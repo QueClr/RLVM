@@ -32,20 +32,39 @@ final class T2Tier extends Tier {
     long calls;
     long notTaken;
 
+    /** Count mode: activations of each block that this machine ran in the stepper (null: the machine's heat accounting counts). */
+    private int[] missed;
+    /** Count mode: how many of them go to the engine at a time (a power of two, at most the promotion threshold). */
+    private final int batch;
+
     T2Tier(Machine m, T2Engine engine) {
         this.m = m;
         this.engine = engine;
+        this.missed = engine.settings.count ? new int[256] : null;
+        this.batch = Math.min(T2Engine.BATCH, Integer.highestOneBit(Math.max(1, engine.settings.at)));
         engine.register(this);
+    }
+
+    /** Count mode: one more activation of {@code blk} for the stepper; every {@code batch} of them go to the engine. */
+    private void miss(int blk) {
+        int[] c = missed;
+        if (c == null) {
+            return;
+        }
+        if (blk >= c.length) {
+            c = missed = java.util.Arrays.copyOf(c, Math.max(c.length << 1, blk + 1));
+        }
+        if ((++c[blk] & batch - 1) == 0) {
+            engine.bump(blk, batch);
+        }
     }
 
     @Override
     public int run(Machine m, int blk, int pc, int rb, int d) {
         T2Engine.Installed[] tab = engine.table;
-        if (blk >= tab.length) {
-            return Op.MISS;
-        }
-        T2Engine.Installed c = tab[blk];
+        T2Engine.Installed c = blk < tab.length ? tab[blk] : null;
         if (c == null) {
+            miss(blk);
             return Op.MISS;
         }
         int e = pc < c.entryOfPc.length ? c.entryOfPc[pc] : -1;

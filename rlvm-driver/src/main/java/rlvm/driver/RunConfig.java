@@ -54,6 +54,14 @@ public final class RunConfig {
     public int chunkUnits = 32;
 
     /**
+     * Largest slice of ready units a worker without work takes for itself ({@code Scheduler}'s slice
+     * mode): the workers move through the file together and a unit starts when the common front
+     * reaches it. 0 = the former scheme: every batch of ready units is cut into one contiguous run
+     * per worker. Affects who checks a unit and when, never the verdict.
+     */
+    public int sliceUnits = 256;
+
+    /**
      * A session is reset when its footprint ({@code Session.footprintBytes()}: bytes in use, counted
      * once) exceeds this many bytes. 0 = automatic: the default of the engine that owns the session,
      * {@link #defaultSessionBytes(String)} of its {@code Engine.name()} (the machine's warm sessions
@@ -247,7 +255,7 @@ public final class RunConfig {
     // ---- settings by name (the launcher's -X KEY=VALUE) ---------------------------------------------
 
     private static final String[] KEYS = {
-        "unit-mib", "keep-mib", "gc-after-mib", "chunk", "env-batch", "spill-ms", "publish-units", "publish-mib",
+        "unit-mib", "keep-mib", "gc-after-mib", "chunk", "slice", "env-batch", "spill-ms", "publish-units", "publish-mib",
         "pipeline-min-mib", "no-fallback", "passes", "shard", "unit-trace"
     };
 
@@ -297,6 +305,7 @@ public final class RunConfig {
      * keep-mib=N          give-back threshold of a lane in MiB (0 = never)             {@link #keepBytes}
      * gc-after-mib=N      collect when the heap holds N MiB of unaccounted bytes (0 = never)  {@link #gcAfterBytes}
      * chunk=N             units per claim                                              {@link #chunkUnits}
+     * slice=N             units a worker without work takes as its run (0 = one run per worker and batch)  {@link #sliceUnits}
      * env-batch=N         units per publication of the environment thread             {@link #envBatchUnits}
      * spill-ms=N          a unit running longer than this returns the rest of its claim (0 = never)  {@link #spillNanos}
      * publish-units=N     pipelined loading: publish every N units                     {@link #publishEveryUnits}
@@ -385,6 +394,9 @@ public final class RunConfig {
                 break;
             case "chunk":
                 chunkUnits = (int) n;
+                break;
+            case "slice":
+                sliceUnits = (int) n;
                 break;
             case "env-batch":
                 envBatchUnits = (int) n;

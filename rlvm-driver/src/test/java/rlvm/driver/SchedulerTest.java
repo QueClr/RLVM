@@ -73,35 +73,36 @@ class SchedulerTest {
     }
 
     @Test
-    void aLargeBatchIsHandedOutASliceAtATimeLowestUnitsFirst() {
+    void inSliceModeAWorkerTakesTheNextSliceForItself() {
         VerdictBoard b = new VerdictBoard();
-        // at most 80 units per split: 4 workers get runs of 20 units each, slice after slice
-        Scheduler s = new Scheduler((Scheduler.Frontier) null, null, 4, 8, 80, b);
+        // slices of at most 40 units: nothing is put into another worker's queue
+        Scheduler s = new Scheduler((Scheduler.Frontier) null, null, 4, 8, 40, b);
         s.unitsReady(400);
         s.close();
-        assertArrayEquals(new int[] {0, 1, 2, 3, 4, 5, 6, 7}, take(s, 0, 8));
-        assertArrayEquals(new int[] {20, 21, 22, 23, 24, 25, 26, 27}, take(s, 1, 8));
-        assertArrayEquals(new int[] {40, 41, 42, 43, 44, 45, 46, 47}, take(s, 2, 8));
-        assertArrayEquals(new int[] {60, 61, 62, 63, 64, 65, 66, 67}, take(s, 3, 8));
-        assertEquals(1, s.splitCount());
-        // worker 3 works off its run; then it does not steal while units wait to be split: the next slice
-        assertArrayEquals(new int[] {68, 69, 70, 71, 72, 73, 74, 75}, take(s, 3, 8));
-        assertArrayEquals(new int[] {76, 77, 78, 79}, take(s, 3, 8));
-        assertArrayEquals(new int[] {80, 81, 82, 83, 84, 85, 86, 87}, take(s, 3, 8));
-        assertEquals(2, s.splitCount());
-        assertEquals(0, s.stealCount());
-        // the other workers got their part of the second slice behind their first run
+        assertArrayEquals(new int[] {0, 1, 2, 3, 4, 5, 6, 7}, take(s, 0, 8));        // worker 0: slice [0, 40)
+        assertArrayEquals(new int[] {40, 41, 42, 43, 44, 45, 46, 47}, take(s, 2, 8)); // worker 2: slice [40, 80)
         assertArrayEquals(new int[] {8, 9, 10, 11, 12, 13, 14, 15}, take(s, 0, 8));
-        assertArrayEquals(new int[] {16, 17, 18, 19}, take(s, 0, 8));
-        assertArrayEquals(new int[] {100, 101, 102, 103, 104, 105, 106, 107}, take(s, 0, 8));
-        // every unit exactly once, whoever takes it
+        assertArrayEquals(new int[] {80, 81, 82, 83, 84, 85, 86, 87}, take(s, 1, 8)); // worker 1: slice [80, 120)
+        assertEquals(3, s.splitCount());
+        assertEquals(0, s.stealCount());
+        // a worker that works off its slice takes the next one: no stealing while units wait to be handed out
+        for (int k = 0; k < 4; k++) {
+            assertEquals(48 + 8 * k, take(s, 2, 8)[0]);
+        }
+        assertArrayEquals(new int[] {120, 121, 122, 123, 124, 125, 126, 127}, take(s, 2, 8));
+        assertEquals(0, s.stealCount());
+        // every unit exactly once, whoever takes it; stealing only when nothing is left to hand out
         int[] seenUnits = new int[400];
-        for (int u : new int[] {0, 1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42, 43, 44, 45, 46, 47, 60, 61, 62,
-            63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 8, 9, 10, 11,
-            12, 13, 14, 15, 16, 17, 18, 19, 100, 101, 102, 103, 104, 105, 106, 107}) {
+        for (int u = 0; u < 16; u++) {
             seenUnits[u]++;
         }
-        for (int w = 0, idle = 0; idle < 4; w = (w + 1) % 4) {
+        for (int u = 40; u < 88; u++) {
+            seenUnits[u]++;
+        }
+        for (int u = 120; u < 128; u++) {
+            seenUnits[u]++;
+        }
+        for (int w = 3, idle = 0; idle < 4; w = (w + 1) % 4) {
             int[] got = take(s, w, 8);
             idle = got.length == 0 ? idle + 1 : 0;
             for (int u : got) {
@@ -111,7 +112,15 @@ class SchedulerTest {
         for (int u = 0; u < 400; u++) {
             assertEquals(1, seenUnits[u], "unit " + u);
         }
-        // a bound below the chunk is raised to the chunk; a failure below the next slice ends the run
+        // few ready units are shared out: a slice is the ready units divided by the workers, at least a chunk
+        VerdictBoard b3 = new VerdictBoard();
+        Scheduler few = new Scheduler((Scheduler.Frontier) null, null, 4, 8, 256, b3);
+        few.unitsReady(64);
+        assertArrayEquals(new int[] {0, 1, 2, 3, 4, 5, 6, 7}, take(few, 0, 8));
+        assertArrayEquals(new int[] {16, 17, 18, 19, 20, 21, 22, 23}, take(few, 1, 8));     // 64 / 4 = 16 for worker 0
+        assertArrayEquals(new int[] {28, 29, 30, 31, 32, 33, 34, 35}, take(few, 2, 8));     // 48 / 4 = 12 for worker 1
+        assertArrayEquals(new int[] {37, 38, 39, 40, 41, 42, 43, 44}, take(few, 3, 8));     // 36 / 4 = 9 for worker 2
+        // a slice bound below the chunk is raised to the chunk; a failure below the next slice ends the run
         VerdictBoard b2 = new VerdictBoard();
         Scheduler t = new Scheduler((Scheduler.Frontier) null, null, 2, 8, 3, b2);
         t.unitsReady(100);
@@ -347,7 +356,7 @@ class SchedulerTest {
                 final int units = 20_000 + round * 137;
                 final int workers = 2 + round % 7;
                 VerdictBoard b = new VerdictBoard();
-                // every other round with a bound on the units one split hands out
+                // every other round in slice mode
                 Scheduler s = round % 2 == 0 ? scheduler(workers, 1 + round % 33, b)
                         : new Scheduler((Scheduler.Frontier) null, null, workers, 1 + round % 33, 64 + round * 50, b);
                 AtomicIntegerArray handed = new AtomicIntegerArray(units);
@@ -572,7 +581,7 @@ class SchedulerTest {
     private long terminals;
     private long states;
     private java.util.HashSet<String> seen;
-    /** The split bound of the simulated schedulers (0 = none). */
+    /** The slice bound of the simulated schedulers (0 = one run per worker and batch). */
     private static int simSplit;
 
     /**
@@ -687,8 +696,8 @@ class SchedulerTest {
     }
 
     @Test
-    void verdictAndFirstFailureUnderAllInterleavingsWithASplitBound() {
-        // one split hands out at most 2 units (chunk 1) or 3 (chunk 3): batches are cut several times
+    void verdictAndFirstFailureUnderAllInterleavingsInSliceMode() {
+        // slice mode with slices of at most 2 units: a worker takes its own slice, the others theirs
         simSplit = 2;
         try {
             assertTrue(exploreAllScripts(5, 2, 1, new int[] {5}, false) > 1000);

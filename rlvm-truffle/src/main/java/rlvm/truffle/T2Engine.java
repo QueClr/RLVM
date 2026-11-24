@@ -99,7 +99,13 @@ final class T2Engine {
     private static boolean hookInstalled;
 
     final Settings settings;
+    /** The machine's heat accounting, or null in count mode ({@code Settings.count}): nothing of the machine is switched on. */
     final Tier.Heat heat;
+    /** The machine engine (block reader). */
+    final Object mengine;
+    /** Count mode: entries per block on the stepper path, summed over the machines (flushed in batches of {@link #BATCH}). */
+    private int[] total = new int[256];
+    static final int BATCH = 64;
     /** Block id -> installed code; replaced as a whole at every installation (copy on write); read racily by the workers. */
     Installed[] table = new Installed[0];
     private volatile int version;
@@ -118,9 +124,33 @@ final class T2Engine {
     private long deopts;
     private volatile String disabled;
 
-    private T2Engine(Settings settings, Tier.Heat heat) {
+    private T2Engine(Settings settings, Tier.Heat heat, Object mengine) {
         this.settings = settings;
         this.heat = heat;
+        this.mengine = mengine;
+    }
+
+    /** A copy of the words of block {@code blk}, or null. */
+    int[] block(int blk) {
+        return T2Bridge.blockWords(mengine, blk);
+    }
+
+    String describe(int blk) {
+        return T2Bridge.describeBlock(mengine, blk);
+    }
+
+    int blockCount() {
+        return T2Bridge.blockCount(mengine);
+    }
+
+    /** Entries of {@code blk} that the tier knows of: the heat accounting's, or in count mode the stepper-path count. */
+    long entriesOf(int blk) {
+        if (heat != null) {
+            return heat.entries(blk);
+        }
+        synchronized (this) {
+            return blk < total.length ? total[blk] : 0;
+        }
     }
 
     /** The tier of the engine of machine {@code m}; null if the engine has no heat accounting (not a machine engine). */
@@ -132,14 +162,21 @@ final class T2Engine {
         synchronized (ENGINES) {
             T2Engine e = ENGINES.get(key);
             if (e == null) {
-                Tier.Heat heat = T2Bridge.heat(m);
-                if (heat == null) {
-                    return null;
-                }
                 Settings s = new Settings();
-                e = new T2Engine(s, heat);
-                heat.timing(s.timing);
-                heat.listen(e::hot, s.at > 0 ? Math.min(s.period, s.at) : s.period);
+                if (s.count) {
+                    if (T2Bridge.strict(key)) {
+                        return null;
+                    }
+                    e = new T2Engine(s, null, key); // the tier counts for itself: the machine's accounting stays off
+                } else {
+                    Tier.Heat heat = T2Bridge.heat(m);
+                    if (heat == null) {
+                        return null;
+                    }
+                    e = new T2Engine(s, heat, key);
+                    heat.timing(s.timing);
+                    heat.listen(e::hot, s.at > 0 ? Math.min(s.period, s.at) : s.period);
+                }
                 ENGINES.put(key, e);
                 if ((s.trace || s.report != null) && !hookInstalled) {
                     hookInstalled = true;
@@ -190,8 +227,54 @@ final class T2Engine {
         }
     }
 
+    /**
+     * Count mode: {@code n} more activations of {@code blk} ran in the stepper (called by a {@link T2Tier} on its
+     * worker thread, once per {@link #BATCH} of them). The block is promoted when the sum reaches {@code at}.
+     */
+    void bump(int blk, int n) {
+        if (disabled != null) {
+            return;
+        }
+        byte[] st = state;
+        if (blk < st.length && st[blk] != COLD) {
+            return;
+        }
+        try {
+            long entries;
+            synchronized (this) {
+                if (blk >= total.length) {
+                    total = Arrays.copyOf(total, Math.max(total.length << 1, blk + 1));
+                }
+                entries = total[blk] += n;
+            }
+            if (entries < settings.at) {
+                return;
+            }
+            double cost = costNanos(blk);
+            if (cost < 0) {
+                return;
+            }
+            Rec rec;
+            synchronized (this) {
+                if (stateOf(blk) != COLD || promoted >= settings.max) {
+                    return;
+                }
+                setState(blk, PENDING);
+                promoted++;
+                pendingNanos += cost;
+                rec = new Rec(blk, describe(blk), entries, 0, cost, 0);
+                rec.instructions = instructions[blk];
+                recs.add(rec);
+            }
+            trace(String.format(Locale.ROOT, "promote  %s | entries %d (count mode)", rec.what, entries));
+            T2Runtime.submit(this, rec, settings.sync);
+        } catch (Throwable t) {
+            disable("the governor failed (" + t + ")");
+        }
+    }
+
     private void consider(Tier.Heat h, int blk) {
-        double cost = costNanos(h, blk);
+        double cost = costNanos(blk);
         if (cost < 0) {
             return;
         }
@@ -225,7 +308,7 @@ final class T2Engine {
             setState(blk, PENDING);
             promoted++;
             pendingNanos += cost;
-            rec = new Rec(blk, h.describe(blk), entries, spent, cost, process);
+            rec = new Rec(blk, describe(blk), entries, spent, cost, process);
             rec.instructions = instructions[blk];
             recs.add(rec);
         }
@@ -235,7 +318,7 @@ final class T2Engine {
     }
 
     /** The compile CPU time expected for {@code blk} in nanoseconds; -1: the block cannot be promoted. */
-    private double costNanos(Tier.Heat h, int blk) {
+    private double costNanos(int blk) {
         int n;
         synchronized (this) {
             if (blk >= instructions.length) {
@@ -244,7 +327,7 @@ final class T2Engine {
             n = instructions[blk];
         }
         if (n == 0) {
-            int[] code = h.block(blk);
+            int[] code = block(blk);
             Decoded d = code == null ? null : new Decoded(code, blk, settings.slots && settings.nodes);
             String why = d == null ? "no such block" : d.hostile != null ? d.hostile : !roleAllowed(d) ? "role switched off"
                     : d.insn.length > settings.maxInstr ? "too large" : d.insn.length < settings.minInstr ? "too small" : null;
@@ -269,6 +352,10 @@ final class T2Engine {
             return (settings.roles & Settings.ROLE_SUB_BIT) != 0;
         }
         return (settings.roles >>> d.role & 1) != 0;
+    }
+
+    private int blk(int blk) {
+        return blk < total.length ? total[blk] : 0;
     }
 
     private byte stateOf(int blk) {
@@ -304,11 +391,15 @@ final class T2Engine {
             rec.codeSize = codeSize;
             rec.graphNodes = graphNodes;
             rec.entryPoints = root.entryPcs.length;
-            rec.entries0 = heat.entries(root.blk);
-            rec.self0 = heat.selfNanos(root.blk);
-            rec.timed0 = heat.timed(root.blk);
-            rec.nanos0 = heat.nanos(root.blk);
-            rec.installedAtProcessCpu = Cpu.processNanos();
+            if (heat != null) {
+                rec.entries0 = heat.entries(root.blk);
+                rec.self0 = heat.selfNanos(root.blk);
+                rec.timed0 = heat.timed(root.blk);
+                rec.nanos0 = heat.nanos(root.blk);
+                rec.installedAtProcessCpu = Cpu.processNanos();
+            } else {
+                rec.entries0 = blk(root.blk);
+            }
             rec.pendingRoot = null; // the table holds the root from here on
             Installed[] t = Arrays.copyOf(table, Math.max(table.length, root.blk + 1));
             t[root.blk] = new Installed(target, root, root.codeLength());
@@ -458,10 +549,12 @@ final class T2Engine {
         synchronized (this) {
             sb.append(String.format(Locale.ROOT,
                     "rlvm-t2: promoted %d, installed %d, failed %d, pending %d | compile cpu %.1f ms (%.2f%% of process cpu %.2f s) | "
-                            + "compiled activations %d, not taken %d | deopts %d | governor held %d | rent %.2f share %.3f period %d%s%n",
+                            + "compiled activations %d, not taken %d | deopts %d | governor held %d | %s%s%n",
                     promoted, installedCount, failedCount, promoted - installedCount - failedCount, compileNanos / 1e6,
                     process == 0 ? 0.0 : 100.0 * compileNanos / process, process / 1e9, calls, notTaken(), deopts, governorHeld,
-                    settings.rent, settings.share, settings.period, disabled == null ? "" : " | DISABLED: " + disabled));
+                    heat == null ? "count mode, at " + settings.at
+                            : String.format(Locale.ROOT, "rent %.2f share %.3f period %d", settings.rent, settings.share, settings.period),
+                    disabled == null ? "" : " | DISABLED: " + disabled));
         }
         sb.append("rlvm-t2: block | compile ms | code bytes | instr | entries before / after | ns per entry before -> after (self) | saved ns | break-even entries | net ms\n");
         double net = 0;
@@ -475,6 +568,12 @@ final class T2Engine {
             }
             if (r.compileCpuNanos < 0) {
                 sb.append(String.format(Locale.ROOT, "rlvm-t2: %s | pending (promoted at %d entries)%n", r.what, r.entriesAtPromotion));
+                continue;
+            }
+            if (heat == null) {
+                // count mode: nothing is timed; activations that compiled code takes are not counted per block
+                sb.append(String.format(Locale.ROOT, "rlvm-t2: %s | %.2f | %d | %d | %d / - | - | - | - | -%n", r.what, r.compileCpuNanos / 1e6,
+                        r.codeSize, r.instructions, r.entries0));
                 continue;
             }
             long e1 = heat.entries(r.blk) - r.entries0;

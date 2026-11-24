@@ -778,9 +778,8 @@ public final class Run {
         primary = primaryFactory.create(h.store(), engineConfig);
         sessionBytes = config.sessionBytesFor(nameOf(primary));
         stats.put("driver.sessionBytes", sessionBytes);
-        // One split hands out at most as many units as the environment thread announces at a time.
         Scheduler s = new Scheduler(null, OrderPolicy.FILE_ORDER, workerCount, config.chunkUnits,
-                Math.max(1, config.envBatchUnits), board);
+                Math.max(0, config.sliceUnits), board);
         if (stats.enabled()) {
             s.timed();
         }

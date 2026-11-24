@@ -43,8 +43,11 @@ public final class Scheduler {
     private final VerdictBoard board;
     private final int workers;
     private final int chunk;
-    /** Largest number of units one split hands out (see {@link #distribute}); {@code Integer.MAX_VALUE} = the whole batch. */
-    private final int splitUnits;
+    /**
+     * Slice mode ({@code > 0}): a worker without a run takes the next slice of the ready units for
+     * itself, at most this many (see {@link #distribute}). 0: every batch is cut into one run per worker.
+     */
+    private final int sliceUnits;
 
     // ---- everything below is guarded by `this` ----------------------------------------------------------
     /** Units {@code [0, ready)} may be handed out. */
@@ -104,13 +107,18 @@ public final class Scheduler {
     }
 
     /**
-     * @param splitUnits the largest number of ready units that one split cuts into runs; 0 = no bound
-     *     (the whole batch at once). With a bound, a large batch (a later pass over a loaded store, a
-     *     loader that is far ahead of the workers) is handed out a slice at a time, lowest units
-     *     first, so that all workers move through the file together, as they do behind the
-     *     environment thread, instead of each working through a contiguous W-th of it.
+     * @param sliceUnits 0: the scheme of the class comment, every batch of ready units is cut into
+     *     one contiguous run per worker. Positive: <b>slice mode</b>. A worker without a run takes
+     *     only the next slice of the ready units for itself: {@code (ready - split) / workers} units,
+     *     at least a chunk and at most {@code sliceUnits}; nothing is put into another worker's
+     *     queue. The workers then move through the file together, lowest units first, and a unit is
+     *     started when the common front reaches it, whoever is free then. With one run per worker a
+     *     worker that fell behind (a few slow units) kept receiving its share of every later batch,
+     *     which nobody else touched while anything was left to split; a heavy unit in that backlog
+     *     started late and its end was the end of the run (Std: one 0.7 s unit of a 1.5 s run).
+     *     Stealing, give-back, the first-failure cut and the order inside a worker are unchanged.
      */
-    public Scheduler(Frontier frontier, OrderPolicy order, int workers, int chunk, int splitUnits, VerdictBoard board) {
+    public Scheduler(Frontier frontier, OrderPolicy order, int workers, int chunk, int sliceUnits, VerdictBoard board) {
         if (order != null && order != OrderPolicy.FILE_ORDER) {
             throw new UnsupportedOperationException(
                     "rlvm-driver: only the file order is implemented; namespace ordering is deferred until after the vertical slice");
@@ -122,7 +130,7 @@ public final class Scheduler {
         this.board = board;
         this.workers = workers;
         this.chunk = chunk;
-        this.splitUnits = splitUnits > 0 ? Math.max(splitUnits, chunk) : Integer.MAX_VALUE;
+        this.sliceUnits = sliceUnits > 0 ? Math.max(sliceUnits, chunk) : 0;
         this.runs = new int[workers][8];
         this.runLen = new int[workers];
         this.holding = new boolean[workers];
@@ -286,12 +294,23 @@ public final class Scheduler {
     }
 
     /**
-     * Cuts the batch {@code [split, ready)}, or its first {@code splitUnits} units, into contiguous
-     * runs, one per worker, starting with worker w.
+     * Cuts the batch {@code [split, ready)} into contiguous runs, one per worker, starting with
+     * worker w; in slice mode worker w takes the next slice of it as its run.
      */
     private void distribute(int w, int ff) {
         int from = split;
-        int to = ready - from > splitUnits ? from + splitUnits : ready;
+        if (sliceUnits > 0) {
+            int avail = ready - from;
+            int n = Math.min(avail, Math.max(chunk, Math.min(sliceUnits, avail / workers)));
+            split = from + n;
+            if (from > ff) {
+                return;
+            }
+            appendRun(w, from, from + n);
+            splits++;
+            return;
+        }
+        int to = ready;
         split = to;
         if (from > ff) {
             return;

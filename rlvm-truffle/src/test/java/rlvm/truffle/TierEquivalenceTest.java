@@ -22,7 +22,7 @@ class TierEquivalenceTest {
         System.setProperty("rlvm.t2.period", "1");
         System.setProperty("rlvm.t2.sync", "true");
         System.setProperty("rlvm.t2.max", "1000000");
-        for (String k : new String[] {"rlvm.t2.slots", "rlvm.t2.nodes", "rlvm.t2.resume", "rlvm.t2.roles", "rlvm.t2.rent", "rlvm.t2.share"}) {
+        for (String k : new String[] {"rlvm.t2.slots", "rlvm.t2.nodes", "rlvm.t2.resume", "rlvm.t2.roles", "rlvm.t2.rent", "rlvm.t2.share", "rlvm.t2.count", "rlvm.t2.mode"}) {
             System.clearProperty(k);
         }
         for (int i = 0; i + 1 < extra.length; i += 2) {
@@ -106,6 +106,25 @@ class TierEquivalenceTest {
         all(f, K1, -1, "rlvm.t2.nodes", "false");
         all(f, K1, 0, "rlvm.t2.resume", "false");
         all(f, K1, 0, "rlvm.t2.nodes", "false");
+    }
+
+    /**
+     * Count mode (T3: promotion by the tier's own entry counters, the machine's heat accounting off): every block at its
+     * first entry, with and without host recursion; then the production form of mode warm (background, at 1000 entries).
+     */
+    @Test
+    @Tag("fast")
+    void countMode() throws Exception {
+        assertTrue(all(SMALL, K1, -1, "rlvm.t2.count", "true") > 0, "compiled code ran");
+        assertTrue(all(new String[] {SMALL[0], SMALL[1]}, K1, 0, "rlvm.t2.count", "true") > 0, "compiled code ran");
+    }
+
+    @Test
+    void perfTestsWarmMode() throws Exception {
+        String[] files = {P + "magma-list-pair-n7.ndjson", P + "proj-app-lazy-delta.ndjson", P + "discarded-argument-match.ndjson"};
+        assertTrue(all(files, "code,casetrees", -1, "rlvm.t2.mode", "warm", "rlvm.t2.at", "1000", "rlvm.t2.sync", "false", "rlvm.t2.period", "256") > 0,
+                "compiled code ran");
+        assertTrue(all(files, "default,code,casetrees", -1, "rlvm.t2.count", "true") > 0, "compiled code ran");
     }
 
     /** Evaluation-heavy published tests (docs/research/13 section 4), every block compiled at its first entry. */

@@ -78,7 +78,7 @@ all agree, 0 differences, 0 declines in all eight runs; all 230: 15,844 / 15,845
 (`loop-unfolded-once`, E_MEM, as v0) and 15,845 / 15,845 with 0 declines. Reports `work/m3/diff-*-g-k1.txt`,
 `diff-*-g-all.txt`.
 
-### W2. K2, derived trees (priority 2; D17): behind `k2`, gates green, see "open" before turning it on
+### W2. K2, derived trees (priority 2; D17): behind `k2`; gates green; NOT yet measured under the lock in its final form
 
 Counters, published state (jar a795a6f85f94 = `work/m3/dist-k2n`), base = `warm,gated,expect,probes,code,casetrees`
 at 4 MiB, host (not the container; CPU = user + sys of one run under load, the counters are exact):
@@ -130,6 +130,42 @@ CPU 5.97 - 6.04 s against 5.65 - 5.73 s) at +0.1 % instructions and equal ticks;
 PER DECLARATION (published 16:06Z): nothing of it runs (no count, no table probe, no firing) until the current
 declaration has run 16,384 ticks, which no light declaration reaches; an interleaved batch (base, `k2,m3a`,
 4 pairs per corpus, `work/m3/batch4.sh`) is queued behind the measurement lock.
+
+**After M7's publication of 15:10Z** (case trees that inline the matchers they call; reachability with
+`code,casetrees` fell from 29.3 G to 17.8 G instructions, 16.5 M to 10.1 M ticks) the K2 of 15:05Z was a LOSS
+on reachability: it fired its own rule where the new tree is better (JVM counters, main tree of 16:10Z:
+`code,casetrees` 10.10 M ticks / 5.55 M records, with `k2` 13.22 M / 7.04 M). Published 16:26Z: **a head that
+has a K1 case tree gets no rule** (the tree is asked for when the head becomes hot). Counters on the main tree
+of 16:20Z (JVM launcher; `code,casetrees` against `code,casetrees,k2,m3a`; ticks M / records M / run words M):
+
+| workload | `code,casetrees` | + `k2,m3a` |
+|---|--:|--:|
+| reachability | 10.10 / 5.55 / 27.1 | 9.06 / 5.32 / 25.8 (183 k firings) |
+| `perf/magma-list-deep-n36` | 56.9 / 10.27 / 73.5 | 7.24 / 1.10 / 7.2 (3.40 M firings) |
+| `perf/magma-list-pair-n21` | 20.9 / 13.64 / 81.2 | 13.1 / 9.35 / 52.2 (1.22 M firings) |
+| `perf/ite-taken-branch` | 11.2 / 6.70 / 39.6 | 6.37 / 4.44 / 23.5 (0.42 M firings) |
+
+The final native image (`work/m3/dist-k2r` = the published state of 16:26Z), host survey, one run each at load
+40 - 60 (CPU s = user + sys; base = `warm,gated,expect,probes,code,casetrees` at 4 MiB -> + `k2,m3a`):
+`magma-list-deep-n36` 12.57 -> **1.42 s** (RSS 1603 -> 166 MiB), `magma-list-pair-n21` 8.73 -> 5.31 s,
+`ite-taken-branch` 4.04 -> 2.09 s, `unfold-before-literal` 6.92 -> 4.31 s (`m3a` with M7's threshold 1),
+`short-circuit-and` 3.47 -> 3.59 s, `gf3-matrix-product` 2.59 -> 2.40 s. reachability on the host is not
+resolved (four alternating runs per set: base 1.90 - 3.11 s, `k2,m3a` 2.41 - 3.04 s; its counters are 9.83 M ->
+8.79 M ticks, 5.02 M -> 4.79 M records, RSS 298 -> 234 MiB): the locked batch 4 decides.
+
+So the rules now serve what the trees do not: structural recursion through `brecOn` (`_f` auxiliaries),
+projection functions, wrappers. Gates of the version of 16:26Z (`work/m3/diff-*-r-*.txt`): K2 stress with
+`code,casetrees,k2,m3a` on tutorial + bugs + other + corner-cases + init-prelude 3,101 / 3,102 agree;
+reachability 4,216 / 4,224 and the Cedar slice 8,053 / 8,064 agree under
+`warm,gated,expect,probes,code,casetrees,k2,m3a` and under stress; 0 differences everywhere. The declines (1 / 8
+/ 11; 164 on Init and 203 on Std in the run of the 16:06Z version, 57,774 / 57,938 and 99,893 / 100,096 agree)
+are not K2's: `UNSUPPORTED_INPUT (E_LIMIT): eager reduction (an argument 'eagerReduce _ _')`, the rule of the
+main tree since about 15:20Z that hands such declarations to the reference engine. The same version on Init
+57,774 / 57,938, Std 99,893 / 100,096, all 230 under the full switch set and under stress 15,839 / 15,845
+(1 `loop-unfolded-once` E_MEM + 5 eager-reduction declines): 0 differences.
+
+The numbers below are those of the first published version (15:05Z, before the trees were inlined and before
+the arming); they show what a rule saves where no better rule exists.
 
 On reachability 0.92 M of the WHNF loop's unfoldings fire a rule (hit rate 97 %); a node costs about 25 ticks
 to derive (74 - 148 nodes in each of the three heavy declarations, 0.05 % of their ticks). The lazy-delta path

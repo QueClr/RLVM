@@ -242,7 +242,7 @@ tutorial: EQUIVALENT (175 constants, 700 results).
 - Heat counters per block (ISA 8.3): since wave 6 `Tier.heat(engine)` (section 8.2); off unless asked for.
 - `dumpStats` of the engine does not print the code store's numbers (M6's file).
 
-## 8. Wave 6 (2026-11-24, 13:25Z - 16:15Z): what code objects are for
+## 8. Wave 6 (2026-11-24, 13:25Z - 16:55Z): what code objects are for
 
 Everything in this section was measured on the CE native image (`-O3`, built by `work/m7/mkdist.sh`: the pipeline
 jars of the integrator's `work/machine-int/dist-g-native`, the machine classes of the M7 sandbox) through the
@@ -370,7 +370,7 @@ had built the suspension - two cases "equal up to PEEK" that were an artefact of
 |---|---|
 | `Code.addressOf`: block id -> address kept per session (one plain load instead of two acquire loads per lookup; `hasEntry` did four) | Init code,casetrees 118.8 -> 118.5 G instructions; batch 2 CPU flat (7.21 / 7.13 -> 7.10 / 7.19 s) |
 | operands of MKAPP / APPLY / TAILAPPLY read in the loop (registers and arguments without a call per operand); KCONST of a level-polymorphic constant answered by the site's inline cache (the IC table of KVAL) instead of the LSUB cache + the CHEAD cache; `Code.entryFor(m, blk, n)` for closures (M2 adopted it 14:54Z: no walk of the lambda chain per APPLY through a block) | together, against the image of one pull earlier (M6's pooling is in the difference): Init 118.5 -> 117.3 G, reachability 29.2 -> 28.5 G, Cedar slice 46.2 -> 45.9 G; tier test identical |
-| rent-to-own thresholds per role: reduction roles at the FIRST request (`CodeStore.REDUCE_AT = 1`), TELE at the tenth; `-Drlvm.machine.elabAt=N` sets both | instructions per run at threshold 10 / 1 (image of 15:11Z): reachability 17.8 / 17.8 G, Cedar slice 37.9 / 37.8, Init 108.2 / 108.1, Std 177.8 / 177.7; CPU s in batch 3: reachability 1.54, 1.58 / 1.68, 1.57; Cedar slice 2.55, 2.46 / 2.43, 2.48; Init 6.25, 6.27 / 6.25, 6.47; Std 10.90, 10.65 / 10.72, 10.60 (inside the noise of that host; batches 4 and 5 - m7a and three more runs of the threshold on the main tree of 15:39Z - were still queued behind the measurement lock at 16:12Z: section 8.8 if they arrived); code on Init 0.92 -> 2.2 MiB; M3: perf/unfold-before-literal 7.9 -> 4.1 s; gate at threshold 1 clean (8.7) |
+| rent-to-own thresholds per role: reduction roles at the FIRST request (`CodeStore.REDUCE_AT = 1`), TELE at the tenth; `-Drlvm.machine.elabAt=N` sets both | instructions per run at threshold 10 / 1 (image of 15:11Z): reachability 17.8 / 17.8 G, Cedar slice 37.9 / 37.8, Init 108.2 / 108.1, Std 177.8 / 177.7; CPU s in batch 3: reachability 1.54, 1.58 / 1.68, 1.57; Cedar slice 2.55, 2.46 / 2.43, 2.48; Init 6.25, 6.27 / 6.25, 6.47; Std 10.90, 10.65 / 10.72, 10.60 (inside the noise of that host; section 8.8); code on Init 0.92 -> 2.2 MiB; M3: perf/unfold-before-literal 7.9 -> 4.1 s; gate at threshold 1 clean (8.7) |
 | `Code.rules` / `rulesCasesOn`: a head with the wrong number of levels answers NONE (DELTA says "does not unfold") instead of running a block under ls = -1 | fail-open; no input reaches it after INFER |
 | `Code.targConv`: `m.enterER()` (M6-F26) | request of M6, 14:46Z |
 
@@ -439,3 +439,36 @@ the reduction threshold 1 and tree inlining, which are not switches) and **`m7a`
 its final name; it is meaningless without `casetrees`). Not ready: `tele` (no gain; the Cedar slice loses),
 `t2` (the tier is another module). M4's `lazyeval` sends the one-sided lazy-delta steps through WHNF and so
 through the trees of 8.3; it is M4's switch and M4's measurement.
+
+### 8.8 Late rows: the main tree of 15:39Z (`work/m7/dist-g`)
+
+Batch 4 (16:29Z-16:37Z, load average 42 to 70; CPU s of two runs, one worker; the reduction threshold is 1 here,
+`Conv` calls `Rules.unfoldLazy`, and M6's rule is armed: the machine declines the 8 / 11 / 164 / 203 declarations
+of reachability / the Cedar slice / Init / Std that enter eager reduction, and the reference engine checks them
+inside the same process, so the rows are not comparable with batch 3):
+
+| configuration | workers | reachability | Cedar slice | Init | Std |
+|---|--:|---|---|---|---|
+| v0 | 1 | 7.99, 8.24 (57.1 G) | 2.72, 2.80 (40.9 G) | 7.42, 7.36 (132.7 G) | 13.03, 12.86 (219.2 G) |
+| `code,casetrees` | 1 | 1.53, 1.50 (17.9 G) | 2.62, 2.59 (40.0 G) | 6.29, 6.36 (109.8 G) | 11.40, 11.42 (187.3 G) |
+| `code,casetrees,m7a` | 1 | 1.58, 1.51 (17.8 G) | 2.72, 2.53 (39.8 G) | 6.32, 6.12 (107.1 G) | 11.30, 11.28 (184.0 G) |
+| step 1 (`warm,gated,expect`, 4 MiB) | 1 | 7.63, 7.57 (58.1 G) | 2.80, 2.71 (40.0 G) | 7.32, 7.03 (103.9 G) | 12.79, 12.55 (181.5 G) |
+| step 1 + `code,casetrees,m7a` | 1 | 1.53, 1.55 (17.3 G) | 2.67, 2.64 (39.0 G) | 6.24, 5.93 (87.1 G) | 11.39, 11.35 (156.3 G) |
+| v0 | 4 | 8.41 CPU, 7.93 wall | 2.93, 1.02 wall | 7.82, 4.38 wall | 14.65, 13.32 wall |
+| `code,casetrees,m7a` | 4 | 1.60 CPU, 1.12 wall | 2.82, 1.00 wall | 6.37, 2.89 wall | 12.49, 9.79 wall |
+
+- `m7a` with the real call sites: Init 6.33 -> 6.22 s (-1.7 %), Std 11.41 -> 11.29 (-1.1 %), Cedar slice 2.61 ->
+  2.63, reachability 1.52 -> 1.55 (both inside the noise; instructions lower on all four: -2.5 %, -1.8 %, -0.5 %,
+  -0.6 %). Smaller than in batch 2 (-4.5 % on Init) because the inlined trees of 8.3 took part of it.
+- Not this package, but visible here and reported to M6: with four workers the eager-reduction declines cost
+  wall clock (Std: 13.32 s for v0 and 9.79 s with the reduction roles, against 4.19 s and 3.75 s on the tree of
+  15:11Z; Init 4.38 / 2.89 s against 2.53 / 2.28 s) - the declined declarations are re-checked by the
+  reference engine.
+- The soundness review's hostile exports (351 files of `work/soundness/exports`, `judge.py --dist work/m7/dist-g
+  --sets "code,casetrees,m7a;code,casetrees,m7a!d0"`, `work/m7/judge-g.out`): no WRONG-ACCEPT, no WRONG-REJECT, no
+  M-INCOMPLETE; the 13 flagged machine declines are the eager-reduction exports (M6's rule).
+- Batch 5 (16:49Z-16:52Z, load average 41 to 65; `code,casetrees`, three runs each): reduction threshold 1 (the
+  default) against 10 (`-Drlvm.machine.elabAt=10`): reachability 1.51, 1.54, 1.63 / 1.59, 1.56, 1.55 s; Cedar slice
+  2.62, 2.67, 2.68 / 2.63, 2.69, 2.67; Init 6.39, 6.39, 6.40 / 6.36, 6.37, 6.38; Std 11.64, 11.70, 11.62 / 11.63, 11.59,
+  11.76: no difference on the four corpora (means within 0.4 %); the gain of threshold 1 is on evaluation tests
+  whose hot closures sit in bodies that are unfolded a few times (M3: perf/unfold-before-literal 7.9 -> 4.1 s).

@@ -144,7 +144,7 @@ final class T2Runtime {
             eng.disable(broken);
             return;
         }
-        int[] code = eng.heat.block(r.rec.blk);
+        int[] code = eng.block(r.rec.blk);
         Decoded d = code == null ? null : new Decoded(code, r.rec.blk, s.slots && s.nodes);
         if (d == null || d.hostile != null) {
             eng.failed(r.rec, d == null ? "no such block" : d.hostile, 0);

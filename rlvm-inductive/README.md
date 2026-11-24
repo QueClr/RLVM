@@ -101,6 +101,62 @@ only if a `LevelOps` does not implement the official ones.
 
 `RecordCompare` and `QuotAdmission` are complete for what v1 accepts (see the declines).
 
+## Levels the official kernel respells (finding L-F1, 2026-11-24)
+
+The official kernel refers to the members of the block it is admitting with level-parameter objects it
+makes itself: `m_levels = lparams_to_levels(m_lparams)` for `m_ind_cnsts`, `mk_constant(cnstr_name,
+m_levels)` and `get_rec_levels()` in `add_inductive_fn`, `m_lvls` for the auxiliary types in
+`elim_nested_inductive_fn`. The official `instantiate` (level.cpp: `replace_level_fn`, `update_succ`,
+`update_max`) keeps a level node only when its operands come back POINTER-equal, and a fresh parameter
+object is never pointer-equal to the one in the declared type. So the type the official type checker
+infers for such a reference (`infer_constant` -> `instantiate_type_lparams`) is the declared type with
+EVERY LEVEL NODE ABOVE A PARAMETER OF THE BLOCK REBUILT through `mk_succ` / `mk_max` / `mk_imax`:
+`imax u 1` becomes `max u 1`, and the official `is_equivalent` (equality of official normal forms) does
+not always identify the two spellings. The kernel then meets
+the mismatch in its own application checks (`check_constructors` for auxiliary types, `check_recursors`
+for everything, the re-check of a restored nested block) and rejects with "application type mismatch":
+
+    inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1) | mk : a -> T a          -- T a
+    axiom F.{u} : Type   inductive T.{u} : Type | mk : F.{imax u 1} -> T             -- T.mk x
+
+A reference WRITTEN IN THE EXPORT (a block type inside a constructor type) carries the level objects
+of the declared type and gets the declared type as it is. Both spellings denote the same level, so
+this is the official kernel's incompleteness, not a soundness matter; under `OWNER-NOTES` item 11
+RLVM gives the official verdict.
+
+How it is reproduced (`InductiveAdmission`, section "the official rebuild of levels"): `rebuildLevel` is
+the official `instantiate(l, lparams, fresh)` (a level without a parameter of the block is kept, every
+other node is rebuilt by `LevelOps.succ` / `mkMax` / `mkIMax`), `rebuildTerm` the official
+`instantiate_lparams` (every `Sort` and every level list of a constant). The stand-in of a member that
+ONLY the kernel refers to has the REBUILT type: constructors (`cAtom`, and `cFinal` in the final
+environment of a nested block), auxiliary types (`tAtom[k]`, `k >= nUser`), the recursors the rules of a
+nested block are re-checked with (`recFinalAtom`). The stand-in of a USER type keeps the declared header
+(the constructor types refer to it with the export's levels); the one application the kernel builds
+itself, the major premise `T params indices`, is checked once against a local of the rebuilt header
+(`checkRecursors`). Every comparison is then the engine's own application check - type of the argument
+against the binder domain of the rebuilt type, the official sides - through `KernelOps.check`, so a
+constant whose level list differs is still equal when it unfolds to the same term (a phantom universe
+parameter), as officially. For a block in which the rebuild changes no spelling (`lastRebuildChanged()
+== false`: every block of Init, Std, reachability, con-leche, cedar, navier-stokes-euler; see the log
+for cslib and mathlib) the stand-ins are exactly those of before and nothing else is computed than one
+memoised walk over the constructor types.
+
+Evidence, all against leanchecker v4.36.0: the 2,200 files of the finding (`work/prof/L`; 183 were
+accepted here and rejected officially, all 2,200 get the official verdict now, with both engines);
+`OfficialLevelRebuildTest`: 1,218 fixtures of ten further shapes (index domain, constructor result
+against the major premise, recursive field, second type of a mutual block, auxiliary type of a nested
+block and its index domain, the final environment of a nested block, definitions with a phantom
+universe, K-like predicates, the result sort alone), each with the records a kernel that keeps the
+declared spelling derives, so that the official answer on the file is the kernel's answer on the block:
+575 accepted, 643 rejected officially (608 of them only because of the rebuild), the same verdict here
+on the reference kernel and on the test kernel, no decline.
+
+NOT COVERED (reported, `requests.log` finding A2-F1): an export with two level RECORDS for one universe
+parameter. The official reader makes two objects of them; a reference in a constructor type that uses
+the other record is then "pointer-different" from the declared type like the kernel's own references,
+and the official kernel rebuilds there too. Levels are interned by structure before admission sees
+them; `lean4export` never writes such a file.
+
 ## Stand-ins (the one structural deviation from the design documents)
 
 `ARCHITECTURE.md` 4.1 / `KernelOps.exposeUnitMembers` foresee that the engine sees the block's own
@@ -187,7 +243,16 @@ tutorial `misnamed_rec`, `dup_rec_def2`, `bugs/orphan-rec`, `other/extra-rec`, `
 - `RecordCompare.compare` reports presence bits for the first 64 recursors only.
 - The "type-check then def-eq" fallback for non-identical records is not implemented (by design).
 
-## Tests (`mvn -o -q -pl rlvm-inductive test`: 84 tests, 1 of them opt-in)
+## Tests (`mvn -o -q -pl rlvm-inductive test`: 85 tests, 1 of them opt-in)
+
+The answers of the official checker are STORED (`OfficialGolden`,
+`src/test/resources/rlvm/inductive/official-golden.tsv`: SHA-256 of the export the test writes, exit
+status, output; 1,353 answers of leanchecker v4.36.0): no checker binary is run by the tests, and a
+fixture whose export changes (other derived records) FAILS until its answer is added:
+
+    $MVN -o -q -pl rlvm-inductive test -Dtest='Official*' -Drlvm.inductive.golden.dump=$PWD/work/a2/golden-dump
+    rlvm-inductive/src/test/scripts/official-verdicts.sh work/a2/golden-dump work/a2/golden-new.tsv   # one Docker container
+    cat work/a2/golden-new.tsv >> rlvm-inductive/src/test/resources/rlvm/inductive/official-golden.tsv
 
 `src/test`: `FakeKernel` (a small recursive substitution checker with beta / delta / zeta; set
 `-Drlvm.inductive.kernel=ref` to run the same fixtures on `RefKernel`), `TermParser` (named-binder
@@ -203,13 +268,16 @@ loader, store and `RefKernel`), `Ndjson` (writes a fixture as a `lean4export` fi
   records flagged unsafe (not compared; a difference declines, never rejects).
 - `QuotAdmissionTest`: canonical types (de Bruijn forms of R03 section 5), forgeries, missing `Eq`,
   a scope above declarations that come later in the file.
-- `OfficialDifferentialTest` (needs `leanchecker` 4.36.0; skipped otherwise): 75 fixtures written out
-  as export files whose recursor records are the DERIVED ones, admission run once on `RefKernel` and
-  once on `FakeKernel`. 44 admitted here are accepted by the official checker (so the derived facts,
-  recursor types and rules are the official ones, including nested blocks, T2 / T3 / T4 cases,
-  `corner-cases/nested-redex-aux`); 28 rejected here are rejected by the official kernel while it
-  replays that block; 3 declined here are reported with the official verdict
-  (`target/official-differential-report.txt`).
+- `OfficialDifferentialTest`: 86 fixtures written out as export files whose recursor records are the
+  DERIVED ones, admission run once on `RefKernel` and once on `FakeKernel` (which compares levels by the
+  official relation, like the engines). 47 admitted here are accepted by the official checker (so the
+  derived facts, recursor types and rules are the official ones, including nested blocks, T2 / T3 / T4
+  cases, `corner-cases/nested-redex-aux`, levels the kernel respells equivalently); 36 rejected here
+  are rejected by the official kernel while it replays that block (8 of them finding L-F1); 3 declined
+  here are reported with the official verdict (`target/official-differential-report.txt`).
+- `OfficialLevelRebuildTest`: finding L-F1, 1,218 fixtures (ten shapes over the 125 levels and 93 level
+  pairs of `level-rebuild-pool.tsv`), see "Levels the official kernel respells"; report in
+  `target/official-level-rebuild-report.txt`.
 - `InitBlocksTest`: with the real pipeline, all 605 inductive blocks of `init.ndjson` (and the 126 of
   `init-prelude.ndjson`) regenerate identically and the quot records are canonical. Opt-in
   `-Drlvm.inductive.corpora=std.ndjson,...` for the other exports of `work/exports`.

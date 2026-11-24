@@ -389,7 +389,34 @@ declines; today's bindings are enough when the file still has the level records)
 dependency analysis (`presence`, `OfficialOrder`: a generated constant is provided by the unit of `Quot`)
 and a probe set against leanchecker. Neither was started in this wave.
 
-## Tests (`$MVN -o -q -pl rlvm-inductive,rlvm-admit test` in wave 7, or `-pl rlvm-admit` against the published `rlvm-inductive`: 87 tests, 86 run, 1 skipped)
+## Finding L-F1 (2026-11-24, agent A2): universe levels the official kernel respells
+
+The official `add_inductive` refers to the block's own constants with level-parameter objects it makes
+itself, and the official `instantiate` rebuilds every level node above such a parameter (`imax u 1`
+becomes `max u 1`); the kernel then compares the rebuilt type with the declared spelling by its
+incomplete level relation and rejects, e.g., `inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1)`
+("application type mismatch"). RLVM accepted 183 of the 2,200 generated declarations of the finding
+(`work/prof/L/levels-r`, `levels-n`) that the official checker rejects. The fix is in `rlvm-inductive`
+(`InductiveAdmission`, section "the official rebuild of levels"; its README has the mechanism and the
+official evidence); this module only counts: `EnvBuilder.respelledBlocks()` (also in the line of
+`-Drlvm.admit.stats=true`) = the inductive blocks with a level the rebuild spells differently, the only
+blocks for which admission compares anything it did not compare before. Init, Std, reachability,
+con-leche, cedar, navier-stokes-euler, cslib, mathlib: see `work/status/rlvm-admit.log` (16:xxZ line).
+
+`LevelRebuildGoldenTest`: a sample of 123 of the 2,200 files with the official answers in
+`src/test/resources/rlvm/admit/levels-golden` (53 of them accepted before the fix and rejected
+officially), through the real loader, the environment pass and the reference kernel: every verdict is
+the official one, no decline; `-Drlvm.admit.levelsFull=true` runs all 2,200 from `work/prof/L`.
+
+NOT FIXED HERE, reported to the owners of `rlvm-load` / `rlvm-level` (`requests.log`, finding A2-F1):
+the same mechanism outside inductive blocks. An export with TWO level records for the same universe
+parameter (`{"il":1,"param":4}` ... `{"il":9,"param":4}`, or one index defined twice; `lean4export`
+never writes that) gives the official checker two parameter objects; a constant used with the other
+record has its declared type rebuilt at that use site, and the official checker rejects where RLVM
+(which interns levels by structure) accepts: 5 hand-made files in `work/a2/item4`. Inside a block the
+same file would make the references of the constructor types "the kernel's own" in the sense above.
+
+## Tests (`$MVN -o -q -pl rlvm-inductive,rlvm-admit test`, or `-pl rlvm-admit` against the published `rlvm-inductive`: 89 tests, 87 run, 2 opt-in)
 
 | Suite | What |
 |---|---|
@@ -401,6 +428,7 @@ and a probe set against leanchecker. Neither was started in this wave.
 | `AdmissionTest` (8) | fake `Session`: structural failures never reach the engine, engine outcomes pass through, lazy environment pass, axiom policy |
 | `ClaimsLayoutTest` (3) | the private copy of the claims layout equals `rlvm.load.BlockClaims`; shape validation |
 | `ArenaStructuralTest` (5) | real loader, no engine, no `rlvm-inductive`: the 9 structural reject tests are rejected with their reason, 6 name clashes are rejected by the loader, no structural reject or decline anywhere in the 138 accept tests, in the other 77 reject tests and in `init-prelude` |
+| `LevelRebuildGoldenTest` (2, all 2,200 files only with `-Drlvm.admit.levelsFull=true`) | finding L-F1 end to end: 123 generated inductive declarations with the answers of leanchecker 4.36.0 (`src/test/resources/rlvm/admit/levels-golden`), same flow as `ArenaPipelineTest`: 55 accepted, 68 rejected, each as officially, no decline |
 | `ArenaPipelineTest` (4, perf group skipped unless `-Drlvm.admit.perf=true`) | integration without the driver: real loader, real `rlvm-inductive`, reference kernel (`rlvm-ref`), one worker, the environment pass driven lazily by `Admission`, the session reset between units at 1 MiB: tutorial 141 / 141, bugs 34 / 34, other 10 / 10 with the expected verdict; reports in `work/rlvm-admit/pipeline-report-*.txt` |
 
 `rlvm-load` and `rlvm-ref` are test-scope dependencies only. Development aids in the test tree (no

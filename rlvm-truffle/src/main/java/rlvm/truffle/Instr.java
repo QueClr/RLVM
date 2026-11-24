@@ -31,13 +31,15 @@ abstract class Instr extends Node {
     static final int SIG = Op.SIG;
 
     /**
-     * Experiment (NOTES-T2 "probes inlined"; 0 = off, the default): 1 = PEEK and the constructor test of SWITCH
-     * are compiled into the block; 2 = also the hash-consing probes of MKAPP and KCONST. A constant of the
-     * class: in a native image it is fixed when the image is built ({@code -Drlvm.t2.inline=N} for
-     * native-image), so that an image built without it contains none of the machine's operations as
-     * runtime-compiled methods.
+     * How much of the machine's operations partial evaluation sees (NOTES-T3 section 3). 0: every operation is a
+     * call behind a boundary (T2's tier). 1 (the default): the operations that only READ the machine's arrays are
+     * compiled into the block - PEEK, the constructor test of SWITCH, the argument base of FIELDS, the inline-cache
+     * probes of KVAL and KCONST, the cache of CONST heads, the immediate case of NSUCC; everything that can write
+     * or grow a store stays a call. 2: also the hash-consing probes of MKAPP (T2's experiment; it never finished a
+     * compilation). A constant of the class: in a native image it is fixed when the image is built
+     * ({@code -Drlvm.t2.inline=N} for native-image).
      */
-    static final int INLINE = Integer.getInteger("rlvm.t2.inline", 0);
+    static final int INLINE = Integer.getInteger("rlvm.t2.inline", 1);
 
     /** Frame slot of the captured frame run / of the level substitution of the activation. */
     final int capSlot;
@@ -245,10 +247,12 @@ abstract class Instr extends Node {
             int v = val(f, m, rb, s);
             if (isPeek) {
                 if (!(v >= SIG || v < 0 || v <= Layout.HOLE)) {
-                    v = T2Bridge.peek(m, v);
+                    v = INLINE >= 1 ? T2Bridge.peekInline(m, v) : T2Bridge.peek(m, v);
                 }
             } else if (v < SIG) {
-                v = T2Bridge.nsucc(m, v);
+                // owner note 7: the successor of a small literal is native arithmetic with an overflow guard
+                // (Values.nsucc: an immediate below the limit is v + 1); everything else is the operation
+                v = INLINE >= 1 && v < -1 ? v + 1 : T2Bridge.nsucc(m, v);
             }
             if (v >= SIG) {
                 return v;
@@ -347,8 +351,21 @@ abstract class Instr extends Node {
         int exec(VirtualFrame f, Machine m, int rb, int d) {
             int v;
             if (op == Op.KCONST) {
-                v = lparam ? T2Bridge.mkConstSubst(m, a, list, f.getIntStatic(lsSlot))
-                        : INLINE >= 2 ? T2Bridge.mkConstInline(m, a, list) : T2Bridge.mkConst(m, a, list);
+                if (lparam) {
+                    // Code.kConst: the inline cache of the site answers (one probe), else CHEAD(D, LSUB(LL, ls)) fills it
+                    int ls = f.getIntStatic(lsSlot);
+                    v = T2Bridge.kConstHit(m, blk, pc, ls);
+                    if (v == Op.MISS) {
+                        v = T2Bridge.kConstFill(m, a, list, blk, pc, ls);
+                    }
+                } else if (INLINE >= 1) {
+                    v = T2Bridge.mkConstHit(m, a, list);
+                    if (v == Op.MISS) {
+                        v = T2Bridge.mkConst(m, a, list);
+                    }
+                } else {
+                    v = T2Bridge.mkConst(m, a, list);
+                }
             } else if (op == Op.KSORT) {
                 v = lparam ? T2Bridge.mkSortSubst(m, a, f.getIntStatic(lsSlot)) : T2Bridge.mkSort(m, a);
             } else {
@@ -647,7 +664,8 @@ abstract class Instr extends Node {
 
         @Override
         int exec(VirtualFrame f, Machine m, int rb, int d) {
-            int v = T2Bridge.kvalHit(m, blk, pc, lparam ? f.getIntStatic(lsSlot) : 0);
+            int key = lparam ? f.getIntStatic(lsSlot) : 0;
+            int v = INLINE >= 1 ? T2Bridge.kvalHitInline(m, blk, pc, key) : T2Bridge.kvalHit(m, blk, pc, key);
             if (v != Op.MISS) {
                 setReg(f, m, rb, dst, dpin, v);
                 return 0;
@@ -688,7 +706,12 @@ abstract class Instr extends Node {
             if (v >= SIG) {
                 return v;
             }
-            int base = T2Bridge.lastArgs(m, v, n);
+            if (INLINE >= 1 && n == 1 && v < 0 && v != Layout.IMM) {
+                // owner note 7: the predecessor view of a small literal (Code.fields: d0 <- v - 1), native arithmetic
+                setReg(f, m, rb, d0, dpin[0], v - 1);
+                return 0;
+            }
+            int base = INLINE >= 1 ? T2Bridge.lastArgsInline(m, v, n) : T2Bridge.lastArgs(m, v, n);
             if (base >= 0) {
                 for (int i = 0; i < n; i++) {
                     setReg(f, m, rb, d0 + i, dpin[i], T2Bridge.runWord(m, base + i));

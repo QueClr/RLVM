@@ -13,7 +13,8 @@ import java.util.Map;
  *                      cpu (default): the governor of ISA 8.5 - total CPU time is the metric, compilation is
  *                        charged: rent 1.0, share 0.02, max 256, period 1024, one compiler thread;
  *                      warm: the steady state is the metric and warm-up is not charged (OWNER-NOTES 12):
- *                        rent 0.05, share 1.0 (no cap), max 4096, period 256, two compiler threads.
+ *                        promotion by entry count (rlvm.t2.count, at 1000 entries), no heat accounting, no share
+ *                        cap, max 4096, two compiler threads.
  * rlvm.t2.rent=F       rent-to-own factor: a block is compiled once the CPU time it has spent in the base
  *                      tier is at least F times its estimated compile cost (default 1.0; ISA 8.5)
  * rlvm.t2.share=F      governor: compiler CPU time (spent + estimated for the candidate) at most this share
@@ -30,7 +31,13 @@ import java.util.Map;
  *                      default of 64 times most entries (the size of that cost is not measured, NOTES-T2 5.1)
  * rlvm.t2.unit0=NS, rlvm.t2.unit1=NS   base-tier time of one entry of a block that has no timed sample yet:
  *                      unit0 + unit1 per instruction, nanoseconds (defaults 20 and 10; a model, not a measurement)
- * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps)
+ * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps; the
+ *                      threshold of rlvm.t2.count, default 1000 there)
+ * rlvm.t2.count=B      promotion by entry count WITHOUT the machine's heat accounting (default: true in mode warm):
+ *                      the tier counts the activations it does not take, per machine, and a block is promoted when
+ *                      the sum over the machines reaches rlvm.t2.at. An activation that compiled code takes is not
+ *                      counted or timed by anybody. With false the heat accounting of the machine is switched on
+ *                      (it costs about 11% of a warm pass on reachability on the JVM, NOTES-T3 section 2).
  * rlvm.t2.cost0=MS, rlvm.t2.cost1=MS   compile cost model before anything was compiled: cost0 + cost1 per
  *                      instruction, CPU milliseconds (defaults 3.0 and 2.5: measured 2.2 - 3.1 ms per instruction;
  *                      then learned from the compilations)
@@ -55,6 +62,8 @@ final class Settings {
     final int threads;
     final int timing;
     final int at;
+    /** Promotion by the tier's own entry counters on the stepper path, without the machine's heat accounting. */
+    final boolean count;
     final double unit0Ns;
     final double unit1Ns;
     final double cost0Ms;
@@ -86,7 +95,11 @@ final class Settings {
         timing = Integer.getInteger("rlvm.t2.timing", 4096);
         unit0Ns = dbl("rlvm.t2.unit0", 20.0);
         unit1Ns = dbl("rlvm.t2.unit1", 10.0);
-        at = Integer.getInteger("rlvm.t2.at", 0);
+        count = bool("rlvm.t2.count", warm);
+        at = Integer.getInteger("rlvm.t2.at", count ? 1000 : 0);
+        if (count && at <= 0) {
+            throw new IllegalArgumentException("rlvm.t2.count needs rlvm.t2.at > 0");
+        }
         cost0Ms = dbl("rlvm.t2.cost0", 3.0);
         cost1Ms = dbl("rlvm.t2.cost1", 2.5);
         roles = roles(System.getProperty("rlvm.t2.roles", "tele,body,rule,rules,sub"));
