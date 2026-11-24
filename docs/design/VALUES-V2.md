@@ -66,7 +66,9 @@ suite of the soundness review with mode 47 on every machine: 32 switch sets x 32
 Own hostile cases: `U2ValuesTest`, 6 tests. The recommended mode (235) passes the same gate; with it and with the mode off the module's default test group is green (451 tests).
 
 **Recommendation.** Adopt a restricted form in stages (section 11): stage 0 the plumbing (no behaviour change);
-stage 1 the staging switch `lazyid` = lazy `MKAPP` of blocks in large sessions, classes K / M / C, adaptive sites;
+stage 1 the staging switch `lazyid` = lazy `MKAPP` of blocks in large sessions, classes K / M / C, adaptive sites -
+OFF by default until the eight-worker gain is resolved on the platform that ships (JVM: -10 %, ranges touching;
+native image: none);
 stage 2 complete classes M and C until the completeness test reads +0.000 %, then widen; stage 3 the tier
 ("reserve, do not write", with T3's CALL). Keep the present model for closures, suspensions and frames.
 
@@ -664,7 +666,8 @@ pristine jar 4 % below and 9 % above the mode-off prototype):
   +6.0 % at eight. In large sessions only (171): -0.1 % at one worker, -5.8 % at eight (inside the scatter:
   188-212 against 195-255) - and its counters ARE the mode-off counters (10.1), so "no change" is by construction.
 - **Where the gain comes from, and where the loss.** The same mechanism on two corpora: reachability's records are
-  made in four sessions of millions of records (intern tables of tens of MiB; NOTES-M1 5.3: four fifths of a probe
+  made in a few sessions of hundreds of thousands to millions of records (85 % of its lazy constructions happen in
+  sessions of 2^17 records and more; intern tables of several to tens of MiB; NOTES-M1 5.3: four fifths of a probe
   is the cache miss of the table slot), the Cedar slice's in sessions that are reset at 1 MiB (tables in the
   cache). A probe that is not made is worth a cache miss in the first and almost nothing in the second, where the
   bit tests of the key-forming loops and the duplicate records are what remains. Hence bit 128.
@@ -712,11 +715,13 @@ record words and ticks comparable word for word. The mode-on / mode-off comparis
 ## 11. Recommendation and stages
 
 **Adopt a restricted form, in stages; keep the present model for everything but applications.** The evidence: no
-verdict needs canonical refs (sections 1, 8; three full gates and the hostile suite); applications are the one class
+verdict needs canonical refs (sections 1, 8; five runs of M8's full gate and the hostile suite); applications are the one class
 whose probes are mostly wasted (9, 10.1); the gain exists where sessions are large (reachability: -17 % warm wall
-clock at one worker, -10 % at eight on the JVM) and the price where they are small (the Cedar slice: +4 % at one
-worker when every session is lazy); a rule that is lazy only where it pays leaves the library corpora exactly as
-they are.
+clock at one worker and -10 % at eight on the JVM; -12 % at one worker and nothing at eight in the native image) and
+the price where they are small (the Cedar slice: +4 % at one worker when every session is lazy); a rule that is
+lazy only where it pays leaves the library corpora exactly as they are. Measured against the owner's first number
+(note 12: warm wall clock with eight workers) this is a gain on one corpus class on the JVM, at the edge of the
+scatter, and no loss anywhere - enough for a staging switch, not yet for a default.
 
 | Stage | What | Owners (patch) | Evidence / condition to enter |
 |---|---|---|---|
