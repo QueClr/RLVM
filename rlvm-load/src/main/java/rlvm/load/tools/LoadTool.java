@@ -33,7 +33,10 @@ import rlvm.load.UnsupportedExportException;
  *   --pipelined             publish while reading (LoadOptions.pipelined; the store sits on a LevelChain)
  *   --publish-units N       hand-off interval in units (default 4096)
  *   --publish-mib N         hand-off interval in MiB of input (default 32)
- *   --scan-threads N        scanner threads of the reader (default 1; needs mapped input)
+ *   --scan-threads N        scanner threads of the reader (default 1; needs mapped input); with them the
+ *                           runs of proof-private records are packed by those threads (LoadOptions.packedRuns)
+ *   --no-packed-runs        scanner threads tokenise only
+ *   --chunk-kib N           size of the chunk a scanner thread takes (default 4096)
  *   --followers N           with --pipelined: N threads that follow the frontier as a worker must (park
  *                           on the hand-off signal, take a private overlay of the newest level snapshot
  *                           whenever the frontier passes their view, read the new unit rows); measures
@@ -56,6 +59,7 @@ public final class LoadTool {
         int publishUnits = 4096;
         long publishMib = 32;
         int scanThreads = 1;
+        boolean packedRuns = true;
         int followers = 0;
         boolean strict = false;
         Path file = null;
@@ -72,6 +76,8 @@ public final class LoadTool {
                     case "--publish-units" -> publishUnits = Integer.parseInt(args[++i]);
                     case "--publish-mib" -> publishMib = Long.parseLong(args[++i]);
                     case "--scan-threads" -> scanThreads = Integer.parseInt(args[++i]);
+                    case "--no-packed-runs" -> packedRuns = false;
+                    case "--chunk-kib" -> ro.parallelChunkBytes = Integer.parseInt(args[++i]) << 10;
                     case "--followers" -> followers = Integer.parseInt(args[++i]);
                     case "--strict-format" -> strict = true;
                     default -> {
@@ -91,7 +97,8 @@ public final class LoadTool {
         } catch (RuntimeException e) {
             System.err.println("usage: LoadTool [--target store|null] [--no-proof-blocks] [--no-flags] "
                     + "[--io auto|mapped|buffered] [--repeat N] [--quiet] [--pipelined] [--publish-units N] "
-                    + "[--publish-mib N] [--scan-threads N] [--followers N] [--strict-format] FILE");
+                    + "[--publish-mib N] [--scan-threads N] [--no-packed-runs] [--chunk-kib N] [--followers N] "
+                    + "[--strict-format] FILE");
             System.exit(3);
             return;
         }
@@ -99,8 +106,9 @@ public final class LoadTool {
             long size = Files.size(file);
             LoadOptions options = (pipelined ? LoadOptions.pipelined(size).withPublishEvery(publishUnits, publishMib << 20)
                     : LoadOptions.batch(size)).withProofBlocks(proofBlocks).withSharingFlags(flags)
-                    .withScanThreads(scanThreads).withStrictFormatVersion(strict);
+                    .withScanThreads(scanThreads).withStrictFormatVersion(strict).withPackedRuns(packedRuns);
             ro.threads = options.scanThreads;
+            ro.runs = ExportLoader.readerOptions(options).runs;
             for (int r = 0; r < repeat; r++) {
                 Loaded l = target.equals("null") ? nullTarget(options) : StoreLoad.create(size, options, followers);
                 LoadReport report;

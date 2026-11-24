@@ -185,6 +185,8 @@ numbers of NOTES-T2 come from whole-run differences instead.
 | `.smallFilesWorklist` | fast | the same under host depth 0: every judgment a block calls suspends it; every class-j node writes its frame, every resume entry is entered |
 | `.variants` | fast | registers in the window; every instruction through the stepper's body; no resume entries |
 | `.perfTests`, `.perfTestsBackground` | default | evaluation-heavy `perf/` tests (magma-list-pair-n7, proj-app-lazy-delta, ..), all blocks compiled / the production promotion in the background |
+| `.countMode` | fast | count mode (the tier's own counters, no heat accounting): every block at its first entry, with and without host recursion |
+| `.perfTestsWarmMode` | default | `mode=warm` in the background on perf/ tests, each file by itself, asserting that compiled code ran |
 | `.files` | slow (tool) | any export: `-Dt2.files=.. [-Dt2.switches=..] [-Dt2.depth=N] [-Dt2.variant="k v .."]` |
 | `BenchTest.bench`, `.scan` | slow (tools) | interleaved warm passes, tier off / on, one worker; activations per file of a directory |
 | `WarmMain` | (main class in the test tree) | the multi-pass measuring tool for both platforms: `bin/warm` of a `build-dist.sh --warm` distribution |

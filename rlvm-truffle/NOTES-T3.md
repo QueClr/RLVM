@@ -13,8 +13,8 @@ is neutral in the image and a loss on the JVM. `t2` stays off by default.** Noth
 it on in the launcher. Nothing argues for deleting it either: it is correct (section 8), and it is the
 place where U1 / U2 of section 7 would pay.
 
-Warm wall clock per pass in ms: median of the later passes of all runs of the configuration in the window
-(in brackets, where it matters, the range of those passes). `K1` = `default,code,casetrees`; tier = the same
+Warm wall clock per pass in ms: median of the later half of the warm passes of all runs of the
+configuration in the window (in brackets, where it matters, the range of those passes). `K1` = `default,code,casetrees`; tier = the same
 + `t2`, `-Drlvm.t2.mode=warm`, without the rejected run-ahead. Every row is one `bench/quiet.py` window, K1
 and tier back to back on the same distribution (`work/t3/warm.tsv`, `launcher.tsv`; labels in the tables).
 
@@ -31,12 +31,12 @@ fixes C7 / C8 of section 4 in; machine jar `8a8ea5644b24`):
 | reachability | native, WarmMain | 8 | 737 (2 runs) | 701 (**-4.8%**) | 12 | N5 |
 | Cedar slice | JVM, WarmMain | 1 | 1426 (1417-1504) | 1487 (**+4.3%**; 1484-1491) | 2 | J9 |
 | Cedar slice | JVM, WarmMain | 8 | 220 (211-227) | 286 (**+30%**; 272-343) | 2 | J9 |
-| Cedar slice | native, WarmMain | 1 | 1808 (1798-1825) | 1802 (-0.3%; 1796-1820) | 2 | N5 |
+| Cedar slice | native, WarmMain | 1 | 1808 (1800-1812) | 1802 (-0.3%; 1796-1814) | 2 | N5 |
 | Cedar slice | native, WarmMain | 8 | 316 (2 runs, 293-348) | 324 (+2.4%; 296-353): inside the scatter | 2 | N5 |
 | full cedar | JVM, WarmMain | 8 | 1469 (1274-1696) | 1355 (1345-1546): no difference to be seen | 12 | J9 |
-| full cedar | JVM, LAUNCHER | 8 | 1574 (1543-1598) | 1664 (+5.7%; 1622-1693, passes still falling) | 12 | L1 |
-| Init | JVM, WarmMain (C7 only) | 8 | 551 (536-718) | 632 (581-722): inside K1's own scatter | 10 | J8 |
-| Std | JVM, WarmMain | 8 | 949 (895-1090) | 1004 (920-1129): inside K1's own scatter | 12 | J8 |
+| full cedar | JVM, LAUNCHER | 8 | 1574 (1543-1578) | 1664 (+5.7%; 1622-1693, passes still falling) | 12 | L1 |
+| Init | JVM, WarmMain (C7 only) | 8 | 551 (536-628; all five passes 536-718) | 632 (581-641; all five 581-722): no gain; five passes are not a steady state here | 10 | J8 |
+| Std | JVM, WarmMain | 8 | 949 (895-1036; passes still falling) | 1004 (920-1042; still falling): no gain | 12 | J8 |
 
 The Cedar slice at 8 workers on the launcher did not reach a steady state in 7 passes (K1's own two runs:
 398-928 ms) and is not in the table.
@@ -163,8 +163,9 @@ What the table says:
    CPU on the open host with the heat timing at 64 or 4096: it adds the compiler threads (0.25-0.4 s per
    pass while blocks are still promoted: process CPU 1640-1870 ms against 1392-1480 ms of wall clock in
    the same passes here) and the host's own factor of 1.5-2 between runs minutes apart.
-4. **The JVM is the faster platform in steady state, tier or no tier**: K1 on reachability 1.03-1.05 s (JVM)
-   against 1.40 s (native), on the Cedar slice 1.44 s against 1.84 s (one worker): 22-26%.
+4. The JVM's K1 is faster than the image's in these windows too (1.03-1.05 s against 1.40 s on
+   reachability), but the two distributions hold different machine jars; the same-jar comparison is
+   section 1, point 4.
 
 ## 4. What was changed in the tier (all inside `rlvm-truffle`; nothing in `rlvm-machine`)
 
@@ -192,14 +193,15 @@ JFR execution samples of warm K1 passes on the JVM (one worker; open host, so SH
 |---|--:|--:|
 | inside code blocks, inclusive (`Code.enter`) | 83% | 14% |
 | the stepper's own code (`Code.*` self: dispatch, operand decoding, register traffic, `go`) | 16.8% | 6.9% |
-| interning called by block instructions, inclusive: `Values.mkApp` / `Values.closure` + `Runs.frame` / `Values.mkProj` | 47% / 14% / 4% | 7% / 16% / 0.2% |
-| self time of the probes and inserts (`Values.neu`, `closureProbe`, `Runs.internRun`, `Values.rec`, `neuExt`, `Machine.addRecordAt`, `growVtab`, `growRtab`) | 57% | 27% |
-| generic judgments outside blocks (`Infer.check` inclusive) | - | 59% |
+| value construction BY BLOCK INSTRUCTIONS, inclusive: `Code.mkApp` / `Code.mkClosure` / `Code.mkProj` | 42% / 14% / 4% | 3% / 3% / 0.3% |
+| self time of the probes and inserts, whoever calls them (`Values.neu`, `closureProbe`, `Runs.internRun`, `Values.rec`, `neuExt`, `Machine.addRecordAt`, `growVtab`, `growRtab`) | 57% | 26% |
+| generic judgments (`Infer.check` inclusive) | 8% | 59% |
 
 A compiled block calls the same operations as the stepper (one semantics, the same records in the same
 order - the tier-equivalence rule). What partial evaluation can remove is the second row; the third and
 fourth rows are identical work in both tiers. That bounds the gain of ANY compilation of single blocks at
-17% on reachability and 7% on the Cedar slice before its own entry costs; measured: 2-5%.
+17% on reachability and 7% on the Cedar slice before its own entry costs; measured on reachability: 4-10%
+(section 1).
 
 The hottest blocks of reachability (activations per warm pass; `work/t3/logs/listing-reach-t2-0.log`):
 
@@ -243,20 +245,22 @@ remembered for sibling closures). `rlvm.t2.aheadCheck=true` counts the predictio
 exact form names the record the operation then returns for 90.3% of 13.6 M records per run; "assume new"
 28% - HALF of the records that reachability's blocks build exist already.
 
-**Result** (quiet windows of 17:55Z, JVM, and 18:00Z, native; warm wall clock per pass in ms, median of the
-later passes; same tier with and without the run-ahead):
+**Result** (quiet windows J3 of 17:55Z, JVM, and N2 of 18:00Z, native; promotion at 1000 entries; warm wall
+clock per pass in ms, median of the later half of the passes of both runs, the two runs' own medians in
+brackets; the same tier with and without the run-ahead):
 
 | Workload | K1 | tier, no run-ahead | tier + run-ahead, exact | tier + run-ahead, "assume new" | compile CPU without / with (exact) |
 |---|--:|--:|--:|--:|--:|
-| reachability, JVM, 1 worker (2 runs each) | 1022, 1105 | 1021, 1000 | 1116, 1116 | 1147, 1147 | 7.6 s / 36-37 s (252 blocks) |
-| reachability, native, 1 worker | 1400, 1433 | 1370 | 1484, 1478 | - | 5.4 s / 14.5 s |
-| Cedar slice, JVM, 1 worker | 1438 | 1489 | 1742 | - | 27 s / 140 s (804 blocks) |
-| Cedar slice, native, 1 worker | 1775 | (window 18:2xZ, section 1) | 2061 | - | - / 56 s |
+| reachability, JVM, 1 worker | 1069 (1022, 1105) | 1021 (1012, 1041) | 1116 (1082, 1120) | 1147 (1167, 1109) | 7.6 s / 36-37 s (252 blocks) |
+| reachability, native, 1 worker | 1424 (1408, 1442) | 1370 (one run) | 1484 (1500, 1462) | - | 5.4 s / 14.5 s |
+| Cedar slice, JVM, 1 worker (one run each) | 1438 | 1489 | 1742 | - | 27 s / 140 s (804 blocks) |
+| Cedar slice, native, 1 worker (one run each) | 1775 | - | 2061 | - | - / 56 s |
 
-It makes the tier 8-12% SLOWER on reachability and far slower on the Cedar slice (where the compiler
-threads are then busy through every measured pass). JFR on reachability (`work/t3/jfr/t3-reach.top.txt`):
-with the exact form `Values.neu` falls from 22% to 15.5% of the samples and the run-ahead itself has 17%
-(`MkApp.ahead` 10.3%): the waiting moves into the run-ahead, it does not overlap. Why, as far as I can
+Against the same tier without it, the run-ahead is 8-12% SLOWER on reachability and far slower on the
+Cedar slice (where the compiler threads are then busy through every measured pass). JFR on reachability
+with the exact form (`work/t3/jfr/t3-reach.top.txt`; against the K1 profile of section 5): `Values.neu` has
+15.5% of the samples instead of 22%, and the run-ahead itself has 17% (`MkApp.ahead` 10.3%): the waiting
+moves into the run-ahead, it does not overlap. Why, as far as I can
 say (readings, not measurements): (1) the probes of one stretch depend on each other - in the hottest block
 (41) nine probes form chains of depth four (frame -> suspension -> application over it -> application over
 that) - so most of the chain is as long as before, whoever walks it first; (2) M1's profile was of v0; with
@@ -267,7 +271,7 @@ not the cost model of these blocks; (3) the root's code doubles (block 41: 4,638
 
 **Kept in the tree, off**, because the differential and equivalence gates ran over it and the next owner
 may want the predictor (`aheadCheck`) as an instrument; deleting it is `Instr.*.ahead`, `BlockRoot.ahead /
-aheadInit / aheadKind / probes`, the run-ahead block of `T2Bridge` and three settings. It is NOT a
+aheadInit / aheadKind / probes`, the run-ahead block of `T2Bridge` and the four `rlvm.t2.ahead*` settings. It is NOT a
 candidate for the stepper either: the result above is an upper bound for a generic version of the same walk.
 
 ## 7. Design finding: what a JIT for the checking process needs from the machine (for the owners, M1, M3, M6, M7)
@@ -312,8 +316,8 @@ What would unlock a compiler (and, each of them, also the stepper):
   measured: a loss).
 
 Without U1 or U2 the upper bound of any compiled tier on closed evaluation is the stepper's own share
-(17% on reachability; measured gain 2-5%), and on library corpora (Cedar: 14% of the time inside blocks at
-all) it is noise or a small loss.
+(17% on reachability; measured gain 4-10%), and on library corpora (Cedar: 14% of the time inside blocks at
+all) it is nothing or a loss.
 
 ## 8. Tests and gates on the final tree
 
@@ -327,12 +331,12 @@ C10 cancelling queued compilations).
 |---|---|---|
 | fast group, `$MVN -o -q -f rlvm-truffle/pom.xml test -Dgroups=fast` (`work/t3/test-fast-2.txt`, 17:25Z) | 4 tests: T2's three + `countMode` | 4 / 0 failures / 0 errors |
 | default group (`work/t3/test-default-2.txt`, 18:00Z, tree of 17:48Z: `rlvm.t2.ahead` still 2 by default, so the run-ahead was on in every test) | 7 tests: T2's five + `countMode` + `perfTestsWarmMode` | 7 / 0 failures / 0 errors / 0 skipped; 0 deoptimisations |
-| default group on the FINAL tree (`work/t3/test-default-3.txt`, 18:23Z; machine jar `8a8ea5644b24`, published while it was queued) | the same 7 tests; run-ahead off, final policy defaults | 7 / 0 failures / 0 errors / 0 skipped |
-| tier equivalence (heap digest, ticks, outcome at every unit), `TierEquivalenceTest#files`, production promotion (`mode=warm`, at 200 entries, background), `default,code,casetrees`, final tree (`work/t3/tiereq-corpora-2.txt`) | Cedar slice / Init / reachability | identical: 215 blocks, 177 k compiled activations / 811 blocks, 6.36 M / 113 blocks, 1.83 M |
+| default group, tree of 18:22Z (before C7 / C8; `work/t3/test-default-3.txt`, 18:23Z; machine jar `8a8ea5644b24`, published while it was queued) | the same 7 tests; run-ahead off, final policy defaults | 7 / 0 failures / 0 errors / 0 skipped |
+| tier equivalence (heap digest, ticks, outcome at every unit), `TierEquivalenceTest#files`, production promotion (`mode=warm`, at 200 entries, background), `default,code,casetrees`, tree of 18:00Z (before C7 - C10; `work/t3/tiereq-corpora-2.txt`) | Cedar slice / Init / reachability | identical: 215 blocks, 177 k compiled activations / 811 blocks, 6.36 M / 113 blocks, 1.83 M |
 | differential gate against the reference engine through the launcher (`testkit diff --engine machine --launcher work/t3/j3/bin/rlvm-jvm -j 4`), tutorial + bugs, 175 exports, `code,casetrees,tele,t2`, ELAB_AT 1, EVERY block compiled at its first entry (count mode, synchronous), run-ahead ON (`work/t3/gates/diff-tb-at1.txt`) | 1,342 checks | 1,341 compared (1,311 both accept, 30 both reject), **0 differences**; 1 not compared (the machine's eager-reduction decline of `Issue.forallFalse`, tier or no tier) |
 | the same harness, reachability + Cedar slice + Init + Std, `--threads 4`, launcher `work/t3/j4/bin/rlvm-jvm` (tree of 18:00Z: before C7 - C9), `default,code,casetrees,t2`, `mode=warm`, at 200 entries (`work/t3/gates/diff-corpora.txt`) | 170,322 checks | 169,936 compared, all both accept, **0 differences**; 386 not compared (eager-reduction declines); Std: 723 blocks installed, 8.55 M compiled activations, 0 deoptimisations |
 | the same on the FINAL tree: launcher `work/t3/j7/bin/rlvm-jvm` (C7 - C10 in; machine jar `8a8ea5644b24`, driver `150aed4bf1bf`), `mode=warm`, at 200 entries, `hot=0`, `max=4096` so that many blocks are compiled (`work/t3/gates/diff-corpora-final.txt`, 18:38-18:41Z) | 170,322 checks | 169,936 compared, all both accept, **0 differences**; 386 not compared; Std: 691 blocks installed, 8.79 M compiled activations, 0 failed, 0 deoptimisations |
-| default group on the final tree (C7 + C8 in; `work/t3/test-default-5.txt`, 18:36Z, machine jar `8a8ea5644b24`) | the 7 tests | 7 / 0 failures / 0 errors / 0 skipped |
+| **default group on the FINAL tree** (C7 - C10 in; `work/t3/test-default-5.txt`, 18:36Z, machine jar `8a8ea5644b24`; it contains the four tests of the fast group) | the 7 tests | 7 / 0 failures / 0 errors / 0 skipped |
 
 Not covered: the native image under a differential gate (the images `work/t3/n2`, `n3`, `n5` are the
 measuring tool only; no `bin/rlvm` of this tree was built); `tele` blocks under the production promotion; 8 workers under the
@@ -347,10 +351,10 @@ not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an en
 
 ## 9. Open points, requests, next step
 
-1. **Kept-engine passes in the driver** (P7; requests.log 16:31Z orchestrator, 16:58Z T3): until
-   `-X passes=N -X passes-mode=recheck` keeps the engine instances, every number of this file is from
-   `WarmMain` (no admission pipeline, no pipelined loading, no re-check). The 8-worker rows should be
-   re-taken through the launcher when it exists; I expect the same signs.
+1. **Most rows are `WarmMain`, not the launcher.** P7 published kept-engine passes at 18:04Z
+   (`-X passes-keep=engines`); one launcher window was taken with them (L1: reachability and full cedar). The
+   Cedar slice on the launcher was not steady in 7 passes; Init, Std and the native launcher were not run
+   through it. No request of mine is open with anybody.
 2. **Not measured**: con-leche, cslib, mathlib, navier-stokes-euler; `tele` blocks under the tier in a timing
    run; the native image at Init / Std / full cedar; the launcher's native `bin/rlvm` with this tree (only the
    measuring tool was built as an image: `work/t3/n5` is the one of the final tree).
@@ -363,14 +367,15 @@ not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an en
    open host): the hook's own frames (`Tier.offer` 1.0%, `T2Tier.run` 0.5%, `OptimizedCallTarget.doInvoke`
    0.5%) are about 2% of the samples - the path `Code.go -> Tier.exec -> Tier.offer -> T2Tier.run` that EVERY
    activation takes once the switch is on, compiled or not - and the host's C2 compiler thread still has
-   9% of the thread load in late passes. In the image the same workload shows +1.0% with 88 blocks (N3).
-   So half of it is the price of the hook on a workload with a million stepped activations per pass, and
-   the other half, and all of the 8-worker figure, is not explained. First things to try: the run with
-   `rlvm.t2.max=0` after the fixes (the hook alone); `-Xint`-free check of whether `Code.resumeOne` (the body
-   that `BUNREAD` of `RULE(List.rec)` runs through; only the tier calls it) is compiled by C2 at 45 k calls
-   per pass; the per-unit times of the driver (`-X unit-trace`) for the unit on the critical path.
-4. **`rlvm.t2.inline=1` against 0** is one run each (974 against 1000-1021 ms, reachability, JVM): no
-   difference that the per-process variance (8% between two K1 runs of one window) lets one see. Kept at 1
+   9% of the thread load in late passes. In the image the same workload is neutral with the same two
+   blocks (N5) and +1.0% with 88 (N3). So part of the one-worker figure may be the price of the hook on a
+   workload with a million stepped activations per pass; the rest, and the 8-worker figure, is not
+   explained. First things to try: the run with `rlvm.t2.max=0` on the final tree (the hook alone);
+   `-XX:+PrintCompilation` for `Code.resumeOne` (the body that `BUNREAD` of `RULE(List.rec)` runs through;
+   only the tier calls it, 45 k times per pass); the driver's per-unit times (`-X unit-trace`) for the unit
+   on the critical path.
+4. **`rlvm.t2.inline=1` against 0**: 1021 ms (two runs) against 974 (one run), reachability, JVM, window J3:
+   no difference that the per-process variance (8% between two K1 runs of that window) lets one see. Kept at 1
    because it removes calls and never showed a loss; the image is built with 1.
 5. **The tier follows the machine by hand.** `Instr.*` mirrors `Code.java` statement by statement; the stepper
    answers `KCONST` of a level-polymorphic constant from the site's inline cache (NOTES-M7: "since wave 6"),

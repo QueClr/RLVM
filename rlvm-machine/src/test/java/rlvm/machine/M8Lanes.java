@@ -361,25 +361,42 @@ final class M8Lanes {
                         o.cpu.release();
                         permit = false;
                     }
-                    Thread[] threads = new Thread[run.lanes.length];
-                    for (int i = 0; i < threads.length; i++) {
-                        final LaneRun l = run.lanes[i];
-                        threads[i] = laneThread(l, () -> {
-                            if (o.cpu != null) {
-                                o.cpu.acquireUninterruptibly();
+                    // Two groups, one after the other (wave-6 integration): first lane 0 and the lanes held against
+                    // another lane by CONV, then the rest (the generic tier, the audits). The lanes of a file are
+                    // engines of their own over ONE store, and a code store leaves the id of a binder's sub-block
+                    // in the node's reserved word (CodeStore.addSub -> TermStore.setBinderHint; a hint that does not
+                    // name the reader's own sub-block is ignored and the closure is walked). Engines that elaborate
+                    // in the same order (the conventions do) give a binder the same id; an audit lane re-computes
+                    // memo hits and elaborates in another order, and its hints made the compared lanes walk terms
+                    // their blocks would have run: tick differences that were the harness's, never the same twice
+                    // (gate of warm,gated,expect + code,casetrees on Std and the Cedar slice, 18:35Z). A real run
+                    // has one machine engine per store.
+                    for (int group = 0; group < 2; group++) {
+                        Thread[] threads = new Thread[run.lanes.length];
+                        for (int i = 0; i < threads.length; i++) {
+                            final LaneRun l = run.lanes[i];
+                            if ((i == 0 || l.spec.how == CONV) != (group == 0)) {
+                                continue;
                             }
-                            try {
-                                pass(h, l, n, o, deadline);
-                            } finally {
+                            threads[i] = laneThread(l, () -> {
                                 if (o.cpu != null) {
-                                    o.cpu.release();
+                                    o.cpu.acquireUninterruptibly();
                                 }
+                                try {
+                                    pass(h, l, n, o, deadline);
+                                } finally {
+                                    if (o.cpu != null) {
+                                        o.cpu.release();
+                                    }
+                                }
+                            });
+                            threads[i].start();
+                        }
+                        for (Thread t : threads) {
+                            if (t != null) {
+                                joinQuietly(t);
                             }
-                        });
-                        threads[i].start();
-                    }
-                    for (Thread t : threads) {
-                        joinQuietly(t);
+                        }
                     }
                     if (o.cpu != null) {
                         o.cpu.acquireUninterruptibly();
