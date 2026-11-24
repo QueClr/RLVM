@@ -54,6 +54,18 @@ import rlvm.store.Terms;
  * the cached copies (a sentinel node with a random payload is checked at every entry). Engines in
  * strict mode do not use it.
  *
+ * <p><b>Exactness</b> (audit: {@code docs/design/review/reference-caches.md}; README, "Exactness").
+ * The caches are read, written and keyed as the official ones. Two things an engine over canonical
+ * ids cannot have make the official verdict differ on adversarial files: the loader drops
+ * {@code mdata} nodes and the {@code nondep} flag of a let (part of the official term identity),
+ * and {@code is_def_eq_core} tests POINTERS after its second {@code whnf_core} (object identity:
+ * see {@link #isDefEqCore} step 10 and {@link #wcFresh}). In the practical mode (the default) the
+ * kernel takes two occurrences of a term for one object and never declines for it; in the strict
+ * mode ({@link RefOptions#exact()}) it shows that the difference does not matter (a probe with
+ * frozen caches, {@link #secondPassRepeatsNothing}; then the session checks the declaration both
+ * ways) or declines, and judgments of admission start with empty judgment caches, as the official
+ * {@code add_inductive} uses a fresh checker for each.
+ *
  * <p>One instance per session; not thread-safe. After any {@link ResourceException} the caller must
  * reset the session and its {@link WorkerContext} (the overlay may have been abandoned mid-update).
  */
@@ -208,6 +220,19 @@ public final class RefKernel implements KernelOps {
     private int maxDepthSeen;
 
     private boolean eagerReduce;
+    /**
+     * Strict mode ({@code ref.exact=official}), judgments asked through {@link KernelOps} in a scope
+     * that {@link #begin} opened (the admission of inductive types): every judgment starts with
+     * empty judgment caches, as the official {@code add_inductive} runs every judgment in a fresh
+     * {@code type_checker} ({@code tc()}; finding R2-F3). The official code shares one checker in
+     * three places (the four judgments per constructor of {@code check_recursors}, the nested
+     * applications, the final re-check); a caller that knows it is in one of them has no way to say
+     * so yet, so there this is fresher than the official kernel.
+     */
+    private final boolean freshJudgments;
+    /** True between a {@link #begin} of the caller and the next {@link #checkConstant} / {@link #endDeclaration}. */
+    private boolean admissionScope;
+
     /** Out-parameters of {@link #lazyDeltaStep} and {@link #lazyDeltaReduction} (the official {@code expr &}). */
     private int outT;
     private int outS;
@@ -294,6 +319,7 @@ public final class RefKernel implements KernelOps {
         }
         this.officialLevels = options.officialLevels;
         this.identityMode = options.identity;
+        this.freshJudgments = options.exact();
         // Strict mode: no cache that survives a unit (RECONCILIATION.md section 2, facade).
         boolean keep = options.importBytes >= 32L && (config == null || !config.strict);
         this.imports = keep ? new ImportCache() : null;
@@ -330,6 +356,7 @@ public final class RefKernel implements KernelOps {
         this.unit = rank > 0 && rank != Integer.MAX_VALUE ? rank - 1 : -1;
         this.counting = false;
         this.hazardIndex = 0;
+        this.admissionScope = true;
         clearAll();
         terms.refresh();
         ovArr = ov.array();
@@ -342,7 +369,12 @@ public final class RefKernel implements KernelOps {
         exposeMask |= kindMask;
         // The environment grew: facts that depend on a constant being absent (a stuck recursor
         // application, a failed comparison) must go, as the official add_inductive creates a fresh
-        // type_checker for every phase.
+        // type_checker for every judgment.
+        clearJudgmentCaches();
+    }
+
+    /** What a fresh official {@code type_checker} does not have: every cache but the function memos of terms. */
+    private void clearJudgmentCaches() {
         inferCheckCache.clear();
         prefixCount = 0;
         inferOnlyCache.clear();
@@ -453,6 +485,7 @@ public final class RefKernel implements KernelOps {
      */
     public void endDeclaration() {
         clearAll();
+        admissionScope = false;
         counting = false;
         rank = Integer.MAX_VALUE;
         lparams = NO_LPARAMS;
@@ -535,6 +568,9 @@ public final class RefKernel implements KernelOps {
         if (importSentinel != 0 && !importsIntact()) {
             dropImports();
         }
+        if (freshJudgments && admissionScope && op != OP_CHECK_CONSTANT && op != OP_MK_LOCAL) {
+            clearJudgmentCaches();
+        }
         int sp0 = sp;
         int lsp0 = lsp;
         int depth0 = depth;
@@ -603,6 +639,7 @@ public final class RefKernel implements KernelOps {
                     + " is admitted by rlvm-inductive / rlvm-admit, not by the engine");
         }
         begin(decls.rank(cid), decls.levelParams(cid));
+        admissionScope = false;
         unit = decls.unit(cid);
         pendingCount = 0;
         counting = imports != null;

@@ -313,10 +313,12 @@ verdicts from Docker; generator `src/test/resources/s/gen/batchE.py`), all stric
 | F5 | `Infer.k_ck8` | the EXPECTED body type (when closed) was stored as the COD memo of the lambda's PII | not stored (the memo written by the lam rule of INFER, the body's own closed type, stays) |
 | F6 | `Reduce.k_iota3`, `Eval.apply` / `k_evalHead`, `Infer.Ext.zetaInexact`, `Infer.LET_EXACT` | the K rule typed the major premise by its VALUE; under `gated` the value of `f a` with `f` a let variable has the variable reduced away, the official `to_cnstr_when_K` types the TERM through the variable's declared type | a LET suspension whose declared type is the very type of its value is marked (`M1 = LET_EXACT`); applying any other let variable sets `zetaInexact` for the declaration, and a K comparison after that is a DECLINE (`E_LIMIT`, fatal). Cost: the declines of this rule on the corpora (the gate of the publication names them) |
 
-### E1-F7 (OPEN, 2026-11-24 21:35Z): the type of a term the official kernel does NOT reduce
+### E1-F7 (kind T, tolerated by the practical policy; 2026-11-24 21:35Z): the type of a term the official kernel does NOT reduce
 
-Three rows of the S manifest carry the known-finding mark `bind` (wrong ACCEPT of the machine; official verdicts from
-Docker, the reference engine rejects): `e1-sib-proj-applied-let-pi-bad` and `e1-sib-proj-redex-pi-bad` (v0 and every
+Owner's note 13 (22:25Z): a kind T accept is tolerated in the default configuration, so this family is documented
+(`docs/design/review/official-divergence.md`) and not worked on further. Three rows of the S manifest carry the kind
+mark `T` (the machine accepts, the official checker rejects, the statement is `True`; official verdicts from Docker,
+the reference engine rejects): `e1-sib-proj-applied-let-pi-bad` and `e1-sib-proj-redex-pi-bad` (v0 and every
 set), `e1-sib-krule-major-redex-bad` (`gated` and the default set; v0 is right only because its tabling record of the
 argument holds the INFER type). Nine more rows `e1-sib-*` are strict.
 
@@ -337,3 +339,11 @@ keeps the suspension of an active struct term instead of its value; (d) the same
 100,096 engine checks): declarations that apply an inexact let variable and then type a projection or run the K rule:
 322 / 12; declarations that bind an inexact let: 3,531 / 335; neither covers the let-free shapes. Cost of F2 / F3: `INST(PII, x)` builds one frame and one record more when the typed binding is
 needed; of F4: lambdas whose domain is not the expected domain's value take the generic rule.
+
+### E1-F4 and the switch `convexpect` (2026-11-24 22:41Z)
+
+The fix of F4 (B9 only when the two domains are one value) is the whole tick cost of the fix: Cedar slice 2.40 %, Std
+0.30 %, Init 0.32 %, Mathlib slices 0.33 %; the typed bindings of F2 / F3 cost nothing. In warm wall clock (8 workers,
+native) it does not show on Std and cedar, so it stays in the default. `convexpect` (`Op.SW_CONV_EXPECT`, off) gives the
+old B9 back; the three rows `e1-lam-fvar-type-in-conv-*-bad` are kind T rows and are accepted with it.
+

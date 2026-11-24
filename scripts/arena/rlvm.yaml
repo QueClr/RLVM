@@ -60,8 +60,11 @@
 # WHICH LAUNCHER, AND WHY (docs/PLATFORM.md, "The platform decision under owner note 12"): the build
 # makes two launchers from the same jars. The arena starts one fresh process per export, and for that
 # the CE native image `work/dist/bin/rlvm` (-O3, serial collector) is the platform: it is steady from
-# its first second (cold wall clock with 8 workers and the reference engine, same cores: Init 2.30 s, Std
-# 3.89 s, cedar 5.00 s; the JVM launcher needs 3 to 6 s more for the same first run). The JVM launcher `work/dist/bin/rlvm-jvm` is the WARM platform - the
+# its first second, starts in 0.02 s where a JVM needs 0.2 s (most arena tests are that small) and holds a
+# third of the memory. Cold wall clock with 8 workers on the same cores, Init / Std / cedar: 2.30 / 3.89 /
+# 5.00 s with the reference engine (the JVM launcher's first run: 2.33 / 3.66 / 4.31 s - on a corpus the
+# reference engine runs long enough for the JIT to pay within the run) and 0.85 / 1.57 / 2.23 s with the
+# machine (JVM launcher: 2.84 / 4.04 / 4.45 s). The JVM launcher `work/dist/bin/rlvm-jvm` is the WARM platform - the
 # owner's target since OWNER-NOTES 12 is the wall clock of checking in steady state, and once warm
 # HotSpot needs 0.68 to 0.88 times the image's wall clock on Init, Std, cedar, reachability and mathlib
 # (docs/research/profiles/J1.md) - but it needs two or three passes to get there, which a single arena

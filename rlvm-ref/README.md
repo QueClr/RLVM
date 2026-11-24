@@ -14,7 +14,7 @@ rejection, the oracle of the differential tests, and the primary engine until th
 | `whnf_core` (beta, zeta, let variables, projections, iota, quotients; cheap-projection mode), `reduce_proj(_core)`, `reduce_recursor`, `inductive_reduce_rec`, `to_cnstr_when_K`, `to_cnstr_when_structure`, `quot_reduce_rec`, `nat_lit_to_constructor`, `string_lit_to_constructor` | `whnfCore`, `reduceProj(Core)`, `reduceRecursor`, `inductiveReduceRec`, `toCnstrWhenK`, `toCnstrWhenStructure`, `quotReduceRec`, `natLitToConstructor`, `stringLitToConstructor` |
 | `whnf`, `is_delta`, `unfold_definition(_core)`, `reduce_nat` (the 15 accelerated functions through `rlvm.api.NatOps`) | `whnfFull`, `deltaCid`, `unfoldDefinition`, `unfoldCore`, `reduceNat` |
 | `is_def_eq`, `is_def_eq_core` in the official order, `quick_is_def_eq`, `is_def_eq_binding`, `is_def_eq_proof_irrel`, `lazy_delta_reduction(_step)` with hints, `is_def_eq_offset`, `lazy_delta_proj_reduction`, `is_def_eq_args`, `is_def_eq_app`, `try_eta_expansion`, `try_eta_struct`, `try_string_lit_expansion`, `is_def_eq_unit_like`, `eagerReduce` | `isDefEqInt`, `isDefEqCore`, `quick`, `isDefEqBinding`, `isDefEqProofIrrel`, `lazyDeltaReduction`, `lazyDeltaStep`, `isDefEqOffset`, `lazyDeltaProjReduction`, `isDefEqArgs`, `isDefEqApp`, `tryEtaExpansionCore`, `tryEtaStructCore`, `tryStringLitExpansionCore`, `isDefEqUnitLike` |
-| the seven caches (`m_infer_type[2]`, `m_whnf_core`, `m_whnf`, `m_success`, `m_failure`, `m_unfold`) | open-addressing `int` tables (`IntIntMap`, `PairSet`, `LongIntMap`; cleared in O(entries)), cleared in `begin` |
+| the seven caches (`m_infer_type[2]`, `m_whnf_core`, `m_whnf`, `m_success`, `m_failure`, `m_unfold`) | open-addressing `int` tables (`IntIntMap`, `PairSet`, `LongIntMap`; cleared in O(entries)), cleared in `begin`; read, written and keyed as the official ones (audit: `docs/design/review/reference-caches.md`; section "Exactness" below) |
 | `add_axiom / add_definition / add_theorem / add_opaque` | `checkConstant(cid)` |
 
 `RefEngine` / `RefEngine.RefSession` implement `rlvm.api.Engine` / `Session`; the provider
@@ -27,15 +27,57 @@ rejection, the oracle of the differential tests, and the primary engine until th
 |---|---|---|---|
 | `-X levels=` | `rlvm.levels` | `official` (default), `complete` | how `is_def_eq` compares universe levels (sorts, level lists of constants): `LevelOps.isEquivOfficial`, the official kernel's test (identity of the official normal forms, sound and incomplete), or with `complete` `LevelOps.isEquiv` / `listsEquiv`, the complete relation, which accepts a superset. The default follows the project owner's decision (OWNER-NOTES item 11, "resemble official by default"): `corner-cases/imax-right-successor` and `imax-nested-absorption` are rejected, as the official checker rejects them; `-X levels=complete` accepts them. `is_prop` is `normalizes_to_zero` in both modes, as in the official kernel. See "Universe levels: official by default" below. |
 | `-X ref.imports=` | `rlvm.ref.imports` | `off` (default), `on`, `verify` | the session's table of imported constant terms (below). Off by default: it took 17 % off Init's CPU time with the wave-2b store, and costs CPU time with the wave-4 store (mathlib, 8 workers: 629.7 s with it, 565.3 s without). `verify` recomputes every answer of the table and fails on a difference (tests) |
+| `-X ref.exact=` (set by `-X policy=strict`) | `rlvm.ref.exact` | `off` (default), `official` | the STRICT mode (OWNER-NOTES item 13): the official verdict or none. Where the official verdict depends on object identity, the engine shows that it does not matter (a probe, then a check of the declaration both ways) or declines the declaration. `off` = the practical policy: never a decline for the sake of agreement on adversarial files. Section "Exactness" below |
+| `-X ref.identity=` | `rlvm.ref.identity` | `same` (default under `ref.exact=off`), `decline` (default under `official`), `other`, `count` | experiments and measurements: the object-identity behaviour alone (`other`: always take two occurrences for two objects; `count`: probe and count as the strict mode, never decline) |
+| - | `rlvm.ref.identityTrace` | N, default 0 | print the first N identity hazards to stderr (diagnostics) |
 | - | `rlvm.ref.importBytes` | bytes, default 4194304 | with `ref.imports=on`: overlay a session may spend on kept imports |
 | - | `rlvm.ref.importMinUses` | default 8 | with `ref.imports=on`: a term is kept once this many declarations of the session had to copy it |
 | - | `rlvm.ref.deepDepth`, `rlvm.ref.chainLimit`, `rlvm.ref.deepStackMB` | | depth limit, chain limit, helper stack (unchanged) |
 
-The two `-X` keys are declared by `RefEngine.Provider.optionKeys()` and reach the engine through
+The `-X` keys (and `policy`, the launcher's own key, which rlvm-main hands to every engine that
+declares it: `policy=strict` means `ref.exact=official` unless `ref.exact` is given) are declared by
+`RefEngine.Provider.optionKeys()` and reach the engine through
 `EngineProvider.factory(Map)`; primary, strict and reference instances of a run get the same map, so
 `-X levels=complete` also governs re-checks and the environment pass. A `-X` setting wins over the
 system property; an unknown value ends the launcher with status 64. `RefOptions` holds the parsed
 settings (`RefEngine.factory(RefOptions)`, `new RefKernel(ctx, config, options)` for tools and tests).
+
+## Exactness: the practical default and the strict mode (R2, 2026-11-24)
+
+Audit of every cache against the official source, with exports and official verdicts:
+`docs/design/review/reference-caches.md`. In short:
+
+- **What the same term is.** The official caches are keyed by structural equality that ignores
+  binder names and infos and includes `mdata` nodes and the `nondep` flag of a let; canonical ids
+  agree with it except for those two, which the loader / store do not keep (findings S3-F2 and
+  R2-F1; fixes are the loader's: `LoadOptions.strictMetadata` declines such declarations in the
+  strict mode).
+- **Object identity** (finding R2-F2). After the second `whnf_core`, `is_def_eq_core` tests
+  `is_eqp(t_n_n, t_n)`: pointers. A stuck projection that a cheap `whnf_core` found stuck by itself
+  ("fresh": `RefKernel.wcFresh`) and that an `m_whnf_core` entry of ANOTHER occurrence of the same
+  term answers at that point comes back as another object IF the two occurrences are two objects
+  for the official kernel - then the whole comparison runs a second time, with other cache effects
+  than the first - and as the same object if they are one. Which it is depends on the record ids of
+  the export and on the official kernel's allocation, not on the terms
+  (`r2-ptr-other-record-bad`, official reject, and `r2-ptr-same-record-ok`, official accept, are
+  the same terms).
+  - practical (`ref.exact=off`, the default): the occurrences are taken for one object, as the
+    engine always did. No decline; a declaration the official checker rejects for this reason is
+    accepted (it is derivable).
+  - strict (`ref.exact=official`): (1) the second pass is run as a probe with the caches frozen
+    (`secondPassRepeatsNothing`); if it would add nothing to `m_whnf_core`, to the success or
+    failure set, and decides nothing, both official continuations are the one in hand. (2)
+    Otherwise `RefSession.decide` checks the declaration again from the start with this hazard
+    decided each way (recursively, at most 63 checks); equal verdicts are the official verdict,
+    different verdicts are a decline (UNSUPPORTED_INPUT; the message names both). On the eight
+    corpora no declaration is declined (Std: 1 declaration, cslib: 8 are decided both ways; numbers
+    in the review document).
+- **Two corrections of cache keys / writes** (both modes, no verdict known to change): the
+  `m_whnf_core` entry that follows an unfolding is one logical table with the entries of explicit
+  terms (`valueOwner`, `explicitLam`: another constant with the same lambda value, or the explicit
+  redex `value a1 .. an`, finds it), and a write never replaces an entry (`insert` semantics).
+- Golden tests: `corpus.ExactnessGoldenTest` (30 exports with the official checker's answers in
+  `src/test/resources/r2/`: what is the same term, object identity, both modes).
 
 ## Universe levels: official by default
 
@@ -181,7 +223,8 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 - **Official control flow.** Every strategy decision is the official one (step order of `is_def_eq_core`,
   which side lazy delta unfolds, when arguments are compared, when Nat literals are folded, what each cache
   stores and when it is consulted). No shortcut the official kernel lacks.
-- **Canonical terms.** The official caches and every `t == s` are structural. Every term that enters the
+- **Canonical terms.** The official caches and every `t == s` are structural (the two pointer tests
+  of `is_def_eq_core` are the exception: section "Exactness"). Every term that enters the
   kernel (API arguments, types and values of constants, recursor rules, types of free variables) is first
   copied into the worker's overlay with the hash-consing constructors (`canon`, iterative, memoised per
   scope). Everything the substitution algebra builds from canonical terms is canonical again, so
@@ -291,7 +334,7 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 
 ## Tests
 
-`. ./env.sh && $MVN -o -q -pl rlvm-ref test` (136 tests, about 12 s on a quiet host):
+`. ./env.sh && $MVN -o -q -pl rlvm-ref test` (141 tests, about 14 s on a quiet host):
 
 | Class | What |
 |---|---|
@@ -305,6 +348,7 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 | `ImportsTest` (10) | the session's import table: off unless asked for; kept copies are served (with every answer recomputed), same verdicts and same step count with the table on and off, nothing kept in strict engines, the byte budget, a rejected declaration promotes nothing, `Session.reset()` drops the table, an overlay that was reset or cut below the kept copies behind the session's back is noticed (the ids are never used), `KernelOps` judgments read but never fill the table, literals of a declaration are released when it ends |
 | `TablesTest` (3) | `IntIntMap`, `LongIntMap`, `PairSet` against the library's collections through sequences of large and small declarations; a table does not stay large after a declaration that hardly used it |
 | `corpus.CorpusTest` (5) | the published arena tests at kernel level (see below); the two imax corner cases rejected by default and accepted with `levels=complete`; the perf group with `-Drlvm.ref.corpus.perf=true` |
+| `corpus.ExactnessGoldenTest` (5) | 30 exports with official verdicts (`src/test/resources/r2/manifest.tsv`): the practical engine gives the official verdict except on the documented rows of kind T (accepted) and never declines; the strict engine gives the official verdict or declines, never the opposite; `policy=strict` selects it and the decline names both verdicts; `ref.identity=other` / `same` each reproduce the official verdict on the files where they are the truth; a hazard whose two continuations agree is decided, not declined |
 
 The fixtures are hand-made stores (`Fixture`, `Prelude`, the term language `Sexp`) written through the real
 `StoreBuilder`, with the derived facts of inductive types set by hand. Hand-made mutants that the new
