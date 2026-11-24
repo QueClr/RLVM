@@ -29,15 +29,25 @@ final class T2Tier extends Tier {
     int result;
     /** Run-ahead: receives the xor of the table words it loaded early (the store that keeps the loads). */
     int sink;
-    /** rlvm.t2.aheadCheck: predicted records that were / were not the record the operation returned. */
-    long aheadHit;
-    long aheadMiss;
-    long aheadOld;
-    long aheadMissClosure;
 
-    /** Activations run by compiled code / offered for a promoted block but not taken (no entry at that pc, code not valid). */
-    long calls;
-    long notTaken;
+    /**
+     * The counters of one machine's tier. The engine keeps THESE (for its report and its promotion test), not the
+     * tier object: a tier references its machine, and a machine's arrays must be collectable when its session
+     * is closed (the engine outlives every session; with one list of tiers per engine, every machine that ever
+     * ran stayed reachable - found by T3 at 18:30Z, NOTES-T3 section 4, C7).
+     */
+    static final class Counts {
+        /** Activations run by compiled code / offered for a promoted block but not taken (no entry at that pc, code not valid). */
+        long calls;
+        long notTaken;
+        /** rlvm.t2.aheadCheck: predicted records that were / were not the record the operation returned. */
+        long aheadHit;
+        long aheadMiss;
+        long aheadOld;
+        long aheadMissClosure;
+    }
+
+    final Counts n = new Counts();
 
     /** Count mode: activations of each block that this machine ran in the stepper (null: the machine's heat accounting counts). */
     private int[] missed;
@@ -49,7 +59,7 @@ final class T2Tier extends Tier {
         this.engine = engine;
         this.missed = engine.settings.count ? new int[256] : null;
         this.batch = Math.min(T2Engine.BATCH, Integer.highestOneBit(Math.max(1, engine.settings.at)));
-        engine.register(this);
+        engine.register(n);
     }
 
     /** Count mode: one more activation of {@code blk} for the stepper; every {@code batch} of them go to the engine. */
@@ -85,10 +95,10 @@ final class T2Tier extends Tier {
         }
         int e = pc < c.entryOfPc.length ? c.entryOfPc[pc] : -1;
         if (e < 0 || !T2Runtime.enter(c, this, e, rb, d)) {
-            notTaken++;
+            n.notTaken++;
             return Op.MISS;
         }
-        calls++;
+        n.calls++;
         int r = result;
         if (r < Op.SIG) {
             T2Bridge.pop(m, rb); // RET (Tier.leave): a result pops the window; a signal leaves it

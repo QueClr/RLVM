@@ -115,7 +115,8 @@ final class T2Engine {
     private byte[] state = new byte[256];
     private int[] instructions = new int[256];
     private final ArrayList<Rec> recs = new ArrayList<>();
-    private final ArrayList<T2Tier> tiers = new ArrayList<>();
+    /** The counters of every machine's tier (never the tiers themselves: they reference their machines). */
+    private final ArrayList<T2Tier.Counts> tiers = new ArrayList<>();
     private int promoted;
     private int installedCount;
     private int failedCount;
@@ -233,7 +234,7 @@ final class T2Engine {
         }
     }
 
-    void register(T2Tier t) {
+    void register(T2Tier.Counts t) {
         synchronized (tiers) {
             tiers.add(t);
         }
@@ -544,7 +545,7 @@ final class T2Engine {
     long compiledCalls() {
         long s = 0;
         synchronized (tiers) {
-            for (T2Tier t : tiers) {
+            for (T2Tier.Counts t : tiers) {
                 s += t.calls;
             }
         }
@@ -555,7 +556,7 @@ final class T2Engine {
     long[] aheadChecks() {
         long[] r = new long[4];
         synchronized (tiers) {
-            for (T2Tier t : tiers) {
+            for (T2Tier.Counts t : tiers) {
                 r[0] += t.aheadHit;
                 r[1] += t.aheadMiss;
                 r[2] += t.aheadOld;
@@ -568,7 +569,7 @@ final class T2Engine {
     long notTaken() {
         long s = 0;
         synchronized (tiers) {
-            for (T2Tier t : tiers) {
+            for (T2Tier.Counts t : tiers) {
                 s += t.notTaken;
             }
         }

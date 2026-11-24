@@ -1067,10 +1067,10 @@ pass 27.9 s; against one worker pipelined (208.3 s) that is 6.5x, against one wo
 | `scripts/gate.sh --dist work/p7/dist-pre --corpus tutorial` (the tree before kept engines, jar 44cd88517795 + the published jars of 17:09Z; JVM launcher, reference engine, 1 worker, batch) | PASS: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413, errors 0; differential self-test caught |
 | the same with `--load pipelined --threads 4` and `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7` (small files through the pipeline too) on `work/p7/dist-pre-pipe` | PASS: 230 / 230; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413 (the same counts as batch); self-test caught |
 | `scripts/gate.sh --corpus none` (slice + self-test) on `work/p7/dist-final` (tree with kept engines, 09668cada690) and on `work/p7/dist-pub` (the published 150aed4bf1bf itself) | PASS, 230 / 230, both |
-| `rlvm-driver/bin/invariance.sh published` (231 files x 9 runs; reference engine) | PASS: 231 correct, 0 wrong, 0 declined, 0 schedule differences, 0 pipelined declines (28 minutes) |
-| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (16,928 mutants x 9 runs), reference engine | PASS: 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
-| the same with `--engine machine -X machine.switches=warm,gated,expect` (machine jar of 17:25Z), on the code of 150aed4bf1bf and again on the code of 31fa08d9ce61 | PASS both: 0 wrong, 0 schedule differences, 1,675 declined alike, **0 pipelined declines** (5 before the kept pass and the parking rule, 1 before the rule covered type roots) |
-| the same, `big` (init-prelude, Init, Std, cedar), machine as primary engine | PASS: 4 files correct in all 9 configurations |
+| `rlvm-driver/bin/invariance.sh published` (231 files x 9 runs; reference engine; the code of 150aed4bf1bf) | PASS: 231 correct, 0 wrong, 0 declined, 0 schedule differences, 0 pipelined declines (28 minutes) |
+| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (16,928 mutants x 9 runs), reference engine, on the code of 31fa08d9ce61 | @@INV5@@ |
+| the same with `--engine machine -X machine.switches=warm,gated,expect` (the machine jar published at 18:11Z as primary engine), on the code of 31fa08d9ce61 | PASS: 0 wrong, 0 schedule differences, 1,675 declined alike, **0 pipelined declines** (during the work: 5 before the kept pass and the parking rule, 1 while the rule covered proof blocks only) |
+| the same, `big` (init-prelude, Init, Std, cedar), machine as primary engine (the code of 150aed4bf1bf) | PASS: 4 files correct in all 9 configurations |
 | mathlib through the native launcher, 8 and 4 workers, batch and pipelined, every build of this section | accept, exit 0, 0 units parked |
 | slice + self-test on a distribution with 31fa08d9ce61 (`work/p7/dist-pub2`), batch and pipelined forced | @@GATE2@@ |
 <!-- measured:end -->

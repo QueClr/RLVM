@@ -205,14 +205,14 @@ abstract class Instr extends Node {
             if (p != 0 && p != UNK) {
                 T2Tier w = (T2Tier) f.getArguments()[0];
                 if (p == r) {
-                    w.aheadHit++;
+                    w.n.aheadHit++;
                 } else {
-                    w.aheadMiss++;
+                    w.n.aheadMiss++;
                     if (r < f.getIntStatic(vp0Slot)) {
-                        w.aheadOld++; // the record existed before this stretch: an interning hit, not a new record
+                        w.n.aheadOld++; // the record existed before this stretch: an interning hit, not a new record
                     }
                     if (this instanceof Closure) {
-                        w.aheadMissClosure++;
+                        w.n.aheadMissClosure++;
                     }
                 }
                 f.setIntStatic(sbase + dst, UNK);
