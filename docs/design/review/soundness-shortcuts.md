@@ -20,7 +20,39 @@ official checker rejects all cases of the official ALGORITHM's incompleteness?**
 
 ## 0. Verdict
 
-[[VERDICT]]
+**Theory-sound as implemented; I could not break either option.** Every equation that `skipargs` (B3: proof
+positions of CARGS; B4: unread positions; the Prop mask of structure eta) and `congruence` (B1: same-head probe;
+B12: closure congruence; B2: proofs by type before reduction) assume is derivable in Lean's type theory from
+delta, beta, zeta, structure eta, proof irrelevance and congruence, under ONE precondition that the options do
+not establish themselves and that the machine's inference establishes for them: both sides of a comparison are
+well-typed terms (2.1). The masks are computed soundly: a position counts as a proof only if the sort of its
+domain is manifest under the telescope and always zero AFTER instantiation at the levels of the head being
+compared (so `Sort u` at `u := 1`, `imax u v` at `v := 1`, or at a level parameter is data); a position counts as
+unread only for a definition or theorem applied to at least `lamArity` arguments on both sides, from a superset of
+the syntactic occurrences in the body; a proof position whose domain mentions an unread position that differs is
+compared (a precaution neither leader takes). [[VNUM]] The exports that the options accept and the official
+checker rejects ([[VKNOWN]]) are all cases of the official ALGORITHM's incompleteness, not of a false equation:
+for each of them the official checker itself accepts a proof of the same statement in which the congruence step
+is written out as a term (section 4).
+
+What the owner should weigh before a named opt-in profile uses them:
+
+1. **They change verdicts, by design, and only towards accepting theorems.** Exports exist that the official
+   checker rejects and the profile accepts (section 4). Both leaders accept exports of the same class (section 5):
+   [[VLEAD]]. The arena's [[VARENA]].
+2. **They remove a redundancy.** The official comparison of two proofs compares their TYPES, which also catches
+   an ill-typed proof argument that inference let through; `skipargs` does not look at a proof or unread position
+   at all. With the options, soundness rests on inference alone. I found no path on which an unchecked term
+   reaches a comparison (2.1, group X of the attacks), and a seeded inference fault shows the difference
+   concretely (3.5: v0 rejects, the options accept). A profile with the options should therefore run where the
+   inference side has the evidence it has today (the differential gates), not as a place to try inference
+   shortcuts.
+3. **No patch is needed.** One optional line of defence in depth is offered (`work/s2/patches/H1-cargs-plan-levels.diff`,
+   owner M4): the plan of CARGS would test the equivalence of the two heads' level lists itself instead of
+   relying on its three callers.
+
+Not a finding of this review, but met on the way: nothing. No accept was seen with the options OFF that the
+official checker does not give ([[VOFF]]).
 
 ## 1. The shortcuts, exactly as the code implements them
 

@@ -227,7 +227,12 @@ final class BlockRoot extends RootNode {
         return A_STOP;
     }
 
-    /** The most intern-table probes the run-ahead from instruction {@code i} can load early, over its paths. */
+    /**
+     * The most interning instructions (MKAPP, MKLAM, MKPI, MKSUSP) the run-ahead from instruction {@code i} can
+     * predict, over its paths. Instructions, not probes: the two probes of one closure (its frame, then the record
+     * over the frame) depend on each other and cannot overlap; what overlaps are the probes of different
+     * instructions, so a stretch with one interning instruction gains nothing from a run-ahead.
+     */
     private int probes(int i, int[] memo) {
         if (i < 0 || akind[i] == A_STOP) {
             return 0;
@@ -235,7 +240,7 @@ final class BlockRoot extends RootNode {
         if (memo[i] >= 0) {
             return memo[i];
         }
-        int own = instr[i] instanceof Instr.MkApp ? 1 : instr[i] instanceof Instr.Closure ? ((Instr.Closure) instr[i]).caps.length > 0 ? 2 : 1 : 0;
+        int own = instr[i] instanceof Instr.MkApp || instr[i] instanceof Instr.Closure ? 1 : 0;
         int best = 0;
         for (int t : succ[i]) {
             best = Math.max(best, probes(t, memo));

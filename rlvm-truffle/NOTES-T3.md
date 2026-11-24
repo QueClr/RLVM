@@ -114,3 +114,40 @@ machine itself; the tier now adds the native paths for `NSUCC` and the predecess
 | C6 | No one-call forwarders in code that partial evaluation reaches (`T2Bridge.peekInline` and the hash functions are written out; `T2Bridge.hashOk()` compares them with the machine's once per engine and switches the inline-cache probes back to the boundary operations if they ever differ) | `T2Bridge` | needed for the native image: a method whose body is one call is inlined before the image's analysis and its deoptimisation target is then missing - the rule T2 found for one-store setters holds for forwarders too |
 
 Not done, and why: direct calls between compiled blocks (section 7, U3).
+
+## 6. Run-ahead of the interning probes (`rlvm.t2.ahead`): the one thing a compiled block knows that the stepper does not
+
+The cost that dominates a block is not its instructions but the cache misses of the intern tables: a probe
+of `vtab` / `rtab` loads one slot of a 64-256 MiB table (M1, requests.log 15:58Z: one instruction, the load
+of the table slot, has 76-83% of the samples of each probe), and a block issues them ONE AFTER THE OTHER,
+because each is a call that finishes before the next starts and often needs the previous result
+(`MKSUSP` = the frame's probe, then the record's probe over the frame's id; `MKAPP r7, PProd, r3, r5` needs
+`r3` and `r5`). A compiled block, unlike the stepper, has its whole future in front of it as constants. So:
+
+- **What it does.** At an entry of a root, and again after every instruction that called a judgment, the
+  block walks the stretch of value construction that follows with PREDICTED registers (`BlockRoot.ahead`,
+  `Instr.*.ahead`; frame slots `sbase ..`): `MOV`, `PEEK`, `KCONST` (cache hit), `KVAL` (cache hit), `FIELDS`,
+  `BKIND` / `BEQ` / `SWITCH` on known values, and for `MKAPP`, `MKLAM`, `MKPI`, `MKSUSP` the hash of the key
+  exactly as `Values.neu` / `Runs.internRun` / `Values.closureProbe` compute it, and the LOAD of the table
+  word where that probe will start. It stops at the first judgment, return, backward jump or value it
+  cannot know. Reads of the machine only; one store, into a field of the tier object, keeps the loads.
+- **Ids are predicted, never used.** A key that is not in the table will get the session's next record id
+  (`vp`; ids are creation order) or the next run offset (`rsp`), so the keys built ON it can be hashed
+  before it exists (M1 does the same for one pair of probes inside `Values.closureAt`). The exact form
+  (default) reads the early-loaded word: empty = new; the key = the existing record (first four slots of the
+  probe sequence; for a NEU the full hash in word c decides, for a frame the hash word of the run); the frame
+  / application predicted new a moment ago is remembered (sibling closures over the same variables).
+  A wrong prediction loads a word nobody needs. `rlvm.t2.aheadCheck=true` counts: on reachability 90.3% of
+  13.6 M predicted records are the record the operation then returns (28% when every key was assumed new:
+  half of the records that reachability's blocks build exist already; 64% before the probe sequence was
+  followed and before sibling frames were remembered).
+- **Why it helps.** The loads of different instructions do not depend on each other, so the processor has
+  them in flight together; when the instructions then run, their probes hit the cache. The serial chain of
+  misses of a stretch shrinks from the number of probes to the depth of their dependencies.
+- **What it costs.** The hashes are computed twice; the root has about twice the graph and code (block 41 of
+  reachability: 4,638 -> 11,481 graph nodes, 31 -> 74 KB, compile CPU x3.5 on the open host). Only stretches
+  with at least two interning instructions get one (`rlvm.t2.ahead=2`); blocks with pinned registers (TELE)
+  and blocks over 128 instructions get none.
+- **It is not a Truffle feature.** Nothing in it needs a compiler: the same walk can be done by a generic
+  routine over the block's words in front of the stepper's dispatch loop (decoding cost per instruction
+  instead of none). That is a proposal for M7 / M1, with the numbers of section 1 as its upper bound.

@@ -55,5 +55,6 @@ workers, JVM variants, host conditions: `work/status/warm.md`.
 | cslib (2.50 GB) | RLVM machine (warm,gated,expect), native image | **9.06** (9.06) | - | 9.34 | 66.06 | 1645 | - |
 | mathlib (6.33 GB) | RLVM machine (warm,gated,expect), JVM launcher | **25.63** (25.63) | - | 38.59 | 187.58 | 11509 | - |
 | mathlib (6.33 GB) | RLVM machine (warm,gated,expect), native image | **35.34** (35.34) | - | 35.06 | 240.62 | 4362 | - |
+| mathlib (6.33 GB) | RLVM reference, JVM launcher | **68.58** (68.58) | - | 73.59 | 502.16 | 13455 | - |
 | mathlib (6.33 GB) | gruszka, 8 / 1 threads | **12.49** (first run 12.86) | - | 12.86 | 75.61 | 2769 | - |
 | mathlib (6.33 GB) | nano-lean, 8 / 1 threads | **20.71** (first run 18.09) | - | 18.09 | 106.43 | 5488 | - |

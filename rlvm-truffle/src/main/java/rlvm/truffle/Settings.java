@@ -39,8 +39,8 @@ import java.util.Map;
  *                      counted or timed by anybody. With false the heat accounting of the machine is switched on
  *                      (it costs about 11% of a warm pass on reachability on the JVM, NOTES-T3 section 2).
  * rlvm.t2.ahead=N       run-ahead of the interning probes in compiled blocks (default 2; 0 = off): before a stretch of
- *                      value construction in which at least N intern-table probes can be predicted, the block loads
- *                      their table slots early, so that the cache misses overlap (reads only; NOTES-T3 section 4).
+ *                      value construction with at least N interning instructions (MKAPP, MKLAM, MKPI, MKSUSP) the block loads
+ *                      the table slots of their probes early, so that the cache misses overlap (reads only; NOTES-T3 section 4).
  *                      rlvm.t2.aheadMaxInstr=N (default 128): not in blocks with more instructions.
  *                      rlvm.t2.aheadExact=B (default true): the early-loaded table word is also read, so that a
  *                      record that exists already is known as such (false: every key is predicted to be new).
@@ -71,7 +71,7 @@ final class Settings {
     final int at;
     /** Promotion by the tier's own entry counters on the stepper path, without the machine's heat accounting. */
     final boolean count;
-    /** Run-ahead of the interning probes: 0 = off, N > 0 = where at least N probes can be loaded early (NOTES-T3 section 4). */
+    /** Run-ahead of the interning probes: 0 = off, N > 0 = where at least N interning instructions follow (NOTES-T3 section 6). */
     final int ahead;
     final int aheadMaxInstr;
     final boolean aheadExact;
