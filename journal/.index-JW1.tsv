@@ -1,0 +1,54 @@
+design-architecture	Design	Architecture: one shared store, a frozen base and per-worker overlays	docs/design/ARCHITECTURE.md
+design-review-reconciliation	Design	The design review and its binding reconciliation	docs/design/RECONCILIATION.md
+design-term-store	Design	The term store: 8-int nodes, three regions and two summaries per node	docs/design/ARCHITECTURE.md
+design-export-loader	Design	The export loader: one pass, per-declaration segments, packed proofs	rlvm-load/README.md
+design-universe-levels	Design	Universe levels: one store, two relations, substitution ids	rlvm-level/README.md
+design-reference-engine	Design	The reference engine: the official kernel on term ids	rlvm-ref/README.md
+design-reference-caches	Design	The caches of the reference engine against the official kernel's	docs/design/review/reference-caches.md
+design-inductive-admission	Design	Admission of declarations and of inductive types	docs/design/ARCHITECTURE.md
+design-verdict-protocol	Design	The verdict protocol: optimistic environment, pessimistic verdict	docs/design/ARCHITECTURE.md
+design-driver	Design	The driver: threads, slices, frontiers and passes	rlvm-driver/README.md
+design-machine-worklist	Design	The machine: a worklist mechanisation of the kernel's judgments	docs/design/ISA.md
+design-control-convention-h	Design	Control convention H: bounded host recursion with lazily written frames	docs/design/review/stepper-convention.md
+design-value-model	Design	The value model: hash-consed records, runs, closures and suspensions	docs/design/ISA.md
+design-nat-literals	Design	Nat and String literals: immediates, offset cells and guarded native arithmetic	docs/design/ISA.md
+design-values-v2	Design	The value model, second version: identity on demand	docs/design/VALUES-V2.md
+design-code-objects-and-tiers	Design	Code objects and tiers	docs/design/ISA.md
+design-truffle-tier	Design	The Truffle tier	rlvm-truffle/NOTES-T3.md
+design-evaluation-and-tabling	Design	Evaluation and tabling	docs/design/ISA.md
+design-conversion	Design	Conversion: the official procedure on values, with one pair table	docs/design/ISA.md
+design-proof-comparison-shortcuts	Design	The two proof-comparison shortcuts: skipargs and congruence	docs/design/review/soundness-shortcuts.md
+design-inference-shortcuts	Design	Inference shortcuts and typed bindings	docs/design/ISA.md
+design-eager-reduction	Design	Eager reduction on the machine	docs/design/review/eager-reduction.md
+design-warm-sessions	Design	Warm sessions and the session cap	docs/design/ISA.md
+design-switches	Design	Staging switches and the default switch set	rlvm-machine/SWITCHES.md
+design-gate	Design	The gate: differential runs, mutants and the hostile suite	rlvm-machine/NOTES-M8.md
+design-adversarial-review	Design	The adversarial review method: hostile exports judged by the official checker	docs/design/review/soundness-default-set.md
+design-exactness-contract	Design	The exactness contract: practical and strict	docs/design/OWNER-NOTES.md
+design-official-divergence	Design	Where the machine's verdict can differ from the official checker's	docs/design/review/official-divergence.md
+design-launchers	Design	The launchers: a native image and a JVM line over one set of jars	docs/PLATFORM.md
+design-measurement-method	Design	The measurement method: warm passes on quiet cores	bench/README.md
+dec-7QMU	Decision	The metric is warm wall clock	docs/design/OWNER-NOTES.md
+dec-P8XP	Decision	Universe levels are compared as the official kernel compares them, by default	docs/design/OWNER-NOTES.md
+dec-6E82	Decision	No Oracle GraalVM in anything default	docs/design/OWNER-NOTES.md
+dec-TQSI	Decision	Practical exactness for the default configuration	docs/design/OWNER-NOTES.md
+dec-T79V	Decision	The machine as default engine: made, withdrawn, and the condition for making it again	rlvm-machine/SWITCHES.md
+dec-QN1O	Decision	No switch enters a default set without an adversarial pass with official verdicts	rlvm-machine/NOTES-INT.md
+dec-LZFX	Decision	The machine's default switch set of the wave-6 integration	rlvm-machine/SWITCHES.md
+dec-KXE1	Decision	The session cap of the machine is 1 MiB	rlvm-machine/SWITCHES.md
+dec-0DSI	Decision	Typed bindings stay in the default	docs/design/review/official-divergence.md
+dec-GL11	Decision	The proof-comparison shortcuts are admissible as a profile	docs/design/OWNER-NOTES.md
+dec-X2UF	Decision	A declaration that enters eager reduction is declined unless the switch eager is on	rlvm-machine/NOTES-M6.md
+dec-USLM	Decision	Metadata is declined only in the strict mode	rlvm-load/README.md
+dec-MOCU	Decision	Derived rules (k2) stay off	docs/design/review/soundness-default-set.md
+dec-10ZO	Decision	The control convention is fixed by measurement: convention H	docs/design/review/stepper-convention.md
+dec-36MX	Decision	Identity on demand enters as a staging switch, off by default	docs/design/VALUES-V2.md
+dec-80ZZ	Decision	No reference-count style in-place reuse of values: no-go by census	docs/research/profiles/X1.md
+dec-ADIK	Decision	The Truffle tier is off by default	rlvm-truffle/NOTES-T3.md
+dec-246U	Decision	The CALL instruction is not integrated	rlvm-truffle/NOTES-T3.md
+dec-WX9Z	Decision	The JVM launcher is the warm platform, the native image the cold and arena platform	docs/PLATFORM.md
+dec-E3EX	Decision	The JVM launcher line, and no AOT cache	docs/research/profiles/J1.md
+dec-Z6DD	Decision	The Serial collector stays	docs/research/profiles/GC.md
+dec-RN77	Decision	Lazy proof ranges in the loader: no-go for now	docs/research/profiles/X5.md
+dec-OC1F	Decision	Parallel packing of proof runs by scanner threads: go	rlvm-load/README.md
+dec-4TQJ	Decision	Pipelined loading is the default for parallel runs	rlvm-main/README.md

@@ -47,12 +47,11 @@ JW3 (changelog) - notes and questions for the journal lead, 2026-11-24
    work/ is not tracked, so no entry links to a status log although the numbers come from them
    (work/status/*.log, work/status/integration.md, work/status/machine-integration.md). Each entry links
    to the tracked document nearest to the change (module README, NOTES-*.md, SWITCHES.md, docs/...) and
-   to the session tree of its phase. Entries do not link to design, decision, insight or problem trees
-   of JW1 / JW2 (their addresses did not exist while I wrote); two entries link to standing-policies.
-   Suggested links for a later pass: log-RGSR (machine default made and withdrawn), log-SPW0 (typed
-   bindings) and log-TLVM (hostile step with kinds) to the trees on the divergence classes and on
-   E1-F1..F7; log-PC32 (levels official by default) and log-PPPC (level rebuild) to the decision on
-   official levels; log-XQ08 / log-XXB9 (JVM launcher line, policy option) to the platform and policy decisions.
+   to the session tree of its phase. 60 entries also end with "Related:" links to the design, decision,
+   insight, example and problem trees that existed at 23:30 UTC (JW2 was done; JW1's design-<slug> and
+   dec-XXXX trees existed but JW1 had not signalled completion). If one of those addresses is withdrawn,
+   journal-check will name the changelog tree that links to it; the link list is one sentence at the
+   end of the entry's last paragraph and can be cut without touching the text.
 
 6. NOT COVERED (left out on purpose, to stay near 70 entries)
    - baseline checkers built and measured (bench/baselines; docs/research/12-baselines.md);
