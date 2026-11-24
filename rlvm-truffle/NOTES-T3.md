@@ -401,7 +401,7 @@ not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an en
 first point at which Truffle can do something the stepper cannot. **Done in the second task (section 10):
 it does not pay there, and nothing is left for the tier on top of it.**
 
-## 10. U1: the CALL instruction (second task, 19:00Z - 20:40Z): NO-GO in the stepper, nothing for `t2` on top
+## 10. U1: the CALL instruction (second task, 19:00Z - 20:50Z): NO-GO in the stepper, nothing for `t2` on top
 
 Proposed ISA section: `work/t3/isa-call.md` (design sections 1-8 written before the prototype, section 9
 after it). Prototype: private tree `work/t3/tree-call/tree` (rlvm-machine + a copy of this module), switch
@@ -419,8 +419,9 @@ the Truffle tier, on the JVM and in the native image, on reachability and on Ced
   ticks.
 - The form that keeps the application as the memo key ("form T", the prototype's default) changes no
   count by more than 0.3% on any corpus.
-- Warm wall clock (bench/quiet.py, one engine kept): no row of either form is outside the scatter between
-  two processes of the same configuration (10.4).
+- Warm wall clock (bench/quiet.py, one engine kept; 10.4): `call` against the default set in twelve cells
+  (JVM, launcher, image; reachability, Cedar slice, Init, Std, full cedar; 1 and 8 workers): between -4.5%
+  and +6.9%, mean +0.4%; in the steadiest cells (the image at one worker) it is 0.5-1.9% slower.
 - For the tier there is nothing on top: `t2` and `t2 + call` are the same within the scatter, and the direct
   call node the task asked for was NOT built, because its object was counted first: 68 k calls per pass on
   reachability have a compiled caller and a compiled callee (4.5% of the compiled activations), none on
@@ -483,4 +484,148 @@ stored in other records and frames at once); half of reachability's `MKAPP` exec
 constructions find an existing record; on Cedar-level work six of seven records are made by the generic
 judgments, where no block instruction reaches. This is the table U2 needs (sent 19:32Z).
 
-@@TIMES@@
+### 10.4 Times
+
+All through `bench/quiet.py` (windows C1 19:41Z, C2 20:15Z, C3 20:38Z, C4 20:42Z), one engine kept over the
+passes, fresh sessions per pass; warm wall clock per pass in ms, median of the later half of the warm passes
+of all processes of a cell. `K1` = `default` (the published default set), `call` = `default,call` (form T),
+`t2` = `default,t2` with `rlvm.t2.mode=warm`. Distribution `work/t3/cc1` (prototype machine jar 3a65e373446f,
+private tier jar b41eabdb6506; the image is `cc1/bin/warm`, CE `-O3`, built from the same jars). Rows:
+`work/t3/warm.tsv`, `work/t3/launcher.tsv`.
+
+| platform, window | corpus | workers | K1 | call | call, form U | t2 | t2 + call | processes x warm passes per cell |
+|---|---|--:|--:|--:|--:|--:|--:|---|
+| JVM, C1 | reachability | 1 | 977 | 976 (-0.1%) | 960 (-1.8%) | 918 | 929 | 2 x 6 |
+| JVM, C1 | Cedar slice | 1 | 1110 | 1118 (+0.8%) | - | - | - | 2 x 6 |
+| JVM, C1 | reachability | 8 | 523 | 499 (-4.5%) | - | 513 | 512 | 1 x 7 |
+| JVM, C4 | Init | 8 | 439 | 451 (+2.7%) | - | 448 | 454 | 2 x 8 |
+| JVM, C2 | Std | 8 | 800 | 779 (-2.7%) | - | - | - | 1 x 4 |
+| JVM, C2 | full cedar | 8 | 1127 | 1111 (-1.4%) | - | - | - | 1 x 4 |
+| JVM launcher, C2 | reachability | 8 | 431 | 442 (+2.5%) | - | 409 | 402 | 1 x 7 |
+| image, C3 | reachability | 1 | 1321 | 1345 (+1.9%) | - | 1238 | 1239 | 2 x 6 |
+| image, C3 | Cedar slice | 1 | 1345 | 1352 (+0.5%) | - | - | - | 1 x 6 |
+| image, C3 | reachability | 8 | 604 | 646 (+6.9%) | - | 573 | 624 | 1 x 7 |
+| image, C3 | Init | 8 | 573 | 564 (-1.6%) | - | - | - | 1 x 5 |
+| image, C3 | full cedar | 8 | 1281 | 1280 (-0.1%) | - | - | - | 1 x 4 |
+
+The launcher row is the real launcher with P7's kept-engine passes (`-X passes=8 -X passes-mode=recheck -X
+passes-keep=engines`), `check_ms` of the later passes. Init on the JVM is given from C4 (two processes, eight
+warm passes); its first row in C2 had five passes that were still falling and showed K1 461, call 465, t2
+486, t2 + call 527 - the 14% of the last cell did not repeat. Not measured: the native launcher (`bin/rlvm`)
+with the prototype, Std in the image, the tier on Std / full cedar (section 1 has the tier's rows there).
+
+Reading:
+
+- **`call` against K1**: twelve cells, between -4.5% and +6.9%, both signs on both platforms, mean +0.4%.
+  The passes of one process spread by 5-15% on the JVM and by up to 12% in the image at eight workers; the only
+  steady cells are the image at one worker, and there `call` is 0.5-1.9% SLOWER (reachability: every pass of
+  the second K1 process is between 1304 and 1327, every pass of the second `call` process between 1329 and
+  1360). That is what the counts predict: the same records, the same probes, a slightly longer way to them.
+- **`t2 + call` against `t2`**: 929 / 918, 512 / 513, 454 / 448, 402 / 409 on the JVM, 1239 / 1238 and 624 /
+  573 in the image: nothing at one worker; +9% in the one eight-worker image cell (one process each).
+- The tier's own figure of section 1 is confirmed on the new default set: reachability -6% on the JVM
+  (918 against 977) and -6.3% in the image (1238 against 1321) at one worker with 13 blocks.
+
+### 10.5 The tier on top of CALL, and why the direct call node was not built
+
+The task asked for "a direct call node so Truffle can inline callee blocks into callers". What exists is a
+node that reaches the callee through the shared operation (a boundary). Before building more I counted
+its object (`-Drlvm.t3.callCount=true`, form T, production policy, one worker, per steady pass):
+
+| corpus | blocks installed | compiled activations | CALLs executed by compiled code | callee's block entered as compiled code | entered in the stepper | no activation (memo answer, generic path) |
+|---|--:|--:|--:|--:|--:|--:|
+| reachability | 13 | 1,528,166 | 461,720 | 68,116 | 21,374 | 372,230 |
+| Cedar slice | 2 | 21,929 | 0 | 0 | 0 | 0 |
+
+So a direct call can serve 68 k calls per pass on reachability (4.5% of the compiled activations) and
+none on the Cedar slice. What it would remove per call is the way from the node to the callee's root
+(`T2Bridge.callv` -> `Code.callTabled` -> `callLoop` -> `Code.enter` -> `Tier.exec` -> `T2Tier.run` ->
+`callIndirect`), not the key probe, the tick, the window, the callee's body, the WHNF of its result or the
+memo write. The hook's own frames were about 2% of the samples of a Cedar-slice tier run in which each of
+the 600 k activations of a pass crosses it (section 9.3): some 40 ns per crossing. Taken generously as
+150 ns per call (the hook, the boundary, the way through `callTabled` and `callLoop`), 68 k calls are 10 ms
+of a 920 ms pass, about 1%, where two processes of one configuration differ by 5-8%. And if those callee
+activations vanished entirely, bodies included, they are 4.5% of the compiled activations of a pass: that
+share of the compiled part is the bound of inlining too, and inlining does not remove the bodies - what a
+callee body does is intern its results (section 5), which stays. I therefore stopped at the count. If
+somebody wants the node anyway, the
+place is `Instr.Apply` (`call == true`): the head is a `KCONST` of the same block, the callee root is known
+if it is installed when the caller is built (a later installation needs a rebuild of the caller: compiled
+blocks never run in the Truffle interpreter); the fast path is "key, memo miss, callable, tick, window,
+`DirectCallNode.call`", everything else (NONE, TCALL, over-application, signals, the WHNF of the result
+and the memo write) goes back to `Code.callLoop` at phase 1, which is already written to be re-entered
+with a block's result (it is how the frame `K_CALL` resumes).
+
+### 10.6 Gates on the prototype
+
+- **M8 gate, form T** (`rlvm-machine/src/test/resources/m8/report.sh gate --switches default,call --tree
+  work/t3/tree-call/tree/rlvm-machine --name call-tabled -Dm8.suffix=-T3 tutorial bugs all cedar reachability
+  init`; 233 files x 6 lanes, 1373 s): **PASS WITH DECLINES; 0 SOUNDNESS, 0 COMPLETENESS; tier equivalence
+  (generic tier against the set) 0 different outcomes and 0 different values; convention equivalence D0 /
+  unbounded against D128: 0 different; audits: 0 different, 0 ended by an audit; the driver: 233 runs,
+  verdict right in all**. The declines are the eager-reduction units (1 + 4 in the tests, 11 Cedar slice,
+  8 reachability, 164 Init), as on the main tree. Report `work/status/machine-gate-call-tabled-T3.md`,
+  output `work/t3/gate-call-tabled.out`. (The gate's corpus "cedar" is the Cedar slice.)
+- **S hostile suite** (`T3CallHostileTest`, in the prototype tree: `SHostile.run` on all 329 exports under
+  `code,casetrees,call`, `default,call`, S's candidate set + `same,call`, `all,call`, `default,call,tele`):
+  form T and form U: 0 unexpected, 0 known findings open, 0 declines (`work/t3/hostile-call-tabled.txt`,
+  `hostile-call-untabled.txt`). That the second run really was form U: its
+  surefire report lists `rlvm.t3.callUntabled=true` among the system properties of the forked test JVM
+  (`work/t3/hostile-call-untabled.surefire.xml`).
+- **Tier equivalence, `default,call` in both tiers** (`EqMain` = `TierEquivalenceTest.equivalent`: outcome,
+  heap digest and ticks at every unit; private build `cc1` / `c6`): every block compiled at its first entry,
+  10 files at host depth unbounded (920,969 compiled activations) and 4 files at depth 0: 0 different
+  (`work/t3/eq-cc1-small.txt`). Whole corpora with blocks promoted at 2,000 entries
+  (synchronously): reachability 4,413 units, 27 blocks, 1,651,792 compiled activations; Cedar slice 8,418
+  units, 67 blocks, 126,930 compiled activations: 0 different (`work/t3/eq-c6-reach.txt`,
+  `eq-c6-cedarslice.txt`).
+- **Form U has no M8 gate run.** It is the worse form and was not worth 23 minutes of a heavy slot; it
+  passed the hostile suite and the tier equivalence above was run on form T only.
+- Not run: `TierEquivalenceTest` of the main module with the switch (the main module cannot reference
+  `Code.callv`; `EqMain` runs the same comparison on the private build), the mutants, Std / cedar / mathlib
+  through the differential.
+- The base of the prototype (the published tree, machine jar 78c74ca92785) has the wrong accept E1-F1 that
+  the orchestrator posted at 20:10Z (INFER's let rule); the prototype inherits it and has nothing to do
+  with it. The patches are against that base and touch neither `Infer` nor the let rule.
+- This module's own sources (no CALL in them) against the published machine jar 78c74ca92785: default test
+  group 7 tests, 0 failures (20:12Z).
+
+### 10.7 Files
+
+- `work/t3/isa-call.md` - the proposed ISA section, with what the prototype taught (section 9).
+- `work/t3/tree-call/` - `base` (main tree of 19:04:35Z), `base2` (the published tree of 19:53:37Z, machine
+  jar 78c74ca92785), `tree` (the prototype, refreshed to `base2`: rlvm-machine and a copy of this module).
+- `work/t3/patches-call/` - patches per owner against `base2` and against this module (M6: Op, Debug;
+  M7: Code, Elab, CodeShow; M1 / M6: the probe census in Values / Machine, measurement only; the hostile
+  test; rlvm-truffle). Applied to the base they give the prototype tree exactly (`work/t3/patch-check`).
+- `work/t3/build-call.sh NAME` - builds the private machine jar (Maven) and the private copy of this module
+  (javac) into the JVM distribution `work/t3/NAME`; `work/t3/ni-warm.sh NAME` - the native image of the
+  measuring tool from it; `work/t3/eq.sh` - tier equivalence on such a build; `work/t3/wc1.sh`, `wc2.sh`,
+  `wc3.sh`, `wc4.sh` - the quiet windows. Distributions: `cc1` (the timed one, JVM + `bin/warm`; built at
+  19:31Z, before the refresh: the refreshed tree differs from it in `MachineProvider.priority`, one comment
+  and the counters added later, not in the reduction code), `c5` (census of probes), `c6` (CALL counters
+  of the tier; built from the refreshed tree).
+- Rows: `work/t3/warm.tsv` (labels C1 - C4), `work/t3/launcher.tsv` (LC2); count runs `work/t3/smoke.tsv`
+  (labels cen5, cnt8, opp, nat0); logs `work/t3/logs/`.
+
+### 10.8 What follows from it
+
+1. **Do not integrate `call`.** It is one more code path through the reduction core (about 440 added lines
+   in `Code` and `Elab`) for no gain. The opcode 0x88 / 0x89 rows of ISA 4.1 can stay reserved or go.
+   **No variant of it can do much better**: the applications at CALL sites are 497 k of reachability's
+   8.4 M record-table probes per pass (6%) and 92 k of its 4.8 M new records (1.9%), and below 1% of the
+   records of a library corpus; that is the ceiling of "do not build the redex" however it is tabled.
+   A side table keyed by head and arguments instead of the record would have to store the arguments to
+   compare them - that is the record. The other shapes the task named do not have the redex to save:
+   `APPLY` of a closure is already direct (beta without a record), the generic tier's EVAL builds the
+   application because it is the value there, and CONV's lazy delta compares both sides by identity
+   first, so it needs the records.
+2. **The WHNF memo of applications is doing the work on closed evaluation**: 77% of the scrutinee
+   reductions of reachability's case trees are memo answers. Anything that makes applications private or
+   lazy (U2) has to keep exactly these as identified records - they are few (1-3% of the activations of a
+   library corpus) and they are the ones that are looked up again.
+3. **Where the records are** (census, 10.3): arguments and results of applications, and closures - values
+   that are stored at once. For a compiler that means: with CALL or without, there is still nothing
+   private to a block. The only remaining unlock of section 7 is U2, and on Cedar-level work even U2
+   reaches at most the 14% of the records that blocks make unless the generic judgments use it too.
+4. **`t2` stays off**; nothing in this task changes the verdict of section 1.

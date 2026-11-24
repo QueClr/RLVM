@@ -14,7 +14,7 @@ image, `work/e1/official.sh`), and `refs/lean4/src/kernel/type_checker.cpp` for 
   Init, Std, cedar, reachability and Mathlib that enters eager reduction: machine declines 164 / 203 / 423 / 8 /
   6,711 units -> 0 on all five (launcher, 8 workers; section 7), at +2.5 % to +4.4 % of the machine's ticks. The
   differential gate against the reference engine per declaration is clean (SOUNDNESS 0, COMPLETENESS 0, 0 declines)
-  on tutorial, bugs, the Cedar slice, reachability, Init, Std, MATHLIB-SLICES-PLACEHOLDER.
+  on tutorial, bugs, the Cedar slice, reachability, Init, Std, the 16 Mathlib slices (436,408 units) and all 230 published tests.
 - **How** (section 4): the comparison of an `eagerReduce _ _` argument is DEFERRED to the end of the declaration, so
   that no plain judgment ever reads an answer derived under eager reduction; the plain phase records every point
   where the two modes would take different branches and at the end compares the two answers of each such point
@@ -217,8 +217,100 @@ What this argument assumes is listed in section 6.
 
 ## 7. What was tested, and the numbers
 
-TESTED-PLACEHOLDER
+All runs on trees under `work/e1/` (never the main tree); JVM (C2), loaded host unless said otherwise. The gated
+tree is `work/e1/frozen/f7` = the main tree of 20:19:58Z + the let patch + the eager patches (`work/e1/tree2`).
+
+### 7.1 Gates
+
+| Gate | Result |
+|---|---|
+| fast test group of the module (`work/e1/out/test-fast-f7.out`; incl. `SHostileEagerTest`, 3 tests) | 415 tests, 0 failures, 3 skipped |
+| differential, machine `default,eager` against the reference engine per declaration (M8's harness; reports `work/e1/root/work/status/machine-diff-*-f7.txt`) | tutorial 395 of 395, bugs 1,428 of 1,428 (was 1,427: `rec-of-subst-prop` unit 128 is REJECTED by the machine itself now), Cedar slice 8,418 of 8,418, reachability 4,413 of 4,413, Init 58,547 of 58,547, Std 101,146 of 101,146: **DIFF-CLEAN, machine declined 0, SOUNDNESS 0, COMPLETENESS 0**; the 16 Mathlib slices `work/exports/slices/good/Mathlib.*.ndjson` 436,408 of 436,408 units, 16 files clean; all 230 published tests 17,493 of 17,493, 230 files clean (without the switch: 5 declines in 2 files) |
+| the same with `warm,gated,expect,eager` (tree `f5`, before the let merge) | tutorial, bugs, Cedar slice: DIFF-CLEAN, 0 declines |
+| the same with the switch off (`default`, tree `f5`): the published rule | declines 11 / 8 / 164 / 203 on Cedar slice / reachability / Init / Std, nothing else differs |
+| hostile exports, in-process (`E1Hostile` = M8's `Diff.compare` per export: loader, reference engine, one machine lane), tree `f7`: package S's 329 rows + 67 rows `e1-*`, under every switch set of `SHostileSlowTest` with `,eager` and `default,eager` (33 sets; `work/e1/out/hostile-f7.txt`) | 13,068 judgments. Flagged: 150, all on the eight rows of E1-F2 .. E1-F5 (mark `bind`; they are flagged without the switch too). No wrong verdict on a row that enters eager reduction. Machine declines: 21 per set (20 rows with the note `eager-hard`, 1 `str-lit-missing-prerequisites-bad`) |
+| the same on the tree before the let merge (`f4`), 372 rows: `default,eager`, `eager`, `all,eager`; with `-Drlvm.machine.elabAt=1` (blocks compiled at first use, `Code.targConv`): `facts,tele,code,casetrees,eager`, `all,eager`, `default,eager`, `default,tele,eager`; with host depth 0: `eager`, `default,eager`, `all,eager` | in every lane: flagged only the two `let` rows (E1-F1, fixed since) |
+| package S's five rows of S-F4 / S-F5 (`warm-pos-across-declarations-eager-bad`, `krule-eager-alone-bad`, `krule-memo-across-declarations-eager-bad`, `canon-fvar-pos-across-binders-eager-bad`, `krule-memo-across-binders-eager-bad`) | no wrong verdict under any set; all five are DECLINED by the new rules (a recorded point with two answers: their beta-redex form makes the machine ask `X = Y p` in plain mode; or the K rule), the reference engine gives the official REJECT |
+
+Of the 67 new rows (official: 29 accept, 38 reject; every expectation of mine was confirmed by leanchecker): 32 do
+not enter eager reduction (the E1-F1 .. F5 family and twins); 35 do: 26 are DECIDED by the machine with the official
+verdict under `default,eager` (deferred comparisons in every order with plain ones, binder scopes: `e1-scope-capture-bad`
+would be accepted by a deferred comparison that ran with its binder closed; nested `eagerReduce`; a site in the type of
+an axiom; let variables; the Bool.true test; sessions across declarations; the K rule after a plain reduction), 9 are
+declined by design (5 a recorded point with two answers, 4 the K rule). The S manifest carries them with the notes
+`eager-decline` (enters eager reduction) and `eager-hard` (declined also with the switch).
+
+### 7.2 Declines before / after (launcher `-X engine=machine`, 8 workers, `-Xmx6g`; `work/e1/out/counts.tsv`)
+
+Distribution `work/e1/dist-b` = INT6's `work/int6/dist-b` with the machine jar of the prototype (tree `f4`); one
+binary, switch off (`default`) and on (`default,eager`). "Declined" counts the driver's cold retry too (2 per unit).
+
+| Corpus | declined, off | units | declined, on | kept | repeated runs | sessions forgotten | deferred comparisons | recorded points | eager-only events | machine ticks off -> on |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| Init | 328 | 164 | **0** | 158 | 132 | 11 | 729 | 131 | 6 | 39.47 M -> 40.44 M (+2.5 %) |
+| Std | 406 | 203 | **0** | 200 | 168 | 32 | 853 | 347 | 6 | 64.77 M -> 67.24 M (+3.8 %) |
+| cedar (whole export) | 846 | 423 | **0** | 419 | 275 | 53 | 3,706 | 573 | 20 | 84.74 M -> 88.22 M (+4.1 %) |
+| reachability | 16 | 8 | **0** | 8 | 5 | 3 | 37 | 15 | 0 | 9.16 M -> 9.15 M |
+| Mathlib | 13,422 | 6,711 | **0** | 6,629 | 1,999 | 162 | 124,364 | 1,383 | 69 | 1,249.2 M -> 1,303.8 M (+4.4 %) |
+
+Verdict ACCEPT, `driver.declined` 0, `machineIncomplete` 0, `warmAnomalies` 0 in all ten runs; `machine.eager.declined.*`
+(the new rules) 0 everywhere: on these corpora no recorded point has two answers and no eager-only event falls into a K
+comparison. "kept" is smaller than "units" where a warm session answers a closed sub-term that was checked, with its
+deferred comparison, by an earlier declaration of the session (6 units on Init).
+
+### 7.3 The formerly declined units: machine against reference engine
+
+In-process (M8's harness, one pass, thread CPU clock, loaded host: orientation, not a timing; `work/e1/units.py`,
+logs `work/e1/out/units-*-{on,off}.tsv`, `ref-*-on.tsv`; tree `f5`):
+
+| Corpus | units | machine ticks, on | machine thread CPU, on | reference thread CPU, same units | machine CPU before its decline, off |
+|---|--:|--:|--:|--:|--:|
+| Cedar slice | 11 | 1.67 M | 0.42 s | 0.70 s | 0.08 s |
+| reachability | 8 | 26 k | 0.012 s | 0.015 s | 0.006 s |
+| Init | 164 | 0.86 M | 0.15 s | 0.13 s | 0.03 s |
+| Std | 203 | 3.08 M | 0.48 s | 1.62 s | 0.16 s |
+
+Std unit 23249 (`Std.Tactic.BVDecide.BVExpr.bitblast.goCache_Inv_of_Inv._mutual`, the unit that bounds the 8-worker
+wall clock of Std): reference 1,100 ms, machine 154 ms (1.10 M ticks, both runs of the repeated check included); unit
+22250: 202 ms -> 117 ms. Most of these units are checked twice (the run is repeated in a fresh session: 133 of 158 on
+Init, 167 of 199 on Std).
+
+### 7.4 Warm wall clock, 8 workers
+
+@@WARM@@
+
+### 7.5 Measured and rejected
+
+Running EVERY declaration aware from its start while the session is clean (`-Drlvm.machine.eager.early=true`, left in
+the patch as an experiment, off): repeated runs fall (Init 129 -> 25, Std 167 -> 28, cedar 280 -> 91) but the probes
+run in all declarations: machine ticks x 4.0 / x 4.6 / x 2.7 and 2 / 10 / 7 new declines (launcher, 8 workers,
+`work/e1/out/early-run1.log`). NO-GO; the cheap session flag with a repeated run stays.
+
+### 7.6 Not done
+
+- Native image; instruction counts; mutant corpora with the switch; 4 workers through the launcher on the hostile
+  exports; `facts` beyond the hostile matrix.
+- No export forces a cut (budget exhaustion inside a TRY) while points are recorded.
+- The gap of section 6 item 1 is argued, not demonstrated.
+- Timing of Mathlib (one counts run per switch position only, cold JVM, loaded host: 90 s / 82 s process wall).
 
 ## 8. Patches
 
-PATCHES-PLACEHOLDER
+`work/e1/patches/` (apply from the repository root with `patch -p1`):
+
+| File | Owner | What |
+|---|---|---|
+| `let/LET-M1.patch`, `let/LET-M5.patch`, `let/LET-S.patch`, `let/S-resources/*.ndjson.gz` (67), `let/README.md` | M1, M5, S | finding E1-F1 (the let variable carries its declared type); the 67 rows `e1-*` of the S manifest with the official verdicts, the generator `gen/batchE.py`, the known-finding mark `bind`. Base: the main tree as copied at 20:19:58Z. Gated separately (README) |
+| `eager/E1-M6.patch` | M6 | `Op.SW_EAGER` (bit 26, name `eager`), `Op.ER_K`, `Layout.NOTED`, `Debug` (switch name), `Machine` (the mechanism: `erSite`, `erNote`, `erDischarge`, `erSensitive`, state), `MachineSession` (repeated run, forgetting, statistics, the measurement aid `-Drlvm.machine.eager.units`), `MachineEngine` (statistics `machine.eager.*`) |
+| `eager/E1-M4.patch` | M4 | `Conv`: the two points P1 / P2 (`lazydFold`, `convBoolTrue`): probe in an aware run, session flag otherwise; `folded`, `boolTrue`, `modeEvent`, `foldCandidate` |
+| `eager/E1-M5.patch` | M5 | `Infer.twD`: the site; `Decl.accepted`: `erDischarge` |
+| `eager/E1-M7.patch` | M7 | `Code.targConv`: the site |
+| `eager/E1-M3.patch` | M3 | `Reduce.k_iota3 / k_iota4`: the K nesting count in `Machine.ER` under ER |
+| `eager/E1-S.patch` | S | `SHostileEagerTest` (fast group), six `,eager` sets in `SHostileSlowTest`, the note `eager-hard` on 20 manifest rows |
+| `E1-F2-F5-design.md` | - | findings E1-F2 .. E1-F5: reproducers, cause, what I think is needed (no patch) |
+
+The eager patches are relative to the main tree + the let patch (`work/e1/let-tree`); together with it they reproduce
+`work/e1/tree2/rlvm-machine`, except my harness change in `M8Harness.java` (the reference engine's per-unit CPU log)
+and my tool `E1Hostile.java`, which are not delivered. With the switch off nothing changes but the name of one
+condition (`Machine.erStop` is what `erSeen && erDeclines` was); the switch is not part of `all` or of the default
+set. To make it the default: `Op.SW_DEFAULT |= SW_EAGER` after the owners' gates (mutants, native image, timing).

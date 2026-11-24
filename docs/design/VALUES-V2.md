@@ -15,7 +15,60 @@ taken inside a `bench/quiet.py` window (section 10 says which).
 
 ## 0. The answer in one page
 
-TBD-0
+**The model in ten lines.**
+
+1. A ref denotes one value for the life of a session, and equal refs are equal values. That is all a verdict needs.
+2. Canonical refs ("equal values have equal refs", I-ID) are SHARING, and sharing is needed in three places only: the
+   subject of a memoised judgment (class M: WHNF, CORE, UNF, TYPE and the PROOF / PROPT flags of an application; VAL
+   of a suspension), the components of a key (class K: frame slots = tabling and closure identity, arguments of an
+   interned application, PROJ / NSUC / FVAR), and the two sides of a comparison (class C: the pair table).
+3. Atoms, frames, closures, suspensions and tabling records keep their identity from birth: they are keys by
+   purpose and most of their probes hit.
+4. An APPLICATION built at a lazy site is born PRIVATE: record and spine are written into the ordinary slabs, one bit
+   says "in no table"; no hash, no probe. Lazy site = `MKAPP` of a code block, except the application that the next
+   instruction reduces (a memo key that hits four times in five).
+5. It is IDENTIFIED - arguments first, iteratively; one probe; entered in place under its own ref, or made a
+   forwarding duplicate of the record that already has the key - at the moment it enters class K, M or C. Reading,
+   matching, projecting, passing, returning, storing it as a memo value do not identify it.
+6. Invariant: every component of an identified record or interned run is identified. So I-ID holds for identified
+   values exactly as ISA 2.5 states it, and with the three classes complete the machine makes the judgments it makes
+   today, tick for tick (the completeness test: ticks with the mode on = ticks with the mode off).
+7. A probe that is not made is worth a cache miss where a session has outgrown the cache and less than its
+   bookkeeping where it has not: lazy sites are lazy only in sessions of 2^17 records and more, and a site whose
+   applications are identified anyway learns to intern at birth (adaptive sites).
+8. Nothing is reclaimed before the session reset; a private record is a record (its footprint counts).
+9. To a JIT a private application is a reserved ref plus a virtual object, written only where the ref leaves the
+   compilation unit; both tiers give every record the same ref; tier equivalence compares identified records.
+10. Soundness: nothing answers "different" from unequal refs; a forward is set only after the whole key compared
+    equal against a table member; no ref is reused. Gates inside the mode are word for word as today.
+
+**Sizing (census, before building).** Block instructions make 70 % of reachability's records and `MKAPP` alone
+47 %; half of its executions find an existing record (T3). Applications are 24-59 % of the records and are found
+again 3.5-21 % of the time; closures and delayed arguments hit two times in three (X1). A per-activation or
+per-judgment nursery has nothing to release (the hot blocks return what they build). So: applications, lazily,
+until they are a key.
+
+**What the prototype measured** (private tree, one binary, `-Drlvm.u2=N`; 10.1, 10.2). Applications never
+identified = probes not made: reachability 3.04 M per run (63 % of the mode-off records, 36 % of all record-table
+probes), Cedar slice 0.29 M (6 %), Init 1.95 M (12 %), Mathlib slice 1.17 M (13 %), Std 2.90 M (10 %), at -0.1 to
++1.6 % ticks and +4 to +36 % records (block sites, every session). One session per declaration: ticks within
+0.02-0.2 % of today's. Warm wall clock, JVM, `WarmMain`: reachability -13 % at one worker and -8 % at eight (block
+sites); with the large-session trigger and adaptive sites **-16.7 % at one worker (888 against 1066 ms, ranges
+disjoint) and -10.0 % at eight (460 against 511 ms)**; the Cedar slice +4 % at one worker when every session is
+lazy (not resolved), +9 % with every site lazy (resolved), and unchanged - counters identical to the mode-off run -
+with the trigger. TBD-NATIVE0
+
+**Gates.** M8's full gate (differential per declaration against the reference engine on tutorial, bugs, the 230
+tests, Init, Std, reachability, the Cedar slice; tier, convention and audit lanes; the real driver) with every site
+lazy (mode 47), with block sites (43) and with the first form (11): PASS WITH DECLINES each, SOUNDNESS 0,
+COMPLETENESS 0, 0 differences in every lane, the declines being the tree's eager-reduction declines. The hostile
+suite of the soundness review with mode 47 on every machine: 32 switch sets x 329 exports, 0 unexpected verdicts.
+Own hostile cases: `U2ValuesTest`, 6 tests. TBD-GATE0
+
+**Recommendation.** Adopt a restricted form in stages (section 11): stage 0 the plumbing (no behaviour change);
+stage 1 the staging switch `lazyid` = lazy `MKAPP` of blocks in large sessions, classes K / M / C, adaptive sites;
+stage 2 complete classes M and C until the completeness test reads +0.000 %, then widen; stage 3 the tier
+("reserve, do not write", with T3's CALL). Keep the present model for closures, suspensions and frames.
 
 ## 1. What identity is used for today
 
@@ -529,7 +582,79 @@ closures and suspensions are not worth their mechanism (private frames) today.**
 
 ### 10.2 Warm wall clock
 
-TBD-10.2
+Tool: `rlvm.truffle.WarmMain` (T3's: one process, ONE engine kept over all passes, pass 1 cold, every later pass
+checks all units again with fresh sessions on W worker threads; no admission pipeline, no pipelined loading), run by
+`work/u2/scripts/warmrun.py` (T3's `warmrun.py` with this directory's paths), every window inside `bench/quiet.py`
+(`work/perf-history/quiet.log`: `work/u2/scripts/q1.sh` 19:40Z, `q2.sh` 19:56Z, `q3.sh` 20:12Z, `qa.sh` 20:37Z, TBD-NBWIN).
+JVM = the launcher's flags (SerialGC, C2, `-Xmx6g`). Two processes per configuration, back to back with the others
+of the window; the number is the median of the later half of the warm passes of both processes, the range is over
+those passes; "against k0" compares with the SAME jar with the mode off, in the SAME window. `base` = the pristine
+twin's jar. Rows: `work/u2/warm.tsv`; complete outputs: `work/u2/wlogs/`; table: `work/u2/scripts/wtab.py`.
+Jars: J1 `8735622ae972` (scrutinee rule, class M = WHNF only), J2 / J3 `16542003a4cc` (class M complete), JA TBD-NBJAR
+`f62325f62b53` (+ adaptive sites, + the large-session trigger; the modes 0 / 43 / 47 are the same code in all three).
+
+| window | corpus | platform | workers | configuration | processes | cold pass ms | warm wall ms: median (range) | against k0 | workers' CPU ms: median | against k0 | ranges disjoint from k0's |
+|---|---|---|--:|---|--:|--:|--:|--:|--:|--:|---|
+| J1 | reach | jvm | 1 | base | 2 | 2972 | 997 (902-1084) | -3.8% | 990 | -3.2% | no |
+| J1 | reach | jvm | 1 | k0 | 2 | 2776 | 1036 (1004-1074) | - | 1023 | - | - |
+| J1 | reach | jvm | 1 | u1 | 2 | 2829 | 1006 (901-1029) | -2.9% | 982 | -4.0% | no |
+| J1 | reach | jvm | 1 | u11 | 2 | 2847 | 902 (881-927) | -12.9% | 887 | -13.3% | yes |
+| J1 | reach | jvm | 1 | u47 | 2 | 2764 | 799 (770-812) | -22.9% | 776 | -24.1% | yes |
+| J2 | reach | jvm | 8 | base | 2 | 3053 | 569 (505-627) | +9.0% | 1084 | +5.7% | no |
+| J2 | reach | jvm | 8 | k0 | 2 | 2710 | 522 (505-569) | - | 1026 | - | - |
+| J2 | reach | jvm | 8 | u11 | 2 | 2693 | 492 (452-513) | -5.7% | 915 | -10.9% | no |
+| J2 | reach | jvm | 8 | u43 | 2 | 2804 | 480 (450-509) | -8.1% | 899 | -12.4% | no |
+| J2 | reach | jvm | 8 | u47 | 2 | 2815 | 479 (441-528) | -8.2% | 893 | -13.0% | no |
+| J3 | cedarslice | jvm | 1 | base | 2 | 3995 | 1117 (1059-1222) | +1.7% | 1116 | +3.1% | no |
+| J3 | cedarslice | jvm | 1 | k0 | 2 | 3947 | 1098 (1056-1145) | - | 1082 | - | - |
+| J3 | cedarslice | jvm | 1 | u11 | 2 | 4017 | 1124 (1099-1188) | +2.4% | 1123 | +3.8% | no |
+| J3 | cedarslice | jvm | 1 | u43 | 2 | 3924 | 1142 (1114-1153) | +4.0% | 1127 | +4.2% | no |
+| J3 | cedarslice | jvm | 1 | u47 | 2 | 3968 | 1198 (1166-1235) | +9.1% | 1194 | +10.3% | yes |
+| J3 | cedarslice | jvm | 8 | base | 2 | 3941 | 211 (183-252) | +1.4% | 1184 | +0.4% | no |
+| J3 | cedarslice | jvm | 8 | k0 | 2 | 3816 | 208 (181-237) | - | 1179 | - | - |
+| J3 | cedarslice | jvm | 8 | u11 | 2 | 3868 | 204 (185-260) | -1.9% | 1256 | +6.5% | no |
+| J3 | cedarslice | jvm | 8 | u43 | 2 | 3876 | 212 (189-249) | +1.9% | 1195 | +1.4% | no |
+| J3 | cedarslice | jvm | 8 | u47 | 2 | 3809 | 220 (191-252) | +6.0% | 1280 | +8.6% | no |
+| JA | cedarslice | jvm | 1 | k0 | 2 | 3923 | 1104 (1088-1124) | - | 1094 | - | - |
+| JA | cedarslice | jvm | 1 | u43 | 2 | 4045 | 1151 (1092-1171) | +4.3% | 1128 | +3.2% | no |
+| JA | cedarslice | jvm | 1 | u107 | 2 | 3973 | 1124 (1101-1156) | +1.8% | 1119 | +2.3% | no |
+| JA | cedarslice | jvm | 1 | u171 | 2 | 4019 | 1103 (1012-1155) | -0.1% | 1094 | +0.0% | no |
+| JA | cedarslice | jvm | 8 | k0 | 2 | 3938 | 214 (195-255) | - | 1201 | - | - |
+| JA | cedarslice | jvm | 8 | u107 | 2 | 3870 | 215 (193-262) | +0.7% | 1241 | +3.3% | no |
+| JA | cedarslice | jvm | 8 | u171 | 2 | 3889 | 201 (188-212) | -5.8% | 1183 | -1.5% | no |
+| JA | reach | jvm | 1 | k0 | 2 | 2815 | 1066 (940-1126) | - | 1048 | - | - |
+| JA | reach | jvm | 1 | u43 | 2 | 2828 | 930 (849-962) | -12.8% | 916 | -12.6% | no |
+| JA | reach | jvm | 1 | u107 | 2 | 2744 | 914 (795-963) | -14.3% | 900 | -14.1% | no |
+| JA | reach | jvm | 1 | u111 | 2 | 2756 | 890 (833-934) | -16.5% | 877 | -16.4% | yes |
+| JA | reach | jvm | 1 | u171 | 2 | 2744 | 891 (855-954) | -16.5% | 874 | -16.6% | no |
+| JA | reach | jvm | 1 | u235 | 2 | 2630 | 888 (860-934) | -16.7% | 863 | -17.7% | yes |
+| JA | reach | jvm | 8 | k0 | 2 | 2802 | 511 (492-553) | - | 993 | - | - |
+| JA | reach | jvm | 8 | u171 | 2 | 2751 | 495 (435-537) | -3.1% | 926 | -6.7% | no |
+| JA | reach | jvm | 8 | u235 | 2 | 2636 | 460 (439-505) | -10.0% | 888 | -10.5% | no |
+
+Reading (a difference is called resolved only where the two ranges do not overlap; with two processes per row that
+is thin, and the scatter between two processes of one configuration is up to 8 % on the JVM - J1 and J2 put the
+pristine jar 4 % below and 9 % above the mode-off prototype):
+
+- **Reachability, JVM.** One worker: block sites lazy (43) -13 % in two windows (J1 mode 11: 902 against 1036 ms,
+  ranges disjoint; JA: 930 against 1066); in large sessions only (171) -16.5 %; with adaptive sites (235) **-16.7 %
+  (888 against 1066 ms, ranges disjoint)**; every site (47, J1) -23 %, every site adaptive (111, JA) -16.5 %. Eight
+  workers: 43: -8.1 % (480 against 522 ms; the workers' CPU -12.4 %); **235: -10.0 % (460 against 511 ms; CPU
+  -10.5 %)**; the ranges touch (439-505 against 492-553). With eight workers the wall clock of this corpus is its
+  largest declaration, so the workers' CPU is the better witness of the mechanism.
+- **Cedar slice, JVM.** Block sites lazy in every session (43): +4.0 % and +4.3 % at one worker in two windows
+  (ranges overlapping both times), +1.9 % at eight; every site lazy (47): **+9.1 % at one worker (resolved)**,
+  +6.0 % at eight. In large sessions only (171): -0.1 % at one worker, -5.8 % at eight (inside the scatter:
+  188-212 against 195-255) - and its counters ARE the mode-off counters (10.1), so "no change" is by construction.
+- **Where the gain comes from, and where the loss.** The same mechanism on two corpora: reachability's records are
+  made in four sessions of millions of records (intern tables of tens of MiB; NOTES-M1 5.3: four fifths of a probe
+  is the cache miss of the table slot), the Cedar slice's in sessions that are reset at 1 MiB (tables in the
+  cache). A probe that is not made is worth a cache miss in the first and almost nothing in the second, where the
+  bit tests of the key-forming loops and the duplicate records are what remains. Hence bit 128.
+- **Not resolved by these windows**: the difference between 43 and 171 / 235 on reachability (171 should be 43
+  minus the lazy constructions of small sessions; it measures 4 points better at one worker and 5 worse at eight:
+  scatter); why every-site laziness is that much better at one worker on reachability (J1) although it identifies
+  more records than block-site laziness.
 
 ### 10.3 Gates
 
@@ -542,11 +667,11 @@ mode), switch set = the tree's default.
 |---|---|---|
 | M8's full gate (`machine-gate-default-u47-u47.md`, 750 s, final classes) | **47** (every site lazy, K + M + C) | **PASS WITH DECLINES.** (1) differential per declaration against the reference engine: SOUNDNESS 0, COMPLETENESS 0 on tutorial (395 units), bugs (1,428), all 230 tests (17,493 units; 15,800 accepted, 40 rejected, 5 declined), Init (57,774 accepted, 164 declined), Std (99,893 / 203), reachability (4,216 / 8), the Cedar slice (8,053 / 11); (2) tier equivalence with the generic tier: 0 declarations with another outcome, 0 with another reason; `M8Tiers` values 700 + 5,944 results, 0 different; (3) convention equivalence, host depth 0 and unbounded against 128 (outcome, reason, ticks, call events, trace, every record word, run word and pair): 0 different; (4) audit lanes `poison,scopeaudit,maskaudit` and `memocheck,shortcheck`: 0 different outcomes, 0 E_AUDIT; (5) the real driver: 230 / 230 verdicts right, the four corpora accepted with 4 workers, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0. Every decline is the tree's own eager-reduction decline (S-F5's rule) |
 | the same gate (`machine-gate-default-u11-u11.md`, 856 s; classes of 19:36Z: scrutinee rule, class M = WHNF only) | **11** (block sites, K + M) | **PASS WITH DECLINES**, the same zeros in all five parts, the same declines |
-| the same gate, final classes | **43** (block sites, K + M + C: the form recommended for stage 1) | TBD-GATE43 |
+| the same gate, final classes | **43** (block sites, K + M + C: the form recommended for stage 1) | **PASS WITH DECLINES** (`machine-gate-default-u43-u43.md`, 915 s): differential SOUNDNESS 0 / COMPLETENESS 0 on every corpus (the accepted / rejected / declined counts of the mode-47 row), tier equivalence 0 / 0 and 0 different values, convention equivalence 0 different, audits 0 / 0, pipeline 230 / 230 right, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0 |
 | the hostile suite of the soundness review: `SHostileSlowTest` (32 switch sets x 329 exports = 10,528 judgments, each against the official verdict of the manifest; the strict `noKnownFindingIsLeft`) and `SHostileTest`, test JVM with `-Drlvm.u2=47` (`work/u2/logs/hostile-u47.out`) | **47** | **0 unexpected verdicts, 0 known findings open, 0 declines of the machine** under every switch set |
 | `U2ValuesTest` (own hostile cases, 6 tests; patch 0007 as `M1LazyIdTest`) | 3, 15, 47, 3 + 64 | green: (a) 6,000 random constructions per seed - lazy, interned, extended, captured into frames, across table growth, with and without adaptive sites: after identification one canonical id per structure and one structure per canonical id, no private component in any key, `vtabUsed` = table entries = records that are not private, clean tables after the reset; (b) flags of private applications = flags of interned ones; (c) nests 300,000 deep identified without host recursion, the second nest a duplicate of the first at every level; (d) twins are convertible and near twins (one innermost argument differs, 3,000 levels down) are not, with and without class C, with and without `same`; (e) twin redexes are reduced once (class M); (f) two spellings of one binder type have one family of free variables |
 | differential, first build, mode 15 (every site, no class C): tutorial 395 / 395, bugs 1,427 / 1,428 | 15 | no SOUNDNESS, no COMPLETENESS |
-| the module's default test group with the mode on every machine | 0 / 43 / 47 | TBD-SUITE |
+| the module's default test group (449 tests of M1 .. M8, S; `work/u2/scripts/suite.sh`) with `-Drlvm.u2=N` for EVERY machine of the test JVM | 0 / 43 / 47 / 235 | TBD-SUITE |
 
 How the gates treat what the mode changes: nothing in M8's gate compares the mode-on machine with the mode-off
 machine; every comparison is inside the mode (lane against lane, lane against reference engine), where V6 makes
@@ -555,7 +680,23 @@ record words and ticks comparable word for word. The mode-on / mode-off comparis
 
 ## 11. Recommendation and stages
 
-TBD-11
+**Adopt a restricted form, in stages; keep the present model for everything but applications.** The evidence: no
+verdict needs canonical refs (sections 1, 8; three full gates and the hostile suite); applications are the one class
+whose probes are mostly wasted (9, 10.1); the gain exists where sessions are large (reachability: -17 % warm wall
+clock at one worker, -10 % at eight on the JVM) and the price where they are small (the Cedar slice: +4 % at one
+worker when every session is lazy); a rule that is lazy only where it pays leaves the library corpora exactly as
+they are.
+
+| Stage | What | Owners (patch) | Evidence / condition to enter |
+|---|---|---|---|
+| **0. Plumbing, no behaviour change** | records may be outside `vtab`: `vtabUsed`, `addRecordFree`, `enterRecordAt`, growth and reset skip private bits; `Values.ident` and the force points of class K behind `privMade != 0` | M6 (0002), M1 (0001) | with no lazy site every counter and every word is today's (the mode-off rows of 10.1; the module's default test group with the mode off: TBD-SUITE0) |
+| **1. `lazyid` as a staging switch, off in strict mode** = mode 235: `MKAPP` of code blocks lazy except the scrutinee of the next `WHNF`; classes K, M (WHNF, CORE, DELTA, VTYPE), C; adaptive sites; lazy only in sessions of 2^17 records and more | M7 (0003), M3 (0004), M4 (0005), M5 (0006), M1 (0001, 0007), M6 (the switch, `SWITCHES.md`, counters into the statistics) | reachability, JVM, warm: 888 against 1066 ms at one worker (-16.7 %, ranges disjoint), 460 against 511 ms at eight (-10.0 %; workers' CPU -10.5 %); 2.66 M of 8.4 M record-table probes per pass not made; ticks identical to the mode-off run (9,104,125); Cedar slice, Init: counters identical to the mode-off run (the sessions never reach the threshold), Cedar slice wall clock -0.1 % (mode 171). Gate: TBD-GATE235. To enter the default set: M8's gate on the main tree, the native image (TBD-NATIVE), one large corpus with giant declarations (Mathlib, not run here) |
+| **2. Complete the classes, then widen** | class M for the two flag memos (`ISPROP` / `PROPT`, `PIRR` / `PROOF`); class C for the argument pairs of `CARGS` and the lazy-delta step; the completeness test (`default,-warm`: ticks equal) becomes a gate. Only then: lower the session threshold, and every site with adaptive sites (mode 239) | M4, M5, M3; M8 (the test) | today +0.02 to +0.2 % ticks (block sites), +0.07 to +0.2 % (every site, adaptive); every-site laziness measured -16.5 % on reachability at one worker (111), but +9 % on the Cedar slice without adaptation (47): it must not enter without the trigger and the adaptive rule |
+| **3. The tier** | `rlvm-truffle` mirrors the lazy site and the scrutinee test; "reserve, do not write" (section 5); with T3's `CALL` and direct call nodes the unit over which a private application can stay virtual is caller + callee | T3 (U1 first), M1 (reservation), M8 (tier equivalence over identified records) | design only. T3's U1 alone measured nothing outside the scatter (machine-T2.log 20:01Z); this stage is where its direct calls would have an object to remove |
+| **not recommended** | every site lazy without adaptation (47); lazy closures / suspensions / frames (stage D of 9.2); reclamation of private records in the stepper | - | 10.1 (records +37 to +61 %, ticks +1.6 to +5.9 % on library corpora), 10.2 (+9 %), the session-end census (2-6 % of the suspensions are never used) |
+
+What stage 1 costs if it is wrong: it is one bit test per key-forming call while a large session has private
+records and nothing otherwise; switching it off is `rlvm.u2=0`.
 
 ## 12. Not established
 
