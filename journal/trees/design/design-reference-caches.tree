@@ -10,7 +10,7 @@
 \meta{origin}{docs/design/review/reference-caches.md}
 \import{base-macros}
 
-\p{\strong{Status:} implemented: the reference engine has a practical and a strict mode. The strict decline for the \code{nondep} flag of a let is a patch that is not published, and the cost and gate sections of the review document were still empty when this note was written.}
+\p{\strong{Status:} implemented: the reference engine has a practical and a strict mode. The cost and gate sections of the review document were still empty when this note was written.}
 
 \p{[The reference engine](design-reference-engine) is the oracle of every gate, so a wrong accept of it (finding S3-F2, found by [the adversarial review](design-adversarial-review)) called for an audit of every cache against the official source, with exports judged by the official checker of Lean v4.36.0 and never by an engine of RLVM. The audit asks two questions: what does the official kernel take for \em{the same term}, and is every cache read, written and cleared where the official one is.}
 
@@ -69,7 +69,7 @@ if (!is_eqp(t_n_n, t_n) || !is_eqp(s_n_n, s_n)) return is_def_eq_core(t_n_n, s_n
 \p{On the eight corpora the strict mode declines no declaration; one declaration of Std and 8 of cslib are decided by checking both ways. A golden test replays 30 exports with the official answers in both modes.}
 
 \ul{
-\li{The strict mode still accepts \code{r2-id-let-nondep-bad}, which the official checker rejects, until the loader's decline for the flag is published. The exact solution, the flag as part of a let node's identity, is not started.}
+\li{The review describes the strict decline for the \code{nondep} flag as a patch that was not yet published, with the strict mode still accepting \code{r2-id-let-nondep-bad} until then. The loader's document, which is later, records the decline as implemented and tested under the loader option of the strict mode, see [dec-USLM](dec-USLM). The exact solution, the flag as part of a let node's identity, is not implemented.}
 \li{Metadata and the flag are declined, not represented: a strict run of a file that has them gives no verdict.}
 \li{The both-ways check assumes that the two continuations are the only official behaviours at such a point.}
 \li{The effect of the kernel's sharing step on theorems was read in the source and not shown by an export.}
