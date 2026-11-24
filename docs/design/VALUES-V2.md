@@ -196,6 +196,15 @@ with it allows it, and transitions to the general one (identified) when an opera
 would enter the same way: born packed and private, unpacked by the constructor view, identified by `ident` (which
 then needs a canonical key for the packed form - not designed here).
 
+**Reussir's bits, once more.** X1 found that the one-bit "unique" of Reussir has nothing to bite on in a store where
+every cell is shared by definition. Private applications are the first population of this machine that is NOT
+shared by definition - so the question comes back in a narrower form: could a private application whose only holder
+is the instruction that just took it apart (`FIELDS` after `SWITCH`) be rewritten in place for the next
+construction? In the stepper: no - "only holder" is not known (registers, environment slots and memo words hold
+refs without counting them), and what would be saved is a bump of ten words, not a probe. In compiled code the
+question answers itself: a virtual object that does not escape is never written at all (section 5), which is reuse
+with the compiler's ownership analysis instead of bits. That is where the owner's idea lands in this design.
+
 ### 4.4 Why nothing is reclaimed
 
 A private application that was never identified is garbage at the latest when no register, environment slot, memo
@@ -222,7 +231,9 @@ removable, in this order:
    register that outlives the unit, the result. Escape analysis then removes object and write for every
    application that is consumed inside the unit. Because the id was reserved, **both tiers give every record the
    same ref**, written or not, so everything keyed by refs (hashes, direct-mapped cells) behaves identically and
-   the lossy caches cannot make ticks tier-dependent.
+   the lossy caches cannot make ticks tier-dependent. The reservation itself is two additions, the private bit and
+   one store (word 0 = kind 0, so that a walker of the slab - an audit, a digest, the session-end census - sees
+   "no record" at a reserved id that was never written).
 2. **Calls (T3's U1).** `CALL` passes and returns refs as they are (T3, requests.log 19:32Z: "a private application
    can be an argument and a result with no rule on my side"). With direct call nodes the unit of step 1 grows to
    caller + inlined callee: the callee's `PProd.mk a b c d` returned to a caller that takes one field is never
@@ -265,10 +276,16 @@ fingerprint) needs no change: a fingerprint follows arguments, private or not.
 
 ## 7. Ticks, records, gates
 
-- **Ticks.** Identical to the mode-off run exactly when every memoised judgment sees canonical refs. With classes K,
-  M (WHNF) and C the prototype's residue is +0.0 % (reachability, mode 43) to +2.6 % (Std, mode 11, which has no
-  class C); without class M or C the tick count shows the repeated work (10.1). A tick difference inside the mode is
-  never a verdict difference; it is the measure of lost sharing and is reported as such.
+- **Ticks, and the completeness test of the force points.** With classes K, M and C complete, every
+  identity-dependent mechanism of section 1 sees canonical refs: the key of a memo is canonical (K, M), both sides
+  of a comparison are canonical and so are all their components (C, V2). The machine then makes exactly the
+  judgments it makes today; only the probes of values that never reach a key, a memo or a comparison are not made.
+  So **the tick count with the mode on must EQUAL the tick count with the mode off** - a tick difference is a path
+  that reads a memo word or compares without identifying (never a verdict difference: it is lost sharing). Two
+  things blur this in a warm session and must be taken out of the test: the machine's session cap is reached
+  earlier (more records), and a reset forgets every memo; and adaptive sites make the set of private records depend
+  on the history. The test is therefore run with one session per declaration (`default,-warm`): 10.1 has the
+  result and the residue of the prototype.
 - **Records.** More, not fewer: every lazy construction that interning would have answered with an existing record is
   now a record of its own (a duplicate once identified, or never looked at again). What falls is the number of
   PROBES and of table entries.
@@ -403,3 +420,17 @@ TBD-11
 ## 12. Not established
 
 TBD-12
+
+- **The launcher path.** Every timing is `WarmMain` (one engine kept, fresh sessions per pass, no admission pipeline,
+  no pipelined loading), not `bin/rlvm -X passes=N -X passes-keep=engines`.
+- **The tier.** `rlvm-truffle` does not know the lazy site (its `MKAPP` node interns); section 5 is design. T3's U1
+  and this mode were not run together.
+- **Closures, suspensions, frames** (stage D): census only (9.2, 10.1).
+- **Reclamation / nursery**: design only (4.4, 5 step 3); the footprint of a session grows in this mode and no run
+  here was near a memory wall, so what the growth costs on the giant declarations of Mathlib is not known.
+- **`once`** (X1) together with this mode: argued (section 6), not run - the tree of 19:04Z does not contain it.
+- **Why the gain is what it is.** No profile was taken; "the probes that are not made" is the mechanism by
+  construction, the share of the time it explains is not measured.
+- **Mutants.** The four mutant corpora (17,775 exports) were not run with the mode; the hostile suite, the 230 tests
+  and the corpora were.
+- **A site per instruction / per term node** for the adaptive rule (the prototype's site is the head constant).

@@ -264,9 +264,20 @@ relation is not transitive (`nontransitive-*` of package S).
   type in every binder; the official kernel makes a fresh variable for every binder it opens. So two laws over
   the same carrier share their sub-comparisons in the machine (1,868 pair hits in the unit) and not in the official
   kernel. The machine's table hits MORE often than the official caches would.
-- Expression-level repeats (a comparison whose two sides are, as expressions by `Same.same`, a pair already
-  answered T in the unit): see the row "struct" of `work/c1/data/` (section 6; the estimator is
-  `C1Trace.structural`, quadratic, traced units only).
+- Expression-level repeats: a comparison that misses the pair table although its two sides are, as EXPRESSIONS
+  (`Same.same` on each side, 256 nodes), a pair that was already answered T in the same unit. Estimator
+  `C1Trace.structural` (quadratic, traced units only, step-1 switches, `-Dc1.struct=true`):
+
+  | unit | comparisons not answered inline | of them a repeat as expressions | pair-table hits |
+  |---|--:|--:|--:|
+  | `AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app` | 2,227 | 100 (4.5 %) | 1,868 |
+  | `AlgebraicGeometry.stalkMap_toStalk` | 7,528 | 349 (4.6 %) | 6,469 |
+  | `AlgebraicGeometry.Spec.sheafedSpaceMap_id` | 9,585 | 331 (3.5 %) | 8,041 |
+
+  So a success cache keyed by expressions instead of records could answer about 4 % more comparisons. It would be
+  exact (the official answer is a function of the two expressions; the argument of D28), but it needs a structural
+  hash of closures under frames for every probe, and M4 measured that walks which do not find identity cost what
+  the others save (NOTES-M4 W4, W5). Not built; the ceiling is 4 % of the comparisons, not of the time.
 
 ## 6. Numbers
 

@@ -319,6 +319,14 @@ Without U1 or U2 the upper bound of any compiled tier on closed evaluation is th
 (17% on reachability; measured gain 4-10%), and on library corpora (Cedar: 14% of the time inside blocks at
 all) it is nothing or a loss.
 
+**CORRECTION (20:30Z, after U1 was prototyped and measured: section 10).** Point 2 describes the code
+correctly and its weight wrongly, and U1 does not pay. The redex of `MKAPP ; WHNF` is a memo key that hits:
+on reachability 77% of those WHNFs are answered by the memo of the application's record, so "do not build
+the redex" means "compute it again" (ticks +8.3%). With the record kept as the key (the tabled form) CALL
+changes no count by more than 0.3% and no time outside the scatter, in the stepper and in the tier; on
+library corpora such sites are 1-3% of the activations. Of the two unlocks only U2 is left, and the census
+of section 10.3 says where it can and cannot reach.
+
 ## 8. Tests and gates on the final tree
 
 On machine jar `4bc20d3e46ef` (the one in `.toolchain/m2` from 17:30Z to about 18:20Z) unless the row names
@@ -386,10 +394,11 @@ not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an en
    cancelCompilation`, the compilation listener; the "no one-store setter, no one-call forwarder in compiled
    code" rule of native-image CE 25.5.5.0.3).
 
-**Next step, if anybody continues**: not more work inside this module. U1 of section 7 in the machine (a
-call instruction that does not build the redex; M7 / M3), measured in the stepper first - it should pay
-there by itself - and then direct calls between compiled blocks on top of it, which is the first point at
-which Truffle can do something the stepper cannot.
+**Next step, if anybody continues** (as written at 18:58Z): not more work inside this module. U1 of section
+7 in the machine (a call instruction that does not build the redex; M7 / M3), measured in the stepper first
+- it should pay there by itself - and then direct calls between compiled blocks on top of it, which is the
+first point at which Truffle can do something the stepper cannot. **Done in the second task (section 10):
+it does not pay there, and nothing is left for the tier on top of it.**
 
 ## 10. U1: the CALL instruction (second task, from 19:00Z)
 
