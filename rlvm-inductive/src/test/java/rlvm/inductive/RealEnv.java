@@ -61,6 +61,9 @@ final class RealEnv {
     int mutualBlocks;
     int recursors;
     int kBlocks;
+    /** Blocks with a level the official kernel respells when it refers to the block's own constants (L-F1). */
+    int respelledBlocks;
+    final java.util.ArrayList<String> respelledNames = new java.util.ArrayList<>();
     int failedUnit = -1;
     long generateNanos;
     long compareNanos;
@@ -152,6 +155,10 @@ final class RealEnv {
                 }
                 if (gen.k) {
                     kBlocks++;
+                }
+                if (admission.lastRebuildChanged()) {
+                    respelledBlocks++;
+                    respelledNames.add(unitName(u));
                 }
             } else if (kind >= DeclKind.QUOT_TYPE && kind <= DeclKind.QUOT_IND) {
                 ops.begin(decls.rank(first), decls.levelParams(first));

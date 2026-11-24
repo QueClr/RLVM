@@ -18,6 +18,9 @@ import rlvm.api.EngineProvider;
  * machine.session-kib=N            the machine's own cap on a warm session: the machine forgets everything before a
  *                                  declaration once its arenas hold more than N KiB (default 1024; 0 = no cap of its
  *                                  own; the driver's -X session-mib applies in any case: the smaller one resets first)
+ * machine.unit-ticks=N             the machine's own tick bound per unit (default MachineEngine.DEFAULT_UNIT_TICKS;
+ *                                  0 = none): beyond it the unit is declined (BUDGET_STEPS) and the reference
+ *                                  engine decides it
  * machine.declines=FILE            append one line per non-ACCEPT outcome of the machine to FILE (outcome, error code,
  *                                  unit, rank, units accepted in the session before it, name, message)
  * levels=official|complete         (the launcher's key, shared with the reference engine) complete = switch
@@ -41,6 +44,7 @@ public final class MachineProvider implements EngineProvider {
     static final String K_MEMO_BUDGET = "machine.memocheck.budget";
     static final String K_SESSION_KIB = "machine.session-kib";
     static final String K_DECLINES = "machine.declines";
+    static final String K_UNIT_TICKS = "machine.unit-ticks";
     /**
      * The launcher's {@code -X levels=official|complete}, shared with the reference engine's provider (the keys
      * of all providers are a union): {@code complete} turns {@code Op.SW_LEVELS_COMPLETE} on, {@code official}
@@ -49,7 +53,7 @@ public final class MachineProvider implements EngineProvider {
      */
     static final String K_LEVELS = "levels";
     private static final Set<String> KEYS = Set.of(K_SWITCHES, K_DEBUG, K_HOST_DEPTH, K_MEMO_EVERY, K_MEMO_BUDGET,
-            K_SESSION_KIB, K_DECLINES, K_LEVELS);
+            K_SESSION_KIB, K_DECLINES, K_LEVELS, K_UNIT_TICKS);
 
     public MachineProvider() {}
 
@@ -115,6 +119,10 @@ public final class MachineProvider implements EngineProvider {
         v = options.get(K_SESSION_KIB);
         if (v != null) {
             s.sessionCapBytes = number(K_SESSION_KIB, v, 0, Long.MAX_VALUE >> 10) << 10;
+        }
+        v = options.get(K_UNIT_TICKS);
+        if (v != null) {
+            s.unitTicks = number(K_UNIT_TICKS, v, 0, Long.MAX_VALUE);
         }
         v = options.get(K_DECLINES);
         if (v != null) {

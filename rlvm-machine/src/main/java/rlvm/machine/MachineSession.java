@@ -83,6 +83,12 @@ public final class MachineSession implements Session {
     long eagerDeclines;
     /** The constant that was last declined for eager reduction: the driver's cold retry of it is answered at once. */
     private int eagerCid = -1;
+    /** Units declined because they reached the machine's own tick bound ({@code MachineEngine.unitTicks}); the retry counts again. */
+    long unitBoundDeclines;
+    /** The constant that last reached the machine's own tick bound: its cold retry is answered at once. */
+    private int boundCid = -1;
+    /** The step budget of the run in progress is the machine's own bound, not the driver's. */
+    private boolean ownBound;
 
     long units;
     long accepted;
@@ -126,6 +132,7 @@ public final class MachineSession implements Session {
         }
         int code;
         boolean eager = false;
+        boolean bound = false;
         try {
             ctx.terms.refresh(); // the overlay may have been reallocated by blockRoot (ISA 12 R4)
             int rank = decls.rank(cid);
@@ -150,8 +157,16 @@ public final class MachineSession implements Session {
                 // the driver's cold retry of a unit that was just declined for eager reduction: the same answer, at once
                 eager = true;
                 code = MachineErrors.E_LIMIT;
+            } else if (cid == boundCid) {
+                // the driver's cold retry of a unit that reached the machine's own tick bound: the same answer, at once
+                bound = true;
+                code = MachineErrors.E_STEPS;
             } else {
                 code = run(cid, rank, decls.unit(cid), budget);
+                if (code == MachineErrors.E_STEPS && ownBound && m.fuel < 0) { // the budget that ran out was the machine's own
+                    bound = true;
+                    boundCid = cid;
+                }
                 if (m.erSeen) {
                     // The declaration entered eager reduction (Machine.erSeen): whatever this run answered is
                     // not a verdict of the machine. DECLINE; the reference engine decides the unit.
@@ -181,6 +196,10 @@ public final class MachineSession implements Session {
         if (eager) {
             eagerDeclines++;
             lastDetail = Machine.ER_DETAIL;
+        } else if (bound) {
+            unitBoundDeclines++;
+            lastDetail = "the machine's own bound of " + engine.unitTicks + " ticks per unit (-X machine.unit-ticks): a warm unit has no"
+                    + " step limit of the driver's, and the machine has no cycle test; the reference engine decides this unit";
         } else if (m.auditMessage != null) {
             lastDetail = m.auditMessage;
         } else if (m.limitDetail != null && (code == MachineErrors.E_MEM || code == MachineErrors.E_STACK)) {
@@ -233,8 +252,15 @@ public final class MachineSession implements Session {
     /** One run of the DECL driver on the machine as it is: the machine error code (0 = ACCEPT). Never throws for a property of the input. */
     private int run(int cid, int rank, int unit, Budget budget) {
         m.erDeclines = true; // a declaration that enters eager reduction is not checked by the machine (Machine.erSeen)
+        // the machine's own tick bound (MachineEngine.unitTicks) where the driver gives more, or no limit at all
+        long steps = budget.maxSteps;
+        long own = engine.unitTicks;
+        ownBound = own > 0 && (steps < 0 || steps > own);
+        if (ownBound) {
+            steps = own;
+        }
         try {
-            m.beginDecl(rank, unit, budget.maxSteps, budget.maxBytes);
+            m.beginDecl(rank, unit, steps, budget.maxBytes);
             return driver.check(m, cid);
         } catch (Machine.HeapLimit e) {
             return MachineErrors.E_MEM; // a table could not grow in the Java heap (Machine.heapAllows)

@@ -786,6 +786,85 @@ class M6FacadeTest {
         assertEquals(0L, stats.get("machine.eagerDeclines"));
     }
 
+    /**
+     * The machine's own tick bound per unit ({@code -X machine.unit-ticks}; NOTES-M6 F31): a warm unit has no
+     * step limit of the driver's, so a declaration that never ends (the official checker does not terminate on
+     * either/corner-cases/eta-struct-major-no-whnf) is declined at the bound (BUDGET_STEPS; the reference engine
+     * decides it), and the driver's cold retry is answered at once. A smaller limit of the driver's still rules.
+     */
+    @Test
+    void theMachinesOwnTickBoundDeclinesAUnitThatNeverEnds() {
+        Fixture f = Fixture.prelude();
+        for (int i = 1; i <= 3; i++) {
+            f.def("tb" + i, "Type", "Prop", Fixture.regular(1));
+        }
+        f.seal();
+        java.util.Map<String, String> options = new java.util.HashMap<>();
+        options.put("machine.switches", "warm");
+        options.put("machine.unit-ticks", "10000");
+        MachineEngine e = (MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults());
+        assertEquals(10000, e.unitTicks);
+        MachineSession s = (MachineSession) e.newSession(f.ctx);
+        int forever = f.cid("tb2");
+        int[] runs = new int[1];
+        long[] fuelAtStart = new long[1];
+        long[] ticked = new long[1];
+        s.driver = (m, c) -> {
+            runs[0]++;
+            fuelAtStart[0] = m.fuel;
+            if (c != forever) {
+                return MachineErrors.E_NONE;
+            }
+            for (;;) { // a judgment that never ends: only the TICK line stops it
+                ticked[0]++;
+                if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+                    return m.err;
+                }
+            }
+        };
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("tb1"), Budget.warm()));
+        assertEquals(10000, fuelAtStart[0], "no limit of the driver's: the machine's own bound");
+        assertEquals(Outcome.DECLINE, s.check(forever, Budget.warm()));
+        assertEquals(Reason.BUDGET_STEPS, s.lastReason());
+        assertEquals(MachineErrors.E_STEPS, s.lastCode());
+        assertTrue(s.lastMessage().contains("the machine's own bound of 10000 ticks"), s.lastMessage());
+        assertEquals(10001, ticked[0], "cut at the bound");
+        assertEquals(1, s.unitBoundDeclines);
+        assertTrue(s.m.pristine());
+        // the driver's cold retry: the same answer at once
+        runs[0] = 0;
+        assertEquals(Outcome.DECLINE, s.check(forever, Budget.cold(BIG)));
+        assertEquals(0, runs[0]);
+        assertEquals(Reason.BUDGET_STEPS, s.lastReason());
+        assertEquals(2, s.unitBoundDeclines);
+        // other units go on
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("tb3"), Budget.warm()));
+        // a smaller limit of the driver's rules, and is not the machine's bound
+        MachineSession t = (MachineSession) e.newSession(f.ctx);
+        t.driver = s.driver;
+        ticked[0] = 0;
+        assertEquals(Outcome.DECLINE, t.check(forever, Budget.strict(500, BIG)));
+        assertEquals(500, fuelAtStart[0]);
+        assertEquals(501, ticked[0]);
+        assertEquals(Reason.BUDGET_STEPS, t.lastReason());
+        assertEquals(0, t.unitBoundDeclines);
+        assertFalse(t.lastMessage().contains("own bound"), t.lastMessage());
+        runs[0] = 0;
+        assertEquals(Outcome.DECLINE, t.check(forever, Budget.strict(500, BIG)));
+        assertEquals(1, runs[0], "the driver's budget may differ next time: the unit is run again");
+        // no bound of its own
+        options.put("machine.unit-ticks", "0");
+        MachineEngine free = (MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults());
+        MachineSession u = (MachineSession) free.newSession(f.ctx);
+        u.driver = s.driver;
+        assertEquals(Outcome.ACCEPT, u.check(f.cid("tb1"), Budget.warm()));
+        assertEquals(Op.FUEL_UNLIMITED, fuelAtStart[0]);
+        assertTrue(MachineEngine.DEFAULT_UNIT_TICKS >= 1L << 26, "far above the largest unit of the corpora (mathlib: 5.4 M ticks)");
+        s.close();
+        t.close();
+        u.close();
+    }
+
     @Test
     void theDeclineLogHasOneLinePerOutcomeOtherThanAccept() throws java.io.IOException {
         Fixture f = Fixture.prelude();

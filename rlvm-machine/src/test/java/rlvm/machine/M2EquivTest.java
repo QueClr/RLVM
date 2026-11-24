@@ -133,6 +133,31 @@ class M2EquivTest {
     }
 
     /**
+     * The economy of wave 6 is the same machine under every depth bound: with gated tabling (depth rule), untabled
+     * bodies and the projection selector (m2a), the APPLY memo (m2b; filled by APPLY[3] on the worklist path), value
+     * ids, ticks, call events, records with their memo words and runs are those of D = 64.
+     */
+    @Test
+    void theSameObservablesUnderEveryDepthBoundWithTheEconomySwitches() {
+        Fixture f = M2.fresh(Op.HOST_DEPTH);
+        int[] nests = {M2DeepTest.listLiteral(f, 300), M2DeepTest.appNest(f, f.term("f"), f.term("n0"), 300),
+            M2DeepTest.binderNest(f, 300), M2DeepTest.mixedNest(f, 300), M2DeepTest.lazyNest(f, f.term("n0"), 300)};
+        for (String sw : new String[] {"gated", "m2a", "gated,m2a", "gated,m2a,m2b", "m2a,m2b"}) {
+            Run base = workload(f, Op.HOST_DEPTH, sw, nests);
+            assertTrue(base.frames > 0, "the nests of depth 300 pass the bound 64");
+            for (int d : new int[] {0, 1, 7, Op.HOST_DEPTH_UNBOUNDED}) {
+                Run r = workload(f, d, sw, nests);
+                String where = "D = " + d + ", " + sw;
+                assertEquals(base.ids, r.ids, "value ids, " + where);
+                assertEquals(base.ticks, r.ticks, "ticks, " + where);
+                assertArrayEquals(base.trace, r.trace, "frame trace (call events), " + where);
+                assertArrayEquals(base.records, r.records, "records incl. memo words, " + where);
+                assertArrayEquals(base.runs, r.runs, "runs, " + where);
+            }
+        }
+    }
+
+    /**
      * The debug modes of ISA 5.5 that have hooks in family EV run clean on the workload: memocheck (VAL, COD, DOM;
      * compared up to PEEK), scopeaudit (every GET), maskaudit (every PRUNE).
      */

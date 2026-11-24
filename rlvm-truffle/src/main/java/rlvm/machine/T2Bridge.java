@@ -456,4 +456,9 @@ public final class T2Bridge {
     public static int errorHole() {
         return MachineErrors.E_HOLE;
     }
+
+    /** The listing of published block {@code blk} as the machine prints it (reports, diagnosis). */
+    public static String listing(Machine m, int blk) {
+        return CodeShow.published(m, blk, false);
+    }
 }

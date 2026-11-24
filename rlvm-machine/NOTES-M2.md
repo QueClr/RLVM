@@ -16,7 +16,8 @@ File: `src/main/java/rlvm/machine/Eval.java`. Tests: `M2EvalTest` (rows of ISA 4
 | Scratch and environments | `APPLY(f, xb, n)` reads `X[xb .. xb + n)` and leaves it to the caller. Every judgment restores `xp` and `ep` when it returns a result; the saved `ep` / `xb` are payload words of its frames (H7) |
 | Inert nests | The evaluation of an inert application that `ARGV` performs at once (constant head, or a variable head bound to a neutral) is an iteration of the inert-nest loop of the enclosing `EVAL`: **one tick per application node, no call event**. A whole nest of constant-headed applications is therefore one `EVAL` call event. `SW_INERT_LOOP` no longer selects anything (D12) |
 | Ticks | One per `EVAL` of an application, let or projection node that is not a memo hit (inert nodes included); one per `FORCE` of a pending suspension, per `APPLY` of a closure or pending suspension, per `INST` without `COD`, per `DOM` without `M_DOM`. Leaves, closures, `MKAPP` of a neutral, `MKSUSP` and memo hits are free |
-| `Eval.Ext` (`m.x2`) | `body`, `en`, `amOpen`: second results of helpers (like `m.envBase`); `ownFirst` (gated tabling); `cm` (closed-term memo), `am` (APPLY memo), `seg` (segment cache); `xsw`, `depthK` (measurement bits, section 6); statistics `hits`, `lazy`, `amHits` (only with `m.stats`) |
+| `Eval.Ext` (`m.x2`) | `body`, `en`, `amOpen`: second results of helpers (like `m.envBase`); `ownFirst` (gated tabling); `cm` (closed-term memo), `am` (APPLY memo) with its governor `amWin`, `amWinHits`, `amOff`; `xsw`, `depthK` (measurement bits, section 6); statistics `hits`, `lazy`, `amHits` (only with `m.stats`) |
+| `Eval.evalBody` | For a caller that binds the arguments of a binder body itself (M5's `TWALK` in telescope mode): `EVAL` of a term entered like the body of a beta step: without a tabling record under `SW_M2A` (D19), else `Eval.eval` |
 | Switches of this package | `SW_GATED_TABLING` (`gated`): tabling by node flags, with the depth rule (D14, D21). `SW_M2A` (`m2a`): bodies without a tabling record, projection selector (D19, D22). `SW_M2B` (`m2b`): the APPLY memo (D23). Without a switch, changing no result: the closed-term memo (D20), the argument picker (D22). Section 6 |
 | Debug hooks (ISA 5.5) | scopeaudit is in `Runs.get` (M1), which every variable read of this family goes through; maskaudit before every `PRUNE` made here (closures, suspensions, tabling records), sharecheck when the walk enters an untabled node (gated tabling), memocheck on `VAL`, `COD`, `M_DOM` (D16) |
 
@@ -71,7 +72,7 @@ ARGV[0](t, eb, en, ls)                   never written (D7)
 | D20 | 4.2 `KVAL` "closed-term cache"; 5.1 (no switch: no result changes) | **Closed-term memo** `Ext.cm`: 4,096 cells `(term, epoch, value)` direct-mapped by the term id, read by the inline part of `EVAL` / `ARGV` for a closed application, let or projection under ls' = 0 (no level parameter, or the identity substitution) and written where `VAL` is written (`done`). Where the node is tabled the entry is a copy of `VAL(SUSP(t, EMPTY, 0))`: the memo saves the probe and changes no id, record, run or tick (`M2EconomyTest.theClosedMemoChangesNothing`). Where the node is not tabled (gated: flat applications, untabled nests) it is the only memo, and saves the evaluation. Bypassed under the debug modes that own a memo hit or a variable read | the task's "direct-mapped memo indexed by term id for closed terms under the identity level substitution"; closed nodes are 11 % (Init) to 17 % (Cedar slice) of the tabling probes of v0, 80-94 % of them hits |
 | D21 | 3.1 "the test must never under-approximate sharing" (`SW_GATED_TABLING`) | **Depth rule**: an inert application that lies `depthK` = 4 or more inert levels below the root of its nest is tabled whatever its flags (`gate`, argument `u`; the depth travels in `X[xb - 1]` and in `EVAL[IN]`) | **Gating by flags alone is quadratic on an unshared dependent nest.** `INFER` evaluates the argument of every dependent application (`TWALK`: `ARGV(t_i)`), bottom-up; each of these evaluations walked the whole untabled nest below it again. Measured on `c (c (.. x))` with `c : (x : T) -> G x`, 4,000 applications under one binder (`work/m2/gen/depnest.py`; resource `m2/depnest-open-300.ndjson`): v0 44,030 ticks, `gated` as published in wave 4 **8,038,031 ticks**, `gated` with the rule 60,017. `sharecheck` reports such walks (it fails on 196 units of init-prelude under `gated`, before and after this wave: an untabled node is legitimately visited once per evaluation root above it); with the rule each node is visited at most `depthK` + 1 times. On the corpora the rule costs nothing measurable (Cedar slice: +0.5 % records, -6 % ticks together with D20) |
 | D22 | 4.3.1 `APPLY` (argument picker: no switch; projection selector: `SW_M2A`) | A beta step whose body is one of the variables it binds returns that argument, PEEKed (`pick`: what `EVAL` of the variable returns; HOLE is `fault(E_HOLE)`), without building the environment: no record, run or tick differs. With `SW_M2A` a body that is a projection of a bound variable is `MKPROJ` of the argument (`betaProj`): no environment, no tick, no call event of the body | selector patterns of the task (item 2). Bodies at `APPLY` on Init: projection of a variable 10.6 %, argument 3.1 % (reachability 4.8 % / 5.6 %) |
-| D23 | 4.3.1 `APPLY` (`SW_M2B`, off) | **APPLY memo** `Ext.am`: 2,048 cells `(closure, a0, a1, a2, epoch, j, value)`, direct-mapped and lossy, for a beta step of j <= 3 binders; the key holds the arguments as `bind` binds them (HOLE for a binder the body does not read), so it is the key of the body's tabling record without the `PRUNE`. Written when the step completes (frame `APPLY[3]` on the worklist path, so D = 0 and D = 64 fill it alike) | gives back the memo that D19 removes, for 2 probes of 32 bytes instead of a `PRUNE` and two records: repeated steps are 17 % (Init), 23 % (Cedar slice), 1.2 % (reachability) of all beta steps |
+| D23 | 4.3.1 `APPLY` (`SW_M2B`, off) | **APPLY memo** `Ext.am`: 2,048 cells `(closure, a0, a1, a2, epoch, j, value)`, direct-mapped and lossy, for a beta step of j <= 3 binders whose body is not a binder; the key holds the arguments as `bind` binds them (HOLE for a binder the body does not read), so it is the key of the body's tabling record without the `PRUNE`. Written when the step completes (frame `APPLY[3]` on the worklist path, so D = 0 and D = 64 fill it alike). **Governor** (`amLive`): after a window of 4,096 lookups with fewer than 256 hits the memo is passed by for 65,536 beta steps, then tried again (a function of the session's history only) | gives back the memo that D19 removes, for 2 probes of 32 bytes instead of a `PRUNE` and two records: repeated steps are 17 % (Init), 23 % (Cedar slice), 1.2 % (reachability) of all beta steps |
 
 ## 3. Why the two inert-nest implementations were the same machine (historic: the loop was removed in wave 6, D12)
 
@@ -83,8 +84,17 @@ order, so the session arrays are equal word by word. Scratch layout differs (rec
 
 ## 4. Open points
 
-- **Gated tabling** (D14) and the sharecheck hook are implemented and smoke-tested (`gatedTablingGivesTheSameValues`);
-  they are step 1 and have not been run through a checker on a corpus (the EV workload of section 5 runs with them).
+- **Gated tabling** (D14, D21) is gated on all 230 tests and the four corpora (section 6). **`sharecheck` is not a gate
+  for it**: the hook reports every second visit of an untabled node under one frame in a declaration, and such visits
+  are legitimate (an evaluation root above the node, a second application of an untabled body under `m2a`); it fails
+  on 196 units of init-prelude under `gated`. A version that counts visits per evaluation root would need an
+  activation serial in the audit's key (M6's `Debug.shareCheck`); not done.
+- **What `m2a` gives up**: a second application of one closure to the same read arguments evaluates the body again
+  (`m2b` gives most of it back). The number of body evaluations is bounded by the number of beta steps (D19), so no
+  walk becomes exponential; the perf/ tests need at most 1.12 times the ticks (section 6).
+- **Unread arguments of constant spines** (the facts' unread masks; task item 2) are not used: an argument of a NEU is
+  part of its identity and of its type, so leaving it out needs the fact "neither the body nor the type telescope
+  reads it" (M5's fact records, `SW_FACTS`) and a HOLE-aware `CARGS`; nothing of it is in this file.
 - **`K_ARGV`** stays in `Op` and in the `resume` switch although no such frame is written (D7).
 - **Callers and suspensions**: `Infer` opens binders with `OPEN(EVAL(A))`, which may be a suspension, while `CBIND` /
   `ETA` use `DOM` (forced): the same binder can get two different variables (never a wrong answer; advice sent to M5).
@@ -228,4 +238,67 @@ as of 14:10Z; the sub-switches of that build were bits of `rlvm.m2.x`: 16 = dept
 | A memo of `INST` by (Pi closure, argument) | **not built** | counted: 7 % of the INST evaluations of Init v0 repeat a pair (12 % under step 1) |
 | A closed prefix of a spine (`@HAdd.hAdd Nat Nat Nat inst` under open arguments) answered by the closed-term memo and extended | **not built** | counted (step 1 + `m2a`): prefixes of two or more arguments cover 9.3 % of the arguments of constant-headed applications on Init, 7 % on the Cedar slice, 0.9 % on reachability; an argument of such a prefix is an atom (a CHEAD or literal lookup), so about 0.1 % of the instructions |
 | A beta step whose body is closed evaluated without `ENTER` | **not built** | counted: 1 % of the beta steps on Init, 4.4 % on the Cedar slice, 0.3 % on reachability |
+| One pass over the spine of an application (arguments met last first, reversed in scratch; more than 16 arguments: the two passes as before), `flat` and `ARGV` with one read of the node, the head of a spine from word c | **kept**, no switch (no result changes) | instructions, unlocked container on the CPUs outside the arena's eight, round 3 -> round 4 of the same tree: v0 Cedar 38.9 -> 38.4 G, reachability 58.3 -> 56.8, Init 132.9 -> 130.1; step 1 + `m2a` 37.6 -> 36.8, 50.0 -> 48.1, 98.6 -> 95.7 |
+| APPLY memo (D23), first form: key computed at the lookup and again at the store, no governor | **rejected** | step 1 + `m2a` -> + memo, instructions: Cedar 37.6 -> 36.9 G, Init 98.6 -> 98.8, **reachability 50.0 -> 51.7 (+3.4 %)** for a hit rate of 1 % |
+| APPLY memo, key computed once, binder bodies excluded | **rejected** as it stood | Cedar 36.8 -> 35.9 G, Init 95.7 -> 95.1, reachability 48.1 -> 48.8 (+1.5 %) |
+| APPLY memo with the governor (D23) | `m2b`: see the final table | Cedar 39.4 -> 38.7 G (-1.8 %), Init 98.7 -> 98.2, Std 174.0 -> 172.9, reachability 48.5 -> 48.7 (+0.4 %) |
+
+perf/ tests (JVM launcher, machine ticks, step 1 -> + `m2a` -> + `m2b`; `work/m2/perfticks.sh`): no test needs more than 1.12 times the
+ticks (proj-applied-struct, unfold-before-literal: 37.75 M -> 42.47 M; the tiny repeated-subproblem 348 -> 443 -> 405), records fall by
+20 % to 45 % (magma-list-deep-n36 21.5 M -> 12.1 M, ite-taken-branch 15.3 M -> 10.8 M, short-circuit-and 16.6 M -> 11.6 M).
+
+### Final A/B of the published code
+
+base = the main tree of 15:26Z with the wave-5 `Eval` (`work/m2/base2`, image `work/m2/dist-base2n`); new = the same tree with `Eval`
+as published at 15:26Z (`work/m2/dist-r5n`; the entry `evalBody` of 15:34Z is not called by anything measured). Both trees hold the
+other packages' work of this wave, among it M6's eager-reduction rule: 11 / 8 / 164 / 203 units of the Cedar slice / reachability /
+Init / Std are declined by design and checked by the reference engine in every row.
+
+Instructions G (unlocked container on the CPUs outside the arena's eight, one run each; they repeat to 0.1 %):
+
+| Configuration | Cedar slice | reachability | Init | Std |
+|---|--:|--:|--:|--:|
+| base, v0 | 41.1 | 57.6 | 134.4 | 221.7 |
+| new, v0 | 40.8 (-0.7 %) | 57.1 (-0.9 %) | 132.7 (-1.3 %) | 219.2 (-1.1 %) |
+| base, step 1 | 42.0 | 59.3 | 109.3 | 190.0 |
+| new, step 1 (`gated` with the depth rule) | 40.2 (-4.3 %) | 58.1 (-2.0 %) | 105.4 (-3.6 %) | 183.8 (-3.3 %) |
+| new, step 1 + `m2a` | **39.4 (-6.2 %)** | **48.5 (-18.2 %)** | **98.7 (-9.7 %)** | **174.0 (-8.4 %)** |
+| new, step 1 + `m2a,m2b` | 38.7 (-7.9 %) | 48.7 (-17.9 %) | 98.2 (-10.2 %) | 172.9 (-9.0 %) |
+
+Batch 2 (locked, 16:15:29Z-16:24:24Z, load average 52-64; `work/m2/batch2.sh`, rows `b2-*`; one worker, two interleaved
+passes): CPU s of pass 1 / pass 2, and the mean against the base row of the same configuration family:
+
+| Configuration | Cedar slice | reachability | Init | Std |
+|---|--:|--:|--:|--:|
+| base, v0 | 2.83 / 2.76 | 8.16 / 8.11 | 7.37 / 7.36 | 13.01 / 12.71 |
+| new, v0 | 2.95 / 2.77 (+2.3 %) | 8.22 / 8.03 (-0.1 %) | 7.33 / 7.32 (-0.5 %) | 12.80 / 12.50 (-1.6 %) |
+| base, step 1 | 2.96 / 3.11 | 8.06 / 7.77 | 7.09 / 7.09 | 13.18 / 13.13 |
+| new, step 1 | 2.74 / 2.80 (-8.7 %) | 7.82 / 7.75 (-1.6 %) | 7.07 / 6.87 (-1.7 %) | 12.82 / 12.91 (-2.2 %) |
+| new, step 1 + `m2a` | **2.56 / 2.87 (-10.5 %)** | **4.90 / 4.98 (-37.6 %)** | **6.31 / 6.39 (-10.4 %)** | **11.79 / 11.95 (-9.8 %)** |
+| new, step 1 + `m2a,m2b` | 2.56 / 2.71 (-13.2 %) | 5.03 / 5.08 (-36.1 %) | 6.31 / 6.35 (-10.7 %) | 11.73 / 12.02 (-9.7 %) |
+| base, step 1, no `stats-file` (the arena's run line) | 2.90 | 8.01 | 7.08 | 13.16 |
+| new, step 1 + `m2a`, no `stats-file` | 2.64 | 4.96 | 6.20 | 11.81 |
+| new, step 1 + `m2a,m2b`, no `stats-file` | 2.62 | 4.97 | 6.41 | 11.70 |
+
+Peak RSS, step 1 -> step 1 + `m2a`: Cedar slice 182 -> 176 MiB, reachability 1,136 -> 774 MiB, Init 246 -> 214 MiB, Std 366 -> 372 MiB.
+The v0 row of the Cedar slice (+2.3 %) is two readings of 2.95 and 2.77 s against 2.83 and 2.76 s with 0.7 % fewer instructions:
+noise of that pass, not a cost (the second pass is equal).
+
+Reading: **`gated` with the depth rule and `m2a` are ready**: every corpus is faster in CPU time (10 % to 38 % against step 1) and
+none is slower. **`m2b` is not decided**: it lowers the Cedar slice (instructions -1.8 %, CPU -3 % in means of two noisy readings)
+and Init / Std by 0.5 % of the instructions, and raises reachability by 0.4 % of the instructions and by 2.3 % of the CPU time in the
+rows with statistics (0.2 % in the row without): inside the noise, but above the 1 % rule on the face of the numbers. It stays off.
+
+Against the yardstick (gruszka on this host: Init 2.63 s, Std 5.62 s, Cedar slice 1.91 s, reachability 3.97 s): step 1 + `m2a` is at
+6.35 / 11.87 / 2.72 / 4.94 s (2.41x / 2.11x / 1.42x / 1.24x).
+
+Gates of the published code (jar of 15:34Z, `work/m2/dist-r6p`; `testkit diff --engine machine` through the launcher, reports in
+`work/m2/diff/`): tutorial + bugs (1,342 units) with v0, step 1 + `m2a`, step 1 + `m2a,m2b` and `gated,m2a,m2b` at hostDepth 0:
+0 differences, 0 declines. All 230 tests with each of v0, step 1 + `m2a`, step 1 + `m2a,m2b`: 0 differences; 15,839 of 15,845 units
+compared in each run (the four memory-hungry perf files in a run of their own with a 10 GiB heap), not compared: five units that
+M6's eager-reduction rule declines by design and `loop_unfolded_once` (E_MEM, as before this wave without M4's former B12 probe).
+Four corpora with each of the three configurations: Cedar slice 8,053 of 8,064, reachability 4,216 of 4,224, Init 57,774 of 57,938,
+Std 99,893 of 100,096 units compared, all agree, 0 differences; the units not compared are the eager-reduction declines (11 / 8 /
+164 / 203). On the code of 15:10Z, before that rule arrived in the tree, the same four corpora with v0 and step 1 + `m2a`: every
+unit compared, 0 differences, 0 declines.
 

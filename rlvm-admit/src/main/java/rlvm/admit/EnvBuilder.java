@@ -89,6 +89,7 @@ public final class EnvBuilder implements Runnable {
     private long passNanos;
     private long blockNanos;
     private int blockUnits;
+    private int respelledBlocks;
     private boolean statsPrinted;
 
     private static final int ORDER_CHECK_UNITS = 1 << 14;
@@ -338,7 +339,8 @@ public final class EnvBuilder implements Runnable {
                 statsPrinted = true;
                 System.err.println("rlvm-admit-stats: environment pass " + env + " units in " + passNanos / 1000
                         + " us (inductive / quot units: " + blockUnits + " in " + blockNanos / 1000 + " us; "
-                        + (replay != null ? "dependency order from unit " + replay.first : "file order") + ")");
+                        + (replay != null ? "dependency order from unit " + replay.first : "file order")
+                        + "; inductive blocks with a level the official kernel respells: " + respelledBlocks + ")");
             }
         }
     }
@@ -355,6 +357,15 @@ public final class EnvBuilder implements Runnable {
     /** Number of inductive and quot units this pass looked at in file order. */
     public int blockUnits() {
         return blockUnits;
+    }
+
+    /**
+     * Number of inductive blocks, of those this pass regenerated, with a universe level that the
+     * official kernel respells when it refers to the block's own constants (finding L-F1: the blocks
+     * for which admission compares anything it would not compare with the declared spelling kept).
+     */
+    public int respelledBlocks() {
+        return respelledBlocks;
     }
 
     private int advance(int limit) {
@@ -916,7 +927,13 @@ public final class EnvBuilder implements Runnable {
     private Reason generateAndCompare(int scope) {
         in.rank = scope;
         ops.begin(scope, in.levelParams);
-        blockOps.generate(in, gen);
+        try {
+            blockOps.generate(in, gen);
+        } finally {
+            if (blockOps.respelled()) {
+                respelledBlocks++;
+            }
+        }
         long present = blockOps.compare(in, gen);
         return recheckClaims(in.recCount, present);
     }

@@ -30,6 +30,10 @@ class InitBlocksTest {
                 + "%d quot units; generate %.1f ms, compare %.1f ms wall, %.1f ms thread CPU (slowest block %s: %.1f ms)%n",
                 file, e.inductiveUnits, e.mutualBlocks, e.nestedBlocks, e.nestedTypes, e.kBlocks, e.recursors, e.quotUnits,
                 e.generateNanos / 1e6, e.compareNanos / 1e6, e.cpuNanos / 1e6, e.unitName(e.slowestUnit), e.slowestNanos / 1e6);
+        // finding L-F1: only for these blocks does admission compare anything it would not compare
+        // if it kept the declared spelling of every level
+        System.out.printf("%s: %d of %d inductive blocks have a level the official kernel respells%s%n", file,
+                e.respelledBlocks, e.inductiveUnits, e.respelledBlocks == 0 ? "" : " (all admitted): " + e.respelledNames);
         return e;
     }
 

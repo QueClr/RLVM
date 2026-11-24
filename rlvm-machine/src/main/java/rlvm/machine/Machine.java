@@ -1031,12 +1031,15 @@ public final class Machine {
     /**
      * Space that the free-memory reading counts but a large array cannot use: on a JVM with a generational
      * collector a large array must fit into the old generation, so the young generation's capacity is not
-     * available to it (the launchers run {@code -Xmn1g}: 1 GiB, capped at a third of the heap). 0 in a native
-     * image, whose heap is not split into regions of fixed size. Found by the driver's invariance suite (a
-     * 6 GiB heap: 2.5 GiB "free" of which 1 GiB young, a 2 GiB slab: OutOfMemoryError in growRecords).
+     * available to it. A third of the heap: HotSpot's default (NewRatio 2); the launchers' {@code -Xmn1g} is
+     * less, so there the estimate errs on the side of declining. 0 in a native image, whose heap is not
+     * split into regions of fixed size. Found twice: by the driver's invariance suite ({@code -Xmx6g}, a
+     * 2 GiB slab with 2.5 GiB "free" of which 1 GiB young) and with good/perf/loop-unfolded-once under
+     * {@code -Xmx6g} without {@code -Xmn} (young 2 GiB): {@code OutOfMemoryError} in the growth, which a
+     * launcher with ExitOnOutOfMemoryError turns into status 3 for the whole run.
      */
     static final long YOUNG_RESERVE = "runtime".equals(System.getProperty("org.graalvm.nativeimage.imagecode")) ? 0
-            : Math.min(1L << 30, Runtime.getRuntime().maxMemory() / 3);
+            : Runtime.getRuntime().maxMemory() / 3;
 
     /**
      * {@code Arrays.copyOf(a, n)} if the Java heap can hold the copy, else null with {@link #limitDetail} and

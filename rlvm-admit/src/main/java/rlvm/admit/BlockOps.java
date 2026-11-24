@@ -46,6 +46,15 @@ interface BlockOps {
     /** Forgets the cause of an earlier decline (called before a unit is looked at). */
     default void clearDeclineDetail() {}
 
+    /**
+     * True if the last call of {@link #generate} met a universe level that the official kernel respells
+     * when it refers to the block's own constants ({@code InductiveAdmission.lastRebuildChanged}); only
+     * for such blocks do the checks differ from a kernel that keeps the declared spelling. Statistics.
+     */
+    default boolean respelled() {
+        return false;
+    }
+
     /** The real thing; the three objects are created on first use, so files without blocks never touch them. */
     final class Inductive implements BlockOps {
         private final Store store;
@@ -74,6 +83,11 @@ interface BlockOps {
                 detail = admission.lastDeclineDetail();
                 throw e;
             }
+        }
+
+        @Override
+        public boolean respelled() {
+            return admission != null && admission.lastRebuildChanged();
         }
 
         @Override

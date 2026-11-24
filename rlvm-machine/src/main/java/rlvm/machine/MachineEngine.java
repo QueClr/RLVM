@@ -82,6 +82,18 @@ public final class MachineEngine implements Engine {
      */
     static final long DEFAULT_SESSION_CAP = 1L << 20;
 
+    /**
+     * The machine's own tick bound per unit ({@code -X machine.unit-ticks}, 0 = none): a warm unit has no step
+     * limit from the driver (RECONCILIATION section 3), and the machine has no cycle test in its delta loops,
+     * so a declaration on which the official checker does not terminate (arena tests
+     * either/corner-cases/eta-struct-major-no-whnf, eta-struct-major-and-no-whnf) ran until somebody's time
+     * limit killed the process. Beyond the bound the unit is declined ({@code E_STEPS}, {@code BUDGET_STEPS})
+     * and the reference engine, which detects the cycle, decides it. 2^27 ticks: the
+     * largest unit of the eight corpora needs 5.4 M (mathlib), the largest of the 230 tests 41.9 M (perf/magma-list-deep-n36,
+     * v0); the native image runs about 9 M ticks per second, so the bound is reached after about 15 s (NOTES-M6 F31).
+     */
+    static final long DEFAULT_UNIT_TICKS = 1L << 27;
+
     /** The machine's own settings (system properties {@code rlvm.machine.*}, overridden by {@code -X machine.*}). */
     static final class Settings {
         int switches = Op.SW_DEFAULT;
@@ -90,6 +102,7 @@ public final class MachineEngine implements Engine {
         long memoEvery = 1;
         long memoBudget = Debug.MEMO_BUDGET;
         long sessionCapBytes = DEFAULT_SESSION_CAP;
+        long unitTicks = DEFAULT_UNIT_TICKS;
         /** File that receives one line per non-ACCEPT outcome of the machine, or null. */
         String declines;
 
@@ -98,6 +111,7 @@ public final class MachineEngine implements Engine {
             Settings s = new Settings();
             s.switches = Debug.parseSwitches(System.getProperty("rlvm.machine.switches", "default"));
             s.sessionCapBytes = Math.max(0, Long.getLong("rlvm.machine.session-kib", DEFAULT_SESSION_CAP >> 10)) << 10;
+            s.unitTicks = Math.max(0, Long.getLong("rlvm.machine.unit-ticks", DEFAULT_UNIT_TICKS));
             String d = System.getProperty("rlvm.machine.declines", "");
             s.declines = d.isEmpty() ? null : d;
             s.debug = Debug.parseModes(System.getProperty("rlvm.machine.debug", ""));
@@ -112,6 +126,9 @@ public final class MachineEngine implements Engine {
     final long memoBudget;
     /** The machine's own cap on a warm session (bytes of {@code Machine.engineBytes()}; 0 = none). */
     final long sessionCapBytes;
+    /** The machine's own tick bound per unit (0 = none). */
+    final long unitTicks;
+    private long statUnitBoundDeclines;
     /** Path of the decline log ({@code -X machine.declines}), or null. */
     final String declinesPath;
     private java.io.Writer declinesOut;
@@ -140,6 +157,7 @@ public final class MachineEngine implements Engine {
         this.memoEvery = settings.memoEvery;
         this.memoBudget = settings.memoBudget;
         this.sessionCapBytes = settings.sessionCapBytes;
+        this.unitTicks = settings.unitTicks;
         this.declinesPath = settings.declines;
     }
 
@@ -214,6 +232,9 @@ public final class MachineEngine implements Engine {
             sink.put("machine.resets", statResets);
             sink.put("machine.sessionCapBytes", sessionCapBytes);
             sink.put("machine.capResets", statCapResets);
+            sink.put("machine.unitTicks", unitTicks);
+            // units declined because they reached the machine's own tick bound (machine.unit-ticks); part of machine.declined
+            sink.put("machine.unitBoundDeclines", statUnitBoundDeclines);
             // declines BY DESIGN: the declaration entered eager reduction (Machine.erSeen); part of machine.declined
             sink.put("machine.eagerDeclines", statEagerDeclines);
             // session arrays allocated after the machine was created: by growth (doublings) and by resets (NOTES-M6 F25)
@@ -341,6 +362,7 @@ public final class MachineEngine implements Engine {
         statTicks += m.ticks();
         statResets += m.resets;
         statCapResets += s.capResets;
+        statUnitBoundDeclines += s.unitBoundDeclines;
         statEagerDeclines += s.eagerDeclines;
         statAllocGrows += m.allocGrows;
         statAllocGrowBytes += m.allocGrowBytes;

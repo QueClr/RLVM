@@ -119,6 +119,19 @@ public final class WarmMain {
         if (e != null && System.getProperty("warm.report") != null) {
             System.out.print(e.report());
         }
+        if (e != null && Integer.getInteger("warm.listing", 0) > 0) {
+            // the listings of the blocks with the most entries (diagnosis: what the hot blocks consist of)
+            int n = e.heat.blockCount();
+            Integer[] ids = new Integer[n];
+            for (int b = 1; b <= n; b++) {
+                ids[b - 1] = b;
+            }
+            java.util.Arrays.sort(ids, (x, y) -> Long.compare(e.heat.entries(y), e.heat.entries(x)));
+            for (int i = 0; i < n && i < Integer.getInteger("warm.listing", 0); i++) {
+                System.out.println("[warm] LISTING entries " + e.heat.entries(ids[i]) + " | " + e.heat.describe(ids[i]));
+                System.out.println(rlvm.machine.T2Bridge.listing(h.m, ids[i]));
+            }
+        }
         System.exit(0);
     }
 }

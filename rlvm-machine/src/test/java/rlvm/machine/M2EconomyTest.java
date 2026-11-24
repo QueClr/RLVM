@@ -172,6 +172,26 @@ class M2EconomyTest {
         }
     }
 
+    /** SW_M2B: a session whose beta steps do not repeat stops paying for the lookups (the governor), and the values stay the same. */
+    @Test
+    void theApplyMemoIsPassedByWhenStepsDoNotRepeat() {
+        Fixture f = fresh(Op.HOST_DEPTH, "gated,m2a,m2b", 0);
+        Machine m = f.m;
+        int clo = f.eval(f.term("(fun (x : Nat) (g (f x) (f (f x))))"));
+        assertEquals(0, m.x2.amOff);
+        int first = f.apply(clo, Layout.imm(0));
+        for (int i = 1; i < Eval.AM_WINDOW; i++) {
+            f.apply(clo, Layout.imm(i));
+        }
+        assertEquals(Eval.AM_PAUSE, m.x2.amOff, "no hit in a window of " + Eval.AM_WINDOW + " lookups: the memo is passed by");
+        long ticks = m.ticks();
+        assertEquals(first, f.apply(clo, Layout.imm(0)), "the same value, by evaluation");
+        assertTrue(m.ticks() - ticks > 1);
+        assertEquals(Eval.AM_PAUSE - 1, m.x2.amOff);
+        m.reset();
+        assertEquals(0, m.x2.amOff, "a new session starts with the memo");
+    }
+
     /** The closed-term memo changes no id, record, run or tick: with it and without it, tabled and gated, under every D. */
     @Test
     void theClosedMemoChangesNothing() {
