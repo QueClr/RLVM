@@ -224,8 +224,38 @@ public final class RefKernel implements KernelOps {
     private boolean outSFresh;
     /** {@link RefOptions#identity}. */
     private final int identityMode;
-    /** Times the official answer depended on object identity (see {@link #isDefEqCore}, step 10). */
-    private long statIdentityEvents;
+    /**
+     * Probe mode ({@link #secondPassRepeatsNothing}): the judgments run as usual, but anything that
+     * would add a fact to an official cache whose content depends on when it was computed
+     * ({@code m_whnf_core}, the success and failure sets) ends the probe with {@link ProbeAbort}.
+     * Function memos (inferred types, {@code m_whnf} of a term whose reduction needed no such
+     * entry, {@code m_unfold}) may be written: they hold what any later computation would find.
+     */
+    private boolean frozen;
+
+    /** Ends a probe (no stack trace: it is control flow). */
+    private static final class ProbeAbort extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        static final ProbeAbort INSTANCE = new ProbeAbort();
+
+        private ProbeAbort() {
+            super("probe", null, false, false);
+        }
+    }
+    /**
+     * Object-identity events (see {@link #isDefEqCore}, step 10): [0] all; [1] harmless: the official
+     * second pass was run as a probe and repeats nothing but cache hits (only counted when the mode
+     * probes); of the others, by what the second pass would do: [2] a K-like recursor application is
+     * reduced again, [3] the type of a term that lazy delta produced is inferred, [4] the same
+     * projection of two structures is compared again; [5] a nested call stored the entry of the
+     * projection a full whnf_core was working on.
+     */
+    private final long[] statIdentity = new long[6];
+    /** Number of events to describe on stderr ({@code -Drlvm.ref.identityTrace=N}, diagnostics). */
+    private int identityTrace = Integer.getInteger("rlvm.ref.identityTrace", 0);
+    private static final int HAZARD_K = 1;
+    private static final int HAZARD_INFER = 2;
+    private static final int HAZARD_PROJ = 4;
     /** Set when a judgment was declined for that reason, for the session's message. */
     private boolean identityDeclined;
 
@@ -1730,6 +1760,9 @@ public final class RefKernel implements KernelOps {
                 // The official insert never replaces an entry (one that a nested call wrote meanwhile stays).
                 int key = stk[i];
                 if (whnfCoreCache.get(key) == 0) {
+                    if (frozen) {
+                        throw ProbeAbort.INSTANCE;
+                    }
                     whnfCoreCache.put(key, r);
                 } else if (key == r) {
                     // This frame found the projection stuck, and while it worked a nested call stored
@@ -1737,7 +1770,11 @@ public final class RefKernel implements KernelOps {
                     // nothing happened; if it is another object, this frame returns an object that is
                     // not the entry's, and every cache that keeps the result keeps that object.
                     // Canonical ids cannot tell: no verdict (never seen on a real declaration).
-                    statIdentityEvents++;
+                    if (frozen) {
+                        throw ProbeAbort.INSTANCE;
+                    }
+                    statIdentity[0]++;
+                    statIdentity[5]++;
                     if (identityMode == RefOptions.IDENTITY_DECLINE) {
                         sp = base;
                         identityDeclined = true;
@@ -1981,6 +2018,10 @@ public final class RefKernel implements KernelOps {
         int cnstr = mkApps(mkConst(ctor, terms.b(ind)), base, Math.min(nparams, n));
         sp = base;
         int newType = inferCore(cnstr, true);
+        if (frozen && appType != newType && !success.contains(appType, newType)) {
+            // A K test that no cache answers: its outcome is not a function of the terms alone.
+            throw ProbeAbort.INSTANCE;
+        }
         if (!isDefEqInt(appType, newType)) {
             return e;
         }
@@ -2134,6 +2175,9 @@ public final class RefKernel implements KernelOps {
         sp = base;
         int r = whnfCore(next, cheapProj);
         if (!cheapProj && unfoldWhnfCache.get(key) == 0) {
+            if (frozen) {
+                throw ProbeAbort.INSTANCE;
+            }
             unfoldWhnfCache.put(key, r);
         }
         return r;
@@ -2288,9 +2332,14 @@ public final class RefKernel implements KernelOps {
         return r;
     }
 
-    /** Times a comparison reached a point where the official answer depends on object identity. */
-    long identityEvents() {
-        return statIdentityEvents;
+    /** Object-identity events since the kernel was created: see {@link #statIdentity}. */
+    long[] identityStats() {
+        return statIdentity.clone();
+    }
+
+    /** Events at which the two possible official continuations may differ (what strict mode declines). */
+    long identityHazards() {
+        return statIdentity[0] - statIdentity[1];
     }
 
     // =====================================================================================================
@@ -2305,6 +2354,9 @@ public final class RefKernel implements KernelOps {
         }
         boolean r = isDefEqCore(t, s);
         if (r) {
+            if (frozen && !success.contains(t, s)) {
+                throw ProbeAbort.INSTANCE;
+            }
             success.add(t, s);
         }
         return r;
@@ -2627,6 +2679,9 @@ public final class RefKernel implements KernelOps {
                             outSFresh = sFresh;
                             return EQUAL;
                         }
+                        if (frozen) {
+                            throw ProbeAbort.INSTANCE;
+                        }
                         failure.add(tn, sn);
                     }
                 }
@@ -2834,6 +2889,115 @@ public final class RefKernel implements KernelOps {
     }
 
     /**
+     * The official second pass {@code is_def_eq_core(t_n_n, s_n_n)} for terms that the second
+     * {@code whnf_core} left unchanged, run as a probe: true if it reaches its own second
+     * {@code whnf_core} again without deciding anything and without adding a fact to a cache whose
+     * content depends on when it was computed ({@link #frozen}). Then the second pass ends in the
+     * tail of the first, in the same cache state, and the comparison is the same whether the
+     * projection in hand is the cache entry's object or another one.
+     *
+     * <p>What the second pass does, step by step: the easy cases (look-ups); {@code Bool.true}
+     * ({@code whnf} of a stuck projection: a function memo); the cheap {@code whnf_core}
+     * (projections are answered by their entries; a stuck application is computed again: its head and
+     * major premise are cache hits, only a K test that no cache answers runs again); proof
+     * irrelevance (the type of {@code t_n} and whether it is a proposition: new work if lazy delta
+     * replaced {@code t_n}); lazy delta reduction (the last round of the first pass again); the same
+     * projection of two structures ({@code lazy_delta_proj_reduction} runs again); the second
+     * {@code whnf_core}.
+     */
+    private boolean secondPassRepeatsNothing(int t, int s) {
+        boolean frozen0 = frozen;
+        int sp0 = sp;
+        int lsp0 = lsp;
+        int depth0 = depth;
+        frozen = true;
+        try {
+            if (quick(t, s) != UNDEF) {
+                return false;
+            }
+            if ((!hasFVar(t) || eagerReduce) && isBoolTrue(s) && isBoolTrue(whnfFull(t))) {
+                return false;
+            }
+            if (whnfCore(t, true) != t || whnfCore(s, true) != s) {
+                return false;
+            }
+            if (isDefEqProofIrrel(t, s) != UNDEF) {
+                return false;
+            }
+            if (lazyDeltaReduction(t, s, false, false) != UNDEF || outT != t || outS != s) {
+                return false;
+            }
+            int kt = terms.kind(t);
+            int ks = terms.kind(s);
+            if (kt == Kind.CONST && ks == Kind.CONST && terms.a(t) == terms.a(s) && levelsEquiv(terms.b(t), terms.b(s))) {
+                return false;
+            }
+            if (kt == Kind.PROJ && ks == Kind.PROJ && terms.c(t) == terms.c(s) && terms.b(t) == terms.b(s)
+                    && lazyDeltaProjReduction(terms.a(t), terms.a(s), terms.c(t), terms.b(t))) {
+                return false;
+            }
+            return whnfCore(t, false) == t && whnfCore(s, false) == s;
+        } catch (ProbeAbort abort) {
+            sp = sp0;
+            lsp = lsp0;
+            depth = depth0;
+            return false;
+        } catch (KernelException error) {
+            // The second pass would raise a kernel error where the first pass goes on.
+            sp = sp0;
+            lsp = lsp0;
+            depth = depth0;
+            return false;
+        } finally {
+            frozen = frozen0;
+        }
+    }
+
+    /**
+     * Diagnostics: what the second pass would do beyond look-ups, read off the terms (bit set of
+     * HAZARD_K, HAZARD_INFER, HAZARD_PROJ; see {@link #statIdentity}).
+     */
+    private int identityHazard(int tn, int sn, boolean tChanged) {
+        int hazard = 0;
+        if (terms.kind(tn) == Kind.PROJ && terms.kind(sn) == Kind.PROJ && terms.c(tn) == terms.c(sn)
+                && terms.b(tn) == terms.b(sn)) {
+            hazard |= HAZARD_PROJ;
+        }
+        if (isKRecursorApp(tn) || isKRecursorApp(sn)) {
+            hazard |= HAZARD_K;
+        }
+        if (tChanged) {
+            boolean answered = false;
+            int type = inferOnlyCache.get(tn);
+            if (type != 0) {
+                int sort = inferOnlyCache.get(type);
+                if (sort != 0) {
+                    int w = terms.kind(sort) == Kind.SORT ? sort : whnfCache.get(sort);
+                    answered = w != 0 && terms.kind(w) == Kind.SORT && !levels.isAlwaysZero(terms.a(w));
+                }
+            }
+            if (!answered) {
+                hazard |= HAZARD_INFER;
+            }
+        }
+        return hazard;
+    }
+
+    /** An application of a K-like recursor with its major premise present. */
+    private boolean isKRecursorApp(int e) {
+        if (terms.kind(e) != Kind.APP) {
+            return false;
+        }
+        int fn = ops.head(e);
+        if (terms.kind(fn) != Kind.CONST) {
+            return false;
+        }
+        int cid = terms.a(fn);
+        return cid > 0 && visible(cid) && decls.kind(cid) == DeclKind.REC
+                && (decls.recFlags(cid) & DeclTable.RF_K) != 0 && decls.recMajorIndex(cid) < terms.spineLength(e);
+    }
+
+    /**
      * {@code is_def_eq_core}, in the official order (research document 02, section 8.1). The official
      * tail call after the second {@code whnf_core} is the loop.
      */
@@ -2860,6 +3024,7 @@ public final class RefKernel implements KernelOps {
             boolean tFresh = wcFresh;
             int sn = whnfCore(s, true);
             boolean sFresh = wcFresh;
+            final int tn3 = tn;
             // 4. (The official test is on pointers: it repeats the easy cases also when a projection was
             // answered by the entry of another object. They give the same answer for the same terms.)
             if (tn != t || sn != s) {
@@ -2924,16 +3089,43 @@ public final class RefKernel implements KernelOps {
                 // the comparison goes on from here if that occurrence is the object in hand, and runs
                 // once more from the start (with everything the first pass cached) if it is another
                 // object. Which it is depends on the sharing of the export's records and on the kernel's
-                // own allocation, which canonical ids do not keep: no verdict (README, "Object identity").
-                statIdentityEvents++;
-                if (identityMode == RefOptions.IDENTITY_DECLINE) {
-                    identityDeclined = true;
-                    throw new ResourceException(Reason.UNSUPPORTED_INPUT);
+                // own allocation, which canonical ids do not keep (README, "Object identity").
+                if (frozen) {
+                    throw ProbeAbort.INSTANCE;
                 }
-                if (identityMode == RefOptions.IDENTITY_OTHER) {
-                    t = tn;
-                    s = sn;
-                    continue;
+                statIdentity[0]++;
+                boolean decided = false;
+                if (identityMode == RefOptions.IDENTITY_DECLINE || identityMode == RefOptions.IDENTITY_COUNT) {
+                    // If the second pass repeats nothing but cache hits, both continuations are this one.
+                    decided = secondPassRepeatsNothing(tn, sn);
+                }
+                if (decided) {
+                    statIdentity[1]++;
+                } else {
+                    int hazard = identityHazard(tn, sn, tn != tn3);
+                    if ((hazard & HAZARD_K) != 0) {
+                        statIdentity[2]++;
+                    }
+                    if ((hazard & HAZARD_INFER) != 0) {
+                        statIdentity[3]++;
+                    }
+                    if ((hazard & HAZARD_PROJ) != 0) {
+                        statIdentity[4]++;
+                    }
+                    if (identityTrace > 0) {
+                        identityTrace--;
+                        System.err.println("rlvm-ref identity event (hazard " + hazard + (tOther ? ", t" : "")
+                                + (sOther ? ", s" : "") + "): " + describe(tn) + "  =?=  " + describe(sn));
+                    }
+                    if (identityMode == RefOptions.IDENTITY_DECLINE) {
+                        identityDeclined = true;
+                        throw new ResourceException(Reason.UNSUPPORTED_INPUT);
+                    }
+                    if (identityMode == RefOptions.IDENTITY_OTHER) {
+                        t = tn;
+                        s = sn;
+                        continue;
+                    }
                 }
             }
             // 11.-15.

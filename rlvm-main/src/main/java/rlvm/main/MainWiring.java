@@ -99,6 +99,11 @@ final class MainWiring implements Wiring {
         if (!loadOptions.publishOnDecline) {
             loadOptions = loadOptions.withPublishOnDecline(true);
         }
+        // OWNER-NOTES 13, the strict mode (options.strict): the loader's exactness-only declines - an
+        // export whose verdict can depend on the official checker's term identity, e.g. a metadata node
+        // around a term (finding S3-F2: the loader drops such nodes) - are switched on HERE when
+        // rlvm-load has an option for them. The published loader has none yet, so the two policies
+        // load alike today (rlvm-main/README.md, "Policy").
         Loader loader;
         if (c != null) {
             // Snapshots: the chain freezes what was created so far at every publication of the loader

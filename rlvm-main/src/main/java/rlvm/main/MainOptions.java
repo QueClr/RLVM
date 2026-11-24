@@ -18,6 +18,14 @@ import rlvm.load.LoadOptions;
  * (ARCHITECTURE.md 7.4). Every key is known here or is a usage error; nothing is ignored.
  *
  * <pre>
+ * policy=practical|strict  what the run promises (OWNER-NOTES 13; default practical). practical: the default
+ *                        engine by priority and none of the exactness-only checks - the official verdict on
+ *                        every real input, never an accept of a statement that is not derivable, and a
+ *                        derivable statement that the official checker rejects only through its own
+ *                        implementation (cache order, non-transitivity, object identity) may be accepted.
+ *                        strict: the reference engine (as -X engine=reference; naming another engine or
+ *                        engine=diff with it is a usage error) and every exactness-only option of the
+ *                        other modules that exists ({@link #STRICT})
  * engine=NAME            reference | machine | diff | any registered EngineProvider name
  *                        (default: the non-reference engine with the highest priority, else reference)
  * load=batch|pipelined|auto  how units are published. Default auto: pipelined (the loader publishes while
@@ -58,6 +66,24 @@ import rlvm.load.LoadOptions;
  * through the driver's own differential mode ({@code RunConfig.differential}).
  */
 final class MainOptions {
+
+    /**
+     * {@code -X policy=strict}: the strict mode of OWNER-NOTES 13 - the reference engine, kept as close
+     * to the official implementation as RLVM can make it. False = {@code practical}, the default.
+     */
+    boolean strict;
+    /** The name the policy has on the command line and in the statistics. */
+    static final String PRACTICAL = "practical";
+    static final String STRICT = "strict";
+    /**
+     * The engine setting through which an engine learns the policy of the run: a provider that
+     * declares this key ({@code EngineProvider.optionKeys()}) receives {@code policy=strict} or
+     * {@code policy=practical} in {@code factory(Map)} on EVERY run, typed or not, and switches its
+     * exactness-only behaviour (what exists only for bug-for-bug agreement with the official checker
+     * on adversarial files) on in the strict mode. A provider that does not declare it sees nothing.
+     * The key itself is the wiring's: no engine can give it another meaning.
+     */
+    static final String POLICY_KEY = "policy";
 
     /** {@code -X engine=...}, or null for the default engine. */
     String engine;
@@ -169,13 +195,36 @@ final class MainOptions {
         o.engineKeys = engineKeys == null ? Set.of() : engineKeys;
         o.driver = driver == null ? DriverSettings.NONE : driver;
         if (extra == null) {
+            o.applyPolicy();
             return o;
         }
         // Sorted, so that the first error reported does not depend on the map's iteration order.
         for (Map.Entry<String, String> e : new TreeMap<>(extra).entrySet()) {
             o.set(e.getKey(), e.getValue());
         }
+        o.applyPolicy();
         return o;
+    }
+
+    /**
+     * What the policy means for the other settings, once all of them are read. The strict mode IS
+     * the reference engine: comparing engines under it is a contradiction, said as a usage error
+     * (that the named engine really is the reference kernel is checked where the providers are
+     * known, {@code RlvmChecker.setup}). Engines that declare {@link #POLICY_KEY} are told the policy.
+     */
+    private void applyPolicy() {
+        if (strict && differential) {
+            throw new UsageError("-X policy=strict checks with the reference engine alone: -X engine=diff "
+                    + "(a comparison of two engines) contradicts it");
+        }
+        if (engineKeys.contains(POLICY_KEY)) {
+            engineOptions.put(POLICY_KEY, policyName());
+        }
+    }
+
+    /** {@code "strict"} or {@code "practical"}. */
+    String policyName() {
+        return strict ? STRICT : PRACTICAL;
     }
 
     private void set(String key, String value) {
@@ -188,6 +237,9 @@ final class MainOptions {
             return;
         }
         switch (key) {
+            case "policy":
+                strict = choose(key, value, PRACTICAL, Boolean.FALSE, STRICT, Boolean.TRUE);
+                break;
             case "engine": {
                 String v = need(key, value);
                 if (v.equals("diff")) {
@@ -300,7 +352,7 @@ final class MainOptions {
                     break;
                 }
                 throw new UsageError("unknown checker setting -X " + key + (value == null || value.isEmpty() ? ""
-                        : "=" + value) + " (known: engine, load, order, session-mib, memory-mib, scan-threads, io, "
+                        : "=" + value) + " (known: policy, engine, load, order, session-mib, memory-mib, scan-threads, io, "
                         + "stop-after, stats-file, no-recheck, no-truffle, no-proof-blocks, profile, passes, "
                         + "passes-mode, engine.*"
                         + (engineKeys.isEmpty() ? "" : "; engine settings: " + String.join(", ", new TreeSet<>(engineKeys)))

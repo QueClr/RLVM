@@ -37,6 +37,15 @@ public interface Checker {
         return getClass().getName();
     }
 
+    /**
+     * Lines for {@code --help}: the checker's own {@code -X KEY[=VALUE]} settings that a user should
+     * know, one per line, each starting with two blanks (the launcher prints them under a heading
+     * that names the checker). Empty (the default): nothing is printed.
+     */
+    default String usage() {
+        return "";
+    }
+
     /** The implementation with the highest priority is the default. The placeholder has {@link Integer#MIN_VALUE}. */
     default int priority() {
         return 0;

@@ -50,7 +50,50 @@ public final class RlvmChecker implements Checker {
         } catch (RuntimeException | java.util.ServiceConfigurationError e) {
             engines = "unavailable (" + e + ")";
         }
-        return "RLVM kernel: reader, loader, environment pass, workers; engines: " + engines + " (* = reference)";
+        return "RLVM kernel: reader, loader, environment pass, workers; engines: " + engines + " (* = reference)"
+                + defaultEngineNote();
+    }
+
+    /**
+     * "; default engine: NAME (policy practical; ...)" for {@code --version}. The words
+     * "default engine: NAME" are read by scripts/build.sh, which gives the JVM launcher the heap of
+     * the engine a run without {@code -X engine} checks with: keep them.
+     */
+    private static String defaultEngineNote() {
+        try {
+            return "; default engine: " + Engines.primary(null, Engines.providers()).name()
+                    + " (policy practical; -X policy=strict = the reference engine)";
+        } catch (RuntimeException | java.util.ServiceConfigurationError e) {
+            return "";
+        }
+    }
+
+    /**
+     * The checker's settings for {@code rlvm --help} (the complete list: rlvm-main/README.md):
+     * {@code rlvm.cli.Checker.usage()} of rlvm-cli. Deliberately without {@code @Override}: this
+     * module is compiled from the working tree into every distribution anybody builds
+     * ({@code scripts/dev.sh dist}), against the launcher jar that is published at that moment, and
+     * must compile against the one without the method too (it is then simply not called).
+     */
+    public String usage() {
+        return String.join("\n",
+                "  policy=practical|strict   what a run promises (default practical). practical: the official verdict on",
+                "                            every real input and never an accept of a statement that is not derivable;",
+                "                            a derivable statement that the official checker rejects only through its",
+                "                            own implementation (cache order, object identity) may be accepted.",
+                "                            strict: the reference engine and every exactness-only check, as close to",
+                "                            the official checker as RLVM gets (slower)",
+                "  engine=NAME               reference | machine | diff (default: by the engines' priorities, see",
+                "                            --version; a rejection is always confirmed by the reference engine)",
+                "  load=auto|batch|pipelined how the file is loaded (default auto: pipelined with checking when two or",
+                "                            more workers run and the file has 8 MiB or more)",
+                "  scan-threads=K|auto, io=buffered|mapped|auto",
+                "                            the reader (default: 2 scanner threads on mapped input from 256 MiB)",
+                "  passes=N, passes-mode=reload|recheck",
+                "                            check the export N times in this process and report every pass",
+                "  stats-file=F, stop-after=load|env, session-mib=N, memory-mib=N, profile=4.36|4.37, no-recheck, ...",
+                "                            and the engines' and the driver's own settings: rlvm-main/README.md",
+                "");
     }
 
     /** Above the launcher's placeholder; the highest priority is the default checker. */
@@ -135,7 +178,7 @@ public final class RlvmChecker implements Checker {
         // '(auto)' = decided by this checker's defaults, not given: the worker count (--threads auto),
         // the load mode (MainOptions.resolveLoadDefaults), the reader's scanner threads.
         return "rlvm: stats: outcome=" + Outcome.name(outcome) + " engine=" + s.primary.name()
-                + " reference=" + s.reference.name() + " workers=" + workerCount
+                + " reference=" + s.reference.name() + " policy=" + s.mo.policyName() + " workers=" + workerCount
                 + (s.autoWorkers ? "(auto)" : "") + " load="
                 + s.config.loadMode.name().toLowerCase(java.util.Locale.ROOT) + (s.mo.loadGiven ? "" : "(auto)")
                 + " scan-threads=" + s.mo.scanThreads + (s.mo.scanThreadsGiven ? "" : "(auto)")
@@ -194,7 +237,7 @@ public final class RlvmChecker implements Checker {
                 }
                 primaryFactory = Engines.factory(primary, mo.engineOptions);
             } else {
-                primary = Engines.primary(mo.engine, all);
+                primary = mo.strict ? strictEngine(mo, reference, all) : Engines.primary(mo.engine, all);
                 // The driver recognises "the reference kernel is the primary engine" by the SAME factory
                 // object and then confirms a rejection with one fresh cold run instead of two.
                 primaryFactory = primary == reference ? referenceFactory : Engines.factory(primary, mo.engineOptions);
@@ -222,6 +265,21 @@ public final class RlvmChecker implements Checker {
         s.primaryFactory = primaryFactory;
         s.referenceFactory = referenceFactory;
         return s;
+    }
+
+    /**
+     * The engine of the strict mode (OWNER-NOTES 13): the reference kernel, whatever the priorities
+     * say. Naming it is allowed ({@code -X policy=strict -X engine=reference}); naming another engine
+     * contradicts the policy.
+     *
+     * @throws UsageError {@code -X engine=NAME} names an engine that is not the reference kernel
+     */
+    static EngineProvider strictEngine(MainOptions mo, EngineProvider reference, java.util.List<EngineProvider> all) {
+        if (mo.engine != null && Engines.primary(mo.engine, all) != reference) {
+            throw new UsageError("-X policy=strict checks with the reference engine ('" + reference.name()
+                    + "'): -X engine=" + mo.engine + " contradicts it (drop one of the two)");
+        }
+        return reference;
     }
 
     /**

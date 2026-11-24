@@ -129,10 +129,10 @@ public final class Engines {
         for (Map.Entry<String, String> e : d.entrySet()) {
             String key = e.getKey();
             if (key == null || key.isEmpty() || key.equals("engine") || key.startsWith("engine.")
-                    || (engineKeys != null && engineKeys.contains(key))) {
+                    || key.equals(MainOptions.POLICY_KEY) || (engineKeys != null && engineKeys.contains(key))) {
                 throw new IllegalStateException("engine provider '" + provider.name() + "' (" + provider.getClass().getName()
                         + ") names -X " + key + " as a run default: only settings of the wiring and of the driver "
-                        + "can be defaulted, not the engine selection or an engine's own setting");
+                        + "can be defaulted, not the engine selection, the policy or an engine's own setting");
             }
             sorted.put(key, e.getValue());
         }

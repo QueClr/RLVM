@@ -54,7 +54,8 @@ public final class RefEngine implements Engine {
     private int statMaxDepth;
     private long statMaxUnitBytes;
     private final long[] statImports = new long[6];
-    private long statIdentityEvents;
+    private final long[] statIdentity = new long[6];
+    private long statIdentityUnits;
 
     public RefEngine(Store store, EngineConfig config) {
         this(store, config, RefOptions.fromSystemProperties());
@@ -109,9 +110,15 @@ public final class RefEngine implements Engine {
             sink.put("reference.importPromoted", statImports[2]);
             sink.put("reference.importDrops", statImports[3]);
             sink.put("reference.importNodes", statImports[5]);
-            sink.put("reference.identity", options.identity == RefOptions.IDENTITY_DECLINE ? "decline"
-                    : options.identity == RefOptions.IDENTITY_SAME ? "same" : "other");
-            sink.put("reference.identityEvents", statIdentityEvents);
+            sink.put("reference.exact", options.exact() ? "official" : "off");
+            sink.put("reference.identity", RefOptions.identityName(options.identity));
+            sink.put("reference.identityEvents", statIdentity[0]);
+            sink.put("reference.identityHarmless", statIdentity[1]);
+            sink.put("reference.identityHazardK", statIdentity[2]);
+            sink.put("reference.identityHazardInfer", statIdentity[3]);
+            sink.put("reference.identityHazardProj", statIdentity[4]);
+            sink.put("reference.identityNested", statIdentity[5]);
+            sink.put("reference.identityUnits", statIdentityUnits);
         }
     }
 
@@ -130,7 +137,11 @@ public final class RefEngine implements Engine {
         statDeepRuns += s.deepRuns;
         statMaxDepth = Math.max(statMaxDepth, s.kernel.maxDepthSeen());
         statMaxUnitBytes = Math.max(statMaxUnitBytes, s.maxUnitBytes);
-        statIdentityEvents += s.kernel.identityEvents();
+        long[] identity = s.kernel.identityStats();
+        for (int i = 0; i < statIdentity.length; i++) {
+            statIdentity[i] += identity[i];
+        }
+        statIdentityUnits += s.identityUnits;
         long[] imports = s.kernel.importStats();
         for (int i = 0; i < statImports.length; i++) {
             statImports[i] += imports[i];
@@ -163,11 +174,12 @@ public final class RefEngine implements Engine {
 
         /**
          * {@code -X levels=official|complete} (default official), {@code -X ref.imports=on|off|verify},
-         * {@code -X ref.identity=decline|same|other} (see {@link RefOptions}).
+         * {@code -X ref.exact=off|official} (default off; official = the strict mode),
+         * {@code -X ref.identity=decline|same|other|count} (experiments; see {@link RefOptions}).
          */
         @Override
         public Set<String> optionKeys() {
-            return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS, RefOptions.KEY_IDENTITY);
+            return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS, RefOptions.KEY_EXACT, RefOptions.KEY_IDENTITY);
         }
 
         @Override
@@ -206,6 +218,8 @@ public final class RefEngine implements Engine {
         long deepRuns;
         /** Largest footprint (overlay terms, literals, kernel tables) a single declaration reached. */
         long maxUnitBytes;
+        /** Declarations in which the official answer depended on object identity (what strict mode declines). */
+        long identityUnits;
 
         RefSession(RefEngine engine, WorkerContext ctx) {
             this.engine = engine;
@@ -225,7 +239,11 @@ public final class RefEngine implements Engine {
                 declined++;
                 return Outcome.DECLINE;
             }
+            long hazards = kernel.identityHazards();
             int outcome = attempt(cid, budget);
+            if (kernel.identityHazards() != hazards) {
+                identityUnits++;
+            }
             if (outcome == Outcome.DECLINE && lastReason == Reason.STACK_DEPTH && kernel.takeOverflowed()) {
                 // The calling thread's stack was too small. Whatever was being written when it
                 // overflowed is abandoned, so everything worker-local starts afresh.

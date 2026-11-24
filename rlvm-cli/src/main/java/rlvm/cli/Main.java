@@ -148,6 +148,7 @@ public final class Main {
         switch (inv.mode) {
             case HELP:
                 out.print(HELP);
+                out.print(checkerUsage(inv.checkerName, injected));
                 return 0;
             case VERSION:
                 return version(out, injected);
@@ -184,6 +185,24 @@ public final class Main {
             }
         }
         return outcome.exitCode;
+    }
+
+    /**
+     * The part of {@code --help} that belongs to the checker which would run ({@code --checker NAME},
+     * else the default one): its own {@code -X} settings ({@link Checker#usage()}). Empty if the
+     * checker has none or cannot be found; {@code --help} never fails because of a checker.
+     */
+    static String checkerUsage(String checkerName, Checker injected) {
+        try {
+            Checker c = injected != null ? injected : Checkers.select(checkerName);
+            String usage = c.usage();
+            if (usage == null || usage.isBlank()) {
+                return "";
+            }
+            return "Settings of the checker '" + c.name() + "' (-X KEY[=VALUE]):\n" + usage.stripTrailing() + "\n\n";
+        } catch (UsageException | RuntimeException | java.util.ServiceConfigurationError e) {
+            return "";
+        }
     }
 
     private static int version(PrintStream out, Checker injected) {
@@ -239,7 +258,8 @@ public final class Main {
                     "      --stack-size S    stack of the checker thread, e.g. 512m (default), 2g (environment:",
                     "                        RLVM_STACK_SIZE)",
                     "      --checker NAME    use this checker implementation instead of the default (see --version)",
-                    "  -X KEY[=VALUE]        setting passed through to the checker implementation",
+                    "  -X KEY[=VALUE]        setting passed through to the checker implementation (the settings of",
+                    "                        the checker that would run are listed at the end of this text)",
                     "  -q, --quiet           print errors only",
                     "  -V, --version         print version, runtime and available checkers",
                     "  -h, --help            print this text",

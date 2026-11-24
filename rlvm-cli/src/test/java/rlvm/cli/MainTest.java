@@ -282,6 +282,16 @@ class MainTest {
         assertEquals(0, run(env(), "--help"));
         assertTrue(stdout().startsWith("Usage: rlvm"), stdout());
         assertTrue(stdout().contains("--threads"), stdout());
+        // The checker that would run adds its own -X settings (Checker.usage()) under its name ...
+        assertTrue(stdout().contains("Settings of the checker 'test-plugin' (-X KEY[=VALUE]):\n"
+                + "  verdict=accept|reject|decline   what this test double answers\n"), stdout());
+        // ... a checker without any (the placeholder) adds nothing, and an unknown name does not break --help.
+        outBytes.reset();
+        assertEquals(0, run(env(), "--help", "--checker", "placeholder"));
+        assertTrue(stdout().startsWith("Usage: rlvm") && !stdout().contains("Settings of the checker"), stdout());
+        outBytes.reset();
+        assertEquals(0, run(env(), "--help", "--checker", "no-such-checker"));
+        assertTrue(stdout().startsWith("Usage: rlvm") && !stdout().contains("Settings of the checker"), stdout());
     }
 
     @Test

@@ -10,10 +10,14 @@ import java.util.Map;
  * OWNER-NOTES item 11; {@code complete} is the opt-in) and
  * {@code -X ref.imports=off|on|verify} (default off: with the overlay of wave 4, whose hash-consing
  * index follows its content, keeping imports costs more CPU time than it saves; see the README) and
- * {@code -X ref.identity=decline|same|other} (default decline: no verdict where the official one
- * depends on object identity; the other two values are for experiments)
- * ({@link RefEngine.Provider#optionKeys()}); the same three are read from the system properties
- * {@code rlvm.levels}, {@code rlvm.ref.imports} and {@code rlvm.ref.identity} when no {@code -X} setting names them (tools,
+ * {@code -X ref.exact=off|official} (default off = the practical policy of OWNER-NOTES item 13: the
+ * engine never declines for the sake of agreement with the official checker on adversarial files;
+ * {@code official} = the strict mode: where the official verdict depends on object identity and the
+ * engine cannot show that it does not matter, the declaration is declined) and, for experiments,
+ * {@code -X ref.identity=decline|same|other|count} (default: decline under {@code ref.exact=official},
+ * else same) ({@link RefEngine.Provider#optionKeys()}); they are read from the system properties
+ * {@code rlvm.levels}, {@code rlvm.ref.imports}, {@code rlvm.ref.exact} and {@code rlvm.ref.identity}
+ * when no {@code -X} setting names them (tools,
  * tests, a launcher that predates the {@code -X} keys). Tuning knobs that are system properties
  * only: {@code rlvm.ref.importBytes} (bytes of overlay a session may spend on imports that outlive
  * a declaration, default 4 MiB; 0 = none) and {@code rlvm.ref.importMinUses} (default 8). All are
@@ -26,17 +30,26 @@ public final class RefOptions {
     public static final String KEY_LEVELS = "levels";
     public static final String KEY_IMPORTS = "ref.imports";
     public static final String KEY_IDENTITY = "ref.identity";
+    public static final String KEY_EXACT = "ref.exact";
 
     /**
      * What the kernel does where the official answer depends on OBJECT identity (the pointer test
      * after the second {@code whnf_core} of {@code is_def_eq_core}; README, "Object identity"), which
-     * a hash-consed term store does not have.
+     * a hash-consed term store does not have. DECLINE is the strict mode ({@code -X ref.exact=official}):
+     * the official second pass is run as a probe; if it repeats nothing the comparison goes on (both
+     * official continuations are the same), otherwise the declaration gets no verdict.
      */
     public static final int IDENTITY_DECLINE = 0;
-    /** Experiments only: assume the two occurrences are one object (the engine before 2026-11-24). */
+    /**
+     * The practical mode (the default, {@code -X ref.exact=off}): the two occurrences are taken to be
+     * one object; no probe, never a decline. Where the official kernel has two objects this can accept
+     * a declaration it rejects (always a derivable one) or, in principle, the reverse.
+     */
     public static final int IDENTITY_SAME = 1;
     /** Experiments only: assume they are two objects (the official second pass runs). */
     public static final int IDENTITY_OTHER = 2;
+    /** Measurements only: as DECLINE (probe, statistics), but go on as SAME where DECLINE would decline. */
+    public static final int IDENTITY_COUNT = 3;
 
     static final long DEFAULT_IMPORT_BYTES = 4L << 20;
     static final int DEFAULT_IMPORT_MIN_USES = 8;
@@ -63,18 +76,19 @@ public final class RefOptions {
     /** Recompute every import that is served from the session cache and fail on a difference (tests). */
     public final boolean importVerify;
     /**
-     * {@link #IDENTITY_DECLINE} (the default: no verdict where the official one depends on object
-     * identity), {@link #IDENTITY_SAME} or {@link #IDENTITY_OTHER} ({@code -X ref.identity=}).
+     * {@link #IDENTITY_SAME} (the default, practical: never a decline), {@link #IDENTITY_DECLINE}
+     * (strict: {@code -X ref.exact=official}), {@link #IDENTITY_OTHER} or {@link #IDENTITY_COUNT}
+     * ({@code -X ref.identity=}, experiments).
      */
     public final int identity;
 
     public RefOptions(boolean officialLevels, long importBytes, int importMinUses, boolean importVerify) {
-        this(officialLevels, importBytes, importMinUses, importVerify, IDENTITY_DECLINE);
+        this(officialLevels, importBytes, importMinUses, importVerify, IDENTITY_SAME);
     }
 
     public RefOptions(boolean officialLevels, long importBytes, int importMinUses, boolean importVerify,
             int identity) {
-        if (identity < IDENTITY_DECLINE || identity > IDENTITY_OTHER) {
+        if (identity < IDENTITY_DECLINE || identity > IDENTITY_COUNT) {
             throw new IllegalArgumentException("identity " + identity);
         }
         this.officialLevels = officialLevels;
@@ -127,7 +141,21 @@ public final class RefOptions {
                 throw new IllegalArgumentException("ref.imports=" + imports + ": expected on, off or verify");
         }
         long minUses = number("rlvm.ref.importMinUses", DEFAULT_IMPORT_MIN_USES);
-        String id = setting(options, KEY_IDENTITY, "rlvm.ref.identity", "decline");
+        // Strict or practical (OWNER-NOTES item 13): everything that exists only for agreement with the
+        // official checker on adversarial files hangs on this one switch; the launcher's policy sets it.
+        String exact = setting(options, KEY_EXACT, "rlvm.ref.exact", "off");
+        boolean strict;
+        switch (exact) {
+            case "official":
+                strict = true;
+                break;
+            case "off":
+                strict = false;
+                break;
+            default:
+                throw new IllegalArgumentException("ref.exact=" + exact + ": expected official or off");
+        }
+        String id = setting(options, KEY_IDENTITY, "rlvm.ref.identity", strict ? "decline" : "same");
         int identity;
         switch (id) {
             case "decline":
@@ -139,8 +167,11 @@ public final class RefOptions {
             case "other":
                 identity = IDENTITY_OTHER;
                 break;
+            case "count":
+                identity = IDENTITY_COUNT;
+                break;
             default:
-                throw new IllegalArgumentException("ref.identity=" + id + ": expected decline, same or other");
+                throw new IllegalArgumentException("ref.identity=" + id + ": expected decline, same, other or count");
         }
         return new RefOptions(official, bytes, (int) Math.min(minUses, Integer.MAX_VALUE), verify, identity);
     }
@@ -189,11 +220,34 @@ public final class RefOptions {
         return new RefOptions(officialLevels, importBytes, importMinUses, importVerify, value);
     }
 
+    /** The strict mode ({@code -X ref.exact=official}) or the practical one. */
+    public RefOptions withExact(boolean official) {
+        return withIdentity(official ? IDENTITY_DECLINE : IDENTITY_SAME);
+    }
+
+    /** True in the strict mode: the engine declines where it cannot be shown to give the official verdict. */
+    public boolean exact() {
+        return identity == IDENTITY_DECLINE;
+    }
+
+    static String identityName(int identity) {
+        switch (identity) {
+            case IDENTITY_DECLINE:
+                return "decline";
+            case IDENTITY_SAME:
+                return "same";
+            case IDENTITY_OTHER:
+                return "other";
+            default:
+                return "count";
+        }
+    }
+
     @Override
     public String toString() {
         return "RefOptions[levels=" + (officialLevels ? "official" : "complete") + ", importBytes=" + importBytes
                 + ", importMinUses=" + importMinUses + (importVerify ? ", verify" : "")
-                + (identity == IDENTITY_DECLINE ? "" : identity == IDENTITY_SAME ? ", identity=same" : ", identity=other")
+                + ", identity=" + identityName(identity)
                 + "]";
     }
 }

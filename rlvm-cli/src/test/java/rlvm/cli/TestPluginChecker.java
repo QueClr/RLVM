@@ -28,6 +28,11 @@ public final class TestPluginChecker implements Checker {
     }
 
     @Override
+    public String usage() {
+        return "  verdict=accept|reject|decline   what this test double answers\n";
+    }
+
+    @Override
     public Verdict check(Path export, Options options) throws UsageException {
         lastExport = export;
         lastOptions = options;
