@@ -16,4 +16,4 @@
 
 \p{With the final tree on the JVM, warm wall clock per pass: reachability with 1 worker 1,118 to 1,006 ms (12 blocks) and with 8 workers 572 to 529 ms; the Cedar slice with 1 worker 1,426 to 1,487 ms and with 8 workers 220 to 286 ms with two compiled blocks, cause open. In the native image reachability gains 3.8 and 4.8 \% and the Cedar slice is neutral. The differential gate on reachability, the Cedar slice, Init and Std compared 169,936 of 170,322 units with no difference. Verdict: correct, and no-go as a default.}
 
-\p{Detail: \src{rlvm-truffle/NOTES-T3.md}. Commit \commit{8766070}. Session: [profiles and prototypes](ses-JRSD).}
+\p{Detail: \src{rlvm-truffle/NOTES-T3.md}. Commit \commit{8766070}. Session: [profiles and prototypes](ses-JRSD). Related: [the Truffle tier is off by default](dec-ADIK), [what the tier gains](ins-KLLU), [the open Cedar slice row](prob-EZEP).}

@@ -13,4 +13,4 @@
 
 \p{\code{\verb~|rlvm-export~} turns a lean4export file of format 3.1.0 into calls on a primitive-typed sink in file order, with no object per record and no dependency besides the JDK. A malformed file is a reject; input outside what RLVM represents is a decline. The module was installed with 71 tests green and has 73 since its first re-install, one of them, the full Mathlib export, opt-in. Its README gives the full Mathlib export (6.3 GB, 112 M lines) at 3.4 s and 40 G instructions for parsing alone, on one thread with C2 as the JIT. A later publication the same day made ids of \code{\verb~|2^63~} and above ids like any other, as in the official reader, and compares 296 edge cases with the official checker 4.36.0.}
 
-\p{Detail: \src{rlvm-export/README.md}. Commit \commit{164409d}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-export/README.md}. Commit \commit{164409d}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [the export loader](design-export-loader).}

@@ -14,4 +14,4 @@
 
 \p{On the candidate distribution with the reference engine as default the 421 rows give 420 agreeing, no accept of kind T, no wrong accept, no wrong reject and 1 decline: pass. On a rehearsal distribution with the withdrawn machine jar as default the same step gives 395 agreeing, 6 tolerated accepts of kind T and 19 wrong accepts: fail, as it must. So the step sees the family that the gates of the default engine could not.}
 
-\p{Detail: \src{docs/design/review/official-divergence.md}, \src{docs/design/OWNER-NOTES.md}. Commit \commit{c4f8f5d}. Session: [exactness](ses-874D).}
+\p{Detail: \src{docs/design/review/official-divergence.md}, \src{docs/design/OWNER-NOTES.md}. Commit \commit{c4f8f5d}. Session: [exactness](ses-874D). Related: [the gate](design-gate), [practical exactness](dec-TQSI), [the divergence classes](design-official-divergence).}

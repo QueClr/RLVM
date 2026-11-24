@@ -15,4 +15,4 @@
 
 \p{In the other direction, four hand-written files with a metadata record inside a constructor type, a recursor type or a recursor rule were accepted by RLVM and rejected by the official checker 4.36: the loader drops metadata, and the official comparison of inductive records sees it. The loader now keeps one bit per expression and declines an inductive or quotient record that carries metadata. Afterwards the tutorial slice was 141 of 141, all 230 tests were correct, and the mutants showed 0 soundness and 0 completeness differences. A mutation kind that wraps a reference in metadata (1,976 mutants, 461 officially accepted and 1,515 rejected) guards the second fix.}
 
-\p{Detail: \src{rlvm-admit/README.md}, \src{rlvm-load/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-admit/README.md}, \src{rlvm-load/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [generated constants](prob-O6YX), [metadata in the official term identity](ins-61D4).}

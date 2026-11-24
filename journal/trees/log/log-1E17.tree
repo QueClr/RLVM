@@ -14,4 +14,4 @@
 
 \p{\code{\verb~|rlvm-cli~} is the command the arena runs. It parses the run line, finds a checker through a service file and turns its verdict into the exit status: 0 for accept, 1 for reject, 2 for decline. The first version ships a placeholder checker that declines every export, which was enough to build and time both forms of the launcher. Measured on 2026-11-23 on the aarch64 development host under a load average of about 30, so that build times are upper bounds: the native image with GraalVM CE at \code{\verb~|-O2~} builds in 56 to 66 s and is 38.8 MB, the arena's build at \code{\verb~|-O3~} in an 8-CPU container takes 115 s for 60.9 MB, and the arena's build step from an empty checkout takes 153 s including 335 MB of downloads.}
 
-\p{Detail: \src{rlvm-cli/README.md}. Commit \commit{45563d9}. Session: [research, benchmark infrastructure and spikes](ses-XOS5).}
+\p{Detail: \src{rlvm-cli/README.md}. Commit \commit{45563d9}. Session: [research, benchmark infrastructure and spikes](ses-XOS5). Related: [the verdict protocol](design-verdict-protocol), [the launchers](design-launchers).}

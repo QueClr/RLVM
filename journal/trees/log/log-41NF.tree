@@ -13,4 +13,4 @@
 
 \p{\code{\verb~|rlvm-load~} implements the reader's sink and writes the store. For every declaration only the records its roots reach become shared nodes, the rest of the segment goes into a proof block, and promotion waits until the referring unit has claimed its names. Records flagged unsafe or partial are dropped, duplicate names are rejected, and a dropped record named like a quotient constant is rejected at load, as the official post-check does. Published with 50 tests green: all 230 arena files, Init, Std and 800 random exports are read back from the real store and compared record by record with the reader's reference sink. Load cost in the arena-shaped container with a cold JVM: Init 1.37 s CPU, 0.84 s wall, 266 MB and 13.3 G instructions; Std 2.01 s, 1.42 s, 393 MB and 18.2 G; 15.7 instructions per input byte in steady state.}
 
-\p{Detail: \src{rlvm-load/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-load/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [the export loader](design-export-loader).}

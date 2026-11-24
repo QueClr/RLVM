@@ -15,4 +15,4 @@
 
 \p{The invariance suite on the published tests passes: 231 files in 9 schedules (batch with 1, 2, 4 and 8 workers, session caps of one byte, pipelined with a publication every 1, 7 and 64 units and 1, 4 and 8 workers), all correct, with no schedule difference and no decline caused by pipelining. Through the launcher all 230 tests are correct with pipelined loading, and Init, Std and reachability are accepted with 1 and with 6 workers.}
 
-\p{Detail: \src{rlvm-driver/README.md}, \src{rlvm-main/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-driver/README.md}, \src{rlvm-main/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [the driver](design-driver), [pipelined loading as the default for parallel runs](dec-4TQJ).}

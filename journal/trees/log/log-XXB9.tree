@@ -15,4 +15,4 @@
 
 \p{The same publication changes the load defaults: pipelined loading for two or more workers on inputs of 8 MiB and more, two scanner threads on mapped input from 256 MiB, and \code{\verb~|--threads auto~} meaning one worker per CPU up to 8. It was published after the gate on exactly these jars in the default configuration, with no option at all: 230 of 230 tests correct, 17,775 mutants with 0 soundness and 0 completeness differences (16,092 agree, 1,683 declined), and seven corpora accepted by the native image.}
 
-\p{Detail: \src{rlvm-main/README.md}, \src{docs/design/OWNER-NOTES.md}. Commit \commit{c4f8f5d}. Session: [exactness](ses-874D).}
+\p{Detail: \src{rlvm-main/README.md}, \src{docs/design/OWNER-NOTES.md}. Commit \commit{c4f8f5d}. Session: [exactness](ses-874D). Related: [practical exactness](dec-TQSI), [the exactness contract](design-exactness-contract), [pipelined loading as the default for parallel runs](dec-4TQJ).}

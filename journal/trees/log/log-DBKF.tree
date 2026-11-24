@@ -15,4 +15,4 @@
 
 \p{These figures correct a first report of gains of 23 to 31 \%, which had been measured against a store whose hash-consing index did not shrink. A session table of imported constant terms from that report saves no CPU time against the new store and is off by default.}
 
-\p{Detail: \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [the reference engine](design-reference-engine).}

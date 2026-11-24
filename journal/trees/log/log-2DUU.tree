@@ -16,4 +16,4 @@
 
 \p{A first install of \code{\verb~|rlvm-nat~} had been built from sources in the middle of an edit, in which a value made again after a reset got a dead handle. Since then a module is installed only from a frozen copy of its sources, after its tests have passed on that copy.}
 
-\p{Detail: \src{rlvm-level/README.md}, \src{rlvm-nat/README.md}. Commit \commit{164409d}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-level/README.md}, \src{rlvm-nat/README.md}. Commit \commit{164409d}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [universe levels](design-universe-levels), [Nat literals](design-nat-literals).}

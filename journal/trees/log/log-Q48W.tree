@@ -15,4 +15,4 @@
 
 \p{Std with 8 workers, native image, quiet windows: check-only passes took 2.15 s before; with slices the median of 10 rounds is 1.67 s (-23 \%), the same as the bounded split that slices replaced (1.63 s). On Mathlib nothing changes beyond noise, as expected: the driver's waits are 1 \% there. Published with 106 tests, 103 green and 3 opt-in.}
 
-\p{Detail: \src{docs/research/profiles/P7.md}, \src{rlvm-driver/README.md}. Commit \commit{8ca5a23}. Session: [profiles and prototypes](ses-JRSD).}
+\p{Detail: \src{docs/research/profiles/P7.md}, \src{rlvm-driver/README.md}. Commit \commit{8ca5a23}. Session: [profiles and prototypes](ses-JRSD). Related: [how the check phase scales](ins-MQ13), [the driver](design-driver).}

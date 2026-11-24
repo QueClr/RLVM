@@ -17,4 +17,4 @@
 
 \p{Load phase on one thread, native image at \code{\verb~|-O3~} in the arena-shaped container, CPU, under a host load average of 107 to 111: Init 844, 885 and 892 ms before against 681, 673 and 667 ms (-24 \%), Std 1,377 and 1,410 ms against 1,102 and 1,136 ms (-20 \%), Mathlib 17.18 s against 12.40 s (-28 \%, one run each). Instructions are unchanged (Mathlib 132.3 against 133.1 G): the gain is cache misses.}
 
-\p{Detail: \src{rlvm-load/README.md}, \src{rlvm-store/README.md}. Commit \commit{93e45d4}. Session: [machine speed and pipeline](ses-CVTE).}
+\p{Detail: \src{rlvm-load/README.md}, \src{rlvm-store/README.md}. Commit \commit{93e45d4}. Session: [machine speed and pipeline](ses-CVTE). Related: [the export loader](design-export-loader), [the loader as the floor](prob-I7M9).}

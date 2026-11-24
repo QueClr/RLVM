@@ -13,4 +13,4 @@
 
 \p{The whole pipeline with the reference engine accepts Mathlib: native image at \code{\verb~|-O2~}, 8 workers, batch load, in the arena-shaped container, 1,486.8 s CPU and 363.3 s wall with 4.09 cores busy on average, 9.27 GB peak RSS and 12,404 G instructions. It is one run, not repeated; for scale, gruszka needs 62.4 s CPU and 18.1 s wall on the same host. At kernel level, with inductive records trusted, the reference kernel accepts all 714,712 axioms, definitions, theorems and opaque constants of Mathlib and rejects or declines none. The integration that followed ended with Init, Std, cedar, cslib, con-leche, reachability, navier-stokes-euler and Mathlib all accepted, and with the build of all modules green at 790 tests.}
 
-\p{Detail: \src{docs/BENCHMARKS.md}, \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{docs/BENCHMARKS.md}, \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [the reference engine](design-reference-engine).}

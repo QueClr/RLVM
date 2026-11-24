@@ -15,4 +15,4 @@
 
 \p{The gate on the published jar: 230 of 230 tests, and 17,775 mutants with 0 soundness and 0 completeness differences. Published with 136 tests, 135 run green and one opt-in. Mathlib was not run with this jar; it rests on the run of the same day with \code{\verb~|-X levels=official~}, accepted by the reference engine in 537.1 s CPU and 142.9 s wall.}
 
-\p{Detail: \src{rlvm-ref/README.md}, \src{rlvm-level/README.md}. Commit \commit{605b9ab}. Session: [machine speed and pipeline](ses-CVTE).}
+\p{Detail: \src{rlvm-ref/README.md}, \src{rlvm-level/README.md}. Commit \commit{605b9ab}. Session: [machine speed and pipeline](ses-CVTE). Related: [the decision on universe levels](dec-P8XP), [universe levels](design-universe-levels).}

@@ -16,4 +16,4 @@
 
 \p{Gates on the tree that carries the set: the full gate passes with declines in 1,697 s with no soundness or completeness difference; 17,775 mutants for the generic tier and for the set, 0 and 0; 32 switch sets times 329 hostile exports, 10,528 judgments against the official verdict, nothing unexpected; and no difference on 760,839 units compared by the differential engine. The declines are eager reduction only.}
 
-\p{Detail: \src{rlvm-machine/SWITCHES.md}, \src{docs/BENCHMARKS.md}. Commit \commit{381c346}. Session: [machine speed and pipeline](ses-CVTE).}
+\p{Detail: \src{rlvm-machine/SWITCHES.md}, \src{docs/BENCHMARKS.md}. Commit \commit{381c346}. Session: [machine speed and pipeline](ses-CVTE). Related: [the decision on the default switch set](dec-LZFX), [the switches](design-switches).}

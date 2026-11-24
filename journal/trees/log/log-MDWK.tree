@@ -15,4 +15,4 @@
 
 \p{Two fixes followed the same day. Containers of other jobs that were pinned on the measurement cores stayed there, and the first 18 rows of the warm table had 9 to 14 such containers beside them; a window now parks them on spare cores, and the measurement's own container is labelled so that it is not parked (\commit{af1fdb3}). Waiting measurements are served first come, first served (\commit{01ccd8c}).}
 
-\p{Detail: \src{bench/README.md}. Commit \commit{6e9f5ab}. Session: [machine speed and pipeline](ses-CVTE).}
+\p{Detail: \src{bench/README.md}. Commit \commit{6e9f5ab}. Session: [machine speed and pipeline](ses-CVTE). Related: [the quiet-core method](ins-I3W2), [the measurement method](design-measurement-method).}

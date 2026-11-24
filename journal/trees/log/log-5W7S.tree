@@ -14,4 +14,4 @@
 
 \p{In the arena-shaped container on the JVM with the reference engine, one run each on a busy host: Init with 1 worker 22.5 s CPU and 17.7 s wall, with 8 workers 23.0 s and 4.6 s; Mathlib with 8 workers accepted in 829.3 s CPU and 154.5 s wall at 13.8 GB RSS and 6,512 G instructions.}
 
-\p{Detail: \src{rlvm-driver/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}
+\p{Detail: \src{rlvm-driver/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM). Related: [the driver](design-driver), [the verdict protocol](design-verdict-protocol).}
