@@ -226,10 +226,12 @@ case "$cmd" in
     echo "root:    $ROOT"
     echo "java:    $("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 2p)"
     echo "maven:   $($MVN -v 2>/dev/null | head -n 1)"
-    if [ -x "$ROOT/.toolchain/oracle-graalvm-25/bin/java" ]; then
-      echo "oracle:  $("$ROOT/.toolchain/oracle-graalvm-25/bin/java" -version 2>&1 | sed -n 2p)"
+    # Oracle GraalVM is never run by a default command (OWNER-NOTES item 11): its version is read
+    # from the release file. Only `scripts/build.sh --pgo` uses it, for labelled measurements.
+    if [ -r "$ROOT/.toolchain/oracle-graalvm-25/release" ]; then
+      echo "oracle:  present, not used by any default build ($(sed -n 's/^GRAALVM_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/Oracle GraalVM \1/p' "$ROOT/.toolchain/oracle-graalvm-25/release"); scripts/build.sh --pgo only: measurements)"
     else
-      echo "oracle:  not installed (no PGO variant)"
+      echo "oracle:  not installed (scripts/build.sh --pgo is unavailable; nothing else needs it)"
     fi
     echo "modules: $(modules | paste -sd' ' -)"
     if [ -f "$ROOT/work/dist/BUILD-INFO.txt" ]; then

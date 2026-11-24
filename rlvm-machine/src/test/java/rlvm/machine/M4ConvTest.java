@@ -78,6 +78,7 @@ class M4ConvTest {
             f.hostDepth(depth);
             if (probes) {
                 f.switches("probes"); // step 5: the answers must be those of the complete procedure
+                f.m.x4.opts |= Conv.Ext.OPT_CONGRUENCE; // incl. the non-official option: these rows do not separate it
             }
             m.stats = true;
             m.debug |= Op.DBG_TRACE;

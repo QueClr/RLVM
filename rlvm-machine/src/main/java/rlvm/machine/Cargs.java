@@ -73,8 +73,8 @@ final class Cargs {
         if (d > m.hostDepth) {
             return m.spill3(Op.K_CARGS, a, b, policy);
         }
-        if ((sw & Op.SW_FACTS) != 0 && na == nb) {
-            return plan(m, a, b, policy, d);
+        if ((sw & Op.SW_FACTS) != 0 && na == nb && Conv.skipArgs(m)) {
+            return plan(m, a, b, policy, d); // non-official option (finding S-F2): positions skipped by the fact record
         }
         return run(m, a, b, policy, 0L, d);
     }

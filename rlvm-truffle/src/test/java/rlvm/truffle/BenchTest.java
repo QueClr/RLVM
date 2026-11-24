@@ -85,4 +85,32 @@ class BenchTest {
             Thread.sleep(20);
         }
     }
+
+    /** A tool: activations per file of a directory with K1 on, to choose test inputs. -Dt2.dir=work/arena-site/tests/good/tutorial */
+    @Test
+    @Tag("slow")
+    void scan() throws Exception {
+        String dir = System.getProperty("t2.dir");
+        assumeTrue(dir != null);
+        System.setProperty("rlvm.machine.elabAt", System.getProperty("t2.elabAt", "1"));
+        String sw = System.getProperty("t2.switches", "code,casetrees,tele");
+        java.util.List<java.nio.file.Path> files;
+        try (java.util.stream.Stream<java.nio.file.Path> s = java.nio.file.Files.list(Harness.root().resolve(dir))) {
+            files = s.filter(p -> p.toString().endsWith(".ndjson")).sorted().collect(java.util.stream.Collectors.toList());
+        }
+        long limit = Long.getLong("t2.maxBytes", 4L << 20);
+        for (java.nio.file.Path p : files) {
+            if (java.nio.file.Files.size(p) > limit) {
+                continue;
+            }
+            String rel = Harness.root().relativize(p).toString();
+            try (Harness h = new Harness(rel, sw)) {
+                Harness.Run r = h.run();
+                System.out.println(String.format(Locale.ROOT, "[scan] %-70s units %5d accepted %5d cpu %6.0f ms activations %9d frames %7d blocks %5d", rel, r.units,
+                        r.accepted, r.cpuNanos / 1e6, r.entered, r.frames, rlvm.machine.Tier.blockCount(h.m)));
+            } catch (Exception e) {
+                System.out.println("[scan] " + rel + ": " + e);
+            }
+        }
+    }
 }

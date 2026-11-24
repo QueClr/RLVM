@@ -684,7 +684,9 @@ final class Diff {
                 String l = lines.get(i);
                 if (l.contains("fast tests green")) {
                     int cut = l.indexOf(';');
-                    return "last publication into the main tree: " + (cut > 0 ? l.substring(0, cut) : l);
+                    String what = cut > 0 ? l.substring(0, cut) : l;
+                    // "2026-11-24T14:30:18Z publish M4: 36 files [Cargs.java Conv.java ...]": the first files are enough
+                    return "last publication into the main tree: " + (what.length() > 150 ? what.substring(0, 150) + " ...]" : what);
                 }
             }
         } catch (IOException | RuntimeException e) {

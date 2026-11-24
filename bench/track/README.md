@@ -167,6 +167,13 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
   (configuration `rlvm/native/t8/-X engine=machine`). The machine's own counters (accepted / declined
   units) are not part of an entry: a declined unit is checked by the reference engine and its time is in
   the figure; `docs/PLATFORM.md` section I.6 has the counters of the measured distribution.
+- **The machine entries in the history today** (Init, Std, reachability, `cedar-hot-ax`; image and JVM
+  launcher, 8 workers) are the eight-worker runs of the platform matrix of 13:33Z to 13:49Z, entered by
+  `work/steward/w7/import-matrix.py` (`imported_from` in the entry; the same `bench/measure.sh` run in
+  the same container). The `track.py` entries made at 14:20Z (three runs each; also the full cedar
+  corpus) fell into the forty minutes in which the host was out of memory and are marked invalid
+  (`invalid_reason`), as the orchestrator ruled for every measurement of that window. A ladder run on
+  a host that is not thrashing replaces them by the rule (a lower entry becomes the reference).
 - `track.py` and `ladder.py` pin the version of a versioned distribution at their start (above).
 - The measurement lock was the bottleneck of the day: thirty agents, up to ten queues behind
   `work/perf-history/.ladder.lock`, holds of minutes. `ladder.py --batch N` takes the lock once for N

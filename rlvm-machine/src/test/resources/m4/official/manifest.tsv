@@ -1,0 +1,29 @@
+probe-b1-rec-proof-major-bad	reject	B1 (same-head probe on a recursor): And.rec f (And.intro ..) against And.rec f h, h an axiom. The arguments are pairwise convertible (proof irrelevance) but the official kernel reduces the left side to 5 and leaves the right stuck
+probe-b1-rec-proof-major-flipped-bad	reject	the same with the stuck side on the left
+probe-b1-rec-proof-major-ok	accept	twin: And.rec f h against And.rec f h2, both stuck: the official kernel compares the arguments
+probe-b12-closure-proof-slot-bad	reject	B12 (closure congruence): the same body g (And.rec f #0) under frames [And.intro ..] and [h]: the slots are convertible by proof irrelevance, the instantiated terms are not convertible for the official kernel
+probe-b12-let-proof-slot-bad	reject	B12 with let: let x := And.intro ..; g (And.rec f x) against let x := h; g (And.rec f x)
+probe-b12-lam-closure-proof-slot-bad	reject	B12 on LAM closures: fun n => And.rec f x under [And.intro ..] and under [h], below a constructor
+probe-b1-def-proof-arg-ok	accept	same-head definitions with convertible arguments: the official kernel compares arguments first
+probe-b1-abbrev-proof-arg	reject	same-head ABBREV definitions with convertible arguments: no argument comparison in the official lazy delta step for abbrev (to be confirmed by the official verdict)
+probe-b1-theorem-head	reject	same-head probe where the head is a THEOREM-like opaque-hint definition (to be confirmed by the official verdict)
+probe-b1-rec-under-ctor-bad	reject	the recursor pair below a constructor: Nat.succ (And.rec f (And.intro ..)) against Nat.succ (And.rec f h)
+probe-b1-rec-under-axiom-bad	reject	the recursor pair below an axiom function
+facts-agreement-noncongruent-app-bad	reject	B3 (agreement rule): w : (x : And True True) -> Q (And.rec f x) -> Nat; w (And.intro ..) p1 against w h p2. Both positions are proof positions; the official kernel compares p1 and p2 by their types, which it cannot show convertible (And.rec f (And.intro ..) reduces to 5, And.rec f h is stuck)
+facts-agreement-congruent-ok	accept	twin: w h p2 against w h2 p3 with both recursors stuck: the official kernel compares the types argument-wise
+facts-agreement-noncongruent-samedef-bad	reject	B3 under SAMEDEF: the same with w an opaque-bodied definition whose unfolding does not help (it calls an axiom with both arguments)
+facts-etas-prop-mask-noncongruent-bad	reject	the Prop mask of structure eta: S.mk (And.intro ..) p1 against an axiom s : S, where the proof field of s has a type the official kernel cannot show convertible to the type of p1
+facts-etas-prop-mask-data-bad	reject	the Prop mask of structure eta must not skip the data field: S.mk s.1 s.2 7 against s
+facts-static-proof-wrong-type-bad	reject	B7 (static PROOF): two proofs of DIFFERENT propositions below a function that takes any proposition: g P p against g Q q
+facts-prop-position-dependent-on-data-bad	reject	B3: a proof position whose proposition depends on a DATA position that differs: v 1 (pf 1) against v 2 (pf 2), v : (n : Nat) -> Q n -> Nat
+facts-unread-then-prop-bad	reject	B4 + B3: a definition that does not read its first parameter but whose proof parameter depends on it; the body keeps the second and third: d 1 p 5 against d 2 q 6
+facts-unread-opaque-head-bad	reject	B4: UNREAD must not be used for an opaque constant: o 1 against o 2
+facts-unread-partial-app-bad	reject	B4: an under-applied definition: K2 1 against K2 2 as functions is fine, but an axiom applied to them must compare them; here the bodies differ
+facts-unread-second-read-first-bad	reject	B4: K2 a b := a: K2 1 7 against K2 2 7 (the READ position differs)
+facts-unread-overapplied-bad	reject	B4: K1 a := fun b => b (reads nothing of a) over-applied: K1 0 1 against K1 0 2
+facts-unread-noncongruent-bad	reject	B4 (unread position under SAMEDEF): d (u : Nat) (x : And True True) : Nat := And.rec f x; d 0 (And.intro ..) against d 1 h. The official argument comparison fails on 0 / 1, both sides unfold, and 5 against a stuck recursor is false; skipping the unread position and comparing the proofs answers T
+facts-unread-congruent-ok	accept	twin: d 0 h against d 1 h: the unread position differs, both sides unfold to the same stuck term
+nontransitive-regular-def-ok	accept	the official same-head argument comparison for a REGULAR definition: d (And.intro ..) against d h is accepted, and d (And.intro ..) against 5 is accepted (unfolding)
+nontransitive-regular-def-bad	reject	the official relation is not transitive: d h against 5 is rejected although d h = d (And.intro ..) = 5 are both accepted; a pair table or a union of accepted pairs must not close them transitively (warm sessions keep the pairs)
+nontransitive-same-decl-bad	reject	the same inside ONE declaration: a pair of proofs first makes the kernel accept d (And.intro ..) = d h and d (And.intro ..) = 5, then d h = 5 is needed
+nontransitive-same-decl-ok	accept	twin: only the two accepted equations in one declaration

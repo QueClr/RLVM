@@ -20,7 +20,7 @@
 #                          equivalence (host depth 0 / the bound in force / unbounded), (4) the debug audits
 #                          (poison, scopeaudit, maskaudit; memocheck, shortcheck), (5) the real driver with
 #                          -X engine=machine on the 230 tests (1 worker) and the corpora (4 workers).
-#                          Parallel: --jobs passes at a time (default 12), about three minutes for everything.
+#                          Parallel: --jobs passes at a time (default 4).
 #                          Warm switch sets run with a session cap of 4 MiB unless --session-mib says otherwise.
 #                          exit 1 = a wrong verdict, a difference, a crash; declines alone do not fail it
 #   report.sh mutants [--switches LIST]... [--corpus NAME]... [--limit N] [--launcher-sample N]
@@ -60,10 +60,14 @@
 #   --tree DIR             measure another copy of the module instead of the main tree, e.g. a sandbox:
 #                          --tree work/sandbox/M4/rlvm-machine. The report then says so in its header and
 #                          is named NAME-M4 (or NAME plus -Dm8.suffix): the plain names are the main tree's
-#   --heap SIZE            heap of the report JVM (default 12g: the host is shared, and a Java heap that
-#                          was pushed into the swap makes a full collection last minutes; a file in which
-#                          the heap answered instead of an engine is run again on its own)
-#   --jobs N               gate, mutants: passes at a time (default 12)
+#   --heap SIZE            heap of the report JVM (default 6g, the limit of a host-wide slot: the host is
+#                          shared, and a Java heap that was pushed into the swap makes a full collection last
+#                          minutes; a file in which the heap answered instead of an engine is run again on its
+#                          own, the perf tests run one at a time). On a quiet host: --heap 12g --jobs 8
+#   --jobs N               passes (gate), files (the corpus reports), mutants at a time (default 4, the limit
+#                          of a host-wide slot)
+#   --no-slot              do not take a host-wide slot (bench/slot.sh; the orchestrator's rule of 14:32Z:
+#                          every heavy job holds one of 8). Only for a caller that holds one already
 #   --no-pin               do not pin the report JVM. By default it runs on the CPUs outside the cpuset of the
 #                          measurement container (bench/arena-docker.sh --arena-limits), so that a report
 #                          never disturbs a measurement
@@ -85,9 +89,10 @@ while [ "$ROOT" != "/" ] && ! { [ -f "$ROOT/env.sh" ] && [ -f "$ROOT/rlvm-machin
 [ "$ROOT" != "/" ] || ROOT="${RLVM_ROOT:?report.sh: cannot find the project root (set RLVM_ROOT)}"
 MAIN="$ROOT/rlvm-machine"
 tree="$MAIN"
-heap="12g"
+heap="6g"
 keep=0
 pin=1
+slot=1
 jvmargs=()
 args=()
 orig="$*"
@@ -98,6 +103,7 @@ while [ "$#" -gt 0 ]; do
     --heap) heap="${2:?--heap needs a size}"; shift 2 ;;
     --keep) keep=1; shift ;;
     --no-pin) pin=0; shift ;;
+    --no-slot) slot=0; shift ;;
     --jobs) jvmargs+=("-Dm8.jobs=${2:?--jobs needs a number}"); shift 2 ;;
     --switches) switchsets+=("${2-}"); shift 2 ;;
     --session-mib) jvmargs+=("-Dm8.sessionMib=${2:?--session-mib needs a number}"); shift 2 ;;
@@ -174,6 +180,10 @@ build_copy() {
   done
 }
 
+# A report is a heavy job: it holds one of the host-wide slots while its JVM runs.
+slot_prefix=()
+if [ "$slot" = 1 ] && [ -x "$ROOT/bench/slot.sh" ]; then slot_prefix=("$ROOT/bench/slot.sh" --); fi
+
 # The CPUs a report may use: those outside the measurement container's cpuset.
 pin_prefix=()
 if [ "$pin" = 1 ] && command -v taskset >/dev/null 2>&1; then
@@ -184,8 +194,8 @@ if [ "$pin" = 1 ] && command -v taskset >/dev/null 2>&1; then
   fi
 fi
 
-# files at a time for the corpus commands (the gate and the mutants have their own default, also 12)
-case " ${jvmargs[*]-} " in *" -Dm8.jobs="*) ;; *) jvmargs+=("-Dm8.jobs=12") ;; esac
+# passes / files / mutants at a time: 4 unless --jobs says otherwise
+case " ${jvmargs[*]-} " in *" -Dm8.jobs="*) ;; *) jvmargs+=("-Dm8.jobs=4") ;; esac
 
 # a report on another tree than the main tree says so and gets the tree's name as its suffix (Diff.sandbox)
 [ "$tree" = "$MAIN" ] || jvmargs+=("-Dm8.tree=$tree")
@@ -194,7 +204,7 @@ run_main() {
   # -Xss2m on purpose: the machine must not need a deep host stack (stepper-convention H9).
   # -Xmn1g: with the default young generation (a third of the heap) Machine.heapAllows counts free bytes that a
   # large array cannot use (it must fit into the old generation), and a growth it allowed ends in OutOfMemoryError.
-  ${pin_prefix[@]+"${pin_prefix[@]}"} "$JAVA_HOME/bin/java" -Xss2m "-Xmx$heap" -Xmn1g -XX:+UseSerialGC \
+  ${slot_prefix[@]+"${slot_prefix[@]}"} ${pin_prefix[@]+"${pin_prefix[@]}"} "$JAVA_HOME/bin/java" -Xss2m "-Xmx$heap" -Xmn1g -XX:+UseSerialGC \
       --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow \
       "-Drlvm.root=$ROOT" "-Dm8.command=rlvm-machine/src/test/resources/m8/report.sh $orig" ${jvmargs[@]+"${jvmargs[@]}"} \
       -cp "$CP" rlvm.machine.M8Main "$@"

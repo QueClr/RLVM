@@ -395,6 +395,11 @@ public final class T2Bridge {
         return m.framesWritten;
     }
 
+    /** Activations of code blocks entered by the machine so far (statistics, tests). */
+    public static long entered(Machine m) {
+        return m.x7.entered;
+    }
+
     public static int recordCount(Machine m) {
         return m.vp;
     }

@@ -25,7 +25,7 @@ rejection, the oracle of the differential tests, and the primary engine until th
 
 | Launcher | System property | Values | Meaning |
 |---|---|---|---|
-| `-X levels=` | `rlvm.levels` | `complete` (default), `official` | how `is_def_eq` compares universe levels (sorts, level lists of constants): `LevelOps.isEquiv` / `listsEquiv`, the complete relation, or `LevelOps.isEquivOfficial`, the official normal-form test. `official` gives the official verdict (reject) on `corner-cases/imax-right-successor` and `imax-nested-absorption`. `is_prop` is `normalizes_to_zero` in both modes, as in the official kernel. The project owner's decision about the default is pending. |
+| `-X levels=` | `rlvm.levels` | `official` (default), `complete` | how `is_def_eq` compares universe levels (sorts, level lists of constants): `LevelOps.isEquivOfficial`, the official kernel's test (identity of the official normal forms, sound and incomplete), or with `complete` `LevelOps.isEquiv` / `listsEquiv`, the complete relation, which accepts a superset. The default follows the project owner's decision (OWNER-NOTES item 11, "resemble official by default"): `corner-cases/imax-right-successor` and `imax-nested-absorption` are rejected, as the official checker rejects them; `-X levels=complete` accepts them. `is_prop` is `normalizes_to_zero` in both modes, as in the official kernel. See "Universe levels: official by default" below. |
 | `-X ref.imports=` | `rlvm.ref.imports` | `off` (default), `on`, `verify` | the session's table of imported constant terms (below). Off by default: it took 17 % off Init's CPU time with the wave-2b store, and costs CPU time with the wave-4 store (mathlib, 8 workers: 629.7 s with it, 565.3 s without). `verify` recomputes every answer of the table and fails on a difference (tests) |
 | - | `rlvm.ref.importBytes` | bytes, default 4194304 | with `ref.imports=on`: overlay a session may spend on kept imports |
 | - | `rlvm.ref.importMinUses` | default 8 | with `ref.imports=on`: a term is kept once this many declarations of the session had to copy it |
@@ -33,7 +33,7 @@ rejection, the oracle of the differential tests, and the primary engine until th
 
 The two `-X` keys are declared by `RefEngine.Provider.optionKeys()` and reach the engine through
 `EngineProvider.factory(Map)`; primary, strict and reference instances of a run get the same map, so
-`-X levels=official` also governs re-checks and the environment pass. A `-X` setting wins over the
+`-X levels=complete` also governs re-checks and the environment pass. A `-X` setting wins over the
 system property; an unknown value ends the launcher with status 64. `RefOptions` holds the parsed
 settings (`RefEngine.factory(RefOptions)`, `new RefKernel(ctx, config, options)` for tools and tests).
 
@@ -171,10 +171,9 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
   (remaining type, number of trailing arguments) that `forcePrefix` turns into the term the first time
   the prefix is looked up. The arguments are closed terms, so every term compared, returned or read
   from the cache is the official one; the judgments and their order are unchanged (same step counts).
-- Universe levels are compared with `LevelOps.isEquiv` / `listsEquiv` by default, the complete relation
-  (a superset of the official normal-form test, as ARCHITECTURE 5 and R02 3.6 prescribe): the corner
-  cases `imax-right-successor` and `imax-nested-absorption` (outcome "either") are accepted, the
-  official kernel rejects them. `-X levels=official` switches to the official test (see Settings).
+- Universe levels are compared as the official kernel compares them (`LevelOps.isEquivOfficial`), so the
+  engine answers "different" for some levels that are equal under every assignment; the complete
+  relation is the opt-in `-X levels=complete` (section "Universe levels: official by default").
 - `EngineConfig.strict` and `memoCheck` are ignored (the reference kernel is always strict; there is no
   memo to cross-check). Only `KernelProfile.LEAN_4_36` exists; `LEAN_4_37` throws
   `UnsupportedOperationException` at construction.
@@ -182,7 +181,7 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 
 ## Tests
 
-`. ./env.sh && $MVN -o -q -pl rlvm-ref test` (131 tests, about 12 s):
+`. ./env.sh && $MVN -o -q -pl rlvm-ref test` (136 tests, about 12 s on a quiet host):
 
 | Class | What |
 |---|---|
@@ -191,10 +190,11 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 | `DefEqTest` (25) | each step of `is_def_eq_core`: quick cases, levels, binders, literals, `Bool.true`, proof irrelevance, lazy delta, same-head arguments, opaques, Nat offsets and folding, projections, congruence, function eta, structure eta, unit-like types, string literals, `eagerReduce`, propagation of errors |
 | `ScopeTest` (14) | visibility by rank, `exposeUnitMembers` (and that it drops stale normal forms), late-bound references, results that keep the argument's id, cache sharing between structurally equal terms, overlay reset, prelude guards, cyclic reductions, step / memory / depth budgets, cancellation (also in `begin` scopes, and CANCELLED wins when the memory signal is up as well) |
 | `EngineTest` (13) | `Session.check` on definitions, theorems, axioms, opaques (accept and every reject reason), a 100,000-deep value (stack overflow on the caller's thread, re-run on the deep stack), depth beyond the limit (decline), budgets, session accounting, provider registration |
-| `LevelsTest` (5) | `levels=complete` (default) and `levels=official` on the declarations of `corner-cases/imax-right-successor` and `imax-nested-absorption`, on equations both relations decide, on level lists of constants, through `Session.check`, through `KernelOps`, through `Provider.factory(Map)` (unknown value refused), in strict engines |
+| `LevelsTest` (7) | the default is the official comparison (`RefOptions.DEFAULT_LEVELS`, every way an engine or kernel is built, strict engines, the system property as a fallback only) and `levels=complete` is the opt-in: the declarations of `corner-cases/imax-right-successor` and `imax-nested-absorption`, equations both relations decide, level lists of constants, through `Session.check`, through `KernelOps`, through `Provider.factory(Map)` (unknown value refused) |
+| `LevelsGoldenTest` (2) | the answers of leanchecker v4.36.0 to the 4,358 `is_equivalent` and 2,939 `instantiate` questions of rlvm-level's golden set, replayed through the engine's `is_def_eq` with default settings: two sorts, the level lists of one constant (constant case and same-head lazy delta step), the instantiated type of a constant; `levels=complete` never answers "different" where the official kernel answers "equal" and differs on more than 1,000 comparisons |
 | `ImportsTest` (10) | the session's import table: off unless asked for; kept copies are served (with every answer recomputed), same verdicts and same step count with the table on and off, nothing kept in strict engines, the byte budget, a rejected declaration promotes nothing, `Session.reset()` drops the table, an overlay that was reset or cut below the kept copies behind the session's back is noticed (the ids are never used), `KernelOps` judgments read but never fill the table, literals of a declaration are released when it ends |
 | `TablesTest` (3) | `IntIntMap`, `LongIntMap`, `PairSet` against the library's collections through sequences of large and small declarations; a table does not stay large after a declaration that hardly used it |
-| `corpus.CorpusTest` (4) | the published arena tests at kernel level (see below); the perf group with `-Drlvm.ref.corpus.perf=true` |
+| `corpus.CorpusTest` (5) | the published arena tests at kernel level (see below); the two imax corner cases rejected by default and accepted with `levels=complete`; the perf group with `-Drlvm.ref.corpus.perf=true` |
 
 The fixtures are hand-made stores (`Fixture`, `Prelude`, the term language `Sexp`) written through the real
 `StoreBuilder`, with the derived facts of inductive types set by hand. Hand-made mutants that the new

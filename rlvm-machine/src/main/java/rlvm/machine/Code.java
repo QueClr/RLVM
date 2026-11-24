@@ -306,6 +306,24 @@ final class Code {
         return e >= 0 && e < nentry(c[o + Op.BLK_HDR2]) && c[o + Op.BLK_ENTRIES + e] != 0;
     }
 
+    /**
+     * The entry of a closure's block for {@code n} arguments (ISA 4.3.1 APPLY "CODE(f) ? call its block at entry
+     * j"): {@code j = min(n, arity)}, the number of binders the block takes from them, or 0 if that entry has no
+     * code. The arity of a sub-block is at most the number of leading binders of its term (its first 16 lambdas,
+     * or the one Pi), so the caller need not count them in the term.
+     */
+    static int entryFor(Machine m, int blk, int n) {
+        int a = addressOf(m, blk);
+        if (a == 0 || n < 1) {
+            return 0;
+        }
+        int[] c = m.engine.code.chunkAt(a);
+        int o = CodeStore.offsetAt(a);
+        int h2 = c[o + Op.BLK_HDR2];
+        int j = Math.min(n, arity(h2));
+        return j <= nentry(h2) && c[o + Op.BLK_ENTRIES + j - 1] != 0 ? j : 0;
+    }
+
     /** Number of arguments a block takes (the leading binders of its source term). */
     static int arityOf(Machine m, int blk) {
         int a = addressOf(m, blk);
@@ -543,7 +561,7 @@ final class Code {
                     r = mkApp(m, code, at, rb, w);
                     break;
                 case Op.KCONST:
-                    r = kConst(m, code, at, rb, w);
+                    r = kConst(m, code, at, blk, pc, rb, w);
                     break;
                 case Op.KSORT:
                     r = kSort(m, code, at, rb, w);
@@ -671,7 +689,7 @@ final class Code {
                 r = mkApp(m, code, at, rb, w);
                 break;
             case Op.KCONST:
-                r = kConst(m, code, at, rb, w);
+                r = kConst(m, code, at, blk, pc, rb, w);
                 break;
             case Op.KSORT:
                 r = kSort(m, code, at, rb, w);
@@ -836,12 +854,30 @@ final class Code {
             return m.fault(MachineErrors.E_MEM);
         }
         int xb = m.xp;
+        int[] x = m.X;
+        int[] rs = m.RS;
+        int[] vh = m.vh;
         for (int i = 0; i < n; i++) {
-            int v = val(m, rb, code[from + i]);
-            if (v >= SIG) {
-                return v;
+            int o = code[from + i];
+            int v;
+            if (o >>> Op.OPND_SHIFT <= Op.MODE_A) {
+                // a register or an argument: the common operand, read as val reads it (nothing here allocates)
+                v = rs[rb + (o & PAY)];
+                if (v > Layout.HOLE) {
+                    int w0 = vh[v << Layout.REC_SHIFT];
+                    if (w0 >>> Layout.KIND_SHIFT == Layout.SUSP) {
+                        v = Values.peek(m, v);
+                    }
+                } else if (v == Layout.HOLE && o >>> Op.OPND_SHIFT == Op.MODE_A) {
+                    return m.fault(MachineErrors.E_HOLE);
+                }
+            } else {
+                v = val(m, rb, o);
+                if (v >= SIG) {
+                    return v;
+                }
             }
-            m.X[xb + i] = v;
+            x[xb + i] = v;
         }
         m.xp = xb + n;
         return xb;
@@ -867,13 +903,37 @@ final class Code {
         return set(m, rb, w, r);
     }
 
-    /** KCONST d, D, LL (ISA 4.2): {@code CHEAD(D, LSUB(LL, ls))}. */
-    private static int kConst(Machine m, int[] code, int at, int rb, int w) {
+    /**
+     * KCONST d, D, LL (ISA 4.2): {@code CHEAD(D, LSUB(LL, ls))}. A constant with level parameters is answered by
+     * the inline cache of its site (ISA 1.5 {@code IC[site] = (epoch, ls, v)}, shared with KVAL: one probe instead
+     * of the LSUB cache and the CHEAD cache); the value is the record those two give.
+     */
+    private static int kConst(Machine m, int[] code, int at, int blk, int pc, int rb, int w) {
         int list = code[at + 2] & PAY;
-        if ((w & X_LPARAM) != 0) {
-            list = Levels.lsubList(m, list, m.RS[rb - W_LS]);
+        if ((w & X_LPARAM) == 0) {
+            return set(m, rb, w, Values.mkConst(m, code[at + 1] & PAY, list));
         }
-        return set(m, rb, w, Values.mkConst(m, code[at + 1] & PAY, list));
+        int ls = m.RS[rb - W_LS];
+        if (pc >= 4096) {
+            return set(m, rb, w, Values.mkConst(m, code[at + 1] & PAY, Levels.lsubList(m, list, ls)));
+        }
+        int site = blk << 12 | pc;
+        int c = (Hash.cell(site, ls) & IC_MASK) << Layout.CELL_SHIFT;
+        int[] ic = m.ic;
+        if (ic[c + Layout.IC_SITE] == site && ic[c + Layout.IC_EPOCH] == m.epoch && ic[c + Layout.IC_KEY] == ls) {
+            m.RS[rb + (w >>> 16 & 255)] = ic[c + Layout.IC_VALUE];
+            return 0;
+        }
+        int v = Values.mkConst(m, code[at + 1] & PAY, Levels.lsubList(m, list, ls));
+        if (v >= SIG) {
+            return v;
+        }
+        ic[c + Layout.IC_SITE] = site;
+        ic[c + Layout.IC_EPOCH] = m.epoch;
+        ic[c + Layout.IC_KEY] = ls;
+        ic[c + Layout.IC_VALUE] = v;
+        m.RS[rb + (w >>> 16 & 255)] = v;
+        return 0;
     }
 
     /** KSORT d, L (ISA 4.2): {@code SORT(LSUB(L, ls))}. */

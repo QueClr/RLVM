@@ -64,6 +64,45 @@ final class Conv {
          */
         long debt;
         static final long DEBT_MAX = 1L << 17;
+        /**
+         * The NON-OFFICIAL options of this package (NOTES-M4 D27): a comma list in the system property
+         * {@code rlvm.machine.m4}, read once per machine. They are deliberately not staging switches: what they
+         * enable is declaratively sound but is not the verdict of the official checker (owner note 11), so no
+         * switch set, {@code all} included, can turn them on. Off by default; strict mode never reads them
+         * ({@link #opt}). They exist to measure what the shortcuts would be worth.
+         */
+        int opts = parseOpts(System.getProperty("rlvm.machine.m4", ""));
+        /**
+         * {@code skipargs}: B3 (proof positions of CARGS skipped under the agreement rule), B4 (unread positions
+         * skipped under SAMEDEF) and the Prop mask of ETAS, with {@code Op.SW_FACTS}. Declaratively sound, but NOT
+         * the official verdict (finding S-F2, NOTES-M4 D27): never part of a default configuration.
+         */
+        static final int OPT_SKIP_ARGS = 2;
+        /**
+         * {@code congruence}: B1 (same-head probe), B12 (closure congruence, slots by CONV) and B2, with
+         * {@code Op.SW_PROBES}. Declaratively sound, but NOT the official verdict (finding S-F1, NOTES-M4 D27):
+         * never part of a default configuration.
+         */
+        static final int OPT_CONGRUENCE = 4;
+
+        private static int parseOpts(String list) {
+            int bits = 0;
+            for (String name : list.split(",")) {
+                switch (name.trim()) {
+                    case "":
+                        break;
+                    case "skipargs":
+                        bits |= OPT_SKIP_ARGS;
+                        break;
+                    case "congruence":
+                        bits |= OPT_CONGRUENCE;
+                        break;
+                    default:
+                        throw new IllegalArgumentException("unknown option of rlvm.machine.m4: '" + name + "'");
+                }
+            }
+            return bits;
+        }
 
         /** Session reset (ISA 1.6): forget everything, in O(used). */
         void reset(Machine m) {
@@ -408,7 +447,7 @@ final class Conv {
         if ((t >>> 1) == 0 || (s >>> 1) == 0) {
             return m.fault(MachineErrors.E_INTERNAL); // NONE or HOLE is never a side of a comparison
         }
-        if (m.sw != 0 && probing(m) && sameClosure(m, t, s)) {
+        if (m.sw != 0 && congruence(m) && sameClosure(m, t, s)) {
             return convB12(m, t, s, d);
         }
         return convForce(m, t, s, d);
@@ -569,7 +608,7 @@ final class Conv {
             }
             return convBind(m, t0, s0, a, b, d);
         }
-        if (m.sw != 0 && ka == Layout.NEU && kb == Layout.NEU && probing(m)) {
+        if (m.sw != 0 && ka == Layout.NEU && kb == Layout.NEU && congruence(m)) {
             long budget = b1Budget(m, a, b);
             if (budget != 0) {
                 return convB1(m, t0, s0, a, b, budget, d);
@@ -601,7 +640,7 @@ final class Conv {
 
     /** c3 / step 3: {@code tn = whnf_core(t, cheap_proj = true)}. The flag WHNF answers CORE inline. */
     private static int convCore1(Machine m, int t0, int s0, int a, int b, int d) {
-        if ((m.sw & Op.SW_PROBES) != 0 && a > 0
+        if ((m.sw & Op.SW_PROBES) != 0 && a > 0 && opt(m, Ext.OPT_CONGRUENCE)
                 && ((m.vh[a << Layout.REC_SHIFT] >>> W0_PROOF_SHIFT) & 3) == Layout.TRI_YES) {
             // [B2] (ISA 6.3): a known proof is compared by type before it is reduced: it enters c4 as it is
             return convIrrel(m, t0, s0, a, b, d);
@@ -895,6 +934,29 @@ final class Conv {
     /** True if speculative segments may be started: step 5 is on and the declaration's probe debt is below its bound. */
     static boolean probing(Machine m) {
         return (m.sw & Op.SW_PROBES) != 0 && m.x4.debt < Ext.DEBT_MAX;
+    }
+
+    /**
+     * True if the congruence shortcuts B1 and B12 may start a segment: step 5 is on, the probe debt is below its bound
+     * AND the non-official option {@code congruence} is given (finding S-F1: a T by congruence of arguments or frame
+     * slots is not always a T of the official procedure).
+     */
+    static boolean congruence(Machine m) {
+        return probing(m) && opt(m, Ext.OPT_CONGRUENCE);
+    }
+
+    /**
+     * True if CARGS and ETAS may skip positions by the fact record (B3, B4, the Prop mask): step 2 is on AND the
+     * non-official option {@code skipargs} is given (finding S-F2: the official procedure compares two proofs by
+     * their types, and that comparison can fail where the agreement rule holds).
+     */
+    static boolean skipArgs(Machine m) {
+        return (m.sw & Op.SW_FACTS) != 0 && opt(m, Ext.OPT_SKIP_ARGS);
+    }
+
+    /** True if the experiment {@code bit} of {@link Ext#opts} is on; never in strict mode (ISA 14.2). */
+    static boolean opt(Machine m, int bit) {
+        return (m.x4.opts & bit) != 0 && !m.strict;
     }
 
     /** Accounts the outcome of a segment that was given {@code budget} ticks (see {@link Ext#debt}). */
@@ -1499,7 +1561,26 @@ final class Conv {
             int x = Reduce.core(m, sn, Op.FULL, d + 1);
             return x >= SIG ? m.sig2(x, K_LSTEP_1, tn, sn) : k_lstep1(m, tn, sn, x, d);
         }
+        if ((m.sw & Op.SW_LAZY_EVAL) != 0 && Reduce.whnfFast(m, sn) == sn) {
+            return evalT(m, tn, sn, d);
+        }
         return unfoldT(m, tn, sn, 0, d);
+    }
+
+    /**
+     * [D26, {@code Op.SW_LAZY_EVAL}] Only tn unfolds and sn is weak-head normal (flag or memo; not a projection): the
+     * official loop would now unfold tn step by step, {@code whnf_core(unfold_definition(tn))}, until it no longer
+     * unfolds, with sn fixed; no same-head state can occur and an intermediate tn (delta-headed) is never
+     * identical to sn. The composition of those steps is taken at once: {@code tn = WHNF(tn)}, then the quick test
+     * of the step. Sound: WHNF is a composition of official reduction steps. A WHNF that does not move tn (never
+     * for a delta head) falls back to the single official step.
+     */
+    private static int evalT(Machine m, int tn, int sn, int d) {
+        int w = Reduce.whnf(m, tn, d + 1);
+        if (w == tn) {
+            return unfoldT(m, tn, sn, 0, d);
+        }
+        return w >= SIG ? m.sig2(w, K_LSTEP_5, sn, 0) : lquick(m, w, sn, d);
     }
 
     /** LSTEP[1](tn, sn); r = CORE(sn, full). */
@@ -1513,7 +1594,19 @@ final class Conv {
             int x = Reduce.core(m, tn, Op.FULL, d + 1);
             return x >= SIG ? m.sig2(x, K_LSTEP_2, tn, sn) : k_lstep2(m, tn, sn, x, d);
         }
+        if ((m.sw & Op.SW_LAZY_EVAL) != 0 && Reduce.whnfFast(m, tn) == tn) {
+            return evalS(m, tn, sn, d);
+        }
         return unfoldS(m, tn, sn, d);
+    }
+
+    /** [D26, {@code Op.SW_LAZY_EVAL}] Only sn unfolds and tn is weak-head normal: {@code sn = WHNF(sn)} (see {@link #evalT}). */
+    private static int evalS(Machine m, int tn, int sn, int d) {
+        int w = Reduce.whnf(m, sn, d + 1);
+        if (w == sn) {
+            return unfoldS(m, tn, sn, d);
+        }
+        return w >= SIG ? m.sig1(w, K_LSTEP_7, tn) : lquick(m, tn, w, d);
     }
 
     /** LSTEP[2](tn, sn); r = CORE(tn, full). */
@@ -1927,7 +2020,7 @@ final class Conv {
         if (c != T) {
             return F;
         }
-        if ((m.sw & Op.SW_FACTS) != 0) {
+        if (skipArgs(m)) {
             int row = ctorOf(m, b);
             if (Facts.facts(m, row) == 0) {
                 int index = Facts.sigd(m, row, d + 1);
@@ -1955,7 +2048,7 @@ final class Conv {
         int np = dt.ctorNumParams(ctor);
         int nf = dt.ctorNumFields(ctor);
         int ind = dt.ctorInduct(ctor);
-        long prop = (m.sw & Op.SW_FACTS) != 0 && Values.kind(m, b) == Layout.NEU ? Facts.propMask(m, Values.a(m, b)) : 0L;
+        long prop = skipArgs(m) && Values.kind(m, b) == Layout.NEU ? Facts.propMask(m, Values.a(m, b)) : 0L;
         for (int i = from; i < nf; i++) {
             if (np + i < Layout.FACT_POSITIONS && (prop >>> (np + i) & 1L) != 0) {
                 continue;

@@ -78,13 +78,20 @@ final class M8Gate {
             return switches == 0 ? "generic tier (no switch)" : Debug.switchNames(switches);
         }
 
+        /** Every corpus and every part of the gate. */
+        boolean complete() {
+            return conv && (tier || switches == 0) && audits && pipeline
+                    && corpora.containsAll(List.of("tutorial", "bugs", "all", "init", "std", "reachability", "cedar"));
+        }
+
         int sessionMib() {
             return (int) (sessionBytes >> 20);
         }
     }
 
+    /** Passes at a time unless {@code -Dm8.jobs} says otherwise: 4, the limit of one host-wide slot ({@code bench/slot.sh}). */
     static int defaultJobs() {
-        return Math.max(1, Math.min(12, Runtime.getRuntime().availableProcessors()));
+        return Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors()));
     }
 
     /** A plan from system properties: {@code m8.switches}, {@code m8.sessionMib}, {@code m8.jobs}, {@code m8.parts}, {@code m8.corpora}, {@code m8.checkSeconds}, {@code m8.fileSeconds}. */
@@ -110,9 +117,20 @@ final class M8Gate {
         if (corpora != null) {
             p.corpora = new ArrayList<>(List.of(corpora.split(",")));
         }
-        String name = p.switches == 0 ? "v0" : Debug.switchNames(p.switches).replace(',', '+');
-        p.name = Diff.reportName(System.getProperty("m8.name", name));
+        p.name = name(p);
         return p;
+    }
+
+    /**
+     * The name of a plan's report: {@code -Dm8.name}, else {@code v0} or the switches joined by {@code +}; with
+     * {@code -partial} when the plan leaves out a corpus or a part, so that only the complete gate writes the plain name.
+     */
+    static String name(Plan p) {
+        String name = p.switches == 0 ? "v0" : Debug.switchNames(p.switches).replace(',', '+');
+        if (!p.complete()) {
+            name += "-partial";
+        }
+        return Diff.reportName(System.getProperty("m8.name", name));
     }
 
     /** The lanes of a plan: lane 0 is the machine under test, the others are compared with it. */
@@ -244,13 +262,21 @@ final class M8Gate {
         final int total = paths.size();
         final long t0 = System.nanoTime();
         List<Thread> threads = new ArrayList<>();
-        for (String p : big) {
+        long heapGb = (Runtime.getRuntime().maxMemory() + (1L << 29)) >> 30;
+        // big files: the loaded store of each stays in the heap while its lanes run (Std: about 1 GB), so only as
+        // many at a time as a fifth of the heap in gigabytes; the lanes of one run at the same time
+        final ConcurrentLinkedQueue<String> bigQueue = new ConcurrentLinkedQueue<>(big);
+        int bigWorkers = big.isEmpty() ? 0 : (int) Math.max(1, Math.min(big.size(), heapGb / 5));
+        for (int i = 0; i < bigWorkers; i++) {
             threads.add(worker("m8-gate-big", () -> {
-                M8Lanes.Options o = options(cpu, fileMillis);
-                o.parallelLanes = true;
-                M8Lanes.FileRun r = M8Lanes.run(p, specs, o);
-                done.put(p, r);
-                progress(what, finished.incrementAndGet(), total, r, t0);
+                String p;
+                while ((p = bigQueue.poll()) != null) {
+                    M8Lanes.Options o = options(cpu, fileMillis);
+                    o.parallelLanes = true;
+                    M8Lanes.FileRun r = M8Lanes.run(p, specs, o);
+                    done.put(p, r);
+                    progress(what, finished.incrementAndGet(), total, r, t0);
+                }
             }));
         }
         Runnable drainSmall = () -> {
@@ -278,9 +304,9 @@ final class M8Gate {
             threads.add(worker("m8-gate-small", drainSmall));
         }
         // heavy files: each may hold gigabytes (the reference kernel on perf/app-lam: 1.2 GB of overlay), so only
-        // as many at a time as a fifth of the heap in gigabytes, at most a third of the jobs
-        long heapGb = (Runtime.getRuntime().maxMemory() + (1L << 29)) >> 30;
-        int heavyWorkers = heavy.isEmpty() ? 0 : (int) Math.max(1, Math.min(Math.max(1, jobs / 3), heapGb / 5));
+        // as many at a time as a fifth of the heap in gigabytes, at most a third of the jobs; in a heap below
+        // 10 GB they wait until everything else is done and then run one at a time
+        int heavyWorkers = heavy.isEmpty() || heapGb < 10 ? 0 : (int) Math.max(1, Math.min(Math.max(1, jobs / 3), heapGb / 5));
         for (int i = 0; i < heavyWorkers; i++) {
             threads.add(worker("m8-gate-heavy", drainHeavy));
         }
@@ -288,6 +314,13 @@ final class M8Gate {
             t.start();
         }
         for (Thread t : threads) {
+            join(t);
+        }
+        if (!heavy.isEmpty()) {
+            // (a small heap) one heavy file at a time, its lanes one after the other, nothing else running
+            M8Pipeline.log.println("m8 " + what + ": " + heavy.size() + " heavy files, one at a time (heap " + heapGb + " GiB)");
+            Thread t = worker("m8-gate-heavy", drainHeavy);
+            t.start();
             join(t);
         }
         // the memory victims again, one at a time, lanes one after the other, nothing else running
@@ -772,7 +805,9 @@ final class M8Gate {
         sb.append("# machine-gate-").append(p.name).append(": THE GATE of engine \"machine\" with switches [").append(Debug.switchNames(p.switches)).append("]")
                 .append(p.switches == 0 ? " (the generic tier, v0)" : "").append('\n');
         sb.append('\n');
-        sb.append("**RESULT: ").append(res.verdict()).append("**\n\n");
+        sb.append("**RESULT: ").append(res.verdict()).append(p.complete() ? "" : " -- A PARTIAL RUN, NOT THE GATE: corpora " + p.corpora
+                + (p.conv ? "" : ", no convention equivalence") + (p.tier || p.switches == 0 ? "" : ", no tier equivalence") + (p.audits ? "" : ", no audits")
+                + (p.pipeline ? "" : ", no pipeline")).append("**\n\n");
         sb.append("- generated ").append(Instant.now().truncatedTo(ChronoUnit.SECONDS)).append(" by `").append(p.command).append("`\n");
         sb.append("- measured: ").append(Diff.lastPublication()).append('\n');
         sb.append("- machine under test: ").append(res.specs.get(0).config).append("; ").append(res.specs.size()).append(" lanes per file; ")

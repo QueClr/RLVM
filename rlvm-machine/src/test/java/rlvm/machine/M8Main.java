@@ -74,12 +74,10 @@ final class M8Main {
             case "gate": {
                 // label = the report's name; the corpora, switches and parts come from system properties
                 M8Gate.Plan plan = M8Gate.planFromProperties();
-                if (!label.equals("-")) {
-                    plan.name = Diff.reportName(label);
-                }
                 if (args.length > 2) {
                     plan.corpora = new java.util.ArrayList<>(Arrays.asList(Arrays.copyOfRange(args, 2, args.length)));
                 }
+                plan.name = label.equals("-") ? M8Gate.name(plan) : Diff.reportName(label);
                 plan.command = System.getProperty("m8.command", "M8Main " + String.join(" ", args));
                 status = M8Gate.report(plan).pass() ? 0 : 1;
                 break;

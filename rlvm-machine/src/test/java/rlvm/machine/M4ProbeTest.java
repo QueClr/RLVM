@@ -53,6 +53,7 @@ class M4ProbeTest {
             f.hostDepth(depth);
             if (probes) {
                 f.switches("probes");
+                f.m.x4.opts |= Conv.Ext.OPT_CONGRUENCE; // B1 / B12 / B2 are the non-official option (finding S-F1)
             }
             m.stats = true;
             m.debug |= Op.DBG_TRACE;
@@ -511,6 +512,7 @@ class M4ProbeTest {
             f.def("const2", "(-> Nat Nat Nat)", "(fun (a : Nat) (b : Nat) a)", Fixture.regular(1));
             f.seal();
             f.switches("probes");
+            f.m.x4.opts |= Conv.Ext.OPT_CONGRUENCE;
             f.debug("shortcheck");
             Machine m = f.m;
             long audits = m.audits;

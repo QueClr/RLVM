@@ -723,6 +723,86 @@ instruction count goes the other way (Init 118.0 G at 2 MiB, 97.9 G at 16 MiB): 
 and misses the cache more, so the cap is a locality setting and CPU time is the measure for it (OWNER-NOTES
 10). For the machine's owners: on Std a warm session at its best cap is no faster than no warm session
 (13.80 s against 13.72 s, with 17 % fewer instructions); on Init it saves 4 %.
+
+#### Slow units inside a claim (reachability)
+
+Where the four heavy units of reachability (4137, 4139, 4145, 4158: 32 M of the corpus's 35 M machine ticks,
+inside 22 consecutive units) run, from the run statistics (`units.top[].worker`, CPU time per worker thread).
+These facts do not depend on the host's load. Two native images from the same jars, differing only in the
+driver jar (`work/rlvm-driver/w7/dist-B`: published eb0944caa630; `dist-native`: this tree, 50adc1f555bd),
+`-X engine=machine -X machine.switches=warm,gated,expect -X session-mib=4`:
+
+| Driver | workers | runs | heavy units on one worker | CPU of the busiest worker | workers with less than 0.5 s of CPU |
+|---|--:|--:|---|--:|--:|
+| before | 8 | 2 | three of the four in both runs (4137 + 4139 + 4145) | 10.2 s, 10.5 s | 6 of 8 |
+| before | 4 | 2 | three of the four in both runs | 10.3 s, 10.6 s | 2 of 4 |
+| after | 8 | 2 | none: four units on four workers | 4.3 s, 4.3 s | 4 of 8 |
+| after | 4 | 1 | none: four units on four workers | 4.3 s | 0 of 4 |
+
+So the wall clock of the checking phase is bounded below by 10.2 s to 10.6 s before and by 4.3 s after (the
+heaviest single unit; total CPU time unchanged: 14.9 s to 15.5 s of user + system time in all runs). Those
+seven runs were made on the host, on the efficiency cores at a load average above 200 (`work/rlvm-driver/w7/
+host-reach.sh`), so their wall clock (before 87 s to 203 s, after 49 s to 63 s) says nothing beyond the
+direction. The measurement in the container (`work/rlvm-driver/w7/sched.sh`: reachability, con-leche and
+mathlib with 4 and 8 workers, before and after, one hold of the measurement lock) is in the table below if it
+got its turn at the lock; see `work/status/rlvm-driver.log` for the state at the end of the session.
+
+SCHED_TABLE_PLACEHOLDER
+
+#### Worker count with the machine (`--threads auto`)
+
+`rlvm-driver/bin/threads-gate.sh --dist work/rlvm-driver/w7/dist-native --native --engine machine -X
+machine.switches=warm,gated,expect work/exports/mathlib.ndjson` (one hold of the lock, 14:22Z to 14:31Z, **load
+average 180 to 240**; raw data `work/rlvm-driver/gate/20261124T135329Z-w7-machine-step1.jsonl`; machine jar
+f82074b207f1 of 13:39Z):
+
+| workers | CPU | wall | peak RSS | instructions | CPU vs 1 worker | instructions vs 1 |
+|--:|--:|--:|--:|--:|--:|--:|
+| 1 | 231.8 s | 233.0 s | 2,671 MB | 2,908.4 G | | |
+| 2 | 247.9 s | 133.3 s | 2,656 MB | 2,986.0 G | +6.9 % | +2.7 % |
+| 4 | 241.6 s | 79.3 s | 2,578 MB | 2,987.3 G | +4.2 % | +2.7 % |
+| 6 | 248.9 s | 73.6 s | 2,791 MB | 2,988.8 G | +7.4 % | +2.8 % |
+| 8 | 267.4 s | 82.7 s | 2,828 MB | 2,993.2 G | +15.3 % | +2.9 % |
+
+What can be read from it and what cannot. Independent of the load: a run with several workers executes 2.7 %
+to 2.9 % more instructions than a run with one, **whatever their number** (2 workers +2.7 %, 8 workers
++2.9 %): the price is that of the multi-worker mode itself (runs and steals instead of one pass in file
+order: more sessions that step back in rank or start cold), not a price per worker. Dependent on the load:
+the CPU time per instruction rises with the worker count (+15 % CPU for 8 workers at +2.9 % instructions) and
+8 workers are slower in wall clock than 6 (82.7 s against 73.6 s): the container's eight cores were shared
+with other jobs during these runs (the machine's owners measured the same corpus with 8 workers at 42.3 s
+wall and 206 s CPU at 13:30Z, load average below 20, without the switches). **So this series does not decide
+the default**: read literally, the 5 % gate gives 4 (the arena run line's `--threads 4`); the instruction
+counts say that 6 or 8 workers cost nothing beyond what 2 cost. `Run.autoWorkers` is unchanged (6 on 8 CPUs).
+The gate is one command and about ten minutes of lock time; it has to be repeated on a quiet host, and the
+native image is the platform to do it on (no compiler threads, so the two CPUs that ARCHITECTURE 6.8 leaves
+free are needed only by a pipelined loader).
+
+The same gate with the reference engine on mathlib (the confirmation asked for since wave 4: about 40 minutes
+of lock time with the native image, 18 of them for the one-worker run) was **not run**: between 13:50Z and
+14:50Z the measurement lock had 12 to 14 waiters and a wait of 25 to 30 minutes per turn.
+
+#### Memory with the machine (mathlib, 8 workers)
+
+Peak RSS 2,828 MB (the row above; 2,855 MiB in the machine owners' run of 13:30Z, no switch), **under the
+4 GB target**; with the reference engine it was 7.15 GiB. The account of the owners' run
+(`work/m6/stats/mathlib-v0-g.json`): shared store 2.12 GB at the start of the check, peak accounted 2.45 GB,
+of which sessions and lanes of all nine checking threads 0.33 GB at their peak (reference engine: 2.5 GB to
+3.1 GB). What is left on the driver's side: nothing that shows. Of the 0.33 GB, 0.15 GB is the initial
+capacity of nine worker contexts (16 MiB of overlay each, `maxSlackBytes` 16.8 MB per worker; the wiring's
+and the store's default, not the driver's); the driver's own structures are the verdict board (one status
+word per unit) and the scheduler's runs. Thread stacks are reservations (1 GiB each, pages committed when
+touched). The give-back rule did not fire once (`giveBacks` 0) and no unit needed the heavy gate.
+
+#### Invariance and guards with the machine (final tree, driver jar 50adc1f555bd)
+
+| Guard | Result |
+|---|---|
+| `$MVN -o -q -pl rlvm-driver test` | 100 tests, 97 run green, 3 opt-in |
+| `rlvm-driver/bin/invariance.sh --engine machine -X machine.switches=warm,gated,expect tutorial bugs mdata` (machine jar f82074b207f1 as primary engine; every file 9 times: batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication every 1 / 7 / 64 units and 1 / 4 / 8 workers) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike in every mode (413 + 65 + 1,197, the same files as with the reference engine), 5 pipelined declines (REORDER_DECL mutants), 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY |
+| the same, `published` (231 files) | INVARIANCE_PUBLISHED_PLACEHOLDER |
+| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (reference engine as primary) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
+| `scripts/gate.sh --dist work/rlvm-driver/w7/dist-gate --corpus tutorial --corpus bugs --corpus mdata --corpus prelude` (the published jars of 13:46Z with this driver jar; JVM launcher, reference engine, 1 worker, batch) | GATE_PLACEHOLDER |
 <!-- measured:end -->
 
 ## Deviations from the design documents

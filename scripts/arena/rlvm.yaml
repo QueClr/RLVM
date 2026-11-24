@@ -24,12 +24,13 @@
 # used by a default build: owner's decision, docs/design/OWNER-NOTES.md item 11).
 #
 # Worker count: 4 (the same gate, Part I section I.3). With four workers the image's CPU time is that
-# of one worker (medians 1.02 / 1.01 / 0.98 times on Init, Std and the Cedar slice) at 2.3 to 2.7 times
-# the speed; eight workers cost 1.07 to 1.09 times the CPU time of one for 18 % less wall clock than
-# four on Init and Std and nothing on the Cedar slice and reachability. Six (the driver's proposal for
-# `--threads auto`) is the open candidate: it could only be measured on a host at load 250 and needs
-# a quiet one and a mathlib run with the machine. To change it, change BOTH numbers below (`--threads`
-# in the run line and `threads:`, the CPU slots the arena reserves).
+# of one worker (1.02 / 1.01 / 0.98 times on Init, Std and the Cedar slice) at 2.5 to 2.7 times the
+# speed; eight workers cost 1.07 times the CPU time of one for 18 % less wall clock than four on Init
+# and Std and nothing on the Cedar slice and reachability. Six (the driver's proposal for
+# `--threads auto`) is the open candidate: it has no valid measurement yet (the runs made with six
+# workers fell into the hour in which the host was out of memory) and needs a quiet host and a
+# mathlib run with the machine. To change it, change BOTH numbers below (`--threads` in the run line
+# and `threads:`, the CPU slots the arena reserves).
 #
 # bench/rlvm/run.sh, suite.sh and measure.sh read the `run:` line of this file, so that local
 # measurements execute exactly the command the arena would. Keep it on one line.

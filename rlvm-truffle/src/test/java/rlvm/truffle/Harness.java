@@ -51,6 +51,7 @@ final class Harness implements AutoCloseable {
         long records;
         long runWords;
         long frames;
+        long entered;
         long cpuNanos;
         long wallNanos;
         String firstFailure = "";
@@ -180,6 +181,7 @@ final class Harness implements AutoCloseable {
         r.records = T2Bridge.recordsMade(m);
         r.runWords = T2Bridge.runWordsMade(m);
         r.frames = T2Bridge.framesWritten(m);
+        r.entered = T2Bridge.entered(m);
         return r;
     }
 

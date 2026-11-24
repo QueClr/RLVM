@@ -42,7 +42,7 @@
 #                     arena-shaped container on eight of them), so that it does not spoil somebody's
 #                     numbers; it is slower there (the tutorial corpus: 10-15 minutes instead of 5)
 #
-# Output: the slice table work/status/gate/slice-all-<parent>-<dist>.md (never work/status/slice-all.md,
+# Output: the slice table work/status/gate/slice-all-<path of the distribution, / as ->.md (never work/status/slice-all.md,
 # which is the steward's record), the judge reports in work/mutants-reports/, one summary line per step.
 # Exit status: 0 if every step passed, 1 if not, 2 usage, 70 nothing built.
 set -uo pipefail
@@ -154,7 +154,12 @@ if [ "$slice" = 1 ]; then
   # A gate never writes work/status/slice-all.md (the steward's record of the published state, made
   # with scripts/slice.sh --all): every gate has its own table under work/status/gate/.
   mkdir -p "$ROOT/work/status/gate"
-  args+=(--out "$ROOT/work/status/gate/slice-all-$(basename "$(dirname "$dist")")-$(basename "$dist").md" --tag "gate-$(basename "$(dirname "$dist")")-$(basename "$dist")")
+  # The name carries the distribution's whole path below the project root (work/steward/w7/dist-gate
+  # -> work-steward-w7-dist-gate): two directory names were not enough, work/steward/w7/dist-gate and
+  # work/rlvm-driver/w7/dist-gate wrote the same table and the same raw report on 2026-11-24.
+  gate_name="$(realpath -m --relative-to="$ROOT" "$dist" 2>/dev/null | tr -c 'A-Za-z0-9._\n-' '-')"
+  [ -n "$gate_name" ] || gate_name="$(basename "$(dirname "$dist")")-$(basename "$dist")"
+  args+=(--out "$ROOT/work/status/gate/slice-all-$gate_name.md" --tag "gate-$gate_name")
   [ "$load" = batch ] || args+=(-X "load=$load")
   # A pinned gate runs on the slow cores, usually beside other people's jobs: it guards verdicts,
   # not the arena's time limits (those are read from scripts/slice.sh on a quiet machine).

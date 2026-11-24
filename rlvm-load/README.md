@@ -484,6 +484,52 @@ Reading:
    (139 s wall, of which the load is 12-14 s) about 10 %; with an engine near the leaders' 18 s it is
    the difference between "load, then check" (about 14 s + check) and max(load, check).
 
+### Wave 7: the load phase in the native image, profiled and attacked (2026-11-24)
+
+Method: CE native image `-O3` with local symbols, arena container, `rlvm --threads 1 FILE -X engine=machine
+-X stop-after=load` = reader + loader + store and nothing else; `perf record -F 4000` for the shares
+(`work/pipeline-w7/perf/*-load-*.txt`), `perf stat` task-clock for the CPU time (`work/pipeline-w7/loadcpu.sh`,
+alternating runs inside one hold of the measurement lock).
+
+Where the load of the published jars went (mathlib 66,246 samples = 16.6 s; Init 3,260 = 0.82 s):
+
+| Share of the load phase | mathlib | Init | What it is |
+|---|--:|--:|---|
+| `ProofBlocks` promotion (`pending`, `seek`, `promote`, `blockOfRecord`, `promoPut`, ..) | 20.4 % | 18.2 % | memo probes, block search, record skipping: cache misses (store) |
+| reader (`Scanner.num` 6.6, `Mem.u64` 4.0, `ExportReader.sequential` 3.8, `Linker`, copy) | 20.3 % | 24.0 % | `rlvm-export`; `Mem.u64` and `Scanner.num` are out-of-line calls in the image |
+| `Loader.exprApp` (+ `exprLam` / `exprForall`) | 12.2 % | 10.6 % | the read of `loc[ordinal]` for a reference to an earlier record |
+| `ProofBlocks$WriterImpl` (`ref` 8.0) | 9.3 % | 11.2 % | `ref` loaded the shared node it names (store) |
+| `NodeCtx` (`writeApp` 6.7) | 9.2 % | 6.3 % | reads of the children's nodes |
+| kernel | 8.3 % | 12.4 % | page faults of the mapped input and of fresh arrays |
+| names (`Loader.nameStr`, `NameTable.internNum`) | 7.1 % | 5.8 % | hash probes into a table far larger than the caches |
+| `Loader.sweep`, `ref`, `markReachable` | 5.2 % | 6.0 % | |
+
+Changes of this wave (the store's are in `rlvm-store/README.md`, "Wave 7"): the promotion memo as a direct
+map, a coarse record-to-block index, positions of the last group in `seek`, no load of the shared node in
+the block writer; in the loader **deferred location reads** (section "What the loader does": the record
+path no longer reads `loc`, all references of a segment to earlier records are resolved in one loop at
+the declaration line) and the **touch hint** from the mark pass. The store that is built is identical
+word for word: `work/pipeline-w7/digest` (`DigestAll` + the loader's `StoreDigest`: outcome or exception,
+every word of the export region, every block row, every word of every decoded block, every name, the
+structural digest of every unit) gives the same line with the published jars (store 45df9b63e7af, load
+30617170f7a3) and with the new ones for all 230 arena tests, all 16,928 mutants of the tutorial, bugs and
+mdata corpora, the 847 prelude mutants, Init, Std, the Cedar slice, reachability and mathlib (721,845
+units, 38,739,557 export nodes, 78,207,172 block records, 9,909,017 promoted).
+
+MEASUREMENTS_PLACEHOLDER
+
+Two diagnostic switches stay in the loader (environment variables, read when a `Loader` is created; both
+paths build the same store): `RLVM_LOAD_EAGER_LOC=1` reads `loc` when the record arrives, as before this
+wave; `RLVM_LOAD_NO_TOUCH=1` switches the touch hint off.
+
+What is left, by the profile after the changes (mathlib, load phase): the reader 22 % (`Mem.u64` 5 % and
+`Scanner.num` 8 % as out-of-line calls: `-H:PriorityForceInline=rlvm.export.Mem.u64` in the image build is
+the first thing to try; not measured), kernel 11 % (page faults), promotion 10 %, `NodeCtx.writeApp` 8 %,
+names 7 %, the block writer 5 %. The 8 s target for mathlib is not reached. The structural step that
+would reach it is X5's finding (requests.log, 14:04Z): on exporter output the private records of a theorem
+are an id range, so the loader need not parse, pack or promote them serially at all (four fifths of the
+expression records), and the workers parse their own proofs.
+
 ## Observations for the next work packages
 
 - The reader needs an id translation table for names with the real store (`LoadReport.readerIdTables`):

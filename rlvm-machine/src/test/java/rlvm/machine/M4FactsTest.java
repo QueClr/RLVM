@@ -60,6 +60,7 @@ class M4FactsTest {
             f.hostDepth(depth);
             if (facts) {
                 f.switches("facts");
+                f.m.x4.opts |= Conv.Ext.OPT_SKIP_ARGS; // B3 / B4 / the ETAS mask are the non-official option (finding S-F2)
             }
             if (shortcheck) {
                 f.debug("shortcheck");

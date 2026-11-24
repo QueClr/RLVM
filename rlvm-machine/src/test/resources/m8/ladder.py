@@ -107,9 +107,12 @@ def build_dist(args):
             sys.exit("ladder.py: %s has no bin/rlvm (build it: scripts/build.sh --published --dist %s)" % (dist, args.dist))
         log = dist + ".build.log"
         print("ladder: building the native image of the published jars -> %s (2-3 minutes; log %s)" % (os.path.relpath(dist, ROOT), os.path.relpath(log, ROOT)), flush=True)
+        cmd = [os.path.join(ROOT, "scripts/build.sh"), "--published", "--no-pgo", "--opt", "3", "--dist", dist]
+        slot = os.path.join(ROOT, "bench/slot.sh")
+        if os.access(slot, os.X_OK):
+            cmd = [slot, "-c", "ni", "-n", "2", "--"] + cmd  # native-image builds: two at a time host-wide
         with open(log, "w") as out:
-            p = subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "--published", "--no-pgo", "--opt", "3", "--dist", dist],
-                               cwd=ROOT, stdout=out, stderr=subprocess.STDOUT)
+            p = subprocess.run(cmd, cwd=ROOT, stdout=out, stderr=subprocess.STDOUT)
         if p.returncode != 0 or not os.path.isfile(info):
             sys.exit("ladder.py: the build failed (%s)" % log)
     text = open(info).read()
@@ -402,6 +405,10 @@ def cmd_status(args):
 
 
 def main():
+    # a measurement batch is a heavy job: it holds one of the host-wide slots (bench/slot.sh) from before it
+    # takes the measurement lock until it is done (never the other way round: nobody waits for a slot with the lock)
+    slot = os.path.join(ROOT, "bench/slot.sh")
+    reexec = len(sys.argv) > 1 and sys.argv[1] == "measure" and os.environ.get("M8_LADDER_SLOT") != "held" and os.access(slot, os.X_OK)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("measure")
@@ -421,6 +428,15 @@ def main():
     s = sub.add_parser("status")
     s.set_defaults(fn=cmd_status)
     a = ap.parse_args()
+    if reexec:
+        # the image first (its own slot class), then the batch under a heavy slot with that image
+        dist, _, _ = build_dist(a)
+        os.environ["M8_LADDER_SLOT"] = "held"
+        argv = [x for x in sys.argv[1:]]
+        if not a.dist:
+            argv += ["--dist", os.path.relpath(dist, ROOT)]
+        sys.stdout.flush()
+        os.execv(slot, [slot, "--", sys.executable, os.path.abspath(__file__)] + argv)
     a.fn(a)
 
 
