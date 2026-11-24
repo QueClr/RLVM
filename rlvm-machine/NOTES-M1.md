@@ -23,6 +23,11 @@ have to know, and what is not done. Files: `Values`, `Runs`, `Lits`, `Levels`, `
 | D14 | `Runs`, ISA 2.4 "REST run" | The REST bindings of a far frame are a **chain of chunks**: the outer bindings are cut from the outermost into REST runs of 64 slots plus a shorter tail; each chunk but the first has the far bit and its predecessor's id in the REST word; the id of the last chunk is the id of the sequence and is what the far frame holds. ISA 2.4 has one REST run with all the bindings | One run per far PRUNE is O(depth) words for every distinct depth: `perf/beta-ladder` (2,000 nested redexes) made 4.03 M run words (16 MB, the whole session cap) for 18,017 records; with chunks 0.41 M. Identity is unchanged (equal sequences give equal chains by induction; a difference in any chunk changes every later id). `Runs.rest(frame)` is the last chunk, `Runs.restLen` / `envLen` walk the chain, `Runs.enter` copies it; `Debug.scopeAudit` and `Show` follow the far bit generically and need no change. Time per far PRUNE stays O(depth) (hash and compare of every outer binding) |
 | D15 | `Values.Ext.openBits`, `Values.openOf`; ISA 2.3 | A second copy of flag OPEN: two bits per record (known, OPEN) in a `long[]` of `Values.Ext`, written when `Values` makes a record, cleared at reset in O(used / 32), counted in the footprint (1/128 of the records). `openOf(v)` answers from it and falls back to the record's own flag when there is no entry (a record made by other code through `Machine.internRecord`). The flag in the record stays the definition (I-FLAG); nothing else reads the table | "OPEN = or over the components" is evaluated once per new frame and per new application, over values scattered through `vh`; section 3.2 |
 | D13 | `Runs.get` | calls `Debug.scopeAudit` when `DBG_SCOPEAUDIT` is on | M6's request of 08:25Z (ISA 2.8: I-FV3 audited at every GET) |
+| D16 | `Runs`, ISA 1.6 run header | Bits 4..7 of the header of a FRAME or REST run (`Layout.RUN_CNT_SHIFT / RUN_CNT_MASK`, adopted by M6 at 14:00Z) = the number of slots that are not HOLE, saturating at 15. A function of the content, not part of the identity (`Layout.RUN_DERIVED` = OPEN + count is what a comparison of headers masks) | It makes a probe that looks only at the KEPT slots exact: a candidate of the same length whose kept positions agree with the environment and whose count equals the number of kept bindings that are not HOLE has nothing but HOLE elsewhere. A saturated count proves nothing: such a candidate (15 and more bindings) is compared slot by slot. Section 5.2 |
+| D17 | `Runs`, `Values`; ISA 13.3 `Hash.seed / step / run / neu` | The content hash of FRAME and REST runs and the hash of a NEU are private to `Runs` / `Values`: `Hash.fin` of the SUM over the slots that are not HOLE (over the arguments) of `mix((v + i * C1) * C2)`, `i` = de Bruijn index (argument position), plus the REST run / the head. `Hash.seed / step / run / neu` are no longer used by M1 (they remain for `TestTables`, whose runs are self-consistent and must not be mixed with `Runs`' in one session). `Machine.growRtab / growVtab / reset` read the stored hash words and are unaffected. The hash word of a stand-alone spine (`Runs.spine`) is 0 | PRUNE can hash the kept slots alone, and no multiplication waits for the previous one (the chained `Hash.step` was one dependent multiplication per slot of the frame's LENGTH: the hottest loop of the machine). Probe-sequence lengths on Init and the Cedar slice are those of the old hash within 0.1% (section 5.2) |
+| D18 | `Levels.lvlEq / listsEq`, ISA 4.4 LVLEQ | Levels are compared as the OFFICIAL kernel compares them by default: `a == b \|\| LevelOps.isEquivOfficial(a, b)` (identity of the official normal forms; sound, incomplete), lists pairwise. The complete relation (`LevelOps.isEquiv / listsEquiv`) only with the switch `levels-complete` (`Op.SW_LEVELS_COMPLETE`, never in strict mode) | Owner decision of 2026-11-24 (OWNER-NOTES item 11; orchestrator's request of 13:40Z): both engines resemble the official kernel by default; the arena's `corner-cases/imax-right-successor` and `imax-nested-absorption` are rejected. Same code as `RefKernel.levelEquiv / levelsEquiv` with `officialLevels` |
+| D19 | `Runs.restOf`, ISA 2.4 | A far PRUNE finds its REST chain through a direct-mapped cache of 64 cells `(eb, n, epoch) -> chain` in `Values.Ext`; a cell is used only after the chain it names was compared with the environment slot by slot (`Arrays.equals` per chunk) | Every far PRUNE under one deep environment needs the same chain; finding it by content hashed and compared every outer binding again (Cedar slice: 2.35 M far PRUNEs, 102 M slots). The cell is a hint verified by content, so a slab that was cut and rewritten costs a comparison and nothing else (no invariant about who writes `es`) |
+| D20 | `Values.mkLamAt / mkPiAt / suspRecordAt / mkSuspAt` (new), ISA 4.2 MKLAM / MKPI / MKSUSP | The closure or suspension of a term over a working environment in ONE operation: exactly the record of `mkX(m, t, Runs.prune(m, eb, en, fvMask(t)), ls)`, but the vtab slot of the record that a NEW frame would give is loaded before rtab is probed (the id of a new frame is the top of the run slab; a record over a frame that did not exist cannot exist). A 256-word table of recently looked-up frame hashes (`Values.Ext.seen`) only predicts "exists, do not speculate" | Section 5.4: in large sessions the load of the table slot IS the probe (79% of PRUNE on reachability), and the two probes of a closure wait for each other. Identity is unchanged (`M1ValuesTest.closuresOverAnEnvironmentAreTheTwoStepRecords`). `Eval.closure / table / suspend` call it since M2's publication of 16:48:45Z; `Infer`'s five PRUNE + constructor pairs (M5) do not yet |
 
 Not deviations, but choices the ISA leaves open:
 
@@ -131,15 +136,201 @@ Reading: the ISA's threshold for sparse frames ("above 2") is reached on calls a
 Sparse storage `(mask, kept values)` would save no memory (the mask costs two words where 1.8 HOLE words
 are saved per frame) and about half of the slot iterations of a PRUNE's hash and comparison. Not done.
 
+## 5. Wave 6 (2026-11-24): the value store measured and reworked
+
+Tools: `work/m1/mkdist.sh TAG [--native] [--tree DIR]` (a private distribution: the pipeline jars of the integrator's
+distribution + the machine jar of a tree; nothing is written to the main tree), `work/m1/m.py` + `work/m1/batch.sh`
+(the integrator's `m.py`: one row per run in `work/m1/measure.tsv`, a batch under ONE hold of the measurement lock,
+distributions interleaved), `work/m1/q.py` (the same run WITHOUT the lock on CPU 18, an X925 core outside the arena
+cpuset: instruction counts are exact there, CPU time is indicative; `work/m1/quick.tsv`), `work/m1/perf/` (perf
+record + annotate of a native image with symbols), `Runs.Stat` (counters; a compile-time constant switches them
+on), `work/m1/fake-eval.py` (the local fake of `Eval` for D20). Everything below is the CE native image `-O3`,
+one worker, v0, unless said.
+
+### 5.1 Distributions (instrumented JVM run, one worker, v0; `work/m1/stat/*.txt`)
+
+| | Init | Cedar slice | reachability |
+|---|--:|--:|--:|
+| PRUNE calls (found / new frame) | 47.2 M (28.2 / 19.0) | 14.3 M (10.1 / 4.19) | 21.1 M (8.4 / 12.6) |
+| mean frame length / kept slots, per call | 5.98 / 2.84 | 22.1 / 3.13 | 4.97 / 3.19 |
+| the same over new frames | 5.25 / 3.42 | 19.4 / 4.63 | 4.90 / 3.76 |
+| far PRUNEs (outer bindings re-hashed, before D19) | 13 K (0.2 M) | 2.35 M = 16% (102.3 M slots, 43.6 each) | 0 |
+| calls by kept slots: 1 / 2 / 3 / 4 / 5 and more | 27 / 27 / 18 / 12 / 16 % | 30 / 28 / 16 / 9 / 17 % | 20 / 19 / 19 / 15 / 27 % |
+| closure and suspension probes (new) | 58.6 M (30.0) | 17.9 M (7.65) | 23.9 M (14.3) |
+| of them SUSP / LAM / PI / PII | 74 / 20 / 5 / 1 % | 67 / 15 / 14 / 4 % | 61 / 38 / 1 / 0 % |
+| by kept slots of their frame: 0 / 1 / 2 / 3 / 4 / more / far | 19 / 22 / 22 / 14 / 10 / 13 / 0 % | 18 / 22 / 20 / 11 / 6 / 9 / 14 % | 12 / 17 / 17 / 17 / 13 / 24 / 0 % |
+| NEU probes (new) | 19.7 M (15.8) | 3.1 M (1.98) | 8.2 M (7.9) |
+| spine length 1 / 2 / 3 / 4 / 5 / 6 / more | 11 / 24 / 20 / 18 / 12 / 12 / 3 % | 12 / 25 / 30 / 12 / 9 / 7 / 5 % | 2 / 11 / 8 / 27 / 32 / 17 / 2 % |
+| run words made: frames / spines / REST | 137.8 / 88.6 / 0.02 M | 90.3 / 12.2 / 0.95 M | 87.0 / 51.0 / 0 M |
+| run words per declaration | 3,908 | 12,832 | 32,700 |
+| ENTER calls (slots copied) | 22.4 M (47.0 M) | 7.2 M (135.3 M) | 9.7 M (19.1 M) |
+
+Readings. (a) A frame is 2.1 times (Init) to 7 times (Cedar slice) longer than what it keeps: everything that
+iterates over the LENGTH is wasted work - that was the hash and the comparison of PRUNE (5.2). (b) On the Cedar
+slice the far frames are the elephant: 16% of the calls, 15% of the new frames, but 46% of the frame words (66
+words each) and, before D19, 102 M re-hashed outer bindings. (c) "PRUNE returns the frame that was just entered"
+(same base, same length, the idea of the wave-5 report) is 0.6% of the calls on Init and 1.7% on the Cedar slice:
+not worth a test, not built. (d) A direct-mapped cache keyed by (top of the environment, mask) in front of PRUNE,
+emptied at every PUSH / ENTER (the only invalidation `Runs` can know without help), would answer 23.5% of the calls
+on Init, 17% on the Cedar slice, 10% on reachability; not built, because of what 5.3 found.
+
+### 5.2 Stage A: kept-slot PRUNE, sum hashes, REST cache (published 14:22:54Z; kept)
+
+- PRUNE: the hash is `Hash.fin` of the sum of one independent term per kept binding (D17), the probe compares the
+  kept positions and the header count (D16), the miss writes HOLE over the length and then the kept slots. The loop
+  runs over the set bits of the mask (`b &= b - 1`), never over the length.
+- far PRUNE: the REST chain comes from the verified cache (D19); the near part is hashed like any frame.
+- NEU: the same sum hash over the arguments (D17); the two `arraycopy` calls of a new spine are a loop for at most 8
+  words (and none for an empty prefix); ENTER of at most 8 slots is a loop.
+- CHEAD index: two independent multiplications and the top bits instead of `Hash.cell` (two in sequence + `fin`).
+- OPEN bit table: the reset range is `[word of the session's first record, word of the last record made]` (records
+  are appended), so `mark` no longer keeps a minimum and a maximum.
+
+Identity: the counters of 5.1 are IDENTICAL before and after (frames found / new, records, run words, ticks, on Init
+and the Cedar slice), probe steps beyond the home slot too (frames 6,638,165 -> 6,643,160 on Init, 5,604,412 ->
+5,608,534 on the Cedar slice; NEU 4,390,620 -> 4,395,034 and 1,446,145 -> 1,452,037: the sum hash spreads as the
+chained one did). Tests: `M1RunsTest.keptSlotProbeKeepsIdentityExactly` (6,000 random environments and masks against
+a model keyed by the dense content: HOLE at kept positions, saturated counts, far frames, FRAME over the dense
+slots, ENTER round trip, neighbours that must differ), `restCacheIsVerifiedByContent`,
+`hashesSpreadConsecutiveIdsAndShiftedPositions`.
+
+Measured, base (the main tree of 13:20Z) against stage A, both built from the same foreign files:
+
+| corpus | instructions G | CPU s / wall s, median of two interleaved runs (locked batch A2, 16:05-16:07Z, load average 58-79) |
+|---|--:|---|
+| Init | 139.0 -> 131.2 (-5.6%) | 7.99 / 8.08 -> 7.36 / 7.46 (-7.9% CPU) |
+| Std | 223.2 -> 209.9 (-6.0%) | 13.40 / 13.51 -> 12.30 / 12.42 (-8.2%) |
+| Cedar slice | 47.0 -> 38.8 (-17.4%) | 3.38 / 3.67 -> 2.69 / 2.71 (-20.4%) |
+| reachability | 59.4 -> 56.8 (-4.4%) | 8.19 / 8.31 -> 8.12 / 8.24 (-0.9%; the two pairs: 7.98 -> 7.88, 8.39 -> 8.36) |
+
+(A first locked batch at 14:28-14:34Z gave Init 8.18 -> 7.69 s CPU, Std 13.96 -> 12.52, Cedar slice 3.50 -> 2.76,
+reachability 8.68 -> 8.38, but it fell into the window in which the host was thrashing; the orchestrator declared the
+timings of that window void.) Profile after stage A (`work/m1/perf/*-a2.txt`): `Runs.pruneNear` 11.6% -> 9.0% of the
+process on Init, 19.1% -> 11.4% on the Cedar slice (with `sameMasked` 3.7% -> `sameKept` 1.0%, `restChain` + `same`
+5.1% -> `sameChain` + `restOf` 3.0%), 23.7% -> 23.6% on reachability.
+
+### 5.3 What the probe costs now: the load of the table slot
+
+`perf annotate` of the three probe functions on reachability (one or two giant declarations, tables of 64-256 MiB):
+
+| function (share of the process) | the load of the table slot | the frame / record load after it |
+|---|--:|--:|
+| `Runs.pruneNear` (23.6%) | 79% (`rtab[slot]`) | 11% |
+| `Eval.table` = the inlined record probe (11.9%) | 76% (`vtab[slot]`) | 14% |
+| `Values.neu` (9.7%) | 83% (`vtab[slot]`) | 5% |
+
+About 39% of reachability is waiting for intern-table slots that miss the cache; hashing, comparing and writing
+are noise there. On Init (tables of 64 + 128 KiB against a 64 KiB first-level cache) the same load is 37% of
+`pruneNear`, and the whole process has 0.8% mispredicted branches (229.6 M) and 0.84% first-level misses (312 M), about
+a tenth of the time each. Experiments that follow from it:
+
+| experiment | result | verdict |
+|---|---|---|
+| smaller base tables (`-Drlvm.machine.sizes`, records / vtab / run words / rtab / pairs / plog), Init CPU s, two runs each | 14,15,16,14,12,10 (default): 7.55 / 7.47; 12,13,14,12,10,8: 8.02 / 7.91; 11,..: 8.13 / 8.13; 10,..: 8.27 / 8.27; Cedar slice 2.62-2.72 in all four | REJECTED (growth costs more than the misses; M6's sizes stand) |
+| front cache of recent frames (256 cells `(hash, epoch, frame)`, verified by content) in PRUNE | answers 48% of all frame lookups on Init (81% of the found ones), 51% on the Cedar slice, 68% of the found ones on reachability - and costs: Init 7.45-7.50 -> 7.59 s, 132.1 -> 133.5 G instructions; reachability 8.36-8.47 -> 8.69 | REJECTED |
+| the same + front cache of closure / suspension records (1,024 pairs; in the simulation it answers 83% of the records that are found on Init, 76% on the Cedar slice, 88% on reachability) | Init 7.40-7.50 -> 7.63 s, 134.6 G; reachability 8.30-8.45 -> 8.60 | REJECTED |
+| PRUNE + record in one operation, the record's slot loaded early ALWAYS | reachability 8.29 -> 8.20 s (8.36 / 8.23 / 8.29 against 8.35 / 8.10 / 8.20) | not enough alone |
+| the same, but no early load for a frame whose hash was looked up a moment ago (D20) | reachability 8.29 -> 7.69 s (7.81 / 7.66 / 7.69): -7.2%; Init, Std, Cedar slice within +-0.5% | KEPT as an operation (5.4) |
+
+Why the front caches lose: a lookup that a small recency cache can answer is a lookup whose table slot is still in
+the cache - the misses are the NEW keys (60% of the frames, 96% of the applications on reachability) and the old
+ones. A cache in front of a table only pays where it replaces work, not where it replaces a load that would have
+hit. The same argument retires the (environment, mask) cache of 5.1 (d). And why the early load must be
+predicted: when the frame exists, the speculative load fetches a cold line for nothing; the 256 recent hashes
+tell "exists" for 68-81% of the found frames at the price of one load and one store.
+
+### 5.4 The combined operation (D20; published 15:42:25Z; called by `Eval` since 16:48:45Z)
+
+`Values.mkLamAt / mkPiAt / suspRecordAt / mkSuspAt(m, t, eb, en, ls)`. Measured and gated BEFORE M2 adopted it,
+with a local fake of `Eval` that makes exactly the three calls M2 then published. Gates with the fake
+(`work/m1/fake-eval.py`): fast group green, tutorial 395 units and bugs 1,428 units DIFF-CLEAN, the Cedar slice 8,418, reachability 4,413, Init 58,547 and Std 101,146 units DIFF-CLEAN with 0 declines (`work/status/machine-diff-*-M1b.txt`).
+Locked batch D (16:24-16:27Z, load average 60-64; median of two interleaved runs), a2 = stage A, e9 = a2 + the combined operation called by the fake:
+
+| corpus | CPU s / wall s / instructions G: a2 -> e9 |
+|---|---|
+| Init | 7.39 / 7.51 / 132.1 -> 7.34 / 7.47 / 132.1 (-0.7% CPU) |
+| Std | 12.23 / 12.42 / 211.2 -> 12.27 / 12.39 / 211.2 (+0.3%) |
+| Cedar slice | 2.57 / 2.62 / 38.9 -> 2.55 / 2.68 / 39.1 (-0.8%) |
+| reachability | 7.92 / 8.07 / 57.4 -> 7.46 / 7.58 / 57.4 (-5.8% CPU, -6.1% wall; the two pairs: 7.92 -> 7.56, 7.93 -> 7.35) |
+
+The instruction counts do not move: the gain is cache misses that overlap, which is what owner note 12 asks to
+look at. KEPT (reachability lower, nothing higher by more than the noise of 1%).
+
+Eight workers (locked batch F, 17:10-17:12Z, load average 45-58; cold process, v0; median of two runs; base ->
+stage A -> stage A + combined operation):
+
+| corpus | CPU s (all threads) | wall s |
+|---|---|---|
+| Init | 8.88 -> 8.28 -> 8.10 | 4.98 -> 4.59 -> 4.10 |
+| Std | 14.50 -> 13.70 -> 13.45 | 6.50 -> 7.46 -> 6.71 (unusable: 4.6 to 8.5 s for ONE binary) |
+| Cedar slice | 3.58 -> 2.92 -> 2.89 | 0.88 -> 0.77 -> 0.78 |
+| reachability | 8.29 -> 8.02 -> 7.49 | 7.28 -> 6.84 -> 6.39 (one giant declaration: wall is one thread) |
+
+The CPU totals repeat the one-worker result (Init -6.8% / -8.8%, Std -5.5% / -7.2%, Cedar slice -18.4% / -19.3%,
+reachability -3.3% / -9.7% against the base). The wall clock of eight workers on this host, with 45-58 runnable
+processes beside the container, scatters by a factor of 1.8 between two runs of the same binary on Std; I do not
+draw a conclusion from it beyond "not slower".
+
+With the step-1 switches (locked batch E, 17:21-17:24Z; `warm,gated,expect,probes`, session cap 4 MiB; one worker;
+median of two; CPU s / wall s):
+
+| corpus | base | stage A (a2) | a2 + combined operation (e9) |
+|---|--:|--:|--:|
+| Init | 7.50 / 7.56 | 7.10 / 7.13 | 6.94 / 6.98 (-2.3% against a2) |
+| Std | 12.84 / 12.91 | 12.30 / 12.37 | 12.00 / 12.04 (-2.4%) |
+| Cedar slice | 2.92 / 2.94 | 2.40 / 2.41 | 2.38 / 2.42 (-0.8%) |
+| reachability | 8.09 / 8.22 | 7.87 / 7.97 | 7.32 / 7.40 (-7.0%) |
+
+a2 against e9 is a clean pair (same foreign files). base against a2 is not: a2 also contains what the other
+packages published between 13:20Z and 14:22Z (M6's pooled arrays among them); for stage A alone the clean pair is
+batch A2 above (v0). With warm sessions the tables are larger than a declaration's, and the combined operation
+gains on Init and Std too. Tick counts are identical in every pair (v0: 77,832,218 / 122,252,150 / 18,104,024 /
+34,599,254; `warm,gated,expect`: Init 56,026,060, Cedar slice 18,712,121).
+
+### 5.5 Storage strategies (owner note 8): what the distributions support
+
+- **Inline frames of 1 or 2 kept slots in the closure record** (no run, one probe): 44% of the closure probes on
+  Init and 42% on the Cedar slice have such a frame. NOT BUILT, for two measured reasons. (1) The second probe is
+  cheap exactly where sessions are small (after stage A a PRUNE of a small frame is a few kept-slot terms, one
+  table word and one comparison), and where sessions are large the two loads overlap with D20; my ESTIMATE for
+  inlining is about 1% of Init (not measured: it cannot be tried without the other packages). (2) The frame word of a
+  closure is read directly in M2, M4, M5, M6 and M7 (`Runs.enter(m, vh[o + B])`, `Match`, `Code` capture slots,
+  `Debug`, `Show`): every one of them would have to go through an accessor that tests the strategy.
+- **Inline arguments of a NEU with 1 or 2 arguments**: 35% of the applications on Init. Not built: spines are read
+  in place by M3, M4 and M7 (`rs[run + RUN_H + j]`), and word c of a NEU is its hash, which `Hash.ofRecord` reads.
+- **Sparse frames `(mask, kept values)` for long environments**: this is the strategy the Cedar slice supports
+  (length 19.4 against 4.6 kept for new frames; far frames 66 words each). Estimate from the histograms: frame words
+  90.3 M -> about 36 M (4 words of header and mask + the kept slots), i.e. 12,832 -> about 6,100 run words per
+  declaration. The target of 4,000 cannot be reached by a representation: the kept slots (19.4 M) and the spines
+  (12.2 M) alone are 3,920 words per declaration - below that only fewer frames help (M2: tabling). NOT BUILT in
+  this wave: after stage A the time of PRUNE no longer depends on the length, so what is left to gain is the
+  memory (page faults of grown slabs, 8 workers' cache footprint), against a layout change with direct readers in
+  M6 (`Debug`, `Show`), M7 (`Match`, `Code`) and M4 (`Conv.ccloFrom` through `Runs.len / arg`). The cheapest first
+  step would be far frames only (46% of the Cedar slice's frame words; nobody but `Runs` reads their near part by
+  index): header, hash, REST word, the mask as three immediates (so that the generic walkers of `Debug` / `Show`
+  see harmless literals), the kept values.
+
 ## 4. Not done / open
 
-- **Far frames are O(depth) TIME per PRUNE and per ENTER** (memory is linear since D14): every outer binding
-  is hashed and compared at each far PRUNE and copied at each ENTER. A nest that reads a variable more than
-  63 binders away at every level costs O(depth^2) slot operations (2,000 deep: 4 M, nothing; 10^5 deep:
-  10^10, too slow). Making it O(1) amortised needs a cache keyed by the environment prefix with a way to
-  know that the prefix was not rewritten; judgments truncate `m.ep` directly, so `Runs` cannot know today.
-  Not done; it needs the measurement item of ISA 2.4 (how often far frames occur) first.
+- **Far frames are still O(depth) per PRUNE and per ENTER, but cheaply**: since D19 a far PRUNE no longer hashes
+  the outer bindings, it compares them with the cached chain (`Arrays.equals`, 44 slots on average on the Cedar
+  slice; `Runs.sameChain` + `restOf` were 3.0% of that corpus before the comparison was vectorised) and ENTER
+  copies them. O(1) would need to know that the prefix of the slab was not rewritten; `Eval.bind` and
+  `MachineOps.in` write `es` directly and every judgment truncates `m.ep`, so `Runs` cannot know without a
+  rule for the other packages. Measured frequency (the item of ISA 2.4): 16% of the PRUNEs of the Cedar slice,
+  0.03% of Init's, none on reachability.
+- **Sparse frames for long environments** (the Cedar slice's 12,832 run words per declaration): designed and
+  estimated in 5.5, not built. The target "under 4,000" is out of reach of any representation (kept slots + spines
+  are 3,920).
+- **The young set** (5.3; requests.log 15:58Z to M6): the way to remove the table-slot misses of giant sessions
+  rather than overlap them. A `Machine` design.
+- **D20 in `Infer`**: five places of `Infer` (M5; lines 333, 933, 1226, 1612, 1971 at 15:43Z) still PRUNE and then
+  probe; requested 15:43Z, M5's call. The LET suspension (`mkSusp(.., true)`) has no combined form.
+- **D20 was measured with my fake of `Eval`, not with M2's published `Eval`** (same three calls; M2's own corpus
+  runs were in progress at 16:49Z). With M2's switch `m2a` most tabling probes of reachability disappear (M2:
+  records 20.6 -> 13.5 M), so the share that D20 can overlap is smaller there.
 - **`m.nats` ownership** (D3): the guard detects a reissued id with the store's 32-bit content hash and the
-  limb count; it is a detection, not a proof. The request to M6 stands.
-- No native-image measurement of the probe (JVM only, section 3.1), and no quiet-host measurement of the
-  two A/B experiments of section 3.2 (the host ran at a load average of 90-170 during this wave).
+  limb count; it is a detection, not a proof. (The machine has had its own overlay since M6's 09:45Z.)
+- **The warm figures of owner note 12** (second pass in one process, 8 workers, pipelined): `-X passes=N` did not
+  exist when this was measured; 5.2 and 5.4 give cold wall clock beside CPU time, one worker and (batch F) eight.
+- The JVM-only probe table of 3.1 predates stage A and was not repeated (the native profile of 5.3 replaces it).

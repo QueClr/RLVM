@@ -400,8 +400,11 @@ incomplete level relation and rejects, e.g., `inductive T.{u} (a : Sort (imax u 
 (`InductiveAdmission`, section "the official rebuild of levels"; its README has the mechanism and the
 official evidence); this module only counts: `EnvBuilder.respelledBlocks()` (also in the line of
 `-Drlvm.admit.stats=true`) = the inductive blocks with a level the rebuild spells differently, the only
-blocks for which admission compares anything it did not compare before. Init, Std, reachability,
-con-leche, cedar, navier-stokes-euler, cslib, mathlib: see `work/status/rlvm-admit.log` (16:xxZ line).
+blocks for which admission compares anything it did not compare before. On the eight corpora
+(launcher, reference engine, 2026-11-24): Init 0 of 609 inductive / quot units, reachability 0 of 189,
+Std 0 of 1,050, con-leche 0 of 473, cedar 0 of 1,960, navier-stokes-euler 0 of 1,618, cslib 0 of 4,377,
+mathlib 0 of 7,133 - no real block is affected, all eight are accepted as before, no decline. With
+`-X levels=complete` the engine identifies the two spellings and the files of the finding are accepted.
 
 `LevelRebuildGoldenTest`: a sample of 123 of the 2,200 files with the official answers in
 `src/test/resources/rlvm/admit/levels-golden` (53 of them accepted before the fix and rejected

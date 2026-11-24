@@ -302,3 +302,25 @@ Std 99,893 of 100,096 units compared, all agree, 0 differences; the units not co
 164 / 203). On the code of 15:10Z, before that rule arrived in the tree, the same four corpora with v0 and step 1 + `m2a`: every
 unit compared, 0 differences, 0 declines.
 
+Batch 3 (locked, 17:08:20Z-17:10:11Z, load average 43-45; `work/m2/batch3.sh`, rows `b3-*`): **four workers**, the same two images,
+base step 1 against step 1 + `m2a`, three interleaved passes; median CPU s / median wall s (the three wall readings):
+
+| | Init | Std | Cedar slice | reachability |
+|---|--:|--:|--:|--:|
+| base, step 1 | 7.47 / 2.68 (2.41, 4.12, 2.68) | 14.13 / 7.76 (8.07, 7.76, 6.91) | 3.06 / 1.05 (1.05, 1.12, 1.02) | 8.11 / 4.37 (3.87, 5.21, 4.37) |
+| new, step 1 + `m2a` | 6.46 / 2.48 (2.15, 2.79, 2.48) | 12.48 / 7.09 (7.09, 7.18, 4.85) | 2.85 / 0.96 (3.30, 0.96, 0.92) | 5.24 / 2.13 (4.71, 1.95, 2.13) |
+
+Four workers cost the CPU of one (Init 6.46 against 6.35 s), and peak RSS falls with the records (reachability 2,191-2,498 ->
+1,437-1,637 MiB). The wall clock of a loaded host scatters by a factor of two between passes; the medians are lower with `m2a` on
+every corpus.
+
+After these batches: the request of M1 (16:48:45Z: `Eval.closure` / `table` / `suspend` call M1's combined constructors
+`Values.mkLamAt` / `mkPiAt` / `suspRecordAt` / `mkSuspAt`; the same frames, records and ids; M1 measured reachability v0 8.29 -> 7.69 s
+with it) and M5's use of `Eval.evalBody` in `TWALK` (16:03Z). Gates of that jar (`work/m2/dist-r8p`): tutorial + bugs with v0,
+step 1 + `m2a` and `gated,m2a,m2b` at hostDepth 0, the four corpora with v0 and with step 1 + `m2a`, all 230 with step 1 + `m2a`:
+0 differences (not compared: the eager-reduction declines and `loop_unfolded_once`, as above). Instructions of that tree
+(`work/m2/dist-r8n`, unlocked, one run): the machine's default switch set is `warm,gated,expect` since about 16:00Z (M6) and has a
+session cap of its own, which doubles the resets on Init (1,129 -> 2,160) and raises the ticks of every warm configuration by 20 %
+(54.95 M -> 66.11 M; `-X machine.session-kib=0` gives the old figure): Init default 116.4 G, default + `m2a` 106.2 G (-8.8 %);
+step 1 + `m2a`: Cedar slice 38.8 G, reachability 48.0 G, Init 108.0 G, Std 186.3 G.
+

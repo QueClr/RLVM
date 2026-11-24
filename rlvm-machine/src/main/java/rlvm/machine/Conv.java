@@ -27,8 +27,12 @@ import rlvm.store.Specials;
  * 8) transcribed to values, state for state: c0 without B12, c2 first line, c3 .. c13, with {@code CARGS} in
  * the official order and every position SAME. No speculative segment, no fact, no plan. The steps of R02
  * 8.1 and the states of ISA 4.4.1 are named in the comments ("step n" = R02 8.1, "cN" = ISA 4.4.1).
- * Step 2 ({@code Op.SW_FACTS}): static PROOF at c4 (B7), the prop mask of ETAS; the plan of CARGS is in
- * {@link Cargs}. Step 5 ({@code Op.SW_PROBES}): B12 (CCLO), B1, B2. Deviations and measurements: NOTES-M4.
+ * Step 2 ({@code Op.SW_FACTS}): static PROOF at c4 (B7). Step 5 ({@code Op.SW_PROBES}): pass B and the quick
+ * refutation of {@link Cargs}. {@code Op.SW_LAZY_EVAL}: a side that unfolds alone against a weak-head normal
+ * side is reduced by one WHNF (D26). {@code Op.SW_SAME}: structural identity of the two values at c0
+ * ({@link Same}, D28). The congruence shortcuts B1, B2, B12 (CCLO) and the skipped positions B3, B4 and the
+ * prop mask of ETAS are NOT the official verdict (findings S-F1 / S-F2) and run only with the non-official
+ * options of {@link Ext#opts}. Deviations and measurements: NOTES-M4.
  *
  * <h2>Loops</h2>
  * Three loops of the official procedure are Java loops whose body is a chain of steps (H3 "inside a

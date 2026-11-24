@@ -146,9 +146,9 @@ is then the engine's own application check - type of the argument against the bi
 (rebuilt) type, the official sides - through `KernelOps.check`, so a constant whose level list differs
 is still equal when it unfolds to the same term (a phantom universe parameter), as officially. With
 `-X levels=complete` the engine's relation identifies the two spellings and these comparisons hold. For a block in which the rebuild changes no spelling (`lastRebuildChanged()
-== false`: every block of Init, Std, reachability, con-leche, cedar, navier-stokes-euler; see the log
-for cslib and mathlib) the stand-ins are exactly those of before and nothing else is computed than one
-memoised walk over the constructor types.
+== false`: every one of the 17,377 blocks of Init, Std, reachability, con-leche, cedar,
+navier-stokes-euler, cslib and mathlib) the stand-ins are exactly those of before and nothing else is
+computed than one memoised walk over the constructor types.
 
 Evidence, all against leanchecker v4.36.0: the 2,200 files of the finding (`work/prof/L`; 183 were
 accepted here and rejected officially, all 2,200 get the official verdict now, with both engines);

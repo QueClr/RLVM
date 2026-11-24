@@ -101,7 +101,7 @@ final class BlockRoot extends RootNode {
         final Decoded d;
         final int capSlot;
         final int lsSlot;
-        /** First of the frame slots of the run-ahead: the predicted registers, then five words of its state. */
+        /** First of the frame slots of the run-ahead: the predicted registers, then nine words of its state. */
         final int sbase;
         final boolean exact;
 
@@ -165,7 +165,7 @@ final class BlockRoot extends RootNode {
             entryLoad[k] = Decoded.list(d.insn[entryIdx[k]].liveIn);
         }
         sbase = b.sbase;
-        slots = 2 * d.win + 7;
+        slots = 2 * d.win + 11;
         akind = new byte[n];
         aheadAt = new boolean[n];
         aheadLive = new int[n][];
@@ -243,7 +243,7 @@ final class BlockRoot extends RootNode {
 
     private static FrameDescriptor descriptor(Decoded d) {
         FrameDescriptor.Builder fb = FrameDescriptor.newBuilder();
-        fb.addSlots(2 * d.win + 7, FrameSlotKind.Static); // registers, cap, ls; the run-ahead's predicted registers and state
+        fb.addSlots(2 * d.win + 11, FrameSlotKind.Static); // registers, cap, ls; the run-ahead's predicted registers and state
         return fb.build();
     }
 
@@ -350,6 +350,10 @@ final class BlockRoot extends RootNode {
         f.setIntStatic(sbase + win + 2, 0);                   // the sink of the early loads
         f.setIntStatic(sbase + win + 3, vp);                  // records from here on are predictions
         f.setIntStatic(sbase + win + 4, 0);                   // new ids are still predictable
+        f.setIntStatic(sbase + win + 5, 0);                   // no frame / application predicted new yet
+        f.setIntStatic(sbase + win + 6, 0);
+        f.setIntStatic(sbase + win + 7, 0);
+        f.setIntStatic(sbase + win + 8, 0);
     }
 
     /**

@@ -518,6 +518,66 @@ public final class T2Bridge {
         return rs[r + Layout.RUN_HASH] == hash && rs[r] >>> Layout.RUN_LEN_SHIFT == len && (rs[r] & Layout.RUN_FAR) == 0 ? r : -1;
     }
 
+    /** How many slots of a probe sequence the exact run-ahead looks at before it takes the key as new. */
+    private static final int AHEAD_SLOTS = 4;
+
+    /** {@link #neuAt} along the first slots of the probe sequence of {@code hash}: the NEU, or -1 (an empty slot ends it). */
+    public static int neuFind(Machine m, int hash, int head) {
+        int[] t = m.vtab;
+        int mask = t.length - 1;
+        int slot = hash & mask;
+        for (int k = 0; k < AHEAD_SLOTS; k++) {
+            int e = t[slot];
+            if (e == 0) {
+                return -1;
+            }
+            int r = neuAt(m, e, hash, head);
+            if (r >= 0) {
+                return r;
+            }
+            slot = (slot + 1) & mask;
+        }
+        return -1;
+    }
+
+    /** {@link #recordAt} along the first slots of the probe sequence. */
+    public static int recordFind(Machine m, int hash, int w0, int a, int b, int c) {
+        int[] t = m.vtab;
+        int mask = t.length - 1;
+        int slot = hash & mask;
+        for (int k = 0; k < AHEAD_SLOTS; k++) {
+            int e = t[slot];
+            if (e == 0) {
+                return -1;
+            }
+            int r = recordAt(m, e, hash, w0, a, b, c);
+            if (r >= 0) {
+                return r;
+            }
+            slot = (slot + 1) & mask;
+        }
+        return -1;
+    }
+
+    /** {@link #runAt} along the first slots of the probe sequence. */
+    public static int runFind(Machine m, int hash, int len) {
+        int[] t = m.rtab;
+        int mask = t.length - 1;
+        int slot = hash & mask;
+        for (int k = 0; k < AHEAD_SLOTS; k++) {
+            int e = t[slot];
+            if (e == 0) {
+                return -1;
+            }
+            int r = runAt(m, e, hash, len);
+            if (r >= 0) {
+                return r;
+            }
+            slot = (slot + 1) & mask;
+        }
+        return -1;
+    }
+
     /** The VAL memo of suspension {@code s} (0: not known). */
     public static int suspVal(Machine m, int s) {
         return m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];

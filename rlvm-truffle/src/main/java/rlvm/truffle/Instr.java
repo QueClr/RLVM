@@ -61,6 +61,15 @@ abstract class Instr extends Node {
     final int vp0Slot;
     final int dirtySlot;
     /**
+     * The last frame / application the run-ahead predicted to be NEW in this stretch (content hash, predicted
+     * id): a block often builds the same frame for sibling closures, or the same application twice; the table
+     * cannot know the second one yet.
+     */
+    final int lastFrameHashSlot;
+    final int lastFrameSlot;
+    final int lastNeuHashSlot;
+    final int lastNeuSlot;
+    /**
      * Run-ahead, exact form (rlvm.t2.aheadExact): the table word that was loaded early is also read - an empty
      * slot predicts a new record, a slot that holds the key gives the record that exists - so that the keys built
      * on that record are the right ones. The other form predicts "new" without waiting for the word.
@@ -80,6 +89,10 @@ abstract class Instr extends Node {
         this.sinkSlot = svpSlot + 2;
         this.vp0Slot = svpSlot + 3;
         this.dirtySlot = svpSlot + 4;
+        this.lastFrameHashSlot = svpSlot + 5;
+        this.lastFrameSlot = svpSlot + 6;
+        this.lastNeuHashSlot = svpSlot + 7;
+        this.lastNeuSlot = svpSlot + 8;
     }
 
     abstract int exec(VirtualFrame f, Machine m, int rb, int d);
@@ -541,7 +554,7 @@ abstract class Instr extends Node {
             int hash = T2Bridge.neuHash(head, sum);
             int id = -1;
             if (exact) {
-                id = T2Bridge.neuAt(m, T2Bridge.vtabWord(m, hash), hash, head);
+                id = T2Bridge.neuFind(m, hash, head);
                 if (id >= 0) {
                     // the probe will compare the arguments with the record's spine: load its first words too
                     f.setIntStatic(sinkSlot, f.getIntStatic(sinkSlot) ^ T2Bridge.runWord(m, T2Bridge.recB(m, id) + Layout.RUN_H));
@@ -549,7 +562,18 @@ abstract class Instr extends Node {
             } else {
                 touchRecord(f, m, hash);
             }
-            sset(f, dst, id >= 0 ? id : newRecord(f, Layout.RUN_H + off + n));
+            if (id < 0) {
+                if (hash == f.getIntStatic(lastNeuHashSlot) && f.getIntStatic(lastNeuSlot) != 0) {
+                    id = f.getIntStatic(lastNeuSlot); // the application this stretch has already predicted
+                } else {
+                    id = newRecord(f, Layout.RUN_H + off + n);
+                    if (id != UNK) {
+                        f.setIntStatic(lastNeuHashSlot, hash);
+                        f.setIntStatic(lastNeuSlot, id);
+                    }
+                }
+            }
+            sset(f, dst, id);
             return 0;
         }
     }
@@ -695,17 +719,23 @@ abstract class Instr extends Node {
                 int fh = T2Bridge.frameHash(sum);
                 fr = -1;
                 if (exact) {
-                    fr = T2Bridge.runAt(m, T2Bridge.rtabWord(m, fh), fh, nc);
+                    fr = T2Bridge.runFind(m, fh, nc);
                 } else {
                     touchRun(f, m, fh);
                 }
                 if (fr < 0) {
-                    if (f.getIntStatic(dirtySlot) != 0) {
-                        f.setIntStatic(sbase + dst, UNK);
-                        return 0;
+                    if (fh == f.getIntStatic(lastFrameHashSlot) && f.getIntStatic(lastFrameSlot) != 0) {
+                        fr = f.getIntStatic(lastFrameSlot); // the frame of a sibling closure, predicted a moment ago
+                    } else {
+                        if (f.getIntStatic(dirtySlot) != 0) {
+                            f.setIntStatic(sbase + dst, UNK);
+                            return 0;
+                        }
+                        fr = f.getIntStatic(srspSlot);
+                        f.setIntStatic(srspSlot, fr + Layout.RUN_H + nc);
+                        f.setIntStatic(lastFrameHashSlot, fh);
+                        f.setIntStatic(lastFrameSlot, fr);
                     }
-                    fr = f.getIntStatic(srspSlot);
-                    f.setIntStatic(srspSlot, fr + Layout.RUN_H + nc);
                 }
             }
             int w0 = op == Op.MKLAM ? Layout.LAM << Layout.KIND_SHIFT | Layout.W0_WHNF
@@ -714,7 +744,7 @@ abstract class Instr extends Node {
             int hash = T2Bridge.recordHash(w0, term, fr, ls);
             int id = -1;
             if (exact) {
-                id = T2Bridge.recordAt(m, T2Bridge.vtabWord(m, hash), hash, w0, term, fr, ls);
+                id = T2Bridge.recordFind(m, hash, w0, term, fr, ls);
                 if (id >= 0 && op == Op.MKSUSP) {
                     int val = T2Bridge.suspVal(m, id); // Values.mkSusp: a known VAL stands for the suspension
                     if (val != 0) {

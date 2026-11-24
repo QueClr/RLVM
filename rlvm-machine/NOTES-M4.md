@@ -324,8 +324,32 @@ Third version of the selection (published with these notes): applications of a d
 no longer walked - lazy delta compares their arguments itself before it unfolds, and on Init only 19 % of those
 walks saw identity (17,368 against 72,248; profile `work/m4/stats/sm2-init.out`: abbrev heads 20,384 / 219,954,
 `LAM` 74,863 / 31,855, `PI` 143,024 / 27,342). In one tree state: Init ticks 63.36 M -> 63.46 M, walks that see
-nothing 363,180 -> 293,563; Cedar slice 11.63 M -> 11.61 M, 66,410 -> 51,364. Batch b4 (binary `work/m4/dist-tune3`)
-measures it: `work/m4/batch-b4.out`, summary in `work/status/machine-M4.log`.
+nothing 363,180 -> 293,563; Cedar slice 11.63 M -> 11.61 M, 66,410 -> 51,364.
+
+**Batch b4, the code as published 17:13Z** (binary `work/m4/dist-tune3`; the other packages' code of 17:00Z, whose
+step 1 differs from b3's; five configurations in one binary, two runs each interleaved, load 45-56; mean CPU s /
+instructions G; `work/m4/batch-b4.out`):
+
+| configuration | Cedar slice | Init | Std | reachability |
+|---|---|---|---|---|
+| A = warm,gated,expect | 2.65 / 39.4 | 7.02 / 116.8 | 12.59 / 198.3 | 7.96 / 57.9 |
+| A + lazyeval | 2.71 / 39.3 | 6.88 / 115.9 | 12.60 / 197.2 | 7.91 / 57.9 |
+| A + lazyeval,same | **2.36 / 37.5** | 6.97 / 117.5 | 12.59 / 198.1 | 7.92 / 57.9 |
+| A + code,casetrees,lazyeval | 2.59 / 37.8 | 5.53 / 86.1 | 10.60 / 156.2 | 1.65 / 17.3 |
+| A + code,casetrees,lazyeval,same | **2.33 / 35.9** | 5.47 / 87.6 | 10.48 / 157.4 | 1.58 / 17.3 |
+
+`same` against the row above it: Cedar slice -12.9 % CPU / -4.6 % instructions without step 4 and -10.0 % / -5.0 %
+with it; Init +1.3 % / +1.4 % without and -1.1 % / +1.7 % with; Std 0 / +0.5 % and -1.1 % / +0.8 %; reachability
+unchanged. With step 4 on, the CPU time of no corpus rises and the Cedar slice falls by a tenth; without it Init's
+CPU is 1.3 % up in a batch whose rows differ by 1 % between runs. KEPT behind its switch; recommended for the
+default set together with step 4.
+
+Call counts per declaration of the published code (JVM launcher, the other packages' code of 17:00Z; step 1 ->
++ lazyeval,same -> + facts): Init LSTEP 55.7 -> 28.7 (-48 %), PIRR 22.1 -> 19.9 -> 3.1 (-86 %), VTYPE 34.1 -> 31.6
+-> 13.9 (-59 %); Cedar slice LSTEP 36.2 -> 21.2 (-41 %), PIRR 28.1 -> 20.8 -> 2.3 (-92 %), VTYPE 36.5 -> 29.1 ->
+10.3 (-72 %). The targets of this package ("PIRR, VTYPE and LSTEP calls per declaration down by half on Init and the
+Cedar slice") are met for PIRR and VTYPE only with `facts`, which costs CPU (b3), and for LSTEP nearly on Init and
+not on the Cedar slice; with the non-official B1 the LSTEP count was halved on both (W4, batch b1).
 
 Mathlib (finding 1 of profiler P8, 16:13Z: the machine is 6.5 times gruszka's instructions on Mathlib against 4.7
 times on Init, and the difference sits in instance diamonds: structure eta field by field, every proof field through
@@ -374,6 +398,6 @@ two options are in the code, off, for that decision.
 |---|---|---|---|
 | `facts` | B7 only | exact by construction (manifest sorts); review rows strict; diff gates | **not for the default set on this package's account**: PIRR -92 % and VTYPE -69 % calls on Init, but together with `probes` +1.1 % instructions on Init and Std (batch b2; b3 separates the two): the records cost more to derive than B7 saves |
 | `probes` | pass B, quick refutation, UNDEC, debt | order-only; review rows strict; diff gates | **not for the default set**: without B1 / B12 it has no gain (b2, b3) |
-| `lazyeval` | D26 | diff gates: 230 tests + four corpora, with and without `code,casetrees`, 0 differences, 0 declines; `shortcheck` runs; review 15:06Z; no cost cliff on the 230 tests | **ready to be on by default** (best together with step 4) |
-| `same` (= `m4a`) | D28 (`Same`) | diff gates of both versions: 230 tests + four corpora + the subst-prop mutants, 0 differences, no decline but M6's eager-reduction ones; `shortcheck` (first version) on Cedar slice, reachability, Init, Std: DIFF-CLEAN; review exports (29) official under every set with it; `M4SameTest` (6 tests incl. far frames) | **for review by S; then on by default if batch b3 confirms it in CPU** (see the log): it removes the last machine decline of the 230 tests that is not an eager-reduction decline (`loop-unfolded-once`) and 40 % of the Cedar slice's ticks |
+| `lazyeval` | D26 | diff gates: 230 tests + four corpora + mutants, with and without `code,casetrees,m7a`, 0 differences; `shortcheck` on the four corpora; review 15:06Z; no cost cliff on the 230 tests; `M4LazyEvalTest`; batches b1, b3, b4 | **ready to be on by default**: with step 4 -7 % CPU on Init and Std (b3), -3 % on the Cedar slice; alone about -1 % |
+| `same` (= `m4a`) | D28 (`Same`) | diff gates of every version: 230 tests + four corpora + the subst-prop mutants, with and without `code,casetrees,m7a`: 0 differences, no decline but M6's eager-reduction ones; `shortcheck` (first and second version) on Cedar slice, reachability, Init, Std: DIFF-CLEAN; review exports (29) official under every set with it; `M4SameTest` (6 tests incl. far frames); batches b3, b4 | **ready per owner, waiting for the review of S; then on by default together with step 4**: -10 to -13 % CPU on the Cedar slice, the other corpora inside the noise (+0.5 to +1.7 % instructions on Init / Std), and it removes the last machine decline of the 230 tests that is not an eager-reduction decline (`loop-unfolded-once`) |
 | `-Drlvm.machine.m4=congruence,skipargs` | B1, B2, B12, B3, B4, ETAS mask | S-F1, S-F2: wrong verdicts | **never a default**; kept only to measure |

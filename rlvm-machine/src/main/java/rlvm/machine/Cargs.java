@@ -13,13 +13,18 @@ import static rlvm.machine.Op.SIG;
  * pair, which is the first line of {@code CONV} and is made inline. The quick refutation of pass A, the
  * comparison plans (step 2, {@code Op.SW_FACTS}) and pass B (step 5, {@code Op.SW_PROBES}) reorder or
  * skip comparisons and are not part of the complete procedure: a kernel error raised by a pair that the
- * official order compares first must stay a verdict (ISA 6.1).
+ * official order compares first must stay a verdict (ISA 6.1). Of these, {@code Op.SW_PROBES} alone runs the
+ * quick refutation and pass B (they only reorder comparisons of the complete CONV).
  *
- * <p>Step 2 ({@code Op.SW_FACTS}): the plan of the head constant is a 64-bit mask of positions that are
- * not compared, computed from its fact record (ISA 3.5) when the comparison starts: UNREAD positions
- * under SAMEDEF (the value's body does not read the parameter; B4) and proof positions under the
- * agreement rule (B3). Positions from 64 on, positions beyond the syntactic telescope and every position
- * of a head without facts are compared.
+ * <p>NOT THE OFFICIAL VERDICT (finding S-F2 of the soundness review, 2026-11-24; NOTES-M4 D27): the plan of
+ * the head constant, a 64-bit mask of positions that are not compared, computed from its fact record (ISA
+ * 3.5) when the comparison starts: UNREAD positions under SAMEDEF (the value's body does not read the
+ * parameter; B4) and proof positions under the agreement rule (B3). The official {@code is_def_eq_args}
+ * compares every position, and its comparison of two proofs (of their types) or of two unread arguments
+ * followed by the unfolding can fail where the skip answers T. The plan therefore runs only with
+ * {@code Op.SW_FACTS} AND the non-official option {@code skipargs} ({@code Conv.skipArgs}); no switch set
+ * reaches it. Positions from 64 on, positions beyond the syntactic telescope and every position of a head
+ * without facts are compared.
  *
  * <p>Frames: {@code CARGS[0](a, b, policy)}; {@code CARGS[1](a, b, k, policy, skip lo, skip hi)}: pass C,
  * k pairs (counted in the policy's order) are done and pair k is being compared; {@code CARGS[2](a, b, k,

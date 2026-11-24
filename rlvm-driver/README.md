@@ -521,16 +521,17 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
 
 ## Tests and commands
 
-`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (101 tests, 3 of them opt-in; about 40 s). All but
+`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (106 tests, 3 of them opt-in; about 40 s on a free machine). All but
 `ArenaIntegrationTest` use fake engines, a fake admission, a fake environment pass and a fake loader (`Fakes`).
 
 - `VerdictBoardTest`: the status chain by enumeration (every assignment of 5 statuses to up to 4 units x
   input failure kinds and positions x `complete` x internal failure x stopped, reported in random order,
   against an independent statement of the rule); double reports; C3.13.
-- `SchedulerTest`: runs, stealing, give-back, first-failure cut, blocking; every unit exactly once under
-  contention; **all interleavings** of small cases (2-3 workers, 4-5 units, all 3^n scripts, pipelined
-  publication, give-back) by state-space search (430,000 states; `-Drlvm.driver.explore=big` adds 3.1 million):
-  verdict, first failure, no deadlock, no unit twice.
+- `SchedulerTest`: runs, stealing, give-back, first-failure cut, blocking; **slice mode** (a worker takes the
+  next slice for itself, few ready units are shared out, no stealing while units wait); every unit exactly
+  once under contention (both modes); **all interleavings** of small cases (2-3 workers, 4-5 units, all 3^n
+  scripts, pipelined publication, give-back; one run per worker and batch, and slices) by state-space search
+  (`-Drlvm.driver.explore=big` adds 3.1 million states): verdict, first failure, no deadlock, no unit twice.
 - `RecheckProtocolTest`: the protocol table by enumeration (2 x 2 x 2 x 4^4 = 2048 cases): final status,
   which engines ran, fresh sessions and cold budgets, events, reported reason.
 - `InvarianceTest`: 400 random workloads (`-Drlvm.driver.invariance=N -Drlvm.driver.seed=S` for soak runs)
@@ -541,8 +542,10 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
   file (worker units and environment units, both protocols of the environment pass); fake lanes report a
   violation when a unit is admitted beyond their snapshot.
 - `PipelineTest`: a file in pieces, a file in one piece, malformed / unsupported / unreadable input in the
-  middle of a load, units that need the rest of the file, an `Error` in the loader, a loader that returns
-  early, the snapshot rule with a deterministic loader.
+  middle of a load, units that need the rest of the file, **the parking rule** (the frontier stands below an
+  out-of-order unit until the load has ended, the verdict is the batch run's; without the host's answer the
+  same file is declined), an `Error` in the loader, a loader that returns early, the snapshot rule with a
+  deterministic loader. `InvarianceTest`'s pipelined workloads contain out-of-order units too.
 - `MemoryAndGateTest`: the account (victim, margin, exempt holder, last resort), the gate (order, giving way,
   cancellation), memory retries in runs, a non-terminating gate holder behind an ill-typed unit, give-back,
   the settings by name, the automatic worker count.
@@ -552,7 +555,11 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
   diagnostics, statistics JSON; **slow units**: a heavy unit that ends only when the last unit of its own
   claim was checked (the run hangs unless the rest is given back while the unit runs; 2 / 4 / 8 workers), two
   heavy units in one claim, no give-back with one worker or with `spill-ms=0`; **passes**: three passes check
-  every unit three times with fresh sessions, a rejected export gets one pass, the verdict is pass 1's.
+  every unit three times with fresh sessions, a rejected export gets one pass, the verdict is pass 1's;
+  **kept engines** (`passes-keep=engines`: one set of engine instances for all passes, closed after the last);
+  **shards** (only the shard is checked, the run declines, a failure inside the shard is the verdict's);
+  **the time account** (tables, time stamps, series, statistics files of later passes, slowest units,
+  histogram, a worker's own unit statistics merged).
 - `ArenaIntegrationTest` (real reader, loader, store, admission, reference kernel; `TestWiring` mirrors
   `rlvm.main.MainWiring`, batch and pipelined): the 141 tutorial tests with one worker; the same verdict and
   deciding unit for 1 / 2 / 4 / 8 workers and a 1-byte session cap; the same when the file is checked while
@@ -567,6 +574,8 @@ Commands (all in `rlvm-driver/bin/`, none touches another module):
 | `threads-gate.sh EXPORT...` | the worker-count gate (above); `--engine machine [-X machine.switches=...]` for the machine |
 | `measure-bench.sh EXPORT [DriverBench options]` | one measured run of `DriverBench` in the arena-shaped container (for what the launcher cannot run yet) |
 | `freeze-cp.sh [TAG]` | a frozen copy of the test class path for long runs |
+| `breakdown.py STATS.json... [--series]` | where the wall clock of a run went: per worker, per cause, environment thread, tail, slowest units (see "Where the wall clock goes") |
+| `gcsum.py LOG... [--phase A B]` | collections and pause time of a native-image run started with `-XX:+PrintGC` |
 
 `invariance.sh --engine machine [-X machine.switches=warm,gated,expect] CORPUS...` runs the same suite with the
 published `rlvm-machine` jar as primary engine (the launcher's `-X engine=machine`; `freeze-cp.sh TAG machine`
