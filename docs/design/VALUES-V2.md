@@ -136,11 +136,12 @@ A lazy site calls `Values.mkAppLazy`; every other caller of `Values.mkApp` inter
 | 8 | WHNF | class M of 2.4: `WHNF` identifies a private application before it reduces it |
 | 32 | CONV | class C of 2.4 |
 | 64 | ADAPT | adaptive sites (below) |
+| 128 | BIG | lazy only in a large session (below) |
 | 16 | STAT | counters (process-wide, printed at exit) |
 
 The modes that were measured: **1** (data built by blocks), **11** = 1 + 2 + 8 (everything blocks build, memo
-shared), **43** = 11 + 32, **47** = 43 + 4 (every site), **107** / **111** = 43 / 47 with adaptive sites, and the
-deliberately broken ones, **3** and **7** / **15** (redexes without class M, every site without class C), which exist
+shared), **43** = 11 + 32, **47** = 43 + 4 (every site), **107** / **111** = 43 / 47 with adaptive sites, **171** /
+**235** = 43 / 107 in large sessions only, and the deliberately broken ones, **3** and **7** / **15** (redexes without class M, every site without class C), which exist
 to show what classes M and C are worth.
 
 **Adaptive sites (bit 64).** Whether a site's applications are ever identified is a property of the site, and it can
@@ -154,6 +155,17 @@ sample (so a site can come back). The decision changes which records are private
 of the machine's history, so V6 holds per machine and per schedule, not across worker counts (as warm sessions
 already make ticks depend on which declarations a session saw). A site per block instruction (the code index of
 the `MKAPP`) and per term node of the generic walk would be sharper; not built.
+
+**Lazy only in a large session (bit 128).** A probe that is not made is worth a cache miss where the tables have
+outgrown the cache and next to nothing where they have not - and in a small session the bit tests of the
+key-forming loops and the duplicate records are all that is left (10.2: the Cedar slice at one worker, +2 to +4 %).
+With this bit a lazy site interns as ever until the session holds 2^17 records (`rlvm.u2.big`; 4 MiB of records, a
+`vtab` of 1 MiB); from then on it is lazy. A warm session is reset at a footprint of 1 MiB, so only a single
+declaration that is itself large gets there: the mode is inert on library corpora (the Cedar slice: 0.01 M private
+applications, every counter the mode-off value) and keeps 88 % of the probes it avoids on reachability (2.67 M of
+3.04 M never identified), whose four giant declarations make 93 % of its records (X1 C8). This is the session-level
+storage strategy: the store changes its discipline when its contents no longer fit the representation that was
+cheap for them.
 
 ## 4. Representation
 
@@ -403,7 +415,106 @@ casetrees, bodies, directrules, same, match, joint, lazycases, lazyeval`).
 
 ### 10.1 Counts (JVM launcher, ONE worker, statistics file; `work/u2/counts/`, table by `work/u2/scripts/tab.py`)
 
-TBD-10.1
+One run per row (jar `16542003a4cc`; rows 107 and 111: the jar with adaptive sites, `879b493003e3`, which is the
+same code with bit 64 off). Deltas are against the mode-off row of the corpus. "never identified" = private
+applications that were in no table when their session ended: each is a probe of `vtab` (hash, table load,
+comparison or insert) and a table entry that the mode-off machine paid for and nothing ever used.
+
+| Corpus | mode | ticks | records | run words | bytes in use at the resets, MiB | session resets | private applications | entered as themselves | duplicates | **never identified** (share of the private ones; of the mode-off records) | accepted / declined |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| reachability | 0 | 9.10 M | 4.83 M | 24.45 M | 263 | 68 | - | - | - | - | 4216 / 16 |
+|  | 1 | 9.10 M (+0.0%) | 5.91 M (+22.6%) | 29.30 M (+19.9%) | 313 | 68 | 2.06 M | 0.11 M | 0.53 M | **1.41 M** (69%; 29%) | 4216 / 16 |
+|  | 3 | 9.14 M (+0.4%) | 6.56 M (+36.0%) | 32.46 M (+32.8%) | 341 | 68 | 3.90 M | 0.32 M | 0.30 M | **3.28 M** (84%; 68%) | 4216 / 16 |
+|  | 11 | 9.11 M (+0.1%) | 6.55 M (+35.8%) | 32.41 M (+32.6%) | 341 | 68 | 3.89 M | 0.53 M | 0.31 M | **3.05 M** (78%; 63%) | 4216 / 16 |
+|  | 43 | 9.10 M (-0.0%) | 6.55 M (+35.8%) | 32.40 M (+32.6%) | 341 | 68 | 3.89 M | 0.53 M | 0.32 M | **3.04 M** (78%; 63%) | 4216 / 16 |
+|  | 47 | 9.16 M (+0.7%) | 6.85 M (+42.1%) | 33.75 M (+38.1%) | 355 | 79 | 5.20 M | 1.39 M | 0.58 M | **3.23 M** (62%; 67%) | 4216 / 16 |
+|  | 107 | 9.10 M (-0.0%) | 6.33 M (+31.2%) | 31.52 M (+28.9%) | 331 | 68 | 3.20 M | 0.07 M | 0.10 M | **3.03 M** (95%; 63%) | 4216 / 16 |
+|  | 111 | 9.10 M (+0.0%) | 6.37 M (+32.1%) | 31.70 M (+29.7%) | 333 | 69 | 3.49 M | 0.16 M | 0.14 M | **3.19 M** (91%; 66%) | 4216 / 16 |
+| Cedar slice | 0 | 9.99 M | 5.13 M | 56.32 M | 410 | 201 | - | - | - | - | 8053 / 22 |
+|  | 1 | 9.99 M (+0.1%) | 5.21 M (+1.6%) | 56.65 M (+0.6%) | 414 | 203 | 0.17 M | 0.03 M | 0.05 M | **0.09 M** (53%; 2%) | 8053 / 22 |
+|  | 11 | 10.00 M (+0.1%) | 5.34 M (+4.1%) | 57.37 M (+1.9%) | 420 | 204 | 0.61 M | 0.20 M | 0.11 M | **0.30 M** (49%; 6%) | 8053 / 22 |
+|  | 43 | 9.98 M (-0.1%) | 5.34 M (+4.1%) | 57.37 M (+1.9%) | 420 | 204 | 0.61 M | 0.20 M | 0.12 M | **0.29 M** (47%; 6%) | 8053 / 22 |
+|  | 47 | 10.15 M (+1.6%) | 7.00 M (+36.5%) | 64.76 M (+15.0%) | 500 | 231 | 3.05 M | 0.94 M | 1.69 M | **0.42 M** (14%; 8%) | 8053 / 22 |
+|  | 107 | 9.99 M (+0.1%) | 5.25 M (+2.5%) | 57.01 M (+1.2%) | 416 | 204 | 0.36 M | 0.05 M | 0.04 M | **0.28 M** (76%; 5%) | 8053 / 22 |
+|  | 111 | 10.02 M (+0.3%) | 5.39 M (+5.1%) | 57.63 M (+2.3%) | 423 | 207 | 0.63 M | 0.16 M | 0.17 M | **0.31 M** (48%; 6%) | 8053 / 22 |
+| Init | 0 | 39.33 M | 16.30 M | 75.46 M | 904 | 1538 | - | - | - | - | 57774 / 328 |
+|  | 1 | 39.56 M (+0.6%) | 17.13 M (+5.0%) | 78.95 M (+4.6%) | 944 | 1567 | 1.47 M | 0.13 M | 0.43 M | **0.92 M** (62%; 6%) | 57774 / 328 |
+|  | 11 | 40.07 M (+1.9%) | 18.25 M (+11.9%) | 84.24 M (+11.6%) | 999 | 1603 | 5.14 M | 1.97 M | 1.12 M | **2.06 M** (40%; 13%) | 57774 / 328 |
+|  | 43 | 39.77 M (+1.1%) | 18.24 M (+11.8%) | 84.18 M (+11.5%) | 996 | 1601 | 5.13 M | 1.97 M | 1.21 M | **1.95 M** (38%; 12%) | 57774 / 328 |
+|  | 47 | 41.66 M (+5.9%) | 24.90 M (+52.7%) | 113.16 M (+50.0%) | 1314 | 1855 | 16.50 M | 6.53 M | 7.02 M | **2.96 M** (18%; 18%) | 57774 / 328 |
+|  | 107 | 39.57 M (+0.6%) | 17.30 M (+6.1%) | 80.06 M (+6.1%) | 951 | 1575 | 2.56 M | 0.30 M | 0.43 M | **1.84 M** (72%; 11%) | 57774 / 328 |
+|  | 111 | 39.74 M (+1.0%) | 17.93 M (+10.0%) | 82.85 M (+9.8%) | 979 | 1594 | 4.22 M | 0.94 M | 0.95 M | **2.33 M** (55%; 14%) | 57774 / 328 |
+| Mathlib slice (`Mathlib.AlgebraicGeometry.Scheme.cone`, 21,127 units) | 0 | 23.00 M | 9.17 M | 42.32 M | 507 | 517 | - | - | - | - | 21099 / 56 |
+|  | 1 | 23.09 M (+0.4%) | 9.50 M (+3.6%) | 43.68 M (+3.2%) | 524 | 527 | 0.67 M | 0.04 M | 0.19 M | **0.44 M** (65%; 5%) | 21099 / 56 |
+|  | 11 | 23.54 M (+2.4%) | 10.62 M (+15.8%) | 48.92 M (+15.6%) | 578 | 560 | 3.03 M | 0.97 M | 0.81 M | **1.25 M** (41%; 14%) | 21099 / 56 |
+|  | 43 | 23.36 M (+1.6%) | 10.61 M (+15.6%) | 48.87 M (+15.5%) | 577 | 558 | 3.03 M | 0.98 M | 0.87 M | **1.17 M** (39%; 13%) | 21099 / 56 |
+|  | 47 | 24.35 M (+5.9%) | 14.76 M (+60.9%) | 68.30 M (+61.4%) | 780 | 694 | 9.99 M | 3.85 M | 4.52 M | **1.62 M** (16%; 18%) | 21099 / 56 |
+|  | 107 | 23.08 M (+0.4%) | 9.58 M (+4.5%) | 44.32 M (+4.7%) | 527 | 528 | 1.26 M | 0.21 M | 0.20 M | **0.85 M** (68%; 9%) | 21099 / 56 |
+|  | 111 | 23.24 M (+1.1%) | 10.01 M (+9.1%) | 46.16 M (+9.1%) | 547 | 549 | 2.03 M | 0.53 M | 0.49 M | **1.02 M** (50%; 11%) | 21099 / 56 |
+| Std | 0 | 64.28 M | 27.87 M | 134.94 M | 1570 | 2280 | - | - | - | - | 99893 / 406 |
+|  | 1 | 64.62 M (+0.5%) | 29.13 M (+4.5%) | 140.26 M (+3.9%) | 1633 | 2317 | 2.33 M | 0.26 M | 0.66 M | **1.41 M** (60%; 5%) | 99893 / 406 |
+|  | 11 | 65.36 M (+1.7%) | 30.84 M (+10.7%) | 148.35 M (+9.9%) | 1716 | 2382 | 7.97 M | 3.18 M | 1.72 M | **3.07 M** (39%; 11%) | 99893 / 406 |
+|  | 43 | 64.93 M (+1.0%) | 30.83 M (+10.6%) | 148.30 M (+9.9%) | 1712 | 2378 | 7.97 M | 3.19 M | 1.87 M | **2.90 M** (36%; 10%) | 99893 / 406 |
+|  | 47 | 67.53 M (+5.0%) | 41.41 M (+48.6%) | 196.10 M (+45.3%) | 2223 | 2741 | 26.18 M | 10.51 M | 11.25 M | **4.42 M** (17%; 16%) | 99893 / 406 |
+|  | 107 | 64.64 M (+0.6%) | 29.33 M (+5.2%) | 141.59 M (+4.9%) | 1639 | 2326 | 3.86 M | 0.56 M | 0.61 M | **2.69 M** (70%; 10%) | 99893 / 406 |
+|  | 111 | 64.98 M (+1.1%) | 30.28 M (+8.7%) | 146.07 M (+8.2%) | 1684 | 2358 | 6.21 M | 1.49 M | 1.40 M | **3.33 M** (54%; 12%) | 99893 / 406 |
+
+What the rows say:
+
+- **Verdicts**: accepted and declined are the mode-off numbers in every row (the declines are the tree's own
+  eager-reduction declines); the machine rejects nothing in these corpora.
+- **Closed evaluation (reachability)**: with block sites lazy (mode 43) 3.04 M applications per run are never
+  identified - 78 % of what blocks build lazily and 63 % of ALL records of the mode-off run - at +0.0 % ticks. The
+  price is 1.72 M more records (+36 %): the constructions that interning would have answered with an existing record
+  (T3's 48 % "found") are records now, and 0.85 M of them are identified later after all. Adaptive sites (107) keep
+  the 3.03 M and cut the wasted constructions from 0.85 M to 0.17 M.
+- **Library corpora**: the population is smaller and more of it is identified. Never identified with block sites
+  (43): 0.29 M on the Cedar slice (6 % of its records), 1.95 M on Init (12 %), 1.17 M on the Mathlib slice (13 %),
+  2.90 M on Std (10 %); 47-64 % of the lazily built applications ARE identified there, mostly because INFER asks for
+  their type (`VTYPE`, class M) or CONV compares them. With every site lazy and no adaptation (47) four of five
+  private applications are identified (Cedar slice 86 %, Init 82 %): records +37 to +61 %, ticks +1.6 to +5.9 %:
+  **every-site laziness without adaptation is a loss in counts on library corpora.** With adaptive sites (111) the
+  same sites cost +5 to +10 % records and +0.3 to +1.1 % ticks and still avoid 0.31 M / 2.33 M / 1.02 M / 3.33 M
+  probes.
+- **What classes M and C are worth** (first build, before the scrutinee rule; `work/u2/counts-v1/`): redexes lazy
+  without class M (mode 3): +25.6 % ticks on reachability; every site lazy without M (mode 7): +143 % ticks, +222 %
+  records; every site lazy without class C (mode 15): +38 % ticks and +174 % pair entries on the Cedar slice. The
+  scrutinee rule alone brings mode 3 from +25.6 % to +0.4 % on reachability: nearly every memo hit of a block-built
+  redex is the hit of `MKAPP ; WHNF`.
+- **Footprint**: bytes in use at the resets +30 % on reachability (263 -> 341 MiB), +2 % on the Cedar slice, +10 %
+  on Init (mode 43); session resets +0 to +4 % (the 1 MiB cap is reached earlier).
+
+**The completeness test of section 7** (one session per declaration, `-X machine.switches=default,-warm`;
+`work/u2/counts-nowarm/`; ticks against the mode-off run of the same configuration):
+
+| Corpus | mode 11 (K, M) | mode 43 (K, M, C) | mode 47 (every site) | mode 111 (every site, adaptive) | where the residue is (call events that differ most) |
+|---|--:|--:|--:|--:|---|
+| reachability (9,440,509 ticks) | +0.129 % | **+0.023 %** (+2,132) | +0.420 % | +0.070 % | 43: `CARGS` +851, `LSTEP` +628; 47: `EVAL` +24 k, `PIRR`, `ISPROP` |
+| Cedar slice (10,466,918) | +0.250 % | **+0.060 %** (+6,270) | +1.413 % | +0.193 % | 43: `CARGS` +2.4 k, `LSTEP` +1.2 k; 47: `EVAL` +74 k, `PIRR` +18 k, `ISPROP` +18 k |
+| Init (50,797,296) | - | **+0.197 %** (+99,831) | +2.297 % | - | 43: `CARGS` +61 k, `LSTEP` +18 k; 47: `EVAL` +650 k, `ISPROP` +226 k |
+
+Reading: with classes K, M (WHNF, CORE, DELTA, VTYPE) and C the block-site mode is within 0.02-0.2 % of the tick
+count of today's machine - what is left is argument pairs that `CARGS` and the lazy-delta step compare by ref
+without going through `CONV`'s entry (class C is applied there only), and the two flag memos `PROOF` / `PROPT`
+(`PIRR`, `ISPROP`), which the prototype does not treat as memo keys; with every site lazy the flag memos are the
+visible residue (`ISPROP` re-inferred per duplicate type, each with its `EVAL`). They are the two rows "M (design)"
+of 2.4: a complete implementation has four more force points and a tick count equal to today's.
+
+**Session-end census** (counting mode; every record of the ended sessions; from the mode-111 runs - suspensions and
+closures are built as in the mode-off machine):
+
+| Corpus | plain suspensions | of them never used as a memo (neither `VAL` nor `TYPE`) | LAM | PI + PII | applications | with an ACTIVE head | of those never reduced (no `WHNF` / `CORE` / `UNF` memo) |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| reachability | 0.53 M | 0.18 M (34 %) | 0.36 M | 0.12 M | 4.85 M | 2.70 M | 0.86 M (32 %) |
+| Cedar slice | 1.75 M | 0.03 M (1.7 %) | 0.46 M | 1.29 M | 1.46 M | 0.87 M | 0.36 M (41 %) |
+| Init | 4.29 M | 0.24 M (5.7 %) | 0.85 M | 1.36 M | 9.88 M | 6.48 M | 1.81 M (28 %) |
+| Mathlib slice | 2.22 M | 0.05 M (2.4 %) | 0.43 M | 0.75 M | 5.46 M | 3.99 M | 1.21 M (30 %) |
+| Std | 7.29 M | 0.37 M (5.1 %) | 1.73 M | 2.63 M | 15.55 M | 10.09 M | 3.16 M (31 %) |
+
+This sizes stage D (lazy suspensions): a suspension that is forced, tabled or inferred needs its identity (its memo
+is the point of it), so the population a lazy suspension could spare is the second column: 2-6 % of the suspensions
+on library corpora and 0.18 M records on reachability (two probes each, against 3.0 M application probes). **Lazy
+closures and suspensions are not worth their mechanism (private frames) today.**
 
 ### 10.2 Warm wall clock
 

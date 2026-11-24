@@ -323,7 +323,20 @@ CPU time and wall clock (bench/quiet.py; native -O3 of the clean private tree, `
 
 ### 7.1 The differential gate (M8, `report.sh gate`) on the clean private tree
 
-**GATE-TABLE**
+`work/c1/gates.sh`, `gates2.sh`; reports under `work/c1/clean/work/status/machine-gate-*.md` (the script was run from
+the clean tree as its own report root; every report JVM held one of the host's slots). SOUNDNESS = the machine
+accepted a declaration the reference engine rejects; COMPLETENESS = it rejected one the reference engine accepts.
+
+| Gate | Switch set | Corpora | Engine checks | SOUNDNESS | COMPLETENESS | Tier / convention (D0, unbounded) / audit differences | Pipeline verdicts | Result |
+|---|---|---|--:|--:|--:|--:|---|---|
+| `c1-a4` | `warm,gated,expect,m4b` | tutorial (141 files), bugs (34), all 230 published tests, Init, Std, reachability, the Cedar slice | 15,845 + 57,938 + 100,096 + 4,224 + 8,064 | 0 | 0 | 0 / 0 / 0 | 230 of 230 tests and the four corpora right; MACHINE-INCOMPLETE 0, WARM-ANOMALY 0 | PASS WITH DECLINES |
+| `c1-a4-mathlib` | the same | ten Mathlib slices (`Scheme`, `Sylow`, `Order.Basic`, `Fintype.Basic`, `Topology.Basic`, `Group.Basic`, `Nat.Basic`, `List.Basic`, `Galois.Basic`, `Pow.Real`) | 108,256 | 0 | 0 | 0 / 0 / 0 | 10 of 10 right | PASS WITH DECLINES |
+GATE-ROWS
+
+The declines are those of the base tree: the eager-reduction rule (M6-F26: 164 units of Init, 203 of Std, 8 of
+reachability, 11 of the Cedar slice, 28 of the `Scheme` slice, ...) and, in the step-1 set under the harness heap of
+5 GiB, three `perf` tests by `E_MEM` (`loop-unfolded-once`, `magma-list-deep-n36`, `magma-list-pair-n21`; they are
+accepted with `same`).
 
 ### 7.2 Hostile exports
 
@@ -334,7 +347,24 @@ expect,m4b`; `f4` = `a4` + `facts,probes`; `rich4` = `warm,gated,expect,facts,pr
 same,m2a,m3a,m7a,k2,m4b`; `all4` = `all,lazyeval,same,match,joint,k2,m2a,m3a,m7a,m4b` with `elabAt=1`; `only4` =
 `m4b` alone; `cap4` = session cap 1 KiB; `d0` = host depth 0.
 
-**HOSTILE-TABLE**
+| Set | Exports (official reject / accept) | Switch sets | WRONG verdicts | Declined by the pipeline |
+|---|--:|---|--:|---|
+| package S, the rows of its manifest | 327 (282 / 45) | `a4`, `f4`, `rich4`, `all4` | 0 | 1 (`str-lit-missing-prerequisites-bad`, by design) |
+| S2's table of known exports: all of package S (351) and the arena's `bad` tests (92) | 443 (396 / 47) | `dflt4` (the published default set of 19:41Z + `m4b`), `dflt4j4` (the same with four workers) | 0 | 1 (the same) |
+| S2 hand-written attacks | 134 (96 / 38) | `a4`, `f4`, `rich4`, `dflt4` | 0 | 1 (`prop-mdata-domain-bad`, as in S2's runs) |
+| S2 non-literal twins | 134 (96 / 38) | `a4`, `rich4` | 0 | 1 (the same) |
+| S2 second batch (`Acc.rec`, `Quot`, unit-like) | 11 (8 / 3) | `a4`, `f4`, `rich4`, `all4`, `dflt4`, `dflt4j4` | 0 | 0 |
+| S2 certificates | 15 (0 / 15) | `a4`, `rich4` | 0 | 0 |
+| S2 random exports | 498 (362 / 136) | `a4`, `rich4` | 0 | 0 |
+| C1's new exports | 41 (15 / 26) | `v0`, `warm,gated,expect`, `a4`, `f4`, `only4`, `rich4`, `all4`, `cap4`, `d0`, `dflt4`, `dflt4j4` | 0 | 0 |
+
+**The 15 exports that `skipargs` / `congruence` accept and the official checker rejects** (the 13 rows of S-F1 / S-F2,
+`open-flag-closed-bad`, `acc-rec-intro-vs-axiom`) are REJECTED under every switch set with `m4b` that they were run
+under (`a4`, `f4`, `rich4`, `all4`, `dflt4`, `dflt4j4`). The control: on the same binary `-Drlvm.machine.m4=
+congruence,skipargs` accepts two of my 41 exports that the official checker rejects (`fuse-abbrev-samehead-
+proofarg-bad`, `fuse-opaque-samehead-proofarg-bad`): the suite does see the class. Raw rows: `work/c1/out/judge-*.tsv`.
+
+Fast test group of the module with the patch applied (the clean tree, `mvn test -Dgroups=fast`): exit 0.
 
 The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, manifest with the official verdicts
 `work/c1/hostile/manifest.tsv`; my prediction of the official verdict was right for all 41):
@@ -351,8 +381,8 @@ The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, mani
 | the shape of `HMul.hMul` over `instHMul` over `Mul.mul`, also nested | 2 ok, 2 bad | two fused levels, the CORE memo on the second occurrence |
 | Nat functions, closed | 1 ok, 1 bad | folded, not unfolded (the shape excludes them) |
 | wrappers that unfold to recursor applications / to constructor applications (also differing in a proof field) | 3 ok, 1 bad | a result that the next state can still change goes to the complete judgment |
-| the restart: a pair that is compared by proof irrelevance only after unfolding, once / twice in two declarations / twice in one | 3 ok | the proof-irrelevance test of the restarted `is_def_eq_core` (see 8) |
-| `a = b` for two axioms of `Q : Sort (imax 1 0)` and of `Q.{1} : Sort (imax u 0)` | 2 ok | probes of the base: the official checker treats such a sort as `Prop` (accept) and so do both engines |
+| a projection chain at a type of sort `Sort (imax 1 0)` whose unfolding has a type of declared sort `Prop`, once / twice in two declarations / twice in one | 3 ok | proof irrelevance before and after the unfolding (see 8) |
+| `a = b` for two axioms of `Q : Sort (imax 1 0)` and of `Q.{1} : Sort (imax u 0)` | 2 ok | probes of the base: the official `is_prop` normalises the level (accept), and so do both engines |
 
 ## 8. Not established
 

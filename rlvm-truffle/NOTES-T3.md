@@ -3,6 +3,7 @@
 Continues `NOTES-T2.md` (what the tier is, its deviations from ISA 8.4, its correctness record). This file:
 the measurements T2 could not take, what the tier costs and gains on each platform and why, what was
 changed, and the go / no-go. Scratch, scripts, logs and raw rows: `work/t3/` (`warm.tsv`, `logs/`).
+Section 10 is the second task of the same day: the prototype of U1, the CALL instruction (NO-GO).
 
 ## 1. Verdict: NO-GO as a default; what the tier is worth, and under which policy
 
@@ -400,32 +401,86 @@ not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an en
 first point at which Truffle can do something the stepper cannot. **Done in the second task (section 10):
 it does not pay there, and nothing is left for the tier on top of it.**
 
-## 10. U1: the CALL instruction (second task, from 19:00Z)
+## 10. U1: the CALL instruction (second task, 19:00Z - 20:40Z): NO-GO in the stepper, nothing for `t2` on top
 
-**Design, written before the prototype** (the proposed ISA section is `work/t3/isa-call.md`; this is its
-summary; what the prototype measured follows below when it exists).
+Proposed ISA section: `work/t3/isa-call.md` (design sections 1-8 written before the prototype, section 9
+after it). Prototype: private tree `work/t3/tree-call/tree` (rlvm-machine + a copy of this module), switch
+`call` (bit 26, off by default); patches per owner in `work/t3/patches-call/` (README.txt there). Nothing
+of it is in the main tree and nothing in this module's sources.
 
-- `CALL d, h, a1..an` stands where a block built an application of a constant only to ask for its weak
-  head normal form (`KCONST ; MKAPP ; WHNF`): it runs the head's RULES / BODY block directly on the
-  arguments, which are in scratch, and leaves in `d` either the application itself (built, exactly as
-  `MKAPP` would: the generic path) or a head reduct of it; the `WHNF d', d` that follows finishes. The
-  application's record, its spine run and its WHNF / UNF memo words are not made.
-- A block entered that way runs in CALL MODE (a marker in the window word of the captured frame, which
-  BODY / RULES activations do not use): its `TAILAPPLY` on a constant head does not build the next
-  application either but hands head and arguments back (`TCALL`), and the loop of `CALL` enters the next
-  block. The elaborator emits `TAILAPPLY h, args` for `MKAPP ; RET` in tail position, which in value mode
-  (DELTA of lazy delta, the generic WHNF, closures) is the same record at the same ticks.
-- The generic path is taken - the application is built and the complete procedure runs on it - for: a
-  head that is not a constant; a head that is not of class DEFN (constructors, axioms, opaque constants,
-  recursors, Quot); the Nat functions (NATFOLD must see the application first); a wrong number of levels or
-  a head marked "does not unfold"; no RULES and no BODY block; fewer arguments than the block's arity;
-  eager reduction. Hints never matter (CALL exists only where WHNF is asked for; CONV's lazy delta keeps
-  single DELTA steps on records); budgets are kept by one tick per iteration; strict mode has no blocks.
-- What changes, only with switch `call`: the records and memo words above (so later ids shift), and one
-  tick less per step that went through DELTA. What stays: verdicts, the structure of every value, and
-  id-identity between runs of the same switch set (host depth lanes; stepper against the tier).
-- The risk is a workload that re-derives the same application many times and lived on its WHNF memo;
-  the prototype counts ticks per corpus against the switch off and has a repeat counter.
-- Tier: a node for `CALL` whose head is a `KCONST` of the same block knows the callee's row when the root
-  is built; if the callee's root is installed it sets up the window and calls it through a
-  `DirectCallNode`, so that Truffle can inline it.
+### 10.1 Verdict
+
+**U1 is a NO-GO: the instruction is correct, gated, and worth nothing measurable** - in the stepper and in
+the Truffle tier, on the JVM and in the native image, on reachability and on Cedar-level work.
+
+- The form I proposed (the application is never built: "form U") saves 1.9% of reachability's records and
+  costs 8.3% more ticks and 21% more block activations, because 77% of the applications at CALL sites were
+  answered by the WHNF memo of their record. On library corpora it saves 0.1-0.8% of the records at equal
+  ticks.
+- The form that keeps the application as the memo key ("form T", the prototype's default) changes no
+  count by more than 0.3% on any corpus.
+- Warm wall clock (bench/quiet.py, one engine kept): no row of either form is outside the scatter between
+  two processes of the same configuration (10.4).
+- For the tier there is nothing on top: `t2` and `t2 + call` are the same within the scatter, and the direct
+  call node the task asked for was NOT built, because its object was counted first: 68 k calls per pass on
+  reachability have a compiled caller and a compiled callee (4.5% of the compiled activations), none on
+  the Cedar slice (10.5).
+
+### 10.2 What was built
+
+- **Elaboration** (`Elab`, switch `call` only): the major premise of an inlined case tree whose term is an
+  application of a definition becomes `KCONST ; CALL r, h, args ; WHNF rM, r` instead of `KCONST ; MKAPP ;
+  WHNF`; an application of a definition in tail position becomes `TAILAPPLY h, args` instead of `MKAPP ; RET`
+  (the same record at the same ticks in value mode).
+- **`CALLV`** (`Code.callLoop`, shared by stepper and tier): one tick per head; the head's RULES block (case
+  tree) or BODY block is entered directly on the arguments in scratch, in CALL MODE (marker in the window
+  word of the captured frame); in call mode a `TAILAPPLY` of a constant hands head and arguments back
+  (`Op.TCALL`) and the loop continues with the next head; over-application of a constant result is again a
+  call; a suspended block leaves a frame `K_CALL` that re-enters the loop.
+- **The generic path** (the application is built and the complete WHNF runs on it), exactly: head not a
+  CONST record; head class not DEFN (constructors, axioms, opaque constants, recursors, Quot); a Nat
+  function; a wrong number of levels or "does not unfold"; no RULES and no BODY block or fewer arguments
+  than the block's arity; eager reduction active. Theorem heads are called (class DEFN); hints do not
+  matter (CALL exists only where WHNF is asked; lazy delta keeps single DELTA steps on records); budgets
+  are kept by the tick per iteration; K and literals are CORE's and NATFOLD's in the WHNF that follows.
+- **Two forms** (a static of `Code`, one per JVM). Form U (`-Drlvm.t3.callUntabled=true`): `CALL` is `CALLV`,
+  the application exists only if the call is stuck. Form T (default): the application is interned first as
+  the memo key; a WHNF flag or a WHNF memo answers; else `CALLV`, then the complete WHNF of its result,
+  which is written into the application's WHNF memo (frames `K_CALLT_1`, `K_CALLT_2`).
+- **Tier** (private copy of this module): `Op.CALL` is decoded like `APPLY`; `Instr.Apply` calls
+  `T2Bridge.callv` (a boundary into `Code.callTabled` / `Code.callv`) and, for a `TAILAPPLY` of a constant in
+  an activation in call mode, `T2Bridge.tailCall`. No direct call node (10.5).
+- **Counters**: `call.entered / memo / tail / builtAtSite / builtAfterTail` (always), the census of block
+  instructions and of record-table probes (`-Drlvm.t3.census=true`), CALLs in compiled code and where the
+  callee runs (`-Drlvm.t3.callCount=true`); `WarmMain` prints them per pass.
+
+### 10.3 Counts per warm pass (one worker; off / form T / form U)
+
+| corpus | ticks | records built | record-table probes | block activations | blocks entered by CALL / answered by the memo |
+|---|--:|--:|--:|--:|--:|
+| reachability | 9,095,141 / 9,094,072 / **9,849,776 (+8.3%)** | 4,819,810 / 4,818,323 / 4,727,624 (-1.9%) | 8,369,951 / 8,391,415 / 8,650,323 (+3.4%) | 1,755,468 / 1,755,477 / 2,128,006 (+21%) | T: 92,151 / 382,961; U: 464,637 / - |
+| Cedar slice | 9,772,239 / 9,765,614 / 9,777,052 | 5,031,495 / 5,029,993 / 5,025,412 (-0.12%) | 10,924,782 / 10,923,479 / 10,920,964 | 597,341 / 597,372 / 601,758 | T: 6,700 / 2,275; U: 9,197 / - |
+| Init | 39,101,002 / 39,001,150 / 39,070,324 | 16,194,242 / 16,154,662 (-0.24%) / 16,080,771 (-0.70%) | 33,213,640 / 33,175,585 / 33,117,125 (-0.29%) | 4,310,644 / 4,312,342 / 4,347,413 | T: 106,605 / 29,626; U: 136,032 / - |
+| Std (4 workers) | 64,816,271 / 64,748,034 / 64,690,161 | 28,212,804 / 28,184,641 / 27,986,777 (-0.80%) | - | 6,605,897 / 6,623,541 / 6,649,179 | T: 147,422 / 38,860; U: 185,000 / - |
+| full cedar (4 workers) | 84,572,859 / 84,471,043 / 84,472,532 | 38,622,220 / 38,599,907 / 38,406,381 (-0.56%) | - | 7,750,183 / 7,757,163 / 7,795,745 | T: 155,505 / 43,955; U: 198,267 / - |
+
+JVM and native image give the same counts; so do the stepper and the tier with form T on reachability
+under the production policy (13 blocks, 1.53 M compiled activations per pass: ticks 9,094,072, records
+4,818,323, run words 24,417,655 in both). With 4 workers the split of the units over the sessions moves the
+counts by up to 1% from run to run; only the one-worker rows are exact.
+
+**Census of what block instructions build** (switch off, `-Drlvm.t3.census=true`; new record / existing
+record found, per pass):
+
+| corpus | records per pass | `MKAPP` | `MKLAM` + `MKPI` + `MKSUSP` | `MKPROJ` | share of the records made by block instructions | `WHNF` instructions: flag / memo / computed |
+|---|--:|--:|--:|--:|--:|--:|
+| reachability | 4,819,810 | 2,274,137 / 2,114,595 | 706,202 / 922,985 | 408,525 / 65,382 | 70% | 536,216 / 387,018 / 378,619 |
+| Cedar slice | 5,031,495 | 387,400 / 213,341 | 293,107 / 709,494 | 30,218 / 53,723 | 14% | 70,059 / 23,975 / 17,117 |
+| Init | 16,194,242 | 3,389,093 / 1,796,109 | 944,506 / 1,254,409 | 331,269 / 895,017 | 29% | 412,820 / 283,317 / 207,742 |
+
+Reading: the applications that cost are not redexes handed to WHNF but ARGUMENTS and RESULTS (they are
+stored in other records and frames at once); half of reachability's `MKAPP` executions and most closure
+constructions find an existing record; on Cedar-level work six of seven records are made by the generic
+judgments, where no block instruction reaches. This is the table U2 needs (sent 19:32Z).
+
+@@TIMES@@

@@ -8,6 +8,9 @@ NOTES-T3 differ, NOTES-T3 is right (in short: in `mode=warm` the tier now promot
 and does not switch the machine's heat accounting on; the read-only helpers are compiled into the blocks;
 `rlvm.t2.ahead` is a rejected experiment).
 
+The prototype of a `CALL` instruction and its node for this tier (NOTES-T3 section 10; verdict NO-GO) is not
+in these sources: it lives in `work/t3/tree-call/` and as patches in `work/t3/patches-call/`.
+
 RLVM is "a GraalVM/Truffle based Lean kernel". Until this module existed, Truffle was linked into the
 image and compiled nothing. This module is the Truffle tier for real: the guest language `rlvm` whose
 programs are the **code blocks of the machine** - the judgment chains of constants (`TELE(c)`: application
