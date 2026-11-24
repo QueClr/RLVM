@@ -310,6 +310,34 @@ public final class T2Bridge {
         return Eval.force(m, s, d);
     }
 
+    // ---------------------------------------------------------------------------------------------------
+    // The same operations WITHOUT a boundary (experiment rlvm.t2.inline, NOTES-T2 "probes inlined"): partial
+    // evaluation continues into the machine's operation, so the hash-consing probe is compiled into the block
+    // with the operand count as a constant. Used only when the tier is built / started with rlvm.t2.inline > 0.
+    // ---------------------------------------------------------------------------------------------------
+
+    public static int peekInline(Machine m, int v) {
+        return Values.peek(m, v);
+    }
+
+    public static int ctorInline(Machine m, int v, int ind) {
+        if (v < 0) {
+            return Code.isNat(m, ind) ? (v == Layout.IMM ? 0 : 1) : -1;
+        }
+        return v > Layout.HOLE ? Code.ctorIndex(m, v, ind) : -1;
+    }
+
+    public static int mkAppInline(Machine m, int h, int xb, int n) {
+        m.xp = xb + n;
+        int r = Values.mkApp(m, h, xb, n);
+        m.xp = xb;
+        return r;
+    }
+
+    public static int mkConstInline(Machine m, int row, int levelList) {
+        return Values.mkConst(m, row, levelList);
+    }
+
     /** {@code Tier.suspend}: the frame ACT [blk, pc, dst, ..] of the activation for signal {@code sig}. */
     @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
     public static int suspend(Machine m, int sig, int blk, int pc, int dst, int rb) {

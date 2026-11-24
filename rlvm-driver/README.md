@@ -696,10 +696,11 @@ All rows: `-X engine=machine`, CE native image `-O3`, arena-shaped container (8 
 `perf stat`), under the measurement lock, columns CPU time, wall clock, peak RSS, instructions. Tool:
 `work/rlvm-driver/w7/m.py` (a copy of the machine integrator's `work/machine-int/m.py`; rows in
 `work/rlvm-driver/w7/measure.tsv`, summary `work/rlvm-driver/w7/summary.py`). **The host's load average was 40
-to 190 during all of it** (more than thirty agents; the container's cores are its own, the memory system is
-not): CPU times are 3 % to 10 % above the machine integrator's of 13:00Z for the same binary, and single
-runs of one configuration differ by up to 5 % (the Cedar slice by more). Differences below that are not
-results.
+to 240 during all of it** (two other workflows were building, guarding and measuring; all twenty CPUs were
+busy, the container's eight included, whenever sampled): CPU times are 6 % to 10 % above the machine
+integrator's of 13:00Z for the same binary, single runs of one configuration differ by up to 5 % (the Cedar
+slice by more), and wall clocks of runs with eight workers are up to twice what a quiet host gives.
+Differences below that are not results.
 
 #### Session cap (request of the machine integrator, requests.log 13:05Z)
 
@@ -734,20 +735,55 @@ driver jar (`work/rlvm-driver/w7/dist-B`: published eb0944caa630; `dist-native`:
 
 | Driver | workers | runs | heavy units on one worker | CPU of the busiest worker | workers with less than 0.5 s of CPU |
 |---|--:|--:|---|--:|--:|
-| before | 8 | 2 | three of the four in both runs (4137 + 4139 + 4145) | 10.2 s, 10.5 s | 6 of 8 |
-| before | 4 | 2 | three of the four in both runs | 10.3 s, 10.6 s | 2 of 4 |
-| after | 8 | 2 | none: four units on four workers | 4.3 s, 4.3 s | 4 of 8 |
-| after | 4 | 1 | none: four units on four workers | 4.3 s | 0 of 4 |
+| before | 8 | 3 | three of the four in 2 runs (4137 + 4139 + 4145), two and two in 1 | 10.5 s, 10.2 s, 8.7 s | 6 of 8 |
+| before | 4 | 3 | three of the four in all 3 runs | 10.6 s, 10.3 s, 10.5 s | 2 of 4 |
+| after | 8 | 3 | none: four units on four workers in all 3 runs | 4.3 s, 4.3 s, 4.2 s | 4 of 8 |
+| after | 4 | 3 | none: four units on four workers in all 3 runs | 4.3 s, 4.6 s, 4.4 s | 0 of 4 |
 
-So the wall clock of the checking phase is bounded below by 10.2 s to 10.6 s before and by 4.3 s after (the
-heaviest single unit; total CPU time unchanged: 14.9 s to 15.5 s of user + system time in all runs). Those
-seven runs were made on the host, on the efficiency cores at a load average above 200 (`work/rlvm-driver/w7/
-host-reach.sh`), so their wall clock (before 87 s to 203 s, after 49 s to 63 s) says nothing beyond the
-direction. The measurement in the container (`work/rlvm-driver/w7/sched.sh`: reachability, con-leche and
-mathlib with 4 and 8 workers, before and after, one hold of the measurement lock) is in the table below if it
-got its turn at the lock; see `work/status/rlvm-driver.log` for the state at the end of the session.
+(These twelve runs were made on the host, on the efficiency cores at a load average above 200,
+`work/rlvm-driver/w7/host-reach.sh`: their CPU figures are those of slower cores and their wall clock, 75 s to
+203 s before and 32 s to 63 s after, says nothing beyond the direction; total CPU time is the same before and
+after, 14.9 s to 15.5 s of user + system time.)
 
-SCHED_TABLE_PLACEHOLDER
+The measurement, in the container, one hold of the lock (`work/rlvm-driver/w7/sched.sh`, 14:45Z to 14:58Z,
+load average 180 to 240; `-X machine.switches=warm,gated,expect -X session-mib=4` in both; median (range) of
+the runs):
+
+| Corpus | workers | runs | CPU before | CPU after | wall before | wall after | | peak RSS before -> after |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| reachability | 8 | 3 | 8.49 s (8.38 - 8.65) | 8.59 s (8.49 - 8.63) | 6.50 s (6.26 - 7.32) | **4.66 s** (4.35 - 5.36) | **-28 %** | 1,948 -> 2,751 MiB |
+| reachability | 4 | 3 | 8.29 s (8.22 - 8.43) | 8.56 s (8.50 - 8.76) | 8.31 s (6.66 - 8.67) | **4.08 s** (3.93 - 4.78) | **-51 %** | 1,869 -> 2,392 MiB |
+| con-leche | 8 | 2 | 18.34, 19.00 s | 18.59, 18.64 s | 8.44, 9.46 s | 8.00, 9.39 s | | 791 -> 718 MiB |
+| con-leche | 4 | 2 | 16.71, 16.91 s | 16.41, 17.43 s | 7.80, 8.60 s | 7.65, 8.64 s | | 624 -> 628 MiB |
+| Init | 8 | 3 | 9.05 s (8.89 - 9.42) | 8.91 s (8.88 - 9.08) | 3.25 s (3.02 - 5.38) | 3.65 s (3.43 - 3.94) | | 338 -> 346 MiB |
+| Std | 8 | 3 | 15.47 s (15.39 - 15.74) | 15.57 s (15.22 - 16.02) | 6.08 s (5.76 - 7.26) | 5.93 s (5.01 - 7.39) | | 482 -> 498 MiB |
+| mathlib | 8 | 1 | 278.4 s | 263.5 s | 89.4 s | 81.8 s | | 2,786 -> 2,815 MiB |
+| mathlib | 4 | 1 | 244.9 s | 244.0 s | 77.3 s | 88.4 s | | 2,630 -> 2,550 MiB |
+| mathlib, `-X load=pipelined` (after only) | 8 | 1 | | 278.3 s | | 80.0 s | | 3,387 MiB |
+| mathlib, `-X load=pipelined` (after only) | 4 | 1 | | 247.6 s | | 68.1 s | | 2,988 MiB |
+
+Reading:
+
+- **reachability: -28 % wall clock with 8 workers, -51 % with 4**, in every one of the three pairs. In the
+  after runs the four heavy units lie on four workers (statistics of the 8-worker run: units 4137 / 4139 /
+  4158 / 4145 on workers 7 / 0 / 4 / 6, checking phase 4.3 s, 8 in-unit give-backs, 52 units given back).
+  The price: +1.2 % CPU time with 8 workers and +3.3 % with 4 (three runs each, ranges touching), and
+  0.5 GB to 0.8 GB more peak RSS: three or four heavy units now hold their arenas at the same time and share
+  the memory system, which is what running them in parallel means (a "lucky" cut of the claims before gave
+  the same: the 6.26 s and 6.66 s runs). Kept: the wall-clock gain is ten times the CPU cost, and the CPU
+  cost exists only while heavy units overlap.
+- con-leche (one heavy unit), Init, Std: no difference beyond the noise in CPU time or wall clock, as
+  expected: nothing there waits behind a slow unit that an idle worker could have taken.
+- mathlib: single runs under this load differ by 10 % in wall clock in both directions (8 workers 89.4 ->
+  81.8 s, 4 workers 77.3 -> 88.4 s): no result. Its heaviest unit takes about 1 s; the statistics of the
+  after run show what the load did (each worker 29 s to 32 s on a CPU during 66 s of checking: the
+  container's cores were shared; the machine's owners measured 42.3 s wall, of which 26.6 s checking, at
+  13:30Z).
+- Pipelined loading with the machine: with 4 workers 68.1 s against 77.3 s / 88.4 s batch; with 8 workers
+  80.0 s against 81.8 s: there the loader, the environment thread and eight workers share eight (contended)
+  cores and the load itself takes 54 s instead of 15.5 s (the environment thread waited for the loader 196
+  times). It confirms the rule of ARCHITECTURE 6.8 for pipelined runs (leave CPUs for the loader); the
+  size of the gain needs a quiet host. Peak RSS +0.4 GB to +0.6 GB.
 
 #### Worker count with the machine (`--threads auto`)
 
@@ -800,9 +836,9 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 |---|---|
 | `$MVN -o -q -pl rlvm-driver test` | 100 tests, 97 run green, 3 opt-in |
 | `rlvm-driver/bin/invariance.sh --engine machine -X machine.switches=warm,gated,expect tutorial bugs mdata` (machine jar f82074b207f1 as primary engine; every file 9 times: batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication every 1 / 7 / 64 units and 1 / 4 / 8 workers) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike in every mode (413 + 65 + 1,197, the same files as with the reference engine), 5 pipelined declines (REORDER_DECL mutants), 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY |
-| the same, `published` (231 files) | INVARIANCE_PUBLISHED_PLACEHOLDER |
+| the same, `published` (231 files) and `big` (init-prelude, Init, Std, cedar) | published: 193 files in 5 of 6 shards: all correct, 0 schedule differences, 0 pipelined declines. The sixth shard (38 files) died with `OutOfMemoryError` in `Machine.growRecords` in the suite's 6 GB JVM (a perf file; with the launcher's 13 GB heap the machine declines there and the reference kernel decides) and was repeated: see `work/status/rlvm-driver.log` for how far the repeat got. big: 4 files, all correct in all 9 configurations |
 | `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (reference engine as primary) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
-| `scripts/gate.sh --dist work/rlvm-driver/w7/dist-gate --corpus tutorial --corpus bugs --corpus mdata --corpus prelude` (the published jars of 13:46Z with this driver jar; JVM launcher, reference engine, 1 worker, batch) | GATE_PLACEHOLDER |
+| `scripts/gate.sh --dist work/rlvm-driver/w7/dist-gate --corpus tutorial --corpus bugs --corpus mdata --corpus prelude` (the published jars of 13:46Z with this driver jar; JVM launcher, reference engine, 1 worker, batch) | PASS in every step: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260 (agree 11,847, declined 413), bugs 2,692 (2,627 / 65), mdata 1,976 (779 / 1,197), prelude 847 (839 / 8): SOUNDNESS 0, COMPLETENESS 0, errors 0 in all four, the same counts as the wave-5 check; differential self-test caught. (The script was edited by its owner while the gate ran and stopped with a syntax error after the fourth corpus; the self-test was then run by `--no-slice --corpus none`.) |
 <!-- measured:end -->
 
 ## Deviations from the design documents

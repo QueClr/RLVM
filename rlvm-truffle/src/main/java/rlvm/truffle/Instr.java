@@ -30,6 +30,15 @@ import rlvm.machine.Tier;
 abstract class Instr extends Node {
     static final int SIG = Op.SIG;
 
+    /**
+     * Experiment (NOTES-T2 "probes inlined"; 0 = off, the default): 1 = PEEK and the constructor test of SWITCH
+     * are compiled into the block; 2 = also the hash-consing probes of MKAPP and KCONST. A constant of the
+     * class: in a native image it is fixed when the image is built ({@code -Drlvm.t2.inline=N} for
+     * native-image), so that an image built without it contains none of the machine's operations as
+     * runtime-compiled methods.
+     */
+    static final int INLINE = Integer.getInteger("rlvm.t2.inline", 0);
+
     /** Frame slot of the captured frame run / of the level substitution of the activation. */
     final int capSlot;
     final int lsSlot;
@@ -118,7 +127,7 @@ abstract class Instr extends Node {
                 return T2Bridge.fault(m, MachineErrors.E_INTERNAL);
         }
         if (v > Layout.HOLE && T2Bridge.kindOfRecord(m, v) == Layout.SUSP) {
-            return T2Bridge.peek(m, v);
+            return INLINE >= 1 ? T2Bridge.peekInline(m, v) : T2Bridge.peek(m, v);
         }
         return v;
     }
@@ -306,7 +315,7 @@ abstract class Instr extends Node {
             if (xb >= SIG) {
                 return xb;
             }
-            int r = T2Bridge.mkApp(m, hv, xb, args.length);
+            int r = INLINE >= 2 ? T2Bridge.mkAppInline(m, hv, xb, args.length) : T2Bridge.mkApp(m, hv, xb, args.length);
             if (r >= SIG) {
                 return r;
             }
@@ -338,7 +347,8 @@ abstract class Instr extends Node {
         int exec(VirtualFrame f, Machine m, int rb, int d) {
             int v;
             if (op == Op.KCONST) {
-                v = lparam ? T2Bridge.mkConstSubst(m, a, list, f.getIntStatic(lsSlot)) : T2Bridge.mkConst(m, a, list);
+                v = lparam ? T2Bridge.mkConstSubst(m, a, list, f.getIntStatic(lsSlot))
+                        : INLINE >= 2 ? T2Bridge.mkConstInline(m, a, list) : T2Bridge.mkConst(m, a, list);
             } else if (op == Op.KSORT) {
                 v = lparam ? T2Bridge.mkSortSubst(m, a, f.getIntStatic(lsSlot)) : T2Bridge.mkSort(m, a);
             } else {
@@ -471,7 +481,7 @@ abstract class Instr extends Node {
             if (v >= SIG) {
                 return v;
             }
-            int j = T2Bridge.ctor(m, v, ind);
+            int j = INLINE >= 1 ? T2Bridge.ctorInline(m, v, ind) : T2Bridge.ctor(m, v, ind);
             return j >= 0 && j < k ? j : k;
         }
     }
