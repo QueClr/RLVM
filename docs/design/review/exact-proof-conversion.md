@@ -25,17 +25,18 @@ default switch set of the published machine since 19:41Z; section 6):
 | | Mathlib slice `Scheme.cone` | Mathlib slice `Galois.Basic.cone` | Cedar slice |
 |---|--:|--:|--:|
 | the two NON-official options on top of D (what is to be recovered) | **-27.7 %** CPU (-48.6 % ticks) | **-31.7 %** (-57.3 %) | -2.6 % (-11.5 %) |
-| `m4b`, the official-exact step built here, on top of D | -1.4 % CPU, not resolved (-3.3 % ticks) | +0.8 %, not resolved (-4.1 %) | -0.7 %, not resolved (-0.8 %) |
+| `m4b`, the official-exact step built here, on top of D | no effect: -1.4 % and, with the order of the pair reversed, +0.8 % CPU (-3.3 % ticks) | +0.8 % (-4.1 %) | -0.7 % and +0.4 % (-0.8 %) |
 | `facts` (B7, official-exact, exists) on top of D + `m4b` | +1.2 % | +0.5 % | +2.1 % |
 | D itself against the step-1 set (official-exact, exists) | -12.1 % | -8.5 % | -24.8 % |
 
 In the 1,690 units of `Scheme.cone` in which the shortcuts save half of the ticks or more (39 % of the slice's
-checking time) the shortcuts remove 70 % of the CPU time; the default set had removed 7.5 % of it, `m4b` removes
-1.4 %. **The share of the 40 % that the official-exact route recovers is between zero and one twentieth.**
+checking time) the shortcuts remove 70 % of the CPU time; the default set had removed 7.5 % of it, and `m4b`'s 1.4 %
+there is inside the order effect of that window. **The share of the 40 % that the official-exact route recovers
+is zero within the resolution of these measurements (1 % of the checking time).**
 
 | # | Idea | Official-exact? | Result |
 |---|---|---|---|
-| 1 | memo / fusion of the unfold-to-structure steps | yes where it only removes bookkeeping | Built: switch `m4b`, the fused two-sided lazy step (`Conv.convFuse`, patch for M4). It makes the same records, unfoldings, comparisons and type inferences as the complete judgment (the counts are identical) and removes the judgments LAZYD / LSTEP around them: -3 to -4 % of the ticks on Mathlib slices, no resolved CPU effect. The two larger parts of the idea were already in the machine: the CORE memo takes the restart of `is_def_eq_core` out of a repeated chain (3.1), and M2's `bodies` makes the unfolding of a projection function one MKPROJ |
+| 1 | memo / fusion of the unfold-to-structure steps | yes where it only removes bookkeeping | Built: switch `m4b`, the fused two-sided lazy step (`Conv.convFuse`, patch for M4). It makes the same records, unfoldings, comparisons and type inferences as the complete judgment (the counts are identical) and removes the judgments LAZYD / LSTEP around them: -3 to -4 % of the ticks on Mathlib slices, no effect on the CPU time. The two larger parts of the idea were already in the machine: the CORE memo takes the restart of `is_def_eq_core` out of a repeated chain (3.1), and M2's `bodies` makes the unfolding of a projection function one MKPROJ |
 | 1' | a derived rule per projection chain AND instance (the strong form of 1) | would be exact under the four conditions of 3.4; NOT built | bounded by the reduction share of the heavy units (61 % of their ticks); my estimate is 5 to 10 % of Mathlib's ticks and less in time. It is M3's K2 extended into lazy delta and keyed by instance arguments: a package of its own, and K2 itself is not reviewed yet |
 | 2 | lockstep walk of one proposition under two frames | exact only where the official order compares arguments before it unfolds: rigid heads, the same REGULAR definition, binder domains, and there the complete judgment is that walk. Not exact for abbreviations (every projection function), recursors, projections, closures | nothing: at most 12 % of a heavy unit's ticks are in nodes of that kind, and what lies below them must be evaluated anyway. Not built |
 | 3 | caches the official kernel has and the machine uses worse | there are none: the machine's pair table hits more often than the official caches would (canonical variables) | 8 of 2,227 comparisons of the traced unit repeat a pair of records; about 4 % repeat a pair of EXPRESSIONS (an expression-keyed table would be exact; M4's measurements say the walks cost what they save). Not built |
@@ -161,7 +162,7 @@ every sub-judgment writes its frame (four new continuation states `CONV2[9..12]`
 
 **Size**: -2.9 % of the ticks on the step-1 set, -3.3 % on the default set and on the rich set (`Scheme.cone`),
 -3.8 % / -4.1 % on `Galois.Basic.cone`, -0.9 % / -0.8 % on the Cedar slice (section 6). The ticks it removes are the
-cheapest ones of the machine: in CPU time the effect is not resolved (6.1).
+cheapest ones of the machine: in CPU time there is no effect (6.1).
 
 ### 3.3 The first form of the step, withdrawn
 
@@ -371,14 +372,22 @@ Reading (means of the two rounds):
 - **The shortcuts**: on the step-1 set -27.3 % (`Scheme`), -33.7 % (`Galois`), -12.1 % (Cedar slice); on top of the
   default set **-27.7 %, -31.7 % and -2.6 %**. The default set did not shrink what they are worth on Mathlib.
 - **The default set** against step 1: -12.1 %, -8.5 %, -24.8 %.
-- **`m4b`**: on A -1.3 % / -0.3 % / -5.4 %, on D -1.4 % / +0.8 % / -0.7 %. The ticks it removes (3 to 4 % on the Mathlib
-  slices) are bookkeeping that costs almost no time: **its CPU effect is not resolved** (within +-1.5 % in five of
-  the six pairs; the -5.4 % on the Cedar slice under A is not repeated under D and was measured with A first in
-  every round: see the reversed-order window below).
+- **`m4b`**: on A -1.3 % / -0.3 % / -5.4 %, on D -1.4 % / +0.8 % / -0.7 % in this window, in which A and D always ran
+  before their `m4b` twins; the reversed-order window below gives -0.1 % to +0.8 %. The ticks it removes (3 to 4 %
+  on the Mathlib slices) are bookkeeping that costs no measurable time.
 - `facts` on top of D + `m4b`: +1.2 % / +0.5 % / +2.1 %: the fact records cost more than B7 saves, as M4 measured
   (NOTES-M4 W6).
 
-REVERSED-WINDOW
+Reversed-order window (`work/c1/quiet-ab.sh`: the same binary, `m4b` FIRST in every pair, three rounds; thread CPU
+s of the checks):
+
+| corpus | A | A + `m4b` | mean | D | D + `m4b` | mean |
+|---|---|---|--:|---|---|--:|
+| Cedar slice | 1.868 / 1.855 / 1.863 | 1.883 / 1.852 / 1.848 | -0.1 % | 1.415 / 1.407 / 1.420 | 1.427 / 1.423 / 1.411 | +0.4 % |
+| `Scheme.cone` | 2.599 / 2.578 / 2.584 | 2.595 / 2.582 / 2.593 | +0.1 % | 2.231 / 2.239 / 2.242 | 2.280 / 2.246 / 2.237 | +0.8 % |
+
+So the differences of the first window were its order: **`m4b` has no effect on the CPU time of the checks**
+(-0.1 % to +0.8 % over twelve pairs of runs).
 
 By class of unit, `Scheme.cone` (the classes of the table above; thread CPU ms, mean of the two rounds):
 
@@ -393,8 +402,9 @@ By class of unit, `Scheme.cone` (the classes of the table above; thread CPU ms, 
 
 **The units at 2 and more** (1,690 units, 39 % of the slice's checking time): A 1,025 ms, D 948 ms, D + `m4b` 934 ms,
 D + `facts,m4b` 933 ms, N 305 ms, DN 336 ms. The shortcuts remove 70 % of the CPU time of these units; the default
-set removes 7.5 % of it, `m4b` another 1.4 %, `facts` nothing measurable: **the official-exact route recovers 11
-to 13 % of the CPU time that the shortcuts save in the units concerned, and `m4b`'s own part is 2 %**. On top of
+set removes 7.5 % of it, `facts` nothing measurable, and the 1.4 % of `m4b` is inside the order effect of this
+window (the reversed-order window above): **the official-exact switches recover about a tenth of the CPU time that
+the shortcuts save in the units concerned, all of it by the default set's cheaper evaluation**. On top of
 the default set the shortcuts still remove 65 % of the CPU time of these units (27.7 % of the slice's): what the
 default set gained is evaluation (the units below 1.25: -23 %), not the comparison of proofs.
 
@@ -534,8 +544,8 @@ The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, mani
   proof-inspecting reduction" is neither established nor refuted. What I can say is that it would not apply to
   the hot comparisons (their leaves are equal only up to proof irrelevance).
 - **The size of 3.4** is an estimate from counters; nothing of it was built.
-- **The CPU effect of `m4b`**: two rounds per set and corpus resolve 1.5 %, not less; the step may be worth 0 to
-  1.5 % of the checking time on Mathlib, and nothing says it costs.
+- **A CPU effect of `m4b` below 1 %**: the two windows resolve about 1 % of the checking time; the step shows
+  none.
 - **All of Mathlib**: counters and CPU time are from two slices (`Scheme.cone`, `Galois.Basic.cone`) and the Cedar
   slice; MATHLIB-NOTE
 - **Parallel workers**: the counters and the CPU table are one worker; four workers were run on the hostile exports
