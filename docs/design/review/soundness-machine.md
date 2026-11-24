@@ -251,3 +251,17 @@ canonicalisation - the condition under which value identity (v0) is the official
 closed, level-parameter-free term that passed check mode once has the same type everywhere its declarations
 are visible, and the bit is never set after an eager-reduction comparison. A next review should attack both,
 and `bodies` / `match` / `joint` / `lazycases` / `directrules`, with exports of its own.
+
+**21:00Z, after this addendum was written: FIVE NEW FINDINGS (E1-F1 .. E1-F5), wrong ACCEPTs, three of them in
+v0.** Agent E1 wrote hostile exports of a shape neither package S nor this addendum had (`work/e1/exports/`, 67
+exports with the official verdicts): over package S's non-transitive triple (`d intro = d h` and `d intro = 5`
+accepted officially, `d h = 5` rejected) a bound variable must have the binder's DECLARED type, and the machine
+gives it a type that is merely convertible with it: the type inferred for a let VALUE (F1), for the ARGUMENT of
+a beta redex whose codomain is re-inferred in ONLY mode (F2), the other side's domain when a lambda is compared
+with a Pi behind a first binder (F3); with `expect` the comparison variable carries the lambda's own domain (F4)
+and the expected codomain is stored as the lambda's (F5). The matrix above did not contain such a row, and the
+corpus gates compare with the reference engine on terms whose types coincide. The machine was the default
+engine from 19:41Z to 20:35Z on the evidence of this addendum and is not any more (`MachineProvider.priority()`
+= 10) until these are fixed (E1: a gated patch for F1, a design for F2 - F5) and E1's rows are strict rows of
+`s/manifest.tsv`. Section 6's "not reviewed" list was the warning; this addendum should not have been read as
+a review.

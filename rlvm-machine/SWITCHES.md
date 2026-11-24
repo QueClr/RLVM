@@ -1,5 +1,20 @@
 # rlvm-machine - switches and the default configuration (the ONE list)
 
+> **STATE, 2026-11-24T21:00Z: THE MACHINE IS NOT THE DEFAULT ENGINE.** It was from 19:41Z to 20:35Z (the
+> integration described below) and was taken back by the orchestrator (`MachineProvider.priority()` = 10, jar
+> `15cb3777e598`): E1's hostile exports (`work/e1/exports/e1-*.ndjson`, 67 exports with official verdicts)
+> show a family of WRONG ACCEPTS against the official checker, **E1-F1 .. E1-F5**, three of them in the
+> generic tier v0: a bound variable is typed by what its environment slot holds (the let value, the argument of
+> a re-inferred beta redex, the other side's comparison variable) or an expected type is kept as the lambda's
+> own, and such a type is only CONVERTIBLE with the declared one - the official relation is not transitive
+> (`work/status/requests.log` 20:10Z - 20:36Z; E1's patch for F1: `work/e1/patches/let/`, design for F2 - F5:
+> `work/e1/patches/E1-F2-F5-design.md`). None of the gates below could see it: they compare the machine with the
+> reference engine on real corpora and mutants, where the two types are the same, and package S's 329 exports
+> have no row of this shape. Everything below is the state of the machine as an engine that runs with
+> `-X engine=machine`: its default SWITCH SET, cap and bounds stand, and so do the measurements. The machine
+> becomes the default engine again when E1-F1 .. F5 are fixed, E1's rows are strict rows of the hostile suite,
+> and the gates of this file have been run again.
+
 Every optimisation of the machine that changes what is computed sits behind a staging switch
 (`Op.SW_*`, `Machine.sw`, `m.on(Op.SW_X)`); a strict engine (`EngineConfig.strict`, the driver's re-check
 engine) runs with none, whatever is configured. This file is the single list: name, bit, owner, state,
@@ -32,7 +47,7 @@ README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.ma
 
 | What | Default | Decided by |
 |---|---|---|
-| engine | **the machine is the default engine** (`MachineProvider.priority()` = 100); the reference engine re-checks every rejection and decides every unit the machine declines; `-X engine=reference` runs it alone | the gates below; step 4 of the integration (eight corpora, DiffEngine) |
+| engine | **the reference engine** (`MachineProvider.priority()` = 10 since 20:35Z; 100 = the default engine from 19:41Z to 20:35Z). `-X engine=machine` runs the machine as primary engine: the reference engine then re-checks every rejection and decides every unit the machine declines | NOT the machine while E1-F1 .. E1-F5 are open (the note at the top); the gates below and step 4 of the integration (eight corpora, DiffEngine) were green |
 | switch set `Op.SW_DEFAULT` | **`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same`** | gates and measurements below, one line per switch in "Named switches" |
 | session cap `MachineEngine.DEFAULT_SESSION_CAP` | **1 MiB** (`-X machine.session-kib=1024`) | section "Sessions": 512 KiB and 1 MiB are equal within 2 % everywhere, 2 and 4 MiB cost 3-4 % CPU and wall clock on mathlib |
 | host depth bound `Op.HOST_DEPTH` | **128** | 512 and 2048 measured: no gain (section "Host depth bound") |
@@ -54,6 +69,8 @@ declaration that enters eager reduction is declined) - a correctness rule, not a
 | M8's gate, the default set (`machine-gate-default-int6.md`) | **PASS WITH DECLINES** (1,697 s): differential SOUNDNESS 0 / COMPLETENESS 0: all 230 (15,845 engine checks: 15,800 accepted, 40 rejected, 5 declined), Init (57,774 / 0 / 164), Std (99,893 / 0 / 203), reachability (4,216 / 0 / 8), Cedar slice (8,053 / 0 / 11); tier equivalence with the generic tier: 0 different outcomes or reasons, values of K1 judgments on 175 + 1,486 constants equal; convention equivalence (host depth 0 and unbounded against 128): 0 different; audits (`poison,scopeaudit,maskaudit`; `memocheck,shortcheck`): 0 outcome differences, 0 `E_AUDIT`; pipeline 230 / 230 and the four corpora, 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY. Every decline is eager reduction |
 | mutant corpora through the real driver with `-X engine=machine`, v0 and the default set (`report.sh mutants`: `work/int6/machine-mutants-run1.md`) | 17,775 mutants per set: **SOUNDNESS 0, COMPLETENESS 0**, agree 16,092, declined 1,683 (= the reference pipeline's), MACHINE-INCOMPLETE 0, WARM-ANOMALY 0; per declaration (1,008,568 per set) machine accepts / reference rejects 0, machine rejects / reference accepts 0; the machine declined 29 (v0) / 31 (default set) declarations, all eager reduction |
 | DiffEngine through the JVM launcher, default configuration (`work/int6/diff/b-default-*.txt`; the same switch list given explicitly on the jar before the default changed: `a-cand-*.txt`) | 0 differences on 760,839 units: 230 tests 15,840 of 15,845 (the two heaviest perf files in a 12 GiB JVM of their own), Cedar slice 8,053 of 8,064, reachability 4,216 of 4,224, Init 57,774 of 57,938, Std 99,893 of 100,096, con-leche 36,186 of 36,274, cedar 143,675 of 144,098, cslib 395,202 of 397,608; every unit not compared is an eager-reduction decline of the machine |
+| **E1's hostile exports** (67, official verdicts; found after the publication of 19:41Z) | **FIVE OPEN FINDINGS, wrong ACCEPTs**: E1-F1 (let: v0 and the default set), E1-F2 (beta redex with an open domain, re-inferred in ONLY mode: v0 and the default set), E1-F3 (lambda body re-inferred under the comparison variable: v0, and through the driver's strict re-check the default pipeline), E1-F4 and E1-F5 (`expect`: the comparison variable carries the lambda's own domain; the expected codomain is stored as the lambda's). The machine is not the default engine until they are closed |
+| the driver's invariance suite with the machine as primary engine, default set (`rlvm-driver/bin/invariance.sh --no-compile --engine machine`, 20:55Z) | published 231 files x 9 schedules and init-prelude / Init / Std / cedar x 9 schedules (1, 2, 4, 8 workers, 1-byte session cap, pipelined with a publication every 1 / 7 / 64 units): 0 wrong, 0 declined, 0 schedule differences, 0 pipelined declines |
 | the eight corpora, machine as primary engine, 8 workers, native image (`work/int6/w5.out`) | all ACCEPT, machine rejected 0, declined for eager reduction only: Init 164, Std 203, Cedar slice 11, reachability 8, con-leche 88, cedar 423, cslib 2,406, navier-stokes-euler 251, mathlib 6,711 of 714,712; 0 warm anomalies, 0 MACHINE-INCOMPLETE, 0 disagreements |
 
 The two findings of the integration itself:

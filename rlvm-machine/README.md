@@ -21,11 +21,12 @@ scripts/machine-sandbox.sh publish M3                      # your files into the
 
 ## Running the machine
 
-Since the integration of wave 6 (2026-11-24) the machine is the DEFAULT engine of a distribution that contains
-its jar (`MachineProvider.priority()` is 100 = `Engines.DEFAULT_ENGINE_MIN_PRIORITY`), with the default switch
-set of `SWITCHES.md`; the reference engine is the re-check engine and the fallback (`-X engine=reference` runs
-it alone, `-X machine.switches=none` is the machine's generic tier v0). The commands below still name it:
-they also work with a distribution in which it is not the default.
+The machine is NOT the default engine (`MachineProvider.priority()` is 10; the launcher's default needs
+100 = `Engines.DEFAULT_ENGINE_MIN_PRIORITY`): name it. It was the default from 2026-11-24T19:41Z to 20:35Z
+(integration of wave 6) and was taken back because of the wrong accepts E1-F1 .. E1-F5 against the official
+checker (`SWITCHES.md`, the note at its top). With `-X engine=machine` it runs its default switch set of
+`SWITCHES.md`, the reference engine re-checks every rejection and decides what the machine declines;
+`-X machine.switches=none` is the generic tier v0.
 
 ```
 scripts/dev.sh dist                                         # work/dist/bin/rlvm-jvm from the published jars
@@ -119,8 +120,9 @@ v0 (generic tier, complete procedure, no switch), machine jar 608b84b2b142:
 With `-X machine.switches=warm,gated,expect -X session-mib=4` (staging step 1) and with `...,probes` (step 5) the same
 runs are clean as well; with `probes` `loop-unfolded-once` is accepted: 15,845 of 15,845, 0 declines on all 230.
 (State of 13:05Z. Since 16:24Z `warm,gated,expect` is the default set, see `SWITCHES.md`; `probes` lost its
-congruence shortcuts after the soundness finding S-F1. Since 19:10Z the default set is the one of the wave-6
-integration and `MachineProvider.priority()` is 100: `SWITCHES.md`, `work/status/machine-integration.md` "Wave 6".)
+congruence shortcuts after the soundness finding S-F1. Since 19:10Z the default SWITCH SET is the one of the wave-6
+integration (`SWITCHES.md`, `work/status/machine-integration.md` "Wave 6"); `MachineProvider.priority()` is 10 again
+since 20:35Z.)
 
 CPU time, CE native image `-O3`, arena-shaped container, one worker (four workers: same CPU, wall / 3):
 

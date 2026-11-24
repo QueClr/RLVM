@@ -277,18 +277,23 @@ Init, 167 of 199 on Std).
 
 ### 7.4 Warm wall clock, 8 workers
 
-**Not established.** The measurement is prepared (`work/e1/warm-batch.sh`: `bench/warm.sh`, JVM launcher,
-`-X engine=machine`, 8 workers, 10 check-only passes, Std and cedar, the switch off and on alternating, two rounds,
-inside ONE `bench/quiet.py` window; distribution `work/e1/dist-d` = INT6's `dist-b` with the machine jar of the gated
-tree) and has been waiting for the measurement lock since 20:33Z behind six other windows; rows, when it runs, go to
-`work/e1/out/warm.tsv` with the label `e1q ..`. The only row taken in a quiet window so far is one of the earlier
-per-window attempt: Std, switch OFF, 8 workers, reload mode, 5 passes: walls 5.76 / 4.11 / 3.50 / 2.90 / 2.70 s (still
-warming up), no row with the switch on. The launcher runs of 7.2 are single cold passes on a loaded host and are not
-evidence in either direction (driver wall of the check phase, off -> on: Init 0.68 -> 0.70 s, Std 1.47 -> 1.16 s,
-cedar 2.49 -> 2.69 s, Mathlib 9.96 -> 11.60 s; the same binary gave Std 0.88 s and cedar 2.01 s with the switch on
-ten minutes later). What the counters say: the reference engine no longer runs on these units (7.3: Std 1.62 s of
-its thread CPU for 0.48 s of the machine's, unit 23249 1.10 s for 0.15 s), and the machine does 2.5 % to 4.4 % more
-ticks in total.
+One `bench/quiet.py` window (2026-11-24T20:57Z - 21:00Z; `work/e1/warm-batch.sh`: `bench/warm.sh --no-quiet` inside
+the window, so the rows of `work/e1/out/warm.tsv`, label `e1q ..`, say "loaded" although they were taken on the quiet
+cores). JVM launcher, `-X engine=machine`, 8 workers, `-Xmx6g`, 10 check-only passes (`recheck`) per process,
+distribution `work/e1/dist-d` (INT6's `dist-b` with the machine jar of the gated tree `f7`), the switch off and on
+alternating, two rounds. Seconds; best and median of passes 2..10; CPU of the median pass:
+
+| Corpus | Round | `default` best / median / CPU | `default,eager` best / median / CPU | median, on against off |
+|---|---|---|---|---|
+| Std | 1 | 0.89 / 0.93 / 6.80 | 0.79 / 0.83 / 6.36 | -11 % |
+| Std | 2 | 0.96 / 1.00 / 7.44 | 0.75 / 0.78 / 6.03 | -22 % |
+| cedar | 1 | 1.21 / 1.22 / 9.23 | 1.09 / 1.13 / 8.72 | -7 % |
+| cedar | 2 | 1.21 / 1.24 / 9.39 | 1.10 / 1.12 / 8.90 | -10 % |
+
+All eight processes ACCEPT. Walls of every pass are in the TSV (Std, round 1, off: 4.28 1.28 1.04 0.97 0.94 0.93 0.91
+0.90 0.89 0.89; on: 5.62 1.26 0.96 0.90 0.82 0.81 0.81 0.84 0.79 0.83). Two rounds only: the two Std rounds differ by
+8 % with the switch off, so the Std gain is between a tenth and a fifth; cedar's two rounds agree within 2 %.
+Not measured: Mathlib, native image, 1 worker, reload mode with the switch on.
 
 ### 7.5 Measured and rejected
 
@@ -303,7 +308,8 @@ run in all declarations: machine ticks x 4.0 / x 4.6 / x 2.7 and 2 / 10 / 7 new 
   exports; `facts` beyond the hostile matrix.
 - No export forces a cut (budget exhaustion inside a TRY) while points are recorded.
 - The gap of section 6 item 1 is argued, not demonstrated.
-- Timing of Mathlib (one counts run per switch position only, cold JVM, loaded host: 90 s / 82 s process wall).
+- Timing of Mathlib (one counts run per switch position only, cold JVM, loaded host: 90 s / 82 s process wall,
+  not evidence) and of the native image.
 
 ## 8. Patches
 

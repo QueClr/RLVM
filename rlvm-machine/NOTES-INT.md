@@ -42,7 +42,17 @@ Tests changed: `MachineStateTest.footprintIsBytesInUseNotCapacity` and `M6Facade
 "capacity is 8 MiB" literally; they now assert that the capacity is many times the bytes in use (the property
 under test: the footprint is not the capacity).
 
-## 3. Wave 6 (integrator of wave 6, 2026-11-24 17:57Z - ): the machine becomes the default engine
+## 3. Wave 6 (integrator of wave 6, 2026-11-24 17:57Z - 21:1xZ): the default switch set; default engine for 54 minutes
+
+**Outcome.** The machine was made the default engine at 19:41Z on the gates of section 3.1 of the log and was
+taken back at 20:35Z by the orchestrator: E1's hostile exports show wrong accepts against the official checker
+(E1-F1 .. E1-F5: a bound variable typed by what its slot holds instead of by its binder's declared type, an
+expected type kept as a lambda's own), three of them in v0. `MachineProvider.priority()` is 10; the default
+SWITCH SET below, the cap and the measurements stand for `-X engine=machine`. The integrator's mistake to
+record: every gate it ran compares the machine with the reference engine (or with exports written before this
+family was known), so "0 differences on 760,839 units" said nothing about verdicts that need a declared type to
+differ from a convertible one; a review with NEW hostile exports belongs before a default-engine change, not
+after it.
 
 The log with every run, count and command is `work/status/machine-integration.md`, heading "Wave 6"; the list of
 switches with the gate and measurement of each is `SWITCHES.md`; tools and outputs are in `work/int6/`.
@@ -51,9 +61,10 @@ switches with the gate and measurement of each is `SWITCHES.md`; tools and outpu
 
 - **Wiring.** `rlvm-truffle` is a module of the parent pom and its jar is in every distribution (`scripts/build.sh`:
   tree builds have it as a reactor module, `--published` builds take the published jar). The tier runs only under
-  `t2`, which is off. `MachineProvider.priority()` is 100: without `-X engine=` a distribution checks with the machine;
-  the reference engine re-checks every rejection and decides what the machine declines; `-X engine=reference` runs it
-  alone. Nothing in `rlvm-main` had to change for that (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`).
+  `t2`, which is off. `MachineProvider.priority()` was 100 from 19:41Z to 20:35Z (without `-X engine=` a distribution
+  then checks with the machine; the reference engine re-checks every rejection and decides what the machine
+  declines) and is 10 again (the outcome above). Nothing in `rlvm-main` has to change for either state
+  (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`).
 - **Default set.** `Op.SW_DEFAULT` = `warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,
   lazyeval,same`; `bodies` / `directrules` / `lazycases` are the new names of `m2a` / `m3a` / `m7a` (same bits; the old
   names are read). Cap 1 MiB, host depth bound 128: unchanged, both re-measured with the new set.

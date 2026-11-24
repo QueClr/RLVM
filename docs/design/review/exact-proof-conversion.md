@@ -13,24 +13,39 @@ can be removed while every verdict stays exactly the official one?**
 
 ## 0. Answer
 
-**Almost none of it by a shortcut, and a part of it by making the same steps cheaper.** The work the shortcuts
-remove is not redundant work of the official algorithm: on these comparisons the official verdict IS the result
-of the unfoldings, and every way of answering without them that I examined is either what the complete judgment
-already does, or is refuted by a hostile export, or needs a meta-theorem about the official algorithm
-(stability of `is_def_eq` under substitution) that nobody has and that I could not prove.
+**None of it by a shortcut, and nothing measurable in time by doing the same steps with less bookkeeping.** The
+work the shortcuts remove is not redundant work of the official algorithm: on these comparisons the official
+verdict IS the result of the unfoldings, and every way of answering without them that I examined is either what
+the complete judgment already does, or is refuted by a hostile export, or needs a meta-theorem about the official
+algorithm (stability of `is_def_eq` under substitution) that nobody has and that I could not prove.
 
-| # | Idea | Official-exact? | What it recovers (Mathlib slice `Scheme.cone`, ticks; CPU in section 6) |
+Measured on one binary (native -O3 of the private tree, one worker, quiet cores; thread CPU of the checks; D = the
+default switch set of the published machine since 19:41Z; section 6):
+
+| | Mathlib slice `Scheme.cone` | Mathlib slice `Galois.Basic.cone` | Cedar slice |
+|---|--:|--:|--:|
+| the two NON-official options on top of D (what is to be recovered) | **-27.7 %** CPU (-48.6 % ticks) | **-31.7 %** (-57.3 %) | -2.6 % (-11.5 %) |
+| `m4b`, the official-exact step built here, on top of D | -1.4 % CPU, not resolved (-3.3 % ticks) | +0.8 %, not resolved (-4.1 %) | -0.7 %, not resolved (-0.8 %) |
+| `facts` (B7, official-exact, exists) on top of D + `m4b` | +1.2 % | +0.5 % | +2.1 % |
+| D itself against the step-1 set (official-exact, exists) | -12.1 % | -8.5 % | -24.8 % |
+
+In the 1,690 units of `Scheme.cone` in which the shortcuts save half of the ticks or more (39 % of the slice's
+checking time) the shortcuts remove 70 % of the CPU time; the default set had removed 7.5 % of it, `m4b` removes
+1.4 %. **The share of the 40 % that the official-exact route recovers is between zero and one twentieth.**
+
+| # | Idea | Official-exact? | Result |
 |---|---|---|---|
-| 1 | memo / fusion of the unfold-to-structure steps | yes, where it only removes bookkeeping; built as switch `m4b` (the fused two-sided lazy step, `Conv.convFuse`) | `m4b` alone -2.9 % of the ticks (31.63 M -> 30.73 M), with every record, DELTA, CONV, PIRR and VTYPE count unchanged; on the heavy units 6 % of what the shortcuts remove. The complete judgment already had the two larger parts: the CORE memo takes the restart of `is_def_eq_core` out of a repeated chain, and M2's `bodies` makes the unfolding of a projection function one MKPROJ |
-| 1' | instance-specialised rules (a derived rule per projection chain AND instance) | would be exact under the conditions of 3.4; NOT built | bounded by the reduction part of the heavy units (61 % of their ticks); my estimate of what a rule mechanism reaches is a third of that. It is M3's K2 extended into lazy delta, a package of its own |
-| 2 | lockstep walk of one proposition under two frames | exact only where the official order compares arguments before it unfolds: rigid heads, the same REGULAR definition, binder domains - and the complete judgment does exactly that already. Not exact for abbreviations (every projection function), recursors, projections, closures | nothing beyond the complete judgment: at most 12 % of a heavy unit's ticks are in nodes of that kind, and the walk would still have to evaluate what lies below them |
-| 3 | caches the official kernel has and the machine uses worse | there are none on these comparisons | 8 of 2,227 comparisons of the traced unit repeat a pair of records; see 5 for the expression-level count |
-| - | the official-exact switches that exist (`facts` = B7; the rich set of the owners: `probes,code,casetrees,lazyeval,k2,same,m2a,m3a,m7a`) | yes (their owners' gates) | `facts` -4.7 %; the rich set -25.8 %; rich set + `m4b` -28.2 % of the ticks. On the units where the shortcuts save half or more, the rich set + `m4b` recovers 34 % of the ticks the shortcuts remove |
-| - | the two NON-official shortcuts, for comparison (same binary) | no (15 known exports + 2 new ones of this report) | -43.4 % of the ticks on the step-1 set, -56.9 % on top of the rich set |
+| 1 | memo / fusion of the unfold-to-structure steps | yes where it only removes bookkeeping | Built: switch `m4b`, the fused two-sided lazy step (`Conv.convFuse`, patch for M4). It makes the same records, unfoldings, comparisons and type inferences as the complete judgment (the counts are identical) and removes the judgments LAZYD / LSTEP around them: -3 to -4 % of the ticks on Mathlib slices, no resolved CPU effect. The two larger parts of the idea were already in the machine: the CORE memo takes the restart of `is_def_eq_core` out of a repeated chain (3.1), and M2's `bodies` makes the unfolding of a projection function one MKPROJ |
+| 1' | a derived rule per projection chain AND instance (the strong form of 1) | would be exact under the four conditions of 3.4; NOT built | bounded by the reduction share of the heavy units (61 % of their ticks); my estimate is 5 to 10 % of Mathlib's ticks and less in time. It is M3's K2 extended into lazy delta and keyed by instance arguments: a package of its own, and K2 itself is not reviewed yet |
+| 2 | lockstep walk of one proposition under two frames | exact only where the official order compares arguments before it unfolds: rigid heads, the same REGULAR definition, binder domains, and there the complete judgment is that walk. Not exact for abbreviations (every projection function), recursors, projections, closures | nothing: at most 12 % of a heavy unit's ticks are in nodes of that kind, and what lies below them must be evaluated anyway. Not built |
+| 3 | caches the official kernel has and the machine uses worse | there are none: the machine's pair table hits more often than the official caches would (canonical variables) | 8 of 2,227 comparisons of the traced unit repeat a pair of records; about 4 % repeat a pair of EXPRESSIONS (an expression-keyed table would be exact; M4's measurements say the walks cost what they save). Not built |
 
-So the honest size of the official-exact route is: **the per-step cost of the same computation**, where the
-owners' switches already hold the larger part, `m4b` adds 3 % of the ticks, and a rule mechanism in lazy delta
-(1') is the one item that is still open and worth a package. The comparisons themselves cannot be skipped.
+Tests of the patch: M8's gate (step-1 set + `m4b`: PASS on tutorial, bugs, all 230 tests, Init, Std, reachability,
+the Cedar slice and ten Mathlib slices, SOUNDNESS 0 / COMPLETENESS 0, tier, convention and audit differences 0; with
+the default set: SOUNDNESS 0 / COMPLETENESS 0 everywhere, and convention differences in the complete gate that the
+default set shows WITHOUT the patch too: finding C1-F2, 7.1); every hostile export of package S and of reviewer S2
+(1,235 exports) and 41 new ones give the official verdict under every switch set with `m4b`; the 15 exports that
+the two options accept against the official checker stay rejected.
 
 ## 1. What the official algorithm does on these comparisons
 
@@ -336,7 +351,33 @@ the eight measurement cores; the sets interleaved, two rounds (`work/c1/quiet-cp
 A = `warm,gated,expect`; D = the default set of 19:41Z; N = A + `facts,probes` + the two NON-official options; DN = D
 + `facts,probes` + the two options.
 
-TIMING-CPU
+Thread CPU of the checks in seconds, round 1 / round 2 (ticks in M; 21,099 / 26,488 / 8,053 units accepted and 56 /
+108 / 22 not accepted by the machine in every row):
+
+| set | `Scheme.cone` ticks | CPU s | `Galois.Basic.cone` ticks | CPU s | Cedar slice ticks | CPU s |
+|---|--:|---|--:|---|--:|---|
+| A (step 1) | 31.63 | 2.597 / 2.623 | 34.10 | 2.824 / 2.829 | 16.55 | 1.871 / 1.896 |
+| A + `m4b` | 30.73 | 2.587 / 2.567 | 32.81 | 2.811 / 2.825 | 16.40 | 1.780 / 1.783 |
+| D (default set of 19:41Z) | 23.00 | 2.311 / 2.275 | 26.82 | 2.586 / 2.586 | 9.99 | 1.436 / 1.397 |
+| D + `m4b` | 22.24 | 2.235 / 2.286 | 25.70 | 2.619 / 2.593 | 9.91 | 1.405 / 1.408 |
+| D + `facts,m4b` | 20.96 | 2.244 / 2.329 | 24.33 | 2.626 / 2.611 | 9.59 | 1.430 / 1.442 |
+| rich + `m4b` | 22.70 | 2.301 / 2.312 | 26.44 | 2.874 / 2.739 | 10.15 | 1.462 / 1.475 |
+| N = A + `facts,probes` + shortcuts (NOT official) | 17.90 | 1.898 / 1.898 | 15.62 | 1.876 / 1.870 | 13.22 | 1.649 / 1.661 |
+| DN = D + `facts,probes` + shortcuts (NOT official) | 11.81 | 1.657 / 1.659 | 11.46 | 1.787 / 1.747 | 8.84 | 1.378 / 1.381 |
+
+Reading (means of the two rounds):
+
+- **The shortcuts**: on the step-1 set -27.3 % (`Scheme`), -33.7 % (`Galois`), -12.1 % (Cedar slice); on top of the
+  default set **-27.7 %, -31.7 % and -2.6 %**. The default set did not shrink what they are worth on Mathlib.
+- **The default set** against step 1: -12.1 %, -8.5 %, -24.8 %.
+- **`m4b`**: on A -1.3 % / -0.3 % / -5.4 %, on D -1.4 % / +0.8 % / -0.7 %. The ticks it removes (3 to 4 % on the Mathlib
+  slices) are bookkeeping that costs almost no time: **its CPU effect is not resolved** (within +-1.5 % in five of
+  the six pairs; the -5.4 % on the Cedar slice under A is not repeated under D and was measured with A first in
+  every round: see the reversed-order window below).
+- `facts` on top of D + `m4b`: +1.2 % / +0.5 % / +2.1 %: the fact records cost more than B7 saves, as M4 measured
+  (NOTES-M4 W6).
+
+REVERSED-WINDOW
 
 By class of unit, `Scheme.cone` (the classes of the table above; thread CPU ms, mean of the two rounds):
 
@@ -373,7 +414,9 @@ accepted a declaration the reference engine rejects; COMPLETENESS = it rejected 
 | `c1-a4` | `warm,gated,expect,m4b` | tutorial (141 files), bugs (34), all 230 published tests, Init, Std, reachability, the Cedar slice | 15,845 + 57,938 + 100,096 + 4,224 + 8,064 | 0 | 0 | 0 / 0 / 0 | 230 of 230 tests and the four corpora right; MACHINE-INCOMPLETE 0, WARM-ANOMALY 0 | PASS WITH DECLINES |
 | `c1-a4-mathlib` | the same | ten Mathlib slices (`Scheme`, `Sylow`, `Order.Basic`, `Fintype.Basic`, `Topology.Basic`, `Group.Basic`, `Nat.Basic`, `List.Basic`, `Galois.Basic`, `Pow.Real`) | 108,256 | 0 | 0 | 0 / 0 / 0 | 10 of 10 right | PASS WITH DECLINES |
 | `c1-d4` | D + `m4b` (D = the published default set of 19:41Z), session cap 1 MiB | the seven corpora as above | the same | 0 | 0 | tier 0, audits 0; **convention: Std 1,725 (D0) / 1,604 (unbounded), Cedar slice 12 / 12 declarations differ** - see below | 230 of 230 and the four corpora right; MACHINE-INCOMPLETE 0 | FAIL (convention part) |
+| `c1-d4-again` | the same, the complete gate a second time | the seven corpora | the same | 0 | 0 | tier 0, audits 0; **convention: Std 1,199 / 2,780, Cedar slice 0 / 15** | right | FAIL (convention part) |
 | `c1-d4-conv` | the same | Std, reachability, the Cedar slice; convention part only | 112,384 | 0 | 0 | convention 0 | - | PASS WITH DECLINES |
+| `report.sh conv` on Std (D128, D64, D0, unbounded) | D + `m4b`; D | Std | 100,096 each | - | - | EQUIVALENT, both | - | - |
 | `c1-d-control` | **D WITHOUT `m4b`** (the published default set on the same copy) | the seven corpora | the same | 0 | 0 | tier 0, audits 0; **convention: Cedar slice 73 declarations differ (D0)** | right | FAIL (convention part) |
 | `c1-d4-mathlib` | D + `m4b` | four Mathlib slices (`Scheme`, `Sylow`, `Order.Basic`, `Galois.Basic`); differential + audits | 68,969 | 0 | 0 | audits 0 | - | PASS WITH DECLINES |
 | `c1-rich4` | rich + `m4b` (with `k2`, `probes`, `facts`), cap 4 MiB | the seven corpora | the same | 0 | 0 | tier 0, audits 0; **convention: Std 12,073 / 1,037, reachability 44, Cedar slice 43** | right | FAIL (convention part) |
@@ -381,19 +424,21 @@ accepted a declaration the reference engine rejects; COMPLETENESS = it rejected 
 | `c1-rich4-mathlib` | rich + `m4b` | three Mathlib slices; differential + audits | 42,427 | 0 | 0 | audits 0 | - | PASS WITH DECLINES |
 | `report.sh conv` (D128, D64, D0, unbounded) | 20 switch sets: `m4b` with each switch of D alone, D + `m4b` complete, D + `m4b` minus one switch at a time | the Cedar slice | 8,064 each | - | - | EQUIVALENT in all 20 (`work/c1/logs/bisect.done`) | - | - |
 
-**The convention differences of the complete gate are not the patch's** (finding C1-F2, for M8 / M7 / the
-integrator). (1) The complete gate of the published default set WITHOUT `m4b`, on the same copy and harness,
-shows them too (`c1-d-control`: 73 declarations of the Cedar slice, "the same number of call events, distributed
-differently over the ops"). (2) With `m4b`, the convention part run alone on the three corpora that differed is
-clean (`c1-d4-conv`), and so is `report.sh conv` on the Cedar slice under the complete set and 19 subsets. (3) The
-declarations that differ are not the same from run to run (12 in `c1-d4`, 73 in `c1-d-control`, all late in the
-file), and in every one of these runs the outcomes, the tier comparison, the audits and the pipeline are clean. So
-something that the passes of one gate JVM share (the code and fact store, the `pchk` bits, or the heap: a growth
-that `heapAllows` refuses gives a lane a fresh session) moves ticks between lanes when all parts run at once; the
-integrator's own gate of the default set did not show it (requests.log 19:41Z). I did not find which one. For the
-patch this means: its convention equivalence is established where the comparison is reproducible (`c1-a4` with all
-parts, `c1-a4-mathlib`, `c1-d4-conv`, the 20 `conv` reports), and the complete gate of D + `m4b` is as (un)stable as
-that of D.
+**The convention differences of the complete gate are not reproducible outside it and exist without the patch**
+(finding C1-F2, for M8 / M7 / the integrator). (1) The complete gate of the published default set WITHOUT `m4b`, on
+the same copy and harness, shows them (`c1-d-control`: 73 declarations of the Cedar slice, "the same number of
+call events, distributed differently over the ops"). (2) With `m4b`, the convention part run alone on the three
+corpora is clean (`c1-d4-conv`), and so is the dedicated report `report.sh conv`: on Std with D + `m4b` and with D
+(100,096 declarations, four depth bounds, EQUIVALENT), on the Cedar slice with D + `m4b` and 19 subsets. (3) Which
+declarations differ changes from run to run (Cedar slice: 12 / 12, then 0 / 15 with the patch, 73 / 0 without),
+they lie late in the file, and in every run the outcomes, the tier comparison, the audits and the pipeline are
+clean. So something that the parts of one gate JVM share (the code and fact store, the `pchk` bits, or the heap: a
+growth that `heapAllows` refuses gives a lane a fresh session) moves ticks between lanes when all parts run at
+once; the integrator's own gate of the default set did not show it (requests.log 19:41Z). I did not find which
+one. What I cannot exclude: the differences on Std appeared in both complete runs with the patch (from unit
+82,426 on) and not in the one complete run without it. For the patch this means: its convention equivalence is
+established where the comparison is reproducible (`c1-a4` with all parts, `c1-a4-mathlib`, `c1-d4-conv`, the 22
+`conv` reports), and whether the complete gate of D + `m4b` is less stable than that of D is open.
 
 The declines are those of the base tree: the eager-reduction rule (M6-F26: 164 units of Init, 203 of Std, 8 of
 reachability, 11 of the Cedar slice, 28 of the `Scheme` slice, ...) and, in the step-1 set under the harness heap of

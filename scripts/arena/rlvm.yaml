@@ -2,18 +2,24 @@
 # Not submitted. Before submitting: set url / ref / rev to the published repository and commit, and
 # re-read the description against the binary once more.
 #
-# State of the binary on 2026-11-24 (integration of wave 6, work/status/machine-integration.md "Wave 6"): the
-# complete pipeline, checking with the MACHINE (rlvm-machine: the worklist machine, default switch set of
-# rlvm-machine/SWITCHES.md); the reference engine re-checks every rejection and decides every declaration
-# the machine declines. All 230 published tests correct with this run line (0 declined; 63.9 s of CPU time and 545 G instructions for the whole suite in the arena-shaped container); Init, Std, cedar,
-# cslib, con-leche, reachability, navier-stokes-euler and mathlib accepted. The machine became the default
-# engine when its provider's priority reached rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY (100) after
-# its gates: M8's gate for the generic tier and for the default set, 17,775 mutants, 329 hostile exports
-# under 32 switch sets against the official verdicts, and the differential engine on 760,839 units (0
-# differences from the reference engine). `rlvm -X engine=reference` runs the reference engine alone,
-# `-X machine.switches=none` the machine's generic tier. The Truffle tier (rlvm-truffle) is compiled into
-# the binary and is OFF (switch t2): it showed no gain. The description below says only what the binary
-# does today.
+# State of the binary on 2026-11-24, 21:00Z (work/status/machine-integration.md "Wave 6"): the complete
+# pipeline, checking with the REFERENCE engine. All 230 published tests correct with this run line (0
+# declined); Init, Std, cedar, cslib, con-leche, reachability, navier-stokes-euler and mathlib accepted.
+# The machine (rlvm-machine: the worklist machine with its default switch set, rlvm-machine/SWITCHES.md) is
+# compiled into this binary and runs with `-X engine=machine` (the reference engine then re-checks every
+# rejection and decides what the machine declines; compare the two with `-X engine=diff`). It was the DEFAULT
+# engine from 19:41Z to 20:35Z today - after M8's gate, 17,775 mutants, 329 hostile exports under 32 switch
+# sets and the differential engine on 760,839 units, all without a difference from the reference engine -
+# and was taken back by the orchestrator when a new set of hostile exports showed wrong ACCEPTs against the
+# official checker, some of them in its generic tier (findings E1-F1 .. E1-F5: a bound variable is typed
+# by what its slot holds instead of by its binder's declared type; work/status/requests.log 20:10Z -
+# 20:36Z). Its provider's priority is 10 again (rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY is 100), so
+# this definition checks with the reference engine until those findings are fixed and gated. With the
+# machine as default the same run line was 230 / 230 on the published tests (63.9 s of CPU time, 545 G
+# instructions for the whole suite) and needed 5.1 s of CPU time on Init, 9.7 s on Std and 181 s on
+# mathlib; the reference engine needs 14.4, 24.4 and 625 s (docs/BENCHMARKS.md). The Truffle tier
+# (rlvm-truffle) is compiled into the binary and is OFF (switch t2 of the machine): it showed no gain.
+# The description below says only what the binary does today.
 #
 # Which launcher: the CE native image (work/dist/bin/rlvm, built at -O3). The platform gate of
 # RECONCILIATION section 3 was run on 2026-11-24 with the MACHINE as engine (docs/PLATFORM.md, Part I;
@@ -26,7 +32,7 @@
 # used by a default build: owner's decision, docs/design/OWNER-NOTES.md item 11).
 # These are figures of a FRESH process per export, which is what an arena run is. The owner's target
 # since OWNER-NOTES item 12 is warm wall clock (warm-up not charged), measured with `rlvm -X passes=N`
-# (bench/warm.sh; docs/BENCHMARKS.md, "Warm wall clock"; this distribution, 8 workers, pipelined load): the
+# (bench/warm.sh; docs/BENCHMARKS.md, "Warm wall clock"; 8 workers, pipelined load, the MACHINE): the
 # image is steady from the first pass (Init 0.81 s, Std 1.51, cedar 2.08, mathlib 27.4), the JVM launcher
 # is the faster platform once warm on Init (0.72 s after 6 passes), reachability and mathlib (21.2 s in
 # its third pass) and takes 4 to 10 passes to get there. For one cold process per export the image stays.
@@ -38,11 +44,11 @@
 # of one worker (1.02 / 1.01 / 0.98 times on Init, Std and the Cedar slice) at 2.5 to 2.7 times the
 # speed; eight workers cost 1.07 times the CPU time of one for 18 % less wall clock than four on Init
 # and Std and nothing on the Cedar slice and reachability (the platform gate, machine v0). With the
-# default configuration of wave 6 the CPU time of eight workers is that of one within 4 % (Init 5.27
-# against 5.22 s, Std 9.97 / 9.60, cedar 13.64 / 13.49) and the cold wall clock of eight is 1.34 s on Init,
-# 2.38 on Std, 35.9 on mathlib (four, this run line: 1.79, 3.31 and 54.9 s). Six (the driver's proposal for `--threads auto`)
-# has no measurement yet. To change the count, change BOTH numbers below (`--threads` in the run line and
-# `threads:`, the CPU slots the arena reserves).
+# machine's default switch set of wave 6 (`-X engine=machine`) the CPU time of eight workers is that of one
+# within 4 % (Init 5.27 against 5.22 s, Std 9.97 / 9.60, cedar 13.64 / 13.49) and the cold wall clock of
+# eight is 1.34 s on Init, 2.38 on Std, 35.9 on mathlib (four: 1.79, 3.31 and 54.9 s). Six (the driver's
+# proposal for `--threads auto`) has no measurement yet. To change the count, change BOTH numbers below
+# (`--threads` in the run line and `threads:`, the CPU slots the arena reserves).
 #
 # bench/rlvm/run.sh, suite.sh and measure.sh read the `run:` line of this file, so that local
 # measurements execute exactly the command the arena would. Keep it on one line.
@@ -50,21 +56,17 @@ description: |
   **RLVM** (Rabdos Lean VM) is a Lean 4 kernel written in Java and shipped as a GraalVM native
   image (no JVM start-up, no warm-up).
 
-  Declarations are checked by its *machine*: a worklist machine whose instructions are the
-  judgments of the kernel algorithm - evaluation (normalisation by evaluation over hash-consed
-  values that are integer ids into flat primitive arrays, which the garbage collector does not
-  trace), weak-head normalisation, definitional equality with lazy delta reduction, type
-  inference with expected types, and the Nat and String literal extensions. Constants are
-  elaborated on demand into code blocks and case trees that the machine runs instead of walking
-  terms. Sessions stay warm across declarations up to a 1 MiB cap, and universe levels are
-  compared as the official kernel compares them.
-
-  A second engine, the *reference engine* - a direct port of the official kernel's algorithm
-  with the official caches - confirms every rejection in a cold run before it is reported, and
-  decides every declaration the machine declines. The machine declines by design every
-  declaration that compares under `eagerReduce` (0.2 to 0.9 % of the declarations of the large
-  corpora), because conversion under eager reduction depends on the official kernel's
-  per-declaration caches; those declarations are checked by the reference engine alone.
+  This version checks every declaration with its *reference engine*: a direct port of the official
+  kernel's algorithm (type inference, weak-head normalisation, definitional equality with lazy
+  delta reduction, the official caches, the Nat and String literal extensions) to hash-consed
+  terms that are integer ids into flat primitive arrays, which the garbage collector does not
+  trace. Universe levels are compared as the official kernel compares them. The engine the
+  project is named after - a worklist machine whose instructions are the judgments of the kernel
+  algorithm, with the environment's constants elaborated into code for it - is in this binary and
+  roughly two to three times faster on the library corpora, but it does not check by default: it
+  still accepts a few hand-made exports that the official checker rejects, so it runs only on
+  request (`-X engine=machine`), and the reference engine will remain as the engine that confirms
+  every rejection.
 
   Nothing derived in the export is trusted: recursors, constructor data and flags of inductive
   types are regenerated and compared with the exported records, the quotient declarations are
@@ -72,17 +74,14 @@ description: |
 
   Declarations are checked by parallel workers over a frozen shared store; a declaration sees only
   the declarations before it in the file, and the verdict is the first failure in file order
-  whatever the number of workers.
+  whatever the number of workers. A rejection found by a worker is reported only after a second,
+  cold run of the kernel has confirmed it.
 
   The process fails closed: the exit status starts as "internal error" and becomes 0 only after
   the whole export has been processed successfully; an exception, an out-of-memory error or a
   stack overflow, on any thread, is a non-zero status and can never read as acceptance. Input
   that RLVM cannot represent exactly (for example metadata inside an inductive declaration) is
   declined, never guessed.
-
-  Measured on the project's aarch64 host in a container shaped like the arena runner (CPU time /
-  wall clock of a fresh process with this run line): Init 5.1 s / 1.8 s, Std 9.7 s / 3.3 s, mathlib
-  181 s / 55 s with a peak of 2.9 GiB; the 230 published tests take 64 s of CPU time in all.
 
   The build step downloads a pinned GraalVM Community Edition and Maven for the runner's
   architecture, verifies their checksums and those of the third-party jars that go into the
