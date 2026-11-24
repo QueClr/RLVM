@@ -303,7 +303,18 @@ would not show.
 
 ### 3.7 Targeted mutants of a Mathlib slice (`work/s2/gen/mutate.py` = S's mutator, kinds `SIBLING_ARG`, `LIT_SUCC_NE`, `LEVEL_ARG`)
 
-[[MUTANTS]]
+360 mutants of `Mathlib.Algebra.Group.Basic.cone` (1,724 units; each mutant edits ONE occurrence inside ONE
+declaration: the argument of an application replaced by the argument of another application of the same function,
+a Nat literal `n` by `Nat.succ n`, one universe argument of a constant by another level; 174 in a declared type,
+186 in a value). `work/s2/out/mut-mathlib-judged.tsv`:
+
+| kind | mutants | official reject | of them rejected under `skip` and `both` | official accept (accepted under both) |
+|---|--:|--:|--:|--:|
+| `SIBLING_ARG` | 120 | 118 | **118** | 2 |
+| `LIT_SUCC_NE` | 120 | 120 | **120** | 0 |
+| `LEVEL_ARG` | 120 | 120 | **120** | 0 |
+
+[[MUT2]]
 
 ## 4. The known exports that the options accept and the official checker rejects
 

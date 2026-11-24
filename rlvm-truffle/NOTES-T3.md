@@ -110,47 +110,61 @@ machine itself; the tier now adds the native paths for `NSUCC` and the predecess
 | C2 | **Pure-read helpers compiled into the block** (`rlvm.t2.inline`, a class constant, now 1): `PEEK` of an operand, the constructor test of `SWITCH`, the argument base of `FIELDS`, the inline-cache probe of `KVAL`, the cache of CONST heads in front of `KCONST`. Everything that can write or grow a store stays a call behind a boundary | `Instr`, `T2Bridge.*Inline / *Hit` | kept |
 | C3 | **`KCONST` with level parameters uses the site's inline cache as the stepper does** (`Code.kConst`: one probe; miss: `CHEAD(D, LSUB(LL, ls))` and fill). T2's node called `lsubList` + `mkConst` every time: the stepper had gained the cache since, the mirror had not followed | `Instr.Konst`, `T2Bridge.kConstHit / kConstFill` | kept (a drift, not a wrong value) |
 | C4 | **Nat literals natively** (owner note 7): `NSUCC` of an immediate below the limit is `v + 1` in the block (overflow guard: the operation), the predecessor view of `FIELDS` is `v - 1`, `SWITCH` on an immediate is a compare | `Instr.Unary1 / Fields / Switch` | kept; the value model already has the immediates, so this removes two calls, not a boxing |
-| C5 | **Run-ahead of the interning probes** (`rlvm.t2.ahead`, section 6) | `BlockRoot.ahead`, `Instr.*.ahead`, `T2Bridge` | see section 6 |
+| C5 | Run-ahead of the interning probes (`rlvm.t2.ahead`, section 6) | `BlockRoot.ahead`, `Instr.*.ahead`, `T2Bridge` | **rejected by measurement, default off** |
 | C6 | No one-call forwarders in code that partial evaluation reaches (`T2Bridge.peekInline` and the hash functions are written out; `T2Bridge.hashOk()` compares them with the machine's once per engine and switches the inline-cache probes back to the boundary operations if they ever differ) | `T2Bridge` | needed for the native image: a method whose body is one call is inlined before the image's analysis and its deoptimisation target is then missing - the rule T2 found for one-store setters holds for forwarders too |
 
 Not done, and why: direct calls between compiled blocks (section 7, U3).
 
-## 6. Run-ahead of the interning probes (`rlvm.t2.ahead`): the one thing a compiled block knows that the stepper does not
+## 6. Experiment REJECTED: run-ahead of the interning probes (`rlvm.t2.ahead`, default 0)
 
-The cost that dominates a block is not its instructions but the cache misses of the intern tables: a probe
-of `vtab` / `rtab` loads one slot of a 64-256 MiB table (M1, requests.log 15:58Z: one instruction, the load
-of the table slot, has 76-83% of the samples of each probe), and a block issues them ONE AFTER THE OTHER,
-because each is a call that finishes before the next starts and often needs the previous result
-(`MKSUSP` = the frame's probe, then the record's probe over the frame's id; `MKAPP r7, PProd, r3, r5` needs
-`r3` and `r5`). A compiled block, unlike the stepper, has its whole future in front of it as constants. So:
+**Idea.** The cost that dominates a block is interning, and M1 had measured on the generic tier (v0, native,
+perf annotate; requests.log 15:58Z) that 76-83% of the samples of a probe are ONE instruction, the load of
+the table slot of a 64-256 MiB table. A block issues its probes one after the other (each is a call that
+ends before the next starts, and often needs the previous result: `MKSUSP` = the frame's probe, then the
+record's probe over the frame's id). A compiled block, unlike the stepper, has its whole future in front of
+it as constants, so it could load the slots EARLY and let the cache misses overlap.
 
-- **What it does.** At an entry of a root, and again after every instruction that called a judgment, the
-  block walks the stretch of value construction that follows with PREDICTED registers (`BlockRoot.ahead`,
-  `Instr.*.ahead`; frame slots `sbase ..`): `MOV`, `PEEK`, `KCONST` (cache hit), `KVAL` (cache hit), `FIELDS`,
-  `BKIND` / `BEQ` / `SWITCH` on known values, and for `MKAPP`, `MKLAM`, `MKPI`, `MKSUSP` the hash of the key
-  exactly as `Values.neu` / `Runs.internRun` / `Values.closureProbe` compute it, and the LOAD of the table
-  word where that probe will start. It stops at the first judgment, return, backward jump or value it
-  cannot know. Reads of the machine only; one store, into a field of the tier object, keeps the loads.
-- **Ids are predicted, never used.** A key that is not in the table will get the session's next record id
-  (`vp`; ids are creation order) or the next run offset (`rsp`), so the keys built ON it can be hashed
-  before it exists (M1 does the same for one pair of probes inside `Values.closureAt`). The exact form
-  (default) reads the early-loaded word: empty = new; the key = the existing record (first four slots of the
-  probe sequence; for a NEU the full hash in word c decides, for a frame the hash word of the run); the frame
-  / application predicted new a moment ago is remembered (sibling closures over the same variables).
-  A wrong prediction loads a word nobody needs. `rlvm.t2.aheadCheck=true` counts: on reachability 90.3% of
-  13.6 M predicted records are the record the operation then returns (28% when every key was assumed new:
-  half of the records that reachability's blocks build exist already; 64% before the probe sequence was
-  followed and before sibling frames were remembered).
-- **Why it helps.** The loads of different instructions do not depend on each other, so the processor has
-  them in flight together; when the instructions then run, their probes hit the cache. The serial chain of
-  misses of a stretch shrinks from the number of probes to the depth of their dependencies.
-- **What it costs.** The hashes are computed twice; the root has about twice the graph and code (block 41 of
-  reachability: 4,638 -> 11,481 graph nodes, 31 -> 74 KB, compile CPU x3.5 on the open host). Only stretches
-  with at least two interning instructions get one (`rlvm.t2.ahead=2`); blocks with pinned registers (TELE)
-  and blocks over 128 instructions get none.
-- **It is not a Truffle feature.** Nothing in it needs a compiler: the same walk can be done by a generic
-  routine over the block's words in front of the stepper's dispatch loop (decoding cost per instruction
-  instead of none). That is a proposal for M7 / M1, with the numbers of section 1 as its upper bound.
+**As built** (`BlockRoot.ahead`, `Instr.*.ahead`, `T2Bridge.neuFind / recordFind / runFind / *Hash`; reads of
+the machine only, one store into a field of the tier object to keep the loads; tier equivalence is not
+touched, and the differential gate of section 8 ran with it on). At an entry of a root, and again after
+every instruction that called a judgment, the block walks the stretch of value construction that follows
+with PREDICTED registers: `MOV`, `PEEK`, `KCONST` / `KVAL` (cache hits), `FIELDS`, `BKIND` / `BEQ` / `SWITCH` on
+known values, and for `MKAPP`, `MKLAM`, `MKPI`, `MKSUSP` the hash of the key exactly as `Values.neu` /
+`Runs.internRun` / `Values.closureProbe` compute it and the load of the table word where the probe will
+start. A key that is not in the table is predicted to get the next record id (`vp`) or run offset (`rsp`),
+so that the keys built on it can be hashed before it exists. Two forms: "assume new" (never waits for a
+loaded word) and exact (`rlvm.t2.aheadExact`: the loaded word is read - empty = new, the key = the existing
+record; first four slots of the probe sequence; the frame / application predicted new a moment ago is
+remembered for sibling closures). `rlvm.t2.aheadCheck=true` counts the predictions: on reachability the
+exact form names the record the operation then returns for 90.3% of 13.6 M records per run; "assume new"
+28% - HALF of the records that reachability's blocks build exist already.
+
+**Result** (quiet windows of 17:55Z, JVM, and 18:00Z, native; warm wall clock per pass in ms, median of the
+later passes; same tier with and without the run-ahead):
+
+| Workload | K1 | tier, no run-ahead | tier + run-ahead, exact | tier + run-ahead, "assume new" | compile CPU without / with (exact) |
+|---|--:|--:|--:|--:|--:|
+| reachability, JVM, 1 worker (2 runs each) | 1022, 1105 | 1021, 1000 | 1116, 1116 | 1147, 1147 | 7.6 s / 36-37 s (252 blocks) |
+| reachability, native, 1 worker | 1400, 1433 | 1370 | 1484, 1478 | - | 5.4 s / 14.5 s |
+| Cedar slice, JVM, 1 worker | 1438 | 1489 | 1742 | - | 27 s / 140 s (804 blocks) |
+| Cedar slice, native, 1 worker | 1775 | (window 18:2xZ, section 1) | 2061 | - | - / 56 s |
+
+It makes the tier 8-12% SLOWER on reachability and far slower on the Cedar slice (where the compiler
+threads are then busy through every measured pass). JFR on reachability (`work/t3/jfr/t3-reach.top.txt`):
+with the exact form `Values.neu` falls from 22% to 15.5% of the samples and the run-ahead itself has 17%
+(`MkApp.ahead` 10.3%): the waiting moves into the run-ahead, it does not overlap. Why, as far as I can
+say (readings, not measurements): (1) the probes of one stretch depend on each other - in the hottest block
+(41) nine probes form chains of depth four (frame -> suspension -> application over it -> application over
+that) - so most of the chain is as long as before, whoever walks it first; (2) M1's profile was of v0; with
+`code,casetrees` the same corpus needs 5.6 times less CPU (M7: 8.79 -> 1.56 s), half the block-built keys
+exist already, and a hit is not one load but three (table, record, spine): "one cache miss per probe" is
+not the cost model of these blocks; (3) the root's code doubles (block 41: 4,638 -> 11,481 graph nodes,
+31 -> 74 KB, measured with the checking counters compiled in).
+
+**Kept in the tree, off**, because the differential and equivalence gates ran over it and the next owner
+may want the predictor (`aheadCheck`) as an instrument; deleting it is `Instr.*.ahead`, `BlockRoot.ahead /
+aheadInit / aheadKind / probes`, the run-ahead block of `T2Bridge` and three settings. It is NOT a
+candidate for the stepper either: the result above is an upper bound for a generic version of the same walk.
 
 ## 7. Design finding: what a JIT for the checking process needs from the machine (for the owners, M1, M3, M6, M7)
 
@@ -190,9 +204,9 @@ What would unlock a compiler (and, each of them, also the stepper):
   and in compiled code they are not even allocated. This changes I-ID from "always" to "once tenured" and
   therefore the tabling keys and the tick counts: it is a machine design decision, not a tier feature, and
   the equivalence rule between tiers has to become "same verdicts, same tenured records".
-- **U3 - what is possible today without either**: overlapping the misses (section 6). It leaves the work
-  and removes the waiting.
+- **What does NOT work without them**: leaving the work and only overlapping its cache misses (section 6,
+  measured: a loss).
 
 Without U1 or U2 the upper bound of any compiled tier on closed evaluation is the stepper's own share
-(17% on reachability) plus what run-ahead recovers, and on library corpora (Cedar: 14% of the time inside
-blocks at all) it is noise.
+(17% on reachability; measured gain 2-5%), and on library corpora (Cedar: 14% of the time inside blocks at
+all) it is noise or a small loss.
