@@ -25,7 +25,9 @@
 #                             header). Copy it with `cp -aL work/dist DIR`
 #   dist-native [options]     the same plus the CE native image bin/rlvm at -O3, the arena's flags
 #                             (2-3 minutes, about 900 s of CPU): scripts/build.sh --published --no-pgo;
-#                             `--opt 2` builds in half the time and runs 10-18 % slower
+#                             `--opt 2` builds in half the time and runs 10-18 % slower. Holds one
+#                             of the host's two native-image slots (bench/slot.sh -c ni -n 2), as
+#                             dist-tree does
 #   dist-versions             list the versions in work/dist.d/ and the one work/dist names
 #   dist-tree [options]       everything compiled from the working tree, JVM launcher + CE native
 #                             image: plain scripts/build.sh (what the arena build does; it fails
@@ -84,7 +86,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 die() { echo "dev.sh: $*" >&2; exit 2; }
-usage() { sed -n '2,81p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,84p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [ "$#" -gt 0 ] || { usage; exit 2; }
 cmd="$1"; shift
@@ -104,6 +106,18 @@ mvn() {
   cd "$ROOT"
   # shellcheck disable=SC2086
   $MVN "${offline[@]}" -q "$@"
+}
+
+# Host rule of 2026-11-24 (orchestrator, work/status/requests.log 14:32Z): at most two native-image
+# builds at a time on the whole host - `bench/slot.sh -c ni -n 2 -- BUILD`. dist-native and dist-tree
+# take that slot themselves unless the caller already holds one (an inherited descriptor on
+# work/build/slots/ni.N) or RLVM_NO_SLOT is set. A direct `scripts/build.sh` call is the caller's to wrap.
+slot=()
+ni_slot() {
+  if [ -x "$ROOT/bench/slot.sh" ] && [ -z "${RLVM_NO_SLOT:-}" ] \
+      && ! ls -l "/proc/$$/fd" 2>/dev/null | grep -q 'work/build/slots/ni\.'; then
+    slot=("$ROOT/bench/slot.sh" -c ni -n 2 --)
+  fi
 }
 
 # run / suite / measure default to the native image; when the distribution has only the JVM
@@ -142,10 +156,12 @@ case "$cmd" in
     exec "$ROOT/scripts/build.sh" --published --jvm-only "$@"
     ;;
   dist-native)
-    exec "$ROOT/scripts/build.sh" --published --no-pgo "$@"
+    ni_slot
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" --published --no-pgo "$@"
     ;;
   dist-tree)
-    exec "$ROOT/scripts/build.sh" "$@"
+    ni_slot
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" "$@"
     ;;
   dist-versions)
     cur="$(readlink "$ROOT/work/dist" 2>/dev/null || true)"

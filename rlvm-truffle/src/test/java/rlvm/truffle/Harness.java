@@ -52,10 +52,12 @@ final class Harness implements AutoCloseable {
         long runWords;
         long frames;
         long cpuNanos;
+        long wallNanos;
         String firstFailure = "";
     }
 
     final String path;
+    final Bindings bindings;
     final Store store;
     final WorkerContext ctx;
     final WorkerContext refCtx;
@@ -85,7 +87,7 @@ final class Harness implements AutoCloseable {
     Harness(String path, String switches, int hostDepth) throws IOException {
         this.path = path;
         Path file = root().resolve(path);
-        Bindings bindings = new Bindings(256);
+        bindings = new Bindings(256);
         Store st = new Store(Files.size(file), bindings.baseLists(), bindings.baseLevelInfo());
         bindings.bindNames(st.names());
         ExportLoader.load(file, st, new LevelStoreInterner(bindings.levelBase(), false), new NatStoreDecoder());
@@ -106,8 +108,28 @@ final class Harness implements AutoCloseable {
         m = T2Bridge.machineOf(session);
     }
 
-    /** The machine over every unit in file order; stops at the first unit that is not accepted. */
+    private int nextContext = 2;
+
+    /** The machine over every unit in file order (first pass: with the environment pass). */
     Run run() {
+        return pass(session, ctx, m, env, true);
+    }
+
+    /**
+     * Another pass over every unit with a FRESH session of the SAME engine (its code store and the tier's
+     * installed blocks are kept: the warm pass of OWNER-NOTES 12). {@code digests}: take the heap digests.
+     */
+    Run again(boolean digests) {
+        WorkerContext c = bindings.newWorkerContext(nextContext++, store, RunSignals.NONE, 1L << 30);
+        Session s = engine.newSession(c);
+        try {
+            return pass(s, c, T2Bridge.machineOf(s), null, digests);
+        } finally {
+            s.close();
+        }
+    }
+
+    private Run pass(Session session, WorkerContext ctx, Machine m, EnvBuilder env, boolean digests) {
         Run r = new Run();
         int units = store.loadedUnits();
         r.outcome = new int[units];
@@ -117,6 +139,7 @@ final class Harness implements AutoCloseable {
         Admission admission = new Admission(ctx, Policy.arena(), env);
         Budget budget = new Budget(maxSteps, 2L << 30, Integer.MAX_VALUE);
         long t0 = java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime();
+        long w0 = System.nanoTime();
         for (int u = 0; u < units; u++) {
             int o;
             try {
@@ -126,8 +149,10 @@ final class Harness implements AutoCloseable {
                 r.firstFailure = "unit " + u + ": exception " + e;
             }
             r.outcome[u] = o;
-            r.digest[u] = T2Bridge.digest(m);
-            r.identity[u] = T2Bridge.identityDigest(m);
+            if (digests) {
+                r.digest[u] = T2Bridge.digest(m);
+                r.identity[u] = T2Bridge.identityDigest(m);
+            }
             r.ticks[u] = T2Bridge.ticks(m);
             r.units++;
             if (o == Outcome.ACCEPT) {
@@ -151,6 +176,7 @@ final class Harness implements AutoCloseable {
             }
         }
         r.cpuNanos = java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime() - t0;
+        r.wallNanos = System.nanoTime() - w0;
         r.records = T2Bridge.recordsMade(m);
         r.runWords = T2Bridge.runWordsMade(m);
         r.frames = T2Bridge.framesWritten(m);

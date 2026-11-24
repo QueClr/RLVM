@@ -1,6 +1,6 @@
 # Platform: which launcher ships, with which flags, with how many workers
 
-Two parts. **Part I** (wave 7, 2026-11-24 13:30Z to 15:10Z) is the platform gate of RECONCILIATION
+Two parts. **Part I** (wave 7, 2026-11-24 13:30Z to 14:25Z) is the platform gate of RECONCILIATION
 section 3: measured with the **machine** as engine (`-X engine=machine`), the engine that will ship,
 and it ends with the decision. **Part II** (wave 4, the same day, 08:00Z to 11:50Z) is the rehearsal
 with the reference engine: launchers, host JIT, collectors and heap sizes in more detail than Part I

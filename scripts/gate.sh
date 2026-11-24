@@ -32,8 +32,11 @@
 #   --load MODE       -X load=MODE (default batch)
 #   -X KEY=VALUE      further checker setting for both steps (repeatable)
 #   --extra-cp PATH   class path entries after the distribution's jars (an engine that is not in it)
-#   -j JOBS           files in parallel (default 8 for the slice, 10 for the mutants)
+#   -j JOBS           files in parallel (default 4 for both steps: the host rule of 2026-11-24 allows
+#                     a slot four lanes; it was 8 for the slice and 10 for the mutants)
 #   --pin CPUS        pin the guard to these CPUs instead (taskset list, e.g. 0-4,10-14,18,19)
+#   The gate holds one host-wide slot (bench/slot.sh) while it runs and waits for one if all are
+#   taken; RLVM_NO_SLOT=1 turns that off (for a caller that accounts for the load itself).
 #   --no-pin          do not pin the guard to the efficiency cores. By default (when taskset
 #                     exists) a gate stays off the performance cores, where measurements run (the
 #                     arena-shaped container on eight of them), so that it does not spoil somebody's
@@ -45,6 +48,14 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Host rule of 2026-11-24 (orchestrator, work/status/requests.log 14:32Z; the host ran out of memory
+# under thirty agents): every heavy job holds one of the host-wide slots of bench/slot.sh. A gate is
+# heavy (hundreds of JVMs), so it takes a slot itself unless its caller already holds one (the slot
+# is a file lock that this process inherited: an open descriptor on work/build/slots/heavy.N).
+if [ -x "$ROOT/bench/slot.sh" ] && [ -z "${RLVM_NO_SLOT:-}" ] \
+    && ! ls -l "/proc/$$/fd" 2>/dev/null | grep -q 'work/build/slots/heavy\.'; then
+  exec "$ROOT/bench/slot.sh" -- "$0" "$@"
+fi
 dist="$ROOT/work/dist"
 build=1
 corpora=()
@@ -74,7 +85,7 @@ while [ "$#" -gt 0 ]; do
     --no-pin) pin=0; shift ;;
     --pin) pin_list="${2:?--pin needs a CPU list}"; shift 2 ;;
     --no-diff-selftest) diffself=0; shift ;;
-    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "gate.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -139,7 +150,7 @@ echo "gate: distribution $dist ($(sed -n 's/^built: *//p' "$dist/BUILD-INFO.txt"
 
 fail=0
 if [ "$slice" = 1 ]; then
-  args=(--dist "$dist" --jvm --all --engine "$engine" --threads "$threads" -j "${jobs:-8}")
+  args=(--dist "$dist" --jvm --all --engine "$engine" --threads "$threads" -j "${jobs:-4}")
   # A gate never writes work/status/slice-all.md (the steward's record of the published state, made
   # with scripts/slice.sh --all): every gate has its own table under work/status/gate/.
   mkdir -p "$ROOT/work/status/gate"
@@ -164,7 +175,7 @@ for c in "${list[@]}"; do
   log="$ROOT/work/logs/gate/judge-$(basename "$dir")-$(date -u +%Y%m%dT%H%M%SZ).log"
   rc=0
   RLVM_DIST="$dist" RLVM_THREADS="$threads" RLVM_ENGINE="$engine" RLVM_LOAD="$load" RLVM_EXTRA_CP="$extra_cp" \
-    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --corpus "$dir" -j "${jobs:-10}" -- \
+    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --corpus "$dir" -j "${jobs:-4}" -- \
     "$ROOT/scripts/check-light.sh" '"$IN"' >"$log" 2>&1 || rc=$?
   # The judge's table ends with:  total  SOUNDNESS COMPLETENESS agree declined error undecided
   summary="$(awk '$1 == "total" { printf "SOUNDNESS %s, COMPLETENESS %s, agree %s, declined %s, errors %s, undecided %s", $2, $3, $4, $5, $6, $7 }' "$log")"
@@ -178,7 +189,7 @@ if [ "$judge_all" = 1 ]; then
   log="$ROOT/work/logs/gate/judge-all-$(date -u +%Y%m%dT%H%M%SZ).log"
   rc=0
   RLVM_DIST="$dist" RLVM_THREADS="$threads" RLVM_ENGINE="$engine" RLVM_LOAD="$load" RLVM_EXTRA_CP="$extra_cp" \
-    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --all -j "${jobs:-10}" -- \
+    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --all -j "${jobs:-4}" -- \
     "$ROOT/scripts/check-light.sh" '"$IN"' >"$log" 2>&1 || rc=$?
   echo "gate: mutants, all corpora: exit $rc | $(grep -ciE 'soundness' "$log") summary line(s); table in work/status/mutants.md | log $log"
   tail -n 8 "$log" | sed 's/^/gate:   /'
