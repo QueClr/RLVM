@@ -1056,3 +1056,49 @@ the same window where you can.
 
 `bench/slot.sh [-n SLOTS] [-c CLASS] -- CMD...` is the host-wide limiter for heavy jobs that are not
 timings (8 slots; native-image builds: `-c ni -n 2`).
+
+## Warm wall clock: `bench/warm.sh` (OWNER-NOTES 12)
+
+The project's target is the wall clock of checking with parallel workers in steady state: after JIT
+warm-up, heap growth and the page faults of the first seconds, with loading pipelined with checking.
+"Warm" = the same process checks the same export again: `rlvm -X passes=N [-X passes-mode=reload|recheck]`
+(rlvm-main/README.md, "Passes") prints one line per pass,
+
+```
+rlvm: pass 2/5 mode=reload wall_ms=1234 cpu_ms=5678 gc_ms=12 gc_count=3 load_ms=400 check_ms=1100 units=57938 accepted=57938 workers=8 pipelined=1 heap_kb=6100 rss_kb=812345 peak_rss_kb=901234 settle_ms=35 verdict=ACCEPT
+```
+
+and `bench/warm.sh` (-> `warm.py`) turns that into table rows. One row per (corpus, worker count):
+
+```bash
+# RLVM: a cold process (plain run) and a warm process (-X passes=5) per row, in ONE quiet.py window
+bench/warm.sh --dist work/dist --launcher jvm --engine machine --heap 6g --workers 8,1 --passes 5 init std
+bench/warm.sh --dist work/dist --launcher native --engine reference --workers 8,1 --passes 5 --mode recheck init
+# a JVM variant: ALL VM flags of the launcher are replaced (heap included)
+bench/warm.sh --launcher jvm --workers 8 --label graal-jit \
+    --java-opts '-XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow -Xms6g -Xmx6g -Xmn1g' init
+# baselines (Rust, no JIT): two runs each in the arena container, the second is reported
+bench/warm.sh --baseline gruszka --workers 8,1 init std
+bench/warm.sh --baseline nano-lean --workers 8,1 init std
+```
+
+| column | meaning |
+|---|---|
+| best later / median later | wall clock of the fastest / the median pass among passes 2..N of the warm process: **the warm number** |
+| pass 1 | wall clock of pass 1 of the warm process (the cold pass, without process start-up) |
+| cold wall | wall clock of a separate fresh process, a plain run, from exec to exit (start-up included) |
+| cpu(med), gc ms(med) | process CPU time and collector time of the median pass |
+| peak RSS MiB | peak resident set of the warm process over all its passes (`wait4`) |
+| walls | every pass |
+| host | `quiet` = inside a `bench/quiet.py` window (evidence); `loaded` = `--no-quiet` (not evidence) |
+
+Modes: `reload` (default) = every pass loads and checks, the owner's metric; `recheck` = the driver's
+check-only passes over the loaded store (pure checking; the engines are new in every pass). Rows are
+appended to `work/perf-history/warm.tsv` (also `cold cpu`, `cold rss`, the load average, the label);
+the raw output of every process is in `work/perf-history/warm-logs/`. The script re-executes itself
+under `bench/quiet.py` (one window for the whole call: keep a call to a few corpora); RLVM runs on the
+host, pinned on the measurement cores by that window, so `--threads 8` has exactly 8 cores; a
+baseline runs in `bench/arena-docker.sh --arena-limits --no-network bench/measure.sh` (the same cores)
+with the arena's run line and the given thread count. Memory rule of the host: `--heap 6g` for Init,
+Std, cedar and reachability (`-Xms6g -Xmx6g -Xmn1g` on the JVM, `-Xmx6g` in the image), the launcher's
+own 13 GB only for a whole large corpus, one at a time. First table: `work/status/warm.md`.

@@ -21,6 +21,7 @@ scripts/dev.sh slice                                              # table for mo
 | `MainWiring implements rlvm.driver.Wiring` | `newStore` (`new Store(bytes, baseLists, baseLevelInfo)`), `load`, `loadReport`, `newWorkerContext`, on top of `rlvm.api.bind.Bindings` and the loader's own glue (`rlvm.load.ExportLoader`, `LevelStoreInterner`, `NatStoreDecoder`) |
 | `Pipeline` | the one place that constructs `rlvm.driver.Run` (`Run(config, wiring, primary, reference)`, diagnostics to the launcher's stderr) |
 | `UsageError` | an `IllegalArgumentException` for bad settings |
+| `Passes`, `ProcessClock` | `-X passes=N` with N > 1 (warm passes, owner note 12): reload passes are made here (a complete run each, `System.gc()` between passes outside the timed region), recheck passes are the driver's `RunConfig.passes`; one line per pass, the `passes` table of the statistics, the verdict rule (section "Passes" below). Never runs for a plain check |
 
 ## Settings (`-X`, ARCHITECTURE 7.4)
 
@@ -37,6 +38,8 @@ scripts/dev.sh slice                                              # table for mo
 | `stats-file=F` | statistics as JSON | - |
 | `no-recheck`, `no-truffle`, `no-proof-blocks` | flags | off |
 | `profile=4.36\|4.37` | official kernel release to imitate | 4.36 |
+| `passes=N` (1..1000) | check the export N times in this process and report every pass (section "Passes") | 1 = a plain run |
+| `passes-mode=reload\|recheck` | what a later pass is: `reload` = a complete run (new store, loader, engines); `recheck` = the driver's check-only pass over the loaded store. No effect with `passes=1` | `reload` |
 | `engine.KEY=VALUE` | Truffle engine options | handed to the engines with the engine settings; no engine reads them today |
 | any `KEY[=VALUE]` an engine declares | **engine settings**: every key some `EngineProvider` on the class path returns from `optionKeys()` is accepted and handed to `EngineProvider.factory(Map)` of the run's primary and reference engines (the reference factory also makes the environment pass's and the re-checks' kernels). The engine parses the value; `IllegalArgumentException` is a usage error. Example: the reference kernel's `levels=...` once `rlvm-ref` declares it | the engine's |
 
@@ -57,6 +60,59 @@ An unknown key, a malformed value, an engine name without a provider, a value an
 refuses and `engine=diff` without a second engine all end the run with status **64** before the export
 is opened. Order of ownership of a key: the wiring's own keys first, then the engines' declared keys,
 then the driver's.
+
+### Passes (`-X passes=N`, `-X passes-mode=reload|recheck`; owner note 12)
+
+The goal is the wall clock of checking in steady state, so one process can check the same export N
+times and report every pass. ONE option for both kinds of later pass (the key `passes` is the
+wiring's; the driver's `RunConfig.passes` is set by this module for `recheck` only):
+
+- **`reload` (default)**: every pass is a complete run - new settings and configuration, new engine
+  factories, new `MainWiring` (store, loader, bindings), new `Run` (engines, threads, lanes,
+  sessions). Only the process is warm (JIT-compiled code, sized heap, touched pages). Between two
+  passes nothing of the previous one is reachable and `System.gc()` runs, outside the timed region:
+  the heap does not grow with the number of passes (`heap_kb` of a pass line = what was reachable when
+  it started). It is the default because it is the owner's metric: a warm pass that loads and checks,
+  with the load pipelined when `-X load=pipelined` is given.
+- **`recheck`**: pure checking in steady state = rlvm-driver's passes (`rlvm-driver/README.md`,
+  "Passes"), to which `Passes` delegates: one `Run` with `RunConfig.passes = N`. Pass 1 is the run
+  itself; if it accepts, each later pass checks every def / thm / axiom / opaque unit of the loaded
+  store again with NEW engine instances, sessions, scheduler and board; inductive blocks and quot
+  records keep their recorded outcome; nothing is loaded and nothing is collected between passes. So
+  what an engine instance holds (the machine's shared code objects and facts) is rebuilt in every
+  pass. If pass 1 does not accept, the driver makes no later pass; the remaining passes are then
+  reload passes and one line says so.
+
+Per pass, on stderr (not with `--quiet`), the same shape in both modes, -1 = not known in this mode:
+
+```
+rlvm: pass 2/5 mode=reload wall_ms=1234 cpu_ms=5678 gc_ms=12 gc_count=3 load_ms=400 check_ms=1100 units=57938 accepted=57938 workers=8 pipelined=1 heap_kb=6100 rss_kb=812345 peak_rss_kb=901234 settle_ms=35 verdict=ACCEPT
+```
+
+`wall_ms`: the pass (reload: from before its configuration is built to the return of `Run.execute()`;
+recheck: the driver's `Run.passResults()`); `cpu_ms`: CPU time of the whole process in the pass
+(`/proc/self/stat` utime + stime, 10 ms steps, so it works in the native image); `gc_ms`,
+`gc_count`: collector time and collections in the pass (the runtime's collector beans; reload only);
+`load_ms`: `Wiring.load` on the calling thread; `check_ms`: from the first worker context (the
+checking threads have started) to the end of the run - pipelined, it overlaps `load_ms`; `units`: units
+of the store; `accepted`: accepted or skipped on the board; `heap_kb`: heap in use at the start of the
+pass (after the collection between passes); `rss_kb` / `peak_rss_kb`: resident set after the pass /
+peak of the process so far; `settle_ms`: the collection before the pass. In recheck mode the driver
+prints its own `rlvm: pass K of N: ...` lines as the passes end, and the lines above follow when the
+run has returned.
+
+Statistics: `-X stats-file=F` gets the values `passes.requested`, `passes.done`, `passes.mode`,
+`passes.verdict` and the table `passes` (one row per pass: outcome, wallMs, cpuMs, gcMs, gcCount,
+loadMs, checkMs, units, accepted, workers, pipelined, recheck, heapStartKb, rssKb, peakRssKb,
+settleMs) on top of the last run's statistics; a reload pass K also writes `F.passK` exactly as a
+plain run writes F. `--stats`: the checker's line ends with `passes=done/N passes-mode=...` and its
+`wall_ms` is the sum.
+
+Verdict: the exit status is pass 1's. A later pass with another verdict prints
+`rlvm: PASSES DISAGREE: pass 1 ended with ..., pass K (...) with ...` (also with `--quiet`) and the run
+DECLINES (exit 2); in reload mode the remaining passes are not made. With `passes` absent or 1
+nothing of this runs: output, exit status and statistics are those of the plain run
+(`PassesTest.onePassIsThePlainRun`). Tool: `bench/warm.sh` (bench/README.md, "Warm wall clock").
 
 Launcher options: `--threads N` becomes `RunConfig.workers`; automatic (`--threads auto`, `0`, or no
 option) is passed on as 0 and the driver decides (`Run.resolveWorkers`: `max(1, min(processors, 8) - 2)`,

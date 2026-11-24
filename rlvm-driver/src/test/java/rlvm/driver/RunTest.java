@@ -500,6 +500,52 @@ class RunTest {
         assertThrows(IllegalArgumentException.class, () -> new RunConfig().set("passes", "0"));
     }
 
+    // ---- shards (measurement) -----------------------------------------------------------------------------------------
+
+    @Test
+    void aShardRunChecksItsShardOnlyAndNeverAccepts() {
+        for (int w : new int[] {1, 4}) {
+            Unit[] script = Fakes.units(3000);
+            FakeHost host = new FakeHost(script);
+            host.failMirror = true;
+            RunConfig c = Fakes.config(w);
+            c.set("shard", "1/2");
+            c.set("passes", "2");
+            c.explain = true;
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            Run run = host.run(c, false);
+            run.setDiagnostics(new PrintStream(bytes, true, StandardCharsets.UTF_8));
+            assertEquals(Outcome.DECLINE, run.execute(), "a shard run never accepts (" + w + " workers)");
+            String err = bytes.toString(StandardCharsets.UTF_8);
+            assertTrue(err.contains("only shard 1 of 2 was checked"), err);
+            assertTrue(err.contains("rlvm: pass 2 of 2: accept (shard 1/2 only)"), err);
+            assertEquals(2, run.passResults().length);
+            for (int u = 0; u < script.length; u++) {
+                boolean mine = (u >> RunConfig.SHARD_BLOCK_LOG2) % 2 == 1;
+                assertEquals(mine ? 2 : 0, host.warmChecks.get(u), "unit " + u);
+            }
+            assertEquals("", host.describeViolations());
+        }
+        // a failure inside the shard is the verdict's as in any run, and ends the passes
+        Unit[] script = Fakes.units(3000);
+        script[1500].warm = Fakes.R;
+        script[1500].strict = Fakes.R;
+        script[1500].ref = Fakes.R;
+        FakeHost host = new FakeHost(script);
+        RunConfig c = Fakes.config(4);
+        c.set("shard", "1/2");
+        c.passes = 3;
+        Run run = host.run(c, false);
+        assertEquals(Outcome.REJECT, run.execute());
+        assertEquals(1500, run.verdicts().decidingUnit());
+        assertEquals(1, run.passResults().length);
+        RunConfig bad = new RunConfig();
+        assertThrows(IllegalArgumentException.class, () -> bad.set("shard", "2/2"));
+        assertThrows(IllegalArgumentException.class, () -> bad.set("shard", "x"));
+        assertThrows(IllegalArgumentException.class, () -> bad.set("shard", null));
+        assertEquals(0, bad.shardCount);
+    }
+
     // ---- slow units -------------------------------------------------------------------------------------------------
 
     @Test
@@ -956,6 +1002,38 @@ class RunTest {
             assertTrue(json.contains("\"declined\": 1"), json);
             assertNotNull(run.stats().value("driver.memory.peakAccountedBytes"));
             assertTrue(run.stats().phaseNanos("total") >= run.stats().phaseNanos("check"));
+            // where the wall clock went: one row per worker, the frontier's time line, the time stamps
+            assertTrue(json.contains("\"driver.workerTimes\": {\"columns\": [\"wallNanos\", \"cpuNanos\", \"runQueueNanos\", "
+                    + "\"unitNanos\", \"claimNanos\", \"waitEnvNanos\", \"waitLoaderNanos\", \"waitTailNanos\""), json);
+            assertTrue(json.contains("\"driver.series.worker-" + (run.workerCount() - 1) + "\": {\"columns\": [\"atNanos\", \"accepted\""), json);
+            assertNotNull(run.stats().value("driver.time.checkStartNanos"));
+            assertNotNull(run.stats().value("driver.time.checkEndNanos"));
+            assertEquals(w > 1, run.stats().value("driver.env.advanceNanos") != null, "the environment thread's account");
+            assertEquals(w > 1, json.contains("\"driver.series.env\""));
+            long units = 0;
+            for (Worker worker : run.workers()) {
+                long[] t = worker.times();
+                assertEquals(Worker.TIME_COLUMNS.length, t.length);
+                assertTrue(t[0] >= t[3] && t[3] >= 0, "a worker's wall clock covers its units: " + t[0] + " / " + t[3]);
+                assertTrue(t[4] >= t[5] + t[6] + t[7], "the parks are part of the time inside claim()");
+                assertTrue(t[15] < 0 || (t[17] >= t[16] && t[16] >= t[15] && t[15] >= t[14]), "start, first claim, last unit, end");
+                units += worker.series()[worker.series().length - 1][1];
+            }
+            assertEquals(299, units, "the last point of the series holds every unit the workers accepted");
+        }
+        // every later pass writes statistics of its own, beside the run's
+        FakeHost again = new FakeHost(Fakes.copy(script));
+        again.failMirror = true;
+        RunConfig c2 = Fakes.config(4);
+        c2.passes = 3;
+        c2.statsFile = dir.resolve("passes.json");
+        assertEquals(Outcome.ACCEPT, again.run(c2, false).execute());
+        assertTrue(Files.readString(c2.statsFile).contains("\"driver.pass.3.verdict\": \"accept\""));
+        for (int k = 2; k <= 3; k++) {
+            String pass = Files.readString(dir.resolve("passes.json.pass" + k));
+            assertBalanced(pass);
+            assertTrue(pass.contains("\"driver.workerTimes\""), pass);
+            assertTrue(pass.contains("\"count\": 299"), pass);
         }
         // disabled statistics record nothing
         RunStats off = new RunStats(false);
@@ -979,8 +1057,24 @@ class RunTest {
         assertBalanced(json);
         assertTrue(json.contains("\"a.b\": \"x\\\"y\\n\""), json);
         assertTrue(json.contains("{\"label\": \"r1\", \"values\": [1, 2]}"), json);
-        int top = json.split("\"unit\": ").length - 1;
-        assertEquals(50, top);
+        // two lists of 50: the heaviest by steps ("top") and the slowest by wall time ("slow")
+        String topList = json.substring(json.indexOf("\"top\""), json.indexOf("\"slow\""));
+        String slowList = json.substring(json.indexOf("\"slow\""), json.indexOf("\"histogram\""));
+        assertEquals(50, topList.split("\"unit\": ").length - 1);
+        assertEquals(50, slowList.split("\"unit\": ").length - 1);
+        // the slowest of all (unit 499 took 499 ns) is listed first, and the histogram counts every unit
+        assertTrue(slowList.startsWith("{\"unit\": 499,", slowList.indexOf("{\"unit\"")), slowList.substring(0, 60));
+        assertTrue(json.contains("\"histogram\": [{\"belowMicros\": 1, \"units\": 500,"), json);
+        // a worker's own statistics merge into the run's
+        UnitStats own = new UnitStats();
+        own.unit(9000, 1, 5_000_000L, 7_000_000L, 0);
+        s.mergeUnits(own);
+        String merged = s.toJson();
+        assertTrue(merged.contains("\"units\": {\"count\": 501,"), merged);
+        int firstTop = merged.indexOf("{\"unit\"", merged.indexOf("\"top\""));
+        assertTrue(merged.startsWith("{\"unit\": 9000, \"worker\": 1, \"steps\": 5000000, \"nanos\": 7000000,", firstTop));
+        int firstSlow = merged.indexOf("{\"unit\"", merged.indexOf("\"slow\""));
+        assertTrue(merged.startsWith("{\"unit\": 9000, \"worker\": 1, \"steps\": 5000000, \"nanos\": 7000000,", firstSlow));
         // the heaviest of all is listed first
         long max = 0;
         for (int u = 0; u < 500; u++) {

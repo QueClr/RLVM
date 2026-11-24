@@ -152,6 +152,7 @@ final class T2Runtime {
         }
         BlockRoot root = new BlockRoot(RlvmLanguage.instance, eng, d, s, r.rec.what);
         root.rec = r.rec;
+        r.rec.pendingRoot = root; // keeps the root (and its call target) alive while the compile queue holds it weakly
         OptimizedCallTarget target = (OptimizedCallTarget) root.getCallTarget();
         root.target = target;
         target.compile(true);
@@ -244,6 +245,18 @@ final class T2Runtime {
                     }
                 }
                 root.owner.failed(root.rec, "compilation failed: " + detail, cpu);
+            } catch (Throwable t) {
+                // bookkeeping only
+            }
+        }
+
+        @Override
+        public void onCompilationDequeued(OptimizedCallTarget target, Object source, CharSequence reason, int tier) {
+            try {
+                BlockRoot root = rootOf(target);
+                if (root != null && !target.isValid() && !target.isSubmittedForCompilation()) {
+                    root.owner.failed(root.rec, "dequeued: " + reason, 0);
+                }
             } catch (Throwable t) {
                 // bookkeeping only
             }

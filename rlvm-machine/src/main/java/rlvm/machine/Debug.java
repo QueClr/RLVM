@@ -56,6 +56,12 @@ final class Debug {
     private static final String[] SWITCHES = {"gated", "pchk", "expect", "warm", "facts", "tele", "code", "casetrees",
         "probes", "k2", "inert", "m1a", "m1b", "m2a", "m2b", "m3a", "m3b", "m4a", "m4b", "m5a", "m5b", "m7a", "m7b", "t2", "lazyeval", "levels-complete"};
 
+    /**
+     * Second names of switch bits ({@code Op.SW_MATCH = SW_M5A}, {@code SW_JOINT = SW_M5B}, {@code SW_SAME = SW_M4A}):
+     * read like the first name, and printed instead of it.
+     */
+    private static final String[][] SWITCH_ALIASES = {{"match", "m5a"}, {"joint", "m5b"}, {"same", "m4a"}};
+
     /** {@code "memocheck,poison"} -> {@code Op.DBG_*} bits; unknown names are an error (fail closed). */
     static int parseModes(String list) {
         if (list.trim().equals("all")) {
@@ -94,9 +100,9 @@ final class Debug {
             } else if (name.equals("all")) {
                 bits |= Op.SW_ALL;
             } else if (name.charAt(0) == '-') {
-                bits &= ~parse(name.substring(1), SWITCHES, "staging switch");
+                bits &= ~parse(firstName(name.substring(1)), SWITCHES, "staging switch");
             } else {
-                bits |= parse(name.charAt(0) == '+' ? name.substring(1) : name, SWITCHES, "staging switch");
+                bits |= parse(firstName(name.charAt(0) == '+' ? name.substring(1) : name), SWITCHES, "staging switch");
             }
         }
         return bits;
@@ -135,7 +141,26 @@ final class Debug {
     }
 
     static String switchNames(int bits) {
-        return names(bits, SWITCHES);
+        String[] names = SWITCHES.clone();
+        for (String[] alias : SWITCH_ALIASES) {
+            for (int i = 0; i < names.length; i++) {
+                if (names[i].equals(alias[1])) {
+                    names[i] = alias[0];
+                }
+            }
+        }
+        return names(bits, names);
+    }
+
+    /** The first name of a switch that has a second one ({@link #SWITCH_ALIASES}); else the name itself. */
+    private static String firstName(String name) {
+        String n = name.trim();
+        for (String[] alias : SWITCH_ALIASES) {
+            if (alias[0].equals(n)) {
+                return alias[1];
+            }
+        }
+        return n;
     }
 
     private static String names(int bits, String[] names) {

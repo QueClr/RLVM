@@ -64,6 +64,8 @@ final class Values {
         final int[] litImp = new int[2 * LIT_SLOTS];
         /** Limb scratch of the literal import. */
         long[] limbs = new long[8];
+        /** Never written ({@code Values.closureAtSlow}). */
+        int pin;
         /**
          * The OPEN flags of the records this class made, two bits per record (bit 0: known, bit 1: OPEN), 32
          * records per word: {@link Values#openOf}. A copy of flag bit OPEN that is 128 times denser than the
@@ -77,6 +79,13 @@ final class Values {
          */
         int openLo;
         int openTop = -1;
+        static final int SEEN_SLOTS = 256;
+        /**
+         * The content hashes of the frames that {@code closureAt} looked up last, direct-mapped: a prediction only
+         * ("this frame exists, and its table slots are in the cache"), never an answer. Not cleared: a stale
+         * word costs one early load or saves none.
+         */
+        final int[] seen = new int[SEEN_SLOTS];
         static final int REST_SLOTS = 64;
         /** REST chain cache of {@code Runs.restOf}: cells (eb, n, epoch, chain), direct-mapped, verified by content. */
         final int[] restCache = new int[Layout.CELL_WORDS * REST_SLOTS];
@@ -415,6 +424,11 @@ final class Values {
         if (ls != 0 && !m.terms.hasLevelParam(term)) {
             ls = 0;
         }
+        return closureProbe(m, w0, term, frame, ls);
+    }
+
+    /** The probe of {@link #closure}: {@code frame} is a frame run (or 0), {@code ls} is already canonical (2.7). */
+    private static int closureProbe(Machine m, int w0, int term, int frame, int ls) {
         int hash = Hash.record(w0, term, frame, ls);
         int[] tab = m.vtab;
         int[] v = m.vh;
@@ -433,6 +447,7 @@ final class Values {
                     Runs.Stat.cloNew++;
                     Runs.Stat.cloNewKeptH[Runs.Stat.kept(m, frame)]++;
                     Runs.Stat.cloNewKind[w0 >>> Layout.KIND_SHIFT]++;
+                    Runs.Stat.rec(m, 0, hash, m.vp, true);
                 }
                 return add(m, slot, hash, w0 | (m.rs[frame] & Runs.RUN_OPEN) << Runs.RUN_OPEN_TO_W0, term, frame, ls);
             }
@@ -440,12 +455,156 @@ final class Values {
                 int o = (e & Layout.TAB_INDEX_MASK) << Layout.REC_SHIFT;
                 if (v[o + Layout.A] == term && v[o + Layout.B] == frame && v[o + Layout.C] == ls
                         && (v[o] & Hash.W0_KEY_MASK) == key0) {
+                    if (Runs.Stat.ON) {
+                        Runs.Stat.rec(m, 0, hash, e & Layout.TAB_INDEX_MASK, false);
+                    }
                     return e & Layout.TAB_INDEX_MASK;
                 }
             }
             slot = (slot + 1) & mask;
         }
     }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Closures and suspensions over a working environment: PRUNE and the record in one operation
+    // ---------------------------------------------------------------------------------------------------
+
+    /** {@code mkLam(m, term, Runs.prune(m, eb, en, fvMask(term)), ls)} ({@link #closureAt}). */
+    static int mkLamAt(Machine m, int term, int eb, int en, int ls) {
+        return closureAt(m, Layout.LAM << Layout.KIND_SHIFT | Layout.W0_WHNF, term, eb, en, ls);
+    }
+
+    /** {@code mkPi(m, term, Runs.prune(m, eb, en, fvMask(term)), ls)} ({@link #closureAt}). */
+    static int mkPiAt(Machine m, int term, int eb, int en, int ls) {
+        return closureAt(m, Layout.PI << Layout.KIND_SHIFT | Layout.W0_WHNF, term, eb, en, ls);
+    }
+
+    /** {@code suspRecord(m, term, Runs.prune(m, eb, en, fvMask(term)), ls)}: the tabling record ({@link #closureAt}). */
+    static int suspRecordAt(Machine m, int term, int eb, int en, int ls) {
+        return closureAt(m, Layout.SUSP << Layout.KIND_SHIFT, term, eb, en, ls);
+    }
+
+    /** {@code mkSusp(m, term, Runs.prune(m, eb, en, fvMask(term)), ls, false)}: a known VAL is returned in its place. */
+    static int mkSuspAt(Machine m, int term, int eb, int en, int ls) {
+        int s = closureAt(m, Layout.SUSP << Layout.KIND_SHIFT, term, eb, en, ls);
+        if (s >= SIG) {
+            return s;
+        }
+        int val = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
+        return val != 0 ? val : s;
+    }
+
+    /**
+     * The record {@code (kind and flags of w0, term, PRUNE(env, mask of term), ls')}: exactly
+     * {@code closure(m, w0, term, Runs.prune(m, eb, en, m.terms.fvMask(term)), ls)} - the same frame, the same
+     * record - with table loads that do not wait for each other (NOTES-M1 section 5).
+     *
+     * <p>The two probes of the two-step construction depend on each other: the frame in rtab, then the record,
+     * whose key holds the frame's id, in vtab. Once a session's tables have outgrown the cache that is two cache
+     * misses in a row (reachability: four fifths of PRUNE and of the record probe are the one load of the
+     * table slot). Here the vtab slot of the record <em>that a new frame would give</em> is loaded before the
+     * rtab probe, so that the two loads overlap: the id of a new frame is known in advance (the top of the run
+     * slab), and a record over a frame that did not exist cannot exist, so if the frame is new the record is
+     * written at the first free slot from there, without a comparison. If the frame exists the early load was
+     * for nothing and the record is probed as usual; to keep that rare, a frame whose content hash was looked
+     * up a moment ago ({@link Ext#seen}; it exists and its slots are in the cache) is not speculated on.
+     * Measured on reachability, native, one worker: -7% CPU; Init, Std, the Cedar slice unchanged.
+     */
+    private static int closureAt(Machine m, int w0, int term, int eb, int en, int ls) {
+        if ((m.debug & Op.DBG_MASKAUDIT) != 0 && Debug.maskAudit(m, term) != 0) {
+            return Op.FATAL; // the mask contract (ISA 2.4, 5.5), audited where the mask is used
+        }
+        long mask = m.terms.fvMask(term);
+        if (mask <= 0) { // a closed term (the empty frame) or a far frame: the two-step way
+            return closure(m, w0, term, mask == 0 ? Layout.RUN_EMPTY : Runs.prune(m, eb, en, mask), ls);
+        }
+        int len = 64 - Long.numberOfLeadingZeros(mask);
+        if (len > en) {
+            return m.fault(MachineErrors.E_INTERNAL); // as Runs.prune: the mask names an index outside the environment
+        }
+        if (ls != 0 && !m.terms.hasLevelParam(term)) {
+            ls = 0;
+        }
+        int[] es = m.es;
+        int top = eb + en - 1;
+        int sum = 0;
+        int cnt = 0;
+        for (long b = mask; b != 0; b &= b - 1) {
+            int i = Long.numberOfTrailingZeros(b);
+            int v = es[top - i];
+            if (v != Layout.HOLE) {
+                sum += Runs.slotHash(v, i);
+                cnt++;
+            }
+        }
+        int fh = Runs.runHash(sum, Layout.RUN_FRAME, 0);
+        int hdr = Layout.runHeader(len, Layout.RUN_FRAME, false) | (cnt < Runs.CNT_MAX ? cnt : Runs.CNT_MAX) << Runs.CNT_SHIFT;
+        int[] seen = m.x1.seen;
+        int si = fh & (Ext.SEEN_SLOTS - 1);
+        if (seen[si] == fh) { // looked up a moment ago: the frame exists and its table slots are in the cache
+            int f = frameProbe(m, fh, hdr, top, len, mask);
+            return f >= SIG ? f : closureProbe(m, w0, term, f, ls);
+        }
+        seen[si] = fh;
+        return closureOverNew(m, w0, term, ls, fh, hdr, top, len, mask);
+    }
+
+    /**
+     * {@link #closureAt} for a frame that is probably new: the slot of the record over a new frame is loaded
+     * first, then the frame is probed (and made), then the record is written - or, if the frame existed after
+     * all, probed.
+     */
+    private static int closureOverNew(Machine m, int w0, int term, int ls, int fh, int hdr, int top, int len, long mask) {
+        int guess = m.rsp; // the id a new frame gets
+        int hg = Hash.record(w0, term, guess, ls);
+        int[] vtab = m.vtab;
+        int vslot = hg & (vtab.length - 1);
+        int ve = vtab[vslot];
+        if (ve == SPEC_PIN) {
+            m.x1.pin++; // never true (record 0 is not interned); the test keeps this load in front of the rtab probe
+        }
+        int frame = frameProbe(m, fh, hdr, top, len, mask);
+        if (frame != guess) {
+            return frame >= SIG ? frame : closureProbe(m, w0, term, frame, ls);
+        }
+        // a record over a frame that did not exist a moment ago does not exist: the first free slot of its sequence
+        while (ve != 0) {
+            vslot = (vslot + 1) & (vtab.length - 1);
+            ve = vtab[vslot];
+        }
+        return add(m, vslot, hg, w0 | (m.rs[frame] & Runs.RUN_OPEN) << Runs.RUN_OPEN_TO_W0, term, frame, ls);
+    }
+
+    /**
+     * The probe of {@code Runs.pruneNear} for a near frame whose content hash {@code fh} and header {@code hdr}
+     * are known: the frame of the bindings that {@code mask} keeps below es[top]; a new frame gets the id
+     * {@code m.rsp} had.
+     */
+    private static int frameProbe(Machine m, int fh, int hdr, int top, int len, long mask) {
+        int[] es = m.es;
+        int[] tab = m.rtab;
+        int[] rs = m.rs;
+        int tmask = tab.length - 1;
+        int slot = fh & tmask;
+        for (;;) {
+            int e = tab[slot];
+            if (e == 0) {
+                return Runs.pruneSlow(m, slot, fh, hdr, top - len + 1, len, mask, 0);
+            }
+            if (((e ^ fh) >>> Layout.TAB_TAG_SHIFT) == 0) {
+                int r = e & Layout.TAB_INDEX_MASK;
+                if ((rs[r] & ~Runs.RUN_OPEN) == hdr && rs[r + Layout.RUN_HASH] == fh
+                        && Runs.sameKept(rs, r + Layout.RUN_H + len - 1, es, top, mask)
+                        && ((hdr & Runs.CNT_MASK) != Runs.CNT_MASK || Runs.sameMasked(rs, r + Layout.RUN_H, es, top - len + 1, len, mask))) {
+                    return r;
+                }
+            }
+            slot = (slot + 1) & tmask;
+        }
+    }
+
+    /** A vtab word that no table holds: tag 8 and record 0 (NONE is never interned). */
+    private static final int SPEC_PIN = 8 << Layout.TAB_TAG_SHIFT;
 
     /**
      * Delayed {@code EVAL(term, frame, ls)} (ISA 2.2 SUSP, 4.2 MKSUSP), also the tabling record of that term under that
@@ -590,12 +749,18 @@ final class Values {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
+                if (Runs.Stat.ON) {
+                    Runs.Stat.rec(m, 1, hash, m.vp, true);
+                }
                 return neuSlow(m, slot, hash, head, head, Layout.RUN_EMPTY, 0, xb, n);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int o = (e & Layout.TAB_INDEX_MASK) << Layout.REC_SHIFT;
                 if (v[o + Layout.C] == hash && v[o + Layout.A] == head && (v[o] & Hash.W0_KEY_MASK) == key0
                         && sameArgs(m.rs, v[o + Layout.B] + Layout.RUN_H, x, xb, n)) {
+                    if (Runs.Stat.ON) {
+                        Runs.Stat.rec(m, 1, hash, e & Layout.TAB_INDEX_MASK, false);
+                    }
                     return e & Layout.TAB_INDEX_MASK;
                 }
             }

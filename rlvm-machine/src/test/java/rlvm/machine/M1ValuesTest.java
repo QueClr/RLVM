@@ -759,4 +759,136 @@ class M1ValuesTest {
         assertEquals(2, used(t.vtab));
         g.close();
     }
+    /**
+     * I-ID of the combined operation (NOTES-M1 section 5): a closure or suspension over a working environment
+     * ({@code mkLamAt / mkPiAt / suspRecordAt / mkSuspAt}) is the record of the two-step construction
+     * ({@code mkLam(.., Runs.prune(..), ..)}), whichever of the two comes first - over a new frame (the speculative
+     * slot), over a frame of the front cache, over a frame that only the table has, over a far frame, over the
+     * empty frame, with {@code ls} of a term without level parameter, with HOLE at a kept position, and after
+     * a session reset. Checked against a model keyed by the dense content.
+     */
+    @Test
+    void closuresOverAnEnvironmentAreTheTwoStepRecords() {
+        closuresOverAnEnvironment(42);
+        closuresOverAnEnvironment(7);
+    }
+
+    private static void closuresOverAnEnvironment(long seed) {
+        Fixture g = Fixture.prelude0();
+        Machine t = g.m;
+        Random rnd = new Random(seed);
+        String[] lams = {
+            "(fun (x : Nat) x)", "(fun (x : Nat) #1)", "(fun (x : Nat) (Nat.add #1 #3))", "(fun (x : Nat) (Nat.add x #2))",
+            "(fun (x : Nat) (Nat.add #5 (Nat.add #9 #2)))", "(fun (x : #0) (Nat.add #1 #1))", "(fun (x : Nat) (Nat.add #20 #41))",
+            "(fun (x : Nat) (Nat.add #62 #1))", "(fun (x : Nat) (Nat.add #63 #1))", "(fun (x : Nat) (Nat.add #70 #2))",
+            "(fun (x : (sort u)) #1)", "(fun (x : (sort u)) (Nat.add #3 #2))",
+        };
+        String[] apps = {
+            "(Nat.add #0 #0)", "(Nat.add #0 #1)", "(Nat.add #2 #0)", "(Nat.add (Nat.add #4 #1) #7)", "(Nat.add #30 #31)",
+            "(Nat.add #62 #0)", "(Nat.add #63 #0)", "(Nat.add #90 #1)", "(Nat.add n0 two)",
+        };
+        int[] lamT = new int[lams.length];
+        int[] appT = new int[apps.length];
+        for (int i = 0; i < lams.length; i++) {
+            lamT[i] = g.term(lams[i]);
+        }
+        for (int i = 0; i < apps.length; i++) {
+            appT[i] = g.term(apps[i]);
+        }
+        int lsU = Levels.substOf(t, Values.mkConst(t, g.cid("id"), g.levels("5"))); // a substitution id != 0
+        java.util.HashMap<String, Integer> model = new java.util.HashMap<>();
+        int compared = 0;
+        for (int round = 0; round < 6000; round++) {
+            if (round == 3000) {
+                t.reset(); // the ids of the first half are gone; the caches must not answer with them
+                t.beginDecl(Integer.MAX_VALUE, -1, Op.FUEL_UNLIMITED, Long.MAX_VALUE);
+                model.clear();
+                lsU = Levels.substOf(t, Values.mkConst(t, g.cid("id"), g.levels("5")));
+            }
+            int nat = Values.mkConst(t, g.cid("Nat"), IntLists.EMPTY);
+            int[] pool = {Layout.imm(0), Layout.imm(1), Layout.imm(2), Values.mkFVar(t, nat, 0), Values.mkFVar(t, nat, 1),
+                Layout.HOLE, nat};
+            t.ep = 0;
+            int en = round % 4 == 0 ? 64 + rnd.nextInt(40) : rnd.nextInt(64);
+            int[] vs = new int[en];
+            for (int i = 0; i < en; i++) {
+                vs[i] = pool[rnd.nextInt(round % 3 == 0 ? 3 : pool.length)];
+            }
+            int eb = M1RunsTest.env(t, vs);
+            boolean lam = rnd.nextBoolean();
+            int term = lam ? lamT[rnd.nextInt(lamT.length)] : appT[rnd.nextInt(appT.length)];
+            long mask = t.terms.fvMask(term);
+            long near = mask & ~Layout.MASK_FAR;
+            if (64 - Long.numberOfLeadingZeros(near) > en) {
+                assertEquals(Op.FATAL, Values.suspRecordAt(t, term, eb, en, 0), "the mask names an index outside the environment");
+                assertEquals(MachineErrors.E_INTERNAL, t.err);
+                t.err = 0;
+                continue;
+            }
+            int ls = rnd.nextInt(3) == 0 ? lsU : 0;
+            boolean atFirst = rnd.nextBoolean();
+            int a;
+            int b;
+            int kind;
+            switch (rnd.nextInt(lam ? 3 : 2)) {
+                case 0: // the tabling record
+                    kind = 0;
+                    a = atFirst ? Values.suspRecordAt(t, term, eb, en, ls) : Values.suspRecord(t, term, Runs.prune(t, eb, en, mask), ls);
+                    b = atFirst ? Values.suspRecord(t, term, Runs.prune(t, eb, en, mask), ls) : Values.suspRecordAt(t, term, eb, en, ls);
+                    break;
+                case 1: // MKSUSP: the VAL once it is known
+                    kind = 0;
+                    a = Values.suspRecordAt(t, term, eb, en, ls);
+                    b = Values.suspRecord(t, term, Runs.prune(t, eb, en, mask), ls);
+                    assertEquals(a, b);
+                    if (Values.memo(t, a, 0) == 0) {
+                        assertEquals(a, Values.mkSuspAt(t, term, eb, en, ls));
+                        if (rnd.nextBoolean()) {
+                            Values.setMemo(t, a, 0, Layout.imm(7));
+                        }
+                    }
+                    assertEquals(Values.mkSusp(t, term, Runs.prune(t, eb, en, mask), ls, false), Values.mkSuspAt(t, term, eb, en, ls));
+                    break;
+                default: // closures
+                    kind = rnd.nextBoolean() ? 1 : 2;
+                    if (kind == 1) {
+                        a = atFirst ? Values.mkLamAt(t, term, eb, en, ls) : Values.mkLam(t, term, Runs.prune(t, eb, en, mask), ls);
+                        b = atFirst ? Values.mkLam(t, term, Runs.prune(t, eb, en, mask), ls) : Values.mkLamAt(t, term, eb, en, ls);
+                    } else {
+                        a = atFirst ? Values.mkPiAt(t, term, eb, en, ls) : Values.mkPi(t, term, Runs.prune(t, eb, en, mask), ls);
+                        b = atFirst ? Values.mkPi(t, term, Runs.prune(t, eb, en, mask), ls) : Values.mkPiAt(t, term, eb, en, ls);
+                    }
+                    break;
+            }
+            assertTrue(a < Op.SIG && a > Layout.HOLE);
+            assertEquals(a, b, "one record, whichever construction comes first");
+            compared++;
+            // the record: term, the frame of PRUNE, the canonical ls, OPEN of the frame
+            int frame = Runs.prune(t, eb, en, mask);
+            assertEquals(term, Values.a(t, a));
+            assertEquals(frame, Values.b(t, a));
+            assertEquals(t.terms.hasLevelParam(term) ? ls : 0, Values.c(t, a));
+            assertEquals(Runs.isOpen(t, frame), Values.isOpen(t, a));
+            // the model: kind, term, ls', the dense near slots, the outer bindings of a far frame
+            boolean far = mask < 0 && en > 63;
+            int len = far ? 63 : 64 - Long.numberOfLeadingZeros(near);
+            StringBuilder key = new StringBuilder().append(kind).append(':').append(term).append(':').append(Values.c(t, a));
+            for (int j = 0; j < len; j++) {
+                int i = len - 1 - j;
+                key.append(',').append((near >>> i & 1) != 0 ? vs[en - 1 - i] : Layout.HOLE);
+            }
+            if (far) {
+                key.append('|');
+                for (int j = 0; j < en - 63; j++) {
+                    key.append(',').append(vs[j]);
+                }
+            }
+            Integer prev = model.put(key.toString(), a);
+            assertTrue(prev == null || prev == a, "equal contents, one record: " + key);
+        }
+        assertTrue(compared > 4000);
+        java.util.HashSet<Integer> ids = new java.util.HashSet<>(model.values());
+        assertEquals(model.size(), ids.size(), "different contents, different records");
+        g.close();
+    }
 }

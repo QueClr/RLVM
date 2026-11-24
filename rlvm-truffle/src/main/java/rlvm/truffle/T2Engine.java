@@ -73,6 +73,12 @@ final class T2Engine {
         String failure;
         int deopts;
         boolean invalidated;
+        /**
+         * The root while its compilation is pending. The runtime's compile queue holds a call target only
+         * weakly: without this reference a collection between submission and compilation drops the task
+         * silently and the block would stay "pending" for ever.
+         */
+        volatile BlockRoot pendingRoot;
 
         Rec(int blk, String what, long entries, long spent, double cost, long processCpu) {
             this.blk = blk;
@@ -299,6 +305,7 @@ final class T2Engine {
             rec.timed0 = heat.timed(root.blk);
             rec.nanos0 = heat.nanos(root.blk);
             rec.installedAtProcessCpu = Cpu.processNanos();
+            rec.pendingRoot = null; // the table holds the root from here on
             Installed[] t = Arrays.copyOf(table, Math.max(table.length, root.blk + 1));
             t[root.blk] = new Installed(target, root, root.codeLength());
             table = t;
@@ -327,6 +334,7 @@ final class T2Engine {
                 pendingNanos = Math.max(0, pendingNanos - rec.costEstimate);
             }
             setState(rec.blk, FAILED);
+            rec.pendingRoot = null;
             failedCount++;
             if (cpuNanos > 0) {
                 compileNanos += cpuNanos;

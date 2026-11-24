@@ -862,6 +862,11 @@ class M6FacadeTest {
         assertEquals(0, Debug.parseSwitches("all") & (Op.SW_LAZY_EVAL | Op.SW_LEVELS_COMPLETE));
         assertEquals(Op.SW_M1A | Op.SW_M7B, Debug.parseSwitches("m1a,m7b"));
         assertEquals("m1a,m7b", Debug.switchNames(Op.SW_M1A | Op.SW_M7B));
+        // experiments with a name of their own: the same bit, read by both names, printed by the new one
+        assertEquals(Op.SW_M5A | Op.SW_M5B | Op.SW_M4A, Debug.parseSwitches("match,joint,same"));
+        assertEquals(Op.SW_MATCH | Op.SW_JOINT | Op.SW_SAME, Debug.parseSwitches("m5a,m5b,m4a"));
+        assertEquals("same,match,joint", Debug.switchNames(Op.SW_MATCH | Op.SW_JOINT | Op.SW_SAME));
+        assertEquals(Op.SW_WARM, Debug.parseSwitches("warm,match,-match"));
         assertEquals(Op.SW_M2A | Op.SW_M2B | Op.SW_M3A | Op.SW_M3B | Op.SW_M4A | Op.SW_M4B | Op.SW_M5A | Op.SW_M5B,
                 Debug.parseSwitches("m2a,m2b,m3a,m3b,m4a,m4b,m5a,m5b"));
         assertEquals(12, Integer.bitCount(Op.SW_EXPERIMENTS));

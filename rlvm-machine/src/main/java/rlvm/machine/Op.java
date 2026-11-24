@@ -487,6 +487,18 @@ public final class Op {
      * never on in strict mode (like every switch).
      */
     public static final int SW_LEVELS_COMPLETE = 1 << 25;
+    /**
+     * Names for experiments that their owners consider ready (2026-11-24): the SAME bits as the experiment
+     * switches they grew in, so that no code moves; {@code Debug} reads and prints the names. They get bits
+     * of their own when they enter the default set.
+     * {@code match} = {@code m5a}: MATCH of a telescope domain against the argument's type instead of building
+     * the domain (M5; ISA 4.5.4, B5 on the generic tier). {@code joint} = {@code m5b}: joint telescope check
+     * of a declaration's type and value (M5). {@code same} = {@code m4a}: the official {@code is_equiv} test
+     * at the start of CONV, a bounded structural walk (M4, {@code Same}).
+     */
+    public static final int SW_MATCH = 1 << 19;
+    public static final int SW_JOINT = 1 << 20;
+    public static final int SW_SAME = 1 << 17;
     /** Every experiment switch. */
     public static final int SW_EXPERIMENTS = SW_M1A | SW_M1B | SW_M2A | SW_M2B | SW_M3A | SW_M3B | SW_M4A | SW_M4B | SW_M5A
             | SW_M5B | SW_M7A | SW_M7B;

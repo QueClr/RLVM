@@ -83,6 +83,35 @@ final class Runs {
             }
         }
 
+        // simulated direct-mapped front caches of records: [kind class][size] hits; cells (epoch << 32 | record)
+        static final int[] RSIM = {6, 8, 10, 12, 14};
+        static final long[][][] rsimCell = new long[3][RSIM.length][];
+        static final long[][] rsimHit = new long[3][RSIM.length];
+        static final long[] rsimProbe = new long[3], rsimOld = new long[3];
+        static {
+            for (int k = 0; k < 3; k++) {
+                for (int i = 0; i < RSIM.length; i++) {
+                    rsimCell[k][i] = new long[1 << RSIM[i]];
+                }
+            }
+        }
+
+        /** A record probe of class k (0 closure / suspension, 1 NEU, 2 other) with hash h ended in record r (isNew: made now). */
+        static void rec(Machine m, int k, int h, int r, boolean isNew) {
+            rsimProbe[k]++;
+            if (!isNew) {
+                rsimOld[k]++;
+            }
+            long key = (long) m.epoch << 32 | r;
+            for (int i = 0; i < RSIM.length; i++) {
+                int ix = h & ((1 << RSIM[i]) - 1);
+                if (!isNew && rsimCell[k][i][ix] == key) {
+                    rsimHit[k][i]++;
+                }
+                rsimCell[k][i][ix] = key;
+            }
+        }
+
         static int kept(Machine m, int frame) {
             int[] rs = m.rs;
             int hdr = rs[frame];
@@ -178,6 +207,14 @@ final class Runs {
             sb.append("M1STAT neu probe ").append(neuProbe).append(" ext ").append(neuExtProbe).append(" new ").append(neuNew).append(" steps ").append(neuSteps).append('\n');
             sb.append("M1STAT neuLenH").append(h(neuLenH)).append('\n');
             sb.append("M1STAT neuNewLenH").append(h(neuNewLenH)).append('\n');
+            for (int k = 0; k < 3; k++) {
+                sb.append("M1STAT recsim ").append(k == 0 ? "closure" : k == 1 ? "neu" : "other").append(" probes ").append(rsimProbe[k])
+                        .append(" found ").append(rsimOld[k]);
+                for (int i = 0; i < RSIM.length; i++) {
+                    sb.append(" 2^").append(RSIM[i]).append(':').append(rsimHit[k][i]);
+                }
+                sb.append('\n');
+            }
             sb.append("M1STAT words frame ").append(wordsFrame).append(" spine ").append(wordsSpine).append(" rest ").append(wordsRest).append('\n');
             System.err.print(sb);
             String f = System.getProperty("rlvm.m1.stat.out");
@@ -224,13 +261,13 @@ final class Runs {
      * multiplications do not depend on each other (the chained {@code Hash.step} of ISA 13.3 cost one dependent
      * multiplication per slot of the frame's length: the hottest loop of the machine; NOTES-M1 section 5).
      */
-    private static int slotHash(int v, int i) {
+    static int slotHash(int v, int i) {
         int t = (v + i * P1) * P2;
         return t ^ (t >>> 15);
     }
 
     /** The content hash of a run from the sum of its {@link #slotHash}es, its kind and its REST run (0 if not far). */
-    private static int runHash(int sum, int kind, int rest) {
+    static int runHash(int sum, int kind, int rest) {
         return Hash.fin(sum + rest * P3 + kind);
     }
 
@@ -380,10 +417,8 @@ final class Runs {
                 return false;
             }
             int b = rest + Layout.RUN_H + (hdr & Layout.RUN_FAR);
-            for (int j = 0; j < len; j++) {
-                if (rs[b + j] != es[pos + j]) {
-                    return false;
-                }
+            if (!java.util.Arrays.equals(rs, b, b + len, es, pos, pos + len)) { // 44 slots on average on the Cedar slice
+                return false;
             }
             rest = (hdr & Layout.RUN_FAR) != 0 ? rs[rest + Layout.RUN_REST_WORD] : 0;
         }
@@ -440,7 +475,7 @@ final class Runs {
     }
 
     /** The kept positions of a candidate agree with the environment: rs[s0 - i] == es[top - i] for every bit i of the mask. */
-    private static boolean sameKept(int[] rs, int s0, int[] es, int top, long mask) {
+    static boolean sameKept(int[] rs, int s0, int[] es, int top, long mask) {
         for (long b = mask; b != 0; b &= b - 1) {
             int i = Long.numberOfTrailingZeros(b);
             if (rs[s0 - i] != es[top - i]) {
@@ -451,7 +486,7 @@ final class Runs {
     }
 
     /** Slot by slot: the candidate is the environment under the mask, HOLE elsewhere (candidates with a saturated count). */
-    private static boolean sameMasked(int[] rs, int sb, int[] es, int base, int len, long mask) {
+    static boolean sameMasked(int[] rs, int sb, int[] es, int base, int len, long mask) {
         for (int j = 0, i = len - 1; j < len; j++, i--) {
             if (rs[sb + j] != ((mask >>> i & 1) != 0 ? es[base + j] : Layout.HOLE)) {
                 return false;
@@ -461,7 +496,7 @@ final class Runs {
     }
 
     /** The miss of {@link #pruneNear}: writes the frame (HOLE everywhere, then the kept slots). */
-    private static int pruneSlow(Machine m, int slot, int hash, int hdr, int base, int len, long mask, int rest) {
+    static int pruneSlow(Machine m, int slot, int hash, int hdr, int base, int len, long mask, int rest) {
         int open = rest != 0 && (m.rs[rest] & RUN_OPEN) != 0 ? RUN_OPEN : openMasked(m, base, len, mask);
         int run = m.addRun(hdr | open, hash, rest);
         if (run >= SIG) {

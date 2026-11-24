@@ -41,8 +41,15 @@ class TierEquivalenceTest {
         try (Harness h = new Harness(path, switches + ",t2", hostDepth)) {
             Harness.Run tier = h.run();
             T2Engine e = h.t2();
-            assertTrue(e != null, "the machine found the tier");
             int u = Harness.firstDifference(base, tier);
+            if (e == null) {
+                // the tier is made at the machine's first declaration: a file without one (rejected by the loader's
+                // or the environment's checks, or without definitions) never has a tier
+                assertEquals(0, tier.entered, "a machine that entered blocks has the tier");
+                assertEquals("identical", Harness.describe(base, tier, u), path);
+                System.out.println("[t2] " + path + ": units " + tier.units + " accepted " + tier.accepted + ", no declaration reached the machine's blocks");
+                return 0;
+            }
             assertEquals("identical", Harness.describe(base, tier, u), path + " " + String.join(" ", t2) + "\n" + e.report());
             assertEquals(base.records, tier.records, "records made");
             assertEquals(base.runWords, tier.runWords, "run words made");
@@ -55,7 +62,8 @@ class TierEquivalenceTest {
             }
             System.out.println("[t2] " + path + " " + String.join(" ", t2) + " D=" + hostDepth + ": units " + tier.units + " accepted " + tier.accepted
                     + ", blocks compiled " + e.installedCount() + ", compiled activations " + e.compiledCalls() + ", not taken " + e.notTaken()
-                    + ", frames written " + tier.frames + ", compile cpu " + e.compileNanos() / 1_000_000 + " ms");
+                    + ", frames written " + tier.frames + ", compile cpu " + e.compileNanos() / 1_000_000 + " ms"
+                    + (tier.firstFailure.isEmpty() ? "" : " | first non-accept (both runs): " + tier.firstFailure));
             return e.compiledCalls();
         }
     }
