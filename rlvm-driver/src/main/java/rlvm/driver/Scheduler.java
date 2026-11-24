@@ -22,7 +22,13 @@ import rlvm.store.Store;
  *               scheduler is closed and no worker holds a claim (then 0 = terminate)
  * cut        units above the board's first failure are never handed out
  * </pre>
- * A worker therefore sees increasing units inside a claim and from claim to claim until it steals,
+ * <b>Slice mode</b> (a positive {@code sliceUnits}; what {@link Run} uses): step 3 gives the caller
+ * alone the next slice of the batch, {@code (ready - split) / W} units, at least a chunk and at most
+ * {@code sliceUnits}; nothing is put into another worker's queue, and "batch" is simply what is
+ * ready and not handed out. The workers then move through the file together and a unit starts when
+ * the common front reaches it (see the constructor).
+ *
+ * <p>A worker therefore sees increasing units inside a claim and from claim to claim until it steals,
  * and neighbouring declarations stay on one worker. With one worker this degenerates to file order.
  * Which worker checks a unit depends on timing; which units are checked below the first failure,
  * and therefore the verdict, does not.

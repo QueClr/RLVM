@@ -72,7 +72,16 @@ final class T2Tier extends Tier {
         T2Engine.Installed c = blk < tab.length ? tab[blk] : null;
         if (c == null) {
             miss(blk);
-            return Op.MISS;
+            if (!engine.settings.sync) {
+                return Op.MISS;
+            }
+            // tests (rlvm.t2.sync): the count may just have promoted and compiled the block; then this very
+            // activation runs in compiled code, as with the heat accounting, which counts before it offers
+            tab = engine.table;
+            c = blk < tab.length ? tab[blk] : null;
+            if (c == null) {
+                return Op.MISS;
+            }
         }
         int e = pc < c.entryOfPc.length ? c.entryOfPc[pc] : -1;
         if (e < 0 || !T2Runtime.enter(c, this, e, rb, d)) {

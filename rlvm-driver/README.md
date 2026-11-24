@@ -279,9 +279,10 @@ common front reaches it, whoever is free. Until wave 7 (`slice=0` still does it)
 was cut into one contiguous run per worker (`min(W, |batch| / chunk)` runs, appended to the workers' queues).
 A worker that fell behind kept receiving its share of every later batch, and nobody else touched that backlog
 while anything was left to split; a heavy unit in it started late, and its end was the end of the run. Std has
-such a unit (23249: the largest proof of the file, 0.7 s of a 1.5 s run with 8 workers): the check phase took
-1.63 s to 2.40 s depending on where it landed, and a later pass (`passes=N`: the whole file is one batch, cut
-into 8 contiguous eighths) 2.15 s. Numbers in "Measured", wave 8. What slices give up is nothing that was
+such a unit (23249: the largest proof of the file, 0.7 s of a 1.5 s run with 8 workers): a later pass
+(`passes=N`: the whole file is one batch, which was cut into 8 contiguous eighths) took 2.15 s where slices
+take 1.65 s, and pass 1 had three samples of nineteen at 2.2 s to 2.4 s. Numbers and their limits in
+"Measured", wave 8. What slices give up is nothing that was
 measured: a session is reset every 75 units or so anyway (the machine's 4 MiB cap), so contiguity beyond a
 slice buys no warmth.
 
@@ -1019,9 +1020,25 @@ P7-F1) and, while the file loads, ten threads on eight cores. No unit and no cha
 | Slices instead of one run per worker and batch | check-only passes with 8 workers 2.15 - 2.18 s -> 1.58 - 1.82 s, with 4 workers 3.37 - 3.53 s -> 2.92 - 3.14 s; pass 1 and pipelined: see the ten rounds below | no difference (2.2 s; no dominant unit) | no difference (41.4 / 28.4 / 34.7 s before, 41.5 / 27.9 / 35.9 s after: batch / check-only / pipelined, one window); steals 286 -> 3 |
 | Kept pass + parking rule | pipelined declines of the invariance suite 5 -> 0 (machine), 0 (reference) | | 0 units parked on Init, Std, mathlib |
 
-@@STD10@@
+Std, 8 workers, ten rounds in one window (17:31Z): a split bounded to the environment batch but still one run
+per worker (`dist-d`) against slices (`dist-e`): pass 1 check, median (range) 1.67 s (1.62 - 1.76) against
+1.68 s (1.65 - 1.72); check-only passes (20 each) 1.63 s (1.59 - 1.70) against 1.67 s (1.64 - 2.03, two above
+1.9); pipelined wall (5 each) 2.03 s (1.95 - 2.07) against 1.99 s (1.96 - 2.01). **So slices and a bounded
+split are the same within the noise; what costs is cutting everything that is ready into W contiguous parts**
+(the check-only passes of the former scheme: 2.15 - 2.18 s in four samples, -23 % now). In pass 1 the former
+scheme gave 2.19 / 2.33 / 2.40 s in three of nineteen samples (all in one window, 16:52Z - 16:55Z; the others
+1.62 - 1.85 s) and slices nothing above 1.72 s in twelve: too few to call it an effect. Slices are the
+default because they need no bound to be right (a worker never holds units that somebody else could take
+while it has not reached them), steals fall to nearly zero (mathlib: 286 -> 3) and fewer units lie beyond a
+lane's snapshot in a pipelined run.
 
-**Hardware ceiling** (`shard=K/8`): @@CEILING@@
+**Hardware ceiling** (`shard=K/8`): eight one-worker processes over the eight shards of mathlib, each pinned to one measurement core, all at once
+(check-only passes): 23.7 s to 31.2 s per shard, mean 26.7 s, 211 - 213 s of CPU in total; the same shard alone
+on its core is 5 % - 7 % faster (23.89 s against 25.14 s, 22.21 s against 23.71 s). One process with 8 workers:
+27.9 - 28.7 s for 210 - 213 s of worker CPU. So one process costs no more CPU than eight, eight busy cores make
+each other 5 % - 7 % slower (the hardware's: the worker CPU of 201 s with 2 workers and 213 s with 8), and the
+driver's 8-worker pass is 5 % - 8 % above what a perfectly balanced split could reach on this machine (26.6 s);
+that rest is the collections. A static split would end with its largest shard, after 31.2 s.
 
 **Guards on the published jar** (@@JAR@@): @@GUARDS@@
 <!-- measured:end -->

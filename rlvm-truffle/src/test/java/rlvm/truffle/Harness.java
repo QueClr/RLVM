@@ -193,6 +193,10 @@ final class Harness implements AutoCloseable {
 
     @Override
     public void close() {
+        T2Engine t2 = t2();
+        if (t2 != null) {
+            t2.retire(); // the next harness of this process must not wait behind this engine's queued compilations
+        }
         session.close();
         engine.close();
         refSession.close();

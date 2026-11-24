@@ -284,7 +284,7 @@ Headline rows of `work/status/warm.md` (first warm table, 2026-11-24; distributi
 `2c4a55f5a8ae`, rlvm-driver `c0aeb3288f46`, rlvm-machine `7eb33a7a4ad7`, rlvm-ref `035f31e854d9`; CE native image
 `-O3`, JVM launcher as shipped: HotSpot C2, SerialGC). Every pass is a complete run (load pipelined with checking, new
 store and engines; `-X passes-mode=reload`); warm = median of passes 2..N of one process (best in brackets), N = 5
-(3 for the corpora above 1 GB and for one worker); `--threads 8` on the 8 measurement cores inside a `bench/quiet.py`
+(3 for con-leche, navier-stokes-euler, cslib, mathlib and for one worker; 10 where a row says so); `--threads 8` on the 8 measurement cores inside a `bench/quiet.py`
 window, on the host (not in the arena container); heap 6 GB for Init, Std, cedar and reachability, 13 GB otherwise.
 Baselines: the arena's run line with 8 (and 1) threads in the arena container on the same cores, second of two runs.
 Not the arena's configuration and not comparable with the cold tables above cell by cell (those are batch loads in

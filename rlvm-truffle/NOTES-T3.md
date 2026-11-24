@@ -101,3 +101,16 @@ interned although nothing ever inspects them, and the callee is reached through 
 `Eval.apply`, never called. There is no arithmetic and no branch a JIT could specialise beyond what the
 stepper already does: `Nat` literals are immediates in the value model (owner note 7 is satisfied by the
 machine itself; the tier now adds the native paths for `NSUCC` and the predecessor view of `FIELDS`).
+
+## 4. What was changed in the tier (all inside `rlvm-truffle`; nothing in `rlvm-machine`)
+
+| # | Change | Where | State |
+|---|---|---|---|
+| C1 | **Promotion by the tier's own entry counters, without the machine's heat accounting** (`rlvm.t2.count`, default in `mode=warm`; threshold `rlvm.t2.at`, default 1000 entries summed over the machines). `T2Tier.run` counts the activations it does NOT take (per machine, flushed to the engine in batches of 64); an activation that compiled code takes is counted and timed by nobody. `Tier.heat(engine)` is not called, so `Tier.exec` is a plain call of the tier. `mode=cpu` keeps T2's rent-to-own governor on the heat accounting | `T2Tier`, `T2Engine.bump`, `Settings` | kept; removes the 2.4-11% of section 3 |
+| C2 | **Pure-read helpers compiled into the block** (`rlvm.t2.inline`, a class constant, now 1): `PEEK` of an operand, the constructor test of `SWITCH`, the argument base of `FIELDS`, the inline-cache probe of `KVAL`, the cache of CONST heads in front of `KCONST`. Everything that can write or grow a store stays a call behind a boundary | `Instr`, `T2Bridge.*Inline / *Hit` | kept |
+| C3 | **`KCONST` with level parameters uses the site's inline cache as the stepper does** (`Code.kConst`: one probe; miss: `CHEAD(D, LSUB(LL, ls))` and fill). T2's node called `lsubList` + `mkConst` every time: the stepper had gained the cache since, the mirror had not followed | `Instr.Konst`, `T2Bridge.kConstHit / kConstFill` | kept (a drift, not a wrong value) |
+| C4 | **Nat literals natively** (owner note 7): `NSUCC` of an immediate below the limit is `v + 1` in the block (overflow guard: the operation), the predecessor view of `FIELDS` is `v - 1`, `SWITCH` on an immediate is a compare | `Instr.Unary1 / Fields / Switch` | kept; the value model already has the immediates, so this removes two calls, not a boxing |
+| C5 | **Run-ahead of the interning probes** (`rlvm.t2.ahead`, section 6) | `BlockRoot.ahead`, `Instr.*.ahead`, `T2Bridge` | see section 6 |
+| C6 | No one-call forwarders in code that partial evaluation reaches (`T2Bridge.peekInline` and the hash functions are written out; `T2Bridge.hashOk()` compares them with the machine's once per engine and switches the inline-cache probes back to the boundary operations if they ever differ) | `T2Bridge` | needed for the native image: a method whose body is one call is inlined before the image's analysis and its deoptimisation target is then missing - the rule T2 found for one-store setters holds for forwarders too |
+
+Not done, and why: direct calls between compiled blocks (section 7, U3).

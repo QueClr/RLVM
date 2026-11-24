@@ -31,7 +31,9 @@ import java.util.concurrent.TimeUnit;
  *   cat work/a2/golden-new.tsv >> rlvm-inductive/src/test/resources/rlvm/inductive/official-golden.tsv
  * </pre>
  * {@code -Drlvm.leanchecker=PATH} runs a checker (or a wrapper script) directly for the missing
- * fixtures and writes the new rows to {@code target/official-golden-new.tsv}.
+ * fixtures and writes the new rows to {@code target/official-golden-new.tsv};
+ * {@code -Drlvm.inductive.golden.dumpAll=DIR} writes EVERY export the tests ask about (to run them
+ * through the launcher: the file name is the key of the stored answer).
  */
 final class OfficialGolden {
     private OfficialGolden() {}
@@ -94,6 +96,13 @@ final class OfficialGolden {
      */
     static synchronized Verdict official(String fixture, String ndjson) throws IOException, InterruptedException {
         String sha = sha256(ndjson);
+        String all = System.getProperty("rlvm.inductive.golden.dumpAll");
+        if (all != null) {
+            // every export asked about, e.g. to run the fixtures through the real launcher as well
+            Path dir = Path.of(all);
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(sha + ".ndjson"), ndjson, StandardCharsets.UTF_8);
+        }
         Verdict v = GOLDEN.get(sha);
         if (v != null) {
             return v;

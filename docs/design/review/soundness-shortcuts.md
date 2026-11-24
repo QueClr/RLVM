@@ -178,19 +178,193 @@ closed statement (the proof of `False` is one `Nat.noConfusion` / `absurd` away)
 | `bothrich` | the `rich` set | `congruence,skipargs` |
 | `bothall` | `all,lazyeval,same,match,joint,k2`, `-Drlvm.machine.elabAt=1` | `congruence,skipargs` |
 
-[[ATTACKS]]
+**Outcome of all of them: no export that the official checker rejects for a FALSE (underivable) claim is accepted
+under any configuration. No accept exists with the options off that the official checker does not give.**
+
+### 3.1 Hand-written attacks (`work/s2/gen/attacks.py`, `work/s2/attacks/`, 134 exports: 96 `-bad`, 38 `-true`)
+
+Judged under all nine configurations of the table (`work/s2/out/attacks-judged.tsv`, jar `ba557722c184`) and
+again under `skip`, `both`, `bothall`, `bothcap` on jar `54eeb7cc50dd` (`attacks-judged2.tsv`); `bothcap` = `both`
+with `-X machine.session-kib=1` (a session reset before nearly every declaration).
+
+| Group | Exports | What is attacked | Machine, every configuration | Official |
+|---|--:|---|---|---|
+| `lvl-*` | 17 bad, 2 true | the Prop mask and universe levels. `f.{u} : (A : Sort u) -> A -> Nat` as an axiom and as a definition with hint regular / abbrev / opaque; after `f.{0} True p1 = f.{0} True p2` (true; fills the mask cache at `u = 0`) the claim `f.{1} Nat 1 = f.{1} Nat 2`; the same under the theorem's own level parameter (`thm.{u} : forall A a b, f.{u} A a = f.{u} A b`, identity substitution), under a renamed parameter and `max u 0`; `Sort (imax v u)` with the parameters listed in the other order; a domain `True -> A` of sort `imax 0 u`; both instances in ONE declaration; `Box.{u} (A : Sort u) := (val : A)` through structure eta (`Box.mk.{1} Nat (succ b.val) = b`) and through constructor heads | bad: REJECT; true: ACCEPT | the same |
+| `rec-*`, `quot-*` | 5 bad, 1 true | stuck recursors and B1 on recursor / quotient heads: `Eq.rec.{1,1}` with different minor premises on an axiom `h : a = b` after a pair at `u = 0` where the minor is a proof; different indices; `And.rec`, `Nat.rec` with different minors; `Quot.lift.{1,1}` with different functions after a pair at `v = 0` (the function is a proof there) | bad: REJECT; true: ACCEPT | the same |
+| `unread-*` | 48 bad, 34 true | B4. The parameter occurs only in a minor premise of a recursor / as a let value / in a let body / as the argument of a beta redex / below a projection / under an inner lambda / in a binder domain; under-application and over-application; an alias type hiding the Pis; an abbrev and an opaque-hint definition (B1). de Bruijn arithmetic: definitions with 3, 63, 64, 65, 70, 130 parameters whose body is parameter `j` for `j` at every boundary (0, 1, 62 .. 69, 127 .. 129): the `-bad` twin changes exactly `j`, the `-true` twin changes every other parameter; nested binders below 66 unread parameters; a theorem head next to a data position; the `differ` rule (true and refutable variants) | bad: REJECT; true: ACCEPT | the same |
+| `prop-*` | 8 bad, 1 true (+ 1 declined) | what counts as a proposition: a domain that IS `Prop`; a Bool position after a proposition; data after a proof; a function type; over-application through a definition that unfolds to a Pi; a sort hidden behind a definition; 70 positions with data at 64 and 65; data at 63 between proofs; `@Eq.{0} True p1 p2 = @Eq.{0} True p3 p4` (true). `prop-mdata-domain-bad` is declined by the pipeline in every configuration, v0 included (mdata around a definition's lambdas; nothing to do with the options) | bad: REJECT (1 DECLINE); true: ACCEPT | the same (the declined one: reject) |
+| `etas-*` | 5 bad | the ETAS mask: the data field after two proof fields; a field of type `Prop` before its proof; a proof PARAMETER; structure eta below structure eta | REJECT | reject |
+| `cong-*` | 4 bad | B12 / B1 / B2 with data: one closure body under frames `[1]` and `[2]`; a lambda closure below a constant; frames whose slots are proofs of different propositions; a theorem head whose applications prove different propositions below a function that keeps the proposition | REJECT | reject |
+| `ctx-*` | 8 bad | section 2.1: an ill-typed proof argument that conversion would skip - in the statement, in the value (`Eq.refl (f 1 (pf 2))` for the statement `f 1 (pf 1) = f 1 (pf 1)`), in a lambda argument checked against an expected type (B9), in an unread position of a definition, in a let value, in the type of a definition, in a later declaration after six warm ones with the well-typed twin of the node, on one side of a data claim | REJECT (by inference) | reject |
+
+The same 134 with every Nat literal written `Nat.add k 0` (`work/s2/attacks-dat/`, `S2_DAT=1`), so that the quick
+refutation of pass A cannot answer before the plan in `both` (with literal arguments the plan paths of B4 were
+reached under `skip` only): [[DAT]]
+
+### 3.2 Second batch (`work/s2/gen/attacks2.py`, `work/s2/attacks2/`, 11 exports)
+
+[[ATT2]]
+
+### 3.3 Random exports (`work/s2/gen/fuzz.py`, seeds 11 - 14, `work/s2/attacks/fuzz/`, 498 exports)
+
+One random constant per export - an axiom (125), a definition with hint regular (151) / abbrev (56) / opaque
+(63), or the constructor of a random structure (103) - over a random telescope of 2 to 8 positions drawn from:
+a sort `Sort u_k` (level parameters shared or not), an element of an earlier sort (a proof when that sort is
+instantiated at 0, a Nat or Bool at 1), a Nat, a proof of `Q n` for an earlier Nat, a proposition, a proof of an
+earlier proposition, a proof of `True`, a member of an axiom family `Fam n`, a function, a proof of a Pi into
+Prop. A definition's body reads a random subset through axioms into Nat, each read wrapped at random in a let, a
+beta redex, an inner lambda or a `Nat.rec`. Each export makes 4 to 12 TRUE claims (the sides differ in proofs,
+in the representation of equal data, and in unread parameters, at several level vectors); a `-bad` export ends
+with one FALSE claim that changes the value of one data position that matters. The official verdict was the
+predicted one for all 498.
+
+| | exports | `v0` | `skip` | `both` | `skip0` | official |
+|---|--:|---|---|---|---|---|
+| `-bad` | 362 | 362 R | 362 R | 362 R | 362 R | 362 reject |
+| `-true` | 136 | 136 A | 136 A | 136 A | 136 A | 136 accept |
+
+### 3.4 Do the attacks have teeth? Seeded faults (`work/s2/mcopy/`, `work/s2/dist3`, `-Ds2.bug=N`)
+
+A private copy of the module with one fault at a time, `skip` configuration, on the `-bad` exports of 3.1, of
+half of 3.3 and of package S's `facts-*` / `mask-*` ([[SEEDN]] exports). "Caught" = at least one false claim is
+ACCEPTED by the faulty build (so the suite would have shown the fault).
+
+[[SEEDED]]
+
+### 3.5 What the options remove: a seeded fault of INFERENCE
+
+Fault 10 of the private copy makes `Infer.twD` skip the comparison of an argument's type with its domain (an
+inference bug). `ctx-wrong-proof-in-value-bad` - statement `f 1 (pf 1) = f 1 (pf 1)`, value
+`Eq.refl (f 1 (pf 2))`, `pf 2 : Q 2` where `Q 1` is required - is then still REJECTED by v0, because the official
+comparison of the two proof arguments compares their types (`Q 2` against `Q 1`), and ACCEPTED under `skip` and
+`both`, which do not look at a proof position. With the options, conversion is no longer a second check of what
+inference let through.
+
+### 3.6 Real corpora under `shortcheck` (`work/s2/corpus-shortcheck.sh`, `both`, one worker)
+
+Every T that skipped a position (CARGS, ETAS) or came from B1 / B12 is re-derived at once by the complete
+official procedure with all switches off; a T that the complete procedure does not find is an audit failure
+(`E_AUDIT`, the unit is declined). A wrong mask would show here as soon as a comparison that the official
+procedure answers F is answered T (failed same-head comparisons of unequal data are frequent in these files).
+
+[[CORPORA]]
+
+### 3.7 Targeted mutants of a Mathlib slice (`work/s2/gen/mutate.py` = S's mutator, kinds `SIBLING_ARG`, `LIT_SUCC_NE`, `LEVEL_ARG`)
+
+[[MUTANTS]]
 
 ## 4. The known exports that the options accept and the official checker rejects
 
-[[KNOWN]]
+Notation: `I = And.intro True True True.intro True.intro`; `h`, `h2` axioms of `And True True`;
+`R x = And.rec (motive := fun _ => Nat) (fun _ _ => 5) x`; PI = proof irrelevance; "cong" = congruence of
+application / of substitution. Verdicts of this review's run (jar `54eeb7cc50dd`, `work/s2/out/known-judged.tsv`):
+A = accepted, R = rejected; the official checker rejects every row.
+
+| Export | Claim | `skip` | `cong` | `both` | Derivation in the theory | Class |
+|---|---|:-:|:-:|:-:|---|---|
+| `probe-b1-rec-proof-major-bad`, `-flipped-bad` (S-F1; pinned by `M4OfficialTest`) | `R I = R h` | R | A | A | `h = I` by PI (both inhabit the proposition `And True True`); cong under `And.rec .. _`. (Then `R I = 5` by iota, beta: the official procedure reduces the left side and cannot move the right) | TRUE; official incompleteness |
+| `probe-b12-closure-proof-slot-bad` (S-F1; pinned) | `(fun x => g (R x)) I = (fun x => g (R x)) h` | R | A | A | beta on both sides, then the row above under `g` | TRUE |
+| `probe-b12-let-proof-slot-bad` | `(let x := I; g (R x)) = (let x := h; g (R x))` | R | A | A | zeta, then as above | TRUE |
+| `probe-b12-lam-closure-proof-slot-bad` | `(fun x => g (fun n => R x)) I = (..) h` | R | A | A | beta; cong under the lambda (xi) and `g`; `R I = R h` | TRUE |
+| `probe-b1-abbrev-proof-arg` | `F I = F h`, `F := fun x => R x` an abbrev | R | A | A | `I = h` by PI, cong under `F` (or delta on both sides and the first row). Officially an abbrev head is unfolded without comparing arguments | TRUE |
+| `probe-b1-theorem-head` | the same, `F` with hint opaque | R | A | A | the same | TRUE |
+| `probe-b1-rec-under-ctor-bad` | `Nat.succ (R I) = Nat.succ (R h)` | R | A | A | the first row under `Nat.succ` | TRUE |
+| `probe-b1-rec-under-axiom-bad` | `g (R I) = g (R h)` | R | A | A | the first row under `g` | TRUE |
+| `facts-agreement-noncongruent-app-bad` (S-F2; pinned) | `w I p1 = w h p2`, `w : (x : And True True) -> Q (R x) -> Nat`, `p1 : Q (R I)`, `p2 : Q (R h)` | A | A | A | `I = h` by PI; so `Q (R I) = Q (R h)` by cong; `p1`, `p2` are then proofs of one proposition: `p1 = p2` by PI; cong under `w` | TRUE |
+| `facts-agreement-noncongruent-samedef-bad` | the same, `w` a regular definition | A | A | A | the same (or delta first) | TRUE |
+| `facts-etas-prop-mask-noncongruent-bad` | `S.mk I p1 s.3 = s`, `s` an axiom of the structure | A | A | A | structure eta: `s = S.mk s.1 s.2 s.3`; `s.1 = I` by PI; `s.2 : Q (R s.1) = Q (R I)`, so `s.2 = p1` by PI; cong under `S.mk` | TRUE |
+| `facts-unread-noncongruent-bad` | `d 0 I = d 1 h`, `d u x := R x` | A | R | R | delta, beta: `d 0 I = R I`, `d 1 h = R h`; the first row. (`both` rejects only because the quick refutation of pass A answers F on `0` / `1` before the plan; the equation is the same) | TRUE |
+| `open-flag-closed-bad` (package S, batch 8; NOT in the list of S-F1 / S-F2, it was written after M4's fix) | `Nat.add (G I) 0 = Nat.add (G h) 0`, `G x := And.rec (fun _ _ => 0) x` regular, both sides closed | R | A | A | `I = h` by PI, cong under `G` and `Nat.add _ 0`. Officially both sides are closed, so the left side is folded to `0` before any same-head comparison, and `0` against the stuck right side is false; B1 compares the arguments of the two `Nat.add` first | TRUE |
+| `acc-rec-intro-vs-axiom` (new, `work/s2/attacks2/`) | `Acc.rec F (Acc.intro true k) = Acc.rec F h`, `h` an axiom of `Acc R true` | [[A1]] | [[A2]] | [[A3]] | `h = Acc.intro true k` by PI; cong under `Acc.rec F _` | TRUE |
+
+**The classification is checked by the official checker itself** (`work/s2/gen/certify.py`, `work/s2/certify/`,
+15 exports, one per row above, both directions of the first): each proves the SAME statement not by `Eq.refl`
+but by the derivation of the table written as a term - `Eq.rec` (congruence) over `Eq.refl x : x = y` for the two
+proofs `x`, `y`, an equation the official checker accepts by proof irrelevance; for the agreement and structure
+eta rows the motive quantifies over the dependent proof (`fun x _ => forall (p : Q (R x)), w I p1 = w x p`).
+**The official checker accepts all 15.** So every statement that the options accept against the official verdict
+is a theorem that the official checker proves once it is given the congruence step explicitly: the official
+`is_def_eq` fails to FIND these equations (it reduces one side before it compares, and it does not compare the
+arguments of an abbrev, a recursor or a closure); none of them is false.
+
+[[KNOWNCOUNT]]
+
+Rejected by the options although TRUE in the theory (so the options are not complete for the theory either, and
+do not need to be): `nontransitive-regular-def-bad`, `nontransitive-same-decl-bad` (`d h = 5`: delta, the first
+row, iota; nothing in the machine closes pairs transitively), the arena's `125_accRecNoEta` and `101_ruleKAcc`
+(`Acc.rec (fun _ _ _ => p) h = p` for a variable `h`: TRUE by PI against `Acc.intro` + iota; the arena lists them
+as `bad`; no shortcut synthesises a constructor form from a proof, every configuration rejects), and
+`acc-rec-no-eta-axiom` of this review.
+
+Not in this class (false or not derivable; rejected by every configuration): the other [[NREJ]] officially
+rejected exports of package S and of the arena, among them the eager-reduction rows (declined by the machine by
+rule M6-F26, rejected by the reference engine) and `100_ruleKbad` (`Eq.rec a (h : true = false) = a`: not
+derivable, `h` is no `Eq.refl`).
 
 ## 5. The leaders
 
-[[LEADERS]]
+Read: `refs/gruszka/src/tc.rs` (`spines_defeq_skip` 8573, `unused_args` 8603, `prop_positions` / `surely_prop`
+8641-8721, `defeq_app` 8770, `try_eta_struct` 8823, `closure_congr` 6792, the same-head step of lazy delta 8180,
+`race_k` 7831, `probe_args` 8414), `refs/nano-lean/src/value_checker/conv.rs` (`def_eq_core` 246, `relevant` 389,
+`prop_type` 433, `args_eq` 455, `probe_args` 359, `def_eq_app` 587, `eta_struct` 628, `same` 107). Both are the
+same family of shortcuts (gruszka names its source: Pestka's ProofArgsSkipped, unusedArgs, EtaProofFieldsSkipped).
+
+| | machine (`skipargs`, `congruence`) | gruszka | nano-lean |
+|---|---|---|---|
+| "position is a proof" | INFER (infer-only) of the domain under the telescope returns a SORT record; level instantiated at the head's levels; exact always-zero test | syntactic: after the domain's own Pis, a variable or constant applied to as many arguments as its type has Pis, that type ending in a sort; level instantiated at the head's levels (`zeroish`) | syntactic, the same shape; the sort must be always zero AS WRITTEN (zero, `max`, `imax _ 0`): no instantiation of universe parameters (`Sort u` at `u := 0` is compared) |
+| proof position whose domain mentions a skipped, different unread position | compared (`differ` rule) | skipped | skipped |
+| unread positions | definitions and theorems, spine >= lamArity, superset mask up to 65,535 lambdas, first 64 positions | definitions only (not theorems), at most 64 lambdas, spine >= lambdas | definitions and theorems, also for a spine shorter than the lambdas (the rest of the lambdas counts as body) |
+| where the masks are used | c8 (proof positions), same-head step of lazy delta for a regular definition, B1 | `defeq_app` (proof positions), same-head step for a regular definition, budgeted probes (`race_k`, `probe_args`, refutation) | `def_eq_app`, `probe_args` before `whnf_core` for every unfoldable same head (budget) |
+| same-head probe on recursors / `Quot.lift` | yes (B1, NOTES-M4 D19) | no (their closure walk covers the measured case) | no |
+| structure eta: proof fields | skipped | skipped | compared (proof irrelevance) |
+| closure congruence | slots by the complete CONV (B12) | slots by identity and by pairs ALREADY found equal (`same_val`), never a comparison of its own | structural identity only (`same`, fuel 512) |
+| proofs by type before `whnf_core` | B2, when the value is already known to be a proof | no | yes, always (`proof_irrel` precedes `whnf_core`) |
+
+Precautions the machine takes and the leaders do not: the `differ` rule; exact level instantiation with a
+semantic sort (nano-lean is MORE conservative here: no instantiation). Precautions the leaders take and the
+machine does not: none that bears on soundness. gruszka restricts unread positions to definitions and to 64
+lambdas, nano-lean compares proof fields in structure eta and never compares closure slots by conversion: all
+three are restrictions of completeness / cost, not conditions of the equations. I could not construct a false
+equation from the absence of the `differ` rule (section 2.2: the two proofs then have types that the consumer's
+side forces to agree, or the pair is never asked), so I do not claim the leaders are unsound there; the machine's
+rule is the more careful one and costs a mask intersection.
+
+Run (Docker, no network, the arena's run lines; `work/s2/leaders.sh`, `work/s2/out/leaders.tsv`):
+
+[[LEADERSRUN]]
 
 ## 6. Not established
 
-[[NOT]]
+- **No proof.** The verdict rests on reading the code, on the argument of section 2 and on the attacks; nothing is
+  mechanised. The induction of 2.2 uses the standard meta-theory of the official algorithm (subject reduction,
+  uniqueness of types up to conversion, soundness of the official rules), which is itself not mechanised for
+  all of Lean 4.
+- **The precondition of 2.1** (every comparison is between well-typed terms) was established by reading the call
+  sites of `Conv.conv` / `Cargs.cargs` and by the group X attacks, not exhaustively. Not read line by line: the
+  K1 code objects (`Code`, `Elab`, case trees, BODY / RULE / LEAF blocks), `Rules` (`k2`), `Tier` (`t2`),
+  `Same` (the `same` switch; it was ON in `rich` / `bothrich` / `bothall` runs, but it is M4's official-exact
+  claim and S's to attack). They reduce and identify; a fault there is a fault of the machine without the options.
+- **Inference is now the only line of defence** for proof arguments and unread arguments (section 0, point 2).
+  How likely a fault of INFER is that the type comparison of proof irrelevance would have caught, I cannot say;
+  one seeded example shows the mechanism, no real one is known.
+- **Parallel workers**: the publication of fact records (`FactStore`: one compare-and-set per row, immutable
+  records) was reviewed by reading; one configuration with four workers ran the 134 hand-written attacks only. No
+  export targets a race.
+- **Native image**: every run is the JVM launcher.
+- **Scale**: `shortcheck` ran on the slices listed in 3.6, not on all of Mathlib, Std or Init (Init: M4, before
+  D27, NOTES-M4). The whole-Mathlib runs of P8 show that every unit is accepted, which says nothing about
+  soundness.
+- **Shapes without a hand-written attack**: mutual and nested inductive types, string literals (`String` is a
+  structure with a proof field in this toolchain: the ETAS mask applies to it), `Nat` literal views. They occur in
+  the Mathlib slices of 3.6 / 3.7 only.
+- **Positions from 64 on** are always compared; nothing was skipped there to attack. Telescopes above 65,535
+  binders get no facts (not exercised).
+- **The leaders** were run on the hostile exports only as black boxes; their sources were read for the shortcuts,
+  not audited.
+- **Universe levels** (finding S-F3 of package S, the official incomplete relation against the complete one) are
+  outside this review; every run used the default (official) relation.
+- **Eager reduction**: a declaration that enters it is declined by the machine in every configuration, with the
+  options as without; the options were therefore never exercised under ER.
 
 ## 7. Reproduction
 

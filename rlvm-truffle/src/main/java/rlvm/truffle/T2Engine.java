@@ -101,8 +101,8 @@ final class T2Engine {
     final Settings settings;
     /** The machine's heat accounting, or null in count mode ({@code Settings.count}): nothing of the machine is switched on. */
     final Tier.Heat heat;
-    /** The machine engine (block reader). */
-    final Object mengine;
+    /** The machine engine (block reader); weak: this object is the value of a map keyed weakly by it. */
+    private final java.lang.ref.WeakReference<Object> mengine;
     /** Count mode: entries per block on the stepper path, summed over the machines (flushed in batches of {@link #BATCH}). */
     private int[] total = new int[256];
     static final int BATCH = 64;
@@ -127,20 +127,60 @@ final class T2Engine {
     private T2Engine(Settings settings, Tier.Heat heat, Object mengine) {
         this.settings = settings;
         this.heat = heat;
-        this.mengine = mengine;
+        this.mengine = new java.lang.ref.WeakReference<>(mengine);
     }
 
     /** A copy of the words of block {@code blk}, or null. */
     int[] block(int blk) {
-        return T2Bridge.blockWords(mengine, blk);
+        Object e = mengine.get();
+        return e == null ? null : T2Bridge.blockWords(e, blk);
     }
 
     String describe(int blk) {
-        return T2Bridge.describeBlock(mengine, blk);
+        Object e = mengine.get();
+        return e == null ? "block " + blk + ": engine gone" : T2Bridge.describeBlock(e, blk);
     }
 
     int blockCount() {
-        return T2Bridge.blockCount(mengine);
+        Object e = mengine.get();
+        return e == null ? 0 : T2Bridge.blockCount(e);
+    }
+
+    /**
+     * The machine engine of this tier is closed (tools and tests that run several engines in one process): nothing
+     * more is promoted, and what is queued for compilation is cancelled, so that the compiler threads do not work
+     * on blocks nobody will run while the next engine waits for its own.
+     */
+    void retire() {
+        ArrayList<Rec> pending = new ArrayList<>();
+        synchronized (this) {
+            if (disabled == null) {
+                disabled = "retired";
+            }
+            for (Rec r : recs) {
+                if (r.pendingRoot != null) {
+                    pending.add(r);
+                }
+            }
+        }
+        for (Rec r : pending) {
+            BlockRoot root = r.pendingRoot;
+            if (root != null) {
+                try {
+                    OptimizedCallTarget t = root.target;
+                    if (t != null) {
+                        t.cancelCompilation("the engine was retired");
+                    }
+                } catch (Throwable t) {
+                    // the compilation finishes or fails by itself
+                }
+                failed(r, "retired", 0);
+            }
+        }
+    }
+
+    boolean retired() {
+        return disabled != null;
     }
 
     /** Entries of {@code blk} that the tier knows of: the heat accounting's, or in count mode the stepper-path count. */

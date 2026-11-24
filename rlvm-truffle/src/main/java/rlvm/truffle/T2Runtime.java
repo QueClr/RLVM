@@ -139,6 +139,10 @@ final class T2Runtime {
     private static void promote(Request r) {
         T2Engine eng = r.engine;
         Settings s = eng.settings;
+        if (eng.retired()) {
+            eng.failed(r.rec, "the engine was retired or disabled before the block was built", 0);
+            return;
+        }
         if (!ensureEngine(s)) {
             eng.failed(r.rec, broken, 0);
             eng.disable(broken);
