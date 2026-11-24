@@ -655,101 +655,89 @@ class M6FacadeTest {
     }
 
     /**
-     * NOTES-M6 F26 (arena test bad/bugs/rec-of-subst-prop): eager reduction changes what CONV answers, and the
-     * official kernel's caches live for one declaration. A declaration that enters ER in a session that holds
-     * earlier declarations' results is checked AGAIN in a fresh session (the first run's outcome is
-     * discarded), and whatever a declaration derived with ER in play is forgotten when it ends.
+     * NOTES-M6 F26 (findings M6-F26, S-F4, S-F5; arena test bad/bugs/rec-of-subst-prop): a declaration that
+     * enters eager reduction is not checked by the machine. Whatever the DECL driver answers, the unit is
+     * DECLINED (E_LIMIT, UNSUPPORTED_INPUT), the session forgets everything, the driver's cold retry is
+     * answered at once, and a judgment that ticks after the mode was entered is cut by a fatal fault.
      */
     @Test
-    void eagerReductionNeverMeetsAnotherDeclarationsResults() {
+    void aDeclarationThatEntersEagerReductionIsDeclined() {
         Fixture f = Fixture.prelude();
-        for (int i = 1; i <= 5; i++) {
+        for (int i = 1; i <= 4; i++) {
             f.def("er" + i, "Type", "Prop", Fixture.regular(1));
         }
         f.seal();
-        f.switches("warm");
-        MachineSession s = f.session;
         int eager = f.cid("er2");
-        int eagerToo = f.cid("er4");
-        int[] runs = new int[1];
-        int[] seen = new int[1];
-        int[] firstRunCode = {MachineErrors.E_NONE};
-        s.driver = (m, c) -> {
-            runs[0]++;
-            seen[0] = m.vp - m.vbase;
-            sort(m, 500 + c);
-            if (c == eager || c == eagerToo) {
-                int saved = m.ER;
-                m.enterER();
-                assertEquals(1, m.ER);
-                boolean tainted = m.erTainted;
-                m.ER = saved;
-                if (tainted) {
-                    return firstRunCode[0]; // whatever the tainted run answers is discarded
-                }
+        // whatever the driver answers for a declaration that entered ER - accept, a kernel error, a limit, or a
+        // judgment cut at the first tick after the mode was entered (-1) -, the unit is declined
+        for (String switches : new String[] {"", "warm", "warm,gated,expect"}) {
+            for (int answer : new int[] {MachineErrors.E_NONE, MachineErrors.E_APP_MISMATCH, MachineErrors.E_MEM, -1}) {
+                String what = "[" + switches + "], driver answer " + (answer < 0 ? "a tick after enterER" : MachineErrors.name(answer));
+                MachineSession s = (MachineSession) f.engine.newSession(f.ctx); // (a session remembers the unit it declined last)
+                s.m.sw = Debug.parseSwitches(switches);
+                int[] runs = new int[1];
+                int[] seen = new int[1];
+                boolean[] cut = new boolean[1];
+                s.driver = (m, c) -> {
+                    runs[0]++;
+                    seen[0] = m.vp - m.vbase;
+                    sort(m, 500 + c);
+                    assertTrue(m.erDeclines, "the facade's rule is in force while the DECL driver runs");
+                    if (c != eager) {
+                        return MachineErrors.E_NONE;
+                    }
+                    int saved = m.ER;
+                    m.enterER();
+                    assertEquals(1, m.ER);
+                    assertTrue(m.erSeen);
+                    m.ER = saved;
+                    if (answer >= 0) {
+                        return answer;
+                    }
+                    // the TICK line of a judgment: the first tick after the mode was entered takes the slow path
+                    if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+                        cut[0] = m.sig == Op.FATAL && m.err == MachineErrors.E_LIMIT;
+                        return m.err;
+                    }
+                    throw new AssertionError("a judgment ticked under eager reduction and went on");
+                };
+                assertEquals(Outcome.ACCEPT, s.check(f.cid("er1"), Budget.warm()), what);
+                long ticks = s.steps();
+                assertEquals(Outcome.DECLINE, s.check(eager, Budget.warm()), what);
+                assertEquals(Reason.UNSUPPORTED_INPUT, s.lastReason(), what);
+                assertEquals(MachineErrors.E_LIMIT, s.lastCode(), what);
+                assertTrue(s.lastMessage().contains("eager reduction"), s.lastMessage());
+                assertEquals(2, runs[0], what);
+                assertEquals(answer < 0, cut[0], what + ": the tick after enterER raises fault(E_LIMIT)");
+                assertEquals(answer < 0 ? ticks + 1 : ticks, s.steps(), what + ": entering the mode moves the poll point, not the tick count");
+                assertTrue(s.m.pristine(), what + ": nothing of that declaration is kept");
+                assertFalse(s.m.erDeclines, "the rule is the facade's: a bare machine runs ER (tests of the judgments)");
+                // the driver's cold retry of the same unit: declined at once, the DECL driver is not run again
+                assertEquals(Outcome.DECLINE, s.check(eager, Budget.cold(BIG)), what);
+                assertEquals(2, runs[0], what);
+                assertEquals(Reason.UNSUPPORTED_INPUT, s.lastReason(), what);
+                assertEquals(2, s.eagerDeclines, what);
+                assertEquals(2, s.declined, what);
+                // other declarations are not affected, and the next one starts in an empty session
+                assertEquals(Outcome.ACCEPT, s.check(f.cid("er3"), Budget.warm()), what);
+                assertEquals(0, seen[0], what);
+                assertFalse(s.m.erSeen, what);
+                assertEquals(Outcome.ACCEPT, s.check(f.cid("er4"), Budget.warm()), what);
+                assertEquals(switches.isEmpty() ? 0 : 1, seen[0], what);
+                s.close();
             }
-            return MachineErrors.E_NONE;
-        };
-        s.reset();
-        assertEquals(Outcome.ACCEPT, s.check(f.cid("er1"), Budget.warm()));
-        assertEquals(1, runs[0]);
-        // er2 enters ER while the session holds er1's record: run twice, the second time cold
-        for (int code : new int[] {MachineErrors.E_NONE, MachineErrors.E_APP_MISMATCH, MachineErrors.E_MEM}) {
-            if (code != MachineErrors.E_NONE) {
-                s.reset();
-                assertEquals(Outcome.ACCEPT, s.check(f.cid("er1"), Budget.warm()));
-            }
-            firstRunCode[0] = code;
-            runs[0] = 0;
-            long restarts = s.erRestarts;
-            assertEquals(Outcome.ACCEPT, s.check(eager, Budget.warm()), "the tainted run's outcome (" + MachineErrors.name(code) + ") is not the verdict");
-            assertEquals(2, runs[0]);
-            assertEquals(0, seen[0], "the second run started in an empty session");
-            assertEquals(restarts + 1, s.erRestarts);
-            assertTrue(f.m.pristine(), "nothing a declaration derived with ER in play survives it");
-            assertFalse(f.m.erTainted);
         }
-        // the next declaration starts cold
-        runs[0] = 0;
-        assertEquals(Outcome.ACCEPT, s.check(f.cid("er3"), Budget.warm()));
-        assertEquals(1, runs[0]);
-        assertEquals(0, seen[0]);
-        // er4 enters ER as well, but now the session holds er3's record: again twice
-        runs[0] = 0;
-        assertEquals(Outcome.ACCEPT, s.check(eagerToo, Budget.warm()));
-        assertEquals(2, runs[0]);
-        assertTrue(f.m.pristine());
-        // in an EMPTY session one run is enough (v0 and strict mode are always in this case), and the session still ends
-        s.reset();
-        runs[0] = 0;
-        long restarts = s.erRestarts;
-        assertEquals(Outcome.ACCEPT, s.check(eager, Budget.warm()));
-        assertEquals(1, runs[0]);
-        assertEquals(restarts, s.erRestarts);
-        assertTrue(f.m.pristine());
-        // a declaration without ER keeps the session warm
-        assertEquals(Outcome.ACCEPT, s.check(f.cid("er3"), Budget.warm()));
-        assertEquals(Outcome.ACCEPT, s.check(f.cid("er5"), Budget.warm()));
-        assertEquals(1, seen[0]);
-        assertFalse(f.m.erSeen);
-        // v0: never a second run
-        Fixture g = Fixture.prelude();
-        g.def("er1", "Type", "Prop", Fixture.regular(1));
-        g.def("er2", "Type", "Prop", Fixture.regular(1));
-        g.seal();
-        int[] v0runs = new int[1];
-        g.session.driver = (m, c) -> {
-            v0runs[0]++;
-            sort(m, 7);
-            m.enterER();
-            m.ER = 0;
-            assertFalse(m.erTainted);
-            return MachineErrors.E_NONE;
-        };
-        assertEquals(Outcome.ACCEPT, g.session.check(g.cid("er1"), Budget.warm()));
-        assertEquals(Outcome.ACCEPT, g.session.check(g.cid("er2"), Budget.warm()));
-        assertEquals(2, v0runs[0]);
-        assertEquals(0, g.session.erRestarts);
+        // a bare machine (no facade): the mode is entered and nothing is cut
+        Machine bare = new Machine(Machine.Sizes.tiny());
+        bare.beginDecl(1, 0, 1 << 20, Long.MAX_VALUE);
+        long fuel = bare.fuel;
+        bare.enterER();
+        assertTrue(bare.erSeen && bare.ER == 1);
+        assertEquals(fuel, bare.fuel);
+        assertEquals(0, bare.poll());
+        bare.ER = 0;
+        bare.beginDecl(2, 1, 1 << 20, Long.MAX_VALUE);
+        assertFalse(bare.erSeen, "a property of ONE declaration");
     }
 
     @Test

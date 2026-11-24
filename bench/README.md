@@ -1035,3 +1035,24 @@ bench/baselines/render-tables.py docs/research/12-baselines.md bench/README.md
   on init and std and 16 % apart on mathlib (`docs/research/12-baselines.md`).
 - `baselines/big.sh` stops its container when it gets SIGINT or SIGTERM; a
   measurement in progress is lost, the records already in `runs.jsonl` stay.
+
+## Timing on a busy host: `bench/quiet.py` and `bench/slot.sh`
+
+The team's builds and tests oversubscribe this host several times, so a wall-clock number is evidence
+only when it was taken through `bench/quiet.py -- CMD...`:
+
+- one measurement at a time on the host (lock `work/perf-history/.quiet.lock`);
+- while `CMD` runs, every other process of the session's cgroup and every other container is moved off
+  the measurement cores (default: the 8 performance cores of `arena-docker.sh --arena-limits`,
+  5-9,15-17 here) and put back afterwards; nothing is paused;
+- `CMD` starts with its affinity on those cores; a container it starts must be pinned there itself
+  (`--arena-limits` is);
+- every window is logged in `work/perf-history/quiet.log` (cores, duration, load before, how many
+  threads were moved, containers that were pinned on the same cores during the run).
+
+`bench/quiet.py --status` shows the cores; `--restore` undoes a herd left behind by a killed wrapper.
+Memory bandwidth and the shared cache are still shared with the other 12 cores: compare runs taken in
+the same window where you can.
+
+`bench/slot.sh [-n SLOTS] [-c CLASS] -- CMD...` is the host-wide limiter for heavy jobs that are not
+timings (8 slots; native-image builds: `-c ni -n 2`).

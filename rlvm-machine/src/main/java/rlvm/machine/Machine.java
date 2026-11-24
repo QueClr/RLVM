@@ -306,22 +306,31 @@ public final class Machine {
      */
     int ER;
     /**
-     * True once a comparison of the current declaration ran under eager reduction ({@link #enterER()}).
-     * Eager reduction changes what CONV answers (it lifts the hasFVar guards of the Bool.true test and of the
-     * Nat folding: a pair can be T plain and F under ER, and the reverse), and the official kernel's caches
-     * live for ONE declaration; so what a declaration derived may not meet a comparison of another
-     * declaration in the other mode (arena test bad/bugs/rec-of-subst-prop; NOTES-M6 F26). The facade
-     * ({@code MachineSession.check}) therefore ends the session after a declaration with {@code erSeen}.
+     * True once the current declaration entered eager reduction ({@link #enterER()}).
+     *
+     * <p>Why it matters (NOTES-M6 F26; findings M6-F26, S-F4, S-F5 of 2026-11-24; arena test
+     * bad/bugs/rec-of-subst-prop). Eager reduction is the one MODE of the official {@code is_def_eq}: it lifts
+     * the hasFVar guards of the Bool.true test and of the Nat folding, so one pair of terms can be T in plain
+     * mode and F under ER, and the reverse. The official kernel answers a pair from its success cache
+     * whatever the mode, but that cache lives for one declaration and is keyed by terms whose free variables
+     * are unique per binder. The machine's pair table and memo words are keyed by values with CANONICAL
+     * variables and (in warm sessions) outlive the declaration: a POS written in plain mode in one binder
+     * scope or declaration was read under ER in another one, where the official kernel computes F. No cheap
+     * rule reproduces the official cache exactly, so the machine does not check such a declaration at all:
+     * under {@link #erDeclines} it is DECLINED (the reference engine decides it), and nothing it derived is
+     * kept.
      */
     boolean erSeen;
     /**
-     * True if eager reduction was entered while the session still held what EARLIER declarations derived
-     * (pair entries and memo words computed in plain mode): the facade discards the outcome of this run
-     * and checks the declaration again in a fresh session.
+     * The facade's rule is in force (set by {@code MachineSession} around the DECL driver; false in a bare
+     * machine, so that the tests of the judgments can still run a comparison under ER): entering eager
+     * reduction ends the declaration with {@code fault(E_LIMIT)} at the next tick, and the facade declines
+     * the unit whatever the driver returned.
      */
-    boolean erTainted;
-    /** The session held records, runs or pair entries when the current declaration began. */
-    private boolean warmAtDecl;
+    boolean erDeclines;
+    /** {@code limitDetail} of a declaration that was declined because it entered eager reduction. */
+    static final String ER_DETAIL = "eager reduction (an argument 'eagerReduce _ _'): conversion under it depends on the mode"
+            + " and on the official per-declaration caches, which the machine's tables do not reproduce; the reference engine checks this declaration";
     /** Code ({@code rlvm.api.MachineErrors}) of the failure whose signal is propagating; 0 = none. */
     int err;
     /**
@@ -1012,6 +1021,12 @@ public final class Machine {
      * @return true if the step must return {@link #sig}
      */
     boolean tickSlow() {
+        if (erSeen && erDeclines) {
+            limitDetail = ER_DETAIL;
+            err = MachineErrors.E_LIMIT;
+            sig = FATAL;
+            return true;
+        }
         if (fuel < 0) {
             err = MachineErrors.E_STEPS;
             sig = ABORT;
@@ -1051,6 +1066,10 @@ public final class Machine {
     /** The poll of ISA 1.4 / 14.4: 0, or the code of the fatal fault to raise. */
     int poll() {
         polls++;
+        if (erSeen && erDeclines) {
+            limitDetail = ER_DETAIL;
+            return MachineErrors.E_LIMIT;
+        }
         if (signals.firstFailure() < unit) {
             return MachineErrors.E_CANCEL;
         }
@@ -1068,14 +1087,21 @@ public final class Machine {
     /**
      * Enters eager-reduce mode: {@code ER = 1}, for the comparison of the type of an {@code eagerReduce _ _}
      * argument with its domain (R02 6.5, 8.9). The caller saves {@link #ER} before and assigns the saved
-     * value back afterwards. EVERY place that sets ER to 1 goes through this method: it is how the facade
-     * learns that the declaration used the mode ({@link #erSeen}, {@link #erTainted}).
+     * value back afterwards. EVERY place that sets ER to 1 goes through this method ({@code M6GuardTest}).
+     * Under {@link #erDeclines} the declaration ends here: the next TICK takes its slow path, which raises
+     * {@code fault(E_LIMIT)} (fatal: no TRY turns it into U); a comparison that is answered without a tick
+     * returns normally, and the facade declines the unit when the driver returns.
      */
     void enterER() {
         ER = 1;
         if (!erSeen) {
             erSeen = true;
-            erTainted = warmAtDecl;
+            if (erDeclines) {
+                // the next (--fuel & POLL_MASK) == POLL_MASK; ticks() = tickBase - fuel is unchanged
+                long f = fuel & ~Op.POLL_MASK;
+                tickBase -= fuel - f;
+                fuel = f;
+            }
         }
     }
 
@@ -1669,9 +1695,7 @@ public final class Machine {
      * stamp. {@code gen} is advanced by the caller (M5 / M6) according to ISA 5.3.
      */
     void beginDecl(int rank, int unitIndex, long maxSteps, long maxBytes) {
-        warmAtDecl = !pristine();
         erSeen = false;
-        erTainted = false;
         long done = ticks();
         fuel = maxSteps > Op.FUEL_UNLIMITED || maxSteps < 0 ? Op.FUEL_UNLIMITED : maxSteps;
         tickBase = done + fuel;

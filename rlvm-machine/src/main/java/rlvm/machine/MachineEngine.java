@@ -114,7 +114,7 @@ public final class MachineEngine implements Engine {
     private java.io.Writer declinesOut;
     private boolean declinesFailed;
     private long statCapResets;
-    private long statErRestarts;
+    private long statEagerDeclines;
     private long statAllocGrows;
     private long statAllocGrowBytes;
     private long statAllocResets;
@@ -209,7 +209,8 @@ public final class MachineEngine implements Engine {
             sink.put("machine.resets", statResets);
             sink.put("machine.sessionCapBytes", sessionCapBytes);
             sink.put("machine.capResets", statCapResets);
-            sink.put("machine.erRestarts", statErRestarts);
+            // declines BY DESIGN: the declaration entered eager reduction (Machine.erSeen); part of machine.declined
+            sink.put("machine.eagerDeclines", statEagerDeclines);
             // session arrays allocated after the machine was created: by growth (doublings) and by resets (NOTES-M6 F25)
             sink.put("machine.alloc.grows", statAllocGrows);
             sink.put("machine.alloc.growBytes", statAllocGrowBytes);
@@ -316,7 +317,7 @@ public final class MachineEngine implements Engine {
         statTicks += m.ticks();
         statResets += m.resets;
         statCapResets += s.capResets;
-        statErRestarts += s.erRestarts;
+        statEagerDeclines += s.eagerDeclines;
         statAllocGrows += m.allocGrows;
         statAllocGrowBytes += m.allocGrowBytes;
         statAllocResets += m.allocResets;

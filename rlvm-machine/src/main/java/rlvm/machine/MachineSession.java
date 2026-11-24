@@ -35,6 +35,11 @@ import rlvm.store.DeclTable;
  *       memory account, so the machine is at its best cost under ANY cap of the driver. A reset of the
  *       machine alone is always legal: no machine value survives it, and the worker context's overlays
  *       (which the driver resets with {@code Session.reset()}) hold nothing that refers to the machine.
+ *   <li><b>eager reduction</b> (every regime; NOTES-M6 F26): a declaration that enters eager reduction (an
+ *       argument {@code eagerReduce _ _}) is DECLINED with {@code E_LIMIT} / {@code UNSUPPORTED_INPUT},
+ *       whatever the DECL driver answered, and the reference engine decides it: conversion under ER
+ *       depends on the mode and on the official kernel's per-declaration caches, which tables keyed by
+ *       canonical values cannot reproduce ({@code Machine.erSeen}). Counted in {@code machine.eagerDeclines}.
  *       The check generation of ISA 5.3 is advanced by the DECL driver ({@code Decl.regime}, M5);
  *       every reset starts again at generation 1.
  * </ul>
@@ -70,8 +75,14 @@ public final class MachineSession implements Session {
     private long warmUnits;
     /** Resets the session made itself because the machine's arenas passed the machine's own cap. */
     long capResets;
-    /** Declarations checked a second time, in a fresh session, because they entered eager reduction in a warm one. */
-    long erRestarts;
+    /**
+     * Units declined because the declaration entered eager reduction ({@code Machine.erSeen}): declines BY
+     * DESIGN, counted apart so that a gate can tell them from a machine that gave up (the driver's cold retry
+     * of the same unit is counted again).
+     */
+    long eagerDeclines;
+    /** The constant that was last declined for eager reduction: the driver's cold retry of it is answered at once. */
+    private int eagerCid = -1;
 
     long units;
     long accepted;
@@ -114,6 +125,7 @@ public final class MachineSession implements Session {
             return Outcome.DECLINE;
         }
         int code;
+        boolean eager = false;
         try {
             ctx.terms.refresh(); // the overlay may have been reallocated by blockRoot (ISA 12 R4)
             int rank = decls.rank(cid);
@@ -134,16 +146,20 @@ public final class MachineSession implements Session {
             // (the generation rule of ISA 5.3 is applied by the DECL driver, Decl.regime, which knows whether the
             // declaration's roots pass the summary test; a reset starts a session at generation 1)
             lastRank = rank;
-            code = run(cid, rank, decls.unit(cid), budget);
-            if (m.erTainted) {
-                // The declaration compared under eager reduction while the session held what earlier
-                // declarations derived in plain mode (Machine.erSeen): the official kernel starts every
-                // declaration with empty caches, so this run proves nothing. Again, in a fresh session.
-                erRestarts++;
-                lastCause = null;
-                m.reset();
-                warmUnits = 0;
+            if (cid == eagerCid) {
+                // the driver's cold retry of a unit that was just declined for eager reduction: the same answer, at once
+                eager = true;
+                code = MachineErrors.E_LIMIT;
+            } else {
                 code = run(cid, rank, decls.unit(cid), budget);
+                if (m.erSeen) {
+                    // The declaration entered eager reduction (Machine.erSeen): whatever this run answered is
+                    // not a verdict of the machine. DECLINE; the reference engine decides the unit.
+                    eager = true;
+                    eagerCid = cid;
+                    lastCause = null;
+                    code = MachineErrors.E_LIMIT;
+                }
             }
         } catch (RuntimeException e) {
             // (ctx.terms.refresh, the declaration table: nothing was checked)
@@ -153,10 +169,8 @@ public final class MachineSession implements Session {
         if (code == MachineErrors.E_NONE) {
             accepted++;
             warmUnits++;
-            if (m.strict || m.erSeen) {
-                // strict: reset() before and after (ISA 14.2). erSeen: what a declaration derived with eager
-                // reduction in play is not seen by another declaration (Machine.erSeen).
-                forget();
+            if (m.strict) {
+                forget(); // ISA 14.2: reset() before and after
             }
             return Outcome.ACCEPT;
         }
@@ -164,7 +178,10 @@ public final class MachineSession implements Session {
         lastCode = code;
         lastReason = MachineErrors.reason(code);
         int outcome = MachineErrors.outcome(code);
-        if (m.auditMessage != null) {
+        if (eager) {
+            eagerDeclines++;
+            lastDetail = Machine.ER_DETAIL;
+        } else if (m.auditMessage != null) {
             lastDetail = m.auditMessage;
         } else if (m.limitDetail != null && (code == MachineErrors.E_MEM || code == MachineErrors.E_STACK)) {
             lastDetail = m.limitDetail + "; in use: " + (m.vp - m.vbase) + " records, " + (m.rsp - m.rbase)
@@ -215,6 +232,7 @@ public final class MachineSession implements Session {
 
     /** One run of the DECL driver on the machine as it is: the machine error code (0 = ACCEPT). Never throws for a property of the input. */
     private int run(int cid, int rank, int unit, Budget budget) {
+        m.erDeclines = true; // a declaration that enters eager reduction is not checked by the machine (Machine.erSeen)
         try {
             m.beginDecl(rank, unit, budget.maxSteps, budget.maxBytes);
             return driver.check(m, cid);
@@ -225,6 +243,8 @@ public final class MachineSession implements Session {
             // implemented yet: no verdict.
             lastCause = e;
             return MachineErrors.E_INTERNAL;
+        } finally {
+            m.erDeclines = false;
         }
     }
 

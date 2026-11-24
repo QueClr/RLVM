@@ -9,9 +9,13 @@ scripts in `src/test/resources/m8/`, the reports in `work/status/`.
 `rlvm-machine/src/test/resources/m8/report.sh --help` lists them. Every command measures the **main tree
 as published**: the script copies the module in a moment without a publication (checked against
 `work/sandbox/.lock.holder` and `publish.log` before and after the copy; it does not queue behind the
-publications), compiles the copy and runs `rlvm.machine.M8Main` in a JVM of its own (`-Xss2m`, 24g
-heap). It never runs Maven on the main tree and never writes into it. `--tree work/sandbox/Mk/rlvm-machine`
-measures a sandbox instead (your files before you publish them).
+publications), compiles the copy and runs `rlvm.machine.M8Main` in a JVM of its own (`-Xss2m`, 6g heap,
+`-Xmn1g`, inside one host-wide slot of `bench/slot.sh`, pinned to the CPUs outside the measurement
+container; wave 6, section 7). It never runs Maven on the main tree and never writes into it.
+`--tree work/sandbox/Mk/rlvm-machine` measures a sandbox instead (your files before you publish them).
+
+**Wave 6 added the three commands everybody uses now (section 7): `report.sh gate`, `report.sh mutants`,
+`ladder.py measure`, and `big.py` for the large corpora.**
 
 | Command | Report in `work/status/` | What (ISA section 11; stepper-convention H12) |
 |---|---|---|
@@ -180,3 +184,71 @@ in sandbox reports of 08:55-08:58Z were reference-engine declines counted as SOU
 - The cost table measures the JVM launcher with the machine jar on `RLVM_EXTRA_CP`, one worker thread;
   the H10 inlining flags are not set (M6 has not wired them).
 - `report.sh frames` keeps one previous call table (`.prev`), not a history.
+
+## 7. Wave 6: the gate, the mutants, the scoreboard (2026-11-24, 13:25Z onwards)
+
+M8 is the gatekeeper and the scorekeeper of the wave. Everything below is test-tree code and scripts; no
+file of another package was touched. The numbers of a run are in section 8; this section is what exists
+and why it is built the way it is.
+
+### 7.1 Commands
+
+| Command | Report | What |
+|---|---|---|
+| `report.sh gate [--switches S] [--tree SANDBOX] [CORPUS..]` | `work/status/machine-gate-NAME.md` (one page) + `.problems.txt` | THE GATE for one switch set (none = the generic tier): (1) every declaration against the reference engine on tutorial, bugs, all 230, Init, Std, reachability, the Cedar slice; (2) tier equivalence: the generic tier gives the same outcome for every declaration (another *reason* for the same outcome is a note), and for a set with K1 switches the values of `M8Tiers` on the tutorial tests and Init; (3) convention equivalence: host depth 0 and unbounded against `Op.HOST_DEPTH`: outcome, reason, ticks, call events by op, the frame trace, after an ACCEPT every record word, run word and pair; (4) the debug audits as two lanes, `poison,scopeaudit,maskaudit` and `memocheck,shortcheck`: the same outcomes and no `E_AUDIT`; (5) the real driver in the same JVM with `-X engine=machine` on the 230 tests (1 worker) and the corpora (4 workers): verdict, machine declines, MACHINE-INCOMPLETE, WARM-ANOMALY, disagreements. NAME = `v0` or the switches joined by `+`; a sandbox gets `-Mk`; fewer corpora or parts get `-partial` and the page says "A PARTIAL RUN, NOT THE GATE". Exit 1 = a wrong verdict, a difference, a crash or a timeout; declines alone are `PASS WITH DECLINES` |
+| `report.sh mutants --switches S1 --switches S2 .. [--corpus NAME] [--limit N] [--launcher-sample N]` | `work/status/machine-mutants.md` | the four mutant corpora (17,775 exports classified by the official checker) per switch set: the final verdict of the real pipeline against the official checker (SOUNDNESS, COMPLETENESS), against the same pipeline with the reference engine, and the machine's own answers: from the driver's statistics (MACHINE-INCOMPLETE, WARM-ANOMALY, disagreements, declines) and, per declaration, in-process against the reference engine (the driver trusts an ACCEPT of the machine: only this sees a wrong one). `--launcher-sample N` runs every N-th mutant through the real launcher (a JVM per mutant, `scripts/check-light.sh`) and holds the in-process verdict against it |
+| `ladder.py measure [--sets 'v0;warm,gated,expect;..']`, `ladder.py render`, `ladder.py status` | `work/status/machine-ladder.md`, `.tsv` | THE SCOREBOARD: the machine jar published now (named by the hash of its code, so that a test-only publication is the same jar), CE native image `-O3` of the published jars, arena-shaped container, ONE hold of the measurement lock per batch: reference engine, gruszka (its arena run line) and every switch set on Init, Std, the Cedar slice, reachability with 1 and 4 workers: CPU s / wall s / RSS MiB / instructions G, ratios to the reference and to gruszka of the same batch. Each batch is announced in `work/status/machine-M8.log` |
+| `big.py [--sets ..] [--corpora ..] [--with-reference]` | `work/status/machine-big.md`, `.tsv` | the large corpora (con-leche, cedar, cslib, navier-stokes-euler, mathlib) through the native launcher with `-X engine=machine`, 4 workers: `agree` = machine accepted == engine checks, nothing rejected or declined, no MACHINE-INCOMPLETE; on a corpus every unit of which the reference engine accepts that is the per-declaration differential (the argument is in the header of the script and of the report) |
+
+`report.sh` options since wave 6: `--jobs N` (passes / files / mutants at a time, default 4), `--heap` (default
+6g), `--levels official|complete` (the level relation of the reference engine, default official: owner note
+11), `--no-pin`, `--no-slot`. `report.sh tutorial|bugs|all|conv ..` run on the same parallel runner.
+
+### 7.2 How the gate stays inside the heap (the two slow tests that ran out of memory)
+
+`M8SlowTest.convAll` (four machine lanes and the reference kernel in lockstep, 6 GB) died with
+`OutOfMemoryError` on perf/app-lam, gf3-matrix-product, magma-list-deep-n36, magma-list-pair-n21;
+`M7HookedTest.all230` ended perf/loop-unfolded-once as CRASH in its K1 lane (`OutOfMemoryError` in
+`Machine.growRecords` under `Diff.run`). Causes: (a) lockstep keeps the reference kernel's overlay (1.2 GB
+used, up to three times that allocated, after app-lam) and every lane's machine alive at the same time;
+(b) the frame trace was kept as an `int[]` per lane and copied per declaration (4 bytes per call event:
+hundreds of MB for one perf declaration); (c) `Machine.heapAllows` counts the free bytes of the young
+generation, which a large array cannot use (SerialGC: a third of the heap by default), so a growth it
+allowed could still fail.
+
+What was built (`M8Lanes`, the pass runner; `M8Harness` keeps lockstep for the single-file tools):
+- **passes**: the reference engine runs over the whole file first and its session and context are emptied;
+  then every lane runs alone over the same units and lets go of its machine, session and context when it
+  ends; per unit only words are kept (outcome and reason of admission and engine, ticks, call events and a
+  digest by op, the length and a digest of the trace, the sizes and digests of records, runs, pairs). The
+  comparisons (lane against reference = `Diff.FileResult` with the fixture's counting rule; lane against
+  lane = `CONV` everything observable, or `OUTCOME`) are made from those words. Peak memory is one engine
+  on one declaration. A corpus that is one big file runs its lanes on one thread each (they share the
+  frozen store and the finished environment pass; `EnvBuilder.advanceTo` returns at once for decided units).
+- **a check the Java heap ends is not a verdict**: `OutOfMemoryError` inside `Session.check` (and a growth
+  that `Machine.heapAllows` refused) is a DECLINE flagged `memory`; the lane gets a new machine and context
+  after the unit; the comparisons skip the unit; the file is flagged and `M8Gate.runAll` runs it again on
+  its own after everything else. A file that still runs out of heap alone is reported as declined for
+  memory, never as a difference. Tested with a seam (`Config.simulateHeapExhaustionAtCheck`).
+- **scheduling**: `jobs` passes at a time (a semaphore); big files (>= 16 MB) one per 5 GB of heap with
+  their lanes in parallel; heavy files (`work/m8/heavy.txt` remembers every file whose lane or reference
+  session held more than 256 MiB or that ran out of heap beside others; without that memory the perf tests)
+  a few at a time, in a heap below 10 GB one at a time after everything else.
+- `report.sh` runs the JVM with `-Xmn1g` so that `heapAllows` is right about large arrays.
+- **warm sessions** (`Config.incrementalDigest`): digesting a 4 MiB session after each of Init's 58,000
+  declarations would cost more than the checks, so after an ACCEPT only what the declaration added is
+  digested, and the whole session once at every reset and at the end of the file.
+- a check that its wall-clock deadline ended (`Config.checkMillis`, 300 s in the gate; the host is shared)
+  is a decline and is not compared between lanes (it would be a difference made by the load).
+
+### 7.3 Deviations (continuing the table of section 3)
+
+| # | Where | Deviation | Reason |
+|---|---|---|---|
+| D16 | the gate, the corpus reports | lanes are compared from digests recorded per unit, not on live machines; the first difference is named by kind ("records made: 12 against 13"), the words themselves are shown by `M8ConventionTest#oneFile` (lockstep) | memory (7.2) |
+| D17 | tier equivalence at declaration level, audit lanes | the same outcome for another reason (another error of a wrong declaration met first under `expect`) is counted as a note, not as a difference; under a host convention (CONV) the reason must be identical | found on bad/bugs/rec-of-subst-prop unit 128: generic TYPE_EXPECTED, `warm,gated,expect` APP_TYPE_MISMATCH, the reference rejects too |
+| D18 | the gate's part 5, the mutants | the real pipeline is called in the report's JVM (`rlvm.main.RlvmChecker.checkExport` by reflection; `report.sh` puts the published rlvm-main and rlvm-cli jars behind the tree's classes), not started as a launcher process | 17,775 mutants x (sets + 1) runs: a JVM each is about 20 minutes per set, a call is milliseconds. Checked against the launcher by `--launcher-sample` and by the baseline table (the in-process reference pipeline must reproduce the published `testkit judge` counts) |
+| D19 | every report | the reference engine compares universe levels as the official kernel does (`-Drlvm.levels=official`; `--levels complete` for the old relation) | owner note 11; the machine does since 14:22Z (M1), the published rlvm-ref jar still defaults to `complete`, and without this every level corner case would show as "the machine rejects, the reference accepts" |
+| D20 | the scoreboard | a machine jar is named by a hash of its classes (names and CRCs), not of the file | a publication of tests only installs a jar with other time stamps and the same code |
+| D21 | large corpora | "differential" = the machine's own statistics on a corpus the reference engine accepts unit for unit, not both engines on every unit | it is the same statement at a quarter of the CPU time on a host that was out of memory; `testkit diff --engine machine` stays the tool for a corpus with rejections |
+| D22 | resources | every report holds a host-wide slot, 4 passes, 6 GB, pinned outside the measurement cpuset | the orchestrator's rule of 14:32Z after the host thrashed; my first full gate (12 passes, 24 GB) was one of the jobs that pushed it into the swap and was killed after 25 minutes without a result |

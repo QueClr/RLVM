@@ -6,14 +6,22 @@ Order of authority: `OWNER-NOTES.md` > this file > `ISA.md` / `ARCHITECTURE.md` 
 Where this file changes a design document, implement this file and say so in your module README; the
 documents are being revised to match.
 
-## 0. Metric (owner note 10)
+## 0. Metric (owner note 12, which replaces note 10's "CPU time first")
 
-CPU time (task-clock over all threads) is the primary metric, wall clock with parallel workers the
-second. Instruction counts are recorded for the arena board and are not the optimisation target.
-Every benchmark table lists CPU time, wall clock, peak RSS, instructions, in that order. Targets measured
-on this host (aarch64, Docker, arena limits): mathlib gruszka 62.4 s CPU / 18.1 s wall / 2.53 GB,
-nano-lean 85.6 s / 25.5 s, sokonanoda 101.4 s / 30.5 s; Init gruszka 2.8 s CPU, Std 5.7 s CPU.
-Heat and JIT questions are judged on Cedar-level workloads (`docs/research/13`, in progress), not on Init.
+The goal is real checking performance: **warm wall clock** - parallel workers, steady state after
+warm-up (JIT, table growth, first page faults), loading pipelined with checking. Warm-up cost is not
+charged. CPU time is a diagnostic (how much parallelism is left); instruction counts are the arena's
+metric and are recorded for information only. Every benchmark table lists, in this order: warm wall
+clock with 8 workers (pipelined), warm wall clock with 1 worker, cold wall clock of a fresh process,
+CPU time, peak RSS, instructions. Wall-clock numbers are evidence only when taken through
+`bench/quiet.py` (serialised, on the reserved performance cores). Where the sections below say "CPU
+time", read "warm wall clock" for decisions (platform gate, session cap sweep, staging gates) and keep
+CPU time as the second column.
+Reference points measured on this host (aarch64, Docker, arena limits, cold processes): mathlib gruszka
+62.4 s CPU / 18.1 s wall / 2.53 GB with 4 workers, nano-lean 85.6 s / 25.5 s, sokonanoda 101.4 s /
+30.5 s; Init gruszka 2.8 s CPU, Std 5.7 s CPU. The load of mathlib is one thread and 13.8 s today: it is
+the floor of our wall clock until it is parallel (scout X5).
+Heat and JIT questions are judged on Cedar-level workloads (`docs/research/13`), not on Init.
 
 ## 1. Blockers
 

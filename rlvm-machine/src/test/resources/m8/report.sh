@@ -169,6 +169,11 @@ build_copy() {
     tar -C "$tree" --exclude=./target -cf - . | tar -C "$copy/rlvm-machine" -xf -
   fi
   cp -p "$ROOT/pom.xml" "$copy/pom.xml"
+  # what was copied: the last publication at this moment (a report that runs for an hour must not name a later one)
+  if [ "$tree" = "$MAIN" ] && [ -f "$ROOT/work/sandbox/publish.log" ]; then
+    published="$(grep 'fast tests green' "$ROOT/work/sandbox/publish.log" | tail -n 1 | cut -d';' -f1 | cut -c1-150)"
+    [ -z "$published" ] || jvmargs+=("-Dm8.published=$published")
+  fi
   local out="$copy/build.out"
   # shellcheck disable=SC2086
   if ! $MVN -o -q -f "$copy/rlvm-machine/pom.xml" "-Drlvm.root=$ROOT" test-compile org.apache.maven.plugins:maven-dependency-plugin:3.8.1:build-classpath \

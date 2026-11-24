@@ -70,6 +70,125 @@ final class Reduce {
         long nestFallbacks;
         long scratchResets;
 
+        // ---- K2: derived trees (Rules, NOTES-M3 D17) -------------------------------------------------------
+        /** Open-addressing table head CONST ref -> {@code k2Val}: a count of unfoldings, {@code Rules.K2_NEVER}, or {@code Rules.K2_RULE + rule}. */
+        int[] k2Key = new int[64];
+        int[] k2Val = new int[64];
+        int k2Used;
+        /** Rules, their trees and leaf templates ({@code Rules}); index 0 is never a node. */
+        int[] k2Code = new int[1024];
+        int k2CodeN = 8;
+        /** The reserved type of the derivation variables (a Nat literal record), 0 = not made in this session. */
+        int k2Type;
+        /** A node is being derived: no rule is used or made meanwhile. */
+        boolean k2Deriving;
+        /** Unfoldings of a head before it gets a rule (ISA 3.6: 32); tests lower it. */
+        int k2Hot = Math.max(1, Integer.getInteger("rlvm.machine.k2Hot", 32));
+        /** Derivation may use 1 / k2Share of the ticks of the session (ISA 3.6: 0.2 %); 0 = no cap (tests). */
+        long k2Share = Math.max(0, Integer.getInteger("rlvm.machine.k2Share", 512));
+        /** {@code m.ticks()} when the session started, and the ticks its derivations used. */
+        long k2Ticks0;
+        long k2DeriveTicks;
+        /** Statistics of the session: rules made, nodes derived, nodes that could not be derived, firings, misses. */
+        int k2Rules;
+        int k2Derivs;
+        int k2Aborted;
+        long k2Fired;
+        long k2Missed;
+        /** Why firings missed (statistics): no derivation allowance yet, a node that cannot be derived, no branch, a template step. */
+        static final int K2_WHY_ALLOWANCE = 0;
+        static final int K2_WHY_NODE = 1;
+        static final int K2_WHY_BRANCH = 2;
+        static final int K2_WHY_TEMPLATE = 3;
+        final long[] k2Why = new long[4];
+        final long[] k2Dbg = new long[6];
+        int k2Reason;
+        static final boolean K2_DUMP = Boolean.getBoolean("rlvm.machine.k2Dump");
+        /** Result register of {@code Rules.k2BlockerSlow}, and the working state of the template compiler. */
+        int k2BlockInd;
+        int[] k2Tmp = new int[256];
+        int k2TmpN;
+        int[] k2Memo = new int[128];
+        int k2MemoN;
+        int k2Nreg;
+        int k2Stage;
+        int k2LastPc;
+        boolean k2Bad;
+
+        // ---- direct recursor rules (Reduce.iotaDirect, NOTES-M3 D18) ----------------------------------------
+        /** Direct-mapped cache (head CONST ref, rule) -> shape of the rule ({@code Reduce.directSlow}); 0 = generic. */
+        static final int DI_SLOTS = 256;
+        final int[] diKey = new int[DI_SLOTS];
+        final int[] diRule = new int[DI_SLOTS];
+        final int[] diInfo = new int[DI_SLOTS];
+        boolean diUsed;
+
+        /** The slot of head {@code head} in the K2 table (made with count 0 if absent). */
+        int k2Find(int head) {
+            int[] k = k2Key;
+            int mask = k.length - 1;
+            int i = (head * 0x9E3779B1 >>> 12) & mask;
+            for (;;) {
+                int x = k[i];
+                if (x == head) {
+                    return i;
+                }
+                if (x == 0) {
+                    return k2InsertSlow(head, i);
+                }
+                i = (i + 1) & mask;
+            }
+        }
+
+        private int k2InsertSlow(int head, int i) {
+            if (2 * (k2Used + 1) > k2Key.length) {
+                int[] ok = k2Key;
+                int[] ov = k2Val;
+                k2Key = new int[2 * ok.length];
+                k2Val = new int[2 * ok.length];
+                k2Used = 0;
+                for (int j = 0; j < ok.length; j++) {
+                    if (ok[j] != 0) {
+                        k2Val[k2Find(ok[j])] = ov[j];
+                    }
+                }
+                return k2Find(head);
+            }
+            k2Key[i] = head;
+            k2Val[i] = 0;
+            k2Used++;
+            return i;
+        }
+
+        /** {@code n} zeroed words of rule code; their address. */
+        int k2Alloc(int n) {
+            int at = k2CodeN;
+            if (at + n > k2Code.length) {
+                k2Code = java.util.Arrays.copyOf(k2Code, Math.max(2 * k2Code.length, at + n));
+            }
+            k2CodeN = at + n;
+            return at;
+        }
+
+        /** Appends an instruction to the template being compiled. */
+        void k2Emit(int[] ins) {
+            if (k2TmpN + ins.length > k2Tmp.length) {
+                k2Tmp = java.util.Arrays.copyOf(k2Tmp, Math.max(2 * k2Tmp.length, k2TmpN + ins.length));
+            }
+            System.arraycopy(ins, 0, k2Tmp, k2TmpN, ins.length);
+            k2TmpN += ins.length;
+        }
+
+        /** Remembers the operand of a value of the template being compiled. */
+        void k2Remember(int v, int op) {
+            if (2 * k2MemoN + 2 > k2Memo.length) {
+                k2Memo = java.util.Arrays.copyOf(k2Memo, 2 * k2Memo.length);
+            }
+            k2Memo[2 * k2MemoN] = v;
+            k2Memo[2 * k2MemoN + 1] = op;
+            k2MemoN++;
+        }
+
         /** Session reset (ISA 1.6): forget everything, in O(used). The worker's list overlay is reset with the session. */
         void reset(Machine m) {
             zeroList = 0;
@@ -77,6 +196,39 @@ final class Reduce {
                 scratch.reset(); // large slabs go back to the collector with the session
             }
             dropScratch();
+            if (K2_DUMP && k2Rules != 0 && m.ticks() - k2Ticks0 > 100_000) {
+                System.err.print(Rules.k2DumpSlow(m)); // a tool: never on in a measured or gated run
+            }
+            if (k2Used != 0) {
+                if (k2Key.length > 1024) {
+                    k2Key = new int[64];
+                    k2Val = new int[64];
+                } else {
+                    java.util.Arrays.fill(k2Key, 0); // at most twice the entries in use
+                }
+                k2Used = 0;
+            }
+            if (k2CodeN > 8) {
+                java.util.Arrays.fill(k2Code, 0, k2CodeN, 0);
+                k2CodeN = 8;
+            }
+            if (diUsed) {
+                java.util.Arrays.fill(diRule, 0);
+                diUsed = false;
+            }
+            k2Type = 0;
+            k2Deriving = false;
+            k2Ticks0 = m.ticks();
+            k2DeriveTicks = 0;
+            k2Rules = 0;
+            if (K2_DUMP) {
+                k2Derivs = 0;
+                k2Aborted = 0;
+                k2Fired = 0;
+                k2Missed = 0;
+                java.util.Arrays.fill(k2Why, 0);
+                java.util.Arrays.fill(k2Dbg, 0);
+            }
         }
 
         /** Empties the scratch store (its slab is kept for the next nests) and, with the stamp, the side memo. */
@@ -96,7 +248,7 @@ final class Reduce {
 
         /** Bytes in use of this package's own session tables (part of the footprint, ISA 1.6). */
         long bytes() {
-            return scratch == null ? 0 : scratch.bytesUsed();
+            return (scratch == null ? 0 : scratch.bytesUsed()) + (k2Used == 0 ? 0 : 8L * k2Used + 4L * k2CodeN);
         }
     }
 
@@ -1061,6 +1213,12 @@ final class Reduce {
         if (rule < 0 || decls.recRuleFields(rec, rule) > viewArgs(m, major)) {
             return Layout.NONE;
         }
+        if ((m.sw & Op.SW_M3A) != 0 && !m.strict) {
+            int info = direct(m, head, rec, rule);
+            if (info != 0) {
+                return iotaDirect(m, v, major, decls.recRuleFields(rec, rule), info, d);
+            }
+        }
         if ((m.sw & Op.SW_CODE) != 0) {
             int b = ruleBlock(m, rec, rule);
             if (b != 0) {
@@ -1069,6 +1227,194 @@ final class Reduce {
         }
         int rhs = Eval.eval(m, decls.recRuleRhs(rec, rule), m.ep, 0, Levels.substOf(m, head), d + 1); // call EVAL(rhs) => 10
         return rhs >= SIG ? m.sig3(rhs, K_IOTA_10, v, major, rule) : k_iota10(m, v, major, rule, rhs, d);
+    }
+
+    // ---- direct recursor rules (behind the experiment switch SW_M3A, "m3a"; NOTES-M3 D18) -----------------
+    //
+    // The right-hand side of a rule of a recursor of a type without indices is, as the kernel generates it,
+    //     fun params motives minors fields => minor_j fields (rec params motives minors field_a) ..
+    // (one induction hypothesis per directly recursive field). When the term of rule j has exactly that form,
+    // IOTA applies the minor premise itself: APPLY(minor_j, fields ++ hypotheses ++ the arguments after the
+    // major), in ONE application, so that a minor of more binders than fields + hypotheses (a motive that is a
+    // function type: structural recursion with further arguments) takes them in the same beta step, and no
+    // closure of the rule, no block activation and no partial application of the minor is made. A hypothesis is
+    // the NEU the right-hand side would build (the same record: same head constant, same arguments); it is not
+    // built when the minor is a closure whose body does not read it (B6, as BUNREAD in the RULE block). The
+    // form is verified on the rule's term, once per (recursor constant at its levels, rule) and session; any
+    // other form (indices, reflexive or nested occurrences, a hypothesis of another recursor) takes the generic
+    // path. The reduct is the one of the generic path: the same APPLY of the same minor to the same arguments,
+    // followed by the same arguments (R02 7.4); nothing is forced.
+
+    /** The cached shape of rule {@code rule} of the recursor constant {@code head} (see {@link #directSlow}); 0 = generic. */
+    private static int direct(Machine m, int head, int rec, int rule) {
+        Ext e = m.x3;
+        int i = (head * 31 + rule) & (Ext.DI_SLOTS - 1);
+        if (e.diKey[i] == head && e.diRule[i] == rule + 1) {
+            return e.diInfo[i];
+        }
+        int info = directSlow(m, head, rec, rule);
+        e.diKey[i] = head;
+        e.diRule[i] = rule + 1;
+        e.diInfo[i] = info;
+        e.diUsed = true;
+        return info;
+    }
+
+    /**
+     * Is the right-hand side of rule {@code rule} of {@code rec} the plain form described above, at the levels of
+     * the constant {@code head}? Then {@code position of the minor | hypotheses << 8 | field of hypothesis k << (12 +
+     * 4k)}, else 0. At most 15 fields and 5 hypotheses.
+     */
+    private static int directSlow(Machine m, int head, int rec, int rule) {
+        DeclTable decls = m.decls;
+        rlvm.store.Terms terms = m.terms;
+        int np = decls.recNumParams(rec);
+        int lead = np + decls.recNumMotives(rec) + decls.recNumMinors(rec);
+        int nf = decls.recRuleFields(rec, rule);
+        int total = lead + nf;
+        int t = decls.recRuleRhs(rec, rule);
+        if (decls.inductNumIndices(decls.recMajorInduct(rec)) != 0 || nf > 15 || lead > 255 || decls.recNumMotives(rec) != 1) {
+            return 0;
+        }
+        for (int i = 0; i < total; i++) {
+            if (t <= 0 || terms.kind(t) != rlvm.store.Kind.LAM) {
+                return 0;
+            }
+            t = terms.b(t);
+        }
+        int n = terms.spineLength(t);
+        int h = terms.head(t);
+        if (t <= 0 || terms.kind(h) != rlvm.store.Kind.BVAR || n < nf || n - nf > 5) {
+            return 0;
+        }
+        int minor = total - 1 - terms.a(h);
+        if (minor <= np || minor >= lead) {
+            return 0;
+        }
+        int[] sp = new int[n];
+        terms.spine(t, sp, 0);
+        for (int i = 0; i < nf; i++) {
+            if (terms.kind(sp[i]) != rlvm.store.Kind.BVAR || total - 1 - terms.a(sp[i]) != lead + i) {
+                return 0;
+            }
+        }
+        int info = minor | (n - nf) << 8;
+        int ls = Levels.substOf(m, head);
+        int[] ia = new int[lead + 1];
+        for (int k = 0; k < n - nf; k++) {
+            int ih = sp[nf + k];
+            int c = terms.head(ih);
+            if (terms.kind(ih) != rlvm.store.Kind.APP || terms.kind(c) != rlvm.store.Kind.CONST || terms.a(c) != rec
+                    || terms.spineLength(ih) != lead + 1) {
+                return 0;
+            }
+            int ll = terms.b(c);
+            if ((terms.hasLevelParam(c) ? Levels.lsubList(m, ll, ls) : ll) != m.vh[(head << Layout.REC_SHIFT) + Layout.B]) {
+                return 0; // the hypothesis is the recursor at other levels
+            }
+            terms.spine(ih, ia, 0);
+            for (int i = 0; i < lead; i++) {
+                if (terms.kind(ia[i]) != rlvm.store.Kind.BVAR || total - 1 - terms.a(ia[i]) != i) {
+                    return 0;
+                }
+            }
+            int f = terms.kind(ia[lead]) == rlvm.store.Kind.BVAR ? total - 1 - terms.a(ia[lead]) - lead : -1;
+            if (f < 0 || f >= nf) {
+                return 0;
+            }
+            info |= f << (12 + 4 * k);
+        }
+        return info;
+    }
+
+    /**
+     * IOTA by the plain form {@code info} of the rule ({@link #directSlow}): the minor premise applied to the fields
+     * of the major, the induction hypotheses and the arguments after the major, in one APPLY (frame IOTA[12](xb)).
+     */
+    private static int iotaDirect(Machine m, int v, int major, int nf, int info, int d) {
+        int rec = recRow(m, v);
+        DeclTable decls = m.decls;
+        int lead = decls.recNumParams(rec) + decls.recNumMotives(rec) + decls.recNumMinors(rec);
+        int n = m.vh[v << Layout.REC_SHIFT] & Layout.AUX_MASK;
+        int rest = n - decls.recMajorIndex(rec) - 1;
+        int nih = info >>> 8 & 15;
+        int total = nf + nih + rest;
+        if (lead > n || !m.ensureScratch(total + lead + 1)) {
+            return m.fault(lead > n ? MachineErrors.E_INTERNAL : MachineErrors.E_MEM);
+        }
+        int minor = Runs.arg(m, m.vh[(v << Layout.REC_SHIFT) + Layout.B], info & 255);
+        if (total == 0) {
+            return minor; // a constructor without fields, nothing after the major: the minor premise itself
+        }
+        int xb = m.xp;
+        int e = nf == 0 ? 0 : pushFields(m, major, nf, xb);
+        if (e >= SIG) {
+            return e;
+        }
+        if (nih != 0) {
+            e = pushHyps(m, v, minor, info, lead, nf, total, xb);
+            if (e >= SIG) {
+                return e;
+            }
+        }
+        copyArgs(m, v, n - rest, rest, xb + nf + nih);
+        m.xp = xb + total;
+        int a = Eval.apply(m, minor, xb, total, d + 1); // call APPLY(minor, fields ++ hypotheses ++ rest) => 12
+        return a >= SIG ? m.sig1(a, K_IOTA_12, xb) : k_iota12(m, xb, a, d);
+    }
+
+    /**
+     * The induction hypotheses of a direct rule to X[xb + nf ..]: {@code rec params motives minors field}, or HOLE
+     * when the minor premise is a closure whose body, under the binders this application binds, does not read it.
+     */
+    private static int pushHyps(Machine m, int v, int minor, int info, int lead, int nf, int total, int xb) {
+        int nih = info >>> 8 & 15;
+        long unread = unreadOf(m, minor, total);
+        int head = m.vh[(v << Layout.REC_SHIFT) + Layout.A];
+        int st = xb + total;
+        for (int k = 0; k < nih; k++) {
+            int x = Layout.HOLE;
+            if ((unread >>> (nf + k) & 1L) == 0) {
+                copyArgs(m, v, 0, lead, st);
+                m.X[st + lead] = m.X[xb + (info >>> (12 + 4 * k) & 15)];
+                m.xp = st + lead + 1;
+                x = Values.mkApp(m, head, st, lead + 1);
+                m.xp = xb;
+                if (x >= SIG) {
+                    return x;
+                }
+            }
+            m.X[xb + nf + k] = x;
+        }
+        return 0;
+    }
+
+    /**
+     * Bit i set: {@code f} is a closure, the first j = min(leading lambdas, n) binders are bound by an application
+     * to n arguments, i < j, and the body under them does not read binder i (the node mask never under-approximates
+     * what is read: a clear bit is definite, ISA 2.4; B6). 0 for anything that is not a closure.
+     */
+    private static long unreadOf(Machine m, int f, int n) {
+        f = Values.peek(m, f);
+        if (f <= Layout.HOLE || (m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) != Layout.LAM) {
+            return 0L;
+        }
+        rlvm.store.Terms terms = m.terms;
+        int t = m.vh[(f << Layout.REC_SHIFT) + Layout.A];
+        int j = 0;
+        do {
+            t = terms.b(t);
+            j++;
+        } while (j < n && terms.kind(t) == rlvm.store.Kind.LAM);
+        long mask = terms.fvMask(t);
+        long u = 0L;
+        for (int i = j > 63 ? 63 : j; --i >= 0;) {
+            int idx = j - 1 - i;
+            if (idx < Layout.NEAR_SLOTS && ((mask >>> idx) & 1L) == 0) {
+                u |= 1L << i;
+            }
+        }
+        return u;
     }
 
     /**
@@ -1479,6 +1825,10 @@ final class Reduce {
                 return Rules.rules(m, w[p], 0);
             case Rules.K_RULES_1:
                 return Rules.k_rules1(m, w[p], r, 0);
+            case Rules.K_RULES_2:
+                return Rules.k_rules2(m, w[p], w[p + 1], w[p + 2], w[p + 3], r, 0);
+            case Rules.K_RULES_3:
+                return Rules.k_rules3(m, w[p], r, 0);
             case Op.K_NATF:
                 return NatRed.natFold(m, w[p], 0);
             case NatRed.K_NATF_1:

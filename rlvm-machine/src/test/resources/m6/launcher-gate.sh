@@ -23,7 +23,7 @@
 #
 # Per test: expected status, launcher status, units, machine accepted / rejected / declined, and the
 # first machine failure message. Totals at the end. Exit status: 0 = every verdict is the expected one,
-# the machine declined nothing (values.engine.primary.machine.declined == 0, units.declined == 0), no
+# the machine declined nothing but declarations that enter eager reduction (machine.declined == machine.eagerDeclines, units.declined == 0), no
 # WARM-ANOMALY and no MACHINE-INCOMPLETE event; 1 otherwise; 2 usage.
 set -euo pipefail
 
@@ -118,7 +118,7 @@ python3 - "$work" "$out" "$label" "$allow" "$((end - start))" "$jar" "${extra[*]
 import json, os, sys, datetime
 work, out, label, allow, secs, jar, extra = sys.argv[1:8]
 rows = []
-tot = dict(tests=0, right=0, wrong=0, units=0, macc=0, mrej=0, mdec=0, udec=0, anomalies=0, incomplete=0, nostats=0, tdec=0)
+tot = dict(tests=0, right=0, wrong=0, units=0, macc=0, mrej=0, mdec=0, meager=0, udec=0, anomalies=0, incomplete=0, nostats=0, tdec=0)
 by_code = {}
 first = []
 for line in open(os.path.join(work, 'list')):
@@ -145,35 +145,37 @@ for line in open(os.path.join(work, 'list')):
     g = lambda k: vals.get(k, 0) or 0
     m = 'values.engine.primary.machine.'
     units, macc, mrej, mdec = g('units.count'), g(m + 'accepted'), g(m + 'rejected'), g(m + 'declined')
+    meager = g(m + 'eagerDeclines')  # declines BY DESIGN: the declaration entered eager reduction (NOTES-M6 F26)
     udec = g('units.declined')
     anomalies, incomplete = g('values.driver.warmAnomalies'), g('values.driver.machineIncomplete')
     ok = status == expect and status in ('0', '1')
     tot['tests'] += 1
     tot['right' if ok else 'wrong'] += 1
     tot['units'] += units; tot['macc'] += macc; tot['mrej'] += mrej; tot['mdec'] += mdec; tot['udec'] += udec
+    tot['meager'] += meager
     tot['anomalies'] += anomalies; tot['incomplete'] += incomplete
-    tot['tdec'] += 1 if mdec else 0
+    tot['tdec'] += 1 if mdec - meager > 0 else 0
     for k, v in vals.items():
         if k.startswith(m + 'declinedBy.') or k.startswith(m + 'rejectedBy.'):
             by_code[k[len(m):]] = by_code.get(k[len(m):], 0) + v
     msg = str(vals.get(m + 'firstFailures.0', ''))
-    if mdec and len(first) < 12 and msg:
+    if mdec - meager > 0 and len(first) < 12 and msg:
         first.append((name, msg[:400]))
     if not ok and not msg:
         msg = (rd('.err').splitlines() or [''])[-1][:200]
     rows.append((name, expect, status, 'ok' if ok else 'WRONG', units, macc, mrej, mdec, msg[:160] if (mdec or not ok) else ''))
-clean = tot['wrong'] == 0 and tot['mdec'] == 0 and tot['udec'] == 0 and tot['anomalies'] == 0 and tot['incomplete'] == 0 and tot['nostats'] == 0
+clean = tot['wrong'] == 0 and tot['mdec'] - tot['meager'] == 0 and tot['udec'] == 0 and tot['anomalies'] == 0 and tot['incomplete'] == 0 and tot['nostats'] == 0
 verdicts = tot['wrong'] == 0
 with open(out, 'w') as f:
     w = lambda s='': f.write(s + '\n')
     w('machine launcher gate: %s   %s   (%s s wall)' % (label, datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), secs))
     w('command per test: RLVM_EXTRA_CP=%s work/dist/bin/rlvm-jvm -X engine=machine -X stats-file=F %s TEST' % (os.path.relpath(jar), extra))
     w()
-    w('RESULT: %s' % ('CLEAN (every verdict right, the machine declined nothing)' if clean else
+    w('RESULT: %s' % ('CLEAN (every verdict right, the machine declined nothing but declarations that enter eager reduction)' if clean else
                       'verdicts right, but NOT clean (machine declines or events below)' if verdicts else 'WRONG VERDICTS'))
     w('tests %d   verdict right %d   wrong %d   without statistics %d' % (tot['tests'], tot['right'], tot['wrong'], tot['nostats']))
-    w('units %d   machine: accepted %d   rejected %d   DECLINED %d (in %d tests)   units.declined %d   WARM-ANOMALY %d   MACHINE-INCOMPLETE %d'
-      % (tot['units'], tot['macc'], tot['mrej'], tot['mdec'], tot['tdec'], tot['udec'], tot['anomalies'], tot['incomplete']))
+    w('units %d   machine: accepted %d   rejected %d   DECLINED %d (in %d tests) + %d for eager reduction (by design)   units.declined %d   WARM-ANOMALY %d   MACHINE-INCOMPLETE %d'
+      % (tot['units'], tot['macc'], tot['mrej'], tot['mdec'] - tot['meager'], tot['tdec'], tot['meager'], tot['udec'], tot['anomalies'], tot['incomplete']))
     for k in sorted(by_code):
         w('  %-40s %d' % (k, by_code[k]))
     if first:

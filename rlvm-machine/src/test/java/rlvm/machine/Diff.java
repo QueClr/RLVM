@@ -675,8 +675,12 @@ final class Diff {
         return mainTreePublication();
     }
 
-    /** The last publication into the main tree. */
+    /** The last publication into the main tree: at the moment the tree under test was copied ({@code -Dm8.published}, set by report.sh), else now. */
     static String mainTreePublication() {
+        String copied = System.getProperty("m8.published");
+        if (copied != null && !copied.isEmpty()) {
+            return "the main tree as copied after: " + copied;
+        }
         Path log = Fixture.root().resolve("work/sandbox/publish.log");
         try {
             List<String> lines = Files.readAllLines(log, StandardCharsets.UTF_8);

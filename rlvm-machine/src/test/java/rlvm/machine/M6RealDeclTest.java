@@ -110,23 +110,24 @@ class M6RealDeclTest {
      * proof irrelevance) and F under eager reduction (Nat folding first: 0 against a stuck Acc.rec). Unit 128
      * compares the pair under {@code eagerReduce}; a warm session that kept the entry went PAST the point
      * where the official kernel rejects (TYPE_EXPECTED at {@code Issue.resultSort Issue.gateWitness}) and
-     * rejected only later, for another reason. With the rule of F26 a warm session answers what a cold one answers.
+     * rejected only later, for another reason. The machine now DECLINES a declaration that enters eager
+     * reduction, in every regime; the reference engine rejects it.
      */
     @Test
-    void aWarmSessionRejectsRecOfSubstPropWhereTheColdOneDoes() throws java.io.IOException {
+    void theDeclarationOfRecOfSubstPropThatEntersEagerReductionIsDeclined() throws java.io.IOException {
         String file = "work/arena-site/tests/bad/bugs/rec-of-subst-prop.ndjson";
         assumeTrue(Fixture.exists(file), "the arena tests are not installed");
-        Fixture cold = Fixture.load(file);
-        Fixture.Verdict c = cold.checkAll();
-        assertEquals(Outcome.REJECT, c.outcome, () -> c.toString());
-        for (String switches : new String[] {"warm", "warm,gated,expect"}) {
-            Fixture warm = Fixture.load(file);
-            warm.switches(switches);
-            Fixture.Verdict w = warm.checkAll();
-            assertEquals(Outcome.REJECT, w.outcome, () -> switches + ": " + w);
-            assertEquals(c.unit, w.unit, () -> switches + ": " + w);
-            assertEquals(c.reason, w.reason, () -> switches + ": the warm session must fail where the cold one fails: " + w + " against " + c);
-            assertTrue(warm.session.erRestarts >= 1, switches + ": the declaration enters eager reduction in a warm session");
+        Fixture ref = Fixture.load(file);
+        Fixture.Verdict r = ref.referenceVerdict();
+        assertEquals(Outcome.REJECT, r.outcome, () -> r.toString());
+        for (String switches : new String[] {"", "warm", "warm,gated,expect"}) {
+            Fixture f = Fixture.load(file);
+            f.switches(switches);
+            Fixture.Verdict v = f.checkAll();
+            assertEquals(Outcome.DECLINE, v.outcome, () -> "[" + switches + "]: " + v);
+            assertEquals(r.unit, v.unit, () -> "[" + switches + "]: the unit the reference rejects: " + v);
+            assertEquals(Reason.UNSUPPORTED_INPUT, v.reason, () -> "[" + switches + "]: " + v);
+            assertTrue(f.session.eagerDeclines >= 1, "[" + switches + "]: declined for eager reduction");
         }
     }
 }

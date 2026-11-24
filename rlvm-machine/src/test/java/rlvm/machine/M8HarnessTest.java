@@ -166,6 +166,48 @@ class M8HarnessTest {
     }
 
     @Test
+    void theGateRunsEveryLaneOfASampleAndSaysWhatItLeftOut() throws IOException {
+        java.util.List<String> sample = new java.util.ArrayList<>();
+        for (String f : FILES) {
+            if (Fixture.exists(f)) {
+                sample.add(f);
+            }
+        }
+        assumeTrue(!sample.isEmpty(), "no arena test present");
+        M8Gate.Plan plan = new M8Gate.Plan();
+        plan.switches = Debug.parseSwitches("warm,gated,expect");
+        plan.sessionBytes = 4L << 20;
+        plan.corpora = sample;
+        plan.pipeline = false; // the launcher's classes are not on the class path of the module's tests
+        plan.jobs = 2;
+        plan.name = "unit-test";
+        assertFalse(plan.complete());
+        java.util.List<M8Lanes.Spec> specs = M8Gate.specs(plan);
+        assertEquals(6, specs.size(), "the machine, D0, unbounded, the generic tier, two audit lanes");
+        assertEquals("tier", specs.get(3).role);
+        assertEquals(0, specs.get(3).config.switches);
+        assertTrue(specs.get(0).config.incrementalDigest, "a warm lane digests what a declaration added");
+        M8Gate.Result res = M8Gate.run(plan);
+        String page = M8Gate.render(res);
+        assertFalse(res.wrong, page);
+        assertFalse(res.different, page);
+        assertTrue(page.contains("A PARTIAL RUN, NOT THE GATE"), page);
+        assertTrue(page.contains("## 3. Convention equivalence") && page.contains("| unbounded |"), page);
+        assertTrue(page.contains("## 4. Debug audits") && page.contains("memocheck,shortcheck"), page);
+        int files = 0;
+        for (M8Gate.Row[] rows : res.rows.values()) {
+            files += rows[0].files;
+            for (M8Gate.Row r : rows) {
+                assertEquals(0, r.soundness + r.completeness + r.crashes + r.timeouts, page);
+            }
+        }
+        assertEquals(sample.size(), files, "every file is in exactly one row");
+        // the generic tier: no tier lane
+        plan.switches = 0;
+        assertEquals(5, M8Gate.specs(plan).size());
+    }
+
+    @Test
     void aFileTheLoaderRejectsIsNotCompared() throws IOException {
         String file = T + "bad/tutorial/001_badFile.ndjson";
         java.nio.file.Path dir = Fixture.root().resolve(T + "bad");
