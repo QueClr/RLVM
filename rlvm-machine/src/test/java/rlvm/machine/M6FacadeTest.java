@@ -50,7 +50,7 @@ class M6FacadeTest {
     void theProviderTakesItsSettingsFromTheCommandLine() {
         MachineProvider p = new MachineProvider();
         assertTrue(p.runDefaults(new java.util.HashMap<>()).isEmpty(), "the machine caps its sessions itself: no driver setting is needed");
-        assertEquals(100, p.priority(), "Engines.DEFAULT_ENGINE_MIN_PRIORITY: the default engine since the integration of wave 6");
+        assertEquals(10, p.priority(), "not the default engine while the wrong accepts E1-F1 .. E1-F4 are open (it was 100 = Engines.DEFAULT_ENGINE_MIN_PRIORITY from 19:41Z to 20:35Z on 2026-11-24)");
         assertTrue(p.optionKeys().contains("machine.debug") && p.optionKeys().contains("machine.switches"));
         Fixture f = Fixture.prelude0();
         java.util.Map<String, String> options = new java.util.HashMap<>();

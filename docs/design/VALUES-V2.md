@@ -112,9 +112,9 @@ itself; present: make it a duplicate. Cost: one probe per private record reached
 | K | `PRUNE`, `FRAME`, the REST chain, `closureAt` (closures, delayed arguments, tabling records) | every binding the frame keeps | V2: frames are the keys of tabling and of closure identity | tabling and closure hits become spelling-dependent: unbounded re-evaluation on shared terms |
 | K | `MKPROJ` that stays a PROJ cell, `NSUCC` that makes an NSUC cell | the struct, the base | V2 | as the first row |
 | K | `OPEN(type)`, `mkFVar` | the type | V2, and row 6 of section 1: one family of variables per type | memo hits under binders are lost; two closures over the "same" binder type open different variables |
-| M (memo keys) | `WHNF` of a private application whose head may reduce (flag ACTIVE), when its own memo word is empty | the application | the WHNF memo is the hit that makes repeated reduction free; it belongs to the canonical record | **measured: +25.6 % ticks on reachability with lazy code blocks, +143 % with every site lazy** (mode 3, 7 of section 10.1) |
-| M | (design; not in the prototype) `CORE`, `DELTA`, `VTYPE`, `ISPROP` / `PIRR` of a private application | the application | the same for `CORE`, `UNF`, `TYPE`, `PROOF` | re-reduction / re-inference per duplicate; in the prototype this is the residual +0.2 to +0.4 % ticks of mode 11 |
-| C (comparison) | `CONV(a, b)` after the test `a == b` (prototype: bit 32) | both sides | row 2 of section 1: the pair table is keyed by refs; and it restores `a == b` for equal values | **measured: +38 % ticks on the Cedar slice with every site lazy** (mode 15 against 47); nothing measurable when only code blocks are lazy |
+| M (memo keys) | `WHNF`, `CORE`, `DELTA` of a private application whose memo word is empty, and `VTYPE` of a private application | the application | the memo (`WHNF`, `CORE`, `UNF`, `TYPE`) is the hit that makes repeated reduction and inference free; it belongs to the canonical record | **measured: +25.6 % ticks on reachability with lazy code blocks, +143 % with every site lazy** (modes 3 and 7 of section 10.1, WHNF alone); without CORE / DELTA / VTYPE: +1.8 % ticks on Init where WHNF alone was identified, +1.1 % with them |
+| M | (design; not in the prototype) the two flag memos: `ISPROP` (`PROPT`) and `PIRR` (`PROOF`) of a private application | the application | the flags are memo words too | the type of a duplicate is asked "is it a proposition" again: the visible residue of the completeness test with every site lazy (10.1: `ISPROP` +226 k on Init) |
+| C (comparison) | `CONV(a, b)` after the test `a == b` (prototype: bit 32) | both sides (design, not in the prototype: also the argument pairs that `CARGS` and the lazy-delta step compare by ref without entering `CONV`) | row 2 of section 1: the pair table is keyed by refs; and it restores `a == b` for equal values | **measured: +38 % ticks on the Cedar slice with every site lazy** (mode 15 against 47); nothing measurable when only code blocks are lazy |
 | - | a site that is known to make a memo key: `KCONST ; MKAPP d ; WHNF _, d` (the scrutinee of a case tree) | the application, at its birth (it is not a lazy site) | T3's count for U1: 464,637 such applications per pass on reachability, 92,000 distinct, four of five answered by the WHNF memo | a private record made and thrown away as a duplicate four times out of five |
 
 What does NOT force identity: reading (`FIELDS`, `SWITCH`, `BKIND`, the projection of a constructor application,
@@ -133,7 +133,7 @@ A lazy site calls `Values.mkAppLazy`; every other caller of `Values.mkApp` inter
 | 1 | DATA | a lazy site builds an application whose head is weak-head normal (constructor, inductive type, axiom, free variable: flag WHNF) privately |
 | 2 | REDEX | ... and an application whose head may reduce (flag ACTIVE: definition, theorem, recursor, quotient, projection, Nat function), except the scrutinee of the next `WHNF` |
 | 4 | ALL | every `Values.mkApp` is a lazy site (the generic `EVAL` walk, the rules, string expansion); without it only `MKAPP` of code blocks is |
-| 8 | WHNF | class M of 2.4: `WHNF` identifies a private application before it reduces it |
+| 8 | MEMO | class M of 2.4: `WHNF`, `CORE`, `DELTA`, `VTYPE` identify a private application before they compute |
 | 32 | CONV | class C of 2.4 |
 | 64 | ADAPT | adaptive sites (below) |
 | 128 | BIG | lazy only in a large session (below) |
@@ -171,6 +171,17 @@ cheap for them.
 
 ### 4.1 In the stepper (as built)
 
+```
+vh[8r .. 8r+7]   w0 = NEU | flags | n     a = head     b = spine run     c = 0, or -(site + 1), or the forward (> 0)
+                 m0 .. m3 = memo words: its own until it is identified (class M identifies before they are used)
+rs[run ..]       header (SPINE, n, OPEN) | 0 | a1 .. an        a spine never was in rtab
+privBits         bit r = 1: record r is in no table (private, or a forwarding duplicate)
+registers, environment slots, scratch, spines of private records, memo VALUES:   the ref r, as for any value
+```
+
+There is no young region and no second kind of ref: a private application lives where every record lives, and what
+distinguishes it is one bit that only the key-forming loops, the memoised judgments and `CONV` read.
+
 - `Machine.addRecordFree(w0, a, b, c)`: the bump of `addRecordAt` without the table store; `Machine.enterRecordAt`
   enters an existing record; `Machine.vtabUsed` replaces `vp - vbase` in the load test (a private record does not
   occupy a slot), in the reset heuristics and in the footprint.
@@ -184,7 +195,7 @@ cheap for them.
 - `Values.ident` / `identSlow`: explicit stack of (record, next argument) pairs in `Values.Ext.istk`; no host
   recursion (test: a nest 300,000 deep).
 - Force points (2.4): `Values.neu`, `neuExt`, `closureAt`, `mkProj`, `nsuccSlow`, `mkFVar`; `Runs.pruneNear`,
-  `internRun`; `Scope.open`; `Reduce.whnf` (bit 8); `Conv.conv` (bit 32). A forced binding is written back into
+  `internRun`; `Scope.open`; `Reduce.whnf`, `core`, `delta`, `Infer.vtype` (bit 8); `Conv.conv` (bit 32). A forced binding is written back into
   the environment slot / scratch word it came from, so the hash and the comparison that follow see canonical refs
   and a second capture of the same slot costs one bit test.
 - Lazy site: `Code.mkApp` (with the scrutinee test of 2.4).
@@ -522,7 +533,25 @@ TBD-10.2
 
 ### 10.3 Gates
 
-TBD-10.3
+All on the private tree, reports under the private root `work/u2/root/work/status/` (never the project's
+`work/status/`), M8's harness started by `work/u2/scripts/m8.sh` (`rlvm.machine.M8Main gate -` with `-Drlvm.u2=N`,
+so that EVERY machine of the gate's JVM - all six lanes, the generic tier lane and the driver of part 5 - runs the
+mode), switch set = the tree's default.
+
+| Gate | Mode | Result |
+|---|---|---|
+| M8's full gate (`machine-gate-default-u47-u47.md`, 750 s, final classes) | **47** (every site lazy, K + M + C) | **PASS WITH DECLINES.** (1) differential per declaration against the reference engine: SOUNDNESS 0, COMPLETENESS 0 on tutorial (395 units), bugs (1,428), all 230 tests (17,493 units; 15,800 accepted, 40 rejected, 5 declined), Init (57,774 accepted, 164 declined), Std (99,893 / 203), reachability (4,216 / 8), the Cedar slice (8,053 / 11); (2) tier equivalence with the generic tier: 0 declarations with another outcome, 0 with another reason; `M8Tiers` values 700 + 5,944 results, 0 different; (3) convention equivalence, host depth 0 and unbounded against 128 (outcome, reason, ticks, call events, trace, every record word, run word and pair): 0 different; (4) audit lanes `poison,scopeaudit,maskaudit` and `memocheck,shortcheck`: 0 different outcomes, 0 E_AUDIT; (5) the real driver: 230 / 230 verdicts right, the four corpora accepted with 4 workers, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0. Every decline is the tree's own eager-reduction decline (S-F5's rule) |
+| the same gate (`machine-gate-default-u11-u11.md`, 856 s; classes of 19:36Z: scrutinee rule, class M = WHNF only) | **11** (block sites, K + M) | **PASS WITH DECLINES**, the same zeros in all five parts, the same declines |
+| the same gate, final classes | **43** (block sites, K + M + C: the form recommended for stage 1) | TBD-GATE43 |
+| the hostile suite of the soundness review: `SHostileSlowTest` (32 switch sets x 329 exports = 10,528 judgments, each against the official verdict of the manifest; the strict `noKnownFindingIsLeft`) and `SHostileTest`, test JVM with `-Drlvm.u2=47` (`work/u2/logs/hostile-u47.out`) | **47** | **0 unexpected verdicts, 0 known findings open, 0 declines of the machine** under every switch set |
+| `U2ValuesTest` (own hostile cases, 6 tests; patch 0007 as `M1LazyIdTest`) | 3, 15, 47, 3 + 64 | green: (a) 6,000 random constructions per seed - lazy, interned, extended, captured into frames, across table growth, with and without adaptive sites: after identification one canonical id per structure and one structure per canonical id, no private component in any key, `vtabUsed` = table entries = records that are not private, clean tables after the reset; (b) flags of private applications = flags of interned ones; (c) nests 300,000 deep identified without host recursion, the second nest a duplicate of the first at every level; (d) twins are convertible and near twins (one innermost argument differs, 3,000 levels down) are not, with and without class C, with and without `same`; (e) twin redexes are reduced once (class M); (f) two spellings of one binder type have one family of free variables |
+| differential, first build, mode 15 (every site, no class C): tutorial 395 / 395, bugs 1,427 / 1,428 | 15 | no SOUNDNESS, no COMPLETENESS |
+| the module's default test group with the mode on every machine | 0 / 43 / 47 | TBD-SUITE |
+
+How the gates treat what the mode changes: nothing in M8's gate compares the mode-on machine with the mode-off
+machine; every comparison is inside the mode (lane against lane, lane against reference engine), where V6 makes
+record words and ticks comparable word for word. The mode-on / mode-off comparison is the completeness test of
+10.1 (ticks) and the equal accepted / rejected / declined counts of every counter run.
 
 ## 11. Recommendation and stages
 

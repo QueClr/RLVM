@@ -250,7 +250,9 @@ def test_ladder() -> None:
     order = [text.find("## Wall clock"), text.find("## CPU time"), text.find("## Peak RSS"), text.find("## Instructions")]
     check("the generated document lists wall clock, CPU time, RSS, instructions in that order (owner note 12)",
           result.returncode == 0 and all(i >= 0 for i in order) and order == sorted(order), result.stderr[-300:])
-    check("one row per corpus in every table", text.count("| mathlib (") == 4 and text.count("| cedar-hot-ax (") == 4,
+    # (the tables generated from the history: the hand-maintained warm fragment at the end has rows of its own)
+    generated = text.split("## Warm wall clock")[0]
+    check("one row per corpus in every table", generated.count("| mathlib (") == 4 and generated.count("| cedar-hot-ax (") == 4,
           str((text.count("| mathlib ("), text.count("| cedar-hot-ax ("))))
     check("a corpus without a measurement shows '-', never a made-up number", "not measured" in text)
     check("one RLVM column per engine, the machine first, beside the baselines",

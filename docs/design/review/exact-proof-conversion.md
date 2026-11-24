@@ -293,10 +293,21 @@ casetrees,lazyeval,k2,facts,same,m2a,m3a,m7a`.
 | + `m2a` | 31,351,447 | -0.9 % | 11,560,882 | 2,116,825 | 1,121,896 | 789,195 | 1,390,046 | 1,348,123 | 65,920 |
 | + `facts` | 30,152,550 | -4.7 % | 14,200,568 | 2,182,312 | 1,144,335 | 258,909 | 1,434,568 | 771,521 | 62,128 |
 | + `facts,m4b` | 29,250,967 | -7.5 % | 14,200,568 | 2,182,312 | 1,144,335 | 258,909 | 836,309 | 771,521 | 59,402 |
+| D = the default set of the published machine since 19:41Z (`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same`) | 22,995,127 | -27.3 % | 9,173,524 | 1,650,613 | 1,018,773 | 696,424 | 1,038,863 | 1,196,592 | 60,437 |
+| D + `m4b` | 22,235,653 | -29.7 % | 9,173,524 | 1,650,613 | 1,018,773 | 696,424 | 529,156 | 1,196,592 | 57,549 |
+| D + `facts,m4b` | 20,959,610 | -33.7 % | 9,037,160 | 1,653,013 | 1,020,540 | 218,068 | 530,072 | 657,488 | 54,114 |
 | rich | 23,479,898 | -25.8 % | 9,303,450 | 1,602,961 | 1,064,195 | 218,193 | 1,082,110 | 663,861 | 57,971 |
 | rich + `m4b` | 22,695,373 | -28.2 % | 9,308,505 | 1,604,781 | 1,062,148 | 218,063 | 551,133 | 663,894 | 54,673 |
 | step 1 + `facts,probes` + `congruence,skipargs` (NOT official) | 17,898,001 | -43.4 % | 8,422,489 | 926,239 | 771,229 | 44,386 | 717,031 | 307,439 | 3,866 |
 | rich + `congruence,skipargs` (NOT official) | 13,624,753 | -56.9 % | 5,434,986 | 542,506 | 703,781 | 39,516 | 336,508 | 286,930 | 3,052 |
+| D + `facts,probes` + `congruence,skipargs` (NOT official) | 11,809,466 | -62.7 % | 5,035,473 | 538,753 | 693,452 | 36,909 | 334,775 | 271,652 | 2,916 |
+
+The same on a second Mathlib slice and on the Cedar slice (ticks; accepted and declined units equal in every row):
+
+| corpus | step 1 | + `m4b` | D | D + `m4b` | D + `facts,m4b` | step 1 + shortcuts (NOT official) | D + shortcuts (NOT official) |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `Mathlib.FieldTheory.Galois.Basic.cone` (26,596 checks) | 34.10 M | 32.81 M (-3.8 %) | 26.82 M | 25.70 M (-4.1 % of D) | 24.33 M | 15.62 M (-54.2 %) | 11.46 M (-57.3 % of D) |
+| Cedar slice `cedar-hot-ax` (8,075 checks) | 16.55 M | 16.40 M (-0.9 %) | 9.99 M | 9.91 M (-0.8 % of D) | 9.59 M | 13.22 M (-20.1 %) | 8.84 M (-11.5 % of D) |
 
 By how much the shortcuts save in a unit (ticks of the step-1 run divided by the ticks with the shortcuts):
 
@@ -317,7 +328,37 @@ LSTEP 1.44 -> 0.72, CONV 1.93 -> 1.56, LAZYD 0.60 -> 0.22. The rich set moves EV
 blocks run instead: 2.30 M ACT) and VTYPE / PIRR (0.66 / 0.22), and leaves CORE (3.41), DELTA (2.21) and CONV (2.03)
 where they are: the unfoldings and the comparisons are still made.
 
-CPU time and wall clock (bench/quiet.py; native -O3 of the clean private tree, `work/c1/dist-n`): **TIMING-TABLE**
+### 6.1 CPU time of the checks, one worker (bench/quiet.py)
+
+Native image -O3 of the CLEAN private tree (`work/c1/dist-n`, machine jar dde92f387280, the other jars as published
+at 18:46Z), engine `c1tap` (P8's tap: the thread CPU clock around every `Session.check`), statistics off, one worker,
+the eight measurement cores; the sets interleaved, two rounds (`work/c1/quiet-cpu.sh`; raw: `work/c1/data/q/`).
+A = `warm,gated,expect`; D = the default set of 19:41Z; N = A + `facts,probes` + the two NON-official options; DN = D
++ `facts,probes` + the two options.
+
+TIMING-CPU
+
+By class of unit, `Scheme.cone` (the classes of the table above; thread CPU ms, mean of the two rounds):
+
+| ticks step 1 / with the shortcuts | units | A | A + `m4b` | D | D + `m4b` | D + `facts,m4b` | N | DN |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| below 1.25 | 16,215 | 1,093 | 1,079 | 845 | 834 | 859 | 1,160 | 879 |
+| 1.25 .. 2 | 3,222 | 490 | 485 | 498 | 491 | 492 | 431 | 441 |
+| 2 .. 4 | 1,113 | 330 | 326 | 330 | 326 | 327 | 199 | 216 |
+| 4 .. 16 | 464 | 427 | 421 | 410 | 404 | 401 | 91 | 101 |
+| 16 and more | 113 | 268 | 264 | 208 | 204 | 204 | 14 | 19 |
+| all | 21,155 | 2,608 | 2,575 | 2,291 | 2,258 | 2,285 | 1,896 | 1,656 |
+
+**The units at 2 and more** (1,690 units, 39 % of the slice's checking time): A 1,025 ms, D 948 ms, D + `m4b` 934 ms,
+D + `facts,m4b` 933 ms, N 305 ms, DN 336 ms. The shortcuts remove 70 % of the CPU time of these units; the default
+set removes 7.5 % of it, `m4b` another 1.4 %, `facts` nothing measurable: **the official-exact route recovers 11
+to 13 % of the CPU time that the shortcuts save in the units concerned, and `m4b`'s own part is 2 %**. On top of
+the default set the shortcuts still remove 65 % of the CPU time of these units (27.7 % of the slice's): what the
+default set gained is evaluation (the units below 1.25: -23 %), not the comparison of proofs.
+
+### 6.2 Wall clock, eight workers, pipelined load (owner note 12)
+
+TIMING-WALL
 
 ## 7. Tests
 

@@ -66,7 +66,12 @@ public final class MachineProvider implements EngineProvider {
 
     @Override
     public int priority() {
-        return 100;
+        // 10 = not the default engine. It was 100 (Engines.DEFAULT_ENGINE_MIN_PRIORITY, the default engine)
+        // from 2026-11-24T19:41Z to 20:35Z; set back by the orchestrator because of the wrong accepts
+        // E1-F1 .. E1-F4 (INFER types a bound variable by what its slot holds, not by the binder's
+        // declared type; work/status/requests.log 20:10Z, 20:19Z, 20:25Z). Back to 100 when they are
+        // closed and gated.
+        return 10;
     }
 
     @Override
