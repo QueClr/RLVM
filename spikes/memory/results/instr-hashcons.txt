@@ -1,0 +1,5 @@
+   2.521 G | cpu   1.18 s | wall   1.32 s | rss   378 MB | kernel  0.464 G | exit 0 | [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons none 10000000
+   3.870 G | cpu   2.06 s | wall   2.86 s | rss   732 MB | kernel  0.924 G | exit 0 | [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons ids 10000000
+   8.524 G | cpu   3.84 s | wall   4.55 s | rss   856 MB | kernel  1.134 G | exit 0 | [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons objopen 10000000
+   7.493 G | cpu   2.91 s | wall   3.18 s | rss   733 MB | kernel  1.026 G | exit 0 | [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons hashmap 10000000
+   6.440 G | cpu   3.24 s | wall   3.54 s | rss   939 MB | kernel  1.270 G | exit 0 | [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons weak 10000000

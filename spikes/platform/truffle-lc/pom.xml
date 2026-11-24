@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RLVM platform spike: a tiny lambda-calculus Truffle language ("lc") with three back-ends
+  (plain-Java tree walker, Truffle AST interpreter, Truffle Bytecode DSL interpreter).
+
+  Build (first run fetches from Maven Central into .toolchain/m2, afterwards add -o for offline):
+    source ../env.sh && $MVN -q -f pom.xml package
+  Build against the Truffle version of another GraalVM (must equal its GRAALVM_VERSION):
+    $MVN -q -f pom.xml -Dgraalvm.version=25.0.4 -Dlc.out=target/25.0.4 package
+  Result:
+    target/lc.jar            the spike classes
+    target/lib/*.jar         polyglot + truffle-api + truffle-runtime + transitive deps (module path)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>rlvm.spike</groupId>
+  <artifactId>lc</artifactId>
+  <version>0.1</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <!-- Must equal GRAALVM_VERSION in $JAVA_HOME/release (NOT JAVA_VERSION). -->
+    <graalvm.version>25.5.5.0.3</graalvm.version>
+    <!-- Build directory; override together with graalvm.version to keep two builds side by side, e.g.
+         -Dgraalvm.version=25.0.4 -Dlc.out=target/25.0.4 for Oracle GraalVM 25.0.4. -->
+    <lc.out>target</lc.out>
+    <maven.compiler.release>25</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.graalvm.polyglot</groupId>
+      <artifactId>polyglot</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.graalvm.truffle</groupId>
+      <artifactId>truffle-api</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.graalvm.truffle</groupId>
+      <artifactId>truffle-runtime</artifactId>
+      <version>${graalvm.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <directory>${lc.out}</directory>
+    <finalName>lc</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <release>25</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.graalvm.truffle</groupId>
+              <artifactId>truffle-dsl-processor</artifactId>
+              <version>${graalvm.version}</version>
+            </path>
+          </annotationProcessorPaths>
+          <compilerArgs>
+            <arg>-Xlint:-options</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.2</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <executions>
+          <execution>
+            <id>copy-deps</id>
+            <phase>package</phase>
+            <goals><goal>copy-dependencies</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

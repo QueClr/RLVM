@@ -1,0 +1,56 @@
+##### fixed total work (16 GB, decl 64 MB, keep 10%) split over T mutator threads
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 1
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.91 s = mutators   6.75 s + VM(GC/JIT/other)  0.16 s  wall  11.11 s  GCs     5  gcPause    297 ms  => 0.402 CPU-ns per allocated byte
+    TOTAL user 6.76 s sys 0.84 s wall 12.23 s maxrss 3500176 KB
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 2
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 2 : procCPU    7.25 s = mutators   6.97 s + VM(GC/JIT/other)  0.28 s  wall  13.80 s  GCs     5  gcPause    659 ms  => 0.422 CPU-ns per allocated byte
+    TOTAL user 7.07 s sys 0.88 s wall 16.27 s maxrss 3511064 KB
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    7.49 s = mutators   7.10 s + VM(GC/JIT/other)  0.39 s  wall   9.77 s  GCs     5  gcPause   5418 ms  => 0.436 CPU-ns per allocated byte
+    TOTAL user 7.26 s sys 0.97 s wall 14.37 s maxrss 3548924 KB
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 8
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 8 : procCPU    8.11 s = mutators   7.42 s + VM(GC/JIT/other)  0.69 s  wall   5.48 s  GCs     5  gcPause    972 ms  => 0.472 CPU-ns per allocated byte
+    TOTAL user 7.81 s sys 1.05 s wall 6.83 s maxrss 3691332 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 1
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    7.04 s = mutators   6.71 s + VM(GC/JIT/other)  0.33 s  wall  10.15 s  GCs     5  gcPause    252 ms  => 0.410 CPU-ns per allocated byte
+    TOTAL user 6.96 s sys 0.82 s wall 11.69 s maxrss 3289120 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 2
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 2 : procCPU    7.18 s = mutators   6.84 s + VM(GC/JIT/other)  0.34 s  wall   7.38 s  GCs     5  gcPause    308 ms  => 0.418 CPU-ns per allocated byte
+    TOTAL user 7.06 s sys 0.97 s wall 9.99 s maxrss 3310644 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    8.12 s = mutators   7.40 s + VM(GC/JIT/other)  0.72 s  wall   6.92 s  GCs     5  gcPause    596 ms  => 0.473 CPU-ns per allocated byte
+    TOTAL user 7.92 s sys 1.07 s wall 9.00 s maxrss 3372668 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 8
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 8 : procCPU    8.92 s = mutators   7.90 s + VM(GC/JIT/other)  1.02 s  wall   2.82 s  GCs     5  gcPause    389 ms  => 0.519 CPU-ns per allocated byte
+    TOTAL user 8.68 s sys 1.11 s wall 3.89 s maxrss 3434160 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g -XX:ParallelGCThreads=2] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    7.55 s = mutators   7.01 s + VM(GC/JIT/other)  0.54 s  wall   2.56 s  GCs     5  gcPause    272 ms  => 0.439 CPU-ns per allocated byte
+    TOTAL user 7.33 s sys 1.07 s wall 3.37 s maxrss 3351456 KB
+--- [-XX:+UseG1GC -Xms10g -Xmx10g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    9.76 s = mutators   8.38 s + VM(GC/JIT/other)  1.38 s  wall   3.64 s  GCs     9  gcPause    965 ms  => 0.568 CPU-ns per allocated byte
+    TOTAL user 9.03 s sys 1.72 s wall 4.60 s maxrss 6477448 KB
+--- [-XX:+UseZGC -Xms10g -Xmx10g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    9.38 s = mutators   7.45 s + VM(GC/JIT/other)  1.93 s  wall   3.68 s  GCs    50  gcPause   3031 ms  => 0.546 CPU-ns per allocated byte
+    TOTAL user 9.10 s sys 2.63 s wall 5.99 s maxrss 4804684 KB
+##### small young generation (1 GB) with 4 mutators: promotion of per-thread hot reference arrays
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU   15.35 s = mutators  13.75 s + VM(GC/JIT/other)  1.60 s  wall   7.96 s  GCs    21  gcPause   2048 ms  => 0.893 CPU-ns per allocated byte
+    TOTAL user 15.57 s sys 0.30 s wall 8.59 s maxrss 1134668 KB
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g -XX:+UseCondCardMark] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU   12.10 s = mutators  10.68 s + VM(GC/JIT/other)  1.42 s  wall   8.09 s  GCs    21  gcPause   2027 ms  => 0.704 CPU-ns per allocated byte
+    TOTAL user 12.36 s sys 0.27 s wall 8.90 s maxrss 1070104 KB
+--- [-XX:-UseJVMCICompiler -XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU   13.12 s = mutators  11.64 s + VM(GC/JIT/other)  1.48 s  wall   6.84 s  GCs    21  gcPause   2284 ms  => 0.764 CPU-ns per allocated byte
+    TOTAL user 13.40 s sys 0.31 s wall 7.75 s maxrss 1044776 KB
+--- [-XX:-UseJVMCICompiler -XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g -XX:+UseCondCardMark] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    7.42 s = mutators   5.74 s + VM(GC/JIT/other)  1.68 s  wall   3.94 s  GCs    21  gcPause   1757 ms  => 0.432 CPU-ns per allocated byte
+    TOTAL user 7.70 s sys 0.30 s wall 4.62 s maxrss 1059096 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU   10.50 s = mutators   8.24 s + VM(GC/JIT/other)  2.26 s  wall   4.21 s  GCs    20  gcPause    931 ms  => 0.611 CPU-ns per allocated byte
+    TOTAL user 10.84 s sys 0.32 s wall 4.88 s maxrss 1153488 KB
+--- [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn1g -XX:ParallelGCThreads=2] GcCost 16 64 0.1 0 4
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    9.10 s = mutators   6.96 s + VM(GC/JIT/other)  2.14 s  wall   4.20 s  GCs    20  gcPause   1426 ms  => 0.530 CPU-ns per allocated byte
+    TOTAL user 9.42 s sys 0.35 s wall 4.83 s maxrss 1194340 KB
+--- [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 1
+alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    7.11 s = mutators   6.66 s + VM(GC/JIT/other)  0.45 s  wall   7.92 s  GCs    21  gcPause    436 ms  => 0.414 CPU-ns per allocated byte
+    TOTAL user 7.40 s sys 0.30 s wall 8.60 s maxrss 1004076 KB

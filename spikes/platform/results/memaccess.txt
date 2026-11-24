@@ -1,0 +1,53 @@
+### HotSpot C2 (-XX:-UseJVMCICompiler), 20M records = 228 MB
+--- measured pass
+int[]                        seq   0.57 ns/record   chase    3.58 ns/step   (check 663a2d3120020)
+IntBuffer (heap)             seq   1.83 ns/record   chase    4.62 ns/step   (check 663a2d3120020)
+IntBuffer (direct)           seq   1.89 ns/record   chase    4.17 ns/step   (check 663a2d3120020)
+MemorySegment.ofArray(int[]) seq   3.40 ns/record   chase    4.42 ns/step   (check 663a2d3120020)
+MemorySegment (native)       seq   5.01 ns/record   chase    5.15 ns/step   (check 663a2d3120020)
+byte[] + VarHandle           seq   0.57 ns/record   chase    3.91 ns/step   (check 663a2d3120020)
+Unsafe (native address)      seq   0.57 ns/record   chase    4.18 ns/step   (check 663a2d3120020)
+### HotSpot Graal JIT
+--- measured pass
+int[]                        seq   0.70 ns/record   chase    3.43 ns/step   (check 663a2d3120020)
+IntBuffer (heap)             seq   0.99 ns/record   chase    3.76 ns/step   (check 663a2d3120020)
+IntBuffer (direct)           seq   0.72 ns/record   chase    3.70 ns/step   (check 663a2d3120020)
+MemorySegment.ofArray(int[]) seq   0.86 ns/record   chase    4.16 ns/step   (check 663a2d3120020)
+MemorySegment (native)       seq   0.82 ns/record   chase    3.62 ns/step   (check 663a2d3120020)
+byte[] + VarHandle           seq   0.76 ns/record   chase    4.03 ns/step   (check 663a2d3120020)
+Unsafe (native address)      seq   0.51 ns/record   chase    3.34 ns/step   (check 663a2d3120020)
+### HotSpot C2, 100k records (cache resident)
+--- measured pass
+int[]                        seq   0.51 ns/record   chase    3.04 ns/step   (check 2c3848edf10)
+IntBuffer (heap)             seq   1.74 ns/record   chase    3.88 ns/step   (check 2c3848edf10)
+IntBuffer (direct)           seq   1.80 ns/record   chase    3.38 ns/step   (check 2c3848edf10)
+MemorySegment.ofArray(int[]) seq   3.85 ns/record   chase    3.87 ns/step   (check 2c3848edf10)
+MemorySegment (native)       seq   3.85 ns/record   chase    3.96 ns/step   (check 2c3848edf10)
+byte[] + VarHandle           seq   0.51 ns/record   chase    3.07 ns/step   (check 2c3848edf10)
+Unsafe (native address)      seq   0.51 ns/record   chase    3.03 ns/step   (check 2c3848edf10)
+### native-image CE
+--- measured pass
+int[]                        seq   0.91 ns/record   chase    3.79 ns/step   (check 663a2d3120020)
+IntBuffer (heap)             seq   4.14 ns/record   chase    4.57 ns/step   (check 663a2d3120020)
+IntBuffer (direct)           seq   3.89 ns/record   chase    4.62 ns/step   (check 663a2d3120020)
+MemorySegment.ofArray(int[]) seq 141.48 ns/record   chase  147.88 ns/step   (check 663a2d3120020)
+MemorySegment (native)       seq 143.34 ns/record   chase  151.06 ns/step   (check 663a2d3120020)
+byte[] + VarHandle           seq 128.29 ns/record   chase  129.94 ns/step   (check 663a2d3120020)
+Unsafe (native address)      seq   2.01 ns/record   chase    3.93 ns/step   (check 663a2d3120020)
+--- measured pass
+int[]                        seq   0.82 ns/record   chase    3.11 ns/step   (check 2c3848edf10)
+IntBuffer (heap)             seq   4.12 ns/record   chase    4.12 ns/step   (check 2c3848edf10)
+IntBuffer (direct)           seq   3.88 ns/record   chase    4.04 ns/step   (check 2c3848edf10)
+MemorySegment.ofArray(int[]) seq 142.18 ns/record   chase  144.87 ns/step   (check 2c3848edf10)
+MemorySegment (native)       seq 140.45 ns/record   chase  144.20 ns/step   (check 2c3848edf10)
+byte[] + VarHandle           seq 125.44 ns/record   chase  125.56 ns/step   (check 2c3848edf10)
+Unsafe (native address)      seq   1.90 ns/record   chase    3.29 ns/step   (check 2c3848edf10)
+### native-image CE with --initialize-at-build-time=MemAccess (static final VarHandle/layout become constants)
+--- measured pass
+int[]                        seq   0.94 ns/record   chase    3.81 ns/step   (check 663a2d3120020)
+IntBuffer (heap)             seq   4.09 ns/record   chase    4.55 ns/step   (check 663a2d3120020)
+IntBuffer (direct)           seq   3.90 ns/record   chase    4.61 ns/step   (check 663a2d3120020)
+MemorySegment.ofArray(int[]) seq  17.15 ns/record   chase   17.17 ns/step   (check 663a2d3120020)
+MemorySegment (native)       seq  17.26 ns/record   chase   17.32 ns/step   (check 663a2d3120020)
+byte[] + VarHandle           seq   0.99 ns/record   chase    4.12 ns/step   (check 663a2d3120020)
+Unsafe (native address)      seq   1.89 ns/record   chase    3.64 ns/step   (check 663a2d3120020)

@@ -1,0 +1,126 @@
+--- [-Xmx2g -XX:+UseSerialGC -XX:-DoEscapeAnalysis] Layout
+java.vm.name=OpenJDK 64-Bit Server VM args=[-XX:ThreadPriorityPolicy=1, -XX:+UnlockExperimentalVMOptions, -XX:+EnableJVMCIProduct, -XX:+EnableJVMCI, -XX:-UnlockExperimentalVMOptions, -Xmx2g, -XX:+UseSerialGC, -XX:-DoEscapeAnalysis]
+Empty                         16.00 bytes
+R1 (1 ref)                    16.00 bytes
+R2 (2 refs)                   24.00 bytes
+R3 (3 refs)                   24.00 bytes
+R4 (4 refs)                   32.00 bytes
+I1 (1 int)                    16.00 bytes
+I2 (2 ints)                   24.00 bytes
+I3 (3 ints)                   24.00 bytes
+L1 (1 long)                   24.00 bytes
+R1I1                          24.00 bytes
+R2I1                          24.00 bytes
+R2I2 / ExprApp                32.00 bytes
+R3I1                          32.00 bytes
+R2L1                          32.00 bytes
+R1B1                          24.00 bytes
+R2B1                          24.00 bytes
+R3B1                          32.00 bytes
+Thunk{int,ref,ref,byte}       32.00 bytes
+Clo{int,ref,ref}              24.00 bytes
+Neu{ref,ref,int,byte}         32.00 bytes
+Frame{ref,ref}                24.00 bytes
+FrameD{ref,ref,int}           24.00 bytes
+Object[0]                     16.00 bytes
+Object[1]                     24.00 bytes
+Object[2]                     24.00 bytes
+Object[3]                     32.00 bytes
+Object[4]                     32.00 bytes
+Object[8]                     48.00 bytes
+int[0]                        16.00 bytes
+int[1]                        24.00 bytes
+int[2]                        24.00 bytes
+int[3]                        32.00 bytes
+int[4]                        32.00 bytes
+long[1]                       24.00 bytes
+byte[8]                       24.00 bytes
+Long.valueOf(big)             24.00 bytes
+Integer.valueOf(big)          16.00 bytes
+BigInteger(small)             64.00 bytes
+lambda capturing 1 ref        16.00 bytes
+    TOTAL user 3.10 s sys 0.18 s wall 2.81 s maxrss 783700 KB
+--- [-Xmx2g -XX:+UseSerialGC -XX:-DoEscapeAnalysis -XX:+UseCompactObjectHeaders] Layout
+java.vm.name=OpenJDK 64-Bit Server VM args=[-XX:ThreadPriorityPolicy=1, -XX:+UnlockExperimentalVMOptions, -XX:+EnableJVMCIProduct, -XX:+EnableJVMCI, -XX:-UnlockExperimentalVMOptions, -Xmx2g, -XX:+UseSerialGC, -XX:-DoEscapeAnalysis, -XX:+UseCompactObjectHeaders]
+Empty                          8.00 bytes
+R1 (1 ref)                    16.00 bytes
+R2 (2 refs)                   16.00 bytes
+R3 (3 refs)                   24.00 bytes
+R4 (4 refs)                   24.00 bytes
+I1 (1 int)                    16.00 bytes
+I2 (2 ints)                   16.00 bytes
+I3 (3 ints)                   24.00 bytes
+L1 (1 long)                   16.00 bytes
+R1I1                          16.00 bytes
+R2I1                          24.00 bytes
+R2I2 / ExprApp                24.00 bytes
+R3I1                          24.00 bytes
+R2L1                          24.00 bytes
+R1B1                          16.00 bytes
+R2B1                          24.00 bytes
+R3B1                          24.00 bytes
+Thunk{int,ref,ref,byte}       24.00 bytes
+Clo{int,ref,ref}              24.00 bytes
+Neu{ref,ref,int,byte}         24.00 bytes
+Frame{ref,ref}                16.00 bytes
+FrameD{ref,ref,int}           24.00 bytes
+Object[0]                     16.00 bytes
+Object[1]                     16.00 bytes
+Object[2]                     24.00 bytes
+Object[3]                     24.00 bytes
+Object[4]                     32.00 bytes
+Object[8]                     48.00 bytes
+int[0]                        16.00 bytes
+int[1]                        16.00 bytes
+int[2]                        24.00 bytes
+int[3]                        24.00 bytes
+int[4]                        32.00 bytes
+long[1]                       24.00 bytes
+byte[8]                       24.00 bytes
+Long.valueOf(big)             16.00 bytes
+Integer.valueOf(big)          16.00 bytes
+BigInteger(small)             48.00 bytes
+lambda capturing 1 ref        16.00 bytes
+    TOTAL user 2.87 s sys 0.17 s wall 2.64 s maxrss 695180 KB
+--- [-Xmx40g -XX:+UseSerialGC -XX:-DoEscapeAnalysis] Layout
+java.vm.name=OpenJDK 64-Bit Server VM args=[-XX:ThreadPriorityPolicy=1, -XX:+UnlockExperimentalVMOptions, -XX:+EnableJVMCIProduct, -XX:+EnableJVMCI, -XX:-UnlockExperimentalVMOptions, -Xmx40g, -XX:+UseSerialGC, -XX:-DoEscapeAnalysis]
+Empty                         16.00 bytes
+R1 (1 ref)                    24.00 bytes
+R2 (2 refs)                   32.00 bytes
+R3 (3 refs)                   40.00 bytes
+R4 (4 refs)                   48.00 bytes
+I1 (1 int)                    16.00 bytes
+I2 (2 ints)                   24.00 bytes
+I3 (3 ints)                   24.00 bytes
+L1 (1 long)                   24.00 bytes
+R1I1                          24.00 bytes
+R2I1                          32.00 bytes
+R2I2 / ExprApp                40.00 bytes
+R3I1                          40.00 bytes
+R2L1                          40.00 bytes
+R1B1                          24.00 bytes
+R2B1                          32.00 bytes
+R3B1                          40.00 bytes
+Thunk{int,ref,ref,byte}       40.00 bytes
+Clo{int,ref,ref}              32.00 bytes
+Neu{ref,ref,int,byte}         40.00 bytes
+Frame{ref,ref}                32.00 bytes
+FrameD{ref,ref,int}           32.00 bytes
+Object[0]                     16.00 bytes
+Object[1]                     24.00 bytes
+Object[2]                     32.00 bytes
+Object[3]                     40.00 bytes
+Object[4]                     48.00 bytes
+Object[8]                     80.00 bytes
+int[0]                        16.00 bytes
+int[1]                        24.00 bytes
+int[2]                        24.00 bytes
+int[3]                        32.00 bytes
+int[4]                        32.00 bytes
+long[1]                       24.00 bytes
+byte[8]                       24.00 bytes
+Long.valueOf(big)             24.00 bytes
+Integer.valueOf(big)          16.00 bytes
+BigInteger(small)             64.00 bytes
+lambda capturing 1 ref        24.00 bytes
+    TOTAL user 3.37 s sys 0.19 s wall 3.11 s maxrss 821036 KB

@@ -1,0 +1,105 @@
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore obj 20000000
+build obj N=20000000               procCPU   2390.0 ms  threadCPU   2340.0 ms  wall   2351.6 ms   119.50 ns/op(procCPU)     33.8 B/op  GCs    0  gc     0 ms
+retained heap 677.1 MB = 33.86 bytes/node; first full GC: procCPU 1350 ms wall 1353 ms
+second full GC (structure already compacted/old): procCPU 980 ms wall 982 ms
+dfs obj (200000 roots x 200)         threadCPU    495.2 ms ( 12.38 ns/op)  procCPU    490.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 7.96 s sys 0.35 s wall 8.06 s maxrss 1469416 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore col 20000000
+build col N=20000000               procCPU   1460.0 ms  threadCPU   1405.0 ms  wall   1405.0 ms    73.00 ns/op(procCPU)     17.0 B/op  GCs    0  gc     0 ms
+retained heap 340.3 MB = 17.02 bytes/node; first full GC: procCPU 80 ms wall 73 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 2 ms
+dfs col (200000 roots x 200)         threadCPU    310.6 ms (  7.76 ns/op)  procCPU    310.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 3.51 s sys 0.21 s wall 3.50 s maxrss 812724 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore aos 20000000
+build aos N=20000000               procCPU   1450.0 ms  threadCPU   1401.6 ms  wall   1401.6 ms    72.50 ns/op(procCPU)     16.0 B/op  GCs    0  gc     0 ms
+retained heap 320.3 MB = 16.02 bytes/node; first full GC: procCPU 80 ms wall 72 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 3 ms
+dfs aos (200000 roots x 200)         threadCPU    510.5 ms ( 12.76 ns/op)  procCPU    510.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 4.73 s sys 0.18 s wall 4.69 s maxrss 744668 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore chunk 20000000
+build chunk N=20000000             procCPU   1530.0 ms  threadCPU   1440.3 ms  wall   1443.9 ms    76.50 ns/op(procCPU)     16.1 B/op  GCs    0  gc     0 ms
+retained heap 323.3 MB = 16.16 bytes/node; first full GC: procCPU 70 ms wall 76 ms
+second full GC (structure already compacted/old): procCPU 10 ms wall 3 ms
+dfs chunk (200000 roots x 200)       threadCPU    572.0 ms ( 14.30 ns/op)  procCPU    570.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 5.18 s sys 0.17 s wall 5.12 s maxrss 778612 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore seg 20000000
+build seg N=20000000               procCPU   1520.0 ms  threadCPU   1430.8 ms  wall   1432.1 ms    76.00 ns/op(procCPU)      0.0 B/op  GCs    0  gc     0 ms
+retained heap 0.3 MB = 0.02 bytes/node; first full GC: procCPU 0 ms wall 3 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 2 ms
+dfs seg (200000 roots x 200)         threadCPU    509.2 ms ( 12.73 ns/op)  procCPU    510.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 5.00 s sys 0.09 s wall 4.76 s maxrss 458924 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC -XX:+UseCompactObjectHeaders] TermStore obj 20000000
+build obj N=20000000               procCPU   2220.0 ms  threadCPU   2161.3 ms  wall   2161.6 ms   111.00 ns/op(procCPU)     28.0 B/op  GCs    0  gc     0 ms
+retained heap 560.5 MB = 28.02 bytes/node; first full GC: procCPU 1380 ms wall 1370 ms
+second full GC (structure already compacted/old): procCPU 1060 ms wall 1058 ms
+dfs obj (200000 roots x 200)         threadCPU    532.9 ms ( 13.32 ns/op)  procCPU    530.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 7.91 s sys 0.30 s wall 7.96 s maxrss 1235796 KB
+--- [-Xms6g -Xmx6g -Xmn256m -XX:+UseSerialGC] TermStore obj 20000000
+build obj N=20000000               procCPU   3440.0 ms  threadCPU   2397.6 ms  wall   3385.2 ms   172.00 ns/op(procCPU)     33.8 B/op  GCs    3  gc   986 ms
+retained heap 677.1 MB = 33.86 bytes/node; first full GC: procCPU 1040 ms wall 1036 ms
+second full GC (structure already compacted/old): procCPU 1000 ms wall 994 ms
+dfs obj (200000 roots x 200)         threadCPU    720.9 ms ( 18.02 ns/op)  procCPU    720.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 9.90 s sys 0.29 s wall 9.91 s maxrss 1053668 KB
+--- [-Xms6g -Xmx6g -Xmn256m -XX:+UseSerialGC] TermStore col 20000000
+build col N=20000000               procCPU   1560.0 ms  threadCPU   1451.1 ms  wall   1498.6 ms    78.00 ns/op(procCPU)     17.0 B/op  GCs    1  gc    47 ms
+retained heap 340.3 MB = 17.02 bytes/node; first full GC: procCPU 30 ms wall 41 ms
+second full GC (structure already compacted/old): procCPU 10 ms wall 2 ms
+dfs col (200000 roots x 200)         threadCPU    272.7 ms (  6.82 ns/op)  procCPU    270.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 3.35 s sys 0.19 s wall 3.30 s maxrss 674200 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseParallelGC] TermStore obj 20000000
+build obj N=20000000               procCPU   2620.0 ms  threadCPU   2570.0 ms  wall   2570.0 ms   131.00 ns/op(procCPU)     33.8 B/op  GCs    0  gc     0 ms
+retained heap 677.1 MB = 33.86 bytes/node; first full GC: procCPU 1710 ms wall 355 ms
+second full GC (structure already compacted/old): procCPU 1270 ms wall 265 ms
+dfs obj (200000 roots x 200)         threadCPU    662.9 ms ( 16.57 ns/op)  procCPU    660.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 9.83 s sys 0.40 s wall 7.60 s maxrss 1493700 KB
+--- [-Xms6g -Xmx6g -XX:+UseG1GC] TermStore obj 20000000
+build obj N=20000000               procCPU   4550.0 ms  threadCPU   2409.1 ms  wall   2808.5 ms   227.50 ns/op(procCPU)     33.8 B/op  GCs    2  gc   398 ms
+retained heap 681.1 MB = 34.06 bytes/node; first full GC: procCPU 1130 ms wall 233 ms
+second full GC (structure already compacted/old): procCPU 1120 ms wall 221 ms
+dfs obj (200000 roots x 200)         threadCPU    371.9 ms (  9.30 ns/op)  procCPU    380.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -4757767636323353
+    TOTAL user 9.06 s sys 0.47 s wall 5.76 s maxrss 1225868 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore obj 100000
+build obj N=100000                 procCPU     30.0 ms  threadCPU     11.0 ms  wall     11.8 ms   300.00 ns/op(procCPU)     33.9 B/op  GCs    0  gc     0 ms
+retained heap 3.7 MB = 36.92 bytes/node; first full GC: procCPU 20 ms wall 6 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 4 ms
+dfs obj (200000 roots x 200)         threadCPU     69.1 ms (  1.73 ns/op)  procCPU     70.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -5341304833047780
+    TOTAL user 0.81 s sys 0.09 s wall 0.62 s maxrss 157116 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore col 100000
+build col N=100000                 procCPU     30.0 ms  threadCPU      9.4 ms  wall      9.7 ms   300.00 ns/op(procCPU)     17.1 B/op  GCs    0  gc     0 ms
+retained heap 2.0 MB = 20.08 bytes/node; first full GC: procCPU 0 ms wall 3 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 2 ms
+dfs col (200000 roots x 200)         threadCPU     56.6 ms (  1.42 ns/op)  procCPU     50.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -5341304833047780
+    TOTAL user 0.60 s sys 0.07 s wall 0.47 s maxrss 148860 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore aos 100000
+build aos N=100000                 procCPU     20.0 ms  threadCPU      9.3 ms  wall      9.4 ms   200.00 ns/op(procCPU)     16.1 B/op  GCs    0  gc     0 ms
+retained heap 1.9 MB = 19.08 bytes/node; first full GC: procCPU 10 ms wall 3 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 2 ms
+dfs aos (200000 roots x 200)         threadCPU     65.8 ms (  1.64 ns/op)  procCPU     70.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -5341304833047780
+    TOTAL user 0.69 s sys 0.06 s wall 0.53 s maxrss 152136 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore chunk 100000
+build chunk N=100000               procCPU     40.0 ms  threadCPU     11.8 ms  wall     12.2 ms   400.00 ns/op(procCPU)     42.0 B/op  GCs    0  gc     0 ms
+retained heap 4.5 MB = 45.02 bytes/node; first full GC: procCPU 0 ms wall 4 ms
+second full GC (structure already compacted/old): procCPU 10 ms wall 2 ms
+dfs chunk (200000 roots x 200)       threadCPU     97.0 ms (  2.43 ns/op)  procCPU    100.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -5341304833047780
+    TOTAL user 0.85 s sys 0.10 s wall 0.73 s maxrss 158144 KB
+--- [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore seg 100000
+build seg N=100000                 procCPU     80.0 ms  threadCPU     31.7 ms  wall     32.9 ms   800.00 ns/op(procCPU)      3.8 B/op  GCs    0  gc     0 ms
+retained heap 0.3 MB = 3.39 bytes/node; first full GC: procCPU 0 ms wall 3 ms
+second full GC (structure already compacted/old): procCPU 0 ms wall 2 ms
+dfs seg (200000 roots x 200)         threadCPU     58.9 ms (  1.47 ns/op)  procCPU     60.0 ms      0.0 B/op  GCs/run   0 (0 ms)
+checksum -5341304833047780
+    TOTAL user 0.95 s sys 0.06 s wall 0.64 s maxrss 158512 KB

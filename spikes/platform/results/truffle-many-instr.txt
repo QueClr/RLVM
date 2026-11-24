@@ -1,0 +1,64 @@
+NATIVE-CE plain many:300 1000 x300 | instr    87.493 G (virtual   14.58 s) | cpu    4.47 s | wall    4.47 s | rss     60 MB | exit 0
+    plain many:300(1000) = -4986361554775321600 | setup 0 ms | iter ms: 19 18 14 15 15 15 15 15 14 15 15 14 ... 14 | best 14.4 ms | wall total 4466 ms | bench-thread cpu 4467 ms | process cpu 4450 ms
+NATIVE-CE ast interp-only many:300 1000 x300 | instr   127.845 G (virtual   21.31 s) | cpu    6.47 s | wall    6.47 s | rss     68 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 31 23 22 22 22 21 21 21 22 21 21 21 ... 21 | best 21.2 ms | wall total 6466 ms | bench-thread cpu 6465 ms | process cpu 6460 ms
+NATIVE-CE bc interp-only many:300 1000 x300 | instr   185.967 G (virtual   30.99 s) | cpu   10.08 s | wall   10.09 s | rss     68 MB | exit 0
+    bc many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 43 34 33 33 34 33 34 33 33 33 33 33 ... 33 | best 33.1 ms | wall total 10078 ms | bench-thread cpu 10079 ms | process cpu 10070 ms
+NATIVE-CE ast many:300 1000 x300 | instr    30.240 G (virtual    5.04 s) | cpu    2.44 s | wall    0.82 s | rss    225 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 39 20 21 22 19 17 15 13 10 9 8 8 ... 0 | best 0.4 ms | wall total 802 ms | bench-thread cpu 796 ms | process cpu 2430 ms
+NATIVE-CE ast many:300 1000 x3000 | instr    61.184 G (virtual   10.20 s) | cpu    4.56 s | wall    1.71 s | rss    238 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 41 20 20 20 19 19 15 14 11 8 8 8 ... 0 | best 0.3 ms | wall total 1694 ms | bench-thread cpu 1684 ms | process cpu 4540 ms
+NATIVE-CE ast many:300 1000 x30000 | instr   136.334 G (virtual   22.72 s) | cpu   14.41 s | wall   11.13 s | rss    225 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 42 20 21 23 18 17 15 17 10 8 8 8 ... 0 | best 0.3 ms | wall total 11103 ms | bench-thread cpu 11088 ms | process cpu 14400 ms
+NATIVE-CE bc many:300 1000 x300 | instr    47.774 G (virtual    7.96 s) | cpu    3.80 s | wall    1.29 s | rss    265 MB | exit 0
+    bc many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 59 32 31 30 29 22 17 13 11 9 8 8 ... 0 | best 0.3 ms | wall total 1265 ms | bench-thread cpu 1245 ms | process cpu 3790 ms
+NATIVE-CE bc many:300 1000 x3000 | instr    87.756 G (virtual   14.63 s) | cpu    6.65 s | wall    2.52 s | rss    255 MB | exit 0
+    bc many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 60 33 33 29 27 26 18 16 18 10 8 8 ... 0 | best 0.4 ms | wall total 2488 ms | bench-thread cpu 2360 ms | process cpu 6620 ms
+NATIVE-CE ast many:300 1000 x300 [MultiTier=false] | instr    47.724 G (virtual    7.95 s) | cpu    2.76 s | wall    0.97 s | rss    231 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 31 22 22 22 22 22 25 22 22 22 20 18 ... 0 | best 0.4 ms | wall total 950 ms | bench-thread cpu 929 ms | process cpu 2740 ms
+NATIVE-CE ast many:300 1000 x3000 [MultiTier=false] | instr    77.796 G (virtual   12.97 s) | cpu    4.87 s | wall    2.04 s | rss    248 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 33 23 22 22 22 22 22 22 22 20 18 18 ... 0 | best 0.3 ms | wall total 2022 ms | bench-thread cpu 2001 ms | process cpu 4870 ms
+NATIVE-CE ast many:300 1000 x300 [tier1 only: LastTier threshold huge] | instr    12.765 G (virtual    2.13 s) | cpu    2.96 s | wall    2.63 s | rss    136 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 44 20 32 35 29 29 28 18 8 8 8 8 ... 8 | best 7.9 ms | wall total 2613 ms | bench-thread cpu 2534 ms | process cpu 2950 ms
+NATIVE-CE ast many:300 1000 x3000 [tier1 only] | instr    47.841 G (virtual    7.97 s) | cpu   16.76 s | wall   16.16 s | rss    163 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 38 20 21 20 18 20 16 13 12 8 8 8 ... 5 | best 5.1 ms | wall total 16151 ms | bench-thread cpu 16143 ms | process cpu 16750 ms
+NATIVE-CE ast many:300 1000 x300 [Inlining=false] | instr    15.898 G (virtual    2.65 s) | cpu    2.90 s | wall    2.16 s | rss    139 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 41 19 29 21 18 18 14 17 10 8 8 8 ... 6 | best 6.6 ms | wall total 2145 ms | bench-thread cpu 2123 ms | process cpu 2890 ms
+NATIVE-CE ast many:300 1000 x3000 [Inlining=false] | instr    46.168 G (virtual    7.69 s) | cpu   20.88 s | wall   20.13 s | rss    141 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 43 24 22 20 18 18 15 13 9 8 8 8 ... 6 | best 6.6 ms | wall total 20114 ms | bench-thread cpu 20088 ms | process cpu 20870 ms
+NATIVE-CE ast many:300 1000 x300 [BackgroundCompilation=false] | instr   376.779 G (virtual   62.80 s) | cpu   19.80 s | wall   19.90 s | rss    161 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 433 11 8 8 8 8 8 8 8 12575 6702 0 ... 0 | best 0.3 ms | wall total 19881 ms | bench-thread cpu 228 ms | process cpu 19790 ms
+NATIVE-CE ast many:300 1000 x300 [CompilerThreads=1] | instr    26.680 G (virtual    4.45 s) | cpu    2.30 s | wall    1.17 s | rss    152 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 1 ms | iter ms: 37 22 20 20 21 21 20 19 21 17 18 15 ... 0 | best 1.0 ms | wall total 1164 ms | bench-thread cpu 1155 ms | process cpu 2290 ms
+JVM plain many:300 1000 x300 | instr    70.357 G (virtual   11.73 s) | cpu    4.64 s | wall    4.53 s | rss    192 MB | exit 0
+    plain many:300(1000) = -4986361554775321600 | setup 16 ms | iter ms: 26 21 14 14 13 14 14 13 14 15 15 14 ... 13 | best 13.0 ms | wall total 4444 ms | bench-thread cpu 4341 ms | process cpu 4610 ms
+JVM plain many:300 1000 x3000 | instr   664.048 G (virtual  110.67 s) | cpu   40.05 s | wall   40.19 s | rss    196 MB | exit 0
+    plain many:300(1000) = -4986361554775321600 | setup 15 ms | iter ms: 28 20 13 14 12 13 13 13 14 13 14 12 ... 13 | best 12.4 ms | wall total 40107 ms | bench-thread cpu 39459 ms | process cpu 40030 ms
+JVM ast interp-only many:300 1000 x300 | instr   100.634 G (virtual   16.77 s) | cpu    6.42 s | wall    6.08 s | rss    243 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 236 ms | iter ms: 75 23 21 20 21 17 20 21 20 20 20 20 ... 18 | best 17.4 ms | wall total 5766 ms | bench-thread cpu 5609 ms | process cpu 6380 ms
+JVM ast many:300 1000 x300 | instr    65.787 G (virtual   10.96 s) | cpu    6.30 s | wall    2.73 s | rss    385 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 494 ms | iter ms: 295 83 23 20 17 16 16 24 37 28 37 19 ... 8 | best 2.2 ms | wall total 2037 ms | bench-thread cpu 1488 ms | process cpu 6180 ms
+JVM ast many:300 1000 x3000 | instr   208.285 G (virtual   34.71 s) | cpu   19.37 s | wall    7.14 s | rss    456 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 487 ms | iter ms: 201 62 17 17 15 17 16 19 13 29 14 12 ... 0 | best 0.8 ms | wall total 6462 ms | bench-thread cpu 4228 ms | process cpu 19240 ms
+JVM ast many:300 1000 x300 [C2 host: -XX:-UseJVMCICompiler] | instr    49.625 G (virtual    8.27 s) | cpu    4.64 s | wall    2.04 s | rss    410 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 214 ms | iter ms: 215 26 23 23 21 19 38 25 16 15 23 21 ... 1 | best 1.5 ms | wall total 1715 ms | bench-thread cpu 1171 ms | process cpu 4560 ms
+JVM(C2 host) ast many:300 1000 x300 [defaults] | instr    56.119 G (virtual    9.35 s) | cpu    5.84 s | wall    3.08 s | rss    389 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 504 ms | iter ms: 475 79 25 24 35 58 55 25 25 29 31 28 ... 4 | best 1.8 ms | wall total 2180 ms | bench-thread cpu 1422 ms | process cpu 5730 ms
+JVM(C2 host) ast many:300 1000 x3000 [defaults] | instr   188.714 G (virtual   31.45 s) | cpu   18.75 s | wall    8.56 s | rss    455 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 403 ms | iter ms: 273 52 47 64 23 34 32 17 30 59 13 31 ... 0 | best 0.6 ms | wall total 7979 ms | bench-thread cpu 4007 ms | process cpu 18670 ms
+JVM(C2 host) ast many:300 1000 x300 [FirstTier=25000 LastTier=2000000] | instr    39.611 G (virtual    6.60 s) | cpu    4.16 s | wall    3.46 s | rss    271 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 409 ms | iter ms: 294 32 21 22 20 23 22 22 23 22 22 22 ... 4 | best 4.2 ms | wall total 2906 ms | bench-thread cpu 2269 ms | process cpu 4130 ms
+JVM(C2 host) ast many:300 1000 x3000 [FirstTier=25000 LastTier=2000000] | instr   187.654 G (virtual   31.28 s) | cpu   19.13 s | wall   16.69 s | rss    416 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 460 ms | iter ms: 169 26 24 22 22 26 22 22 25 22 26 74 ... 0 | best 0.9 ms | wall total 15824 ms | bench-thread cpu 11024 ms | process cpu 19060 ms
+JVM(C2 host) ast many:300 1000 x3000 [FirstTier=25000 LastTier=2000000 CompilerThreads=1] | instr   155.486 G (virtual   25.91 s) | cpu   15.96 s | wall   13.46 s | rss    271 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 289 ms | iter ms: 92 23 21 22 20 22 27 23 23 23 22 22 ... 0 | best 0.8 ms | wall total 13013 ms | bench-thread cpu 11558 ms | process cpu 15920 ms
+JVM(C2 host) ast many:300 1000 x3000 [FirstTier=25000, tier 2 off (LastTier=2e9)] | instr   152.435 G (virtual   25.41 s) | cpu   16.43 s | wall   17.10 s | rss    274 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 368 ms | iter ms: 192 41 47 25 17 44 40 29 45 33 31 26 ... 4 | best 4.2 ms | wall total 16500 ms | bench-thread cpu 13745 ms | process cpu 16400 ms
+JVM(C2 host) ast many:300 1000 x30 [defaults] (each function called 30k times) | instr    24.312 G (virtual    4.05 s) | cpu    2.86 s | wall    2.20 s | rss    323 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 429 ms | iter ms: 364 78 23 42 18 16 16 15 16 34 54 56 ... 20 | best 9.5 ms | wall total 1560 ms | bench-thread cpu 748 ms | process cpu 2770 ms
+JVM(C2 host) ast many:300 1000 x30 [FirstTier=25000 LastTier=2000000] | instr    19.771 G (virtual    3.30 s) | cpu    2.21 s | wall    2.23 s | rss    269 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 535 ms | iter ms: 347 22 20 22 25 22 22 21 22 22 22 26 ... 52 | best 18.7 ms | wall total 1506 ms | bench-thread cpu 903 ms | process cpu 2150 ms
+JVM(C2 host) ast many:300 1000 x30 [Compilation=false] | instr    13.975 G (virtual    2.33 s) | cpu    1.54 s | wall    2.08 s | rss    196 MB | exit 0
+    ast many:300(1000) = -4986361554775321600 | setup 446 ms | iter ms: 224 87 36 29 19 26 28 22 40 24 23 26 ... 18 | best 18.5 ms | wall total 1006 ms | bench-thread cpu 898 ms | process cpu 1510 ms
+JVM(C2 host) plain many:300 1000 x30 | instr    10.828 G (virtual    1.80 s) | cpu    0.98 s | wall    0.91 s | rss    161 MB | exit 0
+    plain many:300(1000) = -4986361554775321600 | setup 39 ms | iter ms: 112 108 60 42 20 25 14 12 14 22 18 16 ... 12 | best 12.5 ms | wall total 726 ms | bench-thread cpu 460 ms | process cpu 950 ms

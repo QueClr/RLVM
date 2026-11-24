@@ -1,0 +1,24 @@
+--- [-Xms6g -Xmx6g -XX:+UseSerialGC -Xmn512m] CtorReuse 1000 20000 10000000 10
+young fresh  (len 1000)              threadCPU    345.8 ms ( 17.29 ns/op)  procCPU    350.0 ms     80.0 B/op  GCs/run   4 (1 ms)
+young reuse  (len 1000)              threadCPU    290.8 ms ( 14.54 ns/op)  procCPU    290.0 ms     56.0 B/op  GCs/run   3 (1 ms)
+old   fresh  (len 10000000 x 10 rounds)   procCPU   4570.0 ms ( 45.70 ns/elem)  wall   4935.9 ms  GCs 9 (3799 ms)  check 50000095000000
+old   reuse  (len 10000000 x 10 rounds)   procCPU   1110.0 ms ( 11.10 ns/elem)  wall   1314.2 ms  GCs 3 (792 ms)  check 50000095000000
+    TOTAL user 11.98 s sys 1.06 s wall 13.60 s maxrss 4802380 KB
+--- [-Xms6g -Xmx6g -XX:+UseSerialGC -Xmn512m -XX:+UseCompactObjectHeaders] CtorReuse 1000 20000 10000000 10
+young fresh  (len 1000)              threadCPU    361.8 ms ( 18.09 ns/op)  procCPU    360.0 ms     80.0 B/op  GCs/run   4 (0 ms)
+young reuse  (len 1000)              threadCPU    284.5 ms ( 14.22 ns/op)  procCPU    280.0 ms     56.0 B/op  GCs/run   3 (1 ms)
+old   fresh  (len 10000000 x 10 rounds)   procCPU   4610.0 ms ( 46.10 ns/elem)  wall   4652.5 ms  GCs 9 (3882 ms)  check 50000095000000
+old   reuse  (len 10000000 x 10 rounds)   procCPU   1150.0 ms ( 11.50 ns/elem)  wall   1139.0 ms  GCs 3 (686 ms)  check 50000095000000
+    TOTAL user 12.65 s sys 1.22 s wall 14.10 s maxrss 4802128 KB
+--- [-Xms6g -Xmx6g -XX:+UseParallelGC -Xmn512m -XX:ParallelGCThreads=2] CtorReuse 1000 20000 10000000 10
+young fresh  (len 1000)              threadCPU    162.4 ms (  8.12 ns/op)  procCPU    160.0 ms     80.0 B/op  GCs/run   3 (2 ms)
+young reuse  (len 1000)              threadCPU    137.6 ms (  6.88 ns/op)  procCPU    140.0 ms     56.0 B/op  GCs/run   3 (1 ms)
+old   fresh  (len 10000000 x 10 rounds)   procCPU  21350.0 ms (213.50 ns/elem)  wall  11229.8 ms  GCs 18 (10617 ms)  check 50000095000000
+old   reuse  (len 10000000 x 10 rounds)   procCPU   2600.0 ms ( 26.00 ns/elem)  wall   1606.7 ms  GCs 8 (1199 ms)  check 50000095000000
+    TOTAL user 43.19 s sys 1.91 s wall 24.74 s maxrss 4783908 KB
+--- [-Xms6g -Xmx6g -XX:+UseG1GC] CtorReuse 1000 20000 10000000 10
+young fresh  (len 1000)              threadCPU    154.1 ms (  7.70 ns/op)  procCPU    190.0 ms     80.0 B/op  GCs/run   0 (0 ms)
+young reuse  (len 1000)              threadCPU    122.7 ms (  6.13 ns/op)  procCPU    120.0 ms     56.0 B/op  GCs/run   0 (0 ms)
+old   fresh  (len 10000000 x 10 rounds)   procCPU   1970.0 ms ( 19.70 ns/elem)  wall   1162.4 ms  GCs 1 (609 ms)  check 50000095000000
+old   reuse  (len 10000000 x 10 rounds)   procCPU    650.0 ms (  6.50 ns/elem)  wall    646.9 ms  GCs 0 (0 ms)  check 50000095000000
+    TOTAL user 8.26 s sys 1.40 s wall 7.29 s maxrss 5015016 KB

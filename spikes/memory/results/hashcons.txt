@@ -1,0 +1,16 @@
+--- [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons ids 10000000
+hashcons ids N=10000000            procCPU    770.0 ms  threadCPU    724.2 ms  wall    725.9 ms    77.00 ns/op(procCPU)     26.4 B/op  GCs    0  gc     0 ms
+distinct 4998505  retained 265 MB (52.9 B per distinct node, incl. the request->result array)  full GC cpu 60 ms then 0 ms  check 16646956140060
+    TOTAL user 1.59 s sys 0.38 s wall 1.85 s maxrss 762804 KB
+--- [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons objopen 10000000
+hashcons objopen N=10000000        procCPU    970.0 ms  threadCPU    934.8 ms  wall    935.1 ms    97.00 ns/op(procCPU)     33.4 B/op  GCs    0  gc     0 ms
+distinct 4998741  retained 334 MB (66.9 B per distinct node, incl. the request->result array)  full GC cpu 930 ms then 670 ms  check 5973882172610
+    TOTAL user 3.44 s sys 0.22 s wall 3.52 s maxrss 893016 KB
+--- [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons hashmap 10000000
+hashcons hashmap N=10000000        procCPU   1410.0 ms  threadCPU   1180.4 ms  wall   1180.5 ms   141.00 ns/op(procCPU)     51.4 B/op  GCs    0  gc     0 ms
+distinct 4998741  retained 454 MB (90.9 B per distinct node, incl. the request->result array)  full GC cpu 1510 ms then 60 ms  check 5973882172610
+    TOTAL user 3.67 s sys 0.30 s wall 3.64 s maxrss 1186828 KB
+--- [-Xms8g -Xmx8g -Xmn2g -XX:+UseSerialGC] HashCons weak 10000000
+hashcons weak N=10000000           procCPU   1900.0 ms  threadCPU   1757.2 ms  wall   1796.4 ms   190.00 ns/op(procCPU)     70.0 B/op  GCs    0  gc     0 ms
+distinct 4998741  retained 494 MB (98.9 B per distinct node, incl. the request->result array)  full GC cpu 2350 ms then 1290 ms  check 5973882172610
+    TOTAL user 6.35 s sys 0.31 s wall 6.49 s maxrss 1412696 KB

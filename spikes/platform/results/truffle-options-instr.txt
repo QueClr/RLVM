@@ -1,0 +1,40 @@
+NATIVE-CE ast tree 20 x200 [] | instr    20.034 G (virtual    3.34 s) | cpu    0.92 s | wall    0.83 s | rss    148 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 41 21 5 3 3 3 4 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 820 ms | bench-thread cpu 819 ms | process cpu 900 ms
+NATIVE-CE ast tree 20 x200 [--engine.Mode=latency] | instr   110.033 G (virtual   18.34 s) | cpu    3.85 s | wall    3.84 s | rss    164 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 43 20 20 21 20 20 19 20 18 20 19 18 ... 18 | best 18.6 ms | wall total 3819 ms | bench-thread cpu 3813 ms | process cpu 3850 ms
+NATIVE-CE ast tree 20 x200 [--engine.Mode=throughput] | instr    20.065 G (virtual    3.34 s) | cpu    0.88 s | wall    0.80 s | rss    148 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 43 21 7 3 4 4 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 784 ms | bench-thread cpu 781 ms | process cpu 870 ms
+NATIVE-CE ast tree 20 x200 [--engine.MultiTier=false] | instr    19.703 G (virtual    3.28 s) | cpu    0.92 s | wall    0.84 s | rss    127 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 62 3 3 3 3 3 4 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 826 ms | bench-thread cpu 823 ms | process cpu 910 ms
+NATIVE-CE ast tree 20 x200 [--engine.BackgroundCompilation=false] | instr    18.775 G (virtual    3.13 s) | cpu    0.86 s | wall    0.87 s | rss    132 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 80 5 4 4 4 4 4 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 860 ms | bench-thread cpu 771 ms | process cpu 850 ms
+NATIVE-CE ast tree 20 x200 [--engine.CompilerThreads=1] | instr    20.131 G (virtual    3.36 s) | cpu    0.91 s | wall    0.83 s | rss    147 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 42 22 6 3 4 4 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 825 ms | bench-thread cpu 826 ms | process cpu 900 ms
+NATIVE-CE ast tree 20 x200 [--engine.Splitting=false] | instr    20.099 G (virtual    3.35 s) | cpu    0.92 s | wall    0.83 s | rss    151 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 45 21 7 3 4 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 818 ms | bench-thread cpu 814 ms | process cpu 900 ms
+NATIVE-CE ast tree 20 x200 [--engine.OSR=false] | instr    20.013 G (virtual    3.34 s) | cpu    0.91 s | wall    0.83 s | rss    146 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 42 21 3 3 3 3 3 4 4 3 3 3 ... 3 | best 3.5 ms | wall total 811 ms | bench-thread cpu 811 ms | process cpu 900 ms
+NATIVE-CE ast tree 20 x200 [--engine.FirstTierCompilationThreshold=4000 --engine.LastTierCompilationThreshold=100000] | instr    20.056 G (virtual    3.34 s) | cpu    0.92 s | wall    0.85 s | rss    146 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 47 21 7 3 5 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 838 ms | bench-thread cpu 828 ms | process cpu 910 ms
+NATIVE-CE ast tree 20 x200 [--engine.FirstTierCompilationThreshold=100 --engine.LastTierCompilationThreshold=1000] | instr    20.372 G (virtual    3.40 s) | cpu    0.90 s | wall    0.79 s | rss    149 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 40 21 5 3 3 3 4 4 3 3 3 3 ... 3 | best 3.5 ms | wall total 775 ms | bench-thread cpu 775 ms | process cpu 890 ms
+NATIVE-CE ast tree 20 x200 [--compiler.FirstTierUseEconomy=false] | instr    20.283 G (virtual    3.38 s) | cpu    0.93 s | wall    0.84 s | rss    150 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 44 21 5 3 3 4 4 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 823 ms | bench-thread cpu 821 ms | process cpu 920 ms
+NATIVE-CE ast tree 20 x200 [--engine.CompileOnly=node,leaf] | instr    19.779 G (virtual    3.30 s) | cpu    0.88 s | wall    0.81 s | rss    137 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 60 3 3 3 4 4 3 3 3 3 3 3 ... 3 | best 3.4 ms | wall total 797 ms | bench-thread cpu 797 ms | process cpu 860 ms
+NATIVE-CE ast tree 20 x200 [--engine.Compilation=false] | instr   736.881 G (virtual  122.81 s) | cpu   32.95 s | wall   32.96 s | rss     68 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 176 165 165 165 165 166 164 164 164 164 164 164 ... 165 | best 162.2 ms | wall total 32948 ms | bench-thread cpu 32946 ms | process cpu 32940 ms
+JVM ast tree 20 x200 [] | instr    31.485 G (virtual    5.25 s) | cpu    1.98 s | wall    1.31 s | rss    298 MB | exit 0
+    ast tree(20) = 1048576 | setup 158 ms | iter ms: 127 8 4 4 4 4 8 4 4 4 7 4 ... 4 | best 4.4 ms | wall total 1073 ms | bench-thread cpu 1141 ms | process cpu 1950 ms
+JVM ast tree 20 x200 [--engine.Mode=latency] | instr   140.437 G (virtual   23.41 s) | cpu    8.77 s | wall    8.24 s | rss    286 MB | exit 0
+    ast tree(20) = 1048576 | setup 180 ms | iter ms: 129 54 49 48 39 46 38 38 39 39 38 39 ... 39 | best 37.7 ms | wall total 7991 ms | bench-thread cpu 7768 ms | process cpu 8740 ms
+JVM ast tree 20 x200 [--engine.MultiTier=false] | instr    32.391 G (virtual    5.40 s) | cpu    2.09 s | wall    1.36 s | rss    294 MB | exit 0
+    ast tree(20) = 1048576 | setup 192 ms | iter ms: 130 4 4 4 7 4 4 4 7 4 4 4 ... 4 | best 4.4 ms | wall total 1086 ms | bench-thread cpu 1185 ms | process cpu 2050 ms
+JVM ast tree 20 x200 [--engine.BackgroundCompilation=false] | instr    30.501 G (virtual    5.08 s) | cpu    1.99 s | wall    1.45 s | rss    301 MB | exit 0
+    ast tree(20) = 1048576 | setup 184 ms | iter ms: 170 13 5 5 4 9 4 4 4 8 4 4 ... 4 | best 4.4 ms | wall total 1186 ms | bench-thread cpu 1132 ms | process cpu 1960 ms
+JVM ast tree 20 x200 [--engine.CompilerThreads=1] | instr    31.634 G (virtual    5.27 s) | cpu    2.01 s | wall    1.35 s | rss    260 MB | exit 0
+    ast tree(20) = 1048576 | setup 182 ms | iter ms: 142 15 4 4 4 7 4 4 4 7 4 4 ... 4 | best 4.4 ms | wall total 1089 ms | bench-thread cpu 1150 ms | process cpu 1980 ms
+JVM ast tree 20 x200 [-XX:-UseJVMCICompiler] | instr    27.883 G (virtual    4.65 s) | cpu    1.78 s | wall    1.35 s | rss    239 MB | exit 0
+    ast tree(20) = 1048576 | setup 175 ms | iter ms: 132 5 4 4 7 4 4 4 7 4 4 4 ... 4 | best 4.4 ms | wall total 1096 ms | bench-thread cpu 1193 ms | process cpu 1760 ms
+JVM ast tree 20 x200 [-XX:-UseJVMCICompiler -XX:TieredStopAtLevel=1] | instr    26.270 G (virtual    4.38 s) | cpu    1.54 s | wall    1.28 s | rss    231 MB | exit 0
+    ast tree(20) = 1048576 | setup 155 ms | iter ms: 121 4 4 4 4 7 4 4 4 7 4 4 ... 4 | best 4.3 ms | wall total 1060 ms | bench-thread cpu 1133 ms | process cpu 1530 ms

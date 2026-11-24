@@ -1,0 +1,88 @@
+JVM plain fib 32 x20 | instr    49.826 G (virtual    8.30 s) | cpu    2.49 s | wall    2.38 s | rss    188 MB | exit 0
+    plain fib(32) = 2178309 | setup 7 ms | iter ms: 136 122 115 115 115 116 114 112 112 113 113 112 ... 113 | best 112.2 ms | wall total 2303 ms | bench-thread cpu 2288 ms | process cpu 2470 ms
+JVM plain fib 32 x200 | instr   476.420 G (virtual   79.40 s) | cpu   22.73 s | wall   22.66 s | rss    187 MB | exit 0
+    plain fib(32) = 2178309 | setup 9 ms | iter ms: 138 121 117 116 115 116 115 113 113 112 113 112 ... 112 | best 111.1 ms | wall total 22578 ms | bench-thread cpu 22438 ms | process cpu 22710 ms
+JVM ast interp-only fib 32 x20 | instr    75.946 G (virtual   12.66 s) | cpu    3.65 s | wall    3.15 s | rss    238 MB | exit 0
+    ast fib(32) = 2178309 | setup 173 ms | iter ms: 198 174 147 140 140 140 140 139 140 139 140 140 ... 140 | best 139.9 ms | wall total 2908 ms | bench-thread cpu 2985 ms | process cpu 3620 ms
+JVM bc interp-only fib 32 x20 | instr   169.904 G (virtual   28.32 s) | cpu    7.44 s | wall    6.91 s | rss    241 MB | exit 0
+    bc fib(32) = 2178309 | setup 189 ms | iter ms: 425 335 322 322 324 322 323 322 322 323 323 329 ... 332 | best 322.1 ms | wall total 6658 ms | bench-thread cpu 6646 ms | process cpu 7420 ms
+JVM ast fib 32 x20 | instr    14.031 G (virtual    2.34 s) | cpu    1.21 s | wall    0.62 s | rss    282 MB | exit 0
+    ast fib(32) = 2178309 | setup 181 ms | iter ms: 111 14 14 10 14 14 14 14 10 14 14 14 ... 11 | best 10.8 ms | wall total 367 ms | bench-thread cpu 474 ms | process cpu 1180 ms
+JVM ast fib 32 x200 | instr    58.948 G (virtual    9.82 s) | cpu    3.17 s | wall    2.60 s | rss    283 MB | exit 0
+    ast fib(32) = 2178309 | setup 157 ms | iter ms: 105 14 14 14 10 13 14 14 14 10 14 14 ... 11 | best 10.6 ms | wall total 2376 ms | bench-thread cpu 2408 ms | process cpu 3140 ms
+JVM ast fib 32 x2000 | instr   512.261 G (virtual   85.38 s) | cpu   22.93 s | wall   22.53 s | rss    282 MB | exit 0
+    ast fib(32) = 2178309 | setup 175 ms | iter ms: 109 14 14 10 14 14 15 14 10 16 15 14 ... 11 | best 10.6 ms | wall total 22282 ms | bench-thread cpu 21819 ms | process cpu 22930 ms
+JVM bc fib 32 x20 | instr    15.001 G (virtual    2.50 s) | cpu    1.30 s | wall    0.72 s | rss    299 MB | exit 0
+    bc fib(32) = 2178309 | setup 221 ms | iter ms: 190 30 12 9 12 12 9 12 9 12 9 12 ... 12 | best 9.3 ms | wall total 425 ms | bench-thread cpu 502 ms | process cpu 1260 ms
+JVM bc fib 32 x200 | instr    54.767 G (virtual    9.13 s) | cpu    3.10 s | wall    2.47 s | rss    298 MB | exit 0
+    bc fib(32) = 2178309 | setup 201 ms | iter ms: 174 24 13 9 13 9 13 13 9 13 9 13 ... 10 | best 9.5 ms | wall total 2198 ms | bench-thread cpu 2250 ms | process cpu 3070 ms
+JVM bc fib 32 x2000 | instr   455.748 G (virtual   75.96 s) | cpu   19.92 s | wall   19.40 s | rss    298 MB | exit 0
+    bc fib(32) = 2178309 | setup 185 ms | iter ms: 149 26 12 9 12 9 12 9 12 12 9 12 ... 9 | best 9.0 ms | wall total 19146 ms | bench-thread cpu 18796 ms | process cpu 19920 ms
+NATIVE-CE plain fib 32 x20 | instr    76.014 G (virtual   12.67 s) | cpu    3.21 s | wall    3.22 s | rss     59 MB | exit 0
+    plain fib(32) = 2178309 | setup 0 ms | iter ms: 169 160 160 159 160 159 160 160 160 159 159 159 ... 160 | best 159.9 ms | wall total 3210 ms | bench-thread cpu 3210 ms | process cpu 3200 ms
+NATIVE-CE plain fib 32 x200 | instr   760.187 G (virtual  126.70 s) | cpu   32.20 s | wall   32.21 s | rss     59 MB | exit 0
+    plain fib(32) = 2178309 | setup 0 ms | iter ms: 169 161 161 161 161 161 161 161 161 160 160 160 ... 159 | best 158.5 ms | wall total 32204 ms | bench-thread cpu 32195 ms | process cpu 32190 ms
+NATIVE-CE ast interp-only fib 32 x20 | instr   115.669 G (virtual   19.28 s) | cpu    5.15 s | wall    5.16 s | rss     65 MB | exit 0
+    ast fib(32) = 2178309 | setup 0 ms | iter ms: 270 255 256 255 256 256 256 256 256 256 256 257 ... 257 | best 255.8 ms | wall total 5147 ms | bench-thread cpu 5146 ms | process cpu 5140 ms
+NATIVE-CE bc interp-only fib 32 x20 | instr   219.818 G (virtual   36.64 s) | cpu   10.96 s | wall   10.97 s | rss     66 MB | exit 0
+    bc fib(32) = 2178309 | setup 0 ms | iter ms: 549 541 542 549 550 549 548 546 545 547 550 548 ... 548 | best 541.4 ms | wall total 10960 ms | bench-thread cpu 10959 ms | process cpu 10950 ms
+NATIVE-CE ast fib 32 x20 | instr     2.488 G (virtual    0.41 s) | cpu    0.10 s | wall    0.09 s | rss     47 MB | exit 0
+    ast fib(32) = 2178309 | setup 0 ms | iter ms: 14 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 81 ms | bench-thread cpu 82 ms | process cpu 90 ms
+NATIVE-CE ast fib 32 x200 | instr    21.569 G (virtual    3.59 s) | cpu    0.74 s | wall    0.73 s | rss     47 MB | exit 0
+    ast fib(32) = 2178309 | setup 0 ms | iter ms: 14 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 719 ms | bench-thread cpu 720 ms | process cpu 730 ms
+NATIVE-CE ast fib 32 x2000 | instr   212.365 G (virtual   35.39 s) | cpu    7.12 s | wall    7.10 s | rss     52 MB | exit 0
+    ast fib(32) = 2178309 | setup 0 ms | iter ms: 14 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 7092 ms | bench-thread cpu 7092 ms | process cpu 7110 ms
+NATIVE-CE bc fib 32 x20 | instr     2.604 G (virtual    0.43 s) | cpu    0.11 s | wall    0.09 s | rss     57 MB | exit 0
+    bc fib(32) = 2178309 | setup 0 ms | iter ms: 20 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 87 ms | bench-thread cpu 87 ms | process cpu 100 ms
+NATIVE-CE bc fib 32 x200 | instr    20.006 G (virtual    3.33 s) | cpu    0.74 s | wall    0.73 s | rss     58 MB | exit 0
+    bc fib(32) = 2178309 | setup 0 ms | iter ms: 21 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 720 ms | bench-thread cpu 720 ms | process cpu 730 ms
+NATIVE-CE bc fib 32 x2000 | instr   194.666 G (virtual   32.44 s) | cpu    6.56 s | wall    6.54 s | rss     63 MB | exit 0
+    bc fib(32) = 2178309 | setup 0 ms | iter ms: 21 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.2 ms | wall total 6531 ms | bench-thread cpu 6530 ms | process cpu 6550 ms
+JVM plain tree 20 x20 | instr    30.130 G (virtual    5.02 s) | cpu    1.61 s | wall    1.48 s | rss    183 MB | exit 0
+    plain tree(20) = 1048576 | setup 6 ms | iter ms: 96 79 71 69 67 67 67 68 73 66 67 67 ... 67 | best 66.9 ms | wall total 1403 ms | bench-thread cpu 1377 ms | process cpu 1590 ms
+JVM plain tree 20 x200 | instr   274.913 G (virtual   45.82 s) | cpu   13.58 s | wall   13.61 s | rss    188 MB | exit 0
+    plain tree(20) = 1048576 | setup 8 ms | iter ms: 94 78 70 71 66 66 66 67 67 66 66 68 ... 67 | best 65.9 ms | wall total 13534 ms | bench-thread cpu 13212 ms | process cpu 13580 ms
+JVM ast interp-only tree 20 x20 | instr    72.220 G (virtual   12.04 s) | cpu    3.51 s | wall    3.01 s | rss    240 MB | exit 0
+    ast tree(20) = 1048576 | setup 176 ms | iter ms: 202 172 138 131 131 131 133 132 132 130 131 130 ... 133 | best 130.7 ms | wall total 2752 ms | bench-thread cpu 2802 ms | process cpu 3480 ms
+JVM bc interp-only tree 20 x20 | instr   115.237 G (virtual   19.21 s) | cpu    5.56 s | wall    4.99 s | rss    245 MB | exit 0
+    bc tree(20) = 1048576 | setup 168 ms | iter ms: 301 262 231 230 228 228 231 231 231 230 231 230 ... 236 | best 228.1 ms | wall total 4748 ms | bench-thread cpu 4714 ms | process cpu 5540 ms
+JVM ast tree 20 x20 | instr    11.748 G (virtual    1.96 s) | cpu    1.14 s | wall    0.48 s | rss    306 MB | exit 0
+    ast tree(20) = 1048576 | setup 173 ms | iter ms: 125 8 4 4 4 4 8 4 4 4 7 4 ... 5 | best 4.4 ms | wall total 229 ms | bench-thread cpu 361 ms | process cpu 1100 ms
+JVM ast tree 20 x200 | instr    31.683 G (virtual    5.28 s) | cpu    2.02 s | wall    1.34 s | rss    300 MB | exit 0
+    ast tree(20) = 1048576 | setup 185 ms | iter ms: 136 5 8 4 4 4 8 4 4 4 8 4 ... 4 | best 4.4 ms | wall total 1090 ms | bench-thread cpu 1172 ms | process cpu 1980 ms
+JVM ast tree 20 x2000 | instr   226.230 G (virtual   37.71 s) | cpu   10.32 s | wall    9.62 s | rss    303 MB | exit 0
+    ast tree(20) = 1048576 | setup 203 ms | iter ms: 137 8 4 4 4 7 4 4 4 7 4 4 ... 4 | best 4.4 ms | wall total 9335 ms | bench-thread cpu 9298 ms | process cpu 10290 ms
+JVM bc tree 20 x20 | instr    15.716 G (virtual    2.62 s) | cpu    1.45 s | wall    0.57 s | rss    328 MB | exit 0
+    bc tree(20) = 1048576 | setup 171 ms | iter ms: 157 51 44 3 3 3 3 3 3 3 3 3 ... 3 | best 3.4 ms | wall total 316 ms | bench-thread cpu 422 ms | process cpu 1420 ms
+JVM bc tree 20 x200 | instr    28.820 G (virtual    4.80 s) | cpu    2.08 s | wall    1.17 s | rss    321 MB | exit 0
+    bc tree(20) = 1048576 | setup 160 ms | iter ms: 148 54 46 3 3 3 3 3 3 3 3 3 ... 3 | best 3.3 ms | wall total 930 ms | bench-thread cpu 1015 ms | process cpu 2040 ms
+JVM bc tree 20 x2000 | instr   159.981 G (virtual   26.66 s) | cpu    8.26 s | wall    7.27 s | rss    322 MB | exit 0
+    bc tree(20) = 1048576 | setup 189 ms | iter ms: 149 50 50 9 3 3 3 3 3 3 3 3 ... 3 | best 3.3 ms | wall total 6997 ms | bench-thread cpu 7055 ms | process cpu 8240 ms
+NATIVE-CE plain tree 20 x20 | instr    37.994 G (virtual    6.33 s) | cpu    1.77 s | wall    1.77 s | rss     60 MB | exit 0
+    plain tree(20) = 1048576 | setup 0 ms | iter ms: 99 87 87 87 87 87 87 87 87 87 87 87 ... 87 | best 87.4 ms | wall total 1766 ms | bench-thread cpu 1765 ms | process cpu 1750 ms
+NATIVE-CE plain tree 20 x200 | instr   379.879 G (virtual   63.31 s) | cpu   17.51 s | wall   17.52 s | rss     60 MB | exit 0
+    plain tree(20) = 1048576 | setup 0 ms | iter ms: 97 87 87 87 87 87 87 87 87 87 87 87 ... 87 | best 87.1 ms | wall total 17509 ms | bench-thread cpu 17505 ms | process cpu 17500 ms
+NATIVE-CE ast interp-only tree 20 x20 | instr    73.701 G (virtual   12.28 s) | cpu    3.32 s | wall    3.33 s | rss     66 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 176 165 165 164 165 164 164 164 164 165 166 166 ... 164 | best 164.6 ms | wall total 3318 ms | bench-thread cpu 3318 ms | process cpu 3310 ms
+NATIVE-CE bc interp-only tree 20 x20 | instr   137.251 G (virtual   22.88 s) | cpu    7.07 s | wall    7.08 s | rss     66 MB | exit 0
+    bc tree(20) = 1048576 | setup 0 ms | iter ms: 361 353 353 357 357 352 351 350 350 347 357 353 ... 358 | best 346.1 ms | wall total 7069 ms | bench-thread cpu 7069 ms | process cpu 7060 ms
+NATIVE-CE ast tree 20 x20 | instr     4.160 G (virtual    0.69 s) | cpu    0.24 s | wall    0.16 s | rss    150 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 47 22 7 3 5 3 3 3 3 3 3 3 ... 3 | best 3.5 ms | wall total 143 ms | bench-thread cpu 140 ms | process cpu 220 ms
+NATIVE-CE ast tree 20 x200 | instr    20.000 G (virtual    3.33 s) | cpu    0.87 s | wall    0.78 s | rss    148 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 41 21 5 3 3 3 4 4 3 3 3 3 ... 3 | best 3.4 ms | wall total 769 ms | bench-thread cpu 769 ms | process cpu 850 ms
+NATIVE-CE ast tree 20 x2000 | instr   178.938 G (virtual   29.82 s) | cpu    7.32 s | wall    7.21 s | rss    148 MB | exit 0
+    ast tree(20) = 1048576 | setup 0 ms | iter ms: 42 21 4 3 3 3 3 4 3 3 3 3 ... 3 | best 3.4 ms | wall total 7195 ms | bench-thread cpu 7193 ms | process cpu 7310 ms
+NATIVE-CE bc tree 20 x20 | instr     5.228 G (virtual    0.87 s) | cpu    0.28 s | wall    0.17 s | rss    158 MB | exit 0
+    bc tree(20) = 1048576 | setup 0 ms | iter ms: 42 21 20 11 3 3 3 3 3 3 3 3 ... 3 | best 3.9 ms | wall total 158 ms | bench-thread cpu 157 ms | process cpu 270 ms
+NATIVE-CE bc tree 20 x200 | instr    20.997 G (virtual    3.50 s) | cpu    1.02 s | wall    0.90 s | rss    165 MB | exit 0
+    bc tree(20) = 1048576 | setup 0 ms | iter ms: 44 21 20 16 4 4 4 4 4 4 3 3 ... 3 | best 3.9 ms | wall total 878 ms | bench-thread cpu 876 ms | process cpu 1010 ms
+NATIVE-CE bc tree 20 x2000 | instr   176.521 G (virtual   29.42 s) | cpu    8.13 s | wall    7.97 s | rss    166 MB | exit 0
+    bc tree(20) = 1048576 | setup 0 ms | iter ms: 45 21 20 10 3 3 3 3 3 3 3 3 ... 3 | best 3.9 ms | wall total 7962 ms | bench-thread cpu 7961 ms | process cpu 8130 ms
+NATIVE-CE(enableTailCallHandlers) bc interp-only fib 32 x20 | instr   176.403 G (virtual   29.40 s) | cpu    7.65 s | wall    7.69 s | rss     87 MB | exit 0
+    bc fib(32) = 2178309 | setup 5 ms | iter ms: 414 377 374 379 382 377 375 388 383 383 385 378 ... 382 | best 374.3 ms | wall total 7672 ms | bench-thread cpu 7642 ms | process cpu 7640 ms
+NATIVE-CE(enableTailCallHandlers) bc fib 32 x200 | instr    19.891 G (virtual    3.32 s) | cpu    0.73 s | wall    0.71 s | rss     69 MB | exit 0
+    bc fib(32) = 2178309 | setup 0 ms | iter ms: 24 3 3 3 3 3 3 3 3 3 3 3 ... 3 | best 3.2 ms | wall total 700 ms | bench-thread cpu 701 ms | process cpu 710 ms
+NATIVE-CE(enableTailCallHandlers) bc interp-only tree 20 x20 | instr   121.033 G (virtual   20.17 s) | cpu    5.38 s | wall    5.38 s | rss     94 MB | exit 0
+    bc tree(20) = 1048576 | setup 0 ms | iter ms: 281 265 265 265 266 265 267 267 265 266 266 265 ... 275 | best 265.0 ms | wall total 5374 ms | bench-thread cpu 5374 ms | process cpu 5370 ms
+NATIVE-CE(enableTailCallHandlers) bc tree 20 x200 | instr    21.025 G (virtual    3.50 s) | cpu    1.01 s | wall    0.89 s | rss    165 MB | exit 0
+    bc tree(20) = 1048576 | setup 0 ms | iter ms: 42 21 22 14 4 4 4 3 3 3 3 3 ... 3 | best 3.9 ms | wall total 877 ms | bench-thread cpu 873 ms | process cpu 1000 ms

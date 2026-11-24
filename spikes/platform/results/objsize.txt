@@ -1,0 +1,92 @@
+### HotSpot (CE 25.5.5.0.3) [-XX:+UseSerialGC -Xmx2g ]
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26  maxHeap=1979MB
+Object                             allocated  16.00 B/obj
+IntOnly {int}                      allocated  16.00 B/obj
+LongOnly {long}                    allocated  24.00 B/obj
+Ref1 {ref}                         allocated  16.00 B/obj
+Ref2 {ref,ref}                     allocated  24.00 B/obj
+ByteRef2 {byte,ref,ref}            allocated  24.00 B/obj
+Ref2Int {ref,ref,int}              allocated  24.00 B/obj
+Ref2Int2 {ref,ref,int,int}         allocated  32.00 B/obj
+Ref3 {ref,ref,ref}                 allocated  24.00 B/obj
+Ref3Int {ref,ref,ref,int}          allocated  32.00 B/obj
+Ref4 {ref x4}                      allocated  32.00 B/obj
+LongRef {long,ref}                 allocated  24.00 B/obj
+Long (boxed)                       allocated  24.00 B/obj
+int[0]                             allocated  16.00 B/obj
+int[3]                             allocated  32.00 B/obj
+int[4]                             allocated  32.00 B/obj
+Object[1]                          allocated  24.00 B/obj
+Object[2]                          allocated  24.00 B/obj
+Object[4]                          allocated  32.00 B/obj
+lambda capturing 1 ref             allocated  16.00 B/obj
+lambda capturing 2 refs            allocated  24.00 B/obj
+### HotSpot (CE 25.5.5.0.3) [-XX:+UseSerialGC -Xmx2g -XX:+UseCompactObjectHeaders]
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26  maxHeap=1979MB
+Object                             allocated   8.00 B/obj
+IntOnly {int}                      allocated  16.00 B/obj
+LongOnly {long}                    allocated  16.00 B/obj
+Ref1 {ref}                         allocated  16.00 B/obj
+Ref2 {ref,ref}                     allocated  16.00 B/obj
+ByteRef2 {byte,ref,ref}            allocated  24.00 B/obj
+Ref2Int {ref,ref,int}              allocated  24.00 B/obj
+Ref2Int2 {ref,ref,int,int}         allocated  24.00 B/obj
+Ref3 {ref,ref,ref}                 allocated  24.00 B/obj
+Ref3Int {ref,ref,ref,int}          allocated  24.00 B/obj
+Ref4 {ref x4}                      allocated  24.00 B/obj
+LongRef {long,ref}                 allocated  24.00 B/obj
+Long (boxed)                       allocated  16.00 B/obj
+int[0]                             allocated  16.00 B/obj
+int[3]                             allocated  24.00 B/obj
+int[4]                             allocated  32.00 B/obj
+Object[1]                          allocated  16.00 B/obj
+Object[2]                          allocated  24.00 B/obj
+Object[4]                          allocated  32.00 B/obj
+lambda capturing 1 ref             allocated  16.00 B/obj
+lambda capturing 2 refs            allocated  16.00 B/obj
+### HotSpot (CE 25.5.5.0.3) [-XX:+UseSerialGC -Xmx2g -XX:-UseCompressedOops]
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26  maxHeap=1979MB
+Object                             allocated  16.00 B/obj
+IntOnly {int}                      allocated  16.00 B/obj
+LongOnly {long}                    allocated  24.00 B/obj
+Ref1 {ref}                         allocated  24.00 B/obj
+Ref2 {ref,ref}                     allocated  32.00 B/obj
+ByteRef2 {byte,ref,ref}            allocated  32.00 B/obj
+Ref2Int {ref,ref,int}              allocated  32.00 B/obj
+Ref2Int2 {ref,ref,int,int}         allocated  40.00 B/obj
+Ref3 {ref,ref,ref}                 allocated  40.00 B/obj
+Ref3Int {ref,ref,ref,int}          allocated  40.00 B/obj
+Ref4 {ref x4}                      allocated  48.00 B/obj
+LongRef {long,ref}                 allocated  32.00 B/obj
+Long (boxed)                       allocated  24.00 B/obj
+int[0]                             allocated  16.00 B/obj
+int[3]                             allocated  32.00 B/obj
+int[4]                             allocated  32.00 B/obj
+Object[1]                          allocated  24.00 B/obj
+Object[2]                          allocated  32.00 B/obj
+Object[4]                          allocated  48.00 B/obj
+lambda capturing 1 ref             allocated  24.00 B/obj
+lambda capturing 2 refs            allocated  32.00 B/obj
+### native-image CE 25.5.5.0.3 (epsilon GC so that the heap delta is exact)
+vm: Substrate VM 25.0.5.0.3+1  maxHeap=4096MB
+Object                             allocated   8.00 B/obj   retained   7.86 B/obj
+IntOnly {int}                      allocated  16.00 B/obj   retained  15.99 B/obj
+LongOnly {long}                    allocated  16.00 B/obj   retained  15.99 B/obj
+Ref1 {ref}                         allocated  16.00 B/obj   retained  15.99 B/obj
+Ref2 {ref,ref}                     allocated  16.00 B/obj   retained  15.99 B/obj
+ByteRef2 {byte,ref,ref}            allocated  24.00 B/obj   retained  24.12 B/obj
+Ref2Int {ref,ref,int}              allocated  24.00 B/obj   retained  24.12 B/obj
+Ref2Int2 {ref,ref,int,int}         allocated  24.00 B/obj   retained  24.12 B/obj
+Ref3 {ref,ref,ref}                 allocated  24.00 B/obj   retained  23.86 B/obj
+Ref3Int {ref,ref,ref,int}          allocated  24.00 B/obj   retained  24.12 B/obj
+Ref4 {ref x4}                      allocated  24.00 B/obj   retained  23.86 B/obj
+LongRef {long,ref}                 allocated  24.00 B/obj   retained  24.12 B/obj
+Long (boxed)                       allocated  16.00 B/obj   retained  15.99 B/obj
+int[0]                             allocated   8.00 B/obj   retained   7.86 B/obj
+int[3]                             allocated  24.00 B/obj   retained  24.12 B/obj
+int[4]                             allocated  24.00 B/obj   retained  24.12 B/obj
+Object[1]                          allocated  16.00 B/obj   retained  15.99 B/obj
+Object[2]                          allocated  16.00 B/obj   retained  15.99 B/obj
+Object[4]                          allocated  24.00 B/obj   retained  24.12 B/obj
+lambda capturing 1 ref             allocated  16.00 B/obj   retained  15.99 B/obj
+lambda capturing 2 refs            allocated  16.00 B/obj   retained  15.99 B/obj

@@ -1,0 +1,46 @@
+SETUP /home/queclr/Documents/rabdos-lean-vm/work/stepper-out/init.bin terms=6137092 constants=59979 roots=115807 setup_ms=201
+VERIFY variant=Ri roots=115807 mismatches=0
+VERIFY variant=W0 roots=115807 mismatches=0
+VERIFY variant=W1 roots=115807 mismatches=0
+VERIFY variant=W1n roots=115807 mismatches=0
+VERIFY variant=H0 roots=115807 mismatches=0
+VERIFY variant=H4 roots=115807 mismatches=0
+VERIFY variant=H8 roots=115807 mismatches=0
+VERIFY variant=H32 roots=115807 mismatches=0
+VERIFY variant=H64 roots=115807 mismatches=0
+VERIFY variant=H256 roots=115807 mismatches=0
+VERIFY variant=Hinf roots=115807 mismatches=0
+VERIFY variant=Hi64 roots=115807 mismatches=0
+VERIFY variant=HT0 roots=115807 mismatches=0
+VERIFY variant=HT64 roots=115807 mismatches=0
+VERIFY variant=HTinf roots=115807 mismatches=0
+VERIFY OK conv_failures_under_R=0
+SETUP /home/queclr/Documents/rabdos-lean-vm/work/stepper-out/cedar.bin terms=14728503 constants=151772 roots=292275 setup_ms=545
+VERIFY variant=Ri roots=292275 mismatches=0
+VERIFY variant=W0 roots=292275 mismatches=0
+VERIFY variant=W1 roots=292275 mismatches=0
+VERIFY variant=W1n roots=292275 mismatches=0
+VERIFY variant=H0 roots=292275 mismatches=0
+VERIFY variant=H4 roots=292275 mismatches=0
+VERIFY variant=H8 roots=292275 mismatches=0
+VERIFY variant=H32 roots=292275 mismatches=0
+VERIFY variant=H64 roots=292275 mismatches=0
+VERIFY variant=H256 roots=292275 mismatches=0
+VERIFY variant=Hinf roots=292275 mismatches=0
+VERIFY variant=Hi64 roots=292275 mismatches=0
+VERIFY variant=HT0 roots=292275 mismatches=0
+VERIFY variant=HT64 roots=292275 mismatches=0
+VERIFY variant=HTinf roots=292275 mismatches=0
+VERIFY OK conv_failures_under_R=0
+TRY variant=HT0 budget=10 roots=115807 T=8121 F=0 U=107686 ticks=1096869 checksum=e2335cc5655fcb40 values=3529695
+TRY variant=HT64 budget=10 roots=115807 T=8121 F=0 U=107686 ticks=1096869 checksum=e2335cc5655fcb40 values=3529695
+TRY variant=HTinf budget=10 roots=115807 T=8121 F=0 U=107686 ticks=1096869 checksum=e2335cc5655fcb40 values=3529695
+TRY variant=HT0 budget=100 roots=115807 T=44562 F=0 U=71245 ticks=9274809 checksum=c8851bfab555fbcd values=3796131
+TRY variant=HT64 budget=100 roots=115807 T=44562 F=0 U=71245 ticks=9274809 checksum=c8851bfab555fbcd values=3796131
+TRY variant=HTinf budget=100 roots=115807 T=44562 F=0 U=71245 ticks=9274809 checksum=c8851bfab555fbcd values=3796131
+TRY variant=HT0 budget=1000 roots=115807 T=97395 F=0 U=18412 ticks=35122800 checksum=eb50d81544b2e585 values=4183237
+TRY variant=HT64 budget=1000 roots=115807 T=97395 F=0 U=18412 ticks=35122800 checksum=eb50d81544b2e585 values=4183237
+TRY variant=HTinf budget=1000 roots=115807 T=97395 F=0 U=18412 ticks=35122800 checksum=eb50d81544b2e585 values=4183237
+TRY variant=HT0 budget=100000 roots=115807 T=115807 F=0 U=0 ticks=154587249 checksum=13f2afba4f12ad32 values=5021039
+TRY variant=HT64 budget=100000 roots=115807 T=115807 F=0 U=0 ticks=154587249 checksum=13f2afba4f12ad32 values=5021039
+TRY variant=HTinf budget=100000 roots=115807 T=115807 F=0 U=0 ticks=154587249 checksum=13f2afba4f12ad32 values=5021039

@@ -1,0 +1,81 @@
+JVM Graal+Serial tag tree4m-norm x10 | instr    23.494 G (virtual    3.92 s) | cpu    2.09 s | wall    2.18 s | rss   1911 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 266 260 372 121 119 231 121 121 183 121 | best 119.7 | avg 192.0 | wall 1919 ms | bench-thread cpu 1569 ms | process cpu 2050 ms | GCs 3 (348 ms pause)
+JVM C2+Serial tag tree4m-norm x10 | instr    21.596 G (virtual    3.60 s) | cpu    2.30 s | wall    2.53 s | rss   1866 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 339 330 464 128 135 256 137 137 204 130 | best 128.1 | avg 226.4 | wall 2263 ms | bench-thread cpu 1824 ms | process cpu 2270 ms | GCs 3 (384 ms pause)
+JVM C1only+Serial tag tree4m-norm x10 | instr    32.689 G (virtual    5.45 s) | cpu    2.83 s | wall    2.97 s | rss   1866 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 324 317 461 207 208 329 207 207 275 210 | best 207.0 | avg 275.0 | wall 2749 ms | bench-thread cpu 2374 ms | process cpu 2820 ms | GCs 3 (377 ms pause)
+JVM C2+Epsilon(40g) tag tree4m-norm x10 | instr    18.747 G (virtual    3.12 s) | cpu    3.61 s | wall    4.09 s | rss   7408 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 345 338 331 332 354 362 376 360 357 340 | best 331.4 | avg 350.1 | wall 3500 ms | bench-thread cpu 3473 ms | process cpu 3580 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ce tag tree4m-norm x10 | instr    28.177 G (virtual    4.70 s) | cpu    1.90 s | wall    2.11 s | rss   1628 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 234 244 221 208 130 130 228 128 127 244 | best 127.8 | avg 189.9 | wall 1898 ms | bench-thread cpu 1892 ms | process cpu 1890 ms | GCs 3 (290 ms pause)
+NATIVE nbe-ce-O3 tag tree4m-norm x10 | instr    27.383 G (virtual    4.56 s) | cpu    1.90 s | wall    2.24 s | rss   1629 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 275 234 241 224 126 127 229 126 128 244 | best 126.7 | avg 196.1 | wall 1960 ms | bench-thread cpu 1885 ms | process cpu 1880 ms | GCs 3 (317 ms pause)
+NATIVE nbe-ce-native tag tree4m-norm x10 | instr    28.178 G (virtual    4.70 s) | cpu    1.94 s | wall    2.15 s | rss   1628 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 287 240 229 209 131 128 234 131 128 251 | best 128.7 | avg 197.3 | wall 1972 ms | bench-thread cpu 1926 ms | process cpu 1930 ms | GCs 3 (304 ms pause)
+NATIVE nbe-ee tag tree4m-norm x10 | instr    27.377 G (virtual    4.56 s) | cpu    1.81 s | wall    1.98 s | rss   1679 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 241 216 204 191 124 113 229 112 112 290 | best 112.5 | avg 183.7 | wall 1837 ms | bench-thread cpu 1801 ms | process cpu 1790 ms | GCs 3 (368 ms pause)
+NATIVE nbe-ee-O3 tag tree4m-norm x10 | instr    28.021 G (virtual    4.67 s) | cpu    1.90 s | wall    2.11 s | rss   1679 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 212 234 247 208 120 120 245 123 120 323 | best 120.1 | avg 195.7 | wall 1957 ms | bench-thread cpu 1893 ms | process cpu 1890 ms | GCs 3 (409 ms pause)
+NATIVE nbe-ee-pgo tag tree4m-norm x10 | instr    28.960 G (virtual    4.83 s) | cpu    1.76 s | wall    1.85 s | rss   1794 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 173 170 176 415 108 116 109 270 107 107 | best 107.7 | avg 175.6 | wall 1756 ms | bench-thread cpu 1752 ms | process cpu 1750 ms | GCs 2 (407 ms pause)
+NATIVE nbe-ee-pgo-O3 tag tree4m-norm x10 | instr    28.960 G (virtual    4.83 s) | cpu    1.87 s | wall    2.25 s | rss   1795 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 204 203 212 435 111 121 113 293 134 113 | best 112.0 | avg 194.4 | wall 1943 ms | bench-thread cpu 1864 ms | process cpu 1860 ms | GCs 2 (428 ms pause)
+NATIVE nbe-ee-g1 tag tree4m-norm x10 | instr    28.747 G (virtual    4.79 s) | cpu    2.38 s | wall    2.46 s | rss   2258 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 308 310 298 335 128 158 301 196 119 109 | best 109.9 | avg 226.6 | wall 2265 ms | bench-thread cpu 1759 ms | process cpu 2370 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ee-pgo-g1 tag tree4m-norm x10 | instr    29.502 G (virtual    4.92 s) | cpu    2.27 s | wall    2.40 s | rss   2136 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 295 281 275 271 294 116 116 116 349 116 | best 116.5 | avg 223.4 | wall 2234 ms | bench-thread cpu 1850 ms | process cpu 2260 ms | GCs 0 (0 ms pause)
+JVM Graal+Serial tag tree4m-norm x100 | instr   232.015 G (virtual   38.67 s) | cpu   15.78 s | wall   16.18 s | rss   2113 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 252 219 338 116 116 228 119 118 177 118 ... 180 | best 115.6 | avg 158.0 | wall 15797 ms | bench-thread cpu 11875 ms | process cpu 15740 ms | GCs 35 (3800 ms pause)
+JVM C2+Serial tag tree4m-norm x100 | instr   214.947 G (virtual   35.82 s) | cpu   16.80 s | wall   17.05 s | rss   2057 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 358 347 479 128 128 263 126 130 196 127 ... 203 | best 125.6 | avg 167.5 | wall 16747 ms | bench-thread cpu 13198 ms | process cpu 16770 ms | GCs 35 (3520 ms pause)
+JVM C1only+Serial tag tree4m-norm x100 | instr   328.657 G (virtual   54.78 s) | cpu   24.83 s | wall   25.35 s | rss   2058 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 331 338 476 207 207 327 207 208 273 210 ... 300 | best 205.1 | avg 250.1 | wall 25010 ms | bench-thread cpu 21134 ms | process cpu 24810 ms | GCs 35 (3755 ms pause)
+JVM C2+Epsilon(40g) tag tree4m-norm x100 | instr    39.617 G (virtual    6.60 s) | cpu    7.65 s | wall    8.58 s | rss  16351 MB | exit 137
+NATIVE nbe-ce tag tree4m-norm x100 | instr   309.318 G (virtual   51.55 s) | cpu   17.86 s | wall   18.07 s | rss   1714 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 238 240 240 207 126 127 227 127 127 245 ... 128 | best 126.6 | avg 179.1 | wall 17910 ms | bench-thread cpu 17852 ms | process cpu 17850 ms | GCs 35 (4913 ms pause)
+NATIVE nbe-ce-O3 tag tree4m-norm x100 | instr   302.180 G (virtual   50.36 s) | cpu   18.30 s | wall   18.50 s | rss   1715 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 279 248 235 207 129 130 237 129 127 253 ... 128 | best 127.9 | avg 183.4 | wall 18343 ms | bench-thread cpu 18294 ms | process cpu 18290 ms | GCs 35 (5197 ms pause)
+NATIVE nbe-ce-native tag tree4m-norm x100 | instr   309.319 G (virtual   51.55 s) | cpu   17.77 s | wall   18.04 s | rss   1714 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 235 240 245 200 127 127 229 128 128 248 ... 127 | best 126.3 | avg 178.5 | wall 17854 ms | bench-thread cpu 17771 ms | process cpu 17770 ms | GCs 35 (4857 ms pause)
+NATIVE nbe-ee tag tree4m-norm x100 | instr   282.837 G (virtual   47.14 s) | cpu   16.94 s | wall   17.46 s | rss   2096 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 245 219 243 207 139 117 245 122 117 309 ... 118 | best 115.4 | avg 172.3 | wall 17233 ms | bench-thread cpu 16933 ms | process cpu 16920 ms | GCs 28 (5063 ms pause)
+NATIVE nbe-ee-O3 tag tree4m-norm x100 | instr   290.065 G (virtual   48.34 s) | cpu   17.31 s | wall   18.35 s | rss   2128 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 230 251 244 209 135 122 261 132 120 306 ... 121 | best 119.9 | avg 181.5 | wall 18152 ms | bench-thread cpu 17309 ms | process cpu 17300 ms | GCs 28 (5178 ms pause)
+NATIVE nbe-ee-pgo tag tree4m-norm x100 | instr   281.167 G (virtual   46.86 s) | cpu   15.54 s | wall   16.60 s | rss   1993 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 183 193 205 479 110 119 113 290 114 112 ... 156 | best 110.9 | avg 163.2 | wall 16315 ms | bench-thread cpu 15537 ms | process cpu 15530 ms | GCs 23 (4109 ms pause)
+NATIVE nbe-ee-pgo-O3 tag tree4m-norm x100 | instr   272.991 G (virtual   45.50 s) | cpu   15.29 s | wall   15.58 s | rss   2049 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 212 208 195 446 116 119 114 281 123 125 ... 112 | best 111.9 | avg 154.0 | wall 15400 ms | bench-thread cpu 15286 ms | process cpu 15280 ms | GCs 22 (3408 ms pause)
+NATIVE nbe-ee-g1 tag tree4m-norm x100 | instr   288.912 G (virtual   48.15 s) | cpu   18.30 s | wall   17.68 s | rss   2269 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 1268 310 299 418 111 111 245 110 110 110 ... 177 | best 109.1 | avg 174.6 | wall 17457 ms | bench-thread cpu 11618 ms | process cpu 18290 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ee-pgo-g1 tag tree4m-norm x100 | instr   320.656 G (virtual   53.44 s) | cpu   20.73 s | wall   16.27 s | rss   2202 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 310 302 303 287 227 117 116 116 196 119 ... 117 | best 115.5 | avg 160.5 | wall 16046 ms | bench-thread cpu 12223 ms | process cpu 20710 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ce-eps (no GC) tag tree4m-norm x10 | instr     0.001 G (virtual    0.00 s) | cpu    0.00 s | wall    0.01 s | rss      6 MB | exit 1
+    Error: The specified maximum heap size (40g) must not be larger than the largest possible heap address space (32g). To allow larger values, please disable compressed references when building the image by adding the option '-H:-UseCompressedReferences'
+NATIVE nbe-ee-pgo-eps (no GC) tag tree4m-norm x10 | instr     0.001 G (virtual    0.00 s) | cpu    0.00 s | wall    0.01 s | rss      6 MB | exit 1
+    error: The specified maximum heap size (40g) must not be larger than the largest possible heap address space (32g). To allow larger values, please disable compressed references when building the image by adding the option '-H:-UseCompressedReferences'
+JVM C2+Epsilon(40g) tag tree4m-norm x10 (no limits) | instr    18.749 G (virtual    3.12 s) | cpu    3.75 s | wall    4.40 s | rss   7408 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 395 398 366 367 348 348 341 336 337 332 | best 332.2 | avg 357.3 | wall 3572 ms | bench-thread cpu 3564 ms | process cpu 3710 ms | GCs 0 (0 ms pause)
+JVM Graal+Epsilon(40g) tag tree4m-norm x10 (no limits) | instr    20.650 G (virtual    3.44 s) | cpu    3.91 s | wall    4.44 s | rss   7465 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 420 411 401 366 367 353 343 340 324 322 | best 322.3 | avg 365.1 | wall 3651 ms | bench-thread cpu 3624 ms | process cpu 3870 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ce-eps (no GC) tag tree4m-norm x10 | instr    25.404 G (virtual    4.23 s) | cpu    3.01 s | wall    3.46 s | rss   4813 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 315 318 314 316 299 297 295 294 291 281 | best 282.0 | avg 302.6 | wall 3026 ms | bench-thread cpu 3004 ms | process cpu 3000 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ee-pgo-eps (no GC) tag tree4m-norm x10 | instr    24.132 G (virtual    4.02 s) | cpu    3.09 s | wall    3.83 s | rss   3849 MB | exit 0
+    tag tree4m-norm ok=true | iter ms: 598 315 314 318 318 313 307 306 299 305 | best 299.7 | avg 339.8 | wall 3397 ms | bench-thread cpu 3087 ms | process cpu 3080 ms | GCs 0 (0 ms pause)
+JVM C2+Epsilon hoas tree4m-norm x10 | instr    12.346 G (virtual    2.06 s) | cpu    3.24 s | wall    3.95 s | rss   5808 MB | exit 0
+    hoas tree4m-norm ok=true | iter ms: 354 327 326 296 297 312 288 280 276 272 | best 272.2 | avg 303.2 | wall 3031 ms | bench-thread cpu 2996 ms | process cpu 3210 ms | GCs 0 (0 ms pause)
+NATIVE ce-eps hoas tree4m-norm x10 | instr    14.141 G (virtual    2.36 s) | cpu    2.28 s | wall    2.65 s | rss   4012 MB | exit 0
+    hoas tree4m-norm ok=true | iter ms: 239 236 236 237 231 221 222 226 220 221 | best 220.4 | avg 229.3 | wall 2292 ms | bench-thread cpu 2271 ms | process cpu 2260 ms | GCs 0 (0 ms pause)
+NATIVE ee-pgo-eps hoas tree4m-norm x10 | instr    22.968 G (virtual    3.83 s) | cpu    2.87 s | wall    3.56 s | rss   3049 MB | exit 0
+    hoas tree4m-norm ok=true | iter ms: 635 290 296 292 291 291 281 276 280 283 | best 276.6 | avg 322.0 | wall 3220 ms | bench-thread cpu 2865 ms | process cpu 2860 ms | GCs 0 (0 ms pause)
+JVM C2+Epsilon virt tree4m-norm x10 | instr    20.725 G (virtual    3.45 s) | cpu    3.89 s | wall    4.58 s | rss   7408 MB | exit 0
+    virt tree4m-norm ok=true | iter ms: 407 410 398 382 363 363 355 351 349 348 | best 348.3 | avg 373.1 | wall 3730 ms | bench-thread cpu 3704 ms | process cpu 3870 ms | GCs 0 (0 ms pause)
+NATIVE ce-eps virt tree4m-norm x10 | instr    24.607 G (virtual    4.10 s) | cpu    2.94 s | wall    3.37 s | rss   4813 MB | exit 0
+    virt tree4m-norm ok=true | iter ms: 319 307 307 308 295 287 285 288 279 283 | best 279.2 | avg 296.3 | wall 2963 ms | bench-thread cpu 2936 ms | process cpu 2930 ms | GCs 0 (0 ms pause)
+NATIVE ee-pgo-eps virt tree4m-norm x10 | instr    27.068 G (virtual    4.51 s) | cpu    3.02 s | wall    3.35 s | rss   3848 MB | exit 0
+    virt tree4m-norm ok=true | iter ms: 363 362 347 274 295 291 281 283 273 268 | best 268.6 | avg 304.2 | wall 3042 ms | bench-thread cpu 3013 ms | process cpu 3000 ms | GCs 0 (0 ms pause)
+JVM C2+Epsilon pat tree4m-norm x10 | instr    19.953 G (virtual    3.33 s) | cpu    3.91 s | wall    4.50 s | rss   7408 MB | exit 0
+    pat tree4m-norm ok=true | iter ms: 475 434 411 384 372 350 340 342 340 332 | best 332.8 | avg 378.5 | wall 3784 ms | bench-thread cpu 3691 ms | process cpu 3880 ms | GCs 0 (0 ms pause)
+NATIVE ce-eps pat tree4m-norm x10 | instr    26.117 G (virtual    4.35 s) | cpu    3.61 s | wall    3.97 s | rss   4813 MB | exit 0
+    pat tree4m-norm ok=true | iter ms: 382 379 380 370 359 357 345 354 346 335 | best 335.2 | avg 361.2 | wall 3611 ms | bench-thread cpu 3606 ms | process cpu 3600 ms | GCs 0 (0 ms pause)
+NATIVE ee-pgo-eps pat tree4m-norm x10 | instr    36.589 G (virtual    6.10 s) | cpu    3.16 s | wall    3.61 s | rss   3849 MB | exit 0
+    pat tree4m-norm ok=true | iter ms: 358 326 326 327 321 311 313 311 301 307 | best 301.6 | avg 320.4 | wall 3204 ms | bench-thread cpu 3151 ms | process cpu 3150 ms | GCs 0 (0 ms pause)

@@ -1,0 +1,60 @@
+--- [-Xms4g -Xmx4g -XX:+UseSerialGC -Xmn256m] DeepStackGc 1000 8
+depth      1000 alloc 8 GB : procCPU   0.18 s wall   0.18 s  GCs    5  gcPause      3 ms  => 0.600 ms per GC
+    TOTAL user 0.30 s sys 0.11 s wall 0.40 s maxrss 331660 KB
+--- [-Xms4g -Xmx4g -XX:+UseSerialGC -Xmn256m] DeepStackGc 100000 8
+depth    100000 alloc 8 GB : procCPU   0.34 s wall   0.27 s  GCs    5  gcPause     31 ms  => 6.200 ms per GC
+    TOTAL user 0.46 s sys 0.13 s wall 0.50 s maxrss 358700 KB
+--- [-Xms4g -Xmx4g -XX:+UseSerialGC -Xmn256m] DeepStackGc 1000000 8
+depth   1000000 alloc 8 GB : procCPU   0.52 s wall   0.45 s  GCs    5  gcPause    179 ms  => 35.800 ms per GC
+    TOTAL user 0.61 s sys 0.16 s wall 0.70 s maxrss 500676 KB
+--- [-Xms4g -Xmx4g -XX:+UseSerialGC -Xmn256m] DeepStackGc 5000000 8
+depth   5000000 alloc 8 GB : procCPU   0.95 s wall   0.95 s  GCs    6  gcPause    617 ms  => 102.833 ms per GC
+    TOTAL user 0.98 s sys 0.25 s wall 1.23 s maxrss 759100 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m] DeepStackGc 1000 8
+depth      1000 alloc 8 GB : procCPU   0.19 s wall   0.19 s  GCs    5  gcPause      9 ms  => 1.800 ms per GC
+    TOTAL user 0.32 s sys 0.10 s wall 0.42 s maxrss 324364 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m] DeepStackGc 100000 8
+depth    100000 alloc 8 GB : procCPU   0.40 s wall   0.30 s  GCs    6  gcPause     67 ms  => 11.167 ms per GC
+    TOTAL user 0.53 s sys 0.11 s wall 0.49 s maxrss 360196 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m] DeepStackGc 1000000 8
+depth   1000000 alloc 8 GB : procCPU   0.73 s wall   0.45 s  GCs    6  gcPause    249 ms  => 41.500 ms per GC
+    TOTAL user 0.85 s sys 0.15 s wall 0.72 s maxrss 484564 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m] DeepStackGc 5000000 8
+depth   5000000 alloc 8 GB : procCPU   2.25 s wall   1.26 s  GCs    7  gcPause    958 ms  => 136.857 ms per GC
+    TOTAL user 2.32 s sys 0.20 s wall 1.49 s maxrss 785680 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m -XX:ParallelGCThreads=1] DeepStackGc 1000 8
+depth      1000 alloc 8 GB : procCPU   0.18 s wall   0.18 s  GCs    5  gcPause      4 ms  => 0.800 ms per GC
+    TOTAL user 0.33 s sys 0.08 s wall 0.38 s maxrss 326696 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m -XX:ParallelGCThreads=1] DeepStackGc 100000 8
+depth    100000 alloc 8 GB : procCPU   0.30 s wall   0.22 s  GCs    6  gcPause     44 ms  => 7.333 ms per GC
+    TOTAL user 0.44 s sys 0.08 s wall 0.44 s maxrss 326612 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m -XX:ParallelGCThreads=1] DeepStackGc 1000000 8
+depth   1000000 alloc 8 GB : procCPU   0.57 s wall   0.50 s  GCs    6  gcPause    292 ms  => 48.667 ms per GC
+    TOTAL user 0.71 s sys 0.13 s wall 0.77 s maxrss 510588 KB
+--- [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m -XX:ParallelGCThreads=1] DeepStackGc 5000000 8
+depth   5000000 alloc 8 GB : procCPU   1.20 s wall   1.15 s  GCs    7  gcPause    839 ms  => 119.857 ms per GC
+    TOTAL user 1.22 s sys 0.24 s wall 1.39 s maxrss 838592 KB
+--- [-Xms4g -Xmx4g -XX:+UseG1GC] DeepStackGc 1000 8
+depth      1000 alloc 8 GB : procCPU   0.37 s wall   0.37 s  GCs    2  gcPause      5 ms  => 2.500 ms per GC
+    TOTAL user 0.42 s sys 0.17 s wall 0.58 s maxrss 810624 KB
+--- [-Xms4g -Xmx4g -XX:+UseG1GC] DeepStackGc 100000 8
+depth    100000 alloc 8 GB : procCPU   0.42 s wall   0.36 s  GCs    2  gcPause     10 ms  => 5.000 ms per GC
+    TOTAL user 0.46 s sys 0.20 s wall 0.58 s maxrss 933608 KB
+--- [-Xms4g -Xmx4g -XX:+UseG1GC] DeepStackGc 1000000 8
+depth   1000000 alloc 8 GB : procCPU   0.58 s wall   0.44 s  GCs    2  gcPause     92 ms  => 46.000 ms per GC
+    TOTAL user 0.59 s sys 0.26 s wall 0.66 s maxrss 1023724 KB
+--- [-Xms4g -Xmx4g -XX:+UseG1GC] DeepStackGc 5000000 8
+depth   5000000 alloc 8 GB : procCPU   1.78 s wall   1.00 s  GCs    5  gcPause    651 ms  => 130.200 ms per GC
+    TOTAL user 1.80 s sys 0.28 s wall 1.27 s maxrss 867312 KB
+--- [-Xms4g -Xmx4g -XX:+UseZGC] DeepStackGc 1000 8
+depth      1000 alloc 8 GB : procCPU   0.33 s wall   0.32 s  GCs   12  gcPause     19 ms  => 1.583 ms per GC
+    TOTAL user 0.43 s sys 0.84 s wall 1.29 s maxrss 981272 KB
+--- [-Xms4g -Xmx4g -XX:+UseZGC] DeepStackGc 100000 8
+depth    100000 alloc 8 GB : procCPU   0.53 s wall   0.68 s  GCs   12  gcPause    141 ms  => 11.750 ms per GC
+    TOTAL user 0.60 s sys 1.01 s wall 1.89 s maxrss 1012492 KB
+--- [-Xms4g -Xmx4g -XX:+UseZGC] DeepStackGc 1000000 8
+depth   1000000 alloc 8 GB : procCPU   0.77 s wall   0.96 s  GCs   10  gcPause    579 ms  => 57.900 ms per GC
+    TOTAL user 0.73 s sys 1.05 s wall 2.26 s maxrss 1572840 KB
+--- [-Xms4g -Xmx4g -XX:+UseZGC] DeepStackGc 5000000 8
+depth   5000000 alloc 8 GB : procCPU   1.41 s wall   0.95 s  GCs    7  gcPause    457 ms  => 65.286 ms per GC
+    TOTAL user 1.55 s sys 1.15 s wall 2.66 s maxrss 1943472 KB

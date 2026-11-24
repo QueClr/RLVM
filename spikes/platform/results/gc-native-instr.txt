@@ -1,0 +1,22 @@
+NATIVE gc-ce-eps (no GC) -Xmx14g | instr    42.525 G (virtual    7.09 s) | cpu   30.17 s | wall   30.50 s | rss   6570 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 8317 ms | transform 200M nodes in 21851 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 6562 MB | GC 0/0 ms [epsilon scavenger=0/0ms] | main-thread cpu 30170 ms | process cpu 30160 ms
+NATIVE gc-ee-pgo-eps (no GC) -Xmx14g | instr    31.265 G (virtual    5.21 s) | cpu   26.83 s | wall   27.25 s | rss   6494 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 8785 ms | transform 200M nodes in 18108 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 6486 MB | GC 0/0 ms [epsilon scavenger=0/0ms] | main-thread cpu 26830 ms | process cpu 26820 ms
+NATIVE gc-ce serial -Xms8g -Xmx8g | instr   143.055 G (virtual   23.84 s) | cpu   76.56 s | wall   76.91 s | rss   2974 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 10160 ms | transform 200M nodes in 66424 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 2355 MB | GC 5/46100 ms [young generation scavenger=5/46100ms complete scavenger=0/0ms] | main-thread cpu 76556 ms | process cpu 76550 ms
+NATIVE gc-ce serial -Xms8g -Xmx8g -Xmn4g | instr   111.972 G (virtual   18.66 s) | cpu   75.32 s | wall   75.66 s | rss   4005 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 10841 ms | transform 200M nodes in 64579 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 2243 MB | GC 3/40828 ms [young generation scavenger=3/40828ms complete scavenger=0/0ms] | main-thread cpu 75320 ms | process cpu 75310 ms
+NATIVE gc-ce serial -Xmx8g -Xmn1g | instr   233.036 G (virtual   38.84 s) | cpu   92.73 s | wall   92.92 s | rss   1919 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 49162 ms | transform 200M nodes in 43629 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 1761 MB | GC 28/59422 ms [young generation scavenger=23/32220ms complete scavenger=5/27202ms] | main-thread cpu 92730 ms | process cpu 92720 ms
+NATIVE gc-ce serial defaults | instr   233.233 G (virtual   38.87 s) | cpu   90.11 s | wall   90.26 s | rss   1938 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 47813 ms | transform 200M nodes in 42305 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 1761 MB | GC 28/57552 ms [young generation scavenger=23/30920ms complete scavenger=5/26632ms] | main-thread cpu 90112 ms | process cpu 90100 ms
+NATIVE gc-ee serial -Xms8g -Xmx8g -Xmn4g | instr    73.352 G (virtual   12.23 s) | cpu   47.80 s | wall   48.38 s | rss   4546 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 9519 ms | transform 200M nodes in 38537 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 1897 MB | GC 2/16448 ms [young generation scavenger=1/758ms complete scavenger=1/15690ms] | main-thread cpu 47796 ms | process cpu 47790 ms
+NATIVE gc-ee-pgo serial -Xms8g -Xmx8g -Xmn4g | instr    63.981 G (virtual   10.66 s) | cpu   38.25 s | wall   38.57 s | rss   4545 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 7831 ms | transform 200M nodes in 30433 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 1826 MB | GC 2/13353 ms [young generation scavenger=1/639ms complete scavenger=1/12714ms] | main-thread cpu 38249 ms | process cpu 38240 ms
+NATIVE gc-ee-g1 -Xms8g -Xmx8g | instr   278.916 G (virtual   46.49 s) | cpu   84.57 s | wall   73.40 s | rss   3314 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 52684 ms | transform 200M nodes in 20355 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 2505 MB | GC 0/0 ms [] | main-thread cpu 65086 ms | process cpu 84570 ms
+NATIVE gc-ee-pgo-g1 -Xms8g -Xmx8g | instr   254.727 G (virtual   42.45 s) | cpu   85.67 s | wall   74.81 s | rss   2513 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 57252 ms | transform 200M nodes in 17298 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 2424 MB | GC 0/0 ms [] | main-thread cpu 68033 ms | process cpu 85680 ms
+NATIVE gc-ee-pgo-g1 -Xms8g -Xmx8g -XX:ParallelGCThreads=1 | instr   319.684 G (virtual   53.28 s) | cpu   93.09 s | wall   88.23 s | rss   2484 MB | exit 0
+    live 40M nodes (table 134217728 slots) built in 69115 ms | transform 200M nodes in 18850 ms | sum ffffff79c7b40753 | final interned 41365824 | heap used 2084 MB | GC 0/0 ms [] | main-thread cpu 74553 ms | process cpu 93080 ms

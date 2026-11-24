@@ -1,0 +1,12 @@
+   1.674 G | cpu   0.34 s | wall   0.57 s | rss   127 MB | kernel  0.137 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 20 escape none
+  44.613 G | cpu   2.82 s | wall   3.54 s | rss  1875 MB | kernel  2.349 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 20 escape copy
+  18.720 G | cpu   2.01 s | wall   2.23 s | rss  1866 MB | kernel  2.374 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 20 escape cons
+  36.500 G | cpu   2.49 s | wall   3.04 s | rss  1875 MB | kernel  2.393 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 20 escape flag4
+  39.346 G | cpu   3.22 s | wall   4.30 s | rss  1876 MB | kernel  2.433 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 20 escape claim
+  15.891 G | cpu   1.85 s | wall   2.17 s | rss  1851 MB | kernel  2.367 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 20 escape exact
+   1.816 G | cpu   0.35 s | wall   0.37 s | rss   138 MB | kernel  0.153 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 20 escape none
+ 122.603 G | cpu   6.39 s | wall  10.96 s | rss  1894 MB | kernel  2.509 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 20 escape copy
+  35.054 G | cpu   3.66 s | wall   6.60 s | rss  1867 MB | kernel  2.414 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 20 escape cons
+  72.371 G | cpu   4.50 s | wall   7.29 s | rss  1875 MB | kernel  2.404 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 20 escape flag4
+  77.348 G | cpu   5.44 s | wall   7.36 s | rss  1879 MB | kernel  2.473 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 20 escape claim
+  28.209 G | cpu   2.39 s | wall   3.05 s | rss  1873 MB | kernel  2.385 G | exit 0 | [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 20 escape exact

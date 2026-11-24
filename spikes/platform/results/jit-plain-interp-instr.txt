@@ -1,0 +1,14 @@
+JVM plain tree 20 x200 [-XX:-UseJVMCICompiler -XX:-TieredCompilation] | instr   311.928 G (virtual   51.99 s) | cpu   15.04 s | wall   15.16 s | rss   2512 MB | exit 0
+    plain tree(20) = 1048576 | setup 11 ms | iter ms: 225 222 218 219 218 217 219 218 112 68 68 68 ... 68 | best 68.0 ms | wall total 14958 ms | bench-thread cpu 14938 ms | process cpu 15020 ms
+JVM plain tree 20 x200 [-XX:-UseJVMCICompiler] | instr   311.986 G (virtual   52.00 s) | cpu   15.11 s | wall   15.19 s | rss   2518 MB | exit 0
+    plain tree(20) = 1048576 | setup 11 ms | iter ms: 222 226 218 218 218 218 207 217 111 68 68 68 ... 68 | best 68.3 ms | wall total 15002 ms | bench-thread cpu 14994 ms | process cpu 15090 ms
+JVM plain tree 20 x200 [] | instr   277.210 G (virtual   46.20 s) | cpu   13.75 s | wall   13.80 s | rss   2563 MB | exit 0
+    plain tree(20) = 1048576 | setup 8 ms | iter ms: 143 143 135 134 134 134 129 124 80 63 63 63 ... 64 | best 63.1 ms | wall total 13511 ms | bench-thread cpu 13505 ms | process cpu 13730 ms
+JVM plain tree 20 x200 [-XX:-UseJVMCICompiler -XX:TieredStopAtLevel=1] | instr   463.382 G (virtual   77.23 s) | cpu   18.30 s | wall   18.48 s | rss   2515 MB | exit 0
+    plain tree(20) = 1048576 | setup 7 ms | iter ms: 165 172 173 173 171 163 158 157 111 93 93 93 ... 87 | best 86.8 ms | wall total 18217 ms | bench-thread cpu 18201 ms | process cpu 18280 ms
+JVM plain tree 20 x200 [-XX:-UseJVMCICompiler -XX:-TieredCompilation -XX:+UseCompactObjectHeaders] | instr   321.854 G (virtual   53.64 s) | cpu   15.46 s | wall   15.66 s | rss   2508 MB | exit 0
+    plain tree(20) = 1048576 | setup 9 ms | iter ms: 212 214 212 211 212 212 211 209 204 203 201 205 ... 67 | best 67.6 ms | wall total 15359 ms | bench-thread cpu 15325 ms | process cpu 15440 ms
+JVM plain tree 20 x200 [-XX:-UseJVMCICompiler -XX:+UseCompactObjectHeaders] | instr   321.946 G (virtual   53.66 s) | cpu   15.53 s | wall   15.72 s | rss   2515 MB | exit 0
+    plain tree(20) = 1048576 | setup 8 ms | iter ms: 208 209 209 210 210 210 203 200 201 217 199 198 ... 67 | best 67.2 ms | wall total 15409 ms | bench-thread cpu 15366 ms | process cpu 15500 ms
+JVM plain tree 20 x200 [-XX:+UseCompactObjectHeaders] | instr   279.622 G (virtual   46.60 s) | cpu   13.05 s | wall   13.11 s | rss   2564 MB | exit 0
+    plain tree(20) = 1048576 | setup 19 ms | iter ms: 124 124 109 108 102 100 102 100 100 96 95 99 ... 60 | best 60.4 ms | wall total 12776 ms | bench-thread cpu 12750 ms | process cpu 13020 ms

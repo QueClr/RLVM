@@ -1,0 +1,50 @@
+##### baseline: JVM start + 512 MB warm-up only (GcCost 0.5 GB)
+   5.258 G | cpu   0.75 s | wall   1.18 s | rss  1230 MB | kernel  1.557 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn4g] GcCost 0.5 16 0 0
+             alloc 1 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    0.30 s = mutators   0.27 s + VM(GC/JIT/other)  0.03 s  wall   0.46 s  GCs     0  gcPause      0 ms  => 0.559 CPU-ns per allocated byte
+##### S1: pure churn (16 GB allocated, nothing retained)
+  54.329 G | cpu   6.15 s | wall   7.18 s | rss   183 MB | kernel  0.329 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn64m] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    5.78 s = mutators   5.71 s + VM(GC/JIT/other)  0.07 s  wall   6.69 s  GCs   320  gcPause     26 ms  => 0.336 CPU-ns per allocated byte
+  54.495 G | cpu   6.21 s | wall   6.48 s | rss   563 MB | kernel  0.757 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn512m] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    5.78 s = mutators   5.74 s + VM(GC/JIT/other)  0.04 s  wall   6.02 s  GCs    40  gcPause     15 ms  => 0.336 CPU-ns per allocated byte
+  54.289 G | cpu   6.72 s | wall   8.21 s | rss  3556 MB | kernel  4.527 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn4g] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    6.26 s = mutators   6.22 s + VM(GC/JIT/other)  0.04 s  wall   7.52 s  GCs     5  gcPause      4 ms  => 0.364 CPU-ns per allocated byte
+  55.070 G | cpu   5.69 s | wall   5.83 s | rss   658 MB | kernel  0.891 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn512m] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    5.20 s = mutators   5.15 s + VM(GC/JIT/other)  0.05 s  wall   5.26 s  GCs    33  gcPause     14 ms  => 0.303 CPU-ns per allocated byte
+  55.299 G | cpu   5.70 s | wall   6.18 s | rss   658 MB | kernel  0.862 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn512m -XX:ParallelGCThreads=1] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    5.20 s = mutators   5.15 s + VM(GC/JIT/other)  0.05 s  wall   5.46 s  GCs    33  gcPause     54 ms  => 0.303 CPU-ns per allocated byte
+  62.947 G | cpu   7.64 s | wall   8.18 s | rss  5276 MB | kernel  6.709 G | exit 0 | [-XX:+UseG1GC -Xms8g -Xmx8g] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    7.16 s = mutators   7.10 s + VM(GC/JIT/other)  0.06 s  wall   7.19 s  GCs     4  gcPause     15 ms  => 0.417 CPU-ns per allocated byte
+  60.358 G | cpu   8.69 s | wall  10.18 s | rss  7785 MB | kernel 16.977 G | exit 0 | [-XX:+UseZGC -Xms8g -Xmx8g] GcCost 16 16 0 0
+             alloc 16 GB decl 16 MB keep 0.000 old 0 MB threads 1 : procCPU    7.35 s = mutators   7.25 s + VM(GC/JIT/other)  0.10 s  wall   7.44 s  GCs    30  gcPause     64 ms  => 0.428 CPU-ns per allocated byte
+##### S2: declaration = 64 MB allocated, 10% of nodes retained until the declaration ends
+ 112.439 G | cpu  14.39 s | wall  15.92 s | rss  2615 MB | kernel  3.431 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn64m] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU   13.75 s = mutators   6.22 s + VM(GC/JIT/other)  7.53 s  wall  14.52 s  GCs   327  gcPause   7863 ms  => 0.800 CPU-ns per allocated byte
+  66.281 G | cpu   8.36 s | wall   8.98 s | rss   384 MB | kernel  0.591 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn256m] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    7.86 s = mutators   6.45 s + VM(GC/JIT/other)  1.41 s  wall   8.34 s  GCs    82  gcPause   1542 ms  => 0.458 CPU-ns per allocated byte
+  59.992 G | cpu   7.42 s | wall   8.10 s | rss  1017 MB | kernel  1.331 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn1g] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.92 s = mutators   6.51 s + VM(GC/JIT/other)  0.41 s  wall   7.51 s  GCs    21  gcPause    403 ms  => 0.403 CPU-ns per allocated byte
+  55.983 G | cpu   7.44 s | wall   7.89 s | rss  3592 MB | kernel  4.537 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn4g] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.94 s = mutators   6.78 s + VM(GC/JIT/other)  0.16 s  wall   7.15 s  GCs     5  gcPause    112 ms  => 0.404 CPU-ns per allocated byte
+  56.886 G | cpu   7.53 s | wall   8.80 s | rss  1020 MB | kernel  1.368 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn1g -XX:+UseCompactObjectHeaders] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.99 s = mutators   6.59 s + VM(GC/JIT/other)  0.40 s  wall   7.93 s  GCs    21  gcPause    585 ms  => 0.407 CPU-ns per allocated byte
+  56.292 G | cpu   7.08 s | wall   7.61 s | rss  1180 MB | kernel  1.521 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn1g] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.49 s = mutators   5.97 s + VM(GC/JIT/other)  0.52 s  wall   6.77 s  GCs    19  gcPause    348 ms  => 0.378 CPU-ns per allocated byte
+  58.602 G | cpu   6.95 s | wall   7.19 s | rss  1172 MB | kernel  1.523 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn1g -XX:ParallelGCThreads=2] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.36 s = mutators   5.90 s + VM(GC/JIT/other)  0.46 s  wall   6.44 s  GCs    19  gcPause    423 ms  => 0.370 CPU-ns per allocated byte
+  58.919 G | cpu   6.96 s | wall   7.21 s | rss  1181 MB | kernel  1.540 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn1g -XX:ParallelGCThreads=1] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.39 s = mutators   5.91 s + VM(GC/JIT/other)  0.48 s  wall   6.55 s  GCs    19  gcPause    543 ms  => 0.372 CPU-ns per allocated byte
+  65.324 G | cpu   8.14 s | wall   8.52 s | rss  5290 MB | kernel  6.721 G | exit 0 | [-XX:+UseG1GC -Xms8g -Xmx8g] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    7.62 s = mutators   7.36 s + VM(GC/JIT/other)  0.26 s  wall   7.75 s  GCs     6  gcPause    222 ms  => 0.444 CPU-ns per allocated byte
+  64.635 G | cpu   9.63 s | wall  10.65 s | rss  7694 MB | kernel 16.841 G | exit 0 | [-XX:+UseZGC -Xms8g -Xmx8g] GcCost 16 64 0.1 0
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    8.20 s = mutators   7.92 s + VM(GC/JIT/other)  0.28 s  wall   8.07 s  GCs    26  gcPause    307 ms  => 0.477 CPU-ns per allocated byte
+##### S3: S2 plus a static 1 GB old-generation object graph (36 M objects); baseline = same with 0.5 GB of work
+  30.035 G | cpu   2.40 s | wall   2.63 s | rss  2092 MB | kernel  2.581 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn1g] GcCost 0.5 64 0.1 1000
+             alloc 1 GB decl 64 MB keep 0.100 old 1000 MB threads 1 : procCPU    0.29 s = mutators   0.23 s + VM(GC/JIT/other)  0.06 s  wall   0.27 s  GCs     1  gcPause     15 ms  => 0.540 CPU-ns per allocated byte
+  84.058 G | cpu   9.21 s | wall   9.83 s | rss  2106 MB | kernel  2.746 G | exit 0 | [-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn1g] GcCost 16 64 0.1 1000
+             alloc 16 GB decl 64 MB keep 0.100 old 1000 MB threads 1 : procCPU    6.98 s = mutators   6.53 s + VM(GC/JIT/other)  0.45 s  wall   7.15 s  GCs    21  gcPause    431 ms  => 0.406 CPU-ns per allocated byte
+  91.753 G | cpu  10.79 s | wall  10.04 s | rss  2094 MB | kernel  2.925 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn1g] GcCost 16 64 0.1 1000
+             alloc 16 GB decl 64 MB keep 0.100 old 1000 MB threads 1 : procCPU    6.78 s = mutators   5.68 s + VM(GC/JIT/other)  1.10 s  wall   7.34 s  GCs    33  gcPause   1028 ms  => 0.395 CPU-ns per allocated byte
+  98.654 G | cpu  10.50 s | wall  11.12 s | rss  2098 MB | kernel  2.763 G | exit 0 | [-XX:+UseParallelGC -Xms8g -Xmx8g -Xmn1g -XX:ParallelGCThreads=2] GcCost 16 64 0.1 1000
+             alloc 16 GB decl 64 MB keep 0.100 old 1000 MB threads 1 : procCPU    6.80 s = mutators   5.78 s + VM(GC/JIT/other)  1.02 s  wall   7.37 s  GCs    33  gcPause    811 ms  => 0.396 CPU-ns per allocated byte
+ 108.238 G | cpu  12.63 s | wall  11.74 s | rss  6421 MB | kernel  8.192 G | exit 0 | [-XX:+UseG1GC -Xms8g -Xmx8g] GcCost 16 64 0.1 1000
+             alloc 16 GB decl 64 MB keep 0.100 old 1000 MB threads 1 : procCPU    7.92 s = mutators   7.60 s + VM(GC/JIT/other)  0.32 s  wall   8.18 s  GCs     7  gcPause    171 ms  => 0.461 CPU-ns per allocated byte

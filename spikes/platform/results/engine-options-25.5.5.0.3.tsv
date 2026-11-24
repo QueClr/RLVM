@@ -1,0 +1,185 @@
+implementation: GraalVM CE version 25.5.5.0.3
+engine.AssertProbes	false	INTERNAL	EXPERIMENTAL	Asserts that enter and return are always called in pairs on ProbeNode, verifies correct behavior of wrapper nodes. Java asserts need to be turned on for this option to have an effect. (default: false)
+engine.BytecodeHistogram	null	EXPERT	STABLE	Collect and print a histogram of executed bytecode opcodes. Set to 'true' to enable basic mode or use a comma separated list to configure grouping (e.g. source,root). Available groupings are root, tier, source, language, thread. Grouping order matters and controls the primary, secondary, ... nesting in the printed histogram. This feature adds high overhead, use for profiling in non-production runs only. Supported only by Bytecode DSL interpreters. Prints when the engine is closed by default, or periodically if BytecodeHistogramInterval > 0.
+engine.BytecodeHistogramInterval	PT0S	EXPERT	STABLE	Print and reset the opcode histogram at a fixed interval while BytecodeHistogram is enabled. Use 0 to disable periodic printing and print only once at shutdown. Examples: 250ms, 2s, 1m.
+engine.BytecodeLanguageFilter		EXPERT	STABLE	Limit tracing and statistics to specific language IDs. Provide a comma-separated list of language IDs, for example: `js`, `python`. An empty value includes all languages. Applies to `--engine.TraceBytecode`, `--engine.TraceBytecodeTransition`, and `--engine.BytecodeHistogram`.
+engine.BytecodeMethodFilter		EXPERT	STABLE	Limit tracing and statistics to selected methods. Matches against `RootNode.getQualifiedName()`. Provide a comma-separated list of includes, or excludes prefixed with `~`. An empty value means no restriction. Whitespace around commas is ignored. Applies to `--engine.TraceBytecode`, `--engine.TraceBytecodeTransition`, and `--engine.BytecodeHistogram`.
+engine.CloseOnGCFailureAction	Print	USER	EXPERIMENTAL	Specifies the action to take when closing a garbage-collected engine or context fails. The accepted values are:     Ignore:     Ignore the exception that occurs during close.     Print:      Log the failure only for the first occurrence; suppress subsequent ones (default value).     PrintAll:   Log each failure.     Throw:      Throw an exception instead of logging the failure.
+engine.DisableCodeSharing	false	INTERNAL	EXPERIMENTAL	Option to force disable code sharing for this engine, even if the context was created with an explicit engine. This option is intended for testing purposes only.
+engine.ForceCodeSharing	false	INTERNAL	EXPERIMENTAL	Option to force enable code sharing for this engine, even if the context was created with a bound engine. This option is intended for testing purposes only.
+engine.ForceStaticObjectSafetyChecks	false	EXPERT	EXPERIMENTAL	On property accesses, the Static Object Model always performs safety checks, overriding engine.RelaxStaticObjectSafetyChecks and builder-level safety check configuration.
+engine.HostCallStackHeadRoom	0	EXPERT	STABLE	Stack space headroom for calls to the host. A value of 0 disables this check.
+engine.InstrumentExceptionsAreThrown	true	INTERNAL	EXPERIMENTAL	Propagates exceptions thrown by instruments. (default: true)
+engine.InterpreterCallStackHeadRoom	0	EXPERT	STABLE	Stack space headroom for any interpreter call. Supported only in the AOT mode.
+engine.IsolateLauncher	null	INTERNAL	EXPERIMENTAL	Path to the external isolate launcher.
+engine.IsolateLibrary	null	INTERNAL	EXPERIMENTAL	Path to the isolate library.
+engine.IsolateMemoryProtection	false	EXPERT	EXPERIMENTAL	Enable memory protection for the isolate.
+engine.IsolateMode	internal	USER	STABLE	Defines how an isolated heap is implemented for isolated engines. 'internal' runs the isolate within the current VM, using native-image isolation, 'external' runs the isolate in a separate external process.
+engine.IsolateOption	org.graalvm.options.OptionMap@0	EXPERT	STABLE	Isolate VM options.
+engine.MaxIsolateMemory	-1	USER	STABLE	Set maximum polyglot isolate heap size. This is a hard limit for the size of the isolate heap including both guest applications retained data and data allocated by the runtime.
+engine.PreinitializeContexts		EXPERT	EXPERIMENTAL	Preinitialize language contexts for given languages.
+engine.PrintInternalStackTrace	false	INTERNAL	EXPERIMENTAL	Printed PolyglotException stacktrace unconditionally contains the stacktrace of the original internal exception as well as the stacktrace of the creation of the PolyglotException instance.
+engine.RelaxStaticObjectSafetyChecks	false	EXPERT	EXPERIMENTAL	On property accesses, the Static Object Model does not perform shape checks and uses unsafe casts
+engine.SafepointALot	false	INTERNAL	EXPERIMENTAL	Repeadly submits thread local actions and collects statistics about safepoint intervals in the process. Prints event and interval statistics when the context is closed for each thread. This option significantly slows down execution and is therefore intended for testing purposes only.
+engine.ShowInternalStackFrames	false	INTERNAL	EXPERIMENTAL	Show internal frames specific to the language implementation in stack traces.
+engine.SourceCacheStatisticDetails	false	EXPERT	STABLE	Print source cache statistics for an engine when the engine is closed. With the details enabled, statistics for all individual sources are printed.
+engine.SourceCacheStatistics	false	EXPERT	STABLE	Print source cache statistics for an engine when the engine is closed.
+engine.SpawnIsolate	null	USER	STABLE	Spawn an isolate with isolated heap for this engine. Can be set to true or false or to the set of languages that should be initialized.
+engine.SpecializationStatistics	false	INTERNAL	EXPERIMENTAL	Enables specialization statistics for nodes generated with Truffle DSL and prints the result on exit. In order for this flag to be functional -Atruffle.dsl.GenerateSpecializationStatistics=true needs to be set at build time. Enabling this flag and the compiler option has major implications on the performance and footprint of the interpreter. Do not use in production environments.
+engine.StaticObjectStorageStrategy	DEFAULT	INTERNAL	EXPERIMENTAL	Set the storage strategy used by the Static Object Model. Accepted values are: ['default', 'array-based', 'field-based']
+engine.SynchronousThreadLocalActionMaxWait	60	EXPERT	EXPERIMENTAL	How long to wait for other threads to reach a synchronous ThreadLocalAction before cancelling it, in seconds. 0 means no limit.
+engine.SynchronousThreadLocalActionPrintStackTraces	false	EXPERT	EXPERIMENTAL	Print thread stacktraces when a synchronous ThreadLocalAction is waiting for more than SynchronousThreadLocalActionMaxWait seconds.
+engine.TraceBytecode	false	EXPERT	STABLE	Trace every executed bytecode instruction. Very high overhead, use only for debugging, never in production. Supported only by Bytecode DSL interpreters. Combine with engine.BytecodeMethodFilter and engine.BytecodeLanguageFilter to limit output.
+engine.TraceBytecodeTransition	null	EXPERT	STABLE	Trace on-stack bytecode interpreter transitions while bytecode is executing (for example uncached-to-cached updates, on-stack bytecode updates, and deoptimization transfers). Set to `true` to trace all transitions, or use a comma-separated subset of transition kinds. Available kinds are `transferToInterpreter`, `bytecode`, `tier`, `tag`, `instrumentation`. The `bytecode` kind traces all bytecode updates; `tier`, `tag`, and `instrumentation` select subsets of bytecode updates. Supported only by Bytecode DSL interpreters. Combine with `--engine.BytecodeMethodFilter` and `--engine.BytecodeLanguageFilter` to limit output.
+engine.TraceCodeSharing	false	INTERNAL	EXPERIMENTAL	Enables printing of code sharing related information to the logger. This option is intended to support debugging language implementations.
+engine.TraceMissingSafepointPollInterval	0	INTERNAL	EXPERIMENTAL	Show Java stacktraces for missing polls longer than the supplied number of milliseconds. Implies SafepointALot.
+engine.TraceSourceCache	false	EXPERT	STABLE	Print information for source cache misses/evictions/failures.
+engine.TraceSourceCacheDetails	false	EXPERT	STABLE	Print information for all source cache events including hits and uncached misses.
+engine.TraceStackTraceInterval	0	EXPERT	EXPERIMENTAL	Prints the stack trace for all threads for a time interval. By default 0, which disables the output.
+engine.TraceThreadLocalActions	false	INTERNAL	EXPERIMENTAL	Traces thread local events and when they are processed on the individual threads. Prints messages with the [engine] [tl] prefix.
+engine.TriggerUncaughtExceptionHandlerForCancel	false	INTERNAL	EXPERIMENTAL	Propagates cancel execution exception into UncaughtExceptionHandler. For testing purposes only.
+engine.UntrustedCodeMitigation	none	USER	STABLE	Enable untrusted code execution defenses.
+engine.UseConservativeContextReferences	false	INTERNAL	EXPERIMENTAL	Enables conservative context references. This allows invalid sharing between contexts. For testing purposes only.
+engine.UsePreInitializedContext	true	INTERNAL	EXPERIMENTAL	Use pre-initialized context when it's available (default: true).
+engine.WarnInterpreterOnly	true	USER	STABLE	Print warning when the engine is using a default Truffle runtime (default: true).
+engine.WarnMethodScoping	true	USER	STABLE	Warn when an isolated context uses host access without host method scoping (default: true).
+engine.WarnOptionDeprecation	true	USER	STABLE	Print warning when a deprecated option is used (default: true).
+engine.WarnVirtualThreadSupport	true	USER	EXPERIMENTAL	Warn that the virtual thread support is experimental (default: true).
+engine.DebugCacheCompile	hot	INTERNAL	EXPERIMENTAL	Policy to use to force compilation for executed call targets before persisting the engine. Possible values are:   - 'none':     No compilations will be persisted and existing compilations will be invalidated.   - 'compiled': No compilations will be forced but finished compilations will be persisted.   - 'hot':      (default) All started compilations will be completed and then persisted.   - 'aot':      All started and AOT compilable roots will be forced to compile and persisted.   - 'executed': All executed and all AOT compilable roots will be forced to compile.
+engine.DebugCacheCompileUseLastTier	true	EXPERT	EXPERIMENTAL	If true uses the last tier instead of the first tier compiler. By default the last tier compiler is used (default: true).
+engine.DebugCacheLoad	false	INTERNAL	EXPERIMENTAL	Prepares the engine to take the stored engine from the static field instead of reading it from disk.
+engine.DebugCachePreinitializeContext	true	INTERNAL	EXPERIMENTAL	Preinitialize a new context with all languages that support it and that were used during the run (default: true).
+engine.DebugCacheStore	false	INTERNAL	EXPERIMENTAL	Prepares the engine for caching and stores it a static field instead of writing it to disk.
+engine.DebugTraceCache	false	INTERNAL	EXPERIMENTAL	Enables tracing for the engine cache debug feature.
+engine.ArgumentTypeSpeculation	true	INTERNAL	EXPERIMENTAL	Speculate on arguments types at call sites (default: true)
+engine.BackgroundCompilation	true	EXPERT	EXPERIMENTAL	Enable asynchronous truffle compilation in background threads (default: true)
+engine.Compilation	true	EXPERT	EXPERIMENTAL	Enable or disable Truffle compilation.
+engine.CompilationFailureAction	Silent	EXPERT	STABLE	Specifies the action to take when Truffle compilation fails. The accepted values are:     Silent - Print nothing to the console.      Print - Print the exception to the console.      Throw - Throw the exception to caller.   Diagnose - Retry compilation with extra diagnostics enabled.     ExitVM - Exit the VM process.
+engine.CompilationStatisticDetails	false	INTERNAL	EXPERIMENTAL	Print additional more verbose Truffle compilation statistics at the end of a run.
+engine.CompilationStatistics	false	INTERNAL	EXPERIMENTAL	Print Truffle compilation statistics at the end of a run.
+engine.CompileAOTOnCreate	false	INTERNAL	EXPERIMENTAL	Compiles created call targets immediately with last tier. Disables background compilation if enabled.
+engine.CompileImmediately	false	INTERNAL	EXPERIMENTAL	Compile immediately to test Truffle compilation
+engine.CompileOnly	null	INTERNAL	EXPERIMENTAL	Restrict compilation to ','-separated list of includes (or excludes prefixed with '~'). No restriction by default.
+engine.CompilerIdleDelay	10000	EXPERT	EXPERIMENTAL	Set the time in milliseconds an idle Truffle compiler thread will wait for new tasks before terminating. New compiler threads will be started once new compilation tasks are submitted. Select '0' to never terminate the Truffle compiler thread. The option is not supported by all Truffle runtimes. On the runtime which doesn't support it the option has no effect. default: 10000
+engine.CompilerThreadStackSize	655360	EXPERT	STABLE	Set the requested stack size of Truffle compiler threads. By default compiler threads use 640KB stack space. The requested size is rounded up to implementation-specific minima and page sizes as needed.
+engine.CompilerThreads	-1	EXPERT	STABLE	Manually set the number of compiler threads. By default, the number of compiler threads is scaled with the number of available cores on the CPU.
+engine.DynamicCompilationThresholds	true	INTERNAL	EXPERIMENTAL	Reduce or increase the compilation threshold depending on the size of the compilation queue (default: true).
+engine.DynamicCompilationThresholdsHighLoadSlope	0.09	INTERNAL	EXPERIMENTAL	The slope used to increase compilation thresholds when compilation queue load is above DynamicCompilationThresholdsMaxNormalLoad (default: 0.09).
+engine.DynamicCompilationThresholdsMaxNormalLoad	90	INTERNAL	EXPERIMENTAL	The desired maximum compilation queue load. When the load rises above this value, the compilation thresholds are increased. The load is scaled by the number of compiler threads.  (default: 90)
+engine.DynamicCompilationThresholdsMinNormalLoad	0	INTERNAL	EXPERIMENTAL	The desired minimum compilation queue load. When the load falls below this value, the compilation thresholds are decreased. The load is scaled by the number of compiler threads (default: 0).
+engine.DynamicCompilationThresholdsMinScale	0.1	INTERNAL	EXPERIMENTAL	The minimal scale the compilation thresholds can be reduced to (default: 0.1).
+engine.EncodedGraphCachePurgeDelay	10000	EXPERT	EXPERIMENTAL	Delay, in milliseconds, after which the encoded graph cache is dropped when a Truffle compiler thread becomes idle (default: 10000).
+engine.FirstTierBackedgeCounts	true	EXPERT	EXPERIMENTAL	Whether to emit look-back-edge counters in the first-tier compilations. (default: true)
+engine.FirstTierCompilationThreshold	400	EXPERT	EXPERIMENTAL	Number of invocations or loop iterations needed to compile a guest language root in first tier under normal compilation load.Might be reduced/increased when compilation load is low/high if DynamicCompilationThresholds is enabled. (default: 400).
+engine.FirstTierMinInvokeThreshold	1	EXPERT	EXPERIMENTAL	Minimum number of calls before a call target is compiled in the first tier (default: 1)
+engine.LastTierCompilationThreshold	10000	EXPERT	EXPERIMENTAL	Number of invocations or loop iterations needed to compile a guest language root in first tier under normal compilation load.Might be reduced/increased when compilation load is low/high if DynamicCompilationThresholds is enabled. (default: 10000).
+engine.MaximumCompilations	100	EXPERT	EXPERIMENTAL	Maximum number of successful compilations for a single call target before a permanent bailout. Exceeding the limit will result in a compilation failure with the appropriate reason and there will be no further attempts to compile the call target. (negative integer means no limit, default: 100)
+engine.MinInvokeThreshold	3	EXPERT	EXPERIMENTAL	Minimum number of calls before a call target is compiled (default: 3).
+engine.Mode	default	EXPERT	STABLE	Configures the execution mode of the engine. Available modes are 'latency' and 'throughput'. The default value balances between the two.
+engine.MultiTier	true	EXPERT	EXPERIMENTAL	Whether to use multiple Truffle compilation tiers by default. (default: true)
+engine.OSR	true	EXPERT	EXPERIMENTAL	Enable automatic on-stack-replacement of loops (default: true).
+engine.OSRCompilationThreshold	100352	INTERNAL	EXPERIMENTAL	Number of loop iterations until on-stack-replacement compilation is triggered (default 100352).
+engine.OSRMaxCompilationReAttempts	30	INTERNAL	EXPERIMENTAL	Number of compilation re-attempts before bailing out of OSR compilation for a given method (default 30). This number is an approximation of the acceptable number of deopts.
+engine.PartialBlockCompilation	true	EXPERT	EXPERIMENTAL	Enable partial compilation for BlockNode (default: true).
+engine.PartialBlockCompilationSize	3000	EXPERT	EXPERIMENTAL	Sets the target non-trivial Truffle node size for partial compilation of BlockNode nodes (default: 3000).
+engine.PartialBlockMaximumSize	10000	EXPERT	EXPERIMENTAL	Sets the maximum non-trivial Truffle node size for partial compilation of BlockNode nodes (default: 10000).
+engine.PriorityQueue	true	INTERNAL	EXPERIMENTAL	Use the priority of compilation jobs in the compilation queue (default: true).
+engine.Profiling	true	INTERNAL	EXPERIMENTAL	Enable/disable builtin profiles in com.oracle.truffle.api.profiles. (default: true)
+engine.PropagateLoopCountToLexicalSingleCaller	true	INTERNAL	EXPERIMENTAL	Enables hotness propagation to lexical parent to lexically parent single callers.
+engine.PropagateLoopCountToLexicalSingleCallerMaxDepth	10	INTERNAL	EXPERIMENTAL	How high to propagate call and loop count (hotness proxy) up a single caller chain to lexical scope parent.
+engine.ReturnTypeSpeculation	true	INTERNAL	EXPERIMENTAL	Speculate on return types at call sites (default: true)
+engine.SingleTierCompilationThreshold	1000	EXPERT	EXPERIMENTAL	Minimum number of invocations or loop iterations needed to compile a guest language root when not using multi tier (default: 1000).
+engine.Splitting	true	EXPERT	EXPERIMENTAL	Enable automatic duplication of compilation profiles (splitting) (default: true).
+engine.SplittingAllowForcedSplits	true	INTERNAL	EXPERIMENTAL	Should forced splits be allowed (default: true)
+engine.SplittingDumpDecisions	false	INTERNAL	EXPERIMENTAL	Dumps to IGV information on polymorphic events
+engine.SplittingGrowthLimit	1.5	INTERNAL	EXPERIMENTAL	Disable call target splitting if the number of nodes created by splitting exceeds this factor times node count (default: 1.5).
+engine.SplittingMaxCalleeSize	100	INTERNAL	EXPERIMENTAL	Disable call target splitting if tree size exceeds this limit (default: 100)
+engine.SplittingMaxPropagationDepth	5	INTERNAL	EXPERIMENTAL	Propagate info about a polymorphic specialize through maximum this many call targets (default: 5)
+engine.SplittingTraceEvents	false	INTERNAL	EXPERIMENTAL	Trace details of splitting events and decisions.
+engine.StoppedCompilationRetryDelay	5000	EXPERT	EXPERIMENTAL	Before the Truffle runtime submits an OptimizedCallTarget for compilation, it checks for the compilation activity mode in the host VM. If the activity mode indicates a full code cache, no new compilation requests are submitted and the compilation queue is flushed. After 'StoppedCompilationRetryDelay' milliseconds new compilations will be submitted again (which might trigger a sweep of the code cache and a reset of the compilation activity mode in the host JVM). The option is only supported on the HotSpot Truffle runtime. On runtimes which don't support it the option has no effect. default: 5000
+engine.ThrowOnMaxOSRCompilationReAttemptsReached	false	INTERNAL	EXPERIMENTAL	Whether an AssertionError is thrown when the maximum number of OSR compilation attempts is reached for a given method (default 'false'). This should only be set to 'true' in testing environments.
+engine.TraceAssumptions	false	INTERNAL	EXPERIMENTAL	Print stack trace on assumption invalidation
+engine.TraceCompilation	false	EXPERT	STABLE	Print information for compilation results.
+engine.TraceCompilationAST	false	INTERNAL	EXPERIMENTAL	Print the entire AST after each compilation
+engine.TraceCompilationDetails	false	INTERNAL	EXPERIMENTAL	Print information for compilation queuing.
+engine.TraceCompilationPolymorphism	false	INTERNAL	EXPERIMENTAL	Print all polymorphic and generic nodes after each compilation
+engine.TraceDeoptimizeFrame	false	INTERNAL	EXPERIMENTAL	Print stack trace when deoptimizing a frame from the stack with `FrameInstance#getFrame(READ_WRITE|MATERIALIZE)`.
+engine.TraceSplitting	false	INTERNAL	EXPERIMENTAL	Print information for splitting decisions.
+engine.TraceSplittingSummary	false	INTERNAL	EXPERIMENTAL	Used for debugging the splitting implementation. Prints splitting summary directly to stdout on shutdown
+engine.TraceStackTraceLimit	20	INTERNAL	EXPERIMENTAL	Number of stack trace elements printed by TraceTruffleTransferToInterpreter, TraceTruffleAssumptions and TraceDeoptimizeFrame (default: 20).
+engine.TraceTransferToInterpreter	false	INTERNAL	EXPERIMENTAL	Print stack trace on transfer to interpreter.
+engine.TraversingCompilationQueue	true	INTERNAL	EXPERIMENTAL	Use a traversing compilation queue. (default: true)
+engine.TraversingQueueFirstTierBonus	15.0	INTERNAL	EXPERIMENTAL	Controls how much of a priority should be given to first tier compilations (default 15.0).
+engine.TraversingQueueFirstTierPriority	false	INTERNAL	EXPERIMENTAL	Traversing queue gives first tier compilations priority.
+engine.TraversingQueueInvalidatedBonus	1.0	INTERNAL	EXPERIMENTAL	Controls how much of a priority should be given to compilations after invalidations (default: 1.0, no bonus).
+engine.TraversingQueueOSRBonus	1.0	INTERNAL	EXPERIMENTAL	Controls how much of a priority should be given to OSR compilations (default: 1.0, no bonus).
+engine.TraversingQueueRateHalfLife	300	INTERNAL	EXPERIMENTAL	Sets the time, in milliseconds, after which the impact of a compilation unit's observed execution rate is halved. (default: 300 ms)
+engine.TraversingQueueStaleTaskDelay	100	INTERNAL	EXPERIMENTAL	Maximum time in milliseconds a queued compilation task may stay without invocation activity before it is considered stale. Set to 0 to disable. (default: 100)
+engine.TraversingQueueWeightingBothTiers	true	INTERNAL	EXPERIMENTAL	Traversing queue uses rate as priority for both tier. (default: true)
+compiler.CompilationTimeout		INTERNAL	EXPERIMENTAL	Time limit in seconds before a compilation expires and throws a bailout (0 to disable the limit). 
+compiler.DeoptCycleDetectionAllowedRepeats		INTERNAL	EXPERIMENTAL	Maximum allowed repeats of the same compiled code for the same compilable. Works only if the detection of repeated compilation is enabled after DeoptCycleDetectionThreshold has been reached for the compilable. (negative integer means 0, default: 0)
+compiler.DeoptCycleDetectionThreshold		INTERNAL	EXPERIMENTAL	Threshold for enabling deopt cycle detection for a call target. When the number of successful compilation of the call target reaches the threshold, deopt cycle detection is enabled for the call target. (negative integer means the detection is never enabled, default: 15)
+compiler.DiagnoseFailure		INTERNAL	EXPERIMENTAL	Forces diagnostics for compilation failures (default: false).
+compiler.EncodedGraphCache		EXPERT	EXPERIMENTAL	Cache encoded graphs across Truffle compilations to speed up partial evaluation. (default: true).
+compiler.ExcludeAssertions		INTERNAL	EXPERIMENTAL	Exclude assertion code from Truffle compilations (default: true)
+compiler.FirstTierInliningPolicy		INTERNAL	EXPERIMENTAL	Explicitly pick a first tier inlining policy by name (None, TrivialOnly). If empty (default) the lowest priority policy (TrivialOnly) is chosen.
+compiler.FirstTierUseEconomy		EXPERT	EXPERIMENTAL	Whether to use the economy configuration in the first-tier compilations. (default: true, syntax: true|false)
+compiler.InlineAcrossTruffleBoundary		INTERNAL	EXPERIMENTAL	Enable inlining across Truffle boundary
+compiler.InlineOnly		INTERNAL	EXPERIMENTAL	Restrict inlined methods to ','-separated list of includes (or excludes prefixed with '~'). No restriction by default. (usage: <name>,<name>,...)
+compiler.Inlining		EXPERT	EXPERIMENTAL	Enable automatic inlining of guest language call targets (default: true, usage: true|false).
+compiler.InliningExpansionBudget		EXPERT	EXPERIMENTAL	The base expansion budget for language-agnostic inlining (default: 12000). Syntax: [1, inf)
+compiler.InliningInliningBudget		EXPERT	EXPERIMENTAL	The base inlining budget for language-agnostic inlining (default: 12000). Syntax: [1, inf)
+compiler.InliningPolicy		INTERNAL	EXPERIMENTAL	Explicitly pick a inlining policy by name. If empty (default) the highest priority chosen by default.
+compiler.InliningRecursionDepth		EXPERT	EXPERIMENTAL	Maximum depth for recursive inlining (default: 2, usage: [0, inf)).
+compiler.InliningUseSize		INTERNAL	EXPERIMENTAL	Use the graph size as a cost model during inlining (default: false).
+compiler.InstrumentBoundaries		INTERNAL	EXPERIMENTAL	Instrument Truffle boundaries and output profiling information to the standard output.
+compiler.InstrumentBoundariesPerInlineSite		INTERNAL	EXPERIMENTAL	Instrument Truffle boundaries by considering different inlining sites as different branches.
+compiler.InstrumentBranches		INTERNAL	EXPERIMENTAL	Instrument branches and output profiling information to the standard output.
+compiler.InstrumentBranchesPerInlineSite		INTERNAL	EXPERIMENTAL	Instrument branches by considering different inlining sites as different branches.
+compiler.InstrumentFilter		INTERNAL	EXPERIMENTAL	Method filter for host methods in which to add instrumentation (syntax: <method>,<method>,....)
+compiler.InstrumentationTableSize		INTERNAL	EXPERIMENTAL	Maximum number of instrumentation counters available (default: 10000, syntax: [1, inf))
+compiler.IterativePartialEscape		INTERNAL	EXPERIMENTAL	Run the partial escape analysis iteratively in Truffle compilation.
+compiler.LogInlinedTargets		INTERNAL	EXPERIMENTAL	Logs inlined targets for statistical purposes (default: false).
+compiler.MaximumGraalGraphSize		INTERNAL	EXPERIMENTAL	Stop partial evaluation when the graph exceeded this size, disabled if < 0. (default: -1, syntax: [-inf, inf))
+compiler.MethodExpansionStatistics		INTERNAL	EXPERIMENTAL	Print statistics on expanded Java methods during partial evaluation at the end of a run.(syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+compiler.NodeExpansionStatistics		INTERNAL	EXPERIMENTAL	Print statistics on expanded Truffle nodes during partial evaluation at the end of a run.(syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+compiler.NodeSourcePositions		INTERNAL	EXPERIMENTAL	Enable node source positions in truffle partial evaluations.
+compiler.ParsePEGraphsWithAssumptions		INTERNAL	EXPERIMENTAL	Allow assumptions during parsing of seed graphs for partial evaluation. Disables the persistent encoded graph cache 'engine.EncodedGraphCache'. (default: false).
+compiler.TraceInlining		INTERNAL	EXPERIMENTAL	Print information for inlining decisions.
+compiler.TraceInliningDetails		INTERNAL	EXPERIMENTAL	Print detailed information for inlining (i.e. the entire explored call tree).
+compiler.TraceMethodExpansion		INTERNAL	EXPERIMENTAL	Print a tree of all expanded Java methods with statistics after each compilation. (syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+compiler.TraceNodeExpansion		INTERNAL	EXPERIMENTAL	Print a tree of all expanded Truffle nodes with statistics after each compilation. (syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+compiler.TracePerformanceWarnings		INTERNAL	EXPERIMENTAL	Print potential performance problems, Performance warnings are: call, instanceof, store, frame_merge, trivial. (syntax: none|all|<perfWarning>,<perfWarning>,...)
+compiler.TraceStackTraceLimit		INTERNAL	EXPERIMENTAL	Number of stack trace elements printed by TraceTruffleTransferToInterpreter, TraceTruffleAssumptions and TraceDeoptimizeFrame (default: 20). Syntax: [1, inf).
+compiler.TreatPerformanceWarningsAsErrors		INTERNAL	EXPERIMENTAL	Treat performance warnings as error. Handling of the error depends on the CompilationFailureAction option value. Performance warnings are: call, instanceof, store, frame_merge, trivial. (syntax: none|all|<perfWarning>,<perfWarning>,...)
+engine.EncodedGraphCache		EXPERT	EXPERIMENTAL	Cache encoded graphs across Truffle compilations to speed up partial evaluation. (default: true).
+engine.ExcludeAssertions		INTERNAL	EXPERIMENTAL	Exclude assertion code from Truffle compilations (default: true)
+engine.FirstTierInliningPolicy		INTERNAL	EXPERIMENTAL	Explicitly pick a first tier inlining policy by name (None, TrivialOnly). If empty (default) the lowest priority policy (TrivialOnly) is chosen.
+engine.FirstTierUseEconomy		EXPERT	EXPERIMENTAL	Whether to use the economy configuration in the first-tier compilations. (default: true, syntax: true|false)
+engine.InlineAcrossTruffleBoundary		INTERNAL	EXPERIMENTAL	Enable inlining across Truffle boundary
+engine.InlineOnly		INTERNAL	EXPERIMENTAL	Restrict inlined methods to ','-separated list of includes (or excludes prefixed with '~'). No restriction by default. (usage: <name>,<name>,...)
+engine.Inlining		EXPERT	EXPERIMENTAL	Enable automatic inlining of guest language call targets (default: true, usage: true|false).
+engine.InliningExpansionBudget		EXPERT	EXPERIMENTAL	The base expansion budget for language-agnostic inlining (default: 12000). Syntax: [1, inf)
+engine.InliningInliningBudget		EXPERT	EXPERIMENTAL	The base inlining budget for language-agnostic inlining (default: 12000). Syntax: [1, inf)
+engine.InliningPolicy		INTERNAL	EXPERIMENTAL	Explicitly pick a inlining policy by name. If empty (default) the highest priority chosen by default.
+engine.InliningRecursionDepth		EXPERT	EXPERIMENTAL	Maximum depth for recursive inlining (default: 2, usage: [0, inf)).
+engine.InliningUseSize		INTERNAL	EXPERIMENTAL	Use the graph size as a cost model during inlining (default: false).
+engine.InstrumentBoundaries		INTERNAL	EXPERIMENTAL	Instrument Truffle boundaries and output profiling information to the standard output.
+engine.InstrumentBoundariesPerInlineSite		INTERNAL	EXPERIMENTAL	Instrument Truffle boundaries by considering different inlining sites as different branches.
+engine.InstrumentBranches		INTERNAL	EXPERIMENTAL	Instrument branches and output profiling information to the standard output.
+engine.InstrumentBranchesPerInlineSite		INTERNAL	EXPERIMENTAL	Instrument branches by considering different inlining sites as different branches.
+engine.InstrumentFilter		INTERNAL	EXPERIMENTAL	Method filter for host methods in which to add instrumentation (syntax: <method>,<method>,....)
+engine.InstrumentationTableSize		INTERNAL	EXPERIMENTAL	Maximum number of instrumentation counters available (default: 10000, syntax: [1, inf))
+engine.IterativePartialEscape		INTERNAL	EXPERIMENTAL	Run the partial escape analysis iteratively in Truffle compilation.
+engine.MaximumGraalGraphSize		INTERNAL	EXPERIMENTAL	Stop partial evaluation when the graph exceeded this size, disabled if < 0. (default: -1, syntax: [-inf, inf))
+engine.MethodExpansionStatistics		INTERNAL	EXPERIMENTAL	Print statistics on expanded Java methods during partial evaluation at the end of a run.(syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+engine.NodeExpansionStatistics		INTERNAL	EXPERIMENTAL	Print statistics on expanded Truffle nodes during partial evaluation at the end of a run.(syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+engine.NodeSourcePositions		INTERNAL	EXPERIMENTAL	Enable node source positions in truffle partial evaluations.
+engine.ParsePEGraphsWithAssumptions		INTERNAL	EXPERIMENTAL	Allow assumptions during parsing of seed graphs for partial evaluation. Disables the persistent encoded graph cache 'engine.EncodedGraphCache'. (default: false).
+engine.TraceInlining		INTERNAL	EXPERIMENTAL	Print information for inlining decisions.
+engine.TraceInliningDetails		INTERNAL	EXPERIMENTAL	Print detailed information for inlining (i.e. the entire explored call tree).
+engine.TraceMethodExpansion		INTERNAL	EXPERIMENTAL	Print a tree of all expanded Java methods with statistics after each compilation. (syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+engine.TraceNodeExpansion		INTERNAL	EXPERIMENTAL	Print a tree of all expanded Truffle nodes with statistics after each compilation. (syntax: true|false|peTier|truffleTier|lowTier|<tier>,<tier>,...)%nAccepted values are:%n    true - Collect data for the default tier 'truffleTier'.%n    false - No data will be collected.%nOr one or multiple tiers separated by comma (e.g. truffleTier,lowTier):%n    peTier - After partial evaluation without additional phases applied.%n    truffleTier - After partial evaluation with additional phases applied.%n    lowTier - After low tier phases were applied.
+engine.TracePerformanceWarnings		INTERNAL	EXPERIMENTAL	Print potential performance problems, Performance warnings are: call, instanceof, store, frame_merge, trivial. (syntax: none|all|<perfWarning>,<perfWarning>,...)
+engine.TraceStackTraceLimit		INTERNAL	EXPERIMENTAL	Number of stack trace elements printed by TraceTruffleTransferToInterpreter, TraceTruffleAssumptions and TraceDeoptimizeFrame (default: 20). Syntax: [1, inf).
+engine.TreatPerformanceWarningsAsErrors		INTERNAL	EXPERIMENTAL	Treat performance warnings as error. Handling of the error depends on the CompilationFailureAction option value. Performance warnings are: call, instanceof, store, frame_merge, trivial. (syntax: none|all|<perfWarning>,<perfWarning>,...)

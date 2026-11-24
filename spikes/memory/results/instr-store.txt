@@ -1,0 +1,29 @@
+   5.587 G | cpu   2.77 s | wall   2.84 s | rss   818 MB | kernel  1.002 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore obj 20000000 b
+  20.783 G | cpu   5.46 s | wall   5.58 s | rss  1475 MB | kernel  1.900 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore obj 20000000 bg
+             retained heap 677.1 MB = 33.86 bytes/node; first full GC: procCPU 1540 ms wall 1572 ms
+  13.485 G | cpu   8.15 s | wall   8.17 s | rss   826 MB | kernel  1.103 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore obj 20000000 bd
+   5.302 G | cpu   1.72 s | wall   1.83 s | rss   486 MB | kernel  0.599 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore col 20000000 b
+   5.515 G | cpu   1.78 s | wall   1.80 s | rss   801 MB | kernel  0.994 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore col 20000000 bg
+             retained heap 340.3 MB = 17.02 bytes/node; first full GC: procCPU 70 ms wall 74 ms
+  12.314 G | cpu   3.84 s | wall   3.73 s | rss   487 MB | kernel  0.605 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore col 20000000 bd
+   5.015 G | cpu   1.74 s | wall   1.78 s | rss   440 MB | kernel  0.560 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore aos 20000000 b
+   5.624 G | cpu   1.80 s | wall   2.00 s | rss   774 MB | kernel  0.956 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore aos 20000000 bg
+             retained heap 320.3 MB = 16.02 bytes/node; first full GC: procCPU 100 ms wall 98 ms
+  12.344 G | cpu   5.87 s | wall   5.84 s | rss   466 MB | kernel  0.628 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore aos 20000000 bd
+   6.368 G | cpu   1.84 s | wall   1.79 s | rss   472 MB | kernel  0.577 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore chunk 20000000 b
+   6.329 G | cpu   1.84 s | wall   1.88 s | rss   767 MB | kernel  0.989 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore chunk 20000000 bg
+             retained heap 323.3 MB = 16.16 bytes/node; first full GC: procCPU 80 ms wall 80 ms
+  15.142 G | cpu   5.69 s | wall   5.55 s | rss   472 MB | kernel  0.636 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore chunk 20000000 bd
+   7.151 G | cpu   1.78 s | wall   1.79 s | rss   473 MB | kernel  0.587 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore seg 20000000 b
+   7.545 G | cpu   1.77 s | wall   1.72 s | rss   469 MB | kernel  0.584 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore seg 20000000 bg
+             retained heap 0.3 MB = 0.02 bytes/node; first full GC: procCPU 10 ms wall 3 ms
+  20.674 G | cpu   5.05 s | wall   4.76 s | rss   473 MB | kernel  0.622 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC] TermStore seg 20000000 bd
+  12.098 G | cpu   3.51 s | wall   3.48 s | rss  1033 MB | kernel  1.270 G | exit 0 | [-Xms6g -Xmx6g -Xmn256m -XX:+UseSerialGC] TermStore obj 20000000 b
+   5.085 G | cpu   1.81 s | wall   1.80 s | rss   493 MB | kernel  0.611 G | exit 0 | [-Xms6g -Xmx6g -Xmn256m -XX:+UseSerialGC] TermStore col 20000000 b
+   5.858 G | cpu   2.68 s | wall   2.68 s | rss   703 MB | kernel  0.879 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC -XX:+UseCompactObjectHeaders] TermStore obj 20000000 b
+  21.979 G | cpu   5.74 s | wall   5.78 s | rss  1237 MB | kernel  1.577 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseSerialGC -XX:+UseCompactObjectHeaders] TermStore obj 20000000 bg
+             retained heap 560.4 MB = 28.02 bytes/node; first full GC: procCPU 1550 ms wall 1557 ms
+  26.263 G | cpu   6.77 s | wall   4.58 s | rss  1495 MB | kernel  1.964 G | exit 0 | [-Xms6g -Xmx6g -Xmn1g -XX:+UseParallelGC] TermStore obj 20000000 bg
+             retained heap 677.1 MB = 33.86 bytes/node; first full GC: procCPU 2040 ms wall 771 ms
+  36.153 G | cpu   7.21 s | wall   5.10 s | rss  1250 MB | kernel  1.618 G | exit 0 | [-Xms6g -Xmx6g -XX:+UseG1GC] TermStore obj 20000000 bg
+             retained heap 681.0 MB = 34.05 bytes/node; first full GC: procCPU 1160 ms wall 629 ms

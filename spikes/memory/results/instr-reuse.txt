@@ -1,0 +1,9 @@
+   0.411 G | cpu   0.08 s | wall   0.15 s | rss   108 MB | kernel  0.091 G | exit 0 | [-Xms6g -Xmx6g -Xmn512m -XX:+UseSerialGC] CtorReuse 1000 20000 10000000 10 none
+  10.779 G | cpu   2.52 s | wall   3.51 s | rss   564 MB | kernel  0.733 G | exit 0 | [-Xms6g -Xmx6g -Xmn512m -XX:+UseSerialGC] CtorReuse 1000 20000 10000000 10 youngfresh
+   8.825 G | cpu   2.08 s | wall   2.95 s | rss   547 MB | kernel  0.684 G | exit 0 | [-Xms6g -Xmx6g -Xmn512m -XX:+UseSerialGC] CtorReuse 1000 20000 10000000 10 youngreuse
+  14.746 G | cpu   1.23 s | wall   2.47 s | rss  1000 MB | kernel  1.339 G | exit 0 | [-Xms6g -Xmx6g -Xmn512m -XX:+UseSerialGC] CtorReuse 1000 20000 10000000 10 oldbuild
+             old   build  (len 10000000 x 10 rounds)   procCPU      0.0 ms (  0.00 ns/elem)  wall      0.0 ms  GCs 0 (0 ms)  check 49999995000000
+  76.126 G | cpu   6.82 s | wall   8.55 s | rss  4920 MB | kernel  6.303 G | exit 0 | [-Xms6g -Xmx6g -Xmn512m -XX:+UseSerialGC] CtorReuse 1000 20000 10000000 10 oldfresh
+             old   fresh  (len 10000000 x 10 rounds)   procCPU   4710.0 ms ( 47.10 ns/elem)  wall   5000.3 ms  GCs 9 (4029 ms)  check 50000095000000
+  32.872 G | cpu   2.86 s | wall   4.11 s | rss  1436 MB | kernel  1.961 G | exit 0 | [-Xms6g -Xmx6g -Xmn512m -XX:+UseSerialGC] CtorReuse 1000 20000 10000000 10 oldreuse
+             old   reuse  (len 10000000 x 10 rounds)   procCPU   1330.0 ms ( 13.30 ns/elem)  wall   1560.3 ms  GCs 3 (976 ms)  check 50000095000000

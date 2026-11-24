@@ -1,0 +1,26 @@
+JVM C2 Serial 8g -Xmn256m tag nat10m-norm x5 | instr    87.064 G (virtual   14.51 s) | cpu    6.30 s | wall    6.62 s | rss   3847 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 1286 1165 1410 1170 1123 | best 1123.2 | avg 1231.3 | wall 6156 ms | bench-thread cpu 1581 ms | process cpu 6240 ms | GCs 21 (4572 ms pause)
+JVM C2 Serial 8g -Xmn1g tag nat10m-norm x5 | instr    68.670 G (virtual   11.44 s) | cpu    5.71 s | wall    6.03 s | rss   4221 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 1335 1084 1053 1028 1051 | best 1028.8 | avg 1110.8 | wall 5554 ms | bench-thread cpu 1804 ms | process cpu 5640 ms | GCs 5 (3756 ms pause)
+JVM C2 Serial 8g -Xmn4g tag nat10m-norm x5 | instr    16.659 G (virtual    2.78 s) | cpu    2.93 s | wall    3.22 s | rss   3942 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 643 581 584 700 274 | best 274.4 | avg 557.1 | wall 2785 ms | bench-thread cpu 2576 ms | process cpu 2880 ms | GCs 1 (216 ms pause)
+JVM C2 Parallel 8g -Xmn1g tag nat10m-norm x5 | instr    79.334 G (virtual   13.22 s) | cpu    9.57 s | wall    4.96 s | rss   3205 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 1349 800 950 838 627 | best 627.8 | avg 913.4 | wall 4566 ms | bench-thread cpu 1812 ms | process cpu 9510 ms | GCs 5 (2761 ms pause)
+JVM C2 G1 8g tag nat10m-norm x5 | instr   102.313 G (virtual   17.05 s) | cpu    9.57 s | wall    6.46 s | rss   4413 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 1672 1121 1526 739 852 | best 739.1 | avg 1182.5 | wall 5912 ms | bench-thread cpu 1772 ms | process cpu 9540 ms | GCs 8 (4130 ms pause)
+JVM C2 ZGC 8g tag nat10m-norm x5 | instr    94.661 G (virtual   15.78 s) | cpu    9.09 s | wall    6.75 s | rss   3623 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 1104 1692 733 254 903 | best 254.1 | avg 937.7 | wall 4688 ms | bench-thread cpu 3321 ms | process cpu 9050 ms | GCs 16 (3543 ms pause)
+JVM C2 Epsilon 14g tag nat10m-norm x5 | instr    14.333 G (virtual    2.39 s) | cpu    3.25 s | wall    3.76 s | rss   4896 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 789 625 614 576 582 | best 576.0 | avg 637.5 | wall 3187 ms | bench-thread cpu 3092 ms | process cpu 3180 ms | GCs 0 (0 ms pause)
+JVM -Xint Serial 8g -Xmn256m tag nat10m-norm x1 | instr    63.452 G (virtual   10.58 s) | cpu    4.92 s | wall    5.01 s | rss   2263 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 4767 | best 4767.5 | avg 4767.5 | wall 4767 ms | bench-thread cpu 3388 ms | process cpu 4800 ms | GCs 4 (1386 ms pause)
+NATIVE nbe-ce 8g -Xmn256m tag nat10m-norm x5 | instr   234.074 G (virtual   39.01 s) | cpu   12.10 s | wall   12.34 s | rss   2990 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 2492 2393 2375 2394 2387 | best 2375.0 | avg 2408.7 | wall 12043 ms | bench-thread cpu 12039 ms | process cpu 12030 ms | GCs 43 (10751 ms pause)
+NATIVE nbe-ce 8g -Xmn1g tag nat10m-norm x5 | instr    51.522 G (virtual    8.59 s) | cpu    3.20 s | wall    3.37 s | rss   1923 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 536 219 741 875 828 | best 219.6 | avg 640.3 | wall 3201 ms | bench-thread cpu 3200 ms | process cpu 3200 ms | GCs 7 (1784 ms pause)
+NATIVE nbe-ce 8g -Xmn4g tag nat10m-norm x5 | instr    18.058 G (virtual    3.01 s) | cpu    1.88 s | wall    2.13 s | rss   3844 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 552 349 345 355 217 | best 217.0 | avg 364.0 | wall 1820 ms | bench-thread cpu 1819 ms | process cpu 1810 ms | GCs 1 (2 ms pause)
+NATIVE nbe-ee-pgo 8g -Xmn4g tag nat10m-norm x5 | instr    16.934 G (virtual    2.82 s) | cpu    1.86 s | wall    2.15 s | rss   3754 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 498 332 331 334 308 | best 308.8 | avg 361.1 | wall 1805 ms | bench-thread cpu 1805 ms | process cpu 1800 ms | GCs 0 (0 ms pause)
+NATIVE nbe-ce-eps 14g tag nat10m-norm x5 | instr    18.146 G (virtual    3.02 s) | cpu    2.51 s | wall    2.83 s | rss   4593 MB | exit 0
+    tag nat10m-norm ok=true | iter ms: 632 465 466 442 441 | best 441.6 | avg 489.7 | wall 2448 ms | bench-thread cpu 2448 ms | process cpu 2440 ms | GCs 0 (0 ms pause)

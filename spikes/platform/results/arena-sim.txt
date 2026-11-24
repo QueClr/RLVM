@@ -1,0 +1,16 @@
+arena-sim JVM run.sh ast tree 20 x200 | instr    29.608 G (virtual    4.93 s) | cpu    2.34 s | wall    2.25 s | rss   2629 MB | exit 0
+    ast tree(20) = 1048576 | setup 292 ms | iter ms: 183 9 6 6 9 6 6 6 6 6 6 6 ... 4 | best 4.3 ms | wall total 1446 ms | bench-thread cpu 1619 ms | process cpu 2030 ms
+arena-sim JVM run.sh plain tree 20 x200 | instr   321.865 G (virtual   53.64 s) | cpu   15.41 s | wall   15.56 s | rss   2508 MB | exit 0
+    plain tree(20) = 1048576 | setup 11 ms | iter ms: 205 199 197 187 194 195 195 195 183 183 195 194 ... 69 | best 67.6 ms | wall total 15278 ms | bench-thread cpu 15269 ms | process cpu 15390 ms
+arena-sim JVM run.sh plain fib 20 x1 (start-up dominated) | instr     1.164 G (virtual    0.19 s) | cpu    0.16 s | wall    0.15 s | rss     69 MB | exit 0
+    plain fib(20) = 6765 | setup 8 ms | iter ms: 7 | best 7.9 ms | wall total 7 ms | bench-thread cpu 21 ms | process cpu 110 ms
+arena-sim JVM run.sh ast fib 20 x1 (Truffle start-up dominated) | instr     4.612 G (virtual    0.77 s) | cpu    0.68 s | wall    0.52 s | rss    161 MB | exit 0
+    ast fib(20) = 6765 | setup 269 ms | iter ms: 127 | best 127.6 ms | wall total 127 ms | bench-thread cpu 325 ms | process cpu 600 ms
+arena-sim NATIVE run.sh ast tree 20 x200 | instr    19.799 G (virtual    3.30 s) | cpu    1.20 s | wall    1.29 s | rss   1631 MB | exit 0
+    ast tree(20) = 1048576 | setup 2 ms | iter ms: 59 14 4 4 4 4 4 4 4 4 4 4 ... 4 | best 4.8 ms | wall total 1134 ms | bench-thread cpu 1090 ms | process cpu 1180 ms
+arena-sim NATIVE run.sh plain tree 20 x200 | instr   379.815 G (virtual   63.30 s) | cpu   18.10 s | wall   18.41 s | rss   2315 MB | exit 0
+    plain tree(20) = 1048576 | setup 0 ms | iter ms: 132 138 136 137 133 131 127 134 125 125 127 105 ... 87 | best 87.2 ms | wall total 18250 ms | bench-thread cpu 18095 ms | process cpu 18080 ms
+arena-sim NATIVE run.sh plain fib 20 x1 (start-up dominated) | instr     0.015 G (virtual    0.00 s) | cpu    0.00 s | wall    0.01 s | rss     15 MB | exit 0
+    plain fib(20) = 6765 | setup 0 ms | iter ms: 0 | best 0.6 ms | wall total 0 ms | bench-thread cpu 0 ms | process cpu 0 ms
+arena-sim NATIVE run.sh ast fib 20 x1 | instr     0.022 G (virtual    0.00 s) | cpu    0.01 s | wall    0.01 s | rss     20 MB | exit 0
+    ast fib(20) = 6765 | setup 0 ms | iter ms: 1 | best 1.2 ms | wall total 1 ms | bench-thread cpu 1 ms | process cpu 0 ms

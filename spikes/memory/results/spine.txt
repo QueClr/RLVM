@@ -1,0 +1,54 @@
+--- [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 2.5 0.05 10 escape
+spines=4000000 meanLen=2.06 share=0.05 totalAppends=8220227
+copy (Arrays.copyOf each append)     threadCPU     48.2 ms (  5.86 ns/op)  procCPU     40.0 ms     27.6 B/op  GCs/run   0 (0 ms)
+cons (snoc list)                     threadCPU     33.1 ms (  4.02 ns/op)  procCPU     30.0 ms     24.0 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 4)        threadCPU     44.2 ms (  5.38 ns/op)  procCPU     40.0 ms     30.2 B/op  GCs/run   1 (2 ms)
+flag (unique in-place, cap 2)        threadCPU     51.3 ms (  6.24 ns/op)  procCPU     50.0 ms     30.3 B/op  GCs/run   0 (0 ms)
+claim (slot-claim buf, cap 4)        threadCPU     55.7 ms (  6.78 ns/op)  procCPU     50.0 ms     54.2 B/op  GCs/run   1 (2 ms)
+checksum 4410006003
+    TOTAL user 3.64 s sys 0.42 s wall 3.35 s maxrss 1835356 KB
+--- [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC -XX:+UseCompactObjectHeaders] SpineAppend 4000000 2.5 0.05 10 escape
+spines=4000000 meanLen=2.06 share=0.05 totalAppends=8220227
+copy (Arrays.copyOf each append)     threadCPU     58.4 ms (  7.11 ns/op)  procCPU     60.0 ms     22.2 B/op  GCs/run   0 (0 ms)
+cons (snoc list)                     threadCPU     32.5 ms (  3.96 ns/op)  procCPU     30.0 ms     24.0 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 4)        threadCPU     47.1 ms (  5.73 ns/op)  procCPU     50.0 ms     30.2 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 2)        threadCPU     50.0 ms (  6.09 ns/op)  procCPU     50.0 ms     30.3 B/op  GCs/run   0 (0 ms)
+claim (slot-claim buf, cap 4)        threadCPU     51.9 ms (  6.31 ns/op)  procCPU     50.0 ms     42.0 B/op  GCs/run   0 (0 ms)
+checksum 4410006003
+    TOTAL user 3.53 s sys 0.41 s wall 3.25 s maxrss 1832368 KB
+--- [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 4 0.05 10 escape
+spines=4000000 meanLen=3.53 share=0.05 totalAppends=14110174
+copy (Arrays.copyOf each append)     threadCPU     90.2 ms (  6.39 ns/op)  procCPU     90.0 ms     32.9 B/op  GCs/run   0 (0 ms)
+cons (snoc list)                     threadCPU     55.6 ms (  3.94 ns/op)  procCPU     50.0 ms     24.0 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 4)        threadCPU     63.0 ms (  4.47 ns/op)  procCPU     60.0 ms     22.1 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 2)        threadCPU     70.2 ms (  4.98 ns/op)  procCPU     70.0 ms     24.4 B/op  GCs/run   0 (0 ms)
+claim (slot-claim buf, cap 4)        threadCPU     95.6 ms (  6.78 ns/op)  procCPU     90.0 ms     47.9 B/op  GCs/run   0 (0 ms)
+checksum 7423331004
+    TOTAL user 5.29 s sys 0.41 s wall 4.83 s maxrss 1836452 KB
+--- [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC -XX:+UseCompactObjectHeaders] SpineAppend 4000000 4 0.05 10 escape
+spines=4000000 meanLen=3.53 share=0.05 totalAppends=14110174
+copy (Arrays.copyOf each append)     threadCPU     89.4 ms (  6.33 ns/op)  procCPU     90.0 ms     28.2 B/op  GCs/run   0 (0 ms)
+cons (snoc list)                     threadCPU     54.0 ms (  3.83 ns/op)  procCPU     50.0 ms     24.0 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 4)        threadCPU     62.9 ms (  4.45 ns/op)  procCPU     60.0 ms     22.1 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 2)        threadCPU     71.7 ms (  5.08 ns/op)  procCPU     70.0 ms     24.4 B/op  GCs/run   0 (0 ms)
+claim (slot-claim buf, cap 4)        threadCPU     87.8 ms (  6.22 ns/op)  procCPU     90.0 ms     36.8 B/op  GCs/run   1 (2 ms)
+checksum 7423331004
+    TOTAL user 5.19 s sys 0.39 s wall 4.76 s maxrss 1835776 KB
+--- [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC] SpineAppend 4000000 8 0.05 10 escape
+spines=4000000 meanLen=7.51 share=0.05 totalAppends=30044762
+copy (Arrays.copyOf each append)     threadCPU    257.5 ms (  8.57 ns/op)  procCPU    260.0 ms     48.4 B/op  GCs/run   1 (2 ms)
+cons (snoc list)                     threadCPU    127.4 ms (  4.24 ns/op)  procCPU    130.0 ms     24.0 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 4)        threadCPU    136.5 ms (  4.54 ns/op)  procCPU    160.0 ms     17.3 B/op  GCs/run   0 (0 ms)
+flag (unique in-place, cap 2)        threadCPU    176.2 ms (  5.86 ns/op)  procCPU    170.0 ms     19.4 B/op  GCs/run   1 (1 ms)
+claim (slot-claim buf, cap 4)        threadCPU    192.9 ms (  6.42 ns/op)  procCPU    190.0 ms     44.3 B/op  GCs/run   1 (0 ms)
+checksum 15576438438
+    TOTAL user 10.52 s sys 0.41 s wall 10.00 s maxrss 1859656 KB
+--- [-Xms4g -Xmx4g -Xmn2g -XX:+UseSerialGC -XX:+UseCompactObjectHeaders] SpineAppend 4000000 8 0.05 10 escape
+spines=4000000 meanLen=7.51 share=0.05 totalAppends=30044762
+copy (Arrays.copyOf each append)     threadCPU    249.3 ms (  8.30 ns/op)  procCPU    250.0 ms     44.1 B/op  GCs/run   0 (0 ms)
+cons (snoc list)                     threadCPU    122.2 ms (  4.07 ns/op)  procCPU    120.0 ms     24.0 B/op  GCs/run   1 (2 ms)
+flag (unique in-place, cap 4)        threadCPU    152.2 ms (  5.06 ns/op)  procCPU    150.0 ms     17.3 B/op  GCs/run   1 (2 ms)
+flag (unique in-place, cap 2)        threadCPU    171.5 ms (  5.71 ns/op)  procCPU    170.0 ms     19.4 B/op  GCs/run   0 (0 ms)
+claim (slot-claim buf, cap 4)        threadCPU    188.7 ms (  6.28 ns/op)  procCPU    190.0 ms     34.1 B/op  GCs/run   1 (0 ms)
+checksum 15576438438
+    TOTAL user 10.26 s sys 0.45 s wall 9.88 s maxrss 1856136 KB

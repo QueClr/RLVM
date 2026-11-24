@@ -1,0 +1,52 @@
+ulimit -s = 8192 KB
+### HotSpot C2, SerialGC
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+main thread (default stack): StackOverflowError at depth 14,807
+stack     1 MB: max depth 29,453 (35.6 B/frame) | first overflow 2 ms | 3 more overflows 8 ms (depth 29,453) | controlled recursion to depth 14,726: 0 ms (18.7 ns/frame)
+stack     8 MB: max depth 258,829 (32.4 B/frame) | first overflow 32 ms | 3 more overflows 63 ms (depth 258,829) | controlled recursion to depth 129,414: 1 ms (13.5 ns/frame)
+stack    64 MB: max depth 2,093,837 (32.1 B/frame) | first overflow 394 ms | 3 more overflows 463 ms (depth 2,093,837) | controlled recursion to depth 1,046,918: 7 ms (7.4 ns/frame)
+stack  1024 MB: max depth 33,551,117 (32.0 B/frame) | first overflow 4492 ms | 3 more overflows 10079 ms (depth 33,551,117) | controlled recursion to depth 16,775,558: 622 ms (37.1 ns/frame)
+stack  8192 MB: max depth 268,432,141 (32.0 B/frame) | first overflow 48876 ms | 3 more overflows 105617 ms (depth 268,432,141) | controlled recursion to depth 134,216,070: 5522 ms (41.1 ns/frame)
+### HotSpot Graal JIT, SerialGC
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+main thread (default stack): StackOverflowError at depth 16,947
+Exception in thread "deep-1" java.lang.StackOverflowError
+	at DeepRec.bounded(DeepRec.java:45)
+	at DeepRec.bounded(DeepRec.java:45)
+	at DeepRec.bounded(DeepRec.java:45)
+	at DeepRec.bounded(DeepRec.java:45)
+	at DeepRec.bounded(DeepRec.java:45)
+### HotSpot -Xint (interpreter frames)
+OpenJDK 64-Bit Server VM warning: JVMCI Compiler disabled due to -Xint.
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+main thread (default stack): StackOverflowError at depth 12,392
+stack    64 MB: max depth 418,766 (160.3 B/frame) | first overflow 67 ms | 3 more overflows 141 ms (depth 418,766) | controlled recursion to depth 209,383: 9 ms (46.6 ns/frame)
+### HotSpot -Xss1g: effect on the main thread
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+main thread (default stack): StackOverflowError at depth 33,490,552
+stack     1 MB: max depth 61,965 (16.9 B/frame) | first overflow 3 ms | 3 more overflows 7 ms (depth 61,965) | controlled recursion to depth 30,982: 0 ms (5.1 ns/frame)
+### HotSpot Graal JIT (default), SerialGC, stacks 8/64/1024 MB
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+main thread (default stack): StackOverflowError at depth 16,710
+Exception in thread "deep-8" java.lang.StackOverflowError
+	at DeepRec.bounded(DeepRec.java:45)
+	at DeepRec.bounded(DeepRec.java:45)
+	at DeepRec.bounded(DeepRec.java:45)
+### native-image CE (serial GC)
+vm: Substrate VM 25.0.5.0.3+1
+main thread (default stack): StackOverflowError at depth 130,294
+stack     1 MB: max depth 16,280 (64.4 B/frame) | first overflow 0 ms | 3 more overflows 1 ms (depth 16,280) | controlled recursion to depth 8,140: 0 ms (5.1 ns/frame)
+stack     8 MB: max depth 130,968 (64.1 B/frame) | first overflow 4 ms | 3 more overflows 10 ms (depth 130,968) | controlled recursion to depth 65,484: 0 ms (7.7 ns/frame)
+stack    64 MB: max depth 1,048,472 (64.0 B/frame) | first overflow 38 ms | 3 more overflows 93 ms (depth 1,048,472) | controlled recursion to depth 524,236: 5 ms (10.8 ns/frame)
+stack  1024 MB: max depth 16,777,112 (64.0 B/frame) | first overflow 3160 ms | 3 more overflows 6528 ms (depth 16,777,112) | controlled recursion to depth 8,388,556: 516 ms (61.5 ns/frame)
+stack  8192 MB: max depth 134,217,624 (64.0 B/frame) | first overflow 36237 ms | 3 more overflows 59784 ms (depth 134,217,624) | controlled recursion to depth 67,108,812: 2321 ms (34.6 ns/frame)
+### HotSpot Graal JIT, skipping the main-thread overflow (-Ddeeprec.skipMain=true)
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+stack     8 MB: max depth 72,260 (116.1 B/frame) | first overflow 10 ms | 3 more overflows 334 ms (depth 172,552) | controlled recursion to depth 36,130: 0 ms (11.7 ns/frame)
+stack    64 MB: max depth 1,395,891 (48.1 B/frame) | first overflow 135 ms | 3 more overflows 334 ms (depth 1,395,891) | controlled recursion to depth 697,945: 10 ms (14.6 ns/frame)
+stack  1024 MB: max depth 22,367,411 (48.0 B/frame) | first overflow 3045 ms | 3 more overflows 8582 ms (depth 22,367,411) | controlled recursion to depth 11,183,705: 113 ms (10.2 ns/frame)
+### HotSpot Graal JIT with main-thread overflow first, -XX:-BackgroundCompilation
+vm: OpenJDK 64-Bit Server VM 25.0.5.0.3+1-jvmci-25.5-b26
+main thread (default stack): StackOverflowError at depth 103,143
+stack     8 MB: max depth 172,254 (48.7 B/frame) | first overflow 20 ms | 3 more overflows 39 ms (depth 172,552) | controlled recursion to depth 86,127: 0 ms (10.8 ns/frame)
+stack    64 MB: max depth 1,395,891 (48.1 B/frame) | first overflow 146 ms | 3 more overflows 333 ms (depth 1,395,891) | controlled recursion to depth 697,945: 10 ms (14.8 ns/frame)

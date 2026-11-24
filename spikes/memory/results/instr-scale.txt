@@ -1,0 +1,30 @@
+##### fixed total work (16 GB, decl 64 MB, keep 10%) split over T mutator threads
+  56.124 G | cpu   7.44 s | wall   7.79 s | rss  3597 MB | kernel  4.565 G | exit 0 | [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 1
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.92 s = mutators   6.77 s + VM(GC/JIT/other)  0.15 s  wall   7.04 s  GCs     5  gcPause    109 ms  => 0.403 CPU-ns per allocated byte
+  57.200 G | cpu   7.57 s | wall   4.73 s | rss  3636 MB | kernel  4.629 G | exit 0 | [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 2
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 2 : procCPU    7.05 s = mutators   6.82 s + VM(GC/JIT/other)  0.23 s  wall   3.95 s  GCs     5  gcPause    224 ms  => 0.410 CPU-ns per allocated byte
+  60.154 G | cpu   8.35 s | wall   4.32 s | rss  3674 MB | kernel  4.697 G | exit 0 | [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    7.79 s = mutators   7.40 s + VM(GC/JIT/other)  0.39 s  wall   3.42 s  GCs     5  gcPause    421 ms  => 0.453 CPU-ns per allocated byte
+  60.942 G | cpu   8.40 s | wall   5.45 s | rss  3739 MB | kernel  4.739 G | exit 0 | [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 8
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 8 : procCPU    7.90 s = mutators   7.29 s + VM(GC/JIT/other)  0.61 s  wall   4.61 s  GCs     5  gcPause    597 ms  => 0.460 CPU-ns per allocated byte
+  57.180 G | cpu   7.56 s | wall   7.75 s | rss  3383 MB | kernel  4.354 G | exit 0 | [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 1
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    6.97 s = mutators   6.72 s + VM(GC/JIT/other)  0.25 s  wall   6.91 s  GCs     5  gcPause    125 ms  => 0.406 CPU-ns per allocated byte
+  61.779 G | cpu   8.99 s | wall   4.13 s | rss  3465 MB | kernel  4.375 G | exit 0 | [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    8.36 s = mutators   7.68 s + VM(GC/JIT/other)  0.68 s  wall   2.97 s  GCs     5  gcPause    259 ms  => 0.487 CPU-ns per allocated byte
+  57.277 G | cpu   9.03 s | wall   4.60 s | rss  3558 MB | kernel  4.555 G | exit 0 | [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g] GcCost 16 64 0.1 0 8
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 8 : procCPU    8.41 s = mutators   7.27 s + VM(GC/JIT/other)  1.14 s  wall   3.57 s  GCs     6  gcPause    543 ms  => 0.490 CPU-ns per allocated byte
+  62.360 G | cpu   8.27 s | wall   3.81 s | rss  3450 MB | kernel  4.299 G | exit 0 | [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn4g -XX:ParallelGCThreads=2] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    7.69 s = mutators   7.03 s + VM(GC/JIT/other)  0.66 s  wall   2.93 s  GCs     5  gcPause    439 ms  => 0.448 CPU-ns per allocated byte
+  70.600 G | cpu  10.00 s | wall   3.95 s | rss  6594 MB | kernel  8.215 G | exit 0 | [-XX:+UseG1GC -Xms10g -Xmx10g] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    9.35 s = mutators   8.65 s + VM(GC/JIT/other)  0.70 s  wall   2.82 s  GCs     6  gcPause    391 ms  => 0.544 CPU-ns per allocated byte
+  78.882 G | cpu  11.07 s | wall   5.57 s | rss  4102 MB | kernel 16.390 G | exit 0 | [-XX:+UseZGC -Xms10g -Xmx10g] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    9.46 s = mutators   7.26 s + VM(GC/JIT/other)  2.20 s  wall   2.78 s  GCs    51  gcPause   2342 ms  => 0.551 CPU-ns per allocated byte
+##### young generation 1 GB, T = 1 and 4
+  60.435 G | cpu   7.58 s | wall   7.77 s | rss  1029 MB | kernel  1.339 G | exit 0 | [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 1
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 1 : procCPU    7.04 s = mutators   6.58 s + VM(GC/JIT/other)  0.46 s  wall   7.03 s  GCs    21  gcPause    420 ms  => 0.410 CPU-ns per allocated byte
+  66.384 G | cpu  18.53 s | wall   7.91 s | rss  1124 MB | kernel  1.608 G | exit 0 | [-XX:+UseSerialGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU   18.01 s = mutators  16.56 s + VM(GC/JIT/other)  1.45 s  wall   7.27 s  GCs    21  gcPause   1516 ms  => 1.048 CPU-ns per allocated byte
+  68.272 G | cpu  14.14 s | wall   6.88 s | rss  1204 MB | kernel  1.725 G | exit 0 | [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn1g] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU   13.57 s = mutators  11.30 s + VM(GC/JIT/other)  2.27 s  wall   6.16 s  GCs    20  gcPause   1390 ms  => 0.790 CPU-ns per allocated byte
+  71.353 G | cpu  10.18 s | wall   6.77 s | rss  1195 MB | kernel  1.711 G | exit 0 | [-XX:+UseParallelGC -Xms10g -Xmx10g -Xmn1g -XX:ParallelGCThreads=2] GcCost 16 64 0.1 0 4
+             alloc 16 GB decl 64 MB keep 0.100 old 0 MB threads 4 : procCPU    9.54 s = mutators   7.19 s + VM(GC/JIT/other)  2.35 s  wall   5.90 s  GCs    21  gcPause   2654 ms  => 0.555 CPU-ns per allocated byte

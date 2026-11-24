@@ -1,0 +1,60 @@
+javac x1  C2 tiered | instr    33.684 G (virtual    5.61 s) | cpu    4.47 s | wall    2.41 s | rss    355 MB | exit 0
+    javac x1 over 32 files / 21081 lines | iter ms: 2257 | best 2258 | wall 2257 ms | main-thread cpu 1181 ms | process cpu 4430 ms | JIT time (CompilationMXBean) 5905 ms
+javac x5  C2 tiered | instr    80.272 G (virtual   13.38 s) | cpu   10.61 s | wall    4.96 s | rss    998 MB | exit 0
+    javac x5 over 32 files / 21081 lines | iter ms: 2048 870 510 592 710 | best 511 | wall 4732 ms | main-thread cpu 2628 ms | process cpu 10580 ms | JIT time (CompilationMXBean) 12903 ms
+javac x20 C2 tiered | instr   136.885 G (virtual   22.81 s) | cpu   17.05 s | wall    9.29 s | rss   1058 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2176 631 681 457 559 406 331 473 367 604 ... 179 | best 175 | wall 9083 ms | main-thread cpu 5320 ms | process cpu 17030 ms | JIT time (CompilationMXBean) 19279 ms
+javac x60 C2 tiered | instr   227.695 G (virtual   37.95 s) | cpu   27.39 s | wall   16.17 s | rss   1071 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 2202 696 404 613 963 439 269 340 259 495 ... 150 | best 148 | wall 15929 ms | main-thread cpu 11598 ms | process cpu 27360 ms | JIT time (CompilationMXBean) 23270 ms
+javac x1 Graal tiered (default JIT) | instr    46.611 G (virtual    7.77 s) | cpu    4.98 s | wall    2.41 s | rss    408 MB | exit 0
+    javac x1 over 32 files / 21081 lines | iter ms: 2223 | best 2224 | wall 2223 ms | main-thread cpu 1250 ms | process cpu 4950 ms | JIT time (CompilationMXBean) 5393 ms
+javac x1 C1 only (TieredStopAtLevel=1) | instr    10.134 G (virtual    1.69 s) | cpu    1.62 s | wall    1.62 s | rss    317 MB | exit 0
+    javac x1 over 32 files / 21081 lines | iter ms: 1489 | best 1490 | wall 1489 ms | main-thread cpu 914 ms | process cpu 1600 ms | JIT time (CompilationMXBean) 916 ms
+javac x20 Graal tiered (default JIT) | instr   232.596 G (virtual   38.77 s) | cpu   21.97 s | wall    8.76 s | rss   1100 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2258 701 577 573 432 308 341 304 249 358 ... 304 | best 202 | wall 8497 ms | main-thread cpu 6454 ms | process cpu 21940 ms | JIT time (CompilationMXBean) 18798 ms
+javac x20 C1 only (TieredStopAtLevel=1) | instr    83.380 G (virtual   13.90 s) | cpu    8.68 s | wall    8.39 s | rss    984 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 1266 412 402 391 463 350 333 367 400 336 ... 325 | best 324 | wall 8151 ms | main-thread cpu 7459 ms | process cpu 8670 ms | JIT time (CompilationMXBean) 1449 ms
+javac x60 Graal tiered (default JIT) | instr   438.929 G (virtual   73.15 s) | cpu   40.58 s | wall   17.13 s | rss   1148 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 2246 593 470 424 543 312 360 298 275 368 ... 160 | best 161 | wall 16897 ms | main-thread cpu 13877 ms | process cpu 40540 ms | JIT time (CompilationMXBean) 31046 ms
+javac x60 C1 only (TieredStopAtLevel=1) | instr   231.951 G (virtual   38.66 s) | cpu   22.07 s | wall   21.84 s | rss    987 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 1119 456 410 406 475 353 377 346 383 348 ... 325 | best 309 | wall 21657 ms | main-thread cpu 20495 ms | process cpu 22060 ms | JIT time (CompilationMXBean) 1831 ms
+javac x1 -Xint | instr    42.282 G (virtual    7.05 s) | cpu    4.51 s | wall    4.56 s | rss    285 MB | exit 1
+    	at JavacBench.main(JavacBench.java:91)
+javac x20 C2 only (-TieredCompilation) | instr   103.748 G (virtual   17.29 s) | cpu   13.97 s | wall    8.41 s | rss   1005 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2435 714 531 502 315 256 255 256 349 277 ... 182 | best 183 | wall 8130 ms | main-thread cpu 6471 ms | process cpu 13950 ms | JIT time (CompilationMXBean) 13670 ms
+javac x20 C2 tiered, Tier4 thresholds x4 | instr   106.307 G (virtual   17.72 s) | cpu   14.41 s | wall    9.12 s | rss   1044 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2061 1117 620 526 815 313 339 310 215 338 ... 240 | best 183 | wall 8891 ms | main-thread cpu 6028 ms | process cpu 14390 ms | JIT time (CompilationMXBean) 13459 ms
+javac x20 C2 tiered, CICompilerCount=2 | instr   109.022 G (virtual   18.17 s) | cpu   13.43 s | wall    7.38 s | rss   1020 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 1664 563 415 400 411 403 239 216 239 327 ... 233 | best 189 | wall 7137 ms | main-thread cpu 5766 ms | process cpu 13400 ms | JIT time (CompilationMXBean) 8751 ms
+javac x60 C2 only (-TieredCompilation) | instr   181.068 G (virtual   30.18 s) | cpu   22.84 s | wall   16.19 s | rss   1025 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 2506 1089 512 581 306 309 249 361 334 273 ... 163 | best 156 | wall 15943 ms | main-thread cpu 13457 ms | process cpu 22820 ms | JIT time (CompilationMXBean) 13632 ms
+javac x60 C2 tiered, Tier4 thresholds x4 | instr   193.568 G (virtual   32.26 s) | cpu   23.62 s | wall   15.25 s | rss   1045 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 2233 666 490 441 498 305 235 203 204 271 ... 154 | best 152 | wall 15012 ms | main-thread cpu 12214 ms | process cpu 23610 ms | JIT time (CompilationMXBean) 15519 ms
+javac x60 C2 tiered, CICompilerCount=2 | instr   222.625 G (virtual   37.10 s) | cpu   26.45 s | wall   15.19 s | rss   1031 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 1628 725 527 409 431 265 286 278 243 314 ... 163 | best 152 | wall 14920 ms | main-thread cpu 12779 ms | process cpu 26420 ms | JIT time (CompilationMXBean) 14722 ms
+javac x1 C2 tiered + AOTCache (trained x5) | instr    33.719 G (virtual    5.62 s) | cpu    3.98 s | wall    1.38 s | rss    334 MB | exit 0
+    javac x1 over 32 files / 21081 lines | iter ms: 1267 | best 1268 | wall 1267 ms | main-thread cpu 966 ms | process cpu 3950 ms | JIT time (CompilationMXBean) 3792 ms
+javac x5 C2 tiered + AOTCache (trained x5) | instr    75.566 G (virtual   12.59 s) | cpu    8.72 s | wall    2.52 s | rss    959 MB | exit 0
+    javac x5 over 32 files / 21081 lines | iter ms: 1031 400 300 307 320 | best 301 | wall 2360 ms | main-thread cpu 2107 ms | process cpu 8700 ms | JIT time (CompilationMXBean) 7510 ms
+javac x20 C2 tiered + AOTCache (trained x5) | instr   135.980 G (virtual   22.66 s) | cpu   14.93 s | wall    4.45 s | rss   1042 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 843 313 270 235 278 165 150 144 142 205 ... 126 | best 127 | wall 4294 ms | main-thread cpu 4081 ms | process cpu 14930 ms | JIT time (CompilationMXBean) 11133 ms
+javac x5 C2 tiered, jar classpath, no AOT cache | instr    70.936 G (virtual   11.82 s) | cpu    7.98 s | wall    2.36 s | rss    966 MB | exit 0
+    javac x5 over 32 files / 21081 lines | iter ms: 1047 370 274 260 261 | best 260 | wall 2214 ms | main-thread cpu 1986 ms | process cpu 7950 ms | JIT time (CompilationMXBean) 7174 ms
+javac x20 C2 only, -XX:-BackgroundCompilation | instr   102.704 G (virtual   17.12 s) | cpu   13.11 s | wall   13.74 s | rss    977 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 4148 1921 885 708 871 629 557 466 390 341 ... 227 | best 200 | wall 13528 ms | main-thread cpu 6292 ms | process cpu 13120 ms | JIT time (CompilationMXBean) 6515 ms
+javac x20 C2 tiered, -XX:-BackgroundCompilation | instr   144.613 G (virtual   24.10 s) | cpu   16.92 s | wall   18.20 s | rss   1020 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 5941 2366 1051 1064 1106 932 771 527 883 497 ... 252 | best 191 | wall 17980 ms | main-thread cpu 4990 ms | process cpu 16960 ms | JIT time (CompilationMXBean) 11656 ms
+javac x20 C2 only, CompileThreshold=30000 | instr   121.446 G (virtual   20.24 s) | cpu   13.92 s | wall   10.21 s | rss    983 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2225 1039 728 647 564 481 425 370 414 317 ... 239 | best 239 | wall 10050 ms | main-thread cpu 9692 ms | process cpu 13920 ms | JIT time (CompilationMXBean) 4514 ms
+javac x20 C2 only, -XX:-UsePerfData -Xshare:auto -XX:CICompilerCount=1 | instr   113.666 G (virtual   18.94 s) | cpu   12.75 s | wall    6.86 s | rss    976 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 1586 717 477 384 367 242 237 229 272 215 ... 162 | best 163 | wall 6711 ms | main-thread cpu 6566 ms | process cpu 12730 ms | JIT time (CompilationMXBean) 6323 ms
+javac x20 Oracle JDK C2 only | instr   105.560 G (virtual   17.59 s) | cpu   12.13 s | wall    8.56 s | rss    998 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2405 907 651 697 374 298 309 375 383 193 ... 162 | best 144 | wall 8357 ms | main-thread cpu 5448 ms | process cpu 12110 ms | JIT time (CompilationMXBean) 12751 ms
+javac x20 Oracle JDK Graal-EE tiered (default) | instr   181.985 G (virtual   30.33 s) | cpu   18.59 s | wall    7.40 s | rss   1141 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 1909 602 475 435 419 287 296 250 242 282 ... 193 | best 171 | wall 7206 ms | main-thread cpu 5508 ms | process cpu 18560 ms | JIT time (CompilationMXBean) 15847 ms
+javac x60 Oracle JDK Graal-EE tiered (default) | instr   314.689 G (virtual   52.45 s) | cpu   32.31 s | wall   14.46 s | rss   1171 MB | exit 0
+    javac x60 over 32 files / 21081 lines | iter ms: 1500 569 485 429 577 361 223 263 230 317 ... 135 | best 133 | wall 14231 ms | main-thread cpu 11849 ms | process cpu 32280 ms | JIT time (CompilationMXBean) 24305 ms
+javac x20 C2 tiered, G1 default heap (JVM defaults) | instr   144.492 G (virtual   24.08 s) | cpu   15.98 s | wall    7.50 s | rss    898 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 1844 708 437 395 266 359 263 344 255 341 ... 199 | best 143 | wall 7320 ms | main-thread cpu 4556 ms | process cpu 15960 ms | JIT time (CompilationMXBean) 17979 ms
+javac x20 all JVM defaults (Graal JIT, G1) | instr   225.533 G (virtual   37.59 s) | cpu   19.60 s | wall    7.70 s | rss    831 MB | exit 0
+    javac x20 over 32 files / 21081 lines | iter ms: 2031 568 493 436 385 294 248 265 245 291 ... 223 | best 205 | wall 7541 ms | main-thread cpu 5543 ms | process cpu 19570 ms | JIT time (CompilationMXBean) 16884 ms

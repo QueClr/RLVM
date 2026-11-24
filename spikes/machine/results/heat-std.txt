@@ -1,0 +1,37 @@
+SETUP /home/queclr/Documents/rabdos-lean-vm/work/machine-out/std.bin exprs=9928514 constants=103885 spines=3115533 setup_ms=625
+HEAT exprs=9928514 app_nodes=8090565 constants=103885 spines_const_head=3115533 spines_other_head=71309 args=12832493 avg_args=4.12 over_applied=47489 under_applied=132493 max_params=99
+HEAT constants used as a spine head: 69712 of 103885 (67.1%)
+HEAT share of all instantiations received by the hottest N constants: top1=11.3% top10=33.8% top30=50.1% top100=66.8% top300=77.1% top1000=85.2% top3000=91.2% top10000=96.2% top30000=98.6%
+HEAT constants needed to cover a share: 50.0%:30 80.0%:448 90.0%:2349 95.0%:7054 99.0%:38557 99.9%:66597
+HEAT heat>=1: 69712 constants, 100.00% of instantiations, 97.76% of instantiations happen after the constant crossed the threshold
+HEAT heat>=10: 9875 constants, 96.13% of instantiations, 92.97% of instantiations happen after the constant crossed the threshold
+HEAT heat>=100: 1704 constants, 88.29% of instantiations, 82.82% of instantiations happen after the constant crossed the threshold
+HEAT heat>=1000: 255 constants, 75.82% of instantiations, 67.64% of instantiations happen after the constant crossed the threshold
+HEAT heat>=10000: 50 constants, 58.06% of instantiations, 42.02% of instantiations happen after the constant crossed the threshold
+HEAT heat>=100000: 3 constants, 18.94% of instantiations, 9.31% of instantiations happen after the constant crossed the threshold
+HEAT heat>=1000000: 0 constants, 0.00% of instantiations, 0.00% of instantiations happen after the constant crossed the threshold
+HEAT #1 Eq heat=352503 (11.31%) params=3 kind=5
+HEAT #2 Eq.trans heat=130630 (4.19%) params=6 kind=2
+HEAT #3 congrArg heat=106839 (3.43%) params=6 kind=2
+HEAT #4 Lean.Omega.LinearCombo.eval heat=93404 (3.00%) params=2 kind=1
+HEAT #5 HSub.hSub heat=76269 (2.45%) params=6 kind=1
+HEAT #6 Eq.symm heat=75486 (2.42%) params=4 kind=2
+HEAT #7 HAdd.hAdd heat=73525 (2.36%) params=6 kind=1
+HEAT #8 id heat=56245 (1.81%) params=2 kind=1
+HEAT #9 And heat=47971 (1.54%) params=2 kind=5
+HEAT #10 List.cons heat=41722 (1.34%) params=3 kind=6
+HEAT #11 PSigma heat=37014 (1.19%) params=2 kind=5
+HEAT #12 LE.le heat=36793 (1.18%) params=4 kind=1
+HEAT #13 LT.lt heat=36144 (1.16%) params=4 kind=1
+HEAT #14 Eq.mpr heat=35474 (1.14%) params=4 kind=1
+HEAT #15 congrFun' heat=32188 (1.03%) params=6 kind=2
+HEAT #16 Eq.refl heat=29335 (0.94%) params=2 kind=6
+HEAT #17 Iff heat=26761 (0.86%) params=2 kind=5
+HEAT #18 Eq.ndrec heat=25949 (0.83%) params=6 kind=1
+HEAT #19 Not heat=24128 (0.77%) params=1 kind=1
+HEAT #20 Lean.Omega.Int.sub_congr heat=23405 (0.75%) params=6 kind=2
+HEAT #21 of_eq_true heat=23307 (0.75%) params=2 kind=2
+HEAT #22 Lean.Omega.LinearCombo.sub_eval heat=22858 (0.73%) params=3 kind=2
+HEAT #23 Exists heat=21801 (0.70%) params=2 kind=5
+HEAT #24 congr heat=21532 (0.69%) params=8 kind=2
+HEAT #25 HMul.hMul heat=21514 (0.69%) params=6 kind=1

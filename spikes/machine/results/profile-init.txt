@@ -1,0 +1,1 @@
+PROFILE per spine: blocks=4.98 instructions=5.83 code_words=17.72 probes=5.00 operands imm=4.27 slot=6.57 | by opcode: MOV=3.310 APP1=0.504 APP2=0.702 APP3=0.630 APPN=0.125 APPD=0.203 PROJ=0.000 CLO=0.360 | spines that need no probe at all: 25.2%

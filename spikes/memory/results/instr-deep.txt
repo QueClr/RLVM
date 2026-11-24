@@ -1,0 +1,20 @@
+  32.575 G | cpu   1.79 s | wall   1.85 s | rss   342 MB | kernel  0.402 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseSerialGC -Xmn256m] DeepStackGc 1000 64
+             depth      1000 alloc 64 GB : procCPU   1.59 s wall   1.63 s  GCs   40  gcPause     13 ms  => 0.325 ms per GC
+  59.932 G | cpu   3.02 s | wall   3.00 s | rss   522 MB | kernel  0.702 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseSerialGC -Xmn256m] DeepStackGc 1000000 64
+             depth   1000000 alloc 64 GB : procCPU   2.79 s wall   2.76 s  GCs   40  gcPause   1139 ms  => 28.475 ms per GC
+  33.003 G | cpu   1.82 s | wall   1.88 s | rss   397 MB | kernel  0.519 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m] DeepStackGc 1000 64
+             depth      1000 alloc 64 GB : procCPU   1.60 s wall   1.64 s  GCs   34  gcPause     38 ms  => 1.118 ms per GC
+  69.434 G | cpu   4.30 s | wall   3.23 s | rss   521 MB | kernel  1.068 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m] DeepStackGc 1000000 64
+             depth   1000000 alloc 64 GB : procCPU   4.04 s wall   2.96 s  GCs   40  gcPause   1344 ms  => 33.600 ms per GC
+  32.761 G | cpu   1.81 s | wall   1.86 s | rss   391 MB | kernel  0.475 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m -XX:ParallelGCThreads=1] DeepStackGc 1000 64
+             depth      1000 alloc 64 GB : procCPU   1.59 s wall   1.61 s  GCs   34  gcPause     16 ms  => 0.471 ms per GC
+  58.426 G | cpu   2.78 s | wall   2.75 s | rss   553 MB | kernel  0.748 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseParallelGC -Xmn256m -XX:ParallelGCThreads=1] DeepStackGc 1000000 64
+             depth   1000000 alloc 64 GB : procCPU   2.55 s wall   2.53 s  GCs   40  gcPause   1257 ms  => 31.425 ms per GC
+  29.453 G | cpu   2.20 s | wall   2.38 s | rss  2712 MB | kernel  3.394 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseG1GC] DeepStackGc 1000 64
+             depth      1000 alloc 64 GB : procCPU   1.95 s wall   1.95 s  GCs    5  gcPause     11 ms  => 2.200 ms per GC
+  44.823 G | cpu   3.06 s | wall   2.99 s | rss  2859 MB | kernel  3.676 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseG1GC] DeepStackGc 1000000 64
+             depth   1000000 alloc 64 GB : procCPU   2.82 s wall   2.51 s  GCs   16  gcPause    552 ms  => 34.500 ms per GC
+  33.246 G | cpu   3.11 s | wall   3.62 s | rss  3827 MB | kernel  8.364 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseZGC] DeepStackGc 1000 64
+             depth      1000 alloc 64 GB : procCPU   2.47 s wall   2.46 s  GCs   32  gcPause     70 ms  => 2.188 ms per GC
+  43.008 G | cpu   3.57 s | wall   3.86 s | rss  3119 MB | kernel  7.850 G | exit 0 | [-Xms4g -Xmx4g -XX:+UseZGC] DeepStackGc 1000000 64
+             depth   1000000 alloc 64 GB : procCPU   2.94 s wall   2.73 s  GCs   34  gcPause    577 ms  => 16.971 ms per GC

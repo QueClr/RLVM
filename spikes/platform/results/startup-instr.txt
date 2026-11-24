@@ -1,0 +1,16 @@
+hello default (G1, CDS on, tiered+Graal) | instr     0.466 G (virtual    0.08 s) | cpu    0.08 s | wall    0.04 s | rss     96 MB | exit 0
+    hello 0
+hello -Xshare:off | instr     0.625 G (virtual    0.10 s) | cpu    0.09 s | wall    0.05 s | rss     79 MB | exit 0
+    hello 0
+hello -XX:+UseSerialGC | instr     0.461 G (virtual    0.08 s) | cpu    0.08 s | wall    0.03 s | rss     93 MB | exit 0
+    hello 0
+hello -XX:+UseSerialGC -XX:TieredStopAtLevel=1 | instr     0.219 G (virtual    0.04 s) | cpu    0.05 s | wall    0.03 s | rss     55 MB | exit 0
+    hello 0
+hello -XX:+UseSerialGC -XX:-UseJVMCICompiler | instr     0.291 G (virtual    0.05 s) | cpu    0.06 s | wall    0.04 s | rss     41 MB | exit 0
+    hello 0
+hello -Xint | instr     0.078 G (virtual    0.01 s) | cpu    0.03 s | wall    0.02 s | rss     36 MB | exit 0
+    hello 0
+hello -XX:AOTCache (JEP 483/514) | instr     0.627 G (virtual    0.10 s) | cpu    0.09 s | wall    0.06 s | rss     79 MB | exit 0
+    hello 0
+hello -XX:AOTCache + SerialGC | instr     0.622 G (virtual    0.10 s) | cpu    0.09 s | wall    0.06 s | rss     77 MB | exit 0
+    hello 0

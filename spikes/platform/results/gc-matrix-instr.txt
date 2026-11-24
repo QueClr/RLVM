@@ -1,0 +1,32 @@
+[-Xms8g -Xmx8g -XX:+UseSerialGC] | instr    54.371 G (virtual    9.06 s) | cpu   34.78 s | wall   34.82 s | rss   4517 MB | exit 0
+    built in 10829 ms | transform 200M nodes in 23663 ms | heap used 3906 MB | GC 3/7406 ms [Copy=3/7406ms MarkSweepCompact=0/0ms] | main-thread cpu 27121 ms | process cpu 34750 ms
+[-Xms8g -Xmx8g -XX:+UseSerialGC -Xmn1g] | instr    63.455 G (virtual   10.58 s) | cpu   35.17 s | wall   35.18 s | rss   3249 MB | exit 0
+    built in 11944 ms | transform 200M nodes in 22940 ms | heap used 2912 MB | GC 9/9167 ms [Copy=9/9167ms MarkSweepCompact=0/0ms] | main-thread cpu 25748 ms | process cpu 35140 ms
+[-Xms8g -Xmx8g -XX:+UseSerialGC -Xmn4g] | instr    57.824 G (virtual    9.64 s) | cpu   34.71 s | wall   34.82 s | rss   5549 MB | exit 0
+    built in 7181 ms | transform 200M nodes in 27244 ms | heap used 3439 MB | GC 2/9313 ms [Copy=2/9313ms MarkSweepCompact=0/0ms] | main-thread cpu 25144 ms | process cpu 34690 ms
+[-Xms8g -Xmx8g -XX:+UseSerialGC -Xmn4g -XX:+UseCompactObjectHeaders] | instr    58.768 G (virtual    9.79 s) | cpu   34.05 s | wall   34.16 s | rss   5250 MB | exit 0
+    built in 6596 ms | transform 200M nodes in 22895 ms | heap used 1570 MB | GC 1/5322 ms [Copy=1/5322ms MarkSweepCompact=0/0ms] | main-thread cpu 24233 ms | process cpu 34010 ms
+[-Xms8g -Xmx8g -XX:+UseParallelGC] | instr    74.926 G (virtual   12.49 s) | cpu   39.72 s | wall   26.13 s | rss   4530 MB | exit 0
+    built in 9725 ms | transform 200M nodes in 16021 ms | heap used 2402 MB | GC 4/2210 ms [PS MarkSweep=0/0ms PS Scavenge=4/2210ms] | main-thread cpu 23567 ms | process cpu 39690 ms
+[-Xms8g -Xmx8g -XX:+UseParallelGC -XX:ParallelGCThreads=1] | instr    75.482 G (virtual   12.58 s) | cpu   34.20 s | wall   34.24 s | rss   4271 MB | exit 0
+    built in 14450 ms | transform 200M nodes in 19466 ms | heap used 2146 MB | GC 4/13391 ms [PS MarkSweep=0/0ms PS Scavenge=4/13391ms] | main-thread cpu 20560 ms | process cpu 34170 ms
+[-Xms8g -Xmx8g -XX:+UseParallelGC -XX:ParallelGCThreads=2] | instr    75.122 G (virtual   12.52 s) | cpu   33.89 s | wall   27.00 s | rss   4531 MB | exit 0
+    built in 9808 ms | transform 200M nodes in 16907 ms | heap used 2402 MB | GC 4/6911 ms [PS MarkSweep=0/0ms PS Scavenge=4/6911ms] | main-thread cpu 19835 ms | process cpu 33870 ms
+[-Xms8g -Xmx8g -XX:+UseParallelGC -XX:ParallelGCThreads=4] | instr    75.000 G (virtual   12.50 s) | cpu   35.73 s | wall   25.12 s | rss   4528 MB | exit 0
+    built in 8597 ms | transform 200M nodes in 16233 ms | heap used 2402 MB | GC 4/3674 ms [PS MarkSweep=0/0ms PS Scavenge=4/3674ms] | main-thread cpu 21193 ms | process cpu 35700 ms
+[-Xms8g -Xmx8g -XX:+UseParallelGC -XX:ParallelGCThreads=4 -Xmn4g] | instr    67.878 G (virtual   11.31 s) | cpu   35.15 s | wall   24.74 s | rss   5456 MB | exit 0
+    built in 6704 ms | transform 200M nodes in 17696 ms | heap used 3878 MB | GC 2/3547 ms [PS MarkSweep=0/0ms PS Scavenge=2/3547ms] | main-thread cpu 20887 ms | process cpu 35120 ms
+[-Xms8g -Xmx8g -XX:+UseG1GC] | instr   204.186 G (virtual   34.03 s) | cpu   53.65 s | wall   38.12 s | rss   5328 MB | exit 0
+    built in 22418 ms | transform 200M nodes in 15390 ms | heap used 2952 MB | GC 10/2537 ms [G1 Young Generation=10/2537ms G1 Concurrent GC=0/0ms G1 Old Generation=0/0ms] | main-thread cpu 35252 ms | process cpu 53620 ms
+[-Xms8g -Xmx8g -XX:+UseG1GC -XX:ParallelGCThreads=1 -XX:ConcGCThreads=1] | instr   312.057 G (virtual   52.01 s) | cpu   65.11 s | wall   61.30 s | rss   2848 MB | exit 0
+    built in 38125 ms | transform 200M nodes in 22918 ms | heap used 2464 MB | GC 18/14501 ms [G1 Young Generation=18/14501ms G1 Concurrent GC=0/0ms G1 Old Generation=0/0ms] | main-thread cpu 44582 ms | process cpu 65080 ms
+[-Xms8g -Xmx8g -XX:+UseG1GC -XX:ParallelGCThreads=4 -XX:ConcGCThreads=1] | instr   281.593 G (virtual   46.93 s) | cpu   66.80 s | wall   64.37 s | rss   2851 MB | exit 0
+    built in 33896 ms | transform 200M nodes in 29760 ms | heap used 2516 MB | GC 18/8465 ms [G1 Young Generation=18/8465ms G1 Concurrent GC=0/0ms G1 Old Generation=0/0ms] | main-thread cpu 45154 ms | process cpu 66780 ms
+[-Xms8g -Xmx8g -XX:+UseZGC] | instr   221.171 G (virtual   36.86 s) | cpu  104.95 s | wall   96.54 s | rss   6565 MB | exit 0
+    built in 29265 ms | transform 200M nodes in 64719 ms | heap used 6280 MB | GC 42/115149 ms [ZGC Minor Cycles=6/38637ms ZGC Minor Pauses=19/0ms ZGC Major Cycles=3/76512ms ZGC Major Pauses=14/0ms] | main-thread cpu 52792 ms | process cpu 104950
+[-Xmx14g -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC] | instr    35.684 G (virtual    5.95 s) | cpu   31.98 s | wall   51.40 s | rss   8097 MB | exit 0
+    built in 22206 ms | transform 200M nodes in 27941 ms | heap used 8020 MB | GC 0/0 ms [Epsilon Heap=0/0ms] | main-thread cpu 31697 ms | process cpu 31960 ms
+[-XX:+UseSerialGC] | instr    83.810 G (virtual   13.97 s) | cpu   43.46 s | wall   52.32 s | rss   2442 MB | exit 0
+    built in 21110 ms | transform 200M nodes in 30500 ms | heap used 2299 MB | GC 106/16290 ms [Copy=106/16290ms MarkSweepCompact=0/0ms] | main-thread cpu 28969 ms | process cpu 43460 ms
+[] | instr   262.831 G (virtual   43.81 s) | cpu   63.50 s | wall   57.36 s | rss   3221 MB | exit 0
+    built in 28658 ms | transform 200M nodes in 28235 ms | heap used 2231 MB | GC 55/13879 ms [G1 Young Generation=49/13864ms G1 Concurrent GC=6/15ms G1 Old Generation=0/0ms] | main-thread cpu 27578 ms | process cpu 63490 ms
