@@ -22,7 +22,7 @@ class TierEquivalenceTest {
         System.setProperty("rlvm.t2.period", "1");
         System.setProperty("rlvm.t2.sync", "true");
         System.setProperty("rlvm.t2.max", "1000000");
-        for (String k : new String[] {"rlvm.t2.slots", "rlvm.t2.nodes", "rlvm.t2.resume", "rlvm.t2.roles", "rlvm.t2.rent", "rlvm.t2.share", "rlvm.t2.count", "rlvm.t2.mode"}) {
+        for (String k : new String[] {"rlvm.t2.slots", "rlvm.t2.nodes", "rlvm.t2.resume", "rlvm.t2.roles", "rlvm.t2.rent", "rlvm.t2.share", "rlvm.t2.count", "rlvm.t2.mode", "rlvm.t2.hot"}) {
             System.clearProperty(k);
         }
         for (int i = 0; i + 1 < extra.length; i += 2) {

@@ -13,8 +13,8 @@ import java.util.Map;
  *                      cpu (default): the governor of ISA 8.5 - total CPU time is the metric, compilation is
  *                        charged: rent 1.0, share 0.02, max 256, period 1024, one compiler thread;
  *                      warm: the steady state is the metric and warm-up is not charged (OWNER-NOTES 12):
- *                        promotion by entry count (rlvm.t2.count, at 1000 entries), no heat accounting, no share
- *                        cap, max 4096, two compiler threads.
+ *                        promotion by entry count without the heat accounting (rlvm.t2.count): at 20000 entries
+ *                        and 2% of all activations (rlvm.t2.at, rlvm.t2.hot), at most 256 blocks, two compiler threads.
  * rlvm.t2.rent=F       rent-to-own factor: a block is compiled once the CPU time it has spent in the base
  *                      tier is at least F times its estimated compile cost (default 1.0; ISA 8.5)
  * rlvm.t2.share=F      governor: compiler CPU time (spent + estimated for the candidate) at most this share
@@ -32,10 +32,15 @@ import java.util.Map;
  * rlvm.t2.unit0=NS, rlvm.t2.unit1=NS   base-tier time of one entry of a block that has no timed sample yet:
  *                      unit0 + unit1 per instruction, nanoseconds (defaults 20 and 10; a model, not a measurement)
  * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps; the
- *                      threshold of rlvm.t2.count, default 1000 there)
+ *                      threshold of rlvm.t2.count: default 20000 in mode warm, 1000 with rlvm.t2.count alone)
+ * rlvm.t2.hot=N        count mode: promote a block only while it has at least N per mille of ALL activations of the
+ *                      engine so far, compiled ones included (default 20 = 2% in mode warm, else 0 = no such test).
+ *                      The entry count is cumulative, so without this test every block that is entered at all
+ *                      crosses any threshold in the end; on library corpora that means hundreds of lukewarm blocks,
+ *                      minutes of compilation and a slower steady state (NOTES-T3 section 1).
  * rlvm.t2.count=B      promotion by entry count WITHOUT the machine's heat accounting (default: true in mode warm):
  *                      the tier counts the activations it does not take, per machine, and a block is promoted when
- *                      the sum over the machines reaches rlvm.t2.at. An activation that compiled code takes is not
+ *                      the sum over the machines reaches rlvm.t2.at (and rlvm.t2.hot holds). An activation that compiled code takes is not
  *                      counted or timed by anybody. With false the heat accounting of the machine is switched on
  *                      (it costs about 11% of a warm pass on reachability on the JVM, NOTES-T3 section 2).
  * rlvm.t2.ahead=N       EXPERIMENT, REJECTED BY MEASUREMENT (NOTES-T3 section 6; default 0 = off; 2 is the setting that was
@@ -72,6 +77,8 @@ final class Settings {
     final int at;
     /** Promotion by the tier's own entry counters on the stepper path, without the machine's heat accounting. */
     final boolean count;
+    /** Count mode: a block is promoted only while it has at least this many per mille of all activations of the engine (0: no such test). */
+    final int hot;
     /** Run-ahead of the interning probes: 0 = off, N > 0 = where at least N interning instructions follow (NOTES-T3 section 6). */
     final int ahead;
     final int aheadMaxInstr;
@@ -101,7 +108,7 @@ final class Settings {
         }
         rent = dbl("rlvm.t2.rent", warm ? 0.05 : 1.0);
         share = dbl("rlvm.t2.share", warm ? 1.0 : 0.02);
-        max = Integer.getInteger("rlvm.t2.max", warm ? 4096 : 256);
+        max = Integer.getInteger("rlvm.t2.max", 256);
         maxInstr = Integer.getInteger("rlvm.t2.maxInstr", 256);
         minInstr = Integer.getInteger("rlvm.t2.minInstr", 0);
         period = Math.max(1, Integer.getInteger("rlvm.t2.period", warm ? 256 : 1024));
@@ -110,7 +117,8 @@ final class Settings {
         unit0Ns = dbl("rlvm.t2.unit0", 20.0);
         unit1Ns = dbl("rlvm.t2.unit1", 10.0);
         count = bool("rlvm.t2.count", warm);
-        at = Integer.getInteger("rlvm.t2.at", count ? 1000 : 0);
+        at = Integer.getInteger("rlvm.t2.at", warm ? 20000 : count ? 1000 : 0);
+        hot = Integer.getInteger("rlvm.t2.hot", warm ? 20 : 0);
         ahead = Integer.getInteger("rlvm.t2.ahead", 0);
         aheadMaxInstr = Integer.getInteger("rlvm.t2.aheadMaxInstr", 128);
         aheadExact = bool("rlvm.t2.aheadExact", true);

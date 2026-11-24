@@ -1,6 +1,6 @@
 # Are `skipargs` and `congruence` sound with respect to Lean's type theory? (reviewer S2)
 
-2026-11-24, 16:45Z - [[END]]Z. Adversarial review of the two non-official options of the machine's conversion checker
+2026-11-24, 16:45Z - 18:30Z. Adversarial review of the two non-official options of the machine's conversion checker
 (`-Drlvm.machine.m4=congruence,skipargs`; owner M4: `Conv.java`, `Cargs.java`; masks: `Facts.java`, `FactStore.java`,
 owner M5). No production code was changed. Everything of this review is under `work/s2/` (generators `gen/`,
 exports `attacks/`, `attacks-dat/`, `attacks/fuzz/`, `attacks/mut-mathlib/`, results `out/`, tools `judge.py`,
@@ -11,7 +11,9 @@ Code reviewed: the main tree as published until 17:25Z. Runs: the JVM launcher o
 from the published jars (`scripts/build.sh --published --jvm-only`): `work/s2/dist` (machine jar `ba557722c184`,
 published 16:45:07Z; the first run of the hand-written attacks) and `work/s2/dist2` (machine jar `54eeb7cc50dd`,
 published 17:16:51Z; everything else). Between the two only `Conv.sameShape` (switch `same`) changed; the
-publication of 17:25Z changed comments of `Conv.java` / `Cargs.java` only (checked by `diff` against my copy).
+publication of 17:25Z changed comments of `Conv.java` / `Cargs.java` only (checked by `diff` against my copy); the
+jar published at 18:12Z was not run: `Conv`, `Cargs`, `Facts`, `FactStore`, `Pairs`, `Infer`, `Reduce`, `Values`
+and `Levels` are unchanged in the tree at 18:27Z.
 Official verdicts: `rlvm-testkit/bin/testkit verdict` (`leanchecker --from-export`, Lean 4.36.0).
 
 The question: **is every equation the two options assume a valid definitional equality of well-typed terms, so that
@@ -25,34 +27,58 @@ positions of CARGS; B4: unread positions; the Prop mask of structure eta) and `c
 B12: closure congruence; B2: proofs by type before reduction) assume is derivable in Lean's type theory from
 delta, beta, zeta, structure eta, proof irrelevance and congruence, under ONE precondition that the options do
 not establish themselves and that the machine's inference establishes for them: both sides of a comparison are
-well-typed terms (2.1). The masks are computed soundly: a position counts as a proof only if the sort of its
-domain is manifest under the telescope and always zero AFTER instantiation at the levels of the head being
-compared (so `Sort u` at `u := 1`, `imax u v` at `v := 1`, or at a level parameter is data); a position counts as
-unread only for a definition or theorem applied to at least `lamArity` arguments on both sides, from a superset of
-the syntactic occurrences in the body; a proof position whose domain mentions an unread position that differs is
-compared (a precaution neither leader takes). [[VNUM]] The exports that the options accept and the official
-checker rejects (14 of the 304 officially rejected exports of package S - the 13 rows of S-F1 / S-F2 and `open-flag-closed-bad`, which was in no list - plus an `Acc.rec` analogue written for this review) are all cases of the official ALGORITHM's incompleteness, not of a false equation:
-for each of them the official checker itself accepts a proof of the same statement in which the congruence step
-is written out as a term (section 4).
+well-typed terms (2.1). The masks are computed soundly (a proof position needs a manifest sort of its domain that
+is always zero AFTER instantiation at the levels of the head being compared; an unread position comes from a
+superset of the occurrences in the body and is used only where both sides unfold; a proof position whose domain
+mentions an unread position that differs is compared, a precaution neither leader takes). No refutable or
+underivable claim was accepted under any configuration, and the exports that the options accept against the
+official verdict are all cases of the official ALGORITHM's incompleteness, not of a false equation: for each of
+them the official checker itself accepts a proof of the same statement once the congruence step is written out
+as a term (section 4). **A named opt-in profile with the two options is as sound as the machine's inference is;
+it is not the official verdict on exports of the kind of section 4, exactly as gruszka's is not.**
+
+The evidence, in numbers:
+
+- False claims REJECTED under every configuration with the options (sections 3.1 - 3.3, 3.7): 95 hand-written
+  ones under nine configurations and their 95 non-literal twins; 6 of a second batch (`Acc.rec`, `Quot`,
+  unit-like, structures in Prop); 362 random ones; 358 targeted mutants of a Mathlib slice; none accepted of the
+  2,040 officially rejected mutants of the arena's `bugs` / `other` tests (1,977 rejected, 63 declined by the
+  pipeline); the 289 officially rejected exports of package S outside the class of section 4; the arena's 92
+  `bad` tests.
+- On nine exports up to Mathlib's `Scheme` slice, 474,228 T answers of the shortcuts were re-derived by the
+  complete official procedure without one disagreement (3.6).
+- The suite does catch seeded faults of the masks: an off-by-one position, an off-by-one de Bruijn index, a wrong
+  universe instantiation (3.4).
+- Accepted with an option, rejected officially: 14 of the 304 officially rejected exports of package S (the 13
+  rows of S-F1 / S-F2 and `open-flag-closed-bad`, which was in no list) and one `Acc.rec` analogue written for
+  this review. All 15 statements are proved for the official checker by `Eq.rec` over an `Eq.refl` between two
+  proofs (`work/s2/certify/`, 15 of 15 accepted officially).
+- With the options OFF nothing differs from the official verdict (`v0` on 1,235 exports, `rich` on 603: the
+  official verdict or a decline of the pipeline on every one).
 
 What the owner should weigh before a named opt-in profile uses them:
 
 1. **They change verdicts, by design, and only towards accepting theorems.** Exports exist that the official
-   checker rejects and the profile accepts (section 4). Both leaders accept exports of the same class (section 5):
-   [[VLEAD]]. The arena's 92 `bad` tests are ALL rejected under `skip`, `cong`, `both` and `bothrich` (as under `v0`), including the two whose statements are true in the theory and that the arena nevertheless requires to be rejected (`125_accRecNoEta`, `101_ruleKAcc`): the options never build a constructor form out of a proof. An arena test of the S-F1 kind would be accepted by the profile - and by gruszka.
+   checker rejects and the profile accepts (section 4). Both leaders accept exports of the same class (section
+   5): gruszka accepts all 14 exports of package S that the profile accepts, nano-lean 6 of them, and both accept
+   three more that the machine rejects even with the options. The arena's 92 `bad` tests are ALL rejected under
+   `skip`, `cong`, `both` and `bothrich` (as under `v0`), including the two whose statements are true in the
+   theory and that the arena nevertheless requires to be rejected (`125_accRecNoEta`, `101_ruleKAcc`): the
+   options never build a constructor form out of a proof. An arena test of the kind of section 4 would be
+   accepted by the profile - and by gruszka.
 2. **They remove a redundancy.** The official comparison of two proofs compares their TYPES, which also catches
-   an ill-typed proof argument that inference let through; `skipargs` does not look at a proof or unread position
-   at all. With the options, soundness rests on inference alone. I found no path on which an unchecked term
-   reaches a comparison (2.1, group X of the attacks), and a seeded inference fault shows the difference
+   an ill-typed proof argument that inference let through; `skipargs` does not look at a proof or unread
+   position at all. With the options, soundness rests on inference alone. I found no path on which an unchecked
+   term reaches a comparison (2.1, group `ctx` of the attacks), and a seeded inference fault shows the difference
    concretely (3.5: v0 rejects, the options accept). A profile with the options should therefore run where the
    inference side has the evidence it has today (the differential gates), not as a place to try inference
    shortcuts.
-3. **No patch is needed.** One optional line of defence in depth is offered (`work/s2/patches/H1-cargs-plan-levels.diff`,
-   owner M4): the plan of CARGS would test the equivalence of the two heads' level lists itself instead of
-   relying on its three callers.
-
-Not a finding of this review, but met on the way: nothing. No accept was seen with the options OFF that the
-official checker does not give ([[VOFF]]).
+3. **No patch is needed.** One optional line of defence in depth is offered
+   (`work/s2/patches/H1-cargs-plan-levels.diff`, owner M4, applies and compiles on a private copy): the plan of
+   CARGS would test the equivalence of the two heads' level lists itself instead of relying on its three callers.
+4. **One row is missing from the guards**: `open-flag-closed-bad` is accepted under `congruence` and is neither
+   in `M4OfficialTest`'s list nor marked in package S's manifest (it was written after M4's fix). It is of the
+   same class and changes nothing in the verdict; a profile's list of expected differences should contain it.
 
 ## 1. The shortcuts, exactly as the code implements them
 
@@ -156,7 +182,7 @@ E1 and E3 replace the official type comparison of two proofs by an argument abou
 official `is_def_eq_proof_irrel` does not need it: it infers both types and compares them, so for an ill-typed
 proof argument it answers F. The same holds for B4 (an ill-typed argument in an unread position is never looked at).
 
-Where the machine guarantees it (read, and attacked in section 3 group X):
+Where the machine guarantees it (read, and attacked in section 3, group `ctx`):
 
 - CONV is called by inference only on (inferred type, domain) / (inferred type, expected type) / (type of a
   let value, its annotation) / (lambda domain, expected domain): `Infer.twD`, `k_check1`, `k_ck5`, the let rule,
@@ -178,10 +204,10 @@ Where the machine guarantees it (read, and attacked in section 3 group X):
   declaration being checked; a record derived from an ill-typed type only matters if that constant is accepted,
   which it is not.
 
-I found no path on which a comparison meets a term that inference did not check (section 3, group X, 8 exports;
+I found no path on which a comparison meets a term that inference did not check (section 3, group `ctx`, 8 exports;
 all rejected under every configuration). This is the same invariant the official kernel relies on for its own
 argument-wise comparisons; what changes with `skipargs` is that a violation would no longer be caught by the type
-comparison of proof irrelevance (see "what the options remove" in section 0).
+comparison of proof irrelevance (section 0, point 2; section 3.5).
 
 ### 2.2 Why "T on well-typed terms" is closed under the shortcuts (the induction, in short)
 
@@ -197,8 +223,10 @@ rule (what both leaders do, section 5) has no false consequence that I could con
 
 ## 3. Attacks
 
-All exports claim their equation by `Eq.refl`, so an ACCEPT of a `-bad` export is the acceptance of a refutable
-closed statement (the proof of `False` is one `Nat.noConfusion` / `absurd` away). Configurations (`work/s2/judge.py`):
+All exports claim their equation by `Eq.refl`. A `-bad` export claims a closed equation that is refutable (two
+different numerals, Booleans, constructor fields: `False` is one `noConfusion` away) or at least not derivable
+(an axiom applied to different data); a `-true` export claims a derivable one and shows that the shortcut under
+attack is reached. Configurations (`work/s2/judge.py`; A = exit 0, R = exit 1, D = exit 2 of the launcher):
 
 | name | switches | options |
 |---|---|---|
@@ -209,6 +237,7 @@ closed statement (the proof of `False` is one `Nat.noConfusion` / `absurd` away)
 | `both` / `both0` / `both4` | `warm,gated,expect,facts,probes` / `facts,probes` / the first with 4 workers | `congruence,skipargs` |
 | `bothrich` | the `rich` set | `congruence,skipargs` |
 | `bothall` | `all,lazyeval,same,match,joint,k2`, `-Drlvm.machine.elabAt=1` | `congruence,skipargs` |
+| `bothcap` | as `both`, `-X machine.session-kib=1` (a session reset before nearly every declaration) | `congruence,skipargs` |
 
 **Outcome of all of them: no export that the official checker rejects for a FALSE (underivable) claim is accepted
 under any configuration. No accept exists with the options off that the official checker does not give.**
@@ -216,8 +245,7 @@ under any configuration. No accept exists with the options off that the official
 ### 3.1 Hand-written attacks (`work/s2/gen/attacks.py`, `work/s2/attacks/`, 134 exports: 96 `-bad`, 38 `-true`)
 
 Judged under all nine configurations of the table (`work/s2/out/attacks-judged.tsv`, jar `ba557722c184`) and
-again under `skip`, `both`, `bothall`, `bothcap` on jar `54eeb7cc50dd` (`attacks-judged2.tsv`); `bothcap` = `both`
-with `-X machine.session-kib=1` (a session reset before nearly every declaration).
+again under `skip`, `both`, `bothall`, `bothcap` on jar `54eeb7cc50dd` (`attacks-judged2.tsv`): the same verdicts.
 
 | Group | Exports | What is attacked | Machine, every configuration | Official |
 |---|--:|---|---|---|
@@ -237,12 +265,27 @@ reached under `skip` only): under `v0`, `skip`, `both`, `bothall` the 95
 
 ### 3.2 Second batch (`work/s2/gen/attacks2.py`, `work/s2/attacks2/`, 11 exports)
 
-[[ATT2]]
+Base for the `Acc` exports: the arena's `124_accRecReduction` (it declares `Acc`, `Eq`, `Bool`). Configurations `v0`,
+`rich`, `skip`, `cong`, `both`, `bothrich`, `bothall` (`work/s2/out/attacks2-judged.tsv`).
+
+| Export | Claim | Machine | Official |
+|---|---|---|---|
+| `acc-rec-minor-bad` | after a stuck pair of `Acc.rec.{0,1}` with two axioms as minor premises (proofs), `Acc.rec.{1,1} (fun _ _ _ => true) h = Acc.rec.{1,1} (fun _ _ _ => false) h` | REJECT, all 7 | reject |
+| `acc-rec-intro-vs-axiom-minor-bad` | `Acc.rec (fun _ _ _ => true) (Acc.intro true k) = Acc.rec (fun _ _ _ => false) h` | REJECT, all 7 | reject |
+| `acc-rec-major-true` | `Acc.rec F h = Acc.rec F h2`, two axioms of `Acc R true` | ACCEPT, all 7 | accept |
+| `acc-rec-intro-vs-axiom` | `Acc.rec F (Acc.intro true k) = Acc.rec F h`: the `Acc` analogue of S-F1, TRUE (section 4) | REJECT under `v0`, `rich`, `skip`; **ACCEPT under `cong`, `both`, `bothrich`, `bothall`** (B1 on the recursor head) | reject |
+| `acc-rec-no-eta-axiom` | the arena's `125_accRecNoEta` on an axiom: `Acc.rec (fun _ _ _ => true) h = true`; true in the theory, `bad` for the arena | REJECT, all 7 | reject |
+| `quot-mk-data-bad` | `Quot.mk r 1 = Quot.mk r 2` | REJECT, all 7 | reject |
+| `quot-lift-mk-vs-axiom` | `Quot.lift f h (Quot.mk r 1) = Quot.lift f h q`, `q` an axiom (DATA: not derivable) | REJECT, all 7 | reject |
+| `quot-lift-proof-true` | `Quot.lift f h1 q = Quot.lift f h2 q` | ACCEPT, all 7 | accept |
+| `unitlike-family-bad` | `W.mk 1 (UF.mk 1) = W.mk 2 (UF.mk 2)`, `UF n` unit-like | REJECT, all 7 | reject |
+| `prop-struct-arg-true` | `g (PS.mk 1 r1) = g (PS.mk 2 r2)`, `PS : Prop` with a Nat field | ACCEPT, all 7 | accept |
+| `prop-struct-data-wrapper-bad` | `k 1 (PS.mk 1 r1) = k 2 (PS.mk 2 r2)`, `k n p := n` | REJECT, all 7 | reject |
 
 ### 3.3 Random exports (`work/s2/gen/fuzz.py`, seeds 11 - 14, `work/s2/attacks/fuzz/`, 498 exports)
 
-One random constant per export - an axiom (125), a definition with hint regular (151) / abbrev (56) / opaque
-(63), or the constructor of a random structure (103) - over a random telescope of 2 to 8 positions drawn from:
+One random constant per export - an axiom (125 exports), a definition with hint regular (151) / abbrev (56) /
+opaque (63), or the constructor of a random structure (103) - over a random telescope of 2 to 8 positions drawn from:
 a sort `Sort u_k` (level parameters shared or not), an element of an earlier sort (a proof when that sort is
 instantiated at 0, a Nat or Bool at 1), a Nat, a proof of `Q n` for an earlier Nat, a proposition, a proof of an
 earlier proposition, a proof of `True`, a member of an axiom family `Fam n`, a function, a proof of a Pi into
@@ -305,14 +348,22 @@ procedure answers F is answered T (failed same-head comparisons of unequal data 
 | `Mathlib.AlgebraicGeometry.Scheme.cone` (P8's slice) | 21,155 | 21,099 | 56 | 317,642 | **0** | 13,883 | 185,816 | 24,089 | 119,640 | 4,301 |
 
 All 226 declines are the eager-reduction rule (`E_LIMIT`, `eagerDeclines`), none is an audit failure. On these
-files every T that a shortcut gave and whose re-derivation completed (489,860 audits, of them 15,632 = 3.2 % out
-of the audit budget of 65,536 ticks and therefore NOT confirmed) is also a T of the complete official procedure:
+files every T of a shortcut whose re-derivation completed is also a T of the complete official procedure
+(489,860 audits; 15,632 of them = 3.2 % ran out of the audit budget of 65,536 ticks and are NOT confirmed):
 the masks never turned an official F into a T. (The control: the same script on S's
 `facts-agreement-noncongruent-app-bad` reports the two `E_AUDIT` declines it should.) This is evidence for the
 masks on real signatures, not a proof: a wrong mask bit on a position whose arguments never differ in these files
 would not show.
 
-### 3.7 Targeted mutants of a Mathlib slice (`work/s2/gen/mutate.py` = S's mutator, kinds `SIBLING_ARG`, `LIT_SUCC_NE`, `LEVEL_ARG`)
+### 3.7 Mutants: a Mathlib slice and the official `bugs` corpus
+
+The official mutant corpus `work/mutants-bugs-other` (mutants of the arena's `bugs`, `other`, `corner-cases` tests,
+22 kinds, classified by the official checker): the 2,040 mutants that the official KERNEL rejects, under `skip`
+and `both` (`work/s2/out/mutants-bugs-judged.tsv`): **1,977 REJECT, 63 DECLINE (declines of the pipeline: never an
+accept), 0 ACCEPT.**
+
+**Targeted mutants of a Mathlib slice** (`work/s2/gen/mutate.py` = S's mutator restricted to the kinds `SIBLING_ARG`,
+`LIT_SUCC_NE`, `LEVEL_ARG`):
 
 360 mutants of `Mathlib.Algebra.Group.Basic.cone` (1,724 units; each mutant edits ONE occurrence inside ONE
 declaration: the argument of an application replaced by the argument of another application of the same function,
@@ -351,7 +402,7 @@ A = accepted, R = rejected; the official checker rejects every row.
 | `facts-etas-prop-mask-noncongruent-bad` | `S.mk I p1 s.3 = s`, `s` an axiom of the structure | A | A | A | structure eta: `s = S.mk s.1 s.2 s.3`; `s.1 = I` by PI; `s.2 : Q (R s.1) = Q (R I)`, so `s.2 = p1` by PI; cong under `S.mk` | TRUE |
 | `facts-unread-noncongruent-bad` | `d 0 I = d 1 h`, `d u x := R x` | A | R | R | delta, beta: `d 0 I = R I`, `d 1 h = R h`; the first row. (`both` rejects only because the quick refutation of pass A answers F on `0` / `1` before the plan; the equation is the same) | TRUE |
 | `open-flag-closed-bad` (package S, batch 8; NOT in the list of S-F1 / S-F2, it was written after M4's fix) | `Nat.add (G I) 0 = Nat.add (G h) 0`, `G x := And.rec (fun _ _ => 0) x` regular, both sides closed | R | A | A | `I = h` by PI, cong under `G` and `Nat.add _ 0`. Officially both sides are closed, so the left side is folded to `0` before any same-head comparison, and `0` against the stuck right side is false; B1 compares the arguments of the two `Nat.add` first | TRUE |
-| `acc-rec-intro-vs-axiom` (new, `work/s2/attacks2/`) | `Acc.rec F (Acc.intro true k) = Acc.rec F h`, `h` an axiom of `Acc R true` | [[A1]] | [[A2]] | [[A3]] | `h = Acc.intro true k` by PI; cong under `Acc.rec F _` | TRUE |
+| `acc-rec-intro-vs-axiom` (new, `work/s2/attacks2/`) | `Acc.rec F (Acc.intro true k) = Acc.rec F h`, `h` an axiom of `Acc R true` | R | A | A | `h = Acc.intro true k` by PI; cong under `Acc.rec F _` | TRUE |
 
 **The classification is checked by the official checker itself** (`work/s2/gen/certify.py`, `work/s2/certify/`,
 15 exports, one per row above, both directions of the first): each proves the SAME statement not by `Eq.refl`
@@ -414,7 +465,32 @@ rule is the more careful one and costs a mask intersection.
 
 Run (Docker, no network, the arena's run lines; `work/s2/leaders.sh`, `work/s2/out/leaders.tsv`):
 
-[[LEADERSRUN]]
+| official | gruszka | nano-lean | exports (872: all of 3.1 with their non-literal twins, 3.2, 3.3, the certificates of section 4, S's conversion groups `facts-*`, `probe-*`, `mask-*`, `pirr-*`, `nontransitive-*`, `eta-*`, `unitlike-*`, `k-eq-rec-*`, `krule-*`, `open-flag-*`, the arena's `100_ruleKbad`, `101_ruleKAcc`, `125_accRecNoEta`) |
+|---|---|---|--:|
+| accept | accept | accept | 253 |
+| reject | reject | reject | 600 |
+| reject | **accept** | **accept** | 9 |
+| reject | **accept** | reject | 10 |
+
+- Neither leader accepts any FALSE claim of this review (the 96 hand-written and 362 random `-bad` exports) or
+  of package S.
+- **gruszka accepts all 14 exports of package S** that the machine accepts under the options (the 13 of S-F1 / S-F2
+  and `open-flag-closed-bad`); **nano-lean accepts 6 of them** (`facts-agreement-noncongruent-app-bad`,
+  `-samedef-bad`, `facts-unread-noncongruent-bad`, `probe-b1-abbrev-proof-arg`, `probe-b1-theorem-head`,
+  `open-flag-closed-bad`): its probe is for unfoldable heads only and it has no closure congruence and no ETAS mask.
+- Both leaders accept three more officially rejected exports that the machine REJECTS also with the options:
+  `krule-eager-alone-bad`, `krule-memo-across-binders-eager-bad`, `krule-memo-across-declarations-eager-bad`
+  (the same class inside the K rule under eager reduction; the machine declines such a declaration, the reference
+  engine rejects it). gruszka also accepts `nontransitive-regular-def-bad` and `nontransitive-same-decl-bad`
+  (`d h = 5`: it closes pairs it found equal).
+
+- Neither leader accepts `acc-rec-intro-vs-axiom` (B1 on a recursor head is the machine's alone: gruszka
+  accepts the `And.rec` rows by another route, `Acc` is no structure), nor the arena's `125_accRecNoEta`,
+  `101_ruleKAcc`, `100_ruleKbad`. Both accept the 15 certificates of section 4, as the official checker does.
+
+So "as the leaders do" is literally true for gruszka: on these 872 exports gruszka differs from the official
+verdict on 19, nano-lean on 9, the machine on 15 under some configuration with an option (14 of package S and the
+`Acc` analogue; 14 of the 15 under `both`), on 4 with `skipargs` alone, on none without the options.
 
 ## 6. Not established
 
@@ -423,7 +499,7 @@ Run (Docker, no network, the arena's run lines; `work/s2/leaders.sh`, `work/s2/o
   uniqueness of types up to conversion, soundness of the official rules), which is itself not mechanised for
   all of Lean 4.
 - **The precondition of 2.1** (every comparison is between well-typed terms) was established by reading the call
-  sites of `Conv.conv` / `Cargs.cargs` and by the group X attacks, not exhaustively. Not read line by line: the
+  sites of `Conv.conv` / `Cargs.cargs` and by the `ctx` attacks, not exhaustively. Not read line by line: the
   K1 code objects (`Code`, `Elab`, case trees, BODY / RULE / LEAF blocks), `Rules` (`k2`), `Tier` (`t2`),
   `Same` (the `same` switch; it was ON in `rich` / `bothrich` / `bothall` runs, but it is M4's official-exact
   claim and S's to attack). They reduce and identify; a fault there is a fault of the machine without the options.

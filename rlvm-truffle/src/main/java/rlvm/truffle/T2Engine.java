@@ -105,6 +105,8 @@ final class T2Engine {
     private final java.lang.ref.WeakReference<Object> mengine;
     /** Count mode: entries per block on the stepper path, summed over the machines (flushed in batches of {@link #BATCH}). */
     private int[] total = new int[256];
+    /** Count mode: all activations the stepper ran, over all blocks and machines (in batches). */
+    private long totalAll;
     static final int BATCH = 64;
     /** Block id -> installed code; replaced as a whole at every installation (copy on write); read racily by the workers. */
     Installed[] table = new Installed[0];
@@ -281,13 +283,20 @@ final class T2Engine {
         }
         try {
             long entries;
+            long all;
             synchronized (this) {
                 if (blk >= total.length) {
                     total = Arrays.copyOf(total, Math.max(total.length << 1, blk + 1));
                 }
                 entries = total[blk] += n;
+                all = totalAll += n;
             }
             if (entries < settings.at) {
+                return;
+            }
+            // concentration (rlvm.t2.hot): compiled code pays only where a few blocks carry the run; a block that
+            // is one of hundreds of lukewarm ones costs its compilation and runs no faster (NOTES-T3 section 1)
+            if (settings.hot > 0 && entries * 1000 < (all + compiledCalls()) * settings.hot) {
                 return;
             }
             double cost = costNanos(blk);

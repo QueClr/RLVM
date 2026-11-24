@@ -152,7 +152,7 @@ change in requests.log; the tier-equivalence tests catch one that slips through.
 
 | Property | Default | Meaning |
 |---|---|---|
-| `rlvm.t2.mode` | `cpu` | `cpu`: the governor above (on the machine's heat accounting) with rent 1.0, share 0.02, max 256, period 1024, one compiler thread. `warm`: the steady state is the metric and warm-up is not charged (OWNER-NOTES 12): promotion by entry count WITHOUT the heat accounting (`rlvm.t2.count`), no share cap, max 4096, two compiler threads |
+| `rlvm.t2.mode` | `cpu` | `cpu`: the governor above (on the machine's heat accounting) with rent 1.0, share 0.02, max 256, period 1024, one compiler thread. `warm`: the steady state is the metric and warm-up is not charged (OWNER-NOTES 12): promotion by entry count WITHOUT the heat accounting (`rlvm.t2.count`): a block is promoted at 20000 entries (`rlvm.t2.at`) while it has at least 2% of all activations of the engine (`rlvm.t2.hot` = 20 per mille), at most 256 blocks (`rlvm.t2.max`), two compiler threads |
 | `rlvm.t2.count` | true in `warm` | the tier counts the activations it does not take (per machine, summed per engine) and promotes a block at `rlvm.t2.at` entries; the machine's heat accounting stays off (it costs 2.4 - 11% of a warm pass, NOTES-T3 section 3) |
 | `rlvm.t2.ahead`, `.aheadExact`, `.aheadMaxInstr`, `.aheadCheck` | 0, true, 128, false | run-ahead of the interning probes: an experiment REJECTED by measurement (NOTES-T3 section 6); 0 = off |
 | `rlvm.t2.rent`, `.share`, `.max`, `.period`, `.threads` | by mode | the single knobs of the governor |
@@ -161,7 +161,8 @@ change in requests.log; the tier-equivalence tests catch one that slips through.
 | `rlvm.t2.unit0`, `.unit1` | 20, 10 | model of the base-tier time per entry (ns; per instruction) for a block without a timed sample |
 | `rlvm.t2.inline` | 1 | fixed at class initialisation (for an image: at image build): 1 = the operations that only read the machine's arrays are compiled into the block (PEEK, the constructor test of SWITCH, FIELDS, the inline-cache probes of KVAL / KCONST, the CONST-head cache, Nat immediates), 0 = every operation behind a boundary (T2's tier), 2 = also the probes of MKAPP (never finished a compilation, NOTES-T2 section 5) |
 | `rlvm.t2.cost0`, `.cost1` | 3.0, 2.5 | compile cost model before anything was compiled (CPU ms; per instruction; measured 2.2 - 3.1 ms per instruction, NOTES-T2 5.8) |
-| `rlvm.t2.at` | 0 (`cpu`), 1000 (`warm`) | N > 0: promote at N entries regardless of rent and governor; the threshold of `rlvm.t2.count`. The count is cumulative, so with a low threshold every block that is ever entered is compiled in the end: bound it with `rlvm.t2.max` (NOTES-T3 section 1, policy) |
+| `rlvm.t2.at` | 0 (`cpu`), 20000 (`warm`) | N > 0: promote at N entries regardless of rent and governor; the threshold of `rlvm.t2.count`. The count is cumulative, so by itself it lets every block that is ever entered be compiled in the end: `rlvm.t2.hot` and `rlvm.t2.max` bound it (NOTES-T3 section 1, policy) |
+| `rlvm.t2.hot` | 20 (`warm`), else 0 | count mode: per mille of all activations of the engine a block must have to be promoted (0 = no such test) |
 | `rlvm.t2.roles` | `tele,body,rule,rules,sub` | promotable roles |
 | `rlvm.t2.slots` / `.nodes` / `.resume` | true | registers in frame slots / own code per instruction / resume points compiled as entries |
 | `rlvm.t2.sync` | false | the worker that crosses the threshold waits for the compilation (tests) |

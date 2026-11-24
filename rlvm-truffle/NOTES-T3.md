@@ -4,7 +4,74 @@ Continues `NOTES-T2.md` (what the tier is, its deviations from ISA 8.4, its corr
 the measurements T2 could not take, what the tier costs and gains on each platform and why, what was
 changed, and the go / no-go. Scratch, scripts, logs and raw rows: `work/t3/` (`warm.tsv`, `logs/`).
 
-SECTIONS 1 AND 7 ARE WRITTEN LAST - see the end of the file for the state of the work if they are missing.
+## 1. Verdict: NO-GO as a default; what the tier is worth, and under which policy
+
+**The Truffle tier does not pay on Cedar-level work and cannot under the present value model; on closed
+evaluation (reachability) it is worth 4 - 7% of the warm wall clock with a promotion policy that compiles
+only the handful of blocks that carry the run. `t2` stays off by default.** Nothing here argues for
+switching it on in the launcher; nothing argues for deleting it either: it is correct (section 8), it no
+longer costs anything when it finds nothing hot (policy below), and it is the place where U1 / U2 of
+section 7 would pay.
+
+Warm wall clock per pass in ms (median of the later passes of all runs of the configuration in the
+window; `K1` = `default,code,casetrees`, tier = the same + `t2` in `mode=warm` WITHOUT the rejected
+run-ahead; one engine kept over the passes; every row from one `bench/quiet.py` window, K1 and tier back to
+back on the same distribution; rows of `work/t3/warm.tsv`, labels J3 / J4 / J6 / J7 / J8 / N2 / N3 / N4):
+
+| Workload | Platform | Workers | K1 | tier, promote at 1000 entries (unbounded) | tier, at 20000 entries, at most 96 blocks | tier, FINAL policy (at 20000 entries and 2% of all activations) |
+|---|---|--:|--:|--:|--:|--:|
+| reachability | JVM | 1 | 1015 (4 runs: 986-1058) | 973 (-4.2%; 212 blocks) | 949 (-6.5%; 26 blocks) | J7ROW_REACH_1 |
+| reachability | JVM | 8 | 520 | 529 (+1.7%; 177 blocks) | - | J7ROW_REACH_8 |
+| reachability | native | 1 | 1475 (2 runs) | 1370 against 1424 in its window (-3.8%; 252 blocks) | 1392 (-5.6%; 26 blocks) | N4ROW_REACH_1 |
+| reachability | native | 8 | 761 (2 runs) | 779 (+2.3%; 182 blocks) | 707 (-7.1%; 28 blocks) | N4ROW_REACH_8 |
+| Cedar slice | JVM | 1 | 1359 (2 runs) | 1489 against 1438 in its window (+3.5%; 804 blocks) | 1462 (+7.6%; 96 blocks) | J7ROW_SLICE_1 |
+| Cedar slice | JVM | 8 | 232 | 321 (+38%; 686 blocks) | - | J7ROW_SLICE_8 |
+| Cedar slice | native | 1 | 1869 | - | 1888 (+1.0%; 88 blocks) | N4ROW_SLICE_1 |
+| Cedar slice | native | 8 | 319 | 391 (+23%; 713 blocks) | 351 (+10%; 96 blocks) | N4ROW_SLICE_8 |
+| full cedar | JVM | 8 | 1315 | 1827 (+39%; 1,820 blocks, 52.6 s of compilation) | - | J7ROW_CEDAR_8 |
+| Init | JVM | 8 | J8ROW_INIT_K1 | - | - | J8ROW_INIT_T3 |
+| Std | JVM | 8 | J8ROW_STD_K1 | - | - | J8ROW_STD_T3 |
+
+Compilation: a block takes about 30 ms of compiler CPU on the JVM (7.6 s for 252 blocks of reachability,
+27 s for 804 of the Cedar slice) and about 20 ms in the image (5.4 s for 252). Deoptimisations: 0 in every
+measured run (the nodes have no profile and no assumption; `engine.MaximumCompilations=1`). Failed
+compilations: 0 in every run of the tier without the run-ahead; with it 1 of 804, 2 of 692 and 6 of 1,821
+blocks (they stay in the stepper).
+
+What the numbers say:
+
+1. **Closed evaluation gains a little, and only with few blocks.** Reachability is 83% inside code blocks
+   and three blocks have two thirds of its 2.5 M activations per pass. Compiling the 26 blocks above 20000
+   entries gives -5.6 to -7.1% on both platforms, at one and at eight workers (native); compiling 180-250
+   blocks gives less (-4%) or nothing (8 workers: +2%). The ceiling is the stepper's own share of such a
+   run, 17% (section 5); the rest of the time is interning, which compiled code repeats call for call.
+2. **Cedar-level work loses, in proportion to the number of blocks compiled.** The Cedar slice spends 14%
+   of its time inside blocks at all, spread over hundreds of them. Each compiled block is about 1 KB of
+   machine code per instruction against a few words that the stepper's one loop interprets; every compiled
+   activation in such a run costs more than it saves (JVM, one worker, 96 blocks: worker CPU +5-7% for
+   0.32 M compiled activations per pass, i.e. about +250 ns per compiled activation - my reading: the code
+   of a block that runs once in a while is not in the instruction cache, the stepper's loop always is; not
+   measured with counters). An unbounded entry count compiles everything in the end, because the count is
+   cumulative: 804 blocks on the slice, 1,820 on full cedar, compilation running through every measured
+   pass and, with 8 workers on 8 cores, taking cores from the workers: +23 to +39%.
+3. **T2's "55-80% loss on the native image"** was the heat accounting and the measurement, not the code
+   (section 3).
+4. **Platform**: K1 itself is 20-30% faster on the JVM than in the native image in steady state, same
+   machine jar (`4bc20d3e46ef`): reachability 1.02 s against 1.42-1.48 s, Cedar slice 1.36-1.44 s against
+   1.78-1.87 s (one worker), Cedar slice with 8 workers 232 ms against 298-319 ms. That is not a tier
+   result, but under OWNER-NOTES 12 it is the larger number in this file. (WarmMain, not the driver: no
+   loading, no admission pipeline.)
+
+**Promotion policy** (what `mode=warm` now does; `rlvm.t2.at`, `.hot`, `.max`): the tier counts, per machine,
+the activations it does not take; a block is promoted when the engine has seen 20000 of them AND the block
+has at least 2% of ALL activations of the engine so far (compiled ones included), at most 256 blocks; the
+machine's heat accounting is never switched on; two compiler threads. In a warm-up-is-free world the
+threshold could be lower - but a cumulative count below "this block carries the run" is what produces the
+Cedar rows above, so the test that matters is the share, not the count.
+
+**If the integrator wants it on for an evaluation-heavy run anyway**: `-X machine.switches=default,code,casetrees,t2
+-Drlvm.t2.mode=warm`, with `rlvm-truffle`'s jar on the class path (module not in the parent pom: README
+"Build, test"); kept engines over the passes are needed for it to show in `-X passes` (P7).
 
 ## 2. How the numbers were taken
 
@@ -66,6 +133,19 @@ What the table says:
 4. **The JVM is the faster platform in steady state, tier or no tier**: K1 on reachability 1.03-1.05 s (JVM)
    against 1.40 s (native), on the Cedar slice 1.44 s against 1.84 s (one worker): 22-26%.
 
+## 4. What was changed in the tier (all inside `rlvm-truffle`; nothing in `rlvm-machine`)
+
+| # | Change | Where | State |
+|---|---|---|---|
+| C1 | **Promotion by the tier's own entry counters, without the machine's heat accounting** (`rlvm.t2.count`, default in `mode=warm`; threshold `rlvm.t2.at`, default 1000 entries summed over the machines). `T2Tier.run` counts the activations it does NOT take (per machine, flushed to the engine in batches of 64); an activation that compiled code takes is counted and timed by nobody. `Tier.heat(engine)` is not called, so `Tier.exec` is a plain call of the tier. `mode=cpu` keeps T2's rent-to-own governor on the heat accounting | `T2Tier`, `T2Engine.bump`, `Settings` | kept; removes the 2.4-11% of section 3 |
+| C2 | **Pure-read helpers compiled into the block** (`rlvm.t2.inline`, a class constant, now 1): `PEEK` of an operand, the constructor test of `SWITCH`, the argument base of `FIELDS`, the inline-cache probe of `KVAL`, the cache of CONST heads in front of `KCONST`. Everything that can write or grow a store stays a call behind a boundary | `Instr`, `T2Bridge.*Inline / *Hit` | kept |
+| C3 | **`KCONST` with level parameters uses the site's inline cache as the stepper does** (`Code.kConst`: one probe; miss: `CHEAD(D, LSUB(LL, ls))` and fill). T2's node called `lsubList` + `mkConst` every time (the stepper's cache is of wave 6, NOTES-M7; the mirror did not have it) | `Instr.Konst`, `T2Bridge.kConstHit / kConstFill` | kept (a drift, not a wrong value) |
+| C4 | **Nat literals natively** (owner note 7): `NSUCC` of an immediate below the limit is `v + 1` in the block (overflow guard: the operation), the predecessor view of `FIELDS` is `v - 1`, `SWITCH` on an immediate is a compare | `Instr.Unary1 / Fields / Switch` | kept; the value model already has the immediates, so this removes two calls, not a boxing |
+| C5 | Run-ahead of the interning probes (`rlvm.t2.ahead`, section 6) | `BlockRoot.ahead`, `Instr.*.ahead`, `T2Bridge` | **rejected by measurement, default off** |
+| C6 | No one-call forwarders in code that partial evaluation reaches (`T2Bridge.peekInline` and the hash functions are written out; `T2Bridge.hashOk()` compares them with the machine's once per engine and switches the inline-cache probes back to the boundary operations if they ever differ) | `T2Bridge` | needed for the native image: a method whose body is one call is inlined before the image's analysis and its deoptimisation target is then missing - the rule T2 found for one-store setters holds for forwarders too |
+
+Not done, and why: direct calls between compiled blocks (section 7, U3).
+
 ## 5. Where the time of a block goes (why removing the dispatch buys so little)
 
 JFR execution samples of warm K1 passes on the JVM (one worker; open host, so SHARES only;
@@ -101,19 +181,6 @@ interned although nothing ever inspects them, and the callee is reached through 
 `Eval.apply`, never called. There is no arithmetic and no branch a JIT could specialise beyond what the
 stepper already does: `Nat` literals are immediates in the value model (owner note 7 is satisfied by the
 machine itself; the tier now adds the native paths for `NSUCC` and the predecessor view of `FIELDS`).
-
-## 4. What was changed in the tier (all inside `rlvm-truffle`; nothing in `rlvm-machine`)
-
-| # | Change | Where | State |
-|---|---|---|---|
-| C1 | **Promotion by the tier's own entry counters, without the machine's heat accounting** (`rlvm.t2.count`, default in `mode=warm`; threshold `rlvm.t2.at`, default 1000 entries summed over the machines). `T2Tier.run` counts the activations it does NOT take (per machine, flushed to the engine in batches of 64); an activation that compiled code takes is counted and timed by nobody. `Tier.heat(engine)` is not called, so `Tier.exec` is a plain call of the tier. `mode=cpu` keeps T2's rent-to-own governor on the heat accounting | `T2Tier`, `T2Engine.bump`, `Settings` | kept; removes the 2.4-11% of section 3 |
-| C2 | **Pure-read helpers compiled into the block** (`rlvm.t2.inline`, a class constant, now 1): `PEEK` of an operand, the constructor test of `SWITCH`, the argument base of `FIELDS`, the inline-cache probe of `KVAL`, the cache of CONST heads in front of `KCONST`. Everything that can write or grow a store stays a call behind a boundary | `Instr`, `T2Bridge.*Inline / *Hit` | kept |
-| C3 | **`KCONST` with level parameters uses the site's inline cache as the stepper does** (`Code.kConst`: one probe; miss: `CHEAD(D, LSUB(LL, ls))` and fill). T2's node called `lsubList` + `mkConst` every time: the stepper had gained the cache since, the mirror had not followed | `Instr.Konst`, `T2Bridge.kConstHit / kConstFill` | kept (a drift, not a wrong value) |
-| C4 | **Nat literals natively** (owner note 7): `NSUCC` of an immediate below the limit is `v + 1` in the block (overflow guard: the operation), the predecessor view of `FIELDS` is `v - 1`, `SWITCH` on an immediate is a compare | `Instr.Unary1 / Fields / Switch` | kept; the value model already has the immediates, so this removes two calls, not a boxing |
-| C5 | Run-ahead of the interning probes (`rlvm.t2.ahead`, section 6) | `BlockRoot.ahead`, `Instr.*.ahead`, `T2Bridge` | **rejected by measurement, default off** |
-| C6 | No one-call forwarders in code that partial evaluation reaches (`T2Bridge.peekInline` and the hash functions are written out; `T2Bridge.hashOk()` compares them with the machine's once per engine and switches the inline-cache probes back to the boundary operations if they ever differ) | `T2Bridge` | needed for the native image: a method whose body is one call is inlined before the image's analysis and its deoptimisation target is then missing - the rule T2 found for one-store setters holds for forwarders too |
-
-Not done, and why: direct calls between compiled blocks (section 7, U3).
 
 ## 6. Experiment REJECTED: run-ahead of the interning probes (`rlvm.t2.ahead`, default 0)
 
@@ -218,7 +285,8 @@ All on machine jar `4bc20d3e46ef` (the one in `.toolchain/m2` from 17:30Z to at 
 | Gate | Configuration | Result |
 |---|---|---|
 | fast group, `$MVN -o -q -f rlvm-truffle/pom.xml test -Dgroups=fast` (`work/t3/test-fast-2.txt`, 17:25Z) | 4 tests: T2's three + `countMode` | 4 / 0 failures / 0 errors |
-| default group (`work/t3/test-default-2.txt`, 18:00Z, tree of 17:48Z = the final tree but for the default of `rlvm.t2.ahead`) | 7 tests: T2's five + `countMode` + `perfTestsWarmMode`; with `rlvm.t2.ahead` at its then default 2 | 7 / 0 failures / 0 errors / 0 skipped; 0 deoptimisations |
+| default group (`work/t3/test-default-2.txt`, 18:00Z, tree of 17:48Z: `rlvm.t2.ahead` still 2 by default, so the run-ahead was on in every test) | 7 tests: T2's five + `countMode` + `perfTestsWarmMode` | 7 / 0 failures / 0 errors / 0 skipped; 0 deoptimisations |
+| default group on the FINAL tree (`work/t3/test-default-3.txt`, 18:23Z; machine jar `8a8ea5644b24`, published while it was queued) | the same 7 tests; run-ahead off, final policy defaults | 7 / 0 failures / 0 errors / 0 skipped |
 | tier equivalence (heap digest, ticks, outcome at every unit), `TierEquivalenceTest#files`, production promotion (`mode=warm`, at 200 entries, background), `default,code,casetrees`, final tree (`work/t3/tiereq-corpora-2.txt`) | Cedar slice / Init / reachability | identical: 215 blocks, 177 k compiled activations / 811 blocks, 6.36 M / 113 blocks, 1.83 M |
 | differential gate against the reference engine through the launcher (`testkit diff --engine machine --launcher work/t3/j3/bin/rlvm-jvm -j 4`), tutorial + bugs, 175 exports, `code,casetrees,tele,t2`, ELAB_AT 1, EVERY block compiled at its first entry (count mode, synchronous), run-ahead ON (`work/t3/gates/diff-tb-at1.txt`) | 1,342 checks | 1,341 compared (1,311 both accept, 30 both reject), **0 differences**; 1 not compared (the machine's eager-reduction decline of `Issue.forallFalse`, tier or no tier) |
 | the same harness, reachability + Cedar slice + Init + Std, `--threads 4`, launcher `work/t3/j4/bin/rlvm-jvm` (final tree), `default,code,casetrees,t2`, `mode=warm`, at 200 entries (`work/t3/gates/diff-corpora.txt`) | 170,322 checks | 169,936 compared, all both accept, **0 differences**; 386 not compared (eager-reduction declines); Std: 723 blocks installed, 8.55 M compiled activations, 0 deoptimisations |
@@ -233,3 +301,34 @@ the first engine's queue (T2's `perfTestsBackground` printed "blocks compiled 0"
 tree, and so did the first equivalence run for the Cedar slice and Init - rows that proved nothing and are
 not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an engine's queued compilations;
 `perfTestsWarmMode` asserts that compiled code ran in each file.
+
+## 9. Open points, requests, next step
+
+1. **Kept-engine passes in the driver** (P7; requests.log 16:31Z orchestrator, 16:58Z T3): until
+   `-X passes=N -X passes-mode=recheck` keeps the engine instances, every number of this file is from
+   `WarmMain` (no admission pipeline, no pipelined loading, no re-check). The 8-worker rows should be
+   re-taken through the launcher when it exists; I expect the same signs.
+2. **Not measured**: con-leche, cslib, mathlib, navier-stokes-euler; `tele` blocks under the tier in a timing
+   run; the native image at Init / Std / full cedar; the launcher's native `bin/rlvm` with this tree (only the
+   measuring tool was built as an image: `work/t3/n2`, `n3`).
+3. **The Cedar slice on the JVM with few compiled blocks is slower than K1 by more than the blocks explain**
+   (section 1, point 2: +7.6% with 96 blocks at one worker, +1.0% in the image). A JFR thread-load sample of
+   such a run shows the host's C2 compiler thread still at work in late passes
+   (`work/t3/jfr/t3-cedarslice.jfr`, open host); whether the tier keeps C2 recompiling host code was not
+   followed up.
+4. **`rlvm.t2.inline=1` against 0** is one run each (974 against 1000-1021 ms, reachability, JVM): no
+   difference that the per-process variance (8% between two K1 runs of one window) lets one see. Kept at 1
+   because it removes calls and never showed a loss; the image is built with 1.
+5. **The tier follows the machine by hand.** `Instr.*` mirrors `Code.java` statement by statement; the stepper
+   answers `KCONST` of a level-polymorphic constant from the site's inline cache (NOTES-M7: "since wave 6"),
+   T2's node did not (C3). The tier-equivalence tests do not see such a drift, because the values are the
+   same. As long as `rlvm-machine` is republished every few minutes, an owner of this module has to diff
+   `Code.java` against `Instr.java` before every measurement.
+6. **Internal API**: as NOTES-T2 section 7.8 (`OptimizedCallTarget.compile / isValid / callIndirect /
+   cancelCompilation`, the compilation listener; the "no one-store setter, no one-call forwarder in compiled
+   code" rule of native-image CE 25.5.5.0.3).
+
+**Next step, if anybody continues**: not more work inside this module. U1 of section 7 in the machine (a
+call instruction that does not build the redex; M7 / M3), measured in the stepper first - it should pay
+there by itself - and then direct calls between compiled blocks on top of it, which is the first point at
+which Truffle can do something the stepper cannot.

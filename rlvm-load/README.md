@@ -233,6 +233,7 @@ Verified against `leanchecker --from-export` v4.36.0 where marked (official); pr
 | numeric name components up to and beyond 2^64, hint heights modulo 2^32 | stored exactly / as the official reader reduces them | same |
 | 30,000-digit numerals, 3 MB string literal, every writer escape, U+0000, non-BMP | loaded | `longLinesNumeralsAndStrings` |
 | loose bound variable, wrong universe arity, unknown or later constant, duplicate universe parameter | loaded; flagged by the store, decided by admission | `looseVariablesWrongArityAndUnknownConstantsLoad` |
+| two level records for one universe parameter (another index, or another name id of the same name), with a level above the parameter whose official respelling is not officially equivalent to it (`imax u 1`) | decline (finding A2-F1, section "Two level records for one universe parameter"; official: a constant used with the other record gets its declared type rebuilt, `Sort (max u 1)` against `Sort (imax u 1)`: rejected in 5 of 5 probes) | `DoubledParamsTest` |
 | unsafe / partial record | dropped, name remembered (official: a user fails with "unknown constant") | `SplitTest.unsafeAndPartialRecordsAreDropped...` |
 | dropped record named `Quot`, `Quot.mk`, `Quot.lift`, `Quot.ind` | reject (official: "Could not find quotient constant in final kernel env") | `droppedRecordsWithAQuotientNameAreRejected` |
 | inductive block, all records unsafe | dropped as a whole (official: accepted) | `unsafeInductiveBlocks` |
@@ -244,6 +245,60 @@ Verified against `leanchecker --from-export` v4.36.0 where marked (official); pr
 | segment longer than `LoadOptions.maxSegmentRecords` (default 2^26 = 1 GiB of buffer) | decline | `aSegmentBeyondTheLimitIsDeclined` |
 | more than 2^31 - 2^29 expression records, any `StoreLimitException` (2^28 - 1 shared nodes, 2 GiB pools, ...) | decline | only the exception mapping is tested (`BindingsTest.storeLimitsAreDeclines`); no input of that size was built |
 | level deeper than 2^24 - 1 (`LevelLimitException`) | decline (see deviations) | not tested (needs 16.7 M records) |
+
+## Two level records for one universe parameter (finding A2-F1, 2026-11-24)
+
+The official reader makes one level OBJECT per level record, and the official `instantiate` keeps a
+level node only when its operands come back pointer-equal. So in a file with two records
+`{"il":1,"param":u}` and `{"il":4,"param":u}` a constant `A.{u}` used as `A.{u'}` (the other record)
+gets the levels of its declared type rebuilt through `mk_succ` / `mk_max` / `mk_imax` at that use site:
+`Sort (imax u 1)` becomes `Sort (max u 1)`, which the official relation does not identify with the
+declared spelling, and leanchecker v4.36.0 rejects `axiom B.{u} : (x : Sort (imax u 1)) -> A.{u'} x`.
+RLVM interns levels by structure (both records are one id, instantiating `u` by `u` is the identity)
+and accepted 5 of 5 such files (`work/a2/item4/files/E4, E5, E6, E11, E12`; found by A2). lean4export
+shares levels: no file it writes has two records for one parameter (0 in the eight corpora and the
+230 published tests).
+
+**The rule** (`DoubledParams`, called from `Loader.levelParam` and for every succ / max / imax
+record): the export is DECLINED (`UnsupportedExportException`, per unit like every decline: the units
+before the line are still checked) when a parameter `p` has two level records - the same name,
+structurally, whatever the indices and name ids - AND some level record `l` of the export that
+mentions `p` is not officially equivalent (`LevelStore.isEquivOfficial`) to `rebuild_p(l)`, the level
+with every node above `p` rebuilt through the official smart constructors (`rlvm-inductive`'s
+`rebuildLevel` restricted to `p`). The record that completes the condition is where the load stops,
+wherever it lies: the second record after the level, or the level after the second record. With
+several doubled parameters the rebuild above all of them together is tested too; more than 8 doubled
+parameters are declined without looking (bound on the work a hostile file can ask for). The reason A2
+gives for the narrow form: at such a use site the official `instantiate` is the identity on names, so
+only the spelling of the levels of the declared type changes, and if every level of the file is
+officially equivalent to its respelling no comparison changes its answer. It only ever declines.
+
+**What it costs.** Nothing on a file without a second record: one list append per level record and
+one set probe per parameter record. The rule is evaluated in a private level arena with the run's
+name order, so the run's level store is never written by it and a file that is not declined loads to
+exactly the store it had before (differential digest: identical on all 18,005 small files, the
+corpora and mathlib). `LevelInterner.structure()` (new, default null = rule off) is how the loader
+reads the levels; `LevelStoreInterner` and `LevelChain` return their store.
+
+**Evidence.** `DoubledParamsTest` (8 tests): the fixtures `src/test/resources/a2f1` = A2's twelve files
+and thirteen probes of `work/lp2/a2f1/genq.py`, each with the answer of leanchecker v4.36.0
+(`official.tsv`, taken in the arena Docker image): the five files the official checker rejects
+because of the second record are declined, in batch and pipelined mode; `max u u`, `imax u 0`,
+`succ u` above a doubled parameter are loaded (official: accepted; both engines accept); the 20
+mutants of the test kit's corpora that repeat a parameter record (`work/a2/item4/dup-mutants.txt`)
+keep their outcome. Two files are declined that the official checker accepts or rejects for another
+reason: `Q6` (`imax u 1` above a doubled `u` in a file that uses no constant at a level with a
+parameter: accepted officially; the rule does not look at use sites) and `Q7` (a wrong unit BEFORE
+the second record: it is still checked, so the run rejects, as officially).
+
+**Not established.** The rule rests on the official kernel observing a level only through its
+normal form (`is_equivalent`, `is_geq`) and through tests that are semantic (`is_not_zero`, the Prop
+test: probes `Q2`, `Q3`, `R1` - `R5` show that proof irrelevance and the theorem check accept
+`Sort (imax u 0)` and `Sort (max 0 0)` as propositions). A level that the rebuild respells to an
+EQUIVALENT but structurally different level (`max u u` to `u`, `imax u 0` to `0`) is therefore let
+through; no probe found a verdict that depends on such a respelling, and none was proved impossible.
+The stricter rule "decline when the rebuild changes ANY level above `p`" needs no such argument and
+would decline 3 of the 20 mutants (two of which the official checker accepts).
 
 ## Deviations from the design documents
 
@@ -364,7 +419,8 @@ official checker stops with "uncaught exception: Duplicate declaration". Tutoria
 the official reader (kernel errors) and load here too. Nothing is declined.
 
 What is still declined at load, on hand-written and mutated input only: metadata inside an inductive
-or quot record; an inductive record that mixes safe and unsafe type records; a projection index above
+or quot record; two level records for one universe parameter under a level that the official
+`instantiate` respells inequivalently (finding A2-F1); an inductive record that mixes safe and unsafe type records; a projection index above
 2^31 - 1; counts of 2^63 or more and ill-formed UTF-8 (reader); a segment above `maxSegmentRecords`;
 the store's and the level store's representation limits.
 
