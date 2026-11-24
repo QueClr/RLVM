@@ -60,8 +60,8 @@ events; tools `work/c1/spans.py`, `view.py`).
 - **Every comparison succeeds**: 2,212 of the 2,227 comparisons that are not answered inline end in T at their
   own level, none of the top-level ones fails. The work is not search; it is the confirmation of equations that
   the theory gives for free.
-- 59,736 of the 65,403 ticks are ONE comparison: `RingHom A B iA iB =?= RingHom A' B' iA' iB'`, where
-  `A = CommRingCat.carrier (F.obj U)` and `A' = (F ⋙ forget).obj U` are the same ring behind two wrappers. The two
+- 59,736 of the 65,403 ticks are ONE comparison: `RingHom A B iA iB =?= RingHom A' B' iA' iB'`, where, as the terms
+  print, `A = CommRingCat.carrier (F.obj U)` and `A' = F'.obj U`: one ring of sections written in two ways. The two
   instance arguments cost 27,263 and 27,373 ticks. Each is `Semiring.toNonAssocSemiring A s =?= Semiring.
   toNonAssocSemiring A' s'`: an abbreviation whose body is a constructor application (a parent that is not a
   sub-object is re-packed field by field), so both sides unfold and the constructors are compared field by field:
@@ -74,8 +74,8 @@ events; tools `work/c1/spans.py`, `view.py`).
   localisation (`LocalizedModule.mul`, regular: its arguments are compared), and the proof inside the `Subtype.mk`
   is compared by ITS type (`Membership.mem ..` -> `Set.Mem` -> the predicate: three nested `Exists`). The depth of
   the tower times the number of operations in the laws is the cost.
-- The leaders answer the top comparison by comparing the arguments of the projection functions first (10
-  unfoldings: `carrier (of X)` against `X` a few times) and never look at a proof.
+- The leaders answer the top comparison by comparing the arguments of the projection functions first and never
+  look at a proof (gruszka: 10 unfoldings in the whole unit, P8 4.1).
 
 Which of this is the official algorithm's own choice (`refs/lean4/src/kernel/type_checker.cpp`, lines given):
 
@@ -159,15 +159,16 @@ on the slice the runs with and without `m4b` make the same 14,374,194 records, 2
 807,213 PIRR and 1,388,832 VTYPE events; only LSTEP (1,437,395 -> 837,831) and LAZYD differ. Under host depth 0
 every sub-judgment writes its frame (four new continuation states `CONV2[9..12]`).
 
-**Size**: -2.9 % of the ticks on the step-1 set, -3.0 % with `facts`, -3.3 % on the rich set (section 6). The ticks
-it removes are the cheapest ones of the machine.
+**Size**: -2.9 % of the ticks on the step-1 set, -3.3 % on the default set and on the rich set (`Scheme.cone`),
+-3.8 % / -4.1 % on `Galois.Basic.cone`, -0.9 % / -0.8 % on the Cedar slice (section 6). The ticks it removes are the
+cheapest ones of the machine: in CPU time the effect is not resolved (6.1).
 
 ### 3.3 The first form of the step, withdrawn
 
 My first version went from the two unfoldings directly to c7 when both results were "inert" (a weak-head normal
 application, or a projection-headed application whose struct `whnf_core(cheap)` leaves alone), on the argument
 that the cheap `whnf_core` and the second iteration do nothing then. That argument describes the OFFICIAL
-algorithm correctly (41 exports, official verdict in every configuration), but not the machine: the cheap CORE of
+algorithm correctly (the 36 exports that existed then: official verdict in every configuration), but not the machine: the cheap CORE of
 a repeated chain is NOT a no-op (3.1), so the first form restarted `is_def_eq_core` where the complete judgment
 continues the loop, and paid a proof-irrelevance test per level: PIRR 807 k -> 1,027 k, ticks only -1.0 %. It is
 the more official of the two (it tests proof irrelevance where the official kernel does), and it is slower. I kept
