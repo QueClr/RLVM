@@ -47,7 +47,7 @@ JW3 (changelog) - notes and questions for the journal lead, 2026-11-24
    work/ is not tracked, so no entry links to a status log although the numbers come from them
    (work/status/*.log, work/status/integration.md, work/status/machine-integration.md). Each entry links
    to the tracked document nearest to the change (module README, NOTES-*.md, SWITCHES.md, docs/...) and
-   to the session tree of its phase. 60 entries also end with "Related:" links to the design, decision,
+   to the session tree of its phase. 65 entries also end with "Related:" links to the design, decision,
    insight, example and problem trees that existed at 23:30 UTC (JW2 was done; JW1's design-<slug> and
    dec-XXXX trees existed but JW1 had not signalled completion). If one of those addresses is withdrawn,
    journal-check will name the changelog tree that links to it; the link list is one sentence at the

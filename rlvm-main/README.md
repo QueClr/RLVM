@@ -239,10 +239,15 @@ Measurements and gates: `docs/PLATFORM.md`, sections 0.5 to 0.7.
 | `scripts/dev.sh steward-install MODULE...` | `scripts/steward-install.sh`: copies the module's sources, runs its suite on the copy, installs the jar built from that copy (`--if-changed` for refreshes) |
 
 `work/dist/BUILD-INFO.txt` lists every RLVM jar of the distribution with its sha256 prefix and the time
-its owner published it. Heap flags follow ARCHITECTURE 7.2: JVM `-Xms13g -Xmx13g -Xmn1g`, image
-`-R:MaxHeapSize=13g`; `-R:MaxNewSize=1g` is not baked into the image because a run-time `-Xmx` below 1g
-then stops the image at start-up with status 1. `docs/PLATFORM.md` (wave 4) has the measurements
-behind the launchers' flags and the candidates for a change (none was changed). Since 11:18Z a
+its owner published it, and the distribution's default engine. Since 2026-11-24T22:41Z the JVM
+launcher is the WARM platform (`docs/PLATFORM.md`, Part 0): `-XX:CICompilerCount=8
+-XX:+UseTransparentHugePages`, VM messages on standard error, a sorted explicit class path, and the heap
+BY ENGINE - the machine `-Xmx7g -Xmn1g`, every other engine `-Xms13g -Xmx13g -Xmn1g` (ARCHITECTURE 7.2),
+where the engine is `-X engine=NAME`, else the distribution's default engine, and `-X policy=strict` is
+the reference engine; an explicit `-Xmx` / `-Xms` / `-Xmn` replaces the heap flags. Image:
+`-R:MaxHeapSize=13g`, the machine's H10 inline lists; `-R:MaxNewSize=1g` is not baked into the image
+because a run-time `-Xmx` below 1g then stops the image at start-up with status 1. The test kit is
+never part of a distribution (22 jars in a tree build and in a `--published` build alike). Since 11:18Z a
 `--published` build also copies the published `rlvm-machine` jar into `lib/` (the machine workflow's
 integrator added the module to the parent pom and that block to `scripts/build.sh`); the machine
 registers with priority 10 and is therefore never the default engine (`Engines`).
@@ -328,11 +333,24 @@ With the jars published by 10:56Z (`work/dist/BUILD-INFO.txt`), reference engine
 Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, collectors, heap):
 `docs/PLATFORM.md`.
 
+## State of 2026-11-24, 23Z (steward B2; supersedes what the sections below say about defaults)
+
+- Published: `rlvm-main` `21150203e39d` (54 tests: 51 run green, 3 opt-in), `rlvm-cli` `cac1433b287a` (49).
+- Defaults of a run without options: load `auto` (pipelined for two or more workers on a file of 8 MiB or
+  more; 2 scanner threads on mapped input from 256 MiB), `--threads auto` = one worker per CPU up to 8
+  (decided here, not by the driver), policy `practical`, the default engine by priority (the reference
+  engine today).
+- Gate of that publication (`scripts/gate.sh --dist work/b2/dist-c --defaults --corpus all`, the
+  distribution exactly as a user runs it): 230 / 230; 17,775 mutants SOUNDNESS 0 / COMPLETENESS 0 (agree
+  16,092, declined 1,683); self-test caught; the driver's invariance suite on the published tests PASS
+  with 0 pipelined declines; the arena's complete test set (270) with `--threads 8`: no wrong verdict;
+  the eight corpora accepted; `scripts/dev.sh arena-test` PASS. Measurements: `docs/PLATFORM.md` 0.5, 0.6.
+
 ## Known gaps
 
 - `-X order=namespace` ends as a decline (`UnsupportedOperationException` in the driver: deferred).
   `-X load=pipelined` runs end to end since the driver's jar of 09:39Z (guards in
-  `work/status/rlvm-main.log`); batch stays the default. `-X engine=diff` was run end to end with the
+  `work/status/rlvm-main.log`); batch was the default until 2026-11-24T23Z (now: `auto`, above). `-X engine=diff` was run end to end with the
   test kit's provider (reference against reference: tutorial tests and init-prelude); the driver's own
   differential mode has no second engine in the distribution yet.
 - `engine.*` options are parsed and handed to the engines, none of which reads them; `-X stats-file`
