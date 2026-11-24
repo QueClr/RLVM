@@ -29,36 +29,3 @@
 \p{\strong{Left open by this phase.} Pipelined loading was correct in every guard and still opt-in. The reference kernel compared universe levels with the complete relation and so accepted the two arena corner cases that the official checker rejects; the maintainer decided that question later the same day, see [standing policies](standing-policies). Files with declarations out of order, generated constants and metadata in inductive records are declined, see [accepted risks](accepted-risks).}
 
 \p{\strong{Next.} [The machine](ses-Z72N). The pipeline's own later work, on the driver and the loader, is part of [the speed phase](ses-CVTE).}
-
-\subtree[ses-BQZM-trees]{
-\title{Trees of this phase}
-
-\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
-
-\scope{
-\put\transclude/expanded{false}
-\subtree[ses-BQZM-designs]{
-\title{Design notes}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-BQZM}} {\rel/has-taxon ?X '{Design}}
-}
-}
-
-\subtree[ses-BQZM-problems]{
-\title{Open problems}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-BQZM}} {\rel/has-taxon ?X '{Problem}}
-}
-}
-
-\subtree[ses-BQZM-changes]{
-\title{Changelog entries}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-BQZM}} {\rel/has-taxon ?X '{Change}}
-}
-}
-}
-}

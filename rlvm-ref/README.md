@@ -88,6 +88,21 @@ Audit of every cache against the official source, with exports and official verd
 - Golden tests: `corpus.ExactnessGoldenTest` (30 exports with the official checker's answers in
   `src/test/resources/r2/`: what is the same term, object identity, both modes).
 
+### Evidence (R2, 2026-11-24; private distribution `work/r2/dist-cand3` = this jar a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-export` dc8c4f1ef79a, everything else as published at 23:08Z)
+
+Details and tables: `docs/design/review/reference-caches.md`, sections 7 and 8.
+
+- `scripts/gate.sh --corpus all`, practical (default): the 230 published tests 230 correct, 0 declined; mutants
+  17,775: SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683 (the published record); self-test passed.
+  With `-X policy=strict`: see the review document.
+- 1,239 review exports with official verdicts (R2, S3, E1, S2, the first review): practical: 7 opposite verdicts,
+  all documented (6 kind T accepts: nondep x2, object identity x2, admission, metadata; 1 reject of a file with
+  metadata around `eagerReduce`); strict: 0 opposite verdicts, 14 declines.
+- The corpora are accepted in both modes; in strict mode no declaration is declined (the identity hazards of
+  Std and cslib are decided both ways).
+- CPU, one worker, quiet window, five alternating runs against the published jar ca1f9bd918bb: Init 14.37 ->
+  14.70 s, Std 22.61 -> 21.99 s (ranges overlap); strict mode 14.71 / 22.48 s.
+
 ## Universe levels: official by default
 
 Project owner's decision of 2026-11-24 (docs/design/OWNER-NOTES.md item 11, "resemble official by

@@ -86,6 +86,12 @@ minutes; later builds reuse the Nix store.
   `\taxon` shows up without further edits. Two hubs are maintained by hand:
   add a new design note to `trees/designs.tree`, and see "Changelog entries"
   below.
+- The index links to the hubs and does not include them. A page carries in
+  full every tree it transcludes, collapsed or not, and every tree that
+  transcludes it, so a hub inside another tree, or a query list in a tree
+  that many trees cite, multiplies the size of the site. Transclude a tree
+  where it is read as part of the text (an example inside an insight); link
+  to it otherwise.
 
 ## Frontmatter
 
@@ -163,6 +169,15 @@ The areas, one tag per entry:
 | `soundness` | a fix of a wrong verdict, in whichever module |
 
 Link the entry to the design note, decision or problem it relates to.
+
+`\meta{commit}` is the commit whose message names the change. The history of
+branch `dev` starts with an import on 2026-11-24, and the commits after it
+are snapshots of a shared tree, so the source of a change can be in an
+earlier commit than the one that records it: where no message names the
+change, give the first commit that contains it, and for work older than the
+history the import commit of its module. Name further commits in the text
+with `\commit{}`. The order of entries within one day exists only in the
+month tree and the release tree, so keep them newest first.
 
 ## Insights
 
@@ -246,8 +261,11 @@ Forester markup looks like LaTeX with markdown links. The pitfalls:
 - Links: `[text](address)` for a tree. For a URL use
   `\<html:a>[href]{\verb~|https://example.org/x#y~}{text}`.
 - A document or source file of the RLVM repository: `\src{docs/design/ISA.md}`
-  (no verbatim span inside; the path is the argument). A commit:
-  `\commit{0123abc}`. Both come from `base-macros`.
+  (no verbatim span inside; the path is the argument). The link shows the file
+  on branch `dev` as it is today; for a document that is regenerated, such as
+  `docs/BENCHMARKS.md`, cite the state you quote:
+  `\srcat{0123abc}{docs/BENCHMARKS.md}`. A commit: `\commit{0123abc}`. All
+  three come from `base-macros`.
 - Lists: `\ul{\li{...}\li{...}}`, `\ol{...}`. Emphasis: `\em{}`, `\strong{}`.
 - Tables: `\table{\tr{\th{A}\th{B}}\tr{\td{1}\td{2}}}` (from `base-macros`).
 - Include another tree as a section: `\transclude{address}`. Declare a section

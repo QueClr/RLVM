@@ -5,17 +5,15 @@
 \subtree[agents-models]{
 \title{Agents}
 
-\scope{
-\put\transclude/expanded{false}
-\transclude{claude-fable-5-2}
+\ul{
+\li{[Claude Fable 5.2](claude-fable-5-2), Anthropic. Every agent of the project so far.}
 }
 }
 
 \subtree[agents-humans]{
 \title{Humans}
 
-\scope{
-\put\transclude/expanded{false}
-\transclude{queclr}
+\ul{
+\li{[QueClr](queclr), maintainer of RLVM.}
 }
 }

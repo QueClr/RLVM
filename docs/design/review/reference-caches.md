@@ -229,7 +229,54 @@ The one wrong REJECT of the practical mode: `s3-mdata-eager-hidden-ok` (the load
 
 ## 8. Gates
 
-@@GATES@@
+The published jars: `rlvm-ref` a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-export` dc8c4f1ef79a (`rlvm-store`
+30979ee659b7 as LP2 published it: unchanged). Everything below ran on the private distribution
+`work/r2/dist-cand3` = exactly these jars + the other modules as published at 23:08Z (`rlvm-main` 21150203e39d,
+`rlvm-cli` cac1433b287a, `rlvm-machine` 97d17e57e51b, ..), through the JVM launcher, `-X engine=reference`.
+
+- **Module suites**: `rlvm-ref` 148 tests (147 run green, 1 opt-in), `rlvm-load` 80 green, `rlvm-export` 76
+  (75 run green, 1 opt-in). New: `corpus.ExactnessGoldenTest` (30 exports with official verdicts, both modes),
+  `UnfoldKeyTest`, `StrictScopeTest`; `SplitTest.aDeclarationWithANondepLetIsDeclinedInStrictMode`; `PackedRunsTest`
+  (every `nondep = true` let reaches the sink as a single record).
+- **Differential store digest** (`work/lp2/digest` tooling, run from `work/r2/digest`; the loader / reader change
+  must not alter the store): IDENTICAL to the reference digests in all 14 reader configurations (17,158 small
+  files, 847 prelude mutants, Init / Std / Cedar slice / reachability, cedar, con-leche, navier-stokes-euler,
+  cslib, mathlib; one thread, and scanner threads with packed runs: the one prelude mutant with a
+  `nondep = true` let has one record fewer in a run, same store). With `strictMetadata` on, against LP2's strict
+  digests: the 1,084 + 33 files declined for metadata are declined as before, 2 + 1 files are newly declined -
+  exactly the mutants with a `nondep = true` let - and nothing else differs, with one thread and with scanner
+  threads.
+- **`scripts/gate.sh --dist work/r2/dist-cand3 --corpus all`** (practical, the default): the 230 published tests
+  230 correct, 0 wrong, 0 declined; mutants 17,775: SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683,
+  errors 0 (tutorial 11,847 / 413, bugs 2,627 / 65, prelude 839 / 8, mdata 779 / 1,197: the published record);
+  differential self-test passed. The same gate had passed its 230-test step on the two earlier candidates of the
+  reference jar.
+- **The same gate with `-X policy=strict`** (`--corpus tutorial --corpus bugs`): @@STRICTGATE@@
+- **Review exports** (one JVM, real pipeline; `work/r2/bin/judge-all.sh`, results `work/r2/out/judge-cand3-*`),
+  1,239 exports with official verdicts:
+
+  | Set | exports | practical: official verdict / declined / opposite | strict: official verdict / declined / opposite |
+  |---|--:|---|---|
+  | R2 (`work/r2/exports`) | 25 | 20 / 0 / 5 (the kind T rows: nondep x2, identity x2, admission) | 17 / 8 / **0** (nondep 4, identity 4) |
+  | S3 (`work/s3/exports`, 23:00Z) | 423 | 421 / 0 / 2 (`s3-wc-pos-mdata-bad` kind T, `s3-mdata-eager-hidden-ok` T-reject) | 420 / 3 / **0** (mdata) |
+  | E1 (`work/e1/exports`) | 92 | 92 / 0 / 0 | 92 / 0 / **0** |
+  | S2 (`work/s2/attacks*`; 10 more have no stored verdict) | 269 | 267 / 2 / 0 | 267 / 2 / **0** |
+  | first review (`rlvm-machine/src/test/resources/s`) | 419 | 418 / 1 / 0 | 418 / 1 / **0** |
+
+  The declines outside the R2 and mdata rows are older ones (metadata inside an inductive record, twice; a String
+  literal without its prerequisites). Before this work the published engine gave 4 opposite verdicts on the R2 set
+  as it stood then and 2 on S3's; in strict mode there is none now.
+- **Corpora**: section 7.
+- **Cost** (`bench/quiet.py` window, one worker, five alternating runs, CPU = user + sys, median [min, max];
+  "before" = the same distribution with the published reference jar ca1f9bd918bb):
+
+  | Corpus | before | now (practical) | now, `-X ref.exact=official` |
+  |---|---|---|---|
+  | Init | 14.37 s [14.16, 14.68] (wall 10.43) | 14.70 s [14.28, 14.87] (wall 10.83) | 14.71 s [14.58, 14.91] (wall 10.79) |
+  | Std | 22.61 s [21.28, 23.37] (wall 18.00) | 21.99 s [21.63, 23.16] (wall 17.60) | 22.48 s [21.84, 23.43] (wall 17.82) |
+
+  The ranges overlap in every pair: +2 % on Init, -3 % on Std, i.e. nothing that five runs resolve. Peak RSS
+  unchanged (723 / 819 MB).
 
 ## 9. Not established, not done
 

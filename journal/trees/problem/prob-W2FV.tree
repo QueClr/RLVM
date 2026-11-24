@@ -25,7 +25,7 @@
 \ul{
 \li{The named switches for the two shortcuts must switch the behaviour of \code{\verb~|facts~} and \code{\verb~|probes~} on with them; the options are inert without those switches.}
 \li{The 423 rows of the review enter the hostile suite with their kinds, the rows for the seeded faults first. Done at the end of 2026-11-24: the suite has 1,189 rows, the rows of all reviews, each with its official verdict taken again from the official checker and its kind; 81 rows are of the tolerated kind.}
-\li{A finding that is no wrong verdict, S3-F7: the compiled code declines a valid unit whose body builds a closure over a variable bound to a small numeral. It is to be fixed or counted; at the end of 2026-11-24 it was on the list of the machine's integrator and not yet fixed.}
+\li{A finding that is no wrong verdict, S3-F7: the compiled code declines a valid unit whose body builds a closure over a variable bound to a small numeral. It is to be fixed or counted. Fixed on the evening of 2026-11-24, with a regression test of the rows that found it: \src{rlvm-machine/NOTES-M7.md}, commit \commit{5bd53c6}.}
 \li{The strict re-check of the pipeline stays what decides a rejection of the machine. An accept of the plain machine there is final, so a wrong accept of the plain machine is a wrong accept of the pipeline whatever the switch set does.}
 \li{Not covered by the review: parallel workers, the native image, and the corpora and mutants under the candidate.}
 \li{The choice of the default switch set itself: with or without \code{\verb~|eager~}, with or without the shortcuts, by warm wall clock over all corpora.}

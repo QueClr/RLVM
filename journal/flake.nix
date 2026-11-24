@@ -74,9 +74,10 @@
           if [ -d output ]; then chmod -R u+w output; fi
         '';
 
-        mkApp = drv: {
+        mkApp = description: drv: {
           type = "app";
           program = lib.getExe drv;
+          meta.description = description;
         };
 
         build = pkgs.writeShellApplication {
@@ -187,10 +188,10 @@
         checks.site = site;
 
         apps = {
-          build = mkApp build;
-          check = mkApp check;
-          serve = mkApp serve;
-          new = mkApp new;
+          build = mkApp "Build the forest into output/" build;
+          check = mkApp "Build a scratch copy of the forest and fail on any diagnostic" check;
+          serve = mkApp "Build the forest and serve it on localhost" serve;
+          new = mkApp "Allocate an address and create a tree file of the given kind" new;
         };
 
         devShells.default = pkgs.mkShell {

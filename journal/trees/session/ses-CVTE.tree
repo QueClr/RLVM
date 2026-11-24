@@ -25,7 +25,7 @@
 
 \p{\strong{The default switch set.} The integrator fixed a difference of one tick between the two control conventions in the code objects, ran the hostile exports under 32 switch sets, the mutants, the full gate and the differential engine over 760,839 units without a difference from the reference engine, and published the machine with the switch set \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}, a session cap of 1 MiB and a host depth bound of 128. With it the machine was made the default engine at 19:41 UTC.}
 
-\p{\strong{Numbers of that distribution.} Warm wall clock, 8 workers, pipelined loading, on the same cores of the aarch64 development host in the same windows: Mathlib 27.4 s as a native image and 21.2 s on the JVM launcher, against 12.3 s for gruszka and 18.5 s for nano-lean; Init 0.81 s against 0.66 s and 1.04 s; Std 1.51 s against 1.06 s and 1.74 s; cedar 2.08 s against 1.65 s and 2.69 s; reachability 0.61 s against 2.36 s and 0.75 s. Against the first warm table of the same day, taken with the first three switches, Mathlib went from 35.3 s to 27.4 s as a native image. In the arena-shaped container the 230 published tests took 63.9 s of CPU time through the arena's run line, where the reference pipeline had taken 154 s.}
+\p{\strong{Numbers of that distribution}, from the benchmark tables as they stood then, \srcat{e021aef}{docs/BENCHMARKS.md}. Warm wall clock, 8 workers, pipelined loading, on the same cores of the aarch64 development host in the same windows: Mathlib 27.4 s as a native image and 21.2 s on the JVM launcher, against 12.3 s for gruszka and 18.5 s for nano-lean; Init 0.81 s against 0.66 s and 1.04 s; Std 1.51 s against 1.06 s and 1.74 s; cedar 2.08 s against 1.65 s and 2.69 s; reachability 0.61 s against 2.36 s and 0.75 s. Against the first warm table of the same day, taken with the first three switches, Mathlib went from 35.3 s to 27.4 s as a native image. In the arena-shaped container the 230 published tests took 63.9 s of CPU time through the arena's run line, where the reference pipeline had taken 154 s.}
 
 \p{\strong{Taken back.} At 20:35 UTC the machine was set back to a non-default priority. An agent writing new hostile exports for a prototype had found accepts of the machine that the official checker rejects: a bound variable was typed by the value in its slot where the official kernel uses the binder's declared type. Every gate of the integration had compared the machine with the reference engine on corpora and mutants, where the two types coincide, or with hostile exports that had no row of this shape. The integrator's own conclusion: no difference on 760,839 units was true and said nothing about it, and making an engine the default needs a review with new hostile exports first. The fix and what followed are in [the exactness phase](ses-874D).}
 
@@ -34,60 +34,3 @@
 \p{\strong{Policy recorded.} The maintainer's decisions on universe levels, Oracle GraalVM, commits and the size of the team, and the change of the goal to warm wall clock, in [standing policies](standing-policies).}
 
 \p{\strong{Running beside this phase.} [Profiles and prototypes](ses-JRSD).}
-
-\subtree[ses-CVTE-trees]{
-\title{Trees of this phase}
-
-\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
-
-\scope{
-\put\transclude/expanded{false}
-\subtree[ses-CVTE-designs]{
-\title{Design notes}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Design}}
-}
-}
-
-\subtree[ses-CVTE-decisions]{
-\title{Decisions}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Decision}}
-}
-}
-
-\subtree[ses-CVTE-insights]{
-\title{Insights}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Insight}}
-}
-}
-
-\subtree[ses-CVTE-examples]{
-\title{Examples}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Example}}
-}
-}
-
-\subtree[ses-CVTE-problems]{
-\title{Open problems}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Problem}}
-}
-}
-
-\subtree[ses-CVTE-changes]{
-\title{Changelog entries}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Change}}
-}
-}
-}
-}

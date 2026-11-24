@@ -14,10 +14,13 @@
 #   the eight corpora, 92 bad, 30 `either`) it gives NO WRONG VERDICT: 148 of 148 good tests accepted, 92
 #   of 92 bad tests rejected, and of the `either` tests 9 accepted, 19 rejected and TWO DECLINED
 #   (`corner-cases/eta-struct-major-no-whnf` and `eta-struct-major-and-no-whnf`: the official kernel does
-#   not terminate there, RLVM says so and exits with 2). Measured by the arena's own procedure in the
-#   arena-shaped container on the published jars of 18:28Z (docs/research/profiles/AR1.md, section 0.1,
-#   configuration (a)); the 230 published tests with a verdict: 230 of 230 with the binary of this
-#   definition (work/status/steward.log, B2).
+#   not terminate there, RLVM says so and exits with 2). Measured by the arena's own procedure (one
+#   arena-shaped container, tests one after the other, the arena's time limits, perf stat) with THIS run
+#   line, `--threads 8`, on the distribution of the jars published at 22:32Z (rlvm-main 21150203e39d;
+#   docs/PLATFORM.md section 0.7): no error, no timeout (closest to its limit: perf/app-lam, 11.3 s of 70 s);
+#   mathlib: accepted in 92 s of wall clock, 618 s of CPU time, 8,455 G instructions, 7.5 GiB peak RSS
+#   (aarch64). The same counts as docs/research/profiles/AR1.md, section 0.1, found with `--threads 4`
+#   on the jars of 18:28Z (mathlib then: 178 s wall, 8,427 G instructions, 5.5 GiB).
 # - The machine (rlvm-machine: the worklist machine, the engine the project is named after) is compiled
 #   into the binary and runs ONLY ON REQUEST (`-X engine=machine`; the reference engine then confirms
 #   every rejection and decides what the machine declines; `-X engine=diff` compares the two). It was the

@@ -21,26 +21,25 @@
 \ul{
 \li{\strong{Verdicts.} The pipeline accepts all eight corpora it is measured on (Init, Std, cedar, cslib, con-leche, reachability, navier-stokes-euler and Mathlib) and gives the expected verdict on the 230 published arena tests without a decline. On 17,775 mutated exports with stored official verdicts it has no wrong accept and no wrong reject.}
 \li{\strong{Default engine.} The reference engine is the default; the machine is selected with \code{\verb~|-X engine=machine~}. The machine was the default engine for under an hour on 2026-11-24 and was taken back when new hostile exports showed accepts that the official checker rejects. Those were fixed or classified, the maintainer chose practical exactness, and an adversarial review of the candidate default configuration found no accept of an underivable statement. One launcher option selects the policy, practical or strict. What the default may differ in is listed under [accepted risks](accepted-risks); what is left before the machine is the default again is in [the problem tree](prob-W2FV) and [the decision](dec-T79V).}
-\li{\strong{Speed.} Warm wall clock on all of Mathlib with 8 workers and pipelined loading, on the aarch64 development host, for the machine with its default switch set of that day: 27.4 s as a native image and 21.2 s on the JVM launcher. Measured in the same windows on the same cores, the two leading checkers of the arena take 12.3 s (gruszka) and 18.5 s (nano-lean). The reference engine needs 120.3 s of cold wall clock for the same file. The numbers and their conditions are in \src{docs/BENCHMARKS.md}.}
-\li{\strong{Where the gap is.} Profiles of Mathlib attribute most of the remaining distance to the official rule for comparing proofs, which the leading checkers do not follow, then to declarations that enter eager reduction, then to a uniform cost per operation. See the [insights](insights).}
+\li{\strong{Speed.} Warm wall clock with 8 workers and pipelined loading, on the aarch64 development host, in the tables of \src{docs/BENCHMARKS.md} as generated on the evening of 2026-11-24. On all of Mathlib the machine with its default switch set takes 21.2 s on the JVM launcher and 28.2 s as a native image; measured in the same windows on the same cores, the two leading checkers of the arena take 14.2 s (gruszka) and 18.7 s (nano-lean), and the default configuration with the reference engine takes 58.0 s on the JVM launcher. On Init, Std and cedar the machine on the JVM launcher takes 0.62 s, 1.22 s and 1.61 s, which is 0.87 to 0.95 times gruszka's time. The session trees quote the tables of earlier in the day, which were taken with other distributions in other windows.}
+\li{\strong{Where the gap is.} Profiles of Mathlib attribute most of the remaining distance to the official rule for comparing proofs, which the leading checkers do not follow, then to declarations that enter eager reduction, then to a uniform cost per operation; see [the problem tree](prob-TJK3). Both of the first two have a switch that is off by default. The first tables of an itemised cost profile, which are working tables and not yet a document, have one warm pass over Mathlib on the JVM launcher at 21.9 s with the default switch set, 18.1 s with eager reduction on the machine, 15.7 s with the two proof-comparison shortcuts and 13.1 s with both. Whether they are on by default is decided by such measurements over all corpora.}
 }
 }
 
 \subtree[index-hubs]{
 \title{Contents}
 
-\scope{
-\put\transclude/expanded{false}
-\transclude{designs}
-\transclude{changelog}
-\transclude{decisions}
-\transclude{open-problems}
-\transclude{examples}
-\transclude{insights}
-\transclude{sessions}
-\transclude{agents}
-\transclude{standing-policies}
-\transclude{accepted-risks}
-\transclude{licence}
+\ul{
+\li{[Design notes](designs): how each part is meant to work and why, in a reading order.}
+\li{[Decisions](decisions): what was chosen, against which alternatives, and what follows from it.}
+\li{[Insights](insights): measured findings, with their numbers and conditions, and hypotheses not yet measured.}
+\li{[Open problems](open-problems): what is not settled, what is known, and what would close it.}
+\li{[Examples](examples): inputs that show a rule of the kernel or a wrong verdict.}
+\li{[Changelog](changelog): dated entries, by month and [by area](release-unreleased).}
+\li{[Sessions](sessions): one tree per phase of the work, with what was done and where it is recorded.}
+\li{[Standing policies](standing-policies): the maintainer's lasting instructions, with their dates.}
+\li{[Accepted risks](accepted-risks): trade-offs decided on purpose, among them where the default configuration may differ from the official checker.}
+\li{[People and agents](agents): who wrote what.}
+\li{[Licence](licence).}
 }
 }

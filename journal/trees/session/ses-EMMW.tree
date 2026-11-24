@@ -25,28 +25,3 @@
 \p{\strong{What the review changed.} The first draft argued several choices from instruction counts and left the machine without a skeleton, packages or gates. After the review the instruction set has a module layout with eight work packages and acceptance tests, static facts are derived lazily from the store alone, faults inside a speculative attempt have two classes, and staging is a sequence of steps that are each measured on Init, Std and a slice of Cedar before the next one starts.}
 
 \p{\strong{Next.} [The foundation modules and the reference pipeline](ses-BQZM), then [the machine](ses-Z72N).}
-
-\subtree[ses-EMMW-trees]{
-\title{Trees of this phase}
-
-\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
-
-\scope{
-\put\transclude/expanded{false}
-\subtree[ses-EMMW-designs]{
-\title{Design notes}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-EMMW}} {\rel/has-taxon ?X '{Design}}
-}
-}
-
-\subtree[ses-EMMW-decisions]{
-\title{Decisions}
-
-\query\datalog{
- ?X -: {\rel/links-to ?X @{ses-EMMW}} {\rel/has-taxon ?X '{Decision}}
-}
-}
-}
-}
