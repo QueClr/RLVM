@@ -1,6 +1,6 @@
 # AR1 - The arena's own procedure on today's published jars, and where RLVM would stand on the board
 
-Agent AR1, 2026-11-24, 18:28Z - 19:40Z. No module code was changed or published. Everything of mine is under
+Agent AR1, 2026-11-24, 18:28Z - 19:30Z. No module code was changed or published. Everything of mine is under
 `work/ar1/` (distributions, reports, logs, scripts); living summary `work/status/prof-AR1.md`.
 
 **Framing (owner note 12).** The arena ranks by user-space instructions on Mathlib. That is the arena's metric,
@@ -21,16 +21,15 @@ other, the arena's time limit per test, `perf stat` + GNU time around the run li
 |---|---|---|---|--:|--:|--:|
 | **(a)** as it is today: **reference engine, `--threads 4`** | 148 / 0 / 0 / 0 / 0 | 92 / 0 / 0 | 9 / 19 / 2 | **0** | **0** | 2 |
 | **(b)** `-X engine=machine` (default switches `warm,gated,expect`) | 147 / 0 / 0 / 0 / **1** | 92 / 0 / 0 | 9 / 19 / 2 | **0** | **0** | 3 |
-| **(c\*)** `-X engine=machine -X machine.switches=gated,pchk,expect,warm,code,casetrees,bodies,directrules,same,match,joint,lazycases,lazyeval` (INT6's CANDIDATE default; see the note) | @@C_GOOD@@ | @@C_BAD@@ | @@C_EITHER@@ | **@@C_WA@@** | **@@C_WR@@** | @@C_DECL@@ |
+| **(c\*)** `-X engine=machine -X machine.switches=gated,pchk,expect,warm,code,casetrees,bodies,directrules,same,match,joint,lazycases,lazyeval` (INT6's CANDIDATE default; see the note) | 148 / 0 / 0 / 0 / 0 | 92 / 0 / 0 | 9 / 19 / 2 | **0** | **0** | 2 |
 | (d) extra, NOT official-exact: `-X engine=machine -X machine.switches=default,facts,probes -Drlvm.machine.m4=congruence,skipargs` | 148 / 0 / 0 / 0 / 0 | 92 / 0 / 0 | 11 / 17 / 2 | **0** | **0** | 2 |
 
 Every test that is not "correct" or a verdict on an `either` test, by name:
 
 | configuration | test | expected | got | cause |
 |---|---|---|---|---|
-| (a), (b), (c\*), (d) | `corner-cases/eta-struct-major-no-whnf`, `corner-cases/eta-struct-major-and-no-whnf` | either | declined (exit 2) | `BUDGET_STEPS ...: the reduction returns to a term it started from; the official kernel does not terminate here` (the published `official` row is a timeout on both). (a): 5 and 17 ms, 0.01 G instructions. (b), (c\*), (d): 0.88 s and 24.0 G each - the machine first runs into its own bound of 2^27 ticks per unit, then the reference engine declines |
-| (b) | `perf/loop-unfolded-once` | accept | **timeout** in the suite run (killed at the arena's 40 s); **accepted in 31.6 s** when repeated alone in a quiet window (199.2 G instructions, 31.3 s CPU, **8,686 MiB**) | not a wrong verdict. The machine works on one unit until its own tick bound cuts it, then the reference engine accepts the file (the reference engine alone: 76 ms, 1.5 G, 60 MiB; with the shortcuts of (d): 58 ms, 0.85 G). 31.6 s of a 40 s limit on this host's cores; the arena's runner is slower (nano-lean's Mathlib wall: 29.5 s here, 36.8 s published; gruszka 20.0 s and 32.5 s), so **on the arena this test is a likely timeout with the machine as it is** |
-@@C_ROWS@@
+| (a), (b), (c\*), (d) | `corner-cases/eta-struct-major-no-whnf`, `corner-cases/eta-struct-major-and-no-whnf` | either | declined (exit 2) | `BUDGET_STEPS ...: the reduction returns to a term it started from; the official kernel does not terminate here` (the published `official` row is a timeout on both). (a): 5 and 17 ms, 0.01 G instructions. (b), (d): 0.88 s and 24.0 G each, (c\*): 1.85 s and 55.2 G each - the machine first runs into its own bound of 2^27 ticks per unit, then the reference engine declines |
+| (b) | `perf/loop-unfolded-once` | accept | **timeout** in the suite run (killed at the arena's 40 s); **accepted in 31.6 s** when repeated alone in a quiet window (199.2 G instructions, 31.3 s CPU, **8,686 MiB**) | not a wrong verdict. The machine works on one unit until its own tick bound cuts it, then the reference engine accepts the file (the reference engine alone: 76 ms, 1.5 G, 60 MiB; with the shortcuts of (d): 58 ms, 0.85 G). 31.6 s of a 40 s limit on this host's cores; the arena's runner is slower (nano-lean's Mathlib wall: 29.5 s here, 36.8 s published; gruszka 20.0 s and 32.5 s), so **on the arena this test is a likely timeout with the machine's default switches**. With the candidate set (c\*) it is accepted in 75 ms (0.77 G): `same` answers what the removed shortcuts used to |
 
 No wrong accept and no wrong reject in any configuration. With (a) RLVM gives the published verdict of `official`
 (v4.35.0) on 268 of the 270 tests; the two others are the non-terminating `either` files above.
@@ -51,7 +50,7 @@ All rows inside a `bench/quiet.py` window unless marked. "second sample" = the M
 |---|---|--:|--:|--:|--:|--:|--:|--:|
 | RLVM (a) reference engine, 4 workers | accepted | **8,427.1 G** | 1,404.5 | 23.33 | 177.7 | 622.4 | 5,513 | 8,408.3 G (-0.22 %) |
 | RLVM (b) machine `warm,gated,expect`, 4 workers | accepted | **2,978.5 G** | 496.4 | 8.25 | 61.3 | 205.1 | 2,886 | 2,980.5 G (+0.07 %) |
-| RLVM (c\*) machine, INT6's candidate set, 4 workers | @@C_ML_STATUS@@ | **@@C_ML_INSTR@@** | @@C_ML_VIRT@@ | @@C_ML_X@@ | @@C_ML_WALL@@ | @@C_ML_CPU@@ | @@C_ML_RSS@@ | @@C_ML_SECOND@@ |
+| RLVM (c\*) machine, INT6's candidate set, 4 workers | accepted | **2,747.7 G** | 458.0 | 7.61 | 56.8 | 187.0 | 2,932 | 2,748.3 G (+0.02 %) |
 | RLVM (d) machine + `facts,probes` + `congruence,skipargs` (not official-exact) | accepted | **1,977.0 G** | 329.5 | 5.47 | not quiet | not quiet | 2,921 | 1,976.7 G (-0.02 %) |
 | nano-lean v0.4.2 (local build of the arena's definition, 4 threads) | accepted | 361.2 G | 60.2 | 1.00 | 29.5 | 102.0 | 5,157 | published x86-64: 394.9 G; here / published 0.915 |
 | gruszka (4 workers) | accepted | 419.1 G | 69.9 | 1.16 | 20.0 | 71.5 | 2,525 | 462.0 G; 0.907 |
@@ -70,8 +69,8 @@ in the arena's configuration has shown on a big corpus (`docs/research/12-baseli
 | configuration | here | via nano-lean (0.915) | via gruszka (0.907) | via sokonanoda (0.959) | lowest ratio seen (0.90) | highest ratio seen (1.05) | **place** |
 |---|--:|--:|--:|--:|--:|--:|--:|
 | (a) reference engine | 8,427.1 G | 9,212 G | 9,289 G | 8,791 G | 9,363 G | 8,026 G | **15** in every column (after pestka-wasm 7,015.4 G, before tenet-jvm 9,798.4 G) |
-| (b) machine, default switches | 2,978.5 G | 3,256 G | 3,283 G | 3,107 G | 3,309 G | 2,837 G | **8** in every column (after palladium 2,833.0 G, before con-ron 3,473.9 G); at the 1.05 edge it is 0.15 % behind palladium |
-| (c\*) machine, candidate set | @@C_ML_INSTR_SHORT@@ | @@C_P1@@ | @@C_P2@@ | @@C_P3@@ | @@C_P4@@ | @@C_P5@@ | **@@C_PLACE@@** |
+| (b) machine, default switches | 2,978.5 G | 3,256 G | 3,283 G | 3,107 G | 3,309 G | 2,837 G | **8** in every column (after palladium 2,833.0 G, before con-ron 3,473.9 G); at the 1.05 edge it is 0.13 % behind palladium |
+| (c\*) machine, candidate set | 2,747.7 G | 3,004 G (place 8) | 3,029 G (place 8) | 2,866 G (place 8) | 3,053 G (place 8) | 2,617 G (place 7) | **8** (after palladium, before con-ron) in four columns; **7** at the 1.05 edge (between kefir 2,577.3 G and palladium) |
 | (d) machine with the shortcuts | 1,977.0 G | 2,161 G | 2,179 G | 2,062 G | 2,197 G | 1,883 G | **6** in every column (after pestka 1,475.3 G, before kefir 2,577.3 G) |
 
 Board (x86-64 G instructions): 1 nano-lean 394.9, 2 gruszka 462.0, 3 sokonanoda 527.4, 4 rpylean 578.1, 5 pestka
@@ -96,7 +95,7 @@ place 1 below 361.2 G.
 |--:|---|---|--:|---|--:|---|
 | 0 | start: the definition as it is, (a) | reference engine checks everything | - | measured | 8,427.1 G | 15 |
 | 1 | the machine becomes the default engine (provider priority >= 100; today 10) | (b) | **-5,448.6 G** (-64.7 %) | measured | 2,978.5 G | **8** |
-| 2 | INT6's candidate switch set instead of `warm,gated,expect` | (c\*) | @@C_SAVED@@ | measured | @@C_ML_INSTR_SHORT@@ | @@C_PLACE_SHORT@@ |
+| 2 | INT6's candidate switch set instead of `warm,gated,expect` | (c\*) | -230.8 G (-7.7 %) against (b) | measured | 2,747.7 G | 8 (7 if RLVM's ratio is 0.97 or more) |
 | 3 | units that enter eager reduction stay on the machine (prototype E1) | 6,711 units (0.94 %) are declined twice by the machine and checked by the reference engine: about 290 - 350 G of (b) are reference-engine work on worker threads (section 6.3), plus about 15 G of abandoned machine work (P8) | about -150 .. -210 G | estimate: fallback minus what the machine would need at its own ratio to gruszka on those units (6.5 x 23.9 G = 155 G) | about 2,770 - 2,830 G | 8 (7 only if RLVM's ratio is 0.98 or more) |
 | 4 | proof-comparison shortcuts `congruence,skipargs` (+ `facts,probes`), owner's decision, review S2 says theory-sound, NOT the official algorithm | (d) | **-1,001.5 G** against (b) (-33.6 %) | measured | 1,977.0 G | **6** |
 | 5 | the same official-exact (prototype C1) | unknown share of item 4 | 0 .. -1,000 G | not built | - | 8 .. 6 |
@@ -108,8 +107,9 @@ place 1 below 361.2 G.
 | 11 | place 4 (rpylean: 544.4 G here) | with a leader-class loader and admission (43 G) the checking would have to cost 500 G = 1.3 x gruszka's 381 G; the machine's checking is 2,820 G in (b) (7.4 x) and 1,819 G in (d) (4.8 x) | about -1,000 G after row 10 | - | 544 G | 4: needs the cost per machine operation (2,133 instructions per tick against gruszka's 823, 1.5 x its ticks; P8 section 4.6) to fall by a factor of about 3 ON TOP of the shortcuts |
 
 Reading: making the machine the default is worth seven places (15 -> 8). After that the only single step
-that moves a place is the shortcut policy (8 -> 6); everything official-exact that is in sight is worth
-at most one place (8 -> 7, and only in part of the projection range). Places 5 and better are not reachable by
+that moves a place for certain is the shortcut policy (8 -> 6). The candidate switch set is worth 7.7 % on
+Mathlib and stays 8th (7th only at the edge of the projection range); with everything official-exact that
+exists or is being prototyped the entry reaches 7th. Places 5 and better are not reachable by
 switching on anything that exists: they need the per-operation cost.
 
 ### 0.5 The arena definition (`scripts/arena/rlvm.yaml`): what the integrator has to update
@@ -137,8 +137,9 @@ To do before submission:
    tests declined.
 4. When the machine becomes the default engine: rewrite the second paragraph of `description` (it says the
    reference engine checks every declaration), say that units the machine declines are checked by the reference
-   engine, and first settle `perf/loop-unfolded-once` (0.1: 31.6 s of a 40 s limit here, 8.7 GB) - as it is,
-   the switch trades a correct verdict for a probable timeout on the arena's slower runner.
+   engine, and first settle `perf/loop-unfolded-once` (0.1: 31.6 s of a 40 s limit here, 8.7 GB) - with the default
+   switches the change of engine trades a correct verdict for a probable timeout on the arena's slower runner;
+   the candidate set (c\*) does settle it (75 ms).
 5. Not pinned by hash: the Maven plugins and their dependencies (an 88 MB local repository; only
    `--strict-checksums` against the repository's own checksum files). The description's sentence "verifies their
    checksums and those of the third-party jars that go into the image" is accurate, but the build is not
@@ -159,7 +160,7 @@ To do before submission:
 ### 0.6 What could not be established
 
 - **RLVM's own aarch64 / x86-64 ratio.** Every place above is a projection. (b) is 8th for every ratio a baseline
-  has shown, but at the 1.05 edge it is 4 G (0.15 %) behind palladium.
+  has shown, but at the 1.05 edge it is 4 G (0.13 %) behind palladium, and (c\*) is 7th there.
 - **Wall clock of `perf/loop-unfolded-once` on the arena's runner** with the machine: 31.6 s here in a quiet
   window; the runner's speed is only known through the leaders' published wall times.
 - **A gated configuration (c).** The integrator's log calls no set beyond the default gated; (c\*) is its
@@ -241,9 +242,9 @@ Run lines:
 - (c\*) (b) plus `-X machine.switches=gated,pchk,expect,warm,code,casetrees,bodies,directrules,same,match,joint,lazycases,lazyeval`
 - (d) (b) plus `-X machine.switches=default,facts,probes -Drlvm.machine.m4=congruence,skipargs`
 
-Times (UTC): suite (a) 18:36:52 - 18:52:12, (b) 18:52:21 - 19:01:15, (d) 19:07:26 - 19:13:51, (c\*) @@C_TIMES@@; quiet windows:
+Times (UTC): suite (a) 18:36:52 - 18:52:12, (b) 18:52:21 - 19:01:15, (d) 19:07:26 - 19:13:51, (c\*) 19:22:00 - 19:26:40 (it waited for a host slot from 19:14:29); quiet windows:
 Mathlib (a) ended 18:49:17, (b) 18:58:41, the three Rust leaders 19:04:02, `loop-unfolded-once` 19:09:43,
-rpylean about 19:18, (c\*) @@C_QTIME@@.
+rpylean about 19:18, (c\*) 19:21:46.
 
 **A caveat that turned out not to matter.** The host was busy (load average 35 - 60 on 20 cores) and the quiet
 lock was taken back to back by other agents, so my suite containers spent most of their time parked on the
@@ -260,7 +261,7 @@ verdicts - 9 accepted (`alg-conv-trans-acc-left`, `-acc-right`, `alg-conv-trans-
 and 19 rejected, among them `imax-right-successor` and `imax-nested-absorption` (owner note 11) - and decline
 the two non-terminating files. That is the published `official` verdict on every one of the 28. (d) accepts two
 more, `alg-conv-trans-quot-left` and `eta-struct-major-and`: the verdicts of gruszka, sokonanoda and rpylean on
-those files.@@C_EITHER_NOTE@@
+those files.
 
 Against the published results of others, configuration (a): `official` (v4.35.0) differs on 2 tests (the
 non-terminating pair: timeout there, decline here); `official-nightly` on 9 `either` tests; nano-lean on 4 (its
@@ -272,20 +273,23 @@ sokonanoda 6, rpylean 4, pestka 0, kefir 0, palladium 6.
 
 | corpus (arena limit) | (a): instructions / virtual s / RSS MiB | (b) | (c\*) | (d) | nano-lean, gruszka (published virtual s) |
 |---|---|---|---|---|---|
-| init (370 s) | 246.3 G / 41.0 / 350 | 115.2 G / 19.2 / 326 | @@C_init@@ | 112.4 G / 18.7 / 331 | 4.1, 4.1 |
-| std (600 s) | 406.0 G / 67.7 / 468 | 195.5 G / 32.6 / 509 | @@C_std@@ | 188.7 G / 31.5 / 552 | 6.7, 6.7 |
-| reachability (220 s) | 112.7 G / 18.8 / 1,929 | 57.3 G / 9.5 / 2,247 | @@C_reachability@@ | 57.2 G / 9.5 / 2,165 | 1.9, 2.4 |
-| cedar (640 s) | 516.8 G / 86.1 / 529 | 263.7 G / 43.9 / 598 | @@C_cedar@@ | 251.6 G / 41.9 / 596 | 10.5, 10.3 |
-| con-leche (920 s) | 809.7 G / 134.9 / 4,074 | 232.0 G / 38.7 / 684 | @@C_con-leche@@ | 231.6 G / 38.6 / 596 | 10.3, 9.2 |
-| navier-stokes-euler (1,840 s) | 3,075.4 G / 512.6 / 813 | 1,151.1 G / 191.9 / 978 | @@C_navier-stokes-euler@@ | 507.9 G / 84.6 / 837 | 17.2, 21.8 |
-| cslib (1,600 s) | 2,173.8 G / 362.3 / 2,030 | 852.3 G / 142.1 / 1,143 | @@C_cslib@@ | 689.2 G / 114.9 / 1,142 | 23.6, 27.4 |
-| mathlib (4,120 s) | 8,408.3 G / 1,401.4 / 5,550 | 2,980.5 G / 496.7 / 2,824 | @@C_mathlib@@ | 1,976.7 G / 329.4 / 2,938 | 65.8, 77.0 |
-| all 270 tests | 17,062.9 G | 6,589.0 G (without the test that timed out) | @@C_total@@ | 4,706.9 G | - |
-| the 262 small tests | 1,314.0 G | 741.5 G | @@C_small@@ | 691.6 G | - |
+| init (370 s) | 246.3 G / 41.0 / 350 | 115.2 G / 19.2 / 326 | 82.8 G / 13.8 / 262 | 112.4 G / 18.7 / 331 | 4.1, 4.1 |
+| std (600 s) | 406.0 G / 67.7 / 468 | 195.5 G / 32.6 / 509 | 148.5 G / 24.8 / 481 | 188.7 G / 31.5 / 552 | 6.7, 6.7 |
+| reachability (220 s) | 112.7 G / 18.8 / 1,929 | 57.3 G / 9.5 / 2,247 | 16.4 G / 2.7 / 564 | 57.2 G / 9.5 / 2,165 | 1.9, 2.4 |
+| cedar (640 s) | 516.8 G / 86.1 / 529 | 263.7 G / 43.9 / 598 | 207.8 G / 34.6 / 530 | 251.6 G / 41.9 / 596 | 10.5, 10.3 |
+| con-leche (920 s) | 809.7 G / 134.9 / 4,074 | 232.0 G / 38.7 / 684 | 173.2 G / 28.9 / 579 | 231.6 G / 38.6 / 596 | 10.3, 9.2 |
+| navier-stokes-euler (1,840 s) | 3,075.4 G / 512.6 / 813 | 1,151.1 G / 191.9 / 978 | 973.5 G / 162.3 / 971 | 507.9 G / 84.6 / 837 | 17.2, 21.8 |
+| cslib (1,600 s) | 2,173.8 G / 362.3 / 2,030 | 852.3 G / 142.1 / 1,143 | 753.7 G / 125.6 / 1,157 | 689.2 G / 114.9 / 1,142 | 23.6, 27.4 |
+| mathlib (4,120 s) | 8,408.3 G / 1,401.4 / 5,550 | 2,980.5 G / 496.7 / 2,824 | 2,748.3 G / 458.1 / 2,978 | 1,976.7 G / 329.4 / 2,938 | 65.8, 77.0 |
+| all 270 tests | 17,062.9 G | 6,589.0 G (without the test that timed out) | 5,783.5 G | 4,706.9 G | - |
+| the 262 small tests | 1,314.0 G | 741.5 G | 679.1 G | 691.6 G | - |
 
 All eight corpora are accepted in every configuration, far inside the arena's limits (the largest share of a
-limit: Mathlib (a), 177.7 s of 4,120 s in the quiet window). The shortcuts of (d) are worth 33.6 % on Mathlib,
-55.9 % on navier-stokes-euler, 19.1 % on cslib and 0 - 5 % on the other five corpora.
+limit: Mathlib (a), 177.7 s of 4,120 s in the quiet window). Against (b), the candidate set (c\*) saves 71 % on reachability, 28 % on init, 25 % on con-leche, 24 % on std,
+21 % on cedar, 15 % on navier-stokes-euler, 12 % on cslib and 7.7 % on Mathlib: the corpus the arena ranks by is the
+one it helps least (P8: Mathlib's extra cost is the conversion of proofs, which no official-exact switch
+touches). The shortcuts of (d) are worth 33.6 % on Mathlib, 55.9 % on navier-stokes-euler, 19.1 % on cslib and
+0 - 5 % on the other five corpora.
 
 Small tests with the largest counts (instructions; wall of the parked suite run in brackets is NOT evidence):
 `perf/magma-list-deep-n36` (limit 360 s) (a) 181.0 G, (b) 60.8 G; `perf/magma-list-pair-n21` (240 s) 115.4 G,
@@ -300,9 +304,9 @@ rejection is confirmed by the reference engine in either configuration). Peak RS
 Table 0.2. The local builds are those of `bench/baselines/` (arena revision `99195b6b`); each ran through its
 generated wrapper (`bench/baselines/NAME.sh`, the arena's run line) in a container of its own inside a quiet
 window (gruszka, nano-lean, sokonanoda in one window, rpylean in another). Their counts repeat this morning's
-(361.3 / 418.7 / 504.3 / 544.6 G) to 0.03 - 0.26 %. Quiet wall clock with their 4 threads: gruszka 20.0 s, nano-lean
+(361.3 / 418.7 / 504.3 / 544.6 G) to 0.02 - 0.26 %. Quiet wall clock with their 4 threads: gruszka 20.0 s, nano-lean
 29.5 s, sokonanoda 33.7 s; rpylean (one thread) 125.8 s. RLVM with 4 workers, same windows: (a) 177.7 s, (b)
-61.3 s@@C_WALL_NOTE@@ - 3.1 times gruszka and 2.1 times nano-lean for (b), a much smaller distance than in instructions
+61.3 s, (c\*) 56.8 s - 3.1 times gruszka and 2.1 times nano-lean for (b), a much smaller distance than in instructions
 (7.1 and 8.2 times), because the machine retires about 14.5 G instructions per CPU second against gruszka's 5.9
 and nano-lean's 3.5. (Cold process, batch load, 4 workers: the arena's configuration, not the owner's; the
 owner's table is `work/status/warm.md`.)
@@ -371,10 +375,12 @@ evaluator, which is the per-operation cost of P8's section 4.6.
 
 `-X machine.declines` of the profile run lists 13,422 declines = **6,711 units, each declined twice**
 (`UNSUPPORTED_INPUT (E_LIMIT) ... eager reduction`), as P8 counted. Those units are checked by the reference
-engine. On the worker threads of (b) the classes that only the reference engine uses (`RefKernel`, `PairSet`,
+engine. On the worker threads of (b) the classes that carry the reference engine in (a) (`RefKernel`, `PairSet`,
 `LongIntMap`, `IntIntMap`, `Overlay`, `TermOps$Rewriter`, `TermOps$Memo`) sum to 287 G; in (a) the same classes are
 83 % of the workers' instructions, so the fallback is about **290 - 350 G, 10 - 12 % of (b)**, for units that cost
-gruszka 23.9 G (P8). This is an estimate from class names, not a per-unit count.
+gruszka 23.9 G (P8). This is an estimate from class names, not a per-unit count: if the machine itself calls
+into the term store's interner, it is too high. Cross-check: P8 measured 23.5 s of thread CPU for the fallback;
+at the reference engine's 13.5 G instructions per CPU second (table 0.2) that is 317 G.
 
 ## 7. What it would take: how table 0.4 was made
 
@@ -427,7 +433,7 @@ was not tested here.
 | A2-F1: two level records for one universe parameter - RLVM accepts files that the official checker rejects | no: 0 of the 270 files and none of the eight corpora contain a repeated level record (A2's scanner over the 230 published tests and the corpora; the 30 `either` tests and the two extra `perf/` tests scanned for this report) | a hand-made `bad` test of that shape would be a WRONG ACCEPT: place 30 whatever the speed. The only open item that can cost the whole ranking, so it should be closed (decline is enough) before any submission |
 | the `either` tests | all 30 answered or declined; verdicts = `official` on 28 | free: `either` never counts |
 | the two non-terminating `either` files with the machine (orchestrator 16:14Z) | declined after 0.88 s and 24 G each (the machine's tick bound of 16:45Z, then the reference engine); the arena's limit is 60 s | closed for the arena |
-| the machine's tick bound on a `good` test: `perf/loop-unfolded-once` | (b), (c\*): @@C_LOOP@@ | a timeout = one more "declined": no place lost, a red cell on a test that the reference engine passes in 76 ms |
+| the machine's tick bound on a `good` test: `perf/loop-unfolded-once` | (b): timeout at 40 s in the suite run, accepted in 31.6 s in a quiet window (199 G, 8.7 GB). (c\*): accepted in 75 ms (0.77 G); (d): 58 ms | a timeout = one more "declined": no place lost, a red cell on a test that the reference engine passes in 76 ms |
 | eager-reduction declines of the machine | unit-level only: the reference engine decides those units, no test is declined for it; 6,711 units on Mathlib | costs instructions (0.4, item 3), never a verdict |
 | generated constants (admission declines an export that needs a kernel-generated constant without a record) | 0 of 270: no test is declined for it | a decline: tie-breaker only |
 | the machine is not the default (`MachineProvider.priority()` = 10) | the definition as it is runs the reference engine: place 15 instead of 8 | seven places |

@@ -246,6 +246,80 @@ Verified against `leanchecker --from-export` v4.36.0 where marked (official); pr
 | more than 2^31 - 2^29 expression records, any `StoreLimitException` (2^28 - 1 shared nodes, 2 GiB pools, ...) | decline | only the exception mapping is tested (`BindingsTest.storeLimitsAreDeclines`); no input of that size was built |
 | level deeper than 2^24 - 1 (`LevelLimitException`) | decline (see deviations) | not tested (needs 16.7 M records) |
 
+## Parallel packing: packed runs (LP2, 2026-11-24)
+
+**Why.** After wave 7 the loader thread did, for every expression record, everything itself: the
+reader's replay, the segment record, the sweep, the block record. On exporter output four fifths of
+the expression records are proof-private (scout X5: the records of a `thm` segment with an id above
+the type's), and for those all of that work except resolving a reference to an EARLIER record can be
+done without the loader's state. Now the reader's scanner threads do it (`rlvm-export` "Parallel
+packing"; `-X scan-threads=N` with `-X io=mapped`), and the loader thread links.
+
+**What the loader thread still does for a packed run** (`Loader.exprRun`, taken in place of the
+`count` calls `exprApp` / `exprLam` / `exprForall` / `exprLet`):
+
+1. *At arrival*: one row in the run table (the run occupies its records' places in the segment
+   without being written there) and a marker in the pending list, so that its references to earlier
+   records are resolved where the records stand in the file. Counters as for the single records.
+2. *At the declaration line, before the pending references are resolved*: every run is decided
+   (`decideRuns`). A run all of whose locally encoded children lie above `max(type root, last record
+   before the segment)` of a theorem or opaque is LINKED: no root of the unit reaches a record above
+   the type root (a record refers only to earlier records), so the run's records and every record
+   between them and those children are unmarked, hence consecutive records of the unit's block, and
+   the distances the scanner thread encoded are block distances. Any other run (a definition, an
+   inductive block, a type root above the run, a segment that began later than the scanner thread
+   could see) is EXPANDED into the segment records its calls would have written.
+3. *In the pending loop, at the run's place*: its OPEN children - references to earlier records that
+   the scanner thread could not encode - are resolved as `resolvePending` resolves a single one: the
+   location is read, a block record is promoted first. Same reads, same promotions, same order.
+4. *In the sweep*: the open children that are records of this segment get their places; then
+   `LoadTarget.blockRun` (`StoreTarget`: `ProofBlocks.Writer.run`) writes the records: the bytes the
+   scanner thread prepared are copied, the open references encoded where they belong; the
+   locations of the run's records are filled in one loop.
+
+**Early references.** A reference from a proof to an earlier record is, two times out of three, a
+reference to a shared term that was finished long ago (Std: 33 % of all references of `app` records
+reach back more than 430,000 records; the scanner threads are at most a few chunks ahead of the
+loader). The loader publishes its location table to the scanner threads
+(`ExportReader.EarlyRefs`, `Loader.runFormat()`): a scanner thread that finds a POSITIVE location
+for a child - a shared term id - writes the reference into the record bytes; everything else stays
+open. This is exact because a location that is a shared id never changes again (a record is swept
+once; promotion replaces a block location by a shared id, never a shared id), so the loader thread
+would read the very same value whenever it resolved the child itself; a stale or missing view only
+leaves more children open. Such a term belongs to an earlier unit, for which the block writer's
+bookkeeping (sharing counters of the open unit) does nothing; the "names an unresolved node" flag
+is kept exact by `ProofBlocks.Writer.run` (it goes record by record when the largest id a scanner
+thread wrote could be an unresolved node).
+
+**THE INVARIANT: the store is word for word the store of the record-by-record path, on every file;
+a file that fails does so with the same exception, message and line.** How it is kept:
+
+- The scanner threads decide nothing. A run on the tape is an offer in front of the ordinary
+  entries; the reader passes it on only if its records could not fail (dense ids with a known delta,
+  the run's first id is the next id, every binder name bound), otherwise the records are delivered
+  one by one. The loader refuses a run whenever the record-by-record path has something to do that
+  a run cannot express: metadata was seen (`mdata` bits), the segment limit would be reached (the
+  record that exceeds it is then found one by one, with its line), referrer counting is on, proof
+  blocks are off (`LoadOptions.packedRuns` / `withPackedRuns(false)` switch runs off altogether).
+- Linking is justified by the loader's own state at the declaration line (rule 2 above), not by
+  what the scanner thread assumed. A run that was packed for the wrong segment - a declaration in
+  another spelling that the scanner threads did not see, a type root in the middle of the records -
+  is expanded; the expansion writes exactly the segment records of the calls.
+- The order of everything that numbers shared nodes is unchanged: promotions happen in the pending
+  loop in file order, shared nodes in the sweep.
+
+**Evidence.** `PackedRunsLoadTest` (10 tests): loads with scanner threads, small chunks and runs
+against loads with the reader's defaults - `Loaded.assertIdenticalStore` (every name, literal, export
+node word, row, claims blob, decoded block record, location of every expression record), the same
+failure (class, message, line) and the same partial store after a failure, the same counters - on the
+230 arena files (batch and pipelined with a hand-off after every unit), 600 random exports, 150
+proof-shaped files with definitions, dropped records, inductive blocks, types in the middle of the
+records or from earlier declarations, 300 hostile ones (metadata, records in another spelling,
+forward references, declarations the scanner threads cannot see), the segment limit, Init and Std
+(Init: 5,010,446 of 6,137,092 expression records through 80,691 runs, none expanded; Std 7,709,869
+of 9,928,514). The differential digest (`work/lp2/digest`: `all.sh`) compares the published jars
+with the candidate in every reader configuration: section "Loading cost".
+
 ## Two level records for one universe parameter (finding A2-F1, 2026-11-24)
 
 The official reader makes one level OBJECT per level record, and the official `instantiate` keeps a
