@@ -12,9 +12,16 @@
 #                                   static library and handed to the linker
 #   3. scripts/build.sh             Maven (online, strict checksums; the third-party jars that go into
 #                                   the image are compared with scripts/arena/deps.sha256), native image
-#                                   with Truffle runtime compilation, verification of the image
+#                                   with Truffle runtime compilation, verification of the image.
+#                                   A tree build: every module that SHIPS is compiled from this checkout
+#                                   (the test kit, rlvm-testkit, is neither compiled nor on the image's
+#                                   class path: the image has the 22 jars of the distributions that are
+#                                   gated). The image gets the machine's inline lists ("H10"), generated
+#                                   from the machine jar with the javap and jar of the GraalVM that step 1
+#                                   fetched; if that fails the image is built without them
 #
-# Result: work/dist/bin/rlvm, which the `run:` line of rlvm.yaml executes.
+# Result: work/dist/bin/rlvm, which the `run:` line of rlvm.yaml executes (and work/dist/bin/rlvm-jvm,
+# the JVM launcher over the same jars: the warm platform, docs/PLATFORM.md).
 # Environment: RLVM_ARENA_OPT (native-image optimisation level, default 3),
 #              RLVM_ARENA_MARCH (e.g. native; default: native-image's portable default),
 #              RLVM_ARENA_FORCE_ZLIB=1 (build zlib even if the system has it; for testing).

@@ -141,6 +141,8 @@ final class M8Lanes {
         int overflowSkipped;
         /** Declarations not compared because the wall-clock limit of a check ended it in one of the two lanes. */
         int deadlineSkipped;
+        /** Units the lane declined by the eager rule while the lane it is held against (switch {@code eager}) decided them. */
+        int eagerOnly;
         int pairOrderNotes;
         /** {@link #OUTCOME} lanes: declarations with the same outcome and another reason (another error of a wrong declaration met first): not differences. */
         int reasonNotes;
@@ -696,6 +698,13 @@ final class M8Lanes {
                 d = b.spec.config.label + " wrote " + b.frames[u] + " frames; without a depth bound no judgment is ever suspended (H1)";
             } else if ((b.flags[u] & OVERFLOW) != 0 || (a.flags[u] & OVERFLOW) != 0) {
                 b.overflowSkipped++;
+                continue;
+            } else if (b.spec.how == OUTCOME && b.outcome[u] == Outcome.DECLINE && a.outcome[u] != Outcome.DECLINE
+                    && (a.spec.config.switches & Op.SW_EAGER) != 0 && (b.spec.config.switches & Op.SW_EAGER) == 0) {
+                // package E1: the lane with the switch `eager` DECIDES a declaration that a lane without it declines
+                // (M6-F26, the eager rule). That is what the switch is for; the verdict of the decided unit is held
+                // against the reference engine by the differential part. Counted, not a difference.
+                b.eagerOnly++;
                 continue;
             } else if (a.outcome[u] != b.outcome[u]) {
                 d = "admission outcome " + Outcome.name(a.outcome[u]) + " (" + reason(a.reason[u]) + ") against " + Outcome.name(b.outcome[u])

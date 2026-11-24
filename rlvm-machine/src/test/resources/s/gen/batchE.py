@@ -523,6 +523,29 @@ def _(C):
 def _(C):
     C.thm('S.ok', C.true, sibkr(C, False))
 
+# -- kind T certificate (orchestrator 21:50Z): the statement the machine accepted in E1-F1 .. F5 is derivable; the official
+# -- checker accepts it when the missing conversion step is written out
+
+@case('e1-cert-dh-eq-5-ok', 'accept',
+      'CERTIFICATE that d h = 5 is derivable (the findings E1-F1 .. F5 are of kind T): theorem S.cert : d h = 5 := Eq.rec (motive := '
+      'fun b _ => d h = b) (Eq.refl (d intro) : d h = d intro) (Eq.refl 5 : d intro = 5): each of the two steps is one the official '
+      'checker accepts (d intro against d h, d intro against 5); only their composition by transitivity is what it does not find')
+def _(C):
+    A, h, d = triple(C)
+    di = app(d, and_intro(C)); dh = app(d, h())
+    mot = lam(C.nat, lambda b: lam(C.eqnat(di, b), lambda t: C.eqnat(dh, b)))
+    C.thm('S.cert', C.eqnat(dh, C.lit(5)), app(C.c('Eq.rec', [C.X.lnum(0) if hasattr(C, 'X') else 0, C.l1]), C.nat, di, mot, C.reflnat(di), C.lit(5), C.reflnat(C.lit(5))))
+
+@case('e1-cert-lam-fvar-ok', 'accept',
+      'CERTIFICATE that the statement of e1-lam-fvar-type-in-conv-bad is derivable (E1-F4 is of kind T): S.ok : (q : d intro = d intro) '
+      '-> G (d intro = 5) r0 is the accepted twin; theorem S.cert : (q : d h = d h) -> G (d intro = 5) r0 := fun q => S.ok q (the '
+      'argument q : d h = d h against the domain d intro = d intro is a step the official checker accepts)')
+def _(C):
+    di, dh, G, gp, r0 = genv(C)
+    tgt = app(G(), C.eqnat(di, C.lit(5)), r0())
+    C.thm('S.ok', arrow(C.eqnat(di, di), tgt), lam(C.eqnat(di, di), lambda q: app(gp(), C.eqnat(di, di), q)))
+    C.thm('S.cert', arrow(C.eqnat(dh, dh), tgt), lam(C.eqnat(dh, dh), lambda q: app(C.k('S.ok'), q)))
+
 @case('e1-app-type-is-domain-dep-bad', 'reject',
       'the same where the body is not the variable but its type depends on the binder type: '
       '(fun (q : d h = d h) => id q) (Eq.refl (d intro)) : d h = 5, id an axiom forall (P : Prop), P -> P')

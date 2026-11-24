@@ -496,6 +496,15 @@ public final class Op {
      * reduction would have taken another branch ({@code Machine.erSensitive}). Not part of {@code all}.
      */
     public static final int SW_EAGER = 1 << 26;
+
+    /**
+     * Package E1 / OWNER-NOTES 13 (the "practical" policy), {@code convexpect}: B9 ({@link #SW_EXPECT}) checks a lambda
+     * against an expected Pi type also when the two domains are only CONVERTIBLE, as before the fix of finding E1-F4
+     * ({@code Infer.k_ck5}). Off (the default): only when they are ONE value, which is what the official checker's
+     * verdict needs. On: 2.4 % fewer ticks on the Cedar slice, 0.3 % on Std, and the kind T exports
+     * {@code e1-lam-fvar-type-in-conv-*} are accepted. OFF by default: the warm wall clock showed no gain (2026-11-24).
+     */
+    public static final int SW_CONV_EXPECT = 1 << 27;
     /**
      * [eager] {@code Machine.ER} while a comparison of the K rule runs under eager reduction: this unit is
      * added per nesting level ({@code Reduce.k_iota3 / k_iota4}); bit 0 stays the mode. Only with

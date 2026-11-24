@@ -22,7 +22,9 @@ rlvm [options] [EXPORT.ndjson]            export also via the environment variab
       --stats           statistics on stderr when done
       --stack-size S    stack of the checker thread, default 512m (RLVM_STACK_SIZE)
       --checker NAME    pick a Checker implementation (see --version)
-  -X KEY[=VALUE]        passed through to the checker (Options.extra())
+  -X KEY[=VALUE]        passed through to the checker (Options.extra()); --help ends with the
+                        settings of the checker that would run (Checker.usage()), for the RLVM
+                        kernel e.g. -X policy=practical|strict, -X engine=NAME, -X load=...
   -q, --quiet | -V, --version | -h, --help
       --truffle-probe   verify Truffle runtime compilation in this build
       --protocol-selftest MODE    fake checker for testing the exit status
@@ -74,6 +76,7 @@ How it is enforced (`VerdictProtocol`, `Main`):
 public interface Checker {                       // rlvm.cli.Checker
     String name();                               // "--checker NAME", shown by --version
     default String description() { ... }
+    default String usage() { return ""; }        // lines for --help: the checker's own -X settings
     default int priority() { return 0; }         // highest wins; the placeholder is Integer.MIN_VALUE
     Verdict check(Path export, Options options) throws Exception;   // ACCEPT | REJECT | DECLINE
 }

@@ -727,6 +727,10 @@ final class M8Gate {
                         .append(opt).append(l.spec.role.equals("conv") ? "" : "   (lanes: " + run.lanes[0].spec.config + " against " + l.spec.config + ")");
                 res.problems.add(sb.toString());
             }
+            if (l.eagerOnly > 0) {
+                res.problems.add("5 note (" + l.spec.role + "): " + l.eagerOnly + " declarations of " + Diff.shortName(run.path)
+                        + " are decided with the switch eager and declined by this lane (the eager rule M6-F26): not a difference");
+            }
             if (l.reasonNotes > 0) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("5 note (").append(l.spec.role).append("): ").append(l.reasonNotes).append(" declarations of ").append(Diff.shortName(run.path))

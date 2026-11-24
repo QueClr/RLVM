@@ -73,6 +73,15 @@ public final class CorpusRunner {
 
     /** As {@link #run(Path, boolean, boolean)} with the engine of {@code factory} (e.g. {@code -X levels=complete}). */
     public static Result run(Path file, boolean keepGoing, boolean verbose, EngineFactory factory) {
+        return run(file, keepGoing, verbose, factory, false);
+    }
+
+    /**
+     * As above; with {@code strictLoad} a file with an {@code mdata} record or a {@code letE} record
+     * with {@code nondep = true} is declined, as the loader of the strict mode declines the
+     * declarations that contain them (this test loader, like the store, keeps neither).
+     */
+    public static Result run(Path file, boolean keepGoing, boolean verbose, EngineFactory factory, boolean strictLoad) {
         Result r = new Result();
         r.file = file;
         long t0 = System.nanoTime();
@@ -86,6 +95,13 @@ public final class CorpusRunner {
         } catch (IOException | RuntimeException e) {
             r.verdict = Outcome.DECLINE;
             r.message = "load: " + e;
+            return r;
+        }
+        if (strictLoad && (loader.mdataRecords != 0 || loader.nondepLets != 0)) {
+            r.verdict = Outcome.DECLINE;
+            r.reason = Reason.UNSUPPORTED_INPUT;
+            r.message = "load: " + loader.mdataRecords + " mdata record(s), " + loader.nondepLets
+                    + " letE record(s) with nondep = true: part of the official term identity, not kept by the store";
             return r;
         }
         long t1 = System.nanoTime();

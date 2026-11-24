@@ -13,7 +13,8 @@
 #
 # Distribution (builds from a snapshot of the sources in work/build/, safe while others work):
 #   dist [options]            the distribution in work/dist/ whose default checker is the real
-#                             pipeline (rlvm-main; reference engine until the machine exists), built
+#                             pipeline (rlvm-main; the default ENGINE is decided by the engines'
+#                             priorities: `rlvm --version` prints it), built
 #                             from the PUBLISHED jars: scripts/build.sh --published --jvm-only, i.e.
 #                             rlvm-main is compiled from the tree and every other RLVM module is the
 #                             jar its owner last installed into .toolchain/m2. JVM launcher only
@@ -24,7 +25,9 @@
 #                             version at their start, old versions go after 90 minutes (build.sh
 #                             header). Copy it with `cp -aL work/dist DIR`
 #   dist-native [options]     the same plus the CE native image bin/rlvm at -O3, the arena's flags
-#                             (2-3 minutes, about 900 s of CPU): scripts/build.sh --published --no-pgo;
+#                             and the machine's inline lists (2-3 minutes, about 900 s of CPU; the
+#                             JVM launcher is the warm platform, the image the cold one:
+#                             docs/PLATFORM.md): scripts/build.sh --published --no-pgo;
 #                             `--opt 2` builds in half the time and runs 10-18 % slower. Holds one
 #                             of the host's two native-image slots (bench/slot.sh -c ni -n 2), as
 #                             dist-tree does
@@ -62,7 +65,10 @@
 #                             (default: tutorial, reference engine, one worker) in work/status/slice.md
 #   gate [options]            scripts/gate.sh: the end-to-end guards in one command - distribution,
 #                             all 230 published tests, mutant campaign(s); `--dist DIR` guards a
-#                             distribution built before publication (scripts/gate.sh --help)
+#                             distribution built before publication; `--defaults` runs it exactly
+#                             as a user does (default engine, automatic workers, default load:
+#                             the gate of a change of a default); `--hostile` adds the hostile
+#                             exports, judged by their official verdicts (scripts/gate.sh --help)
 #   machine ARGS...           scripts/machine-sandbox.sh (the machine workflow's script), passed through
 #   platform ...              scripts/platform-matrix.py: launcher / JIT / collector / heap matrix in
 #                             the arena-shaped container (docs/PLATFORM.md); `platform-report` prints
@@ -86,7 +92,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 die() { echo "dev.sh: $*" >&2; exit 2; }
-usage() { sed -n '2,84p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,90p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [ "$#" -gt 0 ] || { usage; exit 2; }
 cmd="$1"; shift

@@ -4,8 +4,10 @@
 #   scripts/build.sh [options]            (scripts/build.sh --help)
 #
 # Result (default work/dist/):
-#   bin/rlvm-jvm     JVM-mode launcher (sh script; runs lib/*.jar on the build's GraalVM)
-#   bin/rlvm         native image, GraalVM CE, with Truffle runtime compilation
+#   bin/rlvm-jvm     JVM-mode launcher (sh script; runs lib/*.jar on the build's GraalVM): the WARM
+#                    platform (OWNER-NOTES 12: steady-state wall clock; docs/PLATFORM.md)
+#   bin/rlvm         native image, GraalVM CE, with Truffle runtime compilation: the COLD platform,
+#                    what the arena definition runs (one fresh process per export)
 #   bin/rlvm-pgo     native image, Oracle GraalVM + profile-guided optimisation: ONLY with --pgo, for
 #                    measurements that are labelled as such (owner's decision of 2026-11-24, OWNER-NOTES
 #                    item 11: no default build or script downloads or uses Oracle GraalVM; nothing
@@ -25,9 +27,13 @@
 #      tree in which several people work at once: a module that does not compile at the moment
 #      cannot break the distribution, and what is assembled is what was published.
 #   2. Maven packages the modules and copies their runtime dependencies; all jars go to lib/.
+#      The test kit (rlvm-testkit) is a development tool: no build puts it into lib/, so a tree
+#      build and a --published build ship the same set of jars.
 #   3. native-image builds bin/rlvm from exactly those jars. Image-wide options are set here;
 #      package-specific ones (build-time initialisation) come from each jar's own
-#      META-INF/native-image/**/native-image.properties.
+#      META-INF/native-image/**/native-image.properties. The machine's inline lists ("H10": force-
+#      inline its continuation steps, never inline its slow paths) are generated from the machine
+#      jar of the build and added when that works (--no-h10: never).
 #   4. Every artifact is verified before it is installed: --version, the verdict protocol
 #      (--protocol-selftest), a decline on a real export, and `--truffle-probe`, which fails unless a
 #      Truffle call target reaches last-tier compiled code inside the artifact. A build whose image
@@ -83,6 +89,8 @@ Native image:
   --march VALUE         e.g. native, compatibility (default: native-image's own default)
   --gc NAME             serial (default), epsilon, G1 (Oracle GraalVM only)
   --ni-arg ARG          extra native-image argument (repeatable), e.g. --ni-arg -R:MaxHeapSize=12g
+  --no-h10              build the CE image without the machine's inline lists (default: with them
+                        when rlvm-machine is in the build; see "H10" in the header)
   --train FILE          PGO training export (repeatable)
   --train-arg ARG       extra argument of every PGO training run (repeatable), e.g.
                         --train-arg -X --train-arg engine=machine to profile another engine than
@@ -127,9 +135,13 @@ offline=1
 verify_deps=""
 print_deps=0
 
+h10=auto
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --jvm-only) want_native=0; want_pgo=no; shift ;;
+    --no-h10) h10=no; shift ;;
+    --h10) h10=auto; shift ;;
     --no-pgo) want_pgo=no; shift ;;
     --pgo) want_pgo=yes; shift ;;
     --modules) modules="${2:?--modules needs a list}"; shift 2 ;;
@@ -195,8 +207,16 @@ fi
 
 all_modules="$(sed -n 's:.*<module>\(.*\)</module>.*:\1:p' "$ROOT/pom.xml" | paste -sd, -)"
 [ -n "$all_modules" ] || die "no <module> entries in $ROOT/pom.xml"
+# Modules of the reactor that are development tools and never part of a distribution: the test kit
+# (oracle cache, mutants, the differential engine; it reaches a launcher through RLVM_EXTRA_CP). A tree
+# build used to put its jar on the class path of the image (23 jars) while every distribution that is
+# gated and measured is built from the published jars and has 22 (AR1.md 0.5, item 2): the arena build
+# is a tree build and must be the gated binary. So it is neither compiled by default nor ever copied
+# into lib/ (name it in --modules to have it compiled).
+NOT_SHIPPED="rlvm-testkit"
+shipped_modules="$(echo "$all_modules" | tr ',' '\n' | grep -vxF -e "$NOT_SHIPPED" | paste -sd, -)"
 if [ -z "$modules" ]; then
-  if [ "$published" = 1 ]; then modules="rlvm-main"; else modules="$all_modules"; fi
+  if [ "$published" = 1 ]; then modules="rlvm-main"; else modules="$shipped_modules"; fi
 fi
 
 STAGE="$BUILD/stage"
@@ -248,12 +268,14 @@ maven_build() {
   local jar n=0
   for jar in "$dir"/src/*/target/*.jar; do
     case "$jar" in *-tests.jar|*-sources.jar|*-javadoc.jar) continue ;; esac
+    case "$(basename "$jar")" in "$NOT_SHIPPED"-*) continue ;; esac   # a development tool, never shipped
     cp "$jar" "$dir/lib/"; n=$((n + 1))
   done
   [ "$n" -gt 0 ] || die "[$variant] maven produced no jars"
   # Dependencies; a reactor module that is somebody's dependency is already there under the same name.
   for jar in "$dir"/deps/*.jar; do
     [ -e "$jar" ] || continue
+    case "$(basename "$jar")" in "$NOT_SHIPPED"-*) continue ;; esac
     [ -e "$dir/lib/$(basename "$jar")" ] || cp "$jar" "$dir/lib/"
   done
   # Engines found through ServiceLoader that rlvm-main does not depend on (rlvm-machine: a dependency
@@ -285,6 +307,48 @@ maven_build() {
 
 classpath_of() { ls "$1"/*.jar | LC_ALL=C sort | paste -sd: -; }
 
+# The H10 inline lists are 7 kB of method names: logs and BUILD-INFO.txt show their sizes instead.
+brief_flags() {
+  echo "$1" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^-H:Priority(Force|Never)Inline=/) { n = split($i, m, ","); sub(/=.*/, "=<" n " methods of rlvm-machine>", $i) } print }'
+}
+ni_soft_fail=0
+
+# H10 (docs/design/review/stepper-convention.md, rule 3; request of the machine's facade owner, measured
+# by the wave-6 integrator on matched images, rlvm-machine/SWITCHES.md "Build flag measured": CPU time of
+# the machine -0.7 to -4.4 % on four of five corpora, wall clock equal): the CE image is built with
+#   -H:PriorityForceInline=<every continuation step k_* of rlvm-machine>
+#   -H:PriorityNeverInline=<its slow paths: Machine.sig*, spill*, *Slow>
+# The lists are generated at build time from the class files of the machine jar that goes into the
+# image, by the machine's own script rlvm-machine/h10/native-image-args.sh. It needs javap, which is in
+# the GraalVM this build runs on, and reads a directory of classes without any other tool: the jar is
+# unpacked with the JDK's own `jar` (the script would use unzip on a jar, and the arena's build shell,
+# refs/lean-kernel-arena/flake.nix, has no unzip). Tuning only: the lists name methods of the machine,
+# which runs on request (-X engine=machine); if anything of this fails - no machine jar, no script, a
+# native-image that refuses the lists - the image is built without them and the log says so.
+#   h10_lists <lib directory>  ->  the words in the array ni_h10 (empty: not available)
+ni_h10=()
+h10_lists() {
+  local lib="$1" mjar script="$ROOT/rlvm-machine/h10/native-image-args.sh" work="$BUILD/ce/h10" line
+  ni_h10=()
+  mjar="$(ls "$lib"/rlvm-machine-*.jar 2>/dev/null | head -n 1 || true)"
+  [ -n "$mjar" ] || { log "[h10] no rlvm-machine jar in the build: no inline lists"; return 0; }
+  [ -x "$script" ] || { log "[h10] $script is not there: no inline lists"; return 0; }
+  [ -x "$CE_HOME/bin/javap" ] && [ -x "$CE_HOME/bin/jar" ] || { log "[h10] no javap / jar in $CE_HOME: no inline lists"; return 0; }
+  rm -rf "$work"; mkdir -p "$work/classes"
+  if ! ( cd "$work/classes" && "$CE_HOME/bin/jar" xf "$mjar" rlvm/machine ) > "$work/log.txt" 2>&1; then
+    log "[h10] could not unpack $mjar (log: $work/log.txt): no inline lists"; return 0
+  fi
+  if ! line="$(JAVA_HOME="$CE_HOME" PATH="$CE_HOME/bin:$PATH" "$script" "$work/classes" 2>> "$work/log.txt")"; then
+    log "[h10] $script failed (log: $work/log.txt): no inline lists"; return 0
+  fi
+  case "$line" in *-H:PriorityForceInline=rlvm.machine.*) ;; *) log "[h10] the script printed no ForceInline list: no inline lists"; return 0 ;; esac
+  read -r -a ni_h10 <<< "$line"
+  # The script unlocks the experimental options; lock them again behind the two lists.
+  ni_h10+=(-H:-UnlockExperimentalVMOptions)
+  printf '%s\n' "${ni_h10[@]}" > "$work/args.txt"
+  log "[h10] inline lists from $(basename "$mjar"): $(brief_flags "${ni_h10[*]}")"
+}
+
 deps_list() { # sha256 list of third-party jars in a lib directory
   ( cd "$1" && for j in *.jar; do case "$j" in rlvm-*) ;; *) sha256sum "$j" ;; esac; done | LC_ALL=C sort -k2 )
 }
@@ -310,7 +374,7 @@ native_build() {
   args+=("${ni_extra[@]}" "$@")
   mkdir -p "$dir/ni-$name"
   tmp="$dir/ni-$name/time.txt"
-  log "[$variant] native-image $name: ${args[*]}"
+  log "[$variant] native-image $name: $(brief_flags "${args[*]}")"
   local timer=() t0
   # GNU time gives CPU time and peak memory of the builder; without it only the wall time is recorded.
   if [ -n "$GNU_TIME" ]; then timer=("$GNU_TIME" -o "$tmp" -f '%e %U %S %M'); fi
@@ -318,6 +382,8 @@ native_build() {
   ( cd "$dir/ni-$name" && "${timer[@]}" \
       "$ghome/bin/native-image" "${args[@]}" -cp "$cp_" -o "$dir/$name" rlvm.cli.Main > build.log 2>&1 ) \
     || { grep -m 20 -iE '^Error|error:|Caused by' "$dir/ni-$name/build.log" >&2 || tail -n 40 "$dir/ni-$name/build.log" >&2
+         # A caller that has a second way to build (the image without the H10 lists) asks for a status.
+         if [ "$ni_soft_fail" = 1 ]; then cp "$dir/ni-$name/build.log" "$dir/ni-$name/build-failed.log"; return 1; fi
          die "[$variant] native-image failed (log: $dir/ni-$name/build.log)"; }
   if [ -n "$GNU_TIME" ]; then
     read -r ni_wall ni_user ni_sys ni_rss < <(tail -n 1 "$tmp")
@@ -327,7 +393,7 @@ native_build() {
   ni_cpu="$(awk -v u="$ni_user" -v s="$ni_sys" 'BEGIN { printf "%.1f", u + s }')"
   ni_rss_mb=$((ni_rss / 1024))
   ni_size="$(stat -c %s "$dir/$name")"
-  ni_flags="${args[*]}"
+  ni_flags="$(brief_flags "${args[*]}")"
   # CE prints " - Graal compiler: ...", Oracle GraalVM " Graal compiler: ...".
   line="$(grep -E '^ (- )?(Graal compiler|Garbage collector):' "$dir/ni-$name/build.log" | sed -E 's/^ (- )?//' | paste -sd';' - || true)"
   log "[$variant] $name: ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB, $((ni_size / 1024 / 1024)) MB binary | $line"
@@ -419,70 +485,142 @@ cp "$BUILD"/ce/lib/*.jar "$STAGE/dist/lib/"
 record "jars" "maven package ($modules)" "$maven_secs" "" "" "$(du -cb "$STAGE"/dist/lib/*.jar | tail -n 1 | cut -f1)"
 
 # --- JVM launcher -------------------------------------------------------------------------------
-# Default VM flags (docs/research/11-memory-reuse-parallelism.md section 0 and B.10; measurements in
-# spikes/platform/results/ and spikes/memory/results/):
-#   -XX:+UseSerialGC             fewest instructions of all collectors (gc-matrix-instr.txt: Serial 54 G,
-#                                Parallel 75 G, G1 204 G for the same job); collects while workers are parked
-#   -Xms13g -Xmx13g -Xmn1g       fixed heap and nursery, no resizing (ARCHITECTURE.md 7.2: the working set
+# Default VM flags. The line is the one proposed by the profiler J1 (docs/research/profiles/J1.md, section 5;
+# prototype work/j1/proto-src/rlvm-jvm.in) and re-measured on this script's launcher (docs/PLATFORM.md):
+#   -XX:+UseSerialGC             no collector beats it on the real checker with parallel workers
+#                                (docs/research/profiles/GC.md: Parallel and G1 1.00-1.03 times its CPU
+#                                time, ZGC 1.04-1.07, Shenandoah 1.15-1.26; no collector improves the
+#                                8-worker wall clock; smallest resident set)
+#   -Xms13g -Xmx13g -Xmn1g       the heap of every engine but the machine (see "Heap BY ENGINE" below):
+#                                fixed heap and nursery, no resizing (ARCHITECTURE.md 7.2: the working set
 #                                is primitive arrays in the old generation, only big-number garbage fills
 #                                the nursery; 13 GB leaves 3 GB of the runner's 16 GB for stacks, code and
 #                                the page cache; the memory account declines at 12 GiB, before the heap
 #                                limit). Was 8g / 8g / 3g, sized for an object working set. Dropped when
 #                                the caller passes its own -Xmx/-Xms/-Xmn. Nothing is pre-touched, so a
 #                                small test costs no more memory than before
-#   -XX:-UseJVMCICompiler        C2 instead of Graal as the *host* JIT: fewer instructions for the same
-#                                steady state (javac-instr.txt 33.7 G vs 46.6 G; truffle-many-instr.txt
-#                                49.6 G vs 65.8 G). Truffle runtime compilation still uses libgraal
-#   -XX:CICompilerCount=2        the minimum for C1 + C2; compiler threads are billed
+#   -XX:-UseJVMCICompiler        C2 instead of Graal as the *host* JIT: same steady state (J1.md 2.2: 1.98 s
+#                                against 1.99-2.10 s on cedar with 8 workers), 400 MB less resident memory.
+#                                Truffle runtime compilation still uses libgraal
+#   -XX:CICompilerCount=8        compiler threads (a cap: they are created on demand). The JVM launcher is
+#                                the WARM platform (OWNER-NOTES 12: warm-up is reported, not charged): with
+#                                the old value 2 a tiered VM has ONE C2 thread beside eight workers and
+#                                needs five or six passes to reach its steady state; with 8 the third pass
+#                                is steady and the cold wall clock below mathlib nearly halves (J1.md 3.2:
+#                                Init 4.1-5.3 -> 2.8-3.6 s, Std 5.5 -> 3.1, cedar 8.5-9.9 -> 5.2-5.8), the
+#                                steady state unchanged. Was 2 ("compiler threads are billed": the arena's
+#                                metric, which this launcher does not serve)
+#   -XX:+UseTransparentHugePages the one flag with a consistent steady-state gain (J1.md 2.2: mathlib -6 %
+#                                warm wall in an A B A B, reachability -2 to -4 %): TLB reach for a store of
+#                                gigabytes. Takes effect where the host's setting is madvise or always;
+#                                with never the VM prints one warning (on standard error) and runs as before
+#   -Xlog:disable -Xlog:all=warning:stderr   the VM's own messages (huge pages unavailable, ...) go to
+#                                standard error; unified logging prints them on standard OUTPUT by default
 #   -XX:+ExitOnOutOfMemoryError  the VM exits with status 3 (= internal error) on the first OOM
 #   --enable-native-access / --sun-misc-unsafe-memory-access   silence JDK 25 warnings caused by Truffle
-JVM_FLAGS="-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
+#   NOT there: the JDK 25 AOT cache (J1.md 3.3: 0.4-1.1 s off the cold wall, every later pass 5-9 % slower)
+# Heap BY ENGINE (J1.md section 4). The engine of a run is what -X engine=NAME (or -Xengine=NAME) on its
+# command line says; without it, the distribution's DEFAULT engine, which this script asks the jars for
+# ("default engine: NAME" in `rlvm --version`: the engines' priorities decide, rlvm-main) and writes into
+# the launcher - so a distribution whose default engine is the machine gets the machine's heap by itself;
+# -X policy=strict is the reference engine (OWNER-NOTES 13).
+#   machine                      -Xmx7g -Xmn1g, no -Xms: the same warm wall clock on mathlib as 13 GB
+#                                (23.9-24.2 s), 5.7-6.7 GB resident instead of 8.0-8.7 GB; 7 GB is the
+#                                smallest cap at which the machine decides every unit it decides at 13 GB
+#                                (6 GB once finding J1-F1, the machine's young reserve, is fixed); all 230
+#                                published tests pass under it (peak 3.3 GB)
+#   anything else                -Xms13g -Xmx13g -Xmn1g as before (the reference engine: 13.4 GB resident
+#                                on mathlib), also for -X engine=diff (two engines in one process)
+# The class path is spelled out, jar by jar, in the shell's sorted order: "lib/*" is expanded by the VM in
+# directory order, which differs between file systems (and with it the order of ServiceLoader providers).
+JVM_FLAGS="-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
 JVM_HEAP_FLAGS="-Xms13g -Xmx13g -Xmn1g"
+JVM_HEAP_FLAGS_MACHINE="-Xmx7g -Xmn1g"
+default_engine="$("$CE_HOME/bin/java" -Xmx256m -XX:TieredStopAtLevel=1 -cp "$(classpath_of "$STAGE/dist/lib")" rlvm.cli.Main --version 2>/dev/null \
+    | sed -n 's/.*default engine: \([A-Za-z0-9_.-]*\).*/\1/p' | head -n 1 || true)"
+log "default engine of this distribution: ${default_engine:-unknown (no rlvm-main in the build, or one that does not say)}"
 cat > "$STAGE/dist/bin/rlvm-jvm" <<LAUNCHER
 #!/bin/sh
-# RLVM, JVM mode. Generated by scripts/build.sh on $stamp; do not edit.
+# RLVM, JVM mode: the WARM platform (docs/PLATFORM.md). Generated by scripts/build.sh on $stamp; do not edit.
 #
 #   rlvm-jvm [-J<jvm flag>]... [rlvm options] [EXPORT.ndjson]        (export also via \$IN)
 #
 # Like the native image, it takes -Xmx/-Xms/-Xmn/-Xss, -XX:... and -D... for the VM itself; giving a
 # heap size (-Xmx/-Xms/-Xmn) drops the default heap flags.
-# Environment: RLVM_JAVA (java binary), RLVM_JAVA_OPTS (replaces all default VM flags below),
-# RLVM_EXTRA_CP (class path entries appended after lib/*: development plug-ins such as the test
-# kit's differential engine; nothing of it is part of the distribution).
+# Default heap by engine: machine = $JVM_HEAP_FLAGS_MACHINE; any other engine = $JVM_HEAP_FLAGS.
+# The engine is -X engine=NAME; without it this distribution's default engine (${default_engine:-unknown});
+# -X policy=strict = the reference engine.
+# Environment: RLVM_JAVA (java binary), RLVM_JAVA_OPTS (replaces all default VM flags below, the heap
+# included), RLVM_EXTRA_CP (class path entries appended after the jars of lib/: development plug-ins
+# such as the test kit's differential engine; nothing of it is part of the distribution).
 here="\$(cd "\$(dirname "\$0")" && pwd -P)"
 java="\${RLVM_JAVA:-}"
 if [ -z "\$java" ]; then
   if [ -x "$CE_HOME/bin/java" ]; then java="$CE_HOME/bin/java"; else java=java; fi
 fi
 user=""
-heap="$JVM_HEAP_FLAGS"
+userheap=0
+engine=""
+policy=""
+prev=""
 n=\$#
 while [ "\$n" -gt 0 ]; do
   a="\$1"; shift; n=\$((n - 1))
   case "\$a" in
-    -J-Xmx*|-J-Xms*|-J-Xmn*) user="\$user \${a#-J}"; heap="" ;;
+    -J-Xmx*|-J-Xms*|-J-Xmn*) user="\$user \${a#-J}"; userheap=1 ;;
     -J*) user="\$user \${a#-J}" ;;
-    -Xmx[0-9]*|-Xms[0-9]*|-Xmn[0-9]*) user="\$user \$a"; heap="" ;;
+    -Xmx[0-9]*|-Xms[0-9]*|-Xmn[0-9]*) user="\$user \$a"; userheap=1 ;;
     -Xss[0-9]*|-XX:*|-D*) user="\$user \$a" ;;
-    *) set -- "\$@" "\$a" ;;
+    *)
+      # The engine of the run, for the default heap: -X engine=NAME or -Xengine=NAME, and the policy
+      # (the last one wins, as in the checker).
+      case "\$a" in
+        -Xengine=*) engine="\${a#-Xengine=}" ;;
+        -Xpolicy=*) policy="\${a#-Xpolicy=}" ;;
+        engine=*) if [ "\$prev" = "-X" ]; then engine="\${a#engine=}"; fi ;;
+        policy=*) if [ "\$prev" = "-X" ]; then policy="\${a#policy=}"; fi ;;
+      esac
+      set -- "\$@" "\$a" ;;
   esac
+  prev="\$a"
 done
+[ -n "\$engine" ] || engine="$default_engine"
+[ "\$policy" != strict ] || engine=reference
+if [ "\$userheap" = 1 ]; then heap=""
+elif [ "\$engine" = machine ]; then heap="$JVM_HEAP_FLAGS_MACHINE"
+else heap="$JVM_HEAP_FLAGS"; fi
+cp=""
+for j in "\$here"/../lib/*.jar; do cp="\$cp\${cp:+:}\$j"; done
 if [ -n "\${RLVM_JAVA_OPTS:-}" ]; then flags="\$RLVM_JAVA_OPTS"; else flags="$JVM_FLAGS \$heap"; fi
 # shellcheck disable=SC2086
-exec "\$java" \$flags \$user -cp "\$here/../lib/*\${RLVM_EXTRA_CP:+:\$RLVM_EXTRA_CP}" rlvm.cli.Main "\$@"
+exec "\$java" \$flags \$user -cp "\$cp\${RLVM_EXTRA_CP:+:\$RLVM_EXTRA_CP}" rlvm.cli.Main "\$@"
 LAUNCHER
 chmod +x "$STAGE/dist/bin/rlvm-jvm"
-echo "jvm flags:        $JVM_FLAGS $JVM_HEAP_FLAGS" >> "$INFO"
+echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X policy=strict = the reference engine)" >> "$INFO"
+echo "jvm flags:        $JVM_FLAGS + heap by engine: machine $JVM_HEAP_FLAGS_MACHINE; any other $JVM_HEAP_FLAGS" >> "$INFO"
 verify "$STAGE/dist/bin/rlvm-jvm" "rlvm-jvm"
 
 # --- native image, CE ---------------------------------------------------------------------------
 if [ "$want_native" = 1 ]; then
-  native_build ce "$CE_HOME" rlvm
+  [ "$h10" = no ] || h10_lists "$BUILD/ce/lib"
+  if [ "${#ni_h10[@]}" -gt 0 ]; then
+    ni_soft_fail=1
+    if ! native_build ce "$CE_HOME" rlvm "${ni_h10[@]}"; then
+      log "[h10] WARNING: native-image failed with the inline lists (log: $BUILD/ce/ni-rlvm/build-failed.log); building the image without them"
+      ni_h10=()
+      ni_soft_fail=0
+      native_build ce "$CE_HOME" rlvm
+    fi
+    ni_soft_fail=0
+  else
+    native_build ce "$CE_HOME" rlvm
+  fi
   verify "$BUILD/ce/rlvm" "rlvm (native, CE)"
   cp "$BUILD/ce/rlvm" "$STAGE/dist/bin/rlvm"
   {
     echo "native (CE):      bin/rlvm  $ni_size bytes; built in ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB"
     echo "  flags:          $ni_flags"
+    echo "  inline lists:   $([ "${#ni_h10[@]}" -gt 0 ] && echo "H10, generated from the machine jar of this build (rlvm-machine/h10/native-image-args.sh)" || echo "none")"
     echo "  builder:        $ni_summary"
     echo "  truffle probe:  $probe_line"
   } >> "$INFO"

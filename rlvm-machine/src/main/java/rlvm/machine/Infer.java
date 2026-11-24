@@ -2280,7 +2280,8 @@ final class Infer {
     }
 
     /**
-     * CHECK2[5](t, eb, en, ls, V, W, D): r = DOM(W). B9 goes on only if the lambda's domain IS the expected domain
+     * CHECK2[5](t, eb, en, ls, V, W, D): r = DOM(W). Without the switch {@code convexpect} ({@code Op.SW_CONV_EXPECT}; with it
+     * {@link #ck5Conv}) B9 goes on only if the lambda's domain IS the expected domain
      * (the same value): then one variable of that domain is the variable the body is typed under AND the variable
      * the codomains are compared under, as in the official kernel. Two domains that are merely convertible need
      * two types for one binding (findings E1-F3 / E1-F4): the generic rule decides, INFER(t, CHECKED) and
@@ -2291,8 +2292,25 @@ final class Infer {
         if (dom == r) {
             return k_ck6(m, t, eb, en, ls, expected, w, dom, Layout.T, d);
         }
+        if ((m.sw & Op.SW_CONV_EXPECT) != 0) {
+            return ck5Conv(m, t, eb, en, ls, expected, w, dom, r, d);
+        }
         int tt = infer(m, t, eb, en, ls, Op.CHECKED, d + 1); // call INFER(t, CHECKED) => CHECK[1]
         return tt >= SIG ? m.sig1(tt, K_CHECK_1, expected) : k_check1(m, expected, tt, d);
+    }
+
+    /**
+     * {@link #k_ck5} with the switch {@code convexpect}: the practical policy (OWNER-NOTES 13, 2026-11-24), B9 also for two
+     * domains that are only convertible, as before the fix of E1-F4. The body is then typed under a variable of the
+     * lambda's OWN domain, which can accept a derivable statement the official checker rejects (kind T; rows
+     * e1-lam-fvar-type-in-conv-*); the restriction costs 2.4 % of the ticks of the Cedar slice.
+     */
+    private static int ck5Conv(Machine m, int t, int eb, int en, int ls, int expected, int w, int dom, int r, int d) {
+        int c = Conv.conv(m, dom, r, d + 1); // call CONV(D, DOM(W)) => CHECK2[6]
+        if (c < SIG && c != Layout.T) {
+            return m.fail(MachineErrors.E_TYPE_MISMATCH, dom, r); // the lambda's domain and the expected one
+        }
+        return c >= SIG ? m.sig7(c, K_CK_6, t, eb, en, ls, expected, w, dom) : k_ck6(m, t, eb, en, ls, expected, w, dom, c, d);
     }
 
     /** The tabling record of the lambda t under the environment ({@link #checkExpect} made it; the frames carry V instead), 0 if t is not tabled. */

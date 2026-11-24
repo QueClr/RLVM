@@ -44,8 +44,8 @@ What is exact now (machine jar `5945b6568177` and later; 92 rows `e1-*`, 6 of th
 the default set, the three of F7 are accepted): the let rule, the type of
 a lambda instantiated with an argument of another type (typed binding), CBIND's comparison variable, the expected-type
 memo. The typed bindings cost nothing measurable (ticks -0.35 % / -0.01 % on the Cedar slice / Std without them).
-B9's restriction to ONE domain value costs 2.4 % of the ticks of the Cedar slice and 0.3 % of Std's and nothing
-measurable in warm wall clock (native image, 8 workers: cedar 1.59 / 1.62 s before the fix, 1.59 / 1.58 s after; Std
+B9's restriction to ONE domain value costs 2.4 % of the ticks of the Cedar slice, 0.3 % of Std's, Init's and the 16
+Mathlib slices' (268,665,151 against 269,542,201) and nothing measurable in warm wall clock (native image, 8 workers: cedar 1.59 / 1.62 s before the fix, 1.59 / 1.58 s after; Std
 1.19 / 1.20 s before, 1.19 / 1.22 s after), so it stays; the switch `convexpect` (off) gives the old B9 back.
 
 Not exact, and intrinsic to a machine on values (F7): an exact treatment needs the official type of the unreduced

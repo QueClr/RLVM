@@ -66,6 +66,13 @@ public final class TrustingLoader implements ExportSink {
     private Member currentRec;
     private boolean blockUnsafe;
     public int dropped;
+    /**
+     * Records whose content the store does not keep although it is part of the official term
+     * identity: {@code mdata} nodes (dropped) and {@code letE} records with {@code nondep = true}
+     * (the flag is dropped). The strict loader declines the declarations that contain them.
+     */
+    public int mdataRecords;
+    public int nondepLets;
 
     public TrustingLoader() {
         lv = bindings.baseLevels();
@@ -250,6 +257,9 @@ public final class TrustingLoader implements ExportSink {
 
     @Override
     public int exprLet(int binderName, int type, int value, int body, boolean nondep) {
+        if (nondep) {
+            nondepLets++;
+        }
         return sb.let(type, value, body);
     }
 
@@ -286,6 +296,7 @@ public final class TrustingLoader implements ExportSink {
 
     @Override
     public int exprMData(int expr) {
+        mdataRecords++;
         return expr;
     }
 
