@@ -197,6 +197,10 @@ def test_benchmarks() -> None:
                     pass1_s="3.00", cold_wall_s="2.90", cpu_median_s="8.00", gc_median_ms="5", peak_rss_mib="900", cold_cpu_s="12.00",
                     cold_rss_mib="700", walls_s="3.00 1.30 1.10 1.20", loadavg="9", label="bench", dist="work/x/dist", build="t/abc")
         base.update(kw)
+        if "walls_s" not in kw:
+            # the passes of the row: pass 1, then three later passes whose median and minimum are the row's figures
+            m, b = float(base["median_later_s"]), float(base["best_later_s"])
+            base["walls_s"] = f"{base['pass1_s']} {m + 0.1:.2f} {b:.2f} {m:.2f}"
         return "\t".join(base[c] for c in cols)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -222,15 +226,39 @@ def test_benchmarks() -> None:
         check("the tables are in the owner's order: warm 8, warm 1, cold, CPU, RSS, instructions",
               result.returncode == 0 and all(i >= 0 for i in order) and order == sorted(order), result.stderr[-300:] + str(order))
         first = text.split("## 2.")[0]
-        check("a cell is the LATEST quiet row with an allowed label and an accepting verdict",
-              "| **1.00** (0.90) | **1.50** (1.40) | - | - | **0.50** (0.50) | - |" in first, first[-500:])
-        check("ratios against gruszka and between the platforms", "| 2.00x | 3.00x | - | 0.67x | - |" in first, first[-300:])
+        check("the DEFAULT configuration is the first row, and a cell is the LATEST quiet row with an allowed label and an accepting verdict",
+              "| Checker, platform | init" in first and first.find("RLVM default configuration") < first.find("-X engine=machine")
+              and "| RLVM `-X engine=machine`, JVM launcher | **1.00** (0.90) | - |" in first
+              and "| RLVM `-X engine=machine`, native image | **1.50** (1.40) | - |" in first
+              and "| **RLVM default configuration** (reference engine), JVM launcher | - | **1.20** (1.10) |" in first, first[-900:])
+        check("ratios against gruszka and between the platforms are rows of their own",
+              "| *machine, JVM / gruszka* | 2.00x | - |" in first and "| *machine: JVM / native* | 0.67x | - |" in first, first[-500:])
         check("one worker has its own table", "**6.00** (5.90)" in text.split("## 2.")[1].split("## 3.")[0])
-        check("a corpus without a row of a checker shows '-', and every measured corpus has a row",
-              "| std" in first and "| init" in first)
+        flipped = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
+                                  "--history", "/nonexistent", "--notes", "/nonexistent", "--default-engine", "machine"],
+                                 capture_output=True, text=True).stdout.split("## 2.")[0]
+        check("--default-engine machine puts the machine's rows first, as the default configuration",
+              "| **RLVM default configuration** (machine engine), JVM launcher | **1.00** (0.90) | - |" in flipped
+              and flipped.find("RLVM default configuration") < flipped.find("-X engine=reference"), flipped[-700:])
+        with open(tsv, "a") as handle:
+            handle.write(row(utc="2026-11-24T23:00:00Z", what="default", median_later_s="1.11", best_later_s="1.01",
+                             walls_s="3.00 1.21 1.01 1.11") + "\n")
+        again = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
+                                "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout
+        check("a row measured without -X engine is a row of the default configuration",
+              "| **RLVM default configuration** (reference engine), JVM launcher | **1.11** (1.01) | **1.20** (1.10) |" in again.split("## 2.")[0],
+              again.split("## 2.")[0][-700:])
+        long = row(utc="2026-11-24T23:10:00Z", what="machine", passes="10", median_later_s="1.30", best_later_s="0.90",
+                   walls_s="5.00 3.00 2.00 1.00 1.00 1.10 0.90 1.00 1.00 1.00")
+        with open(tsv, "a") as handle:
+            handle.write(long + "\n")
+        again = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
+                                "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout
+        check("a process with 8 or more passes is judged by passes 4..N (the first later passes are warm-up)",
+              "| RLVM `-X engine=machine`, JVM launcher | **1.00** (0.90) |" in again.split("## 2.")[0], again.split("## 2.")[0][-600:])
         prov = text.split("## Provenance")[1]
         check("the provenance names the row, its passes and its build", "2026-11-24T22:10:00Z" in prov
-              and "3.00 1.30 1.10 1.20 / 2.90" in prov and "`work/x/dist`" in prov and "sha256 `abc`" in prov, prov[:600])
+              and "3.00 1.10 0.90 1.00 / 2.90" in prov and "`work/x/dist`" in prov and "sha256 `abc`" in prov, prov[:600])
         check("without history entries the instruction table says so", "Not measured for the current build" in text)
 
 

@@ -99,11 +99,9 @@ final class MainWiring implements Wiring {
         if (!loadOptions.publishOnDecline) {
             loadOptions = loadOptions.withPublishOnDecline(true);
         }
-        // OWNER-NOTES 13, the strict mode (options.strict): the loader's exactness-only declines - an
-        // export whose verdict can depend on the official checker's term identity, e.g. a metadata node
-        // around a term (finding S3-F2: the loader drops such nodes) - are switched on HERE when
-        // rlvm-load has an option for them. The published loader has none yet, so the two policies
-        // load alike today (rlvm-main/README.md, "Policy").
+        if (options.strict) {
+            loadOptions = strictLoad(loadOptions);
+        }
         Loader loader;
         if (c != null) {
             // Snapshots: the chain freezes what was created so far at every publication of the loader
@@ -141,6 +139,47 @@ final class MainWiring implements Wiring {
         }
         if (c == null) {
             bindings.freeze();
+        }
+    }
+
+    /**
+     * {@code LoadOptions.withStrictMetadata(boolean)} of rlvm-load (owner LP2; OWNER-NOTES 13): the
+     * loader's exactness-only decline. Off (practical, the loader's default): a metadata node around
+     * a term is transparent - the wrapped expression stands for it. On (strict): a declaration whose
+     * type or value carries such a node is declined per unit, because the official checker keeps the
+     * node as a term of its own and its verdict can depend on that (finding S3-F2).
+     *
+     * <p>Looked up by name, once: this module is compiled from the working tree into every
+     * distribution anybody builds, against the loader jar that is published at that moment, and must
+     * compile and run against one that does not have the option yet (null: the strict mode then
+     * loads like the practical one, and the statistics say which exactness options a run had).
+     */
+    private static final java.lang.reflect.Method STRICT_METADATA = strictMetadataMethod();
+
+    private static java.lang.reflect.Method strictMetadataMethod() {
+        try {
+            java.lang.reflect.Method m = LoadOptions.class.getMethod("withStrictMetadata", boolean.class);
+            return LoadOptions.class.isAssignableFrom(m.getReturnType()) ? m : null;
+        } catch (NoSuchMethodException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /** True if the loader on the class path has the strict mode's metadata decline. */
+    static boolean strictLoadAvailable() {
+        return STRICT_METADATA != null;
+    }
+
+    /** The load options of the strict mode: the loader's exactness-only declines on, where it has them. */
+    static LoadOptions strictLoad(LoadOptions loadOptions) {
+        if (STRICT_METADATA == null) {
+            return loadOptions;
+        }
+        try {
+            return (LoadOptions) STRICT_METADATA.invoke(loadOptions, Boolean.TRUE);
+        } catch (ReflectiveOperationException e) {
+            // Never run a strict check without the decline it was asked for.
+            throw new IllegalStateException("rlvm-load: LoadOptions.withStrictMetadata(true) failed: " + e, e);
         }
     }
 

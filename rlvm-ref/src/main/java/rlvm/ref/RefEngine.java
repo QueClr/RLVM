@@ -56,6 +56,7 @@ public final class RefEngine implements Engine {
     private final long[] statImports = new long[6];
     private final long[] statIdentity = new long[6];
     private long statIdentityUnits;
+    private long statIdentityForks;
 
     public RefEngine(Store store, EngineConfig config) {
         this(store, config, RefOptions.fromSystemProperties());
@@ -119,6 +120,7 @@ public final class RefEngine implements Engine {
             sink.put("reference.identityHazardProj", statIdentity[4]);
             sink.put("reference.identityNested", statIdentity[5]);
             sink.put("reference.identityUnits", statIdentityUnits);
+            sink.put("reference.identityForks", statIdentityForks);
         }
     }
 
@@ -142,6 +144,7 @@ public final class RefEngine implements Engine {
             statIdentity[i] += identity[i];
         }
         statIdentityUnits += s.identityUnits;
+        statIdentityForks += s.identityForks;
         long[] imports = s.kernel.importStats();
         for (int i = 0; i < statImports.length; i++) {
             statImports[i] += imports[i];
@@ -174,12 +177,14 @@ public final class RefEngine implements Engine {
 
         /**
          * {@code -X levels=official|complete} (default official), {@code -X ref.imports=on|off|verify},
-         * {@code -X ref.exact=off|official} (default off; official = the strict mode),
+         * {@code -X ref.exact=off|official} (default off; official = the strict mode; the launcher's
+         * {@code policy=strict} implies it: this provider declares the key {@code policy}),
          * {@code -X ref.identity=decline|same|other|count} (experiments; see {@link RefOptions}).
          */
         @Override
         public Set<String> optionKeys() {
-            return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS, RefOptions.KEY_EXACT, RefOptions.KEY_IDENTITY);
+            return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS, RefOptions.KEY_EXACT, RefOptions.KEY_IDENTITY,
+                    RefOptions.KEY_POLICY);
         }
 
         @Override
@@ -218,8 +223,17 @@ public final class RefEngine implements Engine {
         long deepRuns;
         /** Largest footprint (overlay terms, literals, kernel tables) a single declaration reached. */
         long maxUnitBytes;
-        /** Declarations in which the official answer depended on object identity (what strict mode declines). */
+        /**
+         * Declarations with an object-identity hazard (strict mode: the second pass was not shown to
+         * repeat nothing; otherwise: every event, nothing is probed).
+         */
         long identityUnits;
+        /** Strict mode: hazards that were decided both ways. */
+        long identityForks;
+        /** Checks of the current declaration so far (strict mode). */
+        private int identityRuns;
+        /** Strict mode: most checks of one declaration (a full tree of five hazards, or less of a deeper one). */
+        static final int MAX_IDENTITY_RUNS = 63;
 
         RefSession(RefEngine engine, WorkerContext ctx) {
             this.engine = engine;
@@ -240,10 +254,81 @@ public final class RefEngine implements Engine {
                 return Outcome.DECLINE;
             }
             long hazards = kernel.identityHazards();
-            int outcome = attempt(cid, budget);
+            int outcome;
+            if (engine.options.identity == RefOptions.IDENTITY_DECLINE) {
+                identityRuns = 0;
+                outcome = decide(cid, budget, 0L, 0);
+                kernel.setIdentityScript(0L, -1);
+            } else {
+                outcome = attemptOnAnyStack(cid, budget);
+            }
             if (kernel.identityHazards() != hazards) {
                 identityUnits++;
             }
+            if (outcome == Outcome.ACCEPT) {
+                accepted++;
+            } else if (outcome == Outcome.REJECT) {
+                rejected++;
+            } else {
+                declined++;
+            }
+            return outcome;
+        }
+
+        /**
+         * Strict mode. The declaration is checked with the given decisions for its first
+         * {@code length} object-identity hazards (README, "Object identity"). If the check meets a
+         * further hazard, it is run again with that hazard decided each way: whether two occurrences
+         * of a term are one object for the official kernel is not known here, but if every decision
+         * leads to the same verdict, that verdict is the official one whichever it is. If the two
+         * verdicts differ, or the tree of decisions grows beyond {@link #MAX_IDENTITY_RUNS} checks,
+         * the declaration is declined.
+         */
+        private int decide(int cid, Budget budget, long decisions, int length) {
+            identityRuns++;
+            lastReason = null;
+            lastMessage = null;
+            kernel.setIdentityScript(decisions, length);
+            int outcome = attemptOnAnyStack(cid, budget);
+            if (outcome != Outcome.DECLINE || lastReason != Reason.UNSUPPORTED_INPUT || !kernel.takeIdentityFork()) {
+                return outcome;
+            }
+            if (identityRuns + 2 > MAX_IDENTITY_RUNS) {
+                lastMessage = lastMessage + "; more than " + MAX_IDENTITY_RUNS + " checks would be needed to try every case";
+                return Outcome.DECLINE;
+            }
+            identityForks++;
+            int same = decide(cid, budget, decisions, length + 1);
+            if (same == Outcome.DECLINE) {
+                return same;
+            }
+            int other = decide(cid, budget, decisions | 1L << length, length + 1);
+            if (other == Outcome.DECLINE || other == same) {
+                return other;
+            }
+            lastReason = Reason.UNSUPPORTED_INPUT;
+            lastMessage = "UNSUPPORTED_INPUT at " + nameOf(cid) + ": the official verdict depends on object identity: "
+                    + Outcome.name(same) + " if the two occurrences of a stuck projection that is_def_eq_core meets are one"
+                    + " object for the official kernel, " + Outcome.name(other) + " if they are two (the second whnf_core"
+                    + " answers with the cache entry of the other occurrence and the comparison runs once more); whether"
+                    + " they are is decided by the sharing of the export's records and the kernel's own allocation,"
+                    + " not by the terms";
+            return Outcome.DECLINE;
+        }
+
+        private String nameOf(int cid) {
+            StringBuilder sb = new StringBuilder("'");
+            try {
+                ctx.store.names().appendTo(sb, ctx.store.decls().name(cid));
+            } catch (RuntimeException e) {
+                sb.append("constant ").append(cid);
+            }
+            return sb.append('\'').toString();
+        }
+
+        /** One check of the declaration, repeated on the deep stack if the caller's stack is too small. */
+        private int attemptOnAnyStack(int cid, Budget budget) {
+            int outcome = attempt(cid, budget);
             if (outcome == Outcome.DECLINE && lastReason == Reason.STACK_DEPTH && kernel.takeOverflowed()) {
                 // The calling thread's stack was too small. Whatever was being written when it
                 // overflowed is abandoned, so everything worker-local starts afresh.
@@ -261,13 +346,6 @@ public final class RefEngine implements Engine {
                     ctx.reset();
                     kernel.reset();
                 }
-            }
-            if (outcome == Outcome.ACCEPT) {
-                accepted++;
-            } else if (outcome == Outcome.REJECT) {
-                rejected++;
-            } else {
-                declined++;
             }
             return outcome;
         }

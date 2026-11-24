@@ -13,7 +13,8 @@ import java.util.Map;
  * {@code -X ref.exact=off|official} (default off = the practical policy of OWNER-NOTES item 13: the
  * engine never declines for the sake of agreement with the official checker on adversarial files;
  * {@code official} = the strict mode: where the official verdict depends on object identity and the
- * engine cannot show that it does not matter, the declaration is declined) and, for experiments,
+ * engine cannot show that it does not matter, the declaration is declined; the launcher's
+ * {@code -X policy=strict} sets it, {@code -X policy=practical} leaves the default) and, for experiments,
  * {@code -X ref.identity=decline|same|other|count} (default: decline under {@code ref.exact=official},
  * else same) ({@link RefEngine.Provider#optionKeys()}); they are read from the system properties
  * {@code rlvm.levels}, {@code rlvm.ref.imports}, {@code rlvm.ref.exact} and {@code rlvm.ref.identity}
@@ -31,6 +32,12 @@ public final class RefOptions {
     public static final String KEY_IMPORTS = "ref.imports";
     public static final String KEY_IDENTITY = "ref.identity";
     public static final String KEY_EXACT = "ref.exact";
+    /**
+     * The launcher's policy ({@code -X policy=practical|strict}, OWNER-NOTES item 13): rlvm-main hands
+     * it to every engine that declares this key. {@code strict} means {@code ref.exact=official}
+     * unless {@code ref.exact} itself is given.
+     */
+    public static final String KEY_POLICY = "policy";
 
     /**
      * What the kernel does where the official answer depends on OBJECT identity (the pointer test
@@ -143,7 +150,11 @@ public final class RefOptions {
         long minUses = number("rlvm.ref.importMinUses", DEFAULT_IMPORT_MIN_USES);
         // Strict or practical (OWNER-NOTES item 13): everything that exists only for agreement with the
         // official checker on adversarial files hangs on this one switch; the launcher's policy sets it.
-        String exact = setting(options, KEY_EXACT, "rlvm.ref.exact", "off");
+        String policy = options == null ? null : options.get(KEY_POLICY);
+        if (policy != null && !policy.equals("strict") && !policy.equals("practical")) {
+            throw new IllegalArgumentException("policy=" + policy + ": expected practical or strict");
+        }
+        String exact = setting(options, KEY_EXACT, "rlvm.ref.exact", "strict".equals(policy) ? "official" : "off");
         boolean strict;
         switch (exact) {
             case "official":

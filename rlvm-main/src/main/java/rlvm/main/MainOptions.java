@@ -25,7 +25,8 @@ import rlvm.load.LoadOptions;
  *                        implementation (cache order, non-transitivity, object identity) may be accepted.
  *                        strict: the reference engine (as -X engine=reference; naming another engine or
  *                        engine=diff with it is a usage error) and every exactness-only option of the
- *                        other modules that exists ({@link #STRICT})
+ *                        other modules that the jars of the run have ({@link #STRICT_ENGINE_SETTINGS},
+ *                        {@code MainWiring.strictLoad})
  * engine=NAME            reference | machine | diff | any registered EngineProvider name
  *                        (default: the non-reference engine with the highest priority, else reference)
  * load=batch|pipelined|auto  how units are published. Default auto: pipelined (the loader publishes while
@@ -84,6 +85,18 @@ final class MainOptions {
      * The key itself is the wiring's: no engine can give it another meaning.
      */
     static final String POLICY_KEY = "policy";
+    /**
+     * The exactness-only settings of the engines, by the names their owners gave them: under
+     * {@code policy=strict} each is set to the value here if a provider on the class path declares
+     * its key and the command line did not set it (a given setting is never changed); under
+     * {@code practical} nothing is passed and each engine's own default (off) holds.
+     * {@code ref.exact=official} (rlvm-ref, owner R2): where the official verdict depends on object
+     * identity, the reference kernel probes the official second pass and declines the declaration if
+     * the two continuations can differ. A jar without the key simply does not have the behaviour yet.
+     */
+    static final Map<String, String> STRICT_ENGINE_SETTINGS = Map.of("ref.exact", "official");
+    /** The exactness-only engine settings this run switched on (strict mode), for the statistics. */
+    final Map<String, String> strictEngineSettings = new TreeMap<>();
 
     /** {@code -X engine=...}, or null for the default engine. */
     String engine;
@@ -219,6 +232,14 @@ final class MainOptions {
         }
         if (engineKeys.contains(POLICY_KEY)) {
             engineOptions.put(POLICY_KEY, policyName());
+        }
+        if (strict) {
+            for (Map.Entry<String, String> e : new TreeMap<>(STRICT_ENGINE_SETTINGS).entrySet()) {
+                if (engineKeys.contains(e.getKey()) && !engineOptions.containsKey(e.getKey())) {
+                    engineOptions.put(e.getKey(), e.getValue());
+                    strictEngineSettings.put(e.getKey(), e.getValue());
+                }
+            }
         }
     }
 

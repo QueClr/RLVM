@@ -170,6 +170,20 @@ class PolicyTest {
         checker.setup(export, 1, false, 0, map("policy", "practical", "levels", "official"), all, System.err, true);
         assertEquals(map("policy", "practical", "levels", "official"), ref.seen);
 
+        // The exactness-only settings the engines' owners named (rlvm-ref: ref.exact=official) are set in the
+        // strict mode when a provider declares them, never under practical, and a given value is kept.
+        Fake exact = new Fake("reference", 1000, true, "ref.exact");
+        RlvmChecker.Setup st = checker.setup(export, 1, false, 0, map("policy", "strict"), List.of(machine, exact), System.err, true);
+        assertEquals(map("ref.exact", "official"), exact.seen);
+        assertEquals("[ref.exact=official" + (MainWiring.strictLoadAvailable() ? ",metadata]" : "]"), RlvmChecker.strictNote(st.mo));
+        checker.setup(export, 1, false, 0, map(), List.of(machine, exact), System.err, true);
+        assertEquals(Map.of(), exact.seen, "practical passes nothing: the engine's own default (off) holds");
+        assertEquals("", RlvmChecker.strictNote(MainOptions.parse(map())));
+        checker.setup(export, 1, false, 0, map("policy", "strict", "ref.exact", "off"), List.of(machine, exact), System.err, true);
+        assertEquals(map("ref.exact", "off"), exact.seen, "a setting that is given is never changed");
+        assertTrue(RlvmChecker.strictNote(MainOptions.parse(map("policy", "strict"))).startsWith("["),
+                "a strict run says which exactness options it had, also when it had none");
+
         // No provider declares the key: nothing is handed over, the policy is the wiring's alone.
         Fake plainRef = new Fake("reference", 1000, true);
         RlvmChecker.Setup s = checker.setup(export, 1, false, 0, map("policy", "strict"), List.of(plainRef), System.err, true);
@@ -185,6 +199,40 @@ class PolicyTest {
         };
         assertTrue(assertThrows(IllegalStateException.class, () -> Engines.runDefaults(pushy, Map.of(), Set.of()))
                 .getMessage().contains("-X policy"));
+    }
+
+    /** {@code def d : Sort 2 := Sort 1} with the value wrapped in a metadata node: well-typed, officially accepted. */
+    private static String definitionWithMetadataAroundItsValue() {
+        return PassesTest.META
+                + "{\"in\":1,\"str\":{\"pre\":0,\"str\":\"d\"}}\n"
+                + "{\"il\":1,\"succ\":0}\n"
+                + "{\"il\":2,\"succ\":1}\n"
+                + "{\"ie\":0,\"sort\":2}\n"
+                + "{\"ie\":1,\"sort\":1}\n"
+                + "{\"ie\":2,\"mdata\":{\"data\":{},\"expr\":1}}\n"
+                + "{\"def\":{\"all\":[1],\"hints\":\"opaque\",\"levelParams\":[],\"name\":1,\"safety\":\"safe\",\"type\":0,\"value\":2}}\n";
+    }
+
+    /**
+     * The loader's part of the strict mode (rlvm-load, {@code LoadOptions.withStrictMetadata}): a
+     * declaration with a metadata node in its value is checked as its wrapped term under the practical
+     * policy and DECLINED under the strict one - never rejected, never accepted on a guess. Runs when
+     * the loader on the class path has the option; with an older loader the two policies load alike.
+     */
+    @Test
+    void theStrictModeDeclinesMetadataAroundATermWhereTheLoaderCan() throws Exception {
+        Path export = dir.resolve("mdata-def.ndjson");
+        Files.writeString(export, definitionWithMetadataAroundItsValue());
+        LauncherAccess.Result practical = launch(export, "--threads", "1", "--stats");
+        assertEquals(0, practical.status, "practical: metadata is transparent: " + practical);
+        LauncherAccess.Result strict = launch(export, "--threads", "1", "--stats", "-X", "policy=strict");
+        if (MainWiring.strictLoadAvailable()) {
+            assertEquals(2, strict.status, "strict: declined, as the loader's owner specified: " + strict);
+            assertTrue(strict.err.contains("policy=strict[") && strict.err.contains("metadata]"), strict.err);
+        } else {
+            assertEquals(0, strict.status, "a loader without the option loads alike under both policies: " + strict);
+            assertFalse(strict.err.contains("metadata]"), strict.err);
+        }
     }
 
     private static LauncherAccess.Result launch(Path export, String... options) {
@@ -210,7 +258,7 @@ class PolicyTest {
         assertTrue(r.err.contains(" policy=practical "), r.err);
         r = launch(good, "--threads", "2", "--stats", "-X", "policy=strict");
         assertEquals(0, r.status, r.toString());
-        assertTrue(r.err.contains(" engine=reference reference=reference policy=strict "), r.err);
+        assertTrue(r.err.contains(" engine=reference reference=reference policy=strict["), r.err);
         r = launch(good, "--threads", "2", "--stats", "-X", "policy=strict", "-X", "engine=reference");
         assertEquals(0, r.status, r.toString());
         for (String[] policy : new String[][] {{}, {"-X", "policy=practical"}, {"-X", "policy=strict"}}) {

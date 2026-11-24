@@ -11,6 +11,15 @@
 #   4. the self-test of the differential path (2 s): rlvm-testkit/bin/testkit diff --engine broken
 #      --expect-differences on bad/tutorial/002_badDef - an engine that accepts everything must be
 #      caught by -X engine=diff through the real launcher and driver (suggested by rlvm-testkit)
+#   5. with --hostile: the hostile exports (scripts/gate-hostile.py; default manifest
+#      rlvm-machine/src/test/resources/s/manifest.tsv) in the gate's configuration, judged by the
+#      official verdict stored with each row: a row of kind T (OWNER-NOTES 13 (d)) may be accepted,
+#      every other row must get the official verdict
+#
+# The oracle of every step is an OFFICIAL verdict (the arena's expected outcome of a published test,
+# the test kit's stored verdicts of leanchecker for the mutants, the manifest's column for a hostile
+# row) - never the opinion of one of our engines. So the same command gates a distribution whose
+# default engine is the reference engine and one whose default engine is the machine.
 #
 #   scripts/gate.sh [options]
 #
@@ -26,6 +35,8 @@
 #                     one call of `testkit judge --all`, which also appends one summary table per
 #                     run to work/status/mutants.md (counts as rebuilt by rlvm-testkit at 08:27Z)
 #   --no-slice        skip step 2
+#   --hostile [FILE]  also step 5; FILE = a manifest (see scripts/gate-hostile.py --help), default the
+#                     machine's suite. --kind-mark REGEX names the marks of a kind T row
 #   --no-diff-selftest  skip step 4
 #   --threads N       worker threads of both steps (default 1; 0 = automatic)
 #   --engine NAME     -X engine=NAME (default reference; `default` = no -X engine at all: the
@@ -61,6 +72,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # under thirty agents): every heavy job holds one of the host-wide slots of bench/slot.sh. A gate is
 # heavy (hundreds of JVMs), so it takes a slot itself unless its caller already holds one (the slot
 # is a file lock that this process inherited: an open descriptor on work/build/slots/heavy.N).
+for a in "$@"; do  # the help text needs no slot
+  case "$a" in -h|--help) sed -n '2,67p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+done
 if [ -x "$ROOT/bench/slot.sh" ] && [ -z "${RLVM_NO_SLOT:-}" ] \
     && ! ls -l "/proc/$$/fd" 2>/dev/null | grep -q 'work/build/slots/heavy\.'; then
   exec "$ROOT/bench/slot.sh" -- "$0" "$@"
@@ -78,6 +92,9 @@ jobs=""
 pin=1
 pin_list=""
 diffself=1
+hostile=0
+hostile_manifest=""
+kind_mark=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -95,7 +112,10 @@ while [ "$#" -gt 0 ]; do
     --no-pin) pin=0; shift ;;
     --pin) pin_list="${2:?--pin needs a CPU list}"; shift 2 ;;
     --no-diff-selftest) diffself=0; shift ;;
-    -h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --hostile) hostile=1
+      case "${2:-}" in ''|-*) shift ;; *) hostile_manifest="$(realpath -m "$2")"; shift 2 ;; esac ;;
+    --kind-mark) kind_mark="${2:?--kind-mark needs a regular expression}"; shift 2 ;;
+    -h|--help) sed -n '2,67p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "gate.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -185,6 +205,9 @@ if [ "$slice" = 1 ]; then
   # work/rlvm-driver/w7/dist-gate wrote the same table and the same raw report on 2026-11-24.
   gate_name="$(realpath -m --relative-to="$ROOT" "$dist" 2>/dev/null | tr -c 'A-Za-z0-9._\n-' '-')"
   [ -n "$gate_name" ] || gate_name="$(basename "$(dirname "$dist")")-$(basename "$dist")"
+  # ... and the configuration when it is not the plain one (reference, batch, 1 worker): three gates of
+  # one distribution (defaults, -X engine=machine, plain) wrote the same table on 2026-11-24.
+  case "$engine/$load/$threads" in reference/batch/1) ;; *) gate_name="$gate_name-$engine-$load-t$threads" ;; esac
   args+=(--out "$ROOT/work/status/gate/slice-all-$gate_name.md" --tag "gate-$gate_name")
   # A pinned gate runs on the slow cores, usually beside other people's jobs: it guards verdicts,
   # not the arena's time limits (those are read from scripts/slice.sh on a quiet machine).
@@ -235,6 +258,20 @@ if [ "$diffself" = 1 ] && [ -f "$bad" ]; then
       --launcher "$dist/bin/rlvm-jvm" "$bad" >"$log" 2>&1 || rc=$?
   echo "gate: differential self-test: exit $rc | $(grep -E '^RESULT' "$log" | tail -n 1) | log $log"
   [ "$rc" = 0 ] || { fail=1; echo "gate: FAILED: an engine that accepts everything was not caught by -X engine=diff" >&2; }
+fi
+
+if [ "$hostile" = 1 ]; then
+  mkdir -p "$ROOT/work/logs/gate"
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  log="$ROOT/work/logs/gate/hostile-$stamp.log"
+  hargs=(-j "$(lanes 4)" --report "$ROOT/work/logs/gate/hostile-$stamp.json")
+  [ -z "$hostile_manifest" ] || hargs+=(--manifest "$hostile_manifest")
+  [ -z "$kind_mark" ] || hargs+=(--kind-mark "$kind_mark")
+  rc=0
+  RLVM_DIST="$dist" RLVM_THREADS="$threads" RLVM_ENGINE="$engine" RLVM_LOAD="$load" RLVM_EXTRA_CP="$extra_cp" \
+    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" python3 -I "$ROOT/scripts/gate-hostile.py" "${hargs[@]}" >"$log" 2>&1 || rc=$?
+  echo "gate: $(tail -n 1 "$log") | exit $rc | log $log"
+  [ "$rc" = 0 ] || { fail=1; grep -E '^  (WRONG|ERROR)' "$log" | head -n 20 >&2; echo "gate: FAILED: hostile exports (a wrong verdict on a row that is not of kind T, or an error)" >&2; }
 fi
 
 if [ "$fail" = 0 ]; then echo "gate: PASS"; else echo "gate: FAIL"; fi

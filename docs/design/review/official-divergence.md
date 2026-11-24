@@ -29,7 +29,7 @@ reduced. The machine binds a variable to a value and types values, so it can use
 | F1 let variable typed by its value | `e1-app-type-is-domain-let-bad` | reject | reject (fixed) | T: `e1-cert-dh-eq-5-ok` |
 | F2 redex re-inferred, variable typed by the argument | `e1-redex-function-applied-open-bad` | reject | reject (fixed) | T: the same two steps (no export of its own) |
 | F3 lambda against Pi, variable of the other side | `e1-lam-fvar-type-in-conv-bad` in v0 | reject | reject (fixed) | T: `e1-cert-lam-fvar-ok` |
-| F4 B9 (`expect`) with convertible domains | `e1-lam-fvar-type-in-conv-bad`, `-second-binder-bad`, `-argument-bad` | reject | ACCEPT without the switch `exact`, reject with it | T: `e1-cert-lam-fvar-ok` |
+| F4 B9 (`expect`) with convertible domains | `e1-lam-fvar-type-in-conv-bad`, `-second-binder-bad`, `-argument-bad` | reject | reject; ACCEPT with the switch `convexpect` (off by default) | T: `e1-cert-lam-fvar-ok` |
 | F5 expected codomain stored as a memo | `e1-expect-cod-memo-bad` | reject | reject (fixed) | T: the same two steps (no export of its own) |
 | F6 K rule on an applied let variable | `e1-sys-let-krule-major-applied-bad` | reject | declined (rule) | T: statement `True` |
 | F7 type of a stuck projection's struct / raw K major | `e1-sib-proj-applied-let-pi-bad`, `e1-sib-proj-redex-pi-bad`, `e1-sib-krule-major-redex-bad` | reject | ACCEPT (the third: `gated` sets only) | T: statement `True` |
@@ -40,11 +40,13 @@ produce kind F: every step the machine takes is a conversion that holds in the t
 irrelevance), the theory's definitional equality is transitive and typing is closed under it, so a term the machine
 types through a convertible stand-in has that type in the theory.
 
-What is exact now (machine jar `5945b6568177` and later; 92 rows `e1-*`, 6 of them kind T): the let rule, the type of
+What is exact now (machine jar `5945b6568177` and later; 92 rows `e1-*`, 6 of them marked kind T: the three of F4 are rejected by
+the default set, the three of F7 are accepted): the let rule, the type of
 a lambda instantiated with an argument of another type (typed binding), CBIND's comparison variable, the expected-type
 memo. The typed bindings cost nothing measurable (ticks -0.35 % / -0.01 % on the Cedar slice / Std without them).
-B9's restriction to ONE domain value costs 2.4 % of the ticks of the Cedar slice and 0.3 % of Std's and is behind the
-switch `exact`, off by default (section 7 has the numbers).
+B9's restriction to ONE domain value costs 2.4 % of the ticks of the Cedar slice and 0.3 % of Std's and nothing
+measurable in warm wall clock (native image, 8 workers: cedar 1.59 / 1.62 s before the fix, 1.59 / 1.58 s after; Std
+1.19 / 1.20 s before, 1.19 / 1.22 s after), so it stays; the switch `convexpect` (off) gives the old B9 back.
 
 Not exact, and intrinsic to a machine on values (F7): an exact treatment needs the official type of the unreduced
 term - `VTYPE` of a suspension = `INFER` of its term, a suspension never replaced by its known value where it stands

@@ -32,7 +32,7 @@ bench/track/benchmarks_cold.py --stdout        # the cold tables from the histor
 | `ladder.py` | `track.py` over all corpora for one engine and one or more launchers, then the baselines that this host has no measurement of; one measurement in the container at a time (lock `work/perf-history/.ladder.lock`, taken per measurement) |
 | `benchmarks.py` | generates `docs/BENCHMARKS.md` from rows of `bench/warm.sh` (and the history for instruction counts): corpus x {RLVM machine, RLVM reference} x {JVM, native} + gruszka + nano-lean, one table per metric in the owner's order (warm wall 8 workers, warm wall 1 worker, cold wall, CPU, RSS, instructions), and for every cell the row, its `bench/quiet.py` window and its jars; the text around the tables is `benchmarks-notes.md` |
 | `benchmarks_cold.py` | the generator of that document until 2026-11-24T23Z: cold tables (CPU time, wall clock, RSS, instructions of a fresh process on a batch load) from the tracker's history; superseded as the statement of where RLVM stands, kept as a tool |
-| `selftest.py` | 77 checks of the rule, the pass lines, the summaries, phase differencing, baseline lookup, the command line, the ladder and both generators on the host (independent of what is built in `work/dist`); `--docker` adds 10 checks of the whole command with a fake checker in the container |
+| `selftest.py` | 79 checks of the rule, the pass lines, the summaries, phase differencing, baseline lookup, the command line, the ladder and both generators on the host (independent of what is built in `work/dist`); `--docker` adds 10 checks of the whole command with a fake checker in the container |
 | `fake-burner.sh` | the fake checker of the self-test (burns a chosen amount of CPU, exits with a chosen status) |
 
 ## The ladder
@@ -199,7 +199,7 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
   window on its own (call it through `bench/quiet.py --`); warm entries of the baselines do not exist
   (a Rust checker has no passes: its wall clock is compared with RLVM's warm wall in the comparison
   table); `selftest.py --docker` was not extended to a run with passes (the fake checker prints none).
-- `selftest.py`: 77 host checks.
+- `selftest.py`: 79 host checks.
 
 ## State (2026-11-24, wave 7)
 

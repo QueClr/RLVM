@@ -1,11 +1,14 @@
-# Adversarial review of the machine's default switch set and of `k2` (reviewer S3)
+# Adversarial review of the machine's default switch set, of `k2`, and of the candidate default (reviewer S3)
 
-2026-11-24, 21:06Z - 23:00Z. Reviewed: `rlvm-machine` as published at 20:28Z (jar `15cb3777e598`; my private copy
-`work/s3/tree` packages to the same hash), through the JVM launcher of `work/s3/dist` (the published jars of the
-shared distribution of 21:02Z: machine `15cb3777e598`, reference `ca1f9bd918bb`), `-Xmx4g`, one worker. E1's
-publications after 21:26Z (typed bindings) are NOT in what I ran. No production file was changed; everything of this
-review is under `work/s3/`. Ground truth everywhere: the official checker (`leanchecker --from-export`, Lean v4.36.0,
-inside Docker: `work/s3/official.sh`), never the reference engine.
+2026-11-24, 21:06Z - 22:50Z. Two passes. **Pass 1** (sections 0 - 9): `rlvm-machine` as published at 20:28Z (jar
+`15cb3777e598`; my private copy `work/s3/tree` packages to the same hash), through the JVM launcher of `work/s3/dist`
+(the published jars of the shared distribution of 21:02Z: machine `15cb3777e598`, reference `ca1f9bd918bb`), `-Xmx4g`,
+one worker. **Pass 2** (section 10, after the owner's decision "practical", OWNER-NOTES note 13): the CANDIDATE
+default - the default set + `eager` + the proof-comparison shortcuts `skipargs` and `congruence` - on machine jar
+`df36be3c8cc9` (E1's publications of 21:26Z typed bindings, 21:57Z `eager`, 22:12Z; my copy `work/s3/tree2` packages
+to the same hash; distribution `work/s3/dist-cand`), attacked for a FALSE accept only. No production file was
+changed; everything of this review is under `work/s3/`. Ground truth everywhere: the official checker (`leanchecker
+--from-export`, Lean v4.36.0, inside Docker: `work/s3/official.sh`), never the reference engine.
 
 Switches reviewed: `same`, `pchk`, `bodies`, `match`, `joint`, `lazycases`, `directrules`, `lazyeval`, `code`,
 `casetrees` (the ten that entered `Op.SW_DEFAULT` at the wave-6 integration without an adversarial review) and `k2`
@@ -20,9 +23,12 @@ switch set (from `engine.primary.machine.*`) and the exit status of the pipeline
 
 ## 0. Verdict
 
-**No kind F finding.** Six findings, all kind T (certificates in section 3): one in v0 and therefore in every switch
-set (S3-F1), one in the REFERENCE engine (S3-F2, the default pipeline), one in `warm` (S3-F3), and three that are
-specific to a switch: `lazyeval` (S3-F4), `pchk` (S3-F5), `k2` (S3-F6, with its default thresholds). They have one
+**No kind F finding, in the default set and in the candidate (section 10).** Six findings of kind T (certificates in
+section 3): one in v0 and therefore in every switch set (S3-F1), one in the REFERENCE engine (S3-F2, the default
+pipeline), one in `warm` (S3-F3), and three that are specific to a switch: `lazyeval` (S3-F4), `pchk` (S3-F5), `k2`
+(S3-F6, with its default thresholds). One finding that is no wrong verdict: `code` declines valid units with an
+internal fault (S3-F7). Under the owner's policy of 22:25Z (kind T tolerated and documented, kind F absolute) the
+kind T findings are the documented divergences of the default configuration, not blockers. They have one
 root that none of the gates could see (section 2): **the official `is_def_eq` is not a function of its two arguments,
 not even in plain mode** - the cache `m_whnf_core` is read by the cheap `whnf_core` calls and written only by the
 full ones - so every memo of the machine that answers a comparison, a checked type or a cheap CORE is exact only if
@@ -39,7 +45,7 @@ it mirrors the official per-declaration, term-keyed caches, and none of them doe
 | `lazycases` | no state of the official lazy-delta loop lies between the unfolding of a `casesOn`-shaped definition and the reduct of its recursor | none found | exact relative to v0 as coded (shape CASESON only; a MATCHER tree in the lazy step is NOT exact: row `s3-lazycases-matcher-over-regular-cases-ok`, seeded fault 10) |
 | `directrules` | the rule's right-hand side has the plain form (verified on the term): one APPLY of the minor is the same reduct | none found | exact relative to v0 as coded |
 | `lazyeval` | "order-only": a one-sided unfolding against a weak-head normal side may run as one WHNF | **wrong ACCEPT, kind T: S3-F4** (v0 rejects) | **not exact**: `s3-wc-inner-caseson-lazy-bad` |
-| `code`, `casetrees` | a compiled body / case tree computes the reduct of DELTA + rule + beta | none found; they change which full-CORE memos exist - in my rows always TOWARDS the official verdict (two v0 wrong accepts become rejects of the primary machine) | no difference of their own found; not provably exact (see 4.9) |
+| `code`, `casetrees` | a compiled body / case tree computes the reduct of DELTA + rule + beta | no wrong verdict found; they change which full-CORE memos exist - in my rows always TOWARDS the official verdict (two v0 wrong accepts become rejects of the primary machine); **S3-F7: `code` declines valid units (internal fault)** | no difference of their own found; not provably exact (see 4.9); S3-F7 costs a decline |
 | `warm` (not on my list) | everything a session keeps is declaration-independent | wrong ACCEPT and wrong REJECT, kind T: S3-F3 | not exact |
 | `k2` (off) | "the leaf is a reduct of `c x̄` by official steps, and reduction commutes with substitution" | **wrong ACCEPT with the default thresholds, kind T, and a wrong REJECT: S3-F6**; with test thresholds also the memo class of S3-F1 | **not exact; must stay off** (section 7) |
 
@@ -139,6 +145,7 @@ All verdicts: official from Docker; machine and reference through the launcher o
 | **S3-F6** | T | `k2`, default thresholds | `s3-k2-krule-subst-hot-bad` | reject | reject | none, default: reject; `default,k2`, all + `k2`: **accept** |
 | | T | `k2`, test thresholds (`k2Hot=1`, `k2Share=0`) | `s3-k2-krule-subst-bad`; and the memo class: `s3-wc-inner-natfold-bad`, `-major-bad`, `-select-bad` (accepted by `k2` alone, rejected by v0) | reject | reject | `k2`, `k2,directrules`, `default,k2`: **accept** |
 | | wrong REJECT | `k2` alone: WHNF answers through the rule, lazy delta does not | `s3-k2-krule-subst-hot-ok` | accept | accept | `k2`, `k2,directrules`: **reject** (repaired) |
+| **S3-F7** | no wrong verdict (a decline) | `code` (default set, both jars): `Code.raw` faults (`E_INTERNAL`) when a closure built in a compiled body captures a variable that a let or a beta redex binds to a numeral below 2^31 | `s3-code-capture-let-literal-ok`, `-beta-literal-ok`, `-let-literal-casesOn-ok`, `-let-literal-succ-arm-ok`; found by the random programs (`s3-r2-005/006/010-ok`, `s3-r3-001-ok`) | accept | accept | none: accept; `code`, default, candidate: the primary machine DECLINES, the reference engine decides (exit 0) |
 
 Kind and certificates. S3-F1 .. F5: every wrongly accepted declaration has the type `True /\ True` (or `True`) and is
 built from the two sub-proofs `W0` and `W`; the certificate is the twin of each row - the same declaration with the

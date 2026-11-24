@@ -232,6 +232,8 @@ public final class RefKernel implements KernelOps {
      * entry, {@code m_unfold}) may be written: they hold what any later computation would find.
      */
     private boolean frozen;
+    /** Diagnostics: why the last probe failed (which cache it would have written, or which step decided). */
+    private String probeWhy = "";
 
     /** Ends a probe (no stack trace: it is control flow). */
     private static final class ProbeAbort extends RuntimeException {
@@ -258,6 +260,18 @@ public final class RefKernel implements KernelOps {
     private static final int HAZARD_PROJ = 4;
     /** Set when a judgment was declined for that reason, for the session's message. */
     private boolean identityDeclined;
+    /**
+     * Strict mode, {@link RefEngine.RefSession#check}: the decisions for the first
+     * {@link #scriptLength} object-identity hazards of the declaration (bit i set = hazard i is taken
+     * as "another object": the official second pass runs). A hazard beyond the script ends the
+     * judgment with UNSUPPORTED_INPUT and {@link #identityFork} set: the session then checks the
+     * declaration once per decision and gives a verdict only if both agree.
+     */
+    private long identityScript;
+    private int scriptLength = -1;
+    /** Hazards met since the declaration began. */
+    private int hazardIndex;
+    private boolean identityFork;
 
     /** Set when a StackOverflowError was caught: the worker context may have been left mid-update. */
     private boolean overflowed;
@@ -315,6 +329,7 @@ public final class RefKernel implements KernelOps {
         // has failed. A scope "after everything" (tests, tools) is never cancelled.
         this.unit = rank > 0 && rank != Integer.MAX_VALUE ? rank - 1 : -1;
         this.counting = false;
+        this.hazardIndex = 0;
         clearAll();
         terms.refresh();
         ovArr = ov.array();
@@ -1761,7 +1776,8 @@ public final class RefKernel implements KernelOps {
                 int key = stk[i];
                 if (whnfCoreCache.get(key) == 0) {
                     if (frozen) {
-                        throw ProbeAbort.INSTANCE;
+                        sp = base;
+                        throw probeAbort("a new m_whnf_core entry");
                     }
                     whnfCoreCache.put(key, r);
                 } else if (key == r) {
@@ -1771,7 +1787,8 @@ public final class RefKernel implements KernelOps {
                     // not the entry's, and every cache that keeps the result keeps that object.
                     // Canonical ids cannot tell: no verdict (never seen on a real declaration).
                     if (frozen) {
-                        throw ProbeAbort.INSTANCE;
+                        sp = base;
+                        throw probeAbort("a nested m_whnf_core entry");
                     }
                     statIdentity[0]++;
                     statIdentity[5]++;
@@ -2020,7 +2037,7 @@ public final class RefKernel implements KernelOps {
         int newType = inferCore(cnstr, true);
         if (frozen && appType != newType && !success.contains(appType, newType)) {
             // A K test that no cache answers: its outcome is not a function of the terms alone.
-            throw ProbeAbort.INSTANCE;
+            throw probeAbort("a K test that no cache answers");
         }
         if (!isDefEqInt(appType, newType)) {
             return e;
@@ -2176,7 +2193,7 @@ public final class RefKernel implements KernelOps {
         int r = whnfCore(next, cheapProj);
         if (!cheapProj && unfoldWhnfCache.get(key) == 0) {
             if (frozen) {
-                throw ProbeAbort.INSTANCE;
+                throw probeAbort("a new m_whnf_core entry of an unfolded definition");
             }
             unfoldWhnfCache.put(key, r);
         }
@@ -2332,6 +2349,24 @@ public final class RefKernel implements KernelOps {
         return r;
     }
 
+    /**
+     * Strict mode: the decisions for the object-identity hazards of the declaration that is checked
+     * next ({@code length} of them, bit i of {@code decisions} set = "another object"); a hazard
+     * beyond them ends the check with UNSUPPORTED_INPUT and {@link #takeIdentityFork()} true.
+     * {@code length < 0}: no script, every hazard declines (judgments through {@link KernelOps}).
+     */
+    void setIdentityScript(long decisions, int length) {
+        identityScript = decisions;
+        scriptLength = length;
+    }
+
+    /** True (once) if the last decline asks for a decision on the next object-identity hazard. */
+    boolean takeIdentityFork() {
+        boolean r = identityFork;
+        identityFork = false;
+        return r;
+    }
+
     /** Object-identity events since the kernel was created: see {@link #statIdentity}. */
     long[] identityStats() {
         return statIdentity.clone();
@@ -2355,7 +2390,7 @@ public final class RefKernel implements KernelOps {
         boolean r = isDefEqCore(t, s);
         if (r) {
             if (frozen && !success.contains(t, s)) {
-                throw ProbeAbort.INSTANCE;
+                throw probeAbort("a new success pair");
             }
             success.add(t, s);
         }
@@ -2680,7 +2715,7 @@ public final class RefKernel implements KernelOps {
                             return EQUAL;
                         }
                         if (frozen) {
-                            throw ProbeAbort.INSTANCE;
+                            throw probeAbort("a new failure pair");
                         }
                         failure.add(tn, sn);
                     }
@@ -2913,30 +2948,41 @@ public final class RefKernel implements KernelOps {
         frozen = true;
         try {
             if (quick(t, s) != UNDEF) {
+                probeWhy = "the easy cases decide";
                 return false;
             }
             if ((!hasFVar(t) || eagerReduce) && isBoolTrue(s) && isBoolTrue(whnfFull(t))) {
+                probeWhy = "Bool.true decides";
                 return false;
             }
             if (whnfCore(t, true) != t || whnfCore(s, true) != s) {
+                probeWhy = "the cheap whnf_core changes a term";
                 return false;
             }
             if (isDefEqProofIrrel(t, s) != UNDEF) {
+                probeWhy = "proof irrelevance decides";
                 return false;
             }
             if (lazyDeltaReduction(t, s, false, false) != UNDEF || outT != t || outS != s) {
+                probeWhy = "lazy delta reduction decides or changes a term";
                 return false;
             }
             int kt = terms.kind(t);
             int ks = terms.kind(s);
             if (kt == Kind.CONST && ks == Kind.CONST && terms.a(t) == terms.a(s) && levelsEquiv(terms.b(t), terms.b(s))) {
+                probeWhy = "the same constant";
                 return false;
             }
             if (kt == Kind.PROJ && ks == Kind.PROJ && terms.c(t) == terms.c(s) && terms.b(t) == terms.b(s)
                     && lazyDeltaProjReduction(terms.a(t), terms.a(s), terms.c(t), terms.b(t))) {
+                probeWhy = "lazy_delta_proj_reduction succeeds";
                 return false;
             }
-            return whnfCore(t, false) == t && whnfCore(s, false) == s;
+            if (whnfCore(t, false) != t || whnfCore(s, false) != s) {
+                probeWhy = "the second whnf_core changes a term";
+                return false;
+            }
+            return true;
         } catch (ProbeAbort abort) {
             sp = sp0;
             lsp = lsp0;
@@ -2947,10 +2993,16 @@ public final class RefKernel implements KernelOps {
             sp = sp0;
             lsp = lsp0;
             depth = depth0;
+            probeWhy = "a kernel error: " + error.reason();
             return false;
         } finally {
             frozen = frozen0;
         }
+    }
+
+    private ProbeAbort probeAbort(String why) {
+        probeWhy = why;
+        return ProbeAbort.INSTANCE;
     }
 
     /**
@@ -3091,7 +3143,7 @@ public final class RefKernel implements KernelOps {
                 // object. Which it is depends on the sharing of the export's records and on the kernel's
                 // own allocation, which canonical ids do not keep (README, "Object identity").
                 if (frozen) {
-                    throw ProbeAbort.INSTANCE;
+                    throw probeAbort("an object-identity event inside the second pass");
                 }
                 statIdentity[0]++;
                 boolean decided = false;
@@ -3114,14 +3166,24 @@ public final class RefKernel implements KernelOps {
                     }
                     if (identityTrace > 0) {
                         identityTrace--;
-                        System.err.println("rlvm-ref identity event (hazard " + hazard + (tOther ? ", t" : "")
-                                + (sOther ? ", s" : "") + "): " + describe(tn) + "  =?=  " + describe(sn));
+                        System.err.println("rlvm-ref identity event (" + (tOther ? "t " : "") + (sOther ? "s " : "")
+                                + "hazard " + hazard + "; the second pass: " + probeWhy + "): " + describe(tn) + "  =?=  "
+                                + describe(sn));
                     }
                     if (identityMode == RefOptions.IDENTITY_DECLINE) {
-                        identityDeclined = true;
-                        throw new ResourceException(Reason.UNSUPPORTED_INPUT);
-                    }
-                    if (identityMode == RefOptions.IDENTITY_OTHER) {
+                        int index = hazardIndex++;
+                        if (index >= scriptLength) {
+                            // No decision for this hazard: the session decides by checking both ways.
+                            identityDeclined = true;
+                            identityFork = scriptLength >= 0 && index < 62;
+                            throw new ResourceException(Reason.UNSUPPORTED_INPUT);
+                        }
+                        if ((identityScript >>> index & 1L) != 0L) {
+                            t = tn;
+                            s = sn;
+                            continue;
+                        }
+                    } else if (identityMode == RefOptions.IDENTITY_OTHER) {
                         t = tn;
                         s = sn;
                         continue;

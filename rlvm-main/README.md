@@ -27,6 +27,7 @@ scripts/dev.sh slice                                              # table for mo
 
 | Key | Meaning | Default |
 |---|---|---|
+| `policy=practical\|strict` | what the run promises (owner note 13; section "Policy" below). `strict` = the reference engine plus every exactness-only option the jars of the run have; `practical` = the default engine by priority and none of them | `practical` |
 | `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. An engine with a lower priority (the machine registers with 10 until it has passed its gates) is in the distribution as a candidate: it runs when named or compared, never by default |
 | `engine=diff` | differential run. With the test kit's provider `diff` on the class path (`scripts/dev.sh diff`): its `DiffEngine` is the primary engine (engine under test and oracle per unit; the driver's own differential mode stays off). Without it: the best non-reference engine is the primary engine and the driver runs the reference kernel beside it on every unit (`RunConfig.differential`); a usage error (64) if the reference kernel is the only engine | - |
 | `load=batch\|pipelined\|auto` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `auto` (since 2026-11-24, owner note 12): **`pipelined` when two or more workers run and the input is a file of at least `pipeline-min-mib`** and no `stop-after` phase is asked for, else `batch` (`MainOptions.resolveLoadDefaults`; section "Load defaults and the automatic worker count"). It was `batch` |
@@ -119,8 +120,47 @@ option) is decided HERE since 2026-11-24 (`RlvmChecker.autoWorkers`: one worker 
 and passed on like an explicit count; the driver still caps it at one worker per 128 units, and its
 own automatic rule (CPUs - 2, at most 6) is no longer consulted. The arena run line names its count;
 `--stack-size` becomes `deepStackBytes` and caps `workerStackBytes`; `--quiet` turns `explain` off;
-`--stats` prints one line (`outcome, engine, reference, workers, load, scan-threads, io,
+`--stats` prints one line (`outcome, engine, reference, policy, workers, load, scan-threads, io,
 [engine-defaults,] wall_ms`; `(auto)` behind a value = decided by the defaults, not given) on stderr.
+`rlvm --help` ends with this checker's settings (`RlvmChecker.usage()` through `rlvm.cli.Checker.usage()`),
+`rlvm --version` names the default engine.
+
+## Policy (`-X policy=practical|strict`, owner note 13)
+
+One option selects the policy; **practical is the default**. The contract of the default
+configuration (OWNER-NOTES 13):
+
+- (a) never accept a statement that is not derivable in Lean's type theory ("kind F"): absolute;
+- (b) the official verdict on every real input: everything lean4export writes (the corpora), the
+  arena's good and bad tests, the mutant corpora with their stored official verdicts;
+- (c) everything the official checker accepts is accepted (a rejection is always confirmed by the
+  reference engine; a unit the primary engine declines goes to it);
+- (d) accepting a derivable statement that the official checker rejects only through its own
+  incompleteness, non-transitivity, cache order or object identity ("kind T") is tolerated; the
+  known classes are written down with one export each (`docs/design/review/official-divergence.md`).
+
+| | `policy=practical` (default) | `policy=strict` |
+|---|---|---|
+| engine | the default engine by priority (`Engines.primary(null)`: the non-reference engine with priority >= 100, else the reference kernel; `rlvm --version` prints it as `default engine: NAME`), or the one `-X engine=NAME` names | **the reference engine**, whatever the priorities say. `-X engine=reference` with it is allowed; another engine or `engine=diff` with it is a usage error (64): the strict mode is one engine |
+| engines' exactness-only settings | none is passed: each engine's own default (off) holds | set to the value of `MainOptions.STRICT_ENGINE_SETTINGS` when a provider on the class path declares the key and the command line did not set it: **`ref.exact=official`** (rlvm-ref, owner R2: where the official verdict depends on object identity the kernel probes the official second pass and declines the declaration if the two continuations can differ) |
+| loader | metadata nodes around a term are transparent (the wrapped term stands for them) | **`LoadOptions.withStrictMetadata(true)`** (rlvm-load, owner LP2): a declaration whose type or value carries a metadata node is declined, per unit |
+| the key `policy` for engines | an engine that declares the key `policy` in `optionKeys()` receives `policy=practical` | ... and `policy=strict`: a further engine can follow the policy without a change here |
+
+"When the jars have it": both exactness options were being gated by their owners when this option
+was published (22:20Z to 23Z on 2026-11-24). The reference kernel's key is found through
+`EngineProvider.optionKeys()`, the loader's method by name (`MainWiring.strictLoad`, reflection on a
+constant name, so that this module compiles and runs against a loader without it); with jars that
+have neither, `policy=strict` is the reference engine alone. A strict run says what it had:
+`--stats` prints `policy=strict[ref.exact=official,metadata]` (`[]` = none), a practical run
+`policy=practical`. The JVM launcher's heap rule follows the policy (strict = the reference engine's
+heap). Neither policy can turn a rejection into an acceptance of something underivable: strict only
+ADDS declines.
+
+Tests: `PolicyTest` (both values and the default; an unknown value, a bare `-X policy`, strict with
+`engine=diff` or with an engine that is not the reference kernel: status 64 before anything is read;
+strict selects the reference engine with a machine of priority 100 on the class path; the engine
+settings each provider receives; through the real launcher an accepted and a rejected export under
+both policies; the metadata decline where the loader has it; `rlvm --help` and `--version`).
 
 ## Load defaults and the automatic worker count (owner note 12)
 

@@ -5,10 +5,13 @@ owner's order (OWNER-NOTES 12).
     bench/track/benchmarks.py --tsv work/perf-history/warm.tsv --labels bench [--since UTC] [--out docs/BENCHMARKS.md]
     bench/track/benchmarks.py ... --stdout           # print instead of writing
 
-Tables, in this order, one row per corpus, one column per checker and platform
-(RLVM machine and RLVM reference, each on the JVM launcher and on the native image; gruszka; nano-lean):
+Tables, in this order, one column per corpus and one row per checker and platform. THE FIRST ROWS
+ARE THE DEFAULT CONFIGURATION (the engine a run without -X engine checks with: --default-engine,
+today the reference engine; policy practical), on the JVM launcher and on the native image; then the
+other RLVM engine on both; then gruszka and nano-lean; then the ratios:
 
-    1. warm wall clock, 8 workers, load pipelined      median of the later passes (best later pass)
+    1. warm wall clock, 8 workers, load pipelined      median of the later passes (best later pass);
+                                                       later = passes 4..N of 8 or more, else 2..N
     2. warm wall clock, 1 worker
     3. cold wall clock of a fresh process, 8 workers   (for information)
     4. CPU time                                        of the median warm pass, 8 workers (and of the cold process)
@@ -20,7 +23,9 @@ and a provenance section that says for EVERY cell which row it is: time, passes,
 window it was taken in, the distribution and its jars.
 
 Where the numbers come from. Tables 1 to 5: rows of bench/warm.py (bench/warm.sh; TSV files given
-with --tsv, repeatable). Only rows taken inside a bench/quiet.py window count ("quiet"), only rows
+with --tsv, repeatable). A row measured without --engine (warm.py's "default") is a row of the
+default engine: it IS the default configuration; a row with -X engine=<the default engine> is the
+same run and counts for the same cell. Only rows taken inside a bench/quiet.py window count ("quiet"), only rows
 whose label is one of --labels, only rows not older than --since; of several rows for the same cell
 the LATEST one is used (so re-measuring replaces a cell). A row with passes gives the warm figures of
 its worker count and, if it has a cold process, the cold ones; a `--cold-only` row gives cold figures.
@@ -56,9 +61,17 @@ COLUMNS = ["utc", "quiet", "corpus", "what", "launcher", "workers", "load", "mod
            "best_later_s", "median_later_s", "pass1_s", "cold_wall_s", "cpu_median_s", "gc_median_ms",
            "peak_rss_mib", "cold_cpu_s", "cold_rss_mib", "walls_s", "loadavg", "label", "dist", "build"]
 CORPORA = ["init", "std", "cedar", "reachability", "con-leche", "navier-stokes-euler", "cslib", "mathlib"]
-# (key, heading): key = (checker as warm.py's "what" up to the first '+', launcher)
-CHECKERS = [(("machine", "jvm"), "RLVM machine, JVM"), (("machine", "native"), "RLVM machine, native"),
-            (("reference", "jvm"), "RLVM reference, JVM"), (("reference", "native"), "RLVM reference, native"),
+ENGINES = ("reference", "machine")
+
+
+def checkers(default_engine: str) -> list:
+    """(key, heading) per table row: key = (checker as warm.py's "what" up to the first '+', launcher).
+    The default configuration first (OWNER-NOTES 13: what a run without any option is)."""
+    other = [e for e in ENGINES if e != default_engine][0]
+    return [((default_engine, "jvm"), f"**RLVM default configuration** ({default_engine} engine), JVM launcher"),
+            ((default_engine, "native"), f"**RLVM default configuration** ({default_engine} engine), native image"),
+            ((other, "jvm"), f"RLVM `-X engine={other}`, JVM launcher"),
+            ((other, "native"), f"RLVM `-X engine={other}`, native image"),
             (("gruszka", "rust"), "gruszka"), (("nano-lean", "rust"), "nano-lean")]
 NOTES = os.path.join(HERE, "benchmarks-notes.md")
 
@@ -89,7 +102,7 @@ def read_rows(paths: list[str]) -> list[dict]:
     return rows
 
 
-def select(rows: list[dict], labels: list[str], since: str | None) -> dict:
+def select(rows: list[dict], labels: list[str], since: str | None, default_engine: str = "reference") -> dict:
     """cells[(corpus, checker, launcher)] = {"warm8": row, "warm1": row, "cold8": row}: the latest eligible row each."""
     cells: dict = {}
     for row in sorted(rows, key=lambda r: r["utc"]):
@@ -97,7 +110,10 @@ def select(rows: list[dict], labels: list[str], since: str | None) -> dict:
             continue
         if not row["verdict"].startswith("ACCEPT"):
             continue
-        key = (row["corpus"], row["what"].split("+")[0], row["launcher"])
+        what = row["what"].split("+")[0]
+        if what == "default":
+            what = default_engine   # measured without -X engine: the default configuration itself
+        key = (row["corpus"], what, row["launcher"])
         cell = cells.setdefault(key, {})
         workers = row["workers"]
         if num(row["median_later_s"]) is not None and workers in ("8", "1"):
@@ -107,6 +123,19 @@ def select(rows: list[dict], labels: list[str], since: str | None) -> dict:
         elif row["launcher"] in ("jvm", "native") and workers == "8" and num(row["pass1_s"]) is not None and "cold8" not in cell:
             cell["pass1_8"] = row   # no separate cold process (mathlib): pass 1 of the warm process stands for it
     return cells
+
+
+def steady(row: dict):
+    """The warm wall clock of a row: the median of passes 4..N when the process made 8 or more passes
+    (the first two or three later passes of a JVM are still warm-up: J1.md 3.2), else of passes 2..N."""
+    walls = [num(x) for x in (row.get("walls_s") or "").split()]
+    walls = [w for w in walls if w is not None]
+    later = walls[3:] if len(walls) >= 8 else walls[1:]
+    if not later:
+        return num(row.get("median_later_s"))
+    later = sorted(later)
+    mid = len(later) // 2
+    return later[mid] if len(later) % 2 else (later[mid - 1] + later[mid]) / 2
 
 
 def f2(value, digits=2) -> str:
@@ -128,23 +157,28 @@ def corpus_title(name: str) -> str:
     return f"{name} ({size / 1e9:.2f} GB)" if size >= 1e9 else f"{name} ({size / 1e6:.0f} MB)"
 
 
-def table(title: str, lead: str, cells: dict, corpora: list[str], value, ratios: list[tuple[str, tuple, tuple]] = ()) -> list[str]:
-    """value(cell) -> text or None. ratios: (heading, key of ours, key of theirs) on numeric(cell)."""
+def table(title: str, lead: str, cells: dict, corpora: list[str], rows_of: list, value, ratios: list[tuple[str, tuple, tuple]] = ()) -> list[str]:
+    """One row per checker (rows_of: (key, heading)), one column per corpus; value(cell) -> (text, number).
+    ratios: (heading, key of ours, key of theirs), one row each behind the checkers."""
     out = [f"## {title}", "", lead, ""]
-    head = ["Corpus"] + [h for _k, h in CHECKERS] + [h for h, _a, _b in ratios]
-    out.append("| " + " | ".join(head) + " |")
-    out.append("|---|" + "--:|" * (len(head) - 1))
-    for corpus in corpora:
-        line = [corpus_title(corpus)]
-        nums = {}
-        for key, _h in CHECKERS:
+    used = [c for c in corpora if any(value(cells.get((c,) + key, {}))[0] != "-" for key, _h in rows_of)]
+    if not used:
+        return out + ["Not measured for the current build.", ""]
+    out.append("| Checker, platform | " + " | ".join(corpus_title(c) for c in used) + " |")
+    out.append("|---|" + "--:|" * len(used))
+    nums: dict = {}
+    for key, heading in rows_of:
+        line = []
+        for corpus in used:
             text, number = value(cells.get((corpus,) + key, {}))
-            nums[key] = number
+            nums[(corpus,) + key] = number
             line.append(text)
-        for _h, a, b in ratios:
-            line.append(ratio(nums.get(a), nums.get(b)))
-        if any(x != "-" for x in line[1:1 + len(CHECKERS)]):
-            out.append("| " + " | ".join(line) + " |")
+        if any(x != "-" for x in line):
+            out.append(f"| {heading} | " + " | ".join(line) + " |")
+    for heading, a, b in ratios:
+        line = [ratio(nums.get((c,) + a), nums.get((c,) + b)) for c in used]
+        if any(x != "-" for x in line):
+            out.append(f"| *{heading}* | " + " | ".join(line) + " |")
     out.append("")
     return out
 
@@ -182,9 +216,11 @@ def jars_of(dist: str) -> list[str]:
         return []
 
 
-def instructions(corpora: list[str], history_dir: str, threads: int, since: str | None) -> tuple[list[str], list[str]]:
+def instructions(corpora: list[str], history_dir: str, threads: int, since: str | None, default_engine: str = "reference") -> tuple[list[str], list[str]]:
     lines, prov = [], []
-    head = ["Corpus", "RLVM machine, native", "RLVM reference, native", "gruszka", "nano-lean", "machine / gruszka", "reference / gruszka"]
+    other = [e for e in ENGINES if e != default_engine][0]
+    head = ["Corpus", f"RLVM default configuration ({default_engine} engine), native", f"RLVM `-X engine={other}`, native", "gruszka", "nano-lean",
+            "default / gruszka", f"{other} / gruszka"]
     lines.append("| " + " | ".join(head) + " |")
     lines.append("|---|" + "--:|" * (len(head) - 1))
     any_row = False
@@ -192,11 +228,12 @@ def instructions(corpora: list[str], history_dir: str, threads: int, since: str 
         name, _path, arena, expected = track.resolve(corpus)
         entries = track.read_history(history_dir, name)
         vals = {}
-        for engine in ("machine", "reference"):
-            config = f"rlvm/native/t{threads}/-X engine={engine}"
+        for engine in ENGINES:
+            # the default configuration is recorded without -X engine (rlvm/native/tN) or with its engine named
+            configs = [f"rlvm/native/t{threads}/-X engine={engine}"] + ([f"rlvm/native/t{threads}"] if engine == default_engine else [])
             found = None
             for entry in entries:
-                if entry.get("config") == config and entry.get("valid") and entry.get("instructions") and (not since or entry.get("utc", "") >= since):
+                if entry.get("config") in configs and entry.get("valid") and entry.get("instructions") and (not since or entry.get("utc", "") >= since):
                     found = entry
             vals[engine] = found
             if found:
@@ -206,8 +243,8 @@ def instructions(corpora: list[str], history_dir: str, threads: int, since: str 
                             f"`{found.get('command', '')}` |")
         base = track.load_baselines(name, history_dir, arena, expected)
         g, n = base.get("gruszka", {}).get("instructions"), base.get("nano-lean", {}).get("instructions")
-        m = vals["machine"]["instructions"] if vals["machine"] else None
-        r = vals["reference"]["instructions"] if vals["reference"] else None
+        m = vals[default_engine]["instructions"] if vals[default_engine] else None
+        r = vals[other]["instructions"] if vals[other] else None
         if m is None and r is None:
             continue
         any_row = True
@@ -227,13 +264,16 @@ def main() -> int:
     parser.add_argument("--since", help="ignore rows and history entries older than this UTC time (2026-11-24T21:00:00Z)")
     parser.add_argument("--history", default=track.DEFAULT_HISTORY, help="the tracker's history, for the instruction counts")
     parser.add_argument("--instr-threads", type=int, default=8, help="worker count of the history entries used for table 6 (default 8)")
+    parser.add_argument("--default-engine", default="reference", choices=ENGINES,
+                        help="the engine a run without -X engine checks with (rlvm --version: 'default engine: NAME'); its rows come first (default reference)")
     parser.add_argument("--notes", default=NOTES, help="markdown put in front of and behind the tables (default bench/track/benchmarks-notes.md)")
     parser.add_argument("--out", default=os.path.join(ROOT, "docs", "BENCHMARKS.md"))
     parser.add_argument("--stdout", action="store_true")
     args = parser.parse_args()
     paths = args.tsv or [os.path.join(ROOT, "work", "perf-history", "warm.tsv")]
     labels = [x for x in args.labels.split(",") if x]
-    cells = select(read_rows(paths), labels, args.since)
+    cells = select(read_rows(paths), labels, args.since, args.default_engine)
+    CHECKERS = checkers(args.default_engine)
     corpora = [c for c in CORPORA if any(k[0] == c for k in cells)]
     corpora += sorted({k[0] for k in cells} - set(corpora))
 
@@ -242,7 +282,7 @@ def main() -> int:
             row = cell.get("warm" + workers)
             if not row:
                 return "-", None
-            median, best = num(row["median_later_s"]), num(row["best_later_s"])
+            median, best = steady(row), num(row["best_later_s"])
             return f"**{f2(median)}** ({f2(best)})", median
         return value
 
@@ -271,7 +311,8 @@ def main() -> int:
             return "-", None
         return f"{f2(w, 0)} / {f2(c, 0)}", w
 
-    mj, mn, rj, rn, gr, nl = [k for k, _h in CHECKERS]
+    dj, dn, oj, on, gr, nl = [k for k, _h in CHECKERS]
+    other = oj[0]
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     head, tail = "", ""
     try:
@@ -290,35 +331,40 @@ def main() -> int:
         out += [head.strip(), ""]
     out += table("1. Warm wall clock, 8 workers, load pipelined (s)",
                  "The target metric (OWNER-NOTES 12). **Median of the later passes** (best later pass) of one process that checks the "
-                 "export N times; every pass is a complete run (load pipelined with checking). gruszka and nano-lean: the second of "
-                 "two runs with 8 threads (no JIT: their run is their steady state).",
-                 cells, corpora, warm("8"),
-                 [("machine JVM / gruszka", mj, gr), ("machine native / gruszka", mn, gr), ("reference JVM / gruszka", rj, gr),
-                  ("machine JVM / native", mj, mn), ("reference JVM / native", rj, rn)])
+                 "export N times; every pass is a complete run (load pipelined with checking). Later passes = passes 4..N of a process "
+                 "with 8 or more passes (a JVM is still compiling in passes 2 and 3), passes 2..N otherwise; the provenance lists every "
+                 "pass. gruszka and nano-lean: the second of two runs with 8 threads (no JIT: their run is their steady state).",
+                 cells, corpora, CHECKERS, warm("8"),
+                 [("default configuration, JVM / gruszka", dj, gr), ("default configuration, native / gruszka", dn, gr),
+                  (f"{other}, JVM / gruszka", oj, gr), (f"{other}, native / gruszka", on, gr),
+                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
     out += table("2. Warm wall clock, 1 worker (s)",
                  "As table 1 with `--threads 1` (one worker; the loader and the environment pass have threads of their own). "
                  "Baselines: one thread.",
-                 cells, corpora, warm("1"), [("machine JVM / gruszka", mj, gr), ("machine native / gruszka", mn, gr)])
+                 cells, corpora, CHECKERS, warm("1"),
+                 [("default configuration, JVM / gruszka", dj, gr), (f"{other}, JVM / gruszka", oj, gr),
+                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
     out += table("3. Cold wall clock of a fresh process, 8 workers (s) - for information",
                  "One fresh process, exec to exit, the build's default configuration (what an arena run is, with 8 threads). "
                  "\"(pass 1)\" = no separate cold process was run: the first pass of the warm process, without the launcher's start. "
                  "Baselines: the first of the two runs.",
-                 cells, corpora, cold, [("machine native / gruszka", mn, gr), ("reference native / gruszka", rn, gr),
-                                         ("machine JVM / native", mj, mn)])
+                 cells, corpora, CHECKERS, cold,
+                 [("default configuration, native / gruszka", dn, gr), (f"{other}, native / gruszka", on, gr),
+                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
     out += table("4. CPU time, 8 workers (s): median warm pass / cold process",
                  "A diagnostic, not the target: process CPU time (all threads: workers, loader, environment thread, JIT compiler, "
                  "collector) of the pass that is the median of table 1, and of the cold process of table 3. CPU / wall says how much "
                  "of the 8 cores a pass uses.",
-                 cells, corpora, cpu)
+                 cells, corpora, CHECKERS, cpu)
     out += table("5. Peak RSS, 8 workers (MiB): warm process / cold process",
                  "Peak resident set of the process that made the passes of table 1 (over all its passes), and of the cold process "
                  "of table 3. The JVM launcher's figure is bounded by its heap flags (see the notes), not by what the checker needs.",
-                 cells, corpora, rss)
+                 cells, corpora, CHECKERS, rss, [("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
     out += ["## 6. Instructions of a cold process - the arena's metric, for information", "",
             f"User-space instructions of one fresh process in the arena-shaped container (`bench/track/track.py`, `perf stat`), native image, "
             f"`--threads {args.instr_threads}`; baselines with their arena run lines (4 threads) as recorded on this host "
             f"(`bench/baselines.json`). Instruction counts do not depend on the host's load and repeat to 0.2 %.", ""]
-    instr_lines, instr_prov = instructions(corpora, os.path.abspath(args.history), args.instr_threads, args.since)
+    instr_lines, instr_prov = instructions(corpora, os.path.abspath(args.history), args.instr_threads, args.since, args.default_engine)
     out += instr_lines + [""]
 
     # ---- provenance ----

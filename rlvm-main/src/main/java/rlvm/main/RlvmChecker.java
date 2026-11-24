@@ -178,13 +178,34 @@ public final class RlvmChecker implements Checker {
         // '(auto)' = decided by this checker's defaults, not given: the worker count (--threads auto),
         // the load mode (MainOptions.resolveLoadDefaults), the reader's scanner threads.
         return "rlvm: stats: outcome=" + Outcome.name(outcome) + " engine=" + s.primary.name()
-                + " reference=" + s.reference.name() + " policy=" + s.mo.policyName() + " workers=" + workerCount
+                + " reference=" + s.reference.name() + " policy=" + s.mo.policyName() + strictNote(s.mo)
+                + " workers=" + workerCount
                 + (s.autoWorkers ? "(auto)" : "") + " load="
                 + s.config.loadMode.name().toLowerCase(java.util.Locale.ROOT) + (s.mo.loadGiven ? "" : "(auto)")
                 + " scan-threads=" + s.mo.scanThreads + (s.mo.scanThreadsGiven ? "" : "(auto)")
                 + " io=" + s.mo.io.name().toLowerCase(java.util.Locale.ROOT)
                 + (s.mo.appliedRunDefaults.isEmpty() ? "" : " engine-defaults=" + s.mo.appliedRunDefaults)
                 + " wall_ms=" + wallNanos / 1_000_000;
+    }
+
+    /**
+     * "[ref.exact=official,metadata]" behind {@code policy=strict}: the exactness-only options of the
+     * other modules that this run really has (the engines' settings that some provider declares, the
+     * loader's metadata decline if the loader has it); "[]" = none exists in these jars, the strict
+     * mode is then the reference engine alone. Empty for the practical policy.
+     */
+    static String strictNote(MainOptions mo) {
+        if (!mo.strict) {
+            return "";
+        }
+        java.util.List<String> on = new java.util.ArrayList<>();
+        for (Map.Entry<String, String> e : mo.strictEngineSettings.entrySet()) {
+            on.add(e.getKey() + "=" + e.getValue());
+        }
+        if (MainWiring.strictLoadAvailable()) {
+            on.add("metadata");
+        }
+        return "[" + String.join(",", on) + "]";
     }
 
     /**
