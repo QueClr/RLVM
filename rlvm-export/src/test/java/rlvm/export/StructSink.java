@@ -13,6 +13,7 @@ final class StructSink extends TraceSink {
     private final Random rnd;
     long runs;
     long runRecords;
+    long earlyChildren;
 
     /** @param take 0 = refuse every run, 1 = take every run, 2 = take or refuse at random */
     StructSink(int take, long seed) {
@@ -40,8 +41,9 @@ final class StructSink extends TraceSink {
     }
 
     @Override
-    public int exprRun(int firstFileId, int count, int delta, int minLocal, byte[] packed, int off, int len, int[] ext,
-            int extOff, int extCount, int numLam, int numPi, int numLet) {
+    public int exprRun(int firstFileId, int count, int delta, int minLocal, byte[] packed, int off, int len, byte[] lengths,
+            int lengthsOff, int[] open, int openOff, int openCount, int numLam, int numPi, int numLet, int numEarly,
+            int maxEarly) {
         if (take == 0 || (take == 2 && rnd.nextBoolean())) {
             return RUN_REFUSED;
         }
@@ -51,47 +53,60 @@ final class StructSink extends TraceSink {
         }
         int first = exprs + 1;
         int p = off;
-        int e = extOff;
+        int e = openOff;
+        final int openEnd = openOff + 2 * openCount;
         int lam = 0;
         int pi = 0;
         int let = 0;
+        int early = 0;
         int[] c = new int[3];
         for (int i = 0; i < count; i++) {
             int id = firstFileId + i;
-            int head = packed[p++];
-            int tag = head & 0xF;
+            int recordEnd = p + (lengths[lengthsOff + i] & 0xFF);
+            int tag = packed[p++];
             int kids = tag == T.RUNS.let ? 3 : 2;
             for (int k = 0; k < kids; k++) {
-                int child;
-                if ((head & (0x10 << k)) != 0) {
-                    child = ext[e++];
-                    if (child >= minLocal) {
-                        throw new AssertionError("external child " + child + " of " + id + " is not below " + minLocal);
+                boolean body = k == kids - 1 && tag != T.RUNS.app;
+                if (e < openEnd && (open[e] & 0x7FFF_FFFF) == p - off) {
+                    // OPEN: the next entry of the list stands at this offset
+                    if ((open[e] < 0) != body) {
+                        throw new AssertionError("body flag of child " + k + " of " + id);
                     }
+                    int child = open[e + 1];
+                    e += 2;
+                    if (child >= minLocal || child < 0) {
+                        throw new AssertionError("open child " + child + " of " + id + " is not below " + minLocal);
+                    }
+                    c[k] = child + delta;
+                    continue;
+                }
+                int v = 0;
+                int shift = 0;
+                int b;
+                do {
+                    b = packed[p++];
+                    v |= (b & 0x7F) << shift;
+                    shift += 7;
+                } while (b < 0);
+                if ((v & 1) == 0) {
+                    // LOCAL
+                    int child = id - (v >>> 1);
+                    if (v == 0 || child < minLocal) {
+                        throw new AssertionError("local child " + child + " of " + id + " is below " + minLocal);
+                    }
+                    c[k] = child + delta;
                 } else {
-                    int v = 0;
-                    int shift = 0;
-                    int b;
-                    do {
-                        b = packed[p++];
-                        v |= (b & 0x7F) << shift;
-                        shift += 7;
-                    } while (b < 0);
-                    if ((v & 1) != 0 || v == 0) {
-                        throw new AssertionError("not a distance: " + v);
+                    // EARLY: the tests' tables hold the sink id of the expression itself
+                    int r = v >>> 1;
+                    if (r > maxEarly || r >= minLocal + delta || r < 1) {
+                        throw new AssertionError("early child " + r + " of " + id + ", largest announced " + maxEarly);
                     }
-                    child = id - (v >>> 1);
-                    if (child < minLocal) {
-                        throw new AssertionError("encoded child " + child + " of " + id + " is below " + minLocal);
-                    }
+                    early++;
+                    c[k] = r;
                 }
-                if (child < 0 || child >= id) {
-                    throw new AssertionError("child " + child + " of " + id);
-                }
-                c[k] = child + delta;
             }
-            if ((head >>> (4 + kids)) != 0) {
-                throw new AssertionError("head " + head);
+            if (p != recordEnd) {
+                throw new AssertionError("record " + id + " ends at " + p + ", its length says " + recordEnd);
             }
             if (tag == T.RUNS.app) {
                 ev("app", c[0], c[1], exprs + 1);
@@ -109,13 +124,14 @@ final class StructSink extends TraceSink {
             }
             exprs++;
         }
-        if (p != off + len || e != extOff + extCount || lam != numLam || pi != numPi || let != numLet) {
-            throw new AssertionError("run of " + count + ": " + (p - off) + " of " + len + " bytes, " + (e - extOff) + " of "
-                    + extCount + " external children, " + lam + "/" + pi + "/" + let + " binders against " + numLam + "/"
-                    + numPi + "/" + numLet);
+        if (p != off + len || e != openEnd || lam != numLam || pi != numPi || let != numLet || early != numEarly) {
+            throw new AssertionError("run of " + count + ": " + (p - off) + " of " + len + " bytes, " + (e - openOff) / 2 + " of "
+                    + openCount + " open children, " + lam + "/" + pi + "/" + let + " binders against " + numLam + "/"
+                    + numPi + "/" + numLet + ", " + early + " early children against " + numEarly);
         }
         runs++;
         runRecords += count;
+        earlyChildren += early;
         return first;
     }
 }

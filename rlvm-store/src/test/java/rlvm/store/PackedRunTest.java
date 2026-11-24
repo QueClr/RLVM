@@ -124,8 +124,10 @@ class PackedRunTest {
         ProofBlocks.Writer w = b.blockWriter();
         ProofBlocks.Writer out = mode == DEFAULT_RUN ? plain(w) : w;
         Random rnd = new Random(seed * 31 + 7); // the same cuts and encodings for both run modes
+        final int unitStart = s1; // shared terms from here on belong to the open unit
         byte[] packed = new byte[64];
-        int[] ext = new int[16];
+        byte[] lengths = new byte[16];
+        int[] open = new int[16];
         int i = 0;
         while (i < script.length) {
             Rec r = script[i];
@@ -159,38 +161,58 @@ class PackedRunTest {
             while (end < script.length && structure(script[end].kind) != 0 && (end == i || rnd.nextInt(12) != 0)) {
                 end++;
             }
-            int p = 3; // an offset, to see that offsets are honoured
-            int e = 2;
-            int e0 = e;
+            // which shared references are written into the bytes: none, those to earlier units (the
+            // loader's case), or any (terms of the open unit too: the writer must still be exact)
+            int earlyMode = rnd.nextInt(4);
+            final int p0 = 3; // offsets, to see that they are honoured
+            final int l0 = 1;
+            final int e0 = 2;
+            int p = p0;
+            int e = e0;
+            int maxEarly = 0;
             for (int j = i; j < end; j++) {
                 Rec q = script[j];
                 int kids = structure(q.kind);
                 if (packed.length < p + 1 + 5 * kids) {
                     packed = Arrays.copyOf(packed, packed.length * 2);
                 }
-                if (ext.length < e + kids) {
-                    ext = Arrays.copyOf(ext, ext.length * 2);
+                if (open.length < e + 2 * kids) {
+                    open = Arrays.copyOf(open, open.length * 2);
                 }
-                int headAt = p++;
-                int head = q.kind;
+                if (lengths.length < l0 + (j - i) + 1) {
+                    lengths = Arrays.copyOf(lengths, lengths.length * 2);
+                }
+                final int start = p;
+                packed[p++] = (byte) q.kind;
                 for (int c = 0; c < kids; c++) {
                     int v = q.child[c];
-                    // a local child is pre-encoded or external; a shared child is always external
-                    if (v > 0 || rnd.nextBoolean()) {
-                        head |= 0x10 << c;
-                        ext[e++] = v;
-                    } else {
-                        int enc = ProofBlocks.Writer.local(j - (-v - 1));
-                        while ((enc & ~0x7F) != 0) {
-                            packed[p++] = (byte) (enc | 0x80);
-                            enc >>>= 7;
+                    boolean body = c == kids - 1 && q.kind != Kind.APP;
+                    int enc;
+                    if (v > 0) {
+                        boolean early = earlyMode == 3 || (earlyMode != 0 && v < unitStart);
+                        if (!early || rnd.nextInt(5) == 0) {
+                            open[e++] = (p - p0) | (body ? 0x8000_0000 : 0);
+                            open[e++] = v;
+                            continue;
                         }
-                        packed[p++] = (byte) enc;
+                        maxEarly = Math.max(maxEarly, v);
+                        enc = ProofBlocks.Writer.shared(v);
+                    } else if (rnd.nextBoolean()) {
+                        open[e++] = (p - p0) | (body ? 0x8000_0000 : 0);
+                        open[e++] = v;
+                        continue;
+                    } else {
+                        enc = ProofBlocks.Writer.local(j - (-v - 1));
                     }
+                    while ((enc & ~0x7F) != 0) {
+                        packed[p++] = (byte) (enc | 0x80);
+                        enc >>>= 7;
+                    }
+                    packed[p++] = (byte) enc;
                 }
-                packed[headAt] = (byte) head;
+                lengths[l0 + j - i] = (byte) (p - start);
             }
-            out.run(packed, 3, p - 3, end - i, ext, e0, e - e0);
+            out.run(packed, p0, p - p0, lengths, l0, end - i, open, e0, (e - e0) / 2, maxEarly);
             assertEquals(end, out.size());
             i = end;
         }
@@ -306,31 +328,34 @@ class PackedRunTest {
         fx.builder.reserve(DeclKind.THM, fx.name("thm"), 0);
         int s1 = fx.builder.bvar(0);
         ProofBlocks.Writer w = fx.builder.blockWriter();
+        byte[] app = {Kind.APP};            // an APP record with both references open
+        byte[] one = {1};
+        byte[] two = {1, 1};
+        int[] both = {1, s1, 1, s1};        // two open references at offset 1
         w.bvar(1);
-        int[] ext = {s1, s1};
-        // too few bytes for the announced records
-        assertThrows(IllegalArgumentException.class, () -> w.run(new byte[] {(byte) (Kind.APP | 0x30)}, 0, 1, 2, ext, 0, 2));
+        // more records announced than there are bytes
+        assertThrows(RuntimeException.class, () -> w.run(app, 0, 1, two, 0, 2, both, 0, 2, 0));
         w.abort();
         w.bvar(1);
-        // an external count that the records do not use up
-        assertThrows(IllegalArgumentException.class, () -> w.run(new byte[] {(byte) (Kind.APP | 0x10), 2}, 0, 2, 1, ext, 0, 2));
-        w.abort();
-        w.bvar(1);
-        // a kind that is not a structure record
-        assertThrows(IllegalArgumentException.class, () -> w.run(new byte[] {(byte) (Kind.BVAR | 0x10)}, 0, 1, 1, ext, 0, 1));
-        w.abort();
-        w.bvar(1);
-        // an external local reference to a record that does not exist yet
-        assertThrows(IllegalArgumentException.class, () -> w.run(new byte[] {(byte) (Kind.APP | 0x30)}, 0, 1, 1, new int[] {-2, s1}, 0, 2));
-        w.abort();
-        // a shared term that does not exist
-        w.bvar(1);
+        // an open reference that no record uses
         assertThrows(IllegalArgumentException.class,
-                () -> w.run(new byte[] {(byte) (Kind.APP | 0x30)}, 0, 1, 1, new int[] {s1 + 100, s1}, 0, 2));
+                () -> w.run(new byte[] {Kind.APP, 2}, 0, 2, new byte[] {2}, 0, 1, new int[] {1, s1, 9, s1}, 0, 2, 0));
         w.abort();
-        // and a well-formed one
         w.bvar(1);
-        w.run(new byte[] {(byte) (Kind.APP | 0x30)}, 0, 1, 1, new int[] {-1, s1}, 0, 2);
+        // an open reference to a record of the block that does not exist yet
+        assertThrows(IllegalArgumentException.class, () -> w.run(app, 0, 1, one, 0, 1, new int[] {1, -2, 1, s1}, 0, 2, 0));
+        w.abort();
+        w.bvar(1);
+        // a shared term that does not exist
+        assertThrows(IllegalArgumentException.class, () -> w.run(app, 0, 1, one, 0, 1, new int[] {1, s1 + 100, 1, s1}, 0, 2, 0));
+        w.abort();
+        w.bvar(1);
+        // a length that does not match the bytes
+        assertThrows(IllegalArgumentException.class, () -> w.run(app, 0, 1, new byte[] {3}, 0, 1, both, 0, 2, 0));
+        w.abort();
+        // and a well-formed one: APP (record 0) s1
+        w.bvar(1);
+        w.run(app, 0, 1, one, 0, 1, new int[] {1, -1, 1, s1}, 0, 2, 0);
         assertEquals(2, w.size());
     }
 }

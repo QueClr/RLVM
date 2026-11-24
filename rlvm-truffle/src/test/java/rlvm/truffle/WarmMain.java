@@ -54,6 +54,11 @@ public final class WarmMain {
             final AtomicInteger next = new AtomicInteger();
             final AtomicInteger accepted = new AtomicInteger();
             final AtomicLong workerNanos = new AtomicLong();
+            final AtomicLong ticks = new AtomicLong();
+            final AtomicLong records = new AtomicLong();
+            final AtomicLong runWords = new AtomicLong();
+            final AtomicLong entered = new AtomicLong();
+            final java.util.concurrent.ConcurrentHashMap<String, AtomicLong> code = new java.util.concurrent.ConcurrentHashMap<>();
             final int units = h.store.loadedUnits();
             Thread[] ts = new Thread[threads];
             c0 = Cpu.processNanos();
@@ -94,6 +99,19 @@ public final class WarmMain {
                     }
                     workerNanos.addAndGet(Cpu.threadNanos() - workerStart); // this thread only: no compiler, no promoter
                     accepted.addAndGet(ok);
+                    rlvm.machine.Machine wm = rlvm.machine.T2Bridge.machineOf(s);
+                    if (wm != null) { // what this pass built and counted (the machine is new with the session)
+                        ticks.addAndGet(rlvm.machine.T2Bridge.ticks(wm));
+                        records.addAndGet(rlvm.machine.T2Bridge.recordsTotal(wm));
+                        runWords.addAndGet(rlvm.machine.T2Bridge.runWordsTotal(wm));
+                        entered.addAndGet(rlvm.machine.T2Bridge.entered(wm));
+                        for (String kv : rlvm.machine.T2Bridge.codeCounters(wm).split(" ")) {
+                            int eq = kv.indexOf('=');
+                            if (eq > 0) {
+                                code.computeIfAbsent(kv.substring(0, eq), k -> new AtomicLong()).addAndGet(Long.parseLong(kv.substring(eq + 1)));
+                            }
+                        }
+                    }
                     s.close();
                 }, "warm-worker-" + i, 64L << 20);
                 ts[i].start();
@@ -109,6 +127,12 @@ public final class WarmMain {
             bestCpu = Math.min(bestCpu, cpu);
             System.out.println(String.format(Locale.ROOT, "[warm] pass %d (warm, %d threads): wall %.0f ms, process cpu %.0f ms, accepted %d of %d, worker cpu %.0f ms", p, threads, wall, cpu,
                     accepted.get(), units, workerNanos.get() / 1e6));
+            StringBuilder cc = new StringBuilder();
+            for (String k : new java.util.TreeSet<>(code.keySet())) {
+                cc.append(' ').append(k).append('=').append(code.get(k).get());
+            }
+            System.out.println(String.format(Locale.ROOT, "[warm] pass %d counts: ticks %d, records %d, run words %d, activations %d%s", p, ticks.get(), records.get(),
+                    runWords.get(), entered.get(), cc));
             Harness.settle(h.t2());
         }
         T2Engine e = h.t2();

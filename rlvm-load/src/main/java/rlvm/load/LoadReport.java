@@ -76,6 +76,8 @@ public final class LoadReport {
     public long packedRuns;
     public long packedRunRecords;
     public long expandedRuns;
+    /** References in packed runs that a scanner thread found resolved in the loader's location table. */
+    public long packedEarlyRefs;
     /** Constants dropped because their record was unsafe or partial. */
     public long droppedUnsafe;
     /** Expression records after the last admitted declaration (never written anywhere). */
@@ -170,8 +172,8 @@ public final class LoadReport {
         sb.append(String.format(Locale.ROOT, "  publications %,d (%,d units published), scan threads %d%s%n", publications,
                 publishedUnits, scanThreads, formatVersionSupported ? "" : ", format version not 3.x (ignored)"));
         if (packedRuns != 0) {
-            sb.append(String.format(Locale.ROOT, "  packed runs %,d (%,d records), expanded %,d%n", packedRuns, packedRunRecords,
-                    expandedRuns));
+            sb.append(String.format(Locale.ROOT, "  packed runs %,d (%,d records, %,d references resolved by scanner threads), expanded %,d%n",
+                    packedRuns, packedRunRecords, packedEarlyRefs, expandedRuns));
         }
         return sb.toString();
     }

@@ -57,6 +57,7 @@ final class T {
         /** {@link #struct}: runs taken by the sink, and the records in them. */
         long runs;
         long runRecords;
+        long earlyChildren;
 
         String outcome() {
             return ok ? "ok" : kind + "@" + line;
@@ -126,6 +127,36 @@ final class T {
         return o;
     }
 
+    /**
+     * A table of finished expressions for the scanner threads ({@link ExportReader.EarlyRefs}) as a sink
+     * that numbers expressions from 1 would keep it: entry {@code file id + 1} is the sink id of the
+     * expression, for every expression ({@code every} 1) or every {@code every}-th one.
+     */
+    static ExportReader.EarlyRefs earlyRefs(int every) {
+        int[] table = new int[1 << 21];
+        for (int i = 1; i < table.length; i += every) {
+            table[i] = i;
+        }
+        return new ExportReader.EarlyRefs() {
+            @Override
+            public int[] table() {
+                return table;
+            }
+
+            @Override
+            public int delta() {
+                return 1;
+            }
+        };
+    }
+
+    /** {@link #packing} with a table of finished expressions. */
+    static ExportReader.Options packingEarly(int threads, int chunkBytes, int every) {
+        ExportReader.Options o = options(threads, chunkBytes, false);
+        o.runs = RUNS.withEarly(earlyRefs(every));
+        return o;
+    }
+
     /** Parallel mode with packed runs offered to a sink that refuses them (every {@link TraceSink}). */
     static Run packed(byte[] data, int threads, int chunkBytes) {
         return run(true, sink -> ExportReader.read(data, sink, packing(threads, chunkBytes)));
@@ -152,6 +183,7 @@ final class T {
         r.events = sink.events;
         r.runs = sink.runs;
         r.runRecords = sink.runRecords;
+        r.earlyChildren = sink.earlyChildren;
         return r;
     }
 
@@ -223,6 +255,11 @@ final class T {
             same(what + ": packing 256, taken", s, struct(data, packing(3, 256), 1), true);
             same(what + ": packing 1000, taken", s, struct(data, packing(2, 1000), 1), true);
             same(what + ": packing 5000, taken at random", s, struct(data, packing(2, 5000), 2), true);
+            // and with a table of finished expressions: complete, and with holes
+            same(what + ": packing 256, early", s, struct(data, packingEarly(3, 256, 1), 1), true);
+            same(what + ": packing 2000, some early, taken at random", s, struct(data, packingEarly(2, 2000, 3), 2), true);
+            same(what + ": packing 3000, early, refused", f, run(true, sink -> ExportReader.read(data, sink, packingEarly(2, 3000, 1))),
+                    true);
         }
         return f;
     }

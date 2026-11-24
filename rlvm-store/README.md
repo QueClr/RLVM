@@ -359,6 +359,30 @@ stayed below the mark; with 64 or more of them (and more than eight times as man
 ended. Reported by rlvm-admit (requests.log, 14:02Z); the map is now sized for the blocks that stay
 (`OverlayTest.resetToRebuildsTheBlockMapForTheBlocksBelowTheMark`).
 
+### LP2: packed runs and the record index of promotion (2026-11-24)
+
+Nothing here changes a word of what a load builds (differential digest, `work/lp2/digest`).
+
+1. **`ProofBlocks.Writer.run`**: a run of APP / LAM / PI / LET records handed over in PACKED form - the
+   record bytes as they will stand in the block (kind byte, references as LEB128) with some
+   references OPEN, one length byte per record, and the open references as `(offset, value)` pairs
+   (`> 0` a shared term, `< 0` an earlier record of the block). It is what a scanner thread of the
+   reader prepares (`rlvm-export` "Parallel packing"; `rlvm-load` links it). The writer walks the
+   length bytes once: the bytes between two open references are copied as they are, an open
+   reference is encoded where it belongs (with the bookkeeping of `ref`: unresolved flag, sharing
+   counters of the open unit), every record gets its entry in the sparse index. A reference that is
+   present in the bytes and names a shared term must name a term of an EARLIER unit, for which that
+   bookkeeping does nothing; the caller states the largest such id (`maxEarly`), and if it could be
+   an unresolved node or a node of the open unit the writer falls back to the interface default,
+   which makes the `count` calls of `app` / `lam` / `pi` / `let` one by one. `PackedRunTest`: 300
+   random blocks written record by record, through the default and through the writer's own `run`
+   give the same export region, block rows, decoded blocks and promotions.
+2. **A byte per block record for promotion** (`within`, loader state, given back by `finish()` with
+   the sparse index): the offset of the record from the sparse offset of its group of 16. `seek` is
+   two loads; it skipped up to 15 records before (`skip`: 6 % of the loader thread on Std after the
+   packing, with `seek` 1.8 %). The sparse index and the block rows are what they were. Cost: one
+   byte per block record while loading (mathlib 78 MB).
+
 ## Tests
 
 68 tests in 12 classes (`src/test/java/rlvm/store`), all green; one of them opt-in (it was run and passes).

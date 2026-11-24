@@ -806,6 +806,33 @@ public final class T2Bridge {
         return m.x7.entered;
     }
 
+    /** Records / run words the machine has made since it was created, the open session included (counts for measurements). */
+    public static long recordsTotal(Machine m) {
+        return m.recordsMade + (m.vp - m.vbase);
+    }
+
+    public static long runWordsTotal(Machine m) {
+        return m.runWordsMade + (m.rsp - m.rbase);
+    }
+
+    /**
+     * The counters the code package of this machine reports ({@code Machine.Counters} of {@code Code.Ext}: e.g. the
+     * CALL prototype's {@code call.entered}), as "name=value name=value"; "" if it reports none.
+     */
+    public static String codeCounters(Machine m) {
+        Object x = m.x7;
+        if (!(x instanceof Machine.Counters)) {
+            return "";
+        }
+        String[] names = ((Machine.Counters) x).counterNames();
+        long[] values = ((Machine.Counters) x).counterValues();
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < names.length; i++) {
+            sb.append(i == 0 ? "" : " ").append(names[i]).append('=').append(values[i]);
+        }
+        return sb.toString();
+    }
+
     public static int recordCount(Machine m) {
         return m.vp;
     }

@@ -778,33 +778,41 @@ public final class ProofBlocks {
          * of the reader prepares for a run of proof-private records, so that the loader thread only
          * has to supply the references it alone can resolve (LP2, parallel packing).
          *
-         * <p>A packed record is one head byte followed, for every child that is not external, by the
-         * final LEB128 bytes of its reference (a local reference {@link #local}, already encoded):
-         * head bits 0..3 = the kind, bit {@code 4 + i} set = child {@code i} (in the order of
-         * {@link #app}, {@link #lam}, {@link #pi}, {@link #let}) is EXTERNAL. The external children
-         * are taken from {@code ext[extOff ..]} in record and child order: a value {@code > 0} is a
-         * shared term id, a value {@code < 0} is {@code -(i + 1)} for record {@code i} of the block
-         * being written (an earlier one). The records written are byte for byte the records that the
-         * calls {@link #app}, {@link #lam}, {@link #pi}, {@link #let} with the same references write.
-         * A pre-encoded local reference is not validated: it is the caller's business that it names
-         * an earlier record of this block.
+         * <p>{@code packed[off .. off+len)} are the bytes of the records as they will stand in the
+         * block, except that some references are missing: a record is its kind byte followed by its
+         * references in the order of {@link #app}, {@link #lam}, {@link #pi}, {@link #let}, each either
+         * present as its final LEB128 bytes (a {@link #local} reference, or a {@link #shared} reference
+         * to a term of an EARLIER unit) or OPEN. {@code lengths[lengthsOff + i]} is the number of bytes
+         * of record {@code i} present in {@code packed}. The open references are
+         * {@code open[openOff .. openOff + 2 * openCount)} in record and child order, two ints each:
+         * the offset from {@code off} at which the reference belongs (bit 31 set: it is the body of a
+         * binder), and its value: {@code > 0} a shared term id, {@code < 0} {@code -(i + 1)} for record
+         * {@code i} of the block being written (an earlier one). A reference is open exactly if the
+         * next entry of the list has the offset reached. The records written are byte for byte the
+         * records that the calls {@link #app}, {@link #lam}, {@link #pi}, {@link #let} with the same
+         * references write. A reference present in the bytes is not validated beyond what those calls
+         * validate; that a local one names an earlier record of this block is the caller's business.
          *
-         * @param len number of packed bytes; {@code extCount} number of external children: both must
-         *     be exactly what the {@code count} records use ({@link IllegalArgumentException} otherwise,
-         *     with the block under construction in an undefined state)
+         * @param maxEarly the largest shared term id among the references present in the bytes (0:
+         *     none); every such term must belong to a unit before the one being written
+         * @throws IllegalArgumentException if the lengths, the list of open references and the bytes
+         *     do not fit together (the block under construction is then in an undefined state)
          */
-        default void run(byte[] packed, int off, int len, int count, int[] ext, int extOff, int extCount) {
+        default void run(byte[] packed, int off, int len, byte[] lengths, int lengthsOff, int count, int[] open,
+                int openOff, int openCount, int maxEarly) {
             int p = off;
-            int e = extOff;
+            int e = openOff;
+            final int openEnd = openOff + 2 * openCount;
             int[] r = new int[3];
             for (int i = 0; i < count; i++) {
-                int head = packed[p++];
-                int kind = head & 0xF;
-                int children = runChildren(kind);
                 int k = size();
+                int recordEnd = p + (lengths[lengthsOff + i] & 0xFF);
+                int kind = packed[p++];
+                int children = runChildren(kind);
                 for (int c = 0; c < children; c++) {
-                    if ((head & (0x10 << c)) != 0) {
-                        int v = ext[e++];
+                    if (e < openEnd && (open[e] & 0x7FFF_FFFF) == p - off) {
+                        int v = open[e + 1];
+                        e += 2;
                         r[c] = v > 0 ? shared(v) : local(k + v + 1);
                     } else {
                         int v = 0;
@@ -815,8 +823,14 @@ public final class ProofBlocks {
                             v |= (b & 0x7F) << shift;
                             shift += 7;
                         } while (b < 0);
+                        if ((v & 1) != 0 && (v >>> 1) > maxEarly) {
+                            throw new IllegalArgumentException("corrupt packed run: shared term " + (v >>> 1) + " above " + maxEarly);
+                        }
                         r[c] = v;
                     }
+                }
+                if (p != recordEnd) {
+                    throw new IllegalArgumentException("corrupt packed run");
                 }
                 switch (kind) {
                     case Kind.APP -> app(r[0], r[1]);
@@ -825,7 +839,7 @@ public final class ProofBlocks {
                     default -> let(r[0], r[1], r[2]);
                 }
             }
-            if (p != off + len || e != extOff + extCount) {
+            if (p != off + len || e != openEnd) {
                 throw new IllegalArgumentException("corrupt packed run");
             }
         }
@@ -934,47 +948,27 @@ public final class ProofBlocks {
         }
 
         /**
-         * Encodes external child {@code ext[e]} of the record with index {@code k} of the block at
-         * {@code b[q ..]}: a shared term id ({@code > 0}) or {@code -(index + 1)} of an earlier record
-         * of the block. Returns the position after it.
-         */
-        private int external(byte[] b, int q, int[] ext, int e, int extEnd, int k, boolean bodyPosition) {
-            if (e >= extEnd) {
-                throw new IllegalArgumentException("corrupt packed run");
-            }
-            final int v = ext[e];
-            int r;
-            if (v > 0) {
-                sharedRef(v, bodyPosition);
-                r = (v << 1) | 1;
-            } else {
-                int d = k + v + 1;
-                if (d < 1 || d > k) {
-                    throw new IllegalArgumentException("local reference " + d + " back from record " + k);
-                }
-                r = d << 1;
-            }
-            while ((r & ~0x7F) != 0) {
-                b[q++] = (byte) (r | 0x80);
-                r >>>= 7;
-            }
-            b[q++] = (byte) r;
-            return q;
-        }
-
-        /**
-         * The packed run in one loop: the bytes of the pre-encoded references are copied, the external
-         * ones are encoded here. Writes exactly what the record-by-record default writes.
+         * The packed run in one pass over the record lengths: the bytes between two open references
+         * are copied as they are, an open reference is encoded where it belongs, and every record
+         * gets its place in the sparse index. Writes exactly what the record-by-record default writes.
          */
         @Override
-        public void run(byte[] packed, int off, int len, int count, int[] ext, int extOff, int extCount) {
-            if (count < 0 || len < 0 || extCount < 0 || off < 0 || extOff < 0 || off + len > packed.length
-                    || extOff + extCount > ext.length) {
+        public void run(byte[] packed, int off, int len, byte[] lengths, int lengthsOff, int count, int[] open,
+                int openOff, int openCount, int maxEarly) {
+            if (count < 0 || len < 0 || openCount < 0 || off < 0 || openOff < 0 || lengthsOff < 0 || maxEarly < 0
+                    || off + len > packed.length || openOff + 2 * openCount > open.length
+                    || lengthsOff + count > lengths.length) {
                 throw new IllegalArgumentException("corrupt packed run");
             }
-            // room: a head byte and the pre-encoded bytes are copied, an external is at most 5 bytes;
-            // 32 more, so that a corrupt record is noticed (below) before it can overrun the buffer
-            long room = (long) pos + len + 5L * extCount + 32;
+            final TermStore ts = terms;
+            if (ts != null && maxEarly > 0 && (maxEarly >= ts.firstUnresolved() || maxEarly >= ts.segmentStart())) {
+                // A reference in the bytes may name an unresolved node, or a node of the open unit
+                // (whose sharing flags a reference sets): record by record, with every check.
+                Writer.super.run(packed, off, len, lengths, lengthsOff, count, open, openOff, openCount, maxEarly);
+                return;
+            }
+            // room: the bytes are copied, an open reference is at most 5 bytes
+            long room = (long) pos + len + 5L * openCount;
             if (room > buf.length) {
                 long cap = Math.max((long) buf.length * 2, room);
                 if (cap > Integer.MAX_VALUE - 15) {
@@ -985,78 +979,88 @@ public final class ProofBlocks {
                 }
                 buf = Arrays.copyOf(buf, (int) cap);
             }
+            if (count == 0) {
+                if (len != 0 || openCount != 0) {
+                    throw new IllegalArgumentException("corrupt packed run");
+                }
+                return;
+            }
+            if ((long) records + n + count > Integer.MAX_VALUE) {
+                throw new StoreLimitException("more than 2^31 - 1 block records");
+            }
             int lastMark = (n + count - 1) >>> SPARSE_SHIFT;
-            if (count > 0 && lastMark >= marks.length) {
+            if (lastMark >= marks.length) {
                 marks = Arrays.copyOf(marks, Math.max(marks.length * 2, lastMark + 1));
             }
             final byte[] b = buf;
             final int[] mk = marks;
             final int end = off + len;
-            final int extEnd = extOff + extCount;
-            int q = pos;
+            final int openEnd = openOff + 2 * openCount;
             int k = n;
-            int p = off;
-            int e = extOff;
-            if ((long) records + n + count > Integer.MAX_VALUE) {
-                throw new StoreLimitException("more than 2^31 - 1 block records");
-            }
-            int g = records + n; // global number of the record being written
-            byte[] wn = count > 0 ? withinChunk(g) : null;
+            int g = records + n;                 // global number of the record being placed
+            byte[] wn = withinChunk(g);
+            int in = off;                        // input position of the record being placed
+            int p = off;                         // input bytes before p are copied
+            int shift = pos - off;               // output position = input position + shift
+            int e = openOff;
+            int nextOpen = e < openEnd ? off + (open[e] & 0x7FFF_FFFF) : Integer.MAX_VALUE;
             for (int i = 0; i < count; i++, k++, g++) {
+                final int at = in + shift;
                 if ((k & ((1 << SPARSE_SHIFT) - 1)) == 0) {
-                    mk[k >>> SPARSE_SHIFT] = q;
+                    mk[k >>> SPARSE_SHIFT] = at;
                 }
                 if ((g & WITHIN_MASK) == 0) {
                     wn = withinChunk(g);
                 }
-                wn[g & WITHIN_MASK] = (byte) (q - mk[k >>> SPARSE_SHIFT]);
-                if (p >= end) {
-                    throw new IllegalArgumentException("corrupt packed run");
-                }
-                final int head = packed[p++];
-                final int kind = head & 0xF;
-                final boolean let = kind == Kind.LET;
-                if (!let && kind != Kind.APP && kind != Kind.LAM && kind != Kind.PI) {
-                    throw new IllegalArgumentException("corrupt packed run: kind " + kind);
-                }
-                b[q++] = (byte) kind;
-                // child 0: never the body of a binder
-                if ((head & 0x10) != 0) {
-                    q = external(b, q, ext, e++, extEnd, k, false);
-                } else {
-                    byte x;
-                    do {
-                        x = packed[p++];
-                        b[q++] = x;
-                    } while (x < 0);
-                }
-                // child 1: the body of a LAM / PI
-                if ((head & 0x20) != 0) {
-                    q = external(b, q, ext, e++, extEnd, k, !let && kind != Kind.APP);
-                } else {
-                    byte x;
-                    do {
-                        x = packed[p++];
-                        b[q++] = x;
-                    } while (x < 0);
-                }
-                // child 2: the body of a LET
-                if (let) {
-                    if ((head & 0x40) != 0) {
-                        q = external(b, q, ext, e++, extEnd, k, true);
-                    } else {
-                        byte x;
-                        do {
-                            x = packed[p++];
-                            b[q++] = x;
-                        } while (x < 0);
+                wn[g & WITHIN_MASK] = (byte) (at - mk[k >>> SPARSE_SHIFT]);
+                final int recordEnd = in + (lengths[lengthsOff + i] & 0xFF);
+                // the open references of this record stand behind its kind byte, up to its end
+                while (nextOpen <= recordEnd) {
+                    if (nextOpen <= in || recordEnd > end) {
+                        throw new IllegalArgumentException("corrupt packed run");
                     }
+                    // the bytes up to the reference
+                    int q = p + shift;
+                    int m = nextOpen - p;
+                    if (m < 16) {
+                        for (int j = 0; j < m; j++) {
+                            b[q + j] = packed[p + j];
+                        }
+                    } else {
+                        System.arraycopy(packed, p, b, q, m);
+                    }
+                    q += m;
+                    p = nextOpen;
+                    // the reference
+                    final int v = open[e + 1];
+                    int r;
+                    if (v > 0) {
+                        sharedRef(v, open[e] < 0);
+                        r = (v << 1) | 1;
+                    } else {
+                        int d = k + v + 1;
+                        if (d < 1 || d > k) {
+                            throw new IllegalArgumentException("local reference " + d + " back from record " + k);
+                        }
+                        r = d << 1;
+                    }
+                    final int q0 = q;
+                    while ((r & ~0x7F) != 0) {
+                        b[q++] = (byte) (r | 0x80);
+                        r >>>= 7;
+                    }
+                    b[q++] = (byte) r;
+                    shift += q - q0;
+                    e += 2;
+                    nextOpen = e < openEnd ? off + (open[e] & 0x7FFF_FFFF) : Integer.MAX_VALUE;
                 }
+                in = recordEnd;
             }
-            if (p != end || e != extEnd) {
+            if (in != end || e != openEnd) {
                 throw new IllegalArgumentException("corrupt packed run");
             }
-            pos = q;
+            System.arraycopy(packed, p, b, p + shift, end - p);
+            pos = end + shift;
             n = k;
         }
 

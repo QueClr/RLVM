@@ -167,6 +167,7 @@ class PackedRunsTest {
         long runs = 0;
         long inRuns = 0;
         long structures = 0;
+        long early = 0;
         for (int seed = 0; seed < 40; seed++) {
             Exp x = exporterLike(seed, 30 + seed, 10 + 12 * (seed % 7));
             byte[] data = x.bytes();
@@ -180,16 +181,23 @@ class PackedRunsTest {
                 T.Run p = T.struct(data, T.packing(2 + seed % 3, chunk), 1);
                 T.same("seed " + seed + ", chunk " + chunk, s, p, true);
                 assertEquals(x.exprs, p.result.exprs);
+                assertEquals(0, p.earlyChildren);
+                // with the sink's table of finished expressions: complete, or with holes
+                T.Run e = T.struct(data, T.packingEarly(2 + seed % 3, chunk, 1 + seed % 4), 1);
+                T.same("seed " + seed + ", chunk " + chunk + ", early", s, e, true);
+                assertEquals(p.runRecords, e.runRecords);
                 if (chunk == 4096) {
                     runs += p.runs;
                     inRuns += p.runRecords;
                     structures += x.structures;
+                    early += e.earlyChildren;
                 }
             }
         }
         // most app / lam / forallE / letE records belong to proofs and stand in stretches of two and more
         assertTrue(runs > 500, "runs taken: " + runs);
         assertTrue(inRuns * 2 > structures, inRuns + " of " + structures + " structure records were read through runs");
+        assertTrue(early > 1000, "children encoded from the table of finished expressions: " + early);
     }
 
     @Test

@@ -54,7 +54,7 @@ public final class ExportLoader {
         long t0 = System.nanoTime();
         ExportReader.Result res;
         try {
-            res = ExportReader.read(file, loader, readerOptions);
+            res = ExportReader.read(file, loader, forLoader(readerOptions, loader));
         } catch (ExportException e) {
             throw failed(loader, translate(e), t0);
         } catch (StoreLimitException e) {
@@ -74,7 +74,7 @@ public final class ExportLoader {
         long t0 = System.nanoTime();
         ExportReader.Result res;
         try {
-            res = ExportReader.read(data, loader, readerOptions);
+            res = ExportReader.read(data, loader, forLoader(readerOptions, loader));
         } catch (ExportException e) {
             throw failed(loader, translate(e), t0);
         } catch (StoreLimitException e) {
@@ -83,6 +83,27 @@ public final class ExportLoader {
             throw failed(loader, e, t0);
         }
         return done(loader, res, t0);
+    }
+
+    /**
+     * {@code o} for a read into {@code loader}: if packed runs are asked for ({@code o.runs != null}),
+     * they are prepared in the loader's own format, with its table of finished records for the scanner
+     * threads ({@link Loader#runFormat()}), or not at all when the loader takes none. The caller's
+     * options object is not modified.
+     */
+    private static ExportReader.Options forLoader(ExportReader.Options o, Loader loader) {
+        if (o.runs == null) {
+            return o;
+        }
+        ExportReader.Options c = new ExportReader.Options();
+        c.io = o.io;
+        c.threads = o.threads;
+        c.bufferBytes = o.bufferBytes;
+        c.parallelChunkBytes = o.parallelChunkBytes;
+        c.unloadMapped = o.unloadMapped;
+        c.generalPathOnly = o.generalPathOnly;
+        c.runs = loader.runFormat();
+        return c;
     }
 
     private static LoadReport done(Loader loader, ExportReader.Result res, long t0) {

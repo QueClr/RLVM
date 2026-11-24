@@ -142,6 +142,57 @@ Scanner threads never interpret anything (non-template lines are recorded as "sl
 the replay), so the sink sees exactly the single-threaded call sequence and the first error of the
 file is reported — verified by differential tests on all corpora. At most 2N+2 chunks are in flight.
 
+## Parallel packing (`Options.runs`, LP2 2026-11-24)
+
+In parallel mode the scanner threads can do more than tokenise. With `ExportReader.Options.runs` set
+to a `RunFormat` they also prepare the PACKED form of the proof-private records, and the reader
+offers it to the sink in place of the single records (`ExportSink.exprRun`, default: refuse).
+
+**What a scanner thread recognises** (`RunPacker`, between `Scanner` and the chunk's `Tape`).
+lean4export writes the records a declaration needs right before its declaration line, children
+first, the type's records before the value's. So at a `thm` line with type id T the records since
+the previous declaration line with an id above T are the proof (finding F1 of scout X5,
+`docs/research/profiles/X5.md`). The packer keeps the entries since the last declaration line in a
+window; at a template `thm` line it copies the window to the tape and puts a run header in front of
+every stretch of at least `RunFormat.minRecords` consecutive `app` / `lam` / `forallE` / `letE` entries
+with consecutive ids above the bound `max(T, first expression id of the window - 1)` whose children
+are all earlier records. At any other declaration line (a line that starts with `{"def":{`,
+`{"axiom"`, `{"induct`, `{"opaque`, `{"quot":`) and at the end of the chunk the window is copied as it
+is. With packing the chunk borders are moved behind the next declaration line (if it ends within
+8 MiB), so that a declaration's records lie in one chunk; the borders remain a function of the file
+content and the chunk size.
+
+**The packed form** (`ExportReader.RunFormat`; the tags of the four kinds are chosen by the sink's
+owner): per record its tag byte and its children in order, each LOCAL (LEB128 of twice the id
+distance: a child above the bound), EARLY (LEB128 of `2R + 1`, `R` the value the sink's table of
+finished expressions gives for the child: `ExportReader.EarlyRefs`, read by the scanner thread once
+per declaration) or OPEN (nothing in the bytes; an entry `(offset, child id)` in the run's list of
+open children); one length byte per record. For `rlvm-load` the tags are the store's node kinds and
+`R` is a shared term id, so the bytes are the bytes of a proof block of `rlvm-store` with holes
+where the loader thread has to resolve a reference itself.
+
+**Nothing in the packer decides anything.** A run header is an offer. The ordinary entries of the
+run follow it on the tape, and the replay makes exactly the calls of the single-threaded mode
+unless the `Linker` passes the run on and the sink takes it. The `Linker` passes it on only if the
+records could not fail: the expression ids are dense with a known delta and the run's first id is
+the next one (so every child, which the packer has checked to be smaller than its record, is
+bound), and every binder name is bound (`IdSpace.nextDense`, `allBoundUpTo`). A sink that takes a run
+must behave as if it had received the calls; what the bound means for it is its own business
+(`rlvm-load` checks it against its segment and the type root, and expands a run that was packed for
+the wrong segment). So a file that is not exporter output - sparse ids, metadata, a declaration in
+another spelling, a damaged line - is read as before, with the same calls, the same error and the
+same line; it only costs offers that are refused.
+
+**Also in this change**: the pages of a mapped chunk leave the resident set on the scanner thread
+that copied it (`Source.copied`), not on the reading thread (2 % of that thread's time; the pages
+that straddle two chunks are still released in file order).
+
+Tests: `PackedRunsTest` (exporter-shaped files through every chunk size, with and without a table of
+finished expressions; a 12 MB file with the default chunks; files that leave the shape) and every
+existing differential test through `T.agree`, which now also reads each input with runs offered and
+refused (complete trace of sink calls equal to the single-threaded read), taken, and taken at
+random by a sink that decodes them (`StructSink`).
+
 ## Measurements
 
 `bench/modules/rlvm-export/measure-all.sh` (arena container: 8 performance cores, 16 GB, `perf stat`

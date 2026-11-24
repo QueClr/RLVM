@@ -1,11 +1,11 @@
-# rlvm-machine - switches (owner: M6; the ONE list)
+# rlvm-machine - switches and the default configuration (the ONE list)
 
 Every optimisation of the machine that changes what is computed sits behind a staging switch
 (`Op.SW_*`, `Machine.sw`, `m.on(Op.SW_X)`); a strict engine (`EngineConfig.strict`, the driver's re-check
 engine) runs with none, whatever is configured. This file is the single list: name, bit, owner, state,
-evidence, blockers. A package that changes the state or the meaning of a switch sends M6 one line
-(`work/status/requests.log`) and M6 edits this file; experiment switches are described by their owners in
-their NOTES file and summarised here.
+the gate and the measurement that justify the state. Owner of the file: M6 until 2026-11-24 17:19Z, then
+the integrator of wave 6 (`work/status/machine-integration.md`, heading "Wave 6": every run named here,
+with its command and its report file).
 
 ## How switches are set
 
@@ -17,135 +17,189 @@ their NOTES file and summarised here.
 
 `LIST` is read from left to right, starting from the empty set: `name` or `+name` adds a switch, `-name`
 removes it, `none` empties the set, `default` adds `Op.SW_DEFAULT`, `all` adds the staging switches of ISA
-section 11 except `k2` (bits 0-10; not `t2`, `lazyeval`, `levels-complete`, no experiment switch).
+section 11 except `k2` (bits 0-10; no experiment bit old or new, not `t2`, `lazyeval`, `levels-complete`).
 Without the setting an engine runs `Op.SW_DEFAULT`. Examples: `none` = v0; `default,probes`;
-`default,-warm`; `all,-tele`; `default,m2a`.
+`default,-same`; `default,k2`.
 
-Related settings (not switches): `-X machine.unit-ticks=N` (the machine's own tick bound per unit, default 2^27, NOTES-M6 F31), `-X machine.session-kib=N` (the machine's own cap on a warm session,
-section "Sessions" below), `-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine),
-`-X machine.debug=...` (audits, README), `-X machine.hostDepth=N`, `-Drlvm.machine.sizes=...` (base table
-sizes, NOTES-INT I1), `-Drlvm.machine.keep=R,W,S` and `-Drlvm.machine.pool=off` (kept and pooled session
-arrays, NOTES-M6 F25).
+Related settings (not switches): `-X machine.session-kib=N` (the machine's own cap on a warm session,
+section "Sessions"), `-X machine.unit-ticks=N` (the machine's own tick bound per unit, default 2^27,
+NOTES-M6 F31), `-X machine.hostDepth=N` (host depth bound, default `Op.HOST_DEPTH` = 128),
+`-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine), `-X machine.debug=...` (audits,
+README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.machine.keep=R,W,S` and
+`-Drlvm.machine.pool=off` (kept and pooled session arrays, NOTES-M6 F25).
 
-## The default set
+## The default configuration (integration of wave 6, 2026-11-24)
 
-`Op.SW_DEFAULT` = **`warm,gated,expect`** (staging step 1), since 2026-11-24 16:24Z, with the machine's own
-session cap of 1 MiB (section "Sessions"). **v0 is `-X machine.switches=none`.**
+| What | Default | Decided by |
+|---|---|---|
+| engine | **the machine is the default engine** (`MachineProvider.priority()` = 100); the reference engine re-checks every rejection and decides every unit the machine declines; `-X engine=reference` runs it alone | the gates below; step 4 of the integration (eight corpora, DiffEngine) |
+| switch set `Op.SW_DEFAULT` | **`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same`** | gates and measurements below, one line per switch in "Named switches" |
+| session cap `MachineEngine.DEFAULT_SESSION_CAP` | **1 MiB** (`-X machine.session-kib=1024`) | section "Sessions": 512 KiB and 1 MiB are equal within 2 % everywhere, 2 and 4 MiB cost 3-4 % CPU and wall clock on mathlib |
+| host depth bound `Op.HOST_DEPTH` | **128** | 512 and 2048 measured: no gain (section "Host depth bound") |
+| Truffle tier (`t2`, module `rlvm-truffle`) | **off**; the jar is in every distribution and is used only under the switch | T3's quiet numbers: parity on reachability, +38 % wall at 8 workers on the Cedar slice, +39 % on cedar (section "Truffle tier") |
+| universe levels | the official relation (`levels-complete` off) | owner note 11; both engines; the two arena imax corner cases are rejected |
+| platform | CE native image `-O3` (the arena's binary); the JVM launcher is the faster platform once warm (table in `docs/BENCHMARKS.md`) | docs/PLATFORM.md, `work/status/warm.md` |
 
-`MachineProvider.priority()` is still 10: the machine is selected with `-X engine=machine`. The module's
-tests are not affected: `pom.xml` gives the test JVM `rlvm.machine.switches=none`, and a `Fixture` engine
-has no switch unless the test names some. In force in EVERY configuration, v0 included, is the
-eager-reduction rule (section "Sessions": a declaration that enters eager reduction is declined) - a
-correctness rule, not an optimisation.
+**v0 is `-X machine.switches=none`.** The module's tests are not affected by the default set: `pom.xml`
+gives the test JVM `rlvm.machine.switches=none`, and a `Fixture` engine has no switch unless the test names
+some. In force in EVERY configuration, v0 included, is the eager-reduction rule (section "Sessions": a
+declaration that enters eager reduction is declined) - a correctness rule, not an optimisation.
 
-Evidence for the set (all on jars that contain the eager-reduction rule unless said otherwise):
+### Gates of the default set (all on the main tree of 2026-11-24 19:10Z; reports in `work/status/`, logs in `work/int6/`)
 
 | Gate | Result |
 |---|---|
-| differential campaign, all 230 tests + Cedar slice + reachability + Init + Std (`work/m6/diff.sh`: DiffEngine through the launcher, both engines on every unit), `warm,gated,expect`, machine cap 1 MiB (`work/m6/diff/s1m1-*.txt`) | all 230: 15,839 of 15,845 units agree (both accept 15,799, both reject 40), 6 not compared (eager-reduction declines and `loop-unfolded-once`); Cedar slice 8,053 of 8,064 (11 eager declines); reachability 4,216 of 4,224 (8); Init 57,774 of 57,938 (164); Std 99,893 of 100,096 (203). **SOUNDNESS 0, COMPLETENESS 0** everywhere |
-| the same before the eager-reduction rule, cap 4 MiB, jar 584eab427250 (`work/m6/diff/s1cap4-*.txt`) | 15,844 of 15,845; 8,064; 4,224; 57,938; 100,096: 0 differences |
-| launcher gate, tutorial + bugs, jar 7eb33a7a4ad7 (`work/m6/gate-tb-s1.txt`) | CLEAN: 175 verdicts right, machine 1,311 accepted / 30 rejected / 0 declined + 2 for eager reduction, 0 anomalies |
-| launcher gate, all 230, PIPELINED loading (`work/m6/gate-all-pipelined-s1.txt`) | 230 verdicts right; machine 15,803 / 41 / 2 declined (`loop-unfolded-once`), 0 anomalies |
-| soundness review (package S: 17 switch sets x 329 hostile exports, main tree of 15:20Z) | 0 unexpected verdicts; S-F4 (a wrong ACCEPT under `warm`) and S-F5 (v0) are closed by the eager-reduction rule; open only S-F3 (levels, both engines) |
-| the driver's invariance suite with the set (16,928 mutants x 9 schedules, jar f82074b207f1) | 0 wrong, 0 schedule differences, 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY |
-| CPU time against v0 in ONE batch (D1: jar 09bef1d6276f, native `-O3`, arena container, load 57, two rounds, mean) | one worker: Init 7.37 -> 7.11 s (-3.5 %), Cedar slice 2.69 -> 2.70 (+0.4 %), reachability 8.18 -> 7.96 (-2.6 %); eight workers: Init 8.35 -> 8.03 (-3.8 %), Cedar slice 3.46 -> 3.24 (-6.4 %), Std 14.59 -> 14.36 (-1.6 %), reachability 8.78 -> 8.33 (-5.0 %). Wall clock at eight workers was noise on that host (one row: 3.4 and 13.0 s) |
+| soundness review, every finding of severity wrong ACCEPT / wrong REJECT (`docs/design/review/soundness-machine.md`) | S-F1, S-F2 (congruence shortcuts of `probes` / `facts`): removed from every switch set by M4; S-F4, S-F5: closed by the eager-reduction decline rule; S-F3 (levels): closed, both engines compare officially by default. `SHostileSlowTest`: 32 switch sets x 329 hostile exports = 10,528 judgments against the OFFICIAL verdict: **0 unexpected, 0 known finding still reproduces** (the strict test `noKnownFindingIsLeft` passes for v0, `warm`, step 1, `probes`, `facts`, `all`, the default set with and without `same`); every new switch alone, on step 1 and in the default set is among the 32 |
+| M8's gate, generic tier (`report.sh gate`: `machine-gate-v0-int6.md`) | **PASS WITH DECLINES**: differential SOUNDNESS 0 / COMPLETENESS 0 on tutorial, bugs, all 230 (15,845 engine checks: 15,797 accepted, 40 rejected, 8 declined), Init (57,774 / 0 / 164), Std (99,893 / 0 / 203), reachability (4,216 / 0 / 8), Cedar slice (8,053 / 0 / 11); convention equivalence 0 different; audits 0 failures; pipeline 230 / 230 |
+| M8's gate, the default set (`machine-gate-default-int6.md`) | GATE_DEFAULT_RESULT |
+| mutant corpora through the real driver with `-X engine=machine`, v0 and the default set (`report.sh mutants`: `work/int6/machine-mutants-run1.md`) | 17,775 mutants per set: **SOUNDNESS 0, COMPLETENESS 0**, agree 16,092, declined 1,683 (= the reference pipeline's), MACHINE-INCOMPLETE 0, WARM-ANOMALY 0; per declaration (1,008,568 per set) machine accepts / reference rejects 0, machine rejects / reference accepts 0; the machine declined 29 (v0) / 31 (default set) declarations, all eager reduction |
+| DiffEngine through the JVM launcher, default configuration (`work/int6/diff/b-default-*.txt`; the same switch list given explicitly on the jar before the default changed: `a-cand-*.txt`) | DIFF_DEFAULT_RESULT |
+| the eight corpora, machine as primary engine, 8 workers, native image (`work/int6/w5.out`) | BIG_DEFAULT_RESULT |
 
-The rule for entering the default set (brief of wave 6): all 230 published tests and the four corpora
-(Init, Std, reachability, the Cedar slice) are diff-clean against the reference engine with the switch at
-the default session cap (`testkit diff --engine machine`: 0 SOUNDNESS, 0 COMPLETENESS, and no decline that
-v0 does not have), the soundness review (package S, `work/soundness/`) has no open finding against it, and
-it lowers warm wall clock or CPU time on at least one of the four corpora without raising any by more than
-1% (native image `-O3`, arena-shaped container, measurement lock, one batch).
+The two findings of the integration itself:
+
+- **M8-F1 (fixed, `Code.kval` / `Code.resume`).** A `KVAL` whose value arrived through a frame (a suspended
+  evaluation of the closed term) did not fill the site's inline cache; a later execution of the site evaluated
+  the term again, and since `gated` no longer tables it that cost a tick the unsuspended run did not pay: the
+  tick count depended on the host depth bound (2 of 8,064 declarations of the Cedar slice). The frame now
+  carries `DST_KVAL` and the fill happens at the resume.
+- **The gate's lanes shared two things they must not** (harness, not the machine): the store's PCHK bits
+  (every lane has a table of its own now, `M8Harness.Lane.build`) and the binder hints of the code store
+  (`CodeStore.addSub` -> `TermStore.setBinderHint`: lanes are engines of their own over ONE store; an audit lane
+  elaborates in another order and its hints made the compared lanes walk terms their blocks would have run).
+  `M8Lanes` now runs lane 0 and the convention lanes first, then the generic tier and the audits. Before that
+  the gate of the default set reported 270 to 45,821 "different" declarations on Std and the Cedar slice,
+  never the same twice; without `code,casetrees,lazycases` or with the lanes of one convention group alone it
+  was clean (bisection in `work/int6/bis-*.out`). A real run has one machine engine per store; a foreign hint
+  is validated and ignored (`CodeStore.hint`), so the effect was on ticks only.
+
+### Measurements of the default set
+
+Native image `-O3` (`work/int6/dist-a`, jars as published 18:16Z, machine `8a8ea5644b24`), 8 workers,
+pipelined load, every row inside a `bench/quiet.py` window; wall clock of the median later pass of
+`-X passes=4` (mathlib: 2 passes) / process CPU of that pass; `work/int6/warm.tsv`, windows `w1` - `w4`.
+
+| Configuration | Init | Std | Cedar slice | reachability | cedar | mathlib |
+|---|--:|--:|--:|--:|--:|--:|
+| `none` (v0) | 1.11 s / 7.53 s | 1.93 / 13.16 | 0.54 / 2.98 | 2.58 / 7.76 | 2.56 / 17.74 | - |
+| `warm,gated,expect` (the default of 16:24Z) | 1.09 / 7.14 | 1.84 / 12.59 | 0.55 / 3.00 | 2.49 / 7.37 | 2.45 / 17.29 | 30.68 / 215.7 |
+| the default set without `same` | 0.82 / 5.32 | 1.52 / 10.32 | 0.53 / 2.75 | 0.61 / 1.60 | 2.44 / 14.78 | - |
+| **the default set** (cap 1 MiB) | **0.81 / 5.26** | **1.51 / 10.09** | **0.46 / 2.40** | **0.62 / 1.64** | **2.09 / 13.99** | **29.28 / 204.8** |
+| the default set, cap 512 KiB | 0.82 / 5.22 | 1.53 / 9.92 | 0.43 / 2.36 | 0.66 / 1.58 | 2.10 / 13.73 | 29.20 / 202.6 |
+| the default set, cap 2 MiB | 0.82 / 5.49 | 1.53 / 10.48 | 0.47 / 2.45 | 0.61 / 1.61 | 2.15 / 14.51 | 30.55 / 211.8 |
+| the default set, cap 4 MiB | 0.85 / 5.58 | 1.62 / 10.84 | 0.52 / 2.61 | 0.67 / 1.62 | 2.46 / 14.92 | 30.26 / 212.2 |
+| default set / `warm,gated,expect`, CPU | -26 % | -20 % | -20 % | -78 % | -19 % | -5 % |
+
+Two more readings of the default set in window `w4` (interleaved with the H10 image): Init 0.84, 0.81 s /
+5.38, 5.37 s CPU; Std 1.52, 1.51 / 10.23, 10.19; Cedar slice 0.46, 0.46 / 2.50, 2.51; reachability 0.61, 0.58 /
+1.60, 1.55; cedar 2.06, 2.11 / 14.01, 14.25: the rows above repeat to 2-4 % in CPU. The table of the final
+distribution against the reference engine, gruszka, nano-lean and the official checker is
+`docs/BENCHMARKS.md`.
 
 ## Named switches
 
-| Name | Bit | Owner | Stage (ISA 11) | What it turns on | State | Evidence / blockers |
-|---|---|---|---|---|---|---|
-| `gated` | 0 `SW_GATED_TABLING` | M2 | 1 | EVAL tables a node only if its flags say it is shared, a binder body or invariant (off: every non-leaf node is tabled) | **ON by default** (since 16:24Z) | part of the default set. The quadratic cliff M2 found on unshared dependent nests (4,000 levels: 44,030 -> 8,038,031 ticks) is fixed since 14:54Z |
-| `pchk` | 1 `SW_PCHK` | M5 | 1 | shared check facts PCHK (implemented 2026-11-24; a fact is not shared once the declaration entered eager reduction) | off; READY per owner (15:31Z) together with `match` and `joint` | M5: tutorial + bugs + all 230 + four corpora diff-clean on `warm,gated,expect,pchk,match,joint`, 9,110 tutorial mutants SOUNDNESS 0 / COMPLETENESS 0; -4 % CPU Init, -3 to -8 % Std, the small corpora inside the scatter (one worker, loaded host). Not yet measured against v0 in one batch at 8 workers by M6 |
-| `expect` | 2 `SW_EXPECT` | M5 | 1 | B9: lambdas and applications are checked against the expected type | **ON by default** (since 16:24Z) | part of the default set (M5: gates and mutants in NOTES-M5) |
-| `warm` | 3 `SW_WARM` | M6 (facade), M5 (generation rule) | 1 | a machine session survives an ACCEPT (v0: one session per declaration); forward in file order only; reset on every other outcome, at the driver's cap and at the machine's own cap | **ON by default** (since 16:24Z) | part of the default set. Two rules make it safe to leave on: the machine's own cap ("Sessions") and the eager-reduction rule (below) |
-| `facts` | 4 `SW_FACTS` | M5, M4, M7 | 2 | fact records (M5); of the consumers only B7 (static PROOF at c4) since 14:30Z - B3, B4 and the ETAS Prop mask were removed from every switch set | off | soundness finding S-F2 (wrong ACCEPT through skipped proof positions) FIXED by M4 14:30Z and verified by S (strict rows of `s/manifest.tsv`). What is left is neutral in instructions (-0.1 % Init / Std, -0.3 % Cedar slice; M5): no reason to turn it on |
-| `tele` | 5 `SW_TELE` | M7, M5 | 3 | K1 TELE blocks, MATCH (B5), the IC table | off | integrator (wave 5): no CPU gain measured on the JVM; to be re-measured on the native image by M7 |
-| `code` | 6 `SW_CODE` | M7, M3 | 4 | K1 BODY / RULE blocks, LEAF blocks (B11) | off | M7: 0.34x on reachability in its own bench; no corpus diff gate recorded for the launcher path yet |
-| `casetrees` | 7 `SW_CASETREES` | M3, M7 | 4 | CASESON / MATCHER case trees (B8) | off | as `code`; `M7HookedTest.all230` (slow group) ends one perf file as CRASH under `tele,code,casetrees` (integration log, open) |
-| `probes` | 8 `SW_PROBES` | M4 | 5 | pass B of CARGS, the quick refutation, UNDEC and the probe debt (order only: every answer is an answer of the complete CONV); B1, B2, B12 (congruence shortcuts) were removed 14:30Z | off | soundness finding S-F1 (wrong ACCEPT by same-head congruence where the official procedure is not a congruence) FIXED by M4 and verified by S. No measured gain is left (M4); `loop-unfolded-once` is declined again without the removed shortcuts (`same` is M4's exact replacement) |
-| `k2` | 9 `SW_K2` | M3 | later | the derived trees of `Rules` (ISA 3.6); off while `ER != 0`, a node whose derivation entered ER is dropped | off | M3's log |
-| `inert` | 10 `SW_INERT_LOOP` | M2 | tuning | the inert-nest loop of EVAL as a scratch loop instead of host recursion; observables identical (NOTES-M2 D12) | off | a per-platform tuning decision; not measured on the native image |
-| `t2` | 23 `SW_T2` | T2 (`rlvm-truffle`), hook in `Code` (M7) | experiment | hot K1 blocks are offered to the tier a `Tier.Factory` installs; without `rlvm-truffle` on the class path nothing changes | off | go / no-go by warm wall clock (owner note 12): T2's log |
-| `lazyeval` | 24 `SW_LAZY_EVAL` | M4 | - | a one-sided lazy-delta step against a weak-head normal side is one WHNF instead of DELTA + cheap CORE per LSTEP | off; READY per owner (15:26Z) | M4: gates green (NOTES-M4 D26); S: no wrong verdict on 329 hostile exports, alone and on top of step 1, with the argument why it is order-only (`docs/design/review/soundness-machine.md` 4.3) |
-| `match` | 19 `SW_MATCH` (= `m5a`) | M5 | - | MATCH of a telescope domain against the argument's type instead of building the domain (ISA 4.5.4, B5 on the generic tier) | off; READY per owner | as `pchk` |
-| `joint` | 20 `SW_JOINT` (= `m5b`) | M5 | - | joint telescope check of a declaration's type and value (ISA 4.5.2) | off; READY per owner | as `pchk` |
-| `same` | 17 `SW_SAME` (= `m4a`) | M4 | - | the official `is_equiv` test at the start of CONV: a bounded structural walk (256 nodes, 40 levels), no judgment (`Same`, NOTES-M4 D28) | off; gates green, waiting for S's attack | M4 15:24Z |
-| `levels-complete` | 25 `SW_LEVELS_COMPLETE` | M1 (`Levels`) | - | universe levels compared by the complete relation (canonical forms) instead of the official kernel's algorithm | off **by owner decision** (OWNER-NOTES item 11: resemble the official kernel by default; the arena tests `imax-right-successor`, `imax-nested-absorption` must be rejected) | never a default |
+| Name | Bit | Owner | What it turns on | State | Evidence |
+|---|---|---|---|---|---|
+| `gated` | 0 `SW_GATED_TABLING` | M2 | EVAL tables a node only if its flags say it is shared, a binder body or invariant, or it lies 4+ inert levels below its nest root (off: every non-leaf node is tabled) | **ON by default** (16:24Z) | part of step 1; the quadratic cliff on unshared dependent nests is fixed (NOTES-M2 D21: 4,000 levels 8,038,031 -> 60,017 ticks) |
+| `pchk` | 1 `SW_PCHK` | M5 | shared check facts: a closed, level-parameter-free export term that passed check mode is inferred in ONLY mode by later declarations and workers (never after an eager-reduction comparison) | **ON by default** (wave-6 integration) | M5: -1.5 to -1.8 % instructions on Init / Std alone, -3.7 / -4.3 % with `match,joint`; 9,110 tutorial mutants 0 / 0; the gates above |
+| `expect` | 2 `SW_EXPECT` | M5 | B9: lambdas and applications are checked against the expected type | **ON by default** (16:24Z) | part of step 1 (NOTES-M5) |
+| `warm` | 3 `SW_WARM` | M6, M5 | a machine session survives an ACCEPT; forward in file order only; reset on every other outcome and at the caps | **ON by default** (16:24Z) | part of step 1; safe because of the machine's own cap and the eager-reduction rule |
+| `facts` | 4 `SW_FACTS` | M5, M4 | fact records; of the consumers only B7 (static PROOF) since M4's fix of S-F2 | off | official-exact, but +1.0 to +2.1 % CPU at -0.1 % instructions on Init, Std and the Cedar slice (M4 batch b3): pays only for itself |
+| `tele` | 5 `SW_TELE` | M7, M5 | K1 TELE blocks, MATCH (B5), the IC table | off | M7, three native batches: no corpus gains, the Cedar slice loses 2-6 % (10 % fewer records on Init, 5.4 M more activations) |
+| `code` | 6 `SW_CODE` | M7, M3 | K1 BODY / RULE blocks, LEAF blocks (B11), elaborated at the first request | **ON by default** (wave-6 integration) | M7 batch 3 (with `casetrees`, against v0, one worker): reachability 8.79 -> 1.56 s CPU, Init -16 %, Std -14 %, Cedar slice -5 %; hostile exports `k1-*` (43), `quot-*`; the gates above |
+| `casetrees` | 7 `SW_CASETREES` | M3, M7 | CASESON / MATCHER case trees (B8), with the matchers they call inlined | **ON by default** (wave-6 integration) | as `code`; inlining alone: reachability 3.03 -> 1.56 s |
+| `probes` | 8 `SW_PROBES` | M4 | pass B of CARGS, the quick refutation, UNDEC and the probe debt (order only) since M4's fix of S-F1 | off | official-exact, but +1.4 to +3.2 % CPU on Init, Std and the Cedar slice (M4 batch b3) |
+| `k2` | 9 `SW_K2` | M3 | derived rule trees of `Rules` (ISA 3.6) for hot definitions without a K1 tree | off | gates green and small gains (M3 batch 4: reachability -4.7 % CPU, others -0.5 to -1 %; `perf/magma-list-deep-n36` 12.6 -> 1.4 s), hostile matrix clean with it, BUT its derivation variables are free variables of a reserved type and not the dedicated value kind of RECONCILIATION section 2 (NOTES-M3 D17): needs the orchestrator's decision and a review before it can be a default |
+| `inert` | 10 `SW_INERT_LOOP` | M2 | nothing (the scratch loop was removed in wave 6; the bit is dead) | off | - |
+| `bodies` | 13 `SW_BODIES` (= `m2a`) | M2 | the body of a beta step / of INST and a telescope's domains and results are evaluated without a tabling record; a body that is a projection of a bound variable is MKPROJ of the argument | **ON by default** (wave-6 integration) | M2 batch 2 (on step 1 + probes, one worker): CPU -10.5 % Cedar slice, -37.6 % reachability, -10.4 % Init, -9.8 % Std; RSS on reachability 1,136 -> 774 MiB; 0 differences on all 230 and the four corpora |
+| `m2b` | 14 `SW_M2B` | M2 | direct-mapped APPLY memo with a governor | off, experiment | undecided: Cedar slice -1.8 % instructions, reachability +2.3 % CPU in two readings (M2 batch 2); needs three quiet repeats |
+| `directrules` | 15 `SW_DIRECT_RULES` (= `m3a`) | M3 | a recursor rule of the plain form is ONE APPLY of the minor premise; unread induction hypotheses are not built | **ON by default** (wave-6 integration) | M3 batches 3 / 4: reachability 21.9 -> 20.7 G instructions, Init / Std -1 %; `M3K2Test` (400 random applications against the generic reduction) |
+| `same` | 17 `SW_SAME` (= `m4a`) | M4 | the official `is_equiv` at the start of CONV: a bounded structural walk of two values (256 nodes, 40 levels; closures, suspensions, projections, same-head applications of a non-regular head; far frames), no judgment, no type | **ON by default** (wave-6 integration) | window `w2`: Cedar slice 0.53 -> 0.46 s wall, 2.75 -> 2.40 s CPU; cedar 2.44 -> 2.09 s wall, 14.78 -> 13.99 s CPU; Init, Std, reachability within 2.5 %; it makes the machine accept `perf/loop-unfolded-once` (332 M ticks and an E_MEM decline -> 266 k ticks). Soundness: see below |
+| `match` | 19 `SW_MATCH` (= `m5a`) | M5 | MATCH of a telescope domain against the argument's inferred type instead of building the domain (unknown falls through to the complete procedure) | **ON by default** (wave-6 integration) | as `pchk`; hostile exports `tele-*` |
+| `joint` | 20 `SW_JOINT` (= `m5b`) | M5 | joint telescope check of a declaration's type and value | **ON by default** (wave-6 integration) | as `pchk` |
+| `lazycases` | 21 `SW_LAZY_CASES` (= `m7a`) | M7 | the casesOn tree as the unfolding step of lazy delta (`Code.rulesCasesOn`) | **ON by default** (wave-6 integration) | M7 batch 4: Init -1.7 %, Std -1.1 % CPU, instructions lower on all four |
+| `t2` | 23 `SW_T2` | T2 / T3 (`rlvm-truffle`) | hot K1 blocks are offered to the Truffle tier a `Tier.Factory` installs | off | section "Truffle tier" |
+| `lazyeval` | 24 `SW_LAZY_EVAL` | M4 | a one-sided lazy-delta step against a weak-head normal side is one WHNF instead of DELTA + cheap CORE per LSTEP | **ON by default** (wave-6 integration) | M4 batch b3, on top of `code,casetrees`: Init 6.35 -> 5.88 s, Std 12.29 -> 11.47 s CPU; order-only by construction (soundness review 4.3) |
+| `levels-complete` | 25 `SW_LEVELS_COMPLETE` | M1 (`Levels`) | universe levels compared by the complete relation instead of the official kernel's algorithm | off **by owner decision** (OWNER-NOTES item 11) | never a default |
 
-## Experiment switches
+The experiment bits that are still free or undecided: `m1a`, `m1b` (unused in published code), `m2b`
+(above), `m3b`, `m4b`, `m7b` (free). `Op.SW_EXPERIMENTS` names exactly these six; the six that entered the
+default set keep their old names as second names (`m2a` = `bodies`, ...).
 
-Two bits per package, usable without a request (`Op.SW_M1A` ... `Op.SW_M7B`, bits 11-22; names `m1a`,
-`m1b`, `m2a`, `m2b`, `m3a`, `m3b`, `m4a`, `m4b`, `m5a`, `m5b`, `m7a`, `m7b`). Never in `all`, never in the
-default set (`M6FacadeTest.switchListsAreReadFromLeftToRight` asserts both). When an experiment stays, its
-owner asks M6 for a name; when it is rejected, the bit is free again. What each bit guards today is in
-the owner's NOTES file; the table below is M6's copy of what the owners announced in `requests.log`.
+### `same`: why it is on although the soundness reviewer (package S) had ended before attacking it
 
-| Bit | Owner | Guards (as announced) |
-|---|---|---|
-| `m1a`, `m1b` | M1 | see NOTES-M1 (wave 6: frame / PRUNE experiments) |
-| `m2a`, `m2b` | M2 | see NOTES-M2 |
-| `m3a` | M3 | `Reduce.iotaDirect`: a recursor rule of the plain form applied as ONE APPLY of the minor premise (NOTES-M3 D18); name `directrules` if it stays |
-| `m3b` | M3 | free |
-| `m4a` | M4 | = `same` (above) |
-| `m4b` | M4 | free (an experiment with `Same` in the quick test was measured and removed) |
-| `m5a`, `m5b` | M5 | = `match`, `joint` (above) |
-| `m7a`, `m7b` | M7 | see NOTES-M7 |
+`Same.same(a, b)` answers T only when it has SEEN the two values read back to the same expression, up to
+the normalisations the value model applies everywhere (beta and zeta of EVAL, canonical literals, PEEK); it
+calls no judgment and looks at no type, so it is not one of the congruence shortcuts of finding S-F1 (it
+never asks whether two DIFFERENT sub-terms are convertible). That is the condition under which value
+identity itself (`a == b` is T, in v0) gives the official verdict. Evidence beyond M4's (shortcheck on the
+four corpora: every T re-derived by the complete procedure; `M4SameTest`, `M4OfficialTest`): the hostile
+matrix above with `same` alone, on step 1 and in the default set (329 official verdicts each); the gate of
+the default set, whose audit lane re-derives every T of `same` under `shortcheck` on all 230 tests and the
+four corpora; 17,775 mutants; DiffEngine on the corpora. It has had no independent adversarial review:
+`-X machine.switches=default,-same` is the way back, at the cost above on Cedar and of the decline of
+`perf/loop-unfolded-once`.
 
 ## Sessions (the cap)
 
 A warm session (`warm`) ends: on every outcome other than ACCEPT; when the next declaration is not later
-in file order; at the driver's cap (`-X session-mib`, default for the machine 4 MiB since driver
-50adc1f555bd, 16 MiB before); and at **the machine's own cap**, `-X machine.session-kib=N` (default
-**1024** = 1 MiB, 0 = none; `MachineEngine.DEFAULT_SESSION_CAP`): before a declaration the machine forgets
-everything once `Machine.engineBytes()` exceeds it (statistic `machine.capResets`). The caps compose: the
-smaller one resets first, so the machine is at its best cost under any cap of the driver.
+in file order; at the driver's cap (`-X session-mib`, default for the machine 4 MiB); and at **the machine's
+own cap**, `-X machine.session-kib=N` (default **1024** = 1 MiB, 0 = none; `MachineEngine.DEFAULT_SESSION_CAP`):
+before a declaration the machine forgets everything once `Machine.engineBytes()` exceeds it (statistic
+`machine.capResets`). The caps compose: the smaller one resets first.
 
-Why a cap of its own, and why so small: the instruction count FALLS as the cap grows (more memo hits) while
-the CPU time RISES (the tables leave the cache). CPU seconds, native `-O3`, arena container, two rounds,
-`warm,gated,expect` against v0 (`work/m6/measure.tsv`; host load 80-190, so compare inside a row only):
-
-| workers, jar | corpus | v0 | cap 512 KiB | 1 MiB | 2 MiB | 4 MiB | 8 MiB | driver's 16 MiB only |
-|---|---|--:|--:|--:|--:|--:|--:|--:|
-| 1, 5618c1d2a2c4 (batch A) | Init | 8.30 / 8.16 | | **7.70 / 7.70** | 8.21 / 8.17 | 8.34 / 8.37 | 8.26 / 8.27 | 9.84 / 9.21 |
-| | Cedar slice | 3.38 / 3.44 | | **3.24 / 3.22** | 3.28 / 3.35 | 3.59 / 3.45 | 3.63 / 3.72 | 4.21 / 3.97 |
-| | reachability | 8.51 / 8.70 | | 8.32 / 8.40 | 8.75 / 8.40 | 8.24 / 8.50 | 8.28 / 8.80 | 8.15 / 8.44 |
-| 8, 8be3fd082f56 (batch B) | Init | 8.15 / 8.20 | **7.95 / 7.98** | 8.23 / 8.06 | 8.48 / 8.35 | 8.75 / 8.59 | | 9.55 / 9.63 |
-| | Cedar slice | 3.11 / 3.42 | 3.20 / 3.12 | 3.32 / 3.19 | 3.24 / 3.38 | 3.42 / 3.43 | | 4.01 / 3.86 |
-| | Std | 14.05 / 13.71 | **13.47 / 13.23** | 13.64 / 13.55 | 14.29 / 13.74 | 15.50 / 15.12 | | 16.60 / 16.90 |
-| instructions (G), 8 workers | Init | 132.6 | 127.2 | 120.1 | 113.1 | 105.3 | | 94.9 |
-| 1, 09bef1d6276f (batch D1, with the eager rule) | Init | 7.41 / 7.33 | 7.19 / 7.15 | **7.10 / 7.12** | | 7.02 / 7.05 (driver's 4 MiB only) | | |
-| | Cedar slice | 2.69 / 2.68 | **2.68 / 2.58** | 2.73 / 2.66 | | 2.78 / 2.73 (driver's 4 MiB only) | | |
-| | reachability | 8.34 / 8.01 | 7.89 / 7.85 | 7.91 / 8.01 | | 8.03 / 7.89 (driver's 4 MiB only) | | |
-| 8, 09bef1d6276f (batch D1) | Init | 8.19 / 8.50 | 7.84 / 8.29 | **7.77 / 8.28** | | 8.27 / 8.61 (driver's 4 MiB only) | | |
-| | Cedar slice | 3.58 / 3.33 | 3.29 / 3.24 | 3.10 / 3.37 | | 3.59 / 3.31 (driver's 4 MiB only) | | |
-| | Std | 14.68 / 14.50 | 14.71 / 12.87 | 14.27 / 14.45 | | 14.92 / 15.44 (driver's 4 MiB only) | | |
-| | reachability | 8.88 / 8.67 | 8.63 / 8.29 | 8.48 / 8.18 | | 8.50 / 8.33 (driver's 4 MiB only) | | |
-
-The driver measured the same shape on a quieter jar (2 / 4 / 8 / 16 MiB: Init 7.71 / 7.78 / 8.23 / 9.23 s
-against 8.13 s without a warm session; `rlvm-driver` log 14:47Z). Warm wall clock (owner note 12) follows
-the CPU column at eight workers; per-pass rows: `work/m6/m.py --passes 2` (driver c0aeb3288f46).
+Why so small: the instruction count FALLS as the cap grows (more memo hits) while CPU time and wall clock
+RISE (the tables leave the cache). M6's sweeps for `warm,gated,expect` are in NOTES-M6 (F24); for the
+default set the rows "cap 512 KiB / 2 MiB / 4 MiB" of the table above: 512 KiB and 1 MiB are within 2 % of
+each other on every corpus (one row each, so no ranking), 2 MiB costs 3-4 % CPU on Init, Std, cedar and
+mathlib, 4 MiB 6-7 % and 17 % of wall clock on cedar. The orchestrator's question of 16:52Z (P8: +17 % ticks
+on a Mathlib slice at 1 MiB against 4 MiB) is answered by wall clock on ALL of mathlib: 29.3 s per warm
+pass at 1 MiB against 30.6 / 30.3 s at 2 / 4 MiB (8 workers): the cap stays.
 
 **Eager reduction** (not a switch: a rule of the facade in EVERY configuration; NOTES-M6 F26). A
 declaration that enters eager reduction (an argument `eagerReduce _ _`) is DECLINED by the machine
 (`E_LIMIT`, `UNSUPPORTED_INPUT`, statistic `machine.eagerDeclines`; the reference engine decides it), and
 nothing it derived is kept. Reason: conversion under eager reduction depends on the mode and on the
 official kernel's per-declaration caches, which tables keyed by canonical values cannot reproduce
-(findings M6-F26, S-F4, S-F5; arena test `bad/bugs/rec-of-subst-prop`). 164 of Init's declarations, 203
-of Std's; on the Cedar slice 11 declarations that are 18 % of the machine's ticks (M5). `M6GuardTest`
-fails if any class but `Machine` sets `ER` to a constant.
+(findings M6-F26, S-F4, S-F5). 164 of Init's declarations, 203 of Std's, 11 of the Cedar slice's, 8 of
+reachability's, 6,711 of mathlib's (0.94 %; 11-12 % of the workers' CPU there, P8). `M6GuardTest` fails if
+any class but `Machine` sets `ER` to a constant. Taking these declarations back is the first item of the
+list "what is left" in the integration log.
+
+## Host depth bound
+
+`Op.HOST_DEPTH` = 128. Window `w4` (native, 8 workers, default set, warm pass wall / CPU): reachability
+0.61, 0.58 s / 1.60, 1.55 s at 128, 0.60 / 1.64 at 512, 0.64 / 1.66 at 2048; Cedar slice 0.46 / 2.50 at 128,
+0.50 / 2.53, 0.46 / 2.43; cedar 2.06, 2.11 / 14.01, 14.25 at 128, 2.18 / 14.47, 2.19 / 14.18. No corpus gains
+(M3 had found the same on reachability with one worker); the bound stays, and with it the worker stack the
+driver gives.
+
+## Truffle tier
+
+`rlvm-truffle` (owner T3 since 16:31Z) is a reactor module and its jar is in every distribution; the tier
+runs only under `t2`. It is off: T2 found no gain; T3's quiet windows (NOTES-T3; warm wall clock per pass with
+one engine kept over the passes, K1 = `default,code,casetrees` of 16:24Z) give parity on reachability (JVM,
+8 workers: 520 against 529 ms), +38 % on the Cedar slice (232 -> 321 ms) and +39 % on cedar (1,315 -> 1,827
+ms; 1,820 blocks, 52.6 s of compilation that takes cores from the workers), +2 to +4 % on the native image.
+The time of a block is in the interning probes it calls, not in the dispatch the tier removes.
+
+## Build flag measured, not adopted by the default build: the H10 inline lists
+
+`rlvm-machine/h10/native-image-args.sh` (`-H:PriorityForceInline` of every continuation step, NeverInline
+of the slow paths), image `work/int6/dist-a-h10` against `work/int6/dist-a` (same jars), window `w4`, two
+interleaved rounds, CPU of the warm pass: Init 5.38, 5.37 -> 5.29, 5.32 (-1.3 %); Std 10.23, 10.19 -> 10.22,
+10.06 (-0.7 %); Cedar slice 2.50, 2.51 -> 2.39, 2.40 (-4.4 %); reachability 1.60, 1.55 -> 1.60, 1.59 (+1.3 %,
+inside its spread); cedar 14.01, 14.25 -> 13.91, 13.97 (-1.3 %); wall clock equal. A gain of 1-4 % by the
+keep rule, except that reachability is not resolved. Not wired into `scripts/build.sh`: the lists are
+generated with `javap` and `unzip` at build time, and the arena build must first be shown to have both
+(`scripts/build.sh ... --ni-arg ARG` for every word the script prints builds such an image today).
 
 ## Changing a default
 
 1. the owner sends the evidence (diff reports on all 230 + four corpora at the default cap, the
-   measurement rows) to M6 in `requests.log`;
-2. M6 re-runs the differential campaign on the published jar (`work/m6/diff.sh`), asks S for open
-   findings, measures the candidate default set against the current one in ONE batch (`work/m6/m.py`);
-3. M6 changes `Op.SW_DEFAULT`, this file, `M6FacadeTest`, and announces it; `-X machine.switches=none`
-   stays the way back to v0, and the strict engine is unaffected.
+   measurement rows) in `requests.log`;
+2. the integrator re-runs M8's gate (`report.sh gate --switches LIST`) and the mutants on the published
+   tree, asks for open soundness findings, and measures the candidate against the current default in ONE
+   quiet window (`bench/warm.sh`, cedar and mathlib included);
+3. `Op.SW_DEFAULT`, this file and `M6FacadeTest` change together; `-X machine.switches=none` stays the way
+   back to v0, and the strict engine is unaffected.

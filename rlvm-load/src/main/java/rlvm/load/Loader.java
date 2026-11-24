@@ -104,13 +104,17 @@ public final class Loader implements ExportSink, RecordSink {
     private static final int R_MIN_LOCAL = 2;
     private static final int R_PACKED_OFF = 3;
     private static final int R_PACKED_LEN = 4;
-    private static final int R_EXT_OFF = 5;
-    private static final int R_EXT_COUNT = 6;
+    /** Offset of the open children (two ints each: place and body bit, then the child) and their number. */
+    private static final int R_OPEN_OFF = 5;
+    private static final int R_OPEN_COUNT = 6;
     /** {@link #RUN_PENDING}, {@link #RUN_LINKED} or {@link #RUN_EXPANDED}; bit {@link #RUN_OWNED}. */
     private static final int R_STATE = 7;
-    /** Ordinal minus file id of the external children. */
+    /** Ordinal minus file id of the open children. */
     private static final int R_DELTA = 8;
-    private static final int RUN_WORDS = 9;
+    private static final int R_LENGTHS_OFF = 9;
+    /** Largest shared id that a scanner thread wrote into the record bytes (0: none). */
+    private static final int R_MAX_EARLY = 10;
+    private static final int RUN_WORDS = 11;
     private static final int RUN_PENDING = 0;
     private static final int RUN_LINKED = 1;
     private static final int RUN_EXPANDED = 2;
@@ -151,8 +155,29 @@ public final class Loader implements ExportSink, RecordSink {
     /** The runs of the open segment in arrival order ({@link #RUN_WORDS} ints each) and their arrays. */
     private int[] runs = new int[RUN_WORDS * 8];
     private byte[][] runPacked = new byte[8][];
-    private int[][] runExt = new int[8][];
+    private byte[][] runLengths = new byte[8][];
+    private int[][] runOpen = new int[8][];
     private int runCount;
+    /**
+     * What the scanner threads may read ({@link ExportReader.EarlyRefs}): the location table and the
+     * difference between ordinal and file id, published once the first run was taken. A scanner
+     * thread encodes a reference to an earlier record whose location it finds POSITIVE there (a
+     * shared term id: such a location never changes again) into the record bytes; everything else
+     * stays open and is resolved here, in file order.
+     */
+    private volatile int[] earlyTable;
+    private volatile int earlyDelta;
+    private final ExportReader.EarlyRefs early = new ExportReader.EarlyRefs() {
+        @Override
+        public int[] table() {
+            return earlyTable;
+        }
+
+        @Override
+        public int delta() {
+            return earlyDelta;
+        }
+    };
     /**
      * One bit per expression ordinal: the record is wrapped by, or contains, a metadata node. Null until
      * the first {@code mdata} record (lean4export writes none unless asked to), so files without
@@ -202,6 +227,7 @@ public final class Loader implements ExportSink, RecordSink {
     private long nRuns;
     private long nRunRecords;
     private long nRunsExpanded;
+    private long nRunEarly;
     private long nUnresolved;
     private int largestSegment;
     private boolean finished;
@@ -421,6 +447,7 @@ public final class Loader implements ExportSink, RecordSink {
         r.packedRuns = nRuns;
         r.packedRunRecords = nRunRecords;
         r.expandedRuns = nRunsExpanded;
+        r.packedEarlyRefs = nRunEarly;
         r.promotedNodes = out.sharedNodes() - nSharedWritten;
         r.droppedUnsafe = nDropped;
         r.unresolvedRefs = out.unresolvedRefs();
@@ -746,6 +773,15 @@ public final class Loader implements ExportSink, RecordSink {
     // ============================================================================================
 
     /**
+     * The packed form in which this loader takes runs, with its table of finished records for the
+     * scanner threads; null if it takes none (no proof blocks, referrer counting, switched off):
+     * the scanner threads then tokenise only.
+     */
+    public ExportReader.RunFormat runFormat() {
+        return takeRuns ? RUN_FORMAT.withEarly(early) : null;
+    }
+
+    /**
      * A run of {@code count} app / lam / forallE / letE records in the packed form of
      * {@link #RUN_FORMAT} (see {@link ExportSink#exprRun}). Taken unless something makes the
      * record-by-record path necessary: then the reader delivers the records one by one, and what
@@ -753,7 +789,8 @@ public final class Loader implements ExportSink, RecordSink {
      */
     @Override
     public int exprRun(int firstFileId, int count, int delta, int minLocal, byte[] packed, int off, int len,
-            int[] ext, int extOff, int extCount, int numLam, int numPi, int numLet) {
+            byte[] lengths, int lengthsOff, int[] open, int openOff, int openCount, int numLam, int numPi, int numLet,
+            int numEarly, int maxEarly) {
         if (!takeRuns || mdata != null || count <= 0 || firstFileId + delta != exprCount + 1
                 || exprCount > MAX_EXPR_RECORDS - count) {
             return ExportSink.RUN_REFUSED;
@@ -769,7 +806,8 @@ public final class Loader implements ExportSink, RecordSink {
         if (r == runPacked.length) {
             runs = Arrays.copyOf(runs, r * 2 * RUN_WORDS);
             runPacked = Arrays.copyOf(runPacked, r * 2);
-            runExt = Arrays.copyOf(runExt, r * 2);
+            runLengths = Arrays.copyOf(runLengths, r * 2);
+            runOpen = Arrays.copyOf(runOpen, r * 2);
         }
         int q = r * RUN_WORDS;
         runs[q + R_FIRST] = segLen;
@@ -777,12 +815,15 @@ public final class Loader implements ExportSink, RecordSink {
         runs[q + R_MIN_LOCAL] = minLocal + delta;
         runs[q + R_PACKED_OFF] = off;
         runs[q + R_PACKED_LEN] = len;
-        runs[q + R_EXT_OFF] = extOff;
-        runs[q + R_EXT_COUNT] = extCount;
+        runs[q + R_OPEN_OFF] = openOff;
+        runs[q + R_OPEN_COUNT] = openCount;
         runs[q + R_STATE] = RUN_PENDING;
         runs[q + R_DELTA] = delta;
+        runs[q + R_LENGTHS_OFF] = lengthsOff;
+        runs[q + R_MAX_EARLY] = maxEarly;
         runPacked[r] = packed;
-        runExt[r] = ext;
+        runLengths[r] = lengths;
+        runOpen[r] = open;
         runCount = r + 1;
         // the run's references to earlier records are resolved where the records stand in the file
         int n = pendCount;
@@ -800,6 +841,12 @@ public final class Loader implements ExportSink, RecordSink {
         nLet += numLet;
         nRuns++;
         nRunRecords += count;
+        nRunEarly += numEarly;
+        if (earlyTable == null) {
+            // from now on the scanner threads may look finished records up
+            earlyDelta = delta;
+            earlyTable = loc;
+        }
         return first;
     }
 
@@ -812,9 +859,12 @@ public final class Loader implements ExportSink, RecordSink {
                 int off = runs[q + R_PACKED_OFF];
                 runPacked[r] = Arrays.copyOfRange(runPacked[r], off, off + runs[q + R_PACKED_LEN]);
                 runs[q + R_PACKED_OFF] = 0;
-                int extOff = runs[q + R_EXT_OFF];
-                runExt[r] = Arrays.copyOfRange(runExt[r], extOff, extOff + runs[q + R_EXT_COUNT]);
-                runs[q + R_EXT_OFF] = 0;
+                int lengthsOff = runs[q + R_LENGTHS_OFF];
+                runLengths[r] = Arrays.copyOfRange(runLengths[r], lengthsOff, lengthsOff + runs[q + R_COUNT]);
+                runs[q + R_LENGTHS_OFF] = 0;
+                int openOff = runs[q + R_OPEN_OFF];
+                runOpen[r] = Arrays.copyOfRange(runOpen[r], openOff, openOff + 2 * runs[q + R_OPEN_COUNT]);
+                runs[q + R_OPEN_OFF] = 0;
                 runs[q + R_STATE] |= RUN_OWNED;
             }
         }
@@ -843,30 +893,37 @@ public final class Loader implements ExportSink, RecordSink {
     /**
      * Writes the segment records of run {@code r}: what {@link #exprApp}, {@link #exprLam},
      * {@link #exprForall} and {@link #exprLet} write, except that a reference to an earlier record is
-     * left PENDING in its slot without an entry in the pending list: {@link #resolveRun} resolves
-     * these when the pending list reaches the run's place.
+     * left PENDING in its slot without an entry in the pending list ({@link #resolveRun} resolves
+     * these when the pending list reaches the run's place), and that a reference a scanner thread
+     * found already resolved is written resolved: the shared id that {@link #resolvePending} would
+     * read from the location table, which does not change once it is a shared id.
      */
     private void expandRun(int r) {
         final int q = r * RUN_WORDS;
         final byte[] pk = runPacked[r];
-        final int[] ex = runExt[r];
+        final byte[] ln = runLengths[r];
+        final int[] op = runOpen[r];
         final int delta = runs[q + R_DELTA];
         final int base = segBase;
         final int[] s = seg;
-        int p = runs[q + R_PACKED_OFF];
-        int e = runs[q + R_EXT_OFF];
+        final int p0 = runs[q + R_PACKED_OFF];
+        int p = p0;
+        int l = runs[q + R_LENGTHS_OFF];
+        int e = runs[q + R_OPEN_OFF];
+        final int openEnd = e + 2 * runs[q + R_OPEN_COUNT];
         int slot = runs[q + R_FIRST] << 2;
         int ordinal = base + runs[q + R_FIRST] + 1;
         for (int i = 0, n = runs[q + R_COUNT]; i < n; i++, slot += 4, ordinal++) {
-            final int head = pk[p++];
-            final int kind = head & 0xF;
+            final int recordEnd = p + (ln[l++] & 0xFF);
+            final int kind = pk[p++];
             final int children = kind == Kind.LET ? 3 : 2;
             s[slot] = kind;
             s[slot + 3] = 0;
             for (int c = 0; c < children; c++) {
                 int child;
-                if ((head & (0x10 << c)) != 0) {
-                    child = ex[e++] + delta;
+                if (e < openEnd && (op[e] & 0x7FFF_FFFF) == p - p0) {
+                    child = op[e + 1] + delta;
+                    e += 2;
                 } else {
                     int v = 0;
                     int shift = 0;
@@ -876,6 +933,10 @@ public final class Loader implements ExportSink, RecordSink {
                         v |= (b & 0x7F) << shift;
                         shift += 7;
                     } while (b < 0);
+                    if ((v & 1) != 0) {
+                        s[slot + 1 + c] = -(v >>> 1); // resolved by a scanner thread: a shared term
+                        continue;
+                    }
                     child = ordinal - (v >>> 1);
                 }
                 if (child < 1 || child >= ordinal) {
@@ -883,6 +944,9 @@ public final class Loader implements ExportSink, RecordSink {
                 }
                 int local = child - base;
                 s[slot + 1 + c] = local > 0 ? local : -(PENDING + child);
+            }
+            if (p != recordEnd) {
+                throw new IllegalStateException("corrupt packed run: record " + ordinal);
             }
         }
         runs[q + R_STATE] = (runs[q + R_STATE] & RUN_OWNED) | RUN_EXPANDED;
@@ -892,8 +956,8 @@ public final class Loader implements ExportSink, RecordSink {
     /**
      * The references of run {@code r} to earlier records, in file order, as {@link #resolvePending}
      * resolves a single one. An expanded run has them PENDING in its slots; a linked run in its list
-     * of external children, where a record before the segment is replaced by its shared id and a
-     * record of the segment by minus its ordinal (it gets its place when the sweep reaches the run).
+     * of open children, where a record before the segment is replaced by its shared id and a record
+     * of the segment by minus its ordinal (it gets its place when the sweep reaches the run).
      */
     private void resolveRun(int r) {
         final int q = r * RUN_WORDS;
@@ -915,19 +979,19 @@ public final class Loader implements ExportSink, RecordSink {
             }
             return;
         }
-        final int[] ex = runExt[r];
+        final int[] op = runOpen[r];
         final int delta = runs[q + R_DELTA];
         final int base = segBase;
-        for (int e = runs[q + R_EXT_OFF], end = e + runs[q + R_EXT_COUNT]; e < end; e++) {
-            int ordinal = ex[e] + delta;
+        for (int e = runs[q + R_OPEN_OFF] + 1, end = e + 2 * runs[q + R_OPEN_COUNT]; e < end; e += 2) {
+            int ordinal = op[e] + delta;
             if (ordinal > base) {
-                ex[e] = -ordinal;
+                op[e] = -ordinal;
             } else {
                 int l = loc[ordinal];
                 if (l < 0) {
                     l = promote(ordinal, l);
                 }
-                ex[e] = l;
+                op[e] = l;
             }
         }
     }
@@ -1295,6 +1359,9 @@ public final class Loader implements ExportSink, RecordSink {
         if (lastOrdinal >= loc.length) {
             long want = Math.max((long) loc.length + (loc.length >> 2) + 1024, (long) lastOrdinal + 1);
             loc = Arrays.copyOf(loc, (int) Math.min(want, Integer.MAX_VALUE - 8));
+            if (earlyTable != null) {
+                earlyTable = loc; // the scanner threads follow the table
+            }
         }
     }
 
@@ -1349,18 +1416,19 @@ public final class Loader implements ExportSink, RecordSink {
                         throw unsupportedDecl("more than 2^31 proof-block records");
                     }
                 }
-                final int[] ex = runExt[run];
-                final int extOff = runs[q + R_EXT_OFF];
-                final int extCount = runs[q + R_EXT_COUNT];
-                // children that are records of this segment: their places are known now
-                for (int e = extOff, end = extOff + extCount; e < end; e++) {
-                    int v = ex[e];
+                final int[] op = runOpen[run];
+                final int openOff = runs[q + R_OPEN_OFF];
+                final int openCount = runs[q + R_OPEN_COUNT];
+                // open children that are records of this segment: their places are known now
+                for (int e = openOff + 1, end = e + 2 * openCount; e < end; e += 2) {
+                    int v = op[e];
                     if (v < 0) {
                         int l = lc[-v];
-                        ex[e] = l > 0 ? l : l + firstRecord; // -(index in the block + 1)
+                        op[e] = l > 0 ? l : l + firstRecord; // -(index in the block + 1)
                     }
                 }
-                o.blockRun(k, runPacked[run], runs[q + R_PACKED_OFF], runs[q + R_PACKED_LEN], count, ex, extOff, extCount);
+                o.blockRun(k, runPacked[run], runs[q + R_PACKED_OFF], runs[q + R_PACKED_LEN], runLengths[run],
+                        runs[q + R_LENGTHS_OFF], count, op, openOff, openCount, runs[q + R_MAX_EARLY]);
                 for (int c = 0, at = base + 1 + i, rec = -(firstRecord + k + 1); c < count; c++) {
                     lc[at + c] = rec - c;
                 }
@@ -1522,7 +1590,8 @@ public final class Loader implements ExportSink, RecordSink {
         segLen = 0;
         for (int r = 0; r < runCount; r++) {
             runPacked[r] = null;
-            runExt[r] = null;
+            runLengths[r] = null;
+            runOpen[r] = null;
         }
         runCount = 0;
     }

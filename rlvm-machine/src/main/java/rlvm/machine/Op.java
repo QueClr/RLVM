@@ -523,7 +523,7 @@ public final class Op {
      * The switches a non-strict engine runs with when neither {@code -X machine.switches} nor the system
      * property {@code rlvm.machine.switches} is given ({@code rlvm-machine/SWITCHES.md} has the gate and the
      * measurement for every member). {@code -X machine.switches=none} is v0 (the generic tier, the complete
-     * procedure). Since 2026-11-24 19:xxZ (integration of wave 6):
+     * procedure). Since 2026-11-24 19:10Z (integration of wave 6):
      * {@code warm,gated,expect} (step 1) + {@code bodies} + {@code pchk,match,joint} + {@code code,casetrees,lazycases}
      * (step 4) + {@code directrules} + {@code lazyeval} + {@code same}, with the machine's own session cap
      * ({@code MachineEngine.DEFAULT_SESSION_CAP}). Not in it: {@code facts}, {@code probes}, {@code tele}

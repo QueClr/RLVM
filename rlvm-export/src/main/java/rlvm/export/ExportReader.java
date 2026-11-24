@@ -150,6 +150,31 @@ public final class ExportReader {
         int delta();
     }
 
+    /** What was read. */
+    public static final class Result {
+        /** Lines including the header (an unterminated last line counts). */
+        public long lines;
+        public long bytes;
+        /** Lines that were parsed by the general JSON path (the header is not counted). */
+        public long generalPathLines;
+        /** Bound ids per id space, including the implicit name 0 and level 0. */
+        public long names;
+        public long levels;
+        public long exprs;
+        /** Largest id of the file per id space (-1: none). */
+        public long maxNameId;
+        public long maxLevelId;
+        public long maxExprId;
+        /** Whether the ids of the space were 0, 1, 2, ... in file order. */
+        public boolean namesDense;
+        public boolean levelsDense;
+        public boolean exprsDense;
+        /** Whether no id translation table was needed (dense file ids and a consecutively numbering sink). */
+        public boolean tableFree;
+        public Io io;
+        public int threads;
+    }
+
     // ------------------------------------------------------------------------------------- entry points
 
     public static Result read(Path file, ExportSink sink) throws IOException, ExportException {

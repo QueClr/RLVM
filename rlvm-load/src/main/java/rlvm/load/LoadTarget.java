@@ -132,27 +132,32 @@ public interface LoadTarget {
 
     /**
      * {@code count} APP / LAM / PI / LET records of the open block in the packed form of
-     * {@link Loader#RUN_FORMAT}: one head byte per record (bits 0..3 the kind, bit {@code 4 + i} set =
-     * child {@code i} is external) followed by the LEB128 bytes of {@link #blockLocal} for every child
-     * that is not external. The external children are {@code ext[extOff ..]} in record and child
-     * order: a value {@code > 0} is a shared term id, a value {@code < 0} is {@code -(i + 1)} for
-     * record {@code i} of the open block. Equivalent to the {@code count} calls of {@link #blockApp},
-     * {@link #blockLam}, {@link #blockPi}, {@link #blockLet}, which is what the default makes.
+     * {@link Loader#RUN_FORMAT} (see {@code rlvm.store.ProofBlocks.Writer.run}): the record bytes
+     * {@code packed[off .. off+len)} - a kind byte and the references that are already encoded
+     * ({@link #blockLocal} or {@link #blockShared} as LEB128) -, one length byte per record, and the
+     * open references {@code open[openOff ..]}, two ints each: the offset in the record bytes at
+     * which the reference belongs (bit 31: body of a binder), and its value: {@code > 0} a shared
+     * term id, {@code < 0} {@code -(i + 1)} for record {@code i} of the open block. Equivalent to the
+     * {@code count} calls of {@link #blockApp}, {@link #blockLam}, {@link #blockPi}, {@link #blockLet},
+     * which is what the default makes.
      *
      * @param blockIndex number of records of the open block before the run
+     * @param maxEarly the largest shared term id encoded in the record bytes (0: none)
      */
-    default void blockRun(int blockIndex, byte[] packed, int off, int len, int count, int[] ext, int extOff,
-            int extCount) {
+    default void blockRun(int blockIndex, byte[] packed, int off, int len, byte[] lengths, int lengthsOff, int count,
+            int[] open, int openOff, int openCount, int maxEarly) {
         int p = off;
-        int e = extOff;
+        int e = openOff;
+        final int openEnd = openOff + 2 * openCount;
         int[] ref = new int[3];
         for (int i = 0; i < count; i++) {
-            int head = packed[p++];
-            int kind = head & 0xF;
+            int recordEnd = p + (lengths[lengthsOff + i] & 0xFF);
+            int kind = packed[p++];
             int children = kind == rlvm.store.Kind.LET ? 3 : 2;
             for (int c = 0; c < children; c++) {
-                if ((head & (0x10 << c)) != 0) {
-                    int v = ext[e++];
+                if (e < openEnd && (open[e] & 0x7FFF_FFFF) == p - off) {
+                    int v = open[e + 1];
+                    e += 2;
                     ref[c] = v > 0 ? blockShared(v) : blockLocal(blockIndex + i + v + 1);
                 } else {
                     int v = 0;
@@ -166,6 +171,9 @@ public interface LoadTarget {
                     ref[c] = v;
                 }
             }
+            if (p != recordEnd) {
+                throw new IllegalArgumentException("corrupt packed run");
+            }
             switch (kind) {
                 case rlvm.store.Kind.APP -> blockApp(ref[0], ref[1]);
                 case rlvm.store.Kind.LAM -> blockLam(ref[0], ref[1]);
@@ -174,7 +182,7 @@ public interface LoadTarget {
                 default -> throw new IllegalArgumentException("corrupt packed run: kind " + kind);
             }
         }
-        if (p != off + len || e != extOff + extCount) {
+        if (p != off + len || e != openEnd) {
             throw new IllegalArgumentException("corrupt packed run");
         }
     }
