@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  rlvm-truffle: the T2 tier of the machine (docs/design/ISA.md sections 0.5, 8.4 - 8.6): one Truffle
+  RootNode per promoted code block of rlvm-machine, compiled by Graal at run time. Owner: T2.
+
+  It plugs into the machine through the hook rlvm.machine.Tier (service
+  META-INF/services/rlvm.machine.Tier$Factory) and is used only by a machine that runs with the staging
+  switch `t2`:   rlvm -X engine=machine -X machine.switches=code,casetrees,t2 FILE
+  Without this jar on the class path, without the switch, or without an optimising Truffle runtime the
+  machine runs exactly as before (README.md).
+
+  Compile and test (the module is NOT in the parent pom's <modules> yet: build it with -f):
+    . ./env.sh && $MVN -o -q -f rlvm-truffle/pom.xml test
+    . ./env.sh && $MVN -o -q -f rlvm-truffle/pom.xml install -DskipTests       (jar into .toolchain/m2)
+  Test groups (JUnit 5 tags) as in rlvm-machine: default = everything not tagged "slow";
+    -Dgroups=fast; -Dgroups=slow -DexcludedGroups=   (corpora: reachability, Init, the Cedar slice).
+
+  The Truffle artifacts carry ${graalvm.version} (parent pom), which must equal GRAALVM_VERSION of
+  $JAVA_HOME/release, as in rlvm-cli and the spikes. truffle-runtime is a COMPILE dependency on purpose:
+  promotion calls OptimizedCallTarget.compile() / isValid() (docs/research/10 section 5.4).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>rlvm</groupId>
+    <artifactId>rlvm-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>rlvm-truffle</artifactId>
+  <packaging>jar</packaging>
+
+  <properties>
+    <rlvm.root>${project.basedir}/..</rlvm.root>
+    <excludedGroups>slow</excludedGroups>
+    <groups></groups>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-machine</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-store</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.graalvm.polyglot</groupId>
+      <artifactId>polyglot</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.graalvm.truffle</groupId>
+      <artifactId>truffle-api</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.graalvm.truffle</groupId>
+      <artifactId>truffle-runtime</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <!-- Tests only: load an export, run the environment pass, check every unit with the machine. -->
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-load</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-export</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-ref</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-inductive</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-admit</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- Generates the provider class and service entry for @TruffleLanguage.Registration. -->
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.graalvm.truffle</groupId>
+              <artifactId>truffle-dsl-processor</artifactId>
+              <version>${graalvm.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- The last two flags silence JDK 25 warnings about Truffle's use of Unsafe and native access.
+               -XX:-UseJVMCICompiler: C2 as the host JIT, Graal (libgraal) for Truffle only, as the launcher. -->
+          <argLine>-Xss8m -Xmx8g -XX:+UseSerialGC -XX:-UseJVMCICompiler --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
+          <groups>${groups}</groups>
+          <excludedGroups>${excludedGroups}</excludedGroups>
+          <systemPropertyVariables>
+            <rlvm.root>${rlvm.root}</rlvm.root>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
