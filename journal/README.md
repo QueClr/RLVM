@@ -17,7 +17,8 @@ journal-check        # build a scratch copy; fails on any diagnostic
 
 `.github/workflows/journal-pages.yml` of the RLVM repository renders the forest
 and publishes it as GitHub Pages when branch `dev` is pushed; the site's
-address will be the `url` of `forest.toml`.
+address is the `url` of `forest.toml`, <https://queclr.github.io/RLVM/>
+(repository: <https://github.com/QueClr/RLVM>).
 
 See [AGENTS.md](AGENTS.md) for the layout and the writing rules.
 
