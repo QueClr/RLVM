@@ -76,16 +76,28 @@ public final class LoadOptions {
      * tokenising, as before the parallel packing.
      */
     public final boolean packedRuns;
+    /**
+     * STRICT exactness only (OWNER-NOTES 13; default false = the practical policy): decline every
+     * axiom, definition, theorem and opaque whose type or value carries a metadata node. The loader
+     * drops {@code mdata} nodes; officially such a node is a term of its own for every cache of the
+     * kernel and hides what is under it from the kernel's syntactic tests, so the official verdict on
+     * such a declaration can differ (finding S3-F2). Under the practical policy the node stays
+     * transparent: it has no meaning in the theory, and nothing lean4export can write
+     * ({@code --export-mdata}) is declined for it. Metadata inside an inductive or quot record is
+     * declined in both modes, as before.
+     */
+    public final boolean strictMetadata;
 
     public LoadOptions(Mode mode, int publishEveryUnits, long publishEveryBytes, boolean proofBlocks,
             long inputBytes) {
         this(mode, publishEveryUnits, publishEveryBytes, proofBlocks, inputBytes, true, DEFAULT_MAX_SEGMENT_RECORDS,
-                null, mode == Mode.PIPELINED, 1, false, true);
+                null, mode == Mode.PIPELINED, 1, false, true, false);
     }
 
     private LoadOptions(Mode mode, int publishEveryUnits, long publishEveryBytes, boolean proofBlocks,
             long inputBytes, boolean sharingFlags, int maxSegmentRecords, LoadListener listener,
-            boolean publishOnDecline, int scanThreads, boolean strictFormatVersion, boolean packedRuns) {
+            boolean publishOnDecline, int scanThreads, boolean strictFormatVersion, boolean packedRuns,
+            boolean strictMetadata) {
         if (mode == null) {
             throw new NullPointerException("mode");
         }
@@ -104,6 +116,7 @@ public final class LoadOptions {
         this.scanThreads = scanThreads;
         this.strictFormatVersion = strictFormatVersion;
         this.packedRuns = packedRuns;
+        this.strictMetadata = strictMetadata;
     }
 
     public static LoadOptions batch(long inputBytes) {
@@ -119,7 +132,7 @@ public final class LoadOptions {
             int maxSegmentRecords, LoadListener listener, boolean publishOnDecline, int scanThreads,
             boolean strictFormatVersion) {
         return new LoadOptions(mode, units, bytes, proofBlocks, inputBytes, sharingFlags, maxSegmentRecords, listener,
-                publishOnDecline, scanThreads, strictFormatVersion, packedRuns);
+                publishOnDecline, scanThreads, strictFormatVersion, packedRuns, strictMetadata);
     }
 
     /** A copy in another mode; BATCH resets the publication intervals, PIPELINED keeps or defaults them. */
@@ -178,7 +191,13 @@ public final class LoadOptions {
     /** A copy with {@link #packedRuns} set. */
     public LoadOptions withPackedRuns(boolean value) {
         return new LoadOptions(mode, publishEveryUnits, publishEveryBytes, proofBlocks, inputBytes, sharingFlags,
-                maxSegmentRecords, listener, publishOnDecline, scanThreads, strictFormatVersion, value);
+                maxSegmentRecords, listener, publishOnDecline, scanThreads, strictFormatVersion, value, strictMetadata);
+    }
+
+    /** A copy with {@link #strictMetadata} set (the strict exactness policy). */
+    public LoadOptions withStrictMetadata(boolean value) {
+        return new LoadOptions(mode, publishEveryUnits, publishEveryBytes, proofBlocks, inputBytes, sharingFlags,
+                maxSegmentRecords, listener, publishOnDecline, scanThreads, strictFormatVersion, packedRuns, value);
     }
 
     /** A copy with {@link #strictFormatVersion} set. */

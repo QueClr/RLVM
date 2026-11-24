@@ -29,11 +29,11 @@ scripts/dev.sh slice                                              # table for mo
 |---|---|---|
 | `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. An engine with a lower priority (the machine registers with 10 until it has passed its gates) is in the distribution as a candidate: it runs when named or compared, never by default |
 | `engine=diff` | differential run. With the test kit's provider `diff` on the class path (`scripts/dev.sh diff`): its `DiffEngine` is the primary engine (engine under test and oracle per unit; the driver's own differential mode stays off). Without it: the best non-reference engine is the primary engine and the driver runs the reference kernel beside it on every unit (`RunConfig.differential`); a usage error (64) if the reference kernel is the only engine | - |
-| `load=batch\|pipelined` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver (jar of 09:39Z) loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `batch` |
+| `load=batch\|pipelined\|auto` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `auto` (since 2026-11-24, owner note 12): **`pipelined` when two or more workers run and the input is a file of at least `pipeline-min-mib`** and no `stop-after` phase is asked for, else `batch` (`MainOptions.resolveLoadDefaults`; section "Load defaults and the automatic worker count"). It was `batch` |
 | `order=file\|namespace` | order of ready units | the driver's (`file`) |
 | `session-mib=N`, `memory-mib=N` | session reset threshold, memory account limit | the driver's, unless the primary engine prefers another (below) |
-| `scan-threads=K` | scanner threads of the reader (they run only on mapped input: `io=mapped` or `auto`; on buffered input the reader stays on the calling thread) | 0 |
-| `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `buffered` (plain `read`; ARCHITECTURE 1.4) |
+| `scan-threads=K\|auto` | scanner threads of the reader: they tokenise and pack file ranges (rlvm-load "packed runs") and run only on mapped input | `auto`: **2 for inputs of 256 MiB and more**, none below (`MainOptions.SCAN_THREADS_MIN_BYTES`, `DEFAULT_SCAN_THREADS`). It was 0 |
+| `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `auto` (mapped if a regular file) when scanner threads run, whoever asked for them; `buffered` (plain `read`; ARCHITECTURE 1.4) otherwise. It was `buffered` |
 | `stop-after=load\|env` | stop after a phase | - |
 | `stats-file=F` | statistics as JSON | - |
 | `no-recheck`, `no-truffle`, `no-proof-blocks` | flags | off |
@@ -115,10 +115,33 @@ nothing of this runs: output, exit status and statistics are those of the plain 
 (`PassesTest.onePassIsThePlainRun`). Tool: `bench/warm.sh` (bench/README.md, "Warm wall clock").
 
 Launcher options: `--threads N` becomes `RunConfig.workers`; automatic (`--threads auto`, `0`, or no
-option) is passed on as 0 and the driver decides (`Run.resolveWorkers`: `max(1, min(processors, 8) - 2)`,
-capped at one worker per 128 units; it was a fixed 1 until wave 4). The arena run line names its count;
+option) is decided HERE since 2026-11-24 (`RlvmChecker.autoWorkers`: one worker per CPU, at most 8)
+and passed on like an explicit count; the driver still caps it at one worker per 128 units, and its
+own automatic rule (CPUs - 2, at most 6) is no longer consulted. The arena run line names its count;
 `--stack-size` becomes `deepStackBytes` and caps `workerStackBytes`; `--quiet` turns `explain` off;
-`--stats` prints one line (`outcome, engine, reference, workers, load, [engine-defaults,] wall_ms`) on stderr.
+`--stats` prints one line (`outcome, engine, reference, workers, load, scan-threads, io,
+[engine-defaults,] wall_ms`; `(auto)` behind a value = decided by the defaults, not given) on stderr.
+
+## Load defaults and the automatic worker count (owner note 12)
+
+The target configuration is parallel workers with the load pipelined; since 2026-11-24 that is what
+a run does when the command line says nothing (requests P7-F4 and of the load path's owner; the
+driver's side was gated by its owner: 0 pipelined-only declines over 16,928 mutants x 9 schedules).
+
+| Left open on the command line | Decided by `MainOptions.resolveLoadDefaults` / `RlvmChecker.autoWorkers` |
+|---|---|
+| `-X load` | `pipelined` if workers >= 2 and the input is a regular file of at least the driver's `pipelineMinBytes` (`-X pipeline-min-mib`, 8 MiB) and there is no `stop-after`; else `batch`. These are exactly the runs in which the driver really pipelines, so a batch run keeps the store it always had (no level chain) |
+| `-X scan-threads` | 2 if the input is at least 256 MiB, else 0 - in either load mode |
+| `-X io` | `auto` if scanner threads run (given or defaulted), else `buffered` |
+| `--threads` | `min(CPUs, 8)`, at least 1 |
+
+A given setting always wins and is never changed. Nothing changes for one worker, for an input below
+8 MiB (every published test but the corpora; every mutant) or of unknown size (not a regular file).
+`-X scan-threads=K` alone now gets mapped input (it used to do nothing without `-X io=mapped`).
+Tests: `LoadDefaultsTest` (the rule as a table; the run configuration for sparse files of 8 MiB and
+256 MiB; through the real launcher: a run with four workers and no `-X load` is pipelined for real,
+gives the batch run's verdict for an accepted and a rejected export, and says `load=pipelined(auto)`).
+Measurements and gates: `docs/PLATFORM.md`, sections 0.5 to 0.7.
 
 ## Invariants
 

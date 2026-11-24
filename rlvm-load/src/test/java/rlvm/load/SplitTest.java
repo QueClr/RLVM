@@ -327,12 +327,13 @@ class SplitTest {
     }
 
     /**
-     * Metadata in the type or the value of an admitted declaration: declined (finding S3-F2 / R2). The
-     * loader would drop the node, but officially it is a term of its own for every cache of the kernel
-     * and hides what is under it from the kernel's syntactic tests.
+     * Metadata in the type or the value of an admitted declaration: loaded with the node dropped by
+     * default (the practical policy, OWNER-NOTES 13), declined with {@code LoadOptions.strictMetadata}
+     * (finding S3-F2 / R2: officially the node is a term of its own for every cache of the kernel and
+     * hides what is under it from the kernel's syntactic tests).
      */
     @Test
-    void aDeclarationWhoseTypeOrValueCarriesMetadataIsDeclined() {
+    void aDeclarationWhoseTypeOrValueCarriesMetadataIsDeclinedInStrictMode() {
         String expected = "metadata (mdata) node in the type or value of a declaration";
         for (int variant = 0; variant < 8; variant++) {
             Nd nd = new Nd();
@@ -361,14 +362,19 @@ class SplitTest {
                     nd.def(nd.name("d"), plain, w);
                 }
             }
-            try {
-                load(nd);
-                fail("variant " + variant + ": loaded");
-            } catch (UnsupportedExportException e) {
-                assertTrue(e.getMessage().startsWith(expected), "variant " + variant + ": " + e.getMessage());
-            } catch (IOException e) {
-                throw new AssertionError(e);
+            byte[] data = nd.bytes();
+            // default: the metadata is transparent, the file loads as it always did
+            Loaded practical = Loaded.load(data, LoadOptions.batch(data.length));
+            assertTrue(practical.failure == null, "variant " + variant + ": " + practical.failure);
+            assertTrue(practical.report.exprMData > 0, "variant " + variant);
+            // strict: declined, in batch and pipelined mode alike
+            for (LoadOptions o : new LoadOptions[] {LoadOptions.batch(data.length).withStrictMetadata(true),
+                    LoadOptions.pipelined(data.length).withPublishEvery(1, 1L << 40).withStrictMetadata(true)}) {
+                Loaded strict = Loaded.load(data, o);
+                assertTrue(strict.failure instanceof UnsupportedExportException, "variant " + variant + ": " + strict.failure);
+                assertTrue(strict.failure.getMessage().startsWith(expected), "variant " + variant + ": " + strict.failure.getMessage());
             }
+            // the same file without the option but with metadata nowhere near a declaration is untouched by it
         }
     }
 

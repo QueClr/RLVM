@@ -1639,11 +1639,13 @@ public final class Loader implements ExportSink, RecordSink {
      */
     private void declare(int kind, int name, int[] ids, int lpOff, int lpCount, int type, int value, int hint,
             boolean asBlock) {
-        if (mdata != null) {
-            // Metadata is dropped by this loader, but officially an mdata node is a term of its own
-            // for every cache of the kernel and hides what is under it from its syntactic tests: a
-            // declaration whose type or value carries metadata is not what the official checker checks
-            // (finding S3-F2 / R2: a wrong accept and a wrong reject of the reference engine).
+        if (mdata != null && options.strictMetadata) {
+            // STRICT policy only (LoadOptions.strictMetadata; OWNER-NOTES 13). Metadata is dropped by
+            // this loader, but officially an mdata node is a term of its own for every cache of the
+            // kernel and hides what is under it from its syntactic tests: a declaration whose type or
+            // value carries metadata is not what the official checker checks (finding S3-F2 / R2: a
+            // wrong accept and a wrong reject of the reference engine). Under the practical policy the
+            // node stays transparent.
             requireNoMDataInDeclaration(type);
             if (value != 0) {
                 requireNoMDataInDeclaration(value);

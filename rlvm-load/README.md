@@ -241,7 +241,7 @@ Verified against `leanchecker --from-export` v4.36.0 where marked (official); pr
 | safe and unsafe type records in one block | decline (not probed) | same |
 | safe types, unsafe constructor / recursor record | loaded, entry flagged `F_UNSAFE` (official: accepted; `rlvm-admit` declines such blocks in v1) | same |
 | `{"inductive":{"types":[],"ctors":[],"recs":[]}}` | declares nothing, no unit (official: accepted) | `anEmptyInductiveLineDeclaresNothing` |
-| `mdata` | a declaration whose type or value carries it (any kind; deviation 7): decline, per unit with `publishOnDecline`; metadata that no admitted declaration reaches: dropped | `SplitTest.mdataIsDropped...`, `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`, `PipelinedLoadTest.aDeclineIsTheStatusOfTheFirstUnitThatWasNotLoaded` |
+| `mdata` | dropped: the wrapped expression stands for it (practical policy, the default). Inside an inductive or quot record: decline (deviation 7), per unit with `publishOnDecline`. With `LoadOptions.strictMetadata` (strict policy): every declaration whose type or value carries it is declined | `SplitTest.mdataIsDropped...`, `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`, `PipelinedLoadTest.aDeclineIsTheStatusOfTheFirstUnitThatWasNotLoaded` |
 | segment longer than `LoadOptions.maxSegmentRecords` (default 2^26 = 1 GiB of buffer) | decline | `aSegmentBeyondTheLimitIsDeclined` |
 | more than 2^31 - 2^29 expression records, any `StoreLimitException` (2^28 - 1 shared nodes, 2 GiB pools, ...) | decline | only the exception mapping is tested (`BindingsTest.storeLimitsAreDeclines`); no input of that size was built |
 | level deeper than 2^24 - 1 (`LevelLimitException`) | decline (see deviations) | not tested (needs 16.7 M records) |
@@ -410,19 +410,23 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
    official checker compares those records with the kernel's own declarations by `Expr.eqv`, which
    compares metadata, and tests their spines syntactically; four hand-written probes
    (`work/integration/probe/mdata-*.ndjson`) were accepted by RLVM and rejected by leanchecker 4.36
-   before this rule. **Since 2026-11-24 (finding S3-F2, traced by R2) the same holds for every
-   declaration**: an axiom, definition, theorem or opaque whose type or value carries the bit is
-   declined (`Loader.declare`, "metadata (mdata) node in the type or value of a declaration"), because
+   before this rule. **The strict exactness policy (`LoadOptions.strictMetadata` /
+   `withStrictMetadata(true)`, default OFF; OWNER-NOTES 13) extends the decline to every declaration**:
+   an axiom, definition, theorem or opaque whose type or value carries the bit is declined
+   (`Loader.declare`, "metadata (mdata) node in the type or value of a declaration"), because
    officially an `mdata` node is a term of its own for every cache of the kernel (`a = mdata b` is not
    `a = b` there) and hides what is under it from the kernel's syntactic tests (eager reduction,
    `is_pi`, `get_app_fn`): with the node dropped the reference engine accepted an export the official
-   checker rejects (`work/s3/exports/s3-wc-pos-mdata-bad.ndjson`) and rejected one it accepts
-   (`s3-mdata-eager-hidden-ok`). lean4export writes metadata only with `--export-mdata`: the eight
-   corpora have no `mdata` record. Until the store has an MDATA node this is a decline. The loader keeps one bit per expression ordinal ("wrapped by or contains
+   checker rejects (`work/s3/exports/s3-wc-pos-mdata-bad.ndjson`, finding S3-F2, traced by R2) and
+   rejected one it accepts (`s3-mdata-eager-hidden-ok`). Under the practical policy, the default, the
+   node stays transparent: it has no meaning in the theory, the accepts it causes are tolerated, and
+   nothing lean4export can write (`--export-mdata`; the eight corpora have no `mdata` record) is
+   declined for it. With the option off the loader is, record for record, the loader without it. The loader keeps one bit per expression ordinal ("wrapped by or contains
    metadata"), allocated at the first `mdata` record, so files without metadata (every lean4export
    file) pay one null test per record. A record wrapped by an `mdata` record counts as carrying
-   metadata even when it is referenced directly (over-approximation; it can only decline). Metadata
-   that only dropped (unsafe / partial) records or no declaration at all reach is dropped silently.
+   metadata even when it is referenced directly (over-approximation; it can only decline). Metadata in
+   definitions, theorems, axioms and opaques is accepted by default: it is invisible to type checking
+   in the theory (strict policy: declined, above).
    `nondep` and binder names / info are not compared by the official checker either (test kit).
    `LoadReport.exprMData` counts the records. Test: `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`.
    The decline is for the rest of the file from that record on: with `publishOnDecline` the units
@@ -500,8 +504,8 @@ Which files are rejected at load: exactly tutorial 132, 133, 134, 135, 138, 139,
 official checker stops with "uncaught exception: Duplicate declaration". Tutorial 136 and 137 get past
 the official reader (kernel errors) and load here too. Nothing is declined.
 
-What is still declined at load, on hand-written and mutated input only: metadata in the type or value
-of a declaration or inside an inductive or quot record; two level records for one universe parameter under a level that the official
+What is still declined at load, on hand-written and mutated input only: metadata inside an inductive
+or quot record (and, with `LoadOptions.strictMetadata`, in the type or value of any declaration); two level records for one universe parameter under a level that the official
 `instantiate` respells inequivalently (finding A2-F1); an inductive record that mixes safe and unsafe type records; a projection index above
 2^31 - 1; counts of 2^63 or more and ill-formed UTF-8 (reader); a segment above `maxSegmentRecords`;
 the store's and the level store's representation limits.
