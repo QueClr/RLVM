@@ -1,0 +1,6 @@
+[forest]
+trees = ["trees"]
+assets = ["assets"]
+url = "https://queclr.github.io/RLVM/"
+home = "index"
+lang = "en"
