@@ -1,0 +1,1385 @@
+package rlvm.machine;
+
+import static rlvm.machine.Op.SIG;
+
+import rlvm.api.MachineErrors;
+import rlvm.store.Kind;
+import rlvm.store.Node;
+import rlvm.store.Terms;
+
+/**
+ * Family EV (ISA 4.2, 4.3.1): {@code EVAL}, {@code FORCE}, {@code APPLY}, {@code INST}, {@code ARGV},
+ * {@code DOM}. Owner: M2.
+ *
+ * <p>Every judgment is a chain of step methods (stepper-convention.md H2-H4; the template is in
+ * WORK-PACKAGES.md): the entry steps below are the cross-package interface and are frozen; continuation
+ * steps {@code k_*}, loop methods and frame keys ({@code static final int K_EVAL_1 = Op.K_EVAL | 1;})
+ * are this file's own.
+ *
+ * <h2>What the family computes</h2>
+ * The official kernel substitutes ({@code instantiate}, R02 section 4) and then reduces; here a term is
+ * evaluated under a working environment, which performs the substitution lazily and beta, zeta and
+ * projection-of-constructor on the way (ISA decision 7: constants stay folded, no delta, no iota).
+ * A value returned by a judgment of this family may be a suspension ({@code SUSP}): the delayed
+ * evaluation of an active argument that was looked up through a variable or taken out of a constructor
+ * application. Consumers that need the value call {@code FORCE}.
+ *
+ * <h2>Rules this file keeps</h2>
+ * <ul>
+ *   <li><b>Tabling</b> (ISA 5.1): {@code EVAL} of an application, a let or a projection is memoised in
+ *       word {@code VAL} of the SUSP record of {@code (term, PRUNE(env, mask), ls')}. v0 tables every such
+ *       node; with {@code SW_GATED_TABLING} only the nodes of ISA 3.1. {@code VAL} is never a SUSP (2.6):
+ *       a result that is still a suspension is returned and not stored ({@link #done}).
+ *   <li><b>B6</b>: a binder whose body does not read it (bit of the body's node mask clear; a clear bit
+ *       is definite, 2.4) receives {@code HOLE}; its argument is not even built.
+ *   <li><b>let</b> inside an evaluated term is zeta by sharing: the bound value is treated like the argument of a
+ *       beta step (ARGV). It is <em>not</em> a {@code LET} suspension: those are the let variables of INFER (2.8), the
+ *       only place where the official kernel has a free variable for a let (NOTES-M2 D9).
+ *   <li><b>Inert nests</b> (ISA 8.2, section 9; convention H8 item 3): the evaluation of an inert
+ *       application that {@code ARGV} performs at once is an iteration of the loop of the enclosing
+ *       {@code EVAL}: it costs a tick and is not a call event. It runs by host recursion that becomes the
+ *       frame {@code EVAL[IN]} beyond the depth bound, or, with {@code SW_INERT_LOOP}, by a loop over
+ *       scratch; both make the same records in the same order.
+ *   <li><b>Stacks</b> (H7): a judgment that entered a frame or pushed on {@code es} keeps the old
+ *       {@code ep} in its payload and restores it when it completes; {@code EVAL} of an application keeps
+ *       the scratch base {@code xb}.
+ * </ul>
+ */
+final class Eval {
+    private Eval() {}
+
+    /**
+     * Session state private to this package (caches, counters, scratch of its own): add fields here
+     * instead of asking for fields in {@link Machine}. One instance per machine, field {@code m.x2}.
+     */
+    static final class Ext {
+        /** Second result of {@link #peel}: the body under the peeled lambdas. */
+        int body;
+        /** Second result of {@link #bind}: the length of the environment it built (its base is {@code m.envBase}). */
+        int en;
+        /** Second result of {@link #inertPop}: the base of the loop frame below, -1 if none. */
+        int prev;
+        /**
+         * {@code SW_GATED_TABLING}: export term ids below this one belong to earlier units and are always
+         * tabled (ISA 3.1). {@code Integer.MAX_VALUE} when the machine checks no unit (fixtures).
+         */
+        int ownFirst = Integer.MAX_VALUE;
+        /** Statistics ({@code m.stats}): tabled evaluations answered by {@code VAL}; results left untabled because they were suspensions. */
+        long hits;
+        long lazy;
+
+        /** Session reset (ISA 1.6): forget everything, in O(used). */
+        void reset(Machine m) {
+            ownFirst = Integer.MAX_VALUE;
+        }
+
+        /** Start of a declaration. */
+        void beginDecl(Machine m) {
+            ownFirst = m.unit >= 0 && m.decls != null ? m.decls.unitFirstTerm(m.unit) : Integer.MAX_VALUE;
+        }
+
+        /** Bytes in use of this package's own session tables (part of the footprint, ISA 1.6). */
+        long bytes() {
+            return 0;
+        }
+    }
+
+    // ---- frame keys of the continuation steps (the payload of J[k] is the parameter list of k_J..) ----
+
+    /** EVAL[IN](t, eb, en, ls): an inert application met by ARGV, beyond the depth bound. */
+    static final int K_EVAL_IN = Op.K_EVAL | 1;
+    /** EVAL[HEAD](s, xb, n, eb, en, ls): waits for the value of the head. */
+    static final int K_EVAL_HEAD = Op.K_EVAL | 2;
+    /** EVAL[HEADF](s, xb, n, eb, en, ls): waits for the forced head. */
+    static final int K_EVAL_HEADF = Op.K_EVAL | 3;
+    /** EVAL[ARG](s, f, xb, n, i, eb, en, ls): waits for argument i (an inert application). */
+    static final int K_EVAL_ARG = Op.K_EVAL | 4;
+    /** EVAL[APP](s, xb): waits for APPLY. */
+    static final int K_EVAL_APP = Op.K_EVAL | 5;
+    /** EVAL[BODY](s, ep0): waits for the body of a let chain. */
+    static final int K_EVAL_BODY = Op.K_EVAL | 6;
+    /** EVAL[PROJ](t, s): waits for the struct of a projection. */
+    static final int K_EVAL_PROJ = Op.K_EVAL | 7;
+    /** EVAL[LET](t, s, eb, en, ls, ep0): waits for the value bound by let node t (an inert application). */
+    static final int K_EVAL_LET = Op.K_EVAL | 8;
+    /** FORCE[1](s, ep0): waits for EVAL of the suspended term. */
+    static final int K_FORCE_1 = Op.K_FORCE | 1;
+    /** FORCE[2](s): waits for FORCE of a result that was itself a suspension. */
+    static final int K_FORCE_2 = Op.K_FORCE | 2;
+    /** APPLY[1](xb, n, k): waits for FORCE of the function. */
+    static final int K_APPLY_1 = Op.K_APPLY | 1;
+    /** APPLY[2](xb, n, k, ep0): waits for EVAL of a body; k arguments are consumed. */
+    static final int K_APPLY_2 = Op.K_APPLY | 2;
+    /** INST[1](memo, ep0): waits for the codomain; memo = the PI / PII record whose COD is to be written, or 0. */
+    static final int K_INST_1 = Op.K_INST | 1;
+    /** INST[2](memo, xb): waits for the block of a PI closure (SW_CODE). */
+    static final int K_INST_2 = Op.K_INST | 2;
+    /** DOM[1](v, ep0): waits for EVAL of the domain term. */
+    static final int K_DOM_1 = Op.K_DOM | 1;
+    /** DOM[2](v): waits for FORCE of the domain. */
+    static final int K_DOM_2 = Op.K_DOM | 2;
+
+    // =====================================================================================================
+    // EVAL
+    // =====================================================================================================
+
+    /**
+     * EVAL(t, env, ls) (ISA 4.2): the value of term t under the working environment (eb, en) and substitution ls.
+     * Fast: variable -> GET; const / sort / literal. Tabled on the SUSP record of (t, PRUNE(env, mask t), ls') (5.1; v0:
+     * every non-leaf node). app: spine in X, constant head -> MKAPP of ARGV, else APPLY; lam / pi: closure; let: LET
+     * suspensions; proj: MKPROJ. Official: {@code instantiate} + beta + zeta, delayed (R02 section 4, 7.1).
+     * Entry frame: EVAL[0](t, eb, en, ls).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int eval(Machine m, int t, int eb, int en, int ls, int d) {
+        int v = atom(m, t, eb, en, ls); // 1. inline answers: leaves and closures (class p of ISA 4.2)
+        if (v != Op.MISS) {
+            return v;
+        }
+        int s = table(m, t, eb, en, ls); // the tabling record (5.1); 0 = t is not tabled
+        if (s != 0) {
+            if (s >= SIG) {
+                return s;
+            }
+            v = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
+            if (v != 0) {
+                return m.debug != 0 || m.stats ? hit(m, s, v) : v; // memo hit: no tick, no event, no frame
+            }
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // 2. TICK
+        }
+        if (m.stats) {
+            m.call(Op.EVAL); // 2b. call event
+        }
+        if (d > m.hostDepth) {
+            return m.spill4(Op.K_EVAL, t, eb, en, ls); // 3. too deep: become the frame EVAL[0](t, eb, en, ls)
+        }
+        return node(m, t, s, eb, en, ls, d); // 4. body
+    }
+
+    /**
+     * EVAL(t, env, ls) for a caller that already holds the tabling record s of (t, PRUNE(env), ls') and found its VAL
+     * unknown (FORCE of a plain suspension; ISA 4.3 "call EVAL(term, frame, ls), VAL := A"): the judgment of
+     * {@link #eval} without the probe. If it is spilled it becomes the frame EVAL[0], which finds s again.
+     */
+    private static int evalAt(Machine m, int t, int s, int eb, int en, int ls, int d) {
+        int v = atom(m, t, eb, en, ls);
+        if (v != Op.MISS) {
+            return v;
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig;
+        }
+        if (m.stats) {
+            m.call(Op.EVAL);
+        }
+        if (d > m.hostDepth) {
+            return m.spill4(Op.K_EVAL, t, eb, en, ls);
+        }
+        return node(m, t, s, eb, en, ls, d);
+    }
+
+    /**
+     * ARGV's evaluation of an inert application t (ISA 4.2 "EVAL now (builds NEUs only)"): an iteration of the
+     * inert-nest loop of the enclosing EVAL (ISA 8.2 "one EVAL frame looping", section 9; convention H8 item 3), so it
+     * is tabled and ticked like any node and is not a call event. Run by host recursion; beyond the depth bound it is
+     * the frame EVAL[IN](t, eb, en, ls) (written without the event bookkeeping of {@code spillN}: there was no
+     * event). With {@code SW_INERT_LOOP} the same nest is evaluated by {@link #inertLoop}: same records, same order.
+     */
+    static int evalIn(Machine m, int t, int eb, int en, int ls, int d) {
+        int s = table(m, t, eb, en, ls);
+        if (s != 0) {
+            if (s >= SIG) {
+                return s;
+            }
+            int v = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
+            if (v != 0) {
+                return m.debug != 0 || m.stats ? hit(m, s, v) : v;
+            }
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // TICK: one per node of the nest (a loop iteration, ISA 1.4)
+        }
+        if ((m.sw & Op.SW_INERT_LOOP) != 0) {
+            if (s == 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
+                return Op.FATAL;
+            }
+            return inertLoop(m, t, s, eb, en, ls);
+        }
+        if (d > m.hostDepth) {
+            m.fuel++; // the tick is given back: the driver enters this step again
+            return m.sig4(Op.SUSP, K_EVAL_IN, t, eb, en, ls);
+        }
+        return node(m, t, s, eb, en, ls, d);
+    }
+
+    /**
+     * The inline part of EVAL and ARGV (ISA 4.2, class p): variable -> PEEK(GET) (reading HOLE is fault(E_HOLE), 2.1);
+     * sort -> KSORT; const -> KCONST (an unbound constant node is fault(E_INTERNAL), section 9); literal -> KLIT;
+     * lam / pi -> MKLAM / MKPI over the pruned frame. Official: {@code instantiate} of a leaf, {@code instantiate_lparams}
+     * on Sort and Const (R02 section 4, 3.3); a closure is the delayed {@code instantiate} of a binder.
+     * @return the value; {@code Op.MISS} for an application, a let or a projection; or a signal (FATAL)
+     */
+    private static int atom(Machine m, int t, int eb, int en, int ls) {
+        final int[] r = m.terms.regionOf(t);
+        final int w = Node.wordOf(t);
+        final int hdr = r[w];
+        switch (hdr & 0xF) {
+            case Kind.BVAR: {
+                int v = Runs.get(m, eb, en, r[w + Node.W_A]); // faults on HOLE; audits the scope in debug builds
+                if (v <= Layout.HOLE || v >= SIG) {
+                    return v != Layout.NONE ? v : m.fault(MachineErrors.E_INTERNAL); // an immediate, or a signal
+                }
+                return (m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) == Layout.SUSP ? Values.peek(m, v) : v;
+            }
+            case Kind.SORT: {
+                int l = r[w + Node.W_A];
+                return Values.mkSort(m, (hdr & Node.F_HAS_LPARAM) != 0 ? Levels.lsub(m, l, ls) : l);
+            }
+            case Kind.CONST: {
+                int row = r[w + Node.W_A];
+                if (row <= 0) {
+                    return m.fault(MachineErrors.E_INTERNAL);
+                }
+                int ll = r[w + Node.W_B];
+                return Values.mkConst(m, row, (hdr & Node.F_HAS_LPARAM) != 0 ? Levels.lsubList(m, ll, ls) : ll);
+            }
+            case Kind.NATLIT:
+            case Kind.STRLIT:
+                return Lits.klit(m, t);
+            case Kind.LAM:
+                return Values.mkLam(m, t, frame(m, t, eb, en), ls);
+            case Kind.PI:
+                return Values.mkPi(m, t, frame(m, t, eb, en), ls);
+            case Kind.APP:
+            case Kind.LET:
+            case Kind.PROJ:
+                return Op.MISS;
+            default:
+                return m.fault(MachineErrors.E_INTERNAL); // FVAR nodes are the reference kernel's; NONE is no term
+        }
+    }
+
+    /**
+     * {@code PRUNE(env, mask t)} (ISA 2.4): the frame of a closure, a suspension or a tabling record of term t. A closed
+     * term has the empty frame. The constructors of {@code Values} pass a signal on and canonicalise ls (ls' = 0 for a
+     * term without level parameter, 2.7).
+     * @return the frame run, or a signal
+     */
+    private static int frame(Machine m, int t, int eb, int en) {
+        if ((m.debug & Op.DBG_MASKAUDIT) != 0 && Debug.maskAudit(m, t) != 0) {
+            return Op.FATAL; // the mask contract (ISA 2.4, 5.5)
+        }
+        long mask = m.terms.fvMask(t);
+        return mask == 0 ? Layout.RUN_EMPTY : Runs.prune(m, eb, en, mask);
+    }
+
+    /**
+     * The tabling record of EVAL(t, env, ls): SUSP(t, PRUNE(env, mask t), ls') with ls' = HAS_LPARAM(t) ? ls : 0 (ISA
+     * 4.2, 5.1, 2.7). The key holds every binding t can read (5.2: the mask is a superset of what is read).
+     * @return the record; 0 if t is not tabled (ISA 3.1, only with SW_GATED_TABLING); or a signal
+     */
+    private static int table(Machine m, int t, int eb, int en, int ls) {
+        if ((m.sw & Op.SW_GATED_TABLING) != 0 && (!tabled(m, t) || flat(m, t))) {
+            return 0;
+        }
+        return Values.suspRecord(m, t, frame(m, t, eb, en), ls);
+    }
+
+    /**
+     * A flat inert application: a constant head and only variables, constants, sorts and literals as arguments. Its
+     * evaluation is one MKAPP of atoms, cheaper than its tabling probe (PRUNE and the SUSP record), and it has no
+     * sub-term whose walk a memo could save: with SW_GATED_TABLING it is never tabled, whatever its sharing flags
+     * say. No DAG is walked as a tree by this: a visit costs O(arguments), and the parents keep their own gate.
+     */
+    private static boolean flat(Machine m, int t) {
+        final Terms T = m.terms;
+        if (T.kind(t) != Kind.APP) {
+            return false;
+        }
+        int u = t;
+        do {
+            int k = T.kind(T.b(u));
+            if (k != Kind.BVAR && k != Kind.CONST && k != Kind.SORT && k != Kind.NATLIT && k != Kind.STRLIT) {
+                return false;
+            }
+            u = T.a(u);
+        } while (T.kind(u) == Kind.APP);
+        return T.kind(u) == Kind.CONST;
+    }
+
+    /**
+     * {@code sharecheck} (ISA 3.1, 5.5): the walk enters node t, which has no tabling record; it must not do so twice
+     * under one pruned frame in a declaration. Debug builds only (it makes the frame a tabled node would have).
+     * @return 0, or FATAL
+     */
+    private static int walked(Machine m, int t, int eb, int en) {
+        if (flat(m, t)) {
+            return 0; // revisited by design
+        }
+        int fr = frame(m, t, eb, en);
+        return fr >= SIG ? fr : Debug.shareCheck(m, t, fr);
+    }
+
+    /**
+     * {@code tabled(t)} of ISA 3.1 (staging step 1, SW_GATED_TABLING): SHARED, BODY or INVARIANT (node header bits 13-15,
+     * which never under-approximate sharing), or t is not a term of the unit being checked: an export id below the
+     * unit's first one, or the generated region. Overlay nodes go by their flags (hash-consed overlay nodes are SHARED;
+     * a decoded block carries the flags of its own segment).
+     */
+    private static boolean tabled(Machine m, int t) {
+        if ((m.terms.header(t) & Node.F_TABLED_MASK) != 0) {
+            return true;
+        }
+        return t < Node.OVERLAY_BIT && (t >= Node.GEN_BASE || t < m.x2.ownFirst);
+    }
+
+    /**
+     * Completion of a tabled EVAL (I-MEMO, ISA 5.4): {@code VAL(s) := r}. VAL is never a SUSP (2.6), so a result that is
+     * still a suspension after PEEK (a delayed argument or a let variable that the term merely passes on) is returned
+     * untabled; evaluating the term again costs one level, its sub-terms are tabled themselves.
+     */
+    private static int done(Machine m, int s, int r) {
+        if (r == Layout.NONE || r == Layout.HOLE) {
+            return m.fault(r == Layout.HOLE ? MachineErrors.E_HOLE : MachineErrors.E_INTERNAL); // not a value
+        }
+        if (r > Layout.HOLE && (m.vh[r << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) == Layout.SUSP) {
+            r = Values.peek(m, r);
+            if (r > Layout.HOLE && (m.vh[r << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) == Layout.SUSP) {
+                if (m.stats) {
+                    m.x2.lazy++;
+                }
+                return r;
+            }
+        }
+        if (s != 0) {
+            m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL] = r;
+        }
+        return r;
+    }
+
+    /** A tabled EVAL was answered by {@code VAL(s) = v}: statistics, and the memo check of debug builds. */
+    private static int hit(Machine m, int s, int v) {
+        if (m.stats) {
+            m.x2.hits++;
+            m.hits[Op.EVAL]++;
+        }
+        return m.debug != 0 ? checkVal(m, s, v) : v;
+    }
+
+    /**
+     * {@code memocheck} (ISA 5.5) of {@code VAL(s)} for a plain suspension s: the suspended term is evaluated again with
+     * the entry bypassed and must give {@code hit}. The comparison is up to PEEK (ISA 2.1): the re-evaluation meets
+     * suspensions whose value has become known since the entry was written and builds with the values
+     * ({@code NEU(c, [SUSP a])} then, {@code NEU(c, [VAL a])} now): the same value, another id.
+     * @return hit, or FATAL (E_AUDIT; or a fatal fault of the re-evaluation)
+     */
+    private static int checkVal(Machine m, int s, int hit) {
+        if (!Debug.memoEnter(m)) {
+            return hit;
+        }
+        m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL] = 0;
+        int r = m.drive(force(m, s, 0));
+        m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL] = hit;
+        if (r < SIG && r != hit && samePeekedSlow(m, hit, r, 24)) {
+            r = hit;
+        }
+        return Debug.memoExit(m, Op.FORCE, s, 0, hit, r);
+    }
+
+    /**
+     * Debug builds: true if a and b are the same value up to PEEK (a suspension whose VAL is known stands for it),
+     * compared structurally through spines and frames to the given depth; beyond it the answer is "same"
+     * (inconclusive: no alarm).
+     */
+    static boolean samePeekedSlow(Machine m, int a, int b, int depth) {
+        int x = forceFast(m, a);
+        int y = forceFast(m, b);
+        a = x == Op.MISS ? a : x;
+        b = y == Op.MISS ? b : y;
+        if (a == b || depth == 0) {
+            return true;
+        }
+        if (a <= Layout.HOLE || b <= Layout.HOLE) {
+            return false;
+        }
+        final int[] vh = m.vh;
+        final int oa = a << Layout.REC_SHIFT;
+        final int ob = b << Layout.REC_SHIFT;
+        if (((vh[oa] ^ vh[ob]) & Hash.W0_KEY_MASK) != 0) {
+            return false; // kind or aux (spine length, LET) differ
+        }
+        switch (vh[oa] >>> Layout.KIND_SHIFT) {
+            case Layout.NEU:
+                return samePeekedSlow(m, vh[oa + Layout.A], vh[ob + Layout.A], depth - 1)
+                        && sameRunSlow(m, vh[oa + Layout.B], vh[ob + Layout.B], depth - 1);
+            case Layout.LAM:
+            case Layout.PI:
+            case Layout.PII:
+            case Layout.SUSP:
+                return vh[oa + Layout.A] == vh[ob + Layout.A] && vh[oa + Layout.C] == vh[ob + Layout.C]
+                        && sameRunSlow(m, vh[oa + Layout.B], vh[ob + Layout.B], depth - 1);
+            case Layout.PROJ:
+                return vh[oa + Layout.B] == vh[ob + Layout.B] && vh[oa + Layout.C] == vh[ob + Layout.C]
+                        && samePeekedSlow(m, vh[oa + Layout.A], vh[ob + Layout.A], depth - 1);
+            case Layout.NSUC:
+            case Layout.FVAR:
+                return vh[oa + Layout.B] == vh[ob + Layout.B]
+                        && samePeekedSlow(m, vh[oa + Layout.A], vh[ob + Layout.A], depth - 1);
+            default:
+                return false; // SORT, CONST, literals: canonical by id
+        }
+    }
+
+    /** Debug builds: two runs (spines, frames, REST runs) slot by slot up to PEEK. */
+    private static boolean sameRunSlow(Machine m, int ra, int rb, int depth) {
+        if (ra == rb) {
+            return true;
+        }
+        final int[] rs = m.rs;
+        final int ha = rs[ra];
+        final int n = Layout.runLen(ha);
+        if (n != Layout.runLen(rs[rb]) || ((ha ^ rs[rb]) & Layout.RUN_FAR) != 0) {
+            return false;
+        }
+        if ((ha & Layout.RUN_FAR) != 0
+                && !sameRunSlow(m, rs[ra + Layout.RUN_REST_WORD], rs[rb + Layout.RUN_REST_WORD], depth)) {
+            return false;
+        }
+        final int h = Layout.runHeaderWords(ha);
+        for (int i = 0; i < n; i++) {
+            if (!samePeekedSlow(m, m.rs[ra + h + i], m.rs[rb + h + i], depth)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** EVAL, step 4: by node kind. s is the tabling record (0 = none). */
+    private static int node(Machine m, int t, int s, int eb, int en, int ls, int d) {
+        if (s == 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
+            return Op.FATAL;
+        }
+        switch (m.terms.kind(t)) {
+            case Kind.APP:
+                return app(m, t, s, eb, en, ls, d);
+            case Kind.LET:
+                return let(m, t, s, eb, en, ls, d);
+            case Kind.PROJ:
+                return proj(m, t, s, eb, en, ls, d);
+            default:
+                return m.fault(MachineErrors.E_INTERNAL);
+        }
+    }
+
+    // ---- application ----------------------------------------------------------------------------------
+
+    /**
+     * EVAL of an application (ISA 4.2 "app"): the spine is collected in X (argument terms at X[xb .. xb + n), replaced
+     * one by one by their values), the head is evaluated and forced, then {@link #args}. Official: the spine of
+     * {@code instantiate(e)} with head beta (R02 section 4 "Head beta": m = min(leading lambdas, n) arguments at once).
+     */
+    private static int app(Machine m, int t, int s, int eb, int en, int ls, int d) {
+        final Terms T = m.terms;
+        int n = 0;
+        int h = t;
+        do {
+            h = T.a(h);
+            n++;
+        } while (T.kind(h) == Kind.APP);
+        if ((m.sw & Op.SW_INERT_LOOP) != 0 && inertHead(m, h, eb, en)) {
+            return inertLoop(m, t, s, eb, en, ls);
+        }
+        int xb = m.xp;
+        if (!m.ensureScratch(n)) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        final int[] X = m.X;
+        for (int u = t, i = xb + n; i > xb; u = T.a(u)) {
+            X[--i] = T.b(u);
+        }
+        m.xp = xb + n;
+        if (T.kind(h) == Kind.CONST) {
+            int c = atom(m, h, eb, en, ls); // a constant head: MKAPP(KCONST h, ARGV(t1) .. ARGV(tn)) (ISA 4.2)
+            return c >= SIG ? c : args(m, s, c, xb, n, 0, eb, en, ls, d);
+        }
+        int f = eval(m, h, eb, en, ls, d + 1); // call EVAL(head) => HEAD (inline for a variable, a lambda)
+        return f >= SIG ? m.sig6(f, K_EVAL_HEAD, s, xb, n, eb, en, ls) : k_evalHead(m, s, xb, n, eb, en, ls, f, d);
+    }
+
+    /** EVAL[HEAD]: r = the value of the head; it is forced before the arguments are looked at (APPLY would force it first, 4.3.1). */
+    static int k_evalHead(Machine m, int s, int xb, int n, int eb, int en, int ls, int r, int d) {
+        int f = force(m, r, d + 1); // call FORCE(head) => HEADF (inline unless a pending suspension)
+        return f >= SIG ? m.sig6(f, K_EVAL_HEADF, s, xb, n, eb, en, ls) : args(m, s, f, xb, n, 0, eb, en, ls, d);
+    }
+
+    /** EVAL[HEADF]: r = the forced head. */
+    static int k_evalHeadF(Machine m, int s, int xb, int n, int eb, int en, int ls, int r, int d) {
+        return args(m, s, r, xb, n, 0, eb, en, ls, d);
+    }
+
+    /**
+     * The argument loop of EVAL (ISA 4.2: {@code MKAPP(KCONST h, ARGV(t1)..ARGV(tn))} / {@code APPLY(f, ARGV(ti)..)}), from
+     * argument i on; f is the forced head. An argument that the closure f does not read is not built: its slot is HOLE
+     * (B6; decision 8 "never evaluated when the callee's binder is unread"). Then APPLY: MKAPP for a neutral head
+     * (inline), beta for a closure.
+     */
+    private static int args(Machine m, int s, int f, int xb, int n, int i, int eb, int en, int ls, int d) {
+        final long skip = unread(m, f, n);
+        for (; i < n; i++) {
+            int v;
+            if (i < 64 && ((skip >>> i) & 1L) != 0) {
+                v = Layout.HOLE;
+            } else {
+                v = argvFast(m, m.X[xb + i], eb, en, ls);
+                if (v >= Op.MISS) {
+                    if (v != Op.MISS) {
+                        return v;
+                    }
+                    v = evalIn(m, m.X[xb + i], eb, en, ls, d + 1); // an inert application: EVAL now => ARG
+                    if (v >= SIG) {
+                        return m.sig8(v, K_EVAL_ARG, s, f, xb, n, i, eb, en, ls);
+                    }
+                }
+            }
+            m.X[xb + i] = v;
+        }
+        int r = apply(m, f, xb, n, d + 1); // call APPLY(f, args) => APP
+        return r >= SIG ? m.sig2(r, K_EVAL_APP, s, xb) : k_evalApp(m, s, xb, r, d);
+    }
+
+    /** EVAL[ARG]: r = the value of argument i; finish the iteration, re-enter the loop. */
+    static int k_evalArg(Machine m, int s, int f, int xb, int n, int i, int eb, int en, int ls, int r, int d) {
+        m.X[xb + i] = r;
+        return args(m, s, f, xb, n, i + 1, eb, en, ls, d);
+    }
+
+    /** EVAL[APP]: r = the application; the scratch of the spine is released (I-STACKS), the result tabled. */
+    static int k_evalApp(Machine m, int s, int xb, int r, int d) {
+        m.xp = xb;
+        return done(m, s, r);
+    }
+
+    /**
+     * B6 for the arguments of an application of f to n arguments: bit i (i &lt; 64) is set iff f is a LAM closure whose
+     * first j = min(leading lambdas, n) binders are bound by this application and the body under them does not read
+     * binder i (ISA 4.1 BUNREAD, 4.3.1; S1 of R05 section 4). The node mask is a superset of what is read, so a clear
+     * bit is definite (2.4); an index beyond the near slots counts as read.
+     */
+    private static long unread(Machine m, int f, int n) {
+        if (f <= Layout.HOLE || (m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) != Layout.LAM) {
+            return 0L;
+        }
+        int j = peel(m, m.vh[(f << Layout.REC_SHIFT) + Layout.A], n);
+        long mask = m.terms.fvMask(m.x2.body);
+        long u = 0L;
+        for (int i = j > 64 ? 64 : j; --i >= 0;) {
+            int idx = j - 1 - i;
+            if (idx < Layout.NEAR_SLOTS && ((mask >>> idx) & 1L) == 0) {
+                u |= 1L << i;
+            }
+        }
+        return u;
+    }
+
+    /**
+     * The number j of leading lambdas of the LAM term t, at most max (>= 1); the body under them is left in
+     * {@code m.x2.body}. Only syntactic lambdas count: no look through let (R02 section 4, "Head beta").
+     */
+    private static int peel(Machine m, int t, int max) {
+        final Terms T = m.terms;
+        int j = 0;
+        do {
+            t = T.b(t);
+            j++;
+        } while (j < max && T.kind(t) == Kind.LAM);
+        m.x2.body = t;
+        return j;
+    }
+
+    // ---- let, projection ------------------------------------------------------------------------------
+
+    /**
+     * EVAL of a let chain (ISA 4.2 "let"): zeta by sharing. The official {@code whnf_core} reduces a let by
+     * {@code instantiate(body, value)} (R02 7.1): the value is substituted, no variable exists. So each bound value is
+     * what an argument of a beta step is (ARGV): an atom, an inert application built at once, or a plain suspension of
+     * an active term - NOT a LET suspension. The LET flag is the official hasFVar of a let variable, and a let variable
+     * is a free variable only inside {@code infer_let} (R02 6.6: INFER pushes the LET suspension, perf/let-fold);
+     * flagging the lets of an evaluated term would make every value built from them OPEN and switch off the Nat
+     * literal folding of lazy delta (R02 8.4) where the official kernel folds (NOTES-M2 D9). A let variable the body
+     * does not read gets HOLE (B6). The environment is extended on {@code es}; {@code ep} is restored when the body
+     * returns.
+     */
+    private static int let(Machine m, int t, int s, int eb, int en, int ls, int d) {
+        return letFrom(m, t, s, eb, en, ls, m.ep, Op.MISS, d);
+    }
+
+    /**
+     * The let chain from let node t on. {@code v} is the value of t's bound term if it is already known (the loop was
+     * interrupted by its evaluation), else {@code Op.MISS}; ep0 is {@code ep} before the first PUSH.
+     */
+    private static int letFrom(Machine m, int t, int s, int eb, int en, int ls, int ep0, int v, int d) {
+        final Terms T = m.terms;
+        do {
+            int body = T.c(t);
+            if (v == Op.MISS) {
+                v = Layout.HOLE;
+                if ((T.fvMask(body) & 1L) != 0) {
+                    v = argvFast(m, T.b(t), eb, en, ls);
+                    if (v >= Op.MISS) {
+                        if (v != Op.MISS) {
+                            return v;
+                        }
+                        v = evalIn(m, T.b(t), eb, en, ls, d + 1); // an inert value: EVAL now => LET
+                        if (v >= SIG) {
+                            return m.sig6(v, K_EVAL_LET, t, s, eb, en, ls, ep0);
+                        }
+                    }
+                }
+            }
+            en = Runs.push(m, eb, en, v);
+            if (en < 0) {
+                return m.fault(MachineErrors.E_MEM);
+            }
+            eb = m.envBase;
+            t = body;
+            v = Op.MISS;
+        } while (T.kind(t) == Kind.LET);
+        int r = eval(m, t, eb, en, ls, d + 1); // call EVAL(body) => BODY
+        return r >= SIG ? m.sig2(r, K_EVAL_BODY, s, ep0) : k_evalBody(m, s, ep0, r, d);
+    }
+
+    /** EVAL[LET]: r = the value bound by let node t (an inert application); finish the iteration, re-enter the loop. */
+    static int k_evalLet(Machine m, int t, int s, int eb, int en, int ls, int ep0, int r, int d) {
+        return letFrom(m, t, s, eb, en, ls, ep0, r, d);
+    }
+
+    /** EVAL[BODY]: r = the value of the let body. */
+    static int k_evalBody(Machine m, int s, int ep0, int r, int d) {
+        m.ep = ep0;
+        return done(m, s, r);
+    }
+
+    /**
+     * EVAL of a projection (ISA 4.2 "proj": {@code MKPROJ(S, i, call EVAL(struct))}; official {@code reduce_proj_core} on a
+     * syntactic constructor, R02 7.2: the struct is not reduced).
+     */
+    private static int proj(Machine m, int t, int s, int eb, int en, int ls, int d) {
+        int r = eval(m, m.terms.a(t), eb, en, ls, d + 1); // call EVAL(struct) => PROJ
+        return r >= SIG ? m.sig2(r, K_EVAL_PROJ, t, s) : k_evalProj(m, t, s, r, d);
+    }
+
+    /** EVAL[PROJ]: r = the value of the struct. An unbound structure name is fault(E_INTERNAL) (ISA section 9). */
+    static int k_evalProj(Machine m, int t, int s, int r, int d) {
+        final Terms T = m.terms;
+        int row = T.c(t);
+        if (row <= 0) {
+            return m.fault(MachineErrors.E_INTERNAL);
+        }
+        int v = Values.mkProj(m, row, T.b(t), r);
+        return v >= SIG ? v : done(m, s, v);
+    }
+
+    // =====================================================================================================
+    // ARGV
+    // =====================================================================================================
+
+    /**
+     * ARGV(t) (ISA 4.2): atoms inline; an application with a constant head, or with a variable head bound to a
+     * neutral, is evaluated now (builds NEUs only; inert nests in one loop, H8); everything else is MKSUSP.
+     * Entry frame: ARGV[0](t, eb, en, ls).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int argv(Machine m, int t, int eb, int en, int ls, int d) {
+        int v = argvFast(m, t, eb, en, ls);
+        return v != Op.MISS ? v : evalIn(m, t, eb, en, ls, d);
+    }
+
+    /**
+     * ARGV without its one sub-judgment (ISA 4.2): the value of an atom; MKSUSP of an active term (lambda head, let,
+     * proj, a variable head bound to anything but a neutral: decision 8 "delayed as a hash-consed suspension when
+     * active"); {@code Op.MISS} for an inert application, which the caller evaluates now ({@link #evalIn}).
+     */
+    private static int argvFast(Machine m, int t, int eb, int en, int ls) {
+        int v = atom(m, t, eb, en, ls);
+        if (v != Op.MISS) {
+            return v;
+        }
+        final Terms T = m.terms;
+        if (T.kind(t) == Kind.APP && inertHead(m, T.head(t), eb, en)) {
+            return Op.MISS;
+        }
+        return suspend(m, t, eb, en, ls);
+    }
+
+    /**
+     * True if an application with head term h is inert under (eb, en) (ISA 4.2 ARGV): h is a constant, or a variable
+     * bound to a neutral (CONST, NEU, FVAR, PROJ; a suspension whose value is known counts by its value, PEEK).
+     */
+    private static boolean inertHead(Machine m, int h, int eb, int en) {
+        final Terms T = m.terms;
+        int k = T.kind(h);
+        if (k == Kind.CONST) {
+            return true;
+        }
+        if (k != Kind.BVAR) {
+            return false;
+        }
+        int i = T.a(h);
+        if (i < 0 || i >= en) {
+            return false; // the evaluation of the head reports it
+        }
+        int v = m.es[eb + en - 1 - i];
+        if (v <= Layout.HOLE) {
+            return false;
+        }
+        int[] vh = m.vh;
+        int kind = vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
+        if (kind == Layout.SUSP) {
+            v = Values.peek(m, v);
+            if (v <= Layout.HOLE) {
+                return false;
+            }
+            kind = m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
+        }
+        return neutral(kind);
+    }
+
+    /** CONST, NEU, FVAR, PROJ: the heads MKAPP accepts (ISA 4.2). */
+    private static boolean neutral(int kind) {
+        return kind == Layout.NEU || kind == Layout.CONST || kind == Layout.FVAR || kind == Layout.PROJ;
+    }
+
+    /**
+     * MKSUSP(t, env) (ISA 4.2): the plain suspension {@code SUSP(t, PRUNE(env, mask t), ls')}; a known VAL is returned in
+     * its place. Official: a delayed {@code instantiate}. (LET suspensions are made by INFER only, see {@link #let}.)
+     */
+    private static int suspend(Machine m, int t, int eb, int en, int ls) {
+        return Values.mkSusp(m, t, frame(m, t, eb, en), ls, false);
+    }
+
+    // =====================================================================================================
+    // The inert-nest loop (SW_INERT_LOOP)
+    // =====================================================================================================
+
+    // Loop frame on scratch at fb: [prev | s | f | n | i | a_0 .. a_(n-1)]: the base of the frame below (-1 = none),
+    // the tabling record, the head value, the number of arguments, the next argument, and the argument terms, each
+    // replaced by its value.
+    private static final int IN_PREV = 0;
+    private static final int IN_S = 1;
+    private static final int IN_F = 2;
+    private static final int IN_N = 3;
+    private static final int IN_I = 4;
+    private static final int IN_ARGS = 5;
+
+    /**
+     * The inert nest rooted at application t (tabling record s, VAL unknown, already ticked) evaluated by one loop over
+     * scratch instead of host recursion (ISA 8.2 "Inert evaluation ... is one EVAL frame looping over scratch X";
+     * convention H8 item 3). No sub-judgment is called: arguments are atoms, suspensions of active terms, or inert
+     * applications, which are pushed. Per node it does what {@link #evalIn} / {@link #app} / {@link #args} do, in the
+     * same order: tabling probe, tick, spine, head, arguments, MKAPP, VAL.
+     * @return the value, or ABORT / FATAL (never SUSP)
+     */
+    private static int inertLoop(Machine m, int t, int s, int eb, int en, int ls) {
+        int fb = inertPush(m, t, s, -1, eb, en, ls);
+        while (fb < SIG) {
+            int i = m.X[fb + IN_I];
+            if (i == m.X[fb + IN_N]) {
+                int r = inertPop(m, fb);
+                if (r >= SIG || m.x2.prev < 0) {
+                    return r;
+                }
+                fb = m.x2.prev;
+                continue;
+            }
+            int a = m.X[fb + IN_ARGS + i];
+            int v = argvFast(m, a, eb, en, ls);
+            if (v == Op.MISS) {
+                v = inertEnter(m, a, fb, eb, en, ls);
+                if (v == Op.MISS) {
+                    fb = m.x2.prev; // the frame of a is on top now
+                    continue;
+                }
+            }
+            if (v >= SIG) {
+                return v;
+            }
+            m.X[fb + IN_ARGS + i] = v;
+            m.X[fb + IN_I] = i + 1;
+        }
+        return fb;
+    }
+
+    /**
+     * An argument of the loop frame fb is the inert application a: what {@link #evalIn} does before its body. The
+     * tabling probe answers (the value is returned), or the node is ticked and its loop frame pushed (its base is left
+     * in {@code m.x2.prev}, {@code Op.MISS} is returned).
+     */
+    private static int inertEnter(Machine m, int a, int fb, int eb, int en, int ls) {
+        int s = table(m, a, eb, en, ls);
+        if (s != 0) {
+            if (s >= SIG) {
+                return s;
+            }
+            int v = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
+            if (v != 0) {
+                return m.debug != 0 || m.stats ? hit(m, s, v) : v;
+            }
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // TICK, as evalIn
+        }
+        if (s == 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, a, eb, en) != 0) {
+            return Op.FATAL;
+        }
+        int nb = inertPush(m, a, s, fb, eb, en, ls);
+        if (nb >= SIG) {
+            return nb;
+        }
+        m.x2.prev = nb;
+        return Op.MISS;
+    }
+
+    /** Pushes the loop frame of the inert application t: spine and head value. Returns its base, or a signal. */
+    private static int inertPush(Machine m, int t, int s, int prev, int eb, int en, int ls) {
+        final Terms T = m.terms;
+        int n = 0;
+        int h = t;
+        do {
+            h = T.a(h);
+            n++;
+        } while (T.kind(h) == Kind.APP);
+        int fb = m.xp;
+        if (!m.ensureScratch(n + IN_ARGS)) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        int[] X = m.X;
+        for (int u = t, i = fb + IN_ARGS + n; i > fb + IN_ARGS; u = T.a(u)) {
+            X[--i] = T.b(u);
+        }
+        m.xp = fb + IN_ARGS + n;
+        int f = atom(m, h, eb, en, ls); // a constant, or a variable bound to a neutral
+        if (f >= SIG) {
+            return f;
+        }
+        if (f <= Layout.HOLE || !neutral(m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT)) {
+            return m.fault(MachineErrors.E_INTERNAL);
+        }
+        X = m.X;
+        X[fb + IN_PREV] = prev;
+        X[fb + IN_S] = s;
+        X[fb + IN_F] = f;
+        X[fb + IN_N] = n;
+        X[fb + IN_I] = 0;
+        return fb;
+    }
+
+    /**
+     * Completes the loop frame at fb: MKAPP, VAL, release of its scratch; the value becomes the next argument of the
+     * frame below, whose base is left in {@code m.x2.prev} (-1: fb was the root of the nest). Returns the value or a signal.
+     */
+    private static int inertPop(Machine m, int fb) {
+        int r = mkApp(m, m.X[fb + IN_F], fb + IN_ARGS, m.X[fb + IN_N]);
+        if (r >= SIG) {
+            return r;
+        }
+        final int[] X = m.X;
+        r = done(m, X[fb + IN_S], r);
+        int prev = X[fb + IN_PREV];
+        m.xp = fb;
+        m.x2.prev = prev;
+        if (prev >= 0) {
+            int i = X[prev + IN_I];
+            X[prev + IN_ARGS + i] = r;
+            X[prev + IN_I] = i + 1;
+        }
+        return r;
+    }
+
+    // =====================================================================================================
+    // FORCE
+    // =====================================================================================================
+
+    /**
+     * FORCE(s) (ISA 4.3): not a SUSP: s; VAL known: VAL; else EVAL(term, frame, ls), VAL := result.
+     * Entry frame: FORCE[0](s).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int force(Machine m, int s, int d) {
+        if (s <= Layout.HOLE) {
+            return s; // an immediate (NONE and HOLE are not values; they pass through)
+        }
+        final int o = s << Layout.REC_SHIFT;
+        final int[] vh = m.vh;
+        final int w0 = vh[o];
+        if ((w0 >>> Layout.KIND_SHIFT) != Layout.SUSP) {
+            return s; // 1. inline answers
+        }
+        int v = vh[o + Layout.M_VAL];
+        if (v != 0) {
+            return m.debug != 0 && (w0 & Layout.W0_LET) == 0 ? checkVal(m, s, v) : v;
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // 2. TICK
+        }
+        if (m.stats) {
+            m.call(Op.FORCE); // 2b. call event
+        }
+        if (d > m.hostDepth) {
+            return m.spill1(Op.K_FORCE, s); // 3. too deep: become the frame FORCE[0](s)
+        }
+        final int t = vh[o + Layout.A];
+        final int ls = vh[o + Layout.C];
+        final int ep0 = m.ep;
+        int en = Runs.enter(m, vh[o + Layout.B]); // ENTER(frame)
+        if (en < 0) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        // call EVAL(term, frame, ls) => 1. A plain suspension is the tabling record of its own evaluation; a LET
+        // suspension is a record of its own (2.8) and evaluates through the plain record's tabling.
+        int r = (w0 & Layout.W0_LET) != 0 ? eval(m, t, m.envBase, en, ls, d + 1) : evalAt(m, t, s, m.envBase, en, ls, d + 1);
+        return r >= SIG ? m.sig2(r, K_FORCE_1, s, ep0) : k_force1(m, s, ep0, r, d);
+    }
+
+    /**
+     * FORCE[1]: r = the value of the suspended term. It may itself be a suspension (a delayed argument that the term
+     * passes on): VAL is never a SUSP (2.6), so that one is forced too.
+     */
+    static int k_force1(Machine m, int s, int ep0, int r, int d) {
+        m.ep = ep0;
+        if (r == Layout.NONE || r == Layout.HOLE) {
+            return m.fault(r == Layout.HOLE ? MachineErrors.E_HOLE : MachineErrors.E_INTERNAL); // not a value
+        }
+        int v = force(m, r, d + 1); // call FORCE(r) => 2 (inline unless r is a pending suspension)
+        return v >= SIG ? m.sig1(v, K_FORCE_2, s) : k_force2(m, s, v, d);
+    }
+
+    /** FORCE[2]: {@code VAL(s) := v} (I-MEMO: the step that completes the judgment). */
+    static int k_force2(Machine m, int s, int v, int d) {
+        m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL] = v;
+        return v;
+    }
+
+    /**
+     * The inline part of FORCE: v if it is not a SUSP, its VAL if known, else {@code Op.MISS}. Never ticks or calls.
+     */
+    static int forceFast(Machine m, int v) {
+        if (v <= Layout.HOLE) {
+            return v;
+        }
+        final int o = v << Layout.REC_SHIFT;
+        final int[] vh = m.vh;
+        if ((vh[o] >>> Layout.KIND_SHIFT) != Layout.SUSP) {
+            return v;
+        }
+        int x = vh[o + Layout.M_VAL];
+        return x != 0 ? x : Op.MISS;
+    }
+
+    // =====================================================================================================
+    // APPLY
+    // =====================================================================================================
+
+    /**
+     * APPLY(f, X[xb .. xb + n)) (ISA 4.3.1), n >= 1: FORCE f; LAM: bind min(leading lambdas, remaining) arguments
+     * (HOLE for unread binders, B6), EVAL the body, continue; CONST, NEU, FVAR, PROJ: MKAPP; otherwise
+     * fault(E_ILLTYPED). The scratch arguments belong to the caller. Official: head beta with several arguments (R02
+     * section 4). Entry frame: APPLY[0](f, xb, n).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int apply(Machine m, int f, int xb, int n, int d) {
+        int g = forceFast(m, f); // 1. inline answers: a neutral head is MKAPP (class p)
+        if (g != Op.MISS) {
+            int kind = Values.kind(m, g);
+            if (kind != Layout.LAM) {
+                return neutral(kind) ? mkApp(m, g, xb, n) : illTyped(m, g);
+            }
+            f = g;
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // 2. TICK
+        }
+        if (m.stats) {
+            m.call(Op.APPLY); // 2b. call event
+        }
+        if (d > m.hostDepth) {
+            return m.spill3(Op.K_APPLY, f, xb, n); // 3. too deep: become the frame APPLY[0](f, xb, n)
+        }
+        return applyFrom(m, f, xb, n, 0, d); // 4. body
+    }
+
+    /**
+     * The loop of ISA 4.3.1 with k arguments consumed: f is a closure, a pending suspension, or the value a body
+     * returned. One group of leading lambdas per iteration (the official multi-argument beta).
+     */
+    private static int applyFrom(Machine m, int f, int xb, int n, int k, int d) {
+        for (;;) {
+            int g = force(m, f, d + 1); // call FORCE(f) => 1
+            if (g >= SIG) {
+                return m.sig3(g, K_APPLY_1, xb, n, k);
+            }
+            int kind = Values.kind(m, g);
+            if (kind != Layout.LAM) {
+                return neutral(kind) ? mkApp(m, g, xb + k, n - k) : illTyped(m, g);
+            }
+            final int ep0 = m.ep;
+            int r;
+            int j = (m.sw & Op.SW_CODE) != 0 ? codeArity(m, g, n - k) : 0;
+            if (j != 0) {
+                // CODE(f): the block of the closure's binder term at entry j, capRun = the frame (staging step 4)
+                final int o = g << Layout.REC_SHIFT;
+                r = Code.callClosure(m, m.vh[o + Layout.M_CODE], j, m.vh[o + Layout.B], m.vh[o + Layout.C], xb + k, d + 1);
+            } else {
+                j = bind(m, g, xb + k, n - k); // env = ENTER(frame) + j arguments
+                if (j >= SIG) {
+                    return j;
+                }
+                r = eval(m, m.x2.body, m.envBase, m.x2.en, m.vh[(g << Layout.REC_SHIFT) + Layout.C], d + 1); // => 2
+            }
+            k += j;
+            if (r >= SIG) {
+                return m.sig4(r, K_APPLY_2, xb, n, k, ep0);
+            }
+            m.ep = ep0;
+            if (k == n) {
+                return r;
+            }
+            f = r;
+        }
+    }
+
+    /** APPLY[1]: r = the forced function. */
+    static int k_apply1(Machine m, int xb, int n, int k, int r, int d) {
+        return applyFrom(m, r, xb, n, k, d);
+    }
+
+    /** APPLY[2]: r = the value of the body after k arguments. */
+    static int k_apply2(Machine m, int xb, int n, int k, int ep0, int r, int d) {
+        m.ep = ep0;
+        return k == n ? r : applyFrom(m, r, xb, n, k, d);
+    }
+
+    /**
+     * {@code env = ENTER(frame of f)}, then PUSH of the first j = min(leading lambdas of f, n) arguments X[xa ..]:
+     * {@code body_j reads the i-th ? a[i] : HOLE} (ISA 4.3.1, B6). Leaves the body in {@code m.x2.body}, the
+     * environment at {@code m.envBase} with length {@code m.x2.en}.
+     * @return j, or a signal
+     */
+    private static int bind(Machine m, int f, int xa, int n) {
+        final int o = f << Layout.REC_SHIFT;
+        final int j = peel(m, m.vh[o + Layout.A], n);
+        final long mask = m.terms.fvMask(m.x2.body);
+        int en = Runs.enter(m, m.vh[o + Layout.B]);
+        if (en < 0 || !m.ensureEnv(j)) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        final int[] es = m.es;
+        final int[] X = m.X;
+        final int p = m.envBase + en;
+        for (int i = 0; i < j; i++) {
+            int idx = j - 1 - i; // de Bruijn index of binder i in body_j
+            boolean reads = idx >= Layout.NEAR_SLOTS ? mask < 0 : ((mask >>> idx) & 1L) != 0;
+            es[p + i] = reads ? X[xa + i] : Layout.HOLE;
+        }
+        m.ep = p + j;
+        m.x2.en = en + j;
+        return j;
+    }
+
+    /**
+     * MKAPP(f, X[xa .. xa + n)) for a neutral f (ISA 4.2). A HOLE among the arguments would enter a spine, where it
+     * could be compared: the caller passed HOLE for a binder that is read after all, fault(E_HOLE).
+     */
+    private static int mkApp(Machine m, int f, int xa, int n) {
+        final int[] X = m.X;
+        for (int i = xa, e = xa + n; i < e; i++) {
+            if (X[i] == Layout.HOLE) {
+                return m.fault(MachineErrors.E_HOLE);
+            }
+        }
+        return Values.mkApp(m, f, xa, n);
+    }
+
+    /** APPLY of something that is neither a closure nor a neutral (ISA 4.3.1 "otherwise"): only inside an unchecked body. */
+    private static int illTyped(Machine m, int f) {
+        return m.fault(f == Layout.HOLE ? MachineErrors.E_HOLE : MachineErrors.E_ILLTYPED);
+    }
+
+    /**
+     * {@code CODE(f)} (ISA 2.6, 3.3 "Finding the block of a closure"; staging step 4, only with SW_CODE): the block of the
+     * binder term of closure clo, looked up at its first APPLY or INST and kept in memo word CODE ({@code NOCODE}:
+     * none). A hint: whether a closure runs its block or is walked changes no result (decision 6).
+     * @return the block id, or 0
+     */
+    private static int codeOf(Machine m, int clo) {
+        final int o = clo << Layout.REC_SHIFT;
+        int c = m.vh[o + Layout.M_CODE];
+        if (c == 0) {
+            c = Code.closureBlock(m, m.vh[o + Layout.A]);
+            m.vh[o + Layout.M_CODE] = c == 0 ? Layout.NOCODE : c;
+        }
+        return c == Layout.NOCODE ? 0 : c;
+    }
+
+    /**
+     * The number j of binders of closure clo that its block takes from n arguments: min(leading lambdas, n, arity of the
+     * block), if the closure has a block with that entry; else 0 (walk the term). The block is in memo word CODE then.
+     */
+    private static int codeArity(Machine m, int clo, int n) {
+        int blk = codeOf(m, clo);
+        if (blk == 0) {
+            return 0;
+        }
+        int j = Math.min(peel(m, m.vh[(clo << Layout.REC_SHIFT) + Layout.A], n), Code.arityOf(m, blk));
+        return j >= 1 && Code.hasEntry(m, blk, j - 1) ? j : 0;
+    }
+
+    // =====================================================================================================
+    // INST
+    // =====================================================================================================
+
+    /**
+     * INST(P, x) (ISA 4.3): P is PI or PII. COD known: it. PI: EVAL(body, PUSH(ENTER(frame), reads0 ? x : HOLE), ls);
+     * PII: INFER(body, PUSH(frame, x), ls, ONLY). Official: {@code instantiate(binding_body(f_type), arg)} (R02 6.5),
+     * type of a lambda body (6.3). Entry frame: INST[0](pi, x).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int inst(Machine m, int pi, int x, int d) {
+        if (pi <= Layout.HOLE) {
+            return m.fault(MachineErrors.E_INTERNAL);
+        }
+        final int o = pi << Layout.REC_SHIFT;
+        final int[] vh = m.vh;
+        final int kind = vh[o] >>> Layout.KIND_SHIFT;
+        if (kind != Layout.PI && kind != Layout.PII) {
+            return m.fault(MachineErrors.E_INTERNAL);
+        }
+        int c = vh[o + Layout.M_COD];
+        if (c != 0) {
+            return m.debug != 0 ? checkCod(m, pi, c) : c; // 1. inline answer: the codomain does not depend on the argument (2.6)
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // 2. TICK
+        }
+        if (m.stats) {
+            m.call(Op.INST); // 2b. call event
+        }
+        if (d > m.hostDepth) {
+            return m.spill2(Op.K_INST, pi, x); // 3. too deep: become the frame INST[0](pi, x)
+        }
+        return instBody(m, pi, x, kind, d); // 4. body
+    }
+
+    /** INST, step 4: the codomain of the PI / PII record pi at x. */
+    private static int instBody(Machine m, int pi, int x, int kind, int d) {
+        if (kind == Layout.PI && (m.sw & Op.SW_CODE) != 0 && codeArity(m, pi, 1) == 1) {
+            return instCode(m, pi, x, d);
+        }
+        final int o = pi << Layout.REC_SHIFT;
+        final int[] vh = m.vh;
+        final int body = m.terms.b(vh[o + Layout.A]);
+        final int ls = vh[o + Layout.C];
+        final boolean reads0 = (m.terms.fvMask(body) & 1L) != 0;
+        final int ep0 = m.ep;
+        int en = Runs.enter(m, vh[o + Layout.B]);
+        if (en >= 0) {
+            en = Runs.push(m, m.envBase, en, reads0 ? x : Layout.HOLE); // B6
+        }
+        if (en < 0) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        // call EVAL / INFER(body) => 1
+        int r = kind == Layout.PI ? eval(m, body, m.envBase, en, ls, d + 1) : Infer.infer(m, body, m.envBase, en, ls, Op.ONLY, d + 1);
+        int memo = reads0 ? 0 : pi;
+        return r >= SIG ? m.sig2(r, K_INST_1, memo, ep0) : k_inst1(m, memo, ep0, r, d);
+    }
+
+    /**
+     * INST of a PI closure that has a block (ISA 4.3 "CODE present: its block"; staging step 4, only with SW_CODE): the
+     * block's entry for one binder on the argument in one scratch word, capRun = the frame.
+     */
+    private static int instCode(Machine m, int pi, int x, int d) {
+        final int o = pi << Layout.REC_SHIFT;
+        final boolean reads0 = (m.terms.fvMask(m.terms.b(m.vh[o + Layout.A])) & 1L) != 0;
+        final int xb = m.xp;
+        if (!m.ensureScratch(1)) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        m.X[xb] = reads0 ? x : Layout.HOLE;
+        m.xp = xb + 1;
+        int r = Code.callClosure(m, m.vh[o + Layout.M_CODE], 1, m.vh[o + Layout.B], m.vh[o + Layout.C], xb, d + 1); // => 2
+        int memo = reads0 ? 0 : pi;
+        return r >= SIG ? m.sig2(r, K_INST_2, memo, xb) : k_inst2(m, memo, xb, r, d);
+    }
+
+    /** INST[2]: r = the codomain computed by the closure's block; the scratch word of the argument is released. */
+    static int k_inst2(Machine m, int memo, int xb, int r, int d) {
+        m.xp = xb;
+        return k_inst1(m, memo, m.ep, r, d);
+    }
+
+    /**
+     * INST[1]: r = the codomain. If the body does not read its variable the result is independent of the argument and
+     * is kept in COD (ISA 2.6), unless it is still a suspension (a memo word holds a value).
+     */
+    static int k_inst1(Machine m, int memo, int ep0, int r, int d) {
+        m.ep = ep0;
+        if (r > Layout.HOLE && (m.vh[r << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) == Layout.SUSP) {
+            r = Values.peek(m, r);
+            if (r > Layout.HOLE && (m.vh[r << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) == Layout.SUSP) {
+                return r;
+            }
+        }
+        if (memo != 0) {
+            m.vh[(memo << Layout.REC_SHIFT) + Layout.M_COD] = r;
+        }
+        return r;
+    }
+
+    /** {@code memocheck} (ISA 5.5) of {@code COD(pi)}: INST with the entry bypassed (the argument is not read: HOLE), compared up to PEEK. */
+    private static int checkCod(Machine m, int pi, int hit) {
+        if (!Debug.memoEnter(m)) {
+            return hit;
+        }
+        m.vh[(pi << Layout.REC_SHIFT) + Layout.M_COD] = 0;
+        int r = m.drive(inst(m, pi, Layout.HOLE, 0));
+        m.vh[(pi << Layout.REC_SHIFT) + Layout.M_COD] = hit;
+        if (r < SIG && r != hit && samePeekedSlow(m, hit, r, 24)) {
+            r = hit;
+        }
+        return Debug.memoExit(m, Op.INST, pi, 0, hit, r);
+    }
+
+    /**
+     * The inline part of INST: the COD memo if known (2.6), else {@code Op.MISS}.
+     */
+    static int instFast(Machine m, int pi, int x) {
+        int c = m.vh[(pi << Layout.REC_SHIFT) + Layout.M_COD];
+        return c != 0 ? c : Op.MISS;
+    }
+
+    // =====================================================================================================
+    // DOM
+    // =====================================================================================================
+
+    /**
+     * DOM(v) for a LAM, PI or PII record: memo M_DOM, else EVAL(domain term, frame, ls) (ISA 4.4.3, 2.6).
+     * Entry frame: DOM[0](v).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int dom(Machine m, int v, int d) {
+        if (v <= Layout.HOLE) {
+            return m.fault(MachineErrors.E_INTERNAL);
+        }
+        final int o = v << Layout.REC_SHIFT;
+        final int[] vh = m.vh;
+        final int kind = vh[o] >>> Layout.KIND_SHIFT;
+        if (kind != Layout.LAM && kind != Layout.PI && kind != Layout.PII) {
+            return m.fault(MachineErrors.E_INTERNAL);
+        }
+        int c = vh[o + Layout.M_DOM];
+        if (c != 0) {
+            return m.debug != 0 ? Debug.memoCheck(m, Op.DOM, v, 0, c) : c; // 1. inline answer
+        }
+        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+            return m.sig; // 2. TICK
+        }
+        if (m.stats) {
+            m.call(Op.DOM); // 2b. call event
+        }
+        if (d > m.hostDepth) {
+            return m.spill1(Op.K_DOM, v); // 3. too deep: become the frame DOM[0](v)
+        }
+        final int ep0 = m.ep;
+        final int dt = m.terms.a(vh[o + Layout.A]);
+        int en = 0;
+        int eb = ep0;
+        if (m.terms.fvMask(dt) != 0) { // a closed domain term reads no binding: no ENTER
+            en = Runs.enter(m, vh[o + Layout.B]);
+            if (en < 0) {
+                return m.fault(MachineErrors.E_MEM);
+            }
+            eb = m.envBase;
+        }
+        int r = eval(m, dt, eb, en, vh[o + Layout.C], d + 1); // call EVAL(domain) => 1
+        return r >= SIG ? m.sig2(r, K_DOM_1, v, ep0) : k_dom1(m, v, ep0, r, d);
+    }
+
+    /**
+     * DOM[1]: r = the value of the domain term. The domain of a binder is the type of the variable that OPEN picks
+     * (2.8) and is compared at once by every caller, so it is forced: DOM never returns, and M_DOM never holds, a
+     * suspension.
+     */
+    static int k_dom1(Machine m, int v, int ep0, int r, int d) {
+        m.ep = ep0;
+        int w = force(m, r, d + 1); // call FORCE(r) => 2 (inline unless a pending suspension)
+        return w >= SIG ? m.sig1(w, K_DOM_2, v) : k_dom2(m, v, w, d);
+    }
+
+    /** DOM[2]: {@code M_DOM(v) := w} (I-MEMO). */
+    static int k_dom2(Machine m, int v, int w, int d) {
+        m.vh[(v << Layout.REC_SHIFT) + Layout.M_DOM] = w;
+        return w;
+    }
+
+    // =====================================================================================================
+    // The family's part of the driver
+    // =====================================================================================================
+
+    /**
+     * The family's part of the driver (H6): one case per frame key, calling the step with the payload words
+     * as arguments, {@code r} as the result register and d = 0. The state-0 cases (spilled entry steps) are
+     * given; M2 adds one case per continuation step (at most 50 cases per method, H10: split by op).
+     */
+    static int resume(Machine m, int key, int[] w, int p, int r) {
+        switch (key) {
+            case Op.K_EVAL:
+                return eval(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
+            case K_EVAL_IN:
+                return evalIn(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
+            case K_EVAL_HEAD:
+                return k_evalHead(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], r, 0);
+            case K_EVAL_HEADF:
+                return k_evalHeadF(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], r, 0);
+            case K_EVAL_ARG:
+                return k_evalArg(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], w[p + 6], w[p + 7], r, 0);
+            case K_EVAL_APP:
+                return k_evalApp(m, w[p], w[p + 1], r, 0);
+            case K_EVAL_BODY:
+                return k_evalBody(m, w[p], w[p + 1], r, 0);
+            case K_EVAL_PROJ:
+                return k_evalProj(m, w[p], w[p + 1], r, 0);
+            case K_EVAL_LET:
+                return k_evalLet(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], r, 0);
+            case Op.K_FORCE:
+                return force(m, w[p], 0);
+            case K_FORCE_1:
+                return k_force1(m, w[p], w[p + 1], r, 0);
+            case K_FORCE_2:
+                return k_force2(m, w[p], r, 0);
+            case Op.K_APPLY:
+                return apply(m, w[p], w[p + 1], w[p + 2], 0);
+            case K_APPLY_1:
+                return k_apply1(m, w[p], w[p + 1], w[p + 2], r, 0);
+            case K_APPLY_2:
+                return k_apply2(m, w[p], w[p + 1], w[p + 2], w[p + 3], r, 0);
+            case Op.K_INST:
+                return inst(m, w[p], w[p + 1], 0);
+            case K_INST_1:
+                return k_inst1(m, w[p], w[p + 1], r, 0);
+            case K_INST_2:
+                return k_inst2(m, w[p], w[p + 1], r, 0);
+            case Op.K_ARGV:
+                return argv(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
+            case Op.K_DOM:
+                return dom(m, w[p], 0);
+            case K_DOM_1:
+                return k_dom1(m, w[p], w[p + 1], r, 0);
+            case K_DOM_2:
+                return k_dom2(m, w[p], r, 0);
+            default:
+                return m.fault(MachineErrors.E_INTERNAL);
+        }
+    }
+}

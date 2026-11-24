@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  rlvm-machine: the RLVM machine (docs/design/ISA.md), EngineProvider "machine".
+  Module build owner: work package M6 (rlvm-machine/OWNERSHIP.md). Created by the workflow
+  "rlvm-wave4-machine".
+
+  Compile:  rlvm-store, rlvm-api, rlvm-level, rlvm-nat   (ISA 13.1; no Truffle, no reflection)
+  Tests:    rlvm-load, rlvm-export, rlvm-ref, rlvm-inductive, rlvm-admit (Fixture.load: loader +
+            environment pass + reference engine) and rlvm-testkit (rlvm.testkit.DiffEngine).
+
+  Test groups (JUnit 5 tags):
+    default            every test that is not tagged "slow"   ($MVN -o -q -f rlvm-machine/pom.xml test)
+    -Dgroups=fast      the fast group that `machine-sandbox.sh publish` runs (tests tagged "fast")
+    -Dgroups=slow -DexcludedGroups=   corpus tests (arena files, Init), minutes
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>rlvm</groupId>
+    <artifactId>rlvm-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>rlvm-machine</artifactId>
+  <packaging>jar</packaging>
+
+  <properties>
+    <!-- Root of the project as seen from the module directory; a sandbox copy overrides it
+         (scripts/machine-sandbox.sh passes -Drlvm.root=...). -->
+    <rlvm.root>${project.basedir}/..</rlvm.root>
+    <excludedGroups>slow</excludedGroups>
+    <groups></groups>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-store</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-level</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-nat</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- Tests only (ISA 13.1): load an export, run the environment pass, compare with the reference engine. -->
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-load</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-export</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-ref</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-inductive</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-admit</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-testkit</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- A small thread stack on purpose: the machine must not need a deep host stack
+               (stepper-convention.md H9); tests that need one start their own thread. -->
+          <argLine>-Xss2m -Xmx6g -XX:+UseSerialGC</argLine>
+          <groups>${groups}</groups>
+          <excludedGroups>${excludedGroups}</excludedGroups>
+          <systemPropertyVariables>
+            <rlvm.root>${rlvm.root}</rlvm.root>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
