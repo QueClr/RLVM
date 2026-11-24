@@ -80,7 +80,7 @@ abstract class Instr extends Node {
 
     static void setReg(VirtualFrame f, Machine m, int rb, int i, boolean pin, int v) {
         if (pin) {
-            T2Bridge.setReg(m, rb, i, v);
+            T2Bridge.regs(m)[rb + i] = v;
         } else {
             f.setIntStatic(i, v);
         }
@@ -139,7 +139,8 @@ abstract class Instr extends Node {
     }
 
     /**
-     * Evaluates {@code a} into scratch at {@code m.xp} and claims it ({@code Code.operands}).
+     * Evaluates {@code a} into scratch at {@code m.xp} ({@code Code.operands}); the operation that consumes
+     * them claims and releases them behind its boundary ({@code T2Bridge.mkApp}, {@code T2Bridge.apply}).
      *
      * @return the scratch base, or a signal
      */
@@ -155,17 +156,17 @@ abstract class Instr extends Node {
             if (v >= SIG) {
                 return v;
             }
-            T2Bridge.setX(m, xb + i, v);
+            T2Bridge.scratch(m)[xb + i] = v;
         }
-        T2Bridge.setXp(m, xb + n);
         return xb;
     }
 
     /** Writes the slot registers {@code regs} back to the window. */
     @ExplodeLoop
     static void flush(VirtualFrame f, Machine m, int rb, int[] regs) {
+        int[] rs = T2Bridge.regs(m);
         for (int i = 0; i < regs.length; i++) {
-            T2Bridge.setReg(m, rb, regs[i], f.getIntStatic(regs[i]));
+            rs[rb + regs[i]] = f.getIntStatic(regs[i]);
         }
     }
 
@@ -306,7 +307,6 @@ abstract class Instr extends Node {
                 return xb;
             }
             int r = T2Bridge.mkApp(m, hv, xb, args.length);
-            T2Bridge.setXp(m, xb);
             if (r >= SIG) {
                 return r;
             }
@@ -390,9 +390,8 @@ abstract class Instr extends Node {
                     if (v >= SIG) {
                         return v;
                     }
-                    T2Bridge.setX(m, xb + i, v);
+                    T2Bridge.scratch(m)[xb + i] = v;
                 }
-                T2Bridge.setXp(m, xb + nc);
             }
             int v = T2Bridge.closure(m, op, term, sub, xb, nc, lparam ? f.getIntStatic(lsSlot) : 0, let);
             if (v >= SIG) {
@@ -488,11 +487,7 @@ abstract class Instr extends Node {
 
         @Override
         int exec(VirtualFrame f, Machine m, int rb, int d) {
-            int v = val(f, m, rb, s);
-            if (v < SIG) {
-                T2Bridge.pop(m, rb);
-            }
-            return v;
+            return val(f, m, rb, s); // the window is popped by the caller of the root (T2Tier.run)
         }
     }
 
@@ -534,10 +529,8 @@ abstract class Instr extends Node {
                 // the arguments stay claimed: they are scratch of the suspended activation
                 return tail ? suspend(f, m, rb, r, 0, T2Bridge.DST_RET) : suspend(f, m, rb, r, resumePc, dst);
             }
-            T2Bridge.setXp(m, xb);
             if (tail) {
-                T2Bridge.pop(m, rb);
-                return r;
+                return r; // the window is popped by the caller of the root (T2Tier.run)
             }
             setReg(f, m, rb, dst, dpin, r);
             return 0;

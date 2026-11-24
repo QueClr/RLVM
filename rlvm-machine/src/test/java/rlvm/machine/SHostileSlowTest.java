@@ -42,7 +42,7 @@ class SHostileSlowTest {
     void noKnownFindingIsLeft() {
         StringBuilder sb = new StringBuilder();
         int open = 0;
-        for (String set : new String[] {"", SHostile.STEP1, "probes", SHostile.STEP1 + ",probes", "facts", "all"}) {
+        for (String set : new String[] {"", "warm", SHostile.STEP1, "probes", SHostile.STEP1 + ",probes", "facts", "all"}) {
             SHostile.Result r = SHostile.run(set, row -> row.knownUnder(set));
             open += r.known.size() + r.unexpected.size();
             if (!r.known.isEmpty() || !r.unexpected.isEmpty()) {

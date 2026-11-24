@@ -81,8 +81,20 @@ public final class T2Bridge {
         return m.RS[rb + i];
     }
 
-    public static void setReg(Machine m, int rb, int i, int v) {
-        m.RS[rb + i] = v;
+    /**
+     * The register stack / the scratch buffer, for a store by the caller ({@code regs(m)[rb + i] = v}). There
+     * is deliberately NO setter method here for compiled code: a method whose whole body is one store is
+     * inlined before the analysis of a native image and its deoptimisation target is then missing ("reachable
+     * during compilation, but was not seen during Bytecode parsing", GraalVM CE 25.5). The scratch pointer and
+     * the register stack pointer are therefore written behind the operations' boundaries ({@link #mkApp},
+     * {@link #apply}, {@link #closure}) and by the host-side caller ({@code T2Tier.run}: {@link #pop}).
+     */
+    public static int[] regs(Machine m) {
+        return m.RS;
+    }
+
+    public static int[] scratch(Machine m) {
+        return m.X;
     }
 
     /** The captured frame run of the activation. */
@@ -115,20 +127,12 @@ public final class T2Bridge {
         return m.xp;
     }
 
-    public static void setXp(Machine m, int xp) {
-        m.xp = xp;
-    }
-
     /** True if {@code n} more scratch words fit without growth. */
     public static boolean scratchFits(Machine m, int n) {
         return m.xp + n <= m.X.length;
     }
 
-    public static void setX(Machine m, int i, int v) {
-        m.X[i] = v;
-    }
-
-    /** RET: pops the window. */
+    /** RET: pops the window. Called by the host-side caller of compiled code, never from compiled code. */
     public static void pop(Machine m, int rb) {
         m.rp = rb - Code.HDR;
     }
@@ -168,7 +172,10 @@ public final class T2Bridge {
 
     @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
     public static int mkApp(Machine m, int h, int xb, int n) {
-        return Values.mkApp(m, h, xb, n);
+        m.xp = xb + n; // the operands are claimed while the operation runs (Code.operands) ...
+        int r = Values.mkApp(m, h, xb, n);
+        m.xp = xb; // ... and released (Code.mkApp)
+        return r;
     }
 
     @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
@@ -211,13 +218,14 @@ public final class T2Bridge {
     /**
      * The body of {@code Code.mkClosure} behind its operand decoding: the closure ({@code op} MKLAM / MKPI)
      * or suspension (MKSUSP) of term {@code t} over the frame of the {@code nc} raw bindings in scratch at
-     * {@code xb} (claimed by the caller, released here), with substitution {@code ls} (0 if the term has no
+     * {@code xb} (claimed and released here), with substitution {@code ls} (0 if the term has no
      * level parameter); the sub-block {@code b} of a closure goes into its CODE memo.
      */
     @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
     public static int closure(Machine m, int op, int t, int b, int xb, int nc, int ls, boolean let) {
         int frame = Layout.RUN_EMPTY;
         if (nc > 0) {
+            m.xp = xb + nc;
             frame = Runs.frame(m, xb, nc, Layout.RUN_EMPTY);
             m.xp = xb;
             if (frame >= Op.SIG) {
@@ -284,7 +292,12 @@ public final class T2Bridge {
 
     @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
     public static int apply(Machine m, int f, int xb, int n, int d) {
-        return Eval.apply(m, f, xb, n, d);
+        m.xp = xb + n; // the arguments are scratch of the activation (Code.operands) ...
+        int r = Eval.apply(m, f, xb, n, d);
+        if (r < Op.SIG) {
+            m.xp = xb; // ... released on a result; a suspended activation keeps them (Code.apply)
+        }
+        return r;
     }
 
     @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)

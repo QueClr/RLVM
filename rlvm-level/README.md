@@ -55,9 +55,14 @@ not (hot paths). Any `Throwable` from this module must be treated as "reject".
   cslib or mathlib comes near (largest: 19 parameters). Callers do not need their own fallback:
   `isEquiv` / `isGeq` then decide that question with the official procedure. A caller that compares
   `canonId`s or `canonRep`s directly must treat -1 as "unknown" and call `isEquiv`.
-- `isEquiv` and `isGeq` therefore accept a superset of the official functions. Use them for
-  `Sort`/constant level comparison; use the `...Official` functions only to mirror the official
-  kernel exactly.
+- `isEquiv` and `isGeq` therefore accept a superset of the official functions.
+- **Which family a kernel uses** (project owner's decision of 2026-11-24, OWNER-NOTES item 11,
+  "resemble official by default"): both engines and inductive admission compare levels with the
+  `...Official` functions by default, so that RLVM rejects where the official kernel rejects
+  (`corner-cases/imax-right-successor`, `imax-nested-absorption`). The complete relation is an
+  opt-in: `-X levels=complete` for the reference engine (`rlvm-ref`), the switch `levels-complete`
+  for the machine. `isEquiv` / `isGeq` / `canonId` stay the tools for everything that is not a
+  verdict of the official kernel (canonical representatives, tests, diagnostics, the opt-in).
 - `isNeverZero` and `isAlwaysZero` are the official syntactic tests and are semantically exact.
 
 Structure matters in two places, both ported exactly: `mkMax`/`mkIMax`, and `instantiate`, which
@@ -71,8 +76,24 @@ the official kernel substitutes freshly allocated parameter objects, as `add_ind
 it rebuilds `imax u 1` into `max u 1` and then fails its own `is_equivalent` on the two spellings
 (observed: an inductive type with a parameter of sort `imax u 1` is rejected by leanchecker v4.36.0
 with "application type mismatch"). This module returns the level unchanged, which is semantically
-the same level. A kernel that compares generated recursor types structurally with exported ones
-should compare their levels with `isEquiv`.
+the same level.
+
+The rule behind that rejection, pinned against the real kernel by `OfficialRebuildGoldenTest`
+(1,600 answers of leanchecker v4.36.0 in `official-golden-rebuild.tsv`, 170 of them rejections):
+`add_inductive` refers to the block's types, constructors and recursors with parameter objects it
+makes itself (`lparams_to_levels`), and since v4.36 it type-checks the recursor it generated
+(`check_recursors`). The type of each such reference is the declared type with **every level node
+above a parameter rebuilt** bottom-up (`succ` as it is, `max` through `mkMax`, `imax` through
+`mkIMax`, a level without parameters untouched), and the official kernel compares it with the
+declared spelling. It accepts the declaration iff `isEquivOfficial(L, rebuild(L))` for the levels `L`
+in the positions it compares (binder domains of the block's types and constructors): all 1,600
+answers follow this rule, for a level in a parameter's sort and for a level argument of a constant
+in a constructor field. The rebuild changes the spelling of 1,188 of the 1,600 levels and breaks the
+official equivalence for 170. `rebuild` needs nothing new from this module (`hasParam`, `kind`,
+`succOf`, `lhs`, `rhs`, `succ`, `mkMax`, `mkIMax`; the test has it in a dozen lines). RLVM's inductive
+admission does not apply it today, so it accepts those 170 declarations where the official checker
+rejects them (reported to its owner, 2026-11-24); no declaration of a real export is affected, since
+the official kernel accepted them all.
 
 **Name order.** `normalize` sorts parameters with `NameOracle.compareNames`, which must be Lean's
 `name::cmp`. It matters for exact agreement: with the order reversed, 35 of 8,189 official answers in
@@ -113,7 +134,7 @@ w.reset();                                      // session boundary: forget ever
 
 ## Tests
 
-`. ./env.sh && $MVN -o -q -pl rlvm-level test`: 45 tests in 7 classes, 0 failures, 1 skipped
+`. ./env.sh && $MVN -o -q -pl rlvm-level test`: 47 tests in 8 classes, 0 failures, 1 skipped
 (`BasicsTest.depthLimitOfTheOfficialKernel`, 16.7 M nodes; it passed when run once with
 `-Dtest=BasicsTest -Drlvm.level.heavy=true`).
 
@@ -122,6 +143,7 @@ w.reset();                                      // session boundary: forget ever
 | `OfficialPortTest` | randomised differential tests against `RefLevel`, a line-by-line tree port of level.cpp in the test tree: flags, `mkMax`, `mkIMax`, `normalize`, `isEquivOfficial`, `isGeqOfficial`, `instantiate`, `undeclaredParam` (about 240,000 random cases) |
 | `SemanticsTest` | brute-force evaluator over all assignments to small naturals: `isEquiv`, `isGeq`, `canonId`, `canonRep`, zero tests agree with the semantics in both directions; official operations never contradict it; `instantiate` is substitution |
 | `OfficialGoldenTest` | answers of the real official kernel (below) |
+| `OfficialRebuildGoldenTest` | the official verdict on 1,600 inductive declarations whose levels `add_inductive` rebuilds (see "Pointer equality"): accepted iff `isEquivOfficial(L, rebuild(L))`, on `LevelStore` and on `RefLevel`; `instantiate` under the identity substitution keeps the declared spelling |
 | `CuratedCasesTest` | the cases of docs/research/02 section 3.6, `bugs/level-imax-leq`, `bugs/level-imax-normalization`, `bugs/large-elim-param`, `bugs/proj-of-imax-prop`, the two imax corner cases, tutorial 015-027 |
 | `OverlayTest` | freeze, overlay ids, reset, reissued ids, cache and memo validity across reset, growth, 8 concurrent workers plus 2 readers of the frozen base |
 | `RealExportTest` | level records of the 230 arena tests (1,554 records) and of init, std, cedar, cslib, mathlib |

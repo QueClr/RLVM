@@ -40,13 +40,13 @@ class SHostileTest {
 
     @Test
     void theManifestIsComplete() {
-        assertTrue(SHostile.rows().size() >= 300, "manifest.tsv lost rows");
+        assertTrue(SHostile.rows().size() >= 320, "manifest.tsv lost rows");
         for (SHostile.Row row : SHostile.rows()) {
             assertTrue(SHostile.export(row).endsWith(row.name + ".ndjson"));
         }
     }
 
-    /** v0: no switch. Every export; no known finding except the level relation applies. */
+    /** v0: no switch. Every export; the known findings that apply to v0 are {@code eager} and {@code levels}. */
     @Test
     void v0GivesTheOfficialVerdictOnEveryHostileExport() {
         strict("", row -> true);
@@ -61,13 +61,13 @@ class SHostileTest {
     /** Step 5 on the exports that attack congruence, proof irrelevance, eta, K and iota. */
     @Test
     void probesOnTheirTargets() {
-        strict(SHostile.STEP1 + ",probes", prefixes("probe-", "nontransitive-", "k-", "iota-", "eta-", "unitlike-", "pirr-", "facts-"));
+        strict(SHostile.STEP1 + ",probes", prefixes("probe-", "nontransitive-", "k-", "iota-", "eta-", "unitlike-", "pirr-", "facts-", "warm-", "canon-", "krule-"));
     }
 
     /** Step 2 on the exports that attack masks, the static proof filter, structure eta and projections. */
     @Test
     void factsOnTheirTargets() {
-        strict("facts", prefixes("facts-", "mask-", "pirr-", "probe-", "nontransitive-", "eta-struct", "proj-"));
+        strict("facts", prefixes("facts-", "mask-", "pirr-", "probe-", "nontransitive-", "eta-struct", "proj-", "warm-", "canon-", "krule-"));
     }
 
     /** Steps 3 and 4 (TELE, BODY / RULE blocks, case trees) on the exports that attack them; they pass the threshold of ten uses. */

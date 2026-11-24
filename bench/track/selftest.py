@@ -246,8 +246,9 @@ def test_ladder() -> None:
     result = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--stdout", "--history", "/nonexistent"],
                             capture_output=True, text=True)
     text = result.stdout
-    order = [text.find("## CPU time"), text.find("## Wall clock"), text.find("## Peak RSS"), text.find("## Instructions")]
-    check("the generated document lists CPU time, wall clock, RSS, instructions in that order",
+    # OWNER-NOTES item 12: wall clock before CPU time (the warm columns do not exist yet).
+    order = [text.find("## Wall clock"), text.find("## CPU time"), text.find("## Peak RSS"), text.find("## Instructions")]
+    check("the generated document lists wall clock, CPU time, RSS, instructions in that order (owner note 12)",
           result.returncode == 0 and all(i >= 0 for i in order) and order == sorted(order), result.stderr[-300:])
     check("one row per corpus in every table", text.count("| mathlib (") == 4 and text.count("| cedar-hot-ax (") == 4,
           str((text.count("| mathlib ("), text.count("| cedar-hot-ax ("))))

@@ -22,8 +22,16 @@
 # CPU time), which is not what will ship. To try it, replace `bin/rlvm` by `bin/rlvm-jvm` in the run
 # line: nothing else changes. The build uses GraalVM CE only (Oracle GraalVM is never downloaded or
 # used by a default build: owner's decision, docs/design/OWNER-NOTES.md item 11).
+# These are figures of a FRESH process per export, which is what an arena run is. The owner's target
+# since OWNER-NOTES item 12 is warm wall clock (warm-up not charged); by that criterion the platform
+# question is open - first indication: once warm, HotSpot needs 0.72 to 0.87 times the image's CPU time
+# for the machine on Init (docs/PLATFORM.md, section I.7) - and needs a launcher that can make warm
+# passes before it can be measured properly.
 #
-# Worker count: 4 (the same gate, Part I section I.3). With four workers the image's CPU time is that
+# Worker count: 4, the count by CPU time (the same gate, Part I section I.3); by wall clock, the
+# owner's criterion since OWNER-NOTES item 12, the same numbers favour 8 (or 6 once it is measured) -
+# not changed here because all 230 published tests must first pass under the arena's limits with
+# the new count. With four workers the image's CPU time is that
 # of one worker (1.02 / 1.01 / 0.98 times on Init, Std and the Cedar slice) at 2.5 to 2.7 times the
 # speed; eight workers cost 1.07 times the CPU time of one for 18 % less wall clock than four on Init
 # and Std and nothing on the Cedar slice and reachability. Six (the driver's proposal for

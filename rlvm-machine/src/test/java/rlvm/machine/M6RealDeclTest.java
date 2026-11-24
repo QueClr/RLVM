@@ -104,4 +104,29 @@ class M6RealDeclTest {
         cold.close();
         f.close();
     }
+    /**
+     * NOTES-M6 F26: the arena test bad/bugs/rec-of-subst-prop. Unit 112 (an axiom) leaves the pair
+     * POS(Nat.add (modeG modeQ) 0, Nat.add (modeG ?m) 0), which is T in plain mode (same-head congruence +
+     * proof irrelevance) and F under eager reduction (Nat folding first: 0 against a stuck Acc.rec). Unit 128
+     * compares the pair under {@code eagerReduce}; a warm session that kept the entry went PAST the point
+     * where the official kernel rejects (TYPE_EXPECTED at {@code Issue.resultSort Issue.gateWitness}) and
+     * rejected only later, for another reason. With the rule of F26 a warm session answers what a cold one answers.
+     */
+    @Test
+    void aWarmSessionRejectsRecOfSubstPropWhereTheColdOneDoes() throws java.io.IOException {
+        String file = "work/arena-site/tests/bad/bugs/rec-of-subst-prop.ndjson";
+        assumeTrue(Fixture.exists(file), "the arena tests are not installed");
+        Fixture cold = Fixture.load(file);
+        Fixture.Verdict c = cold.checkAll();
+        assertEquals(Outcome.REJECT, c.outcome, () -> c.toString());
+        for (String switches : new String[] {"warm", "warm,gated,expect"}) {
+            Fixture warm = Fixture.load(file);
+            warm.switches(switches);
+            Fixture.Verdict w = warm.checkAll();
+            assertEquals(Outcome.REJECT, w.outcome, () -> switches + ": " + w);
+            assertEquals(c.unit, w.unit, () -> switches + ": " + w);
+            assertEquals(c.reason, w.reason, () -> switches + ": the warm session must fail where the cold one fails: " + w + " against " + c);
+            assertTrue(warm.session.erRestarts >= 1, switches + ": the declaration enters eager reduction in a warm session");
+        }
+    }
 }

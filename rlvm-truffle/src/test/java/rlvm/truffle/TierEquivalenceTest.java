@@ -22,7 +22,7 @@ class TierEquivalenceTest {
         System.setProperty("rlvm.t2.period", "1");
         System.setProperty("rlvm.t2.sync", "true");
         System.setProperty("rlvm.t2.max", "1000000");
-        for (String k : new String[] {"rlvm.t2.slots", "rlvm.t2.nodes", "rlvm.t2.resume", "rlvm.t2.roles"}) {
+        for (String k : new String[] {"rlvm.t2.slots", "rlvm.t2.nodes", "rlvm.t2.resume", "rlvm.t2.roles", "rlvm.t2.rent", "rlvm.t2.share"}) {
             System.clearProperty(k);
         }
         for (int i = 0; i + 1 < extra.length; i += 2) {
@@ -46,8 +46,13 @@ class TierEquivalenceTest {
             assertEquals("identical", Harness.describe(base, tier, u), path + " " + String.join(" ", t2) + "\n" + e.report());
             assertEquals(base.records, tier.records, "records made");
             assertEquals(base.runWords, tier.runWords, "run words made");
-            assertEquals(0, e.failedCount(), "failed promotions\n" + e.report());
             assertEquals(0, e.deopts(), "deoptimisations\n" + e.report());
+            for (T2Engine.Rec r : e.records()) {
+                // a compilation Graal gives up on is not an error: the block stays in the stepper (ISA 8.6)
+                if (r.failure != null) {
+                    System.out.println("[t2] NOT COMPILED: " + r.what + ": " + r.failure.split("\n")[0]);
+                }
+            }
             System.out.println("[t2] " + path + " " + String.join(" ", t2) + " D=" + hostDepth + ": units " + tier.units + " accepted " + tier.accepted
                     + ", blocks compiled " + e.installedCount() + ", compiled activations " + e.compiledCalls() + ", not taken " + e.notTaken()
                     + ", frames written " + tier.frames + ", compile cpu " + e.compileNanos() / 1_000_000 + " ms");
@@ -55,21 +60,60 @@ class TierEquivalenceTest {
         }
     }
 
-    @Test
-    @Tag("fast")
-    void tutorialFile() throws Exception {
-        String f = "work/arena-site/tests/good/tutorial/001_basicDef.ndjson";
-        assumeTrue(Harness.exists(f));
-        equivalent(f, K1, -1);
+    static final String T = "work/arena-site/tests/good/tutorial/";
+    static final String P = "work/arena-site/tests/good/perf/";
+    /** Small files whose declarations reduce through blocks of every role (recursor rules, case trees, telescopes, binders). */
+    static final String[] SMALL = {T + "122_rtreeRecReduction.ndjson", T + "112_structEta.ndjson", T + "124_accRecReduction.ndjson",
+        T + "131_quotIndReduction.ndjson"};
+
+    private static long all(String[] files, String switches, int depth, String... t2) throws Exception {
+        long calls = 0;
+        for (String f : files) {
+            assumeTrue(Harness.exists(f), f);
+            calls += equivalent(f, switches, depth, t2);
+        }
+        return calls;
     }
 
+    /** Every block compiled at its first entry: registers in frame slots, own nodes, resume entries. */
     @Test
     @Tag("fast")
-    void closedEvaluation() throws Exception {
-        String f = "work/arena-site/tests/good/perf/church-numerals.ndjson";
-        assumeTrue(Harness.exists(f));
-        long calls = equivalent(f, K1, -1);
-        assertTrue(calls > 0, "compiled code ran");
+    void smallFiles() throws Exception {
+        assertTrue(all(SMALL, K1, -1) > 0, "compiled code ran");
+    }
+
+    /** Host depth 0: every judgment a block calls suspends it, so every class-j node writes its frame and every resume entry is entered. */
+    @Test
+    @Tag("fast")
+    void smallFilesWorklist() throws Exception {
+        assertTrue(all(new String[] {SMALL[0], SMALL[1]}, K1, 0) > 0, "compiled code ran");
+    }
+
+    /** The other shapes of a root: registers in the window, every instruction through the stepper's body, no resume entries. */
+    @Test
+    @Tag("fast")
+    void variants() throws Exception {
+        String[] f = {SMALL[0]};
+        all(f, K1, -1, "rlvm.t2.slots", "false");
+        all(f, K1, -1, "rlvm.t2.nodes", "false");
+        all(f, K1, 0, "rlvm.t2.resume", "false");
+        all(f, K1, 0, "rlvm.t2.nodes", "false");
+    }
+
+    /** Evaluation-heavy published tests (docs/research/13 section 4), every block compiled at its first entry. */
+    @Test
+    void perfTests() throws Exception {
+        String[] files = {P + "magma-list-pair-n7.ndjson", P + "proj-app-lazy-delta.ndjson", P + "discarded-argument-match.ndjson",
+            P + "fueled-chain.ndjson", P + "shared-subterm.ndjson", P + "folded-constant-first.ndjson", P + "args-before-unfold.ndjson"};
+        assertTrue(all(files, "code,casetrees", -1) > 100_000, "compiled code ran");
+        all(new String[] {files[2], files[4]}, K1, 0);
+    }
+
+    /** The same under the production promotion rule (rent-to-own, background compilation): blocks change tier in mid-run. */
+    @Test
+    void perfTestsBackground() throws Exception {
+        String[] files = {P + "magma-list-pair-n7.ndjson", P + "proj-app-lazy-delta.ndjson"};
+        all(files, "code,casetrees", -1, "rlvm.t2.at", "0", "rlvm.t2.sync", "false", "rlvm.t2.period", "256", "rlvm.t2.rent", "0.01", "rlvm.t2.share", "1.0");
     }
 
     /** A tool: -Dt2.files=a.ndjson,b.ndjson [-Dt2.switches=..] [-Dt2.depth=N] [-Dt2.variant="k v k v"]. */

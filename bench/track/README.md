@@ -158,6 +158,13 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
 
 ## State (2026-11-24, wave 7)
 
+- **Owner note 12 (wall clock after warm-up, pipelined loading, is the goal) arrived at the end of this
+  wave.** The tracker still measures ONE FRESH PROCESS per run on a batch load and applies its
+  regression rule to CPU time: by note 12 that is the cold picture (items three and four of its list).
+  `benchmarks.py` now puts the cold wall clock first and says that the warm columns are missing. What
+  the tracker needs next: a launcher that checks an export N times in one process (`rlvm --passes N`
+  does not exist), `-X load=pipelined` in the default configuration, the warm pass as the figure of an
+  entry, and the rule on warm wall clock.
 - `benchmarks.py` writes **engine columns**: `RLVM machine | RLVM reference | gruszka | nano-lean | official`
   (`--engines machine,reference`, `--launcher native`, `--threads 8`), one row per corpus that has a
   machine result; a further table has the other launcher for both engines, and the corpora without a

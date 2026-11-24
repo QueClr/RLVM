@@ -378,6 +378,10 @@ final class M8Mutants {
             if (set.sessionMib > 0) {
                 args.append(" -X session-mib=").append(set.sessionMib);
             }
+            String levels = System.getProperty("rlvm.levels");
+            if (levels != null) {
+                args.append(" -X levels=").append(levels); // the re-check engine as in this JVM (report.sh --levels)
+            }
             pb.environment().put("RLVM_CHECK_ARGS", args.toString().trim());
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
@@ -409,6 +413,8 @@ final class M8Mutants {
         sb.append("- measured: ").append(Diff.lastPublication()).append('\n');
         sb.append(String.format(Locale.ROOT, "- %d mutants at a time in one JVM, wall %.0f s%s%n", jobs, wall,
                 limit == Integer.MAX_VALUE ? "" : "; AN EVEN SAMPLE of at most " + limit + " mutants per corpus, not the whole corpora"));
+        sb.append("- reference engine (the oracle in-process, the re-check engine of the pipeline): universe levels `")
+                .append(System.getProperty("rlvm.levels", "the published default of rlvm-ref")).append("`\n");
         sb.append("- final verdict: the real pipeline (`rlvm.main.RlvmChecker.checkExport`, what the launcher runs) with `-X engine=machine`, one worker, against the"
                 + " classification by the official checker (leanchecker 4.36.0). SOUNDNESS = accepted although the official checker rejects;"
                 + " COMPLETENESS = rejected although it accepts; a decline is never wrong.\n");

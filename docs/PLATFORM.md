@@ -13,7 +13,20 @@ threads), wall clock, peak RSS, instructions.
 
 ## I.0 The answer
 
-1. **The CE native image ships** (`work/dist/bin/rlvm`, GraalVM CE 25, `-O3`). With the machine as
+**Read this first.** This gate was planned and measured under owner note 10 (CPU time of a run first,
+then wall clock): every run below is a FRESH process on a batch load, so the JVM's warm-up is part of
+every figure. While it was being written the owner changed the target (OWNER-NOTES item 12, read
+here at 14:37Z):
+*wall clock after warm-up, with pipelined loading, is the goal; warm-up cost is not charged; the
+platform question is decided by warm wall clock*. By that criterion the four points below are the
+answer for a COLD process - which is what an arena run is - and **the platform question itself is
+open again**: section I.7 has the first indication (the machine's warm passes on HotSpot need less
+CPU time than the image, as the reference engine's long runs do) and what is needed to decide it.
+
+For a fresh process per export (the arena's run), by CPU time, then wall clock:
+
+1. **The CE native image is the launcher of a cold run** (`work/dist/bin/rlvm`, GraalVM CE 25,
+   `-O3`), and the arena definition stays on it. With the machine as
    engine it needs **0.68 / 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers**
    (medians of 8 paired runs each on Init, Std, the Cedar slice and reachability; the image wins all
    24 pairs, 0.24 to 0.88), 0.62 times its wall clock with four workers, and a third to a half of its
@@ -30,11 +43,14 @@ threads), wall clock, peak RSS, instructions.
    a limit, not a reservation (RSS 250 MB to 1.9 GB on the four corpora). The JVM launcher keeps its
    flags (`-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g`); it is
    the launcher of the guards, not of the arena.
-3. **Workers: the run line keeps `--threads 4`.** With four workers the image's CPU time is that of
-   one worker (1.02, 1.01 and 0.98 times on Init, Std and the Cedar slice) at 2.5 to 2.7 times the
-   speed; eight workers cost 1.07 times the CPU time of one on all three for 18 % less wall clock
-   than four on Init and Std and nothing on the other two corpora. Six is the open candidate
-   (section I.3).
+3. **Workers: `--threads 4` by CPU time, 8 by wall clock; the run line was left at 4.** With four
+   workers the image's CPU time is that of one worker (1.02, 1.01 and 0.98 times on Init, Std and
+   the Cedar slice) at 2.5 to 2.7 times the speed; eight workers cost 1.07 times the CPU time of
+   one on all three for 18 % less wall clock than four on Init and Std and nothing on the other two
+   corpora. Under note 10 that reads "four"; under note 12 (wall clock is the goal, CPU time a
+   diagnostic) it reads "eight, or six once it is measured" (section I.3). The run line was not
+   changed: all 230 published tests under the arena's limits with another count could not be run
+   in this session.
 4. **What this rests on, and what it does not settle.** Two repeats of the matrix (48 runs,
    13:33Z to 13:49Z, host load 26 to 95). The third repeat, the six-worker runs and the `bench/track`
    entries of 14:13Z to 14:21Z were taken while the host was thrashing (load 230 to 266, 40 GB of
@@ -233,10 +249,15 @@ workers and is not a candidate):
   (8.23 / 8.67 / 9.01), Std 14.57 (13.46 / 14.57 / 16.42), Cedar slice 3.83 (3.32 / 4.00 / 4.45),
   reachability 8.35 (8.43 / 8.72 / 8.74) - six cost what four cost and less than eight, on a host
   where four already cost +5 to +21 % against one. That neither speaks against six nor confirms it.
-- **Decision: the run line keeps `--threads 4`** (and `threads: 4`, the CPU slots the arena reserves).
-  By the project's order of criteria - CPU time first, then wall clock - four is the largest measured
-  count at which the image's CPU time is still that of one worker; eight buy 18 % of wall clock on
-  two of four corpora for 4 to 11 % more CPU time on three of them. Six is the candidate the
+- **Reading under the two criteria.** CPU time first (owner note 10, in force when this was
+  measured): four is the largest measured count at which the image's CPU time is still that of one
+  worker; eight buy 18 % of wall clock on two of four corpora for 4 to 11 % more CPU time on three of
+  them - keep `--threads 4`. Wall clock first (owner note 12, since 14:37Z): the same numbers say
+  eight - less wall clock on Init and Std, the same on the Cedar slice, no worse on reachability
+  within its scatter, and CPU time is only a diagnostic. **The run line was left at `--threads 4`
+  (and `threads: 4`, the CPU slots the arena reserves)**: a change needs all 230 published tests under
+  the arena's time and memory limits with the new count (the wave-5 check ran them with four), which
+  did not fit into this session. Six is the candidate the
   driver's owner proposes (with the reference engine he measured 12 to 25 % less wall clock than
   with four on Init, Std and cedar, `rlvm-driver/README.md`); it needs a quiet host and a mathlib
   run with the machine to be judged (his `threads-gate.sh --native --engine
@@ -246,7 +267,7 @@ workers and is not a candidate):
 ## I.4 mathlib (reference engine), one run per launcher
 
 The reference engine did not change between the wave-5 check and this series (the same pipeline
-jars; `rlvm-main` differs only by the run-defaults plumbing of section I.7, which no engine uses), so
+jars; `rlvm-main` differs only by the run-defaults plumbing of section I.8, which no engine uses), so
 the mathlib runs of 12:56Z and 13:03Z are the runs of this gate: one per launcher, eight workers, the
 `-O3` image, the same container, through `bench/track/track.py` (`work/perf-history/mathlib.jsonl`,
 note `wave5-check`; distribution `work/pipeline-check/dist`), at a host load of 9 to 14 - quieter
@@ -332,7 +353,52 @@ The remaining units of a file (inductive blocks, quotient declarations) are chec
 environment pass with the reference kernel, as before. All 48 valid timed runs of the matrix (and
 the 36 discarded ones) ended with exit status 0 (accept).
 
-## I.7 What was changed, what was not measured, how to repeat
+## I.7 Owner note 12: warm wall clock - what this part does not answer, and a first indication
+
+Note 12 asks every benchmark for, in this order: warm wall clock with 8 workers (pipelined), warm
+wall clock with 1 worker, cold wall clock of a fresh process (for information), CPU time, peak RSS,
+instructions; "warm" = the same process checks the same export again after a first pass. Against
+that:
+
+- **Everything above is the third and fourth item of that list** (cold wall clock and CPU time of a
+  fresh process, batch load). It stays true for what the arena does - one process per export - and
+  it no longer decides which platform is the fast one.
+- **The launcher cannot make a warm pass**: `rlvm` checks one export and exits. A `--passes N` (same
+  process, per-pass wall clock and CPU time in the statistics, the passes must agree) belongs in
+  `rlvm-cli` / `rlvm-main`; it changes the launcher's fail-closed path and could not be guarded in
+  what was left of this session, so it is not there.
+- **A first indication, not a measurement of record** (`work/steward/w7/warm/Warm.java`: a harness
+  that calls `RlvmChecker.checkExport` several times in one JVM; `work/steward/w7/warm/init-1w.txt`).
+  Machine, Init, ONE worker, the two spare performance cores (CPUs 18, 19; not the container), 14:38Z
+  to 14:42Z at a host load of 135 to 155 - the cores were shared, so the wall clock of these runs
+  (17 to 62 s) says nothing and only the CPU time per pass is quoted:
+
+  | Platform | Pass | CPU s |
+  |---|--:|--:|
+  | JVM launcher's flags (C2, Serial, 6 GB heap), one process | 1 (cold) | 15.62 |
+  | | 2 | 8.49 |
+  | | 3 | 8.23 |
+  | | 4 | 7.08 |
+  | CE native image `-O3`, fresh process | - | 9.81 |
+  | CE native image `-O3`, fresh process | - | 9.41 |
+
+  **Once warm, HotSpot needs 0.72 to 0.87 times the image's CPU time for the same check** (passes 3
+  and 4 against the image's two runs in the same minutes on the same cores), where its cold pass
+  needs 1.6 times. That is the reference engine's picture on mathlib (0.80) repeated for the
+  machine: the JIT's steady-state code is better than the CE ahead-of-time compiler's. One corpus,
+  one worker, disturbed cores (the image's run costs 7.94 s in the container; here contention
+  inflated everything by about a fifth), the image's two runs made right after the JVM's passes and
+  not interleaved with them, process CPU time including the compiler and collector threads: an
+  indication.
+- **What decides it**: warm passes of the machine in the container, 8 workers and 1, pipelined
+  load, on Init, Std, a Cedar-level corpus and mathlib, for the JVM launcher and the image (for the
+  image "warm" removes only page faults and table growth). If the indication holds, the JVM launcher
+  is the faster platform by the owner's criterion, at two to three times the memory - and the arena
+  run, a cold process, still favours the image by the numbers of section I.2. Both cannot be had
+  from one launcher today; the machine's compiled tier (rlvm-truffle) moves the same question into
+  the image.
+
+## I.8 What was changed, what was not measured, how to repeat
 
 **Changed in this wave** (all in the pipeline owner's modules):
 
@@ -357,7 +423,8 @@ the 36 discarded ones) ended with exit status 0 (accept).
   host) unless the caller already holds one; `gate.sh` runs four files at a time by default (it was
   8 and 10). The orchestrator's rule of 14:32Z, after the host had run out of memory.
 - `scripts/platform-matrix.py` finds slices (`cedar-hot-ax`); `scripts/platform-report.py` has the
-  worker-scaling table (`scaling:TAG`).
+  worker-scaling table (`scaling:TAG`). `bench/track/benchmarks.py` writes one RLVM column per engine
+  and, since owner note 12, the cold wall clock before CPU time.
 - `rlvm-api` / `rlvm-main`: `EngineProvider.runDefaults(Map)` - the primary engine may prefer run
   settings (the machine's session cap, request of the machine integrator); applied under the command
   line. No provider declares one yet, so no run changed.
@@ -368,8 +435,9 @@ and heap limit.
 
 **Not measured, and why**
 
-- **The machine on mathlib** (either launcher), **the machine on the JVM launcher beyond Std size**,
-  and **x86-64** (no such machine here).
+- **Warm passes in the container** (owner note 12; section I.7), **the machine on mathlib** (either
+  launcher), **the machine on the JVM launcher beyond Std size**, and **x86-64** (no such machine
+  here).
 - **Oracle GraalVM PGO with the machine**: it needs three more image builds under the build lock
   (`work/build/.lock`), for which six builds of other agents were waiting at 13:50Z and ten at 13:53Z.
   Part II has the PGO image for the reference engine (small corpora: 0.82 and 0.91 times the JVM
@@ -378,8 +446,9 @@ and heap limit.
   decision: nothing that ships uses Oracle GraalVM).
 - **The machine's staging switches** (`warm,gated,expect`, `probes`: -3 to -9 % CPU in
   `work/status/machine-integration.md`): they are the machine workflow's to turn on; the soundness
-  review found wrong accepts under `probes` and `facts` at 13:48Z (`work/status/requests.log`), so
-  v0 is the configuration that could ship today.
+  review found wrong accepts under `probes` and `facts` (13:48Z) and under `warm` (14:38Z;
+  `work/status/requests.log`, findings S-F1, S-F2, S-F4), so v0 is the configuration that could
+  ship today.
 - **A quiet host, and a third repeat.** The load average was 26 to 95 during the two valid repeats;
   the absolute CPU times are a few percent above the wave-4 integrator's (Init, one worker: 7.94 s
   here, 7.77 s at load 7 to 10), the ratios inside a group are what the decision rests on. The third

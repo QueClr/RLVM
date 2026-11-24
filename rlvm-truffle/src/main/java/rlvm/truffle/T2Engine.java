@@ -236,7 +236,8 @@ final class T2Engine {
         if (n == 0) {
             int[] code = h.block(blk);
             Decoded d = code == null ? null : new Decoded(code, blk, settings.slots && settings.nodes);
-            String why = d == null ? "no such block" : d.hostile != null ? d.hostile : roleAllowed(d) ? null : "role switched off";
+            String why = d == null ? "no such block" : d.hostile != null ? d.hostile : !roleAllowed(d) ? "role switched off"
+                    : d.insn.length > settings.maxInstr ? "too large" : null;
             synchronized (this) {
                 if (why != null) {
                     setState(blk, FAILED);

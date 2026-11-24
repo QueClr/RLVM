@@ -139,7 +139,7 @@ final class Harness implements AutoCloseable {
         r.ticks = new long[units];
         Admission admission = new Admission(ctx, Policy.arena(), env);
         Budget budget = new Budget(maxSteps, 2L << 30, Integer.MAX_VALUE);
-        long t0 = java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime();
+        long t0 = Cpu.threadNanos();
         long w0 = System.nanoTime();
         for (int u = 0; u < units; u++) {
             int o;
@@ -176,7 +176,7 @@ final class Harness implements AutoCloseable {
                 ctx.reset();
             }
         }
-        r.cpuNanos = java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime() - t0;
+        r.cpuNanos = Cpu.threadNanos() - t0;
         r.wallNanos = System.nanoTime() - w0;
         r.records = T2Bridge.recordsMade(m);
         r.runWords = T2Bridge.runWordsMade(m);

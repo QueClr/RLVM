@@ -28,9 +28,9 @@ import rlvm.api.Outcome;
  *   <li>the machine's own verdict of the file (its first unit that is not accepted) is the official one; a
  *       decline of the machine is honest: it is reported and never fails a test.
  * </ul>
- * A row may carry a KNOWN FINDING ({@code probes}, {@code facts}, {@code levels}): the switch (or, for
- * {@code levels}, every configuration) under which the published machine still gives a verdict the official
- * checker does not give. Such a violation is reported, not failed, by the fast tests, so that an open finding
+ * A row may carry KNOWN FINDINGS ({@code eager}, {@code warm}, {@code probes}, {@code facts}, {@code levels}): the
+ * switch (or, for {@code eager} and {@code levels}, every configuration, v0 included) under which the published
+ * machine still gives a verdict the official checker does not give. Such a violation is reported, not failed, by the fast tests, so that an open finding
  * of another package does not block publications; {@link SHostileSlowTest#noKnownFindingIsLeft} fails while
  * one is left. When the owner has fixed it, the mark is removed from the manifest and the row is strict.
  *
@@ -49,7 +49,7 @@ final class SHostile {
         final String name;
         /** {@code Outcome.ACCEPT} or {@code Outcome.REJECT}: what the official checker answers. */
         final int official;
-        /** {@code -}, or the known findings, a comma list of {@code probes}, {@code facts}, {@code levels}, {@code decline}. */
+        /** {@code -}, or the known findings, a comma list of {@code eager}, {@code warm}, {@code probes}, {@code facts}, {@code levels}, {@code decline}. */
         final String finding;
         final String attack;
 
@@ -63,7 +63,8 @@ final class SHostile {
         /** True if a known finding of the row applies to a machine under this switch set. */
         boolean knownUnder(String switches) {
             for (String f : finding.split(",")) {
-                if (f.equals("levels") || ((f.equals("probes") || f.equals("facts")) && has(switches, f))) {
+                if (f.equals("levels") || f.equals("eager")
+                        || ((f.equals("probes") || f.equals("facts") || f.equals("warm")) && has(switches, f))) {
                     return true;
                 }
             }

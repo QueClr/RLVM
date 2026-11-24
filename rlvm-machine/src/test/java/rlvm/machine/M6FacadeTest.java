@@ -654,6 +654,104 @@ class M6FacadeTest {
         assertThrows(IllegalArgumentException.class, () -> new MachineProvider().factory(options));
     }
 
+    /**
+     * NOTES-M6 F26 (arena test bad/bugs/rec-of-subst-prop): eager reduction changes what CONV answers, and the
+     * official kernel's caches live for one declaration. A declaration that enters ER in a session that holds
+     * earlier declarations' results is checked AGAIN in a fresh session (the first run's outcome is
+     * discarded), and whatever a declaration derived with ER in play is forgotten when it ends.
+     */
+    @Test
+    void eagerReductionNeverMeetsAnotherDeclarationsResults() {
+        Fixture f = Fixture.prelude();
+        for (int i = 1; i <= 5; i++) {
+            f.def("er" + i, "Type", "Prop", Fixture.regular(1));
+        }
+        f.seal();
+        f.switches("warm");
+        MachineSession s = f.session;
+        int eager = f.cid("er2");
+        int eagerToo = f.cid("er4");
+        int[] runs = new int[1];
+        int[] seen = new int[1];
+        int[] firstRunCode = {MachineErrors.E_NONE};
+        s.driver = (m, c) -> {
+            runs[0]++;
+            seen[0] = m.vp - m.vbase;
+            sort(m, 500 + c);
+            if (c == eager || c == eagerToo) {
+                int saved = m.ER;
+                m.enterER();
+                assertEquals(1, m.ER);
+                boolean tainted = m.erTainted;
+                m.ER = saved;
+                if (tainted) {
+                    return firstRunCode[0]; // whatever the tainted run answers is discarded
+                }
+            }
+            return MachineErrors.E_NONE;
+        };
+        s.reset();
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("er1"), Budget.warm()));
+        assertEquals(1, runs[0]);
+        // er2 enters ER while the session holds er1's record: run twice, the second time cold
+        for (int code : new int[] {MachineErrors.E_NONE, MachineErrors.E_APP_MISMATCH, MachineErrors.E_MEM}) {
+            if (code != MachineErrors.E_NONE) {
+                s.reset();
+                assertEquals(Outcome.ACCEPT, s.check(f.cid("er1"), Budget.warm()));
+            }
+            firstRunCode[0] = code;
+            runs[0] = 0;
+            long restarts = s.erRestarts;
+            assertEquals(Outcome.ACCEPT, s.check(eager, Budget.warm()), "the tainted run's outcome (" + MachineErrors.name(code) + ") is not the verdict");
+            assertEquals(2, runs[0]);
+            assertEquals(0, seen[0], "the second run started in an empty session");
+            assertEquals(restarts + 1, s.erRestarts);
+            assertTrue(f.m.pristine(), "nothing a declaration derived with ER in play survives it");
+            assertFalse(f.m.erTainted);
+        }
+        // the next declaration starts cold
+        runs[0] = 0;
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("er3"), Budget.warm()));
+        assertEquals(1, runs[0]);
+        assertEquals(0, seen[0]);
+        // er4 enters ER as well, but now the session holds er3's record: again twice
+        runs[0] = 0;
+        assertEquals(Outcome.ACCEPT, s.check(eagerToo, Budget.warm()));
+        assertEquals(2, runs[0]);
+        assertTrue(f.m.pristine());
+        // in an EMPTY session one run is enough (v0 and strict mode are always in this case), and the session still ends
+        s.reset();
+        runs[0] = 0;
+        long restarts = s.erRestarts;
+        assertEquals(Outcome.ACCEPT, s.check(eager, Budget.warm()));
+        assertEquals(1, runs[0]);
+        assertEquals(restarts, s.erRestarts);
+        assertTrue(f.m.pristine());
+        // a declaration without ER keeps the session warm
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("er3"), Budget.warm()));
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("er5"), Budget.warm()));
+        assertEquals(1, seen[0]);
+        assertFalse(f.m.erSeen);
+        // v0: never a second run
+        Fixture g = Fixture.prelude();
+        g.def("er1", "Type", "Prop", Fixture.regular(1));
+        g.def("er2", "Type", "Prop", Fixture.regular(1));
+        g.seal();
+        int[] v0runs = new int[1];
+        g.session.driver = (m, c) -> {
+            v0runs[0]++;
+            sort(m, 7);
+            m.enterER();
+            m.ER = 0;
+            assertFalse(m.erTainted);
+            return MachineErrors.E_NONE;
+        };
+        assertEquals(Outcome.ACCEPT, g.session.check(g.cid("er1"), Budget.warm()));
+        assertEquals(Outcome.ACCEPT, g.session.check(g.cid("er2"), Budget.warm()));
+        assertEquals(2, v0runs[0]);
+        assertEquals(0, g.session.erRestarts);
+    }
+
     @Test
     void theDeclineLogHasOneLinePerOutcomeOtherThanAccept() throws java.io.IOException {
         Fixture f = Fixture.prelude();

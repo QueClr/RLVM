@@ -14,6 +14,8 @@ import java.util.Map;
  * rlvm.t2.share=F      governor: compiler CPU time (spent + estimated for the candidate) at most this share
  *                      of the process CPU time so far (default 0.02)
  * rlvm.t2.max=N        at most N promoted blocks per engine (default 256)
+ * rlvm.t2.maxInstr=N   a block of more than N instructions is never promoted (default 256: Graal refuses
+ *                      to install the code of very large blocks, "code is too large")
  * rlvm.t2.period=N     heat listener period: entries of one block by one worker (default 1024)
  * rlvm.t2.timing=N     one entry in N is timed by the machine's heat accounting (default 64)
  * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps)
@@ -34,6 +36,7 @@ final class Settings {
     final double rent;
     final double share;
     final int max;
+    final int maxInstr;
     final int period;
     final int timing;
     final int at;
@@ -54,6 +57,7 @@ final class Settings {
         rent = dbl("rlvm.t2.rent", 1.0);
         share = dbl("rlvm.t2.share", 0.02);
         max = Integer.getInteger("rlvm.t2.max", 256);
+        maxInstr = Integer.getInteger("rlvm.t2.maxInstr", 256);
         period = Math.max(1, Integer.getInteger("rlvm.t2.period", 1024));
         timing = Integer.getInteger("rlvm.t2.timing", 64);
         at = Integer.getInteger("rlvm.t2.at", 0);

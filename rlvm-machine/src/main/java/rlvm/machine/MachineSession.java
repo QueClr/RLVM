@@ -70,6 +70,8 @@ public final class MachineSession implements Session {
     private long warmUnits;
     /** Resets the session made itself because the machine's arenas passed the machine's own cap. */
     long capResets;
+    /** Declarations checked a second time, in a fresh session, because they entered eager reduction in a warm one. */
+    long erRestarts;
 
     long units;
     long accepted;
@@ -132,21 +134,29 @@ public final class MachineSession implements Session {
             // (the generation rule of ISA 5.3 is applied by the DECL driver, Decl.regime, which knows whether the
             // declaration's roots pass the summary test; a reset starts a session at generation 1)
             lastRank = rank;
-            m.beginDecl(rank, decls.unit(cid), budget.maxSteps, budget.maxBytes);
-            code = driver.check(m, cid);
-        } catch (Machine.HeapLimit e) {
-            code = MachineErrors.E_MEM; // a table could not grow in the Java heap (Machine.heapAllows)
+            code = run(cid, rank, decls.unit(cid), budget);
+            if (m.erTainted) {
+                // The declaration compared under eager reduction while the session held what earlier
+                // declarations derived in plain mode (Machine.erSeen): the official kernel starts every
+                // declaration with empty caches, so this run proves nothing. Again, in a fresh session.
+                erRestarts++;
+                lastCause = null;
+                m.reset();
+                warmUnits = 0;
+                code = run(cid, rank, decls.unit(cid), budget);
+            }
         } catch (RuntimeException e) {
-            // A declared limit of rlvm-level / rlvm-nat, an overlay that is full, or a judgment that is not
-            // implemented yet: no verdict.
+            // (ctx.terms.refresh, the declaration table: nothing was checked)
             lastCause = e;
             code = MachineErrors.E_INTERNAL;
         }
         if (code == MachineErrors.E_NONE) {
             accepted++;
             warmUnits++;
-            if (m.strict) {
-                forget(); // ISA 14.2: reset() before and after
+            if (m.strict || m.erSeen) {
+                // strict: reset() before and after (ISA 14.2). erSeen: what a declaration derived with eager
+                // reduction in play is not seen by another declaration (Machine.erSeen).
+                forget();
             }
             return Outcome.ACCEPT;
         }
@@ -201,6 +211,21 @@ public final class MachineSession implements Session {
             }
         }
         engine.logOutcome(sb.toString());
+    }
+
+    /** One run of the DECL driver on the machine as it is: the machine error code (0 = ACCEPT). Never throws for a property of the input. */
+    private int run(int cid, int rank, int unit, Budget budget) {
+        try {
+            m.beginDecl(rank, unit, budget.maxSteps, budget.maxBytes);
+            return driver.check(m, cid);
+        } catch (Machine.HeapLimit e) {
+            return MachineErrors.E_MEM; // a table could not grow in the Java heap (Machine.heapAllows)
+        } catch (RuntimeException e) {
+            // A declared limit of rlvm-level / rlvm-nat, an overlay that is full, or a judgment that is not
+            // implemented yet: no verdict.
+            lastCause = e;
+            return MachineErrors.E_INTERNAL;
+        }
     }
 
     /** The machine forgets everything; never throws for a machine state a failed judgment left behind. */

@@ -2,6 +2,7 @@ package rlvm.truffle;
 
 import rlvm.machine.Machine;
 import rlvm.machine.Op;
+import rlvm.machine.T2Bridge;
 import rlvm.machine.Tier;
 
 /**
@@ -53,6 +54,10 @@ final class T2Tier extends Tier {
             return Op.MISS;
         }
         calls++;
-        return result;
+        int r = result;
+        if (r < Op.SIG) {
+            T2Bridge.pop(m, rb); // RET (Tier.leave): a result pops the window; a signal leaves it
+        }
+        return r;
     }
 }

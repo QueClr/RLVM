@@ -289,14 +289,42 @@ was passed in file order while the file was loading), the pass rejects at the fr
 image `-O3` in the arena-shaped container, `-X engine=machine`, one worker, jars of 11:57Z (the state
 before this wave; `work/admit7/perf/*-base.byclass.txt`, `*-base.syms.txt`; scripts `work/admit7/perf/`):
 
-@@SHARE@@
+| Share of all samples of the process | Init | Std | Cedar slice |
+|---|--:|--:|--:|
+| samples (process CPU) | 32,532 (8.1 s) | 55,262 (13.8 s) | 13,984 (3.5 s) |
+| `rlvm.admit` (EnvBuilder, StructuralChecks, Admission, Claims, ...) | 0.17 % | 0.18 % | 0.11 % |
+| - of it the worker's per-unit admission (StructuralChecks + Admission) | 0.06 % | 0.07 % | 0.07 % |
+| - of it the plain units in the environment pass (special binding, order test) | 0.10 % | 0.09 % | 0.05 % |
+| `rlvm.inductive` (InductiveAdmission, TermTools, RecordCompare, IntIntMap) | 0.12 % | 0.13 % | 0.20 % |
+| **both modules** | **0.29 %** (24 ms) | **0.31 %** (43 ms) | **0.31 %** (11 ms) |
+| + reference kernel and `TermOps` (what the pass calls; `TermOps` has other callers: an upper bound) | 0.59 % (48 ms) | 0.62 % (86 ms) | 1.03 % (36 ms) |
+
+`IntIntMap` is the sum of `rlvm.inductive.IntIntMap` and `rlvm.ref.IntIntMap` (perf shows the simple
+class name; with the machine as engine the reference kernel runs only for the environment pass).
+Hottest symbols of the two modules: `EnvBuilder.unresolved` 0.05 %, `EnvBuilder.plainUnit` 0.04 %,
+`StructuralChecks.checkConstant` 0.02 - 0.04 %, `TermOps.eqv` (record comparison) 0.02 - 0.07 %.
+mathlib: the symbolised image was deleted by its owner before my turn at the measurement lock came, so
+there is no profile; from the thread CPU time below (JVM) against the machine's 206 s of process CPU
+(native, 8 workers, `work/status/machine-M6.log`): about 1.1 - 1.25 % before this wave, 0.7 % after,
+plus about 0.08 % for the worker's per-unit admission (Init's 0.16 % of 8.1 s is 220 ns per unit).
 
 So the environment pass and the per-unit admission together are about half a percent of the process: they
 are not what the rest of the pipeline costs (reader, loader, proof-block decoding: 13 - 21 %). Thread CPU
 time of the whole environment pass (JVM, `EnvPassBench`, real loader + `rlvm-inductive` + reference
 kernel, warm, driven one unit per call as the driver does, session reset at 16 MiB):
 
-@@ENVPASS@@
+| Export | Units (inductive + quot) | Before: median (min) | After: median (min) | |
+|---|--:|--:|--:|--:|
+| `init.ndjson` | 58,547 (609) | 47 / 50 ms (39 / 45) | 37 / 34 ms (35 / 31) | -27 % |
+| `std.ndjson` | 101,146 (1,050) | 107 / 112 ms (86 / 109) | 80 / 77 ms (77 / 71) | -28 % |
+| `cedar.ndjson` | 146,058 (1,960) | 178 / 209 ms (173 / 186) | 138 / 135 ms (122 / 122) | -29 % |
+| `mathlib.ndjson` | 721,845 (7,133) | 2,230 / 2,583 ms (two repetitions) | 1,363 / 1,472 ms; again 1,491 ms | -39 % |
+
+(`work/admit7/ab-envpass.sh FILE REPS 16777216 ROUNDS`: two alternating rounds per export - one for
+mathlib - of 5 to 10 measured repetitions in one JVM, the first two dropped; "before" =
+`-Drlvm.admit.releaseBlocks=false`; host load average 20 to 230 during these runs, which is why thread
+CPU time is quoted; every run ends with the frontier at the last unit: all 7,133 inductive and quot
+units of mathlib are admitted with the release.)
 
 **What was removed.**
 
@@ -347,13 +375,13 @@ recursor and its lists after the level base is frozen (request to the steward in
 14:0xZ, with a proposal: 10 of the 18 declines need it) and (2) the calls from here for the quotient
 constants (7 + 1 declines), which need the dependency analysis and a probe set against leanchecker.
 
-## Tests (`$MVN -o -q -pl rlvm-admit test`: 86 tests, 85 run, 1 skipped)
+## Tests (`$MVN -o -q -pl rlvm-inductive,rlvm-admit test` in wave 7, or `-pl rlvm-admit` against the published `rlvm-inductive`: 87 tests, 86 run, 1 skipped)
 
 | Suite | What |
 |---|---|
 | `StructuralChecksTest` (23) | every row of the table of 4.3 on hand-built stores (real `rlvm-store`, real level bindings): fast path, exact walk, own-unit kind masks, projections, literals, proof-block values, 200,000-deep and 2^60-path terms |
 | `PreludeGuardsTest` (8) | the guard matrix: the standard prelude is VALID, 25 single deviations are INVALID exactly where expected |
-| `EnvBuilderTest` (28) | fake `KernelOps` (every judgment throws), scripted `rlvm-inductive`, policy `ForwardRefs.DECLINE` (file order): frontier and statuses, commit and derived flags, `BlockInput` order, structural rejections inside blocks, item consistency, orphan records, scalar re-statement, quot pre-checks, reserved names, guard states, cancel / run, a decline while the file is loading (`waitingForLoad`), dependency order only with a session that covers the file (`setCoverage`), no move past an out-of-order unit while the file is loading |
+| `EnvBuilderTest` (29) | fake `KernelOps` (every judgment throws), scripted `rlvm-inductive`, policy `ForwardRefs.DECLINE` (file order): frontier and statuses, commit and derived flags, `BlockInput` order, structural rejections inside blocks, item consistency, orphan records, scalar re-statement, quot pre-checks, reserved names, guard states, cancel / run, a decline while the file is loading (`waitingForLoad`), dependency order only with a session that covers the file (`setCoverage`), no move past an out-of-order unit while the file is loading, the cause of a decline in the message, the release of a committed block's derived terms |
 | `ReplayTest` (4) | admission in dependency order through the real loader, `rlvm-inductive` and the reference kernel on 43 exports (`src/test/resources/replay`: 24 hand-made probes from `work/rlvm-admit/probe2` and `probe3`, 19 mutants of tutorial tests), each with the verdict of leanchecker 4.36.0: forward references, cycles, unsafe member records, inconsistent `all` / constructor lists, foreign quot records, files the official hash order decides (in declaration order too); RLVM gives the official verdict (34 files) or declines (9, pinned); once with the worker driving the pass, once with a separate `Admission` that finds the outcomes through the store (the driver's shape); in file order (`ForwardRefs.DECLINE`) the same files are declined or agree, except the two in declaration order that the official order rejects; the official order rejecting a unit behind the frontier (a pipelined run) |
 | `OfficialOrderTest` (3) | the hash of the Lean runtime on known values; the simulated official order on 22 exports that differ only in names (`src/test/resources/order`), against the recorded verdicts of leanchecker 4.36.0; files outside the model are reported unavailable |
 | `AdmissionTest` (8) | fake `Session`: structural failures never reach the engine, engine outcomes pass through, lazy environment pass, axiom policy |

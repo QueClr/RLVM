@@ -66,6 +66,10 @@
 #                          own, the perf tests run one at a time). On a quiet host: --heap 12g --jobs 8
 #   --jobs N               passes (gate), files (the corpus reports), mutants at a time (default 4, the limit
 #                          of a host-wide slot)
+#   --levels official|complete   the universe-level relation of the REFERENCE engine (the oracle of every
+#                          report and the re-check engine of the pipeline runs): official by default (owner
+#                          decision of 2026-11-24, OWNER-NOTES item 11: both engines compare levels as the
+#                          official kernel does), whatever the published rlvm-ref jar has as its default
 #   --no-slot              do not take a host-wide slot (bench/slot.sh; the orchestrator's rule of 14:32Z:
 #                          every heavy job holds one of 8). Only for a caller that holds one already
 #   --no-pin               do not pin the report JVM. By default it runs on the CPUs outside the cpuset of the
@@ -93,6 +97,7 @@ heap="6g"
 keep=0
 pin=1
 slot=1
+levels=official
 jvmargs=()
 args=()
 orig="$*"
@@ -104,6 +109,7 @@ while [ "$#" -gt 0 ]; do
     --keep) keep=1; shift ;;
     --no-pin) pin=0; shift ;;
     --no-slot) slot=0; shift ;;
+    --levels) levels="${2:?--levels needs official or complete}"; shift 2 ;;
     --jobs) jvmargs+=("-Dm8.jobs=${2:?--jobs needs a number}"); shift 2 ;;
     --switches) switchsets+=("${2-}"); shift 2 ;;
     --session-mib) jvmargs+=("-Dm8.sessionMib=${2:?--session-mib needs a number}"); shift 2 ;;
@@ -206,7 +212,7 @@ run_main() {
   # large array cannot use (it must fit into the old generation), and a growth it allowed ends in OutOfMemoryError.
   ${slot_prefix[@]+"${slot_prefix[@]}"} ${pin_prefix[@]+"${pin_prefix[@]}"} "$JAVA_HOME/bin/java" -Xss2m "-Xmx$heap" -Xmn1g -XX:+UseSerialGC \
       --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow \
-      "-Drlvm.root=$ROOT" "-Dm8.command=rlvm-machine/src/test/resources/m8/report.sh $orig" ${jvmargs[@]+"${jvmargs[@]}"} \
+      "-Drlvm.root=$ROOT" "-Drlvm.levels=$levels" "-Dm8.command=rlvm-machine/src/test/resources/m8/report.sh $orig" ${jvmargs[@]+"${jvmargs[@]}"} \
       -cp "$CP" rlvm.machine.M8Main "$@"
 }
 
@@ -225,11 +231,21 @@ case "$cmd" in
       *" -Dm8.mutants.launcherSample="*)
         # the launcher sample runs the PUBLISHED machine jar (a distribution of the published jars, built here)
         [ "$tree" = "$MAIN" ] || { echo "report.sh: --launcher-sample compares with the published jars: not with --tree" >&2; exit 2; }
+        # (not scripts/build.sh: it queues behind every native-image build. scripts/check-light.sh needs lib/ only:
+        # the third-party jars of work/dist and every RLVM jar as published in .toolchain/m2)
         sdist="$ROOT/work/m8/dist-sample-$$"
-        "$ROOT/scripts/build.sh" --published --jvm-only --dist "$sdist" > "$ROOT/work/m8/dist-sample-$$.log" 2>&1 \
-          || { echo "report.sh: scripts/build.sh --published failed (work/m8/dist-sample-$$.log)" >&2; exit 2; }
+        mkdir -p "$sdist/lib"
+        for j in "$(readlink -f "$ROOT/work/dist")"/lib/*.jar "$ROOT/.toolchain/m2/rlvm/rlvm-machine/0.1.0-SNAPSHOT/rlvm-machine-0.1.0-SNAPSHOT.jar"; do
+          b="$(basename "$j")"
+          case "$b" in
+            rlvm-*) m="${b%-0.1.0-SNAPSHOT.jar}"
+                    cp "$ROOT/.toolchain/m2/rlvm/$m/0.1.0-SNAPSHOT/$b" "$sdist/lib/" 2>/dev/null || cp "$j" "$sdist/lib/" ;;
+            *) cp "$j" "$sdist/lib/" ;;
+          esac
+        done
+        [ -f "$sdist/lib/rlvm-main-0.1.0-SNAPSHOT.jar" ] || { echo "report.sh: no rlvm-main jar for the launcher sample (work/dist/lib)" >&2; exit 2; }
         jvmargs+=("-Dm8.mutants.dist=$sdist")
-        trap 'cleanup; rm -rf "$sdist" "$ROOT/work/m8/dist-sample-$$.log"' EXIT ;;
+        trap 'cleanup; rm -rf "$sdist"' EXIT ;;
     esac
     build_copy; run_main mutants - ${rest[@]+"${rest[@]}"} ;;
   gates)

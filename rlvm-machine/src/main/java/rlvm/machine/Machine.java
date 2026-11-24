@@ -300,8 +300,28 @@ public final class Machine {
     long fuel = Op.FUEL_UNLIMITED;
     /** {@code ticks() == tickBase - max(fuel, 0)} at all times; {@link #tryEnter} and {@code Frames.k_try} keep it so. */
     long tickBase = Op.FUEL_UNLIMITED;
-    /** 1 while the argument of an {@code eagerReduce _ _} application is compared with its domain (R02 8.9). */
+    /**
+     * 1 while the argument of an {@code eagerReduce _ _} application is compared with its domain (R02 8.9).
+     * Set through {@link #enterER()} (never by a plain assignment of 1), restored by assigning the saved value.
+     */
     int ER;
+    /**
+     * True once a comparison of the current declaration ran under eager reduction ({@link #enterER()}).
+     * Eager reduction changes what CONV answers (it lifts the hasFVar guards of the Bool.true test and of the
+     * Nat folding: a pair can be T plain and F under ER, and the reverse), and the official kernel's caches
+     * live for ONE declaration; so what a declaration derived may not meet a comparison of another
+     * declaration in the other mode (arena test bad/bugs/rec-of-subst-prop; NOTES-M6 F26). The facade
+     * ({@code MachineSession.check}) therefore ends the session after a declaration with {@code erSeen}.
+     */
+    boolean erSeen;
+    /**
+     * True if eager reduction was entered while the session still held what EARLIER declarations derived
+     * (pair entries and memo words computed in plain mode): the facade discards the outcome of this run
+     * and checks the declaration again in a fresh session.
+     */
+    boolean erTainted;
+    /** The session held records, runs or pair entries when the current declaration began. */
+    private boolean warmAtDecl;
     /** Code ({@code rlvm.api.MachineErrors}) of the failure whose signal is propagating; 0 = none. */
     int err;
     /**
@@ -1045,6 +1065,20 @@ public final class Machine {
         return 0;
     }
 
+    /**
+     * Enters eager-reduce mode: {@code ER = 1}, for the comparison of the type of an {@code eagerReduce _ _}
+     * argument with its domain (R02 6.5, 8.9). The caller saves {@link #ER} before and assigns the saved
+     * value back afterwards. EVERY place that sets ER to 1 goes through this method: it is how the facade
+     * learns that the declaration used the mode ({@link #erSeen}, {@link #erTainted}).
+     */
+    void enterER() {
+        ER = 1;
+        if (!erSeen) {
+            erSeen = true;
+            erTainted = warmAtDecl;
+        }
+    }
+
     /** {@code fail(E)}: a kernel error or a recoverable limit. Returns the signal to return (ABORT). */
     int fail(int code) {
         if (!MachineErrors.isRecoverableInTry(code)) {
@@ -1635,6 +1669,9 @@ public final class Machine {
      * stamp. {@code gen} is advanced by the caller (M5 / M6) according to ISA 5.3.
      */
     void beginDecl(int rank, int unitIndex, long maxSteps, long maxBytes) {
+        warmAtDecl = !pristine();
+        erSeen = false;
+        erTainted = false;
         long done = ticks();
         fuel = maxSteps > Op.FUEL_UNLIMITED || maxSteps < 0 ? Op.FUEL_UNLIMITED : maxSteps;
         tickBase = done + fuel;

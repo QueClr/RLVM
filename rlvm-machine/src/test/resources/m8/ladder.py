@@ -14,6 +14,9 @@ measurement lock (work/perf-history/.ladder.lock) runs, in the arena-shaped cont
     the reference engine, gruszka (its arena run line), and the machine with every switch set
     on Init, Std, the Cedar slice (work/workloads/slices/cedar-hot-ax.ndjson) and reachability, with 1 and 4 workers.
 
+A machine jar is named by its CODE (sha256 over the names and CRCs of its classes, 12 hex digits): a publication
+that changes only tests installs a jar with other time stamps and the same code, and gets no new row.
+
 Every run is one row of work/status/machine-ladder.tsv (CPU s first, then wall s, peak RSS MiB, instructions G,
 the verdict, what the machine accepted / declined). Rows of one invocation form a BATCH: compare inside a batch
 only (the host is shared; CPU time moves with its load, instructions do not). `render` rewrites
@@ -62,6 +65,20 @@ def sha12(path):
     return h.hexdigest()[:12]
 
 
+def code_id(path):
+    """The identity of a jar's CODE: sha256 over (name, CRC) of its entries, without META-INF. A publication that
+    changes only tests recompiles the module and installs a jar with new time stamps and the same classes: the
+    file hash moves, this does not."""
+    import zipfile
+    h = hashlib.sha256()
+    with zipfile.ZipFile(path) as z:
+        for info in sorted(z.infolist(), key=lambda i: i.filename):
+            if info.is_dir() or info.filename.startswith("META-INF/maven/") or info.filename == "META-INF/MANIFEST.MF":
+                continue
+            h.update(("%s %08x %d\n" % (info.filename, info.CRC, info.file_size)).encode())
+    return h.hexdigest()[:12]
+
+
 def last_publication():
     try:
         lines = open(os.path.join(ROOT, "work/sandbox/publish.log")).read().splitlines()
@@ -96,11 +113,12 @@ def append_row(row):
 
 def build_dist(args):
     """A CE native image -O3 of the jars published now; returns (dist dir, machine jar hash, publication time)."""
+    code = code_id(JAR)
     if args.dist:
         dist = os.path.join(ROOT, args.dist)
     else:
         os.makedirs(WORK, exist_ok=True)
-        dist = os.path.join(WORK, "dist-" + sha12(JAR))
+        dist = os.path.join(WORK, "dist-" + code)
     info = os.path.join(dist, "BUILD-INFO.txt")
     if not (os.path.isfile(info) and os.access(os.path.join(dist, "bin/rlvm"), os.X_OK)):
         if args.dist:
@@ -119,7 +137,9 @@ def build_dist(args):
     m = re.search(r"rlvm-machine\s+([0-9a-f]{12})\s+published (\S+)", text)
     if not m:
         sys.exit("ladder.py: %s does not name a published rlvm-machine jar" % info)
-    return dist, m.group(1), m.group(2)
+    # the image's own machine jar (lib/), identified by its code: what was measured, whatever was published since
+    lib = os.path.join(dist, "lib", "rlvm-machine-0.1.0-SNAPSHOT.jar")
+    return dist, code_id(lib) if os.path.isfile(lib) else code, m.group(2)
 
 
 def measure_one(line, export, timeout):
@@ -399,7 +419,7 @@ def cmd_render(args):
 
 
 def cmd_status(args):
-    jar = sha12(JAR)
+    jar = code_id(JAR)
     rows = [r for r in read_rows() if r["jar"] == jar]
     print("published machine jar %s (%s): %d ladder rows%s" % (jar, last_publication(), len(rows), "" if rows else " - run `ladder.py measure`"))
 
