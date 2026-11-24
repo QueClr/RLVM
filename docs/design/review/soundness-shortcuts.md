@@ -3,9 +3,10 @@
 2026-11-24, 16:45Z - 18:30Z. Adversarial review of the two non-official options of the machine's conversion checker
 (`-Drlvm.machine.m4=congruence,skipargs`; owner M4: `Conv.java`, `Cargs.java`; masks: `Facts.java`, `FactStore.java`,
 owner M5). No production code was changed. Everything of this review is under `work/s2/` (generators `gen/`,
-exports `attacks/`, `attacks-dat/`, `attacks/fuzz/`, `attacks/mut-mathlib/`, results `out/`, tools `judge.py`,
-`campaign.sh`, `stats.sh`, `corpus-shortcheck.sh`, `leaders.sh`, a private copy of the module with seeded faults
-`mcopy/`, an optional patch `patches/`).
+exports `attacks/`, `attacks-dat/`, `attacks2/`, `attacks/fuzz/`, `attacks/mut-mathlib/`, certificates `certify/`,
+results `out/`, tools `judge.py`, `campaign.sh`, `campaign2.sh`, `stats.sh`, `corpus-shortcheck.sh`, `leaders.sh`,
+`leaders-summary.py`, `seeded-summary.py`, a private copy of the module with seeded faults `mcopy/` and its
+distribution `dist3/`, an optional patch `patches/`).
 
 Code reviewed: the main tree as published until 17:25Z. Runs: the JVM launcher of two private distributions built
 from the published jars (`scripts/build.sh --published --jvm-only`): `work/s2/dist` (machine jar `ba557722c184`,
@@ -368,7 +369,8 @@ accept), 0 ACCEPT.**
 360 mutants of `Mathlib.Algebra.Group.Basic.cone` (1,724 units; each mutant edits ONE occurrence inside ONE
 declaration: the argument of an application replaced by the argument of another application of the same function,
 a Nat literal `n` by `Nat.succ n`, one universe argument of a constant by another level; 174 in a declared type,
-186 in a value). `work/s2/out/mut-mathlib-judged.tsv`:
+186 in a value). `work/s2/out/mut-mathlib-judged.tsv`; the 360 files (1.9 GB) were deleted after the run, their
+descriptions and SHA-256 sums are in `work/s2/attacks/mut-mathlib/` and the command of section 7 regenerates them:
 
 | kind | mutants | official reject | of them rejected under `skip` and `both` | official accept (accepted under both) |
 |---|--:|--:|--:|--:|
@@ -409,10 +411,13 @@ A = accepted, R = rejected; the official checker rejects every row.
 but by the derivation of the table written as a term - `Eq.rec` (congruence) over `Eq.refl x : x = y` for the two
 proofs `x`, `y`, an equation the official checker accepts by proof irrelevance; for the agreement and structure
 eta rows the motive quantifies over the dependent proof (`fun x _ => forall (p : Q (R x)), w I p1 = w x p`).
-**The official checker accepts all 15.** So every statement that the options accept against the official verdict
-is a theorem that the official checker proves once it is given the congruence step explicitly: the official
-`is_def_eq` fails to FIND these equations (it reduces one side before it compares, and it does not compare the
-arguments of an abbrev, a recursor or a closure); none of them is false.
+**The official checker accepts all 15** (so do the machine under `v0`, `rich`, `both` and both leaders). What this
+certifies: every statement that the options accept against the official verdict is a THEOREM for the official
+checker, so its acceptance is not the acceptance of a false statement. That the equation is moreover
+DEFINITIONAL in the theory is the derivation of the table: proof irrelevance and congruence are conversion rules
+of the theory, the certificate uses nothing else (`Eq.rec` on `Eq.refl` is how one writes them as a term). The
+official `is_def_eq` fails to FIND these equations - it reduces one side before it compares, and it does not
+compare the arguments of an abbrev, a recursor or a closure -; none of them is false.
 
 The whole run (`work/s2/out/known-judged.tsv`, configurations `v0`, `rich`, `skip`, `cong`, `both`, `bothrich`):
 
@@ -449,7 +454,7 @@ same family of shortcuts (gruszka names its source: Pestka's ProofArgsSkipped, u
 | proof position whose domain mentions a skipped, different unread position | compared (`differ` rule) | skipped | skipped |
 | unread positions | definitions and theorems, spine >= lamArity, superset mask up to 65,535 lambdas, first 64 positions | definitions only (not theorems), at most 64 lambdas, spine >= lambdas | definitions and theorems, also for a spine shorter than the lambdas (the rest of the lambdas counts as body) |
 | where the masks are used | c8 (proof positions), same-head step of lazy delta for a regular definition, B1 | `defeq_app` (proof positions), same-head step for a regular definition, budgeted probes (`race_k`, `probe_args`, refutation) | `def_eq_app`, `probe_args` before `whnf_core` for every unfoldable same head (budget) |
-| same-head probe on recursors / `Quot.lift` | yes (B1, NOTES-M4 D19) | no (their closure walk covers the measured case) | no |
+| same-head probe on recursors / `Quot.lift` | yes (B1, NOTES-M4 D19) | none in the code I read (it accepts the `And.rec` rows of section 4 by a route I did not trace) | no |
 | structure eta: proof fields | skipped | skipped | compared (proof irrelevance) |
 | closure congruence | slots by the complete CONV (B12) | slots by identity and by pairs ALREADY found equal (`same_val`), never a comparison of its own | structural identity only (`same`, fuel 512) |
 | proofs by type before `whnf_core` | B2, when the value is already known to be a proof | no | yes, always (`proof_irrel` precedes `whnf_core`) |
@@ -480,12 +485,11 @@ Run (Docker, no network, the arena's run lines; `work/s2/leaders.sh`, `work/s2/o
   `open-flag-closed-bad`): its probe is for unfoldable heads only and it has no closure congruence and no ETAS mask.
 - Both leaders accept three more officially rejected exports that the machine REJECTS also with the options:
   `krule-eager-alone-bad`, `krule-memo-across-binders-eager-bad`, `krule-memo-across-declarations-eager-bad`
-  (the same class inside the K rule under eager reduction; the machine declines such a declaration, the reference
-  engine rejects it). gruszka also accepts `nontransitive-regular-def-bad` and `nontransitive-same-decl-bad`
-  (`d h = 5`: it closes pairs it found equal).
-
-- Neither leader accepts `acc-rec-intro-vs-axiom` (B1 on a recursor head is the machine's alone: gruszka
-  accepts the `And.rec` rows by another route, `Acc` is no structure), nor the arena's `125_accRecNoEta`,
+  (by package S's description the same class, inside the K rule under eager reduction; the machine declines such
+  a declaration, the reference engine rejects it). gruszka also accepts `nontransitive-regular-def-bad` and
+  `nontransitive-same-decl-bad` (`d h = 5`, true in the theory; by which route I did not trace).
+- Neither leader accepts `acc-rec-intro-vs-axiom` (B1 on a recursor head is the machine's alone; why gruszka
+  accepts the `And.rec` rows and not this one I did not trace), nor the arena's `125_accRecNoEta`,
   `101_ruleKAcc`, `100_ruleKbad`. Both accept the 15 certificates of section 4, as the official checker does.
 
 So "as the leaders do" is literally true for gruszka: on these 872 exports gruszka differs from the official

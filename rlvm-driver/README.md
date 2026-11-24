@@ -985,7 +985,7 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 | `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (reference engine as primary) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
 | `scripts/gate.sh --dist work/rlvm-driver/w7/dist-gate --corpus tutorial --corpus bugs --corpus mdata --corpus prelude` (the published jars of 13:46Z with this driver jar; JVM launcher, reference engine, 1 worker, batch) | PASS in every step: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260 (agree 11,847, declined 413), bugs 2,692 (2,627 / 65), mdata 1,976 (779 / 1,197), prelude 847 (839 / 8): SOUNDNESS 0, COMPLETENESS 0, errors 0 in all four, the same counts as the wave-5 check; differential self-test caught. (The script was edited by its owner while the gate ran and stopped with a syntax error after the fourth corpus; the self-test was then run by `--no-slice --corpus none`.) |
 
-### Wave 8: where the wall clock of 8 workers goes (2026-11-24, 15:30Z to 18:00Z; agent P7)
+### Wave 8: where the wall clock of 8 workers goes (2026-11-24, 15:30Z to 18:30Z; agent P7)
 
 The full report is `docs/research/profiles/P7.md`; this is what concerns the driver. All rows: machine engine
 `warm,gated,expect`, cap 4 MiB, CE native image `-O3`, **every wall-clock number through `bench/quiet.py`** (the
@@ -1029,7 +1029,8 @@ P7-F1) and, while the file loads, ten threads on eight cores. No unit and no cha
 |---|---|---|---|
 | Shared bytes added up at most every 20 ms by the environment thread (was: after each of its steps; `Store.sharedBytes()` walks one slot per unit) | none (small tables) | none | environment thread 4.69 s CPU / 5.13 s wall -> 1.56 s / 1.67 s; frontier complete 3.5 s earlier; parks at the frontier 0.7 % -> 0.0 %; wall clock inside the noise (expected 0.4 s of 29 s) |
 | Slices instead of one run per worker and batch | check-only passes with 8 workers 2.15 - 2.18 s -> 1.58 - 1.82 s, with 4 workers 3.37 - 3.53 s -> 2.92 - 3.14 s; pass 1 and pipelined: see the ten rounds below | no difference (2.2 s; no dominant unit) | no difference (41.4 / 28.4 / 34.7 s before, 41.5 / 27.9 / 35.9 s after: batch / check-only / pipelined, one window); steals 286 -> 3 |
-| Kept pass + parking rule | pipelined declines of the invariance suite 5 -> 0 (machine), 0 (reference) | | 0 units parked on Init, Std, mathlib |
+| Kept pass + parking rule | pipelined declines of the invariance suite 5 -> 0 (machine), 0 (reference) | | 0 units parked on Init, Std, cedar, mathlib |
+| **Publication interval times the input's GiB, at most 4** (`publish-scale`) | same interval, same time (2.04 / 2.04 s pipelined with 8 workers) | same interval (3.00 / 2.77 s: noise) | **pipelined, 8 workers, two interleaved rounds: 34.25 / 35.00 s -> 31.71 / 31.90 s (-8 %)**; 4 workers 55.71 -> 53.80 s (-3 %). 205 -> 52 publications, 36.9 -> 20.9 GB of garbage, pauses 3.75 -> 2.23 s, worker CPU 221.3 -> 214.8 s, peak RSS 4.1 -> 3.8 GB |
 
 Std, 8 workers, ten rounds in one window (17:31Z): a split bounded to the environment batch but still one run
 per worker (`dist-d`) against slices (`dist-e`): pass 1 check, median (range) 1.67 s (1.62 - 1.76) against
@@ -1049,9 +1050,29 @@ on its core is 5 % - 7 % faster (23.89 s against 25.14 s, 22.21 s against 23.71 
 27.9 - 28.7 s for 210 - 213 s of worker CPU. So one process costs no more CPU than eight, eight busy cores make
 each other 5 % - 7 % slower (the hardware's: the worker CPU of 201 s with 2 workers and 213 s with 8), and the
 driver's 8-worker pass is 5 % - 8 % above what a perfectly balanced split could reach on this machine (26.6 s);
-that rest is the collections. A static split would end with its largest shard, after 31.2 s.
+that rest is the collections. A static split would end with its largest shard, after 31.2 s. Std: shards
+1.13 - 2.21 s, mean 1.48 s, against 1.63 - 1.67 s for one process (the heavy unit); cedar: 1.66 - 2.77 s, mean
+2.02 s, against 2.15 - 2.20 s; a shard alone is 4.5 % - 5.1 % faster on both.
 
-**Guards on the published jar** (@@JAR@@): @@GUARDS@@
+**After the changes, mathlib with 8 workers** (jar 31fa08d9ce61): pipelined 31.7 - 31.9 s (on a CPU 85.6 %,
+run queue 6.2 %, collections 7.8 %, parks 0.3 % of 8 workers x wall), batch 41.5 s (check 29.9 s), check-only
+pass 27.9 s; against one worker pipelined (208.3 s) that is 6.5x, against one worker batch 7.0x.
+
+**Guards.** Two publications: 150aed4bf1bf (18:03:49Z: everything but the publication scale) and
+31fa08d9ce61 (18:27:41Z: + the publication scale, which changes nothing for inputs below 2 GiB).
+
+| Guard | Result |
+|---|---|
+| `$MVN -o -q -pl rlvm-driver test` | 107 tests, 104 run green, 3 opt-in (150aed4bf1bf: 106 / 103) |
+| `scripts/gate.sh --dist work/p7/dist-pre --corpus tutorial` (the tree before kept engines, jar 44cd88517795 + the published jars of 17:09Z; JVM launcher, reference engine, 1 worker, batch) | PASS: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413, errors 0; differential self-test caught |
+| the same with `--load pipelined --threads 4` and `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7` (small files through the pipeline too) on `work/p7/dist-pre-pipe` | PASS: 230 / 230; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413 (the same counts as batch); self-test caught |
+| `scripts/gate.sh --corpus none` (slice + self-test) on `work/p7/dist-final` (tree with kept engines, 09668cada690) and on `work/p7/dist-pub` (the published 150aed4bf1bf itself) | PASS, 230 / 230, both |
+| `rlvm-driver/bin/invariance.sh published` (231 files x 9 runs; reference engine) | PASS: 231 correct, 0 wrong, 0 declined, 0 schedule differences, 0 pipelined declines (28 minutes) |
+| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (16,928 mutants x 9 runs), reference engine | PASS: 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
+| the same with `--engine machine -X machine.switches=warm,gated,expect` (machine jar of 17:25Z), on the code of 150aed4bf1bf and again on the code of 31fa08d9ce61 | PASS both: 0 wrong, 0 schedule differences, 1,675 declined alike, **0 pipelined declines** (5 before the kept pass and the parking rule, 1 before the rule covered type roots) |
+| the same, `big` (init-prelude, Init, Std, cedar), machine as primary engine | PASS: 4 files correct in all 9 configurations |
+| mathlib through the native launcher, 8 and 4 workers, batch and pipelined, every build of this section | accept, exit 0, 0 units parked |
+| slice + self-test on a distribution with 31fa08d9ce61 (`work/p7/dist-pub2`), batch and pipelined forced | @@GATE2@@ |
 <!-- measured:end -->
 
 ## Deviations from the design documents
@@ -1080,7 +1101,7 @@ that rest is the collections. A static split would end with its largest shard, a
   tests 230 / 230 through the launcher with `--load pipelined --threads 4` and
   `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7`, which forces the small files through the pipeline);
   (2) the end-to-end guards in that mode: see "Measured", wave 8; (3) the gain on quiet cores: mathlib 224.1
-  -> 208.3 s with one worker, 113.4 -> 104.9 with 2, 64.6 -> 55.5 with 4, 42.6 -> 38.1 (41.4 -> 34.7) with 8;
+  -> 208.3 s with one worker, 113.4 -> 104.9 with 2, 64.6 -> 53.8 with 4, 41.5 -> 31.8 with 8;
   Std 2.71 -> 2.57 s, cedar 4.29 -> 2.78 s with 8. The switch itself is `rlvm-main`'s (`MainOptions.loadMode`;
   requested on the board); the driver already loads inputs below `pipeline-min-mib` (8 MiB) in batch mode.
 - **A heavy unit that starts late is the end of the run** on the mid-size corpora (Std: unit 23249, 0.7 s of

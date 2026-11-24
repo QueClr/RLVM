@@ -10,7 +10,7 @@ first and wall clock second.
 
 **Yes, now measured: Serial, Parallel, G1, ZGC (generational), Shenandoah (both modes) and Epsilon, both engines,
 1 / 4 / 8 workers, Init, Std, the Cedar slice, reachability and mathlib. No collector beats Serial; ZGC costs 4 to
-12 % CPU time, Shenandoah 13 to 23 %.**
+7 % CPU time, Shenandoah 15 to 26 %.**
 
 | ratio to Serial, CPU time (arena CPUs, under the lock; geometric mean of Init and Std; 3 repetitions, 5 at 8 workers) | machine, 1 worker | machine, 8 workers | reference, 1 worker | reference, 8 workers |
 |---|--:|--:|--:|--:|
@@ -26,7 +26,7 @@ first and wall clock second.
    of every run (mathlib, reference engine: 7.3 s of 1,065 s), 3 % in one cell (reachability, reference engine).
    Epsilon, which never collects, is not faster than Serial (section 4).
 2. **What the concurrent collectors add instead**: barriers in compiled code and a slower C2 (Shenandoah: +20 to
-   +35 % instructions on both engines, with zero collections on the machine on Init), a heap commit at start (ZGC with the
+   +31 % instructions on both engines, with zero collections on the machine on Init), a heap commit at start (ZGC with the
    launcher's `-Xms = -Xmx`: 1 to 3 s per run, 1.4 to 2.4 s of system time), uncompressed pointers (ZGC: the
    reference engine's footprint doubles). Their own threads are cheap: below 1 s per run on Init / Std, 1 to 8 s on
    mathlib (section 5).
@@ -51,7 +51,7 @@ first and wall clock second.
    deviation from the instruction; every section says which set its tables are from); from 17:26Z the lock was free
    and the Init / Std headline cells, and mathlib with the machine, were measured on the arena CPUs under it. The
    two sets agree. The host was loaded almost throughout (load average 250 at the start, 30 to 60 during the arena
-   runs): 8-worker runs of Init / Std scatter by 10 to 30 % between identical runs, one-worker and mathlib runs by 0
+   runs): 8-worker runs of Init / Std scatter by 10 to 40 % between identical runs, one-worker and mathlib runs by 0
    to 8 %.
 
 ## 1. What was run
@@ -62,8 +62,8 @@ first and wall clock second.
   `eb0944caa630`, ref `035f31e854d9`, store `45df9b63e7af`, api `6ff40825ca1d`; hashes in `dist/BUILD-INFO.txt`). A
   `scripts/build.sh --published --jvm-only --dist work/prof/GC/dist` of my own was queued behind four native-image
   builds of other profilers and would have picked up a machine jar published at 14:00Z in the middle of the wave; I
-  cancelled it before it started and copied the wave's base instead. Nothing outside `work/prof/GC/` and this file was
-  written.
+  cancelled it before it started and copied the wave's base instead. No file outside `work/prof/GC/` and this
+  report was created or edited (the containers use the shared `work/cache/` as always).
 - **Engines.** The machine: `-X engine=machine -X machine.switches=warm,gated,expect,probes,code,casetrees -X session-mib=4`
   (every run: all units accepted by the machine, 0 declined, e.g. mathlib 714,712 / 0). The reference engine:
   `-X engine=reference`. Workers: `--threads 1 | 4 | 8`. Every run counted below ended with exit status 0 (accept).
@@ -183,17 +183,17 @@ From 17:26Z the queue on the lock was empty and the batches ran back to back (se
 Reading: the arena CPUs say the same as the efficiency cores (2.2), at half the absolute level and with less
 scatter in the one-worker cells:
 
-- **Parallel and G1 = Serial** within 5 % in every group (CPU 0.99 / 1.00
+- **Parallel and G1 = Serial** within 3 % in every group (CPU 0.99 / 1.00
   with the machine at one worker, 1.01 / 1.00 with the reference engine,
   1.00 / 1.00 and 1.03 / 1.01 at
   eight workers).
-- **ZGC: +4 to +12 % CPU time** (1.04, 1.06, 1.07,
-  1.06), +3 to +16 % instructions, and a wall clock at eight workers of
+- **ZGC: +4 to +7 % CPU time** (1.04, 1.06, 1.07,
+  1.06), +3 to +11 % instructions, and a wall clock at eight workers of
   1.20 and 1.21 of Serial's, because it commits the 8 GB heap before the
   checker starts.
-- **Shenandoah: +15 to +22 % CPU time, generational +13 to +23 %** (1.15 /
+- **Shenandoah: +15 to +21 % CPU time, generational +15 to +26 %** (1.15 /
   1.15, 1.21 / 1.19, 1.17 /
-  1.16, 1.19 / 1.26), +20 to +35 % instructions,
+  1.16, 1.19 / 1.26), +20 to +31 % instructions,
   and a wall clock at eight workers of 1.23 / 1.22 of Serial's.
 - **No collector improves the wall clock with eight workers**: the geometric means of the 8-worker wall ratios are
   1.05 / 1.02 (Parallel) and 1.08 /
@@ -1248,12 +1248,12 @@ Runs that did not end with exit status 0 (not in the tables):
 1. **Keep `-XX:+UseSerialGC` as the launcher's collector.** No collector beat it in CPU time on any input, engine
    or worker count beyond the noise of the measurement, and it cannot be otherwise: its pauses are below 1 % of the
    CPU time of every run but one (3 %), mathlib included, and with the machine engine a run has zero to nine
-   collections. It has
-   no threads of its own, the cheapest barrier, the smallest footprint on the small inputs, and it is the collector
-   of the arena build, so a JVM-mode run exercises the same memory behaviour as the native image.
+   collections. It has no threads of its own, the cheapest barrier, the smallest footprint with the reference engine
+   on the small inputs (with the machine, G1 and ZGC are 15 to 25 % below it on Std), and it is the collector of
+   the arena build, so a JVM-mode run exercises the same kind of collector as the native image.
 2. **Do not use ZGC or Shenandoah.** Both were measured on the real checker with parallel workers, as the owner
-   asked. Shenandoah costs 10 to 25 % CPU time (15 to 25 % instructions) on both engines in both modes. ZGC costs 0
-   to 10 %, takes 1 to 3 s to commit the heap at start under the launcher's `-Xms = -Xmx` flags, doubles the
+   asked. Shenandoah costs 15 to 26 % CPU time (20 to 31 % instructions) on both engines in both modes. ZGC costs 4
+   to 7 %, takes 1 to 3 s to commit the heap at start under the launcher's `-Xms = -Xmx` flags, doubles the
    reference engine's footprint (no compressed pointers), and stalled the reference engine's workers on mathlib at
    12 GB. Neither removes a pause that matters: there is none.
 3. **G1 is the one alternative worth keeping in mind, for one case**: the reference engine on mathlib-sized inputs
@@ -1268,8 +1268,9 @@ Runs that did not end with exit status 0 (not in the tables):
 4. **Parallel: no.** Same CPU time as Serial, more memory, and on mathlib with the reference engine 9 full
    collections with pauses up to 1.3 s and 17 s of collector CPU.
 5. **If anyone does switch the launcher's collector, the heap flags must change with it**: `-Xms13g` is free for
-   Serial, G1, Parallel and Shenandoah (pages are touched on demand) and costs ZGC a full commit; `-Xmn1g` is honoured
-   by Serial, Parallel and G1 only.
+   Serial, G1, Parallel and Shenandoah (pages are touched on demand) and costs ZGC a full commit; `-Xmn1g` was given
+   to Serial, Parallel and G1 only (ZGC and Shenandoah size themselves; generational Shenandoah was not tried with
+   it).
 6. **None of this applies to the arena build.** The arena runs the native image, and GraalVM CE's native image has
    exactly two collectors, serial and epsilon (G1 for native image exists only in Oracle GraalVM, which the owner
    has ruled out). Epsilon is not an option there either: the reference engine, which the driver needs as the
@@ -1312,7 +1313,8 @@ Runs that did not end with exit status 0 (not in the tables):
 ## 12. Files
 
 - `work/prof/GC/scripts/gcbench.py` (driver; `--dry` prints the batches), `inner.py` (in the container), `run_e.sh`
-  (the steps on the efficiency cores), `gclog.py` (log parser), `report.py` (tables), `build_doc.py` (this file from
+  (the steps on the efficiency cores; the arena phases were started by hand: `gcbench.py A --cells ... --gcs
+  serial,parallel,g1,zgc,shen,shengen --reps 3` and `--reps 5` for the 8-worker cells, `--limit 92` to `100`), `gclog.py` (log parser), `report.py` (tables), `build_doc.py` (this file from
   `work/prof/GC/GC.template.md`), `defaults.sh`, `diag_threads.py`.
 - `work/prof/GC/data/runs-e.jsonl` (efficiency cores), `runs.jsonl` (arena CPUs, under the lock), `runs-e-own.jsonl`
   (own ergonomics), `log-runs.jsonl` (logging runs, with per-thread CPU), `lock.tsv` (waits and holds),
