@@ -210,3 +210,26 @@ What would unlock a compiler (and, each of them, also the stepper):
 Without U1 or U2 the upper bound of any compiled tier on closed evaluation is the stepper's own share
 (17% on reachability; measured gain 2-5%), and on library corpora (Cedar: 14% of the time inside blocks at
 all) it is noise or a small loss.
+
+## 8. Tests and gates on the final tree
+
+All on machine jar `4bc20d3e46ef` (the one in `.toolchain/m2` from 17:30Z to at least 18:06Z) unless stated.
+
+| Gate | Configuration | Result |
+|---|---|---|
+| fast group, `$MVN -o -q -f rlvm-truffle/pom.xml test -Dgroups=fast` (`work/t3/test-fast-2.txt`, 17:25Z) | 4 tests: T2's three + `countMode` | 4 / 0 failures / 0 errors |
+| default group (`work/t3/test-default-2.txt`, 18:00Z, tree of 17:48Z = the final tree but for the default of `rlvm.t2.ahead`) | 7 tests: T2's five + `countMode` + `perfTestsWarmMode`; with `rlvm.t2.ahead` at its then default 2 | 7 / 0 failures / 0 errors / 0 skipped; 0 deoptimisations |
+| tier equivalence (heap digest, ticks, outcome at every unit), `TierEquivalenceTest#files`, production promotion (`mode=warm`, at 200 entries, background), `default,code,casetrees`, final tree (`work/t3/tiereq-corpora-2.txt`) | Cedar slice / Init / reachability | identical: 215 blocks, 177 k compiled activations / 811 blocks, 6.36 M / 113 blocks, 1.83 M |
+| differential gate against the reference engine through the launcher (`testkit diff --engine machine --launcher work/t3/j3/bin/rlvm-jvm -j 4`), tutorial + bugs, 175 exports, `code,casetrees,tele,t2`, ELAB_AT 1, EVERY block compiled at its first entry (count mode, synchronous), run-ahead ON (`work/t3/gates/diff-tb-at1.txt`) | 1,342 checks | 1,341 compared (1,311 both accept, 30 both reject), **0 differences**; 1 not compared (the machine's eager-reduction decline of `Issue.forallFalse`, tier or no tier) |
+| the same harness, reachability + Cedar slice + Init + Std, `--threads 4`, launcher `work/t3/j4/bin/rlvm-jvm` (final tree), `default,code,casetrees,t2`, `mode=warm`, at 200 entries (`work/t3/gates/diff-corpora.txt`) | 170,322 checks | 169,936 compared, all both accept, **0 differences**; 386 not compared (eager-reduction declines); Std: 723 blocks installed, 8.55 M compiled activations, 0 deoptimisations |
+
+Not covered: the native image under a differential gate (the image `work/t3/n2` is the measuring tool only;
+no `bin/rlvm` of this tree was built); `tele` blocks under the production promotion; 8 workers under the
+equivalence test (it is single-session by construction; the launcher gate ran with 4 threads).
+
+A defect of the test tooling found on the way (not of the tier): with background compilation, a second
+engine in the same process got nothing compiled, because the compiler threads were still working through
+the first engine's queue (T2's `perfTestsBackground` printed "blocks compiled 0" for its second file on this
+tree, and so did the first equivalence run for the Cedar slice and Init - rows that proved nothing and are
+not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an engine's queued compilations;
+`perfTestsWarmMode` asserts that compiled code ran in each file.

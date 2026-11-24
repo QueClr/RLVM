@@ -209,6 +209,24 @@ class PipelineTest {
         });
     }
 
+    @Test
+    void aLargeFileIsPublishedInLargerPieces() {
+        // the factor is the input's size in GiB, at least 1 and at most the configured maximum
+        assertEquals(1, Run.publishScale(0, 4));
+        assertEquals(1, Run.publishScale(584L << 20, 4));        // Std
+        assertEquals(1, Run.publishScale((2L << 30) - 1, 4));
+        assertEquals(2, Run.publishScale(2500L << 20, 4));       // cslib
+        assertEquals(4, Run.publishScale(6326141213L, 4));       // mathlib
+        assertEquals(1, Run.publishScale(6326141213L, 1));       // off
+        assertEquals(5, Run.publishScale(6326141213L, 8));
+        assertEquals(1, Run.publishScale(6326141213L, 0));
+        RunConfig c = new RunConfig();
+        assertEquals(4, c.publishScaleMax);
+        c.set("publish-scale", "1");
+        assertEquals(1, c.publishScaleMax);
+        assertThrows(IllegalArgumentException.class, () -> c.set("publish-scale", "0"));
+    }
+
     /**
      * The parking rule: the environment thread does not advance past a unit that may depend on the
      * rest of the file in a way the pass cannot see in file order; after the load the pass decides

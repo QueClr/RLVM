@@ -257,12 +257,13 @@ maven_build() {
     [ -e "$dir/lib/$(basename "$jar")" ] || cp "$jar" "$dir/lib/"
   done
   # Engines found through ServiceLoader that rlvm-main does not depend on (rlvm-machine: a dependency
-  # of rlvm-main on it would close a reactor cycle through rlvm-testkit's test scope). A tree build has
-  # the jar already (it is a reactor module); a published build takes the jar its owner installed.
-  # The machine registers with priority 10, so it runs only when named (-X engine=machine).
+  # of rlvm-main on it would close a reactor cycle through rlvm-testkit's test scope; rlvm-truffle: the
+  # machine's upper tier, found by the machine through ServiceLoader and used only under the switch t2).
+  # A tree build has the jars already (they are reactor modules); a published build takes the jars their
+  # owners installed. Which engine is the default is decided by the providers' priorities (rlvm-main).
   if [ "$published" = 1 ]; then
     local eng ejar
-    for eng in rlvm-machine; do
+    for eng in rlvm-machine rlvm-truffle; do
       case ",$all_modules," in *",$eng,"*) ;; *) continue ;; esac
       ls "$dir/lib/$eng"-*.jar >/dev/null 2>&1 && continue
       ejar="$(ls "$M2_REPO/rlvm/$eng"/*/"$eng"-*.jar 2>/dev/null | grep -v -e '-tests\.jar$' -e '-sources\.jar$' | head -n 1 || true)"

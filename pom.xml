@@ -35,6 +35,7 @@
     <module>rlvm-main</module>
     <module>rlvm-testkit</module>
     <module>rlvm-machine</module>
+    <module>rlvm-truffle</module>
   </modules>
 
   <properties>

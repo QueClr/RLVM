@@ -12,19 +12,19 @@ first and wall clock second.
 1 / 4 / 8 workers, Init, Std, the Cedar slice, reachability and mathlib. No collector beats Serial; ZGC costs 4 to
 12 % CPU time, Shenandoah 13 to 23 %.**
 
-| ratio to Serial, CPU time (arena CPUs, under the lock, Init + Std, 3 repetitions) | machine, 1 worker | machine, 8 workers | reference, 1 worker | reference, 8 workers |
+| ratio to Serial, CPU time (arena CPUs, under the lock; geometric mean of Init and Std; 3 repetitions, 5 at 8 workers) | machine, 1 worker | machine, 8 workers | reference, 1 worker | reference, 8 workers |
 |---|--:|--:|--:|--:|
-| Parallel | 0.99 | 1.05 | 1.01 | 1.04 |
-| G1 | 1.00 | 1.02 | 1.00 | 1.01 |
-| ZGC | 1.04 | 1.12 | 1.06 | 1.08 |
-| Shenandoah | 1.15 | 1.22 | 1.21 | 1.20 |
-| Shenandoah, generational | 1.15 | 1.13 | 1.19 | 1.23 |
+| Parallel | 0.99 | 1.02 | 1.01 | 1.03 |
+| G1 | 1.00 | 1.00 | 1.00 | 1.03 |
+| ZGC | 1.04 | 1.08 | 1.06 | 1.08 |
+| Shenandoah | 1.15 | 1.19 | 1.21 | 1.20 |
+| Shenandoah, generational | 1.15 | 1.11 | 1.19 | 1.23 |
 
 1. **Why nothing can win: there is nothing to collect.** With the machine engine no collector runs a single
    collection on Init, one on Std, nine on mathlib. The reference engine allocates 4 to 8 GiB on Init / Std and
-   188 GiB on mathlib, nearly all dead at the next young collection. Serial's pauses are 0.2 to 0.7 % of the CPU time
-   of every run (mathlib, reference engine: 7.3 s of 1,065 s). Epsilon, which never collects, is not faster than
-   Serial (section 4).
+   188 GiB on mathlib, nearly all dead at the next young collection. Serial's pauses are 0.2 to 0.9 % of the CPU time
+   of every run (mathlib, reference engine: 7.3 s of 1,065 s), 3 % in one cell (reachability, reference engine).
+   Epsilon, which never collects, is not faster than Serial (section 4).
 2. **What the concurrent collectors add instead**: barriers in compiled code and a slower C2 (Shenandoah: +20 to
    +35 % instructions on both engines, with zero collections on the machine on Init), a heap commit at start (ZGC with the
    launcher's `-Xms = -Xmx`: 1 to 3 s per run, 1.4 to 2.4 s of system time), uncompressed pointers (ZGC: the
@@ -35,21 +35,24 @@ first and wall clock second.
    Serial's. The most a perfect collector could
    remove is Serial's pause total: 0.1 to 0.35 s on Init / Std, 1.2 s of 90 s (machine) and 7.3 s of 270 s
    (reference) on mathlib (section 6).
-4. **mathlib, 8 workers** (efficiency cores, one timed run and one logging run each): machine: Parallel and G1
-   within 4 % of Serial either way, ZGC +4 to +7 %, Shenandoah +15 to +17 %. Reference: G1 -3 to -6 % CPU with 0.5 s
-   of pauses against 7.3 s and a peak RSS of 7.1 GB against 12.4 GB; ZGC had 23 allocation stalls (40.8 s) in one
-   of its two runs; Shenandoah +8 to +14 % (section 7).
+4. **mathlib, 8 workers.** Machine, arena CPUs under the lock (one run each): Parallel 1.01, G1 1.02, ZGC 1.04,
+   Shenandoah 1.17, generational Shenandoah 1.19 of Serial's 174.5 CPU seconds; the wall clock follows (1.01 to
+   1.17), the peak RSS goes from 4.2 GB (Serial) to 7.9 GB (generational Shenandoah). Reference, efficiency cores
+   (one timed and one logging run each): G1 -3 to -6 % CPU with 0.5 s of pauses against 7.3 s and a peak RSS of
+   7.1 GB against 12.4 GB; ZGC had 23 allocation stalls (40.8 s) in one of its two runs; Shenandoah +8 to +14 %
+   (section 7).
 5. **Recommendation: keep `-XX:+UseSerialGC` in the JVM launcher** (section 10). The one thing found that deserves a
    follow-up is on Serial's own side: with eight workers of the reference engine the 105 MB survivor spaces of
    `-Xmn1g` overflow at every young collection on mathlib, which is why Serial needs 12.4 GB where G1 needs 7.1 GB.
 6. **The arena build has no choice anyway**: it is a native image, and GraalVM CE's native image has only the
    serial collector (and epsilon).
-7. **How it was measured, and its limits** (sections 1, 11): the team's lock was queued 38 to 47 minutes deep for
-   the first three and a half hours, so the full matrix was measured on eight efficiency cores without the lock
-   (a deviation from the instruction, stated in every table heading); from 17:26Z the lock was free and the Init / Std
-   headline cells were repeated on the arena CPUs under it. The two sets agree. The host was loaded throughout
-   (load average 50 to 250): 8-worker runs of Init / Std scatter by 10 to 30 % between identical runs, one-worker
-   and mathlib runs by 0 to 8 %.
+7. **How it was measured, and its limits** (sections 1, 11): for the first three hours one acquisition of the
+   team's lock took 38 to 47 minutes, so the full matrix was measured on eight efficiency cores without the lock (a
+   deviation from the instruction; every section says which set its tables are from); from 17:26Z the lock was free
+   and the Init / Std headline cells, and mathlib with the machine, were measured on the arena CPUs under it. The
+   two sets agree. The host was loaded almost throughout (load average 250 at the start, 30 to 60 during the arena
+   runs): 8-worker runs of Init / Std scatter by 10 to 30 % between identical runs, one-worker and mathlib runs by 0
+   to 8 %.
 
 ## 1. What was run
 
@@ -110,8 +113,9 @@ first and wall clock second.
     empty, the Init / Std headline cells with six collectors and three repetitions, and mathlib once, in batches of
     at most 100 s estimated (a mathlib run is its own batch).
 - **Host.** 20 cores, 121 GB, shared with about 30 agents: 1-minute load average 250 at the start, 130-150 during the
-  first headline round, 75-130 later (every row carries its own value; the range is in each table heading). The host
-  was swapping at the start (24 GB of swap in use).
+  first headline round on the efficiency cores, 75-130 during mathlib there, 30-60 during the arena runs from 17:26Z,
+  15-30 for the last two repetitions of the 8-worker cells (every row carries its own value; the range is in each
+  table heading). The host was swapping at the start (24 GB of swap in use).
 - **Logging runs.** One extra run per collector and cell with `-Xlog:gc*,safepoint:file=...` (`data/log-runs.jsonl`,
   `gclogs/`, parsed by `scripts/gclog.py`), on the efficiency cores, never used for timing. During these runs a
   sampler reads `/proc/<pid>/task/*/schedstat` every 0.1 s: CPU time per thread, summed by class (collector threads,
@@ -131,45 +135,46 @@ compiler's and the collector's threads); fourth = how far runs of the SAME confi
 ### 2.1 Arena CPUs, under the lock
 
 From 17:26Z the queue on the lock was empty and the batches ran back to back (section 3). Six collectors (no
-"ZGC, no -Xms" and Epsilon rows beyond the first repetition of Init at 8 workers).
+"ZGC, no -Xms" and Epsilon rows beyond the first repetition of Init at 8 workers); three repetitions, five for the
+8-worker cells (the last two from 18:14Z, load average 15 to 30); mathlib with the machine once (section 7).
 
 | collector | mac Init, 1 w | mac Init, 8 w | mac Std, 1 w | mac Std, 8 w | mac mathlib, 8 w | ref Init, 1 w | ref Init, 8 w | ref Std, 1 w | ref Std, 8 w |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| Serial | 11.0 / 6.5 / 593 | 18.4 / 8.6 / 742 | 16.7 / 11.4 / 1163 | 28.9 / 14.2 / 1196 | 174.5 / 94.5 / 4162 | 14.9 / 12.6 / 1156 | 20.5 / 9.4 / 1565 | 23.2 / 20.3 / 1348 | 29.7 / 15.0 / 1743 |
-| Parallel | 10.7 / 6.6 / 584 | 18.5 / 9.8 / 761 | 16.9 / 11.6 / 1485 | 28.6 / 15.4 / 1514 | - | 14.8 / 12.5 / 1245 | 20.2 / 10.3 / 2075 | 23.3 / 20.7 / 1949 | 29.2 / 15.8 / 2695 |
-| G1 | 11.1 / 6.6 / 595 | 18.7 / 8.8 / 775 | 16.7 / 11.4 / 992 | 28.2 / 15.9 / 1169 | - | 14.6 / 12.3 / 1456 | 20.5 / 7.0 / 1700 | 23.5 / 20.7 / 1682 | 28.6 / 15.0 / 1850 |
-| ZGC | 11.7 / 8.2 / 580 | 20.4 / 11.0 / 744 | 17.1 / 12.9 / 862 | 29.2 / 17.5 / 948 | - | 16.1 / 15.1 / 2495 | 20.5 / 11.6 / 2574 | 24.1 / 22.0 / 2527 | 29.8 / 16.9 / 4969 |
+| Serial | 11.0 / 6.5 / 593 | 18.3 / 9.0 / 748 | 16.7 / 11.4 / 1163 | 28.9 / 14.2 / 1196 | 174.5 / 94.5 / 4162 | 14.9 / 12.6 / 1156 | 18.2 / 9.3 / 1541 | 23.2 / 20.3 / 1348 | 29.7 / 15.0 / 1743 |
+| Parallel | 10.7 / 6.6 / 584 | 18.5 / 9.6 / 762 | 16.9 / 11.6 / 1485 | 28.6 / 15.4 / 1514 | 176.1 / 95.1 / 4367 | 14.8 / 12.5 / 1245 | 19.8 / 10.0 / 2046 | 23.3 / 20.7 / 1949 | 29.2 / 15.8 / 2695 |
+| G1 | 11.1 / 6.6 / 595 | 17.7 / 8.5 / 770 | 16.7 / 11.4 / 992 | 28.2 / 15.9 / 1169 | 178.1 / 96.7 / 4605 | 14.6 / 12.3 / 1456 | 20.6 / 7.4 / 1693 | 23.5 / 20.7 / 1682 | 28.6 / 15.0 / 1850 |
+| ZGC | 11.7 / 8.2 / 580 | 19.7 / 10.9 / 744 | 17.1 / 12.9 / 862 | 29.2 / 17.5 / 948 | 180.8 / 98.9 / 5644 | 16.1 / 15.1 / 2495 | 20.5 / 11.6 / 2574 | 24.1 / 22.0 / 2527 | 29.8 / 16.9 / 4969 |
 | ZGC, no -Xms | - | 25.7 / 8.9 / 752 | - | - | - | - | 21.7 / 7.2 / 2551 | - | - |
-| Shenandoah | 12.7 / 7.7 / 590 | 21.9 / 11.2 / 755 | 19.0 / 12.5 / 976 | 32.0 / 16.9 / 1165 | - | 17.6 / 14.4 / 2268 | 21.3 / 11.0 / 2379 | 27.7 / 24.3 / 2400 | 34.8 / 18.3 / 2602 |
-| Shenandoah gen. | 12.9 / 7.5 / 622 | 22.2 / 10.3 / 789 | 18.9 / 13.1 / 1017 | 31.1 / 16.3 / 1206 | - | 17.7 / 15.1 / 2333 | 26.2 / 12.4 / 2489 | 27.2 / 23.9 / 2503 | 34.2 / 18.0 / 2690 |
+| Shenandoah | 12.7 / 7.7 / 590 | 21.8 / 11.2 / 748 | 19.0 / 12.5 / 976 | 32.0 / 16.9 / 1165 | 203.6 / 109.1 / 7229 | 17.6 / 14.4 / 2268 | 21.3 / 11.0 / 2379 | 27.7 / 24.3 / 2400 | 34.8 / 18.3 / 2602 |
+| Shenandoah gen. | 12.9 / 7.5 / 622 | 21.2 / 10.2 / 791 | 18.9 / 13.1 / 1017 | 31.1 / 16.3 / 1206 | 207.3 / 110.7 / 7858 | 17.7 / 15.1 / 2333 | 26.2 / 12.4 / 2489 | 27.2 / 23.9 / 2503 | 34.2 / 18.0 / 2690 |
 | Epsilon | - | 35.7 / 9.1 / 740 | - | - | - | - | 20.1 / 7.2 / 5157 | - | - |
 
 | ratio to Serial: CPU / wall / instr | mac Init, 1 w | mac Init, 8 w | mac Std, 1 w | mac Std, 8 w | mac mathlib, 8 w | ref Init, 1 w | ref Init, 8 w | ref Std, 1 w | ref Std, 8 w |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| Parallel | 0.97 / 0.98 / 0.98 | 1.06 / 1.12 / 1.13 | 1.01 / 1.00 / 1.01 | 1.03 / 1.03 / 1.10 | - | 1.02 / 1.02 / 1.00 | 1.06 / 1.08 / 1.06 | 1.00 / 1.02 / 1.00 | 1.01 / 1.05 / 1.04 |
-| G1 | 1.00 / 1.01 / 1.00 | 1.06 / 1.06 / 1.04 | 1.01 / 1.02 / 1.02 | 0.98 / 1.10 / 1.07 | - | 1.01 / 1.00 / 1.00 | 1.05 / 1.10 / 0.96 | 1.00 / 1.01 / 1.02 | 0.98 / 0.99 / 1.03 |
-| ZGC | 1.06 / 1.26 / 1.02 | 1.22 / 1.43 / 1.21 | 1.02 / 1.10 / 1.04 | 1.02 / 1.18 / 1.11 | - | 1.09 / 1.21 / 1.05 | 1.16 / 1.26 / 1.10 | 1.04 / 1.10 / 1.05 | 1.00 / 1.17 / 1.07 |
+| Parallel | 0.97 / 0.98 / 0.98 | 1.01 / 1.05 / 1.07 | 1.01 / 1.00 / 1.01 | 1.03 / 1.03 / 1.10 | 1.01 / 1.01 / 1.00 | 1.02 / 1.02 / 1.00 | 1.05 / 1.06 / 1.06 | 1.00 / 1.02 / 1.00 | 1.01 / 1.05 / 1.04 |
+| G1 | 1.00 / 1.01 / 1.00 | 1.02 / 1.01 / 1.00 | 1.01 / 1.02 / 1.02 | 0.98 / 1.10 / 1.07 | 1.02 / 1.02 / 1.02 | 1.01 / 1.00 / 1.00 | 1.09 / 0.97 / 0.96 | 1.00 / 1.01 / 1.02 | 0.98 / 0.99 / 1.03 |
+| ZGC | 1.06 / 1.26 / 1.02 | 1.15 / 1.33 / 1.16 | 1.02 / 1.10 / 1.04 | 1.02 / 1.18 / 1.11 | 1.04 / 1.05 / 1.06 | 1.09 / 1.21 / 1.05 | 1.16 / 1.26 / 1.10 | 1.04 / 1.10 / 1.05 | 1.00 / 1.17 / 1.07 |
 | ZGC, no -Xms | - | 1.20 / 1.64 / 1.34 | - | - | - | - | 0.95 / 1.14 / 0.95 | - | - |
-| Shenandoah | 1.15 / 1.14 / 1.21 | 1.37 / 1.35 / 1.38 | 1.14 / 1.10 / 1.19 | 1.09 / 1.22 / 1.31 | - | 1.20 / 1.20 / 1.21 | 1.21 / 1.19 / 1.23 | 1.21 / 1.21 / 1.22 | 1.18 / 1.23 / 1.29 |
-| Shenandoah gen. | 1.16 / 1.13 / 1.22 | 1.22 / 1.38 / 1.41 | 1.14 / 1.15 / 1.18 | 1.04 / 1.17 / 1.25 | - | 1.21 / 1.19 / 1.21 | 1.31 / 1.29 / 1.31 | 1.18 / 1.17 / 1.21 | 1.15 / 1.25 / 1.29 |
+| Shenandoah | 1.15 / 1.14 / 1.21 | 1.31 / 1.30 / 1.37 | 1.14 / 1.10 / 1.19 | 1.09 / 1.22 / 1.31 | 1.17 / 1.15 / 1.21 | 1.20 / 1.20 / 1.21 | 1.21 / 1.19 / 1.23 | 1.21 / 1.21 / 1.22 | 1.18 / 1.23 / 1.29 |
+| Shenandoah gen. | 1.16 / 1.13 / 1.22 | 1.19 / 1.26 / 1.31 | 1.14 / 1.15 / 1.18 | 1.04 / 1.17 / 1.25 | 1.19 / 1.17 / 1.17 | 1.21 / 1.19 / 1.21 | 1.31 / 1.29 / 1.31 | 1.18 / 1.17 / 1.21 | 1.15 / 1.25 / 1.29 |
 | Epsilon | - | 1.67 / 1.68 / 1.36 | - | - | - | - | 0.87 / 0.69 / 0.94 | - | - |
 
 | collector | machine, 1 w (2 cells) | machine, 8 w (2 cells) | reference, 1 w (2 cells) | reference, 8 w (2 cells) |
 |---|--:|--:|--:|--:|
-| Parallel | 0.99 / 0.99 / 1.00 / 1.00 | 1.05 / 1.07 / 1.11 / 1.07 | 1.01 / 1.02 / 1.00 / 0.99 | 1.04 / 1.07 / 1.05 / 1.03 |
-| G1 | 1.00 / 1.01 / 1.01 / 1.00 | 1.02 / 1.08 / 1.05 / 1.02 | 1.00 / 1.00 / 1.01 / 1.01 | 1.01 / 1.05 / 0.99 / 1.03 |
-| ZGC | 1.04 / 1.18 / 1.03 / 1.01 | 1.12 / 1.30 / 1.16 / 1.09 | 1.06 / 1.15 / 1.05 / 1.04 | 1.08 / 1.21 / 1.08 / 1.09 |
+| Parallel | 0.99 / 0.99 / 1.00 / 1.00 | 1.02 / 1.04 / 1.08 / 1.04 | 1.01 / 1.02 / 1.00 / 0.99 | 1.03 / 1.06 / 1.05 / 1.03 |
+| G1 | 1.00 / 1.01 / 1.01 / 1.00 | 1.00 / 1.06 / 1.03 / 1.00 | 1.00 / 1.00 / 1.01 / 1.01 | 1.03 / 0.98 / 0.99 / 1.05 |
+| ZGC | 1.04 / 1.18 / 1.03 / 1.01 | 1.08 / 1.25 / 1.13 / 1.05 | 1.06 / 1.15 / 1.05 / 1.04 | 1.08 / 1.21 / 1.08 / 1.09 |
 | ZGC, no -Xms | - | 1.20 / 1.64 / 1.34 / 1.21 | - | 0.95 / 1.14 / 0.95 / 0.93 |
-| Shenandoah | 1.15 / 1.12 / 1.20 / 1.14 | 1.22 / 1.29 / 1.35 / 1.23 | 1.21 / 1.20 / 1.22 / 1.23 | 1.20 / 1.21 / 1.26 / 1.23 |
-| Shenandoah gen. | 1.15 / 1.14 / 1.20 / 1.13 | 1.13 / 1.27 / 1.33 / 1.13 | 1.19 / 1.18 / 1.21 / 1.22 | 1.23 / 1.27 / 1.30 / 1.24 |
+| Shenandoah | 1.15 / 1.12 / 1.20 / 1.14 | 1.19 / 1.26 / 1.34 / 1.20 | 1.21 / 1.20 / 1.22 / 1.23 | 1.20 / 1.21 / 1.26 / 1.23 |
+| Shenandoah gen. | 1.15 / 1.14 / 1.20 / 1.13 | 1.11 / 1.21 / 1.28 / 1.11 | 1.19 / 1.18 / 1.21 / 1.22 | 1.23 / 1.27 / 1.30 / 1.24 |
 | Epsilon | - | 1.67 / 1.68 / 1.36 / 1.80 | - | 0.87 / 0.69 / 0.94 / 0.87 |
 
 | cell | Serial runs | CPU spread | instr spread | all collectors: median CPU spread | median instr spread |
 |---|--:|--:|--:|--:|--:|
 | Init, machine, 1 w | 3 | 6 % | 1 % | 5 % | 3 % |
-| Init, machine, 8 w | 4 | 30 % | 31 % | 32 % | 17 % |
+| Init, machine, 8 w | 5 | 30 % | 30 % | 41 % | 19 % |
 | Init, reference, 1 w | 6 | 4 % | 2 % | 3 % | 2 % |
-| Init, reference, 8 w | 4 | 28 % | 4 % | 22 % | 12 % |
+| Init, reference, 8 w | 5 | 31 % | 4 % | 24 % | 12 % |
 | Std, machine, 1 w | 5 | 1 % | 4 % | 4 % | 4 % |
 | Std, machine, 8 w | 8 | 19 % | 22 % | 15 % | 6 % |
 | Std, reference, 1 w | 9 | 5 % | 2 % | 2 % | 1 % |
@@ -180,26 +185,27 @@ scatter in the one-worker cells:
 
 - **Parallel and G1 = Serial** within 5 % in every group (CPU 0.99 / 1.00
   with the machine at one worker, 1.01 / 1.00 with the reference engine,
-  1.05 / 1.02 and 1.04 / 1.01 at
+  1.02 / 1.00 and 1.03 / 1.03 at
   eight workers).
-- **ZGC: +4 to +12 % CPU time** (1.04, 1.06, 1.12,
+- **ZGC: +4 to +12 % CPU time** (1.04, 1.06, 1.08,
   1.08), +3 to +16 % instructions, and a wall clock at eight workers of
-  1.30 and 1.21 of Serial's, because it commits the 8 GB heap before the
+  1.25 and 1.21 of Serial's, because it commits the 8 GB heap before the
   checker starts.
 - **Shenandoah: +15 to +22 % CPU time, generational +13 to +23 %** (1.15 /
-  1.15, 1.21 / 1.19, 1.22 /
-  1.13, 1.20 / 1.23), +20 to +35 % instructions,
-  and a wall clock at eight workers of 1.29 / 1.21 of Serial's.
+  1.15, 1.21 / 1.19, 1.19 /
+  1.11, 1.20 / 1.23), +20 to +35 % instructions,
+  and a wall clock at eight workers of 1.26 / 1.21 of Serial's.
 - **No collector improves the wall clock with eight workers**: the geometric means of the 8-worker wall ratios are
-  1.07 / 1.07 (Parallel) and 1.08 /
-  1.05 (G1), and the lowest single cell is G1's 0.99 on Std with the
+  1.04 / 1.06 (Parallel) and 1.06 /
+  0.98 (G1), and the lowest single cell is G1's 0.99 on Std with the
   reference engine.
 - **Eight workers do not shorten these short runs on this host today**: with the machine on Init, Serial needs
-  6.5 s of wall clock with one worker and 8.6 s
-  with eight (CPU 11.0 s against 18.4 s; the minimum
-  of the 8-worker runs is 5.4 s). Probable causes, not separated here: the JVM launcher's warm-up (eight workers
-  executing tier-3 code while one C2 thread compiles) and jobs outside the lock on the same CPUs. It is not a
-  collector effect, but it is the background against which "wall clock with 8 workers" has to be read here.
+  6.5 s of wall clock with one worker and 9.0 s
+  with eight (CPU 11.0 s against 18.3 s; the minimum
+  of the 8-worker runs is 5.4 s). Probable causes, not separated here: the JVM
+  launcher's warm-up (eight workers executing tier-3 code while one C2 thread compiles) and jobs outside the lock on
+  the same CPUs. It is not a collector effect, but it is the background against which "wall clock with 8 workers"
+  has to be read here.
 - The single Epsilon and "ZGC, no -Xms" runs on Init at eight workers are one run each (first batch) and show the
   8-worker noise, nothing else (Epsilon 1.67 with the machine, 0.87 with the reference engine).
 
@@ -229,15 +235,15 @@ three for the machine) plus the logging run of section 9.
 | Shenandoah gen. | 1.15 / 1.05 / 1.19 | 1.26 / 1.01 / 1.22 | 1.16 / 1.12 / 1.16 | 1.28 / 1.04 / 1.29 | 1.07 / 1.17 / 1.16 | 1.21 / 1.15 / 1.20 | 1.17 / 1.01 / 1.19 | 1.23 / 1.06 / 1.19 | 1.19 / 1.11 / 1.21 | 1.06 / 0.90 / 1.15 |
 | Epsilon | 0.94 / 0.92 / 0.96 | 1.29 / 1.17 / 1.06 | 1.00 / 1.04 / 0.98 | 0.93 / 0.80 / 1.01 | 1.00 / 0.99 / 1.00 | 1.06 / 1.06 / 0.99 | 0.93 / 0.95 / 0.98 | 1.03 / 1.00 / 0.99 | 1.13 / 1.37 / 1.04 | - |
 
-| collector | machine, 1 w (4 cells) | machine, 4 w (2 cells) | machine, 8 w (4 cells) | reference, 1 w (4 cells) | reference, 4 w (2 cells) | reference, 8 w (4 cells) |
+| collector | machine, 1 w (4 cells) | machine, 4 w (4 cells) | machine, 8 w (4 cells) | reference, 1 w (4 cells) | reference, 4 w (4 cells) | reference, 8 w (4 cells) |
 |---|--:|--:|--:|--:|--:|--:|
-| Parallel | 1.02 / 1.01 / 1.02 / 1.02 | 1.18 / 1.03 / 1.09 / 1.25 | 0.95 / 0.98 / 0.99 / 0.92 | 1.03 / 1.02 / 1.00 / 1.02 | 0.96 / 0.84 / 0.98 / 0.94 | 0.98 / 1.01 / 0.99 / 0.95 |
-| G1 | 1.02 / 1.02 / 1.02 / 1.03 | 1.06 / 1.01 / 1.04 / 1.09 | 1.02 / 1.00 / 1.01 / 1.02 | 1.03 / 1.01 / 1.00 / 1.03 | 1.04 / 1.07 / 1.00 / 1.04 | 0.93 / 0.91 / 0.97 / 0.94 |
-| ZGC | 1.07 / 1.23 / 1.02 / 1.03 | 1.25 / 1.01 / 1.12 / 1.28 | 1.07 / 1.23 / 1.08 / 0.99 | 1.10 / 1.16 / 1.03 / 1.08 | 1.04 / 1.09 / 1.03 / 1.02 | 1.00 / 1.27 / 1.00 / 0.97 |
+| Parallel | 1.02 / 1.01 / 1.02 / 1.02 | 1.14 / 0.98 / 1.05 / 1.21 | 0.95 / 0.98 / 0.99 / 0.92 | 1.03 / 1.02 / 1.00 / 1.02 | 0.99 / 0.93 / 0.99 / 0.99 | 0.98 / 1.01 / 0.99 / 0.95 |
+| G1 | 1.02 / 1.02 / 1.02 / 1.03 | 1.07 / 0.94 / 1.02 / 1.10 | 1.02 / 1.00 / 1.01 / 1.02 | 1.03 / 1.02 / 1.00 / 1.04 | 1.02 / 1.10 / 1.01 / 1.04 | 0.93 / 0.91 / 0.97 / 0.94 |
+| ZGC | 1.07 / 1.23 / 1.02 / 1.03 | 1.24 / 1.23 / 1.13 / 1.23 | 1.07 / 1.23 / 1.08 / 0.99 | 1.09 / 1.15 / 1.04 / 1.07 | 1.04 / 1.16 / 1.03 / 1.02 | 1.00 / 1.27 / 1.00 / 0.97 |
 | ZGC, no -Xms | 1.01 / 1.05 / 1.01 / 1.09 | - | 1.05 / 0.95 / 1.09 / 1.05 | 1.05 / 1.03 / 1.03 / 1.07 | - | 1.01 / 1.04 / 1.02 / 1.02 |
-| Shenandoah | 1.16 / 1.11 / 1.20 / 1.12 | 1.20 / 0.96 / 1.26 / 1.22 | 1.14 / 0.99 / 1.17 / 1.13 | 1.21 / 1.17 / 1.19 / 1.25 | 1.20 / 1.06 / 1.18 / 1.21 | 1.14 / 1.07 / 1.18 / 1.14 |
-| Shenandoah gen. | 1.20 / 1.14 / 1.23 / 1.16 | 1.28 / 0.97 / 1.28 / 1.28 | 1.18 / 1.06 / 1.24 / 1.16 | 1.23 / 1.21 / 1.19 / 1.22 | 1.20 / 1.07 / 1.20 / 1.19 | 1.22 / 1.10 / 1.23 / 1.23 |
-| Epsilon | 1.01 / 1.02 / 1.02 / 1.01 | 1.38 / 1.17 / 1.17 / 1.50 | 1.04 / 1.01 / 1.05 / 1.05 | 1.04 / 1.04 / 1.00 / 1.07 | 1.14 / 1.18 / 1.06 / 1.15 | 0.95 / 1.09 / 0.95 / 0.95 |
+| Shenandoah | 1.16 / 1.11 / 1.20 / 1.12 | 1.22 / 0.99 / 1.26 / 1.26 | 1.14 / 0.99 / 1.17 / 1.13 | 1.19 / 1.16 / 1.19 / 1.23 | 1.18 / 1.03 / 1.18 / 1.19 | 1.14 / 1.07 / 1.18 / 1.14 |
+| Shenandoah gen. | 1.20 / 1.14 / 1.23 / 1.16 | 1.27 / 1.01 / 1.31 / 1.27 | 1.18 / 1.06 / 1.24 / 1.16 | 1.21 / 1.20 / 1.19 / 1.21 | 1.18 / 0.94 / 1.19 / 1.19 | 1.22 / 1.10 / 1.23 / 1.23 |
+| Epsilon | 1.01 / 1.02 / 1.02 / 1.01 | 1.22 / 1.04 / 1.10 / 1.31 | 1.04 / 1.01 / 1.05 / 1.05 | 1.05 / 1.06 / 1.00 / 1.08 | 1.07 / 1.14 / 1.03 / 1.09 | 0.95 / 1.09 / 0.95 / 0.95 |
 
 | cell | Serial runs | CPU spread | instr spread | all collectors: median CPU spread | median instr spread |
 |---|--:|--:|--:|--:|--:|
@@ -264,17 +270,18 @@ Reading (CPU time first):
   engine; instructions 1.02 / 1.02 and 1.00 /
   1.00. With eight workers the means are 0.95 / 1.02
   (machine) and 0.98 / 0.93 (reference), inside the 8-worker noise.
-- **ZGC costs a little**: 1.07 (machine) and 1.10 (reference) of Serial's CPU
+- **ZGC costs a little**: 1.07 (machine) and 1.09 (reference) of Serial's CPU
   time at one worker, 1.07 and 1.00 at eight, with the heap committed at
   start; 1.01 / 1.05 and 1.05 /
-  1.01 without `-Xms`. Its wall clock is the worst of all collectors on the short runs
-  (1.27 of Serial's with the reference engine at eight workers) because of that commit.
+  1.01 without `-Xms`. Its wall clock on the short runs is
+  1.27 of Serial's with the reference engine at eight workers, because of that commit.
 - **Shenandoah costs clearly more than the noise, in both modes and on both engines**: CPU
-  1.16 / 1.20 (machine, one worker), 1.21 /
-  1.23 (reference, one worker), 1.14 / 1.18 and
-  1.14 / 1.22 at eight workers; instructions +15 to +25 %.
+  1.16 / 1.20 (machine, one worker), 1.19 /
+  1.21 (reference, one worker), 1.14 / 1.18 and
+  1.14 / 1.22 at eight workers; instructions about +20 %
+  (1.20 / 1.19 at one worker).
 - **Epsilon, which never collects, is not faster than Serial** (1.01 and
-  1.04 at one worker): there is nothing to save (section 4).
+  1.05 at one worker): there is nothing to save (section 4).
 - **Peak RSS** is lowest with Serial or G1 on the reference engine; Parallel, ZGC and both Shenandoah modes use 1.2
   to 2.9 times Serial's on Init and Std (they let the heap fill further before the first collection; ZGC also has
   uncompressed pointers). With the machine engine the collectors are within 10 % of Serial on Init, except
@@ -329,6 +336,12 @@ Requested continuously from 14:10Z. Every acquisition (`data/lock.tsv`):
 | 17:58:55Z A-b030 | 3 | 0 | 68 | 40.23 |
 | 18:00:07Z A-b031 | 2 | 0 | 45 | 34.86 |
 | 18:00:59Z A-b001 | 1 | 0 | 95 | 37.54 |
+| 18:03:25Z A-b001 | 1 | 0 | 98 | 43.04 |
+| 18:05:07Z A-b002 | 1 | 0 | 99 | 34.94 |
+| 18:06:50Z A-b003 | 1 | 0 | 110 | 33.03 |
+| 18:08:44Z A-b004 | 1 | 0 | 96 | 35.49 |
+| 18:10:23Z A-b005 | 1 | 0 | 111 | 27.15 |
+| 18:14:19Z A-b001 | 6 | 0 | 57 | 18.54 |
 
 The arena cells in full:
 
@@ -343,17 +356,17 @@ The arena cells in full:
 | Shenandoah | 3 | 12.48 / 12.69 | 7.39 / 7.70 | 590 | 152.5 | 6.14 | 1.155 | 1.137 | 1.208 | 1.136 |
 | Shenandoah gen. | 3 | 12.43 / 12.86 | 7.37 / 7.51 | 622 | 153.5 | 6.18 | 1.156 | 1.130 | 1.216 | 1.145 |
 
-#### Init, machine engine, 8 workers (1-minute load average at the runs: 49 to 144)
+#### Init, machine engine, 8 workers (1-minute load average at the runs: 16 to 144)
 
 | collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| Serial | 4 | 15.87 / 18.39 | 5.43 / 8.64 | 742 | 183.5 | 14.41 | 1.000 | 1.000 | 1.000 | 1.000 |
-| Parallel | 3 | 18.48 / 18.54 | 6.09 / 9.77 | 761 | 197.3 | 14.76 | 1.061 | 1.120 | 1.129 | 1.074 |
-| G1 | 3 | 16.81 / 18.66 | 8.06 / 8.78 | 775 | 195.2 | 14.88 | 1.059 | 1.063 | 1.041 | 1.054 |
-| ZGC | 3 | 19.01 / 20.40 | 10.86 / 11.02 | 744 | 210.6 | 15.77 | 1.219 | 1.435 | 1.209 | 1.198 |
+| Serial | 5 | 15.87 / 18.31 | 5.43 / 9.03 | 748 | 190.5 | 14.25 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 4 | 17.28 / 18.51 | 6.09 / 9.56 | 762 | 199.9 | 14.74 | 1.012 | 1.045 | 1.069 | 1.031 |
+| G1 | 4 | 15.77 / 17.73 | 8.06 / 8.50 | 770 | 189.5 | 13.83 | 1.015 | 1.014 | 1.004 | 1.026 |
+| ZGC | 4 | 16.02 / 19.71 | 9.48 / 10.94 | 744 | 196.3 | 14.95 | 1.150 | 1.328 | 1.157 | 1.107 |
 | ZGC, no -Xms | 1 | 25.74 / 25.74 | 8.92 / 8.92 | 752 | 195.2 | 20.66 | 1.204 | 1.642 | 1.345 | 1.211 |
-| Shenandoah | 3 | 21.68 / 21.91 | 11.15 / 11.23 | 755 | 239.1 | 17.59 | 1.366 | 1.351 | 1.384 | 1.402 |
-| Shenandoah gen. | 3 | 20.19 / 22.22 | 9.53 / 10.34 | 789 | 224.8 | 17.72 | 1.223 | 1.376 | 1.407 | 1.230 |
+| Shenandoah | 4 | 18.03 / 21.79 | 9.45 / 11.19 | 748 | 239.1 | 17.30 | 1.307 | 1.297 | 1.369 | 1.333 |
+| Shenandoah gen. | 4 | 19.66 / 21.21 | 9.53 / 10.21 | 791 | 234.5 | 16.74 | 1.186 | 1.261 | 1.312 | 1.179 |
 | Epsilon | 1 | 35.73 / 35.73 | 9.12 / 9.12 | 740 | 197.7 | 30.66 | 1.672 | 1.680 | 1.362 | 1.798 |
 
 #### Init, reference engine, 1 worker (1-minute load average at the runs: 42 to 61)
@@ -367,13 +380,13 @@ The arena cells in full:
 | Shenandoah | 3 | 17.41 / 17.59 | 14.33 / 14.37 | 2268 | 247.2 | 13.02 | 1.202 | 1.202 | 1.210 | 1.225 |
 | Shenandoah gen. | 3 | 17.35 / 17.67 | 14.58 / 15.13 | 2333 | 247.6 | 13.18 | 1.206 | 1.193 | 1.209 | 1.225 |
 
-#### Init, reference engine, 8 workers (1-minute load average at the runs: 46 to 154)
+#### Init, reference engine, 8 workers (1-minute load average at the runs: 18 to 154)
 
 | collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| Serial | 4 | 17.40 / 20.51 | 6.35 / 9.38 | 1565 | 231.6 | 16.52 | 1.000 | 1.000 | 1.000 | 1.000 |
-| Parallel | 3 | 19.32 / 20.19 | 5.88 / 10.35 | 2075 | 246.5 | 15.21 | 1.061 | 1.083 | 1.063 | 1.037 |
-| G1 | 3 | 18.19 / 20.52 | 5.45 / 7.01 | 1700 | 221.5 | 16.52 | 1.045 | 1.103 | 0.957 | 1.068 |
+| Serial | 5 | 17.40 / 18.21 | 6.35 / 9.26 | 1541 | 231.5 | 14.37 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 4 | 18.40 / 19.75 | 5.88 / 9.98 | 2046 | 242.8 | 15.05 | 1.052 | 1.060 | 1.061 | 1.053 |
+| G1 | 4 | 18.19 / 20.63 | 5.45 / 7.41 | 1693 | 218.5 | 16.60 | 1.086 | 0.973 | 0.956 | 1.109 |
 | ZGC | 3 | 20.18 / 20.53 | 8.64 / 11.64 | 2574 | 253.8 | 15.98 | 1.160 | 1.263 | 1.095 | 1.180 |
 | ZGC, no -Xms | 1 | 21.67 / 21.67 | 7.23 / 7.23 | 2551 | 221.0 | 17.42 | 0.950 | 1.137 | 0.955 | 0.932 |
 | Shenandoah | 3 | 21.12 / 21.28 | 7.67 / 11.01 | 2379 | 279.3 | 16.96 | 1.214 | 1.194 | 1.234 | 1.273 |
@@ -424,11 +437,16 @@ The arena cells in full:
 | Shenandoah | 3 | 34.01 / 34.76 | 17.76 / 18.27 | 2602 | 435.9 | 28.37 | 1.179 | 1.231 | 1.291 | 1.186 |
 | Shenandoah gen. | 3 | 33.83 / 34.20 | 17.80 / 18.04 | 2690 | 425.7 | 28.06 | 1.153 | 1.254 | 1.288 | 1.145 |
 
-#### mathlib, machine engine, 8 workers (1-minute load average at the runs: 34 to 34)
+#### mathlib, machine engine, 8 workers (1-minute load average at the runs: 33 to 43)
 
 | collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | Serial | 1 | 174.47 / 174.47 | 94.47 / 94.47 | 4162 | 1669.1 | 143.91 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 1 | 176.09 / 176.09 | 95.14 / 95.14 | 4367 | 1663.7 | 145.26 | 1.009 | 1.007 | 0.997 | 1.009 |
+| G1 | 1 | 178.13 / 178.13 | 96.67 / 96.67 | 4605 | 1702.7 | 146.99 | 1.021 | 1.023 | 1.020 | 1.021 |
+| ZGC | 1 | 180.77 / 180.77 | 98.86 / 98.86 | 5644 | 1761.8 | 147.23 | 1.036 | 1.046 | 1.056 | 1.023 |
+| Shenandoah | 1 | 203.58 / 203.58 | 109.09 / 109.09 | 7229 | 2012.3 | 168.66 | 1.167 | 1.155 | 1.206 | 1.172 |
+| Shenandoah gen. | 1 | 207.27 / 207.27 | 110.68 / 110.68 | 7858 | 1948.0 | 171.90 | 1.188 | 1.172 | 1.167 | 1.195 |
 
 
 ## 4. What a collector has to do on this workload
@@ -457,13 +475,15 @@ Reading:
 
 - **The machine engine gives a collector almost nothing to do.** It keeps its working set in `int[]` tables that are
   pooled and reset; on Init it allocates less than the 1 GB young generation in the whole run, so **no collector runs
-  a single collection** (Serial, Parallel, G1, ZGC, Shenandoah alike: 0). On Std there is one young collection, on
-  mathlib nine (8.4 GiB allocated in a run of 340 CPU seconds; 1.2 s of pauses on loaded efficiency cores).
+  a single collection** (Serial, Parallel, G1, ZGC, Shenandoah alike: 0). On Std, the Cedar slice and reachability
+  there is one young collection, on mathlib nine (8.4 GiB allocated in a run of 340 CPU seconds; 1.2 s of pauses on
+  loaded efficiency cores).
 - **The reference engine allocates 4 to 8 GiB on Init / Std and 188 GiB on mathlib**, almost all of it dead at the
   next young collection: 5 to 10 young collections on Init / Std, 233 young + 3 full on mathlib.
-- **Serial's pauses are 0.2 % to 0.7 % of the run's CPU time in every cell**, mathlib included (7.3 s of 1,065 s).
-  That is the whole budget a better collector could win back in CPU time. It is smaller than the difference between
-  two runs of the same configuration (table in section 2).
+- **Serial's pauses are 0.2 % to 0.9 % of the run's CPU time in every cell but one**, mathlib included (7.3 s of
+  1,065 s). The exception is reachability with the reference engine (0.68 s in five young collections, 3 %: a large
+  live set is copied each time; G1 needs 0.01 s for the same run). That is the whole budget a better collector could
+  win back in CPU time. It is smaller than the difference between two runs of the same configuration (section 2).
 - Epsilon (no collection at all) therefore cannot be faster by more than that, and it is not (section 2); it pays
   for fresh pages instead (kernel time: reference Init 8 workers, 2.4 s system time
   against 0.8 s) and its peak RSS is the allocation volume (4.7 to 8.3 GB on the
@@ -477,30 +497,35 @@ its collections.
 **5.1 Barriers in compiled code.** Serial and Parallel share one barrier (a card mark on reference stores); G1 adds
 its own pre- and post-write barriers; ZGC and Shenandoah add a barrier on every reference **load** and ZGC also a
 store barrier (generational). The one-worker cells are the clean place to read them (no competition for cores
-between workers and the JIT compiler; the instruction count of a one-worker run repeats within about 1 %):
+between workers and the JIT compiler; the instruction count of a one-worker run repeats within a few percent).
+Efficiency cores, all four small inputs:
 
 | ratio to Serial, 1 worker, geometric mean over the cells | machine: instructions | machine: workers' CPU | machine: process CPU | reference: instructions | reference: workers' CPU | reference: process CPU |
 |---|--:|--:|--:|--:|--:|--:|
 | Parallel | 1.02 | 1.02 | 1.02 | 1.00 | 1.02 | 1.03 |
-| G1 | 1.02 | 1.03 | 1.02 | 1.00 | 1.03 | 1.03 |
-| ZGC | 1.02 | 1.03 | 1.07 | 1.03 | 1.08 | 1.10 |
-| Shenandoah | 1.20 | 1.12 | 1.16 | 1.19 | 1.25 | 1.21 |
-| Shenandoah gen. | 1.23 | 1.16 | 1.20 | 1.19 | 1.22 | 1.23 |
-| Epsilon (no barrier at all) | 1.02 | 1.01 | 1.01 | 1.00 | 1.07 | 1.04 |
+| G1 | 1.02 | 1.03 | 1.02 | 1.00 | 1.04 | 1.03 |
+| ZGC | 1.02 | 1.03 | 1.07 | 1.04 | 1.07 | 1.09 |
+| Shenandoah | 1.20 | 1.12 | 1.16 | 1.19 | 1.23 | 1.19 |
+| Shenandoah gen. | 1.23 | 1.16 | 1.20 | 1.19 | 1.21 | 1.21 |
+| Epsilon (no barrier at all) | 1.02 | 1.01 | 1.01 | 1.00 | 1.08 | 1.05 |
 
-- **ZGC's barriers are close to free on this code** (instructions within a few percent of Serial on both engines;
-  CPU a few percent up, most of it the heap commit of 5.4, see the "ZGC, no -Xms" row of the tables). The machine's
+- **ZGC's barriers are close to free on this code**: instructions 1.02 (machine) and
+  1.04 (reference) of Serial's; CPU 1.07 and 1.09, of
+  which the heap commit of 5.4 is the larger part ("ZGC, no -Xms": 1.01 and
+  1.05, on Init and Std). The machine's
   hot loops read and write `int[]` elements, which carry no barrier; the barrier is paid on loading the array
   references from the session object (that C2 keeps those loads out of the loops is an inference from these
   numbers, not something read off the generated code).
-- **Shenandoah's are not**: about +15 to +20 % instructions and +10 to +15 % CPU time on BOTH engines, in both modes,
-  with no collection running at all on the machine engine (Init: 0 cycles). The workers' own CPU time rises by about
-  10 %, the rest is the compiler (5.2) and Shenandoah's control threads (5.3). That the int-array machine pays as much
+- **Shenandoah's are not**: instructions 1.20 / 1.19 and CPU time
+  1.16 / 1.19 of Serial's (machine / reference), about the same in
+  generational mode, with no collection running at all on the machine engine on Init. The workers' own CPU time
+  rises to 1.12 (machine) and 1.23 (reference); the rest is the compiler
+  (5.2) and Shenandoah's control threads (5.3). That the int-array machine pays as much
   as the object-graph reference engine was not expected; it was not investigated further (a guess, not a
   measurement: the load-reference barrier is expanded late in C2 and keeps array-reference loads from being hoisted;
   `-XX:+UseCondCardMark` and the card barrier of the generational mode add a store-side cost).
 - **G1 costs nothing measurable here** although its write barrier is the heaviest of the three stop-the-world
-  collectors: reference stores are rare in both engines' hot paths.
+  collectors (consistent with reference stores being rare on both engines' hot paths; not checked in the code).
 - Epsilon has no barrier and no collection; it is the floor, and it sits within the noise of Serial.
 
 **5.2 The JIT compiler.** C2 has to expand and optimise the barriers, and with Shenandoah that costs visibly more
@@ -541,7 +566,7 @@ the run's 1,060 CPU seconds.
 **5.4 ZGC: the heap is committed at start, and pointers are not compressed.** With `-Xms` equal to `-Xmx` (the
 launcher's default heap flags are `-Xms13g -Xmx13g`) ZGC allocates and zeroes the whole heap before the first line of
 Java runs: 1.0 to 1.1 s of wall clock for 8 GB in the logging runs (3.0 s in one run while the host was swapping), 1.4
-to 2.4 s of system time on the arena CPUs (1.95 s against
+to 2.4 s of system time on the arena CPUs (1.85 s against
 0.35 s for Serial on Init, machine, 8 workers), about 10 G kernel instructions that
 the arena's metric (`instructions:u`) does not see, and the memory is charged to the container from the first second
 although GNU time's peak RSS does not show it (RSS counts pages a thread touched). The row "ZGC, no -Xms" removes
@@ -560,12 +585,15 @@ under names such as `Finalizer` or `Common-Cleaner`): 0.05 s for a 0.75 GB proce
 
 Asked directly: does any collector change the wall clock with 8 workers?
 
-- **Not measurably on Init and Std.** The wall-clock ratios of the headline table scatter around 1 by as much as two
-  runs of the same configuration differ on this host (the spread table of section 2). The bound from first
+- **Not measurably on Init and Std, and not for the better.** On the arena CPUs the 8-worker wall ratios of
+  Parallel and G1 are 1.0 to 1.1, those of ZGC and Shenandoah 1.2 to 1.3 (2.1); on the efficiency cores they
+  scatter around 1 by as much as two runs of the same configuration differ (2.2). The bound from first
   principles is tighter than the measurement: Serial's pauses total 0.1 to 0.35 s per run (0.5 to 2 % of a 15 to
   20 s wall clock on the efficiency cores), and on Init with the machine engine there is no pause to remove.
 - **On mathlib the bound is 1.2 s of 90 s (machine) and 7.3 s of 270 s (reference)**: about 1 % and 3 %. A parallel
-  or concurrent collector can recover at most that, and the concurrent ones spend it again on barriers.
+  or concurrent collector can recover at most that, and the concurrent ones spend it again on barriers: with the
+  machine on the arena CPUs the wall clock is 1.01 (Parallel), 1.02 (G1), 1.05 (ZGC), 1.15 and 1.17 (Shenandoah) of
+  Serial's (section 7).
 - **What a loaded host adds, and a quiet runner does not:** every stop-the-world pause first has to bring all
   worker threads to a safepoint, and a thread that is runnable but not on a CPU cannot get there. In the Serial
   logging run of the reference engine on mathlib the pauses sum to 7.3 s but the safepoints to 57 s; for G1 0.5 s
@@ -597,6 +625,26 @@ CPU seconds of the two runs of each configuration (timed run / logging run) and 
 | reference: wall s, timed / logging | 273 / 435 | 329 / 361 | 221 / 367 | 222 / 826 | 230 / 493 | 247 / 330 |
 | reference: peak RSS MiB (timed run) | 12428 | 12607 | 7122 | 12507 | 12230 | 12764 |
 | machine: peak RSS MiB (timed run) | 4195 | 4191 | 4635 | 5130 | 7194 | 7800 |
+
+The machine once more on the **arena CPUs under the lock** (one run per collector, each run its own batch of 95 to
+100 s; the reference engine was not run there: one run would hold the lock for more than four minutes):
+
+| machine, mathlib, 8 workers, arena CPUs | Serial | Parallel | G1 | ZGC | Shenandoah | Shenandoah gen. |
+|---|--:|--:|--:|--:|--:|--:|
+| CPU s | 174.5 | 176.1 | 178.1 | 180.8 | 203.6 | 207.3 |
+| wall s | 94.5 | 95.1 | 96.7 | 98.9 | 109.1 | 110.7 |
+| peak RSS MiB | 4162 | 4367 | 4605 | 5644 | 7229 | 7858 |
+| instructions G | 1669 | 1664 | 1703 | 1762 | 2012 | 1948 |
+| workers' CPU s | 143.9 | 145.3 | 147.0 | 147.2 | 168.7 | 171.9 |
+
+This is the cleanest series of the report (load average 33 to 43, one process family on the set, every run within
+two seconds of the same load and check phases): **Parallel 1.01, G1 1.02, ZGC 1.04, Shenandoah 1.17, generational
+Shenandoah 1.19 of Serial's CPU time; wall clock 1.01, 1.02, 1.05, 1.15, 1.17; peak RSS 1.05, 1.11, 1.36, 1.74, 1.89.**
+The order and the sizes are those of the efficiency cores. (The wall clock itself, 95 s for 175 CPU seconds with
+eight workers, says that the workers had about two CPUs on average during the check phase, 79 to 96 s for 144 to
+172 s of worker CPU; on the efficiency cores they had four. Whether that is other jobs on the arena cores or the
+launcher's own pipeline was not separated; it is the same for every collector.)
+
 
 - **CPU time repeats, wall clock does not.** The two Serial runs of the machine differ by 0.3 % in CPU time
   (345.4 and 346.5 s); the two reference runs by 0.4 % (1,060 and 1,065 s) while their wall clock was 273 s and
@@ -954,6 +1002,18 @@ Logging run (`-Xlog:gc*,safepoint`, one per collector, not used above):
 | Shenandoah gen. | 1 | 15.74 / 15.74 | 7.96 / 7.96 | 721 | 95.8 | 6.65 | 1.123 | 1.104 | 1.185 | 1.081 |
 | Epsilon | 1 | 13.03 / 13.03 | 6.99 / 6.99 | 669 | 78.0 | 5.60 | 0.930 | 0.969 | 0.964 | 0.911 |
 
+#### Cedar slice, machine engine, 4 workers (1-minute load average at the runs: 36 to 38)
+
+| collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Serial | 1 | 16.10 / 16.10 | 4.68 / 4.68 | 780 | 72.8 | 10.45 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 1 | 17.13 / 17.13 | 4.98 / 4.98 | 1028 | 74.0 | 11.87 | 1.064 | 1.065 | 1.016 | 1.136 |
+| G1 | 1 | 15.00 / 15.00 | 4.42 / 4.42 | 798 | 69.0 | 9.62 | 0.932 | 0.945 | 0.947 | 0.921 |
+| ZGC | 1 | 20.30 / 20.30 | 8.04 / 8.04 | 785 | 86.3 | 13.21 | 1.261 | 1.719 | 1.184 | 1.264 |
+| Shenandoah | 1 | 22.57 / 22.57 | 5.35 / 5.35 | 781 | 93.6 | 15.83 | 1.402 | 1.143 | 1.285 | 1.515 |
+| Shenandoah gen. | 1 | 20.61 / 20.61 | 5.15 / 5.15 | 808 | 89.6 | 14.05 | 1.280 | 1.101 | 1.230 | 1.344 |
+| Epsilon | 1 | 17.09 / 17.09 | 4.52 / 4.52 | 764 | 74.5 | 11.54 | 1.061 | 0.966 | 1.023 | 1.104 |
+
 #### Cedar slice, machine engine, 8 workers (1-minute load average at the runs: 59 to 62)
 
 | collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
@@ -989,6 +1049,18 @@ Logging run (`-Xlog:gc*,safepoint`, one per collector, not used above):
 | Shenandoah | 1 | 13.97 / 13.97 | 9.41 / 9.41 | 1660 | 81.6 | 8.09 | 1.212 | 1.285 | 1.170 | 1.333 |
 | Shenandoah gen. | 1 | 14.19 / 14.19 | 10.78 / 10.78 | 1689 | 82.4 | 7.58 | 1.232 | 1.472 | 1.181 | 1.249 |
 | Epsilon | 1 | 11.99 / 11.99 | 7.72 / 7.72 | 1646 | 71.3 | 6.65 | 1.040 | 1.053 | 1.022 | 1.096 |
+
+#### Cedar slice, reference engine, 4 workers (1-minute load average at the runs: 30 to 35)
+
+| collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Serial | 1 | 13.90 / 13.90 | 4.09 / 4.09 | 1225 | 70.5 | 8.85 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 1 | 14.27 / 14.27 | 4.56 / 4.56 | 1327 | 69.7 | 9.30 | 1.027 | 1.114 | 0.988 | 1.050 |
+| G1 | 1 | 14.43 / 14.43 | 3.81 / 3.81 | 1673 | 72.4 | 9.43 | 1.038 | 0.930 | 1.027 | 1.065 |
+| ZGC | 1 | 15.10 / 15.10 | 5.83 / 5.83 | 1421 | 71.8 | 9.10 | 1.086 | 1.425 | 1.019 | 1.028 |
+| Shenandoah | 1 | 16.80 / 16.80 | 4.20 / 4.20 | 1865 | 83.1 | 11.17 | 1.209 | 1.027 | 1.178 | 1.262 |
+| Shenandoah gen. | 1 | 16.27 / 16.27 | 4.00 / 4.00 | 1894 | 81.9 | 10.74 | 1.171 | 0.978 | 1.161 | 1.213 |
+| Epsilon | 1 | 13.78 / 13.78 | 3.48 / 3.48 | 1850 | 69.8 | 9.11 | 0.991 | 0.850 | 0.990 | 1.028 |
 
 #### Cedar slice, reference engine, 8 workers (1-minute load average at the runs: 62 to 64)
 
@@ -1026,6 +1098,18 @@ Logging run (`-Xlog:gc*,safepoint`, one per collector, not used above):
 | Shenandoah gen. | 1 | 13.39 / 13.39 | 7.29 / 7.29 | 1397 | 73.0 | 6.24 | 1.382 | 1.295 | 1.409 | 1.280 |
 | Epsilon | 1 | 11.62 / 11.62 | 6.54 / 6.54 | 1348 | 61.1 | 5.69 | 1.199 | 1.161 | 1.180 | 1.166 |
 
+#### reachability, machine engine, 4 workers (1-minute load average at the runs: 30 to 31)
+
+| collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Serial | 1 | 11.69 / 11.69 | 5.39 / 5.39 | 1005 | 53.6 | 7.00 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 1 | 13.43 / 13.43 | 4.34 / 4.34 | 1221 | 53.4 | 8.55 | 1.148 | 0.806 | 0.996 | 1.220 |
+| G1 | 1 | 14.48 / 14.48 | 4.42 / 4.42 | 1416 | 56.2 | 9.34 | 1.238 | 0.821 | 1.047 | 1.334 |
+| ZGC | 1 | 13.89 / 13.89 | 7.04 / 7.04 | 1168 | 59.3 | 7.75 | 1.188 | 1.307 | 1.106 | 1.106 |
+| Shenandoah | 1 | 12.98 / 12.98 | 4.93 / 4.93 | 1395 | 65.9 | 7.79 | 1.110 | 0.915 | 1.230 | 1.112 |
+| Shenandoah gen. | 1 | 14.41 / 14.41 | 5.37 / 5.37 | 1410 | 78.1 | 8.35 | 1.232 | 0.997 | 1.457 | 1.192 |
+| Epsilon | 1 | 12.99 / 12.99 | 4.74 / 4.74 | 1393 | 55.9 | 8.18 | 1.111 | 0.879 | 1.043 | 1.168 |
+
 #### reachability, machine engine, 8 workers (1-minute load average at the runs: 63 to 64)
 
 | collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
@@ -1050,12 +1134,29 @@ Logging run (`-Xlog:gc*,safepoint`, one per collector, not used above):
 | Shenandoah gen. | 0 | 0 | 0.0 | 0.0 | 0 | 0.14 | 0.13 | 6.4 | 0 | - | 0 / 0 | 0, 0 | 15.1 / 7.1 |
 | Epsilon | 0 | 0 | 0.0 | 0.0 | 0 | 0.00 | 0.00 | 3.7 | 0 | - | 0 / 0 | 0, 0 | 13.0 / 5.6 |
 
-#### reachability, reference engine, 1 worker (1-minute load average at the runs: 44 to 45)
+#### reachability, reference engine, 1 worker (1-minute load average at the runs: 40 to 45)
 
 | collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | Serial | 1 | 19.79 / 19.79 | 17.68 / 17.68 | 2381 | 99.7 | 16.41 | 1.000 | 1.000 | 1.000 | 1.000 |
 | Parallel | 1 | 19.79 / 19.79 | 17.72 / 17.72 | 2998 | 98.0 | 16.11 | 1.000 | 1.002 | 0.984 | 0.982 |
+| G1 | 1 | 20.19 / 20.19 | 18.47 / 18.47 | 3940 | 98.9 | 17.47 | 1.020 | 1.045 | 0.993 | 1.064 |
+| ZGC | 1 | 21.14 / 21.14 | 19.80 / 19.80 | 2483 | 103.5 | 17.21 | 1.068 | 1.120 | 1.039 | 1.048 |
+| Shenandoah | 1 | 22.47 / 22.47 | 20.09 / 20.09 | 2631 | 117.3 | 19.17 | 1.135 | 1.136 | 1.177 | 1.168 |
+| Shenandoah gen. | 1 | 22.87 / 22.87 | 20.21 / 20.21 | 2694 | 118.7 | 19.25 | 1.156 | 1.143 | 1.191 | 1.173 |
+| Epsilon | 1 | 21.40 / 21.40 | 19.62 / 19.62 | 4168 | 99.1 | 18.55 | 1.081 | 1.110 | 0.994 | 1.130 |
+
+#### reachability, reference engine, 4 workers (1-minute load average at the runs: 31 to 35)
+
+| collector | n | CPU s min / med | wall s min / med | RSS MiB | instr G | worker CPU s | CPU x | wall x | instr x | worker CPU x |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Serial | 1 | 21.56 / 21.56 | 12.93 / 12.93 | 3083 | 100.7 | 18.05 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Parallel | 1 | 22.19 / 22.19 | 12.66 / 12.66 | 3946 | 103.5 | 18.43 | 1.029 | 0.979 | 1.028 | 1.021 |
+| G1 | 1 | 21.19 / 21.19 | 17.86 / 17.86 | 3977 | 100.7 | 18.22 | 0.983 | 1.381 | 1.000 | 1.010 |
+| ZGC | 1 | 21.92 / 21.92 | 13.57 / 13.57 | 2580 | 103.5 | 17.99 | 1.016 | 1.049 | 1.027 | 0.997 |
+| Shenandoah | 1 | 23.97 / 23.97 | 12.69 / 12.69 | 2200 | 119.6 | 19.87 | 1.111 | 0.981 | 1.187 | 1.101 |
+| Shenandoah gen. | 1 | 24.51 / 24.51 | 8.91 / 8.91 | 2754 | 121.3 | 20.71 | 1.137 | 0.689 | 1.204 | 1.147 |
+| Epsilon | 1 | 21.96 / 21.96 | 18.23 / 18.23 | 3959 | 102.2 | 18.85 | 1.019 | 1.410 | 1.015 | 1.044 |
 
 #### reachability, reference engine, 8 workers (1-minute load average at the runs: 60 to 65)
 
@@ -1134,8 +1235,9 @@ Runs that did not end with exit status 0 (not in the tables):
 ## 10. Recommendation for the JVM launcher
 
 1. **Keep `-XX:+UseSerialGC` as the launcher's collector.** No collector beat it in CPU time on any input, engine
-   or worker count beyond the noise of the measurement, and it cannot be otherwise: its pauses are 0.2 to 0.7 % of
-   the CPU time of every run, mathlib included, and with the machine engine most runs never collect at all. It has
+   or worker count beyond the noise of the measurement, and it cannot be otherwise: its pauses are below 1 % of the
+   CPU time of every run but one (3 %), mathlib included, and with the machine engine a run has zero to nine
+   collections. It has
    no threads of its own, the cheapest barrier, the smallest footprint on the small inputs, and it is the collector
    of the arena build, so a JVM-mode run exercises the same memory behaviour as the native image.
 2. **Do not use ZGC or Shenandoah.** Both were measured on the real checker with parallel workers, as the owner
@@ -1171,8 +1273,9 @@ Runs that did not end with exit status 0 (not in the tables):
   Epsilon and "ZGC, no -Xms" rows, the logging runs and the mathlib repetitions are from eight efficiency cores
   without the lock (section 1). The Init / Std headline cells were repeated on the arena CPUs under the lock and
   agree (2.1 against 2.2); for the rest, ratios can differ on the X925 cores (four times the L2 cache).
-- **The host was never quiet** (load average 57 to 250), and from 16:14Z two of the eight CPUs of the efficiency
-  set (10, 11) were also used by another profiler's pinned jobs. CPU time of a one-worker run and of a long run
+- **The host was not quiet until 18:10Z** (load average 30 to 250), jobs that do not take the lock run on the
+  arena CPUs too, and from 16:14Z two of the eight CPUs of the efficiency set (10, 11) were also used by another
+  profiler's pinned jobs. CPU time of a one-worker run and of a long run
   repeats within a few percent; **an 8-worker run of Init or Std does not** (spread table in section 2: tens of
   percent in CPU time and in the instruction count between identical runs). Why the instruction count of the same
   work moves that much with 8 workers was not investigated; candidates are the tier-3 code the workers execute until

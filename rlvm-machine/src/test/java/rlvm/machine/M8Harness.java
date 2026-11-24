@@ -310,6 +310,11 @@ final class M8Harness implements AutoCloseable {
             m.sw = config.strict ? 0 : config.switches;
             m.debug = config.debug | (config.trace ? Op.DBG_TRACE : 0);
             m.stats = true;
+            // PCHK (switch pchk): the store's shared check facts would leak from one lane into the next (a lane that
+            // runs after another would find every closed term checked and tick less, which is no convention
+            // difference). Every lane therefore has a table of its own and starts from none, as a run of one worker
+            // does; the sharing between workers is the pipeline part's and the mutant campaign's to test.
+            m.x5.shared = new rlvm.store.SharedFacts(store.terms());
             this.admission = new Admission(ctx, Policy.arena(), env);
         }
 

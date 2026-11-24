@@ -948,6 +948,9 @@ class M6FacadeTest {
         assertEquals(Op.SW_MATCH | Op.SW_JOINT | Op.SW_SAME, Debug.parseSwitches("m5a,m5b,m4a"));
         assertEquals("same,match,joint", Debug.switchNames(Op.SW_MATCH | Op.SW_JOINT | Op.SW_SAME));
         assertEquals(Op.SW_WARM, Debug.parseSwitches("warm,match,-match"));
+        assertEquals(Op.SW_M2A | Op.SW_M3A | Op.SW_M7A, Debug.parseSwitches("bodies,directrules,lazycases"));
+        assertEquals(Op.SW_BODIES | Op.SW_DIRECT_RULES | Op.SW_LAZY_CASES, Debug.parseSwitches("m2a,m3a,m7a"));
+        assertEquals("bodies,directrules,lazycases", Debug.switchNames(Op.SW_BODIES | Op.SW_DIRECT_RULES | Op.SW_LAZY_CASES));
         assertEquals(Op.SW_M2A | Op.SW_M2B | Op.SW_M3A | Op.SW_M3B | Op.SW_M4A | Op.SW_M4B | Op.SW_M5A | Op.SW_M5B,
                 Debug.parseSwitches("m2a,m2b,m3a,m3b,m4a,m4b,m5a,m5b"));
         assertEquals(12, Integer.bitCount(Op.SW_EXPERIMENTS));

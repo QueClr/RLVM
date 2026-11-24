@@ -56,4 +56,14 @@ public interface LevelInterner {
      */
     default void attach() {
     }
+
+    /**
+     * The level store in which the ids this interner returns can be read on the loader thread right
+     * now ({@code kind}, operands, parameter names), or null if there is none. The loader only reads
+     * it, and only for an export in which a universe parameter has two level records (finding A2-F1,
+     * {@link DoubledParams}); with null that rule is not applied. The default is null.
+     */
+    default rlvm.level.LevelStore structure() {
+        return null;
+    }
 }

@@ -82,6 +82,8 @@ public final class Loader implements ExportSink, RecordSink {
     private final LevelInterner levels;
     private final NatDecoder nats;
     private final NatDecoder.Limbs limbs = new NatDecoder.Limbs();
+    /** Universe parameters with two level records (finding A2-F1). */
+    private final DoubledParams paramRecords = new DoubledParams();
     private final LoadReport report = new LoadReport();
     private final boolean proofBlocks;
     /** {@code S_BODY | RC_TWO_PLUS} if sharing flags are computed, else 0. */
@@ -516,6 +518,7 @@ public final class Loader implements ExportSink, RecordSink {
     @Override
     public int levelSucc(int level) {
         int id = levels.succ(level);
+        levelRecord(id);
         nLevelSucc++;
         return id;
     }
@@ -523,6 +526,7 @@ public final class Loader implements ExportSink, RecordSink {
     @Override
     public int levelMax(int lhs, int rhs) {
         int id = levels.max(lhs, rhs);
+        levelRecord(id);
         nLevelMax++;
         return id;
     }
@@ -530,6 +534,7 @@ public final class Loader implements ExportSink, RecordSink {
     @Override
     public int levelIMax(int lhs, int rhs) {
         int id = levels.imax(lhs, rhs);
+        levelRecord(id);
         nLevelIMax++;
         return id;
     }
@@ -537,8 +542,32 @@ public final class Loader implements ExportSink, RecordSink {
     @Override
     public int levelParam(int name) {
         int id = levels.param(name);
+        // Finding A2-F1: a second level record for one universe parameter (see DoubledParams).
+        rlvm.level.LevelStore run = levels.structure();
+        if (run != null) {
+            String why = paramRecords.param(run, name, id);
+            if (why != null) {
+                throw unsupported(why);
+            }
+        }
         nLevelParam++;
         return id;
+    }
+
+    /** A succ / max / imax record gave level {@code id} (the record has not been counted yet). */
+    private void levelRecord(int id) {
+        DoubledParams p = paramRecords;
+        if (!p.active()) {
+            p.note(id);
+            return;
+        }
+        rlvm.level.LevelStore run = levels.structure();
+        if (run != null) {
+            String why = p.node(run, id);
+            if (why != null) {
+                throw unsupported(why);
+            }
+        }
     }
 
     // ============================================================================================

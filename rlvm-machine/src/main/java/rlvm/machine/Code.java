@@ -97,6 +97,15 @@ final class Code {
     static final int DST_NONE = 0x102;
     /** The awaited result is a CONV of TARG: anything but T is {@code fail(E_APP_MISMATCH)}. */
     static final int DST_REQ_APP = 0x103;
+    /**
+     * The awaited result is the value of the KVAL at {@code pc - 2} (the frame's pc is the instruction after it): it
+     * goes to register {@code dst & 255} AND into the inline cache of that site, as on the path without a suspension
+     * (finding M8-F1: without the fill a later execution of the site evaluated the closed term again where the
+     * unsuspended run had its cache entry, so the tick count depended on the host depth bound once gated tabling
+     * no longer tabled the term). {@link #DST_KVAL_LS}: the cache key is the activation's level substitution.
+     */
+    static final int DST_KVAL = 0x200;
+    static final int DST_KVAL_LS = 0x400;
 
     // ---- instruction sub-fields (the x byte) ----
 
@@ -534,6 +543,10 @@ final class Code {
                 }
                 break;
             default:
+                if ((dst & DST_KVAL) != 0) {
+                    kvalFill(m, blk << 12 | (pc - 2), pc - 2, (dst & DST_KVAL_LS) != 0 ? rs[rb - W_LS] : 0, r);
+                    dst &= 255;
+                }
                 rs[rb + dst] = r;
                 break;
         }
@@ -1214,7 +1227,8 @@ final class Code {
             int t = code[at + 1] & PAY;
             v = (w & KV_ARGV) != 0 ? Eval.argv(m, t, m.ep, 0, key, d + 1) : Eval.eval(m, t, m.ep, 0, key, d + 1);
             if (v >= SIG) {
-                return susp(m, v, blk, pc + 2, w >>> 16 & 255, rb);
+                // the value arrives through the frame: it fills the cache there (DST_KVAL), as below
+                return susp(m, v, blk, pc + 2, DST_KVAL | ((w & KV_LPARAM) != 0 ? DST_KVAL_LS : 0) | (w >>> 16 & 255), rb);
             }
             if (c >= 0) {
                 int[] ic = m.ic;
@@ -1226,6 +1240,18 @@ final class Code {
         }
         m.RS[rb + (w >>> 16 & 255)] = v;
         return 0;
+    }
+
+    /** The fill of {@link #kval} for a value that arrived through a frame ({@link #DST_KVAL}): the same cell, the same words. */
+    private static void kvalFill(Machine m, int site, int pc, int key, int v) {
+        if (pc < 4096) {
+            int c = (Hash.cell(site, key) & IC_MASK) << Layout.CELL_SHIFT;
+            int[] ic = m.ic;
+            ic[c + Layout.IC_SITE] = site;
+            ic[c + Layout.IC_EPOCH] = m.epoch;
+            ic[c + Layout.IC_KEY] = key;
+            ic[c + Layout.IC_VALUE] = v;
+        }
     }
 
     /** The inline cache cell {@code c} of ISA 1.5 for {@code (site, key)}: its value seen through PEEK, or {@code Op.MISS}. */

@@ -499,6 +499,17 @@ public final class Op {
     public static final int SW_MATCH = 1 << 19;
     public static final int SW_JOINT = 1 << 20;
     public static final int SW_SAME = 1 << 17;
+    /**
+     * Named by the integrator of wave 6 (2026-11-24) on their owners' requests, again the SAME bits:
+     * {@code bodies} = {@code m2a}: the body of a beta step / of INST and a telescope's domains and results are
+     * evaluated without a tabling record; a body that is a projection of a bound variable is MKPROJ of the
+     * argument (M2, NOTES-M2 D21). {@code directrules} = {@code m3a}: a recursor rule of the plain form is ONE
+     * APPLY of the minor premise ({@code Reduce.iotaDirect}, M3, NOTES-M3 D18). {@code lazycases} = {@code m7a}:
+     * the casesOn tree as the unfolding step of lazy delta ({@code Code.rulesCasesOn}, M7).
+     */
+    public static final int SW_BODIES = 1 << 13;
+    public static final int SW_DIRECT_RULES = 1 << 15;
+    public static final int SW_LAZY_CASES = 1 << 21;
     /** Every experiment switch. */
     public static final int SW_EXPERIMENTS = SW_M1A | SW_M1B | SW_M2A | SW_M2B | SW_M3A | SW_M3B | SW_M4A | SW_M4B | SW_M5A
             | SW_M5B | SW_M7A | SW_M7B;

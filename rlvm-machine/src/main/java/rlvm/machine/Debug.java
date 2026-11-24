@@ -57,10 +57,12 @@ final class Debug {
         "probes", "k2", "inert", "m1a", "m1b", "m2a", "m2b", "m3a", "m3b", "m4a", "m4b", "m5a", "m5b", "m7a", "m7b", "t2", "lazyeval", "levels-complete"};
 
     /**
-     * Second names of switch bits ({@code Op.SW_MATCH = SW_M5A}, {@code SW_JOINT = SW_M5B}, {@code SW_SAME = SW_M4A}):
+     * Second names of switch bits ({@code Op.SW_MATCH = SW_M5A}, {@code SW_JOINT = SW_M5B}, {@code SW_SAME = SW_M4A},
+     * {@code SW_BODIES = SW_M2A}, {@code SW_DIRECT_RULES = SW_M3A}, {@code SW_LAZY_CASES = SW_M7A}):
      * read like the first name, and printed instead of it.
      */
-    private static final String[][] SWITCH_ALIASES = {{"match", "m5a"}, {"joint", "m5b"}, {"same", "m4a"}};
+    private static final String[][] SWITCH_ALIASES = {{"match", "m5a"}, {"joint", "m5b"}, {"same", "m4a"},
+        {"bodies", "m2a"}, {"directrules", "m3a"}, {"lazycases", "m7a"}};
 
     /** {@code "memocheck,poison"} -> {@code Op.DBG_*} bits; unknown names are an error (fail closed). */
     static int parseModes(String list) {

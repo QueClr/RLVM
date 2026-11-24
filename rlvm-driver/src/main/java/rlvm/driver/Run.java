@@ -571,8 +571,14 @@ public final class Run {
                 host = new StoreHost(store, config.policy, wiring);
                 // The options carry the loader's listener; the wiring passes them to the loader as they are.
                 final LoadProgress p = progress;
+                // A large file is published in larger pieces (RunConfig.publishScaleMax).
+                final int scale = publishScale(inputBytes, config.publishScaleMax);
+                final int everyUnits = (int) Math.min(Integer.MAX_VALUE, (long) Math.max(1, config.publishEveryUnits) * scale);
+                final long everyBytes = Math.max(1, config.publishEveryBytes) * scale;
+                stats.put("driver.pipeline.publishEveryUnits", everyUnits);
+                stats.put("driver.pipeline.publishEveryBytes", everyBytes);
                 LoadOptions options = LoadOptions.pipelined(inputBytes)
-                        .withPublishEvery(Math.max(1, config.publishEveryUnits), Math.max(1, config.publishEveryBytes))
+                        .withPublishEvery(everyUnits, everyBytes)
                         .withProofBlocks(config.proofBlocks)
                         .withListener(new rlvm.load.LoadListener() {
                             @Override
@@ -607,6 +613,16 @@ public final class Run {
         endLoad();
         stats.put("driver.pipeline.publications", f.publications());
         finishCheck(units, h.loadComplete(), false);
+    }
+
+    /**
+     * The factor by which a pipelined load of {@code inputBytes} bytes stretches its publication
+     * intervals: the input's size in GiB, at least 1 and at most {@code max} (see
+     * {@code RunConfig.publishScaleMax}).
+     */
+    public static int publishScale(long inputBytes, int max) {
+        long gib = inputBytes >> 30;
+        return (int) Math.max(1, Math.min(Math.max(1, max), gib));
     }
 
     /** The load is over, complete or not: waiters are released, outcomes obtained from now on are final. */

@@ -104,6 +104,7 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `env-batch=N` | `envBatchUnits` | 4096 |
 | `spill-ms=N` | `spillNanos`: a unit running longer returns the rest of its claim | 20 |
 | `publish-units=N`, `publish-mib=N` | pipelined hand-off interval | 4096 units, 32 MiB |
+| `publish-scale=N` | `publishScaleMax`: both intervals times the input's size in GiB, at most N (1 = off): a large file is published in larger pieces | 4 |
 | `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
 | `no-fallback` | `referenceFallback = false` | off |
 | `passes=N` | `passes`: check the export N times in one process (see "Passes") | 1 |
@@ -392,6 +393,15 @@ What the driver adds:
 - **Threads.** loader = the thread that called `execute()`; environment thread; W workers. They are started
   by the first publication that is not the end of the file, so a file that arrives in one piece (smaller
   than the hand-off interval: 4,096 units and 32 MiB) is a batch run with the batch worker count.
+- **A large file is published in larger pieces** (wave 8, `publishScaleMax`): the hand-off interval is
+  multiplied by the input's size in GiB, at least 1 and at most 4, so mathlib (5.9 GiB) is published every
+  16,384 units / 128 MiB (about 50 publications instead of 205) and everything below 2 GiB as before. A
+  publication is not free for the workers: each worker context builds a new level overlay at its first reset
+  after a new snapshot (the level and list tables are copied), about 110 MB of garbage and 45 ms of worker
+  CPU per publication on mathlib, and with 8 workers the collections that follow stop everybody. The workers
+  are never short of units on a file of that size (the loader delivers 19 CPU-seconds of work per second),
+  whereas on the mid-size corpora they do wait for the loader, which is why the interval stays small there.
+  Numbers in "Measured", wave 8.
 - **Nobody polls.** The environment thread parks on the loaded frontier (`LoadFrontier`) and is woken by
   the listener; workers park in the scheduler as before. Parked threads look at the first failure every
   50 ms as a safety net against a lost wake-up (no CPU time to speak of).

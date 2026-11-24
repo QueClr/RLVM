@@ -111,7 +111,7 @@ Which constants can have positions skipped:
 | definition, regular hint | yes: lazy delta same-head step; B1 | yes: the same two places |
 | definition, abbrev / opaque hint; theorem (value in the export region) | only in B1 (they are unfolded before c8 is reached) | only in B1 |
 | theorem whose value is a proof block | only in B1 | never (no value facts) |
-| `opaque` constant, axiom, `Quot`, `Quot.mk`, inductive type, constructor | yes: c8 | never (the row has an unread mask for `opaque`, but SAMEDEF is never used for it; S: `facts-unread-opaque-head-bad`) |
+| `opaque` constant, axiom, `Quot`, `Quot.mk`, inductive type, constructor | yes: c8 | never (SAMEDEF is never used for these heads; `syntaxSlow` would compute an unread mask for an `opaque` row, in the runs of this review such a row had none; S: `facts-unread-opaque-head-bad`) |
 | recursor, `Quot.lift`, `Quot.ind` | yes: c8 when stuck; B1 always | never (no value) |
 | projection function, matcher, `casesOn`, `recOn`, `brecOn` | they are definitions: as above | as above |
 | a free variable, a projection or a stuck term as head | never (no CONST head) | never |
@@ -260,10 +260,21 @@ predicted one for all 498.
 ### 3.4 Do the attacks have teeth? Seeded faults (`work/s2/mcopy/`, `work/s2/dist3`, `-Ds2.bug=N`)
 
 A private copy of the module with one fault at a time, `skip` configuration, on the `-bad` exports of 3.1, of
-half of 3.3 and of package S's `facts-*` / `mask-*` ([[SEEDN]] exports). "Caught" = at least one false claim is
+half of 3.3 and of package S's `facts-*` / `mask-*` (301 exports: 96 + 183 + 22). "Caught" = at least one false claim is
 ACCEPTED by the faulty build (so the suite would have shown the fault).
 
-[[SEEDED]]
+| Fault | What is broken | False claims ACCEPTED that the unmodified build rejects | Caught by |
+|---|---|--:|---|
+| 1 | `propMask`: a manifest sort that MAY be zero (a level parameter) counts as a proposition | 8 | `lvl-*-generic-bad`, `-renamed-bad` (8). The random exports cannot catch it: their claims are closed |
+| 5 | `propMask` shifted by one position | 41 | fuzz 35, `etas` 2, S's `facts` 2 and `mask` 1, `prop` 1 |
+| 2 | `unreadMask` shifted by one position | 18 | `unread` 11, fuzz 6, S's `facts` 1 |
+| 7 | de Bruijn arithmetic of the unread mask off by one (`binders(mask, lam + 1)`) | 40 | `unread` 21, fuzz 13, `prop` 3, S's `facts` 3 |
+| 4 | ETAS mask indexed by the field number instead of `nparams + field` | 2 | `etas-param-proof-bad`, one random structure |
+| 6 | the unread mask also under APP | 0 | no effect to catch: no head that reaches c8 has an unread mask (the one candidate, an `opaque` constant, has no value facts: `facts.use.unreadSet` stays 0) |
+| 3 | the `differ` rule dropped (a proof position is skipped whatever its domain reads) | 0 | consistent with 2.2: I could not build a false claim from the absence of the rule, and none of the 301 is one |
+
+So a mask that is wrong by a position, by a de Bruijn index or by a universe instantiation IS shown by the suite
+(`work/s2/out/seeded-bug*.tsv`, `work/s2/seeded-summary.py`); the suite is weakest on the ETAS index (2 exports).
 
 ### 3.5 What the options remove: a seeded fault of INFERENCE
 
@@ -314,7 +325,9 @@ a Nat literal `n` by `Nat.succ n`, one universe argument of a constant by anothe
 | `LIT_SUCC_NE` | 120 | 120 | **120** | 0 |
 | `LEVEL_ARG` | 120 | 120 | **120** | 0 |
 
-[[MUT2]]
+In a sample of 12 of them the machine's rejection is `E_APP_MISMATCH` (the type of an argument against its domain: a
+comparison) in 9 and a declaration-level type mismatch in 1 more: these mutants are decided by comparisons of the
+kind the options shorten, on Mathlib's own signatures (instance arguments, proof fields).
 
 ## 4. The known exports that the options accept and the official checker rejects
 

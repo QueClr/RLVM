@@ -85,4 +85,9 @@ public final class LevelStoreInterner implements LevelInterner {
             store.freeze();
         }
     }
+
+    @Override
+    public LevelStore structure() {
+        return store;
+    }
 }

@@ -256,6 +256,11 @@ public final class LevelChain implements LevelInterner {
         return writing().listHasDuplicates(nameList);
     }
 
+    @Override
+    public LevelStore structure() {
+        return writing();
+    }
+
     // ---- the store's adapters ------------------------------------------------------------------------
 
     /** The list store for {@code new Store(bytes, lists(), info())}: follows the open store on the loader thread. */

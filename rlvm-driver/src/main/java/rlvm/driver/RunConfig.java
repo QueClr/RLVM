@@ -33,6 +33,18 @@ public final class RunConfig {
     public long publishEveryBytes = 32L << 20;
 
     /**
+     * {@code PIPELINED}: both intervals are multiplied by the size of the input in GiB, at least 1 and
+     * at most this ({@link Run#publishScale}): a large file is published in larger pieces. Every
+     * publication that adds a level makes each worker context copy the level tables at its next
+     * reset, and each is a snapshot of the loader's: on mathlib (5.9 GiB) 205 publications cost 17 GB
+     * of garbage, 1.3 s of stop-the-world and 7 s of worker CPU more than 48 do, 7 % of the wall
+     * clock of 8 workers, while the workers are never short of units there. Files below 2 GiB keep
+     * the base interval (there the loader is what the workers wait for). 1 = no scaling. Never
+     * affects the verdict.
+     */
+    public int publishScaleMax = 4;
+
+    /**
      * {@code PIPELINED}: an input smaller than this is loaded in batch mode (threads that wait for a
      * loader which finishes within milliseconds cost more than they save). Never affects the verdict.
      */
@@ -265,6 +277,7 @@ public final class RunConfig {
 
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "slice", "env-batch", "spill-ms", "publish-units", "publish-mib",
+        "publish-scale",
         "pipeline-min-mib", "no-fallback", "passes", "passes-keep", "shard", "unit-trace"
     };
 
@@ -319,6 +332,7 @@ public final class RunConfig {
      * spill-ms=N          a unit running longer than this returns the rest of its claim (0 = never)  {@link #spillNanos}
      * publish-units=N     pipelined loading: publish every N units                     {@link #publishEveryUnits}
      * publish-mib=N       pipelined loading: publish every N MiB of input              {@link #publishEveryBytes}
+     * publish-scale=N     pipelined loading: both intervals times the input's GiB, at most N (1 = off)  {@link #publishScaleMax}
      * pipeline-min-mib=N  inputs below N MiB are loaded in batch mode                  {@link #pipelineMinBytes}
      * passes=N            check the loaded export N times in one process; the verdict is pass 1's  {@link #passes}
      * no-fallback         the reference kernel does not decide what the primary engine declines
@@ -395,9 +409,12 @@ public final class RunConfig {
         }
         long max = key.endsWith("-mib") ? 1L << 24 : key.equals("spill-ms") ? 3_600_000L : 1L << 30;
         long min = key.equals("chunk") || key.equals("env-batch") || key.equals("publish-units")
-                || key.equals("publish-mib") || key.equals("passes") ? 1 : 0;
+                || key.equals("publish-mib") || key.equals("publish-scale") || key.equals("passes") ? 1 : 0;
         if (key.equals("passes")) {
             max = 1000;
+        }
+        if (key.equals("publish-scale")) {
+            max = 1024;
         }
         if (n < min || n > max) {
             throw new IllegalArgumentException(key + "=" + value + ": out of range [" + min + ", " + max + "]");
@@ -429,6 +446,9 @@ public final class RunConfig {
                 break;
             case "publish-mib":
                 publishEveryBytes = n << 20;
+                break;
+            case "publish-scale":
+                publishScaleMax = (int) n;
                 break;
             case "pipeline-min-mib":
                 pipelineMinBytes = n << 20;
