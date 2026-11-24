@@ -55,7 +55,8 @@ final class RunConfig     { arena defaults; see the fields. Settings by name: st
 final class VerdictBoard  { accept(u), skip(u), reject(u, reason, msg), decline(u, reason, msg), inputFailure([unitsLoaded,] reason, msg),
                             internalFailure(msg), stopped(msg), complete(units), firstFailure(), status(u), decidingUnit(),
                             exitCode(), explanation(), warmAnomalies(), machineIncomplete(), disagreements(), events() }
-final class Scheduler     { Scheduler(Frontier, OrderPolicy, workers, chunk, VerdictBoard); Scheduler(Store, OrderPolicy, RunConfig, VerdictBoard);
+final class Scheduler     { Scheduler(Frontier, OrderPolicy, workers, chunk, VerdictBoard); Scheduler(Frontier, OrderPolicy, workers, chunk, sliceUnits, VerdictBoard);
+                            Scheduler(Store, OrderPolicy, RunConfig, VerdictBoard);
                             int claim(int worker, int[] out); int claim(int[] out) /* worker 0 */; int tryClaim(int worker, int[] out);
                             void giveBack(int[], int from, int n); void retire(int worker); void unitsReady(); void unitsReady(int units);
                             void close(); void wake(); void defer(int unit); int claimHeavy(); void closeHeavy(); counters }
@@ -67,7 +68,7 @@ final class MemoryAccount { MemoryAccount(limitBytes, slots); setShared(bytes); 
                             accountedBytes(); peakBytes(); peakSessionBytes(); victimCount(); }
 final class RunStats      implements rlvm.api.StatsSink { phaseStart/phaseEnd, threadCpu/threadTimes (CPU and run-queue wait), unit, put, table, toJson, writeJson }
 interface   RunHost       { the seam below the driver: unit table, frontiers, Lane (context + admission; coveredUnits(), slackBytes()),
-                            EnvPass, retryEnvUnit(unit) }
+                            EnvPass, retryEnvUnit(unit), unitNeedsCompleteFile(unit) (parking rule), unitWeight(unit) (statistics) }
 final class StoreHost     implements RunHost over Store + rlvm.admit (Admission, EnvBuilder) + Wiring
 ```
 

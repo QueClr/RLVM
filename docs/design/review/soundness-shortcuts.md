@@ -31,7 +31,7 @@ compared (so `Sort u` at `u := 1`, `imax u v` at `v := 1`, or at a level paramet
 unread only for a definition or theorem applied to at least `lamArity` arguments on both sides, from a superset of
 the syntactic occurrences in the body; a proof position whose domain mentions an unread position that differs is
 compared (a precaution neither leader takes). [[VNUM]] The exports that the options accept and the official
-checker rejects ([[VKNOWN]]) are all cases of the official ALGORITHM's incompleteness, not of a false equation:
+checker rejects (14 of the 304 officially rejected exports of package S - the 13 rows of S-F1 / S-F2 and `open-flag-closed-bad`, which was in no list - plus an `Acc.rec` analogue written for this review) are all cases of the official ALGORITHM's incompleteness, not of a false equation:
 for each of them the official checker itself accepts a proof of the same statement in which the congruence step
 is written out as a term (section 4).
 
@@ -39,7 +39,7 @@ What the owner should weigh before a named opt-in profile uses them:
 
 1. **They change verdicts, by design, and only towards accepting theorems.** Exports exist that the official
    checker rejects and the profile accepts (section 4). Both leaders accept exports of the same class (section 5):
-   [[VLEAD]]. The arena's [[VARENA]].
+   [[VLEAD]]. The arena's 92 `bad` tests are ALL rejected under `skip`, `cong`, `both` and `bothrich` (as under `v0`), including the two whose statements are true in the theory and that the arena nevertheless requires to be rejected (`125_accRecNoEta`, `101_ruleKAcc`): the options never build a constructor form out of a proof. An arena test of the S-F1 kind would be accepted by the profile - and by gruszka.
 2. **They remove a redundancy.** The official comparison of two proofs compares their TYPES, which also catches
    an ill-typed proof argument that inference let through; `skipargs` does not look at a proof or unread position
    at all. With the options, soundness rests on inference alone. I found no path on which an unchecked term
@@ -231,7 +231,9 @@ with `-X machine.session-kib=1` (a session reset before nearly every declaration
 
 The same 134 with every Nat literal written `Nat.add k 0` (`work/s2/attacks-dat/`, `S2_DAT=1`), so that the quick
 refutation of pass A cannot answer before the plan in `both` (with literal arguments the plan paths of B4 were
-reached under `skip` only): [[DAT]]
+reached under `skip` only): under `v0`, `skip`, `both`, `bothall` the 95
+`-bad` exports are REJECTED, the 38 `-true` exports ACCEPTED, the mdata one is declined
+(`work/s2/out/attacks-dat-judged.tsv`); the official verdicts are those of the literal twins.
 
 ### 3.2 Second batch (`work/s2/gen/attacks2.py`, `work/s2/attacks2/`, 11 exports)
 
@@ -279,7 +281,25 @@ official procedure with all switches off; a T that the complete procedure does n
 (`E_AUDIT`, the unit is declined). A wrong mask would show here as soon as a comparison that the official
 procedure answers F is answered T (failed same-head comparisons of unequal data are frequent in these files).
 
-[[CORPORA]]
+| Export | units | accepted by the machine | declined | T answers of a shortcut that were re-derived (`audits`) | not found by the complete procedure (`E_AUDIT`) | re-derivation out of budget (inconclusive) | B1 T | B3 plans | B4 plans | B12 T |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `init-prelude` (arena test) | 1,710 | 1,710 | 0 | 324 | **0** | 0 | 139 | 124 | 67 | 3 |
+| `Mathlib.Algebra.Group.Basic.cone` | 1,724 | 1,720 | 4 | 5,204 | **0** | 2 | 2,880 | 133 | 2,185 | 16 |
+| `Mathlib.Data.Nat.Basic.cone` | 2,711 | 2,701 | 10 | 5,656 | **0** | 14 | 3,706 | 200 | 1,501 | 271 |
+| `Mathlib.Topology.Basic.cone` | 3,318 | 3,316 | 2 | 6,371 | **0** | 23 | 3,530 | 692 | 2,025 | 276 |
+| `Mathlib.Data.Fintype.Basic.cone` | 4,520 | 4,492 | 28 | 10,033 | **0** | 41 | 5,917 | 1,128 | 2,821 | 366 |
+| `Mathlib.Data.List.Basic.cone` | 4,278 | 4,204 | 74 | 10,460 | **0** | 23 | 6,307 | 1,069 | 2,745 | 458 |
+| `Mathlib.Order.Basic.cone` | 7,663 | 7,655 | 8 | 64,058 | **0** | 574 | 44,339 | 1,705 | 18,321 | 380 |
+| `Mathlib.GroupTheory.Sylow.cone` | 13,663 | 13,619 | 44 | 70,112 | **0** | 1,072 | 41,396 | 4,508 | 25,001 | 638 |
+| `Mathlib.AlgebraicGeometry.Scheme.cone` (P8's slice) | 21,155 | 21,099 | 56 | 317,642 | **0** | 13,883 | 185,816 | 24,089 | 119,640 | 4,301 |
+
+All 226 declines are the eager-reduction rule (`E_LIMIT`, `eagerDeclines`), none is an audit failure. On these
+files every T that a shortcut gave and whose re-derivation completed (489,860 audits, of them 15,632 = 3.2 % out
+of the audit budget of 65,536 ticks and therefore NOT confirmed) is also a T of the complete official procedure:
+the masks never turned an official F into a T. (The control: the same script on S's
+`facts-agreement-noncongruent-app-bad` reports the two `E_AUDIT` declines it should.) This is evidence for the
+masks on real signatures, not a proof: a wrong mask bit on a position whose arguments never differ in these files
+would not show.
 
 ### 3.7 Targeted mutants of a Mathlib slice (`work/s2/gen/mutate.py` = S's mutator, kinds `SIBLING_ARG`, `LIT_SUCC_NE`, `LEVEL_ARG`)
 
@@ -410,10 +430,15 @@ Run (Docker, no network, the arena's run lines; `work/s2/leaders.sh`, `work/s2/o
 ```bash
 python3 -I work/s2/gen/attacks.py                      # work/s2/attacks/*.ndjson (134) + attacks.tsv
 S2_DAT=1 python3 -I work/s2/gen/attacks.py             # work/s2/attacks-dat/ (the same, no literal arguments)
+python3 -I work/s2/gen/attacks2.py                     # work/s2/attacks2/ (Acc.rec, Quot, unit-like, Prop structures)
+python3 -I work/s2/gen/certify.py                      # work/s2/certify/cert-*.ndjson: section 4 as terms for the official checker
+for f in work/s2/certify/cert-*.ndjson; do rlvm-testkit/bin/testkit verdict $f; done     # 15 x accept
 python3 -I work/s2/gen/fuzz.py SEED 100 work/s2/attacks/fuzz      # seeds 11..14
 python3 -I work/s2/gen/mutate.py work/s2/attacks/mut-mathlib --per 120 --seed 7 work/exports/slices/good/Mathlib.Algebra.Group.Basic.cone.ndjson
 scripts/build.sh --published --jvm-only --dist work/s2/dist2
 bench/slot.sh -- python3 -I work/s2/judge.py --manifest work/s2/attacks/attacks.tsv --out OUT.tsv -j 3   # one line per export
 bench/slot.sh -- work/s2/campaign.sh                   # known exports, leaders (Docker), corpora with shortcheck, mutants, seeded faults
+bench/slot.sh -- work/s2/campaign2.sh                  # attacks2, certificates under the machine, leaders on them
+python3 -I work/s2/leaders-summary.py                  # official / gruszka / nano-lean on every hostile export
 work/s2/stats.sh congruence,skipargs warm,gated,expect,facts,probes FILE     # one run with the shortcut counters
 ```

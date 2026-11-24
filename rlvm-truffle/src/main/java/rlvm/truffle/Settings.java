@@ -38,7 +38,8 @@ import java.util.Map;
  *                      the sum over the machines reaches rlvm.t2.at. An activation that compiled code takes is not
  *                      counted or timed by anybody. With false the heat accounting of the machine is switched on
  *                      (it costs about 11% of a warm pass on reachability on the JVM, NOTES-T3 section 2).
- * rlvm.t2.ahead=N       run-ahead of the interning probes in compiled blocks (default 2; 0 = off): before a stretch of
+ * rlvm.t2.ahead=N       EXPERIMENT, REJECTED BY MEASUREMENT (NOTES-T3 section 6; default 0 = off; 2 is the setting that was
+ *                      measured): run-ahead of the interning probes in compiled blocks: before a stretch of
  *                      value construction with at least N interning instructions (MKAPP, MKLAM, MKPI, MKSUSP) the block loads
  *                      the table slots of their probes early, so that the cache misses overlap (reads only; NOTES-T3 section 4).
  *                      rlvm.t2.aheadMaxInstr=N (default 128): not in blocks with more instructions.
@@ -110,7 +111,7 @@ final class Settings {
         unit1Ns = dbl("rlvm.t2.unit1", 10.0);
         count = bool("rlvm.t2.count", warm);
         at = Integer.getInteger("rlvm.t2.at", count ? 1000 : 0);
-        ahead = Integer.getInteger("rlvm.t2.ahead", 2);
+        ahead = Integer.getInteger("rlvm.t2.ahead", 0);
         aheadMaxInstr = Integer.getInteger("rlvm.t2.aheadMaxInstr", 128);
         aheadExact = bool("rlvm.t2.aheadExact", true);
         if (count && at <= 0) {
