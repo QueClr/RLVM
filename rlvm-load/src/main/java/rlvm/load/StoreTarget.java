@@ -137,6 +137,11 @@ final class StoreTarget implements LoadTarget {
     }
 
     @Override
+    public void touch(int sharedId) {
+        b.touch(sharedId);
+    }
+
+    @Override
     public void singleReferrer(int child, int parent) {
         // the store compares the masks itself at the first reference
     }

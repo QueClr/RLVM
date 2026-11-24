@@ -148,7 +148,11 @@ def test_command_line() -> None:
     code, out = run_track(["init-prelude", "--dry-run", "--runs", "2"])
     check("--dry-run prints the container commands", code == 0 and out.count("arena-docker.sh --arena-limits --no-network") == 2
           and "bench/measure.sh --require-perf" in out, out[-300:])
-    check("the measured command is the arena's run line", "RLVM_STATUS_BASE=10 work/dist/bin/rlvm" in out, out[-300:])
+    # work/dist is a symbolic link into work/dist.d/ once scripts/build.sh has versioned it: track.py
+    # then measures (and prints) the version the link names, e.g. work/dist.d/20261124T140000Z-ab12-native.
+    import re
+    check("the measured command is the arena's run line",
+          re.search(r"RLVM_STATUS_BASE=10 work/dist(\.d/[^/ ]+)?/bin/rlvm", out) is not None, out[-300:])
     code, out = run_track(["init-prelude", "--dry-run", "--runs", "1", "--launcher", "jvm", "--threads", "1", "--phases"])
     check("--phases adds the stop-after runs", code == 0 and "stop-after=load" in out and "stop-after=env" in out
           and "rlvm-jvm --threads 1" in out, out[-300:])
@@ -248,6 +252,12 @@ def test_ladder() -> None:
     check("one row per corpus in every table", text.count("| mathlib (") == 4 and text.count("| cedar-hot-ax (") == 4,
           str((text.count("| mathlib ("), text.count("| cedar-hot-ax ("))))
     check("a corpus without a measurement shows '-', never a made-up number", "not measured" in text)
+    check("one RLVM column per engine, the machine first, beside the baselines",
+          "| Corpus | RLVM machine | RLVM reference | gruszka | nano-lean | official |" in text, text[:200])
+    result = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--stdout", "--history", "/nonexistent",
+                             "--engine", "reference", "--launcher", "jvm"], capture_output=True, text=True)
+    check("--engine NAME gives the one-engine table", result.returncode == 0
+          and "| Corpus | RLVM reference | gruszka | nano-lean | official |" in result.stdout, result.stderr[-300:])
 
 
 def main() -> int:

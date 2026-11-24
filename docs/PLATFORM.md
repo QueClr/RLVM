@@ -11,7 +11,157 @@ threads), wall clock, peak RSS, instructions.
 
 # Part I - the machine as engine (wave 7)
 
-@@PART1@@
+## I.0 The answer
+
+@@ANSWER@@
+
+## I.1 What was measured, and how
+
+- **Distribution** (frozen for the whole series): `work/steward/w7/dist`, built 13:30:43Z by
+
+  ```
+  scripts/build.sh --published --no-pgo --opt 3 --dist work/steward/w7/dist
+  ```
+
+  from the jars published at that moment (`BUILD-INFO.txt` there): the pipeline jars of the end of
+  wave 4 / 5 (driver `eb0944caa630`, store `45df9b63e7af`, ref `035f31e854d9`, admit `a817cd0c9d35`,
+  load `30617170f7a3`, api `46e5486d1a02`) and the machine jar **`608b84b2b142`** (the wave-4
+  integrator's final jar; the wave-6 machine workflow published newer ones from 13:39Z on, which are
+  not in these numbers). `bin/rlvm` = CE native image, GraalVM CE 25.5.5.0.3, `-O3 --gc=serial
+  -R:MaxHeapSize=13g`, 64.9 MB: exactly what `scripts/arena/build.sh` builds. `bin/rlvm-jvm` = the same
+  jars on HotSpot with the launcher's flags (`-XX:+UseSerialGC -XX:-UseJVMCICompiler
+  -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g`).
+- **Engine**: `-X engine=machine` with the machine's default switches (v0: one session per
+  declaration; the staging switches `warm,gated,expect,probes` of `work/status/machine-integration.md`
+  are off). The reference engine re-checks what the machine declines; on the four corpora below it
+  declines nothing (section I.6), so every figure is the machine's own.
+- **One run** = the arena run line with the binary and the worker count replaced, in a fresh
+  arena-shaped container (`bench/arena-docker.sh --arena-limits --no-network`: 8 performance cores,
+  16 GB), measured like the arena measures (`bench/measure.sh`: `perf stat` + GNU time around
+  `sh -c`):
+
+  ```
+  RLVM_STATUS_BASE=10 DIST/bin/BINARY --threads N "$IN" -X engine=machine -X load=batch; case $? in ...
+  ```
+
+  One-worker runs are in the same eight-core container (not the two-core container of Part II).
+- **Matrix**: launcher {`jvm`, `native`} x workers {1, 4, 8} x corpus {Init 348 MB, Std 584 MB, the
+  Cedar slice `cedar-hot-ax` 133 MB, reachability 19 MB} x 3 repeats, the two launchers of a group back
+  to back; plus six workers for the image. `scripts/platform-matrix.py` (`work/steward/w7/queue.sh` has
+  the exact calls); raw records with the host's load average before and after every run in
+  `work/steward/platform/results/w7-*.jsonl`.
+- **Lock**: every step ran under one hold of the measurement lock `work/perf-history/.ladder.lock`
+  (a few minutes each; the first six groups with a lock per group).
+- **The host was not quiet.** @@LOAD@@ The figure of a row is the **minimum** over its repeats (median in parentheses);
+  the `Load` column is the highest 1-minute load average of the host at the end of a run of the row.
+  Instruction counts do not depend on the load; compare launchers by the paired ratios.
+
+## I.2 Launcher x workers: Init, Std, Cedar slice, reachability
+
+<!-- BEGIN table:w7-machine:-:1,4,8 -->
+| Corpus | Workers | Configuration | CPU s | Wall s | Peak RSS | Instructions | Collections (young / full; pause) | Runs | Load |
+|---|--:|---|--:|--:|--:|--:|---|--:|--:|
+| init | 1 | `jvm` | 12.75 (12.75) | 8.18 (8.19) | 590 MB | 161.8 G | 0 / 0; 0 ms | 2 | 75 |
+| init | 1 | `native` | **7.94 (7.97)** | 7.97 (7.99) | 252 MB | 136.6 G | n.r. | 2 | 74 |
+| init | 4 | `jvm` | 18.41 (20.01) | 4.90 (5.08) | 771 MB | 177.7 G | 0 / 0; 0 ms | 2 | 74 |
+| init | 4 | `native` | **8.08 (8.11)** | 2.89 (2.95) | 334 MB | 137.1 G | n.r. | 2 | 75 |
+| init | 8 | `jvm` | 24.30 (29.31) | 6.15 (6.17) | 1.18 GB | 198.4 G | 1 / 0; 105 ms | 2 | 76 |
+| init | 8 | `native` | **8.32 (8.56)** | 2.36 (2.92) | 487 MB | 137.2 G | n.r. | 2 | 76 |
+| std | 1 | `jvm` | 17.35 (17.75) | 12.72 (12.77) | 1.16 GB | 227.0 G | 1 / 0; 95 ms | 2 | 80 |
+| std | 1 | `native` | **13.20 (13.37)** | 13.23 (13.78) | 330 MB | 219.5 G | n.r. | 2 | 84 |
+| std | 4 | `jvm` | 22.90 (24.94) | 6.80 (7.90) | 1.23 GB | 253.6 G | 1 / 0; 98 ms | 2 | 86 |
+| std | 4 | `native` | **13.21 (13.46)** | 4.43 (5.20) | 450 MB | 220.9 G | n.r. | 2 | 85 |
+| std | 8 | `jvm` | 34.17 (35.56) | 6.32 (7.40) | 1.24 GB | 262.7 G | 1 / 0; 105 ms | 2 | 85 |
+| std | 8 | `native` | **13.82 (14.24)** | 3.60 (4.35) | 567 MB | 221.0 G | n.r. | 2 | 86 |
+| cedar-hot-ax | 1 | `jvm` | 7.89 (8.11) | 4.13 (4.34) | 981 MB | 86.9 G | 1 / 0; 30 ms | 2 | 94 |
+| cedar-hot-ax | 1 | `native` | **3.60 (3.62)** | 3.64 (3.66) | 190 MB | 46.4 G | n.r. | 2 | 95 |
+| cedar-hot-ax | 4 | `jvm` | 9.01 (9.96) | 2.73 (3.06) | 1.07 GB | 88.2 G | 1 / 0; 57 ms | 2 | 95 |
+| cedar-hot-ax | 4 | `native` | **3.52 (3.54)** | 1.41 (1.48) | 319 MB | 46.4 G | n.r. | 2 | 95 |
+| cedar-hot-ax | 8 | `jvm` | 12.26 (12.44) | 3.04 (3.23) | 1.10 GB | 92.1 G | 1 / 0; 70 ms | 2 | 94 |
+| cedar-hot-ax | 8 | `native` | **3.84 (3.86)** | 1.41 (1.43) | 404 MB | 46.5 G | n.r. | 2 | 94 |
+| reachability | 1 | `jvm` | 9.51 (9.59) | 7.20 (7.38) | 2.03 GB | 75.1 G | 5 / 0; 338 ms | 2 | 91 |
+| reachability | 1 | `native` | **8.12 (8.23)** | 8.21 (8.34) | 1.32 GB | 58.5 G | n.r. | 2 | 88 |
+| reachability | 4 | `jvm` | 11.29 (11.69) | 5.31 (5.51) | 2.91 GB | 79.6 G | 5 / 0; 541 ms | 2 | 85 |
+| reachability | 4 | `native` | **8.58 (8.73)** | 5.44 (7.10) | 1.74 GB | 58.5 G | n.r. | 2 | 86 |
+| reachability | 8 | `jvm` | 11.51 (12.00) | 7.15 (7.31) | 1.73 GB | 86.1 G | 5 / 0; 232 ms | 2 | 85 |
+| reachability | 8 | `native` | **8.38 (8.47)** | 6.18 (7.31) | 1.89 GB | 58.5 G | n.r. | 2 | 87 |
+<!-- END table:w7-machine:-:1,4,8 -->
+
+Paired ratios, CE native image against the JVM launcher (the two runs of a group are seconds apart),
+all worker counts, then per worker count:
+
+<!-- BEGIN ratio:w7-machine:jvm -->
+| Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
+|---|--:|--:|--:|--:|--:|
+| `native` | 0.473 (0.243 - 0.878) | 0.735 | 0.42 | 0.752 | 24 |
+<!-- END ratio:w7-machine:jvm -->
+
+One worker:
+
+<!-- BEGIN ratio:w7-machine:jvm:-:1 -->
+| Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
+|---|--:|--:|--:|--:|--:|
+| `native` | 0.677 (0.437 - 0.878) | 1.006 | 0.35 | 0.823 | 8 |
+<!-- END ratio:w7-machine:jvm:-:1 -->
+
+Four workers:
+
+<!-- BEGIN ratio:w7-machine:jvm:-:4 -->
+| Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
+|---|--:|--:|--:|--:|--:|
+| `native` | 0.464 (0.323 - 0.760) | 0.621 | 0.39 | 0.759 | 8 |
+<!-- END ratio:w7-machine:jvm:-:4 -->
+
+Eight workers:
+
+<!-- BEGIN ratio:w7-machine:jvm:-:8 -->
+| Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
+|---|--:|--:|--:|--:|--:|
+| `native` | 0.368 (0.243 - 0.744) | 0.567 | 0.42 | 0.681 | 8 |
+<!-- END ratio:w7-machine:jvm:-:8 -->
+
+@@READ2@@
+
+## I.3 Worker count
+
+CPU time and wall clock by worker count (minimum over the repeats), and what more workers cost and
+buy against one worker: `CPU N w / 1 w` above 1.00 is the price in the primary metric, `Wall 1 w / N w`
+the speed-up.
+
+<!-- BEGIN scaling:w7-machine -->
+| Corpus | Configuration | CPU s, 1 w | CPU s, 4 w | CPU s, 8 w | Wall s, 1 w | Wall s, 4 w | Wall s, 8 w | CPU 4 w / 1 w | CPU 8 w / 1 w | Wall 1 w / 4 w | Wall 1 w / 8 w | Peak RSS, 8 w | Runs |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| init | `jvm` | 12.75 | 18.41 | 24.30 | 8.18 | 4.90 | 6.15 | 1.44 | 1.91 | 1.67 | 1.33 | 1.18 GB | 2/2/2 |
+| init | `native` | 7.94 | 8.08 | 8.32 | 7.97 | 2.89 | 2.36 | 1.02 | 1.05 | 2.75 | 3.38 | 487 MB | 2/2/2 |
+| std | `jvm` | 17.35 | 22.90 | 34.17 | 12.72 | 6.80 | 6.32 | 1.32 | 1.97 | 1.87 | 2.01 | 1.24 GB | 2/2/2 |
+| std | `native` | 13.20 | 13.21 | 13.82 | 13.23 | 4.43 | 3.60 | 1.00 | 1.05 | 2.99 | 3.68 | 567 MB | 2/2/2 |
+| cedar-hot-ax | `jvm` | 7.89 | 9.01 | 12.26 | 4.13 | 2.73 | 3.04 | 1.14 | 1.55 | 1.51 | 1.36 | 1.10 GB | 2/2/2 |
+| cedar-hot-ax | `native` | 3.60 | 3.52 | 3.84 | 3.64 | 1.41 | 1.41 | 0.98 | 1.07 | 2.58 | 2.58 | 404 MB | 2/2/2 |
+| reachability | `jvm` | 9.51 | 11.29 | 11.51 | 7.20 | 5.31 | 7.15 | 1.19 | 1.21 | 1.36 | 1.01 | 1.73 GB | 2/2/2 |
+| reachability | `native` | 8.12 | 8.58 | 8.38 | 8.21 | 5.44 | 6.18 | 1.06 | 1.03 | 1.51 | 1.33 | 1.89 GB | 2/2/2 |
+<!-- END scaling:w7-machine -->
+
+@@READ3@@
+
+## I.4 mathlib (reference engine), one run per launcher
+
+@@MATHLIB@@
+
+<!-- BEGIN table:w7-mathlib-ref -->
+(no measurements yet)
+<!-- END table:w7-mathlib-ref -->
+
+## I.5 Heap and collector flags
+
+@@FLAGS@@
+
+## I.6 What the machine accepted in these runs
+
+@@ACCEPT@@
+
+## I.7 What was changed, what was not measured, how to repeat
+
+@@CHANGED@@
 
 # Part II - the rehearsal with the reference engine (wave 4)
 

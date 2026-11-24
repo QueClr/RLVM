@@ -24,6 +24,14 @@ package rlvm.load;
  */
 public interface LoadTarget {
 
+    /**
+     * A hint, never required: shared term {@code sharedId} is about to be named as a child of a
+     * shared node of the unit being written. A target whose node writer reads the child's node may
+     * start loading it now. The default does nothing.
+     */
+    default void touch(int sharedId) {
+    }
+
     /** Node flag: two or more referrers inside the declaration's segment (RECONCILIATION section 3). */
     int F_SHARED = 1 << 13;
     /** Node flag: body of a binder, or a root of a declaration. */

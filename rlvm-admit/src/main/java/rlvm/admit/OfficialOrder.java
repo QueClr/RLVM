@@ -465,13 +465,10 @@ final class OfficialOrder {
                 if (v > 0) {
                     mentions(v);
                 } else if (v < 0) {
-                    Overlay overlay = terms.overlay();
-                    if (overlay == null) {
+                    if (terms.overlay() == null) {
                         unavailable("no overlay to decode a proof block");
                     } else {
-                        int root = overlay.blockRoot(-(v + 1));
-                        terms.refresh();
-                        mentions(root);
+                        blockMentions(-(v + 1));
                     }
                 }
                 break;
@@ -560,6 +557,34 @@ final class OfficialOrder {
             }
         }
         return out;
+    }
+
+    /**
+     * {@link #mentions} of the root of proof block {@code block}. The block is decoded into the
+     * session's overlay for the walk and given back at once ({@code found} holds constant ids, the
+     * visited set is empty again): the simulation of a large file never holds more than one decoded
+     * block, and the overlay's block map stays as the caller left it. (Before wave 7 every block of
+     * the file stayed decoded until the end of the simulation: 160 MB for Init.)
+     */
+    private void blockMentions(int block) {
+        Overlay overlay = terms.overlay();
+        long mark;
+        try {
+            mark = overlay.mark();
+        } catch (UnsupportedOperationException e) {
+            int root = overlay.blockRoot(block);
+            terms.refresh();
+            mentions(root);
+            return;
+        }
+        try {
+            int root = overlay.blockRoot(block);
+            terms.refresh();
+            mentions(root);
+        } finally {
+            overlay.resetTo(mark);
+            terms.refresh();
+        }
     }
 
     /** Adds to {@link #found} the constant every CONST / PROJ below {@code root} names (if it has a record). */
@@ -812,9 +837,7 @@ final class OfficialOrder {
             if (v > 0) {
                 mentions(v);
             } else if (v < 0 && terms.overlay() != null) {
-                int root = terms.overlay().blockRoot(-(v + 1));
-                terms.refresh();
-                mentions(root);
+                blockMentions(-(v + 1));
             }
         }
         for (int i = 0; i < nFound; i++) {

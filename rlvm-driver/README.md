@@ -689,6 +689,40 @@ Earlier states of the tree went through the same guards four times during the da
 09:39Z: 230 / 230 and SOUNDNESS 0 twice); the list is in `work/status/rlvm-driver.log`. With the arena's
 time limits enforced the slice lost up to 9 `perf/*` tests to the host's load (load average 150 to 180);
 without the limits, and in the invariance suite, each of them has the expected verdict.
+
+### Wave 7: the machine as primary engine (2026-11-24, 13:30Z to 15:00Z)
+
+All rows: `-X engine=machine`, CE native image `-O3`, arena-shaped container (8 performance cores, 16 GB,
+`perf stat`), under the measurement lock, columns CPU time, wall clock, peak RSS, instructions. Tool:
+`work/rlvm-driver/w7/m.py` (a copy of the machine integrator's `work/machine-int/m.py`; rows in
+`work/rlvm-driver/w7/measure.tsv`, summary `work/rlvm-driver/w7/summary.py`). **The host's load average was 40
+to 190 during all of it** (more than thirty agents; the container's cores are its own, the memory system is
+not): CPU times are 3 % to 10 % above the machine integrator's of 13:00Z for the same binary, and single
+runs of one configuration differ by up to 5 % (the Cedar slice by more). Differences below that are not
+results.
+
+#### Session cap (request of the machine integrator, requests.log 13:05Z)
+
+`-X machine.switches=warm,gated,expect -X session-mib=N`, one worker, the distribution the integrator
+measured (`work/machine-int/dist-g-native`: machine 608b84b2b142, driver eb0944caa630), three rounds (the Cedar
+slice without a warm session: two), median
+(range) of the CPU time in seconds; instructions in G:
+
+| `session-mib` | Init CPU | instr | Std CPU | instr | Cedar slice CPU | instr |
+|---|--:|--:|--:|--:|--:|--:|
+| 2 | 7.71 (7.64 - 8.15) | 118.0 | 14.08 (13.49 - 14.17) | 196.5 | 3.32 (3.02 - 3.51) | 46.0 |
+| **4** | **7.78** (7.73 - 7.83) | 109.6 | **13.80** (13.71 - 13.87) | 185.1 | **3.40** (2.97 - 3.59) | 45.9 |
+| 8 | 8.23 (8.18 - 8.61) | 103.1 | 14.59 (14.25 - 15.33) | 175.6 | 3.58 (3.51 - 3.59) | 44.8 |
+| 16 (the former default) | 9.23 (9.14 - 9.29) | 97.9 | 16.32 (16.05 - 17.23) | 167.2 | 4.15 (3.83 - 4.19) | 44.0 |
+| no warm session (no switch) | 8.13 (8.07 - 8.27) | 139.0 | 13.72 (13.45 - 13.99) | 223.2 | 3.40 (3.37 - 3.42) | 47.0 |
+
+Reading: 2 MiB and 4 MiB cannot be told apart (Init -0.9 %, Std +2.0 %, Cedar slice -2.4 % for 2 MiB: inside
+the spread of the three runs); 8 MiB costs +5.3 % to +5.8 % on all three, 16 MiB +18 % to +22 %. **The default
+for the machine is 4 MiB** (`RunConfig.MACHINE_SESSION_BYTES`; what the integrator asked for). The
+instruction count goes the other way (Init 118.0 G at 2 MiB, 97.9 G at 16 MiB): a longer session re-uses more
+and misses the cache more, so the cap is a locality setting and CPU time is the measure for it (OWNER-NOTES
+10). For the machine's owners: on Std a warm session at its best cap is no faster than no warm session
+(13.80 s against 13.72 s, with 17 % fewer instructions); on Init it saves 4 %.
 <!-- measured:end -->
 
 ## Deviations from the design documents

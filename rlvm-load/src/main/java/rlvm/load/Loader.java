@@ -27,12 +27,13 @@ import rlvm.store.Store;
  * The segment is the run of expression records since the last admitted declaration: 4 ints per record
  * (word 0: kind, a saturating 2-bit referrer counter, the BODY and MARK bits; words 1..3: payload).
  * A child is stored as its 1-based index in the segment (positive) or, when it is an earlier record,
- * as minus its shared term id. An earlier record that still sits in a proof block is stored as a
- * PENDING reference (its ordinal) and remembered in a list; at the declaration line, after the names
- * of the unit have been claimed, the pending references are resolved by promoting those records. So
- * the sweep never reads the location table for records outside the segment, promotion never
- * interleaves with the writing of a block, and a promoted CONST / PROJ binds to the names of the unit
- * that needs it.
+ * as a PENDING reference (its ordinal) whose slot is remembered in a list. At the declaration line,
+ * after the names of the unit have been claimed, the pending references are resolved in one tight
+ * loop: the location of the earlier record is read (the misses of that loop overlap, which they
+ * cannot while records are being scanned), a record in the shared region gives minus its shared term
+ * id, a record that still sits in a proof block is promoted first. So the sweep never reads the
+ * location table for records outside the segment, promotion never interleaves with the writing of a
+ * block, and a promoted CONST / PROJ binds to the names of the unit that needs it.
  *
  * <h2>The split</h2>
  * At a declaration line the records of the segment that the unit's roots reach become shared nodes;
@@ -63,13 +64,18 @@ public final class Loader implements ExportSink, RecordSink {
     private static final int S_BIG = 1 << 8;
     private static final int FLAG_SHIFT = 8;
     /**
-     * Child encoding of an earlier record that is still in a proof block: {@code -(PENDING + ordinal)}.
-     * Shared ids are below 2^28, so everything at or below {@code -PENDING} is pending.
+     * Child encoding of an earlier record until the declaration line resolves it:
+     * {@code -(PENDING + ordinal)}. Shared ids are below 2^28, so everything at or below
+     * {@code -PENDING} is pending.
      */
     private static final int PENDING = 1 << 28;
 
     /** Ordinals are ints; a segment (at most 2^29 - 1 records) must still fit above this. */
     private static final int MAX_EXPR_RECORDS = Integer.MAX_VALUE - (1 << 29) - 16;
+
+    // MEASUREMENT SWITCHES of wave 7 (removed before publication)
+    private final boolean EAGER_LOC = System.getenv("RLVM_LOAD_EAGER_LOC") != null;
+    private final boolean TOUCH = System.getenv("RLVM_LOAD_NO_TOUCH") == null;
 
     private final LoadTarget out;
     private final LoadOptions options;
@@ -559,8 +565,8 @@ public final class Loader implements ExportSink, RecordSink {
 
     /**
      * Encodes a reference to record {@code ordinal}, made by the record being appended, for segment slot
-     * {@code slot}, and counts it: the 1-based index in the segment, minus the shared id of an earlier
-     * record, or a PENDING reference to an earlier record that is still in a proof block.
+     * {@code slot}, and counts it: the 1-based index in the segment, or a PENDING reference to an
+     * earlier record (resolved by {@link #resolvePending()} at the declaration line).
      */
     private int child(int ordinal, int slot) {
         int local = ordinal - segBase;
@@ -580,10 +586,17 @@ public final class Loader implements ExportSink, RecordSink {
         if (ordinal <= 0) {
             throw badReference(ordinal);
         }
-        int l = loc[ordinal];
-        if (l > 0) {
-            return -l;
+        if (EAGER_LOC) {
+            int l = loc[ordinal];
+            if (l > 0) {
+                return -l;
+            }
         }
+        // An earlier record: its location is not read here. loc[] is far larger than the caches and
+        // the next record cannot be scanned before this load has been issued, so one miss at a time
+        // would be outstanding; resolvePending() reads the locations of all such references of the
+        // segment in one tight loop, where the misses overlap. Nothing moves in between: locations of
+        // earlier records change only by promotion, which happens in that loop and after it.
         int n = pendCount;
         if (n == pend.length) {
             pend = Arrays.copyOf(pend, n * 2);
@@ -626,7 +639,11 @@ public final class Loader implements ExportSink, RecordSink {
         return -l;
     }
 
-    /** Promotes the earlier records the segment refers to; called once the names of the unit are claimed. */
+    /**
+     * Resolves the references of the segment to earlier records (all of them are PENDING until here):
+     * a record in the shared region gives its id, a record that still sits in a proof block is
+     * promoted first. Called once the names of the unit are claimed.
+     */
     private void resolvePending() {
         final int[] s = seg;
         final int[] pd = pend;
@@ -939,20 +956,29 @@ public final class Loader implements ExportSink, RecordSink {
      */
     private void markReachable(int top) {
         int[] s = seg;
+        final LoadTarget o = out;
         for (int p = (top - 1) << 2; p >= 0; p -= 4) {
             int w = s[p];
             if ((w & S_MARK) == 0) {
                 continue;
             }
+            // A marked record becomes a shared node, and writing it reads the nodes of its children.
+            // A child in the segment is marked; a child that is an earlier shared term is announced
+            // to the target (LoadTarget.touch), so that its node is on its way into the cache when
+            // the sweep comes to this record instead of being missed there, one record at a time.
             switch (w & K_MASK) {
                 case Kind.APP, Kind.LAM, Kind.PI -> {
                     int a = s[p + 1];
                     int b = s[p + 2];
                     if (a > 0) {
                         s[(a - 1) << 2] |= S_MARK;
+                    } else if (TOUCH) {
+                        o.touch(-a);
                     }
                     if (b > 0) {
                         s[(b - 1) << 2] |= S_MARK;
+                    } else if (TOUCH) {
+                        o.touch(-b);
                     }
                 }
                 case Kind.LET -> {
@@ -961,18 +987,26 @@ public final class Loader implements ExportSink, RecordSink {
                     int c = s[p + 3];
                     if (a > 0) {
                         s[(a - 1) << 2] |= S_MARK;
+                    } else if (TOUCH) {
+                        o.touch(-a);
                     }
                     if (b > 0) {
                         s[(b - 1) << 2] |= S_MARK;
+                    } else if (TOUCH) {
+                        o.touch(-b);
                     }
                     if (c > 0) {
                         s[(c - 1) << 2] |= S_MARK;
+                    } else if (TOUCH) {
+                        o.touch(-c);
                     }
                 }
                 case Kind.PROJ -> {
                     int a = s[p + 1];
                     if (a > 0) {
                         s[(a - 1) << 2] |= S_MARK;
+                    } else if (TOUCH) {
+                        o.touch(-a);
                     }
                 }
                 default -> {

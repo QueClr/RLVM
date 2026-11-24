@@ -100,6 +100,11 @@ public final class T2Bridge {
         return m.rs[cap + Layout.RUN_H + i];
     }
 
+    /** Word {@code i} of the run slab (after {@link #lastArgs}). */
+    public static int runWord(Machine m, int i) {
+        return m.rs[i];
+    }
+
     /** The kind of a record ref ({@code v > Layout.HOLE}). */
     public static int kindOfRecord(Machine m, int v) {
         return m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
@@ -239,6 +244,29 @@ public final class T2Bridge {
             return Code.isNat(m, ind) ? (v == Layout.IMM ? 0 : 1) : -1;
         }
         return v > Layout.HOLE ? Code.ctorIndex(m, v, ind) : -1;
+    }
+
+    /**
+     * The NEU case of {@code Code.fields}: the index in the run slab of the first of the last {@code n}
+     * arguments of constructor application {@code v}, or -1 if {@code v} is not a NEU with at least n arguments
+     * (a Nat literal, an NSUC cell, anything malformed: the stepper's body decides, through {@link #step}).
+     */
+    @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
+    public static int lastArgs(Machine m, int v, int n) {
+        if (v <= Layout.HOLE) {
+            return -1;
+        }
+        int o = v << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        if (vh[o] >>> Layout.KIND_SHIFT != Layout.NEU) {
+            return -1;
+        }
+        int len = vh[o] & Layout.AUX_MASK;
+        if (len < n) {
+            return -1;
+        }
+        int run = vh[o + Layout.B];
+        return run + Layout.RUN_H + (m.rs[run] & Layout.RUN_FAR) + len - n;
     }
 
     /**

@@ -30,7 +30,7 @@ scripts/dev.sh slice                                              # table for mo
 | `engine=diff` | differential run. With the test kit's provider `diff` on the class path (`scripts/dev.sh diff`): its `DiffEngine` is the primary engine (engine under test and oracle per unit; the driver's own differential mode stays off). Without it: the best non-reference engine is the primary engine and the driver runs the reference kernel beside it on every unit (`RunConfig.differential`); a usage error (64) if the reference kernel is the only engine | - |
 | `load=batch\|pipelined` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver (jar of 09:39Z) loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `batch` |
 | `order=file\|namespace` | order of ready units | the driver's (`file`) |
-| `session-mib=N`, `memory-mib=N` | session reset threshold, memory account limit | the driver's |
+| `session-mib=N`, `memory-mib=N` | session reset threshold, memory account limit | the driver's, unless the primary engine prefers another (below) |
 | `scan-threads=K` | scanner threads of the reader (they run only on mapped input: `io=mapped` or `auto`; on buffered input the reader stays on the calling thread) | 0 |
 | `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `buffered` (plain `read`; ARCHITECTURE 1.4) |
 | `stop-after=load\|env` | stop after a phase | - |
@@ -42,6 +42,17 @@ scripts/dev.sh slice                                              # table for mo
 
 | any `KEY[=VALUE]` the driver knows | **driver settings** (`RunConfig.knows(key)` / `config.set(key, value)`; today `unit-mib`, `keep-mib`, `gc-after-mib`, `chunk`, `env-batch`, `spill-ms`, `publish-units`, `publish-mib`, `pipeline-min-mib`, `no-fallback`; the list and the meaning are the driver's, `rlvm-driver/README.md`). A new knob of the driver needs no change here | the driver's |
 
+**Run defaults of the primary engine** (wave 7; request of the machine integrator, a session cap of
+4 MiB for the machine's warm sessions): `EngineProvider.runDefaults(Map engineOptions)` returns
+`-X` settings of the wiring or the driver (for example `session-mib` -> `4`) that the engine prefers
+when it is the PRIMARY engine of the run. `RlvmChecker` applies them as if typed before the command
+line, so an explicit `-X KEY=VALUE` always wins (`RlvmChecker.withRunDefaults`, `Engines.runDefaults`);
+`--stats` names the ones in effect (`engine-defaults={session-mib=4}`). A provider may not default
+`engine`, `engine.*` or an engine's own key, and a default the checker refuses is the provider's
+fault: both are an internal error (status 3), never a usage error and never a verdict. No provider
+declares a default today (the reference kernel prefers nothing; the machine's provider is its
+workflow's to change), so nothing moved for any run.
+
 An unknown key, a malformed value, an engine name without a provider, a value an engine or the driver
 refuses and `engine=diff` without a second engine all end the run with status **64** before the export
 is opened. Order of ownership of a key: the wiring's own keys first, then the engines' declared keys,
@@ -51,7 +62,7 @@ Launcher options: `--threads N` becomes `RunConfig.workers`; automatic (`--threa
 option) is passed on as 0 and the driver decides (`Run.resolveWorkers`: `max(1, min(processors, 8) - 2)`,
 capped at one worker per 128 units; it was a fixed 1 until wave 4). The arena run line names its count;
 `--stack-size` becomes `deepStackBytes` and caps `workerStackBytes`; `--quiet` turns `explain` off;
-`--stats` prints one line (`outcome, engine, reference, workers, load, wall_ms`) on stderr.
+`--stats` prints one line (`outcome, engine, reference, workers, load, [engine-defaults,] wall_ms`) on stderr.
 
 ## Invariants
 
@@ -95,9 +106,10 @@ capped at one worker per 128 units; it was a fixed 1 until wave 4). The arena ru
 
 | Command | What it does |
 |---|---|
-| `scripts/dev.sh dist` | `build.sh --published --jvm-only`: `rlvm-main` compiled from the tree, every other RLVM module as its owner last published it in `.toolchain/m2`; `work/dist/bin/rlvm-jvm`; a few seconds |
-| `scripts/dev.sh dist-native` | the same plus the CE native image `work/dist/bin/rlvm` (about 40 s wall, 460 s CPU on this host) |
-| `scripts/dev.sh dist-tree` | plain `build.sh`: everything from the working tree (what `scripts/arena/build.sh` does) |
+| `scripts/dev.sh dist` | `build.sh --published --jvm-only`: `rlvm-main` compiled from the tree, every other RLVM module as its owner last published it in `.toolchain/m2`; `work/dist/bin/rlvm-jvm`; a few seconds. Since wave 7 the shared `work/dist` is **versioned**: every build is installed as `work/dist.d/<UTC time>-<jars sha256 prefix>-<jvm\|native>` and `work/dist` is a symbolic link switched to it by one `rename(2)`; `gate.sh`, `slice.sh`, `bench/track` and the platform matrix resolve the link once at their start, so a rebuild can no longer change the build under a running guard. Old versions are deleted when they are neither among the newest 4 nor younger than 90 minutes (`RLVM_DIST_KEEP`, `RLVM_DIST_MIN_AGE_MIN`). Copy it with `cp -aL` |
+| `scripts/dev.sh dist-native` | the same plus the CE native image `work/dist/bin/rlvm` at **`-O3`** (wave 7: the default of `build.sh --opt`, the arena's flags; 2.5 min wall, about 900 s CPU on this host; `--opt 2` halves the build and costs 10-18 % CPU at run time, `work/status/machine-integration.md`) |
+| `scripts/dev.sh dist-versions` | the versions in `work/dist.d/` and the one `work/dist` names |
+| `scripts/dev.sh dist-tree` | plain `build.sh`: everything from the working tree (what `scripts/arena/build.sh` does). GraalVM CE only: the Oracle GraalVM PGO image is built only with `--pgo`, for labelled measurements (OWNER-NOTES item 11); `--train-arg` passes arguments to its training runs |
 | `scripts/dev.sh suite [--jvm]` | `bench/rlvm/suite.sh`: `bench/run-suite.py` over the 230 published tests with the distribution (uses the JVM launcher automatically when no native image is built) |
 | `scripts/dev.sh slice [--all] [--native\|--jvm] [--probe]` | `scripts/slice.sh`: tutorial tests (or all 230), reference engine, one worker, batch load; writes `work/status/slice.md` / `slice-all.md` (summary, wrong verdicts, failures grouped by message with a guess at the owning module, every test); `--probe` runs the driverless probe instead (`slice-probe*.md`) |
 | `scripts/dev.sh diff ARGS`, `oracle`, `judge`, `mutate`, `corpus`, `track` | pass-throughs to `rlvm-testkit/bin/testkit` and `bench/track/track.py`; `diff` is the test kit's differential campaign; `diff-launcher EXPORT` runs the JVM launcher once with the test kit's `diff` engine provider on `RLVM_EXTRA_CP` |

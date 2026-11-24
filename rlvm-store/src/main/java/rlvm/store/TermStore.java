@@ -45,6 +45,8 @@ public final class TermStore {
     private int segStart = 1;
     /** Smallest export id whose {@code depMax} is {@link Node#DEP_UNRESOLVED}; MAX_VALUE while there is none. */
     private int firstUnresolved = Integer.MAX_VALUE;
+    /** Sink of {@link #touch}. */
+    private int touched;
     /** Reference counts (saturating at 2) of the nodes {@code segStart ..}. */
     private byte[] refs = new byte[1024];
     private NodeCtx ctx;
@@ -296,6 +298,19 @@ public final class TermStore {
             h |= Node.F_BODY;
         }
         ex[nw] = h;
+    }
+
+    /**
+     * Writer thread: reads the first and the last word of export node {@code n} (a node may straddle
+     * two cache lines) and keeps the sum, so that the loads are really made. See
+     * {@link StoreBuilder#touch}.
+     */
+    void touch(int n) {
+        if (n > 0 && n < exEnd) {
+            int[] d = ex;
+            int w = n << 3;
+            touched += d[w] + d[w + Node.W_LPSET];
+        }
     }
 
     /** Marks {@code n} as a declaration root, if it belongs to the unit being written. */

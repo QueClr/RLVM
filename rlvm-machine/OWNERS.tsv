@@ -89,3 +89,8 @@ NOTES-M5.md	M5
 NOTES-M6.md	M6
 NOTES-M7.md	M7
 NOTES-M8.md	M8
+# ---- package S: the independent soundness review (wave 6; hostile exports and one test class asserting the official verdicts).
+#      S*.java also matches Sexp.java and StepSizeTest.java, which have explicit M6 lines above (first match wins).
+src/test/java/rlvm/machine/S*.java	S
+src/test/resources/s/*	S
+NOTES-S.md	S

@@ -113,6 +113,15 @@ public final class StoreBuilder {
         return cid > 0 ? cid : ~name;
     }
 
+    /**
+     * A hint of the loader: shared term {@code sharedId} will be named as a child of a node appended
+     * soon. Loads the node's words now, so that the cache miss of a far child overlaps with other
+     * work instead of stalling the append. Changes nothing; an id that is not an export term is ignored.
+     */
+    public void touch(int sharedId) {
+        terms.touch(sharedId);
+    }
+
     /** Flags a shared term of the unit being written as a declaration root ({@link Node#F_BODY}). */
     public void markRoot(int sharedId) {
         if (sharedId > 0) {

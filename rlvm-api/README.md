@@ -13,7 +13,7 @@ Never depends on an engine, the driver, the loader or Truffle.
 | Type | Role |
 |---|---|
 | `Engine`, `Session`, `EngineFactory`, `StatsSink`, `RunSignals` | the facade between driver and engines (unchanged from the skeleton) |
-| `EngineProvider` | the service through which an engine is found. Added (wave 4, both `default`): `optionKeys()` = the `-X` keys the engine understands, `factory(Map<String,String> options)` = the engine configured by them. `rlvm -X KEY=VALUE` with a declared key reaches the engine without a change in launcher, wiring or driver; an undeclared key or a refused value (`IllegalArgumentException`) is a usage error, status 64 |
+| `EngineProvider` | the service through which an engine is found. Added (wave 4, both `default`): `optionKeys()` = the `-X` keys the engine understands, `factory(Map<String,String> options)` = the engine configured by them. `rlvm -X KEY=VALUE` with a declared key reaches the engine without a change in launcher, wiring or driver; an undeclared key or a refused value (`IllegalArgumentException`) is a usage error, status 64. Added (wave 7, `default`): `runDefaults(Map<String,String> engineOptions)` = run settings (keys of the wiring or the driver, e.g. `session-mib` -> `4`) the engine prefers when it is the primary engine; the wiring applies them under the command line (an explicit `-X` wins); default: none |
 | `KernelOps` | infer / whnf / def-eq on term ids for admission code (unchanged) |
 | `Outcome`, `Reason`, `KernelException`, `ResourceException` | verdict vocabulary. `Reason.CANCELLED` (decline) added; `Reason.isRetryable()` |
 | `Budget` | step / byte / depth limits. `warm()` has **no step limit**; `strict(steps, bytes)` is the only step-limited budget; `cold(bytes)`; `with*` |

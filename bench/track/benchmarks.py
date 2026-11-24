@@ -81,6 +81,8 @@ def main() -> int:
     parser.add_argument("--history", default=track.DEFAULT_HISTORY)
     parser.add_argument("--out", default=os.path.join(ROOT, "docs", "BENCHMARKS.md"))
     parser.add_argument("--stdout", action="store_true")
+    parser.add_argument("--note", action="append", default=[], metavar="TEXT",
+                        help="a further item for the list 'What the numbers are' (repeatable), e.g. which machine jar was measured")
     args = parser.parse_args()
     history_dir = os.path.abspath(args.history)
     engines = [e for e in (args.engine or args.engines).split(",") if e]
@@ -113,6 +115,10 @@ def main() -> int:
     first = rlvm_columns[0]
     main_rows = [r for r in rows if r[5][first]]
     rest_rows = [r for r in rows if not r[5][first]]
+    if not main_rows:
+        # Nothing of the first engine is recorded (an empty history, a new engine name): the whole
+        # ladder with '-' in its column, never an empty document.
+        main_rows, rest_rows = rows, []
 
     def label_of(name: str, size: int, expected: int) -> str:
         label = f"{name} ({size / 1e6:,.0f} MB)" if size >= 1e6 else f"{name} ({size / 1e3:,.0f} kB)"
@@ -140,6 +146,8 @@ def main() -> int:
     out.append("  today's default. native = the CE native image `bin/rlvm` (`-O3`); JVM = `bin/rlvm-jvm` (GraalVM CE 25, SerialGC,")
     out.append("  13 GB heap, so its RSS is mostly heap reservation that was touched). Which launcher ships and why: `docs/PLATFORM.md`.")
     out.append("- **Rows**: every corpus of the ladder with a machine result; the others are listed at the end with the reference engine.")
+    for note in args.note:
+        out.append("- " + note.strip())
     out.append("- **Baselines**: gruszka, nano-lean and the official checker (`leanchecker`, arena version v4.35.0) with the run lines")
     out.append("  of the arena's checker definitions (gruszka and nano-lean use 4 threads, the official checker one), measured the")
     out.append("  same way on the same host (`docs/research/12-baselines.md`, `bench/baselines.json`).")
@@ -199,11 +207,7 @@ def main() -> int:
     pairs = [(c, "gruszka") for c in rlvm_columns]
     if len(rlvm_columns) > 1:
         pairs.append((rlvm_columns[0], rlvm_columns[1]))
-    if main_rows:
-        metric_tables(main_rows, columns, pairs)
-    else:
-        out.append(f"(no result of engine `{engines[0]}` with the {launcher_name[args.launcher]} and {args.threads} workers in the history yet)")
-        out.append("")
+    metric_tables(main_rows, columns, pairs)
 
     # The other launcher, both engines: CPU time / wall clock / peak RSS in one table.
     if any(cells[c] for _n, _t, _c, _s, _e, cells in rows for c in other_columns):
