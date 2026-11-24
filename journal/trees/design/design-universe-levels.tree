@@ -1,9 +1,56 @@
-\title{Universe levels}
+\title{Universe levels: one store, two relations, substitution ids}
 \taxon{Design}
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{levels}
+\tag{reference-engine}
+\tag{machine}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-level/README.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented in \code{rlvm-level}. Both engines and inductive admission use the official relation by default; the complete relation is an opt-in.}
+
+\p{Universe levels are hash-consed \code{int} ids in flat arrays: equal structure means equal id, which is the official structural equality. The module has no dependency. It ports the level algebra of the official kernel operation by operation and puts a complete, semantic comparison on top.}
+
+\subtree[design-universe-levels-relations]{
+\title{The official relation and the complete one}
+
+\p{The official kernel decides whether two levels are equivalent by comparing their \em{normal forms}. That normal form is not canonical under \code{imax}, so the official test is sound and incomplete. From the answers of the official checker v4.36.0: \code{\verb~|imax u 1~} against \code{\verb~|max u 1~} is rejected, \code{\verb~|imax u (v+1)~} against \code{\verb~|max u (v+1)~} is accepted, \code{\verb~|imax u v~} against \code{\verb~|imax (imax u v) v~} is rejected. The module offers this test and the official ordering test exactly as they are.}
+
+\p{The complete relation rests on a canonical form of the \em{denotation} of a level: two levels have the same canonical form exactly when they are equal under every assignment of naturals to the parameters. It accepts a superset of the official test. The canonical form is "unknown" beyond 64 distinct parameters, 256 sublevels or 4,096 visited nodes, and the comparison then falls back to the official procedure; the largest level of the real exports has 19 parameters. The two zero tests of the official kernel, "never zero" and "always zero", the latter being the test for a proposition, are syntactic and nevertheless semantically exact, so they are the same in both families.}
+
+\p{The port was pinned against the real kernel: 11,128 generated exports, one question each (4,358 equivalences, 3,831 orderings, 2,939 instantiations followed by an equivalence), and the store reproduces every official answer. The set is rich in true but hard questions: the official kernel says no to 1,982 semantically true equalities and to 183 true orderings in it. On real data the difference is latent: Mathlib has 48,246 level records in 14,638 semantic classes, and the official normal form splits 489 of those classes, meaning the export contains two spellings of one level that the official kernel would not identify if it ever compared them.}
+
+\p{Which relation a verdict uses was decided by the owner: [dec-P8XP](dec-P8XP). The opt-in is \code{\verb~|-X levels=complete~}; it reaches the reference engine in all its roles and turns on the machine's switch \code{levels-complete}. The two arena tests \code{imax-right-successor} and \code{imax-nested-absorption} are rejected by default and accepted with the opt-in. Because the official relation is not transitive, the sides of a comparison matter, and \code{Sort} nodes and level lists of constants are compared with the relation in force, never by id alone.}
+}
+
+\subtree[design-universe-levels-structure]{
+\title{Where the spelling matters}
+
+\p{Levels are kept as the export spells them, with no normal form at load, because recursor types are compared syntactically. Structure matters in two operations, both ported exactly: the simplifying constructors for \code{max} and \code{imax}, and instantiation, which rebuilds a changed node through them and returns an unchanged node as it is. The official kernel keeps a node when its operands come back \em{pointer}-equal; here that is structural equality. The two agree whenever structurally equal levels are one object, which holds for levels read from an exporter file. They differ where the official kernel substitutes freshly allocated parameter objects, and there it rejects declarations whose levels its own rebuild respells. The rule, "accepted exactly when each compared level is officially equivalent to its rebuilt spelling", was pinned against 1,600 official answers, 170 of them rejections. It is applied in [the admission of inductive blocks](design-inductive-admission) and, for a file with two level records for one parameter, in [the loader](design-export-loader).}
+
+\p{The normal form sorts parameters by Lean's order on names. It matters for exact agreement: with the order reversed, 35 of 8,189 official answers of the golden set change, never unsoundly.}
+}
+
+\subtree[design-universe-levels-overlays]{
+\title{Frozen base and overlays}
+
+\p{The loader builds the base store with the raw constructors. Freezing it adds the official normal form of every level, so that normalising a base level is a memo hit later: Mathlib grows from 48,248 to 70,610 levels in 37 ms. Each worker then works on an overlay, which on purpose is a private copy of the base arrays and hash table, made in 0.5 to 1.9 ms for Mathlib: hot paths have one array and no "base or overlay" branch, and workers share no memory after creation. Resetting an overlay costs time proportional to what it created. A pipelined load publishes a chain of frozen snapshots instead of one base; a worker that meets a unit beyond its snapshot takes the newest one first.}
+}
+
+\subtree[design-universe-levels-subst]{
+\title{Substitution ids}
+
+\p{A constant is used at a list of levels, and its type, value and recursor rules mention its universe parameters by name. The first draft of the instruction set let closures and suspensions carry the bare level list. The critics found this a blocker: two constants that share one body term under swapped parameter lists would produce the same closure, and the same key in the level-substitution cache, for different instantiations: a wrong answer by identity. The binding resolution is that what travels is a \em{substitution id}: the pairing of the parameter names of the constant a term belongs to with the levels it is instantiated at. Equal pairs give equal ids, 0 is the identity, and a wrong number of levels gives no id and is rejected by the structural checks before it can reach an engine. Closures, suspensions, the keys of the level-substitution cache, inline-cache keys and calls of code blocks carry this id. Levels are substituted only where evaluation or inference meets a sort or a constant node, behind a direct-mapped cache. A term without universe parameters gets the identity in every closure made from it. The regression test is the export the critics described: \code{\verb~|c1.{u,v}~} and \code{\verb~|c2.{v,u}~} over one body term must give different closures at the same levels.}
+}
+
+\subtree[design-universe-levels-cost]{
+\title{Cost and limits}
+
+\p{Measured in instructions per operation on the JVM with the Graal JIT, synthetic small levels, on an overlay: a comparison of identical ids is not distinguishable from the empty benchmark loop; the official test on different ids with memoised normal forms about 15 instructions over the empty loop; an instantiation that hits its cache about 27; the canonical form of a new small level about 1,900, which is 2.5 times the official normal form. How often a checker reaches the cold path was not measured. A level nested deeper than 16,777,215 is refused, where the official kernel panics. Operations recurse on the nesting of \code{max} and \code{imax}; hostile nesting can end in a stack overflow, which fails closed and is not tested.}
+}
+
+\p{Detail: \src{rlvm-level/README.md}; section 2.7 of \src{docs/design/ISA.md} and item B1 of \src{docs/design/RECONCILIATION.md} for the substitution ids; \src{rlvm-ref/README.md} for the engine's side. Related: [the value model](design-value-model), [the reference engine](design-reference-engine). Source: [the session that built the foundation modules](ses-BQZM), [the design session](ses-EMMW) for the substitution ids, and [the pipeline wave](ses-CVTE) for the default relation.}

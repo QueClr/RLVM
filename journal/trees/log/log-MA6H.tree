@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:32Z}
+\title{\code{\verb~|-X passes=N~}: check-only later passes over the loaded store}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\tag{benchmark}
+\meta{release}{Unreleased}
+\meta{commit}{49fff61}
+\import{base-macros}
+
+\p{The project's metric is warm wall clock, and for it a process has to check the same export more than once. With \code{\verb~|passes=N~}, 1 to 1000, pass 1 is the run itself and gives the verdict and the exit status. Passes 2 to N check every definition, theorem, axiom and opaque constant again over the same store with new engines, sessions, scheduler and board, and are made only when pass 1 accepted. Each pass prints one line with its verdict, wall and CPU time. On the prelude export with the machine and 4 workers on the JVM launcher the check phase takes 0.790, 0.238 and 0.220 s in passes 1, 2 and 3. A later pass has no load and no environment pass. Published with 101 tests, 98 run green and 3 opt-in.}
+
+\p{Detail: \src{rlvm-driver/README.md}. Commit \commit{49fff61}. Session: [machine speed and pipeline](ses-CVTE).}

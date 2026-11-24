@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:33Z}
+\title{Pipelined loading: the loader publishes units while it reads}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{loader-store}
+\tag{unreleased}
+\tag{loader}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{In pipelined mode the loader hands what it has read to the checking threads at unit boundaries, every 4,096 units or every 32 MiB of input by default. The order of a hand-off is fixed: first a snapshot of levels and lists, then the store's literals, blocks and frontier, then a signal to the listener, so that whoever sees n loaded units finds the level snapshot for them already published. Batch mode is unchanged except for the header: a format version other than 3.x is now read like any other file. Published with 59 tests green. The 230 published tests stayed correct, and of the 11,605 tutorial mutants 10,972 agree (10,877 before) and 633 are declined (728 before) with 0 soundness and 0 completeness differences, because the 95 mutants that change the format version now get the official verdict.}
+
+\p{Detail: \src{rlvm-load/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

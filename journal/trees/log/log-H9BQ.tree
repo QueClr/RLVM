@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:41Z}
+\title{Closed-term memo and cheaper arguments in evaluation}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{1c67513}
+\import{base-macros}
+
+\p{Three changes of evaluation need no switch because they change no result: a memo of 4,096 cells by term id for the values of closed nodes, an argument picker that returns the argument when the body of an application is a bound variable, and an immediate application record for a neutral head. Under the switch \code{\verb~|gated~} a depth rule was added: an inert application four or more inert levels below the root of its nest is always tabled. That removes a quadratic cliff of gated tabling on unshared dependent nests: a nest of 4,000 levels went from 8,038,031 ticks to 60,017.}
+
+\p{Detail: \src{rlvm-machine/NOTES-M2.md}, \src{rlvm-machine/SWITCHES.md}. Commit \commit{1c67513}. Session: [machine speed and pipeline](ses-CVTE).}

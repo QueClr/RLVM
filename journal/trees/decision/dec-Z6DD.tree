@@ -3,7 +3,45 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{gc}
+\tag{platform}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/GC.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. \code{\verb~|-XX:+UseSerialGC~} is in the JVM launcher line and the native image is built with \code{\verb~|--gc=serial~}.}
+
+\p{\strong{Context.} An early research note had compared collectors on one normalisation-by-evaluation workload by total process CPU time: 2.06 s with Serial, 7.46 s with Parallel and 10.0 s with G1. The owner answered that a realistic workload requires parallelism (owner note 2): a collector is to be judged with parallel workers and wall clock, never from single-threaded CPU totals. The architecture answered by taking the collector off the workers' path: everything that scales with the input is a primitive array whose content no collector reads, see [the architecture](design-architecture). The owner then asked whether ZGC and Shenandoah had been measured. Until then ZGC had been run only in synthetic spikes and Shenandoah never, so the question was asked again on the real checker.}
+
+\p{\strong{Decision.} The JVM launcher keeps the Serial collector. ZGC and Shenandoah are not used. G1 is kept in mind for one case, the reference engine on Mathlib-sized inputs. The native image has no choice: the native image of GraalVM CE has only the serial collector and one that never collects.}
+
+\p{\strong{Evidence.} The study ran every collector that GraalVM CE 25 offers in JVM mode: Serial, Parallel, G1, generational ZGC, Shenandoah in both modes, and Epsilon, which never collects; 646 runs by the count of the commit that recorded the report (\commit{dfaec61}). Both engines (the machine with the switch set \code{\verb~|warm,gated,expect,probes,code,casetrees~}), 1, 4 and 8 workers on Init, Std, the Cedar slice and reachability, 8 workers on Mathlib. Every run is a fresh process in an arena-shaped container (8 CPUs, 16 GB) on the aarch64 development host, heap 8 GB (12 GB for Mathlib), a young generation of 1 GB where the collector takes one. Ratios are paired with the Serial run of the same batch. The table is the ratio to Serial of CPU time, geometric mean of Init and Std (3 repetitions, 5 at 8 workers).}
+
+\table{
+\tr{\th{Collector}\th{Machine, 1 worker}\th{Machine, 8 workers}\th{Reference, 1 worker}\th{Reference, 8 workers}}
+\tr{\td{Parallel}\td{0.99}\td{1.00}\td{1.01}\td{1.03}}
+\tr{\td{G1}\td{1.00}\td{1.00}\td{1.00}\td{1.01}}
+\tr{\td{ZGC}\td{1.04}\td{1.07}\td{1.06}\td{1.06}}
+\tr{\td{Shenandoah}\td{1.15}\td{1.17}\td{1.21}\td{1.19}}
+\tr{\td{Shenandoah, generational}\td{1.15}\td{1.16}\td{1.19}\td{1.26}}
+}
+
+\ul{
+\li{\strong{Wall clock with 8 workers: no collector improves it.} The geometric means of the 8-worker wall ratios are 1.05 (machine) and 1.02 (reference) for Parallel and 1.08 and 1.01 for G1; ZGC and Shenandoah are at 1.2 to 1.3 times Serial's. The lowest single cell is G1's 0.99 on Std with the reference engine.}
+\li{\strong{Mathlib, machine, 8 workers}, one run per collector on the arena CPU set: Serial 174.5 s of CPU time; Parallel 1.01, G1 1.02, ZGC 1.04, Shenandoah 1.17, generational Shenandoah 1.19 times that; wall clock 1.01, 1.02, 1.05, 1.15, 1.17; peak resident set from 4.2 GB with Serial to 7.9 GB with generational Shenandoah.}
+\li{\strong{There is nothing to collect.} With the machine no collector runs a single collection on Init, one on Std, nine on Mathlib. The reference engine allocates 4 to 8 GiB on Init and Std and 188 GiB on Mathlib, nearly all of it dead at the next young collection. Serial's pauses are 0.2 to 0.9 \% of the CPU time of every run (Mathlib with the reference engine: 7.3 s of 1,065 s) and 3 \% in one cell, reachability with the reference engine. Epsilon is not faster than Serial.}
+\li{\strong{What the concurrent collectors add instead}: barriers in compiled code and a slower C2 (Shenandoah: 20 to 31 \% more instructions on both engines, with zero collections on the machine on Init); a commit of the whole heap at start when minimum and maximum heap are equal (ZGC: 1 to 3 s per run); uncompressed pointers (ZGC: the reference engine's footprint doubles).}
+}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{The collector line of [the launchers](design-launchers) is unchanged, and a JVM run exercises the same kind of collector as the image.}
+\li{One follow-up is on Serial's own side. With eight workers of the reference engine on Mathlib the 105 MB survivor spaces of a 1 GB young generation overflow at every young collection, which is why Serial needs 12.4 GB where G1 needs 7.1 GB; G1 also showed 0.5 s of pauses against 7.3 s and 3 to 6 \% less CPU time in two runs. A larger young generation or survivor space was not measured; it is the first thing to try before G1.}
+\li{The collector question is closed for the arena build; G1 for a native image exists only in Oracle GraalVM, see [dec-6E82](dec-6E82).}
+}
+
+\p{\strong{Limits.} The study measured fresh processes, CPU time first and wall clock second; it did not measure warm passes. The host was loaded throughout: 8-worker runs of Init and Std scatter by 10 to 40 \% between identical runs, and wall clock cannot rank collectors there. Most of the matrix was taken on eight efficiency cores; the headline cells were repeated on the arena CPU set and agree. Not measured: other heap and young-generation sizes, tuning flags of the collectors, x86-64.}
+
+\p{Documents: \src{docs/research/profiles/GC.md}, \src{docs/PLATFORM.md}, \src{docs/design/ARCHITECTURE.md}. Source: [the session of the profiles and prototypes](ses-JRSD).}

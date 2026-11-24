@@ -3,7 +3,47 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. The switch \code{t2} is not in the machine's default set. The module \code{rlvm-truffle} stays built, tested and in every distribution, and runs only under the switch.}
+
+\p{\strong{Context.} RLVM is meant to be a kernel on Truffle whose guest language is the judgment language of the mechanised check ([what RLVM is](standing-policies-design)), so [the Truffle tier](design-truffle-tier) compiles the code blocks of constants. The design wrote the test down before anything was built: go if and only if total CPU time, compiler included, is at least 5 \% lower than the code tier on reachability or at least 3 \% lower on cedar as a whole, wall clock is not higher on either, and no corpus loses more than 0.5 \%; the expectation was no-go. The [metric](dec-7QMU) then became warm wall clock with warm-up not charged, which removes the cost of compiling from the account and is the most favourable reading for a JIT. The tier was built and shown correct, but its first owner could not measure it on a loaded host; the second owner measured it in quiet windows.}
+
+\p{\strong{Decision.} The tier is a no-go as a default. Nothing argues for switching it on in the launcher, and nothing argues for deleting it: it is correct, and it is the place where a change of the value model would pay.}
+
+\p{\strong{Evidence.} Warm wall clock per pass in ms (median of the later half of the warm passes), the code tier \code{warm,gated,expect,code,casetrees} against the same with \code{t2}, back to back in one quiet window on the aarch64 host, one engine kept over the passes.}
+
+\table{
+\tr{\th{Workload, platform, workers}\th{Code tier}\th{With the tier}\th{Blocks compiled}}
+\tr{\td{reachability, JVM, 8; promotion at 1,000 entries, unbounded}\td{520}\td{529 (+1.7 \%)}\td{177}}
+\tr{\td{Cedar slice, JVM, 8; the same}\td{232}\td{321 (+38 \%)}\td{686}}
+\tr{\td{full cedar, JVM, 8; the same}\td{1315}\td{1827 (+39 \%)}\td{1,820, with 52.6 s of compilation}}
+\tr{\td{Cedar slice, native image, 8; the same}\td{319}\td{391 (+23 \%)}\td{713}}
+\tr{\td{reachability, JVM, 1 and 8; final policy}\td{1118 and 572}\td{1006 (-10.0 \%) and 529 (-7.5 \%)}\td{12}}
+\tr{\td{reachability, native image, 1 and 8; final policy}\td{1448 and 737}\td{1392 (-3.8 \%) and 701 (-4.8 \%)}\td{12}}
+\tr{\td{Cedar slice, JVM, 1 and 8; final policy}\td{1426 and 220}\td{1487 (+4.3 \%) and 286 (+30 \%)}\td{2}}
+\tr{\td{Cedar slice, native image, 1 and 8; final policy}\td{1808 and 316}\td{1802 (-0.3 \%) and 324 (+2.4 \%, inside the scatter)}\td{2}}
+\tr{\td{full cedar, JVM launcher, 8; final policy}\td{1574}\td{1664 (+5.7 \%, passes still falling)}\td{12}}
+}
+
+\p{The final policy promotes only a block that has at least 2 \% of all activations of the engine after 20,000 of them. With it the tier is worth 7 to 10 \% on closed evaluation on the JVM and 4 to 5 \% in the native image, is neutral on the Cedar slice in the image and a loss there on the JVM. Init and Std on the JVM with eight workers showed no gain. A later window on the default set of the wave-6 integration confirmed the figure for reachability at one worker: 977 to 918 ms on the JVM and 1321 to 1238 ms in the image, with 13 blocks.}
+
+\p{\strong{Why.} The time of a block is in the interning probes it calls, not in the dispatch that compilation removes. Reachability spends 83 \% of a warm pass inside code blocks, but the stepper's own code is 16.8 \% and the probes and inserts are 57 \%; the Cedar slice spends 14 \% inside blocks at all, spread over hundreds of them. A compiled block must build the same records in the same order, so the ceiling of compiling single blocks is 17 \% on reachability and 7 \% on the Cedar slice before the tier's own entry cost. With an unbounded cumulative count every block is compiled in the end: the compiler threads are busy through every measured pass and take cores from eight workers on eight cores.}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{The jar is on the class path of every distribution. \code{\verb~|-X machine.switches=default,t2~} with \code{\verb~|-Drlvm.t2.mode=warm~} switches the tier on for an evaluation-heavy run; without the switch, in the strict engine or without an optimising Truffle runtime the machine runs exactly as before.}
+\li{The verdict changes only with the machine, not with the tier: what a block builds would have to be private to it. A call instruction between blocks does not do it ([dec-246U](dec-246U)); records that get an identity only on demand might ([the second value model](design-values-v2), [dec-36MX](dec-36MX)), and on Cedar-level work even that reaches at most the 14 \% of the records that blocks make unless the generic judgments use it too.}
+\li{Not measured: con-leche, cslib, Mathlib, navier-stokes-euler; the native image on Init, Std and full cedar; the native launcher. Most rows are from the module's multi-pass tool and not from the driver.}
+\li{Unexplained: the Cedar slice on the JVM is 60 ms per pass slower with only two compiled blocks, at unchanged CPU time of the workers at eight workers.}
+\li{The rows with unbounded promotion predate the fix of a defect that kept every machine of an engine reachable, which biases the 8-worker rows against the tier by an amount that was not separated.}
+}
+
+\p{Detail: \src{rlvm-truffle/NOTES-T3.md} sections 1 to 9; \src{rlvm-machine/SWITCHES.md}, section "Truffle tier"; \src{docs/design/ISA.md} section 0.5 for the criterion. Source: [profiles and prototypes](ses-JRSD).}

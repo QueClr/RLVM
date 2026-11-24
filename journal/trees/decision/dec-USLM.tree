@@ -3,7 +3,52 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{loader}
+\tag{soundness}
+\tag{reference-engine}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-load/README.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted and implemented in the loader as the option \code{strictMetadata}, off by default, which \code{\verb~|-X policy=strict~} turns on. The same option declines a let whose \code{nondep} flag is set.}
+
+\p{\strong{Context.} An export can wrap an expression in a metadata record, \code{mdata}. The store has no such node: by the architecture's first design the loader returns the wrapped expression, on the argument that the node has no meaning for type checking. For the official kernel the node is nevertheless a term of its own. Every cache of the kernel is keyed by terms, so \code{\verb~|a = mdata b~} is another key than \code{\verb~|a = b~}; and the node hides what is under it from the kernel's syntactic tests, among them the test that starts eager reduction. Three things were found on 2026-11-24:}
+
+\ul{
+\li{\strong{Inductive and quotient records.} The official checker compares these records with the kernel's own declarations by an equality that sees metadata. Four hand-written probes were accepted by RLVM and rejected by the official checker. Since then an inductive or quotient record whose roots carry metadata is declined at load.}
+\li{\strong{The reference engine gives a wrong accept} (finding S3-F2). \code{s3-wc-pos-mdata-bad} repeats a comparison with one side wrapped in metadata after a full reduction changed what the kernel's cheap reduction returns. Officially the wrapped pair is a new pair and fails; the reference engine sees the old pair and answers from its cache. The audit of the reference engine traced it to the loader, not to a cache. In the other direction, \code{s3-mdata-eager-hidden-ok} is accepted officially, because the node hides an eager-reduction marker and the comparison is plain, and is rejected by the reference engine.}
+\li{\strong{The same class for a let.} The \code{nondep} flag of a let is part of the official term identity and is not stored: \code{r2-id-let-nondep-bad}, official reject, reference engine accept (finding R2-F1).}
+}
+
+\p{The reference engine is the oracle of every differential gate and the engine that confirms rejections. The first response was therefore a loader that declines every declaration that carries metadata; a decline is never a wrong verdict. That loader was in its gate when the owner chose [practical exactness](dec-TQSI).}
+
+\p{\strong{Decision.} The owner's note names this case: behaviour that exists only for bug-for-bug agreement on adversarial files, declining metadata nodes among it, belongs to the strict mode and not to the default.}
+
+\table{
+\tr{\th{Where the metadata is}\th{Practical, the default}\th{Strict}}
+\tr{\td{Type or value of an axiom, definition, theorem or opaque}\td{Transparent: the wrapped term stands for the node.}\td{The declaration is declined, per unit.}}
+\tr{\td{A let with the flag \code{nondep} set, anywhere}\td{The flag is ignored, as before.}\td{Treated like a metadata node: the declaration or record that contains it is declined.}}
+\tr{\td{An inductive or quotient record}\td{Declined at load, for the rest of the file from that record on; the units before it are still checked.}\td{The same.}}
+}
+
+\p{\strong{Evidence.}}
+
+\ul{
+\li{\strong{The accepts are of kind T.} The certificate for \code{s3-wc-pos-mdata-bad} is \code{s3-wc-pos-mdata-ok}: the same term without the earlier full reduction, which the official checker accepts. Nothing false is accepted: every accept path of the kernel is a derivation, and an entry that is in a cache "too early" changes only which true facts the incomplete official procedure finds.}
+\li{\strong{No real input has the node or the flag.} The exporter writes metadata records only when asked to, and the eight corpora and the arena tests have none; of their 550,621 let records none has the flag set. With the option off the loader is, record for record, the loader without it; a file without metadata pays one null test per record.}
+\li{\strong{What the official checker does with metadata}, from the mutant corpus that wraps one expression reference in a metadata record, 1,976 mutants of 186 tests, 461 accepted and 1,515 rejected officially: it accepts metadata in the roots of definitions, theorems and axioms (all 247 such mutants of good sources) and rejects it in constructor types (87 of 87), recursor types (66 of 66), right-hand sides of rules (80 of 80) and quotient types (15 of 15). The reference pipeline, with the rule for inductive and quotient records, agrees on 779 of these mutants and declines 1,197, with no wrong verdict; they are 1,197 of the 1,683 declines over all four mutant corpora.}
+\li{\strong{Cost of the strict decline on real input}: the summary of the audit states that the strict options decline no declaration of the eight corpora. The section of the document that was to list those runs was not filled in.}
+}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{Transparent metadata is an [accepted risk](accepted-risks-divergence) of the default configuration and class 5 of [the divergence note](design-official-divergence-reference).}
+\li{The practical mode has one known wrong reject, \code{s3-mdata-eager-hidden-ok}. It needs a file with metadata records; item (c) of the [contract](design-exactness-contract) is about real inputs, which have none.}
+\li{A strict run of a file with metadata gives no verdict. An export of real code written with the exporter's metadata option is such a file. Representing the node exactly would need a node kind in the store and in every engine; it is not planned.}
+\li{Keeping the let flag exactly, as a header bit in the identity of a let node, was designed across six modules and not started. The audit of the reference engine was written before the strict decline for the flag was in the loader and still calls it an unpublished patch; the loader's document records it as implemented, with a test.}
+\li{The hostile rows with metadata belong to the strict mode's suite, not to the rows that the default configuration must get right.}
+}
+
+\p{Detail: \src{rlvm-load/README.md} (deviation 7 and the table of hostile input), \src{docs/design/review/reference-caches.md} (the audit, divergences D1 and D2), \src{rlvm-store/README.md} (what is not in the store), \src{rlvm-main/README.md} section "Policy", \src{rlvm-testkit/README.md} (the mutant corpus). Related: [the export loader](design-export-loader), [the caches of the reference engine](design-reference-caches). Source: [the exactness session](ses-874D).}

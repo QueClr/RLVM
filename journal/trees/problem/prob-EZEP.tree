@@ -1,0 +1,24 @@
+\title{The Cedar slice on the JVM is 60 ms per pass slower with two compiled blocks}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{platform}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The symptom.} With the final promotion policy of the Truffle tier two blocks of the Cedar slice are compiled, with 45,000 compiled activations per pass. On the JVM the warm pass is then 60 ms slower at one worker, +4.3 percent of 1426 ms, and at eight workers, +30 percent of 220 ms, at unchanged CPU time of the workers. That is more than 1 microsecond per compiled activation, which compiled code cannot cost. In the native image the same workload with the same two blocks is neutral. Source: \src{rlvm-truffle/NOTES-T3.md}, sections 1 and 9, point 3; quiet windows, a measuring tool that keeps one engine; [the profiling session](ses-JRSD).}
+\p{\strong{What is known.}}
+\ul{
+\li{The two blocks are the cons rule of \code{\verb~|List.rec~}, 5 instructions, which is also the hottest block of reachability, where it gains, and a rule of \code{\verb~|Bool.rec~}, 2 instructions. They compile in 107 ms; there are 0 deoptimisations.}
+\li{It is not the retention of machines by the tier and not a lock in its reporting: both were found while looking and fixed, and the row was +27 percent before them.}
+\li{In a profile of a run with 96 blocks on an open host, the frames of the hook that every activation passes once the switch is on, compiled or not, are about 2 percent of the samples, and the C2 compiler thread of the host still has 9 percent of the thread load in late passes.}
+\li{So part of the figure at one worker may be the price of the hook on a workload with a million stepped activations per pass. The rest, and the figure at eight workers, is not explained.}
+}
+\p{\strong{What would close it.} The first things to try, as the owner left them: the run with the hook alone and no block compiled; a compilation log for the resume routine that only the tier calls; the per-unit times of the driver for the unit on the critical path. The tier stays off by default either way, see [the Truffle tier](ins-KLLU).}
+\p{See also: [the Truffle tier](design-truffle-tier).}

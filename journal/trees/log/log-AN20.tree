@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:39Z}
+\title{A \code{\verb~|let~} inside an evaluated term is zeta by sharing}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{afe1c5b}
+\import{base-macros}
+
+\p{The instruction set made every \code{\verb~|let~} value a suspension flagged as a let variable, so that every value built from an evaluated \code{\verb~|let~} counted as open. That is the official behaviour only for the let variable of inference; inside an evaluated term the official kernel substitutes the value. With the wrong rule lazy delta skipped the folding of Nat literals exactly where the official kernel folds, and the machine unfolded division and remainder on large literals step by step: five declarations of the Cedar slice cost about 1,000 times the official work and ran out of memory. Evaluation now treats a \code{\verb~|let~} like the argument of a beta step. One unit of the slice went from 73.7 M ticks and a memory decline to 60,569 ticks; the whole slice went from 168 s of worker CPU with 10 declines to 4.63 s with all 8,064 engine checks accepted (generic tier, one worker, loaded host). The design records the change as its erratum E1.}
+
+\p{Detail: \src{docs/design/RECONCILIATION.md}, \src{rlvm-machine/NOTES-M2.md}. Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N).}

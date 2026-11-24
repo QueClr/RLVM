@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:43Z}
+\title{The arena's complete test set, built locally and byte-identical}
+\taxon{Change}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\tag{arena}
+\meta{release}{Unreleased}
+\meta{commit}{1c3f2e7}
+\import{base-macros}
+
+\p{The arena publishes only its small exports, so \code{\verb~|bench/build-corpus.sh~} builds the complete set with the arena's own build tool at the revision of the published results: 130 test definitions, 270 tests. All 270 exports are byte-identical to the arena's by SHA-256, Mathlib included (6,326,141,213 bytes, 112,081,718 lines). Built side by side on the 20-core development host on 2026-11-23 everything takes about 40 minutes; the slowest is navier-stokes-euler with 32 minutes. The official checker v4.35.0 run over everything except mathlib, cslib and navier-stokes-euler gave 267 of 267 published verdicts; on the three largest corpora it was not run as part of building the corpus.}
+
+\p{Detail: \src{bench/README.md}. Commit \commit{1c3f2e7}. Session: [research, benchmark infrastructure and spikes](ses-XOS5).}

@@ -1,0 +1,28 @@
+\title{No collector beats Serial, because there is nothing to collect}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{gc}
+\tag{platform}
+\tag{performance}
+\meta{origin}{docs/research/profiles/GC.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/GC.md}; [the profiling session](ses-JRSD). Every collector of GraalVM CE 25, JDK 25.0.5, in JVM mode on the real checker: both engines, 1, 4 and 8 workers, Init, Std, the Cedar slice, reachability and Mathlib. The headline cells were taken on the arena cores under the measurement lock with 3 repetitions, 5 at 8 workers; the full matrix on eight efficiency cores without the lock, and the two sets agree. The host was loaded almost throughout: runs of Init and Std with 8 workers scatter by 10 to 40 percent between identical runs.}
+\table{
+\tr{\th{CPU time, ratio to Serial; geometric mean of Init and Std}\th{machine, 1 worker}\th{machine, 8 workers}\th{reference, 1 worker}\th{reference, 8 workers}}
+\tr{\td{Parallel}\td{0.99}\td{1.00}\td{1.01}\td{1.03}}
+\tr{\td{G1}\td{1.00}\td{1.00}\td{1.00}\td{1.01}}
+\tr{\td{ZGC, generational}\td{1.04}\td{1.07}\td{1.06}\td{1.06}}
+\tr{\td{Shenandoah}\td{1.15}\td{1.17}\td{1.21}\td{1.19}}
+\tr{\td{Shenandoah, generational}\td{1.15}\td{1.16}\td{1.19}\td{1.26}}
+}
+\ul{
+\li{With the machine engine no collector runs a single collection on Init, one on Std, nine on Mathlib. The reference engine allocates 4 to 8 GiB on Init and Std and 188 GiB on Mathlib, nearly all dead at the next young collection. The pauses of Serial are 0.2 to 0.9 percent of the CPU time of every run but one. Epsilon, which never collects, is not faster.}
+\li{What the concurrent collectors add instead: barriers in compiled code and a slower C2, 20 to 31 percent more instructions with Shenandoah on both engines although the machine has zero collections on Init; a heap commit at start with ZGC, 1 to 3 s per run; uncompressed pointers with ZGC.}
+\li{With 8 workers no collector improves the wall clock; ZGC and Shenandoah are at 1.2 to 1.3 times the wall clock of Serial. The most a perfect collector could remove is the pause total of Serial: 1.2 s of 90 s with the machine and 7.3 s of 270 s with the reference engine on Mathlib.}
+\li{Mathlib, machine, 8 workers, one run each: Parallel 1.01, G1 1.02, ZGC 1.04, Shenandoah 1.17, generational Shenandoah 1.19 of the 174.5 CPU seconds of Serial; peak RSS from 4.2 GB with Serial to 7.9 GB.}
+}
+\p{The launcher keeps \code{\verb~|-XX:+UseSerialGC~}. An earlier spike on a synthetic normalisation workload had given 2.06 s of process CPU with Serial, 7.46 s with Parallel and 10.0 s with G1, and the maintainer asked for the comparison with parallel workers; this is that comparison. The arena build has no choice: the native image of GraalVM CE has only the serial collector and Epsilon, which is [a problem of its own](prob-BIN4).}
+\p{See also: [the decision that the Serial collector stays](dec-Z6DD).}

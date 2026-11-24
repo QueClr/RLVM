@@ -3,7 +3,48 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{soundness}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-machine/NOTES-M6.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted and in force in every configuration. The switch \code{eager}, which lets the machine keep such declarations, is published, off by default and proposed for the default switch set.}
+
+\p{\strong{Context.} Eager reduction is the one \em{mode} of the official comparison. For an argument of the form \code{\verb~|eagerReduce _ _~} the kernel compares the argument's type with its domain under a flag that lifts two guards: Nat folding and the \code{Bool.true} test also run when a side has a free variable. A pair can be convertible in plain mode and not under the flag, and the reverse. The official kernel answers from its success cache whatever the mode, but that cache lives for one declaration and is keyed by terms whose free variables are unique per binder instance. The machine's pair table and memo words are keyed by values with canonical variables and, in warm sessions, outlive the declaration. Three observations on 2026-11-24 showed the consequence:}
+\ul{
+\li{A memo audit on the arena test \code{\verb~|bad/bugs/rec-of-subst-prop~}: one pair entry, written in unit 112 and read under the flag in unit 128, let the warm machine go past the point where the reference engine rejects. It rejected later for another reason, so every differential gate was clean.}
+\li{Finding S-F4 of the soundness review: a wrong accept with \code{warm}, across two declarations.}
+\li{Finding S-F5: a wrong accept of the machine with no switch at all, in one declaration with two binder scopes that share a canonical variable.}
+}
+
+\p{\strong{Decision.} A declaration that enters eager reduction is not decided by the machine. The only way to set the mode marks the declaration; the machine answers decline (unsupported input) whatever its judgments returned, keeps nothing it derived, answers the driver's cold retry at once, and the reference engine decides the unit. The rule holds in every configuration, the one without switches included: it is a correctness rule, not an optimisation, and a test fails if any other class sets the mode.}
+
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{\em{Run such a declaration again in a fresh session.} It was the first rule, for about twenty minutes, and was withdrawn after S-F5: the two scopes are in one declaration.}
+\li{\em{Do not read positive pairs under the flag.} Not sufficient: memo words that went through the K rule carry the mode too, and the rule loses the case in which the official cache does answer.}
+\li{\em{Stamps on pairs and on every memo word that depends on a comparison, flushed at the mode switch}, or \em{a scratch session for the eager part}. Both leave open whether the official cache holds a given pair.}
+\li{\em{Keep the declarations and check that the official cache cannot matter.} This is the switch \code{eager}, built later the same day, see [eager reduction on the machine](design-eager-reduction).}
+}
+
+\p{\strong{Evidence: what the rule costs.} Units declined with the machine as primary engine, 8 workers, native image: Init 164, Std 203, the Cedar slice 11, reachability 8, con-leche 88, cedar 423, cslib 2,406, navier-stokes-euler 251, Mathlib 6,711 of 714,712 (0.94 \%). They are few and heavy:}
+\ul{
+\li{Mathlib: 23.5 s of thread CPU time on the reference engine for these units, against 177.7 s for the 708,001 units the machine accepts: 11 to 12 \% of a worker's time (profile P8, one worker, loaded host).}
+\li{cslib: 5.9 s of 46.6 s, 12.6 \% of the worker (profile P9, one worker, quiet cores); navier-stokes-euler 1.5 \%, con-leche 2.9 \%.}
+\li{The Cedar slice: its 11 declarations were 18 \% of the machine's ticks there before the rule.}
+\li{Std: one of them is the unit that bounds the wall clock of Std with 8 workers, 1,100 ms on the reference engine.}
+}
+
+\p{\strong{Evidence: what the switch gives back.} With \code{eager} the declines fall to 0 on Init, Std, cedar, reachability and Mathlib at 2.5 to 4.4 \% more machine ticks, and a warm pass over Mathlib with 8 workers in the native image falls from 23.92 to 21.07 s (one row, three check-only passes, quiet window). The other rows, the gates, the one gap that is argued and not demonstrated and the 18 hostile rows declined by design are in the design note.}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{A gate that reads "the machine declined nothing" must subtract the eager-reduction declines; the reports name them.}
+\li{The reference engine stays on the hot path of every real corpus as long as the switch is off.}
+\li{What decides the switch: it enters the default set like any other, after the owners' gates and under [the rule of an adversarial pass with official verdicts](dec-QN1O). The review of the candidate default has attacked it and found no false accept.}
+\li{With the switch alone no divergence from the official verdict is known: the machine decides such a declaration officially or declines it. Combined with [the proof-comparison shortcuts](dec-GL11) the hostile exports of the eager family are accepted; those accepts are of the kind tolerated under [practical exactness](dec-TQSI).}
+}
+
+\p{Related: [staging switches](design-switches), [warm sessions](design-warm-sessions), [conversion](design-conversion). Detail: \src{rlvm-machine/NOTES-M6.md} (F26), \src{docs/design/review/soundness-machine.md} (S-F4, S-F5), \src{docs/design/review/eager-reduction.md}, \src{rlvm-machine/SWITCHES.md}, \src{docs/research/profiles/P8.md}. Sources: [the machine session](ses-Z72N), [the speed wave](ses-CVTE) and [the profiles and prototypes](ses-JRSD).}

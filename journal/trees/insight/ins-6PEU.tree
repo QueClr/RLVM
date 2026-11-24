@@ -1,0 +1,26 @@
+\title{What remains after the shortcuts is uniform: the same operations at 2.6 times the instructions each}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P8.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P8.md}, section 4.6, and \src{docs/research/profiles/P9.md}, section 4.6; [the profiling session](ses-JRSD). Native image, one worker, counts inside the checks; steps of gruszka by its own counter.}
+\table{
+\tr{\th{With the two shortcuts}\th{Machine steps}\th{gruszka steps}\th{Ratio}\th{Instructions per step, machine / gruszka}}
+\tr{\td{Mathlib}\td{680.1 M}\td{454.4 M}\td{1.50}\td{2,133 / 823}}
+\tr{\td{navier-stokes-euler}\td{140.7 M}\td{127.1 M}\td{1.11}\td{2,865 / 874}}
+\tr{\td{cslib}\td{195.7 M}\td{171.3 M}\td{1.14}\td{2,328 / 832}}
+\tr{\td{con-leche, without the shortcuts}\td{74.2 M}\td{57.1 M}\td{1.30}\td{1,979 / 793}}
+}
+\ul{
+\li{On Mathlib the machine makes 345.2 M records against 263.9 M values interned by gruszka, 1.31 times, at 4,200 instructions per record against 1,416.}
+\li{The ratio per class of unit is between 3.3 and 5.5 and per large library area between 2.2 and 6.2: no class sticks out any more.}
+\li{The largest unit of navier-stokes-euler shows it one by one: 3,632,559 machine steps against 3,068,095 for gruszka, the same number of inferences and comparisons, 7.38 G against 2.28 G instructions.}
+\li{In the flat profile of the native image the hash-consing of values is 15.5 to 23.1 percent of the instructions, evaluation 14 to 18 percent, inference 11 to 18 percent. The comparison judgments themselves are small.}
+}
+\p{This part is not about what is computed but about what one operation costs. It is the open problem [the cost of one machine operation](prob-28KQ).}
+\p{See also: [the value model](design-value-model).}

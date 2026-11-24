@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:44Z}
+\title{\code{\verb~|-X policy~} selects practical or strict; new load defaults}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{loader}
+\meta{release}{Unreleased}
+\meta{commit}{c4f8f5d}
+\import{base-macros}
+
+\p{One launcher option selects what a run promises, following [the standing policies](standing-policies). \code{\verb~|policy=practical~}, the default, runs the default engine by priority and none of the exactness-only options. \code{\verb~|policy=strict~} runs the reference engine with every exactness-only option the jars of the run have, such as strict metadata in the loader, and the statistics line names which it had. Neither policy can turn a rejection into an acceptance of something underivable.}
+
+\p{The same publication changes the load defaults: pipelined loading for two or more workers on inputs of 8 MiB and more, two scanner threads on mapped input from 256 MiB, and \code{\verb~|--threads auto~} meaning one worker per CPU up to 8. It was published after the gate on exactly these jars in the default configuration, with no option at all: 230 of 230 tests correct, 17,775 mutants with 0 soundness and 0 completeness differences (16,092 agree, 1,683 declined), and seven corpora accepted by the native image.}
+
+\p{Detail: \src{rlvm-main/README.md}, \src{docs/design/OWNER-NOTES.md}. Commit \commit{c4f8f5d}. Session: [exactness](ses-874D).}

@@ -3,7 +3,41 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{truffle}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. The instruction was prototyped on a private copy of the machine, gated and measured; nothing of it is in the published machine or in \code{rlvm-truffle}.}
+
+\p{\strong{Context.} The measurements of [the Truffle tier](design-truffle-tier) ended in a finding about the machine: a [code block](design-code-objects-and-tiers) builds a redex and then asks a generic judgment to reduce it. For the major premise of a case tree the block interns the application of a known constant to its registers and calls weak-head normalisation on that record; control reaches the callee's block through the generic dispatch, with the arguments unpacked again from the record's spine. There is no call that Truffle could inline, and the stepper pays a record, a spine and a dispatch. The proposed remedy was an instruction \code{CALL} that means "the weak-head normal form of the application of this constant to these registers": enter the callee's case tree or body block directly and intern the application only if the call is stuck. It was to be one operation shared by the stepper and the tier, so that tier equivalence is kept, and it was expected to pay in the stepper by itself.}
+
+\p{\strong{What was built.} A switch \code{call}, off by default. The elaborator emits \code{CALL} for the major premise of an inlined case tree whose term is an application of a definition, and a tail call for such an application in tail position. Two forms were measured. In form U the application is never built unless the call is stuck. In form T, the prototype's default, the application is interned first as the memo key; a flag or a memo of that record answers; otherwise the callee's block is entered directly and the result is written into the record's memo. Everything else (a head that is not a definition, a Nat function, too few arguments, eager reduction) takes the generic path.}
+
+\p{\strong{Decision.} Do not integrate it. It is one more code path through the reduction core, about 440 added lines, for no gain, and no variant of it can do much better.}
+
+\p{\strong{Evidence.}}
+
+\ul{
+\li{Form U saves 1.9 \% of reachability's records and costs 8.3 \% more ticks (9,095,141 to 9,849,776 per warm pass, one worker) and 21 \% more block activations, because 77 \% of the applications at call sites were answered by the memo of their record: not building the redex means computing it again. On library corpora it saves 0.1 to 0.8 \% of the records at equal ticks.}
+\li{Form T changes no count by more than 0.3 \% on any corpus (reachability, the Cedar slice, Init, Std, full cedar).}
+\li{Warm wall clock, quiet windows on the aarch64 host, one engine kept over the passes, \code{default,call} against the default set of the wave-6 integration in twelve cells (JVM, JVM launcher, native image; reachability, Cedar slice, Init, Std, full cedar; 1 and 8 workers): between -4.5 \% and +6.9 \%, both signs on both platforms, mean +0.4 \%. In the steadiest cells, the native image at one worker, it is 0.5 to 1.9 \% slower.}
+\li{For the tier there is nothing on top: \code{t2} with and without \code{call} are the same within the scatter. The direct call node between compiled blocks was not built, because its object was counted first: 68,116 calls per pass on reachability have a compiled caller and a compiled callee, 4.5 \% of the compiled activations, and none on the Cedar slice.}
+\li{The ceiling: the applications at call sites are 497 k of reachability's 8.4 M record-table probes per pass (6 \%) and 92 k of its 4.8 M new records (1.9 \%), and below 1 \% of the records of a library corpus.}
+\li{It is correct as far as it was run. The machine's gate on form T passed with the usual eager-reduction declines: no soundness and no completeness difference, tier equivalence and convention equivalence without a difference, the driver's verdict right in all 233 runs. The hostile suite of 329 exports under five switch sets had nothing unexpected in either form. Form U had no full gate run, and the mutants and the large corpora were not run. The prototype's base was the published machine from before the fix of the wrong accepts E1-F1 to E1-F5; its patches do not touch that code.}
+}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{The finding behind the proposal is corrected: it described the code rightly and its weight wrongly. The memo of weak-head normal forms on application records is what does the work on closed evaluation, so any design that makes applications private or lazy has to keep exactly these as identified records. They are few, 1 to 3 \% of the activations of a library corpus, and they are the ones that are looked up again.}
+\li{A census taken for the prototype says where the records are: arguments and results of applications, and closures, all stored at once. Block instructions make 70 \% of the records on reachability, 29 \% on Init and 14 \% on the Cedar slice; on Cedar-level work six of seven records are made by the generic judgments. That census is an input of [identity on demand](design-values-v2), the one unlock that is left.}
+\li{The other shapes do not have a redex to save: the application of a closure is already direct, the generic evaluation builds the application because it is the value there, and lazy delta compares both sides by identity first and so needs the records.}
+\li{[The Truffle tier stays off](dec-ADIK).}
+\li{Kept outside the repository: the proposed section of the instruction set, the prototype and its patches per owner. The opcode rows reserved for calls in the instruction set may stay reserved or go.}
+}
+
+\p{Detail: \src{rlvm-truffle/NOTES-T3.md} section 10, and the correction at the end of its section 7. Source: [profiles and prototypes](ses-JRSD).}

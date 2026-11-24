@@ -1,0 +1,30 @@
+\title{The duplicated projection record: the same terms, two official verdicts}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{reference-engine}
+\tag{loader}
+\meta{origin}{docs/design/review/reference-caches.md}
+\import{base-macros}
+
+\p{Two exports that contain the same terms and differ only in whether one subterm is written as one record or as two records with the same content. The official checker accepts one and rejects the other. Source: the audit of the reference engine caches, \src{docs/design/review/reference-caches.md}, section 3, finding R2-F2; [the exactness session](ses-874D).}
+\pre{\verb~|
+-- X  = S.q.1                a stuck projection
+-- X' = the same projection, written either as the SAME record or as a SECOND record
+def cX := X
+def cS := Nat.succ X'
+-- the declaration compares  D cX  with  D cS,  and later a pair of the kind of the box example
+
+r2-ptr-same-record-ok     X' is the record of X          official: accept
+r2-ptr-other-record-bad   X' is a second record          official: REJECT
+~}
+\ul{
+\li{The official \code{\verb~|is_def_eq_core~} tests with pointer equality whether its second \code{\verb~|whnf_core~} changed anything. A stuck projection comes back as another object exactly when a full reduction of another occurrence wrote the cache entry. Then the whole comparison runs a second time, and what that second pass leaves in the cache changes a later cheap call.}
+\li{Whether another occurrence is another object is decided by the record ids of the export, by the sharing pass that the official kernel runs when it adds a theorem and not when it adds a definition, and by the allocation inside the kernel. It is not decided by the terms.}
+\li{The reference engine as published accepted both exports. With the continuation fixed to "same object" it accepts both, with "other object" it rejects both: each setting reproduces the official verdict on the file where it is the truth.}
+\li{In the strict mode the reference engine declines both, and accepts the variant in which the order of the declaration makes both continuations agree.}
+}
+\p{Used by [the official verdict depends on object identity](ins-E3MS).}
+\p{See also: [the caches of the reference engine](design-reference-caches).}

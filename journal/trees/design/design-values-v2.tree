@@ -3,7 +3,86 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
+\tag{machine}
+\tag{performance}
 \meta{status}{draft}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/VALUES-V2.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} draft. A design with a prototype on a private copy of the machine; nothing of it is in the main tree. It is recommended for adoption in stages, the first of them as a staging switch that is off by default: see [the decision](dec-36MX).}
+
+\p{In [the value model](design-value-model) every record is entered into the intern table in the operation that makes it. Two findings put that in question. The Truffle tier had nothing to remove from a compiled block, because every value a block builds is a global side effect at birth, see [the Truffle tier](design-truffle-tier). And the census of the reuse study, see [the decision on reference-count bits](dec-80ZZ), showed that applications are 24 to 59 \% of the records and are found again only 3.5 to 21 \% of the time, while closures and delayed arguments are found by two probes in three. The revision asks for which values the probe is paid before it is known that anything will ever look them up, and answers: applications.}
+
+\subtree[design-values-v2-model]{
+\title{The model}
+
+\p{A reference denotes one value for the life of a session, and equal references are equal values. That is all a verdict needs. The other direction, that equal values have equal references, is sharing, and sharing is needed in three places only: the subject of a memoised judgment (class M), the components of a key (class K: frame slots, the arguments of an interned application, the base of a projection or offset cell, the type of a free variable), and the two sides of a comparison (class C: the pair table).}
+
+\table{
+\tr{\th{Kind of value}\th{Identity}}
+\tr{\td{immediates}\td{the reference is the value}}
+\tr{\td{atoms: sorts, constants, free variables, literals}\td{canonical at birth, through small direct-mapped caches}}
+\tr{\td{keys by purpose: tabling records, frames, projection and offset cells; closures and delayed arguments}\td{canonical at birth, as today: they exist to be looked up, and most of their probes hit}}
+\tr{\td{applications built at a lazy site}\td{\strong{private} at birth, identified on demand}}
+}
+
+\p{A private application is written into the ordinary slabs with no hash and no probe; one bit in a side table says "in no table". Every reader works on it unchanged. It is \em{identified} at the moment it enters class K, M or C: its arguments first, iteratively, then one probe. If the key is absent the record itself is entered, in place, under its own reference; if the key is present the record becomes a duplicate that forwards to the canonical one. Reading, matching, projecting, passing, returning and storing it as a memo value do not identify it. A lazy site is the application instruction of a code block, except the application that the next instruction normalises, which is a memo key that hits four times in five. Nothing is reclaimed before the session reset.}
+
+\p{Invariants: a reference means one value; every component of an identified record or interned run is identified, so the identity invariant of the first version holds for identified values as written; unequal references prove nothing unless both are identified, and no judgment may answer "different" from unequal references; which records are private and when each is identified are functions of the sequence of operations, so the equivalence of [control conventions](design-control-convention-h) holds word for word inside the mode. With the three classes complete the machine makes exactly the judgments it makes today, so the tick count with the mode on must equal the tick count with it off. That is the completeness test of the force points.}
+
+\p{Two refinements came from the measurements. \em{Adaptive sites}: a site whose applications are identified three times in four learns to intern at birth again, sampling one construction in 16. \em{Lazy only in a large session}: a probe that is not made is worth a cache miss where the tables have outgrown the cache and less than its bookkeeping where they have not, so a lazy site interns as ever until the session holds \code{\verb~|2^17~} records. A warm session is reset at 1 MiB, so only a declaration that is itself large gets there.}
+}
+
+\subtree[design-values-v2-jit]{
+\title{What a private value is to a JIT}
+
+\p{The stepper still writes a private application, and a write into a shared array is an escape for a compiler too. The design for the tier is "reserve, do not write": a compiled block reserves the reference and keeps head and arguments in a virtual object; it writes the record only where the reference leaves the compilation unit. Escape analysis then removes object and write for every application consumed inside the unit, and both tiers still give every record the same reference. This is where the owner's idea of in-place reuse lands: a virtual object that does not escape is never written at all. Design only; the tier does not know the lazy site.}
+}
+
+\subtree[design-values-v2-soundness]{
+\title{Soundness, in short}
+
+\p{Two equal values can look different: a private application and its twin. Conversion then falls through to the structural test \code{same} or to the complete procedure, which answers "equal" on structurally equal values; the cost may be a decline at the tick bound, never a wrong verdict. Tabling and closure identity are not affected, because frames keep identified bindings only. Two different values could look equal only through a reused reference or a wrong forward: nothing is reclaimed before the reset, and a forward is set only after the probe compared the whole key against a table member with all arguments identified first. No congruence and no transitive closure is introduced.}
+}
+
+\subtree[design-values-v2-measured]{
+\title{What the prototype measured}
+
+\p{The prototype is the machine tree of 2026-11-24 with 667 added lines, one binary with the mode as a property; the switch set is the default set of that tree. Counts are exact counts of one run, JVM launcher, one worker. "Block sites" is the form with classes K, M and C; "never identified" are the probes not made.}
+
+\table{
+\tr{\th{Corpus}\th{Never identified, block sites}\th{Share of the records of the mode-off run}\th{Ticks}\th{Records}}
+\tr{\td{reachability}\td{3.04 M}\td{63 \%}\td{-0.0 \%}\td{+35.8 \%}}
+\tr{\td{Cedar slice}\td{0.29 M}\td{6 \%}\td{-0.1 \%}\td{+4.1 \%}}
+\tr{\td{Init}\td{1.95 M}\td{12 \%}\td{+1.1 \%}\td{+11.8 \%}}
+\tr{\td{a Mathlib slice of 21,127 units}\td{1.17 M}\td{13 \%}\td{+1.6 \%}\td{+15.6 \%}}
+\tr{\td{Std}\td{2.90 M}\td{10 \%}\td{+1.0 \%}\td{+10.6 \%}}
+}
+
+\p{Accepted and declined counts are those of the mode-off run in every row. With every site lazy and no adaptation, four of five private applications are identified on the library corpora: records +37 to +61 \%, ticks +1.6 to +5.9 \%. The classes are worth what the broken modes show: without class M, +25.6 \% ticks on reachability with lazy block sites and +143 \% with every site lazy; without class C, +38 \% ticks on the Cedar slice with every site lazy. In the completeness test, with one session per declaration, block sites are within +0.023 \% (reachability), +0.060 \% (Cedar slice) and +0.197 \% (Init) of today's ticks; the residue is argument pairs compared by reference outside the entry of conversion and two flag memos, four force points that a complete implementation adds.}
+
+\p{Warm wall clock, median of the later warm passes of two processes, inside quiet windows on the aarch64 development host, measured with a test driver that keeps one engine over the passes and has no admission pipeline and no pipelined loading. The recommended form is block sites with adaptive sites, lazy in large sessions only.}
+
+\table{
+\tr{\th{Corpus, platform, workers}\th{Mode off}\th{Recommended form}\th{Difference}\th{Ranges disjoint}}
+\tr{\td{reachability, JVM, 1}\td{1066 ms}\td{888 ms}\td{-16.7 \%}\td{yes}}
+\tr{\td{reachability, JVM, 8}\td{511 ms}\td{460 ms}\td{-10.0 \%}\td{no, they touch}}
+\tr{\td{reachability, native image, 1}\td{1345 ms}\td{1185 ms}\td{-11.9 \%}\td{yes}}
+\tr{\td{reachability, native image, 8}\td{619 ms}\td{638 ms}\td{+3.1 \%}\td{no, inside the scatter}}
+}
+
+\p{On the Cedar slice the form that is lazy in every session costs +4.0 \% and +4.3 \% at one worker on the JVM in two windows (ranges overlapping) and every site lazy costs +9.1 \% (resolved); with the large-session trigger its counters are those of the mode-off run and the wall clock is unchanged (-0.1 \% at one worker). The same mechanism gains where sessions are large and loses where they are small: reachability makes its records in a few sessions of hundreds of thousands to millions of records, the Cedar slice in sessions that are reset at 1 MiB. Why eight workers of the native image lose what one worker gains is not known.}
+
+\p{On the private tree [the full gate](design-gate) passes with declines for every site lazy, for block sites and for the recommended form: no soundness and no completeness difference, no difference in the tier, convention and audit lanes. The hostile suite, 32 switch sets on 329 exports, shows no unexpected verdict with every site lazy.}
+}
+
+\subtree[design-values-v2-open]{
+\title{Stages, and what is not established}
+
+\p{Stage 0 is the plumbing with no behaviour change. Stage 1 is the staging switch in the recommended form. Stage 2 completes classes M and C until the completeness test reads zero, makes it a gate, and only then widens the lazy sites. Stage 3 is the tier. Not recommended: every site lazy without adaptation; lazy closures, suspensions and frames, because only 2 to 6 \% of the suspensions on library corpora are never used; reclamation of private records in the stepper.}
+
+\p{Not established: the gain at eight workers, which is at the edge of the scatter on the JVM and absent in the native image; any timing on Init, Std, cedar, Mathlib or the other project corpora; more than two processes per row, where two JVM processes of one configuration scatter by up to 8 \%; the launcher path with the real pipeline; the mutant corpora with the mode; what the larger footprint costs on the giant declarations of Mathlib (bytes in use at the resets grow by 30 \% on reachability); the combination with the visit filter of [evaluation and tabling](design-evaluation-and-tabling); and how much of the time the avoided probes explain, since no profile was taken.}
+}
+
+\p{Related: [code objects and tiers](design-code-objects-and-tiers), [warm sessions](design-warm-sessions), [the gate](design-gate). Detail: \src{docs/design/VALUES-V2.md}; the census it starts from is \src{docs/research/profiles/X1.md}, the tier's finding \src{rlvm-truffle/NOTES-T3.md}. Source: [the session of profiles and prototypes](ses-JRSD).}

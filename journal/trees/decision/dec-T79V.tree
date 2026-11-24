@@ -3,7 +3,48 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{soundness}
+\tag{reference-engine}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-machine/SWITCHES.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. On 2026-11-24 the machine was the default engine for 54 minutes. When this was written the reference engine was the default again and the machine ran with \code{\verb~|-X engine=machine~}.}
+
+\p{\strong{Context.} A run that names no engine uses the non-reference engine with the highest priority of at least 100, and the [reference engine](design-reference-engine) if there is none. The machine's priority is one line, \code{\verb~|MachineProvider.priority()~}: 100 makes it the default, 10 does not. Nothing else in the launcher changes with it. As primary engine the machine has every rejection re-checked and every decline decided by the reference engine, see [the verdict protocol](design-verdict-protocol).}
+
+\p{\strong{Decision, in three steps.}}
+
+\ol{
+\li{\strong{Made at 19:41Z.} The integrator of wave 6 set the priority to 100 together with the new [default switch set](dec-LZFX), on the gates listed below.}
+\li{\strong{Withdrawn at 20:35Z.} The orchestrator set the priority back to 10. The agent working on eager reduction had written 67 hostile exports with official verdicts, and they showed a family of wrong accepts against the official checker, findings E1-F1 to E1-F5. A bound variable was typed by what its environment slot holds (the value of a let, the argument of a re-inferred beta redex, the comparison variable of the other side), or an expected type was kept as a lambda's own. Such a type is only convertible with the declared one, and the official comparison is not transitive. Three of the five were in the generic tier v0, two in the switch \code{expect}.}
+\li{\strong{The condition for making it again.} As first written: the five findings are fixed, the new exports are strict rows of the hostile suite, and the gates have been run again. As refined later the same evening by the owner's choice of [practical exactness](dec-TQSI): the machine may be the default engine once the gates show items (a) to (c) of the [exactness contract](design-exactness-contract) and an adversarial review of the candidate has found no kind F.}
+}
+
+\p{\strong{Evidence at the time it was made.} All of it on the main tree as published at 19:10Z, machine jar \code{78c74ca92785}:}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{Hostile suite, in process}\td{32 switch sets by 329 exports, 10,528 judgments against the official verdict: 0 unexpected, no known finding still reproduces.}}
+\tr{\td{The machine's gate, v0 and the default set}\td{Pass with declines. SOUNDNESS 0 and COMPLETENESS 0 on all 230 arena tests (15,845 engine checks), Init, Std, reachability and the Cedar slice; tier equivalence, convention equivalence and audits with 0 differences. Every decline of the default set is eager reduction.}}
+\tr{\td{Mutants through the real driver, v0 and the default set}\td{17,775 mutants per set: SOUNDNESS 0, COMPLETENESS 0; 1,008,568 declarations per set with no disagreement in either direction.}}
+\tr{\td{Differential engine through the JVM launcher, default configuration}\td{0 differences on 760,839 units: the 230 tests, the Cedar slice, reachability, Init, Std, con-leche, cedar and cslib. Every unit not compared is an eager-reduction decline of the machine. The commit message that recorded the step gives 760,113 units.}}
+\tr{\td{The corpora with the machine as primary engine, 8 workers, native image}\td{All accepted, nothing rejected by the machine, declines for eager reduction only, for example 6,711 of 714,712 engine checks on Mathlib.}}
+}
+
+\p{\strong{Why none of this saw the findings.} Every gate compared the machine with the reference engine, on real corpora and on mutants, where the declared type and the convertible one are the same type; and the 329 hostile exports had been written before this shape was known and had no such row. In the integrator's words, 0 differences on 760,839 units said nothing about verdicts that need a declared type to differ from a convertible one; a review with new hostile exports belongs before a change of the default engine, not after it.}
+
+\p{\strong{State of the condition when this was written.} The fix of E1-F1 to E1-F6 is published (typed bindings: a bound variable carries its declared type; machine jar \code{5945b6568177}), and 92 rows of this family are in the hostile suite, 6 of them marked kind T. On that jar the full gate for v0 and the default set shows no wrong verdict and no difference, the mutants are at 0 and 0 for both sets, and the differential engine shows 0 verdict differences on 1,153,493 engine checks. The adversarial review of the default set and of the candidate default found no kind F on 987 hostile rows; what it found is kind T and is recorded in [the divergence classes](design-official-divergence), among them E1-F7, which the machine still accepts. The priority in the tree was nevertheless still 10: a new integration of the machine had been started and had not reported, so no document records the second change of default.}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{The default switch set, the session cap and the measurements of wave 6 stand for \code{\verb~|-X engine=machine~}; the benchmark tables name the engine of every row.}
+\li{The hostile suite gained the rows of this family, a kind column, and a step in the end-to-end guard that judges every row by its official verdict; see [the gate](design-gate).}
+\li{A change of the default engine or of a default set now needs an adversarial pass first, see [the rule](dec-QN1O).}
+\li{The addendum to the first soundness review, on which the change had rested, carries the remark that it should not have been read as a review: its list of what was not reviewed was the warning.}
+}
+
+\p{Detail: \src{rlvm-machine/SWITCHES.md} (the note at its top and the table of gates), \src{rlvm-machine/NOTES-INT.md} section 3, \src{docs/design/review/soundness-machine.md} section 7, \src{rlvm-machine/NOTES-M5.md} (the fix), \src{docs/design/review/official-divergence.md} section 6. Source: [the wave-6 session](ses-CVTE) and [the exactness session](ses-874D).}

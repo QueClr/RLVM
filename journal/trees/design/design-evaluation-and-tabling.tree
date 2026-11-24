@@ -1,9 +1,54 @@
 \title{Evaluation and tabling}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented. The switches \code{gated} and \code{bodies} are in the machine's default set. The memo of beta steps (\code{m2b}) is undecided and off. The visit filter of the scout report X1 is a go as a staging switch and is not in the tree.}
+
+\p{\strong{Evaluation.} \code{EVAL} is the generic walk of a term under an environment and a level substitution, the judgment that turns a term into a [value](design-value-model). It performs beta, zeta and the projection of a syntactic constructor, and nothing else: constants stay folded, and unfolding is a judgment of its own, memoised on the value and driven by weak-head normalisation and by [conversion](design-conversion) in the official order. Arguments follow three rules: an argument whose binder the callee does not read is never evaluated (the head is forced first, so the argument is not even built); an inert argument, which can take no beta, zeta or projection step, is evaluated at once; an active one is delayed as a hash-consed suspension. A result may therefore be a suspension, and a caller forces it where it needs the value.}
+
+\p{A \code{let} inside an evaluated term is zeta by sharing with a plain value, like the argument of a beta step. The first design made every let value a flagged suspension, as the official kernel does only for the let variable during inference; that marked every value built from an unfolded body as open, which switched off the folding of Nat literals in lazy delta exactly where the official kernel folds. On one declaration of the Cedar slice the difference was 73.7 M ticks and a memory decline before, 60,569 ticks after. This is erratum E1 of \src{docs/design/RECONCILIATION.md}, see [the design review](design-review-reconciliation).}
+
+\p{\strong{What is tabled, on what key.} All tables live for one [session](design-warm-sessions).}
+
+\table{
+\tr{\th{Judgment}\th{Key}\th{Result kept in}}
+\tr{\td{\code{EVAL}, \code{INFER}, \code{CHECK} of a term}\td{the suspension record of the term, the environment pruned to the bindings the term reads, and the level substitution}\td{memo words of that record}}
+\tr{\td{weak-head normal form, reduction without unfolding, unfolding, the type of a value}\td{the value}\td{memo words of the value's record}}
+\tr{\td{conversion of two values}\td{the unordered pair}\td{status bits of one pair table}}
+\tr{\td{"this closed shared term passed check mode"}\td{the term}\td{one bit, for the whole process (switch \code{pchk})}}
+\tr{\td{code objects and fact records}\td{constant and role}\td{tables of the engine, for the whole process}}
+}
+
+\p{One suspension record is at once the delayed argument, the evaluation cache entry and the inference and checking cache entry of a term under its read bindings: one probe serves all of them. The key is sufficient because the pruned frame holds every binding the term can read (the node's mask is a superset of what is read), the substitution holds every level together with the parameter name it stands for, and each free variable carries its type; no typing context exists outside the key. Evaluation, reduction, conversion and inference without checking do not depend on the declaration being checked. Check mode does, through two conditions (level parameters are declared, constants are visible), and both are established once per declaration root from two summaries that the [term store](design-term-store) keeps per node, so a checked result stays valid in every later declaration of the session. A type inferred without checking never answers a checking query.}
+
+\p{\strong{Completion.} A memo is written by the frame that owns the judgment, in its final state. A frame removed by a cut writes nothing, so no memo holds an answer that depends on a budget. "Undecided" is never stored as "false". The positive pair table holds exact pairs only: no union-find and no congruence closure.}
+
+\p{\strong{Gated tabling} (switch \code{gated}, on by default). Without the switch every application, let and projection node is tabled; a binder needs no record, because the interning of its closure is the memo. That is correct and slow: a probe costs the pruning of the environment and, on a miss, a frame run and a 32-byte record. With the switch a node is tabled only if it is shared (two or more referrers inside its declaration's segment), is the body of a binder, is invariant (its mask is strictly smaller than its single parent's, so it is entered again under every environment of the parent with the same pruned frame), or does not belong to the unit being checked. The flags are node header bits set by the loader from a saturating two-bit referrer counter and by the decoder of proof blocks. The test must never under-approximate sharing, or a DAG is walked as a tree. Two refinements came from measurement:}
+
+\ul{
+\li{A flat inert application (constant head, every argument an atom) is never tabled: building it is cheaper than its probe.}
+\li{The depth rule: an inert application that lies four or more inert levels below the root of its nest is tabled whatever its flags. Gating by flags alone is quadratic on an unshared dependent nest, because inference evaluates the argument of every dependent application and each evaluation walked the untabled nest below it again. On 4,000 nested applications under one binder: 44,030 ticks with everything tabled, 8,038,031 with gating by flags alone, 60,017 with the rule.}
+}
+
+\p{\strong{Bodies without a record} (switch \code{bodies}, on by default). The body of a beta step, the body of an instantiated Pi closure and the domains and results of a telescope are evaluated without a tabling record, and a body that is a projection of a bound variable is the projection of the argument. A body is entered once per application, so its key is new for every new tuple of arguments: the hit rate at this site was 16 \% on Init, 23 \% on the Cedar slice and 0.8 \% on reachability, while the site was 39 \%, 30 \% and 81 \% of all tabling probes there. No DAG is walked as a tree by this, since the number of body evaluations is bounded by the number of beta steps. Measured on the native image built with \code{-O3}, in the arena-shaped container, one worker, two interleaved passes, with the switch set \code{warm,gated,expect,probes} at a session cap of 4 MiB: against the evaluator of the previous wave, CPU time -10.5 \% on the Cedar slice, -37.6 \% on reachability, -10.4 \% on Init and -9.8 \% on Std (the new evaluator without \code{bodies}: -8.7, -1.6, -1.7 and -2.2 \%); peak RSS on reachability 1,136 to 774 MiB; 0 differences from the reference engine on the 230 arena tests and four corpora (units that the machine declines are not compared). No test of the \code{perf} group needs more than 1.12 times the ticks.}
+
+\p{\strong{Without a switch}, changing no result: a closed-term memo of 4,096 direct-mapped cells keyed by the term id (closed nodes are 11 to 17 \% of the tabling probes of the plain machine, 80 to 94 \% of them hits), and a beta step whose body is one of its own variables returns that argument without building an environment.}
+
+\p{\strong{Undecided:} \code{m2b}, a lossy direct-mapped memo of beta steps with a governor that passes it by when it does not hit. It gives back most of what \code{bodies} gives up on repeated steps (17 \% of the beta steps on Init, 23 \% on the Cedar slice, 1.2 \% on reachability). It lowered the instructions of the Cedar slice by 1.8 \% and raised the CPU time of reachability by 2.3 \% in two noisy readings; it stays off until three quiet repeats decide.}
+
+\p{\strong{The visit filter.} The scout report X1 took a census of every record the machine makes. The largest class everywhere is the tabling record of \code{EVAL}: 25 \% of all records on the Cedar slice, 35 \% on Init, 43 \% on reachability (22, 30 and 39 \% under \code{warm,gated,expect}), and 82 to 99.5 \% of them are never found again. What is unshared is the memo key, not the value ([dec-80ZZ](dec-80ZZ)). The filter keeps one bit of visit count per tabling key in a Bloom filter outside the store: the first evaluation of a key makes no frame and no record, the second is tabled as today, so a key is evaluated at most twice. The filter decides only whether a memo is kept, never a value. Against the plain machine it made 18 \% fewer records on the Cedar slice, 30 \% on Init, 28 \% on Std, 29 \% on con-leche and 41 \% on reachability, for 5.8, 5.4, 5.7, 5.3 and 0.7 \% more ticks. Warm check time, JVM launcher, one worker, last pass of a process in a quiet window: reachability 5,687 to 4,143 ms (-27 \%) against the plain machine and 5,585 to 3,972 ms (-29 \%) against \code{warm,gated,expect}; Init under \code{warm,gated,expect} about -6 \% (one process); no resolved change on the Cedar slice. Verdicts were identical and the differential runs clean.}
+
+\p{The filter was not built in the wave-6 integration: it had been measured only against switch sets without \code{bodies} and without the code blocks (\code{bodies} by itself no longer makes the records of the site that was 81 \% of reachability's tabling probes), and a change of the evaluator after the gates would have needed all of them again. Not established for it: eight workers, the native image, the large corpora, and its effect on the present default set, for which no document of the repository reports a measurement. An ephemeral memo with the key held inline, tried in front of the filter, did in counters what it was built for and was slower in time (7.9 \% alone on the Cedar slice): ticks are not time.}
+
+\p{\strong{Audits.} Debug modes recompute every memo hit with the tables bypassed (\code{memocheck}), re-derive every shortcut by the complete procedure (\code{shortcheck}), shift ids at each session reset so that a stale id faults (\code{poison}), and re-derive node masks by a naive traversal (\code{maskaudit}). A failed audit declines the declaration. They are lanes of [the gate](design-gate).}
+
+\p{Related: [code objects and tiers](design-code-objects-and-tiers), [staging switches](design-switches), [the machine](design-machine-worklist). Detail: \src{docs/design/ISA.md} sections 3.1, 4.2, 4.3 and 5; \src{rlvm-machine/NOTES-M2.md} for the evaluator as built, every deviation and every experiment; \src{docs/research/profiles/X1.md} for the census and the filter; \src{rlvm-machine/SWITCHES.md}. Sources: [the design session](ses-EMMW), [the machine](ses-Z72N), [machine speed](ses-CVTE), [profiles and prototypes](ses-JRSD).}

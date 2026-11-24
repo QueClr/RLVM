@@ -3,7 +3,32 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{platform}
+\tag{arena}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/OWNER-NOTES.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. \src{scripts/build.sh} uses Oracle GraalVM only when asked with \code{\verb~|--pgo~}, and no script downloads it.}
+
+\p{\strong{Context.} RLVM is built with GraalVM Community Edition 25. Oracle GraalVM, licensed under the GFTC (free to use, not to redistribute), has two things for a native image that the Community Edition lacks: profile-guided optimisation and the G1 collector. The architecture kept an image with profile-guided optimisation as one of three candidates of the platform gate, and noted that the arena build would then have to fetch Oracle GraalVM. Until this decision a default build made that image whenever an Oracle GraalVM was present in the toolchain directory. What it is worth had been measured:}
+\ul{
+\li{On the platform spike, an object-allocating normalisation benchmark: 273.0 G instructions with Oracle GraalVM and profiles against 302.2 G for the Community image at \code{\verb~|-O3~}, that is -10 \%. The leading checkers of the arena report -11 to -15 \% for their own builds with profiles.}
+\li{On the real pipeline with the reference engine, fresh processes in an arena-shaped container on the aarch64 development host, a loaded host, CPU time: Mathlib with eight workers, the three launchers back to back: JVM launcher 1,057 s, Oracle image with profiles 1,082 s (+2 \%), Community image 1,187 s (+12 \%); with one worker 886 s, 983 s (+11 \%) and 1,112 s (+26 \%). On Init, Std, cedar and reachability the Oracle image needed 0.82 and 0.91 times the JVM launcher's CPU time with eight workers and with one, the Community image 0.92 and 1.03 times. Resident memory on Mathlib with eight workers: 8.1 GiB, against 8.7 GiB for the Community image and 13.0 GiB for the JVM.}
+}
+
+\p{The platform report stated that an image with profiles was not a candidate until the owner had decided, and gave the numbers so that the decision had them.}
+
+\p{\strong{Decision.} The owner's answer of 2026-11-24, one of four (owner note 11): "do not download EE on default, but you can report by here". The default build, the arena build and every default script neither download nor use Oracle GraalVM. It may be used for measurements that are reported to the owner and clearly labelled. Nothing that ships depends on it.}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{The shipped image is the Community image: \code{\verb~|-O3~}, serial collector, see [the launchers](design-launchers). The arena definition uses the Community Edition only.}
+\li{An image with profiles, \code{\verb~|bin/rlvm-pgo~}, is built only with \code{\verb~|scripts/build.sh --pgo~}, and only if somebody has put an Oracle GraalVM into the toolchain directory by hand. The modules are then compiled a second time against that GraalVM's Truffle version, an instrumented image runs the training exports (by default the prelude and, if present, Init; others with \code{\verb~|--train FILE~}), and the final image is built from the profiles. A table that contains such a row names it as Oracle GraalVM with profiles.}
+\li{The gain that profiles gave the reference engine, about a tenth of the CPU time of the Community image on Mathlib, is not available to a default build. With the machine as engine it was never measured: it would have needed three more image builds.}
+\li{The image has no collector but the serial one, which closes the collector question for the arena, see [dec-Z6DD](dec-Z6DD).}
+\li{Steady-state speed beyond the Community image is sought on the JVM launcher instead, see [dec-WX9Z](dec-WX9Z).}
+}
+
+\p{Recorded as a standing policy: [standing policies](standing-policies-conduct). Documents: \src{docs/design/OWNER-NOTES.md} (note 11), \src{docs/PLATFORM.md} (Part II for the labelled measurements), \src{docs/design/ARCHITECTURE.md} (sections 7.1 and 7.6), \src{scripts/build.sh}. Source: [the session of the pipeline wave](ses-CVTE), in which the build script was changed.}

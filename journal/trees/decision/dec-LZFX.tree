@@ -3,7 +3,50 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-machine/SWITCHES.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. It is the set the machine runs under \code{\verb~|-X engine=machine~}. It is not, by itself, the decision to make the machine the default engine; that one was made on the same gates and withdrawn within the hour, see [the machine as default engine](dec-T79V).}
+
+\p{\strong{Context.} Every optimisation of the machine sits behind a [staging switch](design-switches). Since 2026-11-24 16:24Z the default set had been \code{\verb~|warm,gated,expect~}, the first staging step. During the speed wave the owners of the machine's packages measured further switches, each behind gates of its own, and reported them ready. One integrator then owned the whole module and had to say which of them run by default.}
+
+\p{\strong{Decision.} The default set is \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}, with the session cap at 1 MiB and the host depth bound at 128, both unchanged and both measured again with the new set. Left out, each for a stated reason:}
+\ul{
+\li{\code{facts} and \code{probes}: official-exact since the fix of the soundness findings S-F1 and S-F2, but they cost 1.0 to 2.1 \% and 1.4 to 3.2 \% of CPU time on Init, Std and the Cedar slice.}
+\li{\code{tele}: no corpus gains in three native batches, and the Cedar slice loses 2 to 6 \%.}
+\li{\code{k2}: small gains and green gates, but its derivation variables are not the dedicated value kind the reconciliation of the design review demands; see [the decision on derived rules](dec-MOCU).}
+\li{\code{m2b}: undecided, needs three quiet repeats. \code{t2}: see [the Truffle tier](dec-ADIK). \code{\verb~|levels-complete~}: never a default, by the owner's decision.}
+}
+
+\p{\strong{Evidence: the gates} of the set, all on the main tree of that evening.}
+\ul{
+\li{The hostile suite: 32 switch sets times 329 hostile exports, 10,528 judgments against the \em{official} verdict, none unexpected, and no known finding still reproduces. Every new switch alone, on the first step and in the default set is among the 32.}
+\li{The differential gate of the default set against the reference engine, per declaration: no soundness and no completeness difference on all 230 arena tests (15,845 engine checks), Init, Std, reachability and the Cedar slice; no difference between the tiers or between host depth bounds; no audit failure. Every decline is eager reduction.}
+\li{Mutants through the real driver with the machine as engine: 17,775 per set, no soundness and no completeness difference, 16,092 agree and 1,683 are declined as the reference pipeline declines them.}
+\li{The differential engine through the JVM launcher: no difference on 760,839 units of the 230 arena tests, the Cedar slice and six corpora; every unit not compared is an eager-reduction decline of the machine.}
+\li{Eight corpora with the machine as primary engine, 8 workers, native image: all accepted, the machine rejected nothing and declined for eager reduction only (6,711 of Mathlib's 714,712 units).}
+}
+
+\p{\strong{Evidence: the measurement.} Native image, 8 workers, pipelined load, every row inside a quiet-core window; wall clock and process CPU time in seconds of the median later pass of four (Mathlib: of two).}
+\table{
+\tr{\th{Switch set}\th{Init}\th{Std}\th{Cedar slice}\th{reachability}\th{cedar}\th{Mathlib}}
+\tr{\td{none (v0)}\td{1.11 / 7.53}\td{1.93 / 13.16}\td{0.54 / 2.98}\td{2.58 / 7.76}\td{2.56 / 17.74}\td{not measured}}
+\tr{\td{\code{\verb~|warm,gated,expect~}}\td{1.09 / 7.14}\td{1.84 / 12.59}\td{0.55 / 3.00}\td{2.49 / 7.37}\td{2.45 / 17.29}\td{30.68 / 215.7}}
+\tr{\td{the new set without \code{same}}\td{0.82 / 5.32}\td{1.52 / 10.32}\td{0.53 / 2.75}\td{0.61 / 1.60}\td{2.44 / 14.78}\td{not measured}}
+\tr{\td{\strong{the new set}}\td{0.81 / 5.26}\td{1.51 / 10.09}\td{0.46 / 2.40}\td{0.62 / 1.64}\td{2.09 / 13.99}\td{29.28 / 204.8}}
+\tr{\td{CPU time against the old default}\td{-26 \%}\td{-20 \%}\td{-20 \%}\td{-78 \%}\td{-19 \%}\td{-5 \%}}
+}
+\p{Two more readings of the new set in a later window repeat these rows to 2 to 4 \% in CPU time. The large step on reachability is mostly the code blocks and case trees: closed evaluation is what they are for. The step on Mathlib is small because 40 \% of the machine's instructions there are [the official comparison of proofs](design-proof-comparison-shortcuts) and about a tenth of the workers' time is [eager-reduction declines](design-eager-reduction) (profile P8).}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{\strong{The gates could not see a whole class of wrong accepts.} Every gate above compares the machine with the reference engine, or with hostile exports written before the class was known. On real corpora and mutants a bound variable's declared type and the type of what it is bound to are the same, so "no difference on 760,839 units" said nothing about verdicts that need the two to differ. The findings E1-F1 to E1-F5 arrived within the hour after the set was published; their fix is the [typed bindings](design-inference-shortcuts). The integrator recorded the lesson: a review with new hostile exports belongs before a change of default, not after it. It became [a rule](dec-QN1O).}
+\li{\strong{Ten of the switches had entered without an adversarial review.} The review that followed found no accept of an underivable statement. Three switches add accepts of their own that the official checker does not give, all of the tolerated kind: \code{pchk}, \code{lazyeval} and \code{warm}. \code{code} declines some valid units with an internal fault (finding S3-F7), which costs reference-engine work and no verdict.}
+\li{The ways back stay: \code{none} is v0, \code{\verb~|default,-same~} removes the switch that the list singled out at the time as having had no independent review, and a strict engine is unaffected by any default.}
+}
+
+\p{Related: [staging switches](design-switches), [the session cap](dec-KXE1), [the gate](design-gate). Detail: \src{rlvm-machine/SWITCHES.md}, \src{rlvm-machine/NOTES-INT.md} section 3, \src{docs/design/review/soundness-default-set.md}. Source: [the speed wave](ses-CVTE).}

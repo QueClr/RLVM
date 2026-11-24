@@ -1,0 +1,21 @@
+\title{The application built at a call site is a memo key that hits, so a call instruction saves nothing}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{truffle}
+\tag{performance}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-truffle/NOTES-T3.md}, section 10; [the profiling session](ses-JRSD). A code block of the machine builds the application of a constant to its arguments as an interned record and then asks a generic judgment to reduce it. The prototype instruction \code{\verb~|CALL~} enters the code of the constant directly. Warm wall clock on quiet cores, one engine kept, JVM and native image, 1 and 8 workers.}
+\ul{
+\li{The form that never builds the application saves 1.9 percent of the records of reachability and costs 8.3 percent more steps and 21 percent more block activations, because 77 percent of the applications at such sites were answered by the memo of their record. "Do not build the redex" means "compute it again".}
+\li{The form that keeps the application as the memo key changes no count by more than 0.3 percent on any corpus.}
+\li{In twelve cells of reachability, the Cedar slice, Init, Std and full cedar the instruction is between -4.5 and +6.9 percent against the default set, mean +0.4 percent; in the steadiest cells, the image at one worker, it is 0.5 to 1.9 percent slower.}
+\li{No variant can do much better: the applications at such sites are 6 percent of the record-table probes of reachability and below 1 percent of the records of a library corpus.}
+\li{The direct call between two compiled blocks, the one thing a compiler could do on top, was not built, because its object was counted first: 68,000 calls per pass on reachability have a compiled caller and a compiled callee, none on the Cedar slice.}
+}
+\p{The instruction is correct and gated, and it is not integrated: it would be one more path through the reduction core, about 440 lines, for no gain. Anything that makes applications private or lazy has to keep exactly these applications as identified records; that is the rule of [identity on demand](ins-PMD4).}
+\p{See also: [the decision not to integrate the call instruction](dec-246U); [code objects and tiers](design-code-objects-and-tiers).}

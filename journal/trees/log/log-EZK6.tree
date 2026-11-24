@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:33Z}
+\title{Pipelined runs: checking starts while the file loads}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\tag{loader}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{With \code{\verb~|-X load=pipelined~} the calling thread loads while the environment thread and the workers check what has been published. Nothing but an accept is recorded for a unit that started while the file was loading: every other outcome is withheld and the unit is decided again after the end of the load, and malformed input is a reject whatever was checked. Inputs below 8 MiB and files that arrive in one piece run as batch, and batch stayed the default. The same publication lets the driver choose the worker count for \code{\verb~|--threads auto~}.}
+
+\p{The invariance suite on the published tests passes: 231 files in 9 schedules (batch with 1, 2, 4 and 8 workers, session caps of one byte, pipelined with a publication every 1, 7 and 64 units and 1, 4 and 8 workers), all correct, with no schedule difference and no decline caused by pipelining. Through the launcher all 230 tests are correct with pipelined loading, and Init, Std and reachability are accepted with 1 and with 6 workers.}
+
+\p{Detail: \src{rlvm-driver/README.md}, \src{rlvm-main/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:39Z}
+\title{Warm mode of the launcher: \code{\verb~|passes~} with reload or recheck}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{benchmark}
+\meta{release}{Unreleased}
+\meta{commit}{6e11455}
+\import{base-macros}
+
+\p{The launcher has one option for warm measurements. \code{\verb~|-X passes=N~} with \code{\verb~|passes-mode=reload~}, the default, makes a complete run per pass, load included, which is what the metric asks for: after warm-up, with loading pipelined with checking. \code{\verb~|passes-mode=recheck~} delegates to the driver's check-only passes. Both modes print one line per pass with wall, CPU, collector, load and check times, units, workers and memory. The exit status is that of pass 1, and a later pass with another verdict is reported as a disagreement and declined. A run with one pass takes the unchanged code path: status, output and error stream are compared with and without the option for an accepted, a rejected and a declined export. \code{\verb~|bench/warm.sh~} turns the pass lines into table rows. Published with 43 tests.}
+
+\p{Detail: \src{rlvm-main/README.md}, \src{bench/README.md}. Commit \commit{6e11455}. Session: [machine speed and pipeline](ses-CVTE).}

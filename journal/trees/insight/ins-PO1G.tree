@@ -1,0 +1,21 @@
+\title{The official \code{\verb~|is_def_eq~} is not a function of the pair: its answer depends on what was reduced before}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\tag{reference-engine}
+\meta{origin}{docs/design/review/soundness-default-set.md}
+\import{base-macros}
+
+\p{Source: the adversarial review of the default switch set, \src{docs/design/review/soundness-default-set.md}, section 2; [the exactness session](ses-874D). Read from the kernel source of Lean v4.36.0 and confirmed with the official checker.}
+\ul{
+\li{In \code{\verb~|whnf_core~} the cache \code{\verb~|m_whnf_core~} is looked up for every call, also the cheap ones that do not reduce projections; the insert at the end happens only for the full calls. The comparison starts with cheap calls, and the full call comes later.}
+\li{So the cheap reduction of a projection whose structure needs delta is the projection itself while the cache has no entry for that term, and the reduced field once any full reduction of the term ran. The answer is a function of the pair and of the history of the declaration, also in plain mode.}
+\li{All official caches are keyed by terms, with structural equality, and live for one declaration. A metadata node, a beta redex, another free variable are other keys.}
+\li{The direction is monotone inside a declaration: more entries can only turn a true into a false for a new pair of terms; a false never becomes true.}
+}
+\transclude{ex-YTJ5}
+\p{What the machine has in place of these caches differs in four ways: it is keyed by values, free variables are canonical, a warm session keeps entries across declarations, and some reduction routes do not write the memo where the official kernel writes its entry. Each way is a divergence of the tolerated kind, one in the plain machine and therefore in every switch set, finding S3-F1. None of the gates could see the root. An exact treatment would be the official caches themselves, keyed by terms and per declaration, and that is the reference engine.}
+\p{See also: [where the verdict of the machine can differ](design-official-divergence); [the reference engine](design-reference-engine).}

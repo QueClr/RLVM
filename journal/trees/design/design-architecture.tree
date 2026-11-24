@@ -63,7 +63,7 @@
 \li{One shared store of flat integer regions; a term node is 8 ints.}
 \li{Two summaries per node, the largest rank of a constant below it and the set of universe parameters below it, make the structural checks of a declaration three integer tests at its roots and make cached facts independent of order.}
 \li{One pass over the file: no prescan, 4 bytes of transient state per expression record.}
-\li{Proofs stay packed, about 5 bytes per record, until a worker checks or unfolds the theorem.}
+\li{Proofs stay packed, about 5.5 bytes per record in the design, until a worker checks or unfolds the theorem.}
 \li{Loading, environment construction and checking overlap, with two publication frontiers and one failure mark.}
 \li{Optimistic environment, pessimistic verdict: a worker reads the statements of earlier declarations before they are checked, and the file is accepted only if every unit is.}
 \li{Nothing derived is read from the export: facts and recursors of inductive types are regenerated and compared structurally with the exported records.}
@@ -92,7 +92,7 @@
 \ul{
 \li{The optimisation target is warm wall clock ([dec-7QMU](dec-7QMU)); the instruction budgets of the document are no longer targets.}
 \li{The default number of workers is the number of processors, at most 8, where the design said 6. Loading is pipelined by default when there are two or more workers and the input is a regular file of at least 8 MiB, with two scanner threads from 256 MiB on ([dec-OC1F](dec-OC1F)).}
-\li{The session cap fell from the designed 32 MiB to 16 MiB in the reconciliation and to 1 MiB for the machine after measurement ([dec-KXE1](dec-KXE1)).}
+\li{The session cap fell from the designed 32 MiB to 16 MiB in the reconciliation and, after measurement, to 4 MiB in the driver for the machine and 1 MiB in the machine itself ([dec-KXE1](dec-KXE1)).}
 \li{Ranks are 1-based, so that a summary of 0 means "no constant".}
 \li{Constants the kernel generates without a record, and late names, are still declined; the generated region exists and is unused by admission.}
 \li{The default engine is the reference engine; the machine runs under \code{\verb~|-X engine=machine~} ([dec-T79V](dec-T79V)).}

@@ -1,0 +1,20 @@
+\title{A derived rule per projection chain and instance could recover 5 to 10 percent of the steps on Mathlib, exactly}
+\taxon{Hypothesis}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{soundness}
+\meta{origin}{docs/design/review/exact-proof-conversion.md}
+\import{base-macros}
+
+\p{Source: \src{docs/design/review/exact-proof-conversion.md}, section 3.4; [the profiling session](ses-JRSD). Not built and not measured: the figure is the estimate of the author of that report, and the conditions were worked out on paper.}
+\ul{
+\li{The idea is the one official-exact route left open by [the search for a cheap exact proof comparison](ins-FIXO). For a partial application such as \code{\verb~|HMul.hMul A A A (instHMul A m)~}, remember that applied to two arguments it reaches the field of the weak-head normal form of \code{\verb~|m~}, and build that directly: one application instead of two unfoldings, two reductions, two applications and four records per side.}
+\li{Four conditions make firing the rule on both sides the official outcome: every head of the chain is an abbreviation or opaque, never regular, and none is a Nat function; both sides fire rules with the same sequence of heads; the intermediate values that the official algorithm passes are known not to be proofs without building them; the intermediate quick tests can only answer true.}
+\li{Size: bounded by the reduction share of the heavy units, 61 percent of the steps of the traced unit. The two-level chains of multiplication and addition are 1,920 of the 5,359 unfoldings of that unit; halving their cost is about a fifth of its steps. On Mathlib as a whole the estimate is 5 to 10 percent of the steps and less in CPU time.}
+\li{It is the derived-rule mechanism of the machine, keyed additionally by the instance arguments and fired in lockstep inside lazy delta. That mechanism in its present form produced a wrong accept against the official checker in the adversarial review and stays off.}
+}
+\p{The prize is a tenth of [what the shortcuts remove](ins-HPBW). It would need an exactness review of the four conditions before it could be switched on.}
+\p{See also: [the decision that derived rules stay off](dec-MOCU); [conversion](design-conversion).}

@@ -3,7 +3,40 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{levels}
+\tag{soundness}
+\tag{reference-engine}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/OWNER-NOTES.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted and implemented in both engines and in inductive admission on 2026-11-24.}
+
+\p{\strong{Context.} The level module offers two relations: the official kernel's test, which compares normal forms and is sound but incomplete, and a complete relation that identifies two levels exactly when they are equal under every assignment ([universe levels](design-universe-levels)). The first implementations of both engines used the complete relation. The independent soundness review of the machine recorded the consequence as finding S-F3: both engines accepted the two arena tests \code{imax-right-successor} and \code{imax-nested-absorption}, which the official checker rejects. The statements are true, since the two levels they compare are semantically equal, and the arena files them under tests where either verdict is allowed; but the verdict was not the official one. Whether RLVM should follow the theory or the official implementation was one of four open questions put to the owner.}
+
+\p{\strong{Decision.} The owner's answer, note 11: "resemble official by default". Both engines compare universe levels with the official kernel's incomplete algorithm by default. The complete relation is an opt-in only: \code{\verb~|-X levels=complete~}, which reaches the reference engine in every role (primary, re-check, environment pass) and turns on the machine's switch \code{levels-complete}, a switch that is never a default. The two arena corner cases are rejected by default.}
+
+\p{\strong{Evidence.} Ground truth is the official checker of Lean v4.36.0 on each export; the engines ran through the JVM launcher in the real pipeline.}
+
+\table{
+\tr{\th{What}\th{Reference engine, default}\th{With the complete relation}\th{Machine, default}}
+\tr{\td{The two imax corner cases}\td{reject, reject}\td{accept, accept}\td{reject, reject}}
+\tr{\td{6,300 generated exports, one level question each, asked through eleven parts of the checker; officially 2,455 accepted and 3,845 rejected, 2,081 of the rejections semantically true}\td{6,300 official verdicts, none declined}\td{4,538; 1,762 accepted that the official checker rejects}\td{6,300 official verdicts}}
+\tr{\td{The 699 mutants of the four mutant corpora that swap a level}\td{699 official verdicts}\td{699}\td{699}}
+\tr{\td{The 30 arena tests where either verdict is allowed}\td{28 official verdicts; the two on which the official checker does not terminate are declined in under a second}\td{26}\td{28; the two non-terminating tests ran into the time limit at that date, and a bound on the work of one unit, added later, declines them in seconds}}
+}
+
+\p{Only verdicts where the two relations differ changed, and only towards the official verdict: the two corner cases and 1,762 files of the level corpus. No published arena test, no mutant and no declaration of Init, Std or cedar changed its verdict. On the published jar the 230 arena tests were all correct with no decline, and 17,775 mutants showed no soundness and no completeness difference. The reference engine was not run on Mathlib with that jar; the previous publication, with the same comparison code as an option, accepted it, and the machine, which uses the same official test, accepted all 714,712 declarations of Mathlib. What the official relation does not identify, all from official answers: \code{\verb~|imax u 1~} and \code{\verb~|max u 1~}; \code{\verb~|imax u v~} and \code{\verb~|imax (imax u v) v~}; \code{\verb~|imax u (max v w)~} and \code{\verb~|max (imax u v) (imax u w)~}.}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{RLVM rejects some true statements, exactly where the official checker does. Finding S-F3 is closed.}
+\li{The official relation is not transitive, so the sides of a comparison matter and levels are never compared by id alone.}
+\li{Agreement on levels turned out to need more than the relation. The official kernel also \em{respells} levels when it instantiates with parameter objects of its own, and then compares the two spellings with this relation. Of 600 further exports that ask the level question through inductive admission, 13 were still accepted against the official verdict after this decision. That became finding L-F1, closed in [the admission of inductive blocks](design-inductive-admission), and finding A2-F1, a decline in [the loader](design-export-loader).}
+\li{The prelude guards keep the complete relation, since they decide no verdict of the official kernel.}
+\li{The later choice of practical exactness leaves this item as it is: [dec-TQSI](dec-TQSI).}
+}
+
+\p{Detail: note 11 of \src{docs/design/OWNER-NOTES.md}; the section "Universe levels: official by default" of \src{rlvm-ref/README.md} for the evidence; \src{rlvm-level/README.md}; \src{docs/design/review/soundness-machine.md} for finding S-F3. Recorded as a standing policy in [standing policies](standing-policies-exactness). Source: [the pipeline wave](ses-CVTE).}

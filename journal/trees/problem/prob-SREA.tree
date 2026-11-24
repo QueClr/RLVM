@@ -1,0 +1,25 @@
+\title{Admission between the checks: inductive blocks cost more than they do for the leaders}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{reference-engine}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/P9.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The number.} Inductive types, constructors and recursors are not checked by an engine; the driver admits them between two checks. One worker, native image, quiet window: the gaps in which the driver admits such declarations take 1.98 s on navier-stokes-euler, 1,355 gaps of 1.46 ms each and 3.4 percent of the worker; 0.58 s on cslib; 0.27 s on con-leche. gruszka spends 0.27, 0.21 and 0.08 s, by its own clock, on all its declarations that are not units of the machine. Source: \src{docs/research/profiles/P9.md}, section 4.4.}
+\p{\strong{What is known.}}
+\ul{
+\li{On Mathlib the 708,001 accepted units cost 10.5 microseconds of thread CPU each between two checks, 7.5 s or 3.5 percent of the worker: bookkeeping of the driver, admission and 40,568 session resets. Source: \src{docs/research/profiles/P8.md}, section 4.3; a loaded container.}
+\li{By the arena rule admission is 25.1 G instructions on Mathlib where inductive types cost the leaders under 3 G. Source: \src{docs/research/profiles/AR1.md}.}
+\li{The large cases on navier-stokes-euler are the structures of the project itself.}
+\li{Admission regenerates recursors and compares them, and since the level finding it also reproduces [the official rebuild of levels](ex-4MDP); for a block in which the rebuild changes no spelling that is one memoised walk.}
+\li{Exactness has a cost here too: the official admission runs every judgment in a fresh checker with empty caches, with three exceptions, while RLVM runs the judgments of a phase in one scope of the reference kernel. That is a divergence of the tolerated kind, finding R2-F3 in \src{docs/design/review/reference-caches.md}, and an open hole of the strict mode.}
+}
+\p{\strong{What would close it.} A profile of the admission of the large structures of navier-stokes-euler against what the leaders do for the same blocks. The owners are the admission modules and the driver, not the machine.}
+\p{See also: [admission of inductive types](design-inductive-admission).}

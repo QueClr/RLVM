@@ -1,9 +1,74 @@
-\title{Nat and String literals}
+\title{Nat and String literals: immediates, offset cells and guarded native arithmetic}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{nat}
+\tag{machine}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented: the arithmetic in the module \code{rlvm-nat}, the representation and the instructions in \code{rlvm-machine}.}
+
+\p{The Lean kernel accelerates natural-number and string literals: a numeral is one node, and fifteen functions on numerals are computed instead of unfolded. The owner asked for more than a library of literal arithmetic: Nat is specialised in the instruction set and in [the value model](design-value-model). Small naturals are immediate values that never touch the value store, arithmetic has a native fast path with an exact overflow guard, the literal form and the constructor form are cheap views of each other, and a recursor on a literal takes one step. The fixed point of all of it is the official behaviour: a literal folds exactly when the official weak head normalisation folds it, and an operation fails exactly where the official kernel throws.}
+
+\subtree[design-nat-literals-forms]{
+\title{Representations}
+
+\table{
+\tr{\th{Form}\th{Representation}\th{Views}}
+\tr{\td{literal below \code{\verb~|2^31~}}\td{immediate: the reference is the number, no record}\td{as the major premise of a recursor: 0 is \code{Nat.zero}, n is \code{Nat.succ} with the field n - 1; no record is built}}
+\tr{\td{literal from \code{\verb~|2^31~} and below \code{\verb~|2^63~}}\td{a record that holds the value in two words}\td{the same; arithmetic on a 64-bit integer}}
+\tr{\td{literal from \code{\verb~|2^63~}}\td{a record that holds an id of the worker's number store, which interns by content}\td{the same, through \code{rlvm-nat}}}
+\tr{\td{k successors of x, where x is not a literal}\td{one offset cell \code{NSUC} with base x and count k}\td{predecessor: the cell with k - 1, or x}}
+\tr{\td{\code{Nat.zero}}\td{the constant}\td{equal to the literal 0 in the offset comparison; not rewritten by normalisation}}
+\tr{\td{string literal}\td{a record with the index of the literal}\td{the constructor form, one list element per Unicode scalar value, built on demand and memoised}}
+}
+
+\p{Canonical forms: \code{Nat.succ} applied to a literal or to \code{Nat.zero} is the literal plus one, so \code{Nat.succ Nat.zero} is the literal 1; successors of anything else are one cell. Weak head normalisation of an offset cell gives the literal n + k when the base normalises to a literal n or to \code{Nat.zero}, and the cell itself otherwise; the cell carries the flag "already normal" only when its base is a non-literal normal form. This rule answers a soundness finding of the design review (C3.7): with the flag on every cell, \code{\verb~|Nat.mod (Nat.succ (f 2)) 7~} was not folded and fell to the unfolding of \code{Nat.mod}, where the official kernel turns the successor into a literal first.}
+}
+
+\subtree[design-nat-literals-instructions]{
+\title{Instructions}
+
+\ul{
+\li{\code{NSUCC}: the successor in every form of the table, with the size check.}
+\li{\code{NATOP}: one of the binary operations on two literals. Immediates use 64-bit arithmetic; a result below \code{\verb~|2^31~} is an immediate, a larger one a record; anything else goes to \code{rlvm-nat}. The comparisons yield \code{Bool.true} or \code{Bool.false}.}
+\li{\code{NATFOLD}: an application of one of the functions to exactly two arguments normalises both; if either is not a literal there is no fold. It runs before delta, as the official reduction does.}
+\li{\code{OFFSET}: two values that both have a predecessor are compared by peeling the common number of successors at once.}
+\li{\code{SWITCH} and \code{FIELDS} read a literal as a constructor application without building one; \code{STRVIEW} expands a string literal.}
+}
+
+\p{The fifteen operations are \code{add}, \code{sub}, \code{mul}, \code{div}, \code{mod}, \code{gcd}, \code{land}, \code{lor}, \code{xor}, \code{shiftLeft}, \code{shiftRight}, \code{pow}, \code{succ}, \code{beq} and \code{ble}, with the semantics of the kernel of Lean v4.36: subtraction truncates at 0, division by 0 is 0, the remainder by 0 is the dividend. The guards are the official ones: a result larger than 128 MiB is an error; \code{pow} with an exponent above \code{\verb~|2^32 - 1~} is an error even for the bases 0 and 1; a shift of 0 is 0 for any count. So \code{\verb~|2^(2^24)~} is computed and \code{\verb~|2^(2^24+1)~} is an error. The semantics were not only read from the source: 77,720 results computed by the official 4.36.0 kernel under seven values of its size limit, and its verdicts on 462 string literals, are replayed by the tests of \code{rlvm-nat}. Where the official kernel throws, the machine rejects, and the reference engine confirms the rejection like any other; inside a speculative segment the error is only "undecided".}
+}
+
+\subtree[design-nat-literals-identity]{
+\title{Literal identity and the prerequisites}
+
+\p{Conversion answers "different" for two literals only when their contents differ. The design review found three stores for big numbers with three notions of id (finding C3.8); equal numbers with different ids would give a false "different" on proofs such as \code{\verb~|2^64 = 18446744073709551616~}, and Mathlib has 1,820 Nat literals of \code{\verb~|2^64~} or more, the longest with 1,085 digits. The resolution: one bridge with one owner. The machine calls \code{rlvm-nat} directly on 64-bit handles; a handle below \code{\verb~|2^63~} is the number itself, above it an id of a store with a frozen base shared by all workers and one overlay per worker; the pool of export literals interns numbers and strings by content; and until canonical ids are guaranteed end to end, two literal references that differ are compared by content before conversion answers "different".}
+
+\p{Every extension depends on prelude constants having the expected shape, exactly as in the official kernel. A guard per special constant is absent, valid or invalid. Absent: the extension does not fire. Invalid and needed: a decline, also inside a speculative segment. As built, an invalid \code{Nat.succ} declines as soon as it is applied to one argument, which is stricter than the reference engine and keeps one invariant for the reduction code: with a valid guard, a successor application is never an ordinary application record. A function is recognised by its name with no universe levels, before delta and independently of its declaration kind, because that is the official test.}
+}
+
+\subtree[design-nat-literals-measured]{
+\title{Measured}
+
+\p{Numbers of \src{rlvm-nat/README.md}: instructions and CPU time per operation, net of the empty loop, JVM with the Graal JIT in batch compilation mode, aarch64, container with the arena's limits; the CPU times come from a shared host and are indicative.}
+
+\table{
+\tr{\th{Path}\th{Instructions}\th{CPU ns}}
+\tr{\td{\code{add}, both operands and the result below \code{\verb~|2^63~}}\td{3.0}\td{0.02}}
+\tr{\td{\code{mul}, the same}\td{9.0}\td{0.37}}
+\tr{\td{\code{div}, the same}\td{7.0}\td{3.65}}
+\tr{\td{\code{beq}, the same}\td{4.0}\td{0.06}}
+\tr{\td{\code{add} of word-sized operands whose result leaves the word}\td{158}\td{5.1}}
+\tr{\td{\code{mul} of two 256-bit operands}\td{961}\td{41.6}}
+}
+
+\p{Big numbers live as limbs in one slab per store layer, not as \code{BigInteger} objects. Both designs were built: the slab needs 1.4 to 2.8 times fewer instructions where a result leaves the word and 6.3 times fewer on the sparse product of the one arena test that is about big numbers (609,961-bit operands), and 1.4 times more on dense products of 256 to 4,096 bits. \code{BigInteger} is kept as a coprocessor for long products, division by a multi-limb divisor, gcd, powers and long decimal conversions. By extrapolation the largest operations the official guards admit take minutes here (not measured), so the module lets a kernel ask a guard twice, once with the official limit and once with a work limit of its own.}
+}
+
+\p{Related: [the term store](design-term-store) for literals in terms, [the reference engine](design-reference-engine), which uses the same module through its own binding, [conversion](design-conversion). Detail: \src{docs/design/ISA.md} sections 2.9, 4.2 and 4.3; \src{docs/design/RECONCILIATION.md} section 2; \src{rlvm-nat/README.md}; \src{rlvm-machine/NOTES-M1.md} (deviations D3 to D5 and D10). Source: [the design session](ses-EMMW) and [the session of the foundation modules](ses-BQZM).}

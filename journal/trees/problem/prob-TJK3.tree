@@ -1,0 +1,24 @@
+\title{The gap to gruszka on Mathlib: about twice its warm wall clock}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{performance}
+\tag{machine}
+\tag{benchmark}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/BENCHMARKS.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The number.} Warm, with 8 workers and loading pipelined with checking, on the 8 quiet performance cores of the aarch64 development host, Mathlib takes the machine 25.6 s on the JVM launcher with the switch set \code{\verb~|warm,gated,expect~} against 12.5 s for gruszka with 8 threads on the same cores: 2.05 times. With the larger default switch set of the same evening it is 21.23 s on the JVM against 12.32 s, 1.72 times, and 27.43 s in the native image, 2.23 times. In CPU time of the warm pass the first table has 188 s against 75.6 s. On Init, Std and cedar the machine is within a quarter to a half of gruszka, and it is faster on reachability. Source: \src{docs/BENCHMARKS.md}, section "Warm wall clock"; see [the warm table](ins-675U).}
+\p{\strong{What is known.} The distance has four parts, by size.}
+\ol{
+\li{[The official way of comparing proofs](ins-HPBW): 40 percent of the instructions of the machine on Mathlib. The two shortcuts that remove it take the native image with 8 workers from 25.39 s to 19.15 s per warm pass. [No official-exact route](ins-FIXO) recovers it. The shortcuts are admissible under the practical policy; they cost on con-leche.}
+\li{[The units that enter eager reduction](ins-47IQ): about a tenth of the worker time, at the speed of the reference engine. The switch that keeps them on the machine exists and is off, see [eager reduction on the machine](prob-8MJ2).}
+\li{[The cost of one machine operation](prob-28KQ): what remains after both is uniform, 3.9 times gruszka in instructions on Mathlib.}
+\li{The parts that are not the engine: the loader thread, 13.5 s of a 25.6 s pass, right behind the checking, see [the loader as the floor](prob-I7M9); and in the native image the collector, see [garbage and the collector](prob-BIN4).}
+}
+\p{\strong{What would close it.} A decision, by warm wall clock over all corpora, whether the shortcuts are on by default; the switch \code{\verb~|eager~} reviewed and on; and then the cost per operation, which is the only part that also shows on the corpora where the machine is already close. No single item reaches gruszka: with the shortcuts on all of Mathlib the instruction ratio is still 3.88.}
+\p{See also: [the decision for warm wall clock](dec-7QMU).}

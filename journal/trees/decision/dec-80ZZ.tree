@@ -1,9 +1,48 @@
-\title{No reference-count style in-place reuse of values}
+\title{No reference-count style in-place reuse of values: no-go by census}
 \taxon{Decision}
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/X1.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. The schemes below were judged against a census and none was built.}
+
+\p{\strong{Context.} The owner suggested borrowing from the Reussir language the reference count of a few bits, in the limit one bit that says unique or shared, which licenses the reuse of a cell in place, and added that it might not be a good idea and that any specialisation or JIT trick was welcome instead. The design had already given a verdict without data: no reference-count or uniqueness bits on values in the first version, two bits of a value reference reserved, and an experiment only after a profile shows that cells are unique where it matters (\src{docs/design/ISA.md}, section 10). A scout then took that profile: a census of every record and run the machine makes, recording who made it, whether a later probe ever found it again, who holds it, and whether it is dead when the judgment that made it returns. Conditions: the JVM launcher with one worker on the machine tree of 2026-11-24; the generic tier with no switch and the set \code{warm,gated,expect}; the corpora Init, Std, a slice of Cedar, reachability and con-leche; exact counts of one run each, nine census runs.}
+
+\p{\strong{Decision.} [Values](design-value-model) carry no reference-count and no uniqueness bits, and no hash-consed record is rewritten in place. Of the four candidate schemes:}
+
+\table{
+\tr{\th{Scheme}\th{Verdict}\th{Why}}
+\tr{\td{one bit "fresh and unpublished" on the newest record, which is then rewritten in place}\td{no-go}\td{the case is rare, the saving is memory only, and the precondition is false wherever the body is memoised}}
+\tr{\td{saturating two-bit counts in the record header}\td{no-go}\td{no free header bits; a write on every store; counts never fall and do not see Java locals; no constructor has a population of unshared operands to specialise on}}
+\tr{\td{builders that assemble in registers or scratch and intern once}\td{already the design}\td{spines, frames and environments are built once}}
+\tr{\td{a region per judgment with mark and release}\td{no-go as a speed-up}\td{releasing a record costs one probe, as making it did, and needs an undo log at every memo store; kept as the answer to a memory wall if one is measured}}
+}
+
+\p{\strong{Evidence.}}
+
+\ul{
+\li{The cases that such a bit specialises are rare. Extending the spine that was just built makes 1.9 \% (Cedar slice), 3.0 \% (Init), 4.2 \% (con-leche) and 7.2 \% (reachability) of all records in the generic tier. A new frame that could overwrite the frame it was pruned from is 0.4 to 3.4 \% of the new frames. An offset cell made from an offset cell occurs 6 to 878 times per corpus. Working environments are already a stack extended in place: one copy in 162 million pushes over the nine runs.}
+\li{Where the case occurs the source is not free. In the generic tier the source of a spine extension is held by nothing in 0.0 \% of the cases: a memo word or an environment always holds it.}
+\li{Rewriting a hash-consed record in place trades an insert for a delete. It saves bytes, not a probe: at best 1.3 \% (Cedar slice), 2.0 \% (Init) and 4.7 \% (reachability) of the records, and no time is to be expected from it (argued, not prototyped).}
+\li{A uniqueness bit must be maintained at every duplication of a reference by hand-written Java, and references held in Java locals cannot be audited. One missed mark is a value that changes under its reader, that is a wrongly accepted proof.}
+\li{What the census found unshared is the memo key, not the value. The tabling record of evaluation is the largest class of records everywhere: 25 \% of all records on the Cedar slice, 35 \% on Init and 43 \% on reachability in the generic tier, and 82 to 99.5 \% of them are never found again. On reachability 97.5 \% of all records are never found again.}
+}
+
+\p{\strong{What is mutated in place, by construction.} The memo words of a record and the value of a suspension, which is the update of a thunk; worklist frames, which have exactly one owner and are overwritten by a tail call; scratch buffers; the top of the environment stack; and the record on top of the store, which is probed first and written only on a miss, so no record is ever allocated and abandoned.}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{The one bit went onto the key instead, and that was a go: a visit filter with one bit per tabling key, kept outside the store, so that the first evaluation of a key makes no frame and no record and the second is tabled as before. Against the generic tier: records -18 \% (Cedar slice), -30 \% (Init) and -41 \% (reachability) for +5.8 \%, +5.4 \% and +0.7 \% ticks; warm check time on reachability -27 \% (5,687 to 4,143 ms) and, against \code{warm,gated,expect}, -29 \% (5,585 to 3,972 ms), JVM launcher, one worker, last pass of a process. It was handed to the owner of evaluation as a patch for a staging switch; see [evaluation and tabling](design-evaluation-and-tabling). Not established for it: eight workers, the native image, the large corpora.}
+\li{A second idea from the same census, an ephemeral evaluation memo with its key inline, did in counters what it was built for and was never ahead in time (+7.9 \% alone on the Cedar slice): a no-go as built. Ticks are not time.}
+\li{The remaining volume is values that nothing looks up: in the prototype build with the filter, applications are 59 \% of the records on reachability and 3.5 \% of them are found again. Not interning them gives up identity at birth and was left as an experiment with a soundness review of its own; it became [identity on demand](design-values-v2), where reuse comes back as escape analysis in compiled code instead of bits.}
+\li{The two reserved bits of a value reference stay reserved and zero.}
+}
+
+\p{Detail: \src{docs/research/profiles/X1.md} (census tables, the schemes with their invariants, the prototypes and what is not established); \src{docs/design/ISA.md}, section 10 and decision 18 of section 0.2. Source: [the session of profiles and prototypes](ses-JRSD); the design verdict is from [the design session](ses-EMMW).}

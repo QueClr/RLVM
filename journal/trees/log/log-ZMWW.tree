@@ -1,1 +1,19 @@
-\date{2026-11-24T23:09:40Z}
+\title{Truffle tier: a retention defect fixed and a bounded promotion policy}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{truffle-tier}
+\tag{unreleased}
+\tag{truffle}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{8766070}
+\import{base-macros}
+
+\p{Three changes after the first quiet windows. The tier's engine had kept every tier object it ever made; a tier refers to its machine, and so every machine that ever ran in an engine stayed reachable with its arenas, and the heap grew by the workers' arenas each pass. It keeps only the counters now. Counting reports to the engine per 256 stepped activations in one short critical section, where eight workers had met at a lock per 64. Promotion happens at 20,000 entries and 2 \% of all activations of the engine, for at most 256 blocks. An attempt to run ahead of the interning probes, loading the table slots that a compiled block will probe, was rejected: 4 to 7 \% slower.}
+
+\p{With the final tree on the JVM, warm wall clock per pass: reachability with 1 worker 1,118 to 1,006 ms (12 blocks) and with 8 workers 572 to 529 ms; the Cedar slice with 1 worker 1,426 to 1,487 ms and with 8 workers 220 to 286 ms with two compiled blocks, cause open. In the native image reachability gains 3.8 and 4.8 \% and the Cedar slice is neutral. The differential gate on reachability, the Cedar slice, Init and Std compared 169,936 of 170,322 units with no difference. Verdict: correct, and no-go as a default.}
+
+\p{Detail: \src{rlvm-truffle/NOTES-T3.md}. Commit \commit{8766070}. Session: [profiles and prototypes](ses-JRSD).}

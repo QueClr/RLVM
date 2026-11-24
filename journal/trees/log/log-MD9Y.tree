@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:41Z}
+\title{Host-wide slots for heavy jobs}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{ec982e2}
+\import{base-macros}
+
+\p{With many agents building and testing on one host, a profiling wave ran the host out of memory and was paused. \code{\verb~|bench/slot.sh~} is the limiter that every heavy job that is not a timing goes through since: 8 slots for the host, and a class of its own with 2 slots for native-image builds. It got a memory guard within the hour (\commit{3dfe909}).}
+
+\p{Detail: \src{bench/README.md}. Commit \commit{ec982e2}. Session: [machine speed and pipeline](ses-CVTE).}

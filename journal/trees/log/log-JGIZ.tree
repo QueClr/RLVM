@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:35Z}
+\title{Case trees inline the matchers they call}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{3dfe909}
+\import{base-macros}
+
+\p{A case tree used to call the matcher of an inner match as a definition of its own. The elaborator now inlines the matchers a tree calls, with eta-reduced minor premises as leaves. Measured with one worker in the native image at \code{\verb~|-O3~}, CPU seconds of two runs under a load average of 69 to 93: reachability 9.04 and 8.53 in the generic tier, 3.08 and 2.97 with \code{\verb~|code,casetrees~} without inlining, 1.54 and 1.58 with it. On the Cedar slice, Init and Std the inlined trees are within the spread of the trees without inlining (Init 6.25 and 6.27 against 6.55 and 6.37, Std 10.90 and 10.65 against 10.89 and 10.78). Tier equivalence on the prelude export now covers constructor combinations for up to four major premises: 10,324 cases, 10,090 identical value ids and none different. The reduction roles are elaborated at the first request, telescopes at the tenth.}
+
+\p{Detail: \src{rlvm-machine/NOTES-M7.md}, \src{rlvm-machine/SWITCHES.md}. Commit \commit{3dfe909}. Session: [machine speed and pipeline](ses-CVTE).}

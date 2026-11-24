@@ -1,1 +1,19 @@
-\date{2026-11-24T23:09:40Z}
+\title{The machine's default switch set of wave 6}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\tag{benchmark}
+\meta{release}{Unreleased}
+\meta{commit}{381c346}
+\import{base-macros}
+
+\p{The default set became \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~} with a session cap of 1 MiB and a host depth bound of 128; \code{\verb~|facts~}, \code{\verb~|probes~}, \code{\verb~|tele~}, \code{\verb~|k2~} and the Truffle tier stay off. Against the previous default \code{\verb~|warm,gated,expect~}, warm with 8 workers and a pipelined load in the native image at \code{\verb~|-O3~}, wall clock of the median later pass and CPU of that pass, every row in a quiet window: Init 1.09 s and 7.14 s to 0.81 s and 5.26 s, Std 1.84 and 12.59 to 1.51 and 10.09, Cedar slice 0.55 and 3.00 to 0.46 and 2.40, reachability 2.49 and 7.37 to 0.62 and 1.64, cedar 2.45 and 17.29 to 2.09 and 13.99, Mathlib 30.68 and 215.7 to 29.28 and 204.8. In CPU that is -26, -20, -20, -78, -19 and -5 \%.}
+
+\p{Gates on the tree that carries the set: the full gate passes with declines in 1,697 s with no soundness or completeness difference; 17,775 mutants for the generic tier and for the set, 0 and 0; 32 switch sets times 329 hostile exports, 10,528 judgments against the official verdict, nothing unexpected; and no difference on 760,839 units compared by the differential engine. The declines are eager reduction only.}
+
+\p{Detail: \src{rlvm-machine/SWITCHES.md}, \src{docs/BENCHMARKS.md}. Commit \commit{381c346}. Session: [machine speed and pipeline](ses-CVTE).}

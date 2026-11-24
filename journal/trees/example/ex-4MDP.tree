@@ -1,0 +1,32 @@
+\title{An inductive type whose universe level the official kernel respells}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{levels}
+\tag{soundness}
+\tag{reference-engine}
+\meta{origin}{rlvm-inductive/README.md}
+\import{base-macros}
+
+\p{The official kernel refers to the members of the block it is admitting with level-parameter objects it makes itself, and its \code{\verb~|instantiate~} keeps a level node only when the operands come back pointer-equal. Every level node above a parameter of the block is therefore rebuilt, and the rebuilt spelling is compared with the declared one by the official, incomplete level relation. Source: finding L-F1 in \src{rlvm-inductive/README.md} and \src{rlvm-ref/README.md}; [the session on wave 6 and the pipeline](ses-CVTE).}
+\pre{\verb~|
+inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1)
+  | mk : a -> T a
+-- official: REJECT, "application type mismatch":
+--   Sort (imax u 1)  against  Sort (max u 1)
+
+axiom F.{u} : Type
+inductive T.{u} : Type
+  | mk : F.{imax u 1} -> T
+-- official: REJECT, the same mismatch at  T.mk x
+~}
+\ul{
+\li{\code{\verb~|imax u 1~} becomes \code{\verb~|max u 1~} in the rebuild. Both spellings denote the same level; the official relation, equality of official normal forms, does not identify them.}
+\li{RLVM admitted inductive types with the declared spelling and accepted 183 of the 2,200 generated declarations of the finding that the official checker rejects, with both engines. The differential gates could not see it, because both engines shared the admission.}
+\li{The rebuild is now reproduced in the admission of inductive types. All 2,200 files get the official verdict with both engines, and a further 1,468 fixtures of twelve shapes agree: 655 accepted and 813 rejected officially, 778 of them only because of the rebuild.}
+\li{No real declaration is affected: the rebuild changes no spelling in any of the 17,377 inductive blocks of Init, Std, reachability, con-leche, cedar, navier-stokes-euler, cslib and Mathlib. With the opt-in complete level relation the two spellings are identified and these comparisons hold.}
+\li{Not covered: an export with two level records for one universe parameter. The official reader makes two objects of them and the kernel rebuilds there too. The exporter never writes such a file; RLVM declines it.}
+}
+\p{Used by [gates against our own reference engine cannot see a divergence both engines share](ins-SJW4).}
+\p{See also: [universe levels](design-universe-levels); [admission of inductive types](design-inductive-admission).}

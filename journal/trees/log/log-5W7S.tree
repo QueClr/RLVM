@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:42Z}
+\title{Driver: one to N workers, a verdict board and re-checks}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{\code{\verb~|rlvm-driver~} runs a loaded export. With one worker the environment pass is driven lazily in file order; with more, an environment thread admits units ahead of workers that claim contiguous runs and steal from each other. The verdict is the status of the first unit in file order that was not accepted. A rejection of the primary engine is confirmed by the reference engine, and a unit that exceeds the warm byte budget is checked again cold. Published with 71 tests, 68 run by default. All 230 published tests and all 11,605 mutants give the same verdict and the same deciding unit with 1, 2, 4 and 8 workers and with session caps of one byte.}
+
+\p{In the arena-shaped container on the JVM with the reference engine, one run each on a busy host: Init with 1 worker 22.5 s CPU and 17.7 s wall, with 8 workers 23.0 s and 4.6 s; Mathlib with 8 workers accepted in 829.3 s CPU and 154.5 s wall at 13.8 GB RSS and 6,512 G instructions.}
+
+\p{Detail: \src{rlvm-driver/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

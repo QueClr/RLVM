@@ -1,0 +1,18 @@
+\title{Mathlib with the machine needs 6 GB of heap, not 13}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{gc}
+\meta{origin}{docs/research/profiles/J1.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/J1.md}, section 4; [the profiling session](ses-JRSD). JVM launcher, serial collector, young generation of 1 GB, machine engine, Mathlib, 8 workers, warm passes.}
+\ul{
+\li{The warm wall clock is the same from a heap of 13 GB down to 6 GB: 23.9 to 24.2 s.}
+\li{Peak RSS is 8.0 to 8.7 GB at 13 GB, 5.7 to 6.7 GB at 7 GB and 5.8 GB at 6 GB. At 5 GB the run thrashes or dies.}
+\li{Below 7 GB the heap rule of the machine itself, which keeps a young reserve of a third of the heap where the launchers give 1 GB, refuses 2 to 6 session growths per pass for a few tens of MB. That is finding J1-F1.}
+}
+\p{The 11.5 GB of the first warm table were the fixed heap filling before the serial collector collected the old generation. The recommendation is \code{\verb~|-Xmx7g -Xmn1g~} for the machine, and 6 GB once the heap rule is fixed; the reference engine keeps 13 GB.}
+\p{See also: [the decision on the JVM launcher line](dec-E3EX); [the launchers](design-launchers).}

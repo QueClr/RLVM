@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:36Z}
+\title{Reference engine: the same verdicts for less CPU time}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{Two changes leave every judgment and its order alone: in check mode the type of an application prefix is built only when something asks for it, and the kernel's own tables are replaced by small ones after a declaration that used less than a sixteenth of them. The step counts are equal on Init, Std and Mathlib (kernel-level Mathlib: 714,712 declarations, 1,603,710,091 steps as before). Measured in the arena-shaped container with the JVM launcher, alternating runs, medians, against the earlier reference jar on the same published set: Init with one worker 16.44 to 14.80 s CPU, Std 26.67 to 23.30 s, Cedar slice 11.85 to 11.32 s with overlapping ranges, Mathlib with 8 workers 633.1 s (one run) to 549.1 s (three runs) and 155.8 to 132.8 s wall. The host carried a load average of 40 to 170, so differences under about 5 \% are not resolved.}
+
+\p{These figures correct a first report of gains of 23 to 31 \%, which had been measured against a store whose hash-consing index did not shrink. A session table of imported constant terms from that report saves no CPU time against the new store and is off by default.}
+
+\p{Detail: \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

@@ -1,0 +1,29 @@
+\title{A \code{\verb~|let~} whose declared type differs from the type of its value}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\meta{origin}{docs/design/review/official-divergence.md}
+\import{base-macros}
+
+\p{The official kernel types a let variable by the type the binder declares. The machine bound the variable to a value and typed the value. With [the non-transitive triple](ex-OTWJ) the two types are convertible and give different verdicts. Source: finding E1-F1 in \src{docs/design/review/official-divergence.md}, section 1, and \src{rlvm-machine/NOTES-M5.md}; [the exactness session](ses-874D).}
+\pre{\verb~|
+-- A, intro, h, d as in the triple
+theorem S.bad : d h = 5 :=
+  let q : d h = d h := Eq.refl (d intro)
+  q                                          -- official: REJECT
+
+theorem S.ok : d h = d h :=
+  let q : d h = d h := Eq.refl (d intro)
+  q                                          -- official: accept
+~}
+\ul{
+\li{Officially the value \code{\verb~|Eq.refl (d intro)~} has type \code{\verb~|d intro = d intro~}, which is compared with the declared \code{\verb~|d h = d h~} and holds. The body \code{\verb~|q~} then has the declared type \code{\verb~|d h = d h~}, and that against \code{\verb~|d h = 5~} fails.}
+\li{The machine gave \code{\verb~|q~} the type of its value, \code{\verb~|d intro = d intro~}, and \code{\verb~|d intro = 5~} holds: it accepted \code{\verb~|S.bad~}, in the plain machine and in the default switch set of the integration of 2026-11-24.}
+\li{Since the fix the let variable carries the value of its declared type, and the machine rejects \code{\verb~|S.bad~}. The typed bindings of the related fixes cost nothing measurable: without them the steps change by -0.35 percent on the Cedar slice and -0.01 percent on Std.}
+\li{The same pattern appeared in four more places, findings E1-F2 to E1-F5: the bound variable of a beta redex, the comparison variable of a lambda against a Pi, and two forms of the expected-type rule. All five were wrong accepts of true statements, found by new hostile exports; all five shapes now get the official verdict.}
+}
+\p{Used by [an evaluator that types values cannot match a kernel that types unreduced terms](ins-AAXM).}
+\p{See also: [inference shortcuts and typed bindings](design-inference-shortcuts).}

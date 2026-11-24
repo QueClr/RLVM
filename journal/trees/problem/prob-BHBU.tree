@@ -1,0 +1,24 @@
+\title{Identity on demand shows no gain at eight workers in the native image}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{platform}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/VALUES-V2.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The symptom.} [Identity on demand](ins-PMD4) takes 16.7 percent off the warm wall clock of reachability at one worker on the JVM and 11.9 percent in the native image, both with disjoint ranges. At eight workers the JVM shows -10.0 percent, 460 against 511 ms with ranges that touch, and the native image shows nothing: +3.1 percent, inside the scatter, with the CPU of the workers at -1 percent. Source: \src{docs/design/VALUES-V2.md}, sections 10.2 and 12; quiet windows, a measuring tool that keeps one engine, without loading; [the profiling session](ses-JRSD).}
+\p{\strong{What is known.}}
+\ul{
+\li{The reason for the difference between the platforms is not known. No profile was taken: "the probes that are not made" is the mechanism by construction, and the share of the time it explains was not measured.}
+\li{The scatter between two JVM processes of one configuration is up to 8 percent, and the rows have two processes each.}
+\li{The timings are of the form before the points that force an identity were outlined into separate methods; the patches are the outlined form, whose counters are identical and which was not timed.}
+\li{Every timing is the measuring tool, not the launcher with kept engines; the native image was measured in one window.}
+}
+\p{\strong{What would close it.} A measurement at eight workers with more than two processes per row on the platform that ships, through the launcher, with the outlined form; and one large corpus with giant declarations, Mathlib, which was not run. The staging switch stays off by default until then.}
+\p{See also: [the second value model](design-values-v2); [the decision for a staging switch](dec-36MX).}

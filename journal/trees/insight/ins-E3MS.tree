@@ -1,0 +1,21 @@
+\title{The official verdict can depend on whether a subterm is one export record or two}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{reference-engine}
+\tag{store}
+\meta{origin}{docs/design/review/reference-caches.md}
+\import{base-macros}
+
+\p{Source: the audit of the caches of the reference engine against the official kernel, \src{docs/design/review/reference-caches.md}, section 3, finding R2-F2; [the exactness session](ses-874D).}
+\ul{
+\li{The official type checker uses pointer equality on terms in two places of \code{\verb~|is_def_eq_core~}. The first repeats a quick test on structurally the same terms and changes nothing. The second runs the whole comparison a second time when the second reduction returned another object, and that second pass writes cache entries that change later cheap calls.}
+\li{The reduction returns another object in exactly one situation: a stuck projection whose cache entry was written by a full reduction of another occurrence.}
+\li{Whether another occurrence is another object is decided by the record ids of the export, by the sharing pass of the official kernel for theorems, and by its own allocation. It is not a property of the terms.}
+\li{No store that identifies equal terms can reproduce this. The reference engine as published accepted both exports of the example.}
+}
+\transclude{ex-7CCC}
+\p{The statement accepted is derivable, so this is a tolerated divergence in the default configuration. What the strict mode does about it is in [the strict mode and object identity](prob-1YXM).}
+\p{See also: [the caches of the reference engine](design-reference-caches).}

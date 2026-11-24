@@ -1,9 +1,54 @@
-\title{The two proof-comparison shortcuts}
+\title{The two proof-comparison shortcuts: skipargs and congruence}
 \taxon{Design}
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/soundness-shortcuts.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented and off. The code is reached only through the non-official system property \code{\verb~|-Drlvm.machine.m4=congruence,skipargs~} together with the switches \code{facts} and \code{probes}; no switch set turns it on and a strict engine never runs it. Since owner note 13 the two options are admissible as a profile, see [the decision](dec-GL11).}
+
+\p{\strong{Why they exist.} The official kernel compares two proofs by comparing their \em{types}, and it compares the arguments of two applications of one head before unfolding only when that head is a definition with a regular hint. In Mathlib's algebraic hierarchy two instance paths that meet are compared field by field; every proof field costs the comparison of two statements of a law, in which every operation is unfolded again on both sides, and every structure projection function, being an abbreviation, is unfolded whatever its arguments are. The leading checkers of the arena, gruszka and nano-lean, do not compare proof arguments and try the arguments of one head before they unfold it. These were [conversion](design-conversion)'s shortcuts B1, B2, B3, B4 and B12 in the first design; findings S-F1 and S-F2 of the soundness review showed that their answers are not the official algorithm's, and they were taken out of every switch set.}
+
+\p{\strong{The fact record.} Both options read one immutable record per constant, derived lazily from its type and value: the number of leading syntactic Pi binders; for each of the first 64 positions a superset of the binders its domain mentions; a "manifest sort" bit, set only when infer-only inference of the domain returns a sort without any reduction, with that sort's level; and, for a definition or theorem whose value is an export term, the number of leading lambdas and a mask of parameters the body does not mention, which errs only towards "read". A position is a \em{proof position} at a given head when its sort is manifest and its level, instantiated at the levels of that head, is always zero by an exact syntactic test.}
+
+\p{\strong{\code{skipargs}} changes which argument pairs are compared.}
+\ul{
+\li{\strong{Unread positions} (B4): when the same definition stands on both sides and the spine covers its lambdas, a parameter the body does not mention is skipped. If its two arguments are not the identical record, the position is remembered as differing.}
+\li{\strong{Proof positions} (B3): a proof position is skipped, unless its domain mentions a position remembered as differing; then it is compared like data. This \em{agreement rule} is a precaution neither of the two leaders takes.}
+\li{\strong{Structure eta}: the two types are compared first, as officially; then proof fields are not compared.}
+\li{Positions from 64 on and positions beyond the syntactic telescope are always compared.}
+}
+
+\p{\strong{\code{congruence}} answers "true" from the arguments instead of reducing.}
+\ul{
+\li{\strong{Same-head probe} (B1): at the start of a comparison, two applications of one constant (a definition with any hint, a theorem, a recursor, a quotient eliminator) have their arguments compared under a budget of 16,384 ticks for a regular definition and 1,024 otherwise. "True" is the answer; "false" and "undecided" hand over to the complete procedure.}
+\li{\strong{Closure congruence} (B12): two closures or suspensions of the same term and level substitution are equal if their captured frames agree slot by slot, under a budget of 1,024 ticks. Only "true" decides.}
+\li{\strong{Proofs by type} (B2): a value already known to be a proof is compared by type before it is reduced.}
+}
+
+\p{\strong{Why they are sound in the theory.} Every equation the options assume is derivable from delta, beta, zeta, eta, structure eta, iota, proof irrelevance and congruence, under one precondition that they do not establish themselves: both sides of a comparison are well-typed terms. The machine's inference establishes it; the review found no path on which a term that inference did not check reaches a comparison. The price is a lost redundancy: the official comparison of two proofs compares their types and so also catches an ill-typed proof argument that inference let through. A seeded fault of inference shows it: the plain machine still rejects the export, the options accept it. With the options, soundness rests on inference alone.}
+
+\p{\strong{Why the official verdict can differ.} The official comparison is not a congruence where a reduction inspects a proof. \code{\verb~|And.rec f (And.intro ..)~} reduces to a numeral, \code{\verb~|And.rec f h~} with an axiom \code{h} is stuck, and yet the two arguments are equal by proof irrelevance. Fourteen of the 304 officially rejected exports of the first soundness suite, and one analogue over \code{Acc.rec} written for the review, are accepted with an option. For each of the 15 the official checker itself accepts a proof of the same statement once the congruence step is written out as a term. They are official incompleteness, kind T in the words of [the exactness contract](design-exactness-contract). Of the 14, gruszka accepts all and nano-lean 6.}
+
+\p{\strong{The attacks, in numbers} (reviewer S2, JVM launcher, official verdicts from the official checker of Lean 4.36.0): no false claim was accepted under any configuration with the options: 95 hand-written ones under nine configurations and their 95 twins without literals, 6 of a second batch, 362 random ones, 358 targeted mutants of a Mathlib slice, the 2,040 officially rejected mutants of the arena's tests (1,977 rejected, 63 declined), the arena's 92 bad tests. On nine exports up to a Mathlib slice, 474,228 "true" answers of the shortcuts were re-derived by the complete procedure without one disagreement; 15,632 more re-derivations ran out of budget and confirm nothing. Seeded faults of the masks (off by one position, off by one de Bruijn index, a wrong universe instantiation) are caught by the suite. The later review of the candidate default found no false accept on 987 hostile exports. Nothing is mechanised; the verdict rests on reading the code, the argument and the attacks.}
+
+\p{\strong{What they are worth.}}
+\table{
+\tr{\th{Corpus}\th{Effect of the two options}\th{Conditions}}
+\tr{\td{Mathlib}\td{instructions inside the checks 2,438.6 G to 1,450.5 G (-40.5 \%); either option alone about a third}\td{profile P8: native image, one worker, on \code{\verb~|warm,gated,expect~}}}
+\tr{\td{Mathlib}\td{warm pass 25.39 s to 19.15 s (-24.6 \% wall clock, -25.5 \% process CPU time)}\td{report C1: native image, 8 workers, pipelined, on the default switch set}}
+\tr{\td{navier-stokes-euler}\td{-54.5 \% instructions; thread CPU of the checks 54.27 s to 24.56 s}\td{profile P9: native image, one worker, quiet cores, on the default switch set}}
+\tr{\td{cslib}\td{-22.4 \% instructions, -17.7 \% CPU of the checks}\td{as above}}
+\tr{\td{con-leche}\td{+9.2 \% instructions, +5.6 \% CPU of the checks: the options cost}\td{as above; one unit carries it, where walking two large closures slot by slot is more work than reducing them}}
+\tr{\td{Cedar slice}\td{-2.6 \% CPU of the checks}\td{report C1: native image, one worker, on the default switch set}}
+}
+
+\p{The question whether the same work can be removed with official verdicts was put to a prototype (report C1). Its answer is no: on these comparisons the official verdict \em{is} the result of the unfoldings. The one official-exact step that could be built, a fused two-sided lazy-delta step, removes 3 to 4 \% of the ticks on Mathlib slices and nothing measurable in time (-0.1 \% to +0.8 \% over twelve pairs of runs). An official-exact route would need congruence, transitivity or stability under substitution, and the official comparison has none of the three.}
+
+\p{Related: [conversion](design-conversion), [where the verdict can differ](design-official-divergence), [the adversarial review method](design-adversarial-review). Detail: \src{docs/design/review/soundness-shortcuts.md}, \src{docs/design/review/exact-proof-conversion.md}, \src{docs/research/profiles/P8.md}, \src{docs/research/profiles/P9.md}, \src{rlvm-machine/NOTES-M4.md}. Source: [the exactness session](ses-874D) and [the profiles and prototypes](ses-JRSD).}

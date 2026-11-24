@@ -1,0 +1,29 @@
+\title{A metadata node: \code{\verb~|a = mdata b~} is another term for the official caches}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{loader}
+\tag{reference-engine}
+\meta{origin}{docs/design/review/reference-caches.md}
+\import{base-macros}
+
+\p{The loader drops metadata records, so the reference engine saw \code{\verb~|a = b~} where the export says \code{\verb~|a = mdata b~}. Officially the node is a term of its own. Source: \src{docs/design/review/reference-caches.md}, sections 0 and 1, and finding S3-F2 of \src{docs/design/review/soundness-default-set.md}; [the exactness session](ses-874D).}
+\pre{\verb~|
+-- a, b, use as in the box example;  b' = mdata b
+-- one theorem:  And.intro W (And.intro W0 W2)
+--   W  = use (a = b)  (Eq.refl a)     true while the cache is empty
+--   W0 = use (a = 5)  (Eq.refl 5)     the full reduction of a is cached: 5
+--   W2 = use (a = b') (Eq.refl a)
+
+s3-wc-pos-mdata-bad        official: REJECT    reference engine: accept
+s3-mdata-eager-hidden-ok   official: accept    reference engine: reject
+~}
+\ul{
+\li{If \code{\verb~|b'~} is the same term as \code{\verb~|b~} for the caches, the set of successful pairs answers \code{\verb~|W2~} and the theorem is accepted. Officially \code{\verb~|mdata b~} is a different key, the cheap reduction of \code{\verb~|a~} now answers \code{\verb~|5~}, and \code{\verb~|W2~} fails.}
+\li{The second export goes the other way: officially a metadata node hides an application of \code{\verb~|eagerReduce~} from the syntactic test, the comparison is plain and true. An engine that sees through the node compares in eager mode and rejects.}
+\li{The statement accepted in the first export is derivable, so the divergence is of the tolerated kind. Under the practical policy metadata stays transparent; the strict mode declines a declaration whose type or value carries a metadata node.}
+}
+\p{Used by [metadata nodes and the nondep flag are part of the official term identity](ins-61D4).}
+\p{See also: [the caches of the reference engine](design-reference-caches).}

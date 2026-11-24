@@ -60,7 +60,7 @@
 \tr{\td{fatal fault}\td{an invariant seen broken, a failed audit, cancellation because an earlier unit failed, the memory watermark}\td{DECLINE, and the session is reset}\td{the same: \code{W} is cut to the sentinel whatever segment is open}}
 }
 
-\p{The machine polls the first-failure signal and the memory watermarks every 4096 ticks; both are fatal, so an abandon is never swallowed by a speculative segment. A declaration is accepted only by the sentinel frame after its last phase. Every limit produces DECLINE, never ACCEPT, and a REJECT goes to the reference engine before it becomes the verdict, see [the verdict protocol](design-verdict-protocol). Warm sessions have no step limit; strict and differential modes have one.}
+\p{The machine polls the first-failure signal and the memory watermarks every 4096 ticks; both are fatal, so an abandon is never swallowed by a speculative segment. A declaration is accepted only by the sentinel frame after its last phase. Every limit produces DECLINE, never ACCEPT, and a REJECT goes to the reference engine before it becomes the verdict, see [the verdict protocol](design-verdict-protocol). The design gives warm sessions no step limit and strict and differential modes a finite one; as built the machine also has a bound of its own of \code{\verb~|2^27~} ticks per unit, beyond which the unit is declined and the reference engine decides it.}
 }
 
 \subtree[design-machine-worklist-specification]{

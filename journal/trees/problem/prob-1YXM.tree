@@ -1,0 +1,31 @@
+\title{The strict mode and object identity}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{reference-engine}
+\tag{soundness}
+\tag{loader}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/reference-caches.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The question.} The strict policy promises the official verdict or none. The official verdict can depend on [which object a term is](ins-E3MS), on [metadata nodes and the nondep flag](ins-61D4), and on the lifetime of caches during admission. How much of that can the reference engine reproduce, and what does it decline?}
+\p{\strong{What exists.} Source: \src{docs/design/review/reference-caches.md}, sections 0 and 3, and \src{rlvm-main/README.md}; [the exactness session](ses-874D).}
+\ul{
+\li{The reference engine has two modes. The default, used by the practical policy for re-checks and fallbacks, never declines for the sake of agreement on adversarial files. The exact mode, set by the strict policy, gives the official verdict or none.}
+\li{For object identity the exact mode first probes: the second pass of the official comparison is run with the caches frozen, and if it decides nothing new, both continuations are the same. Otherwise the declaration is checked again with the hazard decided each way, at most 63 checks; if all verdicts agree that is the official verdict, if they differ the declaration is declined.}
+\li{In the strict mode the loader declines a declaration whose type or value carries a metadata node.}
+\li{The cost of the strict declines on the eight corpora is stated as zero declarations.}
+}
+\p{\strong{What is open.}}
+\ul{
+\li{The decline for the \code{\verb~|nondep~} flag of \code{\verb~|let~} was a patch not yet published when the audit was written; until it is, the strict mode accepts the export of that finding. The store does not keep the flag.}
+\li{Admission: a hazard inside a judgment of admission has no session to decide it and is a decline; and the judgments of a phase share one scope of the kernel where the official code uses a fresh checker, finding R2-F3.}
+\li{The audit sections on cost, gates and what was not established were still placeholders when this tree was written.}
+\li{The other classes of the cache history, a table keyed by values and memo across declarations, do not concern the strict mode: it is the reference engine alone, whose caches are keyed by terms and live for one declaration.}
+}
+\p{\strong{What would close it.} The \code{\verb~|nondep~} flag kept by the store, with a differential digest that shows the store differs only where it must; the judgments of admission started with empty caches where the official code does; and the strict gate run over the hostile suite with every row of the tolerated kind expected as official verdict or decline.}
+\p{See also: [the exactness contract](design-exactness-contract); [the caches of the reference engine](design-reference-caches).}

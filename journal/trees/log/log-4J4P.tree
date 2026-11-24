@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:37Z}
+\title{Admission: structural checks, prelude guards and the environment pass}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{\code{\verb~|rlvm-admit~} decides what must hold before an engine sees a unit: structural checks of every root, guards for the 34 special constants of the prelude that the literal and Nat extensions rely on, and the environment pass, which admits inductive and quotient units in file order and stops for good at the first failed unit. Its rule is exact or decline: every reject it issues was confirmed with the official checker 4.36.0, and what it cannot decide exactly it declines. Published with 74 tests, 73 green and one opt-in. Without the driver, on the host JVM with one worker, the tutorial tests are 141 of 141, the bugs tests 34 of 34 and the other tests 10 of 10 with the expected verdict and reason. Init (58,547 units) is accepted in 18.9 s wall and 27.9 s CPU, of which the environment pass is 0.12 s, and Std (101,146 units) in 33.4 s wall and 43.0 s CPU.}
+
+\p{Detail: \src{rlvm-admit/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

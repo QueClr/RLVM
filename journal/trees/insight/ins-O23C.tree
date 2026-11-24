@@ -1,0 +1,21 @@
+\title{Eager reduction is a mode of the official comparison, and a table keyed by values cannot reproduce it}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\meta{origin}{docs/design/review/soundness-machine.md}
+\import{base-macros}
+
+\p{Source: finding S-F5 of \src{docs/design/review/soundness-machine.md} and the design of the switch \code{\verb~|eager~} in \src{docs/design/review/eager-reduction.md}; [the session on the machine](ses-Z72N).}
+\ul{
+\li{The official comparison has one mode switch. While it compares the type of an argument of the form \code{\verb~|eagerReduce _ _~} with its domain, lazy delta folds Nat operations although a free variable is present.}
+\li{Its caches live for one declaration and are keyed by terms whose free variables are unique per binder instance. In the machine a free variable is canonical, a type and a depth, so a pair established in one scope answered in another scope and in the other mode: a wrong accept in the plain machine.}
+\li{Eager reduction occurs in 164 of the 55,401 checked declarations of Init and 203 of the 99,235 of Std, 0.30 and 0.20 percent.}
+\li{First fix, exact and cheapest: a declaration that enters eager reduction is declined and the reference engine decides it. A fresh session is not sufficient, because the two scopes are in one declaration; neither is "do not read the pair table in eager mode", because of the memo of the K rule.}
+\li{Second fix, the switch \code{\verb~|eager~}: the eager comparison is deferred to the end of the declaration, so that no plain judgment reads an answer derived under eager reduction; the plain phase records every point where the two modes would branch differently, and a difference declines the declaration.}
+}
+\transclude{ex-GV13}
+\p{The order "eager first, plain later" needs no rule: a true computed under eager reduction from an empty history is also true in plain mode. What the decline rule costs is in [the eager-reduction units](ins-47IQ).}
+\p{See also: [eager reduction on the machine](design-eager-reduction).}

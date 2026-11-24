@@ -1,9 +1,77 @@
-\title{Admission of declarations and inductive types}
+\title{Admission of declarations and of inductive types}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{reference-engine}
+\tag{levels}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ARCHITECTURE.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented in \code{rlvm-admit} and \code{rlvm-inductive}. The official rebuild of universe levels inside inductive blocks was added on 2026-11-24 (finding L-F1, closed).}
+
+\p{Admission is what happens to a declaration between [the loader](design-export-loader) and an engine: the structural checks, the choice of who decides the unit, and for inductive types and the quotient package the whole decision. It depends on no engine class; it asks its judgments through one interface, and [the reference engine](design-reference-engine) answers them.}
+
+\subtree[design-inductive-admission-order]{
+\title{Order, visibility, and why any schedule is sound}
+
+\p{A \em{unit} is one declaration record; an inductive block is one unit. Its \em{rank} is its position in admission order, which for every file the exporter writes is file order. The rules that let workers check units in parallel and in any order:}
+
+\ul{
+\li{\strong{Visibility by rank.} While a unit of rank \code{r} is admitted, a constant is visible exactly when its rank is below \code{r}. This is enforced once per root, by a summary word of the node, instead of at every lookup; see [the term store](design-term-store).}
+\li{\strong{Optimistic environment.} A unit is admitted against the \em{statements} of earlier units, not against their verdicts. This is sound because the file is accepted only if every unit is: a wrong earlier unit can only make a later check fail, loop or crash, and it yields an outcome other than accept by itself.}
+\li{\strong{Kept facts are functions of ids.} Anything an engine keeps across units may depend only on the identity of terms and on published immutable data. Nothing may depend on a constant being absent, or be computed while a budget was running out.}
+\li{\strong{Totality.} Under the optimistic environment an engine may be fed the body of an ill-typed earlier definition, so engines must end with a decline on garbage: bounded ids, budgets of steps and bytes, every exception caught at the unit boundary.}
+\li{\strong{Independence of the worker count.} Budgets are steps and bytes, never time.}
+}
+}
+
+\subtree[design-inductive-admission-flow]{
+\title{Who decides which kind}
+
+\table{
+\tr{\th{Kind}\th{Decided by}\th{Thread}}
+\tr{\td{axiom, definition, theorem, opaque}\td{the structural checks at the roots, then the primary engine}\td{a worker}}
+\tr{\td{the four quotient records}\td{a structural comparison with the canonical declarations, after a check that \code{Eq} has the expected shape}\td{the environment thread}}
+\tr{\td{inductive block}\td{regeneration and comparison, with judgments of the reference engine}\td{the environment thread}}
+\tr{\td{unsafe or partial record}\td{dropped at load; a declaration that mentions one fails with "unknown constant", as officially}\td{the loader}}
+}
+
+\p{A failed unit of the environment pass stops the environment frontier there for good: later units are never checked, earlier ones still are. The rule for verdicts is \em{exact or decline}: a rejection is issued only where the official checker certainly rejects, and everything else that is not accepted is a decline. The official checker replays a file by dependency, not in file order. The environment pass works in file order until the first unit that file order cannot decide and then, once the whole file is loaded, admits in dependency order on the reference engine; the corpora never leave file order.}
+}
+
+\subtree[design-inductive-admission-blocks]{
+\title{Inductive blocks: regenerate, compare, commit}
+
+\p{Nothing derived is read from the export. The only inputs of a block are its universe parameters, its number of parameters, and the names and types of its types and of their constructors. From these the module derives every other fact and every recursor, following the official admission step by step and in its order: the check that every occurrence of a block type is uniform, the elimination of nested inductive types into an auxiliary mutual block, the checks of the types and of the constructors with positivity and universes, the elimination universe and the K target, the recursor types and rules, their type check, and the restoration of the nested block. Each exported constructor and recursor record must then be \em{identical} to the derived one. The comparison is structural, never definitional, and a mismatch is a rejection as in the official checker. Because an identical exported record is the same term as the derived one, the committed rows simply point at the exported shared terms; the side tables hold the derived facts.}
+
+\p{One deviation in structure: while a block is admitted, each of its members (types, auxiliary types, constructors, recursors) is a free variable whose type is the member's type, not a half-declared constant. The auxiliary types of a nested block have no constant at all, and in the official environment a member in flight is an opaque symbol of its type, which is what a free variable is.}
+
+\p{Narrower than official, and therefore declined: a recursor the kernel would generate without an exported record, a nested block in a file that has names under the reserved root, and a few irregular arrangements of records. Literal extensions rest on shape guards of the prelude constants (\code{Nat}, the accelerated functions, \code{Bool}, \code{String} and the others of the 34 special names). A special is absent, valid or invalid; an engine that needs an extension whose special is invalid declines the unit, and a file that declares an odd \code{\verb~|Nat.add~} and never computes with it gets its normal verdict.}
+}
+
+\subtree[design-inductive-admission-rebuild]{
+\title{The official rebuild of universe levels (finding L-F1)}
+
+\p{The official kernel refers to the members of the block it is admitting with level-parameter objects it makes itself, and its instantiation of levels keeps a node only when the operands come back pointer-equal. A fresh parameter object is never pointer-equal to the one in the declared type. So the type the official checker infers for such a reference is the declared type with every level node above a parameter of the block rebuilt through the simplifying constructors: \code{\verb~|imax u 1~} becomes \code{\verb~|max u 1~}. The official level relation does not identify the two spellings (see [universe levels](design-universe-levels)), and the kernel rejects with "application type mismatch", for instance:}
+
+\pre{\verb~|
+inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1) | mk : a -> T a
+~}
+
+\p{Both spellings denote the same level, so this is incompleteness of the official kernel and not a soundness matter; under [dec-P8XP](dec-P8XP) RLVM gives the official verdict. The module reproduces the rebuild: the stand-in of a member that only the kernel refers to has the rebuilt type, and each recursor type is checked on a copy in which the declared types of the block that the rebuild respells are renamed to stand-ins of the rebuilt header. A reference written in the export keeps the declared type.}
+
+\p{Evidence, all against the official checker v4.36.0. RLVM had accepted 183 of 2,200 generated declarations that the official checker rejects; all 2,200 now get the official verdict with both engines. A second set of 1,468 fixtures in twelve further shapes (index domains, mutual and nested blocks, K-like predicates and others), 655 accepted and 813 rejected officially, 778 of them only because of the rebuild, gets the same verdicts with no decline. No real block is affected: the rebuild changes no spelling in any of the 17,377 blocks of the eight corpora, and for such a block nothing is computed beyond one memoised walk over the constructor types. With \code{\verb~|-X levels=complete~} the two spellings are identified and the files of the finding are accepted. The same mechanism outside a block, two level records for one parameter, is handled by the loader (finding A2-F1).}
+}
+
+\subtree[design-inductive-admission-cost]{
+\title{Cost}
+
+\p{The design estimated the environment pass at 10.7 G instructions on Mathlib. Measured as thread CPU time on the JVM, warm, on a loaded host: 34 to 37 ms for Init (58,547 units, 609 of them inductive or quotient), about 1.4 to 1.5 s for Mathlib (721,845 units, 7,133). In a profile of the native image with the machine as engine and one worker, admission and the inductive module together are 0.29 \% of the process on Init and 0.31 \% on Std. Admission is not a cost centre. In the strict mode its judgments start with empty caches, see [the cache audit](design-reference-caches).}
+}
+
+\p{Detail: \src{docs/design/ARCHITECTURE.md} section 4 for the design; \src{rlvm-admit/README.md} and \src{rlvm-inductive/README.md} for the implementation, the declines, the probes against the official checker and the tests. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}

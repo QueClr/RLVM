@@ -3,7 +3,45 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{platform}
+\tag{arena}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/PLATFORM.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. Both launchers are in every distribution; the arena definition names the native image.}
+
+\p{\strong{Context.} The same jars run as a native image of GraalVM CE and on HotSpot, see [the launchers](design-launchers). The design planned one platform gate, decided by CPU time, for when the machine first accepted Init. That gate was measured on fresh processes with a batch load and the machine as engine: the native image needed 0.68 / 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers (medians of 8 paired runs each on Init, Std, the Cedar slice and reachability; the image won all 24 pairs) and a third to a half of its memory. The JVM pays about 3.7 s of C2 compilation per run and runs every worker slowly until it is done. While the gate was being written up, [the metric changed](dec-7QMU): the goal is wall clock after warm-up, warm-up cost is not charged, and the platform question is decided by warm wall clock. The cold answer stays true for what an arena run is, one fresh process per export, and no longer decides which platform is the fast one.}
+
+\p{\strong{Decision.} Each launcher has its job, and nothing has to choose between them at build time.}
+\ul{
+\li{\strong{The JVM launcher is the warm platform}: every measurement of the metric, and any process that checks more than one export or a Mathlib-sized one.}
+\li{\strong{The native image is the cold platform}: one fresh process per export, that is the arena definition, the 230 published tests, anything short.}
+}
+
+\p{\strong{Evidence.} All on the aarch64 development host, 8 workers, load pipelined, inside quiet-core windows; warm is the median of the later passes of one process that checks the same export again.}
+
+\table{
+\tr{\th{Measurement}\th{Warm wall clock, JVM launcher against native image}}
+\tr{\td{First warm table, machine with \code{\verb~|warm,gated,expect~}, old launcher line}\td{Init 0.96 against 1.07 s (JVM in 10 passes), Std 1.72 against 1.88, cedar 2.21 against 2.62, reachability 1.88 against 2.66, con-leche 1.71 against 2.18, navier-stokes-euler 8.45 against 9.29, cslib 7.62 against 9.06, Mathlib 25.63 against 35.34}}
+\tr{\td{The same table, reference engine}\td{Init 1.70 against 2.34 s, Std 2.74 against 3.92, cedar 3.62 against 4.86, reachability 3.96 against 4.83}}
+\tr{\td{Report J1, same jars in the same windows, [the new launcher line](dec-E3EX)}\td{ratio 0.79 (Init), 0.80 (Std), 0.76 (cedar), 0.68 (reachability), 0.88 (Mathlib); with one worker 0.67 to 0.87}}
+\tr{\td{Machine with the default switch set of the wave-6 integration, old launcher line}\td{Mathlib 21.23 against 27.43 s; Init 0.72 against 0.81; reachability 0.56 against 0.61. On Std and cedar the JVM was not yet steady within its 6 passes}}
+}
+
+\p{Cold, the order turns around. In the J1 windows the cold wall clock of the JVM launcher with the new line is 3.0 (Init), 1.75 (Std) and 2.1 (cedar) times the image's, and about equal on reachability and on the first pass over Mathlib; with the old line it was 3.5, 3.1 and 4.0 times. On the prelude alone (3.8 MB) the image answers in 0.02 s and the JVM in about 0.2 s whatever is done, and most arena tests are that small. The JVM's resident set is 1.5 to 2.4 times the image's.}
+
+\p{That the image does the arena's job was checked by a dry run of the arena's own procedure on its complete test set of 270 tests (148 good including the 8 corpora, 92 bad, 30 either): no wrong accept and no wrong reject in any of four configurations, with the reference engine and with the machine. The same report gives the arena's metric for information: on Mathlib with 4 workers, 8,427.1 G user-space instructions with the reference engine and 2,978.5 G with the machine under \code{\verb~|warm,gated,expect~}, against 361.2 G for nano-lean and 419.1 G for gruszka in the same container.}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{Warm wall-clock numbers of record are taken on the JVM launcher, and a table names the launcher of every row; see [the measurement method](design-measurement-method).}
+\li{The arena definition stays on the image. A single arena run never makes the two or three passes the JVM needs to become steady.}
+\li{In steady state the image is the slower platform by the factors above. A compiled tier inside the image would move the question there; [the Truffle tier is off](dec-ADIK). Profile-guided optimisation of the image is not available to a default build, see [dec-6E82](dec-6E82).}
+}
+
+\p{\strong{Not measured.} x86-64: the arena runner is x86-64 and every number here is aarch64. One worker on Mathlib.}
+
+\p{Documents: \src{docs/PLATFORM.md}, \src{docs/BENCHMARKS.md}, \src{docs/research/profiles/J1.md}, \src{docs/research/profiles/AR1.md}, \src{scripts/arena/rlvm.yaml}. Source: the sessions of [the pipeline](ses-CVTE) and of [the profiles and prototypes](ses-JRSD).}

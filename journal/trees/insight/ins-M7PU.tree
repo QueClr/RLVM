@@ -1,0 +1,20 @@
+\title{With two cores more than workers a pipelined run would cost what a check-only pass costs}
+\taxon{Hypothesis}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{loader}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{Source: the closing remark of \src{docs/research/profiles/P7.md}, section 8; [the profiling session](ses-JRSD). Not measured: the measurement cores of the development host are eight, and every 8-worker row has the loader and the environment thread on the same eight cores.}
+\ul{
+\li{The loader, 12 s, and the environment thread, 1.6 to 3 s, are 15 s of CPU on Mathlib and 1.9 s of wall clock on 8 cores. They are not serial work, simply work, and with 8 workers on 8 cores they are why a pipelined run has ten runnable threads for 20 s: 13.6 percent of the worker time is spent runnable without a core.}
+\li{The claim: on a machine with ten cores the pipelined run would take the time of the check-only pass, 28.7 s instead of 31.8 s in the native image on Mathlib.}
+\li{Evidence in its favour, measured on the same eight cores: seven workers are as fast as eight on the JVM launcher, and with four workers [the packed load](ins-3L35) takes half the loader time because the loader has a core of its own.}
+\li{Against it: eight busy cores already make each of them [5 to 7 percent slower](ins-RPLD), and two more busy cores share the same memory bandwidth.}
+}
+\p{It matters for the choice of the default worker count on a runner with more cores than the arena gives.}
+\p{See also: [the driver](design-driver).}

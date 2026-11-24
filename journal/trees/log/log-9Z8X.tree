@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:34Z}
+\title{The machine: skeleton and a complete generic tier}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{afe1c5b}
+\import{base-macros}
+
+\p{\code{\verb~|rlvm-machine~} started as a skeleton with the shared definitions frozen (layout, operations, hashing, machine state, frames) and 42 tests green, among them the control tests: the same result for host depth bounds 0, 1, 2, 7, 64 and unbounded, and a recursion 1,000,000 deep on a 512 KiB stack. The engine was registered under the name \code{\verb~|machine~} and declined everything, failing closed.}
+
+\p{Within the next hour the packages published every judgment family of the generic tier, the configuration later called v0: values, runs, literals and levels; evaluation; reduction with Nat and String; inference and the check of a declaration; conversion with its complete procedure, after which no stub was left on the path. Checked per declaration against the reference engine, Init was clean: 58,547 units compared, 57,938 engine checks accepted by the machine, none declined. Through the launcher the tutorial tests were clean: 141 verdicts right, 175 units accepted, 20 rejected and every rejection confirmed by the reference kernel.}
+
+\p{Detail: \src{rlvm-machine/README.md}, \src{docs/design/ISA.md}. Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N).}

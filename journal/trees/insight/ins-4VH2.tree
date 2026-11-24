@@ -1,0 +1,20 @@
+\title{The official \code{\verb~|is_def_eq~} is not transitive and not a congruence}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\tag{reference-engine}
+\meta{origin}{docs/design/review/soundness-machine.md}
+\import{base-macros}
+
+\p{Source: the independent soundness review of the machine, \src{docs/design/review/soundness-machine.md}, findings S-F1 and S-F2; [the session on the machine](ses-Z72N). Ground truth is the official checker of Lean v4.36.0, never the reference engine alone.}
+\transclude{ex-OTWJ}
+\ul{
+\li{The official comparison reduces before it compares. It compares the arguments of two applications of one head first only for a definition with a regular hint. So "the arguments are pairwise convertible" does not imply that the applications are convertible for the official procedure, although it does in the theory.}
+\li{Several shortcuts of the machine answered from congruence: a same-head probe on recursors, abbreviations and theorems, a closure congruence, skipped proof positions and skipped unread positions, and a Prop mask in structure eta. All were wrong accepts against the official checker, on statements that are true in the theory. They had been measured "clean on everything" earlier in the same wave of work.}
+\li{The owner of conversion removed them from every switch set the same day; they remain available as the two options \code{\verb~|congruence~} and \code{\verb~|skipargs~}.}
+}
+\p{The lesson of the review: every shortcut needs the question "does the official procedure give this answer here", not "is this answer true". Whether the second question is enough is a policy; the maintainer later chose that it is, see [standing policies](standing-policies) and [the two shortcuts are sound in the theory](ins-T1F1). The same root has two more forms: [cache order](ins-PO1G) and [object identity](ins-E3MS).}
+\p{See also: [conversion](design-conversion); [the adversarial review method](design-adversarial-review).}

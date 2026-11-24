@@ -1,0 +1,19 @@
+\title{Step and instruction counts do not stand for CPU time across switch sets}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/P8.md}
+\import{base-macros}
+
+\p{Sources: \src{docs/research/profiles/P8.md}, section 4.7; \src{docs/research/profiles/X1.md}, verdict 4; finding F24 of \src{rlvm-machine/NOTES-M6.md}; [the profiling session](ses-JRSD). Three measurements in which a count and the clock moved differently or in opposite directions.}
+\ul{
+\li{\strong{The steps that a shortcut removes are cheaper than the average step.} On a Mathlib slice of 21,127 units, native image, one worker, quiet cores: the two proof-comparison shortcuts remove 43 percent of the steps and 27 percent of the thread CPU time of the checks; the time per step rises from 99 to 125 ns. On all of Mathlib the step saving is 55 percent and the instruction saving 40.5 percent.}
+\li{\strong{A memo that removes steps can add time.} An ephemeral evaluation memo placed in front of a visit filter did in counters exactly what it was built for, 2 to 11 percent fewer steps than the base under \code{\verb~|warm,gated,expect~}, and in time it was never ahead of the filter alone: 6.7 and 10.4 percent slower on reachability, JVM, one worker.}
+\li{\strong{A larger session lowers the instruction count and raises the CPU time.} Init with eight workers, native image in the arena container, \code{\verb~|warm,gated,expect~}: 127.2, 120.1, 105.3 and 94.9 G instructions at session caps of 512 KiB, 1 MiB, 4 MiB and 16 MiB, against 7.97, 8.15, 8.67 and 9.59 s of CPU time, on a loaded host with two rounds. The tables leave the processor cache; see [the session cap](ins-FJ5R).}
+}
+\p{Counts are exact and repeat, so they are the right tool to say what work was done. They are the wrong tool to decide a default: every switch decision of the machine was taken on warm wall clock in a quiet window.}
+\p{See also: [the measurement method](design-measurement-method).}

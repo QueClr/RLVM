@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:31Z}
+\title{\code{\verb~|rlvm-truffle~} is a module of the build and part of every distribution}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{truffle-tier}
+\tag{unreleased}
+\tag{truffle}
+\tag{platform}
+\meta{release}{Unreleased}
+\meta{commit}{6f02bb0}
+\import{base-macros}
+
+\p{The parent build lists \code{\verb~|rlvm-truffle~}, and a distribution built from published jars takes its jar like the machine's. The tier is still used only under the switch \code{\verb~|t2~}, which is off. The build of all modules with all tests, in a frozen copy of the tree: 16 modules, 1,409 tests, no failure, 18 opt-in tests skipped.}
+
+\p{Detail: \src{rlvm-truffle/README.md}, \src{rlvm-machine/SWITCHES.md}. Commit \commit{6f02bb0}. Session: [machine speed and pipeline](ses-CVTE).}

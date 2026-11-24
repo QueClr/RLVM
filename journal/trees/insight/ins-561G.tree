@@ -1,0 +1,20 @@
+\title{In the native image the collector is the one serial part whose share grows with the workers}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{gc}
+\tag{driver}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P7.md}, sections 2 and 8; [the profiling session](ses-JRSD). Native image \code{\verb~|-O3~} with the serial collector, machine with \code{\verb~|warm,gated,expect~}, Mathlib, quiet cores.}
+\ul{
+\li{Every pause of the single-threaded collector stops all 8 workers and the loader. The pause time per check pass is the same at every worker count, about 1 s, and 1.8 to 3.9 s with the garbage of the pipelined loader on top. Its share of the wall clock is therefore 0.5 percent with one worker and 3.5 percent in a batch run, 10.3 percent in a pipelined run, with 8.}
+\li{A check pass frees 14 GB whatever the worker count: 20 KB per unit and 1 MB per session reset. A pipelined run frees 35.6 GB.}
+\li{A larger young generation does not help: 26 collections of 123 ms instead of 403 of 10 ms, because each one copies the live session arrays.}
+\li{This is the 5 to 8 percent that separate one process with 8 workers from [the hardware ceiling](ins-RPLD).}
+}
+\p{The fix is not to make the garbage; see [where the garbage comes from](ins-2ELY) and the open problem [garbage and the collector of the native image](prob-BIN4).}
+\p{See also: [the driver](design-driver).}

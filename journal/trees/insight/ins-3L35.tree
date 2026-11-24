@@ -1,0 +1,22 @@
+\title{Scanner threads can pack 72 percent of the records of Mathlib; the load gets 1.6 times shorter and the 8-worker pass does not move}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{origin}{rlvm-load/README.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-load/README.md}, sections "Parallel packing" and "LP2: warm measurements", and \src{rlvm-export/README.md}; [the session on wave 6 and the pipeline](ses-CVTE). JVM launcher flags and native image, quiet cores, machine with its default switches, loading pipelined with checking.}
+\ul{
+\li{The exporter writes the records a declaration needs right before its declaration line, the records of the type before those of the value. The scanner threads of the reader, which so far only tokenised, also prepare the packed form of the proof-private records; the loader thread links.}
+\li{Through packed runs go 77,143,904 of the 107,037,712 expression records of Mathlib, 72 percent; 5,010,446 of 6,137,092 on Init; 7,709,869 of 9,928,514 on Std. None is expanded.}
+\li{The invariant is that the store is word for word the store of the record-by-record path on every file, and that a file that fails does so with the same message and line. The scanner threads decide nothing: a run is an offer that the loader accepts from its own state at the declaration line.}
+\li{The load alone, with two scanner threads, warm: Std 0.92 s becomes 0.48 to 0.56 s, cedar 1.36 becomes 0.73 s, Mathlib 9.2 to 9.6 s becomes 5.8 to 6.2 s. That is 1.8 times shorter on Std and cedar and 1.6 times on Mathlib. A third scanner thread buys nothing: the linking thread is the limit again.}
+\li{With 8 workers on 8 cores it changes the pass by nothing measurable: Std 1.64 to 1.68 s against 1.61 to 1.67 s, cedar 2.09 to 2.10 against 2.06 to 2.17 s, Mathlib 21.05 against 20.56 s on the JVM, one row each. Such a pass is bound by its total CPU time, of which the load is a tenth; packing moves that tenth between threads.}
+\li{Where the loader has a core, with 4 workers, its time halves: 0.89 to 0.46 s on Std, 1.37 to 0.78 s on cedar.}
+}
+\p{So the loader is no longer what bounds a pass in which checking leaves a core free, and it is not what bounds the 8-worker passes either: those wait for less checking CPU. Scanner threads without packing do not help beside 8 workers.}
+\p{See also: [the export loader](design-export-loader).}

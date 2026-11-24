@@ -1,0 +1,20 @@
+\title{A seeded fault that the suite does not catch shows a path the suite never exercised}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{benchmark}
+\meta{origin}{docs/design/review/soundness-default-set.md}
+\import{base-macros}
+
+\p{Source: \src{docs/design/review/soundness-default-set.md}, sections 6 and 10.3, and \src{docs/design/review/soundness-shortcuts.md}, section 3.4; [the exactness session](ses-874D). The reviewers kept a private copy of the machine with one deliberate fault at a time behind a property, and ran their hostile exports against it.}
+\ul{
+\li{Of eleven faults seeded into the switches of the default set, three were not caught by the suite as it stood. Of four seeded into the candidate with eager reduction and the two shortcuts, three were not caught at first.}
+\li{Each miss pointed at a path that no export reached. The walk \code{\verb~|same~} is not reached for two closures that the binder case of the quick test compares first. A level difference in an argument of a pattern is found by record identity, and only a level of the constants of the pattern itself reaches the level comparison. A fault in a skip mask was hidden because numerals are refuted before the mask is asked.}
+\li{The rows that catch the faults were added, and they are the first rows to enter the hostile suite.}
+\li{A fault with no effect is information too: two seeded faults of the shortcut masks changed no verdict, one of them because no head reaches the place with the mask in question.}
+\li{One seeded fault was of inference, not of a shortcut: the machine without the shortcuts still rejects the export, because the official comparison of two proof arguments compares their types; with the shortcuts it accepts. With them, conversion is no longer a second check of what inference let through.}
+}
+\p{A suite that cannot catch a seeded fault has not tested the switch. The gates of the project carry a differential self-test in the same spirit, which has to be caught for a run to count.}
+\p{See also: [the adversarial review method](design-adversarial-review); [the gate](design-gate).}

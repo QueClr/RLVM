@@ -1,0 +1,30 @@
+\title{\code{\verb~|perf/loop-unfolded-once~}: equal terms that are two different closures}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{arena}
+\tag{performance}
+\meta{origin}{docs/research/profiles/AR1.md}
+\import{base-macros}
+
+\p{An arena performance test that the official kernel answers by structural identity of two instantiated terms, and on which a machine over values has two closures of different terms that are equal only after substitution. Source: the arena dry run \src{docs/research/profiles/AR1.md}, table 0.1, and \src{rlvm-machine/SWITCHES.md}; [the profiling session](ses-JRSD).}
+\pre{\verb~|
+Nat.rec M Z S1 m  =?=  Nat.rec M Z S2 m
+-- S1 = fun k _ => p (lo + k)               under  lo := 0, p := a closure
+-- S2 = fun k _ => (fun i => g w i) (0 + k)
+-- officially S1 and S2 are the same term once instantiated
+~}
+\table{
+\tr{\th{Configuration}\th{Outcome}\th{Cost}}
+\tr{\td{reference engine}\td{accept}\td{76 ms, 1.5 G instructions, 60 MiB}}
+\tr{\td{machine, \code{\verb~|warm,gated,expect~}}\td{accept after the machine gives up at its own step bound and the reference engine decides}\td{31.6 s, 199.2 G instructions, 8,686 MiB, alone in a quiet window; killed at the limit of 40 s in the suite run}}
+\tr{\td{machine with the candidate set that contains \code{\verb~|same~}}\td{accept}\td{75 ms, 0.77 G instructions}}
+\tr{\td{machine with the two shortcuts}\td{accept}\td{58 ms, 0.85 G instructions}}
+}
+\ul{
+\li{Measured in an arena-shaped container on the aarch64 development host. The arena runner is slower, so with the switch set \code{\verb~|warm,gated,expect~} this test is a likely timeout there, not a wrong verdict.}
+\li{The plain machine cannot accept it by an exact, bounded structural test: it needs the comparison of the slots of the two closures. The walk \code{\verb~|same~}, which answers when two values read back to one expression, settles it.}
+}
+\p{See also: [staging switches and the default switch set](design-switches).}

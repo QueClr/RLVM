@@ -1,0 +1,22 @@
+\title{The best session cap is set by the processor cache, not by the step count: 1 MiB}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{driver}
+\tag{performance}
+\meta{origin}{rlvm-machine/SWITCHES.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-machine/SWITCHES.md}, section "Sessions"; finding F24 of \src{rlvm-machine/NOTES-M6.md}; \src{docs/research/profiles/P8.md}, section 4.5; \src{docs/research/profiles/P9.md}, section 4.5; [the session on wave 6 and the pipeline](ses-CVTE). A warm session keeps the tables of the machine across accepted declarations until a cap on their size.}
+\ul{
+\li{The step count falls as the cap grows, because more memo entries are found. On a Mathlib slice: 31.7 M steps at 1 MiB, 26.9 M at 4 MiB, 24.6 M at 16 MiB, 23.0 M at 64 MiB, 22.7 M at 1 GiB.}
+\li{CPU time and wall clock rise as the cap grows, because the tables leave the cache. With the former cap of the driver, 16 MiB, a warm session was slower than no warm session: Init with one worker 9.5 s against 8.23 s for the plain machine and 7.70 s at 1 MiB; native image in the arena container on a loaded host, two rounds.}
+\li{With the default switch set, native image, 8 workers, quiet windows: 512 KiB and 1 MiB are within 2 percent of each other on every corpus; 2 MiB costs 3 to 4 percent of CPU on Init, Std, cedar and Mathlib; 4 MiB costs 4 to 7 percent and 17 percent of wall clock on cedar.}
+\li{The question whether 17 percent more steps on a Mathlib slice at 1 MiB against 4 MiB should change the default was answered by wall clock on all of Mathlib with 8 workers: 29.3 s per warm pass at 1 MiB against 30.6 and 30.3 s at 2 and 4 MiB. The cap stays.}
+\li{The cap is a property of the tables of the machine, so the machine has a cap of its own beside the memory account of the driver. A reset of the machine alone is always legal.}
+}
+\transclude{ex-UT0I}
+\p{For comparison, nano-lean drops a session when its arena passes 64 MiB and gruszka truncates its arrays at 8 MiB; see \src{docs/research/04-leader-nano-lean.md} and \src{docs/research/05-leader-gruszka-pestka.md}. This is one of the cases of [counts do not stand for time](ins-KFM6).}
+\p{See also: [warm sessions and the session cap](design-warm-sessions); [the decision for 1 MiB](dec-KXE1).}

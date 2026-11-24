@@ -1,0 +1,23 @@
+\title{Inference is a third of the worker time on library corpora}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-machine/NOTES-M5.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The number.} By the innermost judgment family on the stack, in flight-recorder samples of the worker with the default switch set of wave 6, JVM launcher, one worker, shares only: inference is 33 percent on Init, 34 percent on Std, 40 percent on the Cedar slice and 27 percent on a Mathlib slice; evaluation is 35, 35, 31 and 38 percent; conversion 8 to 13; reduction 5 to 10. The profile is that of the integration of wave 6, [the session on wave 6](ses-CVTE).}
+\p{\strong{What is known.}}
+\ul{
+\li{It is not a missing rule. Over all of Mathlib the inference and check events of the machine are 0.98 of the inference misses of gruszka, see \src{docs/research/profiles/P8.md}. The cost is per event.}
+\li{nano-lean spends 42 percent of its instructions on whole cedar in inference, see [the workload](ins-I4Y7). Inference is the largest family of Cedar-level work for a leader too.}
+\li{After the interning work of wave 6, construction of values and frames fell from 51 to 36 percent of the leaves on Init; judgment code is 49 percent and store reads 14 percent.}
+\li{Candidates listed by the owner of inference in \src{rlvm-machine/NOTES-M5.md}, none built: matching a pattern against a pattern for application arguments, which on Init would remove 382,705 of 1.32 M result builds, about 4 percent of the evaluation events; the memo of checked closed terms extended to terms with level parameters; lazier derivation of facts. The telescope code object showed no gain.}
+}
+\p{\strong{What would close it.} A profile by function of the inference judgments on the Cedar slice in a quiet window, and one of the candidates measured in warm wall clock with 8 workers.}
+\p{See also: [inference shortcuts and typed bindings](design-inference-shortcuts).}

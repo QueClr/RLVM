@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:35Z}
+\title{Arena-shaped container with instruction counts}
+\taxon{Change}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\tag{arena}
+\tag{benchmark}
+\meta{release}{Unreleased}
+\meta{commit}{1c3f2e7}
+\import{base-macros}
+
+\p{\code{\verb~|bench/arena-docker.sh~} runs a command in an Ubuntu 24.04 image with the privilege that \code{\verb~|perf~} needs; with \code{\verb~|--arena-limits~} the container is sized like the arena's runner, 8 CPUs and 16 GB. \code{\verb~|bench/measure.sh~} runs one command under \code{\verb~|perf stat~} and GNU \code{\verb~|time~} the way the arena's own tool does and prints one JSON line, and \code{\verb~|bench/run-suite.py~} scores a checker over a directory of tests like the arena. The validation recorded on 2026-11-24 found the counters trustworthy on the aarch64 development host: four threads count 4,800,226,612 user instructions, 1.00005 times four single threads, forked children and spawned processes are counted as well, and the type of core does not change the count.}
+
+\p{Detail: \src{bench/README.md}. Commit \commit{1c3f2e7}. Session: [research, benchmark infrastructure and spikes](ses-XOS5).}

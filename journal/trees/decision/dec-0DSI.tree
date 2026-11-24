@@ -3,7 +3,36 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{soundness}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/official-divergence.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. The fix is in every configuration of the machine; the one part of it that costs ticks can be undone with the switch \code{convexpect}, which is off.}
+
+\p{\strong{Context.} The findings E1-F1 to E1-F6 were accepts of the machine on exports that the official checker rejects: a bound variable was typed by what its environment slot holds, which is only \em{convertible} with its binder's declared type, and the official comparison is not transitive. The fix makes the machine type bound variables as the official kernel does, see [typed bindings](design-inference-shortcuts). An hour after its publication the owner chose the practical exactness policy (owner note 13, see [that decision](dec-TQSI)): accepting a derivable statement that the official checker rejects only through its own incompleteness is tolerated, and behaviour that exists only for bug-for-bug agreement on adversarial files belongs to the strict mode, not to the default. The note names two examples: declining metadata nodes, and "typed bindings if they cost time". Every statement of this family is derivable, so the fix is exactly such behaviour. The question left was whether it costs time.}
+
+\p{\strong{Decision.} The typed bindings stay in the default configuration, including the restriction of the expected-type rule to lambdas whose domain \em{is} the expected domain. They are not moved to the strict mode.}
+
+\p{\strong{Evidence.} The numbers are those of the divergence record and of the notes of the inference package.}
+\ul{
+\li{\strong{The typed bindings themselves cost nothing measurable.} Without them the tick count changes by -0.35 \% on the Cedar slice and -0.01 \% on Std.}
+\li{\strong{The restriction of the expected-type rule is the whole tick cost of the fix}: 2.4 \% of the ticks of the Cedar slice and 0.3 \% of those of Std, of Init and of 16 Mathlib slices (269,542,201 ticks against 268,665,151).}
+\li{\strong{It does not show in warm wall clock.} Native image, 8 workers, two readings each: cedar 1.59 and 1.62 s before the fix, 1.59 and 1.58 s after; Std 1.19 and 1.20 s before, 1.19 and 1.22 s after.}
+\li{The switch \code{convexpect}, which gives the old rule back, was measured the same way: 2.4 \% fewer ticks on the Cedar slice, 0.3 \% on Std, and no gain in warm wall clock on cedar or Std.}
+}
+\p{Not measured: Mathlib as a whole in warm wall clock with and without the restriction, and the JVM launcher.}
+
+\p{\strong{Why.} The reason is the measurement alone. The policy would allow these accepts, and it sends the behaviour that prevents them to the strict mode only if that behaviour costs time. In the project's metric, warm wall clock, it does not.}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{On the rows of E1-F1 to E1-F5 the default machine gives the official verdict. The rule for E1-F6 is a decline; in the per-declaration gate of the published sources (switch set \code{\verb~|default,eager~}) it declined one unit of Std's 101,146 and four of the 436,408 units of 16 Mathlib slices.}
+\li{With \code{convexpect} the three rows of E1-F4 are accepted; they carry the kind mark T in the hostile suite, which then demands the official verdict \em{or} an accept.}
+\li{The seventh shape, E1-F7, is not covered and was not built: an exact treatment needs the official type of a term the kernel has not reduced, in the generic tier and in the compiled paths. It is intrinsic to a machine that computes on values. Its three rows are accepted, their statement is \code{True}, and the class is recorded among [the divergence classes](design-official-divergence). Decline rules in its place would cost 322 of 425,620 units of the Mathlib slices and 12 of 100,096 units of Std and would not cover the shapes without a let.}
+\li{The condition of the note remains: should the restriction be shown to cost warm wall clock, it belongs to the strict mode. The switch for that exists.}
+}
+
+\p{Related: [the exactness contract](design-exactness-contract), [staging switches](design-switches), [the machine as default engine](dec-T79V). Detail: \src{docs/design/review/official-divergence.md} section 1, \src{rlvm-machine/NOTES-M5.md} (sections on E1-F1 to E1-F7 and on \code{convexpect}), \src{docs/design/OWNER-NOTES.md} note 13. Source: [the exactness session](ses-874D).}

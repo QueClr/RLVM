@@ -1,0 +1,29 @@
+\title{navier-stokes-euler is the Mathlib mechanism in a larger dose; cslib is a smaller dose; con-leche is flat}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P9.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P9.md}; [the profiling session](ses-JRSD). One worker, native image \code{\verb~|-O3~}, the default switch set of the machine as published at 21:02Z on 2026-11-24, instructions and thread CPU inside the checks per unit; the leaders per declaration with their arena builds in the same hour; CPU shares from one quiet window.}
+\table{
+\tr{\th{Corpus}\th{Units}\th{Machine / gruszka, instructions}\th{Removed by the two shortcuts}\th{Eager-reduction declines, share of the worker}\th{The rest}}
+\tr{\td{navier-stokes-euler}\td{124,850}\td{7.98}\td{54.5 percent of the instructions, 51.2 percent of the CPU}\td{1.5 percent}\td{3.63 times gruszka}}
+\tr{\td{cslib}\td{397,608}\td{4.12}\td{22.4 percent, 14.6 percent of the CPU}\td{12.6 percent}\td{3.20 times}}
+\tr{\td{con-leche}\td{36,274}\td{3.24}\td{none: +9.2 percent instructions, +5.6 percent CPU}\td{2.9 percent}\td{3.24 times, flat}}
+\tr{\td{Mathlib, from P8}\td{714,712}\td{6.52}\td{40.5 percent}\td{11 to 12 percent}\td{3.88 times}}
+}
+\ul{
+\li{On navier-stokes-euler 84 percent of the instructions are in the 57,330 units of the project itself, at 9.35 times gruszka. The proofs compared are those of analysis: the two instance paths of the reals, bundled maps, and subobjects.}
+\li{A second class is not touched by \code{\verb~|skipargs~} and repaired only by \code{\verb~|congruence~}, 14 percent of the corpus: applications of one head, or one term under two environments, unfolded on both sides instead of compared by their arguments.}
+\li{Nothing about numerals: literal arithmetic is 70,600 folding events and recursor reduction 277,300 events of 553 M.}
+\li{cslib is 79 percent Mathlib and its dependencies by cost. On con-leche every kind of unit with more than 1 percent of the cost is between 2.6 and 3.9 times; the machine makes 1.30 times the steps of gruszka and 0.62 times its values, and the factor is instructions per step, 1,979 against 793.}
+\li{The two options are not a free win: on con-leche \code{\verb~|congruence~} costs 8.4 percent of the instructions, because in one unit the congruence walks cost more than the unfoldings they replace.}
+\li{In CPU time the ratios are smaller than in instructions, about 3.2, 1.6 and 1.2 for the checks alone, because the machine retires 15 to 18 G instructions per second and gruszka 6 to 7.}
+}
+\transclude{ex-VC9X}
+\p{What is still open on this corpus is in [navier-stokes-euler at 3.9 times gruszka](prob-UN63).}
+\p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

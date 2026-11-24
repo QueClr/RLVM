@@ -1,9 +1,51 @@
-\title{Conversion}
+\title{Conversion: the official procedure on values, with one pair table}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented. The complete procedure is what the machine runs with no switch (v0, and every strict engine). Of the additions described here, \code{same} and \code{lazyeval} are in the default switch set, \code{probes} and \code{facts} are off, and the two congruence families are not reachable through any switch set, see [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}
+
+\p{\strong{What it is.} The judgment \code{CONV} decides whether two well-typed values are definitionally equal. Decision 10 of the instruction set fixes its form: the complete procedure is the official \code{\verb~|is_def_eq~} transcribed to values, state for state. Anything faster is either a fact derived from the store or a speculative segment that can only answer "true" or hand over. The states, in the order of \src{docs/design/ISA.md} section 4.4.1:}
+
+\ol{
+\li{\strong{Quick checks.} Identical references are equal; two literals are compared by content; a suspension is forced; the pair table is read; two sorts compare their levels with the official relation; two binders of one kind are compared binder by binder (domains first, then the bodies under one variable).}
+\li{\strong{The \code{Bool.true} test.} If the right side is \code{Bool.true} and the left side has no free variable, or the comparison runs under eager reduction, the left side is reduced to weak-head normal form; if the result is \code{Bool.true} the answer is "true", otherwise the procedure goes on.}
+\li{\strong{Cheap reduction} of both sides (the official \code{\verb~|whnf_core~} with cheap projections), then the quick checks again.}
+\li{\strong{Proof irrelevance.} If the left side is a proof, the answer is the comparison of the two types, final in both directions.}
+\li{\strong{Lazy delta}, described below; then the same constant with equivalent levels, and two projections of one field.}
+\li{\strong{Full reduction} of both sides; if a side moved, the procedure restarts on the new pair.}
+\li{\strong{Applications}: the heads, then the arguments (\code{CARGS}); then eta, structure eta (the types first, then the fields), the expansion of a string literal, the unit-like rule; otherwise "false".}
+}
+
+\p{\strong{Lazy delta} is a loop over a pair of cheaply reduced values. Each round first tries the Nat offset rule (layers of \code{Nat.succ} and literals are peeled at once), then Nat folding when neither side has a free variable or the mode is eager, then unfolds: the one side that has a definition at its head, else the side whose reducibility hint ranks first (an abbreviation, then the greater height), else both sides when the hints are equal. Only when both heads are the same definition with a regular hint are the arguments compared before unfolding. This order is the official one and it is observable: it decides which pairs are ever asked.}
+
+\p{\strong{One pair table.} The official success and failure caches become three status bits of one entry per unordered pair of value references: \code{POS} (convertible), \code{NEG} (not convertible) and \code{FAILED} (a same-head argument comparison completed with "false"). One probe of a 16-byte entry serves all three; the table lives for a session. What may enter it is narrow:}
+
+\ul{
+\li{\code{POS} holds exact pairs only. There is no union-find and no congruence closure.}
+\li{\code{NEG} is written only for a "false" of the complete procedure, never under eager reduction and never when a side is a lambda, and it is not read under eager reduction.}
+\li{\code{FAILED} holds only comparisons that \em{completed}. A probe that ran out of budget goes to a separate per-declaration table that only suppresses another probe of that size; the complete procedure never reads it (resolution of the design review, \src{docs/design/RECONCILIATION.md} section 2).}
+\li{A memo is written by the frame that owns the judgment, in its final state. A frame removed by a cut writes nothing, so no entry holds an answer that depends on a budget.}
+}
+
+\p{On Init with no switch and one worker, 2,490,397 comparisons were not answered inline and a further 1,308,774 were answered by the pair table (34 \%). The table is keyed by values; the official caches are keyed by terms and live for one declaration. That difference is a tolerated divergence class of its own, see [where the verdict can differ](design-official-divergence).}
+
+\p{\strong{The switch \code{same}.} The official procedure starts with a structural equality test of the two expressions and repeats it after every reduction. On hash-consed values that test is identity of references, except for closures and suspensions, where two records can stand for one expression. \code{same} closes the gap: before anything is forced, for two suspensions, two closures of one kind, two projections, or two applications of one reducible head that is not a regular definition, a bounded walk (256 nodes, 96 for applications, 40 levels) compares the two values structurally. It calls no judgment, forces nothing and reads no type. "Seen equal" records \code{POS}; anything else means "not seen" and the complete procedure runs. It never asks whether two \em{different} subterms are convertible, which is why it is not one of the congruence shortcuts. It entered the default set before an independent review had attacked it, on this argument and on its gates (329 hostile exports with official verdicts under three switch sets, an audit lane that re-derives every answer, 17,775 mutants). The later adversarial review found no row on which it differs from the machine without it: "exact relative to v0 as coded". Measured in the native image with 8 workers, warm pass: the Cedar slice 0.53 to 0.46 s wall and 2.75 to 2.40 s CPU, cedar 2.44 to 2.09 s and 14.78 to 13.99 s; Init, Std and reachability within 2.5 \%. It also makes the machine accept the arena test \code{\verb~|perf/loop-unfolded-once~} (332 M ticks and a memory decline before, 266 k ticks after).}
+
+\p{\strong{The switch \code{lazyeval}.} When exactly one side of a lazy-delta step unfolds and the other is weak-head normal and not a projection, the unfolding side is reduced by one call of \code{WHNF} instead of one unfolding per round. On top of the code objects it is worth Init 6.35 to 5.88 s and Std 12.29 to 11.47 s of CPU time (native image, loaded host, mean of two runs). It was designed as "order only"; the adversarial review showed that it changes which reductions the official cache has seen, and one hostile export gets an accept that the official checker does not give (finding S3-F4, kind T).}
+
+\p{\strong{\code{probes} and \code{facts}} are official-exact since the fix of findings S-F1 and S-F2 and are off because they cost time. \code{facts} keeps only the static answer to "is this value a proof": it removes 85 \% of the dynamic proof tests on Init, and costs 1.0 to 2.1 \% of CPU time at 0.1 \% fewer instructions. \code{probes} keeps only what reorders the argument comparison and costs 1.4 to 3.2 \% (Init, Std, the Cedar slice; same batch as above).}
+
+\p{\strong{The fall-through guarantee} is what makes a shortcut admissible. A shortcut returns "true" or hands over to the state that the complete procedure would have entered without it; it never returns a final "false" of its own. Inside a speculative segment a kernel error and a recoverable limit are "undecided", and a fatal fault ends the declaration with a decline. Removing every shortcut leaves exactly the complete procedure; the debug mode \code{shortcheck} runs both and compares. Budgets are counted in ticks, never in time, so that a verdict cannot depend on load.}
+
+\p{\strong{Where the time goes.} On Init, with the switches \code{\verb~|warm,gated,expect~}, 64 \% of all value records are made while a comparison is on the stack, and 78 \% of the lazy-delta steps unfold one side only: lazy delta is used as an evaluator. On Mathlib 40 \% of the machine's instructions are the official way of comparing proofs (profile P8, same switches, one worker), which no official-exact shortcut recovers.}
+
+\p{Related: [the machine](design-machine-worklist), [the value model](design-value-model), [eager reduction](design-eager-reduction), [staging switches](design-switches). Detail: \src{docs/design/ISA.md} sections 4.4, 5.4 and 6, \src{rlvm-machine/NOTES-M4.md} (deviations D1 to D29 and every measurement), \src{docs/design/review/soundness-default-set.md} sections 4.1 and 4.8. Sources: [the design session](ses-EMMW), [the machine session](ses-Z72N) and [the speed wave](ses-CVTE).}

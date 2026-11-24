@@ -1,0 +1,28 @@
+\title{A compiled block must repeat every interning probe, so a compiler has nothing to remove}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-truffle/NOTES-T3.md}, sections 5 and 7; [the profiling session](ses-JRSD). Flight-recorder samples of warm passes on the JVM with one worker, on an open host, so shares only; the machine with compiled case trees and bodies as code blocks that a stepper runs.}
+\table{
+\tr{\th{Share of a warm pass}\th{reachability}\th{Cedar slice}}
+\tr{\td{inside code blocks}\td{83 percent}\td{14 percent}}
+\tr{\td{the stepper itself: dispatch, operand decoding, register traffic}\td{16.8 percent}\td{6.9 percent}}
+\tr{\td{the probes and inserts of interning, whoever calls them}\td{57 percent}\td{26 percent}}
+\tr{\td{generic judgments}\td{8 percent}\td{59 percent}}
+}
+\ul{
+\li{Every intermediate value is a globally interned record: identity is structure. A block that builds a value pays a hash, a probe of a table far larger than the processor cache, and usually a new record.}
+\li{The rule that both tiers make the same records in the same order obliges compiled code to repeat every one of them. Escape analysis, scalar replacement and unboxing, the optimisations a compiler lives on, have no object to work on: nothing a block makes is ever private to it.}
+\li{What partial evaluation can remove is the second row. That bounds the gain of any compilation of single blocks at 17 percent on reachability and 7 percent on the Cedar slice before its own entry costs; measured on reachability, 4 to 10 percent.}
+\li{A block is "build the graph, then ask a generic judgment to reduce it". There is no arithmetic and no branch that a compiler could specialise beyond what the stepper already does; small naturals are immediates in the value model itself.}
+\li{Arguments that nobody inspects are built eagerly: the motive and the auxiliary types of every structural-recursion step, the proof terms of a decision. In a strict machine they would be dead code; here they are components of an interned record.}
+}
+\p{This is why [the Truffle tier does not pay on Cedar-level work](ins-KLLU), and it agrees with [what HotSpot shows](ins-RMUN). What would give a compiler an object is a change of the value model, see [a value model that gives a compiler something to eliminate](prob-E0O1).}
+\p{See also: [the Truffle tier](design-truffle-tier); [the value model](design-value-model).}

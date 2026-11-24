@@ -1,1 +1,18 @@
-\date{2026-11-24T23:07:33Z}
+\title{The arena clock is an instruction count, and its leader is not the fastest checker}
+\taxon{Insight}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{benchmark}
+\meta{origin}{docs/research/01-arena-and-export-format.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/01-arena-and-export-format.md}, section 1, read from the arena tooling in [the research session](ses-XOS5); the same-container runs are from the arena dry run \src{docs/research/profiles/AR1.md}, 2026-11-24.}
+\ul{
+\li{The time column of the Lean Kernel Arena is a virtual time: user-space instructions divided by 6e9. The board sorts by wrongly accepted tests, then wrongly rejected tests, then the instruction count on Mathlib, then the number of declines. Cache misses, waiting and input and output are free.}
+\li{Instructions per second differ by a factor of almost three between checkers: on Mathlib nano-lean retires 3.2 G instructions per CPU second, the official checker 5.4 G, tenet-jvm 8.6 G. Inside the checks the machine of RLVM retires 13.6 G per second against 6.1 G for gruszka, so the ratio in CPU time is about half the ratio in instructions; see \src{docs/research/profiles/P8.md}.}
+\li{Measured in one arena-shaped container on the aarch64 development host, 4 threads each, inside a quiet window: nano-lean, first on the board, needs 361.2 G instructions, 29.5 s of wall clock and 102.0 s of CPU time for Mathlib; gruszka, second, needs 419.1 G, 20.0 s and 71.5 s.}
+}
+\p{So a result is never argued from the board time alone, and RLVM optimises warm wall clock; see [standing policies](standing-policies). The instruction count is still recorded, because it is what the board ranks; see [where RLVM would stand](ins-6OVD).}
+\p{See also: [the decision for warm wall clock](dec-7QMU); [the measurement method](design-measurement-method).}

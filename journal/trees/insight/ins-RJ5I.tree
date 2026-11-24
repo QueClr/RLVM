@@ -1,0 +1,28 @@
+\title{Code objects pay for the reduction roles: 5.6 times on closed evaluation, 5 percent on the Cedar slice}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{rlvm-machine/NOTES-M7.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-machine/NOTES-M7.md}, section 8; [the session on wave 6](ses-CVTE). CE native image \code{\verb~|-O3~} through the launcher in the arena-shaped container, one worker, two runs per row. The host was loaded, load average 69 to 93 during the batch, so CPU seconds are comparable inside the batch only; the instructions per run are the stable signal and are given beside them.}
+\table{
+\tr{\th{Configuration}\th{reachability}\th{Cedar slice}\th{Init}\th{Std}}
+\tr{\td{plain machine}\td{9.04, 8.53 s; 58.3 G}\td{2.64, 2.61 s; 38.9 G}\td{7.46, 7.49 s; 132.9 G}\td{12.66, 12.30 s; 212.4 G}}
+\tr{\td{\code{\verb~|code,casetrees~}, trees without inlining}\td{3.08, 2.97 s; 27.6 G}\td{2.46, 2.50 s; 38.1 G}\td{6.55, 6.37 s; 111.0 G}\td{10.89, 10.78 s; 181.7 G}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{1.54, 1.58 s; 17.8 G}\td{2.55, 2.46 s; 37.9 G}\td{6.25, 6.27 s; 108.2 G}\td{10.90, 10.65 s; 177.8 G}}
+\tr{\td{\code{\verb~|code,casetrees,tele~}}\td{1.69, 1.56 s; 17.8 G}\td{2.53, 2.50 s; 38.2 G}\td{6.53, 6.31 s; 106.8 G}\td{11.07, 10.78 s; 176.2 G}}
+}
+\ul{
+\li{The reduction roles are what code objects are for: bodies, rules, case trees that inline the matchers they call, and closure sub-blocks. With them the machine checks reachability in 1.54 to 1.58 s of CPU where gruszka needs 3.97 s, nano-lean 2.08 s and the reference engine 12.2 s on this host.}
+\li{They save 16 percent on Init and 14 percent on Std. On the Cedar slice, where 82 percent of the work is inference and conversion of open terms, they save 5 percent.}
+\li{Peak RSS on reachability falls from 1,151 to 1,348 MiB to 311 MiB.}
+\li{The telescope code object, the one built for inference, gains nothing as built.}
+\li{Nothing of it changes a verdict: the machine accepted every unit it was given in every row.}
+}
+\p{This is elaborated code run by a stepper, not compiled code. What a compiler adds on top is [4 to 10 percent on the same workload](ins-KLLU), and the workload study had predicted the split: see [what distinguishes Cedar](ins-I4Y7).}
+\p{See also: [code objects and tiers](design-code-objects-and-tiers).}

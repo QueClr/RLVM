@@ -1,0 +1,32 @@
+\title{An application can be born private and get its identity only when it becomes a key}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{truffle}
+\meta{origin}{docs/design/VALUES-V2.md}
+\import{base-macros}
+
+\p{Source: the design and prototype \src{docs/design/VALUES-V2.md}; [the profiling session](ses-JRSD). A prototype on a private copy of the machine; counts on the JVM launcher with one worker, timings in quiet windows with a measuring tool that keeps one engine, without loading.}
+\ul{
+\li{No verdict needs canonical references. Sharing is needed in three places only: the subject of a memoised judgment, the components of a key, and the two sides of a comparison.}
+\li{Atoms, frames, closures, suspensions and tabling records keep their identity from birth: they are keys by purpose and most of their probes hit. Applications are the one class whose probes are mostly wasted: they are 24 to 59 percent of the records and are found again 3.5 to 21 percent of the time.}
+\li{In the prototype an application built by a code block is written into the ordinary slabs with one bit that says "in no table": no hash, no probe. It is identified, arguments first, at the moment it enters one of the three classes. The application that the next instruction reduces is excluded, since it is [a memo key that hits](ins-1SLM).}
+\li{Probes not made: 3.04 M per run on reachability, 63 percent of the records; 6 percent on the Cedar slice, 12 percent on Init, 13 percent on a Mathlib slice, 10 percent on Std.}
+\li{A probe that is not made is worth a cache miss where a session has outgrown the cache and less than its bookkeeping where it has not. The recommended form is lazy only in sessions of 2 to the 17 records and more, and a site whose applications are identified anyway learns to intern at birth.}
+}
+\table{
+\tr{\th{Warm wall clock, reachability, recommended form}\th{Before}\th{After}\th{}}
+\tr{\td{JVM, 1 worker}\td{1066 ms}\td{888 ms}\td{-16.7 percent, ranges disjoint}}
+\tr{\td{JVM, 8 workers}\td{511 ms}\td{460 ms}\td{-10.0 percent, ranges touching}}
+\tr{\td{native image, 1 worker}\td{1345 ms}\td{1185 ms}\td{-11.9 percent, ranges disjoint}}
+\tr{\td{native image, 8 workers}\td{}\td{}\td{+3 percent, inside the scatter}}
+}
+\ul{
+\li{The Cedar slice and Init are unchanged with the session trigger: their counters are identical to the run with the mode off. With every session lazy the Cedar slice is 4 percent slower at one worker, which is not resolved; with every site lazy it is 9 percent slower, which is.}
+\li{The full differential gate against the reference engine passes with every mode tried, and the hostile suite of the soundness review shows no unexpected verdict.}
+}
+\p{The recommendation is a staging switch that is off by default until the gain at 8 workers is resolved on the platform that ships; see [the missing gain at eight workers](prob-BHBU). For a compiler the same model means "reserve the reference, do not write the record"; see [a value model that gives a compiler something to eliminate](prob-E0O1).}
+\p{See also: [the second value model](design-values-v2); [the decision for a staging switch](dec-36MX).}

@@ -1,0 +1,31 @@
+\title{The non-transitive triple: \code{\verb~|d intro = d h~}, \code{\verb~|d intro = 5~}, but not \code{\verb~|d h = 5~}}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{reference-engine}
+\tag{machine}
+\meta{origin}{docs/design/review/soundness-machine.md}
+\import{base-macros}
+
+\p{Three closed equations over one definition. The official checker accepts the first two and rejects the third, so its comparison is not transitive. Every later hostile export of the project is built on this gadget. Source: the soundness review of the machine, \src{docs/design/review/soundness-machine.md}, finding S-F1 and the rows \code{\verb~|nontransitive-*~}; written in [the session on the machine](ses-Z72N). Official verdicts are those of \code{\verb~|leanchecker --from-export~}, Lean v4.36.0.}
+\pre{\verb~|
+-- A = And True True;  intro = its constructor application And.intro True.intro True.intro
+axiom h : A
+def d (x : A) : Nat := And.rec (fun _ _ => 5) x       -- reducibility hint: regular
+
+-- three theorems, each proved by Eq.refl
+t1 : d intro = d h        -- official: accept
+t2 : d intro = 5          -- official: accept
+t3 : d h = 5              -- official: REJECT
+~}
+\ul{
+\li{\code{\verb~|t1~}: both sides are applications of the same definition with a regular hint, so the official kernel compares the arguments before it unfolds. \code{\verb~|intro~} against \code{\verb~|h~} are two proofs of one proposition: equal by proof irrelevance.}
+\li{\code{\verb~|t2~}: \code{\verb~|d intro~} unfolds, the recursor meets the constructor, the result is \code{\verb~|5~}.}
+\li{\code{\verb~|t3~}: \code{\verb~|d h~} unfolds to \code{\verb~|And.rec (fun _ _ => 5) h~}, which is stuck, because \code{\verb~|h~} is an axiom and there is no structure eta for a proposition. The literal \code{\verb~|5~} against a stuck recursor is false.}
+\li{The statement of \code{\verb~|t3~} is true in the theory. The official checker itself accepts a proof of \code{\verb~|d h = 5~} that goes through the two accepted steps with \code{\verb~|Eq.rec~}; that export is the certificate \code{\verb~|e1-cert-dh-eq-5-ok~} of \src{docs/design/review/official-divergence.md}.}
+}
+\p{What each checker answers on \code{\verb~|t3~}: the official checker rejects; RLVM rejects with both engines, the machine with and without the two proof-comparison shortcuts, because nothing in it closes pairs transitively; gruszka accepts the two exports of this shape, \code{\verb~|nontransitive-regular-def-bad~} and \code{\verb~|nontransitive-same-decl-bad~}, according to the run recorded in \src{docs/design/review/soundness-shortcuts.md}, section 5.}
+\p{Used by [the official comparison is not transitive](ins-4VH2).}
+\p{See also: [where the verdict of the machine can differ](design-official-divergence).}

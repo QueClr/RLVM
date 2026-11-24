@@ -1,0 +1,21 @@
+\title{A gate that compares with our own reference engine cannot see a divergence both engines share}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{benchmark}
+\tag{reference-engine}
+\tag{machine}
+\meta{origin}{rlvm-machine/SWITCHES.md}
+\import{base-macros}
+
+\p{Sources: the note at the top of \src{rlvm-machine/SWITCHES.md}; \src{docs/design/review/reference-caches.md}; \src{rlvm-inductive/README.md}; [the exactness session](ses-874D). Three times on 2026-11-24 a clean differential gate said nothing about a divergence from the official checker.}
+\ul{
+\li{\strong{Same inputs.} The machine was made the default engine at 19:41Z on gates that were all green: no difference from the reference engine on the corpora, the mutants and 329 hostile exports. Within the hour new hostile exports showed five wrong accepts. The gates compare the two engines on real corpora and mutants, where a declared type and the type of the value coincide, and the hostile suite had no row of that shape. The count of agreeing units was true and said nothing about it.}
+\li{\strong{Same component.} Both engines share the loader and the admission of inductive types. A metadata node dropped by the loader made the reference engine, the oracle of every gate, accept an export the official checker rejects. An inductive type whose level the official kernel respells was accepted by both engines in 183 of 2,200 generated declarations.}
+\li{\strong{Same idea.} A table keyed by values and canonical free variables are in the plain machine and in every switch set, so comparing switch sets with the plain machine cannot show them.}
+}
+\transclude{ex-4MDP}
+\p{What changed: ground truth in every review is the official checker run on the export, never an engine of the project. Making an engine the default needs a review with new hostile exports first. The gate for a default configuration now has a hostile step whose oracle is the stored official verdict, with a mark for the rows of the tolerated kind; rehearsed on the withdrawn machine jar it fails with 19 wrong accepts, as it must. A suite also has to be shown to have teeth, see [seeded faults](ins-TNZD).}
+\p{See also: [the gate](design-gate); [the decision that no switch enters a default set without an adversarial pass](dec-QN1O).}

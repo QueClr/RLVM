@@ -99,12 +99,22 @@ jars and which measurement window. The target is the warm wall clock: the time o
 checks the same export again, with parallel workers and the load pipelined (`docs/design/OWNER-NOTES.md`,
 note 12). One table from it:
 
-@TABLE@
+<!-- table: work/b2/readme-table.py, from the rows of docs/BENCHMARKS.md table 1 -->
+| Warm wall clock, 8 workers (s) | init (348 MB) | std (584 MB) | cedar (905 MB) | mathlib (6.33 GB) |
+|---|--:|--:|--:|--:|
+| RLVM, default configuration (reference engine) | 1.68 (1.56) | 2.58 (2.54) | 3.17 (3.10) | 58.0 (58.0) |
+| RLVM, `-X engine=machine` | 0.62 (0.61) | 1.22 (1.14) | 1.61 (1.54) | 21.2 (21.2) |
+| gruszka | 0.71 (0.71) | 1.28 (1.28) | 1.73 (1.73) | 14.2 (14.2) |
+| nano-lean | 1.03 (1.03) | 1.74 (1.74) | 2.64 (2.64) | 18.7 (18.7) |
+| *default configuration (reference engine) / gruszka* | 2.37x | 2.02x | 1.83x | 4.09x |
+| *-X engine=machine / gruszka* | 0.87x | 0.95x | 0.93x | 1.50x |
+<!-- end table -->
 
 Conditions: one host (aarch64, Cortex-X925), 8 cores reserved for one measurement at a time while the other
-12 cores were busy, 2026-11-24; RLVM on its JVM launcher, 8 workers, median of the later passes (best pass
-in brackets); gruszka and nano-lean with their arena run lines and 8 threads on the same cores, second of two
-runs. Not the arena's metric (instructions of a cold process) and not its architecture (x86-64). Which
+12 cores were busy, 2026-11-24; RLVM on its JVM launcher, 8 workers, median of the later passes of a process
+with 6 to 10 passes (best pass in brackets; mathlib: the second of two passes); gruszka and nano-lean with
+their arena run lines and 8 threads on the same cores, second of two runs. Single measurement windows: two
+identical rows differ by up to 5 %. Not the arena's metric (instructions of a cold process) and not its architecture (x86-64). Which
 launcher is for what, and why: `docs/PLATFORM.md`.
 
 ## Documents

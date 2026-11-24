@@ -1,0 +1,26 @@
+\title{No official-exact route recovers the cost of comparing proofs}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{soundness}
+\meta{origin}{docs/design/review/exact-proof-conversion.md}
+\import{base-macros}
+
+\p{Source: \src{docs/design/review/exact-proof-conversion.md}; [the profiling session](ses-JRSD). A prototype on a private copy of the machine; native image \code{\verb~|-O3~}, one worker, quiet cores, thread CPU of the checks, against the default switch set of 19:41Z on 2026-11-24.}
+\p{The question was how much of [the 40 percent](ins-HPBW) can be removed while every verdict stays exactly the official one. The answer: none of it by a shortcut, and nothing measurable in time by doing the same steps with less bookkeeping. On these comparisons the official verdict is the result of the unfoldings.}
+\table{
+\tr{\th{}\th{Mathlib slice \code{\verb~|Scheme.cone~}}\th{Mathlib slice \code{\verb~|Galois.Basic.cone~}}\th{Cedar slice}}
+\tr{\td{the two non-official options, CPU; steps in brackets}\td{-27.7 percent (-48.6)}\td{-31.7 percent (-57.3)}\td{-2.6 percent (-11.5)}}
+\tr{\td{the official-exact fused step built for this, CPU}\td{-1.4 and +0.8 percent (-3.3)}\td{+0.8 percent (-4.1)}\td{-0.7 and +0.4 percent (-0.8)}}
+}
+\ul{
+\li{\strong{Fusing the unfold-to-structure steps} was built: it makes the same records, unfoldings, comparisons and type inferences and removes the judgments around them, 3 to 4 percent of the steps on Mathlib slices, no effect on the CPU time. On all of Mathlib with 8 workers it shows no gain.}
+\li{\strong{A lockstep walk of one proposition under two environments} is exact only where the official order compares arguments before it unfolds, and there the complete judgment already is that walk. It is not exact for abbreviations, which every projection function is, nor for recursors, projections and closures.}
+\li{\strong{Caches}: the pair table of the machine already hits more often than the official caches would. 8 of 2,227 comparisons of the traced unit repeat a pair of records.}
+\li{Every other way of answering without the unfoldings is either refuted by a hostile export or needs a theorem about the official algorithm, stability of its comparison under substitution, that nobody has.}
+}
+\p{The share that an official-exact route recovers is zero within the resolution of these measurements, 1 percent of the checking time. A derived rule per projection chain and instance was not built; the estimate is 5 to 10 percent of the steps of Mathlib and less in time.}
+\p{See also: [conversion](design-conversion); [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

@@ -1,0 +1,21 @@
+\title{A \code{\verb~|let~} inside an evaluated term must be zeta by sharing, not a variable}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{nat}
+\tag{soundness}
+\meta{origin}{docs/design/RECONCILIATION.md}
+\import{base-macros}
+
+\p{Source: erratum E1 of \src{docs/design/RECONCILIATION.md}, section 5, which corrects \src{docs/design/ISA.md}; decision D9 of \src{rlvm-machine/NOTES-M2.md}; [the session on the machine](ses-Z72N). Found by implementation on the Cedar slice.}
+\ul{
+\li{The instruction-set document made every \code{\verb~|let~} value a suspension with a flag, so that every value built from an evaluated \code{\verb~|let~} carried the mark "contains a free variable". That is the official behaviour only for the let variable of \code{\verb~|infer_let~}.}
+\li{For a \code{\verb~|let~} inside a term that is evaluated, the body of an unfolded definition or a forced argument, the official \code{\verb~|whnf_core~} instantiates the body with the value: there is no variable.}
+\li{With the rule of the document, lazy delta skipped the folding of Nat literals and conversion skipped the shortcut for \code{\verb~|Bool.true~} exactly where the official kernel folds, and the machine unfolded division, modulo and gcd on large literals by their fuel recursion: five Cedar declarations at about 1,000 times the official work.}
+\li{The rule now: evaluation treats a \code{\verb~|let~} as zeta by sharing with a plain value, like the argument of a beta step; only the let variable of inference is a flagged suspension. The mark on a value means what the official \code{\verb~|has_fvar~} means. Code blocks emit a let value as an ordinary argument operand.}
+}
+\transclude{ex-GZ10}
+\p{The document had said that over-approximating the mark is harmless because it only steers guards. It steers them into non-termination. The let variable of inference had its own correction later, see [the declared type of a let](ex-GZ3D).}
+\p{See also: [the design review and its reconciliation](design-review-reconciliation); [evaluation and tabling](design-evaluation-and-tabling).}

@@ -1,0 +1,36 @@
+\title{One instance-path comparison: 65,363 machine steps against 222 for gruszka}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P8.md}
+\import{base-macros}
+
+\p{The traced unit of profile P8 that shows where the machine loses on Mathlib. Source: \src{docs/research/profiles/P8.md}, section 4.1; [the profiling session](ses-JRSD). Counts are steps of each checker on the unit \code{\verb~|AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app~}; machine with the switch set \code{\verb~|warm,gated,expect~}, traced on the JVM with one worker.}
+\pre{\verb~|
+-- while the type of the theorem is inferred:
+Module R R inst ..   =?=   Module R R inst' ..
+-- the instance arguments are two paths to one structure
+Semiring.toAddCommMonoid R (CommSemiring.toSemiring ..)
+AddCommGroup.toAddCommMonoid R (Ring.toAddCommGroup ..)
+-- field 1 of both is add_comm, a proof; its type on each side:
+(a b : R) -> a + b = b + a      -- with + through one path, and through the other
+~}
+\table{
+\tr{\th{Checker}\th{Steps}\th{Unfoldings}\th{Comparisons}}
+\tr{\td{machine, \code{\verb~|warm,gated,expect~}}\td{65,363}\td{5,359}\td{2,227 and 1,868 pair hits; 2,086 proof-irrelevance steps}}
+\tr{\td{machine with \code{\verb~|facts~}}\td{62,106}\td{5,359}\td{892 proof-irrelevance steps}}
+\tr{\td{machine with \code{\verb~|facts~} and \code{\verb~|skipargs~}}\td{8,091}\td{589}\td{298; 29 proof-irrelevance steps}}
+\tr{\td{machine with \code{\verb~|facts,probes~} and \code{\verb~|congruence,skipargs~}}\td{3,849}\td{221}\td{187; 10 proof-irrelevance steps}}
+\tr{\td{gruszka}\td{222}\td{10}\td{25 calls, 14 cache hits}}
+\tr{\td{nano-lean}\td{162}\td{9}\td{82 calls, 76 answered by pointer equality}}
+}
+\ul{
+\li{Lazy delta unfolds both paths and structure eta compares the fields. Every proof field goes through proof irrelevance, which, as in the official kernel, infers both types and compares them: the statements of the laws, in which every \code{\verb~|+~}, \code{\verb~|*~} and \code{\verb~|0~} is unfolded again on both sides.}
+\li{\code{\verb~|HAdd.hAdd~}, \code{\verb~|instHAdd~}, \code{\verb~|Add.add~} and \code{\verb~|AddMonoid.toAdd~} are projection functions with the hint abbrev, so the official order does not try their arguments first.}
+\li{The extreme case is an instance field: \code{\verb~|AlgebraicGeometry.Scheme.instAddCommGroupEllAdicCohomology._proof_21~} costs the machine 2,204,336 steps and 2.91 G instructions, gruszka 144 steps and 90,700 instructions; with \code{\verb~|skipargs~} 604 steps, with both options 175.}
+}
+\p{Used by [40 percent of the machine work on Mathlib is the official way of comparing proofs](ins-HPBW).}
+\p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

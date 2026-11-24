@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:42Z}
+\title{A pipelined load decides what a batch load decides; passes can keep their engines}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\tag{loader}
+\meta{release}{Unreleased}
+\meta{commit}{8ca5a23}
+\import{base-macros}
+
+\p{Two rules of one publication. The environment pass is now kept over the end of a pipelined load instead of being replaced, and a unit is parked until the file is complete when one of its roots mentions something not yet declared or its proof block has an unresolved reference. So a pipelined run decides exactly what a batch run decides. The invariance suite of 16,928 mutant files in 9 schedules passes with the reference engine and with the machine with no decline caused by pipelining, where the machine had 5.}
+
+\p{With \code{\verb~|passes-keep=engines~} the later passes of \code{\verb~|-X passes=N~} keep their engine instances, so that an engine's own compiled artefacts survive from pass to pass. Gates in batch mode and with pipelining forced: 230 of 230, and 0 soundness and 0 completeness differences on 12,260 tutorial mutants.}
+
+\p{Detail: \src{rlvm-driver/README.md}, \src{docs/research/profiles/P7.md}. Commit \commit{8ca5a23}. Session: [profiles and prototypes](ses-JRSD).}

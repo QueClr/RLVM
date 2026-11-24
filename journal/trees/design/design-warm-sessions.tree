@@ -1,9 +1,41 @@
 \title{Warm sessions and the session cap}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{driver}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented. The switch \code{warm} is in the default switch set; the machine's own cap on a warm session is 1 MiB, see [the decision](dec-KXE1).}
+
+\p{\strong{What a session is.} A session is everything one worker's machine has derived and may reuse: the slab of value records (8 words each) with its intern table, the slab of runs with its table, the pair table of [conversion](design-conversion) with a log of its used slots, a handful of direct-mapped caches, and the worker's overlays of terms, levels and big naturals. All of it is \code{\verb~|int[]~}; nothing in it is visible to another worker. The session is confined to its thread.}
+
+\p{\strong{Footprint and reset.} The footprint is the number of bytes \em{in use}, counted once: 32 bytes per record, 4 per run word, pair word and log entry, 4 per occupied table slot, plus the overlays' bytes in use. It is a sum of bump pointers and counters and costs nothing to read; capacity is never part of it. A reset costs time proportional to what was used: every used record is re-probed and its slot zeroed, the logged pair slots are zeroed, the direct-mapped caches advance an epoch. So a session that held one small declaration resets in the time of that declaration. As built, a reset of the machine takes 8 to 9 microseconds, 0.2 to 0.3 \% of a worker's CPU time (report V1).}
+
+\p{\strong{When a session ends.} Without any switch a session is one declaration. With \code{warm} it survives an accepted declaration and ends:}
+\ul{
+\li{on every outcome other than accept: nothing derived for a failed or abandoned unit is kept;}
+\li{when the next declaration is not later in file order, because every session memo assumes that what it mentions stays visible; the machine enforces this itself and does not rely on the driver;}
+\li{at the driver's cap and at the machine's own cap, whichever is smaller;}
+\li{always, in a strict engine: the cold re-check runs a fresh session before and after each declaration.}
+}
+
+\p{\strong{What is re-validated per declaration.} Evaluation, reduction, conversion and infer-only typing do not depend on the declaration being checked. Check mode adds conditions that do: the universe parameters must be declared and the constants visible. The store's per-node summaries let these be tested once per declaration root, in constant time; when a root passes, a check-mode result is valid in every later declaration of the session. Otherwise a generation stamp applies: a stored type answers a checking query only if its stamp is permanent (the term is closed and has no level parameter) or belongs to the current generation.}
+
+\p{\strong{Why the cap is small.} The design assumed 16 MiB, to be swept between 8 and 64 MiB once the machine ran Std. Measurement turned it round: as the cap grows the instruction count \em{falls}, because more memo hits are found, while CPU time and wall clock \em{rise}, because the tables leave the processor's caches. On Init with 8 workers (native image, switches \code{\verb~|warm,gated,expect~}, two rounds, loaded host): 127.2 G instructions at 512 KiB, 120.1 G at 1 MiB, 105.3 G at 4 MiB, 94.9 G at 16 MiB, against 7.97, 8.15, 8.67 and 9.59 s of CPU time, and 8.18 s with no warm session at all. With 16 MiB a warm session was slower than none. The cap is a locality setting, and time is its measure.}
+
+\p{The same reasoning shrank the tables themselves. A declaration of Init makes about 860 records; with the design's base sizes of 1 to 2 MiB per table every probe missed the cache. The base sizes as built are \code{\verb~|2^14~} records, \code{\verb~|2^15~} intern slots, \code{\verb~|2^16~} run words and \code{\verb~|2^12~} pair entries, against \code{\verb~|2^18~}, \code{\verb~|2^19~}, \code{\verb~|2^20~} and \code{\verb~|2^17~} in the design: Init 13.54 s to 9.27 s, the Cedar slice 3.98 to 3.70, Std 21.79 to 15.80 (native image, one worker, CPU time). The slabs keep the capacity they grew to, since a bump-filled slab costs no locality, and intern tables that grew are pooled and reused.}
+
+\p{\strong{Two caps.} The driver resets a session whose footprint exceeds its cap between two units (\code{\verb~|-X session-mib~}; automatic by engine: 4 MiB for the machine, 16 MiB for every other engine). The machine has a cap of its own (\code{\verb~|-X machine.session-kib~}, default 1024): before a declaration it forgets everything once its engine bytes exceed it. A reset of the machine alone is always legal, because no machine value survives it and the worker's overlays hold nothing that refers to the machine. The caps compose: the smaller one resets first. The machine's cap exists because the best value is a property of its tables, not of the driver's memory account.}
+
+\p{\strong{What warm sessions cost in exactness.} Officially every cache of the kernel lives for one declaration. A session that survives keeps answers of comparisons and of cheap reductions across declarations, and on hostile exports that gives an accept the official checker does not give, and in one case a reject that the pipeline's strict re-check turns back into the official accept (finding S3-F3, kind T, tolerated; see [the divergence classes](design-official-divergence)). A declaration that enters [eager reduction](design-eager-reduction) is declined and nothing it derived is kept; with the switch \code{eager} it shares a session only when nothing the session holds could differ between the two modes.}
+
+\p{\strong{Session memory.} The machine's garbage comes from the 1 to 2 \% of sessions whose one declaration needs more than the kept slab sizes: each doubles its slabs copy by copy and drops them at its reset. On Mathlib that is 4.9 GB of slabs and 0.56 GB of tables per pass, 39 \% of the 13.8 GB the 8 workers allocate. A prototype (report V1) gives these arrays a process-wide pool, taken at the growth and given back at the reset, and counts every allocation. With it a warm pipelined pass with 8 workers takes 2.39 s instead of 2.52 s on cedar, 1.81 instead of 1.88 s on Std and 29.9 instead of 31.4 s on Mathlib (native image, switches \code{\verb~|warm,gated,expect~}, cap 1 MiB, single windows, same peak memory). Its targets, collections below 2 \% of the time and a pass within 2 \% of the hardware ceiling, were not reached. The prototype lives in private copies and was handed to the owners as patches.}
+
+\p{Related: [the value model](design-value-model), [staging switches](design-switches), [the driver](design-driver), [the architecture](design-architecture). Detail: \src{docs/design/ISA.md} sections 1.6, 5.3 and 5.4, \src{rlvm-machine/NOTES-INT.md} (deviations I1 to I5), \src{rlvm-machine/NOTES-M6.md} (F24, F25), \src{rlvm-machine/SWITCHES.md} section "Sessions", \src{rlvm-driver/README.md} section "Session cap", \src{docs/research/profiles/V1.md}. Sources: [the design session](ses-EMMW), [the speed wave](ses-CVTE) and [the profiles and prototypes](ses-JRSD).}

@@ -1,9 +1,71 @@
-\title{The value model}
+\title{The value model: hash-consed records, runs, closures and suspensions}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented in \code{rlvm-machine}, with the table sizes and the hash of the integration (below) instead of those of the design. A revision that gives up identity at birth for applications is a draft: [identity on demand](design-values-v2).}
+
+\p{The values of [the machine](design-machine-worklist) are not Java objects. A value is a 32-bit reference: either a small natural number, or the index of a record of eight 32-bit words in one flat array per worker. All per-worker stores are primitive arrays that the collector never traces. Every record is hash-consed: it is entered into one intern table in the operation that makes it, so two references are equal exactly when the values are the same construction. Conversion's first test, the memo tables and tabling all rest on that identity.}
+
+\subtree[design-value-model-records]{
+\title{References and records}
+
+\p{A reference with the top bit set is a Nat literal below \code{\verb~|2^31~} and never has a record, see [Nat and String literals](design-nat-literals). Otherwise it is a record index; index 0 is "none" and index 1 is HOLE, an unreadable placeholder whose reading through a variable is a fatal fault. Two bits of a reference are reserved and unused, see [the decision on reference-count bits](dec-80ZZ). A record has a first word with the kind, twelve flag bits and sixteen auxiliary bits, three identity words, and four memo words that are not part of the identity.}
+
+\table{
+\tr{\th{Kind}\th{Identity}\th{Meaning}}
+\tr{\td{\code{SORT}}\td{level id}\td{a sort}}
+\tr{\td{\code{NBIG}, \code{STR}}\td{the number in two words or a store id; a string index}\td{literals that are not immediates}}
+\tr{\td{\code{LAM}, \code{PI}}\td{binder term, frame run, level substitution}\td{closures of a lambda and of a dependent function type}}
+\tr{\td{\code{PII}}\td{lambda term, frame run, level substitution}\td{"the type of this lambda": its codomain is inferred on demand}}
+\tr{\td{\code{SUSP}}\td{term, frame run, level substitution}\td{a delayed evaluation of the term under the frame, and at the same time the tabling record of that term under that frame}}
+\tr{\td{\code{FVAR}}\td{type value, k}\td{the k-th free variable of this type}}
+\tr{\td{\code{CONST}}\td{declaration row, level list}\td{a constant head without arguments}}
+\tr{\td{\code{NEU}}\td{head value, spine run}\td{an application of a variable, constant or projection to one or more arguments}}
+\tr{\td{\code{PROJ}}\td{structure value, structure row, field}\td{a stuck projection}}
+\tr{\td{\code{NSUC}}\td{base value, k}\td{k successors of something that is not a literal}}
+}
+
+\p{Three more kinds are reserved for packed representations in the sense of the owner's note on storage strategies; none is in use, and no corpus has justified one. The kind is part of the identity, so \code{PI} and \code{PII} over the same term and frame are different values. The level substitution is part of the identity of a closure too, see [universe levels](design-universe-levels).}
+}
+
+\subtree[design-value-model-runs]{
+\title{Runs, frames and environments}
+
+\p{A run is an immutable sequence of value references in a second flat array: the spine of an application, which its \code{NEU} record owns, or a frame, the captured bindings of a closure or suspension, interned by content. Working environments are something else: a stack of references that nothing in a value points into. Extending the environment on top of the stack writes one slot, which removes the copy per opened binder. In the census of the reuse study one extension in 162 million had to copy.}
+
+\p{A closure does not capture its environment. It captures the frame that agrees with the environment on the positions its binder term reads and holds HOLE elsewhere. The set of positions is the free-variable mask that the term store keeps per node. The mask is a deterministic function of the node and a superset of what the term reads, so a closure gets the same reference however its environment was reached; an over-approximated bit costs a captured slot, never a wrong identity. Closure identity is therefore independent of the tier: the generic walk and [a code object](design-code-objects-and-tiers) must produce the same references, and the gate tests it. A frame that reads beyond the 63 innermost bindings keeps the outer part in separate interned runs, which are part of its identity; as built these are a chain of chunks of 64 slots, after a test with 2,000 nested redexes made 4.03 M run words where the chain needs 0.41 M.}
+
+\p{An argument is never evaluated when the callee does not read its binder, evaluated at once when it is inert, and delayed as a suspension when it can reduce. A suspension whose value is known is never stored where the value could be stored.}
+}
+
+\subtree[design-value-model-fvar]{
+\title{Free variables}
+
+\p{A free variable is the pair of its type and a number. A binder takes the first variable of its type that is not in scope, so re-opening a binder reproduces every reference below it, and a memo entry about values that mention a variable holds for any binder that later receives that variable. No two open binders hold the same variable, and every variable reachable from the operands of a running judgment is in scope.}
+}
+
+\subtree[design-value-model-flags]{
+\title{Flags, memo words, and the erratum on OPEN}
+
+\p{Flags and memo words are functions of the identity, never of how a record was reached. The flags say, among other things, that a value is already in weak head normal form, that its head may reduce, what class its head has, whether it is known to be a proof or a proposition, and \code{OPEN}: the value may contain a free variable. The memo words hold the results of the judgments on that value: for an application its weak head normal form, its core normal form, its type and its unfolding; for a function type its domain, its sort level and, when the body does not read the variable, its codomain; for a suspension its value and the type of its term. Storing a result into a memo word is the only way a record ever changes.}
+
+\p{\strong{Erratum E1} of \src{docs/design/RECONCILIATION.md}, found on a slice of Cedar on 2026-11-24. The design made every \code{let} value a suspension that carries \code{OPEN}, and said that over-approximating the flag was harmless. That is the official behaviour only for the let variable of type inference. Inside an evaluated term the official kernel instantiates the body with the value, with no variable. With the design's rule the machine skipped the folding of Nat literals exactly where the official kernel folds, and unfolded division, remainder and gcd on large literals by their recursion: five Cedar declarations at about 1,000 times the official work. The rule now: evaluation treats a \code{let} as sharing of a plain value, only the let variable of inference is such a suspension, and \code{OPEN} means what the official test for free variables means. One unit went from 73.7 M steps and a memory decline to 60,569 steps.}
+}
+
+\subtree[design-value-model-cost]{
+\title{What interning costs, and the sizes as built}
+
+\p{The spike before the design measured a probe that hits at 3.8 ns and 110 instructions in the native image and 2.9 ns and 38 instructions on the JVM, with everything cached, and a miss at 55 ns. The same probe code ran at 29 instructions per nanosecond on a cached table and at 3.5 in a pass over all of Init with a working set of 116 MB. Memory traffic, not instruction count, sets the time. On the machine as built, a hit of the application constructor with one, two and three arguments costs 4.0, 5.4 and 7.2 ns and 96, 114 and 145 instructions (JVM with the Graal JIT, 4,096 existing values); the design's target of 60 instructions is not met. About half of a worker's CPU time on Init is constructing and interning values and frames. On reachability, where a few declarations make tables of 64 to 256 MiB, about 39 \% of the process waits for intern-table slots that miss the cache.}
+
+\p{The integrator therefore deviated from the design's sizes. A session starts with \code{\verb~|2^14~} records, an intern table of \code{\verb~|2^15~} slots and \code{\verb~|2^16~} run words, where the design had \code{\verb~|2^18~}, \code{\verb~|2^19~} and \code{\verb~|2^20~}: with tables of 1 to 2 MiB every probe was a cache miss. Native image, one worker, container with the arena's limits, CPU time on Init, the Cedar slice and Std: 13.54, 3.98 and 21.79 s with the design's sizes, 9.27, 3.70 and 15.80 s with the sizes adopted. The record hash has three multiplications instead of six, which took a hit from 67 to 46 instructions, and intern tables that grew are pooled. How large a session may become is the subject of [warm sessions](design-warm-sessions).}
+}
+
+\p{Related: [evaluation and tabling](design-evaluation-and-tabling) for what the suspension records are used for, [conversion](design-conversion) for the pair table keyed by references. Detail: \src{docs/design/ISA.md} sections 1.1, 1.6 and 2, \src{rlvm-machine/NOTES-M1.md} (deviations of the value store, probe costs, distributions), \src{rlvm-machine/NOTES-INT.md} (sizes, hash, pooling), \src{docs/research/profiles/X1.md} (the census of every record). Source: [the design session](ses-EMMW) and [the machine session](ses-Z72N).}

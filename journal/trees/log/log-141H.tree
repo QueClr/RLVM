@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:45Z}
+\title{Project skeleton: pinned toolchain and Maven parent}
+\taxon{Change}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{platform}
+\meta{release}{Unreleased}
+\meta{commit}{6fad0e1}
+\import{base-macros}
+
+\p{The repository starts with a build environment that depends on nothing installed on the host. \code{\verb~|env.sh~} pins GraalVM Community Edition 25 and Maven 3.9.16 under \code{\verb~|.toolchain/~} and gives Maven a repository of its own there, so that no build touches the system JDK or a personal Maven repository; \code{\verb~|scripts/fetch-toolchain.sh~} fetches the pinned files. The parent \code{\verb~|pom.xml~} lists the modules, and each module is installed into that private repository when its own tests pass, which is what the later entries call a publication.}
+
+\p{Detail: \src{env.sh}, \src{docs/PLATFORM.md}. Commit \commit{6fad0e1}. Session: [research, benchmark infrastructure and spikes](ses-XOS5).}

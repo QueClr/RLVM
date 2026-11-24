@@ -1,0 +1,21 @@
+\title{Leaving the interning work in place and overlapping its cache misses is a loss}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-truffle/NOTES-T3.md}, section 6; [the profiling session](ses-JRSD). An experiment in the Truffle tier, rejected and kept in the tree switched off. Quiet windows, JVM and native image, one worker, promotion at 1,000 entries.}
+\p{The idea: 76 to 83 percent of the samples of a probe had been measured as one instruction, the load of the slot of a table of 64 to 256 MiB. A compiled block has its whole future in front of it as constants, so it could hash the keys of the values it is about to build, load the slots early, and let the cache misses overlap.}
+\ul{
+\li{The predictor is good: in its exact form it names the record that the operation then returns for 90.3 percent of 13.6 M records per run of reachability.}
+\li{The result is 8 to 12 percent slower than the same tier without it on reachability and far slower on the Cedar slice. The compile time rises from 7.6 s to 36 to 37 s for 252 blocks.}
+\li{In the profile the waiting moves into the run-ahead, it does not overlap: the probe function has 15.5 percent of the samples instead of 22 percent, and the run-ahead itself has 17 percent.}
+\li{Readings, not measurements, of why: the probes of one stretch depend on each other in chains of depth four; half of the keys that blocks build exist already, and a hit is three loads, not one; the code of a block doubles.}
+}
+\p{"One cache miss per probe" was the cost model of the plain machine, not of the machine with compiled case trees, on which the same corpus needs 5.6 times less CPU. The result is an upper bound for a generic version of the same walk in the stepper.}
+\p{See also: [the Truffle tier](design-truffle-tier).}

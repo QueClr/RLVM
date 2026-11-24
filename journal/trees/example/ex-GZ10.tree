@@ -1,0 +1,35 @@
+\title{The Cedar unit that blew up under the wrong \code{\verb~|let~} rule}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{nat}
+\tag{performance}
+\meta{origin}{docs/design/RECONCILIATION.md}
+\import{base-macros}
+
+\p{Unit 7008 of the Cedar slice, \code{\verb~|BitVec.neg_toInt_eq_neg_64._proof_1_1~}, is a certificate of the \code{\verb~|omega~} tactic whose definitions bind \code{\verb~|let~}s. Under the rule of the instruction-set document it ran into the memory limit; under the corrected rule it takes 38 ms. Source: erratum E1 of \src{docs/design/RECONCILIATION.md}, section 5, and decision D9 of \src{rlvm-machine/NOTES-M2.md}; [the session on the machine](ses-Z72N). The code is a schematic of the shape, not the text of the unit.}
+\pre{\verb~|
+-- body of a definition that the kernel unfolds while it evaluates
+def step (x y : Nat) : Nat :=
+  let q := x / y        -- x, y literals near 2^63 in the certificate
+  let r := x % y
+  gcd y r
+
+-- rule of the design document: q and r are LET suspensions, so every value built
+--   from them is OPEN ("has a free variable"); lazy delta then does not fold
+--   Nat.div, Nat.mod, gcd on literals but unfolds them by their fuel recursion
+-- official whnf_core: instantiate the body with the value; no variable; literals fold
+~}
+\table{
+\tr{\th{}\th{Machine steps}\th{Outcome}}
+\tr{\td{every \code{\verb~|let~} value a LET suspension}\td{73.7 M}\td{memory decline}}
+\tr{\td{\code{\verb~|let~} as zeta by sharing}\td{60,569}\td{38 ms; the reference engine takes 42 ms}}
+}
+\ul{
+\li{Officially a let variable is a free variable only inside \code{\verb~|infer_let~}. For a \code{\verb~|let~} inside a term that is evaluated, \code{\verb~|whnf_core~} instantiates the body with the value.}
+\li{Five Cedar declarations ran at about 1,000 times the official work under the wrong rule.}
+}
+\p{Used by [a let must be zeta by sharing](ins-H55H).}
+\p{See also: [the design review and its reconciliation](design-review-reconciliation).}

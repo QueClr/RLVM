@@ -1,9 +1,68 @@
-\title{The export loader}
+\title{The export loader: one pass, per-declaration segments, packed proofs}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{rlvm-load/README.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented in \code{rlvm-export} and \code{rlvm-load}: batch and pipelined loading, and since 2026-11-24 the packing of proofs by scanner threads.}
+
+\p{The loader turns the record stream of an export file, one JSON record per line, into [the term store](design-term-store). It holds no kernel logic and validates only what the official reader validates. One loader thread receives the records in file order; nothing in it recurses on term depth.}
+
+\subtree[design-export-loader-split]{
+\title{One pass, and who owns a record}
+
+\p{About four fifths of the expression records are reachable only from the proof of one theorem, and a proof is never needed unless a worker checks or unfolds that theorem. Such records should stay packed. But about 5 \% of them are referenced again by later declarations, so ownership cannot be decided when a record arrives. A prescan would read 6.33 GB of Mathlib twice, and parsing everything into columns before an ownership sweep would hold 1.39 GB of transient state; both also keep checking from overlapping with loading. The design decides at each declaration line, from that declaration alone, and repairs later.}
+
+\ol{
+\li{Expression records are buffered since the previous declaration: the \em{segment}. The loader hands the reader record ordinals as expression ids, so a canonical file needs no translation table.}
+\li{At the declaration line the declared names are claimed first, so that references to them bind.}
+\li{References of the segment to earlier records are resolved. An earlier record that sits in a proof block is first \em{promoted}: it and what it reaches in its block are copied into the shared region. A record is promoted at most once, so a hostile file cannot make this more than linear.}
+\li{One backward pass marks what the unit's roots reach inside the segment. Roots are the type, the value of a definition, and the member types and rule right-hand sides of an inductive block. The value of a theorem or an opaque is not a root.}
+\li{One forward pass writes marked records as shared nodes and all others into one proof block.}
+}
+
+\p{The only per-record state that outlives a segment is a location, 4 bytes per expression record, 428 MB on Mathlib. On Init the pass writes 17.4 \% of 6,137,092 expression records as shared nodes and 5,071,212 records into 37,601 blocks at 4.37 bytes per record; promotion then copies 593,925 nodes, and the load ends with 1,659,805 shared nodes where an exact two-pass split finds 1,660,489. The price is that 11.7 \% of the block records of Init, and 13.0 \% of Std's, exist twice.}
+}
+
+\subtree[design-export-loader-hostile]{
+\title{Input that is not exporter output}
+
+\p{The rule is: \em{reject} where the official reader fails on the file, \em{decline} where RLVM is merely narrower, and otherwise load and let admission decide. Other key orders, escapes and sparse or out-of-order ids go through the reader's general path and give the same store. An id used before its definition or bound twice is a rejection. A declaration name declared twice is a rejection, by structural name equality across all kinds. Unsafe and partial records are dropped and their names remembered, so that a user fails with "unknown constant" as officially. The header line decides nothing, because the official reader skips it unread. Loose variables, wrong universe arity and unknown or later constants are loaded, flagged in the node summaries, and decided by [admission](design-inductive-admission). Limits of the representation are declines. A decline is per unit: the units before it are still checked, so a file with an ill-typed earlier declaration is rejected as officially.}
+
+\p{\strong{Metadata.} A metadata record is dropped and the wrapped expression stands for it. Inside an inductive or quotient record it is a decline, because the official checker compares those records with the kernel's own by an equality that sees metadata. Declining it everywhere belongs to the strict mode: [dec-USLM](dec-USLM).}
+
+\p{\strong{Two level records for one universe parameter} (finding A2-F1). The official reader makes one object per level record, and the official instantiation keeps a level node only when its operands come back pointer-equal. A constant used through the second record therefore has the levels of its declared type rebuilt, \code{\verb~|Sort (imax u 1)~} becomes \code{\verb~|Sort (max u 1)~}, and the official checker rejects where RLVM, which interns levels by structure, accepted 5 of 5 probe files. The loader now declines an export when a parameter has two records and some level above it is not officially equivalent to its rebuilt spelling. The exporter never writes such a file: there is none in the eight corpora or the 230 arena tests. Not established: the rule assumes the official kernel observes a level only through its normal form; no probe found a verdict that contradicts it.}
+}
+
+\subtree[design-export-loader-pipelined]{
+\title{Pipelined loading}
+
+\p{In batch mode the store is published once, at the end of the file. In pipelined mode the loader hands over after every 4,096 units or 32 MiB of input, 204 times on Mathlib: it first publishes a frozen snapshot of the level store, then the frontier of loaded units, then wakes the waiting threads. A thread that reads the frontier finds the level snapshot that covers it already published. Only complete units are published. The level ids of a pipelined load differ from those of a batch load, because every snapshot adds the official normal forms of its levels; every other word of the store is identical. Publication itself costs nothing measurable. Since 2026-11-24 a run is pipelined by default when it has two or more workers and the input is a regular file of at least 8 MiB.}
+}
+
+\subtree[design-export-loader-scanners]{
+\title{Scanner threads}
+
+\p{The reader can tokenise 4 MiB chunks of the mapped file on helper threads while the loader thread replays them in file order with identical calls. Since 2026-11-24 the helpers also \em{pack}: on exporter output the records of a theorem's segment with an id above the type's are the proof, and a scanner thread prepares their bytes as they will stand in the proof block, leaving open only the references it cannot resolve. The loader thread links such a run instead of handling its records one by one. The invariant is that the store is word for word the store of the record-by-record path on every file, and a failing file fails with the same message and line. Two scanner threads run by default for inputs of 256 MiB and more. Numbers and the argument: [dec-OC1F](dec-OC1F). Leaving the proofs in the file for the workers to parse was studied and not adopted: [dec-RN77](dec-RN77).}
+}
+
+\subtree[design-export-loader-cost]{
+\title{What loading costs}
+
+\ul{
+\li{The design budget was 8 instructions per input byte. A cold JVM process loading Mathlib in batch mode took 15.5 to 15.8 s of CPU time at 17.4 to 18.1 instructions per byte, of which the reader was 4.1 s, the loader's own work 3.4 s and the store 8.1 s. The budget is not met and, with warm wall clock as the goal, no longer the target.}
+\li{Wave 7, native image, one thread, load phase only: Mathlib 17.2 s to 12.4 s, Init 885 ms to 673 ms, at the same number of instructions. All of the gain is cache misses that no longer happen or that overlap: the promotion memo became a direct map, the locations of earlier records are read in one loop at the declaration line, and the block writer stopped loading the shared node it refers to.}
+\li{With packing, the load alone on the JVM, warm, on quiet cores: Std 0.92 s to about 0.5 s, cedar 1.36 s to 0.73 s, Mathlib 9.2 to 9.6 s down to 5.8 to 6.2 s.}
+\li{A warm pass with 8 workers on 8 cores is bound by its total CPU time, of which the whole load is about a tenth; there the packing changes nothing measurable.}
+}
+}
+
+\p{Detail: \src{docs/design/ARCHITECTURE.md} section 3 for the design; \src{rlvm-load/README.md} for the implementation, its deviations, the hostile-input table with tests and every measurement; \src{rlvm-export/README.md} for the reader. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}

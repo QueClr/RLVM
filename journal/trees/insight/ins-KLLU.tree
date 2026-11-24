@@ -1,0 +1,33 @@
+\title{The Truffle tier gains 4 to 10 percent on closed evaluation and nothing on Cedar-level work}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-truffle/NOTES-T3.md}, section 1; [the profiling session](ses-JRSD). Warm wall clock per pass, median of the later half of the warm passes, the stepper and the tier back to back in one quiet window. Most rows are a measuring tool that keeps one engine and has no loading; the launcher rows say so.}
+\table{
+\tr{\th{Workload}\th{Platform}\th{Workers}\th{Stepper, ms}\th{With the tier, ms}\th{Blocks compiled}}
+\tr{\td{reachability}\td{JVM}\td{1}\td{1118}\td{1006, -10.0 percent}\td{12}}
+\tr{\td{reachability}\td{JVM}\td{8}\td{572}\td{529, -7.5 percent}\td{12}}
+\tr{\td{reachability}\td{JVM, launcher}\td{8}\td{439}\td{394, -10.2 percent}\td{11}}
+\tr{\td{reachability}\td{native image}\td{1}\td{1448}\td{1392, -3.8 percent}\td{12}}
+\tr{\td{reachability}\td{native image}\td{8}\td{737}\td{701, -4.8 percent}\td{12}}
+\tr{\td{Cedar slice}\td{JVM}\td{1}\td{1426}\td{1487, +4.3 percent}\td{2}}
+\tr{\td{Cedar slice}\td{JVM}\td{8}\td{220}\td{286, +30 percent}\td{2}}
+\tr{\td{Cedar slice}\td{native image}\td{1}\td{1808}\td{1802, -0.3 percent}\td{2}}
+\tr{\td{Cedar slice}\td{native image}\td{8}\td{316}\td{324, inside the scatter}\td{2}}
+}
+\ul{
+\li{Closed evaluation gains, and only with few blocks. reachability is 83 percent inside code blocks and three blocks have two thirds of its 2.5 M activations per pass. Compiling the dozen blocks that carry the run gives the table; 180 to 250 blocks give less or nothing.}
+\li{Cedar-level work has nothing to gain: the Cedar slice spends 14 percent of its time inside blocks at all, spread over hundreds of them.}
+\li{With an unbounded count everything is compiled in the end, because the count is cumulative: 804 blocks on the slice, 1,820 on full cedar, the compiler threads busy through every measured pass and taking cores from 8 workers: +23 to +39 percent.}
+\li{The promotion test that matters is therefore the share, not the count: a block is promoted when the engine has seen 20,000 activations and the block has at least 2 percent of all of them.}
+\li{A block takes about 30 ms of compiler CPU on the JVM and about 20 ms in the image. Deoptimisations: 0 in every measured run.}
+}
+\p{The tier stays off by default. It is correct, and it is the place where a changed value model would pay; see [a compiler has nothing to remove](ins-JA0J). The loss on the Cedar slice on the JVM is [not explained](prob-EZEP). The research before the design had predicted the shape of this result, see [Truffle is the wrong first tier](ins-E5W9).}
+\p{See also: [the Truffle tier](design-truffle-tier); [the decision that the tier is off by default](dec-ADIK).}

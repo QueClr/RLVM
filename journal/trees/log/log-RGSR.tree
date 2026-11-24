@@ -1,1 +1,19 @@
-\date{2026-11-24T23:09:40Z}
+\title{The machine is made the default engine, and withdrawn within the hour}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{51270a6}
+\import{base-macros}
+
+\p{On the gates of its new default set the machine was published as the default engine at 19:41 UTC (\commit{381c346}): an engine provider with a priority of 100 or more is the default, and the machine's went from 10 to 100. With it all eight corpora were accepted with 8 workers in the native image, and the 230 published tests were correct through the arena's run line.}
+
+\p{Less than an hour later new hostile exports, written during the work on the eager-reduction prototype, showed a family of wrong accepts against the official checker, findings E1-F1 to E1-F5, three of them in the generic tier. A bound variable was typed by what its environment slot holds (the value of a \code{\verb~|let~}, the argument of a beta redex that is inferred again, the other side's comparison variable) and not by its declared type; such a type is only convertible with the declared one, and the official relation is not transitive. The statements accepted are true in the theory; the verdicts are not the official ones. The priority went back to 10, and the reference engine is the default again.}
+
+\p{None of the gates could see the family: they compare the machine with the reference engine on corpora and mutants, where the two types coincide, and the hostile suite had no row of this shape. The lesson recorded with it: making an engine the default needs a review with new hostile exports first.}
+
+\p{Detail: \src{rlvm-machine/SWITCHES.md}, \src{docs/design/review/official-divergence.md}. Commit \commit{51270a6}. Session: [exactness](ses-874D).}

@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:34Z}
+\title{An export with two level records for one universe parameter is declined}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\tag{loader}
+\tag{levels}
+\meta{release}{Unreleased}
+\meta{commit}{34bb2d4}
+\import{base-macros}
+
+\p{Finding A2-F1: five hand-made files with two level records for one universe parameter were accepted by RLVM and rejected by the official checker. Officially a constant used with the other record gets its declared type rebuilt, and a level such as \code{\verb~|imax u 1~} is respelled as \code{\verb~|max u 1~}, which the official relation does not identify with the declared spelling. Exporter output never has such records. The loader now declines such an export per unit, so that the units before the line are still checked, when some level record that mentions the doubled parameter is not officially equivalent to its rebuild. The rule is evaluated in a private level arena and never changes an accept or a reject: a file that is not declined loads to the store it had before. More than 8 doubled parameters are declined unseen. On a file without a second record the cost is one list append per level record and one set probe per parameter record. Published with 69 tests, 8 of them on the files of the finding.}
+
+\p{Detail: \src{rlvm-load/README.md}. Commit \commit{34bb2d4}. Session: [machine speed and pipeline](ses-CVTE).}

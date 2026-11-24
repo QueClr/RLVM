@@ -1,9 +1,57 @@
-\title{Identity on demand enters as a staging switch}
+\title{Identity on demand enters as a staging switch, off by default}
 \taxon{Decision}
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/VALUES-V2.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted as the form in which the change may enter the machine. Not applied: on 2026-11-24 the patches are a recorded queue for the owners of the machine's files, and the switch is not in the list of \src{rlvm-machine/SWITCHES.md}.}
+
+\p{\strong{Context.} [The value model](design-value-model) interns every record in the operation that makes it. [Its proposed second version](design-values-v2) lets an application be born private, in no table, and identifies it only when it becomes a memo subject, a component of a key or a side of a comparison. The proposal came with a prototype on a private copy of the machine and with measurements. The project's metric is warm wall clock with eight workers, see [the decision on the metric](dec-7QMU), and every optimisation of the machine that changes what is computed sits behind a [staging switch](design-switches).}
+
+\p{\strong{Decision.} The value model is not replaced. Identity on demand enters, if at all, as one staging switch (proposed name \code{lazyid}) in a restricted form, and it is off by default and off in the strict engine:}
+
+\ul{
+\li{only the application instruction of code blocks is lazy, except the application that the next instruction normalises;}
+\li{identity is forced for keys, for memo subjects (weak head normal form, core normal form, unfolding, type of a value) and for the two sides of a conversion;}
+\li{a site whose applications are mostly identified interns at birth again (adaptive sites);}
+\li{a site is lazy only in a session that holds \code{\verb~|2^17~} records or more.}
+}
+
+\p{Closures, suspensions and frames keep the present model. The switch may enter a default set only after the full gate on the main tree, an eight-worker measurement with more than two processes per row on the platform that ships, and one large corpus with giant declarations (Mathlib, not run); like every switch it is also subject to the rule that [no switch enters a default set without an adversarial pass](dec-QN1O).}
+
+\p{\strong{Evidence.} All timings are warm wall clock of the prototype, median of the later warm passes of two processes inside quiet windows on the aarch64 development host, measured with a test driver that keeps one engine over the passes (no admission pipeline, no pipelined loading); the base is the same jar with the mode off in the same window.}
+
+\table{
+\tr{\th{Corpus, platform, workers}\th{Mode off}\th{The restricted form}\th{Difference}}
+\tr{\td{reachability, JVM, 1}\td{1066 ms}\td{888 ms}\td{-16.7 \%, ranges disjoint}}
+\tr{\td{reachability, JVM, 8}\td{511 ms}\td{460 ms}\td{-10.0 \%, ranges touch; workers' CPU time -10.5 \%}}
+\tr{\td{reachability, native image, 1}\td{1345 ms}\td{1185 ms}\td{-11.9 \%, ranges disjoint}}
+\tr{\td{reachability, native image, 8}\td{619 ms}\td{638 ms}\td{+3.1 \%, inside the scatter}}
+\tr{\td{Cedar slice, JVM, 1, lazy in large sessions without adaptive sites}\td{1104 ms}\td{1103 ms}\td{-0.1 \%; the counters are those of the mode-off run}}
+}
+
+\ul{
+\li{On reachability 2.66 M of 8.4 M record-table probes per pass are not made, and the tick count is the mode-off count (9,104,125). On the library corpora the sessions never reach the threshold, so the form is inert there by construction.}
+\li{The full gate of the machine with the restricted form on the private tree passes with declines: no soundness and no completeness difference against the reference engine on the tutorial and bug tests, the 230 arena tests, Init, Std, reachability and the Cedar slice; no difference in the tier, convention and audit lanes; every decline is an eager-reduction decline of that tree. The hostile suite of the soundness review (32 switch sets on 329 exports) shows no unexpected verdict.}
+\li{The gain is on one class of corpus, closed evaluation in giant sessions; measured against the first number of the metric it is at the edge of the scatter on the JVM and absent in the native image, and there is no loss anywhere. That is enough for a staging switch and not for a default.}
+}
+
+\p{\strong{Alternatives considered.}}
+
+\table{
+\tr{\th{Alternative}\th{Why not}}
+\tr{\td{every construction site lazy, without adaptation}\td{on library corpora records +37 to +61 \% and ticks +1.6 to +5.9 \%; the Cedar slice +9.1 \% warm wall clock at one worker on the JVM, resolved}}
+\tr{\td{block sites lazy in every session}\td{the Cedar slice +4.0 \% and +4.3 \% at one worker in two windows, not resolved: the price is paid where sessions are small}}
+\tr{\td{lazy closures, suspensions and frames}\td{two thirds of their probes hit, and only 2 to 6 \% of the suspensions on library corpora are never used as a memo}}
+\tr{\td{everything lazy and no table at all}\td{every memo on values loses its hits; measured as the mode with every site lazy and no forcing of memo subjects: +143 \% ticks on reachability}}
+}
+
+\p{\strong{Consequences.} The stages of the design note apply: plumbing with no behaviour change, the switch, then completing the classes until the tick count with the switch equals the count without it and making that a gate, then the Truffle tier. A session's footprint grows with the switch, so the session cap is reached earlier. If the switch is wrong it costs one bit test per key-forming call while a large session has private records, and nothing otherwise. Not established: the eight-worker gain, any timing on Init, Std, cedar or Mathlib, the launcher path with the real pipeline, and the mutant corpora with the mode.}
+
+\p{Related: [the Truffle tier](design-truffle-tier), [the decision against reference-count bits](dec-80ZZ), [warm sessions](design-warm-sessions). Detail: \src{docs/design/VALUES-V2.md}, sections 0, 10 and 11. Source: [the session of profiles and prototypes](ses-JRSD).}

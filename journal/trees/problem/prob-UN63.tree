@@ -1,0 +1,26 @@
+\title{navier-stokes-euler at 3.9 times the CPU time of gruszka}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/P9.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The number.} In CPU time of a fresh process the machine with its default switch set of wave 6 is at 3.9 times gruszka on navier-stokes-euler, where cslib is at 1.77 and con-leche at 1.30; arena-shaped container, native image, 8 workers, the windows of the wave-6 table. Inside the checks it is 7.98 times in instructions, 886.4 G against 111.0 G over 124,850 units. A warm pass with 8 workers takes 8.35 s in the native image. Source: \src{docs/research/profiles/P9.md} and \src{docs/BENCHMARKS.md}.}
+\p{\strong{What is known.} It is [the Mathlib mechanism in a larger dose](ins-K2I2), not something new and nothing about numerals.}
+\ul{
+\li{54.5 percent of the instructions and 51 percent of the worker CPU on quiet cores, 29.7 of 58.1 s, disappear with the two shortcuts, which are not the official algorithm. With them the machine is at 3.63 times gruszka in instructions.}
+\li{84 percent of the cost is in the 57,330 units of the project itself, at 9.35 times; worst are the 690 namespaces whose names begin with Euler, 57.7 percent of the instructions at 13.4 times.}
+\li{14 percent of the corpus is the class that only the congruence shortcut repairs: [one term under two environments](ex-VC9X).}
+\li{Eager-reduction declines are small here, 251 units and 1.5 percent of the worker.}
+\li{Admission of the structures of the project is 3.4 percent of the worker, see [admission between the checks](prob-SREA).}
+\li{What stays above 8 times with the shortcuts is 6.8 percent of that run: sibling units that gruszka answers from its session.}
+}
+\p{\strong{What would close it.} The same decision as for Mathlib, see [the gap to gruszka](prob-TJK3): with the shortcuts admissible, this corpus is the one where they are worth most, more than half. After them it is [the cost of one operation](prob-28KQ), 2,865 instructions per step against 874. Not measured: warm wall clock with 8 workers with the shortcuts on this corpus, and gruszka warm on it.}
+\p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

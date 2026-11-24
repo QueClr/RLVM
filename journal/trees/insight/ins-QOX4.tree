@@ -1,0 +1,28 @@
+\title{Leaving proofs in the file moves their cost to the workers and does not shorten a pass today}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{origin}{docs/research/profiles/X5.md}
+\import{base-macros}
+
+\p{Source: the scout report \src{docs/research/profiles/X5.md}; [the profiling session](ses-JRSD). A prototype outside the published modules; JVM with C2 and the launcher flags, quiet cores, medians of warm passes, Mathlib one run. On exporter output the proof-only records of a theorem are an id range that is recognisable without parsing them; the question was whether the loader can leave those bytes in the file for the worker that checks the theorem.}
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{Mathlib}}
+\tr{\td{expression records the loader still parses}\td{17.9 percent}\td{21.9 percent}\td{23.4 percent}\td{27.7 percent}}
+\tr{\td{load phase, one thread, eager to lazy, s}\td{0.52 to 0.32}\td{0.93 to 0.53}\td{1.43 to 0.92}\td{10.64 to 6.35}}
+\tr{\td{proofs decoded by 8 workers, CPU, s}\td{0.16 to 0.51}\td{0.23 to 0.92}\td{0.31 to 1.65}\td{2.65 to 9.58}}
+\tr{\td{load and decode together, CPU}\td{+23 percent}\td{+25 percent}\td{+47 percent}\td{+20 percent}}
+}
+\ul{
+\li{It works and it agrees with the eager loader: every constant gets the same type and value on Init, Std, cedar and Mathlib and on 18,005 small files, or the load fails with the same message, or restarts. The rule needs five guards.}
+\li{It buys much less than hoped. The serial load gets 1.6 to 1.75 times faster, not five times: pass one over every line, names, levels, declaration rows and page faults stay.}
+\li{The workers pay 3 to 5 times the block decode. Half or more of that is foreign records: 5.5 to 6.9 percent of the references of proof records go to a proof record of an earlier theorem, and fetching one from the file costs 280 to 315 ns.}
+\li{Under pipelining the wall clock is [the larger of the load and the check](ins-R1V8). With the check phase of that day checking is the larger term everywhere, so lazy ranges only add worker time: Std +6 percent, cedar +8 percent, Mathlib +3 percent.}
+\li{They win once the check phase is shorter than the eager load, that is with checking 1.9 times faster on Std, 1.6 times on cedar and 3.9 times on Mathlib, and then by at most 36 to 43 percent of a loader-bound wall clock.}
+}
+\p{Recommendation of the report: no-go now; keep the design and the prototype for the day the loader is the floor. The cheaper step toward the same floor was taken instead, see [scanner threads that pack](ins-3L35), and the question stays open as [the loader as the floor](prob-I7M9).}
+\p{See also: [the export loader](design-export-loader).}

@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:37Z}
+\title{The machine runs behind \code{\verb~|-X engine=machine~}; first measurements against the reference engine}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{benchmark}
+\meta{release}{Unreleased}
+\meta{commit}{afe1c5b}
+\import{base-macros}
+
+\p{The module joined the build and the distributions. The reference engine stayed the default engine and re-checks every rejection of the machine. The gate of the generic tier through the launcher: all 230 published tests with the right verdict, 15,803 engine checks accepted, 41 rejected and 2 declined, both attempts of \code{\verb~|perf/loop-unfolded-once~}. The differential engine found no difference on Init (57,938 units), Std (100,096), reachability (4,224) and the Cedar slice (8,064); over the whole integration about 1.8 million unit comparisons showed none. Base tables far smaller than the design's first sizes cut the worker CPU of Init on the host from 10.1 s to 7.3 s.}
+
+\p{Final rows, native image at \code{\verb~|-O3~}, one worker, arena-shaped container, CPU seconds of the machine against the reference engine: Init 7.77 against 13.82, Std 13.32 against 24.31, Cedar slice 3.17 against 3.90, reachability 7.95 against 12.19. The first Mathlib run of the machine, 8 workers in the same kind of image, accepted all 714,712 engine checks with no decline in 205.98 s CPU and 42.31 s wall at 2,855 MiB, against 624.6 s and 120.3 s for the reference engine.}
+
+\p{Detail: \src{rlvm-machine/NOTES-INT.md}, \src{docs/BENCHMARKS.md}. Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N).}

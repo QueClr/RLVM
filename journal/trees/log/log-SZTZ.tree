@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:40Z}
+\title{Eager reduction behind the switch \code{\verb~|eager~}}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{9c7e11d}
+\import{base-macros}
+
+\p{The decline rule sends every declaration that enters eager reduction to the reference engine, which is 10 to 13 \% of the time in units on Std, cedar and Mathlib. Under the new switch the machine treats such declarations itself. It is off by default. Gate of the tree before publication, per declaration against the reference engine with \code{\verb~|default,eager~}: the tutorial and bugs tests, the Cedar slice (8,418 units), reachability (4,413), Init (58,547) and the 230 tests (17,493) are clean with no decline; Std has 1 decline in 101,146 and the 16 Mathlib slices 4 in 436,408, all by the rule for finding E1-F6; no soundness and no completeness difference. With the switch off the declines are as published: Std 204, Cedar slice 11, Init 164.}
+
+\p{Warm wall clock with 8 workers in the native image, check-only passes, best and median of the later passes: Std 1.16 and 1.19 s without the switch against 1.02 and 1.03 s with it, cedar 1.56 and 1.59 s against 1.40 and 1.42 s. The adversarial review of the default set, which ended the same evening, reports no false accept in the candidate with the switch either (\commit{b391d00}).}
+
+\p{Detail: \src{docs/design/review/eager-reduction.md}, \src{docs/design/review/soundness-default-set.md}. Commit \commit{9c7e11d}. Session: [profiles and prototypes](ses-JRSD).}

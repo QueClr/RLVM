@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:36Z}
+\title{Quiet windows: timings on reserved cores, one at a time}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\tag{benchmark}
+\meta{release}{Unreleased}
+\meta{commit}{6e9f5ab}
+\import{base-macros}
+
+\p{A wall-clock number from a host that is oversubscribed several times is evidence only when it was taken through \code{\verb~|bench/quiet.py~}. One measurement runs at a time; while it runs, every other process of the session and every other container is moved off the 8 measurement cores and put back afterwards, and each window is logged with its cores, its duration, the load before it and what was moved. Memory bandwidth and the shared cache are still shared with the other cores, so runs are compared inside one window where possible.}
+
+\p{Two fixes followed the same day. Containers of other jobs that were pinned on the measurement cores stayed there, and the first 18 rows of the warm table had 9 to 14 such containers beside them; a window now parks them on spare cores, and the measurement's own container is labelled so that it is not parked (\commit{af1fdb3}). Waiting measurements are served first come, first served (\commit{01ccd8c}).}
+
+\p{Detail: \src{bench/README.md}. Commit \commit{6e9f5ab}. Session: [machine speed and pipeline](ses-CVTE).}

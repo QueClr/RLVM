@@ -1,0 +1,26 @@
+\title{The check phase scales 6.9 to 7.4 times at 8 workers; the rest is collections, the loader threads and one heavy unit}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P7.md}; [the profiling session](ses-JRSD). Native image \code{\verb~|-O3~} with the serial collector, machine with \code{\verb~|warm,gated,expect~}, session cap 4 MiB, the 8 quiet performance cores of the aarch64 development host; single runs, differences below 3 percent are not results.}
+\table{
+\tr{\th{Mathlib, 721,845 units}\th{1 worker}\th{2}\th{4}\th{8}}
+\tr{\td{check phase of a batch run, s}\td{212.21}\td{101.39}\td{52.66}\td{30.57}}
+\tr{\td{speed-up of the check}\td{1}\td{2.09}\td{4.03}\td{6.94}}
+\tr{\td{whole pipelined run, s, after the driver changes}\td{208.3}\td{104.9}\td{53.8}\td{31.8}}
+}
+\ul{
+\li{A check-only pass scales 7.4 times on Mathlib; the check phase scales 6.89 times on Std and 6.34 times on cedar.}
+\li{What keeps a whole pipelined run at 5.5 to 5.9 times before the driver changes and 6.5 times after them is, in this order: [the collections](ins-561G), 3.9 s of a 37.7 s run; ten runnable threads on eight cores while the file loads, since the loader needs 12 s and the environment thread 3 to 5 s of CPU; the worker CPU itself, which grows by 6 percent from 2 to 8 workers and is [the hardware](ins-RPLD); and on the mid-size corpora [one heavy unit](ins-OEXH).}
+\li{Nothing is lost to locks, to the frontier or to the tail on Mathlib: parks are 0.4 to 1.1 percent. The workers never wait for the loader.}
+\li{The waits of the driver itself were 1 percent on Mathlib, so scheduler changes move only the mid-size corpora.}
+}
+\p{The question had started from a run on the loaded host that showed a speed-up of 3.4 with 8 workers; see [loaded-host timings are not evidence](ins-I3W2).}
+\p{See also: [the driver](design-driver).}

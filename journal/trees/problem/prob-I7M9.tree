@@ -1,0 +1,25 @@
+\title{The loader as the floor once checking is faster}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/X5.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The question.} The loader is one linking thread. Under pipelining a pass costs [the larger of the load and the check](ins-R1V8), so every gain of the engine is cut off at the load time. How far away is that, and what is the next step when it is reached?}
+\p{\strong{What is known.}}
+\ul{
+\li{First warm table, machine with \code{\verb~|warm,gated,expect~}, JVM launcher, 8 workers: the loader thread takes 1.25 s of a 1.72 s pass on Std, 1.82 s of 2.21 s on cedar, 13.5 s of 25.6 s on Mathlib. An engine twice as fast would gain a quarter on Std and a fifth on cedar.}
+\li{Lazy proof ranges win once checking is 1.9 times faster on Std, 1.6 times on cedar and 3.9 times on Mathlib than on the day of the report, and then by at most 36 to 43 percent of a loader-bound wall clock; before that they only [move cost to the workers](ins-QOX4).}
+\li{[Packing by the scanner threads](ins-3L35) made the load alone 1.6 to 1.8 times shorter, 5.8 to 6.2 s for Mathlib, and did not shorten an 8-worker pass: such a pass is at its CPU bound.}
+\li{What is left on the loading thread has to stay in file order because it numbers shared structures: names, promotion, shared nodes, the references of proofs that the scanner threads could not resolve, and the records that are not proof-private.}
+\li{By the arena rule the loader costs 133.2 G instructions on Mathlib, 21 per input byte, against 6 for the leaders; see [the arena dry run](ins-6OVD). A leader converts the export once to a binary columnar file; RLVM reads the text every time.}
+}
+\p{\strong{What would close it.} The switch point is measurable with numbers the project already produces: the check phase with 8 workers against a run that stops after the load. When they cross on a corpus that counts, cost the variant of the lazy design in which the scanner threads pack the ranges, so that there is no text in the workers, no second read and no restart; source \src{docs/research/profiles/X5.md}, section 7.5.}
+\p{See also: [the export loader](design-export-loader).}

@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:32Z}
+\title{Warm wall-clock table and its tooling}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\tag{benchmark}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{82a8841}
+\import{base-macros}
+
+\p{\code{\verb~|bench/warm.sh~} takes a cold process and a warm process per row in one quiet window and writes the row; the warm section of the benchmark document is generated from the rows. The first table has 91 rows from 12 clean windows, with the 18 disturbed rows kept apart. Its headline, the machine with \code{\verb~|warm,gated,expect~}, 8 workers, pipelined reload passes, warm median in seconds on the JVM launcher and in the native image: Init 1.60 (best pass 1.07, still falling at pass 5) and 1.07, Std 1.68 and 1.88, cedar 2.26 and 2.62, reachability 1.88 and 2.66. Mathlib takes 36.15, 26.13 and 25.63 s per pass on the JVM launcher and 34.48, 35.35 and 35.34 s in the native image: warm, the JVM is at 0.73 times the image's wall clock; cold they are equal. The baselines in the arena container on the same cores with 8 threads: gruszka 12.49 s and nano-lean 20.71 s on Mathlib. Seven workers equal eight on 8 cores; six are slower.}
+
+\p{Detail: \src{docs/BENCHMARKS.md}, \src{bench/README.md}. Commit \commit{82a8841}. Session: [machine speed and pipeline](ses-CVTE).}

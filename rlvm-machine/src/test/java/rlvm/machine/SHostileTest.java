@@ -40,7 +40,19 @@ class SHostileTest {
 
     @Test
     void theManifestIsComplete() {
-        assertTrue(SHostile.rows().size() >= 320, "manifest.tsv lost rows");
+        assertTrue(SHostile.rows().size() >= 1189, "manifest.tsv lost rows");
+        int kindT = 0;
+        for (SHostile.Row row : SHostile.rows()) {
+            if (row.marked("T")) {
+                kindT++;
+                assertEquals(rlvm.api.Outcome.REJECT, row.official, "a kind T row is an official REJECT: " + row.name);
+                assertTrue(row.attack.contains("kind T"), "a kind T row says who gave the kind: " + row.name);
+            }
+            if (row.marked("recheck")) {
+                assertEquals(rlvm.api.Outcome.ACCEPT, row.official, "a recheck row is an official ACCEPT: " + row.name);
+            }
+        }
+        assertTrue(kindT >= 81, "kind T rows: " + kindT);
         for (SHostile.Row row : SHostile.rows()) {
             assertTrue(SHostile.export(row).endsWith(row.name + ".ndjson"));
         }

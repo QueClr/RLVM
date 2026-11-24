@@ -1,0 +1,33 @@
+\title{One pair that is equal in plain mode and different under eager reduction}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\meta{origin}{docs/design/review/soundness-machine.md}
+\import{base-macros}
+
+\p{Eager reduction is the one mode switch of the official comparison: while the type of an argument of the form \code{\verb~|eagerReduce _ _~} is compared with its domain, lazy delta folds Nat operations although a free variable is present. The same pair then has two answers. Source: finding S-F5 of \src{docs/design/review/soundness-machine.md}; [the session on the machine](ses-Z72N).}
+\pre{\verb~|
+def G (x : And True True) : Nat := And.rec (fun _ _ => 0) x      -- regular
+-- X   := Nat.add (G (And.intro ..)) 0
+-- Y p := Nat.add (G p) 0
+
+-- plain mode, p a free variable:  X = Y p  holds
+--   no fold; Nat.add and G compare their arguments; And.intro .. against p: proof irrelevance
+-- eager mode:  X = Y p  fails
+--   X folds to 0 first; 0 against Nat.add (G p) 0 unfolds to 0 against a stuck And.rec
+
+theorem bad : (forall p, X = Y p) /\ (forall p, X = Y p) :=
+  And.intro (fun p => Eq.refl X)
+            (fun p => (fun h => h) (eagerReduce (X = X) (Eq.refl X)))   -- official: REJECT
+~}
+\ul{
+\li{Officially the second lambda opens a new free variable, the cache of successful pairs has no entry for it, and the eager comparison fails.}
+\li{In the machine both binders are the same canonical variable, the pair was established in the first scope, and the pair table answered also in eager mode: the plain machine as published at 12:47Z on 2026-11-24 accepted the export.}
+\li{The machine now declines every declaration that enters eager reduction and the reference engine decides it. The switch \code{\verb~|eager~}, off by default, keeps such a declaration on the machine by deferring the eager comparison to the end of the declaration.}
+\li{Both leaders accept three officially rejected exports of this class inside the K rule, \code{\verb~|krule-eager-alone-bad~} and its two variants.}
+}
+\p{Used by [eager reduction is a mode, and a table keyed by values cannot reproduce it](ins-O23C).}
+\p{See also: [eager reduction on the machine](design-eager-reduction).}

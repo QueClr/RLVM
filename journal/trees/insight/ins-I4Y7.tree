@@ -1,0 +1,24 @@
+\title{Cedar is not more reduction-heavy than Init: what distinguishes it is size and conversion}
+\taxon{Insight}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/13-workload-characterization.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/13-workload-characterization.md}, a dynamic characterisation made with the counters of nano-lean before the machine existed; [the research session](ses-XOS5). It answers the instruction of the maintainer to judge heat on Cedar-level workloads, see [standing policies](standing-policies).}
+\ul{
+\li{Share of the checking instructions of nano-lean spent under a reduction: Init 38 percent, the 22,454 declarations of Cedar itself 17 percent, those of navier-stokes-euler 17 percent, cslib 24 percent, con-leche 34 percent, reachability 99 percent.}
+\li{What distinguishes Cedar-level declarations is size and conversion: 1.02 M instructions per declaration against 0.38 M for Init, and 30 percent of their instructions under the comparison against 16 percent.}
+\li{Real kernel computation exists in three places: reachability, where 5 proofs by \code{\verb~|decide~} are 92.5 percent of the file; con-leche; and the performance tests of the arena.}
+\li{The corpora contain their libraries. By instructions the cedar export is 39.5 percent Init, 14.8 percent Std and 39.8 percent Cedar; cslib is 70 percent Mathlib. A number per corpus is mostly a statement about the core library of Lean.}
+\li{Dynamic heat is low. No body, rule or projection object is executed a million times in any corpus, Mathlib included; 57 percent of the declarations of cedar perform no reduction step at all and 81 percent at most ten.}
+\li{The hot set is the core library and it is the same everywhere: 93.6 percent of the delta unfoldings of cedar are of constants declared in Init.}
+\li{Derived reduction rules, the one specialisation with a measured large effect, pay only on evaluation: switching them off in nano-lean costs 1.9 times on reachability and up to 10.3 times on a performance test, but 1.04 to 1.06 times on Init, Std, cedar and con-leche and 1.00 to 1.02 times on navier-stokes-euler, cslib and Mathlib.}
+\li{On whole cedar inference is 42 percent of the instructions of nano-lean, reduction 25, conversion 20, parsing 9. Hash-consing is the part no code tier removes.}
+}
+\p{The conclusion drawn then, that compiled code has no target on the library corpora and that its only candidates are closed evaluation loops, was confirmed by measurement: see [the Truffle tier](ins-KLLU).}
+\p{See also: [code objects and tiers](design-code-objects-and-tiers).}

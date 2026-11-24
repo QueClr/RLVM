@@ -3,7 +3,67 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented and off. The module \code{rlvm-truffle} is built, gated and in every distribution; it runs only under the staging switch \code{t2}, which is not in the default set ([dec-ADIK](dec-ADIK)).}
+
+\p{\strong{What it compiles.} The Truffle guest language of RLVM is the judgment language, not Lean terms ([what RLVM is](standing-policies-design)). Its programs are the [code blocks](design-code-objects-and-tiers) of the machine: the judgment chains of constants (application inference, bodies, recursor rules, case trees) and the blocks of binders. A block that the promotion policy selects becomes one Truffle root, is compiled by Graal on a background thread, and from then on its activations run as machine code that calls the same operations as the code stepper. A Truffle interpreter costs 1.6 to 3.4 times plain Java, so no block is ever interpreted by Truffle: it runs in the stepper until compiled code is installed.}
+
+\p{\strong{The hook.} The machine has no Truffle dependency. Its class \code{Tier} is the hook: one tier object per machine, made by a factory found through the service loader, only when the machine runs with \code{t2} and never in the strict engine. The stepper offers every activation to the tier, at entry and at every resume; the tier answers with the result, with a signal, or with "not mine" before it has changed anything. With the switch off the hook costs one field test per activation, and no difference was measured. Whatever fails inside the tier (no optimising runtime, a compilation Graal gives up on, a block the tier cannot decode) leaves the block in the stepper: the tier can change speed, never a verdict or a value id.}
+
+\p{\strong{Rules of the compiled code.} One node per instruction, registers in frame slots, written back to the register window only when the root suspends. No deoptimisation: no rewriting specialisation, at most one compilation per root, kind dispatch as an explicit switch; every measured run had 0 deoptimisations. Everything that can write or grow a store stays a call behind a boundary; pure reads and the Nat immediates are compiled into the block. Tier equivalence is strict: after every unit the outcome, the ticks and a digest of every record word and run word of the session are equal with the tier off and on (the Cedar slice, Init and reachability: identical, with 215, 811 and 113 blocks compiled), and the differential gate against the reference engine through the launcher found 0 differences on the 169,936 units compared of 170,322 (the rest are units the machine declines for eager reduction, with or without the tier).}
+
+\p{\strong{The number set in advance.} Before anything was built the design fixed the criterion (\src{docs/design/ISA.md} section 0.5): go if and only if total CPU time, compiler included, is at least 5 \% lower than the code tier on reachability or at least 3 \% lower on cedar as a whole, wall clock is not higher on either, and no corpus loses more than 0.5 \%. The stated expectation was no-go: a compiled telescope root had to run about 400,000 times to repay 18 ms of compilation at 44 ns saved per run. The [metric](dec-7QMU) then became warm wall clock with warm-up not charged, the most favourable reading for a JIT, and the tier was measured under it.}
+
+\p{\strong{What was measured.} Warm wall clock per pass in ms, median of the later half of the warm passes, the code tier against the code tier with \code{t2}, back to back in one quiet window, one engine kept over the passes, aarch64 host. The code tier here is the switch set \code{warm,gated,expect,code,casetrees}. Most rows come from a multi-pass tool of the module, not from the driver.}
+
+\table{
+\tr{\th{Workload, platform, workers}\th{Promotion}\th{Code tier}\th{With the tier}\th{Blocks}}
+\tr{\td{reachability, JVM, 8}\td{at 1,000 entries, unbounded}\td{520}\td{529 (+1.7 \%)}\td{177}}
+\tr{\td{Cedar slice, JVM, 8}\td{the same}\td{232}\td{321 (+38 \%)}\td{686}}
+\tr{\td{full cedar, JVM, 8}\td{the same}\td{1315}\td{1827 (+39 \%)}\td{1,820, 52.6 s of compilation}}
+\tr{\td{Cedar slice, native image, 8}\td{the same}\td{319}\td{391 (+23 \%)}\td{713}}
+\tr{\td{reachability, JVM, 8}\td{final policy}\td{572}\td{529 (-7.5 \%)}\td{12}}
+\tr{\td{reachability, JVM launcher with kept engines, 8}\td{final policy}\td{439}\td{394 (-10.2 \%)}\td{11}}
+\tr{\td{reachability, native image, 8}\td{final policy}\td{737}\td{701 (-4.8 \%)}\td{12}}
+\tr{\td{Cedar slice, JVM, 1}\td{final policy}\td{1426}\td{1487 (+4.3 \%)}\td{2}}
+\tr{\td{Cedar slice, JVM, 8}\td{final policy}\td{220}\td{286 (+30 \%)}\td{2}}
+\tr{\td{Cedar slice, native image, 8}\td{final policy}\td{316}\td{324 (+2.4 \%, inside the scatter)}\td{2}}
+\tr{\td{full cedar, JVM launcher, 8}\td{final policy}\td{1574}\td{1664 (+5.7 \%, passes still falling)}\td{12}}
+}
+
+\p{The tier's first owner could not take a usable measurement on the loaded host and left the verdict open. The tier as that owner left it was then measured in quiet windows at one worker: against the code tier it was between -2.5 \% and parity on reachability on the JVM, +3.3 \% on reachability in the native image, and +2 to +4 \% on the Cedar slice. An earlier figure of a 55 to 80 \% loss in the native image was the heat accounting and the measurement, not the compiled code.}
+
+\p{The final policy promotes a block when the engine has seen 20,000 activations and the block has at least 2 \% of all of them, at most 256 blocks, with two compiler threads; it never switches on the machine's heat accounting, which was most of what the first version of the tier cost (2.4 to 11 \%). The rows with unbounded promotion were taken before a defect that kept every machine of an engine reachable was fixed, which biases the 8-worker rows against the tier by an amount that was not separated. With an unbounded count everything is compiled in the end, the compiler threads are busy through every measured pass and take cores from eight workers on eight cores. Not measured: con-leche, cslib, Mathlib, navier-stokes-euler, and the native launcher. Unexplained: why the Cedar slice on the JVM is 60 ms per pass slower with two compiled blocks.}
+
+\p{\strong{Why so little.} Execution samples of warm passes of the code tier on the JVM (one worker, an open host, so shares only):}
+
+\table{
+\tr{\th{Share of the samples}\th{reachability}\th{Cedar slice}}
+\tr{\td{inside code blocks, inclusive}\td{83 \%}\td{14 \%}}
+\tr{\td{the stepper's own code: dispatch, operand decoding, register traffic}\td{16.8 \%}\td{6.9 \%}}
+\tr{\td{the interning probes and inserts themselves, whoever calls them}\td{57 \%}\td{26 \%}}
+\tr{\td{generic judgments}\td{8 \%}\td{59 \%}}
+}
+
+\p{A compiled block calls the same operations as the stepper, so compilation can remove only the second row: at most 17 \% on reachability and 7 \% on the Cedar slice before its own entry cost. The time of a block is in the interning probes it calls, not in the dispatch the tier removes.}
+
+\p{\strong{The design finding: what a JIT needs from the machine.} The tier is correct and is fed the right programs, and there is still almost nothing in them for a compiler to remove. The reason is the [value model](design-value-model), not the tier.}
+
+\ol{
+\li{Every intermediate value is a globally interned record. Nothing a block makes is ever private to it, so escape analysis, scalar replacement and unboxing have no object to work on, and tier equivalence obliges compiled code to repeat every probe.}
+\li{A block builds a redex and asks a generic judgment to reduce it. The callee is known when the block is elaborated, yet control reaches it through the generic dispatch, so there is no call for Truffle to inline.}
+\li{Arguments that nobody inspects (motives, the types of structural recursion, proof terms) are built eagerly, because they are components of an interned record.}
+}
+
+\p{Two unlocks were proposed. A \code{CALL} instruction that enters the callee's block directly was prototyped and is worth nothing measurable, because the redex it would avoid is a memo key that hits: on reachability 77 \% of those reductions are answered by the memo of the application's record ([dec-246U](dec-246U)). What remains is records that get an identity only when they need one, which is a decision about the machine and not a feature of the tier: [identity on demand](design-values-v2). One thing was measured not to work at all: leaving the probes in place and loading their table slots early from compiled code was 8 to 12 \% slower on reachability and is kept in the tree, off.}
+
+\p{\strong{Upkeep.} The nodes mirror the stepper statement by statement, by hand, and the equivalence tests do not see a drift that leaves values equal; an owner of the module has to compare the two before a measurement.}
+
+\p{Related: [code objects and tiers](design-code-objects-and-tiers), [staging switches](design-switches), [the launchers](design-launchers). Detail: \src{rlvm-truffle/NOTES-T3.md} (measurements, changes, the finding, the \code{CALL} prototype), \src{rlvm-truffle/NOTES-T2.md} (how it was built against the design, its correctness record), \src{rlvm-truffle/README.md}, \src{rlvm-machine/NOTES-M7.md} section 8.2 (the hook), \src{docs/design/ISA.md} sections 0.5 and 8.4 to 8.6. Sources: [the design session](ses-EMMW) for the sketch and the criterion, [profiles and prototypes](ses-JRSD) for the measurements.}

@@ -1,9 +1,63 @@
-\title{The adversarial review method}
+\title{The adversarial review method: hostile exports judged by the official checker}
 \taxon{Design}
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{soundness}
+\tag{machine}
+\tag{reference-engine}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/soundness-default-set.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. Four reviews were made this way on 2026-11-24, and their rows are in the hostile suite of [the gate](design-gate). A review of this kind is required before a switch enters a default set, see [the decision](dec-QN1O).}
+
+\p{The differential gates compare the machine with the reference engine on real input. They cannot show that the default configuration never accepts an underivable statement, item (a) of the [exactness contract](design-exactness-contract), and they cannot see a verdict on which both engines differ from the official checker, or one that needs input no exporter writes. An adversarial review is the instrument for that. A reviewer is an agent who did not write the code under review, changes no production file, and works on private distributions of the published jars.}
+
+\subtree[design-adversarial-review-rules]{
+\title{The rules of the method}
+
+\ol{
+\li{\strong{Ground truth is the official checker run on the export}: \code{\verb~|leanchecker --from-export~} of Lean v4.36.0, in the arena's container, with verdicts cached by content hash. Never the reference engine alone, and never the reviewer's expectation: the manifest of a suite holds the official verdict. In the first review four of the reviewer's expectations were wrong and were corrected this way; in the third, an expected rejection of a \code{And.casesOn} form turned out to be an official accept.}
+\li{\strong{Exports are built, not found.} A small builder writes exports on top of the prelude: it imports the dependency cone of the constants a test names, interns as the exporter does, and generates recursors. Each export attacks one shortcut or one memo and claims its equation by \code{Eq.refl}. A \code{\verb~|-bad~} export claims a closed equation that is refutable, such as two different numerals, or at least not derivable; its twin, \code{\verb~|-ok~} or \code{\verb~|-true~}, claims a derivable one and shows that the attacked path is reached.}
+\li{\strong{A few gadgets carry most rows.} The non-transitive triple over \code{And.rec} of [the divergence note](design-official-divergence-root); the box, a projection out of a structure built over that recursor, whose official answer depends on whether a full reduction of the same term ran before; and a pair of recursor applications that is convertible while an argument is a variable and not for any numeral, used against the derived rules.}
+\li{\strong{Random exports with an independent evaluator.} The third review generated 200 random programs: 100 files of 6 random definitions with 20 true claims each, whose values a separate evaluator computed, and 100 twins with 5 true claims and one false one. The official checker accepts the 100 and rejects the 100, which validates the evaluator. The review of the shortcuts used 498 random exports and 358 targeted mutants of a Mathlib slice.}
+\li{\strong{A matrix, not a run.} Every export is judged by the official checker, by the reference engine and by the machine through the launcher under named switch sets: the switch alone, on the first staging step, and in the default set. A cell records the verdict of the primary machine engine and the exit status of the pipeline, because the pipeline can repair a rejection and can hide a decline.}
+\li{\strong{Seeded faults show that the attacks have teeth.} A private copy carries one planted fault per switch, behind a property. A suite that cannot catch a seeded fault has not tested the switch. In the third review three of eleven faults were not caught by the first set of rows, and three of four on the candidate default; each pointed at a path that no row had exercised, and the rows that catch them were added.}
+\li{\strong{A certificate decides the kind.} For every export that an engine accepts against the official verdict, the reviewer produces an export that the official checker accepts and that proves the same statement: the same declaration with its sub-proofs in the other order, or with the missing step written out as a term, \code{Eq.rec} over an \code{Eq.refl} between two proofs. With a certificate the row is of kind T. A row whose statement is derivable but whose proof term is ill-typed stays strict.}
+\li{\strong{The rows enter the suite with verdict and kind}, and the seeded-fault rows in particular.}
+\li{\strong{Every review ends with what it did not establish.}}
+}
+}
+
+\subtree[design-adversarial-review-results]{
+\title{The four reviews}
+
+\table{
+\tr{\th{Review}\th{Object}\th{Size}\th{Result}}
+\tr{\td{Package S, \src{docs/design/review/soundness-machine.md}}\td{The machine as published after its first integration, generic tier and staged switches.}\td{349 hostile exports, 329 kept; up to 17 switch sets; 602 targeted mutants judged.}\td{Five findings. S-F1 and S-F2: congruence shortcuts answered yes where the official procedure is not a congruence; removed from every switch set. S-F4 and S-F5: a positive pair reused across declarations, or across two binders of one declaration, under eager reduction, the second in the generic tier; closed by declining a declaration that enters eager reduction. S-F3: both engines used the complete level relation; closed by [the official relation](dec-P8XP).}}
+\tr{\td{S2, \src{docs/design/review/soundness-shortcuts.md}}\td{The two [proof-comparison shortcuts](design-proof-comparison-shortcuts).}\td{134 hand-written attacks, 11 more, 498 random exports, 358 mutants; 474,228 positive answers re-derived by the complete procedure on nine exports.}\td{Theory-sound as implemented, under one precondition that inference establishes: both sides are well typed. The exports they accept against the official verdict are official incompleteness only: 15 of 15 statements certified.}}
+\tr{\td{S3, \src{docs/design/review/soundness-default-set.md}}\td{The ten switches that entered the default set unreviewed, the derived rules, then the candidate default.}\td{423 exports, 200 of them random programs; 15 seeded faults; second pass over 987 hostile rows of all suites.}\td{The official comparison depends on the history of the declaration's caches. Six findings of kind T, S3-F1 to S3-F6, and one decline, S3-F7; \code{k2} must stay off. No kind F in the default set, and none in the candidate with \code{eager} and the two shortcuts.}}
+\tr{\td{R2, \src{docs/design/review/reference-caches.md}}\td{The reference engine, cache by cache against the official source.}\td{Two batches of exports around one probe; every official cache with its key, reads, writes and lifetime.}\td{The caches are read, written and cleared where the official ones are. What differs is what counts as the same term: dropped metadata, the let flag, object identity of export records (R2-F2), and cache lifetime in admission (R2-F3). All kind T. The strict mode decides or declines them.}}
+}
+
+\p{The findings E1-F1 to E1-F7 came from the same method, applied by the agent that brought eager reduction to the machine: 67 hostile exports with official verdicts, of a shape that no earlier suite had.}
+
+\p{The first review stated the lesson that all later ones repeat: the machine had answered from something that is true in the theory, and the official comparison is neither a congruence, nor transitive, nor a function of the pair alone. The question for a shortcut that must be exact is whether the official procedure gives this answer here, not whether the answer is true. Under the practical policy the default configuration is held to the weaker question, whether the answer is true, and the strict mode to the stronger one.}
+}
+
+\subtree[design-adversarial-review-limits]{
+\title{What none of the reviews established}
+
+\ul{
+\li{Nothing is mechanised. The verdicts rest on reading the code, on arguments and on attacks.}
+\li{Every run was the JVM launcher or in process, mostly with one worker. The native image was not attacked. No hostile export targets the scheduler, the sharing of check facts across workers or the publication of code under contention.}
+\li{The claim that one cache is the only source of history dependence in plain mode comes from reading the official source, with three confirming exports.}
+\li{No cost was measured for any exact treatment.}
+\li{Shapes without a hand-written attack on the case trees: strings, quotients, mutual and nested inductive types, \code{Acc.rec}. No export forces the cut of a speculative segment on purpose.}
+\li{The 40 kind T accepts that the candidate default shows on the earlier suites are classified by family, not certified one by one. The typed bindings were exercised by the rows of the second pass and not attacked on their own.}
+}
+}
+
+\p{Related: [the divergence classes](design-official-divergence), [the gate](design-gate), [the default switch set](dec-LZFX), [the derived rules stay off](dec-MOCU). Source: [the machine session](ses-Z72N) for package S and [the exactness session](ses-874D) for the others.}

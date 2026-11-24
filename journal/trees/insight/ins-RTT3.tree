@@ -1,0 +1,29 @@
+\title{82 to 99.5 percent of the tabling records of evaluation are never found again}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/X1.md}
+\import{base-macros}
+
+\p{Source: the scout report \src{docs/research/profiles/X1.md}; [the profiling session](ses-JRSD). A census of every record and run the machine makes: who made it, was it ever found again, who holds it. JVM launcher, one worker, the tree of the machine as it was at 15:09Z on 2026-11-24.}
+\ul{
+\li{The largest class of records everywhere is the tabling record of evaluation: 25 percent of all records on the Cedar slice, 35 percent on Init, 43 percent on reachability, and still 22, 30 and 39 percent under \code{\verb~|warm,gated,expect~}. Between 82 and 99.5 percent of them are never found again, and each also cost a pruning of the environment and often a frame.}
+\li{On reachability 97.5 percent of all records are never found again.}
+\li{So what is unshared is the memo key, not the value. The prototype \code{\verb~|once~} puts one bit of visit count per tabling key in a Bloom filter outside the store: the first evaluation of a key makes no frame and no record, the second is tabled as before, so a key is evaluated at most twice. It is 117 lines in one file.}
+}
+\table{
+\tr{\th{\code{\verb~|once~} against the plain machine}\th{Cedar slice}\th{Init}\th{Std}\th{con-leche}\th{reachability}}
+\tr{\td{records}\td{-18 percent}\td{-30 percent}\td{-28 percent}\td{-29 percent}\td{-41 percent}}
+\tr{\td{steps}\td{+5.8 percent}\td{+5.4 percent}\td{+5.7 percent}\td{+5.3 percent}\td{+0.7 percent}}
+}
+\ul{
+\li{Warm check time, last pass of a process on quiet cores: reachability -27 percent against the plain machine, 5,687 to 4,143 ms, and -29 percent against \code{\verb~|warm,gated,expect~}, 5,585 to 3,972 ms. Peak RSS of the JVM on reachability falls from 3,052 to 1,533 MiB.}
+\li{Init under \code{\verb~|warm,gated,expect~}: about -6 percent, one process. Cedar slice, and Init against the plain machine: no resolved change. The gain is where sessions are large; where they are small it is memory only.}
+\li{Accepted, rejected and declined counts are equal with the switch off and on in all 28 counter runs of six corpora, and the per-declaration comparison against the reference engine shows no difference.}
+\li{Not established: 8 workers, the native image, more than three passes, the large corpora. The patch was handed to the owner of evaluation and had not been measured against the later default switch set.}
+}
+\p{The companion verdict of the same census is [in-place reuse has nothing to bite on](ins-6HMY).}
+\p{See also: [evaluation and tabling](design-evaluation-and-tabling).}

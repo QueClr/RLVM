@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:36Z}
+\title{Truffle tier: hot blocks of the code tier compiled behind the switch \code{\verb~|t2~}}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{truffle-tier}
+\tag{unreleased}
+\tag{truffle}
+\meta{release}{Unreleased}
+\meta{commit}{695edc1}
+\import{base-macros}
+
+\p{The machine got a hook for a compiled tier: an abstract tier per machine, installed through a service, that may run a block of the code tier and return a result, a signal or a miss, with heat counters kept apart. \code{\verb~|rlvm-truffle~} implements it with Truffle nodes and is used only under the switch \code{\verb~|t2~}, which is off by default. Correctness first: on the prelude export with every block compiled at its first entry, 3,937 blocks, the heap digests, ticks and outcomes are identical at every unit; one block is refused by the compiler as too large and stays in the stepper. The native image builds with the tier.}
+
+\p{The first measurements were not usable. On a host where the CPU time of identical work moved by 1.5 to 2 times within twenty minutes, rows of sequential configurations cannot be compared; in the one run that isolated it, the promoting tier was 55 to 80 \% slower than the base tier in the native image, cause not established at that point.}
+
+\p{Detail: \src{rlvm-truffle/NOTES-T2.md}, \src{rlvm-truffle/README.md}. Commit \commit{695edc1}. Session: [profiles and prototypes](ses-JRSD).}

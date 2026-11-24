@@ -3,7 +3,39 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/soundness-default-set.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. The switch \code{k2} is off, is not part of the list \code{all}, and is not a candidate for the default set as built.}
+
+\p{\strong{Context.} Derived rules are the second level of the reduction role of a constant ([code objects and tiers](design-code-objects-and-tiers)). Where a definition has no case tree that can be read off its value, the machine partially evaluates the weak-head normal form of the constant applied to opaque arguments, splits on the argument that a stuck recursor or projection waits for, and keeps the normal forms as leaf templates; a later application substitutes its actual arguments. The model is the derived rules of the leading checkers, worth 1.9 times on reachability and 1.6 to 10 times on the evaluation tests of the arena, and 1.00 to 1.06 times on the library corpora. Since the case trees of the code tier take case analysis, what is left for derived rules is structural recursion, projection functions and wrappers.}
+
+\p{The design review had set conditions before the switch may be on (\src{docs/design/RECONCILIATION.md} section 2): the variables of a derivation are a dedicated kind of value, and any type-directed judgment or any undecided answer on such a variable abandons the derivation. As built the conditions are not met to the letter (\src{rlvm-machine/NOTES-M3.md}, deviation D17): a derivation variable is a free variable of a reserved type that no binder can have, and a type-directed judgment on it gets the answer "no" or fails, instead of ending the derivation. Rules are grown lazily, are local to a session and are never published. A rule is made for a definition without a case tree that weak-head normalisation unfolded 32 times in a session, inside a declaration that has run 16,384 ticks.}
+
+\p{The gains were real and small. Native image built with \code{-O3}, arena-shaped container, one worker, three interleaved pairs, \code{k2} together with \code{directrules} against \code{warm,gated,expect,probes,code,casetrees} at a session cap of 4 MiB, median CPU time: reachability 1.49 to 1.42 s (-4.7 \%), Cedar slice -1.6 \%, Init -0.7 \%, Std -0.7 \%; on the evaluation test \code{perf/magma-list-deep-n36} 12.57 to 1.42 s and 1,603 to 166 MiB of peak memory (one run each, on the loaded host). Every differential gate against the reference engine was clean, also in a stress mode that makes a rule at the first unfolding, and so was the first hostile suite. \code{directrules} has since entered the default set on its own.}
+
+\p{\strong{The finding (S3-F6).} The adversarial review of the default set attacked \code{k2} with the official checker of Lean v4.36.0 as ground truth. The argument for derived rules is that a leaf is a reduct of the application by official steps and that reduction commutes with substitution. The second half is false for every step that is decided by a comparison, because the official \code{\verb~|is_def_eq~} is not stable under substitution. Take an axiom and a definition:}
+
+\pre{\verb~|
+axiom E : forall x, t x = s x
+def c x := Eq.rec (motive := fun _ _ => Nat) 7 (E x)
+~}
+
+\p{In the derivation the K rule fires: under the variable, the comparison of \code{\verb~|t x = s x~} with \code{\verb~|t x = t x~} succeeds, so the leaf is the constant 7 and the rule answers that \code{c 0} is 7. Officially the comparison fails for the argument 0 and \code{c 0} is stuck. On the export \code{s3-k2-krule-subst-hot-bad}, one theorem that first makes \code{c} hot, the official checker and the reference engine reject, the default set rejects, and the default set with \code{k2} accepts, with the default thresholds. The accepted statement is derivable (the review gives the certificate, the same statement with the step written out, which the official checker accepts), so the finding is of kind T in the terms of [the exactness contract](design-exactness-contract). The same family gives a wrong reject of \code{k2} alone: weak-head normalisation answers through the rule and lazy delta uses no rule, so the machine disagrees with itself, and only the pipeline's re-check repairs the verdict. With test thresholds the rules also skip memos that the generic walk leaves.}
+
+\p{\strong{Decision.} \code{k2} stays off. The orchestrator of the project decided it on the evening of 2026-11-24, on the reviewer's finding and before the owner chose practical exactness; under that policy it is still listed as not tolerated in [accepted risks](accepted-risks-divergence). As built it cannot be made exact by tuning thresholds.}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{Reachability and the evaluation tests keep the cost stated above. Most of the gain on closed evaluation had already been taken by case trees that inline their matchers; the rules add the last 5 \% there.}
+\li{A next attempt needs, in this order: no step of a derivation may be decided by a comparison or a type-directed test that mentions a derivation variable (the node is abandoned, or made a leaf at the term before that step), which is what the reconciliation asked for; what is then left (beta, unfolding, recursor rules on constructor forms, projection of a constructor, literal folds on closed operands) does commute with substitution; a rule must not change which answers lazy delta and weak-head normalisation give for one value, and must leave the memos the generic walk leaves; and the review's rows become strict rows of the hostile suite, with a new adversarial pass before any gate is read. Nothing in the review says that the gains cannot be had under these conditions.}
+\li{It is one of the cases behind the rule that [no switch enters a default set without an adversarial pass](dec-QN1O): every differential gate on the corpora and the hostile suite of the time were green with \code{k2} on.}
+}
+
+\p{Detail: \src{docs/design/review/soundness-default-set.md} sections 3 and 7; \src{rlvm-machine/NOTES-M3.md} (D17 and the measurements of wave 6); \src{rlvm-machine/SWITCHES.md}, row \code{k2}; \src{docs/design/ISA.md} section 3.6. Sources: [machine speed](ses-CVTE) for the switch and its measurements, [exactness](ses-874D) for the review.}

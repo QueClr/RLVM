@@ -1,0 +1,24 @@
+\title{The cost of one machine operation: 2.6 times the instructions of gruszka per step}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/P8.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The number.} With the two proof-comparison shortcuts the machine does about the number of operations gruszka does, 1.1 to 1.5 times its steps, and needs 2,133 instructions per step on Mathlib against 823, and 4,200 instructions per record against 1,416 per interned value. On con-leche it is 1,979 against 793 without any shortcut. Native image, one worker, counts inside the checks. Source: \src{docs/research/profiles/P8.md}, section 4.6, and \src{docs/research/profiles/P9.md}, section 4.6; see [what remains is uniform](ins-6PEU).}
+\p{\strong{Where it is.} In the flat profile of the native image, hash-consing of values is 15.5 to 23.1 percent of the instructions, evaluation 14 to 18, inference 11 to 18, the stepper of the code blocks 4 to 10, the walks of \code{\verb~|same~} 4 to 8. On the JVM the time is in table probes, not in code shape, see [what C2 runs into](ins-RMUN). In CPU time the ratio is smaller than in instructions, because the machine retires more than twice the instructions per second of gruszka.}
+\p{\strong{What was tried or designed.}}
+\ul{
+\li{One bit per tabling key, so that a key is tabled from its second evaluation on: -18 to -41 percent of the records and -27 percent of warm check time on reachability with one worker; not measured with 8 workers nor against the later default set. See [tabling records](ins-RTT3).}
+\li{[Identity on demand](ins-PMD4) for applications: a gain on reachability, none on the library corpora by design of its trigger.}
+\li{Designed and not built, in \src{rlvm-machine/NOTES-M1.md}: inline frames of one or two slots and inline arguments of neutral applications; sparse frames for long environments, which would take the Cedar slice from 12,832 to about 6,100 run words per declaration; a young set in front of the tables for giant sessions.}
+\li{Rejected by measurement: [in-place reuse](ins-6HMY), [a call instruction](ins-1SLM), [overlapping the cache misses](ins-POOB), [compiling blocks](ins-KLLU).}
+}
+\p{\strong{What would close it.} By the arena rule, place 4 on the board would need this cost to fall by a factor of about 3 on top of the shortcuts, see [the arena dry run](ins-6OVD). For the project metric the measure is warm wall clock with 8 workers on Mathlib and on con-leche, the corpus where nothing else is left.}
+\p{See also: [the value model](design-value-model).}

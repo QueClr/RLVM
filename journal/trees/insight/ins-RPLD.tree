@@ -1,0 +1,26 @@
+\title{Eight busy cores make each of them 5 to 7 percent slower: the ceiling of the host is 7.6 to 7.9 times}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P7.md}, section 5; [the profiling session](ses-JRSD). A measurement-only option makes a one-worker process check one of eight shards of the units. Eight such processes, each pinned to one of the eight measurement cores, against one process with eight workers; native image, machine with \code{\verb~|warm,gated,expect~}, check-only passes over Mathlib.}
+\table{
+\tr{\th{}\th{Wall clock of the pass}\th{CPU}}
+\tr{\td{8 one-worker processes at once, per shard}\td{23.7 to 31.2 s, mean 26.8 s}\td{sum 213.0 s}}
+\tr{\td{shards 0 and 4 alone on their core}\td{23.89 and 22.21 s; at once 25.14 and 23.71 s}\td{at once 5.2 and 6.7 percent more}}
+\tr{\td{one process, 8 workers}\td{27.9 to 28.7 s}\td{workers 209.5 to 212.7 s}}
+}
+\ul{
+\li{One process costs no more CPU than eight: 210 to 213 s either way. Nothing that the workers share, store pages, the fact store, the scheduler, the verdict board, shows up as CPU.}
+\li{Eight busy cores make each of them 5 to 7 percent slower, through memory bandwidth and the shared cache; the store is 2.1 GB of mostly random reads. That is the growth of the worker CPU from 201 s with 2 workers to 213 s with 8.}
+\li{The ceiling for a check-only pass over Mathlib is therefore about 26.6 s, 7.6 to 7.9 times one worker. One process with 8 workers is 5 to 8 percent above it: the collections, which eight separate heaps do not share, and the noise of the host.}
+\li{A static split is worse than the scheduler: the shards differ by 30 percent, so eight independent processes end after 31.2 s.}
+\li{Std and cedar show the same: no CPU lost to sharing a process, 7 to 13 percent above the ceiling.}
+}
+\p{See also: [the driver](design-driver).}

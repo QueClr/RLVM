@@ -1,0 +1,20 @@
+\title{Timings from a loaded host are not evidence: the quiet-core method}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{performance}
+\meta{origin}{bench/README.md}
+\import{base-macros}
+
+\p{Source: \src{bench/README.md}, section "Timing on a busy host"; the cases are from \src{docs/research/profiles/P7.md}, \src{docs/research/profiles/GC.md} and \src{rlvm-truffle/NOTES-T3.md}; [the profiling session](ses-JRSD). The development host has 20 cores and was oversubscribed several times by the builds and tests of the team, with load averages of 45 to 140 and up to 250.}
+\ul{
+\li{\strong{The method.} A wall-clock number is evidence only when it was taken through \code{\verb~|bench/quiet.py~}: one measurement at a time on the host, and while it runs every other process of the session and every other container is moved off the 8 measurement cores and put back afterwards. Nothing is paused. Every window is logged.}
+\li{\strong{What it does not remove.} Memory bandwidth and the shared cache are still shared with the other 12 cores, so compare runs taken in the same window. What leaks onto the measurement cores shows as run-queue time of about 5 percent in rows with 8 workers; the driver measures it.}
+\li{\strong{Case 1.} On the loaded host the machine checked Mathlib with 8 workers in 80 s of wall clock for 278 s of CPU, a speed-up of about 3.4, and 4 workers were no slower. On quiet cores the check phase scales 6.9 times: the 3.4 was the host.}
+\li{\strong{Case 2.} A reported loss of 55 to 80 percent of the Truffle tier on the native image was process CPU on the open host, which adds the compiler threads and a factor of 1.5 to 2 between runs minutes apart. In a quiet window the tier costs 3 to 4 percent there.}
+\li{\strong{Case 3.} Instruction counts are never inflated by contention; CPU time and wall clock are. Between the runs of one three-run entry of the benchmark tables CPU time differs by up to 12 percent.}
+}
+\p{Rules that follow: say for every time whether it is from a quiet window; give single runs as single runs; read differences below 3 percent as nothing, and below 8 percent between two JVM processes of one configuration as scatter.}
+\p{See also: [the measurement method](design-measurement-method).}

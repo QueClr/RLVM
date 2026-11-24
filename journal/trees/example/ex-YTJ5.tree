@@ -1,0 +1,32 @@
+\title{The order-dependence pair: \code{\verb~|a = (f intro).1~} against \code{\verb~|b = (f h).1~}}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{reference-engine}
+\tag{machine}
+\meta{origin}{docs/design/review/soundness-default-set.md}
+\import{base-macros}
+
+\p{One comparison whose official answer depends on what the kernel reduced earlier in the same declaration. Source: the adversarial review of the default switch set, \src{docs/design/review/soundness-default-set.md}, section 2; [the exactness session](ses-874D). Official verdicts from Lean v4.36.0.}
+\pre{\verb~|
+-- A, intro, h as in the triple
+structure B where n : Nat
+def f (x : A) : B := B.mk (And.rec (fun _ _ => 5) x)       -- regular
+-- a := (f intro).1        b := (f h).1
+axiom use : forall (P : Prop), P -> True
+
+-- each line is the value of ONE theorem; arguments are checked left to right
+Eq.refl a : a = b                                                    -- official: accept
+And.intro (use (a = 5) (Eq.refl 5)) (use (a = b) (Eq.refl a))        -- official: REJECT
+And.intro (use (a = b) (Eq.refl a)) (use (a = 5) (Eq.refl 5))        -- official: accept
+~}
+\ul{
+\li{The cheap form of \code{\verb~|whnf_core~} leaves both projections stuck, and the projection step of lazy delta compares \code{\verb~|f intro~} with \code{\verb~|f h~}: same head, arguments by proof irrelevance, so \code{\verb~|a = b~} holds.}
+\li{The full \code{\verb~|whnf_core~} gives \code{\verb~|5~} for \code{\verb~|a~} and the stuck recursor for \code{\verb~|b~}: then \code{\verb~|a = b~} fails.}
+\li{Which of the two the kernel computes depends on whether its cache \code{\verb~|m_whnf_core~} has an entry for the term \code{\verb~|a~}. The cache is read by every call, also the cheap ones, and written only by the full ones. Comparing \code{\verb~|a~} with \code{\verb~|5~} first runs the full reduction and leaves the entry.}
+\li{On these three exports the reference engine and the plain machine agree with the official checker. The machine differs on variants in which the pair is asked again for what the official caches take as a new pair of terms and the machine as the same pair of values: \code{\verb~|s3-wc-pos-beta-bad~} and \code{\verb~|s3-wc-canon-fvar-bad~} are rejected officially and accepted by the machine in every switch set.}
+}
+\p{Used by [the official answer depends on the cache order](ins-PO1G); the same pair is the probe behind [the duplicated record](ex-7CCC) and [the metadata node](ex-4B5D).}
+\p{See also: [where the verdict of the machine can differ](design-official-divergence).}

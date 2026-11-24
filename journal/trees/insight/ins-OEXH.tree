@@ -1,0 +1,21 @@
+\title{On a mid-size corpus one declined unit decides when the 8-worker run ends, and size predicts cost}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P7.md}, sections 4 and 6; the figures with the switch \code{\verb~|eager~} are from \src{docs/design/review/eager-reduction.md}, section 7.3; [the profiling session](ses-JRSD). Native image, machine with \code{\verb~|warm,gated,expect~}, quiet cores.}
+\ul{
+\li{Std with 8 workers is bounded by one unit. Unit 23249 is the largest proof of the file, 76,204 block nodes; the machine declines it and the reference kernel re-checks it: 0.7 s on a quiet core, 1.09 s when ten threads share eight cores. The 8 workers have 1.5 s of CPU each.}
+\li{The former scheduler cut a later pass into 8 contiguous eighths; the unit sat near the end of its eighth and started at 1.4 s of a run that could have ended at 1.5 s. With slices of 256 units that an idle worker takes for itself, check-only passes of Std with 8 workers go from 2.15 to 2.18 s to 1.67 s, median of 20. Mathlib and cedar do not change.}
+\li{Size predicts cost: on Std the two slowest units are the two largest, 9 of the 12 slowest are among the 40 largest of 100,096, and the rank correlation of size and machine steps is 0.83.}
+\li{No unit and no chain bounds Mathlib: the slowest unit takes 2.15 s, the heaviest holds 0.2 percent of the steps.}
+\li{With the switch \code{\verb~|eager~} the machine keeps unit 23249 and needs 154 ms where the reference engine needs 1,100 ms, measured in-process on a loaded host as an orientation.}
+}
+\p{The unit is one of [the eager-reduction declines](ins-47IQ).}
+\p{See also: [the driver](design-driver).}

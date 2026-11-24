@@ -1,0 +1,21 @@
+\title{An evaluator that types values cannot match a kernel that types unreduced terms}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\meta{origin}{docs/design/review/official-divergence.md}
+\import{base-macros}
+
+\p{Source: \src{docs/design/review/official-divergence.md}, section 1, and the notes on E1-F1 to E1-F7 in \src{rlvm-machine/NOTES-M5.md}; [the exactness session](ses-874D).}
+\ul{
+\li{The official kernel types a bound variable by the declared type of its binder, and it infers the type of terms it has not reduced. The machine binds a variable to a value and types values, so it can use a type that is only convertible with the official one. Because [the official comparison is not transitive](ins-4VH2), a convertible type can give another verdict.}
+\li{Seven shapes were found on 2026-11-24 with new hostile exports. Six now get the official verdict or a decline: the let rule, the type of a lambda instantiated with an argument of another type, the comparison variable of a binder comparison, the expected-type rule and its memo, and the K rule on an applied let variable, which is declined.}
+\li{The fixes cost almost nothing: the typed bindings nothing measurable, and the restriction of the expected-type rule to one domain value 2.4 percent of the steps of the Cedar slice, 0.3 percent of those of Std, Init and 16 Mathlib slices, and nothing measurable in warm wall clock.}
+\li{The seventh, E1-F7, is intrinsic. The official kernel infers the type of the raw major premise in the K rule and of the structure of a stuck projection; that type goes through the declared domain of an uncontracted beta redex and the declared type of a let variable. On values the redex is contracted. An exact treatment needs the type of a suspension to be the inferred type of its term, and a suspension never to be replaced by its known value where it stands for an argument. It was not built.}
+\li{Decline rules instead would cost 322 of 425,620 units of the Mathlib slices and 12 of 100,096 of Std, and would not cover the shapes without a \code{\verb~|let~}.}
+}
+\transclude{ex-GZ3D}
+\p{The class cannot produce a false accept: every step the machine takes is a conversion that holds in the theory, the definitional equality of the theory is transitive and typing is closed under it. It was the reason the machine lost its place as default engine for the evening, see [making the machine the default engine](prob-W2FV).}
+\p{See also: [inference shortcuts and typed bindings](design-inference-shortcuts); [where the verdict of the machine can differ](design-official-divergence).}

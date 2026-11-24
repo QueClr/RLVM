@@ -1,0 +1,28 @@
+\title{The same claim with a recursor at the head: \code{\verb~|R I = R h~} is rejected officially}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\meta{origin}{docs/design/review/soundness-shortcuts.md}
+\import{base-macros}
+
+\p{The first equation of [the triple](ex-OTWJ) is accepted officially only because its head is a definition with a regular hint. With the recursor itself at the head, with an abbreviation or with a theorem at the head, the official checker rejects the same true statement. Source: \src{docs/design/review/soundness-shortcuts.md}, section 4, and finding S-F1 of \src{docs/design/review/soundness-machine.md}; [the exactness session](ses-874D).}
+\pre{\verb~|
+-- I = And.intro True True True.intro True.intro,  h : And True True  an axiom
+-- R x = And.rec (motive := fun _ => Nat) (fun _ _ => 5) x
+
+theorem b1 : R I = R h                       -- official: reject
+theorem b2 : F I = F h   -- F := fun x => R x, an abbreviation: official: reject
+theorem b3 : Nat.succ (R I) = Nat.succ (R h) -- official: reject
+theorem ok : G I = G h   -- G a definition with a regular hint: official: accept
+~}
+\ul{
+\li{Officially the left side reduces to \code{\verb~|5~} before anything is compared, the right side stays stuck, and \code{\verb~|5~} against a stuck recursor is false. The arguments of two applications of one head are compared first only for a definition with a regular hint.}
+\li{The machine without the shortcuts rejects all three, as the official checker does. With the option \code{\verb~|congruence~} it accepts them: \code{\verb~|I = h~} by proof irrelevance, then congruence under the head.}
+\li{gruszka accepts all 14 exports of this class that the review tried; nano-lean accepts 6 of them, the ones whose head can be unfolded.}
+\li{For each of the 15 statements of the class the review wrote the congruence step out as a term, \code{\verb~|Eq.rec~} over an \code{\verb~|Eq.refl~} between the two proofs, and the official checker accepts all 15. The statements are theorems; the official procedure only fails to find the equation.}
+}
+\p{Used by [the two shortcuts are sound in the theory](ins-T1F1).}
+\p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

@@ -1,0 +1,31 @@
+\title{Units that enter eager reduction are 1 percent of the units and 10 to 12 percent of the worker time}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{reference-engine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P8.md}
+\import{base-macros}
+
+\p{Sources: \src{docs/research/profiles/P8.md}, section 4.3; \src{docs/research/profiles/P7.md}, finding P7-F3; \src{docs/research/profiles/P9.md}, section 4.3; \src{docs/design/review/eager-reduction.md}; [the profiling session](ses-JRSD). Machine as primary engine, native image.}
+\p{The machine declines every declaration that enters eager reduction, for exactness; see [eager reduction is a mode](ins-O23C). The reference engine then checks it at its own speed. These are also the heaviest proofs of Mathlib for both leaders.}
+\table{
+\tr{\th{Corpus}\th{Declined units}\th{Share of the worker time}\th{Conditions}}
+\tr{\td{Mathlib}\td{6,711 of 714,712, 0.94 percent}\td{11 to 12 percent: 23.5 s against 177.7 s for the other 708,001 units}\td{one worker, thread CPU in a loaded container, so indicative}}
+\tr{\td{cslib}\td{2,406, 0.6 percent}\td{12.6 percent: 5.89 s of 46.6 s}\td{one worker, quiet cores}}
+\tr{\td{navier-stokes-euler}\td{251, 0.2 percent}\td{1.5 percent}\td{one worker, quiet cores}}
+\tr{\td{con-leche}\td{88, 0.2 percent}\td{2.9 percent}\td{one worker, quiet cores}}
+\tr{\td{Std}\td{203}\td{13.2 percent of the time in units, unit 23249 alone 7 percent}\td{the default set of wave 6, one worker}}
+\tr{\td{cedar}\td{423}\td{11.1 percent of the time in units}\td{the same}}
+\tr{\td{Init}\td{164}\td{4.1 percent of the time in units}\td{the same}}
+}
+\ul{
+\li{For gruszka the same Mathlib units are 6.3 percent of its corpus and 3.5 s.}
+\li{Each unit is declined twice, in the warm attempt and in the cold retry of the driver; the second decline costs the machine nothing.}
+\li{With several workers these units are also the longest of the run; see [one heavy unit](ins-OEXH).}
+\li{The switch \code{\verb~|eager~} keeps them on the machine: declines go from 164, 203, 423, 8 and 6,711 units to 0 on Init, Std, cedar, reachability and Mathlib, at 2.5 to 4.4 percent more machine steps. Warm wall clock with 8 workers on the JVM launcher, check-only passes, two rounds on quiet cores: Std -11 and -22 percent, cedar -7 and -10 percent. Mathlib, the native image and one worker were not measured.}
+}
+\p{The switch was published on 2026-11-24 and is off by default; see [eager reduction on the machine](prob-8MJ2).}
+\p{See also: [eager reduction on the machine](design-eager-reduction).}

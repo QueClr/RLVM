@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:31Z}
+\title{Value store stage A: a cheaper frame probe}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\tag{levels}
+\meta{release}{Unreleased}
+\meta{commit}{57b89b9}
+\import{base-macros}
+
+\p{The hottest function of the generic tier was the pruning of an environment to the slots a term reads, 12 to 24 \% of the process. Stage A hashes only the kept slots, keeps a count in the frame header, caches the chain of outer bindings and gives neutral applications a sum hash; what is computed does not change. User instructions of the generic tier in the native image: Init 139.0 to 131.2 G, Std 223.2 to 209.9 G, Cedar slice 47.0 to 38.8 G (-17 \%), reachability 59.4 to 56.8 G. CPU time with one worker, native image at \code{\verb~|-O3~} in the arena-shaped container, median of two interleaved runs under a load average of 58 to 79: Init 7.99 to 7.36 s (-7.9 \%), Std 13.40 to 12.30 s (-8.2 \%), Cedar slice 3.38 to 2.69 s (-20.4 \%), reachability 8.19 to 8.12 s. The four corpora stayed clean against the reference engine. The same publication made the machine compare universe levels with the official relation.}
+
+\p{Detail: \src{rlvm-machine/NOTES-M1.md}. Commit \commit{57b89b9}. Session: [machine speed and pipeline](ses-CVTE).}

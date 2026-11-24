@@ -1,9 +1,72 @@
-\title{The reference engine}
+\title{The reference engine: the official kernel on term ids}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{reference-engine}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{rlvm-ref/README.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented in \code{rlvm-ref}. It is the default engine of a distribution today, the re-check engine of every run, and the strict mode.}
+
+\p{The reference engine is a straight port of the type checker of the official Lean 4 kernel, v4.36.0, function by function: inference in check and infer-only mode, the two weak-head normalisers with the cheap flags, delta with the Nat extension, quotients, iota with the K rule and structure eta, projections, and the definitional equality test with the exact official order of steps. It works on the ids of [the term store](design-term-store) and opens binders with free-variable nodes in the worker's overlay. It is a complete engine, not a helper, which is why the pipeline could be built and tested before the machine existed.}
+
+\subtree[design-reference-engine-roles]{
+\title{Its roles}
+
+\ul{
+\li{\strong{The environment pass.} Every judgment of the admission of inductive blocks and of the quotient package is asked of it ([admission](design-inductive-admission)).}
+\li{\strong{The re-check engine.} When the machine is the primary engine, every rejection it issues is confirmed by a cold check here before it counts, and every unit it declines is decided here ([the verdict protocol](design-verdict-protocol)).}
+\li{\strong{The oracle} of the differential engine and of the kernel-level differential tests ([the gate](design-gate)).}
+\li{\strong{The default engine.} It was the primary engine until the machine existed, and it is the default again while the machine is not ([dec-T79V](dec-T79V)); \code{\verb~|-X engine=reference~} selects it explicitly.}
+\li{\strong{The strict mode.} \code{\verb~|-X policy=strict~} selects this engine whatever the priorities say and turns on its exactness option ([the exactness contract](design-exactness-contract)).}
+}
+}
+
+\subtree[design-reference-engine-invariants]{
+\title{Invariants}
+
+\ul{
+\li{\strong{Official control flow.} Every strategy decision is the official one: the order of the steps of the equality test, which side lazy delta unfolds, when arguments are compared, when Nat literals are folded, what each cache stores and when it is consulted. No shortcut the official kernel lacks, no union-find, no negative cache.}
+\li{\strong{Canonical terms.} Every term that enters the kernel is first copied into the overlay through the hash-consing constructors. Structural equality is then identity of ids, and the seven official caches are integer tables keyed by id that hit exactly where the official structural keys hit. Soundness never rests on this: a pair the id test misses is decided by the rest of the procedure.}
+\li{\strong{Nothing a declaration learned survives it.} The caches are cleared, the overlay is cut back to its mark and the computed literals are released after each declaration, so a verdict is a function of the store and the constant.}
+\li{\strong{Official results.} Weak-head normalisation returns the official term, which the regeneration of recursors relies on.}
+\li{\strong{Every judgment ends.} It recurses like the original and counts depth; beyond the limit, or when a reduction loop returns to a state it was in, the judgment is declined. The two arena tests on which the official checker does not terminate are declined in 0.2 s. If the caller's stack is too small, the declaration runs again on a helper thread with a 1 GiB stack, so a verdict does not depend on the caller's thread.}
+}
+
+\p{Three deviations change the steps taken but not the terms compared, returned or cached: an unfolding followed by its normalisation is done without building the intermediate application; the types of application prefixes are kept as pending pairs and built when first looked up; and the cache tables are resized to fit what a declaration used. The last two were added in a later wave without changing what the kernel does: Mathlib, 714,712 declarations, takes 1,603,710,091 steps before and after.}
+}
+
+\subtree[design-reference-engine-settings]{
+\title{Settings that change a verdict}
+
+\ul{
+\li{\code{\verb~|-X levels=official~} is the default: universe levels are compared with the official, incomplete algorithm. \code{\verb~|-X levels=complete~} is the opt-in. See [dec-P8XP](dec-P8XP) and [universe levels](design-universe-levels).}
+\li{\code{\verb~|-X ref.exact=off~} is the default, the practical policy: the engine never declines for the sake of agreement on adversarial files. \code{\verb~|-X ref.exact=official~}, which the strict policy sets, gives the official verdict or none where that verdict depends on object identity. See [the cache audit](design-reference-caches).}
+}
+}
+
+\subtree[design-reference-engine-cost]{
+\title{What it costs}
+
+\p{In a run whose primary engine is the machine, the reference engine executes the environment pass and the re-checks only. As primary engine it is the slow, exact path. Warm wall clock with 8 workers and pipelined loading, median later pass of one process, on quiet cores of the aarch64 development host (first warm table of 2026-11-24):}
+
+\table{
+\tr{\th{Corpus}\th{JVM launcher}\th{Native image}}
+\tr{\td{Init}\td{1.70 s}\td{2.34 s}}
+\tr{\td{Std}\td{2.74 s}\td{3.92 s}}
+\tr{\td{cedar}\td{3.62 s}\td{4.86 s}}
+\tr{\td{reachability}\td{3.96 s}\td{4.83 s}}
+\tr{\td{Mathlib}\td{68.58 s}\td{not in that table}}
+}
+
+\p{For comparison, the machine with its default switch set later measured 21.23 s on the JVM launcher and 27.43 s in the native image for a warm pass of Mathlib. Cold, with the JVM launcher in the arena-shaped container on a loaded host, Mathlib with 8 workers took 549.1 s of CPU time and 132.8 s of wall clock at a 13.17 GB peak resident set (median of three runs). In this kernel CPU time follows the size of the tables probed per term, not the number of instructions: a table of imported constant terms that outlives a declaration saved 3 to 8 \% of the instructions and cost up to 7 \% of the CPU time on Mathlib, and is off by default.}
+
+\p{Gates of the published engine: the 230 arena tests all correct with no decline; 17,775 mutants in four corpora with no soundness and no completeness difference from the official verdicts (16,092 agree, 1,683 declined). Known gaps: the rules of Lean 4.37 are not implemented; the peak resident set of one heavy declaration is 3 to 4 times the bytes in use.}
+}
+
+\p{Detail: \src{rlvm-ref/README.md}; the design is section 5 of \src{docs/design/ARCHITECTURE.md}; the numbers are from \src{docs/BENCHMARKS.md}. Source: [the session that built the pipeline](ses-BQZM) and [the exactness session](ses-874D).}

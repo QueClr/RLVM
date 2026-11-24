@@ -1,1 +1,20 @@
-\date{2026-11-24T23:09:33Z}
+\title{Load phase 20 to 28 \% shorter with the same instructions}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{loader-store}
+\tag{unreleased}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{93e45d4}
+\import{base-macros}
+
+\p{The loader no longer reads its location table for every reference to an earlier record as the record arrives. Such references are stored as pending and resolved in one tight loop at the declaration line, where the cache misses overlap instead of queueing; the table is 428 MB on Mathlib. A touch hint announces earlier shared terms that are about to be named as children. In the store the promotion memo became a direct map from record number to shared id in chunks, where it had been one miss per question in a 256 MB hash table. The store that is built is identical word for word, shown by a digest over all 12,260 tutorial mutant files.}
+
+\p{Load phase on one thread, native image at \code{\verb~|-O3~} in the arena-shaped container, CPU, under a host load average of 107 to 111: Init 844, 885 and 892 ms before against 681, 673 and 667 ms (-24 \%), Std 1,377 and 1,410 ms against 1,102 and 1,136 ms (-20 \%), Mathlib 17.18 s against 12.40 s (-28 \%, one run each). Instructions are unchanged (Mathlib 132.3 against 133.1 G): the gain is cache misses.}
+
+\p{Detail: \src{rlvm-load/README.md}, \src{rlvm-store/README.md}. Commit \commit{93e45d4}. Session: [machine speed and pipeline](ses-CVTE).}

@@ -1,0 +1,25 @@
+\title{Garbage and the stop-the-world collector in the native image}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{gc}
+\tag{platform}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The question.} The native image of GraalVM CE has only the serial collector and Epsilon. [Every pause stops all workers](ins-561G): 10 percent of a pipelined Mathlib run with 8 workers, and the 5 to 8 percent between one process and [the hardware ceiling](ins-RPLD). The image is the binary of the arena definition; the JVM launcher, whose young generation of 1 GB makes collections rare, is the faster platform once warm.}
+\p{\strong{What is known.}}
+\ul{
+\li{A larger young generation does not help in the image, because each collection copies the live session arrays.}
+\li{[The garbage of the machine](ins-2ELY) is the sessions that outgrow the kept slabs. A process-wide pool for those arrays, a prototype, takes 4.8 percent off a warm Mathlib pass; the published machine pools its session arrays per machine, finding F25 of \src{rlvm-machine/NOTES-M6.md}. The pause share on Mathlib stayed near 10 percent: softly held arrays are taken back by every complete collection of a heap that is 2.8 GB live.}
+\li{61 percent of the bytes of the workers are the reference kernel re-checking the units the machine declines. Keeping those units on the machine, see [eager reduction on the machine](prob-8MJ2), removes most of that at the source.}
+\li{Publishing a large file in fewer pieces [cut the garbage of the pipelined load](ins-E1DU) from 36.9 to 20.9 GB.}
+\li{Not tried: slabs outside the Java heap. That needs every access to the record and run slabs to go through one accessor.}
+}
+\p{\strong{What would close it.} Collections under 2 percent of a warm 8-worker pass over Mathlib in the image, which was the target of the memory work and was not reached; or the decision that the warm platform is the JVM launcher and the image is only the cold binary. Source: \src{docs/research/profiles/P7.md}, section 8, and \src{docs/research/profiles/V1.md}.}
+\p{See also: [the decision on the two platforms](dec-WX9Z); [the decision that the Serial collector stays](dec-Z6DD).}

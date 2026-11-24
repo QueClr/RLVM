@@ -1,0 +1,31 @@
+\title{Sibling proofs: what a longer session answers, and what it costs}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P9.md}
+\import{base-macros}
+
+\p{Three consecutive proofs of con-leche with shared sub-terms. gruszka answers the later ones from what the first left in its session; the machine had reset its session at the cap of 1 MiB. Source: \src{docs/research/profiles/P9.md}, section 4.5; [the profiling session](ses-JRSD). Machine with its default switch set, native image, one worker, quiet cores.}
+\pre{\verb~|
+ConLeche.Model.ctorsLoopAt._proof_1_9
+ConLeche.Model.ctorsLoopAt._proof_1_10
+ConLeche.Model.ctorsLoopAt._proof_1_11
+~}
+\table{
+\tr{\th{}\th{\code{\verb~|_proof_1_9~}}\th{\code{\verb~|_proof_1_10~}}\th{\code{\verb~|_proof_1_11~}}}
+\tr{\td{gruszka, steps}\td{4,538}\td{427}\td{413}}
+\tr{\td{machine, cap 1 MiB, steps}\td{47,976}\td{44,847}\td{44,592}}
+}
+\p{With larger caps \code{\verb~|_proof_1_10~} falls from 44,847 to 10,170 and then 9,079 steps, and \code{\verb~|_proof_1_11~} from 44,592 to 498 and then 435. Over the whole corpus:}
+\table{
+\tr{\th{Session cap}\th{Steps on con-leche}\th{Thread CPU of the checks}}
+\tr{\td{1 MiB, the default}\td{74.2 M}\td{7.86 s}}
+\tr{\td{4 MiB}\td{67.4 M, -9.2 percent}\td{8.02 s}}
+\tr{\td{16 MiB}\td{62.0 M, -16.4 percent}\td{8.61 s}}
+\tr{\td{64 MiB}\td{58.6 M, -21.1 percent}\td{10.16 s}}
+}
+\p{The steps fall and the time rises: 139 and 174 ns per step at the two largest caps against 106 at 1 MiB. Used by [the best session cap is set by the cache, not by the step count](ins-FJ5R).}
+\p{See also: [warm sessions and the session cap](design-warm-sessions).}

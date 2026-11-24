@@ -1,0 +1,19 @@
+\title{Warm-up needs compiler threads: two of them share the cores with eight interpreting workers}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\meta{origin}{docs/research/profiles/J1.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/J1.md}, section 3, and the first warm table summarised in \src{docs/BENCHMARKS.md}; [the profiling session](ses-JRSD). JVM launcher, machine engine, 8 workers on 8 quiet cores.}
+\ul{
+\li{The launcher shipped with \code{\verb~|-XX:CICompilerCount=2~}. With eight workers on eight cores compilation shares the cores with interpreted checking: the first Init pass burns 35.6 s of CPU time for work that costs 6 to 8 s once compiled. With one worker the compiler has cores of its own and the first pass is already within 12 to 25 percent of steady.}
+\li{With \code{\verb~|CICompilerCount=8~} the cold wall clock below Mathlib halves: Init 4.1 to 5.3 s becomes 2.8 to 3.6 s, Std 5.5 becomes 3.1 s, cedar 9.9 becomes 5.2 s, reachability 4.0 becomes 2.5 s. Pass 3 is steady instead of pass 5 or 6.}
+\li{For measuring: five passes and the median of passes 2 to 5 understate the steady state on a corpus as short as Init, 1.60 s where the steady state is 0.96 s. Use ten passes there, or read the best later pass. Later passes still vary by 5 to 15 percent among themselves.}
+\li{In seconds, the compiler needs about 5 to 10 s of running with 8 workers; the first Mathlib pass pays 10.5 s for it and the second is within 2 percent of the third.}
+}
+\p{Warm-up is not charged by the project, but it decides how long a benchmark has to run before its number means anything.}
+\p{See also: [the decision on the JVM launcher line](dec-E3EX).}

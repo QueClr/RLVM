@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:42Z}
+\title{Uniform-occurrence check visits a shared subterm once per binder offset}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{The check that an inductive type occurs uniformly in its constructors visited a shared subterm only once. A closed subterm with an occurrence under a binder of its own was therefore checked at one binder offset only, and a hand-made export could carry a non-uniform occurrence past the check. The walk in \code{\verb~|rlvm-inductive~} now visits a shared subterm once per binder offset; a regression test and a comparison with the official checker cover the case. The inductive blocks of the eight corpora regenerate identically with the fix, as they did before.}
+
+\p{Detail: \src{rlvm-inductive/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

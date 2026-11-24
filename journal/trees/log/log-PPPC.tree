@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:32Z}
+\title{Inductive admission rebuilds universe levels as the official kernel does}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\tag{levels}
+\meta{release}{Unreleased}
+\meta{commit}{98b44a5}
+\import{base-macros}
+
+\p{Finding L-F1: both engines accepted generated inductive declarations that the official checker rejects with an application type mismatch. The official \code{\verb~|add_inductive~} refers to the block's own constants with level-parameter objects it makes itself, and the official instantiation then rebuilds every level node above such a parameter, so that \code{\verb~|imax u 1~} becomes \code{\verb~|max u 1~}. The type the kernel infers for these references is then not always equivalent, for the official relation, to the declared spelling. Admission now performs the same rebuild for the stand-ins of members that only the kernel refers to.}
+
+\p{On the 2,200 files of the finding RLVM had accepted 183 that the official checker v4.36.0 rejects. Now the reference engine and the machine give 2,200 of 2,200 official verdicts with no decline, and the 1,468 exports of a second test set get the official verdict as well. No block of the real corpora is affected. Published with 91 tests in \code{\verb~|rlvm-inductive~} and 89 in \code{\verb~|rlvm-admit~}.}
+
+\p{Detail: \src{rlvm-inductive/README.md}, \src{rlvm-level/README.md}. Commit \commit{98b44a5}. Session: [machine speed and pipeline](ses-CVTE).}

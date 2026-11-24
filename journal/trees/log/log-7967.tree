@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:42Z}
+\title{Mutant campaigns through the reference pipeline: no soundness difference}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{The 11,605 single-edit mutants of the tutorial tests, each classified by the official checker, were run through the real pipeline with the reference engine: 0 soundness differences, 3 completeness differences and 755 declines, in 4 min 50 s wall at 10 in parallel. The three were mutants that drop a quotient record, which admission rejected and the official checker accepts; they were closed the same morning, see [the two wrong verdicts](log-8ZVJ). After that, 16,949 mutants in four corpora gave 0 soundness and 0 completeness differences. The campaign became a standing gate. Its later record is 17,775 mutants in four corpora (tutorial 12,260, bugs and others 2,692, prelude 847, metadata 1,976) with 0 and 0, 16,092 agreeing and 1,683 declined.}
+
+\p{Detail: \src{rlvm-testkit/README.md}, \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

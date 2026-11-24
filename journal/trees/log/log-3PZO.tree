@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:44Z}
+\title{Term store: hash-consed terms, worker overlays and proof blocks}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{loader-store}
+\tag{unreleased}
+\tag{store}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{\code{\verb~|rlvm-store~} holds what a load builds: hash-consed term nodes, the name table, a literal pool interned by content, the declaration table and proof blocks, in which the private records of a proof stay packed and are promoted to shared nodes only when something refers to them. Workers write into overlays over the frozen base. Published with 52 tests green. The acceptance run on real data loads \code{\verb~|init.ndjson~} through the builder: 6,137,092 records, 1,659,805 shared nodes and 5,071,208 block records in 42,695 blocks at 4.36 bytes per record, 593,921 of them promoted; every shared node and every record of every decoded block equals its export record, and all 117,913 declaration roots pass the structural tests.}
+
+\p{Detail: \src{rlvm-store/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

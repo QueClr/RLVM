@@ -1,1 +1,15 @@
-\date{2026-11-24T23:07:45Z}
+\title{Test kit: official verdicts, mutant corpora and a differential engine}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{\code{\verb~|rlvm-testkit~} gives the project its oracle. It runs the official checker with a cache of verdicts and holds the official verdict of the 230 published tests (138 accept, 92 reject, no disagreement with the arena) and of the 30 \code{\verb~|either~} tests. A seeded mutator with 21 kinds of single edits, 22 once the wrapping of a reference in metadata was added, produces classified corpora: 11,605 mutants of the tutorial tests, of which the official checker accepts 3,384 and rejects 8,221, and 2,561 more from the bugs and other tests in the first round. The differential engine runs an engine under test and the reference kernel on every unit an engine checks and reports each difference in verdict with a command that reproduces it; \code{\verb~|-X engine=diff~} works end to end through launcher, loader, environment pass and driver. Published with 81 tests green.}
+
+\p{Detail: \src{rlvm-testkit/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:45Z}
+\title{A declaration that enters eager reduction is declined by the machine}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{3dfe909}
+\import{base-macros}
+
+\p{Two findings of the soundness review concern what the machine remembers across comparisons made in the official kernel's eager-reduction mode. In the generic tier canonical variables and the pair table carry an answer across binders (S-F5), and a warm session carries a positive pair entry from one declaration into the eager comparison of a later one (S-F4). A first rule that restarted the session was replaced by a plain one: a declaration that enters eager reduction is declined, the cold retry is answered at once, and the reference engine decides the unit. The rule is in force in every configuration, the generic tier included. Its price is the units it sends to the reference engine: 164 of Init, 203 of Std, 11 of the Cedar slice, 8 of reachability and 6,711 of the 714,712 of Mathlib, of which 6,485 are private declarations of Mathlib modules.}
+
+\p{Detail: \src{docs/design/review/soundness-machine.md}, \src{rlvm-machine/NOTES-M6.md}. Commit \commit{3dfe909}. Session: [the machine](ses-Z72N).}

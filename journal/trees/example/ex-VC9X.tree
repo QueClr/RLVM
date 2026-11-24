@@ -1,0 +1,34 @@
+\title{A sum of 5,461 terms compared with itself under two environments}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P9.md}
+\import{base-macros}
+
+\p{The unit with the largest excess on navier-stokes-euler. It is not a proof-position case: only the congruence shortcut repairs it. Source: \src{docs/research/profiles/P9.md}, section 4.2; [the profiling session](ses-JRSD). Machine with its default switch set of 21:02Z on 2026-11-24, one worker; unit \code{\verb~|EulerSobolevBaseCommutator.baseCommutator_bound~}.}
+\pre{\verb~|
+-- both sides of the comparison are
+List.foldr (fun a acc => a + acc) 0 l
+-- l : a list of norms indexed by Sobolev words, 5,461 = (4^7 - 1) / 3 elements
+-- the summand closure differs only in its environment
+~}
+\table{
+\tr{\th{Checker}\th{Steps}\th{Instructions}\th{Unfoldings}}
+\tr{\td{machine, default set}\td{1,537,192}\td{2.17 G}\td{89,368}}
+\tr{\td{machine with \code{\verb~|facts~} and \code{\verb~|skipargs~}}\td{1,450,455}\td{2.11 G}\td{}}
+\tr{\td{machine with \code{\verb~|facts,probes~}, official-exact}\td{2,025,399}\td{2.60 G}\td{}}
+\tr{\td{machine with \code{\verb~|facts,probes~} and \code{\verb~|congruence~}}\td{41,200}\td{84.4 M}\td{}}
+\tr{\td{machine with both options}\td{27,988}\td{65.6 M}\td{2,546}}
+\tr{\td{gruszka}\td{12,998}\td{47.9 M}\td{1,663, and 110 closure congruences}}
+\tr{\td{nano-lean}\td{34,155}\td{16.3 M}\td{2,600, and 904 derived rules}}
+}
+\ul{
+\li{Per element the machine unfolds \code{\verb~|List.foldr._f~} on both sides, its matcher on both sides, \code{\verb~|HAdd.hAdd~} and \code{\verb~|Add.add~} on both sides, compares the two heads, then the two tails: 9.8 recursor steps per element.}
+\li{gruszka answers with a closure congruence: two closures of the same term are equal when the environment entries the term reads are identical or already known equal. nano-lean has a structural identity test with fuel and a same-head probe before reduction.}
+\li{The official kernel tries the arguments of two applications of one head first only for a definition with a regular hint, never for a projection function, and has no closure comparison. The machine walk \code{\verb~|same~} is the official-exact part: it answers only for identical slots.}
+}
+\p{Used by [navier-stokes-euler is the Mathlib mechanism in a larger dose](ins-K2I2).}
+\p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

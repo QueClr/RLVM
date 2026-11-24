@@ -1,0 +1,32 @@
+\title{Metadata nodes and the \code{\verb~|nondep~} flag of \code{\verb~|let~} are part of the official term identity}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{loader}
+\tag{store}
+\tag{reference-engine}
+\meta{origin}{docs/design/review/reference-caches.md}
+\import{base-macros}
+
+\p{Source: \src{docs/design/review/reference-caches.md}, sections 0 and 1, findings S3-F2 and R2-F1; [the exactness session](ses-874D). The audit compared, part by part, what the official caches take for the same term with what the loader and the store keep.}
+\table{
+\tr{\th{Part of a term}\th{Official equality}\th{RLVM}\th{Same}}
+\tr{\td{binder name and binder info}\td{ignored}\td{not stored}\td{yes}}
+\tr{\td{two records with one content}\td{one key}\td{one id}\td{yes}}
+\tr{\td{universe levels}\td{by spelling}\td{interned structurally, no normal form at load}\td{yes}}
+\tr{\td{Nat and String literals}\td{by value}\td{by value}\td{yes}}
+\tr{\td{a metadata node}\td{part of the term}\td{dropped by the loader}\td{no}}
+\tr{\td{the \code{\verb~|nondep~} flag of \code{\verb~|let~}}\td{part of the term, not in the hash}\td{not stored}\td{no}}
+\tr{\td{which object a term is}\td{seen by pointer tests}\td{not represented}\td{no}}
+}
+\ul{
+\li{The finding that started the audit was a wrong accept of the reference engine, the oracle of every gate, and it was not a kernel cache: the loader drops metadata records, so the wrapped expression stands for the node.}
+\li{Officially a metadata node is a term of its own for every cache and hides what is under it from the syntactic tests of the kernel.}
+\li{The \code{\verb~|nondep~} flag is the same class: \code{\verb~|r2-id-let-nondep-bad~} is rejected officially and accepted by the reference engine.}
+\li{Both findings are of the tolerated kind. In the strict mode the loader declines a declaration that carries a metadata node; the decline for \code{\verb~|nondep~} was a patch not yet published when the audit was written, so the strict mode still accepted that export.}
+}
+\transclude{ex-4B5D}
+\p{Everything else that decides what "the same term" is agrees with the official kernel. The third row marked "no" is [object identity](ins-E3MS).}
+\p{See also: [the caches of the reference engine](design-reference-caches); [the term store](design-term-store).}

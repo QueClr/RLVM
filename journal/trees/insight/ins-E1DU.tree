@@ -1,0 +1,21 @@
+\title{Each publication of a pipelined load costs every worker a copy of the level tables}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{loader}
+\tag{gc}
+\tag{performance}
+\meta{origin}{docs/research/profiles/P7.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/P7.md}, section 6 and finding P7-F5; [the profiling session](ses-JRSD). Native image, machine with \code{\verb~|warm,gated,expect~}, Mathlib, pipelined load, quiet cores, two interleaved rounds.}
+\ul{
+\li{When the loader publishes a piece of the file, each worker context copies the level tables at its next reset: about 110 MB of garbage and 45 ms of worker CPU per publication on Mathlib, and the collections stop all 8 workers.}
+\li{Publishing the 6 GB file in 52 pieces instead of 205 takes Mathlib with 8 workers from 34.25 and 35.00 s to 31.71 and 31.90 s, -8 percent; with 4 workers from 55.71 to 53.80 s.}
+\li{Garbage falls from 36.9 to 20.9 GB, pauses from 3.75 to 2.23 s, worker CPU from 221.3 to 214.8 s, peak RSS from 4.1 to 3.8 GB.}
+\li{The driver now scales the hand-off interval with the size of the input, at most by 4 and not below 2 GiB; Std and cedar keep their interval and their time.}
+}
+\p{The pipelined hand-off was thought to be free for the workers. The cost was found by the time account of the driver, which splits the wall clock of each worker into running, runnable without a core, parked by cause, and stopped.}
+\p{See also: [the driver](design-driver); [the decision for pipelined loading](dec-4TQJ).}

@@ -1,0 +1,19 @@
+\title{An ahead-of-time profile cache shortens the cold start and makes every warm pass slower}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\meta{origin}{docs/research/profiles/J1.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/J1.md}, section 3; [the profiling session](ses-JRSD). JVM launcher of GraalVM CE 25, machine engine, 8 workers, quiet cores.}
+\ul{
+\li{The ahead-of-time cache of JDK 25, JEP 483, 514 and 515, works on GraalVM CE 25 only with \code{\verb~|-XX:-EnableJVMCI~}. With JVMCI on it silently degrades to a class archive without profiles.}
+\li{It is 18.7 MB, takes one training run at build time and takes another 0.4 to 1.1 s off the cold wall clock.}
+\li{It makes every later pass 5 to 9 percent slower, in 11 of 11 comparisons, the training corpus included.}
+\li{Classic class-data sharing, and the cache without its profiles, gain nothing: class loading is 0.1 to 0.2 s of the start.}
+}
+\p{The recommended launcher line therefore has no cache. Where a cold run counts, the report says what shipping the cache would take.}
+\p{See also: [the decision on the JVM launcher line](dec-E3EX).}

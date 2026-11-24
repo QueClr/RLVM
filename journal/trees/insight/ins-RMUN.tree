@@ -1,0 +1,20 @@
+\title{C2 compiles all of the machine; what it runs into is its inlining budget, and the time is in memory}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/J1.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/J1.md}, section 2; [the profiling session](ses-JRSD). HotSpot of GraalVM CE 25, machine engine, cedar with 8 workers and 5 passes, compilation log and flight recorder.}
+\ul{
+\li{No method is near the limit of 8,000 bytecodes, the largest has 1,476. There is no bail-out, nothing hot is left in C1 or in the interpreter, and there is no deoptimisation storm.}
+\li{What C2 runs into is its inlining budget, 18,000 nodes and 8,000 bytecodes per compile unit and depth 15, in five to twelve of about 940 compile units. The two size limits are constants of a product VM.}
+\li{Neither lifting nor tightening the limits that are flags moves the warm pass, nor do Graal as the top tier, compact object headers, a code cache within branch range or lower tier thresholds.}
+\li{Two flags have a consistent sign: transparent huge pages, -6 percent of warm wall clock on Mathlib in an A B A B comparison, -2 to -4 percent on reachability and 0 to -4 percent on cedar; and switching tiered compilation off with one worker, 0 to -7 percent, nothing with 8.}
+}
+\p{The time is in table probes, not in the shape of the code; that is the same finding as [a compiler has nothing to remove](ins-JA0J).}
+\p{See also: [the decision on the JVM launcher line](dec-E3EX).}

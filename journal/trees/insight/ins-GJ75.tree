@@ -1,0 +1,27 @@
+\title{Once warm the JVM launcher beats the native image, and it loses cold}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/BENCHMARKS.md}
+\import{base-macros}
+
+\p{Source: the first warm table of 2026-11-24, whose headline rows are in \src{docs/BENCHMARKS.md}, section "Warm wall clock"; confirmed by \src{docs/research/profiles/P7.md}, section 3, and \src{docs/research/profiles/J1.md}; [the session on wave 6 and the pipeline](ses-CVTE). Conditions: one process checks the same export several times, every pass loads pipelined with checking, 8 workers on the 8 quiet performance cores of the aarch64 development host; warm is the median of the later passes. JVM launcher: HotSpot of GraalVM CE 25 with C2 and the serial collector. Native image: CE, \code{\verb~|-O3~}, serial collector.}
+\table{
+\tr{\th{Machine, \code{\verb~|warm,gated,expect~}, 8 workers}\th{Init}\th{Std}\th{cedar}\th{reachability}\th{Mathlib}}
+\tr{\td{warm wall, JVM / native, s}\td{0.96 / 1.07}\td{1.72 / 1.88}\td{2.21 / 2.62}\td{1.88 / 2.66}\td{25.6 / 35.3}}
+\tr{\td{ratio}\td{0.90}\td{0.91}\td{0.84}\td{0.71}\td{0.73}}
+\tr{\td{CPU of the warm pass, ratio}\td{0.83}\td{0.82}\td{0.82}\td{0.75}\td{0.78}}
+\tr{\td{cold wall of a fresh process, JVM / native, s}\td{3.96 / 1.10}\td{5.81 / 1.95}\td{8.51 / 2.86}\td{4.29 / 2.82}\td{38.6 / 35.1}}
+}
+\ul{
+\li{The reference engine shows the same: 0.70 to 0.82 times the wall clock of the image on Init, Std, cedar and reachability.}
+\li{Where the lead comes from: the loader thread is faster on the JVM, 13.5 against 20.3 s on Mathlib; the collector of the image runs 10 to 20 times as often, 240 to 370 collections and 3.9 s of pauses per Mathlib pass against 46 collections and 0.7 to 0.9 s; and the code that C2 makes for the engines is faster. A check-only pass over Mathlib takes 23.6 s on the JVM against 28.7 s in the image, with 17 percent less worker CPU.}
+\li{What it costs: memory and the first pass. Peak RSS on Mathlib is 11.5 GB against 4.4 GB with the launcher heap of 13 GB, which is the setting, not the need; see [the heap](ins-P0RA). A cold JVM process costs 2.3 to 4.1 times its warm pass on the small corpora; the first pass of the image is its steady state.}
+\li{With the larger default switch set of the same evening the picture is the same on Mathlib: 21.23 s on the JVM against 27.43 s in the image.}
+}
+\p{So the platform question splits by what is charged. With warm-up not charged, which is the policy of this project, the JVM launcher wins on every corpus measured, by 3 to 30 percent. A single cold run, which is what the arena measures, belongs to the image: by a factor of 1.5 to 3.6 below Mathlib and by 10 percent on Mathlib.}
+\p{See also: [the decision on the two platforms](dec-WX9Z); [the launchers](design-launchers).}

@@ -1,0 +1,26 @@
+\title{Eager reduction on the machine is built and off by default}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/eager-reduction.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{State.} The switch \code{\verb~|eager~} was published in the main tree on 2026-11-24 and is off. Without it a declaration that enters eager reduction is declined by the machine and decided by the reference engine, which costs [a tenth of the worker time](ins-47IQ) on Mathlib, cslib, Std and cedar. With it the machine decides such a declaration with the official verdict or declines. Source: \src{docs/design/review/eager-reduction.md}; [the profiling session](ses-JRSD).}
+\p{\strong{What is known.}}
+\ul{
+\li{Declines go to 0 on Init, Std, cedar, reachability and Mathlib, at 2.5 to 4.4 percent more machine steps. The differential gate against the reference engine per declaration is clean on the tutorial and bugs tests, the Cedar slice, reachability, Init, Std, 16 Mathlib slices and all 230 published tests.}
+\li{396 hostile exports under 33 switch sets show no wrong verdict of the mechanism; 20 rows are declined by design. No divergence from the official checker is known.}
+\li{The second adversarial review attacked the candidate default that contains the switch and found no false accept. One of its seeded faults shows what stands between the design and one: a deferred comparison must run with its binders open, in its own scope.}
+\li{One gap is not closed and not demonstrated: a reduction by the K rule whose plain and eager computation the machine both skips by value identity.}
+\li{The exactness is "official up to evaluation": the official verdict under the standing assumption that the official procedure on terms and the machine on values ask the same queries.}
+}
+\p{\strong{What is open.} Warm wall clock was measured for Std and cedar only, on the JVM launcher with check-only passes: -11 and -22 percent, -7 and -10 percent. Mathlib, the native image, one worker and passes that load were not measured. The review did not cover parallel workers, the native image, or the corpora and mutants under the candidate.}
+\p{\strong{What would close it.} Those measurements and gates, and then the decision on the default switch set that is part of [making the machine the default engine](prob-W2FV).}
+\p{See also: [eager reduction on the machine](design-eager-reduction).}

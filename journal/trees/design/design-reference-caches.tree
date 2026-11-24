@@ -3,7 +3,78 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{reference-engine}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/review/reference-caches.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented: the reference engine has a practical and a strict mode. The strict decline for the \code{nondep} flag of a let is a patch that is not published, and the cost and gate sections of the review document were still empty when this note was written.}
+
+\p{[The reference engine](design-reference-engine) is the oracle of every gate, so a wrong accept of it (finding S3-F2, found by [the adversarial review](design-adversarial-review)) called for an audit of every cache against the official source, with exports judged by the official checker of Lean v4.36.0 and never by an engine of RLVM. The audit asks two questions: what does the official kernel take for \em{the same term}, and is every cache read, written and cleared where the official one is.}
+
+\subtree[design-reference-caches-identity]{
+\title{What the same term is}
+
+\p{All official caches are keyed by structural equality of terms; pointer equality is only a shortcut. That equality ignores binder names and binder info, compares levels by spelling and literals by value, and takes two export records with one content for one key. On all of this the canonical ids of the engine agree. Three things do not:}
+
+\ul{
+\li{\strong{Metadata nodes} are part of the official term, for every cache, and hide what is under them from the kernel's syntactic tests. The loader drops them (finding S3-F2). This can change a verdict in both directions.}
+\li{\strong{The \code{nondep} flag of a let} is part of the official term identity and the store does not keep it (finding R2-F1).}
+\li{\strong{Which object a term is} is not seen by structural equality but is seen by a pointer test (finding R2-F2, below).}
+}
+}
+
+\subtree[design-reference-caches-audit]{
+\title{The audit, cache by cache}
+
+\p{The seven official caches (inferred types in check and in infer-only mode, the two weak-head normal form caches, the sets of successful and of failed comparisons, unfolded constants) all live for one declaration, and so do the engine's. Each was compared for its key, its reads, its writes and its clearing. One fact explains most of the behaviour reviewers found: the cache of the normaliser without delta is \em{read} by every call of it, the cheap ones included, and \em{written} only by full calls. What was reduced earlier in a declaration therefore changes what a later comparison sees, and the official equality test is not a function of its two arguments. The port has the same reads and writes, and 103 of 105 cache-order exports of the adversarial reviewer get the official verdict; the two others carry metadata.}
+
+\p{Two corrections were made in both modes, though no verdict could be constructed that depends on them: the entry that follows an unfolding is now one logical table with the entries of explicit terms, and a write never replaces an existing entry.}
+}
+
+\subtree[design-reference-caches-pointer]{
+\title{Object identity}
+
+\p{The official equality test uses pointer equality on terms in two places. The second matters:}
+
+\pre{\verb~|
+expr t_n_n = whnf_core(t_n);  expr s_n_n = whnf_core(s_n);
+if (!is_eqp(t_n_n, t_n) || !is_eqp(s_n_n, s_n)) return is_def_eq_core(t_n_n, s_n_n);
+~}
+
+\p{The normaliser returns an object that is structurally its argument but not the argument itself in exactly one situation: the argument is a stuck projection, and the cache holds an entry for it that a full call wrote on \em{another occurrence} of the same term. Then the whole comparison runs a second time, and what that second pass leaves in the caches changes later answers. Whether another occurrence is another object is decided by the record ids of the export, by the sharing step the kernel applies to theorems, and by the kernel's own allocation, not by the terms. The exports \code{r2-ptr-other-record-bad} (official reject) and \code{r2-ptr-same-record-ok} (official accept) are the same terms and differ by one duplicated record. No store that identifies equal terms can reproduce this.}
+
+\table{
+\tr{\th{Mode}\th{What the engine does at such a point}\th{On the pair above}}
+\tr{\td{practical, \code{\verb~|ref.exact=off~}, the default}\td{Takes the two occurrences for one object, as it always did. Never a decline.}\td{accepts both}}
+\tr{\td{strict, \code{\verb~|ref.exact=official~}}\td{Runs the second pass as a probe with the caches frozen. If the probe adds nothing and decides nothing, both official continuations are the one in hand. Otherwise the declaration is checked again from the start with the hazard decided each way, at most 63 checks; equal verdicts are the official verdict, different verdicts are a decline.}\td{declines both}}
+}
+
+\p{Forcing each of the two continuations in turn reproduces the official verdict exactly on the files where that continuation is the truth, which is the evidence that this model is the official behaviour.}
+}
+
+\subtree[design-reference-caches-admission]{
+\title{Admission}
+
+\p{The official admission of an inductive block runs every judgment in a fresh checker, except three groups. RLVM's admission keeps the kernel's caches through a phase, so a later judgment can be answered from what an earlier one cached: \code{r2-adm-param-success-bad} is rejected officially and accepted (finding R2-F3, both engines, since admission is shared). In the strict mode every judgment asked by admission starts with empty judgment caches, which is exact outside the three groups and fresher than the official kernel inside them.}
+}
+
+\subtree[design-reference-caches-kind]{
+\title{Kind, cost and what is not established}
+
+\p{All four findings are of kind T: the accepted statement is derivable, and for each export the official checker accepts the same proof term in another cache state or with another sharing of records. The caches hold facts; an entry that is there too early, or one object too many, changes which true facts the incomplete procedure finds. The practical mode has one wrong \em{reject}: with the metadata around an \code{eagerReduce} application dropped, the kernel enters eager reduction and rejects a statement the official checker accepts. Only a file with metadata records can do this, and none of the corpora or tests has one.}
+
+\p{On the eight corpora the strict mode declines no declaration; one declaration of Std and 8 of cslib are decided by checking both ways. A golden test replays 30 exports with the official answers in both modes.}
+
+\ul{
+\li{The strict mode still accepts \code{r2-id-let-nondep-bad}, which the official checker rejects, until the loader's decline for the flag is published. The exact solution, the flag as part of a let node's identity, is not started.}
+\li{Metadata and the flag are declined, not represented: a strict run of a file that has them gives no verdict.}
+\li{The both-ways check assumes that the two continuations are the only official behaviours at such a point.}
+\li{The effect of the kernel's sharing step on theorems was read in the source and not shown by an export.}
+\li{An object-identity hazard inside a judgment of admission is declined at once in the strict mode; it was not seen on the corpora.}
+}
+}
+
+\p{Related: [the exactness contract](design-exactness-contract), [the divergence classes](design-official-divergence), [dec-USLM](dec-USLM) on metadata, [dec-TQSI](dec-TQSI) on the policy. Detail: \src{docs/design/review/reference-caches.md} and the section "Exactness" of \src{rlvm-ref/README.md}. Source: [the exactness session](ses-874D).}

@@ -1,1 +1,17 @@
-\date{2026-11-24T23:09:43Z}
+\title{Gate scripts: default-configuration mode and a hostile step with kinds}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{c4f8f5d}
+\import{base-macros}
+
+\p{The gate can now test a distribution exactly as it is run without options: \code{\verb~|--defaults~} passes no engine, no load mode and no thread count (\commit{c542b12}), and the lanes of a step are limited by the memory available at its start. A new step runs the hostile exports of the machine's suite and judges each by the official verdict of its row. Rows carry a kind: a row of kind T, a derivable statement that the official checker rejects only through its own incompleteness, may be accepted under the practical policy; every other row must get the official verdict (\commit{ca8e886} for the kinds in the manifest).}
+
+\p{On the candidate distribution with the reference engine as default the 421 rows give 420 agreeing, no accept of kind T, no wrong accept, no wrong reject and 1 decline: pass. On a rehearsal distribution with the withdrawn machine jar as default the same step gives 395 agreeing, 6 tolerated accepts of kind T and 19 wrong accepts: fail, as it must. So the step sees the family that the gates of the default engine could not.}
+
+\p{Detail: \src{docs/design/review/official-divergence.md}, \src{docs/design/OWNER-NOTES.md}. Commit \commit{c4f8f5d}. Session: [exactness](ses-874D).}

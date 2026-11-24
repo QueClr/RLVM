@@ -1,0 +1,22 @@
+\title{The fastest checkers converged on one design: evaluation over hash-consed values with memo slots}
+\taxon{Insight}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/09-nbe-hoas-tricks.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/09-nbe-hoas-tricks.md}, with the leader studies \src{docs/research/04-leader-nano-lean.md}, \src{docs/research/05-leader-gruszka-pestka.md} and \src{docs/research/07-leader-rpylean-and-tenet-jvm.md}; [the research session](ses-XOS5). Read from the sources of the checkers; the JVM figures were measured on GraalVM CE 25 on the development host.}
+\ul{
+\li{nano-lean, gruszka and sokonanoda are all normalisation by evaluation over hash-consed values with memo slots per value. Pointer identity means semantic identity, and evaluation, inference, reduction, unfolding and comparison are memoised on identity.}
+\li{Compiling every lambda to a host closure buys a small constant on pure beta reduction and loses every caching lever. On the JVM, closures as Java lambdas need 0.66 to 0.87 times the CPU of a syntax interpreter in steady state, the same when cold, and are 1.0 to 1.6 times slower without a top-tier compiler. Host closures are opaque: no structural identity, no cache key, no pruning of the environment.}
+\li{Conversion shortcuts matter more than evaluation speed. A fast evaluator without hash-consing needs seconds for a conversion that a substitution kernel answers in a millisecond because equal terms are the same node.}
+\li{Constants stay folded during evaluation; delta happens in conversion, memoised once per application node.}
+\li{The same author measured both designs on one input: his substitution kernel with every trick needs 1.07 to 1.11 T instructions for Mathlib, his evaluation kernel 0.37 T. The substitution kernel compiled to a managed runtime with every term an object needs 5.78 T and 11.3 GB.}
+\li{rpylean is the exception that is not evaluation, and its largest win was moving the working set out of the collected heap into integer arrays: Std went from 9.66 T to 348 G instructions.}
+}
+\p{RLVM starts from this design: records in flat arrays, identity by structure, memo words in the record. What the leaders do not compute at all is in [the official way of comparing proofs](ins-HPBW); what the common design costs a compiler is in [a compiler has nothing to remove](ins-JA0J).}
+\p{See also: [the value model](design-value-model); [the machine](design-machine-worklist).}

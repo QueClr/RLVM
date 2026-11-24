@@ -1,0 +1,25 @@
+\title{Session tables must start small: with tables of 1 to 2 MiB every probe was a cache miss}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-machine/NOTES-INT.md}
+\import{base-macros}
+
+\p{Source: deviation I1 of \src{rlvm-machine/NOTES-INT.md}, the notes of the integration of the machine; [the session on the machine](ses-Z72N). Native image in the arena container, one worker, the plain machine.}
+\table{
+\tr{\th{Base sizes of a session}\th{Init}\th{Cedar slice}\th{Std}}
+\tr{\td{as in the instruction-set document: 2^18 records, 2^19 table slots, 2^20 run words}\td{13.54 s}\td{3.98 s}\td{21.79 s}}
+\tr{\td{based on 2^12 records}\td{10.11 s}\td{3.84 s}\td{16.18 s}}
+\tr{\td{based on 2^14 records, the choice}\td{9.27 s}\td{3.70 s}\td{15.80 s}}
+\tr{\td{based on 2^16 records}\td{9.26 s}\td{3.74 s}\td{15.39 s}}
+}
+\ul{
+\li{A declaration of Init makes about 860 records. Tables sized for a large declaration are mostly empty and far larger than the cache, so every probe missed.}
+\li{The owner of the store had measured the direction; the integrator changed the sizes and kept the sizes of the design document behind a property for sweeps.}
+\li{The same reasoning later set [the session cap](ins-FJ5R): the right size of the tables of the machine is a property of the processor cache.}
+}
+\p{A third of the CPU time of the plain machine on Init was a sizing constant. It was found from a profile, not from a count of steps, which the sizes do not change.}
+\p{See also: [the value model](design-value-model).}

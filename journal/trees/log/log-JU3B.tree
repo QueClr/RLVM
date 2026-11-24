@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:37Z}
+\title{The machine bounds the steps of one unit}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{22b5613}
+\import{base-macros}
+
+\p{The two arena corner cases on which the official kernel does not terminate did not terminate in the machine either: 600 s twice and 1,500 s alone, where the reference engine declines in under a second. The machine now has a bound of its own of \code{\verb~|2^27~} ticks per unit, set with \code{\verb~|-X machine.unit-ticks~}. Both files end with a decline, after 3.2 and 5.9 s on the JVM. The largest legitimate unit measured is 41.9 M ticks (\code{\verb~|perf/magma-list-deep-n36~}); the largest of Mathlib is 5.36 M.}
+
+\p{Detail: \src{rlvm-machine/NOTES-M6.md}, \src{rlvm-machine/SWITCHES.md}. Commit \commit{22b5613}. Session: [machine speed and pipeline](ses-CVTE).}

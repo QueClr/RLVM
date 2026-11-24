@@ -1,1 +1,16 @@
-\date{2026-11-24T23:09:36Z}
+\title{Switches \code{\verb~|pchk~}, \code{\verb~|match~} and \code{\verb~|joint~} in inference}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{3dfe909}
+\import{base-macros}
+
+\p{Three additions to inference, published off. \code{\verb~|pchk~} shares check facts: a closed export term without level parameters that passed check mode is inferred without being checked again by later declarations and workers, never after an eager-reduction comparison. \code{\verb~|match~} matches a telescope domain against the inferred type of the argument instead of building the domain, and falls through to the complete procedure when it cannot tell. \code{\verb~|joint~} checks the telescopes of a declaration's type and value together. Instruction counts, which repeat exactly, with all three on top of \code{\verb~|warm,gated,expect~} (native image, one worker): Init 105.6 to 101.7 G (-3.7 \%), Std 177.9 to 170.2 G (-4.3 \%), Cedar slice 39.6 to 39.0 G (-1.5 \%), reachability 59.1 to 59.0 G. On 9,110 tutorial mutants there was no soundness and no completeness difference. All three joined the default set at the integration of wave 6.}
+
+\p{Detail: \src{rlvm-machine/SWITCHES.md}, \src{rlvm-machine/NOTES-M5.md}. Commit \commit{3dfe909}. Session: [machine speed and pipeline](ses-CVTE).}

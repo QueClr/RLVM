@@ -28,3 +28,36 @@ and add its manifest row.
 
 Deviation: the exports are stored compressed (2.3 MB instead of 8.5 MB) and unpacked into a temporary directory
 by the tests.
+
+## The whole suite (INT7, 2026-11-25; OWNER-NOTES 13, the "practical" policy)
+
+`manifest.tsv` has 1,189 rows: package S's and E1's 421, reviewer S3's 423 (`s3-*`; `work/s3/manifest.tsv`, the six rows
+that caught seeded faults first), reviewer S2's 279 (`s2-*` = `work/s2/attacks` 134 + `attacks2` 11, `s2d-*` =
+`attacks-dat` 134), reviewer C1's 41 (`c1-*`; `work/c1/hostile`) and R2's 25 (`r2-*`; `work/r2/exports/batch1..3.tsv`).
+The official verdict of every new row was taken again from leanchecker 4.36.0 in Docker (`work/int7/official.sh`,
+`work/int7/hostile/official.tsv`: 325 accept, 443 reject; every reviewer's verdict confirmed, S2's `attacks-dat` had
+none of its own). Built by `work/int7/hostile/collect.py` + `mkmanifest.py` (+ `marks.tsv`).
+
+**Every row = official verdict + kind.** The kind is the mark `T` (81 rows, all official REJECT): the official verdict
+OR an accept. Every other row is strict. A `T` is given only where a reviewer gave it; the text of the row says who:
+
+| Rows | Kind T by |
+|---|---|
+| 31 `s3-*` | S3, `soundness-default-set.md` section 8 (derivable as written; certificates and twins in sections 3, 7, 10) |
+| 15: `probe-b1-*`, `probe-b12-*`, `facts-*-noncongruent-*`, `open-flag-closed-bad` (14) and `s2-acc-rec-intro-vs-axiom` | S2, `soundness-shortcuts.md` section 4: 15 certificates accepted by the official checker |
+| 19 rows of the family `X = Y p` under eager reduction (`*-eager-*`, `krule-*-eager-*`, `e1-site-*`, ..) | S3, section 10.1 (family argument) |
+| 7 `e1-lam-fvar-type-in-conv-*`, `e1-sib-*` | E1 (`official-divergence.md` section 1, certificates `e1-cert-*`); the seventh, `e1-sib-proj-let-pi-bad`, by S3 10.1 |
+| 5 `r2-*` | R2 (findings R2-F1 nondep, R2-F2 object identity, R2-F3 admission cache) |
+| `c1-fuse-abbrev-samehead-proofarg-bad`, `c1-fuse-opaque-samehead-proofarg-bad` | INT7 by S2's certified family: the statement `G I = G h` of `probe-b1-abbrev-proof-arg` / `probe-b1-theorem-head` |
+| `r2-id-beta-control-bad`, `r2-id-literal-vs-offset-bad` | INT7 by S3's family S3-F1 (R2 lists them as controls of S3-F1): the statement of an officially accepted twin up to a beta step / `Nat.succ 6 = 7` |
+
+Notes of single rows (the rule is in `SHostile`): `recheck` (11 official ACCEPT rows that the machine's primary lane
+may REJECT through its cache history - S3-F1, S3-F3, S3-F6 and R2's `r2-id-binder-*`, `r2-ptr-*-ok` - and the
+reference engine accepts: the pipeline's verdict is the official one; a rejection of the machine on an official ACCEPT
+without this note fails the suite); `mdata` (`s3-mdata-eager-hidden-ok`: official ACCEPT because an `mdata` node hides
+`eagerReduce`; with transparent `mdata` - the practical policy - `default,eager` and the reference engine REJECT it;
+with the two shortcuts the machine accepts it. It is the one known input on which the pipeline rejects what the
+official checker accepts; it belongs to the strict mode's suite); `decline` (`s2-prop-mdata-domain-bad`, `s2d-`: the
+reference engine declines).
+
+`SHostileSlowTest`: 1,189 rows under every switch set. `SHostileTest` (fast): v0 and `warm,gated,expect` on every row.

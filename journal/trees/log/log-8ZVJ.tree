@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:34Z}
+\title{Two wrong verdicts closed: constants the kernel generates, and metadata in inductive records}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\tag{loader}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{The first integration of the pipeline found two verdicts that differed from the official checker's. Admission rejected a reference to a name without a record as an unknown constant, but the official checker adds the quotient constants itself when it replays a quotient record, and the kernel generates the recursors of every inductive block. Such a reference is now declined; it stays a reject only when no record of the file can generate the name.}
+
+\p{In the other direction, four hand-written files with a metadata record inside a constructor type, a recursor type or a recursor rule were accepted by RLVM and rejected by the official checker 4.36: the loader drops metadata, and the official comparison of inductive records sees it. The loader now keeps one bit per expression and declines an inductive or quotient record that carries metadata. Afterwards the tutorial slice was 141 of 141, all 230 tests were correct, and the mutants showed 0 soundness and 0 completeness differences. A mutation kind that wraps a reference in metadata (1,976 mutants, 461 officially accepted and 1,515 rejected) guards the second fix.}
+
+\p{Detail: \src{rlvm-admit/README.md}, \src{rlvm-load/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:44Z}
+\title{Universe levels are compared as the official kernel compares them, by default}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\tag{levels}
+\meta{release}{Unreleased}
+\meta{commit}{605b9ab}
+\import{base-macros}
+
+\p{By the maintainer's decision, recorded in [the standing policies](standing-policies), the reference engine compares universe levels with the official kernel's incomplete relation; \code{\verb~|-X levels=complete~} is the opt-in. The option had appeared the same morning with the complete relation as its default. Verdicts that changed: the arena corner cases \code{\verb~|imax-right-successor~} and \code{\verb~|imax-nested-absorption~} are rejected, as by the official checker, and 1,762 of 6,300 generated level exports go from accept to reject; nothing else. Of the 30 \code{\verb~|either~} tests 28 now get the official verdict (26 with the complete relation); the other two are the ones on which the official checker does not terminate, and they are declined. On the level corpus judged by the official checker v4.36.0 both engines give 6,300 of 6,300 official verdicts, against 4,538 with the complete relation.}
+
+\p{The gate on the published jar: 230 of 230 tests, and 17,775 mutants with 0 soundness and 0 completeness differences. Published with 136 tests, 135 run green and one opt-in. Mathlib was not run with this jar; it rests on the run of the same day with \code{\verb~|-X levels=official~}, accepted by the reference engine in 537.1 s CPU and 142.9 s wall.}
+
+\p{Detail: \src{rlvm-ref/README.md}, \src{rlvm-level/README.md}. Commit \commit{605b9ab}. Session: [machine speed and pipeline](ses-CVTE).}

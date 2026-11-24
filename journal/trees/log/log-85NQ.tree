@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:45Z}
+\title{Reference kernel declines a reduction that returns to its start}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{Two corner cases of the arena, \code{\verb~|eta-struct-major-no-whnf~} and \code{\verb~|eta-struct-major-and-no-whnf~}, make the official kernel loop: it does not terminate, and the arena records a timeout. The reference kernel had the same loop and ran into the 60 s timeout without allocating. Its delta loops (weak head normal form, lazy delta reduction, lazy delta under projections) now detect a return to a state they were in before and decline the judgment, saying that the reduction returns to a term it started from. Both tests decline in 0.2 s. 110 unit tests are green and all 230 published tests stay correct.}
+
+\p{Detail: \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

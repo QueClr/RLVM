@@ -1,0 +1,29 @@
+\title{Two arena tests on which the official checker does not terminate}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{reference-engine}
+\tag{soundness}
+\meta{origin}{docs/research/01-arena-and-export-format.md}
+\import{base-macros}
+
+\p{The arena tests \code{\verb~|corner-cases/eta-struct-major-no-whnf~} and \code{\verb~|corner-cases/eta-struct-major-and-no-whnf~} have the expected outcome "either" and a limit of 60 s. A checker that reduces the major premise of a recursor before it eta-expands it does not terminate on them. Source: \src{docs/research/01-arena-and-export-format.md}, \src{rlvm-ref/README.md} and the arena dry run \src{docs/research/profiles/AR1.md}; [the research session](ses-XOS5). The statements are those of the arena test file.}
+\pre{\verb~|
+-- Omega : a proof with no weak head normal form (Coquand's paradox through propext)
+-- loopPair : Nat x Nat := Acc.rec (fun _ _ _ => (0, 0)) loopAcc     loopAcc built from Omega
+def prodConst (p : Nat x Nat) : Nat := Prod.rec (fun _ _ => 1) p
+def andConst (h : And True True) : Nat := And.rec (fun _ _ => 1) h
+
+theorem prodMajorNoWhnf : prodConst loopPair = 1
+theorem andMajorNoWhnf  : andConst (Omega _ (And.intro True.intro True.intro)) = 1
+~}
+\ul{
+\li{The official checker of the arena, v4.35.0, runs into the time limit on both. Its v4.36 code reduces every major premise to weak head normal form first.}
+\li{The reference engine declines both: its delta loops remember an earlier state, and a loop that returns to it is declined with \code{\verb~|BUDGET_STEPS~}, "the reduction returns to a term it started from; the official kernel does not terminate here". In the arena dry run that took 5 and 17 ms.}
+\li{With the machine as primary engine the unit first runs into the machine bound of 2^27 steps, then the reference engine declines: 0.88 s and 24.0 G instructions each with the switch set \code{\verb~|warm,gated,expect~}, measured in the arena-shaped container on the aarch64 development host.}
+\li{nano-lean declines both after 21 G instructions with "declaration work budget exhausted"; sokonanoda, rpylean, nanobruijn and nanoda time out.}
+\li{Expanding the major premise to a pair of its projections first lets the recursor fire without looking at the proof. The result is the same either way, since structure eta is part of the theory; the question is only one of termination.}
+}
+\p{See also: [the reference engine](design-reference-engine).}

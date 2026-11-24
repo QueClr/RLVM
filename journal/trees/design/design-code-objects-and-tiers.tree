@@ -1,9 +1,64 @@
 \title{Code objects and tiers}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented. The generic tier and the reduction roles of the code tier (switches \code{code}, \code{casetrees}, \code{lazycases}, \code{directrules}) are in the machine's default switch set since the wave-6 integration of 2026-11-24. The telescope role (\code{tele}), derived rules (\code{k2}) and the Truffle tier (\code{t2}) are built and off.}
+
+\p{The guest language of [the machine](design-machine-worklist) is the language of judgments, not the lambda calculus: terms and values are its data (see [what RLVM is](standing-policies-design)). A constant is \em{elaborated} into the residual judgment chains obtained by specialising the kernel's judgments to that constant. This note says what is elaborated, into what, when, and what each part turned out to be worth.}
+
+\p{\strong{Two layers, four tiers.} Layer T is the term table itself: a node is a generic instruction, executed by the generic judgments \code{EVAL}, \code{INFER} and \code{CHECK}, which are Java state machines. Layer K is code objects: linear instruction sequences in an \code{\verb~|int[]~} over registers, executed by the code stepper.}
+
+\table{
+\tr{\th{Tier}\th{Code}\th{Executed by}\th{State}}
+\tr{\td{K0}\td{term nodes}\td{the generic judgments}\td{always available; the only tier for run-once terms, for terms of a worker's overlay and for the strict engine}}
+\tr{\td{K1}\td{code blocks, and case trees read off a definition's value}\td{the code stepper, a plain-Java dispatch loop}\td{reduction roles on by default, telescopes off}}
+\tr{\td{K2}\td{case trees derived by partial evaluation}\td{the same loop}\td{built, off: [dec-MOCU](dec-MOCU)}}
+\tr{\td{T2}\td{one Truffle root per promoted block}\td{Graal-compiled code}\td{built, off: [the Truffle tier](design-truffle-tier)}}
+}
+
+\p{Nothing in K0 or K1 is shaped for the sake of K2 or T2, and every tier must produce the same value ids as the generic walk. That equality is a test (tier equivalence): on init-prelude 25,824 cases, 25,590 with identical ids, 0 different, and 234 ill-typed applications that fail in both tiers.}
+
+\p{\strong{Run-once terms are walked.} 93 to 95 \% of the nodes of an export are private to one declaration and are inferred about once (cedar: 13.7 M inference misses for 14.7 M nodes). In the spike that preceded the design, a code object for a telescope saved 86 to 184 ns per use and cost 3 to 4 microseconds to make, so it pays back after 22 to 35 uses. A proof or a declaration type is therefore never elaborated; a role of a constant is elaborated \em{rent-to-own}, once it has been requested often enough.}
+
+\p{\strong{What a constant elaborates into.} Each role is one kernel judgment specialised to the constant \code{c}:}
+
+\ul{
+\li{\code{TELE(c)}: inference of an application of \code{c}. One step per Pi of the type; the domain is a pattern that is matched against the argument's type before anything is built.}
+\li{\code{CONG(c)}: comparison of two applications of \code{c}, as a plan per argument position.}
+\li{\code{RULES(c)}: weak-head normalisation of an application of \code{c} by case analysis on its arguments, a case tree.}
+\li{\code{BODY(c)} and \code{RULE(r, j)}: the general form of the reduction role, the value of a definition and the right-hand side of rule j of a recursor as a block, with sub-blocks for inner binders.}
+\li{\code{FACTS(c)}: one immutable record of classification facts (arities, which binders are read, sort levels, the shape of the value) that the other roles read. It is derived lazily by any worker from the store alone. A sort level is recorded only when it is manifest, that is a sort before any weak-head normalisation, and a failed derivation records "no facts".}
+}
+
+\p{\strong{Blocks and the publication rule.} A block is an immutable word sequence (a header, an entry table, instructions of an opcode word followed by operand words) in engine-wide chunks behind a block directory, shared by all workers. Anything visible to more than one session contains only term ids of the export or of the generated region, constant ids, name ids and level ids of the frozen base. A level that a worker derived is stored structurally and interned again per session; a value, a run, an overlay term or an overlay level is never published. Consequences: a role whose source term lives in an overlay (the value of a theorem kept as a proof block, any term a worker built) stays at the generic tier; a record is written completely and then published by one store of its index, and a reader that sees 0 walks the term; two workers that build the same role build word-identical blocks, and the first publication wins. The debug mode \code{pubcheck} asserts the rule on every block. The elaborator assumes nothing about well-typedness: under the optimistic environment it may be handed a constant that is not checked yet, and its output is a function of the term alone.}
+
+\p{\strong{Case trees.} A definition whose value, under its leading lambdas, is a \code{casesOn} over one of its parameters (or a recursor whose minor premises read no induction hypothesis), with alternatives that are again such trees or leaves, is recognised syntactically: shape \code{CASESON} for \code{casesOn} itself, \code{MATCHER} otherwise. Running the tree normalises only the major premises on the path taken and applies the chosen alternative; the motive and the other alternatives are never built. A stuck major premise leaves the tree without a result and the caller takes the ordinary unfolding. The result is a finite composition of official steps (unfolding, the recursor rule, beta); recursors with the K rule and structures whose major premise may need eta are excluded. As built, a tree compiles the matchers it calls in place, because a definition by pattern matching is an application of its matcher to one closure per alternative: on reachability (\code{code,casetrees}, one worker) this took the ticks from 16.48 M to 10.14 M and the records made from 9.08 M to 5.59 M.}
+
+\p{\strong{The switches}, with the state and the effect recorded in \src{rlvm-machine/SWITCHES.md}. The figures are CPU time on the native image built with \code{-O3}, in the arena-shaped container, with one worker, on a loaded aarch64 host, so they compare inside one batch only.}
+
+\table{
+\tr{\th{Switch}\th{What it turns on}\th{State}\th{Measured}}
+\tr{\td{\code{code}}\td{\code{BODY} and \code{RULE} blocks, and leaf blocks that run without a frame; elaborated at the first request}\td{on by default}\td{with \code{casetrees}, against the machine without switches: reachability 8.79 to 1.56 s, Init -16 \%, Std -14 \%, Cedar slice -5 \%}}
+\tr{\td{\code{casetrees}}\td{the case trees, with the matchers they call inlined}\td{on by default}\td{as \code{code}; inlining alone: reachability 3.03 to 1.56 s}}
+\tr{\td{\code{lazycases}}\td{the tree of \code{casesOn} itself as the unfolding step of lazy delta, where no state of the official loop lies between the unfolding and the recursor step}\td{on by default}\td{Init -1.7 \%, Std -1.1 \%; instructions lower on all four corpora}}
+\tr{\td{\code{directrules}}\td{a recursor rule of the plain form is one application of the minor premise; an induction hypothesis the minor does not read is not built}\td{on by default}\td{reachability 21.9 to 20.7 G instructions; Init, Std and the Cedar slice -0.5 to -0.9 \% of the instructions}}
+\tr{\td{\code{tele}}\td{\code{TELE} blocks and the matching of domains}\td{off}\td{three batches: no corpus gains, the Cedar slice loses 2 to 6 \%; 10 \% fewer records on Init but 5.4 M more activations}}
+\tr{\td{\code{k2}}\td{derived rule trees for hot definitions without a case tree}\td{off}\td{measured together with \code{directrules}: reachability -4.7 \%, Cedar slice -1.6 \%, Init and Std -0.7 \%, \code{perf/magma-list-deep-n36} 12.6 to 1.4 s; it produced a wrong accept, see [dec-MOCU](dec-MOCU)}}
+}
+
+\p{\strong{What code objects turned out to be for.} The reduction roles. Closed evaluation is where they pay: reachability needs less than a fifth of the CPU time and its peak memory falls from 1,151-1,348 MiB to 311 MiB, while on the Cedar slice, where 82 \% of the work is inference and conversion of open terms, they save 5 \%. The telescope role, which the design expected to carry the common case, shows no gain as built: the generic inference was meanwhile given a mode that walks the syntactic telescope directly, and against it a \code{TELE} block only adds activations. \code{CONG} plans are built and tested but are not read by the comparison of arguments, because skipping a position is not the official verdict; what became of that idea is in [the proof-comparison shortcuts](design-proof-comparison-shortcuts).}
+
+\p{\strong{Heat and thresholds.} The design set the elaboration threshold at about the tenth request of a role. As built, reduction roles are elaborated at the first request and telescopes at the tenth: thresholds 1 and 10 give the same CPU time on reachability, the Cedar slice, Init and Std (means within 0.4 \%), the code of Init grows from 0.92 to 2.2 MiB, and an evaluation test whose hot closures sit in bodies that are unfolded a few times gains (\code{perf/unfold-before-literal} 7.9 to 4.1 s). Heat is concentrated: on Init, 293 of 6,425 blocks take 92.8 \% of the 10.4 M block entries. Entry counters per block exist for experiments and cost one field test per activation when nobody asked for them.}
+
+\p{\strong{Review.} The adversarial review of the default set found no wrong verdict of these four switches on hand-written rows and 200 random exports with official verdicts, and one defect that costs a decline, not a verdict (S3-F7: a compiled body that builds a closure over a variable bound to a numeral below \code{\verb~|2^31~} faults, and the reference engine decides the unit). It also showed why a matcher-shaped tree must not run in the lazy-delta step: between the unfolding and the result the official loop can stand at a cases function and compare its arguments there.}
+
+\p{Related: [evaluation and tabling](design-evaluation-and-tabling); [control convention H](design-control-convention-h) for how the stepper runs under bounded host recursion; [the value model](design-value-model); [staging switches](design-switches); [the gate](design-gate). Detail: \src{docs/design/ISA.md} sections 3, 8.1 and 8.3; \src{docs/design/RECONCILIATION.md} item B2; \src{rlvm-machine/NOTES-M7.md} for the elaborator, the stepper and their measurements; \src{rlvm-machine/NOTES-M3.md} for the reduction side; \src{docs/design/review/soundness-default-set.md}. Sources: [the design session](ses-EMMW), [the machine](ses-Z72N), [machine speed](ses-CVTE).}

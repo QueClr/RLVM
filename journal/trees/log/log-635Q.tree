@@ -1,1 +1,15 @@
-\date{2026-11-24T23:09:38Z}
+\title{First complete pipeline: all 230 published tests correct}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{45563d9}
+\import{base-macros}
+
+\p{With loader, store, admission, driver and launcher published, the reference engine checks through the real pipeline. The first run of the 230 published tests gave 228 correct, no wrong verdict and 2 declines, both for a reference inside a unit to a member of the unit itself that the loader had left unbound. After the loader bound such names on demand all 230 were correct with no decline, error or timeout (JVM launcher, one worker, batch load). In that state Init is accepted in 12.1 s wall and 17.6 s CPU at 1.20 GB RSS, and Std in 27.5 s wall and 34.6 s CPU at 1.51 GB. The kernel of that publication makes the same judgments with less work per declaration: at kernel level in the arena-shaped container Init fell from 254.3 G to 222.5 G instructions (-12.5 \%).}
+
+\p{Detail: \src{rlvm-ref/README.md}. Commit \commit{45563d9}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

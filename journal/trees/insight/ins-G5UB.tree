@@ -1,0 +1,19 @@
+\title{The projected board places assume that the aarch64 to x86-64 ratio of the leaders carries over to RLVM}
+\taxon{Hypothesis}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/AR1.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/AR1.md}, sections 0.3 and 0.6, and \src{docs/research/12-baselines.md}, section 3; [the profiling session](ses-JRSD). Not verified: RLVM has never been measured on the x86-64 runner of the arena.}
+\ul{
+\li{The development host is aarch64. A leader measured there in the arena configuration needs 0.907 to 0.959 times its published x86-64 instruction count; over every baseline and big corpus the extremes seen are 0.90 and 1.05.}
+\li{The places of [the arena dry run](ins-6OVD) divide the count of RLVM on this host by such a ratio. They hold for every ratio in that range, with two exceptions at the edge of 1.05: the machine with \code{\verb~|warm,gated,expect~} would be 0.13 percent behind the checker in place 7, and the candidate set would be seventh instead of eighth.}
+\li{The leaders measured are binaries compiled ahead of time by other compilers; RLVM is a native image of Java code with another instruction mix. Nothing measured says that its ratio lies inside the range of the leaders.}
+\li{Also not established: whether the arena counts kernel instructions too. If it does, the reference engine gains 208.9 G, 2.5 percent, and the machine 29.5 G, 1.0 percent; no place changes.}
+}
+\p{One run of the arena build on an x86-64 machine with the arena container would turn this into an insight.}
+\p{See also: [the launchers](design-launchers).}

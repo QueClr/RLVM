@@ -1,0 +1,25 @@
+\title{Generated constants: files the official checker accepts and RLVM declines}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{reference-engine}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-load/README.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{The question.} The official kernel generates some constants itself when the export has no record for them: a recursor whose record is missing, and the \code{\verb~|Quot~} constants of a file that lacks one of the four records. The official checker accepts such files. RLVM declines them. Source: \src{rlvm-load/README.md}, section "Generated constants, late names, forward references", and \src{rlvm-admit/README.md}; [the session on the foundation modules](ses-BQZM).}
+\p{\strong{What is known.}}
+\ul{
+\li{A decline is not a wrong verdict, and the exporter never writes such a file: no declaration of the eight corpora is affected. The cases come from mutants and hand-written tests. See [accepted risks](accepted-risks).}
+\li{Declines by design of all kinds, not only this one: 413 of the 12,260 tutorial mutants and 65 of the 2,692 mutants of the bugs tests; over the four mutant corpora 1,683 of 17,775, of which 1,197 are in the corpus that wraps expressions in metadata.}
+\li{In batch mode nothing is needed from the loader: a reference to such a name is an unbound node that admission resolves by name. In pipelined mode the loader and the environment thread can claim the same name concurrently, which needs a late-name table in the store with a compare-and-set claim. The loader already makes every claim through the store.}
+\li{The rows and terms of generated constants are to be written by the environment thread into a generated region of the store, and they need shared levels. That region is deferred.}
+\li{Related declines by design: a declaration placed after its user in a large pipelined file; an export with two level records for one universe parameter; two different string literals in an export without the prelude constants the literal rule needs.}
+}
+\p{\strong{What would close it.} The generated region and the late-name table in the store, admission that fills them, and a probe set against the official checker for the order in which it provides generated constants. Until then the gates count these declines and require the count to stay what it is.}
+\p{See also: [admission of inductive types](design-inductive-admission); [the verdict protocol](design-verdict-protocol).}

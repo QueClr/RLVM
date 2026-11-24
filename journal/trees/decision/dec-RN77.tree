@@ -3,7 +3,45 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{loader}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/research/profiles/X5.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} accepted. Nothing of the prototype entered the published modules; the design and the prototype are kept.}
+
+\p{\strong{Context.} [The loader](design-export-loader) is one thread, and under pipelined loading a run cannot be shorter than its load: 12.4 s for Mathlib in the native image after the load path was tuned. A scout found that on exporter output the proof-only records of a theorem are a range of ids that can be recognised without parsing them: the exporter writes a declaration's records right before its declaration line, the type's records before the value's, so the records of a theorem's segment with an id above the type's are the proof. The proposal: the loader leaves those byte ranges in the file, keeps only where they are, and the worker that checks the theorem parses its range itself. The loader would then parse 18 to 28 \% of the expression records.}
+
+\p{\strong{Decision.} No-go at the checking speed of the day. Nothing of it enters the loader, the store or the driver while the check phase is longer than the load on the corpora that count. The design and the prototype are kept for the day the loader is the floor.}
+
+\p{\strong{Evidence.} A prototype on the real store, outside the published modules; JVM with the launcher's flags, quiet cores, medians of warm passes, Mathlib one run. The native image was not measured.}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{Mathlib}}
+\tr{\td{Expression records the loader still parses}\td{17.9 \%}\td{21.9 \%}\td{23.4 \%}\td{27.7 \%}}
+\tr{\td{Load phase, one thread, eager to lazy}\td{0.52 to 0.32 s}\td{0.93 to 0.53 s}\td{1.43 to 0.92 s}\td{10.64 to 6.35 s}}
+\tr{\td{Proofs decoded by 8 workers, CPU time, blocks to ranges}\td{0.16 to 0.51 s}\td{0.23 to 0.92 s}\td{0.31 to 1.65 s}\td{2.65 to 9.58 s}}
+\tr{\td{Load plus decode, CPU time}\td{+23 \%}\td{+25 \%}\td{+47 \%}\td{+20 \%}}
+\tr{\td{Constants whose type and value equal the eager load's}\td{all 59,979}\td{all 103,885}\td{all 151,772}\td{all 739,167}}
+}
+
+\ul{
+\li{\strong{It works.} With five guards the rule gives, for every constant, the same type and value as the eager loader, or fails with the same message, or restarts eagerly (309 files), on 18,005 small files (the 230 arena tests and 17,775 mutants) and on the four corpora of the table. Without the guard on name binding, 14 mutants that reorder declarations load differently.}
+\li{\strong{It buys less than the record count suggests.} The serial load gets 1.6 to 1.75 times faster, not five times: the pass over every line, the names, the levels, the declaration rows, the page faults and the shared prefix all stay.}
+\li{\strong{The workers pay 3 to 5 times the decode.} Half or more of that is \em{foreign records}: 5.5 to 6.9 \% of the references of proof records go to a proof record of an earlier theorem that no shared record needed, and fetching one from the file costs 280 to 315 ns.}
+\li{\strong{End to end it loses today.} This is arithmetic on measured terms, since the prototype has no engine. A pipelined pass costs the larger of the serial load and the check phase. With the machine's check phase of the day (8 workers, quiet cores: Std 1.85 s, cedar 2.26 s, Mathlib 42.3 s) checking is the larger term everywhere, so lazy ranges only add worker time: Std +6 \%, cedar +8 \%, Mathlib +3 \%. They would start to win once checking is 1.9 times faster on Std, 1.6 times on cedar and 3.9 times on Mathlib, and then by at most 36 to 43 \% of a loader-bound wall clock. When later passes of a process re-check without loading, they can only lose.}
+}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{The cheaper step toward the same floor was taken instead, and it needs no new trust argument: scanner threads, which were then taught to pack the proof records using the same finding about id ranges. See [dec-OC1F](dec-OC1F).}
+\li{The switch point is measurable with numbers the project already produces: the check phase with 8 workers against a load-only run. The measurements made after the packing agree with the direction of this decision: a warm pass with 8 workers on 8 cores is bound by its total CPU time, and lazy ranges raise the CPU time of load plus decode.}
+\li{If it is built later, the scout's report prescribes the form: a range is a proof block whose records are still text, so no consumer of a decoded block changes; restart instead of guessing; only an accept is final under lazy loading; and first cost the variant in which scanner threads pack the ranges, which removes the text from the workers, the second read of the file and the restart.}
+\li{Owed before it could ship: a mutation campaign aimed at the range rule, measurements in the native image and with loader and workers running together, and the behaviour when the file's pages are reclaimed on the 16 GB runner, since a lazy run reads the export twice.}
+\li{Kept by-products: a tool that compares the structural digest of every constant of two loads of one file, and measured unit costs (13 ns per line for the line end and its class, 28 to 32 ns per record for template tokenising, 20 to 35 ns per node written, 28 to 34 ns per node decoded from a block).}
+}
+
+\p{Detail: \src{docs/research/profiles/X5.md}. Source: [the session of profiles and prototypes](ses-JRSD).}

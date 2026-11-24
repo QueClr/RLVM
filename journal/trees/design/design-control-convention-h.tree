@@ -1,9 +1,72 @@
-\title{Control convention H}
+\title{Control convention H: bounded host recursion with lazily written frames}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{machine}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/review/stepper-convention.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented. The rules H1 to H12 are normative for how every judgment of \code{rlvm-machine} is written. The depth bound is 128 since 2026-11-24; the spike had chosen 64.}
+
+\p{[The worklist transition system](design-machine-worklist) is the specification of the machine. Convention H is how Java executes it. A sub-judgment is a Java call while at most D judgments are on the host stack, so the host stack acts as a cache of the top of the worklist. A judgment that runs on the host stack has no frame. Its frame is written at the moment the judgment is suspended, and it then has exactly the layout of the specification. The worklist \code{W} holds the suspended part of the computation, the host stack the running top of it, at most D + 2 judgments. With D set to 0 every call writes its frame and the driver loop is the stepper: the same source is the worklist machine. That build is a test configuration, not a second implementation.}
+
+\p{\strong{When a frame is written.} A judgment that finds more than D judgments below it becomes its own frame in state 0 and returns the signal SUSP; every step above it writes the frame of its continuation and returns the signal too. The frames go innermost first into a side buffer that grows downwards, the driver copies the buffer onto \code{W} with one array copy, and from then on \code{W} is run like any worklist, each resumed frame entering its step with depth 0. A \code{TRY} that completes writes nothing: its saved state is in Java locals. When a budget runs out or a failure is raised, the signals ABORT and FATAL unwind the host stack without writing, and the driver cuts whatever part of the segment is in \code{W}.}
+
+\subtree[design-control-convention-h-rules]{
+\title{The rules}
+
+\ul{
+\li{\strong{H1.} The specification does not change. What changes is when a frame exists in memory.}
+\li{\strong{H2.} A judgment is a chain of step methods, written once: an entry step and one continuation step per resume state, whose parameters are the payload words of its frame, the awaited result and the host depth. A step is entered by the step before it or by the driver from a frame, with no difference.}
+\li{\strong{H3.} A sub-judgment is called with depth + 1 and its result is tested once against the signal threshold; in tail position the call is returned with no test. A loop of the algorithm is a method, so a resumed loop costs one host frame.}
+\li{\strong{H4.} The entry step does, in this order: the inline answers (no tick, no event, no frame), the tick, the depth test, the body.}
+\li{\strong{H5.} Three integers that no judgment returns as a result are the signals SUSP, ABORT and FATAL; one comparison recognises all three.}
+\li{\strong{H6.} Frames are written through the side buffer. The driver is the only code that knows \code{W}; each judgment family has one switch that resumes a step from a frame.}
+\li{\strong{H7.} The result register is the Java return value and operands are parameters. The registers of a code-object activation live in a register stack, because a frame has no address until it is written.}
+\li{\strong{H8.} The fast path of a judgment is straight-line code at the head of its entry step; slow parts are out of line.}
+\li{\strong{H9.} Every sub-judgment call passes depth + 1, tail calls included; only the entry step tests it.}
+\li{\strong{H10.} An entry step stays below 325 bytecodes and a continuation step below 150. Continuation steps share a name prefix, so that the build can force them inline.}
+\li{\strong{H11.} Failures are return values, never Java exceptions. A tick is charged independently of D and of whether frames exist, so the outcome of a segment and the fuel it leaves are functions of the judgment and the budget alone.}
+\li{\strong{H12.} Tests that belong to the convention: the D = 0 configuration gives the same value ids, memo contents, tick counts and outcomes; the frames written stay below 0.1 \% of the call events on Init; nests one million deep run on a 512 KiB thread stack; a static check enforces the step sizes.}
+}
+}
+
+\subtree[design-control-convention-h-spike]{
+\title{What the spike measured}
+
+\p{The spike \src{spikes/stepper/README.md} wrote three small judgments (evaluation without delta, readback, structural conversion) under each convention over one operation library with hash-consed values. All variants return the same results for 115,807 roots of Init and 292,275 roots of Cedar. CPU time relative to plain host recursion, geometric mean over four workloads (Init and Cedar, declaration types only and types with definition values, 16 MiB sessions), ratio of the minimum pass times, aarch64, container with the arena's limits:}
+
+\table{
+\tr{\th{Convention}\th{Native image, GraalVM CE}\th{JVM, Graal JIT}\th{JVM, C2}}
+\tr{\td{the specification as first written: every frame in \code{W}, registers in fields}\td{1.35}\td{1.31}\td{1.57}}
+\tr{\td{a fused loop per judgment family, registers in locals}\td{1.11}\td{1.03}\td{1.17}}
+\tr{\td{H with D = 64}\td{1.04}\td{1.05}\td{1.02}}
+}
+
+\p{Frames written per judgment on Init: 0.19, 0.064 and 0.00011 in the order of the table. Instruction counts overstate every candidate: in the native image H executes 15 \% more instructions than plain recursion for 6 \% more CPU time. What costs is the data-dependent dispatch of an explicit stack: the fused loops take 25 \% more branch misses than recursion, H none. The comparison of the candidates is in [the decision](dec-10ZO).}
+}
+
+\subtree[design-control-convention-h-bound]{
+\title{The depth bound as built}
+
+\p{The spike chose 64: with 8 the convention costs 7 to 10 points more, and 32, 64, 256 and no bound cannot be told apart. On the real machine, checking Init wrote 0.234 \% of its call events as frames under 64 (185,128 frames for 79.2 M call events), above the bound of rule H12; 0.041 \% under 128 and 0.017 \% under 256, with identical ticks, call events and outcomes. The constant became 128, with which a later tree wrote 32,274 frames for 63.5 M call events, 0.051 \%. The bound is a field of the machine (\code{\verb~|-X machine.hostDepth=N~}), so one build runs 0, 128 and unbounded. CPU time on Init with the generic tier, one worker, JVM launcher with C2, three interleaved rounds: mean 15.95 s at 64, 15.61 s at 256 and 18.99 s at 0. The pure worklist machine costs about 19 \% there.}
+
+\p{With the default switch set (native image, 8 workers, warm pass inside a quiet window) 512 and 2048 were measured against 128 and no corpus gains: reachability 0.61 and 0.58 s wall at 128, 0.60 s at 512, 0.64 s at 2048; cedar 2.06 and 2.11 s at 128, 2.18 s and 2.19 s. The bound stays at 128, and with it the thread stack the driver gives a worker.}
+}
+
+\subtree[design-control-convention-h-inline]{
+\title{The inline lists of rule H10}
+
+\p{The native-image compiler does not inline the continuation steps on its own. Two lists (force inline every continuation step, never inline the slow paths) are generated from the class files of the machine. Measured on matched images of the same jars with the default switch set, two interleaved rounds, CPU time of the warm pass with 8 workers: Init -1.3 \%, Std -0.7 \%, the Cedar slice -4.4 \%, cedar -1.3 \%, reachability +1.3 \% inside its spread; wall clock equal. At the integration of 2026-11-24 the lists were measured and not adopted. Since then \src{scripts/build.sh} generates them at build time from the machine jar that goes into the image and builds the native image with them; the option \code{--no-h10} leaves them out, and a build in which the generation or the image build fails falls back to an image without them. The lists are tuning, not correctness.}
+}
+
+\p{\strong{In the gate.} [The gate](design-gate) runs every declaration under depth bounds 0 and unbounded against 128 and compares outcome, reason, ticks, call events and the words of every record. For the default switch set the comparison shows no difference. It found one real defect on the way (finding M8-F1): an inline cache that was not filled when the value arrived through a frame, so that the tick count of 2 of 8,064 declarations of the Cedar slice depended on the bound.}
+
+\p{\strong{The price, and the limits of the evidence.} Every call of a judgment must be followed by the signal test or be a tail return; a forgotten test shows only on deep terms or under a budget, which is why the D = 0 configuration is run on every test. The spike's workload is three small judgments without tabling, on aarch64 only (the arena runner is x86-64), on a shared host where ratios are good to about 3 points.}
+
+\p{Related: [the decision that fixed the convention by measurement](dec-10ZO), [the machine](design-machine-worklist), [staging switches](design-switches). Detail: \src{docs/design/review/stepper-convention.md} (the rules with a code template), \src{docs/design/ISA.md} section 8.2, \src{spikes/stepper/README.md}, \src{rlvm-machine/SWITCHES.md} (the measurements of the depth bound and of the inline lists), \src{rlvm-machine/NOTES-M6.md} (item F22, the bound of 128). Source: [the design session](ses-EMMW) and [the machine sessions](ses-CVTE).}

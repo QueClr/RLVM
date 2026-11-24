@@ -1,1 +1,18 @@
-\date{2026-11-24T23:09:37Z}
+\title{Scheduler slices, a cheaper environment thread and a time account}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{8ca5a23}
+\import{base-macros}
+
+\p{The driver now accounts for time: per worker what was spent on a CPU, in the run queue, in collections and parked, the environment lane, a time series and a trace per unit. The account showed two things. The environment thread spent 4.0 of its 4.85 s on Mathlib adding up the shared bytes of the store after every step; it refreshes that sum at most every 20 ms now, and its CPU time fell from 4.69 s to 1.56 s. In later passes one batch of the whole file was cut into as many contiguous parts as there are workers, so that a heavy unit sat at the end of a part; a worker without work now takes the next slice of at most 256 units for itself.}
+
+\p{Std with 8 workers, native image, quiet windows: check-only passes took 2.15 s before; with slices the median of 10 rounds is 1.67 s (-23 \%), the same as the bounded split that slices replaced (1.63 s). On Mathlib nothing changes beyond noise, as expected: the driver's waits are 1 \% there. Published with 106 tests, 103 green and 3 opt-in.}
+
+\p{Detail: \src{docs/research/profiles/P7.md}, \src{rlvm-driver/README.md}. Commit \commit{8ca5a23}. Session: [profiles and prototypes](ses-JRSD).}

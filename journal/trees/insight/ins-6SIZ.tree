@@ -1,0 +1,19 @@
+\title{The heat accounting cost more than the compiled blocks won back}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\import{base-macros}
+
+\p{Source: \src{rlvm-truffle/NOTES-T3.md}, section 3; [the profiling session](ses-JRSD). reachability, one worker, quiet windows, the tier as its first owner left it, whose governor promoted a block by measured time.}
+\ul{
+\li{Counting every entry of a block costs 2.4 percent on the JVM and 5.0 percent in the native image against the stepper alone.}
+\li{Timing on top, even at one sampled entry in 4,096, costs 11 percent on the JVM and 8.5 percent in the image, because a sampled entry times every block entered beneath it.}
+\li{Compiled blocks win back about that much and no more: against "tier attached, nothing promoted" they gain 4.7 percent on the JVM and 1.7 percent in the image. Net against the stepper: -2.5 percent to parity on the JVM, +3.3 percent in the image, +2 to +4 percent on the Cedar slice.}
+}
+\p{The final policy never switches the heat accounting of the machine on: the tier counts, per machine, the activations it does not take. A governor that rents by measured time has to earn its own meter first, and here it could not.}
+\p{See also: [the Truffle tier](design-truffle-tier).}

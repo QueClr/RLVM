@@ -11,7 +11,7 @@
 \meta{origin}{docs/design/OWNER-NOTES.md}
 \import{base-macros}
 
-\p{\strong{Status:} implemented. The practical policy is the default since 2026-11-24; one launcher option selects the strict mode. One strict-mode decline, for the \code{nondep} flag of a let, existed only as an unpublished patch when this was written.}
+\p{\strong{Status:} implemented. The practical policy is the default since 2026-11-24; one launcher option selects the strict mode. Both strict-mode options, of the loader and of the reference kernel, are in the tree.}
 
 \p{RLVM answers accept, reject or decline for an export. The contract says which of these answers the default configuration owes on which input. It exists because "the verdict of the official checker on every input" turned out not to be a property an engine on values can have: the official kernel's answer depends on its cache order, on the non-transitivity of its comparison and on the object identity of export records, see [the divergence classes](design-official-divergence). The owner chose between two readings on 2026-11-24, see [the decision](dec-TQSI); the lasting form is in [standing policies](standing-policies-exactness).}
 
@@ -27,11 +27,11 @@
 \subtree[design-exactness-contract-items]{
 \title{The contract of the default configuration}
 
-\ol{
-\li{(a) Never accept a statement that is not derivable (kind F). Absolute.}
-\li{(b) The official verdict on every real input: everything the exporter writes (the corpora), the arena's good and bad tests, and the mutant corpora with their stored official verdicts.}
-\li{(c) Everything the official checker accepts is accepted. A rejection of the primary engine is always confirmed by the reference engine, and a unit the primary engine declines goes to it; see [the verdict protocol](design-verdict-protocol).}
-\li{(d) A kind T accept is tolerated. The known classes are written down with one export each.}
+\ul{
+\li{\strong{(a)} Never accept a statement that is not derivable (kind F). Absolute.}
+\li{\strong{(b)} The official verdict on every real input: everything the exporter writes (the corpora), the arena's good and bad tests, and the mutant corpora with their stored official verdicts.}
+\li{\strong{(c)} Everything the official checker accepts is accepted. A rejection of the primary engine is always confirmed by the reference engine, and a unit the primary engine declines goes to it; see [the verdict protocol](design-verdict-protocol).}
+\li{\strong{(d)} A kind T accept is tolerated. The known classes are written down with one export each.}
 }
 
 \p{What shows each item. For (a): [adversarial reviews](design-adversarial-review) with hostile exports whose strict rows must all be rejected, and seeded faults that show the rows reach the code. For (b) and (c): [the gate](design-gate), that is the differential runs on the corpora, the 230 arena tests and the 17,775 mutants. For (d): the record in \src{docs/design/review/official-divergence.md}. The order is fixed by the owner's note: the machine may be the default engine once (a) to (c) are shown by the gates and an adversarial review of the candidate has found no kind F.}
@@ -46,7 +46,7 @@
 \tr{\th{}\th{\code{practical}}\th{\code{strict}}}
 \tr{\td{Engine}\td{The default engine by priority, or the one named with \code{\verb~|-X engine=NAME~}.}\td{The reference engine, whatever the priorities say. Another engine, or the differential engine, with it is a usage error with status 64: the strict mode is one engine.}}
 \tr{\td{Exactness-only settings of the engines}\td{None is passed; each engine's own default, off, holds.}\td{\code{\verb~|ref.exact=official~} for the reference kernel: where the official verdict depends on object identity, the kernel probes the official second pass and, if that pass can change anything, checks the declaration again under both continuations; it declines the declaration only if the two verdicts differ. Judgments of admission start with empty caches.}}
-\tr{\td{Loader}\td{A metadata node around a term is transparent: the wrapped term stands for it.}\td{\code{strictMetadata}: a declaration whose type or value carries a metadata node is declined, per unit.}}
+\tr{\td{Loader}\td{A metadata node around a term is transparent: the wrapped term stands for it.}\td{\code{strictMetadata}: a declaration whose type or value carries a metadata node, or a let with the flag \code{nondep} set, is declined, per unit.}}
 \tr{\td{Other engines}\td{An engine that declares the key \code{policy} receives \code{\verb~|policy=practical~}.}\td{It receives \code{\verb~|policy=strict~}, so a further engine can follow the policy without a change of the launcher.}}
 }
 
@@ -63,7 +63,7 @@
 \title{What the strict mode does not reach}
 
 \ul{
-\li{Metadata and the \code{nondep} flag of a let are declined, not represented: a strict run of a file that has them gives no verdict. The decline for \code{nondep} was a patch handed to the owner of the loader and not yet published; until it is, the strict mode accepts one hostile export that the official checker rejects.}
+\li{Metadata and the \code{nondep} flag of a let are declined, not represented: a strict run of a file that has them gives no verdict. No let record of the eight corpora or of the arena tests has the flag set, 0 of 550,621, and none of them has a metadata record. The audit of the reference engine still describes the decline for the flag as an unpublished patch; the loader's document, which is later, records it as implemented and tested.}
 \li{In three groups of judgments of inductive admission the official kernel shares one checker; the strict kernel gives each judgment empty caches and is fresher than the official one there.}
 \li{An object-identity hazard inside a judgment of admission is declined at once, since there is no session to check it both ways. It was not seen on the corpora.}
 }

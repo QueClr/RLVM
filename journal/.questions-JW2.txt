@@ -1,0 +1,34 @@
+JW2 (insights, examples, problems) - notes and questions for the journal lead, 2026-11-24
+
+1. Sources under work/. AGENTS.md says not to link files under work/. Where a finding lives only in
+   work/status/warm.md or work/status/machine-integration.md I state the result and cite the in-repository
+   document that carries its headline (docs/BENCHMARKS.md, rlvm-machine/SWITCHES.md, rlvm-load/README.md) with
+   \src, and describe the status file in words ("the first warm table", "the integration of wave 6").
+   \meta{origin} is always a path inside the repository. Affected: the warm table, JVM against native image,
+   max(load, check), the inference share (prob), the Mathlib packing count (77,143,904 of 107,037,712: from the
+   publication record of the load path; the README has Init and Std only).
+
+2. Links to JW1's trees. Every tree ends with a "See also" paragraph that links design-* notes and a few dec-*
+   decisions that existed when I emitted (checked for existence at that moment; journal-check passes). If JW1
+   renames or deletes one of those addresses, the link becomes a diagnostic in my tree. The link table is
+   regenerable; tell me (or delete the "See also" paragraph of the tree).
+   Decisions linked: dec-7QMU dec-WX9Z dec-E3EX dec-Z6DD dec-4TQJ dec-80ZZ dec-246U dec-ADIK dec-36MX dec-KXE1
+   dec-QN1O dec-TQSI dec-MOCU dec-T79V.
+
+3. Hypotheses. Three trees have \taxon{Hypothesis} (allocated with journal-new insight, index kind "insight"):
+   the aarch64 / x86-64 ratio behind the projected board places, the ten-core claim of P7, the unbuilt derived
+   rule per projection chain of the exact-proof-conversion review.
+
+4. Not written because I could not find it in the documents: "warm sessions pay 16-28 % of the steps". The
+   session-cap insight carries the figures the documents do state (steps against time by cap).
+
+5. The level example. The documents give `inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1) | mk : a -> T a`
+   (rlvm-inductive/README.md, rlvm-ref/README.md), not a three-parameter form; the example tree uses the
+   documented form.
+
+6. docs/design/review/reference-caches.md still had placeholders in its sections 7 to 9 (cost, gates, not
+   established) when I read it; the problem tree on the strict mode says so and quotes only section 0 for the
+   cost ("zero declarations").
+
+7. The example of the Cedar unit under the wrong let rule shows a schematic body, labelled as such: the
+   documents name the unit and its counts, not its text.

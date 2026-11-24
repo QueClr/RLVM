@@ -1,0 +1,34 @@
+\title{Making the machine the default engine under the practical contract}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{reference-engine}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-machine/SWITCHES.md}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+\p{\strong{State in the documents of 2026-11-24.} The reference engine is the default engine. The machine is selected by option; the reference engine then re-checks every rejection and decides every unit the machine declines. The machine was the default from 19:41Z to 20:35Z and was taken back because new hostile exports showed wrong accepts against the official checker, see [typing values](ins-AAXM). Source: the note at the top of \src{rlvm-machine/SWITCHES.md} and \src{docs/BENCHMARKS.md}.}
+\p{\strong{The contract.} Since the decision of the maintainer for practical exactness, the default configuration must never accept a statement that is not derivable, must give the official verdict on every real input, and must accept everything the official checker accepts; accepting a derivable statement that the official checker rejects for reasons internal to its implementation is tolerated and written down. See [standing policies](standing-policies) and [accepted risks](accepted-risks). The machine may be the default once the gates show the first three and an adversarial review of the candidate has found no false accept.}
+\p{\strong{What is done.}}
+\ul{
+\li{The findings E1-F1 to E1-F6 are fixed; E1-F7 is of the tolerated kind. With the fixed machine the full gate of the plain machine and of the default set shows no wrong verdict, 17,775 mutants show no soundness and no completeness difference, and 1,153,493 engine checks over the arena tests, the corpora and 16 Mathlib slices show no verdict difference from the reference engine. Source: \src{docs/design/review/official-divergence.md}, section 6.}
+\li{The adversarial review found no false accept in the default set and none in the candidate, the default set with \code{\verb~|eager~} and both shortcuts, on 987 hostile rows with official verdicts and 200 random programs. Source: \src{docs/design/review/soundness-default-set.md}, section 10.}
+\li{The launcher has one option for the policy; the strict policy is the reference engine alone. Source: \src{rlvm-main/README.md}.}
+\li{A gate for a default configuration exists whose hostile step uses stored official verdicts and lets only rows marked as tolerated be accepted.}
+}
+\p{\strong{What is open}, from the conditions of the review:}
+\ul{
+\li{The named switches for the two shortcuts must switch the behaviour of \code{\verb~|facts~} and \code{\verb~|probes~} on with them; the options are inert without those switches.}
+\li{The 423 rows of the review enter the hostile suite with their kinds, the rows for the seeded faults first.}
+\li{A finding that is no wrong verdict, S3-F7: the compiled code declines a valid unit whose body builds a closure over a variable bound to a small numeral. It is fixed or counted.}
+\li{The strict re-check of the pipeline stays what decides a rejection of the machine. An accept of the plain machine there is final, so a wrong accept of the plain machine is a wrong accept of the pipeline whatever the switch set does.}
+\li{Not covered by the review: parallel workers, the native image, and the corpora and mutants under the candidate.}
+\li{The choice of the default switch set itself: with or without \code{\verb~|eager~}, with or without the shortcuts, by warm wall clock over all corpora.}
+}
+\p{\strong{What would close it.} The gate for a default configuration green on a distribution in which the machine has the default priority, with the hostile suite extended as above, and the benchmark tables regenerated for that distribution.}
+\p{See also: [the decision on the machine as default engine](dec-T79V); [the exactness contract](design-exactness-contract); [the gate](design-gate).}

@@ -1,1 +1,19 @@
-\date{2026-11-24T23:09:31Z}
+\title{Universe levels, Nat and String literals as modules of their own}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\tag{levels}
+\tag{nat}
+\meta{release}{Unreleased}
+\meta{commit}{164409d}
+\import{base-macros}
+
+\p{\code{\verb~|rlvm-level~} implements universe levels with two families of comparison: the official kernel's incomplete relation (\code{\verb~|isEquivOfficial~}, \code{\verb~|isGeqOfficial~}) and a complete one (\code{\verb~|isEquiv~}, \code{\verb~|isGeq~}, \code{\verb~|canonId~}). Its golden set holds 4,358 equivalence answers and 2,939 instantiation answers of the official checker v4.36.0. \code{\verb~|rlvm-nat~} implements the Nat functions that the kernel computes natively and the String literals, tested against 77,720 results computed by the official 4.36.0 kernel itself. They were installed with 45 and 54 tests green.}
+
+\p{A first install of \code{\verb~|rlvm-nat~} had been built from sources in the middle of an edit, in which a value made again after a reset got a dead handle. Since then a module is installed only from a frozen copy of its sources, after its tests have passed on that copy.}
+
+\p{Detail: \src{rlvm-level/README.md}, \src{rlvm-nat/README.md}. Commit \commit{164409d}. Session: [foundation modules and the reference pipeline](ses-BQZM).}

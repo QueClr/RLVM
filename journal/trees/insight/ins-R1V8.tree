@@ -1,0 +1,26 @@
+\title{With 8 workers a warm pass costs the larger of the load and the check, and the loader is right behind}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{loader}
+\tag{performance}
+\meta{origin}{docs/BENCHMARKS.md}
+\import{base-macros}
+
+\p{Source: the analysis of the first warm table of 2026-11-24, whose headline rows are in \src{docs/BENCHMARKS.md}; the scout report \src{docs/research/profiles/X5.md} uses the same model; [the session on wave 6 and the pipeline](ses-CVTE). Machine with \code{\verb~|warm,gated,expect~}, JVM launcher, 8 workers on 8 quiet cores. W is the wall clock of a warm pass that loads and checks, L the time of its loader thread, C the wall clock of a check-only pass.}
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{Mathlib}}
+\tr{\td{W, s}\td{0.96}\td{1.72}\td{2.21}\td{25.6}}
+\tr{\td{L, s}\td{0.6 to 0.7}\td{1.25}\td{1.82}\td{13.5}}
+\tr{\td{C, s}\td{0.80}\td{1.88}\td{1.92}\td{}}
+}
+\ul{
+\li{Pipelining hides the whole load behind the checking: W is about the larger of L and C. On Std a pass that loads is even a little faster than a check-only pass, whose units are all ready at once.}
+\li{Checking is the larger term on the JVM everywhere, but only by 5 to 50 percent below Mathlib. An engine that is twice as fast would gain about a quarter on Std and a fifth on cedar, not half; a loader that is twice as fast would gain nothing on Std.}
+\li{Seven workers are as fast as eight on the JVM launcher or a little faster, and equal in the image: leaving one of the 8 cores to the loader and the environment thread costs nothing.}
+\li{Mathlib is the corpus where the engine is the larger term: 188 s of CPU in 25.6 s, with 13.5 s of loading.}
+}
+\p{Both have to move, or the load has to be split over threads; see [the loader as the floor](prob-I7M9).}
+\p{See also: [the decision for pipelined loading](dec-4TQJ); [the export loader](design-export-loader).}

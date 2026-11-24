@@ -1,9 +1,89 @@
-\title{The term store}
+\title{The term store: 8-int nodes, three regions and two summaries per node}
 \taxon{Design}
-\date{2026-11-24}
+\date{2026-11-23}
 \author{claude-fable-5-2}
 \contributor{queclr}
-\meta{status}{draft}
+\tag{store}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ARCHITECTURE.md}
 \import{base-macros}
 
-\p{Being written.}
+\p{\strong{Status:} implemented in \code{rlvm-store}. The layout is the designed one; the deviations and the measured memory are below.}
+
+\p{The store holds all persistent data of a run as \code{int} ids into flat primitive arrays: terms, names, levels, literals, the declaration table and the packed proofs. Id 0 is "none". It is the base of [the architecture](design-architecture): the loader writes it, every engine reads it, and nothing in it is an object.}
+
+\subtree[design-term-store-node]{
+\title{The node}
+
+\p{A term node is 8 ints, 32 bytes. Word 0 is a header: 4 bits of kind, 12 bits of flags and a 16-bit saturating range of loose bound variables. Words 1 to 3 are the payload by kind: for an application the function, the argument and the head of the spine; for a binder the domain and the body; for a constant the constant id, the id of its level list and its name. Words 4 and 5 are a 64-bit mask of the de Bruijn indices that occur free below the node, with the last bit standing for every index from 63 on. Word 6 is \code{depMax}, word 7 is \code{lpSet}. Binder names, binder info, the \code{nondep} flag of a let and metadata nodes are not stored.}
+
+\p{The layout is interleaved, not one array per field, so that every consumer touches one cache line per node. The question was re-measured on the real access pattern, 4.0 M decoded nodes of Init's proofs walked from their roots on the JVM: 7.2 ns per visit interleaved against 9.3 ns for columns with the Graal JIT, 6.9 against 7.0 with C2. It was not measured in the native image.}
+
+\p{Every writer derives a node from its children with the same code: the loader for export nodes, the block decoder, the overlay constructors and promotion. A term therefore has the same summaries wherever it lives, and nothing in the store recurses on term depth.}
+}
+
+\subtree[design-term-store-regions]{
+\title{Regions, ids and identity}
+
+\p{A term id is a non-negative \code{int}; negative ints are left to the machine for its value tags. Ids from 1 up are the export region, shared and written by the loader thread. Ids with the bit \code{\verb~|0x20000000~} are the generated region, shared and written by the environment thread, empty for canonical files. Ids with the bit \code{\verb~|0x40000000~} are the overlay of one worker. A region is one flat \code{\verb~|int[]~} of at most \code{\verb~|2^28 - 1~} nodes; an export that needs more shared nodes is declined. The export region is sized at one node per 144 input bytes and grows by a factor 1.25 with a copy; on Mathlib it ends 88 \% full.}
+
+\p{The shared regions and decoded proof blocks have no hash index: two export records with the same content are two ids. \em{Equal ids imply equal terms, never the converse.} Overlay nodes are hash-consed by their constructors, and [the reference engine](design-reference-engine) copies every term it works on into the overlay, so inside an engine structural equality is identity of ids. The machine's values have an identity of their own, see [the value model](design-value-model).}
+}
+
+\subtree[design-term-store-summaries]{
+\title{The two summaries}
+
+\p{\code{depMax} is the largest rank of a constant mentioned anywhere below the node; 0 means none, and a reserved value means that a reference could not be bound. \code{lpSet} is the id of the sorted set of universe-parameter names below the node. With the loose range they turn the structural rules of the official kernel into integer tests at the roots of a declaration: the root is closed, its \code{lpSet} is a subset of the declared parameters, and its \code{depMax} is below the declaration's own rank, which says that every constant it mentions was declared earlier. The tests are complete because the official check visits every sub-term, so a property of the whole expression is a property of the root's summary.}
+
+\p{The same two words make cached facts independent of order. A fact about a closed shared term, for instance "this term passed check mode", is usable by a unit of rank \code{r} with parameters \code{L} exactly when the term's \code{depMax} is below \code{r} and its \code{lpSet} is inside \code{L}; no stamp is needed. A literal counts as mentioning its prerequisite constants (\code{Nat}, \code{\verb~|Nat.zero~}, \code{\verb~|Nat.succ~}, and the string constants), which keeps facts about literals monotone. As built, ranks are 1-based so that 0 can mean "no constant".}
+}
+
+\subtree[design-term-store-rest]{
+\title{Names, levels, literals, declarations, proofs}
+
+\ul{
+\li{\strong{Names} are interned structurally at load, 5 ints each, so "same name" is an integer comparison. One word of a name says which constant was declared under it; claiming it twice fails, which is the flat namespace of the official reader.}
+\li{\strong{Levels} are ids of the level module's store, kept as the export spells them, because recursor types are compared syntactically; see [universe levels](design-universe-levels). Level lists, parameter lists and the \code{lpSet} sets share one list store.}
+\li{\strong{Literals}: a natural below 2 to the 64th lives in its node; larger ones and strings live in a pool that is interned by content. A worker has a pool of its own for computed numbers.}
+\li{\strong{The declaration table} has one 8-int row per constant, one row per unit with an atomic status, and side rows for inductive types, constructors and recursors. Every fact the kernel reads about a constant is here and nowhere else, and the side rows hold what [admission](design-inductive-admission) derived, not what the export claimed.}
+\li{\strong{Proof blocks} hold the expression records that only one theorem's proof reaches, packed with variable-length integers. A block is decoded into the overlay of the worker that checks or unfolds the theorem in one forward loop, without recursion or hash-consing. The design estimated 5.5 bytes per record; measured are 4.37 on Init and 4.62 on Mathlib. How records get there is in [the loader](design-export-loader).}
+\li{\strong{Sharing flags} in the header (shared, binder body, invariant) tell the machine which nodes are worth tabling. The store derives them when it appends a node or decodes a block; of Init's decoded block nodes 52 \% carry none and need no tabling. See [evaluation and tabling](design-evaluation-and-tabling).}
+}
+}
+
+\subtree[design-term-store-memory]{
+\title{Memory on Mathlib}
+
+\p{The design budgeted 4.00 GB at the peak of loading with 6 workers and 3.55 GB afterwards, under a ceiling of 6 GB. Measured after a batch load of Mathlib on the JVM:}
+
+\table{
+\tr{\th{Region}\th{Allocated MiB}\th{Used MiB}\th{Entities}\th{Budget GB}}
+\tr{\td{Export terms}\td{1,340.7}\td{1,182.2}\td{38,739,557 nodes, 9.9 M of them promoted}\td{1.41}}
+\tr{\td{Proof blocks}\td{366.1}\td{361.2}\td{78,207,172 records in 475,132 blocks}\td{0.37}}
+\tr{\td{Loader state, released at the end of the load}\td{288.0}\td{288.0}\td{9,909,017 promoted records}\td{not budgeted}}
+\tr{\td{Names}\td{229.0}\td{164.6}\td{4,273,914}\td{0.15}}
+\tr{\td{Declarations}\td{84.0}\td{46.6}\td{739,167 constants}\td{0.04}}
+\tr{\td{Literals}\td{6.5}\td{3.5}\td{21,519}\td{0.03 with levels and lists}}
+\tr{\td{Total}\td{2,314.3}\td{2,046.2}\td{}\td{2.04}}
+}
+
+\p{After the loader state is released the store is 2,026.3 MiB allocated and 1,758.2 MiB in use: within 5 \% of its budget. Names and declarations are over-sized by their growth policy.}
+}
+
+\subtree[design-term-store-deviations]{
+\title{Deviations and gaps}
+
+\ul{
+\li{Names are claimed before the terms of a unit are written, so that the members of an inductive block bind to each other.}
+\li{The special constants are split: the loader binds a special name to its constant and rank when the name is claimed, the environment thread records the guard state. A literal's summary must not depend on how far the environment pass is.}
+\li{Generated constants are written only after the load is complete, by the environment thread as the single writer; there is no concurrent table of late names.}
+\li{The instruction budgets of the design (60 per appended node, 150 per overlay constructor, 60 per decoded record) are exceeded by a factor of 2 to 4. In time, on the JVM with the Graal JIT in the arena-shaped container: 15.2 ns to append an export node with nearby children, 40.3 ns for an overlay application that creates a node and 8.4 ns for one that finds it; on the host JVM, 24 ns per decoded block record of Init.}
+\li{The \code{nondep} flag of a let is part of the official term identity and is not stored (finding R2-F1, see [the cache audit](design-reference-caches)).}
+\li{The peak resident set of one huge declaration is 2 to 4 times its nodes, because the overlay's node array and index grow by copying: 5.3 GB for the arena test \code{\verb~|perf/app-lam~}. A chunked node array would remove it and was not built, since every engine reads the array directly.}
+}
+}
+
+\p{Detail: \src{docs/design/ARCHITECTURE.md} section 2 for the design, \src{rlvm-store/README.md} for the implementation, its invariants, measurements and tests. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}
