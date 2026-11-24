@@ -413,12 +413,19 @@ launcher reports them per pass; every pass ACCEPT.
 | N (NOT official) | 422 / 415 / 451 / 439 | 439 | 408 | 2,450 | 313 |
 | DN (NOT official) | 384 / 388 / 371 / 388 | 388 | 356 | 2,180 | 310 |
 
-WALL-CEDAR
+| Cedar slice `cedar-hot-ax` (8,418 units) | wall ms, passes 1 .. 4 | median of passes 2 .. 4 | check ms (median) | process CPU ms (median) | load ms (median) |
+|---|---|--:|--:|--:|--:|
+| A (step 1) | 552 / 542 / 543 / 519 | 542 | 514 | 2,930 | 270 |
+| D | 478 / 442 / 447 / 443 | 443 | 413 | 2,400 | 257 |
+| D + `m4b` | 447 / 449 / 430 / 434 | 434 | 405 | 2,360 | 257 |
+| D + `facts,m4b` | 439 / 450 / 452 / 448 | 450 | 423 | 2,380 | 250 |
+| N (NOT official) | 486 / 515 / 492 / 482 | 492 | 464 | 2,620 | 263 |
+| DN (NOT official) | 429 / 454 / 465 / 426 | 454 | 426 | 2,340 | 258 |
 
 Reading: with eight workers a slice of this size is bounded by its pipelined load (310 to 340 ms of the 390 to 550
 ms), so the wall clock moves less than the CPU time: the shortcuts on top of D -16 % of the wall clock (462 -> 388
-ms) and -24 % of the process CPU time; `m4b` on top of D 462 -> 461 ms: nothing. The warm wall clock of all of
-Mathlib was not measured (section 8).
+ms) and -24 % of the process CPU time on the Mathlib slice, nothing on the Cedar slice (443 -> 454 ms: inside the
+spread of the passes); `m4b` on top of D 462 -> 461 ms and 443 -> 434 ms: inside the spread. MATHLIB-WALL
 
 ## 7. Tests
 

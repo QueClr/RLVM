@@ -3,7 +3,8 @@
 
 Run CMD as a TIMING measurement on quiet cores.
 
-  * One measurement at a time on this host (lock work/perf-history/.quiet.lock).
+  * One measurement at a time on this host (lock work/perf-history/.quiet.lock),
+    first come, first served (tickets in work/perf-history/quiet.queue/).
   * While CMD runs, every other process of this session (all processes of the
     session's cgroup: agents' shells, builds, tests, the orchestrator) and every
     other container is kept OFF the measurement cores; their old affinity is
@@ -39,7 +40,7 @@ import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HIST = os.path.join(ROOT, "work", "perf-history")
+HIST = os.environ.get("RLVM_QUIET_DIR") or os.path.join(ROOT, "work", "perf-history")
 LOCK = os.path.join(HIST, ".quiet.lock")
 STATE = os.path.join(HIST, "quiet.state.json")
 LOG = os.path.join(HIST, "quiet.log")
@@ -320,13 +321,48 @@ def main(argv):
     measure = cpus if cpus else big_cpus(8)
     os.makedirs(HIST, exist_ok=True)
 
+    # First come, first served: a ticket per waiter (flock alone let late comers overtake, and some
+    # windows waited half an hour). Only the oldest live ticket tries the lock.
+    qdir = os.path.join(HIST, "quiet.queue")
+    os.makedirs(qdir, exist_ok=True)
+    ticket = f"{time.time_ns():020d}.{os.getpid()}"
+    tpath = os.path.join(qdir, ticket)
+    open(tpath, "w").close()
     lockf = open(LOCK, "w")
     t0 = time.time()
+    told = 0.0
     try:
-        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        print("quiet.py: waiting for the measurement in progress ...", file=sys.stderr)
-        fcntl.flock(lockf, fcntl.LOCK_EX)
+        while True:
+            live = []
+            for e in sorted(os.listdir(qdir)):
+                try:
+                    pid = int(e.rsplit(".", 1)[1])
+                except (ValueError, IndexError):
+                    continue
+                if os.path.exists(f"/proc/{pid}"):
+                    live.append(e)
+                else:
+                    try:
+                        os.remove(os.path.join(qdir, e))
+                    except OSError:
+                        pass
+            if not live or live[0] == ticket:
+                try:
+                    fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    pass
+            if time.time() - told > 120:
+                pos = live.index(ticket) if ticket in live else 0
+                print(f"quiet.py: waiting for the measurement in progress ({pos} window(s) ahead in the queue) ...",
+                      file=sys.stderr)
+                told = time.time()
+            time.sleep(1.0)
+    finally:
+        try:
+            os.remove(tpath)
+        except OSError:
+            pass
     waited_lock = time.time() - t0
 
     # a herd left behind by a killed wrapper
