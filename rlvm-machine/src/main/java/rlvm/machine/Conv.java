@@ -460,7 +460,8 @@ final class Conv {
         if ((t >>> 1) == 0 || (s >>> 1) == 0) {
             return m.fault(MachineErrors.E_INTERNAL); // NONE or HOLE is never a side of a comparison
         }
-        if ((m.sw & Op.SW_M4A) != 0 && sameShape(m, t, s) && seenSame(m, t, s)) {
+        int fuel = (m.sw & Op.SW_M4A) != 0 ? sameShape(m, t, s) : 0;
+        if (fuel != 0 && seenSame(m, t, s, fuel)) {
             // [D28] the two values stand for one expression: the official is_equiv of quick_is_def_eq
             if ((m.debug & Op.DBG_SHORTCHECK) != 0 && Debug.shortCheck(m, t, s, T) != 0) {
                 return Op.FATAL; // shortcheck (ISA 5.5): the complete procedure must answer T as well
@@ -990,34 +991,49 @@ final class Conv {
     }
 
     /**
-     * The pairs for which the structural identity walk {@link Same} is tried at c0 (D28): a suspension on either side
-     * (identity is then decided without forcing it), two closures of one kind, two applications of the same length,
-     * two projections; and only while the walks of this declaration have not wasted {@code SAME_WASTE_MAX} nodes.
+     * The pairs for which the structural identity walk {@link Same} is tried at c0 (D28), chosen by what a T saves
+     * and by the measured share of walks that see identity (NOTES-M4 W4): two suspensions (identity is decided
+     * without forcing them: 40 %), two closures of one kind (no binder is opened: 80-96 % for Pi types of different
+     * terms), two projections, and two applications of the SAME head and length whose head may reduce (flag ACTIVE:
+     * definition, theorem, recursor, quotient, projection), where a T saves the unfolding. Applications of a rigid
+     * head (constructor, inductive type, variable, axiom) are left to the complete procedure, whose c8 compares
+     * their arguments one by one and meets the walk again on every closure among them; a suspension against a
+     * value never was the same expression in the corpora. And only while the walks of this declaration have not
+     * wasted {@code SAME_WASTE_MAX} nodes.
+     * @return the fuel of the walk, 0 = no walk
      */
-    private static boolean sameShape(Machine m, int t, int s) {
+    private static int sameShape(Machine m, int t, int s) {
         if (t <= Layout.HOLE || s <= Layout.HOLE || m.x4.sameWaste >= Ext.SAME_WASTE_MAX) {
-            return false;
+            return 0;
         }
         int[] vh = m.vh;
-        int wt = vh[t << Layout.REC_SHIFT];
-        int ws = vh[s << Layout.REC_SHIFT];
+        int ot = t << Layout.REC_SHIFT;
+        int os = s << Layout.REC_SHIFT;
+        int wt = vh[ot];
         int kt = wt >>> Layout.KIND_SHIFT;
-        int ks = ws >>> Layout.KIND_SHIFT;
-        if (kt == Layout.SUSP || ks == Layout.SUSP) {
-            return true;
+        if (kt != vh[os] >>> Layout.KIND_SHIFT) {
+            return 0;
         }
-        if (kt != ks) {
-            return false;
+        switch (kt) {
+            case Layout.NEU:
+                return (wt & Layout.W0_ACTIVE) != 0 && vh[ot + Layout.A] == vh[os + Layout.A]
+                        && (wt & Layout.AUX_MASK) == (vh[os] & Layout.AUX_MASK) ? Same.FUEL_NEU : 0;
+            case Layout.SUSP:
+            case Layout.LAM:
+            case Layout.PI:
+            case Layout.PII:
+            case Layout.PROJ:
+                return Same.FUEL;
+            default:
+                return 0;
         }
-        return kt == Layout.NEU ? (wt & Layout.AUX_MASK) == (ws & Layout.AUX_MASK)
-                : kt == Layout.LAM || kt == Layout.PI || kt == Layout.PII || kt == Layout.PROJ;
     }
 
     /** {@link Same#same} with its accounting: the outcome as a probe event (B12's counters: T seen, U not seen). */
-    private static boolean seenSame(Machine m, int t, int s) {
-        boolean r = Same.same(m, t, s);
+    private static boolean seenSame(Machine m, int t, int s, int fuel) {
+        boolean r = Same.same(m, t, s, fuel);
         if (!r) {
-            m.x4.sameWaste += Same.FUEL - m.x4.sameFuel;
+            m.x4.sameWaste += fuel - m.x4.sameFuel;
         }
         if (m.stats) {
             m.probe(Op.B12, r ? T : Layout.U);

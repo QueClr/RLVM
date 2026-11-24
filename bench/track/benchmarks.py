@@ -133,11 +133,21 @@ def main() -> int:
     out.append("")
     out.append("## What the numbers are")
     out.append("")
+    # The warm numbers (the first two columns of owner note 12) are not taken by the ladder: they come from
+    # bench/warm.sh (rlvm -X passes=N) and are kept as a hand-maintained fragment that is inserted below.
+    warm_fragment = os.path.join(os.path.dirname(os.path.abspath(__file__)), "warm-wall-clock.md")
+    has_warm = os.path.isfile(warm_fragment)
     out.append("- **Order (owner note 12): warm wall clock with 8 workers and pipelined loading, warm wall clock with 1 worker, cold")
-    out.append("  wall clock of a fresh process, CPU time, peak RSS, instructions.** THE FIRST TWO ARE MISSING: every figure here is")
-    out.append("  one fresh process per run on a batch load (what the arena runs), i.e. cold wall clock and its CPU time, which")
-    out.append("  charge the warm-up that the owner's target does not. A warm pass needs a launcher that checks an export more")
-    out.append("  than once in one process (`docs/PLATFORM.md`, section I.7); until then read these tables as the cold picture.")
+    if has_warm:
+        out.append("  wall clock of a fresh process, CPU time, peak RSS, instructions.** The first two are in the section \"Warm wall")
+        out.append("  clock\" at the end (`bench/warm.sh`: the same process checks the same export again; full table in")
+        out.append("  `work/status/warm.md`). Every OTHER table here is one fresh process per run on a batch load (what the arena")
+        out.append("  runs), i.e. cold wall clock and its CPU time, which charge the warm-up that the owner's target does not.")
+    else:
+        out.append("  wall clock of a fresh process, CPU time, peak RSS, instructions.** THE FIRST TWO ARE MISSING: every figure here is")
+        out.append("  one fresh process per run on a batch load (what the arena runs), i.e. cold wall clock and its CPU time, which")
+        out.append("  charge the warm-up that the owner's target does not. A warm pass needs a launcher that checks an export more")
+        out.append("  than once in one process (`docs/PLATFORM.md`, section I.7); until then read these tables as the cold picture.")
     out.append("  CPU time is `perf stat` task-clock summed over all threads and child processes; instructions are user-space")
     out.append("  instructions; peak RSS is GNU time's maximum resident set size of the process tree's largest process.")
     out.append("- **Where**: this host (aarch64; Cortex-X925 performance cores), one fresh container per run, shaped like the arena")
@@ -296,6 +306,11 @@ def main() -> int:
     out.append("")
     if builds:
         out.append("RLVM builds measured: " + "; ".join(sorted(builds)) + ".")
+        out.append("")
+    if has_warm:
+        # "## Warm wall clock": headline rows of work/status/warm.md, maintained with bench/warm.sh.
+        with open(warm_fragment) as handle:
+            out.append(handle.read().rstrip("\n"))
         out.append("")
     text = "\n".join(out) + "\n"
     if args.stdout:

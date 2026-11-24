@@ -99,6 +99,14 @@ class M4SameTest {
         assertFalse(Same.same(m, Layout.HOLE, val(f, "n0")));
     }
 
+    /** {@code idn ((fun z => z) n0)} twice (a definition at the head): the argument is a suspension of two different terms. */
+    private static int[] twoApplicationsOfADefinition(Fixture f) {
+        int n0 = val(f, "n0");
+        int a = f.apply(val(f, "(fun (w : Nat) (idn ((fun (z : Nat) z) w)))"), n0);
+        int b = f.apply(val(f, "(fun (w : Nat) (u : Nat) (idn ((fun (z : Nat) z) w)))"), n0, n0);
+        return new int[] {a, b};
+    }
+
     @Test
     void convAnswersByIdentityWithoutInstantiatingOrForcing() {
         for (int depth : new int[] {Op.HOST_DEPTH, 0}) {
@@ -106,21 +114,27 @@ class M4SameTest {
             Fixture off = fixture(depth, false);
             for (Fixture f : new Fixture[] {on, off}) {
                 Machine m = f.m;
-                int[][] pairs = {twoClosures(f, "n0"), twoSuspendedArguments(f), variableAgainstLambda(f)};
-                for (int[] p : pairs) {
+                // closures, and applications of a head that may reduce: the walk answers for the pair itself.
+                // Applications of a rigid head (the axiom f): c8 compares the arguments (one CARGS), and the walk
+                // answers for the pair of suspended arguments.
+                int[][] pairs = {twoClosures(f, "n0"), twoApplicationsOfADefinition(f), twoSuspendedArguments(f), variableAgainstLambda(f)};
+                for (int i = 0; i < pairs.length; i++) {
+                    int[] p = pairs[i];
                     long cbind = m.calls[Op.CBIND];
                     long apply = m.calls[Op.APPLY];
                     long force = m.calls[Op.FORCE];
                     long cargs = m.calls[Op.CARGS];
+                    long delta = m.calls[Op.DELTA];
                     long seen = m.probes[3 * Op.B12 + T];
                     assertEquals(T, f.conv(p[0], p[1]), f.show(p[0]) + " =?= " + f.show(p[1]));
                     assertEquals(Layout.POS, f.pair(p[0], p[1]) & Layout.POS, "the pair is recorded");
                     if (f == on) {
-                        assertEquals(1, m.probes[3 * Op.B12 + T] - seen, "answered by the identity walk");
+                        assertEquals(1, m.probes[3 * Op.B12 + T] - seen, "answered by one identity walk (row " + i + ")");
                         assertEquals(0, m.calls[Op.CBIND] - cbind, "no binder was opened");
                         assertEquals(0, m.calls[Op.APPLY] - apply, "no body was instantiated");
                         assertEquals(0, m.calls[Op.FORCE] - force, "no suspension was forced");
-                        assertEquals(0, m.calls[Op.CARGS] - cargs, "no argument was compared");
+                        assertEquals(0, m.calls[Op.DELTA] - delta, "nothing was unfolded");
+                        assertEquals(i < 2 ? 0 : 1, m.calls[Op.CARGS] - cargs, "arguments compared only under a rigid head (row " + i + ")");
                     } else {
                         assertEquals(0, m.probes[3 * Op.B12 + T] - seen, "v0 has no identity walk");
                         assertTrue(m.calls[Op.CBIND] - cbind + m.calls[Op.CARGS] - cargs > 0, "v0 compares the parts");
@@ -152,6 +166,83 @@ class M4SameTest {
                 }
             }
         }
+    }
+
+    /** {@code fun y => g y a} as the inner lambda of a function of {@code n} parameters applied to a, then n - 1 times n0. */
+    private static int deepClosure(Fixture f, int n, String a) {
+        StringBuilder t = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            t.append("(fun (x").append(i).append(" : Nat) ");
+        }
+        t.append("(fun (y : Nat) (g y x0))");
+        for (int i = 0; i < n; i++) {
+            t.append(")");
+        }
+        int[] args = new int[n];
+        args[0] = val(f, a);
+        for (int i = 1; i < n; i++) {
+            args[i] = val(f, "n0");
+        }
+        return f.apply(val(f, t.toString()), args);
+    }
+
+    /**
+     * Far frames (ISA 2.4): the inner lambda reads a variable 70 or 72 binders out, so its frame has 63 near slots
+     * and a REST chain. The two closures are different terms (index 70 / index 72) over environments of different
+     * lengths; the variable they read is looked up in the REST chains.
+     */
+    @Test
+    void farFramesAreWalked() {
+        for (int depth : new int[] {Op.HOST_DEPTH, 0}) {
+            Fixture f = fixture(depth, true);
+            Machine m = f.m;
+            int a = deepClosure(f, 70, "(f n0)");
+            int b = deepClosure(f, 72, "(f n0)");
+            int direct = val(f, "(fun (y : Nat) (g y (f n0)))");
+            assertNotEquals(a, b);
+            assertTrue((m.rs[Values.b(m, a)] & Layout.RUN_FAR) != 0, "the frame of the first closure is far: " + f.show(a));
+            assertTrue(Same.same(m, a, b), "one expression under two far frames");
+            assertTrue(Same.same(m, a, direct) && Same.same(m, direct, b), "and the closed lambda is the same expression");
+            long cbind = m.calls[Op.CBIND];
+            assertEquals(T, f.conv(a, b));
+            assertEquals(0, m.calls[Op.CBIND] - cbind, "answered by the walk");
+            // another value in the far slot: not the same; convertible (two / 2) or not (n0)
+            int c = deepClosure(f, 70, "(f two)");
+            int d = deepClosure(f, 72, "(f (lit 2))");
+            assertFalse(Same.same(m, c, d));
+            assertEquals(T, f.conv(c, d), "the complete procedure answers");
+            assertFalse(Same.same(m, a, c));
+            assertEquals(F, f.conv(a, c));
+            // one term under two far frames that differ in a slot the term does not read: not seen (the REST run
+            // holds every outer binding), and the complete procedure answers T
+            int e = f.apply(val(f, farTerm(70)), farArgs(f, 70, "n0"));
+            int g = f.apply(val(f, farTerm(70)), farArgs(f, 70, "two"));
+            assertNotEquals(e, g);
+            assertEquals(T, f.conv(e, g));
+        }
+    }
+
+    /** A function of n parameters whose inner lambda reads the first one; the second one is not read. */
+    private static String farTerm(int n) {
+        StringBuilder t = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            t.append("(fun (x").append(i).append(" : Nat) ");
+        }
+        t.append("(fun (y : Nat) (g y x0))");
+        for (int i = 0; i < n; i++) {
+            t.append(")");
+        }
+        return t.toString();
+    }
+
+    private static int[] farArgs(Fixture f, int n, String second) {
+        int[] args = new int[n];
+        args[0] = val(f, "(f n0)");
+        args[1] = val(f, second);
+        for (int i = 2; i < n; i++) {
+            args[i] = val(f, "n0");
+        }
+        return args;
     }
 
     @Test

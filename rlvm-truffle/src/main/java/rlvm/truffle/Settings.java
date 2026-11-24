@@ -25,7 +25,11 @@ import java.util.Map;
  *                      to install the code of very large blocks, "code is too large")
  * rlvm.t2.period=N     heat listener period: entries of one block by one worker (default 1024)
  * rlvm.t2.threads=N    compiler threads of the Truffle engine (default 1; ISA 8.5)
- * rlvm.t2.timing=N     one entry in N is timed by the machine's heat accounting (default 64)
+ * rlvm.t2.timing=N     one entry in N is timed by the machine's heat accounting (default 4096; 0 = never). A timed
+ *                      entry times every block entered beneath it, so on deep evaluation the accounting's own
+ *                      default of 64 times almost every entry: +30-50% CPU on reachability (NOTES-T2 section 5)
+ * rlvm.t2.unit0=NS, rlvm.t2.unit1=NS   base-tier time of one entry of a block that has no timed sample yet:
+ *                      unit0 + unit1 per instruction, nanoseconds (defaults 20 and 10; a model, not a measurement)
  * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps)
  * rlvm.t2.cost0=MS, rlvm.t2.cost1=MS   compile cost model before anything was compiled: cost0 + cost1 per
  *                      instruction, CPU milliseconds (defaults 3.0 and 0.15; then learned from the compilations)
@@ -50,6 +54,8 @@ final class Settings {
     final int threads;
     final int timing;
     final int at;
+    final double unit0Ns;
+    final double unit1Ns;
     final double cost0Ms;
     final double cost1Ms;
     final int roles;
@@ -76,7 +82,9 @@ final class Settings {
         minInstr = Integer.getInteger("rlvm.t2.minInstr", 0);
         period = Math.max(1, Integer.getInteger("rlvm.t2.period", warm ? 256 : 1024));
         threads = Math.max(1, Integer.getInteger("rlvm.t2.threads", warm ? 2 : 1));
-        timing = Integer.getInteger("rlvm.t2.timing", 64);
+        timing = Integer.getInteger("rlvm.t2.timing", 4096);
+        unit0Ns = dbl("rlvm.t2.unit0", 20.0);
+        unit1Ns = dbl("rlvm.t2.unit1", 10.0);
         at = Integer.getInteger("rlvm.t2.at", 0);
         cost0Ms = dbl("rlvm.t2.cost0", 3.0);
         cost1Ms = dbl("rlvm.t2.cost1", 0.15);

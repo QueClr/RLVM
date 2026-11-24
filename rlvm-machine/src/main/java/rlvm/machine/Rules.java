@@ -45,7 +45,8 @@ import rlvm.store.Terms;
  * to force or apply something) answers NONE, and the caller runs the complete procedure (K1 tree, DELTA).
  * The majors a firing normalises are the ones the unfolded definition would normalise on that path, in
  * that order (K-like majors are never split), so nothing is forced that the generic walk leaves alone.
- * Derivation is capped at 1 / {@code k2Share} (0.2 %) of the session's ticks, and no rule is used or made
+ * Rules are active only inside a declaration that has run 16,384 ticks (light declarations never touch the
+ * table). Derivation is capped at 1 / {@code k2Share} (0.2 %) of the session's ticks, and no rule is used or made
  * while a node is being derived, nor under eager reduction ({@code m.ER}: the comparison of the K rule is
  * the only mode-dependent step of WHNF; a rule is derived and used in plain mode only). Lazy delta does not
  * use rules ({@code Reduce.delta}, ISA 3.6).
@@ -207,6 +208,12 @@ final class Rules {
     private static final int K2_MAX_CODE = 1 << 20;
     private static final long K2_BUDGET = 4096;
     private static final long K2_MIN_BUDGET = 64;
+    /**
+     * Rules are counted, looked up and fired only in a declaration that has run this many ticks: the library
+     * corpora (95 % of their declarations make at most 100 reduction steps) then never touch the rule table, and
+     * a declaration that evaluates loses 16 k of its millions of ticks.
+     */
+    private static final long K2_ARM_TICKS = 16384;
 
     /**
      * The derived rule of the head of {@code v}, if the head is hot (class comment): counts the unfolding, makes
@@ -227,6 +234,12 @@ final class Rules {
             return Layout.NONE;
         }
         Reduce.Ext e = m.x3;
+        if (!e.k2Armed) {
+            if (e.k2Share != 0 && m.ticks() - e.k2DeclTicks0 < K2_ARM_TICKS) {
+                return Layout.NONE; // a light declaration: nothing is counted, looked up or fired (W2 of NOTES-M3)
+            }
+            e.k2Armed = true;
+        }
         if (e.k2Deriving || m.ER != 0) {
             return Layout.NONE; // (under eager reduction K's comparison answers differently: no rule is made or used)
         }

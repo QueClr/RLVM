@@ -85,6 +85,10 @@ def run(cmd, env, log, timeout):
     """Runs cmd; returns (exit status, wall s, cpu s, peak rss kB, stderr text). Output goes to log."""
     t0 = time.monotonic()
     with open(log, "wb") as out:
+        # The exact command (and the VM flags that replace the launcher's, if any) heads the log.
+        opts = env.get("RLVM_JAVA_OPTS")
+        out.write(("# " + (f"RLVM_JAVA_OPTS={shlex.quote(opts)} " if opts else "") + shlex.join(cmd) + "\n").encode())
+        out.flush()
         p = subprocess.Popen(cmd, env=env, stdout=out, stderr=subprocess.STDOUT)
         killer = threading.Timer(timeout, p.kill)
         killer.start()

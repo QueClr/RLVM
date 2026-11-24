@@ -48,7 +48,26 @@ final class Infer {
      * Session state private to this package (caches, counters, scratch of its own): add fields here
      * instead of asking for fields in {@link Machine}. One instance per machine, field {@code m.x5}.
      */
-    static final class Ext {
+    static final class Ext implements Machine.Counters {
+        /** Names of {@link #counterValues} in the statistics ({@code machine.<name>}; M6 sums them over the sessions). */
+        private static final String[] COUNTER_NAMES = {"match.tried", "match.hit", "pchk.set", "pchk.hit", "joint.binders",
+            "infer.icHits", "facts.ticks", "facts.use.propMask", "facts.use.propMaskSet", "facts.use.unread", "facts.use.unreadSet",
+            "facts.use.proof", "facts.use.proofYes", "facts.use.proofNo"};
+
+        @Override
+        public String[] counterNames() {
+            return COUNTER_NAMES;
+        }
+
+        /** Read once, when the session is closed (no cost on a checking path). All but {@code facts.ticks} count while {@code m.stats}. */
+        @Override
+        public long[] counterValues() {
+            long[] u = factUse;
+            return new long[] {matchTried, matchHit, pchkSets, pchkHits, jointBinders, icHits, sigdTicks, u[Facts.USE_PROPMASK],
+                u[Facts.USE_PROPMASK_SET], u[Facts.USE_UNREAD], u[Facts.USE_UNREAD_SET], u[Facts.USE_PROOF], u[Facts.USE_PROOF_YES],
+                u[Facts.USE_PROOF_NO]};
+        }
+
         /** {@code CONST Nat} / {@code CONST String} of this session (ISA 4.5.3, R02 6.9); 0 = not made yet. */
         int natType;
         int strType;
@@ -1135,7 +1154,9 @@ final class Infer {
             }
         }
         int wn = twEnv(m, xb, end);
-        return wn < 0 ? m.fault(MachineErrors.E_MEM) : Eval.eval(m, term, m.envBase, wn, pls, d + 1);
+        // the INST of a telescope: the term is entered like the body of a beta step (M2's rule: no tabling record
+        // under SW_M2A, else EVAL as before; the same value either way)
+        return wn < 0 ? m.fault(MachineErrors.E_MEM) : Eval.evalBody(m, term, m.envBase, wn, pls, d + 1);
     }
 
     /** The binding of de Bruijn index {@code k} in the telescope's environment, as EVAL of a variable gives it; MISS: not a near slot. */

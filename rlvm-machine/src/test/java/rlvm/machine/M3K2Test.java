@@ -263,6 +263,24 @@ class M3K2Test {
         assertEquals(0, f.m.x3.k2Fired);
     }
 
+    /** A light declaration (below 16,384 ticks) never touches the rule table when the cap is in force. */
+    @Test
+    void aLightDeclarationDoesNotCount() {
+        assumeTrue(ready, "the machine is not complete in this tree");
+        int t = f.term("(fib (lit 9))");
+        f.m.reset();
+        f.m.beginDecl(Integer.MAX_VALUE, -1, 2_000_000, Long.MAX_VALUE);
+        f.m.sw = k2;
+        f.m.x3.k2Hot = 1;
+        f.m.x3.k2Share = 512;
+        try {
+            assertEquals("34", nf(f.eval(t), 0));
+        } finally {
+            f.m.sw = 0;
+        }
+        assertEquals(0, f.m.x3.k2Used, "heads counted in a light declaration");
+    }
+
     /** The derivation allowance (0.2 % of the session's ticks): a short session derives nothing. */
     @Test
     void aShortSessionDerivesNothing() {

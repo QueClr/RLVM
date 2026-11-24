@@ -33,7 +33,7 @@ import rlvm.store.Terms;
  * No judgment is called, no value is forced, nothing is reduced and no type is looked at: the answer
  * {@code true} states a fact about syntax, the one {@code is_equiv} states, up to the normalisations that
  * the value model applies everywhere (I-ID: beta and zeta of EVAL, canonical literals, PEEK). Everything
- * the walk does not understand, a far frame, a HOLE that is read, a LET suspension, and the end of its
+ * the walk does not understand, a HOLE that is read, a LET suspension, a pool literal, and the end of its
  * fuel or depth, is {@code false}: "not seen to be the same", after which the caller runs the complete
  * procedure. It is therefore not one of the congruence shortcuts of finding S-F1: it never asks whether
  * two different sub-terms are convertible.
@@ -45,8 +45,14 @@ import rlvm.store.Terms;
 final class Same {
     private Same() {}
 
-    /** Nodes (value records, term nodes, slots) one query may visit. nano-lean {@code same}: 512; gruszka: 16384. */
+    /**
+     * Nodes (value records, term nodes; eight identical slots of a run count as one) one query may visit. nano-lean
+     * {@code same}: 512; gruszka {@code closure_congr}: 16384. Measured on Init (step 1 + lazyeval): 91 % of the walks
+     * that see identity need fewer than 128 nodes, and the walks that run out of 256 were 70 % of all nodes visited
+     * in vain; a pair of applications therefore gets {@link #FUEL_NEU}.
+     */
     static final int FUEL = 256;
+    static final int FUEL_NEU = 96;
     /** Host recursion bound of one query. */
     static final int DEPTH = 40;
 
@@ -55,10 +61,15 @@ final class Same {
      * "not seen", never "different".
      */
     static boolean same(Machine m, int a, int b) {
+        return same(m, a, b, FUEL);
+    }
+
+    /** {@link #same(Machine, int, int)} under a fuel of {@code fuel} nodes; {@code m.x4.sameFuel} is what was left. */
+    static boolean same(Machine m, int a, int b, int fuel) {
         Conv.Ext x = m.x4;
-        x.sameFuel = FUEL;
+        x.sameFuel = fuel;
         boolean r = val(m, a, b, 0);
-        x.sameNodes += FUEL - x.sameFuel;
+        x.sameNodes += fuel - x.sameFuel;
         return r;
     }
 
@@ -141,7 +152,11 @@ final class Same {
         return terms(m, ta, fa, la, 0, tb, fb, lb, 0, 0, depth + 1);
     }
 
-    /** Two frames of one term (the same mask, so the same length and HOLE at the same places): slot by slot. */
+    /**
+     * Two frames of one term (the same mask, so the same length and HOLE at the same places): slot by slot. Far
+     * frames (ISA 2.4): the near slots, then the REST chains chunk by chunk from the innermost; a REST run holds
+     * every outer binding, read or not, so two far frames are seen as the same only if all of them are.
+     */
     private static boolean frames(Machine m, int fa, int fb, int depth) {
         if (fa == fb) {
             return true;
@@ -149,17 +164,47 @@ final class Same {
         int[] rs = m.rs;
         int ha = rs[fa];
         int hb = rs[fb];
-        if (((ha | hb) & Layout.RUN_FAR) != 0 || (ha >>> Layout.RUN_LEN_SHIFT) != (hb >>> Layout.RUN_LEN_SHIFT)) {
+        if (((ha ^ hb) & Layout.RUN_FAR) != 0 || (ha >>> Layout.RUN_LEN_SHIFT) != (hb >>> Layout.RUN_LEN_SHIFT)) {
             return false;
         }
-        return spines(m, fa, fb, ha >>> Layout.RUN_LEN_SHIFT, depth);
+        if (!spines(m, fa, fb, ha >>> Layout.RUN_LEN_SHIFT, depth)) {
+            return false;
+        }
+        return (ha & Layout.RUN_FAR) == 0 || rests(m, m.rs[fa + Layout.RUN_REST_WORD], m.rs[fb + Layout.RUN_REST_WORD], depth);
     }
 
-    /** The first {@code n} slots of two near runs, pairwise (HOLE only against HOLE: {@link #val}). */
+    /** Two REST chains (ids of their last chunks; a chunk is interned with its predecessor): chunk by chunk. */
+    private static boolean rests(Machine m, int ra, int rb, int depth) {
+        while (ra != rb) {
+            if (ra == 0 || rb == 0) {
+                return false;
+            }
+            int ha = m.rs[ra];
+            int hb = m.rs[rb];
+            int n = ha >>> Layout.RUN_LEN_SHIFT;
+            if (n != (hb >>> Layout.RUN_LEN_SHIFT) || !spines(m, ra, rb, n, depth)) {
+                return false;
+            }
+            ra = (ha & Layout.RUN_FAR) != 0 ? m.rs[ra + Layout.RUN_REST_WORD] : 0;
+            rb = (hb & Layout.RUN_FAR) != 0 ? m.rs[rb + Layout.RUN_REST_WORD] : 0;
+        }
+        return true;
+    }
+
+    /**
+     * The first {@code n} slots of two runs, pairwise (HOLE only against HOLE: {@link #val}). Identical slots (most
+     * slots of two frames of one term are HOLE or the same record) cost one comparison each and one unit of fuel
+     * per eight. The walk allocates no run, so the slab is not reallocated under it.
+     */
     private static boolean spines(Machine m, int ra, int rb, int n, int depth) {
+        final int[] rs = m.rs;
+        int pa = ra + Layout.RUN_H + (rs[ra] & Layout.RUN_FAR);
+        int pb = rb + Layout.RUN_H + (rs[rb] & Layout.RUN_FAR);
+        m.x4.sameFuel -= n >>> 3;
         for (int i = 0; i < n; i++) {
-            // the run slab is not reallocated by this walk, but it is re-read: no reference is kept across calls
-            if (!val(m, Runs.arg(m, ra, i), Runs.arg(m, rb, i), depth)) {
+            int x = rs[pa + i];
+            int y = rs[pb + i];
+            if (x != y && !val(m, x, y, depth)) {
                 return false;
             }
         }
@@ -172,19 +217,35 @@ final class Same {
 
     /**
      * The value of de Bruijn index {@code i} of a term that stands under {@code j} joint binders and {@code o}
-     * binders of its own side that it does not read, in a near frame {@code f}: NONE if it is not a slot of the frame
-     * (a binder variable, a far index, an index beyond the frame).
+     * binders of its own side that it does not read, in frame {@code f}: NONE if it is not a slot of the frame (a
+     * binder variable, an index beyond the frame). An index beyond the 63 near slots of a far frame is looked up in
+     * its REST chain, whose last chunk holds the innermost of the outer bindings (ISA 2.4, {@code Runs.enter}).
      */
     private static int slot(Machine m, int f, int i, int j, int o) {
         int k = i - j - o;
         if (k < 0 || f == Layout.RUN_EMPTY) {
             return Layout.NONE;
         }
-        int hdr = m.rs[f];
-        if ((hdr & Layout.RUN_FAR) != 0 || k >= (hdr >>> Layout.RUN_LEN_SHIFT)) {
+        int[] rs = m.rs;
+        int hdr = rs[f];
+        int len = hdr >>> Layout.RUN_LEN_SHIFT;
+        if (k < len) {
+            return Runs.fget(m, f, k);
+        }
+        if ((hdr & Layout.RUN_FAR) == 0) {
             return Layout.NONE;
         }
-        return Runs.fget(m, f, k);
+        k -= len;
+        for (int r = rs[f + Layout.RUN_REST_WORD]; r != 0;) {
+            int h = rs[r];
+            int n = h >>> Layout.RUN_LEN_SHIFT;
+            if (k < n) {
+                return rs[r + Layout.RUN_H + (h & Layout.RUN_FAR) + n - 1 - k];
+            }
+            k -= n;
+            r = (h & Layout.RUN_FAR) != 0 ? rs[r + Layout.RUN_REST_WORD] : 0;
+        }
+        return Layout.NONE;
     }
 
     /**
@@ -326,8 +387,8 @@ final class Same {
             return false;
         }
         if (j + o > 0) {
-            if (j + o >= Layout.NEAR_SLOTS || (T.fvMask(t) & ((1L << (j + o)) - 1 | Layout.MASK_FAR)) != 0) {
-                return false; // the term reads a binder of the walk (or a far index): no value is that
+            if (j + o >= Layout.NEAR_SLOTS || (T.fvMask(t) & ((1L << (j + o)) - 1)) != 0) {
+                return false; // the term reads a binder of the walk: no value is that (mask bit 63 is an outer index)
             }
             o += j; // from here on they are binders the term stands under and does not read
         }

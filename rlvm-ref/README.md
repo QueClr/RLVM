@@ -98,21 +98,40 @@ many small exports through `rlvm.main.RlvmChecker` in one JVM, `bin/levelcorpus.
 | what | reference engine, default | `-X levels=complete` | `-X engine=machine` (machine jar 01084ca09707, default) |
 |---|---|---|---|
 | `imax-right-successor`, `imax-nested-absorption` | reject, reject | accept, accept | reject, reject |
-| the 30 `either` tests | 28 official verdicts; the two tests on which leanchecker does not terminate (`eta-struct-major-no-whnf`, `eta-struct-major-and-no-whnf`) are declined in under a second | 26 (the two imax tests accepted) | 28 official verdicts; the two non-terminating tests ran into a 600 s limit (no decline) |
+| the 30 `either` tests | 28 official verdicts; the two tests on which leanchecker does not terminate (`eta-struct-major-no-whnf`, `eta-struct-major-and-no-whnf`) are declined in under a second | 26 (the two imax tests accepted) | 28 official verdicts; the two non-terminating tests ran into the time limit (600 s; one of them alone: 1,500 s), no decline |
 | the 230 published tests (`scripts/gate.sh`, slice) | 230 correct = 230 official verdicts, 0 declined | - | - |
 | level corpus: 6,300 generated exports, one level question each, asked through eleven parts of the checker (two sorts; level lists of a constant bare, under an application, after delta, with a phantom parameter; theorem value type; `is_prop` of a theorem type; instantiated constant type; constructor field universe; mutual types in one universe); official: 2,455 accept, 3,845 reject, 2,081 of the rejects semantically true | 6,300 official verdicts, 0 declined | 4,538 (1,762 accepted that the official checker rejects; the 319 inductive ones stay rejected, see above) | 6,300 official verdicts |
-| 600 more exports where inductive admission asks the level question of this engine (`inductive T (a : Sort l1) : Type | mk : (a : Sort l2) -> T a`; official: 163 accept, 437 reject) | 587 official verdicts; 13 accepted that the official checker rejects, all of them the known difference below (published jar before the change: 272) | 328 | 587, the same 13 |
+| 600 more exports where inductive admission asks the level question of this engine (`inductive T (a : Sort l1) : Type` with the constructor `mk : (a : Sort l2) -> T a`; official: 163 accept, 437 reject) | 587 official verdicts; 13 accepted that the official checker rejects, all of them the known difference below (published jar before the change: 272) | 328 | 587, the same 13 |
 | the 699 `SWAP_LEVEL` mutants of the four mutant corpora (official: 25 accept, 674 reject) | 699 official verdicts | 699 | 699 |
-| differential engine (`-X engine=diff -X diff.engine=machine`, test kit) on the 6,300 + 1,600 level exports | 0 difference records | 4 COMPLETENESS records per imax file (reference complete, machine official) unless `levels-complete` is given to the machine as well | - |
+| differential engine (`-X engine=diff -X diff.engine=machine`, test kit) on the 6,300 + 1,600 level exports | 0 difference records | with the machine jar of 14:30Z 4 COMPLETENESS records per imax file (reference complete, machine official) unless `levels-complete` was given to the machine as well | - |
 | Init / Cedar slice (`cedar-hot-ax`) / Std / cedar, 4 workers | accept (23.9 / 9.8 / 34.6 / 44.6 s CPU) | - | accept (28.1 / 9.7 / 26.0 / 34.9 s CPU), no `MACHINE-INCOMPLETE` line |
 
-GATE_PLACEHOLDER
+Guards on exactly the published jar (`scripts/gate.sh --dist work/prof/L/dist-pre --corpus all -j 4`
+inside `bench/slot.sh`, 14:35 - 16:03Z, log `work/prof/L/logs/gate-step2.log`): the 230 published
+tests 230 correct, 0 wrong, 0 declined; mutants 17,775 in four corpora: SOUNDNESS 0, COMPLETENESS 0,
+agree 16,092, declined 1,683, errors 0 (tutorial 12,260: 11,847 / 413; bugs / other / corner-cases
+2,692: 2,627 / 65; prelude 847: 839 / 8; mdata 1,976: 779 / 1,197) - exactly the counts of the gate
+of 12:20Z, before the change; differential self-test passed. Unit tests: 136 (135 run green, 1
+opt-in).
+
+Mathlib was not run with this jar (the session's permission check refused a 13 GB run on the
+overloaded host). It was accepted with `-X levels=official` by the previous publication (12:20Z,
+same comparison code), and the machine, whose level comparison is the same
+`LevelOps.isEquivOfficial`, accepted all 714,712 declarations of mathlib with 0 `MACHINE-INCOMPLETE`
+in M8's runs of 15:44Z and 15:57Z (also con-leche, cedar, cslib, navier-stokes-euler).
+
+The level checks of the table were repeated at 15:30 - 15:41Z on a second private distribution with
+the jars other owners had published meanwhile (admit 143aff8926eb, inductive 5f8165d2ceed, driver
+c0aeb3288f46, store f85c730603b8, load 26242def2701, main 6957058c0e9e, machine 904d8ff41d25, which
+reads `-X levels`): the same numbers in every row (`work/prof/L/logs/final-pre2.log`); with
+`-X levels=complete` the machine and the reference engine give the same verdict on all 6,300 level
+exports (4,217 accept); Init / Cedar slice / Std accepted by both engines.
 
 ### Known difference from the official kernel that involves levels (not in this module)
 
 The official `instantiate` keeps a level node only when its operands come back pointer-equal, and
 `add_inductive` applies the block's own constants with parameter objects it makes itself when it
-type-checks the recursor it generated (`check_recursors`, new in v4.36). There every level node above
+type-checks the recursor it generated (`check_recursors` in v4.36.0). There every level node above
 a parameter is rebuilt through `mk_max` / `mk_imax`, and the official kernel then compares the
 rebuilt spelling with the declared one: `inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1) |
 mk : a -> T a` is rejected by leanchecker ("application type mismatch": `Sort (imax u 1)` against

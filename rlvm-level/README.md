@@ -81,7 +81,7 @@ the same level.
 The rule behind that rejection, pinned against the real kernel by `OfficialRebuildGoldenTest`
 (1,600 answers of leanchecker v4.36.0 in `official-golden-rebuild.tsv`, 170 of them rejections):
 `add_inductive` refers to the block's types, constructors and recursors with parameter objects it
-makes itself (`lparams_to_levels`), and since v4.36 it type-checks the recursor it generated
+makes itself (`lparams_to_levels`), and in v4.36.0 it type-checks the recursor it generated
 (`check_recursors`). The type of each such reference is the declared type with **every level node
 above a parameter rebuilt** bottom-up (`succ` as it is, `max` through `mkMax`, `imax` through
 `mkIMax`, a level without parameters untouched), and the official kernel compares it with the

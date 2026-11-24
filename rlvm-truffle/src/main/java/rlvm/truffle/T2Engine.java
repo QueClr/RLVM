@@ -197,6 +197,14 @@ final class T2Engine {
         }
         long entries = h.entries(blk);
         long spent = h.spentNanos(blk);
+        if (h.timed(blk) == 0) {
+            // not sampled yet (one entry in `timing` is timed): the model of Settings.unit0Ns / unit1Ns
+            int n;
+            synchronized (this) {
+                n = blk < instructions.length ? instructions[blk] : 0;
+            }
+            spent = (long) (entries * (settings.unit0Ns + settings.unit1Ns * n));
+        }
         long process = Cpu.processNanos();
         if (settings.at > 0) {
             if (entries < settings.at) {

@@ -16,8 +16,8 @@ import rlvm.api.EngineProvider;
  * machine.switches=warm,gated,..   staging switches (Debug.parseSwitches: names, -name, none, default, all; without the
  *                                  setting: Op.SW_DEFAULT; ignored by a strict engine; rlvm-machine/SWITCHES.md)
  * machine.session-kib=N            the machine's own cap on a warm session: the machine forgets everything before a
- *                                  declaration once its arenas hold more than N KiB (0 = no cap of its own; the
- *                                  driver's -X session-mib applies in any case)
+ *                                  declaration once its arenas hold more than N KiB (default 1024; 0 = no cap of its
+ *                                  own; the driver's -X session-mib applies in any case: the smaller one resets first)
  * machine.declines=FILE            append one line per non-ACCEPT outcome of the machine to FILE (outcome, error code,
  *                                  unit, rank, units accepted in the session before it, name, message)
  * levels=official|complete         (the launcher's key, shared with the reference engine) complete = switch

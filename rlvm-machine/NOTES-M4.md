@@ -227,7 +227,7 @@ comparison under ER occurs in 150 of Init's 57,938 engine checks, 188 of Std's 1
 | # | Where | Deviation | Reason |
 |---|---|---|---|
 | D26 | 4.4.2 l2 (`Conv.lstepOnlyT / lstepOnlyS`, `evalT / evalS`); switch `lazyeval` (`Op.SW_LAZY_EVAL`, registered by M6 at my request) | when exactly ONE side of a lazy-delta step unfolds, the other side is not a projection and is weak-head normal (`Reduce.whnfFast` answers itself: flag or memo), the unfolding side is reduced by ONE `Reduce.whnf` and the pair continues at the step's quick test (frames `LSTEP[5]` / `LSTEP[7]`, which already carry exactly that continuation). A WHNF that does not move the side (never for a delta head) falls back to the official single step | the official loop would unfold that side step by step, `whnf_core(unfold_definition(tn))`, until it no longer unfolds, with the other side fixed. No same-head state can occur (the other side has no delta head: this is the reason ISA 3.6 gives for keeping single DELTA steps, and it does not apply), an intermediate form (delta-headed) is never identical to a weak-head normal form, `quick` refutes only WHNF forms, OFFSET needs constructor / literal forms, and the Nat fold is what WHNF does; so the loop can leave early only through a pair-table hit, which states a T that the completed loop finds again. The composition is `whnf`: reduction steps of the official kernel on one side, no congruence, no type, no skipped comparison. The work then runs in M3's WHNF loop: its memo, and BODY blocks / case trees / (later) derived rules when step 4 is on. Reviewed by the soundness review (15:06Z: no wrong verdict on 329 exports; its reading in `soundness-machine.md` 4.3) |
-| D28 | 4.4.1 c0 (`Conv.convStart`, `Same`); experiment switch `m4a` | after the tick and before anything is forced: for a pair with a suspension on either side, two closures of one kind, two applications of the same length or two projections, the bounded walk `Same.same(a, b)` (256 nodes, 40 levels; no judgment, no forcing, no reduction, no type) decides whether the two VALUES stand for the same EXPRESSION: terms under frames in lockstep, a frame variable replaced by its slot, constants and sorts by their levels under `ls`, binder variables by index, an application node against a NEU, a binder node against a closure. `true`: T, POS for the pair (under `shortcheck` re-derived by the complete procedure first). `false` ("not seen", never "different"): the complete procedure. A declaration whose failed walks visited 2^16 nodes starts no further walk (`Conv.Ext.sameWaste`) | the official `is_def_eq` starts with `is_equiv(t, s)` (structural equality of the two expressions, R02 8.2) and repeats it after `whnf_core` and after every lazy-delta step. The machine had it only as identity of refs, which is not complete for closures and suspensions: `SUSP(t, frame)` stands for `t[frame]`, and two suspensions of different terms (the same sub-term at two binder depths), or of one term under frames whose slots are different records of one expression, are one expression officially. `perf/loop-unfolded-once` is exactly that (R04: nano-lean `same`, fuel 512; R05: gruszka `closure_congr` / `same_val`). It is NOT one of the congruence shortcuts of S-F1: it never asks whether two different sub-terms are convertible; its T states what `is_equiv` states, up to the normalisations the value model applies everywhere (beta / zeta of EVAL, canonical literals, PEEK). The probe events are counted under B12 (T = seen, U = not seen) |
+| D28 | 4.4.1 c0 (`Conv.convStart`, `Same`); switch `same` (= experiment bit `m4a`; named by M6 15:40Z) | after the tick and before anything is forced, for a pair of two suspensions, two closures of one kind, two projections, or two applications of the SAME head and length whose head may reduce (flag ACTIVE), the bounded walk `Same.same(a, b)` (256 nodes, 96 for applications; 40 levels; no judgment, no forcing, no reduction, no type) decides whether the two VALUES stand for the same EXPRESSION: terms under frames in lockstep, a frame variable replaced by its slot (far frames: the REST chain), constants and sorts by their levels under `ls`, binder variables by index, an application node against a NEU, a binder node against a closure. `true`: T, POS for the pair (under `shortcheck` re-derived by the complete procedure first). `false` ("not seen", never "different"): the complete procedure. A declaration whose failed walks visited 2^16 nodes starts no further walk (`Conv.Ext.sameWaste`) | the official `is_def_eq` starts with `is_equiv(t, s)` (structural equality of the two expressions, R02 8.2) and repeats it after `whnf_core` and after every lazy-delta step. The machine had it only as identity of refs, which is not complete for closures and suspensions: `SUSP(t, frame)` stands for `t[frame]`, and two suspensions of different terms (the same sub-term at two binder depths), or of one term under frames whose slots are different records of one expression, are one expression officially. `perf/loop-unfolded-once` is exactly that (R04: nano-lean `same`, fuel 512; R05: gruszka `closure_congr` / `same_val`). It is NOT one of the congruence shortcuts of S-F1: it never asks whether two different sub-terms are convertible; its T states what `is_equiv` states, up to the normalisations the value model applies everywhere (beta / zeta of EVAL, canonical literals, PEEK). Which pairs are walked was chosen by measurement (W4): applications of a rigid head are left to c8, which compares their arguments one by one and meets the walk again on every closure among them; a suspension against a value never was the same expression in the corpora. The probe events are counted under B12 (T = seen, U = not seen) |
 | D29 | 4.4.2 l2 (`Conv.unfoldT / unfoldS`) | the delta step is `Rules.unfoldLazy` (M3), which is `Reduce.delta` unless `casetrees,m7a` are on; then a head of shape CASESON on a constructor major gives the alternative at once | request of M7 (14:17Z) and M3 (15:05Z): for that shape the iota belongs to the `whnf_core` of the same official step, so no state of the official loop is skipped. Their measurement (Init -2.6 % instructions on top of `code,casetrees`), their gate; this package only calls it |
 
 ### W4. Measurements
@@ -256,23 +256,60 @@ largest change of one test +12 ticks (no cost cliff; `work/m4/ticks/e1-{off,on}.
 count on all four, CPU lower on Init and Std; the Cedar slice's +1.3 % CPU is inside the noise of that batch and its
 instruction count fell).
 
-`Same` (`m4a`) on top of `warm,gated,expect,facts,probes,lazyeval` (counters; JVM launcher, the published code +
-`Same`): Init ticks 55.69 M -> 52.70 M (-5.4 %), call events 41.48 M -> 38.86 M, records 25.79 M -> 25.19 M,
-`CBIND` 415,589 -> 164,511 (-60 %), `CONV` not answered inline 1.93 M -> 1.67 M; walks 256,122 seen / 908,265 not
-seen. Cedar slice ticks 18.38 M -> 16.40 M (-10.7 %), call events -11.9 %, records 8.62 M -> 8.10 M (-6.0 %), run
-words -5.2 %, `CBIND` 697,516 -> 512,061 (-27 %); walks 115,233 seen / 300,078 not seen. The 230 published tests
-(native image): 642.7 M ticks -> 310.9 M, every test equal or lower; `perf/loop-unfolded-once` 332.0 M ticks and two
-E_MEM declines (444 s of wall under load) -> **272,629 ticks, accepted by the machine, 1.2 s**: the open item 7 of
-the integrator's list is closed without a congruence probe.
+`Same`, first version (published 15:24Z: near frames only; every pair with a suspension, two closures, two
+applications of one length, two projections; 256 nodes), on top of `warm,gated,expect,facts,probes,lazyeval`
+(counters, JVM launcher): Init ticks 55.69 M -> 52.70 M (-5.4 %), records 25.79 M -> 25.19 M, `CBIND` 415,589 ->
+164,511 (-60 %); walks 256,122 seen / 908,265 not seen. Cedar slice ticks 18.38 M -> 16.40 M (-10.7 %), records 8.62
+M -> 8.10 M, `CBIND` 697,516 -> 512,061 (-27 %); walks 115,233 / 300,078. The 230 published tests (native image):
+642.7 M ticks -> 310.9 M, every test equal or lower; `perf/loop-unfolded-once` 332.0 M ticks and two E_MEM declines
+(444 s of wall under load) -> **272,629 ticks, accepted by the machine, 1.2 s**: the open item 7 of the integrator's
+list is closed without a congruence probe.
 
-Batch b2 (native image with `Same`, six configurations in one binary): see `work/m4/batch-b2.out` and the table in
-`work/status/machine-M4.log`.
+**But it did not pay in instructions.** Batch b2 (binary `work/m4/dist-same`: that first version; six configurations
+in one binary, three runs each interleaved, load 80-150; mean CPU s / instructions G; `work/m4/batch-b2.out`):
+
+| corpus | A = step 1 | F = A + facts,probes | L = F + lazyeval | S = L + same (first version) | K = A + code,casetrees | KS = K + facts,probes,lazyeval,same |
+|---|--:|--:|--:|--:|--:|--:|
+| Init | 7.44 / 105.3 | 7.75 / 106.5 | 7.79 / 105.6 | 7.91 / 108.9 | 6.62 / 91.1 | 6.36 / 90.1 |
+| Std | 13.51 / 177.3 | 13.76 / 179.3 | 13.97 / 178.3 | 13.26 / 181.3 | 11.86 / 156.3 | 11.94 / 154.9 |
+| Cedar slice | 2.89 / 39.5 | 2.93 / 39.6 | 2.84 / 39.6 | 2.72 / 40.7 | 2.68 / 38.9 | 2.69 / 39.6 |
+| reachability | 8.06 / 59.1 | 8.20 / 59.1 | 8.11 / 59.1 | 8.20 / 59.1 | 2.98 / 28.7 | 3.02 / 28.7 |
+
+Reading: (1) `facts,probes` in their exact form COST instructions (Init +1.1 %, Std +1.1 %): the fact records are
+derived for every constant (58,566 `SIGD` on Init) and have one consumer left, and pass B pays a TRY per pair; (2)
+`lazyeval` gives back 0.6-0.9 % on Init / Std; (3) the first `Same` cost +3.1 % instructions on Init, +1.7 % on Std,
++2.8 % on the Cedar slice although it removed 5-11 % of the ticks: the walks that do not see identity were not
+free. Profile of the walks by shape (profiling copy, `work/m4/stats/sm-{init,cedar}.out`, step 1 + lazyeval + same;
+seen / not seen): Init `NEU / NEU` same head 125,879 / 520,152 (of which inductive-type heads 95,416 / 232,473,
+definition heads 21,585 / 266,686 with 17,574 walks that ran out of 256 nodes), `NEU / NEU` other head 176 /
+57,320, a suspension against a value 154 / 178,000, `PI / PI` of different terms 106,136 / 25,809, `LAM / LAM`
+20,956 / 29,278; Cedar slice `PI / PI` of different terms 171,048 / 6,878, `LAM / LAM` 41,625 / 9,620, `NEU / NEU`
+same head 28,678 / 72,110. And every frame comparison called the value comparison once per slot, 63 times for a
+frame that is HOLE almost everywhere.
+
+`Same`, second version (D28 as it stands; changes: far frames walked - on the Cedar slice half of the closures that
+are one expression have more than 63 bindings in scope -; a suspension against a value and applications of a rigid
+or of different heads no longer walked; 96 nodes for applications; identical slots of two runs compared in a tight
+loop, eight for one unit of fuel). Counters, the same switch set as above (JVM launcher; both rows with M6's
+eager-reduction declines): Cedar slice walks 257,325 seen / 66,604 not seen (first version with far frames 243,199
+/ 126,888; without 115,233 / 300,078), ticks 18.38 M -> **11.10 M (-40 %)**, call events 15.44 M -> 9.10 M, records
+8.62 M -> 6.58 M (-24 %), run words 94.6 M -> 69.0 M (-27 %); Init walks 244,547 / 380,087 (first version 257,196 /
+905,059), ticks 55.69 M -> 51.97 M (part of it the declined declarations). `perf/loop-unfolded-once`: 266,315
+ticks, accepted. Batch b3 (binary `work/m4/dist-tune`, CPU and instructions): table in
+`work/status/machine-M4.log` (line "BATCH b3").
 
 ### W5. Rejected or not done, with numbers
 
 - **`Same` also in the quick test after `whnf_core` and after every lazy-delta step** (tried as `m4b`): Init ticks
   52.703 M -> 52.705 M, Cedar slice 16.404 M -> 16.455 M, failed walks 0.91 M -> 1.52 M on Init. No gain: the pairs
   it would find are found by the walk at c0 of the argument comparisons. REJECTED, code removed.
+- **`Same` on every pair of applications and on a suspension against a value** (the first version): +3.1 % / +1.7 % /
+  +2.8 % instructions on Init / Std / Cedar slice (batch b2). REJECTED in that form; replaced by the selection of
+  D28.
+- **`lazyeval` also when the fixed side is a stuck recursor application without the WHNF flag or memo**: measured
+  how often the condition of D26 fails (profiling copy): Init 414,035 one-sided steps taken by WHNF, 13,206 not
+  taken because the fixed side is such an application, 6,769 an NSUC cell, 1,166 a suspension (PROJD); Cedar slice
+  32,001 / 5,139 / 19 / 35. Not worth a second condition; NOT DONE.
 - **CONG(c) read by CARGS (task item 2): NOT WIRED, on purpose.** The only classes of a plan that change what is
   compared are UNREAD and PROOF / PROOFL, i.e. B4 and B3, which S-F2 showed are not the official verdict; TYPE and
   the probe ranks only order pass B. With `skipargs` off a plan has nothing to say to pass A or pass C. Its cost
@@ -294,8 +331,8 @@ Batch b2 (native image with `Same`, six configurations in one binary): see `work
 
 | Switch | Guards (this package) | Evidence | Recommendation |
 |---|---|---|---|
-| `facts` | B7 only | exact by construction (manifest sorts); review rows strict; diff gates below | may be on (with M5's SIGD); worth little by itself (PIRR -92 %, VTYPE -69 % calls on Init, about -0.3 % instructions) |
-| `probes` | pass B, quick refutation, UNDEC, debt | order-only; review rows strict; diff gates below | harmless; not worth a default by itself (without B1 / B12 it has no measured gain) |
+| `facts` | B7 only | exact by construction (manifest sorts); review rows strict; diff gates | **not for the default set on this package's account**: PIRR -92 % and VTYPE -69 % calls on Init, but together with `probes` +1.1 % instructions on Init and Std (batch b2; b3 separates the two): the records cost more to derive than B7 saves |
+| `probes` | pass B, quick refutation, UNDEC, debt | order-only; review rows strict; diff gates | **not for the default set**: without B1 / B12 it has no gain (b2, b3) |
 | `lazyeval` | D26 | diff gates: 230 tests + four corpora, with and without `code,casetrees`, 0 differences, 0 declines; `shortcheck` runs; review 15:06Z; no cost cliff on the 230 tests | **ready to be on by default** (best together with step 4) |
-| `m4a` | D28 (`Same`) | diff gates: 230 tests (15,845 / 15,845, 0 declines) + four corpora, 0 differences; `shortcheck` on Cedar slice, reachability, Init; review exports (29) official under every set with `m4a`; `M4SameTest` | **ready for review by S, then default**: it is the only one of the four that also removes a decline (`loop-unfolded-once`) |
+| `same` (= `m4a`) | D28 (`Same`) | diff gates of both versions: 230 tests + four corpora + the subst-prop mutants, 0 differences, no decline but M6's eager-reduction ones; `shortcheck` (first version) on Cedar slice, reachability, Init, Std: DIFF-CLEAN; review exports (29) official under every set with it; `M4SameTest` (6 tests incl. far frames) | **for review by S; then on by default if batch b3 confirms it in CPU** (see the log): it removes the last machine decline of the 230 tests that is not an eager-reduction decline (`loop-unfolded-once`) and 40 % of the Cedar slice's ticks |
 | `-Drlvm.machine.m4=congruence,skipargs` | B1, B2, B12, B3, B4, ETAS mask | S-F1, S-F2: wrong verdicts | **never a default**; kept only to measure |

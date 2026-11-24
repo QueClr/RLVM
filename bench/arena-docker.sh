@@ -186,6 +186,9 @@ args=(run --rm --init --platform linux/arm64
       --label "$LABEL" --name "$name" --hostname rlvm-arena
       -e "HOST_UID=$uid" -e "HOST_GID=$gid" -e "RLVM_ROOT=$ROOT"
       -w "$workdir")
+# Started inside a bench/quiet.py window: mark the container as the measurement's own, so that the
+# wrapper leaves it on the measurement cores (every other container is moved off them meanwhile).
+if [ -n "${RLVM_QUIET_NAME:-}" ]; then args+=(--label "rlvm-quiet=$RLVM_QUIET_NAME"); fi
 
 # --- mounts ------------------------------------------------------------------
 writable=()

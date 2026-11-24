@@ -36,7 +36,10 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
 
 | Key | Values | Default |
 |---|---|---|
-| `machine.switches` | staging switches of ISA section 11: `gated`, `pchk`, `expect`, `warm`, `facts`, `tele`, `code`, `casetrees`, `probes`, `k2`, `inert`, or `all` (all but `k2`). Ignored by a strict engine | none = v0 |
+| `machine.switches` | staging switches, read left to right: `name` / `+name` adds, `-name` removes, `none` = v0, `default` = `Op.SW_DEFAULT`, `all` = the switches of ISA section 11 but `k2`. **`SWITCHES.md` is the one list** (name, bit, owner, state, evidence). Ignored by a strict engine | `Op.SW_DEFAULT` (today: none = v0) |
+| `machine.session-kib` | the machine's own cap on a warm session, in KiB of `Machine.engineBytes()`; 0 = none. The driver's `-X session-mib` applies as well; the smaller cap resets first | 1024 |
+| `machine.declines` | a file that receives one line per non-ACCEPT outcome of the machine: outcome, error code, unit, rank, units accepted in the session before it, name, message | none |
+| `levels` | the launcher's `official` / `complete` (shared with the reference engine): `complete` turns the switch `levels-complete` on | official |
 | `machine.debug` | debug modes of ISA 5.5: `memocheck`, `shortcheck`, `poison`, `scopeaudit`, `maskaudit`, `sharecheck`, `pubcheck`, `trace`, or `all` (all but `trace`) | none |
 | `machine.hostDepth` | host depth bound D of the control convention; 0 = every frame materialised (the worklist machine) | 128 |
 | `machine.memocheck.every`, `machine.memocheck.budget` | re-compute one memo hit in N; tick budget of one re-computation | 1; 65536 |
@@ -63,9 +66,18 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
   `probes.Bk.T/F/U`, `code.blocks`, `code.entered`, `code.elaborated.<ROLE>`, `code.stayedGeneric.<ROLE>`,
   `code.icHits`, `code.icMisses`, `factsDerived`, `factsNone`, `audits`, `memoChecks`, `memoInconclusive`,
   `memoByConv`.
+- **Eager reduction** (NOTES-M6 F26): a declaration that enters eager reduction (an argument `eagerReduce _ _`)
+  is DECLINED in every configuration (`E_LIMIT`, `UNSUPPORTED_INPUT`; `machine.eagerDeclines`): conversion under
+  it depends on the mode and on the official kernel's per-declaration caches, which the machine's tables do not
+  reproduce. `Machine.enterER()` is the only way to enter the mode (`M6GuardTest`). The reference engine decides
+  these units (164 of Init's 57,938 engine checks).
+- More statistics (wave 6): `capResets`, `sessionCapBytes`, `eagerDeclines`, `alloc.grows / growBytes / resets /
+  resetBytes` (session arrays allocated after the machine was created), and every counter a package's session
+  state reports through `Machine.Counters` (`machine.<name>`).
 - **The exit status alone proves nothing**: the driver re-checks a unit the machine declines with the
-  reference kernel. A gate reads `machine.declined == 0`, `units.declined == 0`, `driver.warmAnomalies ==
-  0`, `driver.machineIncomplete == 0`; `launcher-gate.sh` does.
+  reference kernel. A gate reads `machine.declined == machine.eagerDeclines` (the machine
+  gave up on nothing but eager reduction), `driver.declined == 0`, `driver.warmAnomalies == 0`,
+  `driver.machineIncomplete == 0`; `launcher-gate.sh` does (`-Xmx4g` per test, four at a time).
 - `Session.ops()` is null (admission uses the reference kernel). `MachineOps` serves `KernelOps` for
   differential tests, with the test tree's `Quote` as its readback.
 
@@ -116,3 +128,26 @@ CPU time, CE native image `-O3`, arena-shaped container, one worker (four worker
 Where the time goes (perf on the native image, v0): frames (`Runs`, PRUNE) 17-31%, `Eval` 15-26%, value records
 (`Values`) 12-20%, `Infer` 8-11% (not on reachability), conversion 4%, reduction 1-3%. By judgment family (JFR): EV
 55-81% of the worker. The staging switches are described above; base sizes: `-Drlvm.machine.sizes=...` (NOTES-INT I1).
+
+## State, wave 6 (2026-11-24, M6; logs `work/status/machine-M6.log`, rows `work/m6/measure.tsv`)
+
+Gates and reports of this wave (M8): `src/test/resources/m8/report.sh gate [--switches S] [--tree SANDBOX]` (the
+one-page gate, `work/status/machine-gate-NAME.md`), `report.sh mutants --switches S`, `m8/ladder.py measure`
+(`work/status/machine-ladder.md`), `m8/big.py` (`work/status/machine-big.md`); the soundness review's hostile
+exports and their official verdicts are `src/test/resources/s/` (`SHostileTest`, `SHostileSlowTest`).
+
+The machine on the large corpora, through the launcher, CE native image `-O3`, arena-shaped container, EIGHT
+workers, v0 (`work/m6/big.sh`; first run 13:29Z-13:32Z on jar 608b84b2b142, quiet host):
+
+| Corpus | Verdict | Units (by the machine) | Machine accepted / rejected / declined | Wall s | CPU s | Peak RSS MiB | Instructions G |
+|---|---|--:|---|--:|--:|--:|--:|
+| mathlib | ACCEPT | 721,845 (714,712) | 714,712 / 0 / 0 | 42.31 | 205.98 | 2,855 | 3,225 |
+| cslib | ACCEPT | 401,985 (397,608) | 397,608 / 0 / 0 | 12.80 | 57.67 | 1,210 | 943 |
+| navier-stokes-euler | ACCEPT | 126,468 (124,850) | 124,850 / 0 / 0 | 14.88 | 90.11 | 1,062 | 1,480 |
+| con-leche | ACCEPT | 36,747 (36,274) | 36,274 / 0 / 0 | 4.51 | 17.81 | 923 | 289 |
+| cedar | ACCEPT | 146,058 (144,098) | 144,098 / 0 / 0 | 5.77 | 20.06 | 729 | 315 |
+
+(Reference engine, same kind of image, 8 workers, mathlib: 624.6 s CPU / 120.3 s wall.) That jar predates the
+eager-reduction rule: since 15:11Z the machine declines the declarations that enter eager reduction and the
+reference engine checks them; the repeat on the jar of 15:22Z is in `work/status/machine-M6.log` and
+`NOTES-M6.md`.

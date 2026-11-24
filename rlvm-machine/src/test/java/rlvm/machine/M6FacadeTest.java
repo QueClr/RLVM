@@ -588,6 +588,7 @@ class M6FacadeTest {
         options.put("machine.session-kib", "1");
         MachineEngine e = (MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults().withStats(true));
         assertEquals(1024, e.sessionCapBytes);
+        assertEquals(1L << 20, new MachineEngine(f.store, EngineConfig.defaults()).sessionCapBytes, "the default: 1 MiB (NOTES-M6 F24)");
         MachineSession s = (MachineSession) e.newSession(f.ctx);
         int[] seen = new int[1];
         int[] make = {10};

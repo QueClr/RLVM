@@ -25,7 +25,7 @@
 #
 # Per test: expected status, launcher status, units, machine accepted / rejected / declined, and the
 # first machine failure message. Totals at the end. Exit status: 0 = every verdict is the expected one,
-# the machine declined nothing but declarations that enter eager reduction (machine.declined == machine.eagerDeclines, units.declined == 0), no
+# the machine declined nothing but declarations that enter eager reduction (machine.declined == machine.eagerDeclines, driver.declined == 0), no
 # WARM-ANOMALY and no MACHINE-INCOMPLETE event; 1 otherwise; 2 usage.
 set -euo pipefail
 
@@ -152,7 +152,9 @@ for line in open(os.path.join(work, 'list')):
     m = 'values.engine.primary.machine.'
     units, macc, mrej, mdec = g('units.count'), g(m + 'accepted'), g(m + 'rejected'), g(m + 'declined')
     meager = g(m + 'eagerDeclines')  # declines BY DESIGN: the declaration entered eager reduction (NOTES-M6 F26)
-    udec = g('units.declined')
+    # units the RUN left declined (the driver's final statuses). units.declined counts warm attempts of the primary
+    # engine, so a declaration declined for eager reduction and then decided by the reference engine is in it.
+    udec = g('values.driver.declined')
     anomalies, incomplete = g('values.driver.warmAnomalies'), g('values.driver.machineIncomplete')
     ok = status == expect and status in ('0', '1')
     tot['tests'] += 1
@@ -180,7 +182,7 @@ with open(out, 'w') as f:
     w('RESULT: %s' % ('CLEAN (every verdict right, the machine declined nothing but declarations that enter eager reduction)' if clean else
                       'verdicts right, but NOT clean (machine declines or events below)' if verdicts else 'WRONG VERDICTS'))
     w('tests %d   verdict right %d   wrong %d   without statistics %d' % (tot['tests'], tot['right'], tot['wrong'], tot['nostats']))
-    w('units %d   machine: accepted %d   rejected %d   DECLINED %d (in %d tests) + %d for eager reduction (by design)   units.declined %d   WARM-ANOMALY %d   MACHINE-INCOMPLETE %d'
+    w('units %d   machine: accepted %d   rejected %d   DECLINED %d (in %d tests) + %d for eager reduction (by design)   driver.declined %d   WARM-ANOMALY %d   MACHINE-INCOMPLETE %d'
       % (tot['units'], tot['macc'], tot['mrej'], tot['mdec'] - tot['meager'], tot['tdec'], tot['meager'], tot['udec'], tot['anomalies'], tot['incomplete']))
     for k in sorted(by_code):
         w('  %-40s %d' % (k, by_code[k]))

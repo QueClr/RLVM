@@ -75,9 +75,12 @@ public final class MachineEngine implements Engine {
 
     /**
      * The machine's own cap on a warm session, in bytes of {@code Machine.engineBytes()} (0 = none): see
-     * {@link MachineSession#check}. Measured in NOTES-M6 (F24).
+     * {@link MachineSession#check}. 1 MiB: with warm sessions the machine's CPU time is lowest at 512 KiB to
+     * 1 MiB (one and eight workers), a session of 4 MiB costs more than no warm session at eight workers and
+     * one of 16 MiB 17-20 % more, although the instruction count keeps falling as the cap grows - the tables
+     * leave the cache (NOTES-M6 F24). Only read when {@code Op.SW_WARM} is on.
      */
-    static final long DEFAULT_SESSION_CAP = 0;
+    static final long DEFAULT_SESSION_CAP = 1L << 20;
 
     /** The machine's own settings (system properties {@code rlvm.machine.*}, overridden by {@code -X machine.*}). */
     static final class Settings {

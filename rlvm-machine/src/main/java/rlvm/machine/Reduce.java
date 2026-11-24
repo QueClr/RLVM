@@ -82,6 +82,9 @@ final class Reduce {
         int k2Type;
         /** A node is being derived: no rule is used or made meanwhile. */
         boolean k2Deriving;
+        /** The current declaration has run long enough for rules ({@code Rules.K2_ARM_TICKS}); {@code m.ticks()} at its start. */
+        boolean k2Armed;
+        long k2DeclTicks0;
         /** Unfoldings of a head before it gets a rule (ISA 3.6: 32); tests lower it. */
         int k2Hot = Math.max(1, Integer.getInteger("rlvm.machine.k2Hot", 32));
         /** Derivation may use 1 / k2Share of the ticks of the session (ISA 3.6: 0.2 %); 0 = no cap (tests). */
@@ -218,7 +221,9 @@ final class Reduce {
             }
             k2Type = 0;
             k2Deriving = false;
+            k2Armed = false;
             k2Ticks0 = m.ticks();
+            k2DeclTicks0 = k2Ticks0;
             k2DeriveTicks = 0;
             k2Rules = 0;
             if (K2_DUMP) {
@@ -244,7 +249,10 @@ final class Reduce {
         }
 
         /** Start of a declaration. */
-        void beginDecl(Machine m) {}
+        void beginDecl(Machine m) {
+            k2Armed = false;
+            k2DeclTicks0 = m.ticks();
+        }
 
         /** Bytes in use of this package's own session tables (part of the footprint, ISA 1.6). */
         long bytes() {

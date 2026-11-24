@@ -94,6 +94,21 @@ at 4 MiB, host (not the container; CPU = user + sys of one run under load, the c
 | `perf/proj-applied-struct` | 6.00 / 42.5 / 15.73 / 1318 | - | 5.18 / 28.3 / 12.60 / 1206 |
 | all 43 `perf/` files, CPU s | 155.2 | - | 122.3 |
 
+Locked batch 2 (`work/m3/batch2.out`; native `-O3`, container, one worker, 2 runs per row, host load 120 - 135;
+`work/m3/dist-k2f` = the K2 of 14:45Z without `m3a`; CPU s of both runs / instructions G):
+
+| corpus | `code,casetrees` | + `k2` | `warm,gated,expect,probes,code,casetrees` | + `k2` |
+|---|--:|--:|--:|--:|
+| reachability | 3.08, 3.09 / 29.4 | 2.47, 2.66 / 23.7 | 3.14, 3.12 / 29.4 | **2.54, 2.52 / 23.1** |
+| Cedar slice | 3.44, 3.25 / 46.3 | 3.45, 3.28 / 46.2 | 2.91, 2.87 / 40.6 | 2.89, 3.02 / 40.5 |
+| Init | 7.00, 7.21 / 118.8 | 7.05, 7.01 / 119.1 | 7.16, 6.85 / 92.8 | 7.13, 6.80 / 92.9 |
+| Std | 12.37, 12.20 / 194.8 | 12.43, 12.48 / 195.3 | 12.78, 12.06 / 158.1 | 11.99, 12.26 / 158.1 |
+
+reachability -19 % CPU (-21 % instructions; on the quiet host of batch 0 the base row was 2.52 s, so about 2.0 s
+with `k2`: at nano-lean's 2.08 s); the Cedar slice, Init and Std do not move (instructions -0.2 % .. +0.3 %:
+the per-unfolding count in the one-declaration sessions of v0; with warm sessions +0.0 % .. +0.1 %). By the
+rule of this wave (lower on one corpus, none raised by more than 1 %): KEEP.
+
 On reachability 0.92 M of the WHNF loop's unfoldings fire a rule (hit rate 97 %); a node costs about 25 ticks
 to derive (74 - 148 nodes in each of the three heavy declarations, 0.05 % of their ticks). The lazy-delta path
 (most of a `decide` proof's top-level chain) takes no rule, which bounds the gain there; `magma-list-deep-n36`

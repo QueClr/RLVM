@@ -10,14 +10,18 @@ Run CMD as a TIMING measurement on quiet cores.
     restored when CMD ends. Nothing is stopped or paused: the rest of the team
     keeps working on the remaining cores.
   * CMD is started with its affinity set to the measurement cores. A container
-    that CMD starts must ask for the same cores itself:
-    `bench/arena-docker.sh --arena-limits` does (the 8 performance cores).
+    that CMD starts must go through `bench/arena-docker.sh --arena-limits` (it
+    pins the container to the same 8 performance cores and labels it as the
+    measurement's own; a raw `docker run` needs --cpuset-cpus "$RLVM_QUIET_CPUS"
+    and --label "rlvm-quiet=$RLVM_QUIET_NAME", else it is parked like the others).
+  * Containers of other agents that are pinned on the measurement cores are
+    parked on the spare performance cores (18,19 here; same PMU, so their
+    instruction counts stay valid) for the window and put back afterwards.
 
 Options:
   --cpus LIST     measurement cores (default: the 8 performance cores that
                   bench/arena-docker.sh --arena-limits uses)
-  --wait SECONDS  how long to wait for foreign containers that are pinned on the
-                  measurement cores to end before starting anyway (default 600)
+  --wait SECONDS  accepted and ignored (older callers)
   --restore       undo a herd that a killed quiet.py left behind, then exit
   --status        print the measurement cores, the other cores, who holds the lock
 
@@ -134,14 +138,20 @@ def containers():
     out = []
     if not ids:
         return out
-    text = docker("inspect", "-f", "{{.Id}} {{.Name}} [{{.HostConfig.CpusetCpus}}]", *ids)
+    text = docker("inspect", "-f",
+                  '{{.Id}}|{{.Name}}|{{index .Config.Labels "rlvm-quiet"}}|{{.HostConfig.CpusetCpus}}', *ids)
     for line in text.splitlines():
+        parts = line.split("|")
+        if len(parts) != 4:
+            continue
+        cid, name, label, cs = (x.strip() for x in parts)
+        if label.startswith("<"):   # "<no value>": the container has no such label
+            label = ""
         try:
-            cid, name, cs = line.split(" ", 2)
+            cpus = parse_list(cs) if cs else None
         except ValueError:
             continue
-        cs = cs.strip()[1:-1]
-        out.append((cid, name.lstrip("/"), parse_list(cs) if cs else None))
+        out.append((cid, name.lstrip("/"), cpus, label))
     return out
 
 
@@ -150,6 +160,8 @@ class Herd:
         self.measure = set(measure)
         self.all = online()
         self.others = self.all - self.measure
+        self.spare = big_cpus(len(self.all)) - self.measure   # fast cores outside the measurement set
+        self.name = f"quiet{os.getpid()}"
         self.me = os.getpid()
         self.tid_rec = {}    # tid -> old mask (sorted list)
         self.pid_rec = {}    # pid -> old mask of its main thread
@@ -185,18 +197,19 @@ class Herd:
                     self.tid_rec.setdefault(str(tid), sorted(cur))
                     if tid == pid:
                         self.pid_rec.setdefault(str(pid), sorted(cur))
-            for cid, name, cs in containers():
-                if cid in self.cont_rec:
-                    continue
+            for cid, name, cs, label in containers():
+                if cid in self.cont_rec or label == self.name:
+                    continue   # already moved, or the measurement's own container
                 cur = cs if cs is not None else self.all
                 if not (cur & self.measure):
                     continue
-                if cur <= self.measure:
-                    # pinned inside the measurement cores: ours, or somebody measuring without the lock
-                    if os.environ.get("RLVM_QUIET_NAME", "") not in name:
-                        self.contended.add(name)
-                    continue
                 new = cur - self.measure
+                if not new:
+                    # pinned inside the measurement cores (an --arena-limits run that did not go through
+                    # this wrapper): park it on the spare cores of the same core type, which share the
+                    # PMU, so that its instruction counts stay valid; its timings are not evidence anyway
+                    new = self.spare if self.spare else self.others
+                    self.contended.add(name)
                 if docker("update", "--cpuset-cpus", fmt_list(new), cid):
                     self.cont_rec[cid] = fmt_list(cs) if cs is not None else ""
             self.save()
@@ -325,15 +338,8 @@ def main(argv):
     os.environ["RLVM_QUIET_NAME"] = name
     os.environ["RLVM_QUIET_CPUS"] = fmt_list(measure)
 
-    # foreign containers pinned on the measurement cores: let them end first
-    t1 = time.time()
-    while time.time() - t1 < wait:
-        busy = [n for _, n, cs in containers() if cs is not None and cs <= measure]
-        if not busy:
-            break
-        if int(time.time() - t1) % 60 < 5:
-            print(f"quiet.py: waiting for containers on the measurement cores: {' '.join(busy)}", file=sys.stderr)
-        time.sleep(5)
+    # Containers of other agents that are pinned on the measurement cores are not waited for: herd()
+    # parks them on the spare fast cores for the window (same PMU: their instruction counts stay valid).
 
     stop = threading.Event()
     child = None
@@ -373,10 +379,10 @@ def main(argv):
     cont = sorted(herd.contended)
     log(f"cpus={fmt_list(measure)} rc={rc} wall={dur:.1f}s lock_wait={waited_lock:.0f}s load_before={load0} "
         f"moved_threads={len(herd.tid_rec)} moved_containers={len(herd.cont_rec)} "
-        f"contended={','.join(cont) if cont else '-'} cmd={' '.join(cmd)[:300]}")
+        f"parked={','.join(cont) if cont else '-'} cmd={' '.join(cmd)[:300]}")
     if cont:
-        print(f"quiet.py: WARNING, other containers were pinned on the measurement cores during the run: "
-              f"{' '.join(cont)}", file=sys.stderr)
+        print(f"quiet.py: note, containers pinned on the measurement cores were parked on "
+              f"{fmt_list(herd.spare if herd.spare else herd.others)} during the run: {' '.join(cont)}", file=sys.stderr)
     return rc if rc >= 0 else 128 - rc
 
 
