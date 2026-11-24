@@ -23,11 +23,14 @@ the loader `patches/`, raw results `out/`, `data/corpora.tsv`, `logs/`).
    `is_def_eq_core`. `r2-ptr-other-record-bad` (official reject) and `r2-ptr-same-record-ok` (official accept) are
    THE SAME TERMS. No store that identifies equal terms can reproduce this; the published reference engine accepts
    both.
+   **R2-F3** (new, admission, both engines): the official `add_inductive` runs every judgment in a fresh checker;
+   RLVM's admission keeps the kernel's caches through a phase. `r2-adm-param-success-bad`: official reject, RLVM
+   accept.
 4. Everything else that decides what "the same term" is agrees with the official kernel (binder names and binder
    infos ignored, two records with one content one term, levels by spelling, literals by value), and every cache is
    read, written and cleared where the official one is, with two corrections made here that change no verdict I
    could construct (the key of the entry that follows an unfolding; `insert` never replaces).
-5. All three findings are **kind T** (OWNER-NOTES item 13): the statement the engine accepted is derivable and the
+5. All four findings are **kind T** (OWNER-NOTES item 13): the statement the engine accepted is derivable and the
    official checker itself accepts the same proof term in another cache state or with another sharing of records
    (certificates: the twins `-ok` of each export, section 6).
 6. **Policy** (OWNER-NOTES item 13, "practical"): the reference engine now has two modes.
@@ -35,9 +38,10 @@ the loader `patches/`, raw results `out/`, `data/corpora.tsv`, `logs/`).
    for the sake of agreement on adversarial files; behaves as before on the three findings.
    `-X ref.exact=official` (the strict mode; `-X policy=strict` sets it): the official verdict or none. Object
    identity is handled exactly where it can be (a probe, then a check of the declaration under both possibilities)
-   and declined only where the verdict really depends on it; `mdata` and `nondep = true` are declined by the
-   loader's strict switch (LP2: `LoadOptions.strictMetadata`; `nondep` needs patch
-   `work/r2/patches/0001-strict-nondep-decline.patch`).
+   and declined only where the verdict really depends on it; the judgments of admission start with empty caches;
+   `mdata` and `nondep = true` are declined by the loader's strict switch (LP2: `LoadOptions.strictMetadata`,
+   published 22:55Z for `mdata`; `nondep` needs patch `work/r2/patches/0001-strict-nondep-decline.patch`, handed
+   to LP2 at 22:5xZ: until it is published the strict mode still accepts `r2-id-let-nondep-bad`).
    **Cost of the strict declines on the eight corpora: zero declarations** (section 7).
 
 ## 1. What the official kernel takes for the same term
@@ -177,7 +181,7 @@ projection that an entry answers at step 10 with both terms unchanged.
 | D3 | object identity at (P2) (R2-F2) | yes | `r2-ptr-other-record-bad` reject (ours accept); twin accept | T | strict: probe, both-ways check, decline where the verdicts differ (this module). practical: as before |
 | D4 | key of the `m_whnf_core` entry after an unfolding: `c a1..an` instead of `value a1..an`. Missed: an explicit redex `value a1..an` in the declaration, another constant with the same value, the same constant at other levels with the same instantiated value | not found: a miss recomputes cheaply and meets the entries of the same reduction chain (every projection frame of the full run wrote one), so the result is the cached one; only a K test that failed is run again | none | - | fixed in both modes: `valueOwner` (one representative reference per lambda value), `explicitLam` + look-up of the built term; the two tables are one logical table |
 | D5 | a literal above 2^64 that a worker computes twice could get two pool indices (shared pool looked up first, with the limit "published now": pipelined load) | only through cache keys, and only by thread timing | none (not deterministic) | - | LP2: the worker pool looks in its own table first (in the store candidate `30979ee659b7`) |
-| D6 | admission: the official `add_inductive` makes a fresh checker for EVERY judgment (`tc()`), except (i) the four judgments per constructor of `check_recursors`, (ii) the nested-application checks, (iii) the final re-check; RLVM's admission runs the judgments of a phase in one cache scope of this kernel | in principle (a full `whnf_core` of one judgment changes a cheap one of the next: wrong reject; the other direction not excluded) | not constructed (the recursor type is checked by one official checker, which blocks the obvious construction) | - | not this module: the owner of `rlvm-inductive` / `rlvm-admit` decides where a scope ends (`KernelOps.begin`, or `exposeUnitMembers(0)`, clears the judgment caches) |
+| D6 | admission (**R2-F3**): the official `add_inductive` makes a fresh checker for EVERY judgment (`tc()`), except (i) the four judgments per constructor of `check_recursors`, (ii) the nested-application checks, (iii) the final re-check; RLVM's admission runs the judgments of a phase in one cache scope of this kernel | yes (both engines: admission is shared) | `r2-adm-param-success-bad` reject (ours ACCEPT: the parameter comparison of a constructor is answered by the success pair its type check left); twins `-ok`, `-plain-ok` accept | T | strict: every judgment asked through `KernelOps` in a `begin` scope starts with empty judgment caches (`RefKernel.freshJudgments`; this module) - exact outside the three groups, fresher than the official kernel inside them (the owner of `rlvm-inductive` would have to say where a group begins and ends). practical: as before |
 | D7 | `whnfCoreCache.put` replaced an entry that a nested call had written for the same key | not found (the two values are the same unless the nested call saw another cache state) | none | - | fixed in both modes: write if absent |
 | D8 | (P1) is not repeated on equal ids | no (section 3) | - | - | none needed |
 | D9 | a reduction that returns to a state it was in is declined (the official kernel does not terminate) | no verdict exists officially | `corner-cases/eta-struct-major-*-no-whnf` | - | as before |
@@ -194,7 +198,9 @@ projection that an entry answers at step 10 with both terms unchanged.
 - **Re-checks and fallbacks of the driver** are `Session.check` calls of another session: the same isolation. In
   strict mode a both-ways check (section 3) repeats `Session.check`'s body up to 63 times; each repetition starts
   from the cleared state.
-- **The environment pass** (admission of inductive blocks through `KernelOps`): one scope per phase (D6).
+- **The environment pass** (admission of inductive blocks through `KernelOps`): one scope per phase in the
+  practical mode (D6 / R2-F3); in the strict mode every judgment starts with empty judgment caches (`infer` x2,
+  `whnf_core`, `whnf`, success, failure), which is the official lifetime except inside the three groups of row D6.
 
 ## 6. Certificates (kind T)
 
@@ -206,6 +212,7 @@ of the same statement elsewhere:
 | `s3-wc-pos-mdata-bad`: `use (a = mdata b) (Eq.refl a)` after `W0` | `s3-wc-pos-mdata-ok`: the same term without `W0` |
 | `r2-id-let-nondep-bad`, `-def-bad`: `use (a = L2) (Eq.refl a)` after `W0` | `r2-id-let-nondep-ok`: the same term without `W0` |
 | `r2-ptr-other-record-bad`, `-def-bad`: `needs c0` (i.e. `U = U'`) after the second pass | `r2-ptr-same-record-ok`: the same declaration with one record shared; `r2-ptr-alone-ok`, `-order-ok` |
+| `r2-adm-param-success-bad`: the constructor parameter `Q2 5 b` against the type's `Q2 a a` | the same comparison inside the constructor's type check of the same file (`T p` with `p : Q2 5 b` is well typed for the official checker: the error is raised by the next judgment); `r2-adm-param-success-ok` (`Q2 a b`) |
 
 `a = b`, `U = U'` hold by proof irrelevance (`h` against `And.intro ..`) and iota. Nothing false is accepted: every
 accept path of the kernel is a derivation; the caches hold facts, and an entry that is "there too early" or "one

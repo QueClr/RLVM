@@ -2,5 +2,50 @@
 \date{2026-11-24}
 \author{claude-fable-5-2}
 \contributor{queclr}
+\tag{policy}
+\tag{soundness}
+\import{base-macros}
 
 \p{Trade-offs that were decided on purpose. A reviewing agent should not report these again; if the situation changed, open a problem tree that links here.}
+
+\subtree[accepted-risks-divergence]{
+\title{Where the default configuration may differ from the official checker}
+
+\p{The maintainer chose practical exactness on 2026-11-24; see [standing policies](standing-policies). The default configuration must never accept a statement that is not derivable in Lean's type theory (\em{kind F}) and must give the official verdict on every real input. It may accept a derivable statement that the official checker rejects only through its own incompleteness, non-transitivity, cache order or object identity (\em{kind T}). The record of the known classes, with one export for each, is \src{docs/design/review/official-divergence.md}; the adversarial reviews behind it are \src{docs/design/review/soundness-default-set.md} and \src{docs/design/review/reference-caches.md}. Ground truth for every verdict there is the official checker of Lean v4.36.0 run on the export. No class of kind F is known.}
+
+\p{\strong{The common root.} The official \code{\verb~|is_def_eq~} is not transitive and not a function of the pair it is asked about. With \code{\verb~|A = True /\ True~}, an axiom \code{\verb~|h : A~} and \code{\verb~|d x := And.rec (fun _ _ => 5) x~}, the kernel accepts \code{\verb~|d intro = d h~} and \code{\verb~|d intro = 5~} and rejects \code{\verb~|d h = 5~}. One of its caches is read by cheap reduction calls and written only by full ones, so the answer for a pair depends on what was reduced before; and one test is pointer equality, so the answer depends on whether a subterm is one export record or two. An engine that computes on values and keys its memo tables by values answers the question of the theory, which is transitive.}
+
+\ul{
+\li{\strong{Stand-in types of terms the kernel has not reduced.} The official kernel types a bound variable by its binder's declared type. The machine binds a variable to a value and can use a type that is only convertible. Six of the seven shapes found (findings E1-F1 to E1-F6) now get the official verdict or a decline; the shape with convertible domains under the expected-type rule is accepted only with the switch \code{convexpect}, which is off. The seventh (E1-F7: the type of the structure of a stuck projection, and the raw major premise of the K rule) is still accepted, and is intrinsic to a machine on values. An exact treatment is described in the document and was not built.}
+\li{\strong{A pair table keyed by values.} The machine's table of established comparisons is keyed by values; the official caches are keyed by terms and live for one declaration. The machine answers a comparison that the official kernel asks again for a new pair of terms (finding S3-F1; present in every switch set).}
+\li{\strong{Memo that survives a declaration.} The switches \code{warm} and \code{pchk} keep results across declarations; officially every cache lives for one declaration (findings S3-F3 and S3-F5). The warm machine alone can also reject a valid unit; the pipeline's strict re-check turns that into the official accept.}
+\li{\strong{One-sided unfolding as one reduction.} The switch \code{lazyeval} runs a one-sided unfolding against a weak-head-normal side as one reduction to weak-head normal form (finding S3-F4).}
+\li{\strong{Metadata is transparent.} The loader drops metadata nodes in axioms, definitions, theorems and opaques, and the wrapped expression stands for the node; the official kernel treats the node as a term of its own (finding S3-F2). Declining such declarations belongs to the strict mode. Metadata inside an inductive or quotient record is declined in both modes.}
+\li{\strong{Object identity of export records.} Two exports with the same terms, differing by one duplicated record, can get different official verdicts. Any engine over a hash-consed store accepts both (finding R2-F2). The strict mode of the reference engine declines where it would need the official object identity.}
+}
+
+\p{\strong{Not tolerated.} The switch \code{k2} produced a wrong accept with its default thresholds (finding S3-F6) and stays off. A declaration that enters eager reduction is declined by the machine without the switch \code{eager} and decided by the reference engine; with the switch, no divergence is known.}
+
+\p{\strong{What the gates show for real inputs}, as recorded in the divergence document for the machine with the fix of the stand-in types: no wrong verdict in the full gate of the plain machine and of the default switch set; 17,775 mutants with no soundness and no completeness difference; no verdict difference from the reference engine on 1,153,493 engine checks over the 230 arena tests, Init, Std, cedar, cslib, reachability, a slice of Cedar and 16 slices of Mathlib. The adversarial review of the candidate default found no kind F on 987 hostile exports with official verdicts.}
+}
+
+\subtree[accepted-risks-declines]{
+\title{Declines by design}
+
+\ul{
+\li{\strong{A decline is not a wrong verdict.} RLVM answers accept, reject or decline. Input that the pipeline cannot decide with the official verdict is declined: among others a declaration placed after its user in a large file, a missing recursor record, a constant the kernel would generate under a foreign name, metadata inside an inductive record. On the four mutant corpora the reference pipeline declined 1,683 of 17,775 files, 1,197 of them in the corpus that wraps expressions in metadata, with no wrong verdict.}
+\li{\strong{Two official non-terminations are declined.} The two arena tests on which the official checker does not terminate are declined within seconds by a bound on the work of one unit.}
+}
+}
+
+\subtree[accepted-risks-journal]{
+\title{The journal itself}
+
+\ul{
+\li{\strong{Forester compiles from source.} Forester is not in nixpkgs, so the first build on a machine compiles Forester and its OCaml libraries, which takes several minutes. Later builds reuse the local store.}
+\li{\strong{The first two days were written up afterwards.} The trees dated 2026-11-23 and 2026-11-24 were written on 2026-11-24 from the documents under \code{docs/}, the commit history and the status logs of the team, not during the work. Their dates are the dates of the work. The session trees of that period describe phases of a team of agents, not single sessions.}
+\li{\strong{Documents stay whole.} The research, design and review documents under \code{docs/} are long and stay in the repository. A tree states one point of a document and links to it; it does not replace it.}
+\li{\strong{The site is public and the repository is not.} A link to a file or a commit of the repository works only for a reader with access to it.}
+\li{\strong{Working files are not cited.} The team's status logs and scratch directories under \code{work/} are not part of the repository. A number that exists only there is stated in the tree without a link.}
+}
+}

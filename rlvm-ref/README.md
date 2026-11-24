@@ -72,6 +72,15 @@ Audit of every cache against the official source, with exports and official verd
     different verdicts are a decline (UNSUPPORTED_INPUT; the message names both). On the eight
     corpora no declaration is declined (Std: 1 declaration, cslib: 8 are decided both ways; numbers
     in the review document).
+- **Admission** (finding R2-F3). The official `add_inductive` runs every judgment in a fresh
+  `type_checker` (`tc()`); RLVM's admission keeps this kernel's caches through a phase, so a later
+  judgment can be answered from what an earlier one cached (`r2-adm-param-success-bad`: official
+  reject, accepted). Strict mode: every judgment asked through `KernelOps` in a scope opened by
+  `begin` starts with empty judgment caches (`RefKernel.freshJudgments`, the tables that
+  `exposeUnitMembers` clears). The official code shares one checker in three places (the four
+  judgments per constructor of `check_recursors`, the nested applications, the final re-check);
+  there the strict kernel is fresher than the official one until the admission can say where such a
+  group begins and ends. Practical mode: unchanged.
 - **Two corrections of cache keys / writes** (both modes, no verdict known to change): the
   `m_whnf_core` entry that follows an unfolding is one logical table with the entries of explicit
   terms (`valueOwner`, `explicitLam`: another constant with the same lambda value, or the explicit
@@ -334,7 +343,7 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 
 ## Tests
 
-`. ./env.sh && $MVN -o -q -pl rlvm-ref test` (141 tests, about 14 s on a quiet host):
+`. ./env.sh && $MVN -o -q -pl rlvm-ref test` (148 tests, about 14 s on a quiet host):
 
 | Class | What |
 |---|---|
@@ -348,6 +357,8 @@ no verdict (DECLINE): `STACK_DEPTH`, `BUDGET_STEPS` (also: a reduction that cycl
 | `ImportsTest` (10) | the session's import table: off unless asked for; kept copies are served (with every answer recomputed), same verdicts and same step count with the table on and off, nothing kept in strict engines, the byte budget, a rejected declaration promotes nothing, `Session.reset()` drops the table, an overlay that was reset or cut below the kept copies behind the session's back is noticed (the ids are never used), `KernelOps` judgments read but never fill the table, literals of a declaration are released when it ends |
 | `TablesTest` (3) | `IntIntMap`, `LongIntMap`, `PairSet` against the library's collections through sequences of large and small declarations; a table does not stay large after a declaration that hardly used it |
 | `corpus.CorpusTest` (5) | the published arena tests at kernel level (see below); the two imax corner cases rejected by default and accepted with `levels=complete`; the perf group with `-Drlvm.ref.corpus.perf=true` |
+| `UnfoldKeyTest` (4) | the `m_whnf_core` entry that follows an unfolding is one table with the entries of explicit terms: another constant with the same lambda value and the explicit redex `value a1 .. an` find it, and the unfolding finds the entry of the explicit redex (read off the sizes of the tables through `retention`); other arguments or values do not share |
+| `StrictScopeTest` (3) | strict mode: two judgments of a `begin` scope do not see each other's caches (a `whnf` is computed again, a successful comparison is made again); the practical kernel, and a strict kernel outside such a scope, keep them |
 | `corpus.ExactnessGoldenTest` (5) | 30 exports with official verdicts (`src/test/resources/r2/manifest.tsv`): the practical engine gives the official verdict except on the documented rows of kind T (accepted) and never declines; the strict engine gives the official verdict or declines, never the opposite; `policy=strict` selects it and the decline names both verdicts; `ref.identity=other` / `same` each reproduce the official verdict on the files where they are the truth; a hazard whose two continuations agree is decided, not declined |
 
 The fixtures are hand-made stores (`Fixture`, `Prelude`, the term language `Sexp`) written through the real

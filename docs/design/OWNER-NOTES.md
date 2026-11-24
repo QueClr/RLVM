@@ -129,3 +129,13 @@ owner's words.
       make it (declining where it would need the official object identity). One launcher option selects the
       policy; behaviour that exists only for bug-for-bug agreement on adversarial files (declining metadata
       nodes, typed bindings if they cost time) belongs to the strict mode, not to the default.
+
+14. (2026-11-24, on publishing the repository) "License: I hope we can use Apache-2.0/MIT for code with
+    GNU doc for journal if applicable. I am open to accept oracle graal CE license to run CI."
+    Reading:
+    - The code is dual-licensed Apache-2.0 OR MIT, at the user's option (file LICENSE at the repository
+      root, in the form the owner's other project uses). The journal (`journal/`) is documentation under
+      the GNU Free Documentation License 1.3 or later (`journal/LICENSE`).
+    - Continuous integration may download and run GraalVM Community Edition (GPL v2 with the Classpath
+      exception). Note 11, item 2 is unchanged: Oracle GraalVM (GFTC) is not downloaded or used by
+      anything default.
