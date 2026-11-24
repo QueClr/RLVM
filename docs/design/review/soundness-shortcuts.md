@@ -319,7 +319,14 @@ is a theorem that the official checker proves once it is given the congruence st
 `is_def_eq` fails to FIND these equations (it reduces one side before it compares, and it does not compare the
 arguments of an abbrev, a recursor or a closure); none of them is false.
 
-[[KNOWNCOUNT]]
+The whole run (`work/s2/out/known-judged.tsv`, configurations `v0`, `rich`, `skip`, `cong`, `both`, `bothrich`):
+
+| Set | exports | official reject | of them accepted under an option | rejected under every configuration | official accept (accepted under every configuration) |
+|---|--:|--:|--:|--:|--:|
+| package S (`work/soundness/exports/`) | 351 | 304 | **14** (the rows above without the last) | 289 (+ 1 declined by the pipeline in every configuration, `str-lit-missing-prerequisites-bad`) | 47 |
+| the arena's `bad` tests (`work/arena-site/tests/bad/`: 32 bugs, 5 other, 8 perf, 47 tutorial) | 92 | 92 | **0** | **92** | - |
+
+No export is accepted under `v0` or `rich` that the official checker rejects.
 
 Rejected by the options although TRUE in the theory (so the options are not complete for the theory either, and
 do not need to be): `nontransitive-regular-def-bad`, `nontransitive-same-decl-bad` (`d h = 5`: delta, the first
@@ -328,7 +335,7 @@ row, iota; nothing in the machine closes pairs transitively), the arena's `125_a
 as `bad`; no shortcut synthesises a constructor form from a proof, every configuration rejects), and
 `acc-rec-no-eta-axiom` of this review.
 
-Not in this class (false or not derivable; rejected by every configuration): the other [[NREJ]] officially
+Not in this class (false or not derivable; rejected by every configuration): the other 289 + 92 officially
 rejected exports of package S and of the arena, among them the eager-reduction rows (declined by the machine by
 rule M6-F26, rejected by the reference engine) and `100_ruleKbad` (`Eq.rec a (h : true = false) = a`: not
 derivable, `h` is no `Eq.refl`).

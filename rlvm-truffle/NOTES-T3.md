@@ -151,3 +151,48 @@ because each is a call that finishes before the next starts and often needs the 
 - **It is not a Truffle feature.** Nothing in it needs a compiler: the same walk can be done by a generic
   routine over the block's words in front of the stepper's dispatch loop (decoding cost per instruction
   instead of none). That is a proposal for M7 / M1, with the numbers of section 1 as its upper bound.
+
+## 7. Design finding: what a JIT for the checking process needs from the machine (for the owners, M1, M3, M6, M7)
+
+The Truffle tier is correct and it is fed the right programs (the judgment chains of constants, owner note
+5), and still there is almost nothing in them for a compiler to remove. The reason is the value model, not
+the tier:
+
+1. **Every intermediate value is a globally interned record** (I-ID: identity = structure). A block that
+   builds a value pays a hash, a probe of a table far larger than the cache, and usually a new record and a
+   new spine or frame run. On reachability that is 57% of the warm time in the probes and inserts
+   themselves (section 5); M1 measured that 96% of the application probes of the generic tier are for NEW
+   keys (15:58Z); of the records that reachability's blocks build, about half exist already (section 6) -
+   either way the block cannot know without the probe. Tier equivalence (same records, same order) obliges
+   compiled code to repeat every one of them. Escape analysis, scalar replacement, unboxing - the
+   optimisations a JIT lives on - have no object to work on: nothing a block makes is ever private to it.
+2. **A block builds the redex and asks a generic judgment to reduce it.** `MKAPP r7 (decEq Nat inst a b)`,
+   `WHNF r8, r7`: the callee is known when the block is elaborated, yet control reaches it through
+   `Reduce.whnf` -> `Rules.unfold` -> `Code.rules` -> `Code.enter` -> the hook, with the arguments unpacked
+   again from the record's spine. There is no call for Truffle to inline, so "one constant's code object
+   inlined into its caller" cannot happen whatever the tier does. `APPLY` is the same through `Eval.apply`.
+3. **Arguments nobody inspects are built eagerly**: the motive and the `List.below` / `PProd` types of every
+   structural-recursion step, the proof terms of `Decidable.isTrue / isFalse` (block 41 and
+   `instDecidableEqFin` of section 5). In a strict machine they would be dead code; here they are the
+   components of an interned record, so they must exist and be interned first.
+
+What would unlock a compiler (and, each of them, also the stepper):
+
+- **U1 - call instructions.** `CALL d, c, a1..an` = WHNF of the application of constant `c` to the registers:
+  enter `c`'s RULES / BODY block directly, intern the application only if the call is stuck or its result is
+  to be tabled. One operation shared by the stepper and the tier, so tier equivalence is kept; the redex
+  record, its spine run, the unpacking and the generic dispatch in between disappear for both, and the tier
+  gets a call it can inline (`DirectCallNode`, T2's D5).
+- **U2 - records that are not interned until they have to be** (M1's "young set", 15:58Z, is the table-side
+  half of the same idea): a value made by a block lives in a per-activation or per-session nursery without
+  a table entry and gets an identity only when it is stored into an interned record, used as a memo key,
+  compared by identity or returned to a generic judgment. Then the values of point 3 are never interned,
+  and in compiled code they are not even allocated. This changes I-ID from "always" to "once tenured" and
+  therefore the tabling keys and the tick counts: it is a machine design decision, not a tier feature, and
+  the equivalence rule between tiers has to become "same verdicts, same tenured records".
+- **U3 - what is possible today without either**: overlapping the misses (section 6). It leaves the work
+  and removes the waiting.
+
+Without U1 or U2 the upper bound of any compiled tier on closed evaluation is the stepper's own share
+(17% on reachability) plus what run-ahead recovers, and on library corpora (Cedar: 14% of the time inside
+blocks at all) it is noise.

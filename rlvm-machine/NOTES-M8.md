@@ -414,7 +414,19 @@ frames under D128: Init 0.072%, Std 0.064%, Cedar slice 0.41%, reachability 1.15
 differences, 0 `E_AUDIT`. Pipeline: 230 / 230 verdicts right, the four corpora accepted with 4 workers,
 MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0.
 
-### 8.5 Which switches the evidence supports (as of 17:30Z; M8's evidence only)
+**Finding M8-F1 (17:35Z-17:55Z, open; requests.log to M2 and M7).** The quick gate of
+`warm,gated,expect,probes,code,casetrees` on the tree of about 17:30Z FAILS on convention equivalence and
+on nothing else (differential 0 / 0, generic tier equal, tier test on values 175 constants / 700 results
+equal, audits clean, pipeline right): on the Cedar slice two of 8,064 declarations (unit 6225
+`Cedar.Thm.conversion_preserves_typedness._unary`, unit 7434
+`Cedar.Thm.ofEnv_entities_valid_refs_for_wt_expr._unary`) use one tick more under host depth 0 than under
+D128 (two with `probes`); the lane without a bound agrees with D128. Bisected with `report.sh gate
+--switches S --parts conv cedar`: clean for `code`, `code,casetrees`, `expect,code,casetrees`,
+`warm,code,casetrees`, `warm,gated,expect`, `warm,gated,expect,probes`; **not clean for
+`gated,code,casetrees`**. A tick on a path that only runs when a judgment is suspended, in the interplay of
+gated tabling and the K1 blocks.
+
+### 8.5 Which switches the evidence supports (as of 17:55Z; M8's evidence only)
 
 | switch set | mutants (17,775 x set) | gate | large corpora | CPU (locked batch 16:44Z, jar 14:41Z) | M8's reading |
 |---|---|---|---|---|---|
@@ -422,7 +434,7 @@ MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0.
 | `warm,gated,expect` | S 0 / C 0 twice (trees 14:42Z, 15:24Z) | full: PASS WITH DECLINES, same declines, tier / convention / audits clean | 5 / 5 agree | within 1-4% of the generic tier on all four corpora, one run each | CORRECT by every gate M8 has; the CPU gain is NOT shown (needs `--runs 3`); it is the engine's default since M6's publication of 16:24Z |
 | `warm,gated,expect,probes` | S 0 / C 0 (tree 14:42Z, after M4's fix of S-F1) | not run | not run | no gain over `warm,gated,expect` | not ready: no gate, no gain |
 | `code,casetrees` | S 0 / C 0 (tree 15:24Z) | not run | not run | not measured under the lock | not ready: no gate |
-| `warm,gated,expect,probes,code,casetrees` | S 0 / C 0 (tree 15:24Z) | quick form only (tutorial, bugs, Cedar slice; see the log) | not run | probe: Init 96.5 G, reachability 17.4 G instructions | the candidate with the largest effect; needs the full gate (incl. the tier test on values) and a locked batch |
+| `warm,gated,expect,probes,code,casetrees` | S 0 / C 0 (tree 15:24Z) | quick form (tutorial, bugs, Cedar slice): **FAIL, finding M8-F1** (convention equivalence: `gated` + `code,casetrees`) | not run | probe: Init 96.5 G, reachability 17.4 G instructions | the candidate with the largest effect; NOT ready: M8-F1, then the full gate and a locked batch |
 | `all` | S 0 / C 0 (tree 15:24Z) | not run | not run | not measured | bug-hunting set only |
 
 ### 8.6 Tool experiments, kept and rejected (wall time of the tools, not CPU time of the machine)
