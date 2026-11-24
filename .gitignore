@@ -1,0 +1,9 @@
+build/
+*.class
+.claude/
+.gradle/
+*.jfr
+refs/
+target/
+.toolchain/
+work/

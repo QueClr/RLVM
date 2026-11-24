@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RLVM (Rabdos Lean VM) - parent/aggregator build.
+
+  Toolchain:   . ./env.sh            (GraalVM CE 25 + Maven, both under .toolchain/)
+  One module:  $MVN -q -pl rlvm-level test
+  Everything:  $MVN -q test
+
+  Each module is owned by one agent/author at a time. Build ONLY your own module with -pl (never -am)
+  so that concurrent work in other modules cannot break your build.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>rlvm</groupId>
+  <artifactId>rlvm-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>RLVM - Rabdos Lean VM</name>
+
+  <modules>
+    <module>rlvm-export</module>
+    <module>rlvm-level</module>
+    <module>rlvm-nat</module>
+    <module>rlvm-cli</module>
+    <module>rlvm-store</module>
+    <module>rlvm-api</module>
+    <module>rlvm-load</module>
+    <module>rlvm-ref</module>
+    <module>rlvm-inductive</module>
+    <module>rlvm-admit</module>
+    <module>rlvm-driver</module>
+    <module>rlvm-main</module>
+    <module>rlvm-testkit</module>
+    <module>rlvm-machine</module>
+  </modules>
+
+  <properties>
+    <!-- Must equal GRAALVM_VERSION in $JAVA_HOME/release. -->
+    <graalvm.version>25.5.5.0.3</graalvm.version>
+    <maven.compiler.release>25</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
+    <junit.version>5.11.4</junit.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.14.0</version>
+          <configuration>
+            <release>25</release>
+            <compilerArgs>
+              <arg>-Xlint:-options</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.5.2</version>
+          <configuration>
+            <argLine>-Xss512m -Xmx4g</argLine>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.4.2</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>
