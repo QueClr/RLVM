@@ -123,7 +123,7 @@
         # the given kind and print the path of the new file.
         new = pkgs.writeShellApplication {
           name = "journal-new";
-          runtimeInputs = [ foresterPkg ];
+          runtimeInputs = [ foresterPkg pkgs.coreutils pkgs.findutils pkgs.gnugrep ];
           text = ''
             kind="''${1:-}"
             case "$kind" in
@@ -141,7 +141,28 @@
                 ;;
             esac
             mkdir -p "trees/$dir"
-            exec forester new forest.toml --random --prefix "$prefix" --dest "trees/$dir"
+            if forester new forest.toml --random --prefix "$prefix" --dest "trees/$dir" 2>/dev/null; then
+              exit 0
+            fi
+            # Forester parses the whole forest to allocate an address, and
+            # fails while any tree has a syntax error, for example one that
+            # another agent is in the middle of writing. Allocate the same
+            # form of address without it.
+            chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            while :; do
+              id=""
+              for _ in 1 2 3 4; do
+                id+="''${chars:RANDOM % 36:1}"
+              done
+              if find trees -name "$prefix-$id.tree" | grep -q .; then
+                continue
+              fi
+              file="trees/$dir/$prefix-$id.tree"
+              if (set -o noclobber; printf '\\date{%s}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$file") 2>/dev/null; then
+                echo "./$file"
+                exit 0
+              fi
+            done
           '';
         };
 
