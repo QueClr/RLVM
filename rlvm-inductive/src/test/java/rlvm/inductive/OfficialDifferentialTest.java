@@ -2,14 +2,10 @@ package rlvm.inductive;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import rlvm.api.KernelException;
@@ -27,45 +23,10 @@ import rlvm.store.DeclKind;
  *   <li>a fixture this module rejects must be REJECTED by the official kernel while it replays that
  *       very block.
  * </ul>
- * Fixtures this module declines are only reported (a decline is never a wrong verdict). Skipped when
- * the toolchain is not installed.
+ * Fixtures this module declines are only reported (a decline is never a wrong verdict). The official
+ * answers are stored by the SHA-256 of the export ({@link OfficialGolden}): no checker binary is run.
  */
 class OfficialDifferentialTest {
-
-    private static Path checker() {
-        String p = System.getProperty("rlvm.leanchecker");
-        Path c = p != null ? Path.of(p)
-                : Path.of(System.getProperty("user.home"), ".elan", "toolchains", "leanprover--lean4---v4.36.0", "bin", "leanchecker");
-        return Files.isExecutable(c) ? c : null;
-    }
-
-    private static final class Verdict {
-        int exit;
-        String output;
-    }
-
-    private static Verdict official(String ndjson) throws IOException, InterruptedException {
-        Path dir = Files.createTempDirectory("rlvm-inductive-diff");
-        Path file = dir.resolve("fixture.ndjson");
-        Path log = dir.resolve("out.txt");
-        try {
-            Files.write(file, ndjson.getBytes(StandardCharsets.UTF_8));
-            Process p = new ProcessBuilder(checker().toString(), "--from-export", file.toString()).redirectErrorStream(true)
-                    .redirectOutput(log.toFile()).start();
-            if (!p.waitFor(120, TimeUnit.SECONDS)) {
-                p.destroyForcibly();
-                fail("official checker timed out");
-            }
-            Verdict v = new Verdict();
-            v.exit = p.exitValue();
-            v.output = new String(Files.readAllBytes(log), StandardCharsets.UTF_8);
-            return v;
-        } finally {
-            Files.deleteIfExists(file);
-            Files.deleteIfExists(log);
-            Files.deleteIfExists(dir);
-        }
-    }
 
     private static final int ACCEPT = 0;
     private static final int REJECT = 1;
@@ -299,7 +260,59 @@ class OfficialDifferentialTest {
             e.inductive("", 1).type("T", "Type → Type").ctor("T.mk", "∀ (α : TypeAlias), α → T α").rec("T.rec", "u").end();
         });
 
+        // finding L-F1: levels the official kernel respells when it refers to the block's own constants
+        accept("respelled but equivalent: parameter of sort imax u (v+1)", e -> e.inductive("u v", 1)
+                .type("T", "Sort (imax u (v+1)) → Sort (imax u (v+1))")
+                .ctor("T.mk", "∀ (a : Sort (imax u (v+1))), a → T.{u,v} a").rec("T.rec", "u_1 u v").end());
+        accept("respelled result sort alone (never compared)", e -> e.inductive("u", 0).type("T", "Sort (imax u 1)")
+                .ctor("T.mk", "T.{u}").rec("T.rec", "u_1 u").end());
+        accept("respelled phantom universe of a definition in a result index (equal after unfolding)", e -> {
+            e.axiom("G", "", "Type");
+            e.axiom("g0", "", "G");
+            e.def("gd", "u", "G", "g0");
+            e.inductive("u", 0).type("T", "G → Type").ctor("T.mk", "T.{u} gd.{(imax u 1)}").rec("T.rec", "u_1 u").end();
+        });
+
         // ---- rejected: the official kernel must reject the same block -------------------------------------
+        reject("L-F1 (a): parameter of sort imax u 1", e -> e.inductive("u v w", 1)
+                .type("T", "Sort (imax u 1) → Sort (imax u 1)")
+                .ctor("T.mk", "∀ (a : Sort (imax u 1)), a → T.{u,v,w} a").rec("T.rec", "u_1 u v w").end());
+        reject("L-F1 (b): field of type F.{imax u 1}", e -> {
+            e.axiom("F", "u", "Type");
+            e.inductive("u v w", 0).type("T", "Type").ctor("T.mk", "F.{(imax u 1)} → T.{u,v,w}").rec("T.rec", "u_1 u v w").end();
+        });
+        reject("L-F1 (N): constructor parameter imax u 1 against the header's imax 0 (imax u 1)", e -> e.inductive("u v w", 1)
+                .type("T", "Sort (imax 0 (imax u 1)) → Type")
+                .ctor("T.mk", "∀ (a : Sort (imax u 1)), T.{u,v,w} a").rec("T.rec", "u_1 u v w").end());
+        reject("L-F1: index domain of sort imax u 1", e -> {
+            e.axiom("A", "u", "Sort (imax u 1)");
+            e.inductive("u", 0).type("T", "Sort (imax u 1) → Type").ctor("T.mk", "T.{u} A.{u}").rec("T.rec", "u_1 u").end();
+        });
+        reject("L-F1: result index g.{imax u 1} against the major premise", e -> {
+            e.axiom("G", "", "Type");
+            e.axiom("g", "u", "G");
+            e.inductive("u", 0).type("T", "G → Type").ctor("T.mk", "T.{u} g.{(imax u 1)}").rec("T.rec", "u_1 u").end();
+        });
+        reject("L-F1: recursive field T g.{imax u 1}", e -> {
+            e.axiom("G", "", "Type");
+            e.axiom("g0", "", "G");
+            e.axiom("g", "u", "G");
+            e.inductive("u", 0).type("T", "G → Type").ctor("T.base", "T.{u} g0")
+                    .ctor("T.step", "T.{u} g.{(imax u 1)} → T.{u} g0").rec("T.rec", "u_1 u").end();
+        });
+        reject("L-F1: second type of a mutual block with a parameter of sort imax u 1", e -> e.inductive("u", 1)
+                .type("A", "Sort (imax u 1) → Type").ctor("A.mk", "∀ (a : Sort (imax u 1)), A.{u} a")
+                .type("B", "Sort (imax u 1) → Type").ctor("B.mk", "∀ (a : Sort (imax u 1)), A.{u} a → B.{u} a")
+                .rec("A.rec", "u_1 u").rec("B.rec", "u_1 u").end());
+        reject("L-F1: index domain of an auxiliary type (nested block)", e -> {
+            e.axiom("F", "u", "Type");
+            e.inductive("u", 1).type("J", "Type → F.{u} → Type")
+                    .ctor("J.mk", "∀ (α : Type) (i : F.{u}), α → J.{u} α i").rec("J.rec", "u_1 u").end();
+            e.inductive("u", 0).type("T", "Type")
+                    .ctor("T.mk", "∀ (i : F.{(imax u 1)}), J.{(imax u 1)} T.{u} i → T.{u}")
+                    .rec("T.rec", "u_1 u").rec("T.rec_1", "u_1 u").end();
+        });
+
         reject("non-uniform parameter inside a nested container (corner-cases/nested-nonuniform-param)", e -> {
             Fixtures.nat(e);
             Fixtures.list(e);
@@ -477,8 +490,11 @@ class OfficialDifferentialTest {
                 }
             }
         }
-        Verdict v = official(w.text());
-        String first = v.output.lines().limit(3).reduce("", (a, b) -> a + " | " + b);
+        OfficialGolden.Verdict v = OfficialGolden.official(s.name, w.text());
+        if (v == null) {
+            return s.name + ": no stored answer of the official checker";
+        }
+        String first = " | " + (v.output.length() > 160 ? v.output.substring(0, 160) : v.output);
         String line = String.format("%-62s here %-8s %-22s official exit %d%s", s.name,
                 mine == ACCEPT ? "ACCEPT" : mine == REJECT ? "REJECT" : "DECLINE", why, v.exit, v.exit == 0 ? "" : first);
         if (mine != s.expect) {
@@ -504,7 +520,6 @@ class OfficialDifferentialTest {
 
     @Test
     void fixturesAgainstTheOfficialChecker() throws Exception {
-        assumeTrue(checker() != null, "leanchecker (Lean 4.36.0) is not installed");
         ArrayList<String> report = new ArrayList<>();
         for (Scenario s : SCENARIOS) {
             // on the real engine (the reference kernel) and on the test's own small checker
@@ -515,6 +530,7 @@ class OfficialDifferentialTest {
         if (Files.isDirectory(dir)) {
             Files.write(dir.resolve("official-differential-report.txt"), report);
         }
+        OfficialGolden.failIfMissing();
         long accepted = SCENARIOS.stream().filter(s -> s.expect == ACCEPT).count();
         long rejected = SCENARIOS.stream().filter(s -> s.expect == REJECT).count();
         System.out.printf("official differential: %d fixtures admitted here and accepted officially, %d rejected by both, %d declined here%n",

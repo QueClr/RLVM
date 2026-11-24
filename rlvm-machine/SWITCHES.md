@@ -29,24 +29,26 @@ arrays, NOTES-M6 F25).
 
 ## The default set
 
-`Op.SW_DEFAULT` = **none = v0 (the generic tier, the complete procedure, one session per declaration)**
+`Op.SW_DEFAULT` = **`warm,gated,expect`** (staging step 1), since 2026-11-24 16:24Z, with the machine's own
+session cap of 1 MiB (section "Sessions"). **v0 is `-X machine.switches=none`.**
 
-Nothing is on by default today. `MachineProvider.priority()` is still 10: the machine is selected with
-`-X engine=machine`. What IS in force in every configuration, v0 included, is the eager-reduction rule
-(section "Sessions": a declaration that enters eager reduction is declined), because it is a correctness
-rule, not an optimisation.
+`MachineProvider.priority()` is still 10: the machine is selected with `-X engine=machine`. The module's
+tests are not affected: `pom.xml` gives the test JVM `rlvm.machine.switches=none`, and a `Fixture` engine
+has no switch unless the test names some. In force in EVERY configuration, v0 included, is the
+eager-reduction rule (section "Sessions": a declaration that enters eager reduction is declined) - a
+correctness rule, not an optimisation.
 
-**The candidate, `warm,gated,expect` with the machine's own cap** (state of the evidence, 2026-11-24 15:50Z):
+Evidence for the set (all on jars that contain the eager-reduction rule unless said otherwise):
 
 | Gate | Result |
 |---|---|
-| differential campaign, all 230 tests + Cedar slice + reachability + Init + Std (`work/m6/diff.sh`, DiffEngine through the launcher), jar 584eab427250 (before the eager-reduction rule), cap 4 MiB | 15,844 of 15,845 units agree (1 decline: `loop-unfolded-once`, as v0), 8,064 / 4,224 / 57,938 / 100,096 agree; SOUNDNESS 0, COMPLETENESS 0 (`work/m6/diff/s1cap4-*.txt`) |
-| the same on the jar with the eager-reduction rule, cap 1 MiB | launcher gate tutorial + bugs on jar 7eb33a7a4ad7 (`work/m6/gate-tb-s1.txt`): CLEAN, 175 verdicts right, machine 1,311 accepted / 30 rejected / 0 declined + 2 for eager reduction, 0 anomalies. The full campaign (`work/m6/diff/s1m1-*.txt`) was still running when this file was written: see `work/status/machine-M6.log` |
-| launcher gate, all 230, PIPELINED loading (`work/m6/gate-all-pipelined-s1.txt`) | 230 verdicts right; machine 15,803 accepted / 41 rejected / 2 declined (`loop-unfolded-once`), 0 anomalies |
-| soundness review (package S: 17 switch sets x 329 hostile exports, main tree of 15:20Z) | 0 unexpected verdicts; S-F4 (a wrong ACCEPT under `warm`, 14:38Z) and S-F5 (v0) closed by the eager-reduction rule; open only S-F3 (levels, both engines) |
-| the driver's invariance suite with `warm,gated,expect` (16,928 mutants x 9 schedules, jar f82074b207f1) | 0 wrong, 0 schedule differences, 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY |
-| CPU time, native `-O3`, arena container, loaded host (load 80-190), two rounds each | see "Sessions" below: with a cap of 512 KiB - 1 MiB the set is 0-6 % below v0 at one worker and 0-4 % below at eight; with 4 MiB it is ABOVE v0 at eight workers |
-
+| differential campaign, all 230 tests + Cedar slice + reachability + Init + Std (`work/m6/diff.sh`: DiffEngine through the launcher, both engines on every unit), `warm,gated,expect`, machine cap 1 MiB (`work/m6/diff/s1m1-*.txt`) | all 230: 15,839 of 15,845 units agree (both accept 15,799, both reject 40), 6 not compared (eager-reduction declines and `loop-unfolded-once`); Cedar slice 8,053 of 8,064 (11 eager declines); reachability 4,216 of 4,224 (8); Init 57,774 of 57,938 (164); Std 99,893 of 100,096 (203). **SOUNDNESS 0, COMPLETENESS 0** everywhere |
+| the same before the eager-reduction rule, cap 4 MiB, jar 584eab427250 (`work/m6/diff/s1cap4-*.txt`) | 15,844 of 15,845; 8,064; 4,224; 57,938; 100,096: 0 differences |
+| launcher gate, tutorial + bugs, jar 7eb33a7a4ad7 (`work/m6/gate-tb-s1.txt`) | CLEAN: 175 verdicts right, machine 1,311 accepted / 30 rejected / 0 declined + 2 for eager reduction, 0 anomalies |
+| launcher gate, all 230, PIPELINED loading (`work/m6/gate-all-pipelined-s1.txt`) | 230 verdicts right; machine 15,803 / 41 / 2 declined (`loop-unfolded-once`), 0 anomalies |
+| soundness review (package S: 17 switch sets x 329 hostile exports, main tree of 15:20Z) | 0 unexpected verdicts; S-F4 (a wrong ACCEPT under `warm`) and S-F5 (v0) are closed by the eager-reduction rule; open only S-F3 (levels, both engines) |
+| the driver's invariance suite with the set (16,928 mutants x 9 schedules, jar f82074b207f1) | 0 wrong, 0 schedule differences, 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY |
+| CPU time against v0 in ONE batch (D1: jar 09bef1d6276f, native `-O3`, arena container, load 57, two rounds, mean) | one worker: Init 7.37 -> 7.11 s (-3.5 %), Cedar slice 2.69 -> 2.70 (+0.4 %), reachability 8.18 -> 7.96 (-2.6 %); eight workers: Init 8.35 -> 8.03 (-3.8 %), Cedar slice 3.46 -> 3.24 (-6.4 %), Std 14.59 -> 14.36 (-1.6 %), reachability 8.78 -> 8.33 (-5.0 %). Wall clock at eight workers was noise on that host (one row: 3.4 and 13.0 s) |
 
 The rule for entering the default set (brief of wave 6): all 230 published tests and the four corpora
 (Init, Std, reachability, the Cedar slice) are diff-clean against the reference engine with the switch at
@@ -59,10 +61,10 @@ it lowers warm wall clock or CPU time on at least one of the four corpora withou
 
 | Name | Bit | Owner | Stage (ISA 11) | What it turns on | State | Evidence / blockers |
 |---|---|---|---|---|---|---|
-| `gated` | 0 `SW_GATED_TABLING` | M2 | 1 | EVAL tables a node only if its flags say it is shared, a binder body or invariant (off: every non-leaf node is tabled) | off; **candidate for the default set** | part of the candidate set above. The quadratic cliff M2 found on unshared dependent nests (4,000 levels: 44,030 -> 8,038,031 ticks) is fixed since 14:54Z |
+| `gated` | 0 `SW_GATED_TABLING` | M2 | 1 | EVAL tables a node only if its flags say it is shared, a binder body or invariant (off: every non-leaf node is tabled) | **ON by default** (since 16:24Z) | part of the default set. The quadratic cliff M2 found on unshared dependent nests (4,000 levels: 44,030 -> 8,038,031 ticks) is fixed since 14:54Z |
 | `pchk` | 1 `SW_PCHK` | M5 | 1 | shared check facts PCHK (implemented 2026-11-24; a fact is not shared once the declaration entered eager reduction) | off; READY per owner (15:31Z) together with `match` and `joint` | M5: tutorial + bugs + all 230 + four corpora diff-clean on `warm,gated,expect,pchk,match,joint`, 9,110 tutorial mutants SOUNDNESS 0 / COMPLETENESS 0; -4 % CPU Init, -3 to -8 % Std, the small corpora inside the scatter (one worker, loaded host). Not yet measured against v0 in one batch at 8 workers by M6 |
-| `expect` | 2 `SW_EXPECT` | M5 | 1 | B9: lambdas and applications are checked against the expected type | off; **candidate for the default set** | part of the candidate set above (M5: gates and mutants in NOTES-M5) |
-| `warm` | 3 `SW_WARM` | M6 (facade), M5 (generation rule) | 1 | a machine session survives an ACCEPT (v0: one session per declaration); forward in file order only; reset on every other outcome, at the driver's cap and at the machine's own cap | off; **candidate for the default set** | part of the candidate set above. Two rules make it safe to leave on: the machine's own cap ("Sessions") and the eager-reduction rule (below) |
+| `expect` | 2 `SW_EXPECT` | M5 | 1 | B9: lambdas and applications are checked against the expected type | **ON by default** (since 16:24Z) | part of the default set (M5: gates and mutants in NOTES-M5) |
+| `warm` | 3 `SW_WARM` | M6 (facade), M5 (generation rule) | 1 | a machine session survives an ACCEPT (v0: one session per declaration); forward in file order only; reset on every other outcome, at the driver's cap and at the machine's own cap | **ON by default** (since 16:24Z) | part of the default set. Two rules make it safe to leave on: the machine's own cap ("Sessions") and the eager-reduction rule (below) |
 | `facts` | 4 `SW_FACTS` | M5, M4, M7 | 2 | fact records (M5); of the consumers only B7 (static PROOF at c4) since 14:30Z - B3, B4 and the ETAS Prop mask were removed from every switch set | off | soundness finding S-F2 (wrong ACCEPT through skipped proof positions) FIXED by M4 14:30Z and verified by S (strict rows of `s/manifest.tsv`). What is left is neutral in instructions (-0.1 % Init / Std, -0.3 % Cedar slice; M5): no reason to turn it on |
 | `tele` | 5 `SW_TELE` | M7, M5 | 3 | K1 TELE blocks, MATCH (B5), the IC table | off | integrator (wave 5): no CPU gain measured on the JVM; to be re-measured on the native image by M7 |
 | `code` | 6 `SW_CODE` | M7, M3 | 4 | K1 BODY / RULE blocks, LEAF blocks (B11) | off | M7: 0.34x on reachability in its own bench; no corpus diff gate recorded for the launcher path yet |
@@ -118,6 +120,14 @@ the CPU time RISES (the tables leave the cache). CPU seconds, native `-O3`, aren
 | | Cedar slice | 3.11 / 3.42 | 3.20 / 3.12 | 3.32 / 3.19 | 3.24 / 3.38 | 3.42 / 3.43 | | 4.01 / 3.86 |
 | | Std | 14.05 / 13.71 | **13.47 / 13.23** | 13.64 / 13.55 | 14.29 / 13.74 | 15.50 / 15.12 | | 16.60 / 16.90 |
 | instructions (G), 8 workers | Init | 132.6 | 127.2 | 120.1 | 113.1 | 105.3 | | 94.9 |
+| 1, 09bef1d6276f (batch D1, with the eager rule) | Init | 7.41 / 7.33 | 7.19 / 7.15 | **7.10 / 7.12** | | 7.02 / 7.05 (driver's 4 MiB only) | | |
+| | Cedar slice | 2.69 / 2.68 | **2.68 / 2.58** | 2.73 / 2.66 | | 2.78 / 2.73 (driver's 4 MiB only) | | |
+| | reachability | 8.34 / 8.01 | 7.89 / 7.85 | 7.91 / 8.01 | | 8.03 / 7.89 (driver's 4 MiB only) | | |
+| 8, 09bef1d6276f (batch D1) | Init | 8.19 / 8.50 | 7.84 / 8.29 | **7.77 / 8.28** | | 8.27 / 8.61 (driver's 4 MiB only) | | |
+| | Cedar slice | 3.58 / 3.33 | 3.29 / 3.24 | 3.10 / 3.37 | | 3.59 / 3.31 (driver's 4 MiB only) | | |
+| | Std | 14.68 / 14.50 | 14.71 / 12.87 | 14.27 / 14.45 | | 14.92 / 15.44 (driver's 4 MiB only) | | |
+| | reachability | 8.88 / 8.67 | 8.63 / 8.29 | 8.48 / 8.18 | | 8.50 / 8.33 (driver's 4 MiB only) | | |
+
 The driver measured the same shape on a quieter jar (2 / 4 / 8 / 16 MiB: Init 7.71 / 7.78 / 8.23 / 9.23 s
 against 8.13 s without a warm session; `rlvm-driver` log 14:47Z). Warm wall clock (owner note 12) follows
 the CPU column at eight workers; per-pass rows: `work/m6/m.py --passes 2` (driver c0aeb3288f46).

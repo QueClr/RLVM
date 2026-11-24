@@ -442,6 +442,13 @@ public final class InductiveAdmission {
     private int[] lvlBuf = new int[8];
     /** True once the rebuild changed the spelling of a level of the block in flight. */
     private boolean rebuildChanged;
+    /**
+     * Test hook, never set by shipped code: derive the block as a kernel that keeps the declared
+     * spelling of every level would (the behaviour before finding L-F1). The differential tests use it
+     * to write an export with complete recursor records for a block the official kernel rejects, so
+     * that the official answer on the file is the kernel's answer on the block.
+     */
+    boolean keepDeclaredLevels;
 
     /**
      * True if, in the last call of {@link #generate}, the official rebuild gave another spelling to at
@@ -585,7 +592,7 @@ public final class InductiveAdmission {
      * {@code type} with its levels rebuilt. The same id if no level changes its spelling.
      */
     private int rebuildTerm(int type) {
-        if ((terms.header(type) & Node.F_HAS_LPARAM) == 0) {
+        if (keepDeclaredLevels || (terms.header(type) & Node.F_HAS_LPARAM) == 0) {
             return type;
         }
         try {

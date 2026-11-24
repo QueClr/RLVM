@@ -36,7 +36,7 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
 
 | Key | Values | Default |
 |---|---|---|
-| `machine.switches` | staging switches, read left to right: `name` / `+name` adds, `-name` removes, `none` = v0, `default` = `Op.SW_DEFAULT`, `all` = the switches of ISA section 11 but `k2`. **`SWITCHES.md` is the one list** (name, bit, owner, state, evidence). Ignored by a strict engine | `Op.SW_DEFAULT` (today: none = v0) |
+| `machine.switches` | staging switches, read left to right: `name` / `+name` adds, `-name` removes, `none` = v0, `default` = `Op.SW_DEFAULT`, `all` = the switches of ISA section 11 but `k2`. **`SWITCHES.md` is the one list** (name, bit, owner, state, evidence). Ignored by a strict engine | `Op.SW_DEFAULT` = `warm,gated,expect` since 2026-11-24 16:24Z (`none` = v0) |
 | `machine.session-kib` | the machine's own cap on a warm session, in KiB of `Machine.engineBytes()`; 0 = none. The driver's `-X session-mib` applies as well; the smaller cap resets first | 1024 |
 | `machine.declines` | a file that receives one line per non-ACCEPT outcome of the machine: outcome, error code, unit, rank, units accepted in the session before it, name, message | none |
 | `levels` | the launcher's `official` / `complete` (shared with the reference engine): `complete` turns the switch `levels-complete` on | official |
@@ -114,7 +114,8 @@ v0 (generic tier, complete procedure, no switch), machine jar 608b84b2b142:
 
 With `-X machine.switches=warm,gated,expect -X session-mib=4` (staging step 1) and with `...,probes` (step 5) the same
 runs are clean as well; with `probes` `loop-unfolded-once` is accepted: 15,845 of 15,845, 0 declines on all 230.
-The switches stay OFF by default and `MachineProvider.priority()` stays 10.
+(State of 13:05Z. Since 16:24Z `warm,gated,expect` is the default set, see `SWITCHES.md`; `probes` lost its
+congruence shortcuts after the soundness finding S-F1. `MachineProvider.priority()` stays 10.)
 
 CPU time, CE native image `-O3`, arena-shaped container, one worker (four workers: same CPU, wall / 3):
 
@@ -148,6 +149,9 @@ workers, v0 (`work/m6/big.sh`; first run 13:29Z-13:32Z on jar 608b84b2b142, quie
 | cedar | ACCEPT | 146,058 (144,098) | 144,098 / 0 / 0 | 5.77 | 20.06 | 729 | 315 |
 
 (Reference engine, same kind of image, 8 workers, mathlib: 624.6 s CPU / 120.3 s wall.) That jar predates the
-eager-reduction rule: since 15:11Z the machine declines the declarations that enter eager reduction and the
-reference engine checks them; the repeat on the jar of 15:22Z is in `work/status/machine-M6.log` and
-`NOTES-M6.md`.
+eager-reduction rule. Repeat on jar 09bef1d6276f (v0 + the rule; 16:15Z, host load 60): mathlib ACCEPT, machine
+accepted 708,001 / rejected 0 / declined 6,711 declarations, ALL for eager reduction (decline log
+`work/m6/declines/big2-v0-mathlib.tsv`; 6,485 of them `_private.*` declarations of Mathlib modules), the
+reference engine checked those 6,711 units, 0 anomalies; 251.5 s CPU, 3,251 MiB, 3,291 G instructions; 134 s
+wall on the loaded host (each worker ran 24 % of the wall time), not comparable with the quiet-host 42.3 s.
+The other rows of the repeat and the warm per-pass rows (`-X passes`): `work/status/machine-M6.log`.

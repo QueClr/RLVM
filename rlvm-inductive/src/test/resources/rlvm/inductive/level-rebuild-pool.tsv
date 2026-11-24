@@ -1,0 +1,224 @@
+# Universe levels for OfficialLevelRebuildTest, in the notation of finding L-F1 (s = succ, m = max, i = imax).
+# Selected from the level questions of work/prof/L (levels-r family R, levels-n family N); the third column
+# is the official answer to THAT family (R: inductive T (a : Sort L) : Sort L | mk : a -> T a; N: T (a : Sort
+# L1) : Type | mk : (a : Sort L2) -> T a), for orientation only: 1 accepted, 0 rejected, 0* rejected by the
+# official kernel and accepted by RLVM before the fix.
+# L <level> <answer>   |   P <level 1> <level 2> <answer>
+L	(i u (s 0))	0*
+L	(i w (s 0))	0*
+L	(i v (s 0))	0*
+L	(i w (s u))	0*
+L	(i w (s v))	0*
+L	(i v (s u))	0*
+L	(i (s (m (i w 0) (s w))) (m (i (i (s 0) 0) (s (s 0))) (m (m u v) (m v v))))	0*
+L	(i u (i (i (m w u) (s 0)) (i (s w) (s (s 0)))))	0*
+L	(i (i (i (s w) v) (m (s u) w)) (i v (s (i u 0))))	0*
+L	(i (m (i 0 w) (m 0 v)) (s (m 0 w)))	0*
+L	(m (i (s (i v (s 0))) (m w (i 0 u))) (i 0 (i (i v w) (s v))))	0*
+L	(i (i (i (s 0) (i u u)) u) (s (m v (i w u))))	0*
+L	(i (i (m (s v) w) (s (m 0 v))) (s (i (s u) (s v))))	0*
+L	(i (s 0) (s (s (m (m v w) (m w 0)))))	0*
+L	(s (i v (i (i v v) (s 0))))	0*
+L	(s (s (i (i v w) (s w))))	0*
+L	(i (m (i w 0) (m w u)) (s (s w)))	0*
+L	(i (m (m u u) (i v v)) (i w (s w)))	0*
+L	(i (m (m w 0) (s u)) (s (s v)))	0*
+L	(i (i v (s (i u v))) (i (m (m v w) (m 0 w)) (s (i w u))))	0*
+L	(i (s (i w (s 0))) (m (m v u) w))	0*
+L	(m (s (i v (s 0))) (s (i v 0)))	0*
+L	(i u (m (m u (m v (s 0))) (i u w)))	0*
+L	(i (m (m 0 u) (m w u)) (s (i v 0)))	0*
+L	(m (s (i (i u (s 0)) (s 0))) (s (i w (i u w))))	0*
+L	(i (s (m (i 0 0) (m v w))) (m (i (i w u) (m w v)) (i (i w u) (s w))))	0*
+L	(s (i (m (s v) (i (s 0) v)) (s u)))	0*
+L	(i (m (i u u) v) (s (s 0)))	0*
+L	(i (s 0) (m (s (s 0)) (i (m 0 v) (s 0))))	0*
+L	(i (i (i (m w v) u) (m (i (s 0) w) (i (s 0) u))) (i (s (m w 0)) (i (m 0 v) (s u))))	0*
+L	(i (s 0) (s (m (s 0) w)))	0*
+L	(i (s (i u (m w (s 0)))) (s (m (i u 0) (m u v))))	0*
+L	(m (s (i (s w) (i v (s 0)))) (m (s (s v)) (i (m u 0) (s 0))))	0*
+L	(i (s (i u w)) (i (s (s 0)) (s w)))	0*
+L	(i (i (i (m v 0) (i u w)) w) (m (s (m u (s 0))) (i (i w v) (m u v))))	0*
+L	(i (m (m (m u w) (i u v)) 0) (i (s (s w)) (s (m u w))))	0*
+L	(i (s (s u)) (m (s u) (s w)))	0*
+L	(i (s (s (m v v))) (s (m (m v v) (s u))))	0*
+L	(m (m (s (m (s 0) v)) (s (i u (s 0)))) (m w w))	0*
+L	(i (i (i w v) (s v)) (m (s (s 0)) (s (s 0))))	0*
+L	(i (m v (m v u)) (s 0))	0*
+L	(i (s 0) (i (m w (i u w)) (m (s u) (i v u))))	0*
+L	(i (m v (s (s v))) (i (i (m u w) (i w w)) (m 0 (s u))))	0*
+L	(i (s (i (i w 0) 0)) (s (i (m 0 v) (m w u))))	0*
+L	(i 0 (i (i v (m w (s u))) (m u 0)))	0*
+L	(i u (i (m w u) (s (s v))))	0*
+L	(s (i (s u) (i u (s 0))))	0*
+L	(i (s (i (m v u) (m w 0))) (i (i u (m v (s 0))) (s u)))	0*
+L	(i (m v (s (i w (s 0)))) (i (m (i u 0) (m 0 u)) (i (i (s 0) 0) (s v))))	0*
+L	(s (i (i (i w 0) (s v)) (m (i v 0) (i w (s 0)))))	0*
+L	(i (i (s v) (s (s v))) (m (s w) (m (i w u) (i w u))))	0*
+L	(s (i (s (i 0 w)) (i (i w 0) (s v))))	0*
+L	(s (i (i (s u) (m w v)) (s (i u u))))	0*
+L	(m (i (i (m v (s v)) (s (m v v))) (s (i (i v w) (s 0)))) (i (i (i (m v (s v)) (s (m v v))) (s (i (i v w) (s 0)))) (i (i (m v (s v)) (s (m v v))) (s (i (i v w) (s 0))))))	0*
+L	(i (m 0 (i (i 0 w) (m u (s 0)))) (m (m (m v v) (m v v)) (m (s u) (i u w))))	0*
+L	(i (i (s w) (m v v)) (m (s (s 0)) (s w)))	0*
+L	(i v (i (i u w) (s v)))	0*
+L	(i (i (i (m w 0) (m 0 v)) (s (i u v))) (i (m (m v v) (s 0)) (m 0 (s 0))))	0*
+L	(i (i (s (s w)) (i (m v v) (m u w))) (s (s (s 0))))	0*
+L	(i (m (m w u) v) (s (m (m w u) v)))	0*
+L	(m (m w w) (s (i w (s 0))))	0*
+L	(i (s 0) (m (s (s (i w w))) (s (m (m u (s 0)) (m v v)))))	0*
+L	(i (s (i 0 u)) (s (m (m w 0) (s (s 0)))))	0*
+L	(i (i (m (m u 0) (i v v)) 0) (i (s (s w)) (s (s u))))	0*
+L	(i (s v) (i (m (i u v) (i v v)) (s (m w v))))	0*
+L	(i (i (i u u) (m 0 v)) (s 0))	0*
+L	(i (s (i v (m (i u u) (i 0 0)))) (s 0))	0*
+L	(m (s 0) (s (i (s v) (s w))))	0*
+L	(s (i (m w w) (s v)))	0*
+L	(i (i (s v) w) (m u (m (s 0) 0)))	0*
+L	(i (i (m (m 0 w) (i w u)) (s (s u))) (s (i (s v) (i w w))))	0*
+L	(i (s (i u u)) (s 0))	0*
+L	(s (i (m (i u w) (i w w)) (m (s v) v)))	0*
+L	(i (i (m (s 0) (i w v)) (i (m 0 (s 0)) (s 0))) (i (s (m 0 u)) (m (m w u) (s u))))	0*
+L	(s (i 0 (m (m v u) w)))	0*
+L	(i (s 0) (m (m (m w u) (s v)) (i (i w v) (s v))))	0*
+L	(i (s (s (m 0 w))) (i (s w) (m (s u) (i v u))))	0*
+L	(s (i (m v (s (s u))) (s (m v (s (s u))))))	0*
+L	(s (i (i (m u w) (m w 0)) (s w)))	0*
+L	(m (i (s (m u (i 0 v))) (s 0)) (i (i (s 0) (s w)) w))	0*
+L	(i (i (i (i u w) (m v v)) (s (i u u))) (i (m (i u u) (s w)) (m (i u 0) (s u))))	0*
+L	(s (s (i (s 0) (s u))))	0*
+L	(i (i (m (m w u) (s w)) (i (i u v) (s w))) (m (m w v) (i (m 0 (s 0)) u)))	0*
+L	(m (i (m (m 0 v) (s v)) u) (s (i w (s 0))))	0*
+L	(i u (s (i u v)))	0*
+L	(i u 0)	1
+L	(i (s 0) u)	1
+L	(i v (s w))	1
+L	(i u (m v w))	1
+L	(i (i u u) v)	1
+L	(i v (i u w))	1
+L	(m 0 (i v v))	1
+L	(m v (i w 0))	1
+L	(m (i v u) 0)	1
+L	(i u (m w v))	1
+L	(i v (m u v))	1
+L	(i (m 0 w) v)	1
+L	(m (i w w) 0)	1
+L	(i (m v u) u)	1
+L	(m 0 (i v u))	1
+L	(m (m (i 0 w) (m v w)) (i (m (i 0 w) (m v w)) (m (i 0 w) (m v w))))	1
+L	(m (i (s 0) 0) (i (i (m 0 v) (m u u)) (i (m u w) (i u u))))	1
+L	(m (i (s (m u u)) (i (s 0) v)) (m (i (m u 0) (i u 0)) (m v (i u u))))	1
+L	(i (i (i (i v u) (i u w)) (m (i u w) (s v))) v)	1
+L	(i (m (i v v) 0) (s (m (i v v) 0)))	1
+L	(i (m (i v 0) (s (s 0))) (m (i 0 0) (m v u)))	1
+L	(m (s v) (i (s 0) (m v (s 0))))	1
+L	(i (s (m v u)) (m w u))	1
+L	(m (s (m (s u) (m v w))) (i (m (s w) (m u u)) (i u (i v u))))	1
+L	(m (s (i (m v w) 0)) (m (s (s 0)) (i u (i w v))))	1
+L	(m (i (i u w) (s w)) (i u v))	1
+L	(i (m v (m (i u v) (i w v))) (m (i (s u) (m 0 u)) u))	1
+L	(s (i (m v u) (i w 0)))	1
+L	(m (i (i w u) (m 0 w)) (i v (i 0 (s 0))))	1
+L	(m (m (i (s 0) (m 0 v)) (i (m u u) 0)) (m (m u (m v v)) (i w (s 0))))	1
+L	u	1
+L	(m w 0)	1
+L	(m v (s 0))	1
+L	(s (m u w))	1
+L	(m (m u v) w)	1
+L	(m 0 (m 0 w))	1
+L	(m w (m 0 0))	1
+L	(m 0 (m w u))	1
+L	(m (m (s 0) v) (m v u))	1
+L	(m (s (s (s v))) (m (m 0 v) u))	1
+P	(s (i (i u v) (s v)))	(s (i (i (i u u) v) (s (m v v))))	0*
+P	(i (i (s w) (s v)) (m (m w 0) (m v u)))	(i (i (s w) (s v)) (m (m u w) (m u v)))	0*
+P	(i (i (s (m v (s 0))) (m (m w u) (m u (s 0)))) (m (m w u) (m u (s 0))))	(i (s (m v (s 0))) (m (m w u) (m u (s 0))))	0*
+P	(m (m (s (i w (s u))) (m 0 (s (m u 0)))) (m (s (i w (s u))) (m 0 (s (m u 0)))))	(m (s (i w (s u))) (m 0 (s (m u 0))))	0*
+P	(i u (m (i (i u w) (m 0 w)) (m (i v (s 0)) (i 0 0))))	(i (i u (m (i (i u w) (m 0 w)) (m (i v (s 0)) (i 0 0)))) (m (i (i u w) (m 0 w)) (m (i v (s 0)) (i 0 0))))	0*
+P	(i (i u u) (s (s 0)))	(i 0 (i (i u u) (s (s 0))))	0*
+P	(m (i (i (m v 0) (s 0)) v) (i (i (m v 0) (s 0)) (i 0 v)))	(i (i (m v 0) (s 0)) (m v (i 0 v)))	0*
+P	(i 0 (i u (s 0)))	(i u (s 0))	0*
+P	(i (i (i u (s (s 0))) (m (m w u) (m 0 v))) (m (i (s 0) 0) (s 0)))	(i (i (i (i u (s (s 0))) (m (m w u) (m 0 v))) (m (i (s 0) 0) (s 0))) (i (i (i u (s (s 0))) (m (m w u) (m 0 v))) (m (i (s 0) 0) (s 0))))	0*
+P	(i w (s (i u 0)))	(i (i w (s (i u 0))) (i w (s (i u 0))))	0*
+P	(m (s (i (s u) (i u (s 0)))) (i (s (i (s u) (i u (s 0)))) (s (i (s u) (i u (s 0))))))	(s (i (s u) (i u (s 0))))	0*
+P	(i w (i (i (s v) (s u)) (i (i 0 0) (s v))))	(i 0 (i 0 (i w (i (i (s v) (s u)) (i (i 0 0) (s v))))))	0*
+P	(i (m (s (s 0)) (i (s v) (m u v))) (m (m (s (m v v)) (m (s v) (m w u))) (i (m (s (m v v)) (m (s v) (m w u))) (m (s (m v v)) (m (s v) (m w u))))))	(i (m (s (s 0)) (i (s v) (m u v))) (m (s (m v v)) (m (s v) (m w u))))	0*
+P	(i u v)	(i (i u v) v)	0
+P	(s 0)	(m u 0)	0
+P	(m u 0)	(i v 0)	0
+P	(i 0 u)	(i u v)	0
+P	(m (i (i (i u v) (m w (s 0))) (i (i v w) (m u v))) (m (s u) (i w u)))	(m (i (m v w) (m v u)) (s (i u u)))	0
+P	(s (s (i (i u v) (i w v))))	(s (s (i (m u v) (i w v))))	0
+P	(s (i (s (s w)) (i u (i v v))))	(s (i (s (s w)) (i (m u w) v)))	0
+P	(i u (i (i v w) (i u u)))	(i (m (m 0 (i v w)) (s 0)) u)	0
+P	(s (m (m (m v u) w) (s (s 0))))	(i (i (i (m u u) (s u)) (i 0 (m v u))) (s (m (m v w) (s (s 0)))))	0
+P	(m (i (s (i u w)) (s (i w v))) u)	(i (m (s (i u w)) u) (m (s (m w v)) (i w (m 0 0))))	0
+P	(i (m u w) (m w v))	(i (i u u) (m w v))	0
+P	(m (i (s w) v) (m (m v u) (s 0)))	(i (i (i (i (s 0) w) (m u w)) (i (s w) (m v 0))) (m (m (m 0 u) (i u (s 0))) (m v (s 0))))	0
+P	(i (i (s (s u)) (m (s v) v)) w)	(i (s (s (i u u))) (i (s (i 0 v)) (i v w)))	0
+P	(i (m (s v) (s u)) v)	(i (s (i u v)) (i (i 0 u) (m 0 v)))	0
+P	(s (i (i u v) (i v w)))	(s (i w (i (i u v) w)))	0
+P	(m (i (m (i u w) (s u)) (s (i v u))) v)	(i (m (m w (m w w)) (i w (m v u))) (m (i (s v) (i v u)) (s u)))	0
+P	(m (s (s 0)) (i w v))	(i (m (i v v) (i (m w 0) v)) (s (s (m 0 0))))	0
+P	(i v (s (i (i w v) (i 0 u))))	(m (i u (i v (m 0 v))) (s (i (i w v) (i u u))))	0
+P	(i v (s (i (m w v) (m 0 0))))	(m (i (m v (i 0 0)) (s 0)) (i (m (m u u) u) 0))	0
+P	(m (s (i (i v w) v)) (s (m (i v 0) (s (s 0)))))	(s (m (m (i w v) (i 0 0)) (s (s 0))))	0
+P	(m (s (i (s 0) 0)) (i (m v w) (i v u)))	(m (s (i w 0)) (i w (i v u)))	0
+P	(m (m v (i (s 0) u)) (i (s u) (i v u)))	(i (s u) (m v u))	0
+P	(m (m (i u w) (m w v)) (m v (s v)))	(m (s (m v v)) (i (m u w) (m w 0)))	0
+P	(i 0 (i (m (s v) 0) (s 0)))	(m (s v) 0)	0
+P	(i (i (m v u) (s 0)) (i (m v u) (s 0)))	(m v u)	0
+P	(m (s 0) v)	v	0
+P	(i v (s w))	(i (i 0 (i v (s w))) (s (i 0 (i v (s w)))))	0
+P	(i (s (m (m u w) (i v 0))) (s (m u (s u))))	(i (i (s (m (m u w) (i v 0))) (s (m u (s u)))) (s (i (s (m (m u w) (i v 0))) (s (m u (s u))))))	0
+P	(i (s 0) (m (i (i (m w u) (s v)) (i (s v) (i w u))) (s (m (m v 0) w))))	(m (i (i (m w u) (s v)) (i (s v) (i w u))) (s (m (m v 0) w)))	0
+P	(s (m (s 0) (i w u)))	(s (m (s (m (s 0) (i w u))) 0))	0
+P	(s (i (m v v) (s w)))	(s (s (i (m v v) (s w))))	0
+P	(i (i (s 0) u) (i (i u v) (s 0)))	w	0
+P	u	(i (m (s (i u (s 0))) (i (m u w) 0)) (s (s (s w))))	0
+P	(m w w)	(i (i w 0) v)	0
+P	(i (m v w) (i v w))	0	0
+P	(s (s 0))	(i (s (s 0)) (s 0))	1
+P	(m 0 u)	u	1
+P	v	(m 0 v)	1
+P	(m 0 v)	(m v v)	1
+P	(m v v)	(i 0 v)	1
+P	(s (m (s 0) (s (s (s 0)))))	(m (s (s (s (s 0)))) (i (i v (m v w)) 0))	1
+P	(m (i (i v v) (s v)) (s (s u)))	(m (i (i (i (s 0) v) (s 0)) (s v)) (m (s (s u)) 0))	1
+P	(i (s u) (m w v))	(i (s u) (m v w))	1
+P	(i (s (s v)) v)	(i (s (s (i v v))) v)	1
+P	(s (s (m w (m w (s 0)))))	(s (s (m (s 0) w)))	1
+P	(s (s (i u (i 0 v))))	(s (s (i (m u u) (m 0 v))))	1
+P	(m (m (m (s u) w) (m (m v v) (m 0 0))) (s (m (i 0 (s 0)) 0)))	(m (m (m (s u) (m 0 v)) u) (m (m (m v v) (m w 0)) (i (m (s 0) 0) (s (s 0)))))	1
+P	(m (i (m v v) (i 0 u)) (s 0))	(m (i (m 0 v) u) (s (i w 0)))	1
+P	(i 0 (m (s (s (s 0))) w))	(m (m (i w (m w w)) (s 0)) (s (s (s 0))))	1
+P	(s (m (s (s 0)) (m v (m (s 0) v))))	(m (m v (s (m v v))) (m (m (s 0) (i u 0)) (s (s (s 0)))))	1
+P	(m (m u (i w 0)) (i (s u) (i w w)))	(m (i (s u) (m w w)) u)	1
+P	(s (s (m (i w w) (s v))))	(s (m (s w) (s (s v))))	1
+P	(s (s (i (m v w) (i w 0))))	(s (m (i 0 (s 0)) (m 0 0)))	1
+P	(s (m (i u v) (m (s v) v)))	(m (s (i u v)) (s (s v)))	1
+P	(m (i (m u u) (m 0 v)) 0)	(i (m 0 u) v)	1
+P	(m (i (i (m 0 w) (m w 0)) (i (s u) (s v))) (s (m (s (s 0)) w)))	(s (m (m (m v u) w) (s (s 0))))	1
+P	(m (m w u) (i 0 0))	(m (m u w) 0)	1
+P	(i (s w) (m v (m w w)))	(i (m (s w) (m 0 0)) (m v (m 0 w)))	1
+P	(i (s (m v (s 0))) u)	(i (s (m (s 0) v)) u)	1
+P	(s (m (s w) (m w w)))	(i w (s (m (s w) (m w w))))	1
+P	(m (m (i (s w) (i w 0)) (i (m v 0) 0)) (s (s (i 0 u))))	(s (i (s u) (s u)))	1
+P	(s (i (m (m v w) (m v w)) (m (i u v) (m w w))))	(m 0 (i (s (i (m (m v w) (m v w)) (m (i u v) (m w w)))) (s 0)))	1
+P	(i (m w v) (i (s 0) w))	(m (m (i (m w v) (i (s 0) w)) (i (m w v) (i (s 0) w))) (i (m (i (m w v) (i (s 0) w)) (i (m w v) (i (s 0) w))) (m (i (m w v) (i (s 0) w)) (i (m w v) (i (s 0) w)))))	1
+P	(s v)	(m (s 0) (s v))	1
+P	(i 0 (m v v))	(m v v)	1
+P	(s (m 0 u))	(s (m 0 (m 0 u)))	1
+P	(i (s (m (s u) (s 0))) u)	(m 0 (i (s (m (s u) (s 0))) u))	1
+P	(s (m (i v v) v))	(m 0 (s (m (i v v) v)))	1
+P	(m 0 w)	w	1
+P	(m (i (m (s 0) w) (m 0 u)) (i (i (m (s 0) w) (m 0 u)) (i (m (s 0) w) (m 0 u))))	(i (m (s 0) w) (m 0 u))	1
+P	(m (i w u) 0)	(i w u)	1
+P	(i (m (s 0) (s 0)) 0)	(i (s 0) 0)	1
+P	(m (m (i w v) (m u 0)) 0)	(m (i w v) (m u 0))	1
+P	(s (s u))	(m (s (s u)) (s (s u)))	1
+P	(m (m (m v u) v) u)	(m v u)	1
+P	(i (i 0 0) (s (m (m 0 w) (m 0 u))))	(s (m (m 0 w) (m 0 u)))	1
+P	(m (i 0 (m (i (m (i v 0) (m u v)) (s (s 0))) (m (i (m w (s 0)) (i v u)) (m (m 0 0) (s u))))) 0)	(m (i (m (i v 0) (m u v)) (s (s 0))) (m (i (m w (s 0)) (i v u)) (m (m 0 0) (s u))))	1
+P	(m (m w w) (i (m w w) (m w w)))	(m w w)	1
+P	u	(m u (i u u))	1
+P	(i 0 (m u (s w)))	(m u (s w))	1

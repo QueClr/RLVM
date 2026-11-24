@@ -1218,6 +1218,8 @@ public final class Run {
     private static final class EnvRunner implements Runnable {
         /** Statistics: this many of the slowest steps of the pass are kept. */
         private static final int SLOWEST = 12;
+        /** The shared bytes of the memory account are added up at most this often by the environment thread. */
+        private static final long SHARED_REFRESH_NANOS = 20_000_000L;
 
         /** Keeps the {@link #SLOWEST} longest steps: (nanos, first unit, units) triples, unordered. */
         private static void slowest(long[] list, long nanos, int from, int units) {
@@ -1268,6 +1270,7 @@ public final class Run {
             long[] series = new long[timed ? 192 : 0];
             int seriesLen = 0;
             long seriesNext = 0;
+            long sharedAt = System.nanoTime() - SHARED_REFRESH_NANOS;
             try {
                 LaneSignals signals = new LaneSignals(board, run.account, slot, true);
                 env = new EnvLane(run, signals);
@@ -1359,9 +1362,16 @@ public final class Run {
                     signals.guard(frontier);
                     final long a0 = timed ? System.nanoTime() : 0;
                     int n = env.advanceTo(target);
-                    final long a1 = timed ? System.nanoTime() : 0;
+                    final long a1 = System.nanoTime();
                     signals.guard(-1);
-                    run.refreshSharedBytes();
+                    // The shared part of the memory account: the pass adds a few terms per inductive block, and
+                    // adding up the store's tables is not free (Store.sharedBytes() walks the chunks of every
+                    // table: 0.3 ms on mathlib, 4 s of this thread over its 12,700 steps when it was done
+                    // after every step). Refreshed at most every SHARED_REFRESH_NANOS, and at the end.
+                    if (a1 - sharedAt >= SHARED_REFRESH_NANOS) {
+                        run.refreshSharedBytes();
+                        sharedAt = a1;
+                    }
                     Engine p = run.primary;
                     if (p != null) {
                         p.environmentAdvanced(n);
@@ -1418,6 +1428,11 @@ public final class Run {
                 run.fatal(t);
             } finally {
                 scheduler.close();
+                try {
+                    run.refreshSharedBytes();
+                } catch (Throwable t) {
+                    run.fatal(t);
+                }
                 if (timed) {
                     final long closedAt = System.nanoTime();
                     stats.put("driver.time.envStartNanos", startAt - run.startNanos);

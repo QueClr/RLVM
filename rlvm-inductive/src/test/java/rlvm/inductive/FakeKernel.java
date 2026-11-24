@@ -234,10 +234,28 @@ final class FakeKernel implements KernelOps {
             return false;
         }
         switch (ka) {
+            // The official, incomplete level relation (OWNER-NOTES item 11: the kernels compare levels
+            // as the official kernel does), so that the fixtures get the official verdict on this
+            // checker too.
             case Kind.SORT:
-                return levels.isEquiv(terms.a(a), terms.a(b));
-            case Kind.CONST:
-                return terms.a(a) == terms.a(b) && levels.listsEquiv(terms.b(a), terms.b(b));
+                return levels.isEquivOfficial(terms.a(a), terms.a(b));
+            case Kind.CONST: {
+                if (terms.a(a) != terms.a(b)) {
+                    return false;
+                }
+                int la = terms.b(a);
+                int lb = terms.b(b);
+                int n = levels.lists().length(la);
+                if (n != levels.lists().length(lb)) {
+                    return false;
+                }
+                for (int i = 0; i < n; i++) {
+                    if (!levels.isEquivOfficial(levels.lists().get(la, i), levels.lists().get(lb, i))) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             case Kind.APP: {
                 int n = terms.spineLength(a);
                 if (n != terms.spineLength(b)) {
