@@ -29,6 +29,14 @@ class M4ArenaTest {
     }
 
     private static void clean(String path, long maxTicks, String switches) throws IOException {
+        clean(path, maxTicks, switches, 0);
+    }
+
+    /**
+     * {@code maxDeclines}: machine declines that are expected: a declaration that enters eager reduction is declined
+     * by the facade's rule (M6, findings S-F4 / S-F5 / M6-F26) and decided by the reference engine.
+     */
+    private static void clean(String path, long maxTicks, String switches, int maxDeclines) throws IOException {
         assumeTrue(Fixture.exists(path), "missing " + path);
         long ticks64 = -1;
         for (int depth : new int[] {Op.HOST_DEPTH, 0}) {
@@ -43,7 +51,7 @@ class M4ArenaTest {
                 long ticks = g.m.ticks() - before;
                 System.out.println(path + " (D = " + depth + "): " + r + "; " + ticks + " ticks");
                 assertEquals(0, r.soundness + r.completeness, "wrong verdicts on " + path + " (D = " + depth + "):\n" + r);
-                assertEquals(0, r.declined, "machine declines on " + path + " (D = " + depth + "):\n" + r);
+                assertTrue(r.declined <= maxDeclines, "machine declines on " + path + " (D = " + depth + "):\n" + r);
                 assertTrue(ticks <= maxTicks, path + ": " + ticks + " ticks, expected at most " + maxTicks
                         + " (the official order makes this test cheap)");
                 if (depth == Op.HOST_DEPTH) {
@@ -149,9 +157,11 @@ class M4ArenaTest {
     void theAcceptanceFilesWithFactsAndProbes() throws IOException {
         for (String f : new String[] {"bad/bugs/unit-rec-rule.ndjson", "bad/bugs/eta-ctor-alias.ndjson",
             "bad/bugs/rec-missing-ih.ndjson", "good/perf/irrelevance-refutes.ndjson", "good/perf/proj-lazy-struct.ndjson",
-            "bad/bugs/proj-of-subst-prop.ndjson", "bad/bugs/rec-of-subst-prop.ndjson", "bad/bugs/proj-of-stuck-prop.ndjson"}) {
+            "bad/bugs/proj-of-subst-prop.ndjson", "bad/bugs/proj-of-stuck-prop.ndjson"}) {
             clean(T + f, Long.MAX_VALUE, "facts,probes,lazyeval,m4a");
         }
+        // unit 128 'Issue.forallFalse' applies eagerReduce: declined by the eager-reduction rule, never a wrong verdict
+        clean(T + "bad/bugs/rec-of-subst-prop.ndjson", Long.MAX_VALUE, "facts,probes,lazyeval,m4a", 1);
     }
 
     @Test

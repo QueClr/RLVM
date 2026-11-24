@@ -460,7 +460,7 @@ final class Conv {
         if ((t >>> 1) == 0 || (s >>> 1) == 0) {
             return m.fault(MachineErrors.E_INTERNAL); // NONE or HOLE is never a side of a comparison
         }
-        int fuel = (m.sw & Op.SW_M4A) != 0 ? sameShape(m, t, s) : 0;
+        int fuel = (m.sw & Op.SW_SAME) != 0 ? sameShape(m, t, s) : 0;
         if (fuel != 0 && seenSame(m, t, s, fuel)) {
             // [D28] the two values stand for one expression: the official is_equiv of quick_is_def_eq
             if ((m.debug & Op.DBG_SHORTCHECK) != 0 && Debug.shortCheck(m, t, s, T) != 0) {

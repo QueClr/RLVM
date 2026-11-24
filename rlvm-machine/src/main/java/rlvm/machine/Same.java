@@ -6,7 +6,8 @@ import rlvm.store.Terms;
 
 /**
  * SAME(a, b): bounded structural identity of two values, i.e. of the TERMS they stand for (NOTES-M4 D28).
- * Owner: M4. Behind the experiment switch {@code Op.SW_M4A}; nothing of it runs in v0 or in strict mode.
+ * Owner: M4. Behind the switch {@code same} ({@code Op.SW_SAME}, the experiment bit {@code Op.SW_M4A}); nothing
+ * of it runs in v0 or in strict mode. Which pairs are walked: {@code Conv.sameShape}.
  *
  * <h2>What it decides</h2>
  * The official {@code is_def_eq} starts with {@code quick_is_def_eq}, whose first test is
@@ -37,6 +38,10 @@ import rlvm.store.Terms;
  * fuel or depth, is {@code false}: "not seen to be the same", after which the caller runs the complete
  * procedure. It is therefore not one of the congruence shortcuts of finding S-F1: it never asks whether
  * two different sub-terms are convertible.
+ *
+ * <p>Far frames (ISA 2.4) are walked: a variable beyond the 63 near slots is looked up in the REST chain, and
+ * two far frames of one term are the same if their near slots and all their outer bindings are (measured: on
+ * the Cedar slice half of the closures that are one expression stand under more than 63 bindings).
  *
  * <p>Cost: at most {@link #FUEL} nodes per query and {@link #DEPTH} host frames; no allocation, except that
  * a level or level list with parameters is instantiated through the caches of {@link Levels} (the same
