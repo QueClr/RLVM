@@ -687,9 +687,10 @@ a machine class nor the kernel is 19.9 % = 1.59 s of Init before and 19.1 % = 1.
 reader, loader, store writers and block decoding 0.87 -> 0.78 s. **The targets of the wave (0.5 s on
 Init for everything that is not the engine; 8 s of CPU for the mathlib load) are not reached.**
 
-Two diagnostic switches stay in the loader (environment variables, read when a `Loader` is created; both
-paths build the same store): `RLVM_LOAD_EAGER_LOC=1` reads `loc` when the record arrives, as before this
-wave; `RLVM_LOAD_NO_TOUCH=1` switches the touch hint off.
+The two diagnostic switches of that wave (`RLVM_LOAD_EAGER_LOC`, `RLVM_LOAD_NO_TOUCH`, environment
+variables read when a `Loader` was created) are gone since LP2: the loader reads no environment
+variable and no system property. Locations are always read at the declaration line (the packed runs
+depend on it); the touch hint is on (LP2's measurement of it: "LP2: warm measurements" below).
 
 What is left, by the profile of the published state (mathlib, load phase, 49,559 samples = 12.4 s;
 `work/pipeline-w7/perf/final-b-load-mathlib.txt`): the reader 26 % (`Scanner.num` 9.3 %, `Mem.u64` 5.7 %,

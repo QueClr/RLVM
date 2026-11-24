@@ -41,3 +41,56 @@ What the measurements say about ISA 1.6 and the staging table (details in the lo
 Tests changed: `MachineStateTest.footprintIsBytesInUseNotCapacity` and `M6FacadeTest.footprint...` asserted
 "capacity is 8 MiB" literally; they now assert that the capacity is many times the bytes in use (the property
 under test: the footprint is not the capacity).
+
+## 3. Wave 6 (integrator of wave 6, 2026-11-24 17:57Z - ): the machine becomes the default engine
+
+The log with every run, count and command is `work/status/machine-integration.md`, heading "Wave 6"; the list of
+switches with the gate and measurement of each is `SWITCHES.md`; tools and outputs are in `work/int6/`.
+
+### 3.1 What the integrator changed
+
+- **Wiring.** `rlvm-truffle` is a module of the parent pom and its jar is in every distribution (`scripts/build.sh`:
+  tree builds have it as a reactor module, `--published` builds take the published jar). The tier runs only under
+  `t2`, which is off. `MachineProvider.priority()` is 100: without `-X engine=` a distribution checks with the machine;
+  the reference engine re-checks every rejection and decides what the machine declines; `-X engine=reference` runs it
+  alone. Nothing in `rlvm-main` had to change for that (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`).
+- **Default set.** `Op.SW_DEFAULT` = `warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,
+  lazyeval,same`; `bodies` / `directrules` / `lazycases` are the new names of `m2a` / `m3a` / `m7a` (same bits; the old
+  names are read). Cap 1 MiB, host depth bound 128: unchanged, both re-measured with the new set.
+- **M8-F1** (`Code.kval`, `Code.resume`, `Code.kvalFill`; deviation from the letter of ISA 4.2, which has no frame form
+  of `KVAL`): the frame of an activation that waits for the value of a `KVAL` is `ACT[blk, pc + 2, DST_KVAL |
+  DST_KVAL_LS? | reg, ..]`, and the resume stores the value into the register AND into the inline cache cell of the
+  site `(blk << 12 | pc, key)`, exactly the words the unsuspended path writes. Without it the tick count was a
+  function of the host depth bound (the cache was empty after a suspended evaluation, and under `gated` the closed
+  term is not tabled, so the next execution paid its ticks again).
+
+### 3.2 What the gate's harness taught (test tree; relevant to anybody who runs several engines over one store)
+
+Two pieces of state live in the STORE, not in the engine, and are therefore shared by every `MachineEngine` made
+over it: the PCHK bits (`Store.facts()`, by design: workers share them) and the **binder hints** of the code store
+(`CodeStore.addSub` writes the sub-block id of a binder into the node's reserved `c` word through
+`TermStore.setBinderHint`; `CodeStore.hint` validates the id against the reader's own directory and answers 0 for a
+foreign one, i.e. "walk the term"). One engine per store - the real pipeline - is unaffected. M8's gate runs up to
+six engines over one store: lanes that elaborate in the same order assign the same ids and agree, an audit lane
+(memo re-computations) does not, and its hints silently turned block activations of the other lanes into walks:
+tick differences without outcome differences, different in every run. `M8Lanes` now runs the compared lanes before
+the others and `M8Harness` gives every lane a PCHK table of its own. `-X passes=N -X passes-mode=recheck` (new
+engines per pass over one store) has the same property in a milder form: a new engine finds stale hints, walks,
+and overwrites them when it elaborates the parent again.
+
+### 3.3 Kept and rejected, with numbers (native `-O3`, 8 workers, pipelined, `bench/quiet.py` windows; wall s / CPU s of a warm pass)
+
+| Experiment | Init | Std | Cedar slice | reachability | cedar | mathlib | Decision |
+|---|---|---|---|---|---|---|---|
+| `warm,gated,expect` -> the new default set | 1.09 / 7.14 -> 0.81 / 5.26 | 1.84 / 12.59 -> 1.51 / 10.09 | 0.55 / 3.00 -> 0.46 / 2.40 | 2.49 / 7.37 -> 0.62 / 1.64 | 2.45 / 17.29 -> 2.09 / 13.99 | 30.68 / 215.7 -> 29.28 / 204.8 | KEPT (the default) |
+| the set without `same` -> with it | 0.82 / 5.32 -> 0.81 / 5.26 | 1.52 / 10.32 -> 1.51 / 10.09 | 0.53 / 2.75 -> 0.46 / 2.40 | 0.61 / 1.60 -> 0.62 / 1.64 | 2.44 / 14.78 -> 2.09 / 13.99 | - | KEPT; reachability +2.5 % CPU in one row, inside the spread of two more readings (1.60, 1.55) |
+| cap 1 MiB -> 512 KiB | 5.26 -> 5.22 CPU | 10.09 -> 9.92 | 2.40 -> 2.36 | 1.64 -> 1.58 | 13.99 -> 13.73 | 204.8 -> 202.6 (29.28 -> 29.20 s) | NOT ADOPTED: 1-2 % in one row each, wall equal; needs three rounds |
+| cap 1 MiB -> 2 MiB / 4 MiB | 5.49 / 5.58 | 10.48 / 10.84 | 2.45 / 2.61 | 1.61 / 1.62 | 14.51 / 14.92 | 211.8 / 212.2 (30.55 / 30.26 s) | REJECTED |
+| host depth 128 -> 512 / 2048 | - | - | 2.50 -> 2.53 / 2.43 CPU | 1.58 -> 1.64 / 1.66 | 14.13 -> 14.47 / 14.18 | - | REJECTED (no gain) |
+| H10 inline lists (same jars, two interleaved rounds) | 5.38, 5.37 -> 5.29, 5.32 | 10.23, 10.19 -> 10.22, 10.06 | 2.50, 2.51 -> 2.39, 2.40 | 1.60, 1.55 -> 1.60, 1.59 | 14.01, 14.25 -> 13.91, 13.97 | - | MEASURED, not wired into the build (SWITCHES.md) |
+| the Truffle tier (`t2`) | | | +38 % wall (T3, JVM, 8 workers) | parity | +39 % | | OFF |
+
+Not built in this pass (and why): X1's `once` filter for EVAL tabling (measured only against sets without `bodies`
+and the K1 blocks; a change of `Eval` after the gates would have needed all of them again); an exact treatment of
+eager reduction (the declined declarations are 0.2-0.9 % of the units and about a tenth of the workers' time on
+mathlib and Std: the first item of "what is left").

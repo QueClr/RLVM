@@ -84,9 +84,6 @@ public final class Loader implements ExportSink, RecordSink {
     /** Ordinals are ints; a segment (at most 2^29 - 1 records) must still fit above this. */
     private static final int MAX_EXPR_RECORDS = Integer.MAX_VALUE - (1 << 29) - 16;
 
-    // MEASUREMENT SWITCH (LP2: decided by a warm measurement, then removed)
-    private final boolean TOUCH = System.getenv("RLVM_LOAD_NO_TOUCH") == null;
-
     /**
      * The packed form in which this loader takes runs ({@link #exprRun}): the tags are the node kinds
      * of the store, so the bytes of a child encoded by a scanner thread are the bytes of a
@@ -1309,12 +1306,12 @@ public final class Loader implements ExportSink, RecordSink {
                     int b = s[p + 2];
                     if (a > 0) {
                         s[(a - 1) << 2] |= S_MARK;
-                    } else if (TOUCH) {
+                    } else {
                         o.touch(-a);
                     }
                     if (b > 0) {
                         s[(b - 1) << 2] |= S_MARK;
-                    } else if (TOUCH) {
+                    } else {
                         o.touch(-b);
                     }
                 }
@@ -1324,17 +1321,17 @@ public final class Loader implements ExportSink, RecordSink {
                     int c = s[p + 3];
                     if (a > 0) {
                         s[(a - 1) << 2] |= S_MARK;
-                    } else if (TOUCH) {
+                    } else {
                         o.touch(-a);
                     }
                     if (b > 0) {
                         s[(b - 1) << 2] |= S_MARK;
-                    } else if (TOUCH) {
+                    } else {
                         o.touch(-b);
                     }
                     if (c > 0) {
                         s[(c - 1) << 2] |= S_MARK;
-                    } else if (TOUCH) {
+                    } else {
                         o.touch(-c);
                     }
                 }
@@ -1342,7 +1339,7 @@ public final class Loader implements ExportSink, RecordSink {
                     int a = s[p + 1];
                     if (a > 0) {
                         s[(a - 1) << 2] |= S_MARK;
-                    } else if (TOUCH) {
+                    } else {
                         o.touch(-a);
                     }
                 }

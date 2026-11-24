@@ -221,3 +221,33 @@ Condition = what must hold for the shortcut to give the official verdict. Eviden
 - `Nat.gcd`, bitwise operations, shifts and `log2` are not in `init-prelude`; no hostile export covers them.
 - A second mode switch of the official kernel was looked for and not found (definition safety and the local
   context do not change an answer for a pair); if one exists, S-F5 has a sibling.
+
+## 7. Addendum of the wave-6 integrator (2026-11-24, 18:15Z - 19:40Z; not part of package S's review)
+
+State of the findings on the main tree of 19:10Z (machine jar `78c74ca92785`, reference jar `ca1f9bd918bb`):
+
+| Id | State | Evidence |
+|---|---|---|
+| S-F1, S-F2 | fixed (M4, 14:30Z); the removed shortcuts are reachable only through `-Drlvm.machine.m4=congruence,skipargs`, never through a switch set | the 16 rows pass under all 32 switch sets below |
+| S-F4, S-F5 | closed by the decline rule (a declaration that enters eager reduction is declined; the reference engine decides) | the 5 rows and the 11 `eager-decline` rows under all 32 sets; the rule declines 164 / 203 / 6,711 declarations of Init / Std / mathlib (statistic `machine.eagerDeclines`) |
+| **S-F3** | **closed**: both engines compare universe levels as the official kernel does by default (`Levels` of the machine since 14:22Z, rlvm-ref `ca1f9bd918bb` since 16:03Z); `levels-complete` / `-X levels=complete` is the opt-in | `arena-imax-right-successor`, `arena-imax-nested-absorption` are REJECTED under every set; the strict test `SHostileSlowTest#noKnownFindingIsLeft` passes and the mark `levels` is gone from `s/manifest.tsv` |
+
+The matrix was run again with the switches that did not exist or had no name when the review ended
+(`SHostileSlowTest`, in-process, the manifest's official verdicts): 32 switch sets x 329 exports = 10,528
+judgments, **0 unexpected verdicts, 0 known findings that still reproduce**. The 15 new sets: `bodies`, `same`,
+`match`, `joint`, `pchk`, `directrules`, `code,casetrees,lazycases`, `k2,directrules`; step 1 with `bodies`, with
+`same`, with `match,joint,pchk`; the new default set (`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,
+lazycases,directrules,lazyeval,same`) with and without `same` and with `k2`; `all` plus every new switch.
+
+What this does NOT replace: an adversarial review of the new switches. Section 6 lists `pchk`, the experiment
+switches and K2 as not reviewed, and `same` (M4's request of 15:26Z) was never attacked by package S. They are
+in the default set on the strength of the matrix above, M8's gate (differential, tier equivalence, convention
+equivalence, the audits `memocheck` and `shortcheck`, which re-derive every answer of `same` and of PCHK by the
+complete procedure, on all 230 tests and the four corpora), 17,775 mutants and the DiffEngine runs on six
+corpora (`rlvm-machine/SWITCHES.md`). The general lesson of section 1 applies to each of them: the question is
+whether the OFFICIAL procedure gives the answer, not whether the answer is true. For `same` the argument is
+that it answers T only for two values that read back to the same expression up to beta, zeta and literal
+canonicalisation - the condition under which value identity (v0) is the official answer; for PCHK that a
+closed, level-parameter-free term that passed check mode once has the same type everywhere its declarations
+are visible, and the bit is never set after an eager-reduction comparison. A next review should attack both,
+and `bodies` / `match` / `joint` / `lazycases` / `directrules`, with exports of its own.
