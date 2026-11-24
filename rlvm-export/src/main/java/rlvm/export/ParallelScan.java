@@ -57,9 +57,11 @@ final class ParallelScan {
         Throwable failure;
         /** Packing ({@link ExportReader.Options#runs}), or null. */
         final ExportReader.RunFormat runs;
+        final ExportReader.Source source;
 
-        Shared(MemorySegment seg, long from, long to, long chunk, int threads, ExportReader.RunFormat runs) {
-            this.seg = seg;
+        Shared(ExportReader.Source source, long from, long to, long chunk, int threads, ExportReader.RunFormat runs) {
+            this.source = source;
+            this.seg = source.seg;
             this.from = from;
             this.to = to;
             this.chunk = chunk;
@@ -222,6 +224,7 @@ final class ParallelScan {
                     }
                     byte[] buf = c.buf;
                     MemorySegment.copy(sh.seg, ValueLayout.JAVA_BYTE, start, buf, 0, n);
+                    sh.source.copied(start, end);
                     c.fileEnd = end;
                     c.tape.reset();
                     int lastNl = n - 1;
@@ -273,7 +276,7 @@ final class ParallelScan {
         }
         long chunkBytes = Math.min(Math.max(o.parallelChunkBytes, MIN_CHUNK), 1 << 28);
         int threads = o.threads;
-        Shared sh = new Shared(seg, metaEnd, size, chunkBytes, threads, o.runs);
+        Shared sh = new Shared(src, metaEnd, size, chunkBytes, threads, o.runs);
         Worker[] workers = new Worker[threads];
         for (int i = 0; i < threads; i++) {
             workers[i] = new Worker(sh, i);

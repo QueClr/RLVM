@@ -510,20 +510,30 @@ public final class Op {
     public static final int SW_BODIES = 1 << 13;
     public static final int SW_DIRECT_RULES = 1 << 15;
     public static final int SW_LAZY_CASES = 1 << 21;
-    /** Every experiment switch. */
-    public static final int SW_EXPERIMENTS = SW_M1A | SW_M1B | SW_M2A | SW_M2B | SW_M3A | SW_M3B | SW_M4A | SW_M4B | SW_M5A
-            | SW_M5B | SW_M7A | SW_M7B;
-    /** The staging switches that {@code all} names: every named switch but {@code k2}; no experiment switch. */
+    /**
+     * Every experiment switch that is still an experiment. The six bits that entered the default set on
+     * 2026-11-24 ({@code bodies} = m2a, {@code directrules} = m3a, {@code same} = m4a, {@code match} = m5a,
+     * {@code joint} = m5b, {@code lazycases} = m7a) are named switches now and no longer in this mask; their old
+     * names are still read.
+     */
+    public static final int SW_EXPERIMENTS = SW_M1A | SW_M1B | SW_M2B | SW_M3B | SW_M4B | SW_M7B;
+    /** The staging switches that {@code all} names: every named switch of ISA section 11 but {@code k2}; no experiment switch. */
     public static final int SW_ALL = (1 << 11) - 1 & ~SW_K2;
     /**
      * The switches a non-strict engine runs with when neither {@code -X machine.switches} nor the system
-     * property {@code rlvm.machine.switches} is given ({@code rlvm-machine/SWITCHES.md} has the evidence for
-     * every member). {@code -X machine.switches=none} is v0 (the generic tier, the complete procedure).
-     * Since 2026-11-24 16:2xZ: staging step 1, {@code warm,gated,expect}, with the machine's own session cap
-     * ({@code MachineEngine.DEFAULT_SESSION_CAP}, 1 MiB). The module's tests run with the system property
-     * {@code rlvm.machine.switches=none} (pom.xml), so a test engine is v0 unless the test says otherwise.
+     * property {@code rlvm.machine.switches} is given ({@code rlvm-machine/SWITCHES.md} has the gate and the
+     * measurement for every member). {@code -X machine.switches=none} is v0 (the generic tier, the complete
+     * procedure). Since 2026-11-24 19:xxZ (integration of wave 6):
+     * {@code warm,gated,expect} (step 1) + {@code bodies} + {@code pchk,match,joint} + {@code code,casetrees,lazycases}
+     * (step 4) + {@code directrules} + {@code lazyeval} + {@code same}, with the machine's own session cap
+     * ({@code MachineEngine.DEFAULT_SESSION_CAP}). Not in it: {@code facts}, {@code probes}, {@code tele}
+     * (no measured gain), {@code k2} (a deviation from RECONCILIATION section 2 that waits for a decision),
+     * {@code m2b} (undecided), {@code t2} (the Truffle tier: no gain), {@code levels-complete} (owner note 11).
+     * The module's tests run with the system property {@code rlvm.machine.switches=none} (pom.xml), so a test
+     * engine is v0 unless the test says otherwise.
      */
-    public static final int SW_DEFAULT = SW_WARM | SW_GATED_TABLING | SW_EXPECT;
+    public static final int SW_DEFAULT = SW_WARM | SW_GATED_TABLING | SW_EXPECT | SW_BODIES | SW_PCHK | SW_MATCH | SW_JOINT
+            | SW_CODE | SW_CASETREES | SW_LAZY_CASES | SW_DIRECT_RULES | SW_LAZY_EVAL | SW_SAME;
 
     // ---------------------------------------------------------------------------------------------------
     // Debug modes (5.5). Machine.debug holds the set; a failed audit is fault(E_AUDIT).

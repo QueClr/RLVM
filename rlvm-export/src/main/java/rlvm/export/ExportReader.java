@@ -276,6 +276,21 @@ public final class ExportReader {
             }
         }
 
+        /**
+         * Parallel mode: a scanner thread has copied {@code [from, to)} out of the mapping. The whole
+         * pages inside it leave the resident set at once, on that thread; the pages that straddle two
+         * chunks are left to {@link #released}, which the reading thread calls in file order.
+         */
+        void copied(long from, long to) {
+            if (unload) {
+                long a = (from + PAGE - 1) & -PAGE;
+                long b = to & -PAGE;
+                if (b > a) {
+                    seg.asSlice(a, b - a).unload();
+                }
+            }
+        }
+
         /** Everything before {@code upTo} has been copied out: its pages may leave the resident set. */
         void released(long upTo) {
             if (unload) {

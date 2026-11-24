@@ -88,10 +88,16 @@ public final class ProofBlocks {
     private static final int COARSE_SHIFT = 9;
     private int[] coarse = new int[64];
     private int coarseUsed;
-    /** {@link #seek}: byte positions of the first {@code seekKnown + 1} records of the group with sparse slot {@code seekKey}. */
-    private final int[] seekPos = new int[1 << SPARSE_SHIFT];
-    private int seekKey = -1;
-    private int seekKnown;
+    /**
+     * Per global block record: its byte offset from the sparse offset of its group of
+     * {@code 1 << SPARSE_SHIFT} records (at most 15 records of at most 16 bytes: it fits a byte), in
+     * chunks of {@code 1 << WITHIN_SHIFT} records. With it promotion finds a record with two loads
+     * instead of skipping up to 15 records. Loader thread only; given back with the sparse index.
+     */
+    private static final int WITHIN_SHIFT = 16;
+    private static final int WITHIN_MASK = (1 << WITHIN_SHIFT) - 1;
+    private byte[][] within = new byte[16][];
+    private long withinBytes;
     private long payloadBytes;
     private boolean released;
 
@@ -202,7 +208,8 @@ public final class ProofBlocks {
 
     /** Bytes of what only promotion needs: the promotion memo and the sparse record index. */
     long loaderBytes() {
-        return 4L * sparse.length + 4L * promoInts + 8L * promo.length + 4L * promoStack.length + 4L * coarse.length;
+        return 4L * sparse.length + 4L * promoInts + 8L * promo.length + 4L * promoStack.length + 4L * coarse.length
+                + withinBytes + 8L * within.length;
     }
 
     /** True once {@link #releaseLoaderState()} ran: nothing can be promoted any more. */
@@ -225,7 +232,23 @@ public final class ProofBlocks {
         sparseUsed = 0;
         coarse = new int[0];
         coarseUsed = 0;
-        seekKey = -1;
+        within = new byte[0][];
+        withinBytes = 0;
+    }
+
+    /** The chunk of {@link #within} that holds global record {@code record}, allocated on demand. */
+    private byte[] withinChunk(int record) {
+        int ci = record >>> WITHIN_SHIFT;
+        byte[][] dir = within;
+        if (ci >= dir.length) {
+            dir = within = Arrays.copyOf(dir, Math.max(dir.length * 2, ci + 1));
+        }
+        byte[] c = dir[ci];
+        if (c == null) {
+            c = dir[ci] = new byte[1 << WITHIN_SHIFT];
+            withinBytes += 1 << WITHIN_SHIFT;
+        }
+        return c;
     }
 
     /** Loader thread: makes the blocks written so far visible to other threads. */
@@ -607,7 +630,7 @@ public final class ProofBlocks {
         int[] st = promoStack;
         int sp = 0;
         st[sp++] = record - first;
-        st[sp++] = seek(src, blockAt, sparseAt, record - first);
+        st[sp++] = seek(blockAt, sparseAt, first, record - first);
         while (sp > 0) {
             int k = st[sp - 2];
             parse(src, st[sp - 1]);
@@ -642,7 +665,7 @@ public final class ProofBlocks {
                     st = promoStack = Arrays.copyOf(st, st.length * 2);
                 }
                 st[sp++] = c;
-                st[sp++] = seek(src, blockAt, sparseAt, c);
+                st[sp++] = seek(blockAt, sparseAt, first, c);
                 continue;
             }
             int id;
@@ -690,59 +713,13 @@ public final class ProofBlocks {
     }
 
     /**
-     * Byte position of record {@code k} of the block that starts at {@code blockAt}. The positions of
-     * the records of the group (16 records behind one sparse offset) that was sought last are kept,
-     * so a walk down a chain of neighbours skips every record of a group once, not once per visit.
+     * Byte position of record {@code k} of the block that starts at {@code blockAt}, whose first
+     * record has the global number {@code first}: the sparse offset of its group plus its offset
+     * within the group.
      */
-    private int seek(byte[] src, int blockAt, int sparseAt, int k) {
-        int slot = sparseAt + (k >>> SPARSE_SHIFT);
-        int i = k & ((1 << SPARSE_SHIFT) - 1);
-        int[] sp = seekPos;
-        if (slot != seekKey) {
-            seekKey = slot;
-            sp[0] = blockAt + sparse[slot];
-            seekKnown = 0;
-        }
-        int known = seekKnown;
-        if (i > known) {
-            int p = sp[known];
-            do {
-                p = skip(src, p);
-                sp[++known] = p;
-            } while (known < i);
-            seekKnown = known;
-        }
-        return sp[i];
-    }
-
-    /** Position after the record at {@code p}. */
-    private static int skip(byte[] s, int p) {
-        int tag = s[p++] & 0xFF;
-        int fields;
-        switch (tag & 0xF) {
-            case Kind.APP:
-            case Kind.LAM:
-            case Kind.PI:
-                fields = 2;
-                break;
-            case Kind.LET:
-            case Kind.PROJ:
-            case Kind.CONST:
-                fields = 3;
-                break;
-            case Kind.BVAR:
-                fields = (tag >>> 4) == 15 ? 1 : 0;
-                break;
-            default:
-                fields = 1;
-                break;
-        }
-        while (fields > 0) {
-            if (s[p++] >= 0) {
-                fields--;
-            }
-        }
-        return p;
+    private int seek(int blockAt, int sparseAt, int first, int k) {
+        int g = first + k;
+        return blockAt + sparse[sparseAt + (k >>> SPARSE_SHIFT)] + (within[g >>> WITHIN_SHIFT][g & WITHIN_MASK] & 0xFF);
     }
 
     /** The block-local index of the record that {@code ref} names, if it is local and not promoted yet; else -1. */
@@ -896,12 +873,17 @@ public final class ProofBlocks {
 
         /** Start of a record of at most {@code bytes} bytes. */
         private void need(int bytes) {
+            int m = n >>> SPARSE_SHIFT;
             if ((n & ((1 << SPARSE_SHIFT) - 1)) == 0) {
-                int m = n >>> SPARSE_SHIFT;
                 if (m == marks.length) {
                     marks = Arrays.copyOf(marks, m * 2);
                 }
                 marks[m] = pos;
+            }
+            // the record's offset within its group, for promotion (records < 2^31: finish checks)
+            int g = records + n;
+            if (g >= 0) {
+                withinChunk(g)[g & WITHIN_MASK] = (byte) (pos - marks[m]);
             }
             if (pos + bytes > buf.length) {
                 long cap = Math.max((long) buf.length * 2, (long) pos + bytes);
@@ -952,6 +934,35 @@ public final class ProofBlocks {
         }
 
         /**
+         * Encodes external child {@code ext[e]} of the record with index {@code k} of the block at
+         * {@code b[q ..]}: a shared term id ({@code > 0}) or {@code -(index + 1)} of an earlier record
+         * of the block. Returns the position after it.
+         */
+        private int external(byte[] b, int q, int[] ext, int e, int extEnd, int k, boolean bodyPosition) {
+            if (e >= extEnd) {
+                throw new IllegalArgumentException("corrupt packed run");
+            }
+            final int v = ext[e];
+            int r;
+            if (v > 0) {
+                sharedRef(v, bodyPosition);
+                r = (v << 1) | 1;
+            } else {
+                int d = k + v + 1;
+                if (d < 1 || d > k) {
+                    throw new IllegalArgumentException("local reference " + d + " back from record " + k);
+                }
+                r = d << 1;
+            }
+            while ((r & ~0x7F) != 0) {
+                b[q++] = (byte) (r | 0x80);
+                r >>>= 7;
+            }
+            b[q++] = (byte) r;
+            return q;
+        }
+
+        /**
          * The packed run in one loop: the bytes of the pre-encoded references are copied, the external
          * ones are encoded here. Writes exactly what the record-by-record default writes.
          */
@@ -961,8 +972,9 @@ public final class ProofBlocks {
                     || extOff + extCount > ext.length) {
                 throw new IllegalArgumentException("corrupt packed run");
             }
-            // room: a head byte and the pre-encoded bytes are copied, an external is at most 5 bytes
-            long room = (long) pos + len + 5L * extCount;
+            // room: a head byte and the pre-encoded bytes are copied, an external is at most 5 bytes;
+            // 32 more, so that a corrupt record is noticed (below) before it can overrun the buffer
+            long room = (long) pos + len + 5L * extCount + 32;
             if (room > buf.length) {
                 long cap = Math.max((long) buf.length * 2, room);
                 if (cap > Integer.MAX_VALUE - 15) {
@@ -985,46 +997,56 @@ public final class ProofBlocks {
             int k = n;
             int p = off;
             int e = extOff;
-            for (int i = 0; i < count; i++, k++) {
+            if ((long) records + n + count > Integer.MAX_VALUE) {
+                throw new StoreLimitException("more than 2^31 - 1 block records");
+            }
+            int g = records + n; // global number of the record being written
+            byte[] wn = count > 0 ? withinChunk(g) : null;
+            for (int i = 0; i < count; i++, k++, g++) {
                 if ((k & ((1 << SPARSE_SHIFT) - 1)) == 0) {
                     mk[k >>> SPARSE_SHIFT] = q;
                 }
+                if ((g & WITHIN_MASK) == 0) {
+                    wn = withinChunk(g);
+                }
+                wn[g & WITHIN_MASK] = (byte) (q - mk[k >>> SPARSE_SHIFT]);
                 if (p >= end) {
                     throw new IllegalArgumentException("corrupt packed run");
                 }
                 final int head = packed[p++];
                 final int kind = head & 0xF;
-                final int children = Writer.runChildren(kind);
+                final boolean let = kind == Kind.LET;
+                if (!let && kind != Kind.APP && kind != Kind.LAM && kind != Kind.PI) {
+                    throw new IllegalArgumentException("corrupt packed run: kind " + kind);
+                }
                 b[q++] = (byte) kind;
-                for (int c = 0; c < children; c++) {
-                    if ((head & (0x10 << c)) != 0) {
-                        if (e >= extEnd) {
-                            throw new IllegalArgumentException("corrupt packed run");
-                        }
-                        final int v = ext[e++];
-                        int r;
-                        if (v > 0) {
-                            // the body of a binder is its last child
-                            sharedRef(v, c == children - 1 && kind != Kind.APP);
-                            r = (v << 1) | 1;
-                        } else {
-                            int d = k + v + 1;
-                            if (d < 1 || d > k) {
-                                throw new IllegalArgumentException("local reference " + d + " back from record " + k);
-                            }
-                            r = d << 1;
-                        }
-                        while ((r & ~0x7F) != 0) {
-                            b[q++] = (byte) (r | 0x80);
-                            r >>>= 7;
-                        }
-                        b[q++] = (byte) r;
+                // child 0: never the body of a binder
+                if ((head & 0x10) != 0) {
+                    q = external(b, q, ext, e++, extEnd, k, false);
+                } else {
+                    byte x;
+                    do {
+                        x = packed[p++];
+                        b[q++] = x;
+                    } while (x < 0);
+                }
+                // child 1: the body of a LAM / PI
+                if ((head & 0x20) != 0) {
+                    q = external(b, q, ext, e++, extEnd, k, !let && kind != Kind.APP);
+                } else {
+                    byte x;
+                    do {
+                        x = packed[p++];
+                        b[q++] = x;
+                    } while (x < 0);
+                }
+                // child 2: the body of a LET
+                if (let) {
+                    if ((head & 0x40) != 0) {
+                        q = external(b, q, ext, e++, extEnd, k, true);
                     } else {
                         byte x;
                         do {
-                            if (p >= end) {
-                                throw new IllegalArgumentException("corrupt packed run");
-                            }
                             x = packed[p++];
                             b[q++] = x;
                         } while (x < 0);

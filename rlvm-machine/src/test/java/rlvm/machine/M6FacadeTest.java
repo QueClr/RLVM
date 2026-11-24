@@ -936,7 +936,8 @@ class M6FacadeTest {
         assertEquals(Op.SW_WARM, Debug.parseSwitches("warm,gated,-gated"));
         assertEquals(Op.SW_EXPECT, Debug.parseSwitches("warm,none,+expect"));
         assertEquals(Op.SW_ALL & ~Op.SW_WARM, Debug.parseSwitches("all,-warm"));
-        assertEquals(0, Debug.parseSwitches("all") & (Op.SW_K2 | Op.SW_T2 | Op.SW_EXPERIMENTS), "all = every named switch but k2 and t2");
+        assertEquals(0, Debug.parseSwitches("all") & (Op.SW_K2 | Op.SW_T2 | Op.SW_EXPERIMENTS | Op.SW_BODIES | Op.SW_DIRECT_RULES | Op.SW_SAME
+                | Op.SW_MATCH | Op.SW_JOINT | Op.SW_LAZY_CASES), "all = the staging switches of ISA section 11 but k2: no experiment bit, old or new");
         assertEquals(Op.SW_CODE | Op.SW_CASETREES | Op.SW_T2, Debug.parseSwitches("code,casetrees,t2"));
         assertEquals(Op.SW_LAZY_EVAL | Op.SW_LEVELS_COMPLETE, Debug.parseSwitches("lazyeval,levels-complete"));
         assertEquals("lazyeval,levels-complete", Debug.switchNames(Op.SW_LAZY_EVAL | Op.SW_LEVELS_COMPLETE));
@@ -953,10 +954,13 @@ class M6FacadeTest {
         assertEquals("bodies,directrules,lazycases", Debug.switchNames(Op.SW_BODIES | Op.SW_DIRECT_RULES | Op.SW_LAZY_CASES));
         assertEquals(Op.SW_M2A | Op.SW_M2B | Op.SW_M3A | Op.SW_M3B | Op.SW_M4A | Op.SW_M4B | Op.SW_M5A | Op.SW_M5B,
                 Debug.parseSwitches("m2a,m2b,m3a,m3b,m4a,m4b,m5a,m5b"));
-        assertEquals(12, Integer.bitCount(Op.SW_EXPERIMENTS));
+        assertEquals(6, Integer.bitCount(Op.SW_EXPERIMENTS), "six experiment bits are named switches of the default set now");
         assertEquals(0, Op.SW_EXPERIMENTS & Op.SW_ALL);
         assertEquals(0, Op.SW_DEFAULT & (Op.SW_EXPERIMENTS | Op.SW_K2), "no experiment is a default");
-        assertEquals(Op.SW_WARM | Op.SW_GATED_TABLING | Op.SW_EXPECT, Op.SW_DEFAULT, "the default set: staging step 1 (SWITCHES.md)");
+        assertEquals(Debug.parseSwitches("warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same"),
+                Op.SW_DEFAULT, "the default set of the wave-6 integration (SWITCHES.md)");
+        assertEquals(0, Op.SW_DEFAULT & (Op.SW_FACTS | Op.SW_PROBES | Op.SW_TELE | Op.SW_T2 | Op.SW_M2B | Op.SW_LEVELS_COMPLETE | Op.SW_INERT_LOOP),
+                "not in the default set (SWITCHES.md says why)");
         assertEquals("none", System.getProperty("rlvm.machine.switches", "none"), "the module's tests run v0 unless they say otherwise (pom.xml)");
         assertThrows(IllegalArgumentException.class, () -> Debug.parseSwitches("warm,-fast"));
         // without the setting an engine runs the default set; a strict engine runs none
