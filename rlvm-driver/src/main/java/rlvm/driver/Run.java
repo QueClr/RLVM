@@ -331,6 +331,10 @@ public final class Run {
         }
         Throwable t = fatal.get();
         if (t instanceof Error) {
+            if (keptPrimary != null) {
+                keptPrimary.closeAll();
+                keptReference.closeAll();
+            }
             throw (Error) t;
         }
         long cpu1 = processCpuNanos();

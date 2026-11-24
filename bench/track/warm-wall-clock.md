@@ -15,7 +15,7 @@ workers, JVM variants, host conditions: `work/status/warm.md`.
 
 | Corpus | Checker | Warm wall, 8 workers pipelined (s): median (best) | Warm wall, 1 worker (s) | Cold wall, fresh process, 8 workers (s) | CPU of the median warm pass, 8 workers (s) | Peak RSS, 8 workers (MiB) | 1w / (8 x 8w) |
 |---|---|--:|--:|--:|--:|--:|--:|
-| init (348 MB) | RLVM machine (warm,gated,expect), JVM launcher | **1.60** (1.07) | **5.13** (5.13) | 3.96 | 12.37 | 900 | 0.40 |
+| init (348 MB) | RLVM machine (warm,gated,expect), JVM launcher | **0.96** (0.88) in 10 passes; 5 passes: 1.60 (1.07) | **5.13** (5.13) | 3.96 | 6.07 | 893 | 0.67 |
 | init (348 MB) | RLVM machine (warm,gated,expect), native image | **1.07** (1.07) | **6.26** (6.26) | 1.10 | 7.30 | 455 | 0.73 |
 | init (348 MB) | RLVM machine (no switch), JVM launcher | **1.05** (1.03) | - | 4.32 | 6.73 | 866 | - |
 | init (348 MB) | RLVM machine (no switch), native image | **1.08** (1.06) | - | 1.19 | 7.47 | 481 | - |
@@ -23,7 +23,7 @@ workers, JVM variants, host conditions: `work/status/warm.md`.
 | init (348 MB) | RLVM reference, native image | **2.34** (2.22) | - | 2.53 | 14.61 | 596 | - |
 | init (348 MB) | gruszka, 8 / 1 threads | **1.01** (first run 0.96) | **3.15** (first run 2.83) | 0.96 | 4.14 | 498 | 0.39 |
 | init (348 MB) | nano-lean, 8 / 1 threads | **1.23** (first run 1.11) | **5.03** (first run 5.34) | 1.11 | 5.89 | 1385 | 0.51 |
-| std (584 MB) | RLVM machine (warm,gated,expect), JVM launcher | **1.68** (1.57) | **9.68** (9.68) | 5.81 | 11.94 | 1782 | 0.72 |
+| std (584 MB) | RLVM machine (warm,gated,expect), JVM launcher | **1.72** (1.53) in 10 passes; 5 passes: 1.68 (1.57) | **9.68** (9.68) | 5.81 | 10.93 | 1774 | 0.70 |
 | std (584 MB) | RLVM machine (warm,gated,expect), native image | **1.88** (1.87) | **11.19** (11.19) | 1.95 | 13.28 | 745 | 0.74 |
 | std (584 MB) | RLVM machine (no switch), JVM launcher | **1.71** (1.61) | - | 6.35 | 11.44 | 1768 | - |
 | std (584 MB) | RLVM machine (no switch), native image | **1.84** (1.81) | - | 1.96 | 13.02 | 739 | - |
@@ -31,7 +31,7 @@ workers, JVM variants, host conditions: `work/status/warm.md`.
 | std (584 MB) | RLVM reference, native image | **3.92** (3.75) | - | 4.13 | 24.92 | 837 | - |
 | std (584 MB) | gruszka, 8 / 1 threads | **1.13** (first run 1.37) | **5.33** (first run 5.40) | 1.37 | 6.11 | 667 | 0.59 |
 | std (584 MB) | nano-lean, 8 / 1 threads | **1.79** (first run 1.96) | **8.57** (first run 8.54) | 1.96 | 10.06 | 1661 | 0.60 |
-| cedar (905 MB) | RLVM machine (warm,gated,expect), JVM launcher | **2.26** (2.23) | **12.48** (12.48) | 8.51 | 16.46 | 1832 | 0.69 |
+| cedar (905 MB) | RLVM machine (warm,gated,expect), JVM launcher | **2.21** (2.01) in 10 passes; 5 passes: 2.26 (2.23) | **12.48** (12.48) | 8.51 | 14.96 | 2067 | 0.71 |
 | cedar (905 MB) | RLVM machine (warm,gated,expect), native image | **2.62** (2.62) | **14.97** (14.97) | 2.86 | 18.20 | 882 | 0.71 |
 | cedar (905 MB) | RLVM machine (no switch), JVM launcher | **2.18** (2.16) | - | 7.77 | 15.96 | 2040 | - |
 | cedar (905 MB) | RLVM machine (no switch), native image | **2.58** (2.51) | - | 2.78 | 17.80 | 896 | - |
@@ -47,6 +47,12 @@ workers, JVM variants, host conditions: `work/status/warm.md`.
 | reachability (19 MB) | RLVM reference, native image | **4.83** (4.80) | - | 5.04 | 12.80 | 2693 | - |
 | reachability (19 MB) | gruszka, 8 / 1 threads | **2.57** (first run 2.49) | **3.61** (first run 3.92) | 2.49 | 4.04 | 1162 | 0.18 |
 | reachability (19 MB) | nano-lean, 8 / 1 threads | **0.96** (first run 0.96) | **1.99** (first run 1.88) | 0.96 | 2.06 | 1421 | 0.26 |
+| con-leche (702 MB) | RLVM machine (warm,gated,expect), JVM launcher | **1.71** (1.71) | - | 6.34 | 12.50 | 2118 | - |
+| con-leche (702 MB) | RLVM machine (warm,gated,expect), native image | **2.18** (2.18) | - | 2.26 | 14.08 | 910 | - |
+| navier-stokes-euler (1.56 GB) | RLVM machine (warm,gated,expect), JVM launcher | **8.45** (8.45) | - | 15.67 | 61.09 | 3116 | - |
+| navier-stokes-euler (1.56 GB) | RLVM machine (warm,gated,expect), native image | **9.29** (9.29) | - | 9.73 | 69.64 | 1313 | - |
+| cslib (2.50 GB) | RLVM machine (warm,gated,expect), JVM launcher | **7.62** (7.62) | - | 12.56 | 56.63 | 3311 | - |
+| cslib (2.50 GB) | RLVM machine (warm,gated,expect), native image | **9.06** (9.06) | - | 9.34 | 66.06 | 1645 | - |
 | mathlib (6.33 GB) | RLVM machine (warm,gated,expect), JVM launcher | **25.63** (25.63) | - | 38.59 | 187.58 | 11509 | - |
 | mathlib (6.33 GB) | RLVM machine (warm,gated,expect), native image | **35.34** (35.34) | - | 35.06 | 240.62 | 4362 | - |
 | mathlib (6.33 GB) | gruszka, 8 / 1 threads | **12.49** (first run 12.86) | - | 12.86 | 75.61 | 2769 | - |

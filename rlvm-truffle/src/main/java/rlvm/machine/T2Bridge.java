@@ -316,8 +316,62 @@ public final class T2Bridge {
     // with the operand count as a constant. Used only when the tier is built / started with rlvm.t2.inline > 0.
     // ---------------------------------------------------------------------------------------------------
 
+    /**
+     * PEEK as partial evaluation sees it: the body of {@code Values.peek} (array reads only). Written out, not a
+     * call of it: a method of this class whose body is ONE call (or one store) is inlined before the analysis of
+     * a native image and its deoptimisation target is then missing ("reachable during compilation, but was not
+     * seen during Bytecode parsing: ..peekInline%%D", GraalVM CE 25.5) - the rule for everything here that compiled
+     * code calls: array reads and arithmetic in the method itself, or a body with more than one call.
+     */
     public static int peekInline(Machine m, int v) {
-        return Values.peek(m, v);
+        if (v <= Layout.HOLE) {
+            return v;
+        }
+        int[] vh = m.vh;
+        int o = v << Layout.REC_SHIFT;
+        if ((vh[o] & (0xF << Layout.KIND_SHIFT | Layout.W0_LET)) == Layout.SUSP << Layout.KIND_SHIFT) {
+            int val = vh[o + Layout.M_VAL];
+            return val != 0 ? val : v;
+        }
+        return v;
+    }
+
+    /** {@code Hash.fin}, {@code Hash.cell}, {@code Hash.record} written out (see {@link #peekInline}); {@link #hashOk} compares them. */
+    private static int fin(int h) {
+        h ^= h >>> 15;
+        h *= 0x2C1B3C6D;
+        h ^= h >>> 13;
+        return h;
+    }
+
+    private static int cell(int k1, int k2) {
+        int h = k1 * 0x9E3779B1 + k2 * 0x85EBCA6B;
+        h ^= h >>> 15;
+        h *= 0x2C1B3C6D;
+        h ^= h >>> 13;
+        return h;
+    }
+
+    /**
+     * True if the hash functions written out in this class are the machine's (compared on sample values; the tier
+     * asks once per engine, on the host side). If the machine changes a formula, the inline-cache probes of
+     * compiled code fall back to the operations behind a boundary, and the run-ahead's predictions simply stop
+     * hitting (harmless). Not a static field: this class must not need initialisation in an image.
+     */
+    public static boolean hashOk() {
+        int[] xs = {0, 1, 2, 77, 4096, 0x12345678, -5, 0x7FFFFFFF, 0x9E3779B1};
+        for (int a : xs) {
+            if (fin(a) != Hash.fin(a)) {
+                return false;
+            }
+            for (int b : xs) {
+                if (cell(a, b) != Hash.cell(a, b) || recordHash(a, b, a ^ b, 3) != Hash.record(a, b, a ^ b, 3)
+                        || slotHash(a, b & 63) != Runs.slotHash(a, b & 63) || frameHash(a) != Runs.runHash(a, Layout.RUN_FRAME, 0)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public static int ctorInline(Machine m, int v, int ind) {
@@ -351,7 +405,7 @@ public final class T2Bridge {
             return Op.MISS;
         }
         int site = blk << 12 | pc;
-        return Code.icGet(m, (Hash.cell(site, key) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT, site, key);
+        return Code.icGet(m, (cell(site, key) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT, site, key);
     }
 
     /**
@@ -364,7 +418,7 @@ public final class T2Bridge {
             return Op.MISS;
         }
         int site = blk << 12 | pc;
-        int c = (Hash.cell(site, ls) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT;
+        int c = (cell(site, ls) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT;
         int[] ic = m.ic;
         if (ic[c + Layout.IC_SITE] == site && ic[c + Layout.IC_EPOCH] == m.epoch && ic[c + Layout.IC_KEY] == ls) {
             return ic[c + Layout.IC_VALUE];
@@ -453,7 +507,11 @@ public final class T2Bridge {
 
     /** {@code Values.neuHash}: the hash of a NEU from its head and the sum of the {@link #argHash}es. */
     public static int neuHash(int head, int sum) {
-        return Hash.fin(sum + head * 0xC2B2AE35 + (Layout.NEU << Layout.KIND_SHIFT));
+        int h = sum + head * 0xC2B2AE35 + (Layout.NEU << Layout.KIND_SHIFT);
+        h ^= h >>> 15;
+        h *= 0x2C1B3C6D;
+        h ^= h >>> 13;
+        return h;
     }
 
     /** The sum of the {@link #argHash}es of the {@code pn} arguments a NEU already has (spine run {@code pre}). */
@@ -467,18 +525,26 @@ public final class T2Bridge {
         return h;
     }
 
-    /** {@code Runs.slotHash} / {@code Runs.runHash} of a FRAME run without REST. */
+    /** {@code Runs.slotHash} / {@code Runs.runHash} of a FRAME run without REST (written out, see {@link #peekInline}). */
     public static int slotHash(int v, int i) {
-        return Runs.slotHash(v, i);
+        int t = (v + i * 0x9E3779B1) * 0x85EBCA6B;
+        return t ^ (t >>> 15);
     }
 
     public static int frameHash(int sum) {
-        return Runs.runHash(sum, Layout.RUN_FRAME, 0);
+        int h = sum + Layout.RUN_FRAME;
+        h ^= h >>> 15;
+        h *= 0x2C1B3C6D;
+        h ^= h >>> 13;
+        return h;
     }
 
-    /** The hash of the record {@code (w0, a, b, c)} of every kind but NEU ({@code Hash.record}). */
+    /** The hash of the record {@code (w0, a, b, c)} of every kind but NEU ({@code Hash.record}, written out). */
     public static int recordHash(int w0, int a, int b, int c) {
-        return Hash.record(w0, a, b, c);
+        int h = (a ^ (w0 & Hash.W0_KEY_MASK)) * 0x9E3779B1 + b;
+        h = (h ^ (h >>> 15)) * 0x85EBCA6B + c;
+        h = (h ^ (h >>> 13)) * 0xC2B2AE35;
+        return h ^ (h >>> 16);
     }
 
     /**

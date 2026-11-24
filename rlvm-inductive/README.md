@@ -253,7 +253,7 @@ tutorial `misnamed_rec`, `dup_rec_def2`, `bugs/orphan-rec`, `other/extra-rec`, `
 - `RecordCompare.compare` reports presence bits for the first 64 recursors only.
 - The "type-check then def-eq" fallback for non-identical records is not implemented (by design).
 
-## Tests (`mvn -o -q -pl rlvm-inductive test`: 85 tests, 1 of them opt-in)
+## Tests (`mvn -o -q -pl rlvm-inductive test`: 91 tests, 1 of them opt-in)
 
 The answers of the official checker are STORED (`OfficialGolden`,
 `src/test/resources/rlvm/inductive/official-golden.tsv`: SHA-256 of the export the test writes, exit
@@ -285,6 +285,9 @@ loader, store and `RefKernel`), `Ndjson` (writes a fixture as a `lean4export` fi
   cases, `corner-cases/nested-redex-aux`, levels the kernel respells equivalently); 36 rejected here
   are rejected by the official kernel while it replays that block (8 of them finding L-F1); 3 declined
   here are reported with the official verdict (`target/official-differential-report.txt`).
+- `LevelRebuildTest` (6): finding L-F1 on single blocks: which blocks the rebuild touches
+  (`lastRebuildChanged`), the two smallest rejections of the finding (`APP_TYPE_MISMATCH`), a respelled
+  but equivalent level, a phantom universe of a definition, the result sort alone.
 - `OfficialLevelRebuildTest`: finding L-F1, 1,468 fixtures (twelve shapes over the 125 levels and 93 level
   pairs of `level-rebuild-pool.tsv`), see "Levels the official kernel respells"; report in
   `target/official-level-rebuild-report.txt`.

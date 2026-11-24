@@ -335,3 +335,134 @@ So the first publications of wave 6 took 5% of the instructions off Init and Std
 and 3% off reachability in `v0`. A locked batch (CPU s, 1 and 4 workers, gruszka in the same batch) was
 queued at 15:10Z; its rows, when it got the lock, are in `machine-ladder.md` and announced in
 `work/status/machine-M8.log`.
+
+**The locked batch got the lock at 16:44Z** (batch `2026-11-24T16:44Z`, host load 39-47; machine code
+`767442aced60` = jars of 14:41Z; reference engine and gruszka in the same batch), CPU s with 1 worker
+(4 workers: CPU s / wall s):
+
+| | Init | Std | Cedar slice | reachability |
+|---|--:|--:|--:|--:|
+| reference engine | 14.39 (15.14 / 8.33) | 24.19 (24.96 / 13.75) | 4.10 (4.55 / 1.50) | 12.55 (12.49 / 8.32) |
+| gruszka (arena run line, 4 threads) | 3.34 | 5.54 | 1.80 | 4.01 |
+| machine `v0` | 7.41 (7.80 / 4.43) | 12.11 (12.58 / 5.43) | 2.58 (2.75 / 0.94) | 8.11 (8.17 / 5.89) |
+| machine `warm,gated,expect` (4 MiB) | 7.33 (7.85 / 3.62) | 12.04 (13.22 / 7.79) | 2.67 (2.83 / 0.98) | 7.79 (7.70 / 5.56) |
+| machine `warm,gated,expect,probes` | 7.16 (7.63 / 3.24) | 12.38 (13.14 / 7.02) | 2.72 (2.93 / 1.25) | 7.83 (7.78 / 7.61) |
+| best machine / gruszka | 2.14x | 2.17x | 1.43x | 1.94x |
+
+(Wall with 4 workers was taken on a loaded host: the reference engine's 8.33 s on Init was 4.38 s on the
+quiet host of wave 5.) Two readings for the owners: (a) against wave 5's final batch (`v0` 7.77 / 13.32 /
+3.17 / 7.95 s) the first wave-6 publications are worth 5% of the CPU time on Init, 9% on Std, 19% on the
+Cedar slice in `v0`; (b) **`warm,gated,expect` takes 20% of the instructions off Init and 16% off Std and
+1% of the CPU time**: the process no longer runs at a constant number of instructions per second (v0
+17.8 G/s, warm 14.4 G/s on Init), so on this machine jar the instruction count is NOT a proxy for CPU time
+across switch sets. The CPU differences between the three machine rows are 1-4% in either direction on one
+run per row: inside the band in which the rule of the wave asks for three runs, so this batch neither
+shows a gain of the step-1 switches nor a loss (Cedar slice 2.58 -> 2.67 s, reachability 8.11 -> 7.79 s);
+`ladder.py measure --runs 3 --sets 'none;warm,gated,expect'` is the batch that would settle it.
+
+Probes of the newest jar at the end of the session (code `22f54062df4d`, jars of 16:53Z; instructions G,
+1 worker, no lock):
+
+| | Init | Std | Cedar slice | reachability | machine declined (engine checks) |
+|---|--:|--:|--:|--:|---|
+| reference engine | 246.8 | 407.8 | 54.7 | 112.6 | - |
+| machine `none` (the generic tier) | 132.0 | 218.1 | 39.9 | 56.9 | 328 / 406 / 22 / 16 |
+| machine default = `warm,gated,expect` | 116.4 | 197.6 | 39.4 | 57.9 | 328 / 406 / 22 / 16 |
+| machine `warm,gated,expect,probes,code,casetrees` | 96.5 | 169.7 | 38.5 | 17.4 | 328 / 406 / 22 / 16 |
+
+Every machine row of this jar is a FALLBACK row: the declarations that enter eager reduction are declined
+(M6's rule of 15:07Z) and checked by the reference kernel, whose instructions are in the totals.
+Reachability with `code,casetrees` on top: 17.4 G instructions, 1.48 s of (unlocked) CPU against gruszka's
+4.0 s. NOTE the labels: since M6's publication of 16:24Z the engine's default set is `warm,gated,expect`;
+the generic tier is `-X machine.switches=none` (the tools say so explicitly since 17:18Z; four probe rows
+that were taken without the setting are labelled "default" in the TSV).
+
+### 8.4 The gate (priority 1)
+
+Full gate of the generic tier, main tree as copied after 16:09:23Z (`work/m8/machine-gate-v0-1609Z.md`;
+4 passes, 6 GiB, 64 minutes wall beside a second gate at load 45-70): **PASS WITH DECLINES**.
+
+| corpus | engine checks | accepted | rejected | declined | SOUNDNESS | COMPLETENESS | convention differences (D0, unbounded) | audit differences / E_AUDIT | pipeline: verdict, MACHINE-INCOMPLETE, WARM-ANOMALY |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| tutorial (141 files) | 195 | 175 | 20 | 0 | 0 | 0 | 0 | 0 / 0 | right, 0, 0 |
+| bugs (34) | 1,147 | 1,136 | 10 | 1 | 0 | 0 | 0 | 0 / 0 | right, 0, 0 |
+| all 230 | 15,845 | 15,798 | 40 | 7 | 0 | 0 | 0 (13 not compared: host stack overflow without a bound) | 0 / 0 | 230 / 230 right, 0, 0 |
+| Init | 57,938 | 57,774 | 0 | 164 | 0 | 0 | 0 | 0 / 0 | accept (4 workers), 0, 0 |
+| Std | 100,096 | 99,893 | 0 | 203 | 0 | 0 | 0 | 0 / 0 | accept, 0, 0 |
+| reachability | 4,224 | 4,216 | 0 | 8 | 0 | 0 | 0 | 0 / 0 | accept, 0, 0 |
+| Cedar slice | 8,064 | 8,053 | 0 | 11 | 0 | 0 | 0 | 0 / 0 | accept, 0, 0 |
+
+The declines: 386 + 5 declarations that enter eager reduction (UNSUPPORTED_INPUT; Init 164, Std 203,
+reachability 8, Cedar slice 11, perf/grind-ring-5 4, bugs/rec-of-subst-prop 1), perf/loop-unfolded-once
+(E_MEM at 2^28 run words, as in wave 5) and perf/magma-list-deep-n36 `countermodel` (the report's 6 GiB
+heap: `Machine.heapAllows` refused a 1 GiB array; `--heap 12g` checks it). Frames written under D128:
+Init 0.051%, Std 0.047%, Cedar slice 0.026%, reachability 1.14%.
+
+Found by the gate on the way (quick form, tutorial + bugs + Cedar slice, `warm,gated,expect`, tree of
+14:46Z): bad/bugs/rec-of-subst-prop unit 128 `Issue.forallFalse`: lane `memocheck,shortcheck` E_AUDIT
+("CONV .. is memoised as HOLE/T but the re-computation gives NONE/F") and the generic tier rejecting for
+another reason than the warm tier: the warm-session / eager-reduction defect that M5 and M6 reported in the
+same quarter of an hour (F26); it led to the rule "a declaration that enters eager reduction is declined".
+
+Full gate of `warm,gated,expect` (4 MiB session cap), the same tree (`work/m8/machine-gate-step1-1609Z.md`;
+65 minutes wall): **PASS WITH DECLINES**, the declines being exactly those of the generic tier. Differential:
+SOUNDNESS 0, COMPLETENESS 0 on every corpus (all 230: 15,798 accepted, 40 rejected, 7 declined; Init
+57,774 / 164 declined; Std 99,893 / 203; reachability 4,216 / 8; Cedar slice 8,053 / 11). Tier equivalence
+against the generic tier: 0 declarations with another outcome, 0 with another reason. Convention
+equivalence with warm sessions: 0 differences (12 perf declarations not compared with the unbounded lane);
+frames under D128: Init 0.072%, Std 0.064%, Cedar slice 0.41%, reachability 1.15%. Audits: 0 outcome
+differences, 0 `E_AUDIT`. Pipeline: 230 / 230 verdicts right, the four corpora accepted with 4 workers,
+MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0.
+
+### 8.5 Which switches the evidence supports (as of 17:30Z; M8's evidence only)
+
+| switch set | mutants (17,775 x set) | gate | large corpora | CPU (locked batch 16:44Z, jar 14:41Z) | M8's reading |
+|---|---|---|---|---|---|
+| none (generic tier) | S 0 / C 0, machine's own answers never differ | full: PASS WITH DECLINES | 5 / 5 agree | the baseline | correct; 391 declarations declined for eager reduction since 15:07Z |
+| `warm,gated,expect` | S 0 / C 0 twice (trees 14:42Z, 15:24Z) | full: PASS WITH DECLINES, same declines, tier / convention / audits clean | 5 / 5 agree | within 1-4% of the generic tier on all four corpora, one run each | CORRECT by every gate M8 has; the CPU gain is NOT shown (needs `--runs 3`); it is the engine's default since M6's publication of 16:24Z |
+| `warm,gated,expect,probes` | S 0 / C 0 (tree 14:42Z, after M4's fix of S-F1) | not run | not run | no gain over `warm,gated,expect` | not ready: no gate, no gain |
+| `code,casetrees` | S 0 / C 0 (tree 15:24Z) | not run | not run | not measured under the lock | not ready: no gate |
+| `warm,gated,expect,probes,code,casetrees` | S 0 / C 0 (tree 15:24Z) | quick form only (tutorial, bugs, Cedar slice; see the log) | not run | probe: Init 96.5 G, reachability 17.4 G instructions | the candidate with the largest effect; needs the full gate (incl. the tier test on values) and a locked batch |
+| `all` | S 0 / C 0 (tree 15:24Z) | not run | not run | not measured | bug-hunting set only |
+
+### 8.6 Tool experiments, kept and rejected (wall time of the tools, not CPU time of the machine)
+
+| experiment | result | kept |
+|---|---|---|
+| pass runner (reference first, lanes one after the other, digests) instead of lockstep for corpus runs | perf/app-lam, gf3-matrix-product, magma-list-pair-n21 with five or six lanes CLEAN in a 6 GiB JVM (lockstep: OutOfMemoryError with four lanes); peak = one engine | kept |
+| first full gate with 12 passes and a 24 GB heap (13:44Z) | Init / Std / reachability / Cedar slice lanes done after 271 s, then the host went into the swap (my JVM at 23.5 GB RSS among others) and a full collection never ended; killed after 25 minutes, no result | rejected: 6 GB, 4 passes, a slot |
+| heavy files one at a time on one thread (no memory of earlier runs: all 43 perf tests) | on the loaded host that thread got 15% of a CPU: 48 minutes for the heavy phase without an end; killed | rejected: `work/m8/heavy.txt` (measured peaks), light perf tests in the pool, heavy ones two at a time, only sessions above a sixth of the heap alone |
+| the same gate with that scheduling (16:10Z) | 64 minutes wall for 234 files x 5 lanes + pipeline, of which 25 minutes for the four corpora and about 30 for 6 heavy perf files and 4 heap retries; two gates ran side by side | kept; on a quiet host `--heap 12g --jobs 8` |
+| mutants through the pipeline in one JVM instead of a JVM per mutant | 17,775 mutants x (3 sets + baseline) + per-declaration comparison in 19 minutes at 4 at a time; the launcher needs 13-27 minutes per set at 10-12 at a time; verdicts identical (baseline table, 537 launcher samples) | kept |
+| incremental digest for warm lanes | Cedar slice, 6 lanes, warm: 8-20 s CPU per lane, convention equivalence still exact at resets | kept |
+| scoreboard: slot first, then the measurement lock | held a host-wide slot idle for 25 minutes in the lock's queue | rejected: lock first, then a slot within two minutes, else the lock goes back |
+| scoreboard probe without the lock (CPUs 18, 19) | instruction counts identical to the locked batch (132.1 / 105.2 / 106.7 G on Init) | kept as a stop-gap; CPU time only from locked batches |
+
+### 8.7 Incidents
+
+- 13:44Z-14:09Z: my first full gate (24 GB heap) was one of the processes on the host when it ran out of
+  memory; I killed it by pid at 14:09Z. Since then every M8 job holds a slot and stays at 6 GB.
+- 15:55Z: a `pgrep -f` pattern of mine matched the shell that issued it; that command ended my own shell
+  and the slow-test script (intended); the test JVM it had started was then stopped by pid. Nothing of
+  another agent was touched.
+- The two slow tests (`M8SlowTest#convAll`, `M7HookedTest#all230`) were started in the sandbox's surefire
+  JVM at 15:45Z and stopped after 9 minutes to give the slot and 5 GB back when the host was at 16 GB
+  available: **they have not been run to completion under surefire since the change.** What stands in
+  for them: the same code path (`M8Lanes` passes, heap failures as flagged declines) ran all 230 tests
+  with five and six lanes in a 6 GiB JVM twice (the two gates above) without a crash, and the fast test
+  `aCheckThatTheJavaHeapEndsIsFlaggedAndTheLaneGoesOnWithANewMachine`.
+
+## 9. Not done, not verified (wave 6)
+
+- The full gate for any set with K1 switches (`code`, `casetrees`, `tele`, `facts`), `probes`, `lazyeval`,
+  `k2`, the experiment switches; the tier test on values inside the gate (`M8Gate.valueTiers`) has run only
+  in the quick form.
+- `M8SlowTest#convAll` and `M7HookedTest#all230` to completion under surefire (8.7).
+- A locked scoreboard batch for a jar newer than 14:41Z, and three runs per row for differences below 5%.
+- Large corpora with other sets than the generic tier and `warm,gated,expect`; `--with-reference` was not
+  used (the premise "the reference engine accepts every unit" rests on the pipeline check of wave 5).
+- The mutants with `k2`, `m3a`, `m4a/b`, `m5a/b`, `m7a/b`, `lazyeval`, `t2`, `levels-complete`.
+- The gate at `--heap 12g`: in 6 GiB perf/magma-list-deep-n36 `countermodel` and (warm) perf/loop-unfolded-once
+  are declined by the heap test of the report JVM, so those two declarations are not gated.
+- The gate's pipeline part and the mutants run the driver in the report's JVM (D18); the launcher sample
+  is 179 mutants per set, not all.

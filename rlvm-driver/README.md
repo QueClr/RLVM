@@ -972,6 +972,58 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 | the same, `published` (231 files) and `big` (init-prelude, Init, Std, cedar) | published: 230 of 231 files correct in all 9 configurations, 0 schedule differences, 0 pipelined declines (193 in five shards; the sixth died with `OutOfMemoryError` in `Machine.growRecords` in the suite's 6 GB JVM on `perf/loop-unfolded-once`, where the machine grows to its own limit before it declines, and its other 37 files were repeated: all equal). `perf/loop-unfolded-once` alone with the launcher's heap (`-Xmx13g`): accepted in the first configuration (machine declines, reference kernel decides; 250 s on this host); the other eight configurations were not finished when the session ended. big: 4 files, all correct in all 9 configurations |
 | `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (reference engine as primary) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
 | `scripts/gate.sh --dist work/rlvm-driver/w7/dist-gate --corpus tutorial --corpus bugs --corpus mdata --corpus prelude` (the published jars of 13:46Z with this driver jar; JVM launcher, reference engine, 1 worker, batch) | PASS in every step: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260 (agree 11,847, declined 413), bugs 2,692 (2,627 / 65), mdata 1,976 (779 / 1,197), prelude 847 (839 / 8): SOUNDNESS 0, COMPLETENESS 0, errors 0 in all four, the same counts as the wave-5 check; differential self-test caught. (The script was edited by its owner while the gate ran and stopped with a syntax error after the fourth corpus; the self-test was then run by `--no-slice --corpus none`.) |
+
+### Wave 8: where the wall clock of 8 workers goes (2026-11-24, 15:30Z to 18:00Z; agent P7)
+
+The full report is `docs/research/profiles/P7.md`; this is what concerns the driver. All rows: machine engine
+`warm,gated,expect`, cap 4 MiB, CE native image `-O3`, **every wall-clock number through `bench/quiet.py`** (the
+8 performance cores reserved; load average of the host 45 - 140, of which about 3 % - 7 % still reach the
+measurement cores as run-queue time; single runs unless stated; differences below 3 % are not results; the same
+binary gave 34.7 s and 38.1 s for mathlib pipelined with 8 workers in two windows). Distributions that differ
+only in the driver jar (`work/p7/dist-b` .. `dist-e`: the published jars of 15:31Z + one driver jar each).
+
+**Mathlib, wall clock (s), driver c0aeb3288f46 + time account:**
+
+| workers | batch | of it load | check | pipelined | check-only pass 2 |
+|--:|--:|--:|--:|--:|--:|
+| 1 | 224.05 | 11.65 | 212.21 | 208.34 | |
+| 2 | 113.40 | 11.77 | 101.39 | 104.89 | |
+| 4 | 64.58 | 11.92 | 52.66 | 55.49 | 53.28 |
+| 8 | 42.63 (41.45) | 12.06 | 30.57 (28.86) | 38.06 (34.71) | 28.74 (28.42) |
+
+(in parentheses: the same binary one hour later, on a quieter host.) The check phase scales 6.9x - 7.4x from 8
+workers; the whole pipelined run 5.5x - 6.0x against one worker pipelined.
+
+**Where 8 workers x check wall goes (mathlib):**
+
+| | batch (30.57 s) | batch, quieter host (28.86 s) | pipelined (37.61 s) | pipelined, quieter host (34.34 s) |
+|---|--:|--:|--:|--:|
+| on a CPU | 87.0 % | 91.0 % | 74.5 % | 80.9 % |
+| runnable without a CPU | 7.5 % | 3.0 % | 13.6 % | 6.7 % |
+| stopped: collections, page faults | 4.4 % | 5.2 % | 11.6 % | 12.2 % |
+| parked: nothing announced | 0.7 % | 0.7 % | 0.1 % | 0.2 % |
+| parked: tail | 0.4 % | 0.0 % | 0.3 % | 0.1 % |
+| heavy gate, end of the load | 0 | 0 | 0 | 0 |
+
+So the driver's own waits (frontier, tail, gate) are 1 % of the wall clock on mathlib; the serial part is the
+collector (1.06 s of pauses per check pass whatever the worker count, 3.9 s in a pipelined run; the garbage
+is the engines' and the store's: session arrays grown again after each of 14,000 resets per pass, reported as
+P7-F1) and, while the file loads, ten threads on eight cores. No unit and no chain of units bounds mathlib
+(slowest unit 2.15 s; the heaviest holds 0.2 % of the steps).
+
+**What the driver changed, before / after:**
+
+| Change | Std | cedar | mathlib |
+|---|---|---|---|
+| Shared bytes added up at most every 20 ms by the environment thread (was: after each of its steps; `Store.sharedBytes()` walks one slot per unit) | none (small tables) | none | environment thread 4.69 s CPU / 5.13 s wall -> 1.56 s / 1.67 s; frontier complete 3.5 s earlier; parks at the frontier 0.7 % -> 0.0 %; wall clock inside the noise (expected 0.4 s of 29 s) |
+| Slices instead of one run per worker and batch | check-only passes with 8 workers 2.15 - 2.18 s -> 1.58 - 1.82 s, with 4 workers 3.37 - 3.53 s -> 2.92 - 3.14 s; pass 1 and pipelined: see the ten rounds below | no difference (2.2 s; no dominant unit) | no difference (41.4 / 28.4 / 34.7 s before, 41.5 / 27.9 / 35.9 s after: batch / check-only / pipelined, one window); steals 286 -> 3 |
+| Kept pass + parking rule | pipelined declines of the invariance suite 5 -> 0 (machine), 0 (reference) | | 0 units parked on Init, Std, mathlib |
+
+@@STD10@@
+
+**Hardware ceiling** (`shard=K/8`): @@CEILING@@
+
+**Guards on the published jar** (@@JAR@@): @@GUARDS@@
 <!-- measured:end -->
 
 ## Deviations from the design documents
@@ -994,17 +1046,32 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 
 ## Open, and things to know
 
-- **Pipelined loading is not the default.** What a switch of `RunConfig.loadMode` / `-X load` needs: (1)
-  `rlvm-admit` waiting (`waitingForLoad()`) instead of moving the frontier past a plain unit that mentions a
-  later declaration while the file loads: then a pipelined run decides what the batch run decides (today:
-  the "pipelined declines" of the invariance suite, 27 of 50,784 pipelined runs on the mutant corpora, none
-  on the published tests), and an answer from `rlvm-admit` to whether a small file that the official replay
-  order rejects can slip through a pass that follows the loader (the driver loads files below 8 MiB in batch
-  mode, so only tests with `pipeline-min-mib=0` get there); (2) the end-to-end guards in pipelined mode
-  through the launcher (`scripts/dev.sh gate --load pipelined`, with
-  `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7` so that the small tests really take the pipelined path);
-  (3) the wall-clock gain on a quiet machine (see "Measured": with the reference engine the load is 6-8 %
-  of the wall clock; it becomes the larger part with the machine engine).
+- **Pipelined loading is still not the default, but nothing of the driver stands in the way any more**
+  (wave 8). The three conditions of wave 7: (1) a pipelined run decides what the batch run decides: done by
+  the kept pass and the parking rule (invariance suite: 0 pipelined declines with both engines; published
+  tests 230 / 230 through the launcher with `--load pipelined --threads 4` and
+  `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7`, which forces the small files through the pipeline);
+  (2) the end-to-end guards in that mode: see "Measured", wave 8; (3) the gain on quiet cores: mathlib 224.1
+  -> 208.3 s with one worker, 113.4 -> 104.9 with 2, 64.6 -> 55.5 with 4, 42.6 -> 38.1 (41.4 -> 34.7) with 8;
+  Std 2.71 -> 2.57 s, cedar 4.29 -> 2.78 s with 8. The switch itself is `rlvm-main`'s (`MainOptions.loadMode`;
+  requested on the board); the driver already loads inputs below `pipeline-min-mib` (8 MiB) in batch mode.
+- **A heavy unit that starts late is the end of the run** on the mid-size corpora (Std: unit 23249, 0.7 s of
+  a 1.5 s run with 8 workers). Slices make all workers reach it together, which removes the bad cases of the
+  old scheme, but file order still starts it at about half of the run. Starting large units first would
+  need (a) a size known before the unit runs: `RunHost.unitWeight` (block nodes + shared terms) predicts
+  well: on Std the two slowest units are the two largest, 9 of the 12 slowest are among the 40 largest,
+  Spearman 0.83 against machine steps; (b) a scheduler rule that keeps the progress property ("the lowest
+  undecided unit is always reached"): a worker that runs a unit ahead of lower unstarted ones may never get
+  back to them, so at most W - 1 workers may be ahead, a worker that is ahead must own no run, and no run may
+  be handed to it; the state-space test of `SchedulerTest` is the place to prove a rule. Expected: Std with 8
+  workers pipelined 2.0 -> 1.7 s, nothing on mathlib (tail 0.3 %).
+- **Stealing from the tail of a busy claim** was measured and is not worth its price: the tail (workers
+  parked after the last announcement while others hold claims) is 0.0 % - 0.4 % of 8 workers x wall on mathlib
+  and, on Std, is one unit, not a claim.
+- **Collections**: the driver allocates nothing per unit, but its session resets are what makes the engines
+  and the store's overlay grow their arrays again (P7-F1 in requests.log, 16:37Z). If the owners keep those
+  arrays over a reset, the session cap should be swept again (`work/rlvm-driver/w7/sweep-cap2.sh`): part of
+  what made 16 MiB slow may have been this.
 - **Default worker count**: see "Measured". The arena run line names `--threads 4`; the steward decides.
 - **Peak resident set**: 6.8 GB with the native image on mathlib (was 9.4 GB), not the 6 GB asked for (see
   "Where mathlib's memory goes"). Left to do, in the order of what they would bring: an overlay that grows

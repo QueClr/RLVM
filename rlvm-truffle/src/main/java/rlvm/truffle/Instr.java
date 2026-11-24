@@ -75,9 +75,12 @@ abstract class Instr extends Node {
      * on that record are the right ones. The other form predicts "new" without waiting for the word.
      */
     final boolean exact;
+    /** The hash functions written out in the bridge are the machine's ({@code T2Bridge.hashOk}): inline-cache probes may be compiled in. */
+    final boolean hashOk;
 
     Instr(BlockRoot.Build b, Decoded.Insn in) {
         this.exact = b.exact;
+        this.hashOk = b.hashOk;
         this.capSlot = b.capSlot;
         this.lsSlot = b.lsSlot;
         this.blk = b.d.blk;
@@ -114,14 +117,9 @@ abstract class Instr extends Node {
         return -1;
     }
 
-    final void sset(VirtualFrame f, int reg, int v) {
-        f.setIntStatic(sbase + reg, v);
-    }
-
-    /** True if {@code v} is a record this activation is predicted to make (it has no words yet). */
-    final boolean predicted(VirtualFrame f, int v) {
-        return v > Layout.HOLE && v >= f.getIntStatic(vp0Slot);
-    }
+    // (No one-line helpers here: a method whose body is one call is inlined before the analysis of a native
+    // image and its deoptimisation target is then missing, T2Bridge.peekInline. Predicted register i is frame slot
+    // sbase + i; a record ref v is PREDICTED - it has no words yet - iff v > HOLE and v >= the vp0 slot.)
 
     /** The predicted value of a value operand, read as {@link #val} reads it; {@link #UNK} if it is not known. */
     final int sval(VirtualFrame f, Machine m, Opnd o) {
@@ -391,7 +389,7 @@ abstract class Instr extends Node {
 
         @Override
         int ahead(VirtualFrame f, Machine m) {
-            sset(f, dst, sval(f, m, s));
+            f.setIntStatic(sbase + dst, sval(f, m, s));
             return 0;
         }
     }
@@ -434,11 +432,11 @@ abstract class Instr extends Node {
         int ahead(VirtualFrame f, Machine m) {
             int v = sval(f, m, s);
             if (isPeek) {
-                sset(f, dst, v); // sval has seen through a known suspension; a predicted record has no VAL
+                f.setIntStatic(sbase + dst, v); // sval has seen through a known suspension; a predicted record has no VAL
                 return 0;
             }
             if (v != UNK && v < -1) {
-                sset(f, dst, v + 1);
+                f.setIntStatic(sbase + dst, v + 1);
                 return 0;
             }
             return unknown(f, dst);
@@ -517,7 +515,7 @@ abstract class Instr extends Node {
         int ahead(VirtualFrame f, Machine m) {
             int n = args.length;
             int hv = sval(f, m, h);
-            if (hv == UNK || hv <= Layout.HOLE || predicted(f, hv)) {
+            if (hv == UNK || hv <= Layout.HOLE || (hv > Layout.HOLE && hv >= f.getIntStatic(vp0Slot))) {
                 return unknown(f, dst);
             }
             int w0 = T2Bridge.w0(m, hv);
@@ -529,7 +527,7 @@ abstract class Instr extends Node {
                 if (n == 1 && (w0 & T2Bridge.NATOP_MASK) == T2Bridge.NATOP_SUCC) {
                     int v = sval(f, m, args[0]);
                     if (v != UNK && v < -1) {
-                        sset(f, dst, v + 1);
+                        f.setIntStatic(sbase + dst, v + 1);
                         return 0;
                     }
                     return unknown(f, dst);
@@ -573,7 +571,7 @@ abstract class Instr extends Node {
                     }
                 }
             }
-            sset(f, dst, id);
+            f.setIntStatic(sbase + dst, id);
             return 0;
         }
     }
@@ -604,7 +602,7 @@ abstract class Instr extends Node {
                 if (lparam) {
                     // Code.kConst: the inline cache of the site answers (one probe), else CHEAD(D, LSUB(LL, ls)) fills it
                     int ls = f.getIntStatic(lsSlot);
-                    v = T2Bridge.kConstHit(m, blk, pc, ls);
+                    v = hashOk ? T2Bridge.kConstHit(m, blk, pc, ls) : Op.MISS;
                     if (v == Op.MISS) {
                         v = T2Bridge.kConstFill(m, a, list, blk, pc, ls);
                     }
@@ -637,7 +635,7 @@ abstract class Instr extends Node {
             if (v == Op.MISS) {
                 return unknown(f, dst); // the head may have to be made
             }
-            sset(f, dst, v);
+            f.setIntStatic(sbase + dst, v);
             return 0;
         }
     }
@@ -754,7 +752,7 @@ abstract class Instr extends Node {
             } else {
                 touchRecord(f, m, hash);
             }
-            sset(f, dst, id >= 0 ? id : newRecord(f, 0));
+            f.setIntStatic(sbase + dst, id >= 0 ? id : newRecord(f, 0));
             return 0;
         }
     }
@@ -787,7 +785,7 @@ abstract class Instr extends Node {
         @Override
         int ahead(VirtualFrame f, Machine m) {
             int v = sval(f, m, s);
-            if (v == UNK || predicted(f, v)) {
+            if (v == UNK || (v > Layout.HOLE && v >= f.getIntStatic(vp0Slot))) {
                 return -1;
             }
             int k = v < 0 ? Layout.K_IMM : T2Bridge.kindOfRecord(m, v);
@@ -855,7 +853,7 @@ abstract class Instr extends Node {
         @Override
         int ahead(VirtualFrame f, Machine m) {
             int v = sval(f, m, s);
-            if (v == UNK || predicted(f, v)) {
+            if (v == UNK || (v > Layout.HOLE && v >= f.getIntStatic(vp0Slot))) {
                 return -1;
             }
             int j = T2Bridge.ctorInline(m, v, ind);
@@ -1025,7 +1023,7 @@ abstract class Instr extends Node {
         @Override
         int exec(VirtualFrame f, Machine m, int rb, int d) {
             int key = lparam ? f.getIntStatic(lsSlot) : 0;
-            int v = INLINE >= 1 ? T2Bridge.kvalHitInline(m, blk, pc, key) : T2Bridge.kvalHit(m, blk, pc, key);
+            int v = INLINE >= 1 && hashOk ? T2Bridge.kvalHitInline(m, blk, pc, key) : T2Bridge.kvalHit(m, blk, pc, key);
             if (v != Op.MISS) {
                 setReg(f, m, rb, dst, dpin, v);
                 return 0;
@@ -1043,7 +1041,7 @@ abstract class Instr extends Node {
             if (v == Op.MISS) {
                 return -1; // the generic walk of the closed term: a judgment
             }
-            sset(f, dst, v);
+            f.setIntStatic(sbase + dst, v);
             return 0;
         }
     }
@@ -1099,11 +1097,11 @@ abstract class Instr extends Node {
         @ExplodeLoop
         int ahead(VirtualFrame f, Machine m) {
             int v = sval(f, m, s);
-            if (v == UNK || predicted(f, v)) {
+            if (v == UNK || (v > Layout.HOLE && v >= f.getIntStatic(vp0Slot))) {
                 return -1;
             }
             if (n == 1 && v < 0 && v != Layout.IMM) {
-                sset(f, d0, v - 1);
+                f.setIntStatic(sbase + d0, v - 1);
                 return 0;
             }
             int base = T2Bridge.lastArgsInline(m, v, n);
@@ -1111,7 +1109,7 @@ abstract class Instr extends Node {
                 return -1;
             }
             for (int i = 0; i < n; i++) {
-                sset(f, d0 + i, T2Bridge.runWord(m, base + i));
+                f.setIntStatic(sbase + d0 + i, T2Bridge.runWord(m, base + i));
             }
             return 0;
         }

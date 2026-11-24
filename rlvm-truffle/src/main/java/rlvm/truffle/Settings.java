@@ -75,6 +75,8 @@ final class Settings {
     final int ahead;
     final int aheadMaxInstr;
     final boolean aheadExact;
+    /** The hash functions the bridge writes out for compiled code are the machine's (checked once per engine). */
+    final boolean hashOk = rlvm.machine.T2Bridge.hashOk();
     final double unit0Ns;
     final double unit1Ns;
     final double cost0Ms;

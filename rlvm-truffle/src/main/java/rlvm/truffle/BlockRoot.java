@@ -104,13 +104,15 @@ final class BlockRoot extends RootNode {
         /** First of the frame slots of the run-ahead: the predicted registers, then nine words of its state. */
         final int sbase;
         final boolean exact;
+        final boolean hashOk;
 
-        Build(Decoded d, boolean exact) {
+        Build(Decoded d, Settings settings) {
             this.d = d;
             this.capSlot = d.win;
             this.lsSlot = d.win + 1;
             this.sbase = d.win + 2;
-            this.exact = exact;
+            this.exact = settings.aheadExact;
+            this.hashOk = settings.hashOk;
         }
 
         /** The slot registers an instruction writes back when it suspends: live after it, not written by it. */
@@ -130,7 +132,7 @@ final class BlockRoot extends RootNode {
         this.name = name;
         this.code = d.code;
         this.instructions = d.insn.length;
-        Build b = new Build(d, settings.aheadExact);
+        Build b = new Build(d, settings);
         capSlot = b.capSlot;
         lsSlot = b.lsSlot;
         usesCap = d.usesCap;
