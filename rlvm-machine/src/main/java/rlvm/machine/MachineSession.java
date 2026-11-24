@@ -202,6 +202,8 @@ public final class MachineSession implements Session {
                     + " step limit of the driver's, and the machine has no cycle test; the reference engine decides this unit";
         } else if (m.auditMessage != null) {
             lastDetail = m.auditMessage;
+        } else if (m.limitDetail != null && code == MachineErrors.E_LIMIT) {
+            lastDetail = m.limitDetail; // which rule declined (E1-F6: the K rule after an inexact let application)
         } else if (m.limitDetail != null && (code == MachineErrors.E_MEM || code == MachineErrors.E_STACK)) {
             lastDetail = m.limitDetail + "; in use: " + (m.vp - m.vbase) + " records, " + (m.rsp - m.rbase)
                     + " run words, " + m.pairUsed + " pairs, W max " + m.maxWp + "; " + footprintParts();

@@ -127,8 +127,19 @@ final class Infer {
             firstTerm = 0;
         }
 
+        /**
+         * Finding E1-F6 (2026-11-24): this declaration APPLIED a let variable whose declared type is not the very
+         * type of its value ({@link #LET_EXACT} not set on its suspension; {@code Eval.apply}). The machine's value of
+         * such an application has the let variable reduced away, the official term has not, so the type of that
+         * VALUE can differ from the type of the official TERM by a convertible stand-in. The one place where the
+         * official kernel types an unreduced argument inside a reduction, the K rule ({@code to_cnstr_when_K}:
+         * {@code infer_type(major)}), declines from then on ({@code Reduce}).
+         */
+        boolean zetaInexact;
+
         /** Start of a declaration: until {@link Decl#check} says otherwise nothing is trusted. */
         void beginDecl(Machine m) {
+            zetaInexact = false;
             trusted = false;
             declLparams = -1;
             firstTerm = 0;
@@ -257,6 +268,71 @@ final class Infer {
         Terms terms = m.terms;
         int body = terms.b(m.vh[(p << Layout.REC_SHIFT) + Layout.A]);
         return (terms.word(body, Node.W_MASK_LO) & 1) != 0;
+    }
+
+    /**
+     * Memo word {@code M1} of a LET suspension (unused by SUSP records otherwise): this value = the declared type of
+     * the let variable IS the type inferred for its value (one record), so reducing the variable away loses nothing.
+     * Set by the let rule in CHECKED mode; a function of the suspension's identity (value term, frame, declared type).
+     */
+    static final int LET_EXACT = 1;
+
+    /** {@code Eval.apply}: is {@code f} a let variable whose value has only a convertible type (see {@link Ext#zetaInexact})? */
+    static boolean inexactLet(Machine m, int f) {
+        if (f <= Layout.HOLE) {
+            return false;
+        }
+        int o = f << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        return (vh[o] & (0xF << Layout.KIND_SHIFT | Layout.W0_LET)) == (Layout.SUSP << Layout.KIND_SHIFT | Layout.W0_LET)
+                && vh[o + Layout.M1] != LET_EXACT;
+    }
+
+    /**
+     * May {@code INFER(t, ONLY)} ask for the TYPE of the variable with de Bruijn index {@code k}? (Findings E1-F2 /
+     * E1-F3: only then does it matter which type the variable's binding carries.) Syntactic and conservative: true
+     * when in doubt. Infer-only inference follows the head of an application (arguments are not typed), the
+     * structure of a projection, the bodies of lambdas and lets, and both parts of a Pi (their sorts).
+     */
+    static boolean typeReads(Terms terms, int t, int k) {
+        for (int fuel = 256; fuel > 0; fuel--) {
+            if (k < 62 && (terms.fvMask(t) >>> k & 1L) == 0) {
+                return false; // the term does not read the variable at all (a clear mask bit is definite)
+            }
+            switch (terms.kind(t)) {
+                case Kind.BVAR:
+                    return terms.a(t) == k;
+                case Kind.APP:
+                    t = terms.a(t);
+                    break;
+                case Kind.PROJ:
+                    t = terms.a(t);
+                    break;
+                case Kind.LAM:
+                    t = terms.b(t);
+                    k++;
+                    break;
+                case Kind.LET:
+                    t = terms.c(t);
+                    k++;
+                    break;
+                case Kind.PI:
+                    if (typeReads(terms, terms.a(t), k)) {
+                        return true;
+                    }
+                    t = terms.b(t);
+                    k++;
+                    break;
+                case Kind.SORT:
+                case Kind.CONST:
+                case Kind.NATLIT:
+                case Kind.STRLIT:
+                    return false;
+                default:
+                    return true;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1693,15 +1769,18 @@ final class Infer {
 
     /**
      * The let chain from node {@code cur}: CHECKED: {@code ENSORT(INFER(A)); Tv = INFER(v); CONV(Tv, EVAL(A))}
-     * else fail(E_LET_MISMATCH); both modes: {@code env = PUSH(env, MKSUSP(v, env, LET))} (never a variable,
-     * ISA 2.8); then the type of the body under the bound values, which is the official let-telescope type
-     * after zeta. The frames INFER2[10..14] exist in CHECKED mode only; their word {@code exp} is the expected
-     * type of the body when the chain was started by CHECK (B9), else 0.
+     * else fail(E_LET_MISMATCH); both modes: {@code env = PUSH(env, MKLET(v, env, EVAL(A)))} (never a variable,
+     * ISA 2.8; the suspension carries the DECLARED type {@code EVAL(A)} as the type of the let variable:
+     * finding E1-F1, the official {@code infer_let} types the body under a variable of the declared type, and
+     * {@code Tv} is only convertible with it); then the type of the body under the bound values, which is
+     * the official let-telescope type after zeta. The frames INFER2[10..12, 14] exist in CHECKED mode only;
+     * INFER2[13] (the value of the declared type) also in ONLY mode, with the word {@code Tv} = 0; the word
+     * {@code exp} is the expected type of the body when the chain was started by CHECK (B9), else 0.
      */
     private static int letLoop(Machine m, int cur, int eb, int en, int ls, int mode, int exp, int ep0, int d) {
         Terms terms = m.terms;
         while (terms.kind(cur) == Kind.LET) {
-            int nb = mode == Op.CHECKED ? letIter0(m, cur, eb, en, ls, exp, ep0, d) : letBind(m, cur, eb, en, ls);
+            int nb = mode == Op.CHECKED ? letIter0(m, cur, eb, en, ls, exp, ep0, d) : letOnly(m, cur, eb, en, ls, exp, ep0, d);
             if (nb >= SIG) {
                 return nb;
             }
@@ -1712,6 +1791,12 @@ final class Infer {
         // call INFER(body) => INFER2[15]; with an expected type (B9, ISA 4.5.2 let): call CHECK(body, env', V)
         int r = exp != 0 ? check(m, cur, eb, en, ls, exp, d + 1) : infer(m, cur, eb, en, ls, mode, d + 1);
         return r >= SIG ? m.sig1(r, K_LET_6, ep0) : k_let6(m, ep0, r, d);
+    }
+
+    /** ONLY mode: nothing is checked, but the let variable still carries its declared type: {@code EVAL(A)} => INFER2[13] with Tv = 0. */
+    private static int letOnly(Machine m, int cur, int eb, int en, int ls, int exp, int ep0, int d) {
+        int da = Eval.eval(m, m.terms.a(cur), eb, en, ls, d + 1);
+        return da >= SIG ? m.sig7(da, K_LET_4, cur, eb, en, ls, exp, ep0, 0) : letBind(m, cur, eb, en, ls, da, false);
     }
 
     private static int letIter0(Machine m, int cur, int eb, int en, int ls, int exp, int ep0, int d) {
@@ -1738,26 +1823,32 @@ final class Infer {
         if (tv != da) {
             int c = Conv.conv(m, tv, da, d + 1); // call CONV(Tv, EVAL(A)) => INFER2[14]
             if (c >= SIG) {
-                return m.sig6(c, K_LET_5, cur, eb, en, ls, exp, ep0);
+                return m.sig7(c, K_LET_5, cur, eb, en, ls, exp, ep0, da);
             }
             if (c != Layout.T) {
                 return m.fail(MachineErrors.E_LET_MISMATCH, tv, da); // the value's type and the declared type
             }
         }
-        return letBind(m, cur, eb, en, ls);
+        return letBind(m, cur, eb, en, ls, da, tv == da);
     }
 
-    /** {@code env = PUSH(env, MKSUSP(v, env, LET))}: the new environment base, or a signal. */
-    private static int letBind(Machine m, int cur, int eb, int en, int ls) {
+    /**
+     * {@code env = PUSH(env, MKLET(v, env, da))}: the new environment base, or a signal. {@code da} = the value of
+     * the DECLARED type: it is the type of the let variable ({@code Values.mkLet}, finding E1-F1).
+     */
+    private static int letBind(Machine m, int cur, int eb, int en, int ls, int da, boolean exact) {
         Terms terms = m.terms;
         int v = terms.b(cur);
         int frame = Runs.prune(m, eb, en, terms.fvMask(v));
         if (frame >= SIG) {
             return frame;
         }
-        int s = Values.mkSusp(m, v, frame, terms.hasLevelParam(v) ? ls : 0, true);
+        int s = Values.mkLet(m, v, frame, terms.hasLevelParam(v) ? ls : 0, da);
         if (s >= SIG) {
             return s;
+        }
+        if (exact) {
+            m.vh[(s << Layout.REC_SHIFT) + Layout.M1] = LET_EXACT; // the value's type is the declared type itself (E1-F6)
         }
         return Runs.push(m, eb, en, s) < 0 ? m.fault(MachineErrors.E_MEM) : m.envBase;
     }
@@ -1780,18 +1871,18 @@ final class Infer {
         return nb >= SIG ? nb : letLoop(m, m.terms.c(cur), nb, en + 1, ls, Op.CHECKED, exp, ep0, d);
     }
 
-    /** INFER2[13](.., Tv): r = the value of the let type. */
+    /** INFER2[13](.., Tv): r = the value of the let type. Tv = 0: the chain runs in ONLY mode ({@link #letOnly}). */
     static int k_let4(Machine m, int cur, int eb, int en, int ls, int exp, int ep0, int tv, int r, int d) {
-        int nb = letIter4(m, cur, eb, en, ls, exp, ep0, tv, r, d);
-        return nb >= SIG ? nb : letLoop(m, m.terms.c(cur), nb, en + 1, ls, Op.CHECKED, exp, ep0, d);
+        int nb = tv == 0 ? letBind(m, cur, eb, en, ls, r, false) : letIter4(m, cur, eb, en, ls, exp, ep0, tv, r, d);
+        return nb >= SIG ? nb : letLoop(m, m.terms.c(cur), nb, en + 1, ls, tv == 0 ? Op.ONLY : Op.CHECKED, exp, ep0, d);
     }
 
-    /** INFER2[14](..): r = CONV(Tv, EVAL(A)). */
-    static int k_let5(Machine m, int cur, int eb, int en, int ls, int exp, int ep0, int r, int d) {
+    /** INFER2[14](.., EVAL(A)): r = CONV(Tv, EVAL(A)). */
+    static int k_let5(Machine m, int cur, int eb, int en, int ls, int exp, int ep0, int da, int r, int d) {
         if (r != Layout.T) {
             return m.fail(MachineErrors.E_LET_MISMATCH);
         }
-        int nb = letBind(m, cur, eb, en, ls);
+        int nb = letBind(m, cur, eb, en, ls, da, false);
         return nb >= SIG ? nb : letLoop(m, m.terms.c(cur), nb, en + 1, ls, Op.CHECKED, exp, ep0, d);
     }
 
@@ -2130,7 +2221,8 @@ final class Infer {
      * CHECK of a lam or let node against V with the expected type pushed inwards (ISA 4.5.2, B9; admissible: if
      * {@code body : B[x]} and {@code D} is convertible with {@code DOM(W)} then {@code (fun x : D => body) : W}).
      * A tabled node whose checked type is stored answers by {@code CONV(TYPE(s), V)}; after the lam rule
-     * succeeded, {@code TYPE(s) = PII(t, frame of s, ls')} is stored with the check stamp. V is never stored.
+     * succeeded, {@code TYPE(s) = PII(t, frame of s, ls')} is stored with the check stamp. V is never stored, and
+     * the lam rule applies only when the lambda's domain and V's domain are one value ({@link #k_ck5}).
      */
     private static int checkExpect(Machine m, int t, int kind, int eb, int en, int ls, int expected, int d) {
         Terms terms = m.terms;
@@ -2161,43 +2253,57 @@ final class Infer {
             return tt >= SIG ? m.sig1(tt, K_CHECK_1, expected) : k_check1(m, expected, tt, d);
         }
         int ta = infer(m, m.terms.a(t), eb, en, ls, Op.CHECKED, d + 1); // call INFER(A, CHECKED) => CHECK2[2]
-        return ta >= SIG ? m.sig6(ta, K_CK_2, t, eb, en, ls, s, r) : k_ck2(m, t, eb, en, ls, s, r, ta, d);
+        return ta >= SIG ? m.sig6(ta, K_CK_2, t, eb, en, ls, expected, r) : k_ck2(m, t, eb, en, ls, expected, r, ta, d);
     }
 
-    /** CHECK2[2](t, eb, en, ls, s, W): r = the type of the domain. */
-    static int k_ck2(Machine m, int t, int eb, int en, int ls, int s, int w, int r, int d) {
+    /** CHECK2[2](t, eb, en, ls, V, W): r = the type of the domain. */
+    static int k_ck2(Machine m, int t, int eb, int en, int ls, int expected, int w, int r, int d) {
         int u = ensort(m, r, d + 1); // call ENSORT => CHECK2[3]
-        return u >= SIG ? m.sig6(u, K_CK_3, t, eb, en, ls, s, w) : k_ck3(m, t, eb, en, ls, s, w, u, d);
+        return u >= SIG ? m.sig6(u, K_CK_3, t, eb, en, ls, expected, w) : k_ck3(m, t, eb, en, ls, expected, w, u, d);
     }
 
-    /** CHECK2[3](t, eb, en, ls, s, W): r = the sort level of the domain (only its existence matters). */
-    static int k_ck3(Machine m, int t, int eb, int en, int ls, int s, int w, int r, int d) {
+    /** CHECK2[3](t, eb, en, ls, V, W): r = the sort level of the domain (only its existence matters). */
+    static int k_ck3(Machine m, int t, int eb, int en, int ls, int expected, int w, int r, int d) {
         int dom = evalDom(m, m.terms.a(t), eb, en, ls, d); // call EVAL(A), forced => CHECK2[4]
-        return dom >= SIG ? m.sig6(dom, K_CK_4, t, eb, en, ls, s, w) : k_ck4(m, t, eb, en, ls, s, w, dom, d);
+        return dom >= SIG ? m.sig6(dom, K_CK_4, t, eb, en, ls, expected, w) : k_ck4(m, t, eb, en, ls, expected, w, dom, d);
     }
 
-    /** CHECK2[4](t, eb, en, ls, s, W): r = D, the lambda's domain. */
-    static int k_ck4(Machine m, int t, int eb, int en, int ls, int s, int w, int r, int d) {
+    /** CHECK2[4](t, eb, en, ls, V, W): r = D, the lambda's domain. */
+    static int k_ck4(Machine m, int t, int eb, int en, int ls, int expected, int w, int r, int d) {
         int dw = Eval.dom(m, w, d + 1); // call DOM(W) => CHECK2[5]
-        return dw >= SIG ? m.sig7(dw, K_CK_5, t, eb, en, ls, s, w, r) : k_ck5(m, t, eb, en, ls, s, w, r, dw, d);
+        return dw >= SIG ? m.sig7(dw, K_CK_5, t, eb, en, ls, expected, w, r) : k_ck5(m, t, eb, en, ls, expected, w, r, dw, d);
     }
 
-    /** CHECK2[5](t, eb, en, ls, s, W, D): r = DOM(W); {@code D != DOM(W) and CONV(D, DOM(W)) != T: fail}. */
-    static int k_ck5(Machine m, int t, int eb, int en, int ls, int s, int w, int dom, int r, int d) {
+    /**
+     * CHECK2[5](t, eb, en, ls, V, W, D): r = DOM(W). B9 goes on only if the lambda's domain IS the expected domain
+     * (the same value): then one variable of that domain is the variable the body is typed under AND the variable
+     * the codomains are compared under, as in the official kernel. Two domains that are merely convertible need
+     * two types for one binding (findings E1-F3 / E1-F4): the generic rule decides, INFER(t, CHECKED) and
+     * CONV(type, V), where CBIND compares under a variable of V's domain and the lambda's own type is instantiated
+     * under a typed binding ({@code Eval.instBody}).
+     */
+    static int k_ck5(Machine m, int t, int eb, int en, int ls, int expected, int w, int dom, int r, int d) {
         if (dom == r) {
-            return k_ck6(m, t, eb, en, ls, s, w, dom, Layout.T, d);
+            return k_ck6(m, t, eb, en, ls, expected, w, dom, Layout.T, d);
         }
-        int c = Conv.conv(m, dom, r, d + 1); // call CONV(D, DOM(W)) => CHECK2[6]
-        if (c < SIG && c != Layout.T) {
-            return m.fail(MachineErrors.E_TYPE_MISMATCH, dom, r); // the lambda's domain and the expected one
-        }
-        return c >= SIG ? m.sig7(c, K_CK_6, t, eb, en, ls, s, w, dom) : k_ck6(m, t, eb, en, ls, s, w, dom, c, d);
+        int tt = infer(m, t, eb, en, ls, Op.CHECKED, d + 1); // call INFER(t, CHECKED) => CHECK[1]
+        return tt >= SIG ? m.sig1(tt, K_CHECK_1, expected) : k_check1(m, expected, tt, d);
     }
 
-    /** CHECK2[6](t, eb, en, ls, s, W, D): r = the comparison of the domains; then {@code x = OPEN(D)} and INST(W, x). */
-    static int k_ck6(Machine m, int t, int eb, int en, int ls, int s, int w, int dom, int r, int d) {
+    /** The tabling record of the lambda t under the environment ({@link #checkExpect} made it; the frames carry V instead), 0 if t is not tabled. */
+    private static int ckRecord(Machine m, int t, int eb, int en, int ls) {
+        Terms terms = m.terms;
+        return tabled(m, t, terms.header(t)) ? suspRec(m, t, Runs.prune(m, eb, en, terms.fvMask(t)), ls) : 0;
+    }
+
+    /** CHECK2[6](t, eb, en, ls, V, W, D): the domains are one value; {@code x = OPEN(D)} and INST(W, x). */
+    static int k_ck6(Machine m, int t, int eb, int en, int ls, int expected, int w, int dom, int r, int d) {
         if (r != Layout.T) {
             return m.fail(MachineErrors.E_TYPE_MISMATCH);
+        }
+        int s = ckRecord(m, t, eb, en, ls);
+        if (s >= SIG) {
+            return s;
         }
         int ep0 = m.ep;
         int nb = openPush(m, eb, en, dom);
@@ -2229,7 +2335,8 @@ final class Infer {
             if (pii >= SIG) {
                 return pii;
             }
-            closedCod(m, pii, b);
+            // (finding E1-F5: the EXPECTED body type b is not stored as the PII's codomain; it is only
+            // convertible with the body's own type, which INST(PII, x) infers when it is asked for)
             k_infer1(m, s, t, Op.CHECKED, pii, d);
         }
         return Layout.T;
@@ -2850,7 +2957,7 @@ final class Infer {
             case K_LET_4:
                 return k_let4(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], w[p + 6], r, 0);
             case K_LET_5:
-                return k_let5(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], r, 0);
+                return k_let5(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], w[p + 6], r, 0);
             case K_LET_6:
                 return k_let6(m, w[p], r, 0);
             default:

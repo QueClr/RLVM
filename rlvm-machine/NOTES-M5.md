@@ -296,3 +296,23 @@ but `facts.ticks` count only while statistics are on).
 | `m5b` | J1-J3: joint telescope check in DECL | the same | batches 1 and 2: kept |
 | `-Drlvm.machine.m5ic=true` | C1-C3: INFER's front cache (no switch; rejected by measurement, off) | tutorial + bugs, the four corpora (with the three switches) | batch 2: no gain |
 | `facts` | F1-F13: derivation and accessors (the consumers are M4's) | M4's and S's gates | F13 |
+
+## E1-F1 .. E1-F6: a bound variable is typed by its binder's DECLARED type (agent E1, 2026-11-24)
+
+Findings of package E1 (board 20:10Z - 20:35Z, `docs/design/review/eager-reduction.md` 6.6,
+`work/e1/patches/E1-F2-F5-design.md`): the machine accepted exports the official checker rejects because a type that
+is only CONVERTIBLE with the official one was used in its place (the official `is_def_eq` is not transitive: package
+S's triple `d intro = d h`, `d intro = 5` accepted, `d h = 5` rejected). 78 exports `e1-*` of the S manifest (official
+verdicts from Docker; generator `src/test/resources/s/gen/batchE.py`), all strict rows.
+
+| # | Where | Was | Now |
+|---|---|---|---|
+| F1 | `Infer.letBind`, `Values.mkLet` | the let variable (a LET suspension, never a variable) had the type of its VALUE | the suspension carries `EVAL(A)`, the value of the DECLARED type, in `M_TYPE` (`vtypeFast` answers a SUSP from it); one record per declared type (`aux = SUSP_LET + j`); the declared type is evaluated in ONLY mode too (`letOnly`, frame INFER2[13] with `Tv = 0`); INFER2[14] carries `EVAL(A)` |
+| F2, F3 | `Eval.instBody` (`INST(PII, x)`: the type of a lambda instantiated = its body typed again under `x`) | the lambda's variable had the type of whatever `x` is (the argument of a redex; the comparison variable of CBIND, typed by the other side's domain) | if the body's type can depend on the type of its variable (`Infer.typeReads`, syntactic) and `x` does not have exactly `DOM(PII)` as its type (`vtypeFast(x) == DOM`), the variable is bound to a TYPED BINDING (`Values.mkTyped`: a plain SUSP, aux `SUSP_TYPED`, `M_VAL = x`, `M_TYPE = DOM`; EVAL peeks it to `x`, INFER reads the domain, frames keep it). `DOM` may need the judgment: frame INST[3]. `Eval.force` / `forceFast` return the value of a typed binding's value and do not memo-check it |
+| F4 | `Infer.k_ck5` (B9, `expect`) | the body was checked against the expected codomain under a variable of the lambda's OWN domain whenever the two domains were convertible | B9 applies only when the lambda's domain IS the expected domain (one value); otherwise the generic rule (INFER + CONV, where CBIND compares under the expected domain and the lambda's type is instantiated under a typed binding). The frames CHECK2[2..5] carry `V` instead of the tabling record (found again in `k_ck6`, `ckRecord`) |
+| F5 | `Infer.k_ck8` | the EXPECTED body type (when closed) was stored as the COD memo of the lambda's PII | not stored (the memo written by the lam rule of INFER, the body's own closed type, stays) |
+| F6 | `Reduce.k_iota3`, `Eval.apply` / `k_evalHead`, `Infer.Ext.zetaInexact`, `Infer.LET_EXACT` | the K rule typed the major premise by its VALUE; under `gated` the value of `f a` with `f` a let variable has the variable reduced away, the official `to_cnstr_when_K` types the TERM through the variable's declared type | a LET suspension whose declared type is the very type of its value is marked (`M1 = LET_EXACT`); applying any other let variable sets `zetaInexact` for the declaration, and a K comparison after that is a DECLINE (`E_LIMIT`, fatal). Cost: the declines of this rule on the corpora (the gate of the publication names them) |
+
+Not covered (not probed): the type of a stuck projection of an applied let variable inside proof irrelevance; eta
+on such a term. Cost of F2 / F3: `INST(PII, x)` builds one frame and one record more when the typed binding is
+needed; of F4: lambdas whose domain is not the expected domain's value take the generic rule.

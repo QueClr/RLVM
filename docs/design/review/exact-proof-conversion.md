@@ -400,7 +400,25 @@ default set gained is evaluation (the units below 1.25: -23 %), not the comparis
 
 ### 6.2 Wall clock, eight workers, pipelined load (owner note 12)
 
-TIMING-WALL
+Native -O3 (`work/c1/dist-n`), `-j 8 -X load=pipelined -X engine=machine -X passes=4 -X passes-mode=reload`, the
+eight measurement cores (`work/c1/quiet-wall.sh`); every pass loads and checks the file; milliseconds as the
+launcher reports them per pass; every pass ACCEPT.
+
+| `Scheme.cone` (22,055 units) | wall ms, passes 1 .. 4 | median of passes 2 .. 4 | check ms (median) | process CPU ms (median) | load ms (median) |
+|---|---|--:|--:|--:|--:|
+| A (step 1) | 563 / 559 / 532 / 550 | 550 | 519 | 3,200 | 341 |
+| D | 457 / 462 / 476 / 447 | 462 | 429 | 2,850 | 333 |
+| D + `m4b` | 454 / 461 / 466 / 454 | 461 | 429 | 2,810 | 336 |
+| D + `facts,m4b` | 461 / 447 / 456 / 448 | 448 | 417 | 2,870 | 322 |
+| N (NOT official) | 422 / 415 / 451 / 439 | 439 | 408 | 2,450 | 313 |
+| DN (NOT official) | 384 / 388 / 371 / 388 | 388 | 356 | 2,180 | 310 |
+
+WALL-CEDAR
+
+Reading: with eight workers a slice of this size is bounded by its pipelined load (310 to 340 ms of the 390 to 550
+ms), so the wall clock moves less than the CPU time: the shortcuts on top of D -16 % of the wall clock (462 -> 388
+ms) and -24 % of the process CPU time; `m4b` on top of D 462 -> 461 ms: nothing. The warm wall clock of all of
+Mathlib was not measured (section 8).
 
 ## 7. Tests
 
@@ -509,8 +527,13 @@ The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, mani
   proof-inspecting reduction" is neither established nor refuted. What I can say is that it would not apply to
   the hot comparisons (their leaves are equal only up to proof irrelevance).
 - **The size of 3.4** is an estimate from counters; nothing of it was built.
-- **TIMING-CAVEATS**
-- Parallel workers: every counter run and the hostile runs are one worker (the judge has no 4-worker row).
+- **The CPU effect of `m4b`**: two rounds per set and corpus resolve 1.5 %, not less; the step may be worth 0 to
+  1.5 % of the checking time on Mathlib, and nothing says it costs.
+- **All of Mathlib**: counters and CPU time are from two slices (`Scheme.cone`, `Galois.Basic.cone`) and the Cedar
+  slice; MATHLIB-NOTE
+- **Parallel workers**: the counters and the CPU table are one worker; four workers were run on the hostile exports
+  (`dflt4j4`) and in the pipeline part of the gates, eight in 6.2. No export targets a race in the step (it has no
+  state of its own: nothing to race on).
 - The official kernel's own cost on these units was not measured (P8: 30 times gruszka's instructions on Mathlib).
 
 ## 9. Deliverables and what each owner would do with them

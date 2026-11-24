@@ -1109,8 +1109,23 @@ final class Reduce {
         return c;
     }
 
+    /**
+     * Finding E1-F6: the official kernel types the major TERM ({@code to_cnstr_when_K}); this declaration applied a
+     * let variable whose value has only a convertible type ({@code Infer.Ext.zetaInexact}; the type of the major was
+     * computed just now, which may have been that application), so the type of the major VALUE may be a stand-in
+     * for the official one: no verdict (fatal: no TRY turns it into U).
+     */
+    private static int zetaInexact(Machine m) {
+        m.limitDetail = "K rule after the application of a let variable whose declared type is not the type of its value (finding E1-F6):"
+                + " the type of the major premise may differ from the official one; the reference engine checks this declaration";
+        return m.fault(MachineErrors.E_LIMIT);
+    }
+
     /** Frame IOTA[3](v, major, ty, c): r = VTYPE(c); the indices must match definitionally. */
     static int k_iota3(Machine m, int v, int major, int ty, int c, int r, int d) {
+        if (m.x5.zetaInexact) {
+            return zetaInexact(m);
+        }
         int e = Conv.conv(m, ty, r, d + 1); // call CONV(T, type of c) => 4
         return e >= SIG ? m.sig3(e, K_IOTA_4, v, major, c) : k_iota4(m, v, major, c, e, d);
     }

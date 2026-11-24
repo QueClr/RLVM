@@ -28,8 +28,10 @@ import rlvm.api.Outcome;
  *   <li>the machine's own verdict of the file (its first unit that is not accepted) is the official one; a
  *       decline of the machine is honest: it is reported and never fails a test.
  * </ul>
- * A row may carry KNOWN FINDINGS ({@code eager}, {@code warm}, {@code probes}, {@code facts}, {@code levels}): the
- * switch (or, for {@code eager} and {@code levels}, every configuration, v0 included) under which the published
+ * A row may carry KNOWN FINDINGS ({@code eager}, {@code warm}, {@code probes}, {@code facts}, {@code levels},
+ * {@code bind} = findings E1-F1 .. E1-F6 of 2026-11-24: a bound variable typed by what it is bound to instead of by
+ * its binder's declared domain; no row carries it since the fix of the same day): the
+ * switch (or, for {@code eager}, {@code levels} and {@code bind}, every configuration, v0 included) under which the published
  * machine still gives a verdict the official checker does not give. Such a violation is reported, not failed, by the fast tests, so that an open finding
  * of another package does not block publications; {@link SHostileSlowTest#noKnownFindingIsLeft} fails while
  * one is left. When the owner has fixed it, the mark is removed from the manifest and the row is strict.
@@ -77,7 +79,7 @@ final class SHostile {
         /** True if a known finding of the row applies to a machine under this switch set. */
         boolean knownUnder(String switches) {
             for (String f : finding.split(",")) {
-                if (f.equals("levels") || f.equals("eager")
+                if (f.equals("levels") || f.equals("eager") || f.equals("bind")
                         || ((f.equals("probes") || f.equals("facts") || f.equals("warm")) && has(switches, f))) {
                     return true;
                 }

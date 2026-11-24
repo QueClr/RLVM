@@ -623,6 +623,82 @@ final class Values {
         return val != 0 ? val : s;
     }
 
+    /** aux of a typed binding ({@link #mkTyped}); outside {@code SUSP_LET .. SUSP_LET + LET_TYPES_MAX}. */
+    static final int SUSP_TYPED = 0x4000;
+
+    /**
+     * A TYPED BINDING (findings E1-F2 / E1-F3, 2026-11-24): what the variable of the lambda term {@code lam} is
+     * bound to when the lambda's body is typed again under a value {@code x} ({@code INST(PII, x)}), TOGETHER with
+     * the lambda's own domain {@code dom}. The official kernel typed the body under a free variable of {@code dom}
+     * and only substitutes {@code x} into the resulting type; the type of {@code x} itself is merely convertible
+     * with {@code dom}, and the official relation is not transitive. The record is a plain SUSP (aux
+     * {@link #SUSP_TYPED}) with {@code M_VAL = x} and {@code M_TYPE = dom}: EVAL of the variable peeks it to
+     * {@code x}, so no value or type contains it; INFER of the variable ({@code Infer.vtypeFast}) answers
+     * {@code dom}; frames keep it ({@code Runs.prune} copies slots), so the type of an inner lambda still sees it.
+     * Identity: {@code (lam, the frame of (eb, en) under the lambda's mask and slot 0, ls)}, where {@code (eb, en)}
+     * is ENTER(the lambda's frame) + {@code x}: it determines {@code x} and, with the lambda and its bindings,
+     * {@code dom}, so the two memo words are functions of identity (I-FLAG). Its term is NOT what its VAL was
+     * evaluated from: {@code Eval.force} neither evaluates nor memo-checks it.
+     * @return the record, or a signal (E_MEM)
+     */
+    static int mkTyped(Machine m, int lam, int eb, int en, int ls, int x, int dom) {
+        long mask = m.terms.fvMask(lam);
+        // the lambda's mask one binder further in, plus the variable itself; a lambda that reads index 62 or a far
+        // variable: the whole environment (a finer identity than needed, never a coarser one)
+        long under = (mask >>> 62) == 0 ? mask << 1 | 1L : en > Layout.NEAR_SLOTS ? -1L : (1L << en) - 1;
+        int frame = Runs.prune(m, eb, en, under);
+        if (frame >= SIG) {
+            return frame;
+        }
+        int s = closure(m, Layout.SUSP << Layout.KIND_SHIFT | SUSP_TYPED, lam, frame, ls);
+        if (s >= SIG) {
+            return s;
+        }
+        int[] vh = m.vh;
+        int o = s << Layout.REC_SHIFT;
+        if (vh[o + Layout.M_VAL] == 0) {
+            vh[o + Layout.M_VAL] = x;
+            vh[o + Layout.M_TYPE] = dom;
+            // OPEN is the value's, not the frame's (the lambda's other bindings are not part of what it stands for)
+            vh[o] = (vh[o] & ~Layout.W0_OPEN) | (flags(m, x) & Layout.FL_OPEN) << Layout.FLAG_SHIFT;
+        }
+        return s;
+    }
+
+    /** At most this many declared types for one let value under one frame (records {@code aux = SUSP_LET + j}); more is {@code fail(E_LIMIT)}. */
+    static final int LET_TYPES_MAX = 64;
+
+    /**
+     * The LET suspension of a let binder {@code let x : A := v} (finding E1-F1, 2026-11-24): the delayed
+     * {@code EVAL(v, frame, ls)} as {@link #mkSusp} with {@code let}, AND the DECLARED type of the variable,
+     * {@code type = EVAL(A)}, in {@code M_TYPE}. The official {@code infer_let} types the body under a free variable
+     * of the declared type (R02 6.6); the type of the VALUE is only convertible with it, and the official
+     * relation is not transitive, so {@code VTYPE} of a let variable must be the declared type
+     * ({@code Infer.vtypeFast} answers a SUSP from {@code M_TYPE}). Two let binders with one value term under one
+     * frame but different declared types are different variables: the record is the first of
+     * {@code aux = SUSP_LET, SUSP_LET + 1, ..} whose {@code M_TYPE} is free or holds this type (aux is part of a
+     * record's identity, {@code Hash.W0_KEY_MASK}), so {@code M_TYPE} stays a function of identity (I-FLAG).
+     * @return the record, or a signal ({@code E_MEM}; ABORT with {@code E_LIMIT} beyond {@link #LET_TYPES_MAX})
+     */
+    static int mkLet(Machine m, int term, int frame, int ls, int type) {
+        for (int j = 0; j < LET_TYPES_MAX; j++) {
+            int s = closure(m, Layout.SUSP << Layout.KIND_SHIFT | Layout.W0_LET | Layout.W0_OPEN | (SUSP_LET + j), term, frame, ls);
+            if (s >= SIG) {
+                return s;
+            }
+            int o = (s << Layout.REC_SHIFT) + Layout.M_TYPE;
+            int ty = m.vh[o];
+            if (ty == 0) {
+                m.vh[o] = type;
+                return s;
+            }
+            if (ty == type) {
+                return s;
+            }
+        }
+        return m.fail(rlvm.api.MachineErrors.E_LIMIT);
+    }
+
     /**
      * The plain SUSP record of {@code (term, frame, ls)} itself, made if absent and never replaced by its VAL: the
      * tabling record of EVAL, INFER and CHECK (ISA 5.1). Key {@code (SUSP, aux 0, term, frame, ls')}; the LET

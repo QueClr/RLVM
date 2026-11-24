@@ -186,6 +186,8 @@ final class Eval {
     static final int K_INST_1 = Op.K_INST | 1;
     /** INST[2](memo, xb): waits for the block of a PI closure (SW_CODE). */
     static final int K_INST_2 = Op.K_INST | 2;
+    /** INST[3](pi, x): waits for DOM(pi) of a PII whose body is typed under a typed binding (E1-F2 / E1-F3). */
+    static final int K_INST_3 = Op.K_INST | 3;
     /** DOM[1](v, ep0): waits for EVAL of the domain term. */
     static final int K_DOM_1 = Op.K_DOM | 1;
     /** DOM[2](v): waits for FORCE of the domain. */
@@ -724,6 +726,9 @@ final class Eval {
 
     /** EVAL[HEAD]: r = the value of the head; it is forced before the arguments are looked at (APPLY would force it first, 4.3.1). */
     static int k_evalHead(Machine m, int s, int xb, int n, int eb, int en, int ls, int r, int d) {
+        if (Infer.inexactLet(m, r)) {
+            m.x5.zetaInexact = true; // E1-F6: the value of this application loses a let variable whose type is only convertible
+        }
         int f = force(m, r, d + 1); // call FORCE(head) => HEADF (inline unless a pending suspension)
         return f >= SIG ? m.sig6(f, K_EVAL_HEADF, s, xb, n, eb, en, ls) : args(m, s, f, xb, n, 0, eb, en, ls, d);
     }
@@ -995,6 +1000,9 @@ final class Eval {
         }
         int v = vh[o + Layout.M_VAL];
         if (v != 0) {
+            if ((w0 & Layout.AUX_MASK) == Values.SUSP_TYPED) {
+                return force(m, v, d); // a typed binding (Values.mkTyped): its value, which may itself be a suspension
+            }
             return m.debug != 0 && (w0 & Layout.W0_LET) == 0 ? checkVal(m, s, v) : v;
         }
         if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
@@ -1051,7 +1059,10 @@ final class Eval {
             return v;
         }
         int x = vh[o + Layout.M_VAL];
-        return x != 0 ? x : Op.MISS;
+        if (x == 0) {
+            return Op.MISS;
+        }
+        return (vh[o] & Layout.AUX_MASK) == Values.SUSP_TYPED ? forceFast(m, x) : x; // a typed binding: its value's value
     }
 
     // =====================================================================================================
@@ -1066,6 +1077,9 @@ final class Eval {
      * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
      */
     static int apply(Machine m, int f, int xb, int n, int d) {
+        if (Infer.inexactLet(m, f)) {
+            m.x5.zetaInexact = true; // E1-F6: the value of this application loses a let variable whose type is only convertible
+        }
         int g = forceFast(m, f); // 1. inline answers: a neutral head is MKAPP (class p)
         if (g != Op.MISS) {
             int kind = Values.kind(m, g);
@@ -1418,11 +1432,39 @@ final class Eval {
         return instBody(m, pi, x, kind, d); // 4. body
     }
 
-    /** INST, step 4: the codomain of the PI / PII record pi at x. */
+    /**
+     * INST, step 4: the codomain of the PI / PII record pi at x. A PII (the type of a lambda) types the lambda's
+     * body again, under x: if the body's type can depend on the TYPE of its variable and x does not have exactly
+     * the lambda's domain as its type, the variable is bound to the typed binding of (x, DOM) (findings E1-F2 /
+     * E1-F3; {@code Values.mkTyped}). The domain may need the judgment DOM => INST[3].
+     */
     private static int instBody(Machine m, int pi, int x, int kind, int d) {
         if (kind == Layout.PI && (m.sw & Op.SW_CODE) != 0 && codeArity(m, pi, 1) == 1) {
             return instCode(m, pi, x, d);
         }
+        if (kind == Layout.PII && x != Layout.HOLE) {
+            final int body = m.terms.b(m.vh[(pi << Layout.REC_SHIFT) + Layout.A]);
+            if ((m.terms.fvMask(body) & 1L) != 0 && Infer.typeReads(m.terms, body, 0)) {
+                int dom = m.vh[(pi << Layout.REC_SHIFT) + Layout.M_DOM];
+                if (dom == 0) {
+                    dom = dom(m, pi, d + 1); // call DOM(pi) => INST[3]
+                    if (dom >= SIG) {
+                        return m.sig2(dom, K_INST_3, pi, x);
+                    }
+                }
+                return instUnder(m, pi, x, kind, Infer.vtypeFast(m, x) == dom ? 0 : dom, d);
+            }
+        }
+        return instUnder(m, pi, x, kind, 0, d);
+    }
+
+    /** INST[3](pi, x): r = DOM(pi), the domain of the lambda whose type pi is. */
+    static int k_inst3(Machine m, int pi, int x, int r, int d) {
+        return instUnder(m, pi, x, Layout.PII, Infer.vtypeFast(m, x) == r ? 0 : r, d);
+    }
+
+    /** The body of pi under its frame + x; {@code dom != 0}: under the typed binding of (x, dom) (see {@link #instBody}). */
+    private static int instUnder(Machine m, int pi, int x, int kind, int dom, int d) {
         final int o = pi << Layout.REC_SHIFT;
         final int[] vh = m.vh;
         final int body = m.terms.b(vh[o + Layout.A]);
@@ -1435,6 +1477,14 @@ final class Eval {
         }
         if (en < 0) {
             return m.fault(MachineErrors.E_MEM);
+        }
+        if (dom != 0) {
+            int tb = Values.mkTyped(m, m.vh[o + Layout.A], m.envBase, en, ls, x, dom);
+            if (tb >= SIG) {
+                m.ep = ep0;
+                return tb;
+            }
+            m.es[m.envBase + en - 1] = tb; // the innermost slot: the variable of the lambda
         }
         // call EVAL / INFER(body) => 1
         int r = kind != Layout.PI ? Infer.infer(m, body, m.envBase, en, ls, Op.ONLY, d + 1)
@@ -1622,6 +1672,8 @@ final class Eval {
                 return k_inst1(m, w[p], w[p + 1], r, 0);
             case K_INST_2:
                 return k_inst2(m, w[p], w[p + 1], r, 0);
+            case K_INST_3:
+                return k_inst3(m, w[p], w[p + 1], r, 0);
             case Op.K_ARGV:
                 return argv(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
             case Op.K_DOM:
