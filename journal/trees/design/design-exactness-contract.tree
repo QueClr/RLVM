@@ -13,7 +13,7 @@
 
 \p{\strong{Status:} implemented. The practical policy is the default since 2026-11-24; one launcher option selects the strict mode. Both strict-mode options, of the loader and of the reference kernel, are in the tree.}
 
-\p{RLVM answers accept, reject or decline for an export. The contract says which of these answers the default configuration owes on which input. It exists because "the verdict of the official checker on every input" turned out not to be a property an engine on values can have: the official kernel's answer depends on its cache order, on the non-transitivity of its comparison and on the object identity of export records, see [the divergence classes](design-official-divergence). The owner chose between two readings on 2026-11-24, see [the decision](dec-TQSI); the lasting form is in [standing policies](standing-policies-exactness).}
+\p{RLVM answers accept, reject or decline for an export. The contract says which of these answers the default configuration owes on which input. It exists because "the verdict of the official checker on every input" turned out not to be a property an engine on values can have: the official kernel's answer depends on its cache order, on the non-transitivity of its comparison and on the object identity of export records, see [the divergence classes](design-official-divergence). The maintainer chose between two readings on 2026-11-24, see [the decision](dec-TQSI); the lasting form is in [standing policies](standing-policies-exactness).}
 
 \subtree[design-exactness-contract-kinds]{
 \title{Two kinds of wrong accept}
@@ -34,7 +34,7 @@
 \li{\strong{(d)} A kind T accept is tolerated. The known classes are written down with one export each.}
 }
 
-\p{What shows each item. For (a): [adversarial reviews](design-adversarial-review) with hostile exports whose strict rows must all be rejected, and seeded faults that show the rows reach the code. For (b) and (c): [the gate](design-gate), that is the differential runs on the corpora, the 230 arena tests and the 17,775 mutants. For (d): the record in \src{docs/design/review/official-divergence.md}. The order is fixed by the owner's note: the machine may be the default engine once (a) to (c) are shown by the gates and an adversarial review of the candidate has found no kind F.}
+\p{What shows each item. For (a): [adversarial reviews](design-adversarial-review) with hostile exports whose strict rows must all be rejected, and seeded faults that show the rows reach the code. For (b) and (c): [the gate](design-gate), that is the differential runs on the corpora, the 230 arena tests and the 17,775 mutants. For (d): the record in \src{docs/design/review/official-divergence.md}. The order is fixed by the maintainer's note: the machine may be the default engine once (a) to (c) are shown by the gates and an adversarial review of the candidate has found no kind F.}
 }
 
 \subtree[design-exactness-contract-policy]{

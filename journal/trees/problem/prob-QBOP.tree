@@ -11,7 +11,7 @@
 \import{base-macros}
 
 \p{\strong{Status:} open.}
-\p{\strong{The number.} By the innermost judgment family on the stack, in flight-recorder samples of the worker with the default switch set of wave 6, JVM launcher, one worker, shares only: inference is 33 percent on Init, 34 percent on Std, 40 percent on the Cedar slice and 27 percent on a Mathlib slice; evaluation is 35, 35, 31 and 38 percent; conversion 8 to 13; reduction 5 to 10. The profile is that of the integration of wave 6, [the session on wave 6](ses-CVTE).}
+\p{\strong{The number.} By the innermost judgment family on the stack, in flight-recorder samples of the worker with the default switch set of wave 6, JVM launcher, one worker, shares only: inference is 33 percent on Init, 34 percent on Std, 40 percent on the Cedar slice and 27 percent on a Mathlib slice; evaluation is 35, 35, 31 and 38 percent; conversion 8 to 13; reduction 5 to 10. The profile is that of the integration of wave 6, [the session on wave 6](ses-CVTE); its shares are from the integration log of 2026-11-24, which is not part of the repository.}
 \p{\strong{What is known.}}
 \ul{
 \li{It is not a missing rule. Over all of Mathlib the inference and check events of the machine are 0.98 of the inference misses of gruszka, see \src{docs/research/profiles/P8.md}. The cost is per event.}

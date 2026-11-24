@@ -77,7 +77,7 @@
 }
 
 \subtree[design-architecture-cost]{
-\title{What following the owner's vision cost}
+\title{What following the maintainer's vision cost}
 
 \ul{
 \li{\strong{Parallelism and wall clock first.} The research recommended one worker by default, because every worker costs instructions on the arena's board. The design chose parallel workers and a pipelined loader; the cost read from a leading checker was 0.8 \% more instructions with 4 workers and 1.6 \% with 8.}

@@ -23,7 +23,7 @@
 \li{Warm check time, last pass of a process on quiet cores: reachability -27 percent against the plain machine, 5,687 to 4,143 ms, and -29 percent against \code{\verb~|warm,gated,expect~}, 5,585 to 3,972 ms. Peak RSS of the JVM on reachability falls from 3,052 to 1,533 MiB.}
 \li{Init under \code{\verb~|warm,gated,expect~}: about -6 percent, one process. Cedar slice, and Init against the plain machine: no resolved change. The gain is where sessions are large; where they are small it is memory only.}
 \li{Accepted, rejected and declined counts are equal with the switch off and on in all 28 counter runs of six corpora, and the per-declaration comparison against the reference engine shows no difference.}
-\li{Not established: 8 workers, the native image, more than three passes, the large corpora. The patch was handed to the owner of evaluation and had not been measured against the later default switch set.}
+\li{Not established: 8 workers, the native image, more than three passes, the large corpora. The patch was handed to the owner of evaluation and had not been measured against the later default switch set. It was, later on 2026-11-24: on top of that set the tabling records of evaluation are 2 to 13 percent of all records, the filter gains nothing that holds across platforms and worker counts, and the verdict is no-go; see \src{docs/research/profiles/O1.md}.}
 }
 \p{The companion verdict of the same census is [in-place reuse has nothing to bite on](ins-6HMY).}
 \p{See also: [evaluation and tabling](design-evaluation-and-tabling).}

@@ -10,7 +10,7 @@
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{The first phase of the project. A team of research agents read the arena, the official kernel and the leading checkers, measured the platform, and built the tooling that every later number comes from. No checker code was written. Branch \code{dev}; the work is in the commits \commit{6fad0e1}, \commit{066dbf8}, \commit{1c3f2e7} and \commit{f6670d9}, which were recorded together on 2026-11-24 when the history was started. Dates in this journal follow the commit history; the documents give times in UTC.}
+\p{The first phase of the project. A team of research agents read the arena, the official kernel and the leading checkers, measured the platform, and built the tooling that every later number comes from. No checker code was written. Branch \code{dev}; the work is in the commits \commit{6fad0e1}, \commit{066dbf8}, \commit{1c3f2e7} and \commit{f6670d9}, which were recorded together on 2026-11-24 when the history was started. Dates in this journal are calendar dates in the time zone of the commit history, UTC-5; the status logs and several documents give times in UTC, by which the same evening is already 2026-11-24.}
 
 \ul{
 \li{\strong{The contract.} \src{docs/research/01-arena-and-export-format.md}: how the Lean Kernel Arena runs and ranks a checker, and the export format a checker reads.}
@@ -24,6 +24,49 @@
 
 \p{\strong{Infrastructure.} \src{bench/README.md} describes the tooling: a container image with the arena's limits (8 processors, 16 GB, no network) in which a command runs under \code{\verb~|perf stat~} as the arena runs it, a suite runner that scores a checker over the arena's tests as the arena does, the leading checkers built from the arena's own definitions as baselines, and a history of results. The arena's complete test set, Mathlib included, was built with the arena's own tool. Four spikes under \code{spikes/} measured the platform, memory layouts, tiers of a machine and the control convention of a stepper before any design depended on them.}
 
+\p{\strong{Recorded from this phase.} [The arena's clock is an instruction count](ins-0Q3P); [the fastest checkers converged on one design](ins-4TC3); [both leaders keep caches across declarations](ins-2FR1); [Truffle is the wrong first tier for a proof checker](ins-E5W9); [Cedar is not more reduction-heavy than Init](ins-I4Y7). The changelog has the [arena container](log-1FCQ) and the [test corpus](log-1M63).}
+
 \p{\strong{Policy recorded.} The first of the maintainer's notes were given during this phase: the board's clock is not wall clock, realistic workloads are parallel, the elaboration language decides how hot the machine is, and Cedar-level workloads are the yardstick. See [standing policies](standing-policies).}
 
 \p{\strong{Next.} [The design and its review](ses-EMMW).}
+
+\subtree[ses-XOS5-trees]{
+\title{Trees of this phase}
+
+\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
+
+\scope{
+\put\transclude/expanded{false}
+\subtree[ses-XOS5-designs]{
+\title{Design notes}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-XOS5}} {\rel/has-taxon ?X '{Design}}
+}
+}
+
+\subtree[ses-XOS5-insights]{
+\title{Insights}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-XOS5}} {\rel/has-taxon ?X '{Insight}}
+}
+}
+
+\subtree[ses-XOS5-examples]{
+\title{Examples}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-XOS5}} {\rel/has-taxon ?X '{Example}}
+}
+}
+
+\subtree[ses-XOS5-changes]{
+\title{Changelog entries}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-XOS5}} {\rel/has-taxon ?X '{Change}}
+}
+}
+}
+}

@@ -8,4 +8,19 @@
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{This journal was created in the directory \code{journal/} of the RLVM repository, in the form of the Reussir agentic journal, and filled with the record of the project's first two days. Branch \code{dev}. Four agents worked in one copy of the directory: a lead wrote the frame, and three writers wrote the trees of one group of kinds each, from the documents under \code{docs/}, the module documents and the commit history.}
+
+\ul{
+\li{\strong{The frame.} The instructions for agents (\src{journal/AGENTS.md}), the flake, the hubs, the identity trees, [standing policies](standing-policies) from the maintainer's fourteen notes, [accepted risks](accepted-risks), the [licence](licence), and one session tree for each phase of the work so far.}
+\li{\strong{The trees.} 30 design notes and 24 decisions; 50 insights, 3 hypotheses, 14 examples and 14 open problems; 68 changelog entries in eight areas. The lead added two insights and the lists of the hubs that are kept by hand.}
+\li{\strong{The tools.} Forester 6.0 from the lock file of the Reussir journal. Three things were added to that journal's commands for a forest that lives inside another repository and is written by several agents at once: \code{journal-check}, which builds a scratch copy and fails on any diagnostic; a package with all commands, built once and called by path; and a fallback in \code{journal-new} for the case that Forester cannot parse the forest. The lessons are in [the insight](ins-LVMC). \src{journal/scripts/check-public.py} searches the trees for what a public site must not show and for missing frontmatter.}
+\li{\strong{Publication.} \src{.github/workflows/journal-pages.yml} builds the forest and publishes it as GitHub Pages when branch \code{dev} is pushed. It was written and not run: nothing was pushed in this session, and pushing is the maintainer's step. The site's address will be the \code{url} of \src{journal/forest.toml}.}
+}
+
+\p{\strong{Conventions settled here.} A tree states one point and links to the document that carries the detail; the long documents stay in the repository. A measured finding is an insight with its numbers and their conditions, and there is no separate kind for a profile or a review. Dates are calendar dates in the time zone of the commit history, not UTC, so the first evening of the project is 2026-11-23 although the status logs of that evening carry UTC times of 2026-11-24. The person who directs the work is called the maintainer; the documents say the owner. The session trees of the first two days list the trees that cite them by a query.}
+
+\p{\strong{Verified.} On aarch64 Linux: the site derivation and the flake check build with no diagnostic; the development shell starts and the markdown converter runs in it; the rule check reports no error; the marker check finds no marker in the repository, as expected. Not verified: the workflow itself, the build on the x86-64 runner that the workflow uses (the Reussir journal builds the same Forester from the same lock file there), and the rendering in a browser, which was read as HTML only.}
+
+\p{\strong{Policy recorded.} The journal is a Forester forest prepared for publication; the journal is under the GNU Free Documentation License and the code under Apache-2.0 or MIT; continuous integration may use GraalVM Community Edition. See [standing policies](standing-policies).}
+
+\p{\strong{Known limits.} The trees of the first two days were written afterwards, in one evening, from documents that were still changing; where a tree says that something was not established or still to come, the date of that statement is 2026-11-24. Three figures in the trees come from working logs that are not part of the repository, and say so. The design notes are longer than a tree should be and are divided into sections with addresses of their own.}

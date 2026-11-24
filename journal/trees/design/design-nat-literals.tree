@@ -13,7 +13,7 @@
 
 \p{\strong{Status:} implemented: the arithmetic in the module \code{rlvm-nat}, the representation and the instructions in \code{rlvm-machine}.}
 
-\p{The Lean kernel accelerates natural-number and string literals: a numeral is one node, and fifteen functions on numerals are computed instead of unfolded. The owner asked for more than a library of literal arithmetic: Nat is specialised in the instruction set and in [the value model](design-value-model). Small naturals are immediate values that never touch the value store, arithmetic has a native fast path with an exact overflow guard, the literal form and the constructor form are cheap views of each other, and a recursor on a literal takes one step. The fixed point of all of it is the official behaviour: a literal folds exactly when the official weak head normalisation folds it, and an operation fails exactly where the official kernel throws.}
+\p{The Lean kernel accelerates natural-number and string literals: a numeral is one node, and fifteen functions on numerals are computed instead of unfolded. The maintainer asked for more than a library of literal arithmetic: Nat is specialised in the instruction set and in [the value model](design-value-model). Small naturals are immediate values that never touch the value store, arithmetic has a native fast path with an exact overflow guard, the literal form and the constructor form are cheap views of each other, and a recursor on a literal takes one step. The fixed point of all of it is the official behaviour: a literal folds exactly when the official weak head normalisation folds it, and an operation fails exactly where the official kernel throws.}
 
 \subtree[design-nat-literals-forms]{
 \title{Representations}

@@ -1,0 +1,28 @@
+\title{A warm session saves 16 percent of the steps at the default cap, and 26 to 28 percent at 4 MiB}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/profiles/V1.md}
+\import{base-macros}
+
+\p{Source: \src{docs/research/profiles/V1.md}, section 6, "the region question"; [the profiles of that day](ses-JRSD). One worker, exact counters of the machine, switches \code{\verb~|gated,expect~} with and without \code{warm}.}
+
+\table{
+\tr{\th{Session}\th{cedar: ticks}\th{cedar: records}\th{cedar: sessions}\th{Std: ticks}\th{Std: records}\th{Std: sessions}}
+\tr{\td{one declaration per session}\td{163.5 M}\td{88.6 M}\td{145,789}\td{127.7 M}\td{68.1 M}\td{100,907}}
+\tr{\td{warm, cap 256 KiB}\td{153.9 M (-5.9 \%)}\td{79.9 M}\td{11,474}\td{120.8 M (-5.5 \%)}\td{61.7 M}\td{8,339}}
+\tr{\td{warm, cap 1 MiB, the default}\td{137.7 M (-15.8 \%)}\td{69.3 M (-21.8 \%)}\td{4,956}\td{106.4 M (-16.7 \%)}\td{52.5 M (-22.9 \%)}\td{3,223}}
+\tr{\td{warm, cap 4 MiB}\td{121.0 M (-26.0 \%)}\td{59.0 M (-33.3 \%)}\td{2,839}\td{91.3 M (-28.5 \%)}\td{43.4 M (-36.3 \%)}\td{1,561}}
+}
+
+\ul{
+\li{At the default cap a declaration finds 22 \% of the records it needs already made by an earlier declaration of its session, 133 of 613 per declaration on cedar, and saves 16 \% of its ticks.}
+\li{The survivors are not a small, known set. Found again across declarations are tabling records of inference, closures and application spines; they refer to each other by record id, so a survivor drags its children along, and the census of \src{docs/research/profiles/X1.md} found no cheap predictor at creation time. This is what prevents the rule that everything a declaration made dies with it.}
+\li{The session already is an arena: records and runs are filled by a bump pointer and a reset moves two pointers back and clears the tables in time proportional to their use. A reset costs 8 to 9 microseconds, 0.2 to 0.3 \% of the worker's CPU time. Table growth costs more: 4 to 6 \% of the worker's CPU time is inside growths, because at the 1 MiB cap nearly every session outgrows its first table once.}
+\li{What a design with a survivor region could save is therefore ticks, not memory: the reuse of a 4 MiB session at the table footprint of a 1 MiB one. The 4 MiB session itself is slower in CPU time although it needs fewer ticks, because its tables leave the cache; see [the session cap](ins-FJ5R). The upper bound of the gain is the 10 \% of ticks between the two rows, less the cost of evacuating the survivors at a reset. It was not prototyped.}
+}
+
+\p{See also: [warm sessions and the session cap](design-warm-sessions); [the decision for 1 MiB](dec-KXE1); [counts do not stand for time](ins-KFM6).}

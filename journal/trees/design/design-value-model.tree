@@ -33,7 +33,7 @@
 \tr{\td{\code{NSUC}}\td{base value, k}\td{k successors of something that is not a literal}}
 }
 
-\p{Three more kinds are reserved for packed representations in the sense of the owner's note on storage strategies; none is in use, and no corpus has justified one. The kind is part of the identity, so \code{PI} and \code{PII} over the same term and frame are different values. The level substitution is part of the identity of a closure too, see [universe levels](design-universe-levels).}
+\p{Three more kinds are reserved for packed representations in the sense of the maintainer's note on storage strategies; none is in use, and no corpus has justified one. The kind is part of the identity, so \code{PI} and \code{PII} over the same term and frame are different values. The level substitution is part of the identity of a closure too, see [universe levels](design-universe-levels).}
 }
 
 \subtree[design-value-model-runs]{

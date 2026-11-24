@@ -11,11 +11,11 @@
 \meta{origin}{docs/design/OWNER-NOTES.md}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Decided by the owner on 2026-11-24 with one word, "practical"; it is note 13 of \src{docs/design/OWNER-NOTES.md} and is implemented as the launcher option \code{\verb~|-X policy=practical|strict~} with practical as the default.}
+\p{\strong{Status:} accepted. Decided by the maintainer on 2026-11-24 with one word, "practical"; it is note 13 of \src{docs/design/OWNER-NOTES.md} and is implemented as the launcher option \code{\verb~|-X policy=practical|strict~} with practical as the default.}
 
-\p{\strong{Context.} Until that evening the rule was the owner's earlier note, "resemble official by default", read as: the verdict of the official checker on every input. The adversarial reviews of the day showed that no engine on values can keep that reading. The official kernel's verdict can depend on the order in which its caches were filled, on the non-transitivity of its comparison, and on whether a subterm is one export record or two. On files built to show this, the machine, and in three cases the reference engine, accepts a statement that the official checker rejects. Every such statement is true in the theory, and no false accept was found. The reviewer of the default set concluded that under the strict reading even the generic tier of the machine is not a candidate, with or without any switch. The machine had been [withdrawn as default engine](dec-T79V) earlier that evening for a family of the same nature.}
+\p{\strong{Context.} Until that evening the rule was the maintainer's earlier note, "resemble official by default", read as: the verdict of the official checker on every input. The adversarial reviews of the day showed that no engine on values can keep that reading. The official kernel's verdict can depend on the order in which its caches were filled, on the non-transitivity of its comparison, and on whether a subterm is one export record or two. On files built to show this, the machine, and in three cases the reference engine, accepts a statement that the official checker rejects. Every such statement is true in the theory, and no false accept was found. The reviewer of the default set concluded that under the strict reading even the generic tier of the machine is not a candidate, with or without any switch. The machine had been [withdrawn as default engine](dec-T79V) earlier that evening for a family of the same nature.}
 
-\p{\strong{The question as it was put to the owner}: strict or practical exactness for the default?}
+\p{\strong{The question as it was put to the maintainer}: strict or practical exactness for the default?}
 
 \table{
 \tr{\th{}\th{Strict}\th{Practical}}

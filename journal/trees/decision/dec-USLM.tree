@@ -21,9 +21,9 @@
 \li{\strong{The same class for a let.} The \code{nondep} flag of a let is part of the official term identity and is not stored: \code{r2-id-let-nondep-bad}, official reject, reference engine accept (finding R2-F1).}
 }
 
-\p{The reference engine is the oracle of every differential gate and the engine that confirms rejections. The first response was therefore a loader that declines every declaration that carries metadata; a decline is never a wrong verdict. That loader was in its gate when the owner chose [practical exactness](dec-TQSI).}
+\p{The reference engine is the oracle of every differential gate and the engine that confirms rejections. The first response was therefore a loader that declines every declaration that carries metadata; a decline is never a wrong verdict. That loader was in its gate when the maintainer chose [practical exactness](dec-TQSI).}
 
-\p{\strong{Decision.} The owner's note names this case: behaviour that exists only for bug-for-bug agreement on adversarial files, declining metadata nodes among it, belongs to the strict mode and not to the default.}
+\p{\strong{Decision.} The maintainer's note names this case: behaviour that exists only for bug-for-bug agreement on adversarial files, declining metadata nodes among it, belongs to the strict mode and not to the default.}
 
 \table{
 \tr{\th{Where the metadata is}\th{Practical, the default}\th{Strict}}

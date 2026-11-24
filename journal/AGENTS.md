@@ -102,7 +102,15 @@ Every tree starts with:
 ```
 
 - `\date` is the creation date. When you substantially revise a tree, do not
-  change it; set `\meta{updated}{YYYY-MM-DD}`.
+  change it; set `\meta{updated}{YYYY-MM-DD}`. A tree that records earlier
+  work carries the date of the work, not the date it was written up.
+- Dates are calendar dates in the time zone of the repository's commit
+  history, which is the maintainer's (UTC-5 when the journal was started):
+  the date `git log` shows for a commit and the date your environment gives
+  as today. Do not use the UTC date. The status logs and several documents of
+  the project give times in UTC; a time of day quoted from them is marked
+  `UTC`, and a UTC time before 05:00 belongs to the previous date here. The
+  line `journal-new` writes is a UTC time stamp: replace it.
 - Design notes, decisions and problems also carry `\meta{status}{...}`,
   `\meta{created}{...}` and, once finished, `\meta{completed}{...}`, and repeat
   the status as the first paragraph (`\p{\strong{Status:} open.}`) so that it
@@ -183,6 +191,10 @@ not usable.
   commits (`\commit{abc1234}`), documents of the repository (`\src{docs/...}`)
   and session trees. They must never refer to a chat, to "the user" or to an
   agent's private scratch files.
+- The person who directs the work is "the maintainer". The documents of the
+  repository say "the owner"; "owner note 12" names note 12 of
+  `docs/design/OWNER-NOTES.md`, and "the owner of" a module is the agent
+  responsible for it.
 - Agents of the project are named by their role when it matters ("the
   integrator of the machine", "the adversarial reviewer"). The short labels
   that findings carry in the documents (`S3-F1`, `E1-F7`, `P8`) may be used as

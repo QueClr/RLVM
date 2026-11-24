@@ -11,12 +11,14 @@
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{The third phase: a complete checker without the machine. One agent per module wrote the modules of \src{docs/design/ARCHITECTURE.md}, an integrator put them together, and a later check re-ran every guard after the module owners had kept working. Branch \code{dev}, commits \commit{164409d} (export reader, universe levels, literals) and \commit{45563d9} (store, loader, reference kernel, inductive admission, admission, driver, launcher, test kit).}
+\p{The third phase: a complete checker without the machine. One agent per module wrote the modules of \src{docs/design/ARCHITECTURE.md}, an integrator put them together, and a later check re-ran every guard after the module owners had kept working. The foundation modules were installed late on 2026-11-23; the pipeline, its integration and the later check are of 2026-11-24. Branch \code{dev}, commits \commit{164409d} (export reader, universe levels, literals) and \commit{45563d9} (store, loader, reference kernel, inductive admission, admission, driver, launcher, test kit).}
 
 \ul{
 \li{\strong{Foundation.} \code{rlvm-export} reads the export, \code{rlvm-level} holds universe levels, \code{rlvm-nat} holds Nat and String literals and their arithmetic.}
 \li{\strong{Pipeline.} \code{rlvm-store} is the shared store of terms in flat arrays, \code{rlvm-load} builds it in one pass over the file, \code{rlvm-ref} is the reference kernel, \code{rlvm-inductive} regenerates inductive facts and recursors and compares them with the exported records, \code{rlvm-admit} admits declarations, \code{rlvm-driver} schedules workers and combines verdicts, \code{rlvm-cli} and \code{rlvm-main} are the launcher, and \code{rlvm-testkit} holds the differential engine and the mutant generator. Engines sit behind one interface in \code{rlvm-api}.}
 }
+
+\p{\strong{Design notes of this phase.} [The term store](design-term-store), [the export loader](design-export-loader), [universe levels](design-universe-levels), [Nat and String literals](design-nat-literals), [the reference engine](design-reference-engine), [admission of declarations and inductive types](design-inductive-admission), [the verdict protocol](design-verdict-protocol), [the driver](design-driver) and [the gate](design-gate).}
 
 \p{\strong{First integration.} The reactor built with 786 tests, and after the integration with 790. All 230 published arena tests got the expected verdict with no decline, on the JVM launcher and on the native image, and all eight corpora were accepted. Two differences from the official checker were found by probing it and were turned into declines: a reference to a constant that the official kernel generates itself had been rejected as unknown, and metadata inside an inductive or quotient record had been accepted where the official checker rejects, which had let four hand-written bad proofs through. A mutation kind that wraps an expression in metadata was added to the test kit as the guard; its corpus of 1,976 mutants established that the official checker accepts metadata in definitions, theorems and axioms and rejects it in constructor types, recursor types, rule right-hand sides and quotient types.}
 
@@ -27,3 +29,36 @@
 \p{\strong{Left open by this phase.} Pipelined loading was correct in every guard and still opt-in. The reference kernel compared universe levels with the complete relation and so accepted the two arena corner cases that the official checker rejects; the maintainer decided that question later the same day, see [standing policies](standing-policies). Files with declarations out of order, generated constants and metadata in inductive records are declined, see [accepted risks](accepted-risks).}
 
 \p{\strong{Next.} [The machine](ses-Z72N). The pipeline's own later work, on the driver and the loader, is part of [the speed phase](ses-CVTE).}
+
+\subtree[ses-BQZM-trees]{
+\title{Trees of this phase}
+
+\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
+
+\scope{
+\put\transclude/expanded{false}
+\subtree[ses-BQZM-designs]{
+\title{Design notes}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-BQZM}} {\rel/has-taxon ?X '{Design}}
+}
+}
+
+\subtree[ses-BQZM-problems]{
+\title{Open problems}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-BQZM}} {\rel/has-taxon ?X '{Problem}}
+}
+}
+
+\subtree[ses-BQZM-changes]{
+\title{Changelog entries}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-BQZM}} {\rel/has-taxon ?X '{Change}}
+}
+}
+}
+}

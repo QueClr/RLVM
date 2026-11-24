@@ -37,7 +37,7 @@
 \subtree[design-values-v2-jit]{
 \title{What a private value is to a JIT}
 
-\p{The stepper still writes a private application, and a write into a shared array is an escape for a compiler too. The design for the tier is "reserve, do not write": a compiled block reserves the reference and keeps head and arguments in a virtual object; it writes the record only where the reference leaves the compilation unit. Escape analysis then removes object and write for every application consumed inside the unit, and both tiers still give every record the same reference. This is where the owner's idea of in-place reuse lands: a virtual object that does not escape is never written at all. Design only; the tier does not know the lazy site.}
+\p{The stepper still writes a private application, and a write into a shared array is an escape for a compiler too. The design for the tier is "reserve, do not write": a compiled block reserves the reference and keeps head and arguments in a virtual object; it writes the record only where the reference leaves the compilation unit. Escape analysis then removes object and write for every application consumed inside the unit, and both tiers still give every record the same reference. This is where the maintainer's idea of in-place reuse lands: a virtual object that does not escape is never written at all. Design only; the tier does not know the lazy site.}
 }
 
 \subtree[design-values-v2-soundness]{

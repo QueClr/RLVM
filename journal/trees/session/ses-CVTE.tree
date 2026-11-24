@@ -29,4 +29,65 @@
 
 \p{\strong{Taken back.} At 20:35 UTC the machine was set back to a non-default priority. An agent writing new hostile exports for a prototype had found accepts of the machine that the official checker rejects: a bound variable was typed by the value in its slot where the official kernel uses the binder's declared type. Every gate of the integration had compared the machine with the reference engine on corpora and mutants, where the two types coincide, or with hostile exports that had no row of this shape. The integrator's own conclusion: no difference on 760,839 units was true and said nothing about it, and making an engine the default needs a review with new hostile exports first. The fix and what followed are in [the exactness phase](ses-874D).}
 
+\p{\strong{Decisions of this phase.} [The metric is warm wall clock](dec-7QMU); [universe levels as the official kernel compares them](dec-P8XP); [no Oracle GraalVM in anything default](dec-6E82); [the default switch set](dec-LZFX) and [the session cap of 1 MiB](dec-KXE1); [the machine as default engine, made and withdrawn](dec-T79V); [parallel packing of proof runs](dec-OC1F) and [pipelined loading as the default for parallel runs](dec-4TQJ); [the JVM launcher as the warm platform and the native image as the cold one](dec-WX9Z). Design notes: [switches](design-switches), [warm sessions](design-warm-sessions), [the launchers](design-launchers), [the measurement method](design-measurement-method).}
+
+\p{\strong{Policy recorded.} The maintainer's decisions on universe levels, Oracle GraalVM, commits and the size of the team, and the change of the goal to warm wall clock, in [standing policies](standing-policies).}
+
 \p{\strong{Running beside this phase.} [Profiles and prototypes](ses-JRSD).}
+
+\subtree[ses-CVTE-trees]{
+\title{Trees of this phase}
+
+\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
+
+\scope{
+\put\transclude/expanded{false}
+\subtree[ses-CVTE-designs]{
+\title{Design notes}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Design}}
+}
+}
+
+\subtree[ses-CVTE-decisions]{
+\title{Decisions}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Decision}}
+}
+}
+
+\subtree[ses-CVTE-insights]{
+\title{Insights}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Insight}}
+}
+}
+
+\subtree[ses-CVTE-examples]{
+\title{Examples}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Example}}
+}
+}
+
+\subtree[ses-CVTE-problems]{
+\title{Open problems}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Problem}}
+}
+}
+
+\subtree[ses-CVTE-changes]{
+\title{Changelog entries}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-CVTE}} {\rel/has-taxon ?X '{Change}}
+}
+}
+}
+}

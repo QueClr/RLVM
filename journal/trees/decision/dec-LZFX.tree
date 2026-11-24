@@ -19,7 +19,7 @@
 \li{\code{facts} and \code{probes}: official-exact since the fix of the soundness findings S-F1 and S-F2, but they cost 1.0 to 2.1 \% and 1.4 to 3.2 \% of CPU time on Init, Std and the Cedar slice.}
 \li{\code{tele}: no corpus gains in three native batches, and the Cedar slice loses 2 to 6 \%.}
 \li{\code{k2}: small gains and green gates, but its derivation variables are not the dedicated value kind the reconciliation of the design review demands; see [the decision on derived rules](dec-MOCU).}
-\li{\code{m2b}: undecided, needs three quiet repeats. \code{t2}: see [the Truffle tier](dec-ADIK). \code{\verb~|levels-complete~}: never a default, by the owner's decision.}
+\li{\code{m2b}: undecided, needs three quiet repeats. \code{t2}: see [the Truffle tier](dec-ADIK). \code{\verb~|levels-complete~}: never a default, by the maintainer's decision.}
 }
 
 \p{\strong{Evidence: the gates} of the set, all on the main tree of that evening.}

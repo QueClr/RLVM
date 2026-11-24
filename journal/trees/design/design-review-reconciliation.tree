@@ -14,7 +14,7 @@
 
 \p{\strong{Status:} accepted and binding. The resolutions were applied in revision 2 of the instruction-set document and in the modules; one erratum found by implementation was added on 2026-11-24.}
 
-\p{Before any module of the machine was written, three independent critics reviewed the first complete drafts of \src{docs/design/ISA.md} and \src{docs/design/ARCHITECTURE.md}: one for coherence and implementability, one for performance and feasibility, one for soundness. Their findings are kept verbatim in \src{docs/design/review/critic-findings.md}: 41 findings, of which 6 blockers, 26 major and 9 minor. The orchestrator answered them in \src{docs/design/RECONCILIATION.md}. That document is binding, and the order of authority for a design question is: the owner's notes, then the reconciliation, then the two design documents, then the research documents. A module that follows the reconciliation against a design document says so in its README.}
+\p{Before any module of the machine was written, three independent critics reviewed the first complete drafts of \src{docs/design/ISA.md} and \src{docs/design/ARCHITECTURE.md}: one for coherence and implementability, one for performance and feasibility, one for soundness. Their findings are kept verbatim in \src{docs/design/review/critic-findings.md}: 41 findings, of which 6 blockers, 26 major and 9 minor. The orchestrator answered them in \src{docs/design/RECONCILIATION.md}. That document is binding, and the order of authority for a design question is: the maintainer's notes, then the reconciliation, then the two design documents, then the research documents. A module that follows the reconciliation against a design document says so in its README.}
 
 \subtree[design-review-reconciliation-verdicts]{
 \title{What the critics said}
@@ -66,7 +66,7 @@
 \li{\strong{First goal is a vertical slice}: batch load, one worker, the reference engine, the tutorial tests end to end. Pipelined loading and the rest were deferred until the 230 small tests passed.}
 }
 
-\p{Section 0 of the reconciliation states the metric; it was rewritten when the owner's note 12 arrived, see [dec-7QMU](dec-7QMU).}
+\p{Section 0 of the reconciliation states the metric; it was rewritten when the maintainer's note 12 arrived, see [dec-7QMU](dec-7QMU).}
 }
 
 \subtree[design-review-reconciliation-erratum-e1]{

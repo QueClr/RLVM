@@ -472,3 +472,15 @@ inside the same process, so the rows are not comparable with batch 3):
   2.62, 2.67, 2.68 / 2.63, 2.69, 2.67; Init 6.39, 6.39, 6.40 / 6.36, 6.37, 6.38; Std 11.64, 11.70, 11.62 / 11.63, 11.59,
   11.76: no difference on the four corpora (means within 0.4 %); the gain of threshold 1 is on evaluation tests
   whose hot closures sit in bodies that are unfolded a few times (M3: perf/unfold-before-literal 7.9 -> 4.1 s).
+
+## S3-F7: a capture list with an immediate operand (INT7, 2026-11-25)
+
+`Code.raw` (the operand of a capture list, called from `Code.mkClosure`) had no case for `Op.MODE_I`. `Elab.atom`
+emits an immediate operand for a numeral below 2^28, and `Elab.let` / an inlined beta step bind a variable to the
+ARGV of its value, so a closure in a compiled body that captures a variable bound to a small numeral
+(`let x := 5; m _ n (fun _ => x) ..`) reached the default branch: `E_INTERNAL`, the unit was declined and the
+reference engine decided it (finding S3-F7 of reviewer S3; no wrong verdict). The case now returns the immediate
+value `n | Layout.IMM` - what `Code.val` returns for the operand and what the generic walk pushes for the binding
+(`Eval.letFrom` -> `argvFast` -> `Lits.klit`), so the frame is the run `PRUNE` builds (decision 6). Regression test
+`M7CaptureLiteralTest` (S3's eight minimal rows and the four random programs that found it, under `code`,
+`code,casetrees`, `default`, `default,eager`: no decline).

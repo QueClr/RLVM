@@ -20,5 +20,5 @@
 \li{In a profile of a run with 96 blocks on an open host, the frames of the hook that every activation passes once the switch is on, compiled or not, are about 2 percent of the samples, and the C2 compiler thread of the host still has 9 percent of the thread load in late passes.}
 \li{So part of the figure at one worker may be the price of the hook on a workload with a million stepped activations per pass. The rest, and the figure at eight workers, is not explained.}
 }
-\p{\strong{What would close it.} The first things to try, as the owner left them: the run with the hook alone and no block compiled; a compilation log for the resume routine that only the tier calls; the per-unit times of the driver for the unit on the critical path. The tier stays off by default either way, see [the Truffle tier](ins-KLLU).}
+\p{\strong{What would close it.} The first things to try, as the owner of the tier left them: the run with the hook alone and no block compiled; a compilation log for the resume routine that only the tier calls; the per-unit times of the driver for the unit on the critical path. The tier stays off by default either way, see [the Truffle tier](ins-KLLU).}
 \p{See also: [the Truffle tier](design-truffle-tier).}

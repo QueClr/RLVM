@@ -831,7 +831,10 @@ final class Code {
     /**
      * The operand as a slot of a capture list: the binding as it is, not seen through and not tested, which
      * is what {@code PRUNE} copies from the environment of the generic walk ({@code Runs.pruneNear}); the
-     * frames of both tiers are then the same run (decision 6).
+     * frames of both tiers are then the same run (decision 6). An immediate operand is the binding of a variable
+     * that a let or an inlined beta step binds to a small numeral ({@code Elab.atom}: ARGV of a numeral is the
+     * immediate value, which is also what the generic walk pushes: {@code Eval.letFrom} / {@code argvFast}); until
+     * 2026-11-25 this mode fell into the default branch and the unit was declined with E_INTERNAL (finding S3-F7).
      */
     static int raw(Machine m, int rb, int o) {
         switch (o >>> Op.OPND_SHIFT) {
@@ -840,6 +843,8 @@ final class Code {
                 return m.RS[rb + (o & PAY)];
             case Op.MODE_C:
                 return m.rs[m.RS[rb - W_CAP] + Layout.RUN_H + (o & PAY)];
+            case Op.MODE_I:
+                return (o & PAY) | Layout.IMM;
             case Op.MODE_V:
                 return o & PAY;
             default:

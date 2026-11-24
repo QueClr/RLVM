@@ -18,9 +18,9 @@
 \li{On the real pipeline with the reference engine, fresh processes in an arena-shaped container on the aarch64 development host, a loaded host, CPU time: Mathlib with eight workers, the three launchers back to back: JVM launcher 1,057 s, Oracle image with profiles 1,082 s (+2 \%), Community image 1,187 s (+12 \%); with one worker 886 s, 983 s (+11 \%) and 1,112 s (+26 \%). On Init, Std, cedar and reachability the Oracle image needed 0.82 and 0.91 times the JVM launcher's CPU time with eight workers and with one, the Community image 0.92 and 1.03 times. Resident memory on Mathlib with eight workers: 8.1 GiB, against 8.7 GiB for the Community image and 13.0 GiB for the JVM.}
 }
 
-\p{The platform report stated that an image with profiles was not a candidate until the owner had decided, and gave the numbers so that the decision had them.}
+\p{The platform report stated that an image with profiles was not a candidate until the maintainer had decided, and gave the numbers so that the decision had them.}
 
-\p{\strong{Decision.} The owner's answer of 2026-11-24, one of four (owner note 11): "do not download EE on default, but you can report by here". The default build, the arena build and every default script neither download nor use Oracle GraalVM. It may be used for measurements that are reported to the owner and clearly labelled. Nothing that ships depends on it.}
+\p{\strong{Decision.} The maintainer's answer of 2026-11-24, one of four (owner note 11): "do not download EE on default, but you can report by here". The default build, the arena build and every default script neither download nor use Oracle GraalVM. It may be used for measurements that are reported to the maintainer and clearly labelled. Nothing that ships depends on it.}
 
 \p{\strong{Consequences.}}
 \ul{

@@ -20,7 +20,7 @@
 \p{The launcher option \code{\verb~|-X passes=N~} makes one process check the export N times and print one line per pass with its wall clock, CPU time, collector time, load and check time, units, workers, heap and resident set. There are two kinds of later pass, chosen with \code{\verb~|-X passes-mode~}.}
 
 \ul{
-\li{\code{reload}, the default: every pass is a complete run with a new store, loader, engines and sessions, the load pipelined with the checking. Only the process is warm: compiled code, a sized heap, touched pages. A collection runs between two passes, outside the timed region. This is the owner's metric.}
+\li{\code{reload}, the default: every pass is a complete run with a new store, loader, engines and sessions, the load pipelined with the checking. Only the process is warm: compiled code, a sized heap, touched pages. A collection runs between two passes, outside the timed region. This is the maintainer's metric.}
 \li{\code{recheck}: the driver checks every definition, theorem, axiom and opaque unit of the loaded store again with new engine instances; nothing is loaded. It measures pure checking. With \code{\verb~|-X passes-keep=engines~} the later passes reuse the engine instances of pass 1, so what an engine keeps per instance (the machine's code store, compiled blocks, published facts) is warm as well.}
 }
 

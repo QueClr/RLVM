@@ -36,7 +36,7 @@
 \tr{\td{\code{t2}}\td{hot code blocks are offered to the Truffle tier}\td{off, see [the decision](dec-ADIK)}}
 \tr{\td{\code{eager}}\td{a declaration that enters [eager reduction](design-eager-reduction) stays on the machine}\td{off; proposed for the default set, see [the decision](dec-X2UF)}}
 \tr{\td{\code{convexpect}}\td{expected-type checking of a lambda also when its domain is only convertible with the expected one, as before the typed-binding fix}\td{off: no gain in warm wall clock, see [the decision](dec-0DSI)}}
-\tr{\td{\code{levels-complete}}\td{universe levels compared by the complete relation instead of the official algorithm}\td{off by the owner's decision, never a default, see [the decision](dec-P8XP)}}
+\tr{\td{\code{levels-complete}}\td{universe levels compared by the complete relation instead of the official algorithm}\td{off by the maintainer's decision, never a default, see [the decision](dec-P8XP)}}
 \tr{\td{\code{m2b}}\td{a direct-mapped memo for applications; one of the experiment bits each package has}\td{off, undecided}}
 }
 

@@ -19,6 +19,57 @@
 
 \p{\strong{The first soundness review.} \src{docs/design/review/soundness-machine.md}. The reviewer judged every verdict against the official checker, never against the reference engine, on 329 hostile exports. Five findings. Four were accepts of the machine that the official checker does not give, one of them without any switch; all four were fixed by their owners during the review. Two speculative shortcuts answered a comparison by congruence, or skipped positions, where the official procedure does not; they were removed from every switch set. Comparisons that survived a declaration, and one case that involved eager reduction, were closed by a rule: a declaration that enters eager reduction is declined by the machine and checked by the reference engine. The fifth finding was the universe-level relation, in both engines, which the maintainer decided. The reviewer's analysis was that all five accepted statements are true in the theory. Two of the four were in switches that the integration had measured as clean on everything, because every gate of the integration compared the machine with the reference engine on real corpora. The reviewer advised keeping the remaining speculative switches opt-in.}
 
-\p{\strong{One test the plain machine cannot accept.} On the arena test \code{\verb~|perf/loop-unfolded-once~} the official kernel answers a comparison of two recursor applications by structural identity of the instantiated terms. The machine has two closures of different terms that are equal only after substitution, and declines. The later switch \code{same}, a bounded structural identity, answers it.}
+\p{\strong{One test the plain machine cannot accept.} On the arena test \code{\verb~|perf/loop-unfolded-once~} the official kernel answers a comparison of two recursor applications by structural identity of the instantiated terms. The machine has two closures of different terms that are equal only after substitution, and declines. The later switch \code{same}, a bounded structural identity, answers it. See [the example](ex-IIVH).}
+
+\p{\strong{Recorded from this phase.} [The machine](design-machine-worklist) and [the gate](design-gate); [the official comparison is not transitive and not a congruence](ins-4VH2), with [the triple that shows it](ex-OTWJ); [eager reduction is a mode of the official comparison](ins-O23C) and [the decision to decline such declarations](dec-X2UF); [session tables must start small](ins-8O66); [the adversarial review method](design-adversarial-review).}
 
 \p{\strong{Next.} [Machine speed and the pipeline](ses-CVTE).}
+
+\subtree[ses-Z72N-trees]{
+\title{Trees of this phase}
+
+\p{Every tree that cites this session, by kind. The lists are queries, so a tree written later that names this session appears here.}
+
+\scope{
+\put\transclude/expanded{false}
+\subtree[ses-Z72N-designs]{
+\title{Design notes}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-Z72N}} {\rel/has-taxon ?X '{Design}}
+}
+}
+
+\subtree[ses-Z72N-decisions]{
+\title{Decisions}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-Z72N}} {\rel/has-taxon ?X '{Decision}}
+}
+}
+
+\subtree[ses-Z72N-insights]{
+\title{Insights}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-Z72N}} {\rel/has-taxon ?X '{Insight}}
+}
+}
+
+\subtree[ses-Z72N-examples]{
+\title{Examples}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-Z72N}} {\rel/has-taxon ?X '{Example}}
+}
+}
+
+\subtree[ses-Z72N-changes]{
+\title{Changelog entries}
+
+\query\datalog{
+ ?X -: {\rel/links-to ?X @{ses-Z72N}} {\rel/has-taxon ?X '{Change}}
+}
+}
+}
+}

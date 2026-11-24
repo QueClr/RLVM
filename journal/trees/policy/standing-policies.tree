@@ -5,7 +5,7 @@
 \tag{policy}
 \import{base-macros}
 
-\p{Rules the maintainer has given for RLVM and for this journal. When the maintainer gives a new lasting instruction, add it here in the same session, with the date. The maintainer's own words are kept verbatim, in the order they were given, in \src{docs/design/OWNER-NOTES.md}; the number at the end of an item is the note there. Order of authority for a design question: these policies, then \src{docs/design/RECONCILIATION.md}, then \src{docs/design/ISA.md} and \src{docs/design/ARCHITECTURE.md}, then the research documents.}
+\p{Rules the maintainer has given for RLVM and for this journal. When the maintainer gives a new lasting instruction, add it here in the same session, with the date. The maintainer's own words are kept verbatim, in the order they were given, in \src{docs/design/OWNER-NOTES.md}; the number at the end of an item is the note there. That document and the others of the repository call the maintainer the owner, so "owner note 12" in a tree means note 12 there. Order of authority for a design question: these policies, then \src{docs/design/RECONCILIATION.md}, then \src{docs/design/ISA.md} and \src{docs/design/ARCHITECTURE.md}, then the research documents.}
 
 \subtree[standing-policies-goal]{
 \title{What is optimised}

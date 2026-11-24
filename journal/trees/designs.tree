@@ -1,3 +1,65 @@
 \title{Design notes}
 
-\p{Design notes for the RLVM machine, the reference engine, the loader and store, the driver and the platform, and the reviews of those designs. A note describes how a part is meant to work and why, and links to the document of the repository that carries the detail.}
+\p{Design notes for the RLVM machine, the reference engine, the loader and store, the driver and the platform, and the reviews of those designs. A note describes how a part is meant to work and why; its sections are addressable subtrees, and it links to the document of the repository that carries the detail. The notes are listed collapsed, in a reading order.}
+
+\subtree[designs-pipeline]{
+\title{Architecture and the pipeline}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{design-architecture}
+\transclude{design-review-reconciliation}
+\transclude{design-term-store}
+\transclude{design-export-loader}
+\transclude{design-universe-levels}
+\transclude{design-reference-engine}
+\transclude{design-reference-caches}
+\transclude{design-inductive-admission}
+\transclude{design-verdict-protocol}
+\transclude{design-driver}
+}
+}
+
+\subtree[designs-machine]{
+\title{The machine}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{design-machine-worklist}
+\transclude{design-control-convention-h}
+\transclude{design-value-model}
+\transclude{design-nat-literals}
+\transclude{design-values-v2}
+\transclude{design-code-objects-and-tiers}
+\transclude{design-truffle-tier}
+\transclude{design-evaluation-and-tabling}
+\transclude{design-conversion}
+\transclude{design-proof-comparison-shortcuts}
+\transclude{design-inference-shortcuts}
+\transclude{design-eager-reduction}
+\transclude{design-warm-sessions}
+\transclude{design-switches}
+}
+}
+
+\subtree[designs-exactness]{
+\title{Soundness and exactness}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{design-gate}
+\transclude{design-adversarial-review}
+\transclude{design-exactness-contract}
+\transclude{design-official-divergence}
+}
+}
+
+\subtree[designs-platform]{
+\title{Platform and measurement}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{design-launchers}
+\transclude{design-measurement-method}
+}
+}

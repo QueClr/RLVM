@@ -1,15 +1,370 @@
-# Platform: which launcher ships, with which flags, with how many workers
+# Platform: which launcher is for what, with which flags, with how many workers
 
-Two parts. **Part I** (wave 7, 2026-11-24 13:30Z to 14:25Z) is the platform gate of RECONCILIATION
-section 3: measured with the **machine** as engine (`-X engine=machine`), the engine that will ship,
-and it ends with the decision. **Part II** (wave 4, the same day, 08:00Z to 11:50Z) is the rehearsal
-with the reference engine: launchers, host JIT, collectors and heap sizes in more detail than Part I
-repeats; where the two parts disagree, Part I is the newer measurement of the engine that matters.
+Three parts. **Part 0** (2026-11-24, 21:40Z to 23:45Z; steward B2) is the platform decision under owner
+note 12 - *wall clock after warm-up, with pipelined loading, is the goal; warm-up is reported, not
+charged; the platform question is decided by warm wall clock* - with the numbers, the launcher line
+that follows from it, the collector, the default load mode and the worker count. It is the current
+answer and supersedes the decisions of the two older parts wherever they differ. **Part I** (wave 7,
+13:30Z to 14:25Z) is the platform gate of RECONCILIATION section 3 measured with the machine as engine
+on COLD processes by CPU time; **Part II** (wave 4, 08:00Z to 11:50Z) is the rehearsal with the
+reference engine (launchers, host JIT, collectors, heap sizes). Both are kept as the record of a cold
+process per export, which is what an arena run is.
 
-Order of the columns everywhere (OWNER-NOTES 10, RECONCILIATION 0): **CPU time** (task-clock over all
-threads), wall clock, peak RSS, instructions.
+Order of the columns in Part 0 (OWNER-NOTES 12): **warm wall clock with 8 workers (load pipelined),
+warm wall clock with 1 worker, cold wall clock of a fresh process, CPU time, peak RSS, instructions**.
+Parts I and II still list CPU time first (owner note 10, the rule when they were measured).
 
-# Part I - the machine as engine (wave 7)
+# Part 0 - the platform decision under owner note 12
+
+## 0.0 The answer
+
+One build (`scripts/build.sh`) makes two launchers from the same 22 jars, and each has its job:
+
+| Launcher | What it is | What it is for | Why |
+|---|---|---|---|
+| `bin/rlvm-jvm` | the jars on HotSpot of GraalVM CE 25 (C2, serial collector) | **the WARM platform**: every measurement of the owner's metric (`rlvm -X passes=N`, `bench/warm.sh`), a process that checks more than one export or a mathlib-sized one, the guards (`scripts/gate.sh`, through the same jars) | once warm it needs **0.68 to 0.88 times the image's wall clock** with 8 workers on Init, Std, cedar, reachability and mathlib (J1.md 5.2, machine engine; 0.71 to 0.91 in the first warm table `work/status/warm.md`; 0.74 to 0.81 re-measured here) and 0.70 to 0.82 times with the reference engine (`warm.md`; 0.66 to 0.74 here). It pays for that at the start - its first run of a corpus takes 2.0 to 3.3 times the image's with the machine (0.9 to 1.0 times with the reference engine, whose runs are long enough for the JIT to pay within them), 0.2 s on a tiny input - and in memory: 1.4 to 3.7 times the image's resident set |
+| `bin/rlvm` | CE native image, `-O3`, serial collector, the machine's inline lists | **the COLD platform**: one fresh process per export - the arena definition (`scripts/arena/rlvm.yaml`), the 230 published tests, anything short | steady from its first second: no warm-up to pay (cold wall Init / Std / cedar with 8 workers: 2.29 / 3.78 / 4.91 s with the reference engine, 0.82 / 1.59 / 2.16 s with the machine), a third to a half of the JVM's memory, 0.02 s on a tiny input where the JVM needs 0.2 s. In steady state it is the slower platform by the factors above |
+| `scripts/check-light.sh` | the same jars on HotSpot with C1 only and a 4 GB heap | the mutant campaigns of the gates (thousands of small files) | start-up dominates there; not a platform anybody measures |
+| `bin/rlvm-pgo` | Oracle GraalVM native image with profile-guided optimisation | measurements that are labelled as such, only with `scripts/build.sh --pgo` | owner note 11: nothing that ships or any default script downloads or uses Oracle GraalVM |
+
+**The engines and the contract of the default configuration** (OWNER-NOTES 13: the policy is
+"practical"). Both launchers carry both engines. The **reference engine** (`rlvm-ref`, the official
+algorithm on hash-consed terms) is the default engine today; it confirms every rejection, decides
+every unit the other engine declines, and alone it is the strict mode. The **machine**
+(`rlvm-machine`, the worklist machine) runs with `-X engine=machine` and becomes the default engine
+when its gates and its adversarial review are clean: its provider's priority decides, and nothing in
+a launcher, a script or the arena definition names the engine. One option selects the policy:
+`-X policy=practical` (the default) or `-X policy=strict` (the reference engine plus the
+exactness-only declines of the reference kernel and the loader; `rlvm-main/README.md`, "Policy").
+Whatever engine is the default, the default configuration promises:
+
+- (a) never an accept of a statement that is not derivable in Lean's type theory ("kind F");
+- (b) the official verdict on every real input: what lean4export writes (the corpora), the arena's good and bad tests, the mutant corpora with their stored official verdicts;
+- (c) everything the official checker accepts is accepted (a rejection is always confirmed by the reference engine, a decline goes to it);
+- (d) a derivable statement that the official checker rejects only through its own incompleteness, non-transitivity, cache order or object identity ("kind T") may be accepted (`docs/design/review/official-divergence.md`).
+
+The platform decision below does not depend on which engine is the default: every table has both
+engines, and the launchers follow the default engine by themselves (the JVM launcher's heap rule
+reads the distribution's default engine, which `scripts/build.sh` writes into it; `-X policy=strict`
+is the reference engine's heap).
+
+The decisions, each with its evidence below:
+
+1. **Warm platform = the JVM launcher; cold / arena platform = the CE native image** (section 0.2).
+   Under note 12 the JVM launcher is the faster platform for both engines and stays so with every
+   switch set measured today; the arena starts one process per export - most of them tiny, where a
+   JVM needs ten times the image's 0.02 s - and never reaches the JVM's steady state with the
+   machine, so its definition stays on the image. Nothing has to choose between them at build
+   time: both are in every distribution.
+2. **The JVM launcher line** (section 0.3; proposed by the profiler J1, re-measured here on the
+   launcher `scripts/build.sh` now generates):
+
+   ```
+   -XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages
+   -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError
+   --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow
+   + heap by engine:  machine        ->  -Xmx7g -Xmn1g          (no -Xms)
+                      anything else  ->  -Xms13g -Xmx13g -Xmn1g  (as before)
+     engine = -X engine=NAME, else the distribution's default engine; -X policy=strict = reference
+   ```
+
+   an explicit `-Xmx` / `-Xms` / `-Xmn` on the command line still replaces the heap flags, and the
+   class path is spelled out jar by jar in sorted order. Against the line before (`CICompilerCount=2`,
+   no huge pages, 13 GB for every engine): with the machine the cold wall clock of Init / Std / cedar falls from 4.82 / 6.15 / 7.36 s to 2.84 / 4.04 / 4.45 s and the first pass over mathlib from 31.4 to 24.1 s; the warm wall clock is 0.62 / 1.22 / 1.61 s against 0.69 / 1.37 / 1.74 s (mathlib 21.1 against 22.2 s) and the peak RSS on mathlib 6.43 GiB against 8.84 GiB. With the reference engine (heap unchanged): cold 3.37 / 5.26 / 6.27 -> 2.33 / 3.66 / 4.31 s, warm 1.80 / 2.99 / 3.69 -> 1.61 / 2.77 / 3.20 s.
+3. **No AOT cache, no CDS archive, C2 not Graal, tiers on** (J1.md sections 2 and 3): JDK 25's AOT
+   cache takes 0.4 to 1.1 s off the cold wall and makes every later pass 5 to 9 % slower (11 of 11
+   comparisons), which is the metric; class loading is 0.1 to 0.2 s of a start; Graal as the top tier
+   reaches the same steady state with 400 MB more memory; no inlining flag moves the warm pass.
+4. **The collector stays Serial** (section 0.4; `docs/research/profiles/GC.md`): no collector of
+   GraalVM CE 25 beats it on the real checker with parallel workers, and the image has no other.
+5. **The Truffle tier stays off** (`rlvm-truffle/NOTES-T3.md`, section 1: NO-GO as a default). It is
+   compiled into both launchers and is reached only through the machine's switch `t2`; it changes
+   nothing in the choice of platform.
+6. **Load: pipelined by default** when two or more workers run and the input is at least the driver's
+   `pipeline-min-mib` (8 MiB), with two scanner threads on mapped input for files of 256 MiB and more
+   (section 0.5). Cold, native image, 8 workers, the old default (batch, plain reader) against the new one: reference Init 2.66 -> 2.29 s; reference Std 4.58 -> 3.78 s; reference cedar 6.16 -> 4.91 s; machine Init 1.30 -> 0.82 s; machine Std 2.33 -> 1.59 s; machine cedar 3.27 -> 2.16 s; machine mathlib 35.67 -> 27.59 s.
+7. **Workers: `--threads auto` = one per CPU, at most 8, and the arena run line names 8** (section
+   0.6). Seven and eight are equal for the machine, eight is better for the reference engine, which is the default engine: cold, native image, reference, 8 / 7 / 4 workers: Init 2.30 / 2.49 / 3.67 s, Std 3.89 / 4.06 / 6.21 s, cedar 5.00 / 5.32 / 7.86 s; warm on the JVM launcher, 8 / 7: 1.55 / 1.62, 2.64 / 2.73, 3.38 / 3.43 s.
+8. **Not settled**: x86-64 (the arena's architecture; every number here is aarch64, Cortex-X925); a
+   host whose transparent huge pages are set to `never` (the flag then prints one warning on standard
+   error and the VM runs as before: expected from the VM's documentation, not tested, the setting is
+   the host's); one worker on mathlib; the 6 GB machine heap, which needs finding J1-F1 fixed in
+   `rlvm-machine` first (`Machine.YOUNG_RESERVE`); and which ENGINE checks by default, which is not a
+   platform question (the reference engine does; the machine runs with `-X engine=machine`).
+
+## 0.1 What was measured, and how
+
+- **Distribution** `work/b2/dist-a`, built 2026-11-24T21:50:18Z with the build script of this part
+  (`scripts/build.sh --published`): `rlvm-main` `9995ff8855ab` compiled from the tree (the load defaults and
+  `--threads auto` of sections 0.5 and 0.6) and every other module as published at that minute -
+  machine `5945b6568177` (E1's first fix publication; default switch set), driver `31fa08d9ce61`, load
+  `bb5734f612c3`, store `5b72707013bc`, export `14faa521df15` (LP2's packed runs), ref `ca1f9bd918bb`,
+  admit `398a117d4ad8`, inductive `c15b14fffdd3`, api `6ff40825ca1d`, cli `f2af2657a704`, truffle
+  `ad3256d0751d`. `bin/rlvm` = CE native image `-O3 --gc=serial -R:MaxHeapSize=13g` with the H10 inline
+  lists; `bin/rlvm-jvm` = the launcher of decision 2. **The distribution that is published is `work/b2/dist-c`** (built 22:32Z; the shared `work/dist` is rebuilt from the same jars): it differs from `dist-a` in `rlvm-main` `21150203e39d` and `rlvm-cli` `cac1433b287a` (the `-X policy` option of owner note 13 and `rlvm --help`: nothing changes for a run without the option) and in the machine jar (`df36be3c8cc9`: E1's publications of 21:57Z and 22:12Z; the new switch `eager` is off). Its DEFAULT configuration - no `-X engine`, no `-X load`, `--threads 8` - was measured in a window of its own (`b6`): JVM launcher, 10 passes: warm 1.68 / 2.58 / 3.17 s, cold 2.63 / 3.66 / 4.21 s on Init / Std / cedar; native image: warm 2.26 / 3.81 / 4.90 s, cold 2.30 / 3.89 / 5.05 s - the reference-engine rows of `dist-a` within the spread between windows. All other rows of this part are `dist-a`.
+- **"Before"** in section 0.3 = the same jars and the same checker settings with the VM flags of the
+  launcher until today, given through `RLVM_JAVA_OPTS` (`-XX:+UseSerialGC -XX:-UseJVMCICompiler
+  -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError ...` and its heap): only the VM flags differ.
+- **Tool**: `bench/warm.sh` (one row = a cold process, exec to exit, and a process with `-X passes=N`:
+  every pass a complete run, load included). warm = the median of passes 4..N of a row with 8 or more
+  passes and of passes 2..N otherwise (best later pass in brackets). Rows: `work/b2/warm.tsv`; raw
+  output of every process: `work/b2/logs/`; window scripts `work/b2/w/*.sh`; tables: `work/b2/summ.py`.
+- **Every timing was taken inside a `bench/quiet.py` window** (one measurement at a time on the host,
+  the 8 measurement cores 5-9,15-17, the rest of the session off them): `m1a` (ended 21:59Z, 136 s), `t1` (ended 22:06Z, 132 s), `t3` (ended 22:17Z, 200 s), `m1b` (ended 22:24Z, 100 s), `t2` (ended 22:34Z, 146 s), `r1a` (ended 22:44Z, 132 s), `b4` (ended 22:45Z, 75 s), `b6` (ended 22:50Z, 134 s), `t4` (ended 22:55Z, 207 s), `b5` (ended 22:57Z, 107 s), `b3` (ended 23:00Z, 136 s), `t6` (ended 23:07Z, 99 s), `b1` (ended 23:09Z, 122 s), `r1b` (ended 23:18Z, 119 s), `b2` (ended 23:21Z, 155 s). The other 12 cores
+  were busy the whole time (load average 25 to 40): memory bandwidth and caches are shared, and two
+  identical 8-worker rows of one window differ by up to 5 % (J1.md section 1). Differences below that
+  are not findings.
+- **Heap**: below mathlib `-Xmx6g -Xmn1g` (new line), `-Xms6g -Xmx6g -Xmn1g` (old line and the reference
+  engine) and `-Xmx6g` for the image, as the host's memory rule asks; on mathlib each launcher's own
+  default (machine 7 GB new / 13 GB old; reference 13 GB; image 13 GB cap, 7 GB for the machine).
+- **Engines**: `-X engine=machine` (default switch set of wave 6) and `-X engine=reference` (the default
+  engine), each named explicitly. Load and reader: the build's defaults (pipelined, two scanner threads
+  for these sizes) unless a row says otherwise.
+
+## 0.2 JVM launcher against native image
+
+| engine | corpus | JVM warm 8w (best) | native warm 8w (best) | JVM / native warm | JVM cold | native cold | JVM / native cold | JVM RSS | native RSS |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| machine | init | 0.62 (0.61) | 0.83 (0.81) | 0.74 | 2.84 | 0.85 | 3.34 | 1014 | 452 |
+| machine | std | 1.22 (1.14) | 1.50 (1.50) | 0.81 | 4.04 | 1.57 | 2.57 | 1684 | 722 |
+| machine | cedar | 1.61 (1.54) | 2.10 (2.09) | 0.76 | 4.45 | 2.23 | 2.00 | 2047 | 899 |
+| machine | mathlib | 21.23 (21.23) | 28.18 (28.18) | 0.75 | 24.31 | 27.59 | 0.88 | 6624 | 4654 |
+| reference | init | 1.61 (1.55) | 2.25 (2.25) | 0.72 | 2.33 | 2.30 | 1.01 | 1833 | 501 |
+| reference | std | 2.77 (2.67) | 3.76 (3.75) | 0.74 | 3.66 | 3.89 | 0.94 | 2188 | 827 |
+| reference | cedar | 3.20 (3.14) | 4.88 (4.87) | 0.66 | 4.31 | 5.00 | 0.86 | 2458 | 867 |
+| reference | mathlib | 58.01 (58.01) | - | - | 60.85 | - | - | 13272 | - |
+
+Reading. Warm, with 8 workers, the JVM launcher needs 0.74 to 0.81 times the image's wall clock with the machine and 0.66 to 0.74 times with the reference engine: the same picture as J1's 0.68 to 0.88 and the first warm table's 0.70 to 0.91, on newer jars, for both engines and on every corpus. Cold, with the machine, it is the other way round: the JVM's first run costs 2.0 to 3.3 times the image's. With the reference engine the two first runs take about the same time below mathlib (0.86 to 1.01 times): its runs are long enough for the JIT to pay within them, and the new launcher line took a third off the JVM's start. The JVM holds 1.4 to 3.7 times the memory. So the answer to "which platform" is the answer to "is warm-up charged": under owner note 12 it is not, and the JVM launcher is the platform of the metric; for one process per export it is - most of the arena's exports are tiny, where a JVM needs 0.2 s against the image's 0.02 s, and with the machine the image is two to three times faster cold on the corpora too - and the image is the platform of the arena.
+
+Earlier measurements of the same question, for the record: J1.md 5.2 (machine `8a8ea5644b24`, windows
+A, B, 4): warm wall JVM / image 0.79 (Init), 0.80 (Std), 0.76 (cedar), 0.68 (reachability), 0.88
+(mathlib) with 8 workers, 0.67 to 0.87 with one; cold 3.0 / 1.75 / 2.1 / 0.97 / 0.93 (first pass).
+`work/status/warm.md` (machine `7eb33a7a4ad7`, reference `ca1f9bd918bb`): machine 0.90 / 0.91 / 0.84 /
+0.71 / 0.73, reference 0.73 / 0.70 / 0.74 / 0.82 on Init / Std / cedar / reachability (/ mathlib). INT6
+(`work/status/machine-integration.md`, machine `78c74ca92785`): mathlib 21.2 s on the JVM launcher
+against 27.4 s on the image. Part I of this document (cold processes, CPU time): the image needs 0.68
+/ 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers - the same two platforms seen
+from the other side: the JVM's first pass costs several times a warm one.
+
+## 0.3 The launcher line, before and after
+
+| engine | corpus | line | cold wall s | pass 1 s | warm wall s: steady median (best) | CPU of the median warm pass s | peak RSS MiB | passes s |
+|---|---|---|--:|--:|--:|--:|--:|---|
+| machine | init | before | 4.82 | 4.96 | **0.69** (0.62) | 4.9 | 813 | 4.96 1.07 0.87 0.72 0.69 0.67 0.68 0.70 0.70 0.62 |
+| machine | init | after | 2.84 | 3.00 | **0.62** (0.61) | 4.8 | 1014 | 3.00 0.84 0.69 0.61 0.62 0.69 0.65 0.67 0.61 0.61 |
+| machine | std | before | 6.15 | 7.09 | **1.37** (1.21) | 10.5 | 1819 | 7.09 3.87 2.56 1.86 1.37 1.38 1.29 1.25 1.62 1.21 |
+| machine | std | after | 4.04 | 4.02 | **1.22** (1.14) | 8.2 | 1684 | 4.02 1.45 1.20 1.35 1.27 1.16 1.17 1.38 1.14 1.22 |
+| machine | cedar | before | 7.36 | 7.35 | **1.74** (1.62) | 14.0 | 2112 | 7.35 3.46 2.36 1.87 1.74 1.88 1.62 1.89 1.62 1.64 |
+| machine | cedar | after | 4.45 | 4.17 | **1.61** (1.54) | 12.2 | 2047 | 4.17 1.80 1.66 1.61 1.75 1.61 1.68 1.54 1.79 1.61 |
+| machine | mathlib | before | (pass 1) | 31.36 | **22.24** (22.24) | 167.3 | 9052 | 31.36 22.24 |
+| machine | mathlib | after | (pass 1) | 24.11 | **21.10** (21.10) | 154.9 | 6587 | 24.11 21.10 |
+| reference | init | before | 3.37 | 3.71 | **1.80** (1.66) | 12.8 | 1794 | 3.71 1.91 1.80 1.89 1.72 1.66 |
+| reference | init | after | 2.33 | 2.31 | **1.61** (1.55) | 12.0 | 1833 | 2.31 1.62 1.61 1.58 1.55 1.67 |
+| reference | std | before | 5.26 | 5.05 | **2.99** (2.90) | 21.5 | 2135 | 5.05 3.25 2.99 3.16 2.97 2.90 |
+| reference | std | after | 3.66 | 3.52 | **2.77** (2.67) | 19.6 | 2188 | 3.52 2.86 2.90 2.77 2.67 2.72 |
+| reference | cedar | before | 6.27 | 5.78 | **3.69** (3.59) | 26.9 | 2254 | 5.78 3.95 3.87 3.64 3.59 3.69 |
+| reference | cedar | after | 4.31 | 4.15 | **3.20** (3.14) | 23.4 | 2458 | 4.15 3.28 3.34 3.20 3.15 3.14 |
+| reference | mathlib | after | (pass 1) | 60.85 | **58.01** (58.01) | 438.6 | 13272 | 60.85 58.01 |
+
+| ratio after / before | machine init | machine std | machine cedar | machine mathlib | reference init | reference std | reference cedar | reference mathlib |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| cold wall (pass 1 on mathlib) | 0.59 | 0.66 | 0.60 | 0.77 | 0.69 | 0.70 | 0.69 | - |
+| warm wall | 0.90 | 0.89 | 0.93 | 0.95 | 0.89 | 0.93 | 0.87 | - |
+| peak RSS | 1.25 | 0.93 | 0.97 | 0.73 | 1.02 | 1.02 | 1.09 | - |
+
+Reading. The cold wall clock is where the line shows: 0.59 to 0.66 times the old line's on Init, Std and cedar with the machine (0.69 to 0.70 with the reference engine), 0.77 on the first pass over mathlib: the eight compiler threads. With the machine the old line's pass 2 is still 1.6 to 2.8 times a warm pass and its pass 3 1.3 to 1.9 times; the new line's pass 3 is at 0.98 to 1.11 times its steady state. Warm, the new line is at 0.89 to 0.95 times the old line with the machine and 0.87 to 0.93 with the reference engine: J1 could claim no steady-state gain below mathlib (0.88 to 1.04) and 6 % on mathlib from the huge pages; these rows are single windows, so read them as "not slower, a few per cent faster". Memory: the machine's 7 GB heap takes 2.4 GiB off the resident set on mathlib at the same wall clock; below mathlib the resident set is the touched part of the young generation and the store, as before.
+
+What each change is for (J1.md has the experiments; this table is the re-measurement of the whole line):
+
+| Change | Why | Evidence |
+|---|---|---|
+| `CICompilerCount` 2 -> 8 | with 2 a tiered VM has ONE C2 thread beside eight workers that still run interpreted and C1 code; it needs five or six passes to become steady. The threads are created on demand: 8 is a cap | J1.md 3.2: Init cold 5.3 -> 2.9 s, cedar pass 1 7.4-8.9 -> 5.0 s, pass 3 steady; here: machine cold 4.82 / 6.15 / 7.36 -> 2.84 / 4.04 / 4.45 s (Init / Std / cedar), pass 3 0.69 / 1.20 / 1.66 s against 0.87 / 2.56 / 2.36 s; reference cold 3.37 / 5.26 / 6.27 -> 2.33 / 3.66 / 4.31 s |
+| `+UseTransparentHugePages` | the one flag with a consistent steady-state gain: TLB reach for a store of gigabytes | J1.md 2.2: mathlib -6 % warm wall and -9 % first pass in an A B A B; reachability -2 to -4 %; cedar 0 to -4 % |
+| `-Xlog:disable -Xlog:all=warning:stderr` | the VM prints its own warnings on standard OUTPUT by default (huge pages unavailable, ...) | J1.md 3.1 |
+| machine: `-Xmx7g -Xmn1g`, no `-Xms` | the same warm wall clock as 13 GB with 2 GB less resident memory; 7 GB is the smallest cap at which the machine decides every unit it decides at 13 GB | J1.md section 4: 23.9 / 24.1 / 24.2 / 24.0 s for 13 / 8 / 7 / 6 GB, RSS 8.0-8.7 -> 5.7-6.7 GB; here: mathlib, machine, old line with 13 GB against new line with 7 GB: warm pass 22.2 against 21.1 s, peak RSS 9052 against 6587 MiB |
+| reference and every other engine: `-Xms13g -Xmx13g -Xmn1g` unchanged | the reference engine's garbage on mathlib fills whatever heap it is given (13.4 GB resident, `warm.md`); the one alternative that showed something is another collector, not another size (section 0.4) | - |
+| sorted, explicit class path | `lib/*` is expanded by the VM in directory order, which is not the same on every file system; with it the order of the `ServiceLoader` providers | - |
+| not added: AOT cache | 0.4-1.1 s off the cold wall, 5-9 % ON every warm pass | J1.md 3.3 |
+
+## 0.4 Collectors: Serial stays
+
+`docs/research/profiles/GC.md` measured every collector of GraalVM CE 25 in JVM mode on the real
+checker, both engines, 1 / 4 / 8 workers, Init, Std, the Cedar slice, reachability and mathlib:
+
+| ratio to Serial, CPU time (geometric mean of Init and Std) | machine, 1 worker | machine, 8 workers | reference, 1 worker | reference, 8 workers |
+|---|--:|--:|--:|--:|
+| Parallel | 0.99 | 1.00 | 1.01 | 1.03 |
+| G1 | 1.00 | 1.00 | 1.00 | 1.01 |
+| ZGC (generational) | 1.04 | 1.07 | 1.06 | 1.06 |
+| Shenandoah | 1.15 | 1.17 | 1.21 | 1.19 |
+| Shenandoah, generational | 1.15 | 1.16 | 1.19 | 1.26 |
+
+- **Wall clock with 8 workers: no collector improves it** (every ratio at or above 1 but G1's 0.99 on
+  Std with the reference engine; ZGC and Shenandoah 1.2 to 1.3). The most a perfect collector could
+  remove is Serial's pause total: 0.1 to 0.35 s on Init / Std, 1.2 s of 90 s (machine) and 7.3 s of
+  270 s (reference) on mathlib. In warm passes (`warm.md`): Parallel and G1 are inside the run-to-run
+  spread of Serial on Init, Std and cedar (30 to 50 ms of pauses per warm pass).
+- There is nothing to collect: with the machine no collector runs a single collection on Init, one on
+  Std, nine on mathlib; Epsilon, which never collects, is not faster than Serial.
+- The one cell where another collector has something: mathlib with the REFERENCE engine and 8 workers,
+  G1 -3 to -6 % CPU and a peak RSS of 7.1 GB against 12.4 GB (the 105 MB survivor spaces of `-Xmn1g`
+  overflow at every young collection). Not adopted: one corpus, the engine that confirms rather than
+  the one meant to ship, and G1 costs on the small corpora. If the reference engine stays the default
+  engine for long, this is the first thing to measure again (with `-XX:SurvivorRatio` for Serial).
+- The image has no choice: GraalVM CE's native image has the serial collector (and epsilon). Its own
+  finding (P7-F4, 18:14Z) is open: `-Xms6g` for the image on mathlib with 8 workers pipelined took the
+  collections from 359-379 to 26 and the wall clock from 34.1 to 32.5 s (-4.7 %, two interleaved
+  rounds) for 0.8 GB more resident memory; in a batch check phase it gains nothing. Not baked in
+  (`-R:MinHeapSize`): it is a mathlib-only gain measured on an older driver, and the arena's small
+  tests would each reserve what they do not use. To be re-measured on the current jars.
+
+## 0.5 The default load mode
+
+`rlvm-main` (`MainOptions.resolveLoadDefaults`) now decides what the command line leaves open:
+
+| Setting | Default | Before |
+|---|---|---|
+| `-X load` | `pipelined` when two or more workers run AND the input is a file of at least the driver's `pipeline-min-mib` (8 MiB) AND no `stop-after` phase is asked for; else `batch`. `load=auto` spells it out | `batch` |
+| `-X scan-threads` | 2 for inputs of 256 MiB and more (either load mode), else 0 | 0 |
+| `-X io` | `auto` (mapped if a regular file) when scanner threads run, else `buffered` | `buffered` |
+
+A setting that is given wins. `--stats` prints what was decided (`load=pipelined(auto)
+scan-threads=2(auto) io=auto`). Nothing changes for one worker, for a file below 8 MiB (every published
+arena test but the corpora, every mutant) or for a run that names its mode.
+
+Why it may be the default: the driver decides in pipelined mode what it decides in batch mode (kept
+environment pass + parking rule, rlvm-driver `150aed4bf1bf` / `31fa08d9ce61`: 0 pipelined-only declines
+over 16,928 mutants x 9 configurations with either engine), both modes build the same store
+(`PipelinedLoadTest`, record by record), and the scanner threads with packed runs build it word for
+word (LP2's differential digest: identical in 14 reader configurations including mathlib). Gates of
+THIS change: section 0.7.
+
+What it buys:
+
+| engine | corpus | old default (batch, plain reader): wall / CPU / RSS MiB | new default (pipelined, 2 scanner threads): wall / CPU / RSS MiB | new / old wall |
+|---|---|--:|--:|--:|
+| reference | init | 2.66 / 14.4 / 441 | 2.29 / 14.7 / 523 | 0.86 |
+| reference | std | 4.58 / 24.4 / 626 | 3.78 / 24.9 / 611 | 0.83 |
+| reference | cedar | 6.16 / 31.7 / 761 | 4.91 / 32.5 / 837 | 0.80 |
+| machine | init | 1.30 / 5.2 / 319 | 0.82 / 5.5 / 429 | 0.63 |
+| machine | std | 2.33 / 9.8 / 561 | 1.59 / 10.3 / 719 | 0.68 |
+| machine | cedar | 3.27 / 13.5 / 658 | 2.16 / 14.5 / 889 | 0.66 |
+| machine | mathlib | 35.67 / 185.8 / 3355 | 27.59 / 196.0 / 4073 | 0.77 |
+
+Reading. With the batch default the load is one thread and its wall clock is added to the check's; pipelined, the workers check while the file is read, and the two scanner threads take the tokenising and the packing of the proof records off the loader thread. New / old cold wall clock: reference Init 0.86, reference Std 0.83, reference cedar 0.80, machine Init 0.63, machine Std 0.68, machine cedar 0.66, machine mathlib 0.77. The gain is largest where loading was a large share of the run (the machine: loading was half of its cold wall clock on Init, Std and cedar) and smallest where checking dominates (the reference engine). Warm, on the JVM launcher, with 8 workers, the scanner threads by themselves move a pass by a few per cent at most (machine, 2 scanner threads against the plain reader: Init 0.64 against 0.70 s, Std 1.17 against 1.27, cedar 1.60 against 1.58; reference: 1.55 against 1.60, 2.64 against 2.74, 3.38 against 3.27 s): beside 8 workers on 8 cores a pass is bound by its total CPU time, as the load owner measured (the load alone: Std 0.92 -> 0.50 s, cedar 1.36 -> 0.73 s, mathlib 9.4 -> 6.0 s with two scanner threads; three are no better). They are the default because they are never worse and halve the load wherever cores are free (one worker, four workers, the first seconds of a run).
+
+## 0.6 Workers: 7 against 8 on 8 cores
+
+`--threads auto` is decided in `rlvm-main` now (`RlvmChecker.autoWorkers`: one worker per CPU, at most
+8) and passed to the driver like an explicit count; the driver's own automatic rule (CPUs - 2, at
+most 6: chosen by CPU time in wave 4) is no longer consulted, and its cap of one worker per 128
+units still applies. The question was whether the eighth worker should be left to the loader, the
+scanner threads and the environment thread:
+
+| platform, engine | corpus | reader | 8 workers: warm (best) / pass 1 / CPU | 7 workers: warm (best) / pass 1 / CPU | 4 workers |
+|---|---|---|--:|--:|--:|
+| jvm, machine | init | 2 scanner threads | 0.64 (0.61) / 3.18 / 4.5 | 0.64 (0.62) / 3.09 / 4.6 | - |
+| jvm, machine | init | plain (scan-threads=0) | 0.70 (0.65) / 2.96 / 4.6 | 0.71 (0.67) / 2.85 / 4.6 | - |
+| jvm, machine | std | 2 scanner threads | 1.17 (1.10) / 3.57 / 8.6 | 1.16 (1.15) / 3.52 / 8.4 | - |
+| jvm, machine | std | plain (scan-threads=0) | 1.27 (1.17) / 3.71 / 8.5 | 1.17 (1.15) / 3.89 / 8.3 | - |
+| jvm, machine | cedar | 2 scanner threads | 1.60 (1.53) / 4.13 / 11.7 | 1.75 (1.61) / 4.27 / 11.5 | - |
+| jvm, machine | cedar | plain (scan-threads=0) | 1.58 (1.54) / 4.58 / 11.2 | 1.56 (1.51) / 4.43 / 11.0 | - |
+| jvm, machine | mathlib | 2 scanner threads | 21.23 (21.23) / 24.31 / 161.4 | 21.11 (21.11) / 24.34 / 151.7 | - |
+| jvm, reference | init | 2 scanner threads | 1.55 (1.51) / 2.37 / 11.1 | 1.62 (1.57) / 2.31 / 10.9 | - |
+| jvm, reference | init | plain (scan-threads=0) | 1.60 (1.54) / 2.19 / 11.8 | - | - |
+| jvm, reference | std | 2 scanner threads | 2.64 (2.61) / 3.33 / 19.1 | 2.73 (2.72) / 3.47 / 18.3 | - |
+| jvm, reference | std | plain (scan-threads=0) | 2.74 (2.64) / 3.38 / 19.7 | - | - |
+| jvm, reference | cedar | 2 scanner threads | 3.38 (3.26) / 4.19 / 24.7 | 3.43 (3.36) / 4.26 / 23.8 | - |
+| jvm, reference | cedar | plain (scan-threads=0) | 3.27 (3.10) / 4.08 / 24.0 | - | - |
+| native, reference | init | 2 scanner threads | 2.25 (2.25) / 2.29 / 14.7 | 2.42 (2.38) / 2.38 / 14.6 | 3.70 (3.69) / 3.74 / 14.3 |
+| native, reference | std | 2 scanner threads | 3.76 (3.75) / 3.82 / 24.9 | 4.00 (4.00) / 4.10 / 24.9 | 6.12 (6.11) / 6.15 / 24.3 |
+| native, reference | cedar | 2 scanner threads | 4.88 (4.87) / 4.96 / 32.5 | 5.18 (5.10) / 5.21 / 32.4 | 7.93 (7.89) / 7.89 / 31.8 |
+| native, machine | init | 2 scanner threads | 0.83 (0.81) / 0.79 / 5.4 | 0.79 (0.79) / 0.78 / 5.4 | - |
+| native, machine | std | 2 scanner threads | 1.50 (1.50) / 1.52 / 10.4 | 1.52 (1.50) / 1.54 / 10.2 | - |
+| native, machine | cedar | 2 scanner threads | 2.10 (2.09) / 2.12 / 14.6 | 2.08 (2.07) / 2.08 / 14.4 | - |
+| native, machine | mathlib | 2 scanner threads | 28.18 (28.18) / 28.20 / 201.0 | 29.13 (29.13) / 29.31 / 197.1 | - |
+
+### cold (a fresh process, exec to exit), native image, the same window as the warm rows above
+
+| engine | corpus | 8 workers: wall / CPU / RSS MiB | 7 workers | 4 workers |
+|---|---|--:|--:|--:|
+| reference | init | 2.30 / 14.7 / 532 | 2.49 / 14.7 / 475 | 3.67 / 14.4 / 452 |
+| reference | std | 3.89 / 25.1 / 655 | 4.06 / 24.8 / 615 | 6.21 / 24.5 / 561 |
+| reference | cedar | 5.00 / 32.9 / 805 | 5.32 / 32.7 / 854 | 7.86 / 31.8 / 713 |
+| machine | init | 0.85 / 5.5 / 427 | 0.83 / 5.5 / 416 | - |
+| machine | std | 1.57 / 10.4 / 747 | 1.61 / 10.3 / 713 | - |
+| machine | cedar | 2.23 / 14.7 / 900 | 2.18 / 14.5 / 843 | - |
+
+Reading. **Machine**: warm on the JVM launcher 8 against 7 workers 0.64 / 1.17 / 1.60 against 0.64 / 1.16 / 1.75 s on Init / Std / cedar, cold in the image 0.85 / 1.57 / 2.23 against 0.83 / 1.61 / 2.18 s: a tie inside the 5 % between rows, as the first warm table found ("seven equal eight, six are slower"). On mathlib 8 against 7: 21.2 against 21.1 s warm on the JVM launcher, 28.2 against 29.1 s in the image. **Reference engine** (the default engine): the eighth worker pays - cold in the image 1.04 to 1.08 times the 8-worker wall clock with 7 workers and 1.57 to 1.60 times with 4 (the arena run line until today), at the same CPU time; warm on the JVM launcher 7 workers are 1.01 to 1.05 times 8. The reference engine's passes are bound by the checking, which spreads over the workers: a warm Std pass on the JVM launcher keeps 7.2 of the 8 cores busy (19.1 s of CPU in 2.64 s), so a core that is left to the loader, its scanner threads and the environment thread is a core the checking misses. The load owner's windows agree (8 on 8 cores; 7 no better on Std and cedar, worse on mathlib and in the image; `rlvm-load/README.md`, "LP2: warm measurements"). So `--threads auto` is one worker per CPU up to 8 and the arena run line says 8. With the machine as the default engine the choice costs nothing; it should be measured again if the machine's passes get shorter than the load.
+
+## 0.7 Gates of the changed defaults, and what was changed
+
+Everything is on `work/b2/dist-c` - the published `rlvm-main` `21150203e39d` and `rlvm-cli` `cac1433b287a`
+with the other jars as published at 22:32Z - unless a row names another distribution.
+
+| Gate | Result |
+|---|---|
+| Module suites | `rlvm-cli` 49 tests, `rlvm-main` 54 tests (3 opt-in skipped), 0 failures: in a frozen private copy of the tree with both modules together, and again in the tree at publication (the installed jars are byte-identical to the gated ones); `bench/track/selftest.py --docker` 89 checks; `scripts/gate-hostile.py --selftest` |
+| `scripts/gate.sh --dist work/b2/dist-c --defaults --corpus all`: the distribution exactly as a user runs it - no `-X`, `--threads auto` - on the 230 published tests (JVM launcher, the new line), the four mutant corpora (`scripts/check-light.sh`; oracle: the stored official verdicts) and the differential self-test | **230 / 230** correct, 0 wrong, 0 declined; **17,775 mutants: SOUNDNESS 0, COMPLETENESS 0**, agree 16,092, declined 1,683 (tutorial 11,847 / 413, bugs 2,627 / 65, prelude 839 / 8, mdata 779 / 1,197: the published record exactly), errors 0; self-test caught; PASS (22:39Z - 23:07Z; 1,554 s for the mutants at 4 lanes) |
+| The same 230 tests with `-X engine=machine` under the launcher's 7 GB machine heap (`dist-a`) | 230 / 230; peak RSS 3.3 GB (`perf/gf3-matrix-product`) |
+| `rlvm-driver/bin/invariance.sh --no-compile -P 4 published` - the driver's suite on the published jars: every published test with 1 / 2 / 4 / 8 workers, a session reset after every unit, and pipelined loading with a publication after every unit, every 7 and every 64 units | 231 files x 9 runs: 231 correct, 0 wrong, 0 declined, 0 schedule differences, **0 pipelined declines**; PASS |
+| The eight corpora in the default configuration (no option at all) | native image: Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib accepted (verdict runs on the efficiency cores); mathlib not run on the image; JVM launcher: Init, Std, cedar accepted (window `b6`), mathlib accepted with the reference engine (`dist-a`, window `r1b`: first pass 60.9 s, second 58.0 s, peak RSS 13.0 GiB) |
+| The arena's complete test set by the arena's own procedure (one arena-shaped container, tests one after the other, the arena's time limits, `perf stat`; `work/b2/arena-suite.sh`, as AR1.md section 1), run line of `scripts/arena/rlvm.yaml` with `--threads 8` | all tests but mathlib (269; 22:44Z - 22:54Z): good 147 / 147 accepted, bad 92 / 92 rejected, `either` 9 accepted / 19 rejected / 2 declined (`corner-cases/eta-struct-major-no-whnf`, `-and-no-whnf`: the official kernel does not terminate there): **no wrong verdict**, no error, no timeout (closest to its limit: `perf/app-lam`, 11.3 s of 70 s); 8.72 T instructions, peak RSS 4.1 GiB; mathlib: see the corpora row |
+| `scripts/dev.sh arena-test --reuse --strict` (a clean copy of the tree, `scripts/arena/build.sh` in the 8-CPU / 16 GB container, the run line on four tests) | PASS (22:46Z): the 14 modules that ship compiled from source, **22 jars** (no test kit), third-party jars match `scripts/arena/deps.sha256`, H10 lists generated in the container, image in 267 s; `init-prelude` and `001_basicDef` exit 0, `002_badDef` exit 1, `perf/app-lam` exit 0 (55.6 G instructions, 10.7 s, 4.0 GB) |
+| A differential run (`-X engine=diff` with the test kit's provider) on Init under the default load | accept, exit 0 (pipelined, 8 workers) |
+| The hostile exports (`scripts/gate.sh --defaults --hostile`: the machine's suite, 421 rows, official verdicts, kind T rows may be accepted) | default engine reference: agree 420, wrong 0, declined 1 (`str-lit-missing-prerequisites-bad`), PASS |
+| Readiness for a machine-default tree: the same gate on a REHEARSAL distribution whose default engine is the machine (`work/b2/dist-mdefault`: the old machine jar `78c74ca92785` with priority 100, not for verdicts) | the launcher reads `default engine: machine` and runs the 7 GB heap without an option; 230 / 230 with the machine checking by default; self-test caught; the hostile step FAILS that jar as it must: agree 395, kind T tolerated 6, **wrong accepts 19** (the E1-F1 .. F7 rows that are not of kind T; fixed in the machine's later jars) |
+| The shared distribution after the publication (`work/dist` -> `dist.d/20261124T231129Z-9cdeba20778f-native`: the published jars of 23:08Z, loader `7e3f85cecdaa`, store `30979ee659b7`, machine `97d17e57e51b`) | the 230 published tests through the arena run line (image, `--threads 8`): 230 / 230, 0 declined (`work/status/slice-all.md`); `-X policy=strict` declines a definition with a metadata node around its value on both launchers (`policy=strict[metadata]`), the default accepts it |
+
+Not gated by me: the mutant corpora and the invariance suite were not repeated on the jars that other owners
+published after 22:32Z (their owners gate their own publications); the hostile exports of S3, S2 and C1 are not
+in the manifest yet; nothing ran on x86-64.
+
+**Changed** (all in the steward's modules and scripts):
+
+- `scripts/build.sh`: the JVM launcher template (decision 2: VM flags, heap by engine from `-X
+  engine=NAME` / `-Xengine=NAME`, sorted explicit class path, VM messages on standard error); the test
+  kit is never part of a distribution (a tree build - the arena build - used to put `rlvm-testkit` on
+  the image class path: 23 jars against the 22 of every gated distribution); the CE image is built
+  with the machine's H10 inline lists, generated from the machine jar of the build with the `javap`
+  and `jar` of the build's own GraalVM (no `unzip`: the arena's shell has none), with a fallback to an
+  image without them (`--no-h10`: never).
+- `rlvm-main`: `MainOptions` (`load` / `scan-threads` / `io` defaults as in 0.5; `load=auto`,
+  `scan-threads=auto`), `RlvmChecker` (`--threads auto` = `autoWorkers`; the statistics line names
+  what was decided), tests `LoadDefaultsTest`. **`-X policy=practical|strict`** (OWNER-NOTES 13;
+  `PolicyTest`): strict = the reference engine, `ref.exact=official` for the reference kernel and
+  `LoadOptions.withStrictMetadata(true)` for the loader where the jars have them. `rlvm --version`
+  names the default engine; `rlvm --help` lists the checker's settings (`rlvm-cli`:
+  `Checker.usage()`).
+- `scripts/gate.sh`, `scripts/slice.sh`, `scripts/check-light.sh`: `--engine default` / `--load
+  default` (no `-X` at all), `gate.sh --defaults` (the distribution exactly as a user runs it, so the
+  same command gates a reference-default and a machine-default tree; every oracle is an official
+  verdict), `gate.sh --hostile` (`scripts/gate-hostile.py`: the hostile exports judged by their
+  official verdicts, a kind T row may be accepted), lanes clamped by the memory available at the
+  start of a step.
+- `scripts/arena/rlvm.yaml`: the state, the description, `--threads 8` / `threads: 8`.
+- `bench/track` (rule on wall clock, pass lines, the generator of `docs/BENCHMARKS.md`), `bench/warm.py`
+  (`--load default`, `--cold-only`, the distribution in every row).
+
+**Not changed**: which engine is the default (the reference engine; `Engines.DEFAULT_ENGINE_MIN_PRIORITY`
+= 100, the machine registers with 10); the image's collector, heap cap (13 GB) and optimisation level;
+the driver, the loader, the store, the engines.
+
+**To repeat** (each line one quiet window of two to four minutes; `work/b2/w/win.sh NAME...`):
+
+```
+bench/slot.sh -c ni -n 2 -- scripts/build.sh --published --dist work/b2/dist-a
+bench/quiet.py -- bash work/b2/w/m1a.sh     # launcher line, machine, Init / Std / cedar      (m1b: mathlib)
+bench/quiet.py -- bash work/b2/w/r1a.sh     # launcher line, reference                        (r1b, r1c: mathlib)
+bench/quiet.py -- bash work/b2/w/t1.sh      # 7 against 8 workers, JVM warm, machine          (t2: reference)
+bench/quiet.py -- bash work/b2/w/t3.sh      # 4 / 7 / 8 workers, native, cold + warm          (t4, t5: mathlib)
+bench/quiet.py -- bash work/b2/w/t6.sh      # batch against the default load, cold
+python3 -I work/b2/summ.py                  # the tables of this part
+```
+
+# Part I - the machine as engine (wave 7): cold processes, by CPU time
+
+*Superseded as the platform decision by Part 0 (owner note 12: warm wall clock decides). Kept as the record of what a fresh process per export costs on each launcher - the arena's situation - measured with the machine v0 on a batch load. "The launcher", "the flags" and "the worker count" in this part are the cold-process answers of 14:25Z; the current ones are in Part 0.*
 
 ## I.0 The answer
 
@@ -472,7 +827,9 @@ work/steward/w7/assemble.py                    # this part: part1.md + scripts/p
 work/steward/w7/benchmarks.sh                  # docs/BENCHMARKS.md
 ```
 
-# Part II - the rehearsal with the reference engine (wave 4)
+# Part II - the rehearsal with the reference engine (wave 4): cold processes, by CPU time
+
+*Superseded as a decision by Part 0; kept for its measurements of the host JIT, the collectors and the heap sizes on cold processes of the reference engine.*
 
 Steward, wave 4, 2026-11-24. Engine: the **reference engine** (`-X engine=reference -X load=batch`), the
 only engine in the distribution at the time. This part was the rehearsal of the platform gate with the
