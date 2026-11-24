@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""bench/track/track.py - one command per corpus: measure RLVM like the arena,
-keep a history, compare with the baselines measured on this host, and flag
-CPU-time regressions.
+"""bench/track/track.py - one command per corpus: measure RLVM in the arena-shaped
+container, keep a history, compare with the baselines measured on this host, and
+flag WALL-CLOCK regressions (OWNER-NOTES 12: warm wall clock is the target).
 
     bench/track/track.py CORPUS [options]                 (run on the host; starts containers)
 
-    bench/track/track.py init                             # work/dist/bin/rlvm, the arena's run line, 3 runs
+    bench/track/track.py init                             # work/dist/bin/rlvm, the arena's run line, 3 runs (cold)
+    bench/track/track.py init --passes 5 --threads 8 --launcher jvm   # WARM: 5 passes per process, the target metric
     bench/track/track.py init --launcher jvm --threads 1
     bench/track/track.py std --rlvm-arg -X --rlvm-arg engine=reference
     bench/track/track.py init --phases                    # + per-phase table (load / env / check)
@@ -27,31 +28,50 @@ What is measured. Every run is one fresh container sized like the arena runner
 RUN LINE is the arena's own run line of RLVM (scripts/arena/rlvm.yaml, through
 bench/rlvm/run.sh --print), so the numbers are what the arena would see; this
 is also exactly how bench/baselines/big.sh measured the baselines. Recorded
-per run, in this order of importance: CPU time (perf task-clock over all
-threads and children), wall clock, peak RSS, user-space instructions.
+per run, in the order of OWNER-NOTES 12: warm wall clock (with --passes), wall
+clock of the fresh process (cold), CPU time (perf task-clock over all threads
+and children), peak RSS, user-space instructions.
+
+Warm passes. With --passes N (N >= 2) the run line gets `-X passes=N`: the same
+process checks the export N times (rlvm-main, Passes) and prints one line per
+pass, `rlvm: pass K/N mode=.. wall_ms=.. cpu_ms=.. gc_ms=.. .. verdict=..`.
+The tracker reads these lines from the run's log (it also reads them when the
+run line has -X passes=N through --rlvm-arg): per run the wall clock of every
+pass, pass 1, the best later pass and the MEDIAN LATER PASS = the run's warm
+wall clock, with the CPU time of that pass. A run whose passes do not all end
+with the expected verdict is invalid. Take such an entry inside a
+bench/quiet.py window (bench/quiet.py -- bench/track/track.py ...).
 
 History. One JSON line per invocation is appended to
 work/perf-history/CORPUS.jsonl: the runs, their medians, the configuration
 (checker / launcher / threads / extra arguments), the build (BUILD-INFO and
 the binary's hash), the comparison and the verdict of the regression rule.
 
-The figure of an entry is the MINIMUM CPU time over its runs (default 3):
-other containers share the eight performance cores and can only add CPU time,
-never remove any (measured here: gruszka on mathlib 62.4 / 75.9 / 81.9 s CPU
-in three runs whose instruction counts are 0.3 % apart). Wall clock likewise;
-peak RSS is the maximum, instructions the median. Baselines get the same
-treatment.
+The figures of an entry are MINIMA over its runs (default 3): other containers
+share the eight performance cores and can only add time, never remove any
+(measured here: gruszka on mathlib 62.4 / 75.9 / 81.9 s CPU in three runs
+whose instruction counts are 0.3 % apart). That holds for the warm wall clock
+(the minimum over the runs of each run's median later pass), the cold wall
+clock and CPU time; peak RSS is the maximum, instructions the median.
+Baselines get the same treatment.
 
-Regression rule. The entry's CPU time is compared with the reference of its
-configuration, which is its last accepted entry that was made the reference:
+Regression rule. It is on WALL CLOCK: the warm wall clock when the entry has
+passes, else the wall clock of the fresh process (which OWNER-NOTES 12 reports
+"for information": a cold entry is judged by it because it has nothing else).
+Until 2026-11-24 the rule was on cold CPU time, which note 12 no longer makes
+the target; CPU time and instructions are printed beside the verdict as
+diagnostics. The entry's figure is compared with the reference of its
+configuration (the pass count is part of the configuration), which is its
+last accepted entry that was made the reference:
 
-    cpu > reference * (1 + threshold)   ->  REGRESSION: recorded with "accepted": false, exit status 1
-    cpu < reference * (1 - threshold)   ->  improvement: accepted, becomes the new reference
-    otherwise                           ->  accepted; the reference stays where it is
+    wall > reference * (1 + threshold)   ->  REGRESSION: recorded with "accepted": false, exit status 1
+    wall < reference * (1 - threshold)   ->  improvement: accepted, becomes the new reference
+    otherwise                            ->  accepted; the reference stays where it is
 
-with threshold = 3 % (--threshold). The first valid entry of a configuration
-is its first reference. A regression can be accepted on purpose with
---accept "REASON" (the reason is stored; the entry becomes the reference).
+with threshold = 5 % (--threshold; two identical 8-worker rows of one quiet
+window differ by up to 5 %, J1.md section 1). The first valid entry of a
+configuration is its first reference. A regression can be accepted on purpose
+with --accept "REASON" (the reason is stored; the entry becomes the reference).
 Because entries inside the band do not move the reference, a slow drift
 cannot creep in three percent at a time.
 An entry is only eligible when every run gave the expected verdict (exit
@@ -62,7 +82,7 @@ Baselines. bench/baselines.json (else work/baselines/big/runs.jsonl), for the
 small tests work/baselines/small/NAME.json, and entries of this history made
 with --checker NAME; per checker the runs that accepted, summarised as above.
 
-Exit status: 0 measured and accepted (or --show); 1 CPU-time regression;
+Exit status: 0 measured and accepted (or --show); 1 wall-clock regression;
 2 invalid measurement (wrong verdict, timeout, no counters); 64 usage;
 70 nothing to run (distribution or wrapper missing).
 
@@ -76,6 +96,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import shlex
 import signal
 import statistics
@@ -87,7 +108,8 @@ ROOT = os.path.realpath(os.path.join(HERE, "..", ".."))
 DOCKER = os.path.join(ROOT, "bench", "arena-docker.sh")
 RUN_SH = os.path.join(ROOT, "bench", "rlvm", "run.sh")
 DEFAULT_HISTORY = os.path.join(ROOT, "work", "perf-history")
-THRESHOLD_PCT = 3.0
+THRESHOLD_PCT = 5.0
+PASS_LINE = re.compile(r"^rlvm: pass (\d+)/(\d+) (.*)$")
 PHASES = (("load", ["-X", "stop-after=load"]), ("env", ["-X", "stop-after=env"]))
 BINARIES = {"native": "rlvm", "jvm": "rlvm-jvm", "pgo": "rlvm-pgo"}
 
@@ -174,7 +196,15 @@ def summarise_runs(runs: list[dict]) -> dict:
     rss = [r["max_rss_bytes"] for r in runs if r.get("max_rss_bytes")]
     cpu = [r["cpu_time_s"] for r in runs if r.get("cpu_time_s") is not None]
     wall = [r["wall_time_s"] for r in runs if r.get("wall_time_s") is not None]
+    # Warm passes (rlvm -X passes=N): the run with the lowest median later pass speaks for the entry.
+    warm = sorted((r for r in runs if r.get("warm_wall_s") is not None), key=lambda r: r["warm_wall_s"])
+    best = warm[0] if warm else {}
     return {
+        "warm_wall_s": best.get("warm_wall_s"),
+        "warm_wall_s_best_pass": min((r["warm_best_s"] for r in warm), default=None),
+        "warm_cpu_s": best.get("warm_cpu_s"),
+        "pass1_wall_s": min((r["pass1_wall_s"] for r in warm), default=None),
+        "passes": best.get("n_passes"),
         "n_runs": len(runs),
         "cpu_time_s": min(cpu) if cpu else None,
         "cpu_time_s_median": statistics.median(cpu) if cpu else None,
@@ -278,17 +308,76 @@ def read_history(history_dir: str, corpus: str) -> list[dict]:
     return entries
 
 
-def last_reference(entries: list[dict], config: str) -> dict | None:
-    """The reference of a configuration: its last accepted entry that was made the reference."""
+def read_passes(text: str) -> dict:
+    """The per-pass lines of `rlvm -X passes=N` in a run's output, as fields of the run.
+
+    {} when there is none (a plain run). Else: passes = [{pass, wall_s, cpu_s, gc_ms, load_s, check_s,
+    verdict, pipelined}], n_passes, pass1_wall_s, and for N >= 2 warm_wall_s (the lower median of the
+    later passes: a real pass, so that its CPU time can be quoted as warm_cpu_s) and warm_best_s.
+    """
+    passes = []
+    for line in text.splitlines():
+        match = PASS_LINE.match(line.strip())
+        if not match:
+            continue
+        fields = dict(item.split("=", 1) for item in match.group(3).split() if "=" in item)
+
+        def number(key: str, scale: float = 1.0):
+            try:
+                value = float(fields[key])
+            except (KeyError, ValueError):
+                return None
+            return None if value < 0 else value / scale
+
+        passes.append({"pass": int(match.group(1)), "of": int(match.group(2)), "wall_s": number("wall_ms", 1000.0),
+                       "cpu_s": number("cpu_ms", 1000.0), "gc_ms": number("gc_ms"), "load_s": number("load_ms", 1000.0),
+                       "check_s": number("check_ms", 1000.0), "verdict": fields.get("verdict"),
+                       "pipelined": fields.get("pipelined")})
+    passes = [p for p in passes if p["wall_s"] is not None]
+    if not passes:
+        return {}
+    out = {"passes": passes, "n_passes": len(passes), "pass1_wall_s": passes[0]["wall_s"]}
+    later = sorted(passes[1:], key=lambda p: p["wall_s"])
+    if later:
+        median = later[(len(later) - 1) // 2]
+        out.update(warm_wall_s=median["wall_s"], warm_cpu_s=median["cpu_s"], warm_best_s=later[0]["wall_s"])
+    return out
+
+
+def passes_valid(run: dict, expected_exit: int) -> tuple[bool, str]:
+    """Every pass of a warm run must end with the verdict the run is expected to end with."""
+    want = {0: "ACCEPT", 1: "REJECT", 2: "DECLINE"}.get(expected_exit)
+    for p in run.get("passes") or []:
+        if want and p.get("verdict") != want:
+            return False, f"pass {p['pass']} ended with {p.get('verdict')}, expected {want}"
+    return True, ""
+
+
+def metric_of(entry: dict) -> tuple[str, float | None]:
+    """What the regression rule compares: the warm wall clock of an entry with passes, else the wall
+    clock of the fresh process (OWNER-NOTES 12; until 2026-11-24 the rule was on cold CPU time)."""
+    if entry.get("warm_wall_s") is not None:
+        return "warm_wall_s", entry["warm_wall_s"]
+    return "wall_time_s", entry.get("wall_time_s")
+
+
+METRIC_NAMES = {"warm_wall_s": "warm wall clock (median later pass)", "wall_time_s": "cold wall clock (fresh process)"}
+
+
+def last_reference(entries: list[dict], config: str, metric: str = "wall_time_s") -> dict | None:
+    """The reference of a configuration: its last accepted entry that was made the reference (and has the metric)."""
     for entry in reversed(entries):
-        if entry.get("config") == config and entry.get("reference") and entry.get("cpu_time_s") is not None:
+        if entry.get("config") == config and entry.get("reference") and entry.get(metric) is not None:
             return entry
     return None
 
 
-def judge(cpu: float | None, valid: bool, reference: dict | None, threshold_pct: float, accept_reason: str | None,
-          instructions: float | None = None) -> dict:
-    """The regression rule. Returns the fields added to the entry.
+def judge(value: float | None, valid: bool, reference: dict | None, threshold_pct: float, accept_reason: str | None,
+          instructions: float | None = None, metric: str = "wall_time_s", cpu: float | None = None) -> dict:
+    """The regression rule on `metric` (a wall clock, see metric_of). Returns the fields added to the entry.
+
+    cpu / instructions: the entry's CPU time and instruction count, compared with the reference's for
+    information (cpu_delta_pct, instructions_delta_pct); they are not part of the rule.
 
     accepted:  the entry passes (no regression beyond the threshold, or one accepted on purpose)
     reference: later entries are compared with this one. An entry becomes the reference when it is
@@ -296,17 +385,22 @@ def judge(cpu: float | None, valid: bool, reference: dict | None, threshold_pct:
                or when it was accepted on purpose (--accept). Entries inside the band leave the
                reference where it is, so small regressions cannot add up unnoticed.
     """
-    out = {"threshold_pct": threshold_pct, "reference_utc": None, "reference_cpu_time_s": None, "cpu_delta_pct": None,
+    out = {"metric": metric, "threshold_pct": threshold_pct, "reference_utc": None, "reference_value": None,
+           "delta_pct": None, "reference_cpu_time_s": None, "cpu_delta_pct": None,
            "instructions_delta_pct": None, "regression": False, "improvement": False, "accepted": False,
            "reference": False, "accept_reason": None}
-    if not valid or cpu is None:
+    if not valid or value is None:
         return out
     if reference is None:
         out.update(accepted=True, reference=True, accept_reason=accept_reason or "first valid entry of this configuration")
         return out
-    ref_cpu = reference["cpu_time_s"]
-    delta = (cpu / ref_cpu - 1.0) * 100.0 if ref_cpu > 0 else 0.0
-    out.update(reference_utc=reference.get("utc"), reference_cpu_time_s=ref_cpu, cpu_delta_pct=round(delta, 3))
+    ref_value = reference[metric]
+    delta = (value / ref_value - 1.0) * 100.0 if ref_value > 0 else 0.0
+    out.update(reference_utc=reference.get("utc"), reference_value=ref_value, delta_pct=round(delta, 3))
+    if cpu and reference.get("cpu_time_s"):
+        # not part of the rule since OWNER-NOTES 12: how much parallelism and work is behind the wall clock
+        out.update(reference_cpu_time_s=reference["cpu_time_s"],
+                   cpu_delta_pct=round((cpu / reference["cpu_time_s"] - 1.0) * 100.0, 3))
     if instructions and reference.get("instructions"):
         # not part of the rule; printed next to it, because instruction counts do not depend on the host's load
         out["instructions_delta_pct"] = round((instructions / reference["instructions"] - 1.0) * 100.0, 3)
@@ -380,6 +474,11 @@ def measure_once(export: str, command: str, cwd: str | None, timeout: float | No
             record.update(json.load(handle))
     except (OSError, ValueError) as exc:
         record["measure_error"] = f"no measurement ({exc}); see {record['log']}"
+    try:
+        with open(log, errors="replace") as handle:
+            record.update(read_passes(handle.read()))
+    except OSError:
+        pass
     return record
 
 
@@ -396,7 +495,7 @@ def run_valid(run: dict, expected_exit: int) -> tuple[bool, str]:
         return False, "no instruction count (perf counters unavailable)"
     if (run.get("counter_coverage") or 1.0) < 0.999:
         return False, f"counter coverage {run.get('counter_coverage')}"
-    return True, ""
+    return passes_valid(run, expected_exit)
 
 
 # ------------------------------------------------------------ build info ----
@@ -467,7 +566,7 @@ def fmt_g(value) -> str:
 
 
 def print_comparison(label: str, entry: dict | None, baselines: dict[str, dict]) -> None:
-    """CPU time first; then wall clock, peak RSS, instructions (RECONCILIATION section 0)."""
+    """Warm wall clock (if the entry has passes), cold wall clock, CPU time, peak RSS, instructions (OWNER-NOTES 12)."""
     rows = []
     if entry and entry.get("cpu_time_s") is not None:
         rows.append((label, entry, True))
@@ -478,17 +577,22 @@ def print_comparison(label: str, entry: dict | None, baselines: dict[str, dict])
         return
     ours = entry.get("cpu_time_s") if entry else None
     ours_wall = entry.get("wall_time_s") if entry else None
-    print(f"  {'checker':<22} {'CPU s':>9} {'(median)':>9} {'wall s':>9} {'RSS MiB':>8} {'instr G':>9} {'runs':>4}   {'ours/their CPU':>14} {'ours/their wall':>15}")
+    ours_warm = entry.get("warm_wall_s") if entry else None
+    print(f"  {'checker':<22} {'warm s':>8} {'wall s':>9} {'CPU s':>9} {'(median)':>9} {'RSS MiB':>8} {'instr G':>9} {'runs':>4}   "
+          f"{'ours/their wall':>15} {'warm/their wall':>15} {'ours/their CPU':>14}")
     for name, row, mine in rows:
-        ratio = ratio_wall = ""
+        ratio = ratio_wall = ratio_warm = ""
         if not mine and ours is not None and row.get("cpu_time_s"):
             ratio = f"{ours / row['cpu_time_s']:.2f}x"
         if not mine and ours_wall is not None and row.get("wall_time_s"):
             ratio_wall = f"{ours_wall / row['wall_time_s']:.2f}x"
-        print(f"  {('> ' + name) if mine else name:<22} {fmt_s(row.get('cpu_time_s')):>9} {fmt_s(row.get('cpu_time_s_median')):>9} "
-              f"{fmt_s(row.get('wall_time_s')):>9} "
+        if not mine and ours_warm is not None and row.get("wall_time_s"):
+            # a baseline has no warm-up to speak of (Rust): its wall clock stands for its steady state
+            ratio_warm = f"{ours_warm / row['wall_time_s']:.2f}x"
+        print(f"  {('> ' + name) if mine else name:<22} {fmt_s(row.get('warm_wall_s')):>8} {fmt_s(row.get('wall_time_s')):>9} "
+              f"{fmt_s(row.get('cpu_time_s')):>9} {fmt_s(row.get('cpu_time_s_median')):>9} "
               f"{fmt_mib(row.get('max_rss_bytes')):>8} {fmt_g(row.get('instructions')):>9} {row.get('n_runs', ''):>4}   "
-              f"{ratio:>14} {ratio_wall:>15}")
+              f"{ratio_wall:>15} {ratio_warm:>15} {ratio:>14}")
     if not baselines:
         print("  (no baseline measured on this host for this corpus: bench/baselines/big.sh, or track --checker NAME)")
 
@@ -497,16 +601,18 @@ def print_history(entries: list[dict], limit: int = 12) -> None:
     if not entries:
         print("  (no history)")
         return
-    print(f"  {'utc':<20} {'configuration':<28} {'CPU s':>9} {'wall s':>9} {'RSS MiB':>8} {'instr G':>9} {'delta':>8}  status")
+    print(f"  {'utc':<20} {'configuration':<28} {'warm s':>8} {'wall s':>9} {'CPU s':>9} {'RSS MiB':>8} {'instr G':>9} {'delta':>8}  status")
     for entry in entries[-limit:]:
-        delta = entry.get("cpu_delta_pct")
+        # delta_pct: the rule's own figure (wall clock) since 2026-11-24; older entries have the CPU delta only
+        delta = entry.get("delta_pct") if "metric" in entry else entry.get("cpu_delta_pct")
         status = ("INVALID: " + str(entry.get("invalid_reason"))) if not entry.get("valid") else \
             ("REGRESSION" + (" (accepted: " + str(entry.get("accept_reason")) + ")" if entry.get("accepted") else "")) \
             if entry.get("regression") else "accepted" + (" (improvement)" if entry.get("improvement") else "")
         if entry.get("reference"):
             status += "  <- reference"
-        print(f"  {entry.get('utc', '?'):<20} {entry.get('config', '?')[:28]:<28} {fmt_s(entry.get('cpu_time_s')):>9} "
-              f"{fmt_s(entry.get('wall_time_s')):>9} {fmt_mib(entry.get('max_rss_bytes')):>8} {fmt_g(entry.get('instructions')):>9} "
+        print(f"  {entry.get('utc', '?'):<20} {entry.get('config', '?')[:28]:<28} {fmt_s(entry.get('warm_wall_s')):>8} "
+              f"{fmt_s(entry.get('wall_time_s')):>9} {fmt_s(entry.get('cpu_time_s')):>9} "
+              f"{fmt_mib(entry.get('max_rss_bytes')):>8} {fmt_g(entry.get('instructions')):>9} "
               f"{('%+.1f%%' % delta) if delta is not None else '':>8}  {status}")
 
 
@@ -561,8 +667,9 @@ def main() -> int:
     parser.add_argument("--cmd", metavar="COMMAND", help="measure this shell command (export path in $IN) instead of RLVM; needs --label")
     parser.add_argument("--label", help="name of the --cmd checker in the history")
     parser.add_argument("--cwd", help="working directory of --cmd")
-    parser.add_argument("--runs", type=int, default=3, help="measured runs; the entry is their median (default 3)")
-    parser.add_argument("--threshold", type=float, default=THRESHOLD_PCT, help="CPU-time regression threshold in percent (default 3)")
+    parser.add_argument("--runs", type=int, default=3, help="measured runs (fresh processes); the entry's times are their minima (default 3)")
+    parser.add_argument("--passes", type=int, default=1, metavar="N", help="RLVM: check the export N times per process (-X passes=N) and record the warm wall clock = the median later pass (default 1: a plain cold run)")
+    parser.add_argument("--threshold", type=float, default=THRESHOLD_PCT, help="wall-clock regression threshold in percent (default 5)")
     parser.add_argument("--accept", metavar="REASON", help="accept this entry as the new reference even if it regresses")
     parser.add_argument("--expect-exit", type=int, default=None, help="exit status a valid run must have (default: 0 = accept; 1 = reject for a published bad test)")
     parser.add_argument("--timeout-factor", type=float, default=2.0, help="timeout = factor x the arena's timeout of the corpus (default 2; 3600 s when the arena has none)")
@@ -580,6 +687,12 @@ def main() -> int:
         args.expect_exit = expected_verdict
     if args.engine:
         args.rlvm_arg = ["-X", "engine=" + args.engine] + args.rlvm_arg
+    if args.passes < 1:
+        die("--passes must be at least 1")
+    if args.passes > 1:
+        if args.cmd or args.checker:
+            die("--passes is an option of RLVM (-X passes=N); a baseline has no passes")
+        args.rlvm_arg = args.rlvm_arg + ["-X", f"passes={args.passes}"]
     if args.extra_cp and (args.launcher != "jvm" or args.cmd or args.checker):
         die("--extra-cp needs the JVM launcher (--launcher jvm): a native image has a closed class path")
     history_dir = os.path.abspath(args.history)
@@ -646,7 +759,6 @@ def main() -> int:
         cwd = ROOT
         threads = args.threads
         if threads is None:
-            import re
             match = re.search(r"--threads (\d+)", command)
             threads = int(match.group(1)) if match else None
         config = f"rlvm/{args.launcher}/t{threads if threads is not None else 'auto'}"
@@ -666,8 +778,9 @@ def main() -> int:
     if args.show:
         print("history (%s):" % os.path.relpath(history_file(history_dir, corpus), ROOT))
         print_history(entries)
-        reference = last_reference(entries, config)
-        print(f"comparison (CPU time first; '>' = the reference, i.e. the last accepted entry of {config}):")
+        metric = "warm_wall_s" if re.search(r"passes=([2-9]|[1-9][0-9])", config) else "wall_time_s"
+        reference = last_reference(entries, config, metric)
+        print(f"comparison (wall clock first; '>' = the reference, i.e. the last accepted entry of {config}):")
         print_comparison(config, reference, baselines)
         if reference and reference.get("phases"):
             print("phases of that entry:")
@@ -696,8 +809,10 @@ def main() -> int:
                 continue
             run["run"] = i
             valid, reason = run_valid(run, expected_exit)
-            print("exit %s  cpu %s s  wall %s s  rss %s MiB  instr %s G%s" % (
-                run.get("exit_code"), fmt_s(run.get("cpu_time_s")), fmt_s(run.get("wall_time_s")),
+            warm = "" if run.get("warm_wall_s") is None else "warm %s s (passes: %s)  " % (
+                fmt_s(run["warm_wall_s"]), " ".join(fmt_s(p["wall_s"]) for p in run["passes"]))
+            print("exit %s  %swall %s s  cpu %s s  rss %s MiB  instr %s G%s" % (
+                run.get("exit_code"), warm, fmt_s(run.get("wall_time_s")), fmt_s(run.get("cpu_time_s")),
                 fmt_mib(run.get("max_rss_bytes")), fmt_g(run.get("instructions")), "" if valid else "   INVALID: " + reason))
             if not valid and ok:
                 ok, why = False, reason
@@ -720,8 +835,10 @@ def main() -> int:
         return 0
 
     summary = summarise_runs(runs) if valid else summarise_runs([r for r in runs if r.get("cpu_time_s") is not None])
-    reference = last_reference(entries, config)
-    verdict = judge(summary.get("cpu_time_s"), valid, reference, args.threshold, args.accept, summary.get("instructions"))
+    metric, value = metric_of(summary)
+    reference = last_reference(entries, config, metric)
+    verdict = judge(value, valid, reference, args.threshold, args.accept, summary.get("instructions"), metric,
+                    summary.get("cpu_time_s"))
     spread = None
     if valid and summary["cpu_time_s"]:
         spread = round(100.0 * (summary["cpu_time_s_max"] - summary["cpu_time_s"]) / summary["cpu_time_s"], 2)
@@ -750,7 +867,7 @@ def main() -> int:
     print()
     if not valid:
         print(f"INVALID measurement: {invalid_reason}. Recorded as invalid; it is not compared and never becomes a reference.")
-    print("comparison with the baselines measured on this host (CPU time first):")
+    print("comparison with the baselines measured on this host (wall clock first):")
     print_comparison(config, entry if valid else None, baselines if checker == "rlvm" else
                      {k: v for k, v in baselines.items() if k != checker})
     if entry.get("phases"):
@@ -765,21 +882,25 @@ def main() -> int:
         if busy > 8.0:
             print(f"WARNING: the host was busy (load average {busy:.1f}); other containers share the 8 performance cores, "
                   "which inflates CPU time (frequency, caches) but not instruction counts.")
-        print("regression rule (CPU time, threshold %.1f %%):" % args.threshold)
+        print("regression rule (%s, threshold %.1f %%):" % (METRIC_NAMES[metric], args.threshold))
+        if metric == "wall_time_s" and checker == "rlvm":
+            print("  note: this is a COLD entry; the target of OWNER-NOTES 12 is the warm wall clock (--passes 5 --threads 8).")
         if reference is None:
             print(f"  no accepted entry of {config} before this one: accepted as the first reference "
-                  f"({fmt_s(summary['cpu_time_s'])} s CPU).")
+                  f"({fmt_s(value)} s).")
         else:
             idelta = verdict.get("instructions_delta_pct")
-            print(f"  last accepted reference {reference.get('utc')}: {fmt_s(reference['cpu_time_s'])} s CPU; now "
-                  f"{fmt_s(summary['cpu_time_s'])} s: {verdict['cpu_delta_pct']:+.2f} %"
+            cdelta = verdict.get("cpu_delta_pct")
+            print(f"  last accepted reference {reference.get('utc')}: {fmt_s(reference[metric])} s; now "
+                  f"{fmt_s(value)} s: {verdict['delta_pct']:+.2f} %"
+                  + (f"   (CPU time {cdelta:+.2f} %)" if cdelta is not None else "")
                   + (f"   (instructions {idelta:+.2f} %)" if idelta is not None else ""))
             if verdict["regression"] and not verdict["accepted"]:
                 print(f"  REGRESSION: more than {args.threshold:.1f} % slower. Not accepted; the reference stays. "
                       "Fix it, re-measure if the host was busy, or justify it with --accept \"REASON\".")
                 if idelta is not None and abs(idelta) < 1.0:
                     print("  note: the instruction count moved by less than 1 %; with a busy host this smells like "
-                          "contention on the shared cores rather than a change in RLVM. Re-measure.")
+                          "contention on the shared cores rather than a change in RLVM. Re-measure inside a bench/quiet.py window.")
             elif verdict["regression"]:
                 print(f"  REGRESSION accepted on purpose: {verdict['accept_reason']}. This entry is the new reference.")
             elif verdict["improvement"]:

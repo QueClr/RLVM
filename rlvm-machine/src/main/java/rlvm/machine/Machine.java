@@ -889,10 +889,8 @@ public final class Machine {
      * ordered as unsigned numbers; {@code lo != 0}.
      */
     void addPairAt(int slot, int lo, int hi, int status) {
-        int o = slot << Layout.PAIR_SHIFT;
-        pair[o + Layout.PAIR_LO] = lo;
-        pair[o + Layout.PAIR_HI] = hi;
-        pair[o + Layout.PAIR_STATUS] = status;
+        // the log first (finding F-V1-M2 of V1, 2026-11-24): a growth of the log that the heap refuses (HeapLimit) must
+        // not leave an entry in the table that the log does not know - reset() clears the logged entries only
         if (plogN == plog.length) {
             int[] grown = copyOrNull(plog, plogN << 1);
             if (grown == null) {
@@ -902,6 +900,10 @@ public final class Machine {
             allocGrows++;
             allocGrowBytes += 8L * plogN;
         }
+        int o = slot << Layout.PAIR_SHIFT;
+        pair[o + Layout.PAIR_LO] = lo;
+        pair[o + Layout.PAIR_HI] = hi;
+        pair[o + Layout.PAIR_STATUS] = status;
         plog[plogN++] = slot;
         if ((++pairUsed << 1) > pairMask + 1) {
             growPairs();

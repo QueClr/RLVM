@@ -1,11 +1,13 @@
 # bench/track - performance tracking (work package T2)
 
 One command per corpus: run RLVM in the arena-shaped container, append the measurement to a history
-file, print the comparison with the baselines measured on this host (CPU time first), and apply the
-regression rule.
+file, print the comparison with the baselines measured on this host (wall clock first), and apply the
+regression rule - which is on WALL CLOCK since 2026-11-24 (OWNER-NOTES 12): the warm wall clock of an
+entry made with `--passes N`, else the wall clock of the fresh process.
 
 ```bash
-bench/track/track.py init                      # work/dist/bin/rlvm with the arena's run line, 3 runs
+bench/track/track.py init                      # work/dist/bin/rlvm with the arena's run line, 3 runs (cold entry)
+bench/quiet.py -- bench/track/track.py init --launcher jvm --threads 8 --passes 5   # WARM entry: the target metric
 bench/track/track.py init-prelude | std | cedar | con-leche | cslib | reachability | navier-stokes-euler | mathlib
 bench/track/track.py cedar-hot-ax              # a slice: work/workloads/slices/NAME.ndjson, work/exports/slices/good/NAME.ndjson
 bench/track/track.py perf/magma-list-pair-n21  # a published test; a bad one (perf/unfold-before-literal-bad) must be REJECTED
@@ -18,16 +20,19 @@ bench/track/selftest.py [--docker]             # checks of the tracker itself
 
 bench/track/ladder.py                          # ALL corpora, JVM + native, reference engine, 8 workers; missing baselines
 bench/track/ladder.py --tier small --engine machine --launcher jvm --extra-cp rlvm-machine/target/classes
+bench/track/ladder.py --tier small --launcher jvm --passes 5      # warm entries for a tier
 bench/track/ladder.py --list                   # what is recorded for the ladder; measures nothing
-bench/track/benchmarks.py                      # docs/BENCHMARKS.md from the history (the generated table)
+bench/track/benchmarks.py --tsv work/perf-history/warm.tsv --labels bench   # docs/BENCHMARKS.md: one table per metric, owner's order
+bench/track/benchmarks_cold.py --stdout        # the cold tables from the history (superseded form of that document)
 ```
 
 | File | What |
 |---|---|
 | `track.py` | one corpus, one configuration: measure, record, compare, apply the rule (host; starts containers; Python stdlib only) |
 | `ladder.py` | `track.py` over all corpora for one engine and one or more launchers, then the baselines that this host has no measurement of; one measurement in the container at a time (lock `work/perf-history/.ladder.lock`, taken per measurement) |
-| `benchmarks.py` | generates `docs/BENCHMARKS.md`: corpus x {RLVM JVM, RLVM native, gruszka, nano-lean, official} x {CPU time, wall clock, peak RSS, instructions}, with a provenance table |
-| `selftest.py` | 42 checks of the rule, the summaries, phase differencing, baseline lookup and the command line on the host (independent of what is built in `work/dist`); `--docker` adds 10 checks of the whole command with a fake checker in the container |
+| `benchmarks.py` | generates `docs/BENCHMARKS.md` from rows of `bench/warm.sh` (and the history for instruction counts): corpus x {RLVM machine, RLVM reference} x {JVM, native} + gruszka + nano-lean, one table per metric in the owner's order (warm wall 8 workers, warm wall 1 worker, cold wall, CPU, RSS, instructions), and for every cell the row, its `bench/quiet.py` window and its jars; the text around the tables is `benchmarks-notes.md` |
+| `benchmarks_cold.py` | the generator of that document until 2026-11-24T23Z: cold tables (CPU time, wall clock, RSS, instructions of a fresh process on a batch load) from the tracker's history; superseded as the statement of where RLVM stands, kept as a tool |
+| `selftest.py` | 77 checks of the rule, the pass lines, the summaries, phase differencing, baseline lookup, the command line, the ladder and both generators on the host (independent of what is built in `work/dist`); `--docker` adds 10 checks of the whole command with a fake checker in the container |
 | `fake-burner.sh` | the fake checker of the self-test (burns a chosen amount of CPU, exits with a chosen status) |
 
 ## The ladder
@@ -73,16 +78,25 @@ bench/arena-docker.sh --arena-limits --no-network bench/measure.sh --require-per
 - A published bad test is a valid measurement only when it is rejected (exit status 1); every other
   corpus must be accepted.
 - `T` = twice the arena's timeout of the corpus (`--timeout-factor`; 3600 s where the arena has none).
-- Recorded per run and listed in this order everywhere (RECONCILIATION section 0): **CPU time**
-  (perf task-clock over all threads and children), **wall clock**, **peak RSS**, **user-space
-  instructions** (plus kernel instructions, counter coverage, host load average, number of other
-  containers).
+- Recorded per run and listed in this order (OWNER-NOTES 12): **warm wall clock** (only with
+  `--passes N`), **wall clock** of the fresh process, **CPU time** (perf task-clock over all threads
+  and children), **peak RSS**, **user-space instructions** (plus kernel instructions, counter
+  coverage, host load average, number of other containers).
+- **Warm passes** (`--passes N`, N >= 2; RLVM only): the run line gets `-X passes=N`, the process
+  checks the export N times and prints one line per pass (`rlvm: pass K/N mode=.. wall_ms=..
+  cpu_ms=.. verdict=..`, rlvm-main `Passes`). The tracker reads the pass lines from the run's log
+  (also when `-X passes=N` came through `--rlvm-arg`): `passes` (every pass), `pass1_wall_s`,
+  `warm_wall_s` = the MEDIAN LATER PASS of the run (a real pass: its CPU time is `warm_cpu_s`),
+  `warm_best_s`. A run in which a pass ends with another verdict than expected is invalid. The
+  wall clock, CPU time, RSS and instructions of such a run are those of the whole process (all N
+  passes). Take warm entries inside a `bench/quiet.py` window.
 
-The figure of an entry is the **minimum CPU time over its runs** (default 3; median and maximum are
-kept). Other containers share the eight performance cores, and whatever they do can only add CPU
+The figures of an entry are **minima over its runs** (default 3; for CPU time the median and maximum
+are kept). Other containers share the eight performance cores, and whatever they do can only add
 time, never remove any. Measured on this host: gruszka on mathlib took 62.4, 75.9 and 81.9 s of CPU
-in three runs whose instruction counts are 0.3 % apart. Wall clock likewise; peak RSS is the maximum,
-instructions the median. The baselines are summarised the same way.
+in three runs whose instruction counts are 0.3 % apart. The entry's warm wall clock is the lowest
+median later pass over its runs; peak RSS is the maximum, instructions the median. The baselines
+are summarised the same way.
 
 ## History
 
@@ -90,13 +104,16 @@ instructions the median. The baselines are summarised the same way.
 
 ```
 utc, corpus, export, export_bytes, checker, config ("rlvm/native/t4[/extra args]"), command, launcher, threads,
+warm_wall_s, warm_wall_s_best_pass, warm_cpu_s, pass1_wall_s, passes                 (with --passes N; else null)
 cpu_time_s (min), cpu_time_s_median, cpu_time_s_max, cpu_spread_pct, wall_time_s (min), wall_time_s_median,
 max_rss_bytes, instructions, instructions_kernel,
 valid, invalid_reason,
-threshold_pct, reference_utc, reference_cpu_time_s, cpu_delta_pct, instructions_delta_pct,
+metric ("warm_wall_s" | "wall_time_s"), threshold_pct, reference_utc, reference_value, delta_pct,
+reference_cpu_time_s, cpu_delta_pct, instructions_delta_pct                          (the last three: diagnostics)
 regression, improvement, accepted, reference, accept_reason,
 build {binary, binary_sha256, binary_mtime_utc, built, modules, rlvm_jars_sha256, commit}, note,
-runs [ the complete output of bench/measure.sh per run + started_utc, host_loadavg_start/end, other_containers, log ],
+runs [ the complete output of bench/measure.sh per run + started_utc, host_loadavg_start/end, other_containers, log,
+       passes [ {pass, of, wall_s, cpu_s, gc_ms, load_s, check_s, verdict, pipelined} ], warm_wall_s, ... ],
 phases {load, env, check, total}, phase_runs            (with --phases)
 ```
 
@@ -104,26 +121,36 @@ Raw measurements and the checker's output of every run are in `work/perf-history
 
 ## Regression rule
 
-The entry's CPU time is compared with the **reference** of its configuration (checker, launcher,
-threads, extra arguments): its last accepted entry that was made the reference.
+**The rule is on wall clock** (OWNER-NOTES 12; until 2026-11-24 it was on the CPU time of a cold
+process, which note 12 no longer makes the target). The figure of an entry is its **warm wall
+clock** when it was made with `--passes N` (the median later pass), else the **wall clock of the
+fresh process** - which note 12 reports "for information": a cold entry is judged by it because it
+has nothing else, and the tool says that the target metric needs `--passes`. The figure is compared
+with the **reference** of the entry's configuration (checker, launcher, threads, extra arguments;
+`-X passes=N` is one of them, so warm and cold entries never share a reference): its last accepted
+entry that was made the reference and has that figure.
 
-| CPU time against the reference | Result | Exit |
+| Wall clock against the reference | Result | Exit |
 |---|---|---:|
-| more than 3 % above | **REGRESSION**: recorded with `accepted: false`; the reference stays | 1 |
-| more than 3 % above, with `--accept "REASON"` | accepted on purpose; the reason is stored; becomes the reference | 0 |
-| within 3 % | accepted; the reference stays where it is | 0 |
-| more than 3 % below | improvement; accepted; becomes the reference | 0 |
+| more than 5 % above | **REGRESSION**: recorded with `accepted: false`; the reference stays | 1 |
+| more than 5 % above, with `--accept "REASON"` | accepted on purpose; the reason is stored; becomes the reference | 0 |
+| within 5 % | accepted; the reference stays where it is | 0 |
+| more than 5 % below | improvement; accepted; becomes the reference | 0 |
 | no reference yet | first valid entry: accepted; becomes the reference | 0 |
 | a run with the wrong verdict, a timeout, no counters or partial counter coverage | **INVALID**: recorded, never compared, never a reference | 2 |
 
-- The threshold is `--threshold` (percent, default 3).
+- The threshold is `--threshold` (percent, default 5: two identical 8-worker rows of one quiet window
+  differ by up to 5 %, `docs/research/profiles/J1.md` section 1; it was 3 for CPU time).
 - Entries inside the band do not move the reference, so small regressions cannot add up unnoticed: a
   drift of 2 % per step is flagged at the second step (`selftest.py`).
 - All corpora are accept tests: a valid run exits with 0. The placeholder checker in today's
   `work/dist` declines everything, so its entries are INVALID, which is the intended behaviour.
-- The instruction delta is printed next to the CPU delta but is not part of the rule (owner note 10).
-  It helps to read a flag: CPU time up, instructions unchanged and a busy host mean contention, and
-  the tool says so; re-measure before acting.
+- The CPU-time delta and the instruction delta are printed next to the verdict and are not part of
+  the rule (owner note 12: CPU time is a diagnostic, instructions are the arena's metric). They help
+  to read a flag: wall clock up, instructions unchanged and a busy host mean contention, and the
+  tool says so; re-measure inside a `bench/quiet.py` window before acting.
+- Entries written before the change have no `metric`; a reference among them serves a cold entry
+  with its `wall_time_s`.
 - `--no-record` measures and compares without touching the history; `--note TEXT` is stored.
 
 ## Comparison with the baselines
@@ -155,6 +182,24 @@ load   = the run that stops after loading (process start, reading, loading)
 env    = stop-after=env minus stop-after=load (environment pass)
 check  = complete run minus stop-after=env (checking, verdict, exit)
 ```
+
+## State (2026-11-24, 23Z: the rule follows owner note 12)
+
+- `track.py` **reads the pass lines** (`--passes N`; `read_passes`) and its **regression rule is on
+  wall clock**: warm for an entry with passes, cold otherwise; threshold 5 %. `ladder.py --passes N`
+  makes warm entries for a tier. The comparison and history tables print warm wall, cold wall, CPU,
+  RSS, instructions in that order.
+- `benchmarks.py` is new: `docs/BENCHMARKS.md` is generated from the rows of `bench/warm.sh` (the tool
+  that measures the owner's metric on the host, inside `bench/quiet.py` windows) and, for the
+  instruction counts, from this history; one table per metric in the owner's order, a provenance row
+  per cell (row, window, jars). The former generator is `benchmarks_cold.py`.
+- `bench/warm.py` records the distribution and its build id in every row (`dist`, `build`), has
+  `--load default` (no `-X load`: the checker's own rule) and `--cold-only`.
+- Not done: the tracker itself still runs in the arena-shaped container and does not take a quiet
+  window on its own (call it through `bench/quiet.py --`); warm entries of the baselines do not exist
+  (a Rust checker has no passes: its wall clock is compared with RLVM's warm wall in the comparison
+  table); `selftest.py --docker` was not extended to a run with passes (the fake checker prints none).
+- `selftest.py`: 77 host checks.
 
 ## State (2026-11-24, wave 7)
 
@@ -241,7 +286,8 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
 
 ## Deviations from ARCHITECTURE 9.4
 
-- The rule is on **CPU time with a 3 % threshold** (owner note 10, RECONCILIATION section 0, this
-  wave's task), not "+1 % instructions". Instructions are recorded and shown.
+- The rule is on **wall clock with a 5 % threshold** (owner note 12: warm wall clock where the entry
+  has passes; it was CPU time with 3 % under owner note 10), not "+1 % instructions". CPU time and
+  instructions are recorded and shown.
 - The history is `work/perf-history/CORPUS.jsonl` as specified; `scripts/dev.sh track CORPUS` is not
   added here (`scripts/` belongs to the steward; it should call `bench/track/track.py CORPUS "$@"`).

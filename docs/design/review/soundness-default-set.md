@@ -274,9 +274,11 @@ As coded: in the unfolding step of lazy delta a head whose case tree has shape C
 `I.rec` over its own parameters with eta-expanded minors) runs the tree; every other head, every miss: DELTA.
 Assumes: `whnf_core(unfold_definition(t))` of such a head reduces the recursor at once, so no state of the official
 loop lies between. Correct for this shape (the same-head argument comparison happens in `lstepBoth` before any
-unfolding, whatever the hints of the definition). Note: `And.casesOn` and the other structure `casesOn` of this
-Lean version are `fun .. t intro => intro t.1 t.2` (projections, no recursor): `dc h = 5` is ACCEPTED officially
-(`s3-ct-proof-major-axiom-ok`; my expectation was wrong) and by every set.
+unfolding, whatever the hints of the definition). Note: `And.casesOn` of `init-prelude` is `fun .. t intro => intro
+t.1 t.2` (projections, no recursor; `Prod.casesOn`, `Nat.casesOn`, `List.casesOn`, `Eq.casesOn` are direct
+recursor applications): `dc h = 5` with `dc x := And.casesOn x (fun _ _ => 5)` is ACCEPTED officially
+(`s3-ct-proof-major-axiom-ok`; my expectation was wrong) and by every set, while package S's `d` over `And.rec`
+is stuck on `h`.
 
 A MATCHER tree must not run there, and the reason is stronger than the comment in `Code.rulesCasesOn` says: between
 the unfolding of the matcher and the reduct the official loop can stand at a REGULAR cases function and compare its
@@ -376,7 +378,19 @@ Exact options, cheapest first (none built, no cost measured - I was asked for no
 default set, with the fault and with `-Ds3.bug=0`; CAUGHT = the primary machine's verdict changes to one that is not
 the official one (`work/s3/seeded.py`, outputs `work/s3/out/seeded.out`, `seeded2.out`).
 
-SEEDED_TABLE
+| N | Switch | The fault | Caught by (verdict without -> with the fault) |
+|--:|---|---|---|
+| 1 | `same` | binder domains of two closures are not compared | `s3-same-pi-domain-bad`: R -> A (wrong accept), `same` alone and default |
+| 2 | `same` | the level substitutions of two closures of ONE term are not compared | first run: NOT CAUGHT (`s3-same-ls-differs-bad` is decided by the binder case of the quick test); `s3-same-ls-in-arg-bad` (added): R -> A |
+| 3 | `pchk` | the bit is set and read for open terms too | `s3-pchk-open-term-bad`: R -> A |
+| 4 | `bodies` | SELECT takes the projection of the wrong argument | `s3-bodies-select-bad`: R -> A; `s3-bodies-select-ok`: A -> R |
+| 5 | `match` | a constant of the pattern matches whatever its levels | first run: NOT CAUGHT (`s3-match-const-level-only-bad`: the levels sit in the arguments, which are compared by record identity); `s3-match-phantom-level-bad` (added): R -> A |
+| 6 | `joint` | every leading Pi / lambda pair is a joint binder | `s3-joint-other-domain-bad`: R -> A |
+| 7 | `lazyeval` | the one WHNF also when both sides unfold and the hints choose one | `s3-lazyeval-step-samehead-ok`, `s3-lazycases-intermediate-samehead-ok`, `s3-lazycases-caseson-step-ok`: A -> R (wrong reject) |
+| 8 | `directrules` | every induction hypothesis is built from the first field | `s3-dr-two-hypotheses-bad`: R -> A; `-ok`: A -> R |
+| 9 | `casetrees` | the arguments after the arity of a case tree are dropped | `s3-ct-over-application-ok`: A -> R (default set; with `code,casetrees` alone the row is not affected) |
+| 10 | `lazycases` | every case tree runs in the lazy step, not only shape CASESON | first run: NOT CAUGHT; `s3-lazycases-matcher-over-regular-cases-ok` (added): A -> R |
+| 11 | `code` | MKPROJ of a block reads the neighbouring field | 20 cells of 10 rows, e.g. `s3-bodies-select-stuck-bad`: R -> A, `s3-bodies-select-ok`: A -> R |
 
 A suite that cannot catch a seeded fault has not tested the switch: three of the eleven were NOT caught by the suite
 as it stood at the first run (2, 5, 10). Each pointed at a path I had not exercised - `same` is not reached for two

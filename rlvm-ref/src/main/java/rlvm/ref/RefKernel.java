@@ -1732,7 +1732,18 @@ public final class RefKernel implements KernelOps {
                 if (whnfCoreCache.get(key) == 0) {
                     whnfCoreCache.put(key, r);
                 } else if (key == r) {
-                    fresh = true;
+                    // This frame found the projection stuck, and while it worked a nested call stored
+                    // an entry for an occurrence of the same term. If that occurrence is this object,
+                    // nothing happened; if it is another object, this frame returns an object that is
+                    // not the entry's, and every cache that keeps the result keeps that object.
+                    // Canonical ids cannot tell: no verdict (never seen on a real declaration).
+                    statIdentityEvents++;
+                    if (identityMode == RefOptions.IDENTITY_DECLINE) {
+                        sp = base;
+                        identityDeclined = true;
+                        throw new ResourceException(Reason.UNSUPPORTED_INPUT);
+                    }
+                    fresh = identityMode == RefOptions.IDENTITY_OTHER;
                 }
             }
         }

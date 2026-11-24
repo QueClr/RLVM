@@ -31,11 +31,14 @@ import rlvm.api.EngineProvider;
  * machine.memocheck.budget=N       tick budget of one re-computation (default 65536)
  * </pre>
  *
- * <p>{@link #priority()} is 100 = {@code Engines.DEFAULT_ENGINE_MIN_PRIORITY} since the integration of wave 6
- * (2026-11-24; gates in {@code rlvm-machine/SWITCHES.md} and {@code work/status/machine-integration.md}): the
- * machine is the DEFAULT engine of a distribution that contains it. The reference engine stays the re-check
- * engine (every rejection and every decline of the machine is decided by it) and is selected with
- * {@code -X engine=reference}. It was 10 (never the default) until then.
+ * <p>{@link #priority()} is 10: the machine is NOT the default engine of a distribution that contains it; it is
+ * selected with {@code -X engine=machine}, and the reference engine is the default and the re-check engine (every
+ * rejection and every decline of the machine is decided by it). It was 100 =
+ * {@code Engines.DEFAULT_ENGINE_MIN_PRIORITY} (the default engine) from the integration of wave 6 (2026-11-24 19:41Z;
+ * gates in {@code rlvm-machine/SWITCHES.md} and {@code work/status/machine-integration.md}) until the orchestrator
+ * took it back the same day at 20:28Z: the machine accepts exports the official checker rejects (findings E1-F1 ..
+ * E1-F7 and S3-F1 .. S3-F6 of 2026-11-24; E1-F1 .. F6 are fixed, {@code NOTES-M5.md}; the open classes are listed in
+ * {@code docs/design/review/official-divergence.md}). The priority goes back to 100 only as a publication of its own.
  */
 public final class MachineProvider implements EngineProvider {
 

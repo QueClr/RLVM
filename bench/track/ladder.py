@@ -7,6 +7,7 @@
     bench/track/ladder.py --tier small                      # init, std, cedar, reachability, cedar-hot-ax: 3 runs each
     bench/track/ladder.py --tier small --engine machine --launcher jvm --extra-cp rlvm-machine/target/classes
     bench/track/ladder.py --only cedar-hot-ax,init --launcher jvm --threads 1
+    bench/track/ladder.py --tier small --launcher jvm --passes 5      # WARM entries: 5 passes per process (OWNER-NOTES 12)
     bench/track/ladder.py --baselines gruszka,nano-lean,official --no-rlvm     # only the baselines that are missing
     bench/track/ladder.py --list                            # the ladder and what is recorded for it; measures nothing
 
@@ -17,7 +18,8 @@ Tiers (ARCHITECTURE 9.4; owner note 9: Cedar-level workloads are the yardstick):
     large   con-leche, navier-stokes-euler, cslib, mathlib                                         1 run each
 
 Per corpus and launcher one call of track.py (history work/perf-history/CORPUS.jsonl, comparison with
-the baselines of this host, CPU-time regression rule), then, for every checker named by --baselines
+the baselines of this host, wall-clock regression rule: warm wall clock with --passes N, else the
+cold wall clock), then, for every checker named by --baselines
 that has no measurement on this host for the corpus yet, `track.py CORPUS --checker NAME`.
 
 Only one measurement runs in the container at a time: the ladder takes the lock
@@ -25,7 +27,7 @@ work/perf-history/.ladder.lock around every single track.py call (two measuremen
 cores would spoil each other's CPU time), and releases it between calls so that several queues
 interleave (--batch N: around N consecutive calls). Other tools that measure there should do the same (`flock work/perf-history/.ladder.lock CMD`).
 
-Exit status: 0 everything measured and accepted; 1 at least one CPU-time regression; 2 at least one
+Exit status: 0 everything measured and accepted; 1 at least one wall-clock regression; 2 at least one
 invalid measurement (wrong verdict, timeout, no counters); 70 nothing to run.
 
 Python stdlib only.
@@ -58,11 +60,12 @@ TIER_RUNS = {"small": 3, "perf": 3, "large": 1}
 TIERS = ("small", "perf", "large")
 
 
-def config_name(launcher: str, threads: int | None, engine: str | None, extra_cp: str | None) -> str:
+def config_name(launcher: str, threads: int | None, engine: str | None, extra_cp: str | None, passes: int = 1) -> str:
     """The configuration string track.py gives such a run (track.py: config)."""
     name = f"rlvm/{launcher}/t{threads if threads is not None else 4}"
-    if engine:
-        name += f"/-X engine={engine}"
+    settings = ([f"-X engine={engine}"] if engine else []) + ([f"-X passes={passes}"] if passes > 1 else [])
+    if settings:
+        name += "/" + " ".join(settings)
     if extra_cp:
         name += "/+cp"
     return name
@@ -82,6 +85,7 @@ def main() -> int:
                         help="checkers to measure where this host has no measurement of them for a corpus (comma list; 'none')")
     parser.add_argument("--no-rlvm", action="store_true", help="measure only the missing baselines")
     parser.add_argument("--runs", type=int, help="runs per corpus (default: 3 for the small and perf tiers, 1 for the large one)")
+    parser.add_argument("--passes", type=int, default=1, metavar="N", help="RLVM: N passes per process (track.py --passes N): warm entries, judged by the warm wall clock (default 1: cold entries)")
     parser.add_argument("--history", default=track.DEFAULT_HISTORY, help="history directory (default work/perf-history)")
     parser.add_argument("--note", help="free text stored with every entry")
     parser.add_argument("--accept", metavar="REASON", help="passed to track.py: accept regressions as new references")
@@ -124,9 +128,11 @@ def main() -> int:
             entries = track.read_history(history_dir, corpus)
             have = []
             for launcher in launchers:
-                config = config_name(launcher, threads, engine, args.extra_cp if launcher == "jvm" else None)
-                ref = track.last_reference(entries, config)
-                have.append(f"{config}: {track.fmt_s(ref['cpu_time_s']) + ' s CPU' if ref else 'not measured'}")
+                config = config_name(launcher, threads, engine, args.extra_cp if launcher == "jvm" else None, args.passes)
+                metric = "warm_wall_s" if args.passes > 1 else "wall_time_s"
+                ref = track.last_reference(entries, config, metric)
+                what = "s warm wall" if args.passes > 1 else "s cold wall"
+                have.append(f"{config}: {track.fmt_s(ref[metric]) + ' ' + what if ref else 'not measured'}")
             known = track.load_baselines(corpus, history_dir, arena_name, expected)
             have.append("baselines: " + (", ".join(c for c in baselines if c in known) or "none")
                         + ("; missing: " + ", ".join(c for c in baselines if c not in known) if any(c not in known for c in baselines) else ""))
@@ -148,9 +154,11 @@ def main() -> int:
                     argv += ["--threads", str(threads)]
                 if engine:
                     argv += ["--engine", engine]
+                if args.passes > 1:
+                    argv += ["--passes", str(args.passes)]
                 if args.extra_cp and launcher == "jvm":
                     argv += ["--extra-cp", args.extra_cp]
-                jobs.append((f"{name} {config_name(launcher, threads, engine, args.extra_cp if launcher == 'jvm' else None)}", argv))
+                jobs.append((f"{name} {config_name(launcher, threads, engine, args.extra_cp if launcher == 'jvm' else None, args.passes)}", argv))
         corpus, _export, arena_name, expected = track.resolve(name)
         known = track.load_baselines(corpus, history_dir, arena_name, expected)
         for checker in baselines:
