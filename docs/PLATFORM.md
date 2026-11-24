@@ -1,12 +1,23 @@
-# Platform comparison: JVM launcher, native image, host JIT, collectors, heap
+# Platform: which launcher ships, with which flags, with how many workers
 
-Steward, wave 4, 2026-11-24. Engine: the **reference engine** (`-X engine=reference -X load=batch`), the
-only engine in the distribution today. The binding platform gate (RECONCILIATION section 3) is run when
-the machine accepts Init; this document is its rehearsal with the engine that exists, and its scripts
-are the ones to run again then (section 7).
+Two parts. **Part I** (wave 7, 2026-11-24 13:30Z to 15:10Z) is the platform gate of RECONCILIATION
+section 3: measured with the **machine** as engine (`-X engine=machine`), the engine that will ship,
+and it ends with the decision. **Part II** (wave 4, the same day, 08:00Z to 11:50Z) is the rehearsal
+with the reference engine: launchers, host JIT, collectors and heap sizes in more detail than Part I
+repeats; where the two parts disagree, Part I is the newer measurement of the engine that matters.
 
 Order of the columns everywhere (OWNER-NOTES 10, RECONCILIATION 0): **CPU time** (task-clock over all
 threads), wall clock, peak RSS, instructions.
+
+# Part I - the machine as engine (wave 7)
+
+@@PART1@@
+
+# Part II - the rehearsal with the reference engine (wave 4)
+
+Steward, wave 4, 2026-11-24. Engine: the **reference engine** (`-X engine=reference -X load=batch`), the
+only engine in the distribution at the time. This part was the rehearsal of the platform gate with the
+engine that existed; its scripts are the ones Part I ran again with the machine (section 7).
 
 ## 0. Summary
 

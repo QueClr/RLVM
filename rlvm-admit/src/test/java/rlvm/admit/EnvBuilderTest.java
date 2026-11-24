@@ -155,6 +155,8 @@ class EnvBuilderTest {
         assertEquals(1, p.blocks.generates);
         assertEquals(1, p.blocks.compares);
         assertEquals(1, p.ops.begins);
+        assertEquals(1, p.ops.releases, "the derived terms of the committed block are given back");
+        assertEquals(1, p.env.blockUnits());
         assertEquals(decls.rank(i), p.ops.lastRank);
         assertEquals(f.names(), p.ops.lastLevelParams);
 

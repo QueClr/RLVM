@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """bench/track/benchmarks.py - generate docs/BENCHMARKS.md from the performance history.
 
-    bench/track/benchmarks.py [--engine reference] [--threads 8] [--out docs/BENCHMARKS.md]
+    bench/track/benchmarks.py [--engines machine,reference] [--launcher native] [--threads 8] [--out docs/BENCHMARKS.md]
     bench/track/benchmarks.py --stdout            # print instead of writing
 
-For every corpus of the ladder (bench/track/ladder.py) and every column
+For every corpus of the ladder (bench/track/ladder.py) that has a result of the FIRST engine (the
+machine: the engine that will ship) and every column
 
-    RLVM <engine> JVM | RLVM <engine> native | gruszka | nano-lean | official
+    RLVM machine | RLVM reference | gruszka | nano-lean | official
 
 the table lists CPU time, wall clock, peak RSS and user-space instructions, in that order (owner
-note 10, RECONCILIATION section 0), one table per metric. RLVM's figure is the current reference of
-its configuration in work/perf-history/CORPUS.jsonl (track.py: the last accepted entry that became
-the reference); a baseline's figure comes from bench/baselines.json, work/baselines/ or the history
-(track.py --checker NAME). Everything is the minimum CPU time / wall clock over the runs of an
-entry, the maximum RSS and the median instruction count, as track.py prints them.
+note 10, RECONCILIATION section 0), one table per metric; the RLVM columns are one launcher (default:
+the native image, the arena's binary) and one worker count. A further table has the other launcher
+for both engines, and the corpora without a result of the first engine are listed with the second
+(the reference engine) alone, so that nothing measured disappears from the document. RLVM's figure
+is the current reference of its configuration in work/perf-history/CORPUS.jsonl (track.py: the last
+accepted entry that became the reference); a baseline's figure comes from bench/baselines.json,
+work/baselines/ or the history (track.py --checker NAME). Everything is the minimum CPU time / wall
+clock over the runs of an entry, the maximum RSS and the median instruction count, as track.py
+prints them.
 
 Nothing is measured here: run bench/track/ladder.py first.
 
@@ -68,36 +73,57 @@ def ratio(ours, theirs) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="bench/track/benchmarks.py", description="Generate docs/BENCHMARKS.md from work/perf-history.")
-    parser.add_argument("--engine", default="reference", help="RLVM engine of the two RLVM columns (default reference)")
+    parser.add_argument("--engines", default="machine,reference",
+                        help="RLVM engines, one column each; rows = the corpora with a result of the first (default machine,reference)")
+    parser.add_argument("--engine", help="one engine only (the form of this tool before 2026-11-24T14Z): same as --engines NAME")
+    parser.add_argument("--launcher", default="native", choices=("native", "jvm"), help="launcher of the RLVM columns (default native: the arena's binary)")
     parser.add_argument("--threads", type=int, default=8, help="worker threads of the RLVM configuration (default 8)")
     parser.add_argument("--history", default=track.DEFAULT_HISTORY)
     parser.add_argument("--out", default=os.path.join(ROOT, "docs", "BENCHMARKS.md"))
     parser.add_argument("--stdout", action="store_true")
     args = parser.parse_args()
     history_dir = os.path.abspath(args.history)
+    engines = [e for e in (args.engine or args.engines).split(",") if e]
+    other = "jvm" if args.launcher == "native" else "native"
+    launcher_name = {"native": "native image", "jvm": "JVM launcher"}
 
-    rows = []  # (arg, tier, corpus, size, expected, {column: summary or None}, {column: provenance})
-    columns = [f"RLVM {args.engine} JVM", f"RLVM {args.engine} native", *BASELINES]
+    def rlvm_col(engine: str) -> str:
+        return f"RLVM {engine}"
+
+    def other_col(engine: str) -> str:
+        return f"RLVM {engine} ({other})"
+
+    rows = []  # (arg, tier, corpus, size, expected, {column: summary or None})
+    rlvm_columns = [rlvm_col(e) for e in engines]
+    other_columns = [other_col(e) for e in engines]
+    columns = [*rlvm_columns, *BASELINES]
     for name, tier in ladder.LADDER:
         corpus, export, arena_name, expected = track.resolve(name)
         entries = track.read_history(history_dir, corpus)
         cells: dict[str, dict | None] = {}
-        for launcher, column in (("jvm", columns[0]), ("native", columns[1])):
-            config = ladder.config_name(launcher, args.threads, args.engine, None)
-            cells[column] = track.last_reference(entries, config)
+        for engine in engines:
+            cells[rlvm_col(engine)] = track.last_reference(entries, ladder.config_name(args.launcher, args.threads, engine, None))
+            cells[other_col(engine)] = track.last_reference(entries, ladder.config_name(other, args.threads, engine, None))
         known = track.load_baselines(corpus, history_dir, arena_name, expected)
         for checker in BASELINES:
             cells[checker] = known.get(checker)
         for checker in MORE_BASELINES:
             cells["+" + checker] = known.get(checker)
         rows.append((name, tier, corpus, os.path.getsize(export), expected, cells))
+    first = rlvm_columns[0]
+    main_rows = [r for r in rows if r[5][first]]
+    rest_rows = [r for r in rows if not r[5][first]]
+
+    def label_of(name: str, size: int, expected: int) -> str:
+        label = f"{name} ({size / 1e6:,.0f} MB)" if size >= 1e6 else f"{name} ({size / 1e3:,.0f} kB)"
+        return label + (", reject" if expected == 1 else "")
 
     out: list[str] = []
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     out.append("# RLVM benchmarks")
     out.append("")
     out.append(f"GENERATED by `bench/track/benchmarks.py` on {now} from `work/perf-history/` and the baselines of this host; do not")
-    out.append("edit. Regenerate: `bench/track/ladder.py` (measure), then `bench/track/benchmarks.py`.")
+    out.append("edit. Regenerate: `bench/track/ladder.py --engine machine --launcher native` (measure), then `bench/track/benchmarks.py`.")
     out.append("")
     out.append("## What the numbers are")
     out.append("")
@@ -107,9 +133,13 @@ def main() -> int:
     out.append("- **Where**: this host (aarch64; Cortex-X925 performance cores), one fresh container per run, shaped like the arena")
     out.append("  runner: 8 CPUs, 16 GB, no network (`bench/arena-docker.sh --arena-limits --no-network bench/measure.sh`). The arena")
     out.append("  itself runs on x86-64; absolute numbers differ, ratios between checkers carry over only roughly.")
-    out.append(f"- **RLVM**: engine `{args.engine}`, `--threads {args.threads}`, batch load, the arena's run line otherwise")
-    out.append("  (`scripts/arena/rlvm.yaml`, whose own thread count is still 4). JVM = `bin/rlvm-jvm` (GraalVM CE 25, SerialGC, 13 GB")
-    out.append("  heap, so its RSS is mostly heap reservation that was touched); native = the CE native image `bin/rlvm`.")
+    out.append(f"- **RLVM columns**: one per engine (`-X engine=NAME`), {launcher_name[args.launcher]}, `--threads {args.threads}`, batch load, the arena's")
+    out.append("  run line otherwise (`scripts/arena/rlvm.yaml`, whose own thread count is 4). **RLVM machine** is the engine that will")
+    out.append("  ship (`rlvm-machine`: the worklist machine; today it runs only when named, and a unit it declines is checked by the")
+    out.append("  reference engine, whose time is then part of the figure); **RLVM reference** is the fallback and re-check engine,")
+    out.append("  today's default. native = the CE native image `bin/rlvm` (`-O3`); JVM = `bin/rlvm-jvm` (GraalVM CE 25, SerialGC,")
+    out.append("  13 GB heap, so its RSS is mostly heap reservation that was touched). Which launcher ships and why: `docs/PLATFORM.md`.")
+    out.append("- **Rows**: every corpus of the ladder with a machine result; the others are listed at the end with the reference engine.")
     out.append("- **Baselines**: gruszka, nano-lean and the official checker (`leanchecker`, arena version v4.35.0) with the run lines")
     out.append("  of the arena's checker definitions (gruszka and nano-lean use 4 threads, the official checker one), measured the")
     out.append("  same way on the same host (`docs/research/12-baselines.md`, `bench/baselines.json`).")
@@ -118,53 +148,97 @@ def main() -> int:
     out.append("  average are in the provenance table at the end. `-` = not measured on this host.")
     out.append("- **Regression rule** (`bench/track/README.md`): an RLVM entry more than 3 % above the reference of its")
     out.append("  configuration in CPU time is a regression; the cells below are those references.")
-    loads, spreads = [], []
-    for _name, _tier, _corpus, _size, _expected, cells in rows:
-        for column in columns[:2]:
+    for column in rlvm_columns:
+        loads, spreads = [], []
+        for _name, _tier, _corpus, _size, _expected, cells in rows:
             cell = cells[column]
             if cell:
                 loads += [r["host_loadavg_start"][0] for r in cell.get("runs") or [] if r.get("host_loadavg_start")]
                 if cell.get("cpu_spread_pct") is not None and (cell.get("n_runs") or 0) > 1:
                     spreads.append(cell["cpu_spread_pct"])
-    if loads:
-        loads.sort()
-        line = (f"- **How quiet the host was**: 1-minute load average at the start of the {len(loads)} RLVM runs: minimum {loads[0]:.0f}, "
-                f"median {loads[len(loads) // 2]:.0f}, maximum {loads[-1]:.0f} (20 CPUs; the container has 8 of them to itself only")
-        out.append(line)
-        out.append("  as far as other jobs are pinned elsewhere). Contention inflates CPU time and wall clock, never instruction counts.")
-        if spreads:
-            spreads.sort()
-            out.append(f"  Between the runs of one three-run entry, CPU time differs by {spreads[0]:.1f} % to {spreads[-1]:.1f} % "
-                       f"(median {spreads[len(spreads) // 2]:.1f} %): read CPU differences below that as noise.")
+        if loads:
+            loads.sort()
+            line = (f"- **How quiet the host was, {column}**: 1-minute load average at the start of the {len(loads)} runs: minimum {loads[0]:.0f}, "
+                    f"median {loads[len(loads) // 2]:.0f}, maximum {loads[-1]:.0f} (20 CPUs; the container has 8 of them to itself only as far as")
+            out.append(line)
+            tail = "  other jobs are pinned elsewhere). Contention inflates CPU time and wall clock, never instruction counts."
+            if spreads:
+                spreads.sort()
+                tail += (f" Between the runs of\n  one three-run entry, CPU time differs by {spreads[0]:.1f} % to {spreads[-1]:.1f} % "
+                         f"(median {spreads[len(spreads) // 2]:.1f} %): read CPU differences below that as noise.")
+            out.append(tail)
     out.append("")
 
-    metrics = (
-        ("CPU time (s)", "cpu_time_s", fmt_cpu),
-        ("Wall clock (s)", "wall_time_s", fmt_cpu),
-        ("Peak RSS", "max_rss_bytes", fmt_rss),
-        ("Instructions (user space)", "instructions", fmt_instr),
-    )
-    for title, key, fmt in metrics:
-        out.append(f"## {title}")
+    def metric_tables(table_rows, table_columns, ratio_pairs):
+        metrics = (
+            ("CPU time (s)", "cpu_time_s", fmt_cpu),
+            ("Wall clock (s)", "wall_time_s", fmt_cpu),
+            ("Peak RSS", "max_rss_bytes", fmt_rss),
+            ("Instructions (user space)", "instructions", fmt_instr),
+        )
+        for title, key, fmt in metrics:
+            out.append(f"## {title}")
+            out.append("")
+            head = "| Corpus | " + " | ".join(table_columns) + " |"
+            extra = ratio_pairs if key == "cpu_time_s" else []
+            for a, b in extra:
+                head += f" {a.replace('RLVM ', '')} / {b.replace('RLVM ', '')} |"
+            out.append(head)
+            out.append("|---|" + "--:|" * (len(table_columns) + len(extra)))
+            last_tier = None
+            for name, tier, corpus, size, expected, cells in table_rows:
+                if tier != last_tier:
+                    out.append(f"| *{TIER_TITLE[tier]}* |" + " |" * (len(table_columns) + len(extra)))
+                    last_tier = tier
+                line = f"| {label_of(name, size, expected)} | " + " | ".join(fmt((cells[c] or {}).get(key)) for c in table_columns) + " |"
+                for a, b in extra:
+                    line += f" {ratio((cells[a] or {}).get(key), (cells[b] or {}).get(key))} |"
+                out.append(line)
+            out.append("")
+
+    pairs = [(c, "gruszka") for c in rlvm_columns]
+    if len(rlvm_columns) > 1:
+        pairs.append((rlvm_columns[0], rlvm_columns[1]))
+    if main_rows:
+        metric_tables(main_rows, columns, pairs)
+    else:
+        out.append(f"(no result of engine `{engines[0]}` with the {launcher_name[args.launcher]} and {args.threads} workers in the history yet)")
         out.append("")
-        head = "| Corpus | " + " | ".join(columns) + " |"
-        if key == "cpu_time_s":
-            head += " JVM / gruszka | native / gruszka |"
-        out.append(head)
-        out.append("|---|" + "--:|" * (len(columns) + (2 if key == "cpu_time_s" else 0)))
-        last_tier = None
+
+    # The other launcher, both engines: CPU time / wall clock / peak RSS in one table.
+    if any(cells[c] for _n, _t, _c, _s, _e, cells in rows for c in other_columns):
+        out.append(f"## The other launcher ({launcher_name[other]}), {args.threads} workers: CPU time (s) / wall clock (s) / peak RSS")
+        out.append("")
+        out.append("| Corpus | " + " | ".join(other_columns) + " | " + " | ".join(f"{other} / {args.launcher} CPU, {e}" for e in engines) + " |")
+        out.append("|---|" + "--:|" * (2 * len(other_columns)))
         for name, tier, corpus, size, expected, cells in rows:
-            if tier != last_tier:
-                out.append(f"| *{TIER_TITLE[tier]}* |" + " |" * (len(columns) + (2 if key == "cpu_time_s" else 0)))
-                last_tier = tier
-            label = f"{name} ({size / 1e6:,.0f} MB)" if size >= 1e6 else f"{name} ({size / 1e3:,.0f} kB)"
-            if expected == 1:
-                label += ", reject"
-            line = f"| {label} | " + " | ".join(fmt((cells[c] or {}).get(key)) for c in columns) + " |"
-            if key == "cpu_time_s":
-                g = (cells["gruszka"] or {}).get(key)
-                line += f" {ratio((cells[columns[0]] or {}).get(key), g)} | {ratio((cells[columns[1]] or {}).get(key), g)} |"
-            out.append(line)
+            if not any(cells[c] for c in other_columns):
+                continue
+            parts = []
+            for c in other_columns:
+                cell = cells[c]
+                parts.append("-" if not cell else f"{fmt_cpu(cell.get('cpu_time_s'))} / {fmt_cpu(cell.get('wall_time_s'))} / {fmt_rss(cell.get('max_rss_bytes'))}")
+            for c, e in zip(other_columns, engines):
+                parts.append(ratio((cells[c] or {}).get("cpu_time_s"), (cells[rlvm_col(e)] or {}).get("cpu_time_s")))
+            out.append(f"| {label_of(name, size, expected)} | " + " | ".join(parts) + " |")
+        out.append("")
+
+    if rest_rows and len(rlvm_columns) > 1:
+        second = rlvm_columns[1]
+        out.append(f"## Corpora without a machine result yet: {second}, CPU time (s) / wall clock (s) / peak RSS")
+        out.append("")
+        out.append(f"| Corpus | {second} | {other_columns[1]} | gruszka | nano-lean | official | {second.replace('RLVM ', '')} / gruszka |")
+        out.append("|---|--:|--:|--:|--:|--:|--:|")
+        for name, tier, corpus, size, expected, cells in rest_rows:
+            parts = []
+            for c in (second, other_columns[1]):
+                cell = cells[c]
+                parts.append("-" if not cell else f"{fmt_cpu(cell.get('cpu_time_s'))} / {fmt_cpu(cell.get('wall_time_s'))} / {fmt_rss(cell.get('max_rss_bytes'))}")
+            for c in BASELINES:
+                cell = cells[c]
+                parts.append("-" if not cell else f"{fmt_cpu(cell.get('cpu_time_s'))} / {fmt_cpu(cell.get('wall_time_s'))}")
+            parts.append(ratio((cells[second] or {}).get("cpu_time_s"), (cells["gruszka"] or {}).get("cpu_time_s")))
+            out.append(f"| {label_of(name, size, expected)} | " + " | ".join(parts) + " |")
         out.append("")
 
     out.append("## All baselines of this host: CPU time (s) / wall clock (s)")
@@ -187,10 +261,12 @@ def main() -> int:
     out.append("|---|---|--:|---|---|---|---|")
     builds = set()
     for name, tier, corpus, size, expected, cells in rows:
-        for column in columns:
+        for column in [*rlvm_columns, *other_columns, *BASELINES, "+sokonanoda", "+rpylean"]:
             cell = cells[column]
+            shown = column.lstrip("+")
             if not cell:
-                out.append(f"| {name} | {column} | 0 | - | - | - | not measured |")
+                if column in rlvm_columns or column in BASELINES:
+                    out.append(f"| {name} | {shown} | 0 | - | - | - | not measured |")
                 continue
             runs = cell.get("runs") or []
             loads = [str(r["host_loadavg_start"][0]) for r in runs if r.get("host_loadavg_start")]
@@ -205,7 +281,7 @@ def main() -> int:
                                   f", jars sha256 {build.get('rlvm_jars_sha256', '')[:12]}"))
             else:
                 source = f"`{cell.get('source', '?')}`"
-            out.append(f"| {name} | {column} | {cell.get('n_runs', len(runs))} | {spread} | {when} | {', '.join(loads) or '-'} | {source} |")
+            out.append(f"| {name} | {shown} | {cell.get('n_runs', len(runs))} | {spread} | {when} | {', '.join(loads) or '-'} | {source} |")
     out.append("")
     if builds:
         out.append("RLVM builds measured: " + "; ".join(sorted(builds)) + ".")
@@ -216,7 +292,7 @@ def main() -> int:
     else:
         with open(args.out, "w") as handle:
             handle.write(text)
-        print(f"written: {os.path.relpath(args.out, ROOT)} ({len(rows)} corpora)")
+        print(f"written: {os.path.relpath(args.out, ROOT)} ({len(main_rows)} corpora with a result of `{engines[0]}`, {len(rest_rows)} without)")
     return 0
 
 

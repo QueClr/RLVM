@@ -27,9 +27,10 @@
 #                             (2-3 minutes, about 900 s of CPU): scripts/build.sh --published --no-pgo;
 #                             `--opt 2` builds in half the time and runs 10-18 % slower
 #   dist-versions             list the versions in work/dist.d/ and the one work/dist names
-#   dist-tree [options]       everything compiled from the working tree, JVM launcher + native
-#                             image(s) + PGO: plain scripts/build.sh (what the arena build does; it
-#                             fails if any module of the tree does not compile at the moment)
+#   dist-tree [options]       everything compiled from the working tree, JVM launcher + CE native
+#                             image: plain scripts/build.sh (what the arena build does; it fails
+#                             if any module of the tree does not compile at the moment). The Oracle
+#                             GraalVM PGO image is built only with `--pgo` (measurements only)
 #   dist-quick [options]      scripts/build.sh --jvm-only from the working tree
 #   info                      print work/dist/BUILD-INFO.txt and the toolchain versions
 #

@@ -9,7 +9,9 @@
                                                          of the document from work/steward/platform/results/TAG.jsonl;
                                                          also  ratio:TAG:CONTROL[:corpora][:threads]  (paired
                                                          ratios against one configuration) and
-                                                         legend:TAG[:config,...]  (what each configuration is)
+                                                         legend:TAG[:config,...]  (what each configuration is),
+                                                         scaling:TAG[:config,...][:BASE]  (CPU time and wall
+                                                         clock by worker count, relative to BASE workers)
 
 Input: the JSON lines written by scripts/platform-matrix.py. One table row per (corpus, workers,
 configuration), columns in the project's order: CPU time, wall clock, peak RSS, instructions.
@@ -33,7 +35,7 @@ import sys
 
 ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 RESULTS = os.path.join(ROOT, "work/steward/platform/results")
-CORPUS_ORDER = ["init", "std", "cedar", "reachability", "cslib", "con-leche", "navier-stokes-euler", "mathlib"]
+CORPUS_ORDER = ["init", "std", "cedar-hot-ax", "cedar", "reachability", "cslib", "con-leche", "navier-stokes-euler", "mathlib"]
 
 
 def load(tag: str) -> list[dict]:
@@ -190,6 +192,49 @@ def ratios(rows: list[dict], control: str, corpora: list[str] | None = None, thr
     return "\n".join(out) + "\n"
 
 
+def scaling(rows: list[dict], configs: list[str] | None = None, base: int = 1) -> str:
+    """Worker scaling per (corpus, configuration): CPU time and wall clock at every measured worker
+    count (minimum over the repeats), and what more workers cost and buy against `base` workers:
+    CPU time relative to `base` (the price: above 1.00 = the workers disturb each other or idle
+    threads are billed) and the speed-up in wall clock. The question behind the run line's
+    `--threads`."""
+    groups: dict[tuple, list[dict]] = {}
+    order: list[str] = []
+    for r in rows:
+        if r.get("exit_code") != 0 or r.get("timed_out"):
+            continue
+        if configs and r["config"] not in configs:
+            continue
+        if r["config"] not in order:
+            order.append(r["config"])
+        groups.setdefault((r["corpus"], r["config"], r["threads"]), []).append(r)
+    if not groups:
+        return "(no measurements yet)\n"
+    if configs:
+        order = [c for c in configs if c in order]
+    ts = sorted({k[2] for k in groups})
+    cs = sorted({k[0] for k in groups}, key=lambda c: (CORPUS_ORDER.index(c) if c in CORPUS_ORDER else 99, c))
+    head = ["Corpus", "Configuration"] + ["CPU s, %d w" % t for t in ts] + ["Wall s, %d w" % t for t in ts] \
+        + ["CPU %d w / %d w" % (t, base) for t in ts if t != base] + ["Wall %d w / %d w" % (base, t) for t in ts if t != base] \
+        + ["Peak RSS, %d w" % ts[-1], "Runs"]
+    out = ["| " + " | ".join(head) + " |", "|---|---|" + "--:|" * (len(head) - 2)]
+    for corpus in cs:
+        for c in order:
+            cpu = {t: min(r["cpu_time_s"] for r in groups[(corpus, c, t)]) for t in ts if (corpus, c, t) in groups}
+            wall = {t: min(r["wall_time_s"] for r in groups[(corpus, c, t)]) for t in ts if (corpus, c, t) in groups}
+            if not cpu:
+                continue
+            row = [corpus, "`%s`" % c] + [fmt_s(cpu[t]) if t in cpu else "-" for t in ts] \
+                + [fmt_s(wall[t]) if t in wall else "-" for t in ts]
+            row += ["%.2f" % (cpu[t] / cpu[base]) if t in cpu and base in cpu else "-" for t in ts if t != base]
+            row += ["%.2f" % (wall[base] / wall[t]) if t in wall and base in wall else "-" for t in ts if t != base]
+            top = max(t for t in ts if (corpus, c, t) in groups)
+            row.append(fmt_rss(max(r.get("max_rss_bytes") or 0 for r in groups[(corpus, c, top)])))
+            row.append("/".join(str(len(groups.get((corpus, c, t), []))) for t in ts))
+            out.append("| " + " | ".join(row) + " |")
+    return "\n".join(out) + "\n"
+
+
 def legend(rows: list[dict], configs: list[str] | None = None) -> str:
     seen: dict[str, dict] = {}
     for r in rows:
@@ -245,6 +290,14 @@ def main() -> int:
                 body = ratios(rows, parts[1],
                               parts[2].split(",") if len(parts) > 2 and parts[2] not in ("", "-") else None,
                               [int(t) for t in parts[3].split(",")] if len(parts) > 3 and parts[3] not in ("", "-") else None)
+            elif kind == "scaling":
+                # scaling:TAG[:config,...][:base workers]
+                parts = spec.split(":")
+                rows = []
+                for t in parts[0].split("+"):
+                    rows += load(t)
+                body = scaling(rows, parts[1].split(",") if len(parts) > 1 and parts[1] not in ("", "-") else None,
+                               int(parts[2]) if len(parts) > 2 and parts[2] not in ("", "-") else 1)
             else:
                 parts = spec.split(":")
                 rows = []
@@ -253,7 +306,7 @@ def main() -> int:
                 body = legend(rows, parts[1].split(",") if len(parts) > 1 and parts[1] not in ("", "-") else None)
             return "<!-- BEGIN %s:%s -->\n%s<!-- END %s:%s -->" % (kind, spec, body, kind, spec)
 
-        new = re.sub(r"<!-- BEGIN (table|legend|ratio):(\S+) -->\n.*?<!-- END \1:\2 -->", repl, text, flags=re.S)
+        new = re.sub(r"<!-- BEGIN (table|legend|ratio|scaling):(\S+) -->\n.*?<!-- END \1:\2 -->", repl, text, flags=re.S)
         if new != text:
             with open(path, "w") as f:
                 f.write(new)

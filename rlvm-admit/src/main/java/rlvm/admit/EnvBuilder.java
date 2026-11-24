@@ -72,6 +72,25 @@ public final class EnvBuilder implements Runnable {
      * looked at): at most this many units, shared term nodes and proof-block records, and this many
      * node visits. A file that left file order gets the larger budget.
      */
+    /**
+     * The derived terms of an admitted inductive block are given back to the session's overlay as
+     * soon as the block is committed ({@code -Drlvm.admit.releaseBlocks=false} keeps them until the
+     * owner of the session resets it: the behaviour before wave 7, kept for measurements).
+     */
+    private final boolean releaseBlocks = !"false".equals(System.getProperty("rlvm.admit.releaseBlocks"));
+
+    /**
+     * {@code -Drlvm.admit.stats=true}: the pass measures itself (two clock reads per call of
+     * {@link #advanceTo} that has work to do) and prints one line to standard error when the
+     * frontier reaches the end of the completely loaded file. Off by default; {@link #blockNanos()}
+     * and {@link #blockUnits()} are always counted (two clock reads per inductive / quot unit).
+     */
+    private final boolean stats = Boolean.getBoolean("rlvm.admit.stats");
+    private long passNanos;
+    private long blockNanos;
+    private int blockUnits;
+    private boolean statsPrinted;
+
     private static final int ORDER_CHECK_UNITS = 1 << 14;
     private static final int ORDER_CHECK_NODES = 1 << 19;
     private static final int ORDER_CHECK_RECORDS = 1 << 19;
@@ -307,6 +326,38 @@ public final class EnvBuilder implements Runnable {
         if (limit <= env) {
             return env;
         }
+        if (!stats) {
+            return advance(limit);
+        }
+        long t0 = System.nanoTime();
+        try {
+            return advance(limit);
+        } finally {
+            passNanos += System.nanoTime() - t0;
+            if (!statsPrinted && store.loadComplete() && (env >= store.loadedUnits() || failedUnit >= 0)) {
+                statsPrinted = true;
+                System.err.println("rlvm-admit-stats: environment pass " + env + " units in " + passNanos / 1000
+                        + " us (inductive / quot units: " + blockUnits + " in " + blockNanos / 1000 + " us; "
+                        + (replay != null ? "dependency order from unit " + replay.first : "file order") + ")");
+            }
+        }
+    }
+
+    /**
+     * Wall-clock nanoseconds this pass spent deciding inductive and quot units in file order
+     * (structural checks, {@code rlvm-inductive}, the judgments of its {@code KernelOps}, commit).
+     * The thread that runs the pass reads it; for the driver's statistics.
+     */
+    public long blockNanos() {
+        return blockNanos;
+    }
+
+    /** Number of inductive and quot units this pass looked at in file order. */
+    public int blockUnits() {
+        return blockUnits;
+    }
+
+    private int advance(int limit) {
         terms.refresh();
         waitingForLoad = false;
         int start = env;
@@ -639,11 +690,16 @@ public final class EnvBuilder implements Runnable {
             case DeclKind.QUOT_MK:
             case DeclKind.QUOT_LIFT:
             case DeclKind.QUOT_IND:
+            case DeclKind.INDUCT: {
                 decided = true;
-                return quotUnit(first, kind);
-            case DeclKind.INDUCT:
-                decided = true;
-                return blockUnit(u, first, size);
+                long t0 = System.nanoTime();
+                try {
+                    return kind == DeclKind.INDUCT ? blockUnit(u, first, size) : quotUnit(first, kind);
+                } finally {
+                    blockNanos += System.nanoTime() - t0;
+                    blockUnits++;
+                }
+            }
             default:
                 return fail(Reason.INTERNAL_ERROR, "unit of unknown kind " + kind);
         }
@@ -824,6 +880,15 @@ public final class EnvBuilder implements Runnable {
         if (r != null || typeless) {
             return r;
         }
+        Overlay overlay = releaseBlocks ? terms.overlay() : null;
+        long mark = 0L;
+        if (overlay != null) {
+            try {
+                mark = overlay.mark();
+            } catch (UnsupportedOperationException e) {
+                overlay = null;
+            }
+        }
         r = generateAndCompare(in.rank);
         if (r != null) {
             return r;
@@ -832,6 +897,15 @@ public final class EnvBuilder implements Runnable {
             nestedBeforeLoadEnd = true;
         }
         commitBlock(u, first, size);
+        if (overlay != null) {
+            // Nothing derived survives the block (the rows hold exported shared terms and numbers): give
+            // the derived terms back at once, as checkPlain does for a declaration. The session's
+            // hash-consing index then stays at the size of ONE block instead of growing to the caller's
+            // session cap, and every probe of the next block stays in the cache (measured: README).
+            ops.begin(Integer.MAX_VALUE, IntLists.EMPTY);
+            overlay.resetTo(mark);
+            terms.refresh();
+        }
         return null;
     }
 

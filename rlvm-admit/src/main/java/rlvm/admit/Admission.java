@@ -41,6 +41,15 @@ public final class Admission {
     private final StructuralChecks structural;
     private final DeclTable decls;
 
+    /**
+     * {@code -Drlvm.admit.stats=true}: this worker times its structural checks (which include the
+     * decoding of a theorem's proof block) and prints one line to standard error when it admits the
+     * last unit of the file. Off by default (two clock reads per unit when on).
+     */
+    private final boolean stats = Boolean.getBoolean("rlvm.admit.stats");
+    private long structuralNanos;
+    private int structuralUnits;
+
     private Reason lastReason;
     private String lastMessage;
     /** Source of a lazily built message: the session whose check produced the last outcome. */
@@ -96,7 +105,17 @@ public final class Admission {
                 if (rs != null) {
                     return replayed(unit, kind, rs);
                 }
-                return checkConstant(decls.unitFirstCid(unit), kind, session, budget);
+                if (!stats) {
+                    return checkConstant(decls.unitFirstCid(unit), kind, session, budget);
+                }
+                try {
+                    return checkConstant(decls.unitFirstCid(unit), kind, session, budget);
+                } finally {
+                    if (unit == ctx.store.loadedUnits() - 1 && ctx.store.loadComplete()) {
+                        System.err.println("rlvm-admit-stats: structural checks of this worker: " + structuralUnits
+                                + " units in " + structuralNanos / 1000 + " us (proof blocks decoded for them included)");
+                    }
+                }
             }
             case DeclKind.INDUCT:
             case DeclKind.QUOT_TYPE:
@@ -156,11 +175,16 @@ public final class Admission {
 
     private int checkConstant(int cid, int kind, Session session, Budget budget) {
         Reason r;
+        long t0 = stats ? System.nanoTime() : 0L;
         try {
             r = structural.checkConstant(cid);
         } catch (Overlay.OverlayFullException e) {
             return fail(Reason.BUDGET_MEMORY, "term overlay full while decoding the proof block of '"
                     + ctx.store.names().toString(decls.name(cid)) + "'");
+        }
+        if (stats) {
+            structuralNanos += System.nanoTime() - t0;
+            structuralUnits++;
         }
         if (r != null) {
             return fail(r, "'" + ctx.store.names().toString(decls.name(cid)) + "': " + structural.lastMessage());

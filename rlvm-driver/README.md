@@ -24,6 +24,8 @@ says so.
 | Verdict rule of RECONCILIATION section 2, fail-closed chain of 8.1 | done |
 | Cancellation on first failure; **memory account by allocated capacity, one victim at the watermark** | done |
 | Sessions reset by footprint, after any outcome but ACCEPT, when the rank steps back, **before a unit beyond the lane's snapshot, and when a lane's unused capacity grew (give-back)** | done |
+| **Session cap per engine** (`RunConfig.sessionBytes = 0`, the default: 4 MiB for the machine, 16 MiB otherwise; a configured value wins) | done (wave 7; see "Session cap") |
+| **A slow unit returns the rest of its claim while it is still running** (at a poll of its session; before: after it had ended) | done (wave 7; see "Scheduler" and "Slow units") |
 | Statistics (`RunStats`, JSON), explanation line on stderr | done |
 | Differential mode (`RunConfig.differential`); **`RunConfig.referenceFallback = false` (`no-fallback`)**: the engine under test alone | done |
 | Namespace ordering (`OrderPolicy.Kind.NAMESPACE_WINDOW`, `RunConfig.order`) | **deferred**: `OrderPolicy.of`, `Scheduler` constructor and `Run.execute()` throw `UnsupportedOperationException` |
@@ -78,6 +80,9 @@ lane (reference engine) uses the worker count. Engines are created with `EngineC
 
 ### Settings by name
 
+`RunConfig.sessionBytes` is not in this list: `-X session-mib=N` is a key of `rlvm-main` (it sets the field; 0 /
+absent = the per-engine default below).
+
 `RunConfig.set(key, value)` / `setAll("key=value,key=value")` / `knows(key)` cover the driver's own knobs, so
 that the launcher needs no code per knob (`rlvm-main` is asked to pass unknown `-X` keys through). Until it
 does, `Run` reads the same list from the environment variable `RLVM_DRIVER` (only when it has a `Wiring`;
@@ -90,7 +95,7 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `gc-after-mib=N` | `gcAfterBytes`: ask for a collection when the heap holds N MiB of unaccounted bytes | 0 = never |
 | `chunk=N` | `chunkUnits` | 32 |
 | `env-batch=N` | `envBatchUnits` | 4096 |
-| `spill-ms=N` | `spillNanos` | 20 |
+| `spill-ms=N` | `spillNanos`: a unit running longer returns the rest of its claim | 20 |
 | `publish-units=N`, `publish-mib=N` | pipelined hand-off interval | 4096 units, 32 MiB |
 | `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
 | `no-fallback` | `referenceFallback = false` | off |
@@ -133,10 +138,29 @@ dropped record (size 0)     -> SKIPPED, counts as accepted
 u >= lane's covered units   -> reset the warm session first (pipelined: the lane's level / list / literal snapshot)
 rank(u) <= last rank        -> reset the warm session first (I5)
 o = admit(u) in the warm session; budget: no step limit, unitBytes, no depth limit
-ACCEPT                      -> final. Reset the session if Session.footprintBytes() > sessionBytes, or if the lane's
+ACCEPT                      -> final. Reset the session if Session.footprintBytes() > the session cap (sessionBytes,
+                               or the primary engine's default: machine 4 MiB, else 16 MiB), or if the lane's
                                unused capacity grew by more than keepBytes and the last units did not need it (give-back)
 anything else               -> reset the session; if u is still <= firstFailure: re-check now, on this thread
+at every poll of the unit's session (RunSignals.memoryExhausted, every few thousand steps): if the unit has been
+                               running for more than spillNanos, give the unstarted rest of the claim back
 ```
+
+### Session cap (`sessionBytes`)
+
+`RunConfig.sessionBytes = 0` (the default) = automatic: the cap of a session is the default of the engine it
+belongs to, `RunConfig.defaultSessionBytes(Engine.name())`: **4 MiB for the machine** (requested by the machine
+integrator and confirmed by the sweep in "Measured": with its warm sessions 16 MiB is slower than no warm
+session at all), 16 MiB for every other engine (RECONCILIATION section 3). The workers' warm sessions use the
+primary engine's cap (`Run.sessionBytes()`, statistic `driver.sessionBytes`), the environment lane the
+reference kernel's. A positive value (`-X session-mib=N`) applies to every session.
+
+Who provides the default: `rlvm.api.Engine` has no method for it, so the table is in the driver, keyed by the
+engine's name. Since 13:34Z `rlvm.api.EngineProvider.runDefaults(options)` exists (the wiring applies a
+provider's preferred `-X` settings, e.g. `session-mib=4`, unless the command line names the key): an engine
+that states its cap there overrides this table, because the wiring then sets `sessionBytes`. The machine also
+has a cap of its own inside the session (`-X machine.session-kib`, off by default); the three compose: the
+smallest one that is in force resets first.
 
 ### Re-check protocol (ARCHITECTURE 8.2 / 6.5 / 6.6)
 
@@ -191,10 +215,26 @@ Units that became ready since the last split form a batch. When a worker without
 cut into `min(W, |batch| / chunk)` contiguous runs (at least one), one per worker starting with the caller;
 runs are appended to the workers' queues. A worker takes chunks of `chunkUnits` (32) from the front of its
 first run. A worker without a run and without a batch steals the back half of the largest remaining run (the
-whole run if it is no longer than a chunk). A unit that took longer than `spillNanos` (20 ms) makes its
-worker give back the unstarted rest of its claim; given-back units are served before anything else, except
-that a worker never takes them ahead of a lower unit waiting in its own run. Units above the first failure
+whole run if it is no longer than a chunk). A unit that runs longer than `spillNanos` (20 ms) makes its
+worker give back the unstarted rest of its claim (see "Slow units"); given-back units are served before
+anything else, except that a worker never takes them ahead of a lower unit waiting in its own run. Units above the first failure
 are never handed out. One lock, taken once per claim; idle workers wait on its monitor.
+
+**Slow units.** A claim is up to `chunkUnits` (32) units that nobody else can take. Until wave 7 a worker
+returned the rest of its claim only after the slow unit had ended, so a heavy unit kept up to 31 units waiting
+behind it, the next heavy one among them, while the other workers had nothing to do (reachability: units 4137,
+4139, 4145 and 4158 carry 93 % of the steps and lie inside one or two claims). Now the rest goes back while
+the unit is still running: `Worker.sample()`, which every session calls through `RunSignals.memoryExhausted()`
+every few thousand steps (the machine every 4,096 ticks, the reference kernel every 1,024 steps), looks at the
+clock when the claim still has a rest and gives it back once the unit has run for `spillNanos`; a worker also
+gives the rest back before it waits for the heavy gate, and, as before, when the unit has ended or is deferred
+to the end of the load. Everything happens on the worker's own thread through the existing `Scheduler.giveBack`:
+the scheduler and its lock are unchanged, and the exhaustive interleaving test got the new move (give back
+while the unit is unfinished). The time only decides who checks a unit. Statistic:
+`driver.scheduler.restsReleasedInUnit`. A unit that does not poll (none known) keeps its claim until it ends.
+Not done: stealing from the tail of a busy worker's claim by an idle worker (it would also balance the last
+claims of a batch of fast units, at the price of a shared claim cursor per unit and more sessions that step
+back in rank and are reset; the heavy case, which is what costs wall clock, is covered without it).
 
 **Progress.** Warm sessions have no step limit, so a unit behind an ill-typed unit may never finish; it
 ends when the failure of the ill-typed unit is recorded and its session polls `firstFailure`. This needs
@@ -367,7 +407,7 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
 
 ## Tests and commands
 
-`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (96 tests, 3 of them opt-in; about 40 s). All but
+`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (100 tests, 3 of them opt-in; about 40 s). All but
 `ArenaIntegrationTest` use fake engines, a fake admission, a fake environment pass and a fake loader (`Fakes`).
 
 - `VerdictBoardTest`: the status chain by enumeration (every assignment of 5 statuses to up to 4 units x
@@ -393,8 +433,11 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
   cancellation), memory retries in runs, a non-terminating gate holder behind an ill-typed unit, give-back,
   the settings by name, the automatic worker count.
 - `RunTest`: fail-closed paths (Error, exceptions outside a unit, incomplete load, count mismatch),
-  environment failures, non-termination behind a failure, session reset rules, memory watermark, load
-  failures through a `Wiring`, stop-after, `no-fallback`, deferred features, diagnostics, statistics JSON.
+  environment failures, non-termination behind a failure, session reset rules, **the session cap per engine
+  name**, memory watermark, load failures through a `Wiring`, stop-after, `no-fallback`, deferred features,
+  diagnostics, statistics JSON; **slow units**: a heavy unit that ends only when the last unit of its own
+  claim was checked (the run hangs unless the rest is given back while the unit runs; 2 / 4 / 8 workers), two
+  heavy units in one claim, no give-back with one worker or with `spill-ms=0`.
 - `ArenaIntegrationTest` (real reader, loader, store, admission, reference kernel; `TestWiring` mirrors
   `rlvm.main.MainWiring`, batch and pipelined): the 141 tutorial tests with one worker; the same verdict and
   deciding unit for 1 / 2 / 4 / 8 workers and a 1-byte session cap; the same when the file is checked while
@@ -406,12 +449,17 @@ Commands (all in `rlvm-driver/bin/`, none touches another module):
 | Command | What it does |
 |---|---|
 | `invariance.sh [CORPUS...]` | **the invariance suite as one command**, to run before every publication: every file 9 times (batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication after every unit / 7 units / 64 units and 1 / 4 / 8 workers); verdict and deciding unit must be equal and the verdict the expected one. A pipelined run that DECLINES what the batch run decides is counted apart ("pipelined declines") and is not a failure; any ACCEPT / REJECT difference is. Corpora: `published` (231 files), `tutorial` (12,260 mutants), `bugs` (2,692), `mdata` (1,976), `prelude` (847), `big` (init-prelude, Init, Std, cedar), `all`. Pinned to the efficiency cores. Exit 0 = PASS |
-| `threads-gate.sh EXPORT...` | the worker-count gate (above) |
+| `threads-gate.sh EXPORT...` | the worker-count gate (above); `--engine machine [-X machine.switches=...]` for the machine |
 | `measure-bench.sh EXPORT [DriverBench options]` | one measured run of `DriverBench` in the arena-shaped container (for what the launcher cannot run yet) |
 | `freeze-cp.sh [TAG]` | a frozen copy of the test class path for long runs |
 
+`invariance.sh --engine machine [-X machine.switches=warm,gated,expect] CORPUS...` runs the same suite with the
+published `rlvm-machine` jar as primary engine (the launcher's `-X engine=machine`; `freeze-cp.sh TAG machine`
+adds the jar to the frozen class path).
+
 `DriverBench` (a `main` in the test tree): any export or directory through the driver with a `Wiring` equal to
 `MainWiring`: `-j N`, `--compare`, `--pipelined [--publish-units N]`, `--set k=v,..`, `--stats F`,
+`--engine NAME [--engine-opt KEY=VALUE]` (an engine found through `ServiceLoader`, as `rlvm-main` does),
 `--mem-trace F [--gc-every S]` (accounted, shared and heap bytes every second; with `--gc-every` what is
 reachable).
 
@@ -650,7 +698,7 @@ without the limits, and in the invariance suite, each of them has the expected v
 | ARCH 6.3: one global claim front | per-worker contiguous runs per batch, stealing | RECONCILIATION section 3 (C2.4) |
 | ARCH 6.5: warm budget 5 x 10^7 steps | no step limit warm (`warmSteps`), no depth limit warm (`warmDepth`) | RECONCILIATION section 3 (C2.5); a depth limit only made deep units run twice, workers have deep stacks |
 | ARCH 6.5: warm byte budget 1 GiB | the whole headroom, `memoryLimit - shared` (at least 256 MiB) | any smaller budget made units run twice (measured); the account's victim rule and the heavy gate bound the run instead |
-| ARCH 6.4: `sessionBytes` 32 MiB, footprint = session + context | 16 MiB, `Session.footprintBytes()` alone; the context's unused capacity is a separate trigger (`keepBytes`) | RECONCILIATION section 3 (C1.6): footprint = bytes in use, counted once |
+| ARCH 6.4: `sessionBytes` 32 MiB, footprint = session + context | per engine: 4 MiB for the machine, 16 MiB otherwise; `Session.footprintBytes()` alone; the context's unused capacity is a separate trigger (`keepBytes`) | RECONCILIATION section 3 (C1.6): footprint = bytes in use, counted once; "swept by CPU time once the machine runs Std": done, see "Measured" |
 | ARCH 6.7: above the limit `memoryExhausted()` is true (for everybody) | true for the largest holder only; for everybody above limit + margin | everybody giving up at once threw away the work of all workers and made the re-checks compete again |
 | ARCH 6.1 / 6.5: heavy-lane threads (0-2) with deep stacks | re-checks run at once on the worker's own thread, which has a deep stack; memory retries one at a time through `HeavyGate` | a deferred re-check lets units behind an ill-typed unit run on (possibly forever, there is no step limit); a second thread only adds a hand-off. Costs W stack reservations of 1 GiB (virtual) |
 | ARCH 0.6 / 6.6: "REJECT iff some rejection was confirmed" | status of the first non-accepted unit in file order | RECONCILIATION section 2 (C3.13) |

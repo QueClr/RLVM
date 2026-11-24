@@ -6,8 +6,10 @@
 # Result (default work/dist/):
 #   bin/rlvm-jvm     JVM-mode launcher (sh script; runs lib/*.jar on the build's GraalVM)
 #   bin/rlvm         native image, GraalVM CE, with Truffle runtime compilation
-#   bin/rlvm-pgo     native image, Oracle GraalVM + profile-guided optimisation (only if
-#                    .toolchain/oracle-graalvm-25 exists; see "PGO" below)
+#   bin/rlvm-pgo     native image, Oracle GraalVM + profile-guided optimisation: ONLY with --pgo, for
+#                    measurements that are labelled as such (owner's decision of 2026-11-24, OWNER-NOTES
+#                    item 11: no default build or script downloads or uses Oracle GraalVM; nothing
+#                    that ships depends on it). See "PGO" below
 #   lib/*.jar        every module of the reactor plus its runtime dependencies (Truffle, polyglot)
 #   BUILD-INFO.txt   versions, flags, build times, sizes
 # A history of build times and sizes is appended to work/build/build-times.tsv.
@@ -41,7 +43,8 @@
 #      shared distribution is `cp -aL work/dist DIR` (-L: the files, not the link). A private
 #      distribution (--dist DIR) is replaced in place as before (--versioned gives it the same scheme).
 #
-# PGO (Oracle GraalVM only; `--pgo-instrument` does not exist in CE)
+# PGO (Oracle GraalVM only; `--pgo-instrument` does not exist in CE). Never part of a default build:
+# it needs --pgo and an Oracle GraalVM that somebody put into .toolchain/oracle-graalvm-25 by hand.
 #   a. the modules are compiled against the Truffle version of the Oracle GraalVM (its GRAALVM_VERSION);
 #   b. an instrumented image is built (native-image --pgo-instrument);
 #   c. TRAINING: the instrumented image runs `--truffle-probe` (so that the runtime compiler itself is
@@ -61,10 +64,12 @@ usage() {
   cat <<'EOF'
 Usage: scripts/build.sh [options]
 
-What to build (default: JVM launcher + CE native image + PGO image if Oracle GraalVM is present):
+What to build (default: JVM launcher + CE native image; GraalVM CE only):
   --jvm-only            jars and bin/rlvm-jvm only (about 15 s)
-  --no-pgo              do not build bin/rlvm-pgo
-  --pgo                 require bin/rlvm-pgo (fail if .toolchain/oracle-graalvm-25 is missing)
+  --pgo                 also build bin/rlvm-pgo with Oracle GraalVM + PGO, for MEASUREMENTS ONLY
+                        (GFTC licence; never the default, never what ships; fails if
+                        .toolchain/oracle-graalvm-25 is missing - it is not downloaded by any script)
+  --no-pgo              no bin/rlvm-pgo (the default; kept for older command lines)
   --modules A,B         build only these modules (and what they depend on); default: all modules
                         of the parent pom
   --published           compile only the --modules (default: rlvm-main) and take every other RLVM
@@ -107,7 +112,7 @@ since() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
 
 DIST="$ROOT/work/dist"
 want_native=1
-want_pgo=auto
+want_pgo=no   # Oracle GraalVM is used only on request (--pgo): OWNER-NOTES item 11
 modules=""
 published=0
 run_tests=0
@@ -168,9 +173,7 @@ ORACLE_HOME_DIR="${RLVM_ORACLE_GRAALVM:-$ROOT/.toolchain/oracle-graalvm-25}"
 
 graalvm_version() { sed -n 's/^GRAALVM_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$1/release"; }
 
-if [ "$want_pgo" = auto ]; then
-  if [ "$want_native" = 1 ] && [ -x "$ORACLE_HOME_DIR/bin/native-image" ]; then want_pgo=yes; else want_pgo=no; fi
-elif [ "$want_pgo" = yes ]; then
+if [ "$want_pgo" = yes ]; then
   [ -x "$ORACLE_HOME_DIR/bin/native-image" ] || die "--pgo: no Oracle GraalVM at $ORACLE_HOME_DIR"
 fi
 if [ "$want_native" = 1 ]; then

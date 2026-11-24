@@ -13,7 +13,10 @@ import rlvm.store.Terms;
  */
 final class FakeOps implements KernelOps {
     private final WorkerContext ctx;
+    /** Scopes opened for a unit. */
     int begins;
+    /** Scopes opened only to drop the kernel's caches before derived terms are released. */
+    int releases;
     int lastRank = -1;
     int lastLevelParams = -1;
 
@@ -23,6 +26,11 @@ final class FakeOps implements KernelOps {
 
     @Override
     public void begin(int rank, int levelParams) {
+        if (rank == Integer.MAX_VALUE) {
+            // The scope "after everything" the pass opens before it gives a block's derived terms back.
+            releases++;
+            return;
+        }
         begins++;
         lastRank = rank;
         lastLevelParams = levelParams;
