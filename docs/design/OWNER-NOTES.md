@@ -82,3 +82,22 @@ owner's words.
       labelled; nothing that ships depends on it.
     - Version control: the orchestrator commits every step (agents still do not run git commands).
     - Team size: up to 32 agents at a time; the extra seats go to profiling and optimisation.
+
+12. (2026-11-24) "as I said, instruction cost is what arena chasing, not us. wall clock time after
+    warmup/pipelined is our goal. we care about 'real checking performance'"
+    Reading (this refines note 10 and replaces every "CPU time first" in earlier documents and briefs):
+    - THE GOAL IS REAL CHECKING PERFORMANCE: wall-clock time of checking with parallel workers, measured in
+      steady state, i.e. after warm-up (JIT compilation, table growth, page faults of the first seconds) and
+      with loading pipelined with checking. Instruction counts are the arena's metric, not ours: they are
+      recorded for information only. CPU time is a secondary diagnostic (it tells how much parallelism is
+      left), not the target.
+    - Warm-up cost is not charged. Consequences: a JIT (HotSpot C2 or Graal on the JVM launcher, and the
+      Truffle tier for the machine's code objects) is judged by the steady-state speed it reaches, not by
+      what compiling costs; background compiler threads on spare cores are fine; promotion thresholds can be
+      low; the platform question (JVM with JIT against native image) is decided by warm wall clock.
+    - Every benchmark reports, in this order: warm wall clock with 8 workers (pipelined), warm wall clock
+      with 1 worker, cold wall clock of a fresh process (for information), CPU time, peak RSS, instructions.
+      "Warm" = the same process checks the same export again after a first pass (per-pass times reported), or
+      the steady-state rate after the first N seconds of a long corpus.
+    - Correctness rules are unchanged, and the arena's interface (run line, exit codes, official verdicts) is
+      still honoured; only the optimisation target changed.

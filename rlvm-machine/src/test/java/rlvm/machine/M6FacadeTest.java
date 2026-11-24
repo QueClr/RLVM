@@ -727,6 +727,9 @@ class M6FacadeTest {
         assertEquals(Op.SW_ALL & ~Op.SW_WARM, Debug.parseSwitches("all,-warm"));
         assertEquals(0, Debug.parseSwitches("all") & (Op.SW_K2 | Op.SW_T2 | Op.SW_EXPERIMENTS), "all = every named switch but k2 and t2");
         assertEquals(Op.SW_CODE | Op.SW_CASETREES | Op.SW_T2, Debug.parseSwitches("code,casetrees,t2"));
+        assertEquals(Op.SW_LAZY_EVAL | Op.SW_LEVELS_COMPLETE, Debug.parseSwitches("lazyeval,levels-complete"));
+        assertEquals("lazyeval,levels-complete", Debug.switchNames(Op.SW_LAZY_EVAL | Op.SW_LEVELS_COMPLETE));
+        assertEquals(0, Debug.parseSwitches("all") & (Op.SW_LAZY_EVAL | Op.SW_LEVELS_COMPLETE));
         assertEquals(Op.SW_M1A | Op.SW_M7B, Debug.parseSwitches("m1a,m7b"));
         assertEquals("m1a,m7b", Debug.switchNames(Op.SW_M1A | Op.SW_M7B));
         assertEquals(Op.SW_M2A | Op.SW_M2B | Op.SW_M3A | Op.SW_M3B | Op.SW_M4A | Op.SW_M4B | Op.SW_M5A | Op.SW_M5B,

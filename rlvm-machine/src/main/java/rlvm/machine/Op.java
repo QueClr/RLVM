@@ -474,6 +474,19 @@ public final class Op {
      * path the switch changes nothing. Not part of {@code all}.
      */
     public static final int SW_T2 = 1 << 23;
+    /**
+     * Conversion (request of M4, 2026-11-24): when exactly one side of a lazy-delta step unfolds and the other
+     * side is weak-head normal, the unfolding side is reduced by one WHNF instead of one DELTA + cheap CORE per
+     * LSTEP ({@code Conv.lstep}). Off by default; not part of {@code all}.
+     */
+    public static final int SW_LAZY_EVAL = 1 << 24;
+    /**
+     * Universe levels (owner decision of 2026-11-24, OWNER-NOTES item 11): OFF = levels are compared as the
+     * official kernel compares them (the default of both engines); ON = the complete relation of
+     * {@code rlvm-level}'s canonical forms ({@code Levels.lvlEq / listsEq}, M1). Not part of {@code all};
+     * never on in strict mode (like every switch).
+     */
+    public static final int SW_LEVELS_COMPLETE = 1 << 25;
     /** Every experiment switch. */
     public static final int SW_EXPERIMENTS = SW_M1A | SW_M1B | SW_M2A | SW_M2B | SW_M3A | SW_M3B | SW_M4A | SW_M4B | SW_M5A
             | SW_M5B | SW_M7A | SW_M7B;

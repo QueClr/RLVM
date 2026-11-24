@@ -215,7 +215,7 @@ public final class Layout {
     public static final int TSTAMP_PERM = 0x3FFF_FFFF;
 
     // ---------------------------------------------------------------------------------------------------
-    // 1.6 / 2.4 Runs: rs[r] = len:24 (31..8) | 0:4 | open:1 (3) | kind:2 (2..1) | far:1 (0);
+    // 1.6 / 2.4 Runs: rs[r] = len:24 (31..8) | count:4 (7..4) | open:1 (3) | kind:2 (2..1) | far:1 (0);
     //                 rs[r + 1] = content hash;  far: rs[r + 2] = id of the REST run;  then the slots.
     //                 Run id = r; 0 = the empty run.
     // ---------------------------------------------------------------------------------------------------
@@ -230,6 +230,15 @@ public final class Layout {
      * and {@code runHeaderWords} ignore it; a comparison of headers masks it out.
      */
     public static final int RUN_OPEN = 1 << 3;
+    /**
+     * Header bits 4..7 of a FRAME or REST run: the number of slots that are not {@link #HOLE}, saturating at
+     * 15 (set by {@code Runs}, M1; announced 2026-11-24). Like {@link #RUN_OPEN} a function of the content,
+     * not part of the run's identity; 0 in a SPINE run.
+     */
+    public static final int RUN_CNT_SHIFT = 4;
+    public static final int RUN_CNT_MASK = 0xF;
+    /** The header bits that are functions of the content ({@link #RUN_OPEN} and the count): masked out when two headers are compared. */
+    public static final int RUN_DERIVED = RUN_OPEN | RUN_CNT_MASK << RUN_CNT_SHIFT;
     public static final int RUN_KIND_SHIFT = 1;
     public static final int RUN_KIND_MASK = 3;
     public static final int RUN_FRAME = 0;

@@ -90,6 +90,21 @@ public final class Machine {
          */
         public int keepRecords = 0;
         public int keepRunWords = 0;
+        /**
+         * The LIFO working arrays (environment slab, worklist, side buffer, scope stack, scratch, registers)
+         * keep the capacity they grew to across a reset, up to 2^keepStack words each (never below the base);
+         * 0 = return to the base size. A stack is only touched up to its high-water mark, so a larger one
+         * costs no locality, and returning it to the base made the next deep declaration allocate and fault
+         * it in again.
+         */
+        public int keepStack = 0;
+        /**
+         * Session arrays are pooled per machine (NOTES-M6 F25): a slab that outgrows its kept size leaves the
+         * kept array behind for the next reset instead of making it garbage, and pair tables that grew are
+         * pooled by size like the intern tables. False = every such array is allocated anew (the A/B of F25,
+         * {@code -Drlvm.machine.pool=off}).
+         */
+        public boolean pool = true;
 
         /**
          * The base sizes of a session. ISA 1.6 sized them for the 16 MiB cap (2^18 records, 2^19 / 2^18 table
@@ -113,9 +128,38 @@ public final class Machine {
                 s.pairs = o[4];
                 s.plog = o[5];
             }
-            s.keepRecords = Math.max(s.records, 18);   // the ISA 1.6 capacities: 8 MiB + 4 MiB per worker at most
-            s.keepRunWords = Math.max(s.runWords, 20);
+            int[] k = KEEP;
+            s.keepRecords = Math.max(s.records, k[0]);   // default: the ISA 1.6 capacities, 8 MiB + 4 MiB per worker at most
+            s.keepRunWords = Math.max(s.runWords, k[1]);
+            s.keepStack = k[2];
+            s.pool = POOL;
             return s;
+        }
+
+        /**
+         * Kept capacities in force (log2): records, run words, stack words. {@code -Drlvm.machine.keep=R,W,S};
+         * default 18, 20, 20 (8 MiB of records, 4 MiB of run words, 4 MiB per working array at most).
+         */
+        private static final int[] KEEP = keepSizes(System.getProperty("rlvm.machine.keep"));
+        private static final boolean POOL = !"off".equals(System.getProperty("rlvm.machine.pool"));
+
+        static int[] keepSizes(String p) {
+            int[] dflt = {18, 20, 20};
+            if (p == null || p.isEmpty()) {
+                return dflt;
+            }
+            String[] f = p.split(",");
+            if (f.length != dflt.length) {
+                throw new IllegalArgumentException("rlvm.machine.keep: three numbers expected, got '" + p + "'");
+            }
+            int[] o = new int[f.length];
+            for (int i = 0; i < f.length; i++) {
+                o[i] = Integer.parseInt(f[i].trim());
+                if (o[i] < 0 || o[i] > 27) {
+                    throw new IllegalArgumentException("rlvm.machine.keep: log2 sizes are 0..27, got '" + p + "'");
+                }
+            }
+            return o;
         }
 
         /** Base sizes in force (log2): records, vtab, run words, rtab, pairs, plog; null = the ISA 1.6 sizes. */
@@ -490,9 +534,39 @@ public final class Machine {
         if (!heapAllows(8L * vh.length)) {
             return false;
         }
-        vh = Arrays.copyOf(vh, vh.length << 1);
+        int[] old = vh;
+        vh = Arrays.copyOf(old, old.length << 1);
+        allocGrows++;
+        allocGrowBytes += 8L * old.length;
+        if (sizes.pool && old.length == keptRecordWords()) {
+            vhKept = old; // the next reset takes it back: no regrowth from the base after a large declaration
+        }
         return true;
     }
+
+    /** Words of the record slab a reset keeps (the larger of the base and the kept size). */
+    private int keptRecordWords() {
+        return Layout.REC_WORDS << Math.max(sizes.records, sizes.keepRecords);
+    }
+
+    /** Words of the run slab a reset keeps. */
+    private int keptRunWords() {
+        return 1 << Math.max(sizes.runWords, sizes.keepRunWords);
+    }
+
+    /** Words of a working array of base size 2^base that a reset keeps. */
+    private int keptStackWords(int base) {
+        return 1 << Math.max(base, sizes.keepStack);
+    }
+
+    /** A slab that outgrew its kept size left this array behind ({@code Sizes.pool}); null = none. */
+    private int[] vhKept;
+    private int[] rsKept;
+    /** Arrays allocated by growth (doublings) and their bytes; arrays allocated by {@link #reset()} and their bytes. Cold paths only. */
+    long allocGrows;
+    long allocGrowBytes;
+    long allocResets;
+    long allocResetBytes;
 
     private boolean growVtab() {
         if (!heapAllows(8L * vtab.length)) {
@@ -565,6 +639,14 @@ public final class Machine {
                 return false;
             }
         }
+        if (!allZero(pair)) {
+            return false;
+        }
+        for (int[] t : ppool) {
+            if (t != null && !allZero(t)) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -625,7 +707,13 @@ public final class Machine {
         if (!heapAllows(4L * n)) {
             return false;
         }
-        rs = Arrays.copyOf(rs, n);
+        int[] old = rs;
+        rs = Arrays.copyOf(old, n);
+        allocGrows++;
+        allocGrowBytes += 4L * n;
+        if (sizes.pool && old.length == keptRunWords()) {
+            rsKept = old;
+        }
         return true;
     }
 
@@ -673,6 +761,8 @@ public final class Machine {
                 throw new HeapLimit(limitDetail);
             }
             plog = Arrays.copyOf(plog, plogN << 1);
+            allocGrows++;
+            allocGrowBytes += 8L * plogN;
         }
         plog[plogN++] = slot;
         if ((++pairUsed << 1) > pairMask + 1) {
@@ -689,7 +779,7 @@ public final class Machine {
         if (!heapAllows(4L * (entries << Layout.PAIR_SHIFT))) {
             throw new HeapLimit(limitDetail);
         }
-        int[] tab = new int[entries << Layout.PAIR_SHIFT];
+        int[] tab = takePairs(Integer.numberOfTrailingZeros(entries), false);
         int mask = entries - 1;
         int[] old = pair;
         for (int i = 0; i < plogN; i++) {
@@ -704,10 +794,51 @@ public final class Machine {
             tab[n + Layout.PAIR_LO] = lo;
             tab[n + Layout.PAIR_HI] = hi;
             tab[n + Layout.PAIR_STATUS] = old[o + Layout.PAIR_STATUS];
+            old[o + Layout.PAIR_LO] = 0; // the old table is all zero when the loop ends: it can be pooled as it is
+            old[o + Layout.PAIR_HI] = 0;
+            old[o + Layout.PAIR_STATUS] = 0;
             plog[i] = slot;
         }
+        poolPairs(old);
         pair = tab;
         pairMask = mask;
+    }
+
+    /**
+     * Retired pair tables by log2 of their entry count, EVERY ONE ALL ZERO (as {@link #vpool}; NOTES-M6 F25):
+     * before, every declaration that outgrew the base pair table allocated each larger table anew and the
+     * reset allocated a new base table.
+     */
+    private final int[][] ppool = new int[TAB_POOL_MAX - Layout.PAIR_SHIFT + 1][];
+
+    /** A pair table of 2^k entries, all zero: the pooled one, or a new array (counted as a growth or as a reset allocation). */
+    private int[] takePairs(int k, boolean atReset) {
+        if (sizes.pool && k < ppool.length) {
+            int[] t = ppool[k];
+            if (t != null) {
+                ppool[k] = null;
+                return t;
+            }
+        }
+        if (atReset) {
+            allocResets++;
+            allocResetBytes += 4L << (k + Layout.PAIR_SHIFT);
+        } else {
+            allocGrows++;
+            allocGrowBytes += 4L << (k + Layout.PAIR_SHIFT);
+        }
+        return new int[1 << (k + Layout.PAIR_SHIFT)];
+    }
+
+    /** Keeps the ALL-ZERO pair table {@code t} for reuse (unless it is too large or its size is already kept). */
+    private void poolPairs(int[] t) {
+        if (!sizes.pool) {
+            return;
+        }
+        int k = Integer.numberOfTrailingZeros(t.length) - Layout.PAIR_SHIFT;
+        if (k < ppool.length && ppool[k] == null) {
+            ppool[k] = t;
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -727,6 +858,8 @@ public final class Machine {
             return false;
         }
         es = Arrays.copyOf(es, grown(es.length, ep + n));
+        allocGrows++;
+        allocGrowBytes += 4L * es.length;
         return true;
     }
 
@@ -743,6 +876,8 @@ public final class Machine {
             return false;
         }
         X = Arrays.copyOf(X, grown(X.length, xp + n));
+        allocGrows++;
+        allocGrowBytes += 4L * X.length;
         return true;
     }
 
@@ -759,6 +894,8 @@ public final class Machine {
             return false;
         }
         RS = Arrays.copyOf(RS, grown(RS.length, rp + n));
+        allocGrows++;
+        allocGrowBytes += 4L * RS.length;
         return true;
     }
 
@@ -1399,6 +1536,8 @@ public final class Machine {
                 return false;
             }
             W = Arrays.copyOf(W, grown(W.length, wp + n));
+            allocGrows++;
+            allocGrowBytes += 4L * W.length;
         }
         System.arraycopy(S, sp, W, wp, n);
         wp += n;
@@ -1611,8 +1750,19 @@ public final class Machine {
                 }
             }
         }
-        if (vh.length > Layout.REC_WORDS << Math.max(sizes.records, sizes.keepRecords)) {
-            vh = new int[Layout.REC_WORDS << sizes.records];
+        if (vh.length > keptRecordWords()) {
+            // a slab beyond the kept size goes back to the heap; the kept array it left behind is taken back
+            // (its content is dead: a record is written whole before it is read)
+            if (vhKept != null) {
+                vh = vhKept;
+                if (poison) {
+                    Arrays.fill(vh, 0);
+                }
+            } else {
+                vh = new int[Layout.REC_WORDS << sizes.records];
+                allocResets++;
+                allocResetBytes += 4L * vh.length;
+            }
             vp = Layout.FIRST_RECORD;
         } else if (poison) {
             Arrays.fill(vh, vbase << Layout.REC_SHIFT, vp << Layout.REC_SHIFT, 0);
@@ -1622,6 +1772,7 @@ public final class Machine {
         } else {
             vp = Layout.FIRST_RECORD;
         }
+        vhKept = null;
         vbase = vp;
         // rtab
         if (rtab.length != 1 << sizes.rtab) {
@@ -1649,8 +1800,17 @@ public final class Machine {
                 r += Layout.runHeaderWords(hdr) + Layout.runLen(hdr);
             }
         }
-        if (rs.length > 1 << Math.max(sizes.runWords, sizes.keepRunWords)) {
-            rs = new int[1 << sizes.runWords];
+        if (rs.length > keptRunWords()) {
+            if (rsKept != null) {
+                rs = rsKept;
+                if (poison) {
+                    Arrays.fill(rs, 0);
+                }
+            } else {
+                rs = new int[1 << sizes.runWords];
+                allocResets++;
+                allocResetBytes += 4L * rs.length;
+            }
             rsp = Layout.FIRST_RUN;
         } else if (poison) {
             Arrays.fill(rs, rbase, rsp, 0);
@@ -1660,13 +1820,12 @@ public final class Machine {
         } else {
             rsp = Layout.FIRST_RUN;
         }
+        rsKept = null;
         rbase = rsp;
         rtabUsed = 0;
         // pairs
-        if (pairMask + 1 != 1 << sizes.pairs) {
-            pair = new int[Layout.PAIR_WORDS << sizes.pairs];
-            pairMask = (1 << sizes.pairs) - 1;
-        } else {
+        {
+            // the entries in use are those of the log: zeroed in O(used), whatever the table's size
             int[] t = pair;
             for (int i = 0; i < plogN; i++) {
                 int o = plog[i] << Layout.PAIR_SHIFT;
@@ -1674,9 +1833,16 @@ public final class Machine {
                 t[o + Layout.PAIR_HI] = 0;
                 t[o + Layout.PAIR_STATUS] = 0;
             }
+            if (pairMask + 1 != 1 << sizes.pairs) {
+                poolPairs(t); // all zero now
+                pair = takePairs(sizes.pairs, true);
+                pairMask = (1 << sizes.pairs) - 1;
+            }
         }
-        if (plog.length != 1 << sizes.plog) {
-            plog = new int[1 << sizes.plog];
+        if (plog.length > keptStackWords(sizes.plog)) {
+            plog = new int[1 << sizes.plog]; // the log is written before it is read: a grown one is kept as it is
+            allocResets++;
+            allocResetBytes += 4L * plog.length;
         }
         plogN = 0;
         pairUsed = 0;
@@ -1695,23 +1861,24 @@ public final class Machine {
             epoch = 1;
         }
         // control stacks (the records the scope stack points to are gone: nothing to release)
-        if (es.length != 1 << sizes.env) {
-            es = new int[1 << sizes.env];
+        // (a working array that grew is kept up to 2^keepStack words: LIFO, touched up to its high-water mark only)
+        if (es.length > keptStackWords(sizes.env)) {
+            es = resetArray(sizes.env);
         }
-        if (W.length != 1 << sizes.worklist) {
-            W = new int[1 << sizes.worklist];
+        if (W.length > keptStackWords(sizes.worklist)) {
+            W = resetArray(sizes.worklist);
         }
-        if (S.length != 1 << sizes.side) {
-            S = new int[1 << sizes.side];
+        if (S.length > keptStackWords(sizes.side)) {
+            S = resetArray(sizes.side);
         }
-        if (SC.length != 1 << sizes.scope) {
-            SC = new int[1 << sizes.scope];
+        if (SC.length > keptStackWords(sizes.scope)) {
+            SC = resetArray(sizes.scope);
         }
-        if (X.length != 1 << sizes.scratch) {
-            X = new int[1 << sizes.scratch];
+        if (X.length > keptStackWords(sizes.scratch)) {
+            X = resetArray(sizes.scratch);
         }
-        if (RS.length != 1 << sizes.regs) {
-            RS = new int[1 << sizes.regs];
+        if (RS.length > keptStackWords(sizes.regs)) {
+            RS = resetArray(sizes.regs);
         }
         wp = 0;
         sp = S.length;
@@ -1736,6 +1903,13 @@ public final class Machine {
         x4.reset(this);
         x5.reset(this);
         x7.reset(this);
+    }
+
+    /** A working array of base size 2^log2, allocated by a reset (counted). */
+    private int[] resetArray(int log2) {
+        allocResets++;
+        allocResetBytes += 4L << log2;
+        return new int[1 << log2];
     }
 
     /** True if the session holds nothing: no record, run or pair entry (a reset would change nothing but the epoch). */

@@ -151,6 +151,90 @@ class MachineStateTest {
         }
     }
 
+    /**
+     * NOTES-M6 F25: session arrays are pooled per machine. A slab that outgrows its kept size leaves the kept
+     * array behind and the reset takes it back (no new array, no regrowth from the base); pair tables are
+     * pooled by size and every pooled one is all zero; working arrays keep what they grew to up to
+     * 2^keepStack words. With {@code pool = false} the same session allocates at every reset.
+     */
+    @Test
+    void sessionArraysArePooledAcrossResets() {
+        Machine.Sizes z = Machine.Sizes.tiny();
+        z.keepRecords = 8;   // 256 records kept
+        z.keepRunWords = 10; // 1024 run words kept
+        z.keepStack = 12;
+        Machine m = new Machine(z);
+        // warm-up: grow to the kept sizes (these arrays stay)
+        for (int i = 0; i < 200; i++) {
+            sort(m, i);
+            TestTables.internRun(m, Layout.RUN_FRAME, 0, i, i + 1);
+        }
+        m.reset();
+        int[] keptRecords = m.vh;
+        int[] keptRuns = m.rs;
+        assertEquals(Layout.REC_WORDS << 8, keptRecords.length);
+        assertEquals(1 << 10, keptRuns.length);
+        long grows = m.allocGrows;
+        for (int round = 0; round < 4; round++) {
+            for (int i = 0; i < 5000; i++) {
+                sort(m, i);
+                TestTables.internRun(m, Layout.RUN_FRAME, 0, i, i + 1, i + 2);
+                if (i < 2000) { // the pair log stays below 2^keepStack entries
+                    TestTables.pairAdd(m, Layout.FIRST_RECORD + i, Layout.imm(i), Layout.POS);
+                }
+            }
+            assertTrue(m.vh.length > keptRecords.length && m.rs.length > keptRuns.length);
+            assertTrue(m.ensureScratch(3000) && m.ensureEnv(3000) && m.ensureRegs(3000));
+            assertEquals(Layout.POS, TestTables.pairStatus(m, Layout.imm(77), Layout.FIRST_RECORD + 77));
+            int[] x = m.X;
+            int[] es = m.es;
+            int[] rs = m.RS;
+            m.reset();
+            assertTrue(m.vh == keptRecords, "round " + round + ": the kept record slab came back");
+            assertTrue(m.rs == keptRuns, "round " + round + ": the kept run slab came back");
+            assertEquals(Layout.PAIR_WORDS << z.pairs, m.pair.length);
+            assertTrue(m.X == x && m.es == es && m.RS == rs, "working arrays below 2^keepStack words are kept");
+            assertTrue(m.tablesClean(), "round " + round + ": a pooled table is not all zero");
+            assertEquals(0, m.allocResets, "nothing is allocated by a reset");
+            assertEquals(Layout.FIRST_RECORD, sort(m, 123), "the slab is reused from its start");
+            m.reset();
+        }
+        long perRound = (m.allocGrows - grows) / 4;
+        assertTrue(perRound > 0, "the slabs beyond the kept size are still grown by doubling");
+        // a working array beyond 2^keepStack words returns to its base
+        assertTrue(m.ensureScratch(1 << 13));
+        m.reset();
+        assertEquals(1 << z.scratch, m.X.length);
+        assertEquals(1, m.allocResets);
+        // the same without the pool: every reset after a large session allocates
+        Machine.Sizes y = Machine.Sizes.tiny();
+        y.keepRecords = 8;
+        y.keepRunWords = 10;
+        y.pool = false;
+        Machine n = new Machine(y);
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 5000; i++) {
+                sort(n, i);
+                TestTables.internRun(n, Layout.RUN_FRAME, 0, i, i + 1, i + 2);
+                TestTables.pairAdd(n, Layout.FIRST_RECORD + i, Layout.imm(i), Layout.POS);
+            }
+            n.reset();
+            assertTrue(n.tablesClean());
+            assertEquals(Layout.REC_WORDS << y.records, n.vh.length, "without the pool the slab returns to the base");
+        }
+        assertTrue(n.allocResets >= 9, "records, runs and pairs at each of the three resets: " + n.allocResets);
+        // under poison a kept slab that comes back holds no stale record
+        Machine q = new Machine(z);
+        q.debug = Op.DBG_POISON;
+        for (int i = 0; i < 5000; i++) {
+            sort(q, i);
+        }
+        int stale = sort(q, 4000);
+        q.reset();
+        assertEquals(0, q.vh[(Layout.FIRST_RECORD + 3) << Layout.REC_SHIFT], "the dead session's records read as kind 0");
+        assertTrue(stale > 0 && q.vh.length == Layout.REC_WORDS << 8);
+    }
+
     /** ISA 1.6: a session of one small declaration resets in time proportional to that declaration. */
     @Test
     void resetIsProportionalToWhatWasUsed() {

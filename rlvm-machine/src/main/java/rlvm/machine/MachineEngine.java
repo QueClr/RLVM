@@ -114,6 +114,10 @@ public final class MachineEngine implements Engine {
     private java.io.Writer declinesOut;
     private boolean declinesFailed;
     private long statCapResets;
+    private long statAllocGrows;
+    private long statAllocGrowBytes;
+    private long statAllocResets;
+    private long statAllocResetBytes;
 
     public MachineEngine(Store store, EngineConfig config) {
         this(store, config, Settings.fromProperties());
@@ -204,6 +208,11 @@ public final class MachineEngine implements Engine {
             sink.put("machine.resets", statResets);
             sink.put("machine.sessionCapBytes", sessionCapBytes);
             sink.put("machine.capResets", statCapResets);
+            // session arrays allocated after the machine was created: by growth (doublings) and by resets (NOTES-M6 F25)
+            sink.put("machine.alloc.grows", statAllocGrows);
+            sink.put("machine.alloc.growBytes", statAllocGrowBytes);
+            sink.put("machine.alloc.resets", statAllocResets);
+            sink.put("machine.alloc.resetBytes", statAllocResetBytes);
             sink.put("machine.bytesAtReset", statBytesAtReset);
             sink.put("machine.records", statRecords);
             sink.put("machine.runWords", statRunWords);
@@ -305,6 +314,10 @@ public final class MachineEngine implements Engine {
         statTicks += m.ticks();
         statResets += m.resets;
         statCapResets += s.capResets;
+        statAllocGrows += m.allocGrows;
+        statAllocGrowBytes += m.allocGrowBytes;
+        statAllocResets += m.allocResets;
+        statAllocResetBytes += m.allocResetBytes;
         statBytesAtReset += m.bytesAtReset;
         statFrames += m.framesWritten;
         statFrameWords += m.frameWords;

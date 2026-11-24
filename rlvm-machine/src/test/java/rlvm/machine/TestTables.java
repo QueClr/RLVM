@@ -2,8 +2,11 @@ package rlvm.machine;
 
 /**
  * Reference probes over the frozen table formats of {@link Layout} / {@link Hash}, for the tests of the
- * machine state. {@code Runs} (M1) and {@code Pairs} (M4) implement the real ones; theirs must find the
- * entries these make and vice versa.
+ * machine state. {@code Pairs} (M4) implements the real pair probe; it must find the entries these make
+ * and vice versa. Runs: since wave 6 the content hash of a frame is private to {@code Runs} (M1; a sum of
+ * per-slot terms), so {@link #internRun} is self-consistent (it finds what it made, and {@code Machine}'s
+ * growth and reset handle its runs, which read only the stored hash word) but it does NOT find the frames
+ * {@code Runs} makes, nor the reverse: never mix the two in one machine session of a test.
  */
 final class TestTables {
     private TestTables() {}
@@ -24,7 +27,7 @@ final class TestTables {
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int r = e & Layout.TAB_INDEX_MASK;
-                if ((m.rs[r] & ~Layout.RUN_OPEN) == hdr && (rest == 0 || m.rs[r + Layout.RUN_REST_WORD] == rest) && sameSlots(m, r, slots)) {
+                if ((m.rs[r] & ~Layout.RUN_DERIVED) == hdr && (rest == 0 || m.rs[r + Layout.RUN_REST_WORD] == rest) && sameSlots(m, r, slots)) {
                     return r;
                 }
             }

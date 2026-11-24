@@ -54,7 +54,7 @@ final class Debug {
     private static final String[] MODES = {"memocheck", "shortcheck", "poison", "scopeaudit", "maskaudit", "sharecheck",
         "pubcheck", "trace"};
     private static final String[] SWITCHES = {"gated", "pchk", "expect", "warm", "facts", "tele", "code", "casetrees",
-        "probes", "k2", "inert", "m1a", "m1b", "m2a", "m2b", "m3a", "m3b", "m4a", "m4b", "m5a", "m5b", "m7a", "m7b", "t2"};
+        "probes", "k2", "inert", "m1a", "m1b", "m2a", "m2b", "m3a", "m3b", "m4a", "m4b", "m5a", "m5b", "m7a", "m7b", "t2", "lazyeval", "levels-complete"};
 
     /** {@code "memocheck,poison"} -> {@code Op.DBG_*} bits; unknown names are an error (fail closed). */
     static int parseModes(String list) {
@@ -68,7 +68,8 @@ final class Debug {
      * {@code "warm,gated"} -> {@code Op.SW_*} bits; unknown names are an error (fail closed). The list is read
      * from left to right, starting from the empty set: a name (or {@code +name}) adds a switch,
      * {@code -name} removes it, {@code none} empties the set, {@code default} adds {@link Op#SW_DEFAULT},
-     * {@code all} adds every named switch but {@code k2} and {@code t2} (no experiment switch {@code m1a .. m7b}). So
+     * {@code all} adds the staging switches of ISA section 11 but {@code k2} (bits 0..10: not {@code t2},
+     * {@code lazyeval}, {@code levels-complete}, nor an experiment switch {@code m1a .. m7b}). So
      * {@code ""} and {@code "none"} are v0, {@code "default,probes"} is the default set plus probes, and
      * {@code "default,-warm"} the default set without warm sessions.
      */
