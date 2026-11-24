@@ -52,13 +52,14 @@ algorithm, and the complete relation is an opt-in switch only. For this engine:
 | everything else (caches, `t == s`, `Sort` and `Const` nodes) | structural, i.e. identity of ids | the same |
 
 The setting reaches every instance of a run (primary, strict re-check, environment pass), so the
-inductive and theorem checks that call this engine through `KernelOps` follow it. Three things it does
-not reach: `rlvm-inductive` compares levels itself where `add_inductive` does (`is_equivalent` of the
-mutual types' universes, `is_geq` of a constructor field's universe) and always uses the official
+inductive and theorem checks that call this engine through `KernelOps` follow it. The machine reads
+the same key since its jar of 15:22Z (`-X levels=complete` turns its switch `levels-complete` on;
+before that jar `-X engine=machine -X levels=complete` left the machine official and the run
+reported `MACHINE-INCOMPLETE` where the two relations differ). Two things the setting does not reach:
+`rlvm-inductive` compares levels itself where `add_inductive` does (`is_equivalent` of the mutual
+types' universes, `is_geq` of a constructor field's universe) and always uses the official
 functions; `rlvm-admit`'s prelude guards use the complete relation (they decide no verdict of the
-official kernel); the machine has its own switch (`-X machine.switches=...,levels-complete`, off by
-default; `-X levels=complete` alone leaves the machine official, the run then reports
-`MACHINE-INCOMPLETE` where the two differ - asked of M6 in requests.log, 14:50Z).
+official kernel).
 
 What the official relation does not identify (all answers of leanchecker v4.36.0): `imax u 1` and
 `max u 1`; `(imax u (v+1))+1` and `(max u (v+1))+1`; `imax u v` and `imax (imax u v) v`;

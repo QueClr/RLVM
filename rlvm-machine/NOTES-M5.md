@@ -140,7 +140,7 @@ records and the rest is conversion work started by the official comparison of an
 
 | # | Decision | Reason |
 |---|---|---|
-| I20 | `Infer.twD` sets the mode with `m.enterER()` (M6's request of 14:46Z), never by assigning `m.ER` | the facade must learn that the declaration compared under eager reduction: it checks it again in a fresh session if the session was warm and ends the session after it. On Init 155 declarations enter the mode (718 comparisons, 1.1% of the ticks); none of their `eagerReduce _ _` arguments has a type identical to its domain |
+| I20 | `Infer.twD` sets the mode with `m.enterER()` (M6's request of 14:46Z), never by assigning `m.ER` | the facade must learn that the declaration compared under eager reduction. M6's rule since 15:07Z (F26, after S-F5): such a declaration is DECLINED by the machine (`E_LIMIT`, UNSUPPORTED_INPUT; `machine.eagerDeclines`) and checked by the reference engine. On Init 155 declarations enter the mode (718 comparisons, 1.1% of the machine's ticks before the rule); none of their `eagerReduce _ _` arguments has a type identical to its domain. In-process tools that stop at the first decline (`Fixture.checkAll`, so `M5Bench`) end at unit 2,718 of Init since then: the counters of this file were taken before, on one code state, and the measured rows go through the launcher |
 | P5 | PCHK is not set once the declaration has entered eager reduction (`m.erSeen`) | the official answer of a comparison under `eagerReduce` depends on the declaration's history (its caches live for one declaration), so nothing derived after such a comparison is shared. A term whose bit is set was checked without any ER comparison, and it is closed, so its types are the same records in every declaration |
 | M6 | MATCH is not restricted for `eagerReduce _ _` arguments | a T of MATCH is identity of the two values up to PEEK and the official level equivalence: the case in which TWALK compares nothing (`Tt == D`) and never enters the mode. An argument whose type does not match goes through `enterER` + CONV as before |
 
@@ -196,6 +196,78 @@ Why so little, when MATCH answers 2.2 M of 3.2 M domains and EVAL call events fa
 flat application under the gate is one NEU probe, a tabled one is a memo hit), and the conversions that make 59% of the
 records are untouched.
 
+The two numbers the brief asked for, on Init, in-process and exact (one code state: the sandbox of 14:30Z, before the
+eager-reduction rule):
+
+| | v0 | `warm,gated,expect` | + m5a,pchk,m5b | + facts,m5a,pchk,m5b and the front cache |
+|---|--:|--:|--:|--:|
+| records per unit | 853.3 | 442.8 | 423.6 | 417.6 |
+| run words per unit | 3,867.6 | 2,290.4 | 2,247.4 | 2,218.3 |
+| INFER + VTYPE call events | 7.33 M | 5.07 M | not taken | 3.91 M |
+| EVAL call events | 13.62 M | 11.29 M | not taken | 8.73 M |
+| ticks | 77.83 M | 56.03 M | 52.36 M | 49.62 M |
+
+"Records down by a third" and "INFER + VTYPE down by a third" hold against v0 (-51% and -47% with every step-1 switch, facts
+and this wave's switches) and do NOT hold against step 1 (-5.7% and -23%; without `facts` -4.3% of the records): what inference
+itself can still remove is bounded by the 41% of the records it makes, and the VTYPE calls that remain after `facts` are
+conversions asking for the type of a neutral term.
+
+### Measurements of wave 6, batch 2: the front cache, facts, everything together
+
+Same method, one hold of the lock (15:18:05Z-15:26:33Z, load average 80-114), `work/m5/batch2.sh`, rows `b2-*`; image
+`work/m5/dist-a3` = the sandbox of 14:50Z, which has M1's cheaper PRUNE of 14:22Z (so its base is lower than batch 1's) and is
+from before the eager-reduction rule. "new" = `m5a,pchk,m5b`; "ic" = `-Drlvm.machine.m5ic=true`. Two rounds; instructions
+repeat exactly. Every row: all units accepted, 0 declined.
+
+| corpus | configuration | CPU s (two rounds) | wall s | RSS MiB | instructions G | against base | ticks |
+|---|---|--:|--:|--:|--:|--:|--:|
+| Init | v0 | 7.58 | 7.66 | 244 | 132.6 | | 77.83 M |
+| Init | base (`warm,gated,expect`) | 7.47 / 7.48 | 7.66 / 7.65 | 225 | 105.6 | | 56.03 M |
+| Init | + ic | 7.25 / 7.74 | 7.48 / 8.05 | 224 | 105.3 | -0.3% | 56.09 M |
+| Init | + new | 7.06 / 7.26 | 7.10 / 7.48 | 227 | 101.7 | **-3.7%** | 52.36 M |
+| Init | + new + ic | 7.10 / 7.53 | 7.22 / 7.66 | 227 | 101.2 | -4.2% | 52.30 M |
+| Init | + facts | 7.54 / 7.65 | 7.73 / 7.79 | 233 | 105.5 | -0.1% | 53.91 M |
+| Init | + facts + new + ic | 7.25 / 7.28 | 7.29 / 7.41 | 236 | 101.0 | -4.4% | 50.17 M |
+| Std | v0 | 12.60 | 12.88 | 352 | 212.0 | | 122.25 M |
+| Std | base | 12.94 / 13.01 | 13.08 / 13.07 | 325 | 177.9 | | 94.06 M |
+| Std | + ic | 12.86 / 12.90 | 13.12 / 13.05 | 328 | 177.8 | -0.1% | 94.28 M |
+| Std | + new | 12.52 / 12.57 | 13.21 / 12.68 | 328 | 170.2 | **-4.3%** | 87.04 M |
+| Std | + new + ic | 13.12 / 13.40 | 13.25 / 13.53 | 329 | 169.7 | -4.6% | 87.00 M |
+| Std | + facts | 13.06 / 13.11 | 13.24 / 13.21 | 344 | 177.8 | -0.1% | 90.15 M |
+| Std | + facts + new + ic | 12.72 / 13.42 | 12.88 / 13.54 | 350 | 169.4 | -4.8% | 83.04 M |
+| Cedar slice | v0 | 2.66 | 2.90 | 179 | 39.0 | | 18.10 M |
+| Cedar slice | base | 2.75 / 2.94 | 2.80 / 3.00 | 173 | 39.6 | | 18.71 M |
+| Cedar slice | + ic | 2.73 / 2.75 | 2.74 / 2.81 | 173 | 39.7 | +0.3% | 18.72 M |
+| Cedar slice | + new | 2.76 / 2.99 | 2.79 / 3.02 | 174 | 39.0 | **-1.5%** | 18.09 M |
+| Cedar slice | + new + ic | 2.80 / 2.72 | 2.90 / 2.77 | 174 | 39.0 | -1.5% | 18.08 M |
+| Cedar slice | + facts | 2.97 / 2.78 | 3.11 / 3.30 | 190 | 39.5 | -0.3% | 18.21 M |
+| Cedar slice | + facts + new + ic | 2.98 / 2.75 | 3.08 / 2.78 | 175 | 38.9 | -1.8% | 17.59 M |
+| reachability | v0 | 8.41 | 8.48 | 1151 | 57.4 | | 34.60 M |
+| reachability | base | 8.22 / 8.07 | 8.33 / 8.17 | 1144 | 59.1 | | 35.44 M |
+| reachability | + ic | 8.15 / 8.15 | 8.22 / 8.25 | 1144 | 59.1 | 0.0% | 35.44 M |
+| reachability | + new | 8.33 / 8.61 | 8.44 / 9.08 | 1144 | 59.0 | **-0.2%** | 35.31 M |
+| reachability | + new + ic | 8.09 / 8.24 | 8.15 / 8.37 | 1145 | 59.0 | -0.2% | 35.31 M |
+| reachability | + facts + new + ic | 8.02 / 8.23 | 8.19 / 8.42 | 1145 | 59.0 | -0.2% | 35.27 M |
+
+Reading.
+- **m5a,pchk,m5b: kept.** Instructions -3.7% (Init), -4.3% (Std), -1.5% (Cedar slice), -0.2% (reachability) on the newer base
+  as on the older one; CPU -4.2% on Init and -3.3% on Std with both rounds below both base rounds (batch 1: Std -8%, Init level);
+  Cedar slice and reachability move by less than the scatter in either direction (the reachability rows of "+ new" are above
+  the base in this batch and equal to it in batch 1, and "+ new + ic", the same work, is level here). Memory: +2 to +3 MiB.
+  A confirmation on a quiet host is still owed for the two small corpora.
+- **The front cache: rejected (stays off, behind its property).** It answers nearly every tabling hit (4.13 M of 4.14 M on
+  Init), but since M1's PRUNE hashes only the kept slots the probe it replaces is cheap: -0.3% to -0.5% of the instructions on
+  the libraries, +0.3% on the Cedar slice, and no CPU gain in any pair of rows (on Std "+ new + ic" is 0.6-0.8 s ABOVE "+ new"
+  in both rounds). Not worth a table in every session.
+- **facts (after M4's fix of S-F1 / S-F2: static PROOF only): neutral.** -0.1% of the instructions on Init and Std, -0.3% on the
+  Cedar slice, CPU inside the scatter; the derivation (0.23% of the ticks) is paid for by the PIRR / VTYPE calls it removes and
+  no more. The derivation cost stays far below the 2% bound.
+- Not this package's, but visible in both batches: on the Cedar slice and on reachability v0 needs FEWER instructions than
+  `warm,gated,expect` since M1's PRUNE (39.0 against 39.6 G; 57.4 against 59.1 G).
+- With the eager-reduction rule armed (after these batches) the machine declines the declarations that compare under
+  `eagerReduce`: 155 on Init (1.1% of its ticks) but 11 on the Cedar slice that were 18% of the machine's ticks there
+  (18.09 M -> 14.79 M in the final gate): what that costs through the reference engine is not in these tables.
+
 ### Experiments of wave 6 that were not kept, or not built (with their numbers)
 
 | Experiment | Result |
@@ -204,16 +276,17 @@ records are untouched.
 | Pattern against pattern for an untabled application argument (R07 `inst_eq_inst`) | not built; probe on Init: 632,317 untabled APP arguments reach MATCH, 437,944 are answered, 382,705 of them right after their result type was built: that many of 1.32 M result builds (and as many MATCH walks) would go, about 4% of the EVAL call events |
 | Lazy ARGV (the value of an argument only when a domain or the result is built) | not built; of 6.16 M argument values on Init 3.10 M are atoms and only 0.71 M of the others are read by domains alone |
 | PCHK for closed terms WITH level parameters (allowed by `SharedFacts`: `lpSet` within the declaration's parameters) | probe on Init: 89,448 bits instead of 60,390, 132,040 hits instead of 117,875 (+12%); not adopted: about a quarter of a per cent of the ticks, and ISA 5.3 gives PERM only to terms without level parameter |
-| Telescope domains and results evaluated without a tabling record (M2's `evalNT`, as for the body of INST under `m2a`) | probe in a private copy, see "Open" below |
-| A record-free INFER memo (the front cache alone, no SUSP record) | not built: a lossy memo is not safe against a DAG that is walked as a tree (RECONCILIATION C3.10: CHECK is tabled); the front cache stays in front of the exact memo |
+| Telescope domains and results evaluated without a tabling record (M2's `evalNT`, as for the body of INST under `m2a`) | probe in a private copy (`work/m5/evtop`), Init, on top of `warm,gated,expect,m5a,m2a`: records 358.8 -> 345.6 per unit (-3.7%), run words 1,767.7 -> 1,709.3 (-3.3%), ticks +0.4%. Needs `Eval.evalNT` to be callable from the package: requested of M2 (15:17Z) |
+| INFER's front cache (C1-C3) | built, measured (batch 2), REJECTED: -0.3% to -0.5% instructions on the libraries, +0.3% on the Cedar slice, no CPU gain. The code stays behind `-Drlvm.machine.m5ic=true` (off) for a re-measurement on a quiet host; if that shows nothing either, it should be deleted |
+| A record-free INFER memo (the front cache alone, no SUSP record) | not built: a lossy memo is not safe against a DAG that is walked as a tree (RECONCILIATION C3.10: CHECK is tabled) |
 
 ### Switches of this package (for `SWITCHES.md`)
 
 | Switch | Guards | Gates passed | Measured |
 |---|---|---|---|
 | `expect` | B9: CHECK of lam / let nodes against the expected type (E1-E6) | wave 4 / integrator | E6, integrator |
-| `pchk` | P1-P5: shared check facts | tutorial + bugs (alone, with step 1, with probes, with facts, audits), the four corpora, 5,800+ tutorial mutants (together with `m5a`, `m5b`) | batch 1 |
-| `m5a` | M1-M6: MATCH of a telescope domain against the argument's type | the same | batch 1 |
-| `m5b` | J1-J3: joint telescope check in DECL | the same | batch 1 |
-| `-Drlvm.machine.m5ic=true` | C1-C3: INFER's front cache (no switch yet) | tutorial + bugs, the four corpora (with the three switches) | see batch 2 |
+| `pchk` | P1-P5: shared check facts | tutorial + bugs (alone, with step 1, with probes, with facts, audits), the four corpora, all 8,661 officially rejected tutorial mutants + 449 accepted ones through the launcher (together with `m5a`, `m5b`; one difference, caused by the official level relation against an older reference jar, present without any switch) | batches 1 and 2: kept |
+| `m5a` | M1-M6: MATCH of a telescope domain against the argument's type | the same | batches 1 and 2: kept |
+| `m5b` | J1-J3: joint telescope check in DECL | the same | batches 1 and 2: kept |
+| `-Drlvm.machine.m5ic=true` | C1-C3: INFER's front cache (no switch; rejected by measurement, off) | tutorial + bugs, the four corpora (with the three switches) | batch 2: no gain |
 | `facts` | F1-F13: derivation and accessors (the consumers are M4's) | M4's and S's gates | F13 |

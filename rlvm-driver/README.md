@@ -169,6 +169,11 @@ passes are made only when pass 1 accepted (a failing run's time is that of a can
 does not accept is reported in its line and changes nothing. CPU time is the process's (`/proc/self/stat`,
 10 ms steps). With `passes=1`, the default, none of this code runs.
 
+At 15:27Z the launcher's working tree (`rlvm-main`, with its new owner) had a `-X passes=N` of its own
+(`passes-mode=reload|recheck`, lines `pass K/N mode=...`). A key of the wiring wins over a driver key of the
+same name, so with that launcher `-X passes` is the wiring's and the driver's stays at 1; the driver's is then
+reached as `RunConfig.passes` by callers of `Run` and as `RLVM_DRIVER=passes=N`.
+
 What it does not do yet: (1) the engines of a later pass are new instances, so only what lives in the process
 (JIT-compiled code, the allocator's pages) is warm, not artefacts an engine keeps per instance (a tier of
 compiled code objects would have to be kept by its provider or by a later version of this loop that reuses
@@ -721,7 +726,7 @@ Earlier states of the tree went through the same guards four times during the da
 time limits enforced the slice lost up to 9 `perf/*` tests to the host's load (load average 150 to 180);
 without the limits, and in the invariance suite, each of them has the expected verdict.
 
-### Wave 7: the machine as primary engine (2026-11-24, 13:30Z to 15:00Z)
+### Wave 7: the machine as primary engine (2026-11-24, 13:30Z to 15:30Z)
 
 All rows: `-X engine=machine`, CE native image `-O3`, arena-shaped container (8 performance cores, 16 GB,
 `perf stat`), under the measurement lock, columns CPU time, wall clock, peak RSS, instructions. Tool:
