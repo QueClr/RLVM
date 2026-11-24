@@ -7,3 +7,9 @@ refs/
 target/
 .toolchain/
 work/
+__pycache__/
+*.pyc
+journal/output/
+journal/build/
+journal/result
+journal/result-*
