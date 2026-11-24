@@ -104,6 +104,29 @@ final class Loaded {
         return new Loaded(data.length, options).run(data);
     }
 
+    /** A load with reader options of the caller's (scanner threads, chunk size, packed runs). */
+    static Loaded load(byte[] data, LoadOptions options, rlvm.export.ExportReader.Options readerOptions) {
+        Loaded l = new Loaded(data.length, options);
+        try {
+            l.report = ExportLoader.read(data, l.loader, readerOptions);
+        } catch (MalformedExportException | UnsupportedExportException e) {
+            l.failure = e;
+            l.report = l.loader.report();
+        }
+        return l;
+    }
+
+    static Loaded load(Path file, LoadOptions options, rlvm.export.ExportReader.Options readerOptions) throws IOException {
+        Loaded l = new Loaded(Files.size(file), options);
+        try {
+            l.report = ExportLoader.read(file, l.loader, readerOptions);
+        } catch (MalformedExportException | UnsupportedExportException e) {
+            l.failure = e;
+            l.report = l.loader.report();
+        }
+        return l;
+    }
+
     /** A load whose level store is a {@link LevelChain} whatever the mode. */
     static Loaded loadOnChain(byte[] data, LoadOptions options) {
         return new Loaded(data.length, options, true).run(data);

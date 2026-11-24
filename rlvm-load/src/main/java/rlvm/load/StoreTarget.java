@@ -226,6 +226,15 @@ final class StoreTarget implements LoadTarget {
     }
 
     @Override
+    public void blockRun(int blockIndex, byte[] packed, int off, int len, int count, int[] ext, int extOff,
+            int extCount) {
+        if (writer.size() != blockIndex) {
+            throw new IllegalStateException("the block has " + writer.size() + " records, the run starts at " + blockIndex);
+        }
+        writer.run(packed, off, len, count, ext, extOff, extCount);
+    }
+
+    @Override
     public int blockEnd(int rootLocal) {
         int block = writer.finish(rootLocal);
         writer = null;

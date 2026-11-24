@@ -69,16 +69,23 @@ public final class LoadOptions {
      * false: the official reader never looks at line 1, so the header decides nothing.
      */
     public final boolean strictFormatVersion;
+    /**
+     * Take the packed runs that the reader's scanner threads prepare ({@link Loader#exprRun}; they
+     * exist only with scanner threads on mapped input). Default true. The store that is built, every
+     * failure and every message are the same either way; false keeps the scanner threads to
+     * tokenising, as before the parallel packing.
+     */
+    public final boolean packedRuns;
 
     public LoadOptions(Mode mode, int publishEveryUnits, long publishEveryBytes, boolean proofBlocks,
             long inputBytes) {
         this(mode, publishEveryUnits, publishEveryBytes, proofBlocks, inputBytes, true, DEFAULT_MAX_SEGMENT_RECORDS,
-                null, mode == Mode.PIPELINED, 1, false);
+                null, mode == Mode.PIPELINED, 1, false, true);
     }
 
     private LoadOptions(Mode mode, int publishEveryUnits, long publishEveryBytes, boolean proofBlocks,
             long inputBytes, boolean sharingFlags, int maxSegmentRecords, LoadListener listener,
-            boolean publishOnDecline, int scanThreads, boolean strictFormatVersion) {
+            boolean publishOnDecline, int scanThreads, boolean strictFormatVersion, boolean packedRuns) {
         if (mode == null) {
             throw new NullPointerException("mode");
         }
@@ -96,6 +103,7 @@ public final class LoadOptions {
         this.publishOnDecline = publishOnDecline || mode == Mode.PIPELINED;
         this.scanThreads = scanThreads;
         this.strictFormatVersion = strictFormatVersion;
+        this.packedRuns = packedRuns;
     }
 
     public static LoadOptions batch(long inputBytes) {
@@ -111,7 +119,7 @@ public final class LoadOptions {
             int maxSegmentRecords, LoadListener listener, boolean publishOnDecline, int scanThreads,
             boolean strictFormatVersion) {
         return new LoadOptions(mode, units, bytes, proofBlocks, inputBytes, sharingFlags, maxSegmentRecords, listener,
-                publishOnDecline, scanThreads, strictFormatVersion);
+                publishOnDecline, scanThreads, strictFormatVersion, packedRuns);
     }
 
     /** A copy in another mode; BATCH resets the publication intervals, PIPELINED keeps or defaults them. */
@@ -165,6 +173,12 @@ public final class LoadOptions {
     public LoadOptions withScanThreads(int value) {
         return copy(mode, publishEveryUnits, publishEveryBytes, proofBlocks, sharingFlags, maxSegmentRecords, listener,
                 publishOnDecline, Math.max(1, value), strictFormatVersion);
+    }
+
+    /** A copy with {@link #packedRuns} set. */
+    public LoadOptions withPackedRuns(boolean value) {
+        return new LoadOptions(mode, publishEveryUnits, publishEveryBytes, proofBlocks, inputBytes, sharingFlags,
+                maxSegmentRecords, listener, publishOnDecline, scanThreads, strictFormatVersion, value);
     }
 
     /** A copy with {@link #strictFormatVersion} set. */

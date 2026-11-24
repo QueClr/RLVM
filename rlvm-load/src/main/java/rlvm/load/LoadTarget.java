@@ -131,6 +131,55 @@ public interface LoadTarget {
     void blockStr(int litIndex);
 
     /**
+     * {@code count} APP / LAM / PI / LET records of the open block in the packed form of
+     * {@link Loader#RUN_FORMAT}: one head byte per record (bits 0..3 the kind, bit {@code 4 + i} set =
+     * child {@code i} is external) followed by the LEB128 bytes of {@link #blockLocal} for every child
+     * that is not external. The external children are {@code ext[extOff ..]} in record and child
+     * order: a value {@code > 0} is a shared term id, a value {@code < 0} is {@code -(i + 1)} for
+     * record {@code i} of the open block. Equivalent to the {@code count} calls of {@link #blockApp},
+     * {@link #blockLam}, {@link #blockPi}, {@link #blockLet}, which is what the default makes.
+     *
+     * @param blockIndex number of records of the open block before the run
+     */
+    default void blockRun(int blockIndex, byte[] packed, int off, int len, int count, int[] ext, int extOff,
+            int extCount) {
+        int p = off;
+        int e = extOff;
+        int[] ref = new int[3];
+        for (int i = 0; i < count; i++) {
+            int head = packed[p++];
+            int kind = head & 0xF;
+            int children = kind == rlvm.store.Kind.LET ? 3 : 2;
+            for (int c = 0; c < children; c++) {
+                if ((head & (0x10 << c)) != 0) {
+                    int v = ext[e++];
+                    ref[c] = v > 0 ? blockShared(v) : blockLocal(blockIndex + i + v + 1);
+                } else {
+                    int v = 0;
+                    int shift = 0;
+                    int b;
+                    do {
+                        b = packed[p++];
+                        v |= (b & 0x7F) << shift;
+                        shift += 7;
+                    } while (b < 0);
+                    ref[c] = v;
+                }
+            }
+            switch (kind) {
+                case rlvm.store.Kind.APP -> blockApp(ref[0], ref[1]);
+                case rlvm.store.Kind.LAM -> blockLam(ref[0], ref[1]);
+                case rlvm.store.Kind.PI -> blockPi(ref[0], ref[1]);
+                case rlvm.store.Kind.LET -> blockLet(ref[0], ref[1], ref[2]);
+                default -> throw new IllegalArgumentException("corrupt packed run: kind " + kind);
+            }
+        }
+        if (p != off + len || e != extOff + extCount) {
+            throw new IllegalArgumentException("corrupt packed run");
+        }
+    }
+
+    /**
      * Closes the open block and returns its index.
      *
      * @param rootLocal index (0-based, in the block) of the record that is the owner's value, or -1 for

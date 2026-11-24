@@ -68,6 +68,14 @@ public final class LoadReport {
     public long promotedNodes;
     /** Promotion requests (roots of the copies above). */
     public long promotions;
+    /**
+     * Packed runs taken from the reader's scanner threads ({@link Loader#exprRun}), the expression
+     * records in them, and the runs among them that had to be expanded into segment records (the
+     * others were linked into a proof block).
+     */
+    public long packedRuns;
+    public long packedRunRecords;
+    public long expandedRuns;
     /** Constants dropped because their record was unsafe or partial. */
     public long droppedUnsafe;
     /** Expression records after the last admitted declaration (never written anywhere). */
@@ -161,6 +169,10 @@ public final class LoadReport {
                 promotions, promotedNodes, largestSegment, trailingExprRecords, generalPathLines, sparseIds, readerIdTables));
         sb.append(String.format(Locale.ROOT, "  publications %,d (%,d units published), scan threads %d%s%n", publications,
                 publishedUnits, scanThreads, formatVersionSupported ? "" : ", format version not 3.x (ignored)"));
+        if (packedRuns != 0) {
+            sb.append(String.format(Locale.ROOT, "  packed runs %,d (%,d records), expanded %,d%n", packedRuns, packedRunRecords,
+                    expandedRuns));
+        }
         return sb.toString();
     }
 }

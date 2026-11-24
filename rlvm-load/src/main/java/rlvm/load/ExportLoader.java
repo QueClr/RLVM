@@ -36,12 +36,16 @@ public final class ExportLoader {
 
     /**
      * The reader options a load with {@code options} wants: {@link LoadOptions#scanThreads} scanner
-     * threads, everything else at the reader's defaults. A caller with reader options of its own sets
-     * {@code threads} the same way.
+     * threads, the loader's packed form for the runs they prepare ({@link LoadOptions#packedRuns}),
+     * everything else at the reader's defaults. A caller with reader options of its own sets
+     * {@code threads} and {@code runs} the same way.
      */
     public static ExportReader.Options readerOptions(LoadOptions options) {
         ExportReader.Options ro = new ExportReader.Options();
         ro.threads = Math.max(1, options.scanThreads);
+        // The scanner threads (if the caller gives the reader any) also pack the runs of proof-private
+        // records in the loader's block format; a loader that cannot take them refuses each offer.
+        ro.runs = options.packedRuns && options.proofBlocks ? Loader.RUN_FORMAT : null;
         return ro;
     }
 
