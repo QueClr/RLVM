@@ -38,9 +38,12 @@ class MainOptionsTest {
             MainOptions o = MainOptions.parse(none);
             assertNull(o.engine);
             assertFalse(o.differential);
+            // The load settings are open until the input and the worker count are known
+            // (resolveLoadDefaults, LoadDefaultsTest); until then they read as the batch slice.
             assertEquals(LoadOptions.Mode.BATCH, o.loadMode);
             assertEquals(ExportReader.Io.BUFFERED, o.io);
             assertEquals(0, o.scanThreads);
+            assertFalse(o.loadGiven || o.scanThreadsGiven || o.ioGiven);
             assertTrue(o.recheck && o.truffle && o.proofBlocks);
             assertEquals(EngineConfig.KernelProfile.LEAN_4_36, o.profile);
             assertNull(o.stopAfter);
@@ -62,6 +65,7 @@ class MainOptionsTest {
         assertEquals(4096L << 20, o.memoryLimitBytes);
         assertEquals(3, o.scanThreads);
         assertEquals(ExportReader.Io.MAPPED, o.io);
+        assertTrue(o.loadGiven && o.scanThreadsGiven && o.ioGiven);
         assertEquals("env", o.stopAfter);
         assertEquals(Path.of("/tmp/s.json"), o.statsFile);
         assertFalse(o.recheck);
@@ -181,7 +185,9 @@ class MainOptionsTest {
         assertTrue(usage("", "x").contains("needs a key"));
         assertTrue(usage("engine", "").contains("needs a value"));
         assertTrue(usage("engine", null).contains("needs a value"));
-        assertTrue(usage("load", "lazy").contains("expected batch or pipelined"));
+        assertTrue(usage("load", "lazy").contains("expected batch, pipelined or auto"));
+        assertTrue(usage("load", "").contains("needs a value"));
+        assertTrue(usage("scan-threads", "many").contains("not a number"));
         assertTrue(usage("order", "random").contains("expected file or namespace"));
         assertTrue(usage("profile", "4.38").contains("expected 4.36 or 4.37"));
         assertTrue(usage("io", "mmap").contains("expected buffered, mapped or auto"));

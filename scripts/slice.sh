@@ -11,7 +11,10 @@
 #                       rlvm-main may use it (it runs that module's test tree). With --all: 230 tests
 #   --all               every published test (230) instead of the tutorial tests (141)
 #   --only GLOB         tests to run (repeatable; default 'tutorial/*'; names as in run-suite.py)
-#   --engine NAME       -X engine=NAME (default reference)
+#   --engine NAME       -X engine=NAME (default reference; `default` = no -X engine: the
+#                       distribution's own default engine)
+#   --load MODE         -X load=MODE (default batch; `default` = no -X load: the checker's own rule,
+#                       pipelined for two or more workers on inputs of 8 MiB and more)
 #   --threads N         worker threads (default 1: the vertical slice)
 #   --native | --jvm    launcher of work/dist (default: native if built, else JVM)
 #   -j JOBS             tests in parallel (default 8)
@@ -28,7 +31,8 @@
 #   -X KEY=VALUE        extra checker setting (repeatable)
 #
 # The checker command is the arena's run line (scripts/arena/rlvm.yaml) with the thread count
-# replaced and `-X engine=... -X load=batch` appended; bench/run-suite.py scores it like the arena.
+# replaced and `-X engine=... -X load=...` appended (nothing with `default`); bench/run-suite.py
+# scores it like the arena.
 # JSON report: work/rlvm/slice/<label>.json. Exit status: 0 if every selected test is correct, 1 if
 # not (declines included: the slice's goal is "pass"), 2 for usage errors, 70 if nothing is built.
 set -euo pipefail
@@ -36,6 +40,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 only=()
 engine=reference
+load=batch
 threads=1
 mode=""
 jobs=8
@@ -54,6 +59,7 @@ while [ "$#" -gt 0 ]; do
     --probe) probe=1; shift ;;
     --only) only+=("${2:?--only needs a glob}"); shift 2 ;;
     --engine) engine="${2:?--engine needs a name}"; shift 2 ;;
+    --load) load="${2:?--load needs a mode}"; shift 2 ;;
     --threads) threads="${2:?--threads needs a number}"; shift 2 ;;
     --native|--jvm) mode="${1#--}"; shift ;;
     -j|--jobs) jobs="${2:?-j needs a number}"; shift 2 ;;
@@ -63,7 +69,7 @@ while [ "$#" -gt 0 ]; do
     --tag) tag="-${2:?--tag needs a value}"; shift 2 ;;
     --no-arena-timeouts) arena_timeouts=0; shift ;;
     -X) extra+=(-X "${2:?-X needs KEY=VALUE}"); shift 2 ;;
-    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "slice.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -114,7 +120,10 @@ fi
 case "$mode" in native) binary=rlvm ;; jvm) binary=rlvm-jvm ;; esac
 [ -x "$dist/bin/$binary" ] || { echo "slice.sh: $dist/bin/$binary not built" >&2; exit 70; }
 
-cmd="$("$ROOT/bench/rlvm/run.sh" "--$mode" --dist "$dist" --threads "$threads" --print -- -X "engine=$engine" -X load=batch "${extra[@]}")"
+settings=()
+[ "$engine" = default ] || settings+=(-X "engine=$engine")
+[ "$load" = default ] || settings+=(-X "load=$load")
+cmd="$("$ROOT/bench/rlvm/run.sh" "--$mode" --dist "$dist" --threads "$threads" --print -- "${settings[@]}" "${extra[@]}")"
 label="slice-$engine-$mode-t$threads$tag"
 report="$ROOT/work/rlvm/slice/$label.json"
 mkdir -p "$ROOT/work/rlvm/slice" "$(dirname "$out")"

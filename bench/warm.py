@@ -28,7 +28,9 @@ Options (RLVM):
   --passes N            passes of the warm process (default 5)
   --mode reload|recheck -X passes-mode (default reload: every pass loads and checks; recheck: the
                         driver's check-only passes over the loaded store)
-  --load pipelined|batch  -X load (default pipelined)
+  --load pipelined|batch|default  -X load (default pipelined); default = no -X load at all: the
+                        launcher's own rule (rlvm-main since 2026-11-24: pipelined when two or more
+                        workers run and the input is at least 8 MiB), and the reader's own defaults
   --heap SIZE           JVM: -Xms SIZE -Xmx SIZE -Xmn1g in place of the launcher's 13g / 13g / 1g;
                         native image: -Xmx SIZE (e.g. 6g)
   --java-opts 'FLAGS'   JVM: replaces ALL default VM flags of the launcher (RLVM_JAVA_OPTS), for
@@ -36,6 +38,7 @@ Options (RLVM):
   --arg ARG             extra argument for the checker (repeatable), e.g. --arg -X --arg chunk=8
   --label TEXT          free text for the row (default: derived from the options)
   --no-cold             no separate cold process
+  --cold-only           only the cold process (a fresh process, a plain run): cold wall / CPU / RSS
 Options (baselines):
   --baseline NAME       gruszka | nano-lean, with --workers as its thread counts
 Common:
@@ -142,7 +145,9 @@ def rlvm_row(args, corpus, name, workers, logs, env):
     base = [launcher]
     if args.heap and not args.java_opts:
         base += ([f"-Xms{args.heap}", f"-Xmx{args.heap}", "-Xmn1g"] if args.launcher == "jvm" else [f"-Xmx{args.heap}"])
-    base += ["--threads", str(workers), "--stats", "-X", f"load={args.load}"]
+    base += ["--threads", str(workers), "--stats"]
+    if args.load != "default":
+        base += ["-X", f"load={args.load}"]
     if args.engine:
         base += ["-X", f"engine={args.engine}"]
     if args.switches:
@@ -153,17 +158,24 @@ def rlvm_row(args, corpus, name, workers, logs, env):
         tag += "-" + re.sub(r"[^A-Za-z0-9_.+-]", "_", args.label)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     cold = None
-    if not args.no_cold:
+    if not args.no_cold or args.cold_only:
         rc, wall, cpu, rss, text = run(base + [corpus], env, os.path.join(logs, f"{stamp}-{tag}-cold.log"), args.timeout)
         cold = {"rc": rc, "wall": wall, "cpu": cpu, "rss_kb": rss}
+    row = {c: "" for c in COLUMNS}
+    row.update(corpus=name, launcher=args.launcher, workers=workers, load=args.load, mode=args.mode, passes=args.passes,
+               what=(args.engine or "default") + ("+" + args.switches if args.switches else ""),
+               label=args.label or "")
+    if args.cold_only:
+        # One fresh process, nothing else: the row has the cold columns only.
+        row.update(mode="cold", passes=0, cold_wall_s=fmt(cold["wall"]), cold_cpu_s=fmt(cold["cpu"]),
+                   cold_rss_mib=str(cold["rss_kb"] // 1024),
+                   verdict={0: "ACCEPT", 1: "REJECT", 2: "DECLINE"}.get(cold["rc"], f"exit {cold['rc']}"))
+        return row
     warm_cmd = base + ["-X", f"passes={args.passes}", "-X", f"passes-mode={args.mode}", corpus]
     log = os.path.join(logs, f"{stamp}-{tag}-warm.log")
     rc, wall, cpu, rss, text = run(warm_cmd, env, log, args.timeout)
     ps = passes_of(text)
-    row = {c: "" for c in COLUMNS}
-    row.update(corpus=name, launcher=args.launcher, workers=workers, load=args.load, mode=args.mode, passes=args.passes,
-               what=(args.engine or "default") + ("+" + args.switches if args.switches else ""),
-               label=args.label or "", verdict=f"exit {rc}")
+    row["verdict"] = f"exit {rc}"
     if cold:
         row.update(cold_wall_s=fmt(cold["wall"]), cold_cpu_s=fmt(cold["cpu"]), cold_rss_mib=str(cold["rss_kb"] // 1024))
         if cold["rc"] != rc:
@@ -233,12 +245,13 @@ def main():
     ap.add_argument("--workers", default="8,1")
     ap.add_argument("--passes", type=int, default=5)
     ap.add_argument("--mode", choices=["reload", "recheck"], default="reload")
-    ap.add_argument("--load", choices=["pipelined", "batch"], default="pipelined")
+    ap.add_argument("--load", choices=["pipelined", "batch", "default"], default="pipelined")
     ap.add_argument("--heap")
     ap.add_argument("--java-opts")
     ap.add_argument("--arg", action="append", default=[])
     ap.add_argument("--label")
     ap.add_argument("--no-cold", action="store_true")
+    ap.add_argument("--cold-only", action="store_true")
     ap.add_argument("--baseline", choices=sorted(BASELINES))
     ap.add_argument("--out", default=os.path.join(ROOT, "work", "perf-history", "warm.tsv"))
     ap.add_argument("--logs", default=os.path.join(ROOT, "work", "perf-history", "warm-logs"))

@@ -47,12 +47,12 @@ import rlvm.store.Store;
  */
 class PassesTest {
 
-    private static final String META = "{\"meta\":{\"exporter\":{\"name\":\"lean4export\",\"version\":\"3.1.0\"},"
+    static final String META = "{\"meta\":{\"exporter\":{\"name\":\"lean4export\",\"version\":\"3.1.0\"},"
             + "\"format\":{\"version\":\"3.1.0\"},\"lean\":{\"githash\":\"611c117bfaf7b7ae1cfcf246ce6fba31e8f509e9\","
             + "\"version\":\"4.36.0\"}}}\n";
 
     /** Unit {@code i}: {@code def dI : Sort 2 := Sort 1} (well-typed) or {@code def dI : Sort 0 := Sort 1} (ill-typed). */
-    private static String def(int i, boolean good) {
+    static String def(int i, boolean good) {
         int name = i + 1;
         int l1 = 2 * i + 1;
         int l2 = 2 * i + 2;
@@ -82,9 +82,9 @@ class PassesTest {
     }
 
     /** Units of the generated exports: enough for four workers in a batch run (128 units per worker). */
-    private static final int UNITS = 640;
+    static final int UNITS = 640;
 
-    private static String accepted() {
+    static String accepted() {
         StringBuilder sb = new StringBuilder(META);
         for (int i = 0; i < UNITS; i++) {
             sb.append(def(i, true));
@@ -93,7 +93,7 @@ class PassesTest {
     }
 
     /** As {@link #accepted()} with one ill-typed definition in the middle. */
-    private static String rejected() {
+    static String rejected() {
         StringBuilder sb = new StringBuilder(META);
         for (int i = 0; i < UNITS; i++) {
             sb.append(def(i, i != UNITS / 2));

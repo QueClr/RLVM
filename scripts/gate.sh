@@ -28,12 +28,21 @@
 #   --no-slice        skip step 2
 #   --no-diff-selftest  skip step 4
 #   --threads N       worker threads of both steps (default 1; 0 = automatic)
-#   --engine NAME     -X engine=NAME (default reference)
-#   --load MODE       -X load=MODE (default batch)
+#   --engine NAME     -X engine=NAME (default reference; `default` = no -X engine at all: the
+#                     distribution's own default engine)
+#   --load MODE       -X load=MODE (default batch; `default` = no -X load at all: the checker's
+#                     own rule, pipelined for two or more workers on inputs of 8 MiB and more)
+#   --defaults        the distribution exactly as a user runs it: --threads 0 --engine default
+#                     --load default (automatic workers, default engine, default load mode and
+#                     reader). The gate of a change of a DEFAULT (rlvm-main, an engine's priority)
 #   -X KEY=VALUE      further checker setting for both steps (repeatable)
 #   --extra-cp PATH   class path entries after the distribution's jars (an engine that is not in it)
 #   -j JOBS           files in parallel (default 4 for both steps: the host rule of 2026-11-24 allows
-#                     a slot four lanes; it was 8 for the slice and 10 for the mutants)
+#                     a slot four lanes; it was 8 for the slice and 10 for the mutants). Whatever is
+#                     asked for, a step never starts more lanes than the memory that is available
+#                     at its start can hold beside a reserve of 14 GB: a lane of the mutant step is
+#                     counted with the 4 GB heap cap of scripts/check-light.sh, a lane of the
+#                     230-test step with 8 GB (the largest published test through the JVM launcher)
 #   --pin CPUS        pin the guard to these CPUs instead (taskset list, e.g. 0-4,10-14,18,19)
 #   The gate holds one host-wide slot (bench/slot.sh) while it runs and waits for one if all are
 #   taken; RLVM_NO_SLOT=1 turns that off (for a caller that accounts for the load itself).
@@ -79,13 +88,14 @@ while [ "$#" -gt 0 ]; do
     --threads) threads="${2:?--threads needs a number}"; shift 2 ;;
     --engine) engine="${2:?--engine needs a name}"; shift 2 ;;
     --load) load="${2:?--load needs a mode}"; shift 2 ;;
+    --defaults) threads=0; engine=default; load=default; shift ;;
     -X) extra+=("${2:?-X needs KEY=VALUE}"); shift 2 ;;
     --extra-cp) extra_cp="${2:?--extra-cp needs a path}"; shift 2 ;;
     -j|--jobs) jobs="${2:?-j needs a number}"; shift 2 ;;
     --no-pin) pin=0; shift ;;
     --pin) pin_list="${2:?--pin needs a CPU list}"; shift 2 ;;
     --no-diff-selftest) diffself=0; shift ;;
-    -h|--help) sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "gate.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -148,9 +158,25 @@ if [ -L "$dist" ]; then dist="$(realpath -e "$dist" 2>/dev/null || echo "$dist")
 [ -x "$dist/bin/rlvm-jvm" ] || { echo "gate: $dist/bin/rlvm-jvm not built (scripts/dev.sh dist)" >&2; exit 70; }
 echo "gate: distribution $dist ($(sed -n 's/^built: *//p' "$dist/BUILD-INFO.txt" | cut -d' ' -f1)); engine $engine, load $load, threads $threads${extra[*]:+, -X ${extra[*]}}" >&2
 
+# Lanes of a step: the number asked for (-j, default 4), but never more than the memory available
+# now can hold: (MemAvailable - 14 GB reserve) / the bound of one lane, at least 1. bench/slot.sh
+# guards the START of the gate (14 GB available); this guards each step, so that a larger -j is
+# safe to ask for: it is granted only while the host has the memory.
+lanes() { # per-lane bound in GB -> lanes
+  local want="${jobs:-4}" avail fit
+  avail="$(awk '/MemAvailable/ { printf "%d", $2 / 1048576 }' /proc/meminfo 2>/dev/null || echo 0)"
+  fit=$(( (avail - 14) / $1 ))
+  [ "$fit" -ge 1 ] || fit=1
+  if [ "$fit" -lt "$want" ]; then
+    echo "gate: $want lanes asked for, $fit started: ${avail} GB of memory available, $1 GB per lane beside a 14 GB reserve" >&2
+    want="$fit"
+  fi
+  echo "$want"
+}
+
 fail=0
 if [ "$slice" = 1 ]; then
-  args=(--dist "$dist" --jvm --all --engine "$engine" --threads "$threads" -j "${jobs:-4}")
+  args=(--dist "$dist" --jvm --all --engine "$engine" --load "$load" --threads "$threads" -j "$(lanes 8)")
   # A gate never writes work/status/slice-all.md (the steward's record of the published state, made
   # with scripts/slice.sh --all): every gate has its own table under work/status/gate/.
   mkdir -p "$ROOT/work/status/gate"
@@ -160,7 +186,6 @@ if [ "$slice" = 1 ]; then
   gate_name="$(realpath -m --relative-to="$ROOT" "$dist" 2>/dev/null | tr -c 'A-Za-z0-9._\n-' '-')"
   [ -n "$gate_name" ] || gate_name="$(basename "$(dirname "$dist")")-$(basename "$dist")"
   args+=(--out "$ROOT/work/status/gate/slice-all-$gate_name.md" --tag "gate-$gate_name")
-  [ "$load" = batch ] || args+=(-X "load=$load")
   # A pinned gate runs on the slow cores, usually beside other people's jobs: it guards verdicts,
   # not the arena's time limits (those are read from scripts/slice.sh on a quiet machine).
   [ "${#prefix[@]}" -eq 0 ] || args+=(--no-arena-timeouts)
@@ -180,7 +205,7 @@ for c in "${list[@]}"; do
   log="$ROOT/work/logs/gate/judge-$(basename "$dir")-$(date -u +%Y%m%dT%H%M%SZ).log"
   rc=0
   RLVM_DIST="$dist" RLVM_THREADS="$threads" RLVM_ENGINE="$engine" RLVM_LOAD="$load" RLVM_EXTRA_CP="$extra_cp" \
-    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --corpus "$dir" -j "${jobs:-4}" -- \
+    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --corpus "$dir" -j "$(lanes 4)" -- \
     "$ROOT/scripts/check-light.sh" '"$IN"' >"$log" 2>&1 || rc=$?
   # The judge's table ends with:  total  SOUNDNESS COMPLETENESS agree declined error undecided
   summary="$(awk '$1 == "total" { printf "SOUNDNESS %s, COMPLETENESS %s, agree %s, declined %s, errors %s, undecided %s", $2, $3, $4, $5, $6, $7 }' "$log")"
@@ -194,7 +219,7 @@ if [ "$judge_all" = 1 ]; then
   log="$ROOT/work/logs/gate/judge-all-$(date -u +%Y%m%dT%H%M%SZ).log"
   rc=0
   RLVM_DIST="$dist" RLVM_THREADS="$threads" RLVM_ENGINE="$engine" RLVM_LOAD="$load" RLVM_EXTRA_CP="$extra_cp" \
-    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --all -j "${jobs:-4}" -- \
+    RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" "$ROOT/rlvm-testkit/bin/testkit" judge --all -j "$(lanes 4)" -- \
     "$ROOT/scripts/check-light.sh" '"$IN"' >"$log" 2>&1 || rc=$?
   echo "gate: mutants, all corpora: exit $rc | $(grep -ciE 'soundness' "$log") summary line(s); table in work/status/mutants.md | log $log"
   tail -n 8 "$log" | sed 's/^/gate:   /'

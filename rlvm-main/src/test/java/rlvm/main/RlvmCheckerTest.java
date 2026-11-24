@@ -54,7 +54,8 @@ class RlvmCheckerTest {
         Path export = Path.of("/some/export.ndjson");
         RunConfig auto = checker.configure(export, 0, false, 512L << 20, null);
         assertEquals(export, auto.input);
-        assertEquals(0, auto.workers, "automatic is passed on as 0: the driver decides (Run.resolveWorkers)");
+        assertEquals(RlvmChecker.autoWorkers(Runtime.getRuntime().availableProcessors()), auto.workers,
+                "automatic is decided here and passed on like an explicit count (LoadDefaultsTest)");
         assertEquals(512L << 20, auto.deepStackBytes);
         assertTrue(auto.workerStackBytes <= 512L << 20);
         assertEquals(LoadOptions.Mode.BATCH, auto.loadMode);
