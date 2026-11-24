@@ -49,15 +49,152 @@ abstract class Instr extends Node {
     /** Slot registers to write back to the window when this instruction suspends the activation. */
     @CompilationFinal(dimensions = 1) final int[] flushOnSusp;
 
+    /** Run-ahead (NOTES-T3 section 4): "not known" as a predicted value; never a value ref. */
+    static final int UNK = Op.MISS;
+    /** Count, per machine, how often a predicted record is the record the operation then returns (rlvm.t2.aheadCheck). */
+    static final boolean AHEAD_CHECK = Boolean.getBoolean("rlvm.t2.aheadCheck");
+    /** Frame slots of the run-ahead: the predicted value of register i is slot {@code sbase + i}. */
+    final int sbase;
+    final int svpSlot;
+    final int srspSlot;
+    final int sinkSlot;
+    final int vp0Slot;
+    final int dirtySlot;
+
     Instr(BlockRoot.Build b, Decoded.Insn in) {
         this.capSlot = b.capSlot;
         this.lsSlot = b.lsSlot;
         this.blk = b.d.blk;
         this.pc = in.pc;
         this.flushOnSusp = b.flushOnSusp(in);
+        this.sbase = b.sbase;
+        this.svpSlot = b.sbase + b.d.win;
+        this.srspSlot = svpSlot + 1;
+        this.sinkSlot = svpSlot + 2;
+        this.vp0Slot = svpSlot + 3;
+        this.dirtySlot = svpSlot + 4;
     }
 
     abstract int exec(VirtualFrame f, Machine m, int rb, int d);
+
+    // ---------------------------------------------------------------------------------------------------
+    // Run-ahead: predict what the instruction will intern, load the table slots early (NOTES-T3 section 4)
+    // ---------------------------------------------------------------------------------------------------
+
+    /**
+     * The run-ahead of this instruction: its effect on the PREDICTED registers (the shadow slots), computed
+     * from reads of the machine only, and the early load of the intern-table slot of every record or frame
+     * it is going to probe. A record that does not exist yet is predicted to get the session's next record id
+     * (ids are creation order); the prediction is a hint and is never used as a value.
+     *
+     * @return the selector of the successor as {@code exec} returns it (0 for a sequential instruction), or -1:
+     *     the run-ahead stops here (a judgment is called, the block returns, the outcome is not predictable)
+     */
+    int ahead(VirtualFrame f, Machine m) {
+        return -1;
+    }
+
+    final void sset(VirtualFrame f, int reg, int v) {
+        f.setIntStatic(sbase + reg, v);
+    }
+
+    /** True if {@code v} is a record this activation is predicted to make (it has no words yet). */
+    final boolean predicted(VirtualFrame f, int v) {
+        return v > Layout.HOLE && v >= f.getIntStatic(vp0Slot);
+    }
+
+    /** The predicted value of a value operand, read as {@link #val} reads it; {@link #UNK} if it is not known. */
+    final int sval(VirtualFrame f, Machine m, Opnd o) {
+        int v;
+        switch (o.mode) {
+            case Op.MODE_R:
+                v = f.getIntStatic(sbase + o.p);
+                break;
+            case Op.MODE_A:
+                v = f.getIntStatic(sbase + o.p);
+                if (v == Layout.HOLE) {
+                    return UNK;
+                }
+                break;
+            case Op.MODE_C:
+                v = T2Bridge.captured(m, f.getIntStatic(capSlot), o.p);
+                if (v == Layout.HOLE) {
+                    return UNK;
+                }
+                break;
+            case Op.MODE_I:
+                return o.p | Layout.IMM;
+            case Op.MODE_V:
+                return o.p;
+            default:
+                return UNK;
+        }
+        if (v > Layout.HOLE && v < f.getIntStatic(vp0Slot) && T2Bridge.kindOfRecord(m, v) == Layout.SUSP) {
+            return T2Bridge.peekInline(m, v);
+        }
+        return v;
+    }
+
+    /** The predicted value of a capture operand ({@link #raw}). */
+    final int sraw(VirtualFrame f, Machine m, Opnd o) {
+        switch (o.mode) {
+            case Op.MODE_R:
+            case Op.MODE_A:
+                return f.getIntStatic(sbase + o.p);
+            case Op.MODE_C:
+                return T2Bridge.captured(m, f.getIntStatic(capSlot), o.p);
+            case Op.MODE_V:
+                return o.p;
+            default:
+                return UNK;
+        }
+    }
+
+    /** Loads the record-table / run-table word where the probe of {@code hash} will start. */
+    final void touchRecord(VirtualFrame f, Machine m, int hash) {
+        f.setIntStatic(sinkSlot, f.getIntStatic(sinkSlot) ^ T2Bridge.vtabWord(m, hash));
+    }
+
+    final void touchRun(VirtualFrame f, Machine m, int hash) {
+        f.setIntStatic(sinkSlot, f.getIntStatic(sinkSlot) ^ T2Bridge.rtabWord(m, hash));
+    }
+
+    /**
+     * The id a record made now is predicted to get, with {@code runWords} words of the run slab made before it
+     * (the spine of a NEU); {@link #UNK} once an instruction with an unknown effect on the stores has been passed.
+     */
+    final int newRecord(VirtualFrame f, int runWords) {
+        if (f.getIntStatic(dirtySlot) != 0) {
+            return UNK;
+        }
+        int id = f.getIntStatic(svpSlot);
+        f.setIntStatic(svpSlot, id + 1);
+        f.setIntStatic(srspSlot, f.getIntStatic(srspSlot) + runWords);
+        return id;
+    }
+
+    /** The instruction makes records the run-ahead cannot number: its result and every later new id are unknown. */
+    final int unknown(VirtualFrame f, int dst) {
+        f.setIntStatic(dirtySlot, 1);
+        f.setIntStatic(sbase + dst, UNK);
+        return 0;
+    }
+
+    /** rlvm.t2.aheadCheck: was the predicted value of register {@code dst} the value {@code r} the operation returned? */
+    final void check(VirtualFrame f, int dst, int r) {
+        if (AHEAD_CHECK) {
+            int p = f.getIntStatic(sbase + dst);
+            if (p != 0 && p != UNK) {
+                T2Tier w = (T2Tier) f.getArguments()[0];
+                if (p == r) {
+                    w.aheadHit++;
+                } else {
+                    w.aheadMiss++;
+                }
+                f.setIntStatic(sbase + dst, UNK);
+            }
+        }
+    }
 
     // ---------------------------------------------------------------------------------------------------
     // Operands
@@ -225,6 +362,12 @@ abstract class Instr extends Node {
             setReg(f, m, rb, dst, dpin, v);
             return 0;
         }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            sset(f, dst, sval(f, m, s));
+            return 0;
+        }
     }
 
     /** PEEK d, s ({@code Code.peek}) and NSUCC d, s ({@code Code.nsucc}). */
@@ -259,6 +402,20 @@ abstract class Instr extends Node {
             }
             setReg(f, m, rb, dst, dpin, v);
             return 0;
+        }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            int v = sval(f, m, s);
+            if (isPeek) {
+                sset(f, dst, v); // sval has seen through a known suspension; a predicted record has no VAL
+                return 0;
+            }
+            if (v != UNK && v < -1) {
+                sset(f, dst, v + 1);
+                return 0;
+            }
+            return unknown(f, dst);
         }
     }
 
@@ -323,7 +480,53 @@ abstract class Instr extends Node {
             if (r >= SIG) {
                 return r;
             }
+            check(f, dst, r);
             setReg(f, m, rb, dst, dpin, r);
+            return 0;
+        }
+
+        /** {@code Values.mkApp}: the NEU of a CONST / FVAR / PROJ head, or the extension of a NEU head; {@code Nat.succ} of a literal. */
+        @Override
+        @ExplodeLoop
+        int ahead(VirtualFrame f, Machine m) {
+            int n = args.length;
+            int hv = sval(f, m, h);
+            if (hv == UNK || hv <= Layout.HOLE || predicted(f, hv)) {
+                return unknown(f, dst);
+            }
+            int w0 = T2Bridge.w0(m, hv);
+            int kind = w0 >>> Layout.KIND_SHIFT;
+            int head = hv;
+            int off = 0;
+            int sum = 0;
+            if (kind == Layout.CONST) {
+                if (n == 1 && (w0 & T2Bridge.NATOP_MASK) == T2Bridge.NATOP_SUCC) {
+                    int v = sval(f, m, args[0]);
+                    if (v != UNK && v < -1) {
+                        sset(f, dst, v + 1);
+                        return 0;
+                    }
+                    return unknown(f, dst);
+                }
+            } else if (kind == Layout.NEU) {
+                off = w0 & Layout.AUX_MASK;
+                if (off > 8) {
+                    return unknown(f, dst);
+                }
+                head = T2Bridge.recA(m, hv);
+                sum = T2Bridge.prefixHash(m, T2Bridge.recB(m, hv), off);
+            } else if (kind != Layout.FVAR && kind != Layout.PROJ) {
+                return unknown(f, dst);
+            }
+            for (int i = 0; i < n; i++) {
+                int v = sval(f, m, args[i]);
+                if (v == UNK) {
+                    return unknown(f, dst);
+                }
+                sum += T2Bridge.argHash(v, off + i);
+            }
+            touchRecord(f, m, T2Bridge.neuHash(head, sum));
+            sset(f, dst, newRecord(f, Layout.RUN_H + off + n));
             return 0;
         }
     }
@@ -377,6 +580,19 @@ abstract class Instr extends Node {
             setReg(f, m, rb, dst, dpin, v);
             return 0;
         }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            if (op != Op.KCONST) {
+                return -1;
+            }
+            int v = lparam ? T2Bridge.kConstHit(m, blk, pc, f.getIntStatic(lsSlot)) : T2Bridge.mkConstHit(m, a, list);
+            if (v == Op.MISS) {
+                return unknown(f, dst); // the head may have to be made
+            }
+            sset(f, dst, v);
+            return 0;
+        }
     }
 
     /** MKLAM / MKPI d, T, B, c0..ck and MKSUSP d, T, c0..ck ({@code Code.mkClosure}). */
@@ -424,7 +640,47 @@ abstract class Instr extends Node {
             if (v >= SIG) {
                 return v;
             }
+            check(f, dst, v);
             setReg(f, m, rb, dst, dpin, v);
+            return 0;
+        }
+
+        /**
+         * {@code Runs.frame} then {@code Values.closure}: the frame's slot in the run table, and - predicting that
+         * the frame is new, i.e. gets the next run offset - the slot of the record over it in the record table (the
+         * second probe depends on the first: without the prediction they are two cache misses in a row).
+         */
+        @Override
+        @ExplodeLoop
+        int ahead(VirtualFrame f, Machine m) {
+            if (let) {
+                return unknown(f, dst);
+            }
+            int nc = caps.length;
+            int fr = Layout.RUN_EMPTY;
+            if (nc > 0) {
+                int sum = 0;
+                for (int j = 0; j < nc; j++) {
+                    int v = sraw(f, m, caps[j]);
+                    if (v == UNK) {
+                        return unknown(f, dst);
+                    }
+                    if (v != Layout.HOLE) {
+                        sum += T2Bridge.slotHash(v, nc - 1 - j);
+                    }
+                }
+                touchRun(f, m, T2Bridge.frameHash(sum));
+                if (f.getIntStatic(dirtySlot) != 0) {
+                    f.setIntStatic(sbase + dst, UNK);
+                    return 0;
+                }
+                fr = f.getIntStatic(srspSlot);
+                f.setIntStatic(srspSlot, fr + Layout.RUN_H + nc);
+            }
+            int w0 = op == Op.MKLAM ? Layout.LAM << Layout.KIND_SHIFT | Layout.W0_WHNF
+                    : op == Op.MKPI ? Layout.PI << Layout.KIND_SHIFT | Layout.W0_WHNF : Layout.SUSP << Layout.KIND_SHIFT;
+            touchRecord(f, m, T2Bridge.recordHash(w0, term, fr, lparam ? f.getIntStatic(lsSlot) : 0));
+            sset(f, dst, newRecord(f, 0));
             return 0;
         }
     }
@@ -453,6 +709,16 @@ abstract class Instr extends Node {
             int k = v < 0 ? Layout.K_IMM : T2Bridge.kindOfRecord(m, v);
             return set >>> k & 1;
         }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            int v = sval(f, m, s);
+            if (v == UNK || predicted(f, v)) {
+                return -1;
+            }
+            int k = v < 0 ? Layout.K_IMM : T2Bridge.kindOfRecord(m, v);
+            return set >>> k & 1;
+        }
     }
 
     /** BEQ / BNE a, b, L ({@code Code.beq}): identity of refs. */
@@ -474,6 +740,16 @@ abstract class Instr extends Node {
             int y = val(f, m, rb, b);
             if (x >= SIG || y >= SIG) {
                 return x >= SIG ? x : y;
+            }
+            return (x == y) == eq ? 1 : 0;
+        }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            int x = sval(f, m, a);
+            int y = sval(f, m, b);
+            if (x == UNK || y == UNK) {
+                return -1;
             }
             return (x == y) == eq ? 1 : 0;
         }
@@ -499,6 +775,16 @@ abstract class Instr extends Node {
                 return v;
             }
             int j = INLINE >= 1 ? T2Bridge.ctorInline(m, v, ind) : T2Bridge.ctor(m, v, ind);
+            return j >= 0 && j < k ? j : k;
+        }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            int v = sval(f, m, s);
+            if (v == UNK || predicted(f, v)) {
+                return -1;
+            }
+            int j = T2Bridge.ctorInline(m, v, ind);
             return j >= 0 && j < k ? j : k;
         }
     }
@@ -676,6 +962,16 @@ abstract class Instr extends Node {
             }
             return 0;
         }
+
+        @Override
+        int ahead(VirtualFrame f, Machine m) {
+            int v = T2Bridge.kvalHitInline(m, blk, pc, lparam ? f.getIntStatic(lsSlot) : 0);
+            if (v == Op.MISS) {
+                return -1; // the generic walk of the closed term: a judgment
+            }
+            sset(f, dst, v);
+            return 0;
+        }
     }
 
     /**
@@ -721,6 +1017,27 @@ abstract class Instr extends Node {
             if (step(f, m, rb, d) < 0) {
                 int r = T2Bridge.stepResult(m);
                 return r >= SIG ? r : T2Bridge.fault(m, MachineErrors.E_INTERNAL);
+            }
+            return 0;
+        }
+
+        @Override
+        @ExplodeLoop
+        int ahead(VirtualFrame f, Machine m) {
+            int v = sval(f, m, s);
+            if (v == UNK || predicted(f, v)) {
+                return -1;
+            }
+            if (n == 1 && v < 0 && v != Layout.IMM) {
+                sset(f, d0, v - 1);
+                return 0;
+            }
+            int base = T2Bridge.lastArgsInline(m, v, n);
+            if (base < 0) {
+                return -1;
+            }
+            for (int i = 0; i < n; i++) {
+                sset(f, d0 + i, T2Bridge.runWord(m, base + i));
             }
             return 0;
         }

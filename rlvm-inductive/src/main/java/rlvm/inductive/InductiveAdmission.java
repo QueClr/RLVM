@@ -103,6 +103,8 @@ public final class InductiveAdmission {
     /** User constructors: the declared type with the block's types as atoms (before elimination). */
     private int[] cDeclared = new int[8];
     private int[] cAtom = new int[8];
+    /** The type of {@link #cAtom}: the constructor type with its levels rebuilt. */
+    private int[] cRebuilt = new int[8];
     /** User constructors: own cid. Auxiliary ones: cid of the container's constructor. */
     private int[] cCid = new int[8];
     private int[] cOwner = new int[8];
@@ -428,11 +430,17 @@ public final class InductiveAdmission {
     // the declared type and gets the declared type as it is.
     //
     // Here: the stand-in of a member that only the kernel refers to (constructors, recursors, auxiliary
-    // types) is a local whose type is the REBUILT type; the stand-in of a user type keeps the declared
-    // header for the occurrences in the constructor types, and the one application the kernel builds
-    // itself (the major premise `T params indices`) is checked once against a local of the rebuilt
-    // header ({@link #checkRecursors}). Every comparison is then the engine's own application check,
-    // with the official sides: type of the argument against the binder domain of the rebuilt type.
+    // types) is a local whose type is the REBUILT type. A user type is referred to by the constructor
+    // types of the export as well, and which type such a reference gets depends on the official type
+    // checker at work (each has an infer cache keyed by structural equality, and the kernel's own
+    // reference is structurally the export's): the declared header while the constructor types are
+    // checked (check_constructors: the kernel has made no reference of its own yet) and in the final
+    // environment of a nested block (the constructor types are checked first), the REBUILT header for
+    // every occurrence while a recursor type is checked (check_recursors: the motives, with the
+    // kernel's reference, come first). So the stand-in of a user type keeps the declared header and
+    // the recursor types are checked on a copy with a stand-in of the rebuilt header
+    // ({@link #checkRecursors}). Every comparison is then the engine's own application check, with the
+    // official sides: type of the argument against the binder domain of the (rebuilt) type.
 
     /** Rebuilt level per level id of the block in flight. */
     private final IntIntMap lvlRebuilt = new IntIntMap(64);
@@ -933,7 +941,7 @@ public final class InductiveAdmission {
         // An auxiliary type is only ever referred to as `auxJ.{m_lvls}` (replace_if_nested) and
         // `auxJ.{m_levels}` (m_ind_cnsts): its stand-in has the rebuilt header. A user type is also
         // referred to by the constructor types of the export, with the levels of the declaration:
-        // its stand-in keeps the header, and the kernel's own application is checked in checkRecursors.
+        // its stand-in keeps the header; checkRecursors checks with the rebuilt one.
         int atom = ops.mkLocal(t >= nUser ? rebuildTerm(header) : header);
         tAtom[t] = atom;
         atomType.put(atom, t + 1);
@@ -952,6 +960,7 @@ public final class InductiveAdmission {
             cType = Arrays.copyOf(cType, n);
             cDeclared = Arrays.copyOf(cDeclared, n);
             cAtom = Arrays.copyOf(cAtom, n);
+            cRebuilt = Arrays.copyOf(cRebuilt, n);
             cCid = Arrays.copyOf(cCid, n);
             cOwner = Arrays.copyOf(cOwner, n);
             cInput = Arrays.copyOf(cInput, n);
@@ -1465,7 +1474,8 @@ public final class InductiveAdmission {
         // (mk_constant(cnstr_name, m_levels) in mk_rec_infos and check_recursors): the type inferred
         // for it is the constructor type with its levels rebuilt.
         for (int c = 0; c < nCtors; c++) {
-            int atom = ops.mkLocal(rebuildTerm(cType[c]));
+            cRebuilt[c] = rebuildTerm(cType[c]);
+            int atom = ops.mkLocal(cRebuilt[c]);
             cAtom[c] = atom;
             atomCtor.put(atom, c + 1);
         }
@@ -1690,21 +1700,45 @@ public final class InductiveAdmission {
         } else {
             recLevelParams = in.levelParams;
         }
-        // tc().check(rec type): the major premise `t : T_k.{m_levels} params indices` (in every motive
-        // and in the recursor of T_k) is an application of a reference the kernel made itself, so
-        // T_k has the REBUILT header there: the type of each parameter and index local is compared
-        // with the binder domain of the rebuilt header. With the declared header (the stand-in of a
-        // user type) this is part of the check below; with a header that the rebuild respells it is
-        // made here, by the engine's own application check on a local of the rebuilt header.
+        // (1) tc().check(rec type, rec lparams): ONE type checker per recursor type, whose infer cache is
+        // keyed by structural equality. The first reference to a user type T_k that it infers is the
+        // kernel's own (`t : T_k.{m_levels} params indices` in the motive of T_k, before any minor
+        // premise), so the rebuilt header is what the cache holds for T_k, and the references the
+        // constructor types of the export make in the field types of the minor premises (structurally
+        // the same constant) get it too. So in this check EVERY occurrence of T_k has the rebuilt header:
+        // the recursor type is checked with T_k renamed to a local of the rebuilt header, and with the
+        // constructor stand-ins whose types mention T_k renamed along. (check_constructors above is
+        // another type checker: there the export's references have the declared header.)
+        int[] checked = recTypeAux;
+        renameMap.clear();
+        boolean respelled = false;
         for (int k = 0; k < nUser; k++) {
             int rebuilt = rebuildTerm(tHeader[k]);
             if (rebuilt != tHeader[k]) {
-                int fresh = ops.mkLocal(rebuilt);
-                ops.check(ov.mkApps(ov.mkApps(fresh, params, 0, nparams), idxPool, tIdx0[k], tNumIdx[k]));
+                renameMap.put(tAtom[k], ops.mkLocal(rebuilt));
+                respelled = true;
+            }
+        }
+        if (respelled) {
+            rename.memo.clear();
+            int[] ctorLocal = new int[nCtors];
+            for (int c = 0; c < nCtors; c++) {
+                int type = tools.replace(cRebuilt[c], rename);
+                ctorLocal[c] = type != cRebuilt[c] ? ops.mkLocal(type) : 0;
+            }
+            for (int c = 0; c < nCtors; c++) {
+                if (ctorLocal[c] != 0) {
+                    renameMap.put(cAtom[c], ctorLocal[c]);
+                }
+            }
+            rename.memo.clear();
+            checked = new int[nTypes];
+            for (int j = 0; j < nTypes; j++) {
+                checked[j] = tools.replace(recTypeAux[j], rename);
             }
         }
         for (int j = 0; j < nTypes; j++) {
-            ops.check(recTypeAux[j]);
+            ops.check(checked[j]);
             for (int c = tCtor0[j], e = c + tCtorN[j]; c < e; c++) {
                 int res = cResult[c];
                 int m = terms.spineLength(res);

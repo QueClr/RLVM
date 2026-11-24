@@ -125,6 +125,15 @@ class InvarianceTest {
             // Pipelined runs only: the unit cannot be decided before the file is completely loaded.
             u.late = rnd.nextInt(failures == 0 ? 60 : 12) == 0;
         }
+        // Pipelined runs only, one workload in four: units that are out of file order in a way the environment
+        // pass does not see while the file loads (the parking rule keeps the frontier below them until the end).
+        if (rnd.nextInt(4) == 0) {
+            for (Unit u : s) {
+                if (u.cls == RunHost.CHECK && rnd.nextInt(40) == 0) {
+                    u.outOfOrder = true;
+                }
+            }
+        }
         // (a unit may have been scripted twice; only the final scripts count)
         for (int i = n - 1; i >= 0; i--) {
             if (Fakes.finalOf(s[i], same, true, Policy.Unconfirmed.DECLINE) != Outcome.ACCEPT) {
@@ -298,6 +307,7 @@ class InvarianceTest {
                     assertTrue(!run.rejectionsTainted() || host.envCollateral, "only collateral records taint: " + where);
                     assertEquals(seen.verdict, verdict, where + ": " + run.verdicts().explanation());
                     assertEquals(seen.unit, run.verdicts().decidingUnit(), where);
+                    assertEquals(0, host.passedOutOfOrder.get(), "the frontier never passed an out-of-order unit while loading: " + where);
                     check(host, run, script, seen, where, true);
                     retried += host.envRetries.get();
                     if (run.workers() != null) {
@@ -311,7 +321,9 @@ class InvarianceTest {
             }
             assertTrue(iterations < 400 || (verdicts[0] > 60 && verdicts[1] > 20 && verdicts[2] > 20),
                     "the workloads cover all verdicts: " + java.util.Arrays.toString(verdicts));
-            assertTrue(iterations < 400 || (deferred > 50 && retried > 20 && snapshotResets > 200 && pipelinedRuns > 800),
+            // (slice mode: a worker takes its units when it needs them, so fewer of them lie beyond its lane's snapshot: 170 - 180
+            // snapshot resets where one run per worker and batch gave 520)
+            assertTrue(iterations < 400 || (deferred > 50 && retried > 20 && snapshotResets > 100 && pipelinedRuns > 800),
                     "the pipeline's paths are covered: " + pipelinedRuns + " pipelined runs, " + deferred
                             + " deferred units, " + retried + " environment retries, " + snapshotResets + " snapshot resets");
             System.out.println("InvarianceTest: pipelined: " + pipelinedRuns + " pipelined runs, " + downgraded

@@ -404,6 +404,86 @@ public final class T2Bridge {
         return Op.MISS;
     }
 
+    // ---------------------------------------------------------------------------------------------------
+    // Run-ahead (NOTES-T3 section 4): what a compiled block needs to PREDICT the intern-table slots its coming
+    // instructions will probe, so that it can load them early and the cache misses overlap. Reads only; a wrong
+    // prediction loads a slot nobody needs and changes nothing. The hash formulas are those of Values.neu /
+    // Runs.internRun / Values.closureProbe; rlvm.t2.aheadCheck counts how often the predicted record is the one
+    // the operation then returns.
+    // ---------------------------------------------------------------------------------------------------
+
+    /** The next record id / the next run offset of the session: what a NEW record / run will get. */
+    public static int vp(Machine m) {
+        return m.vp;
+    }
+
+    public static int rsp(Machine m) {
+        return m.rsp;
+    }
+
+    /** Word 0 / a / b of record {@code v}. */
+    public static int w0(Machine m, int v) {
+        return m.vh[v << Layout.REC_SHIFT];
+    }
+
+    public static int recA(Machine m, int v) {
+        return m.vh[(v << Layout.REC_SHIFT) + Layout.A];
+    }
+
+    public static int recB(Machine m, int v) {
+        return m.vh[(v << Layout.REC_SHIFT) + Layout.B];
+    }
+
+    /** The word of the record table / the run table where the probe sequence of {@code hash} starts. */
+    public static int vtabWord(Machine m, int hash) {
+        int[] t = m.vtab;
+        return t[hash & t.length - 1];
+    }
+
+    public static int rtabWord(Machine m, int hash) {
+        int[] t = m.rtab;
+        return t[hash & t.length - 1];
+    }
+
+    /** {@code Values.argHash}: the contribution of argument {@code v} at position {@code j} to the hash of a NEU. */
+    public static int argHash(int v, int j) {
+        int t = (v + j * 0x9E3779B1) * 0x85EBCA6B;
+        return t ^ (t >>> 15);
+    }
+
+    /** {@code Values.neuHash}: the hash of a NEU from its head and the sum of the {@link #argHash}es. */
+    public static int neuHash(int head, int sum) {
+        return Hash.fin(sum + head * 0xC2B2AE35 + (Layout.NEU << Layout.KIND_SHIFT));
+    }
+
+    /** The sum of the {@link #argHash}es of the {@code pn} arguments a NEU already has (spine run {@code pre}). */
+    public static int prefixHash(Machine m, int pre, int pn) {
+        int[] rs = m.rs;
+        int pb = pre + Layout.RUN_H;
+        int h = 0;
+        for (int i = 0; i < pn; i++) {
+            h += argHash(rs[pb + i], i);
+        }
+        return h;
+    }
+
+    /** {@code Runs.slotHash} / {@code Runs.runHash} of a FRAME run without REST. */
+    public static int slotHash(int v, int i) {
+        return Runs.slotHash(v, i);
+    }
+
+    public static int frameHash(int sum) {
+        return Runs.runHash(sum, Layout.RUN_FRAME, 0);
+    }
+
+    /** The hash of the record {@code (w0, a, b, c)} of every kind but NEU ({@code Hash.record}). */
+    public static int recordHash(int w0, int a, int b, int c) {
+        return Hash.record(w0, a, b, c);
+    }
+
+    public static final int NATOP_MASK = Layout.CONST_NATOP_MASK;
+    public static final int NATOP_SUCC = rlvm.nat.NatOp.SUCC;
+
     public static int mkAppInline(Machine m, int h, int xb, int n) {
         m.xp = xb + n;
         int r = Values.mkApp(m, h, xb, n);

@@ -27,13 +27,15 @@ import rlvm.store.DeclKind;
  * for the official relation, to the declared spelling ({@code InductiveAdmission}, "the official
  * rebuild of levels").
  *
- * <p>Ten declaration shapes, each over the levels of {@code level-rebuild-pool.tsv} (taken from the
+ * <p>Twelve declaration shapes, each over the levels of {@code level-rebuild-pool.tsv} (taken from the
  * level questions of the finding; 85 of the 125 single levels are respelled inequivalently). Every
  * shape puts the level where another comparison of the official kernel meets a rebuilt type:
  * <pre>
  *   SORT      inductive T : Sort L | mk : T                        (the result sort is never compared)
  *   PROP      inductive P (a : Sort L) : Prop | mk : P a           (parameter; K-like predicate)
  *   IDX       inductive T : Sort L -> Type | mk : T A              (index domain; A : Sort L an axiom)
+ *   IDXREC    ... | base : T A | step : T A -> T A                 (the export's own reference to T inside a minor premise)
+ *   MUTREC    mutual A (a : Sort L) | mk : B a -> A a,  B (a : Sort L) | nil | mk : A a -> B a
  *   RES       inductive T : G -> Type | mk : T g.{L}               (constructor result against the major premise)
  *   RESD      the same with a definition gd.{u} : G := g0          (equal after unfolding: accepted)
  *   RECF      inductive T : G -> Type | base | step : T g.{L} -> T g0   (recursive field)
@@ -140,6 +142,16 @@ class OfficialLevelRebuildTest {
             e.axiom("A", U, "Sort " + l);
             e.inductive(U, 0).type("T", "Sort " + l + " → Type").ctor("T.mk", T + " A.{u,v,w}").rec("T.rec", REC).end();
         }));
+        out.add(new Fixture("IDXREC " + shown, e -> {
+            e.axiom("A", U, "Sort " + l);
+            e.inductive(U, 0).type("T", "Sort " + l + " → Type").ctor("T.base", T + " A.{u,v,w}")
+                    .ctor("T.step", T + " A.{u,v,w} → " + T + " A.{u,v,w}").rec("T.rec", REC).end();
+        }));
+        out.add(new Fixture("MUTREC " + shown, e -> e.inductive(U, 1)
+                .type("A", "Sort " + l + " → Type").ctor("A.mk", "∀ (a : Sort " + l + "), B.{u,v,w} a → A.{u,v,w} a")
+                .type("B", "Sort " + l + " → Type").ctor("B.nil", "∀ (a : Sort " + l + "), B.{u,v,w} a")
+                .ctor("B.mk", "∀ (a : Sort " + l + "), A.{u,v,w} a → B.{u,v,w} a")
+                .rec("A.rec", REC).rec("B.rec", REC).end()));
         out.add(new Fixture("RES " + shown, e -> {
             e.axiom("G", "", "Type");
             e.axiom("g", "u", "G");
