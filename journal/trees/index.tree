@@ -1,6 +1,33 @@
 \title{RLVM agentic journal}
+\import{base-macros}
 
-\p{Working notes for RLVM (Rabdos Lean VM), a checker for the Lean 4 kernel on GraalVM. Agents and the maintainer record design notes, decisions, measured findings, open problems, examples and dated changelog entries here as small trees that link to each other.}
+\p{Working notes for RLVM (Rabdos Lean VM), a checker for the Lean 4 kernel on GraalVM. Agents and the maintainer record design notes, decisions, measured findings, open problems, examples and dated changelog entries here as small trees that link to each other. A tree states one point; the long research, design and review documents stay in the repository under \code{docs/} and are linked from the trees. The journal is documentation under the GNU Free Documentation License; see the [licence](licence).}
+
+\subtree[index-what]{
+\title{What RLVM is}
+
+\p{RLVM reads an export of a Lean 4 library in the format of \code{lean4export} and answers accept, reject or decline, as an external checker for the Lean Kernel Arena does. It is written in Java for GraalVM and runs as a native image or on the JVM.}
+
+\p{The maintainer's framing is that the project is a \em{mechanisation} of the kernel's type checking in the sense of type theory: the judgments of the kernel (inference, checking, conversion, reduction to weak-head normal form) are entries of a worklist with continuations, and RLVM is the machine that steps that worklist. Its design is written as an instruction set for normalisation by evaluation and definitional equality. The goal is real checking performance, which means warm wall-clock time with parallel workers, with the verdicts of the official checker. Both are stated in the [standing policies](standing-policies).}
+
+\p{There are two engines behind one pipeline of loader, store, admission and driver. The \em{reference engine} is a port of the official algorithm over a hash-consed term store: it admits inductive types, re-checks every rejection, is the oracle of the differential tests and is the strict mode. The \em{machine} is the worklist engine on values that is meant to carry the checking work.}
+}
+
+\subtree[index-state]{
+\title{Where it stands}
+
+\p{State of 2026-11-24, the second day of the project, on branch \code{dev}.}
+
+\ul{
+\li{\strong{Verdicts.} The pipeline accepts all eight corpora it is measured on (Init, Std, cedar, cslib, con-leche, reachability, navier-stokes-euler and Mathlib) and gives the expected verdict on the 230 published arena tests without a decline. On 17,775 mutated exports with stored official verdicts it has no wrong accept and no wrong reject.}
+\li{\strong{Default engine.} The reference engine is the default; the machine is selected with \code{\verb~|-X engine=machine~}. The machine was the default engine for under an hour on 2026-11-24 and was taken back when new hostile exports showed accepts that the official checker rejects. Those were fixed or classified, the maintainer chose practical exactness, and an adversarial review of the candidate default configuration found no accept of an underivable statement. What the default may differ in is listed under [accepted risks](accepted-risks).}
+\li{\strong{Speed.} Warm wall clock on all of Mathlib with 8 workers and pipelined loading, on the aarch64 development host, for the machine with its default switch set of that day: 27.4 s as a native image and 21.2 s on the JVM launcher. Measured in the same windows on the same cores, the two leading checkers of the arena take 12.3 s (gruszka) and 18.5 s (nano-lean). The reference engine needs 120.3 s of cold wall clock for the same file. The numbers and their conditions are in \src{docs/BENCHMARKS.md}.}
+\li{\strong{Where the gap is.} Profiles of Mathlib attribute most of the remaining distance to the official rule for comparing proofs, which the leading checkers do not follow, then to declarations that enter eager reduction, then to a uniform cost per operation. See the [insights](insights).}
+}
+}
+
+\subtree[index-hubs]{
+\title{Contents}
 
 \scope{
 \put\transclude/expanded{false}
@@ -14,4 +41,6 @@
 \transclude{agents}
 \transclude{standing-policies}
 \transclude{accepted-risks}
+\transclude{licence}
+}
 }

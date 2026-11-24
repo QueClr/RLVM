@@ -45,7 +45,7 @@
 \li{\strong{Forester compiles from source.} Forester is not in nixpkgs, so the first build on a machine compiles Forester and its OCaml libraries, which takes several minutes. Later builds reuse the local store.}
 \li{\strong{The first two days were written up afterwards.} The trees dated 2026-11-23 and 2026-11-24 were written on 2026-11-24 from the documents under \code{docs/}, the commit history and the status logs of the team, not during the work. Their dates are the dates of the work. The session trees of that period describe phases of a team of agents, not single sessions.}
 \li{\strong{Documents stay whole.} The research, design and review documents under \code{docs/} are long and stay in the repository. A tree states one point of a document and links to it; it does not replace it.}
-\li{\strong{The site is public and the repository is not.} A link to a file or a commit of the repository works only for a reader with access to it.}
+\li{\strong{Links point at branch \code{dev}.} A link to a file of the repository shows the file as it is on branch \code{dev} today, which can be later than the state a tree describes. A tree that depends on an exact state names the commit.}
 \li{\strong{Working files are not cited.} The team's status logs and scratch directories under \code{work/} are not part of the repository. A number that exists only there is stated in the tree without a link.}
 }
 }

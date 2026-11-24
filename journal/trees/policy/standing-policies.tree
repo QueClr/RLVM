@@ -50,6 +50,8 @@
 
 \ul{
 \li{\strong{No Oracle GraalVM by default.} The default build, the arena build and every default script neither download nor use Oracle GraalVM. It may be used for measurements that are reported to the maintainer and clearly labelled; nothing that ships depends on it. Given 2026-11-24. Note 11.}
+\li{\strong{Continuous integration may use GraalVM Community Edition.} Automated builds may download and run GraalVM Community Edition, which is under the GPL version 2 with the Classpath exception. The item above is unchanged by this. Given 2026-11-24. Note 14.}
+\li{\strong{Code is Apache-2.0 or MIT; the journal is GFDL.} The code of the repository is dual-licensed under the Apache License 2.0 or the MIT License, at the reader's option. This journal is documentation under the GNU Free Documentation License, version 1.3 or later; see the [licence](licence). Given 2026-11-24. Note 14.}
 \li{\strong{Commit each step.} The history is needed: every step of the work is committed on branch \code{dev}. In the team of agents the orchestrator commits and the other agents do not run git. Given 2026-11-24. Note 11.}
 \li{\strong{Up to 32 agents at a time.} The seats beyond the first sixteen go to profiling and optimisation. Given 2026-11-24. Note 11.}
 \li{\strong{The journal is a Forester forest.} The notes of the project are kept as this forest, in the form of the Reussir agentic journal, and are prepared for publication as a web site. Given 2026-11-24.}

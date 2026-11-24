@@ -231,6 +231,32 @@ The one wrong REJECT of the practical mode: `s3-mdata-eager-hidden-ok` (the load
 
 @@GATES@@
 
-## 9. Not established
+## 9. Not established, not done
 
-@@OPEN@@
+- **`nondep` in the strict mode is not published.** The decline is a patch for `rlvm-load` / `rlvm-export`
+  (`work/r2/patches/0001-strict-nondep-decline.patch`, tests `0002-..`), run end to end only as the private
+  distribution `work/r2/dist-nd`; I may not edit those modules. Until it is applied, `-X policy=strict` accepts
+  `r2-id-let-nondep-bad` (official reject). The exact solution (the flag as part of a LET node's identity, LP2's
+  design of 22:05Z) is not started.
+- **`mdata` and `nondep` are declined, not represented**: a strict run of a file with them gives no verdict. An
+  export of real code written with `--export-mdata` is such a file.
+- **Admission in the strict mode is fresher than the official kernel in three places** (D6): the four judgments
+  per constructor of `check_recursors`, the nested-application checks and the final re-check share one official
+  checker; the strict kernel gives each judgment empty caches. Whether RLVM's admission asks those judgments at all
+  in the official order is the admission's matter (finding L-F1 of today is in the same code). Other divergences of
+  the admission from `add_inductive` were not audited here.
+- **The second pass inside admission**: an object-identity hazard in a judgment asked through `KernelOps` is
+  declined at once in the strict mode (no session to check both ways). Not seen on the corpora.
+- **`sharecommon`** (`add_theorem` shares the value and the type before checking) was read in the source, not
+  shown by an export: every construction of a hazard I have needs a term that lazy delta produces from ANOTHER
+  declaration's value, which `sharecommon` never touches.
+- **No export for D4, D5, D7.** For D4 and D7 I could not construct a verdict that depends on them (the argument
+  is in section 4); they are corrected because the official tables are what they are. D5 is a matter of thread
+  timing.
+- **The both-ways check assumes that the two continuations at a hazard are the only official behaviours** and
+  that everything else in the kernel is the official procedure. The evidence for the first is section 3's table
+  (each continuation reproduces the official verdict exactly where it is the truth); for the second, the gates.
+  A hazard is decided by at most 63 checks of the declaration; more would be a decline (not seen).
+- **A wrong REJECT of the practical mode on a file with `mdata`** (`s3-mdata-eager-hidden-ok`) remains by design
+  (the loader's default drops metadata); contract (c) of OWNER-NOTES 13 is about real inputs, which have none.
+- Mathlib: see section 7 for what was run.

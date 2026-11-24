@@ -1,0 +1,12 @@
+\title{Research and benchmark infrastructure}
+\taxon{Session}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{research}
+\tag{benchmark}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{Being written.}

@@ -1,0 +1,11 @@
+\title{The exactness reviews and the choice of practical exactness}
+\taxon{Session}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{Being written.}

@@ -1,0 +1,11 @@
+\title{Design of the instruction set and the architecture, and its review}
+\taxon{Session}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{design}
+\meta{harness}{Claude Code}
+\meta{model-id}{claude-fable-5-2}
+\import{base-macros}
+
+\p{Being written.}

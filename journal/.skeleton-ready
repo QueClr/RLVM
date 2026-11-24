@@ -1,0 +1,46 @@
+The skeleton of the RLVM journal is ready (journal lead, 2026-11-24).
+
+READ FIRST: journal/AGENTS.md (kinds of trees, frontmatter, "Numbers", "Writing rules",
+"What must not be written", "Markup"). The site and the repository are public.
+
+TOOLS (prebuilt; run them with journal/ as the working directory):
+  result-tools/bin/journal-new <design|decision|problem|log|example|motivation|insight|session>
+      allocates a random address, creates trees/<dir>/<address>.tree with one \date line
+      (replace that line with the frontmatter of AGENTS.md; \date is YYYY-MM-DD, the date of the work)
+  result-tools/bin/journal-check
+      builds a scratch copy of the forest and fails on any diagnostic; it does not write output/,
+      so it is safe while others work. It shows the diagnostics of ALL trees: fix those in your
+      directories, ignore the others (their owner is mid-edit).
+  Do NOT run journal-build, journal-serve, nix build or nix develop in journal/ (they write output/
+  or copy the directory); the lead does the site builds.
+  scripts/md2tree.py converts a markdown fragment: python3 scripts/md2tree.py draft.md <address>
+  (keep drafts outside journal/, for example under work/).
+
+MACROS (\import{base-macros}): \table \tr \th \td, \src{docs/design/ISA.md} (a file of the
+repository, path as the argument, no \verb inside), \commit{abc1234}.
+A link or transclusion to an address that does not exist is a diagnostic: link only to trees that
+exist (yours, the session trees below, the hubs, standing-policies, accepted-risks, licence).
+
+SESSION TREES (exist now; link to the phase a tree's work belongs to, e.g. "Source: [the session](ses-JRSD)"):
+  ses-XOS5  2026-11-23  research (docs/research/01-13), benchmark infrastructure, spikes
+  ses-EMMW  2026-11-23  design: ISA, ARCHITECTURE, critics' review, RECONCILIATION, stepper convention
+  ses-BQZM  2026-11-24  foundation modules and the reference pipeline (waves 2-3, check of wave 5)
+  ses-Z72N  2026-11-24  the machine: packages M1-M8, v0 gate, integration of wave 4, review of package S
+  ses-CVTE  2026-11-24  machine speed (wave 6) and pipeline (wave 7): switches, default set, warm passes, driver, loader, levels
+  ses-JRSD  2026-11-24  profiles and prototypes: P7 P8 P9 GC X1 X5 J1 V1 AR1, C1, E1 eager, U2 values, T3 Truffle tier and CALL
+  ses-874D  2026-11-24  exactness: reviews S2 S3 R2, findings E1-F1..F7, divergence classes, owner note 13 (practical)
+Other fixed addresses: index, designs, decisions, open-problems, insights, examples, changelog,
+sessions, agents, standing-policies, accepted-risks, licence, claude-fable-5-2, queclr,
+log-2026-11, release-unreleased.
+
+OWNERSHIP: the lead owns the hubs (trees/*.tree), trees/log/log-2026-11.tree,
+trees/log/release-unreleased.tree, trees/policy, trees/people, trees/session, AGENTS.md, the flake.
+Do not edit those: the lead adds your trees to designs.tree and to the two changelog lists from
+your index file. JW1: trees/design + trees/decision. JW2: trees/insight + trees/example +
+trees/problem. JW3: trees/log (entries log-XXXX only).
+
+INDEX: append one line per finished tree to journal/.index-<JW1|JW2|JW3>.tsv:
+  address<TAB>kind<TAB>title<TAB>source document
+Changelog entries use the same four columns; the lead reads the date and the area tag from the
+tree itself.
+When you are done, create journal/.done-<JW1|JW2|JW3>.

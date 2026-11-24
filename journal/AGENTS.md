@@ -14,8 +14,8 @@ can be moved into a repository of its own unchanged. All commands below are run
 in this directory.
 
 Write here freely as part of your work. You do not need to ask first. The
-rendered forest is a public web site (see "Publication"), so read "What must
-not be written" before you add a tree.
+rendered forest is meant to be a public web site (see "Publication"), so read
+"What must not be written" before you add a tree.
 
 ## Tools
 
@@ -196,7 +196,7 @@ not usable.
 
 ## What must not be written
 
-The site is public although the RLVM repository is private.
+The repository and the rendered site are public.
 
 - No credentials, tokens or keys, and no host names or absolute paths of a
   machine. Paths are relative to the root of the RLVM repository.
@@ -259,13 +259,23 @@ names an existing tree or section.
 ## Publication
 
 `.github/workflows/journal-pages.yml` at the root of the RLVM repository
-builds the forest with `nix build .#site` and publishes it as GitHub Pages at
-`https://queclr.github.io/RLVM/` on every push to branch `dev` that touches
-this directory. A pull request builds and does not publish. Links in the
-rendered forest are absolute and start with the path of `url` in
-`forest.toml`, so the site root is the directory `RLVM` of the build output.
-If the journal moves to another repository, change `url`, `sitePath` in
-`flake.nix` and the workflow together.
+builds the forest with `nix build .#site` and publishes it as GitHub Pages on
+every push to branch `dev` that touches this directory. The site's address is
+the `url` of `forest.toml`. A pull request builds and does not publish. Links
+in the rendered forest are absolute and start with the path of `url`, so the
+site root is the directory `RLVM` of the build output. If the journal moves to
+another repository, change `url`, `sitePath` in `flake.nix` and the workflow
+together. Pushing is the maintainer's decision: do not push, and do not start
+the workflow by hand, unless asked.
+
+## Licence
+
+The trees are licensed under the GNU Free Documentation License, Version 1.3
+or any later version, with no Invariant Sections, no Front-Cover Texts and no
+Back-Cover Texts. The text is `LICENSE` in this directory, and
+`assets/GFDL-1.3.txt` is the same text for the site, which shows the notice
+in `trees/licence.tree`. Code quoted in trees is from the RLVM repository and
+is under its licence, Apache-2.0 OR MIT. A tree needs no licence header.
 
 ## Version control
 
