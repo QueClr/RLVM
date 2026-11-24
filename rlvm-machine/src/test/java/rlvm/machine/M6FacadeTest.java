@@ -57,7 +57,7 @@ class M6FacadeTest {
         options.put("machine.switches", "warm");
         options.put("machine.hostDepth", "0");
         options.put("machine.memocheck.every", "16");
-        options.put("levels", "something of another provider");
+        options.put("ref.imports", "something of another provider");
         MachineEngine e = (MachineEngine) p.factory(options).create(f.store, EngineConfig.defaults());
         assertEquals(Op.DBG_MEMOCHECK | Op.DBG_POISON, e.debug);
         assertEquals(Op.SW_WARM, e.switches);
@@ -879,6 +879,18 @@ class M6FacadeTest {
             assertEquals(Op.SW_DEFAULT, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults())).switches);
             options.put("machine.switches", "none");
             assertEquals(0, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults())).switches);
+            // the launcher's -X levels=... reaches the machine too, and wins over machine.switches
+            assertTrue(new MachineProvider().optionKeys().contains("levels"));
+            options.put("levels", "complete");
+            assertEquals(Op.SW_LEVELS_COMPLETE, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults())).switches);
+            assertEquals(0, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults().withStrict(true))).switches,
+                    "a strict engine has no switch: official levels");
+            options.put("machine.switches", "warm,levels-complete");
+            options.put("levels", "official");
+            assertEquals(Op.SW_WARM, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults())).switches);
+            options.put("levels", "both");
+            assertThrows(IllegalArgumentException.class, () -> new MachineProvider().factory(options));
+            options.remove("levels");
         } finally {
             if (old != null) {
                 System.setProperty("rlvm.machine.switches", old);

@@ -527,16 +527,48 @@ compare):
 | mathlib (6.33 GB), CPU s, 1 run | 16.65 | 13.77 | -17 % |
 | instructions, Init / Std / mathlib (G) | 7.44 / 12.47 / 132.3 | 7.17 / 12.03 / 128.2 | -3 % |
 
-LOADER_MEASUREMENT_PLACEHOLDER
+The published state of the wave (store f85c730603b8 + loader 26242def2701; the native image
+`work/pipeline-w7/dist-b` holds the loader as published and the store without the unrelated
+`Overlay.remapBlocks` fix) against the jars before it, and the two loader changes switched off one at a
+time on the same binary (`RLVM_LOAD_EAGER_LOC=1`, `RLVM_LOAD_NO_TOUCH=1`), all in ONE hold of the
+measurement lock, alternating (15:15-15:17Z, host load average 107-111; `work/pipeline-w7/final-load.txt`;
+CPU time = wall clock here, the load is one thread; not taken through `bench/quiet.py`, which came later):
+
+| Load phase, native `-O3`, CPU ms | before the wave | published | `loc` read at arrival (old way) | no touch hint |
+|---|--:|--:|--:|--:|
+| Init, 3 alternating rounds | 844 / 885 / 892 | **681 / 673 / 667** | 688 / 740 / 684 | 669 / 661 / 681 |
+| Std, 2 rounds | 1,377 / 1,410 | **1,102 / 1,136** | 1,152 / 1,189 | 1,158 / 1,148 |
+| mathlib, 1 run | 17,182 | **12,396** | 13,352 | 12,868 |
+| instructions (G), Init / Std / mathlib | 7.44 / 12.47 / 132.3 | 7.42 / 12.47 / 133.1 | 7.28 / 12.22 / 130.5 | 7.37 / 12.36 / 131.8 |
+
+Reading: (1) the wave takes 24 % off the load of Init (885 -> 673 ms, medians), 20 % off Std, 28 % off
+mathlib (17.2 -> 12.4 s), with the SAME number of instructions: all of it is cache misses that no longer
+happen or that overlap. (2) Deferring the `loc` reads is worth 2 % on Init (lower in each of the three
+rounds), 4 % on Std (both rounds), 7 % on mathlib (one run) and costs 2 % more instructions; it grows
+with the file because `loc` outgrows the caches. (3) The touch hint is not established: Init +0.6 %
+(noise), Std -3 % (two rounds), mathlib -3.7 % (one run), +0.7 % instructions; it never lost on the two
+larger files and stays on, but it has not had its three repeats there.
+
+A whole check with the machine as engine, one worker, same hold of the lock, one run each
+(`final-full.txt`; the two images differ in the machine jar, 608b84b2b142 against f82074b207f1, with equal
+instruction counts): Init 8.07 -> 7.91 s CPU (load phase by the driver's clock 0.82 -> 0.67 s), Std 13.74
+-> 13.34 s. By classes (`perf record`, `work/pipeline-w7/perf/base-init*`, `final-b-init*`): what is neither
+a machine class nor the kernel is 19.9 % = 1.59 s of Init before and 19.1 % = 1.51 s after; the classes of
+reader, loader, store writers and block decoding 0.87 -> 0.78 s. **The targets of the wave (0.5 s on
+Init for everything that is not the engine; 8 s of CPU for the mathlib load) are not reached.**
 
 Two diagnostic switches stay in the loader (environment variables, read when a `Loader` is created; both
 paths build the same store): `RLVM_LOAD_EAGER_LOC=1` reads `loc` when the record arrives, as before this
 wave; `RLVM_LOAD_NO_TOUCH=1` switches the touch hint off.
 
-What is left, by the profile after the changes (mathlib, load phase): the reader 22 % (`Mem.u64` 5 % and
-`Scanner.num` 8 % as out-of-line calls: `-H:PriorityForceInline=rlvm.export.Mem.u64` in the image build is
-the first thing to try; not measured), kernel 11 % (page faults), promotion 10 %, `NodeCtx.writeApp` 8 %,
-names 7 %, the block writer 5 %. The 8 s target for mathlib is not reached. The structural step that
+What is left, by the profile of the published state (mathlib, load phase, 49,559 samples = 12.4 s;
+`work/pipeline-w7/perf/final-b-load-mathlib.txt`): the reader 26 % (`Scanner.num` 9.3 %, `Mem.u64` 5.7 %,
+`ExportReader.sequential` 5.0 %, `Linker` 3.3 %; `Mem.u64` and `Scanner.num` are out-of-line calls in the
+image: `-H:PriorityForceInline=rlvm.export.Mem.u64` in the image build is the first thing to try, not
+measured), kernel 11 % (page faults), promotion 11 % (`seek` 4.8, `promote` 3.7), the `loc` reads 7.3 %
+(`resolvePending` 5.1 + `exprApp` 2.2; they were 12.1 % in `exprApp`), children's nodes 9.4 %
+(`NodeCtx.writeApp` 5.1 + `TermStore.touch` 4.3: the hint moves the miss more than it removes it), names
+8.4 %, `Loader.sweep` 4.6 %, the block writer 5.2 %. The 8 s target for mathlib is not reached. The structural step that
 would reach it is X5's finding (requests.log, 14:04Z): on exporter output the private records of a theorem
 are an id range, so the loader need not parse, pack or promote them serially at all (four fifths of the
 expression records), and the workers parse their own proofs.

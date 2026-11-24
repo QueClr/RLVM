@@ -67,7 +67,7 @@ final class Eval {
         /** Statistics ({@code m.stats}): tabled evaluations answered by {@code VAL}; results left untabled because they were suspensions. */
         long hits;
         long lazy;
-        /** Measurement bits ({@code X_SEG}, {@code X_NODEPTH}, {@code X_NOCM}, {@code X_NOINV}; system property {@code rlvm.m2.x}, default 0). */
+        /** Measurement bits ({@code X_NODEPTH}, {@code X_NOCM}; system property {@code rlvm.m2.x}, default 0). */
         int xsw = Integer.getInteger("rlvm.m2.x", 0);
         /** SW_GATED_TABLING: an inert application nested this many inert levels below its evaluation root is always tabled. */
         int depthK = Math.max(1, Integer.getInteger("rlvm.m2.k", DEPTH_K));
@@ -82,20 +82,25 @@ final class Eval {
          * what EVAL of the body under those bindings returned. Lossy: a cell is overwritten, never chained.
          */
         final int[] am = new int[8 << AM_LOG2];
-        /** Second result of {@link #beta}: the step missed the APPLY memo and its result is to be recorded. */
+        /** Second result of {@link #beta} when it returns SUSP: the step is to be recorded in the APPLY memo when it completes. */
         boolean amOpen;
-        /** Scratch of {@link #amKey}: the key's arguments. */
+        /** Second results of {@link #amKey}: the key's arguments. */
         int ak0;
         int ak1;
         int ak2;
         /** Statistics ({@code m.stats}): beta steps answered by the APPLY memo. */
         long amHits;
-        /** Segment cache: pairs {@code (first id, end id)} of export segments of earlier units, direct-mapped by {@code id >>> SEG_SHIFT}. Never stale: a published unit's segment does not change. */
-        final int[] seg = new int[2 << SEG_LOG2];
+        /** The APPLY memo's governor ({@link #amLive}): lookups and hits of the current window, steps still to pass by. */
+        int amWin;
+        int amWinHits;
+        int amOff;
 
         /** Session reset (ISA 1.6): forget everything, in O(used) (the closed-term memo is stamped by the epoch). */
         void reset(Machine m) {
             ownFirst = Integer.MAX_VALUE;
+            amWin = 0;
+            amWinHits = 0;
+            amOff = 0;
             if (m.epoch == 1) {
                 java.util.Arrays.fill(cm, 0); // the epoch counter wrapped: stale stamps could match again
                 java.util.Arrays.fill(am, 0);
@@ -114,8 +119,8 @@ final class Eval {
     }
 
     // ---- the evaluation economy (NOTES-M2 section 6) ----------------------------------------------------------
-    // SW_M2A: X_NOBODY | X_SELECT. SW_M2B: X_AMEMO. The other bits are read from the system property rlvm.m2.x
-    // (measurements; default 0) and, but for X_NOCM, act only with SW_GATED_TABLING.
+    // SW_M2A: X_NOBODY | X_SELECT. SW_M2B: X_AMEMO. X_NODEPTH and X_NOCM are read from the system property rlvm.m2.x
+    // (measurements; default 0).
 
     /** The body of a beta step and of INST is evaluated without a tabling record. */
     static final int X_NOBODY = 1;
@@ -123,24 +128,23 @@ final class Eval {
     static final int X_SELECT = 2;
     /** A beta step of at most three binders is memoised by (closure, bound arguments) in a direct-mapped table. */
     static final int X_AMEMO = 4;
-    /** An inert argument is tabled by its flags when it lies in its parent's export segment (instead of: always, when foreign). */
-    static final int X_SEG = 8;
     /** Without the depth rule of inert nests (reproduces the quadratic walk of NOTES-M2 D21). */
     static final int X_NODEPTH = 16;
     /** Without the closed-term memo. */
     static final int X_NOCM = 32;
-    /** INVARIANT alone does not table an inert argument. */
-    static final int X_NOINV = 64;
     static final int DEPTH_K = 4;
     static final int CM_LOG2 = 12;
     static final int AM_LOG2 = 11;
     static final int AM_ARGS = 3;
-    static final int SEG_LOG2 = 8;
-    static final int SEG_SHIFT = 6;
+    /** The APPLY memo's governor: after a window of this many lookups with fewer than one hit in {@code AM_MIN_RATE} ... */
+    static final int AM_WINDOW = 4096;
+    static final int AM_MIN_RATE = 16;
+    /** ... the memo is passed by for this many beta steps. */
+    static final int AM_PAUSE = 1 << 16;
+    /** Longest spine that {@link #app} collects in one pass. */
+    private static final int SPINE_FAST = 16;
     /** The debug modes that own a path this file would otherwise shorten (memo hits, variable reads); tracing is not one. */
     private static final int DBG_HOOKS = Op.DBG_MEMOCHECK | Op.DBG_SHORTCHECK | Op.DBG_SCOPEAUDIT | Op.DBG_MASKAUDIT | Op.DBG_SHARECHECK;
-    /** {@code lo} of {@link #table}: the node is an evaluation root; the segment bound is the unit's own first id. */
-    private static final int LO_ROOT = -1;
 
     /** The economy in force: {@code X_NOBODY | X_SELECT} with SW_M2A, {@code X_AMEMO} with SW_M2B. */
     private static int feat(Machine m) {
@@ -150,7 +154,7 @@ final class Eval {
 
     // ---- frame keys of the continuation steps (the payload of J[k] is the parameter list of k_J..) ----
 
-    /** EVAL[IN](t, lo, u, eb, en, ls): an inert application met by ARGV, beyond the depth bound. */
+    /** EVAL[IN](t, u, eb, en, ls): an inert application met by ARGV at depth u of its nest, beyond the depth bound. */
     static final int K_EVAL_IN = Op.K_EVAL | 1;
     /** EVAL[HEAD](s, xb, n, eb, en, ls): waits for the value of the head. */
     static final int K_EVAL_HEAD = Op.K_EVAL | 2;
@@ -205,7 +209,7 @@ final class Eval {
             return v;
         }
         // the tabling record (5.1), or -t: t is not tabled
-        return enter(m, t, table(m, t, LO_ROOT, 0, eb, en, ls), Op.K_EVAL, eb, en, ls, d);
+        return enter(m, t, table(m, t, 0, eb, en, ls), Op.K_EVAL, eb, en, ls, d);
     }
 
     /**
@@ -274,19 +278,16 @@ final class Eval {
      * ARGV's evaluation of an inert application t (ISA 4.2 "EVAL now (builds NEUs only)"): an iteration of the
      * inert-nest loop of the enclosing EVAL (ISA 8.2 "one EVAL frame looping", section 9; convention H8 item 3), so it
      * is tabled and ticked like any node and is not a call event. Run by host recursion; beyond the depth bound it is
-     * the frame EVAL[IN](t, lo, u, eb, en, ls) (written without the event bookkeeping of {@code spillN}: there was no
+     * the frame EVAL[IN](t, u, eb, en, ls) (written without the event bookkeeping of {@code spillN}: there was no
      * event). This entry is the root of a nest (ARGV called from outside, a let value).
      */
     static int evalIn(Machine m, int t, int eb, int en, int ls, int d) {
-        return evalInAt(m, t, LO_ROOT, 0, eb, en, ls, d);
+        return evalInAt(m, t, 0, eb, en, ls, d);
     }
 
-    /**
-     * {@link #evalIn} for the inert application t at nesting depth u below the root of its nest; lo is the first id
-     * of the export segment of its parent ({@code LO_ROOT}: no parent is known), which the tabling gate reads.
-     */
-    private static int evalInAt(Machine m, int t, int lo, int u, int eb, int en, int ls, int d) {
-        int s = table(m, t, lo, u, eb, en, ls);
+    /** {@link #evalIn} for the inert application t at nesting depth u below the root of its nest (the tabling gate reads u). */
+    private static int evalInAt(Machine m, int t, int u, int eb, int en, int ls, int d) {
+        int s = table(m, t, u, eb, en, ls);
         if (s > 0) {
             if (s >= SIG) {
                 return s;
@@ -301,7 +302,7 @@ final class Eval {
         }
         if (d > m.hostDepth) {
             m.fuel++; // the tick is given back: the driver enters this step again
-            return m.sig6(Op.SUSP, K_EVAL_IN, t, lo, u, eb, en, ls);
+            return m.sig5(Op.SUSP, K_EVAL_IN, t, u, eb, en, ls);
         }
         if (s <= 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
             return Op.FATAL;
@@ -411,83 +412,32 @@ final class Eval {
     /**
      * The tabling record of EVAL(t, env, ls): SUSP(t, PRUNE(env, mask t), ls') with ls' = HAS_LPARAM(t) ? ls : 0 (ISA
      * 4.2, 5.1, 2.7). The key holds every binding t can read (5.2: the mask is a superset of what is read).
-     * @param lo the first id of the export segment of the node's parent, {@code LO_ROOT} if t is an evaluation root
-     * @param u the number of inert applications between t and the root of its inert nest (0: t is not in a nest)
+     * @param u the number of inert applications between t and the root of its nest (0: t is not in a nest)
      * @return the record; -t if t is not tabled (ISA 3.1, only with SW_GATED_TABLING); or a signal
      */
-    private static int table(Machine m, int t, int lo, int u, int eb, int en, int ls) {
-        if ((m.sw & Op.SW_GATED_TABLING) != 0 && !gate(m, t, lo, u)) {
+    private static int table(Machine m, int t, int u, int eb, int en, int ls) {
+        if ((m.sw & Op.SW_GATED_TABLING) != 0 && !gate(m, t, u)) {
             return -t;
         }
         return Values.suspRecord(m, t, frame(m, t, eb, en), ls);
     }
 
     /**
-     * {@code tabled(t)} of ISA 3.1 as this package applies it under SW_GATED_TABLING (NOTES-M2 D14, D19): t is tabled
+     * {@code tabled(t)} of ISA 3.1 as this package applies it under SW_GATED_TABLING (NOTES-M2 D14, D21): t is tabled
      * iff it is not a flat inert application and (a) one of its sharing flags is set (SHARED, BODY, INVARIANT; they
-     * never under-approximate the referrers inside the node's own export segment), or (b) it is reached from outside
-     * its segment (below {@code lo}: the referrers of other segments are not in its flags; a generated node always
-     * counts as such), or (c) it lies {@code depthK} or more inert levels below the root of its nest (bounds the
-     * walk that every outer evaluation root repeats over an untabled nest by {@code depthK} levels, NOTES-M2 D21).
+     * never under-approximate the referrers inside the node's own export segment), or (b) it is not a term of the
+     * unit being checked (an export id below the unit's first one, or the generated region: its referrers in other
+     * segments are not in its flags; overlay nodes go by their flags), or (c) it lies {@code depthK} or more inert
+     * levels below the root of its nest (bounds the walk that every outer evaluation root repeats over an untabled
+     * nest by {@code depthK} levels).
      */
-    private static boolean gate(Machine m, int t, int lo, int u) {
+    private static boolean gate(Machine m, int t, int u) {
         final Ext x = m.x2;
-        final int fl = (x.xsw & X_NOINV) != 0 ? Node.F_SHARED | Node.F_BODY : Node.F_TABLED_MASK;
-        if ((m.terms.header(t) & fl) == 0) {
-            if (lo < 0) {
-                lo = x.ownFirst;
-            }
-            if (t >= lo && (t < Node.GEN_BASE || t >= Node.OVERLAY_BIT) && (u < x.depthK || (x.xsw & X_NODEPTH) != 0)) {
-                return false;
-            }
+        if ((m.terms.header(t) & Node.F_TABLED_MASK) == 0 && (t >= Node.OVERLAY_BIT || (t < Node.GEN_BASE && t >= x.ownFirst))
+                && (u < x.depthK || (x.xsw & X_NODEPTH) != 0)) {
+            return false;
         }
         return !flat(m, t);
-    }
-
-    /**
-     * The first id of the export segment that holds node t, for the gate of its children (X_SEG): a child at or
-     * above it lies in the same segment, so its flags count every referrer but those of later units, which reach it
-     * through this parent only if they reached the parent. The unit's own nodes and every overlay node (a decoded
-     * block of the unit, ISA 3.1): the unit's first id. A generated node: no child counts as its own
-     * ({@code Integer.MAX_VALUE}).
-     */
-    static int segLo(Machine m, int t) {
-        final Ext x = m.x2;
-        if (t >= Node.GEN_BASE) {
-            return t >= Node.OVERLAY_BIT ? x.ownFirst : Integer.MAX_VALUE;
-        }
-        if (t >= x.ownFirst) {
-            return x.ownFirst;
-        }
-        final int[] c = x.seg;
-        final int i = (t >>> SEG_SHIFT & ((1 << SEG_LOG2) - 1)) << 1;
-        return c[i] <= t && t < c[i + 1] ? c[i] : segSlow(m, t, i);
-    }
-
-    /** The segment of the export node t of an earlier unit, by bisection over the units; fills cell i of the cache. */
-    private static int segSlow(Machine m, int t, int i) {
-        final rlvm.store.DeclTable dt = m.decls;
-        int hi = m.unit; // t < unitFirstTerm(m.unit) = ownFirst
-        if (dt == null || hi <= 0 || t <= 0) {
-            return Integer.MAX_VALUE;
-        }
-        int lo = 0;
-        while (hi - lo > 1) { // invariant: unitFirstTerm(lo) <= t < unitFirstTerm(hi)
-            int mid = (lo + hi) >>> 1;
-            if (dt.unitFirstTerm(mid) <= t) {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        final int first = dt.unitFirstTerm(lo);
-        final int end = dt.unitFirstTerm(hi);
-        if (first > t || t >= end) {
-            return Integer.MAX_VALUE; // the unit table is not what this search assumes: no child counts as its own
-        }
-        m.x2.seg[i] = first;
-        m.x2.seg[i + 1] = end;
-        return first;
     }
 
     /**
@@ -498,19 +448,27 @@ final class Eval {
      */
     private static boolean flat(Machine m, int t) {
         final Terms T = m.terms;
-        if (T.kind(t) != Kind.APP) {
+        int[] r = T.regionOf(t);
+        int w = Node.wordOf(t);
+        if ((r[w] & 0xF) != Kind.APP) {
             return false;
         }
-        int u = t;
-        do {
-            int k = T.kind(T.b(u));
-            if (k != Kind.BVAR && k != Kind.CONST && k != Kind.SORT && k != Kind.NATLIT && k != Kind.STRLIT) {
+        for (;;) {
+            if ((FLAT_ARGS >>> T.kind(r[w + Node.W_B]) & 1) == 0) {
                 return false;
             }
-            u = T.a(u);
-        } while (T.kind(u) == Kind.APP);
-        return T.kind(u) == Kind.CONST;
+            final int f = r[w + Node.W_A];
+            r = T.regionOf(f);
+            w = Node.wordOf(f);
+            final int k = r[w] & 0xF;
+            if (k != Kind.APP) {
+                return k == Kind.CONST;
+            }
+        }
     }
+
+    /** The kinds of the arguments of a flat application, as a bit set. */
+    private static final int FLAT_ARGS = 1 << Kind.BVAR | 1 << Kind.CONST | 1 << Kind.SORT | 1 << Kind.NATLIT | 1 << Kind.STRLIT;
 
     /**
      * {@code sharecheck} (ISA 3.1, 5.5): the walk enters node t, which has no tabling record; it must not do so twice
@@ -686,6 +644,41 @@ final class Eval {
      */
     private static int app(Machine m, int t, int s, int u, int eb, int en, int ls, int d) {
         final Terms T = m.terms;
+        final int xb = m.xp + 1;
+        if (!m.ensureScratch(SPINE_FAST + 1)) {
+            return m.fault(MachineErrors.E_MEM);
+        }
+        final int[] X = m.X;
+        X[xb - 1] = u;
+        // one pass over the spine: the arguments are met last first and reversed afterwards
+        int n = 0;
+        int h = t;
+        int hk;
+        for (;;) {
+            final int[] r = T.regionOf(h);
+            final int w = Node.wordOf(h);
+            hk = r[w] & 0xF;
+            if (hk != Kind.APP) {
+                break;
+            }
+            if (n == SPINE_FAST) {
+                return appLong(m, t, s, u, eb, en, ls, d);
+            }
+            X[xb + n++] = r[w + Node.W_B];
+            h = r[w + Node.W_A];
+        }
+        for (int i = xb, k = xb + n - 1; i < k; i++, k--) {
+            final int a = X[i];
+            X[i] = X[k];
+            X[k] = a;
+        }
+        m.xp = xb + n;
+        return appHead(m, s, h, hk, xb, n, eb, en, ls, d);
+    }
+
+    /** {@link #app} for a spine of more than {@code SPINE_FAST} arguments: counted first, then collected. */
+    private static int appLong(Machine m, int t, int s, int u, int eb, int en, int ls, int d) {
+        final Terms T = m.terms;
         int n = 0;
         int h = t;
         do {
@@ -702,7 +695,12 @@ final class Eval {
             X[--i] = T.b(w);
         }
         m.xp = xb + n;
-        if (T.kind(h) == Kind.CONST) {
+        return appHead(m, s, h, T.kind(h), xb, n, eb, en, ls, d);
+    }
+
+    /** The head h (of kind hk) of the application whose n argument terms are at X[xb ..]: KCONST, or EVAL and FORCE. */
+    private static int appHead(Machine m, int s, int h, int hk, int xb, int n, int eb, int en, int ls, int d) {
+        if (hk == Kind.CONST) {
             int c = atom(m, h, eb, en, ls); // a constant head: MKAPP(KCONST h, ARGV(t1) .. ARGV(tn)) (ISA 4.2)
             return c >= SIG ? c : args(m, s, c, xb, n, 0, eb, en, ls, d);
         }
@@ -730,7 +728,6 @@ final class Eval {
     private static int args(Machine m, int s, int f, int xb, int n, int i, int eb, int en, int ls, int d) {
         final int kind = f <= Layout.HOLE ? 0 : m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
         final long skip = kind == Layout.LAM ? unread(m, f, n) : 0L;
-        int lo = 0; // the segment bound of this node for the gate of its inert arguments: computed at the first one
         for (; i < n; i++) {
             int v;
             if (i < 64 && ((skip >>> i) & 1L) != 0) {
@@ -741,10 +738,7 @@ final class Eval {
                     if (v != Op.MISS) {
                         return v;
                     }
-                    if (lo == 0) {
-                        lo = (m.x2.xsw & X_SEG) != 0 ? segLo(m, s > 0 ? m.vh[(s << Layout.REC_SHIFT) + Layout.A] : -s) : LO_ROOT;
-                    }
-                    v = evalInAt(m, m.X[xb + i], lo, m.X[xb - 1] + 1, eb, en, ls, d + 1); // an inert application: EVAL now => ARG
+                    v = evalInAt(m, m.X[xb + i], m.X[xb - 1] + 1, eb, en, ls, d + 1); // an inert application: EVAL now => ARG
                     if (v >= SIG) {
                         return m.sig8(v, K_EVAL_ARG, s, f, xb, n, i, eb, en, ls);
                     }
@@ -912,8 +906,9 @@ final class Eval {
         if (v != Op.MISS) {
             return v;
         }
-        final Terms T = m.terms;
-        if (T.kind(t) == Kind.APP && inertHead(m, T.head(t), eb, en)) {
+        final int[] r = m.terms.regionOf(t);
+        final int w = Node.wordOf(t);
+        if ((r[w] & 0xF) == Kind.APP && inertHead(m, r[w + Node.W_C], eb, en)) { // word c of an APP node: the head of its spine
             return Op.MISS;
         }
         return suspend(m, t, eb, en, ls);
@@ -1107,9 +1102,6 @@ final class Eval {
             if (r >= SIG) {
                 return m.x2.amOpen ? m.sig6(r, K_APPLY_3, xb, n, k, ep0, g, j) : m.sig4(r, K_APPLY_2, xb, n, k, ep0);
             }
-            if (m.x2.amOpen) {
-                amPut(m, g, xb + k - j, j, r);
-            }
             m.ep = ep0;
             if (k == n) {
                 return r;
@@ -1133,45 +1125,91 @@ final class Eval {
         final int[] tr = m.terms.regionOf(body);
         final int w = Node.wordOf(body);
         final int bk = tr[w] & 0xF;
-        if (bk == Kind.BVAR) {
-            final int idx = tr[w + Node.W_A];
-            if (idx >= 0 && idx < j && (m.debug & DBG_HOOKS) == 0) {
-                return pick(m, m.X[xa + j - 1 - idx]);
-            }
-        } else if (bk == Kind.PROJ && (m.debug & DBG_HOOKS) == 0 && (feat(m) & X_SELECT) != 0) {
-            int v = betaProj(m, body, xa, j);
-            if (v != Op.MISS) {
-                return v;
-            }
-        }
         final int x = feat(m);
-        if ((x & X_AMEMO) != 0 && j <= AM_ARGS && (m.debug & DBG_HOOKS) == 0) {
-            int v = amGet(m, g, xa, j);
+        if ((bk == Kind.BVAR || bk == Kind.PROJ) && (m.debug & DBG_HOOKS) == 0) {
+            int v = bk == Kind.BVAR ? betaVar(m, tr[w + Node.W_A], xa, j) : (x & X_SELECT) != 0 ? betaProj(m, body, xa, j) : Op.MISS;
             if (v != Op.MISS) {
                 return v;
             }
         }
-        int e = bind(m, g, xa, j); // env = ENTER(frame) + j arguments
+        final long mask = (tr[w + Node.W_MASK_LO] & 0xFFFFFFFFL) | ((long) tr[w + Node.W_MASK_HI] << 32);
+        if ((x & X_AMEMO) != 0 && j <= AM_ARGS && bk != Kind.LAM && bk != Kind.PI && (m.debug & DBG_HOOKS) == 0 && amLive(m.x2)) {
+            return betaMemo(m, g, xa, j, body, mask, x, d);
+        }
+        int e = bind(m, g, xa, j, mask); // env = ENTER(frame) + j arguments
         if (e >= SIG) {
             return e;
         }
         final int ls = m.vh[(g << Layout.REC_SHIFT) + Layout.C];
         int r = (x & X_NOBODY) != 0 ? evalNT(m, body, m.envBase, m.x2.en, ls, d + 1) : eval(m, body, m.envBase, m.x2.en, ls, d + 1);
-        m.x2.amOpen = (x & X_AMEMO) != 0 && j <= AM_ARGS && (m.debug & DBG_HOOKS) == 0; // set last: the body's own beta steps wrote it
+        if ((x & X_AMEMO) != 0) {
+            m.x2.amOpen = false; // this step is not recorded, whatever the body's own beta steps left
+        }
+        return r;
+    }
+
+    /**
+     * The governor of the APPLY memo: a session whose beta steps do not repeat (closed evaluation: 1 % on reachability)
+     * should not pay for the lookups. After a window of {@code AM_WINDOW} lookups with fewer than one hit in
+     * {@code AM_MIN_RATE} the memo is passed by for {@code AM_PAUSE} steps, then tried again. A function of the
+     * session's history only, so the same under every depth bound.
+     */
+    private static boolean amLive(Ext e) {
+        if (e.amOff > 0) {
+            e.amOff--;
+            return false;
+        }
+        if (++e.amWin == AM_WINDOW) {
+            if (e.amWinHits * AM_MIN_RATE < AM_WINDOW) {
+                e.amOff = AM_PAUSE;
+            }
+            e.amWin = 0;
+            e.amWinHits = 0;
+        }
+        return true;
+    }
+
+    /**
+     * {@link #beta} through the APPLY memo (SW_M2B): a recorded step is answered (PEEKed); else the body is evaluated
+     * and the step recorded, at once or, if the evaluation is suspended, by APPLY[3] ({@code m.x2.amOpen}).
+     */
+    private static int betaMemo(Machine m, int g, int xa, int j, int body, long mask, int x, int d) {
+        final int i = amKey(m, g, xa, j, mask);
+        final Ext e = m.x2;
+        final int a0 = e.ak0;
+        final int a1 = e.ak1;
+        final int a2 = e.ak2;
+        final int[] am = e.am;
+        if (am[i] == g && am[i + 1] == a0 && am[i + 2] == a1 && am[i + 3] == a2 && am[i + 4] == m.epoch && am[i + 5] == j) {
+            e.amWinHits++;
+            if (m.stats) {
+                e.amHits++;
+            }
+            return pick(m, am[i + 6]);
+        }
+        int b = bind(m, g, xa, j, mask);
+        if (b >= SIG) {
+            return b;
+        }
+        final int ls = m.vh[(g << Layout.REC_SHIFT) + Layout.C];
+        int r = (x & X_NOBODY) != 0 ? evalNT(m, body, m.envBase, m.x2.en, ls, d + 1) : eval(m, body, m.envBase, m.x2.en, ls, d + 1);
+        if (r < SIG) {
+            amStore(m, i, g, a0, a1, a2, j, r);
+        } else {
+            m.x2.amOpen = r == Op.SUSP; // written last: the body's own beta steps wrote it too
+        }
         return r;
     }
 
     /**
      * The key of the APPLY memo for closure g applied to the j <= 3 arguments X[xa .. xa + j): the arguments as
-     * {@link #bind} binds them (HOLE for a binder the body under the j lambdas does not read, B6) are left in
-     * {@code m.x2.ak0 .. ak2} (NONE beyond j). The value of the step is a function of exactly this key (ISA 4.3.1: the
-     * body, the frame and ls are the closure's; I-ID).
+     * {@link #bind} binds them (HOLE for a binder that the body under the j lambdas, whose mask is given, does not
+     * read, B6) are left in {@code m.x2.ak0 .. ak2} (NONE beyond j). The value of the step is a function of exactly
+     * this key (ISA 4.3.1: the body, the frame and ls are the closure's; I-ID).
      * @return the index of the key's cell
      */
-    private static int amKey(Machine m, int g, int xa, int j) {
+    private static int amKey(Machine m, int g, int xa, int j, long mask) {
         final Ext x = m.x2;
-        peel(m, m.vh[(g << Layout.REC_SHIFT) + Layout.A], j);
-        final long mask = m.terms.fvMask(x.body);
         final int[] X = m.X;
         int a0 = (mask >>> (j - 1) & 1L) != 0 ? X[xa] : Layout.HOLE;
         int a1 = j < 2 ? Layout.NONE : (mask >>> (j - 2) & 1L) != 0 ? X[xa + 1] : Layout.HOLE;
@@ -1183,34 +1221,21 @@ final class Eval {
         return (Hash.fin(h) & ((1 << AM_LOG2) - 1)) << 3;
     }
 
-    /** The APPLY memo: the recorded value of closure g applied to X[xa .. xa + j) (PEEKed), or {@code Op.MISS}. */
-    private static int amGet(Machine m, int g, int xa, int j) {
-        final int body = m.x2.body;
-        final int i = amKey(m, g, xa, j);
-        final Ext x = m.x2;
-        x.body = body;
-        final int[] am = x.am;
-        if (am[i] != g || am[i + 1] != x.ak0 || am[i + 2] != x.ak1 || am[i + 3] != x.ak2 || am[i + 4] != m.epoch || am[i + 5] != j) {
-            return Op.MISS;
-        }
-        if (m.stats) {
-            x.amHits++;
-        }
-        return pick(m, am[i + 6]);
-    }
-
-    /** {@code APPLY(g, X[xa .. xa + j)) = r} (one beta step, r not a signal): into the APPLY memo. */
-    private static void amPut(Machine m, int g, int xa, int j, int r) {
-        final int i = amKey(m, g, xa, j);
-        final Ext x = m.x2;
-        final int[] am = x.am;
+    /** {@code APPLY(g, the j arguments a0 .. a2 as bound) = r} (one beta step, r not a signal): into cell i of the APPLY memo. */
+    private static void amStore(Machine m, int i, int g, int a0, int a1, int a2, int j, int r) {
+        final int[] am = m.x2.am;
         am[i] = g;
-        am[i + 1] = x.ak0;
-        am[i + 2] = x.ak1;
-        am[i + 3] = x.ak2;
+        am[i + 1] = a0;
+        am[i + 2] = a1;
+        am[i + 3] = a2;
         am[i + 4] = m.epoch;
         am[i + 5] = j;
         am[i + 6] = r;
+    }
+
+    /** The argument picker: the body is the variable of index idx; if this step binds it, its argument (PEEKed), else {@code Op.MISS}. */
+    private static int betaVar(Machine m, int idx, int xa, int j) {
+        return idx >= 0 && idx < j ? pick(m, m.X[xa + j - 1 - idx]) : Op.MISS;
     }
 
     /**
@@ -1257,7 +1282,10 @@ final class Eval {
 
     /** APPLY[3]: r = the value of the body of closure g after its j arguments, k in all: recorded, then as APPLY[2]. */
     static int k_apply3(Machine m, int xb, int n, int k, int ep0, int g, int j, int r, int d) {
-        amPut(m, g, xb + k - j, j, r);
+        peel(m, m.vh[(g << Layout.REC_SHIFT) + Layout.A], j);
+        final int i = amKey(m, g, xb + k - j, j, m.terms.fvMask(m.x2.body));
+        final Ext e = m.x2;
+        amStore(m, i, g, e.ak0, e.ak1, e.ak2, j, r);
         m.ep = ep0;
         return k == n ? r : applyFrom(m, r, xb, n, k, d);
     }
@@ -1270,13 +1298,12 @@ final class Eval {
 
     /**
      * {@code env = ENTER(frame of f)}, then PUSH of the first j = min(leading lambdas of f, n) arguments X[xa ..]:
-     * {@code body_j reads the i-th ? a[i] : HOLE} (ISA 4.3.1, B6). The body under the j lambdas is in
-     * {@code m.x2.body} ({@link #peel}); leaves the environment at {@code m.envBase} with length {@code m.x2.en}.
+     * {@code body_j reads the i-th ? a[i] : HOLE} (ISA 4.3.1, B6); mask is the mask of the body under the j
+     * lambdas. Leaves the environment at {@code m.envBase} with length {@code m.x2.en}.
      * @return j, or a signal
      */
-    private static int bind(Machine m, int f, int xa, int j) {
+    private static int bind(Machine m, int f, int xa, int j, long mask) {
         final int o = f << Layout.REC_SHIFT;
-        final long mask = m.terms.fvMask(m.x2.body);
         int en = Runs.enter(m, m.vh[o + Layout.B]);
         if (en < 0 || !m.ensureEnv(j)) {
             return m.fault(MachineErrors.E_MEM);
@@ -1544,7 +1571,7 @@ final class Eval {
             case Op.K_EVAL:
                 return eval(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
             case K_EVAL_IN:
-                return evalInAt(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], 0);
+                return evalInAt(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], 0);
             case K_EVAL_NB:
                 return evalNT(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
             case K_EVAL_HEAD:

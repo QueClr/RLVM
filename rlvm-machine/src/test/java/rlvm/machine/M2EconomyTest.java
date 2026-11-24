@@ -11,12 +11,11 @@ import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import rlvm.api.MachineErrors;
-import rlvm.store.DeclTable;
 
 /**
  * The evaluation economy of family EV (NOTES-M2 section 6): the argument picker and the closed-term memo, which
  * change no result and act in v0; the depth rule of inert nests under {@code SW_GATED_TABLING}; untabled bodies and
- * the projection selector ({@code SW_M2A}); the APPLY memo ({@code SW_M2B}); the segment of a node.
+ * the projection selector ({@code SW_M2A}); the APPLY memo ({@code SW_M2B}).
  */
 @Tag("fast")
 class M2EconomyTest {
@@ -267,34 +266,5 @@ class M2EconomyTest {
         }
         assertTrue(ticks[1] < 2 * ticks[0], "gated with the depth rule: " + ticks[1] + " ticks, v0: " + ticks[0]);
         assertTrue(ticks[2] > 10 * ticks[0], "without the rule the walk is quadratic: " + ticks[2] + " ticks");
-    }
-
-    /** The segment of a node of an earlier unit is found by bisection and kept in the cache; own and overlay nodes: the unit's first id. */
-    @Test
-    void theSegmentOfAForeignNode() throws IOException {
-        assumeTrue(Fixture.exists(NEST));
-        Fixture f = Fixture.load(NEST);
-        try {
-            assertEquals(5, f.checkAll().units);
-            Machine m = f.m;
-            DeclTable decls = m.decls;
-            int last = decls.unitCount() - 1;
-            m.beginDecl(Integer.MAX_VALUE, last, Op.FUEL_UNLIMITED, Long.MAX_VALUE);
-            int own = decls.unitFirstTerm(last);
-            assertEquals(own, m.x2.ownFirst);
-            for (int pass = 0; pass < 2; pass++) { // the second pass reads the cache
-                for (int u = 0; u < last; u++) {
-                    for (int t = decls.unitFirstTerm(u); t < decls.unitFirstTerm(u + 1); t++) {
-                        assertEquals(decls.unitFirstTerm(u), Eval.segLo(m, t), "term " + t + " of unit " + u);
-                    }
-                }
-            }
-            assertEquals(own, Eval.segLo(m, own));
-            assertEquals(own, Eval.segLo(m, own + 17));
-            assertEquals(own, Eval.segLo(m, rlvm.store.Node.OVERLAY_BIT | 5), "an overlay node: the unit's first id");
-            assertEquals(Integer.MAX_VALUE, Eval.segLo(m, rlvm.store.Node.GEN_BASE | 5), "a generated node has no segment");
-        } finally {
-            f.close();
-        }
     }
 }

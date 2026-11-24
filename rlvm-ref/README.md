@@ -65,7 +65,7 @@ What the official relation does not identify (all answers of leanchecker v4.36.0
 `imax u (max v w)` and `max (imax u v) (imax u w)`. In rlvm-level's golden set the official kernel
 says "different" to 1,982 of 3,280 semantically true equations.
 
-### What changed (2026-11-24, wave 8)
+### What changed (2026-11-24)
 
 - `RefOptions`: `DEFAULT_LEVELS = "official"`; `-X levels=official|complete`, system property
   `rlvm.levels` as the fallback, anything else an `IllegalArgumentException` (launcher status 64).
@@ -100,11 +100,28 @@ many small exports through `rlvm.main.RlvmChecker` in one JVM, `bin/levelcorpus.
 | the 30 `either` tests | 28 official verdicts; the two tests on which leanchecker does not terminate (`eta-struct-major-no-whnf`, `eta-struct-major-and-no-whnf`) are declined in under a second | 26 (the two imax tests accepted) | 28 official verdicts; the two non-terminating tests ran into a 600 s limit (no decline) |
 | the 230 published tests (`scripts/gate.sh`, slice) | 230 correct = 230 official verdicts, 0 declined | - | - |
 | level corpus: 6,300 generated exports, one level question each, asked through eleven parts of the checker (two sorts; level lists of a constant bare, under an application, after delta, with a phantom parameter; theorem value type; `is_prop` of a theorem type; instantiated constant type; constructor field universe; mutual types in one universe); official: 2,455 accept, 3,845 reject, 2,081 of the rejects semantically true | 6,300 official verdicts, 0 declined | 4,538 (1,762 accepted that the official checker rejects; the 319 inductive ones stay rejected, see above) | 6,300 official verdicts |
+| 600 more exports where inductive admission asks the level question of this engine (`inductive T (a : Sort l1) : Type | mk : (a : Sort l2) -> T a`; official: 163 accept, 437 reject) | 587 official verdicts; 13 accepted that the official checker rejects, all of them the known difference below (published jar before the change: 272) | 328 | 587, the same 13 |
 | the 699 `SWAP_LEVEL` mutants of the four mutant corpora (official: 25 accept, 674 reject) | 699 official verdicts | 699 | 699 |
 | differential engine (`-X engine=diff -X diff.engine=machine`, test kit) on the 6,300 + 1,600 level exports | 0 difference records | 4 COMPLETENESS records per imax file (reference complete, machine official) unless `levels-complete` is given to the machine as well | - |
 | Init / Cedar slice (`cedar-hot-ax`) / Std / cedar, 4 workers | accept (23.9 / 9.8 / 34.6 / 44.6 s CPU) | - | accept (28.1 / 9.7 / 26.0 / 34.9 s CPU), no `MACHINE-INCOMPLETE` line |
 
 GATE_PLACEHOLDER
+
+### Known difference from the official kernel that involves levels (not in this module)
+
+The official `instantiate` keeps a level node only when its operands come back pointer-equal, and
+`add_inductive` applies the block's own constants with parameter objects it makes itself when it
+type-checks the recursor it generated (`check_recursors`, new in v4.36). There every level node above
+a parameter is rebuilt through `mk_max` / `mk_imax`, and the official kernel then compares the
+rebuilt spelling with the declared one: `inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1) |
+mk : a -> T a` is rejected by leanchecker ("application type mismatch": `Sort (imax u 1)` against
+`Sort (max u 1)`). RLVM's inductive admission instantiates with the identity and accepts it, with
+both engines and with either level relation: 170 of 1,600 generated declarations (and the 13 of the
+row above). The rule (`isEquivOfficial(L, rebuild(L))`) is pinned against 1,600 official answers in
+`rlvm-level` (`OfficialRebuildGoldenTest`, README section "Pointer equality") and was reported to
+the owner of `rlvm-inductive` (requests.log, 14:57Z and 15:25Z). It is not a soundness problem
+(both spellings denote the same level) and no real declaration is affected: the rebuild breaks the
+official equivalence of none of the level records of Init, Std, cedar, cslib and mathlib.
 
 ## Public API
 

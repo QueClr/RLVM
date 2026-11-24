@@ -345,6 +345,10 @@ of the measurement lock (13:44Z, load average 60-90 on the host: only the pairs 
 | mathlib, CPU s (1 run) | 16.65 | 13.77 | -17 % |
 | instructions, Init / Std / mathlib (G) | 7.44 / 12.47 / 132.3 | 7.17 / 12.03 / 128.2 | -3 % |
 
+With the loader's two changes of the same wave on top (`rlvm-load/README.md`, "Wave 7"; one hold of the
+lock at 15:15Z, load average 107-111): Init 844 / 885 / 892 -> 681 / 673 / 667 ms, Std 1,377 / 1,410 ->
+1,102 / 1,136 ms, mathlib 17.18 -> 12.40 s, at the same instruction counts.
+
 So the gain is cache misses, not instructions (owner note 10). After it (mathlib, 53,022 samples): promotion
 10.0 % (`seek` 4.4: the first touch of a cold block's bytes; `promote` 3.3), `WriterImpl.ref` 2.8 %,
 `NodeCtx.writeApp` 8.2 %, `Loader.exprApp` 12.1 % (the `loc` reads, moved by the loader's change of the same

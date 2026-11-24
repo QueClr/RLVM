@@ -32,7 +32,8 @@ class M4OfficialTest {
 
     /** The switch sets under which the verdict must be the official one. */
     private static final String[] SETS = {"", "facts", "probes", "lazyeval", "facts,probes", "facts,probes,lazyeval",
-        "warm,gated,expect,facts,probes", "warm,gated,expect,facts,probes,lazyeval"};
+        "warm,gated,expect,facts,probes", "warm,gated,expect,facts,probes,lazyeval", "m4a", "probes,m4a",
+        "warm,gated,expect,facts,probes,lazyeval,m4a"};
 
     private static Path dir() {
         URL u = M4OfficialTest.class.getResource("/m4/official/manifest.tsv");
@@ -88,7 +89,7 @@ class M4OfficialTest {
     @Test
     @Tag("fast")
     void theVerdictIsTheOfficialOne() throws IOException {
-        official(new String[] {"warm,gated,expect,facts,probes,lazyeval"}, 0, "");
+        official(new String[] {"warm,gated,expect,facts,probes,lazyeval,m4a"}, 0, "");
     }
 
     /** The whole matrix (slow group): every switch set of this package. */

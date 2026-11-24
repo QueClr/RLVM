@@ -26,6 +26,7 @@ says so.
 | Sessions reset by footprint, after any outcome but ACCEPT, when the rank steps back, **before a unit beyond the lane's snapshot, and when a lane's unused capacity grew (give-back)** | done |
 | **Session cap per engine** (`RunConfig.sessionBytes = 0`, the default: 4 MiB for the machine, 16 MiB otherwise; a configured value wins) | done (wave 7; see "Session cap") |
 | **A slow unit returns the rest of its claim while it is still running** (at a poll of its session; before: after it had ended) | done (wave 7; see "Scheduler" and "Slow units") |
+| **`-X passes=N`**: check the loaded export N times in one process, per-pass wall clock / CPU time / verdict (owner note 12: warm wall clock) | done (wave 7; see "Passes") |
 | Statistics (`RunStats`, JSON), explanation line on stderr | done |
 | Differential mode (`RunConfig.differential`); **`RunConfig.referenceFallback = false` (`no-fallback`)**: the engine under test alone | done |
 | Namespace ordering (`OrderPolicy.Kind.NAMESPACE_WINDOW`, `RunConfig.order`) | **deferred**: `OrderPolicy.of`, `Scheduler` constructor and `Run.execute()` throw `UnsupportedOperationException` |
@@ -99,6 +100,7 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `publish-units=N`, `publish-mib=N` | pipelined hand-off interval | 4096 units, 32 MiB |
 | `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
 | `no-fallback` | `referenceFallback = false` | off |
+| `passes=N` | `passes`: check the export N times in one process (see "Passes") | 1 |
 
 ## How a run goes
 
@@ -145,6 +147,34 @@ anything else               -> reset the session; if u is still <= firstFailure:
 at every poll of the unit's session (RunSignals.memoryExhausted, every few thousand steps): if the unit has been
                                running for more than spillNanos, give the unstarted rest of the claim back
 ```
+
+### Passes (`-X passes=N`, owner note 12)
+
+The target is warm wall clock: what a pass over an export costs once the process is warm (JIT, grown tables,
+touched pages). `passes=N` makes one process check the export N times and report each pass:
+
+```
+rlvm: pass 1 of 3: accept, wall 1.244 s (check 0.790 s), cpu 0.500 s
+rlvm: pass 2 of 3: accept, wall 0.262 s (check 0.238 s), cpu 0.140 s
+rlvm: pass 3 of 3: accept, wall 0.221 s (check 0.220 s), cpu 0.100 s
+```
+
+(stderr; `driver.passes` and `driver.pass.K.{verdict,wallNanos,checkWallNanos,cpuNanos}` in the statistics;
+`Run.passResults()`; the example is init-prelude, machine, 4 workers, JVM launcher.) Pass 1 is the run
+itself, load included (pipelined: overlapping), and **its verdict is the verdict and the exit status of the
+run**. A later pass is a check-only run of its own over the same loaded store: new engines, new sessions, new
+scheduler and verdict board, the configured worker count; every def / thm / axiom / opaque unit is checked
+again, inductive blocks and quot records keep the outcome the environment pass of pass 1 recorded. Later
+passes are made only when pass 1 accepted (a failing run's time is that of a cancellation); a later pass that
+does not accept is reported in its line and changes nothing. CPU time is the process's (`/proc/self/stat`,
+10 ms steps). With `passes=1`, the default, none of this code runs.
+
+What it does not do yet: (1) the engines of a later pass are new instances, so only what lives in the process
+(JIT-compiled code, the allocator's pages) is warm, not artefacts an engine keeps per instance (a tier of
+compiled code objects would have to be kept by its provider or by a later version of this loop that reuses
+the engine); (2) a later pass does not load, so it has no pipelined overlap and no environment pass (the
+workers start with the whole export ready); (3) `bench/track`, `m.py` and the gate scripts do not read the
+pass lines yet (the tools' owners).
 
 ### Session cap (`sessionBytes`)
 
@@ -407,7 +437,7 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
 
 ## Tests and commands
 
-`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (100 tests, 3 of them opt-in; about 40 s). All but
+`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (101 tests, 3 of them opt-in; about 40 s). All but
 `ArenaIntegrationTest` use fake engines, a fake admission, a fake environment pass and a fake loader (`Fakes`).
 
 - `VerdictBoardTest`: the status chain by enumeration (every assignment of 5 statuses to up to 4 units x
@@ -437,7 +467,8 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
   name**, memory watermark, load failures through a `Wiring`, stop-after, `no-fallback`, deferred features,
   diagnostics, statistics JSON; **slow units**: a heavy unit that ends only when the last unit of its own
   claim was checked (the run hangs unless the rest is given back while the unit runs; 2 / 4 / 8 workers), two
-  heavy units in one claim, no give-back with one worker or with `spill-ms=0`.
+  heavy units in one claim, no give-back with one worker or with `spill-ms=0`; **passes**: three passes check
+  every unit three times with fresh sessions, a rejected export gets one pass, the verdict is pass 1's.
 - `ArenaIntegrationTest` (real reader, loader, store, admission, reference kernel; `TestWiring` mirrors
   `rlvm.main.MainWiring`, batch and pipelined): the 141 tutorial tests with one worker; the same verdict and
   deciding unit for 1 / 2 / 4 / 8 workers and a 1-byte session cap; the same when the file is checked while
@@ -702,6 +733,15 @@ integrator's of 13:00Z for the same binary, single runs of one configuration dif
 slice by more), and wall clocks of runs with eight workers are up to twice what a quiet host gives.
 Differences below that are not results.
 
+**Owner note 12 (14:08Z) changed the metric while this section was being measured**: warm wall clock with 8
+workers and pipelined loading comes first, CPU time is a diagnostic, and wall-clock numbers count as evidence
+only when taken through `bench/quiet.py` (published 15:05Z). Nothing below was taken through it, and the
+runs are cold processes. So: the session-cap sweep (one worker, wall = CPU to 0.5 %) and the placement facts
+of "Slow units" stand as they are; every wall-clock figure with 4 or 8 workers (reachability before / after,
+the worker-count series, pipelined against batch) shows a direction and has to be re-taken with
+`bench/quiet.py -- ...` and `-X passes=2` before it decides a default. The commands are the ones named in each
+part (`work/rlvm-driver/w7/sched.sh`, `sweep-cap2.sh`, `rlvm-driver/bin/threads-gate.sh --engine machine`).
+
 #### Session cap (request of the machine integrator, requests.log 13:05Z)
 
 `-X machine.switches=warm,gated,expect -X session-mib=N`, one worker, the distribution the integrator
@@ -834,9 +874,9 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 
 | Guard | Result |
 |---|---|
-| `$MVN -o -q -pl rlvm-driver test` | 100 tests, 97 run green, 3 opt-in |
+| `$MVN -o -q -pl rlvm-driver test` | 101 tests, 98 run green, 3 opt-in (final jar c0aeb3288f46 = the jar of the rows below, 50adc1f555bd, plus `passes`) |
 | `rlvm-driver/bin/invariance.sh --engine machine -X machine.switches=warm,gated,expect tutorial bugs mdata` (machine jar f82074b207f1 as primary engine; every file 9 times: batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication every 1 / 7 / 64 units and 1 / 4 / 8 workers) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike in every mode (413 + 65 + 1,197, the same files as with the reference engine), 5 pipelined declines (REORDER_DECL mutants), 0 MACHINE-INCOMPLETE, 0 WARM-ANOMALY |
-| the same, `published` (231 files) and `big` (init-prelude, Init, Std, cedar) | published: 193 files in 5 of 6 shards: all correct, 0 schedule differences, 0 pipelined declines. The sixth shard (38 files) died with `OutOfMemoryError` in `Machine.growRecords` in the suite's 6 GB JVM (a perf file; with the launcher's 13 GB heap the machine declines there and the reference kernel decides) and was repeated: see `work/status/rlvm-driver.log` for how far the repeat got. big: 4 files, all correct in all 9 configurations |
+| the same, `published` (231 files) and `big` (init-prelude, Init, Std, cedar) | published: 230 of 231 files correct in all 9 configurations, 0 schedule differences, 0 pipelined declines (193 in five shards; the sixth died with `OutOfMemoryError` in `Machine.growRecords` in the suite's 6 GB JVM on `perf/loop-unfolded-once`, where the machine grows to its own limit before it declines, and its other 37 files were repeated: all equal). `perf/loop-unfolded-once` alone with the launcher's heap (`-Xmx13g`): accepted in the first configuration (machine declines, reference kernel decides; 250 s on this host); the other eight configurations were not finished when the session ended. big: 4 files, all correct in all 9 configurations |
 | `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (reference engine as primary) | PASS: 16,928 files, 0 wrong, 0 schedule differences, 1,675 declined alike, 0 pipelined declines |
 | `scripts/gate.sh --dist work/rlvm-driver/w7/dist-gate --corpus tutorial --corpus bugs --corpus mdata --corpus prelude` (the published jars of 13:46Z with this driver jar; JVM launcher, reference engine, 1 worker, batch) | PASS in every step: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260 (agree 11,847, declined 413), bugs 2,692 (2,627 / 65), mdata 1,976 (779 / 1,197), prelude 847 (839 / 8): SOUNDNESS 0, COMPLETENESS 0, errors 0 in all four, the same counts as the wave-5 check; differential self-test caught. (The script was edited by its owner while the gate ran and stopped with a syntax error after the fourth corpus; the self-test was then run by `--no-slice --corpus none`.) |
 <!-- measured:end -->

@@ -11,7 +11,9 @@
 #                     = work/arena-site/tests/{good,bad}/CORPUS; a FILE or DIR is run as given, and its
 #                     expected verdict is read from its path (/good/ = accept, /bad/ = reject) or, failing
 #                     that, taken from a run with -X engine=reference
-#   -j N              tests in parallel (default 6)
+#   -j N              tests in parallel (default 4)
+#   --heap SIZE       Java heap of each test's JVM (default 4g; the perf/ tests always get the launcher's own
+#                     default heap, which three of them need); "launcher" = the launcher's default for all
 #   -X KEY=VALUE      extra checker setting, repeatable (e.g. -X machine.debug=memocheck,poison,scopeaudit
 #                     or -X machine.hostDepth=0)
 #   --dist DIR        distribution (default work/dist; build it with scripts/dev.sh dist)
@@ -32,7 +34,8 @@ case "$ROOT" in */work/sandbox/*) ROOT="${ROOT%%/work/sandbox/*}" ;; esac
 TESTS="$ROOT/work/arena-site/tests"
 dist="$ROOT/work/dist"
 jar="$ROOT/.toolchain/m2/rlvm/rlvm-machine/0.1.0-SNAPSHOT/rlvm-machine-0.1.0-SNAPSHOT.jar"
-jobs=6
+jobs=4
+heap=4g
 timeout=600
 out=""
 label=""
@@ -47,6 +50,7 @@ while [ "$#" -gt 0 ]; do
     --dist) dist="${2:?}"; shift 2 ;;
     --jar) jar="${2:?}"; shift 2 ;;
     --timeout) timeout="${2:?}"; shift 2 ;;
+    --heap) heap="${2:?}"; shift 2 ;;
     --out) out="${2:?}"; shift 2 ;;
     --label) label="${2:?}"; shift 2 ;;
     --allow-declines) allow=1; shift ;;
@@ -79,9 +83,11 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/machine-gate.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 run_one() { # run_one INDEX FILE
-  local idx="$1" f="$2" st
+  local idx="$1" f="$2" st hp=()
+  # a small heap for small tests (the launcher's default is sized for mathlib: host memory, orchestrator 15:20Z)
+  case "$f" in */perf/*) ;; *) [ "$heap" = launcher ] || hp=("-Xmx$heap") ;; esac
   set +e
-  RLVM_EXTRA_CP="$jar" timeout "$timeout" "$dist/bin/rlvm-jvm" -X engine=machine -X stats-file="$work/$idx.json" \
+  RLVM_EXTRA_CP="$jar" timeout "$timeout" "$dist/bin/rlvm-jvm" "${hp[@]}" -X engine=machine -X stats-file="$work/$idx.json" \
       "${extra[@]}" "$f" > "$work/$idx.out" 2> "$work/$idx.err"
   st=$?
   set -e
@@ -90,13 +96,13 @@ run_one() { # run_one INDEX FILE
     */good/*) echo 0 > "$work/$idx.expect" ;;
     */bad/*) echo 1 > "$work/$idx.expect" ;;
     *) set +e
-       timeout "$timeout" "$dist/bin/rlvm-jvm" -X engine=reference "$f" > /dev/null 2>&1
+       timeout "$timeout" "$dist/bin/rlvm-jvm" "${hp[@]}" -X engine=reference "$f" > /dev/null 2>&1
        echo $? > "$work/$idx.expect"
        set -e ;;
   esac
 }
 export -f run_one
-export work dist jar timeout
+export work dist jar timeout heap
 # the extra settings travel through a file (arrays are not exported)
 printf '%s\n' "${extra[@]:-}" > "$work/extra"
 run_wrapper() {

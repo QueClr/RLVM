@@ -20,6 +20,8 @@ import rlvm.api.EngineProvider;
  *                                  driver's -X session-mib applies in any case)
  * machine.declines=FILE            append one line per non-ACCEPT outcome of the machine to FILE (outcome, error code,
  *                                  unit, rank, units accepted in the session before it, name, message)
+ * levels=official|complete         (the launcher's key, shared with the reference engine) complete = switch
+ *                                  levels-complete on, official = off; wins over machine.switches
  * machine.debug=memocheck,poison,scopeaudit,maskaudit,sharecheck,shortcheck,pubcheck,trace | all
  * machine.hostDepth=N              host depth bound D (default 64; 0 = the worklist machine)
  * machine.memocheck.every=N        re-compute one memo hit in N (default 1)
@@ -39,8 +41,15 @@ public final class MachineProvider implements EngineProvider {
     static final String K_MEMO_BUDGET = "machine.memocheck.budget";
     static final String K_SESSION_KIB = "machine.session-kib";
     static final String K_DECLINES = "machine.declines";
+    /**
+     * The launcher's {@code -X levels=official|complete}, shared with the reference engine's provider (the keys
+     * of all providers are a union): {@code complete} turns {@code Op.SW_LEVELS_COMPLETE} on, {@code official}
+     * off, whatever {@code machine.switches} says, so that one setting gives both engines of a run (primary
+     * and re-check, or the two sides of a differential run) the same relation. Request of L, 2026-11-24.
+     */
+    static final String K_LEVELS = "levels";
     private static final Set<String> KEYS = Set.of(K_SWITCHES, K_DEBUG, K_HOST_DEPTH, K_MEMO_EVERY, K_MEMO_BUDGET,
-            K_SESSION_KIB, K_DECLINES);
+            K_SESSION_KIB, K_DECLINES, K_LEVELS);
 
     public MachineProvider() {}
 
@@ -76,6 +85,16 @@ public final class MachineProvider implements EngineProvider {
         String v = options.get(K_SWITCHES);
         if (v != null) {
             s.switches = Debug.parseSwitches(v);
+        }
+        v = options.get(K_LEVELS);
+        if (v != null) {
+            if (v.equals("complete")) {
+                s.switches |= Op.SW_LEVELS_COMPLETE;
+            } else if (v.equals("official")) {
+                s.switches &= ~Op.SW_LEVELS_COMPLETE;
+            } else {
+                throw new IllegalArgumentException(K_LEVELS + "=" + v + ": official or complete");
+            }
         }
         v = options.get(K_DEBUG);
         if (v != null) {

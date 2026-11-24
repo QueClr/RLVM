@@ -64,6 +64,17 @@ final class Conv {
          */
         long debt;
         static final long DEBT_MAX = 1L << 17;
+        /** {@link Same}: the fuel left of the running query; the nodes all queries of this machine visited (statistics). */
+        int sameFuel;
+        long sameNodes;
+        /**
+         * {@link Same}: nodes visited by the queries of this declaration that did not see identity. At
+         * {@link #SAME_WASTE_MAX} no further query is started in the declaration: a failed walk is pure cost, and a
+         * declaration in which they keep failing gains nothing from more of them. Counted in nodes, reset at
+         * {@code beginDecl}, so costs stay functions of the declaration alone.
+         */
+        int sameWaste;
+        static final int SAME_WASTE_MAX = 1 << 16;
         /**
          * The NON-OFFICIAL options of this package (NOTES-M4 D27): a comma list in the system property
          * {@code rlvm.machine.m4}, read once per machine. They are deliberately not staging switches: what they
@@ -107,11 +118,13 @@ final class Conv {
         /** Session reset (ISA 1.6): forget everything, in O(used). */
         void reset(Machine m) {
             debt = 0;
+            sameWaste = 0;
         }
 
         /** Start of a declaration. */
         void beginDecl(Machine m) {
             debt = 0;
+            sameWaste = 0;
         }
 
         /** Bytes in use of this package's own session tables (part of the footprint, ISA 1.6). */
@@ -446,6 +459,14 @@ final class Conv {
     private static int convStart(Machine m, int t, int s, int d) {
         if ((t >>> 1) == 0 || (s >>> 1) == 0) {
             return m.fault(MachineErrors.E_INTERNAL); // NONE or HOLE is never a side of a comparison
+        }
+        if ((m.sw & Op.SW_M4A) != 0 && sameShape(m, t, s) && seenSame(m, t, s)) {
+            // [D28] the two values stand for one expression: the official is_equiv of quick_is_def_eq
+            if ((m.debug & Op.DBG_SHORTCHECK) != 0 && Debug.shortCheck(m, t, s, T) != 0) {
+                return Op.FATAL; // shortcheck (ISA 5.5): the complete procedure must answer T as well
+            }
+            Pairs.add(m, t, s, Layout.POS);
+            return T;
         }
         if (m.sw != 0 && congruence(m) && sameClosure(m, t, s)) {
             return convB12(m, t, s, d);
@@ -966,6 +987,42 @@ final class Conv {
         } else if (outcome == T) {
             m.x4.debt >>>= 1;
         }
+    }
+
+    /**
+     * The pairs for which the structural identity walk {@link Same} is tried at c0 (D28): a suspension on either side
+     * (identity is then decided without forcing it), two closures of one kind, two applications of the same length,
+     * two projections; and only while the walks of this declaration have not wasted {@code SAME_WASTE_MAX} nodes.
+     */
+    private static boolean sameShape(Machine m, int t, int s) {
+        if (t <= Layout.HOLE || s <= Layout.HOLE || m.x4.sameWaste >= Ext.SAME_WASTE_MAX) {
+            return false;
+        }
+        int[] vh = m.vh;
+        int wt = vh[t << Layout.REC_SHIFT];
+        int ws = vh[s << Layout.REC_SHIFT];
+        int kt = wt >>> Layout.KIND_SHIFT;
+        int ks = ws >>> Layout.KIND_SHIFT;
+        if (kt == Layout.SUSP || ks == Layout.SUSP) {
+            return true;
+        }
+        if (kt != ks) {
+            return false;
+        }
+        return kt == Layout.NEU ? (wt & Layout.AUX_MASK) == (ws & Layout.AUX_MASK)
+                : kt == Layout.LAM || kt == Layout.PI || kt == Layout.PII || kt == Layout.PROJ;
+    }
+
+    /** {@link Same#same} with its accounting: the outcome as a probe event (B12's counters: T seen, U not seen). */
+    private static boolean seenSame(Machine m, int t, int s) {
+        boolean r = Same.same(m, t, s);
+        if (!r) {
+            m.x4.sameWaste += Same.FUEL - m.x4.sameFuel;
+        }
+        if (m.stats) {
+            m.probe(Op.B12, r ? T : Layout.U);
+        }
+        return r;
     }
 
     /**
@@ -1651,9 +1708,14 @@ final class Conv {
         return unfoldT(m, tn, sn, 1, d);
     }
 
-    /** {@code tn = whnf_core(unfold_definition(tn), cheap_proj = true)}; {@code both}: sn unfolds afterwards. */
+    /**
+     * {@code tn = whnf_core(unfold_definition(tn), cheap_proj = true)}; {@code both}: sn unfolds afterwards. The delta
+     * step is {@code Rules.unfoldLazy} (M3; request of M7, 14:17Z): {@code Reduce.delta}, except that with
+     * {@code casetrees,m7a} a head of shape CASESON on a constructor major gives the alternative at once: for that
+     * shape the iota is part of the whnf_core of this very step, so no state of the official loop is skipped.
+     */
     private static int unfoldT(Machine m, int tn, int sn, int both, int d) {
-        int u = Reduce.delta(m, tn, d + 1);
+        int u = Rules.unfoldLazy(m, tn, d + 1);
         return u >= SIG ? m.sig2(u, K_LSTEP_4, sn, both) : k_lstep4(m, sn, both, u, d);
     }
 
@@ -1673,7 +1735,7 @@ final class Conv {
 
     /** {@code sn = whnf_core(unfold_definition(sn), cheap_proj = true)}. */
     private static int unfoldS(Machine m, int tn, int sn, int d) {
-        int u = Reduce.delta(m, sn, d + 1);
+        int u = Rules.unfoldLazy(m, sn, d + 1);
         return u >= SIG ? m.sig1(u, K_LSTEP_6, tn) : k_lstep6(m, tn, u, d);
     }
 

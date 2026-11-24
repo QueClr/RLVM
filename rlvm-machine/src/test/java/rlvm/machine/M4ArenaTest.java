@@ -133,23 +133,24 @@ class M4ArenaTest {
 
     /**
      * {@code allInK 0 N p} against its one-step unfolding, N = 10^6. Officially both sides are the same term after
-     * one unfolding. In the machine the two loop bodies are different closures (convertible), so the complete
-     * procedure (v0) descends the structural recursion: 45 ticks and about 4 KB per level, E_MEM under the 2 GiB
-     * budget of the harness after 487,000 levels (measured 2026-11-24; NOTES-M4 "Measured"). With step 5 the
-     * closure congruence B12 and the same-head probe B1 answer at the first level.
+     * one unfolding ({@code is_equiv} in {@code quick_is_def_eq}). In the machine the two loop bodies are different
+     * closures, so the complete procedure (v0) descends the structural recursion: 45 ticks and about 4 KB per level,
+     * E_MEM under the 2 GiB budget of the harness after 487,000 levels (measured 2026-11-24; NOTES-M4 "Measured").
+     * With the structural identity walk {@link Same} (switch {@code m4a}, D28) the machine sees what the official
+     * kernel sees: 272,629 ticks for the whole file (measured through the launcher).
      */
     @Test
-    void loopUnfoldedOnceWithProbes() throws IOException {
-        clean(T + "good/perf/loop-unfolded-once.ndjson", 3_000_000, "probes");
+    void loopUnfoldedOnceWithTheIdentityWalk() throws IOException {
+        clean(T + "good/perf/loop-unfolded-once.ndjson", 3_000_000, "m4a");
     }
 
-    /** The acceptance files once more with the shortcuts of steps 2 and 5 switched on: the same verdicts. */
+    /** The acceptance files once more with every switch of this package on: the same verdicts. */
     @Test
     void theAcceptanceFilesWithFactsAndProbes() throws IOException {
         for (String f : new String[] {"bad/bugs/unit-rec-rule.ndjson", "bad/bugs/eta-ctor-alias.ndjson",
             "bad/bugs/rec-missing-ih.ndjson", "good/perf/irrelevance-refutes.ndjson", "good/perf/proj-lazy-struct.ndjson",
             "bad/bugs/proj-of-subst-prop.ndjson", "bad/bugs/rec-of-subst-prop.ndjson", "bad/bugs/proj-of-stuck-prop.ndjson"}) {
-            clean(T + f, Long.MAX_VALUE, "facts,probes");
+            clean(T + f, Long.MAX_VALUE, "facts,probes,lazyeval,m4a");
         }
     }
 

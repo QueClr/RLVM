@@ -170,3 +170,62 @@ Stack safety (`M2DeepTest`, group `slow`, 38 s for all five): a 913,500-element 
 event), 1,000,000-deep application, binder and mixed nests and a 1,000,000-long chain of suspensions, each on a
 512 KiB thread stack under D = 64 and D = 0, with and without the inert loop: identical value ids, records, runs
 and ticks in the four configurations.
+
+## 6. Wave 6: the evaluation economy (what is tabled, what is built), with every experiment
+
+Where the tabling probes of `EVAL` went (counting copy of the wave-5 `Eval`, JVM launcher, one worker; `work/m2/Eval-prof.java`,
+`work/m2/profagg.py`; v0 = every node tabled, step 1 = `warm,gated,expect,probes` at 4 MiB):
+
+| | Init v0 | Init step 1 | Cedar slice step 1 | reachability step 1 |
+|---|--:|--:|--:|--:|
+| tabling probes (`PRUNE` + SUSP probe) | 32.8 M | 14.1 M | 3.88 M | 8.78 M |
+| ... of the body of a beta step (`APPLY`) | 11.1 M (hit 14 %) | 5.56 M (16 %) | 1.17 M (23 %) | 7.14 M (0.8 %) |
+| ... of an inert argument (`ARGV`) | 11.5 M (47 %) | 4.76 M (50 %) | 1.18 M (61 %) | 1.50 M (34 %) |
+| ... from outside the family (INFER's `ARGV`, `EVAL`) | 8.7 M (57 %) | 3.14 M (65 %) | 0.97 M (65 %) | 0.11 M |
+| closed terms among the probes | 3.65 M (80 % hits) | - | - | - |
+| `PRUNE` for closures (`LAM` / `PI`) | 14.7 M | 8.27 M | 3.72 M (22.8 slots each) | 9.22 M |
+| beta steps; of them a repeat of (closure, read arguments) | 12.3 M; 14 % | 6.80 M; 17 % | 1.45 M; 23 % | 8.66 M; 1.2 % |
+| body of the step: projection of a bound variable / a bound variable | 13.4 % / 3.6 % | 10.6 % / 3.1 % | 4.5 % / 3.1 % | 4.8 % / 5.6 % |
+
+What follows from it, by switch (D19-D23): without a switch the closed-term memo, the argument picker and `MKAPP` at once
+for a neutral head; under `gated` the depth rule; `m2a` = bodies without a tabling record + the projection selector; `m2b` =
+the APPLY memo. Sub-switches for measurements: `-Drlvm.m2.x=16` (no depth rule), `32` (no closed-term memo), `-Drlvm.m2.k=N`
+(the depth of the rule, 4).
+
+### Experiments (kept / rejected), CPU seconds first
+
+All rows: CE native image `-O3`, arena-shaped container, one worker, `-X stats-file` on (as the integrator's rows),
+tool `work/m2/m.py` (a copy of the integrator's; rows in `work/m2/measure.tsv`). "Locked" rows hold
+`work/perf-history/.ladder.lock` for the whole batch; the host's load average was 80 to 130 during them (fifteen other
+agents), so single CPU figures move by about 5 %; the instruction counts repeat to 0.1 %. Step 1 = `warm,gated,expect,probes`
+at 4 MiB.
+
+Batch 1 (15:08Z-15:13Z, locked; `work/m2/batch1.sh`; base = main tree of 13:23Z, r1 = the same tree with this wave's `Eval`
+as of 14:10Z; the sub-switches of that build were bits of `rlvm.m2.x`: 16 = depth rule, 1 = untabled bodies, 2 = selector,
+8 = segment-relative gating, 64 = INVARIANT alone does not table). CPU s / instructions G:
+
+| Configuration | Cedar slice | reachability | Init | Std |
+|---|--:|--:|--:|--:|
+| base, v0 | 3.43 / 47.0 | 8.49 / 59.4 | 8.17 / 139.0 | 14.08 / 223.2 |
+| r1, v0 (closed-term memo, picker, direct `MKAPP`) | 3.42 / 46.9 | 8.60 / 59.9 | 8.27 / 139.1 | 13.60 / 223.5 |
+| r1, v0 without the closed-term memo | 3.54 / 47.3 | 8.51 / 59.9 | 8.18 / 140.0 | 14.01 / 224.7 |
+| base, step 1 | 3.13 / 41.8 | 8.15 / 60.8 | 8.18 / 106.6 | 13.11 / 177.8 |
+| r1, step 1 + depth rule (= `gated` now) | 3.13 / 40.4 | 8.10 / 61.2 | 8.13 / 105.2 | 13.15 / 175.7 |
+| r1, + untabled bodies | 2.74 / 39.1 | 5.20 / 51.5 | 6.90 / 99.3 | 12.89 / 167.8 |
+| r1, + projection selector (= `m2a` now) | **2.75 / 39.1** | **5.20 / 51.5** | **7.38 / 98.9** | **12.08 / 167.3** |
+| r1, + segment-relative gating | 2.94 / 39.1 | 5.15 / 51.5 | 7.35 / 99.1 | 13.65 / 168.5 |
+| r1, + segment-relative gating + no INVARIANT | 2.74 / 39.2 | 4.96 / 51.7 | 7.39 / 99.1 | 12.38 / 168.4 |
+
+| Experiment | Verdict | Numbers |
+|---|---|---|
+| Closed-term memo (D20) | **kept**, no switch | v0 instructions with / without: Cedar 46.9 / 47.3 G, Init 139.1 / 140.0, Std 223.5 / 224.7, reachability 59.9 / 59.9; CPU inside the noise. Under `gated` it is the only memo of an untabled closed node (the closed dependent nest of D21 is linear by it alone) |
+| Argument picker, `MKAPP` at once for a neutral head (D22) | **kept**, no switch | no record, run or tick differs; in the v0 rows above together with the memo: instructions 0.0 to +0.8 % against the base (reachability 59.4 -> 59.9 G), CPU -3.4 % to +1.3 %, inside the noise of single runs |
+| Depth rule (D21) | **kept**, part of `gated` | removes a quadratic walk (8.04 M -> 60 k ticks on the 4,000-level nest). Corpora, step 1: Cedar 41.8 -> 40.4 G, Init 106.6 -> 105.2, Std 177.8 -> 175.7, reachability 60.8 -> 61.2 (+0.7 %); CPU equal |
+| Untabled bodies (D19) | **kept**, `m2a` | step 1 -> step 1 + bodies: Cedar **3.13 -> 2.74 s** (41.8 -> 39.1 G), reachability **8.15 -> 5.20 s** (60.8 -> 51.5 G, peak RSS 1,341 -> 946 MiB), Init **8.18 -> 6.90 s** (106.6 -> 99.3 G), Std **13.11 -> 12.89 s** (177.8 -> 167.8 G). Records made (JVM counters): Init 24.3 -> 19.1 M, Cedar 7.25 -> 6.37 M, reachability 20.6 -> 13.5 M; run words 125 -> 94 M, 84.6 -> 76.1 M, 127 -> 82 M |
+| Projection selector (D22) | **kept**, `m2a` | ticks -1.3 % on Init (EVAL call events 11.62 -> 10.94 M), instructions Init 99.3 -> 98.9 G, Std 167.8 -> 167.3 G, Cedar and reachability equal; CPU inside the noise (Init 6.90 -> 7.38 s is two single runs of one instruction count) |
+| Segment-relative gating of inert arguments (a foreign argument in its parent's export segment goes by its flags; bisection over `DeclTable.unitFirstTerm` behind a 256-cell cache) | **rejected**, code removed | instructions equal (Cedar 39.1 -> 39.1 G, reachability 51.5 -> 51.5, Init 98.9 -> 99.1, Std 167.3 -> 168.5); records -1.3 % (Cedar), -3 % (Init) |
+| INVARIANT alone does not table | **rejected**, code removed | on top of the previous row: Cedar 39.1 -> 39.2 G, reachability 51.5 -> 51.7, Init 99.1 -> 99.1, Std 168.5 -> 168.4; with `m2a` alone (unlocked run, instructions only): Cedar 37.6 -> 37.6, reachability 50.0 -> 50.0, Init 98.6 -> 98.9 |
+| A memo of `INST` by (Pi closure, argument) | **not built** | counted: 7 % of the INST evaluations of Init v0 repeat a pair (12 % under step 1) |
+| A closed prefix of a spine (`@HAdd.hAdd Nat Nat Nat inst` under open arguments) answered by the closed-term memo and extended | **not built** | counted (step 1 + `m2a`): prefixes of two or more arguments cover 9.3 % of the arguments of constant-headed applications on Init, 7 % on the Cedar slice, 0.9 % on reachability; an argument of such a prefix is an atom (a CHEAD or literal lookup), so about 0.1 % of the instructions |
+| A beta step whose body is closed evaluated without `ENTER` | **not built** | counted: 1 % of the beta steps on Init, 4.4 % on the Cedar slice, 0.3 % on reachability |
+
