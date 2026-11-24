@@ -375,8 +375,10 @@ class PackedRunsLoadTest {
         samePartialStore(name, plain, packed);
         sameReport(name, plain.report, packed.report);
         LoadReport r = packed.report;
-        System.out.printf(java.util.Locale.ROOT, "[packed runs] %s, %d threads, chunk %d: %,d of %,d expression records in %,d runs, %,d runs expanded%n",
-                name, threads, chunk, r.packedRunRecords, r.exprRecords, r.packedRuns, r.expandedRuns);
+        System.out.printf(java.util.Locale.ROOT, "[packed runs] %s, %d threads, chunk %d: %,d of %,d expression records in %,d runs, %,d runs expanded, %,d references resolved by scanner threads%n",
+                name, threads, chunk, r.packedRunRecords, r.exprRecords, r.packedRuns, r.expandedRuns, r.packedEarlyRefs);
+        // most references of proofs to earlier records name shared terms that were finished long ago
+        assertTrue(r.packedEarlyRefs > r.packedRunRecords / 4, name + ": early references " + r.packedEarlyRefs);
         assertTrue(r.packedRunRecords > least * r.exprRecords, name + ": " + r.packedRunRecords + " of " + r.exprRecords);
         assertTrue(r.expandedRuns * 100 < r.packedRuns, name + ": " + r.expandedRuns + " of " + r.packedRuns + " runs expanded");
     }

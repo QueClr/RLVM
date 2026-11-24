@@ -325,7 +325,9 @@ class PassesTest {
                     assertFalse(pass.contains("\"passes\""), "a pass's own file is a plain run's");
                     assertTrue(pass.contains("\"engine.primary.name\": \"reference\""), mode + " pass " + k + ": " + pass);
                 } else {
-                    assertFalse(Files.exists(own), "the driver's passes are one run: one file");
+                    // The driver's passes are one run: its file is F. Since rlvm-driver 150aed4bf1bf (18:03Z, "statistics
+                    // per later pass") a LATER pass also leaves its own statistics in F.passK; pass 1 never does.
+                    assertEquals(k > 1, Files.exists(own), "recheck: pass 1 is the run's file, pass " + k + " of the driver");
                 }
             }
             String all = Files.readString(stats);
