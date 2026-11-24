@@ -48,7 +48,19 @@ final class Facts {
     private static final int B_SHAPE_OP = 10;
     private static final int B_SLVL = 11;
     private static final int B_DEP = B_SLVL + Layout.FACT_POSITIONS;
-    private static final int B_WORDS = B_DEP + 2 * Layout.FACT_POSITIONS;
+    /** The tick count at which the derivation started (two words): its cost is visible in {@code Infer.Ext.sigdTicks}. */
+    private static final int B_T0 = B_DEP + 2 * Layout.FACT_POSITIONS;
+    private static final int B_WORDS = B_T0 + 2;
+
+    /** Indices of {@code Infer.Ext.factUse} (statistics of the consumers' queries, counted while {@code m.stats}). */
+    static final int USE_PROPMASK = 0;
+    static final int USE_PROPMASK_SET = 1;
+    static final int USE_UNREAD = 2;
+    static final int USE_UNREAD_SET = 3;
+    static final int USE_PROOF = 4;
+    static final int USE_PROOF_YES = 5;
+    static final int USE_PROOF_NO = 6;
+    static final int USE_COUNT = 7;
     /** Arity and lamArity are 16-bit fields of f1; a longer telescope gets no facts. */
     private static final int COUNT_MAX = 0xFFFF;
 
@@ -143,10 +155,21 @@ final class Facts {
         }
         int[] c = m.sigt;
         int cell = (Hash.cell(constRef, 0) & ((1 << Layout.SIGT_LOG2) - 1)) << Layout.CELL_SHIFT;
-        if (c[cell + Layout.SIGT_CONST] == constRef && c[cell + Layout.SIGT_EPOCH] == m.epoch) {
-            return (c[cell + Layout.SIGT_LO] & 0xFFFFFFFFL) | ((long) c[cell + Layout.SIGT_HI] << 32);
+        long r = c[cell + Layout.SIGT_CONST] == constRef && c[cell + Layout.SIGT_EPOCH] == m.epoch
+                ? (c[cell + Layout.SIGT_LO] & 0xFFFFFFFFL) | ((long) c[cell + Layout.SIGT_HI] << 32) : propMaskSlow(m, constRef, cell);
+        if (m.stats) {
+            used(m, USE_PROPMASK, r != 0);
         }
-        return propMaskSlow(m, constRef, cell);
+        return r;
+    }
+
+    /** Statistics: one query of kind {@code use}; {@code set}: it was answered from a record (a mask bit, a definite PROOF). */
+    private static void used(Machine m, int use, boolean set) {
+        long[] u = m.x5.factUse;
+        u[use]++;
+        if (set) {
+            u[use + 1]++;
+        }
     }
 
     private static long propMaskSlow(Machine m, int constRef, int cell) {
@@ -192,10 +215,11 @@ final class Facts {
      */
     static long unreadMask(Machine m, int row, int spineLen) {
         int index = facts(m, row);
-        if (!usable(m, index) || spineLen < lamArity(m, index)) {
-            return 0L;
+        long r = !usable(m, index) || spineLen < lamArity(m, index) ? 0L : mask(m, index, Layout.F_UNREAD);
+        if (m.stats && index != 0) {
+            used(m, USE_UNREAD, r != 0);
         }
-        return mask(m, index, Layout.F_UNREAD);
+        return r;
     }
 
     /**
@@ -224,17 +248,31 @@ final class Facts {
             case Layout.STR:
                 return Layout.TRI_NO;
             case Layout.CONST:
-                return staticProofSlow(m, v, 0);
+                return proofUsed(m, staticProofSlow(m, v, 0));
             case Layout.NEU: {
                 int h = m.vh[o + Layout.A];
                 if (h < 0 || (m.vh[h << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) != Layout.CONST) {
                     return Layout.TRI_UNKNOWN;
                 }
-                return staticProofSlow(m, h, w0 & Layout.AUX_MASK);
+                return proofUsed(m, staticProofSlow(m, h, w0 & Layout.AUX_MASK));
             }
             default:
                 return Layout.TRI_UNKNOWN;
         }
+    }
+
+    /** Statistics of {@link #staticProof} on a constant head: queries, and the two definite answers. */
+    private static int proofUsed(Machine m, int tri) {
+        if (m.stats) {
+            long[] u = m.x5.factUse;
+            u[USE_PROOF]++;
+            if (tri == Layout.TRI_YES) {
+                u[USE_PROOF_YES]++;
+            } else if (tri == Layout.TRI_NO) {
+                u[USE_PROOF_NO]++;
+            }
+        }
+        return tri;
     }
 
     private static int staticProofSlow(Machine m, int head, int len) {
@@ -297,7 +335,11 @@ final class Facts {
             return m.fault(MachineErrors.E_MEM);
         }
         m.xp = xb + B_WORDS;
-        if (!syntaxSlow(m, row, xb)) {
+        boolean fits = syntaxSlow(m, row, xb);
+        long t0 = m.ticks() - 1; // the derivation's own tick included
+        m.X[xb + B_T0] = (int) t0;
+        m.X[xb + B_T0 + 1] = (int) (t0 >>> 32);
+        if (!fits) {
             return k_sigd1(m, row, xb, Layout.U, d); // a telescope beyond the 16-bit counts: F_NONE
         }
         int r = trySigType(m, row, xb, d + 1); // TRY B_SIGD; call the type part => SIGD[1]
@@ -307,6 +349,8 @@ final class Facts {
     /** SIGD[1](row, xb): r = T (the type part is in the buffer) or U (budget, or a kernel error inside): publish. */
     static int k_sigd1(Machine m, int row, int xb, int r, int d) {
         int index = publishSlow(m, row, xb, r == Layout.T);
+        Infer.Ext ext = m.x5;
+        ext.sigdTicks += m.ticks() - ((m.X[xb + B_T0] & 0xFFFFFFFFL) | ((long) m.X[xb + B_T0 + 1] << 32));
         m.xp = xb;
         return index;
     }
@@ -506,6 +550,10 @@ final class Facts {
             }
         }
         ext.factsDerived++;
+        m.factsDerived++; // the engine's statistics (machine.factsDerived, machine.factsNone)
+        if (!ok) {
+            m.factsNone++;
+        }
         return m.engine.facts.publish(row, rec, p);
     }
 

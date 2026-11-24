@@ -142,6 +142,9 @@ final class M8Lanes {
         /** Declarations not compared because the wall-clock limit of a check ended it in one of the two lanes. */
         int deadlineSkipped;
         int pairOrderNotes;
+        /** {@link #OUTCOME} lanes: declarations with the same outcome and another reason (another error of a wrong declaration met first): not differences. */
+        int reasonNotes;
+        final List<String> reasonLines = new ArrayList<>();
         /** Declarations a debug audit ended ({@code E_AUDIT}); the first messages are in {@link #auditLines}. */
         int audits;
         final List<String> auditLines = new ArrayList<>();
@@ -664,12 +667,25 @@ final class M8Lanes {
                 continue;
             } else if (a.outcome[u] != b.outcome[u]) {
                 d = "admission outcome " + Outcome.name(a.outcome[u]) + " (" + reason(a.reason[u]) + ") against " + Outcome.name(b.outcome[u])
-                        + " (" + b.keys.getOrDefault(u, String.valueOf(reason(b.reason[u]))) + ")";
+                        + " (" + clip(b.keys.getOrDefault(u, String.valueOf(reason(b.reason[u]))), 300) + ")";
             } else if (ca != cb) {
                 d = "the unit reached the engine in one lane only";
-            } else if (a.engOutcome[u] != b.engOutcome[u] || a.engReason[u] != b.engReason[u]) {
+            } else if (a.engOutcome[u] != b.engOutcome[u]) {
                 d = "outcome " + Outcome.name(a.engOutcome[u]) + " (" + reason(a.engReason[u]) + ") against " + Outcome.name(b.engOutcome[u])
-                        + " (" + b.keys.getOrDefault(u, String.valueOf(reason(b.engReason[u]))) + ")";
+                        + " (" + clip(b.keys.getOrDefault(u, String.valueOf(reason(b.engReason[u]))), 300) + ")";
+            } else if (a.engReason[u] != b.engReason[u]) {
+                String text = "the same outcome " + Outcome.name(a.engOutcome[u]) + " for another reason: " + reason(a.engReason[u]) + " against "
+                        + clip(b.keys.getOrDefault(u, String.valueOf(reason(b.engReason[u]))), 300);
+                if (b.spec.how == CONV) {
+                    d = text; // a host convention changes nothing observable, the reason included
+                } else {
+                    // another tier or an audit may meet another error of a wrong declaration first: reported, not a difference
+                    b.reasonNotes++;
+                    if (b.reasonLines.size() < 8) {
+                        b.reasonLines.add(Diff.shortName(run.path) + " unit " + u + " " + h.unitKindName(u) + " '" + h.unitName(u) + "': " + a.spec.config.label
+                                + " against " + b.spec.config.label + ": " + text);
+                    }
+                }
             } else if (b.spec.how == CONV) {
                 d = observables(a, b, u);
                 if (d != null && d.startsWith("NOTE")) {

@@ -28,8 +28,10 @@ import rlvm.store.Terms;
  * <ul>
  *   <li><b>Tabling</b> (ISA 5.1): {@code EVAL} of an application, a let or a projection is memoised in
  *       word {@code VAL} of the SUSP record of {@code (term, PRUNE(env, mask), ls')}. v0 tables every such
- *       node; with {@code SW_GATED_TABLING} only the nodes of ISA 3.1. {@code VAL} is never a SUSP (2.6):
- *       a result that is still a suspension is returned and not stored ({@link #done}).
+ *       node; with {@code SW_GATED_TABLING} only the nodes of ISA 3.1 and those deep in an inert nest
+ *       ({@link #gate}); with {@code SW_M2A} never the body of a beta step. {@code VAL} is never a SUSP
+ *       (2.6): a result that is still a suspension is returned and not stored ({@link #done}). A closed
+ *       node under ls' = 0 is also in the closed-term memo, which the inline part reads.
  *   <li><b>B6</b>: a binder whose body does not read it (bit of the body's node mask clear; a clear bit
  *       is definite, 2.4) receives {@code HOLE}; its argument is not even built.
  *   <li><b>let</b> inside an evaluated term is zeta by sharing: the bound value is treated like the argument of a
@@ -38,8 +40,8 @@ import rlvm.store.Terms;
  *   <li><b>Inert nests</b> (ISA 8.2, section 9; convention H8 item 3): the evaluation of an inert
  *       application that {@code ARGV} performs at once is an iteration of the loop of the enclosing
  *       {@code EVAL}: it costs a tick and is not a call event. It runs by host recursion that becomes the
- *       frame {@code EVAL[IN]} beyond the depth bound, or, with {@code SW_INERT_LOOP}, by a loop over
- *       scratch; both make the same records in the same order.
+ *       frame {@code EVAL[IN]} beyond the depth bound ({@code SW_INERT_LOOP} selects nothing any more,
+ *       NOTES-M2 D12).
  *   <li><b>Stacks</b> (H7): a judgment that entered a frame or pushed on {@code es} keeps the old
  *       {@code ep} in its payload and restores it when it completes; {@code EVAL} of an application keeps
  *       the scratch base {@code xb}.
@@ -57,8 +59,6 @@ final class Eval {
         int body;
         /** Second result of {@link #bind}: the length of the environment it built (its base is {@code m.envBase}). */
         int en;
-        /** Second result of {@link #inertPop}: the base of the loop frame below, -1 if none. */
-        int prev;
         /**
          * {@code SW_GATED_TABLING}: export term ids below this one belong to earlier units and are always
          * tabled (ISA 3.1). {@code Integer.MAX_VALUE} when the machine checks no unit (fixtures).
@@ -67,10 +67,39 @@ final class Eval {
         /** Statistics ({@code m.stats}): tabled evaluations answered by {@code VAL}; results left untabled because they were suspensions. */
         long hits;
         long lazy;
+        /** Measurement bits ({@code X_SEG}, {@code X_NODEPTH}, {@code X_NOCM}, {@code X_NOINV}; system property {@code rlvm.m2.x}, default 0). */
+        int xsw = Integer.getInteger("rlvm.m2.x", 0);
+        /** SW_GATED_TABLING: an inert application nested this many inert levels below its evaluation root is always tabled. */
+        int depthK = Math.max(1, Integer.getInteger("rlvm.m2.k", DEPTH_K));
+        /**
+         * Closed-term memo: cells {@code (term, epoch, value, -)}, direct-mapped by the term id. {@code value} is the
+         * result of EVAL of the closed application, let or projection {@code term} under ls' = 0 (2.7), never a SUSP.
+         */
+        final int[] cm = new int[Layout.CELL_WORDS << CM_LOG2];
+        /**
+         * APPLY memo ({@code X_AMEMO}): cells {@code (closure, a0, a1, a2, epoch, j, value, -)}, direct-mapped by a hash
+         * of the key {@code (closure, j, the j <= 3 bound arguments with HOLE for unread binders)}; {@code value} is
+         * what EVAL of the body under those bindings returned. Lossy: a cell is overwritten, never chained.
+         */
+        final int[] am = new int[8 << AM_LOG2];
+        /** Second result of {@link #beta}: the step missed the APPLY memo and its result is to be recorded. */
+        boolean amOpen;
+        /** Scratch of {@link #amKey}: the key's arguments. */
+        int ak0;
+        int ak1;
+        int ak2;
+        /** Statistics ({@code m.stats}): beta steps answered by the APPLY memo. */
+        long amHits;
+        /** Segment cache: pairs {@code (first id, end id)} of export segments of earlier units, direct-mapped by {@code id >>> SEG_SHIFT}. Never stale: a published unit's segment does not change. */
+        final int[] seg = new int[2 << SEG_LOG2];
 
-        /** Session reset (ISA 1.6): forget everything, in O(used). */
+        /** Session reset (ISA 1.6): forget everything, in O(used) (the closed-term memo is stamped by the epoch). */
         void reset(Machine m) {
             ownFirst = Integer.MAX_VALUE;
+            if (m.epoch == 1) {
+                java.util.Arrays.fill(cm, 0); // the epoch counter wrapped: stale stamps could match again
+                java.util.Arrays.fill(am, 0);
+            }
         }
 
         /** Start of a declaration. */
@@ -84,9 +113,44 @@ final class Eval {
         }
     }
 
+    // ---- the evaluation economy (NOTES-M2 section 6) ----------------------------------------------------------
+    // SW_M2A: X_NOBODY | X_SELECT. SW_M2B: X_AMEMO. The other bits are read from the system property rlvm.m2.x
+    // (measurements; default 0) and, but for X_NOCM, act only with SW_GATED_TABLING.
+
+    /** The body of a beta step and of INST is evaluated without a tabling record. */
+    static final int X_NOBODY = 1;
+    /** A body that is a projection of one of the bound arguments is answered from the arguments (no environment, no tick). */
+    static final int X_SELECT = 2;
+    /** A beta step of at most three binders is memoised by (closure, bound arguments) in a direct-mapped table. */
+    static final int X_AMEMO = 4;
+    /** An inert argument is tabled by its flags when it lies in its parent's export segment (instead of: always, when foreign). */
+    static final int X_SEG = 8;
+    /** Without the depth rule of inert nests (reproduces the quadratic walk of NOTES-M2 D21). */
+    static final int X_NODEPTH = 16;
+    /** Without the closed-term memo. */
+    static final int X_NOCM = 32;
+    /** INVARIANT alone does not table an inert argument. */
+    static final int X_NOINV = 64;
+    static final int DEPTH_K = 4;
+    static final int CM_LOG2 = 12;
+    static final int AM_LOG2 = 11;
+    static final int AM_ARGS = 3;
+    static final int SEG_LOG2 = 8;
+    static final int SEG_SHIFT = 6;
+    /** The debug modes that own a path this file would otherwise shorten (memo hits, variable reads); tracing is not one. */
+    private static final int DBG_HOOKS = Op.DBG_MEMOCHECK | Op.DBG_SHORTCHECK | Op.DBG_SCOPEAUDIT | Op.DBG_MASKAUDIT | Op.DBG_SHARECHECK;
+    /** {@code lo} of {@link #table}: the node is an evaluation root; the segment bound is the unit's own first id. */
+    private static final int LO_ROOT = -1;
+
+    /** The economy in force: {@code X_NOBODY | X_SELECT} with SW_M2A, {@code X_AMEMO} with SW_M2B. */
+    private static int feat(Machine m) {
+        final int sw = m.sw;
+        return ((sw & Op.SW_M2A) != 0 ? X_NOBODY | X_SELECT : 0) | ((sw & Op.SW_M2B) != 0 ? X_AMEMO : 0);
+    }
+
     // ---- frame keys of the continuation steps (the payload of J[k] is the parameter list of k_J..) ----
 
-    /** EVAL[IN](t, eb, en, ls): an inert application met by ARGV, beyond the depth bound. */
+    /** EVAL[IN](t, lo, u, eb, en, ls): an inert application met by ARGV, beyond the depth bound. */
     static final int K_EVAL_IN = Op.K_EVAL | 1;
     /** EVAL[HEAD](s, xb, n, eb, en, ls): waits for the value of the head. */
     static final int K_EVAL_HEAD = Op.K_EVAL | 2;
@@ -102,6 +166,10 @@ final class Eval {
     static final int K_EVAL_PROJ = Op.K_EVAL | 7;
     /** EVAL[LET](t, s, eb, en, ls, ep0): waits for the value bound by let node t (an inert application). */
     static final int K_EVAL_LET = Op.K_EVAL | 8;
+    /** EVAL[NB](t, eb, en, ls): the entry step of a body evaluated without a tabling record (X_NOBODY), spilled. */
+    static final int K_EVAL_NB = Op.K_EVAL | 9;
+    /** APPLY[3](xb, n, k, ep0, g, j): as APPLY[2]; the step that ended applied closure g to j arguments (X_AMEMO). */
+    static final int K_APPLY_3 = Op.K_APPLY | 3;
     /** FORCE[1](s, ep0): waits for EVAL of the suspended term. */
     static final int K_FORCE_1 = Op.K_FORCE | 1;
     /** FORCE[2](s): waits for FORCE of a result that was itself a suspension. */
@@ -132,16 +200,24 @@ final class Eval {
      * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
      */
     static int eval(Machine m, int t, int eb, int en, int ls, int d) {
-        int v = atom(m, t, eb, en, ls); // 1. inline answers: leaves and closures (class p of ISA 4.2)
+        int v = atom(m, t, eb, en, ls); // 1. inline answers: leaves, closures, the closed-term memo (class p of ISA 4.2)
         if (v != Op.MISS) {
             return v;
         }
-        int s = table(m, t, eb, en, ls); // the tabling record (5.1); 0 = t is not tabled
-        if (s != 0) {
+        // the tabling record (5.1), or -t: t is not tabled
+        return enter(m, t, table(m, t, LO_ROOT, 0, eb, en, ls), Op.K_EVAL, eb, en, ls, d);
+    }
+
+    /**
+     * EVAL after its inline answers: s is the tabling record of t (5.1), or -t if t is not tabled; key is the frame
+     * key of the entry step (EVAL[0], or EVAL[NB] for a body without a record).
+     */
+    private static int enter(Machine m, int t, int s, int key, int eb, int en, int ls, int d) {
+        if (s > 0) {
             if (s >= SIG) {
                 return s;
             }
-            v = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
+            int v = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
             if (v != 0) {
                 return m.debug != 0 || m.stats ? hit(m, s, v) : v; // memo hit: no tick, no event, no frame
             }
@@ -153,9 +229,23 @@ final class Eval {
             m.call(Op.EVAL); // 2b. call event
         }
         if (d > m.hostDepth) {
-            return m.spill4(Op.K_EVAL, t, eb, en, ls); // 3. too deep: become the frame EVAL[0](t, eb, en, ls)
+            return m.spill4(key, t, eb, en, ls); // 3. too deep: become the frame EVAL[0] / EVAL[NB](t, eb, en, ls)
         }
-        return node(m, t, s, eb, en, ls, d); // 4. body
+        if (s <= 0 && key == Op.K_EVAL && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
+            return Op.FATAL;
+        }
+        return node(m, t, s, 0, eb, en, ls, d); // 4. body
+    }
+
+    /**
+     * EVAL of the body of a beta step or of INST under {@code X_NOBODY} (SW_M2A): the judgment of {@link #eval} without a
+     * tabling record. A body is entered once per APPLY / INST, never through an inert nest, so no DAG is walked as a
+     * tree by this (NOTES-M2 D19); the memo it gives up is the one of a second application of the same closure to the
+     * same arguments. Entry frame: EVAL[NB](t, eb, en, ls).
+     */
+    private static int evalNT(Machine m, int t, int eb, int en, int ls, int d) {
+        int v = atom(m, t, eb, en, ls);
+        return v != Op.MISS ? v : enter(m, t, -t, K_EVAL_NB, eb, en, ls, d);
     }
 
     /**
@@ -177,19 +267,27 @@ final class Eval {
         if (d > m.hostDepth) {
             return m.spill4(Op.K_EVAL, t, eb, en, ls);
         }
-        return node(m, t, s, eb, en, ls, d);
+        return node(m, t, s, 0, eb, en, ls, d);
     }
 
     /**
      * ARGV's evaluation of an inert application t (ISA 4.2 "EVAL now (builds NEUs only)"): an iteration of the
      * inert-nest loop of the enclosing EVAL (ISA 8.2 "one EVAL frame looping", section 9; convention H8 item 3), so it
      * is tabled and ticked like any node and is not a call event. Run by host recursion; beyond the depth bound it is
-     * the frame EVAL[IN](t, eb, en, ls) (written without the event bookkeeping of {@code spillN}: there was no
-     * event). With {@code SW_INERT_LOOP} the same nest is evaluated by {@link #inertLoop}: same records, same order.
+     * the frame EVAL[IN](t, lo, u, eb, en, ls) (written without the event bookkeeping of {@code spillN}: there was no
+     * event). This entry is the root of a nest (ARGV called from outside, a let value).
      */
     static int evalIn(Machine m, int t, int eb, int en, int ls, int d) {
-        int s = table(m, t, eb, en, ls);
-        if (s != 0) {
+        return evalInAt(m, t, LO_ROOT, 0, eb, en, ls, d);
+    }
+
+    /**
+     * {@link #evalIn} for the inert application t at nesting depth u below the root of its nest; lo is the first id
+     * of the export segment of its parent ({@code LO_ROOT}: no parent is known), which the tabling gate reads.
+     */
+    private static int evalInAt(Machine m, int t, int lo, int u, int eb, int en, int ls, int d) {
+        int s = table(m, t, lo, u, eb, en, ls);
+        if (s > 0) {
             if (s >= SIG) {
                 return s;
             }
@@ -201,17 +299,14 @@ final class Eval {
         if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
             return m.sig; // TICK: one per node of the nest (a loop iteration, ISA 1.4)
         }
-        if ((m.sw & Op.SW_INERT_LOOP) != 0) {
-            if (s == 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
-                return Op.FATAL;
-            }
-            return inertLoop(m, t, s, eb, en, ls);
-        }
         if (d > m.hostDepth) {
             m.fuel++; // the tick is given back: the driver enters this step again
-            return m.sig4(Op.SUSP, K_EVAL_IN, t, eb, en, ls);
+            return m.sig6(Op.SUSP, K_EVAL_IN, t, lo, u, eb, en, ls);
         }
-        return node(m, t, s, eb, en, ls, d);
+        if (s <= 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
+            return Op.FATAL;
+        }
+        return node(m, t, s, u, eb, en, ls, d);
     }
 
     /**
@@ -249,16 +344,54 @@ final class Eval {
             case Kind.STRLIT:
                 return Lits.klit(m, t);
             case Kind.LAM:
-                return Values.mkLam(m, t, frame(m, t, eb, en), ls);
             case Kind.PI:
-                return Values.mkPi(m, t, frame(m, t, eb, en), ls);
+                return closure(m, t, hdr & 0xF, eb, en, ls);
             case Kind.APP:
             case Kind.LET:
             case Kind.PROJ:
-                return Op.MISS;
+                return (r[w + Node.W_MASK_LO] | r[w + Node.W_MASK_HI]) != 0 ? Op.MISS : closedGet(m, t, hdr, ls);
             default:
                 return m.fault(MachineErrors.E_INTERNAL); // FVAR nodes are the reference kernel's; NONE is no term
         }
+    }
+
+    /** MKLAM / MKPI over the pruned frame (ISA 4.2). */
+    private static int closure(Machine m, int t, int kind, int eb, int en, int ls) {
+        final int fr = frame(m, t, eb, en);
+        return kind == Kind.LAM ? Values.mkLam(m, t, fr, ls) : Values.mkPi(m, t, fr, ls);
+    }
+
+    /**
+     * The closed-term memo (NOTES-M2 D20): the value of EVAL of the closed application, let or projection t under
+     * ls' = 0 (t has no level parameter, or ls is the identity), if this session has computed it; else {@code Op.MISS}.
+     * The entry is a copy of {@code VAL} of the tabling record {@code SUSP(t, EMPTY, 0)} where t is tabled (so with it
+     * and without it every result is the same; it saves the probe), and the memo itself where t is not tabled.
+     * Bypassed in debug builds, where {@code memocheck} owns the hit path.
+     */
+    private static int closedGet(Machine m, int t, int hdr, int ls) {
+        if (ls != 0 && (hdr & Node.F_HAS_LPARAM) != 0) {
+            return Op.MISS;
+        }
+        final Ext x = m.x2;
+        final int[] cm = x.cm;
+        final int i = (t & ((1 << CM_LOG2) - 1)) << Layout.CELL_SHIFT;
+        if (cm[i] != t || cm[i + 1] != m.epoch || (m.debug & DBG_HOOKS) != 0 || (x.xsw & X_NOCM) != 0) {
+            return Op.MISS;
+        }
+        if (m.stats) {
+            x.hits++;
+            m.hits[Op.EVAL]++;
+        }
+        return cm[i + 2];
+    }
+
+    /** {@code EVAL(t) = r} for the closed term t under ls' = 0, r not a SUSP: into the closed-term memo. */
+    private static void closedPut(Machine m, int t, int r) {
+        final int[] cm = m.x2.cm;
+        final int i = (t & ((1 << CM_LOG2) - 1)) << Layout.CELL_SHIFT;
+        cm[i] = t;
+        cm[i + 1] = m.epoch;
+        cm[i + 2] = r;
     }
 
     /**
@@ -278,13 +411,83 @@ final class Eval {
     /**
      * The tabling record of EVAL(t, env, ls): SUSP(t, PRUNE(env, mask t), ls') with ls' = HAS_LPARAM(t) ? ls : 0 (ISA
      * 4.2, 5.1, 2.7). The key holds every binding t can read (5.2: the mask is a superset of what is read).
-     * @return the record; 0 if t is not tabled (ISA 3.1, only with SW_GATED_TABLING); or a signal
+     * @param lo the first id of the export segment of the node's parent, {@code LO_ROOT} if t is an evaluation root
+     * @param u the number of inert applications between t and the root of its inert nest (0: t is not in a nest)
+     * @return the record; -t if t is not tabled (ISA 3.1, only with SW_GATED_TABLING); or a signal
      */
-    private static int table(Machine m, int t, int eb, int en, int ls) {
-        if ((m.sw & Op.SW_GATED_TABLING) != 0 && (!tabled(m, t) || flat(m, t))) {
-            return 0;
+    private static int table(Machine m, int t, int lo, int u, int eb, int en, int ls) {
+        if ((m.sw & Op.SW_GATED_TABLING) != 0 && !gate(m, t, lo, u)) {
+            return -t;
         }
         return Values.suspRecord(m, t, frame(m, t, eb, en), ls);
+    }
+
+    /**
+     * {@code tabled(t)} of ISA 3.1 as this package applies it under SW_GATED_TABLING (NOTES-M2 D14, D19): t is tabled
+     * iff it is not a flat inert application and (a) one of its sharing flags is set (SHARED, BODY, INVARIANT; they
+     * never under-approximate the referrers inside the node's own export segment), or (b) it is reached from outside
+     * its segment (below {@code lo}: the referrers of other segments are not in its flags; a generated node always
+     * counts as such), or (c) it lies {@code depthK} or more inert levels below the root of its nest (bounds the
+     * walk that every outer evaluation root repeats over an untabled nest by {@code depthK} levels, NOTES-M2 D21).
+     */
+    private static boolean gate(Machine m, int t, int lo, int u) {
+        final Ext x = m.x2;
+        final int fl = (x.xsw & X_NOINV) != 0 ? Node.F_SHARED | Node.F_BODY : Node.F_TABLED_MASK;
+        if ((m.terms.header(t) & fl) == 0) {
+            if (lo < 0) {
+                lo = x.ownFirst;
+            }
+            if (t >= lo && (t < Node.GEN_BASE || t >= Node.OVERLAY_BIT) && (u < x.depthK || (x.xsw & X_NODEPTH) != 0)) {
+                return false;
+            }
+        }
+        return !flat(m, t);
+    }
+
+    /**
+     * The first id of the export segment that holds node t, for the gate of its children (X_SEG): a child at or
+     * above it lies in the same segment, so its flags count every referrer but those of later units, which reach it
+     * through this parent only if they reached the parent. The unit's own nodes and every overlay node (a decoded
+     * block of the unit, ISA 3.1): the unit's first id. A generated node: no child counts as its own
+     * ({@code Integer.MAX_VALUE}).
+     */
+    static int segLo(Machine m, int t) {
+        final Ext x = m.x2;
+        if (t >= Node.GEN_BASE) {
+            return t >= Node.OVERLAY_BIT ? x.ownFirst : Integer.MAX_VALUE;
+        }
+        if (t >= x.ownFirst) {
+            return x.ownFirst;
+        }
+        final int[] c = x.seg;
+        final int i = (t >>> SEG_SHIFT & ((1 << SEG_LOG2) - 1)) << 1;
+        return c[i] <= t && t < c[i + 1] ? c[i] : segSlow(m, t, i);
+    }
+
+    /** The segment of the export node t of an earlier unit, by bisection over the units; fills cell i of the cache. */
+    private static int segSlow(Machine m, int t, int i) {
+        final rlvm.store.DeclTable dt = m.decls;
+        int hi = m.unit; // t < unitFirstTerm(m.unit) = ownFirst
+        if (dt == null || hi <= 0 || t <= 0) {
+            return Integer.MAX_VALUE;
+        }
+        int lo = 0;
+        while (hi - lo > 1) { // invariant: unitFirstTerm(lo) <= t < unitFirstTerm(hi)
+            int mid = (lo + hi) >>> 1;
+            if (dt.unitFirstTerm(mid) <= t) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        final int first = dt.unitFirstTerm(lo);
+        final int end = dt.unitFirstTerm(hi);
+        if (first > t || t >= end) {
+            return Integer.MAX_VALUE; // the unit table is not what this search assumes: no child counts as its own
+        }
+        m.x2.seg[i] = first;
+        m.x2.seg[i + 1] = end;
+        return first;
     }
 
     /**
@@ -323,19 +526,6 @@ final class Eval {
     }
 
     /**
-     * {@code tabled(t)} of ISA 3.1 (staging step 1, SW_GATED_TABLING): SHARED, BODY or INVARIANT (node header bits 13-15,
-     * which never under-approximate sharing), or t is not a term of the unit being checked: an export id below the
-     * unit's first one, or the generated region. Overlay nodes go by their flags (hash-consed overlay nodes are SHARED;
-     * a decoded block carries the flags of its own segment).
-     */
-    private static boolean tabled(Machine m, int t) {
-        if ((m.terms.header(t) & Node.F_TABLED_MASK) != 0) {
-            return true;
-        }
-        return t < Node.OVERLAY_BIT && (t >= Node.GEN_BASE || t < m.x2.ownFirst);
-    }
-
-    /**
      * Completion of a tabled EVAL (I-MEMO, ISA 5.4): {@code VAL(s) := r}. VAL is never a SUSP (2.6), so a result that is
      * still a suspension after PEEK (a delayed argument or a let variable that the term merely passes on) is returned
      * untabled; evaluating the term again costs one level, its sub-terms are tabled themselves.
@@ -353,10 +543,26 @@ final class Eval {
                 return r;
             }
         }
-        if (s != 0) {
-            m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL] = r;
+        if (s > 0) {
+            final int o = s << Layout.REC_SHIFT;
+            final int[] vh = m.vh;
+            vh[o + Layout.M_VAL] = r;
+            if (vh[o + Layout.B] == Layout.RUN_EMPTY && vh[o + Layout.C] == 0 && (m.debug & DBG_HOOKS) == 0) {
+                closedPut(m, vh[o + Layout.A], r); // a closed term under ls' = 0: also in the closed-term memo
+            }
+        } else if ((m.debug & DBG_HOOKS) == 0) {
+            closedPutUntabled(m, -s, r);
         }
         return r;
+    }
+
+    /** Completion of the untabled node t: if it is closed and has no level parameter (ls' = 0), into the closed-term memo. */
+    private static void closedPutUntabled(Machine m, int t, int r) {
+        final int[] tr = m.terms.regionOf(t);
+        final int w = Node.wordOf(t);
+        if ((tr[w + Node.W_MASK_LO] | tr[w + Node.W_MASK_HI]) == 0 && (tr[w] & Node.F_HAS_LPARAM) == 0) {
+            closedPut(m, t, r);
+        }
     }
 
     /** A tabled EVAL was answered by {@code VAL(s) = v}: statistics, and the memo check of debug builds. */
@@ -456,14 +662,11 @@ final class Eval {
         return true;
     }
 
-    /** EVAL, step 4: by node kind. s is the tabling record (0 = none). */
-    private static int node(Machine m, int t, int s, int eb, int en, int ls, int d) {
-        if (s == 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, t, eb, en) != 0) {
-            return Op.FATAL;
-        }
+    /** EVAL, step 4: by node kind. s is the tabling record, or -t (none); u the depth of t in its inert nest. */
+    private static int node(Machine m, int t, int s, int u, int eb, int en, int ls, int d) {
         switch (m.terms.kind(t)) {
             case Kind.APP:
-                return app(m, t, s, eb, en, ls, d);
+                return app(m, t, s, u, eb, en, ls, d);
             case Kind.LET:
                 return let(m, t, s, eb, en, ls, d);
             case Kind.PROJ:
@@ -477,10 +680,11 @@ final class Eval {
 
     /**
      * EVAL of an application (ISA 4.2 "app"): the spine is collected in X (argument terms at X[xb .. xb + n), replaced
-     * one by one by their values), the head is evaluated and forced, then {@link #args}. Official: the spine of
-     * {@code instantiate(e)} with head beta (R02 section 4 "Head beta": m = min(leading lambdas, n) arguments at once).
+     * one by one by their values; X[xb - 1] = u, the depth of the node in its inert nest), the head is evaluated and
+     * forced, then {@link #args}. Official: the spine of {@code instantiate(e)} with head beta (R02 section 4 "Head
+     * beta": m = min(leading lambdas, n) arguments at once).
      */
-    private static int app(Machine m, int t, int s, int eb, int en, int ls, int d) {
+    private static int app(Machine m, int t, int s, int u, int eb, int en, int ls, int d) {
         final Terms T = m.terms;
         int n = 0;
         int h = t;
@@ -488,16 +692,14 @@ final class Eval {
             h = T.a(h);
             n++;
         } while (T.kind(h) == Kind.APP);
-        if ((m.sw & Op.SW_INERT_LOOP) != 0 && inertHead(m, h, eb, en)) {
-            return inertLoop(m, t, s, eb, en, ls);
-        }
-        int xb = m.xp;
-        if (!m.ensureScratch(n)) {
+        int xb = m.xp + 1;
+        if (!m.ensureScratch(n + 1)) {
             return m.fault(MachineErrors.E_MEM);
         }
         final int[] X = m.X;
-        for (int u = t, i = xb + n; i > xb; u = T.a(u)) {
-            X[--i] = T.b(u);
+        X[xb - 1] = u;
+        for (int w = t, i = xb + n; i > xb; w = T.a(w)) {
+            X[--i] = T.b(w);
         }
         m.xp = xb + n;
         if (T.kind(h) == Kind.CONST) {
@@ -526,7 +728,9 @@ final class Eval {
      * (inline), beta for a closure.
      */
     private static int args(Machine m, int s, int f, int xb, int n, int i, int eb, int en, int ls, int d) {
-        final long skip = unread(m, f, n);
+        final int kind = f <= Layout.HOLE ? 0 : m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
+        final long skip = kind == Layout.LAM ? unread(m, f, n) : 0L;
+        int lo = 0; // the segment bound of this node for the gate of its inert arguments: computed at the first one
         for (; i < n; i++) {
             int v;
             if (i < 64 && ((skip >>> i) & 1L) != 0) {
@@ -537,7 +741,10 @@ final class Eval {
                     if (v != Op.MISS) {
                         return v;
                     }
-                    v = evalIn(m, m.X[xb + i], eb, en, ls, d + 1); // an inert application: EVAL now => ARG
+                    if (lo == 0) {
+                        lo = (m.x2.xsw & X_SEG) != 0 ? segLo(m, s > 0 ? m.vh[(s << Layout.REC_SHIFT) + Layout.A] : -s) : LO_ROOT;
+                    }
+                    v = evalInAt(m, m.X[xb + i], lo, m.X[xb - 1] + 1, eb, en, ls, d + 1); // an inert application: EVAL now => ARG
                     if (v >= SIG) {
                         return m.sig8(v, K_EVAL_ARG, s, f, xb, n, i, eb, en, ls);
                     }
@@ -545,7 +752,9 @@ final class Eval {
             }
             m.X[xb + i] = v;
         }
-        int r = apply(m, f, xb, n, d + 1); // call APPLY(f, args) => APP
+        // call APPLY(f, args) => APP. A neutral head is MKAPP at once: f is forced, and no HOLE was written above
+        // (skip = 0; a value of ARGV is never HOLE), so the HOLE test of APPLY has nothing to find.
+        int r = neutral(kind) ? Values.mkApp(m, f, xb, n) : apply(m, f, xb, n, d + 1);
         return r >= SIG ? m.sig2(r, K_EVAL_APP, s, xb) : k_evalApp(m, s, xb, r, d);
     }
 
@@ -557,20 +766,17 @@ final class Eval {
 
     /** EVAL[APP]: r = the application; the scratch of the spine is released (I-STACKS), the result tabled. */
     static int k_evalApp(Machine m, int s, int xb, int r, int d) {
-        m.xp = xb;
+        m.xp = xb - 1;
         return done(m, s, r);
     }
 
     /**
-     * B6 for the arguments of an application of f to n arguments: bit i (i &lt; 64) is set iff f is a LAM closure whose
+     * B6 for the arguments of an application of the LAM closure f to n arguments: bit i (i &lt; 64) is set iff the
      * first j = min(leading lambdas, n) binders are bound by this application and the body under them does not read
      * binder i (ISA 4.1 BUNREAD, 4.3.1; S1 of R05 section 4). The node mask is a superset of what is read, so a clear
      * bit is definite (2.4); an index beyond the near slots counts as read.
      */
     private static long unread(Machine m, int f, int n) {
-        if (f <= Layout.HOLE || (m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) != Layout.LAM) {
-            return 0L;
-        }
         int j = peel(m, m.vh[(f << Layout.REC_SHIFT) + Layout.A], n);
         long mask = m.terms.fvMask(m.x2.body);
         long u = 0L;
@@ -760,144 +966,6 @@ final class Eval {
     }
 
     // =====================================================================================================
-    // The inert-nest loop (SW_INERT_LOOP)
-    // =====================================================================================================
-
-    // Loop frame on scratch at fb: [prev | s | f | n | i | a_0 .. a_(n-1)]: the base of the frame below (-1 = none),
-    // the tabling record, the head value, the number of arguments, the next argument, and the argument terms, each
-    // replaced by its value.
-    private static final int IN_PREV = 0;
-    private static final int IN_S = 1;
-    private static final int IN_F = 2;
-    private static final int IN_N = 3;
-    private static final int IN_I = 4;
-    private static final int IN_ARGS = 5;
-
-    /**
-     * The inert nest rooted at application t (tabling record s, VAL unknown, already ticked) evaluated by one loop over
-     * scratch instead of host recursion (ISA 8.2 "Inert evaluation ... is one EVAL frame looping over scratch X";
-     * convention H8 item 3). No sub-judgment is called: arguments are atoms, suspensions of active terms, or inert
-     * applications, which are pushed. Per node it does what {@link #evalIn} / {@link #app} / {@link #args} do, in the
-     * same order: tabling probe, tick, spine, head, arguments, MKAPP, VAL.
-     * @return the value, or ABORT / FATAL (never SUSP)
-     */
-    private static int inertLoop(Machine m, int t, int s, int eb, int en, int ls) {
-        int fb = inertPush(m, t, s, -1, eb, en, ls);
-        while (fb < SIG) {
-            int i = m.X[fb + IN_I];
-            if (i == m.X[fb + IN_N]) {
-                int r = inertPop(m, fb);
-                if (r >= SIG || m.x2.prev < 0) {
-                    return r;
-                }
-                fb = m.x2.prev;
-                continue;
-            }
-            int a = m.X[fb + IN_ARGS + i];
-            int v = argvFast(m, a, eb, en, ls);
-            if (v == Op.MISS) {
-                v = inertEnter(m, a, fb, eb, en, ls);
-                if (v == Op.MISS) {
-                    fb = m.x2.prev; // the frame of a is on top now
-                    continue;
-                }
-            }
-            if (v >= SIG) {
-                return v;
-            }
-            m.X[fb + IN_ARGS + i] = v;
-            m.X[fb + IN_I] = i + 1;
-        }
-        return fb;
-    }
-
-    /**
-     * An argument of the loop frame fb is the inert application a: what {@link #evalIn} does before its body. The
-     * tabling probe answers (the value is returned), or the node is ticked and its loop frame pushed (its base is left
-     * in {@code m.x2.prev}, {@code Op.MISS} is returned).
-     */
-    private static int inertEnter(Machine m, int a, int fb, int eb, int en, int ls) {
-        int s = table(m, a, eb, en, ls);
-        if (s != 0) {
-            if (s >= SIG) {
-                return s;
-            }
-            int v = m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
-            if (v != 0) {
-                return m.debug != 0 || m.stats ? hit(m, s, v) : v;
-            }
-        }
-        if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
-            return m.sig; // TICK, as evalIn
-        }
-        if (s == 0 && (m.debug & Op.DBG_SHARECHECK) != 0 && walked(m, a, eb, en) != 0) {
-            return Op.FATAL;
-        }
-        int nb = inertPush(m, a, s, fb, eb, en, ls);
-        if (nb >= SIG) {
-            return nb;
-        }
-        m.x2.prev = nb;
-        return Op.MISS;
-    }
-
-    /** Pushes the loop frame of the inert application t: spine and head value. Returns its base, or a signal. */
-    private static int inertPush(Machine m, int t, int s, int prev, int eb, int en, int ls) {
-        final Terms T = m.terms;
-        int n = 0;
-        int h = t;
-        do {
-            h = T.a(h);
-            n++;
-        } while (T.kind(h) == Kind.APP);
-        int fb = m.xp;
-        if (!m.ensureScratch(n + IN_ARGS)) {
-            return m.fault(MachineErrors.E_MEM);
-        }
-        int[] X = m.X;
-        for (int u = t, i = fb + IN_ARGS + n; i > fb + IN_ARGS; u = T.a(u)) {
-            X[--i] = T.b(u);
-        }
-        m.xp = fb + IN_ARGS + n;
-        int f = atom(m, h, eb, en, ls); // a constant, or a variable bound to a neutral
-        if (f >= SIG) {
-            return f;
-        }
-        if (f <= Layout.HOLE || !neutral(m.vh[f << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT)) {
-            return m.fault(MachineErrors.E_INTERNAL);
-        }
-        X = m.X;
-        X[fb + IN_PREV] = prev;
-        X[fb + IN_S] = s;
-        X[fb + IN_F] = f;
-        X[fb + IN_N] = n;
-        X[fb + IN_I] = 0;
-        return fb;
-    }
-
-    /**
-     * Completes the loop frame at fb: MKAPP, VAL, release of its scratch; the value becomes the next argument of the
-     * frame below, whose base is left in {@code m.x2.prev} (-1: fb was the root of the nest). Returns the value or a signal.
-     */
-    private static int inertPop(Machine m, int fb) {
-        int r = mkApp(m, m.X[fb + IN_F], fb + IN_ARGS, m.X[fb + IN_N]);
-        if (r >= SIG) {
-            return r;
-        }
-        final int[] X = m.X;
-        r = done(m, X[fb + IN_S], r);
-        int prev = X[fb + IN_PREV];
-        m.xp = fb;
-        m.x2.prev = prev;
-        if (prev >= 0) {
-            int i = X[prev + IN_I];
-            X[prev + IN_ARGS + i] = r;
-            X[prev + IN_I] = i + 1;
-        }
-        return r;
-    }
-
-    // =====================================================================================================
     // FORCE
     // =====================================================================================================
 
@@ -1030,16 +1098,17 @@ final class Eval {
                 // CODE(f): the block of the closure's binder term at entry j, capRun = the frame (staging step 4)
                 final int o = g << Layout.REC_SHIFT;
                 r = Code.callClosure(m, m.vh[o + Layout.M_CODE], j, m.vh[o + Layout.B], m.vh[o + Layout.C], xb + k, d + 1);
+                m.x2.amOpen = false;
             } else {
-                j = bind(m, g, xb + k, n - k); // env = ENTER(frame) + j arguments
-                if (j >= SIG) {
-                    return j;
-                }
-                r = eval(m, m.x2.body, m.envBase, m.x2.en, m.vh[(g << Layout.REC_SHIFT) + Layout.C], d + 1); // => 2
+                j = peel(m, m.vh[(g << Layout.REC_SHIFT) + Layout.A], n - k);
+                r = beta(m, g, xb + k, j, d); // => 2 (3 if the step is to be recorded in the APPLY memo)
             }
             k += j;
             if (r >= SIG) {
-                return m.sig4(r, K_APPLY_2, xb, n, k, ep0);
+                return m.x2.amOpen ? m.sig6(r, K_APPLY_3, xb, n, k, ep0, g, j) : m.sig4(r, K_APPLY_2, xb, n, k, ep0);
+            }
+            if (m.x2.amOpen) {
+                amPut(m, g, xb + k - j, j, r);
             }
             m.ep = ep0;
             if (k == n) {
@@ -1049,9 +1118,148 @@ final class Eval {
         }
     }
 
+    /**
+     * One beta step (ISA 4.3.1): the closure g applied to the j arguments X[xa .. xa + j); {@link #peel} left the
+     * body under the j lambdas in {@code m.x2.body}. A body that is one of the j variables is that argument (PEEKed):
+     * what EVAL of the variable under the bound environment returns, without building the environment. With
+     * SW_M2A a body that is a projection of one of the j variables is MKPROJ of that argument ({@code X_SELECT}).
+     * With SW_M2B a step of at most three binders is looked up in the APPLY memo ({@code X_AMEMO}). Otherwise
+     * {@code env = ENTER(frame) + arguments} and EVAL of the body (untabled with SW_M2A, {@code X_NOBODY}).
+     * @return the value of the body, or a signal (SUSP: the body's frames are on the worklist)
+     */
+    private static int beta(Machine m, int g, int xa, int j, int d) {
+        final int body = m.x2.body;
+        m.x2.amOpen = false;
+        final int[] tr = m.terms.regionOf(body);
+        final int w = Node.wordOf(body);
+        final int bk = tr[w] & 0xF;
+        if (bk == Kind.BVAR) {
+            final int idx = tr[w + Node.W_A];
+            if (idx >= 0 && idx < j && (m.debug & DBG_HOOKS) == 0) {
+                return pick(m, m.X[xa + j - 1 - idx]);
+            }
+        } else if (bk == Kind.PROJ && (m.debug & DBG_HOOKS) == 0 && (feat(m) & X_SELECT) != 0) {
+            int v = betaProj(m, body, xa, j);
+            if (v != Op.MISS) {
+                return v;
+            }
+        }
+        final int x = feat(m);
+        if ((x & X_AMEMO) != 0 && j <= AM_ARGS && (m.debug & DBG_HOOKS) == 0) {
+            int v = amGet(m, g, xa, j);
+            if (v != Op.MISS) {
+                return v;
+            }
+        }
+        int e = bind(m, g, xa, j); // env = ENTER(frame) + j arguments
+        if (e >= SIG) {
+            return e;
+        }
+        final int ls = m.vh[(g << Layout.REC_SHIFT) + Layout.C];
+        int r = (x & X_NOBODY) != 0 ? evalNT(m, body, m.envBase, m.x2.en, ls, d + 1) : eval(m, body, m.envBase, m.x2.en, ls, d + 1);
+        m.x2.amOpen = (x & X_AMEMO) != 0 && j <= AM_ARGS && (m.debug & DBG_HOOKS) == 0; // set last: the body's own beta steps wrote it
+        return r;
+    }
+
+    /**
+     * The key of the APPLY memo for closure g applied to the j <= 3 arguments X[xa .. xa + j): the arguments as
+     * {@link #bind} binds them (HOLE for a binder the body under the j lambdas does not read, B6) are left in
+     * {@code m.x2.ak0 .. ak2} (NONE beyond j). The value of the step is a function of exactly this key (ISA 4.3.1: the
+     * body, the frame and ls are the closure's; I-ID).
+     * @return the index of the key's cell
+     */
+    private static int amKey(Machine m, int g, int xa, int j) {
+        final Ext x = m.x2;
+        peel(m, m.vh[(g << Layout.REC_SHIFT) + Layout.A], j);
+        final long mask = m.terms.fvMask(x.body);
+        final int[] X = m.X;
+        int a0 = (mask >>> (j - 1) & 1L) != 0 ? X[xa] : Layout.HOLE;
+        int a1 = j < 2 ? Layout.NONE : (mask >>> (j - 2) & 1L) != 0 ? X[xa + 1] : Layout.HOLE;
+        int a2 = j < 3 ? Layout.NONE : (mask & 1L) != 0 ? X[xa + 2] : Layout.HOLE;
+        x.ak0 = a0;
+        x.ak1 = a1;
+        x.ak2 = a2;
+        int h = Hash.step(Hash.step(Hash.step(Hash.seed(g), a0), a1), a2);
+        return (Hash.fin(h) & ((1 << AM_LOG2) - 1)) << 3;
+    }
+
+    /** The APPLY memo: the recorded value of closure g applied to X[xa .. xa + j) (PEEKed), or {@code Op.MISS}. */
+    private static int amGet(Machine m, int g, int xa, int j) {
+        final int body = m.x2.body;
+        final int i = amKey(m, g, xa, j);
+        final Ext x = m.x2;
+        x.body = body;
+        final int[] am = x.am;
+        if (am[i] != g || am[i + 1] != x.ak0 || am[i + 2] != x.ak1 || am[i + 3] != x.ak2 || am[i + 4] != m.epoch || am[i + 5] != j) {
+            return Op.MISS;
+        }
+        if (m.stats) {
+            x.amHits++;
+        }
+        return pick(m, am[i + 6]);
+    }
+
+    /** {@code APPLY(g, X[xa .. xa + j)) = r} (one beta step, r not a signal): into the APPLY memo. */
+    private static void amPut(Machine m, int g, int xa, int j, int r) {
+        final int i = amKey(m, g, xa, j);
+        final Ext x = m.x2;
+        final int[] am = x.am;
+        am[i] = g;
+        am[i + 1] = x.ak0;
+        am[i + 2] = x.ak1;
+        am[i + 3] = x.ak2;
+        am[i + 4] = m.epoch;
+        am[i + 5] = j;
+        am[i + 6] = r;
+    }
+
+    /**
+     * {@code X_SELECT}: the projection node body, if its struct is one of the j variables bound to X[xa .. xa + j):
+     * MKPROJ of that argument (PEEKed), completed like the EVAL of the node. Else {@code Op.MISS}.
+     */
+    private static int betaProj(Machine m, int body, int xa, int j) {
+        final Terms T = m.terms;
+        final int st = T.a(body);
+        final int row = T.c(body);
+        if (T.kind(st) != Kind.BVAR || row <= 0) {
+            return Op.MISS;
+        }
+        final int idx = T.a(st);
+        if (idx < 0 || idx >= j) {
+            return Op.MISS;
+        }
+        int sv = pick(m, m.X[xa + j - 1 - idx]);
+        if (sv >= SIG) {
+            return sv;
+        }
+        int v = Values.mkProj(m, row, T.b(body), sv);
+        return v >= SIG ? v : done(m, -body, v);
+    }
+
+    /**
+     * The value EVAL returns for a variable bound to the argument v (ISA 4.2 "variable -> GET", D8): v PEEKed; reading
+     * HOLE is fault(E_HOLE) (2.1), NONE is no value.
+     */
+    private static int pick(Machine m, int v) {
+        if (v <= Layout.HOLE) {
+            return v == Layout.HOLE ? m.fault(MachineErrors.E_HOLE) : v == Layout.NONE ? m.fault(MachineErrors.E_INTERNAL) : v;
+        }
+        if (v >= SIG) {
+            return v;
+        }
+        return (m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) == Layout.SUSP ? Values.peek(m, v) : v;
+    }
+
     /** APPLY[1]: r = the forced function. */
     static int k_apply1(Machine m, int xb, int n, int k, int r, int d) {
         return applyFrom(m, r, xb, n, k, d);
+    }
+
+    /** APPLY[3]: r = the value of the body of closure g after its j arguments, k in all: recorded, then as APPLY[2]. */
+    static int k_apply3(Machine m, int xb, int n, int k, int ep0, int g, int j, int r, int d) {
+        amPut(m, g, xb + k - j, j, r);
+        m.ep = ep0;
+        return k == n ? r : applyFrom(m, r, xb, n, k, d);
     }
 
     /** APPLY[2]: r = the value of the body after k arguments. */
@@ -1062,13 +1270,12 @@ final class Eval {
 
     /**
      * {@code env = ENTER(frame of f)}, then PUSH of the first j = min(leading lambdas of f, n) arguments X[xa ..]:
-     * {@code body_j reads the i-th ? a[i] : HOLE} (ISA 4.3.1, B6). Leaves the body in {@code m.x2.body}, the
-     * environment at {@code m.envBase} with length {@code m.x2.en}.
+     * {@code body_j reads the i-th ? a[i] : HOLE} (ISA 4.3.1, B6). The body under the j lambdas is in
+     * {@code m.x2.body} ({@link #peel}); leaves the environment at {@code m.envBase} with length {@code m.x2.en}.
      * @return j, or a signal
      */
-    private static int bind(Machine m, int f, int xa, int n) {
+    private static int bind(Machine m, int f, int xa, int j) {
         final int o = f << Layout.REC_SHIFT;
-        final int j = peel(m, m.vh[o + Layout.A], n);
         final long mask = m.terms.fvMask(m.x2.body);
         int en = Runs.enter(m, m.vh[o + Layout.B]);
         if (en < 0 || !m.ensureEnv(j)) {
@@ -1131,8 +1338,7 @@ final class Eval {
         if (blk == 0) {
             return 0;
         }
-        int j = Math.min(peel(m, m.vh[(clo << Layout.REC_SHIFT) + Layout.A], n), Code.arityOf(m, blk));
-        return j >= 1 && Code.hasEntry(m, blk, j - 1) ? j : 0;
+        return Code.entryFor(m, blk, n);
     }
 
     // =====================================================================================================
@@ -1190,7 +1396,8 @@ final class Eval {
             return m.fault(MachineErrors.E_MEM);
         }
         // call EVAL / INFER(body) => 1
-        int r = kind == Layout.PI ? eval(m, body, m.envBase, en, ls, d + 1) : Infer.infer(m, body, m.envBase, en, ls, Op.ONLY, d + 1);
+        int r = kind != Layout.PI ? Infer.infer(m, body, m.envBase, en, ls, Op.ONLY, d + 1)
+                : (feat(m) & X_NOBODY) != 0 ? evalNT(m, body, m.envBase, en, ls, d + 1) : eval(m, body, m.envBase, en, ls, d + 1);
         int memo = reads0 ? 0 : pi;
         return r >= SIG ? m.sig2(r, K_INST_1, memo, ep0) : k_inst1(m, memo, ep0, r, d);
     }
@@ -1337,7 +1544,9 @@ final class Eval {
             case Op.K_EVAL:
                 return eval(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
             case K_EVAL_IN:
-                return evalIn(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
+                return evalInAt(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], 0);
+            case K_EVAL_NB:
+                return evalNT(m, w[p], w[p + 1], w[p + 2], w[p + 3], 0);
             case K_EVAL_HEAD:
                 return k_evalHead(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], r, 0);
             case K_EVAL_HEADF:
@@ -1364,6 +1573,8 @@ final class Eval {
                 return k_apply1(m, w[p], w[p + 1], w[p + 2], r, 0);
             case K_APPLY_2:
                 return k_apply2(m, w[p], w[p + 1], w[p + 2], w[p + 3], r, 0);
+            case K_APPLY_3:
+                return k_apply3(m, w[p], w[p + 1], w[p + 2], w[p + 3], w[p + 4], w[p + 5], r, 0);
             case Op.K_INST:
                 return inst(m, w[p], w[p + 1], 0);
             case K_INST_1:

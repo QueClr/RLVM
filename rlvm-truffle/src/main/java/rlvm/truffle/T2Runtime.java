@@ -109,7 +109,7 @@ final class T2Runtime {
             }
             Map<String, String> opts = new LinkedHashMap<>();
             opts.put("engine.BackgroundCompilation", "true");
-            opts.put("engine.CompilerThreads", "1");
+            opts.put("engine.CompilerThreads", Integer.toString(s.threads));
             opts.put("engine.MultiTier", "false");
             opts.put("engine.SingleTierCompilationThreshold", "2000000000");
             opts.put("engine.DynamicCompilationThresholds", "false");
@@ -181,29 +181,58 @@ final class T2Runtime {
         return true;
     }
 
-    /** Runs on the compiler thread: the compile cost of a block is that thread's CPU time between start and end. */
+    /**
+     * Runs on the compiler thread: the compile cost of a block is that thread's CPU time between start and end.
+     * Nothing here may fail a compilation: every callback catches whatever its bookkeeping throws.
+     */
     private static final class Listener implements OptimizedTruffleRuntimeListener {
+        private static BlockRoot rootOf(OptimizedCallTarget target) {
+            return target.getRootNode() instanceof BlockRoot ? (BlockRoot) target.getRootNode() : null;
+        }
+
         @Override
         public void onCompilationStarted(OptimizedCallTarget target, AbstractCompilationTask task) {
-            if (target.getRootNode() instanceof BlockRoot) {
-                ((BlockRoot) target.getRootNode()).compileStartCpu = Cpu.threadNanos();
+            try {
+                BlockRoot root = rootOf(target);
+                if (root != null) {
+                    root.compileStartCpu = Cpu.threadNanos();
+                }
+            } catch (Throwable t) {
+                // bookkeeping only
             }
         }
 
         @Override
         public void onCompilationSuccess(OptimizedCallTarget target, AbstractCompilationTask task, GraphInfo graph, CompilationResultInfo result) {
-            if (target.getRootNode() instanceof BlockRoot) {
-                BlockRoot root = (BlockRoot) target.getRootNode();
-                long cpu = root.compileStartCpu == 0 ? -1 : Cpu.threadNanos() - root.compileStartCpu;
-                root.owner.installed(root, target, cpu, result == null ? 0 : result.getTargetCodeSize(), graph == null ? 0 : graph.getNodeCount());
+            BlockRoot root = rootOf(target);
+            if (root == null) {
+                return;
+            }
+            long cpu = -1;
+            int size = 0;
+            int nodes = 0;
+            try {
+                cpu = root.compileStartCpu == 0 ? -1 : Cpu.threadNanos() - root.compileStartCpu;
+                size = result == null ? 0 : result.getTargetCodeSize();
+                nodes = graph == null ? 0 : graph.getNodeCount();
+            } catch (Throwable t) {
+                // the compiler's info classes are not accessible: no sizes in the report
+            }
+            try {
+                root.owner.installed(root, target, cpu, size, nodes);
+            } catch (Throwable t) {
+                T2Engine.warn("installing " + root + " failed (" + t + "); the block stays in the stepper");
             }
         }
 
         @Override
         public void onCompilationFailed(OptimizedCallTarget target, String reason, boolean bailout, boolean permanentBailout, int tier,
                 Supplier<String> lazyStackTrace) {
-            if (target.getRootNode() instanceof BlockRoot) {
-                BlockRoot root = (BlockRoot) target.getRootNode();
+            try {
+                BlockRoot root = rootOf(target);
+                if (root == null) {
+                    return;
+                }
                 long cpu = root.compileStartCpu == 0 ? 0 : Cpu.threadNanos() - root.compileStartCpu;
                 String detail = reason;
                 if (root.owner.settings.trace && lazyStackTrace != null) {
@@ -214,22 +243,32 @@ final class T2Runtime {
                     }
                 }
                 root.owner.failed(root.rec, "compilation failed: " + detail, cpu);
+            } catch (Throwable t) {
+                // bookkeeping only
             }
         }
 
         @Override
         public void onCompilationDeoptimized(OptimizedCallTarget target, Frame frame, String reason) {
-            if (target.getRootNode() instanceof BlockRoot) {
-                BlockRoot root = (BlockRoot) target.getRootNode();
-                root.owner.deoptimized(root, String.valueOf(reason));
+            try {
+                BlockRoot root = rootOf(target);
+                if (root != null) {
+                    root.owner.deoptimized(root, String.valueOf(reason));
+                }
+            } catch (Throwable t) {
+                // bookkeeping only
             }
         }
 
         @Override
         public void onCompilationInvalidated(OptimizedCallTarget target, Object source, CharSequence reason) {
-            if (target.getRootNode() instanceof BlockRoot) {
-                BlockRoot root = (BlockRoot) target.getRootNode();
-                root.owner.invalidated(root, String.valueOf(reason));
+            try {
+                BlockRoot root = rootOf(target);
+                if (root != null) {
+                    root.owner.invalidated(root, String.valueOf(reason));
+                }
+            } catch (Throwable t) {
+                // bookkeeping only
             }
         }
     }

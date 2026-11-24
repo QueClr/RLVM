@@ -55,6 +55,8 @@ class RealExportTest {
         Lv.Names n = e.names;
         int withIMax = 0;
         int nonIdempotent = 0;
+        int respelled = 0;
+        int rebuildBreaks = 0;
         int maxDepth = 0;
         int maxParams = 0;
         Map<Integer, List<Integer>> classes = new HashMap<>();
@@ -71,6 +73,12 @@ class RealExportTest {
             if (s.normalize(nf) != nf) {
                 nonIdempotent++;
             }
+            // add_inductive rebuilds every node above a parameter (OfficialRebuildGoldenTest): how many levels
+            // of a real export get another spelling, and for how many the official kernel would not identify the two
+            int rebuilt = OfficialRebuildGoldenTest.rebuild(s, l);
+            respelled += rebuilt != l ? 1 : 0;
+            rebuildBreaks += s.isEquivOfficial(l, rebuilt) ? 0 : 1;
+            assertTrue(s.isEquiv(l, rebuilt), label + ": rebuild changed the value of " + s.toString(l));
             // complete form
             int c = s.canonId(l);
             assertTrue(c > 0, label + ": no canonical form for " + s.toString(l));
@@ -158,9 +166,11 @@ class RealExportTest {
         assertEquals(fresh.size(), ov.baseSize());
         return String.format(
                 "%-12s %6d levels, %5d with imax, max depth %d, max params %d, %5d classes, %d classes split by the official"
-                        + " normal form, %d levels with normalize(normalize(l)) != normalize(l), %d param checks;"
+                        + " normal form, %d levels with normalize(normalize(l)) != normalize(l), %d respelled by the rebuild of"
+                        + " add_inductive, %d of them no longer equivalent for the official kernel, %d param checks;"
                         + " load %.0f ms, checks %.0f ms, freeze %.2f ms (store %d -> %d levels), newOverlay %.3f ms",
-                label, e.levels.size(), withIMax, maxDepth, maxParams, classes.size(), officialSplits, nonIdempotent, checked,
+                label, e.levels.size(), withIMax, maxDepth, maxParams, classes.size(), officialSplits, nonIdempotent, respelled,
+                rebuildBreaks, checked,
                 (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t4 - t3) / 1e6, sizeBeforeFreeze, fresh.size(), (t5 - t4) / 1e6);
     }
 

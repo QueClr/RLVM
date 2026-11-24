@@ -9,6 +9,11 @@ import java.util.Map;
  * ({@code -X machine.switches=code,casetrees,t2}); these only tune it.
  *
  * <pre>
+ * rlvm.t2.mode=cpu|warm  the governor's profile; the single settings below override it.
+ *                      cpu (default): the governor of ISA 8.5 - total CPU time is the metric, compilation is
+ *                        charged: rent 1.0, share 0.02, max 256, period 1024, one compiler thread;
+ *                      warm: the steady state is the metric and warm-up is not charged (OWNER-NOTES 12):
+ *                        rent 0.05, share 1.0 (no cap), max 4096, period 256, two compiler threads.
  * rlvm.t2.rent=F       rent-to-own factor: a block is compiled once the CPU time it has spent in the base
  *                      tier is at least F times its estimated compile cost (default 1.0; ISA 8.5)
  * rlvm.t2.share=F      governor: compiler CPU time (spent + estimated for the candidate) at most this share
@@ -17,6 +22,7 @@ import java.util.Map;
  * rlvm.t2.maxInstr=N   a block of more than N instructions is never promoted (default 256: Graal refuses
  *                      to install the code of very large blocks, "code is too large")
  * rlvm.t2.period=N     heat listener period: entries of one block by one worker (default 1024)
+ * rlvm.t2.threads=N    compiler threads of the Truffle engine (default 1; ISA 8.5)
  * rlvm.t2.timing=N     one entry in N is timed by the machine's heat accounting (default 64)
  * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps)
  * rlvm.t2.cost0=MS, rlvm.t2.cost1=MS   compile cost model before anything was compiled: cost0 + cost1 per
@@ -38,6 +44,7 @@ final class Settings {
     final int max;
     final int maxInstr;
     final int period;
+    final int threads;
     final int timing;
     final int at;
     final double cost0Ms;
@@ -54,11 +61,17 @@ final class Settings {
     static final int ROLE_SUB_BIT = 1 << 15;
 
     Settings() {
-        rent = dbl("rlvm.t2.rent", 1.0);
-        share = dbl("rlvm.t2.share", 0.02);
-        max = Integer.getInteger("rlvm.t2.max", 256);
+        String mode = System.getProperty("rlvm.t2.mode", "cpu");
+        boolean warm = mode.equals("warm");
+        if (!warm && !mode.equals("cpu")) {
+            throw new IllegalArgumentException("rlvm.t2.mode=" + mode + ": cpu or warm");
+        }
+        rent = dbl("rlvm.t2.rent", warm ? 0.05 : 1.0);
+        share = dbl("rlvm.t2.share", warm ? 1.0 : 0.02);
+        max = Integer.getInteger("rlvm.t2.max", warm ? 4096 : 256);
         maxInstr = Integer.getInteger("rlvm.t2.maxInstr", 256);
-        period = Math.max(1, Integer.getInteger("rlvm.t2.period", 1024));
+        period = Math.max(1, Integer.getInteger("rlvm.t2.period", warm ? 256 : 1024));
+        threads = Math.max(1, Integer.getInteger("rlvm.t2.threads", warm ? 2 : 1));
         timing = Integer.getInteger("rlvm.t2.timing", 64);
         at = Integer.getInteger("rlvm.t2.at", 0);
         cost0Ms = dbl("rlvm.t2.cost0", 3.0);

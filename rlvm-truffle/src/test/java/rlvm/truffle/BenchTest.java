@@ -43,7 +43,7 @@ class BenchTest {
                     }
                     assertEquals(accepted, r.accepted, "units accepted, configuration " + k + " pass " + p);
                     if (k == 1) {
-                        settle(h.t2());
+                        Harness.settle(h.t2());
                     }
                 }
             }
@@ -73,17 +73,6 @@ class BenchTest {
             m = Math.min(m, a[i]);
         }
         return a.length > 1 ? m : a[0];
-    }
-
-    /** Waits until no compilation of the tier is pending (at most 60 s), so that the next pass is steady state. */
-    static void settle(T2Engine e) throws InterruptedException {
-        if (e == null) {
-            return;
-        }
-        long deadline = System.nanoTime() + 60_000_000_000L;
-        while (e.promotedCount() > e.installedCount() + e.failedCount() && System.nanoTime() < deadline) {
-            Thread.sleep(20);
-        }
     }
 
     /** A tool: activations per file of a directory with K1 on, to choose test inputs. -Dt2.dir=work/arena-site/tests/good/tutorial */

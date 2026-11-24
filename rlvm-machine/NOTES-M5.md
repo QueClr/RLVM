@@ -70,3 +70,68 @@ Deviations from `docs/design/ISA.md` (revision 2) and things a caller should kno
 | F8 | `staticProof`: TRI_NO for SORT, PI, PII and literals; for a constant applied to exactly `arity` arguments TRI_YES / TRI_NO from `rlvl[ls]` (`isAlwaysZero` / `isNeverZero`); everything else TRI_UNKNOWN. All three answers are TRI_UNKNOWN / 0 while the switch is off or the session is strict | ISA 3.5 table, 14.2 |
 | F9 | `Decl` derives the record of a declaration it accepted (`Facts.onAccept`); a signal out of that derivation is dropped (the stacks are restored) and the declaration stays accepted | ISA 4.5.6: "an optimisation only" |
 | F10 | Manifest mutation tests (`M5ManifestTest`): the three exports, each rebuilt (a) with the family `Owner` as axioms in place of the inductive type with the stuck sort, (b) with the sort's definition replaced by an axiom, (c) variant (a) without the last steps of the exploit; verdicts compared with `leanchecker --from-export` with the switch on and off | ISA 3.5 says "rebuilt with an axiom family in place of the stuck sort" without fixing the construction; (a) makes the machine itself check the family and derive its facts, (b) makes the sort stuck everywhere, (c) gives one mutant the official checker ACCEPTS (`proj-of-subst-prop`). As long as no consumer reads the prop mask or the static PROOF (M4's step 2), the verdict rows cannot fail because of a fact; the record rows (`rlvl` of the constructor is UNKNOWN) test the rule itself |
+
+## Wave 6 (2026-11-24): where inference spends, and four shortcuts
+
+Tools of this section: `work/m5/` (`bench.sh` = `M5Bench` in-process on the sandbox classes with counters; `attr.sh` = the same
+on an INSTRUMENTED COPY, `work/m5/attr`, that attributes records and run words to the call sites of `Infer` - never published;
+`prof.sh` + `tools/jfrsite.py` = JFR samples by the nearest enclosing judgment; `nbuild.sh` = a CE native image `-O3` with the
+sandbox's machine jar and the integrator's pipeline jars; `m.py` + `batch*.sh` = measured rows in the arena-shaped container
+under the measurement lock, `work/m5/measure.tsv`). Counts are exact (in-process, one thread); CPU times are from the container.
+
+### What the measurements say first (Init, `warm,gated,expect`, 4 MiB sessions)
+
+| Question | Answer |
+|---|---|
+| Who makes the records? (443 per unit) | 59% are made inside `CONV` calls started by argument checks (`TWALK`'s `CONV(Tt, D)`: 246 per unit; `CHECK`'s 14). 78.8% of those conversions make no record; 5.4% of them (83,000 calls: `decide`, `omega` reflection, `Nat.le` unfolding - kernel work no inference rule can avoid) make 90% of it and half of all ticks of the run. Inference proper makes about 180 per unit: tabling records of INFER 47, telescope results (codomain EVAL / INST) 41, telescope domains 17, argument values 16, `CHECK` lambda `INST` 11, PII / PI closures 8, CONST 6, FVAR 4 |
+| Where is the CPU? (JFR on the JVM, nearest enclosing judgment) | IN 42% of the samples, RD 36%, CV 11%, loader etc. 11%. Inside IN: EVAL of telescope domains and results (`twEval`) 11.9%, ARGV of arguments 6.0%, the tabling probe of INFER (PRUNE 3.4% + SUSP record 3.0%), spine copy 2.7%, `CHECK` lambda `INST` 1.7%, `inferConst` 1.5% |
+| How often is `Tt == D`? | 11.24 M argument checks: 88.6% identical records. 2.79 M of the domains are open non-leaf terms that needed an environment and an EVAL; a structural MATCH against `Tt` answers 2.13 M of them (97% of the identical ones) |
+| Does the tabling probe pay? | Yes: 6.24 M probes on APP nodes in CHECKED mode, 4.11 M hits (66%); but each hit costs a PRUNE and a record probe |
+| What can a shared check fact save? | CHECKED inference of closed, level-parameter-free terms of EARLIER units: 97,088 outermost calls, 1.13 M ticks (2.0% of the run), 0.59 M records |
+| What does a lazy ARGV save? | Little: of 6.16 M argument values, 3.10 M are atoms; of the 3.06 M others only 0.71 M are read by later domains alone (the result reads the rest) |
+
+So the target "records per declaration down by a third" cannot come from inference rules: inference proper owns 41% of the
+records and the rest is conversion work started by the official comparison of an argument's type with its domain.
+
+### M: MATCH instead of building a telescope domain (switch `m5a`; ISA 4.4.4, 4.5.4, B5 of 6.3; R07 1.8 `inst_eq`)
+
+| # | Decision | Reason |
+|---|---|---|
+| M1 | In TWALK's telescope mode (I15), CHECKED: before the domain of binder i is built, `tmatch(dom_i, g, Tt)` decides "`EVAL(dom_i, ENTER(F0) ++ g[K0 .. i), PLS)` is convertible with `Tt`" over the registers of the running TWALK; the environment is never built. T: the argument is accepted for this binder. Unknown (never a refutation): the domain is built and compared as before (`Tt == D`, else `CONV`), so `E_APP_MISMATCH` is raised exactly where it was | the complete procedure stays the fall-through (6.3 rule 3); the match is M7's `Match` generalised to an environment that has a frame part (`F0`) and to suspensions |
+| M2 | Rules of `tmatch` (pattern node against value, the value seen through PEEK): variable: the binding (through PEEK) is the same record; sort: equivalent levels after LSUB; constant: same row, equivalent level lists; small literal: the immediate; application: a NEU with as many arguments whose head matches (a constant by row and levels, a variable by identity with the NEU's head) and whose arguments match pairwise; lam / pi node: the closure of that very node, ls' and a near frame that agrees with the environment on the node's mask; an unevaluated suspension: the suspension of that very term under an agreeing frame. At most 64 pattern nodes, nesting 16; HOLE bindings, far frames, NSUC, a NEU that EVAL would extend: unknown | T by congruence (R02 8.6) or by I-ID (the record EVAL would return). No judgment is called, no record is made, only levels are instantiated |
+| M3 | Only non-leaf domain terms (app, pi, lam) are offered; a variable domain is read from its slot and a constant is one probe, as before. Value mode keeps `DOM(P)` (a memo word) | measured: 3.19 M domains offered on Init, 2.20 M answered |
+| M4 | `shortcheck` (ISA 5.5): a T is audited by building the domain and `Debug.shortCheck(Tt, D, T)` (the complete CONV with the switches off) | a failed audit is `E_AUDIT` |
+| M5 | Not done: the expected-type return for an application (ISA 4.5.4 "untabled t: MATCH(res, g, V) succeeds: ret V without building R"). Built and removed: it never fires. `CHECK` is only called on declaration roots and on bodies of binders, and the gate (T4) tables every BODY node, so no `CHECK` of an untabled application exists (0 of 1.09 M `CHECK` calls on Init). The form that would fire is pattern against pattern for an untabled application ARGUMENT (rpylean's `inst_eq_inst`): a probe on Init finds 383,000 result builds it would save (29% of the application results built at telescope ends, 4% of all EVAL calls). Not built | recorded as the next step; the gain is bounded by those numbers |
+
+### P: shared check facts (switch `pchk`; ISA 5.1 last-but-one row, 5.3; the store's `SharedFacts.CHECKED` bit)
+
+| # | Decision | Reason |
+|---|---|---|
+| P1 | Set: when a CHECKED INFER of a term completes (`INFER[1]`, which a signal never reaches) and its stamp is PERM (closed, no level parameter) and the term is in the export region (`0 < t < GEN_BASE`), the bit of `t` is set. Overlay terms (decoded proof blocks) and generated terms have no bit. The byte is read before it is written (a set bit dirties no shared cache line) | ISA 5.1 "closed shared term passed check mode"; the publication rule (only export ids) |
+| P2 | Use: a CHECKED INFER of such a term whose bit is set, in a declaration whose roots passed the summaries (`Ext.trusted`), runs the node's chain in ONLY mode (same value: both modes return the same record) and stores the type with stamp PERM. A lambda returns its PII at once. `CHECK` of a lam / let node whose bit is set takes the generic rule (INFER + CONV) instead of B9 | the conditions check mode adds are declaration-relative (5.3): level parameters (none here) and visibility, which the root summary of the using declaration discharges (`depMax` of a sub-term never exceeds its root's; a literal's `depMax` covers its prerequisite names, RECONCILIATION section 2) |
+| P3 | Never read in strict mode (no switch) or in an untrusted declaration; `shortcheck` runs the CHECKED chain after all and turns a kernel error in it into `E_AUDIT` | fail closed |
+| P4 | Measured potential and effect on Init: 60,390 bits set, 117,875 CHECKED inferences answered in ONLY mode; ticks 56.03 M -> 54.87 M (-2.1%), records 442.8 -> 433.8 per unit. The bit only helps terms of the export region: theorem values are proof blocks decoded into the worker's overlay and have no shared id | the upper bound was 1.13 M ticks |
+
+### J: the joint telescope check of DECL (switch `m5b`; ISA 4.5.2 last comment, R07 1.8)
+
+| # | Decision | Reason |
+|---|---|---|
+| J1 | `Decl.joint`: while the declared type is a Pi node, the value a lam node and both have the SAME domain term (node id): `u_i = ENSORT(INFER(A_i, CHECKED))`, `x_i = OPEN(EVAL(A_i))`, once for both telescopes. Then `u = ENSORT(INFER(rest of the type, CHECKED))`, the sort of the type is `mkImax(u_1, .. mkImax(u_k, u))`, a theorem's must be always zero (before the value is looked at, as `add_theorem`), then `CHECK(rest of the value, env, EVAL(rest of the type, env))`, CLOSE all. The telescope state is in the driver's locals (H6) | the type part is INFER.pi verbatim; the value part is B9's lam rule with `D == DOM(W)` by construction and `INST(W, x)` = EVAL of the rest of the Pi under `env + x` (mask contract). Officially Pi against Pi is decided binder by binder (R02 8.1), so with identical domains the comparison is `typeof(v)` against `T` under the same variables. With no joint binder the calls are those of `phases` |
+| J2 | Only identical node ids count as "the same domain" (the loader shares equal terms; hand-built fixtures do not, so `M5Step1Test.initPrelude` tests it on a real export) | no comparison is made; anything else is left to `CHECK` |
+| J3 | Measured on Init: 220,353 joint binders (3.8 per declaration with a value); ticks 56.03 M -> 53.35 M (-4.8%), records 442.8 -> 430.1 per unit, CHECK 1.09 M -> 0.87 M, INST 1.19 M -> 0.97 M, DOM 1.48 M -> 1.29 M | each joint binder saves a tabling probe of the lambda and of its domain, `WHNF(V)`, `DOM(W)`, the PI closure of the rest of the telescope and its frame |
+
+### C: INFER's front cache (no switch yet: system property `rlvm.machine.m5ic=true`; ISA 12 open question 6)
+
+| # | Decision | Reason |
+|---|---|---|
+| C1 | A direct-mapped, lossy table (2^10 cells of 8 words; `rlvm.machine.m5ic.log2` for sweeps) in front of INFER's tabling probe. A cell holds (term, session epoch, frame, ls', TYPE, TSTAMP) of a tabling record whose TYPE is stored; its index is a hash of the term and of the binding of the innermost variable the term reads. A query whose term, ls' and epoch match and whose environment agrees with the cell's frame on every index of the term's mask (popcount comparisons, no hash) is answered under the validity rule of 5.3; anything else takes PRUNE and the record probe as before. Cells are written when INFER stores a type and when the probe hits | a memo hit cost a PRUNE (hash of the whole frame, probe, comparison) and a record probe (ISA "a memo hit costs almost what it saves"). The cache is exact: the frame comparison does not depend on how the environment was built. Far masks are not cached. Off in strict mode and in every debug mode (the audits see the canonical path) |
+| C2 | It changes no result and no record. Inside one session it changes no tick either (`M5Step1Test.frontCacheChangesNothing`); in warm sessions its bytes count in the footprint (32 KiB), so resets move slightly | honest footprint |
+| C3 | Measured on Init (2^12 cells): 4.13 M of the 4.14 M tabling hits are answered by the cache | the hit rate is not the limit; whether it pays is a CPU measurement (below) |
+
+### F: facts are visible (ISA 3.5; `facts`)
+
+| # | Decision | Reason |
+|---|---|---|
+| F11 | Cost: `Infer.Ext.sigdTicks` = ticks between the start of a SIGD derivation and its publication (the stamp travels in the record buffer, two words), lazy derivations and those of DECL alike; `Machine.factsDerived` / `factsNone` are now written (they were never incremented, so the statistics always showed 0) | "make their derivation cost visible" |
+| F12 | Use: `Ext.factUse[Facts.USE_*]`, counted while `m.stats`: prop-mask queries / with a bit, unread-mask queries on a derived record / with a bit, static-PROOF queries on a constant head / answered YES / answered NO | "their use measurable"; requested of M6 for `dumpStats` |
+| F13 | Measured on Init (`warm,gated,expect,facts`): 58,576 records derived in 121,541 ticks = **0.23% of all ticks** (the bound is 2%), 0 F_NONE; static PROOF 1.08 M queries: 3,678 yes, 947,262 no (87.6% definite); prop mask 945,213 queries, 26,405 with a bit; unread mask 314,944 queries, 6,507 with a bit. Effect of the consumers (M4): PIRR 1.15 M -> 0.17 M, VTYPE 1.65 M -> 0.62 M, ISPROP 83 k -> 33 k, ticks 56.03 M -> 55.12 M | the derivation is cheap because the type telescope was just checked in the same session (every INFER is a memo hit) |

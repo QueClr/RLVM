@@ -9,6 +9,7 @@ import rlvm.store.DeclTable;
 import rlvm.store.IntLists;
 import rlvm.store.Kind;
 import rlvm.store.Node;
+import rlvm.store.SharedFacts;
 import rlvm.store.Specials;
 import rlvm.store.TermOps;
 import rlvm.store.Terms;
@@ -70,6 +71,31 @@ final class Infer {
         int[] factBuf;
         /** Fact records this session derived (statistics). */
         long factsDerived;
+        /** Ticks spent in SIGD derivations, the lazy ones and those of DECL on acceptance (the cost of the facts; always counted). */
+        long sigdTicks;
+        /** Queries of the fact consumers by kind ({@code Facts.USE_*}; counted while {@code m.stats}). */
+        final long[] factUse = new long[Facts.USE_COUNT];
+        /**
+         * INFER's front cache (NOTES-M5 C1): a direct-mapped, lossy table in front of the tabling probe. A cell
+         * holds (term, epoch, frame, ls', type, stamp) of a tabling record whose TYPE is stored; a query that
+         * finds its term there and whose environment agrees with the cell's frame on the term's mask is
+         * answered without PRUNE and without the probe for the SUSP record. Null: off.
+         */
+        int[] ic;
+        /** Statistics ({@code m.stats}): INFER queries answered by the front cache. */
+        long icHits;
+        /** The store's shared facts (PCHK, ISA 5.1; SW_PCHK); looked up at first use. */
+        SharedFacts shared;
+        /** Statistics ({@code m.stats}): CHECKED inferences answered in ONLY mode because of PCHK; PCHK bits set by this session. */
+        long pchkHits;
+        long pchkSets;
+        /** Statistics ({@code m.stats}): binders that the joint telescope check of DECL opened once for type and value (SW_M5B). */
+        long jointBinders;
+        /** Pattern nodes the running MATCH may still visit ({@link #tmatch}). */
+        int tmBudget;
+        /** Statistics ({@code m.stats}): telescope domains offered to MATCH / answered by it (SW_M5A). */
+        long matchTried;
+        long matchHit;
 
         /** Session reset (ISA 1.6): forget everything, in O(used). */
         void reset(Machine m) {
@@ -87,11 +113,22 @@ final class Infer {
             trusted = false;
             declLparams = -1;
             firstTerm = 0;
+            if (ic == null && icWanted && !m.strict) {
+                ic = new int[(1 << Integer.getInteger("rlvm.machine.m5ic.log2", IC_LOG2)) << IC_SHIFT]; // epoch 0: no cell is valid
+            }
         }
+
+        /**
+         * The front cache is an experiment without a switch of its own yet (requested of M6): it is on iff the
+         * system property {@code rlvm.machine.m5ic} is {@code true} (read when the session is made), never in
+         * strict mode. It changes no result, no record and no tick: it only answers what the tabling probe
+         * would answer.
+         */
+        final boolean icWanted = Boolean.getBoolean("rlvm.machine.m5ic");
 
         /** Bytes in use of this package's own session tables (part of the footprint, ISA 1.6). */
         long bytes() {
-            return 0;
+            return ic == null ? 0 : 4L * ic.length;
         }
     }
 
@@ -294,6 +331,82 @@ final class Infer {
         return 0;
     }
 
+    // ---- INFER's front cache: (term, frame) -> TYPE without PRUNE and without the record probe (NOTES-M5 C1) ----
+
+    /** Cells of the front cache: 2^IC_LOG2 (32 bytes each); {@code rlvm.machine.m5ic.log2} overrides it for sweeps. */
+    private static final int IC_LOG2 = 10;
+    private static final int IC_TERM = 0;
+    private static final int IC_EPOCH = 1;
+    private static final int IC_FRAME = 2;
+    private static final int IC_LS = 3;
+    private static final int IC_TYPE = 4;
+    private static final int IC_STAMP = 5;
+    private static final int IC_SHIFT = 3; // 8 words per cell
+
+    /** The cell of term {@code t} whose innermost variable read is bound to {@code v} (0 for a closed term). */
+    private static int icCell(int[] ic, int t, int v) {
+        int h = (t * 0x9E3779B1) ^ (v * 0x85EBCA6B);
+        return ((h ^ (h >>> 15)) << IC_SHIFT) & (ic.length - 1 & -(1 << IC_SHIFT));
+    }
+
+    /**
+     * The front cache's answer to INFER(t, env, ls', mode): the TYPE of the tabling record of
+     * {@code (t, PRUNE(env, mask), ls')} if the cell of t holds that record's frame, i.e. a frame that agrees
+     * with the environment on every index of the mask (the frame of a cell was pruned with the same mask, so
+     * it has the same length and HOLE elsewhere), under the validity rule of ISA 5.3 ({@link #hit}). 0 = no
+     * answer: the caller takes the tabling probe. Exact: nothing is assumed about how the environment was built.
+     */
+    private static int icGet(Machine m, int[] ic, int t, int ls1, int eb, int en, long mask, int mode) {
+        int[] es = m.es;
+        int top = eb + en - 1;
+        int c;
+        if (mask == 0) {
+            c = icCell(ic, t, 0);
+        } else {
+            if (64 - Long.numberOfLeadingZeros(mask) > en) {
+                return 0; // PRUNE reports it
+            }
+            c = icCell(ic, t, es[top - Long.numberOfTrailingZeros(mask)]);
+        }
+        if (ic[c + IC_TERM] != t || ic[c + IC_EPOCH] != m.epoch || ic[c + IC_LS] != ls1
+                || (mode != Op.ONLY && ic[c + IC_STAMP] < m.gen)) {
+            return 0;
+        }
+        if (mask != 0) {
+            int[] rs = m.rs;
+            int fb = ic[c + IC_FRAME] + Layout.RUN_H + 63 - Long.numberOfLeadingZeros(mask);
+            for (long r = mask; r != 0; r &= r - 1) {
+                int idx = Long.numberOfTrailingZeros(r);
+                if (rs[fb - idx] != es[top - idx]) {
+                    return 0;
+                }
+            }
+        }
+        return ic[c + IC_TYPE];
+    }
+
+    /** Enters the stored TYPE of tabling record {@code s} (term t, a near frame) into the front cache. */
+    private static void icPut(Machine m, int[] ic, int s, int t, int type, int stamp) {
+        long mask = m.terms.fvMask(t);
+        if (mask < 0) {
+            return;
+        }
+        int o = s << Layout.REC_SHIFT;
+        int frame = m.vh[o + Layout.B];
+        int v = 0;
+        if (mask != 0) {
+            int len = 64 - Long.numberOfLeadingZeros(mask);
+            v = m.rs[frame + Layout.RUN_H + len - 1 - Long.numberOfTrailingZeros(mask)];
+        }
+        int c = icCell(ic, t, v);
+        ic[c + IC_TERM] = t;
+        ic[c + IC_EPOCH] = m.epoch;
+        ic[c + IC_FRAME] = frame;
+        ic[c + IC_LS] = m.vh[o + Layout.C];
+        ic[c + IC_TYPE] = type;
+        ic[c + IC_STAMP] = stamp;
+    }
+
     /**
      * The check stamp of a CHECKED result for term {@code t} (ISA 5.3): PERM if the term is closed and has no
      * level parameter (nothing declaration-relative can be wrong with it later), else the generation.
@@ -325,30 +438,55 @@ final class Infer {
             return inferLeaf(m, t, kind, reg[o + Node.W_A], eb, en, ls, mode, d); // 1. inline answers
         }
         int ls1 = (hdr & Node.F_HAS_LPARAM) != 0 ? ls : 0;
-        int frame = 0;
-        int s = 0;
         boolean tab = tabled(m, t, hdr);
         if (tab || kind == Kind.LAM) {
             long mask = (reg[o + Node.W_MASK_LO] & 0xFFFFFFFFL) | ((long) reg[o + Node.W_MASK_HI] << 32);
-            frame = Runs.prune(m, eb, en, mask);
-            if (frame >= SIG) {
-                return frame;
-            }
-            if (kind == Kind.LAM && mode == Op.ONLY) {
-                return Values.mkPii(m, t, frame, ls1); // ISA 4.5.1 lam, ONLY: nothing opened, nothing visited
-            }
-            if (tab) {
-                s = suspRec(m, t, frame, ls1);
-                if (s >= SIG) {
-                    return s;
+            return inferProbe(m, t, hdr, kind, tab, mask, ls1, eb, en, ls, mode, d);
+        }
+        return inferMiss(m, t, hdr, kind, 0, 0, ls1, eb, en, ls, mode, d);
+    }
+
+    /**
+     * INFER of a tabled node or of a lambda (same judgment, same host depth): the front cache, PRUNE, the lambda
+     * in ONLY mode (ISA 4.5.1), the tabling probe (5.1, 5.3). A memo hit is no tick, no event, no frame.
+     */
+    private static int inferProbe(Machine m, int t, int hdr, int kind, boolean tab, long mask, int ls1, int eb, int en, int ls,
+            int mode, int d) {
+        int[] ic = m.x5.ic;
+        if (ic != null && tab && mask >= 0 && m.debug == 0 && !(kind == Kind.LAM && mode == Op.ONLY)) {
+            int ty = icGet(m, ic, t, ls1, eb, en, mask, mode);
+            if (ty != 0) {
+                if (m.stats) {
+                    m.x5.icHits++;
                 }
-                int ty = hit(m, s, mode);
-                if (ty != 0) {
-                    return m.debug != 0 ? inferHitSlow(m, s, t, eb, en, ls, mode, ty) : ty; // memo: no tick, no event, no frame
-                }
+                return ty; // the front cache: no PRUNE, no probe
             }
         }
-        return inferNode(m, t, kind, s, frame, ls1, eb, en, ls, mode, d);
+        int frame = Runs.prune(m, eb, en, mask);
+        if (frame >= SIG) {
+            return frame;
+        }
+        if (kind == Kind.LAM && mode == Op.ONLY) {
+            return Values.mkPii(m, t, frame, ls1); // ISA 4.5.1 lam, ONLY: nothing opened, nothing visited
+        }
+        int s = 0;
+        if (tab) {
+            s = suspRec(m, t, frame, ls1);
+            if (s >= SIG) {
+                return s;
+            }
+            int ty = hit(m, s, mode);
+            if (ty != 0) {
+                if (m.debug != 0) {
+                    return inferHitSlow(m, s, t, eb, en, ls, mode, ty);
+                }
+                if (ic != null) {
+                    icPut(m, ic, s, t, ty, m.vh[(s << Layout.REC_SHIFT) + Layout.M_TSTAMP]);
+                }
+                return ty;
+            }
+        }
+        return inferMiss(m, t, hdr, kind, s, frame, ls1, eb, en, ls, mode, d);
     }
 
     /**
@@ -369,12 +507,106 @@ final class Infer {
         return Debug.memoExit(m, Op.INFER, s, mode, hit, r);
     }
 
+    /** INFER of a non-leaf node that no memo answered: a PCHK hit (SW_PCHK) runs it in ONLY mode, else the node's chain. */
+    private static int inferMiss(Machine m, int t, int hdr, int kind, int s, int frame, int ls1, int eb, int en, int ls, int mode,
+            int d) {
+        if (mode == Op.CHECKED && (m.sw & Op.SW_PCHK) != 0 && (hdr & Node.F_HAS_LPARAM) == 0 && Node.looseRange(hdr) == 0
+                && pchkKnown(m, t)) {
+            return inferKnown(m, t, kind, s, frame, ls1, eb, en, ls, d); // PCHK: the closed term passed check mode before
+        }
+        return inferNode(m, t, kind, s, frame, ls1, eb, en, ls, mode, mode, d);
+    }
+
+    // ---- PCHK: shared check facts (ISA 5.1 "closed shared term passed check mode", 5.3; staging step 1, SW_PCHK) ----
+
+    /**
+     * PCHK(t): the store's {@code SharedFacts.CHECKED} bit of a term of the export region. It says that the
+     * closed, level-parameter-free term {@code t} passed INFER in CHECKED mode once, in some declaration, on
+     * some worker. That is a fact about the term and the declarations it mentions alone, and those are
+     * visible here: the bit is used only while the declaration being checked passed the root summaries
+     * ({@code Ext.trusted}: {@code depMax} of every sub-term of its roots is below its rank, ISA 5.3), and a
+     * literal's {@code depMax} covers its prerequisite names (RECONCILIATION section 2). A term without level
+     * parameter has no CHKLVL obligation. Overlay and generated terms have no bit.
+     */
+    private static boolean pchkKnown(Machine m, int t) {
+        Ext x5 = m.x5;
+        if (!x5.trusted || t <= 0 || t >= Node.GEN_BASE) {
+            return false;
+        }
+        SharedFacts sf = x5.shared;
+        if (sf == null) {
+            if (m.store == null) {
+                return false;
+            }
+            sf = m.store.facts();
+            x5.shared = sf;
+        }
+        return sf.isChecked(t);
+    }
+
+    /** PCHK for {@link #check}: is {@code t} a closed term without level parameter whose bit is set? */
+    private static boolean pchkTerm(Machine m, int t) {
+        int hdr = m.terms.header(t);
+        return (hdr & Node.F_HAS_LPARAM) == 0 && Node.looseRange(hdr) == 0 && pchkKnown(m, t);
+    }
+
+    /**
+     * Records PCHK(t) after a CHECKED inference of the closed, level-parameter-free term {@code t} completed
+     * (the caller is INFER[1], which a signal never reaches). The byte is read first: a set bit is not
+     * written again (no shared cache line is dirtied by a hit).
+     */
+    private static void pchkSet(Machine m, int t) {
+        if (t <= 0 || t >= Node.GEN_BASE || m.store == null) {
+            return;
+        }
+        Ext x5 = m.x5;
+        SharedFacts sf = x5.shared;
+        if (sf == null) {
+            sf = m.store.facts();
+            x5.shared = sf;
+        }
+        if (!sf.isChecked(t)) {
+            sf.setChecked(t);
+            if (m.stats) {
+                x5.pchkSets++;
+            }
+        }
+    }
+
+    /**
+     * INFER in CHECKED mode of a term whose PCHK bit is set: its type is computed as in ONLY mode (the same
+     * value, without visiting what was checked before) and stored with the check stamp PERM. Under
+     * {@code shortcheck} (ISA 5.5) the complete procedure runs instead and must not fail.
+     */
+    private static int inferKnown(Machine m, int t, int kind, int s, int frame, int ls1, int eb, int en, int ls, int d) {
+        if (m.stats) {
+            m.x5.pchkHits++;
+        }
+        if ((m.debug & Op.DBG_SHORTCHECK) != 0) {
+            return pchkAuditSlow(m, t, kind, s, frame, ls1, eb, en, ls);
+        }
+        if (kind == Kind.LAM) {
+            int pii = Values.mkPii(m, t, frame, ls1); // ISA 4.5.1 lam, ONLY: nothing opened, nothing visited
+            return pii >= SIG ? pii : k_infer1(m, s, t, Op.CHECKED, pii, d);
+        }
+        return inferNode(m, t, kind, s, frame, ls1, eb, en, ls, Op.ONLY, Op.CHECKED, d);
+    }
+
+    /** {@code shortcheck} of a PCHK hit: the CHECKED inference is run after all; a kernel error in it is an audit failure. */
+    private static int pchkAuditSlow(Machine m, int t, int kind, int s, int frame, int ls1, int eb, int en, int ls) {
+        int r = m.drive(inferNode(m, t, kind, s, frame, ls1, eb, en, ls, Op.CHECKED, Op.CHECKED, 0));
+        m.audits++;
+        return r == Op.ABORT ? m.fault(MachineErrors.E_AUDIT) : r;
+    }
+
     /**
      * INFER of a non-leaf node that the tabling record {@code s} (0 = untabled) did not answer: steps 2-4 of the
-     * entry step (same judgment, same host depth as {@link #infer}).
+     * entry step (same judgment, same host depth as {@link #infer}). {@code mode} is the mode the node's chain
+     * runs in, {@code smode} the mode of the query, under which the result is stored: they differ only for a
+     * PCHK hit (chain ONLY, query CHECKED).
      */
     private static int inferNode(Machine m, int t, int kind, int s, int frame, int ls1, int eb, int en, int ls,
-            int mode, int d) {
+            int mode, int smode, int d) {
         if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
             return m.sig; // 2. TICK
         }
@@ -382,10 +614,10 @@ final class Infer {
             m.call(Op.INFER); // 2b. call event
         }
         if (d > m.hostDepth) {
-            return m.spill5(Op.K_INFER, t, eb, en, ls, mode); // 3. too deep: the frame INFER[0]
+            return m.spill5(Op.K_INFER, t, eb, en, ls, smode); // 3. too deep: the frame INFER[0]
         }
         int r = inferChain(m, t, kind, frame, ls1, eb, en, ls, mode, d); // 4. body: the chain of this node kind
-        return r >= SIG ? m.sig3(r, K_INFER_1, s, t, mode) : k_infer1(m, s, t, mode, r, d);
+        return r >= SIG ? m.sig3(r, K_INFER_1, s, t, smode) : k_infer1(m, s, t, smode, r, d);
     }
 
     /** The chain of a non-leaf node (same judgment, same host depth). */
@@ -417,19 +649,41 @@ final class Infer {
      * stored type (it could only lose a check stamp).
      */
     static int k_infer1(Machine m, int s, int t, int mode, int r, int d) {
-        if (s != 0) {
+        if (mode == Op.CHECKED) {
+            storeChecked(m, s, t, r);
+        } else if (s != 0) {
             int o = s << Layout.REC_SHIFT;
-            if (mode == Op.CHECKED) {
-                int st = stamp(m, t);
-                int[] vh = m.vh;
-                vh[o + Layout.M_TYPE] = r;
-                vh[o + Layout.M_TSTAMP] = st;
-            } else if (m.vh[o + Layout.M_TYPE] == 0) {
-                m.vh[o + Layout.M_TYPE] = r;
-                m.vh[o + Layout.M_TSTAMP] = Layout.TSTAMP_ONLY;
+            if (m.vh[o + Layout.M_TYPE] == 0) {
+                storeType(m, s, t, r, Layout.TSTAMP_ONLY);
             }
         }
         return r;
+    }
+
+    /** TYPE and TSTAMP of tabling record {@code s} (I-MEMO), and the front cache's cell. */
+    private static void storeType(Machine m, int s, int t, int type, int stamp) {
+        int o = s << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        vh[o + Layout.M_TYPE] = type;
+        vh[o + Layout.M_TSTAMP] = stamp;
+        int[] ic = m.x5.ic;
+        if (ic != null) {
+            icPut(m, ic, s, t, type, stamp);
+        }
+    }
+
+    /** A CHECKED inference of {@code t} completed with type {@code r}: the record (if tabled) and PCHK (if the stamp is PERM). */
+    private static void storeChecked(Machine m, int s, int t, int r) {
+        int st = stamp(m, t);
+        if (s != 0) {
+            storeType(m, s, t, r, st);
+        }
+        if (st == Layout.TSTAMP_PERM && (m.sw & Op.SW_PCHK) != 0 && !m.erSeen) {
+            // the closed term passed check mode: a fact for every later declaration and worker. Not once the
+            // declaration has compared under eager reduction: the official answer of such a comparison depends
+            // on the declaration's history (M6-F26, S-F4 / S-F5), so nothing derived after it is shared
+            pchkSet(m, t);
+        }
     }
 
     /**
@@ -751,6 +1005,12 @@ final class Infer {
 
     /** The domain the argument's type is compared with: DOM(P), or the domain term of TW_PT under the telescope. */
     private static int twC(Machine m, int xb, int i, int p, int tt, int d) {
+        if (p == 0 && (m.sw & Op.SW_M5A) != 0) {
+            int q = twMatchDom(m, xb, i, tt); // B5: MATCH(dom_i, g, Tt): the domain is not built
+            if (q != Layout.F) {
+                return q >= SIG ? q : twE(m, xb, i, p, d);
+            }
+        }
         int ep0 = m.ep;
         int dom = p != 0 ? Eval.dom(m, p, d + 1) : twEval(m, xb, i, m.terms.a(m.X[xb + TW_PT]), d); // => TWALK[4]
         if (dom >= SIG) {
@@ -776,7 +1036,7 @@ final class Infer {
         if (tt != dom) {
             int saved = m.ER;
             if (isEagerReduce(m, m.X[xb + TW_ARGS + i])) {
-                m.ER = 1;
+                m.enterER(); // never a plain assignment: the facade must learn that this declaration used the mode (M6-F26)
             }
             int c = Conv.conv(m, tt, dom, d + 1); // call CONV(Tt, D) => TWALK[5]
             if (c >= SIG) {
@@ -954,6 +1214,253 @@ final class Infer {
         }
         int h = terms.a(f);
         return terms.kind(h) == Kind.CONST && terms.a(h) == er;
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // MATCH on the generic tier (ISA 4.4.4, 4.5.4 "Tt != D and not MATCH(dom_i, g, Tt)", B5 of 6.3; SW_M5A):
+    // compare the argument's type with the domain PATTERN instead of building the domain (rpylean's inst_eq,
+    // R07 1.8). The pattern is a term of the head's type telescope; its variables are the registers of the
+    // running TWALK: the environment ENTER(F0) ++ g[K0 .. end), which is never built.
+    // ---------------------------------------------------------------------------------------------------
+
+    /** Pattern nodes one MATCH may visit, and the nesting it follows; beyond either the answer is "unknown". */
+    private static final int TM_NODES = Op.MATCH_NODES;
+    private static final int TM_DEPTH = 16;
+
+    /**
+     * B5 for argument {@code i} of a TWALK in telescope mode: T if the argument's type {@code tt} is convertible
+     * with the domain of the binder TW_PT without building that domain; F = unknown (the caller builds the
+     * domain and compares, the complete procedure); or a signal (only from the audit). Leaf domains are left
+     * to the caller: a variable is read from its slot and a constant is one probe. Under {@code shortcheck}
+     * (ISA 5.5) a T is re-derived: the domain is built and CONV must agree.
+     */
+    private static int twMatchDom(Machine m, int xb, int i, int tt) {
+        Terms terms = m.terms;
+        int dt = terms.a(m.X[xb + TW_PT]);
+        int k = terms.kind(dt);
+        if (k != Kind.APP && k != Kind.PI && k != Kind.LAM) {
+            return Layout.F;
+        }
+        Ext x5 = m.x5;
+        x5.tmBudget = TM_NODES;
+        boolean ok = tmatch(m, xb, i, dt, tt, 0);
+        if (m.stats) {
+            x5.matchTried++;
+            if (ok) {
+                x5.matchHit++;
+            }
+        }
+        if (!ok) {
+            return Layout.F;
+        }
+        return (m.debug & Op.DBG_SHORTCHECK) != 0 ? tmAuditSlow(m, xb, i, dt, tt) : Layout.T;
+    }
+
+    /** {@code shortcheck} of a MATCH that answered T: the domain is built after all and {@code CONV(tt, D)} must be T. */
+    private static int tmAuditSlow(Machine m, int xb, int end, int dt, int tt) {
+        int ep0 = m.ep;
+        int dom = m.drive(twEval(m, xb, end, dt, 0));
+        m.ep = ep0;
+        if (dom >= SIG) {
+            return dom;
+        }
+        if (dom == tt) {
+            m.audits++; // the very record: nothing to convert
+            return Layout.T;
+        }
+        int a = Debug.shortCheck(m, tt, dom, Layout.T);
+        return a != 0 ? a : Layout.T;
+    }
+
+    /**
+     * The binding of de Bruijn index {@code k} in the telescope's environment {@code ENTER(F0) ++ g[K0 .. end)} as it
+     * is stored (not seen through PEEK); HOLE if it is not available here (a far frame, an unread binder).
+     */
+    private static int twRaw(Machine m, int xb, int end, int k) {
+        int[] x = m.X;
+        int s = end - x[xb + TW_K0];
+        if (k < s) {
+            return x[xb + TW_ARGS + end - 1 - k];
+        }
+        int f0 = x[xb + TW_F0];
+        int j = k - s;
+        if (f0 == Layout.RUN_EMPTY || (m.rs[f0] & Layout.RUN_FAR) != 0 || j >= Runs.len(m, f0)) {
+            return Layout.HOLE;
+        }
+        return Runs.fget(m, f0, j);
+    }
+
+    /**
+     * MATCH(p, g, v) (ISA 4.4.4): "{@code EVAL(p, ENTER(F0) ++ g[K0 .. end), PLS)} is convertible with {@code v}", decided
+     * without building the left side. True is sound by congruence (R02 8.6: a constant applied to pairwise
+     * convertible arguments at equivalent levels) or because {@code v} is the very record EVAL would return
+     * (I-ID: a closure or a suspension of the same term under a frame that agrees with g on the term's mask).
+     * False means unknown, never a refutation. No judgment is called and no record is made.
+     */
+    private static boolean tmatch(Machine m, int xb, int end, int p, int v, int depth) {
+        if (--m.x5.tmBudget < 0 || depth > TM_DEPTH || (v >= 0 && v <= Layout.HOLE)) {
+            return false;
+        }
+        int vk = Layout.K_IMM;
+        if (v > 0) {
+            vk = m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
+            if (vk == Layout.SUSP) {
+                int pv = Values.peek(m, v);
+                if (pv == v) {
+                    return tmSame(m, xb, end, p, v); // not evaluated yet: the suspension of this very term?
+                }
+                v = pv;
+                vk = v < 0 ? Layout.K_IMM : m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT;
+            }
+        }
+        return tmNode(m, xb, end, p, v, vk, depth);
+    }
+
+    /** One pattern node against a value of kind {@code vk} that is not an unevaluated suspension (the rules of {@link #tmatch}). */
+    private static boolean tmNode(Machine m, int xb, int end, int p, int v, int vk, int depth) {
+        Terms terms = m.terms;
+        int[] reg = terms.regionOf(p);
+        int o = Node.wordOf(p);
+        int hdr = reg[o];
+        switch (hdr & 0xF) {
+            case Kind.BVAR:
+                return tmVar(m, twRaw(m, xb, end, reg[o + Node.W_A]), v);
+            case Kind.SORT:
+                return vk == Layout.SORT && tmSort(m, reg[o + Node.W_A], hdr, m.X[xb + TW_PLS], v);
+            case Kind.CONST:
+                return vk == Layout.CONST && tmConst(m, reg[o + Node.W_A], reg[o + Node.W_B], hdr, m.X[xb + TW_PLS], v);
+            case Kind.NATLIT:
+                return tmLit(terms, p, v);
+            case Kind.APP:
+                return vk == Layout.NEU && tmApp(m, xb, end, p, v, depth);
+            case Kind.LAM:
+                return vk == Layout.LAM && tmSame(m, xb, end, p, v);
+            case Kind.PI:
+                return vk == Layout.PI && tmSame(m, xb, end, p, v);
+            default:
+                return false;
+        }
+    }
+
+    /** A variable bound to {@code g} (as stored; HOLE = not available) against {@code v}: the same record, through PEEK. */
+    private static boolean tmVar(Machine m, int g, int v) {
+        return (g < 0 || g > Layout.HOLE) && (g > 0 ? Values.peek(m, g) : g) == v;
+    }
+
+    /** A small Nat literal node against the immediate of the same number (ISA 2.9); a pooled literal is unknown. */
+    private static boolean tmLit(Terms terms, int p, int v) {
+        return !terms.isNatBig(p) && terms.natSmall(p) >= 0 && terms.natSmall(p) < Layout.IMM_LIMIT
+                && v == ((int) terms.natSmall(p) | Layout.IMM);
+    }
+
+    /** A sort node (level, header) under {@code pls} against the SORT record {@code v}: equivalent levels. */
+    private static boolean tmSort(Machine m, int l, int hdr, int pls, int v) {
+        if ((hdr & Node.F_HAS_LPARAM) != 0) {
+            l = Levels.lsub(m, l, pls);
+        }
+        int vl = m.vh[(v << Layout.REC_SHIFT) + Layout.A];
+        return l == vl || Levels.lvlEq(m, l, vl);
+    }
+
+    /** A constant node (row, level list, header) under {@code pls} against the CONST record {@code v}: same row, equivalent levels. */
+    private static boolean tmConst(Machine m, int row, int ll, int hdr, int pls, int v) {
+        int o = v << Layout.REC_SHIFT;
+        if (m.vh[o + Layout.A] != row) {
+            return false;
+        }
+        if ((hdr & Node.F_HAS_LPARAM) != 0 && pls != 0 && ll != IntLists.EMPTY) {
+            ll = Levels.lsubList(m, ll, pls);
+        }
+        int vl = m.vh[o + Layout.B];
+        return ll == vl || Levels.listsEq(m, ll, vl);
+    }
+
+    /**
+     * An application against a NEU with as many arguments: the heads agree (a constant by row and levels; a
+     * variable by identity with the head the NEU has) and the arguments match pairwise. Everything else
+     * (an NSUC, a NEU that EVAL would have extended, another length) is unknown.
+     */
+    private static boolean tmApp(Machine m, int xb, int end, int p, int v, int depth) {
+        Terms terms = m.terms;
+        int o = v << Layout.REC_SHIFT;
+        int n = m.vh[o] & Layout.AUX_MASK;
+        int head = m.vh[o + Layout.A];
+        int run = m.vh[o + Layout.B];
+        int h = p;
+        for (int i = 0; i < n; i++) {
+            if (terms.kind(h) != Kind.APP) {
+                return false; // the pattern has fewer arguments than the value
+            }
+            h = terms.a(h);
+        }
+        int[] reg = terms.regionOf(h);
+        int ho = Node.wordOf(h);
+        int hh = reg[ho];
+        if (head <= Layout.HOLE) {
+            return false;
+        }
+        switch (hh & 0xF) {
+            case Kind.CONST:
+                if ((m.vh[head << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT) != Layout.CONST
+                        || !tmConst(m, reg[ho + Node.W_A], reg[ho + Node.W_B], hh, m.X[xb + TW_PLS], head)) {
+                    return false;
+                }
+                break;
+            case Kind.BVAR: {
+                int g = twRaw(m, xb, end, reg[ho + Node.W_A]);
+                if (g <= Layout.HOLE || Values.peek(m, g) != head) {
+                    return false;
+                }
+                break;
+            }
+            default:
+                return false; // more arguments than the value has, or a head that is neither
+        }
+        int t = p;
+        for (int i = n - 1; i >= 0; i--) {
+            if (!tmatch(m, xb, end, terms.b(t), Runs.arg(m, run, i), depth + 1)) {
+                return false;
+            }
+            t = terms.a(t);
+        }
+        return true;
+    }
+
+    /**
+     * Is the closure or suspension record {@code v} the record EVAL of binder / argument term {@code p} under the
+     * telescope's environment returns (ISA 2.5 I-ID)? The same term, the same ls', and a near frame that agrees
+     * with the environment on every index of the term's mask.
+     */
+    private static boolean tmSame(Machine m, int xb, int end, int p, int v) {
+        int o = v << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        Terms terms = m.terms;
+        if (vh[o + Layout.A] != p || vh[o + Layout.C] != (terms.hasLevelParam(p) ? m.X[xb + TW_PLS] : 0)) {
+            return false;
+        }
+        long mask = terms.fvMask(p);
+        int frame = vh[o + Layout.B];
+        if (mask == 0) {
+            return frame == Layout.RUN_EMPTY;
+        }
+        if (mask < 0 || frame == Layout.RUN_EMPTY) {
+            return false;
+        }
+        int[] rs = m.rs;
+        int fh = rs[frame];
+        int len = 64 - Long.numberOfLeadingZeros(mask);
+        if ((fh & Layout.RUN_FAR) != 0 || (fh >>> Layout.RUN_LEN_SHIFT) != len) {
+            return false;
+        }
+        for (int idx = 0; idx < len; idx++) {
+            if ((mask >>> idx & 1) != 0) {
+                int g = twRaw(m, xb, end, idx);
+                if (g == Layout.HOLE || rs[frame + Layout.RUN_H + len - 1 - idx] != g) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -1588,7 +2095,7 @@ final class Infer {
         }
         if ((m.sw & Op.SW_EXPECT) != 0) {
             int kind = m.terms.kind(t);
-            if (kind == Kind.LAM || kind == Kind.LET) {
+            if ((kind == Kind.LAM || kind == Kind.LET) && ((m.sw & Op.SW_PCHK) == 0 || !pchkTerm(m, t))) {
                 return checkExpect(m, t, kind, eb, en, ls, expected, d); // B9
             }
         }

@@ -222,4 +222,15 @@ final class Harness implements AutoCloseable {
                 + (a.identity[u] == b.identity[u] ? "equal" : "DIFFERENT") + ", ticks " + a.ticks[u] + " / " + b.ticks[u]
                 + " | " + a.firstFailure + " | " + b.firstFailure;
     }
+
+    /** Waits until no compilation of the tier is pending (at most 60 s), so that the next pass is steady state. */
+    static void settle(T2Engine e) throws InterruptedException {
+        if (e == null) {
+            return;
+        }
+        long deadline = System.nanoTime() + 60_000_000_000L;
+        while (e.promotedCount() > e.installedCount() + e.failedCount() && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+    }
 }

@@ -15,7 +15,7 @@ class SHostileSlowTest {
 
     static final String[] SETS = {
         "", "gated", "expect", "warm", "facts", "tele", "code", "casetrees", "code,casetrees", "probes", "inert",
-        SHostile.STEP1, SHostile.STEP1 + ",probes", "facts,tele,code,casetrees", "all",
+        "lazyeval", SHostile.STEP1, SHostile.STEP1 + ",lazyeval", SHostile.STEP1 + ",probes", "facts,tele,code,casetrees", "all",
     };
 
     /** No wrong verdict that the manifest does not list as a known finding, under any switch set. */

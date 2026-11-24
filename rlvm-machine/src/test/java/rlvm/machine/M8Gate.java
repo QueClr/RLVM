@@ -452,6 +452,7 @@ final class M8Gate {
         long differing;
         long overflowSkipped;
         long pairOrderNotes;
+        long reasonNotes;
         long audits;
         long memoryFailures;
 
@@ -489,6 +490,7 @@ final class M8Gate {
                 differing += l.differing;
                 overflowSkipped += l.overflowSkipped;
                 pairOrderNotes += l.pairOrderNotes;
+                reasonNotes += l.reasonNotes;
                 audits += l.audits;
                 memoryFailures += l.memoryFailures;
             }
@@ -521,6 +523,8 @@ final class M8Gate {
         final Map<String, PipeRow> pipe = new LinkedHashMap<>();
         final List<String> problems = new ArrayList<>();
         final List<String> notes = new ArrayList<>();
+        /** Table rows of the tier test on values (only for a switch set with K1 switches). */
+        final List<String> valueTiers = new ArrayList<>();
         long wallNanos;
         int retried;
         boolean wrong;
@@ -640,6 +644,9 @@ final class M8Gate {
                 }
             }
         }
+        if (plan.tier && (plan.switches & TierEq.K1_SWITCHES) != 0) {
+            valueTiers(plan, res, paths);
+        }
         if (plan.pipeline && !M8Pipeline.available()) {
             res.notes.add("part 5 (the pipeline) NOT RUN: rlvm.main.RlvmChecker is not on the class path (run the gate through report.sh)");
             res.broken = true;
@@ -700,16 +707,65 @@ final class M8Gate {
                         .append(opt).append(l.spec.role.equals("conv") ? "" : "   (lanes: " + run.lanes[0].spec.config + " against " + l.spec.config + ")");
                 res.problems.add(sb.toString());
             }
+            if (l.reasonNotes > 0) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("5 note (").append(l.spec.role).append("): ").append(l.reasonNotes).append(" declarations of ").append(Diff.shortName(run.path))
+                        .append(" have the same outcome for another reason");
+                for (int k = 0; k < l.reasonLines.size() && k < 2; k++) {
+                    sb.append("\n    ").append(l.reasonLines.get(k));
+                }
+                res.problems.add(sb.toString());
+            }
             if (l.audits > 0) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("2 AUDIT ").append(l.spec.config.label).append(": ").append(l.audits).append(" declarations of ").append(Diff.shortName(run.path))
                         .append(" ended by a debug audit (E_AUDIT)");
                 for (int k = 0; k < l.auditLines.size() && k < 3; k++) {
-                    sb.append("\n    ").append(l.auditLines.get(k));
+                    sb.append("\n    ").append(M8Lanes.clip(l.auditLines.get(k), 420));
                 }
                 sb.append("\n    reproduce: ").append(Diff.reproduce(run.path, -1)).append(laneOpt);
                 res.problems.add(sb.toString());
             }
+        }
+    }
+
+    // ---- part 2, on values: K0 against the K1 switches of the set (ISA section 11 "tier equivalence") -------------
+
+    /**
+     * For a switch set with K1 switches (facts, tele, code, casetrees): DELTA, WHNF, VTYPE and CONV of generated
+     * applications of the constants of the tutorial tests and of Init give the same VALUE in the generic tier and
+     * under those switches ({@link M8Tiers}: structural fingerprint incl. closure identity).
+     */
+    private static void valueTiers(Plan plan, Result res, List<String> paths) {
+        int k1 = plan.switches & TierEq.K1_SWITCHES;
+        Map<String, int[]> sums = new LinkedHashMap<>();
+        for (String p : paths) {
+            String row = p.startsWith(TESTS) ? (testRow(p).equals("tutorial") ? "tutorial" : null) : p.equals("work/exports/init.ndjson") ? "init" : null;
+            if (row == null) {
+                continue;
+            }
+            int[] sum = sums.computeIfAbsent(row, k -> new int[4]);
+            try {
+                M8Tiers.Result r = M8Tiers.values(p, 1, k1, Integer.getInteger("m8.every", 0));
+                sum[0] += r.constants;
+                sum[1] += r.compared;
+                sum[2] += r.differences.size();
+                sum[3] += r.skipped;
+                if (!r.differences.isEmpty()) {
+                    res.different = true;
+                    res.problems.add("2 DIFFERENT VALUE in the tier [" + Debug.switchNames(k1) + "]: " + r.differences.size() + " results of " + Diff.shortName(p)
+                            + "\n    " + r.differences.get(0) + "\n    reproduce: rlvm-machine/src/test/resources/m8/report.sh tiers x " + p + " -Dm8.k1="
+                            + Debug.switchNames(k1));
+                }
+            } catch (IOException | RuntimeException e) {
+                sum[2]++;
+                res.broken = true;
+                res.problems.add("1 CRASH of the tier test on " + Diff.shortName(p) + ": " + e);
+            }
+        }
+        for (Map.Entry<String, int[]> e : sums.entrySet()) {
+            int[] v = e.getValue();
+            res.valueTiers.add(String.format(Locale.ROOT, "| %s | %d | %d | %s | %d |", e.getKey(), v[0], v[1], bold(v[2]), v[3]));
         }
     }
 
@@ -849,13 +905,22 @@ final class M8Gate {
             sb.append(p.switches == 0 ? "Not applicable: the machine under test is the generic tier.\n\n" : "NOT RUN (`-Dm8.parts` without `tier`).\n\n");
         } else {
             int i = tier.get(0)[0];
-            sb.append("| corpus | declarations compared | different | generic tier: declined | SOUNDNESS | COMPLETENESS | lane CPU s |\n|---|--:|--:|--:|--:|--:|--:|\n");
+            sb.append("| corpus | declarations compared | different outcome | same outcome, another reason | generic tier: declined | SOUNDNESS | COMPLETENESS | lane CPU s |\n|---|--:|--:|--:|--:|--:|--:|--:|\n");
             for (Map.Entry<String, Row[]> e : res.rows.entrySet()) {
                 Row r = e.getValue()[i];
-                sb.append(String.format(Locale.ROOT, "| %s | %d | %s | %d | %s | %s | %.1f |%n", e.getKey(), r.comparedWithLead, bold(r.differing), r.declined,
-                        bold(r.soundness), bold(r.completeness), r.nanos / 1e9));
+                sb.append(String.format(Locale.ROOT, "| %s | %d | %s | %d | %d | %s | %s | %.1f |%n", e.getKey(), r.comparedWithLead, bold(r.differing), r.reasonNotes,
+                        r.declined, bold(r.soundness), bold(r.completeness), r.nanos / 1e9));
             }
             sb.append('\n');
+            if (!res.valueTiers.isEmpty()) {
+                sb.append("On values (the K1 switches [").append(Debug.switchNames(p.switches & TierEq.K1_SWITCHES)).append("] against the generic tier: DELTA, WHNF,"
+                        + " VTYPE and CONV of generated applications give the same value, structural fingerprint incl. closure identity):\n\n");
+                sb.append("| corpus | constants | judgment results compared | different | constants skipped (a limit, or the same failure in both tiers) |\n|---|--:|--:|--:|--:|\n");
+                for (String l : res.valueTiers) {
+                    sb.append(l).append('\n');
+                }
+                sb.append('\n');
+            }
         }
         sb.append("## 3. Convention equivalence: host depth ");
         for (int k = 0; k < conv.size(); k++) {
@@ -887,12 +952,12 @@ final class M8Gate {
         if (audit.isEmpty()) {
             sb.append("NOT RUN (`-Dm8.parts` without `audits`).\n\n");
         } else {
-            sb.append("| corpus | audits | declarations compared | different outcome | ended by an audit (E_AUDIT) | declined | SOUNDNESS | COMPLETENESS | lane CPU s |\n|---|---|--:|--:|--:|--:|--:|--:|--:|\n");
+            sb.append("| corpus | audits | declarations compared | different outcome | ended by an audit (E_AUDIT) | same outcome, another reason | declined | SOUNDNESS | COMPLETENESS | lane CPU s |\n|---|---|--:|--:|--:|--:|--:|--:|--:|--:|\n");
             for (Map.Entry<String, Row[]> e : res.rows.entrySet()) {
                 for (int[] c : audit) {
                     Row r = e.getValue()[c[0]];
-                    sb.append(String.format(Locale.ROOT, "| %s | %s | %d | %s | %s | %d | %s | %s | %.1f |%n", e.getKey(), res.specs.get(c[0]).config.label,
-                            r.comparedWithLead, bold(r.differing), bold(r.audits), r.declined, bold(r.soundness), bold(r.completeness), r.nanos / 1e9));
+                    sb.append(String.format(Locale.ROOT, "| %s | %s | %d | %s | %s | %d | %d | %s | %s | %.1f |%n", e.getKey(), res.specs.get(c[0]).config.label,
+                            r.comparedWithLead, bold(r.differing), bold(r.audits), r.reasonNotes, r.declined, bold(r.soundness), bold(r.completeness), r.nanos / 1e9));
                 }
             }
             sb.append('\n');
@@ -920,7 +985,7 @@ final class M8Gate {
             }
             sb.append('\n');
         }
-        sb.append("## Problems\n\n");
+        sb.append("## Problems and notes\n\n");
         if (res.problems.isEmpty()) {
             sb.append("None.\n");
         } else {

@@ -45,7 +45,7 @@ public final class WarmMain {
         long c1 = Cpu.processNanos();
         System.out.println(String.format(Locale.ROOT, "[warm] pass 1 (cold, 1 thread, environment pass): wall %.0f ms, process cpu %.0f ms, accepted %d of %d%s", (w1 - w0) / 1e6,
                 (c1 - c0) / 1e6, first.accepted, first.units, first.firstFailure.isEmpty() ? "" : " | " + first.firstFailure));
-        BenchTest.settle(h.t2());
+        Harness.settle(h.t2());
         double bestWall = Double.MAX_VALUE;
         double bestCpu = Double.MAX_VALUE;
         for (int p = 2; p <= passes; p++) {
@@ -105,7 +105,7 @@ public final class WarmMain {
             bestCpu = Math.min(bestCpu, cpu);
             System.out.println(String.format(Locale.ROOT, "[warm] pass %d (warm, %d threads): wall %.0f ms, process cpu %.0f ms, accepted %d of %d", p, threads, wall, cpu,
                     accepted.get(), units));
-            BenchTest.settle(h.t2());
+            Harness.settle(h.t2());
         }
         T2Engine e = h.t2();
         System.out.println(String.format(Locale.ROOT, "[warm] RESULT %s | switches '%s' | threads %d | cold wall %.0f ms | best warm wall %.0f ms | best warm cpu %.0f ms | accepted %d%s", file,

@@ -516,7 +516,18 @@ structural digest of every unit) gives the same line with the published jars (st
 mdata corpora, the 847 prelude mutants, Init, Std, the Cedar slice, reachability and mathlib (721,845
 units, 38,739,557 export nodes, 78,207,172 block records, 9,909,017 promoted).
 
-MEASUREMENTS_PLACEHOLDER
+CPU time of the load phase (`perf stat` task-clock, arena container, alternating runs in one hold of the
+measurement lock; `work/pipeline-w7/loadcpu.txt`, 13:44Z, host load average 60-90, so only the pairs
+compare):
+
+| Load phase, native `-O3`, one thread | published jars | with the store's changes | |
+|---|--:|--:|--:|
+| Init (348 MB), CPU ms, 3 alternating runs | 897 / 800 / 797 | 709 / 682 / 693 | -13 % |
+| Std (584 MB), CPU ms, 3 runs | 1,338 / 1,373 / 1,504 | 1,150 / 1,156 / 1,287 | -15 % |
+| mathlib (6.33 GB), CPU s, 1 run | 16.65 | 13.77 | -17 % |
+| instructions, Init / Std / mathlib (G) | 7.44 / 12.47 / 132.3 | 7.17 / 12.03 / 128.2 | -3 % |
+
+LOADER_MEASUREMENT_PLACEHOLDER
 
 Two diagnostic switches stay in the loader (environment variables, read when a `Loader` is created; both
 paths build the same store): `RLVM_LOAD_EAGER_LOC=1` reads `loc` when the record arrives, as before this
