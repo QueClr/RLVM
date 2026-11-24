@@ -63,7 +63,7 @@ tests, Init, Std, reachability, the Cedar slice; tier, convention and audit lane
 lazy (mode 47), with block sites (43) and with the first form (11): PASS WITH DECLINES each, SOUNDNESS 0,
 COMPLETENESS 0, 0 differences in every lane, the declines being the tree's eager-reduction declines. The hostile
 suite of the soundness review with mode 47 on every machine: 32 switch sets x 329 exports, 0 unexpected verdicts.
-Own hostile cases: `U2ValuesTest`, 6 tests. TBD-GATE0
+Own hostile cases: `U2ValuesTest`, 6 tests. The recommended mode (235) passes the same gate; with it and with the mode off the module's default test group is green (451 tests).
 
 **Recommendation.** Adopt a restricted form in stages (section 11): stage 0 the plumbing (no behaviour change);
 stage 1 the staging switch `lazyid` = lazy `MKAPP` of blocks in large sessions, classes K / M / C, adaptive sites;
@@ -374,7 +374,11 @@ fingerprint) needs no change: a fingerprint follows arguments, private or not.
   reason per declaration as the mode-off run, and no decline that the mode-off run does not have**; (3) convention
   equivalence inside the mode, word for word; (4) the audit lanes inside the mode; (5) `SHostileSlowTest` with the
   mode on in every switch set; (6) `U2ValuesTest` (I-ID of identified values under random construction, capture,
-  extension and growth; flags; deep nests; clean tables after a reset).
+  extension and growth; flags; deep nests; clean tables after a reset); (7) the completeness test, as a gate once
+  classes M and C are complete (stage 2); (8) the unit tests that assert K0 = K1 BY REF (`M3TierTest`, `M7TierTest`,
+  `M7TierHookTest`: decision 6 "both tiers give the same record") compare `Values.ident` of both sides in a mode
+  whose sessions are lazy: a block's application equals the generic tier's after identification, not at birth
+  (10.3). With the large-session trigger they pass unchanged, because a unit test's session never gets there.
 
 ## 8. Soundness
 
@@ -472,7 +476,7 @@ worker; "new / found" = executions that made a record / that found one):
 ## 10. The prototype: what was measured
 
 Private tree `work/u2/tree/rlvm-machine` = the main tree of 19:04:34Z + the patches of `work/u2/patches/` (eight
-main files, 610 added and 5 changed lines, one test class). One binary for before and after: the mode is the system
+main files, 667 added and 9 removed lines, one test class). One binary for before and after: the mode is the system
 property `rlvm.u2`; the pristine twin (`work/u2/base`) is measured beside it to show that the mode-off prototype is
 the tree it was copied from. Switches everywhere: the default set of that tree (`gated, pchk, expect, warm, code,
 casetrees, bodies, directrules, same, match, joint, lazycases, lazyeval`).
@@ -668,10 +672,13 @@ mode), switch set = the tree's default.
 | M8's full gate (`machine-gate-default-u47-u47.md`, 750 s, final classes) | **47** (every site lazy, K + M + C) | **PASS WITH DECLINES.** (1) differential per declaration against the reference engine: SOUNDNESS 0, COMPLETENESS 0 on tutorial (395 units), bugs (1,428), all 230 tests (17,493 units; 15,800 accepted, 40 rejected, 5 declined), Init (57,774 accepted, 164 declined), Std (99,893 / 203), reachability (4,216 / 8), the Cedar slice (8,053 / 11); (2) tier equivalence with the generic tier: 0 declarations with another outcome, 0 with another reason; `M8Tiers` values 700 + 5,944 results, 0 different; (3) convention equivalence, host depth 0 and unbounded against 128 (outcome, reason, ticks, call events, trace, every record word, run word and pair): 0 different; (4) audit lanes `poison,scopeaudit,maskaudit` and `memocheck,shortcheck`: 0 different outcomes, 0 E_AUDIT; (5) the real driver: 230 / 230 verdicts right, the four corpora accepted with 4 workers, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0. Every decline is the tree's own eager-reduction decline (S-F5's rule) |
 | the same gate (`machine-gate-default-u11-u11.md`, 856 s; classes of 19:36Z: scrutinee rule, class M = WHNF only) | **11** (block sites, K + M) | **PASS WITH DECLINES**, the same zeros in all five parts, the same declines |
 | the same gate, final classes | **43** (block sites, K + M + C: the form recommended for stage 1) | **PASS WITH DECLINES** (`machine-gate-default-u43-u43.md`, 915 s): differential SOUNDNESS 0 / COMPLETENESS 0 on every corpus (the accepted / rejected / declined counts of the mode-47 row), tier equivalence 0 / 0 and 0 different values, convention equivalence 0 different, audits 0 / 0, pipeline 230 / 230 right, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0 |
+| M8's full gate (`machine-gate-default-u235-u235.md`, 586 s; the classes the timings were taken with) | **235** (block sites, K + M + C, adaptive sites, large sessions only: stage 1) | **PASS WITH DECLINES**, the same zeros in all five parts; the ticks of reachability (9,104,125), Init and Std in its differential part are the mode-off ticks |
+| the same gate on the tree of the patches (force points outlined; `machine-gate-default-u235r-u235r.md`) | **235** | TBD-GATE235R |
 | the hostile suite of the soundness review: `SHostileSlowTest` (32 switch sets x 329 exports = 10,528 judgments, each against the official verdict of the manifest; the strict `noKnownFindingIsLeft`) and `SHostileTest`, test JVM with `-Drlvm.u2=47` (`work/u2/logs/hostile-u47.out`) | **47** | **0 unexpected verdicts, 0 known findings open, 0 declines of the machine** under every switch set |
+| the hostile suite on the tree of the patches, `-Drlvm.u2=235 -Drlvm.u2.big=8` (threshold 2^8 records, so that the mode engages in exports of a few hundred records; `work/u2/logs/hostileR-u235.out`) | **235** | 32 switch sets x 329 exports: **0 unexpected verdicts, 0 declines**; `SHostileTest` 6 / 6 |
 | `U2ValuesTest` (own hostile cases, 6 tests; patch 0007 as `M1LazyIdTest`) | 3, 15, 47, 3 + 64 | green: (a) 6,000 random constructions per seed - lazy, interned, extended, captured into frames, across table growth, with and without adaptive sites: after identification one canonical id per structure and one structure per canonical id, no private component in any key, `vtabUsed` = table entries = records that are not private, clean tables after the reset; (b) flags of private applications = flags of interned ones; (c) nests 300,000 deep identified without host recursion, the second nest a duplicate of the first at every level; (d) twins are convertible and near twins (one innermost argument differs, 3,000 levels down) are not, with and without class C, with and without `same`; (e) twin redexes are reduced once (class M); (f) two spellings of one binder type have one family of free variables |
 | differential, first build, mode 15 (every site, no class C): tutorial 395 / 395, bugs 1,427 / 1,428 | 15 | no SOUNDNESS, no COMPLETENESS |
-| the module's default test group (449 tests of M1 .. M8, S; `work/u2/scripts/suite.sh`) with `-Drlvm.u2=N` for EVERY machine of the test JVM | 0 / 43 / 47 / 235 | TBD-SUITE |
+| the module's default test group (449 tests of M1 .. M8, S; `work/u2/scripts/suite.sh`) with `-Drlvm.u2=N` for EVERY machine of the test JVM | 0 / 43 / 47 / 235 | mode 0: **451 tests, 0 failures, 4 skipped** on the tree of the patches (before the force points were outlined: 1 failure, `StepSizeTest` - six methods had grown beyond the 325 bytecodes of H10; a convention failure of the first form of the patch, fixed by outlining, counters identical: `work/u2/counts-final/`). Mode 235: **451 / 0 / 4** (unit-test sessions never reach the threshold). Mode 43 (first form): `StepSizeTest` + 5 tests of `M3TierTest`, `M7TierTest`, `M7TierHookTest` that assert K0 = K1 by REF: a block's application is equal to the generic tier's after identification, not at birth - in a mode whose sessions are lazy these tests need `Values.ident` on both sides. Mode 47: 19 failures in 10 classes, all of them assertions about identity or record counts AT CONSTRUCTION (`M1ValuesTest` "two constructions, one id", `M1RunsTest` / `M2EconomyTest` record counts, `M4ConvTest` the pair entry on the refs CONV was called with, `M3ReduceTest` a memo word on the record the test built): the list of tests that encode I-ID at birth |
 
 How the gates treat what the mode changes: nothing in M8's gate compares the mode-on machine with the mode-off
 machine; every comparison is inside the mode (lane against lane, lane against reference engine), where V6 makes
@@ -689,8 +696,8 @@ they are.
 
 | Stage | What | Owners (patch) | Evidence / condition to enter |
 |---|---|---|---|
-| **0. Plumbing, no behaviour change** | records may be outside `vtab`: `vtabUsed`, `addRecordFree`, `enterRecordAt`, growth and reset skip private bits; `Values.ident` and the force points of class K behind `privMade != 0` | M6 (0002), M1 (0001) | with no lazy site every counter and every word is today's (the mode-off rows of 10.1; the module's default test group with the mode off: TBD-SUITE0) |
-| **1. `lazyid` as a staging switch, off in strict mode** = mode 235: `MKAPP` of code blocks lazy except the scrutinee of the next `WHNF`; classes K, M (WHNF, CORE, DELTA, VTYPE), C; adaptive sites; lazy only in sessions of 2^17 records and more | M7 (0003), M3 (0004), M4 (0005), M5 (0006), M1 (0001, 0007), M6 (the switch, `SWITCHES.md`, counters into the statistics) | reachability, JVM, warm: 888 against 1066 ms at one worker (-16.7 %, ranges disjoint), 460 against 511 ms at eight (-10.0 %; workers' CPU -10.5 %); 2.66 M of 8.4 M record-table probes per pass not made; ticks identical to the mode-off run (9,104,125); Cedar slice, Init: counters identical to the mode-off run (the sessions never reach the threshold), Cedar slice wall clock -0.1 % (mode 171). Gate: TBD-GATE235. To enter the default set: M8's gate on the main tree, the native image (TBD-NATIVE), one large corpus with giant declarations (Mathlib, not run here) |
+| **0. Plumbing, no behaviour change** | records may be outside `vtab`: `vtabUsed`, `addRecordFree`, `enterRecordAt`, growth and reset skip private bits; `Values.ident` and the force points of class K behind `privMade != 0` | M6 (0002), M1 (0001) | with no lazy site every counter and every word is today's (the mode-off rows of 10.1; the module's default test group with the mode off: 451 tests, 0 failures) |
+| **1. `lazyid` as a staging switch, off in strict mode** = mode 235: `MKAPP` of code blocks lazy except the scrutinee of the next `WHNF`; classes K, M (WHNF, CORE, DELTA, VTYPE), C; adaptive sites; lazy only in sessions of 2^17 records and more | M7 (0003), M3 (0004), M4 (0005), M5 (0006), M1 (0001, 0007), M6 (the switch, `SWITCHES.md`, counters into the statistics) | reachability, JVM, warm: 888 against 1066 ms at one worker (-16.7 %, ranges disjoint), 460 against 511 ms at eight (-10.0 %; workers' CPU -10.5 %); 2.66 M of 8.4 M record-table probes per pass not made; ticks identical to the mode-off run (9,104,125); Cedar slice, Init: counters identical to the mode-off run (the sessions never reach the threshold), Cedar slice wall clock -0.1 % (mode 171). Gate: M8's full gate with mode 235 PASSES WITH DECLINES (`machine-gate-default-u235-u235.md`, 586 s: SOUNDNESS 0, COMPLETENESS 0, 0 differences in the tier, convention and audit lanes, pipeline 230 / 230; ticks of reachability, Init and Std in the gate = the mode-off ticks). To enter the default set: M8's gate on the main tree, the native image (TBD-NATIVE), one large corpus with giant declarations (Mathlib, not run here) |
 | **2. Complete the classes, then widen** | class M for the two flag memos (`ISPROP` / `PROPT`, `PIRR` / `PROOF`); class C for the argument pairs of `CARGS` and the lazy-delta step; the completeness test (`default,-warm`: ticks equal) becomes a gate. Only then: lower the session threshold, and every site with adaptive sites (mode 239) | M4, M5, M3; M8 (the test) | today +0.02 to +0.2 % ticks (block sites), +0.07 to +0.2 % (every site, adaptive); every-site laziness measured -16.5 % on reachability at one worker (111), but +9 % on the Cedar slice without adaptation (47): it must not enter without the trigger and the adaptive rule |
 | **3. The tier** | `rlvm-truffle` mirrors the lazy site and the scrutinee test; "reserve, do not write" (section 5); with T3's `CALL` and direct call nodes the unit over which a private application can stay virtual is caller + callee | T3 (U1 first), M1 (reservation), M8 (tier equivalence over identified records) | design only. T3's U1 alone measured nothing outside the scatter (machine-T2.log 20:01Z); this stage is where its direct calls would have an object to remove |
 | **not recommended** | every site lazy without adaptation (47); lazy closures / suspensions / frames (stage D of 9.2); reclamation of private records in the stepper | - | 10.1 (records +37 to +61 %, ticks +1.6 to +5.9 % on library corpora), 10.2 (+9 %), the session-end census (2-6 % of the suspensions are never used) |
@@ -700,8 +707,15 @@ records and nothing otherwise; switching it off is `rlvm.u2=0`.
 
 ## 12. Not established
 
-TBD-12
-
+- **The native image.** TBD-NATIVE12
+- **Init, Std, full cedar, Mathlib, con-leche, cslib, navier-stokes-euler in a timing window.** Counters only for
+  Init, Std and the Mathlib slice; the windows for Init / Std and full cedar with 8 workers were queued behind the
+  quiet lock (waits of 13-18 minutes per window) and TBD-J45.
+- **More than two processes per row.** The scatter between two JVM processes of one configuration is up to 8 %; the
+  resolved rows are reachability at one worker (two windows agree) and the Cedar slice with every site lazy.
+- **The timings are of the form before the force points were outlined** (jar `f62325f62b53` and earlier); the
+  patches are the outlined form (`7e07c389b70b`), whose counters are identical on six runs and whose methods are
+  smaller, but which was not timed.
 - **The launcher path.** Every timing is `WarmMain` (one engine kept, fresh sessions per pass, no admission pipeline,
   no pipelined loading), not `bin/rlvm -X passes=N -X passes-keep=engines`.
 - **The tier.** `rlvm-truffle` does not know the lazy site (its `MKAPP` node interns); section 5 is design. T3's U1

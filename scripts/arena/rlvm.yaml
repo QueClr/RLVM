@@ -5,7 +5,7 @@
 # State of the binary on 2026-11-24 (integration of wave 6, work/status/machine-integration.md "Wave 6"): the
 # complete pipeline, checking with the MACHINE (rlvm-machine: the worklist machine, default switch set of
 # rlvm-machine/SWITCHES.md); the reference engine re-checks every rejection and decides every declaration
-# the machine declines. All 230 published tests correct with this run line (ARENA_SUITE_LINE); Init, Std, cedar,
+# the machine declines. All 230 published tests correct with this run line (0 declined; 63.9 s of CPU time and 545 G instructions for the whole suite in the arena-shaped container); Init, Std, cedar,
 # cslib, con-leche, reachability, navier-stokes-euler and mathlib accepted. The machine became the default
 # engine when its provider's priority reached rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY (100) after
 # its gates: M8's gate for the generic tier and for the default set, 17,775 mutants, 329 hostile exports
@@ -40,7 +40,7 @@
 # and Std and nothing on the Cedar slice and reachability (the platform gate, machine v0). With the
 # default configuration of wave 6 the CPU time of eight workers is that of one within 4 % (Init 5.27
 # against 5.22 s, Std 9.97 / 9.60, cedar 13.64 / 13.49) and the cold wall clock of eight is 1.34 s on Init,
-# 2.38 on Std, 35.9 on mathlib (four: FOUR_THREADS_LINE). Six (the driver's proposal for `--threads auto`)
+# 2.38 on Std, 35.9 on mathlib (four, this run line: 1.79, 3.31 and 54.9 s). Six (the driver's proposal for `--threads auto`)
 # has no measurement yet. To change the count, change BOTH numbers below (`--threads` in the run line and
 # `threads:`, the CPU slots the arena reserves).
 #
@@ -81,7 +81,8 @@ description: |
   declined, never guessed.
 
   Measured on the project's aarch64 host in a container shaped like the arena runner (CPU time /
-  wall clock of a fresh process with this run line): ARENA_NUMBERS_LINE
+  wall clock of a fresh process with this run line): Init 5.1 s / 1.8 s, Std 9.7 s / 3.3 s, mathlib
+  181 s / 55 s with a peak of 2.9 GiB; the 230 published tests take 64 s of CPU time in all.
 
   The build step downloads a pinned GraalVM Community Edition and Maven for the runner's
   architecture, verifies their checksums and those of the third-party jars that go into the

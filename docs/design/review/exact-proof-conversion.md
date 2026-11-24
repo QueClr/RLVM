@@ -467,7 +467,28 @@ The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, mani
 - Parallel workers: every counter run and the hostile runs are one worker (the judge has no 4-worker row).
 - The official kernel's own cost on these units was not measured (P8: 30 times gruszka's instructions on Mathlib).
 
-## 9. Reproduction
+## 9. Deliverables and what each owner would do with them
+
+| What | Where | Owner |
+|---|---|---|
+| patch: switch `m4b`, the fused two-sided lazy step (`Conv.java` only: `convFuse`, `fuseShape`, `fuseQuick`, frames `CONV2[9..12]`; applies to the main tree of 20:50Z, whose `Conv.java` is that of the copy) | `work/c1/patches/0001-fused-two-sided-lazy-step.M4.patch` | M4 |
+| 41 hostile exports with official verdicts (leanchecker 4.36.0, arena container) and their generator | `work/c1/hostile/`, `manifest.tsv`; `work/c1/gen/hostile.py` | candidates for package S |
+| gate reports of the clean private tree | `work/c1/clean/work/status/machine-gate-c1-*.md`, `machine-conv-c1b*.txt` | M8 (finding C1-F2) |
+| tools: per-unit tap and sequential trace (private hooks), counters, judge, timing | `work/c1/run.sh`, `spans.py`, `view.py`, `sum.py`, `judge.py`, `quiet-cpu.sh`, `quiet-wall.sh`, `qtable.py` | - |
+
+- **M4**: the step is the two-sided case of `lstepBoth` inlined; with the switch off `convLazy` tests one bit. It
+  counts a fused iteration as a probe event B1 / T: it wants a counter of its own. Its value is small (section 6):
+  take it with the next gate of the default set, not for its own sake.
+- **M6**: `m4b` is M4's free experiment bit (the earlier `m4b` experiment was removed, NOTES-M4 W5); no change to `Op`,
+  `Debug` or `Machine` is needed. A name is yours to give.
+- **M3 / M4 / package S**: the argument of 3.1 / section 8 for the CORE memo was not written down anywhere; five
+  exports now sit next to it.
+- **M8 / M7 / the integrator**: finding C1-F2 (7.1).
+- **The owner**: the comparison of proofs the official way is a cost of the official algorithm, not of this
+  implementation. The decision of P8's section 0, point 5, stands as it was: official verdicts at this price, or a
+  named profile with the two theory-sound options. This report removes the third possibility.
+
+## 10. Reproduction
 
 ```bash
 C=work/c1
