@@ -300,7 +300,8 @@ class PackedRunsLoadTest {
                 expanded += Loaded.load(data, o, packing(o, 2, 256)).report.expandedRuns;
             }
         }
-        assertTrue(failed > 30 && loaded > 30, failed + " failed, " + loaded + " loaded");
+        // (a declaration that carries metadata is declined, so most of these files fail)
+        assertTrue(failed > 30 && loaded > 5, failed + " failed, " + loaded + " loaded");
         assertTrue(expanded > 20, "runs expanded: " + expanded);
     }
 

@@ -645,10 +645,16 @@ final class Conv {
 
     /** c2 / step 2: only s on the RIGHT is tested; t must be closed (the official hasFVar) unless ER. */
     private static int convBoolTrue(Machine m, int t0, int s0, int a, int b, int d) {
-        if (Values.kind(m, b) == Layout.CONST && isBoolTrue(m, b)
-                && ((Values.flags(m, a) & Layout.FL_OPEN) == 0 || m.ER != 0)) {
-            int r = Reduce.whnf(m, a, d + 1);
-            return r >= SIG ? m.sig4(r, K_CONV_3, t0, s0, a, b) : k_conv3(m, t0, s0, a, b, r, d);
+        if (Values.kind(m, b) == Layout.CONST && isBoolTrue(m, b)) {
+            // [eager] erAware: a declaration that defers its eager comparisons runs the lifted branch as a probe
+            // (k_conv3 declines if it would have answered); otherwise the point is only noted for the session
+            if ((Values.flags(m, a) & Layout.FL_OPEN) == 0 || m.ER != 0 || m.erAware) {
+                int r = Reduce.whnf(m, a, d + 1);
+                return r >= SIG ? m.sig4(r, K_CONV_3, t0, s0, a, b) : k_conv3(m, t0, s0, a, b, r, d);
+            }
+            if ((m.sw & Op.SW_EAGER) != 0) {
+                m.erSens = true;
+            }
         }
         return convCore1(m, t0, s0, a, b, d);
     }
@@ -661,7 +667,111 @@ final class Conv {
 
     /** CONV[3](t0, s0, a, b); r = WHNF(a). Step 2: {@code whnf(t)} is {@code Bool.true}: T; otherwise fall through. */
     static int k_conv3(Machine m, int t0, int s0, int a, int b, int r, int d) {
-        return r == b ? rec(m, t0, s0, a, b, T) : convCore1(m, t0, s0, a, b, d);
+        if (r != b) {
+            return convCore1(m, t0, s0, a, b, d);
+        }
+        int ev = boolTrue(m, a, b); // [eager]
+        if (ev != 0) {
+            return ev == TAKE_PLAIN ? convCore1(m, t0, s0, a, b, d) : ev;
+        }
+        return rec(m, t0, s0, a, b, T);
+    }
+
+    /**
+     * [eager] Under ER a hasFVar guard of the official kernel was lifted for an OPEN operand and the lifted
+     * branch is about to answer (the Nat fold succeeded; {@code whnf(t)} is {@code Bool.true}): an eager-only
+     * event. Counted; inside a comparison of the K rule (with {@code Op.SW_EAGER}) the declaration is
+     * declined, because the result of a REDUCTION would depend on the mode.
+     * @return 0 = go on, else the signal to return
+     */
+    private static int modeEvent(Machine m, int why) {
+        int er = m.ER;
+        if (er >= Op.ER_K) {
+            return m.erSensitive(why + (Machine.ER_WHY_K_FOLD - Machine.ER_WHY_FOLD));
+        }
+        m.erEoe++;
+        return 0;
+    }
+
+    /**
+     * [eager] {@code whnf(a)} is {@code b = Bool.true}. A closed {@code a}: 0 (the test answers in every mode). An OPEN
+     * one: the hasFVar guard was lifted; as {@link #folded}: an eager-only event under ER, a recorded point and
+     * {@link #TAKE_PLAIN} in the plain phase of an aware run.
+     */
+    private static int boolTrue(Machine m, int a, int b) {
+        if ((Values.flags(m, a) & Layout.FL_OPEN) == 0) {
+            return 0;
+        }
+        if (m.ER == 0) {
+            int ev = m.erNote(a, b, 0, 3);
+            return ev != 0 ? ev : TAKE_PLAIN;
+        }
+        int ev = modeEvent(m, Machine.ER_WHY_BOOL);
+        if (ev != 0) {
+            m.errA = a;
+            m.errB = b;
+        }
+        return ev;
+    }
+
+    /** [eager] Private result of {@link #folded}: the fold was a probe of an aware run, the plain branch goes on. */
+    private static final int TAKE_PLAIN = 6;
+
+    /**
+     * [eager] {@code reduce_nat} of side {@code which} (1 = tn, 2 = sn) of the pair in hand succeeded with {@code v}.
+     * A closed pair: 0 (the fold answers in every mode). An OPEN pair: the hasFVar guard was lifted. Under ER this
+     * is an eager-only event ({@link #modeEvent}: 0, or the signal of a decline). In plain mode it is the probe
+     * of an aware run: the point is recorded ({@code Machine.erNote}) and the result is {@link #TAKE_PLAIN}.
+     */
+    private static int folded(Machine m, int tn, int sn, int v, int which) {
+        if (!openPair(m, tn, sn)) {
+            return 0;
+        }
+        if (m.ER == 0) {
+            int ev = m.erNote(tn, sn, v, which);
+            return ev != 0 ? ev : TAKE_PLAIN;
+        }
+        int ev = modeEvent(m, Machine.ER_WHY_FOLD);
+        if (ev != 0) {
+            m.errA = tn;
+            m.errB = sn;
+        }
+        return ev;
+    }
+
+    /** [eager] {@code tn} or {@code sn} is OPEN (the official {@code has_fvar}, over-approximated). */
+    private static boolean openPair(Machine m, int tn, int sn) {
+        return ((Values.flags(m, tn) | Values.flags(m, sn)) & Layout.FL_OPEN) != 0;
+    }
+
+    /**
+     * [eager] Could {@code reduce_nat(v)} succeed? Cheap and over-approximate (the session flag {@code m.erSens}):
+     * false only if an argument that would have to become a literal is weak-head normal and is none.
+     */
+    private static boolean foldCandidate(Machine m, int v) {
+        if ((lazyClass(m, v) & 4) == 0) {
+            return false;
+        }
+        int[] vh = m.vh;
+        int o = v << Layout.REC_SHIFT;
+        if ((vh[o] >>> Layout.KIND_SHIFT) == Layout.NSUC) {
+            return maybeLit(m, vh[o + Layout.A]);
+        }
+        int run = vh[o + Layout.B];
+        return maybeLit(m, Runs.arg(m, run, 0)) && maybeLit(m, Runs.arg(m, run, 1));
+    }
+
+    /** [eager] May {@code whnf(x)} be a Nat literal or {@code Nat.zero}? False only for a weak-head normal value that is none. */
+    private static boolean maybeLit(Machine m, int x) {
+        if (x < 0) {
+            return true;
+        }
+        int w = m.vh[x << Layout.REC_SHIFT];
+        int k = w >>> Layout.KIND_SHIFT;
+        if (k == Layout.NBIG || (Values.flags(m, x) & Layout.FL_WHNF) == 0) {
+            return true;
+        }
+        return k == Layout.CONST && hclass(w) == Layout.HC_CTOR; // Nat.zero
     }
 
     /** c3 / step 3: {@code tn = whnf_core(t, cheap_proj = true)}. The flag WHNF answers CORE inline. */
@@ -1526,7 +1636,9 @@ final class Conv {
      * (R02 8.4; section 10 row 36: let variables count as free variables, the flag OPEN).
      */
     private static int lazydFold(Machine m, int tn, int sn, int d) {
-        if (m.ER != 0 || ((Values.flags(m, tn) | Values.flags(m, sn)) & Layout.FL_OPEN) == 0) {
+        // [eager] erAware: a declaration that defers its eager comparisons runs the lifted branch as a probe
+        // (k_lazyd2 / k_lazyd4 decline if a fold succeeds); otherwise the point is only noted for the session
+        if (m.ER != 0 || !openPair(m, tn, sn) || m.erAware) {
             if ((lazyClass(m, tn) & 4) != 0) {
                 int v = foldCall(m, tn, d);
                 return v >= SIG ? m.sig2(v, K_LAZYD_2, tn, sn) : k_lazyd2(m, tn, sn, v, d);
@@ -1535,6 +1647,8 @@ final class Conv {
                 int v = foldCall(m, sn, d);
                 return v >= SIG ? m.sig2(v, K_LAZYD_4, tn, sn) : k_lazyd4(m, tn, sn, v, d);
             }
+        } else if ((m.sw & Op.SW_EAGER) != 0 && !m.erSens && (foldCandidate(m, tn) || foldCandidate(m, sn))) {
+            m.erSens = true;
         }
         return lazydStep(m, tn, sn, d);
     }
@@ -1560,14 +1674,23 @@ final class Conv {
     static int k_lazyd2(Machine m, int tn, int sn, int v, int d) {
         v = foldResult(m, tn, v);
         if (v != NONE) {
-            int r = conv(m, v, sn, d + 1);
-            return r >= SIG ? m.sig2(r, K_LAZYD_3, tn, sn) : k_lazyd3(m, tn, sn, r, d);
+            return foldedT(m, tn, sn, v, d);
         }
         if ((lazyClass(m, sn) & 4) != 0) {
             int u = foldCall(m, sn, d);
             return u >= SIG ? m.sig2(u, K_LAZYD_4, tn, sn) : k_lazyd4(m, tn, sn, u, d);
         }
         return lazydStep(m, tn, sn, d);
+    }
+
+    /** {@code reduce_nat(tn) = v}: {@code return is_def_eq_core(v, sn)}; [eager] unless the fold was a probe ({@link #folded}). */
+    private static int foldedT(Machine m, int tn, int sn, int v, int d) {
+        int ev = folded(m, tn, sn, v, 1);
+        if (ev != 0) {
+            return ev == TAKE_PLAIN ? lazydStep(m, tn, sn, d) : ev;
+        }
+        int r = conv(m, v, sn, d + 1);
+        return r >= SIG ? m.sig2(r, K_LAZYD_3, tn, sn) : k_lazyd3(m, tn, sn, r, d);
     }
 
     /** LAZYD[3](tn, sn); r = the comparison after a Nat fold: final. The pair is left in A2 / A3 after the call. */
@@ -1581,6 +1704,10 @@ final class Conv {
     static int k_lazyd4(Machine m, int tn, int sn, int v, int d) {
         v = foldResult(m, sn, v);
         if (v != NONE) {
+            int ev = folded(m, tn, sn, v, 2); // [eager]
+            if (ev != 0) {
+                return ev == TAKE_PLAIN ? lazydStep(m, tn, sn, d) : ev;
+            }
             int r = conv(m, tn, v, d + 1);
             return r >= SIG ? m.sig2(r, K_LAZYD_3, tn, sn) : k_lazyd3(m, tn, sn, r, d);
         }

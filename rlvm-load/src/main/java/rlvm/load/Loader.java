@@ -1240,6 +1240,14 @@ public final class Loader implements ExportSink, RecordSink {
         }
     }
 
+    /** Declines a declaration whose root {@code root} is wrapped by, or contains, a metadata node. */
+    private void requireNoMDataInDeclaration(int root) {
+        if (root >= 1 && root <= exprCount && hasMData(root)) {
+            throw unsupportedDecl("metadata (mdata) node in the type or value of a declaration: the official kernel"
+                    + " treats it as a term of its own, RLVM drops it, so what RLVM would check is not that declaration");
+        }
+    }
+
     /** Canonical decimal digits denote a number below 2^64. */
     private static boolean fitsUnsignedLong(byte[] d, int off, int len) {
         if (len < 20) {
@@ -1631,6 +1639,16 @@ public final class Loader implements ExportSink, RecordSink {
      */
     private void declare(int kind, int name, int[] ids, int lpOff, int lpCount, int type, int value, int hint,
             boolean asBlock) {
+        if (mdata != null) {
+            // Metadata is dropped by this loader, but officially an mdata node is a term of its own
+            // for every cache of the kernel and hides what is under it from its syntactic tests: a
+            // declaration whose type or value carries metadata is not what the official checker checks
+            // (finding S3-F2 / R2: a wrong accept and a wrong reject of the reference engine).
+            requireNoMDataInDeclaration(type);
+            if (value != 0) {
+                requireNoMDataInDeclaration(value);
+            }
+        }
         int lp = lparams(ids, lpOff, lpCount);
         out.beginUnit(kind);
         int cid = out.reserve(kind, name, lp);

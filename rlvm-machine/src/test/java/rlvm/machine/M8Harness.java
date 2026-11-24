@@ -764,6 +764,29 @@ final class M8Harness implements AutoCloseable {
      * @return false when there is no further unit (the end of the file, or the unit after the first one
      *     the reference did not accept)
      */
+    /** Package E1, a measurement aid ({@code -De1.reflog=FILE}): unit, thread CPU ns and wall ns of the reference engine's admission of every unit. */
+    private static final String E1_REFLOG = System.getProperty("e1.reflog", "");
+    private static java.io.Writer e1RefOut;
+
+    private static synchronized void e1RefLog(int unit, long cpu, long wall) {
+        try {
+            if (e1RefOut == null) {
+                e1RefOut = new java.io.BufferedWriter(new java.io.FileWriter(E1_REFLOG, true), 1 << 16);
+                final java.io.Writer w = e1RefOut;
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    try {
+                        w.flush();
+                    } catch (java.io.IOException e) {
+                        // a measurement aid
+                    }
+                }));
+            }
+            e1RefOut.write(unit + "\t" + cpu + "\t" + wall + "\n");
+        } catch (java.io.IOException e) {
+            // a measurement aid
+        }
+    }
+
     boolean next() {
         for (Lane lane : lanes) {
             lane.endUnit();
@@ -774,6 +797,7 @@ final class M8Harness implements AutoCloseable {
         }
         int u = ++unit;
         refDeadline.arm(refCheckMillis);
+        long c0 = E1_REFLOG.isEmpty() ? 0 : java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime();
         long t0 = System.nanoTime();
         try {
             oracle = refAdmission.admit(u, refSession, Budget.cold(refBytes));
@@ -792,6 +816,9 @@ final class M8Harness implements AutoCloseable {
             oracleNanos = System.nanoTime() - t0;
             oracleTotalNanos += oracleNanos;
             refDeadline.disarm();
+            if (!E1_REFLOG.isEmpty()) {
+                e1RefLog(u, java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime() - c0, oracleNanos);
+            }
         }
         if (refDeclines != null && oracle == Outcome.ACCEPT && engineUnit(u) && refDeclines.test(u)) {
             oracle = Outcome.DECLINE;

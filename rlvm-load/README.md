@@ -241,7 +241,7 @@ Verified against `leanchecker --from-export` v4.36.0 where marked (official); pr
 | safe and unsafe type records in one block | decline (not probed) | same |
 | safe types, unsafe constructor / recursor record | loaded, entry flagged `F_UNSAFE` (official: accepted; `rlvm-admit` declines such blocks in v1) | same |
 | `{"inductive":{"types":[],"ctors":[],"recs":[]}}` | declares nothing, no unit (official: accepted) | `anEmptyInductiveLineDeclaresNothing` |
-| `mdata` | wrapped expression; inside an inductive or quot record: decline (deviation 7), per unit with `publishOnDecline` | `SplitTest.mdataIsDropped...`, `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`, `PipelinedLoadTest.aDeclineIsTheStatusOfTheFirstUnitThatWasNotLoaded` |
+| `mdata` | a declaration whose type or value carries it (any kind; deviation 7): decline, per unit with `publishOnDecline`; metadata that no admitted declaration reaches: dropped | `SplitTest.mdataIsDropped...`, `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`, `PipelinedLoadTest.aDeclineIsTheStatusOfTheFirstUnitThatWasNotLoaded` |
 | segment longer than `LoadOptions.maxSegmentRecords` (default 2^26 = 1 GiB of buffer) | decline | `aSegmentBeyondTheLimitIsDeclined` |
 | more than 2^31 - 2^29 expression records, any `StoreLimitException` (2^28 - 1 shared nodes, 2 GiB pools, ...) | decline | only the exception mapping is tested (`BindingsTest.storeLimitsAreDeclines`); no input of that size was built |
 | level deeper than 2^24 - 1 (`LevelLimitException`) | decline (see deviations) | not tested (needs 16.7 M records) |
@@ -410,11 +410,19 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
    official checker compares those records with the kernel's own declarations by `Expr.eqv`, which
    compares metadata, and tests their spines syntactically; four hand-written probes
    (`work/integration/probe/mdata-*.ndjson`) were accepted by RLVM and rejected by leanchecker 4.36
-   before this rule. The loader keeps one bit per expression ordinal ("wrapped by or contains
+   before this rule. **Since 2026-11-24 (finding S3-F2, traced by R2) the same holds for every
+   declaration**: an axiom, definition, theorem or opaque whose type or value carries the bit is
+   declined (`Loader.declare`, "metadata (mdata) node in the type or value of a declaration"), because
+   officially an `mdata` node is a term of its own for every cache of the kernel (`a = mdata b` is not
+   `a = b` there) and hides what is under it from the kernel's syntactic tests (eager reduction,
+   `is_pi`, `get_app_fn`): with the node dropped the reference engine accepted an export the official
+   checker rejects (`work/s3/exports/s3-wc-pos-mdata-bad.ndjson`) and rejected one it accepts
+   (`s3-mdata-eager-hidden-ok`). lean4export writes metadata only with `--export-mdata`: the eight
+   corpora have no `mdata` record. Until the store has an MDATA node this is a decline. The loader keeps one bit per expression ordinal ("wrapped by or contains
    metadata"), allocated at the first `mdata` record, so files without metadata (every lean4export
    file) pay one null test per record. A record wrapped by an `mdata` record counts as carrying
-   metadata even when it is referenced directly (over-approximation; it can only decline). Metadata in
-   definitions, theorems, axioms and opaques is accepted: it is invisible to type checking.
+   metadata even when it is referenced directly (over-approximation; it can only decline). Metadata
+   that only dropped (unsafe / partial) records or no declaration at all reach is dropped silently.
    `nondep` and binder names / info are not compared by the official checker either (test kit).
    `LoadReport.exprMData` counts the records. Test: `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`.
    The decline is for the rest of the file from that record on: with `publishOnDecline` the units
@@ -492,8 +500,8 @@ Which files are rejected at load: exactly tutorial 132, 133, 134, 135, 138, 139,
 official checker stops with "uncaught exception: Duplicate declaration". Tutorial 136 and 137 get past
 the official reader (kernel errors) and load here too. Nothing is declined.
 
-What is still declined at load, on hand-written and mutated input only: metadata inside an inductive
-or quot record; two level records for one universe parameter under a level that the official
+What is still declined at load, on hand-written and mutated input only: metadata in the type or value
+of a declaration or inside an inductive or quot record; two level records for one universe parameter under a level that the official
 `instantiate` respells inequivalently (finding A2-F1); an inductive record that mixes safe and unsafe type records; a projection index above
 2^31 - 1; counts of 2^63 or more and ill-formed UTF-8 (reader); a segment above `maxSegmentRecords`;
 the store's and the level store's representation limits.
@@ -703,6 +711,131 @@ measured), kernel 11 % (page faults), promotion 11 % (`seek` 4.8, `promote` 3.7)
 would reach it is X5's finding (requests.log, 14:04Z): on exporter output the private records of a theorem
 are an id range, so the loader need not parse, pack or promote them serially at all (four fifths of the
 expression records), and the workers parse their own proofs.
+
+### LP2: warm measurements of the load path (2026-11-24)
+
+Method (OWNER-NOTES 12: warm wall clock, 8 workers, loading pipelined with checking). Everything
+below was taken inside `bench/quiet.py` windows on the 8 measurement cores. Passes: `bench/warm.sh`
+(`rlvm -X passes=N`, mode reload, machine engine with its default switches, `-X load=pipelined`,
+heap 6 GB for Std and cedar, the launcher's 13 GB for mathlib); "loader" is the pass line's `load_ms`,
+the wall clock of the loading thread; rows in `work/lp2/warm.tsv`, logs in `work/lp2/logs`
+(`work/lp2/passes.py` prints them). "Published" = the jars before LP2 (`work/lp2/dist-base2`: export
+392c19f95db4, store f85c730603b8, load 492a436c2c95), "packing" = `work/lp2/dist-pack2` with
+`-X io=mapped -X scan-threads=N` (the published LP2 code plus a measurement switch; every other jar
+equal to dist-base2's, machine 8a8ea5644b24). The default reader is `-X io=buffered` on one thread.
+
+**1. The load alone** (JVM, the launcher's VM flags, `rlvm.load.tools.LoadTool`, later loads of one
+process = warm; wall clock of the whole load; `work/lp2/batches.log`, lines `LOAD`):
+
+| Load alone, quiet cores, s | Std | cedar | mathlib |
+|---|--:|--:|--:|
+| published, one thread | 0.92 | 1.36 | 9.2 - 9.6 |
+| published, `scan-threads` 2 (tokenising only) | 0.65 | 1.02 | 7.2 - 7.5 |
+| packing, `scan-threads` 2 | 0.48 - 0.56 | 0.73 | **5.8 - 6.2** |
+| packing, `scan-threads` 3 | 0.50 - 0.55 | 0.73 | 5.7 - 6.0 |
+
+The load path is 1.8 times (Std, cedar) and 1.6 times (mathlib) shorter than the published
+one-thread load and 1.2 - 1.4 times shorter than the published load with scanner threads. Mathlib
+with two scanner threads is under the 7 s target, also in the first load of a process (6.8 s). A third
+scanner thread buys nothing on quiet cores: the linking thread is the limit again.
+
+**2. Warm passes, 8 and 7 workers on 8 cores** (pass wall / loader thread, s; JVM: median of passes
+2 - 7; native image: of passes 2 - 5; mathlib: the better of passes 2 and 3; each cell one row, a
+second row of the same configuration after a comma):
+
+| Pass wall / loader, s | Std | cedar | mathlib |
+|---|--:|--:|--:|
+| JVM, 8 workers, published, default reader | 1.67 / 1.09, 1.61 / 1.11 | 2.06 / 1.70, 2.17 / 1.72 | 20.56 / 12.84 |
+| JVM, 8 workers, published, `scan-threads` 2 | 1.67 / 1.25, 1.60 / 1.18 | 2.04 / 1.65, 2.12 / 1.79 | - |
+| JVM, 8 workers, packing, 2 scanner threads | 1.64 / 1.04, 1.68 / 1.02 | 2.09 / 1.77, 2.10 / 1.61 | 21.05 / 11.11 |
+| JVM, 8 workers, packing, 3 scanner threads | 1.64 / 0.90 | 2.08 / 1.64 | - |
+| JVM, 7 workers, published, default reader | 1.49 / 1.08 | 2.24 / 1.59 | - |
+| JVM, 7 workers, packing, 2 scanner threads | 1.56 / 0.97 | 1.94 / 1.37 | 22.66 / 10.75 |
+| JVM, 7 workers, packing, 3 scanner threads | 1.52 / 0.89 | 2.10 / 1.35 | - |
+| native, 8 workers, published, default reader | 1.81 / 1.37 | 2.50 / 2.20 | 27.38 / 15.37 |
+| native, 8 workers, packing, 2 scanner threads | 1.85 / 1.08 | 2.51 / 2.05 | 28.23 / 13.84 |
+| native, 8 workers, packing, 3 scanner threads | 1.81 / 1.27 | 2.44 / 1.74 | - |
+| native, 7 workers, published, default reader | 1.88 / 1.28 | 2.45 / 1.90 | - |
+| native, 7 workers, packing, 2 scanner threads | 1.92 / 0.94 | 2.56 / 1.82 | 31.03 / 13.73 |
+
+Seven passes are too few for the packing rows on the JVM: the new code is compiled by two compiler
+threads that share the cores with eight workers, and the loader's time still falls until pass 6.
+Twelve passes of one process (the JFR runs of point 4, loader thread per pass, ms): Std published
+1700 1499 1250 1085 1218 1216 1253 1166 1072 1137 1112 1130, packing 1816 1509 1261 878 826 763 833
+758 789 765 751 780; cedar published 2713 1930 1866 1734 1953 1810 1786 1733 1720 1617 1737 1695,
+packing 2585 1642 1721 1803 1661 1471 1303 1170 1143 1283 1151 1282. Steady state beside 8 workers:
+**Std 1.13 -> 0.77 s, cedar 1.70 -> 1.2 s**.
+
+**3. Spare cores** (4 workers on the 8 cores, JVM, median of passes 2 - 7): the loader thread has a
+core of its own and its wall clock is its work:
+
+| 4 workers: pass wall / loader, s | Std | cedar |
+|---|--:|--:|
+| published, default reader | 2.25 / 0.89 | 3.17 / 1.37 |
+| published, `scan-threads` 2 | 2.18 / 0.67 | 3.01 / 1.10 |
+| packing, 2 scanner threads | 2.21 / **0.46** | 3.08 / **0.78** |
+| packing, 3 scanner threads | 2.27 / 0.47 | 2.92 / 0.78 |
+
+**4. Where the loader thread's time goes** (JFR, CPU-time samples every 1 ms, warm JVM passes with 8
+workers on quiet cores, recording from the 14th / 18th second on; `work/lp2/jfr/*-q-*.jfr`,
+`work/lp2/jfrsum.py`; share of the loading thread's CPU time by class):
+
+| Loading thread, 8 workers | Std published | Std packing | cedar published | cedar packing |
+|---|--:|--:|--:|--:|
+| reader: `Scanner` + `read` (+ `Tape` replay with scanner threads) | 32.1 % | 4.5 % | 31.3 % | 4.4 % |
+| `Loader` (segment, pending references, sweep, runs) | 15.6 % | 16.6 % | 16.3 % | 17.1 % |
+| `ProofBlocks` (promotion) | 12.6 % | 18.9 % | 11.4 % | 17.4 % |
+| `NameTable` | 10.2 % | 15.7 % | 13.8 % | 19.7 % |
+| block writer (`ProofBlocks$WriterImpl`) | 9.3 % | 14.4 % | 7.7 % | 11.9 % |
+| shared nodes (`TermStore`, `NodeCtx`) | 10.2 % | 18.6 % | 10.6 % | 17.9 % |
+| `IdSpace`, `Linker` | 3.4 % | 4.9 % | 3.2 % | 5.7 % |
+| CPU samples of the loading thread in the recording | 7,723 | 4,723 | 11,485 | 4,894 |
+| CPU samples of the two scanner threads | - | 4,607 | - | 4,459 |
+
+The loading thread needs 0.6 times the CPU it needed on Std and 0.43 times on cedar; the scanner
+threads take as much again between them. What is left on the loading thread is what numbers shared
+structures and therefore has to stay in file order: names, promotion, shared nodes, the references
+of proofs that the scanner threads could not resolve, the records that are not proof-private.
+
+**5. Reading.**
+
+- On quiet cores, and whenever the loading thread has a core (4 workers), the packing nearly
+  halves the load: the loader is busy for 21 % (Std) and 25 % (cedar) of a pass instead of 40 - 43 %.
+- **With 8 workers on 8 cores it changes the pass by nothing measurable** (Std 1.64 - 1.68 against
+  1.61 - 1.67 s; cedar 2.09 - 2.10 against 2.06 - 2.17; mathlib 21.05 against 20.56, one row each).
+  Such a pass is bound by its total CPU time (CPU / wall 7.1 - 7.4 of 8 cores), of which the whole
+  load is a tenth, and the packing moves that tenth between threads, it does not remove it. The
+  loader thread's own wall clock there is set by the share of a core it gets and by the caches it
+  shares with eight workers (its CPU time beside them is 1.2 - 1.35 times its time alone): steady
+  state Std 1.13 -> 0.77 s (47 % of the pass), cedar 1.70 -> 1.2 s (57 %); the per-pass values of one
+  row scatter between 0.55 and 1.33 s on Std. The target "less than half of a warm 8-worker pass" is
+  reached on Std and missed on cedar; with 7 workers it is 0.62 / 0.70 of the pass in the 7-pass
+  rows. Mathlib: 12.8 -> 11.1 s of a 21 s pass on the JVM (0.53), 15.4 -> 13.8 s of 28 s in the
+  image (0.49).
+- So the loader is no longer what bounds a pass in which checking leaves a core free, and it is not
+  what bounds today's 8-worker passes either: those wait for less checking CPU.
+- Published scanner threads without packing do not help beside 8 workers (Std 1.09 -> 1.18 - 1.25 s
+  of loader time, cedar 1.70 -> 1.65 - 1.79): two more threads on full cores for a quarter less work
+  on the loading thread.
+
+**6. The smaller questions.**
+
+- *Touch hint* (wave 7, published unmeasured): KEPT. Three alternating pairs of processes on Std and
+  on cedar and one on mathlib, load alone, hint on against off (medians of the later loads, s): Std
+  0.51 / 0.48 / 0.51 against 0.53 / 0.53 / 0.52; cedar 0.77 / 0.71 / 0.76 against 0.79 / 0.79 / 0.82;
+  mathlib 5.8 - 6.0 against 6.0 - 6.2. On is faster in every pair, by 2 - 10 %. Its switch is removed.
+- *`-X io=mapped` against the default reader, one thread, published jars, 8 workers* (first windows,
+  `work/lp2/dist-base`): Std 1.54 / 1.06 against 1.64 / 1.21 s, cedar 2.10 / 1.68 against 2.18 / 1.64;
+  with 7 workers 1.51 / 1.02 against 1.62 / 1.12 and 2.15 / 1.65 against 2.10 / 1.63: no difference
+  beyond the spread between rows.
+- *Publication interval* (packing, 2 scanner threads, 8 workers; default 4,096 units / 32 MiB): 1,024
+  units / 8 MiB Std 1.54 / 0.93, cedar 1.90 / 1.37; 16,384 units / 128 MiB Std 1.55 / 0.91, cedar
+  2.14 / 1.35. One row each in one window; against the default rows of another window (1.64 - 1.68,
+  2.09 - 2.10) the differences are of the size of the spread between windows: NOT RESOLVED, the
+  default stays.
+- *7 workers against 8 on 8 cores*: no winner on Std and cedar (JVM 1.49 - 1.56 against 1.61 - 1.68
+  and 1.94 - 2.24 against 2.04 - 2.17), 8 better on mathlib (21.05 against 22.66 s) and in the image
+  (cedar 2.51 against 2.56, mathlib 28.2 against 31.0): 8 workers stay.
 
 ## Observations for the next work packages
 

@@ -2,8 +2,9 @@
 
 2026-11-24. Prototype and evidence: `work/e1/` (tree `work/e1/tree/rlvm-machine`, patches `work/e1/patches/`,
 hostile exports `work/e1/exports/` with official verdicts in `work/e1/manifest.tsv`, living summary
-`work/status/prof-E1.md`). The main tree is unchanged: the mechanism is a patch behind the switch `eager`
-(`Op.SW_EAGER`, bit 26; off = the published rule M6-F26, a declaration that enters eager reduction is declined).
+`work/status/prof-E1.md`). The mechanism is behind the switch `eager` (`Op.SW_EAGER`, bit 26; off = the published
+rule M6-F26, a declaration that enters eager reduction is declined). **Status 2026-11-24T21:58Z: PUBLISHED in the main
+tree, switch OFF by default (section 9); sections 1 - 8 describe the prototype as it was gated before the rebase.**
 
 Ground truth everywhere: the official checker (`leanchecker --from-export`, Lean v4.36.0, in the arena Docker
 image, `work/e1/official.sh`), and `refs/lean4/src/kernel/type_checker.cpp` for the reading of the procedure.
@@ -331,3 +332,35 @@ The eager patches are relative to the main tree + the let patch (`work/e1/let-tr
 and my tool `E1Hostile.java`, which are not delivered. With the switch off nothing changes but the name of one
 condition (`Machine.erStop` is what `erSeen && erDeclines` was); the switch is not part of `all` or of the default
 set. To make it the default: `Op.SW_DEFAULT |= SW_EAGER` after the owners' gates (mutants, native image, timing).
+
+## 9. Publication in the main tree (2026-11-24T21:57:52Z, machine jar `33914d3530cf`)
+
+The patches were rebased (three-way merge, one conflict in `Reduce.k_iota3`) on the main tree that has the fix of the
+wrong ACCEPTs E1-F1 .. E1-F6 (publication of 21:26:43Z, jar `5945b6568177`; `rlvm-machine/NOTES-M5.md`) and published
+as a publication of their own: `Op`, `Debug`, `Layout`, `Machine`, `MachineSession`, `MachineEngine`, `Conv`, `Infer`
+(`twD`), `Code` (`targConv`), `Decl`, `Reduce`, `SWITCHES.md`; tests `SHostileEagerTest` (new, fast group),
+`SHostileSlowTest` (six eager sets), `M8Harness`, the note `eager-hard` in `s/manifest.tsv`. The switch is OFF by
+default: with the default set the differential is what it was (Std 204, Cedar slice 11, Init 164 declines).
+
+Gate of the published sources (frozen copy `work/e1/frozen/e10`), switch set `default,eager`, per declaration against
+the reference engine: tutorial 395, bugs 1,428, Cedar slice 8,418, reachability 4,413, Init 58,547, all 230 tests
+17,493: DIFF-CLEAN, 0 declines; Std 101,145 of 101,146 and the 16 Mathlib slices 436,404 of 436,408 (the five units are
+declined by the E1-F6 rule of the fix, not by eager reduction); SOUNDNESS 0, COMPLETENESS 0. Fast group 415 tests, 0
+failures. Hostile matrix, 33 switch sets (each with `eager`) x 419 rows = 13,827 judgments: the only flagged rows are
+the three rows of the open finding E1-F7, which is not about eager reduction (below); 21 or 22 rows per set are
+declined by design.
+
+What the rebase changed: the two rows `warm-eager-pair-alone-bad` and `warm-pos-across-declarations-eager-bad` are no
+longer declined (`eager-hard` removed, 18 rows keep it). Their eager argument sits in a beta-redex; before the fix the
+machine typed the redex body under the ARGUMENT's type and so ran one comparison in the plain phase that the official
+kernel never runs - the recorded point with two answers. With the redex typed by its binder's declared domain (E1-F2)
+that comparison is gone and the deferred eager comparison fails as it does officially: the machine rejects.
+
+Open and NOT closed by this work (board 21:3xZ / 21:4xZ, `NOTES-M5.md` "E1-F7"): the machine still accepts three
+exports the official checker rejects (`e1-sib-proj-applied-let-pi-bad`, `e1-sib-proj-redex-pi-bad`,
+`e1-sib-krule-major-redex-bad`; rows of the S manifest with the mark `bind`). The official kernel infers the type of a
+term it has not reduced (the raw major premise of the K rule, the struct of a stuck projection) through the declared
+domain of an uncontracted redex or the declared type of a let variable; the machine's type of the VALUE is only
+convertible with it. This is independent of the switch `eager`, and it is the reason (with S3-F1 / S3-F3) why the
+machine's priority stays 10.
+

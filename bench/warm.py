@@ -72,7 +72,35 @@ BASELINES = {
 }
 COLUMNS = ["utc", "quiet", "corpus", "what", "launcher", "workers", "load", "mode", "passes", "verdict",
            "best_later_s", "median_later_s", "pass1_s", "cold_wall_s", "cpu_median_s", "gc_median_ms",
-           "peak_rss_mib", "cold_cpu_s", "cold_rss_mib", "walls_s", "loadavg", "label"]
+           "peak_rss_mib", "cold_cpu_s", "cold_rss_mib", "walls_s", "loadavg", "label", "dist", "build"]
+# dist / build (since 2026-11-24T22Z; older rows end with "label"): the distribution's path below the
+# project root and what it is - the "built:" time of its BUILD-INFO.txt and the first 12 hex digits of
+# the sha256 over its RLVM jars (the id scripts/build.sh gives a versioned distribution) - so that a
+# table can say for every row which jars it measured (docs/BENCHMARKS.md).
+
+
+def build_id(dist):
+    """'<built time>/<sha256 prefix of the RLVM jars>' of a distribution, '' if it cannot be read."""
+    import glob
+    import hashlib
+    built = ""
+    try:
+        with open(os.path.join(dist, "BUILD-INFO.txt")) as f:
+            for line in f:
+                if line.startswith("built:"):
+                    built = line.split()[1]
+                    break
+    except OSError:
+        pass
+    h = hashlib.sha256()
+    jars = sorted(glob.glob(os.path.join(dist, "lib", "rlvm-*.jar")))
+    try:
+        for j in jars:
+            with open(j, "rb") as f:
+                h.update(f.read())
+    except OSError:
+        return built
+    return f"{built}/{h.hexdigest()[:12]}" if jars else built
 
 
 def corpus_path(name):
@@ -268,6 +296,9 @@ def main():
         os.execv(os.path.join(ROOT, "bench", "quiet.py"),
                  [os.path.join(ROOT, "bench", "quiet.py"), "--", sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
     args.dist = os.path.abspath(args.dist)
+    # A versioned distribution (work/dist -> work/dist.d/<version>): the row names the version measured.
+    real_dist = os.path.realpath(args.dist)
+    build = "" if args.baseline else build_id(real_dist)
     os.makedirs(args.logs, exist_ok=True)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     env = dict(os.environ)
@@ -282,6 +313,9 @@ def main():
             row["utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             row["quiet"] = "quiet" if quiet else "loaded"
             row["loadavg"] = load
+            if not args.baseline:
+                row["dist"] = os.path.relpath(real_dist, ROOT) if real_dist.startswith(ROOT + os.sep) else real_dist
+                row["build"] = build
             rows.append(row)
             new = not os.path.exists(args.out)
             with open(args.out, "a") as f:

@@ -383,6 +383,23 @@ Nothing here changes a word of what a load builds (differential digest, `work/lp
    packing, with `seek` 1.8 %). The sparse index and the block rows are what they were. Cost: one
    byte per block record while loading (mathlib 78 MB).
 
+### Exactness and allocation items taken on 2026-11-24 (LP2)
+
+- **`LitPool.addNat` / `addString` on a worker pool look in the worker's own table first** (R2): a
+  value a worker has already interned keeps its index for the rest of the declaration. Before, the
+  shared pool was asked first, with the limit "published now": under a pipelined load a value could
+  get the worker's negative index at its first use and the shared index at the second, when the
+  loader thread had published it in between - two node ids for one literal inside one declaration,
+  depending on thread timing. Nothing changes for the loader's own pool.
+- **V1's two patches** (`work/v1/patches/rlvm-store-LP2`, findings F-V1-S1 / S2; worker side only):
+  the overlay's index tables go round a small pool instead of being allocated at every `resetTo` and
+  doubling (2.4 GB of the 13.8 GB that 8 workers allocate in one pass over mathlib), and
+  `TermOps`' rewriter memo keeps the scratch of `widen` (1.5 GB).
+- **Not in the store yet: the `nondep` flag of a LET** (finding R2-F1): it is part of the official
+  term identity and the store does not keep it; the plan agreed with R2 (header bit 12 on LET nodes,
+  tag bit of the block record, `Overlay.mkLet` with the flag, a second tag for the packed runs) and
+  how such a change is gated are in `work/status/requests.log`, LP2's answer of 22:1xZ.
+
 ## Tests
 
 68 tests in 12 classes (`src/test/java/rlvm/store`), all green; one of them opt-in (it was run and passes).

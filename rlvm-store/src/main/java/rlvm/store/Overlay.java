@@ -267,7 +267,7 @@ public final class Overlay {
      * and recounts them.
      */
     private void rehash(int cap) {
-        int[] t = new int[cap];
+        int[] t = takeIndex(cap);
         int mask = cap - 1;
         int[] o = ov;
         int b = 0;
@@ -293,8 +293,52 @@ public final class Overlay {
             t[i] = idx | (h & TAG_MASK);
             count++;
         }
+        int[] old = table;
         table = t;
         hashed = count;
+        giveIndex(old);
+    }
+
+    /**
+     * Retired index tables by log2 size, EVERY ONE ALL ZERO (V1 finding F-V1-S1). The index is cut back to
+     * KEEP_TABLE slots whenever a reset leaves it nearly empty (it must fit the cache for the small
+     * declarations) and doubles again under the next larger one; each of those steps allocated a new table:
+     * 2.4 GB of the 13.8 GB that 8 workers allocate in one pass over mathlib, nearly all of it in the lanes of
+     * the reference kernel (one {@code resetTo} per declaration). With the pool the same tables go round.
+     * Tables of up to 2^POOL_MAX slots (1 MiB) are kept: 2 MiB per overlay at most. (A first version kept
+     * tables up to 4 MiB here and up to 8 MiB per map in rlvm-ref: with 8 workers, three lanes each, the image
+     * ran out of a 4 GB heap on mathlib.)
+     */
+    private static final int POOL_MAX = 18;
+    private final int[][] indexPool = new int[POOL_MAX + 1][];
+
+    /** An all-zero index of {@code cap} slots: the pooled one, or a new array. */
+    private int[] takeIndex(int cap) {
+        int k = Integer.numberOfTrailingZeros(cap);
+        if (k <= POOL_MAX && cap == 1 << k) {
+            int[] t = indexPool[k];
+            if (t != null) {
+                indexPool[k] = null;
+                return t;
+            }
+        }
+        return new int[cap];
+    }
+
+    /** Zeroes the retired index {@code t} and keeps it (unless it is too large or its size is already kept). */
+    private void giveIndex(int[] t) {
+        int k = Integer.numberOfTrailingZeros(t.length);
+        if (k <= POOL_MAX && t.length == 1 << k && indexPool[k] == null) {
+            Arrays.fill(t, 0);
+            indexPool[k] = t;
+        }
+    }
+
+    /** Replaces the index by an all-zero one of {@code cap} slots. */
+    private void freshIndex(int cap) {
+        int[] old = table;
+        table = takeIndex(cap);
+        giveIndex(old);
     }
 
     // ---- constructors ------------------------------------------------------------------------------
@@ -705,7 +749,7 @@ public final class Overlay {
     /** Empties the index after {@code forgotten} nodes (all of them) were dropped. */
     private void clearTable(int forgotten) {
         if (table.length > KEEP_TABLE) {
-            table = new int[KEEP_TABLE];
+            freshIndex(KEEP_TABLE);
         } else if (forgotten * 32L < table.length) {
             // few nodes in a larger index: looking each one up is cheaper than clearing all slots
             removeFromTable(1, 0);
@@ -764,12 +808,12 @@ public final class Overlay {
             // a session that ends full keeps an index of its size for the next one
             int want = Math.max(KEEP_TABLE, Integer.highestOneBit(used) << 2);
             if (table.length > want * 4) {
-                table = new int[want];
+                freshIndex(want);
             } else {
                 Arrays.fill(table, 0);
             }
         } else if (table.length > KEEP_TABLE) {
-            table = new int[KEEP_TABLE];
+            freshIndex(KEEP_TABLE);
         }
         if (ov.length > KEEP_INTS) {
             ov = new int[KEEP_INTS];

@@ -54,7 +54,7 @@ final class Debug {
     private static final String[] MODES = {"memocheck", "shortcheck", "poison", "scopeaudit", "maskaudit", "sharecheck",
         "pubcheck", "trace"};
     private static final String[] SWITCHES = {"gated", "pchk", "expect", "warm", "facts", "tele", "code", "casetrees",
-        "probes", "k2", "inert", "m1a", "m1b", "m2a", "m2b", "m3a", "m3b", "m4a", "m4b", "m5a", "m5b", "m7a", "m7b", "t2", "lazyeval", "levels-complete"};
+        "probes", "k2", "inert", "m1a", "m1b", "m2a", "m2b", "m3a", "m3b", "m4a", "m4b", "m5a", "m5b", "m7a", "m7b", "t2", "lazyeval", "levels-complete", "eager"};
 
     /**
      * Second names of switch bits ({@code Op.SW_MATCH = SW_M5A}, {@code SW_JOINT = SW_M5B}, {@code SW_SAME = SW_M4A},

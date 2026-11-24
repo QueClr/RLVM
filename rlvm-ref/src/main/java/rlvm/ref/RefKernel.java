@@ -134,6 +134,20 @@ public final class RefKernel implements KernelOps {
      * which is a function of {@code e} and is not built here (see {@link #unfoldWhnfCore}).
      */
     private final IntIntMap unfoldWhnfCache = new IntIntMap();
+    /**
+     * Lambda value of a definition -> the first constant reference with that value that was unfolded
+     * under arguments in this declaration. The official key of an {@link #unfoldWhnfCache} entry is
+     * the term {@code value a1 .. an}; it is kept under {@code c a1 .. an} for THIS reference c, so
+     * that two constants with one value (or one constant at two level lists that instantiate to one
+     * value) share their entries as they do officially.
+     */
+    private final IntIntMap valueOwner = new IntIntMap();
+    /**
+     * Lambdas that are the head of an explicit beta redex for which a full {@code whnf_core} may have
+     * written an {@link #whnfCoreCache} entry. If such a lambda is also the value of a definition,
+     * the unfolding of that definition has to look the explicit term up ({@link #unfoldWhnfCore}).
+     */
+    private final IntIntMap explicitLam = new IntIntMap();
 
     // ---- own tables -----------------------------------------------------------------------------------
     /** Any term id -> its canonical copy. */
@@ -197,6 +211,23 @@ public final class RefKernel implements KernelOps {
     /** Out-parameters of {@link #lazyDeltaStep} and {@link #lazyDeltaReduction} (the official {@code expr &}). */
     private int outT;
     private int outS;
+    /**
+     * Object identity (README, "Object identity"). A stuck projection is FRESH while the object the
+     * official kernel holds for it is not the object of an {@code m_whnf_core} entry: the cheap
+     * {@code whnf_core} computed it as stuck by itself (no entry answered) and no full
+     * {@code whnf_core} of this very object has written the entry since. {@link #wcFresh} is that
+     * fact about the result of the last {@link #whnfCore} / {@link #unfoldWhnfCore} call;
+     * {@link #outTFresh} / {@link #outSFresh} go with {@link #outT} / {@link #outS}.
+     */
+    private boolean wcFresh;
+    private boolean outTFresh;
+    private boolean outSFresh;
+    /** {@link RefOptions#identity}. */
+    private final int identityMode;
+    /** Times the official answer depended on object identity (see {@link #isDefEqCore}, step 10). */
+    private long statIdentityEvents;
+    /** Set when a judgment was declined for that reason, for the session's message. */
+    private boolean identityDeclined;
 
     /** Set when a StackOverflowError was caught: the worker context may have been left mid-update. */
     private boolean overflowed;
@@ -218,6 +249,7 @@ public final class RefKernel implements KernelOps {
                     "rlvm-ref implements the v4.36 kernel only; profile " + config.profile + " is deferred");
         }
         this.officialLevels = options.officialLevels;
+        this.identityMode = options.identity;
         // Strict mode: no cache that survives a unit (RECONCILIATION.md section 2, facade).
         boolean keep = options.importBytes >= 32L && (config == null || !config.strict);
         this.imports = keep ? new ImportCache() : null;
@@ -272,6 +304,7 @@ public final class RefKernel implements KernelOps {
         whnfCoreCache.clear();
         whnfCache.clear();
         unfoldWhnfCache.clear();
+        explicitLam.clear();
         success.clear();
         failure.clear();
     }
@@ -401,7 +434,8 @@ public final class RefKernel implements KernelOps {
     /** Bytes of the kernel's own tables (the overlay is accounted by the {@link WorkerContext}). */
     public long tableBytes() {
         return inferCheckCache.bytes() + inferOnlyCache.bytes() + whnfCoreCache.bytes() + whnfCache.bytes()
-                + success.bytes() + failure.bytes() + unfoldCache.bytes() + unfoldWhnfCache.bytes() + canonMemo.bytes()
+                + success.bytes() + failure.bytes() + unfoldCache.bytes() + unfoldWhnfCache.bytes()
+                + valueOwner.bytes() + explicitLam.bytes() + canonMemo.bytes()
                 + letValues.bytes()
                 + instCache.bytes() + instMemo.bytes() + ((long) stk.length << 2) + ((long) lstk.length << 2)
                 + ((long) prefixTypes.length << 2)
@@ -427,6 +461,8 @@ public final class RefKernel implements KernelOps {
         whnfCoreCache.clear();
         whnfCache.clear();
         unfoldWhnfCache.clear();
+        valueOwner.clear();
+        explicitLam.clear();
         success.clear();
         failure.clear();
         unfoldCache.clear();
@@ -1563,16 +1599,23 @@ public final class RefKernel implements KernelOps {
                 break;
             case Kind.FVAR:
                 if (letValues.get(e0) == 0) {
+                    wcFresh = false;
                     return e0;
                 }
                 break;
             default:
+                wcFresh = false;
                 return e0;
         }
         enter();
         int base = sp;
         int e = e0;
         int r;
+        // True when the official result of this call is a stuck projection that is NOT the object of
+        // its m_whnf_core entry: a cheap call that found it stuck itself (it returns its argument and
+        // stores nothing), or a full call that found it stuck while a nested call had already stored
+        // an entry for the same term (the insert below does not replace it).
+        boolean fresh = false;
         loop:
         for (;;) {
             k = terms.kind(e);
@@ -1609,8 +1652,10 @@ public final class RefKernel implements KernelOps {
                     int m = reduceProj(e, cheapProj);
                     push(e);
                     if (m == 0) {
-                        // Stuck: the ORIGINAL term, with the structure untouched.
+                        // Stuck: the ORIGINAL term, with the structure untouched. A full call stores
+                        // (e, e) below; a cheap one returns its own argument and stores nothing.
                         r = e;
+                        fresh = cheapProj;
                         break loop;
                     }
                     e = m;
@@ -1624,6 +1669,23 @@ public final class RefKernel implements KernelOps {
                 }
                 default: {
                     int f0 = ops.head(e);
+                    if (terms.kind(f0) == Kind.LAM) {
+                        // An explicit redex `V a1 .. an`. If V is the value of a definition that was
+                        // unfolded in this declaration, the official entry of this very term may have
+                        // been written through the unfolding, which keeps it under `c a1 .. an`
+                        // (unfoldWhnfCore): the look-up of this frame covers that table too.
+                        int owner = valueOwner.get(f0);
+                        if (owner != 0) {
+                            int hit = unfoldWhnfCache.get(withHead(e, owner));
+                            if (hit != 0) {
+                                r = hit;
+                                break loop;
+                            }
+                        }
+                        if (!cheapProj) {
+                            explicitLam.put(f0, 1);
+                        }
+                    }
                     int f = whnfCore(f0, cheapProj);
                     if (terms.kind(f) == Kind.LAM) {
                         // Multi-argument beta with one instantiation.
@@ -1665,11 +1727,28 @@ public final class RefKernel implements KernelOps {
         }
         if (!cheapProj) {
             for (int i = base; i < sp; i++) {
-                whnfCoreCache.put(stk[i], r);
+                // The official insert never replaces an entry (one that a nested call wrote meanwhile stays).
+                int key = stk[i];
+                if (whnfCoreCache.get(key) == 0) {
+                    whnfCoreCache.put(key, r);
+                } else if (key == r) {
+                    fresh = true;
+                }
             }
         }
         sp = base;
         depth--;
+        wcFresh = fresh;
+        return r;
+    }
+
+    /** The application {@code e} with its head replaced by {@code head}. */
+    private int withHead(int e, int head) {
+        int n = terms.spineLength(e);
+        int ab = alloc(n);
+        terms.spine(e, stk, ab);
+        int r = mkApps(head, ab, n);
+        sp = ab;
         return r;
     }
 
@@ -1997,7 +2076,8 @@ public final class RefKernel implements KernelOps {
         if (terms.kind(e) != Kind.APP) {
             return whnfCore(unfoldCore(e), cheapProj);
         }
-        int value = unfoldCore(ops.head(e));
+        int head = ops.head(e);
+        int value = unfoldCore(head);
         int n = terms.spineLength(e);
         if (terms.kind(value) != Kind.LAM) {
             int base = alloc(n);
@@ -2006,9 +2086,29 @@ public final class RefKernel implements KernelOps {
             sp = base;
             return whnfCore(app, cheapProj);
         }
-        int cached = unfoldWhnfCache.get(e);
+        // The official key is the term `value a1 .. an`. It stands under `c a1 .. an` for the first
+        // reference c with this value (valueOwner), so that another constant with the same value, or
+        // the same constant at other levels with the same instantiated value, finds the entry too.
+        int key = e;
+        int owner = valueOwner.get(value);
+        if (owner == 0) {
+            valueOwner.put(value, head);
+        } else if (owner != head) {
+            key = withHead(e, owner);
+        }
+        int cached = unfoldWhnfCache.get(key);
         if (cached != 0) {
+            wcFresh = false;
             return cached;
+        }
+        if (explicitLam.get(value) != 0) {
+            // The explicit term `value a1 .. an` went through a full whnf_core in this declaration and
+            // may have its entry in whnfCoreCache: take the official path, with the term built.
+            int base = alloc(n);
+            terms.spine(e, stk, base);
+            int app = mkApps(value, base, n);
+            sp = base;
+            return whnfCore(app, cheapProj);
         }
         tick();
         int base = alloc(n);
@@ -2022,8 +2122,8 @@ public final class RefKernel implements KernelOps {
         int next = mkApps(instRev(body, base, m), base + m, n - m);
         sp = base;
         int r = whnfCore(next, cheapProj);
-        if (!cheapProj) {
-            unfoldWhnfCache.put(e, r);
+        if (!cheapProj && unfoldWhnfCache.get(key) == 0) {
+            unfoldWhnfCache.put(key, r);
         }
         return r;
     }
@@ -2168,6 +2268,18 @@ public final class RefKernel implements KernelOps {
         boolean r = cycled;
         cycled = false;
         return r;
+    }
+
+    /** True (once) if the last UNSUPPORTED_INPUT decline was an object-identity decline. */
+    boolean takeIdentityDeclined() {
+        boolean r = identityDeclined;
+        identityDeclined = false;
+        return r;
+    }
+
+    /** Times a comparison reached a point where the official answer depends on object identity. */
+    long identityEvents() {
+        return statIdentityEvents;
     }
 
     // =====================================================================================================
@@ -2395,13 +2507,23 @@ public final class RefKernel implements KernelOps {
     }
 
     /** {@code try_unfold_proj_app}: {@code e = s.i ..} that whnf_core can reduce. */
-    private int tryUnfoldProjApp(int e) {
+    private int tryUnfoldProjApp(int e, boolean fresh) {
         int f = ops.head(e);
         if (terms.kind(f) != Kind.PROJ) {
+            wcFresh = fresh;
             return 0;
         }
+        // Object identity: a full whnf_core on the object itself. If an entry answers, the object is
+        // what it was; if the call computes, the object wrote the entry (unless a nested call did).
+        boolean answered = whnfCoreCache.get(e) != 0;
         int n = whnfCore(e, false);
-        return n != e ? n : 0;
+        if (n != e) {
+            return n;
+        }
+        if (answered) {
+            wcFresh = fresh;
+        }
+        return 0;
     }
 
     private static boolean hintIsRegular(int hint) {
@@ -2442,29 +2564,36 @@ public final class RefKernel implements KernelOps {
 
     /**
      * {@code lazy_delta_reduction_step}. Returns CONTINUE, UNKNOWN, EQUAL or DIFF and leaves the
-     * updated terms in {@link #outT} / {@link #outS}.
+     * updated terms in {@link #outT} / {@link #outS}, and whether each is a fresh projection object
+     * (see {@link #wcFresh}) in {@link #outTFresh} / {@link #outSFresh}.
      */
-    private int lazyDeltaStep(int tn, int sn) {
+    private int lazyDeltaStep(int tn, int sn, boolean tFresh, boolean sFresh) {
         int dt = deltaCid(ops.head(tn));
         int ds = deltaCid(ops.head(sn));
         if (dt == 0 && ds == 0) {
             outT = tn;
             outS = sn;
+            outTFresh = tFresh;
+            outSFresh = sFresh;
             return UNKNOWN;
         } else if (dt != 0 && ds == 0) {
             // If sn is a projection application, try to unfold it instead of the expensive side.
-            int snNew = tryUnfoldProjApp(sn);
+            int snNew = tryUnfoldProjApp(sn, sFresh);
+            sFresh = wcFresh;
             if (snNew != 0) {
                 sn = snNew;
             } else {
                 tn = unfoldAndWhnfCore(tn);
+                tFresh = wcFresh;
             }
         } else if (dt == 0) {
-            int tnNew = tryUnfoldProjApp(tn);
+            int tnNew = tryUnfoldProjApp(tn, tFresh);
+            tFresh = wcFresh;
             if (tnNew != 0) {
                 tn = tnNew;
             } else {
                 sn = unfoldAndWhnfCore(sn);
+                sFresh = wcFresh;
             }
         } else {
             int ht = hintOf(dt);
@@ -2472,8 +2601,10 @@ public final class RefKernel implements KernelOps {
             int c = compareHints(ht, hs);
             if (c < 0) {
                 tn = unfoldAndWhnfCore(tn);
+                tFresh = wcFresh;
             } else if (c > 0) {
                 sn = unfoldAndWhnfCore(sn);
+                sFresh = wcFresh;
             } else {
                 if (terms.kind(tn) == Kind.APP && terms.kind(sn) == Kind.APP && dt == ds && hintIsRegular(ht)) {
                     // Same regular definition on both sides: compare the arguments before unfolding.
@@ -2481,18 +2612,24 @@ public final class RefKernel implements KernelOps {
                         if (levelsEquiv(terms.b(ops.head(tn)), terms.b(ops.head(sn))) && isDefEqArgs(tn, sn)) {
                             outT = tn;
                             outS = sn;
+                            outTFresh = tFresh;
+                            outSFresh = sFresh;
                             return EQUAL;
                         }
                         failure.add(tn, sn);
                     }
                 }
                 tn = unfoldAndWhnfCore(tn);
+                tFresh = wcFresh;
                 sn = unfoldAndWhnfCore(sn);
+                sFresh = wcFresh;
             }
         }
         int q = quick(tn, sn);
         outT = tn;
         outS = sn;
+        outTFresh = tFresh;
+        outSFresh = sFresh;
         return q == TRUE ? EQUAL : q == FALSE ? DIFF : CONTINUE;
     }
 
@@ -2551,8 +2688,11 @@ public final class RefKernel implements KernelOps {
         return isDefEqCore(pt, ps) ? TRUE : FALSE;
     }
 
-    /** {@code lazy_delta_reduction}; the updated terms are left in {@link #outT} / {@link #outS}. */
-    private int lazyDeltaReduction(int tn, int sn) {
+    /**
+     * {@code lazy_delta_reduction}; the updated terms are left in {@link #outT} / {@link #outS} and,
+     * when the answer is UNDEF, their freshness in {@link #outTFresh} / {@link #outSFresh}.
+     */
+    private int lazyDeltaReduction(int tn, int sn, boolean tFresh, boolean sFresh) {
         int seenT = tn;
         int seenS = sn;
         int lap = 0;
@@ -2580,9 +2720,11 @@ public final class RefKernel implements KernelOps {
                     return b ? TRUE : FALSE;
                 }
             }
-            int st = lazyDeltaStep(tn, sn);
+            int st = lazyDeltaStep(tn, sn, tFresh, sFresh);
             tn = outT;
             sn = outS;
+            tFresh = outTFresh;
+            sFresh = outSFresh;
             switch (st) {
                 case CONTINUE:
                     break;
@@ -2612,7 +2754,8 @@ public final class RefKernel implements KernelOps {
         int lap = 0;
         int lapLength = 1;
         for (;;) {
-            int st = lazyDeltaStep(a, b);
+            // The structures are not asked for again by a second whnf_core here: no freshness to track.
+            int st = lazyDeltaStep(a, b, false, false);
             a = outT;
             b = outS;
             switch (st) {
@@ -2703,8 +2846,11 @@ public final class RefKernel implements KernelOps {
             }
             // 3. whnf_core without delta and with cheap projections
             int tn = whnfCore(t, true);
+            boolean tFresh = wcFresh;
             int sn = whnfCore(s, true);
-            // 4.
+            boolean sFresh = wcFresh;
+            // 4. (The official test is on pointers: it repeats the easy cases also when a projection was
+            // answered by the entry of another object. They give the same answer for the same terms.)
             if (tn != t || sn != s) {
                 q = quick(tn, sn);
                 if (q != UNDEF) {
@@ -2719,13 +2865,15 @@ public final class RefKernel implements KernelOps {
                 break;
             }
             // 6. lazy delta reduction (updates tn, sn even when undecided)
-            q = lazyDeltaReduction(tn, sn);
+            q = lazyDeltaReduction(tn, sn, tFresh, sFresh);
             tn = outT;
             sn = outS;
             if (q != UNDEF) {
                 res = q == TRUE;
                 break;
             }
+            tFresh = outTFresh;
+            sFresh = outSFresh;
             int kt = terms.kind(tn);
             int ks = terms.kind(sn);
             // 7. the same constant
@@ -2746,13 +2894,36 @@ public final class RefKernel implements KernelOps {
                     break;
                 }
             }
-            // 10. whnf_core again, now reducing projections with full whnf
+            // 10. whnf_core again, now reducing projections with full whnf. The official test that
+            // follows is on POINTERS: `if (!is_eqp(t_n_n, t_n) || !is_eqp(s_n_n, s_n)) return
+            // is_def_eq_core(t_n_n, s_n_n)`. A term that did not change comes back as another object
+            // exactly when it is a stuck projection that an m_whnf_core entry answers and the object in
+            // hand is not that entry's (it was fresh, see wcFresh, and another call wrote the entry since).
+            boolean tOther = tFresh && whnfCoreCache.get(tn) != 0;
             int tnn = whnfCore(tn, false);
+            boolean sOther = sFresh && whnfCoreCache.get(sn) != 0;
             int snn = whnfCore(sn, false);
             if (tnn != tn || snn != sn) {
                 t = tnn;
                 s = snn;
                 continue;
+            }
+            if (tOther || sOther) {
+                // The entry was written by a full whnf_core on an occurrence of the same term. Officially
+                // the comparison goes on from here if that occurrence is the object in hand, and runs
+                // once more from the start (with everything the first pass cached) if it is another
+                // object. Which it is depends on the sharing of the export's records and on the kernel's
+                // own allocation, which canonical ids do not keep: no verdict (README, "Object identity").
+                statIdentityEvents++;
+                if (identityMode == RefOptions.IDENTITY_DECLINE) {
+                    identityDeclined = true;
+                    throw new ResourceException(Reason.UNSUPPORTED_INPUT);
+                }
+                if (identityMode == RefOptions.IDENTITY_OTHER) {
+                    t = tn;
+                    s = sn;
+                    continue;
+                }
             }
             // 11.-15.
             if (isDefEqApp(tn, sn)) {

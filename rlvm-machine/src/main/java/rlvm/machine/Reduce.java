@@ -1126,12 +1126,18 @@ final class Reduce {
         if (m.x5.zetaInexact) {
             return zetaInexact(m);
         }
+        if (m.ER != 0 && (m.sw & Op.SW_EAGER) != 0) {
+            m.ER += Op.ER_K; // [eager] the comparison of the K rule under ER: an eager-only event inside it declines (Conv.modeEvent)
+        }
         int e = Conv.conv(m, ty, r, d + 1); // call CONV(T, type of c) => 4
         return e >= SIG ? m.sig3(e, K_IOTA_4, v, major, c) : k_iota4(m, v, major, c, e, d);
     }
 
     /** Frame IOTA[4](v, major, c): r = CONV(T, type of c); T: the major is replaced by the constructor application. */
     static int k_iota4(Machine m, int v, int major, int c, int r, int d) {
+        if (m.ER >= Op.ER_K) {
+            m.ER -= Op.ER_K; // [eager] (a cut or a failure restores a saved ER instead)
+        }
         return iotaMajor(m, v, r == Layout.T ? c : major, d);
     }
 

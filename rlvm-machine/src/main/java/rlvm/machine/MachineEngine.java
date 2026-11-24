@@ -135,6 +135,13 @@ public final class MachineEngine implements Engine {
     private boolean declinesFailed;
     private long statCapResets;
     private long statEagerDeclines;
+    private long statEagerKept;
+    private long statEagerRestarts;
+    private long statEagerForgets;
+    private long statEagerSites;
+    private long statEagerEvents;
+    private long statEagerNotes;
+    private final long[] statEagerWhy = new long[Machine.ER_WHY_COUNT];
     /** Counters the packages' session states report ({@code Machine.Counters}), by name, in the order first seen. */
     private final java.util.LinkedHashMap<String, long[]> statPackage = new java.util.LinkedHashMap<>();
     private long statAllocGrows;
@@ -237,6 +244,22 @@ public final class MachineEngine implements Engine {
             sink.put("machine.unitBoundDeclines", statUnitBoundDeclines);
             // declines BY DESIGN: the declaration entered eager reduction (Machine.erSeen); part of machine.declined
             sink.put("machine.eagerDeclines", statEagerDeclines);
+            if ((switches & Op.SW_EAGER) != 0) {
+                // [eager] units that entered eager reduction and were decided by the machine; runs repeated in a fresh
+                // session; sessions forgotten after an eager-only event; deferred comparisons; eager-only events;
+                // the declines by reason (part of machine.eagerDeclines; the driver's cold retry counts again)
+                sink.put("machine.eager.kept", statEagerKept);
+                sink.put("machine.eager.restarts", statEagerRestarts);
+                sink.put("machine.eager.forgets", statEagerForgets);
+                sink.put("machine.eager.sites", statEagerSites);
+                sink.put("machine.eager.events", statEagerEvents);
+                sink.put("machine.eager.notes", statEagerNotes);
+                sink.put("machine.eager.declined.plainFold", statEagerWhy[Machine.ER_WHY_FOLD]);
+                sink.put("machine.eager.declined.plainBoolTrue", statEagerWhy[Machine.ER_WHY_BOOL]);
+                sink.put("machine.eager.declined.kFold", statEagerWhy[Machine.ER_WHY_K_FOLD]);
+                sink.put("machine.eager.declined.kBoolTrue", statEagerWhy[Machine.ER_WHY_K_BOOL]);
+                sink.put("machine.eager.declined.other", statEagerWhy[0] + statEagerWhy[Machine.ER_WHY_LIMIT]);
+            }
             // session arrays allocated after the machine was created: by growth (doublings) and by resets (NOTES-M6 F25)
             sink.put("machine.alloc.grows", statAllocGrows);
             sink.put("machine.alloc.growBytes", statAllocGrowBytes);
@@ -364,6 +387,15 @@ public final class MachineEngine implements Engine {
         statCapResets += s.capResets;
         statUnitBoundDeclines += s.unitBoundDeclines;
         statEagerDeclines += s.eagerDeclines;
+        statEagerKept += s.eagerKept;
+        statEagerRestarts += s.eagerRestarts;
+        statEagerForgets += s.eagerForgets;
+        statEagerSites += s.eagerSites;
+        statEagerEvents += s.eagerEvents;
+        statEagerNotes += s.eagerNotes;
+        for (int i = 0; i < statEagerWhy.length; i++) {
+            statEagerWhy[i] += s.eagerWhy[i];
+        }
         statAllocGrows += m.allocGrows;
         statAllocGrowBytes += m.allocGrowBytes;
         statAllocResets += m.allocResets;

@@ -1131,6 +1131,11 @@ final class Infer {
         if (tt != dom) {
             int saved = m.ER;
             if (isEagerReduce(m, m.X[xb + TW_ARGS + i])) {
+                if (m.erDefers()) {
+                    // [eager] Op.SW_EAGER: the comparison runs under ER when the plain judgments of the declaration are done
+                    int q = m.erSite(tt, dom);
+                    return q >= SIG ? q : twE(m, xb, i, p, d);
+                }
                 m.enterER(); // never a plain assignment: the facade must learn that this declaration used the mode (M6-F26)
             }
             int c = Conv.conv(m, tt, dom, d + 1); // call CONV(Tt, D) => TWALK[5]

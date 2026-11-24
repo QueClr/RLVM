@@ -24,6 +24,10 @@ class SHostileSlowTest {
         "bodies", "same", "match", "joint", "pchk", "directrules", "code,casetrees,lazycases", "k2,directrules",
         SHostile.STEP1 + ",bodies", SHostile.STEP1 + ",same", SHostile.STEP1 + ",match,joint,pchk",
         CANDIDATE, CANDIDATE + ",same", CANDIDATE + ",same,k2", "all,bodies,same,match,joint,pchk,directrules,lazycases,lazyeval",
+        // package E1: eager reduction on the machine (Op.SW_EAGER), alone, on step 1, on the default set and on the
+        // sets with facts / tele / probes (the other switches with it: work/e1/sets-eager.txt, 32 sets, run by E1)
+        "eager", SHostile.STEP1 + ",eager", "default,eager", "facts,tele,code,casetrees,eager", "all,eager",
+        "all,bodies,same,match,joint,pchk,directrules,lazycases,lazyeval,eager",
     };
 
     /** No wrong verdict that the manifest does not list as a known finding, under any switch set. */

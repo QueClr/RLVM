@@ -886,6 +886,14 @@ public final class TermOps {
         private int stamp;
         private int size;
         private int cap = 64;
+        /**
+         * Scratch of {@link #widen}: the live entries while the table is re-stamped. Kept like the tables (V1
+         * finding F-V1-S2: every call starts at 64 slots and doubles, and every doubling allocated two
+         * temporaries of the size of its entries - 1.5 GB of the 13.8 GB that 8 workers allocate in one pass
+         * over mathlib).
+         */
+        private long[] wk = new long[32];
+        private int[] wv = new int[32];
 
         void begin() {
             if (keys.length > (1 << 20)) {
@@ -893,6 +901,8 @@ public final class TermOps {
                 keys = new long[64];
                 vals = new int[64];
                 stamps = new int[64];
+                wk = new long[32];
+                wv = new int[32];
                 stamp = 0;
             }
             if (++stamp == 0) {
@@ -942,8 +952,13 @@ public final class TermOps {
         }
 
         private void widen() {
-            long[] k = new long[size];
-            int[] v = new int[size];
+            if (wk.length < size) {
+                int n = Integer.highestOneBit(Math.max(size, 1) - 1) << 1;
+                wk = new long[Math.max(n, size)];
+                wv = new int[Math.max(n, size)];
+            }
+            long[] k = wk;
+            int[] v = wv;
             int m = 0;
             for (int i = 0; i < cap; i++) {
                 if (stamps[i] == stamp) {

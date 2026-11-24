@@ -1618,6 +1618,11 @@ final class Code {
         m.x7.targConv++;
         int r;
         if (isEagerReduce(m, m.X[rs[s + S_XB] + i])) {
+            if (m.erDefers()) {
+                // [eager] Op.SW_EAGER: the comparison runs under ER when the plain judgments of the declaration are done
+                int q = m.erSite(tt, dom);
+                return q >= SIG ? q : pc + 2;
+            }
             int saved = m.ER;
             m.enterER(); // M6-F26: eager reduction is entered through the facade's rule (a warm session is restarted)
             r = Conv.conv(m, tt, dom, d + 1);

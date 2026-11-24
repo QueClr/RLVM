@@ -128,6 +128,14 @@ public final class LitPool {
             throw new IllegalArgumentException("a pooled natural has at least one limb and no leading zero limb");
         }
         int h = hashLimbs(src, from, len);
+        // A worker looks in its OWN table first (R2, 2026-11-24): a value it has already interned keeps
+        // its index for the rest of the declaration, whatever the loader thread publishes meanwhile
+        // (looking in the shared pool first gave one literal two indices, hence two node ids, inside
+        // one declaration when the loader published that value between two uses: timing-dependent).
+        int k = findNat(src, from, len, h, natTable, natCount);
+        if (k != 0) {
+            return shared != null ? -k : k;
+        }
         if (shared != null) {
             // Count first, then the table: a table read later holds every entry up to that count.
             int limit = shared.natCountPub;
@@ -135,10 +143,6 @@ public final class LitPool {
             if (s != 0) {
                 return s;
             }
-        }
-        int k = findNat(src, from, len, h, natTable, natCount);
-        if (k != 0) {
-            return shared != null ? -k : k;
         }
         k = natCount + 1;
         if (3 * k + 3 > natLoc.length) {
@@ -302,16 +306,17 @@ public final class LitPool {
     /** Interns a string literal (decoded, valid UTF-8); returns its index. */
     public int addString(byte[] utf8, int off, int len) {
         int h = hashBytes(utf8, off, len);
+        // the worker's own table first, as in addNat
+        int k = findString(utf8, off, len, h, strTable, strCount);
+        if (k != 0) {
+            return shared != null ? -k : k;
+        }
         if (shared != null) {
             int limit = shared.strCountPub;
             int s = shared.findString(utf8, off, len, h, shared.strTablePub, limit);
             if (s != 0) {
                 return s;
             }
-        }
-        int k = findString(utf8, off, len, h, strTable, strCount);
-        if (k != 0) {
-            return shared != null ? -k : k;
         }
         k = strCount + 1;
         if (k + 2 > strOff.length) {

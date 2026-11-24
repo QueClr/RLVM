@@ -421,7 +421,7 @@ class CatalogueTest {
         assertTrue(o.ls.listHasDuplicates(o.fake.cLparams[dup]), "duplicates are kept for admission to reject");
     }
 
-    // ---- metadata inside inductive and quot records (fail closed; mdata in definitions stays accepted) -----
+    // ---- metadata inside inductive and quot records (fail closed; in other declarations: SplitTest) --------
 
     /**
      * Metadata is dropped at load. The official checker compares inductive and quot records, metadata
@@ -444,8 +444,8 @@ class CatalogueTest {
             int recType = variant == 2 ? b.mdata(ct) : ct;
             int rhs = variant == 4 ? b.app(b.lam(ct, b.bvar(0)), b.mdata(ct)) : ct;
             if (variant == 5) {
-                // metadata elsewhere in the file does not matter
-                b.def(b.name("d"), type1, b.mdata(b.sort(0)));
+                // metadata that no declaration of the file reaches does not matter
+                b.mdata(b.sort(0));
             }
             String ty = Nd.type(t, wrappedSort, 0, 0, Nd.ints(t), Nd.ints(mk), false);
             String ctor = Nd.ctor(mk, ctorType, t, 0, 0, 0, false);
@@ -459,7 +459,7 @@ class CatalogueTest {
             } else if (variant == 5) {
                 Oracle o = load(b);
                 assertEquals(1, o.report.exprMData);
-                assertEquals(4, o.report.constants);
+                assertEquals(3, o.report.constants);
             } else {
                 declined(b.bytes(), "metadata (mdata) node inside a quot record");
             }

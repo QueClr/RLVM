@@ -243,6 +243,14 @@ final class Decl {
             m.abandon();
             return MachineErrors.E_INTERNAL;
         }
+        if (m.erObN != 0 || m.erNtN != 0) {
+            // [eager] Op.SW_EAGER: the deferred comparisons of `eagerReduce _ _` arguments, under ER, now that
+            // every plain judgment of the declaration has completed (Machine.erDischarge)
+            int e = m.erDischarge();
+            if (e != MachineErrors.E_NONE) {
+                return e;
+            }
+        }
         if (m.on(Op.SW_FACTS) && !m.strict) {
             Facts.onAccept(m, cid);
         }

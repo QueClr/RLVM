@@ -54,6 +54,7 @@ public final class RefEngine implements Engine {
     private int statMaxDepth;
     private long statMaxUnitBytes;
     private final long[] statImports = new long[6];
+    private long statIdentityEvents;
 
     public RefEngine(Store store, EngineConfig config) {
         this(store, config, RefOptions.fromSystemProperties());
@@ -108,6 +109,9 @@ public final class RefEngine implements Engine {
             sink.put("reference.importPromoted", statImports[2]);
             sink.put("reference.importDrops", statImports[3]);
             sink.put("reference.importNodes", statImports[5]);
+            sink.put("reference.identity", options.identity == RefOptions.IDENTITY_DECLINE ? "decline"
+                    : options.identity == RefOptions.IDENTITY_SAME ? "same" : "other");
+            sink.put("reference.identityEvents", statIdentityEvents);
         }
     }
 
@@ -126,6 +130,7 @@ public final class RefEngine implements Engine {
         statDeepRuns += s.deepRuns;
         statMaxDepth = Math.max(statMaxDepth, s.kernel.maxDepthSeen());
         statMaxUnitBytes = Math.max(statMaxUnitBytes, s.maxUnitBytes);
+        statIdentityEvents += s.kernel.identityEvents();
         long[] imports = s.kernel.importStats();
         for (int i = 0; i < statImports.length; i++) {
             statImports[i] += imports[i];
@@ -156,10 +161,13 @@ public final class RefEngine implements Engine {
             return FACTORY;
         }
 
-        /** {@code -X levels=official|complete} (default official), {@code -X ref.imports=on|off|verify} (see {@link RefOptions}). */
+        /**
+         * {@code -X levels=official|complete} (default official), {@code -X ref.imports=on|off|verify},
+         * {@code -X ref.identity=decline|same|other} (see {@link RefOptions}).
+         */
         @Override
         public Set<String> optionKeys() {
-            return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS);
+            return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS, RefOptions.KEY_IDENTITY);
         }
 
         @Override
@@ -347,6 +355,12 @@ public final class RefEngine implements Engine {
             if (reason == Reason.BUDGET_STEPS && kernel.takeCycled()) {
                 sb.append(": the reduction returns to a term it started from; the official kernel does not"
                         + " terminate here");
+            }
+            if (reason == Reason.UNSUPPORTED_INPUT && kernel.takeIdentityDeclined()) {
+                sb.append(": the official verdict depends on object identity here (is_def_eq_core repeats a"
+                        + " comparison when the second whnf_core answers a stuck projection with the cache"
+                        + " entry of another occurrence of the same term; whether two occurrences are one"
+                        + " object is not a property of the terms)");
             }
             if (cause != null) {
                 sb.append(": ").append(cause);

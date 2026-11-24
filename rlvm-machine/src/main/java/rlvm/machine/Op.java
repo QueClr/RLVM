@@ -488,6 +488,21 @@ public final class Op {
      */
     public static final int SW_LEVELS_COMPLETE = 1 << 25;
     /**
+     * Eager reduction on the machine (package E1, 2026-11-24; {@code docs/design/review/eager-reduction.md}):
+     * OFF = the rule of NOTES-M6 F26 (a declaration that enters eager reduction is DECLINED and the reference
+     * engine checks it). ON = the declaration stays on the machine: the comparison of an {@code eagerReduce _ _}
+     * argument is DEFERRED to the end of the declaration ({@code Machine.erSite}, {@code Machine.erDischarge})
+     * and the declaration is declined only if a plain-mode comparison of it passed a point where eager
+     * reduction would have taken another branch ({@code Machine.erSensitive}). Not part of {@code all}.
+     */
+    public static final int SW_EAGER = 1 << 26;
+    /**
+     * [eager] {@code Machine.ER} while a comparison of the K rule runs under eager reduction: this unit is
+     * added per nesting level ({@code Reduce.k_iota3 / k_iota4}); bit 0 stays the mode. Only with
+     * {@link #SW_EAGER}; every reader of {@code ER} tests {@code != 0}, every writer restores a saved value.
+     */
+    public static final int ER_K = 1 << 8;
+    /**
      * Names for experiments that their owners consider ready (2026-11-24): the SAME bits as the experiment
      * switches they grew in, so that no code moves; {@code Debug} reads and prints the names. They get bits
      * of their own when they enter the default set.

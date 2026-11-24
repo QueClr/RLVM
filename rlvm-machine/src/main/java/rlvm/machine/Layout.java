@@ -298,6 +298,12 @@ public final class Layout {
     public static final int POS = 1;
     public static final int NEG = 2;
     public static final int FAILED = 4;
+    /**
+     * [eager] ({@code Op.SW_EAGER}) Pair status bit, no memo: the pair is recorded as a mode-dependent point of the
+     * plain phase of a declaration that defers its eager comparisons ({@code Machine.erNote}); only stops a
+     * second record of the same pair.
+     */
+    public static final int NOTED = 8;
 
     // ---------------------------------------------------------------------------------------------------
     // 1.5 Direct-mapped caches. Every cell has 4 words and carries a stamp (the session epoch, or the

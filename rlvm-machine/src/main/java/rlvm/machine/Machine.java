@@ -341,6 +341,86 @@ public final class Machine {
      * the unit whatever the driver returned.
      */
     boolean erDeclines;
+    // ---- [eager] package E1: eager reduction ON the machine (Op.SW_EAGER; docs/design/review/eager-reduction.md) ----
+    /** The rule of F26 fired: the declaration ends at the next tick (was: {@code erSeen && erDeclines}). */
+    boolean erStop;
+    /**
+     * [eager] SESSION flag (cleared by {@link #reset()}): a plain-mode comparison passed a point at which the
+     * official kernel takes another branch under eager reduction (the hasFVar guards of the Nat folding and
+     * of the Bool.true test) and nobody recorded it. Over-approximated (a cheap test on the hot path). While
+     * it is false every answer the session holds is the same in both modes.
+     */
+    boolean erSens;
+    /**
+     * [eager] This run of the declaration decides those points EXACTLY: it runs the lifted branch as a probe
+     * and records every point at which it would have answered ({@link #erNote}). Set at the first deferred
+     * comparison of a declaration (the session held no possibly mode-dependent answer), or from the start
+     * of the facade's second run ({@link #erAwareNext}).
+     */
+    boolean erAware;
+    /** [eager] The next {@link #beginDecl} starts an aware run (the facade's second run, in a fresh session). */
+    boolean erAwareNext;
+    /** [eager] The run ended because it must be repeated in a fresh session with {@link #erAware} (the facade does it). */
+    boolean erRestart;
+    /** [eager] The declaration is declined for eager reduction after all: {@link #erWhy} says why. */
+    boolean erGaveUp;
+    int erWhy;
+    static final int ER_WHY_FOLD = 1;
+    static final int ER_WHY_BOOL = 2;
+    static final int ER_WHY_K_FOLD = 3;
+    static final int ER_WHY_K_BOOL = 4;
+    static final int ER_WHY_LIMIT = 5;
+    static final int ER_WHY_COUNT = 6;
+    static final String[] ER_WHY = {
+        "",
+        "eager reduction, and a comparison of the PLAIN phase is mode-dependent: with the Nat folding that eager reduction"
+                + " allows although a free variable is present it has another answer, so the official answer depends on which"
+                + " mode saw the pair first; the reference engine checks this declaration",
+        "eager reduction, and a comparison of the PLAIN phase is mode-dependent: eager reduction answers T (an open term"
+                + " reduces to Bool.true) where the plain procedure answers F, so the official answer depends on which mode saw"
+                + " the pair first; the reference engine checks this declaration",
+        "eager reduction lifts a hasFVar guard (Nat folding) INSIDE the comparison of the K rule: the result of a reduction"
+                + " would depend on the mode; the reference engine checks this declaration",
+        "eager reduction lifts a hasFVar guard (Bool.true) INSIDE the comparison of the K rule: the result of a reduction"
+                + " would depend on the mode; the reference engine checks this declaration",
+        "eager reduction: too many deferred comparisons or mode-dependent points; the reference engine checks this declaration"};
+    /**
+     * [eager] Eager-only events of the declaration's deferred comparisons: ER lifted a hasFVar guard and the
+     * lifted branch was taken. 0 (and no note) = eager reduction changed nothing, the session stays warm.
+     */
+    long erEoe;
+    /** [eager] The deferred comparisons: {@link #ER_OB} ints each ({@code Tt}, {@code D}, offset and length of the scope in {@link #erScope}). */
+    int[] erOb = new int[32];
+    int erObN;
+    static final int ER_OB = 4;
+    /**
+     * [eager] The mode-dependent points of the plain phase ({@link #erNote}): {@link #ER_NT} ints each: the pair
+     * {@code (tn, sn)}, the value the lifted branch produced, which branch (1 = {@code reduce_nat(tn)}, 2 =
+     * {@code reduce_nat(sn)}, 3 = {@code whnf(t)} is {@code Bool.true}), offset and length of the scope.
+     */
+    int[] erNt = new int[32];
+    int erNtN;
+    static final int ER_NT = 6;
+    /** [eager] The open binders (SC from the bottom) at each deferred comparison and note; equal consecutive scopes are stored once. */
+    int[] erScope = new int[64];
+    int erScopeN;
+    private int erScopeLast = -1;
+    private int erScopeLastN;
+    /** [eager] Statistics: deferred comparisons, notes. */
+    long erSites;
+    long erNotes;
+    static final int ER_OB_MAX = 1 << 22;
+    /**
+     * [eager] Experiment ({@code -Drlvm.machine.eager.early=true}): EVERY declaration that starts in a session without
+     * a possibly mode-dependent answer runs aware from its start (probes at the points where ER would lift a guard), so
+     * that the session flag is set only by a real point and a declaration that sets it itself needs no second run.
+     */
+    static final boolean ER_EARLY = Boolean.getBoolean("rlvm.machine.eager.early");
+    /** [eager] At most this many mode-dependent points per declaration (each costs two comparisons at the end). */
+    static final int ER_NOTES_MAX = 1 << 12;
+    /** {@code limitDetail} of a run that is repeated in a fresh session (never a verdict: the facade runs it again). */
+    static final String ER_RESTART_DETAIL = "eager reduction: the declaration is checked again in a fresh session (the session held plain-mode answers that may depend on the mode)";
+
     /** {@code limitDetail} of a declaration that was declined because it entered eager reduction. */
     static final String ER_DETAIL = "eager reduction (an argument 'eagerReduce _ _'): conversion under it depends on the mode"
             + " and on the official per-declaration caches, which the machine's tables do not reproduce; the reference engine checks this declaration";
@@ -1087,7 +1167,7 @@ public final class Machine {
      * @return true if the step must return {@link #sig}
      */
     boolean tickSlow() {
-        if (erSeen && erDeclines) {
+        if (erStop) {
             limitDetail = ER_DETAIL;
             err = MachineErrors.E_LIMIT;
             sig = FATAL;
@@ -1132,7 +1212,7 @@ public final class Machine {
     /** The poll of ISA 1.4 / 14.4: 0, or the code of the fatal fault to raise. */
     int poll() {
         polls++;
-        if (erSeen && erDeclines) {
+        if (erStop) {
             limitDetail = ER_DETAIL;
             return MachineErrors.E_LIMIT;
         }
@@ -1163,12 +1243,256 @@ public final class Machine {
         if (!erSeen) {
             erSeen = true;
             if (erDeclines) {
+                erStop = true;
                 // the next (--fuel & POLL_MASK) == POLL_MASK; ticks() = tickBase - fuel is unchanged
                 long f = fuel & ~Op.POLL_MASK;
                 tickBase -= fuel - f;
                 fuel = f;
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // [eager] Eager reduction on the machine (Op.SW_EAGER; package E1, docs/design/review/eager-reduction.md)
+    //
+    // The official is_def_eq has ONE mode switch (m_eager_reduce lifts the hasFVar guards of the Nat folding
+    // in lazy_delta_reduction and of the Bool.true test) and caches that live for one declaration and are
+    // read in both modes. Call a query MODE-DEPENDENT if its plain value and its value under eager reduction
+    // (each computed without caches) differ. If no query that the plain phase asks is mode-dependent, a cache
+    // entry written in one mode and read in the other holds what the reader would have computed, so the
+    // official answers are the cache-free ones, whatever was asked first. The machine keeps a declaration
+    // that applies `eagerReduce` exactly then:
+    //   - the comparison of an `eagerReduce _ _` argument with its domain is DEFERRED (erSite) and taken as T
+    //     for the rest of the plain phase; the deferred comparisons run under ER when every plain judgment of
+    //     the declaration has completed (erDischarge, from Decl.accepted). So no plain judgment reads an
+    //     answer derived under ER;
+    //   - the plain phase runs "aware": at every point where ER would lift a guard it runs the lifted branch
+    //     as a probe; if the branch would have answered, the point is recorded (erNote) and the plain branch
+    //     goes on. At the end the plain value and the value of the lifted branch under ER are compared for
+    //     every recorded point; a difference declines the declaration (erSensitive): the official answer
+    //     for that pair depends on whether the official cache holds it. The pairs of findings S-F4 / S-F5;
+    //   - the session a declaration with deferred comparisons runs in holds no possibly mode-dependent answer
+    //     of an earlier declaration or of the part of this one that ran unaware: erSens (cheap, over-
+    //     approximate) -> the facade repeats the run in a fresh session, aware from the start;
+    //   - an eager-only event inside the comparison of the K rule declines (Reduce.k_iota3, Conv.modeEvent);
+    //   - a session that saw an eager-only event or a recorded point is forgotten when the declaration is done.
+    // ---------------------------------------------------------------------------------------------------
+
+    /** [eager] True if comparisons of {@code eagerReduce _ _} arguments are deferred: the switch is on and the facade's rule is in force. */
+    boolean erDefers() {
+        return (sw & Op.SW_EAGER) != 0 && erDeclines;
+    }
+
+    /** [eager] The offset in {@link #erScope} of a copy of the open binders (SC from the bottom); -1 = too many. */
+    private int erScopeHere() {
+        int n = ssp;
+        int[] sc = SC;
+        if (erScopeLast >= 0 && erScopeLastN == n) {
+            int[] es = erScope;
+            int so = erScopeLast;
+            int j = 0;
+            while (j < n && es[so + j] == sc[j]) {
+                j++;
+            }
+            if (j == n) {
+                return so;
+            }
+        }
+        if (erScopeN + n > erScope.length) {
+            if (erScopeN + n >= ER_OB_MAX) {
+                return -1;
+            }
+            erScope = Arrays.copyOf(erScope, Math.max(erScope.length << 1, erScopeN + n));
+        }
+        int so = erScopeN;
+        System.arraycopy(sc, 0, erScope, so, n);
+        erScopeN = so + n;
+        erScopeLast = so;
+        erScopeLastN = n;
+        return so;
+    }
+
+    /**
+     * [eager] The comparison {@code CONV(Tt, D)} of an {@code eagerReduce _ _} argument's type with its domain
+     * ({@code Tt != D}) is deferred to {@link #erDischarge}: the open binders are recorded with it.
+     * @return {@code Layout.T} (go on as if the comparison had succeeded), or FATAL (the run is repeated in a
+     *     fresh session: {@link #erRestart}; or a limit)
+     */
+    int erSite(int tt, int dom) {
+        if (!erSeen) {
+            erSeen = true;
+            if (erSens && !erAware) {
+                erRestart = true;
+                limitDetail = ER_RESTART_DETAIL;
+                return fault(MachineErrors.E_LIMIT);
+            }
+            erAware = true;
+        }
+        if (erObN + ER_OB > erOb.length) {
+            if (erObN >= ER_OB_MAX) {
+                return erSensitive(ER_WHY_LIMIT);
+            }
+            erOb = Arrays.copyOf(erOb, erOb.length << 1);
+        }
+        int so = erScopeHere();
+        if (so < 0) {
+            return erSensitive(ER_WHY_LIMIT);
+        }
+        erOb[erObN] = tt;
+        erOb[erObN + 1] = dom;
+        erOb[erObN + 2] = so;
+        erOb[erObN + 3] = ssp;
+        erObN += ER_OB;
+        erSites++;
+        return Layout.T;
+    }
+
+    /**
+     * [eager] A point of the PLAIN phase of an aware run where ER would lift a hasFVar guard and the lifted
+     * branch would answer: {@code which} = 1: {@code reduce_nat(tn) = v}, the official kernel under ER returns
+     * {@code is_def_eq_core(v, sn)}; 2: {@code reduce_nat(sn) = v}, it returns {@code is_def_eq_core(tn, v)}; 3:
+     * {@code whnf(tn)} is {@code Bool.true = sn}, it returns T. The pair is recorded once; the plain branch
+     * goes on, and {@link #erDischarge} compares the two answers.
+     * @return 0 = go on with the plain branch, else the signal to return
+     */
+    int erNote(int tn, int sn, int v, int which) {
+        if ((Pairs.status(this, tn, sn) & Layout.NOTED) != 0) {
+            return 0;
+        }
+        if (erNtN + ER_NT > erNt.length) {
+            if (erNtN >= ER_NOTES_MAX * ER_NT) {
+                errA = tn;
+                errB = sn;
+                return erSensitive(ER_WHY_LIMIT);
+            }
+            erNt = Arrays.copyOf(erNt, erNt.length << 1);
+        }
+        int so = erScopeHere();
+        if (so < 0) {
+            return erSensitive(ER_WHY_LIMIT);
+        }
+        Pairs.add(this, tn, sn, Layout.NOTED);
+        erNt[erNtN] = tn;
+        erNt[erNtN + 1] = sn;
+        erNt[erNtN + 2] = v;
+        erNt[erNtN + 3] = which;
+        erNt[erNtN + 4] = so;
+        erNt[erNtN + 5] = ssp;
+        erNtN += ER_NT;
+        erNotes++;
+        erSens = true; // the session holds an answer that was not compared across the modes yet
+        return 0;
+    }
+
+    /**
+     * [eager] The declaration is declined for eager reduction after all (fatal: no TRY turns it into U): a
+     * recorded point has two answers, an eager-only event inside the comparison of the K rule, or a limit.
+     */
+    int erSensitive(int why) {
+        erGaveUp = true;
+        erWhy = why;
+        limitDetail = ER_WHY[why];
+        return fault(MachineErrors.E_LIMIT);
+    }
+
+    /** [eager] Re-opens the binders of a recorded scope (binders close in LIFO order per type: the same variables). 0, or an error code. */
+    private int erOpen(int so, int sn) {
+        for (int j = 0; j < sn; j++) {
+            int x = erScope[so + j];
+            int y = Scope.open(this, vh[(x << Layout.REC_SHIFT) + Layout.A]);
+            if (y != x) {
+                return y >= SIG && err != MachineErrors.E_NONE ? err : MachineErrors.E_INTERNAL;
+            }
+        }
+        return 0;
+    }
+
+    /** [eager] One comparison at host depth 0 under the binders of a recorded scope, in plain mode or under ER: T, F, or -(error code). */
+    private int erConv(int a, int b, int so, int sn, boolean eager) {
+        int e = erOpen(so, sn);
+        if (e != 0) {
+            abandon();
+            return -e;
+        }
+        if (eager) {
+            enterER();
+        }
+        int r = drive(Conv.conv(this, a, b, 0));
+        ER = 0;
+        if (r >= SIG) {
+            abandon();
+            return -(err != MachineErrors.E_NONE ? err : MachineErrors.E_INTERNAL);
+        }
+        closeBindersAbove(0);
+        if (!idle() || (r != Layout.T && r != Layout.F)) {
+            abandon();
+            return -MachineErrors.E_INTERNAL;
+        }
+        return r;
+    }
+
+    /**
+     * [eager] The end of a declaration that deferred comparisons, at host depth 0 when every plain judgment
+     * has completed. (1) Plain mode: the plain value of every recorded point (a recorded pair may record
+     * further ones). (2) Under ER: the value of the lifted branch of every recorded point; a difference
+     * declines the declaration. (3) Under ER: the deferred comparisons; F is {@code E_APP_MISMATCH}, as the
+     * official {@code infer_app}.
+     * @return {@code MachineErrors.E_NONE}, or the code of the failure (the stacks are restored then)
+     */
+    int erDischarge() {
+        if (erObN == 0) {
+            // an aware run that deferred nothing: nothing ran under ER, the recorded points do not matter
+            // (erSens stays set: a later declaration of this session that defers is checked in a fresh one)
+            erNtN = 0;
+            erScopeN = 0;
+            erScopeLast = -1;
+            return MachineErrors.E_NONE;
+        }
+        int[] plain = new int[Math.max(erNtN / ER_NT, 1)];
+        for (int k = 0, i = 0; k < erNtN; k += ER_NT, i++) { // erNtN may grow
+            if (i == plain.length) {
+                plain = Arrays.copyOf(plain, i << 1);
+            }
+            int r = erConv(erNt[k], erNt[k + 1], erNt[k + 4], erNt[k + 5], false);
+            if (r < 0) {
+                return -r;
+            }
+            plain[i] = r;
+        }
+        for (int k = 0, i = 0; k < erNtN; k += ER_NT, i++) {
+            int tn = erNt[k];
+            int sn = erNt[k + 1];
+            int v = erNt[k + 2];
+            int which = erNt[k + 3];
+            int r = which == 3 ? Layout.T : erConv(which == 1 ? v : tn, which == 1 ? sn : v, erNt[k + 4], erNt[k + 5], true);
+            if (r < 0) {
+                return -r;
+            }
+            if (r != plain[i]) {
+                erSensitive(which == 3 ? ER_WHY_BOOL : ER_WHY_FOLD);
+                errA = tn;
+                errB = sn;
+                return MachineErrors.E_LIMIT;
+            }
+        }
+        for (int k = 0; k < erObN; k += ER_OB) {
+            int tt = erOb[k];
+            int dom = erOb[k + 1];
+            int r = erConv(tt, dom, erOb[k + 2], erOb[k + 3], true);
+            if (r < 0) {
+                return -r;
+            }
+            if (r != Layout.T) {
+                errA = tt;
+                errB = dom;
+                return MachineErrors.E_APP_MISMATCH;
+            }
+        }
+        erObN = 0;
+        erNtN = 0;
+        erScopeN = 0;
+        erScopeLast = -1;
+        return MachineErrors.E_NONE;
     }
 
     /** {@code fail(E)}: a kernel error or a recoverable limit. Returns the signal to return (ABORT). */
@@ -1763,6 +2087,18 @@ public final class Machine {
      */
     void beginDecl(int rank, int unitIndex, long maxSteps, long maxBytes) {
         erSeen = false;
+        erStop = false;
+        erRestart = false;
+        erGaveUp = false;
+        erWhy = 0;
+        erEoe = 0;
+        erObN = 0;
+        erNtN = 0;
+        erScopeN = 0;
+        erScopeLast = -1;
+        // aware from the start in a session that holds no possibly mode-dependent answer (ER_EARLY), else only on demand
+        erAware = erAwareNext || (ER_EARLY && !erSens && erDefers());
+        erAwareNext = false;
         long done = ticks();
         fuel = maxSteps > Op.FUEL_UNLIMITED || maxSteps < 0 ? Op.FUEL_UNLIMITED : maxSteps;
         tickBase = done + fuel;
@@ -1850,6 +2186,7 @@ public final class Machine {
 
     void reset() {
         resets++;
+        erSens = false;
         bytesAtReset += engineBytes();
         recordsMade += vp - vbase;
         runWordsMade += rsp - rbase;

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 
@@ -304,24 +305,71 @@ class SplitTest {
 
     @Test
     void mdataIsDroppedAndTheWrappedExpressionStandsForIt() throws IOException {
+        // metadata that no admitted declaration reaches: dropped, the wrapped record stands for it
         Nd nd = new Nd();
         int prop = prop(nd);
         int p = nd.name("P");
         nd.axiom(p, prop);
         int cp = nd.cnst(p);
-        int wrapped = nd.mdata(cp);
-        int ty = nd.pi(wrapped, nd.mdata(wrapped));
-        nd.def(nd.name("d"), ty, nd.mdata(nd.lam(cp, nd.bvar(0))));
+        int ty = nd.pi(cp, cp);
+        nd.def(nd.name("d"), ty, nd.lam(cp, nd.bvar(0)));
+        int q = nd.cnst(p);
+        int wrapped = nd.mdata(q);
+        nd.def(nd.name("u"), nd.pi(wrapped, nd.mdata(wrapped)), nd.mdata(nd.lam(q, nd.bvar(0))), "\"abbrev\"", "unsafe");
         Oracle o = load(nd);
         assertEquals(3, o.report.exprMData);
-        assertEquals(8, o.report.exprRecords);
-        assertEquals(5, o.loader.exprCount());
-        assertTrue(o.report.sparseIds || true);
+        assertEquals(1, o.report.droppedUnsafe);
         FakeTarget f = o.fake;
         int d = f.constOf[f.findName("d")];
         assertEquals(Kind.PI, f.nKind[f.cType[d]]);
         assertEquals(f.nA[f.cType[d]], f.nB[f.cType[d]], "both children are the one const node");
         assertEquals(Kind.LAM, f.nKind[f.cValue[d]]);
+    }
+
+    /**
+     * Metadata in the type or the value of an admitted declaration: declined (finding S3-F2 / R2). The
+     * loader would drop the node, but officially it is a term of its own for every cache of the kernel
+     * and hides what is under it from the kernel's syntactic tests.
+     */
+    @Test
+    void aDeclarationWhoseTypeOrValueCarriesMetadataIsDeclined() {
+        String expected = "metadata (mdata) node in the type or value of a declaration";
+        for (int variant = 0; variant < 8; variant++) {
+            Nd nd = new Nd();
+            int prop = prop(nd);
+            int p = nd.name("P");
+            nd.axiom(p, prop);
+            int cp = nd.cnst(p);
+            int plain = nd.pi(cp, cp);
+            int id = nd.lam(cp, nd.bvar(0));
+            switch (variant) {
+                case 0 -> nd.def(nd.name("d"), nd.mdata(plain), id);                       // the type root
+                case 1 -> nd.def(nd.name("d"), plain, nd.mdata(id));                       // the value root
+                case 2 -> nd.def(nd.name("d"), nd.pi(nd.mdata(cp), cp), id);               // below the type root
+                case 3 -> nd.thm(nd.name("t"), plain, nd.app(nd.lam(plain, nd.bvar(0)), nd.mdata(id))); // inside a proof
+                case 4 -> nd.axiom(nd.name("a"), nd.pi(plain, nd.mdata(prop)));
+                case 5 -> nd.opaque(nd.name("o"), plain, nd.mdata(id), false);
+                case 6 -> {
+                    // the wrapped record referred to directly: counted as carrying metadata (fail closed)
+                    nd.mdata(id);
+                    nd.def(nd.name("d"), plain, id);
+                }
+                default -> {
+                    // the metadata was read with an earlier declaration's records and is used by a later one
+                    int w = nd.mdata(id);
+                    nd.axiom(nd.name("a"), plain);
+                    nd.def(nd.name("d"), plain, w);
+                }
+            }
+            try {
+                load(nd);
+                fail("variant " + variant + ": loaded");
+            } catch (UnsupportedExportException e) {
+                assertTrue(e.getMessage().startsWith(expected), "variant " + variant + ": " + e.getMessage());
+            } catch (IOException e) {
+                throw new AssertionError(e);
+            }
+        }
     }
 
     @Test

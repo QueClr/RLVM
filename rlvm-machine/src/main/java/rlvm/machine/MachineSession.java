@@ -83,6 +83,23 @@ public final class MachineSession implements Session {
     long eagerDeclines;
     /** The constant that was last declined for eager reduction: the driver's cold retry of it is answered at once. */
     private int eagerCid = -1;
+    /** The detail of that decline (the rule of F26, or why a declaration with deferred comparisons was given up). */
+    private String eagerDetail = Machine.ER_DETAIL;
+    /**
+     * [eager] ({@code Op.SW_EAGER}) Units that entered eager reduction and were DECIDED by the machine (accepted or
+     * rejected; their eager comparisons ran deferred, {@code Machine.erDischarge}); runs repeated in a fresh session;
+     * sessions forgotten after such a unit because an eager-only event occurred; declines by reason
+     * ({@code Machine.ER_WHY_*}; part of {@link #eagerDeclines}); deferred comparisons; eager-only events.
+     */
+    long eagerKept;
+    long eagerRestarts;
+    long eagerForgets;
+    final long[] eagerWhy = new long[Machine.ER_WHY_COUNT];
+    long eagerSites;
+    long eagerEvents;
+    long eagerNotes;
+    /** [eager] The session is forgotten after the ACCEPT in progress (it holds answers derived under an eager-only event). */
+    private boolean eagerDirty;
     /** Units declined because they reached the machine's own tick bound ({@code MachineEngine.unitTicks}); the retry counts again. */
     long unitBoundDeclines;
     /** The constant that last reached the machine's own tick bound: its cold retry is answered at once. */
@@ -112,8 +129,66 @@ public final class MachineSession implements Session {
         m.strict = engine.config.strict;
     }
 
+    /**
+     * [eager] Measurement aid of package E1 ({@code -Drlvm.machine.eager.units=FILE}): one line per unit that
+     * entered eager reduction: outcome, unit, rank, name, ticks and thread CPU ns of the whole check (both runs
+     * of a repeated one), runs, deferred comparisons, recorded points, eager-only events, the decline reason.
+     */
+    private static final String EAGER_UNITS = System.getProperty("rlvm.machine.eager.units", "");
+    private static java.io.Writer eagerUnitsOut;
+
+    private static synchronized void eagerUnit(String line) {
+        try {
+            if (eagerUnitsOut == null) {
+                eagerUnitsOut = new java.io.BufferedWriter(new java.io.FileWriter(EAGER_UNITS, true));
+                final java.io.Writer w = eagerUnitsOut;
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    try {
+                        w.flush();
+                    } catch (java.io.IOException e) {
+                        // a measurement aid
+                    }
+                }));
+            }
+            eagerUnitsOut.write(line);
+            eagerUnitsOut.write('\n');
+            eagerUnitsOut.flush();
+        } catch (java.io.IOException e) {
+            // a measurement aid
+        }
+    }
+
+    private static long threadCpu() {
+        return java.lang.management.ManagementFactory.getThreadMXBean().getCurrentThreadCpuTime();
+    }
+
     @Override
     public int check(int cid, Budget budget) {
+        if (EAGER_UNITS.isEmpty()) {
+            return check0(cid, budget);
+        }
+        long t0 = m.ticks();
+        long c0 = threadCpu();
+        long r0 = eagerRestarts;
+        long s0 = eagerSites;
+        long n0 = eagerNotes;
+        long e0 = eagerEvents;
+        long d0 = eagerDeclines;
+        int out = check0(cid, budget);
+        if (eagerSites != s0 || eagerRestarts != r0 || eagerDeclines != d0) {
+            StringBuilder sb = new StringBuilder(160);
+            DeclTable decls = ctx.store.decls();
+            sb.append(Outcome.name(out)).append('\t').append(decls.unit(cid)).append('\t').append(decls.rank(cid)).append('\t');
+            ctx.store.names().appendTo(sb, decls.name(cid));
+            sb.append('\t').append(m.ticks() - t0).append('\t').append(threadCpu() - c0).append('\t').append(1 + eagerRestarts - r0)
+                    .append('\t').append(eagerSites - s0).append('\t').append(eagerNotes - n0).append('\t').append(eagerEvents - e0)
+                    .append('\t').append(eagerDeclines != d0 ? (m.on(Op.SW_EAGER) ? "declined: " + clip(String.valueOf(lastDetail)) : "declined (F26)") : "-");
+            eagerUnit(sb.toString());
+        }
+        return out;
+    }
+
+    private int check0(int cid, Budget budget) {
         units++;
         lastReason = null;
         lastMessage = null;
@@ -163,17 +238,54 @@ public final class MachineSession implements Session {
                 code = MachineErrors.E_STEPS;
             } else {
                 code = run(cid, rank, decls.unit(cid), budget);
+                if (m.erRestart) {
+                    // [eager] The declaration reached its first `eagerReduce _ _` argument in a session whose
+                    // plain-mode answers may depend on the mode (Machine.erSens): the same unit again, in a fresh
+                    // session, with the mode-dependent points decided exactly (Machine.erAware).
+                    m.reset();
+                    warmUnits = 0;
+                    eagerRestarts++;
+                    lastCause = null;
+                    m.erAwareNext = true;
+                    code = run(cid, rank, decls.unit(cid), budget);
+                }
                 if (code == MachineErrors.E_STEPS && ownBound && m.fuel < 0) { // the budget that ran out was the machine's own
                     bound = true;
                     boundCid = cid;
                 }
                 if (m.erSeen) {
-                    // The declaration entered eager reduction (Machine.erSeen): whatever this run answered is
-                    // not a verdict of the machine. DECLINE; the reference engine decides the unit.
-                    eager = true;
-                    eagerCid = cid;
-                    lastCause = null;
-                    code = MachineErrors.E_LIMIT;
+                    eagerSites += m.erSites;
+                    eagerEvents += m.erEoe;
+                    eagerNotes += m.erNotes;
+                    m.erSites = 0;
+                    m.erNotes = 0;
+                    if (!m.on(Op.SW_EAGER) || m.strict) {
+                        // The declaration entered eager reduction (Machine.erSeen): whatever this run answered is
+                        // not a verdict of the machine. DECLINE; the reference engine decides the unit.
+                        eager = true;
+                        eagerCid = cid;
+                        eagerDetail = Machine.ER_DETAIL;
+                        lastCause = null;
+                        code = MachineErrors.E_LIMIT;
+                    } else if (m.erGaveUp || m.erRestart) {
+                        // [eager] a mode-dependent point in plain mode, or under ER inside the K rule: DECLINE as above
+                        eager = true;
+                        eagerCid = cid;
+                        eagerDetail = m.erGaveUp ? Machine.ER_WHY[m.erWhy] : Machine.ER_RESTART_DETAIL;
+                        if (m.erGaveUp && (m.errA != 0 || m.errB != 0)) {
+                            String at = site(); // the pair at the mode-dependent point, rendered before the session forgets it
+                            if (at != null) {
+                                eagerDetail = eagerDetail + " [at: " + at + "]";
+                            }
+                        }
+                        eagerWhy[m.erGaveUp ? m.erWhy : 0]++;
+                        lastCause = null;
+                        code = MachineErrors.E_LIMIT;
+                    } else if (code == MachineErrors.E_NONE || MachineErrors.outcome(code) == Outcome.REJECT) {
+                        // [eager] the machine's own verdict; a session that saw an eager-only event is not kept
+                        eagerKept++;
+                        eagerDirty = m.erEoe != 0 || m.erSens;
+                    }
                 }
             }
         } catch (RuntimeException e) {
@@ -186,16 +298,21 @@ public final class MachineSession implements Session {
             warmUnits++;
             if (m.strict) {
                 forget(); // ISA 14.2: reset() before and after
+            } else if (eagerDirty) {
+                eagerDirty = false;
+                eagerForgets++;
+                forget(); // [eager] nothing derived under an eager-only event is seen by a later declaration
             }
             return Outcome.ACCEPT;
         }
+        eagerDirty = false;
         long before = warmUnits;
         lastCode = code;
         lastReason = MachineErrors.reason(code);
         int outcome = MachineErrors.outcome(code);
         if (eager) {
             eagerDeclines++;
-            lastDetail = Machine.ER_DETAIL;
+            lastDetail = eagerDetail;
         } else if (bound) {
             unitBoundDeclines++;
             lastDetail = "the machine's own bound of " + engine.unitTicks + " ticks per unit (-X machine.unit-ticks): a warm unit has no"
