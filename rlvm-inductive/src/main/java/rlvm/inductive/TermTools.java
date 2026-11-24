@@ -48,6 +48,11 @@ final class TermTools {
         int leaf(int node, int kind) {
             return 0;
         }
+
+        /** SORT node. Returns the replacement, or 0 to keep it. */
+        int sort(int node) {
+            return 0;
+        }
     }
 
     private final Terms terms;
@@ -176,6 +181,11 @@ final class TermTools {
                     case Kind.CONST:
                     case Kind.FVAR: {
                         int r = rw.leaf(node, kind);
+                        memo.put(node, r != 0 ? r : node);
+                        break;
+                    }
+                    case Kind.SORT: {
+                        int r = rw.sort(node);
                         memo.put(node, r != 0 ? r : node);
                         break;
                     }

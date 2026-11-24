@@ -97,8 +97,12 @@ Two kinds of rows, kept apart everywhere below.
   `Pn`, below) are read as comparisons, and only for their sign.
 
 `WarmMain` is not the driver: no admission pipeline, no re-check, no pipelined loading; the workers of a
-warm pass claim chunks of 16 units from a shared counter. It exists because the driver had no `-X passes=N`
-when these runs were made (requested by the orchestrator at 14:08Z).
+warm pass claim chunks of 16 units from a shared counter. It was written at 14:55Z, when the driver had no
+`-X passes=N`. Since 15:41Z the launcher has it (`-X passes=N` = reload passes, `-X passes=N -X
+passes-mode=recheck` = later passes over the same store; requests.log 15:46Z): that is the tool to use from
+here on, and none of the rows below were taken with it. A reload pass builds a new store and therefore a
+new machine engine and code store, so the tier starts cold in every reload pass; whether recheck mode keeps
+the engine (and with it the installed blocks) is section 7, open point 1.
 
 Distributions: `work/t2/dist-n2` (machine jar of 14:46Z; tier WITH defect 4 of section 2: about one promoted
 block in five was never compiled) and `work/t2/dist-n3` (the same sources plus the fix of defect 4, the
@@ -196,3 +200,110 @@ and the differential gates were NOT repeated on a jar later than 14:51Z.
    blocks of closed evaluation) on a contended host: they give the order of magnitude of one compilation
    (about 15 ms, 2-3 ms per instruction, about 1 KB of machine code per instruction), not a comparison of
    the platforms. A resume point is an entry: the prelude's blocks have 6.9 entries on average.
+9. **The tier against the base tier, back-to-back pairs on the host: NO GAIN OBSERVED; whether and how
+   much it loses is not determined.** Native `dist-n3` (`bin/warm`), reachability, one worker,
+   `code,casetrees` against `code,casetrees,t2` with `rlvm.t2.mode=warm rlvm.t2.timing=4096`, three passes
+   per process, the two configurations alternating, one process of mine at a time, 16:07Z - 16:17Z, load
+   average 55-67 (label `Pn1`). Process CPU in ms (it contains the compiler threads); every row accepted
+   4,405 units; a tier run made 6.40 - 6.49 M compiled activations.
+
+   | pair | base: cold, pass 2, pass 3 (wall/CPU) | tier: cold, pass 2, pass 3 (wall/CPU) | blocks installed, compile CPU | tier / base, pass 2, pass 3 |
+   |---|---|---|---|---|
+   | 1 | 2360, 1970, 1950 (2.4, 2.5) | 3720, 3700, 3800 (6.1, 5.6) | 74, 2327 ms | 1.88, 1.95 - FLAGGED: the base run fell into a quiet moment |
+   | 2 | 3280, 3030, 2930 (8.3, 4.6) | 4330, 3320, 3900 (5.2, 6.4) | 76, 2557 ms | 1.10, 1.33 |
+   | 3 | 3410, 2840, 2870 (5.9, 6.0) | 3500, 2510, 2960 (6.8, 3.7) | 72, 1720 ms | 0.88, 1.03 |
+   | 4 | 3160, 2170, 1630 (5.4, 2.2) | 3400, 2470, 3930 (3.0, 4.3) | 76, 1929 ms | 1.14, 2.41 - pass 3 FLAGGED: quiet moment of the base run |
+   | 5 | 3360, 3030, 3200 (12.1, 4.9) | 4860, 3890, 3780 (5.2, 3.1) | 79, 2742 ms | 1.28, 1.18 |
+   | 6 | 3570, 2970, 3180 (2.0, 5.5) | 4380, 3050, 3200 (2.5, 4.2) | 73, 2429 ms | 1.03, 1.01 |
+
+   Reading, and its limits. The tier is at or above the base tier in 11 of 12 comparisons and never clearly
+   below it (0.88 once). But the base tier's own value for the same pass ranges from 1630 to 3200 ms over
+   these ten minutes, a factor of two, which is more than any ratio that is not flagged; passes inside one
+   process differ by up to 1.6x. A tier run also spends 1.7 - 2.7 s compiling, spread over its three passes
+   (blocks keep crossing the `warm` profile's threshold), and that is inside the process clock: an attempt
+   to explain the excess as "exactly the compiler" fitted pair 2 and failed on pairs 3 and 4. So these rows
+   do not separate slower compiled code from compilation still in progress, and they are one corpus, one
+   platform, one worker.
+
+## 6. Go / no-go
+
+**Not established by measurement.** Neither criterion was evaluated under its own conditions:
+
+- ISA 0.5 as revised (go iff total CPU time, compiler included, falls by at least 5% on reachability or 3%
+  on the Cedar slice, wall clock is not higher, and no corpus loses more than 0.5%): needs container rows
+  with instruction counts. The batches for it (`work/t2/container-all.sh`: reachability, Cedar slice, Init,
+  three perf/ tests, con-leche; native and JVM launcher; one and four workers; base / tier attached without
+  promotion / both governor profiles) were queued at 15:58Z and never got the measurement lock (11 batches
+  waiting, the oldest for 40 minutes, at 16:10Z). `work/t2/measure.tsv` does not exist.
+- OWNER-NOTES 12 (does the tier lower warm wall clock, 8 workers and 1): wall clock on this host was not
+  usable all afternoon (wall / CPU between 2 and 12 for the same run), and no run with more than one
+  worker produced a usable row.
+
+What exists instead: the paired host rows of 5.9 (no gain observed on reachability, native, one worker;
+a loss suggested, size unknown), compile costs of about 15 ms per block (5.8), and three samples of
+two-instruction LEAF blocks that were 5 - 19 ns slower per entry compiled than stepped (5.4).
+
+**Recommendation on that basis: `t2` stays off; it is not ready to be a default, and nothing measured here
+argues for it.** That is a recommendation from the absence of any observed gain, not the no-go verdict the
+brief asks for; the verdict needs the container rows.
+
+Expectation, from the structure of the tier (reasoning, not measurement; ISA 0.5 states the same
+expectation): a promoted block is short (6.9 instructions on average among reachability's promoted blocks,
+12.9 in the prelude); what compiled code removes is the stepper's dispatch and operand decoding for those
+few instructions; what it adds is the hand-over (hook, table lookup, Truffle call boundary, entry dispatch,
+register loads) once per activation; and every operation that does the real work (interning, frames,
+`Eval.apply`) is the same out-of-line call as before. Section 1, D5 is the consequence that matters: a
+block reaches the next block through `Eval.apply` and the stepper's hook, never directly.
+
+What could change the picture, none of it built or measured:
+
+1. Calls between promoted blocks without leaving compiled code. `APPLY` would need the fast path of
+   `Eval.apply` for "closure whose block is promoted" as one shared operation that both the stepper and a
+   node can call (a request for M2 / M7), so that Truffle can call or inline the callee's root.
+2. Blocks that iterate inside one activation (a recursor chain as a backward jump; K2 trees published as
+   blocks): note to M3 in requests.log, 15:02:16Z.
+3. Operations compiled into the block (`rlvm.t2.inline`): implemented, no result (5.5).
+4. The tier being warm at all under the driver's passes (section 7, open point 1).
+
+## 7. Open points
+
+1. **The tier is cold in every pass of the driver's `-X passes`.** Checked through the launcher of
+   `dist-n3` (16:20Z, `work/t2/gates/passes-recheck-n3.log`): `-X passes=3 -X passes-mode=recheck` on
+   perf/proj-app-lazy-delta with `code,casetrees,t2`: all three passes accept, and in each pass the same
+   two blocks are promoted and compiled again (80.9 / 60.5 / 54.4 ms and 6.2 / 6.5 / 5.5 ms); three tier
+   instances report at exit. The tier is keyed by the machine engine, so each recheck pass had a new engine
+   with a new code store; reload mode has a new store per pass. As wired, the warm-pass metric of
+   OWNER-NOTES 12 cannot credit a compiled tier (or a warm code store) at all. Reported to the driver's
+   owner and M6 (requests.log 16:20:31Z). `WarmMain` keeps one engine across passes, which is why its tier
+   rows show blocks staying installed; it measures something the launcher does not do today.
+2. **No go / no-go by measurement** (section 6). The container batches never ran: `work/t2/container-all.sh`
+   (waits for `dist-n3`, takes the measurement lock once per batch, rows to `work/t2/measure.tsv`) was
+   queued from 15:58Z to 16:20Z behind up to eleven other batches and was then stopped by me, because
+   nothing of mine may be left running. Re-run it as it is; its warm rows use `bin/warm`, because of open
+   point 1.
+3. **Not measured at all**: the JVM launcher against the native image with the tier; four or eight
+   workers; the Cedar slice; Init; the evaluation-heavy perf/ tests; con-leche; break-even executions
+   (the saving per execution is not established, not even its sign). The only comparison rows are 5.9.
+4. **No image of the final tree.** `dist-n3` (15:38Z) lacks four small changes: the timing default 4096
+   (every measured tier row passed it explicitly), the model for a block without a timed sample, the
+   process clock read after the rent test, and `cost1` 2.5. The tree with them compiles and passes the fast
+   group (3 tests, machine jar `4023ec9211dd` before and after the run, 16:16-16:17Z) and the default group
+   (5 tests, 16:17:54Z - 16:19:18Z; started on `4023ec9211dd`, the repository jar changed to `f9b6d253065a`
+   during the run). `work/t2/build-dist.sh --native --warm dist-n4` builds the image.
+5. **The differential gates were run on one machine jar only** (`a089fd2aef4b`, 14:51Z; section 4). The
+   machine has been republished about forty times since. To repeat: `rlvm-testkit/bin/testkit diff --engine
+   machine --launcher work/t2/DIST/bin/rlvm-jvm --threads 4 --fail-on-decline reachability cedar-hot-ax init
+   std -- -Xmx8g -X machine.switches=code,casetrees,t2 -Drlvm.t2.mode=warm -Drlvm.t2.timing=4096` and the
+   tutorial + bugs form of section 3. With the newer machine jars `--fail-on-decline` will report the
+   machine's own 8 declines on reachability (section 4), tier or no tier.
+6. **Heat timing**: the mechanism is reported to M7, its cost is not measured (5.1).
+7. **Experiments without a result**: `rlvm.t2.inline`, `rlvm.t2.minInstr`, the speed of the three variants
+   (5.4 - 5.6).
+8. **Tied to this GraalVM**: `OptimizedCallTarget.compile / isValid / callIndirect` and the compilation
+   listener are internal API of the optimising runtime; the "no setter helper in compiled code" rule works
+   around a limitation of native-image CE 25.5.5.0.3 (defect 2) that another version may not have, or may
+   have differently.
+9. **Two incidents of mine** (machine-T2.log 14:27Z and 15:54Z): a `pkill -f` that matched its own shell,
+   and a kill loop over a process-name pattern that the permission system refused and that would have
+   terminated my own running image build. Nothing of anybody else's was touched either time. Processes of
+   mine were stopped only through their task ids afterwards.

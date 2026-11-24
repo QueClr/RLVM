@@ -508,8 +508,11 @@ public final class Op {
      * The switches a non-strict engine runs with when neither {@code -X machine.switches} nor the system
      * property {@code rlvm.machine.switches} is given ({@code rlvm-machine/SWITCHES.md} has the evidence for
      * every member). {@code -X machine.switches=none} is v0 (the generic tier, the complete procedure).
+     * Since 2026-11-24 16:2xZ: staging step 1, {@code warm,gated,expect}, with the machine's own session cap
+     * ({@code MachineEngine.DEFAULT_SESSION_CAP}, 1 MiB). The module's tests run with the system property
+     * {@code rlvm.machine.switches=none} (pom.xml), so a test engine is v0 unless the test says otherwise.
      */
-    public static final int SW_DEFAULT = 0;
+    public static final int SW_DEFAULT = SW_WARM | SW_GATED_TABLING | SW_EXPECT;
 
     // ---------------------------------------------------------------------------------------------------
     // Debug modes (5.5). Machine.debug holds the set; a failed audit is fault(E_AUDIT).

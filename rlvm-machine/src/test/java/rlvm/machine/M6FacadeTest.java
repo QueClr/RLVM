@@ -49,6 +49,7 @@ class M6FacadeTest {
     @Test
     void theProviderTakesItsSettingsFromTheCommandLine() {
         MachineProvider p = new MachineProvider();
+        assertTrue(p.runDefaults(new java.util.HashMap<>()).isEmpty(), "the machine caps its sessions itself: no driver setting is needed");
         assertEquals(10, p.priority(), "below Engines.DEFAULT_ENGINE_MIN_PRIORITY until the gates are passed");
         assertTrue(p.optionKeys().contains("machine.debug") && p.optionKeys().contains("machine.switches"));
         Fixture f = Fixture.prelude0();
@@ -873,6 +874,8 @@ class M6FacadeTest {
         assertEquals(12, Integer.bitCount(Op.SW_EXPERIMENTS));
         assertEquals(0, Op.SW_EXPERIMENTS & Op.SW_ALL);
         assertEquals(0, Op.SW_DEFAULT & (Op.SW_EXPERIMENTS | Op.SW_K2), "no experiment is a default");
+        assertEquals(Op.SW_WARM | Op.SW_GATED_TABLING | Op.SW_EXPECT, Op.SW_DEFAULT, "the default set: staging step 1 (SWITCHES.md)");
+        assertEquals("none", System.getProperty("rlvm.machine.switches", "none"), "the module's tests run v0 unless they say otherwise (pom.xml)");
         assertThrows(IllegalArgumentException.class, () -> Debug.parseSwitches("warm,-fast"));
         // without the setting an engine runs the default set; a strict engine runs none
         String old = System.getProperty("rlvm.machine.switches");

@@ -109,6 +109,28 @@ with `k2`: at nano-lean's 2.08 s); the Cedar slice, Init and Std do not move (in
 the per-unfolding count in the one-declaration sessions of v0; with warm sessions +0.0 % .. +0.1 %). By the
 rule of this wave (lower on one corpus, none raised by more than 1 %): KEEP.
 
+Locked batch 3 (`work/m3/batch3.out`; the published state of 15:05Z = jar a795a6f85f94 = `work/m3/dist-k2n`, with
+the other packages' publications of the afternoon; base = `warm,gated,expect,probes,code,casetrees` at 4 MiB;
+3 runs per row, host load 100 - 157; CPU s of the runs / instructions G):
+
+| corpus | base | + `k2` | + `k2,m3a` | + `k2,m3a`, `elabAt` 1 |
+|---|--:|--:|--:|--:|
+| reachability | 2.84, 3.00, 2.96 / 27.9 | 2.30, 2.63, 2.55 / 21.9 | 2.50, 2.50, 2.42 / 20.7 | 2.39, 2.32, 2.53 / 20.6 |
+| Cedar slice | 2.61, 2.61, 2.82 / 37.5 | 2.60, 2.74, 2.83 / 37.5 | 2.48, 2.73, 2.60 / 37.3 | 2.46, 2.75, 2.63 / 37.2 |
+| Init | 6.44, 6.70, 6.49 / 90.1 | 6.78, 6.88, 6.86 / 90.2 | 6.22, 6.90, 6.87 / 89.4 | 6.28, 6.84, 6.80 / 89.3 |
+| Std | 11.67, 12.53, 11.50 / 154.9 | 11.91, 12.32, 11.49 / 155.3 | 12.50, 12.33, 11.57 / 154.1 | 12.76, 11.39, 12.44 / 153.9 |
+
+reachability also: host depth 512 2.41, 2.39 s and 2048 2.57, 2.37 s (20.7 G both: no CPU difference
+established); `lazyeval` on top 2.24, 2.33 s (20.7 G); v0 8.95, 8.61 s (58.3 G); the reference engine 13.15, 12.78 s.
+So reachability: -16 % CPU / -26 % instructions with `k2,m3a` (median 2.96 -> 2.50 s; 0.28x of v0 in the same
+batch); `m3a` is worth -0.5 % .. -0.9 % of the instructions on Init, Std and the Cedar slice and -5 % on
+reachability. **Init is the open point**: its three `k2` rows are 5 % above its three base rows in CPU (worker
+CPU 5.97 - 6.04 s against 5.65 - 5.73 s) at +0.1 % instructions and equal ticks; batch 2 had shown no difference
+(7.16, 6.85 against 7.13, 6.80). Not resolved under this load. To make the question moot, K2 was then ARMED
+PER DECLARATION (published 16:06Z): nothing of it runs (no count, no table probe, no firing) until the current
+declaration has run 16,384 ticks, which no light declaration reaches; an interleaved batch (base, `k2,m3a`,
+4 pairs per corpus, `work/m3/batch4.sh`) is queued behind the measurement lock.
+
 On reachability 0.92 M of the WHNF loop's unfoldings fire a rule (hit rate 97 %); a node costs about 25 ticks
 to derive (74 - 148 nodes in each of the three heavy declarations, 0.05 % of their ticks). The lazy-delta path
 (most of a `decide` proof's top-level chain) takes no rule, which bounds the gain there; `magma-list-deep-n36`

@@ -64,6 +64,8 @@ public final class InductiveAdmission {
     private NameTable names;
     private DeclTable decls;
     private TermTools tools;
+    /** A second traversal state for {@link #rebuildTerm}: it runs inside the hooks of {@link #tools}. */
+    private TermTools rebuildTools;
     private boolean syntacticWhnf;
     /** Set when a non-syntactic engine's whnf changed a term (see {@link #whnfT}). */
     private boolean whnfChanged;
@@ -200,6 +202,7 @@ public final class InductiveAdmission {
             terms = t;
             ov = t.overlay();
             tools = new TermTools(t);
+            rebuildTools = new TermTools(t);
         }
         tops = ops.termOps();
         levels = ops.levels();
@@ -250,6 +253,10 @@ public final class InductiveAdmission {
         atomType.clear();
         atomCtor.clear();
         atomRec.clear();
+        lvlRebuilt.clear();
+        lvlTouched.clear();
+        rebuild.memo.clear();
+        rebuildChanged = false;
 
         indexMembers();
         buildLevels();
@@ -402,6 +409,192 @@ public final class InductiveAdmission {
             }
         }
         return true;
+    }
+
+    // =====================================================================================================
+    // the official rebuild of levels (references the kernel makes itself)
+    // =====================================================================================================
+    //
+    // add_inductive refers to the members of the block with level-parameter objects it creates itself
+    // (m_levels = lparams_to_levels(m_lparams); m_ind_cnsts; mk_constant(cnstr_name, m_levels);
+    // get_rec_levels(); m_lvls of elim_nested_inductive_fn). The official instantiate (level.cpp:
+    // replace_level_fn, update_succ, update_max) keeps a level node only when its operands come back
+    // POINTER-equal, and a fresh parameter object is never pointer-equal to the one of the declared
+    // type. So the type the official type checker infers for such a reference
+    // (infer_constant -> instantiate_type_lparams) is the declared type with every level node above a
+    // parameter of the block rebuilt through mk_succ / mk_max / mk_imax: `imax u 1` becomes `max u 1`,
+    // which the official is_equivalent does not identify with `imax u 1`, and the block is rejected
+    // ("application type mismatch"). A reference written in the export carries the level objects of
+    // the declared type and gets the declared type as it is.
+    //
+    // Here: the stand-in of a member that only the kernel refers to (constructors, recursors, auxiliary
+    // types) is a local whose type is the REBUILT type; the stand-in of a user type keeps the declared
+    // header for the occurrences in the constructor types, and the one application the kernel builds
+    // itself (the major premise `T params indices`) is checked once against a local of the rebuilt
+    // header ({@link #checkRecursors}). Every comparison is then the engine's own application check,
+    // with the official sides: type of the argument against the binder domain of the rebuilt type.
+
+    /** Rebuilt level per level id of the block in flight. */
+    private final IntIntMap lvlRebuilt = new IntIntMap(64);
+    /** 2 if the level mentions a universe parameter of the block, else 1. */
+    private final IntIntMap lvlTouched = new IntIntMap(64);
+    private int[] lvlStack = new int[32];
+    private int[] lvlBuf = new int[8];
+    /** True once the rebuild changed the spelling of a level of the block in flight. */
+    private boolean rebuildChanged;
+
+    /**
+     * True if, in the last call of {@link #generate}, the official rebuild gave another spelling to at
+     * least one level of a type it is applied to (statistics: such blocks are the only ones for which
+     * the checks of this class differ from a kernel that keeps the declared spelling).
+     */
+    public boolean lastRebuildChanged() {
+        return rebuildChanged;
+    }
+
+    private boolean isBlockParam(int name) {
+        int lp = in.levelParams;
+        for (int i = 0, n = lists.length(lp); i < n; i++) {
+            if (lists.get(lp, i) == name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The official {@code instantiate(l, lparams, fresh)}: a level that mentions no parameter of the
+     * block is kept; a parameter is itself; every other node is rebuilt from its rebuilt operands with
+     * {@code mk_succ} / {@code mk_max} / {@code mk_imax}. Iterative (the depth of a level is the
+     * export's).
+     */
+    private int rebuildLevel(int level) {
+        int done = lvlRebuilt.get(level);
+        if (done != 0) {
+            return done;
+        }
+        int sp = 0;
+        lvlStack[sp++] = level;
+        while (sp > 0) {
+            int l = lvlStack[sp - 1];
+            if (lvlRebuilt.contains(l)) {
+                sp--;
+                continue;
+            }
+            if (!levels.hasParam(l)) {
+                lvlRebuilt.put(l, l);
+                lvlTouched.put(l, 1);
+                sp--;
+                continue;
+            }
+            int kind = levels.kind(l);
+            int r;
+            boolean touched;
+            if (kind == LevelOps.KIND_PARAM) {
+                r = l;
+                touched = isBlockParam(levels.paramName(l));
+            } else if (kind == LevelOps.KIND_SUCC) {
+                int a = levels.succOf(l);
+                int ra = lvlRebuilt.get(a);
+                if (ra == 0) {
+                    sp = lvlPush(sp, a);
+                    continue;
+                }
+                touched = lvlTouched.get(a) == 2;
+                r = touched ? levels.succ(ra) : l;
+            } else if (kind == LevelOps.KIND_MAX || kind == LevelOps.KIND_IMAX) {
+                int a = levels.lhs(l);
+                int b = levels.rhs(l);
+                int ra = lvlRebuilt.get(a);
+                if (ra == 0) {
+                    sp = lvlPush(sp, a);
+                    continue;
+                }
+                int rb = lvlRebuilt.get(b);
+                if (rb == 0) {
+                    sp = lvlPush(sp, b);
+                    continue;
+                }
+                touched = lvlTouched.get(a) == 2 || lvlTouched.get(b) == 2;
+                r = !touched ? l : kind == LevelOps.KIND_MAX ? levels.mkMax(ra, rb) : levels.mkIMax(ra, rb);
+            } else {
+                r = l;
+                touched = false;
+            }
+            if (r != l) {
+                rebuildChanged = true;
+            }
+            lvlRebuilt.put(l, r);
+            lvlTouched.put(l, touched ? 2 : 1);
+            sp--;
+        }
+        return lvlRebuilt.get(level);
+    }
+
+    private int lvlPush(int sp, int l) {
+        if (sp == lvlStack.length) {
+            lvlStack = Arrays.copyOf(lvlStack, sp * 2);
+        }
+        lvlStack[sp] = l;
+        return sp + 1;
+    }
+
+    /** The official {@code instantiate_lparams(e, lparams, fresh)}: every SORT and CONST level rebuilt. */
+    private final TermTools.Rewriter rebuild = new TermTools.Rewriter() {
+        @Override
+        boolean skip(int header) {
+            return (header & Node.F_HAS_LPARAM) == 0;
+        }
+
+        @Override
+        int sort(int node) {
+            int l = terms.a(node);
+            int r = rebuildLevel(l);
+            return r == l ? 0 : ov.mkSort(r);
+        }
+
+        @Override
+        int leaf(int node, int kind) {
+            if (kind != Kind.CONST) {
+                return 0;
+            }
+            int list = terms.b(node);
+            int n = lists.length(list);
+            lvlBuf = ensure(lvlBuf, n);
+            boolean changed = false;
+            for (int i = 0; i < n; i++) {
+                int l = lists.get(list, i);
+                int r = rebuildLevel(l);
+                lvlBuf[i] = r;
+                changed |= r != l;
+            }
+            if (!changed) {
+                return 0;
+            }
+            int cid = terms.a(node);
+            if (cid <= 0) {
+                throw decline("a reference to an undeclared constant carries a universe level that the official"
+                        + " kernel respells when it instantiates the block's own constants: not reproduced");
+            }
+            return ov.mkConst(cid, lists.intern(lvlBuf, 0, n));
+        }
+    };
+
+    /**
+     * The type the official kernel infers for a reference to a member of the block that it built itself:
+     * {@code type} with its levels rebuilt. The same id if no level changes its spelling.
+     */
+    private int rebuildTerm(int type) {
+        if ((terms.header(type) & Node.F_HAS_LPARAM) == 0) {
+            return type;
+        }
+        try {
+            return rebuildTools.replace(type, rebuild);
+        } catch (UnsupportedOperationException e) {
+            // A LevelOps without the structural view cannot say what the official kernel compares.
+            throw decline("the level operations at hand cannot rebuild a universe level as the official kernel does"
+                    + " when it instantiates the block's own constants (" + e.getMessage() + ")");
+        }
     }
 
     // =====================================================================================================
@@ -730,7 +923,11 @@ public final class InductiveAdmission {
             tContLvls = Arrays.copyOf(tContLvls, n);
         }
         tHeader[t] = header;
-        int atom = ops.mkLocal(header);
+        // An auxiliary type is only ever referred to as `auxJ.{m_lvls}` (replace_if_nested) and
+        // `auxJ.{m_levels}` (m_ind_cnsts): its stand-in has the rebuilt header. A user type is also
+        // referred to by the constructor types of the export, with the levels of the declaration:
+        // its stand-in keeps the header, and the kernel's own application is checked in checkRecursors.
+        int atom = ops.mkLocal(t >= nUser ? rebuildTerm(header) : header);
         tAtom[t] = atom;
         atomType.put(atom, t + 1);
         tCtor0[t] = nCtors;
@@ -1257,9 +1454,11 @@ public final class InductiveAdmission {
             cResult[c] = result;
             cNumFields[c] = arity - nparams;
         }
-        // declare_constructors
+        // declare_constructors. A constructor of the block is referred to only by the kernel itself
+        // (mk_constant(cnstr_name, m_levels) in mk_rec_infos and check_recursors): the type inferred
+        // for it is the constructor type with its levels rebuilt.
         for (int c = 0; c < nCtors; c++) {
-            int atom = ops.mkLocal(cType[c]);
+            int atom = ops.mkLocal(rebuildTerm(cType[c]));
             cAtom[c] = atom;
             atomCtor.put(atom, c + 1);
         }
@@ -1483,6 +1682,19 @@ public final class InductiveAdmission {
             ops.begin(in.rank, recLevelParams);
         } else {
             recLevelParams = in.levelParams;
+        }
+        // tc().check(rec type): the major premise `t : T_k.{m_levels} params indices` (in every motive
+        // and in the recursor of T_k) is an application of a reference the kernel made itself, so
+        // T_k has the REBUILT header there: the type of each parameter and index local is compared
+        // with the binder domain of the rebuilt header. With the declared header (the stand-in of a
+        // user type) this is part of the check below; with a header that the rebuild respells it is
+        // made here, by the engine's own application check on a local of the rebuilt header.
+        for (int k = 0; k < nUser; k++) {
+            int rebuilt = rebuildTerm(tHeader[k]);
+            if (rebuilt != tHeader[k]) {
+                int fresh = ops.mkLocal(rebuilt);
+                ops.check(ov.mkApps(ov.mkApps(fresh, params, 0, nparams), idxPool, tIdx0[k], tNumIdx[k]));
+            }
         }
         for (int j = 0; j < nTypes; j++) {
             ops.check(recTypeAux[j]);
@@ -1780,7 +1992,9 @@ public final class InductiveAdmission {
             if (restored != cDeclared[c] && !tops.eqv(restored, cDeclared[c])) {
                 throw reject(Reason.RECORD_MISMATCH);
             }
-            cFinal[c] = ops.mkLocal(cDeclared[c]);
+            // In the final environment the recursor types and rules still refer to the constructor
+            // with the kernel's own level objects: rebuilt type, as for cAtom.
+            cFinal[c] = ops.mkLocal(rebuildTerm(cDeclared[c]));
         }
 
         // recursor types (they mention no recursor)
@@ -1794,7 +2008,9 @@ public final class InductiveAdmission {
         for (int j = 0; j < nTypes; j++) {
             recRestored[j] = restoreTerm(recTypeAux[j]);
             recTypeCheck[j] = tools.replace(recRestored[j], rename);
-            recFinalAtom[j] = ops.mkLocal(recTypeCheck[j]);
+            // The rules refer to the recursors as `rec.{lvls}` with the kernel's level objects, and
+            // the re-check of the rules infers their types in check mode: rebuilt recursor type.
+            recFinalAtom[j] = ops.mkLocal(rebuildTerm(recTypeCheck[j]));
         }
         // rules: check form
         for (int j = 0; j < nUser; j++) {

@@ -209,6 +209,73 @@ class PipelineTest {
         });
     }
 
+    /**
+     * The parking rule: the environment thread does not advance past a unit that may depend on the
+     * rest of the file in a way the pass cannot see in file order; after the load the pass decides
+     * it over the complete file, and the run has the verdict of the batch run.
+     */
+    @Test
+    void theFrontierWaitsBelowAnOutOfOrderUnitUntilTheLoadHasEnded() {
+        assertTimeoutPreemptively(Duration.ofSeconds(120), () -> {
+            for (int w : WORKERS) {
+                for (int variant = 0; variant < 4; variant++) {
+                    Unit[] script = mixed(600);
+                    int at = variant == 3 ? 0 : 200;
+                    script[at].cls = RunHost.CHECK;
+                    script[at].outOfOrder = true;
+                    if (variant == 1) { // really ill-typed: the batch verdict is REJECT at this unit
+                        script[at].warm = Fakes.R;
+                        script[at].strict = Fakes.R;
+                        script[at].ref = Fakes.R;
+                    }
+                    if (variant == 2) { // a second one further up, in the last piece of the file
+                        script[500].cls = RunHost.CHECK;
+                        script[500].outOfOrder = true;
+                    }
+                    // batch: the pass meets the unit over the complete file
+                    FakeHost batch = new FakeHost(Fakes.copy(script));
+                    int expected = batch.run(Fakes.config(w), false).execute();
+                    assertEquals(variant == 1 ? Outcome.REJECT : Outcome.ACCEPT, expected);
+                    assertEquals(0, batch.passedOutOfOrder.get());
+                    // pipelined: units 0 .. 299 are published first; the loader goes on only when everything
+                    // below the out-of-order unit was checked, i.e. the frontier really stood there
+                    final FakeHost host = new FakeHost(Fakes.copy(script));
+                    final int below = at;
+                    final Run[] holder = new Run[1];
+                    Run run = host.runPipelined(Fakes.config(w), false, new int[] {300, 450, 600}, 300, null, () -> {
+                        VerdictBoard b = holder[0].verdicts();
+                        for (int u = 0; u < below; u++) {
+                            if (b.status(u) == VerdictBoard.NONE) {
+                                return false;
+                            }
+                        }
+                        return host.env.get() == below;
+                    });
+                    holder[0] = run;
+                    int verdict = run.execute();
+                    String where = w + " workers, variant " + variant + ": " + run.verdicts().explanation();
+                    assertEquals(expected, verdict, where);
+                    assertEquals(variant == 1 ? 200 : -1, run.verdicts().decidingUnit(), where);
+                    assertEquals(0, host.passedOutOfOrder.get(), "the pass never went past an out-of-order unit while loading: " + where);
+                    assertEquals("", host.describeViolations(), where);
+                }
+            }
+            // Without the host's answer (the rule off) the same file is declined where the batch run accepts:
+            // the difference the rule removes.
+            Unit[] script = mixed(600);
+            script[200].cls = RunHost.CHECK;
+            script[200].outOfOrder = true;
+            final FakeHost silent = new FakeHost(script);
+            silent.tellsOutOfOrder = false;
+            Run run = silent.runPipelined(Fakes.config(4), false, new int[] {300, 450, 600}, 300, null,
+                    () -> silent.env.get() >= 300);
+            assertEquals(Outcome.DECLINE, run.execute());
+            assertEquals(200, run.verdicts().decidingUnit());
+            assertEquals(1, silent.passedOutOfOrder.get());
+            assertTrue(run.verdicts().explanation().contains("FORWARD_REFERENCE"), run.verdicts().explanation());
+        });
+    }
+
     @Test
     void anEnvironmentUnitThatNeedsTheRestOfTheFileIsDecidedAfterTheLoad() {
         assertTimeoutPreemptively(Duration.ofSeconds(120), () -> {

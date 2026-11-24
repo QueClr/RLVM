@@ -573,7 +573,7 @@ class SchedulerTest {
     private long states;
     private java.util.HashSet<String> seen;
     /** The split bound of the simulated schedulers (0 = none). */
-    private int simSplit;
+    private static int simSplit;
 
     /**
      * Depth-first search over the schedules, pruned at states already visited: every reachable state

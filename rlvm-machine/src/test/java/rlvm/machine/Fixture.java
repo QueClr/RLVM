@@ -426,7 +426,7 @@ final class Fixture implements Sexp.Sink {
         store = w.store;
         ctx = w.ctx;
         sealed = true;
-        engine = new MachineEngine(store, EngineConfig.defaults());
+        engine = v0Engine(store);
         session = (MachineSession) engine.newSession(ctx);
         m = session.m;
         m.beginDecl(Integer.MAX_VALUE, -1, Op.FUEL_UNLIMITED, Long.MAX_VALUE);
@@ -879,6 +879,20 @@ final class Fixture implements Sexp.Sink {
         return this;
     }
 
+    /**
+     * The engine of a fixture: NO staging switch unless the test asks for some - with {@link #switches}, or
+     * with the system property {@code rlvm.machine.switches} set before the fixture is made (M7's tests do).
+     * The production default set ({@code Op.SW_DEFAULT}) never reaches a fixture: a test of v0 tests v0. The
+     * other settings (debug modes, host depth) come from the system properties as in production.
+     */
+    static MachineEngine v0Engine(Store st) {
+        MachineEngine.Settings s = MachineEngine.Settings.fromProperties();
+        if (System.getProperty("rlvm.machine.switches") == null) {
+            s.switches = 0;
+        }
+        return new MachineEngine(st, EngineConfig.defaults(), s);
+    }
+
     /** Staging switches by name ({@code "warm,gated"}; see {@code Debug.parseSwitches}). */
     Fixture switches(String names) {
         seal();
@@ -967,7 +981,7 @@ final class Fixture implements Sexp.Sink {
         f.refEngine = RefEngine.FACTORY.create(st, EngineConfig.defaults());
         f.refSession = f.refEngine.newSession(f.refCtx);
         f.env = new EnvBuilder(st, f.refSession.ops(), Policy.arena(), null);
-        f.engine = new MachineEngine(st, EngineConfig.defaults());
+        f.engine = v0Engine(st);
         f.session = (MachineSession) f.engine.newSession(f.ctx);
         f.m = f.session.m;
         return f;

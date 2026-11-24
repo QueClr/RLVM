@@ -92,6 +92,17 @@ final class Fakes {
          * that is declared later, or nowhere); the script applies once the load is complete.
          */
         boolean late;
+        /**
+         * Pipelined loading, a CHECK unit that is out of file order in a way only the unit's proof
+         * shows (the store's "something in the block was unresolved"): the environment pass, going
+         * through the file in file order while it loads, does not see it. If the pass moves its
+         * frontier past the unit before the file is complete, every stage of the unit declines with
+         * FORWARD_REFERENCE for good (the admission of the real host: the unit is neither in file
+         * order nor decided by the pass); if the pass meets the unit when the file is complete, it
+         * decides it itself in dependency order, as in a batch run, and the script applies. The
+         * driver's parking rule keeps the frontier below such a unit until the load has ended.
+         */
+        boolean outOfOrder;
         /** Bytes of unused capacity the lane holds after this unit was checked (until its next reset). */
         long slack;
 
@@ -109,6 +120,7 @@ final class Fakes {
             u.delayMicros = delayMicros;
             u.holdFor = holdFor;
             u.late = late;
+            u.outOfOrder = outOfOrder;
             u.slack = slack;
             return u;
         }
@@ -200,12 +212,19 @@ final class Fakes {
          */
         volatile boolean envSilentWait;
         final AtomicInteger envRetries = new AtomicInteger();
+        /** Out-of-order units ({@code Unit.outOfOrder}) the environment pass moved past while the file was loading. */
+        final AtomicInteger passedOutOfOrder = new AtomicInteger();
+        /** Set per unit when that happened: the unit's stages then decline for good. */
+        final java.util.concurrent.atomic.AtomicIntegerArray lostToFileOrder;
+        /** False: the host does not tell the driver which units need the complete file (no parking). */
+        volatile boolean tellsOutOfOrder = true;
         final AtomicInteger lateDeclines = new AtomicInteger();
         final AtomicInteger laneResets = new AtomicInteger();
         /** The lane of every context handed out, so that a session can find the snapshot it runs on. */
         final java.util.concurrent.ConcurrentHashMap<WorkerContext, FakeLane> lanes = new java.util.concurrent.ConcurrentHashMap<>();
 
         FakeHost(Unit[] script) {
+            this.lostToFileOrder = new java.util.concurrent.atomic.AtomicIntegerArray(Math.max(1, script.length));
             this.script = script;
             this.loaded = script.length;
             this.rank = new int[script.length];
@@ -365,6 +384,14 @@ final class Fakes {
             run.setMinUnitsPerWorker(1);
             run.setDiagnostics(null);
             return run;
+        }
+
+        @Override
+        public boolean unitNeedsCompleteFile(int unit) {
+            if (unit >= loaded) {
+                violation("unitNeedsCompleteFile asked for unit " + unit + " beyond the loaded frontier " + loaded);
+            }
+            return tellsOutOfOrder && script[unit].outOfOrder;
         }
 
         @Override
@@ -581,6 +608,10 @@ final class Fakes {
                         stuck = true;
                         break;
                     }
+                } else if (s.outOfOrder && !host.complete) {
+                    // file order while the file loads: the pass does not see what the unit's proof needs
+                    host.passedOutOfOrder.incrementAndGet();
+                    host.lostToFileOrder.set(u, 1);
                 }
                 u++;
                 host.env.set(u);
@@ -743,6 +774,13 @@ final class Fakes {
                     host.refChecks.incrementAndGet(unit);
                     behaviour = s.ref;
                 }
+            }
+            if (host.lostToFileOrder.get(unit) != 0) {
+                // The environment pass went past this out-of-order unit in file order: no stage decides it.
+                reason = Reason.FORWARD_REFERENCE;
+                message = "unit " + unit + " is out of order and was passed in file order";
+                sinceReset++;
+                return Outcome.DECLINE;
             }
             if (s.late && !host.complete) {
                 // The stage was started before the end of the load; role bookkeeping above still applies.

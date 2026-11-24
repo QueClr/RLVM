@@ -19,8 +19,8 @@ import rlvm.store.Terms;
  * runs. A tree that has no arm for the major ({@code NONE}) hands over to DELTA (ISA 6.3 B8).
  *
  * <h2>K2: derived trees (ISA 3.6 "K2", nano-lean's derived rules R04 section 8; NOTES-M3 D17)</h2>
- * A definition {@code c} whose applications the WHNF loop unfolds {@code k2Hot} (32) times in a session gets
- * a rule, session-local and keyed by its CONST record (constant and levels). The rule is a tree over the
+ * A definition {@code c} without a K1 case tree whose applications the WHNF loop unfolds {@code k2Hot} (32)
+ * times in a session gets a rule, session-local and keyed by its CONST record (constant and levels). The rule is a tree over the
  * first {@code arity} arguments (the leading lambdas of the value):
  * <pre>
  * SPLIT x, I   w = WHNF(value bound to x); it must be a constructor application of I with exactly its
@@ -281,6 +281,11 @@ final class Rules {
                 || m.lists.length(m.vh[ho + Layout.B]) != decls.numLevelParams(row) || e.k2Rules >= K2_MAX_RULES
                 || NatRed.binaryOp(m, head) != 0) {
             return K2_NEVER; // (a binary Nat function is reduced by NATFOLD, and stays folded in a leaf)
+        }
+        if ((m.sw & Op.SW_CASETREES) != 0) {
+            if (Code.blockFor(m, row, Op.ROLE_RULES) != 0) {
+                return K2_NEVER; // the head has a K1 case tree (M7; since 15:10Z it inlines the matchers it calls): the better rule
+            }
         }
         int t = decls.value(row);
         int arity = 0;

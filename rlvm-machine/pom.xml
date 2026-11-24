@@ -106,6 +106,9 @@
           <excludedGroups>${excludedGroups}</excludedGroups>
           <systemPropertyVariables>
             <rlvm.root>${rlvm.root}</rlvm.root>
+            <!-- Test engines are v0 unless a test names its switches (Fixture.switches, M8Harness, ..): the
+                 production default set (Op.SW_DEFAULT, SWITCHES.md) must not change what a test of v0 tests. -->
+            <rlvm.machine.switches>none</rlvm.machine.switches>
           </systemPropertyVariables>
         </configuration>
       </plugin>
