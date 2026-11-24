@@ -53,6 +53,8 @@ final class T2Tier extends Tier {
     private int[] missed;
     /** Count mode: how many of them go to the engine at a time (a power of two, at most the promotion threshold). */
     private final int batch;
+    /** Count mode: the compiled activations of this machine that the engine's total already contains. */
+    private long flushedCalls;
 
     T2Tier(Machine m, T2Engine engine) {
         this.m = m;
@@ -72,7 +74,9 @@ final class T2Tier extends Tier {
             c = missed = java.util.Arrays.copyOf(c, Math.max(c.length << 1, blk + 1));
         }
         if ((++c[blk] & batch - 1) == 0) {
-            engine.bump(blk, batch);
+            long calls = n.calls;
+            engine.bump(blk, batch, calls - flushedCalls); // with the compiled activations of this machine since its last report
+            flushedCalls = calls;
         }
     }
 

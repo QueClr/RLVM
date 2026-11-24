@@ -796,6 +796,74 @@ public final class ProofBlocks {
 
         void str(int litIndex);
 
+        /**
+         * Appends {@code count} APP / LAM / PI / LET records given in PACKED form: what a scanner thread
+         * of the reader prepares for a run of proof-private records, so that the loader thread only
+         * has to supply the references it alone can resolve (LP2, parallel packing).
+         *
+         * <p>A packed record is one head byte followed, for every child that is not external, by the
+         * final LEB128 bytes of its reference (a local reference {@link #local}, already encoded):
+         * head bits 0..3 = the kind, bit {@code 4 + i} set = child {@code i} (in the order of
+         * {@link #app}, {@link #lam}, {@link #pi}, {@link #let}) is EXTERNAL. The external children
+         * are taken from {@code ext[extOff ..]} in record and child order: a value {@code > 0} is a
+         * shared term id, a value {@code < 0} is {@code -(i + 1)} for record {@code i} of the block
+         * being written (an earlier one). The records written are byte for byte the records that the
+         * calls {@link #app}, {@link #lam}, {@link #pi}, {@link #let} with the same references write.
+         * A pre-encoded local reference is not validated: it is the caller's business that it names
+         * an earlier record of this block.
+         *
+         * @param len number of packed bytes; {@code extCount} number of external children: both must
+         *     be exactly what the {@code count} records use ({@link IllegalArgumentException} otherwise,
+         *     with the block under construction in an undefined state)
+         */
+        default void run(byte[] packed, int off, int len, int count, int[] ext, int extOff, int extCount) {
+            int p = off;
+            int e = extOff;
+            int[] r = new int[3];
+            for (int i = 0; i < count; i++) {
+                int head = packed[p++];
+                int kind = head & 0xF;
+                int children = runChildren(kind);
+                int k = size();
+                for (int c = 0; c < children; c++) {
+                    if ((head & (0x10 << c)) != 0) {
+                        int v = ext[e++];
+                        r[c] = v > 0 ? shared(v) : local(k + v + 1);
+                    } else {
+                        int v = 0;
+                        int shift = 0;
+                        int b;
+                        do {
+                            b = packed[p++];
+                            v |= (b & 0x7F) << shift;
+                            shift += 7;
+                        } while (b < 0);
+                        r[c] = v;
+                    }
+                }
+                switch (kind) {
+                    case Kind.APP -> app(r[0], r[1]);
+                    case Kind.LAM -> lam(r[0], r[1]);
+                    case Kind.PI -> pi(r[0], r[1]);
+                    default -> let(r[0], r[1], r[2]);
+                }
+            }
+            if (p != off + len || e != extOff + extCount) {
+                throw new IllegalArgumentException("corrupt packed run");
+            }
+        }
+
+        /** Number of children of a packed record of kind {@code kind} (APP, LAM, PI: 2; LET: 3). */
+        static int runChildren(int kind) {
+            if (kind == Kind.APP || kind == Kind.LAM || kind == Kind.PI) {
+                return 2;
+            }
+            if (kind == Kind.LET) {
+                return 3;
+            }
+            throw new IllegalArgumentException("corrupt packed run: kind " + kind);
+        }
+
         /** Number of records written so far. */
         int size();
 
@@ -859,24 +927,115 @@ public final class ProofBlocks {
                     throw new IllegalArgumentException("local reference " + d + " back from record " + n);
                 }
             } else {
-                int id = r >>> 1;
-                if (id <= 0) {
-                    throw new IllegalArgumentException("not a shared term: " + id);
-                }
-                TermStore ts = terms;
-                if (ts != null) {
-                    if (id >= ts.exportEnd()) {
-                        throw new IllegalArgumentException("shared term " + id + " does not exist");
-                    }
-                    // the node is read only if an unresolved export node exists at or below it: in an
-                    // export whose references all bind, no reference costs a load of the shared region
-                    if (id >= ts.firstUnresolved() && ts.writerArray()[(id << 3) + Node.W_DEPMAX] == Node.DEP_UNRESOLVED) {
-                        unresolved = true;
-                    }
-                    ts.refFromBlock(id, bodyPosition);
-                }
+                sharedRef(r >>> 1, bodyPosition);
             }
             v32(r);
+        }
+
+        /** A record of the block under construction refers to shared term {@code id}. */
+        private void sharedRef(int id, boolean bodyPosition) {
+            if (id <= 0) {
+                throw new IllegalArgumentException("not a shared term: " + id);
+            }
+            TermStore ts = terms;
+            if (ts != null) {
+                if (id >= ts.exportEnd()) {
+                    throw new IllegalArgumentException("shared term " + id + " does not exist");
+                }
+                // the node is read only if an unresolved export node exists at or below it: in an
+                // export whose references all bind, no reference costs a load of the shared region
+                if (id >= ts.firstUnresolved() && ts.writerArray()[(id << 3) + Node.W_DEPMAX] == Node.DEP_UNRESOLVED) {
+                    unresolved = true;
+                }
+                ts.refFromBlock(id, bodyPosition);
+            }
+        }
+
+        /**
+         * The packed run in one loop: the bytes of the pre-encoded references are copied, the external
+         * ones are encoded here. Writes exactly what the record-by-record default writes.
+         */
+        @Override
+        public void run(byte[] packed, int off, int len, int count, int[] ext, int extOff, int extCount) {
+            if (count < 0 || len < 0 || extCount < 0 || off < 0 || extOff < 0 || off + len > packed.length
+                    || extOff + extCount > ext.length) {
+                throw new IllegalArgumentException("corrupt packed run");
+            }
+            // room: a head byte and the pre-encoded bytes are copied, an external is at most 5 bytes
+            long room = (long) pos + len + 5L * extCount;
+            if (room > buf.length) {
+                long cap = Math.max((long) buf.length * 2, room);
+                if (cap > Integer.MAX_VALUE - 15) {
+                    cap = Integer.MAX_VALUE - 15;
+                    if (room > cap) {
+                        throw new StoreLimitException("proof block larger than 2 GiB");
+                    }
+                }
+                buf = Arrays.copyOf(buf, (int) cap);
+            }
+            int lastMark = (n + count - 1) >>> SPARSE_SHIFT;
+            if (count > 0 && lastMark >= marks.length) {
+                marks = Arrays.copyOf(marks, Math.max(marks.length * 2, lastMark + 1));
+            }
+            final byte[] b = buf;
+            final int[] mk = marks;
+            final int end = off + len;
+            final int extEnd = extOff + extCount;
+            int q = pos;
+            int k = n;
+            int p = off;
+            int e = extOff;
+            for (int i = 0; i < count; i++, k++) {
+                if ((k & ((1 << SPARSE_SHIFT) - 1)) == 0) {
+                    mk[k >>> SPARSE_SHIFT] = q;
+                }
+                if (p >= end) {
+                    throw new IllegalArgumentException("corrupt packed run");
+                }
+                final int head = packed[p++];
+                final int kind = head & 0xF;
+                final int children = Writer.runChildren(kind);
+                b[q++] = (byte) kind;
+                for (int c = 0; c < children; c++) {
+                    if ((head & (0x10 << c)) != 0) {
+                        if (e >= extEnd) {
+                            throw new IllegalArgumentException("corrupt packed run");
+                        }
+                        final int v = ext[e++];
+                        int r;
+                        if (v > 0) {
+                            // the body of a binder is its last child
+                            sharedRef(v, c == children - 1 && kind != Kind.APP);
+                            r = (v << 1) | 1;
+                        } else {
+                            int d = k + v + 1;
+                            if (d < 1 || d > k) {
+                                throw new IllegalArgumentException("local reference " + d + " back from record " + k);
+                            }
+                            r = d << 1;
+                        }
+                        while ((r & ~0x7F) != 0) {
+                            b[q++] = (byte) (r | 0x80);
+                            r >>>= 7;
+                        }
+                        b[q++] = (byte) r;
+                    } else {
+                        byte x;
+                        do {
+                            if (p >= end) {
+                                throw new IllegalArgumentException("corrupt packed run");
+                            }
+                            x = packed[p++];
+                            b[q++] = x;
+                        } while (x < 0);
+                    }
+                }
+            }
+            if (p != end || e != extEnd) {
+                throw new IllegalArgumentException("corrupt packed run");
+            }
+            pos = q;
+            n = k;
         }
 
         @Override

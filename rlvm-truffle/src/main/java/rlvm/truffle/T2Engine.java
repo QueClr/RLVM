@@ -105,9 +105,14 @@ final class T2Engine {
     private final java.lang.ref.WeakReference<Object> mengine;
     /** Count mode: entries per block on the stepper path, summed over the machines (flushed in batches of {@link #BATCH}). */
     private int[] total = new int[256];
-    /** Count mode: all activations the stepper ran, over all blocks and machines (in batches). */
+    /** Count mode: all activations of the engine, stepped and compiled, over all blocks and machines (reported in batches). */
     private long totalAll;
-    static final int BATCH = 64;
+    /**
+     * Count mode: a machine reports to the engine every BATCH activations of a block that it stepped. One short
+     * critical section per report; at 64 the eight workers of a Cedar run met in it often enough to show in the
+     * wall clock (NOTES-T3 section 4, C8).
+     */
+    static final int BATCH = 256;
     /** Block id -> installed code; replaced as a whole at every installation (copy on write); read racily by the workers. */
     Installed[] table = new Installed[0];
     private volatile int version;
@@ -271,15 +276,20 @@ final class T2Engine {
     }
 
     /**
-     * Count mode: {@code n} more activations of {@code blk} ran in the stepper (called by a {@link T2Tier} on its
-     * worker thread, once per {@link #BATCH} of them). The block is promoted when the sum reaches {@code at}.
+     * Count mode: {@code n} more activations of {@code blk} ran in the stepper, and {@code compiled} activations
+     * of any block ran in compiled code on the same machine since its last report (called by a {@link T2Tier} on
+     * its worker thread, once per {@link #BATCH} stepped activations of a block). The block is promoted when its
+     * sum reaches {@code at} and it has {@code hot} per mille of all activations.
      */
-    void bump(int blk, int n) {
+    void bump(int blk, int n, long compiled) {
         if (disabled != null) {
             return;
         }
         byte[] st = state;
         if (blk < st.length && st[blk] != COLD) {
+            synchronized (this) {
+                totalAll += n + compiled;
+            }
             return;
         }
         try {
@@ -290,14 +300,14 @@ final class T2Engine {
                     total = Arrays.copyOf(total, Math.max(total.length << 1, blk + 1));
                 }
                 entries = total[blk] += n;
-                all = totalAll += n;
+                all = totalAll += n + compiled;
             }
             if (entries < settings.at) {
                 return;
             }
             // concentration (rlvm.t2.hot): compiled code pays only where a few blocks carry the run; a block that
             // is one of hundreds of lukewarm ones costs its compilation and runs no faster (NOTES-T3 section 1)
-            if (settings.hot > 0 && entries * 1000 < (all + compiledCalls()) * settings.hot) {
+            if (settings.hot > 0 && entries * 1000 < all * settings.hot) {
                 return;
             }
             double cost = costNanos(blk);

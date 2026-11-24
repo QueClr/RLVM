@@ -32,6 +32,8 @@ says so.
 | **Parking rule for pipelined loading** (`RunHost.unitNeedsCompleteFile`): the environment frontier waits below a unit that may depend on the rest of the file; the environment pass is kept over the end of the load | done (wave 8; see "Pipelined loading") |
 | **Time account** in the statistics: per worker on-CPU / run queue / parked by cause / heavy gate / end of load / resets, the environment thread's account, time stamps, time series, slowest units, per-unit trace (`-X unit-trace`), statistics per later pass | done (wave 8; see "Where the wall clock goes") |
 | **`-X shard=K/N`** (measurement only: one shard of the units is checked, the run declines) | done (wave 8; the hardware ceiling in "Measured") |
+| **A large file is published in larger pieces** (`RunConfig.publishScaleMax` = 4, `-X publish-scale=N`: the pipelined hand-off interval times the input's size in GiB, at most 4) | done (wave 8; see "Pipelined loading"; mathlib pipelined with 8 workers -8 %) |
+| **`-X passes-keep=engines`**: the later passes of `passes=N` use the engine instances of pass 1 (`KeptEngines`) | done (wave 8; see "Passes") |
 | Differential mode (`RunConfig.differential`); **`RunConfig.referenceFallback = false` (`no-fallback`)**: the engine under test alone | done |
 | Namespace ordering (`OrderPolicy.Kind.NAMESPACE_WINDOW`, `RunConfig.order`) | **deferred**: `OrderPolicy.of`, `Scheduler` constructor and `Run.execute()` throw `UnsupportedOperationException` |
 | Heavy-lane threads | **not used**: re-checks run on the worker's own deep-stack thread; `Scheduler.defer` / `claimHeavy` work as a plain queue that nothing in `Run` feeds |
@@ -1068,11 +1070,11 @@ pass 27.9 s; against one worker pipelined (208.3 s) that is 6.5x, against one wo
 | the same with `--load pipelined --threads 4` and `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7` (small files through the pipeline too) on `work/p7/dist-pre-pipe` | PASS: 230 / 230; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413 (the same counts as batch); self-test caught |
 | `scripts/gate.sh --corpus none` (slice + self-test) on `work/p7/dist-final` (tree with kept engines, 09668cada690) and on `work/p7/dist-pub` (the published 150aed4bf1bf itself) | PASS, 230 / 230, both |
 | `rlvm-driver/bin/invariance.sh published` (231 files x 9 runs; reference engine; the code of 150aed4bf1bf) | PASS: 231 correct, 0 wrong, 0 declined, 0 schedule differences, 0 pipelined declines (28 minutes) |
-| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (16,928 mutants x 9 runs), reference engine, on the code of 31fa08d9ce61 | @@INV5@@ |
+| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (16,928 mutants x 9 runs), reference engine, on the code of 31fa08d9ce61 | PASS: 0 wrong, 0 schedule differences, 1,675 declined alike (413 + 65 + 1,197), 0 pipelined declines |
 | the same with `--engine machine -X machine.switches=warm,gated,expect` (the machine jar published at 18:11Z as primary engine), on the code of 31fa08d9ce61 | PASS: 0 wrong, 0 schedule differences, 1,675 declined alike, **0 pipelined declines** (during the work: 5 before the kept pass and the parking rule, 1 while the rule covered proof blocks only) |
 | the same, `big` (init-prelude, Init, Std, cedar), machine as primary engine (the code of 150aed4bf1bf) | PASS: 4 files correct in all 9 configurations |
 | mathlib through the native launcher, 8 and 4 workers, batch and pipelined, every build of this section | accept, exit 0, 0 units parked |
-| slice + self-test on a distribution with 31fa08d9ce61 (`work/p7/dist-pub2`), batch and pipelined forced | @@GATE2@@ |
+| slice + self-test on a distribution with 31fa08d9ce61 (`work/p7/dist-pub2`), batch and pipelined forced | PASS both: 230 / 230, 0 wrong, 0 declined; differential self-test caught |
 <!-- measured:end -->
 
 ## Deviations from the design documents
