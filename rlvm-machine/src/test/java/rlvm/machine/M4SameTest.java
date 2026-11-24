@@ -26,6 +26,7 @@ class M4SameTest {
     private static Fixture fixture(int depth, boolean on) {
         Fixture f = Fixture.prelude();
         f.def("idn", "(-> Nat Nat)", "(fun (a : Nat) a)", Fixture.regular(3));
+        f.def("idab", "(-> Nat Nat)", "(fun (a : Nat) a)", Fixture.ABBREV);
         f.seal();
         f.hostDepth(depth);
         if (on) {
@@ -99,11 +100,11 @@ class M4SameTest {
         assertFalse(Same.same(m, Layout.HOLE, val(f, "n0")));
     }
 
-    /** {@code idn ((fun z => z) n0)} twice (a definition at the head): the argument is a suspension of two different terms. */
-    private static int[] twoApplicationsOfADefinition(Fixture f) {
+    /** {@code d ((fun z => z) n0)} twice (the definition d at the head): the argument is a suspension of two different terms. */
+    private static int[] twoApplicationsOfADefinition(Fixture f, String d) {
         int n0 = val(f, "n0");
-        int a = f.apply(val(f, "(fun (w : Nat) (idn ((fun (z : Nat) z) w)))"), n0);
-        int b = f.apply(val(f, "(fun (w : Nat) (u : Nat) (idn ((fun (z : Nat) z) w)))"), n0, n0);
+        int a = f.apply(val(f, "(fun (w : Nat) (" + d + " ((fun (z : Nat) z) w)))"), n0);
+        int b = f.apply(val(f, "(fun (w : Nat) (u : Nat) (" + d + " ((fun (z : Nat) z) w)))"), n0, n0);
         return new int[] {a, b};
     }
 
@@ -114,10 +115,12 @@ class M4SameTest {
             Fixture off = fixture(depth, false);
             for (Fixture f : new Fixture[] {on, off}) {
                 Machine m = f.m;
-                // closures, and applications of a head that may reduce: the walk answers for the pair itself.
-                // Applications of a rigid head (the axiom f): c8 compares the arguments (one CARGS), and the walk
-                // answers for the pair of suspended arguments.
-                int[][] pairs = {twoClosures(f, "n0"), twoApplicationsOfADefinition(f), twoSuspendedArguments(f), variableAgainstLambda(f)};
+                // closures, and applications of an abbreviation (the official loop would unfold both sides at once):
+                // the walk answers for the pair itself. Applications of a regular definition (lazy delta compares
+                // the arguments first) and of a rigid head (the axiom f: c8 compares the arguments): one CARGS, and
+                // the walk answers for the pair of suspended arguments.
+                int[][] pairs = {twoClosures(f, "n0"), twoApplicationsOfADefinition(f, "idab"),
+                    twoApplicationsOfADefinition(f, "idn"), twoSuspendedArguments(f), variableAgainstLambda(f)};
                 for (int i = 0; i < pairs.length; i++) {
                     int[] p = pairs[i];
                     long cbind = m.calls[Op.CBIND];
@@ -134,10 +137,11 @@ class M4SameTest {
                         assertEquals(0, m.calls[Op.APPLY] - apply, "no body was instantiated");
                         assertEquals(0, m.calls[Op.FORCE] - force, "no suspension was forced");
                         assertEquals(0, m.calls[Op.DELTA] - delta, "nothing was unfolded");
-                        assertEquals(i < 2 ? 0 : 1, m.calls[Op.CARGS] - cargs, "arguments compared only under a rigid head (row " + i + ")");
+                        assertEquals(i < 2 ? 0 : 1, m.calls[Op.CARGS] - cargs, "arguments compared only under a regular or rigid head (row " + i + ")");
                     } else {
                         assertEquals(0, m.probes[3 * Op.B12 + T] - seen, "v0 has no identity walk");
-                        assertTrue(m.calls[Op.CBIND] - cbind + m.calls[Op.CARGS] - cargs > 0, "v0 compares the parts");
+                        assertTrue(m.calls[Op.CBIND] - cbind + m.calls[Op.CARGS] - cargs + m.calls[Op.DELTA] - delta > 0,
+                                "v0 compares the parts or unfolds (row " + i + ")");
                     }
                 }
             }

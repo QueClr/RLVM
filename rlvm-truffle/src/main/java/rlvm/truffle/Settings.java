@@ -38,6 +38,13 @@ import java.util.Map;
  *                      the sum over the machines reaches rlvm.t2.at. An activation that compiled code takes is not
  *                      counted or timed by anybody. With false the heat accounting of the machine is switched on
  *                      (it costs about 11% of a warm pass on reachability on the JVM, NOTES-T3 section 2).
+ * rlvm.t2.ahead=N       run-ahead of the interning probes in compiled blocks (default 2; 0 = off): before a stretch of
+ *                      value construction in which at least N intern-table probes can be predicted, the block loads
+ *                      their table slots early, so that the cache misses overlap (reads only; NOTES-T3 section 4).
+ *                      rlvm.t2.aheadMaxInstr=N (default 128): not in blocks with more instructions.
+ *                      rlvm.t2.aheadExact=B (default true): the early-loaded table word is also read, so that a
+ *                      record that exists already is known as such (false: every key is predicted to be new).
+ *                      rlvm.t2.aheadCheck=true counts how often a predicted record is the one the operation returns.
  * rlvm.t2.cost0=MS, rlvm.t2.cost1=MS   compile cost model before anything was compiled: cost0 + cost1 per
  *                      instruction, CPU milliseconds (defaults 3.0 and 2.5: measured 2.2 - 3.1 ms per instruction;
  *                      then learned from the compilations)
@@ -64,6 +71,10 @@ final class Settings {
     final int at;
     /** Promotion by the tier's own entry counters on the stepper path, without the machine's heat accounting. */
     final boolean count;
+    /** Run-ahead of the interning probes: 0 = off, N > 0 = where at least N probes can be loaded early (NOTES-T3 section 4). */
+    final int ahead;
+    final int aheadMaxInstr;
+    final boolean aheadExact;
     final double unit0Ns;
     final double unit1Ns;
     final double cost0Ms;
@@ -97,6 +108,9 @@ final class Settings {
         unit1Ns = dbl("rlvm.t2.unit1", 10.0);
         count = bool("rlvm.t2.count", warm);
         at = Integer.getInteger("rlvm.t2.at", count ? 1000 : 0);
+        ahead = Integer.getInteger("rlvm.t2.ahead", 2);
+        aheadMaxInstr = Integer.getInteger("rlvm.t2.aheadMaxInstr", 128);
+        aheadExact = bool("rlvm.t2.aheadExact", true);
         if (count && at <= 0) {
             throw new IllegalArgumentException("rlvm.t2.count needs rlvm.t2.at > 0");
         }

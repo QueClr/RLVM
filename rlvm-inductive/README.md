@@ -130,26 +130,36 @@ other node is rebuilt by `LevelOps.succ` / `mkMax` / `mkIMax`), `rebuildTerm` th
 `instantiate_lparams` (every `Sort` and every level list of a constant). The stand-in of a member that
 ONLY the kernel refers to has the REBUILT type: constructors (`cAtom`, and `cFinal` in the final
 environment of a nested block), auxiliary types (`tAtom[k]`, `k >= nUser`), the recursors the rules of a
-nested block are re-checked with (`recFinalAtom`). The stand-in of a USER type keeps the declared header
-(the constructor types refer to it with the export's levels); the one application the kernel builds
-itself, the major premise `T params indices`, is checked once against a local of the rebuilt header
-(`checkRecursors`). Every comparison is then the engine's own application check - type of the argument
-against the binder domain of the rebuilt type, the official sides - through `KernelOps.check`, so a
-constant whose level list differs is still equal when it unfolds to the same term (a phantom universe
-parameter), as officially. For a block in which the rebuild changes no spelling (`lastRebuildChanged()
+nested block are re-checked with (`recFinalAtom`). A USER type is also referred to by the constructor
+types of the export, and which type such a reference gets officially depends on the type checker at
+work: every official `type_checker` has an infer cache keyed by STRUCTURAL equality, and the kernel's
+own `T.{m_levels}` is structurally the export's `T.{u, v}`. While the constructor types are checked
+(`check_constructors`) the kernel has made no reference of its own: declared header. While a recursor
+type is checked (`check_recursors`, one type checker per recursor) the motives come first, with the
+kernel's reference `t : T params indices`: the rebuilt header is cached and EVERY occurrence of `T` in
+that recursor type has it, the export's references in the field types of the minor premises included.
+In the final environment of a nested block one type checker checks the restored constructor types
+first: declared header. So the stand-in of a user type keeps the declared header, and `checkRecursors`
+checks each recursor type on a copy in which the user types the rebuild respells (and the constructor
+stand-ins whose types mention them) are renamed to stand-ins of the rebuilt header. Every comparison
+is then the engine's own application check - type of the argument against the binder domain of the
+(rebuilt) type, the official sides - through `KernelOps.check`, so a constant whose level list differs
+is still equal when it unfolds to the same term (a phantom universe parameter), as officially. With
+`-X levels=complete` the engine's relation identifies the two spellings and these comparisons hold. For a block in which the rebuild changes no spelling (`lastRebuildChanged()
 == false`: every block of Init, Std, reachability, con-leche, cedar, navier-stokes-euler; see the log
 for cslib and mathlib) the stand-ins are exactly those of before and nothing else is computed than one
 memoised walk over the constructor types.
 
 Evidence, all against leanchecker v4.36.0: the 2,200 files of the finding (`work/prof/L`; 183 were
 accepted here and rejected officially, all 2,200 get the official verdict now, with both engines);
-`OfficialLevelRebuildTest`: 1,218 fixtures of ten further shapes (index domain, constructor result
-against the major premise, recursive field, second type of a mutual block, auxiliary type of a nested
-block and its index domain, the final environment of a nested block, definitions with a phantom
-universe, K-like predicates, the result sort alone), each with the records a kernel that keeps the
-declared spelling derives, so that the official answer on the file is the kernel's answer on the block:
-575 accepted, 643 rejected officially (608 of them only because of the rebuild), the same verdict here
-on the reference kernel and on the test kernel, no decline.
+`OfficialLevelRebuildTest`: 1,468 fixtures of twelve further shapes (index domain, the export's own
+reference to the type inside a minor premise, constructor result against the major premise, recursive
+field, second type of a mutual block, mutually recursive types, auxiliary type of a nested block and its
+index domain, the final environment of a nested block, definitions with a phantom universe, K-like
+predicates, the result sort alone), each with the records a kernel that keeps the declared spelling
+derives, so that the official answer on the file is the kernel's answer on the block: 655 accepted, 813
+rejected officially (778 of them only because of the rebuild), the same verdict here on the reference
+kernel and on the test kernel, no decline.
 
 NOT COVERED (reported, `requests.log` finding A2-F1): an export with two level RECORDS for one universe
 parameter. The official reader makes two objects of them; a reference in a constructor type that uses
@@ -247,7 +257,7 @@ tutorial `misnamed_rec`, `dup_rec_def2`, `bugs/orphan-rec`, `other/extra-rec`, `
 
 The answers of the official checker are STORED (`OfficialGolden`,
 `src/test/resources/rlvm/inductive/official-golden.tsv`: SHA-256 of the export the test writes, exit
-status, output; 1,353 answers of leanchecker v4.36.0): no checker binary is run by the tests, and a
+status, output; 1,603 answers of leanchecker v4.36.0): no checker binary is run by the tests, and a
 fixture whose export changes (other derived records) FAILS until its answer is added:
 
     $MVN -o -q -pl rlvm-inductive test -Dtest='Official*' -Drlvm.inductive.golden.dump=$PWD/work/a2/golden-dump
@@ -275,7 +285,7 @@ loader, store and `RefKernel`), `Ndjson` (writes a fixture as a `lean4export` fi
   cases, `corner-cases/nested-redex-aux`, levels the kernel respells equivalently); 36 rejected here
   are rejected by the official kernel while it replays that block (8 of them finding L-F1); 3 declined
   here are reported with the official verdict (`target/official-differential-report.txt`).
-- `OfficialLevelRebuildTest`: finding L-F1, 1,218 fixtures (ten shapes over the 125 levels and 93 level
+- `OfficialLevelRebuildTest`: finding L-F1, 1,468 fixtures (twelve shapes over the 125 levels and 93 level
   pairs of `level-rebuild-pool.tsv`), see "Levels the official kernel respells"; report in
   `target/official-level-rebuild-report.txt`.
 - `InitBlocksTest`: with the real pipeline, all 605 inductive blocks of `init.ndjson` (and the 126 of

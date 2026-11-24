@@ -116,6 +116,11 @@ public final class WarmMain {
                 switches, threads, (double) first.wallNanos / 1e6, bestWall, bestCpu, first.accepted,
                 e == null ? "" : String.format(Locale.ROOT, " | t2: installed %d, failed %d, compile cpu %.0f ms, compiled activations %d, deopts %d", e.installedCount(),
                         e.failedCount(), e.compileNanos() / 1e6, e.compiledCalls(), e.deopts())));
+        if (e != null && Boolean.getBoolean("rlvm.t2.aheadCheck")) {
+            long[] c = e.aheadChecks();
+            System.out.println(String.format(Locale.ROOT, "[warm] run-ahead: predicted records right %d, wrong %d (%.1f%% right); of the wrong ones %d were records that existed already, %d closures / suspensions", c[0], c[1],
+                    c[0] + c[1] == 0 ? 0.0 : 100.0 * c[0] / (c[0] + c[1]), c[2], c[3]));
+        }
         if (e != null && System.getProperty("warm.report") != null) {
             System.out.print(e.report());
         }

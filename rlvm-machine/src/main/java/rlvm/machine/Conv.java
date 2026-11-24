@@ -995,7 +995,8 @@ final class Conv {
      * and by the measured share of walks that see identity (NOTES-M4 W4): two suspensions (identity is decided
      * without forcing them: 40 %), two closures of one kind (no binder is opened: 80-96 % for Pi types of different
      * terms), two projections, and two applications of the SAME head and length whose head may reduce (flag ACTIVE:
-     * definition, theorem, recursor, quotient, projection), where a T saves the unfolding. Applications of a rigid
+     * recursor, quotient, projection, theorem, definition) but is not a definition with a regular hint, where a T
+     * saves the unfolding that the official loop starts with. Applications of a rigid
      * head (constructor, inductive type, variable, axiom) are left to the complete procedure, whose c8 compares
      * their arguments one by one and meets the walk again on every closure among them; a suspension against a
      * value never was the same expression in the corpora. And only while the walks of this declaration have not
@@ -1015,9 +1016,17 @@ final class Conv {
             return 0;
         }
         switch (kt) {
-            case Layout.NEU:
-                return (wt & Layout.W0_ACTIVE) != 0 && vh[ot + Layout.A] == vh[os + Layout.A]
-                        && (wt & Layout.AUX_MASK) == (vh[os] & Layout.AUX_MASK) ? Same.FUEL_NEU : 0;
+            case Layout.NEU: {
+                int h = vh[ot + Layout.A];
+                if ((wt & Layout.W0_ACTIVE) == 0 || h != vh[os + Layout.A] || (wt & Layout.AUX_MASK) != (vh[os] & Layout.AUX_MASK)) {
+                    return 0;
+                }
+                // a REGULAR definition: lazy delta compares the arguments itself before it unfolds (R02 8.4), and the
+                // walk is met again on every closure among them (measured on Init: 19 % of these walks saw identity)
+                int hw = vh[h << Layout.REC_SHIFT];
+                return (hw >>> Layout.KIND_SHIFT) == Layout.CONST
+                        && ((hw >>> Layout.CONST_HINT_SHIFT) & 3) == Layout.HINT_REGULAR ? 0 : Same.FUEL_NEU;
+            }
             case Layout.SUSP:
             case Layout.LAM:
             case Layout.PI:

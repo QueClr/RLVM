@@ -502,6 +502,20 @@ final class T2Engine {
         return s;
     }
 
+    /** rlvm.t2.aheadCheck: {hits, misses} of the run-ahead's record predictions over all machines. */
+    long[] aheadChecks() {
+        long[] r = new long[4];
+        synchronized (tiers) {
+            for (T2Tier t : tiers) {
+                r[0] += t.aheadHit;
+                r[1] += t.aheadMiss;
+                r[2] += t.aheadOld;
+                r[3] += t.aheadMissClosure;
+            }
+        }
+        return r;
+    }
+
     long notTaken() {
         long s = 0;
         synchronized (tiers) {

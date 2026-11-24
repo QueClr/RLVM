@@ -500,6 +500,53 @@ class RunTest {
         assertThrows(IllegalArgumentException.class, () -> new RunConfig().set("passes", "0"));
     }
 
+    @Test
+    void keptEnginesServeEveryPass() {
+        for (int w : new int[] {1, 4}) {
+            for (boolean same : new boolean[] {false, true}) {
+                Unit[] script = Fakes.units(300);
+                script[50].warm = Fakes.D; // the cold stage accepts: the strict / reference instances exist too
+                script[60].warm = Fakes.R;
+                script[60].strict = Fakes.A; // a warm anomaly: strict primary engine
+                // how many engine instances one pass makes
+                FakeHost once = new FakeHost(Fakes.copy(script));
+                once.failMirror = true;
+                assertEquals(Outcome.ACCEPT, once.run(Fakes.config(w), same).execute());
+                int perPass = once.enginesCreated.get();
+                assertTrue(perPass >= 1);
+                // three passes, new engines each (the default)
+                FakeHost fresh = new FakeHost(Fakes.copy(script));
+                fresh.failMirror = true;
+                RunConfig c = Fakes.config(w);
+                c.passes = 3;
+                assertEquals(Outcome.ACCEPT, fresh.run(c, same).execute());
+                assertEquals(3 * perPass, fresh.enginesCreated.get(), w + " workers, same " + same);
+                // three passes over the engines of the first
+                FakeHost host = new FakeHost(Fakes.copy(script));
+                host.failMirror = true;
+                RunConfig k = Fakes.config(w);
+                k.set("passes", "3");
+                k.set("passes-keep", "engines");
+                Run run = host.run(k, same);
+                assertEquals(Outcome.ACCEPT, run.execute(), w + " workers, same " + same);
+                assertEquals(3, run.passResults().length);
+                assertEquals(perPass, host.enginesCreated.get(), "one set of engines for all passes");
+                assertEquals(0, host.enginesOpen.get(), "closed after the last pass");
+                assertEquals(0, host.sessionsOpen.get());
+                for (int u = 0; u < script.length; u++) {
+                    assertEquals(3, host.warmChecks.get(u), "unit " + u + " is checked once per pass");
+                }
+                assertEquals("", host.describeViolations());
+            }
+        }
+        RunConfig bad = new RunConfig();
+        assertThrows(IllegalArgumentException.class, () -> bad.set("passes-keep", "yes"));
+        bad.set("passes-keep", "engines");
+        assertTrue(bad.passesKeepEngines);
+        bad.set("passes-keep", "none");
+        assertFalse(bad.passesKeepEngines);
+    }
+
     // ---- shards (measurement) -----------------------------------------------------------------------------------------
 
     @Test

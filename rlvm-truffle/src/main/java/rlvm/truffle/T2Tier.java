@@ -27,6 +27,13 @@ final class T2Tier extends Tier {
     int rb;
     int d;
     int result;
+    /** Run-ahead: receives the xor of the table words it loaded early (the store that keeps the loads). */
+    int sink;
+    /** rlvm.t2.aheadCheck: predicted records that were / were not the record the operation returned. */
+    long aheadHit;
+    long aheadMiss;
+    long aheadOld;
+    long aheadMissClosure;
 
     /** Activations run by compiled code / offered for a promoted block but not taken (no entry at that pc, code not valid). */
     long calls;

@@ -47,8 +47,12 @@ public final class Run {
     private final RunConfig config;
     private final Wiring wiring;
     private final Store presetStore;
-    private final EngineFactory primaryFactory;
-    private final EngineFactory referenceFactory;
+    /** The caller's factories; replaced by {@link KeptEngines} over them for {@code RunConfig.passesKeepEngines}. */
+    private EngineFactory primaryFactory;
+    private EngineFactory referenceFactory;
+    /** {@code passes-keep=engines}: the factories of this run and of its later passes; closed after the last pass. */
+    private KeptEngines keptPrimary;
+    private KeptEngines keptReference;
     private final VerdictBoard board = new VerdictBoard();
     private final RunStats stats;
     private final AtomicReference<Throwable> fatal = new AtomicReference<>();
@@ -284,6 +288,14 @@ public final class Run {
             if (wiring != null && !laterPass) {
                 applyEnvironment();
             }
+            if (!laterPass && config.passes > 1 && config.passesKeepEngines) {
+                // Every pass works with the engine instances of this one (same factory object for both
+                // roles stays the same object: "the reference kernel is the primary engine").
+                keptPrimary = new KeptEngines(primaryFactory);
+                keptReference = primaryFactory == referenceFactory ? keptPrimary : new KeptEngines(referenceFactory);
+                primaryFactory = keptPrimary;
+                referenceFactory = keptReference;
+            }
             if (config.stopAfter != null && !"load".equals(config.stopAfter) && !"env".equals(config.stopAfter)) {
                 // Never ignored: the run declines ("driver: ..." is the explanation).
                 throw new UnsupportedOperationException("rlvm-driver: unknown stop-after phase '" + config.stopAfter + "'");
@@ -326,7 +338,14 @@ public final class Run {
                 checkEndNanos > checkStartNanos ? checkEndNanos - checkStartNanos : -1,
                 cpu0 < 0 || cpu1 < 0 ? -1 : cpu1 - cpu0}};
         if (!laterPass && config.passes > 1) {
-            laterPasses();
+            try {
+                laterPasses();
+            } finally {
+                if (keptPrimary != null) {
+                    keptPrimary.closeAll();
+                    keptReference.closeAll();
+                }
+            }
         }
         report();
         return board.exitCode();
@@ -359,6 +378,11 @@ public final class Run {
         }
         passLine(1, passResults[0], "");
         for (int k = 2; k <= config.passes; k++) {
+            if (k == config.passes && keptPrimary != null) {
+                // Kept engines write their statistics once, into those of the last pass.
+                keptPrimary.lastPass();
+                keptReference.lastPass();
+            }
             Run pass = wiring != null ? new Run(config, wiring, h.store(), null, null, primaryFactory, referenceFactory)
                     : new Run(config, null, null, h, null, primaryFactory, referenceFactory);
             pass.laterPass = true;

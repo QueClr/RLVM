@@ -295,8 +295,49 @@ eager-reduction declines): Cedar slice walks 257,325 seen / 66,604 not seen (fir
 / 126,888; without 115,233 / 300,078), ticks 18.38 M -> **11.10 M (-40 %)**, call events 15.44 M -> 9.10 M, records
 8.62 M -> 6.58 M (-24 %), run words 94.6 M -> 69.0 M (-27 %); Init walks 244,547 / 380,087 (first version 257,196 /
 905,059), ticks 55.69 M -> 51.97 M (part of it the declined declarations). `perf/loop-unfolded-once`: 266,315
-ticks, accepted. Batch b3 (binary `work/m4/dist-tune`, CPU and instructions): table in
-`work/status/machine-M4.log` (line "BATCH b3").
+ticks, accepted.
+
+**Batch b3** (binary `work/m4/dist-tune` = the code published 15:59Z, with M6's eager-reduction declines in every
+row: 11 / 164 / 8 / 203 units; eight configurations in ONE binary, two runs each interleaved, load 43-56; mean CPU s
+/ instructions G, and the change against A; `work/m4/batch-b3.out`). A = `warm,gated,expect` (4 MiB sessions):
+
+| configuration | Cedar slice | Init | Std | reachability |
+|---|---|---|---|---|
+| A | 2.86 / 40.7 | 7.29 / 106.9 | 13.61 / 186.5 | 8.03 / 60.2 |
+| A + facts | 2.91 / 40.6 (+1.7 % / -0.2 %) | 7.44 / 106.8 (+2.1 % / -0.1 %) | 13.74 / 186.4 (+1.0 % / -0.1 %) | 8.11 / 60.2 |
+| A + probes | 2.95 / 40.9 (+3.1 % / +0.5 %) | 7.52 / 108.4 (+3.2 % / +1.4 %) | 13.83 / 188.8 (+1.6 % / +1.2 %) | 8.14 / 60.2 |
+| A + lazyeval | 2.82 / 40.6 (-1.4 % / -0.2 %) | 7.22 / 106.2 (-0.9 % / -0.7 %) | 13.53 / 185.7 (-0.6 % / -0.4 %) | 8.05 / 60.1 |
+| A + lazyeval,same | **2.48 / 38.4 (-13.1 % / -5.7 %)** | 7.32 / 107.9 (+0.5 % / +0.9 %) | 13.48 / 186.8 (-1.0 % / +0.2 %) | 8.00 / 60.1 |
+| K = A + code,casetrees | 2.81 / 39.7 | 6.35 / 90.2 | 12.29 / 161.4 | 1.58 / 17.5 |
+| K + lazyeval | 2.72 / 39.1 | **5.88 / 83.5** | **11.47 / 152.7** | 1.68 / 17.4 |
+| K + lazyeval,same | **2.46 / 36.8** | 5.80 / 85.3 | 11.40 / 154.5 | 1.60 / 17.4 |
+
+Reading. `lazyeval`: on top of step 4 it is worth -7.4 % CPU / -7.4 % instructions on Init, -6.7 % / -5.4 % on Std,
+-3.2 % / -1.5 % on the Cedar slice (reachability: the same instruction count; its +6 % CPU is two runs of 1.7 s
+against 1.6 s, and the row with `same` on top is at 1.60 again); without step 4 it is -0.6 to -1.4 %. KEPT. `same`
+(second version): **-12 % CPU on the Cedar slice in both columns** (2.82 -> 2.48, 2.72 -> 2.46) and -5.4 % / -5.9 %
+instructions; on Init and Std the CPU is inside the noise of the batch (Init +1.4 % without step 4, -1.4 % with it;
+Std -0.4 % / -0.6 %) while the instruction count is 1.2-2.2 % HIGHER: on those corpora the walks that see nothing
+cost about what the others save. `facts` alone and `probes` alone cost CPU everywhere and are not candidates.
+
+Third version of the selection (published with these notes): applications of a definition with a REGULAR hint are
+no longer walked - lazy delta compares their arguments itself before it unfolds, and on Init only 19 % of those
+walks saw identity (17,368 against 72,248; profile `work/m4/stats/sm2-init.out`: abbrev heads 20,384 / 219,954,
+`LAM` 74,863 / 31,855, `PI` 143,024 / 27,342). In one tree state: Init ticks 63.36 M -> 63.46 M, walks that see
+nothing 363,180 -> 293,563; Cedar slice 11.63 M -> 11.61 M, 66,410 -> 51,364. Batch b4 (binary `work/m4/dist-tune3`)
+measures it: `work/m4/batch-b4.out`, summary in `work/status/machine-M4.log`.
+
+Mathlib (finding 1 of profiler P8, 16:13Z: the machine is 6.5 times gruszka's instructions on Mathlib against 4.7
+times on Init, and the difference sits in instance diamonds: structure eta field by field, every proof field through
+PIRR, which compares the statements of the laws, where every `+` / `*` is unfolded through both instance paths).
+Slice `work/exports/slices/good/Mathlib.AlgebraicGeometry.Scheme.cone.ndjson` (21,099 machine checks), counters,
+JVM launcher, the code of 15:59Z: `warm,gated,expect` 26.95 M ticks / 11.83 M records / 697 k PIRR; + `lazyeval`
+27.00 M / 11.82 M / 688 k (this workload is not evaluation); + `lazyeval,same` 25.53 M / 11.40 M / 637 k (-5.3 %
+ticks, `CBIND` -38 %); + `facts,probes` and the NON-OFFICIAL `congruence,skipargs` 14.95 M / 6.92 M / 36 k (-45 %
+ticks). Nothing official-exact in this package recovers that factor: the official kernel itself compares the types
+of the proofs and unfolds same-head applications of an abbrev before it looks at their arguments. Whether the arena
+run line may use shortcuts that are sound by the theory, as the leaders do, is the owner's decision (note 11); the
+two options are in the code, off, for that decision.
 
 ### W5. Rejected or not done, with numbers
 

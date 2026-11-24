@@ -78,7 +78,7 @@ all agree, 0 differences, 0 declines in all eight runs; all 230: 15,844 / 15,845
 (`loop-unfolded-once`, E_MEM, as v0) and 15,845 / 15,845 with 0 declines. Reports `work/m3/diff-*-g-k1.txt`,
 `diff-*-g-all.txt`.
 
-### W2. K2, derived trees (priority 2; D17): behind `k2`; gates green; NOT yet measured under the lock in its final form
+### W2. K2, derived trees (priority 2; D17): behind `k2`; gates green; measured (batch 4): KEEP
 
 Counters, published state (jar a795a6f85f94 = `work/m3/dist-k2n`), base = `warm,gated,expect,probes,code,casetrees`
 at 4 MiB, host (not the container; CPU = user + sys of one run under load, the counters are exact):
@@ -151,7 +151,25 @@ The final native image (`work/m3/dist-k2r` = the published state of 16:26Z), hos
 `ite-taken-branch` 4.04 -> 2.09 s, `unfold-before-literal` 6.92 -> 4.31 s (`m3a` with M7's threshold 1),
 `short-circuit-and` 3.47 -> 3.59 s, `gf3-matrix-product` 2.59 -> 2.40 s. reachability on the host is not
 resolved (four alternating runs per set: base 1.90 - 3.11 s, `k2,m3a` 2.41 - 3.04 s; its counters are 9.83 M ->
-8.79 M ticks, 5.02 M -> 4.79 M records, RSS 298 -> 234 MiB): the locked batch 4 decides.
+8.79 M ticks, 5.02 M -> 4.79 M records, RSS 298 -> 234 MiB): the locked batch 4 above decides.
+
+**Locked batch 4** (`work/m3/batch4.out`, rows `b4-*`; the published state of 16:26Z = `work/m3/dist-k2r`, native
+`-O3`, container, one worker, base and `k2,m3a` INTERLEAVED, 3 pairs per corpus, host load 45 - 52; CPU s of
+the three runs / instructions G / RSS MiB; base = `warm,gated,expect,probes,code,casetrees` at 4 MiB):
+
+| corpus | base | + `k2,m3a` | median CPU | instructions |
+|---|--:|--:|--:|--:|
+| reachability | 1.46, 1.49, 1.55 / 17.4 / 292 | 1.38, 1.47, 1.42 / 15.9 / 228 | 1.49 -> **1.42 s** (-4.7 %) | -8.6 % |
+| Cedar slice | 2.59, 2.52, 2.48 / 38.6 / 182 | 2.57, 2.47, 2.48 / 38.4 / 182 | 2.52 -> 2.48 s (-1.6 %) | -0.5 % |
+| Init | 6.11, 5.97, 6.12 / 96.9 / 212 | 6.07, 6.07, 6.04 / 95.8 / 213 | 6.11 -> 6.07 s (-0.7 %) | -1.1 % |
+| Std | 11.36, 11.16, 11.19 / 170.5 / 372 | 11.10, 11.13, 11.11 / 169.1 / 372 | 11.19 -> 11.11 s (-0.7 %) | -0.8 % |
+
+(8 / 11 / 164 / 203 units of these corpora are declined by the machine under the eager-reduction rule of the
+main tree and checked by the reference engine inside the same process; their cost is in both columns.)
+Lower on all four, none raised: **KEEP `k2` and `m3a`** in this form. The Init question of batch 3 is gone with
+the arming (worker CPU 5.28, 5.19, 5.27 against 5.24, 5.24, 5.20 s). reachability stands at 1.4 - 1.5 s CPU
+(target 4 s; gruszka 3.97 s, nano-lean 2.08 s on this host); most of that is M7's inlined trees, the rules
+add the last 5 %.
 
 So the rules now serve what the trees do not: structural recursion through `brecOn` (`_f` auxiliaries),
 projection functions, wrappers. Gates of the version of 16:26Z (`work/m3/diff-*-r-*.txt`): K2 stress with

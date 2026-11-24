@@ -60,8 +60,15 @@ abstract class Instr extends Node {
     final int sinkSlot;
     final int vp0Slot;
     final int dirtySlot;
+    /**
+     * Run-ahead, exact form (rlvm.t2.aheadExact): the table word that was loaded early is also read - an empty
+     * slot predicts a new record, a slot that holds the key gives the record that exists - so that the keys built
+     * on that record are the right ones. The other form predicts "new" without waiting for the word.
+     */
+    final boolean exact;
 
     Instr(BlockRoot.Build b, Decoded.Insn in) {
+        this.exact = b.exact;
         this.capSlot = b.capSlot;
         this.lsSlot = b.lsSlot;
         this.blk = b.d.blk;
@@ -190,6 +197,12 @@ abstract class Instr extends Node {
                     w.aheadHit++;
                 } else {
                     w.aheadMiss++;
+                    if (r < f.getIntStatic(vp0Slot)) {
+                        w.aheadOld++; // the record existed before this stretch: an interning hit, not a new record
+                    }
+                    if (this instanceof Closure) {
+                        w.aheadMissClosure++;
+                    }
                 }
                 f.setIntStatic(sbase + dst, UNK);
             }
@@ -525,8 +538,14 @@ abstract class Instr extends Node {
                 }
                 sum += T2Bridge.argHash(v, off + i);
             }
-            touchRecord(f, m, T2Bridge.neuHash(head, sum));
-            sset(f, dst, newRecord(f, Layout.RUN_H + off + n));
+            int hash = T2Bridge.neuHash(head, sum);
+            int id = -1;
+            if (exact) {
+                id = T2Bridge.neuAt(m, T2Bridge.vtabWord(m, hash), hash, head);
+            } else {
+                touchRecord(f, m, hash);
+            }
+            sset(f, dst, id >= 0 ? id : newRecord(f, Layout.RUN_H + off + n));
             return 0;
         }
     }
@@ -669,18 +688,39 @@ abstract class Instr extends Node {
                         sum += T2Bridge.slotHash(v, nc - 1 - j);
                     }
                 }
-                touchRun(f, m, T2Bridge.frameHash(sum));
-                if (f.getIntStatic(dirtySlot) != 0) {
-                    f.setIntStatic(sbase + dst, UNK);
-                    return 0;
+                int fh = T2Bridge.frameHash(sum);
+                fr = -1;
+                if (exact) {
+                    fr = T2Bridge.runAt(m, T2Bridge.rtabWord(m, fh), fh, nc);
+                } else {
+                    touchRun(f, m, fh);
                 }
-                fr = f.getIntStatic(srspSlot);
-                f.setIntStatic(srspSlot, fr + Layout.RUN_H + nc);
+                if (fr < 0) {
+                    if (f.getIntStatic(dirtySlot) != 0) {
+                        f.setIntStatic(sbase + dst, UNK);
+                        return 0;
+                    }
+                    fr = f.getIntStatic(srspSlot);
+                    f.setIntStatic(srspSlot, fr + Layout.RUN_H + nc);
+                }
             }
             int w0 = op == Op.MKLAM ? Layout.LAM << Layout.KIND_SHIFT | Layout.W0_WHNF
                     : op == Op.MKPI ? Layout.PI << Layout.KIND_SHIFT | Layout.W0_WHNF : Layout.SUSP << Layout.KIND_SHIFT;
-            touchRecord(f, m, T2Bridge.recordHash(w0, term, fr, lparam ? f.getIntStatic(lsSlot) : 0));
-            sset(f, dst, newRecord(f, 0));
+            int ls = lparam ? f.getIntStatic(lsSlot) : 0;
+            int hash = T2Bridge.recordHash(w0, term, fr, ls);
+            int id = -1;
+            if (exact) {
+                id = T2Bridge.recordAt(m, T2Bridge.vtabWord(m, hash), hash, w0, term, fr, ls);
+                if (id >= 0 && op == Op.MKSUSP) {
+                    int val = T2Bridge.suspVal(m, id); // Values.mkSusp: a known VAL stands for the suspension
+                    if (val != 0) {
+                        id = val;
+                    }
+                }
+            } else {
+                touchRecord(f, m, hash);
+            }
+            sset(f, dst, id >= 0 ? id : newRecord(f, 0));
             return 0;
         }
     }

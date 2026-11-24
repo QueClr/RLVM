@@ -225,6 +225,15 @@ public final class RunConfig {
     public int passes = 1;
 
     /**
+     * {@link #passes} > 1 ({@code -X passes-keep=engines}): every pass works with the engine instances
+     * of pass 1 instead of new ones, so that what an engine keeps per instance (a code store, compiled
+     * blocks, published facts) is warm in the later passes; sessions are new in every pass, and the
+     * engines' statistics are written once, into those of the last pass. False ({@code none}, the
+     * default): new engine instances per pass.
+     */
+    public boolean passesKeepEngines = false;
+
+    /**
      * MEASUREMENT ONLY ({@code -X shard=K/N}): workers check only the def / thm / axiom / opaque units
      * of shard {@link #shardIndex} of {@code shardCount} (blocks of {@code 2^SHARD_BLOCK_LOG2}
      * consecutive units, block number modulo N) and pass over the others; everything else of the run
@@ -256,7 +265,7 @@ public final class RunConfig {
 
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "slice", "env-batch", "spill-ms", "publish-units", "publish-mib",
-        "pipeline-min-mib", "no-fallback", "passes", "shard", "unit-trace"
+        "pipeline-min-mib", "no-fallback", "passes", "passes-keep", "shard", "unit-trace"
     };
 
     /** Environment variable with driver settings for experiments: {@code key=value[,key=value]...}. */
@@ -314,6 +323,7 @@ public final class RunConfig {
      * passes=N            check the loaded export N times in one process; the verdict is pass 1's  {@link #passes}
      * no-fallback         the reference kernel does not decide what the primary engine declines
      *                     (a flag: no value, or true / false)                          {@link #referenceFallback}
+     * passes-keep=engines|none  the later passes use the engine instances of pass 1     {@link #passesKeepEngines}
      * shard=K/N           measurement only: check shard K (0 .. N-1) of N; the run declines   {@link #shardCount}
      * unit-trace          statistics: one line per checked unit in STATSFILE.units.tsv (a flag)  {@link #unitTrace}
      * </pre>
@@ -334,6 +344,16 @@ public final class RunConfig {
                 referenceFallback = true;
             } else {
                 throw new IllegalArgumentException("no-fallback=" + value + ": expected no value, true or false");
+            }
+            return;
+        }
+        if (key.equals("passes-keep")) {
+            if ("engines".equals(value)) {
+                passesKeepEngines = true;
+            } else if ("none".equals(value)) {
+                passesKeepEngines = false;
+            } else {
+                throw new IllegalArgumentException("passes-keep=" + value + ": expected engines or none");
             }
             return;
         }

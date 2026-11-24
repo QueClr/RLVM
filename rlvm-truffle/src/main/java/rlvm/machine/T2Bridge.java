@@ -481,6 +481,48 @@ public final class T2Bridge {
         return Hash.record(w0, a, b, c);
     }
 
+    /**
+     * Run-ahead, exact form: the NEU with hash {@code hash} and head {@code head} if table word {@code e} (the
+     * word at the start of its probe sequence) holds it, else -1 (the slot is empty: the key is new; or it holds
+     * another key: taken as new). The full hash is word c of a NEU, so one record word decides.
+     */
+    public static int neuAt(Machine m, int e, int hash, int head) {
+        if (e == 0 || ((e ^ hash) >>> Layout.TAB_TAG_SHIFT) != 0) {
+            return -1;
+        }
+        int r = e & Layout.TAB_INDEX_MASK;
+        int o = r << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        return vh[o + Layout.C] == hash && vh[o + Layout.A] == head && vh[o] >>> Layout.KIND_SHIFT == Layout.NEU ? r : -1;
+    }
+
+    /** As {@link #neuAt} for the record with key {@code (kind of w0, a, b, c)} (closures, suspensions). */
+    public static int recordAt(Machine m, int e, int hash, int w0, int a, int b, int c) {
+        if (e == 0 || ((e ^ hash) >>> Layout.TAB_TAG_SHIFT) != 0) {
+            return -1;
+        }
+        int r = e & Layout.TAB_INDEX_MASK;
+        int o = r << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        return vh[o + Layout.A] == a && vh[o + Layout.B] == b && vh[o + Layout.C] == c
+                && (vh[o] & Hash.W0_KEY_MASK) == (w0 & Hash.W0_KEY_MASK) ? r : -1;
+    }
+
+    /** As {@link #neuAt} for a FRAME run with content hash {@code hash} ({@code len} slots) in the run table. */
+    public static int runAt(Machine m, int e, int hash, int len) {
+        if (e == 0 || ((e ^ hash) >>> Layout.TAB_TAG_SHIFT) != 0) {
+            return -1;
+        }
+        int r = e & Layout.TAB_INDEX_MASK;
+        int[] rs = m.rs;
+        return rs[r + Layout.RUN_HASH] == hash && rs[r] >>> Layout.RUN_LEN_SHIFT == len && (rs[r] & Layout.RUN_FAR) == 0 ? r : -1;
+    }
+
+    /** The VAL memo of suspension {@code s} (0: not known). */
+    public static int suspVal(Machine m, int s) {
+        return m.vh[(s << Layout.REC_SHIFT) + Layout.M_VAL];
+    }
+
     public static final int NATOP_MASK = Layout.CONST_NATOP_MASK;
     public static final int NATOP_SUCC = rlvm.nat.NatOp.SUCC;
 

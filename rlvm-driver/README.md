@@ -28,6 +28,10 @@ says so.
 | **A slow unit returns the rest of its claim while it is still running** (at a poll of its session; before: after it had ended) | done (wave 7; see "Scheduler" and "Slow units") |
 | **`-X passes=N`**: check the loaded export N times in one process, per-pass wall clock / CPU time / verdict (owner note 12: warm wall clock) | done (wave 7; see "Passes") |
 | Statistics (`RunStats`, JSON), explanation line on stderr | done |
+| **Slice mode of the scheduler** (`RunConfig.sliceUnits = 256`, `-X slice=N`): a worker without work takes the next slice of the ready units for itself; the workers move through the file together | done (wave 8; see "Scheduler") |
+| **Parking rule for pipelined loading** (`RunHost.unitNeedsCompleteFile`): the environment frontier waits below a unit that may depend on the rest of the file; the environment pass is kept over the end of the load | done (wave 8; see "Pipelined loading") |
+| **Time account** in the statistics: per worker on-CPU / run queue / parked by cause / heavy gate / end of load / resets, the environment thread's account, time stamps, time series, slowest units, per-unit trace (`-X unit-trace`), statistics per later pass | done (wave 8; see "Where the wall clock goes") |
+| **`-X shard=K/N`** (measurement only: one shard of the units is checked, the run declines) | done (wave 8; the hardware ceiling in "Measured") |
 | Differential mode (`RunConfig.differential`); **`RunConfig.referenceFallback = false` (`no-fallback`)**: the engine under test alone | done |
 | Namespace ordering (`OrderPolicy.Kind.NAMESPACE_WINDOW`, `RunConfig.order`) | **deferred**: `OrderPolicy.of`, `Scheduler` constructor and `Run.execute()` throw `UnsupportedOperationException` |
 | Heavy-lane threads | **not used**: re-checks run on the worker's own deep-stack thread; `Scheduler.defer` / `claimHeavy` work as a plain queue that nothing in `Run` feeds |
@@ -95,12 +99,15 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `keep-mib=N` | `keepBytes`: give-back threshold of a lane | 256 |
 | `gc-after-mib=N` | `gcAfterBytes`: ask for a collection when the heap holds N MiB of unaccounted bytes | 0 = never |
 | `chunk=N` | `chunkUnits` | 32 |
+| `slice=N` | `sliceUnits`: units a worker without work takes as its run (0 = one run per worker and batch, the scheme until wave 7) | 256 |
 | `env-batch=N` | `envBatchUnits` | 4096 |
 | `spill-ms=N` | `spillNanos`: a unit running longer returns the rest of its claim | 20 |
 | `publish-units=N`, `publish-mib=N` | pipelined hand-off interval | 4096 units, 32 MiB |
 | `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
 | `no-fallback` | `referenceFallback = false` | off |
 | `passes=N` | `passes`: check the export N times in one process (see "Passes") | 1 |
+| `shard=K/N` | `shardIndex`, `shardCount`: measurement only, check shard K of N (blocks of 1,024 units, block number mod N); the run's verdict is DECLINE | off |
+| `unit-trace` | `unitTrace`: with a statistics file, one line per checked unit in `STATSFILE.units.tsv` (unit, worker, start, nanoseconds, steps, outcome, size) | off |
 
 ## How a run goes
 
@@ -246,14 +253,27 @@ failure). A rejection is only ever recorded when confirmed.
 
 ### Scheduler (RECONCILIATION section 3)
 
-Units that became ready since the last split form a batch. When a worker without a run finds a batch it is
-cut into `min(W, |batch| / chunk)` contiguous runs (at least one), one per worker starting with the caller;
-runs are appended to the workers' queues. A worker takes chunks of `chunkUnits` (32) from the front of its
-first run. A worker without a run and without a batch steals the back half of the largest remaining run (the
-whole run if it is no longer than a chunk). A unit that runs longer than `spillNanos` (20 ms) makes its
-worker give back the unstarted rest of its claim (see "Slow units"); given-back units are served before
-anything else, except that a worker never takes them ahead of a lower unit waiting in its own run. Units above the first failure
-are never handed out. One lock, taken once per claim; idle workers wait on its monitor.
+Units `[0, ready)` may be handed out (the environment thread announces them); `[0, split)` have been handed
+out as runs. **Slice mode (the default since wave 8, `sliceUnits` = 256):** a worker without a run takes the
+next slice of the ready units for itself, `(ready - split) / W` units, at least a chunk and at most
+`sliceUnits`; nothing is put into another worker's queue. A worker takes chunks of `chunkUnits` (32) from the
+front of its run. A worker without a run when nothing is left to slice steals the back half of the largest
+remaining run (the whole run if it is no longer than a chunk). A unit that runs longer than `spillNanos`
+(20 ms) makes its worker give back the unstarted rest of its claim (see "Slow units"); given-back units are
+served before anything else, except that a worker never takes them ahead of a lower unit waiting in its own
+run. Units above the first failure are never handed out. One lock, taken once per claim; idle workers wait on
+its monitor.
+
+Why slices: the workers then move through the file together, lowest units first, and a unit starts when the
+common front reaches it, whoever is free. Until wave 7 (`slice=0` still does it) every batch of ready units
+was cut into one contiguous run per worker (`min(W, |batch| / chunk)` runs, appended to the workers' queues).
+A worker that fell behind kept receiving its share of every later batch, and nobody else touched that backlog
+while anything was left to split; a heavy unit in it started late, and its end was the end of the run. Std has
+such a unit (23249: the largest proof of the file, 0.7 s of a 1.5 s run with 8 workers): the check phase took
+1.63 s to 2.40 s depending on where it landed, and a later pass (`passes=N`: the whole file is one batch, cut
+into 8 contiguous eighths) 2.15 s. Numbers in "Measured", wave 8. What slices give up is nothing that was
+measured: a session is reset every 75 units or so anyway (the machine's 4 MiB cap), so contiguity beyond a
+slice buys no warmth.
 
 **Slow units.** A claim is up to `chunkUnits` (32) units that nobody else can take. Until wave 7 a worker
 returned the rest of its claim only after the slow unit had ended, so a heavy unit kept up to 31 units waiting
@@ -377,22 +397,41 @@ What the driver adds:
   (`EnvBuilder.waitingForLoad()`, `rlvm-admit` since 10:34Z) is advanced again after the load
   (`driver.env.waitsForLoadEnd`). The price is paid by failing runs only: their failing unit is checked
   twice, and the verdict comes after the end of the load.
-- **After the end of the load the lane is reset and the pass replaced** (`driver.env.renewals`):
-  `rlvm-admit`'s admission in dependency order (`Policy.ForwardRefs.REORDER`, the arena policy since 10:34Z)
-  reads units beyond the frontier, which needs a lane whose level and list view reaches the end of the
-  file. The pass is told how far the lane reaches (`EnvBuilder.setCoverage`, `rlvm-admit` 11:20Z) and enters
-  dependency order only then. (Found the hard way: advancing the pass over a stale lane view gave REJECT for
-  reordered exports that batch mode accepts. The invariance suite caught it with the `rlvm-admit` jar of
-  10:34Z, before anything of this module was published against that jar.)
+- **After the end of the load the lane is reset; the pass is kept** (wave 8; until then it was replaced,
+  `driver.env.renewals`, now always 0): `rlvm-admit`'s admission in dependency order
+  (`Policy.ForwardRefs.REORDER`, the arena policy since 10:34Z) reads units beyond the frontier, which needs
+  a lane whose level and list view reaches the end of the file. The pass is told how far the lane reaches
+  (`EnvBuilder.setCoverage`, `rlvm-admit` 11:20Z) and enters dependency order by itself once the file is
+  complete and the lane covers it. Replacing it was wrong in one case: a pass that had already left file
+  order (the load ended while it was advancing over a lane that covered the last publication) has decided
+  units ahead of the frontier and dropped their claims; its replacement, which starts at the frontier,
+  declined them ("the inductive unit has no claims blob", requests.log 15:12:24Z). (History: advancing a pass
+  over a stale lane view gave REJECT for reordered exports that batch mode accepts; the invariance suite
+  caught it with the `rlvm-admit` jar of 10:34Z, and `setCoverage` is the fix.)
+- **The parking rule** (wave 8; proposed by the load path, requests.log 14:35:27Z): the environment thread
+  does not advance the pass past a unit for which `RunHost.unitNeedsCompleteFile(unit)` holds while the
+  file is loading. `StoreHost` answers from the store's summaries, without decoding anything: a type root
+  or shared value root whose `depMax` lies beyond the unit's own rank (something was not declared when the
+  loader wrote the node), or a value kept as a proof block with `ProofBlocks.hasUnresolved`. The frontier
+  stops below such a unit (`driver.env.parkedUnits`), the workers go on with everything below it, and after
+  the end of the load the pass, over the complete file and a lane that covers it, decides the unit exactly
+  as a batch run does (dependency order). Before the rule the pass moved past a unit whose proof block
+  mentions a later declaration (it does not decode blocks while the file loads), and, in a window of a few
+  microseconds, past one whose type does (the pass asks the store whether the file is complete, which
+  becomes true before the driver's lane covers it); a worker could then only decline the unit. Exporter
+  output never parks: 0 parked units on Init, Std and mathlib.
 - **Fail closed where the driver cannot see.** If the failed attempt of the pass on the incomplete file
   had written down failures of other units as well (`RunHost.RETRY_TAINTED`: `StoreHost` erases them; not
   observed with the published `rlvm-admit`), the run records no rejection any more: what would be REJECTED
   is DECLINED(UNCONFIRMED_REJECT) (`driver.pipeline.rejectionsTainted`).
-- **What is still different from batch mode** (less complete, never another verdict): a file that is not in
-  declaration order can be DECLINED (FORWARD_REFERENCE) in a pipelined run where the batch run decides it,
-  because the pass, in file order while the file loads, moves the frontier past a plain unit that mentions a
-  later declaration, and dependency order starts only at the frontier (reported to `rlvm-admit`). The
-  invariance suite counts these as "pipelined declines". Exporter output is in declaration order.
+- **What is still different from batch mode**: nothing that the guards find. Until wave 8 a file that is
+  not in declaration order could be DECLINED (FORWARD_REFERENCE) in a pipelined run where the batch run
+  decides it (the invariance suite's "pipelined declines": 5 of 16,928 mutants with the machine as primary
+  engine, 27 with the reference engine before `rlvm-admit` learnt to wait); with the kept pass and the
+  parking rule the suite counts 0 with both engines. A failure of the environment pass that is reported
+  while the file is loading is still withheld and decided again by a new pass (`retryEnvUnit`); should that
+  pass have decided blocks ahead of the frontier before, the retry declines them (never observed; fail
+  closed).
 - **Failures of the load.** Malformed input: REJECT whatever was checked (the official reader rejects before
   any checking). Unsupported input, I/O errors: the published units are checked; REJECT if one of them is
   rejected (confirmed), else DECLINE; never ACCEPT. An `Error` in the loader cancels the run, the checking
@@ -403,6 +442,36 @@ What the driver adds:
 
 Not the default: `RunConfig.loadMode` is `BATCH` and `rlvm-main` sets `PIPELINED` only for
 `-X load=pipelined`. See "Measured" and "Open" for what a default switch needs.
+
+## Where the wall clock goes (statistics, wave 8)
+
+Owner note 12 makes the wall clock of 8 workers the goal, so the statistics now say where it goes. Everything
+below exists only with a statistics file (`-X stats-file=F`); without one the cost is the branches that were
+there before. Nothing takes a shared lock per unit: each worker keeps its per-unit statistics (`UnitStats`)
+to itself and hands them over when it ends (until wave 7: `RunStats.unit` under one lock, once per unit).
+
+| In the JSON | What |
+|---|---|
+| table `driver.workerTimes`, one row per worker | `wallNanos`, `cpuNanos`, `runQueueNanos` (`/proc/thread-self/schedstat`: on a CPU, runnable without one); `unitNanos` (inside units), `claimNanos` (inside `Scheduler.claim`), of which parked `waitEnvNanos` (nothing announced by the environment lane), `waitLoaderNanos` (the lane itself was waiting for the loader), `waitTailNanos` (after the last announcement: only busy claims left); `gateWaitNanos`, `loadEndWaitNanos`, `openNanos`, `resetNanos` / `laneResetNanos` (warm session resets, the lane's part), `lazyEnvNanos` (one worker, batch: the environment pass it drives itself); `claims`, `parks`; `startAt`, `firstClaimAt`, `lastUnitEndAt`, `endAt` (nanoseconds since the start of the run) |
+| `driver.env.*` | the environment thread: `wallNanos`, `advanceNanos` / `advances` (inside the pass), `announceNanos`, `waitLoaderNanos`, `waitLoadEndNanos`, `openNanos`, `parkedUnits`; table `driver.env.slowest` (the 12 longest steps: nanoseconds, first unit, units) |
+| `driver.time.*` | `loadStart`, `loadEnd`, `firstPublication`, `checkStart`, `checkEnd`, `envStart`, `envClosed` (the frontier is complete), nanoseconds since the start of the run |
+| tables `driver.series.worker-N`, `driver.series.env`, `driver.series.loader` | progress over time: per worker (time, accepted, nanoseconds in units, in `claim`) about every 100 ms; the environment frontier; the loader's publications |
+| `units.slow`, `units.histogram` | the 50 slowest units by wall time (beside `units.top`, the 50 heaviest by steps), and the time by unit duration class |
+| `F.pass2`, `F.pass3`, ... | the complete statistics of every later pass (`passes=N`) |
+| `F.units.tsv` (`-X unit-trace`) | one line per checked unit: unit, worker, start, nanoseconds, steps, warm outcome, size (`RunHost.unitWeight`: block nodes + shared terms of the unit) |
+
+What is not the driver's to see is the difference: `wall - cpu - runQueue - parks - gate - loadEnd` = blocked for
+another reason, which in practice is a collection (every worker stops for one collector thread) or a page
+fault. `rlvm-driver/bin/breakdown.py F.json [--series]` prints the table per worker, the shares of
+`workers x check wall`, the environment thread, the tail ("frontier complete" to "last unit ended"), the
+slowest units; `rlvm-driver/bin/gcsum.py LOG [--phase A B]` adds up the collections of a native-image run
+started with `-XX:+PrintGC`.
+
+`-X shard=K/N` (measurement only) makes the workers pass over every def / thm / axiom / opaque unit that is
+not in shard K of N (blocks of 1,024 consecutive units, block number modulo N); load and environment pass are
+complete, and the run's verdict is DECLINE ("only shard K of N was checked") whatever happens. N one-worker
+processes over the N shards, each pinned to a core, against one process with N workers separate what the
+hardware gives from what one process costs: the numbers are in "Measured", wave 8.
 
 ## Worker count (`--threads auto`)
 
@@ -890,7 +959,7 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 
 | Document says | This module does | Why |
 |---|---|---|
-| ARCH 6.3: one global claim front | per-worker contiguous runs per batch, stealing | RECONCILIATION section 3 (C2.4) |
+| ARCH 6.3: one global claim front | a common front handed out in slices of up to 256 units per worker (wave 8), chunks of 32 inside a slice, stealing at the end; `slice=0`: per-worker contiguous runs per batch | RECONCILIATION section 3 (C2.4) asked for contiguous runs per worker; one run per worker and batch let a heavy unit start late (see "Scheduler"), and a slice is longer than the 75 units a session lives |
 | ARCH 6.5: warm budget 5 x 10^7 steps | no step limit warm (`warmSteps`), no depth limit warm (`warmDepth`) | RECONCILIATION section 3 (C2.5); a depth limit only made deep units run twice, workers have deep stacks |
 | ARCH 6.5: warm byte budget 1 GiB | the whole headroom, `memoryLimit - shared` (at least 256 MiB) | any smaller budget made units run twice (measured); the account's victim rule and the heavy gate bound the run instead |
 | ARCH 6.4: `sessionBytes` 32 MiB, footprint = session + context | per engine: 4 MiB for the machine, 16 MiB otherwise; `Session.footprintBytes()` alone; the context's unused capacity is a separate trigger (`keepBytes`) | RECONCILIATION section 3 (C1.6): footprint = bytes in use, counted once; "swept by CPU time once the machine runs Std": done, see "Measured" |
