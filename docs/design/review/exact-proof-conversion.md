@@ -372,7 +372,28 @@ accepted a declaration the reference engine rejects; COMPLETENESS = it rejected 
 |---|---|---|--:|--:|--:|--:|---|---|
 | `c1-a4` | `warm,gated,expect,m4b` | tutorial (141 files), bugs (34), all 230 published tests, Init, Std, reachability, the Cedar slice | 15,845 + 57,938 + 100,096 + 4,224 + 8,064 | 0 | 0 | 0 / 0 / 0 | 230 of 230 tests and the four corpora right; MACHINE-INCOMPLETE 0, WARM-ANOMALY 0 | PASS WITH DECLINES |
 | `c1-a4-mathlib` | the same | ten Mathlib slices (`Scheme`, `Sylow`, `Order.Basic`, `Fintype.Basic`, `Topology.Basic`, `Group.Basic`, `Nat.Basic`, `List.Basic`, `Galois.Basic`, `Pow.Real`) | 108,256 | 0 | 0 | 0 / 0 / 0 | 10 of 10 right | PASS WITH DECLINES |
-GATE-ROWS
+| `c1-d4` | D + `m4b` (D = the published default set of 19:41Z), session cap 1 MiB | the seven corpora as above | the same | 0 | 0 | tier 0, audits 0; **convention: Std 1,725 (D0) / 1,604 (unbounded), Cedar slice 12 / 12 declarations differ** - see below | 230 of 230 and the four corpora right; MACHINE-INCOMPLETE 0 | FAIL (convention part) |
+| `c1-d4-conv` | the same | Std, reachability, the Cedar slice; convention part only | 112,384 | 0 | 0 | convention 0 | - | PASS WITH DECLINES |
+| `c1-d-control` | **D WITHOUT `m4b`** (the published default set on the same copy) | the seven corpora | the same | 0 | 0 | tier 0, audits 0; **convention: Cedar slice 73 declarations differ (D0)** | right | FAIL (convention part) |
+| `c1-d4-mathlib` | D + `m4b` | four Mathlib slices (`Scheme`, `Sylow`, `Order.Basic`, `Galois.Basic`); differential + audits | 68,969 | 0 | 0 | audits 0 | - | PASS WITH DECLINES |
+| `c1-rich4` | rich + `m4b` (with `k2`, `probes`, `facts`), cap 4 MiB | the seven corpora | the same | 0 | 0 | tier 0, audits 0; **convention: Std 12,073 / 1,037, reachability 44, Cedar slice 43** | right | FAIL (convention part) |
+| `c1-rich-control` | rich WITHOUT `m4b` | Std, reachability, the Cedar slice; convention part only | 112,384 | 0 | 0 | convention 0 | - | PASS WITH DECLINES |
+| `c1-rich4-mathlib` | rich + `m4b` | three Mathlib slices; differential + audits | 42,427 | 0 | 0 | audits 0 | - | PASS WITH DECLINES |
+| `report.sh conv` (D128, D64, D0, unbounded) | 20 switch sets: `m4b` with each switch of D alone, D + `m4b` complete, D + `m4b` minus one switch at a time | the Cedar slice | 8,064 each | - | - | EQUIVALENT in all 20 (`work/c1/logs/bisect.done`) | - | - |
+
+**The convention differences of the complete gate are not the patch's** (finding C1-F2, for M8 / M7 / the
+integrator). (1) The complete gate of the published default set WITHOUT `m4b`, on the same copy and harness,
+shows them too (`c1-d-control`: 73 declarations of the Cedar slice, "the same number of call events, distributed
+differently over the ops"). (2) With `m4b`, the convention part run alone on the three corpora that differed is
+clean (`c1-d4-conv`), and so is `report.sh conv` on the Cedar slice under the complete set and 19 subsets. (3) The
+declarations that differ are not the same from run to run (12 in `c1-d4`, 73 in `c1-d-control`, all late in the
+file), and in every one of these runs the outcomes, the tier comparison, the audits and the pipeline are clean. So
+something that the passes of one gate JVM share (the code and fact store, the `pchk` bits, or the heap: a growth
+that `heapAllows` refuses gives a lane a fresh session) moves ticks between lanes when all parts run at once; the
+integrator's own gate of the default set did not show it (requests.log 19:41Z). I did not find which one. For the
+patch this means: its convention equivalence is established where the comparison is reproducible (`c1-a4` with all
+parts, `c1-a4-mathlib`, `c1-d4-conv`, the 20 `conv` reports), and the complete gate of D + `m4b` is as (un)stable as
+that of D.
 
 The declines are those of the base tree: the eager-reduction rule (M6-F26: 164 units of Init, 203 of Std, 8 of
 reachability, 11 of the Cedar slice, 28 of the `Scheme` slice, ...) and, in the step-1 set under the harness heap of
