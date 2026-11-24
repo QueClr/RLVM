@@ -542,6 +542,10 @@ abstract class Instr extends Node {
             int id = -1;
             if (exact) {
                 id = T2Bridge.neuAt(m, T2Bridge.vtabWord(m, hash), hash, head);
+                if (id >= 0) {
+                    // the probe will compare the arguments with the record's spine: load its first words too
+                    f.setIntStatic(sinkSlot, f.getIntStatic(sinkSlot) ^ T2Bridge.runWord(m, T2Bridge.recB(m, id) + Layout.RUN_H));
+                }
             } else {
                 touchRecord(f, m, hash);
             }

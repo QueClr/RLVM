@@ -106,6 +106,7 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
 | `no-fallback` | `referenceFallback = false` | off |
 | `passes=N` | `passes`: check the export N times in one process (see "Passes") | 1 |
+| `passes-keep=engines\|none` | `passesKeepEngines`: the later passes use the engine instances of pass 1 | none |
 | `shard=K/N` | `shardIndex`, `shardCount`: measurement only, check shard K of N (blocks of 1,024 units, block number mod N); the run's verdict is DECLINE | off |
 | `unit-trace` | `unitTrace`: with a statistics file, one line per checked unit in `STATSFILE.units.tsv` (unit, worker, start, nanoseconds, steps, outcome, size) | off |
 
@@ -181,12 +182,21 @@ At 15:27Z the launcher's working tree (`rlvm-main`, with its new owner) had a `-
 same name, so with that launcher `-X passes` is the wiring's and the driver's stays at 1; the driver's is then
 reached as `RunConfig.passes` by callers of `Run` and as `RLVM_DRIVER=passes=N`.
 
-What it does not do yet: (1) the engines of a later pass are new instances, so only what lives in the process
-(JIT-compiled code, the allocator's pages) is warm, not artefacts an engine keeps per instance (a tier of
-compiled code objects would have to be kept by its provider or by a later version of this loop that reuses
-the engine); (2) a later pass does not load, so it has no pipelined overlap and no environment pass (the
-workers start with the whole export ready); (3) `bench/track`, `m.py` and the gate scripts do not read the
-pass lines yet (the tools' owners).
+**`-X passes-keep=engines`** (wave 8; asked for by the Truffle tier's and the code store's owners,
+requests.log 16:31Z / 16:57Z): every pass works with the engine instances of pass 1 instead of new ones
+(`KeptEngines`, a caching `EngineFactory` around the caller's; the idea and first implementation are the
+agent "warm"'s). What an engine keeps per instance - the machine's code store, compiled blocks, published
+facts - is then warm in the later passes; sessions, scheduler and verdict board are new in every pass. The
+engines are closed after the last pass, and their statistics (`engine.*`, written by `Engine.dumpStats` once
+per engine) appear in the statistics of the last pass, summed over all passes. Default `none`: new engine
+instances per pass, as before.
+
+Every later pass writes its complete statistics, time account included, to `STATSFILE.pass2`, `.pass3`, ...
+(wave 8).
+
+What it does not do: a later pass does not load, so it has no pipelined overlap and no environment pass (the
+workers start with the whole export ready); for warm passes that load, `rlvm-main` has `-X passes=N` in its
+default mode `reload` (its key shadows this one; `-X passes-mode=recheck` hands the count to the driver).
 
 ### Session cap (`sessionBytes`)
 

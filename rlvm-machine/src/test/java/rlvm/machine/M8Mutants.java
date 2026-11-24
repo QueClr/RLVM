@@ -378,9 +378,7 @@ final class M8Mutants {
             pb.environment().put("RLVM_DIST", dist);
             pb.environment().put("RLVM_ENGINE", "machine");
             StringBuilder args = new StringBuilder();
-            if (set.switches != 0) {
-                args.append("-X machine.switches=").append(Debug.switchNames(set.switches));
-            }
+            args.append("-X machine.switches=").append(set.switches == 0 ? "none" : Debug.switchNames(set.switches));
             if (set.sessionMib > 0) {
                 args.append(" -X session-mib=").append(set.sessionMib);
             }

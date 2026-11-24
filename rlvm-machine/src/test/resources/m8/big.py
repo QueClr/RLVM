@@ -56,8 +56,9 @@ def run(dist, export, engine, sset, threads, mib, timeout):
     stats = os.path.join(tmp, "stats.json")
     timef = os.path.join(tmp, "time")
     cmd = [os.path.join(dist, "bin/rlvm"), "--threads", str(threads), export, "-X", "engine=" + engine, "-X", "stats-file=" + stats]
-    if engine == "machine" and sset:
-        cmd += ["-X", "machine.switches=" + sset]
+    if engine == "machine":
+        # always explicit: without the setting the engine runs its default set (warm,gated,expect since 16:24Z)
+        cmd += ["-X", "machine.switches=" + (sset or "none")]
         if "warm" in sset.split(","):
             cmd += ["-X", "session-mib=%d" % mib]
     full = ["/usr/bin/time", "-f", "%e %U %S %M", "-o", timef] + cmd

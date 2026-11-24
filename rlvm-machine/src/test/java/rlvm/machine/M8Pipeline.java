@@ -114,9 +114,9 @@ final class M8Pipeline {
     static Map<String, String> machine(String switches, String debug, int sessionMib) {
         Map<String, String> x = new LinkedHashMap<>();
         x.put("engine", "machine");
-        if (switches != null && !switches.isEmpty()) {
-            x.put("machine.switches", switches);
-        }
+        // always explicit: without the setting the engine runs Op.SW_DEFAULT, which is warm,gated,expect since M6's
+        // publication of 16:24Z; "none" is the generic tier (v0)
+        x.put("machine.switches", switches == null || switches.isEmpty() ? "none" : switches);
         if (debug != null && !debug.isEmpty()) {
             x.put("machine.debug", debug);
         }

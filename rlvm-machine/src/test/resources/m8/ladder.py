@@ -254,8 +254,10 @@ def cmd_measure(args):
                         line = '%s "$IN"' % os.path.join(ROOT, "bench/baselines/gruszka.sh")
                     else:
                         x = ["-X engine=%s" % engine, "-X stats-file=%s" % stats]
-                        if engine == "machine" and s:
-                            x.append("-X machine.switches=%s" % s)
+                        if engine == "machine":
+                            # always explicit: without the setting the engine runs its default set (Op.SW_DEFAULT,
+                            # warm,gated,expect since 16:24Z); "none" is the generic tier (v0), "default" that set
+                            x.append("-X machine.switches=%s" % (s or "none"))
                             if "warm" in s.split(","):
                                 mib = str(args.session_mib)
                                 x.append("-X session-mib=%s" % mib)
