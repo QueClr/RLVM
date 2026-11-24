@@ -2,16 +2,18 @@
 # Not submitted. Before submitting: set url / ref / rev to the published repository and commit, and
 # re-read the description against the binary once more.
 #
-# State of the binary on 2026-11-24 (wave 5 check, work/status/integration.md): the complete
-# pipeline, checking with the REFERENCE engine. All 230 published tests correct with this run line
-# (0 declined); Init, Std, cedar, cslib, con-leche, reachability, navier-stokes-euler and mathlib
-# accepted. The machine (rlvm-machine: worklist stepper, code objects, Truffle tier) is being built
-# by another workflow. Since 11:18Z its module is in the parent pom, so its classes are compiled
-# into this binary (`rlvm --version` lists the engines "machine, reference*"), but it is only a
-# candidate engine (run with -X engine=machine or compared with -X engine=diff) until it registers
-# with a priority of at least 100 (rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY; today 10), so
-# this definition checks with the reference engine. The description below says only what the
-# binary does today.
+# State of the binary on 2026-11-24 (integration of wave 6, work/status/machine-integration.md "Wave 6"): the
+# complete pipeline, checking with the MACHINE (rlvm-machine: the worklist machine, default switch set of
+# rlvm-machine/SWITCHES.md); the reference engine re-checks every rejection and decides every declaration
+# the machine declines. All 230 published tests correct with this run line (ARENA_SUITE_LINE); Init, Std, cedar,
+# cslib, con-leche, reachability, navier-stokes-euler and mathlib accepted. The machine became the default
+# engine when its provider's priority reached rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY (100) after
+# its gates: M8's gate for the generic tier and for the default set, 17,775 mutants, 329 hostile exports
+# under 32 switch sets against the official verdicts, and the differential engine on 760,839 units (0
+# differences from the reference engine). `rlvm -X engine=reference` runs the reference engine alone,
+# `-X machine.switches=none` the machine's generic tier. The Truffle tier (rlvm-truffle) is compiled into
+# the binary and is OFF (switch t2): it showed no gain. The description below says only what the binary
+# does today.
 #
 # Which launcher: the CE native image (work/dist/bin/rlvm, built at -O3). The platform gate of
 # RECONCILIATION section 3 was run on 2026-11-24 with the MACHINE as engine (docs/PLATFORM.md, Part I;
@@ -46,14 +48,21 @@ description: |
   **RLVM** (Rabdos Lean VM) is a Lean 4 kernel written in Java and shipped as a GraalVM native
   image (no JVM start-up, no warm-up).
 
-  This version checks every declaration with its *reference engine*: a direct port of the official
-  kernel's algorithm (type inference, weak-head normalisation, definitional equality with lazy
-  delta reduction, the official caches, the Nat and String literal extensions) to hash-consed
-  terms that are integer ids into flat primitive arrays, which the garbage collector does not
-  trace. The engine the project is named after - a worklist machine whose instructions are the
-  judgments of the kernel algorithm, with the environment's constants elaborated into code for
-  it - is under construction: its code is in this binary, but nothing is checked with it yet; the
-  reference engine will remain as the engine that confirms every rejection.
+  Declarations are checked by its *machine*: a worklist machine whose instructions are the
+  judgments of the kernel algorithm - evaluation (normalisation by evaluation over hash-consed
+  values that are integer ids into flat primitive arrays, which the garbage collector does not
+  trace), weak-head normalisation, definitional equality with lazy delta reduction, type
+  inference with expected types, and the Nat and String literal extensions. Constants are
+  elaborated on demand into code blocks and case trees that the machine runs instead of walking
+  terms. Sessions stay warm across declarations up to a 1 MiB cap, and universe levels are
+  compared as the official kernel compares them.
+
+  A second engine, the *reference engine* - a direct port of the official kernel's algorithm
+  with the official caches - confirms every rejection in a cold run before it is reported, and
+  decides every declaration the machine declines. The machine declines by design every
+  declaration that compares under `eagerReduce` (0.2 to 0.9 % of the declarations of the large
+  corpora), because conversion under eager reduction depends on the official kernel's
+  per-declaration caches; those declarations are checked by the reference engine alone.
 
   Nothing derived in the export is trusted: recursors, constructor data and flags of inductive
   types are regenerated and compared with the exported records, the quotient declarations are
@@ -61,14 +70,16 @@ description: |
 
   Declarations are checked by parallel workers over a frozen shared store; a declaration sees only
   the declarations before it in the file, and the verdict is the first failure in file order
-  whatever the number of workers. A rejection found by a worker is reported only after a second,
-  cold run of the kernel has confirmed it.
+  whatever the number of workers.
 
   The process fails closed: the exit status starts as "internal error" and becomes 0 only after
   the whole export has been processed successfully; an exception, an out-of-memory error or a
   stack overflow, on any thread, is a non-zero status and can never read as acceptance. Input
   that RLVM cannot represent exactly (for example metadata inside an inductive declaration) is
   declined, never guessed.
+
+  Measured on the project's aarch64 host in a container shaped like the arena runner (CPU time /
+  wall clock of a fresh process with this run line): ARENA_NUMBERS_LINE
 
   The build step downloads a pinned GraalVM Community Edition and Maven for the runner's
   architecture, verifies their checksums and those of the third-party jars that go into the

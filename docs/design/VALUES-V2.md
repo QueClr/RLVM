@@ -135,11 +135,25 @@ A lazy site calls `Values.mkAppLazy`; every other caller of `Values.mkApp` inter
 | 4 | ALL | every `Values.mkApp` is a lazy site (the generic `EVAL` walk, the rules, string expansion); without it only `MKAPP` of code blocks is |
 | 8 | WHNF | class M of 2.4: `WHNF` identifies a private application before it reduces it |
 | 32 | CONV | class C of 2.4 |
+| 64 | ADAPT | adaptive sites (below) |
 | 16 | STAT | counters (process-wide, printed at exit) |
 
 The modes that were measured: **1** (data built by blocks), **11** = 1 + 2 + 8 (everything blocks build, memo
-shared), **43** = 11 + 32, **47** = 43 + 4 (every site), and the two deliberately broken ones, **3** and **7** / **15**
-(redexes without class M, every site without class C), which exist to show what classes M and C are worth.
+shared), **43** = 11 + 32, **47** = 43 + 4 (every site), **107** / **111** = 43 / 47 with adaptive sites, and the
+deliberately broken ones, **3** and **7** / **15** (redexes without class M, every site without class C), which exist
+to show what classes M and C are worth.
+
+**Adaptive sites (bit 64).** Whether a site's applications are ever identified is a property of the site, and it can
+be learned - the owner's "use whatever specialization / JIT trick": an inline cache of the site's demand for
+identity. The prototype's site is the constant at the head (its declaration row, direct-mapped into 2^13 pairs of
+saturating byte counters per machine: made / identified; both are halved when one saturates). A private record of
+an adaptive site carries its site in word c (`-(site + 1)`: negative = private with a site, 0 = private, positive =
+forward) and reports to its site when it is identified. A site with at least 32 samples whose records were
+identified three times in four interns at birth again, except for one construction in 16, which stays lazy as a
+sample (so a site can come back). The decision changes which records are private, never a value; it is a function
+of the machine's history, so V6 holds per machine and per schedule, not across worker counts (as warm sessions
+already make ticks depend on which declarations a session saw). A site per block instruction (the code index of
+the `MKAPP`) and per term node of the generic walk would be sharper; not built.
 
 ## 4. Representation
 
@@ -153,7 +167,8 @@ shared), **43** = 11 + 32, **47** = 43 + 4 (every site), and the two deliberatel
 - `Values.Ext.privBits`: one bit per record (1/256 of the record slab), cleared at the reset in O(used / 64);
   `privMade` (private records of this session) is the one word every key-forming loop tests: 0 = the loops are the
   loops of today.
-- Forwarding: word c of the duplicate. No side table.
+- Forwarding: word c of the duplicate (positive). No side table. Word c of a private record is 0, or negative: the
+  adaptive site it reports to.
 - `Values.ident` / `identSlow`: explicit stack of (record, next argument) pairs in `Values.Ext.istk`; no host
   recursion (test: a nest 300,000 deep).
 - Force points (2.4): `Values.neu`, `neuExt`, `closureAt`, `mkProj`, `nsuccSlow`, `mkFVar`; `Runs.pruneNear`,
@@ -363,7 +378,23 @@ worker; "new / found" = executions that made a record / that found one):
 
 ## 10. The prototype: what was measured
 
-TBD-10
+Private tree `work/u2/tree/rlvm-machine` = the main tree of 19:04:34Z + the patches of `work/u2/patches/` (eight
+main files, 610 added and 5 changed lines, one test class). One binary for before and after: the mode is the system
+property `rlvm.u2`; the pristine twin (`work/u2/base`) is measured beside it to show that the mode-off prototype is
+the tree it was copied from. Switches everywhere: the default set of that tree (`gated, pchk, expect, warm, code,
+casetrees, bodies, directrules, same, match, joint, lazycases, lazyeval`).
+
+### 10.1 Counts (JVM launcher, ONE worker, statistics file; `work/u2/counts/`, table by `work/u2/scripts/tab.py`)
+
+TBD-10.1
+
+### 10.2 Warm wall clock
+
+TBD-10.2
+
+### 10.3 Gates
+
+TBD-10.3
 
 ## 11. Recommendation and stages
 
