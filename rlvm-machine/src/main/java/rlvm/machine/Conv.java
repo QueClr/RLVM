@@ -80,23 +80,26 @@ final class Conv {
         int sameWaste;
         static final int SAME_WASTE_MAX = 1 << 16;
         /**
-         * The NON-OFFICIAL options of this package (NOTES-M4 D27): a comma list in the system property
-         * {@code rlvm.machine.m4}, read once per machine. They are deliberately not staging switches: what they
-         * enable is declaratively sound but is not the verdict of the official checker (owner note 11), so no
-         * switch set, {@code all} included, can turn them on. Off by default; strict mode never reads them
-         * ({@link #opt}). They exist to measure what the shortcuts would be worth.
+         * The two proof-comparison shortcuts of this package (NOTES-M4 D27) as they were given before they became
+         * named switches (2026-11-25): a comma list in the system property {@code rlvm.machine.m4}, read once per
+         * machine, and the bits the unit tests of M4 set. The switches are {@code skipargs} ({@code Op.SW_SKIPARGS},
+         * brings {@code facts}) and {@code congruence} ({@code Op.SW_CONGRUENCE}, brings {@code probes}); an option of
+         * the property is the same shortcut WITHOUT the implication (it acts only with {@code facts} / {@code probes}
+         * in the switch set, as it always did: older measurements stay reproducible). What they enable is
+         * declaratively sound but is not always the verdict of the official checker (kind T, OWNER-NOTES 13;
+         * findings S-F1, S-F2): no switch set named {@code all} turns them on, and strict mode never reads them
+         * ({@link #opt}; a strict engine has no switch).
          */
         int opts = parseOpts(System.getProperty("rlvm.machine.m4", ""));
         /**
          * {@code skipargs}: B3 (proof positions of CARGS skipped under the agreement rule), B4 (unread positions
          * skipped under SAMEDEF) and the Prop mask of ETAS, with {@code Op.SW_FACTS}. Declaratively sound, but NOT
-         * the official verdict (finding S-F2, NOTES-M4 D27): never part of a default configuration.
+         * always the official verdict (finding S-F2, NOTES-M4 D27).
          */
         static final int OPT_SKIP_ARGS = 2;
         /**
          * {@code congruence}: B1 (same-head probe), B12 (closure congruence, slots by CONV) and B2, with
-         * {@code Op.SW_PROBES}. Declaratively sound, but NOT the official verdict (finding S-F1, NOTES-M4 D27):
-         * never part of a default configuration.
+         * {@code Op.SW_PROBES}. Declaratively sound, but NOT always the official verdict (finding S-F1, NOTES-M4 D27).
          */
         static final int OPT_CONGRUENCE = 4;
 
@@ -776,7 +779,7 @@ final class Conv {
 
     /** c3 / step 3: {@code tn = whnf_core(t, cheap_proj = true)}. The flag WHNF answers CORE inline. */
     private static int convCore1(Machine m, int t0, int s0, int a, int b, int d) {
-        if ((m.sw & Op.SW_PROBES) != 0 && a > 0 && opt(m, Ext.OPT_CONGRUENCE)
+        if ((m.sw & Op.SW_PROBES) != 0 && a > 0 && congruenceOn(m)
                 && ((m.vh[a << Layout.REC_SHIFT] >>> W0_PROOF_SHIFT) & 3) == Layout.TRI_YES) {
             // [B2] (ISA 6.3): a known proof is compared by type before it is reduced: it enters c4 as it is
             return convIrrel(m, t0, s0, a, b, d);
@@ -1074,23 +1077,33 @@ final class Conv {
 
     /**
      * True if the congruence shortcuts B1 and B12 may start a segment: step 5 is on, the probe debt is below its bound
-     * AND the non-official option {@code congruence} is given (finding S-F1: a T by congruence of arguments or frame
-     * slots is not always a T of the official procedure).
+     * AND the switch {@code congruence} is on (finding S-F1: a T by congruence of arguments or frame slots is not
+     * always a T of the official procedure; kind T, OWNER-NOTES 13).
      */
     static boolean congruence(Machine m) {
-        return probing(m) && opt(m, Ext.OPT_CONGRUENCE);
+        return probing(m) && congruenceOn(m);
+    }
+
+    /** True if the switch {@code congruence} ({@code Op.SW_CONGRUENCE}) or the old option of that name is on. */
+    static boolean congruenceOn(Machine m) {
+        return (m.sw & Op.SW_CONGRUENCE) != 0 || opt(m, Ext.OPT_CONGRUENCE);
     }
 
     /**
      * True if CARGS and ETAS may skip positions by the fact record (B3, B4, the Prop mask): step 2 is on AND the
-     * non-official option {@code skipargs} is given (finding S-F2: the official procedure compares two proofs by
-     * their types, and that comparison can fail where the agreement rule holds).
+     * switch {@code skipargs} ({@code Op.SW_SKIPARGS}) or the old option of that name is on (finding S-F2: the
+     * official procedure compares two proofs by their types, and that comparison can fail where the agreement rule
+     * holds; kind T, OWNER-NOTES 13).
      */
     static boolean skipArgs(Machine m) {
-        return (m.sw & Op.SW_FACTS) != 0 && opt(m, Ext.OPT_SKIP_ARGS);
+        int sw = m.sw;
+        return (sw & Op.SW_FACTS) != 0 && ((sw & Op.SW_SKIPARGS) != 0 || opt(m, Ext.OPT_SKIP_ARGS));
     }
 
-    /** True if the experiment {@code bit} of {@link Ext#opts} is on; never in strict mode (ISA 14.2). */
+    /**
+     * True if the option {@code bit} of {@link Ext#opts} (the system property {@code rlvm.machine.m4}, or a unit
+     * test) is on; never in strict mode (ISA 14.2).
+     */
     static boolean opt(Machine m, int bit) {
         return (m.x4.opts & bit) != 0 && !m.strict;
     }

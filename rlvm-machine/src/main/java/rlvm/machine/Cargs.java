@@ -79,7 +79,7 @@ final class Cargs {
             return m.spill3(Op.K_CARGS, a, b, policy);
         }
         if ((sw & Op.SW_FACTS) != 0 && na == nb && Conv.skipArgs(m)) {
-            return plan(m, a, b, policy, d); // non-official option (finding S-F2): positions skipped by the fact record
+            return plan(m, a, b, policy, d); // switch skipargs (kind T, finding S-F2): positions skipped by the fact record
         }
         return run(m, a, b, policy, 0L, d);
     }
@@ -166,6 +166,13 @@ final class Cargs {
         int ha = Values.a(m, a);
         int hb = Values.a(m, b);
         if (Values.kind(m, ha) != Layout.CONST || Values.kind(m, hb) != Layout.CONST || Values.a(m, ha) != Values.a(m, hb)) {
+            return run(m, a, b, policy, 0L, d);
+        }
+        // Defence in depth (review S2): the masks are computed for a's head at a's levels and are b's masks only if
+        // the two level lists are equivalent. Every caller establishes that today (c8: CONV of the two heads; lazy
+        // delta and B1: Levels.listsEq); the plan must not depend on it silently: without it, f.{0} P p against
+        // f.{1} N n would skip a position that is a proof on one side only.
+        if (ha != hb && !Levels.listsEq(m, Values.b(m, ha), Values.b(m, hb))) {
             return run(m, a, b, policy, 0L, d);
         }
         int row = Values.a(m, ha);

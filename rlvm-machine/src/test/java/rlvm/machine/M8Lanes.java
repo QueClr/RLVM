@@ -673,6 +673,9 @@ final class M8Lanes {
     // A lane against another lane
     // ---------------------------------------------------------------------------------------------------
 
+    /** What the detail of a decline by the eager rule (M6-F26) starts with ({@code Machine.ER_DETAIL}). */
+    private static final String EAGER_RULE = "eager reduction (an argument 'eagerReduce _ _')";
+
     private static void againstLane(M8Harness h, FileRun run, LaneRun a, LaneRun b) {
         if (a.outcome == null || b.outcome == null) {
             return; // a pass that never started is reported as the crash it is
@@ -700,10 +703,15 @@ final class M8Lanes {
                 b.overflowSkipped++;
                 continue;
             } else if (b.spec.how == OUTCOME && b.outcome[u] == Outcome.DECLINE && a.outcome[u] != Outcome.DECLINE
-                    && (a.spec.config.switches & Op.SW_EAGER) != 0 && (b.spec.config.switches & Op.SW_EAGER) == 0) {
+                    && (a.spec.config.switches & Op.SW_EAGER) != 0 && (b.spec.config.switches & Op.SW_EAGER) == 0
+                    && String.valueOf(b.keys.get(u)).contains(EAGER_RULE)) {
                 // package E1: the lane with the switch `eager` DECIDES a declaration that a lane without it declines
                 // (M6-F26, the eager rule). That is what the switch is for; the verdict of the decided unit is held
                 // against the reference engine by the differential part. Counted, not a difference.
+                // INT7 (review of 2026-11-25): ONLY when the other lane's decline IS the eager rule (its detail text);
+                // as published at 22:41Z the test took ANY decline of the lane without the switch - an internal
+                // fault of the generic tier, a tick bound, the E1-F6 rule - and would have counted it under this
+                // name instead of reporting a tier difference.
                 b.eagerOnly++;
                 continue;
             } else if (a.outcome[u] != b.outcome[u]) {

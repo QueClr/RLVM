@@ -326,7 +326,10 @@ def main() -> int:
            + ", ".join(f"`{os.path.relpath(p, ROOT) if os.path.abspath(p).startswith(ROOT + os.sep) else p}`" for p in paths)
            + (f" (labels {', '.join(labels)}" + (f"; not older than {args.since}" if args.since else "") + ")" if labels or args.since else "")
            + " and the tracker's history; the text around the tables is `bench/track/benchmarks-notes.md`. Do not edit: "
-           "re-measure (`bench/warm.sh`, inside `bench/quiet.py` windows) and regenerate.", ""]
+           "re-measure (`bench/warm.sh`, inside `bench/quiet.py` windows) and regenerate with `bench/track/benchmarks.py "
+           + " ".join(a if os.path.isabs(a) is False else os.path.relpath(a, ROOT) for a in sys.argv[1:] if a != "--stdout")
+           + f"`. Default engine of these tables: **{args.default_engine}** (`rlvm --version`: `default engine: NAME`; when "
+           "the default engine changes, re-measure the default rows and pass `--default-engine`).", ""]
     if head.strip():
         out += [head.strip(), ""]
     out += table("1. Warm wall clock, 8 workers, load pipelined (s)",
@@ -392,7 +395,7 @@ def main() -> int:
                 build = row.get("build") or ""
                 tag = "-"
                 if row.get("dist"):
-                    tag = builds.setdefault(row["dist"] + "|" + build, f"B{len(builds) + 1}")
+                    tag = builds.setdefault(row["dist"] + "|" + build, f"D{len(builds) + 1}")
                 what = {"warm8": "1, 4, 5", "warm1": "2", "cold8": "3, 4, 5", "pass1_8": "3"}
                 cellsused = ", ".join(sorted({x.strip() for u in uses for x in what[u].split(",")}))
                 passes = row["walls_s"] or "-"

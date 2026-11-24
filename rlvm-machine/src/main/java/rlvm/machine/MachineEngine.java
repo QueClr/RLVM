@@ -158,7 +158,7 @@ public final class MachineEngine implements Engine {
         this.config = config == null ? EngineConfig.defaults() : config;
         this.facts = new FactStore(store);
         this.code = new CodeStore(store);
-        this.switches = this.config.strict ? 0 : settings.switches; // ISA 14.2: a strict engine has no switch
+        this.switches = this.config.strict ? 0 : Op.implied(settings.switches); // ISA 14.2: a strict engine has no switch
         this.debug = settings.debug | (this.config.memoCheck ? Op.DBG_MEMOCHECK : 0);
         this.hostDepth = settings.hostDepth;
         this.memoEvery = settings.memoEvery;

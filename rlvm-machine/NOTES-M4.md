@@ -401,3 +401,17 @@ two options are in the code, off, for that decision.
 | `lazyeval` | D26 | diff gates: 230 tests + four corpora + mutants, with and without `code,casetrees,m7a`, 0 differences; `shortcheck` on the four corpora; review 15:06Z; no cost cliff on the 230 tests; `M4LazyEvalTest`; batches b1, b3, b4 | **ready to be on by default**: with step 4 -7 % CPU on Init and Std (b3), -3 % on the Cedar slice; alone about -1 % |
 | `same` (= `m4a`) | D28 (`Same`) | diff gates of every version: 230 tests + four corpora + the subst-prop mutants, with and without `code,casetrees,m7a`: 0 differences, no decline but M6's eager-reduction ones; `shortcheck` (first and second version) on Cedar slice, reachability, Init, Std: DIFF-CLEAN; review exports (29) official under every set with it; `M4SameTest` (6 tests incl. far frames); batches b3, b4 | **ready per owner, waiting for the review of S; then on by default together with step 4**: -10 to -13 % CPU on the Cedar slice, the other corpora inside the noise (+0.5 to +1.7 % instructions on Init / Std), and it removes the last machine decline of the 230 tests that is not an eager-reduction decline (`loop-unfolded-once`) |
 | `-Drlvm.machine.m4=congruence,skipargs` | B1, B2, B12, B3, B4, ETAS mask | S-F1, S-F2: wrong verdicts | **never a default**; kept only to measure |
+
+## D27 after the owner's note 13: the two shortcuts are named switches (INT7, 2026-11-25)
+
+`skipargs` (`Op.SW_SKIPARGS`, bit 28) and `congruence` (`Op.SW_CONGRUENCE`, bit 29) replace the options of the system
+property `rlvm.machine.m4` (D27). `Conv.skipArgs` / `Conv.congruence` / `Conv.congruenceOn` are the only tests; the
+switch brings what it needs (`Op.implied`, applied by `Debug.parseSwitches` to the final set and by `MachineEngine`):
+`skipargs` -> `facts`, `congruence` -> `probes`. Neither is in `all`; a strict engine has no switch. The property is
+still read and means what it always meant (the shortcut WITHOUT the implication: inert without `facts` / `probes`),
+so older command lines and measurements stay reproducible; the unit tests of this package still set `Conv.Ext.opts`.
+What they answer is kind T (derivable, not always the official verdict): reviews `soundness-shortcuts.md` (S2:
+theory-sound as implemented) and `soundness-default-set.md` section 10 (S3: no kind F in the default set + `eager` +
+both). S2's optional patch H1 is taken: `Cargs.plan` applies the masks of side a's head only if the two heads are one
+record or their level lists are equivalent (`Levels.listsEq`; no judgment, no tick) instead of relying on its three
+callers. `M4OfficialTest.theNamedSwitchesBringWhatTheyNeed` pins the implication and the three attacks.

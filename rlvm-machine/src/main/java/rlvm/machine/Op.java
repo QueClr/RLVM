@@ -506,6 +506,36 @@ public final class Op {
      */
     public static final int SW_CONV_EXPECT = 1 << 27;
     /**
+     * The two proof-comparison shortcuts (OWNER-NOTES 13, the "practical" policy; reviews
+     * {@code docs/design/review/soundness-shortcuts.md}: theory-sound as implemented, and
+     * {@code soundness-default-set.md} section 10: no kind F in the default set with them). Until 2026-11-25 they were
+     * the options of the system property {@code rlvm.machine.m4}; what they answer is derivable but is not always
+     * the verdict of the official checker (kind T: findings S-F1, S-F2), so they are named switches that are never
+     * part of {@code all} and, like every switch, off in strict mode.
+     * <ul>
+     *   <li>{@code skipargs}: CARGS and ETAS skip the positions the fact record of the head allows (B3: proof
+     *       positions under the agreement rule; B4: positions the definition does not read, under SAMEDEF; the Prop
+     *       mask of structure eta). Needs the fact records: it IMPLIES {@link #SW_FACTS}.
+     *   <li>{@code congruence}: the same-head probe B1, closure congruence B12 and proofs by type B2. Runs as
+     *       speculative segments of step 5: it IMPLIES {@link #SW_PROBES}.
+     * </ul>
+     * {@link #implied} adds the implied bits; {@code Debug.parseSwitches} and {@code MachineEngine} apply it, so a
+     * machine never runs with one of these bits and without what it needs.
+     */
+    public static final int SW_SKIPARGS = 1 << 28;
+    public static final int SW_CONGRUENCE = 1 << 29;
+
+    /** The switch set with the switches its members need: {@code skipargs} -> {@code facts}, {@code congruence} -> {@code probes}. */
+    public static int implied(int sw) {
+        if ((sw & SW_SKIPARGS) != 0) {
+            sw |= SW_FACTS;
+        }
+        if ((sw & SW_CONGRUENCE) != 0) {
+            sw |= SW_PROBES;
+        }
+        return sw;
+    }
+    /**
      * [eager] {@code Machine.ER} while a comparison of the K rule runs under eager reduction: this unit is
      * added per nesting level ({@code Reduce.k_iota3 / k_iota4}); bit 0 stays the mode. Only with
      * {@link #SW_EAGER}; every reader of {@code ER} tests {@code != 0}, every writer restores a saved value.

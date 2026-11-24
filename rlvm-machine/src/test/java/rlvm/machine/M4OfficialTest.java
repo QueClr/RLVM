@@ -24,9 +24,9 @@ import rlvm.api.Outcome;
  * ({@code And.rec f (And.intro ..)} reduces, {@code And.rec f h} is stuck). The machine's verdict must be the
  * official one, which the manifest records ({@code accept} / {@code reject}; confirmed by leanchecker 4.36).
  *
- * <p>With the non-official options {@code congruence} / {@code skipargs} of {@code Conv.Ext} the machine accepts
- * some of the {@code reject} files: that is what the options mean, and the last test pins it down so that nobody
- * mistakes them for a default.
+ * <p>With the shortcuts {@code congruence} / {@code skipargs} (named switches since 2026-11-25, before that options
+ * of {@code Conv.Ext}) the machine accepts some of the {@code reject} files (kind T, OWNER-NOTES 13): that is what
+ * they mean, and the last two tests pin it down.
  */
 class M4OfficialTest {
 
@@ -113,5 +113,35 @@ class M4OfficialTest {
         assertEquals(Outcome.ACCEPT, verdict("facts-agreement-noncongruent-app-bad", "facts", Conv.Ext.OPT_SKIP_ARGS).outcome);
         assertEquals(Outcome.REJECT, verdict("probe-b1-rec-proof-major-bad", "probes", 0).outcome);
         assertEquals(Outcome.REJECT, verdict("facts-agreement-noncongruent-app-bad", "facts", 0).outcome);
+    }
+
+    /**
+     * The shortcuts as named switches (INT7, 2026-11-25; OWNER-NOTES 13): {@code congruence} and {@code skipargs}
+     * give what the old options gave with {@code probes} / {@code facts}, and each BRINGS the switch it needs
+     * ({@code Op.implied}); an old option without its switch stays inert; {@code all} does not contain them.
+     */
+    @Test
+    @Tag("fast")
+    void theNamedSwitchesBringWhatTheyNeed() throws IOException {
+        assertEquals(Op.SW_SKIPARGS | Op.SW_FACTS, Debug.parseSwitches("skipargs"));
+        assertEquals(Op.SW_CONGRUENCE | Op.SW_PROBES, Debug.parseSwitches("congruence"));
+        assertEquals(Op.SW_SKIPARGS | Op.SW_FACTS, Debug.parseSwitches("skipargs,-facts"), "the implication does not depend on the order");
+        assertEquals(Op.SW_CONGRUENCE | Op.SW_PROBES, Debug.parseSwitches("-probes,congruence,-probes"));
+        assertEquals(0, Debug.parseSwitches("skipargs,congruence,-skipargs,-congruence"),
+                "the implication is applied to the final set: a shortcut that was removed brings nothing");
+        assertEquals(Op.SW_SKIPARGS | Op.SW_FACTS | Op.SW_PROBES, Op.implied(Op.SW_SKIPARGS | Op.SW_PROBES));
+        assertEquals(0, Debug.parseSwitches("all") & (Op.SW_SKIPARGS | Op.SW_CONGRUENCE), "'all' never names a kind T shortcut");
+        assertEquals("facts,skipargs", Debug.switchNames(Debug.parseSwitches("skipargs")));
+        assertEquals("probes,congruence", Debug.switchNames(Debug.parseSwitches("congruence")));
+        assertEquals(Outcome.ACCEPT, verdict("probe-b1-rec-proof-major-bad", "congruence", 0).outcome);
+        assertEquals(Outcome.ACCEPT, verdict("probe-b12-closure-proof-slot-bad", "congruence", 0).outcome);
+        assertEquals(Outcome.ACCEPT, verdict("facts-agreement-noncongruent-app-bad", "skipargs", 0).outcome);
+        // each shortcut is its own switch: `skipargs` does not start the same-head probe (the agreement attack is
+        // accepted by either: with `congruence` the two proof arguments are compared by B1 / B2)
+        assertEquals(Outcome.REJECT, verdict("probe-b1-rec-proof-major-bad", "skipargs", 0).outcome);
+        assertEquals(Outcome.REJECT, verdict("probe-b12-closure-proof-slot-bad", "skipargs", 0).outcome);
+        // the old options are inert without facts / probes, as they always were
+        assertEquals(Outcome.REJECT, verdict("probe-b1-rec-proof-major-bad", "", Conv.Ext.OPT_CONGRUENCE).outcome);
+        assertEquals(Outcome.REJECT, verdict("facts-agreement-noncongruent-app-bad", "", Conv.Ext.OPT_SKIP_ARGS).outcome);
     }
 }
