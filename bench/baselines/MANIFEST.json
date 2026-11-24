@@ -1,0 +1,110 @@
+{
+  "gruszka": {
+    "wrapper": "bench/baselines/gruszka.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/gruszka/src",
+    "run": "scripts/arena-run \"$IN\" 4",
+    "yaml_threads": 4,
+    "language": "rust",
+    "url": "https://github.com/jasisz/gruszka",
+    "ref": "main",
+    "rev": "ebc80dcb20786d4f25335146b8a9fe8f398843c1",
+    "version": "ebc80dc",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "mathgraph": {
+    "wrapper": "bench/baselines/mathgraph.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/mathgraph/src",
+    "run": "target/release/sokonanoda config.json < \"$IN\" || exit 1\n",
+    "yaml_threads": null,
+    "language": "rust",
+    "url": "https://github.com/metalogiclabs/mathgraph-lean-kernel",
+    "ref": "flash",
+    "rev": "78c7502bac8a5ba000057b3f083bc0595ac65750",
+    "version": "flash",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "nano-lean": {
+    "wrapper": "bench/baselines/nano-lean.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/nano-lean/src",
+    "run": "target/release/nl-fast -q -j 4 \"$IN\"",
+    "yaml_threads": 4,
+    "language": "rust",
+    "url": "https://github.com/sdiehl/nano-lean",
+    "ref": "v0.4.2",
+    "rev": "5cd4a25de7cdd8a5fadde3fec53e41a6a8693138",
+    "version": "v0.4.2 (5cd4a25)",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "nanoda": {
+    "wrapper": "bench/baselines/nanoda.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/nanoda/src",
+    "run": "target/release/nanoda_bin config.json < \"$IN\"\ncase $? in \n  0) exit 0 ;;\n  2) exit 2 ;;\n  *) exit 1 ;;\nesac\n",
+    "yaml_threads": null,
+    "language": "rust",
+    "url": "https://github.com/ammkrn/nanoda_lib",
+    "ref": "master",
+    "rev": "0da9f98feadd3a0a2ef4b3dbcf52a298a6fef929",
+    "version": "0da9f98",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "official": {
+    "wrapper": "bench/baselines/official.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/official",
+    "run": "leanchecker --from-export \"$IN\"",
+    "yaml_threads": null,
+    "language": "cpp",
+    "url": null,
+    "ref": null,
+    "rev": null,
+    "version": "v4.35.0",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "pestka": {
+    "wrapper": "bench/baselines/pestka.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/pestka/src",
+    "run": "bin/arena-run \"$IN\" 4",
+    "yaml_threads": 4,
+    "language": "aver",
+    "url": "https://github.com/jasisz/pestka",
+    "ref": "main",
+    "rev": "cea66e6e50a0999735fd76455f2358772351ccba",
+    "version": "cea66e6",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "rpylean": {
+    "wrapper": "bench/baselines/rpylean.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/rpylean/src",
+    "run": "./rpylean-c check \"$IN\"\n",
+    "yaml_threads": null,
+    "language": "python",
+    "url": "https://github.com/Julian/rpylean",
+    "ref": "main",
+    "rev": "bbf354d3adbfe84d297ea2159cc707b48d96a90a",
+    "version": "v2026.11.11",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "sokonanoda": {
+    "wrapper": "bench/baselines/sokonanoda.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/sokonanoda/src",
+    "run": "target/release/sokonanoda --stdin --nat-extension --string-extension --axiom-allow-all --threads 4 < \"$IN\"\n",
+    "yaml_threads": null,
+    "language": "rust",
+    "url": "https://github.com/intgrah/sokonanoda",
+    "ref": "master",
+    "rev": "9a021b66f804a1d1df68a981337c67413ef72f6b",
+    "version": "9a021b6",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "tenet-jvm": {
+    "wrapper": "bench/baselines/tenet-jvm.sh",
+    "checker_dir": "work/arena-checkers/_build/checkers/tenet-jvm/src",
+    "run": "bin/tenet-jvm \"$IN\"",
+    "yaml_threads": null,
+    "language": "java",
+    "url": "https://github.com/keithadler/tenet-jvm",
+    "ref": "main",
+    "rev": "4cc6e20a0456c5e042c1fad5ad09b09c7e6e79c4",
+    "version": "0.1.5",
+    "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  }
+}

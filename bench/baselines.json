@@ -1,0 +1,4084 @@
+{
+ "meta": {
+  "generated_utc": "2026-11-24T05:58:26Z",
+  "what": "Baseline arena checkers measured on this machine on the big corpora, the way the Lean Kernel Arena measures (perf stat -e instructions:u over the whole process tree, GNU time max RSS). The ranking metric is virtual_time_s = instructions / 6e9 on mathlib.",
+  "host": {
+   "arch": "aarch64",
+   "cores": "Cortex-X925 (CPUs 5-9,15-19) + Cortex-A725 (0-4,10-14)",
+   "note": "the arena runner is x86-64, 8 vCPU, 16 GB; absolute counts differ, see aarch64_over_x86_64"
+  },
+  "container": "bench/arena-docker.sh --arena-limits --no-network (8 performance cores, 16 GB, one run per container); a run made otherwise says so in its own \"container\" field",
+  "images": [
+   "sha256:b69e20dddbac38e277575f7b02c0999f95d8ccd7f1890486660ea5710f1bdecf"
+  ],
+  "measure": "bench/measure.sh (perf stat --no-scale -e instructions:u summed over PMUs, task-clock, duration_time; GNU time %M)",
+  "instructions_per_virtual_second": 6000000000,
+  "representative_value": "median over the runs of the arena configuration; *_min/_max/_spread_pct next to it",
+  "timeout": "2 x the arena's timeout of the corpus (init 370 s, std 600 s, mathlib 4120 s)",
+  "arena_revision": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350",
+  "published_results": {
+   "file": "work/arena-site/results.json",
+   "timestamp": "2026-11-23 18:13:52 UTC"
+  },
+  "runs_file": [
+   "work/baselines/big/runs.jsonl"
+  ],
+  "n_runs": 91,
+  "first_run_utc": "2026-11-24T04:23:06Z",
+  "last_run_utc": "2026-11-24T05:33:13Z",
+  "host_loadavg_1min_during_runs": {
+   "min": 5.17,
+   "median": 13.73,
+   "max": 34.51
+  },
+  "caveat": "wall and CPU times were taken while other containers shared the host (and at times the same 8 cores); instruction counts do not depend on that",
+  "reproduce": "bench/baselines/big-all.sh && bench/baselines/big-summary.py"
+ },
+ "corpora": {
+  "init": {
+   "size": 347772063,
+   "lines": 6495296,
+   "sha256": "93b61a432ed4241b1d2184de65354e0b98333bf4403a8d63922da18e10b430ba",
+   "timeout": 370,
+   "lean_version": "4.36.0"
+  },
+  "std": {
+   "size": 584315500,
+   "lines": 10611507,
+   "sha256": "15b659c12c14eb5c104b169ff288dcbd35baaff51412f43c9a078f79e9cf2f7d",
+   "timeout": 600,
+   "lean_version": "4.36.0"
+  },
+  "mathlib": {
+   "size": 6326141213,
+   "lines": 112081718,
+   "sha256": "f749dfd084fc0727d107c7aaded7d492cebfc0b517cfaa7337d8a7578a6c0dec",
+   "timeout": 4120,
+   "lean_version": "4.36.0"
+  }
+ },
+ "checkers": {
+  "nano-lean": {
+   "wrapper": "bench/baselines/nano-lean.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/nano-lean/src",
+   "run": "target/release/nl-fast -q -j 4 \"$IN\"",
+   "yaml_threads": 4,
+   "language": "rust",
+   "url": "https://github.com/sdiehl/nano-lean",
+   "ref": "v0.4.2",
+   "rev": "5cd4a25de7cdd8a5fadde3fec53e41a6a8693138",
+   "version": "v0.4.2 (5cd4a25)",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "gruszka": {
+   "wrapper": "bench/baselines/gruszka.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/gruszka/src",
+   "run": "scripts/arena-run \"$IN\" 4",
+   "yaml_threads": 4,
+   "language": "rust",
+   "url": "https://github.com/jasisz/gruszka",
+   "ref": "main",
+   "rev": "ebc80dcb20786d4f25335146b8a9fe8f398843c1",
+   "version": "ebc80dc",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "sokonanoda": {
+   "wrapper": "bench/baselines/sokonanoda.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/sokonanoda/src",
+   "run": "target/release/sokonanoda --stdin --nat-extension --string-extension --axiom-allow-all --threads 4 < \"$IN\"\n",
+   "yaml_threads": null,
+   "language": "rust",
+   "url": "https://github.com/intgrah/sokonanoda",
+   "ref": "master",
+   "rev": "9a021b66f804a1d1df68a981337c67413ef72f6b",
+   "version": "9a021b6",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "rpylean": {
+   "wrapper": "bench/baselines/rpylean.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/rpylean/src",
+   "run": "./rpylean-c check \"$IN\"\n",
+   "yaml_threads": null,
+   "language": "python",
+   "url": "https://github.com/Julian/rpylean",
+   "ref": "main",
+   "rev": "bbf354d3adbfe84d297ea2159cc707b48d96a90a",
+   "version": "v2026.11.11",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "mathgraph": {
+   "wrapper": "bench/baselines/mathgraph.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/mathgraph/src",
+   "run": "target/release/sokonanoda config.json < \"$IN\" || exit 1\n",
+   "yaml_threads": null,
+   "language": "rust",
+   "url": "https://github.com/metalogiclabs/mathgraph-lean-kernel",
+   "ref": "flash",
+   "rev": "78c7502bac8a5ba000057b3f083bc0595ac65750",
+   "version": "flash",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350",
+   "note": "accepts 8 bad proofs on the small tests; not a ranking competitor"
+  },
+  "pestka": {
+   "wrapper": "bench/baselines/pestka.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/pestka/src",
+   "run": "bin/arena-run \"$IN\" 4",
+   "yaml_threads": 4,
+   "language": "aver",
+   "url": "https://github.com/jasisz/pestka",
+   "ref": "main",
+   "rev": "cea66e6e50a0999735fd76455f2358772351ccba",
+   "version": "cea66e6",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "nanoda": {
+   "wrapper": "bench/baselines/nanoda.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/nanoda/src",
+   "run": "target/release/nanoda_bin config.json < \"$IN\"\ncase $? in \n  0) exit 0 ;;\n  2) exit 2 ;;\n  *) exit 1 ;;\nesac\n",
+   "yaml_threads": null,
+   "language": "rust",
+   "url": "https://github.com/ammkrn/nanoda_lib",
+   "ref": "master",
+   "rev": "0da9f98feadd3a0a2ef4b3dbcf52a298a6fef929",
+   "version": "0da9f98",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  },
+  "tenet-jvm-c2": {
+   "wrapper": "bench/baselines/tenet-jvm.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/tenet-jvm/src",
+   "run": "bin/tenet-jvm \"$IN\"",
+   "yaml_threads": null,
+   "language": "java",
+   "url": "https://github.com/keithadler/tenet-jvm",
+   "ref": "main",
+   "rev": "4cc6e20a0456c5e042c1fad5ad09b09c7e6e79c4",
+   "version": "0.1.5",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350",
+   "note": "same JVM with -XX:-UseJVMCICompiler (C2), the closest to the arena's stock OpenJDK"
+  },
+  "tenet-jvm": {
+   "wrapper": "bench/baselines/tenet-jvm.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/tenet-jvm/src",
+   "run": "bin/tenet-jvm \"$IN\"",
+   "yaml_threads": null,
+   "language": "java",
+   "url": "https://github.com/keithadler/tenet-jvm",
+   "ref": "main",
+   "rev": "4cc6e20a0456c5e042c1fad5ad09b09c7e6e79c4",
+   "version": "0.1.5",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350",
+   "note": "project GraalVM CE 25 with the Graal JIT (not the arena's JVM setup)"
+  },
+  "official": {
+   "wrapper": "bench/baselines/official.sh",
+   "checker_dir": "work/arena-checkers/_build/checkers/official",
+   "run": "leanchecker --from-export \"$IN\"",
+   "yaml_threads": null,
+   "language": "cpp",
+   "url": null,
+   "ref": null,
+   "rev": null,
+   "version": "v4.35.0",
+   "arena_rev": "99195b6b009bc3df2c946ddbcfa4a2ab1eb40350"
+  }
+ },
+ "target": {
+  "mathlib": {
+   "fastest_checker": "nano-lean",
+   "instructions": 361316442800,
+   "virtual_time_s": 60.219,
+   "top": [
+    {
+     "checker": "nano-lean",
+     "instructions": 361316442800,
+     "virtual_time_s": 60.219
+    },
+    {
+     "checker": "gruszka",
+     "instructions": 418657807548,
+     "virtual_time_s": 69.776
+    },
+    {
+     "checker": "sokonanoda",
+     "instructions": 504306780410,
+     "virtual_time_s": 84.051
+    },
+    {
+     "checker": "rpylean",
+     "instructions": 544607010722,
+     "virtual_time_s": 90.768
+    }
+   ]
+  },
+  "init": {
+   "fastest_checker": "nano-lean",
+   "instructions": 22262797830,
+   "virtual_time_s": 3.71,
+   "top": [
+    {
+     "checker": "nano-lean",
+     "instructions": 22262797830,
+     "virtual_time_s": 3.71
+    },
+    {
+     "checker": "gruszka",
+     "instructions": 22574300339,
+     "virtual_time_s": 3.762
+    },
+    {
+     "checker": "sokonanoda",
+     "instructions": 27732643954,
+     "virtual_time_s": 4.622
+    },
+    {
+     "checker": "rpylean",
+     "instructions": 30179574656,
+     "virtual_time_s": 5.03
+    }
+   ]
+  },
+  "std": {
+   "fastest_checker": "gruszka",
+   "instructions": 36496018369,
+   "virtual_time_s": 6.083,
+   "top": [
+    {
+     "checker": "gruszka",
+     "instructions": 36496018369,
+     "virtual_time_s": 6.083
+    },
+    {
+     "checker": "nano-lean",
+     "instructions": 36963544689,
+     "virtual_time_s": 6.161
+    },
+    {
+     "checker": "sokonanoda",
+     "instructions": 46372557738,
+     "virtual_time_s": 7.729
+    },
+    {
+     "checker": "rpylean",
+     "instructions": 51221609289,
+     "virtual_time_s": 8.537
+    }
+   ]
+  }
+ },
+ "aarch64_over_x86_64": {
+  "nano-lean": {
+   "init": 0.9155,
+   "std": 0.9182,
+   "mathlib": 0.915,
+   "small_tests_230": 0.9345
+  },
+  "gruszka": {
+   "init": 0.9087,
+   "std": 0.9053,
+   "mathlib": 0.9062,
+   "small_tests_230": 0.9261
+  },
+  "sokonanoda": {
+   "init": 0.9618,
+   "std": 0.9585,
+   "mathlib": 0.9562,
+   "small_tests_230": 0.9328
+  },
+  "rpylean": {
+   "init": 0.9274,
+   "std": 0.929,
+   "mathlib": 0.9421,
+   "small_tests_230": 1.0055
+  },
+  "mathgraph": {
+   "init": 0.9674,
+   "std": 0.9665,
+   "mathlib": 0.9656,
+   "small_tests_230": 0.9914
+  },
+  "pestka": {
+   "init": 0.8958,
+   "std": 0.8995,
+   "mathlib": 0.908,
+   "small_tests_230": 0.8731
+  },
+  "nanoda": {
+   "init": 0.9623,
+   "std": 0.9618,
+   "mathlib": 0.9584,
+   "small_tests_230": 0.9328
+  },
+  "tenet-jvm-c2": {
+   "init": 1.0323,
+   "std": 1.0492,
+   "mathlib": 0.9505,
+   "small_tests_230": 0.892
+  },
+  "tenet-jvm": {
+   "init": 1.1045,
+   "std": 1.089,
+   "mathlib": 1.2206,
+   "small_tests_230": 1.5393
+  },
+  "official": {
+   "init": 0.9494,
+   "std": 0.9495,
+   "mathlib": 0.9445,
+   "small_tests_230": 0.9435
+  }
+ },
+ "results": {
+  "init": {
+   "nano-lean": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 22262797830,
+      "virtual_time_s": 3.710466305,
+      "cpu_time_s": 4.46092232,
+      "wall_time_s": 1.3223056340000001,
+      "max_rss_bytes": 969629696,
+      "instructions_kernel": 373489117,
+      "user_time_s": 4.37,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:26Z",
+      "host_loadavg_start": [
+       9.99,
+       15.21,
+       20.09
+      ],
+      "host_loadavg_end": [
+       9.99,
+       15.21,
+       20.09
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 22276714633,
+      "virtual_time_s": 3.712785772166667,
+      "cpu_time_s": 4.525199104,
+      "wall_time_s": 1.333240425,
+      "max_rss_bytes": 1002123264,
+      "instructions_kernel": 373184802,
+      "user_time_s": 4.44,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:28Z",
+      "host_loadavg_start": [
+       9.99,
+       15.21,
+       20.09
+      ],
+      "host_loadavg_end": [
+       9.99,
+       15.21,
+       20.09
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 22236264208,
+      "virtual_time_s": 3.7060440346666668,
+      "cpu_time_s": 4.5603553119999996,
+      "wall_time_s": 1.352890415,
+      "max_rss_bytes": 956174336,
+      "instructions_kernel": 372632847,
+      "user_time_s": 4.48,
+      "sys_time_s": 0.07,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:30Z",
+      "host_loadavg_start": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "host_loadavg_end": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 22262797830,
+    "instructions_min": 22236264208,
+    "instructions_max": 22276714633,
+    "instructions_spread_pct": 0.182,
+    "virtual_time_s": 3.71,
+    "cpu_time_s": 4.53,
+    "wall_time_s": 1.33,
+    "wall_time_s_min": 1.32,
+    "max_rss_bytes": 1002123264,
+    "instructions_kernel": 373184802,
+    "command": "bench/baselines/nano-lean.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "nano-lean",
+     "status": "accepted",
+     "instructions": 24318474282,
+     "virtual_time_s": 4.053,
+     "wall_time_s": 1.791088762,
+     "cpu_time_s": 6.296931483000001,
+     "max_rss_bytes": 954462208,
+     "date": "2026-11-22 02:03:06 UTC"
+    },
+    "aarch64_over_x86_64": 0.9155,
+    "ratio_to_fastest": 1.0
+   },
+   "gruszka": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 22541613610,
+      "virtual_time_s": 3.7569356016666666,
+      "cpu_time_s": 2.7970681760000002,
+      "wall_time_s": 0.8172910720000001,
+      "max_rss_bytes": 377352192,
+      "instructions_kernel": 889964632,
+      "user_time_s": 2.62,
+      "sys_time_s": 0.17,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:31Z",
+      "host_loadavg_start": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "host_loadavg_end": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 22671321919,
+      "virtual_time_s": 3.7785536531666666,
+      "cpu_time_s": 2.631797312,
+      "wall_time_s": 0.777719346,
+      "max_rss_bytes": 397713408,
+      "instructions_kernel": 871036030,
+      "user_time_s": 2.44,
+      "sys_time_s": 0.19,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:33Z",
+      "host_loadavg_start": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "host_loadavg_end": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 22574300339,
+      "virtual_time_s": 3.7623833898333334,
+      "cpu_time_s": 2.906430896,
+      "wall_time_s": 0.8565545720000001,
+      "max_rss_bytes": 391720960,
+      "instructions_kernel": 878589647,
+      "user_time_s": 2.73,
+      "sys_time_s": 0.18,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:34Z",
+      "host_loadavg_start": [
+       9.67,
+       15.05,
+       20.01
+      ],
+      "host_loadavg_end": [
+       10.1,
+       15.05,
+       19.99
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 22574300339,
+    "instructions_min": 22541613610,
+    "instructions_max": 22671321919,
+    "instructions_spread_pct": 0.575,
+    "virtual_time_s": 3.762,
+    "cpu_time_s": 2.8,
+    "wall_time_s": 0.82,
+    "wall_time_s_min": 0.78,
+    "max_rss_bytes": 397713408,
+    "instructions_kernel": 878589647,
+    "command": "bench/baselines/gruszka.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "gruszka",
+     "status": "accepted",
+     "instructions": 24841488571,
+     "virtual_time_s": 4.14,
+     "wall_time_s": 1.40740309,
+     "cpu_time_s": 4.6490136,
+     "max_rss_bytes": 377610240,
+     "date": "2026-11-22 02:08:02 UTC"
+    },
+    "aarch64_over_x86_64": 0.9087,
+    "ratio_to_fastest": 1.014
+   },
+   "sokonanoda": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 27835956729,
+      "virtual_time_s": 4.6393261215,
+      "cpu_time_s": 4.506849744,
+      "wall_time_s": 1.3752348920000002,
+      "max_rss_bytes": 796782592,
+      "instructions_kernel": 259130122,
+      "user_time_s": 4.44,
+      "sys_time_s": 0.06,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:35Z",
+      "host_loadavg_start": [
+       10.1,
+       15.05,
+       19.99
+      ],
+      "host_loadavg_end": [
+       10.1,
+       15.05,
+       19.99
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 27732643954,
+      "virtual_time_s": 4.622107325666667,
+      "cpu_time_s": 4.902723552,
+      "wall_time_s": 1.532184738,
+      "max_rss_bytes": 801206272,
+      "instructions_kernel": 266255774,
+      "user_time_s": 4.85,
+      "sys_time_s": 0.05,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:37Z",
+      "host_loadavg_start": [
+       10.1,
+       15.05,
+       19.99
+      ],
+      "host_loadavg_end": [
+       10.1,
+       15.05,
+       19.99
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 27636434773,
+      "virtual_time_s": 4.606072462166667,
+      "cpu_time_s": 4.361688224000001,
+      "wall_time_s": 1.328984554,
+      "max_rss_bytes": 782917632,
+      "instructions_kernel": 252229752,
+      "user_time_s": 4.28,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:39Z",
+      "host_loadavg_start": [
+       10.1,
+       15.05,
+       19.99
+      ],
+      "host_loadavg_end": [
+       9.85,
+       14.92,
+       19.92
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 27732643954,
+    "instructions_min": 27636434773,
+    "instructions_max": 27835956729,
+    "instructions_spread_pct": 0.719,
+    "virtual_time_s": 4.622,
+    "cpu_time_s": 4.51,
+    "wall_time_s": 1.38,
+    "wall_time_s_min": 1.33,
+    "max_rss_bytes": 801206272,
+    "instructions_kernel": 259130122,
+    "command": "bench/baselines/sokonanoda.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "sokonanoda",
+     "status": "accepted",
+     "instructions": 28834745158,
+     "virtual_time_s": 4.806,
+     "wall_time_s": 1.8838990180000001,
+     "cpu_time_s": 6.510871166,
+     "max_rss_bytes": 752979968,
+     "date": "2026-11-22 03:35:41 UTC"
+    },
+    "aarch64_over_x86_64": 0.9618,
+    "ratio_to_fastest": 1.246
+   },
+   "rpylean": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 30178646903,
+      "virtual_time_s": 5.029774483833333,
+      "cpu_time_s": 5.127651792,
+      "wall_time_s": 5.154525442000001,
+      "max_rss_bytes": 382857216,
+      "instructions_kernel": 867555927,
+      "user_time_s": 4.93,
+      "sys_time_s": 0.21,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:52Z",
+      "host_loadavg_start": [
+       9.71,
+       14.72,
+       19.8
+      ],
+      "host_loadavg_end": [
+       9.33,
+       14.56,
+       19.72
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 30179621650,
+      "virtual_time_s": 5.029936941666667,
+      "cpu_time_s": 4.904371472,
+      "wall_time_s": 4.930057307,
+      "max_rss_bytes": 382857216,
+      "instructions_kernel": 855864449,
+      "user_time_s": 4.73,
+      "sys_time_s": 0.19,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:58Z",
+      "host_loadavg_start": [
+       9.33,
+       14.56,
+       19.72
+      ],
+      "host_loadavg_end": [
+       8.99,
+       14.4,
+       19.64
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 30179574656,
+      "virtual_time_s": 5.029929109333334,
+      "cpu_time_s": 4.536454496,
+      "wall_time_s": 4.560131356,
+      "max_rss_bytes": 382853120,
+      "instructions_kernel": 865049096,
+      "user_time_s": 4.34,
+      "sys_time_s": 0.21,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:03Z",
+      "host_loadavg_start": [
+       8.99,
+       14.4,
+       19.64
+      ],
+      "host_loadavg_end": [
+       8.51,
+       14.21,
+       19.55
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 30179574656,
+    "instructions_min": 30178646903,
+    "instructions_max": 30179621650,
+    "instructions_spread_pct": 0.003,
+    "virtual_time_s": 5.03,
+    "cpu_time_s": 4.9,
+    "wall_time_s": 4.93,
+    "wall_time_s_min": 4.56,
+    "max_rss_bytes": 382857216,
+    "instructions_kernel": 865049096,
+    "command": "bench/baselines/rpylean.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "rpylean",
+     "status": "accepted",
+     "instructions": 32540973441,
+     "virtual_time_s": 5.423,
+     "wall_time_s": 5.006277387,
+     "cpu_time_s": 4.980673469,
+     "max_rss_bytes": 386838528,
+     "date": "2026-11-22 21:44:24 UTC"
+    },
+    "aarch64_over_x86_64": 0.9274,
+    "ratio_to_fastest": 1.356
+   },
+   "mathgraph": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 43115211607,
+      "virtual_time_s": 7.185868601166667,
+      "cpu_time_s": 7.6027119679999995,
+      "wall_time_s": 3.932240929,
+      "max_rss_bytes": 858529792,
+      "instructions_kernel": 378505730,
+      "user_time_s": 7.51,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:08Z",
+      "host_loadavg_start": [
+       8.51,
+       14.21,
+       19.55
+      ],
+      "host_loadavg_end": [
+       8.23,
+       14.06,
+       19.47
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 43333013854,
+      "virtual_time_s": 7.2221689756666665,
+      "cpu_time_s": 8.088560256,
+      "wall_time_s": 4.172709019,
+      "max_rss_bytes": 879124480,
+      "instructions_kernel": 401279963,
+      "user_time_s": 7.99,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:12Z",
+      "host_loadavg_start": [
+       8.23,
+       14.06,
+       19.47
+      ],
+      "host_loadavg_end": [
+       8.21,
+       13.96,
+       19.41
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 43195311650,
+      "virtual_time_s": 7.199218608333333,
+      "cpu_time_s": 8.242931296,
+      "wall_time_s": 4.258130107,
+      "max_rss_bytes": 868761600,
+      "instructions_kernel": 389003774,
+      "user_time_s": 8.16,
+      "sys_time_s": 0.07,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:17Z",
+      "host_loadavg_start": [
+       8.21,
+       13.96,
+       19.41
+      ],
+      "host_loadavg_end": [
+       8.11,
+       13.84,
+       19.34
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 43195311650,
+    "instructions_min": 43115211607,
+    "instructions_max": 43333013854,
+    "instructions_spread_pct": 0.504,
+    "virtual_time_s": 7.199,
+    "cpu_time_s": 8.09,
+    "wall_time_s": 4.17,
+    "wall_time_s_min": 3.93,
+    "max_rss_bytes": 879124480,
+    "instructions_kernel": 389003774,
+    "command": "bench/baselines/mathgraph.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "mathgraph",
+     "status": "accepted",
+     "instructions": 44652757162,
+     "virtual_time_s": 7.442,
+     "wall_time_s": 4.770017056,
+     "cpu_time_s": 9.161084469,
+     "max_rss_bytes": 893382656,
+     "date": "2026-11-22 03:02:12 UTC"
+    },
+    "aarch64_over_x86_64": 0.9674,
+    "note": "accepts 8 bad proofs on the small tests; not a ranking competitor",
+    "ratio_to_fastest": 1.94
+   },
+   "pestka": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 58641820361,
+      "virtual_time_s": 9.773636726833333,
+      "cpu_time_s": 11.466352848000001,
+      "wall_time_s": 3.4235137370000004,
+      "max_rss_bytes": 564412416,
+      "instructions_kernel": 1037202033,
+      "user_time_s": 11.27,
+      "sys_time_s": 0.2,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:41Z",
+      "host_loadavg_start": [
+       9.85,
+       14.92,
+       19.92
+      ],
+      "host_loadavg_end": [
+       9.85,
+       14.92,
+       19.92
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 58639261426,
+      "virtual_time_s": 9.773210237666667,
+      "cpu_time_s": 11.532670688,
+      "wall_time_s": 3.392702594,
+      "max_rss_bytes": 555487232,
+      "instructions_kernel": 1056238874,
+      "user_time_s": 11.31,
+      "sys_time_s": 0.22,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:44Z",
+      "host_loadavg_start": [
+       9.85,
+       14.92,
+       19.92
+      ],
+      "host_loadavg_end": [
+       9.86,
+       14.84,
+       19.86
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 58651086223,
+      "virtual_time_s": 9.775181037166666,
+      "cpu_time_s": 11.501325152,
+      "wall_time_s": 3.4292425260000003,
+      "max_rss_bytes": 553074688,
+      "instructions_kernel": 1054070959,
+      "user_time_s": 11.28,
+      "sys_time_s": 0.23,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:29:48Z",
+      "host_loadavg_start": [
+       9.86,
+       14.84,
+       19.86
+      ],
+      "host_loadavg_end": [
+       9.71,
+       14.72,
+       19.8
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 58641820361,
+    "instructions_min": 58639261426,
+    "instructions_max": 58651086223,
+    "instructions_spread_pct": 0.02,
+    "virtual_time_s": 9.774,
+    "cpu_time_s": 11.5,
+    "wall_time_s": 3.42,
+    "wall_time_s_min": 3.39,
+    "max_rss_bytes": 564412416,
+    "instructions_kernel": 1054070959,
+    "command": "bench/baselines/pestka.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "pestka",
+     "status": "accepted",
+     "instructions": 65466149083,
+     "virtual_time_s": 10.911,
+     "wall_time_s": 3.6645096410000004,
+     "cpu_time_s": 12.423122300000001,
+     "max_rss_bytes": 586387456,
+     "date": "2026-11-23 17:39:41 UTC"
+    },
+    "aarch64_over_x86_64": 0.8958,
+    "ratio_to_fastest": 2.634
+   },
+   "nanoda": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 215279885991,
+      "virtual_time_s": 35.8799809985,
+      "cpu_time_s": 25.873056976,
+      "wall_time_s": 8.526922849,
+      "max_rss_bytes": 542908416,
+      "instructions_kernel": 1437832544,
+      "user_time_s": 25.64,
+      "sys_time_s": 0.23,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:21Z",
+      "host_loadavg_start": [
+       8.11,
+       13.84,
+       19.34
+      ],
+      "host_loadavg_end": [
+       8.09,
+       13.65,
+       19.22
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 215355805141,
+      "virtual_time_s": 35.89263419016667,
+      "cpu_time_s": 25.955608496,
+      "wall_time_s": 8.76340261,
+      "max_rss_bytes": 547495936,
+      "instructions_kernel": 1440287034,
+      "user_time_s": 25.7,
+      "sys_time_s": 0.25,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:30Z",
+      "host_loadavg_start": [
+       8.09,
+       13.65,
+       19.22
+      ],
+      "host_loadavg_end": [
+       8.17,
+       13.57,
+       19.17
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 215397380283,
+      "virtual_time_s": 35.8995633805,
+      "cpu_time_s": 26.08598312,
+      "wall_time_s": 8.565198449,
+      "max_rss_bytes": 554381312,
+      "instructions_kernel": 1443701848,
+      "user_time_s": 25.84,
+      "sys_time_s": 0.25,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:39Z",
+      "host_loadavg_start": [
+       8.17,
+       13.57,
+       19.17
+      ],
+      "host_loadavg_end": [
+       8.0,
+       13.36,
+       19.04
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 215355805141,
+    "instructions_min": 215279885991,
+    "instructions_max": 215397380283,
+    "instructions_spread_pct": 0.055,
+    "virtual_time_s": 35.893,
+    "cpu_time_s": 25.96,
+    "wall_time_s": 8.57,
+    "wall_time_s_min": 8.53,
+    "max_rss_bytes": 554381312,
+    "instructions_kernel": 1440287034,
+    "command": "bench/baselines/nanoda.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "nanoda",
+     "status": "accepted",
+     "instructions": 223793709072,
+     "virtual_time_s": 37.299,
+     "wall_time_s": 9.91811798,
+     "cpu_time_s": 28.941835042,
+     "max_rss_bytes": 545013760,
+     "date": "2026-11-22 02:54:44 UTC"
+    },
+    "aarch64_over_x86_64": 0.9623,
+    "ratio_to_fastest": 9.673
+   },
+   "tenet-jvm-c2": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 230879285342,
+      "virtual_time_s": 38.479880890333334,
+      "cpu_time_s": 33.508614560000005,
+      "wall_time_s": 29.873196847000003,
+      "max_rss_bytes": 4754935808,
+      "instructions_kernel": 7207861733,
+      "user_time_s": 31.89,
+      "sys_time_s": 1.9,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:32:37Z",
+      "host_loadavg_start": [
+       13.58,
+       13.4,
+       18.39
+      ],
+      "host_loadavg_end": [
+       14.35,
+       13.6,
+       18.3
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 222256600251,
+      "virtual_time_s": 37.0427667085,
+      "cpu_time_s": 29.400556512,
+      "wall_time_s": 26.13503276,
+      "max_rss_bytes": 4764200960,
+      "instructions_kernel": 6968309166,
+      "user_time_s": 28.16,
+      "sys_time_s": 1.54,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:33:07Z",
+      "host_loadavg_start": [
+       14.35,
+       13.6,
+       18.3
+      ],
+      "host_loadavg_end": [
+       15.95,
+       14.08,
+       18.33
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 233685834056,
+      "virtual_time_s": 38.947639009333336,
+      "cpu_time_s": 32.340683456,
+      "wall_time_s": 28.499562799000003,
+      "max_rss_bytes": 4771278848,
+      "instructions_kernel": 7017635263,
+      "user_time_s": 31.09,
+      "sys_time_s": 1.58,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:33:34Z",
+      "host_loadavg_start": [
+       15.95,
+       14.08,
+       18.33
+      ],
+      "host_loadavg_end": [
+       15.51,
+       14.12,
+       18.21
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 230879285342,
+    "instructions_min": 222256600251,
+    "instructions_max": 233685834056,
+    "instructions_spread_pct": 4.95,
+    "virtual_time_s": 38.48,
+    "cpu_time_s": 32.34,
+    "wall_time_s": 28.5,
+    "wall_time_s_min": 26.14,
+    "max_rss_bytes": 4771278848,
+    "instructions_kernel": 7017635263,
+    "command": "bench/baselines/tenet-jvm-c2.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "tenet-jvm",
+     "status": "accepted",
+     "instructions": 223661569030,
+     "virtual_time_s": 37.277,
+     "wall_time_s": 24.891081953,
+     "cpu_time_s": 30.275938247,
+     "max_rss_bytes": 4716183552,
+     "date": "2026-11-22 03:54:18 UTC"
+    },
+    "aarch64_over_x86_64": 1.0323,
+    "note": "same JVM with -XX:-UseJVMCICompiler (C2), the closest to the arena's stock OpenJDK",
+    "ratio_to_fastest": 10.371
+   },
+   "tenet-jvm": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 244147727276,
+      "virtual_time_s": 40.69128787933333,
+      "cpu_time_s": 29.4992996,
+      "wall_time_s": 25.381736452000002,
+      "max_rss_bytes": 4864638976,
+      "instructions_kernel": 7252953480,
+      "user_time_s": 28.26,
+      "sys_time_s": 1.55,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:34:03Z",
+      "host_loadavg_start": [
+       15.51,
+       14.12,
+       18.21
+      ],
+      "host_loadavg_end": [
+       16.53,
+       14.48,
+       18.22
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 248618150442,
+      "virtual_time_s": 41.436358407,
+      "cpu_time_s": 35.45192496,
+      "wall_time_s": 30.601738642,
+      "max_rss_bytes": 4796940288,
+      "instructions_kernel": 7229084482,
+      "user_time_s": 34.23,
+      "sys_time_s": 1.48,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:34:29Z",
+      "host_loadavg_start": [
+       16.53,
+       14.48,
+       18.22
+      ],
+      "host_loadavg_end": [
+       23.89,
+       16.51,
+       18.76
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 247035733834,
+      "virtual_time_s": 41.172622305666664,
+      "cpu_time_s": 37.0333924,
+      "wall_time_s": 32.447662918,
+      "max_rss_bytes": 4792107008,
+      "instructions_kernel": 7286884634,
+      "user_time_s": 35.84,
+      "sys_time_s": 1.45,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:00Z",
+      "host_loadavg_start": [
+       23.89,
+       16.51,
+       18.76
+      ],
+      "host_loadavg_end": [
+       30.13,
+       18.71,
+       19.42
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 247035733834,
+    "instructions_min": 244147727276,
+    "instructions_max": 248618150442,
+    "instructions_spread_pct": 1.81,
+    "virtual_time_s": 41.173,
+    "cpu_time_s": 35.45,
+    "wall_time_s": 30.6,
+    "wall_time_s_min": 25.38,
+    "max_rss_bytes": 4864638976,
+    "instructions_kernel": 7252953480,
+    "command": "bench/baselines/tenet-jvm.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "tenet-jvm",
+     "status": "accepted",
+     "instructions": 223661569030,
+     "virtual_time_s": 37.277,
+     "wall_time_s": 24.891081953,
+     "cpu_time_s": 30.275938247,
+     "max_rss_bytes": 4716183552,
+     "date": "2026-11-22 03:54:18 UTC"
+    },
+    "aarch64_over_x86_64": 1.1045,
+    "note": "project GraalVM CE 25 with the Graal JIT (not the arena's JVM setup)",
+    "ratio_to_fastest": 11.096
+   },
+   "official": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 381174007231,
+      "virtual_time_s": 63.529001205166665,
+      "cpu_time_s": 35.045706960000004,
+      "wall_time_s": 35.058443315000005,
+      "max_rss_bytes": 633724928,
+      "instructions_kernel": 733058430,
+      "user_time_s": 34.96,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:30:48Z",
+      "host_loadavg_start": [
+       8.0,
+       13.36,
+       19.04
+      ],
+      "host_loadavg_end": [
+       9.34,
+       13.06,
+       18.72
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 381287324539,
+      "virtual_time_s": 63.547887423166664,
+      "cpu_time_s": 36.841207744,
+      "wall_time_s": 36.904410771,
+      "max_rss_bytes": 633724928,
+      "instructions_kernel": 792406819,
+      "user_time_s": 36.73,
+      "sys_time_s": 0.11,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:31:24Z",
+      "host_loadavg_start": [
+       9.34,
+       13.06,
+       18.72
+      ],
+      "host_loadavg_end": [
+       11.04,
+       13.03,
+       18.47
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 381068876537,
+      "virtual_time_s": 63.51147942283333,
+      "cpu_time_s": 35.3833304,
+      "wall_time_s": 35.392086634,
+      "max_rss_bytes": 633720832,
+      "instructions_kernel": 749746718,
+      "user_time_s": 35.3,
+      "sys_time_s": 0.08,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:32:01Z",
+      "host_loadavg_start": [
+       11.04,
+       13.03,
+       18.47
+      ],
+      "host_loadavg_end": [
+       13.58,
+       13.4,
+       18.39
+      ],
+      "timeout_s": 740,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 381174007231,
+    "instructions_min": 381068876537,
+    "instructions_max": 381287324539,
+    "instructions_spread_pct": 0.057,
+    "virtual_time_s": 63.529,
+    "cpu_time_s": 35.38,
+    "wall_time_s": 35.39,
+    "wall_time_s_min": 35.06,
+    "max_rss_bytes": 633724928,
+    "instructions_kernel": 749746718,
+    "command": "bench/baselines/official.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "official",
+     "status": "accepted",
+     "instructions": 401487727161,
+     "virtual_time_s": 66.915,
+     "wall_time_s": 46.685335489,
+     "cpu_time_s": 46.672389145000004,
+     "max_rss_bytes": 620298240,
+     "date": "2026-11-22 02:33:23 UTC"
+    },
+    "aarch64_over_x86_64": 0.9494,
+    "ratio_to_fastest": 17.122
+   }
+  },
+  "std": {
+   "gruszka": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 36496018369,
+      "virtual_time_s": 6.082669728166667,
+      "cpu_time_s": 5.717073952,
+      "wall_time_s": 1.924815259,
+      "max_rss_bytes": 482734080,
+      "instructions_kernel": 1262502853,
+      "user_time_s": 5.47,
+      "sys_time_s": 0.26,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:46Z",
+      "host_loadavg_start": [
+       31.24,
+       19.53,
+       19.68
+      ],
+      "host_loadavg_end": [
+       31.24,
+       19.53,
+       19.68
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 36547824596,
+      "virtual_time_s": 6.091304099333334,
+      "cpu_time_s": 5.616404288,
+      "wall_time_s": 1.815029073,
+      "max_rss_bytes": 508018688,
+      "instructions_kernel": 1254908999,
+      "user_time_s": 5.37,
+      "sys_time_s": 0.26,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:48Z",
+      "host_loadavg_start": [
+       31.24,
+       19.53,
+       19.68
+      ],
+      "host_loadavg_end": [
+       31.14,
+       19.7,
+       19.73
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 36463382252,
+      "virtual_time_s": 6.077230375333333,
+      "cpu_time_s": 5.927344688000001,
+      "wall_time_s": 1.8726099680000001,
+      "max_rss_bytes": 502767616,
+      "instructions_kernel": 1255328445,
+      "user_time_s": 5.67,
+      "sys_time_s": 0.27,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:50Z",
+      "host_loadavg_start": [
+       31.14,
+       19.7,
+       19.73
+      ],
+      "host_loadavg_end": [
+       31.14,
+       19.7,
+       19.73
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 36496018369,
+    "instructions_min": 36463382252,
+    "instructions_max": 36547824596,
+    "instructions_spread_pct": 0.231,
+    "virtual_time_s": 6.083,
+    "cpu_time_s": 5.72,
+    "wall_time_s": 1.87,
+    "wall_time_s_min": 1.82,
+    "max_rss_bytes": 508018688,
+    "instructions_kernel": 1255328445,
+    "command": "bench/baselines/gruszka.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "gruszka",
+     "status": "accepted",
+     "instructions": 40312479352,
+     "virtual_time_s": 6.719,
+     "wall_time_s": 2.0427678360000003,
+     "cpu_time_s": 7.194310499999999,
+     "max_rss_bytes": 513581056,
+     "date": "2026-11-22 02:08:02 UTC"
+    },
+    "aarch64_over_x86_64": 0.9053,
+    "ratio_to_fastest": 1.0
+   },
+   "nano-lean": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 36963544689,
+      "virtual_time_s": 6.1605907815,
+      "cpu_time_s": 8.863344368,
+      "wall_time_s": 3.622571122,
+      "max_rss_bytes": 1214173184,
+      "instructions_kernel": 600166948,
+      "user_time_s": 8.74,
+      "sys_time_s": 0.12,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:33Z",
+      "host_loadavg_start": [
+       30.13,
+       18.71,
+       19.42
+      ],
+      "host_loadavg_end": [
+       30.76,
+       19.03,
+       19.52
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 37022735514,
+      "virtual_time_s": 6.170455919,
+      "cpu_time_s": 9.463277488,
+      "wall_time_s": 4.3096961170000005,
+      "max_rss_bytes": 1150513152,
+      "instructions_kernel": 607133316,
+      "user_time_s": 9.32,
+      "sys_time_s": 0.14,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:37Z",
+      "host_loadavg_start": [
+       30.76,
+       19.03,
+       19.52
+      ],
+      "host_loadavg_end": [
+       31.34,
+       19.35,
+       19.62
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 36961336166,
+      "virtual_time_s": 6.160222694333333,
+      "cpu_time_s": 9.246063856000001,
+      "wall_time_s": 3.323714399,
+      "max_rss_bytes": 1114767360,
+      "instructions_kernel": 595599929,
+      "user_time_s": 9.11,
+      "sys_time_s": 0.13,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:42Z",
+      "host_loadavg_start": [
+       31.34,
+       19.35,
+       19.62
+      ],
+      "host_loadavg_end": [
+       31.24,
+       19.53,
+       19.68
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 36963544689,
+    "instructions_min": 36961336166,
+    "instructions_max": 37022735514,
+    "instructions_spread_pct": 0.166,
+    "virtual_time_s": 6.161,
+    "cpu_time_s": 9.25,
+    "wall_time_s": 3.62,
+    "wall_time_s_min": 3.32,
+    "max_rss_bytes": 1214173184,
+    "instructions_kernel": 600166948,
+    "command": "bench/baselines/nano-lean.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "nano-lean",
+     "status": "accepted",
+     "instructions": 40258629098,
+     "virtual_time_s": 6.71,
+     "wall_time_s": 3.11946415,
+     "cpu_time_s": 10.887844923000001,
+     "max_rss_bytes": 1186775040,
+     "date": "2026-11-22 02:03:06 UTC"
+    },
+    "aarch64_over_x86_64": 0.9182,
+    "ratio_to_fastest": 1.013
+   },
+   "sokonanoda": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 46428240445,
+      "virtual_time_s": 7.738040074166666,
+      "cpu_time_s": 9.003525136,
+      "wall_time_s": 3.4085635180000002,
+      "max_rss_bytes": 882569216,
+      "instructions_kernel": 438515764,
+      "user_time_s": 8.89,
+      "sys_time_s": 0.11,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:53Z",
+      "host_loadavg_start": [
+       31.14,
+       19.7,
+       19.73
+      ],
+      "host_loadavg_end": [
+       31.13,
+       19.89,
+       19.79
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 46372557738,
+      "virtual_time_s": 7.728759623,
+      "cpu_time_s": 8.849189392,
+      "wall_time_s": 3.3388455410000004,
+      "max_rss_bytes": 929910784,
+      "instructions_kernel": 444335655,
+      "user_time_s": 8.73,
+      "sys_time_s": 0.11,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:35:56Z",
+      "host_loadavg_start": [
+       31.13,
+       19.89,
+       19.79
+      ],
+      "host_loadavg_end": [
+       31.04,
+       20.06,
+       19.85
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 46085672044,
+      "virtual_time_s": 7.680945340666667,
+      "cpu_time_s": 8.123897072,
+      "wall_time_s": 3.0987742970000003,
+      "max_rss_bytes": 861409280,
+      "instructions_kernel": 439999815,
+      "user_time_s": 8.01,
+      "sys_time_s": 0.1,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:00Z",
+      "host_loadavg_start": [
+       31.04,
+       20.06,
+       19.85
+      ],
+      "host_loadavg_end": [
+       31.04,
+       20.06,
+       19.85
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 46372557738,
+    "instructions_min": 46085672044,
+    "instructions_max": 46428240445,
+    "instructions_spread_pct": 0.739,
+    "virtual_time_s": 7.729,
+    "cpu_time_s": 8.85,
+    "wall_time_s": 3.34,
+    "wall_time_s_min": 3.1,
+    "max_rss_bytes": 929910784,
+    "instructions_kernel": 439999815,
+    "command": "bench/baselines/sokonanoda.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "sokonanoda",
+     "status": "accepted",
+     "instructions": 48378262589,
+     "virtual_time_s": 8.063,
+     "wall_time_s": 3.3565744960000004,
+     "cpu_time_s": 11.373557077,
+     "max_rss_bytes": 918425600,
+     "date": "2026-11-22 03:35:41 UTC"
+    },
+    "aarch64_over_x86_64": 0.9585,
+    "ratio_to_fastest": 1.271
+   },
+   "rpylean": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 51221609289,
+      "virtual_time_s": 8.5369348815,
+      "cpu_time_s": 10.69006664,
+      "wall_time_s": 10.723635450000002,
+      "max_rss_bytes": 544071680,
+      "instructions_kernel": 1418996675,
+      "user_time_s": 10.38,
+      "sys_time_s": 0.33,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:25Z",
+      "host_loadavg_start": [
+       30.6,
+       20.83,
+       20.11
+      ],
+      "host_loadavg_end": [
+       30.35,
+       21.1,
+       20.21
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 51220920465,
+      "virtual_time_s": 8.5368200775,
+      "cpu_time_s": 10.852595792,
+      "wall_time_s": 10.891294464000001,
+      "max_rss_bytes": 540385280,
+      "instructions_kernel": 1389334192,
+      "user_time_s": 10.52,
+      "sys_time_s": 0.35,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:37Z",
+      "host_loadavg_start": [
+       30.35,
+       21.1,
+       20.21
+      ],
+      "host_loadavg_end": [
+       30.23,
+       21.37,
+       20.31
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 51223637777,
+      "virtual_time_s": 8.537272962833333,
+      "cpu_time_s": 10.182895248000001,
+      "wall_time_s": 10.215645007,
+      "max_rss_bytes": 544829440,
+      "instructions_kernel": 1412386475,
+      "user_time_s": 9.85,
+      "sys_time_s": 0.36,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:48Z",
+      "host_loadavg_start": [
+       30.23,
+       21.37,
+       20.31
+      ],
+      "host_loadavg_end": [
+       28.51,
+       21.31,
+       20.3
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 51221609289,
+    "instructions_min": 51220920465,
+    "instructions_max": 51223637777,
+    "instructions_spread_pct": 0.005,
+    "virtual_time_s": 8.537,
+    "cpu_time_s": 10.69,
+    "wall_time_s": 10.72,
+    "wall_time_s_min": 10.22,
+    "max_rss_bytes": 544829440,
+    "instructions_kernel": 1412386475,
+    "command": "bench/baselines/rpylean.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "rpylean",
+     "status": "accepted",
+     "instructions": 55136429214,
+     "virtual_time_s": 9.189,
+     "wall_time_s": 14.485719259000001,
+     "cpu_time_s": 14.313208606,
+     "max_rss_bytes": 546004992,
+     "date": "2026-11-22 21:44:24 UTC"
+    },
+    "aarch64_over_x86_64": 0.929,
+    "ratio_to_fastest": 1.403
+   },
+   "mathgraph": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 72211120282,
+      "virtual_time_s": 12.035186713666667,
+      "cpu_time_s": 14.6357692,
+      "wall_time_s": 7.564786093,
+      "max_rss_bytes": 1048768512,
+      "instructions_kernel": 703824402,
+      "user_time_s": 14.47,
+      "sys_time_s": 0.16,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:58Z",
+      "host_loadavg_start": [
+       28.51,
+       21.31,
+       20.3
+      ],
+      "host_loadavg_end": [
+       25.51,
+       20.9,
+       20.18
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 72150358557,
+      "virtual_time_s": 12.0250597595,
+      "cpu_time_s": 14.945067456,
+      "wall_time_s": 7.724923057000001,
+      "max_rss_bytes": 1062031360,
+      "instructions_kernel": 719471118,
+      "user_time_s": 14.77,
+      "sys_time_s": 0.17,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:37:06Z",
+      "host_loadavg_start": [
+       25.51,
+       20.9,
+       20.18
+      ],
+      "host_loadavg_end": [
+       24.27,
+       20.72,
+       20.12
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 72325948316,
+      "virtual_time_s": 12.054324719333334,
+      "cpu_time_s": 15.94405088,
+      "wall_time_s": 8.405391059000001,
+      "max_rss_bytes": 1059831808,
+      "instructions_kernel": 749142972,
+      "user_time_s": 15.76,
+      "sys_time_s": 0.17,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:37:15Z",
+      "host_loadavg_start": [
+       24.27,
+       20.72,
+       20.12
+      ],
+      "host_loadavg_end": [
+       22.55,
+       20.47,
+       20.04
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 72211120282,
+    "instructions_min": 72150358557,
+    "instructions_max": 72325948316,
+    "instructions_spread_pct": 0.243,
+    "virtual_time_s": 12.035,
+    "cpu_time_s": 14.95,
+    "wall_time_s": 7.72,
+    "wall_time_s_min": 7.56,
+    "max_rss_bytes": 1062031360,
+    "instructions_kernel": 719471118,
+    "command": "bench/baselines/mathgraph.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "mathgraph",
+     "status": "accepted",
+     "instructions": 74711187253,
+     "virtual_time_s": 12.452,
+     "wall_time_s": 7.8170184990000005,
+     "cpu_time_s": 15.083052164000001,
+     "max_rss_bytes": 1058078720,
+     "date": "2026-11-22 03:02:12 UTC"
+    },
+    "aarch64_over_x86_64": 0.9665,
+    "note": "accepts 8 bad proofs on the small tests; not a ranking competitor",
+    "ratio_to_fastest": 1.979
+   },
+   "pestka": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 96883364185,
+      "virtual_time_s": 16.147227364166667,
+      "cpu_time_s": 21.397348208,
+      "wall_time_s": 6.887071094,
+      "max_rss_bytes": 762089472,
+      "instructions_kernel": 1599761840,
+      "user_time_s": 21.04,
+      "sys_time_s": 0.36,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:04Z",
+      "host_loadavg_start": [
+       31.04,
+       20.06,
+       19.85
+      ],
+      "host_loadavg_end": [
+       30.5,
+       20.3,
+       19.93
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 96897980816,
+      "virtual_time_s": 16.149663469333333,
+      "cpu_time_s": 21.653608752,
+      "wall_time_s": 6.738554948,
+      "max_rss_bytes": 750415872,
+      "instructions_kernel": 1644768802,
+      "user_time_s": 21.33,
+      "sys_time_s": 0.33,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:11Z",
+      "host_loadavg_start": [
+       30.5,
+       20.3,
+       19.93
+      ],
+      "host_loadavg_end": [
+       30.86,
+       20.55,
+       20.01
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 96886724825,
+      "virtual_time_s": 16.147787470833332,
+      "cpu_time_s": 21.683053088,
+      "wall_time_s": 6.69434634,
+      "max_rss_bytes": 750129152,
+      "instructions_kernel": 1666191228,
+      "user_time_s": 21.35,
+      "sys_time_s": 0.33,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:36:18Z",
+      "host_loadavg_start": [
+       30.86,
+       20.55,
+       20.01
+      ],
+      "host_loadavg_end": [
+       30.6,
+       20.83,
+       20.11
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 96886724825,
+    "instructions_min": 96883364185,
+    "instructions_max": 96897980816,
+    "instructions_spread_pct": 0.015,
+    "virtual_time_s": 16.148,
+    "cpu_time_s": 21.65,
+    "wall_time_s": 6.74,
+    "wall_time_s_min": 6.69,
+    "max_rss_bytes": 762089472,
+    "instructions_kernel": 1644768802,
+    "command": "bench/baselines/pestka.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "pestka",
+     "status": "accepted",
+     "instructions": 107714377877,
+     "virtual_time_s": 17.952,
+     "wall_time_s": 6.849020937000001,
+     "cpu_time_s": 22.934576179,
+     "max_rss_bytes": 746831872,
+     "date": "2026-11-23 17:39:41 UTC"
+    },
+    "aarch64_over_x86_64": 0.8995,
+    "ratio_to_fastest": 2.655
+   },
+   "nanoda": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 332613324119,
+      "virtual_time_s": 55.43555401983333,
+      "cpu_time_s": 45.90657856,
+      "wall_time_s": 15.135973922000002,
+      "max_rss_bytes": 796356608,
+      "instructions_kernel": 2346891212,
+      "user_time_s": 45.51,
+      "sys_time_s": 0.4,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:37:24Z",
+      "host_loadavg_start": [
+       22.55,
+       20.47,
+       20.04
+      ],
+      "host_loadavg_end": [
+       20.1,
+       20.02,
+       19.9
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 332352284576,
+      "virtual_time_s": 55.39204742933333,
+      "cpu_time_s": 46.577433647999996,
+      "wall_time_s": 15.533508333,
+      "max_rss_bytes": 777347072,
+      "instructions_kernel": 2346737158,
+      "user_time_s": 46.19,
+      "sys_time_s": 0.39,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:37:39Z",
+      "host_loadavg_start": [
+       20.1,
+       20.02,
+       19.9
+      ],
+      "host_loadavg_end": [
+       18.65,
+       19.68,
+       19.79
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 332402701082,
+      "virtual_time_s": 55.40045018033333,
+      "cpu_time_s": 46.39397816,
+      "wall_time_s": 15.522175425,
+      "max_rss_bytes": 801443840,
+      "instructions_kernel": 2316916788,
+      "user_time_s": 46.0,
+      "sys_time_s": 0.4,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:37:55Z",
+      "host_loadavg_start": [
+       18.65,
+       19.68,
+       19.79
+      ],
+      "host_loadavg_end": [
+       17.26,
+       19.32,
+       19.67
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 332402701082,
+    "instructions_min": 332352284576,
+    "instructions_max": 332613324119,
+    "instructions_spread_pct": 0.079,
+    "virtual_time_s": 55.4,
+    "cpu_time_s": 46.39,
+    "wall_time_s": 15.52,
+    "wall_time_s_min": 15.14,
+    "max_rss_bytes": 801443840,
+    "instructions_kernel": 2346737158,
+    "command": "bench/baselines/nanoda.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "nanoda",
+     "status": "accepted",
+     "instructions": 345602529551,
+     "virtual_time_s": 57.6,
+     "wall_time_s": 18.77273172,
+     "cpu_time_s": 54.659739611,
+     "max_rss_bytes": 773820416,
+     "date": "2026-11-22 02:54:44 UTC"
+    },
+    "aarch64_over_x86_64": 0.9618,
+    "ratio_to_fastest": 9.108
+   },
+   "tenet-jvm-c2": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 378964308949,
+      "virtual_time_s": 63.16071815816667,
+      "cpu_time_s": 53.348797663999996,
+      "wall_time_s": 48.22374663,
+      "max_rss_bytes": 5203415040,
+      "instructions_kernel": 8202337006,
+      "user_time_s": 51.85,
+      "sys_time_s": 1.84,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:41:38Z",
+      "host_loadavg_start": [
+       21.54,
+       19.07,
+       19.39
+      ],
+      "host_loadavg_end": [
+       20.31,
+       19.49,
+       19.54
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 378699947967,
+      "virtual_time_s": 63.1166579945,
+      "cpu_time_s": 54.248433232000004,
+      "wall_time_s": 47.339703298,
+      "max_rss_bytes": 5204766720,
+      "instructions_kernel": 8167645181,
+      "user_time_s": 52.73,
+      "sys_time_s": 1.87,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:42:27Z",
+      "host_loadavg_start": [
+       20.31,
+       19.49,
+       19.54
+      ],
+      "host_loadavg_end": [
+       13.73,
+       17.85,
+       18.98
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 381850600378,
+      "virtual_time_s": 63.641766729666664,
+      "cpu_time_s": 51.489317216,
+      "wall_time_s": 44.781617497000006,
+      "max_rss_bytes": 5238235136,
+      "instructions_kernel": 8173318199,
+      "user_time_s": 50.0,
+      "sys_time_s": 1.84,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:43:15Z",
+      "host_loadavg_start": [
+       13.73,
+       17.85,
+       18.98
+      ],
+      "host_loadavg_end": [
+       11.71,
+       16.67,
+       18.52
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 378964308949,
+    "instructions_min": 378699947967,
+    "instructions_max": 381850600378,
+    "instructions_spread_pct": 0.831,
+    "virtual_time_s": 63.161,
+    "cpu_time_s": 53.35,
+    "wall_time_s": 47.34,
+    "wall_time_s_min": 44.78,
+    "max_rss_bytes": 5238235136,
+    "instructions_kernel": 8173318199,
+    "command": "bench/baselines/tenet-jvm-c2.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "tenet-jvm",
+     "status": "accepted",
+     "instructions": 361187514966,
+     "virtual_time_s": 60.198,
+     "wall_time_s": 38.733762065,
+     "cpu_time_s": 45.104861126,
+     "max_rss_bytes": 5134897152,
+     "date": "2026-11-22 03:54:18 UTC"
+    },
+    "aarch64_over_x86_64": 1.0492,
+    "note": "same JVM with -XX:-UseJVMCICompiler (C2), the closest to the arena's stock OpenJDK",
+    "ratio_to_fastest": 10.384
+   },
+   "tenet-jvm": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 395429935078,
+      "virtual_time_s": 65.90498917966667,
+      "cpu_time_s": 59.36946928,
+      "wall_time_s": 54.819682433000004,
+      "max_rss_bytes": 5203718144,
+      "instructions_kernel": 8502805552,
+      "user_time_s": 57.85,
+      "sys_time_s": 1.89,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:44:00Z",
+      "host_loadavg_start": [
+       11.71,
+       16.67,
+       18.52
+      ],
+      "host_loadavg_end": [
+       26.88,
+       20.09,
+       19.59
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 393328574913,
+      "virtual_time_s": 65.5547624855,
+      "cpu_time_s": 60.883821184,
+      "wall_time_s": 54.888330165000006,
+      "max_rss_bytes": 5151969280,
+      "instructions_kernel": 8486448090,
+      "user_time_s": 59.24,
+      "sys_time_s": 2.01,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:44:55Z",
+      "host_loadavg_start": [
+       26.88,
+       20.09,
+       19.59
+      ],
+      "host_loadavg_end": [
+       19.53,
+       19.21,
+       19.32
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 392158014040,
+      "virtual_time_s": 65.35966900666666,
+      "cpu_time_s": 61.899623136,
+      "wall_time_s": 55.763302011,
+      "max_rss_bytes": 5193883648,
+      "instructions_kernel": 8543137406,
+      "user_time_s": 60.28,
+      "sys_time_s": 2.03,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:45:51Z",
+      "host_loadavg_start": [
+       19.53,
+       19.21,
+       19.32
+      ],
+      "host_loadavg_end": [
+       25.2,
+       20.5,
+       19.73
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 393328574913,
+    "instructions_min": 392158014040,
+    "instructions_max": 395429935078,
+    "instructions_spread_pct": 0.832,
+    "virtual_time_s": 65.555,
+    "cpu_time_s": 60.88,
+    "wall_time_s": 54.89,
+    "wall_time_s_min": 54.82,
+    "max_rss_bytes": 5203718144,
+    "instructions_kernel": 8502805552,
+    "command": "bench/baselines/tenet-jvm.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "tenet-jvm",
+     "status": "accepted",
+     "instructions": 361187514966,
+     "virtual_time_s": 60.198,
+     "wall_time_s": 38.733762065,
+     "cpu_time_s": 45.104861126,
+     "max_rss_bytes": 5134897152,
+     "date": "2026-11-22 03:54:18 UTC"
+    },
+    "aarch64_over_x86_64": 1.089,
+    "note": "project GraalVM CE 25 with the Graal JIT (not the arena's JVM setup)",
+    "ratio_to_fastest": 10.777
+   },
+   "official": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 631779322839,
+      "virtual_time_s": 105.2965538065,
+      "cpu_time_s": 65.881609904,
+      "wall_time_s": 65.91962517900001,
+      "max_rss_bytes": 1002811392,
+      "instructions_kernel": 1346170871,
+      "user_time_s": 65.71,
+      "sys_time_s": 0.17,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:38:11Z",
+      "host_loadavg_start": [
+       17.26,
+       19.32,
+       19.67
+      ],
+      "host_loadavg_end": [
+       15.48,
+       18.12,
+       19.22
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 632010252308,
+      "virtual_time_s": 105.33504205133333,
+      "cpu_time_s": 68.500512976,
+      "wall_time_s": 68.620734225,
+      "max_rss_bytes": 998596608,
+      "instructions_kernel": 1397325449,
+      "user_time_s": 68.34,
+      "sys_time_s": 0.16,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:39:18Z",
+      "host_loadavg_start": [
+       15.48,
+       18.12,
+       19.22
+      ],
+      "host_loadavg_end": [
+       15.54,
+       17.91,
+       19.08
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 631983334927,
+      "virtual_time_s": 105.33055582116667,
+      "cpu_time_s": 70.83116219200001,
+      "wall_time_s": 70.885606217,
+      "max_rss_bytes": 998658048,
+      "instructions_kernel": 1373056778,
+      "user_time_s": 70.66,
+      "sys_time_s": 0.17,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:40:27Z",
+      "host_loadavg_start": [
+       15.54,
+       17.91,
+       19.08
+      ],
+      "host_loadavg_end": [
+       21.54,
+       19.07,
+       19.39
+      ],
+      "timeout_s": 1200,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 631983334927,
+    "instructions_min": 631779322839,
+    "instructions_max": 632010252308,
+    "instructions_spread_pct": 0.037,
+    "virtual_time_s": 105.331,
+    "cpu_time_s": 68.5,
+    "wall_time_s": 68.62,
+    "wall_time_s_min": 65.92,
+    "max_rss_bytes": 1002811392,
+    "instructions_kernel": 1373056778,
+    "command": "bench/baselines/official.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "official",
+     "status": "accepted",
+     "instructions": 665615180163,
+     "virtual_time_s": 110.936,
+     "wall_time_s": 87.86870245600001,
+     "cpu_time_s": 87.84639645099999,
+     "max_rss_bytes": 985620480,
+     "date": "2026-11-22 02:33:23 UTC"
+    },
+    "aarch64_over_x86_64": 0.9495,
+    "ratio_to_fastest": 17.317
+   }
+  },
+  "mathlib": {
+   "nano-lean": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 361413365009,
+      "virtual_time_s": 60.235560834833336,
+      "cpu_time_s": 85.591508144,
+      "wall_time_s": 25.539359620000003,
+      "max_rss_bytes": 5407969280,
+      "instructions_kernel": 4849320750,
+      "user_time_s": 84.45,
+      "sys_time_s": 1.15,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:23:06Z",
+      "host_loadavg_start": [
+       8.36,
+       18.39,
+       23.26
+      ],
+      "host_loadavg_end": [
+       8.24,
+       17.55,
+       22.85
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 361282170416,
+      "virtual_time_s": 60.21369506933333,
+      "cpu_time_s": 111.886702784,
+      "wall_time_s": 42.138323992000004,
+      "max_rss_bytes": 5399932928,
+      "instructions_kernel": 15099201558,
+      "user_time_s": 107.81,
+      "sys_time_s": 4.1,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:46:48Z",
+      "host_loadavg_start": [
+       25.2,
+       20.5,
+       19.73
+      ],
+      "host_loadavg_end": [
+       25.51,
+       21.41,
+       20.09
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 361316442800,
+      "virtual_time_s": 60.219407133333334,
+      "cpu_time_s": 107.223108688,
+      "wall_time_s": 36.876835009000004,
+      "max_rss_bytes": 5401645056,
+      "instructions_kernel": 9254224700,
+      "user_time_s": 104.84,
+      "sys_time_s": 2.4,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:47:32Z",
+      "host_loadavg_start": [
+       25.51,
+       21.41,
+       20.09
+      ],
+      "host_loadavg_end": [
+       25.98,
+       21.84,
+       20.27
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 361316442800,
+    "instructions_min": 361282170416,
+    "instructions_max": 361413365009,
+    "instructions_spread_pct": 0.036,
+    "virtual_time_s": 60.219,
+    "cpu_time_s": 107.22,
+    "wall_time_s": 36.88,
+    "wall_time_s_min": 25.54,
+    "max_rss_bytes": 5407969280,
+    "instructions_kernel": 9254224700,
+    "command": "bench/baselines/nano-lean.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "nano-lean",
+     "status": "accepted",
+     "instructions": 394884600833,
+     "virtual_time_s": 65.814,
+     "wall_time_s": 36.835343444,
+     "cpu_time_s": 121.616936077,
+     "max_rss_bytes": 5368479744,
+     "date": "2026-11-22 02:03:06 UTC"
+    },
+    "aarch64_over_x86_64": 0.915,
+    "ratio_to_fastest": 1.0
+   },
+   "gruszka": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 418642750141,
+      "virtual_time_s": 69.77379169016666,
+      "cpu_time_s": 62.434563008,
+      "wall_time_s": 18.132202983000003,
+      "max_rss_bytes": 2718318592,
+      "instructions_kernel": 9939854173,
+      "user_time_s": 59.97,
+      "sys_time_s": 2.57,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:23:32Z",
+      "host_loadavg_start": [
+       8.24,
+       17.55,
+       22.85
+      ],
+      "host_loadavg_end": [
+       8.48,
+       17.01,
+       22.56
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 419896437895,
+      "virtual_time_s": 69.98273964916666,
+      "cpu_time_s": 81.86199704,
+      "wall_time_s": 35.320991261,
+      "max_rss_bytes": 2553106432,
+      "instructions_kernel": 10639760732,
+      "user_time_s": 79.39,
+      "sys_time_s": 2.57,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:48:09Z",
+      "host_loadavg_start": [
+       25.98,
+       21.84,
+       20.27
+      ],
+      "host_loadavg_end": [
+       34.3,
+       24.56,
+       21.26
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 418657807548,
+      "virtual_time_s": 69.776301258,
+      "cpu_time_s": 75.928787168,
+      "wall_time_s": 22.260804584000002,
+      "max_rss_bytes": 2624983040,
+      "instructions_kernel": 10194407011,
+      "user_time_s": 73.41,
+      "sys_time_s": 2.64,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:48:45Z",
+      "host_loadavg_start": [
+       34.3,
+       24.56,
+       21.26
+      ],
+      "host_loadavg_end": [
+       30.16,
+       24.26,
+       21.23
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 418657807548,
+    "instructions_min": 418642750141,
+    "instructions_max": 419896437895,
+    "instructions_spread_pct": 0.299,
+    "virtual_time_s": 69.776,
+    "cpu_time_s": 75.93,
+    "wall_time_s": 22.26,
+    "wall_time_s_min": 18.13,
+    "max_rss_bytes": 2718318592,
+    "instructions_kernel": 10194407011,
+    "command": "bench/baselines/gruszka.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "gruszka",
+     "status": "accepted",
+     "instructions": 462007744958,
+     "virtual_time_s": 77.001,
+     "wall_time_s": 32.476173261,
+     "cpu_time_s": 109.67844628900001,
+     "max_rss_bytes": 2481217536,
+     "date": "2026-11-22 02:08:02 UTC"
+    },
+    "aarch64_over_x86_64": 0.9062,
+    "ratio_to_fastest": 1.159
+   },
+   "sokonanoda": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 504765961787,
+      "virtual_time_s": 84.12766029783333,
+      "cpu_time_s": 101.40892929600001,
+      "wall_time_s": 30.452033687,
+      "max_rss_bytes": 5386665984,
+      "instructions_kernel": 4476621820,
+      "user_time_s": 100.2,
+      "sys_time_s": 1.22,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:23:51Z",
+      "host_loadavg_start": [
+       8.48,
+       17.01,
+       22.56
+      ],
+      "host_loadavg_end": [
+       8.23,
+       16.14,
+       22.09
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 504306780410,
+      "virtual_time_s": 84.05113006833334,
+      "cpu_time_s": 113.21662576,
+      "wall_time_s": 35.709422353,
+      "max_rss_bytes": 5482463232,
+      "instructions_kernel": 23924048162,
+      "user_time_s": 107.68,
+      "sys_time_s": 5.53,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:49:08Z",
+      "host_loadavg_start": [
+       30.16,
+       24.26,
+       21.23
+      ],
+      "host_loadavg_end": [
+       22.48,
+       23.0,
+       20.92
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 504205923827,
+      "virtual_time_s": 84.03432063783333,
+      "cpu_time_s": 120.438077104,
+      "wall_time_s": 41.082123659000004,
+      "max_rss_bytes": 5307547648,
+      "instructions_kernel": 18151160255,
+      "user_time_s": 115.95,
+      "sys_time_s": 4.48,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:49:44Z",
+      "host_loadavg_start": [
+       22.48,
+       23.0,
+       20.92
+      ],
+      "host_loadavg_end": [
+       27.26,
+       24.25,
+       21.44
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 504306780410,
+    "instructions_min": 504205923827,
+    "instructions_max": 504765961787,
+    "instructions_spread_pct": 0.111,
+    "virtual_time_s": 84.051,
+    "cpu_time_s": 113.22,
+    "wall_time_s": 35.71,
+    "wall_time_s_min": 30.45,
+    "max_rss_bytes": 5482463232,
+    "instructions_kernel": 18151160255,
+    "command": "bench/baselines/sokonanoda.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "sokonanoda",
+     "status": "accepted",
+     "instructions": 527406147961,
+     "virtual_time_s": 87.901,
+     "wall_time_s": 46.325764653,
+     "cpu_time_s": 154.812722186,
+     "max_rss_bytes": 5316808704,
+     "date": "2026-11-22 03:35:41 UTC"
+    },
+    "aarch64_over_x86_64": 0.9562,
+    "ratio_to_fastest": 1.396
+   },
+   "rpylean": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 544815453369,
+      "virtual_time_s": 90.8025755615,
+      "cpu_time_s": 135.630274528,
+      "wall_time_s": 136.033762144,
+      "max_rss_bytes": 4763308032,
+      "instructions_kernel": 13608633332,
+      "user_time_s": 132.4,
+      "sys_time_s": 3.49,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:25:51Z",
+      "host_loadavg_start": [
+       7.65,
+       13.87,
+       20.74
+      ],
+      "host_loadavg_end": [
+       24.68,
+       18.42,
+       21.47
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 544526587103,
+      "virtual_time_s": 90.75443118383333,
+      "cpu_time_s": 131.76105336,
+      "wall_time_s": 132.171830403,
+      "max_rss_bytes": 4766212096,
+      "instructions_kernel": 13504042735,
+      "user_time_s": 128.19,
+      "sys_time_s": 3.91,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:54:46Z",
+      "host_loadavg_start": [
+       24.93,
+       27.64,
+       23.69
+      ],
+      "host_loadavg_end": [
+       15.21,
+       22.95,
+       22.46
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 544607010722,
+      "virtual_time_s": 90.76783512033333,
+      "cpu_time_s": 117.49634976,
+      "wall_time_s": 117.90914423100001,
+      "max_rss_bytes": 4760895488,
+      "instructions_kernel": 13332298104,
+      "user_time_s": 114.32,
+      "sys_time_s": 3.57,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:56:59Z",
+      "host_loadavg_start": [
+       15.21,
+       22.95,
+       22.46
+      ],
+      "host_loadavg_end": [
+       10.54,
+       18.52,
+       20.89
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 544607010722,
+    "instructions_min": 544526587103,
+    "instructions_max": 544815453369,
+    "instructions_spread_pct": 0.053,
+    "virtual_time_s": 90.768,
+    "cpu_time_s": 131.76,
+    "wall_time_s": 132.17,
+    "wall_time_s_min": 117.91,
+    "max_rss_bytes": 4766212096,
+    "instructions_kernel": 13504042735,
+    "command": "bench/baselines/rpylean.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "rpylean",
+     "status": "accepted",
+     "instructions": 578087692456,
+     "virtual_time_s": 96.348,
+     "wall_time_s": 130.15021660800002,
+     "cpu_time_s": 127.333821467,
+     "max_rss_bytes": 4765331456,
+     "date": "2026-11-22 21:44:24 UTC"
+    },
+    "aarch64_over_x86_64": 0.9421,
+    "ratio_to_fastest": 1.507
+   },
+   "mathgraph": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 880439566796,
+      "virtual_time_s": 146.73992779933334,
+      "cpu_time_s": 152.733617984,
+      "wall_time_s": 78.494669513,
+      "max_rss_bytes": 6860759040,
+      "instructions_kernel": 7599215809,
+      "user_time_s": 151.36,
+      "sys_time_s": 1.36,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:28:07Z",
+      "host_loadavg_start": [
+       24.68,
+       18.42,
+       21.47
+      ],
+      "host_loadavg_end": [
+       9.99,
+       15.21,
+       20.09
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 880342451393,
+      "virtual_time_s": 146.72374189883334,
+      "cpu_time_s": 170.452632208,
+      "wall_time_s": 87.971915718,
+      "max_rss_bytes": 6852689920,
+      "instructions_kernel": 8247540215,
+      "user_time_s": 168.5,
+      "sys_time_s": 1.94,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:58:57Z",
+      "host_loadavg_start": [
+       10.54,
+       18.52,
+       20.89
+      ],
+      "host_loadavg_end": [
+       10.29,
+       16.37,
+       19.9
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 880380658314,
+      "virtual_time_s": 146.730109719,
+      "cpu_time_s": 156.29080192,
+      "wall_time_s": 80.584114646,
+      "max_rss_bytes": 6815010816,
+      "instructions_kernel": 8044855190,
+      "user_time_s": 154.67,
+      "sys_time_s": 1.61,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T05:00:26Z",
+      "host_loadavg_start": [
+       10.29,
+       16.37,
+       19.9
+      ],
+      "host_loadavg_end": [
+       10.28,
+       15.02,
+       19.14
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 880380658314,
+    "instructions_min": 880342451393,
+    "instructions_max": 880439566796,
+    "instructions_spread_pct": 0.011,
+    "virtual_time_s": 146.73,
+    "cpu_time_s": 156.29,
+    "wall_time_s": 80.58,
+    "wall_time_s_min": 78.49,
+    "max_rss_bytes": 6860759040,
+    "instructions_kernel": 8044855190,
+    "command": "bench/baselines/mathgraph.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "mathgraph",
+     "status": "accepted",
+     "instructions": 911748086403,
+     "virtual_time_s": 151.958,
+     "wall_time_s": 104.45538212000001,
+     "cpu_time_s": 198.893227865,
+     "max_rss_bytes": 6616330240,
+     "date": "2026-11-22 03:02:12 UTC"
+    },
+    "aarch64_over_x86_64": 0.9656,
+    "note": "accepts 8 bad proofs on the small tests; not a ranking competitor",
+    "ratio_to_fastest": 2.437
+   },
+   "pestka": {
+    "n_runs": 3,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 1339580293554,
+      "virtual_time_s": 223.263382259,
+      "cpu_time_s": 300.821894224,
+      "wall_time_s": 88.965755054,
+      "max_rss_bytes": 3803242496,
+      "instructions_kernel": 19319319742,
+      "user_time_s": 296.64,
+      "sys_time_s": 4.27,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:24:22Z",
+      "host_loadavg_start": [
+       8.23,
+       16.14,
+       22.09
+      ],
+      "host_loadavg_end": [
+       7.65,
+       13.87,
+       20.74
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 2,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 1339585303444,
+      "virtual_time_s": 223.26421724066665,
+      "cpu_time_s": 348.454873152,
+      "wall_time_s": 133.357430899,
+      "max_rss_bytes": 3786158080,
+      "instructions_kernel": 25267992822,
+      "user_time_s": 342.52,
+      "sys_time_s": 6.02,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:50:26Z",
+      "host_loadavg_start": [
+       27.26,
+       24.25,
+       21.44
+      ],
+      "host_loadavg_end": [
+       34.51,
+       27.4,
+       22.91
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     },
+     {
+      "run": 3,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 1339651485483,
+      "virtual_time_s": 223.2752475805,
+      "cpu_time_s": 349.821427664,
+      "wall_time_s": 125.94189918100001,
+      "max_rss_bytes": 3756118016,
+      "instructions_kernel": 22371022870,
+      "user_time_s": 345.15,
+      "sys_time_s": 4.74,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:52:40Z",
+      "host_loadavg_start": [
+       34.51,
+       27.4,
+       22.91
+      ],
+      "host_loadavg_end": [
+       24.93,
+       27.64,
+       23.69
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 1339585303444,
+    "instructions_min": 1339580293554,
+    "instructions_max": 1339651485483,
+    "instructions_spread_pct": 0.005,
+    "virtual_time_s": 223.264,
+    "cpu_time_s": 348.45,
+    "wall_time_s": 125.94,
+    "wall_time_s_min": 88.97,
+    "max_rss_bytes": 3803242496,
+    "instructions_kernel": 22371022870,
+    "command": "bench/baselines/pestka.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "pestka",
+     "status": "accepted",
+     "instructions": 1475325110184,
+     "virtual_time_s": 245.888,
+     "wall_time_s": 100.58639210400001,
+     "cpu_time_s": 341.238460532,
+     "max_rss_bytes": 3762868224,
+     "date": "2026-11-23 17:39:41 UTC"
+    },
+    "aarch64_over_x86_64": 0.908,
+    "ratio_to_fastest": 3.708
+   },
+   "nanoda": {
+    "n_runs": 1,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 5533318731998,
+      "virtual_time_s": 922.2197886663333,
+      "cpu_time_s": 973.421900688,
+      "wall_time_s": 290.84489471800003,
+      "max_rss_bytes": 6347337728,
+      "instructions_kernel": 35628402746,
+      "user_time_s": 968.12,
+      "sys_time_s": 5.29,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T05:10:37Z",
+      "host_loadavg_start": [
+       14.95,
+       12.87,
+       16.0
+      ],
+      "host_loadavg_end": [
+       11.1,
+       10.46,
+       14.07
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 5533318731998,
+    "instructions_min": 5533318731998,
+    "instructions_max": 5533318731998,
+    "instructions_spread_pct": 0.0,
+    "virtual_time_s": 922.22,
+    "cpu_time_s": 973.42,
+    "wall_time_s": 290.84,
+    "wall_time_s_min": 290.84,
+    "max_rss_bytes": 6347337728,
+    "instructions_kernel": 35628402746,
+    "command": "bench/baselines/nanoda.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "nanoda",
+     "status": "accepted",
+     "instructions": 5773260228023,
+     "virtual_time_s": 962.21,
+     "wall_time_s": 377.222524744,
+     "cpu_time_s": 1227.309239091,
+     "max_rss_bytes": 6374621184,
+     "date": "2026-11-22 02:54:44 UTC"
+    },
+    "aarch64_over_x86_64": 0.9584,
+    "ratio_to_fastest": 15.314
+   },
+   "tenet-jvm-c2": {
+    "n_runs": 1,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 9313027384729,
+      "virtual_time_s": 1552.1712307881667,
+      "cpu_time_s": 1144.5005391840002,
+      "wall_time_s": 1064.0177248070001,
+      "max_rss_bytes": 12723924992,
+      "instructions_kernel": 49992900379,
+      "user_time_s": 1134.76,
+      "sys_time_s": 10.59,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T05:15:29Z",
+      "host_loadavg_start": [
+       11.1,
+       10.46,
+       14.07
+      ],
+      "host_loadavg_end": [
+       5.17,
+       5.94,
+       9.09
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 9313027384729,
+    "instructions_min": 9313027384729,
+    "instructions_max": 9313027384729,
+    "instructions_spread_pct": 0.0,
+    "virtual_time_s": 1552.171,
+    "cpu_time_s": 1144.5,
+    "wall_time_s": 1064.02,
+    "wall_time_s_min": 1064.02,
+    "max_rss_bytes": 12723924992,
+    "instructions_kernel": 49992900379,
+    "command": "bench/baselines/tenet-jvm-c2.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "tenet-jvm",
+     "status": "accepted",
+     "instructions": 9798360842702,
+     "virtual_time_s": 1633.06,
+     "wall_time_s": 1059.958086245,
+     "cpu_time_s": 1143.9284593539999,
+     "max_rss_bytes": 12637220864,
+     "date": "2026-11-22 03:54:18 UTC"
+    },
+    "aarch64_over_x86_64": 0.9505,
+    "note": "same JVM with -XX:-UseJVMCICompiler (C2), the closest to the arena's stock OpenJDK",
+    "ratio_to_fastest": 25.775
+   },
+   "official": {
+    "n_runs": 1,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 11423744210286,
+      "virtual_time_s": 1903.957368381,
+      "cpu_time_s": 1752.151597408,
+      "wall_time_s": 1757.1527850880002,
+      "max_rss_bytes": 10660495360,
+      "instructions_kernel": 32851845522,
+      "user_time_s": 1746.82,
+      "sys_time_s": 4.91,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T04:43:27Z",
+      "host_loadavg_start": [
+       12.39,
+       17.43,
+       18.83
+      ],
+      "host_loadavg_end": [
+       8.6,
+       11.63,
+       15.18
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --cpuset-cpus 18,19 --memory 16g --docker-arg --memory-swap=16g --no-network"
+     }
+    ],
+    "instructions": 11423744210286,
+    "instructions_min": 11423744210286,
+    "instructions_max": 11423744210286,
+    "instructions_spread_pct": 0.0,
+    "virtual_time_s": 1903.957,
+    "cpu_time_s": 1752.15,
+    "wall_time_s": 1757.15,
+    "wall_time_s_min": 1757.15,
+    "max_rss_bytes": 10660495360,
+    "instructions_kernel": 32851845522,
+    "command": "bench/baselines/official.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "official",
+     "status": "accepted",
+     "instructions": 12095308286065,
+     "virtual_time_s": 2015.885,
+     "wall_time_s": 2234.368798503,
+     "cpu_time_s": 2233.877053529,
+     "max_rss_bytes": 10634473472,
+     "date": "2026-11-22 02:33:23 UTC"
+    },
+    "aarch64_over_x86_64": 0.9445,
+    "ratio_to_fastest": 31.617
+   },
+   "tenet-jvm": {
+    "n_runs": 1,
+    "status": "accepted",
+    "exit_codes": [
+     0
+    ],
+    "runs": [
+     {
+      "run": 1,
+      "exit_code": 0,
+      "timed_out": false,
+      "instructions": 11959740906172,
+      "virtual_time_s": 1993.2901510286667,
+      "cpu_time_s": 1160.463865904,
+      "wall_time_s": 1082.774429016,
+      "max_rss_bytes": 13168308224,
+      "instructions_kernel": 53938015212,
+      "user_time_s": 1149.99,
+      "sys_time_s": 11.48,
+      "counter_coverage": 1.0,
+      "started_utc": "2026-11-24T05:33:13Z",
+      "host_loadavg_start": [
+       5.17,
+       5.94,
+       9.09
+      ],
+      "host_loadavg_end": [
+       26.73,
+       14.5,
+       10.39
+      ],
+      "timeout_s": 8240,
+      "container": "bench/arena-docker.sh --arena-limits --no-network"
+     }
+    ],
+    "instructions": 11959740906172,
+    "instructions_min": 11959740906172,
+    "instructions_max": 11959740906172,
+    "instructions_spread_pct": 0.0,
+    "virtual_time_s": 1993.29,
+    "cpu_time_s": 1160.46,
+    "wall_time_s": 1082.77,
+    "wall_time_s_min": 1082.77,
+    "max_rss_bytes": 13168308224,
+    "instructions_kernel": 53938015212,
+    "command": "bench/baselines/tenet-jvm.sh \"$IN\"",
+    "published_x86_64": {
+     "checker": "tenet-jvm",
+     "status": "accepted",
+     "instructions": 9798360842702,
+     "virtual_time_s": 1633.06,
+     "wall_time_s": 1059.958086245,
+     "cpu_time_s": 1143.9284593539999,
+     "max_rss_bytes": 12637220864,
+     "date": "2026-11-22 03:54:18 UTC"
+    },
+    "aarch64_over_x86_64": 1.2206,
+    "note": "project GraalVM CE 25 with the Graal JIT (not the arena's JVM setup)",
+    "ratio_to_fastest": 33.1
+   }
+  }
+ },
+ "thread_scaling": {
+  "mathlib": {
+   "nano-lean": {
+    "1": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 360989459050,
+     "virtual_time_s": 60.165,
+     "cpu_time_s": 90.47,
+     "wall_time_s": 89.86,
+     "max_rss_bytes": 5407973376,
+     "instructions_spread_pct": 0.0
+    },
+    "2": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 361203174177,
+     "virtual_time_s": 60.201,
+     "cpu_time_s": 82.47,
+     "wall_time_s": 43.67,
+     "max_rss_bytes": 5407965184,
+     "instructions_spread_pct": 0.0
+    },
+    "4": {
+     "n_runs": 3,
+     "status": "accepted",
+     "instructions": 361316442800,
+     "virtual_time_s": 60.219,
+     "cpu_time_s": 107.22,
+     "wall_time_s": 36.88,
+     "max_rss_bytes": 5407969280,
+     "instructions_spread_pct": 0.036
+    },
+    "8": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 361863272811,
+     "virtual_time_s": 60.311,
+     "cpu_time_s": 99.12,
+     "wall_time_s": 17.95,
+     "max_rss_bytes": 5716938752,
+     "instructions_spread_pct": 0.0
+    }
+   },
+   "gruszka": {
+    "1": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 414597183030,
+     "virtual_time_s": 69.1,
+     "cpu_time_s": 61.26,
+     "wall_time_s": 58.07,
+     "max_rss_bytes": 2318217216,
+     "instructions_spread_pct": 0.0
+    },
+    "2": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 416977463754,
+     "virtual_time_s": 69.496,
+     "cpu_time_s": 71.72,
+     "wall_time_s": 36.76,
+     "max_rss_bytes": 2412699648,
+     "instructions_spread_pct": 0.0
+    },
+    "4": {
+     "n_runs": 3,
+     "status": "accepted",
+     "instructions": 418657807548,
+     "virtual_time_s": 69.776,
+     "cpu_time_s": 75.93,
+     "wall_time_s": 22.26,
+     "max_rss_bytes": 2718318592,
+     "instructions_spread_pct": 0.299
+    },
+    "8": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 421562076296,
+     "virtual_time_s": 70.26,
+     "cpu_time_s": 68.25,
+     "wall_time_s": 14.4,
+     "max_rss_bytes": 2968379392,
+     "instructions_spread_pct": 0.0
+    }
+   },
+   "sokonanoda": {
+    "1": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 487158276167,
+     "virtual_time_s": 81.193,
+     "cpu_time_s": 95.19,
+     "wall_time_s": 94.39,
+     "max_rss_bytes": 4854747136,
+     "instructions_spread_pct": 0.0
+    },
+    "2": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 497159703417,
+     "virtual_time_s": 82.86,
+     "cpu_time_s": 90.33,
+     "wall_time_s": 48.13,
+     "max_rss_bytes": 4989734912,
+     "instructions_spread_pct": 0.0
+    },
+    "4": {
+     "n_runs": 3,
+     "status": "accepted",
+     "instructions": 504306780410,
+     "virtual_time_s": 84.051,
+     "cpu_time_s": 113.22,
+     "wall_time_s": 35.71,
+     "max_rss_bytes": 5482463232,
+     "instructions_spread_pct": 0.111
+    },
+    "8": {
+     "n_runs": 1,
+     "status": "accepted",
+     "instructions": 510748219286,
+     "virtual_time_s": 85.125,
+     "cpu_time_s": 106.58,
+     "wall_time_s": 19.74,
+     "max_rss_bytes": 5878849536,
+     "instructions_spread_pct": 0.0
+    }
+   }
+  }
+ },
+ "variants": {
+  "mathlib": {
+   "nano-lean": {
+    "threads-1": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 360989459050,
+       "virtual_time_s": 60.16490984166666,
+       "cpu_time_s": 90.47066024,
+       "wall_time_s": 89.863527825,
+       "max_rss_bytes": 5407973376,
+       "instructions_kernel": 4696346589,
+       "user_time_s": 89.47,
+       "sys_time_s": 0.99,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:01:48Z",
+       "host_loadavg_start": [
+        10.28,
+        15.02,
+        19.14
+       ],
+       "host_loadavg_end": [
+        12.34,
+        14.31,
+        18.49
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 360989459050,
+     "instructions_min": 360989459050,
+     "instructions_max": 360989459050,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 60.165,
+     "cpu_time_s": 90.47,
+     "wall_time_s": 89.86,
+     "wall_time_s_min": 89.86,
+     "max_rss_bytes": 5407973376,
+     "instructions_kernel": 4696346589,
+     "command": "target/release/nl-fast -q -j 1 \"$IN\""
+    },
+    "threads-2": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 361203174177,
+       "virtual_time_s": 60.2005290295,
+       "cpu_time_s": 82.473257632,
+       "wall_time_s": 43.674191625000006,
+       "max_rss_bytes": 5407965184,
+       "instructions_kernel": 4692122216,
+       "user_time_s": 81.38,
+       "sys_time_s": 1.1,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:05:52Z",
+       "host_loadavg_start": [
+        12.23,
+        13.03,
+        17.33
+       ],
+       "host_loadavg_end": [
+        9.5,
+        12.16,
+        16.83
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 361203174177,
+     "instructions_min": 361203174177,
+     "instructions_max": 361203174177,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 60.201,
+     "cpu_time_s": 82.47,
+     "wall_time_s": 43.67,
+     "wall_time_s_min": 43.67,
+     "max_rss_bytes": 5407965184,
+     "instructions_kernel": 4692122216,
+     "command": "target/release/nl-fast -q -j 2 \"$IN\""
+    },
+    "threads-8": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 361863272811,
+       "virtual_time_s": 60.3105454685,
+       "cpu_time_s": 99.120402944,
+       "wall_time_s": 17.951773468000003,
+       "max_rss_bytes": 5716938752,
+       "instructions_kernel": 4933163669,
+       "user_time_s": 97.98,
+       "sys_time_s": 1.14,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:08:02Z",
+       "host_loadavg_start": [
+        11.22,
+        12.07,
+        16.39
+       ],
+       "host_loadavg_end": [
+        12.34,
+        12.28,
+        16.38
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 361863272811,
+     "instructions_min": 361863272811,
+     "instructions_max": 361863272811,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 60.311,
+     "cpu_time_s": 99.12,
+     "wall_time_s": 17.95,
+     "wall_time_s_min": 17.95,
+     "max_rss_bytes": 5716938752,
+     "instructions_kernel": 4933163669,
+     "command": "target/release/nl-fast -q -j 8 \"$IN\""
+    }
+   },
+   "gruszka": {
+    "threads-1": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 414597183030,
+       "virtual_time_s": 69.099530505,
+       "cpu_time_s": 61.263057456000006,
+       "wall_time_s": 58.071121643000005,
+       "max_rss_bytes": 2318217216,
+       "instructions_kernel": 10544298178,
+       "user_time_s": 58.6,
+       "sys_time_s": 2.76,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:03:18Z",
+       "host_loadavg_start": [
+        12.34,
+        14.31,
+        18.49
+       ],
+       "host_loadavg_end": [
+        10.38,
+        13.37,
+        17.91
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 414597183030,
+     "instructions_min": 414597183030,
+     "instructions_max": 414597183030,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 69.1,
+     "cpu_time_s": 61.26,
+     "wall_time_s": 58.07,
+     "wall_time_s_min": 58.07,
+     "max_rss_bytes": 2318217216,
+     "instructions_kernel": 10544298178,
+     "command": "scripts/arena-run \"$IN\" 1"
+    },
+    "threads-2": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 416977463754,
+       "virtual_time_s": 69.496243959,
+       "cpu_time_s": 71.715875024,
+       "wall_time_s": 36.756559535,
+       "max_rss_bytes": 2412699648,
+       "instructions_kernel": 10326195383,
+       "user_time_s": 69.18,
+       "sys_time_s": 2.63,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:06:36Z",
+       "host_loadavg_start": [
+        9.5,
+        12.16,
+        16.83
+       ],
+       "host_loadavg_end": [
+        12.45,
+        12.46,
+        16.75
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 416977463754,
+     "instructions_min": 416977463754,
+     "instructions_max": 416977463754,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 69.496,
+     "cpu_time_s": 71.72,
+     "wall_time_s": 36.76,
+     "wall_time_s_min": 36.76,
+     "max_rss_bytes": 2412699648,
+     "instructions_kernel": 10326195383,
+     "command": "scripts/arena-run \"$IN\" 2"
+    },
+    "threads-8": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 421562076296,
+       "virtual_time_s": 70.26034604933334,
+       "cpu_time_s": 68.25495110400001,
+       "wall_time_s": 14.402296053,
+       "max_rss_bytes": 2968379392,
+       "instructions_kernel": 10141841981,
+       "user_time_s": 65.85,
+       "sys_time_s": 2.51,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:08:20Z",
+       "host_loadavg_start": [
+        12.34,
+        12.28,
+        16.38
+       ],
+       "host_loadavg_end": [
+        12.8,
+        12.38,
+        16.35
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 421562076296,
+     "instructions_min": 421562076296,
+     "instructions_max": 421562076296,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 70.26,
+     "cpu_time_s": 68.25,
+     "wall_time_s": 14.4,
+     "wall_time_s_min": 14.4,
+     "max_rss_bytes": 2968379392,
+     "instructions_kernel": 10141841981,
+     "command": "scripts/arena-run \"$IN\" 8"
+    }
+   },
+   "sokonanoda": {
+    "threads-1": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 487158276167,
+       "virtual_time_s": 81.19304602783333,
+       "cpu_time_s": 95.186195376,
+       "wall_time_s": 94.390308828,
+       "max_rss_bytes": 4854747136,
+       "instructions_kernel": 4415046412,
+       "user_time_s": 93.81,
+       "sys_time_s": 1.37,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:04:17Z",
+       "host_loadavg_start": [
+        10.38,
+        13.37,
+        17.91
+       ],
+       "host_loadavg_end": [
+        12.23,
+        13.03,
+        17.33
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 487158276167,
+     "instructions_min": 487158276167,
+     "instructions_max": 487158276167,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 81.193,
+     "cpu_time_s": 95.19,
+     "wall_time_s": 94.39,
+     "wall_time_s_min": 94.39,
+     "max_rss_bytes": 4854747136,
+     "instructions_kernel": 4415046412,
+     "command": "target/release/sokonanoda --stdin --nat-extension --string-extension --axiom-allow-all --threads 1 < \"$IN\""
+    },
+    "threads-2": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 497159703417,
+       "virtual_time_s": 82.8599505695,
+       "cpu_time_s": 90.332900384,
+       "wall_time_s": 48.134559221,
+       "max_rss_bytes": 4989734912,
+       "instructions_kernel": 4382636567,
+       "user_time_s": 89.23,
+       "sys_time_s": 1.09,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:07:13Z",
+       "host_loadavg_start": [
+        12.45,
+        12.46,
+        16.75
+       ],
+       "host_loadavg_end": [
+        11.22,
+        12.07,
+        16.39
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 497159703417,
+     "instructions_min": 497159703417,
+     "instructions_max": 497159703417,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 82.86,
+     "cpu_time_s": 90.33,
+     "wall_time_s": 48.13,
+     "wall_time_s_min": 48.13,
+     "max_rss_bytes": 4989734912,
+     "instructions_kernel": 4382636567,
+     "command": "target/release/sokonanoda --stdin --nat-extension --string-extension --axiom-allow-all --threads 2 < \"$IN\""
+    },
+    "threads-8": {
+     "n_runs": 1,
+     "status": "accepted",
+     "exit_codes": [
+      0
+     ],
+     "runs": [
+      {
+       "run": 1,
+       "exit_code": 0,
+       "timed_out": false,
+       "instructions": 510748219286,
+       "virtual_time_s": 85.12470321433334,
+       "cpu_time_s": 106.580631904,
+       "wall_time_s": 19.740286997000002,
+       "max_rss_bytes": 5878849536,
+       "instructions_kernel": 4562232473,
+       "user_time_s": 105.41,
+       "sys_time_s": 1.16,
+       "counter_coverage": 1.0,
+       "started_utc": "2026-11-24T05:08:35Z",
+       "host_loadavg_start": [
+        12.8,
+        12.38,
+        16.35
+       ],
+       "host_loadavg_end": [
+        12.22,
+        12.27,
+        16.23
+       ],
+       "timeout_s": 8240,
+       "container": "bench/arena-docker.sh --arena-limits --no-network"
+      }
+     ],
+     "instructions": 510748219286,
+     "instructions_min": 510748219286,
+     "instructions_max": 510748219286,
+     "instructions_spread_pct": 0.0,
+     "virtual_time_s": 85.125,
+     "cpu_time_s": 106.58,
+     "wall_time_s": 19.74,
+     "wall_time_s_min": 19.74,
+     "max_rss_bytes": 5878849536,
+     "instructions_kernel": 4562232473,
+     "command": "target/release/sokonanoda --stdin --nat-extension --string-extension --axiom-allow-all --threads 8 < \"$IN\""
+    }
+   }
+  }
+ }
+}
