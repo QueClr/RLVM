@@ -20,12 +20,17 @@ import rlvm.load.LoadOptions;
  * <pre>
  * engine=NAME            reference | machine | diff | any registered EngineProvider name
  *                        (default: the non-reference engine with the highest priority, else reference)
- * load=batch|pipelined   default batch (pipelined loading is deferred; the driver refuses it for now)
+ * load=batch|pipelined|auto  how units are published. Default auto: pipelined (the loader publishes while
+ *                        workers check; OWNER-NOTES 12) when two or more workers run and the input is at
+ *                        least the driver's pipeline-min-mib (8 MiB), else batch ({@link #resolveLoadDefaults})
  * order=file|namespace   order of ready units (default file)
  * session-mib=N          session reset threshold in MiB (default: the driver's, 16)
  * memory-mib=N           memory account limit in MiB above which the run declines (default: the driver's)
- * scan-threads=K         helper threads of the reader (default 0 = none; deferred in the loader)
- * io=buffered|mapped|auto  how the reader brings the file into memory (default buffered: plain read)
+ * scan-threads=K|auto    scanner threads of the reader (they tokenise and pack file ranges; mapped input
+ *                        only). Default auto: {@link #DEFAULT_SCAN_THREADS} for inputs of
+ *                        {@link #SCAN_THREADS_MIN_BYTES} and more, none below
+ * io=buffered|mapped|auto  how the reader brings the file into memory. Default: buffered (plain read)
+ *                        without scanner threads, auto (mapped if a regular file) with them
  * stop-after=load|env    stop after a phase (per-phase measurements); the verdict is then DECLINE
  * stats-file=F           write statistics as JSON
  * no-recheck             do not re-check a rejection of the primary engine
@@ -57,12 +62,34 @@ final class MainOptions {
     /** {@code -X engine=...}, or null for the default engine. */
     String engine;
     boolean differential;
+    /**
+     * {@code -X load}. Without the setting (or with {@code load=auto}) this is BATCH until
+     * {@link #resolveLoadDefaults} has seen the input and the worker count ({@link #loadGiven} false).
+     */
     LoadOptions.Mode loadMode = LoadOptions.Mode.BATCH;
+    /** True if {@code -X load=batch|pipelined} was given: the default rule then decides nothing. */
+    boolean loadGiven;
     OrderPolicy.Kind order;
     long sessionBytes = -1;
     long memoryLimitBytes = -1;
+    /** {@code -X scan-threads}; 0 until {@link #resolveLoadDefaults} when not given ({@link #scanThreadsGiven}). */
     int scanThreads = 0;
+    boolean scanThreadsGiven;
+    /** {@code -X io}; BUFFERED until {@link #resolveLoadDefaults} when not given ({@link #ioGiven}). */
     ExportReader.Io io = ExportReader.Io.BUFFERED;
+    boolean ioGiven;
+
+    /**
+     * Inputs of at least this size are read with {@link #DEFAULT_SCAN_THREADS} scanner threads by
+     * default (proposal of the load path's owner, work/status/requests.log 2026-11-24T14:35Z, with the
+     * packed runs of rlvm-load {@code bb5734f612c3}: the load alone of Std 0.92 -> 0.5 s, cedar 1.36 ->
+     * 0.73 s, mathlib 9.4 -> 6.0 s with two scanner threads; three are no better than two beside eight
+     * workers). Below it the file is read on the loader thread as before: every published arena test
+     * and every mutant is far below, so nothing changes for them.
+     */
+    static final long SCAN_THREADS_MIN_BYTES = 256L << 20;
+    /** The default number of scanner threads for inputs of {@link #SCAN_THREADS_MIN_BYTES} and more. */
+    static final int DEFAULT_SCAN_THREADS = 2;
     String stopAfter;
     Path statsFile;
     boolean recheck = true;
@@ -172,9 +199,26 @@ final class MainOptions {
                 }
                 break;
             }
-            case "load":
-                loadMode = choose(key, value, "batch", LoadOptions.Mode.BATCH, "pipelined", LoadOptions.Mode.PIPELINED);
+            case "load": {
+                String v = need(key, value);
+                switch (v) {
+                    case "batch":
+                        loadMode = LoadOptions.Mode.BATCH;
+                        loadGiven = true;
+                        break;
+                    case "pipelined":
+                        loadMode = LoadOptions.Mode.PIPELINED;
+                        loadGiven = true;
+                        break;
+                    case "auto":
+                        loadMode = LoadOptions.Mode.BATCH; // until resolveLoadDefaults
+                        loadGiven = false;
+                        break;
+                    default:
+                        throw new UsageError("-X load=" + v + ": expected batch, pipelined or auto");
+                }
                 break;
+            }
             case "order":
                 order = choose(key, value, "file", OrderPolicy.Kind.FILE, "namespace", OrderPolicy.Kind.NAMESPACE_WINDOW);
                 break;
@@ -185,10 +229,17 @@ final class MainOptions {
                 memoryLimitBytes = number(key, value, 16, 1 << 24) << 20;
                 break;
             case "scan-threads":
+                if ("auto".equals(value)) {
+                    scanThreads = 0;
+                    scanThreadsGiven = false;
+                    break;
+                }
                 scanThreads = (int) number(key, value, 0, 64);
+                scanThreadsGiven = true;
                 break;
             case "io": {
                 String v = need(key, value);
+                ioGiven = true;
                 switch (v) {
                     case "buffered":
                         io = ExportReader.Io.BUFFERED;
@@ -296,6 +347,45 @@ final class MainOptions {
             return vb;
         }
         throw new UsageError("-X " + key + "=" + v + ": expected " + a + " or " + b);
+    }
+
+    /**
+     * Decides what the command line (and the primary engine's run defaults) left open about the load,
+     * for this input and this many workers, in these settings and in {@code config} (to which
+     * {@link #applyTo} was applied before: the driver's {@code pipeline-min-mib} is read from it):
+     *
+     * <ul>
+     * <li>{@code load}: PIPELINED when two or more workers run, the input is a file of at least the
+     *     driver's {@code pipelineMinBytes} and no {@code stop-after} phase is asked for - exactly the
+     *     runs in which the driver really loads pipelined - and BATCH otherwise. So the store of a
+     *     batch run is the one it always was, and nothing changes for one worker or a small file.
+     * <li>{@code scan-threads}: {@link #DEFAULT_SCAN_THREADS} for inputs of
+     *     {@link #SCAN_THREADS_MIN_BYTES} and more, in either load mode.
+     * <li>{@code io}: AUTO (mapped for a regular file; scanner threads only run on mapped input) when
+     *     scanner threads are used, whoever asked for them; BUFFERED otherwise.
+     * </ul>
+     *
+     * A setting that was given is never changed. None of this can change a verdict: both load modes
+     * build the same store and decide the same units (the driver's parking rule; gates in
+     * rlvm-driver/README.md and rlvm-load/README.md).
+     *
+     * @param inputBytes size of the export, 0 if unknown (not a regular file)
+     * @param workers the worker threads the run asks the driver for (at least 1)
+     */
+    void resolveLoadDefaults(long inputBytes, int workers, RunConfig config) {
+        if (!loadGiven) {
+            boolean pipelined = workers >= 2 && inputBytes > 0 && inputBytes >= config.pipelineMinBytes
+                    && stopAfter == null;
+            loadMode = pipelined ? LoadOptions.Mode.PIPELINED : LoadOptions.Mode.BATCH;
+        }
+        if (!scanThreadsGiven) {
+            scanThreads = inputBytes >= SCAN_THREADS_MIN_BYTES ? DEFAULT_SCAN_THREADS : 0;
+        }
+        if (!ioGiven) {
+            io = scanThreads > 0 ? ExportReader.Io.AUTO : ExportReader.Io.BUFFERED;
+        }
+        config.loadMode = loadMode;
+        config.scanThreads = scanThreads;
     }
 
     /** Copies the settings into a run configuration (fields this class leaves alone keep the driver's defaults). */

@@ -29,8 +29,10 @@ import rlvm.api.Outcome;
  *       decline of the machine is honest: it is reported and never fails a test.
  * </ul>
  * A row may carry KNOWN FINDINGS ({@code eager}, {@code warm}, {@code probes}, {@code facts}, {@code levels},
- * {@code bind} = findings E1-F1 .. E1-F6 of 2026-11-24: a bound variable typed by what it is bound to instead of by
- * its binder's declared domain; no row carries it since the fix of the same day): the
+ * {@code bind} = findings E1-F1 .. E1-F7 of 2026-11-24: a bound variable typed by what it is bound to instead of by
+ * its binder's declared domain; E1-F1 .. F6 are fixed, three rows {@code e1-sib-*-bad} carry it for the OPEN family
+ * E1-F7: the type of a term the official kernel does not reduce - the struct of a stuck projection, the raw major
+ * premise of the K rule - against the type of its value, NOTES-M5): the
  * switch (or, for {@code eager}, {@code levels} and {@code bind}, every configuration, v0 included) under which the published
  * machine still gives a verdict the official checker does not give. Such a violation is reported, not failed, by the fast tests, so that an open finding
  * of another package does not block publications; {@link SHostileSlowTest#noKnownFindingIsLeft} fails while

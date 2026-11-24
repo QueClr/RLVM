@@ -313,6 +313,27 @@ verdicts from Docker; generator `src/test/resources/s/gen/batchE.py`), all stric
 | F5 | `Infer.k_ck8` | the EXPECTED body type (when closed) was stored as the COD memo of the lambda's PII | not stored (the memo written by the lam rule of INFER, the body's own closed type, stays) |
 | F6 | `Reduce.k_iota3`, `Eval.apply` / `k_evalHead`, `Infer.Ext.zetaInexact`, `Infer.LET_EXACT` | the K rule typed the major premise by its VALUE; under `gated` the value of `f a` with `f` a let variable has the variable reduced away, the official `to_cnstr_when_K` types the TERM through the variable's declared type | a LET suspension whose declared type is the very type of its value is marked (`M1 = LET_EXACT`); applying any other let variable sets `zetaInexact` for the declaration, and a K comparison after that is a DECLINE (`E_LIMIT`, fatal). Cost: the declines of this rule on the corpora (the gate of the publication names them) |
 
-Not covered (not probed): the type of a stuck projection of an applied let variable inside proof irrelevance; eta
-on such a term. Cost of F2 / F3: `INST(PII, x)` builds one frame and one record more when the typed binding is
+### E1-F7 (OPEN, 2026-11-24 21:35Z): the type of a term the official kernel does NOT reduce
+
+Three rows of the S manifest carry the known-finding mark `bind` (wrong ACCEPT of the machine; official verdicts from
+Docker, the reference engine rejects): `e1-sib-proj-applied-let-pi-bad` and `e1-sib-proj-redex-pi-bad` (v0 and every
+set), `e1-sib-krule-major-redex-bad` (`gated` and the default set; v0 is right only because its tabling record of the
+argument holds the INFER type). Nine more rows `e1-sib-*` are strict.
+
+Root cause: the official kernel infers the type of a term it has not reduced in two places - the RAW major premise in
+`to_cnstr_when_K`, and the struct of a STUCK projection (`reduce_proj` fails, `whnf_core` returns the projection as it
+was; `is_def_eq_proof_irrel`, structure eta, the unit-like rule and eta expansion then call `infer_type` on it). That
+type goes through the DECLARED domain of an uncontracted beta-redex and the declared type of a let variable. The
+machine's `VTYPE` works on the VALUE, where the redex is contracted (`Values.mkSuspAt` also returns a known VAL in
+place of the suspension, and `Eval.proj` evaluates the struct), and gives the argument's own type, which is only
+convertible. The F6 rule above (decline of the K rule after the application of an inexact let variable) covers one
+shape only and is not robust in a warm session (a memoised evaluation does not pass `Eval.apply` again).
+
+What an exact fix needs (not built): (a) `VTYPE` of a plain suspension = `INFER(term, frame, ONLY)` (what v0's tabling
+stores), not `VTYPE(FORCE)`; (b) a suspension is never replaced by its known VAL where it stands for an argument
+(`mkSuspAt`, `mkSusp`, `Eval.inertHead`'s PEEK), so that a bound variable keeps the term it stands for; (c) `Eval.proj`
+keeps the suspension of an active struct term instead of its value; (d) the same in the compiled paths (`Code`,
+`Rules`, `Ops`: `mkSusp`, strict projections). Measured for a decline rule instead (Mathlib slices 425,620 / Std
+100,096 engine checks): declarations that apply an inexact let variable and then type a projection or run the K rule:
+322 / 12; declarations that bind an inexact let: 3,531 / 335; neither covers the let-free shapes. Cost of F2 / F3: `INST(PII, x)` builds one frame and one record more when the typed binding is
 needed; of F4: lambdas whose domain is not the expected domain's value take the generic rule.

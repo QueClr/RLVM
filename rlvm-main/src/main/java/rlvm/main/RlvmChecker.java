@@ -132,10 +132,14 @@ public final class RlvmChecker implements Checker {
 
     /** The {@code --stats} line of a run (without the part {@link Passes} appends). */
     static String statsLine(Setup s, int outcome, int workerCount, long wallNanos) {
+        // '(auto)' = decided by this checker's defaults, not given: the worker count (--threads auto),
+        // the load mode (MainOptions.resolveLoadDefaults), the reader's scanner threads.
         return "rlvm: stats: outcome=" + Outcome.name(outcome) + " engine=" + s.primary.name()
                 + " reference=" + s.reference.name() + " workers=" + workerCount
-                + (s.config.workers == 0 ? "(auto)" : "") + " load="
-                + s.config.loadMode.name().toLowerCase(java.util.Locale.ROOT)
+                + (s.autoWorkers ? "(auto)" : "") + " load="
+                + s.config.loadMode.name().toLowerCase(java.util.Locale.ROOT) + (s.mo.loadGiven ? "" : "(auto)")
+                + " scan-threads=" + s.mo.scanThreads + (s.mo.scanThreadsGiven ? "" : "(auto)")
+                + " io=" + s.mo.io.name().toLowerCase(java.util.Locale.ROOT)
                 + (s.mo.appliedRunDefaults.isEmpty() ? "" : " engine-defaults=" + s.mo.appliedRunDefaults)
                 + " wall_ms=" + wallNanos / 1_000_000;
     }
@@ -148,6 +152,8 @@ public final class RlvmChecker implements Checker {
     static final class Setup {
         MainOptions mo;
         RunConfig config;
+        /** True if the worker count is this checker's automatic one ({@code --threads auto}). */
+        boolean autoWorkers;
         EngineProvider primary;
         EngineProvider reference;
         EngineFactory primaryFactory;
@@ -210,6 +216,7 @@ public final class RlvmChecker implements Checker {
         Setup s = new Setup();
         s.mo = mo;
         s.config = config;
+        s.autoWorkers = threads == 0;
         s.primary = primary;
         s.reference = reference;
         s.primaryFactory = primaryFactory;
@@ -303,16 +310,34 @@ public final class RlvmChecker implements Checker {
         }
         RunConfig config = new RunConfig();
         config.input = export;
-        // 0 = automatic: the driver decides (Run.resolveWorkers: max(1, min(processors, 8) - 2), capped
-        // by the number of units, ARCHITECTURE.md 6.8). An explicit -j N is passed on as given.
-        config.workers = threads;
+        // 0 = automatic: this checker decides (autoWorkers) and passes the count on like an explicit
+        // -j N; the driver still caps it by the number of units (one worker per 128).
+        int workers = threads == 0 ? autoWorkers(Runtime.getRuntime().availableProcessors()) : threads;
+        config.workers = workers;
         if (stackBytes > 0) {
             // --stack-size is the stack of the threads that run the reference kernel's recursion.
             config.deepStackBytes = stackBytes;
             config.workerStackBytes = Math.min(config.workerStackBytes, stackBytes);
         }
         mo.applyTo(config);
+        // What the command line left open about the load (mode, scanner threads, I/O) is decided for
+        // this input and this worker count; after applyTo, which sets the driver's pipeline-min-mib.
+        mo.resolveLoadDefaults(inputBytes(export), workers, config);
         return config;
+    }
+
+    /** The most workers {@code --threads auto} ever uses (the launcher's help: "up to 8"). */
+    static final int AUTO_MAX_WORKERS = 8;
+
+    /**
+     * The worker count of {@code --threads auto} on a machine with {@code processors} CPUs: one worker
+     * per CPU, at most {@link #AUTO_MAX_WORKERS}. Decided by wall clock (OWNER-NOTES 12), warm and
+     * cold, on 8 cores with the load pipelined and the reader's scanner threads: the measurements are
+     * in rlvm-main/README.md ("Automatic worker count") and docs/PLATFORM.md. The driver's own
+     * automatic rule (processors - 2, at most 6: by CPU time, wave 4) is no longer consulted.
+     */
+    static int autoWorkers(int processors) {
+        return Math.max(1, Math.min(processors, AUTO_MAX_WORKERS));
     }
 
     /** Size of the export in bytes, 0 if unknown (a pipe, an unreadable file). */

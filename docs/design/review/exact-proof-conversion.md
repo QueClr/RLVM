@@ -1,6 +1,6 @@
 # Can the machine compare proofs cheaply and still give the official verdict? (agent C1)
 
-2026-11-24, 18:35Z - 21:30Z. Prototype work on a PRIVATE copy of `rlvm-machine` (taken under the sandbox lock at
+2026-11-24, 18:35Z - 21:50Z. Prototype work on a PRIVATE copy of `rlvm-machine` (taken under the sandbox lock at
 18:37:51Z; `work/c1/tree`, base copy `work/c1/base`, the copy without my instrumentation `work/c1/clean`). No
 production file was changed and nothing was published. Everything of this report is under `work/c1/`; the living
 summary is `work/status/prof-C1.md`; the patch is `work/c1/patches/0001-fused-two-sided-lazy-step.M4.patch`.
@@ -28,6 +28,9 @@ default switch set of the published machine since 19:41Z; section 6):
 | `m4b`, the official-exact step built here, on top of D | no effect: -1.4 % and, with the order of the pair reversed, +0.8 % CPU (-3.3 % ticks) | +0.8 % (-4.1 %) | -0.7 % and +0.4 % (-0.8 %) |
 | `facts` (B7, official-exact, exists) on top of D + `m4b` | +1.2 % | +0.5 % | +2.1 % |
 | D itself against the step-1 set (official-exact, exists) | -12.1 % | -8.5 % | -24.8 % |
+
+On all of Mathlib, eight workers, pipelined, warm passes (6.2): the default set 25.39 s, with the two options
+19.15 s (**-24.6 %** of the wall clock, -25.5 % of the process CPU time), with `m4b` 26.18 s (no gain).
 
 In the 1,690 units of `Scheme.cone` in which the shortcuts save half of the ticks or more (39 % of the slice's
 checking time) the shortcuts remove 70 % of the CPU time; the default set had removed 7.5 % of it, and `m4b`'s 1.4 %
@@ -435,7 +438,24 @@ launcher reports them per pass; every pass ACCEPT.
 Reading: with eight workers a slice of this size is bounded by its pipelined load (310 to 340 ms of the 390 to 550
 ms), so the wall clock moves less than the CPU time: the shortcuts on top of D -16 % of the wall clock (462 -> 388
 ms) and -24 % of the process CPU time on the Mathlib slice, nothing on the Cedar slice (443 -> 454 ms: inside the
-spread of the passes); `m4b` on top of D 462 -> 461 ms and 443 -> 434 ms: inside the spread. MATHLIB-WALL
+spread of the passes); `m4b` on top of D 462 -> 461 ms and 443 -> 434 ms: inside the spread.
+
+**All of Mathlib** (`work/exports/mathlib.ndjson`, 721,845 units, every pass ACCEPT; the same binary and options,
+three passes per process, one process at a time, one quiet window, announced on the board at 21:21Z;
+`work/c1/quiet-mathlib.sh`):
+
+| all of Mathlib, 8 workers, pipelined | wall s, passes 1 / 2 / 3 | process CPU s, passes 1 / 2 / 3 | peak RSS GB |
+|---|---|---|--:|
+| D (the default set of 19:41Z) | 25.42 / 25.45 / 25.33 | 182.3 / 184.5 / 183.8 | 4.4 |
+| DN = D + `facts,probes` + the two NON-official options | 19.25 / 18.98 / 19.32 | 136.5 / 136.1 / 138.3 | 4.3 |
+| D + `m4b` (the last process of the window) | 26.54 / 26.75 / 25.60 | 191.5 / 192.3 / 185.6 | 4.5 |
+
+**On all of Mathlib the two options are worth 24.6 % of the warm wall clock with eight workers on top of the
+default set (25.39 -> 19.15 s, passes 2 and 3) and 25.5 % of the process CPU time (184.2 -> 137.2 s).** That is
+the size of the policy in the owner's metric today. `m4b` shows no gain there either: its first two passes are 4
+to 5 % above D and its third equals D (25.60 against 25.33 s); it was the last process of a five-minute window and
+I have one batch, so I read it as "no gain", not as a loss of that size (the one-worker windows of 6.1 put it at
+0 +- 1 %).
 
 ## 7. Tests
 
@@ -547,7 +567,8 @@ The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, mani
 - **A CPU effect of `m4b` below 1 %**: the two windows resolve about 1 % of the checking time; the step shows
   none.
 - **All of Mathlib**: counters and CPU time are from two slices (`Scheme.cone`, `Galois.Basic.cone`) and the Cedar
-  slice; MATHLIB-NOTE
+  slice; all of Mathlib was run once, for the wall clock with eight workers (6.2), not for
+  counters or per-unit CPU time. The shares by class of unit are those of `Scheme.cone`.
 - **Parallel workers**: the counters and the CPU table are one worker; four workers were run on the hostile exports
   (`dflt4j4`) and in the pipeline part of the gates, eight in 6.2. No export targets a race in the step (it has no
   state of its own: nothing to race on).
@@ -557,7 +578,7 @@ The 41 new exports (`work/c1/hostile/`, generator `work/c1/gen/hostile.py`, mani
 
 | What | Where | Owner |
 |---|---|---|
-| patch: switch `m4b`, the fused two-sided lazy step (`Conv.java` only: `convFuse`, `fuseShape`, `fuseQuick`, frames `CONV2[9..12]`; applies to the main tree of 20:50Z, whose `Conv.java` is that of the copy) | `work/c1/patches/0001-fused-two-sided-lazy-step.M4.patch` | M4 |
+| patch: switch `m4b`, the fused two-sided lazy step (`Conv.java` only: `convFuse`, `fuseShape`, `fuseQuick`, frames `CONV2[9..12]`; applies to the main tree of 21:48Z, whose `Conv.java` is that of the copy) | `work/c1/patches/0001-fused-two-sided-lazy-step.M4.patch` | M4 |
 | 41 hostile exports with official verdicts (leanchecker 4.36.0, arena container) and their generator | `work/c1/hostile/`, `manifest.tsv`; `work/c1/gen/hostile.py` | candidates for package S |
 | gate reports of the clean private tree | `work/c1/clean/work/status/machine-gate-c1-*.md`, `machine-conv-c1b*.txt` | M8 (finding C1-F2) |
 | tools: per-unit tap and sequential trace (private hooks), counters, judge, timing | `work/c1/run.sh`, `spans.py`, `view.py`, `sum.py`, `judge.py`, `quiet-cpu.sh`, `quiet-wall.sh`, `qtable.py` | - |

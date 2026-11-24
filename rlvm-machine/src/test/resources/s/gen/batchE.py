@@ -405,6 +405,124 @@ def _(C):
     body = lambda e: app(lam(C.eqnat(R(e), C.lit(7)), lambda _: C.trivial), C.reflnat(C.lit(7)))
     C.thm('S.bad', C.true, let_(C.eqnat(dh, C.lit(5)), r0(), body))
 
+# -- siblings of E1-F6: the official kernel infers the type of a STUCK PROJECTION of a let variable (applied or not) through the
+# -- variable's DECLARED type (the projection term keeps the variable: reduce_proj fails and returns the term as it was)
+
+def sibenv(C, dx):
+    """dx = the index the DECLARED type of the let variable uses; the value is an axiom at d intro"""
+    di, dh, G, gp, r0 = genv(C)
+    unit = C.c('Unit'); star = C.c('Unit.unit')
+    andc = C.c('And')
+    return di, dh, G, gp, r0, unit, star, andc
+
+@case('e1-sib-proj-applied-let-pi-bad', 'reject',
+      'PROOF IRRELEVANCE on a stuck projection of an APPLIED let variable: let q : Unit -> (d h = d h) /\\ True := ax (ax : Unit -> '
+      '(d intro = d intro) /\\ True an axiom); (fun (_ : G (d intro = 5) r0) => True.intro) (gp (d intro = d intro) (q Unit.unit).1). '
+      'Official: (q Unit.unit).1 stays as it is (ax Unit.unit is no constructor), its type is read through the DECLARED type of q, '
+      'd h = d h, and against d intro = 5 that is false. An engine on values has the projection of ax Unit.unit : d intro = d intro')
+def _(C):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    ax = C.axiom('S.ax', arrow(unit, app(andc, C.eqnat(di, di), C.true)))
+    body = lambda q: app(lam(app(G(), C.eqnat(di, C.lit(5)), r0()), lambda _: C.trivial), app(gp(), C.eqnat(di, di), proj('And', 0, app(q, star))))
+    C.thm('S.bad', C.true, let_(arrow(unit, app(andc, C.eqnat(dh, dh), C.true)), ax(), body))
+
+@case('e1-sib-proj-applied-let-pi-ok', 'accept', 'twin: the declared type of q is the type of ax')
+def _(C):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    ax = C.axiom('S.ax', arrow(unit, app(andc, C.eqnat(di, di), C.true)))
+    body = lambda q: app(lam(app(G(), C.eqnat(di, C.lit(5)), r0()), lambda _: C.trivial), app(gp(), C.eqnat(di, di), proj('And', 0, app(q, star))))
+    C.thm('S.ok', C.true, let_(arrow(unit, app(andc, C.eqnat(di, di), C.true)), ax(), body))
+
+@case('e1-sib-proj-let-pi-bad', 'reject',
+      'the same with the let variable projected DIRECTLY: let p : (d h = d h) /\\ True := ax0 (ax0 : (d intro = d intro) /\\ True); '
+      '(fun (_ : G (d intro = 5) r0) => True.intro) (gp (d intro = d intro) p.1)')
+def _(C):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    ax0 = C.axiom('S.ax0', app(andc, C.eqnat(di, di), C.true))
+    body = lambda p: app(lam(app(G(), C.eqnat(di, C.lit(5)), r0()), lambda _: C.trivial), app(gp(), C.eqnat(di, di), proj('And', 0, p)))
+    C.thm('S.bad', C.true, let_(app(andc, C.eqnat(dh, dh), C.true), ax0(), body))
+
+@case('e1-sib-proj-let-pi-ok', 'accept', 'twin: the declared type of p is the type of ax0')
+def _(C):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    ax0 = C.axiom('S.ax0', app(andc, C.eqnat(di, di), C.true))
+    body = lambda p: app(lam(app(G(), C.eqnat(di, C.lit(5)), r0()), lambda _: C.trivial), app(gp(), C.eqnat(di, di), proj('And', 0, p)))
+    C.thm('S.ok', C.true, let_(app(andc, C.eqnat(di, di), C.true), ax0(), body))
+
+def sibk(C, declared_at_h, applied):
+    """the K rule on a major premise that is a stuck projection of a let variable (applied to Unit.unit or not)"""
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    at = dh if declared_at_h else di
+    T0 = app(andc, C.eqnat(di, C.lit(5)), C.true)      # the type of the axiom
+    T1 = app(andc, C.eqnat(at, C.lit(5)), C.true)      # the declared type
+    mot = lam(C.nat, lambda b: lam(C.eqnat(at, b), lambda t: C.nat))
+    def R(e): return app(C.c('Eq.rec', [C.l1, C.l1]), C.nat, at, mot, C.lit(7), C.lit(5), e)
+    body = lambda e: app(lam(C.eqnat(R(e), C.lit(7)), lambda _: C.trivial), C.reflnat(C.lit(7)))
+    if applied:
+        ax = C.axiom('S.ax', arrow(unit, T0))
+        return let_(arrow(unit, T1), ax(), lambda q: body(proj('And', 0, app(q, star))))
+    ax0 = C.axiom('S.ax0', T0)
+    return let_(T1, ax0(), lambda p: body(proj('And', 0, p)))
+
+@case('e1-sib-krule-major-proj-let-bad', 'reject',
+      'the K RULE on a major premise that is a stuck projection of a let variable: let p : (d h = 5) /\\ True := ax0 (ax0 : (d intro '
+      '= 5) /\\ True); (fun (_ : Eq.rec (motive := fun _ _ => Nat) 7 p.1 = 7) => True.intro) (Eq.refl 7), the recursor at d h. Official: '
+      'the type of the major p.1 is d h = 5 (declared), against d h = d h false: K does not fire, the recursor is stuck')
+def _(C):
+    C.thm('S.bad', C.true, sibk(C, True, False))
+
+@case('e1-sib-krule-major-proj-let-ok', 'accept', 'twin: declared at d intro, the recursor at d intro: K fires for everybody')
+def _(C):
+    C.thm('S.ok', C.true, sibk(C, False, False))
+
+@case('e1-sib-krule-major-proj-applied-let-bad', 'reject', 'the same with p.1 replaced by (q Unit.unit).1, q : Unit -> (d h = 5) /\\ True := ax')
+def _(C):
+    C.thm('S.bad', C.true, sibk(C, True, True))
+
+@case('e1-sib-krule-major-proj-applied-let-ok', 'accept', 'twin: declared at d intro, the recursor at d intro')
+def _(C):
+    C.thm('S.ok', C.true, sibk(C, False, True))
+
+# -- the same WITHOUT a let: a beta-redex that the official kernel leaves uncontracted (the struct of a stuck projection, the raw
+# -- major premise of the K rule) is typed through its binder's DECLARED domain; a value has the redex contracted
+
+@case('e1-sib-proj-redex-pi-bad', 'reject',
+      'PROOF IRRELEVANCE on a stuck projection of a BETA-REDEX, no let: (fun (_ : G (d intro = 5) r0) => True.intro) (gp (d intro = '
+      'd intro) ((fun (z : Unit -> (d h = d h) /\\ True) => z Unit.unit) ax).1). Official: the struct of the stuck projection stays the '
+      'redex; its type is the body\'s under z of the binder domain: (d h = d h) /\\ True, so the projection has type d h = d h, '
+      'against d intro = 5 false. An engine on values has the projection of ax Unit.unit : d intro = d intro')
+def _(C):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    ax = C.axiom('S.ax', arrow(unit, app(andc, C.eqnat(di, di), C.true)))
+    redex = app(lam(arrow(unit, app(andc, C.eqnat(dh, dh), C.true)), lambda z: app(z, star)), ax())
+    C.thm('S.bad', C.true, app(lam(app(G(), C.eqnat(di, C.lit(5)), r0()), lambda _: C.trivial), app(gp(), C.eqnat(di, di), proj('And', 0, redex))))
+
+@case('e1-sib-proj-redex-pi-ok', 'accept', 'twin: the binder domain is the type of ax')
+def _(C):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    ax = C.axiom('S.ax', arrow(unit, app(andc, C.eqnat(di, di), C.true)))
+    redex = app(lam(arrow(unit, app(andc, C.eqnat(di, di), C.true)), lambda z: app(z, star)), ax())
+    C.thm('S.ok', C.true, app(lam(app(G(), C.eqnat(di, C.lit(5)), r0()), lambda _: C.trivial), app(gp(), C.eqnat(di, di), proj('And', 0, redex))))
+
+def sibkr(C, at_h):
+    di, dh, G, gp, r0, unit, star, andc = sibenv(C, None)
+    at = dh if at_h else di
+    mot = lam(C.nat, lambda b: lam(C.eqnat(at, b), lambda t: C.nat))
+    major = app(lam(C.eqnat(at, C.lit(5)), lambda z: z), r0())
+    R = app(C.c('Eq.rec', [C.l1, C.l1]), C.nat, at, mot, C.lit(7), C.lit(5), major)
+    return app(lam(C.eqnat(R, C.lit(7)), lambda _: C.trivial), C.reflnat(C.lit(7)))
+
+@case('e1-sib-krule-major-redex-bad', 'reject',
+      'the K RULE on a major premise that is a BETA-REDEX, no let: (fun (_ : Eq.rec (motive := fun _ _ => Nat) 7 ((fun (z : d h = 5) => z) '
+      'r0) = 7) => True.intro) (Eq.refl 7), the recursor at d h, r0 : d intro = 5. Official: to_cnstr_when_K types the raw major through '
+      'the binder domain, d h = 5, against d h = d h false: K does not fire; the major reduces to the axiom r0, the recursor is stuck')
+def _(C):
+    C.thm('S.bad', C.true, sibkr(C, True))
+
+@case('e1-sib-krule-major-redex-ok', 'accept', 'twin: everything at d intro, K fires for everybody')
+def _(C):
+    C.thm('S.ok', C.true, sibkr(C, False))
+
 @case('e1-app-type-is-domain-dep-bad', 'reject',
       'the same where the body is not the variable but its type depends on the binder type: '
       '(fun (q : d h = d h) => id q) (Eq.refl (d intro)) : d h = 5, id an axiom forall (P : Prop), P -> P')
