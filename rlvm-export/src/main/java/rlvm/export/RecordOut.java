@@ -51,11 +51,10 @@ interface RecordOut {
      * as written in the file). Returns true if the receiver has consumed the run: the tape then skips
      * the {@code count} calls. The default takes nothing.
      *
-     * @param minLocal every child encoded in the packed bytes has an id of at least this
-     * @param maxName the largest binder name id of the run, -1 if it has no binder
+     * @param tape the tape that holds the run: its {@code packed}, {@code lengths} and {@code ext} arrays
+     * @param h index of the run's header on the tape ({@link Tape#RUN_INTS} ints, layout there)
      */
-    default boolean run(int firstId, int count, int minLocal, int maxName, int numLam, int numPi, int numLet,
-            byte[] packed, int off, int len, int[] ext, int extOff, int extCount) throws ExportException {
+    default boolean run(Tape tape, int h) throws ExportException {
         return false;
     }
 }

@@ -274,14 +274,19 @@ final class Linker implements RecordOut {
      * tape replays the records one by one.
      */
     @Override
-    public boolean run(int firstId, int count, int minLocal, int maxName, int numLam, int numPi, int numLet,
-            byte[] packed, int off, int len, int[] ext, int extOff, int extCount) throws ExportException {
+    public boolean run(Tape t, int h) throws ExportException {
+        final int[] b = t.buf;
+        final int firstId = b[h + Tape.H_FIRST_ID];
+        final int count = b[h + Tape.H_COUNT];
+        final int maxName = b[h + Tape.H_MAX_NAME];
         IdSpace e = exprs;
         if (!e.nextDense(firstId, count) || (maxName >= 0 && !names.allBoundUpTo(maxName))) {
             return false;
         }
-        int first = sink.exprRun(firstId, count, e.delta, minLocal, packed, off, len, ext, extOff, extCount, numLam, numPi,
-                numLet);
+        int first = sink.exprRun(firstId, count, e.delta, b[h + Tape.H_MIN_LOCAL], t.packed, b[h + Tape.H_PACKED_OFF],
+                b[h + Tape.H_PACKED_LEN], t.lengths, b[h + Tape.H_LENGTHS_OFF], t.ext, b[h + Tape.H_OPEN_OFF],
+                b[h + Tape.H_OPEN_COUNT], b[h + Tape.H_NUM_LAM], b[h + Tape.H_NUM_PI], b[h + Tape.H_NUM_LET],
+                b[h + Tape.H_NUM_EARLY], b[h + Tape.H_MAX_EARLY]);
         if (first == ExportSink.RUN_REFUSED) {
             return false;
         }

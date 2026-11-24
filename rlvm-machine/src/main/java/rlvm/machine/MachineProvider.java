@@ -26,14 +26,16 @@ import rlvm.api.EngineProvider;
  * levels=official|complete         (the launcher's key, shared with the reference engine) complete = switch
  *                                  levels-complete on, official = off; wins over machine.switches
  * machine.debug=memocheck,poison,scopeaudit,maskaudit,sharecheck,shortcheck,pubcheck,trace | all
- * machine.hostDepth=N              host depth bound D (default 64; 0 = the worklist machine)
+ * machine.hostDepth=N              host depth bound D (default Op.HOST_DEPTH = 128; 0 = the worklist machine)
  * machine.memocheck.every=N        re-compute one memo hit in N (default 1)
  * machine.memocheck.budget=N       tick budget of one re-computation (default 65536)
  * </pre>
  *
- * <p>{@link #priority()} is 10 on purpose: below {@code Engines.DEFAULT_ENGINE_MIN_PRIORITY} (100) the
- * machine is never the default engine; it runs with {@code -X engine=machine}. It is raised when the
- * gates of ISA section 11 are passed.
+ * <p>{@link #priority()} is 100 = {@code Engines.DEFAULT_ENGINE_MIN_PRIORITY} since the integration of wave 6
+ * (2026-11-24; gates in {@code rlvm-machine/SWITCHES.md} and {@code work/status/machine-integration.md}): the
+ * machine is the DEFAULT engine of a distribution that contains it. The reference engine stays the re-check
+ * engine (every rejection and every decline of the machine is decided by it) and is selected with
+ * {@code -X engine=reference}. It was 10 (never the default) until then.
  */
 public final class MachineProvider implements EngineProvider {
 
@@ -64,7 +66,7 @@ public final class MachineProvider implements EngineProvider {
 
     @Override
     public int priority() {
-        return 10;
+        return 100;
     }
 
     @Override

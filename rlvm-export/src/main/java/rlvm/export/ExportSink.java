@@ -163,19 +163,22 @@ public interface ExportSink {
      * the {@code nondep} flag of the records are not part of the packed form: a sink that needs them
      * refuses.
      *
-     * <p>{@code packed[off .. off+len)} holds the records, {@code ext[extOff .. extOff+extCount)} the
-     * children that are not encoded in them (FILE ids: add {@code delta}), in record and child
-     * order; every child encoded in the packed bytes is a record with a file id of at least
-     * {@code minLocal}. Unlike all other array arguments these two stay valid, and {@code ext} may be
+     * <p>{@code packed[off .. off+len)} holds the record bytes, {@code lengths[lengthsOff ..]} one
+     * length byte per record, {@code open[openOff .. openOff + 2 * openCount)} the open children (two
+     * ints each; the child is a FILE id: add {@code delta}); every LOCAL child is a record with a file
+     * id of at least {@code minLocal}; every EARLY child has a value of at most {@code maxEarly} (0 if
+     * the run has none). Unlike all other array arguments these stay valid, and {@code open} may be
      * overwritten by the sink, until {@link #exprRunsEnd()} is called or the read ends.
      *
      * @param firstFileId file id of the first record of the run
      * @param numLam number of {@code lam} records, {@code numPi} of {@code forallE}, {@code numLet} of
      *     {@code letE} records in the run (the others are {@code app} records)
+     * @param numEarly number of EARLY children in the run
      * @return the sink id of the first record ({@code firstFileId + delta}), or {@link #RUN_REFUSED}
      */
     default int exprRun(int firstFileId, int count, int delta, int minLocal, byte[] packed, int off, int len,
-            int[] ext, int extOff, int extCount, int numLam, int numPi, int numLet) throws ExportException {
+            byte[] lengths, int lengthsOff, int[] open, int openOff, int openCount, int numLam, int numPi, int numLet,
+            int numEarly, int maxEarly) throws ExportException {
         return RUN_REFUSED;
     }
 

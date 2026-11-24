@@ -14,8 +14,10 @@ package rlvm.export;
  * {@code forallE} / {@code letE} entries with consecutive ids above the bound
  * {@code max(T, first expression id of the window - 1)}, whose children are all earlier records. The
  * packed form of such a run ({@link ExportReader.RunFormat}) has every child above the bound encoded
- * as the distance to it and lists the others as external children. At any other declaration line,
- * and at the end of the chunk, the window is copied as it is.
+ * as the distance to it (LOCAL); a child at or below the bound is looked up in the sink's table of
+ * finished expressions ({@link ExportReader.EarlyRefs}) and encoded with what the table says (EARLY),
+ * or listed as an open child when the table does not know it yet. At any other declaration line, and
+ * at the end of the chunk, the window is copied as it is.
  *
  * <p><b>Nothing here decides anything.</b> A run header is an offer: the ordinary entries of the run
  * follow it on the tape, and the replay ({@link Tape#replay}) makes exactly the calls of the
@@ -43,10 +45,17 @@ final class RunPacker implements RecordOut {
     private final int tagPi;
     private final int tagLet;
     private final int minRecords;
+    private final ExportReader.EarlyRefs early;
     /** The entries since the last declaration line. */
     private final Tape win = new Tape(1 << 12);
     private Tape out;
     private byte[] src;
+    /** The sink's table for the window being flushed (null: nothing known) and its delta. */
+    private int[] table;
+    private int delta;
+    /** Of the run being packed: EARLY children and the largest of their values. */
+    private int numEarly;
+    private int maxEarly;
 
     RunPacker(ExportReader.RunFormat format) {
         this.tagApp = format.app;
@@ -54,6 +63,7 @@ final class RunPacker implements RecordOut {
         this.tagPi = format.pi;
         this.tagLet = format.let;
         this.minRecords = format.minRecords;
+        this.early = format.early;
     }
 
     /** Starts a chunk: entries go to {@code tape}; {@code chunk} is the buffer the scanner reads. */
@@ -186,6 +196,9 @@ final class RunPacker implements RecordOut {
         }
         final int bound = Math.max(type, first - 1);
         final Tape o = out;
+        // what the sink knows by now about the expressions before the window (read once per window)
+        table = early == null ? null : early.table();
+        delta = table == null ? 0 : early.delta();
         int copied = 0;
         int p = 0;
         while (p < end) {
@@ -197,22 +210,26 @@ final class RunPacker implements RecordOut {
             final int runStart = p;
             final int firstId = w[p + 1];
             final int packed0 = o.packedLen;
+            final int lengths0 = o.lengthsLen;
             final int ext0 = o.extLen;
             int count = 0;
             int maxName = -1;
             int numLam = 0;
             int numPi = 0;
             int numLet = 0;
+            numEarly = 0;
+            maxEarly = 0;
             while (p < end) {
                 op = w[p] & 0xFF;
                 if (op == Tape.OP_APP) {
-                    if (w[p + 1] != firstId + count || !pack(o, tagApp, firstId + count, bound, w[p + 2], w[p + 3], -1)) {
+                    if (w[p + 1] != firstId + count
+                            || !pack(o, tagApp, false, firstId + count, bound, packed0, w[p + 2], w[p + 3], -1)) {
                         break;
                     }
                     p += 4;
                 } else if (op == Tape.OP_LAM || op == Tape.OP_PI) {
-                    if (w[p + 1] != firstId + count
-                            || !pack(o, op == Tape.OP_LAM ? tagLam : tagPi, firstId + count, bound, w[p + 3], w[p + 4], -1)) {
+                    if (w[p + 1] != firstId + count || !pack(o, op == Tape.OP_LAM ? tagLam : tagPi, true, firstId + count,
+                            bound, packed0, w[p + 3], w[p + 4], -1)) {
                         break;
                     }
                     if (op == Tape.OP_LAM) {
@@ -223,7 +240,8 @@ final class RunPacker implements RecordOut {
                     maxName = Math.max(maxName, w[p + 2]);
                     p += 5;
                 } else if (op == Tape.OP_LET) {
-                    if (w[p + 1] != firstId + count || !pack(o, tagLet, firstId + count, bound, w[p + 3], w[p + 4], w[p + 5])) {
+                    if (w[p + 1] != firstId + count
+                            || !pack(o, tagLet, true, firstId + count, bound, packed0, w[p + 3], w[p + 4], w[p + 5])) {
                         break;
                     }
                     numLet++;
@@ -236,12 +254,28 @@ final class RunPacker implements RecordOut {
             }
             if (count >= minRecords) {
                 o.appendEntries(w, copied, runStart);
-                o.runHeader(firstId, count, bound + 1, maxName, numLam, numPi, numLet, packed0, o.packedLen - packed0, ext0,
-                        o.extLen - ext0, p - runStart);
+                int h = o.runHeader();
+                int[] b = o.buf;
+                b[h + Tape.H_FIRST_ID] = firstId;
+                b[h + Tape.H_COUNT] = count;
+                b[h + Tape.H_MIN_LOCAL] = bound + 1;
+                b[h + Tape.H_MAX_NAME] = maxName;
+                b[h + Tape.H_NUM_LAM] = numLam;
+                b[h + Tape.H_NUM_PI] = numPi;
+                b[h + Tape.H_NUM_LET] = numLet;
+                b[h + Tape.H_PACKED_OFF] = packed0;
+                b[h + Tape.H_PACKED_LEN] = o.packedLen - packed0;
+                b[h + Tape.H_LENGTHS_OFF] = lengths0;
+                b[h + Tape.H_OPEN_OFF] = ext0;
+                b[h + Tape.H_OPEN_COUNT] = (o.extLen - ext0) >> 1;
+                b[h + Tape.H_NUM_EARLY] = numEarly;
+                b[h + Tape.H_MAX_EARLY] = maxEarly;
+                b[h + Tape.H_SKIP] = p - runStart;
                 o.appendEntries(w, runStart, p);
                 copied = p;
             } else {
                 o.packedLen = packed0;
+                o.lengthsLen = lengths0;
                 o.extLen = ext0;
                 if (count == 0) {
                     p += size(w, p); // the entry cannot be packed: it stays an ordinary entry
@@ -250,46 +284,59 @@ final class RunPacker implements RecordOut {
         }
         o.appendEntries(w, copied, end);
         win.reset();
+        table = null;
     }
 
     /**
      * Appends the packed form of the record {@code id} with children {@code c0, c1} and, unless it is
-     * -1, {@code c2}; false (nothing appended) if a child is not an earlier record.
+     * -1, {@code c2} (the last child is the body if {@code binder}); false (nothing appended) if a
+     * child is not an earlier record. {@code runStart} is where the run's record bytes begin.
      */
-    private static boolean pack(Tape o, int tag, int id, int bound, int c0, int c1, int c2) {
+    private boolean pack(Tape o, int tag, boolean binder, int id, int bound, int runStart, int c0, int c1, int c2) {
         if (c0 < 0 || c0 >= id || c1 < 0 || c1 >= id || c2 >= id || c2 < -1) {
             return false;
         }
         byte[] pk = o.packedRoom(16);
-        int[] ext = o.extRoom(3);
-        int q = o.packedLen;
-        int e = o.extLen;
-        final int headAt = q++;
-        int head = tag;
-        if (c0 > bound) {
-            q = varint(pk, q, (id - c0) << 1);
-        } else {
-            head |= 0x10;
-            ext[e++] = c0;
-        }
-        if (c1 > bound) {
-            q = varint(pk, q, (id - c1) << 1);
-        } else {
-            head |= 0x20;
-            ext[e++] = c1;
-        }
+        o.extRoom(6);
+        final int start = o.packedLen;
+        int q = start;
+        pk[q++] = (byte) tag;
+        q = child(o, pk, q, id, bound, runStart, c0, false);
+        q = child(o, pk, q, id, bound, runStart, c1, binder && c2 < 0);
         if (c2 >= 0) {
-            if (c2 > bound) {
-                q = varint(pk, q, (id - c2) << 1);
-            } else {
-                head |= 0x40;
-                ext[e++] = c2;
+            q = child(o, pk, q, id, bound, runStart, c2, true);
+        }
+        o.packedLen = q;
+        byte[] ln = o.lengthsRoom();
+        ln[o.lengthsLen++] = (byte) (q - start);
+        return true;
+    }
+
+    /** One child of the record {@code id} at {@code pk[q ..]}: LOCAL, EARLY or OPEN. Returns the next position. */
+    private int child(Tape o, byte[] pk, int q, int id, int bound, int runStart, int c, boolean body) {
+        if (c > bound) {
+            return varint(pk, q, (id - c) << 1);
+        }
+        final int[] t = table;
+        if (t != null) {
+            int at = c + delta;
+            if (at >= 0 && at < t.length) {
+                int r = t[at];
+                if (r > 0 && r < (1 << 30)) {
+                    numEarly++;
+                    if (r > maxEarly) {
+                        maxEarly = r;
+                    }
+                    return varint(pk, q, (r << 1) | 1);
+                }
             }
         }
-        pk[headAt] = (byte) head;
-        o.packedLen = q;
-        o.extLen = e;
-        return true;
+        int[] ext = o.ext;
+        int e = o.extLen;
+        ext[e] = (q - runStart) | (body ? 0x8000_0000 : 0);
+        ext[e + 1] = c;
+        o.extLen = e + 2;
+        return q;
     }
 
     private static int varint(byte[] b, int q, int v) {

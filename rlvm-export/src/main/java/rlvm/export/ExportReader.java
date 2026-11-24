@@ -71,18 +71,23 @@ public final class ExportReader {
      * The packed form of a run of consecutive {@code app} / {@code lam} / {@code forallE} / {@code letE}
      * records ({@link Options#runs}, {@link ExportSink#exprRun}), chosen by the sink's owner so that it
      * can be turned into the sink's own storage with little work (rlvm-load: the tags are the node
-     * kinds of the store, and the bytes of a child encoded here are the bytes of a block-local
-     * reference of {@code rlvm.store.ProofBlocks}).
+     * kinds of the store and the bytes of a child are the bytes of a reference of
+     * {@code rlvm.store.ProofBlocks}, so that most of a run is copied into a proof block as it is).
      *
      * <pre>
-     * record  head:u8, then for every child that is not external the unsigned LEB128 of
-     *         2 * (file id of the record - file id of the child)
-     * head    bits 0..3 = the tag of the record kind; bit 4 + i set = child i is EXTERNAL: its file id
-     *         is the next entry of the run's list of external children
-     * child   app: 0 = fn, 1 = arg;  lam, forallE: 0 = type, 1 = body;  letE: 0 = type, 1 = value, 2 = body
+     * record  tag:u8, then its children in order, each of which is one of
+     *           LOCAL   the unsigned LEB128 of 2 * (file id of the record - file id of the child)
+     *           EARLY   the unsigned LEB128 of 2 * R + 1, R &gt; 0 the value of {@link EarlyRefs} for the child
+     *           OPEN    nothing: the child is entry of the run's list of open children
+     * child   app: fn, arg;  lam, forallE: type, body;  letE: type, value, body
+     * lengths one byte per record: the number of bytes of the record (tag and encoded children)
+     * open    two ints per open child, in record and child order: the offset in the run's record bytes
+     *         at which the child's reference belongs (bit 31 set: the child is the body of a binder),
+     *         and the file id of the child
      * </pre>
-     * A child is encoded in the record exactly if its file id is at least the {@code minLocal} of the
-     * run. Every child of a packed record has a smaller file id than the record.
+     * A child is LOCAL exactly if its file id is at least the {@code minLocal} of the run. Every child
+     * of a packed record has a smaller file id than the record. While the records are read back, a
+     * child is OPEN exactly if the next entry of the list of open children has the current offset.
      */
     public static final class RunFormat {
         /** Tags of the four record kinds: distinct values in {@code 1 .. 15}. */
@@ -92,8 +97,14 @@ public final class ExportReader {
         public final int let;
         /** Shortest run that is offered. */
         public final int minRecords;
+        /** What the scanner threads may know about earlier expressions, or null. */
+        public final EarlyRefs early;
 
         public RunFormat(int app, int lam, int pi, int let, int minRecords) {
+            this(app, lam, pi, let, minRecords, null);
+        }
+
+        public RunFormat(int app, int lam, int pi, int let, int minRecords, EarlyRefs early) {
             int[] tags = {app, lam, pi, let};
             for (int i = 0; i < 4; i++) {
                 if (tags[i] < 1 || tags[i] > 15) {
@@ -113,32 +124,30 @@ public final class ExportReader {
             this.pi = pi;
             this.let = let;
             this.minRecords = minRecords;
+            this.early = early;
+        }
+
+        /** The same format with {@code early} as its {@link EarlyRefs}. */
+        public RunFormat withEarly(EarlyRefs refs) {
+            return new RunFormat(app, lam, pi, let, minRecords, refs);
         }
     }
 
-    /** What was read. */
-    public static final class Result {
-        /** Lines including the header (an unterminated last line counts). */
-        public long lines;
-        public long bytes;
-        /** Lines that were parsed by the general JSON path (the header is not counted). */
-        public long generalPathLines;
-        /** Bound ids per id space, including the implicit name 0 and level 0. */
-        public long names;
-        public long levels;
-        public long exprs;
-        /** Largest id of the file per id space (-1: none). */
-        public long maxNameId;
-        public long maxLevelId;
-        public long maxExprId;
-        /** Whether the ids of the space were 0, 1, 2, ... in file order. */
-        public boolean namesDense;
-        public boolean levelsDense;
-        public boolean exprsDense;
-        /** Whether no id translation table was needed (dense file ids and a consecutively numbering sink). */
-        public boolean tableFree;
-        public Io io;
-        public int threads;
+    /**
+     * What the sink already knows, for good, about expressions it has finished with, readable by the
+     * scanner threads while the sink goes on ({@link RunFormat#early}). A scanner thread that packs a
+     * record with a child below the run's {@code minLocal} looks the child up:
+     * {@code table()[file id + delta()]}. A value {@code R > 0} must be FINAL: the sink would turn a
+     * reference to that expression into exactly {@code R} whenever it resolved it itself, now or
+     * later; the child is then encoded in the record (EARLY). Any other value, an index outside the
+     * table and a null table mean "not known": the child stays open. The table may be written by the
+     * sink while it is read (a stale or torn view only makes fewer children EARLY); the methods are
+     * called on scanner threads, once per declaration.
+     */
+    public interface EarlyRefs {
+        int[] table();
+
+        int delta();
     }
 
     // ------------------------------------------------------------------------------------- entry points

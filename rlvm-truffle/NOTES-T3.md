@@ -390,3 +390,33 @@ not in the table). `T2Engine.retire()` (called by `Harness.close`) cancels an en
 call instruction that does not build the redex; M7 / M3), measured in the stepper first - it should pay
 there by itself - and then direct calls between compiled blocks on top of it, which is the first point at
 which Truffle can do something the stepper cannot.
+
+## 10. U1: the CALL instruction (second task, from 19:00Z)
+
+**Design, written before the prototype** (the proposed ISA section is `work/t3/isa-call.md`; this is its
+summary; what the prototype measured follows below when it exists).
+
+- `CALL d, h, a1..an` stands where a block built an application of a constant only to ask for its weak
+  head normal form (`KCONST ; MKAPP ; WHNF`): it runs the head's RULES / BODY block directly on the
+  arguments, which are in scratch, and leaves in `d` either the application itself (built, exactly as
+  `MKAPP` would: the generic path) or a head reduct of it; the `WHNF d', d` that follows finishes. The
+  application's record, its spine run and its WHNF / UNF memo words are not made.
+- A block entered that way runs in CALL MODE (a marker in the window word of the captured frame, which
+  BODY / RULES activations do not use): its `TAILAPPLY` on a constant head does not build the next
+  application either but hands head and arguments back (`TCALL`), and the loop of `CALL` enters the next
+  block. The elaborator emits `TAILAPPLY h, args` for `MKAPP ; RET` in tail position, which in value mode
+  (DELTA of lazy delta, the generic WHNF, closures) is the same record at the same ticks.
+- The generic path is taken - the application is built and the complete procedure runs on it - for: a
+  head that is not a constant; a head that is not of class DEFN (constructors, axioms, opaque constants,
+  recursors, Quot); the Nat functions (NATFOLD must see the application first); a wrong number of levels or
+  a head marked "does not unfold"; no RULES and no BODY block; fewer arguments than the block's arity;
+  eager reduction. Hints never matter (CALL exists only where WHNF is asked for; CONV's lazy delta keeps
+  single DELTA steps on records); budgets are kept by one tick per iteration; strict mode has no blocks.
+- What changes, only with switch `call`: the records and memo words above (so later ids shift), and one
+  tick less per step that went through DELTA. What stays: verdicts, the structure of every value, and
+  id-identity between runs of the same switch set (host depth lanes; stepper against the tier).
+- The risk is a workload that re-derives the same application many times and lived on its WHNF memo;
+  the prototype counts ticks per corpus against the switch off and has a repeat counter.
+- Tier: a node for `CALL` whose head is a `KCONST` of the same block knows the callee's row when the root
+  is built; if the callee's root is installed it sets up the window and calls it through a
+  `DirectCallNode`, so that Truffle can inline it.

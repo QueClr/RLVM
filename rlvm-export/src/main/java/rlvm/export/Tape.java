@@ -24,12 +24,28 @@ final class Tape implements RecordOut {
     private static final int THM = 10;
     private static final int DEF = 11;
     /**
-     * Header of a packed run ({@link RunPacker}): {@code [RUN, firstId, count, minLocal, maxName,
-     * numLam, numPi, numLet, packedOff, packedLen, extOff, extCount, skip]}, followed by the run's
-     * ordinary entries ({@code skip} ints), which the replay skips when the receiver takes the run.
+     * Header of a packed run ({@link RunPacker}), {@link #RUN_INTS} ints at the offsets {@code H_*},
+     * followed by the run's ordinary entries ({@code H_SKIP} ints), which the replay skips when the
+     * receiver takes the run.
      */
     static final int RUN = 12;
-    static final int RUN_INTS = 13;
+    static final int H_FIRST_ID = 1;
+    static final int H_COUNT = 2;
+    static final int H_MIN_LOCAL = 3;
+    static final int H_MAX_NAME = 4;
+    static final int H_NUM_LAM = 5;
+    static final int H_NUM_PI = 6;
+    static final int H_NUM_LET = 7;
+    static final int H_PACKED_OFF = 8;
+    static final int H_PACKED_LEN = 9;
+    static final int H_LENGTHS_OFF = 10;
+    /** Offset in {@link #ext} and number of open children (two ints each). */
+    static final int H_OPEN_OFF = 11;
+    static final int H_OPEN_COUNT = 12;
+    static final int H_NUM_EARLY = 13;
+    static final int H_MAX_EARLY = 14;
+    static final int H_SKIP = 15;
+    static final int RUN_INTS = 16;
 
     static final int OP_APP = APP;
     static final int OP_LAM = LAM;
@@ -44,9 +60,11 @@ final class Tape implements RecordOut {
     int[] buf;
     int len;
     private int[] scratch = new int[64];
-    /** Packed runs of this tape: record bytes and external children (see {@link RunPacker}). */
+    /** Packed runs of this tape: record bytes, record lengths and open children (see {@link RunPacker}). */
     byte[] packed = new byte[0];
     int packedLen;
+    byte[] lengths = new byte[0];
+    int lengthsLen;
     int[] ext = new int[0];
     int extLen;
 
@@ -57,6 +75,7 @@ final class Tape implements RecordOut {
     void reset() {
         len = 0;
         packedLen = 0;
+        lengthsLen = 0;
         extLen = 0;
     }
 
@@ -68,25 +87,25 @@ final class Tape implements RecordOut {
         len += n;
     }
 
-    /** Appends the header of a packed run whose ordinary entries ({@code skip} ints) follow. */
-    void runHeader(int firstId, int count, int minLocal, int maxName, int numLam, int numPi, int numLet,
-            int packedOff, int packedBytes, int extOff, int extCount, int skip) {
+    /** Appends room for the header of a packed run and returns its index; the caller fills the {@code H_*} fields. */
+    int runHeader() {
         int[] b = room(RUN_INTS);
         int n = len;
         b[n] = RUN;
-        b[n + 1] = firstId;
-        b[n + 2] = count;
-        b[n + 3] = minLocal;
-        b[n + 4] = maxName;
-        b[n + 5] = numLam;
-        b[n + 6] = numPi;
-        b[n + 7] = numLet;
-        b[n + 8] = packedOff;
-        b[n + 9] = packedBytes;
-        b[n + 10] = extOff;
-        b[n + 11] = extCount;
-        b[n + 12] = skip;
         len = n + RUN_INTS;
+        return n;
+    }
+
+    /** Room for one more record length; returns the array. */
+    byte[] lengthsRoom() {
+        if (lengthsLen == lengths.length) {
+            long cap = Math.max((long) lengths.length * 2, 1 << 10);
+            if (cap > Integer.MAX_VALUE - 16) {
+                throw new IllegalStateException("tape overflow");
+            }
+            lengths = Arrays.copyOf(lengths, (int) cap);
+        }
+        return lengths;
     }
 
     /** Room for {@code n} more packed bytes; returns the array. */
@@ -328,10 +347,8 @@ final class Tape implements RecordOut {
                     p += 7 + numAll + numParams;
                 }
                 case RUN -> {
-                    boolean taken = out.run(b[p + 1], b[p + 2], b[p + 3], b[p + 4], b[p + 5], b[p + 6], b[p + 7],
-                            packed, b[p + 8], b[p + 9], ext, b[p + 10], b[p + 11]);
                     // not taken: the run's ordinary entries follow and are replayed like any others
-                    p += taken ? RUN_INTS + b[p + 12] : RUN_INTS;
+                    p += out.run(this, p) ? RUN_INTS + b[p + H_SKIP] : RUN_INTS;
                 }
                 default -> throw new IllegalStateException("corrupt tape");
             }
