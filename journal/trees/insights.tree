@@ -1,0 +1,19 @@
+\title{Insights}
+
+\p{Measured findings and short lessons: what a profile, an experiment or a prototype showed, with its numbers and the conditions they were taken under. A confirmed finding has taxon \code{Insight}; a claim that was not measured has taxon \code{Hypothesis} until someone confirms it. Each names its source: a document of the repository, a commit, or a session tree.}
+
+\subtree[insights-confirmed]{
+\title{Confirmed}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Insight}}
+}
+}
+
+\subtree[insights-hypotheses]{
+\title{Hypotheses}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Hypothesis}}
+}
+}

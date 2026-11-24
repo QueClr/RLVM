@@ -1,0 +1,3 @@
+\title{Design notes}
+
+\p{Design notes for the RLVM machine, the reference engine, the loader and store, the driver and the platform, and the reviews of those designs. A note describes how a part is meant to work and why, and links to the document of the repository that carries the detail.}

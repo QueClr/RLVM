@@ -2,7 +2,7 @@
 
 Scope: what the two `normalization-bench` repositories, smalltt, elaboration-zoo and the closure-based Lean
 Kernel Arena checkers teach about building a fast normaliser/conversion checker, and what RLVM should build
-on GraalVM. Paths are relative to `/home/queclr/Documents/rabdos-lean-vm/refs/`. Everything marked **[src]**
+on GraalVM. Paths are relative to `refs/`. Everything marked **[src]**
 was read in the cited file; **[measured-here]** was measured on this host for this document; **[lit]** is
 from the literature/general knowledge and was *not* verified against source here; **[hyp]** is my
 interpretation.

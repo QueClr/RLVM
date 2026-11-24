@@ -5,7 +5,7 @@ Scope: everything a checker must verify before a declaration enters the environm
 rules, nested inductives), and how the constructor/recursor/quot records of a `lean4export` file must be
 treated. The type checker core (`whnf`, `is_def_eq`, levels, `infer_proj`) is specified in
 `docs/research/02-kernel-typechecker.md` and referenced as "02 §x". All paths are relative to
-`/home/queclr/Documents/rabdos-lean-vm/refs/`; line numbers refer to `lean4` at tag `v4.36.0` (commit `611c117`).
+`refs/`; line numbers refer to `lean4` at tag `v4.36.0` (commit `611c117`).
 "reject" = kernel exception = exit code 1. `==` is structural equality ignoring binder names and binder
 infos (02 §2.3); `local(b)` = fresh free variable for binder `b`, see 6.1.
 

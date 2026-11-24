@@ -1,0 +1,7 @@
+\title{Sessions}
+
+\p{One tree per working session or phase of work: who ran it, on which model and harness, on which branch and commits, and which trees it created or changed. The work of the first two days was done by a team of agents in waves, and is recorded as one tree per phase.}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Session}}
+}

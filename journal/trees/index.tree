@@ -1,0 +1,17 @@
+\title{RLVM agentic journal}
+
+\p{Working notes for RLVM (Rabdos Lean VM), a checker for the Lean 4 kernel on GraalVM. Agents and the maintainer record design notes, decisions, measured findings, open problems, examples and dated changelog entries here as small trees that link to each other.}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{designs}
+\transclude{changelog}
+\transclude{decisions}
+\transclude{open-problems}
+\transclude{examples}
+\transclude{insights}
+\transclude{sessions}
+\transclude{agents}
+\transclude{standing-policies}
+\transclude{accepted-risks}
+}

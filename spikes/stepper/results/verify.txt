@@ -1,4 +1,4 @@
-SETUP /home/queclr/Documents/rabdos-lean-vm/work/stepper-out/init.bin terms=6137092 constants=59979 roots=115807 setup_ms=201
+SETUP work/stepper-out/init.bin terms=6137092 constants=59979 roots=115807 setup_ms=201
 VERIFY variant=Ri roots=115807 mismatches=0
 VERIFY variant=W0 roots=115807 mismatches=0
 VERIFY variant=W1 roots=115807 mismatches=0
@@ -15,7 +15,7 @@ VERIFY variant=HT0 roots=115807 mismatches=0
 VERIFY variant=HT64 roots=115807 mismatches=0
 VERIFY variant=HTinf roots=115807 mismatches=0
 VERIFY OK conv_failures_under_R=0
-SETUP /home/queclr/Documents/rabdos-lean-vm/work/stepper-out/cedar.bin terms=14728503 constants=151772 roots=292275 setup_ms=545
+SETUP work/stepper-out/cedar.bin terms=14728503 constants=151772 roots=292275 setup_ms=545
 VERIFY variant=Ri roots=292275 mismatches=0
 VERIFY variant=W0 roots=292275 mismatches=0
 VERIFY variant=W1 roots=292275 mismatches=0

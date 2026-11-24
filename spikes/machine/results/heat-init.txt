@@ -1,4 +1,4 @@
-SETUP /home/queclr/Documents/rabdos-lean-vm/work/machine-out/init.bin exprs=6137092 constants=59979 spines=2088996 setup_ms=392
+SETUP work/machine-out/init.bin exprs=6137092 constants=59979 spines=2088996 setup_ms=392
 HEAT exprs=6137092 app_nodes=5228615 constants=59979 spines_const_head=2088996 spines_other_head=43460 args=8350959 avg_args=4.00 over_applied=30482 under_applied=88268 max_params=99
 HEAT constants used as a spine head: 39783 of 59979 (66.3%)
 HEAT share of all instantiations received by the hottest N constants: top1=11.1% top10=37.9% top30=55.3% top100=71.7% top300=81.6% top1000=89.3% top3000=94.4% top10000=97.9% top30000=99.5%

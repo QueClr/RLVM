@@ -2,7 +2,7 @@
 
 Research snapshot: arena commit `99195b6b` (2026-11-23, the commit the live site was built from), `results.json`
 of the same commit (37 checkers, 270 tests, 9990 results, runs dated 2026-11-14 … 2026-11-23).
-Paths are relative to `/home/queclr/Documents/rabdos-lean-vm/refs/` unless absolute.
+Paths are relative to `refs/` unless absolute.
 
 Sources read (all read-only; nothing from the cloned repositories was built or executed — the only programs run were the host's official Lean 4.36.0 toolchain binaries `leanexport`, `lean`, `leanchecker`, and analysis scripts written for this report):
 - `lean-kernel-arena/` (README.md, lka.py, set-timeouts.py, schemas/, checkers/*.yaml, tests/**, tutorial/**, .github/workflows/build-and-deploy.yml, flake.nix)
@@ -10,7 +10,7 @@ Sources read (all read-only; nothing from the cloned repositories was built or e
 - `lean4export/` — standalone exporter, HEAD df81913 (toolchain v4.36.0-rc1)
 - `lean4-leanexport/` — sparse clone of leanprover/lean4 at tag v4.36.0 (611c117b…) made for this report: `src/LeanExport/{Basic,Parse}.lean`, `src/Lean/Data/Json/*`; other files read with `git show HEAD:<path>` (`src/Lean/Replay.lean`, `src/Lean/Declaration.lean`, `src/Lean/Expr.lean`)
 - `lean4/` (another agent's sparse clone, v4.36.0): `src/LeanChecker.lean`, `src/kernel/type_checker.cpp`, `src/kernel/inductive.cpp`
-- Downloaded data in `/home/queclr/Documents/rabdos-lean-vm/work/arena-site/`: `index.html`, `results.json`, `lean-arena-tests.tar.gz`, extracted `tests/{good,bad}/…` (230 files, 52 MB)
+- Downloaded data in `work/arena-site/`: `index.html`, `results.json`, `lean-arena-tests.tar.gz`, extracted `tests/{good,bad}/…` (230 files, 52 MB)
 - Generated locally with the host's official Lean 4.36.0 toolchain (`~/.elan/toolchains/leanprover--lean4---v4.36.0/bin/leanexport`): `work/arena-site/generated/init.ndjson` and `std.ndjson`. Both are **byte-identical to the arena tests `init` and `std`** (sha256 equal to the values in results.json), see §5.
 
 ---
@@ -670,7 +670,7 @@ Common theme: recursors (especially auxiliary recursors of nested inductives) co
 
 ## 5. Local reproduction and ground truth
 
-- Arena data: `/home/queclr/Documents/rabdos-lean-vm/work/arena-site/{index.html,results.json,lean-arena-tests.tar.gz}`; tests extracted to `work/arena-site/tests/{good,bad}/<group>/<name>.ndjson` (138 good, 92 bad). Links on the site: `https://arena.lean-lang.org/lean-arena-tests.tar.gz`, `https://arena.lean-lang.org/results.json`.
+- Arena data: `work/arena-site/{index.html,results.json,lean-arena-tests.tar.gz}`; tests extracted to `work/arena-site/tests/{good,bad}/<group>/<name>.ndjson` (138 good, 92 bad). Links on the site: `https://arena.lean-lang.org/lean-arena-tests.tar.gz`, `https://arena.lean-lang.org/results.json`.
 - Real corpora reproduced locally (Lean 4.36.0 toolchain already installed under `~/.elan`):
   ```
   TC=$HOME/.elan/toolchains/leanprover--lean4---v4.36.0

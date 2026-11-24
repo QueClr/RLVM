@@ -1,0 +1,8 @@
+\title{Changelog}
+
+\p{Dated changelog entries for RLVM, grouped by month, newest first. Each entry is its own tree of taxon \code{Change}; the view by area is [Unreleased](release-unreleased).}
+
+\scope{
+\put\transclude/expanded{false}
+\transclude{log-2026-11}
+}

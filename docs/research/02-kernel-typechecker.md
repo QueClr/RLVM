@@ -2,7 +2,7 @@
 
 Scope: everything in the official C++ kernel except declaration admission (inductive checking,
 recursor generation, replay order), which the declaration-admission document covers. All paths are relative to
-`/home/queclr/Documents/rabdos-lean-vm/refs/`. Line numbers refer to `lean4` at tag `v4.36.0`
+`refs/`. Line numbers refer to `lean4` at tag `v4.36.0`
 (commit `611c117`). "throw" always means a kernel exception, i.e. the whole declaration is rejected.
 
 Notation: `==` structural equality (binder names/infos ignored, see 2.3); `=p` pointer equality;

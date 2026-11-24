@@ -110,7 +110,7 @@ results/                    *.txt per batch, heat-*.txt, profile-*.txt, verify.t
 ## 2. Reproduce
 
 ```bash
-cd /home/queclr/Documents/rabdos-lean-vm/spikes/machine
+cd spikes/machine
 scripts/build-all.sh        # ~10 min: jars, init.bin/std.bin, 12 native images (CE, Oracle, -O3, PGO)
 scripts/run-all.sh          # ~45 min: all batches in arena-shaped containers, then results/tables.md
 ```

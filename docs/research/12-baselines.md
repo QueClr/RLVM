@@ -733,7 +733,7 @@ whole run is then the runtime's share). Not tried with a native image; `--trace`
 ## 8. Reproducing
 
 ```bash
-cd /home/queclr/Documents/rabdos-lean-vm
+cd .
 
 # the baselines on init, std, mathlib (about 2 h; stages can be named one by one)
 bench/baselines/big-all.sh                 # = mathlib-fast-1 small mathlib-fast-23 threads mathlib-slow mathlib-official

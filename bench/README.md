@@ -934,7 +934,7 @@ not against the published numbers.
 ## Reproducing everything
 
 ```bash
-cd /home/queclr/Documents/rabdos-lean-vm
+cd .
 
 # 0. arena tests + published results (done by a research agent; for reference)
 #    mkdir -p work/arena-site/tests && cd work/arena-site &&

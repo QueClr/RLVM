@@ -364,3 +364,16 @@ domain of an uncontracted redex or the declared type of a let variable; the mach
 convertible with it. This is independent of the switch `eager`, and it is the reason (with S3-F1 / S3-F3) why the
 machine's priority stays 10.
 
+Later the same day (22:25Z) the owner chose the "practical" policy (`docs/design/OWNER-NOTES.md` note 13): the three
+exports above are kind T (their statement is `True`) and tolerated; they are rows with the kind mark `T` in the S
+manifest and the class is recorded in `docs/design/review/official-divergence.md`.
+
+Numbers after the publication (jar `33914d3530cf`; 8 workers, check-only passes, `bench/quiet.py` windows 22:17 -
+22:48Z, best / median of the later passes, `default` -> `default,eager`): native image Std 1.16 / 1.19 -> 1.02 / 1.03 s
+and 1.17 / 1.22 -> 1.03 / 1.04 s; cedar 1.56 / 1.59 -> 1.40 / 1.42 s and 1.56 / 1.58 -> 1.39 / 1.42 s; mathlib (one row,
+3 passes) 23.92 -> 21.07 s; JVM Std 1.00 / 1.16 -> 0.82 / 0.94 s and 0.97 / 1.02 -> 0.89 / 0.99 s; cedar 1.33 / 1.65 ->
+1.15 / 1.18 s and 1.25 / 1.28 -> 1.16 / 1.19 s; mathlib 20.07 -> 19.53 s. On the main tree: mutants 17,775 x (v0,
+default, `default,eager`): SOUNDNESS 0, COMPLETENESS 0, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0; M8's gate with
+`default,eager`: differential SOUNDNESS 0, COMPLETENESS 0; its tier part reported the 391 units that the switch decides
+and the generic tier declines as differences until the harness was taught to count them (publication of 22:41Z).
+

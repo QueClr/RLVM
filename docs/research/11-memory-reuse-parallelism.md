@@ -6,7 +6,7 @@ Part C parallelism under the instruction metric. Companion documents: `09-nbe-ho
 core, the two normalization-bench repositories), `04`/`05`/`06`/`07` (leader deep-dives), `08` (Truffle).
 
 Evidence tags: **[src]** read in source, path given (external repositories relative to `refs/`; reussir
-paths relative to `/home/queclr/Documents/`); **[instr]** exact user-space instruction counts measured here
+paths relative to `~/Documents/`); **[instr]** exact user-space instruction counts measured here
 with the project's `bench/arena-docker.sh --arena-limits bench/measure.sh` (perf stat `instructions:u`, all
 threads, 8 performance cores, 16 GB; every figure is a whole JVM process); **[cpu]** CPU-time measured here,
 pinned to the same 8 cores; **[lit]** from the literature, not re-verified here; **[est]** my estimate.
