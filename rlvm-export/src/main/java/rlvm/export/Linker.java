@@ -263,6 +263,46 @@ final class Linker implements RecordOut {
         sink.declDef(n, out, 0, numParams, t, v, hintKind, (int) hintHeight, ExportSink.SAFETY_SAFE, numParams, numAll);
     }
 
+    /** A run was taken by the sink since the last {@link #runsEnd()}. */
+    private boolean runsOpen;
+
+    /**
+     * A packed run offered by a tape ({@link RunPacker}). It is passed on to the sink only if the
+     * records could not fail here: the expression ids are dense with a known delta and the run's
+     * first id is the next one (so every child, which the packer has checked to be smaller than its
+     * record, is bound), and every binder name is bound. Otherwise, and if the sink refuses, the
+     * tape replays the records one by one.
+     */
+    @Override
+    public boolean run(int firstId, int count, int minLocal, int maxName, int numLam, int numPi, int numLet,
+            byte[] packed, int off, int len, int[] ext, int extOff, int extCount) throws ExportException {
+        IdSpace e = exprs;
+        if (!e.nextDense(firstId, count) || (maxName >= 0 && !names.allBoundUpTo(maxName))) {
+            return false;
+        }
+        int first = sink.exprRun(firstId, count, e.delta, minLocal, packed, off, len, ext, extOff, extCount, numLam, numPi,
+                numLet);
+        if (first == ExportSink.RUN_REFUSED) {
+            return false;
+        }
+        if (first - firstId != e.delta) {
+            throw new IllegalStateException("the sink numbered the run it took from " + first + " instead of "
+                    + (firstId + e.delta));
+        }
+        e.bindRun(count);
+        line += count;
+        runsOpen = true;
+        return true;
+    }
+
+    /** The arrays of the runs offered so far are about to be reused. */
+    void runsEnd() throws ExportException {
+        if (runsOpen) {
+            runsOpen = false;
+            sink.exprRunsEnd();
+        }
+    }
+
     // ================================================================================== general path
 
     @Override

@@ -54,6 +54,9 @@ final class T {
         long hash;
         long events;
         ExportReader.Result result;
+        /** {@link #struct}: runs taken by the sink, and the records in them. */
+        long runs;
+        long runRecords;
 
         String outcome() {
             return ok ? "ok" : kind + "@" + line;
@@ -112,6 +115,44 @@ final class T {
 
     static Run parallel(byte[] data, int threads, int chunkBytes) {
         return run(true, sink -> ExportReader.read(data, sink, options(threads, chunkBytes, false)));
+    }
+
+    /** The packed form the tests ask for: tags 4 - 7 (app, lam, forallE, letE), runs of two records and more. */
+    static final ExportReader.RunFormat RUNS = new ExportReader.RunFormat(4, 5, 6, 7, 2);
+
+    static ExportReader.Options packing(int threads, int chunkBytes) {
+        ExportReader.Options o = options(threads, chunkBytes, false);
+        o.runs = RUNS;
+        return o;
+    }
+
+    /** Parallel mode with packed runs offered to a sink that refuses them (every {@link TraceSink}). */
+    static Run packed(byte[] data, int threads, int chunkBytes) {
+        return run(true, sink -> ExportReader.read(data, sink, packing(threads, chunkBytes)));
+    }
+
+    /**
+     * The structural trace ({@link StructSink}: binder names, binder infos and the nondep flag left
+     * out) of a read with {@code options} by a sink that takes the runs offered to it never
+     * ({@code take} 0), always (1) or at random (2).
+     */
+    static Run struct(byte[] data, ExportReader.Options options, int take) {
+        StructSink sink = new StructSink(take, data.length);
+        Run r = new Run();
+        try {
+            r.result = ExportReader.read(data, sink, options);
+            r.ok = true;
+        } catch (ExportException e) {
+            r.kind = e.kind();
+            r.line = e.line();
+            r.message = e.reason();
+        }
+        r.trace = sink.text();
+        r.hash = sink.hash;
+        r.events = sink.events;
+        r.runs = sink.runs;
+        r.runRecords = sink.runRecords;
+        return r;
     }
 
     /** Through a channel that delivers the data in pieces of random size. */
@@ -175,6 +216,13 @@ final class T {
         if (data.length >= 2 * 256) {
             same(what + ": parallel 256", f, parallel(data, 3, 256), true);
             same(what + ": parallel 1000", f, parallel(data, 2, 1000), true);
+            // packed runs: offered and refused (the complete trace), taken, taken at random
+            same(what + ": packing 256, refused", f, packed(data, 3, 256), true);
+            same(what + ": packing 3000, refused", f, packed(data, 2, 3000), true);
+            Run s = struct(data, options(1, 1 << 20, false), 0);
+            same(what + ": packing 256, taken", s, struct(data, packing(3, 256), 1), true);
+            same(what + ": packing 1000, taken", s, struct(data, packing(2, 1000), 1), true);
+            same(what + ": packing 5000, taken at random", s, struct(data, packing(2, 5000), 2), true);
         }
         return f;
     }

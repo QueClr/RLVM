@@ -43,4 +43,19 @@ interface RecordOut {
      * to be parsed by the general JSON path.
      */
     void slow(int off, int len) throws ExportException;
+
+    /**
+     * Only made by the replay of a {@link Tape}: the next {@code count} records, which follow on the
+     * tape as ordinary {@code app} / {@code lam} / {@code pi} / {@code let} calls with the consecutive
+     * ids {@code firstId ..}, are also available in packed form ({@link ExportReader.RunFormat}; ids
+     * as written in the file). Returns true if the receiver has consumed the run: the tape then skips
+     * the {@code count} calls. The default takes nothing.
+     *
+     * @param minLocal every child encoded in the packed bytes has an id of at least this
+     * @param maxName the largest binder name id of the run, -1 if it has no binder
+     */
+    default boolean run(int firstId, int count, int minLocal, int maxName, int numLam, int numPi, int numLet,
+            byte[] packed, int off, int len, int[] ext, int extOff, int extCount) throws ExportException {
+        return false;
+    }
 }

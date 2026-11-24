@@ -21,6 +21,13 @@ final class ParallelScan {
     private ParallelScan() {}
 
     static final int MIN_CHUNK = 256;
+    /**
+     * With packing, a chunk border is moved behind the next declaration line if that line ends within
+     * this many bytes: a declaration's records then lie in one chunk and can be offered as runs.
+     */
+    static final long ALIGN_MAX = 8L << 20;
+    private static final ValueLayout.OfLong LE64 =
+            ValueLayout.JAVA_LONG_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
 
     /** One chunk of the file: its bytes, the recording of its scan, and where it ends in the file. */
     private static final class Chunk {
@@ -48,20 +55,23 @@ final class ParallelScan {
         int replayed;
         boolean abort;
         Throwable failure;
+        /** Packing ({@link ExportReader.Options#runs}), or null. */
+        final ExportReader.RunFormat runs;
 
-        Shared(MemorySegment seg, long from, long to, long chunk, int threads) {
+        Shared(MemorySegment seg, long from, long to, long chunk, int threads, ExportReader.RunFormat runs) {
             this.seg = seg;
             this.from = from;
             this.to = to;
             this.chunk = chunk;
+            this.runs = runs;
             this.numChunks = (int) Math.min(Integer.MAX_VALUE - 8, (to - from + chunk - 1) / chunk);
             this.window = 2 * threads + 2;
             this.done = new Chunk[numChunks];
             this.pool = new Chunk[window + threads];
         }
 
-        /** Start of chunk {@code k}: the first line start at or after {@code from + k * chunk}. */
-        long boundary(int k) {
+        /** The first line start at or after {@code from + k * chunk}. */
+        long lineBoundary(int k) {
             if (k <= 0) {
                 return from;
             }
@@ -75,6 +85,52 @@ final class ParallelScan {
                 }
             }
             return to;
+        }
+
+        /**
+         * Start of chunk {@code k}: {@link #lineBoundary}; with packing, the start of the line after
+         * the first declaration line that begins at or after it and ends within {@link #ALIGN_MAX}
+         * bytes of it (if there is none: the line boundary). A function of the file content and the
+         * chunk size only, and monotone in {@code k}.
+         */
+        long boundary(int k) {
+            long ls = lineBoundary(k);
+            if (runs == null || k <= 0 || ls >= to) {
+                return ls;
+            }
+            final long limit = Math.min(to, ls + ALIGN_MAX);
+            long p = ls;
+            while (p < limit) {
+                boolean declaration = p + 8 <= to && RunPacker.declarationStart(seg.get(LE64, p));
+                long q = lineEnd(p, limit);
+                if (q < 0) {
+                    break; // the line does not end within the limit
+                }
+                if (declaration) {
+                    return q;
+                }
+                p = q;
+            }
+            return ls;
+        }
+
+        /** The position after the first {@code '\n'} in {@code [p, limit)}, or -1 if there is none. */
+        private long lineEnd(long p, long limit) {
+            long i = p;
+            while (i + 8 <= limit) {
+                long x = seg.get(LE64, i) ^ 0x0A0A0A0A0A0A0A0AL;
+                long m = (x - 0x0101010101010101L) & ~x & 0x8080808080808080L;
+                if (m != 0) {
+                    return i + (Long.numberOfTrailingZeros(m) >>> 3) + 1;
+                }
+                i += 8;
+            }
+            for (; i < limit; i++) {
+                if (seg.get(ValueLayout.JAVA_BYTE, i) == '\n') {
+                    return i + 1;
+                }
+            }
+            return -1;
         }
 
         /** Claims the next chunk, waiting while the scan is too far ahead of the replay; -1 when done. */
@@ -143,18 +199,20 @@ final class ParallelScan {
         @Override
         public void run() {
             int[] list = new int[64];
+            final RunPacker packer = sh.runs == null ? null : new RunPacker(sh.runs);
             try {
                 while (true) {
                     int k = sh.claim();
                     if (k < 0) {
                         return;
                     }
+                    // the limit on lines is tested on the line boundaries, with or without packing
+                    if (sh.lineBoundary(k + 1) - sh.lineBoundary(k) > Scanner.MAX_LINE + sh.chunk) {
+                        throw ExportException.unsupported("line longer than " + Scanner.MAX_LINE + " bytes");
+                    }
                     long start = sh.boundary(k);
                     long end = sh.boundary(k + 1);
                     long len = end - start;
-                    if (len > Scanner.MAX_LINE + sh.chunk) {
-                        throw ExportException.unsupported("line longer than " + Scanner.MAX_LINE + " bytes");
-                    }
                     int n = (int) len;
                     Chunk c = sh.chunk();
                     if (c == null) {
@@ -171,7 +229,13 @@ final class ParallelScan {
                         lastNl--;
                     }
                     if (lastNl >= 0) {
-                        Scanner.scan(buf, 0, lastNl + 1, c.tape, list);
+                        if (packer == null) {
+                            Scanner.scan(buf, 0, lastNl + 1, c.tape, list);
+                        } else {
+                            packer.begin(c.tape, buf);
+                            Scanner.scan(buf, 0, lastNl + 1, packer, list);
+                            packer.end();
+                        }
                     }
                     if (lastNl + 1 < n) {
                         // the unterminated last line of the file
@@ -209,7 +273,7 @@ final class ParallelScan {
         }
         long chunkBytes = Math.min(Math.max(o.parallelChunkBytes, MIN_CHUNK), 1 << 28);
         int threads = o.threads;
-        Shared sh = new Shared(seg, metaEnd, size, chunkBytes, threads);
+        Shared sh = new Shared(seg, metaEnd, size, chunkBytes, threads, o.runs);
         Worker[] workers = new Worker[threads];
         for (int i = 0; i < threads; i++) {
             workers[i] = new Worker(sh, i);
@@ -224,6 +288,7 @@ final class ParallelScan {
                 }
                 lk.src = c.buf;
                 c.tape.replay(lk);
+                lk.runsEnd(); // the chunk's arrays go back to the scanner threads
                 src.released(c.fileEnd);
                 sh.recycle(c);
             }

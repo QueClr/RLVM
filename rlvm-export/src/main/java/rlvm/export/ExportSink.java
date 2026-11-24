@@ -144,6 +144,48 @@ public interface ExportSink {
      */
     int exprMData(int expr) throws ExportException;
 
+    /** {@link #exprRun}: the sink does not take the run; the reader delivers its records one by one. */
+    int RUN_REFUSED = Integer.MIN_VALUE;
+
+    /**
+     * Optional fast path of the parallel mode with {@link ExportReader.Options#runs}: {@code count}
+     * consecutive {@code app} / {@code lam} / {@code forallE} / {@code letE} records that a scanner
+     * thread has already put into the PACKED form of {@link ExportReader.RunFormat}, in place of the
+     * {@code count} calls {@link #exprApp}, {@link #exprLam}, {@link #exprForall}, {@link #exprLet}.
+     *
+     * <p>The reader offers a run only while the expression ids of the file are dense, in order and
+     * numbered consecutively by the sink (sink id = file id + {@code delta} for every expression so
+     * far), and only if every record of the run is well formed with respect to everything read
+     * before it (all its references and binder names are bound). The sink either takes the run -
+     * then it must behave exactly as if it had received the {@code count} calls, and return the id of
+     * the first record, the others being the following ids - or returns {@link #RUN_REFUSED} without
+     * any other effect, and the reader makes the {@code count} calls. Binder names, binder infos and
+     * the {@code nondep} flag of the records are not part of the packed form: a sink that needs them
+     * refuses.
+     *
+     * <p>{@code packed[off .. off+len)} holds the records, {@code ext[extOff .. extOff+extCount)} the
+     * children that are not encoded in them (FILE ids: add {@code delta}), in record and child
+     * order; every child encoded in the packed bytes is a record with a file id of at least
+     * {@code minLocal}. Unlike all other array arguments these two stay valid, and {@code ext} may be
+     * overwritten by the sink, until {@link #exprRunsEnd()} is called or the read ends.
+     *
+     * @param firstFileId file id of the first record of the run
+     * @param numLam number of {@code lam} records, {@code numPi} of {@code forallE}, {@code numLet} of
+     *     {@code letE} records in the run (the others are {@code app} records)
+     * @return the sink id of the first record ({@code firstFileId + delta}), or {@link #RUN_REFUSED}
+     */
+    default int exprRun(int firstFileId, int count, int delta, int minLocal, byte[] packed, int off, int len,
+            int[] ext, int extOff, int extCount, int numLam, int numPi, int numLet) throws ExportException {
+        return RUN_REFUSED;
+    }
+
+    /**
+     * The arrays of every run taken so far ({@link #exprRun}) are about to be reused by the reader: a
+     * sink that still needs their content copies it now. The default does nothing.
+     */
+    default void exprRunsEnd() throws ExportException {
+    }
+
     // ------------------------------------------------------------------------------------ declarations
     // Name lists (levelParams, all, ctors) are ranges of the scratch array `ids`.
 

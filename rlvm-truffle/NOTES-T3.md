@@ -7,30 +7,54 @@ changed, and the go / no-go. Scratch, scripts, logs and raw rows: `work/t3/` (`w
 ## 1. Verdict: NO-GO as a default; what the tier is worth, and under which policy
 
 **The Truffle tier does not pay on Cedar-level work and cannot under the present value model; on closed
-evaluation (reachability) it is worth 4 - 7% of the warm wall clock with a promotion policy that compiles
-only the handful of blocks that carry the run. `t2` stays off by default.** Nothing here argues for
-switching it on in the launcher; nothing argues for deleting it either: it is correct (section 8), it no
-longer costs anything when it finds nothing hot (policy below), and it is the place where U1 / U2 of
-section 7 would pay.
+evaluation (reachability) it is worth 5 - 10% of the warm wall clock, with a promotion policy that compiles
+only the dozen blocks that carry the run. `t2` stays off by default.** Nothing here argues for switching
+it on in the launcher. Nothing argues for deleting it either: it is correct (section 8), and it is the
+place where U1 / U2 of section 7 would pay.
 
-Warm wall clock per pass in ms (median of the later passes of all runs of the configuration in the
-window; `K1` = `default,code,casetrees`, tier = the same + `t2` in `mode=warm` WITHOUT the rejected
-run-ahead; one engine kept over the passes; every row from one `bench/quiet.py` window, K1 and tier back to
-back on the same distribution; rows of `work/t3/warm.tsv`, labels J3 / J4 / J6 / J7 / J8 / N2 / N3 / N4):
+Warm wall clock per pass in ms: median of the later passes of all runs of the configuration in the window
+(in brackets, where it matters, the range of those passes). `K1` = `default,code,casetrees`; tier = the same
++ `t2`, `-Drlvm.t2.mode=warm`, without the rejected run-ahead. Every row is one `bench/quiet.py` window, K1
+and tier back to back on the same distribution (`work/t3/warm.tsv`, `launcher.tsv`; labels in the tables).
 
-| Workload | Platform | Workers | K1 | tier, promote at 1000 entries (unbounded) | tier, at 20000 entries, at most 96 blocks | tier, FINAL policy (at 20000 entries and 2% of all activations) |
-|---|---|--:|--:|--:|--:|--:|
-| reachability | JVM | 1 | 1015 (4 runs: 986-1058) | 973 (-4.2%; 212 blocks) | 949 (-6.5%; 26 blocks) | J7ROW_REACH_1 |
-| reachability | JVM | 8 | 520 | 529 (+1.7%; 177 blocks) | - | J7ROW_REACH_8 |
-| reachability | native | 1 | 1475 (2 runs) | 1370 against 1424 in its window (-3.8%; 252 blocks) | 1392 (-5.6%; 26 blocks) | N4ROW_REACH_1 |
-| reachability | native | 8 | 761 (2 runs) | 779 (+2.3%; 182 blocks) | 707 (-7.1%; 28 blocks) | N4ROW_REACH_8 |
-| Cedar slice | JVM | 1 | 1359 (2 runs) | 1489 against 1438 in its window (+3.5%; 804 blocks) | 1462 (+7.6%; 96 blocks) | J7ROW_SLICE_1 |
-| Cedar slice | JVM | 8 | 232 | 321 (+38%; 686 blocks) | - | J7ROW_SLICE_8 |
-| Cedar slice | native | 1 | 1869 | - | 1888 (+1.0%; 88 blocks) | N4ROW_SLICE_1 |
-| Cedar slice | native | 8 | 319 | 391 (+23%; 713 blocks) | 351 (+10%; 96 blocks) | N4ROW_SLICE_8 |
-| full cedar | JVM | 8 | 1315 | 1827 (+39%; 1,820 blocks, 52.6 s of compilation) | - | J7ROW_CEDAR_8 |
-| Init | JVM | 8 | J8ROW_INIT_K1 | - | - | J8ROW_INIT_T3 |
-| Std | JVM | 8 | J8ROW_STD_K1 | - | - | J8ROW_STD_T3 |
+**Table A - the final tree and the final policy** (promotion at 20000 entries and 2% of all activations;
+fixes C7 / C8 of section 4 in; machine jar `8a8ea5644b24`):
+
+| Workload | Platform, tool | Workers | K1 | K1 + t2 | blocks compiled | window |
+|---|---|--:|--:|--:|--:|---|
+| reachability | JVM, WarmMain | 1 | 1118 (2 runs) | 1006 (**-10.0%**) | 12 | J9 |
+| reachability | JVM, WarmMain | 8 | 572 (2 runs) | 529 (**-7.5%**) | 12 | J9 |
+| reachability | JVM, LAUNCHER, kept-engine passes | 8 | 439 (2 runs) | 394 (**-10.2%**) | 11 | L1 |
+| reachability | JVM, LAUNCHER, kept-engine passes | 1 | 1036 | 1020 (-1.5%) | 12 | L1 |
+| reachability | native, WarmMain | 1 | N5_R1_K1 | N5_R1_T3 | N5_R1_B | N5 |
+| reachability | native, WarmMain | 8 | N5_R8_K1 | N5_R8_T3 | N5_R8_B | N5 |
+| Cedar slice | JVM, WarmMain | 1 | 1426 (1417-1504) | 1487 (**+4.3%**; 1484-1491) | 2 | J9 |
+| Cedar slice | JVM, WarmMain | 8 | 220 (211-227) | 286 (**+30%**; 272-343) | 2 | J9 |
+| Cedar slice | native, WarmMain | 1 | N5_S1_K1 | N5_S1_T3 | N5_S1_B | N5 |
+| Cedar slice | native, WarmMain | 8 | N5_S8_K1 | N5_S8_T3 | N5_S8_B | N5 |
+| full cedar | JVM, WarmMain | 8 | 1469 (1274-1696) | 1355 (1345-1546): no difference to be seen | 12 | J9 |
+| full cedar | JVM, LAUNCHER | 8 | 1574 (1543-1598) | 1664 (+5.7%; 1622-1693, passes still falling) | 12 | L1 |
+| Init | JVM, WarmMain (C7 only) | 8 | 551 (536-718) | 632 (581-722): inside K1's own scatter | 10 | J8 |
+| Std | JVM, WarmMain | 8 | 949 (895-1090) | 1004 (920-1129): inside K1's own scatter | 12 | J8 |
+
+The Cedar slice at 8 workers on the launcher did not reach a steady state in 7 passes (K1's own two runs:
+398-928 ms) and is not in the table.
+
+**Table B - the promotion policy** (earlier windows, before C7 / C8, machine jar `4bc20d3e46ef`; C7 keeps
+one machine per session reachable in the tier runs, so the 8-worker rows are biased against the tier by an
+amount I did not separate; they are here for the comparison of the policies with each other):
+
+| Workload | Platform | Workers | K1 | tier, at 1000 entries, unbounded | tier, at 20000 entries, at most 96 blocks | windows |
+|---|---|--:|--:|--:|--:|---|
+| reachability | JVM | 1 | 1015 (4 runs: 986-1058) | 973 (-4.2%; 212 blocks) | 949 (-6.5%; 26 blocks) | J6 |
+| reachability | JVM | 8 | 520 | 529 (+1.7%; 177 blocks) | - | J4 |
+| reachability | native | 1 | 1475 (2 runs) | 1370 against 1424 in its window (-3.8%; 252 blocks) | 1392 (-5.6%; 26 blocks) | N3, N2 |
+| reachability | native | 8 | 761 (2 runs) | 779 (+2.3%; 182 blocks) | 707 (-7.1%; 28 blocks) | N3 |
+| Cedar slice | JVM | 1 | 1359 (2 runs) | 1489 against 1438 in its window (+3.5%; 804 blocks) | 1462 (+7.6%; 96 blocks) | J6, J3 |
+| Cedar slice | JVM | 8 | 232 | 321 (+38%; 686 blocks) | - | J4 |
+| Cedar slice | native | 1 | 1869 | - | 1888 (+1.0%; 88 blocks) | N3 |
+| Cedar slice | native | 8 | 319 | 391 (+23%; 713 blocks) | 351 (+10%; 96 blocks) | N3 |
+| full cedar | JVM | 8 | 1315 | 1827 (+39%; 1,820 blocks, 52.6 s of compilation) | - | J4 |
 
 Compilation: a block takes about 30 ms of compiler CPU on the JVM (7.6 s for 252 blocks of reachability,
 27 s for 804 of the Cedar slice) and about 20 ms in the image (5.4 s for 252). Deoptimisations: 0 in every
@@ -40,20 +64,21 @@ blocks (they stay in the stepper).
 
 What the numbers say:
 
-1. **Closed evaluation gains a little, and only with few blocks.** Reachability is 83% inside code blocks
-   and three blocks have two thirds of its 2.5 M activations per pass. Compiling the 26 blocks above 20000
-   entries gives -5.6 to -7.1% on both platforms, at one and at eight workers (native); compiling 180-250
-   blocks gives less (-4%) or nothing (8 workers: +2%). The ceiling is the stepper's own share of such a
-   run, 17% (section 5); the rest of the time is interning, which compiled code repeats call for call.
-2. **Cedar-level work loses, in proportion to the number of blocks compiled.** The Cedar slice spends 14%
-   of its time inside blocks at all, spread over hundreds of them. Each compiled block is about 1 KB of
-   machine code per instruction against a few words that the stepper's one loop interprets; every compiled
-   activation in such a run costs more than it saves (JVM, one worker, 96 blocks: worker CPU +5-7% for
-   0.32 M compiled activations per pass, i.e. about +250 ns per compiled activation - my reading: the code
-   of a block that runs once in a while is not in the instruction cache, the stepper's loop always is; not
-   measured with counters). An unbounded entry count compiles everything in the end, because the count is
-   cumulative: 804 blocks on the slice, 1,820 on full cedar, compilation running through every measured
-   pass and, with 8 workers on 8 cores, taking cores from the workers: +23 to +39%.
+1. **Closed evaluation gains, and only with few blocks.** Reachability is 83% inside code blocks and three
+   blocks have two thirds of its 2.5 M activations per pass. Compiling the 11-14 blocks that pass the
+   final policy gives -7.5 to -10% on the JVM (WarmMain and the launcher, 8 workers); 26 blocks gave -5.6 to
+   -7.1% (both platforms); 180-250 blocks give less (-4%) or nothing (8 workers: +2%). The ceiling is the
+   stepper's own share of such a run, 17% (section 5); the rest is interning, which compiled code repeats
+   call for call. One row does not fit: the launcher at one worker (-1.5%), one run.
+2. **Cedar-level work loses, and not in proportion to how little is compiled.** The Cedar slice spends 14%
+   of its time inside blocks at all, spread over hundreds of them. With the final policy two blocks are
+   compiled, 45 k compiled activations per pass - and the pass is 60 ms slower at one worker (+4.3%) and at
+   eight (+30% of 220 ms, at unchanged CPU time: the cost sits in the unit on the critical path). That is
+   more than 1 microsecond per compiled activation. C7 and C8 were found while looking for it and are not
+   it (J7 before them: +27% with one block). SECTION 9, POINT 3 has what I know about the cause.
+   With an unbounded count everything is compiled in the end, because the count is cumulative: 804 blocks on
+   the slice, 1,820 on full cedar, the compiler threads busy through every measured pass and, with 8
+   workers on 8 cores, taking cores from them: +23 to +39% (table B).
 3. **T2's "55-80% loss on the native image"** was the heat accounting and the measurement, not the code
    (section 3).
 4. **Platform**: K1 itself is 20-30% faster on the JVM than in the native image in steady state, same
@@ -66,21 +91,26 @@ What the numbers say:
 the activations it does not take; a block is promoted when the engine has seen 20000 of them AND the block
 has at least 2% of ALL activations of the engine so far (compiled ones included), at most 256 blocks; the
 machine's heat accounting is never switched on; two compiler threads. In a warm-up-is-free world the
-threshold could be lower - but a cumulative count below "this block carries the run" is what produces the
-Cedar rows above, so the test that matters is the share, not the count.
+threshold could be lower - but a cumulative count below "this block carries the run" is what produces
+table B's Cedar rows, so the test that matters is the share, not the count.
 
 **If the integrator wants it on for an evaluation-heavy run anyway**: `-X machine.switches=default,code,casetrees,t2
 -Drlvm.t2.mode=warm`, with `rlvm-truffle`'s jar on the class path (module not in the parent pom: README
-"Build, test"); kept engines over the passes are needed for it to show in `-X passes` (P7).
+"Build, test"); with `-X passes=N -X passes-mode=recheck -X passes-keep=engines` (rlvm-driver `150aed4bf1bf`)
+the launcher shows it.
 
 ## 2. How the numbers were taken
 
 - **Tool**: `rlvm.truffle.WarmMain` (test tree): one process, ONE machine engine kept over all passes; pass 1
   cold with the environment pass, every later pass checks all units again with fresh sessions of the same
   engine on W worker threads (chunks of 16 units from a shared counter). This is what "warm" has to mean for
-  this tier: the launcher's `-X passes=N -X passes-mode=recheck` builds new engines per pass (T2's finding
-  of 16:20Z; request to P7 open), so no launcher run can credit a code store or compiled blocks yet. Not
-  the driver: no admission pipeline, no re-check, no pipelined loading.
+  this tier: until 18:04Z the launcher's `-X passes=N -X passes-mode=recheck` built new engines per pass
+  (T2's finding of 16:20Z), so no launcher run could credit a code store or compiled blocks. Not the
+  driver: no admission pipeline, no re-check, no pipelined loading.
+- **Launcher rows** (label L1, `work/t3/launchrun.py`, `launcher.tsv`): `bin/rlvm-jvm --threads W FILE -X
+  engine=machine -X passes=N -X passes-mode=recheck -X passes-keep=engines` with rlvm-driver `150aed4bf1bf`
+  (P7, 18:04Z): the real driver, the engine instances of pass 1 kept; the number read is `check_ms` of the
+  later passes.
 - **Quiet**: every number in a table below comes from inside `bench/quiet.py -- work/t3/wN.sh` (one
   measurement at a time on the 8 reserved performance cores; `quiet.log` has each window). Runs of one
   window are back to back; a configuration is repeated inside the window where the table says so. Rows:

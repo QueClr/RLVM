@@ -58,6 +58,62 @@ public final class ExportReader {
         public boolean unloadMapped = true;
         /** Testing: send every line through the general JSON path. */
         public boolean generalPathOnly;
+        /**
+         * Parallel mode only: the scanner threads also prepare the packed form of the runs of
+         * proof-private records and the reader offers them to the sink ({@link ExportSink#exprRun}).
+         * Null (default): no packing. The sink receives the same records either way; a sink that does
+         * not implement {@code exprRun} refuses every offer and sees no difference.
+         */
+        public RunFormat runs;
+    }
+
+    /**
+     * The packed form of a run of consecutive {@code app} / {@code lam} / {@code forallE} / {@code letE}
+     * records ({@link Options#runs}, {@link ExportSink#exprRun}), chosen by the sink's owner so that it
+     * can be turned into the sink's own storage with little work (rlvm-load: the tags are the node
+     * kinds of the store, and the bytes of a child encoded here are the bytes of a block-local
+     * reference of {@code rlvm.store.ProofBlocks}).
+     *
+     * <pre>
+     * record  head:u8, then for every child that is not external the unsigned LEB128 of
+     *         2 * (file id of the record - file id of the child)
+     * head    bits 0..3 = the tag of the record kind; bit 4 + i set = child i is EXTERNAL: its file id
+     *         is the next entry of the run's list of external children
+     * child   app: 0 = fn, 1 = arg;  lam, forallE: 0 = type, 1 = body;  letE: 0 = type, 1 = value, 2 = body
+     * </pre>
+     * A child is encoded in the record exactly if its file id is at least the {@code minLocal} of the
+     * run. Every child of a packed record has a smaller file id than the record.
+     */
+    public static final class RunFormat {
+        /** Tags of the four record kinds: distinct values in {@code 1 .. 15}. */
+        public final int app;
+        public final int lam;
+        public final int pi;
+        public final int let;
+        /** Shortest run that is offered. */
+        public final int minRecords;
+
+        public RunFormat(int app, int lam, int pi, int let, int minRecords) {
+            int[] tags = {app, lam, pi, let};
+            for (int i = 0; i < 4; i++) {
+                if (tags[i] < 1 || tags[i] > 15) {
+                    throw new IllegalArgumentException("tag out of range: " + tags[i]);
+                }
+                for (int j = 0; j < i; j++) {
+                    if (tags[i] == tags[j]) {
+                        throw new IllegalArgumentException("tags must be distinct");
+                    }
+                }
+            }
+            if (minRecords < 1) {
+                throw new IllegalArgumentException("minRecords must be positive");
+            }
+            this.app = app;
+            this.lam = lam;
+            this.pi = pi;
+            this.let = let;
+            this.minRecords = minRecords;
+        }
     }
 
     /** What was read. */

@@ -244,6 +244,27 @@ final class IdSpace {
         hashVals[i] = val;
     }
 
+    /**
+     * Whether {@code n} ids starting with {@code id} can be bound in one step ({@link #bindRun}): dense
+     * mode with a known delta, {@code id} is the next id, and the run stays below 2^31.
+     */
+    boolean nextDense(long id, int n) {
+        return dense && !deltaOpen && id == limit && n > 0 && id + n <= Integer.MAX_VALUE - 1024;
+    }
+
+    /** Binds the next {@code n} ids to consecutive sink ids ({@code id + delta}); only after {@link #nextDense}. */
+    void bindRun(int n) {
+        limit += n;
+    }
+
+    /**
+     * Whether every id in {@code [0, maxId]} is bound: true in dense mode and while the ids came in
+     * order (then exactly the ids below {@link #boundCount()} are bound). False may be a false alarm.
+     */
+    boolean allBoundUpTo(long maxId) {
+        return (dense || inOrder) && maxId < (dense ? limit : count);
+    }
+
     /** Number of bound ids (including the implicit id 0 of names and levels). */
     long boundCount() {
         return dense ? limit : count;

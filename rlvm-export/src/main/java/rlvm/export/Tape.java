@@ -23,10 +23,32 @@ final class Tape implements RecordOut {
     private static final int SLOW = 9;
     private static final int THM = 10;
     private static final int DEF = 11;
+    /**
+     * Header of a packed run ({@link RunPacker}): {@code [RUN, firstId, count, minLocal, maxName,
+     * numLam, numPi, numLet, packedOff, packedLen, extOff, extCount, skip]}, followed by the run's
+     * ordinary entries ({@code skip} ints), which the replay skips when the receiver takes the run.
+     */
+    static final int RUN = 12;
+    static final int RUN_INTS = 13;
 
-    private int[] buf;
-    private int len;
+    static final int OP_APP = APP;
+    static final int OP_LAM = LAM;
+    static final int OP_PI = PI;
+    static final int OP_LET = LET;
+    static final int OP_PROJ = PROJ;
+    static final int OP_CONST = CONST;
+    static final int OP_NAME_STR = NAME_STR;
+    static final int OP_NAME_NUM = NAME_NUM;
+    static final int OP_SLOW = SLOW;
+
+    int[] buf;
+    int len;
     private int[] scratch = new int[64];
+    /** Packed runs of this tape: record bytes and external children (see {@link RunPacker}). */
+    byte[] packed = new byte[0];
+    int packedLen;
+    int[] ext = new int[0];
+    int extLen;
 
     Tape(int capacity) {
         buf = new int[Math.max(capacity, 64)];
@@ -34,6 +56,61 @@ final class Tape implements RecordOut {
 
     void reset() {
         len = 0;
+        packedLen = 0;
+        extLen = 0;
+    }
+
+    /** Appends the entries {@code src[from .. to)} of another tape as they are. */
+    void appendEntries(int[] src, int from, int to) {
+        int n = to - from;
+        int[] b = room(n);
+        System.arraycopy(src, from, b, len, n);
+        len += n;
+    }
+
+    /** Appends the header of a packed run whose ordinary entries ({@code skip} ints) follow. */
+    void runHeader(int firstId, int count, int minLocal, int maxName, int numLam, int numPi, int numLet,
+            int packedOff, int packedBytes, int extOff, int extCount, int skip) {
+        int[] b = room(RUN_INTS);
+        int n = len;
+        b[n] = RUN;
+        b[n + 1] = firstId;
+        b[n + 2] = count;
+        b[n + 3] = minLocal;
+        b[n + 4] = maxName;
+        b[n + 5] = numLam;
+        b[n + 6] = numPi;
+        b[n + 7] = numLet;
+        b[n + 8] = packedOff;
+        b[n + 9] = packedBytes;
+        b[n + 10] = extOff;
+        b[n + 11] = extCount;
+        b[n + 12] = skip;
+        len = n + RUN_INTS;
+    }
+
+    /** Room for {@code n} more packed bytes; returns the array. */
+    byte[] packedRoom(int n) {
+        if (packedLen + n > packed.length) {
+            long cap = Math.max(Math.max((long) packed.length * 2, 1 << 12), (long) packedLen + n);
+            if (cap > Integer.MAX_VALUE - 16) {
+                throw new IllegalStateException("tape overflow");
+            }
+            packed = Arrays.copyOf(packed, (int) cap);
+        }
+        return packed;
+    }
+
+    /** Room for {@code n} more external children; returns the array. */
+    int[] extRoom(int n) {
+        if (extLen + n > ext.length) {
+            long cap = Math.max(Math.max((long) ext.length * 2, 1 << 10), (long) extLen + n);
+            if (cap > Integer.MAX_VALUE - 16) {
+                throw new IllegalStateException("tape overflow");
+            }
+            ext = Arrays.copyOf(ext, (int) cap);
+        }
+        return ext;
     }
 
     private int[] room(int n) {
@@ -249,6 +326,12 @@ final class Tape implements RecordOut {
                     System.arraycopy(b, p + 7, scratch, 0, numAll + numParams);
                     out.def(b[p + 1], b[p + 2], b[p + 3], h >>> 8, b[p + 4], scratch, numAll, numParams);
                     p += 7 + numAll + numParams;
+                }
+                case RUN -> {
+                    boolean taken = out.run(b[p + 1], b[p + 2], b[p + 3], b[p + 4], b[p + 5], b[p + 6], b[p + 7],
+                            packed, b[p + 8], b[p + 9], ext, b[p + 10], b[p + 11]);
+                    // not taken: the run's ordinary entries follow and are replayed like any others
+                    p += taken ? RUN_INTS + b[p + 12] : RUN_INTS;
                 }
                 default -> throw new IllegalStateException("corrupt tape");
             }

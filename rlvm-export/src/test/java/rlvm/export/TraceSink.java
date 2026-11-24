@@ -35,7 +35,7 @@ class TraceSink implements ExportSink {
         }
     }
 
-    private void ev(String name, long... args) {
+    void ev(String name, long... args) {
         events++;
         mix(name.hashCode());
         for (long a : args) {
