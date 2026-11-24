@@ -25,10 +25,11 @@
 # line: nothing else changes. The build uses GraalVM CE only (Oracle GraalVM is never downloaded or
 # used by a default build: owner's decision, docs/design/OWNER-NOTES.md item 11).
 # These are figures of a FRESH process per export, which is what an arena run is. The owner's target
-# since OWNER-NOTES item 12 is warm wall clock (warm-up not charged); by that criterion the platform
-# question is open - first indication: once warm, HotSpot needs 0.72 to 0.87 times the image's CPU time
-# for the machine on Init (docs/PLATFORM.md, section I.7) - and needs a launcher that can make warm
-# passes before it can be measured properly.
+# since OWNER-NOTES item 12 is warm wall clock (warm-up not charged), measured with `rlvm -X passes=N`
+# (bench/warm.sh; docs/BENCHMARKS.md, "Warm wall clock"; this distribution, 8 workers, pipelined load): the
+# image is steady from the first pass (Init 0.81 s, Std 1.51, cedar 2.08, mathlib 27.4), the JVM launcher
+# is the faster platform once warm on Init (0.72 s after 6 passes), reachability and mathlib (21.2 s in
+# its third pass) and takes 4 to 10 passes to get there. For one cold process per export the image stays.
 #
 # Worker count: 4, the count by CPU time (the same gate, Part I section I.3); by wall clock, the
 # owner's criterion since OWNER-NOTES item 12, the same numbers favour 8 (or 6 once it is measured) -
@@ -36,11 +37,12 @@
 # the new count. With four workers the image's CPU time is that
 # of one worker (1.02 / 1.01 / 0.98 times on Init, Std and the Cedar slice) at 2.5 to 2.7 times the
 # speed; eight workers cost 1.07 times the CPU time of one for 18 % less wall clock than four on Init
-# and Std and nothing on the Cedar slice and reachability. Six (the driver's proposal for
-# `--threads auto`) is the open candidate: it has no valid measurement yet (the runs made with six
-# workers fell into the hour in which the host was out of memory) and needs a quiet host and a
-# mathlib run with the machine. To change it, change BOTH numbers below (`--threads` in the run line
-# and `threads:`, the CPU slots the arena reserves).
+# and Std and nothing on the Cedar slice and reachability (the platform gate, machine v0). With the
+# default configuration of wave 6 the CPU time of eight workers is that of one within 4 % (Init 5.27
+# against 5.22 s, Std 9.97 / 9.60, cedar 13.64 / 13.49) and the cold wall clock of eight is 1.34 s on Init,
+# 2.38 on Std, 35.9 on mathlib (four: FOUR_THREADS_LINE). Six (the driver's proposal for `--threads auto`)
+# has no measurement yet. To change the count, change BOTH numbers below (`--threads` in the run line and
+# `threads:`, the CPU slots the arena reserves).
 #
 # bench/rlvm/run.sh, suite.sh and measure.sh read the `run:` line of this file, so that local
 # measurements execute exactly the command the arena would. Keep it on one line.

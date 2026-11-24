@@ -10,7 +10,28 @@ image, `work/e1/official.sh`), and `refs/lean4/src/kernel/type_checker.cpp` for 
 
 ## 1. Result in one page
 
-RESULT-PLACEHOLDER
+- **It can be done, and the prototype does it.** With the switch `eager` the machine keeps every declaration of
+  Init, Std, cedar, reachability and Mathlib that enters eager reduction: machine declines 164 / 203 / 423 / 8 /
+  6,711 units -> 0 on all five (launcher, 8 workers; section 7), at +2.5 % to +4.4 % of the machine's ticks. The
+  differential gate against the reference engine per declaration is clean (SOUNDNESS 0, COMPLETENESS 0, 0 declines)
+  on tutorial, bugs, the Cedar slice, reachability, Init, Std, MATHLIB-SLICES-PLACEHOLDER.
+- **How** (section 4): the comparison of an `eagerReduce _ _` argument is DEFERRED to the end of the declaration, so
+  that no plain judgment ever reads an answer derived under eager reduction; the plain phase records every point
+  where the two modes would take different branches and at the end compares the two answers of each such point
+  (a difference declines the declaration: these are exactly the hostile pairs of S-F4 / S-F5); an eager-only event
+  inside the comparison of the K rule declines; a session is not shared across such a declaration when it could
+  hold a mode-dependent answer.
+- **How exact** (sections 5, 6): the official verdict under the machine's standing assumption that the official
+  procedure on terms and the machine's on values ask the same queries ("official up to evaluation"). 396 hostile
+  exports (package S's 329 and 67 new ones with official verdicts from Docker) under 33 switch sets: no wrong
+  verdict of the mechanism; 20 rows are declined by design. One gap is not closed and not demonstrated (section 6
+  item 1): a K reduction whose plain and eager computation the machine both skips by value identity.
+- **Found on the way, not about eager reduction, and worse** (section 6 item 6; `work/e1/patches/let/`,
+  `work/e1/patches/E1-F2-F5-design.md`): five wrong ACCEPTs of the machine as published, in v0 and / or the default
+  set: a convertible type is used in place of the official one (the type of a let variable, of a redex's bound
+  variable, of a lambda's bound variable under comparison, B9's comparison variable and codomain memo), and the
+  official relation is not transitive. A gated patch exists for the let rule (E1-F1) only.
+- The eager patches are relative to the main tree of 20:19:58Z + the let patch (section 8).
 
 ## 2. What the official kernel does
 
@@ -180,13 +201,19 @@ What this argument assumes is listed in section 6.
 5. Resource behaviour: a probe computes `whnf` of an argument that the official plain procedure does not
    compute at that point; a deferred comparison runs after plain work that the official kernel would not have
    reached had the comparison failed. Both can only turn into a decline (budget), never into a verdict.
-6. **Finding E1-F1 (independent of this work, in the published default engine):** the machine gives a `let`
-   variable the type of its value, the official `infer_let` the declared type. `theorem S.bad : d h = 5 := let q :
-   d h = d h := Eq.refl (d intro); q` (package S's non-transitive triple) is ACCEPTED by the machine in v0 and in
-   the default set (`work/int6/dist-b`, default engine, exit 0), REJECTED by the official checker and by the
-   reference engine. Exports `e1-app-type-is-domain-let-bad`, `-let-under-lambda-bad`; the beta-redex forms are
-   judged correctly. Owner: M5 (the let rule of `Infer`) / M2. It also means that the machine's plain phase can
-   ask queries the official kernel does not ask.
+6. **Findings E1-F1 .. E1-F5 (independent of this work, in the published default engine):** five wrong ACCEPTs,
+   all of one pattern: a type that is CONVERTIBLE with the official one is used in its place, and the official
+   relation is not transitive (package S's triple). F1: a `let` variable gets the type of its value (v0, default;
+   gated patch `work/e1/patches/let/`). F2: the bound variable of a beta redex whose type is inferred again without
+   checking gets the type of the argument (v0, default). F3: a lambda's bound variable gets the domain of the Pi it
+   is compared with (v0; through the driver's strict re-check also the default pipeline). F4: under `expect` the
+   body of a lambda is compared with the expected codomain under a variable of the lambda's own domain. F5: under
+   `expect` the expected codomain is stored as the lambda's codomain. Reproducers with official verdicts:
+   `work/e1/exports/e1-app-type-*`, `e1-let-*`, `e1-lam-*`, `e1-redex-*`, `e1-expect-*` (rows of the S manifest: the
+   let rows strict, F2 .. F5 with the known-finding mark `bind`); board lines of 20:10Z - 20:35Z; what I think is
+   needed: `work/e1/patches/E1-F2-F5-design.md`. For this document they mean: the machine's plain phase can ask
+   queries the official kernel does not ask (and the reverse), so "official up to evaluation" holds for the eager
+   mechanism only as far as it holds for the plain machine.
 
 ## 7. What was tested, and the numbers
 

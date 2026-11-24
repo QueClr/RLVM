@@ -152,7 +152,7 @@ Why so small: the instruction count FALLS as the cap grows (more memo hits) whil
 RISE (the tables leave the cache). M6's sweeps for `warm,gated,expect` are in NOTES-M6 (F24); for the
 default set the rows "cap 512 KiB / 2 MiB / 4 MiB" of the table above: 512 KiB and 1 MiB are within 2 % of
 each other on every corpus (one row each, so no ranking), 2 MiB costs 3-4 % CPU on Init, Std, cedar and
-mathlib, 4 MiB 6-7 % and 17 % of wall clock on cedar. The orchestrator's question of 16:52Z (P8: +17 % ticks
+mathlib, 4 MiB 4-7 % and 17 % of wall clock on cedar. The orchestrator's question of 16:52Z (P8: +17 % ticks
 on a Mathlib slice at 1 MiB against 4 MiB) is answered by wall clock on ALL of mathlib: 29.3 s per warm
 pass at 1 MiB against 30.6 / 30.3 s at 2 / 4 MiB (8 workers): the cap stays.
 
