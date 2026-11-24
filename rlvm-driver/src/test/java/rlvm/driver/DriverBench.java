@@ -203,8 +203,9 @@ public final class DriverBench {
                 compare ? ", " + different + " schedule differences, " + failClosed + " pipelined declines" : "",
                 (System.nanoTime() - wall0) / 1_000_000, processCpuMillis() - cpu0, peakRssKb() / 1024);
         System.out.flush();
-        if (wrong > 0 || different > 0) {
-            throw new AssertionError(wrong + " wrong verdicts, " + different + " schedule differences");
+        if (wrong > 0 || different > 0 || passDifferences > 0) {
+            throw new AssertionError(wrong + " wrong verdicts, " + different + " schedule differences, " + passDifferences
+                    + " later passes with another verdict");
         }
     }
 
@@ -249,11 +250,31 @@ public final class DriverBench {
         if (run.verdicts().warmAnomalies() > 0) {
             why[0] = "WARM-ANOMALY x" + run.verdicts().warmAnomalies() + " " + why[0];
         }
+        long[][] passes = run.passResults();
+        for (int k = 1; k < passes.length || (k == 1 && c.passes > 1 && passes.length == 1); k++) {
+            long[] r = passes[Math.min(k, passes.length - 1)];
+            if (passes.length == 1) {
+                System.out.printf("  no further pass (the first one did not accept the whole export): %s%n", file);
+                break;
+            }
+            System.out.printf("  pass %d: %s, wall %d ms (check %d ms), cpu %d ms; pass 1: %s, wall %d ms (check %d ms), cpu %d ms  %s%n",
+                    k + 1, Outcome.name((int) r[0]), r[1] / 1_000_000, r[2] / 1_000_000, r[3] / 1_000_000,
+                    Outcome.name((int) passes[0][0]), passes[0][1] / 1_000_000, passes[0][2] / 1_000_000,
+                    passes[0][3] / 1_000_000, file);
+            if ((int) r[0] != verdict) {
+                System.out.printf("DIFFERENT %s: pass %d gives %s, pass 1 %s%n", file, k + 1, Outcome.name((int) r[0]),
+                        Outcome.name(verdict));
+                passDifferences++;
+            }
+        }
         if (run.verdicts().machineIncomplete() > 0) {
             why[0] = "MACHINE-INCOMPLETE x" + run.verdicts().machineIncomplete() + " " + why[0];
         }
         return verdict;
     }
+
+    /** Later passes ({@code --set passes=N}) whose verdict differed from the first pass's. */
+    private static int passDifferences;
 
     /** The primary engine of every run: the reference kernel itself unless {@code --engine} names another. */
     private static EngineFactory primaryFactory = RefEngine.FACTORY;

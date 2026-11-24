@@ -1593,7 +1593,7 @@ final class Code {
         int r;
         if (isEagerReduce(m, m.X[rs[s + S_XB] + i])) {
             int saved = m.ER;
-            m.ER = 1;
+            m.enterER(); // M6-F26: eager reduction is entered through the facade's rule (a warm session is restarted)
             r = Conv.conv(m, tt, dom, d + 1);
             if (r >= SIG) {
                 return susp(m, m.sig1(r, Op.K_ERF, saved), blk, pc + 2, DST_REQ_APP, rb);

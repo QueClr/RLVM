@@ -16,11 +16,11 @@ Rules of the tests: a WRONG ACCEPT or WRONG REJECT against the official verdict 
 it as a KNOWN FINDING of a switch (`warm`; `probes` and `facts` had rows until M4's fix of 14:30Z) or of every
 configuration, v0 included (`eager` = S-F5, `levels` = S-F3): those are printed.
 
-State on 2026-11-24, 14:56Z (main tree): open are `eager` (2 rows), `warm` (3 rows), `levels` (2 rows); the 16 rows
-of S-F1 / S-F2 are strict and pass under every switch set.
-A decline of the machine is printed and never fails. When an owner has fixed a finding, `SHostileSlowTest#
-noKnownFindingIsLeft` passes for it and the mark is removed from the manifest (ask S, or edit the manifest in
-the same publication as the fix: the row is then strict for everybody).
+State on 2026-11-24, 15:15Z (main tree): open is only `levels` (2 rows: S-F3, both engines). The 16 rows of
+S-F1 / S-F2 (fixed by M4 at 14:30Z), the 3 rows of S-F4 and the 2 rows of S-F5 (closed by M6's rule M6-F26, armed
+by M5 and M7 by 15:10Z: a declaration that enters eager reduction is DECLINED by the machine and checked by the
+reference engine) are strict and pass under every switch set. The 11 exports that enter eager reduction carry the
+note `eager-decline`: a decline of the machine on them is by design and is not printed.
 
 Adding an export: write it with `gen/lk.py` (see `gen/batch2.py` for a short example), judge it with
 `gen/judge.py FILE` (prints the official verdict and every switch set), gzip it into `src/test/resources/s/`

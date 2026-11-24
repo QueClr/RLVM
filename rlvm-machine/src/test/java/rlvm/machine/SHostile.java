@@ -49,7 +49,11 @@ final class SHostile {
         final String name;
         /** {@code Outcome.ACCEPT} or {@code Outcome.REJECT}: what the official checker answers. */
         final int official;
-        /** {@code -}, or the known findings, a comma list of {@code eager}, {@code warm}, {@code probes}, {@code facts}, {@code levels}, {@code decline}. */
+        /**
+         * {@code -}, or a comma list of marks: known findings ({@code eager}, {@code warm}, {@code probes}, {@code facts},
+         * {@code levels}) and notes ({@code decline}: the pipeline declines the input by design; {@code eager-decline}:
+         * the machine declines the unit that enters eager reduction, by design, M6-F26).
+         */
         final String finding;
         final String attack;
 
@@ -58,6 +62,16 @@ final class SHostile {
             this.official = official;
             this.finding = finding;
             this.attack = attack;
+        }
+
+        /** True if the row carries this mark. */
+        boolean marked(String mark) {
+            for (String f : finding.split(",")) {
+                if (f.equals(mark)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** True if a known finding of the row applies to a machine under this switch set. */
@@ -219,7 +233,8 @@ final class SHostile {
         if (r.status.equals("CRASH") || r.status.equals("TIMEOUT")) {
             return r.status + ": " + r.first;
         }
-        boolean declineOk = row.finding.contains("decline");
+        boolean declineOk = row.marked("decline"); // the pipeline declines the input by design
+        boolean eagerDecline = row.marked("eager-decline"); // the machine declines a unit that enters eager reduction
         if (r.soundness > 0) {
             return "WRONG ACCEPT: the machine accepts a unit the reference engine rejects: " + r.first;
         }
@@ -236,7 +251,7 @@ final class SHostile {
         if (r.refVerdict != row.official && !(declineOk && r.refVerdict == Outcome.DECLINE)) {
             return "the reference engine answers " + Outcome.name(r.refVerdict) + ", the official checker " + Outcome.name(row.official);
         }
-        if (r.machineVerdict == Outcome.DECLINE && !declineOk) {
+        if (r.machineVerdict == Outcome.DECLINE && !declineOk && !eagerDecline) {
             return DECLINE + r.first;
         }
         return null;

@@ -740,6 +740,50 @@ class M6FacadeTest {
         assertFalse(bare.erSeen, "a property of ONE declaration");
     }
 
+    /** A package's session state that implements {@code Machine.Counters} is summed into the statistics as {@code machine.<name>}. */
+    @Test
+    void packageCountersAreSummedIntoTheStatistics() {
+        Fixture f = Fixture.prelude0();
+        MachineEngine e = new MachineEngine(f.store, EngineConfig.defaults().withStats(true));
+        Machine.Counters one = new Machine.Counters() {
+            @Override
+            public String[] counterNames() {
+                return new String[] {"match.tried", "match.hit"};
+            }
+
+            @Override
+            public long[] counterValues() {
+                return new long[] {5, 2};
+            }
+        };
+        e.packageCounters(one);
+        e.packageCounters(one);
+        e.packageCounters(new Object()); // a state without counters
+        java.util.Map<String, Object> stats = new java.util.HashMap<>();
+        e.dumpStats(new StatsSink() {
+            @Override
+            public void put(String key, long value) {
+                stats.put(key, value);
+            }
+
+            @Override
+            public void put(String key, double value) {
+                stats.put(key, value);
+            }
+
+            @Override
+            public void put(String key, String value) {
+                stats.put(key, value);
+            }
+
+            @Override
+            public void table(String key, String[] columns, long[][] rows, String[] rowLabels) {}
+        });
+        assertEquals(10L, stats.get("machine.match.tried"));
+        assertEquals(4L, stats.get("machine.match.hit"));
+        assertEquals(0L, stats.get("machine.eagerDeclines"));
+    }
+
     @Test
     void theDeclineLogHasOneLinePerOutcomeOtherThanAccept() throws java.io.IOException {
         Fixture f = Fixture.prelude();

@@ -59,6 +59,16 @@ final class Elab {
     /** Nesting bound of sub-blocks. */
     static final int MAX_SUB_NEST = 8;
 
+    /**
+     * An environment entry that is not an operand yet: argument {@code payload} of an inlined definition, a term of
+     * the caller's environment that is compiled where (and only if) the callee's tree uses it ({@link #resolve}).
+     * Mode 13 is never the mode of an instruction operand.
+     */
+    static final int DEFER = 0xD000_0000;
+    private static final int MODE_BITS = 0xF000_0000;
+    /** Nesting bound of inlined definitions in one case tree. */
+    static final int MAX_INLINE = 4;
+
     private static final int POS_ARG = 0;
     private static final int POS_EVAL = 1;
     private static final int POS_TAIL = 2;
@@ -95,6 +105,21 @@ final class Elab {
         int treeDepth;
         int treeLevels;
         boolean bad;
+        /**
+         * Inlining of case-tree definitions into the tree of their caller ({@link #inline}): the nesting of inlined
+         * callees whose terms are being compiled (0: the role's own terms), the number of expansions on the way,
+         * the deferred argument terms as quadruples {@code (term, envBase, depth, inl)} - the term, the environment
+         * region it is a term of, and its owner - and the arguments beyond the callee's parameters that the
+         * leaves still have to be applied to ({@code tmp[extTb .. extTb + extN)}, environment entries).
+         */
+        int inl;
+        int inlDepth;
+        int[] def = new int[64];
+        int defN;
+        int extTb;
+        int extN;
+        /** Number of case trees that inlined a definition (statistics of the corpus tests). */
+        int inlined;
         /** ISA section 12, open question 1: APPLY instead of BKIND / MKSUSP for an active argument (changes value ids). */
         boolean strictArgs;
         /** No sub-blocks for inner binders (their closures are walked). */
@@ -195,6 +220,11 @@ final class Elab {
         s.classJ = 0;
         s.rec = 0;
         s.subNest = 0;
+        s.inl = 0;
+        s.inlDepth = 0;
+        s.defN = 0;
+        s.extTb = 0;
+        s.extN = 0;
         s.bad = false;
     }
 
@@ -303,8 +333,11 @@ final class Elab {
         s.depth++;
     }
 
-    /** The operand of de Bruijn index {@code i}; an unread or unbound variable makes the role generic. */
-    private static int var(State s, int i) {
+    /**
+     * The operand of de Bruijn index {@code i}; an unread or unbound variable makes the role generic. A deferred
+     * argument of an inlined definition is compiled here ({@link #resolve}).
+     */
+    private static int var(Machine m, State s, int i) {
         int lvl = s.depth - 1 - i;
         if (i < 0 || lvl < 0) {
             s.bad = true;
@@ -315,7 +348,117 @@ final class Elab {
             s.bad = true;
             return BAD;
         }
+        return (o & MODE_BITS) == DEFER ? resolve(m, s, o) : o;
+    }
+
+    /** The environment entry of de Bruijn index {@code i} as it is (an operand, HOLE, or a deferred argument). */
+    private static int entryOf(State s, int i) {
+        int lvl = s.depth - 1 - i;
+        if (i < 0 || lvl < 0) {
+            s.bad = true;
+            return BAD;
+        }
+        return s.env[s.envBase + lvl];
+    }
+
+    /** Words of a deferred argument: its term, the base and depth of its environment region, its owner, and the operand it was compiled into at a tree node that dominates the code being emitted (0: none). */
+    private static final int DEF_WORDS = 5;
+    private static final int DEF_MEMO = 4;
+
+    private static int defer(State s, int term, int base, int depth, int inl) {
+        if (s.defN + DEF_WORDS > s.def.length) {
+            s.def = java.util.Arrays.copyOf(s.def, s.def.length << 1);
+        }
+        int k = s.defN;
+        s.def[k] = term;
+        s.def[k + 1] = base;
+        s.def[k + 2] = depth;
+        s.def[k + 3] = inl;
+        s.def[k + DEF_MEMO] = 0;
+        s.defN = k + DEF_WORDS;
+        return DEFER | k / DEF_WORDS;
+    }
+
+    /**
+     * Follows a deferred argument through variables of its own environment: the result is an operand, HOLE, or a
+     * deferred argument whose term is not a variable. Emits nothing.
+     */
+    private static int chase(Machine m, State s, int o) {
+        Terms terms = m.terms;
+        while ((o & MODE_BITS) == DEFER && o != BAD) {
+            int k = (o & PAY) * DEF_WORDS;
+            int t = s.def[k];
+            if (terms.kind(t) != Kind.BVAR) {
+                break;
+            }
+            int lvl = s.def[k + 2] - 1 - terms.a(t);
+            if (terms.a(t) < 0 || lvl < 0) {
+                s.bad = true;
+                return BAD;
+            }
+            o = s.env[s.def[k + 1] + lvl];
+        }
         return o;
+    }
+
+    /**
+     * Makes the environment region {@code [base, base + depth)} of owner {@code inl} the current one, as a copy on
+     * top of the environment stack, so that binders pushed while a term of that region is compiled do not
+     * overwrite the regions above it. Returns nothing: the caller saved {@code envBase}, {@code depth},
+     * {@code inl} and restores them.
+     */
+    private static void enterRegion(State s, int base, int depth, int inl) {
+        int nb = s.envBase + s.depth;
+        if (nb + depth + 8 > s.env.length) {
+            s.env = java.util.Arrays.copyOf(s.env, Math.max(s.env.length << 1, nb + depth + 8));
+        }
+        System.arraycopy(s.env, base, s.env, nb, depth);
+        s.envBase = nb;
+        s.depth = depth;
+        s.inl = inl;
+    }
+
+    /**
+     * The operand of an environment entry: a deferred argument is compiled now, in position ARG, in the
+     * environment it is a term of (what the generic tier passes to the inlined definition: {@code ARGV} of the
+     * argument term). A term owned by an inlined definition may only be a variable or a constant without level
+     * parameters (its block runs under the substitution of the role, not of that definition).
+     */
+    private static int resolve(Machine m, State s, int o) {
+        o = chase(m, s, o);
+        if (o == HOLE_OP || o == BAD || s.bad) {
+            s.bad = true;
+            return BAD;
+        }
+        if ((o & MODE_BITS) != DEFER) {
+            return o;
+        }
+        int k = (o & PAY) * DEF_WORDS;
+        if (s.def[k + DEF_MEMO] != 0) {
+            return s.def[k + DEF_MEMO];
+        }
+        int t = s.def[k];
+        int owner = s.def[k + 3];
+        int envBase = s.envBase;
+        int depth = s.depth;
+        int inl = s.inl;
+        int extN = s.extN;
+        enterRegion(s, s.def[k + 1], s.def[k + 2], owner);
+        s.extN = 0;
+        int r;
+        if (owner > 0) {
+            r = m.terms.kind(t) == Kind.CONST && !m.terms.hasLevelParam(t) ? atom(m, s, t, Kind.CONST) : BAD;
+            if (r == BAD) {
+                s.bad = true;
+            }
+        } else {
+            r = arg(m, s, t);
+        }
+        s.envBase = envBase;
+        s.depth = depth;
+        s.inl = inl;
+        s.extN = extN;
+        return r;
     }
 
     /**
@@ -626,7 +769,7 @@ final class Elab {
         int o;
         switch (k) {
             case Kind.BVAR:
-                o = var(s, terms.a(t));
+                o = var(m, s, terms.a(t));
                 break;
             case Kind.SORT:
             case Kind.CONST:
@@ -705,10 +848,14 @@ final class Elab {
     }
 
     /** Writes the capture list of a node: for each index up to the highest bit of its mask the variable's operand, else HOLE. */
-    private static void captures(State s, long mask, int len) {
+    private static void captures(Machine m, State s, long mask, int len) {
         for (int j = 0; j < len; j++) {
             int idx = len - 1 - j;
-            put(s, (mask >>> idx & 1) != 0 ? var(s, idx) : HOLE_OP);
+            int o = (mask >>> idx & 1) != 0 ? entryOf(s, idx) : HOLE_OP;
+            if ((mask >>> idx & 1) != 0 && (o == HOLE_OP || (o & MODE_BITS) == DEFER)) {
+                s.bad = true; // an unread binder that is read after all, or an argument of an inlined definition (never captured)
+            }
+            put(s, o);
         }
     }
 
@@ -725,7 +872,7 @@ final class Elab {
         ins(s, kind == Kind.LAM ? Op.MKLAM : Op.MKPI, r, 2 + len, m.terms.hasLevelParam(t) ? Code.X_LPARAM : 0);
         put(s, typed(s, Op.MODE_T, t));
         put(s, typed(s, Op.MODE_B, blk));
-        captures(s, mask, len);
+        captures(m, s, mask, len);
         return opR(r);
     }
 
@@ -745,7 +892,7 @@ final class Elab {
         int len = 64 - Long.numberOfLeadingZeros(mask);
         ins(s, Op.MKSUSP, r, 1 + len, (m.terms.hasLevelParam(t) ? Code.X_LPARAM : 0) | (let ? Code.X_LET : 0));
         put(s, typed(s, Op.MODE_T, t));
-        captures(s, mask, len);
+        captures(m, s, mask, len);
     }
 
     /**
@@ -816,7 +963,7 @@ final class Elab {
         } else if (hk == Kind.LAM) {
             result = beta(m, s, h, tb, n, pos);
         } else {
-            int fo = hk == Kind.BVAR ? var(s, terms.a(h)) : eval(m, s, h);
+            int fo = hk == Kind.BVAR ? var(m, s, terms.a(h)) : eval(m, s, h);
             result = applyTo(m, s, fo, tb, 0, n, pos);
         }
         s.tn = tb;
@@ -828,7 +975,7 @@ final class Elab {
      * is neutral at run time the application is inert and is built now, otherwise the node is suspended.
      */
     private static int argApp(Machine m, State s, int t, int h, int tb, int n) {
-        int fo = var(s, m.terms.a(h));
+        int fo = var(m, s, m.terms.a(h));
         int r = reg(s);
         if (s.strictArgs) {
             for (int i = 0; i < n; i++) {
@@ -1127,8 +1274,11 @@ final class Elab {
             majorArg = n - 1;
             minor0 = decls.recNumParams(rec) + 1;
         } else {
-            if (kind != DeclKind.DEFN || !casesOnInfo(m, s, c, tb + n) || n != s.tmp[tb + n + 1]) {
+            if (kind != DeclKind.DEFN) {
                 return false;
+            }
+            if (!casesOnInfo(m, s, c, tb + n) || n != s.tmp[tb + n + 1]) {
+                return inline(m, s, t, c, n, lX);
             }
             rec = s.tmp[tb + n];
             majorArg = s.tmp[tb + n + 2];
@@ -1143,9 +1293,25 @@ final class Elab {
             s.tn = tb;
             return false;
         }
+        // The major's operand first: an argument of an inlined definition is compiled here, once, and holds for the
+        // whole node (its code dominates every arm), so later uses below this node find it.
+        int me = chase(m, s, entryOf(s, terms.a(major)));
+        int memoAt = -1;
+        int mo;
+        if ((me & MODE_BITS) == DEFER && me != BAD && me != HOLE_OP) {
+            mo = resolve(m, s, me);
+            memoAt = (me & PAY) * DEF_WORDS + DEF_MEMO;
+            if (s.def[memoAt] != 0 || s.bad) {
+                memoAt = -1;
+            } else {
+                s.def[memoAt] = mo;
+            }
+        } else {
+            mo = var(m, s, terms.a(major));
+        }
         int rM = reg(s);
         ins(s, Op.WHNF, rM, 1, 0);
-        put(s, var(s, terms.a(major)));
+        put(s, mo);
         s.classJ++;
         int l0 = s.labN;
         for (int j = 0; j < k; j++) {
@@ -1174,12 +1340,262 @@ final class Elab {
         }
         s.treeDepth--;
         s.tn = tb;
+        if (memoAt >= 0) {
+            s.def[memoAt] = 0;
+        }
         return !s.bad;
+    }
+
+    /**
+     * A tree node {@code D a_1 .. a_n} whose head is a definition with a case tree of its own (a matcher:
+     * {@code fun p_1 .. p_q => tree over the p_i}, {@code n >= q}): the tree of {@code D} is compiled in place, its
+     * parameters bound to the argument terms, which are compiled only where the tree uses them ({@link #DEFER}).
+     * A major premise that is a parameter is {@code ARGV} of its argument; a leaf {@code p_i ȳ} whose argument is
+     * a lambda of the caller is a static beta: the alternative's body is compiled in tail position with its
+     * binders bound to the fields, and neither the alternative nor any other argument of {@code D} is built.
+     * The arguments beyond {@code q} are applied to the leaves. This is {@code RULES(D)} (ISA 3.6) composed with
+     * the DELTA of the caller: the same finite composition of DELTA, recursor rules and beta on the same
+     * arguments, so a stuck major still leaves the block with NONE and the caller takes the DELTA path.
+     * Only the tree nodes and leaves of {@code D} are compiled from its value, never a term that depends on its
+     * level parameters: the block runs under the substitution of the role.
+     */
+    private static boolean inline(Machine m, State s, int t, int c, int n, int lX) {
+        Terms terms = m.terms;
+        DeclTable decls = m.decls;
+        int v = decls.value(c);
+        if (m.engine == null || !m.engine.code.inlineTrees || s.inlDepth >= MAX_INLINE || !sourceOk(v)
+                || (decls.flags(c) & DeclTable.CF_BLOCK_VALUE) != 0 || !terms.isClosed(v)) {
+            return false;
+        }
+        int q = 0;
+        int body = v;
+        while (terms.kind(body) == Kind.LAM && q < MAX_ARITY) {
+            body = terms.b(body);
+            q++;
+        }
+        if (q == 0 || q > n || terms.kind(body) != Kind.APP) {
+            return false;
+        }
+        int tb = s.tn;
+        tmpRoom(s, 2 * n + s.extN);
+        terms.spine(t, s.tmp, tb);
+        int envBase = s.envBase;
+        int depth = s.depth;
+        int inl = s.inl;
+        int extTb = s.extTb;
+        int extN = s.extN;
+        int eb = tb + n;
+        int ne = 0;
+        for (int i = q; i < n; i++) {
+            s.tmp[eb + ne++] = defer(s, s.tmp[tb + i], envBase, depth, inl);
+        }
+        for (int i = 0; i < extN; i++) {
+            s.tmp[eb + ne++] = s.tmp[extTb + i];
+        }
+        s.tn = eb + ne;
+        int nb = envBase + depth;
+        if (nb + q + 8 > s.env.length) {
+            s.env = java.util.Arrays.copyOf(s.env, Math.max(s.env.length << 1, nb + q + 8));
+        }
+        for (int i = 0; i < q; i++) {
+            s.env[nb + i] = defer(s, s.tmp[tb + i], envBase, depth, inl);
+        }
+        s.envBase = nb;
+        s.depth = q;
+        s.inl = inl + 1;
+        s.inlDepth++;
+        s.extTb = eb;
+        s.extN = ne;
+        boolean ok = tree(m, s, body, lX);
+        s.envBase = envBase;
+        s.depth = depth;
+        s.inl = inl;
+        s.inlDepth--;
+        s.extTb = extTb;
+        s.extN = extN;
+        s.tn = tb;
+        if (s.bad) {
+            // The definition is not a tree of the accepted form (or the block grew too large): the caller compiles the
+            // application as it did before (it restores the emission state); nothing of the attempt remains.
+            s.bad = false;
+            return false;
+        }
+        if (ok) {
+            s.inlined++;
+        }
+        return ok;
+    }
+
+    /**
+     * A leaf of an inlined definition's tree (ISA 3.6 {@code leaf ::= p ȳ}): a parameter applied to fields,
+     * parameters and constants without level parameters; then the pending arguments of the inlined call.
+     */
+    private static void leaf(Machine m, State s, int t, int lX) {
+        Terms terms = m.terms;
+        int n = terms.kind(t) == Kind.APP ? terms.spineLength(t) : 0;
+        if (n > 200 || s.bad) {
+            s.bad = true;
+            return;
+        }
+        int tb = s.tn;
+        tmpRoom(s, n + s.extN + 1);
+        int h = n == 0 ? t : terms.spine(t, s.tmp, tb);
+        if (terms.kind(h) != Kind.BVAR) {
+            s.bad = true;
+            return;
+        }
+        for (int i = 0; i < n; i++) {
+            int a = s.tmp[tb + i];
+            int k = terms.kind(a);
+            if (k == Kind.BVAR) {
+                s.tmp[tb + i] = entryOf(s, terms.a(a));
+            } else if (k == Kind.CONST && terms.a(a) > 0 && !terms.hasLevelParam(a)) {
+                s.tmp[tb + i] = defer(s, a, s.envBase, s.depth, s.inl);
+            } else {
+                s.bad = true;
+                return;
+            }
+        }
+        for (int i = 0; i < s.extN; i++) {
+            s.tmp[tb + n + i] = s.tmp[s.extTb + i];
+        }
+        int na = n + s.extN;
+        s.tn = tb + na;
+        leafApply(m, s, entryOf(s, terms.a(h)), tb, na, lX);
+        s.tn = tb;
+    }
+
+    /**
+     * The application of environment entry {@code e} to the entries {@code tmp[aTb .. aTb + na)} in tail position: a
+     * static beta if {@code e} is an argument of an inlined definition that is a lambda term, else TAILAPPLY.
+     */
+    private static void leafApply(Machine m, State s, int e, int aTb, int na, int lX) {
+        e = chase(m, s, e);
+        if (e == HOLE_OP || e == BAD || s.bad || na > 250) {
+            s.bad = true;
+            return;
+        }
+        if ((e & MODE_BITS) == DEFER) {
+            int k = (e & PAY) * DEF_WORDS;
+            if (s.def[k + DEF_MEMO] == 0 && m.terms.kind(s.def[k]) == Kind.LAM && na > 0) {
+                betaLeaf(m, s, k, aTb, na, lX);
+                return;
+            }
+        }
+        int fo = resolve(m, s, e);
+        for (int i = 0; i < na; i++) {
+            s.tmp[aTb + i] = resolve(m, s, s.tmp[aTb + i]);
+        }
+        if (s.bad) {
+            return;
+        }
+        if (na == 0) {
+            ins(s, Op.RET, 0, 1, 0);
+            put(s, fo);
+            return;
+        }
+        ins(s, Op.TAILAPPLY, 0, na + 1, 0);
+        put(s, fo);
+        for (int i = 0; i < na; i++) {
+            put(s, s.tmp[aTb + i]);
+        }
+        s.classJ++;
+    }
+
+    /**
+     * Static beta of the deferred lambda term {@code def[k]} on the entries {@code tmp[aTb .. aTb + na)} (ISA 3.4
+     * "app, lambda head", applied to an alternative of an inlined matcher): its first {@code j = min(leading
+     * lambdas, na)} binders are bound to the arguments its body reads (HOLE otherwise, B6), the body is compiled
+     * in tail position in the environment the lambda is a term of - as a nested tree if it is one - and further
+     * arguments are applied to its value.
+     */
+    private static void betaLeaf(Machine m, State s, int k, int aTb, int na, int lX) {
+        Terms terms = m.terms;
+        int owner = s.def[k + 3];
+        int j = 0;
+        int body = s.def[k];
+        while (j < na && terms.kind(body) == Kind.LAM) {
+            body = terms.b(body);
+            j++;
+        }
+        if (j >= Layout.NEAR_SLOTS || (j < na && owner > 0)) {
+            s.bad = true;
+            return;
+        }
+        long mask = terms.fvMask(body);
+        for (int i = 0; i < na; i++) {
+            s.tmp[aTb + i] = i >= j || (mask >>> (j - 1 - i) & 1) != 0 ? resolve(m, s, s.tmp[aTb + i]) : HOLE_OP;
+        }
+        if (s.bad) {
+            return;
+        }
+        int envBase = s.envBase;
+        int depth = s.depth;
+        int inl = s.inl;
+        int extN = s.extN;
+        enterRegion(s, s.def[k + 1], s.def[k + 2], owner);
+        s.extN = 0;
+        for (int i = 0; i < j; i++) {
+            push(s, s.tmp[aTb + i]);
+        }
+        if (j == na) {
+            int n0 = s.n;
+            int insns = s.insns;
+            int fixN = s.fixN;
+            int labN = s.labN;
+            int nextReg = s.nextReg;
+            if (!tree(m, s, body, lX) && !s.bad) {
+                s.n = n0;
+                s.insns = insns;
+                s.fixN = fixN;
+                s.labN = labN;
+                s.nextReg = nextReg;
+                if (owner > 0) {
+                    leaf(m, s, body, lX);
+                } else {
+                    tail(m, s, body);
+                }
+            }
+        } else {
+            int fo = eval(m, s, body);
+            ins(s, Op.TAILAPPLY, 0, na - j + 1, 0);
+            put(s, fo);
+            for (int i = j; i < na; i++) {
+                put(s, s.tmp[aTb + i]);
+            }
+            s.classJ++;
+        }
+        s.envBase = envBase;
+        s.depth = depth;
+        s.inl = inl;
+        s.extN = extN;
     }
 
     /** One arm: the minor's {@code nf + nih} binders are the fields (FIELDS) and unread hypotheses; then a tree or a leaf. */
     private static void arm(Machine m, State s, int minor, int nf, int nih, int rM, int lX) {
         Terms terms = m.terms;
+        if (nf > 0 && nf <= 200 && nih == 0 && terms.kind(minor) == Kind.BVAR && m.engine != null && m.engine.code.inlineTrees) {
+            // an eta-reduced minor that takes fields only: the variable applied to the fields
+            int r0 = reg(s);
+            for (int i = 1; i < nf; i++) {
+                reg(s);
+            }
+            ins(s, Op.FIELDS, r0, 1, nf);
+            put(s, opR(rM));
+            int tb = s.tn;
+            tmpRoom(s, nf + s.extN);
+            for (int i = 0; i < nf; i++) {
+                s.tmp[tb + i] = opR(r0 + i);
+            }
+            for (int i = 0; i < s.extN; i++) {
+                s.tmp[tb + nf + i] = s.tmp[s.extTb + i];
+            }
+            int na = nf + s.extN;
+            s.tn = tb + na;
+            leafApply(m, s, entryOf(s, terms.a(minor)), tb, na, lX);
+            s.tn = tb;
+            return;
+        }
         int body = minor;
         for (int i = 0; i < nf + nih; i++) {
             if (terms.kind(body) != Kind.LAM) {
@@ -1225,7 +1641,11 @@ final class Elab {
             s.fixN = fixN;
             s.labN = labN;
             s.nextReg = nextReg;
-            tail(m, s, body);
+            if (s.inl > 0) {
+                leaf(m, s, body, lX); // a term of an inlined definition: only the leaf form (ISA 3.6)
+            } else {
+                tail(m, s, body);
+            }
         }
         s.depth = depth;
     }

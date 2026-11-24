@@ -204,6 +204,18 @@ public final class RunConfig {
      */
     public long spillNanos = 20_000_000L;
 
+    /**
+     * Check the export this many times in the same process ({@code -X passes=N}; owner note 12: the
+     * target is warm wall clock). Pass 1 is the run itself: load and check, and its verdict is the
+     * verdict of the run. Each later pass checks every def / thm / axiom / opaque unit of the loaded
+     * store again, with new engines, new sessions and a new verdict board (the outcomes of
+     * inductive blocks and quot records are the ones the environment pass of pass 1 recorded), and
+     * only reports: one line per pass on the diagnostics stream (verdict, wall clock, CPU time) and
+     * {@code driver.pass.K.*} in the statistics. Later passes run only when pass 1 accepted the
+     * export. 1 = no later pass; nothing else in a run depends on this setting.
+     */
+    public int passes = 1;
+
     /** Print WARM-ANOMALY and MACHINE-INCOMPLETE events to stderr (at most 8 lines per run). */
     public boolean logAnomalies = true;
 
@@ -211,7 +223,7 @@ public final class RunConfig {
 
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "env-batch", "spill-ms", "publish-units", "publish-mib",
-        "pipeline-min-mib", "no-fallback"
+        "pipeline-min-mib", "no-fallback", "passes"
     };
 
     /** Environment variable with driver settings for experiments: {@code key=value[,key=value]...}. */
@@ -265,6 +277,7 @@ public final class RunConfig {
      * publish-units=N     pipelined loading: publish every N units                     {@link #publishEveryUnits}
      * publish-mib=N       pipelined loading: publish every N MiB of input              {@link #publishEveryBytes}
      * pipeline-min-mib=N  inputs below N MiB are loaded in batch mode                  {@link #pipelineMinBytes}
+     * passes=N            check the loaded export N times in one process; the verdict is pass 1's  {@link #passes}
      * no-fallback         the reference kernel does not decide what the primary engine declines
      *                     (a flag: no value, or true / false)                          {@link #referenceFallback}
      * </pre>
@@ -299,7 +312,10 @@ public final class RunConfig {
         }
         long max = key.endsWith("-mib") ? 1L << 24 : key.equals("spill-ms") ? 3_600_000L : 1L << 30;
         long min = key.equals("chunk") || key.equals("env-batch") || key.equals("publish-units")
-                || key.equals("publish-mib") ? 1 : 0;
+                || key.equals("publish-mib") || key.equals("passes") ? 1 : 0;
+        if (key.equals("passes")) {
+            max = 1000;
+        }
         if (n < min || n > max) {
             throw new IllegalArgumentException(key + "=" + value + ": out of range [" + min + ", " + max + "]");
         }
@@ -330,6 +346,9 @@ public final class RunConfig {
                 break;
             case "pipeline-min-mib":
                 pipelineMinBytes = n << 20;
+                break;
+            case "passes":
+                passes = (int) n;
                 break;
             default:
                 throw new IllegalArgumentException("unknown driver setting '" + key + "'");

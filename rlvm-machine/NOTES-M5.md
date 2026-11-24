@@ -118,7 +118,7 @@ records and the rest is conversion work started by the official comparison of an
 |---|---|---|
 | J1 | `Decl.joint`: while the declared type is a Pi node, the value a lam node and both have the SAME domain term (node id): `u_i = ENSORT(INFER(A_i, CHECKED))`, `x_i = OPEN(EVAL(A_i))`, once for both telescopes. Then `u = ENSORT(INFER(rest of the type, CHECKED))`, the sort of the type is `mkImax(u_1, .. mkImax(u_k, u))`, a theorem's must be always zero (before the value is looked at, as `add_theorem`), then `CHECK(rest of the value, env, EVAL(rest of the type, env))`, CLOSE all. The telescope state is in the driver's locals (H6) | the type part is INFER.pi verbatim; the value part is B9's lam rule with `D == DOM(W)` by construction and `INST(W, x)` = EVAL of the rest of the Pi under `env + x` (mask contract). Officially Pi against Pi is decided binder by binder (R02 8.1), so with identical domains the comparison is `typeof(v)` against `T` under the same variables. With no joint binder the calls are those of `phases` |
 | J2 | Only identical node ids count as "the same domain" (the loader shares equal terms; hand-built fixtures do not, so `M5Step1Test.initPrelude` tests it on a real export) | no comparison is made; anything else is left to `CHECK` |
-| J3 | Measured on Init: 220,353 joint binders (3.8 per declaration with a value); ticks 56.03 M -> 53.35 M (-4.8%), records 442.8 -> 430.1 per unit, CHECK 1.09 M -> 0.87 M, INST 1.19 M -> 0.97 M, DOM 1.48 M -> 1.29 M | each joint binder saves a tabling probe of the lambda and of its domain, `WHNF(V)`, `DOM(W)`, the PI closure of the rest of the telescope and its frame |
+| J3 | Measured on Init: 220,353 joint binders (3.8 per declaration with a value); ticks 56.03 M -> 55.12 M (-1.6%), records 442.8 -> 430.1 per unit (-2.9%), CHECK 1.09 M -> 0.87 M, INST 1.19 M -> 0.97 M, DOM 1.48 M -> 1.29 M | each joint binder saves a tabling probe of the lambda and of its domain, `WHNF(V)`, `DOM(W)`, the PI closure of the rest of the telescope and its frame |
 
 ### C: INFER's front cache (no switch yet: system property `rlvm.machine.m5ic=true`; ISA 12 open question 6)
 
@@ -134,4 +134,86 @@ records and the rest is conversion work started by the official comparison of an
 |---|---|---|
 | F11 | Cost: `Infer.Ext.sigdTicks` = ticks between the start of a SIGD derivation and its publication (the stamp travels in the record buffer, two words), lazy derivations and those of DECL alike; `Machine.factsDerived` / `factsNone` are now written (they were never incremented, so the statistics always showed 0) | "make their derivation cost visible" |
 | F12 | Use: `Ext.factUse[Facts.USE_*]`, counted while `m.stats`: prop-mask queries / with a bit, unread-mask queries on a derived record / with a bit, static-PROOF queries on a constant head / answered YES / answered NO | "their use measurable"; requested of M6 for `dumpStats` |
-| F13 | Measured on Init (`warm,gated,expect,facts`): 58,576 records derived in 121,541 ticks = **0.23% of all ticks** (the bound is 2%), 0 F_NONE; static PROOF 1.08 M queries: 3,678 yes, 947,262 no (87.6% definite); prop mask 945,213 queries, 26,405 with a bit; unread mask 314,944 queries, 6,507 with a bit. Effect of the consumers (M4): PIRR 1.15 M -> 0.17 M, VTYPE 1.65 M -> 0.62 M, ISPROP 83 k -> 33 k, ticks 56.03 M -> 55.12 M | the derivation is cheap because the type telescope was just checked in the same session (every INFER is a memo hit) |
+| F13 | Measured on Init (`warm,gated,expect,facts`): 58,576 records derived in 121,541 ticks = **0.23% of all ticks** (the bound is 2%), 0 F_NONE; static PROOF 1.08 M queries: 3,678 yes, 947,262 no (87.6% definite); prop mask 945,213 queries, 26,405 with a bit; unread mask 314,944 queries, 6,507 with a bit. Effect of the consumers (M4): PIRR 1.15 M -> 0.17 M, VTYPE 1.65 M -> 0.62 M, ISPROP 83 k -> 33 k, ticks 56.03 M -> 53.35 M (-4.8%), records 442.8 -> 437.6 per unit | the derivation is cheap because the type telescope was just checked in the same session (every INFER is a memo hit) |
+
+### Eager reduction (M6-F26, S-F4 / S-F5; 2026-11-24)
+
+| # | Decision | Reason |
+|---|---|---|
+| I20 | `Infer.twD` sets the mode with `m.enterER()` (M6's request of 14:46Z), never by assigning `m.ER` | the facade must learn that the declaration compared under eager reduction: it checks it again in a fresh session if the session was warm and ends the session after it. On Init 155 declarations enter the mode (718 comparisons, 1.1% of the ticks); none of their `eagerReduce _ _` arguments has a type identical to its domain |
+| P5 | PCHK is not set once the declaration has entered eager reduction (`m.erSeen`) | the official answer of a comparison under `eagerReduce` depends on the declaration's history (its caches live for one declaration), so nothing derived after such a comparison is shared. A term whose bit is set was checked without any ER comparison, and it is closed, so its types are the same records in every declaration |
+| M6 | MATCH is not restricted for `eagerReduce _ _` arguments | a T of MATCH is identity of the two values up to PEEK and the official level equivalence: the case in which TWALK compares nothing (`Tt == D`) and never enters the mode. An argument whose type does not match goes through `enterER` + CONV as before |
+
+### Measurements of wave 6, batch 1: each switch on top of step 1
+
+Native image CE `-O3`, arena-shaped container, ONE worker, under the measurement lock, one batch (`work/m5/batch1.sh`, rows
+`b1-*` of `work/m5/measure.tsv`; image `work/m5/dist-a2` = this package's sandbox of 14:05Z with the integrator's pipeline
+jars; two interleaved rounds per configuration). **The host was heavily loaded (load average 73-165 during the batch), so CPU
+and wall seconds scatter by about +-5% and decide nothing below that; the instruction counts are exact (every repeat gave the
+same number) and are the signal here.** Base = `warm,gated,expect`, `session-mib=4`. Every row: all units accepted, 0 declined.
+
+| corpus | configuration | CPU s (two rounds) | wall s | RSS MiB | instructions G | against base | ticks |
+|---|---|--:|--:|--:|--:|--:|--:|
+| Init | v0 (no switch) | 8.29 | 8.35 | 252 | 139.2 | | 77.83 M |
+| Init | base | 7.96 / 7.80 | 7.96 | 239 | 109.9 | | 56.03 M |
+| Init | + m5a | 8.25 / 7.80 | 8.07 | 239 | 108.4 | -1.4% | 53.93 M |
+| Init | + pchk | 7.81 / 8.14 | 8.09 | 240 | 107.9 | -1.8% | 54.87 M |
+| Init | + m5b | 8.11 / 7.67 | 7.95 | 237 | 108.4 | -1.4% | 55.12 M |
+| Init | + m5a,pchk,m5b | 8.05 / 7.97 | 8.05 | 240 | 105.7 | **-3.8%** | 52.36 M |
+| Init | base + probes | 8.14 | 8.20 | 225 | 106.8 | | 52.97 M |
+| Init | base + probes + m5a,pchk,m5b | 7.92 | 7.97 | 228 | 102.5 | -4.0% (of probes) | 49.15 M |
+| Std | v0 | 13.76 | 13.87 | 329 | 223.6 | | 122.25 M |
+| Std | base | 13.89 / 14.58 | 14.35 | 307 | 185.6 | | 94.06 M |
+| Std | + m5a | 14.60 / 14.72 | 14.76 | 307 | 182.5 | -1.7% | 90.16 M |
+| Std | + pchk | 14.50 / 13.43 | 14.11 | 310 | 182.8 | -1.5% | 92.37 M |
+| Std | + m5b | 13.50 / 13.32 | 13.51 | 308 | 182.4 | -1.7% | 92.07 M |
+| Std | + m5a,pchk,m5b | 13.10 / 13.07 | 13.14 | 312 | 177.5 | **-4.4%** | 87.04 M |
+| Std | base + probes | 13.19 | 13.27 | 314 | 178.3 | | 86.71 M |
+| Std | base + probes + m5a,pchk,m5b | 12.95 | 13.01 | 311 | 169.8 | -4.8% (of probes) | 79.51 M |
+| Cedar slice | v0 | 3.40 | 3.44 | 190 | 47.1 | | 18.10 M |
+| Cedar slice | base | 3.39 / 3.58 | 3.54 | 169 | 46.0 | | 18.71 M |
+| Cedar slice | + m5a | 3.59 / 3.63 | 3.84 | 169 | 45.8 | -0.4% | 18.39 M |
+| Cedar slice | + pchk | 3.31 / 3.34 | 3.36 | 170 | 45.6 | -0.9% | 18.46 M |
+| Cedar slice | + m5b | 3.34 / 3.35 | 3.38 | 169 | 45.9 | -0.2% | 18.65 M |
+| Cedar slice | + m5a,pchk,m5b | 3.28 / 3.54 | 3.45 | 169 | 45.3 | **-1.5%** | 18.09 M |
+| Cedar slice | base + probes | 3.00 | 3.04 | 171 | 41.9 | | 15.67 M |
+| Cedar slice | base + probes + m5a,pchk,m5b | 3.17 | 3.23 | 172 | 41.3 | -1.4% (of probes) | 15.08 M |
+| reachability | base | 8.17 / 8.21 | 8.32 | 1341 | 60.9 | | 35.44 M |
+| reachability | + m5a | 8.54 / 8.74 | 8.79 | 1341 | 60.8 | -0.2% | 35.36 M |
+| reachability | + pchk | 8.27 / 8.50 | 8.57 | 1341 | 60.9 | 0.0% | 35.43 M |
+| reachability | + m5b | 8.21 / 8.30 | 8.38 | 1341 | 60.8 | -0.2% | 35.39 M |
+| reachability | + m5a,pchk,m5b | 8.15 / 8.19 | 8.30 | 1341 | 60.8 | **-0.2%** | 35.31 M |
+
+Reading. The three switches together take 3.8% (Init), 4.4% (Std), 1.5% (Cedar slice), 0.2% (reachability) of the instructions
+and are neutral on memory. Each alone is 1.4-1.8% on the libraries and below 1% on the Cedar slice. In CPU seconds the Std rows
+show the same direction (13.1 s against 13.9 - 14.6 s), the others are inside the scatter of a loaded host; the one row pair
+that looks worse, reachability + m5a (two runs 0.4 s above the base at the same instruction count and the same ticks), can only
+be the host: inference is 1% of that corpus. The warm in-process A/B on the JVM (`work/m5/ab.sh`: `M5Bench` alternates the two
+configurations in ONE process, thread CPU of the check phase; Init, eight rounds, host load 140-170): base 8.99 / 9.11 / 7.83 /
+9.09 s, with m5a,pchk,m5b 8.50 / 8.66 / 8.61 / 7.81 s: -4% in the mean, also inside the scatter.
+
+Why so little, when MATCH answers 2.2 M of 3.2 M domains and EVAL call events fall by 18%: the domains it answers were cheap (a
+flat application under the gate is one NEU probe, a tabled one is a memo hit), and the conversions that make 59% of the
+records are untouched.
+
+### Experiments of wave 6 that were not kept, or not built (with their numbers)
+
+| Experiment | Result |
+|---|---|
+| Expected-type return for an untabled application under `CHECK` (ISA 4.5.4 last lines) | built, removed: fires 0 times on Init (M5 above) |
+| Pattern against pattern for an untabled application argument (R07 `inst_eq_inst`) | not built; probe on Init: 632,317 untabled APP arguments reach MATCH, 437,944 are answered, 382,705 of them right after their result type was built: that many of 1.32 M result builds (and as many MATCH walks) would go, about 4% of the EVAL call events |
+| Lazy ARGV (the value of an argument only when a domain or the result is built) | not built; of 6.16 M argument values on Init 3.10 M are atoms and only 0.71 M of the others are read by domains alone |
+| PCHK for closed terms WITH level parameters (allowed by `SharedFacts`: `lpSet` within the declaration's parameters) | probe on Init: 89,448 bits instead of 60,390, 132,040 hits instead of 117,875 (+12%); not adopted: about a quarter of a per cent of the ticks, and ISA 5.3 gives PERM only to terms without level parameter |
+| Telescope domains and results evaluated without a tabling record (M2's `evalNT`, as for the body of INST under `m2a`) | probe in a private copy, see "Open" below |
+| A record-free INFER memo (the front cache alone, no SUSP record) | not built: a lossy memo is not safe against a DAG that is walked as a tree (RECONCILIATION C3.10: CHECK is tabled); the front cache stays in front of the exact memo |
+
+### Switches of this package (for `SWITCHES.md`)
+
+| Switch | Guards | Gates passed | Measured |
+|---|---|---|---|
+| `expect` | B9: CHECK of lam / let nodes against the expected type (E1-E6) | wave 4 / integrator | E6, integrator |
+| `pchk` | P1-P5: shared check facts | tutorial + bugs (alone, with step 1, with probes, with facts, audits), the four corpora, 5,800+ tutorial mutants (together with `m5a`, `m5b`) | batch 1 |
+| `m5a` | M1-M6: MATCH of a telescope domain against the argument's type | the same | batch 1 |
+| `m5b` | J1-J3: joint telescope check in DECL | the same | batch 1 |
+| `-Drlvm.machine.m5ic=true` | C1-C3: INFER's front cache (no switch yet) | tutorial + bugs, the four corpora (with the three switches) | see batch 2 |
+| `facts` | F1-F13: derivation and accessors (the consumers are M4's) | M4's and S's gates | F13 |

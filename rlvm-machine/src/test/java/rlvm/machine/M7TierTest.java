@@ -107,6 +107,7 @@ class M7TierTest {
             String s = run(t, w.store.decls().constantCount(), "init-prelude D=" + depth);
             System.out.print(s);
             System.out.print(t.both);
+            System.out.print(t.peekNotes);
             report.append(s);
             assertTrue(t.clean(), s + t.failures);
             assertTrue(t.matchHits * 10 >= t.matchSites * 9, s + t.failures);

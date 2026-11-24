@@ -67,6 +67,12 @@ class M8DiffReportTest {
         report("cedar");
     }
 
+    /** The evaluation-heavy corpus (owner note 9). */
+    @Test
+    void reachability() throws IOException {
+        report("reachability");
+    }
+
     /** Any other corpus: {@code -Dm8.label=NAME -Dm8.paths=FILE_OR_DIR[,FILE_OR_DIR..]}. */
     @Test
     void custom() throws IOException {

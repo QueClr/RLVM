@@ -115,6 +115,8 @@ public final class MachineEngine implements Engine {
     private boolean declinesFailed;
     private long statCapResets;
     private long statEagerDeclines;
+    /** Counters the packages' session states report ({@code Machine.Counters}), by name, in the order first seen. */
+    private final java.util.LinkedHashMap<String, long[]> statPackage = new java.util.LinkedHashMap<>();
     private long statAllocGrows;
     private long statAllocGrowBytes;
     private long statAllocResets;
@@ -269,6 +271,9 @@ public final class MachineEngine implements Engine {
                     sink.put("machine.code.stayedGeneric." + roleName(role), statStayedGeneric[role]);
                 }
             }
+            for (java.util.Map.Entry<String, long[]> e : statPackage.entrySet()) {
+                sink.put("machine." + e.getKey(), e.getValue()[0]);
+            }
             sink.put("machine.factsDerived", statFactsDerived);
             sink.put("machine.factsNone", statFactsNone);
             sink.put("machine.factBytes", facts.bytes());
@@ -279,6 +284,22 @@ public final class MachineEngine implements Engine {
                 sink.put("machine.memoInconclusive", statMemoInconclusive);
                 sink.put("machine.memoByConv", statMemoByConv);
             }
+        }
+    }
+
+    /** Sums the counters of a package's session state, if it reports any ({@code Machine.Counters}). Called under the engine's lock. */
+    synchronized void packageCounters(Object ext) {
+        if (!(ext instanceof Machine.Counters)) {
+            return;
+        }
+        Machine.Counters c = (Machine.Counters) ext;
+        String[] names = c.counterNames();
+        long[] values = c.counterValues();
+        if (names == null || values == null) {
+            return;
+        }
+        for (int i = 0; i < names.length && i < values.length; i++) {
+            statPackage.computeIfAbsent(names[i], k -> new long[1])[0] += values[i];
         }
     }
 
@@ -356,6 +377,12 @@ public final class MachineEngine implements Engine {
         for (int i = 0; i < statByCode.length; i++) {
             statByCode[i] += s.byCode[i];
         }
+        packageCounters(m.x1);
+        packageCounters(m.x2);
+        packageCounters(m.x3);
+        packageCounters(m.x4);
+        packageCounters(m.x5);
+        packageCounters(m.x7);
         for (int i = 0; i < s.keptN && statMessagesN < statMessages.length; i++) {
             statMessages[statMessagesN++] = s.kept[i];
         }

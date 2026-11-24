@@ -37,6 +37,75 @@ The two `-X` keys are declared by `RefEngine.Provider.optionKeys()` and reach th
 system property; an unknown value ends the launcher with status 64. `RefOptions` holds the parsed
 settings (`RefEngine.factory(RefOptions)`, `new RefKernel(ctx, config, options)` for tools and tests).
 
+## Universe levels: official by default
+
+Project owner's decision of 2026-11-24 (docs/design/OWNER-NOTES.md item 11, "resemble official by
+default"): both engines compare universe levels as the official Lean kernel does, with its incomplete
+algorithm, and the complete relation is an opt-in switch only. For this engine:
+
+| | default (`-X levels=official`) | opt-in `-X levels=complete` |
+|---|---|---|
+| two sorts (`quick`, the official `is_def_eq(level, level)`) | `a == b` or `LevelOps.isEquivOfficial`: identity of the official normal forms (`is_equivalent`, level.cpp) | `LevelOps.isEquiv`: equal under every assignment |
+| level lists of two references to one constant (`levelsEquiv`: the same-head step of lazy delta reduction and the constant case of `is_def_eq_core`) | equal length and pairwise the same test | `LevelOps.listsEquiv` |
+| `is_prop` (theorem types, proof irrelevance, projections, K) | `normalizes_to_zero`, which is exact | the same |
+| universe instantiation of a constant's type / value / rule | the official `instantiate` (rebuilds changed nodes through `mk_max` / `mk_imax`) | the same |
+| everything else (caches, `t == s`, `Sort` and `Const` nodes) | structural, i.e. identity of ids | the same |
+
+The setting reaches every instance of a run (primary, strict re-check, environment pass), so the
+inductive and theorem checks that call this engine through `KernelOps` follow it. Three things it does
+not reach: `rlvm-inductive` compares levels itself where `add_inductive` does (`is_equivalent` of the
+mutual types' universes, `is_geq` of a constructor field's universe) and always uses the official
+functions; `rlvm-admit`'s prelude guards use the complete relation (they decide no verdict of the
+official kernel); the machine has its own switch (`-X machine.switches=...,levels-complete`, off by
+default; `-X levels=complete` alone leaves the machine official, the run then reports
+`MACHINE-INCOMPLETE` where the two differ - asked of M6 in requests.log, 14:50Z).
+
+What the official relation does not identify (all answers of leanchecker v4.36.0): `imax u 1` and
+`max u 1`; `(imax u (v+1))+1` and `(max u (v+1))+1`; `imax u v` and `imax (imax u v) v`;
+`imax u (max v w)` and `max (imax u v) (imax u w)`. In rlvm-level's golden set the official kernel
+says "different" to 1,982 of 3,280 semantically true equations.
+
+### What changed (2026-11-24, wave 8)
+
+- `RefOptions`: `DEFAULT_LEVELS = "official"`; `-X levels=official|complete`, system property
+  `rlvm.levels` as the fallback, anything else an `IllegalArgumentException` (launcher status 64).
+- `RefKernel` / `RefEngine`: comments only; the comparison code (`levelEquiv`, `levelsEquiv`) is the
+  one published at 10:37Z, where `official` was the opt-in.
+- Tests: `LevelsTest` (default, opt-in, every way an engine is built), `LevelsGoldenTest` (new: 7,297
+  official answers through `is_def_eq`), `corpus.CorpusTest.imaxCornerCasesFollowTheOfficialKernelByDefault`,
+  `corpus.CorpusRunner --levels official|complete`.
+
+### Verdicts that changed
+
+Only where the two relations differ, and only towards the official verdict:
+
+| test | before (default complete) | now (default official) | official checker |
+|---|---|---|---|
+| `either/corner-cases/imax-right-successor` | accept | **reject** (`imaxRightOne`: `Sort (imax u 1)+1` vs `Sort (max u 1)+1`) | reject |
+| `either/corner-cases/imax-nested-absorption` | accept | **reject** (`imaxAbsorbRight`: `Sort (imax u v)+1` vs `Sort (imax (imax u v) v)+1`) | reject |
+| level corpus (below), 1,762 of 6,300 files | accept | **reject** | reject |
+
+With `-X levels=complete` all of them are accepted again. No published test, no mutant and no
+declaration of Init, Std or cedar changes its verdict.
+
+### Evidence (2026-11-24; private distribution = this module's jar ca1f9bd918bb + every other module as published at 14:33Z; JVM launcher, real pipeline)
+
+Ground truth is `leanchecker --from-export` of Lean v4.36.0 (cached for the arena tests in
+`work/oracle/`). Scripts, files and raw results: `work/prof/L/` (`bin/either.sh`, `bin/lbatch.sh` =
+many small exports through `rlvm.main.RlvmChecker` in one JVM, `bin/levelcorpus.py`, `data/`, `levels/`).
+
+| what | reference engine, default | `-X levels=complete` | `-X engine=machine` (machine jar 01084ca09707, default) |
+|---|---|---|---|
+| `imax-right-successor`, `imax-nested-absorption` | reject, reject | accept, accept | reject, reject |
+| the 30 `either` tests | 28 official verdicts; the two tests on which leanchecker does not terminate (`eta-struct-major-no-whnf`, `eta-struct-major-and-no-whnf`) are declined in under a second | 26 (the two imax tests accepted) | 28 official verdicts; the two non-terminating tests ran into a 600 s limit (no decline) |
+| the 230 published tests (`scripts/gate.sh`, slice) | 230 correct = 230 official verdicts, 0 declined | - | - |
+| level corpus: 6,300 generated exports, one level question each, asked through eleven parts of the checker (two sorts; level lists of a constant bare, under an application, after delta, with a phantom parameter; theorem value type; `is_prop` of a theorem type; instantiated constant type; constructor field universe; mutual types in one universe); official: 2,455 accept, 3,845 reject, 2,081 of the rejects semantically true | 6,300 official verdicts, 0 declined | 4,538 (1,762 accepted that the official checker rejects; the 319 inductive ones stay rejected, see above) | 6,300 official verdicts |
+| the 699 `SWAP_LEVEL` mutants of the four mutant corpora (official: 25 accept, 674 reject) | 699 official verdicts | 699 | 699 |
+| differential engine (`-X engine=diff -X diff.engine=machine`, test kit) on the 6,300 + 1,600 level exports | 0 difference records | 4 COMPLETENESS records per imax file (reference complete, machine official) unless `levels-complete` is given to the machine as well | - |
+| Init / Cedar slice (`cedar-hot-ax`) / Std / cedar, 4 workers | accept (23.9 / 9.8 / 34.6 / 44.6 s CPU) | - | accept (28.1 / 9.7 / 26.0 / 34.9 s CPU), no `MACHINE-INCOMPLETE` line |
+
+GATE_PLACEHOLDER
+
 ## Public API
 
 ```java

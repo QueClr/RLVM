@@ -451,6 +451,55 @@ class RunTest {
         }
     }
 
+    // ---- passes -----------------------------------------------------------------------------------------------------
+
+    @Test
+    void laterPassesCheckEveryUnitAgainAndNeverChangeTheVerdict() {
+        for (int w : new int[] {1, 4}) {
+            Unit[] script = Fakes.units(300);
+            FakeHost host = new FakeHost(script);
+            host.failMirror = true; // the fake host's status column takes one write per unit; the driver tolerates the refusal
+            RunConfig c = Fakes.config(w);
+            c.set("passes", "3");
+            Run run = host.run(c, false);
+            assertEquals(Outcome.ACCEPT, run.execute(), w + " workers");
+            long[][] passes = run.passResults();
+            assertEquals(3, passes.length);
+            for (long[] p : passes) {
+                assertEquals(Outcome.ACCEPT, p[0]);
+                assertTrue(p[1] >= p[2] && p[2] >= 0, "wall clock of the pass and of its checking phase");
+            }
+            for (int u = 0; u < script.length; u++) {
+                assertEquals(3, host.warmChecks.get(u), "unit " + u + " is checked once per pass");
+            }
+            assertEquals("", host.describeViolations());
+            assertEquals(0, host.sessionsOpen.get());
+            assertEquals(0, host.enginesOpen.get());
+        }
+        // The verdict is the first pass's, and a run that does not accept the whole export makes no further pass.
+        Unit[] script = Fakes.units(50);
+        script[7].warm = Fakes.R;
+        script[7].strict = Fakes.R;
+        script[7].ref = Fakes.R;
+        FakeHost host = new FakeHost(script);
+        RunConfig c = Fakes.config(4);
+        c.passes = 3;
+        Run run = host.run(c, false);
+        assertEquals(Outcome.REJECT, run.execute());
+        assertEquals(7, run.verdicts().decidingUnit());
+        assertEquals(1, run.passResults().length);
+        assertEquals(Outcome.REJECT, run.passResults()[0][0]);
+        assertEquals(1, host.warmChecks.get(7));
+        assertEquals("", host.describeViolations());
+        // One pass by default: nothing but the run itself.
+        FakeHost plain = new FakeHost(Fakes.units(20));
+        Run one = plain.run(Fakes.config(1), true);
+        assertEquals(Outcome.ACCEPT, one.execute());
+        assertEquals(1, one.passResults().length);
+        assertEquals(1, plain.warmChecks.get(3));
+        assertThrows(IllegalArgumentException.class, () -> new RunConfig().set("passes", "0"));
+    }
+
     // ---- slow units -------------------------------------------------------------------------------------------------
 
     @Test

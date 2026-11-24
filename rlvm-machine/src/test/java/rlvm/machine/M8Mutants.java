@@ -230,11 +230,17 @@ final class M8Mutants {
             for (int i = 0; i < ts.length; i++) {
                 total[i].add(ts[i]);
             }
+            // what is known so far (a campaign runs for a long time on a loaded host; nothing of it is lost if it is stopped)
+            Path part = Fixture.root().resolve("work/status/machine-mutants" + Diff.reportName("") + ".running.md");
+            Files.createDirectories(part.getParent());
+            Files.write(part, ("NOT COMPLETE: the corpora done so far (" + tallies.keySet() + " of " + names + ")\n\n"
+                    + render(sets, tallies, total, (System.nanoTime() - t0) / 1e9, jobs, limit, sampleEvery)).getBytes(StandardCharsets.UTF_8));
         }
         String text = render(sets, tallies, total, (System.nanoTime() - t0) / 1e9, jobs, limit, sampleEvery);
         Path out = Fixture.root().resolve("work/status/machine-mutants" + Diff.reportName("") + ".md");
         Files.createDirectories(out.getParent());
         Files.write(out, text.getBytes(StandardCharsets.UTF_8));
+        Files.deleteIfExists(out.resolveSibling("machine-mutants" + Diff.reportName("") + ".running.md"));
         System.out.println(text);
         System.out.println("report: " + out);
         boolean ok = !tallies.isEmpty();

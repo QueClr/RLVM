@@ -71,6 +71,13 @@ public final class Run {
     private long loaderUnits = -1;
     private PrintStream err = System.err;
 
+    /** This run is pass 2 .. N of another run ({@code RunConfig.passes}): it reports to that run only. */
+    private boolean laterPass;
+    /** Verdict, wall clock, checking-phase wall clock and process CPU time of every pass (pass 1 first). */
+    private long[][] passResults = new long[0][];
+    private long checkStartNanos;
+    private long checkEndNanos;
+
     private HeavyGate gate;
     private final AtomicLong givenBack = new AtomicLong();
     private final AtomicLong gcRequests = new AtomicLong();
@@ -255,8 +262,10 @@ public final class Run {
                     "rlvm-driver: order " + config.order + " is deferred until after the vertical slice");
         }
         long total = stats.phaseStart("total");
+        final long wall0 = System.nanoTime();
+        final long cpu0 = processCpuNanos();
         try {
-            if (wiring != null) {
+            if (wiring != null && !laterPass) {
                 applyEnvironment();
             }
             if (config.stopAfter != null && !"load".equals(config.stopAfter) && !"env".equals(config.stopAfter)) {
@@ -296,8 +305,103 @@ public final class Run {
         if (t instanceof Error) {
             throw (Error) t;
         }
+        long cpu1 = processCpuNanos();
+        passResults = new long[][] {{board.exitCode(), System.nanoTime() - wall0,
+                checkEndNanos > checkStartNanos ? checkEndNanos - checkStartNanos : -1,
+                cpu0 < 0 || cpu1 < 0 ? -1 : cpu1 - cpu0}};
+        if (!laterPass && config.passes > 1) {
+            laterPasses();
+        }
         report();
         return board.exitCode();
+    }
+
+    // ---- passes -----------------------------------------------------------------------------------------------
+
+    /**
+     * {@code RunConfig.passes > 1}: checks the loaded export again, pass 2 .. N, each as a run of its
+     * own over the same store (new engines, sessions, scheduler and verdict board; the environment
+     * frontier is where pass 1 left it, so inductive blocks and quot records keep their recorded
+     * outcomes and every other unit is checked again). Only an accepted export is checked again: a
+     * failing run's time is that of a cancellation. Nothing a later pass finds changes this run's
+     * verdict; a later pass that fails is reported and ends the series.
+     */
+    private void laterPasses() {
+        final RunHost h = host;
+        boolean whole;
+        try {
+            whole = h != null && fatal.get() == null && board.exitCode() == Outcome.ACCEPT && config.stopAfter == null
+                    && h.loadComplete() && h.envUnits() >= h.loadedUnits();
+        } catch (RuntimeException e) {
+            whole = false;
+        }
+        if (!whole) {
+            passLine(1, passResults[0], " (no further pass: the first one did not accept the whole export)");
+            return;
+        }
+        passLine(1, passResults[0], "");
+        for (int k = 2; k <= config.passes; k++) {
+            Run pass = wiring != null ? new Run(config, wiring, h.store(), null, null, primaryFactory, referenceFactory)
+                    : new Run(config, null, null, h, null, primaryFactory, referenceFactory);
+            pass.laterPass = true;
+            pass.minUnitsPerWorker = minUnitsPerWorker;
+            pass.err = null;
+            long[] result;
+            String note = "";
+            try {
+                pass.execute();
+                result = pass.passResults[0];
+            } catch (Throwable t) {
+                result = new long[] {Outcome.DECLINE, -1, -1, -1};
+                note = " (failed: " + t + ")";
+            }
+            passResults = java.util.Arrays.copyOf(passResults, k);
+            passResults[k - 1] = result;
+            passLine(k, result, note);
+            if (!note.isEmpty()) {
+                break;
+            }
+        }
+    }
+
+    private void passLine(int k, long[] r, String note) {
+        if (err != null) {
+            err.println("rlvm: pass " + k + " of " + config.passes + ": " + Outcome.name((int) r[0]) + ", wall "
+                    + seconds(r[1]) + " s (check " + seconds(r[2]) + " s), cpu " + seconds(r[3]) + " s" + note);
+        }
+    }
+
+    private static String seconds(long nanos) {
+        if (nanos < 0) {
+            return "n/a";
+        }
+        long ms = (nanos + 500_000L) / 1_000_000L;
+        return (ms / 1000) + "." + (ms % 1000 < 100 ? "0" : "") + (ms % 1000 < 10 ? "0" : "") + (ms % 1000);
+    }
+
+    /**
+     * The results of the passes made so far, pass 1 first: {@code {outcome code, wall nanoseconds,
+     * wall nanoseconds of the checking phase or -1, process CPU nanoseconds or -1}}. One row unless
+     * {@code RunConfig.passes > 1}.
+     */
+    public long[][] passResults() {
+        long[][] copy = new long[passResults.length][];
+        for (int i = 0; i < copy.length; i++) {
+            copy[i] = passResults[i].clone();
+        }
+        return copy;
+    }
+
+    /** User + system CPU time of the process in nanoseconds ({@code /proc/self/stat}, 10 ms steps), or -1. */
+    static long processCpuNanos() {
+        try {
+            String stat = new String(Files.readAllBytes(java.nio.file.Paths.get("/proc/self/stat")),
+                    java.nio.charset.StandardCharsets.ISO_8859_1);
+            String[] f = stat.substring(stat.lastIndexOf(')') + 2).trim().split(" +");
+            return (Long.parseLong(f[11]) + Long.parseLong(f[12])) * 10_000_000L;
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
     }
 
     // ---- load -----------------------------------------------------------------------------------------------
@@ -644,6 +748,7 @@ public final class Run {
         stats.put("driver.sessionBytes", sessionBytes);
         Scheduler s = new Scheduler(null, OrderPolicy.FILE_ORDER, workerCount, config.chunkUnits, board);
         scheduler = s;
+        checkStartNanos = System.nanoTime();
         checkPhase = stats.phaseStart("check");
         final long stack = Math.max(config.workerStackBytes, config.deepStackBytes);
         envThread = null;
@@ -690,6 +795,7 @@ public final class Run {
             interrupted |= join(envThread);
         }
         stats.phaseEnd(checkPhase);
+        checkEndNanos = System.nanoTime();
         stats.put("driver.units", units);
         if (interrupted) {
             Thread.currentThread().interrupt();
@@ -880,6 +986,14 @@ public final class Run {
                 stats.put("driver.heavy.waits", g.waitCount());
                 stats.put("driver.heavy.yields", g.yieldCount());
             }
+            stats.put("driver.passes", passResults.length);
+            for (int k = 0; k < passResults.length && passResults.length > 1; k++) {
+                long[] r = passResults[k];
+                stats.put("driver.pass." + (k + 1) + ".verdict", Outcome.name((int) r[0]));
+                stats.put("driver.pass." + (k + 1) + ".wallNanos", r[1]);
+                stats.put("driver.pass." + (k + 1) + ".checkWallNanos", r[2]);
+                stats.put("driver.pass." + (k + 1) + ".cpuNanos", r[3]);
+            }
             stats.put("driver.pipelined", pipelineStarted ? 1 : 0);
             stats.put("driver.pipeline.rejectionsTainted", rejectionsTainted ? 1 : 0);
             Scheduler s = scheduler;
@@ -915,7 +1029,9 @@ public final class Run {
                 stats.put("driver.event." + i, events[i]);
             }
             try {
-                stats.writeJson(config.statsFile);
+                if (!laterPass) {
+                    stats.writeJson(config.statsFile);
+                }
             } catch (IOException | RuntimeException e) {
                 if (err != null) {
                     err.println("rlvm: cannot write statistics to " + config.statsFile + ": " + e);

@@ -96,11 +96,17 @@ final class M7Tier {
             identical++;
         } else if (Eval.samePeekedSlow(m, k0, k1, 24)) {
             upToPeek++;
+            if (peekNotes.length() < 4000) {
+                peekNotes.append(what).append(": K0 ").append(show(k0)).append(" K1 ").append(show(k1)).append('\n');
+            }
         } else {
             different++;
             note(what + ": K0 " + show(k0) + " K1 " + show(k1));
         }
     }
+
+    /** The cases that were equal only up to PEEK (path dependence of the generic walk, ISA 2.1). */
+    final StringBuilder peekNotes = new StringBuilder();
 
     private void note(String s) {
         if (failures.length() < 6000) {
@@ -354,9 +360,11 @@ final class M7Tier {
     // ---- RULES: WHNF of a case analysis on a constructor ---------------------------------------------------------
 
     /**
-     * For every constant with a case tree: the application to variables, with the first major premise
-     * replaced by each constructor of its inductive type applied to variables; K0: WHNF by DELTA and IOTA;
-     * K1: RULES, then WHNF of the reduct (NONE: the tree declined, which is always correct).
+     * For every constant with a case tree: the application to variables in which the major premises that are
+     * parameters of the constant (up to four: a tree may switch on several, also through inlined matchers) are
+     * replaced by every combination of constructors of their inductive types applied to variables, and by a
+     * variable (a stuck major); K0: WHNF by DELTA and IOTA; K1: RULES, then WHNF of the reduct (NONE: the tree
+     * declined, which is always correct).
      */
     void caseTrees(int from, int to) {
         for (int row = from; row <= to; row++) {
@@ -369,51 +377,97 @@ final class M7Tier {
             }
             int[] c = cs.chunkOf(blk);
             int o = cs.offsetOf(blk);
-            int pc = o + c[o + Op.BLK_ENTRIES];
-            // the first two instructions: WHNF rM, A_major ; SWITCH rM, D(I), ..
-            int major = c[pc + 1] & Op.OPND_PAYLOAD_MASK;
-            int ind = c[pc + 2 + 2] & Op.OPND_PAYLOAD_MASK;
+            int len = Code.len(c[o + Op.BLK_HDR0]);
             int arity = Code.arityOf(m, blk);
-            for (int j = 0; j <= decls.inductCtorCount(ind); j++) {
-                for (int extra = 0; extra < 2; extra++) {
-                    caseTree(row, arity, major, ind, j, extra);
+            // every "WHNF rM, A_i ; SWITCH rM, D(I), .." of the block: argument i is a major premise of type I
+            int[] majors = new int[4];
+            int[] inds = new int[4];
+            int nm = 0;
+            for (int pc = c[o + Op.BLK_ENTRIES]; pc < len; pc += 1 + (c[o + pc] >>> 8 & 255)) {
+                int w = c[o + pc];
+                if (w >>> 24 != Op.WHNF || pc + 4 >= len || c[o + pc + 2] >>> 24 != Op.SWITCH) {
+                    continue;
+                }
+                int opnd = c[o + pc + 1];
+                int i = opnd & Op.OPND_PAYLOAD_MASK;
+                boolean seen = false;
+                for (int k = 0; k < nm; k++) {
+                    seen |= majors[k] == i;
+                }
+                if (opnd >>> Op.OPND_SHIFT == Op.MODE_A && i < arity && !seen && nm < 4) {
+                    majors[nm] = i;
+                    inds[nm++] = c[o + pc + 4] & Op.OPND_PAYLOAD_MASK;
                 }
             }
+            treeBlocks++;
+            int[] choice = new int[nm];
+            int cases = 0;
+            do {
+                for (int extra = 0; extra < 2; extra++) {
+                    caseTree(row, arity, majors, inds, choice, nm, extra);
+                }
+            } while (++cases < 120 && next(choice, inds, nm));
         }
     }
 
-    private void caseTree(int row, int arity, int major, int ind, int j, int extra) {
+    /** The next combination of constructor choices (choice[k] == number of constructors: a stuck major); false after the last. */
+    private boolean next(int[] choice, int[] inds, int nm) {
+        for (int k = 0; k < nm; k++) {
+            if (++choice[k] <= decls.inductCtorCount(inds[k])) {
+                return true;
+            }
+            choice[k] = 0;
+        }
+        return false;
+    }
+
+    long treeBlocks;
+
+    private void caseTree(int row, int arity, int[] majors, int[] inds, int[] choice, int nm, int extra) {
         int xp = m.xp;
         int ep = m.ep;
         int rp = m.rp;
         int ssp = m.ssp;
         int n = arity + extra;
-        int mv = pool[major]; // j == number of constructors: a stuck major
-        if (j < decls.inductCtorCount(ind)) {
-            int ctor = decls.inductCtor(ind, j);
-            int cn = decls.ctorNumParams(ctor) + decls.ctorNumFields(ctor);
-            if (cn + n + 2 > pool.length) {
-                return;
+        int next = n + 1; // pool variables of the constructor arguments
+        int[] mv = new int[nm];
+        boolean ok = true;
+        for (int k = 0; k < nm; k++) {
+            mv[k] = pool[majors[k]];
+            if (choice[k] < decls.inductCtorCount(inds[k])) {
+                int ctor = decls.inductCtor(inds[k], choice[k]);
+                int cn = decls.ctorNumParams(ctor) + decls.ctorNumFields(ctor);
+                if (next + cn > pool.length) {
+                    return;
+                }
+                int cc = Values.mkConst(m, ctor, levelsOf(ctor, 1));
+                int cb = scratch(cn);
+                System.arraycopy(pool, next, m.X, cb, cn);
+                next += cn;
+                mv[k] = Values.mkApp(m, cc, cb, cn);
+                m.xp = xp;
+                ok &= cc < Op.SIG && mv[k] < Op.SIG;
             }
-            int cc = Values.mkConst(m, ctor, levelsOf(ctor, 1));
-            int cb = scratch(cn);
-            System.arraycopy(pool, n + 1, m.X, cb, cn);
-            mv = Values.mkApp(m, cc, cb, cn);
-            m.xp = xp;
         }
         int c = Values.mkConst(m, row, levelsOf(row, 0));
+        if (n + 1 > pool.length) {
+            return;
+        }
         int xb = scratch(n);
         System.arraycopy(pool, 0, m.X, xb, n);
-        m.X[xb + major] = mv;
+        for (int k = 0; k < nm; k++) {
+            m.X[xb + majors[k]] = mv[k];
+        }
         int v = Values.mkApp(m, c, xb, n);
         m.xp = xp;
-        if (c >= Op.SIG || v >= Op.SIG || mv >= Op.SIG || Values.kind(m, v) != Layout.NEU) {
+        if (!ok || c >= Op.SIG || v >= Op.SIG || Values.kind(m, v) != Layout.NEU) {
             recover(xp, ep, rp, ssp);
             return;
         }
+        // The tree runs first and its reduct is normalised after the K0 run: the K0 WHNF forces suspensions (the base
+        // of a Nat.succ, to see whether it is a literal), and a tree that ran after it would be handed their values
+        // by MKSUSP where K0 itself still built the suspension (ISA 2.1 PEEK: path dependence, not a tier difference).
         int sw = m.sw;
-        m.sw = 0;
-        int k0 = k0(Reduce.whnf(m, v, 0), xp, ep, rp, ssp);
         m.sw = K1;
         int r = m.drive(Code.rules(m, v, 0));
         if (r >= Op.SIG) {
@@ -424,6 +478,7 @@ final class M7Tier {
             throw new AssertionError("I-STACKS broken by RULES(" + name(row) + ")");
         }
         m.sw = 0;
+        int k0 = k0(Reduce.whnf(m, v, 0), xp, ep, rp, ssp);
         int k1 = r >= Op.SIG ? r : r == Layout.NONE ? k0 : k0(Reduce.whnf(m, r, 0), xp, ep, rp, ssp);
         m.sw = sw;
         if (r == Layout.NONE) {
@@ -431,7 +486,7 @@ final class M7Tier {
         } else if (r < Op.SIG) {
             fired++;
         }
-        compare("RULES(" + name(row) + ") constructor " + j + " extra " + extra, k0, k1);
+        compare("RULES(" + name(row) + ") constructors " + java.util.Arrays.toString(choice) + " extra " + extra, k0, k1);
     }
 
     long fired;

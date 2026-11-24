@@ -28,6 +28,9 @@ import rlvm.driver.RunConfig;
  * {@link Outcome#ACCEPT}; any other number is an internal error. A part of the pipeline that is not
  * implemented yet ({@link UnsupportedOperationException}) makes the run DECLINE with the message on
  * stderr.
+ *
+ * <p>{@code -X passes=N} (N &gt; 1) checks the export N times in this process and reports every pass
+ * ({@link Passes}: warm wall clock); without it nothing of that class runs.
  */
 public final class RlvmChecker implements Checker {
 
@@ -97,6 +100,69 @@ public final class RlvmChecker implements Checker {
             PrintStream err, boolean quiet) {
         // One ServiceLoader pass, so that "the primary engine is the reference engine" is an identity.
         java.util.List<EngineProvider> all = Engines.providers();
+        Setup s = setup(export, threads, stats, stackBytes, extra, all, err, quiet);
+        if (s == null) {
+            return Outcome.DECLINE; // a part of the pipeline is not implemented; said on the diagnostics stream
+        }
+        if (s.mo.passes > 1) {
+            // -X passes=N: the same export N times in this process (warm passes). Never on a plain run.
+            return new Passes(this, export, threads, stats, stackBytes, extra, all, err, quiet).run(s);
+        }
+        MainOptions mo = s.mo;
+        RunConfig config = s.config;
+        MainWiring wiring = new MainWiring(export, mo);
+        long t0 = System.nanoTime();
+        int outcome;
+        Run run;
+        try {
+            run = Pipeline.newRun(config, wiring, s.primaryFactory, s.referenceFactory, quiet ? null : err);
+            outcome = run.execute();
+        } catch (UnsupportedOperationException e) {
+            return declineNotImplemented(e, err, quiet);
+        }
+        if (outcome != Outcome.ACCEPT && !quiet && run.verdicts().explanation() == null) {
+            // The driver explains every failure it knows the cause of; never end silently otherwise.
+            err.println("rlvm: " + Outcome.name(outcome) + " (no explanation recorded)");
+        }
+        if (stats) {
+            err.println(statsLine(s, outcome, run.workerCount(), System.nanoTime() - t0));
+        }
+        return outcome;
+    }
+
+    /** The {@code --stats} line of a run (without the part {@link Passes} appends). */
+    static String statsLine(Setup s, int outcome, int workerCount, long wallNanos) {
+        return "rlvm: stats: outcome=" + Outcome.name(outcome) + " engine=" + s.primary.name()
+                + " reference=" + s.reference.name() + " workers=" + workerCount
+                + (s.config.workers == 0 ? "(auto)" : "") + " load="
+                + s.config.loadMode.name().toLowerCase(java.util.Locale.ROOT)
+                + (s.mo.appliedRunDefaults.isEmpty() ? "" : " engine-defaults=" + s.mo.appliedRunDefaults)
+                + " wall_ms=" + wallNanos / 1_000_000;
+    }
+
+    /**
+     * What a run is made of besides its wiring: the settings, the run configuration, the engines'
+     * providers and their factories. Built anew for every run (a run may write into its
+     * configuration): once for a plain run, once per pass by {@link Passes}.
+     */
+    static final class Setup {
+        MainOptions mo;
+        RunConfig config;
+        EngineProvider primary;
+        EngineProvider reference;
+        EngineFactory primaryFactory;
+        EngineFactory referenceFactory;
+    }
+
+    /**
+     * Settings, configuration and engine factories of one run.
+     *
+     * @return null if a part of the pipeline that the settings ask for is not implemented (the run
+     *     declines; the reason was printed unless {@code quiet})
+     * @throws UsageError a setting this checker does not know or cannot parse: nothing has been read yet
+     */
+    Setup setup(Path export, int threads, boolean stats, long stackBytes, Map<String, String> extra,
+            java.util.List<EngineProvider> all, PrintStream err, boolean quiet) {
         // Everything from here to the construction of the run can end in a UsageError (status 64):
         // nothing has been read yet.
         java.util.Set<String> engineKeys = Engines.optionKeys(all);
@@ -128,7 +194,8 @@ public final class RlvmChecker implements Checker {
                 primaryFactory = primary == reference ? referenceFactory : Engines.factory(primary, mo.engineOptions);
             }
         } catch (UnsupportedOperationException e) {
-            return declineNotImplemented(e, err, quiet);
+            declineNotImplemented(e, err, quiet);
+            return null;
         }
         // The primary engine's own run defaults (EngineProvider.runDefaults, e.g. the machine's session
         // cap): applied under the command line, so an explicit -X KEY=VALUE wins.
@@ -140,29 +207,14 @@ public final class RlvmChecker implements Checker {
             config.differential = driverDifferential;
         }
         config.explain = !quiet;
-        MainWiring wiring = new MainWiring(export, mo);
-        long t0 = System.nanoTime();
-        int outcome;
-        Run run;
-        try {
-            run = Pipeline.newRun(config, wiring, primaryFactory, referenceFactory, quiet ? null : err);
-            outcome = run.execute();
-        } catch (UnsupportedOperationException e) {
-            return declineNotImplemented(e, err, quiet);
-        }
-        if (outcome != Outcome.ACCEPT && !quiet && run.verdicts().explanation() == null) {
-            // The driver explains every failure it knows the cause of; never end silently otherwise.
-            err.println("rlvm: " + Outcome.name(outcome) + " (no explanation recorded)");
-        }
-        if (stats) {
-            err.println("rlvm: stats: outcome=" + Outcome.name(outcome) + " engine=" + primary.name()
-                    + " reference=" + reference.name() + " workers=" + run.workerCount()
-                    + (config.workers == 0 ? "(auto)" : "") + " load="
-                    + config.loadMode.name().toLowerCase(java.util.Locale.ROOT)
-                    + (mo.appliedRunDefaults.isEmpty() ? "" : " engine-defaults=" + mo.appliedRunDefaults)
-                    + " wall_ms=" + (System.nanoTime() - t0) / 1_000_000);
-        }
-        return outcome;
+        Setup s = new Setup();
+        s.mo = mo;
+        s.config = config;
+        s.primary = primary;
+        s.reference = reference;
+        s.primaryFactory = primaryFactory;
+        s.referenceFactory = referenceFactory;
+        return s;
     }
 
     /**
@@ -203,7 +255,7 @@ public final class RlvmChecker implements Checker {
      * A deferred or not yet published part of the pipeline was reached: never a verdict about the
      * input. The message names where, so that the owner of the missing part can be found.
      */
-    private static int declineNotImplemented(UnsupportedOperationException e, PrintStream err, boolean quiet) {
+    static int declineNotImplemented(UnsupportedOperationException e, PrintStream err, boolean quiet) {
         if (!quiet) {
             StackTraceElement[] st = e.getStackTrace();
             String where = st.length > 0 ? " (at " + st[0].getClassName() + "." + st[0].getMethodName() + ":"

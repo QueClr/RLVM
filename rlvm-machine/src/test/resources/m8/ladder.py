@@ -3,6 +3,7 @@
 
     ladder.py measure [--sets 'v0;warm,gated,expect;warm,gated,expect,probes'] [--corpora init,std,cedar,reach]
                       [--threads 1,4] [--runs 1] [--no-gruszka] [--dist DIR] [--note TEXT] [--no-announce]
+    ladder.py probe   [--sets ..] [--corpora ..] [--cpus 18,19]     the same with 1 worker, NO lock: instructions only
     ladder.py render
     ladder.py status          the published machine jar and whether it has rows
 
@@ -142,11 +143,32 @@ def build_dist(args):
     return dist, code_id(lib) if os.path.isfile(lib) else code, m.group(2)
 
 
-def measure_one(line, export, timeout):
-    """One run in the arena-shaped container; returns the measurement dict or None."""
+def take_slot(wait_s):
+    """One of the host-wide heavy slots (the files and the protocol of bench/slot.sh: an exclusive flock on
+    work/build/slots/heavy.N), tried for wait_s seconds. Returns the open file (close it to give the slot back) or None."""
+    import time
+    d = os.path.join(ROOT, "work/build/slots")
+    os.makedirs(d, exist_ok=True)
+    end = time.time() + wait_s
+    while True:
+        for i in range(1, 9):
+            f = open(os.path.join(d, "heavy.%d" % i), "w")
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return f
+            except OSError:
+                f.close()
+        if time.time() >= end:
+            return None
+        time.sleep(3)
+
+
+def measure_one(line, export, timeout, cpus=""):
+    """One run in the arena-shaped container (or, for a probe, on the given CPUs); returns the measurement dict or None."""
     tmp = tempfile.mkdtemp(prefix="run-", dir=os.path.join(WORK, "tmp"))
     raw = os.path.join(tmp, "raw.json")
-    cmd = [os.path.join(ROOT, "bench/arena-docker.sh"), "--arena-limits", "--no-network", "bench/measure.sh", "--require-perf",
+    limits = ["--cpuset-cpus", cpus, "--memory", "16g"] if cpus else ["--arena-limits"]
+    cmd = [os.path.join(ROOT, "bench/arena-docker.sh")] + limits + ["--no-network", "bench/measure.sh", "--require-perf",
            "--timeout", str(timeout), "--cwd", ROOT, "--in", export, "-o", raw, "-c", line]
     p = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
@@ -180,17 +202,36 @@ def cmd_measure(args):
     for c in corpora:
         if c not in CORPORA or not os.path.isfile(os.path.join(ROOT, CORPORA[c])):
             sys.exit("ladder.py: no corpus '%s'" % c)
-    threads = [int(t) for t in args.threads.split(",")]
+    probe = args.cmd == "probe"
+    threads = [1] if probe else [int(t) for t in args.threads.split(",")]
     dist, jar, published = build_dist(args)
     os.makedirs(os.path.join(WORK, "tmp"), exist_ok=True)
     rlvm = os.path.join(dist, "bin/rlvm")
-    batch = now().strftime("%Y-%m-%dT%H:%MZ")
-    print("ladder: batch %s, machine jar %s (published %s), waiting for the measurement lock" % (batch, jar, published), flush=True)
+    batch = ("probe-" if probe else "") + now().strftime("%Y-%m-%dT%H:%MZ")
     lock = open(LOCK, "a")
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    # A batch is a heavy job and holds one host-wide slot (bench/slot.sh's files). The queue for the measurement
+    # lock can be an hour long, and a slot must not sit idle in it: first the lock, then a slot; if no slot comes
+    # within a minute the lock goes back to the others and the wait starts again.
+    slot = None
+    if probe:
+        args.no_gruszka = True
+        if not args.note:
+            args.note = "PROBE without the measurement lock on CPUs %s: only the instruction counts mean something" % args.cpus
+        print("ladder: %s, machine jar %s (published %s), no lock, CPUs %s; waiting for a slot" % (batch, jar, published, args.cpus), flush=True)
+        while slot is None:
+            slot = take_slot(600)
+    else:
+        print("ladder: batch %s, machine jar %s (published %s), waiting for the measurement lock" % (batch, jar, published), flush=True)
+        while slot is None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            slot = take_slot(60)
+            if slot is None:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                print("ladder: had the lock, no host-wide slot within a minute: lock released, waiting again", flush=True)
+        batch = now().strftime("%Y-%m-%dT%H:%MZ")
     rows = []
     try:
-        print("ladder: lock taken %s, load average %s" % (now().strftime("%H:%M:%SZ"), open("/proc/loadavg").read().split()[0]), flush=True)
+        print("ladder: %s %s, load average %s" % ("started" if probe else "lock taken", now().strftime("%H:%M:%SZ"), open("/proc/loadavg").read().split()[0]), flush=True)
         for c in corpora:
             export = os.path.join(ROOT, CORPORA[c])
             plan = []
@@ -217,7 +258,7 @@ def cmd_measure(args):
                                 mib = str(args.session_mib)
                                 x.append("-X session-mib=%s" % mib)
                         line = '%s --threads %d "$IN" %s' % (rlvm, t, " ".join(x))
-                    j, tmp = measure_one(line, export, args.timeout)
+                    j, tmp = measure_one(line, export, args.timeout, args.cpus if probe else "")
                     subprocess.run(["rm", "-rf", tmp])
                     if j is None:
                         continue
@@ -233,9 +274,12 @@ def cmd_measure(args):
                     print("ladder: %-9s %-28s %-5s %dw  %6s s CPU  %6s s wall  %5s MiB  %6s G  exit %s  accepted %s declined %s  load %s" % (
                         engine, row["set"], c, t, row["cpu_s"], row["wall_s"], row["rss_mib"], row["instr_g"], row["exit"], acc, dec, row["loadavg"]), flush=True)
     finally:
-        fcntl.flock(lock, fcntl.LOCK_UN)
+        if not probe:
+            fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
-        print("ladder: lock released %s" % now().strftime("%H:%M:%SZ"), flush=True)
+        if slot is not None:
+            slot.close()
+        print("ladder: %s %s" % ("done" if probe else "lock released", now().strftime("%H:%M:%SZ")), flush=True)
     cmd_render(args)
     if not args.no_announce and rows:
         announce(batch, jar, published, rows)
@@ -276,6 +320,12 @@ def announce(batch, jar, published, rows):
             g = best(rows, engine="gruszka", corpus=c)
             if m is None:
                 continue
+            if batch.startswith("probe-"):
+                txt = "%s %s G instructions" % (TITLE[c], m["instr_g"]) + flag(m)
+                if ok_row(m) and ref is not None and float(ref["instr_g"]) > 0:
+                    txt += " (%.2fx reference)" % (float(m["instr_g"]) / float(ref["instr_g"]))
+                parts.append(txt)
+                continue
             txt = "%s %s s CPU / %s G" % (TITLE[c], m["cpu_s"], m["instr_g"]) + flag(m)
             if ok_row(m) and ref is not None:
                 txt += " (%.2fx reference" % (float(m["cpu_s"]) / float(ref["cpu_s"]))
@@ -285,6 +335,10 @@ def announce(batch, jar, published, rows):
             if m4 is not None:
                 txt += "; 4 workers %s s CPU / %s s wall" % (m4["cpu_s"], m4["wall_s"]) + flag(m4)
             parts.append(txt)
+        if batch.startswith("probe-"):
+            lines.append("%s M8 LADDER PROBE (%s, machine jar %s published %s, native -O3, 1 worker, NO measurement lock: instructions only, CPU time not comparable): [%s] %s. Table: work/status/machine-ladder.md" % (
+                now().strftime("%Y-%m-%dT%H:%MZ"), batch, jar, published, s, "; ".join(parts)))
+            continue
         lines.append("%s M8 LADDER (batch %s, machine jar %s published %s, native -O3, arena container, 1 worker; load %s): [%s] %s. Table: work/status/machine-ladder.md" % (
             now().strftime("%Y-%m-%dT%H:%MZ"), batch, jar, published, rows[-1]["loadavg"], s, "; ".join(parts)))
     with open(LOG, "a") as f:
@@ -294,7 +348,7 @@ def announce(batch, jar, published, rows):
         print(l)
 
 
-def table(out, rows, threads):
+def table(out, rows, threads, probe=False):
     sets = []
     for r in rows:
         if r["engine"] == "machine" and int(r["threads"]) == threads and r["set"] not in sets:
@@ -308,6 +362,13 @@ def table(out, rows, threads):
     def cell(r, c, ratio=True):
         if r is None:
             return "-"
+        if probe:
+            # no lock, other CPUs: the instruction count is the result, the CPU time is only shown
+            s = "%s / %s / %s / **%s**" % (r["cpu_s"], r["wall_s"], r["rss_mib"], r["instr_g"]) + flag(r)
+            ref = best(rows, engine="reference", corpus=c, threads=threads)
+            if ratio and ok_row(r) and ref is not None and float(ref["instr_g"]) > 0:
+                s += " (%.2fx ref instructions)" % (float(r["instr_g"]) / float(ref["instr_g"]))
+            return s
         s = "**%s** / %s / %s / %s" % (r["cpu_s"], r["wall_s"], r["rss_mib"], r["instr_g"]) + flag(r)
         if ratio and ok_row(r):
             ref = best(rows, engine="reference", corpus=c, threads=threads)
@@ -349,8 +410,12 @@ def cmd_render(args):
     if not rows:
         out.append("No measurement yet.")
     batches = []
+    probes = []
     for r in rows:
-        if r["batch"] not in batches:
+        if r["batch"].startswith("probe-"):
+            if r["batch"] not in probes:
+                probes.append(r["batch"])
+        elif r["batch"] not in batches:
             batches.append(r["batch"])
     # the target line: the newest batch, best machine row per corpus
     if batches:
@@ -385,6 +450,16 @@ def cmd_render(args):
             out.append("")
             table(out, b, t)
             out.append("")
+    for bname in reversed(probes):
+        b = [r for r in rows if r["batch"] == bname]
+        jars = sorted({"%s (published %s)" % (r["jar"], r["published"]) for r in b if r["engine"] == "machine"})
+        out.append("## %s - machine jar %s - INSTRUCTIONS ONLY" % (bname, ", ".join(jars) or "-"))
+        out.append("")
+        out.append("Not under the measurement lock and not on the arena's CPUs (the queue for the lock was long): the **instruction count** (last number, bold) is the result;")
+        out.append("CPU time, wall and RSS are shown and must not be compared with a batch. 1 worker.")
+        out.append("")
+        table(out, b, 1, probe=True)
+        out.append("")
     # history per switch set
     if batches:
         out.append("## History: CPU s with 1 worker per (batch, jar, switch set), and the ratio to the reference engine of the same batch")
@@ -425,10 +500,6 @@ def cmd_status(args):
 
 
 def main():
-    # a measurement batch is a heavy job: it holds one of the host-wide slots (bench/slot.sh) from before it
-    # takes the measurement lock until it is done (never the other way round: nobody waits for a slot with the lock)
-    slot = os.path.join(ROOT, "bench/slot.sh")
-    reexec = len(sys.argv) > 1 and sys.argv[1] == "measure" and os.environ.get("M8_LADDER_SLOT") != "held" and os.access(slot, os.X_OK)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("measure")
@@ -443,20 +514,22 @@ def main():
     m.add_argument("--no-gruszka", action="store_true")
     m.add_argument("--no-announce", action="store_true")
     m.set_defaults(fn=cmd_measure)
+    pr = sub.add_parser("probe", help="the same runs with 1 worker WITHOUT the measurement lock, on --cpus: instruction counts only")
+    pr.add_argument("--sets", default="v0;warm,gated,expect;warm,gated,expect,probes")
+    pr.add_argument("--corpora", default="init,std,cedar,reach")
+    pr.add_argument("--cpus", default="18,19", help="CPUs outside the measurement container's cpuset")
+    pr.add_argument("--runs", type=int, default=1)
+    pr.add_argument("--session-mib", type=int, default=4)
+    pr.add_argument("--timeout", type=int, default=1800)
+    pr.add_argument("--dist", default="")
+    pr.add_argument("--note", default="")
+    pr.add_argument("--no-announce", action="store_true")
+    pr.set_defaults(fn=cmd_measure, threads="1", no_gruszka=True)
     r = sub.add_parser("render")
     r.set_defaults(fn=cmd_render)
     s = sub.add_parser("status")
     s.set_defaults(fn=cmd_status)
     a = ap.parse_args()
-    if reexec:
-        # the image first (its own slot class), then the batch under a heavy slot with that image
-        dist, _, _ = build_dist(a)
-        os.environ["M8_LADDER_SLOT"] = "held"
-        argv = [x for x in sys.argv[1:]]
-        if not a.dist:
-            argv += ["--dist", os.path.relpath(dist, ROOT)]
-        sys.stdout.flush()
-        os.execv(slot, [slot, "--", sys.executable, os.path.abspath(__file__)] + argv)
     a.fn(a)
 
 

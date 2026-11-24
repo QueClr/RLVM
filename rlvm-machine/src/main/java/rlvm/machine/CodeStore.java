@@ -85,10 +85,18 @@ final class CodeStore {
      */
     final int elabAt;
 
+    /**
+     * Case trees inline the trees of the definitions they call (matchers; {@code Elab.inline}). On; system
+     * property {@code rlvm.machine.m7.inline=off} keeps the trees of ISA 3.6 as they were (for A/B measurements:
+     * the blocks are a function of the store and of this setting, which is one per engine).
+     */
+    final boolean inlineTrees;
+
     CodeStore(Store store) {
         this.store = store;
         int at = Integer.getInteger("rlvm.machine.elabAt", Op.ELAB_AT);
         this.elabAt = at < 1 ? 1 : at > 15 ? 15 : at;
+        this.inlineTrees = !"off".equals(System.getProperty("rlvm.machine.m7.inline"));
     }
 
     // ---------------------------------------------------------------------------------------------------

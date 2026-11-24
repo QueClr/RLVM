@@ -63,7 +63,8 @@ class ImportsTest {
     }
 
     private static RefOptions options(long bytes, int minUses, boolean verify) {
-        return new RefOptions(false, bytes, minUses, verify);
+        // the default level relation (official, see LevelsTest); the import table does not depend on it
+        return new RefOptions(true, bytes, minUses, verify);
     }
 
     private RefEngine.RefSession session(RefOptions options, EngineConfig config, WorkerContext ctx) {

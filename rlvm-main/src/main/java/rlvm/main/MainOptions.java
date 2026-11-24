@@ -32,6 +32,11 @@ import rlvm.load.LoadOptions;
  * no-truffle             no Truffle tier
  * no-proof-blocks        every record becomes a shared term
  * profile=4.36|4.37      which official kernel release to imitate (default 4.36)
+ * passes=N               check the export N times in this process (default 1; {@link Passes}): one line per
+ *                        pass on the diagnostics stream; the verdict is the first pass's, and a later pass
+ *                        with another verdict makes the run DECLINE
+ * passes-mode=reload|recheck  what a later pass is (default reload: a complete run; recheck: the loaded
+ *                        store and the engines are kept, every unit is checked again)
  * engine.KEY=VALUE       Truffle engine options, kept for rlvm-truffle
  * KEY=VALUE              any key an engine on the class path declares (rlvm.api.EngineProvider.optionKeys(),
  *                        e.g. the reference kernel's levels=...): handed to the engines of the run
@@ -64,6 +69,10 @@ final class MainOptions {
     boolean truffle = true;
     boolean proofBlocks = true;
     EngineConfig.KernelProfile profile = EngineConfig.KernelProfile.LEAN_4_36;
+    /** {@code -X passes=N}: how often the export is checked in this process; 1 = the plain run. */
+    int passes = 1;
+    /** {@code -X passes-mode=recheck}: later passes keep the loaded store and the engines; false = reload. */
+    boolean passesRecheck;
     /** {@code engine.*} keys, for the Truffle tier. */
     final Map<String, String> truffleOptions = new LinkedHashMap<>();
     /**
@@ -222,6 +231,12 @@ final class MainOptions {
                 profile = choose(key, value, "4.36", EngineConfig.KernelProfile.LEAN_4_36, "4.37",
                         EngineConfig.KernelProfile.LEAN_4_37);
                 break;
+            case "passes":
+                passes = (int) number(key, value, 1, MAX_PASSES);
+                break;
+            case "passes-mode":
+                passesRecheck = choose(key, value, "reload", Boolean.FALSE, "recheck", Boolean.TRUE);
+                break;
             default:
                 if (engineKeys.contains(key)) {
                     // An engine's own setting: the engine parses the value (EngineProvider.factory(Map)).
@@ -235,11 +250,15 @@ final class MainOptions {
                 }
                 throw new UsageError("unknown checker setting -X " + key + (value == null || value.isEmpty() ? ""
                         : "=" + value) + " (known: engine, load, order, session-mib, memory-mib, scan-threads, io, "
-                        + "stop-after, stats-file, no-recheck, no-truffle, no-proof-blocks, profile, engine.*"
+                        + "stop-after, stats-file, no-recheck, no-truffle, no-proof-blocks, profile, passes, "
+                        + "passes-mode, engine.*"
                         + (engineKeys.isEmpty() ? "" : "; engine settings: " + String.join(", ", new TreeSet<>(engineKeys)))
                         + "; and the driver's settings, see rlvm-driver/README.md)");
         }
     }
+
+    /** Upper bound of {@code -X passes}. */
+    static final int MAX_PASSES = 1000;
 
     private static String need(String key, String value) {
         if (value == null || value.isEmpty()) {

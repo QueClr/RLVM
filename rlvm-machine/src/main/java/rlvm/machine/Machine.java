@@ -62,6 +62,19 @@ import rlvm.store.Terms;
  */
 public final class Machine {
 
+    /**
+     * Counters of a package's session state: an {@code Ext} class ({@code m.x1 .. m.x7}) that implements
+     * this has its counters summed over the sessions of an engine and written to the statistics as
+     * {@code machine.<name>} (e.g. name {@code "match.tried"}), without a change of M6's files. The two
+     * arrays have the same length and the same order in every session; they are read once, when the session
+     * is closed (no cost on a checking path).
+     */
+    public interface Counters {
+        String[] counterNames();
+
+        long[] counterValues();
+    }
+
     /** Resumes the frames of family EXT (toy judgments of tests, experiments). */
     public interface Resumer {
         int resume(Machine m, int key, int[] w, int p, int r);
@@ -560,11 +573,12 @@ public final class Machine {
             limitDetail = "value records: 2^27 per session (ISA section 9; int[] capacity)";
             return false;
         }
-        if (!heapAllows(8L * vh.length)) {
+        int[] old = vh;
+        int[] grown = copyOrNull(old, old.length << 1);
+        if (grown == null) {
             return false;
         }
-        int[] old = vh;
-        vh = Arrays.copyOf(old, old.length << 1);
+        vh = grown;
         allocGrows++;
         allocGrowBytes += 8L * old.length;
         if (sizes.pool && old.length == keptRecordWords()) {
@@ -646,7 +660,20 @@ public final class Machine {
                 return t;
             }
         }
-        return new int[1 << k];
+        return newTable(1 << k);
+    }
+
+    /**
+     * A new all-zero table of {@code n} words. An allocation that the heap cannot serve is a refused growth
+     * ({@link HeapLimit}: the facade declines the unit with E_MEM), never an {@code OutOfMemoryError} that
+     * escapes (F27).
+     */
+    private static int[] newTable(int n) {
+        try {
+            return new int[n];
+        } catch (OutOfMemoryError e) {
+            throw new HeapLimit("the Java heap: a table of " + 4L * n + " bytes could not be allocated");
+        }
     }
 
     /** Zeroes {@code t} and keeps it for reuse (unless it is too large or its size is already kept). */
@@ -733,11 +760,12 @@ public final class Machine {
         while (n < need) {
             n <<= 1;
         }
-        if (!heapAllows(4L * n)) {
+        int[] old = rs;
+        int[] grown = copyOrNull(old, n);
+        if (grown == null) {
             return false;
         }
-        int[] old = rs;
-        rs = Arrays.copyOf(old, n);
+        rs = grown;
         allocGrows++;
         allocGrowBytes += 4L * n;
         if (sizes.pool && old.length == keptRunWords()) {
@@ -786,10 +814,11 @@ public final class Machine {
         pair[o + Layout.PAIR_HI] = hi;
         pair[o + Layout.PAIR_STATUS] = status;
         if (plogN == plog.length) {
-            if (!heapAllows(8L * plogN)) {
+            int[] grown = copyOrNull(plog, plogN << 1);
+            if (grown == null) {
                 throw new HeapLimit(limitDetail);
             }
-            plog = Arrays.copyOf(plog, plogN << 1);
+            plog = grown;
             allocGrows++;
             allocGrowBytes += 8L * plogN;
         }
@@ -856,7 +885,7 @@ public final class Machine {
             allocGrows++;
             allocGrowBytes += 4L << (k + Layout.PAIR_SHIFT);
         }
-        return new int[1 << (k + Layout.PAIR_SHIFT)];
+        return newTable(1 << (k + Layout.PAIR_SHIFT));
     }
 
     /** Keeps the ALL-ZERO pair table {@code t} for reuse (unless it is too large or its size is already kept). */
@@ -883,10 +912,11 @@ public final class Machine {
             limitDetail = "environment slab: 2^28 words";
             return false;
         }
-        if (!heapAllows(4L * grown(es.length, ep + n))) {
+        int[] grown = copyOrNull(es, grown(es.length, ep + n));
+        if (grown == null) {
             return false;
         }
-        es = Arrays.copyOf(es, grown(es.length, ep + n));
+        es = grown;
         allocGrows++;
         allocGrowBytes += 4L * es.length;
         return true;
@@ -901,10 +931,11 @@ public final class Machine {
             limitDetail = "scratch: 2^28 words";
             return false;
         }
-        if (!heapAllows(4L * grown(X.length, xp + n))) {
+        int[] grown = copyOrNull(X, grown(X.length, xp + n));
+        if (grown == null) {
             return false;
         }
-        X = Arrays.copyOf(X, grown(X.length, xp + n));
+        X = grown;
         allocGrows++;
         allocGrowBytes += 4L * X.length;
         return true;
@@ -919,10 +950,11 @@ public final class Machine {
             limitDetail = "register stack: 2^28 words";
             return false;
         }
-        if (!heapAllows(4L * grown(RS.length, rp + n))) {
+        int[] grown = copyOrNull(RS, grown(RS.length, rp + n));
+        if (grown == null) {
             return false;
         }
-        RS = Arrays.copyOf(RS, grown(RS.length, rp + n));
+        RS = grown;
         allocGrows++;
         allocGrowBytes += 4L * RS.length;
         return true;
@@ -979,7 +1011,7 @@ public final class Machine {
         if (bytes < heapCheckMin) {
             return true;
         }
-        long need = bytes + heapReserve + (engine != null && engine.config.workers > 1 ? bytes : 0);
+        long need = bytes + heapReserve + YOUNG_RESERVE + (engine != null && engine.config.workers > 1 ? bytes : 0);
         Runtime rt = Runtime.getRuntime();
         long free = rt.maxMemory() - rt.totalMemory() + rt.freeMemory();
         if (need <= free) {
@@ -994,6 +1026,37 @@ public final class Machine {
                 + rt.maxMemory() + ", reserve " + heapReserve + ")";
         heapRefused = true;
         return false;
+    }
+
+    /**
+     * Space that the free-memory reading counts but a large array cannot use: on a JVM with a generational
+     * collector a large array must fit into the old generation, so the young generation's capacity is not
+     * available to it (the launchers run {@code -Xmn1g}: 1 GiB, capped at a third of the heap). 0 in a native
+     * image, whose heap is not split into regions of fixed size. Found by the driver's invariance suite (a
+     * 6 GiB heap: 2.5 GiB "free" of which 1 GiB young, a 2 GiB slab: OutOfMemoryError in growRecords).
+     */
+    static final long YOUNG_RESERVE = "runtime".equals(System.getProperty("org.graalvm.nativeimage.imagecode")) ? 0
+            : Math.min(1L << 30, Runtime.getRuntime().maxMemory() / 3);
+
+    /**
+     * {@code Arrays.copyOf(a, n)} if the Java heap can hold the copy, else null with {@link #limitDetail} and
+     * {@link #heapRefused} set (the caller refuses the growth: E_MEM). {@link #heapAllows} asks first; an
+     * {@code OutOfMemoryError} of the allocation itself (the estimate was wrong, or another worker took the
+     * space meanwhile) is caught HERE, around this one allocation, and is a refusal too: the heap is as it
+     * was, nothing was half done (F27; a launcher that runs with ExitOnOutOfMemoryError still ends, which is
+     * why heapAllows exists).
+     */
+    private int[] copyOrNull(int[] a, int n) {
+        if (!heapAllows(4L * n)) {
+            return null;
+        }
+        try {
+            return Arrays.copyOf(a, n);
+        } catch (OutOfMemoryError e) {
+            limitDetail = "the Java heap: a session array of " + 4L * n + " bytes could not be allocated";
+            heapRefused = true;
+            return null;
+        }
     }
 
     private static int grown(int length, int need) {
@@ -1591,11 +1654,12 @@ public final class Machine {
                 limitDetail = "worklist W: 2^28 words (ISA section 9)";
                 return false;
             }
-            if (!heapAllows(4L * grown(W.length, wp + n))) {
+            int[] grown = copyOrNull(W, grown(W.length, wp + n));
+            if (grown == null) {
                 sp = S.length;
                 return false;
             }
-            W = Arrays.copyOf(W, grown(W.length, wp + n));
+            W = grown;
             allocGrows++;
             allocGrowBytes += 4L * W.length;
         }

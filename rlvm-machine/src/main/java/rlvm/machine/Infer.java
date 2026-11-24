@@ -1238,8 +1238,8 @@ final class Infer {
         Terms terms = m.terms;
         int dt = terms.a(m.X[xb + TW_PT]);
         int k = terms.kind(dt);
-        if (k != Kind.APP && k != Kind.PI && k != Kind.LAM) {
-            return Layout.F;
+        if ((k != Kind.APP && k != Kind.PI && k != Kind.LAM) || m.X[xb + TW_PLS] < 0) {
+            return Layout.F; // (a substitution of the wrong arity is reported by the complete procedure)
         }
         Ext x5 = m.x5;
         x5.tmBudget = TM_NODES;

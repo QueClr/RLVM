@@ -326,6 +326,17 @@ mathlib - of 5 to 10 measured repetitions in one JVM, the first two dropped; "be
 CPU time is quoted; every run ends with the frontier at the last unit: all 7,133 inductive and quot
 units of mathlib are admitted with the release.)
 
+Whole process, the two native images back to back (jar set of 11:57Z with the machine's jar 608b84b2b142
+= `work/machine-int/dist-g-native`, against the same set with the two jars of this wave, same
+`native-image` flags = `work/admit7/dist-g-native-new`; `work/admit7/batch-ab.sh`, one hold of the
+measurement lock per pair): Init, one worker, machine engine: 8.12 s CPU / 8.21 s wall / 252 MiB / 139.0 G
+instructions before, 8.06 s / 8.32 s / 238 MiB / 139.0 G after. One pair only - the lock had a queue of
+twelve and gave this batch one turn in an hour - and no measurable CPU difference, which is what a share of
+0.3 % predicts. Peak RSS is lower in every run: Init -14 MiB, Cedar slice 190 -> 174 MiB, Std 329 -> 311
+MiB (the last two on the host). Not measured: 8 workers, pipelined loading, warm wall clock (the order
+of owner's note 12, which arrived during this session); the pass is one thread beside the workers, so
+its part of the wall clock of a parallel run is at most its own time (table above).
+
 **What was removed.**
 
 1. *Derived terms of a block are given back at once* (`EnvBuilder.blockUnit`: `Overlay.mark()` before
@@ -371,9 +382,12 @@ behind them. Same counts as before (SOUNDNESS 0, COMPLETENESS 0, agree 11,847, d
 
 **Generated constants: still declined.** The store's region (`GeneratedBuilder`) and the bindings'
 `isSharedLevel` / `isSharedList` exist; what is missing is (1) a place for the level `u` of a generated
-recursor and its lists after the level base is frozen (request to the steward in `requests.log`,
-14:0xZ, with a proposal: 10 of the 18 declines need it) and (2) the calls from here for the quotient
-constants (7 + 1 declines), which need the dependency analysis and a probe set against leanchecker.
+recursor and its lists after the level base is frozen (my request of 14:04Z and the steward's answer of
+14:10Z in `requests.log`: a snapshot chain, `Bindings.lateLevels()` / `publishLate(unit)`, not published
+yet; 10 of the 18 declines need it) and (2) the calls from here for the quotient constants (7 + 1
+declines; today's bindings are enough when the file still has the level records), which need the
+dependency analysis (`presence`, `OfficialOrder`: a generated constant is provided by the unit of `Quot`)
+and a probe set against leanchecker. Neither was started in this wave.
 
 ## Tests (`$MVN -o -q -pl rlvm-inductive,rlvm-admit test` in wave 7, or `-pl rlvm-admit` against the published `rlvm-inductive`: 87 tests, 86 run, 1 skipped)
 
@@ -451,6 +465,12 @@ machine during this session).
   environment pass - one thread, the reference kernel. The official-order simulation of such a file has a
   budget of 2^25 node visits; beyond it a unit whose official verdict depends on the replay order is
   declined.
+- PIPELINED, a pass REPLACED after it left file order (found by the driver's owner, `requests.log`
+  14:47Z; forced settings; a decline, batch accepts): a block that dependency order committed ahead of
+  the frontier has lost its claims blob, and a new `EnvBuilder` that starts at the frontier declines it
+  (`INTERNAL_ERROR`, "the inductive unit has no claims blob") with everything that depends on it. Keep
+  the pass (and `setCoverage`), or wait for the fix here (the blob must stay until the frontier passes
+  the unit).
 - Generated constants (a recursor or quot constant without a record), an unsafe member record that
   differs from the constant the kernel generates, an unsafe constructor record that no type lists,
   safe member records of an unsafe inductive record (declined by the loader; request in
