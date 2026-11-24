@@ -101,3 +101,31 @@ owner's words.
       the steady-state rate after the first N seconds of a long corpus.
     - Correctness rules are unchanged, and the arena's interface (run line, exit codes, official verdicts) is
       still honoured; only the optimisation target changed.
+
+13. (2026-11-24, answering the question "strict or practical exactness for the default?") "practical"
+    The question as it was put to the owner: adversarial reviews found that the official kernel's verdict
+    can depend on its cache order, on the non-transitivity of its comparison and on whether a subterm is one
+    export record or two; on such files the machine (and in three cases the reference engine) accepts a
+    statement the official checker rejects, every such statement is true in the theory, and no false accept
+    was found. Strict = the default matches the official checker on every input (then the reference engine
+    stays the default and the machine is an opt-in fast mode). Practical = official verdicts on all real
+    inputs, never a false accept, and accepting true statements that the official checker rejects for
+    reasons internal to its implementation is tolerated, as the leading checkers do; the reference engine
+    stays available as the strict mode; the two proof-comparison shortcuts become admissible as a profile.
+    Reading (this refines note 11, item 1, which stays as it is for universe levels):
+    - THE CONTRACT OF THE DEFAULT CONFIGURATION. (a) Never accept a statement that is not derivable in
+      Lean's type theory ("kind F"): absolute, and the first thing every review attacks. (b) The official
+      verdict on every real input: everything lean4export writes (the corpora), the arena's good and bad
+      tests, the mutant corpora with their stored official verdicts. (c) Everything the official checker
+      accepts is accepted (a rejection is always confirmed by the reference engine; a decline goes to it).
+      (d) Accepting a derivable statement that the official checker rejects only through its own
+      incompleteness, non-transitivity, cache order or object identity ("kind T") is TOLERATED; the known
+      classes are written down with one export each (docs/design/review/official-divergence.md).
+    - The machine may be the default engine once (a)-(c) are shown by the gates and an adversarial review
+      of the candidate has found no kind F. The proof-comparison shortcuts (skipargs, congruence; review
+      docs/design/review/soundness-shortcuts.md: theory-sound) are admissible; whether they are on by
+      default is decided by warm wall clock over all corpora (they cost on con-leche).
+    - THE STRICT MODE stays: the reference engine, kept as close to the official implementation as we can
+      make it (declining where it would need the official object identity). One launcher option selects the
+      policy; behaviour that exists only for bug-for-bug agreement on adversarial files (declining metadata
+      nodes, typed bindings if they cost time) belongs to the strict mode, not to the default.

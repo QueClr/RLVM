@@ -837,7 +837,47 @@ of proofs that the scanner threads could not resolve, the records that are not p
   and 1.94 - 2.24 against 2.04 - 2.17), 8 better on mathlib (21.05 against 22.66 s) and in the image
   (cedar 2.51 against 2.56, mathlib 28.2 against 31.0): 8 workers stay.
 
+- *Native image, `Mem.u64` / `Scanner.num` out of line* (wave 7's first thing to try): an image of the
+  published jars built with `-H:DirectedInline` for every call of the two from `Scanner`
+  (`work/lp2/inline-rules.txt`, `work/lp2/dist-pack2i`) against the image of the same jars without it
+  (`work/lp2/dist-final-n`), 8 workers, median of passes 2 - 6, pass wall / loader: default reader Std
+  1.48 / 1.31 against 1.54 / 1.36 s, cedar 2.06 / 1.97 against 2.09 / 2.01; two scanner threads Std
+  1.52 / 1.33 against 1.50 / 1.31, cedar 2.05 / 1.96 against 2.07 / 1.94. No difference beyond the
+  spread between rows: NOT adopted (whether the rule really inlined the calls was not verified: the
+  images have no symbols).
+- *The loading thread in the image* (`perf record` in the arena container, warm passes with 8
+  workers, Std; the images have no symbols, so only the shares per thread, `work/lp2/perf`): published
+  jars, default reader: loading thread 9.2 % of all samples (12.8 % of them in the kernel); packing
+  with two scanner threads: loading thread 5.1 % (16.6 % kernel), scanner threads 5.8 % together;
+  mathlib with packing: 3.6 % and 3.5 %.
+
+**7. The published state with a faster machine** (window of 22:01Z: the jars published at 20:29Z in a
+distribution with the machine jar of 19:15Z, `78c74ca92785`, against the same distribution with the
+three jars of before LP2, `work/lp2/dist-prev`; JVM launcher, 8 workers, 12 passes, median of passes
+6 - 12, two rows each):
+
+| 8 workers, pass wall / loader, s (CPU of the pass) | Std | cedar |
+|---|--:|--:|
+| jars before LP2, default reader | 1.30 / 1.04 (9.2), 1.18 / 1.02 (8.7) | 1.65 / 1.59 (11.5), 1.67 / 1.62 (12.1) |
+| published, `io=mapped`, 2 scanner threads | 1.31 / 0.98 (9.4), 1.15 / 0.87 (8.6) | 1.68 / 1.31 (12.1), 1.54 / 1.46 (11.5) |
+
+With that machine the passes are a quarter shorter than in the tables above and the loader thread
+runs for 80 - 97 % of them with the old jars - and still the packing does not shorten the pass (Std
+1.24 -> 1.23 s, cedar 1.66 -> 1.61 s, means of two rows): the pass is at its CPU bound (8.6 - 9.4 s and
+11.5 - 12.1 s of CPU on 8 cores = 1.1 - 1.2 s and 1.45 - 1.5 s), every thread ends when the cores run out
+of work, and the load's TOTAL CPU (loading thread plus scanner threads: about 1.3 s on Std against
+1.1 s on one thread) is what counts there. **What would shorten such a pass is less CPU in the load
+as a whole**, not a shorter loading thread: see "Observations".
+
 ## Observations for the next work packages
+
+- (LP2) On 8 saturated cores the load costs a pass its total CPU time, now 13 - 14 % of a Std or
+  cedar pass. Candidates, by the profiles above: on the scanner threads the tape is written twice
+  for a window (entries, then the copy with run headers: reserve the header in place instead), ids
+  are parsed where they could be compared with the expected text (the reader's rejected trick: it
+  costs instructions and saves time, and time is the metric now), and the lookups for early
+  references are cache misses that the loading thread no longer pays but the scanner threads do; on
+  the loading thread names (16 - 20 % of it), promotion (17 - 19 %) and the shared nodes (18 %).
 
 - The reader needs an id translation table for names with the real store (`LoadReport.readerIdTables`):
   the store pre-interns the 34 special names, so the name ids the loader returns are not consecutive.
