@@ -23,6 +23,8 @@ class PackedRunsTest {
         int names = 1;
         int exprs;
         int structures;
+        /** letE records written with nondep = true. */
+        int nondepLets;
         int levelOne;
 
         Exp(long seed) {
@@ -72,8 +74,12 @@ class PackedRunsTest {
         }
 
         int let(int name, int type, int value, int body) {
+            boolean nondep = rnd.nextBoolean();
+            if (nondep) {
+                nondepLets++;
+            }
             sb.append("{\"ie\":").append(exprs).append(",\"letE\":{\"body\":").append(body).append(",\"name\":").append(name)
-                    .append(",\"nondep\":").append(rnd.nextBoolean()).append(",\"type\":").append(type).append(",\"value\":")
+                    .append(",\"nondep\":").append(nondep).append(",\"type\":").append(type).append(",\"value\":")
                     .append(value).append("}}\n");
             structures++;
             return exprs++;
@@ -181,6 +187,8 @@ class PackedRunsTest {
                 T.Run p = T.struct(data, T.packing(2 + seed % 3, chunk), 1);
                 T.same("seed " + seed + ", chunk " + chunk, s, p, true);
                 assertEquals(x.exprs, p.result.exprs);
+                // a let with nondep = true is never packed: the sink sees every one of them (R2-F1)
+                assertEquals(x.nondepLets, p.nondepLets, "seed " + seed + ", chunk " + chunk);
                 assertEquals(0, p.earlyChildren);
                 // with the sink's table of finished expressions: complete, or with holes
                 T.Run e = T.struct(data, T.packingEarly(2 + seed % 3, chunk, 1 + seed % 4), 1);

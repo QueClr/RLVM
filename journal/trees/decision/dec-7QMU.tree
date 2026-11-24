@@ -1,0 +1,39 @@
+\title{The metric is warm wall clock}
+\taxon{Decision}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{performance}
+\tag{benchmark}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/design/OWNER-NOTES.md}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. It is owner note 12 of 2026-11-24 and section 0 of \src{docs/design/RECONCILIATION.md}; it replaces the earlier "CPU time first".}
+
+\p{\strong{Context.} The Lean Kernel Arena ranks checkers by a virtual clock derived from user-space instruction counts on Mathlib. The first design drafts therefore argued from instruction counts. The owner corrected this in three steps. Note 1 (2026-11-23): the board's time is a virtual clock, and the leading position on it does not reflect wall clock. Note 10 (2026-11-23): "We don't want to beat instructions. care more about CPU time plz.", which made CPU time summed over all threads the primary metric. Note 12 (2026-11-24): "instruction cost is what arena chasing, not us. wall clock time after warmup/pipelined is our goal. we care about 'real checking performance'".}
+
+\p{\strong{Decision.} The goal is real checking performance: the wall-clock time of checking with parallel workers, in steady state, that is after warm-up (JIT compilation, table growth, the page faults of the first seconds), with loading pipelined with checking. Warm-up cost is not charged. CPU time is a diagnostic that tells how much parallelism is left. Instruction counts are the arena's metric and are recorded for information only. Every benchmark table lists, in this order: warm wall clock with 8 workers (pipelined), warm wall clock with 1 worker, cold wall clock of a fresh process, CPU time, peak RSS, instructions. "Warm" means that the same process checks the same export again after a first pass, with per-pass times reported, or the steady-state rate after the first seconds of a long corpus. Correctness rules and the arena's interface (run line, exit codes, official verdicts) are unchanged.}
+
+\p{\strong{Evidence.} The three metrics rank designs differently, and the project has measured each disagreement.}
+
+\ul{
+\li{Instructions against time, same code. The same hash-consing probe ran at 29 instructions per nanosecond on a cached table and at 3.5 per nanosecond in a pass over all of Init with a working set of 116 MB (spike on the CE native image, aarch64, one thread; \src{docs/design/ISA.md} section 0.3). Memory traffic, not instruction count, sets the time.}
+\li{Instructions against time, a tuning knob. As the machine's session cap grows, the instruction count falls (more memo hits) while CPU time and wall clock rise (the tables leave the cache); see [dec-KXE1](dec-KXE1).}
+\li{Instructions against time, a compiler. On Mathlib the same JVM checker (tenet-jvm) with the Graal JIT instead of C2 needs 1.4 \% more CPU time and 28 \% more instructions (\src{bench/README.md}).}
+\li{Cold against warm. On Mathlib with 8 workers and pipelined loading, the machine with its default switch set of the wave-6 integration takes 27.43 s per warm pass on the CE native image and 21.23 s on the JVM launcher, whose first pass took 30.94 s (median of the later passes of one process, inside a quiet-core window, development host aarch64; \src{docs/BENCHMARKS.md}, "Warm wall clock"). Charged for warm-up, the JVM loses; in steady state it wins. See [dec-WX9Z](dec-WX9Z).}
+}
+
+\p{\strong{Consequences.}}
+
+\ul{
+\li{A JIT, whether HotSpot on the JVM launcher or the [Truffle tier](design-truffle-tier), is judged by the steady-state speed it reaches and not by what compiling costs. Background compiler threads on spare cores are fine and promotion thresholds can be low.}
+\li{The platform question is decided by warm wall clock, see [the launchers](design-launchers).}
+\li{Decisions that earlier documents take "by CPU time" (the platform gate, the session cap sweep, the staging gates of the machine) are read as "by warm wall clock", with CPU time kept as the second column.}
+\li{A wall-clock number is evidence only when it was taken on reserved cores; the tooling for that is in [the measurement method](design-measurement-method). The launcher gained a multi-pass mode for it, see [the driver](design-driver).}
+\li{The default run became the target configuration: parallel workers, and the load pipelined when two or more workers run on an input of at least 8 MiB (\src{rlvm-main/README.md}).}
+\li{The arena's own figure, instructions of a cold process on an x86-64 runner, is still recorded; it is not the optimisation target.}
+}
+
+\p{The standing form of this decision is in [standing policies](standing-policies-goal). Source: \src{docs/design/OWNER-NOTES.md} notes 1, 2, 10 and 12; [the session](ses-CVTE) in which note 12 arrived.}

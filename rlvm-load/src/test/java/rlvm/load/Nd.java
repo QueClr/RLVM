@@ -151,9 +151,13 @@ final class Nd {
     }
 
     int let(int type, int value, int body) {
+        return let(type, value, body, false);
+    }
+
+    int let(int type, int value, int body, boolean nondep) {
         int id = ++exprs;
-        raw("{\"ie\":" + id + ",\"letE\":{\"body\":" + body + ",\"name\":0,\"nondep\":false,\"type\":" + type + ",\"value\":"
-                + value + "}}");
+        raw("{\"ie\":" + id + ",\"letE\":{\"body\":" + body + ",\"name\":0,\"nondep\":" + nondep + ",\"type\":" + type
+                + ",\"value\":" + value + "}}");
         return id;
     }
 

@@ -4,8 +4,23 @@
 \author{claude-fable-5-2}
 \contributor{queclr}
 \tag{soundness}
+\tag{machine}
+\tag{reference-engine}
 \meta{harness}{Claude Code}
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{The last phase of 2026-11-24 began when the machine was [taken back as the default engine](ses-CVTE). It asked one question from several sides: what would it take for the default configuration to give the official verdict on every input, and is that the right contract. Every review here judged against the official checker of Lean v4.36.0 run on the export, never against the reference engine.}
+
+\ul{
+\li{\strong{The wrong accepts and their fix.} Seven shapes, findings E1-F1 to E1-F7, with one root: the official kernel types a bound variable by its binder's declared type, and the machine typed it by the value in its slot, which can be a type that is only convertible. The fix gives bound variables their declared type (typed bindings), restricts the expected-type rule to one domain value, and added 78 hostile exports. It cost nothing measurable in warm wall clock. One shape is intrinsic to a machine on values and stays.}
+\li{\strong{The shortcuts.} \src{docs/design/review/soundness-shortcuts.md}: the two proof-comparison options that [the profiles](ses-JRSD) priced are sound with respect to Lean's type theory as implemented. Every equation they assume is derivable, under the precondition that both sides are well typed, which the machine's inference establishes. Where they differ from the official verdict, the official checker accepts a proof of the same statement once the congruence step is written out as a term.}
+\li{\strong{The default set.} \src{docs/design/review/soundness-default-set.md}: the ten switches that had entered the default set without an adversarial review, attacked with 423 new exports, 200 of them random programs. No accept of an underivable statement. Six findings of accepts of derivable statements that the official checker rejects, one of them in the reference engine, with one root that no gate could see: the official \code{\verb~|is_def_eq~} is not a function of its two arguments, because one of its caches is read by cheap calls and written only by full ones. One switch, \code{k2}, gave a wrong accept with its default thresholds and stays off.}
+\li{\strong{The reference engine.} \src{docs/design/review/reference-caches.md}: an audit of the oracle's own caches after one of those findings was an accept of the reference engine. The loader drops metadata nodes and a flag of let bindings that are part of the official term identity; the official verdict can depend on whether a subterm is one export record or two, through a pointer test, which no store that identifies equal terms can reproduce; and admission of inductive types keeps caches that the official kernel discards. All are accepts of derivable statements.}
+}
+
+\p{\strong{The decision.} With these findings the question was put to the maintainer as strict or practical exactness for the default, and the answer was practical: never an accept of an underivable statement, the official verdict on every real input, everything the official checker accepts is accepted, and an accept of a derivable statement that the official checker rejects only through its own incompleteness, non-transitivity, cache order or object identity is tolerated and written down. It is recorded in [standing policies](standing-policies); the classes that are tolerated are in [accepted risks](accepted-risks) and \src{docs/design/review/official-divergence.md}.}
+
+\p{\strong{What followed the same evening.} One launcher option was wired to select the policy: practical is the default, and strict means the reference engine with its exactness-only behaviour, among it the decline of metadata in declarations and the official second pass where the verdict depends on object identity. The hostile suite of the machine got a kind per row: a row marked as tolerated demands the official verdict or an accept, every other row the official verdict. The gate for a default configuration runs a distribution exactly as a user does and judges it against official verdicts only. The second pass of the adversarial review attacked the candidate default, the default set with eager reduction and the two shortcuts, on 987 hostile exports with official verdicts, and found no accept of an underivable statement.}
+
+\p{\strong{State at the end of the day.} The reference engine is the default engine. The conditions the maintainer set for making the machine the default are met by the review for the candidate; the publication with the machine as default, its gate and the warm measurements that decide whether the shortcuts are on by default were still to come.}

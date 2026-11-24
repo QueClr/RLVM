@@ -5,8 +5,25 @@
 \contributor{queclr}
 \tag{research}
 \tag{benchmark}
+\tag{arena}
 \meta{harness}{Claude Code}
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{The first phase of the project. A team of research agents read the arena, the official kernel and the leading checkers, measured the platform, and built the tooling that every later number comes from. No checker code was written. Branch \code{dev}; the work is in the commits \commit{6fad0e1}, \commit{066dbf8}, \commit{1c3f2e7} and \commit{f6670d9}, which were recorded together on 2026-11-24 when the history was started. Dates in this journal follow the commit history; the documents give times in UTC.}
+
+\ul{
+\li{\strong{The contract.} \src{docs/research/01-arena-and-export-format.md}: how the Lean Kernel Arena runs and ranks a checker, and the export format a checker reads.}
+\li{\strong{The specification.} \src{docs/research/02-kernel-typechecker.md} and \src{docs/research/03-kernel-declarations.md}: the type checker and the admission of declarations of the official kernel at v4.36.0, written so that an implementation can follow them rule by rule.}
+\li{\strong{The leaders.} \src{docs/research/04-leader-nano-lean.md}, \src{docs/research/05-leader-gruszka-pestka.md}, \src{docs/research/06-leader-sokonanoda-family.md} and \src{docs/research/07-leader-rpylean-and-tenet-jvm.md}: how the four leading checkers work, and why the one existing checker on the JVM is slow.}
+\li{\strong{Techniques.} \src{docs/research/08-thc-truffle-tricks.md} on Truffle for a lazy evaluator, \src{docs/research/09-nbe-hoas-tricks.md} on normalisation by evaluation, \src{docs/research/11-memory-reuse-parallelism.md} on memory, in-place reuse and parallel workers.}
+\li{\strong{Measurements.} \src{docs/research/10-graalvm-platform.md} on GraalVM as a platform, \src{docs/research/12-baselines.md} with the leaders measured on the development host, and \src{docs/research/13-workload-characterization.md} on what the kernel does on the larger corpora.}
+}
+
+\p{\strong{What the measurements said.} On the aarch64 development host, in a container shaped like the arena runner, nano-lean checks Mathlib in 361.3e9 instructions, gruszka in 418.7e9, sokonanoda in 504.3e9 and rpylean in 544.6e9; the official kernel needs 11.42e12. Instruction counts repeat to within 0.3 \% on Mathlib and wall-clock time does not: the same command varied by a factor of two with the load of the host. Checking has no hot spot: the most expensive declaration of Mathlib is 0.35 \% of nano-lean's checking cost, and half of the cost is spread over 715,866 declarations. Reading the export is 7 to 11 \% of a leader's run. The workload study found that Cedar is not more reduction-heavy than Init, that the larger corpora differ in the size of their declarations and in conversion, and that dynamic heat is low: no corpus executes one code object often enough to repay the promotion cost that the first design assumed, while two of the arena's performance tests do.}
+
+\p{\strong{Infrastructure.} \src{bench/README.md} describes the tooling: a container image with the arena's limits (8 processors, 16 GB, no network) in which a command runs under \code{\verb~|perf stat~} as the arena runs it, a suite runner that scores a checker over the arena's tests as the arena does, the leading checkers built from the arena's own definitions as baselines, and a history of results. The arena's complete test set, Mathlib included, was built with the arena's own tool. Four spikes under \code{spikes/} measured the platform, memory layouts, tiers of a machine and the control convention of a stepper before any design depended on them.}
+
+\p{\strong{Policy recorded.} The first of the maintainer's notes were given during this phase: the board's clock is not wall clock, realistic workloads are parallel, the elaboration language decides how hot the machine is, and Cedar-level workloads are the yardstick. See [standing policies](standing-policies).}
+
+\p{\strong{Next.} [The design and its review](ses-EMMW).}

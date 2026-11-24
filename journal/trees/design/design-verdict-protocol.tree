@@ -1,0 +1,70 @@
+\title{The verdict protocol: optimistic environment, pessimistic verdict}
+\taxon{Design}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ARCHITECTURE.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented in \code{rlvm-driver} and \code{rlvm-cli}, with the verdict rule of the reconciliation instead of the first draft's.}
+
+\p{RLVM answers accept, reject or decline for a file. A unit is one declaration record of the export; an engine answers accept, reject or decline for a unit. This note is the chain between the two. Its purpose is that no optimisation, cache, schedule or crash can turn into a wrong answer: a wrong answer in either direction outweighs any speed, and a decline is always available.}
+
+\subtree[design-verdict-protocol-statuses]{
+\title{Statuses and the fail-closed chain}
+
+\table{
+\tr{\th{Exit status}\th{Meaning}}
+\tr{\td{0}\td{every unit accepted, or skipped as unsafe or partial; the end of the file was reached and the counts are consistent}}
+\tr{\td{1}\td{malformed input, or a rejection confirmed by the reference engine}}
+\tr{\td{2}\td{no confirmed rejection, but something was declined}}
+\tr{\td{3}\td{internal error: an \code{Error}, a dead thread, a launcher failure}}
+\tr{\td{64}\td{usage error}}
+}
+
+\p{Three independent defaults must all be overturned for a 0. The launcher's status starts as 3 and takes a verdict only from a check that returned normally. The driver's verdict board says decline until the loader has reported the complete file. And completion yields accept only if every unit is accepted or skipped, the number of units equals the number of declaration records the reader counted, and no unit has another status. Every unit status is written once.}
+}
+
+\subtree[design-verdict-protocol-optimistic]{
+\title{Optimistic environment}
+
+\p{Units are checked against the \em{statements} of earlier units, not against their verdicts: a worker reads the type of an earlier declaration before anybody has checked it. This is what lets loading, the environment pass and the workers overlap, see [the driver](design-driver). It is sound because the file is accepted only if every unit is. A wrong earlier unit can only make a later check fail, loop or crash, and it yields a non-accept outcome by itself. The price is totality: an engine may be fed the body of an ill-typed earlier definition, so it must end with a decline on garbage, with bounds-checked ids and budgets, and every exception is caught at the unit boundary. Visibility is enforced once per root: a unit of rank r may mention only constants of smaller rank, which is one integer test on the summary \code{depMax} of [the term store](design-term-store).}
+}
+
+\subtree[design-verdict-protocol-rule]{
+\title{The verdict rule}
+
+\p{The verdict is the status of the first unit in file order that is not accepted or skipped: rejected gives reject, declined or "no status" gives decline. Later units never change it. A rejection is only ever recorded when it is confirmed. Malformed input gives reject whatever was checked, because the official reader rejects before any checking; unsupported input and I/O errors never give accept. The first draft gave two rules, "reject iff some rejection was confirmed" and "the first failure in file order". The soundness critic of [the design review](design-review-reconciliation) pointed out that a final decline of an early unit cancels later units, so whether a later rejecting unit was already checked depends on timing, and the same bad file could end in reject or decline with different worker counts (finding C3.13). The rule above is deterministic.}
+}
+
+\subtree[design-verdict-protocol-recheck]{
+\title{The re-check protocol}
+
+\p{An accept of the primary engine is final and is never re-checked: it is the hot path, and its soundness is the engine's own obligation, shown by [the gate](design-gate) and attacked by [the adversarial reviews](design-adversarial-review). Everything else is checked again, at once, on the worker's own thread, in a freshly reset session with a cold budget.}
+
+\table{
+\tr{\th{Warm outcome}\th{Stage}\th{Final status}}
+\tr{\td{reject}\td{1. the primary engine in strict mode accepts}\td{accepted; logged as WARM-ANOMALY, a cache or shortcut produced a wrong rejection}}
+\tr{\td{}\td{2. the reference engine rejects}\td{rejected, confirmed; the reason reported is the reference engine's}}
+\tr{\td{}\td{the reference engine accepts}\td{accepted; logged as MACHINE-INCOMPLETE}}
+\tr{\td{}\td{the reference engine declines or throws}\td{declined as an unconfirmed rejection, by policy}}
+\tr{\td{decline}\td{1. the primary engine with a cold budget accepts}\td{accepted}}
+\tr{\td{}\td{2. the reference engine}\td{its accept, reject or decline}}
+\tr{\td{exception}\td{session discarded; the reference engine}\td{its outcome; an internal-error decline if it throws too}}
+}
+
+\p{Accepting on the reference engine's word after the primary engine rejected is sound: [the reference engine](design-reference-engine) is a complete checker in its own right. This step is the rule "shortcuts fail open into the complete official procedure" at the granularity of a declaration, and it is what gives item (c) of [the exactness contract](design-exactness-contract): everything the official checker accepts is accepted. When the reference engine is itself the primary engine, one fresh cold run decides. Structural rejections and rejections of the environment pass need no confirmation. A WARM-ANOMALY fails a test build. The gate of an engine under test runs with the fallback off, so that the engine must accept every unit by itself.}
+}
+
+\subtree[design-verdict-protocol-resources]{
+\title{Resources}
+
+\p{No budget is expressed in time; a timeout would be scored like the decline it tries to avoid. Warm sessions have no step limit; step budgets exist only in strict and differential runs, and the machine has a bound of its own on the work of one unit. A budget that runs out, a depth limit of the reference engine and the memory account over its limit all give a decline, never a rejection. A decline for memory in a warm session is retried one unit at a time before it counts. An \code{Error} on any thread cancels the run and ends the process with status 3.}
+}
+
+\p{Documents: \src{docs/design/ARCHITECTURE.md} sections 4.1, 6.5, 6.6 and 8; \src{docs/design/RECONCILIATION.md} section 2, "Verdict rule" and "Faults inside TRY"; \src{rlvm-driver/README.md} sections "Re-check protocol" and "Verdict"; \src{rlvm-cli/README.md} for the exit-status protocol. Source: [the design session](ses-EMMW); built in [the reference pipeline](ses-BQZM).}

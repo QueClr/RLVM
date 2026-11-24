@@ -1,0 +1,76 @@
+\title{The driver: threads, slices, frontiers and passes}
+\taxon{Design}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-driver/README.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented in the module \code{rlvm-driver}. Namespace ordering of units and separate heavy-lane threads were designed and are not built.}
+
+\p{The driver runs one check of one export, from a store that is loaded or still loading to a verdict. It owns the threads, the scheduler, the life cycle of sessions, the re-check protocol, the verdict, the memory account and the statistics. It never sees an engine class (engines arrive as factories behind the facade of [the architecture](design-architecture)) and it never ends the process. How a unit's outcome becomes the verdict of the file is in [the verdict protocol](design-verdict-protocol).}
+
+\subtree[design-driver-threads]{
+\title{Threads and frontiers}
+
+\ul{
+\li{\strong{The loader} is the thread that called the driver. In a pipelined run it publishes finished units while the others check; this moves the \em{loaded frontier}. See [the export loader](design-export-loader).}
+\li{\strong{The environment thread} runs the environment lane: it admits inductive blocks and the quotient records in file order with [the reference engine](design-reference-engine), and announces every unit below what it has admitted. This is the \em{environment frontier}: units below it may be handed out. See [admission](design-inductive-admission).}
+\li{\strong{W workers} claim announced units and check definitions, theorems, axioms and opaques with the primary engine in a warm session. A worker has three lanes: the warm lane, a strict lane and a reference lane for re-checks.}
+\li{\strong{The first-failure mark} is the smallest unit with a recorded rejection or decline. Units above it are no longer handed out, and running ones abandon at their next poll.}
+}
+
+\p{Nobody polls: the environment thread parks on the loaded frontier and is woken by a publication, workers park in the scheduler. With one worker in batch mode there is no environment thread; the worker advances the environment pass itself, in strict file order.}
+}
+
+\subtree[design-driver-scheduler]{
+\title{The scheduler: slices}
+
+\p{A worker without work takes the next \em{slice} of the announced units for itself: its share of what is ready, at least one chunk and at most 256 units. It takes chunks of 32 units from the front of its slice. When nothing is left to slice, it steals the back half of the largest remaining run. One lock is taken once per claim.}
+
+\p{The first scheme cut every batch of ready units into one contiguous run per worker, as the reconciliation of the design review had asked. A worker that fell behind then kept receiving its share of every later batch, nobody else touched its backlog, and a heavy unit in it started late; its end was the end of the run. With slices the workers move through the file together, lowest units first. Measured on Std, check-only passes with 8 workers: 2.15 to 2.18 s before, 1.58 to 1.82 s with slices; on Mathlib no difference, steals fall from 286 to 3 (machine with the switch set \code{\verb~|warm,gated,expect~}, native image, quiet-core windows). A ten-round comparison showed that slices and a split bounded to the environment batch are equal within the noise; what costs is cutting everything that is ready into W contiguous parts.}
+
+\p{\strong{Slow units.} A unit that has run for more than 20 ms makes its worker give back the unstarted rest of its claim while the unit is still running. On reachability four units carry 93 \% of the steps and lie inside one or two claims; before this rule the other workers idled behind them. The time only decides who checks a unit, never a verdict.}
+}
+
+\subtree[design-driver-pipeline]{
+\title{Pipelined loading and the parking rule}
+
+\p{In a pipelined run the workers check what the loader has published so far. Three rules make such a run decide exactly what a batch run decides.}
+
+\ul{
+\li{\strong{"Not loaded yet" is not a verdict.} Nothing but an accept is recorded for a unit that started before the end of the load. Any other outcome is withheld, and the unit's protocol runs once more when the file is complete, because a rejection may rest on a name that a later record still provides.}
+\li{\strong{The environment pass is kept} over the end of the load and its lane is reset, so that admission in dependency order can read the whole file.}
+\li{\strong{The parking rule.} While the file is loading, the environment frontier does not move past a unit that may depend on the rest of the file. The driver sees that from the store's summaries without decoding anything: a root whose \code{depMax} lies beyond the unit's own rank, or a proof block with an unresolved reference. Workers go on with everything below the parked unit. Output of the exporter never parks: 0 parked units on Init, Std, cedar and Mathlib.}
+}
+
+\p{A large file is published in larger pieces: the hand-off interval of 4,096 units and 32 MiB is multiplied by the input's size in GiB, at most by 4. Each publication makes every worker rebuild its level overlay, about 110 MB of garbage and 45 ms of worker CPU on Mathlib. With the scaled interval Mathlib is published 52 times instead of 205, and the pipelined run with 8 workers went from 34.25 and 35.00 s to 31.71 and 31.90 s, two interleaved rounds. Pipelined loading is the launcher's default since 2026-11-24 when two or more workers run on an input of at least 8 MiB.}
+}
+
+\subtree[design-driver-memory]{
+\title{Sessions and memory}
+
+\p{A worker's warm session is reset when its footprint exceeds the session cap, after any outcome but accept, when the next unit's rank is not larger than the last one's, before a unit beyond the lane's snapshot of the loading file, and when a lane holds much unused capacity after a heavy unit. The cap is per engine, see [warm sessions](design-warm-sessions). The memory account adds the shared store and one slot per checking thread. Above the limit of 12 GiB only the thread that holds the most gives up; its unit is checked again holding the \em{heavy gate}, which admits one memory retry at a time. A unit is therefore declined for memory only if it does not fit into the limit by itself.}
+}
+
+\subtree[design-driver-invariants]{
+\title{Invariants and what was measured}
+
+\ul{
+\li{Fail closed: the run's status is decline until the complete file was accepted.}
+\li{The verdict and the deciding unit do not depend on the worker count, the chunk and slice sizes, the session cap, the byte budgets or the load mode. No decision that affects a verdict is based on time.}
+\li{The invariance suite runs every file under 9 schedules: batch with 1, 2, 4 and 8 workers, a session cap of one byte, pipelined with a publication every 1, 7 and 64 units. On 16,928 mutants, with the reference engine and with the machine as primary engine: 0 wrong, 0 schedule differences, 1,675 declined alike in every schedule, 0 declines that only a pipelined run has.}
+}
+
+\p{Where the wall clock of 8 workers goes was profiled on Mathlib (report P7; machine with \code{\verb~|warm,gated,expect~}, session cap 4 MiB, CE native image, quiet-core windows, development host aarch64). The check phase scales 6.9 to 7.4 times from 1 to 8 workers. Of 8 workers times the check wall clock, 87 to 91 \% is spent on a CPU in a batch run; the driver's own waits (frontier, tail, gate) are 1 \%; the serial part is the collector. Eight one-worker processes over eight shards of the file show that the 8-worker pass is 5 to 8 \% above what a perfectly balanced split could reach on that machine. After the changes above: pipelined 31.7 to 31.9 s, batch 41.5 s, a check-only pass 27.9 s.}
+
+\p{The automatic worker count is one worker per CPU and at most 8, decided by the launcher; a batch run uses at most one worker per 128 units. The multi-pass mode that measures warm wall clock is described in [the measurement method](design-measurement-method).}
+}
+
+\p{\strong{Open.} A heavy unit that starts late is still the end of the run on mid-size corpora: on Std one unit takes 0.7 s of a 1.5 s run with 8 workers. Starting large units first needs a scheduler rule that keeps the progress property, that the lowest undecided unit is always reached; the expected gain is 2.0 to 1.7 s on Std and nothing on Mathlib.}
+
+\p{Documents: \src{rlvm-driver/README.md} (as built, deviations, every measurement), \src{docs/design/ARCHITECTURE.md} section 6 (the design), \src{docs/research/profiles/P7.md} (the parallel-scaling profile), \src{rlvm-main/README.md} (load defaults, worker count). Source: [the pipeline session](ses-CVTE) and [the profiles](ses-JRSD).}

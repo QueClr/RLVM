@@ -1,0 +1,80 @@
+\title{The design review and its binding reconciliation}
+\taxon{Design}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/RECONCILIATION.md}
+\import{base-macros}
+
+\p{\strong{Status:} accepted and binding. The resolutions were applied in revision 2 of the instruction-set document and in the modules; one erratum found by implementation was added on 2026-11-24.}
+
+\p{Before any module of the machine was written, three independent critics reviewed the first complete drafts of \src{docs/design/ISA.md} and \src{docs/design/ARCHITECTURE.md}: one for coherence and implementability, one for performance and feasibility, one for soundness. Their findings are kept verbatim in \src{docs/design/review/critic-findings.md}: 41 findings, of which 6 blockers, 26 major and 9 minor. The orchestrator answered them in \src{docs/design/RECONCILIATION.md}. That document is binding, and the order of authority for a design question is: the owner's notes, then the reconciliation, then the two design documents, then the research documents. A module that follows the reconciliation against a design document says so in its README.}
+
+\subtree[design-review-reconciliation-verdicts]{
+\title{What the critics said}
+
+\ul{
+\li{\strong{Coherence.} Not ready to staff as written. The machine had no module skeleton, no work packages and no acceptance gates, while the architecture's packages absorbed every agent.}
+\li{\strong{Performance.} Coherent and implementable, and the spike confirms the core bet, that code objects make telescope instantiation cheaper. But no document added up a total for Mathlib, and the worklist stepper measured +33 \% instructions over host recursion in its best form, against the 8 to 10 \% that the draft had planned.}
+\li{\strong{Soundness.} Not ready to implement as written: two blockers, both with small fixes. The admission pipeline, the canonical free variables, the discipline of true, false and undecided, and the confirmation of rejections looked sound.}
+}
+}
+
+\subtree[design-review-reconciliation-blockers]{
+\title{The four blockers}
+
+\table{
+\tr{\th{Blocker}\th{Finding}\th{Resolution}}
+\tr{\td{B1}\td{The universe instantiation carried by closures and suspensions was a bare list of levels. Two constants that share a body term under swapped parameter lists would get one closure: a wrong answer by identity.}\td{It is a \em{substitution id} that pairs parameter names with levels, see [universe levels](design-universe-levels). Regression test: exactly that pair of constants.}}
+\tr{\td{B2}\td{Published code objects and facts could hold ids that are local to one worker, for instance the terms of a theorem's proof block decoded into one overlay.}\td{The \em{publication rule}: anything visible to more than one session contains only export or generated term ids, constant ids, name ids and base level ids. A role whose source term lives in an overlay is never published. See [code objects and tiers](design-code-objects-and-tiers).}}
+\tr{\td{B3}\td{The machine could not be staffed.}\td{A skeleton module with layout and opcode constants, the operation library's signatures and about eight work packages with file ownership and acceptance tests; gates against the reference engine, see [the gate](design-gate).}}
+\tr{\td{B4}\td{The stepper's overhead.}\td{The control convention is fixed by measurement before any judgment is written, with the worklist transition system kept as the specification. See [dec-10ZO](dec-10ZO) and [control convention H](design-control-convention-h).}}
+}
+}
+
+\subtree[design-review-reconciliation-soundness]{
+\title{Soundness resolutions}
+
+\p{All soundness findings were accepted. The ones that shaped the machine:}
+
+\ul{
+\li{\strong{Static facts about propositions} are derived lazily from the store alone, and a sort level is recorded only when it is manifest, that is a sort before any reduction; otherwise the position is always compared. All facts of a constant form one immutable record published by a single store.}
+\li{\strong{Faults inside a speculative segment} fall into two classes. Recoverable ones (a kernel failure, a budget) become "undecided" and fall through to the complete procedure. Fatal ones (an invariant seen broken, a cancellation, the memory watermark) end the declaration with a decline.}
+\li{\strong{The table of failed comparisons} holds only comparisons that completed with false. Probes whose budget ran out go to a separate table that only suppresses another probe.}
+\li{\strong{Literals.} The successor of a literal folds exactly when the official kernel folds it, and literal identity has one bridge and one owner; see [Nat and String literals](design-nat-literals).}
+\li{\strong{The verdict rule} is the status of the first non-accepted unit in file order, see [the verdict protocol](design-verdict-protocol).}
+\li{\strong{Derived rules and the Truffle tier} stay off until named conditions hold, see [dec-MOCU](dec-MOCU) and [dec-ADIK](dec-ADIK).}
+\li{\strong{The facade} gained a strict mode: generic tier only, the complete procedure, a fresh session, no shared facts or code.}
+}
+}
+
+\subtree[design-review-reconciliation-structure]{
+\title{Performance and structure resolutions}
+
+\ul{
+\li{\strong{Sessions.} The footprint is bytes in use, counted once; reset costs in proportion to what was used; the default cap of 16 MiB is to be swept. The sweep later gave a much smaller cap, see [dec-KXE1](dec-KXE1).}
+\li{\strong{Scheduler.} Contiguous runs per worker with stealing, no step limit in warm sessions. The driver later replaced runs by slices, see [the driver](design-driver).}
+\li{\strong{Elaboration} of a role is rent-to-own, at about the tenth use.}
+\li{\strong{Vision fidelity.} The roles specialised to a judgment are primary; Truffle compilation is an experiment with a go or no-go number, and nothing in the lower tiers may be constrained for its sake.}
+\li{\strong{Staging with measured gates}, six steps, each followed by a measurement on Init, Std and a slice of Cedar; see [staging switches](design-switches).}
+\li{\strong{First goal is a vertical slice}: batch load, one worker, the reference engine, the tutorial tests end to end. Pipelined loading and the rest were deferred until the 230 small tests passed.}
+}
+
+\p{Section 0 of the reconciliation states the metric; it was rewritten when the owner's note 12 arrived, see [dec-7QMU](dec-7QMU).}
+}
+
+\subtree[design-review-reconciliation-erratum-e1]{
+\title{Erratum E1: a let is zeta, not a variable}
+
+\p{Found on 2026-11-24 by the owner of evaluation, on the Cedar slice. The instruction-set document made every \code{let} value a suspension that behaves as a variable, so every value built from an evaluated \code{let} carried the flag OPEN. That is the official behaviour only for the let variable of inference. For a \code{let} inside an evaluated term the official kernel instantiates the body with the value: there is no variable. With the wrong rule, lazy unfolding skipped the folding of Nat literals and conversion skipped a shortcut exactly where the official kernel takes them, and the machine unfolded division, modulo and gcd on large literals by their fuel recursion: five Cedar declarations at about 1,000 times the official work.}
+
+\p{The rule now: evaluation treats a \code{let} as zeta by sharing with a plain value, like a beta argument; only inference's let variable is a suspension. OPEN on a value means what the official test for a free variable means. The document's statement that over-approximating OPEN is harmless was wrong: it steers into non-termination. Regression: unit 7008 of the Cedar slice, 73.7 M steps and a memory decline before, 60,569 steps after. See [the value model](design-value-model).}
+}
+
+\p{Documents: \src{docs/design/RECONCILIATION.md}, \src{docs/design/review/critic-findings.md}, \src{docs/design/OWNER-NOTES.md}. Source: [the design session](ses-EMMW); the erratum comes from [the machine's session](ses-Z72N).}

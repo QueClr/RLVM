@@ -1,0 +1,68 @@
+\title{The measurement method: warm passes on quiet cores}
+\taxon{Design}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{bench/README.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented. Every wall-clock number that the project uses as evidence since 2026-11-24 was taken this way.}
+
+\p{The goal of RLVM is warm wall clock with parallel workers, see [dec-7QMU](dec-7QMU). Measuring that on the development host needs three things that an ordinary run does not give: a process that is warm, cores that are quiet, and a host that is not out of memory. The host is shared by all agents of the project, whose builds and tests oversubscribe it several times.}
+
+\subtree[design-measurement-method-passes]{
+\title{Warm: one process checks the same export several times}
+
+\p{The launcher option \code{\verb~|-X passes=N~} makes one process check the export N times and print one line per pass with its wall clock, CPU time, collector time, load and check time, units, workers, heap and resident set. There are two kinds of later pass, chosen with \code{\verb~|-X passes-mode~}.}
+
+\ul{
+\li{\code{reload}, the default: every pass is a complete run with a new store, loader, engines and sessions, the load pipelined with the checking. Only the process is warm: compiled code, a sized heap, touched pages. A collection runs between two passes, outside the timed region. This is the owner's metric.}
+\li{\code{recheck}: the driver checks every definition, theorem, axiom and opaque unit of the loaded store again with new engine instances; nothing is loaded. It measures pure checking. With \code{\verb~|-X passes-keep=engines~} the later passes reuse the engine instances of pass 1, so what an engine keeps per instance (the machine's code store, compiled blocks, published facts) is warm as well.}
+}
+
+\p{The verdict and the exit status of the run are those of pass 1. A later pass with another verdict makes the run decline. With one pass, the default, none of this code runs.}
+
+\p{The warm number of a table is the median wall clock of passes 2 to N of one process, with the best pass in brackets. The tool \code{\verb~|bench/warm.sh~} produces one row per corpus and worker count: best and median later pass, pass 1, the cold wall clock of a separate fresh process from exec to exit, CPU and collector time of the median pass, peak resident set, and whether the row was taken in a quiet window.}
+}
+
+\subtree[design-measurement-method-quiet]{
+\title{Quiet: a window on reserved cores}
+
+\p{\code{\verb~|bench/quiet.py -- CMD~} runs a command as a timing measurement.}
+
+\ul{
+\li{One measurement at a time on the host, first come, first served.}
+\li{While the command runs, every other process of the working session and every other container is moved off the measurement cores, the 8 performance cores that the arena-shaped container uses, and put back afterwards. Nothing is stopped or paused: the rest of the team keeps working on the other cores.}
+\li{Containers of other agents that are pinned on the measurement cores are parked on spare performance cores for the window. Those have the same performance counters, so the instruction counts of the parked job stay valid.}
+\li{Every window is logged with its cores, duration, the load before and the number of threads moved.}
+}
+
+\p{Memory bandwidth and the shared cache are still shared with the other cores. So runs that are compared are taken in the same window where possible, interleaved when a difference is small. A wall-clock number that did not go through this wrapper is not reported.}
+}
+
+\subtree[design-measurement-method-slots]{
+\title{Host slots for heavy jobs}
+
+\p{\code{\verb~|bench/slot.sh -- CMD~} is the host-wide limiter for heavy jobs that are not timings: at most 8 such commands run at a time, and at most 2 native-image builds. A job does not start while less than 14 GB of memory is available; it waits for at most 30 minutes. The guard exists because the host went into swap thrash twice when many agents started large JVMs together.}
+}
+
+\subtree[design-measurement-method-reading]{
+\title{What a number means}
+
+\ul{
+\li{\strong{Order of columns.} Warm wall clock with 8 workers and pipelined loading, warm wall clock with 1 worker, cold wall clock of a fresh process, CPU time, peak RSS, instructions.}
+\li{\strong{Where.} The development host is aarch64 with Cortex-X925 performance cores. The arena runner is x86-64 with 8 CPUs and 16 GB. Absolute numbers differ, and ratios between checkers carry over only roughly.}
+\li{\strong{Cold tables.} One fresh process per run in a container shaped like the arena runner: 8 CPUs, 16 GB, no network, instruction counts from \code{\verb~|perf stat~}. The host itself cannot count instructions. These tables charge the warm-up that the goal does not.}
+\li{\strong{Noise.} Between the runs of one three-run entry, CPU time differed by 0.9 \% to 5.4 \%, median 2.9 \%. The same binary gave 34.7 s and 38.1 s for Mathlib pipelined with 8 workers in two windows. Differences below 3 \% are not results unless they repeat in interleaved rounds.}
+\li{\strong{Baselines.} gruszka and nano-lean are measured with the arena's run lines on the same cores, in the same windows where a ratio is stated. A baseline cell of the cold tables is the minimum over all its entries on the host.}
+\li{\strong{Steady state is not a given.} On Std and cedar the JVM launcher was still getting faster in its last passes at 6 passes; such a row is read by its best pass and by a longer row.}
+\li{\strong{Regression rule.} An entry more than 3 \% above the reference of its configuration is a regression; since 2026-11-24 the rule is applied to wall clock.}
+\li{\strong{Corpora.} Init and Std are regression corpora. The yardstick for a decision about heat, tiers or a JIT is the Cedar level: cedar, con-leche, reachability, navier-stokes-euler, cslib and Mathlib.}
+}
+}
+
+\p{Related: [the driver](design-driver) implements the passes, [the launchers](design-launchers) are what is measured, [the gate](design-gate) is the correctness counterpart of this method. Documents: \src{bench/README.md} sections "Timing on a busy host" and "Warm wall clock", \src{bench/track/README.md}, \src{docs/BENCHMARKS.md}, \src{rlvm-main/README.md} section "Passes", \src{rlvm-driver/README.md} section "Passes". Source: [the session](ses-CVTE); the container and the baselines come from [the first session](ses-XOS5).}

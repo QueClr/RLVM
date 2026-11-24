@@ -85,6 +85,12 @@ public final class LoadOptions {
      * transparent: it has no meaning in the theory, and nothing lean4export can write
      * ({@code --export-mdata}) is declined for it. Metadata inside an inductive or quot record is
      * declined in both modes, as before.
+     *
+     * <p>With the option on, a {@code letE} record with {@code nondep = true} is treated like a
+     * metadata node (finding R2-F1): the flag is part of the official term identity
+     * ({@code expr_eq_fn}: {@code let_nondep(a) == let_nondep(b)}) and the store does not keep it,
+     * so a declaration (also an inductive or quot record) that contains such a let is declined. No
+     * letE of the eight corpora or of the arena tests has the flag.
      */
     public final boolean strictMetadata;
 

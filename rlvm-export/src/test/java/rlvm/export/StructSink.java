@@ -13,6 +13,8 @@ final class StructSink extends TraceSink {
     private final Random rnd;
     long runs;
     long runRecords;
+    /** letE records with nondep = true that arrived as single records (none may be hidden in a run). */
+    long nondepLets;
     long earlyChildren;
 
     /** @param take 0 = refuse every run, 1 = take every run, 2 = take or refuse at random */
@@ -36,6 +38,9 @@ final class StructSink extends TraceSink {
 
     @Override
     public int exprLet(int binderName, int type, int value, int body, boolean nondep) {
+        if (nondep) {
+            nondepLets++;
+        }
         ev("let", type, value, body, exprs + 1);
         return ++exprs;
     }

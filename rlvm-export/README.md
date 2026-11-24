@@ -156,7 +156,11 @@ the previous declaration line with an id above T are the proof (finding F1 of sc
 window; at a template `thm` line it copies the window to the tape and puts a run header in front of
 every stretch of at least `RunFormat.minRecords` consecutive `app` / `lam` / `forallE` / `letE` entries
 with consecutive ids above the bound `max(T, first expression id of the window - 1)` whose children
-are all earlier records. At any other declaration line (a line that starts with `{"def":{`,
+are all earlier records. A `letE` entry with `nondep = true` is never part of a run (R2, 2026-11-24,
+finding R2-F1: the flag is part of the official term identity and the packed form has no place for
+it; such a record ends the stretch and reaches the sink through `exprLet`, where the strict loader
+declines the declaration; no letE of the eight corpora has the flag, so no run is shorter for it;
+`PackedRunsTest`: the sink sees every such record). At any other declaration line (a line that starts with `{"def":{`,
 `{"axiom"`, `{"induct`, `{"opaque`, `{"quot":`) and at the end of the chunk the window is copied as it
 is. With packing the chunk borders are moved behind the next declaration line (if it ends within
 8 MiB), so that a declaration's records lie in one chunk; the borders remain a function of the file

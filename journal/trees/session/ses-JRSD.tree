@@ -5,8 +5,39 @@
 \contributor{queclr}
 \tag{performance}
 \tag{benchmark}
+\tag{truffle}
+\tag{gc}
 \meta{harness}{Claude Code}
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{Beside [the speed phase](ses-CVTE), the seats that the maintainer added to the team went to profilers, scouts and prototype agents. Most of them worked on a private copy, wrote a report and handed patches to the owner of the module; two took over a module and published their changes themselves, the driver and eager reduction in the machine. Their reports are under \code{\verb~|docs/research/profiles/~} and \code{\verb~|docs/design/~}. Several ended with a measured no, which is recorded here as carefully as a yes.}
+
+\subtree[ses-JRSD-profiles]{
+\title{Profiles}
+
+\ul{
+\li{\strong{The gap to the leaders on Mathlib.} \src{docs/research/profiles/P8.md}: joined declaration by declaration over 714,712 units, the machine with its first switch set executed 6.5 times gruszka's instructions. The part that is specific to Mathlib is one class of work, the conversion of proofs: where two instance paths meet, every proof field and proof argument goes through proof irrelevance, which as in the official kernel compares the types of the two proofs. The leading checkers never compare a proof argument. That rule is 40 \% of the machine's instructions on Mathlib, declarations that enter eager reduction are 11 to 12 \%, and the rest is a uniform cost per operation.}
+\li{\strong{The same on three more corpora.} \src{docs/research/profiles/P9.md}: on navier-stokes-euler the proof-comparison rule is 54.5 \% of the machine's instructions; on cslib 22.4 \%, with 12.6 \% of the worker's CPU time in eager-reduction declines; on con-leche the two non-official shortcuts cost time.}
+\li{\strong{Parallel scaling.} \src{docs/research/profiles/P7.md}: where the wall clock of 8 workers goes, with a time account built into the driver.}
+\li{\strong{Collectors.} \src{docs/research/profiles/GC.md}: 646 runs over six collectors and both engines. No collector beats Serial; ZGC costs 4 to 7 \% of CPU time and Shenandoah 15 to 26 \%. With the machine there is almost nothing to collect.}
+\li{\strong{The JVM as the warm platform.} \src{docs/research/profiles/J1.md}: C2 compiles all of the machine and the time is in memory, not in code shape. Eight compiler threads halve the cold wall clock below Mathlib; transparent huge pages take 6 \% off the warm Mathlib pass; the ahead-of-time cache of JDK 25 makes every later pass 5 to 9 \% slower and was rejected. Mathlib needs the same warm wall clock from a 13 GB heap down to 6 GB.}
+\li{\strong{Session memory.} \src{docs/research/profiles/V1.md}: who makes the garbage in a worker, and a shared pool of large arrays with which a worker in steady state allocates almost nothing.}
+\li{\strong{The arena's own procedure.} \src{docs/research/profiles/AR1.md}: the complete arena test set of 270 tests without a wrong accept or a wrong reject in every configuration tried, and the instruction counts on Mathlib that the board would rank. This is information about the arena's metric, not a target.}
+}
+}
+
+\subtree[ses-JRSD-prototypes]{
+\title{Prototypes and their verdicts}
+
+\ul{
+\li{\strong{In-place reuse by reference-count bits: no.} \src{docs/research/profiles/X1.md}: a census of every record the machine makes showed that the cases such a bit specialises are a few per cent of the records. What is unshared is the memo key, not the value. A one-bit visit filter on the tabling keys of evaluation was the idea that paid: 18 to 41 \% fewer records, and 27 \% less warm check time on reachability against the machine without switches.}
+\li{\strong{Lazy proof ranges in the loader: works, and no.} \src{docs/research/profiles/X5.md}: leaving the bytes of proofs in the file for the worker that checks them makes the serial load 1.6 to 1.75 times faster, costs the workers 3 to 5 times the decoding, and makes a pipelined run slower at today's checking speed. The design and the prototype are kept.}
+\li{\strong{Official-exact proof conversion: nothing to recover.} \src{docs/design/review/exact-proof-conversion.md}: none of the 40 \% can be removed while giving the official verdict. The two non-official options are worth 24.6 \% of warm wall clock on all of Mathlib, 25.4 s to 19.2 s as a native image with 8 workers.}
+\li{\strong{Eager reduction on the machine: yes, behind a switch.} \src{docs/design/review/eager-reduction.md}: with the switch \code{eager} the machine decides the declarations it used to decline, 164 on Init and 6,711 on Mathlib. Published, gated and off by default.}
+\li{\strong{Identity on demand for application records: on reachability only.} \src{docs/design/VALUES-V2.md}: a revision of the value model in which a record built inside a block gets an identity only when one is needed. A design and a prototype; it gains on reachability and is kept as a staging switch with a patch queue.}
+\li{\strong{The Truffle tier: correct, and not a default.} \src{rlvm-truffle/NOTES-T3.md}: the guest language of the tier is the code blocks of the machine, the judgment chains of constants, not Lean terms. A promoted block becomes a Truffle root node, is compiled by Graal in the background and calls the same operations as the stepper. It agrees with the stepper and is off by default; as a default it was a measured no. Its finding is about design: what a JIT needs from the machine. The follow-up, a call instruction between code blocks, was built and gated clean and is worth nothing measurable, in the stepper and in the tier: most applications at a call site are answered by the memo of their record, so the application is a memo key that hits. It was not integrated.}
+}
+}
+
+\p{\strong{What the phase settled.} The distance to the leaders is not a tuning problem of one hot loop. Its largest part is a rule of the official kernel that the leaders do not follow, and whether RLVM may leave it is a question of policy, which the maintainer answered at the end of the day; see [the exactness phase](ses-874D).}

@@ -1,10 +1,11 @@
 # DRAFT arena checker definition for RLVM (lean-kernel-arena: checkers/rlvm.yaml). NOT SUBMITTED.
 #
-# `url`, `ref` and `rev` below are PLACEHOLDERS, on purpose: the project has no remote repository (the
-# working tree is not published anywhere; the orchestrator commits to a local branch). Before a
-# submission they must name the public repository, its branch and the full hash of a commit that
-# contains pom.xml, env.sh, scripts/ and every module of the parent pom (the arena fetches exactly that
-# commit with depth 1), and this file must be re-read against the binary once more.
+# `url` is the public repository (https://github.com/QueClr/RLVM; OWNER-NOTES item 14: the code is
+# dual-licensed Apache-2.0 OR MIT). `ref` and `rev` below are still PLACEHOLDERS, on purpose: nothing
+# had been pushed when this file was written. They are filled in AT SUBMISSION with the branch and the
+# full hash of a pushed commit that contains pom.xml, env.sh, scripts/ and every module of the parent
+# pom (the arena fetches exactly that commit with depth 1), and this file is re-read against the
+# binary once more then.
 #
 # WHAT IS SHIPPED NOW (2026-11-24, 23:00Z; docs/PLATFORM.md, docs/BENCHMARKS.md):
 #
@@ -137,8 +138,8 @@ description: |
   architecture, verifies their checksums and those of the third-party jars that go into the
   image, and builds from source.
 language: java
-# PLACEHOLDERS (there is no remote repository): see the first comment of this file.
-url: https://example.invalid/rlvm.git
+# `ref` and `rev` are PLACEHOLDERS until submission (nothing is pushed yet): see the first comment of this file.
+url: https://github.com/QueClr/RLVM
 ref: main
 rev: "0000000"
 version: "0.1.0-SNAPSHOT"

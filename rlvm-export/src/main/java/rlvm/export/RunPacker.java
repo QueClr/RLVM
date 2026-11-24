@@ -40,6 +40,9 @@ final class RunPacker implements RecordOut {
         return w == THM_0 || w == DEF_0 || w == AXIOM_0 || w == INDUCT_0 || w == OPAQUE_0 || w == QUOT_0;
     }
 
+    /** Bit of the first word of a {@link Tape#OP_LET} entry: the record has {@code nondep = true} ({@link Tape#let}). */
+    private static final int LET_NONDEP = 1 << 8;
+
     private final int tagApp;
     private final int tagLam;
     private final int tagPi;
@@ -203,7 +206,8 @@ final class RunPacker implements RecordOut {
         int p = 0;
         while (p < end) {
             int op = w[p] & 0xFF;
-            if ((op != Tape.OP_APP && op != Tape.OP_LAM && op != Tape.OP_PI && op != Tape.OP_LET) || w[p + 1] <= bound) {
+            if ((op != Tape.OP_APP && op != Tape.OP_LAM && op != Tape.OP_PI && op != Tape.OP_LET) || w[p + 1] <= bound
+                    || (op == Tape.OP_LET && (w[p] & LET_NONDEP) != 0)) {
                 p += size(w, p);
                 continue;
             }
@@ -239,7 +243,10 @@ final class RunPacker implements RecordOut {
                     }
                     maxName = Math.max(maxName, w[p + 2]);
                     p += 5;
-                } else if (op == Tape.OP_LET) {
+                } else if (op == Tape.OP_LET && (w[p] & LET_NONDEP) == 0) {
+                    // A letE with nondep = true is never packed: the packed form has no place for the
+                    // flag, and a sink that has to see it (the strict loader: finding R2-F1) gets the
+                    // record through exprLet. lean4export writes none in the eight corpora.
                     if (w[p + 1] != firstId + count
                             || !pack(o, tagLet, true, firstId + count, bound, packed0, w[p + 3], w[p + 4], w[p + 5])) {
                         break;

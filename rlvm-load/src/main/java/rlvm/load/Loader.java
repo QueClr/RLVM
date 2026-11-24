@@ -1122,7 +1122,13 @@ public final class Loader implements ExportSink, RecordSink {
         segLen++;
         nLet++;
         int id = ++exprCount;
-        if (mdata != null && (hasMData(type) || hasMData(value) || hasMData(body))) {
+        if ((nondep && options.strictMetadata) || (mdata != null && (hasMData(type) || hasMData(value) || hasMData(body)))) {
+            // STRICT policy only, the first alternative (finding R2-F1): the nondep flag of a let is
+            // part of the official term identity (expr_eq_fn compares it; the hash does not see it)
+            // and the store does not keep it, so `let x := v; b` with and without the flag are ONE
+            // term for RLVM and two for the official caches. Such a record is treated like metadata:
+            // a declaration that contains it is declined (LoadOptions.strictMetadata). The reader
+            // never packs such a record into a run (RunPacker), so every one of them comes here.
             markMData(id);
         }
         return id;
@@ -1244,7 +1250,9 @@ public final class Loader implements ExportSink, RecordSink {
     private void requireNoMDataInDeclaration(int root) {
         if (root >= 1 && root <= exprCount && hasMData(root)) {
             throw unsupportedDecl("metadata (mdata) node in the type or value of a declaration: the official kernel"
-                    + " treats it as a term of its own, RLVM drops it, so what RLVM would check is not that declaration");
+                    + " treats it as a term of its own, RLVM drops it, so what RLVM would check is not that declaration"
+                    + " (the same holds for a let with nondep = true: the flag is part of the official term and RLVM"
+                    + " does not keep it)");
         }
     }
 

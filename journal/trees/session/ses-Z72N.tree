@@ -4,8 +4,21 @@
 \author{claude-fable-5-2}
 \contributor{queclr}
 \tag{machine}
+\tag{soundness}
 \meta{harness}{Claude Code}
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{The fourth phase: the worklist engine of \src{docs/design/ISA.md} as the module \code{rlvm-machine}. A skeleton agent created the module, eight package owners wrote it in parallel, an integrator wired it into the build and measured it, and an independent reviewer attacked it with hand-built exports. Branch \code{dev}, commits \commit{afe1c5b}, \commit{d16b92a} and \commit{b37d5a4}.}
+
+\p{\strong{Wiring.} The machine is an engine behind the same interface as the reference engine and is selected with \code{\verb~|-X engine=machine~}. The reference engine re-checks every rejection of the machine and decides every unit the machine declines. The default engine stayed the reference engine: a provider needs a priority of 100 to be the default, and the machine registered with 10.}
+
+\p{\strong{The first gate.} Through the launcher, the machine without any switch gave the right verdict on all 230 published tests, with 15,803 declarations accepted, 41 rejected and 2 declined. The differential engine compared the machine with the reference engine on 57,938 units of Init, 100,096 of Std, 8,064 of a slice of Cedar and 4,224 of reachability, without switches and with the first optimisation switches, and found no difference in any of twelve runs. Over about 1.8 million unit comparisons of the integration no disagreement between the two engines was found.}
+
+\p{\strong{First numbers.} Cold, native image at \code{-O3}, one worker, in the arena-shaped container, CPU time: Init 13.8 s for the reference engine and 7.8 s for the machine without switches; Std 24.3 s and 13.3 s; the Cedar slice 3.9 s and 3.2 s; reachability 12.2 s and 8.0 s. The first switches (a session kept warm across declarations, gated tabling, expected types) brought Init to 7.1 s. The tables of a session had been sized as the instruction set document proposed; starting them small and letting them grow took the worker's CPU time on Init from 10.1 s to 7.3 s on the JVM. The profile was dominated by the probes of hash-consing: every frame was hashed, probed and compared for every argument and every tabled node. gruszka needed 2.8 s on Init and 5.7 s on Std on the same host.}
+
+\p{\strong{The first soundness review.} \src{docs/design/review/soundness-machine.md}. The reviewer judged every verdict against the official checker, never against the reference engine, on 329 hostile exports. Five findings. Four were accepts of the machine that the official checker does not give, one of them without any switch; all four were fixed by their owners during the review. Two speculative shortcuts answered a comparison by congruence, or skipped positions, where the official procedure does not; they were removed from every switch set. Comparisons that survived a declaration, and one case that involved eager reduction, were closed by a rule: a declaration that enters eager reduction is declined by the machine and checked by the reference engine. The fifth finding was the universe-level relation, in both engines, which the maintainer decided. The reviewer's analysis was that all five accepted statements are true in the theory. Two of the four were in switches that the integration had measured as clean on everything, because every gate of the integration compared the machine with the reference engine on real corpora. The reviewer advised keeping the remaining speculative switches opt-in.}
+
+\p{\strong{One test the plain machine cannot accept.} On the arena test \code{\verb~|perf/loop-unfolded-once~} the official kernel answers a comparison of two recursor applications by structural identity of the instantiated terms. The machine has two closures of different terms that are equal only after substitution, and declines. The later switch \code{same}, a bounded structural identity, answers it.}
+
+\p{\strong{Next.} [Machine speed and the pipeline](ses-CVTE).}

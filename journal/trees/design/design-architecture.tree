@@ -1,0 +1,103 @@
+\title{Architecture: one shared store, a frozen base and per-worker overlays}
+\taxon{Design}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{store}
+\tag{loader}
+\tag{driver}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ARCHITECTURE.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented. Every module of the design exists and the pipeline accepts all eight corpora; several defaults moved after measurement and are listed at the end.}
+
+\p{This note covers everything around the machine: the persistent store, the loader, declaration admission, the reference kernel, the scheduler and the verdict. What happens inside one worker while it checks a declaration is [the machine](design-machine-worklist). The scale the design is sized for is Mathlib: 6,326,141,213 bytes of export, 107,037,712 expression records, 721,845 declaration records that declare 739,167 constants.}
+
+\subtree[design-architecture-modules]{
+\title{Modules and layers}
+
+\table{
+\tr{\th{Layer}\th{Modules}\th{Role}}
+\tr{\td{0}\td{\code{rlvm-export}, \code{rlvm-level}, \code{rlvm-nat}, \code{rlvm-cli}}\td{Export bytes to record events; hash-consed universe levels; Nat and String literals with the 15 kernel operations; the launcher and the exit-status protocol. None depends on another RLVM module.}}
+\tr{\td{1}\td{\code{rlvm-store}}\td{All persistent data of a run. Depends on the JDK only.}}
+\tr{\td{2}\td{\code{rlvm-api}, \code{rlvm-load}}\td{The contracts of an engine and a session; the loader that fills the store.}}
+\tr{\td{3}\td{\code{rlvm-ref}, \code{rlvm-inductive}, \code{rlvm-machine}, \code{rlvm-truffle}}\td{The two engines, the regeneration of inductive blocks, the Truffle tier.}}
+\tr{\td{4}\td{\code{rlvm-admit}}\td{Structural checks, the environment pass, the flow per declaration, policies.}}
+\tr{\td{5}\td{\code{rlvm-driver}}\td{Threads, scheduler, session lifecycle, re-check protocol, verdict.}}
+\tr{\td{6}\td{\code{rlvm-main}, \code{rlvm-testkit}}\td{The kernel as a plug-in of the launcher; the differential engine and the mutators, which are not shipped.}}
+}
+
+\p{A module depends only on lower layers. The driver, admission and the wiring never see an engine class: engines register through \code{ServiceLoader} and arrive as factories behind one facade, whose question is "check constant \code{cid}; answer ACCEPT, REJECT or DECLINE", plus the judgments admission needs (\code{KernelOps}). Only the Truffle tier and the launcher's probe depend on Truffle artifacts.}
+}
+
+\subtree[design-architecture-store]{
+\title{One store of flat arrays, frozen progressively}
+
+\p{A term, a name, a level, a literal and a constant are each an \code{int} into flat primitive arrays; 0 means none; there is no object per term. Flat arrays were preferred to chunks (25 \% more per access in the research measurement) and to \code{MemorySegment} (1.9 times). Terms live in three regions: the export region and the generated region are shared, and each worker has an overlay of its own for the terms it builds. See [the term store](design-term-store).}
+
+\table{
+\tr{\th{Structure}\th{Writer}\th{Published by}}
+\tr{\td{Export region, names, literals, lists, levels, proof blocks, constant and unit rows}\td{the loader thread}\td{the frontier \code{loadedUnits}}}
+\tr{\td{Side rows of inductive types, constructors and recursors; the special constants; generated constants}\td{the environment thread}\td{the frontier \code{envUnits}, never ahead of the first}}
+\tr{\td{Unit status and the verdict board}\td{any worker, by compare-and-set}\td{-}}
+\tr{\td{Shared check facts, the machine's static facts and code objects}\td{any worker, racy and idempotent or publish-once}\td{-}}
+\tr{\td{Overlay terms, worker lists, levels and literals, the engine session}\td{the owning worker}\td{never shared}}
+}
+
+\p{The contract is the whole of the concurrency design: everything reachable from a unit below a frontier is immutable, a worker may check unit \code{u} only when \code{u} is below \code{envUnits}, and it then needs nothing above \code{u}. Both frontiers are volatile and monotone. No structure is locked on a hot path.}
+}
+
+\subtree[design-architecture-pipeline]{
+\title{The pipeline}
+
+\p{[The loader](design-export-loader) reads the file once and publishes finished units while it reads. An environment thread admits inductive blocks and the quotient package ahead of the workers, with [the reference engine](design-reference-engine), and publishes the derived facts ([admission](design-inductive-admission)). Workers check every other declaration with the primary engine in sessions ([the driver](design-driver)). A session is the engine's session plus the worker's overlays; it lives across units and is reset when its footprint passes a cap, after any outcome other than ACCEPT, when the next unit is not later than the last one, when the unit lies beyond the worker's level snapshot, and for every re-check ([warm sessions](design-warm-sessions)). Every rejection is confirmed by the reference engine before it counts ([the verdict protocol](design-verdict-protocol)).}
+}
+
+\subtree[design-architecture-decisions]{
+\title{The decisions of the document, condensed}
+
+\ol{
+\li{One shared store of flat integer regions; a term node is 8 ints.}
+\li{Two summaries per node, the largest rank of a constant below it and the set of universe parameters below it, make the structural checks of a declaration three integer tests at its roots and make cached facts independent of order.}
+\li{One pass over the file: no prescan, 4 bytes of transient state per expression record.}
+\li{Proofs stay packed, about 5 bytes per record, until a worker checks or unfolds the theorem.}
+\li{Loading, environment construction and checking overlap, with two publication frontiers and one failure mark.}
+\li{Optimistic environment, pessimistic verdict: a worker reads the statements of earlier declarations before they are checked, and the file is accepted only if every unit is.}
+\li{Nothing derived is read from the export: facts and recursors of inductive types are regenerated and compared structurally with the exported records.}
+\li{The reference kernel is a complete engine, so the pipeline was complete and testable before the machine existed.}
+\li{Engines sit behind one facade and are found at run time.}
+\li{Sessions are per worker and are reset by footprint and on every outcome that is not an accept.}
+\li{Parallel by default, with a verdict that does not depend on the number of workers: budgets are steps and bytes, never time.}
+\li{One native-image binary with the Serial collector and the working set in primitive arrays; the same jars stay launchable on the JVM, and a measurement gate decides which launcher ships.}
+\li{Policies: every well-typed axiom is admitted; unsafe and partial records are dropped; the prelude constants behind the literal extensions get shape guards; malformed input is rejected exactly where the official reader rejects and declined where RLVM is merely narrower.}
+}
+}
+
+\subtree[design-architecture-cost]{
+\title{What following the owner's vision cost}
+
+\ul{
+\li{\strong{Parallelism and wall clock first.} The research recommended one worker by default, because every worker costs instructions on the arena's board. The design chose parallel workers and a pipelined loader; the cost read from a leading checker was 0.8 \% more instructions with 4 workers and 1.6 \% with 8.}
+\li{\strong{The machine carries the checking.} Definitions, theorems, axioms and opaques go to the machine; only inductive blocks, the quotient package, which together are 1 \% of the units, and re-checks use the reference kernel. The environment pass was estimated at about 10 G instructions on Mathlib, on a thread of its own.}
+\li{\strong{A base tier of plain Java compiled ahead of time.} The spike numbers said the JIT of HotSpot needs 0.69 times the instructions of the community native image on the object benchmark, after a warm-up. The design took the native image first and a platform gate later, at a risk of up to 1.4 times on steady-state code if the gate were skipped. The gate was run: see [the launchers](design-launchers) and [dec-WX9Z](dec-WX9Z).}
+}
+}
+
+\subtree[design-architecture-as-built]{
+\title{What moved after the design, as of 2026-11-24}
+
+\ul{
+\li{The optimisation target is warm wall clock ([dec-7QMU](dec-7QMU)); the instruction budgets of the document are no longer targets.}
+\li{The default number of workers is the number of processors, at most 8, where the design said 6. Loading is pipelined by default when there are two or more workers and the input is a regular file of at least 8 MiB, with two scanner threads from 256 MiB on ([dec-OC1F](dec-OC1F)).}
+\li{The session cap fell from the designed 32 MiB to 16 MiB in the reconciliation and to 1 MiB for the machine after measurement ([dec-KXE1](dec-KXE1)).}
+\li{Ranks are 1-based, so that a summary of 0 means "no constant".}
+\li{Constants the kernel generates without a record, and late names, are still declined; the generated region exists and is unused by admission.}
+\li{The default engine is the reference engine; the machine runs under \code{\verb~|-X engine=machine~} ([dec-T79V](dec-T79V)).}
+\li{The shared store of Mathlib measures 2,046 MiB in use after a batch load, against a budget of 2.04 GB.}
+}
+}
+
+\p{Detail: \src{docs/design/ARCHITECTURE.md}, corrected by \src{docs/design/RECONCILIATION.md} ([the review](design-review-reconciliation)); the module documents \src{rlvm-store/README.md}, \src{rlvm-load/README.md}, \src{rlvm-admit/README.md}, \src{rlvm-driver/README.md} and \src{rlvm-main/README.md} say where each module deviates and why. Source: [the design session](ses-EMMW) and [the session that built the pipeline](ses-BQZM).}

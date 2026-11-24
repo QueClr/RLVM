@@ -19,6 +19,37 @@
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>RLVM - Rabdos Lean VM</name>
+  <description>RLVM (Rabdos Lean VM): a Lean 4 kernel checker for lean4export NDJSON files, written in Java for GraalVM (JVM launcher and native image).</description>
+  <url>https://github.com/QueClr/RLVM</url>
+  <inceptionYear>2026</inceptionYear>
+
+  <!--
+    The code is dual-licensed: Apache License, Version 2.0, or MIT License - either, at your option
+    (file LICENSE at the repository root; docs/design/OWNER-NOTES.md, item 14). The journal under
+    journal/ is documentation, is not part of this build, and is under the GNU Free Documentation
+    License 1.3 or later (journal/LICENSE).
+  -->
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+      <distribution>repo</distribution>
+      <comments>Dual-licensed: Apache-2.0 OR MIT, either, at your option.</comments>
+    </license>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/license/mit</url>
+      <distribution>repo</distribution>
+      <comments>Dual-licensed: Apache-2.0 OR MIT, either, at your option.</comments>
+    </license>
+  </licenses>
+
+  <scm>
+    <url>https://github.com/QueClr/RLVM</url>
+    <connection>scm:git:https://github.com/QueClr/RLVM.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/QueClr/RLVM.git</developerConnection>
+    <tag>HEAD</tag>
+  </scm>
 
   <modules>
     <module>rlvm-export</module>

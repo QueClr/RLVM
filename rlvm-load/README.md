@@ -241,7 +241,7 @@ Verified against `leanchecker --from-export` v4.36.0 where marked (official); pr
 | safe and unsafe type records in one block | decline (not probed) | same |
 | safe types, unsafe constructor / recursor record | loaded, entry flagged `F_UNSAFE` (official: accepted; `rlvm-admit` declines such blocks in v1) | same |
 | `{"inductive":{"types":[],"ctors":[],"recs":[]}}` | declares nothing, no unit (official: accepted) | `anEmptyInductiveLineDeclaresNothing` |
-| `mdata` | dropped: the wrapped expression stands for it (practical policy, the default). Inside an inductive or quot record: decline (deviation 7), per unit with `publishOnDecline`. With `LoadOptions.strictMetadata` (strict policy): every declaration whose type or value carries it is declined | `SplitTest.mdataIsDropped...`, `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`, `PipelinedLoadTest.aDeclineIsTheStatusOfTheFirstUnitThatWasNotLoaded` |
+| `mdata` | dropped: the wrapped expression stands for it (practical policy, the default). Inside an inductive or quot record: decline (deviation 7), per unit with `publishOnDecline`. With `LoadOptions.strictMetadata` (strict policy): every declaration whose type or value carries it is declined; a `letE` with `nondep = true` counts as metadata there (deviation 7) | `SplitTest.mdataIsDropped...`, `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`, `PipelinedLoadTest.aDeclineIsTheStatusOfTheFirstUnitThatWasNotLoaded` |
 | segment longer than `LoadOptions.maxSegmentRecords` (default 2^26 = 1 GiB of buffer) | decline | `aSegmentBeyondTheLimitIsDeclined` |
 | more than 2^31 - 2^29 expression records, any `StoreLimitException` (2^28 - 1 shared nodes, 2 GiB pools, ...) | decline | only the exception mapping is tested (`BindingsTest.storeLimitsAreDeclines`); no input of that size was built |
 | level deeper than 2^24 - 1 (`LevelLimitException`) | decline (see deviations) | not tested (needs 16.7 M records) |
@@ -427,7 +427,20 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
    metadata even when it is referenced directly (over-approximation; it can only decline). Metadata in
    definitions, theorems, axioms and opaques is accepted by default: it is invisible to type checking
    in the theory (strict policy: declined, above).
-   `nondep` and binder names / info are not compared by the official checker either (test kit).
+   Binder names and binder infos are not part of the official term identity (`expr_eq_fn<false>`).
+   **The `nondep` flag of a `letE` is** (R2, finding R2-F1, 2026-11-24): `expr_eq_fn` compares
+   `let_nondep(a) == let_nondep(b)` and the hash does not see it, so `let x := v; b` with and without
+   the flag are two keys of every cache of the official kernel and ONE term for the store, which does
+   not keep the flag (`work/r2/exports/r2-id-let-nondep-bad.ndjson`: official reject, accepted). A
+   single edit of the flag does not change an official verdict (test kit), and it does not occur in
+   real exports (0 of 550,621 letE records of the eight corpora and the arena tests have
+   `nondep = true`). **With `LoadOptions.strictMetadata` a `letE` record with `nondep = true` is treated
+   like a metadata node** (`Loader.exprLet` marks it; the reader's `RunPacker` never packs such a
+   record, so the flag always reaches the loader): the declaration, inductive or quot record that
+   contains it is declined. With the option off nothing changes (the flag is ignored as before; the
+   store digest is identical in all reader configurations). Test:
+   `SplitTest.aDeclarationWithANondepLetIsDeclinedInStrictMode`. The exact treatment - the flag as
+   part of a LET node's identity (LP2's design on the board, 22:05Z) - is not implemented.
    `LoadReport.exprMData` counts the records. Test: `CatalogueTest.metadataInsideInductiveAndQuotRecordsIsDeclined`.
    The decline is for the rest of the file from that record on: with `publishOnDecline` the units
    before it are still checked (see "A decline is per unit"), so a file with an ill-typed earlier

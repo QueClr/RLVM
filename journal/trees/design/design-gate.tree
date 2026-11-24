@@ -1,0 +1,70 @@
+\title{The gate: differential runs, mutants and the hostile suite}
+\taxon{Design}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{benchmark}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-machine/NOTES-M8.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented. Two commands carry it: the machine's own gate for one switch set, and the end-to-end guard of a distribution. Since 2026-11-24 the hostile exports are a step of the guard and are judged by the official verdict and by their kind.}
+
+\p{A change of the machine that can change what is computed (a new [switch](design-switches), a default set, a fix) is published only with evidence that no verdict moved. The gate is that evidence in a fixed form, so that two runs can be compared and nobody has to trust a hand-picked sample. It has five kinds of test, and each sees something the others cannot.}
+
+\subtree[design-gate-machine]{
+\title{The machine's gate for one switch set}
+
+\p{One command of the gate tooling of \code{rlvm-machine} (\code{\verb~|report.sh gate --switches LIST~}; no list is the generic tier, called v0) measures the tree as published and writes a one-page report. Its parts:}
+
+\ol{
+\li{\strong{Differential.} Every declaration is checked by the machine and by the [reference engine](design-reference-engine), on the ladder of corpora: the tutorial tests, the \code{bugs} tests, all 230 published arena tests, Init, Std, reachability and a slice of Cedar. A unit the machine accepts and the reference engine rejects counts as SOUNDNESS, the opposite as COMPLETENESS; both must be 0. A unit the machine declines is not compared, because the reference engine decides it in a real run. A unit the reference engine itself declines is settled by the official verdict of the file.}
+\li{\strong{Tier equivalence.} The generic tier must give the same outcome for every declaration as the set under test. For a set with code objects, the values of unfolding, weak-head normalisation and type inference and the answers of conversion are compared on generated applications of every constant of the tutorial tests and Init. See [code objects and tiers](design-code-objects-and-tiers).}
+\li{\strong{Convention equivalence.} Host depth bound 0 and no bound are compared with the bound in force, 128: outcome, reason, ticks, call events by operation, the trace of frames, and after an accept every word of every record, every run word and every pair entry. This is the test that [control convention H](design-control-convention-h) does not change the transition system.}
+\li{\strong{Audits.} Two more lanes run with the debug audits on, \code{\verb~|poison,scopeaudit,maskaudit~} and \code{\verb~|memocheck,shortcheck~}: the same outcomes and no audit failure. The second lane recomputes memo hits and re-derives every positive answer of a shortcut by the complete procedure.}
+\li{\strong{Pipeline.} The real driver with \code{\verb~|-X engine=machine~} runs the 230 tests with one worker and the corpora with four: the verdict, the machine's declines, and the counters for a unit the machine could not finish, for a strict accept after a warm reject, and for disagreements.}
+}
+
+\p{A wrong verdict, a difference, a crash or a timeout fails the gate. Declines alone give "pass with declines". The lanes run as passes, one engine at a time, and are compared from digests recorded per unit, so the peak memory is one engine on one declaration.}
+}
+
+\subtree[design-gate-mutants]{
+\title{Mutants, through the real driver}
+
+\p{The test kit keeps four corpora of mutated exports, 17,775 files in all, each classified once by the official checker: 12,260 mutants of the tutorial tests, 2,692 of the \code{bugs}, \code{other} and \code{corner-cases} tests, 847 of the prelude, and 1,976 that wrap one expression in a metadata record. The mutant command runs every file through the real pipeline per switch set and compares the final verdict with the stored official one, with the same pipeline on the reference engine, and, per declaration and in process, the machine's own answer with the reference engine's. The last comparison matters because the driver trusts an accept of the machine. For v0 and for the default set of the wave-6 integration: SOUNDNESS 0 and COMPLETENESS 0 on 17,775 mutants per set, 16,092 in agreement and 1,683 declined, which is exactly what the reference pipeline declines; over 1,008,568 declarations per set the machine never accepts what the reference engine rejects, nor the reverse.}
+}
+
+\subtree[design-gate-diff]{
+\title{The differential engine through the launcher}
+
+\p{\code{\verb~|-X engine=diff~} of \code{rlvm-testkit} is an engine that runs the engine under test and the reference kernel on every unit inside a normal run, with reader, loader, environment pass, driver and workers. It is the form used on the large corpora. Its self-test is a deliberately broken engine with eight kinds of lies that the run must catch.}
+}
+
+\subtree[design-gate-hostile]{
+\title{The hostile suite, with kinds}
+
+\p{Hostile exports are small hand-built files, each attacking one shortcut or memo; see [the adversarial review method](design-adversarial-review). The suite lives with the machine's tests as compressed exports and a manifest with four columns: name, the verdict of the official checker of Lean 4.36.0, marks, and what the export attacks. It started as the 329 exports of the first soundness review and has 421 rows on 2026-11-24: 85 that the official checker accepts and 336 that it rejects.}
+
+\p{The rule of a row follows the [exactness contract](design-exactness-contract). A row with the mark \code{T} is of kind T: its statement is derivable and the official checker rejects it only through its own non-transitivity, cache order or object identity; such a row demands the official verdict or an accept. Six rows carry the mark. Every other row is strict and demands the official verdict. Further marks say that a decline is by design: 46 rows enter eager reduction and are declined without the switch \code{eager}, and 18 of them are declined even with it.}
+
+\p{The suite runs in process as a fast test group at every publication, as a slow matrix of every row under some thirty switch sets (32 sets by 329 rows, 10,528 judgments, for the default set of the wave-6 integration; 33 sets by 419 rows, 13,827 judgments, at the publication of the switch \code{eager}), and through the launcher as a step of the guard below.}
+}
+
+\subtree[design-gate-guard]{
+\title{The end-to-end guard of a distribution}
+
+\p{\src{scripts/gate.sh} is what every owner runs before publishing a behavioural change: build the distribution; all 230 arena tests through the JVM launcher with no wrong verdict and no decline; the mutant corpora with SOUNDNESS 0 and no good mutant rejected; the self-test of the differential path; and, with \code{\verb~|--hostile~}, the hostile rows through the launcher. The oracle of every step is an official verdict and never the opinion of one of the project's engines, so the same command gates a distribution whose default engine is the reference engine and one whose default engine is the machine. \code{\verb~|--defaults~} runs the distribution exactly as a user runs it, with automatic workers, the default engine and the default load mode; it is the gate of a change of a default.}
+}
+
+\subtree[design-gate-limits]{
+\title{What the gate could not see, and what it taught}
+
+\p{\strong{A differential against the reference engine is blind where both engines agree with each other and not with the official checker, and where real input never goes.} The default set of the wave-6 integration passed all of the above, including the differential engine with 0 differences on 760,839 units of eight corpora, and the machine was made the default engine. Within the hour, 67 new hostile exports with official verdicts showed five wrong accepts, three of them in v0: a bound variable was typed by what its slot holds, and such a type is only convertible with the declared one. On real corpora and on mutants the two types are the same, and the 329 rows of the suite had no row of that shape. See [the decision on the default engine](dec-T79V) and [the rule that followed](dec-QN1O).}
+
+\p{\strong{Lanes over one store share state that a real run does not.} Two pieces of state live in the store and not in the engine: the bits that record that a closed term passed check mode, and the hints that tell a binder node which code block was built for it. The gate runs up to six engines over one store. An audit lane that elaborates in another order wrote hints that turned block activations of the compared lanes into walks: the gate of the default set reported between 270 and 45,821 "different" declarations on Std and the Cedar slice, never the same number twice, in ticks only and never in outcomes. Every lane now has a table of its own for the bits, and the compared lanes run before the others. A real run has one machine engine per store and is not affected.}
+}
+
+\p{Detail: \src{rlvm-machine/NOTES-M8.md} (commands, deviations, every run), \src{rlvm-testkit/README.md} (the differential engine, the mutant corpora, the official-verdict cache), \src{rlvm-machine/NOTES-S.md} (the suite and its tests), \src{rlvm-machine/SWITCHES.md} (the gates of the default set), \src{rlvm-machine/NOTES-INT.md} (the two harness findings), \src{docs/design/ARCHITECTURE.md} section 9. Source: [the machine session](ses-Z72N), [the wave-6 session](ses-CVTE) and [the exactness session](ses-874D).}

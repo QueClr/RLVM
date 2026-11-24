@@ -1,0 +1,80 @@
+\title{The machine: a worklist mechanisation of the kernel's judgments}
+\taxon{Design}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\meta{status}{implemented}
+\meta{created}{2026-11-23}
+\meta{updated}{2026-11-24}
+\meta{origin}{docs/design/ISA.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented. The module \code{rlvm-machine} implements the transition system below and runs as the engine \code{machine} (\code{\verb~|-X engine=machine~}). Whether it is the default engine is a separate question: see [the decision on the default engine](dec-T79V).}
+
+\p{RLVM's machine is not an abstract machine for the lambda calculus. It is a mechanisation of the Lean kernel's type checking in the sense of the worklist formulation of Zhao, Oliveira and Schrijvers (ICFP 2019): a judgment is an entry of a worklist, an inference judgment carries its continuation and binds its result in it, a binder is an entry of the same order, and the algorithm is a first-order small-step transition system that succeeds when the worklist is empty. Terms and values are the data of this machine; its programs are judgments. This is the owner's reading of the project, recorded in [standing policies](standing-policies-design), and the instruction set of \src{docs/design/ISA.md} is built on it.}
+
+\subtree[design-machine-worklist-system]{
+\title{The transition system}
+
+\p{A configuration is a stack \code{W} of frames, a scope stack \code{SC} of open binders, a result register \code{A}, a mode register \code{ER} (set while the argument of an \code{eagerReduce} application is compared with its domain) and the remaining \code{fuel}, over the stores of terms, [values](design-value-model), runs and memo tables. A frame is an operation, a resume state and a few payload words. Every frame is a judgment that waits for the result of the frame above it; the result arrives in \code{A}. The transitions of the top frame:}
+
+\ul{
+\li{\strong{inline}: the frame needs a judgment whose fast path answers (identity, a flag, a memo word, a cache). \code{A} receives the answer and \code{W} is unchanged.}
+\li{\strong{call}: there is no fast answer. The frame stores the state that will read the result, and the judgment is pushed in its state 0.}
+\li{\strong{ret}: the top frame completes with a result. It is popped, and the new top frame continues in its saved state and reads \code{A}.}
+\li{\strong{tail}: the judgment is the frame's last action, and the frame owns no open binder and no scratch. The frame is replaced by the judgment.}
+\li{\strong{open} and \strong{close}: a frame opens a binder by taking the first free variable of the binder's type that is not in scope and pushing it on \code{SC}. The frame that opened a binder closes it before it returns.}
+\li{\strong{try}, \strong{exhaust}, \strong{fail}, \strong{fault}, \strong{cut}: budgets and failures, below.}
+\li{\strong{accept}: \code{W} holds only the sentinel frame \code{DECL} in its last phase. The declaration is accepted.}
+}
+
+\p{Four invariants keep this honest. A frame reads its own payload, \code{A} when it resumes, and the stores, never another frame. The frame that opened a binder closes it, and cutting \code{W} closes every binder whose owner is cut. The scratch and environment pointers are, when a frame returns, what they were when it was pushed. A memo is written only by the frame that owns the judgment, in the transition that completes it.}
+}
+
+\subtree[design-machine-worklist-judgments]{
+\title{The judgments}
+
+\p{The generic judgments are the unspecialised chains; a constant that is used often is elaborated into the same chains specialised to it, see [code objects and tiers](design-code-objects-and-tiers). The complete procedure is the official one, transcribed to values state for state. A generic judgment and the code instruction of the same name are one operation.}
+
+\table{
+\tr{\th{Family}\th{Judgments}\th{What the official kernel does there}}
+\tr{\td{evaluation}\td{\code{EVAL}, \code{FORCE}, \code{APPLY}, \code{INST}}\td{instantiation with beta, zeta and the projection of a constructor, delayed; constants stay folded. See [evaluation and tabling](design-evaluation-and-tabling).}}
+\tr{\td{reduction}\td{\code{DELTA}, \code{CORE}, \code{WHNF}, \code{IOTA}, \code{QUOTR}, \code{RULES}, \code{NATF}}\td{unfolding of a definition, weak head normal form without and with delta, recursor rules with the K rule and structure eta, quotient reduction, case trees, folding of Nat literals.}}
+\tr{\td{conversion}\td{\code{CONV}, \code{CARGS}, \code{CCLO}, \code{CBIND}, \code{LAZYD}, \code{PROJD}, \code{PIRR}, \code{ETA}, \code{ETAS}, \code{UNITL}}\td{definitional equality and its parts: arguments, binders, lazy delta, proof irrelevance, eta, structure eta, unit-like types. See [conversion](design-conversion).}}
+\tr{\td{inference}\td{\code{INFER}, \code{CHECK}, \code{TWALK}, \code{VTYPE}, \code{IPROJ}, \code{SIGD}}\td{type inference in checking and in infer-only mode, checking against an expected type, the walk of an application's telescope, the type of a value, projections, the facts of a constant. See [inference shortcuts](design-inference-shortcuts).}}
+\tr{\td{code}\td{\code{ACT}}\td{the activation of a code object; its resume state is the program counter.}}
+\tr{\td{control}\td{\code{TRY}, \code{ERF}, \code{DECL}}\td{a speculative segment under a budget; the restore of \code{ER}; the sentinel at the bottom of \code{W} that drives one declaration.}}
+}
+}
+
+\subtree[design-machine-worklist-budgets]{
+\title{Budgets and the three classes of failure}
+
+\p{A tick is charged where work is done and not on a memo hit: one per generic frame started, one per entry of a code block, one per iteration of the loops of weak head normalisation and lazy delta. \code{TRY} runs the next judgment under a budget that the enclosing budget bounds; the result is T, F or U, where U means that the budget ran out. Rolling a segment back needs no trail: values and completed memo entries made inside it are facts about values and stay, and the rest of the mutable state is restored from what the \code{TRY} saved. Nothing computed under a budget that ran out enters a memo. Every shortcut of the machine is either a fact derived from the store or such a segment, and U falls through to the complete procedure.}
+
+\table{
+\tr{\th{Class}\th{Examples}\th{Outside a segment}\th{Inside a segment}}
+\tr{\td{kernel error: the official kernel throws here}\td{type mismatch, function expected, unknown constant, Nat size}\td{REJECT, which the reference engine must confirm}\td{U: the speculative path may raise an error that the complete path never meets}}
+\tr{\td{recoverable limit}\td{step budget, spine or binder count}\td{DECLINE}\td{U}}
+\tr{\td{fatal fault}\td{an invariant seen broken, a failed audit, cancellation because an earlier unit failed, the memory watermark}\td{DECLINE, and the session is reset}\td{the same: \code{W} is cut to the sentinel whatever segment is open}}
+}
+
+\p{The machine polls the first-failure signal and the memory watermarks every 4096 ticks; both are fatal, so an abandon is never swallowed by a speculative segment. A declaration is accepted only by the sentinel frame after its last phase. Every limit produces DECLINE, never ACCEPT, and a REJECT goes to the reference engine before it becomes the verdict, see [the verdict protocol](design-verdict-protocol). Warm sessions have no step limit; strict and differential modes have one.}
+}
+
+\subtree[design-machine-worklist-specification]{
+\title{The specification, and how the host executes it}
+
+\p{The transition system says nothing about Java, and it is the specification. What is observable, and therefore identical under every way of executing it and in every tier, is: the value ids that judgments return, the contents of the memo and pair tables, the tick count, the outcome, and the sequence of \em{call} events. How the host runs the transitions is a separate choice that was made by measurement, see [the decision](dec-10ZO): under [control convention H](design-control-convention-h) the top of the worklist lives on the Java stack and a frame is written only when its judgment is suspended. With the depth bound of that convention set to 0 the same source is the worklist machine exactly as specified here, and that configuration is a test that every gate runs.}
+}
+
+\subtree[design-machine-worklist-cost]{
+\title{What it costs and what it buys}
+
+\p{The research documents recommended host recursion with a trampoline for deep terms. The spike that preceded the design measured the plain worklist against host recursion on evaluation and readback of the 59,979 declaration types of Init: +18 \% to +32 \% instructions; in CPU time +7 \% to +18 \% without hash-consing and inside the run-to-run spread with it (native image of GraalVM CE, aarch64, two runs). The first draft's estimate of 8 to 10 \% of the leading checker's instructions was withdrawn. Under convention H the measured cost against plain recursion is +1 \% to +6 \% CPU time, depending on the runtime.}
+
+\p{What it buys: no stack limit and no enlarged thread stacks, where a list literal of 913,500 elements is 913,500 nested applications; exact budgets and rollback by cutting \code{W}; a Java stack that stays shallow for the collector; and observable steps, which the differential tests of [the gate](design-gate) compare between tiers and conventions.}
+}
+
+\p{Detail: \src{docs/design/ISA.md}, sections 0.2 (decisions), 1.3 (the transition system and the frame classes), 1.4 (budgets and failure classes), 4 (the instruction tables) and 9 (limits and what is reported); \src{rlvm-machine/README.md} for running the machine. Source: [the design session](ses-EMMW) and [the machine session](ses-Z72N).}

@@ -207,6 +207,9 @@ The repository and the rendered site are public.
 - Source code of other projects is not copied here beyond a short quotation
   that a finding needs.
 
+`python3 scripts/check-public.py` searches the trees for these and for
+missing frontmatter. Run it with `journal-check` before finishing.
+
 ## Markup
 
 Forester markup looks like LaTeX with markdown links. The pitfalls:

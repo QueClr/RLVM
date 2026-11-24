@@ -5,9 +5,25 @@
 \contributor{queclr}
 \tag{reference-engine}
 \tag{loader}
+\tag{store}
 \tag{driver}
 \meta{harness}{Claude Code}
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{The third phase: a complete checker without the machine. One agent per module wrote the modules of \src{docs/design/ARCHITECTURE.md}, an integrator put them together, and a later check re-ran every guard after the module owners had kept working. Branch \code{dev}, commits \commit{164409d} (export reader, universe levels, literals) and \commit{45563d9} (store, loader, reference kernel, inductive admission, admission, driver, launcher, test kit).}
+
+\ul{
+\li{\strong{Foundation.} \code{rlvm-export} reads the export, \code{rlvm-level} holds universe levels, \code{rlvm-nat} holds Nat and String literals and their arithmetic.}
+\li{\strong{Pipeline.} \code{rlvm-store} is the shared store of terms in flat arrays, \code{rlvm-load} builds it in one pass over the file, \code{rlvm-ref} is the reference kernel, \code{rlvm-inductive} regenerates inductive facts and recursors and compares them with the exported records, \code{rlvm-admit} admits declarations, \code{rlvm-driver} schedules workers and combines verdicts, \code{rlvm-cli} and \code{rlvm-main} are the launcher, and \code{rlvm-testkit} holds the differential engine and the mutant generator. Engines sit behind one interface in \code{rlvm-api}.}
+}
+
+\p{\strong{First integration.} The reactor built with 786 tests, and after the integration with 790. All 230 published arena tests got the expected verdict with no decline, on the JVM launcher and on the native image, and all eight corpora were accepted. Two differences from the official checker were found by probing it and were turned into declines: a reference to a constant that the official kernel generates itself had been rejected as unknown, and metadata inside an inductive or quotient record had been accepted where the official checker rejects, which had let four hand-written bad proofs through. A mutation kind that wraps an expression in metadata was added to the test kit as the guard; its corpus of 1,976 mutants established that the official checker accepts metadata in definitions, theorems and axioms and rejects it in constructor types, recursor types, rule right-hand sides and quotient types.}
+
+\p{\strong{Where the reference engine's time goes.} On Init with one worker on the JVM, 94 \% of the wall clock was checking, and about two thirds of the engine's time was building substituted terms and interning them; the probe of the hash-consing table alone was 39 \% of the samples. Keeping hash bits in the table entries was tried, measured no change, and was reverted: the cost is the cache misses of the probes, not the comparisons. The integrator's conclusion was that this is inherent to a substitution-based port of the official algorithm over hash-consed terms, and that the machine, which uses environments instead of substitution, is the remedy.}
+
+\p{\strong{The later check.} 893 tests in 13 modules. The four mutant corpora, 17,775 files, gave no soundness and no completeness difference from the stored official verdicts, with 16,092 agreeing and 1,683 declined. The invariance suite ran 18,010 files under nine schedules each (one to eight workers, one-byte session caps, pipelined loading with different publication sizes) with no wrong verdict and no difference between schedules. All eight corpora were accepted in batch and in pipelined mode by both launchers. Cold, with 8 workers and a batch load in the arena-shaped container, the reference engine checked Mathlib in 97.4 s of wall clock and 500.5 s of CPU time on the JVM launcher and in 120.3 s and 624.6 s as a native image; the same measurement of the first integration had given 153.2 s and 201.9 s of wall clock on a busier host. The owners' own back-to-back comparisons attribute the part that is code to a change of the store's index and to lazily built prefix types in the reference kernel. That left the reference engine at 3.3 to 13.5 times gruszka's CPU time, depending on the corpus.}
+
+\p{\strong{Left open by this phase.} Pipelined loading was correct in every guard and still opt-in. The reference kernel compared universe levels with the complete relation and so accepted the two arena corner cases that the official checker rejects; the maintainer decided that question later the same day, see [standing policies](standing-policies). Files with declarations out of order, generated constants and metadata in inductive records are declined, see [accepted risks](accepted-risks).}
+
+\p{\strong{Next.} [The machine](ses-Z72N). The pipeline's own later work, on the driver and the loader, is part of [the speed phase](ses-CVTE).}

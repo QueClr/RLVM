@@ -58,6 +58,8 @@ final class T {
         long runs;
         long runRecords;
         long earlyChildren;
+        /** {@link #struct}: letE records with nondep = true that the sink received as single records. */
+        long nondepLets;
 
         String outcome() {
             return ok ? "ok" : kind + "@" + line;
@@ -184,6 +186,7 @@ final class T {
         r.runs = sink.runs;
         r.runRecords = sink.runRecords;
         r.earlyChildren = sink.earlyChildren;
+        r.nondepLets = sink.nondepLets;
         return r;
     }
 

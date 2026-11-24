@@ -1,0 +1,130 @@
+# Continuous integration of the code (everything but journal/, which has its own workflow).
+#
+# What runs on every push and pull request: the pinned toolchain is fetched (GraalVM COMMUNITY
+# Edition and Maven, checksum-verified by scripts/fetch-toolchain.sh; Oracle GraalVM is never
+# downloaded or used), then every module is built and its unit tests run on the JVM.
+#
+# What does NOT run here, on purpose:
+#   - the 230 published arena tests, the mutant corpora and the library corpora (scripts/gate.sh):
+#     they need the arena's test tarball and exports of several gigabytes, which are not in the
+#     repository and are not pinned by any script, so nothing downloads them here. The tests that
+#     use them are opt-in or skip themselves when the files are absent;
+#   - the native image: minutes of runner time per build. The job `native-image` below builds it
+#     with the arena definition's own build line when the workflow is started by hand with
+#     `native_image` ticked.
+#
+# STATUS: written on 2026-11-24 without access to a hosted runner. The steps are the commands that
+# were run locally on linux-aarch64 (a clean copy of the repository, an empty Maven repository,
+# Maven online); the x86-64 GraalVM tarball that a hosted runner downloads has the pinned sha256 of
+# the official release page but was never unpacked or run by us.
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+    paths-ignore:
+      - 'journal/**'
+  pull_request:
+    branches: [dev, main]
+    paths-ignore:
+      - 'journal/**'
+  workflow_dispatch:
+    inputs:
+      native_image:
+        description: 'also build the CE native image with scripts/arena/build.sh (minutes of runner time)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build and unit tests (GraalVM CE, JVM)
+    runs-on: ubuntu-24.04   # x86-64
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # .toolchain/ is where scripts/fetch-toolchain.sh puts GraalVM CE and Maven and where env.sh
+      # expects them. The key is the script's hash: a new pin is a new cache.
+      - name: Cache the pinned toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            .toolchain/graalvm-ce-25
+            .toolchain/apache-maven-3.9.16
+          key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-toolchain.sh') }}
+
+      # env.sh points Maven at .toolchain/m2 (never ~/.m2). `mvn test` installs nothing, so the cache
+      # holds third-party artifacts only.
+      - name: Cache the Maven repository
+        uses: actions/cache@v4
+        with:
+          path: .toolchain/m2
+          key: m2-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            m2-${{ runner.os }}-
+
+      - name: Fetch GraalVM Community Edition and Maven (pinned, checksum-verified)
+        run: scripts/fetch-toolchain.sh
+
+      - name: Toolchain versions
+        run: |
+          . ./env.sh
+          "$JAVA_HOME/bin/java" -version
+          $MVN -v
+
+      # Online for dependencies (no -o); surefire's default group only: the opt-in tests need
+      # exports that are not in the repository.
+      - name: Build and unit tests of all modules
+        run: |
+          . ./env.sh
+          $MVN test
+
+      - name: Keep the test reports of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/'
+          if-no-files-found: ignore
+
+  native-image:
+    name: CE native image (started by hand)
+    if: github.event_name == 'workflow_dispatch' && inputs.native_image
+    runs-on: ubuntu-24.04   # x86-64
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the pinned toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            .toolchain/graalvm-ce-25
+            .toolchain/apache-maven-3.9.16
+          key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-toolchain.sh') }}
+
+      - name: Cache the Maven repository
+        uses: actions/cache@v4
+        with:
+          path: .toolchain/m2
+          key: m2-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            m2-${{ runner.os }}-
+
+      # The `build:` line of scripts/arena/rlvm.yaml: fetches the toolchain, builds the modules that
+      # ship (Maven online, third-party jars compared with scripts/arena/deps.sha256), builds the CE
+      # native image at -O3 and verifies it (exit-status protocol, Truffle runtime compilation).
+      - name: Build the distribution as the arena definition does
+        run: scripts/arena/build.sh
+
+      - name: The binary
+        run: |
+          work/dist/bin/rlvm --version
+          cat work/dist/BUILD-INFO.txt

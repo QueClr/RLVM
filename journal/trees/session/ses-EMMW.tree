@@ -4,8 +4,22 @@
 \author{claude-fable-5-2}
 \contributor{queclr}
 \tag{design}
+\tag{machine}
 \meta{harness}{Claude Code}
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{Being written.}
+\p{The second phase, from the evening of 2026-11-23 into 2026-11-24. Two design documents were drafted from the [research](ses-XOS5), three critics reviewed them, and the resolutions were made binding before the machine was written. Branch \code{dev}, commit \commit{dab9047}.}
+
+\ul{
+\li{\strong{The instruction set.} \src{docs/design/ISA.md}: machine state, value model, the core elaboration language, the instructions, tabling, scheduling of obligations and speculation, tiers, limits, staging and the work packages of the module \code{rlvm-machine}.}
+\li{\strong{Everything around the machine.} \src{docs/design/ARCHITECTURE.md}: the persistent store, the loader, admission and its policies, the reference kernel, the scheduler, the platform, the verdict protocol, testing and milestones.}
+\li{\strong{The maintainer's notes.} \src{docs/design/OWNER-NOTES.md}, kept verbatim. The framing of the project as a mechanisation of the kernel's type checking, the judgment language as the Truffle language, the instruction set, the specialisation of natural numbers and the open question of storage strategies were given in this phase and shaped the second revision of the instruction set. See [standing policies](standing-policies).}
+\li{\strong{The review.} \src{docs/design/review/critic-findings.md}: three independent critics, one each for coherence and implementability, performance and feasibility, and soundness, with 15, 12 and 14 findings; six of them blockers.}
+\li{\strong{The resolutions.} \src{docs/design/RECONCILIATION.md}, binding over both design documents: four blockers (level substitutions as ids, a publication rule for anything visible to more than one session, a skeleton with packages and gates for the machine, and the control convention decided by measurement), the soundness resolutions, the performance and structure resolutions, and later the errata found by implementation.}
+\li{\strong{The control convention.} \src{docs/design/review/stepper-convention.md}: the machine runs judgments by bounded host recursion and writes worklist frames lazily. Measured against plain host recursion on the declaration types and values of Init and Cedar, the worklist machine as first written cost 31 to 57 \% more CPU time depending on the runtime; the chosen convention with a depth bound of 64 costs 2 to 5 \%, on the native image, the Graal JIT and C2 alike. With the bound set to 0 the same source is the worklist machine of the specification.}
+}
+
+\p{\strong{What the review changed.} The first draft argued several choices from instruction counts and left the machine without a skeleton, packages or gates. After the review the instruction set has a module layout with eight work packages and acceptance tests, static facts are derived lazily from the store alone, faults inside a speculative attempt have two classes, and staging is a sequence of steps that are each measured on Init, Std and a slice of Cedar before the next one starts.}
+
+\p{\strong{Next.} [The foundation modules and the reference pipeline](ses-BQZM), then [the machine](ses-Z72N).}

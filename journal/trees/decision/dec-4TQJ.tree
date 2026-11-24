@@ -1,0 +1,30 @@
+\title{Pipelined loading is the default for parallel runs}
+\taxon{Decision}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{loader}
+\tag{performance}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{rlvm-main/README.md}
+\import{base-macros}
+
+\p{\strong{Status:} accepted and implemented in the launcher on 2026-11-24.}
+
+\p{\strong{Context.} The architecture planned loading, environment construction and checking to overlap from the start, see [the export loader](design-export-loader). The reconciliation of the design review deferred it behind a vertical slice: batch load first, the pipeline only once the small tests passed. When the pipeline existed, the driver's default stayed \code{batch}, because a pipelined run could decline a file that the batch run decides: while the file is loading, admission cannot tell a forward reference from an unknown constant. The driver's owner set three conditions for a change of default: a pipelined run decides what the batch run decides, the end-to-end guards pass in that mode, and there is a gain on quiet cores. Then the owner's note 12 made "wall clock after warm-up, with loading pipelined with checking" the goal itself, see [dec-7QMU](dec-7QMU).}
+
+\p{\strong{Decision.} When the command line says nothing, the launcher loads pipelined if two or more workers run, the input is a regular file of at least 8 MiB, and no stop after a phase is requested; otherwise in one batch. With it, the reader's scanner threads default to 2 for inputs of at least 256 MiB, the input is memory-mapped when scanner threads run, and the automatic worker count is one worker per CPU, at most 8. A setting given on the command line always wins.}
+
+\p{\strong{Evidence.}}
+
+\ul{
+\li{\strong{Same verdicts.} The driver keeps the environment pass over the end of the load and parks the environment frontier below a unit that may depend on the rest of the file, see [the driver](design-driver-pipeline). The invariance suite then counts 0 declines that only a pipelined run has, over 16,928 mutants under 9 schedules, with the reference engine and with the machine as primary engine; before the two rules it counted 5 with the machine and, earlier, 27 with the reference engine. The 230 published tests give 230 correct verdicts through the launcher with the small files forced through the pipeline.}
+\li{\strong{Gain.} Wall clock of a fresh process, batch against pipelined, machine with the switch set \code{\verb~|warm,gated,expect~}, CE native image, quiet-core windows, development host aarch64: Mathlib 224.1 to 208.3 s with one worker, 113.4 to 104.9 s with 2, 64.6 to 53.8 s with 4, 41.5 to 31.8 s with 8; Std 2.71 to 2.57 s and cedar 4.29 to 2.78 s with 8 workers.}
+\li{\strong{Cost.} A pipelined publication is not free for the workers: each rebuilds its level overlay. That is why a large file is published in larger pieces, which was worth 8 \% on Mathlib with 8 workers.}
+}
+
+\p{\strong{Consequences.} Nothing changes for one worker, for an input below 8 MiB (every published test but the corpora, every mutant) or for input that is not a regular file. A batch run keeps the store it always had. A failing file is decided after the end of the load, and its failing unit is checked twice; only failing runs pay that. The arena's run line names its own thread count.}
+
+\p{Documents: \src{rlvm-main/README.md} section "Load defaults and the automatic worker count", \src{rlvm-driver/README.md} sections "Pipelined loading" and "Open, and things to know", \src{rlvm-load/README.md}. Source: [the pipeline session](ses-CVTE).}

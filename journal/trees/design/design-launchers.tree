@@ -1,0 +1,66 @@
+\title{The launchers: a native image and a JVM line over one set of jars}
+\taxon{Design}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{arena}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/PLATFORM.md}
+\import{base-macros}
+
+\p{\strong{Status:} implemented. \src{scripts/build.sh} builds both launchers from the same jars; the JVM line below was wired in on 2026-11-24 (\commit{ca8e886}), and the arena definition builds and runs from a clean copy with it.}
+
+\p{\strong{Two launchers, one set of jars.} One build makes a distribution: \code{\verb~|lib/*.jar~} (every module plus its runtime dependencies), \code{\verb~|bin/rlvm~} and \code{\verb~|bin/rlvm-jvm~}. \code{\verb~|bin/rlvm~} is a native image of GraalVM CE 25 built from exactly those jars, with Truffle runtime compilation linked in. \code{\verb~|bin/rlvm-jvm~} is a shell script that runs the same jars on the HotSpot VM of the same GraalVM, with C2 as the JIT. Module code uses neither image-only nor JVM-only APIs, so that both stay possible. Which launcher is for what is [a decision of its own](dec-WX9Z): the JVM launcher is the warm platform, the native image the platform of a cold process and of the arena. A third artifact, a native image built with Oracle GraalVM and profile-guided optimisation, exists only on request, see [dec-6E82](dec-6E82).}
+
+\p{\strong{The launcher proper} is the module \code{rlvm-cli}. It parses the command line, finds a checker through \code{ServiceLoader} (the interface \code{\verb~|rlvm.cli.Checker~}; the kernel registers from \code{rlvm-main} under the name \code{rlvm}), runs it on a thread of its own and is the only place that ends the process. \code{rlvm-main} contains no kernel logic: it turns options into a run configuration, finds the engines (again through \code{ServiceLoader}, as \code{\verb~|rlvm.api.EngineProvider~}) and hands [the driver](design-driver) what it needs. The exit status is fail closed: the status variable starts as 3 and receives a verdict's status in one place, only if the checker returned normally, the verdict is not null and no thread died.}
+
+\table{
+\tr{\th{Status}\th{Meaning}}
+\tr{\td{0}\td{accept: only an accept returned cleanly by the checker}}
+\tr{\td{1}\td{reject}}
+\tr{\td{2}\td{decline}}
+\tr{\td{3}\td{internal error: any throwable, a null verdict, a thread that died, heap exhaustion}}
+\tr{\td{64}\td{usage error: a bad option, a missing export, a setting the checker refuses, before the export is opened}}
+}
+
+\p{A JVM or an image that fails before \code{main} exits with 1, which would read as a rejection. The arena run line therefore asks the launcher to add 10 to every status it produces itself and maps exactly 10, 11 and 12 back:}
+
+\pre{\verb~|
+RLVM_STATUS_BASE=10 work/dist/bin/rlvm --threads 8 "$IN"; case $? in 10) exit 0;; 11) exit 1;; 12) exit 2;; *) exit 3;; esac
+~}
+
+\p{\strong{Settings.} Kernel settings are \code{\verb~|-X KEY=VALUE~}: among them \code{\verb~|policy=practical|strict~} (see [the exactness contract](design-exactness-contract)), \code{\verb~|engine=NAME~}, \code{\verb~|load=batch|pipelined|auto~}, \code{\verb~|scan-threads=K~}, \code{\verb~|passes=N~} for warm passes (see [the measurement method](design-measurement-method)), and every key an engine or the driver declares. An unknown key or a malformed value is status 64, never ignored. What a run does when the command line says nothing was changed on 2026-11-24 to the target configuration of the metric: the load is pipelined when two or more workers run and the input is a regular file of at least 8 MiB, otherwise batch; two scanner threads on mapped input for files of 256 MiB and more; \code{\verb~|--threads auto~} is one worker per CPU, at most 8, and the driver caps it at one worker per 128 units. The arena run line names 8 workers; it was 4, the count by CPU time.}
+
+\p{\strong{The JVM line.} The script passes these flags, then a heap chosen by engine:}
+
+\pre{\verb~|
+-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages
+-Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError
+--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow
+heap, machine:           -Xmx7g -Xmn1g           (no -Xms)
+heap, any other engine:  -Xms13g -Xmx13g -Xmn1g
+~}
+
+\p{The engine of a run is what \code{\verb~|-X engine=NAME~} says, else the default engine of the distribution, which the build asks the jars for and writes into the script; \code{\verb~|-X policy=strict~} means the reference engine. A heap flag on the command line replaces the default heap, \code{\verb~|RLVM_JAVA_OPTS~} replaces every default flag, and the class path is spelled out jar by jar in sorted order, because the VM expands a wildcard in directory order and with it the order of the service providers. Why each flag is there, and why there is no AOT cache, is in [dec-E3EX](dec-E3EX); why the collector is Serial is in [dec-Z6DD](dec-Z6DD).}
+
+\p{\strong{The native image} is built with \code{\verb~|-O3 --gc=serial --no-fallback -R:+ExitOnOutOfMemoryError -R:MaxHeapSize=13g~}. \code{\verb~|-O3~} needs 10 to 18 \% less CPU time than \code{\verb~|-O2~} for the machine and is the default level of the build script and of the arena build. The heap limit is a limit and not a reservation. A nursery bound is not baked in, because with it a run-time \code{\verb~|-Xmx~} below 1 GB stops the image at start with status 1. Since 2026-11-24 the image is also built with the machine's inline lists, rule H10 of [the control convention](design-control-convention-h): force-inline of every continuation step of the machine and never-inline of its slow paths, generated at build time from the machine jar with the \code{javap} and \code{jar} of the GraalVM that builds. On matched images the integrator of the machine measured the machine's CPU time of a warm pass at -1.3 \% on Init, -0.7 \% on Std, -4.4 \% on the Cedar slice and -1.3 \% on cedar, reachability within its spread, wall clock equal (native image, 8 workers). If the lists cannot be generated the image is built without them. \src{rlvm-machine/SWITCHES.md} still describes the lists as measured and not adopted; the build script is the newer state.}
+
+\p{\strong{Verification and stacks.} Every artifact is verified before the distribution is replaced as a whole: \code{\verb~|--version~}, the exit-status self-test in every mode, a real heap exhaustion under a 128 MB cap that must end with status 3, and a probe that fails unless a Truffle call target reaches last-tier compiled code inside the artifact. The stack size of the launcher (\code{\verb~|--stack-size~}, 512 MB by default) is the stack of the checker thread and is handed to the driver as its deep-stack size. The driver gives worker threads and the environment thread a deep stack, a reservation whose pages are committed only when touched, because the reference engine recurses like the original kernel and runs on those threads as primary engine, for re-checks and for the environment pass. The architecture document had planned 64 MiB for workers and deep stacks only for the environment and heavy-lane threads.}
+
+\p{\strong{What was measured.} The same jars on both launchers, machine engine with the switch set \code{\verb~|warm,gated,expect~}, 8 workers, load pipelined, every timing inside a quiet-core window on the aarch64 development host; warm is the median of the later passes of one process, cold a fresh process. The JVM rows use the line above.}
+
+\table{
+\tr{\th{Corpus}\th{Warm wall, JVM (s)}\th{Warm wall, native image (s)}\th{Cold wall, JVM (s)}\th{Cold wall, native image (s)}}
+\tr{\td{Init}\td{0.81}\td{1.02}\td{3.57}\td{1.18}}
+\tr{\td{Std}\td{1.37}\td{1.72}\td{3.11}\td{1.78}}
+\tr{\td{cedar}\td{1.92}\td{2.54}\td{5.15}\td{2.5}}
+\tr{\td{reachability}\td{1.65}\td{2.44}\td{2.54}\td{2.63}}
+\tr{\td{Mathlib, pass 2 and pass 1 of one process}\td{24.91}\td{28.34}\td{27.16}\td{29.10}}
+}
+
+\p{Warm, the JVM launcher needs 0.68 to 0.88 times the image's wall clock; cold, it needs up to three times as long below Mathlib, and its resident set is 1.5 to 2.4 times the image's. On a tiny input (the prelude, 3.8 MB) the image answers in 0.02 s and the JVM in about 0.2 s. With the machine's default switch set of the wave-6 integration a warm pass over Mathlib took 21.23 s on the JVM launcher (with the earlier line of two compiler threads) and 27.43 s on the image. Not measured: x86-64, the architecture of the arena runner; a host whose transparent huge pages are set to \code{never}.}
+
+\p{Related: [the driver](design-driver), [the architecture](design-architecture), [the measurement method](design-measurement-method). Documents: \src{docs/PLATFORM.md}, \src{docs/research/profiles/J1.md}, \src{docs/BENCHMARKS.md}, \src{rlvm-cli/README.md}, \src{rlvm-main/README.md}, \src{scripts/arena/rlvm.yaml}. Source: the sessions of [the pipeline and the launcher](ses-CVTE) and of [the profiles and prototypes](ses-JRSD).}

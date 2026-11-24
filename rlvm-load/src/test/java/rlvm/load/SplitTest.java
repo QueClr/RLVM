@@ -378,6 +378,51 @@ class SplitTest {
         }
     }
 
+    /**
+     * A let whose {@code nondep} flag is set (finding R2-F1): the flag is part of the official term
+     * identity and is not stored, so in strict mode the declaration is declined like one with
+     * metadata; by default, and with the flag clear, the file loads as it always did.
+     */
+    @Test
+    void aDeclarationWithANondepLetIsDeclinedInStrictMode() {
+        for (int variant = 0; variant < 6; variant++) {
+            boolean nondep = variant != 5;
+            Nd nd = new Nd();
+            int prop = prop(nd);
+            int p = nd.name("P");
+            nd.axiom(p, prop);
+            int cp = nd.cnst(p);
+            int plain = nd.pi(cp, cp);
+            int id = nd.lam(cp, nd.bvar(0));
+            int let = nd.let(plain, id, nd.bvar(0), nondep);   // let x : P -> P := id; x
+            switch (variant) {
+                case 0 -> nd.def(nd.name("d"), plain, let);                                   // the value root
+                case 1 -> nd.thm(nd.name("t"), plain, nd.app(nd.lam(plain, nd.bvar(0)), let)); // inside a proof
+                case 2 -> nd.axiom(nd.name("a"), nd.pi(plain, nd.let(prop, cp, nd.bvar(0), true))); // in a type
+                case 3 -> nd.opaque(nd.name("o"), plain, let, false);
+                case 4 -> {
+                    // read with an earlier declaration's records, used by a later one
+                    nd.axiom(nd.name("a"), plain);
+                    nd.def(nd.name("d"), plain, let);
+                }
+                default -> nd.def(nd.name("d"), plain, let);                                  // nondep = false
+            }
+            byte[] data = nd.bytes();
+            Loaded practical = Loaded.load(data, LoadOptions.batch(data.length));
+            assertTrue(practical.failure == null, "variant " + variant + ": " + practical.failure);
+            for (LoadOptions o : new LoadOptions[] {LoadOptions.batch(data.length).withStrictMetadata(true),
+                    LoadOptions.pipelined(data.length).withPublishEvery(1, 1L << 40).withStrictMetadata(true)}) {
+                Loaded strict = Loaded.load(data, o);
+                if (nondep) {
+                    assertTrue(strict.failure instanceof UnsupportedExportException, "variant " + variant + ": " + strict.failure);
+                    assertTrue(strict.failure.getMessage().contains("nondep = true"), strict.failure.getMessage());
+                } else {
+                    assertTrue(strict.failure == null, "variant " + variant + ": " + strict.failure);
+                }
+            }
+        }
+    }
+
     @Test
     void trailingRecordsAfterTheLastDeclarationAreNotStored() throws IOException {
         Nd nd = new Nd();
