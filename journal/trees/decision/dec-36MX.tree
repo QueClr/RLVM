@@ -55,3 +55,5 @@
 \p{\strong{Consequences.} The stages of the design note apply: plumbing with no behaviour change, the switch, then completing the classes until the tick count with the switch equals the count without it and making that a gate, then the Truffle tier. A session's footprint grows with the switch, so the session cap is reached earlier. If the switch is wrong it costs one bit test per key-forming call while a large session has private records, and nothing otherwise. Not established: the eight-worker gain, any timing on Init, Std, cedar or Mathlib, the launcher path with the real pipeline, and the mutant corpora with the mode.}
 
 \p{Related: [the Truffle tier](design-truffle-tier), [the decision against reference-count bits](dec-80ZZ), [warm sessions](design-warm-sessions). Detail: \src{docs/design/VALUES-V2.md}, sections 0, 10 and 11. Source: [the session of profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [an application can be born private](ins-PMD4), [no gain at eight workers in the native image](prob-BHBU).}

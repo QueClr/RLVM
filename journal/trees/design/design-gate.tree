@@ -68,3 +68,5 @@
 }
 
 \p{Detail: \src{rlvm-machine/NOTES-M8.md} (commands, deviations, every run), \src{rlvm-testkit/README.md} (the differential engine, the mutant corpora, the official-verdict cache), \src{rlvm-machine/NOTES-S.md} (the suite and its tests), \src{rlvm-machine/SWITCHES.md} (the gates of the default set), \src{rlvm-machine/NOTES-INT.md} (the two harness findings), \src{docs/design/ARCHITECTURE.md} section 9. Source: [the machine session](ses-Z72N), [the wave-6 session](ses-CVTE) and [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [what a gate against the reference engine cannot see](ins-SJW4).}

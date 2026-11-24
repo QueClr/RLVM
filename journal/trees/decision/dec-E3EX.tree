@@ -44,3 +44,5 @@ heap, any other engine:  -Xms13g -Xmx13g -Xmn1g
 \p{\strong{Not established.} Effects below about 5 \%; x86-64, the architecture of the arena runner; a host whose transparent huge pages are set to \code{never}; one worker on Mathlib.}
 
 \p{Documents: \src{docs/research/profiles/J1.md}, \src{docs/PLATFORM.md}. Source: [the session of the profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [warm-up needs compiler threads](ins-K0ZA), [the ahead-of-time profile cache](ins-M0WQ), [the heap that Mathlib needs with the machine](ins-P0RA).}

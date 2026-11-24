@@ -78,3 +78,5 @@
 }
 
 \p{Detail: \src{docs/design/ISA.md}, sections 0.2 (decisions), 1.3 (the transition system and the frame classes), 1.4 (budgets and failure classes), 4 (the instruction tables) and 9 (limits and what is reported); \src{rlvm-machine/README.md} for running the machine. Source: [the design session](ses-EMMW) and [the machine session](ses-Z72N).}
+
+\p{Findings, examples and open problems: [the design the fastest checkers converged on](ins-4TC3).}

@@ -52,3 +52,5 @@
 }
 
 \p{Detail: \src{rlvm-load/README.md} (deviation 7 and the table of hostile input), \src{docs/design/review/reference-caches.md} (the audit, divergences D1 and D2), \src{rlvm-store/README.md} (what is not in the store), \src{rlvm-main/README.md} section "Policy", \src{rlvm-testkit/README.md} (the mutant corpus). Related: [the export loader](design-export-loader), [the caches of the reference engine](design-reference-caches). Source: [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [metadata and the nondep flag are part of the official term identity](ins-61D4), [a metadata node](ex-4B5D).}

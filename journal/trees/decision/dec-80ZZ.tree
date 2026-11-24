@@ -46,3 +46,5 @@
 }
 
 \p{Detail: \src{docs/research/profiles/X1.md} (census tables, the schemes with their invariants, the prototypes and what is not established); \src{docs/design/ISA.md}, section 10 and decision 18 of section 0.2. Source: [the session of profiles and prototypes](ses-JRSD); the design verdict is from [the design session](ses-EMMW).}
+
+\p{Findings, examples and open problems: [the reuse cases are too rare in a hash-consed store](ins-6HMY), [most tabling records of evaluation are never found again](ins-RTT3).}

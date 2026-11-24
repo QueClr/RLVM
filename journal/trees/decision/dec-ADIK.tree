@@ -47,3 +47,5 @@
 }
 
 \p{Detail: \src{rlvm-truffle/NOTES-T3.md} sections 1 to 9; \src{rlvm-machine/SWITCHES.md}, section "Truffle tier"; \src{docs/design/ISA.md} section 0.5 for the criterion. Source: [profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [what the Truffle tier gains](ins-KLLU), [a compiled block must repeat every interning probe](ins-JA0J), [the heat accounting](ins-6SIZ).}

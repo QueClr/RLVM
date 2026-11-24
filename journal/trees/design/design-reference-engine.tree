@@ -70,3 +70,5 @@
 }
 
 \p{Detail: \src{rlvm-ref/README.md}; the design is section 5 of \src{docs/design/ARCHITECTURE.md}; the numbers are from \src{docs/BENCHMARKS.md}. Source: [the session that built the pipeline](ses-BQZM) and [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [two arena tests on which the official checker does not terminate](ex-9ECC).}

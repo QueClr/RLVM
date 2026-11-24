@@ -75,3 +75,5 @@ inductive T.{u} (a : Sort (imax u 1)) : Sort (imax u 1) | mk : a -> T a
 }
 
 \p{Detail: \src{docs/design/ARCHITECTURE.md} section 4 for the design; \src{rlvm-admit/README.md} and \src{rlvm-inductive/README.md} for the implementation, the declines, the probes against the official checker and the tests. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}
+
+\p{Findings, examples and open problems: [an inductive type whose level the official kernel respells](ex-4MDP), [what admission costs between the checks](prob-SREA), [generated constants](prob-O6YX).}

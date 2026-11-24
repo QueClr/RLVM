@@ -66,3 +66,5 @@
 }
 
 \p{Related: [the driver](design-driver) implements the passes, [the launchers](design-launchers) are what is measured, [the gate](design-gate) is the correctness counterpart of this method. Documents: \src{bench/README.md} sections "Timing on a busy host" and "Warm wall clock", \src{bench/track/README.md}, \src{docs/BENCHMARKS.md}, \src{rlvm-main/README.md} section "Passes", \src{rlvm-driver/README.md} section "Passes". Source: [the session](ses-CVTE); the container and the baselines come from [the first session](ses-XOS5).}
+
+\p{Findings, examples and open problems: [why timings from a loaded host are not evidence](ins-I3W2).}

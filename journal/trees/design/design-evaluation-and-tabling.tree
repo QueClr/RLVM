@@ -52,3 +52,5 @@
 \p{\strong{Audits.} Debug modes recompute every memo hit with the tables bypassed (\code{memocheck}), re-derive every shortcut by the complete procedure (\code{shortcheck}), shift ids at each session reset so that a stale id faults (\code{poison}), and re-derive node masks by a naive traversal (\code{maskaudit}). A failed audit declines the declaration. They are lanes of [the gate](design-gate).}
 
 \p{Related: [code objects and tiers](design-code-objects-and-tiers), [staging switches](design-switches), [the machine](design-machine-worklist). Detail: \src{docs/design/ISA.md} sections 3.1, 4.2, 4.3 and 5; \src{rlvm-machine/NOTES-M2.md} for the evaluator as built, every deviation and every experiment; \src{docs/research/profiles/X1.md} for the census and the filter; \src{rlvm-machine/SWITCHES.md}. Sources: [the design session](ses-EMMW), [the machine](ses-Z72N), [machine speed](ses-CVTE), [profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [most tabling records of evaluation are never found again](ins-RTT3).}

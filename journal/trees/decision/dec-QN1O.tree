@@ -43,3 +43,5 @@
 }
 
 \p{Where the parts are stated: the lesson, that a review with new hostile exports belongs before a change of the default engine, in \src{rlvm-machine/NOTES-INT.md} section 3; the remark that a re-run matrix is not a review, in the addendum of \src{docs/design/review/soundness-machine.md}; the requirement of a review that found no false accept, in note 13 of \src{docs/design/OWNER-NOTES.md}; seeded faults and the conditions on the candidate, in \src{docs/design/review/soundness-default-set.md} sections 6, 7 and 10; the procedure, in \src{rlvm-machine/SWITCHES.md} under "Changing a default". Source: [the wave-6 session](ses-CVTE) and [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [what a gate against the reference engine cannot see](ins-SJW4), [what a seeded fault shows](ins-TNZD).}

@@ -101,3 +101,5 @@ d h     = 5       rejected   the recursor is stuck on the axiom
 }
 
 \p{Detail: \src{docs/design/review/official-divergence.md} (the record), \src{docs/design/review/soundness-default-set.md} (classes 2 to 4, the cache-history analysis and the exact options), \src{docs/design/review/reference-caches.md} (class 5), \src{rlvm-machine/NOTES-M5.md} (class 1). Source: [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [the non-transitive triple](ex-OTWJ), [the order-dependence pair](ex-YTJ5), [the duplicated projection record](ex-7CCC), [a metadata node](ex-4B5D), [not transitive and not a congruence](ins-4VH2), [not a function of the pair](ins-PO1G), [typing values against typing unreduced terms](ins-AAXM).}

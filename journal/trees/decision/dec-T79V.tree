@@ -48,3 +48,5 @@
 }
 
 \p{Detail: \src{rlvm-machine/SWITCHES.md} (the note at its top and the table of gates), \src{rlvm-machine/NOTES-INT.md} section 3, \src{docs/design/review/soundness-machine.md} section 7, \src{rlvm-machine/NOTES-M5.md} (the fix), \src{docs/design/review/official-divergence.md} section 6. Source: [the wave-6 session](ses-CVTE) and [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [a gate that compares with the reference engine cannot see a divergence both engines share](ins-SJW4), [the open problem of making the machine the default engine](prob-W2FV).}

@@ -78,3 +78,5 @@ if (!is_eqp(t_n_n, t_n) || !is_eqp(s_n_n, s_n)) return is_def_eq_core(t_n_n, s_n
 }
 
 \p{Related: [the exactness contract](design-exactness-contract), [the divergence classes](design-official-divergence), [dec-USLM](dec-USLM) on metadata, [dec-TQSI](dec-TQSI) on the policy. Detail: \src{docs/design/review/reference-caches.md} and the section "Exactness" of \src{rlvm-ref/README.md}. Source: [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [the verdict can depend on whether a subterm is one export record or two](ins-E3MS), [the duplicated projection record](ex-7CCC), [the strict mode and object identity](prob-1YXM).}

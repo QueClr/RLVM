@@ -64,3 +64,5 @@ heap, any other engine:  -Xms13g -Xmx13g -Xmn1g
 \p{Warm, the JVM launcher needs 0.68 to 0.88 times the image's wall clock; cold, up to three times as long below Mathlib, at 1.5 to 2.4 times the image's resident set. On the prelude alone (3.8 MB) the image answers in 0.02 s and the JVM in about 0.2 s. Not measured: x86-64, the architecture of the arena runner; a host whose transparent huge pages are set to \code{never}.}
 
 \p{Related: [the architecture](design-architecture). Documents: \src{docs/PLATFORM.md}, \src{docs/research/profiles/J1.md}, \src{docs/BENCHMARKS.md}, \src{rlvm-cli/README.md}, \src{rlvm-main/README.md}, \src{scripts/arena/rlvm.yaml}. Source: the sessions of [the pipeline and the launcher](ses-CVTE) and of [the profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [warm against cold on the two launchers](ins-GJ75).}

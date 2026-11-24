@@ -48,3 +48,5 @@
 }
 
 \p{Related: [staging switches](design-switches), [warm sessions](design-warm-sessions), [conversion](design-conversion). Detail: \src{rlvm-machine/NOTES-M6.md} (F26), \src{docs/design/review/soundness-machine.md} (S-F4, S-F5), \src{docs/design/review/eager-reduction.md}, \src{rlvm-machine/SWITCHES.md}, \src{docs/research/profiles/P8.md}. Sources: [the machine session](ses-Z72N), [the speed wave](ses-CVTE) and [the profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [what the declined units cost](ins-47IQ), [the open problem](prob-8MJ2).}

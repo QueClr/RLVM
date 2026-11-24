@@ -78,3 +78,5 @@
 }
 
 \p{Documents: \src{docs/design/RECONCILIATION.md}, \src{docs/design/review/critic-findings.md}, \src{docs/design/OWNER-NOTES.md}. Source: [the design session](ses-EMMW); the erratum comes from [the machine's session](ses-Z72N).}
+
+\p{Findings, examples and open problems: [the Cedar unit that blew up under the wrong let rule](ex-GZ10), [a let inside an evaluated term must be zeta by sharing](ins-H55H).}

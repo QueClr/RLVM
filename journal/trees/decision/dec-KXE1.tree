@@ -49,3 +49,5 @@
 }
 
 \p{Related: [staging switches](design-switches), [the default switch set](dec-LZFX), [the metric](dec-7QMU). Detail: \src{rlvm-machine/SWITCHES.md} section "Sessions", \src{rlvm-machine/NOTES-M6.md} (F24), \src{rlvm-machine/NOTES-INT.md}, \src{rlvm-driver/README.md} section "Session cap", \src{docs/research/profiles/P9.md} section 4.5. Source: [the speed wave](ses-CVTE).}
+
+\p{Findings, examples and open problems: [the best cap is set by the processor cache](ins-FJ5R), [sibling proofs and what a longer session answers](ex-UT0I).}

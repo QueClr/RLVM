@@ -28,3 +28,5 @@
 \p{\strong{Consequences.} Nothing changes for one worker, for an input below 8 MiB (every published test but the corpora, every mutant) or for input that is not a regular file. A batch run keeps the store it always had. A failing file is decided after the end of the load, and its failing unit is checked twice; only failing runs pay that. The arena's run line names its own thread count.}
 
 \p{Documents: \src{rlvm-main/README.md} section "Load defaults and the automatic worker count", \src{rlvm-driver/README.md} sections "Pipelined loading" and "Open, and things to know", \src{rlvm-load/README.md}. Source: [the pipeline session](ses-CVTE).}
+
+\p{Findings, examples and open problems: [a warm pass costs the larger of the load and the check](ins-R1V8), [the cost of a publication](ins-E1DU).}

@@ -61,3 +61,5 @@
 }
 
 \p{Related: [the divergence classes](design-official-divergence), [the gate](design-gate), [the default switch set](dec-LZFX), [the derived rules stay off](dec-MOCU). Source: [the machine session](ses-Z72N) for package S and [the exactness session](ses-874D) for the others.}
+
+\p{Findings, examples and open problems: [what a seeded fault shows](ins-TNZD), [the non-transitive triple](ex-OTWJ).}

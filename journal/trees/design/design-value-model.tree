@@ -69,3 +69,5 @@
 }
 
 \p{Related: [evaluation and tabling](design-evaluation-and-tabling) for what the suspension records are used for, [conversion](design-conversion) for the pair table keyed by references. Detail: \src{docs/design/ISA.md} sections 1.1, 1.6 and 2, \src{rlvm-machine/NOTES-M1.md} (deviations of the value store, probe costs, distributions), \src{rlvm-machine/NOTES-INT.md} (sizes, hash, pooling), \src{docs/research/profiles/X1.md} (the census of every record). Source: [the design session](ses-EMMW) and [the machine session](ses-Z72N).}
+
+\p{Findings, examples and open problems: [the design the fastest checkers converged on](ins-4TC3), [session tables must start small](ins-8O66).}

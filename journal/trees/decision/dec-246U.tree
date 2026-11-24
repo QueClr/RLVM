@@ -41,3 +41,5 @@
 }
 
 \p{Detail: \src{rlvm-truffle/NOTES-T3.md} section 10, and the correction at the end of its section 7. Source: [profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [the application at a call site is a memo key that hits](ins-1SLM).}

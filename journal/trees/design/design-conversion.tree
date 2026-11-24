@@ -49,3 +49,5 @@
 \p{\strong{Where the time goes.} On Init, with the switches \code{\verb~|warm,gated,expect~}, 64 \% of all value records are made while a comparison is on the stack, and 78 \% of the lazy-delta steps unfold one side only: lazy delta is used as an evaluator. On Mathlib 40 \% of the machine's instructions are the official way of comparing proofs (profile P8, same switches, one worker), which no official-exact shortcut recovers.}
 
 \p{Related: [the machine](design-machine-worklist), [the value model](design-value-model), [eager reduction](design-eager-reduction), [staging switches](design-switches). Detail: \src{docs/design/ISA.md} sections 4.4, 5.4 and 6, \src{rlvm-machine/NOTES-M4.md} (deviations D1 to D29 and every measurement), \src{docs/design/review/soundness-default-set.md} sections 4.1 and 4.8. Sources: [the design session](ses-EMMW), [the machine session](ses-Z72N) and [the speed wave](ses-CVTE).}
+
+\p{Findings, examples and open problems: [equal terms that are two different closures](ex-IIVH), [not transitive and not a congruence](ins-4VH2).}

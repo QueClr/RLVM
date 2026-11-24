@@ -50,3 +50,5 @@
 }
 
 \p{Detail: the sections "Parallel packing: packed runs" and "LP2: warm measurements of the load path" of \src{rlvm-load/README.md}; "Parallel packing" in \src{rlvm-export/README.md}; "LP2" in \src{rlvm-store/README.md}; the defaults in \src{rlvm-main/README.md}. Source: [the pipeline wave](ses-CVTE).}
+
+\p{Findings, examples and open problems: [what the packing gained and what did not move](ins-3L35).}

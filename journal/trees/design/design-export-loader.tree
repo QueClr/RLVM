@@ -66,3 +66,5 @@
 }
 
 \p{Detail: \src{docs/design/ARCHITECTURE.md} section 3 for the design; \src{rlvm-load/README.md} for the implementation, its deviations, the hostile-input table with tests and every measurement; \src{rlvm-export/README.md} for the reader. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}
+
+\p{Findings, examples and open problems: [the loader as the floor once checking is faster](prob-I7M9).}

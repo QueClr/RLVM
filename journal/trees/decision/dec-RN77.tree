@@ -45,3 +45,5 @@
 }
 
 \p{Detail: \src{docs/research/profiles/X5.md}. Source: [the session of profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [leaving proofs in the file moves their cost to the workers](ins-QOX4), [the loader as the floor once checking is faster](prob-I7M9).}

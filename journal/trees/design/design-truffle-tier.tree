@@ -67,3 +67,5 @@
 \p{\strong{Upkeep.} The nodes mirror the stepper statement by statement, by hand, and the equivalence tests do not see a drift that leaves values equal; an owner of the module has to compare the two before a measurement.}
 
 \p{Related: [code objects and tiers](design-code-objects-and-tiers), [staging switches](design-switches), [the launchers](design-launchers). Detail: \src{rlvm-truffle/NOTES-T3.md} (measurements, changes, the finding, the \code{CALL} prototype), \src{rlvm-truffle/NOTES-T2.md} (how it was built against the design, its correctness record), \src{rlvm-truffle/README.md}, \src{rlvm-machine/NOTES-M7.md} section 8.2 (the hook), \src{docs/design/ISA.md} sections 0.5 and 8.4 to 8.6. Sources: [the design session](ses-EMMW) for the sketch and the criterion, [profiles and prototypes](ses-JRSD) for the measurements.}
+
+\p{Findings, examples and open problems: [what the Truffle tier gains](ins-KLLU), [a compiled block must repeat every interning probe](ins-JA0J).}

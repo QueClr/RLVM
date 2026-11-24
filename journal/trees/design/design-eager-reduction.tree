@@ -45,3 +45,5 @@
 \p{\strong{Measured and rejected.} Running every declaration aware from its start removes most repeated runs but makes the probes run everywhere: machine ticks grow by a factor of 2.7 to 4.6 and new declines appear.}
 
 \p{Related: [conversion](design-conversion), [warm sessions](design-warm-sessions), [the divergence classes](design-official-divergence), [staging switches](design-switches), [the gate](design-gate). Detail: \src{docs/design/review/eager-reduction.md}; the first findings in \src{docs/design/review/soundness-machine.md}; the decline rule in \src{rlvm-machine/NOTES-M6.md} (F26). Source: [the profiles and prototypes](ses-JRSD).}
+
+\p{Findings, examples and open problems: [eager reduction as a mode of the official comparison](ins-O23C), [what the declined units cost](ins-47IQ), [one pair that differs between the modes](ex-GV13), [the open problem](prob-8MJ2).}

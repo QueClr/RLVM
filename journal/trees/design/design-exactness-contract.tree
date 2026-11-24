@@ -70,3 +70,5 @@
 }
 
 \p{Related: [accepted risks](accepted-risks) is the policy summary of what is tolerated; [metadata only in the strict mode](dec-USLM), [typed bindings stay](dec-0DSI) and [the shortcuts as a profile](dec-GL11) are the decisions that follow from the contract; [the reference engine](design-reference-engine) and [its caches](design-reference-caches) describe the strict engine. Detail: \src{docs/design/OWNER-NOTES.md} note 13, \src{rlvm-main/README.md} section "Policy", \src{docs/design/review/reference-caches.md}, \src{docs/design/ISA.md} section 14.2. Source: [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [the official comparison is not transitive](ins-4VH2), [the strict mode and object identity](prob-1YXM).}

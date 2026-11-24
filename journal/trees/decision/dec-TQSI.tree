@@ -62,3 +62,5 @@
 }
 
 \p{Detail: \src{docs/design/OWNER-NOTES.md} note 13, \src{docs/design/review/official-divergence.md}, \src{docs/design/review/soundness-default-set.md}, \src{docs/design/review/soundness-shortcuts.md}, \src{docs/design/review/exact-proof-conversion.md}, \src{docs/research/profiles/P8.md}, \src{rlvm-main/README.md} section "Policy". Source: [the exactness session](ses-874D).}
+
+\p{Findings, examples and open problems: [the official comparison is not transitive](ins-4VH2), [its answer depends on what was reduced before](ins-PO1G), [object identity of export records](ins-E3MS).}
