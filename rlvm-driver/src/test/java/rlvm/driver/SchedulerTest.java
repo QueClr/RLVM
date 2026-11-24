@@ -73,6 +73,57 @@ class SchedulerTest {
     }
 
     @Test
+    void aLargeBatchIsHandedOutASliceAtATimeLowestUnitsFirst() {
+        VerdictBoard b = new VerdictBoard();
+        // at most 80 units per split: 4 workers get runs of 20 units each, slice after slice
+        Scheduler s = new Scheduler((Scheduler.Frontier) null, null, 4, 8, 80, b);
+        s.unitsReady(400);
+        s.close();
+        assertArrayEquals(new int[] {0, 1, 2, 3, 4, 5, 6, 7}, take(s, 0, 8));
+        assertArrayEquals(new int[] {20, 21, 22, 23, 24, 25, 26, 27}, take(s, 1, 8));
+        assertArrayEquals(new int[] {40, 41, 42, 43, 44, 45, 46, 47}, take(s, 2, 8));
+        assertArrayEquals(new int[] {60, 61, 62, 63, 64, 65, 66, 67}, take(s, 3, 8));
+        assertEquals(1, s.splitCount());
+        // worker 3 works off its run; then it does not steal while units wait to be split: the next slice
+        assertArrayEquals(new int[] {68, 69, 70, 71, 72, 73, 74, 75}, take(s, 3, 8));
+        assertArrayEquals(new int[] {76, 77, 78, 79}, take(s, 3, 8));
+        assertArrayEquals(new int[] {80, 81, 82, 83, 84, 85, 86, 87}, take(s, 3, 8));
+        assertEquals(2, s.splitCount());
+        assertEquals(0, s.stealCount());
+        // the other workers got their part of the second slice behind their first run
+        assertArrayEquals(new int[] {8, 9, 10, 11, 12, 13, 14, 15}, take(s, 0, 8));
+        assertArrayEquals(new int[] {16, 17, 18, 19}, take(s, 0, 8));
+        assertArrayEquals(new int[] {100, 101, 102, 103, 104, 105, 106, 107}, take(s, 0, 8));
+        // every unit exactly once, whoever takes it
+        int[] seenUnits = new int[400];
+        for (int u : new int[] {0, 1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42, 43, 44, 45, 46, 47, 60, 61, 62,
+            63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 8, 9, 10, 11,
+            12, 13, 14, 15, 16, 17, 18, 19, 100, 101, 102, 103, 104, 105, 106, 107}) {
+            seenUnits[u]++;
+        }
+        for (int w = 0, idle = 0; idle < 4; w = (w + 1) % 4) {
+            int[] got = take(s, w, 8);
+            idle = got.length == 0 ? idle + 1 : 0;
+            for (int u : got) {
+                seenUnits[u]++;
+            }
+        }
+        for (int u = 0; u < 400; u++) {
+            assertEquals(1, seenUnits[u], "unit " + u);
+        }
+        // a bound below the chunk is raised to the chunk; a failure below the next slice ends the run
+        VerdictBoard b2 = new VerdictBoard();
+        Scheduler t = new Scheduler((Scheduler.Frontier) null, null, 2, 8, 3, b2);
+        t.unitsReady(100);
+        t.close();
+        assertArrayEquals(new int[] {0, 1, 2, 3, 4, 5, 6, 7}, take(t, 0, 8));
+        b2.decline(5, rlvm.api.Reason.INTERNAL_ERROR, "x");
+        assertEquals(0, take(t, 1, 8).length);
+        assertEquals(0, t.tryClaim(0, new int[8]));
+        assertEquals(0, t.tryClaim(1, new int[8]));
+    }
+
+    @Test
     void anIdleWorkerStealsTheBackHalfOfTheLargestRun() {
         VerdictBoard b = new VerdictBoard();
         Scheduler s = scheduler(2, 10, b);
@@ -296,7 +347,9 @@ class SchedulerTest {
                 final int units = 20_000 + round * 137;
                 final int workers = 2 + round % 7;
                 VerdictBoard b = new VerdictBoard();
-                Scheduler s = scheduler(workers, 1 + round % 33, b);
+                // every other round with a bound on the units one split hands out
+                Scheduler s = round % 2 == 0 ? scheduler(workers, 1 + round % 33, b)
+                        : new Scheduler((Scheduler.Frontier) null, null, workers, 1 + round % 33, 64 + round * 50, b);
                 AtomicIntegerArray handed = new AtomicIntegerArray(units);
                 Thread[] t = new Thread[workers];
                 for (int w = 0; w < workers; w++) {
@@ -373,7 +426,7 @@ class SchedulerTest {
             this.workers = workers;
             this.publications = publications;
             this.giveBack = giveBack;
-            this.scheduler = scheduler(workers, chunk, board);
+            this.scheduler = new Scheduler((Scheduler.Frontier) null, null, workers, chunk, simSplit, board);
             this.claim = new int[workers][chunk];
             this.n = new int[workers];
             this.idx = new int[workers];
@@ -519,6 +572,8 @@ class SchedulerTest {
     private long terminals;
     private long states;
     private java.util.HashSet<String> seen;
+    /** The split bound of the simulated schedulers (0 = none). */
+    private int simSplit;
 
     /**
      * Depth-first search over the schedules, pruned at states already visited: every reachable state
@@ -629,6 +684,20 @@ class SchedulerTest {
         assertTrue(exploreAllScripts(6, 2, 2, new int[] {3, 6}, true) > 100_000);
         assertTrue(exploreAllScripts(5, 3, 1, new int[] {2, 5}, false) > 100_000);
         assertTrue(exploreAllScripts(5, 3, 2, new int[] {5}, true) > 100_000);
+    }
+
+    @Test
+    void verdictAndFirstFailureUnderAllInterleavingsWithASplitBound() {
+        // one split hands out at most 2 units (chunk 1) or 3 (chunk 3): batches are cut several times
+        simSplit = 2;
+        try {
+            assertTrue(exploreAllScripts(5, 2, 1, new int[] {5}, false) > 1000);
+            assertTrue(exploreAllScripts(5, 2, 1, new int[] {2, 3, 5}, false) > 1000);
+            assertTrue(exploreAllScripts(4, 3, 1, new int[] {4}, false) > 1000);
+            assertTrue(exploreAllScripts(5, 2, 2, new int[] {5}, true) > 1000);
+        } finally {
+            simSplit = 0;
+        }
     }
 
     @Test

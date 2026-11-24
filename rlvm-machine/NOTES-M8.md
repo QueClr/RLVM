@@ -280,3 +280,58 @@ the reference engine through the launcher (`work/status/mutants.md`, 12:42Z), wh
 in-process method (D18). The declines are the loader's and admission's, not the machine's (the machine
 declined no engine check). **No case in which the machine's own answer differs from the reference
 engine's**, per declaration or in the driver.
+
+Campaign 2, main tree as copied after M4's publication of 15:24:08Z (with M6's rule of 15:07Z that the
+machine declines a declaration that enters eager reduction), four sets, 859 s wall
+(`work/status/machine-mutants-k1.md`):
+
+| switch set | SOUNDNESS | COMPLETENESS | agree | declined | final verdict not the reference pipeline's | machine accepted / rejected / declined (engine checks) | MACHINE-INCOMPLETE / WARM-ANOMALY / disagreements | machine accepts, reference rejects | machine rejects, reference accepts | machine declines (declarations, in-process) |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `warm,gated,expect` | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,846 / 58 | 0 / 0 / 0 | 0 | 0 | 29 |
+| `code,casetrees` | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,846 / 58 | 0 / 0 / 0 | 0 | 0 | 29 |
+| `warm,gated,expect,probes,code,casetrees` | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,846 / 58 | 0 / 0 / 0 | 0 | 0 | 29 |
+| `all` (= gated,pchk,expect,warm,facts,tele,code,casetrees,probes,inert) | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,846 / 58 | 0 / 0 / 0 | 0 | 0 | 29 |
+
+The 29 declines (bugs corpus 24, mdata 5; the driver counts both attempts: 58) are the declarations that
+enter eager reduction; the reference kernel decides them and the final verdict is the reference pipeline's.
+Seven switch sets in two campaigns: no machine bug found by the mutants. Not covered: `k2`, `m3a`, `m4a/b`,
+`m5a/b`, `m7a/b`, `lazyeval`, `t2`, `levels-complete`.
+
+### 8.2 The large corpora (priority 4; coordinated with M6 in requests.log 15:06Z / 15:22Z)
+
+M6 has the 8-worker v0 rows (13:30Z: all five ACCEPT, machine declined 0). `big.py`, native image `-O3` of
+the jars published at 14:41Z (machine code `767442aced60`), 4 workers, one slot per run
+(`work/status/machine-big-partial.md`, `machine-big-mathlib.md`, rows in `machine-big.tsv`):
+
+| corpus | units | engine checks | `v0`: accepted / rejected / declined | `warm,gated,expect`: accepted / rejected / declined | result |
+|---|--:|--:|--:|--:|---|
+| con-leche | 36,747 | 36,274 | 36,274 / 0 / 0 | 36,274 / 0 / 0 | agree |
+| cedar | 146,058 | 144,098 | 144,098 / 0 / 0 | 144,098 / 0 / 0 | agree |
+| cslib | 401,985 | 397,608 | 397,608 / 0 / 0 | 397,608 / 0 / 0 | agree |
+| navier-stokes-euler | 126,468 | 124,850 | 124,850 / 0 / 0 | 124,850 / 0 / 0 | agree |
+| mathlib | 721,845 | 714,712 | 714,712 / 0 / 0 | see the log | agree (v0) |
+
+MACHINE-INCOMPLETE, WARM-ANOMALY and disagreements are 0 in every run. "agree" is the per-declaration
+differential on these corpora because the reference engine accepts each of them unit for unit (D21).
+Orientation only (no lock, load average about 100): CPU s `v0` -> `warm,gated,expect`: con-leche 37 -> 29,
+cedar 41 -> 33, cslib 154 -> 108, navier-stokes-euler 207 -> 142; mathlib `v0` 368 s CPU, 2.7 GB RSS.
+
+### 8.3 The scoreboard (priority 3)
+
+`work/status/machine-ladder.md`. The queue for the measurement lock was longer than an hour during the
+wave (five packages' batches), so the first rows are a PROBE (`ladder.py probe`: no lock, CPUs 18 and 19,
+1 worker): instruction counts are comparable, CPU time is not. Machine code `767442aced60` (jars of 14:41Z:
+M1's kept-slot PRUNE of 14:22Z, M4's official `probes`), instructions G (ratio to the reference engine):
+
+| | Init | Std | Cedar slice | reachability |
+|---|--:|--:|--:|--:|
+| reference engine | 246.8 | 407.8 | 54.8 | 112.6 |
+| machine `v0` | 132.1 (0.54x) | 211.2 (0.52x) | 38.9 (0.71x) | 57.4 (0.51x) |
+| machine `warm,gated,expect` | 105.2 (0.43x) | 177.2 (0.43x) | 39.5 (0.72x) | 59.1 (0.52x) |
+| machine `warm,gated,expect,probes` | 106.7 (0.43x) | 179.6 (0.44x) | 39.7 (0.72x) | 59.1 (0.52x) |
+| machine `v0` at the end of wave 5 (integrator, jar 608b84b2b142) | 139.0 | 223.2 | 47.0 | 59.4 |
+
+So the first publications of wave 6 took 5% of the instructions off Init and Std, 17% off the Cedar slice
+and 3% off reachability in `v0`. A locked batch (CPU s, 1 and 4 workers, gruszka in the same batch) was
+queued at 15:10Z; its rows, when it got the lock, are in `machine-ladder.md` and announced in
+`work/status/machine-M8.log`.

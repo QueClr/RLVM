@@ -412,7 +412,13 @@ final class M8Mutants {
             ok &= total[i].ok();
         }
         sb.append("# machine-mutants: the mutant corpora with engine \"machine\"\n\n");
+        long machineDeclines = 0;
+        for (int i = 0; i < sets.size(); i++) {
+            machineDeclines = Math.max(machineDeclines, total[i].unitDeclined);
+        }
         sb.append("**RESULT: ").append(ok ? "PASS: SOUNDNESS 0, COMPLETENESS 0, and the machine's own answers never differ from the reference engine's"
+                + (machineDeclines == 0 ? "" : " (it DECLINED up to " + machineDeclines + " declarations per switch set, which the reference kernel then decided:"
+                        + " column \"machine declines\")")
                 : "FAIL (see the columns in bold and the list at the end)").append("**\n\n");
         sb.append("- generated ").append(Instant.now().truncatedTo(ChronoUnit.SECONDS)).append(" by `")
                 .append(System.getProperty("m8.command", "M8Main mutants")).append("`\n");

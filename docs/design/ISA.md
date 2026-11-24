@@ -576,8 +576,12 @@ cache; level lists go through `instantiateList`. Rules:
 - A term whose node flag `HAS_LPARAM` is clear gets `ls = 0` in every closure and suspension made from it.
 - The identity substitution is 0 (R05 §2.2, `mk_ls`). This is sound because a level parameter is
   identified by its name in the whole file.
-- Level comparison is `LevelOps.isEquiv` (official normal form first, complete procedure on mismatch,
-  R02 §3.6). `Sort` and constant level lists are compared with it, never by id alone.
+- Level comparison is the OFFICIAL relation by default (owner note 11; `rlvm-level`'s `isEquivOfficial` /
+  `isGeqOfficial`: the official kernel's incomplete algorithm, which is not transitive, so the sides of a
+  comparison matter). The complete relation (`isEquiv`: official normal form first, complete procedure on
+  mismatch, R02 §3.6) is the opt-in `-X levels=complete` (machine switch `levels-complete`) and never
+  decides a default verdict. `Sort` and constant level lists are compared with the relation in force,
+  never by id alone (equal ids are equal under both).
 - Regression test (RECONCILIATION B1): an export with two constants `c1.{u,v}` and `c2.{v,u}` whose values
   share one body term; `c1.{1,2}` and `c2.{1,2}` must give different closures and different `LSUB` results.
 - Open: restricting the substitution to the parameters in `lpSet(t)` would raise hit rates; not in v1.
@@ -1068,7 +1072,7 @@ ARGV(t):  variable -> GET;  const, sort, literal -> its value;  lam, pi -> closu
 | Instr | Operands | Precondition | Transition | Fails | Kernel rule | Cost |
 |---|---|---|---|---|---|---|
 | `CONV` | d, a, b | both well typed | 4.4.1 | whatever the complete procedure throws | `is_def_eq` (§8.1) | identity 3; pair hit 60 |
-| `LVLEQ` | d, l1, l2 | levels or level lists | equal ids: `T`; else `rlvm-level.isEquiv`, pairwise, equal length | | §3.4-3.6 | 3 / 40 / slow path |
+| `LVLEQ` | d, l1, l2 | levels or level lists | equal ids: `T`; else the official relation (`rlvm-level.isEquivOfficial`; `isEquiv` only under `levels-complete`), pairwise, equal length | | §3.4-3.6 | 3 / 40 / slow path |
 | `MATCH` | d, p, g, v | p is a term over the telescope variables g | 4.4.4; `F` means unknown | none | shortcut for `instantiate(p, g) =?= v` (rpylean `inst_eq`) | 10-15 per pattern node |
 | `CARGS` | d, a, b, policy | NEU, NEU, equal length, heads agree | section 6 | | `is_def_eq_args` (§8.4), `is_def_eq_app` (§8.6) | 12 per identical pair |
 | `CBIND` | d, a, b | both LAM, or both PI/PII | 4.4.3 | | `is_def_eq_binding` (§8.2) | per binder: 2 `INST` + `CONV` |

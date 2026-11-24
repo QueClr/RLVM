@@ -778,7 +778,9 @@ public final class Run {
         primary = primaryFactory.create(h.store(), engineConfig);
         sessionBytes = config.sessionBytesFor(nameOf(primary));
         stats.put("driver.sessionBytes", sessionBytes);
-        Scheduler s = new Scheduler(null, OrderPolicy.FILE_ORDER, workerCount, config.chunkUnits, board);
+        // One split hands out at most as many units as the environment thread announces at a time.
+        Scheduler s = new Scheduler(null, OrderPolicy.FILE_ORDER, workerCount, config.chunkUnits,
+                Math.max(1, config.envBatchUnits), board);
         if (stats.enabled()) {
             s.timed();
         }
@@ -1098,8 +1100,17 @@ public final class Run {
             }
             try {
                 // A later pass (RunConfig.passes) has statistics of its own: FILE.pass2, FILE.pass3, ...
-                stats.writeJson(laterPass ? config.statsFile.resolveSibling(config.statsFile.getFileName() + ".pass"
-                        + passIndex) : config.statsFile);
+                java.nio.file.Path file = laterPass ? config.statsFile.resolveSibling(config.statsFile.getFileName()
+                        + ".pass" + passIndex) : config.statsFile;
+                stats.writeJson(file);
+                if (config.unitTrace && workers != null) {
+                    StringBuilder sb = new StringBuilder(1 << 16);
+                    sb.append("unit\tworker\tstartNanos\tnanos\tsteps\toutcome\tweight\n");
+                    for (Worker w : workers) {
+                        w.appendTrace(sb);
+                    }
+                    Files.writeString(file.resolveSibling(file.getFileName() + ".units.tsv"), sb);
+                }
             } catch (IOException | RuntimeException e) {
                 if (err != null) {
                     err.println("rlvm: cannot write statistics to " + config.statsFile + ": " + e);
@@ -1243,6 +1254,7 @@ public final class Run {
             EnvLane env = null;
             long waits = 0;
             long waitsForEnd = 0;
+            long parked = 0;
             // Statistics: where the environment thread's wall clock goes, its slowest steps, its frontier over time.
             final boolean timed = stats.enabled();
             final long startAt = timed ? System.nanoTime() : 0;
@@ -1312,6 +1324,36 @@ public final class Run {
                         int limit = (int) Math.min(loaded, (long) frontier + batch);
                         while (target < limit && host.unitClass(target) == RunHost.CHECK) {
                             target++;
+                        }
+                    }
+                    if (!ended) {
+                        // The parking rule (pipelined loading): the pass does not move past a unit that may
+                        // depend on the rest of the file in a way it cannot see in file order. The frontier
+                        // stops below such a unit until the load has ended; then the pass decides the unit
+                        // over the complete file, exactly as in a batch run.
+                        int park = -1;
+                        for (int u = frontier; u < target; u++) {
+                            if (host.unitNeedsCompleteFile(u)) {
+                                park = u;
+                                break;
+                            }
+                        }
+                        if (park == frontier) {
+                            parked++;
+                            scheduler.frontierState(Scheduler.FRONTIER_WAITS_FOR_LOADER);
+                            final long w0 = timed ? System.nanoTime() : 0;
+                            final boolean alive = run.awaitLoadEnd(frontier);
+                            if (timed) {
+                                waitLoadEndNanos += System.nanoTime() - w0;
+                            }
+                            scheduler.frontierState(Scheduler.FRONTIER_WORKING);
+                            if (!alive) {
+                                break;
+                            }
+                            continue;
+                        }
+                        if (park > frontier) {
+                            target = park;
                         }
                     }
                     signals.guard(frontier);
@@ -1409,6 +1451,7 @@ public final class Run {
                     stats.put("driver.env.renewals", env.renewals());
                     stats.put("driver.env.waitsForLoader", waits);
                     stats.put("driver.env.waitsForLoadEnd", waitsForEnd);
+                    stats.put("driver.env.parkedUnits", parked);
                     try {
                         env.close();
                     } catch (Throwable t) {

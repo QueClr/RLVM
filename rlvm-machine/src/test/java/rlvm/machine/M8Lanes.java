@@ -161,6 +161,8 @@ final class M8Lanes {
         long spills;
         long nanos;
         long memoryFailures;
+        /** Units declined for memory (the machine's own limits or the harness's heap). */
+        long memoryDeclines;
         long overflows;
         long cancelled;
         long peakFootprint;
@@ -263,6 +265,16 @@ final class M8Lanes {
                 p = Math.max(p, l.peakFootprint);
             }
             return p;
+        }
+
+        /** Some lane declined a unit for memory: the file needs room, whatever footprint is left after the decline. */
+        boolean memoryDeclines() {
+            for (LaneRun l : lanes) {
+                if (l.memoryDeclines > 0) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 
@@ -498,6 +510,9 @@ final class M8Lanes {
                 }
                 l.flags[u] = f;
                 l.sessionDigest[u] = lane.sessionDigest;
+                if (lane.outcome == Outcome.DECLINE && lane.reason == Reason.BUDGET_MEMORY) {
+                    l.memoryDeclines++; // the unit grew until a limit said no: the file is a heavy one, whatever its footprint is now
+                }
                 if (lane.outcome != Outcome.ACCEPT) {
                     String key = Diff.reasonKey(lane.reason, lane.message, h.unitName(u));
                     String same = intern.putIfAbsent(key, key);

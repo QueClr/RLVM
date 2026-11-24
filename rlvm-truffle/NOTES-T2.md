@@ -116,8 +116,25 @@ blocks are faster or slower than the stepper.
 `dist-n2` and `dist-n3` contain different machine jars (`a089fd2aef4b` of 14:51Z, `a5313e0b6c32` of 15:38Z).
 The newer one declines 8 of the 4,413 units of reachability by itself (`UNSUPPORTED_INPUT`, "eager
 reduction (an argument 'eagerReduce _ _')", first at unit 2373), in the base tier, without `t2`: rows of
-the two distributions measure different work and are never compared. The correctness runs of section 3
-were made on the jar of 14:51Z or the tree's jar of that hour.
+the two distributions measure different work and are never compared.
+
+**Which machine jar the correctness runs of section 3 used.** `rlvm-machine` was republished about forty
+times between 14:00Z and 16:08Z (`work/sandbox/publish.log`), so there is no single "machine jar of this
+wave":
+
+| Run | Machine jar |
+|---|---|
+| both differential gates (through `dist-n2`) | `a089fd2aef4b`, staged 14:51:59Z - one known jar |
+| tier equivalence, init-prelude, every block compiled (ended 14:40Z) | the jar published when the run started, about 14:23Z; hash not recorded |
+| tier equivalence, reachability + heavy perf/ (ended 15:05Z) | as published about 15:01Z; hash not recorded |
+| tier equivalence, Init (ended 15:35Z) | as published about 15:30Z; hash not recorded |
+| tier equivalence, tutorial + bugs digests (ended 15:49Z) | as published about 15:37Z; hash not recorded |
+| default test group on the final tree (15:58:51Z - 16:01:25Z) | as published 15:42Z or 15:59Z (a publication landed while the run started); hash not recorded |
+
+Inside one run the tier-on and the tier-off machine are the same jar, so each row is a valid tier
+equivalence result for its snapshot; the tier was thus compared against five different states of the
+machine. None of them is the jar in `.toolchain/m2` at the time of writing (`4023ec9211dd`, 16:07:38Z),
+and the differential gates were NOT repeated on a jar later than 14:51Z.
 
 ## 5. Experiments (kept / rejected, with numbers)
 
@@ -147,3 +164,35 @@ were made on the jar of 14:51Z or the tree's jar of that hour.
 2. **Promotion record holds the root: KEPT** (defect 4): without it 17 of 89 promoted blocks of
    reachability were never compiled (native, trace of 15:33Z).
 3. **No setter helpers in compiled code: KEPT** (defect 2): the precondition for an image to build at all.
+4. **Minimum block size (`rlvm.t2.minInstr`): implemented, default 0, NOT measured.** The idea: entering
+   compiled code has a fixed cost, so a block of two instructions may lose where a block of twenty gains.
+   The only direct observation is from the heat accounting's samples of three tiny LEAF blocks in a native
+   run (2 instructions each: 45 -> 55, 45 -> 54, 82 -> 87 ns per entry, stepper -> compiled), which points
+   that way; the host rows with `minInstr` 8 / 16 are unusable (section 4). No default was chosen from data.
+5. **Probes inlined (`rlvm.t2.inline` = 1 / 2): implemented behind a class constant, default 0, NO RESULT.**
+   Partial evaluation continues into `Values.peek` / `Code.ctorIndex` (1) and `Values.mkApp` /
+   `Values.mkConst` (2) instead of stopping at a boundary. One attempt on the JVM (`perfTests` with every
+   block compiled at its first entry, `inline=2`) ran for 27 minutes without finishing its first file and
+   was stopped; it was never built into an image and never run with the production promotion. Whether it
+   compiles in reasonable time, whether an image builds with it, and what it gains are all open.
+6. **Variants `rlvm.t2.slots=false`, `rlvm.t2.nodes=false`, `rlvm.t2.resume=false`: tested for
+   equivalence (fast group), NOT measured for speed.** Compile cost with resume entries is visible in the
+   reports (a `TELE` block of 16 instructions has 12 entries and 7.3 KB of code) but was not compared
+   against `resume=false`.
+7. **Process clock read moved out of the listener's common path: KEPT, effect not measured.**
+   `T2Engine.consider` read `/proc/self/stat` (the governor's process CPU time) before the rent test, i.e.
+   on the worker thread at every listener call: every `period` entries of every block that is not promoted
+   yet. It is now read only for a block that has passed the rent test. Found by reading the code while
+   planning a measurement, 16:13Z; in the tree, not in `dist-n3`.
+8. **Compile cost model: `rlvm.t2.cost1` 0.15 -> 2.5 ms per instruction: KEPT.** The model is used until
+   three blocks have been compiled; measured costs are an order of magnitude above the old default:
+
+   | Log (compiler thread's CPU clock from start to success of each compilation) | Blocks | median | p90 | max | per instruction | code per instruction | instructions / entries per block |
+   |---|--:|--:|--:|--:|--:|--:|--:|
+   | JVM (libgraal), init-prelude, every block at first entry, `code,casetrees,tele`, 14:27-14:40Z, host load 200+ (`/tmp/claude-t2/prelude-all.log`) | 3,937 | 12.9 ms | 64.9 ms | 1,125 ms | 2.16 ms | 849 B | 12.9 / 6.9 |
+   | native `dist-n2`, reachability, `code,casetrees`, rent 0.05, 15:33Z, host load 90-140 (`/tmp/claude-t2/warm-trace.log`) | 72 | 15.0 ms | 42.7 ms | 126.6 ms | 3.05 ms | 1,184 B | 6.9 / 1.4 |
+
+   The two rows are different populations of blocks (a library prelude with telescopes against the hot
+   blocks of closed evaluation) on a contended host: they give the order of magnitude of one compilation
+   (about 15 ms, 2-3 ms per instruction, about 1 KB of machine code per instruction), not a comparison of
+   the platforms. A resume point is an entry: the prelude's blocks have 6.9 entries on average.

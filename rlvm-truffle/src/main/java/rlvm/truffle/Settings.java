@@ -27,12 +27,13 @@ import java.util.Map;
  * rlvm.t2.threads=N    compiler threads of the Truffle engine (default 1; ISA 8.5)
  * rlvm.t2.timing=N     one entry in N is timed by the machine's heat accounting (default 4096; 0 = never). A timed
  *                      entry times every block entered beneath it, so on deep evaluation the accounting's own
- *                      default of 64 times almost every entry: +30-50% CPU on reachability (NOTES-T2 section 5)
+ *                      default of 64 times most entries (the size of that cost is not measured, NOTES-T2 5.1)
  * rlvm.t2.unit0=NS, rlvm.t2.unit1=NS   base-tier time of one entry of a block that has no timed sample yet:
  *                      unit0 + unit1 per instruction, nanoseconds (defaults 20 and 10; a model, not a measurement)
  * rlvm.t2.at=N         N > 0: promote at N entries, whatever the rent and the governor say (tests, sweeps)
  * rlvm.t2.cost0=MS, rlvm.t2.cost1=MS   compile cost model before anything was compiled: cost0 + cost1 per
- *                      instruction, CPU milliseconds (defaults 3.0 and 0.15; then learned from the compilations)
+ *                      instruction, CPU milliseconds (defaults 3.0 and 2.5: measured 2.2 - 3.1 ms per instruction;
+ *                      then learned from the compilations)
  * rlvm.t2.roles=LIST   promotable roles: tele,body,rule,rules,sub (default all)
  * rlvm.t2.slots=B      registers in frame slots (default true; false: every register stays in the window)
  * rlvm.t2.nodes=B      own code per instruction (default true; false: every instruction through Tier.step)
@@ -87,7 +88,7 @@ final class Settings {
         unit1Ns = dbl("rlvm.t2.unit1", 10.0);
         at = Integer.getInteger("rlvm.t2.at", 0);
         cost0Ms = dbl("rlvm.t2.cost0", 3.0);
-        cost1Ms = dbl("rlvm.t2.cost1", 0.15);
+        cost1Ms = dbl("rlvm.t2.cost1", 2.5);
         roles = roles(System.getProperty("rlvm.t2.roles", "tele,body,rule,rules,sub"));
         slots = bool("rlvm.t2.slots", true);
         nodes = bool("rlvm.t2.nodes", true);

@@ -160,7 +160,7 @@ def take_slot(wait_s):
                 f.close()
         if time.time() >= end:
             return None
-        time.sleep(3)
+        time.sleep(1)
 
 
 def measure_one(line, export, timeout, cpus=""):
@@ -211,7 +211,7 @@ def cmd_measure(args):
     lock = open(LOCK, "a")
     # A batch is a heavy job and holds one host-wide slot (bench/slot.sh's files). The queue for the measurement
     # lock can be an hour long, and a slot must not sit idle in it: first the lock, then a slot; if no slot comes
-    # within a minute the lock goes back to the others and the wait starts again.
+    # within two minutes the lock goes back to the others and the wait starts again.
     slot = None
     if probe:
         args.no_gruszka = True
@@ -224,10 +224,12 @@ def cmd_measure(args):
         print("ladder: batch %s, machine jar %s (published %s), waiting for the measurement lock" % (batch, jar, published), flush=True)
         while slot is None:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            slot = take_slot(60)
+            slot = take_slot(120)
             if slot is None:
                 fcntl.flock(lock, fcntl.LOCK_UN)
-                print("ladder: had the lock, no host-wide slot within a minute: lock released, waiting again", flush=True)
+                print("ladder: had the lock, no host-wide slot within two minutes: lock released, waiting again", flush=True)
+                import time
+                time.sleep(20)
         batch = now().strftime("%Y-%m-%dT%H:%MZ")
     rows = []
     try:

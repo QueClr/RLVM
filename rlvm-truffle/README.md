@@ -151,7 +151,7 @@ change in requests.log; the tier-equivalence tests catch one that slips through.
 | `rlvm.t2.mode` | `cpu` | `cpu`: the governor above with rent 1.0, share 0.02, max 256, period 1024, one compiler thread. `warm`: the steady state is the metric and warm-up is not charged (OWNER-NOTES 12): rent 0.05, no share cap, max 4096, period 256, two compiler threads |
 | `rlvm.t2.rent`, `.share`, `.max`, `.period`, `.threads` | by mode | the single knobs of the governor |
 | `rlvm.t2.minInstr`, `.maxInstr` | 0, 256 | a block with fewer / more instructions is never promoted (entering compiled code costs about what the stepper spends on a few instructions; Graal refuses very large blocks) |
-| `rlvm.t2.timing` | 4096 | one entry in N is timed by the machine's heat accounting (its own default of 64 costs 30-50% CPU on deep evaluation: a timed entry times every block entered beneath it) |
+| `rlvm.t2.timing` | 4096 | one entry in N is timed by the machine's heat accounting (a timed entry also times every block entered beneath it, so on deep evaluation the accounting's own default of 64 times most entries; the size of that cost is not measured, NOTES-T2 section 5.1) |
 | `rlvm.t2.unit0`, `.unit1` | 20, 10 | model of the base-tier time per entry (ns; per instruction) for a block without a timed sample |
 | `rlvm.t2.inline` | 0 | experiment, fixed at class initialisation (for an image: at image build): 1 = PEEK and the constructor test of SWITCH compiled into the block, 2 = also the probes of MKAPP / KCONST (NOTES-T2 section 5) |
 | `rlvm.t2.cost0`, `.cost1` | 3.0, 0.15 | compile cost model before anything was compiled (CPU ms; per instruction) |

@@ -103,7 +103,7 @@ many small exports through `rlvm.main.RlvmChecker` in one JVM, `bin/levelcorpus.
 | level corpus: 6,300 generated exports, one level question each, asked through eleven parts of the checker (two sorts; level lists of a constant bare, under an application, after delta, with a phantom parameter; theorem value type; `is_prop` of a theorem type; instantiated constant type; constructor field universe; mutual types in one universe); official: 2,455 accept, 3,845 reject, 2,081 of the rejects semantically true | 6,300 official verdicts, 0 declined | 4,538 (1,762 accepted that the official checker rejects; the 319 inductive ones stay rejected, see above) | 6,300 official verdicts |
 | 600 more exports where inductive admission asks the level question of this engine (`inductive T (a : Sort l1) : Type` with the constructor `mk : (a : Sort l2) -> T a`; official: 163 accept, 437 reject) | 587 official verdicts; 13 accepted that the official checker rejects, all of them the known difference below (published jar before the change: 272) | 328 | 587, the same 13 |
 | the 699 `SWAP_LEVEL` mutants of the four mutant corpora (official: 25 accept, 674 reject) | 699 official verdicts | 699 | 699 |
-| differential engine (`-X engine=diff -X diff.engine=machine`, test kit) on the 6,300 + 1,600 level exports | 0 difference records | with the machine jar of 14:30Z 4 COMPLETENESS records per imax file (reference complete, machine official) unless `levels-complete` was given to the machine as well | - |
+| differential engine (`-X engine=diff -X diff.engine=machine`, test kit) on the 6,300 + 1,600 level exports | 0 difference records | 0 difference records on the two imax files with the jars published now; with the machine jar of 14:30Z, which did not read `-X levels`, 4 COMPLETENESS records per imax file (reference complete, machine official) | - |
 | Init / Cedar slice (`cedar-hot-ax`) / Std / cedar, 4 workers | accept (23.9 / 9.8 / 34.6 / 44.6 s CPU) | - | accept (28.1 / 9.7 / 26.0 / 34.9 s CPU), no `MACHINE-INCOMPLETE` line |
 
 Guards on exactly the published jar (`scripts/gate.sh --dist work/prof/L/dist-pre --corpus all -j 4`
@@ -120,12 +120,16 @@ same comparison code), and the machine, whose level comparison is the same
 `LevelOps.isEquivOfficial`, accepted all 714,712 declarations of mathlib with 0 `MACHINE-INCOMPLETE`
 in M8's runs of 15:44Z and 15:57Z (also con-leche, cedar, cslib, navier-stokes-euler).
 
-The level checks of the table were repeated at 15:30 - 15:41Z on a second private distribution with
-the jars other owners had published meanwhile (admit 143aff8926eb, inductive 5f8165d2ceed, driver
+The level checks of the table were repeated on the jars other owners published meanwhile: at
+15:30 - 15:41Z on a second private distribution (admit 143aff8926eb, inductive 5f8165d2ceed, driver
 c0aeb3288f46, store f85c730603b8, load 26242def2701, main 6957058c0e9e, machine 904d8ff41d25, which
-reads `-X levels`): the same numbers in every row (`work/prof/L/logs/final-pre2.log`); with
-`-X levels=complete` the machine and the reference engine give the same verdict on all 6,300 level
-exports (4,217 accept); Init / Cedar slice / Std accepted by both engines.
+reads `-X levels`; `work/prof/L/logs/final-pre2.log`), and after the publication, at 16:04 - 16:16Z,
+on a distribution assembled from the published jars alone (this jar, machine 1a901658969c, main
+2c4a55f5a8ae; `work/prof/L/logs/final-published.log`): the same numbers in every row both times;
+with `-X levels=complete` the machine and the reference engine give the same verdict on all 6,300
+level exports (4,217 accept) and the differential engine reports nothing; Init / Cedar slice / Std
+accepted by both engines; the 230 published tests on the published set: 230 correct, 0 declined
+(`work/status/gate/slice-all-L-dist-final.md`).
 
 ### Known difference from the official kernel that involves levels (not in this module)
 

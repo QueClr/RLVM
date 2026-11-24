@@ -49,6 +49,29 @@ public interface RunHost {
     /** Diagnostics only: the name of the unit's (first) constant. */
     String unitName(int unit);
 
+    /**
+     * Pipelined loading, the parking rule: true if {@code unit} (loaded; a {@link #CHECK} unit) may
+     * depend on a part of the file that is not loaded yet, in a way that the environment pass, which
+     * goes through the file in file order while it loads, cannot see: the pass would move its
+     * frontier past the unit, a worker could then only decline it (a forward reference), where a batch
+     * run lets the pass decide it over the complete file (admission in dependency order). The
+     * environment thread does not advance past such a unit before the end of the load. The answer
+     * may err on the side of true (the frontier then waits for the loader at that unit); it is never
+     * asked once the load has ended.
+     */
+    default boolean unitNeedsCompleteFile(int unit) {
+        return false;
+    }
+
+    /**
+     * Statistics only: a size of the unit that is known without checking it (production: the nodes of
+     * its proof blocks plus the shared terms its records added); 0 = unknown. Written to the unit
+     * trace beside the time the unit took, to see what the size predicts.
+     */
+    default long unitWeight(int unit) {
+        return 0;
+    }
+
     /** Bytes held by the shared store, for the memory account. */
     long sharedBytes();
 

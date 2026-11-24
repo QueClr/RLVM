@@ -146,7 +146,7 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     static final String[] TIME_COLUMNS = {"wallNanos", "cpuNanos", "runQueueNanos", "unitNanos", "claimNanos",
         "waitEnvNanos", "waitLoaderNanos", "waitTailNanos", "gateWaitNanos", "loadEndWaitNanos", "openNanos",
         "resetNanos", "claims", "parks", "startAtNanos", "firstClaimAtNanos", "lastUnitEndAtNanos", "endAtNanos",
-        "lazyEnvNanos"};
+        "lazyEnvNanos", "laneResetNanos"};
     /** A point of the worker's time series is recorded at a claim boundary at most this often. */
     private static final long SERIES_NANOS = 100_000_000L;
     static final String[] SERIES_COLUMNS = {"atNanos", "accepted", "unitNanos", "claimNanos"};
@@ -162,7 +162,9 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private long gateWaitNanos;
     private long loadEndWaitNanos;
     private long openNanos;
+    /** Resets of the warm session and its lane; {@link #laneResetNanos} is the lane's part (the worker context). */
     private long resetNanos;
+    private long laneResetNanos;
     /** One worker, batch: the environment pass, which this worker advances itself (part of {@code unitNanos}). */
     private long lazyEnvNanos;
     private long claimsTaken;
@@ -171,6 +173,9 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private long[] series;
     private int seriesLen;
     private long seriesNext;
+    /** {@code RunConfig.unitTrace}: four words per checked unit (unit, start, nanos, steps * 4 + outcome), or null. */
+    private long[] trace;
+    private int traceLen;
 
     public Worker(int id, Run run, Engine primary, Scheduler scheduler, VerdictBoard board) {
         this.id = id;
@@ -199,6 +204,9 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         if (statsOn) {
             unitStats = new UnitStats();
             series = new long[64 * SERIES_COLUMNS.length];
+            if (config.unitTrace) {
+                trace = new long[4 * 1024];
+            }
             startAt = System.nanoTime();
         }
         try {
@@ -260,6 +268,16 @@ public final class Worker implements Runnable, LaneSignals.Probe {
                             lastUnitEndAt = t1;
                             if (o >= 0) {
                                 unitStats.unit(u, id, unitSteps, t1 - t0, o);
+                                if (trace != null) {
+                                    if (traceLen + 4 > trace.length) {
+                                        trace = java.util.Arrays.copyOf(trace, trace.length * 2);
+                                    }
+                                    trace[traceLen] = u;
+                                    trace[traceLen + 1] = t0 - run.startNanos();
+                                    trace[traceLen + 2] = t1 - t0;
+                                    trace[traceLen + 3] = unitSteps * 4 + o;
+                                    traceLen += 4;
+                                }
                             }
                         }
                         if (spill > 0 && t1 - t0 > spill) {
@@ -802,9 +820,12 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         int frontier = frontierNow();
         final long r0 = statsOn ? System.nanoTime() : 0;
         session.reset();
+        final long r1 = statsOn ? System.nanoTime() : 0;
         lane.reset();
         if (statsOn) {
-            resetNanos += System.nanoTime() - r0;
+            final long r2 = System.nanoTime();
+            resetNanos += r2 - r0;
+            laneResetNanos += r2 - r1;
         }
         laneUnits = Math.min(frontier, lane.coveredUnits());
         laneBaseSlack = lane.slackBytes();
@@ -1028,7 +1049,7 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             scheduler.waitNanos(id, Scheduler.WAIT_ENV), scheduler.waitNanos(id, Scheduler.WAIT_LOADER),
             scheduler.waitNanos(id, Scheduler.WAIT_TAIL), gateWaitNanos, loadEndWaitNanos, openNanos, resetNanos,
             claimsTaken, parks, startAt - base, firstClaimAt == 0 ? -1 : firstClaimAt - base,
-            lastUnitEndAt == 0 ? -1 : lastUnitEndAt - base, endAt - base, lazyEnvNanos};
+            lastUnitEndAt == 0 ? -1 : lastUnitEndAt - base, endAt - base, lazyEnvNanos, laneResetNanos};
     }
 
     /** The worker's time series: rows of {@link #SERIES_COLUMNS}, one about every 100 ms at a claim boundary. */
@@ -1039,6 +1060,21 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             rows[i] = java.util.Arrays.copyOfRange(series, i * w, i * w + w);
         }
         return rows;
+    }
+
+    /** Appends this worker's unit trace ({@code RunConfig.unitTrace}) as lines "unit worker start nanos steps outcome weight". */
+    void appendTrace(StringBuilder sb) {
+        for (int i = 0; i < traceLen; i += 4) {
+            long weight;
+            try {
+                weight = host.unitWeight((int) trace[i]);
+            } catch (RuntimeException e) {
+                weight = 0;
+            }
+            sb.append(trace[i]).append('\t').append(id).append('\t').append(trace[i + 1]).append('\t')
+                    .append(trace[i + 2]).append('\t').append(trace[i + 3] >> 2).append('\t').append(trace[i + 3] & 3)
+                    .append('\t').append(weight).append('\n');
+        }
     }
 
     /** Units of other shards that this worker passed over without checking ({@code RunConfig.shardCount}). */

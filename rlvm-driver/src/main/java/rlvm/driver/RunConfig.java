@@ -233,6 +233,14 @@ public final class RunConfig {
     /** See {@link #shardCount}: a shard is made of blocks of 1024 consecutive units. */
     public static final int SHARD_BLOCK_LOG2 = 10;
 
+    /**
+     * Statistics ({@code -X unit-trace}, with a statistics file): every checked unit is written to
+     * {@code STATSFILE.units.tsv} (unit, worker, start in nanoseconds since the start of the run,
+     * wall nanoseconds, engine steps, outcome): where the work lies along the file, which units are
+     * slow and when they started. Costs four words per unit while the run lasts.
+     */
+    public boolean unitTrace = false;
+
     /** Print WARM-ANOMALY and MACHINE-INCOMPLETE events to stderr (at most 8 lines per run). */
     public boolean logAnomalies = true;
 
@@ -240,7 +248,7 @@ public final class RunConfig {
 
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "env-batch", "spill-ms", "publish-units", "publish-mib",
-        "pipeline-min-mib", "no-fallback", "passes", "shard"
+        "pipeline-min-mib", "no-fallback", "passes", "shard", "unit-trace"
     };
 
     /** Environment variable with driver settings for experiments: {@code key=value[,key=value]...}. */
@@ -298,6 +306,7 @@ public final class RunConfig {
      * no-fallback         the reference kernel does not decide what the primary engine declines
      *                     (a flag: no value, or true / false)                          {@link #referenceFallback}
      * shard=K/N           measurement only: check shard K (0 .. N-1) of N; the run declines   {@link #shardCount}
+     * unit-trace          statistics: one line per checked unit in STATSFILE.units.tsv (a flag)  {@link #unitTrace}
      * </pre>
      * None of the numeric settings can change a verdict; {@code no-fallback} and {@code shard} can only
      * turn an ACCEPT into a DECLINE.
@@ -316,6 +325,16 @@ public final class RunConfig {
                 referenceFallback = true;
             } else {
                 throw new IllegalArgumentException("no-fallback=" + value + ": expected no value, true or false");
+            }
+            return;
+        }
+        if (key.equals("unit-trace")) {
+            if (value == null || value.isEmpty() || value.equals("true") || value.equals("1")) {
+                unitTrace = true;
+            } else if (value.equals("false") || value.equals("0")) {
+                unitTrace = false;
+            } else {
+                throw new IllegalArgumentException("unit-trace=" + value + ": expected no value, true or false");
             }
             return;
         }

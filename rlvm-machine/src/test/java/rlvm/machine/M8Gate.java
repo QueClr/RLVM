@@ -218,8 +218,9 @@ final class M8Gate {
             }
             for (M8Lanes.FileRun r : runs.values()) {
                 long peak = Math.max(r.peakFootprint(), r.refPeak);
-                if (retried.contains(r.path) || peak > HEAVY_BYTES) {
-                    lines.put(r.path, r.path + "\t" + (peak >> 20) + " MiB" + (retried.contains(r.path) ? "\tran out of heap beside others" : ""));
+                if (retried.contains(r.path) || r.memoryDeclines() || peak > HEAVY_BYTES) {
+                    lines.put(r.path, r.path + "\t" + (peak >> 20) + " MiB" + (retried.contains(r.path) ? "\tran out of heap beside others"
+                            : r.memoryDeclines() ? "\ta unit was declined for memory" : ""));
                 } else if (r.loadOutcome == Outcome.ACCEPT && r.crash == null) {
                     lines.remove(r.path);
                 }

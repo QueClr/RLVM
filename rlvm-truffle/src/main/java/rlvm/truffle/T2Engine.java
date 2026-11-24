@@ -205,15 +205,11 @@ final class T2Engine {
             }
             spent = (long) (entries * (settings.unit0Ns + settings.unit1Ns * n));
         }
-        long process = Cpu.processNanos();
-        if (settings.at > 0) {
-            if (entries < settings.at) {
-                return;
-            }
-        } else {
-            if (spent < settings.rent * cost) {
-                return;
-            }
+        if (settings.at > 0 ? entries < settings.at : spent < settings.rent * cost) {
+            return; // the common case of a listener call: nothing below runs on the worker for a block that is not due
+        }
+        long process = Cpu.processNanos(); // a file read: only for a block that is about to be promoted
+        if (settings.at <= 0) {
             synchronized (this) {
                 if (compileNanos + pendingNanos + cost > settings.share * process) {
                     governorHeld++;

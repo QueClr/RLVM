@@ -24,9 +24,9 @@ import rlvm.api.Session;
  * of the load and calls {@link #retry()}, which lets a new pass decide the unit again; if the host
  * cannot do that, a decline is recorded (never a rejection); if the failed attempt had written down
  * failures of other units as well, the run records no rejection any more ({@code Run.taintRejections}).
- * After the end of the load the pass is replaced in any case by one that was created over the
- * complete file (only such a pass may admit in dependency order), and the lane is reset so that
- * its level and list view reaches the end of the file.
+ * After the end of the load the lane is reset, so that its level and list view reaches the end of
+ * the file; the pass is kept (it is told how far the lane reaches and admits in dependency order
+ * only when the lane covers the complete file).
  */
 final class EnvLane implements EnvBuilder.Listener {
 
@@ -89,12 +89,15 @@ final class EnvLane implements EnvBuilder.Listener {
             reset();
         }
         if (passWhileLoading && ended) {
-            // A pass that was created while the file was loading stays in file order for good
-            // (rlvm-admit: its session did not cover the file then). The rest of the file gets a pass
-            // that was created over the complete file, as in a batch run; it resumes at the frontier.
+            // The pass that followed the loader is KEPT over the end of the load. It knows how far its
+            // lane reaches (EnvBuilder.setCoverage through the host) and enters dependency order by
+            // itself once the file is complete and the lane, reset just above, covers it. Until
+            // 16:10Z of 2026-11-24 it was replaced here by a pass created over the complete file; but a
+            // pass that had ALREADY left file order (the load ended while it was advancing over a lane
+            // that covered the last publication) has decided units ahead of the frontier and dropped
+            // their claims, and its replacement, which starts at the frontier, declined them
+            // ("the inductive unit has no claims blob": rlvm-admit, requests.log 15:12:24Z).
             passWhileLoading = false;
-            pass = host.newEnvPass(lane, session, this);
-            renewals++;
         }
         loading = !run.loadEnded();
         reported = false;
@@ -187,7 +190,7 @@ final class EnvLane implements EnvBuilder.Listener {
         return retries;
     }
 
-    /** Passes created after the end of a pipelined load to replace the one that followed the loader. */
+    /** Passes created after the end of a pipelined load to replace the one that followed the loader (none since the pass is kept). */
     long renewals() {
         return renewals;
     }

@@ -43,6 +43,8 @@ public final class Scheduler {
     private final VerdictBoard board;
     private final int workers;
     private final int chunk;
+    /** Largest number of units one split hands out (see {@link #distribute}); {@code Integer.MAX_VALUE} = the whole batch. */
+    private final int splitUnits;
 
     // ---- everything below is guarded by `this` ----------------------------------------------------------
     /** Units {@code [0, ready)} may be handed out. */
@@ -98,6 +100,17 @@ public final class Scheduler {
      * @param chunk largest number of units per claim
      */
     public Scheduler(Frontier frontier, OrderPolicy order, int workers, int chunk, VerdictBoard board) {
+        this(frontier, order, workers, chunk, 0, board);
+    }
+
+    /**
+     * @param splitUnits the largest number of ready units that one split cuts into runs; 0 = no bound
+     *     (the whole batch at once). With a bound, a large batch (a later pass over a loaded store, a
+     *     loader that is far ahead of the workers) is handed out a slice at a time, lowest units
+     *     first, so that all workers move through the file together, as they do behind the
+     *     environment thread, instead of each working through a contiguous W-th of it.
+     */
+    public Scheduler(Frontier frontier, OrderPolicy order, int workers, int chunk, int splitUnits, VerdictBoard board) {
         if (order != null && order != OrderPolicy.FILE_ORDER) {
             throw new UnsupportedOperationException(
                     "rlvm-driver: only the file order is implemented; namespace ordering is deferred until after the vertical slice");
@@ -109,6 +122,7 @@ public final class Scheduler {
         this.board = board;
         this.workers = workers;
         this.chunk = chunk;
+        this.splitUnits = splitUnits > 0 ? Math.max(splitUnits, chunk) : Integer.MAX_VALUE;
         this.runs = new int[workers][8];
         this.runLen = new int[workers];
         this.holding = new boolean[workers];
@@ -271,10 +285,13 @@ public final class Scheduler {
         return n;
     }
 
-    /** Cuts the batch {@code [split, ready)} into contiguous runs, one per worker, starting with worker w. */
+    /**
+     * Cuts the batch {@code [split, ready)}, or its first {@code splitUnits} units, into contiguous
+     * runs, one per worker, starting with worker w.
+     */
     private void distribute(int w, int ff) {
         int from = split;
-        int to = ready;
+        int to = ready - from > splitUnits ? from + splitUnits : ready;
         split = to;
         if (from > ff) {
             return;

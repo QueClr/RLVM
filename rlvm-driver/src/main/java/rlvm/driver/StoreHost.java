@@ -95,6 +95,59 @@ public final class StoreHost implements RunHost {
     }
 
     /**
+     * The store says it without decoding anything (the load path's proposal, requests.log 14:35:27Z):
+     * a value kept as a proof block in which something was unresolved when the loader wrote it (a
+     * constant that was not declared by then, a literal before its prerequisites). The type root and
+     * a shared value root need no test here: the environment pass looks at their summaries itself and
+     * waits for the end of the load ({@code EnvBuilder.waitingForLoad()}); the block is the one root
+     * it does not look at while the file is loading (it would have to decode it).
+     */
+    @Override
+    public boolean unitNeedsCompleteFile(int unit) {
+        int n = decls.unitSize(unit);
+        if (n == 0) {
+            return false;
+        }
+        switch (decls.unitKind(unit)) {
+            case DeclKind.AXIOM:
+            case DeclKind.DEFN:
+            case DeclKind.THM:
+            case DeclKind.OPAQUE:
+                break;
+            default:
+                return false; // decided by the pass itself, which waits by itself
+        }
+        int first = decls.unitFirstCid(unit);
+        for (int i = 0; i < n; i++) {
+            int v = decls.value(first + i);
+            if (v < 0 && store.blocks().hasUnresolved(-(v + 1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public long unitWeight(int unit) {
+        long w = 0;
+        int n = decls.unitSize(unit);
+        int first = decls.unitFirstCid(unit);
+        for (int i = 0; i < n; i++) {
+            int v = decls.value(first + i);
+            if (v < 0) {
+                w += store.blocks().nodeCount(-(v + 1));
+            }
+        }
+        if (unit + 1 < store.loadedUnits()) {
+            long shared = (long) decls.unitFirstTerm(unit + 1) - decls.unitFirstTerm(unit);
+            if (shared > 0) {
+                w += shared;
+            }
+        }
+        return w;
+    }
+
+    /**
      * Mirrors the board's status into the declaration table's status column, unless the unit already
      * has a final status there (the environment pass writes the final status of the units it decides).
      */

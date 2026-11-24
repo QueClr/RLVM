@@ -2,6 +2,7 @@ package rlvm.truffle;
 
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import rlvm.admit.Admission;
 import rlvm.admit.Policy;
 import rlvm.api.Budget;
@@ -52,6 +53,7 @@ public final class WarmMain {
             final int base = p * 64;
             final AtomicInteger next = new AtomicInteger();
             final AtomicInteger accepted = new AtomicInteger();
+            final AtomicLong workerNanos = new AtomicLong();
             final int units = h.store.loadedUnits();
             Thread[] ts = new Thread[threads];
             c0 = Cpu.processNanos();
@@ -59,6 +61,7 @@ public final class WarmMain {
             for (int i = 0; i < threads; i++) {
                 final int id = base + i;
                 ts[i] = new Thread(null, () -> {
+                    final long workerStart = Cpu.threadNanos();
                     WorkerContext c = h.bindings.newWorkerContext(id, h.store, RunSignals.NONE, 1L << 30);
                     Session s = h.engine.newSession(c);
                     Admission admission = new Admission(c, Policy.arena(), null);
@@ -89,6 +92,7 @@ public final class WarmMain {
                             }
                         }
                     }
+                    workerNanos.addAndGet(Cpu.threadNanos() - workerStart); // this thread only: no compiler, no promoter
                     accepted.addAndGet(ok);
                     s.close();
                 }, "warm-worker-" + i, 64L << 20);
@@ -103,8 +107,8 @@ public final class WarmMain {
             double cpu = (c1 - c0) / 1e6;
             bestWall = Math.min(bestWall, wall);
             bestCpu = Math.min(bestCpu, cpu);
-            System.out.println(String.format(Locale.ROOT, "[warm] pass %d (warm, %d threads): wall %.0f ms, process cpu %.0f ms, accepted %d of %d", p, threads, wall, cpu,
-                    accepted.get(), units));
+            System.out.println(String.format(Locale.ROOT, "[warm] pass %d (warm, %d threads): wall %.0f ms, process cpu %.0f ms, accepted %d of %d, worker cpu %.0f ms", p, threads, wall, cpu,
+                    accepted.get(), units, workerNanos.get() / 1e6));
             Harness.settle(h.t2());
         }
         T2Engine e = h.t2();
