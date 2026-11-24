@@ -1,0 +1,127 @@
+# Sample of the 2,200 generated inductive declarations of finding L-F1 (work/prof/L/levels-r, levels-n) with the
+# answers of the official checker (leanchecker --from-export, Lean v4.36.0). Columns: file, official answer,
+# "L-F1" if RLVM accepted the file before the fix. Families: R: inductive T (a : Sort L) : Sort L | mk : a -> T a;
+# R2: axiom F.{u} : Type; inductive T : Type | mk : F.{L} -> T; N: T (a : Sort L1) : Type | mk : (a : Sort L2) -> T a.
+R/R00043.ndjson	reject	L-F1
+R/R00123.ndjson	reject	L-F1
+R/R00407.ndjson	reject	L-F1
+R/R00434.ndjson	reject	L-F1
+R/R00479.ndjson	reject	L-F1
+R/R00500.ndjson	reject	L-F1
+R/R00518.ndjson	reject	L-F1
+R/R00533.ndjson	reject	L-F1
+R/R00543.ndjson	reject	L-F1
+R/R00570.ndjson	reject	L-F1
+R/R00589.ndjson	reject	L-F1
+R/R00606.ndjson	reject	L-F1
+R/R00625.ndjson	reject	L-F1
+R/R00647.ndjson	reject	L-F1
+R/R00671.ndjson	reject	L-F1
+R/R00680.ndjson	reject	L-F1
+R/R00703.ndjson	reject	L-F1
+R/R00725.ndjson	reject	L-F1
+R/R00739.ndjson	reject	L-F1
+R/R00770.ndjson	reject	L-F1
+R/R00000.ndjson	accept	
+R/R00035.ndjson	accept	
+R/R00073.ndjson	accept	
+R/R00109.ndjson	accept	
+R/R00146.ndjson	accept	
+R/R00181.ndjson	accept	
+R/R00216.ndjson	accept	
+R/R00251.ndjson	accept	
+R/R00286.ndjson	accept	
+R/R00321.ndjson	accept	
+R/R00356.ndjson	accept	
+R/R00391.ndjson	accept	
+R/R00432.ndjson	accept	
+R/R00471.ndjson	accept	
+R/R00512.ndjson	accept	
+R/R00559.ndjson	accept	
+R/R00604.ndjson	accept	
+R/R00648.ndjson	accept	
+R/R00694.ndjson	accept	
+R/R00736.ndjson	accept	
+R2/R200043.ndjson	reject	L-F1
+R2/R200123.ndjson	reject	L-F1
+R2/R200407.ndjson	reject	L-F1
+R2/R200434.ndjson	reject	L-F1
+R2/R200479.ndjson	reject	L-F1
+R2/R200500.ndjson	reject	L-F1
+R2/R200518.ndjson	reject	L-F1
+R2/R200533.ndjson	reject	L-F1
+R2/R200543.ndjson	reject	L-F1
+R2/R200570.ndjson	reject	L-F1
+R2/R200589.ndjson	reject	L-F1
+R2/R200606.ndjson	reject	L-F1
+R2/R200625.ndjson	reject	L-F1
+R2/R200647.ndjson	reject	L-F1
+R2/R200671.ndjson	reject	L-F1
+R2/R200680.ndjson	reject	L-F1
+R2/R200703.ndjson	reject	L-F1
+R2/R200725.ndjson	reject	L-F1
+R2/R200739.ndjson	reject	L-F1
+R2/R200770.ndjson	reject	L-F1
+R2/R200000.ndjson	accept	
+R2/R200035.ndjson	accept	
+R2/R200073.ndjson	accept	
+R2/R200109.ndjson	accept	
+R2/R200146.ndjson	accept	
+R2/R200181.ndjson	accept	
+R2/R200216.ndjson	accept	
+R2/R200251.ndjson	accept	
+R2/R200286.ndjson	accept	
+R2/R200321.ndjson	accept	
+R2/R200356.ndjson	accept	
+R2/R200391.ndjson	accept	
+R2/R200432.ndjson	accept	
+R2/R200471.ndjson	accept	
+R2/R200512.ndjson	accept	
+R2/R200559.ndjson	accept	
+R2/R200604.ndjson	accept	
+R2/R200648.ndjson	accept	
+R2/R200694.ndjson	accept	
+R2/R200736.ndjson	accept	
+N/N00082.ndjson	reject	L-F1
+N/N00256.ndjson	reject	L-F1
+N/N00360.ndjson	reject	L-F1
+N/N00361.ndjson	reject	L-F1
+N/N00372.ndjson	reject	L-F1
+N/N00391.ndjson	reject	L-F1
+N/N00403.ndjson	reject	L-F1
+N/N00432.ndjson	reject	L-F1
+N/N00442.ndjson	reject	L-F1
+N/N00445.ndjson	reject	L-F1
+N/N00467.ndjson	reject	L-F1
+N/N00490.ndjson	reject	L-F1
+N/N00500.ndjson	reject	L-F1
+N/N00003.ndjson	reject	
+N/N00040.ndjson	reject	
+N/N00074.ndjson	reject	
+N/N00112.ndjson	reject	
+N/N00145.ndjson	reject	
+N/N00182.ndjson	reject	
+N/N00218.ndjson	reject	
+N/N00254.ndjson	reject	
+N/N00294.ndjson	reject	
+N/N00330.ndjson	reject	
+N/N00374.ndjson	reject	
+N/N00431.ndjson	reject	
+N/N00489.ndjson	reject	
+N/N00537.ndjson	reject	
+N/N00567.ndjson	reject	
+N/N00000.ndjson	accept	
+N/N00036.ndjson	accept	
+N/N00081.ndjson	accept	
+N/N00132.ndjson	accept	
+N/N00181.ndjson	accept	
+N/N00228.ndjson	accept	
+N/N00273.ndjson	accept	
+N/N00310.ndjson	accept	
+N/N00358.ndjson	accept	
+N/N00379.ndjson	accept	
+N/N00397.ndjson	accept	
+N/N00413.ndjson	accept	
+N/N00437.ndjson	accept	
+N/N00458.ndjson	accept	
+N/N00486.ndjson	accept	
