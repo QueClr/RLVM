@@ -41,7 +41,7 @@ the loader `patches/`, raw results `out/`, `data/corpora.tsv`, `logs/`).
    and declined only where the verdict really depends on it; the judgments of admission start with empty caches;
    `mdata` and `nondep = true` are declined by the loader's strict switch (`LoadOptions.strictMetadata`: LP2's
    publication of 22:55Z for `mdata`; for `nondep` mine, with the modules handed to me at 23:1xZ:
-   `rlvm-load` @@LOAD@@, `rlvm-export` @@EXPORT@@).
+   `rlvm-load` b23a88e4c30b, `rlvm-export` dc8c4f1ef79a).
    **Cost of the strict declines on the eight corpora: zero declarations** (section 7).
 
 ## 1. What the official kernel takes for the same term
@@ -93,8 +93,7 @@ every table below is an `int` table keyed by id. "W" = written, "R" = read.
 
 The official `is_def_eq` is not a function of its arguments: `m_whnf_core` is read by cheap calls and written by
 full ones, so what was reduced earlier in the declaration changes what a later comparison sees (S3, 21:21Z). The
-port has the same reads and writes; S3's 105 cache-order exports of 21:20Z give the official verdict except the two
-with `mdata`.
+port has the same reads and writes; S3's 423 exports (23:00Z) give the official verdict except the two with `mdata`.
 
 ## 3. Object identity (R2-F2, D3)
 
@@ -177,7 +176,7 @@ projection that an entry answers at step 10 with both terms unchanged.
 | | What | Can change a verdict? | Export, official verdict | Kind | Fix / mode |
 |---|---|---|---|---|---|
 | D1 | `mdata` dropped by the loader (S3-F2) | yes, both directions | `s3-wc-pos-mdata-bad` reject (ours accept); `s3-mdata-eager-hidden-ok` accept (ours reject) | T / T-reject | strict: declined by the loader (`LoadOptions.strictMetadata`, LP2, candidate jar `7e3f85cecdaa`). practical: transparent, as before. Exact: an MDATA node in the store (not planned) |
-| D2 | `nondep` of `letE` not stored (R2-F1) | yes | `r2-id-let-nondep-bad`, `-def-bad` reject (ours accept) | T | strict: a declaration that contains such a let is declined by the loader (`Loader.exprLet` marks the record like metadata under `LoadOptions.strictMetadata`; `RunPacker` never packs such a record, so the flag always reaches the loader; `rlvm-load` @@LOAD@@, `rlvm-export` @@EXPORT@@; patches `work/r2/patches/0001`, `0002`). Exact: a header bit of the LET node in its identity (LP2's design of 22:05Z; six modules; not started). practical: as before; the store is unchanged (differential digest, section 8) |
+| D2 | `nondep` of `letE` not stored (R2-F1) | yes | `r2-id-let-nondep-bad`, `-def-bad` reject (ours accept) | T | strict: a declaration that contains such a let is declined by the loader (`Loader.exprLet` marks the record like metadata under `LoadOptions.strictMetadata`; `RunPacker` never packs such a record, so the flag always reaches the loader; `rlvm-load` b23a88e4c30b, `rlvm-export` dc8c4f1ef79a; patches `work/r2/patches/0001`, `0002`). Exact: a header bit of the LET node in its identity (LP2's design of 22:05Z; six modules; not started). practical: as before; the store is unchanged (differential digest, section 8) |
 | D3 | object identity at (P2) (R2-F2) | yes | `r2-ptr-other-record-bad` reject (ours accept); twin accept | T | strict: probe, both-ways check, decline where the verdicts differ (this module). practical: as before |
 | D4 | key of the `m_whnf_core` entry after an unfolding: `c a1..an` instead of `value a1..an`. Missed: an explicit redex `value a1..an` in the declaration, another constant with the same value, the same constant at other levels with the same instantiated value | not found: a miss recomputes cheaply and meets the entries of the same reduction chain (every projection frame of the full run wrote one), so the result is the cached one; only a K test that failed is run again | none | - | fixed in both modes: `valueOwner` (one representative reference per lambda value), `explicitLam` + look-up of the built term; the two tables are one logical table |
 | D5 | a literal above 2^64 that a worker computes twice could get two pool indices (shared pool looked up first, with the limit "published now": pipelined load) | only through cache keys, and only by thread timing | none (not deterministic) | - | LP2: the worker pool looks in its own table first (in the store candidate `30979ee659b7`) |
