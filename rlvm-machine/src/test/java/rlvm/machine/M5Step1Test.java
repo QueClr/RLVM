@@ -127,6 +127,11 @@ class M5Step1Test {
         outcomes(f);
         assertTrue(f.m.x5.pchkSets > 0, "PCHK bits set");
         assertTrue(f.m.x5.pchkHits > 0, "PCHK answered a CHECKED inference in a later declaration");
+        // the statistics of the package (Machine.Counters): one value per name, and the PCHK counters among them
+        String[] names = f.m.x5.counterNames();
+        long[] values = f.m.x5.counterValues();
+        assertEquals(names.length, values.length);
+        assertEquals(f.m.x5.pchkHits, values[java.util.Arrays.asList(names).indexOf("pchk.hit")]);
         f.close();
     }
 

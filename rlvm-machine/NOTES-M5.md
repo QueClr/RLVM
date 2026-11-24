@@ -276,9 +276,15 @@ Reading.
 | Pattern against pattern for an untabled application argument (R07 `inst_eq_inst`) | not built; probe on Init: 632,317 untabled APP arguments reach MATCH, 437,944 are answered, 382,705 of them right after their result type was built: that many of 1.32 M result builds (and as many MATCH walks) would go, about 4% of the EVAL call events |
 | Lazy ARGV (the value of an argument only when a domain or the result is built) | not built; of 6.16 M argument values on Init 3.10 M are atoms and only 0.71 M of the others are read by domains alone |
 | PCHK for closed terms WITH level parameters (allowed by `SharedFacts`: `lpSet` within the declaration's parameters) | probe on Init: 89,448 bits instead of 60,390, 132,040 hits instead of 117,875 (+12%); not adopted: about a quarter of a per cent of the ticks, and ISA 5.3 gives PERM only to terms without level parameter |
-| Telescope domains and results evaluated without a tabling record (M2's `evalNT`, as for the body of INST under `m2a`) | probe in a private copy (`work/m5/evtop`), Init, on top of `warm,gated,expect,m5a,m2a`: records 358.8 -> 345.6 per unit (-3.7%), run words 1,767.7 -> 1,709.3 (-3.3%), ticks +0.4%. Needs `Eval.evalNT` to be callable from the package: requested of M2 (15:17Z) |
+| Telescope domains and results evaluated without a tabling record (M2's rule for the body of INST under `m2a`) | KEPT, under M2's switch `m2a`: `Infer.twEval` calls `Eval.evalBody` (M2 published it at 15:36Z on this package's request; without `m2a` it is `Eval.eval`). Probe in a private copy, Init, on top of `warm,gated,expect,m5a,m2a`: records 358.8 -> 345.6 per unit (-3.7%), run words 1,767.7 -> 1,709.3 (-3.3%), ticks +0.4% (the memo it gives up is a second application of the same head to the same arguments). Not measured in CPU |
 | INFER's front cache (C1-C3) | built, measured (batch 2), REJECTED: -0.3% to -0.5% instructions on the libraries, +0.3% on the Cedar slice, no CPU gain. The code stays behind `-Drlvm.machine.m5ic=true` (off) for a re-measurement on a quiet host; if that shows nothing either, it should be deleted |
 | A record-free INFER memo (the front cache alone, no SUSP record) | not built: a lossy memo is not safe against a DAG that is walked as a tree (RECONCILIATION C3.10: CHECK is tabled) |
+
+### Statistics (M6's `Machine.Counters`, 15:18Z)
+
+`Infer.Ext` reports `machine.match.tried`, `match.hit`, `pchk.set`, `pchk.hit`, `joint.binders`, `infer.icHits`, `facts.ticks`,
+`facts.use.propMask`, `.propMaskSet`, `.unread`, `.unreadSet`, `.proof`, `.proofYes`, `.proofNo` (summed over the sessions; all
+but `facts.ticks` count only while statistics are on).
 
 ### Switches of this package (for `SWITCHES.md`)
 

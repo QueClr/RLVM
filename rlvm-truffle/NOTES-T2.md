@@ -85,10 +85,16 @@ Two kinds of rows, kept apart everywhere below.
   `rlvm.truffle.WarmMain` (test tree; `bin/warm` of a `build-dist.sh --warm` distribution, or the same class
   on the JVM) run directly on the host, configurations interleaved, NOT under the lock: one process, one
   engine, pass 1 cold, later passes warm with fresh sessions. The number to read is the process CPU time of
-  a warm pass (`/proc/self/stat`, 10 ms resolution). The host was at load average 80-250 throughout: the
-  same configuration varies by about +-15% from pass to pass inside one process (JVM, reachability, base
-  tier, passes 3-8: 1700 - 2220 ms), wall clock by a factor of two. A host row therefore shows an effect of
-  more than about 10% and nothing finer; ratios are given to two digits for that reason.
+  a warm pass (`/proc/self/stat`, 10 ms resolution). The host was at load average 70-250 throughout.
+  **What these rows can show is very little.** Inside one process the same configuration varies by about
+  +-15% from pass to pass (JVM, reachability, base tier, passes 3-8: 1700 - 2220 ms); ACROSS processes
+  minutes apart the CPU time of identical work moves by a factor of 1.5 - 2 (native `dist-n2`, base tier,
+  reachability: cold / warm 3920 / 3470-3930 ms at 15:44Z and 6040 / 5540 ms at 16:04Z; `dist-n3`: 3510 /
+  2830-3110 ms at 16:00Z and 2060 / 1880-2350 ms for a configuration that does strictly more work two
+  minutes later), and the load average does not predict the direction; part of it was my own host runs
+  overlapping. Rows of one label were taken sequentially over many minutes, so a difference between two
+  configurations of a host run is NOT evidence about the configurations. Only back-to-back pairs (label
+  `Pn`, below) are read as comparisons, and only for their sign.
 
 `WarmMain` is not the driver: no admission pipeline, no re-check, no pipelined loading; the workers of a
 warm pass claim chunks of 16 units from a shared counter. It exists because the driver had no `-X passes=N`
@@ -104,11 +110,18 @@ default timing; the model fallback was not in any measured image.
 **Discarded**: every tier row measured before 15:54Z (labels without a timing argument: the first JVM and
 native host runs, `Hj1`, the first `Mj1` rows, `BenchTest` runs). They carry the cost of the heat
 accounting's timing (next section) mixed with whatever the tier itself costs, so they cannot be used for
-either. That does not mean the tier is neutral: see the last row of the table in section 5.1.
+either. That does not mean the tier is neutral: nothing measured on the host so far says whether compiled
+blocks are faster or slower than the stepper.
+
+`dist-n2` and `dist-n3` contain different machine jars (`a089fd2aef4b` of 14:51Z, `a5313e0b6c32` of 15:38Z).
+The newer one declines 8 of the 4,413 units of reachability by itself (`UNSUPPORTED_INPUT`, "eager
+reduction (an argument 'eagerReduce _ _')", first at unit 2373), in the base tier, without `t2`: rows of
+the two distributions measure different work and are never compared. The correctness runs of section 3
+were made on the jar of 14:51Z or the tree's jar of that hour.
 
 ## 5. Experiments (kept / rejected, with numbers)
 
-1. **Heat timing rate 64 -> 4096: KEPT (default of the tier).** The tier switches the machine's heat
+1. **Heat timing rate 64 -> 4096: KEPT (default of the tier), size of the effect NOT measured.** The tier switches the machine's heat
    accounting on (`Tier.heat(engine)`); at its default of one timed entry in 64, a timed entry also times
    every block entered beneath it. Host rows, native image `dist-n2`, reachability, `code,casetrees`, one
    worker, process CPU of warm passes 2-4 (label `Tn1`):
@@ -121,15 +134,16 @@ either. That does not mean the tier is neutral: see the last row of the table in
    | tier promoting (134 blocks installed, 8.0 M compiled activations), timing 64 | 4810, 6710, 4830 |
    | tier promoting (122 blocks installed, 15.5 M compiled activations), timing 4096 | 7060, 6100, 5940 |
 
-   At timing 64 the accounting alone costs 30-50% here. Reported to M7 (requests.log 15:56Z) with the
-   suggestion to time only the direct children of a sampled entry.
-
-   **This does NOT clear the tier.** The last row is the one that isolates compiled code from the
-   accounting, and it is 55-80% SLOWER than the base tier (and than the tier attached with nothing
-   promoted). One run, `dist-n2` (which has defect 4), host at load 79; the cause is not established
-   (compiler threads are inside the process clock, but the whole compile CPU of that run was 2.7 s, less
-   than one pass's excess). The JVM row of the same shape (`Mk1`, `dist-n3` classes) shows no such effect.
-   Whether it reproduces on `dist-n3` is what the `Vn1` rows below answer.
+   **Read this table for its mechanism, not its numbers.** The five rows were taken between 15:44Z and
+   16:01Z, 2-17 minutes apart, under the host conditions described in section 4. I first read rows 1-3 as
+   "the accounting costs 30-50%" and reported that to M7 (15:56Z), then read row 5 as "the promoting tier
+   is 55-80% slower"; neither magnitude is established, and the first was withdrawn in requests.log at
+   16:06Z. A second set on `dist-n3` (label `Vn1`, 16:00-16:02Z) shows base 2830-3110 ms, timing 64
+   1910-2700 ms, timing 4096 1880-2350 ms while the host was emptying: no usable difference. What stands
+   is the reading of `Tier.exec`: while a sampled entry is on the stack, every block entered beneath it is
+   timed (two clock calls), so the share of timed entries grows with nesting depth, 1 - (63/64)^depth. The
+   tier asks for timing 4096 because that cannot hurt; whether 64 hurts, and how much, needs instruction
+   counts from the container.
 2. **Promotion record holds the root: KEPT** (defect 4): without it 17 of 89 promoted blocks of
    reachability were never compiled (native, trace of 15:33Z).
 3. **No setter helpers in compiled code: KEPT** (defect 2): the precondition for an image to build at all.
