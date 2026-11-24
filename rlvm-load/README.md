@@ -134,22 +134,30 @@ expression it wraps and gets none of its own).
 
 **Segment.** Expression records are buffered since the last admitted declaration, 4 ints per record:
 kind, a 2-bit saturating referrer counter, a BODY bit, a MARK bit, and the payload. A child is stored
-as its 1-based index in the segment, or, when it is an earlier record, as minus its shared term id; an
-earlier record that still sits in a proof block is stored as a *pending* reference (its ordinal) and
-its slot is remembered in a list. `loc[ordinal]` (4 bytes per expression record, the only per-record
-state that outlives the segment) says where a record of a finished segment went: a shared id, or
-`-(global block record + 1)`.
+as its 1-based index in the segment, or, when it is an earlier record, as a *pending* reference (its
+ordinal) whose slot is remembered in a list. `loc[ordinal]` (4 bytes per expression record, the only
+per-record state that outlives the segment) says where a record of a finished segment went: a shared
+id, or `-(global block record + 1)`. Since wave 7 the record path never reads `loc`: the locations of
+all earlier records a segment refers to are read at the declaration line, in one tight loop (step 2
+below). `loc` is far larger than the caches (428 MB on mathlib); read while records are scanned, one
+miss at a time is outstanding, read in that loop the misses overlap. The store that results is
+bit-identical (locations of earlier records change only by promotion, which happens in that loop and
+after it; the promotions are requested in the same order as before).
 
 **Declaration line.** In this order:
 
 1. the name(s) are claimed (`LoadTarget.reserve`): from here on a CONST / PROJ written with one of them
    binds to the new constant;
-2. the pending references of the segment are resolved: each earlier block record that the segment
-   refers to is promoted (`StoreBuilder.promote` copies it and what it reaches in its block into the
-   export region; `loc` is updated); the same for roots that are earlier block records;
+2. the pending references of the segment are resolved: the location of each earlier record is read;
+   a shared record gives its id, an earlier block record is promoted first (`StoreBuilder.promote`
+   copies it and what it reaches in its block into the export region; `loc` is updated); the same
+   for roots that are earlier block records;
 3. one backward pass marks what the unit's **roots** reach inside the segment. Roots: the type; the
    value of a definition; all member types and all rule right-hand sides of an inductive block. The
-   value of a theorem or opaque is *not* a root (unless `withProofBlocks(false)`);
+   value of a theorem or opaque is *not* a root (unless `withProofBlocks(false)`). The same pass
+   announces to the target every earlier shared term that is a child of a marked record
+   (`LoadTarget.touch`, a hint; `StoreTarget` -> `StoreBuilder.touch` loads the node), so that the
+   node is in the cache when the sweep writes the parent;
 4. one forward pass writes the segment: marked records become shared nodes, all others go to one proof
    block. A theorem's / opaque's value is that block (`-(block+1)`) if its root is in it, else a shared
    term. For the other kinds the block, if there is one, is ownerless (root -1): it holds records that
@@ -481,8 +489,8 @@ Reading:
 - The reader needs an id translation table for names with the real store (`LoadReport.readerIdTables`):
   the store pre-interns the 34 special names, so the name ids the loader returns are not consecutive.
   One table load per name reference; not measured separately. Expression ordinals stay table-free.
-- `Loader.sweep` reads `loc` only for records of the segment; promotion at arrival reads it once per
-  reference to an earlier record. On mathlib `loc` is 428 MB of random-access memory (ARCHITECTURE.md
-  2.9); that cost has not been measured.
+- `Loader.sweep` reads `loc` only for records of the segment; references to earlier records read it
+  once each, at the declaration line (wave 7; before, when the record arrived). On mathlib `loc` is
+  428 MB of random-access memory (ARCHITECTURE.md 2.9); see "Wave 7" under "Loading cost".
 - A promoted record stays in its block as well (12-13 % of the block records): a per-block "frontier"
   or an exact prescan would remove the copies; ARCHITECTURE.md 3.3 decided against both.

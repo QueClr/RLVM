@@ -113,6 +113,53 @@ class M1LevelsTest {
         assertNotEquals(Values.mkSort(m, a), Values.mkSort(m, b));
     }
 
+    /**
+     * Owner decision of 2026-11-24 (OWNER-NOTES item 11): by default levels are compared as the official kernel
+     * compares them (identity of the official normal forms: sound, incomplete); the complete relation only with
+     * the switch {@code levels-complete}. The pairs are those of the arena's corner cases
+     * {@code imax-right-successor} and {@code imax-nested-absorption}: semantically equal, officially different.
+     */
+    @Test
+    void levelsAreComparedAsTheOfficialKernelDoesByDefault() {
+        Fixture g = Fixture.prelude0();
+        Machine t = g.m;
+        String[][] pairs = {
+            {"(imax u 1)", "(max u 1)"},
+            {"(imax u (succ v))", "(max u (succ v))"},
+            {"(imax (imax u v) v)", "(imax u v)"},
+            {"(imax v (imax u v))", "(imax u v)"},
+            {"(max u v)", "(max v u)"},
+            {"(imax u 0)", "0"},
+            {"(max u u)", "u"},
+            {"(succ (max u v))", "(max (succ u) (succ v))"},
+            {"u", "v"},
+        };
+        int officialOnlyDifferent = 0;
+        for (String[] p : pairs) {
+            int a = g.level(p[0]);
+            int b = g.level(p[1]);
+            boolean official = t.levels.isEquivOfficial(a, b);
+            boolean complete = t.levels.isEquiv(a, b);
+            assertTrue(complete || !official, p[0] + " ~ " + p[1] + ": the official relation is a subset of the complete one");
+            assertEquals(official, Levels.lvlEq(t, a, b), p[0] + " ~ " + p[1] + ": default = official");
+            assertEquals(official, Levels.listsEq(t, g.levels(p[0], "u"), g.levels(p[1], "u")), "lists, default = official");
+            assertEquals(official, Levels.listsEq(t, g.levels("u", p[0]), g.levels("u", p[1])), "lists, second position");
+            g.switches("levels-complete");
+            assertEquals(complete, Levels.lvlEq(t, a, b), p[0] + " ~ " + p[1] + ": levels-complete = the complete relation");
+            assertEquals(complete, Levels.listsEq(t, g.levels(p[0], "u"), g.levels(p[1], "u")), "lists, levels-complete");
+            g.switches("none");
+            assertEquals(official, Levels.lvlEq(t, a, b), "the switch is off again");
+            if (complete && !official) {
+                officialOnlyDifferent++;
+            }
+        }
+        assertTrue(officialOnlyDifferent >= 1, "at least one pair of the corner cases separates the two relations");
+        assertFalse(Levels.listsEq(t, g.levels("u"), g.levels("u", "u")), "different lengths");
+        assertFalse(Levels.listsEq(t, g.levels("u"), IntLists.EMPTY));
+        assertTrue(Levels.listsEq(t, IntLists.EMPTY, IntLists.EMPTY));
+        g.close();
+    }
+
     /** ISA 3.3 (staging step 2): a derived level is published structurally and re-interned per session. */
     @Test
     void structuralLevelCodecRoundTrips() {

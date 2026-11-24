@@ -541,10 +541,15 @@ public final class Overlay {
         m[i] = k + 1;
     }
 
-    /** Rebuilds the block map for the first {@code count} decoded blocks. */
+    /**
+     * Rebuilds the block map for the first {@code count} decoded blocks. A map that is much too large
+     * is replaced by one sized for {@code count} at a load of at most one half, like {@link #mapBlock}
+     * keeps it (it used to be 64 slots whatever {@code count} was: with 64 or more blocks below a mark
+     * the probe of {@link #putBlock} never ended; reported by rlvm-admit, 2026-11-24).
+     */
     private void remapBlocks(int count) {
-        if (blkMap.length > 64 && count * 8 < blkMap.length) {
-            blkMap = new int[64];
+        if (blkMap.length > 64 && (long) count * 8 < blkMap.length) {
+            blkMap = new int[Math.max(64, Integer.highestOneBit(Math.max(1, count)) << 2)];
         } else {
             Arrays.fill(blkMap, 0);
         }

@@ -172,7 +172,10 @@ public final class RefKernel implements KernelOps {
     private long statImportDrops;
     private long statImportNodes;
 
-    /** Universe levels are compared with the official normal-form test instead of the complete relation. */
+    /**
+     * Universe levels are compared with the official normal-form test (the default, {@link RefOptions});
+     * false = the complete relation, the opt-in {@code -X levels=complete}.
+     */
     private final boolean officialLevels;
 
     // ---- work stacks (argument buffers, telescopes, pending cache keys) -------------------------------
@@ -2185,8 +2188,15 @@ public final class RefKernel implements KernelOps {
     }
 
     /**
-     * {@code is_equivalent(l1, l2)} on two levels: the complete relation, or with {@code levels=official}
-     * the official test (syntactic equality of the official normal forms).
+     * {@code is_equivalent(l1, l2)} on two levels (level.cpp: {@code l1 == l2 || normalize(l1) ==
+     * normalize(l2)}): the official test, identity of the official normal forms, which is sound and
+     * incomplete; with {@code -X levels=complete} the complete relation, which accepts a superset. The
+     * two callers are the official ones: {@code is_def_eq(level, level)} for two sorts
+     * ({@link #quick}) and {@code is_def_eq(levels, levels)} for the level lists of two references to
+     * one constant ({@link #levelsEquiv}: lazy delta reduction with equal heads, and the constant
+     * case of {@code is_def_eq_core}). Every other comparison of the official kernel is structural
+     * ({@code ==}), which is identity of ids here; {@code is_prop} is {@code normalizes_to_zero} in
+     * both modes.
      */
     private boolean levelEquiv(int a, int b) {
         return a == b || (officialLevels ? levels.isEquivOfficial(a, b) : levels.isEquiv(a, b));

@@ -16,10 +16,12 @@ import rlvm.api.Reason;
 import rlvm.api.Session;
 
 /**
- * The switch {@code -X levels=complete|official}: how {@code is_def_eq} compares universe levels
- * (sorts and the level lists of constants). The declarations are those of the arena's corner cases
- * {@code imax-right-successor} and {@code imax-nested-absorption} (outcome "either": the official
- * kernel rejects them, a complete comparison accepts them) plus equations both relations decide.
+ * The switch {@code -X levels=official|complete}: how {@code is_def_eq} compares universe levels
+ * (sorts and the level lists of constants). The default is the official kernel's comparison (the
+ * project owner's decision, OWNER-NOTES item 11); the complete relation is the opt-in. The
+ * declarations are those of the arena's corner cases {@code imax-right-successor} and
+ * {@code imax-nested-absorption} (outcome "either": the official kernel rejects them, a complete
+ * comparison accepts them) plus equations both relations decide.
  */
 class LevelsTest {
 
@@ -75,18 +77,62 @@ class LevelsTest {
     }
 
     @Test
-    void theCompleteRelationIsTheDefault() {
+    void theOfficialRelationIsTheDefault() {
+        assertEquals("official", RefOptions.DEFAULT_LEVELS);
         RefOptions defaults = RefOptions.fromSystemProperties();
-        assertFalse(defaults.officialLevels);
-        assertFalse(((RefEngine) RefEngine.FACTORY.create(fx.store, EngineConfig.defaults())).options().officialLevels);
+        assertTrue(defaults.officialLevels);
+        assertTrue(RefOptions.parse(Map.of()).officialLevels);
+        assertTrue(RefOptions.parse(null).officialLevels);
+        assertTrue(((RefEngine) RefEngine.FACTORY.create(fx.store, EngineConfig.defaults())).options().officialLevels);
+        assertTrue(((RefEngine) new RefEngine.Provider().factory().create(fx.store, EngineConfig.defaults())).options()
+                .officialLevels);
+        assertTrue(new RefEngine(fx.store, EngineConfig.defaults()).options().officialLevels);
+        // a strict engine (re-checks, the environment pass) has the same default
+        assertTrue(((RefEngine) RefEngine.FACTORY.create(fx.store, EngineConfig.defaults().withStrict(true))).options()
+                .officialLevels);
         for (String name : ONLY_COMPLETE) {
-            assertEquals(Outcome.ACCEPT, check(RefEngine.FACTORY, name), name);
+            assertEquals(Outcome.REJECT, check(RefEngine.FACTORY, name), name);
         }
         for (String name : BOTH) {
             assertEquals(Outcome.ACCEPT, check(RefEngine.FACTORY, name), name);
         }
         for (String name : NEITHER) {
             assertEquals(Outcome.REJECT, check(RefEngine.FACTORY, name), name);
+        }
+    }
+
+    @Test
+    void theKernelBuiltWithoutOptionsComparesLikeTheOfficialKernel() {
+        RefKernel k = new RefKernel(fx.ctx, EngineConfig.defaults());
+        k.begin(Integer.MAX_VALUE, fx.names("u v"));
+        assertFalse(k.isDefEq(fx.t("(sort (imax u 1))"), fx.t("(sort (max u 1))")));
+        assertFalse(k.isDefEq(fx.t("(@ F (imax u v))"), fx.t("(@ F (imax (imax u v) v))")));
+        assertTrue(k.isDefEq(fx.t("(sort (imax u (succ v)))"), fx.t("(sort (max u (succ v)))")),
+                "the official normal form turns imax u (v+1) into max u (v+1)");
+        assertTrue(k.isDefEq(fx.t("(sort (max u v))"), fx.t("(sort (max v u))")));
+    }
+
+    @Test
+    void theSystemPropertyIsOnlyAFallback() {
+        String saved = System.getProperty("rlvm.levels");
+        try {
+            System.setProperty("rlvm.levels", "complete");
+            assertFalse(RefOptions.fromSystemProperties().officialLevels);
+            assertFalse(RefOptions.parse(Map.of("ref.imports", "off")).officialLevels);
+            assertTrue(RefOptions.parse(Map.of("levels", "official")).officialLevels, "-X wins over the property");
+            System.setProperty("rlvm.levels", "official");
+            assertTrue(RefOptions.fromSystemProperties().officialLevels);
+            assertFalse(RefOptions.parse(Map.of("levels", "complete")).officialLevels, "-X wins over the property");
+            System.setProperty("rlvm.levels", "");
+            assertTrue(RefOptions.fromSystemProperties().officialLevels, "an empty property is no setting");
+            System.setProperty("rlvm.levels", "lean4lean");
+            assertThrows(IllegalArgumentException.class, RefOptions::fromSystemProperties);
+        } finally {
+            if (saved == null) {
+                System.clearProperty("rlvm.levels");
+            } else {
+                System.setProperty("rlvm.levels", saved);
+            }
         }
     }
 
@@ -161,14 +207,15 @@ class LevelsTest {
         RefEngine complete = (RefEngine) provider.factory(Map.of("levels", "complete")).create(fx.store,
                 EngineConfig.defaults());
         assertFalse(complete.options().officialLevels);
-        // no setting, and settings of other engines: the default
-        assertFalse(((RefEngine) provider.factory(Map.of()).create(fx.store, EngineConfig.defaults())).options()
+        // no setting, and settings of other engines: the default, which is the official comparison
+        assertTrue(((RefEngine) provider.factory(Map.of()).create(fx.store, EngineConfig.defaults())).options()
                 .officialLevels);
-        assertFalse(((RefEngine) provider.factory(Map.of("machine.tier", "k1")).create(fx.store, EngineConfig.defaults()))
+        assertTrue(((RefEngine) provider.factory(Map.of("machine.tier", "k1")).create(fx.store, EngineConfig.defaults()))
                 .options().officialLevels);
         assertEquals(Outcome.REJECT, check(provider.factory(Map.of("levels", "official")), "imaxRightOne"));
         assertEquals(Outcome.ACCEPT, check(provider.factory(Map.of("levels", "complete")), "imaxRightOne"));
-        assertEquals(Outcome.ACCEPT, check(provider.factory(Map.of()), "imaxRightOne"));
+        assertEquals(Outcome.REJECT, check(provider.factory(Map.of()), "imaxRightOne"));
+        assertEquals(Outcome.REJECT, check(provider.factory(Map.of("machine.tier", "k1")), "imaxAbsorbRight"));
         // a value that is not understood is refused before anything runs
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> provider.factory(Map.of("levels", "lean4lean")));
@@ -182,5 +229,11 @@ class LevelsTest {
         assertEquals(Outcome.ACCEPT, s.check(fx.cid("maxComm"), Budget.cold(1L << 30)), () -> s.lastMessage());
         s.close();
         strict.close();
+        RefEngine strictComplete = (RefEngine) provider.factory(Map.of("levels", "complete")).create(fx.store,
+                EngineConfig.defaults().withStrict(true));
+        Session c = strictComplete.newSession(fx.ctx);
+        assertEquals(Outcome.ACCEPT, c.check(fx.cid("imaxAbsorbLeft"), Budget.cold(1L << 30)), () -> c.lastMessage());
+        c.close();
+        strictComplete.close();
     }
 }

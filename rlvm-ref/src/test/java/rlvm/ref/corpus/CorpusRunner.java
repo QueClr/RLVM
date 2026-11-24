@@ -11,6 +11,7 @@ import java.util.stream.Stream;
 import rlvm.api.Budget;
 import rlvm.api.Engine;
 import rlvm.api.EngineConfig;
+import rlvm.api.EngineFactory;
 import rlvm.api.Outcome;
 import rlvm.api.Reason;
 import rlvm.api.Session;
@@ -28,7 +29,7 @@ import rlvm.store.DeclTable;
  * tool measures the type checker, not the pipeline.
  *
  * <pre>
- * java -cp ... rlvm.ref.corpus.CorpusRunner [--keep-going] [--stack MB] [--quiet] FILE_OR_DIR...
+ * java -cp ... rlvm.ref.corpus.CorpusRunner [--keep-going] [--stack MB] [--quiet] [--levels official|complete] FILE_OR_DIR...
  * </pre>
  */
 public final class CorpusRunner {
@@ -67,6 +68,11 @@ public final class CorpusRunner {
     private CorpusRunner() {}
 
     public static Result run(Path file, boolean keepGoing, boolean verbose) {
+        return run(file, keepGoing, verbose, RefEngine.FACTORY);
+    }
+
+    /** As {@link #run(Path, boolean, boolean)} with the engine of {@code factory} (e.g. {@code -X levels=complete}). */
+    public static Result run(Path file, boolean keepGoing, boolean verbose, EngineFactory factory) {
         Result r = new Result();
         r.file = file;
         long t0 = System.nanoTime();
@@ -87,7 +93,7 @@ public final class CorpusRunner {
         r.loadMillis = (t1 - t0) / 1_000_000;
         DeclTable decls = loader.store.decls();
         WorkerContext ctx = loader.newWorkerContext();
-        Engine engine = RefEngine.FACTORY.create(loader.store, EngineConfig.defaults().withStats(true));
+        Engine engine = factory.create(loader.store, EngineConfig.defaults().withStats(true));
         Session session = engine.newSession(ctx);
         Budget budget = Budget.cold(8L << 30);
         r.constants = decls.constantCount();
@@ -183,6 +189,7 @@ public final class CorpusRunner {
         boolean keepGoing = false;
         boolean quiet = false;
         long stackMb = 0;
+        String levels = null;
         List<String> paths = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -195,6 +202,9 @@ public final class CorpusRunner {
                 case "--stack":
                     stackMb = Long.parseLong(args[++i]);
                     break;
+                case "--levels":
+                    levels = args[++i];
+                    break;
                 default:
                     paths.add(args[i]);
             }
@@ -203,9 +213,11 @@ public final class CorpusRunner {
         boolean kg = keepGoing;
         boolean verbose = !quiet;
         int[] counts = new int[4];
+        EngineFactory factory = levels == null ? RefEngine.FACTORY
+                : RefEngine.factory(rlvm.ref.RefOptions.parse(java.util.Map.of(rlvm.ref.RefOptions.KEY_LEVELS, levels)));
         Runnable body = () -> {
             for (Path f : files) {
-                Result r = run(f, kg, verbose);
+                Result r = run(f, kg, verbose, factory);
                 String tag = r.correct() ? "OK   " : r.verdict == Outcome.DECLINE ? "DECL " : "WRONG";
                 counts[r.correct() ? 0 : r.verdict == Outcome.DECLINE ? 1 : 2]++;
                 System.out.printf("%s %-60s %-7s load %5d ms check %7d ms (cpu %7d ms)  consts %6d checked %6d fail %d steps %d depth %d deep %d mem %d MB imports %d/%d/%d%s%n",

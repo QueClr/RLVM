@@ -67,6 +67,11 @@ final class Diff {
         long refBytes;
         /** Test seam of {@link M8Harness#refDeclines}. */
         java.util.function.IntPredicate refDeclines;
+        /**
+         * Files at a time ({@code -Dm8.jobs}, default 1). Above 1 the corpus runs through {@link M8Gate#runAll}:
+         * heavy files a few at a time, and a file in which the Java heap answered again on its own.
+         */
+        int jobs = Integer.getInteger("m8.jobs", 1);
     }
 
     /** What the comparison of one export showed. */
@@ -113,6 +118,14 @@ final class Diff {
         /** Normalised machine reason -> number of declarations (declines and rejections that differ). */
         final Map<String, Integer> reasons = new TreeMap<>();
         Throwable crash;
+        /** The file's wall-clock limit ended the comparison (the counts are those of the units done). */
+        boolean timeout;
+        /**
+         * Some answer in this file is the test JVM's heap speaking (an {@code OutOfMemoryError} in a check, a
+         * growth the machine's heap test refused, the reference engine out of heap): such declines are the
+         * harness's, and a parallel report runs the file again on its own.
+         */
+        boolean memory;
 
         boolean clean() {
             return status.equals("CLEAN") || status.equals("LOADER") || status.equals("CLEAN*");
@@ -177,55 +190,71 @@ final class Diff {
     // One file
     // ---------------------------------------------------------------------------------------------------
 
-    /** The comparison of one export under the given options; never throws for a property of the input or of the machine. */
+    /**
+     * The comparison of one export under the given options; never throws for a property of the input, of the
+     * machine or of the heap. The reference engine runs over the file first and is emptied, then the machine
+     * ({@link M8Lanes}): the two never hold their memory at the same time.
+     */
     static FileResult compare(String path, Options options) {
-        final FileResult r = new FileResult();
-        r.path = path;
-        final M8Harness[] holder = new M8Harness[1];
-        Thread t = new Thread(null, () -> {
-            try {
-                compareOn(path, options, r, holder);
-            } catch (Throwable e) { // a report run records everything, also an Error out of a judgment
-                r.crash = e;
-            }
-        }, "m8-diff", 2L << 20);
+        final M8Lanes.Options lo = new M8Lanes.Options();
+        lo.fileMillis = options.fileMillis;
+        lo.linesPerFile = options.linesPerFile;
+        lo.refBytes = options.refBytes;
+        lo.refDeclines = options.refDeclines;
+        lo.inlineLanes = true;
+        lo.holder = new M8Harness[1];
+        final List<M8Lanes.Spec> specs = Collections.singletonList(new M8Lanes.Spec("diff", options.config));
+        final M8Lanes.FileRun[] out = new M8Lanes.FileRun[1];
+        Thread t = new Thread(null, () -> out[0] = M8Lanes.run(path, specs, lo), "m8-diff", 2L << 20);
         t.setDaemon(true);
         t.start();
+        boolean hung = false;
         try {
-            t.join(options.fileMillis);
+            // the passes stop by themselves between two units once the limit is over; the margin is for a
+            // declaration that is being checked then (its own deadline is Config.checkMillis)
+            t.join(options.fileMillis + Math.min(options.fileMillis, 30_000));
             if (t.isAlive()) {
-                M8Harness h = holder[0];
+                lo.cancel = true;
+                M8Harness h = lo.holder[0];
                 if (h != null) {
                     h.cancel(); // every engine gives up at its next poll
                 }
                 t.join(20_000);
-                // The abandoned thread may still write into r: report a snapshot of the counts, not r itself.
-                FileResult out = new FileResult();
-                out.path = path;
-                out.status = "TIMEOUT";
-                out.units = r.units;
-                out.compared = r.compared;
-                out.engineChecks = r.engineChecks;
-                out.agree = r.agree;
-                out.declined = r.declined;
-                out.soundness = r.soundness;
-                out.completeness = r.completeness;
-                out.refDeclined = r.refDeclined;
-                out.refVerdict = r.refVerdict;
-                out.machineVerdict = r.machineVerdict;
-                out.firstUnit = r.firstUnit;
-                String first = r.first;
-                out.first = "no answer within " + options.fileMillis / 1000 + " s after " + r.compared + " units"
-                        + (t.isAlive() ? " (the thread did not react to the cancellation: a loop without ticks)" : "")
-                        + (first.isEmpty() ? "" : "; first difference before that: " + first);
-                return out;
+                hung = t.isAlive();
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            hung = true;
+        }
+        M8Lanes.FileRun run = out[0];
+        if (hung || run == null) {
+            FileResult r = new FileResult();
+            r.path = path;
             r.status = "TIMEOUT";
+            r.first = "no answer within " + options.fileMillis / 1000 + " s (the thread did not react to the cancellation: a loop without ticks)";
             return r;
         }
-        if (r.crash == null && r.refDeclined > 0 && !r.status.equals("LOADER")) {
+        return of(run, 0);
+    }
+
+    /** The result of lane {@code i} of a run against the reference engine; a run that died outside the lanes is a CRASH. */
+    static FileResult of(M8Lanes.FileRun run, int i) {
+        if (run.crash != null || run.lanes.length <= i || run.lanes[i].diff == null) {
+            FileResult r = new FileResult();
+            r.path = run.path;
+            r.crash = run.crash != null ? run.crash : new IllegalStateException("the lane did not run");
+            r.memory = run.memory();
+            return finish(r);
+        }
+        return run.lanes[i].diff;
+    }
+
+    /** Settles a file by the official verdict where the reference engine declined, and sets its status. */
+    static FileResult finish(FileResult r) {
+        if (r.status.equals("LOADER")) {
+            return r;
+        }
+        if (r.crash == null && r.refDeclined > 0) {
             settle(r);
         }
         if (r.crash != null) {
@@ -233,6 +262,10 @@ final class Diff {
             r.first = "crash: " + r.crash + at(r.crash);
         } else if (r.wrong()) {
             r.status = "WRONG";
+        } else if (r.timeout) {
+            r.status = "TIMEOUT";
+            r.first = "the file's time limit ended the comparison after " + r.compared + " units"
+                    + (r.first.isEmpty() ? "" : "; first difference before that: " + r.first);
         } else if (r.declined > 0) {
             r.status = "DECLINED";
         } else if (r.refDeclined > 0) {
@@ -279,97 +312,6 @@ final class Diff {
         return sb.toString();
     }
 
-    private static void compareOn(String path, Options options, FileResult r, M8Harness[] holder) throws IOException {
-        try (M8Harness h = M8Harness.load(path)) {
-            holder[0] = h;
-            if (options.refBytes > 0) {
-                h.refBytes = options.refBytes;
-            }
-            h.refDeclines = options.refDeclines;
-            r.loadNanos = h.loadNanos;
-            if (h.loadOutcome != Outcome.ACCEPT) {
-                // The loader decides the file for every engine alike: nothing to compare.
-                r.status = "LOADER";
-                r.refVerdict = h.loadOutcome;
-                r.machineVerdict = h.loadOutcome;
-                r.loadMessage = h.loadMessage;
-                return;
-            }
-            r.units = h.units;
-            M8Harness.Lane lane = h.lane(options.config);
-            while (h.next()) {
-                int u = h.unit;
-                int mine = lane.outcome;
-                int oracle = h.oracle;
-                r.compared++;
-                if (lane.obs != null) {
-                    r.engineChecks++;
-                    if (lane.obs.outcome == Outcome.ACCEPT) {
-                        r.accepted++;
-                    } else if (lane.obs.outcome == Outcome.REJECT) {
-                        r.rejected++;
-                    } else {
-                        r.engineDeclined++;
-                    }
-                }
-                if (mine != Outcome.ACCEPT && r.machineFirstUnit < 0) {
-                    r.machineFirstUnit = u;
-                    r.machineVerdict = mine;
-                }
-                if (oracle != Outcome.ACCEPT && r.refVerdict == Outcome.ACCEPT) {
-                    r.refVerdict = oracle;
-                }
-                if (mine == oracle) {
-                    r.agree++;
-                    continue;
-                }
-                String kind;
-                if (oracle == Outcome.DECLINE) {
-                    // the reference engine has no verdict on this unit: nothing to hold the machine's against
-                    r.refDeclined++;
-                    String line = "ref-declined unit " + u + " " + h.unitKindName(u) + " '" + h.unitName(u) + "': machine "
-                            + Outcome.name(mine) + ", reference decline (" + h.oracleReason + ": " + clip(h.oracleMessage, 160) + ")";
-                    if (r.first.isEmpty()) {
-                        r.first = line;
-                        r.firstUnit = u;
-                    }
-                    if (r.lines.size() < options.linesPerFile) {
-                        r.lines.add(line);
-                    }
-                    continue;
-                }
-                if (mine == Outcome.DECLINE) {
-                    r.declined++;
-                    kind = "declined    ";
-                } else if (mine == Outcome.ACCEPT) {
-                    r.soundness++;
-                    kind = "SOUNDNESS   ";
-                } else {
-                    r.completeness++;
-                    kind = "COMPLETENESS";
-                }
-                String name = h.unitName(u);
-                String key = reasonKey(lane.reason, lane.message, name);
-                r.reasons.merge(key, 1, Integer::sum);
-                String line = kind + " unit " + u + " " + h.unitKindName(u) + " '" + name + "': machine " + Outcome.name(mine)
-                        + (mine == Outcome.ACCEPT ? "" : " (" + key + ")") + ", reference " + Outcome.name(oracle)
-                        + (oracle == Outcome.ACCEPT ? "" : " (" + h.oracleReason + ": " + clip(h.oracleMessage, 160) + ")");
-                if (r.firstUnit < 0) {
-                    r.firstUnit = u;
-                    r.first = line;
-                }
-                if (r.lines.size() < options.linesPerFile) {
-                    r.lines.add(line);
-                }
-            }
-            r.ticks = lane.ticks;
-            r.calls = lane.calls;
-            r.framesWritten = lane.framesWritten;
-            r.machineNanos = lane.nanos;
-            r.refNanos = h.oracleTotalNanos;
-        }
-    }
-
     /**
      * The machine's reason for a difference without what is particular to the declaration: the reason,
      * the machine code, and the exception that ended the check if there was one (for a stub: the name of
@@ -400,7 +342,7 @@ final class Diff {
         return m.isEmpty() ? r : r + " " + m;
     }
 
-    private static String clip(String s, int n) {
+    static String clip(String s, int n) {
         s = s.replace('\n', ' ');
         return s.length() <= n ? s : s.substring(0, n) + "...";
     }
@@ -505,6 +447,14 @@ final class Diff {
         rep.label = label;
         rep.options = options;
         long t0 = System.nanoTime();
+        if (options.jobs > 1 && paths.size() > 1 && options.refDeclines == null && options.refBytes == 0) {
+            List<M8Lanes.Spec> specs = Collections.singletonList(new M8Lanes.Spec("diff", options.config));
+            for (M8Lanes.FileRun r : M8Gate.runAll("diff " + label, paths, specs, options.jobs, options.fileMillis).values()) {
+                rep.files.add(of(r, 0));
+            }
+            rep.wallNanos = System.nanoTime() - t0;
+            return rep;
+        }
         int i = 0;
         for (String p : paths) {
             FileResult f = compare(p, options);
@@ -678,7 +628,7 @@ final class Diff {
                 + (unit >= 0 ? " -Dm8.unit=" + unit : "");
     }
 
-    private static String shortName(String path) {
+    static String shortName(String path) {
         return path.replaceAll("^work/arena-site/tests/", "").replaceAll("^work/", "");
     }
 

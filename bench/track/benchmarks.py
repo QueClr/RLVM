@@ -68,7 +68,7 @@ def ratio(ours, theirs) -> str:
     if ours is None or not theirs:
         return "-"
     r = ours / theirs
-    return f"{r:.0f}x" if r >= 20 else f"{r:.1f}x"
+    return f"{r:.0f}x" if r >= 20 else f"{r:.1f}x" if r >= 2 else f"{r:.2f}x"
 
 
 def main() -> int:

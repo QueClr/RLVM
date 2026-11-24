@@ -12,9 +12,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import rlvm.api.Outcome;
+import rlvm.api.Reason;
+import rlvm.ref.RefEngine;
+import rlvm.ref.RefOptions;
 
 /**
  * The reference kernel on the published arena tests at kernel level ({@link CorpusRunner}: inductive
@@ -26,6 +30,8 @@ import rlvm.api.Outcome;
 class CorpusTest {
 
     private static final Path TESTS = Paths.get("..", "work", "arena-site", "tests");
+    /** The arena's tests with outcome "either" (not in the published tarball; collected by bench/collect-exports.py). */
+    private static final Path EITHER = Paths.get("..", "work", "exports", "all", "either", "corner-cases");
 
     /** Bad tests the kernel alone cannot see: forged or ill-formed inductive / quot records, duplicate universe names. */
     private static final Set<String> NOT_A_KERNEL_MATTER = new HashSet<>(Arrays.asList(
@@ -77,6 +83,31 @@ class CorpusTest {
     @Test
     void bugsOtherCornerCases() throws IOException {
         run("bugs", "other", "corner-cases");
+    }
+
+    /**
+     * The two arena corner cases on which the official level comparison and the complete one differ
+     * (outcome "either"; the official checker rejects both): rejected by default, accepted with the
+     * opt-in {@code levels=complete}. Neither file declares an inductive type, so the kernel-level
+     * verdict is the pipeline's.
+     */
+    @Test
+    void imaxCornerCasesFollowTheOfficialKernelByDefault() {
+        for (String n : new String[] {"imax-right-successor", "imax-nested-absorption"}) {
+            Path f = EITHER.resolve(n + ".ndjson");
+            assumeTrue(Files.exists(f), "the arena's 'either' tests are not present");
+            CorpusRunner.Result byDefault = CorpusRunner.run(f, true, false);
+            assertEquals(Outcome.REJECT, byDefault.verdict, n + " by default: " + byDefault.message);
+            assertEquals(Reason.DECL_TYPE_MISMATCH, byDefault.reason, n);
+            CorpusRunner.Result official = CorpusRunner.run(f, true, false,
+                    RefEngine.factory(RefOptions.parse(Map.of("levels", "official"))));
+            assertEquals(Outcome.REJECT, official.verdict, n + " with levels=official");
+            assertEquals(byDefault.failures, official.failures, n);
+            CorpusRunner.Result complete = CorpusRunner.run(f, true, false,
+                    RefEngine.factory(RefOptions.parse(Map.of("levels", "complete"))));
+            assertEquals(Outcome.ACCEPT, complete.verdict, n + " with levels=complete: " + complete.message);
+            assertEquals(0, complete.failures, n);
+        }
     }
 
     @Test

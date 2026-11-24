@@ -79,6 +79,29 @@ final class M8Harness implements AutoCloseable {
         long maxBytes = REF_BYTES;
         /** Wall-clock limit of one engine check; the machine notices it at its next poll. */
         long checkMillis = 120_000;
+        /**
+         * Session cap between units (ISA 1.6; the driver's {@code -X session-mib}): a lane whose session
+         * footprint passes it after a unit is reset. Only a warm lane ({@code Op.SW_WARM}) keeps a session
+         * across declarations at all.
+         */
+        long sessionBytes = SESSION_BYTES;
+        /**
+         * With {@link #trace}: keep only the number of call events and a digest of their ops
+         * ({@link Obs#traceLen}, {@link Obs#traceDigest}), not the ops themselves (4 bytes per call event:
+         * 400 MB for one declaration of perf/app-lam, per lane).
+         */
+        boolean traceDigestOnly;
+        /**
+         * With {@link #digest}: digest after an ACCEPT only what the declaration added to the session (records,
+         * run words, pair-log entries since the previous digest) and the whole session once, when the lane is
+         * about to reset it ({@link Lane#sessionDigest}). In v0 a session is one declaration and the two are
+         * the same; a warm session of 4 MiB digested as a whole after each of Init's 58,000 declarations would
+         * cost more than the checks. Memo words that a later declaration writes into earlier records are then
+         * compared at the reset instead of at once.
+         */
+        boolean incrementalDigest;
+        /** Test seam: the engine check with this index (0 = the lane's first) ends as if the Java heap were exhausted; -1 = never. */
+        long simulateHeapExhaustionAtCheck = -1;
 
         Config(String label) {
             this.label = label;
@@ -119,10 +142,44 @@ final class M8Harness implements AutoCloseable {
             return this;
         }
 
+        Config sessionBytes(long bytes) {
+            sessionBytes = bytes;
+            return this;
+        }
+
+        Config traceDigestOnly(boolean on) {
+            traceDigestOnly = on;
+            return this;
+        }
+
+        Config incrementalDigest(boolean on) {
+            incrementalDigest = on;
+            return this;
+        }
+
+        /** A copy with another label (the lanes of a gate share their limits and differ in bound, switches, debug modes). */
+        Config copy(String newLabel) {
+            Config c = new Config(newLabel);
+            c.hostDepth = hostDepth;
+            c.switches = switches;
+            c.debug = debug;
+            c.strict = strict;
+            c.trace = trace;
+            c.digest = digest;
+            c.maxSteps = maxSteps;
+            c.maxBytes = maxBytes;
+            c.checkMillis = checkMillis;
+            c.sessionBytes = sessionBytes;
+            c.traceDigestOnly = traceDigestOnly;
+            c.incrementalDigest = incrementalDigest;
+            return c;
+        }
+
         @Override
         public String toString() {
             return label + " (hostDepth " + (hostDepth == Op.HOST_DEPTH_UNBOUNDED ? "unbounded" : Integer.toString(hostDepth))
-                    + ", switches [" + Debug.switchNames(switches) + "]" + (strict ? ", strict" : "") + ")";
+                    + ", switches [" + Debug.switchNames(switches) + "]" + (debug != 0 ? ", debug [" + Debug.modeNames(debug) + "]" : "")
+                    + (strict ? ", strict" : "") + ((switches & Op.SW_WARM) != 0 ? ", session cap " + (sessionBytes >> 20) + " MiB" : "") + ")";
         }
     }
 
@@ -140,8 +197,15 @@ final class M8Harness implements AutoCloseable {
         long framesWritten;
         long spills;
         long nanos;
-        /** The ops of the call events in order ({@link Config#trace}), else null. */
+        /** The ops of the call events in order ({@link Config#trace} without {@link Config#traceDigestOnly}), else null. */
         int[] trace;
+        /** With {@link Config#trace}: the number of call events recorded and a digest of their ops in order. */
+        int traceLen;
+        long traceDigest;
+        /** Machine error code of an outcome other than ACCEPT ({@code MachineErrors.*}); 0 after an ACCEPT. */
+        int code;
+        /** The Java heap ended this check (an {@code OutOfMemoryError}, or the machine's own heap test refused a growth): no verdict of the machine. */
+        boolean memory;
         /** After an ACCEPT with {@link Config#digest}: sizes and digests of what the declaration left in the session. */
         boolean hasDigest;
         int records;
@@ -189,11 +253,13 @@ final class M8Harness implements AutoCloseable {
     /** A machine session run in lockstep with the reference engine. It is the {@link Session} admission talks to. */
     final class Lane implements Session {
         final Config config;
-        final WorkerContext ctx;
-        final MachineEngine engine;
-        final MachineSession session;
-        final Machine m;
-        final Admission admission;
+        final int workerId;
+        // not final: a lane whose check ran out of Java heap is rebuilt (recycle), a finished lane lets go (release)
+        WorkerContext ctx;
+        MachineEngine engine;
+        MachineSession session;
+        Machine m;
+        Admission admission;
         final Deadline deadline = new Deadline();
 
         /** Of the unit run last: the admission outcome, and the engine check if admission reached the engine. */
@@ -217,11 +283,26 @@ final class M8Harness implements AutoCloseable {
         long exceptions;
         long overflows;
         private Reason overflowReason;
+        private String overflowMessage;
         final long[] callsByOp = new long[Op.OP_COUNT];
+
+        /** Units whose check the Java heap ended (see {@link Obs#memory}): the lane's answers there are no verdicts of the machine. */
+        long memoryFailures;
+        /** Largest session footprint seen after a unit. */
+        long peakFootprint;
+        private boolean recycleAfterUnit;
 
         Lane(Config config, int workerId) {
             this.config = config;
-            this.ctx = bindings.newWorkerContext(workerId, store, deadline, REF_BYTES);
+            this.workerId = workerId;
+            build();
+        }
+
+        private void build() {
+            synchronized (M8Harness.this) {
+                // one at a time: a lane takes its worker context from the bindings (level and number overlays)
+                this.ctx = bindings.newWorkerContext(workerId, store, deadline, REF_BYTES);
+            }
             this.engine = new MachineEngine(store, config.strict ? EngineConfig.defaults().withStrict(true) : EngineConfig.defaults());
             this.session = (MachineSession) engine.newSession(ctx);
             this.m = session.m;
@@ -230,6 +311,43 @@ final class M8Harness implements AutoCloseable {
             m.debug = config.debug | (config.trace ? Op.DBG_TRACE : 0);
             m.stats = true;
             this.admission = new Admission(ctx, Policy.arena(), env);
+        }
+
+        /**
+         * A new machine, session and worker context for this lane; the old ones (and every array they grew)
+         * become garbage. After an {@code OutOfMemoryError} inside a check nothing of the old machine is trusted.
+         */
+        void recycle() {
+            try {
+                session.close();
+            } catch (RuntimeException | OutOfMemoryError e) {
+                // the old session is dropped whatever it says
+            }
+            ctx = null;
+            engine = null;
+            session = null;
+            m = null;
+            admission = null;
+            build();
+            recycleAfterUnit = false;
+            resetAfterUnit = false;
+            digResets = -1;
+        }
+
+        /** The lane is finished: its machine, session and context are let go (the totals stay). */
+        void release() {
+            if (session != null) {
+                try {
+                    session.close();
+                } catch (RuntimeException | OutOfMemoryError e) {
+                    // nothing to report: the lane is over
+                }
+            }
+            ctx = null;
+            engine = null;
+            session = null;
+            m = null;
+            admission = null;
         }
 
         void runUnit(int u) {
@@ -247,22 +365,99 @@ final class M8Harness implements AutoCloseable {
                 reason = Reason.INTERNAL_ERROR;
                 message = "exception in admission: " + e;
                 exceptions++;
+            } catch (OutOfMemoryError e) {
+                // outside Session.check (structural checks, the message of a failure): the harness's heap, not a verdict
+                outcome = Outcome.DECLINE;
+                reason = Reason.BUDGET_MEMORY;
+                message = HEAP_MESSAGE + " in admission";
+                memoryFailures++;
+                recycleAfterUnit = true;
+            }
+            if (obs != null && obs.memory && outcome == Outcome.DECLINE && !message.startsWith(HEAP_MESSAGE)) {
+                message = HEAP_MESSAGE + ": " + message;
+            } else if (outcome == Outcome.DECLINE && message.contains(MACHINE_HEAP_MESSAGE)) {
+                // Machine.heapAllows refused a growth: how much heap is free depends on what the other lanes hold
+                if (obs != null) {
+                    obs.memory = true;
+                }
+                memoryFailures++;
             }
             units++;
-            if (outcome != Outcome.ACCEPT || session.footprintBytes() > sessionBytes) {
+            if (recycleAfterUnit) {
+                return;
+            }
+            long footprint = session.footprintBytes();
+            if (footprint > peakFootprint) {
+                peakFootprint = footprint;
+            }
+            sessionDigest = 0;
+            if (outcome != Outcome.ACCEPT || footprint > config.sessionBytes) {
                 // as the driver does (and Fixture.diffAgainstReference): nothing of a failed unit survives
                 resetAfterUnit = true;
+                if (outcome == Outcome.ACCEPT && config.digest && config.incrementalDigest) {
+                    sessionDigest = sessionDigestNow();
+                }
             }
+        }
+
+        /** With {@link Config#incrementalDigest}: the digest of the whole session, taken when the unit run last made the lane reset it; else 0. */
+        long sessionDigest;
+        private long digResets = -1;
+        private int digVp;
+        private int digRsp;
+        private int digPlog;
+
+        /** Every record word, run word and pair entry (as a set) of the live session in one number; never 0. */
+        long sessionDigestNow() {
+            Obs o = new Obs();
+            digest(m, o);
+            long d = o.recordDigest * 31 + o.runDigest * 17 + o.pairSetDigest + o.records + ((long) o.runWords << 20) + ((long) o.pairs << 40);
+            return d == 0 ? 1 : d;
+        }
+
+        /** {@link Config#incrementalDigest}: what the declaration added since the previous digest of this session. */
+        private void digestSince(Obs o) {
+            if (m.resets != digResets || m.vp < digVp || m.rsp < digRsp || m.plogN < digPlog) {
+                digResets = m.resets;
+                digVp = m.vbase;
+                digRsp = m.rbase;
+                digPlog = 0;
+            }
+            o.hasDigest = true;
+            o.records = m.vp - digVp;
+            o.runWords = m.rsp - digRsp;
+            o.pairs = m.plogN - digPlog;
+            o.recordDigest = digest(m.vh, digVp << Layout.REC_SHIFT, m.vp << Layout.REC_SHIFT) ^ digVp;
+            o.runDigest = digest(m.rs, digRsp, m.rsp) ^ digRsp;
+            long h = 0x9E3779B97F4A7C15L;
+            long set = 0;
+            int[] pair = m.pair;
+            for (int i = digPlog; i < m.plogN; i++) {
+                int e = m.plog[i] << Layout.PAIR_SHIFT;
+                long x = mix(mix(mix(0x1234567L, pair[e + Layout.PAIR_LO]), pair[e + Layout.PAIR_HI]), pair[e + Layout.PAIR_STATUS]);
+                h = mix(h, (int) x) ^ (x >>> 32);
+                set += x * 0xD6E8FEB86659FD93L;
+            }
+            o.pairDigest = h;
+            o.pairSetDigest = set;
+            digVp = m.vp;
+            digRsp = m.rsp;
+            digPlog = m.plogN;
         }
 
         boolean resetAfterUnit;
 
         /** Called by the harness when every comparison of the unit has looked at the live machines. */
         void endUnit() {
-            if (resetAfterUnit) {
+            if (recycleAfterUnit) {
+                recycle();
+            } else if (resetAfterUnit) {
                 session.reset();
                 ctx.reset();
                 resetAfterUnit = false;
+            }
+            if (m.trace.length > TRACE_KEEP) {
+                m.trace = new int[0]; // the trace of one huge declaration is not kept for the small ones behind it
             }
         }
 
@@ -282,6 +477,9 @@ final class M8Harness implements AutoCloseable {
             int out;
             overflowReason = null;
             try {
+                if (config.simulateHeapExhaustionAtCheck == checks) {
+                    throw new OutOfMemoryError("simulated by the test");
+                }
                 out = session.check(cid, budget);
             } catch (StackOverflowError e) {
                 // Only a lane that runs plain host recursion (a test configuration, H9) may run out of host
@@ -292,14 +490,37 @@ final class M8Harness implements AutoCloseable {
                 session.reset();
                 out = Outcome.DECLINE;
                 overflowReason = Reason.STACK_DEPTH;
+                overflowMessage = "host stack overflow under plain host recursion (hostDepth unbounded)";
                 o.overflow = true;
                 overflows++;
+            } catch (OutOfMemoryError e) {
+                // The harness runs several engines in one Java heap (the reference kernel, the other lanes, other
+                // files of a parallel report), the launcher one: an exhausted heap here says nothing about the
+                // machine. The check counts as a decline for memory that is flagged (Obs.memory), the lane gets a
+                // new machine after the unit, and a report runs such a file again on its own.
+                m.trace = new int[0];
+                out = Outcome.DECLINE;
+                overflowReason = Reason.BUDGET_MEMORY;
+                overflowMessage = HEAP_MESSAGE;
+                o.memory = true;
+                memoryFailures++;
+                recycleAfterUnit = true;
             } finally {
                 o.nanos = System.nanoTime() - t0;
                 deadline.disarm();
             }
             o.outcome = out;
             o.reason = lastReason();
+            o.code = out == Outcome.ACCEPT || overflowReason != null ? 0 : session.lastCode();
+            if (o.memory) {
+                // nothing else of this check is observable: the machine is replaced
+                o.callsByOp = new long[Op.OP_COUNT];
+                checks++;
+                declined++;
+                this.nanos += o.nanos;
+                obs = o;
+                return out;
+            }
             o.ticks = session.steps() - ticks0;
             o.framesWritten = m.framesWritten - frames0;
             o.spills = m.spills - spills0;
@@ -311,10 +532,18 @@ final class M8Harness implements AutoCloseable {
                 callsByOp[op] += n;
             }
             if (config.trace) {
-                o.trace = Arrays.copyOf(m.trace, m.traceN);
+                o.traceLen = m.traceN;
+                o.traceDigest = digest(m.trace, 0, m.traceN);
+                if (!config.traceDigestOnly) {
+                    o.trace = Arrays.copyOf(m.trace, m.traceN);
+                }
             }
             if (out == Outcome.ACCEPT && config.digest) {
-                digest(m, o);
+                if (config.incrementalDigest) {
+                    digestSince(o);
+                } else {
+                    digest(m, o);
+                }
             }
             checks++;
             if (out == Outcome.ACCEPT) {
@@ -343,7 +572,7 @@ final class M8Harness implements AutoCloseable {
 
         @Override
         public String lastMessage() {
-            return overflowReason != null ? "host stack overflow under plain host recursion (hostDepth unbounded)" : session.lastMessage();
+            return overflowReason != null ? overflowMessage : session.lastMessage();
         }
 
         @Override
@@ -368,7 +597,9 @@ final class M8Harness implements AutoCloseable {
 
         @Override
         public void close() {
-            session.close();
+            if (session != null) {
+                session.close();
+            }
         }
     }
 
@@ -390,8 +621,20 @@ final class M8Harness implements AutoCloseable {
     String loadMessage = "";
     long loadNanos;
 
-    /** Session cap between units (ISA 1.6). */
-    long sessionBytes = 16L << 20;
+    /** Default session cap between units (ISA 1.6), {@code -Dm8.sessionMib=N} (16, the driver's default; the machine's warm sessions are measured with 4). */
+    static final long SESSION_BYTES = (long) Integer.getInteger("m8.sessionMib", 16) << 20;
+    /** Session cap of the reference engine between units. */
+    long sessionBytes = SESSION_BYTES;
+    /** A trace array longer than this (call events) is given back after the unit. */
+    static final int TRACE_KEEP = 1 << 22;
+    /** How the message of a check that the Java heap ended starts ({@link Obs#memory}). */
+    static final String HEAP_MESSAGE = "harness: the Java heap of the test JVM is exhausted (OutOfMemoryError); not a verdict of the machine";
+    /** What {@code Machine.heapAllows} says when it refuses a growth (the limit detail of an E_MEM decline). */
+    static final String MACHINE_HEAP_MESSAGE = "the Java heap: a session array";
+    /** Largest session footprint of the reference engine after a unit. */
+    long refPeakFootprint;
+    /** The reference engine ran out of Java heap on some unit (its DECLINE there is the harness's, not its own). */
+    boolean refMemory;
     /**
      * Byte budget of the reference engine per unit and cap of its term overlay: what the driver gives it at
      * one worker (6 GiB; perf/app-lam needs 1.2 GB of overlay, perf/magma-list-deep-n36 1.7 GB), heap
@@ -468,6 +711,47 @@ final class M8Harness implements AutoCloseable {
         return lane;
     }
 
+    // ---- pass mode: the reference engine first, then every lane on its own ------------------------------------
+
+    private int passLanes;
+
+    /**
+     * Ends the reference pass of pass mode ({@code while (h.next()) ..} without a lane): the reference session and
+     * its context are emptied, so that what the reference kernel held (1.7 GB of overlay after
+     * perf/magma-list-deep-n36) is free before the first lane runs. The environment pass stays as it is: it has
+     * decided every unit up to {@link #unit}, and {@code EnvBuilder.advanceTo} returns at once for those.
+     */
+    void endReferencePass() {
+        if (!lanes.isEmpty()) {
+            throw new IllegalStateException("pass mode has no lockstep lane");
+        }
+        finished = true;
+        if (refSession != null) {
+            refSession.reset();
+            refCtx.reset();
+        }
+    }
+
+    /**
+     * A lane of pass mode: created after {@link #endReferencePass()}, it runs the units {@code [0, unit]} alone
+     * ({@link Lane#runUnit}, the caller's observation, {@link Lane#endUnit}), on any one thread; several pass
+     * lanes may run at the same time on threads started after the reference pass (they share the frozen store
+     * and the finished environment pass, nothing else). It is not in {@link #lanes}; the caller releases it.
+     */
+    Lane passLane(Config config) {
+        if (!finished) {
+            throw new IllegalStateException("pass lanes are created after endReferencePass()");
+        }
+        if (loadOutcome != Outcome.ACCEPT) {
+            throw new IllegalStateException("the export was not loaded: " + loadMessage);
+        }
+        int id;
+        synchronized (this) {
+            id = ++passLanes;
+        }
+        return new Lane(config, id);
+    }
+
     /**
      * Runs the next unit in the reference engine and in every lane. The lanes' machines keep the state
      * the unit left until the next call, so that the caller can compare them.
@@ -494,6 +778,11 @@ final class M8Harness implements AutoCloseable {
             oracle = Outcome.DECLINE;
             oracleReason = Reason.INTERNAL_ERROR;
             oracleMessage = "exception in the reference engine: " + e;
+        } catch (OutOfMemoryError e) {
+            oracle = Outcome.DECLINE;
+            oracleReason = Reason.BUDGET_MEMORY;
+            oracleMessage = HEAP_MESSAGE + " (reference engine)";
+            refMemory = true;
         } finally {
             oracleNanos = System.nanoTime() - t0;
             oracleTotalNanos += oracleNanos;
@@ -506,6 +795,11 @@ final class M8Harness implements AutoCloseable {
         }
         for (Lane lane : lanes) {
             lane.runUnit(u);
+        }
+        try {
+            refPeakFootprint = Math.max(refPeakFootprint, refSession.footprintBytes());
+        } catch (RuntimeException e) {
+            // a footprint is only a scheduling hint
         }
         if (oracle != Outcome.ACCEPT) {
             refSession.reset();

@@ -13,11 +13,23 @@
 # this definition checks with the reference engine. The description below says only what the
 # binary does today.
 #
-# Which launcher: the CE native image (work/dist/bin/rlvm). docs/PLATFORM.md has the comparison with
-# the JVM launcher (work/dist/bin/rlvm-jvm, built by the same build step) and with an Oracle GraalVM
-# PGO image, measured with the reference engine on this aarch64 host; the binding platform gate
-# (RECONCILIATION section 3) is run when the machine accepts Init. To try the JVM launcher, replace
-# `bin/rlvm` by `bin/rlvm-jvm` in the run line: nothing else changes.
+# Which launcher: the CE native image (work/dist/bin/rlvm, built at -O3). The platform gate of
+# RECONCILIATION section 3 was run on 2026-11-24 with the MACHINE as engine (docs/PLATFORM.md, Part I;
+# aarch64 host, arena-shaped container): on Init, Std, the Cedar slice and reachability the image
+# needs 0.68 / 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers and a third to
+# a half of its memory. The JVM launcher (work/dist/bin/rlvm-jvm, built by the same build step) is
+# the cheaper platform only for long runs of the REFERENCE engine (mathlib: 0.80 times the image's
+# CPU time), which is not what will ship. To try it, replace `bin/rlvm` by `bin/rlvm-jvm` in the run
+# line: nothing else changes. The build uses GraalVM CE only (Oracle GraalVM is never downloaded or
+# used by a default build: owner's decision, docs/design/OWNER-NOTES.md item 11).
+#
+# Worker count: 4 (the same gate, Part I section I.3). With four workers the image's CPU time is that
+# of one worker (medians 1.02 / 1.01 / 0.98 times on Init, Std and the Cedar slice) at 2.3 to 2.7 times
+# the speed; eight workers cost 1.07 to 1.09 times the CPU time of one for 18 % less wall clock than
+# four on Init and Std and nothing on the Cedar slice and reachability. Six (the driver's proposal for
+# `--threads auto`) is the open candidate: it could only be measured on a host at load 250 and needs
+# a quiet one and a mathlib run with the machine. To change it, change BOTH numbers below (`--threads`
+# in the run line and `threads:`, the CPU slots the arena reserves).
 #
 # bench/rlvm/run.sh, suite.sh and measure.sh read the `run:` line of this file, so that local
 # measurements execute exactly the command the arena would. Keep it on one line.

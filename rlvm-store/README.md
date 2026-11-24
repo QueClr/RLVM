@@ -6,7 +6,7 @@ test scope). Everything is `int` ids into flat primitive arrays; id 0 is "none";
 level or literal; no reflection, no `java.util` collections, no lambdas on any path.
 
 ```
-. ./env.sh && $MVN -o -q -pl rlvm-store test                      # 67 tests, 1 opt-in (init.ndjson)
+. ./env.sh && $MVN -o -q -pl rlvm-store test                      # 68 tests, 1 opt-in (init.ndjson)
 $MVN -o -q -pl rlvm-store test -Dtest='RealExportTest#initWithProofBlocks' -Drlvm.store.heavy=true
 bench/arena-docker.sh --arena-limits rlvm-store/bench/store-bench.sh [--c2] [MODE[:SIZE] ...]
 rlvm-store/bench/real-export.sh [-XX:-UseJVMCICompiler] work/exports/init.ndjson [--decode-rounds 8 | --layout]
@@ -51,9 +51,13 @@ Every skeleton signature still exists, with one exception: `StoreBuilder.dropUns
   ids every thread can read.
   `Overlay(store, lists, levelInfo, litPool, maxBytes)`, `TermOps(terms, lists, levelInfo)`,
   `TermOps.setLitPool`.
-- **End of load**: `StoreBuilder.finish()` publishes the last units and gives the promotion memo and the
-  sparse record index back (`releaseLoaderState()`, idempotent): `promote` and a further block throw
-  `IllegalStateException` afterwards. A load that ends without `finish()` keeps the state.
+- **End of load**: `StoreBuilder.finish()` publishes the last units and gives the promotion memo, the
+  sparse record index and the coarse record-to-block index back (`releaseLoaderState()`, idempotent):
+  `promote` and a further block throw `IllegalStateException` afterwards. A load that ends without
+  `finish()` keeps the state.
+- **`StoreBuilder.touch(sharedId)`** (wave 7): a hint of the loader that the export node will be named as
+  a child of a node appended soon; it loads the node's first and last word (a node can straddle two cache
+  lines) and changes nothing. An id that is not an export term is ignored.
 - **Builder protocol** (`StoreBuilder`): `beginUnit(recordKind)`, `reserve(kind, name, lparams)` -> cid or 0,
   `complete(cid, type, value, hint)`, `unitClaims(blob, len)`, `endUnit()`; the same per kind as
   `beginDeclaration / endDeclaration`, `beginBlock / claimMember / setMemberType / endBlock`; `markRoot`,
@@ -300,16 +304,67 @@ node array and of the index (old and new array alive together, the old ones garb
 that a 13 GB heap never needs). A chunked node array would remove it and was not done: every reader's
 address arithmetic changes, and CPU time comes first.
 
+### Wave 7: the loader's side of the store (promotion, block writer, hints)
+
+Profile first (CE native image `-O3` with local symbols, `perf record -F 4000` in the arena container,
+`rlvm --threads 1 FILE -X engine=machine -X stop-after=load`; `work/pipeline-w7/perf/base-load-*.txt`): of the
+load phase of mathlib (66,246 samples = 16.6 s) `ProofBlocks` promotion was 20.4 % (`pending` 6.2, `seek`
+4.8, `promote` 3.2, `blockOfRecord` 2.9, `promoPut` 1.9, `parse` / `rd` / `promoGet` 1.4), `WriterImpl.ref`
+8.0 %, `NodeCtx.writeApp` 6.7 %; on Init (3,260 samples = 0.82 s) 18.2 %, 9.3 % and 4.8 %. Three changes,
+none of which changes a word of the store that is built (the differential digest of
+`work/pipeline-w7/digest` compares the stores of the published and the new jars):
+
+1. **Promotion memo = a direct map** `global record number -> shared id` in chunks of 4,096 records that
+   are allocated at the first promotion inside them, instead of an open-addressing hash table of the
+   promoted records. A promotion asks about a record and the earlier records of its block: neighbours,
+   which now share cache lines (the hash scattered them over a 256 MB table, one miss per question, and
+   doubled by re-insertion). Memory: at most 4 bytes per block record (mathlib 313 MB if every chunk were
+   touched; the hash table ended at 268 MB), part of the loader state that `finish()` gives back.
+2. **Block of a record** through a coarse index (one int per 512 records: the block that holds that
+   record, written when a block is finished) and a binary search over the few rows between two entries,
+   instead of a binary search over all block rows (19 steps on mathlib, most of them cache misses).
+   `blockOfRecord` (any thread) is unchanged; `ProofBlocksTest` compares the two for every record.
+3. **`seek` keeps the byte positions of the group of 16 records it walked last**, so a walk down a chain
+   of neighbours skips each record of a group once instead of once per visited record.
+4. **`WriterImpl.ref` no longer loads the shared node it refers to.** It read the node's `depMax` for every
+   reference from a block record to a shared term (0.7 per record), only to learn whether the node is
+   unresolved: a load of the 1.2 GB export region per reference. `TermStore` now keeps the smallest id of
+   an export node with `depMax == DEP_UNRESOLVED` (`firstUnresolved()`, MAX_VALUE in an export whose
+   references all bind) and the writer reads the node only at or above it. The answer is the same.
+5. `StoreBuilder.touch(sharedId)`: the loader announces the earlier shared children of the nodes it is
+   about to append (see `rlvm-load/README.md`, "Wave 7").
+
+CPU time of the load phase, `perf stat` task-clock in the arena container, alternating runs in one hold
+of the measurement lock (13:44Z, load average 60-90 on the host: only the pairs compare), store changes
+1-4 alone against the published jars (`work/pipeline-w7/loadcpu.txt`):
+
+| Load phase (`-X stop-after=load`, native `-O3`) | published (store 45df9b63e7af) | changes 1-4 | |
+|---|--:|--:|--:|
+| Init, CPU ms (3 alternating runs) | 897 / 800 / 797 | 709 / 682 / 693 | -13 % |
+| Std, CPU ms (3 runs) | 1,338 / 1,373 / 1,504 | 1,150 / 1,156 / 1,287 | -15 % |
+| mathlib, CPU s (1 run) | 16.65 | 13.77 | -17 % |
+| instructions, Init / Std / mathlib (G) | 7.44 / 12.47 / 132.3 | 7.17 / 12.03 / 128.2 | -3 % |
+
+So the gain is cache misses, not instructions (owner note 10). After it (mathlib, 53,022 samples): promotion
+10.0 % (`seek` 4.4: the first touch of a cold block's bytes; `promote` 3.3), `WriterImpl.ref` 2.8 %,
+`NodeCtx.writeApp` 8.2 %, `Loader.exprApp` 12.1 % (the `loc` reads, moved by the loader's change of the same
+wave), reader 22 %, kernel (page faults) 10.7 %.
+
+Also in wave 7: `Overlay.remapBlocks` sized the rebuilt block map with 64 slots whatever number of blocks
+stayed below the mark; with 64 or more of them (and more than eight times as many above) `putBlock` never
+ended. Reported by rlvm-admit (requests.log, 14:02Z); the map is now sized for the blocks that stay
+(`OverlayTest.resetToRebuildsTheBlockMapForTheBlocksBelowTheMark`).
+
 ## Tests
 
-67 tests in 12 classes (`src/test/java/rlvm/store`), all green; one of them opt-in (it was run and passes).
+68 tests in 12 classes (`src/test/java/rlvm/store`), all green; one of them opt-in (it was run and passes).
 
 | Class | What |
 |---|---|
 | `DeriveTest` (7) | summaries of export, overlay and decoded nodes against naive recursive definitions on 900 random DAGs; sticky saturation and exact range (70,001 binders); masks under binders; DAG-shaped and 200,000-deep levels; fail-closed without `LevelInfo` |
 | `TermOpsTest` (13) | every operation against a naive model on random DAGs (shared and overlay inputs); inverse laws; `eqv` against structural digests incl. mutants; depth 300,000; a DAG with 2^64 paths; overflow |
 | `OverlayTest` (7) | hash-consing of every constructor; reset; random marks with blocks and free variables in between; growth to the cap with two readers; **`resetTo` gives back node array and index** (three ways of cleaning the index); **an id below a mark is never handed out again** (400 random rounds against a model); **`resetTo` releases the declaration's literals**, keeps the ones made before the newest mark, drops stale marks |
-| `ProofBlocksTest` (5) | random files (definitions, theorems, cross references, interleaved segments): round trip, promotion copies exactly the reachable unpromoted records, block table, chunk limits, every record encoding; **sharing flags against a naive referrer count** |
+| `ProofBlocksTest` (6) | random files (definitions, theorems, cross references, interleaved segments): round trip, promotion copies exactly the reachable unpromoted records, block table, chunk limits, every record encoding; **sharing flags against a naive referrer count**; **promotion over 150 blocks and more than 12,288 records** (several chunks of the promotion memo, many entries of the coarse record index, 1,500 promotions in random order, the loader's block lookup against the binary search for every record) |
 | `NameTableTest` (5) | interning, big numerals, queries, claims, **`compare` against a reference of Lean's order on 10^5 pairs**, growth |
 | `LitPoolTest` (5) | interning by content, code points of 1..4-byte scalars, worker pools and publication, chunked big naturals; **marks against a model: no index is issued twice in a session, a released entry cannot be read, memory follows the live payload** (naturals and strings) |
 | `MachineAccessTest` (5) | the one-dispatch accessor against the field accessors in every region; `regionOf` after growth and reset; the binder hint (only export and generated binders, nothing else changes, a writer racing with a growing region); `unitFirstTerm` |
@@ -339,6 +394,15 @@ Seven more for `ProofBlocks.hasUnresolved` and the promotion experiment: all kil
   levels after the freeze; in a pipelined run the steward's bindings answer "not shared" for everything.
 - Peak RSS of one huge declaration is 2 to 4 times its nodes (copy-on-growth of the overlay's node array
   and index; `perf/app-lam` 5.3 GB, `perf/magma-list-pair-n21` 6.1 GB). A chunked node array is the fix.
+  Still not done in wave 7 (asked for again): `Overlay.array()` is read directly by every engine, so the
+  change is a change of all their accessors and needs their owners.
+- A node is 32 bytes at offset 16 + 32 i of its `int[]`: if the array's first element is 64-byte aligned
+  plus 16 (the usual object layout), every second node straddles two cache lines (`StoreBuilder.touch`
+  therefore reads the first and the last word). Not measured; one padding node in front of the region would
+  settle it, at the price of the address arithmetic of every reader.
+- Promotion still starts with a miss on the block's bytes (cold: 361 MB on mathlib) and on its rows per
+  call; the loader calls it once per referenced record. X5's finding (requests.log 14:04Z: on exporter
+  output the private records of a theorem are an id range) would remove four fifths of the promotions.
 - `Overlay` keeps a 32 MiB node array per overlay (10-11 overlays in an 8-worker run: 0.35 GB).
 - Instruction budgets of A 10.2 are exceeded by a factor of 2 to 4 (table above). CPU time per node is
   15..40 ns. The remaining cost of decoding is loading the shared children of block records; a record

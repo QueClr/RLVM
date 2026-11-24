@@ -353,7 +353,12 @@ final class TierEq {
     // ---------------------------------------------------------------------------------------------------
 
     /**
-     * Convention equivalence over a corpus: {@code work/status/machine-conv-LABEL.txt}.
+     * Convention equivalence over a corpus: {@code work/status/machine-conv-LABEL.txt}. The lanes run in passes
+     * ({@link M8Lanes}: the reference engine first, then one lane after the other, each letting go of everything
+     * before the next starts; the trace as a digest), files in parallel ({@code -Dm8.jobs}, default 1), a file in
+     * which the Java heap answered again on its own: four lanes and the reference kernel in lockstep on
+     * perf/app-lam or perf/magma-list-deep-n36 do not fit into the 6 GB of the test JVM. The first difference of
+     * a declaration is named by kind; {@code M8ConventionTest#oneFile} shows it on the live machines.
      *
      * @return true if no declaration differs
      */
@@ -361,7 +366,24 @@ final class TierEq {
         List<String> paths = Diff.exports(roots);
         String name = Diff.reportName(label);
         boolean trace = !"false".equals(System.getProperty("m8.trace"));
+        int switches = Debug.parseSwitches(System.getProperty("m8.switches", ""));
+        boolean warm = (switches & Op.SW_WARM) != 0;
         long t0 = System.nanoTime();
+        List<M8Lanes.Spec> specs = new ArrayList<>();
+        M8Harness.Config lead = new M8Harness.Config(boundName(BOUNDS[0])).hostDepth(BOUNDS[0]).trace(trace).traceDigestOnly(true);
+        lead.maxSteps = Long.getLong("m8.maxSteps", lead.maxSteps);
+        lead.checkMillis = 1000L * Long.getLong("m8.checkSeconds", lead.checkMillis / 1000);
+        lead.switches = switches;
+        lead.incrementalDigest = warm;
+        if (warm) {
+            lead.sessionBytes = (long) Integer.getInteger("m8.sessionMib", 4) << 20;
+        }
+        specs.add(new M8Lanes.Spec("conv", lead));
+        for (int i = 1; i < BOUNDS.length; i++) {
+            specs.add(new M8Lanes.Spec("conv", lead.copy(boundName(BOUNDS[i])).hostDepth(BOUNDS[i])).against(0, M8Lanes.CONV));
+        }
+        Map<String, M8Lanes.FileRun> runs = M8Gate.runAll("conv " + name, paths, specs, Integer.getInteger("m8.jobs", 1),
+                1000L * Long.getLong("m8.fileSeconds", 1800));
         int files = 0;
         int bad = 0;
         long checks = 0;
@@ -372,31 +394,57 @@ final class TierEq {
         long notes = 0;
         long[] frames = new long[BOUNDS.length];
         StringBuilder body = new StringBuilder();
-        for (String p : paths) {
-            ConvResult r = convention(p, trace, BOUNDS);
+        for (Map.Entry<String, M8Lanes.FileRun> e : runs.entrySet()) {
+            M8Lanes.FileRun run = e.getValue();
             files++;
-            checks += r.checks;
-            accepted += r.accepted;
-            calls += r.calls;
-            ticks += r.ticks;
-            overflow += r.overflowSkipped;
-            notes += r.pairOrderNotes;
-            for (int i = 0; i < frames.length; i++) {
-                frames[i] += r.frames[i];
+            List<String> differences = new ArrayList<>();
+            if (run.crash != null) {
+                StackTraceElement[] st = run.crash.getStackTrace();
+                differences.add("CRASH " + e.getKey() + ": " + run.crash + (st.length > 0 ? " < " + st[0] : "") + (st.length > 1 ? " < " + st[1] : ""));
             }
-            if (!r.ok()) {
+            for (int i = 0; i < run.lanes.length; i++) {
+                M8Lanes.LaneRun l = run.lanes[i];
+                frames[i] += l.framesTotal;
+                if (i == 0) {
+                    checks += l.checks;
+                    accepted += l.accepted;
+                    calls += l.callsTotal;
+                    ticks += l.ticksTotal;
+                }
+                overflow += l.overflowSkipped;
+                notes += l.pairOrderNotes;
+                if (l.crash != null) {
+                    StackTraceElement[] st = l.crash.getStackTrace();
+                    differences.add("CRASH " + e.getKey() + " in lane " + l.spec.config.label + ": " + l.crash + (st.length > 0 ? " < " + st[0] : "")
+                            + (st.length > 1 ? " < " + st[1] : ""));
+                }
+                if (l.timeout) {
+                    differences.add("TIMEOUT " + e.getKey() + " in lane " + l.spec.config.label + " after " + l.ranUnits + " units");
+                }
+                if (l.memoryFailures > 0) {
+                    differences.add("NOT COMPARED " + e.getKey() + ": lane " + l.spec.config.label + " ran out of Java heap on " + l.memoryFailures
+                            + " declarations although the file ran on its own (give the report more heap: report.sh --heap)");
+                }
+                differences.addAll(l.differences);
+                if (l.differing > l.differences.size()) {
+                    differences.add("... and " + (l.differing - l.differences.size()) + " more declarations that differ in lane " + l.spec.config.label);
+                }
+            }
+            if (!differences.isEmpty()) {
                 bad++;
-                for (String d : r.differences) {
+                for (String d : differences) {
                     body.append(d).append('\n');
                 }
-                body.append("    reproduce: scripts/machine-sandbox.sh test <WP> -Dtest=M8ConventionTest#oneFile -Dm8.file=").append(p).append('\n');
-                System.err.println("m8 conv " + name + ": DIFFERENT " + p + " -- " + r.differences.get(0));
+                body.append("    reproduce: scripts/machine-sandbox.sh test <WP> -Dtest=M8ConventionTest#oneFile -Dm8.file=").append(e.getKey())
+                        .append(switches == 0 ? "" : " -Dm8.switches=" + Debug.switchNames(switches)).append('\n');
+                System.err.println("m8 conv " + name + ": DIFFERENT " + e.getKey() + " -- " + differences.get(0));
             }
         }
         StringBuilder sb = new StringBuilder();
         sb.append("# machine-conv-").append(name).append(": convention equivalence (stepper-convention H12 item 1; ISA 1.3 observables)\n");
         sb.append("# generated ").append(Instant.now().truncatedTo(ChronoUnit.SECONDS)).append(" by: rlvm-machine/src/test/resources/m8/report.sh conv ")
                 .append(label).append("; ").append(Diff.lastPublication()).append('\n');
+        sb.append("# machine: ").append(lead).append('\n');
         sb.append("# lanes (host depth bound):");
         for (int i = 0; i < BOUNDS.length; i++) {
             sb.append(i == 0 ? " " : ", ").append(boundName(BOUNDS[i])).append(i == 0 ? " (the bound in force; the others are compared with it)"
@@ -404,7 +452,7 @@ final class TierEq {
                             ? " (plain host recursion)" : "");
         }
         sb.append('\n');
-        sb.append("# compared per declaration: outcome, reason, ticks, call events by op").append(trace ? ", the frame trace" : "")
+        sb.append("# compared per declaration: outcome, reason, ticks, call events by op").append(trace ? ", the frame trace (as a digest)" : "")
                 .append("; after an ACCEPT: every record word (ids, flags, memo), every run word, the pair entries\n");
         sb.append("#\n# RESULT ").append(name).append(": ").append(bad == 0 ? "EQUIVALENT" : "DIFFERENT in " + bad + " files").append(" -- files ")
                 .append(files).append(", declarations that reached the engine ").append(checks).append(", of them accepted ").append(accepted)

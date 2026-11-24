@@ -1,0 +1,313 @@
+# name<TAB>official verdict (leanchecker 4.36.0)<TAB>known findings (- = none; a comma list of: probes | facts | levels | decline)<TAB>what the export attacks
+lvl-swapped-params-ok	accept	-	B1 twin: A.{u,v} and B.{v,u} share type and value terms; B.{2,1} = A.{1,2}
+lvl-swapped-params-bad	reject	-	B1: A.{u,v} and B.{v,u} share type and value terms; B.{1,2} is Sort 3, not A.{1,2} = Sort 2
+lvl-shared-closed-subterm-ok	accept	-	B1 twin: T.{0} against T.{0}
+lvl-shared-closed-subterm-bad	reject	-	B1: the closed body of T.{u} under two level arguments: T.{0} is not T.{1}
+lvl-simultaneous-subst-ok	accept	-	B1 twin: Sw.{v,u} instantiated simultaneously
+lvl-simultaneous-subst-bad	reject	-	B1: Sw.{v,u} must be instantiated simultaneously (a sequential substitution gives max u (u+1))
+lvl-param-shadow-ok	accept	-	B1 twin: T.{u+1} inside a declaration whose own parameter is u
+lvl-param-shadow-bad	reject	-	B1: T.{u+1} inside a declaration whose own parameter is u: the identity substitution must not be used
+lvl-arity-in-proof-bad	reject	-	level arity of a constant inside a theorem proof (proof block): id.{0,0}
+lvl-undeclared-in-proof-bad	reject	-	an undeclared universe parameter inside a theorem proof
+lvl-warm-lparam-reuse-bad	reject	-	warm: a term with parameter u checked in a declaration with u, then reused by a declaration without u
+thm-type-nat-bad	reject	-	theorem whose type is Nat
+thm-type-sort-u-bad	reject	-	theorem whose type lives in Sort u (not always Prop)
+thm-type-imax-ok	accept	-	theorem whose type lives in Sort (imax (u+1) 0): a proposition
+thm-type-max-u-bad	reject	-	theorem whose type lives in Sort (max 0 u)
+thm-type-via-def-ok	accept	-	theorem whose type is an axiom of type MyProp := Prop (ensure_sort needs whnf)
+thm-type-via-def-bad	reject	-	theorem whose type is an axiom of type MyType := Type
+chk-lam-domain-bad	reject	-	def f : Nat -> Nat := fun (x : Bool) => Nat.zero
+chk-lam-body-bad	reject	-	def f : Nat -> Nat := fun (x : Nat) => Bool.true
+chk-lam-second-domain-bad	reject	-	def f : Nat -> Nat -> Nat := fun (x : Nat) (y : Bool) => x
+chk-lam-expected-via-def-bad	reject	-	def T := Nat -> Nat; def f : T := fun (x : Bool) => Nat.zero
+chk-arg-lam-domain-bad	reject	-	B9: a lambda argument with the wrong binder type
+chk-arg-lam-body-bad	reject	-	B9: a lambda argument with the wrong body type
+chk-arg-lam-extra-binder-bad	reject	-	B9: a lambda argument that returns a function where Nat is expected
+chk-arg-lam-illtyped-domain-bad	reject	-	B9: the binder type of a lambda argument is ill-typed but evaluates to the expected domain
+chk-arg-lam-illtyped-body-bad	reject	-	B9: the body of a lambda argument is ill-typed but evaluates to a Nat
+chk-arg-lam-nonsort-domain-bad	reject	-	B9: the binder type of a lambda argument is not a type (Nat.zero)
+chk-def-lam-illtyped-domain-bad	reject	-	the binder type of the value lambda is ill-typed but evaluates to Nat
+chk-let-illtyped-type-bad	reject	-	let x : <ill-typed, evaluates to Nat> := Nat.zero; x
+chk-let-unused-value-bad	reject	-	let x : Nat := Bool.true; Nat.zero (the variable is not used)
+chk-let-unused-type-bad	reject	-	let x : Bool := Nat.zero; Nat.zero
+chk-let-type-not-sort-bad	reject	-	let x : Nat.zero := Nat.zero; Nat.zero
+chk-unused-arg-bad	reject	-	(fun (x : Nat) => Nat.zero) Bool.true: the unused argument is ill-typed
+chk-proof-arg-bad	reject	-	(fun (h : True) => True.intro) Nat.zero inside a theorem proof
+chk-decl-type-illtyped-bad	reject	-	the declared type is ill-typed but evaluates to Nat
+chk-decl-pi-domain-illtyped-bad	reject	-	a Pi domain of the declared type is ill-typed but evaluates to Nat
+chk-axiom-type-illtyped-bad	reject	-	an axiom whose type is ill-typed but evaluates to Nat
+chk-axiom-type-not-sort-bad	reject	-	an axiom whose type is Nat.zero
+chk-thm-illtyped-in-irrelevant-bad	reject	-	a proof that contains an ill-typed application in a position proof irrelevance never looks at
+chk-same-lambda-two-types-bad	reject	-	CHECK memo: the same lambda term at two argument positions with different expected types
+chk-warm-same-lambda-two-types-bad	reject	-	warm CHECK memo: the same lambda term checked against Nat -> Nat, then against Nat -> Bool in the next declaration
+chk-open-term-shared-body-bad	reject	-	the open body term Nat.succ #0 under a Nat binder and then under a Bool binder
+chk-open-term-shared-let-bad	reject	-	the open body term Nat.succ #0 under let x : Nat := 0 and then under let x : Bool := true
+chk-proj-wrong-struct-bad	reject	-	projection Prod.0 of Nat.zero
+chk-proj-wrong-name-bad	reject	-	projection named Prod applied to a value of another structure with the same shape
+chk-proj-index-range-bad	reject	-	projection index 2 of a structure with two fields
+chk-proj-field-type-bad	reject	-	projection 1 of Prod Nat Bool claimed to be a Nat
+eta-ok	accept	-	fun x => Nat.succ x against Nat.succ, and against an axiom of a type that needs whnf to be a Pi
+eta-wrong-fn-bad	reject	-	fun x => f x against g
+eta-arg-swap-bad	reject	-	fun x y => f y x against f
+unitlike-ok	accept	-	two axioms of a structure without fields are definitionally equal
+unitlike-param-ok	accept	-	unit-like with a parameter
+unitlike-indexed-bad	reject	-	one constructor without fields but an index: not unit-like
+unitlike-two-ctors-bad	reject	-	two constructors without fields: not unit-like
+unitlike-field-bad	reject	-	one constructor with a field: not unit-like
+unitlike-param-mismatch-bad	reject	-	unit-like values of U 0 and U 1 compared (the types differ)
+eta-struct-ok	accept	-	Prod.mk p.1 p.2 against p, both directions
+eta-struct-swapped-bad	reject	-	Prod.mk p.2 p.1 against p
+eta-struct-other-bad	reject	-	Prod.mk p.1 q.2 against p
+eta-struct-recursive-bad	reject	-	structure eta on a recursive one-constructor type (not structure-like)
+eta-struct-recursive-forged-flag-bad	reject	-	the same with isRec forged to false in the export (the flag must be recomputed)
+eta-struct-indexed-bad	reject	-	structure eta on a one-constructor family with an index (not structure-like)
+iota-struct-eta-type-ok	accept	-	Prod.rec on an axiom: structure eta in iota
+iota-struct-eta-prop-bad	reject	-	And.rec into Nat on an axiom: no structure eta for a proposition
+iota-struct-prop-ctor-ok	accept	-	And.rec into Nat on And.intro: plain iota
+k-eq-rec-ok	accept	-	K: Eq.rec on an axiom of 0 = 0 reduces
+k-eq-rec-defeq-index-ok	accept	-	K: Eq.rec on an axiom of 2 = 1 + 1 reduces (indices definitionally equal)
+k-eq-rec-wrong-index-bad	reject	-	K: Eq.rec on an axiom of 0 = 1 must not reduce
+k-eq-rec-open-index-bad	reject	-	K: Eq.rec on an axiom of 0 = n (n an axiom) must not reduce
+proj-prop-indexed-later-field-bad	reject	-	projection of the proof field of a Prop family whose result type reads the data field
+proj-prop-indexed-data-field-bad	reject	-	projection of the data field of a Prop family
+proj-indexed-type-ok	accept	-	projections of a one-constructor Type family with an index
+proj-indexed-type-field-bad	reject	-	projection 0 (a Nat) of the family claimed to be a Bool
+proj-indexed-reduce-bad	reject	-	projection 1 of TI.mk 5 true claimed to be false
+proj-prop-witness-bad	reject	-	projection of the witness of an existential-like proposition
+proj-prop-dependent-proof-bad	reject	-	projection of the proof field that depends on the witness
+proj-prop-and-ok	accept	-	projections of And
+pirr-ok	accept	-	two axioms of True are equal; two proofs under a function
+pirr-data-bad	reject	-	two axioms of Nat are not equal
+pirr-poly-result-ok	accept	-	c.{u} : (A : Sort u) -> A at u = 0: a proof
+pirr-poly-result-bad	reject	-	static proof filter: c.{u} : (A : Sort u) -> A is a proof at u = 0 and data at u = 1
+pirr-imax-result-ok	accept	-	c.{u,v} : (A : Sort (imax u v)) -> A at (1, 0): a proof
+pirr-imax-result-bad	reject	-	static proof filter: result sort imax u v is Prop at (1, 0) and Type at (0, 1)
+pirr-overapplied-ok	accept	-	over-applied constants whose telescope ends in a definition that unfolds to Nat -> True
+pirr-overapplied-bad	reject	-	static proof filter on an over-applied constant: g 0 1 : Nat is data
+mask-prop-position-ok	accept	-	f 1 h1 i against f 1 h2 i: the proof position is skipped or equal by irrelevance
+mask-after-prop-position-bad	reject	-	mask: the argument AFTER a proof position differs
+mask-before-prop-position-bad	reject	-	mask: the argument BEFORE a proof position differs
+mask-poly-position-ok	accept	-	f.{u} : (A : Sort u) -> A -> Nat at u = 0: the second argument is a proof
+mask-poly-position-bad	reject	-	mask: the same position is a proof at u = 0 and data at u = 1 (f.{1} Nat 1 against f.{1} Nat 2)
+mask-imax-position-bad	reject	-	mask: a position of sort imax u v, Prop at (1, 0), Type at (0, 1)
+mask-dependent-prop-ok	accept	-	f Q n (h n) against f Q n (k n): the proof position depends on earlier arguments
+mask-dependent-prop-n-bad	reject	-	mask: f Q 1 (h 1) against f Q 2 (h 2)
+mask-dependent-prop-q-bad	reject	-	mask: f Q 1 _ against f Q2 1 _
+mask-unread-arg-opaque-bad	reject	-	an opaque constant that ignores its argument: K 1 against K 2 must not be equal
+mask-unread-arg-def-ok	accept	-	a definition that ignores its argument: K 1 against K 2 (delta)
+mask-unread-arg-axiom-bad	reject	-	an axiom function: K 1 against K 2
+mask-unread-ctor-param-bad	reject	-	constructor parameters differ: Prod.mk Nat Nat 1 2 is not compared equal to a pair with other fields
+mask-theorem-args-bad	reject	-	two applications of a theorem-valued function to different data compared as data through a wrapper
+probe-b1-rec-proof-major-bad	reject	probes	B1 (same-head probe on a recursor): And.rec f (And.intro ..) against And.rec f h, h an axiom. The arguments are pairwise convertible (proof irrelevance) but the official kernel reduces the left side to 5 and leaves the right stuck
+probe-b1-rec-proof-major-flipped-bad	reject	probes	the same with the stuck side on the left
+probe-b1-rec-proof-major-ok	accept	-	twin: And.rec f h against And.rec f h2, both stuck: the official kernel compares the arguments
+probe-b12-closure-proof-slot-bad	reject	probes	B12 (closure congruence): the same body g (And.rec f #0) under frames [And.intro ..] and [h]: the slots are convertible by proof irrelevance, the instantiated terms are not convertible for the official kernel
+probe-b12-let-proof-slot-bad	reject	probes	B12 with let: let x := And.intro ..; g (And.rec f x) against let x := h; g (And.rec f x)
+probe-b12-lam-closure-proof-slot-bad	reject	probes	B12 on LAM closures: fun n => And.rec f x under [And.intro ..] and under [h], below a constructor
+probe-b1-def-proof-arg-ok	accept	-	same-head definitions with convertible arguments: the official kernel compares arguments first
+probe-b1-abbrev-proof-arg	reject	probes	same-head ABBREV definitions with convertible arguments: no argument comparison in the official lazy delta step for abbrev (to be confirmed by the official verdict)
+probe-b1-theorem-head	reject	probes	same-head probe where the head is a THEOREM-like opaque-hint definition (to be confirmed by the official verdict)
+probe-b1-rec-under-ctor-bad	reject	probes	the recursor pair below a constructor: Nat.succ (And.rec f (And.intro ..)) against Nat.succ (And.rec f h)
+probe-b1-rec-under-axiom-bad	reject	probes	the recursor pair below an axiom function
+facts-agreement-noncongruent-app-bad	reject	facts,probes	B3 (agreement rule): w : (x : And True True) -> Q (And.rec f x) -> Nat; w (And.intro ..) p1 against w h p2. Both positions are proof positions; the official kernel compares p1 and p2 by their types, which it cannot show convertible (And.rec f (And.intro ..) reduces to 5, And.rec f h is stuck)
+facts-agreement-congruent-ok	accept	-	twin: w h p2 against w h2 p3 with both recursors stuck: the official kernel compares the types argument-wise
+facts-agreement-noncongruent-samedef-bad	reject	facts,probes	B3 under SAMEDEF: the same with w an opaque-bodied definition whose unfolding does not help (it calls an axiom with both arguments)
+facts-etas-prop-mask-noncongruent-bad	reject	facts,probes	the Prop mask of structure eta: S.mk (And.intro ..) p1 against an axiom s : S, where the proof field of s has a type the official kernel cannot show convertible to the type of p1
+facts-etas-prop-mask-data-bad	reject	-	the Prop mask of structure eta must not skip the data field: S.mk s.1 s.2 7 against s
+facts-static-proof-wrong-type-bad	reject	-	B7 (static PROOF): two proofs of DIFFERENT propositions below a function that takes any proposition: g P p against g Q q
+facts-prop-position-dependent-on-data-bad	reject	-	B3: a proof position whose proposition depends on a DATA position that differs: v 1 (pf 1) against v 2 (pf 2), v : (n : Nat) -> Q n -> Nat
+facts-unread-then-prop-bad	reject	-	B4 + B3: a definition that does not read its first parameter but whose proof parameter depends on it; the body keeps the second and third: d 1 p 5 against d 2 q 6
+facts-unread-opaque-head-bad	reject	-	B4: UNREAD must not be used for an opaque constant: o 1 against o 2
+facts-unread-partial-app-bad	reject	-	B4: an under-applied definition: K2 1 against K2 2 as functions is fine, but an axiom applied to them must compare them; here the bodies differ
+facts-unread-second-read-first-bad	reject	-	B4: K2 a b := a: K2 1 7 against K2 2 7 (the READ position differs)
+facts-unread-overapplied-bad	reject	-	B4: K1 a := fun b => b (reads nothing of a) over-applied: K1 0 1 against K1 0 2
+nat-boundaries-ok	accept	-	true arithmetic and literal identities across the 2^31 / 2^63 / 2^64 representation boundaries
+nat-add-imm-edge-0-bad	reject	-	false arithmetic claim add-imm-edge = 0
+nat-add-imm-edge-1-bad	reject	-	false arithmetic claim add-imm-edge = 2147483647
+nat-add-imm-edge-2-bad	reject	-	false arithmetic claim add-imm-edge = 4294967296
+nat-add-u32-edge-0-bad	reject	-	false arithmetic claim add-u32-edge = 0
+nat-add-u32-edge-1-bad	reject	-	false arithmetic claim add-u32-edge = 4294967295
+nat-mul-u32-0-bad	reject	-	false arithmetic claim mul-u32 = 0
+nat-mul-u64-0-bad	reject	-	false arithmetic claim mul-u64 = 0
+nat-mul-u64-1-bad	reject	-	false arithmetic claim mul-u64 = 18446744073709551615
+nat-add-i64-edge-0-bad	reject	-	false arithmetic claim add-i64-edge = 0
+nat-add-i64-edge-1-bad	reject	-	false arithmetic claim add-i64-edge = 9223372036854775807
+nat-add-u64-edge-0-bad	reject	-	false arithmetic claim add-u64-edge = 0
+nat-add-u64-edge-1-bad	reject	-	false arithmetic claim add-u64-edge = 18446744073709551615
+nat-sub-trunc-0-bad	reject	-	false arithmetic claim sub-trunc = 18446744073709551614
+nat-sub-trunc-1-bad	reject	-	false arithmetic claim sub-trunc = 4294967294
+nat-sub-trunc-2-bad	reject	-	false arithmetic claim sub-trunc = 2147483646
+nat-sub-trunc-3-bad	reject	-	false arithmetic claim sub-trunc = 2
+nat-sub-zero-0-bad	reject	-	false arithmetic claim sub-zero = 2147483647
+nat-sub-zero-1-bad	reject	-	false arithmetic claim sub-zero = 4294967295
+nat-sub-zero-2-bad	reject	-	false arithmetic claim sub-zero = 18446744073709551615
+nat-sub-big-0-bad	reject	-	false arithmetic claim sub-big = 18446744073709551616
+nat-sub-big-1-bad	reject	-	false arithmetic claim sub-big = 0
+nat-sub-imm-edge-0-bad	reject	-	false arithmetic claim sub-imm-edge = 2147483648
+nat-pow-64-0-bad	reject	-	false arithmetic claim pow-64 = 0
+nat-pow-32-0-bad	reject	-	false arithmetic claim pow-32 = 0
+nat-pow-31-0-bad	reject	-	false arithmetic claim pow-31 = 0
+nat-pow-31-1-bad	reject	-	false arithmetic claim pow-31 = 2147483647
+nat-pow-0-0-0-bad	reject	-	false arithmetic claim pow-0-0 = 0
+nat-div-zero-0-bad	reject	-	false arithmetic claim div-zero = 7
+nat-mod-zero-0-bad	reject	-	false arithmetic claim mod-zero = 0
+nat-div-big-0-bad	reject	-	false arithmetic claim div-big = 0
+nat-mod-big-0-bad	reject	-	false arithmetic claim mod-big = 0
+nat-succ-imm-edge-0-bad	reject	-	false arithmetic claim succ-imm-edge = 0
+nat-succ-imm-edge-1-bad	reject	-	false arithmetic claim succ-imm-edge = 2147483647
+nat-succ-u32-edge-0-bad	reject	-	false arithmetic claim succ-u32-edge = 0
+nat-succ-i64-edge-0-bad	reject	-	false arithmetic claim succ-i64-edge = 0
+nat-succ-u64-edge-0-bad	reject	-	false arithmetic claim succ-u64-edge = 0
+nat-succ-u64-edge-1-bad	reject	-	false arithmetic claim succ-u64-edge = 18446744073709551615
+nat-succ-succ-zero-0-bad	reject	-	false arithmetic claim succ-succ-zero = 1
+nat-succ-succ-zero-1-bad	reject	-	false arithmetic claim succ-succ-zero = 3
+nat-zero-ctor-0-bad	reject	-	false arithmetic claim zero-ctor = 1
+nat-succ-zero-0-bad	reject	-	false arithmetic claim succ-zero = 0
+nat-succ-zero-1-bad	reject	-	false arithmetic claim succ-zero = 2
+nat-lit-distinct-0-bad	reject	-	two different literals claimed equal: 4294967296 = 0
+nat-lit-distinct-0-flipped-bad	reject	-	two different literals claimed equal: 0 = 4294967296
+nat-lit-distinct-1-bad	reject	-	two different literals claimed equal: 2147483648 = 0
+nat-lit-distinct-1-flipped-bad	reject	-	two different literals claimed equal: 0 = 2147483648
+nat-lit-distinct-2-bad	reject	-	two different literals claimed equal: 18446744073709551616 = 0
+nat-lit-distinct-2-flipped-bad	reject	-	two different literals claimed equal: 0 = 18446744073709551616
+nat-lit-distinct-3-bad	reject	-	two different literals claimed equal: 18446744073709551617 = 1
+nat-lit-distinct-3-flipped-bad	reject	-	two different literals claimed equal: 1 = 18446744073709551617
+nat-lit-distinct-4-bad	reject	-	two different literals claimed equal: 9223372036854775808 = 0
+nat-lit-distinct-4-flipped-bad	reject	-	two different literals claimed equal: 0 = 9223372036854775808
+nat-lit-distinct-5-bad	reject	-	two different literals claimed equal: 2147483647 = 4294967295
+nat-lit-distinct-5-flipped-bad	reject	-	two different literals claimed equal: 4294967295 = 2147483647
+nat-lit-distinct-6-bad	reject	-	two different literals claimed equal: 4294967295 = 18446744073709551615
+nat-lit-distinct-6-flipped-bad	reject	-	two different literals claimed equal: 18446744073709551615 = 4294967295
+nat-lit-distinct-7-bad	reject	-	two different literals claimed equal: 2147483653 = 5
+nat-lit-distinct-7-flipped-bad	reject	-	two different literals claimed equal: 5 = 2147483653
+nat-lit-distinct-8-bad	reject	-	two different literals claimed equal: 4294967301 = 5
+nat-lit-distinct-8-flipped-bad	reject	-	two different literals claimed equal: 5 = 4294967301
+nat-lit-distinct-9-bad	reject	-	two different literals claimed equal: 9223372036854775813 = 5
+nat-lit-distinct-9-flipped-bad	reject	-	two different literals claimed equal: 5 = 9223372036854775813
+nat-lit-distinct-10-bad	reject	-	two different literals claimed equal: 18446744078004518912 = 4294967296
+nat-lit-distinct-10-flipped-bad	reject	-	two different literals claimed equal: 4294967296 = 18446744078004518912
+nat-lit-distinct-11-bad	reject	-	two different literals claimed equal: 1180591620717411303424 = 1180591620717411303425
+nat-lit-distinct-11-flipped-bad	reject	-	two different literals claimed equal: 1180591620717411303425 = 1180591620717411303424
+nat-lit-distinct-12-bad	reject	-	two different literals claimed equal: 1606938044258990275541962092341162602522202993782792835301376 = 1606938044258990275541962092342430253122431223184289538506752
+nat-lit-distinct-12-flipped-bad	reject	-	two different literals claimed equal: 1606938044258990275541962092342430253122431223184289538506752 = 1606938044258990275541962092341162602522202993782792835301376
+nat-lit-distinct-13-bad	reject	-	two different literals claimed equal: 2147483647 = 2147483648
+nat-lit-distinct-13-flipped-bad	reject	-	two different literals claimed equal: 2147483648 = 2147483647
+nat-lit-distinct-14-bad	reject	-	two different literals claimed equal: 9223372036854775807 = 9223372036854775808
+nat-lit-distinct-14-flipped-bad	reject	-	two different literals claimed equal: 9223372036854775808 = 9223372036854775807
+nat-bool-0-bad	reject	-	false claim Nat.beq 4294967296 0 = true
+nat-bool-1-bad	reject	-	false claim Nat.ble 4294967296 5 = true
+nat-bool-2-bad	reject	-	false claim Nat.beq 2147483648 0 = true
+nat-bool-3-bad	reject	-	false claim Nat.ble 2147483648 2147483647 = true
+nat-bool-4-bad	reject	-	false claim Nat.beq 18446744073709551616 18446744073709551616 = false
+nat-bool-5-bad	reject	-	false claim Nat.ble 5 4294967296 = false
+nat-bool-6-bad	reject	-	false claim Nat.beq 18446744073709551617 1 = true
+nat-bool-7-bad	reject	-	false claim Nat.ble 18446744073709551616 18446744073709551615 = true
+nat-bool-8-bad	reject	-	false claim Nat.beq 2147483647 4294967295 = true
+nat-succ-offsets-ok	accept	-	Nat.succ offsets over a variable: reflexive and literal-view identities
+nat-succ-n-vs-succ-n-bad	reject	-	false claim about Nat.succ offsets: n-vs-succ-n
+nat-succ-n-vs-succ-n-flipped-bad	reject	-	the same, sides exchanged: n-vs-succ-n
+nat-succ-succ2-vs-succ1-bad	reject	-	false claim about Nat.succ offsets: succ2-vs-succ1
+nat-succ-succ2-vs-succ1-flipped-bad	reject	-	the same, sides exchanged: succ2-vs-succ1
+nat-succ-succ3-vs-succ2-bad	reject	-	false claim about Nat.succ offsets: succ3-vs-succ2
+nat-succ-succ3-vs-succ2-flipped-bad	reject	-	the same, sides exchanged: succ3-vs-succ2
+nat-succ-succ-n-vs-one-bad	reject	-	false claim about Nat.succ offsets: succ-n-vs-one
+nat-succ-succ-n-vs-one-flipped-bad	reject	-	the same, sides exchanged: succ-n-vs-one
+nat-succ-succ-n-vs-zero-bad	reject	-	false claim about Nat.succ offsets: succ-n-vs-zero
+nat-succ-succ-n-vs-zero-flipped-bad	reject	-	the same, sides exchanged: succ-n-vs-zero
+nat-succ-succ-n-vs-lit-zero-bad	reject	-	false claim about Nat.succ offsets: succ-n-vs-lit-zero
+nat-succ-succ-n-vs-lit-zero-flipped-bad	reject	-	the same, sides exchanged: succ-n-vs-lit-zero
+nat-succ-succ-n-vs-succ-k-bad	reject	-	false claim about Nat.succ offsets: succ-n-vs-succ-k
+nat-succ-succ-n-vs-succ-k-flipped-bad	reject	-	the same, sides exchanged: succ-n-vs-succ-k
+nat-succ-succ2-n-vs-succ2-k-bad	reject	-	false claim about Nat.succ offsets: succ2-n-vs-succ2-k
+nat-succ-succ2-n-vs-succ2-k-flipped-bad	reject	-	the same, sides exchanged: succ2-n-vs-succ2-k
+nat-succ-n-vs-zero-bad	reject	-	false claim about Nat.succ offsets: n-vs-zero
+nat-succ-n-vs-zero-flipped-bad	reject	-	the same, sides exchanged: n-vs-zero
+nat-succ-add-n-1-vs-n-bad	reject	-	false claim about Nat.succ offsets: add-n-1-vs-n
+nat-succ-add-n-1-vs-n-flipped-bad	reject	-	the same, sides exchanged: add-n-1-vs-n
+nat-succ-add-n-2-vs-succ-n-bad	reject	-	false claim about Nat.succ offsets: add-n-2-vs-succ-n
+nat-succ-add-n-2-vs-succ-n-flipped-bad	reject	-	the same, sides exchanged: add-n-2-vs-succ-n
+nat-succ-succ-n-vs-big-bad	reject	-	false claim about Nat.succ offsets: succ-n-vs-big
+nat-succ-succ-n-vs-big-flipped-bad	reject	-	the same, sides exchanged: succ-n-vs-big
+nat-succ-one-vs-zero-ctor-bad	reject	-	false claim about Nat.succ offsets: one-vs-zero-ctor
+nat-succ-one-vs-zero-ctor-flipped-bad	reject	-	the same, sides exchanged: one-vs-zero-ctor
+nat-succ-succ-zero-vs-two-bad	reject	-	false claim about Nat.succ offsets: succ-zero-vs-two
+nat-succ-succ-zero-vs-two-flipped-bad	reject	-	the same, sides exchanged: succ-zero-vs-two
+nat-succ-zero-lit-vs-succ-zero-bad	reject	-	false claim about Nat.succ offsets: zero-lit-vs-succ-zero
+nat-succ-zero-lit-vs-succ-zero-flipped-bad	reject	-	the same, sides exchanged: zero-lit-vs-succ-zero
+nat-succ-succ-u64max-vs-u64max-bad	reject	-	false claim about Nat.succ offsets: succ-u64max-vs-u64max
+nat-succ-succ-u64max-vs-u64max-flipped-bad	reject	-	the same, sides exchanged: succ-u64max-vs-u64max
+nat-succ-succ3-lit-vs-wrong-bad	reject	-	false claim about Nat.succ offsets: succ3-lit-vs-wrong
+nat-succ-succ3-lit-vs-wrong-flipped-bad	reject	-	the same, sides exchanged: succ3-lit-vs-wrong
+str-lit-ok	accept	-	string literals against String.ofList of their code points; equal literals with different ids
+str-lit-distinct-0-bad	reject	-	two different string literals claimed equal: 'a' = 'b'
+str-lit-missing-prerequisites-bad	reject	decline	two different string literals claimed equal in an export that does not declare String.ofList / Char.ofNat: the official checker rejects (literals differ); the pipeline declines by design (UNSUPPORTED_PRELUDE)
+str-lit-expand-5-flipped-bad	reject	-	String.ofList of the code points of '😁' against the literal '😀'
+k1-trees-ok	accept	-	case trees, CASESON, leaves, over-application, LEAF shapes, structure iota: 40 true claims, twice
+k1-pred-5-bad	reject	-	K1 roles: false claim pred-5 after 40 true uses of the same definitions
+k1-pred-0-bad	reject	-	K1 roles: false claim pred-0 after 40 true uses of the same definitions
+k1-pred-big-bad	reject	-	K1 roles: false claim pred-big after 40 true uses of the same definitions
+k1-pred-p31-bad	reject	-	K1 roles: false claim pred-p31 after 40 true uses of the same definitions
+k1-pred-p32-bad	reject	-	K1 roles: false claim pred-p32 after 40 true uses of the same definitions
+k1-pred-p64-bad	reject	-	K1 roles: false claim pred-p64 after 40 true uses of the same definitions
+k1-pred-succ-n-bad	reject	-	K1 roles: false claim pred-succ-n after 40 true uses of the same definitions
+k1-pred-n-bad	reject	-	K1 roles: false claim pred-n after 40 true uses of the same definitions
+k1-iszero-big-bad	reject	-	K1 roles: false claim iszero-big after 40 true uses of the same definitions
+k1-iszero-zero-bad	reject	-	K1 roles: false claim iszero-zero after 40 true uses of the same definitions
+k1-iszero-n-bad	reject	-	K1 roles: false claim iszero-n after 40 true uses of the same definitions
+k1-two-00-bad	reject	-	K1 roles: false claim two-00 after 40 true uses of the same definitions
+k1-two-05-bad	reject	-	K1 roles: false claim two-05 after 40 true uses of the same definitions
+k1-two-30-bad	reject	-	K1 roles: false claim two-30 after 40 true uses of the same definitions
+k1-two-35-bad	reject	-	K1 roles: false claim two-35 after 40 true uses of the same definitions
+k1-two-swapped-bad	reject	-	K1 roles: false claim two-swapped after 40 true uses of the same definitions
+k1-three-3-bad	reject	-	K1 roles: false claim three-3 after 40 true uses of the same definitions
+k1-three-10-bad	reject	-	K1 roles: false claim three-10 after 40 true uses of the same definitions
+k1-three-2-bad	reject	-	K1 roles: false claim three-2 after 40 true uses of the same definitions
+k1-three-big-bad	reject	-	K1 roles: false claim three-big after 40 true uses of the same definitions
+k1-cases-0-bad	reject	-	K1 roles: false claim cases-0 after 40 true uses of the same definitions
+k1-cases-9-bad	reject	-	K1 roles: false claim cases-9 after 40 true uses of the same definitions
+k1-double-4-bad	reject	-	K1 roles: false claim double-4 after 40 true uses of the same definitions
+k1-leaf-3-bad	reject	-	K1 roles: false claim leaf-3 after 40 true uses of the same definitions
+k1-leaf-0-bad	reject	-	K1 roles: false claim leaf-0 after 40 true uses of the same definitions
+k1-over-true-bad	reject	-	K1 roles: false claim over-true after 40 true uses of the same definitions
+k1-over-false-bad	reject	-	K1 roles: false claim over-false after 40 true uses of the same definitions
+k1-fst-mk-bad	reject	-	K1 roles: false claim fst-mk after 40 true uses of the same definitions
+k1-snd-mk-bad	reject	-	K1 roles: false claim snd-mk after 40 true uses of the same definitions
+k1-pick-bad	reject	-	K1 roles: false claim pick after 40 true uses of the same definitions
+k1-swap-once-bad	reject	-	K1 roles: false claim swap-once after 40 true uses of the same definitions
+k1-fst-swap-bad	reject	-	K1 roles: false claim fst-swap after 40 true uses of the same definitions
+k1-families-ok	accept	-	case trees on an enumeration and on an indexed family with a parameter: true claims, three times
+k1-fam-rot-r-bad	reject	-	K1 roles on families: false claim rot-r
+k1-fam-rot-g-bad	reject	-	K1 roles on families: false claim rot-g
+k1-fam-rot-b-bad	reject	-	K1 roles on families: false claim rot-b
+k1-fam-rot-twice-bad	reject	-	K1 roles on families: false claim rot-twice
+k1-fam-hd-nil-bad	reject	-	K1 roles on families: false claim hd-nil
+k1-fam-hd-v1-bad	reject	-	K1 roles on families: false claim hd-v1
+k1-fam-hd-v2-bad	reject	-	K1 roles on families: false claim hd-v2
+k1-fam-len-v2-bad	reject	-	K1 roles on families: false claim len-v2
+k1-fam-len-nil-bad	reject	-	K1 roles on families: false claim len-nil
+tele-ok	accept	-	TELE: applications of constants with dependent telescopes, each well-typed argument list 12 times
+tele-dep-proof-wrong-index-bad	reject	-	TELE / domain patterns: ill-typed argument list dep-proof-wrong-index
+tele-dep-value-wrong-type-bad	reject	-	TELE / domain patterns: ill-typed argument list dep-value-wrong-type
+tele-dep-pred-wrong-domain-bad	reject	-	TELE / domain patterns: ill-typed argument list dep-pred-wrong-domain
+tele-level-arg-type-bad	reject	-	TELE / domain patterns: ill-typed argument list level-arg-type
+tele-level-sort-mismatch-bad	reject	-	TELE / domain patterns: ill-typed argument list level-sort-mismatch
+tele-const-level-pattern-bad	reject	-	TELE / domain patterns: ill-typed argument list const-level-pattern
+tele-const-level-pattern-2-bad	reject	-	TELE / domain patterns: ill-typed argument list const-level-pattern-2
+tele-prod-args-swapped-bad	reject	-	TELE / domain patterns: ill-typed argument list prod-args-swapped
+tele-prod-args-swapped-2-bad	reject	-	TELE / domain patterns: ill-typed argument list prod-args-swapped-2
+tele-prod-level-pattern-bad	reject	-	TELE / domain patterns: ill-typed argument list prod-level-pattern
+tele-closure-pattern-bad	reject	-	TELE / domain patterns: ill-typed argument list closure-pattern
+tele-closure-pattern-2-bad	reject	-	TELE / domain patterns: ill-typed argument list closure-pattern-2
+tele-too-many-args-bad	reject	-	TELE / domain patterns: ill-typed argument list too-many-args
+quot-lift-ok	accept	-	Quot.lift f h (Quot.mk r a) reduces to f a
+quot-lift-wrong-arg-bad	reject	-	Quot.lift f h (Quot.mk r 1) claimed to be f 2
+quot-lift-stuck-bad	reject	-	Quot.lift f h q with q an axiom claimed to be f 0
+quot-mk-distinct-bad	reject	-	Quot.mk r 1 claimed equal to Quot.mk r 2 (no Quot.sound by conversion)
+facts-unread-noncongruent-bad	reject	facts	B4 (unread position under SAMEDEF): d (u : Nat) (x : And True True) : Nat := And.rec f x; d 0 (And.intro ..) against d 1 h. The official argument comparison fails on 0 / 1, both sides unfold, and 5 against a stuck recursor is false; skipping the unread position and comparing the proofs answers T
+facts-unread-congruent-ok	accept	-	twin: d 0 h against d 1 h: the unread position differs, both sides unfold to the same stuck term
+nontransitive-regular-def-ok	accept	-	the official same-head argument comparison for a REGULAR definition: d (And.intro ..) against d h is accepted, and d (And.intro ..) against 5 is accepted (unfolding)
+nontransitive-regular-def-bad	reject	-	the official relation is not transitive: d h against 5 is rejected although d h = d (And.intro ..) = 5 are both accepted; a pair table or a union of accepted pairs must not close them transitively (warm sessions keep the pairs)
+nontransitive-same-decl-bad	reject	-	the same inside ONE declaration: a pair of proofs first makes the kernel accept d (And.intro ..) = d h and d (And.intro ..) = 5, then d h = 5 is needed
+nontransitive-same-decl-ok	accept	-	twin: only the two accepted equations in one declaration
+arena-imax-right-successor	reject	levels	arena corner case (either): universe levels the official normal form does not identify; the complete relation accepts (owner note 11: official by default)
+arena-imax-nested-absorption	reject	levels	arena corner case (either): universe levels the official normal form does not identify; the complete relation accepts (owner note 11: official by default)

@@ -16,6 +16,10 @@ import java.util.Arrays;
  *                                    -> work/status/machine-frames-NAME.txt          exit 1 above the bound
  * M8Main sample NAME [FILE_OR_DIR..] whnf / infer of the machine read back and compared by the reference kernel
  *                                    -> work/status/machine-sample-NAME.txt          exit 1 on a difference
+ * M8Main gate NAME|- [CORPUS..]      THE GATE for the switch set -Dm8.switches (M8Gate): differential, tier and convention
+ *                                    equivalence, debug audits, the pipeline -> work/status/machine-gate-NAME.md
+ * M8Main mutants -                   the mutant corpora with the machine (M8Mutants; -Dm8.mutants.sets="v0;warm,gated,expect")
+ *                                    -> work/status/machine-mutants.md
  * M8Main tiers NAME [FILE_OR_DIR..]  K0 against the tier -Dm8.k1=facts,tele,code,casetrees: DELTA, WHNF, VTYPE, CONV on
  *                                    generated applications of every constant (ISA section 11 "tier equivalence")
  *                                    -> work/status/machine-tiers-NAME.txt           exit 1 on a difference
@@ -36,7 +40,7 @@ final class M8Main {
         String cmd = args[0];
         String label = args[1];
         String[] roots = args.length > 2 ? Arrays.copyOfRange(args, 2, args.length) : Diff.corpus(label);
-        if (roots == null) {
+        if (roots == null && !cmd.equals("gate") && !cmd.equals("mutants")) {
             System.err.println("M8Main: unknown corpus '" + label + "' and no file or directory given");
             System.exit(2);
         }
@@ -64,6 +68,22 @@ final class M8Main {
             case "tiers":
                 status = M8Tiers.report(label, roots) ? 0 : 1;
                 break;
+            case "mutants":
+                status = M8Mutants.report() ? 0 : 1;
+                break;
+            case "gate": {
+                // label = the report's name; the corpora, switches and parts come from system properties
+                M8Gate.Plan plan = M8Gate.planFromProperties();
+                if (!label.equals("-")) {
+                    plan.name = Diff.reportName(label);
+                }
+                if (args.length > 2) {
+                    plan.corpora = new java.util.ArrayList<>(Arrays.asList(Arrays.copyOfRange(args, 2, args.length)));
+                }
+                plan.command = System.getProperty("m8.command", "M8Main " + String.join(" ", args));
+                status = M8Gate.report(plan).pass() ? 0 : 1;
+                break;
+            }
             default:
                 usage();
                 return;
@@ -74,7 +94,7 @@ final class M8Main {
     }
 
     private static void usage() {
-        System.err.println("usage: M8Main diff|conv|frames|sample|tiers NAME [FILE_OR_DIR..]   (see the class comment; report.sh --help)");
+        System.err.println("usage: M8Main diff|conv|frames|sample|tiers|gate|mutants NAME [FILE_OR_DIR..]   (see the class comment; report.sh --help)");
         System.exit(2);
     }
 }

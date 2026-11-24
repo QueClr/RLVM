@@ -198,6 +198,69 @@ class OverlayTest {
         assertThrows(IllegalArgumentException.class, () -> ov.resetTo(((long) 1 << 40) | 5));
     }
 
+    /**
+     * A return to a mark with many decoded blocks below it and more than eight times as many above:
+     * the block map is rebuilt smaller, for the blocks that stay. With 64 or more blocks below the
+     * mark the rebuilt map had 64 slots and the insertion never ended (rlvm-admit, 2026-11-24).
+     */
+    @Test
+    @org.junit.jupiter.api.Timeout(120)
+    void resetToRebuildsTheBlockMapForTheBlocksBelowTheMark() {
+        Model fx = new Model();
+        fx.declareLiteralPrerequisites(true);
+        Segs segs = new Segs(fx);
+        Random rnd = new Random(11);
+        List<Integer> blocks = new ArrayList<>();
+        for (int i = 0; i < 1500; i++) {
+            List<M> ty = fx.random(rnd, gen(4));
+            List<M> val = fx.random(rnd, gen(6));
+            List<M> nodes = new ArrayList<>(ty);
+            nodes.addAll(val);
+            Segs.Seg s = segs.write(DeclKind.THM, fx.name("t" + i), 0, nodes, ty.get(ty.size() - 1), val.get(val.size() - 1));
+            if (s.block >= 0) {
+                blocks.add(s.block);
+            }
+        }
+        fx.builder.finish();
+        assertTrue(blocks.size() > 1300, "blocks: " + blocks.size());
+        Overlay o = new Overlay(fx.store, fx.store.lists(), 1L << 28);
+        Terms t = new Terms(fx.store.terms(), o);
+        for (int below : new int[] {0, 1, 31, 32, 33, 63, 64, 65, 100, 127, 128, 129, 150}) {
+            o.reset();
+            int[] roots = new int[below];
+            long[] digests = new long[below];
+            for (int i = 0; i < below; i++) {
+                roots[i] = o.blockRoot(blocks.get(i));
+                digests[i] = fx.digest(t, roots[i]);
+            }
+            long mark = o.mark();
+            int count = o.nodeCount();
+            for (int i = below; i < blocks.size(); i++) {
+                o.blockRoot(blocks.get(i));
+            }
+            assertTrue(o.nodeCount() > count);
+            o.resetTo(mark);
+            assertEquals(count, o.nodeCount(), below + " blocks below the mark");
+            for (int i = 0; i < below; i++) {
+                assertEquals(roots[i], o.blockRoot(blocks.get(i)), "block " + i + " of " + below + " is still decoded");
+                assertEquals(digests[i], fx.digest(t, roots[i]));
+            }
+            assertEquals(count, o.nodeCount(), "the blocks below the mark are found, not decoded again");
+            // a block above the mark is decoded again, and found afterwards
+            int last = blocks.get(blocks.size() - 1);
+            int again = o.blockRoot(last);
+            assertTrue(o.nodeCount() > count);
+            assertEquals(again, o.blockRoot(last));
+            // the map keeps working when it grows again
+            for (int i = below; i < blocks.size(); i++) {
+                o.blockRoot(blocks.get(i));
+            }
+            for (int i = 0; i < below; i++) {
+                assertEquals(roots[i], o.blockRoot(blocks.get(i)));
+            }
+        }
+    }
+
     /** A chain of {@code steps} applications over fresh literals: 2 nodes per step, none shared with earlier chains. */
     private static int chain(Overlay o, int head, int from, int steps) {
         int cur = head;

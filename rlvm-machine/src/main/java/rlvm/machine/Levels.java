@@ -4,6 +4,7 @@ import static rlvm.machine.Op.SIG;
 
 import rlvm.api.LevelOps;
 import rlvm.api.MachineErrors;
+import rlvm.store.IntLists;
 
 /**
  * Universe levels in the machine (ISA 2.7): substitution ids, {@code LSUB}, {@code LVLEQ}, the import
@@ -78,21 +79,50 @@ final class Levels {
     }
 
     /**
-     * LVLEQ on two levels (ISA 4.4): equal ids, else {@code LevelOps.isEquiv} (R02 3.4-3.6). Never by id alone.
+     * LVLEQ on two levels (ISA 4.4): equal ids, else the official {@code is_equivalent}
+     * ({@code l1 == l2 || normalize(l1) == normalize(l2)}, level.cpp; R02 3.4-3.6): identity of the official
+     * normal forms, sound and incomplete. Never by id alone.
+     *
+     * <p>Owner decision of 2026-11-24 (OWNER-NOTES item 11): levels are compared as the official kernel
+     * compares them by default, in both engines; the complete relation of {@code rlvm-level}'s canonical forms
+     * ({@code LevelOps.isEquiv}, a superset) only with the switch {@code levels-complete}
+     * ({@code Op.SW_LEVELS_COMPLETE}; never in strict mode). This mirrors {@code RefKernel.levelEquiv}. The two
+     * callers are the official ones: two sorts, and the level lists of two references to one constant
+     * ({@link #listsEq}).
      */
     static boolean lvlEq(Machine m, int a, int b) {
-        return a == b || m.levels.isEquiv(a, b);
+        if (a == b) {
+            return true;
+        }
+        return (m.sw & Op.SW_LEVELS_COMPLETE) != 0 ? m.levels.isEquiv(a, b) : m.levels.isEquivOfficial(a, b);
     }
 
     /**
-     * LVLEQ on two level lists: equal length and pairwise equivalent.
+     * LVLEQ on two level lists: equal length and pairwise {@link #lvlEq} (official {@code is_def_eq(levels,
+     * levels)}; {@code RefKernel.levelsEquiv}).
      */
     static boolean listsEq(Machine m, int a, int b) {
         if (a == b) {
             return true;
         }
+        IntLists ls = m.lists;
+        int na = a == IntLists.EMPTY ? 0 : ls.length(a);
+        int nb = b == IntLists.EMPTY ? 0 : ls.length(b);
+        if (na != nb) {
+            return false;
+        }
+        if ((m.sw & Op.SW_LEVELS_COMPLETE) != 0) {
+            return m.levels.listsEquiv(a, b);
+        }
         LevelOps lv = m.levels;
-        return m.lists.length(a) == m.lists.length(b) && lv.listsEquiv(a, b);
+        for (int i = 0; i < na; i++) {
+            int x = ls.get(a, i);
+            int y = ls.get(b, i);
+            if (x != y && !lv.isEquivOfficial(x, y)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------------

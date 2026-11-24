@@ -77,10 +77,11 @@ class M1RunsTest {
         // FGET: de Bruijn index 0 is the innermost = the last slot
         assertEquals(b, Runs.fget(m, f1, 0));
         assertEquals(a, Runs.fget(m, f1, 1));
-        // the reference probe of the frozen format finds the same run, and Runs finds what it made
-        assertEquals(f1, TestTables.internRun(m, Layout.RUN_FRAME, 0, a, b));
-        int viaRef = TestTables.internRun(m, Layout.RUN_FRAME, 0, b, b, a);
-        assertEquals(viaRef, Runs.frame(m, scratch(m, b, b, a), 3, 0));
+        // the header of a FRAME carries the number of slots that are not HOLE (NOTES-M1 D16); the length, kind
+        // and far bit read as before
+        assertEquals(2, (m.rs[f1] & Runs.CNT_MASK) >>> Runs.CNT_SHIFT);
+        assertEquals(2, Layout.runLen(m.rs[f1]));
+        assertEquals(2, Layout.runHeaderWords(m.rs[f1]));
         // a REST run with the same slots is another run (the kind is part of the content hash)
         int rest = Runs.restRun(m, scratch(m, a, b), 2);
         assertNotEquals(f1, rest);
@@ -429,6 +430,209 @@ class M1RunsTest {
         java.util.HashSet<Integer> ids = new java.util.HashSet<>(model.values());
         assertEquals(model.size(), ids.size(), "different contents, different runs");
         assertEquals(model.size() - 1, m.rtabUsed, "one rtab slot per frame (the empty frame has none)");
+    }
+
+    /**
+     * I-ID of frames under the kept-slot probe (NOTES-M1 D16): PRUNE, FRAME over the dense slots and PRUNE of the
+     * entered frame give one id for one content and different ids for different contents - with HOLE at kept
+     * positions (the placeholder of an unread binder that the mask over-approximates), with 15 and more kept
+     * bindings (the saturated count: slot-by-slot comparison), with values that differ only in position, and
+     * with far frames. Checked against a model keyed by the dense content.
+     */
+    @Test
+    void keptSlotProbeKeepsIdentityExactly() {
+        Machine m = tiny();
+        Random rnd = new Random(20261124);
+        java.util.HashMap<String, Integer> model = new java.util.HashMap<>();
+        int ty = Values.mkSort(m, 2);
+        int[] pool = new int[9];
+        for (int i = 0; i < 6; i++) {
+            pool[i] = i < 3 ? Layout.imm(i) : Values.mkFVar(m, ty, i);
+        }
+        pool[6] = Layout.HOLE; // an environment slot may hold the placeholder
+        pool[7] = Layout.HOLE;
+        pool[8] = Layout.imm(Integer.MAX_VALUE);
+        int rounds = 0;
+        for (int round = 0; round < 6000; round++) {
+            m.ep = 0;
+            int en = round % 5 == 0 ? 64 + rnd.nextInt(80) : rnd.nextInt(64);
+            int[] vs = new int[en];
+            for (int i = 0; i < en; i++) {
+                vs[i] = pool[rnd.nextInt(round % 3 == 0 ? 3 : pool.length)];
+            }
+            int eb = env(m, vs);
+            long mask = rnd.nextLong();
+            switch (round % 4) {
+                case 0: mask &= rnd.nextLong() & rnd.nextLong(); break; // sparse
+                case 1: mask |= rnd.nextLong(); break;                  // dense: saturated counts
+                default: break;
+            }
+            if (en <= 63) {
+                mask &= en == 0 ? 0 : (1L << en) - 1;
+            } else if (round % 2 == 0) {
+                mask &= ~Layout.MASK_FAR;
+            }
+            int f = Runs.prune(m, eb, en, mask);
+            assertTrue(f < Op.SIG);
+            // the model: dense near slots + the outer bindings of a far frame
+            long near = mask & ~Layout.MASK_FAR;
+            boolean far = mask < 0 && en > 63;
+            int len = far ? 63 : 64 - Long.numberOfLeadingZeros(near);
+            int[] dense = new int[len];
+            StringBuilder key = new StringBuilder(far ? "far" : "near");
+            for (int j = 0; j < len; j++) {
+                int i = len - 1 - j;
+                dense[j] = (near >>> i & 1) != 0 ? vs[en - 1 - i] : Layout.HOLE;
+                key.append(',').append(dense[j]);
+            }
+            if (far) {
+                key.append('|');
+                for (int j = 0; j < en - 63; j++) {
+                    key.append(',').append(vs[j]);
+                }
+            }
+            if (len == 0) {
+                assertEquals(Layout.RUN_EMPTY, f);
+                continue;
+            }
+            rounds++;
+            assertArrayEquals(dense, slots(m, f));
+            int nonHole = 0;
+            for (int v : dense) {
+                nonHole += v != Layout.HOLE ? 1 : 0;
+            }
+            assertEquals(Math.min(nonHole, Runs.CNT_MAX), (m.rs[f] & Runs.CNT_MASK) >>> Runs.CNT_SHIFT, "count of the header");
+            Integer prev = model.put(key.toString(), f);
+            assertTrue(prev == null || prev == f, "equal contents, one run: " + key);
+            // FRAME over the dense slots is the same construction
+            int rest = far ? Runs.rest(m, f) : 0;
+            assertEquals(f, Runs.frame(m, scratch(m, dense), len, rest), "FRAME of the dense slots");
+            // PRUNE again (the REST cache answers a far one), and PRUNE of the entered frame
+            assertEquals(f, Runs.prune(m, eb, en, mask));
+            int n = Runs.enter(m, f);
+            assertEquals(f, Runs.prune(m, m.envBase, n, mask), "round trip through ENTER");
+            // a neighbour: one kept binding replaced, or one kept position less: never the same run
+            if (near != 0) {
+                int i = Long.numberOfTrailingZeros(near);
+                int[] ws = vs.clone();
+                ws[en - 1 - i] = vs[en - 1 - i] == Layout.imm(77) ? Layout.imm(78) : Layout.imm(77);
+                m.ep = 0;
+                int eb2 = env(m, ws);
+                assertNotEquals(f, Runs.prune(m, eb2, en, mask), "a kept binding differs");
+                if (vs[en - 1 - i] != Layout.HOLE) {
+                    assertNotEquals(f, Runs.prune(m, eb2, en, mask & ~(1L << i)), "a kept position less");
+                }
+            }
+        }
+        assertTrue(rounds > 5000);
+        java.util.HashSet<Integer> ids = new java.util.HashSet<>(model.values());
+        assertEquals(model.size(), ids.size(), "different contents, different runs");
+    }
+
+    /**
+     * The REST cache of far PRUNE is a hint that is verified by content: an environment slab that was cut and
+     * rewritten at the same base and length never gets the chain of the bindings that were there before.
+     */
+    @Test
+    void restCacheIsVerifiedByContent() {
+        Machine m = tiny();
+        long mask = Layout.MASK_FAR | 0b1L;
+        int total = 63 + 2 * Runs.REST_CHUNK + 5;
+        int[] vs = imms(3000, total);
+        int eb = env(m, vs);
+        int f = Runs.prune(m, eb, total, mask);
+        assertEquals(f, Runs.prune(m, eb, total, mask), "answered through the cache");
+        for (int at : new int[] {0, 63, Runs.REST_CHUNK, 2 * Runs.REST_CHUNK + 4}) {
+            // the same base and length, one outer binding rewritten in place: the cell is stale
+            int old = m.es[eb + at];
+            m.es[eb + at] = Layout.imm(9);
+            int g = Runs.prune(m, eb, total, mask);
+            assertNotEquals(f, g, "outer slot " + at + " was rewritten");
+            assertEquals(Layout.imm(9), Runs.arg(m, chunkOf(m, Runs.rest(m, g), at), at % Runs.REST_CHUNK));
+            m.es[eb + at] = old;
+            assertEquals(f, Runs.prune(m, eb, total, mask), "and back");
+        }
+        // a longer and a shorter environment at the same base
+        assertNotEquals(f, Runs.prune(m, eb, total - 1, mask));
+        assertEquals(f, Runs.prune(m, eb, total, mask));
+        // after a reset the cells of the old session are not used (another epoch), and the ids are fresh
+        m.reset();
+        eb = env(m, vs);
+        int f2 = Runs.prune(m, eb, total, mask);
+        assertTrue(f2 < Op.SIG);
+        assertEquals(total, Runs.envLen(m, f2));
+        assertEquals(vs[0], Runs.arg(m, chunkOf(m, Runs.rest(m, f2), 0), 0));
+    }
+
+    /** The chunk of the chain ending in {@code rest} that holds outer binding {@code at}. */
+    static int chunkOf(Machine m, int rest, int at) {
+        int n = Runs.restLen(m, rest);
+        int c = rest;
+        int hi = n;
+        for (;;) {
+            int lo = hi - Runs.len(m, c);
+            if (at >= lo) {
+                return c;
+            }
+            hi = lo;
+            c = Runs.rest(m, c);
+        }
+    }
+
+    /**
+     * The probe sequences stay short: the content hash of frames (a sum over the kept slots) and the hash of
+     * applications (a sum over the arguments) spread realistic keys - consecutive record ids at shifting
+     * positions - over the tables.
+     */
+    @Test
+    void hashesSpreadConsecutiveIdsAndShiftedPositions() {
+        Machine m = new Machine(Machine.Sizes.standard());
+        int ty = Values.mkSort(m, 2);
+        int[] xs = new int[40];
+        for (int i = 0; i < xs.length; i++) {
+            xs[i] = Values.mkFVar(m, ty, i);
+        }
+        java.util.HashSet<Integer> frames = new java.util.HashSet<>();
+        int eb = env(m, xs);
+        for (int hi = 0; hi < 40; hi++) {
+            for (int lo = 0; lo <= hi; lo++) {
+                for (int third = 0; third <= lo; third += 3) {
+                    frames.add(Runs.prune(m, eb, 40, 1L << hi | 1L << lo | 1L << third));
+                }
+            }
+        }
+        // displacement of every frame from its home slot in rtab
+        long steps = 0;
+        int[] tab = m.rtab;
+        for (int slot = 0; slot < tab.length; slot++) {
+            int e = tab[slot];
+            if (e != 0) {
+                int home = m.rs[(e & Layout.TAB_INDEX_MASK) + Layout.RUN_HASH] & (tab.length - 1);
+                steps += (slot - home) & (tab.length - 1);
+            }
+        }
+        assertTrue(steps < frames.size(), "frames: " + steps + " probe steps for " + frames.size() + " runs");
+        // applications of one head to (x_i, x_j) and (x_j, x_i), and to shifted windows of the variables
+        java.util.HashSet<Integer> neus = new java.util.HashSet<>();
+        for (int i = 0; i < 40; i++) {
+            for (int j = 0; j < 40; j++) {
+                neus.add(Values.mkNeu(m, xs[0], scratch(m, xs[i], xs[j]), 2));
+                neus.add(Values.mkNeu(m, xs[1], scratch(m, xs[i], xs[j], xs[(i + j) % 40]), 3));
+            }
+        }
+        assertEquals(3200, neus.size());
+        steps = 0;
+        tab = m.vtab;
+        int n = 0;
+        for (int slot = 0; slot < tab.length; slot++) {
+            int e = tab[slot];
+            if (e != 0) {
+                int home = Hash.ofRecord(m.vh, e & Layout.TAB_INDEX_MASK) & (tab.length - 1);
+                steps += (slot - home) & (tab.length - 1);
+                n++;
+            }
+        }
+        assertTrue(steps < n, "records: " + steps + " probe steps for " + n + " records");
     }
 
     @Test

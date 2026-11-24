@@ -65,6 +65,7 @@ h10/hotspot-inline.cmd	M6
 h10/native-image-args.sh	M6
 src/main/java/rlvm/machine/CodeShow.java	M7
 src/main/java/rlvm/machine/Tier.java	M7
+SWITCHES.md	M6
 src/test/java/rlvm/machine/M1*.java	M1
 src/test/java/rlvm/machine/M2*.java	M2
 src/test/java/rlvm/machine/M3*.java	M3

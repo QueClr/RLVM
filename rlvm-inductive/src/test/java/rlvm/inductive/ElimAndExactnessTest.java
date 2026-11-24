@@ -217,6 +217,8 @@ class ElimAndExactnessTest {
         e.freeze();
         e.kernel.syntactic = false;
         assertEquals(Reason.UNSUPPORTED_INPUT, assertThrows(ResourceException.class, () -> e.generate(t)).reason());
+        // every decline states its cause
+        assertTrue(e.admission.lastDeclineDetail().contains("weak-head normal form"), e.admission.lastDeclineDetail());
 
         // ... but not where whnf is the identity
         Env e2 = new Env();

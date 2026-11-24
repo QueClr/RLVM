@@ -774,9 +774,12 @@ and misses the cache more, so the cap is a locality setting and CPU time is the 
   long unit right after it, keeps the capacity that long (con-leche: unit 24018 is the last one its worker
   checks, 2.7 GB stay allocated to the end). An immediate give-back for very large lanes would be the
   refinement.
-- **Session cap** (`sessionBytes`, 16 MiB): without effect with the reference engine, whose sessions keep
-  nothing from one unit to the next. The sweep over 8 / 16 / 32 / 64 MiB that RECONCILIATION section 3 asks
-  for belongs to the machine engine ("once the machine runs Std"); `-X session-mib=N` is there for it.
+- **Session cap**: per engine since wave 7 (machine 4 MiB by the sweep in "Measured", others 16 MiB; without
+  effect with the reference engine, whose sessions keep nothing from one unit to the next). The table is keyed
+  by `Engine.name()` because `rlvm.api.Engine` cannot state a cap; `EngineProvider.runDefaults` (rlvm-api
+  13:34Z) lets a provider state `session-mib` through the wiring, which then wins. The sweep was made with the
+  machine jar of 12:47Z; the best cap follows the size of the machine's tables and has to be swept again when
+  those change (one command: `work/rlvm-driver/w7/sweep-cap2.sh`).
 - **Batch splitting**: workers start as soon as the first units are announced, so the first batches of a
   file are small, and a worker's runs are `envBatchUnits / W` units long. Whether longer contiguous runs save
   CPU time is a question for an engine with warm sessions (`env-batch=N`).
@@ -786,7 +789,9 @@ and misses the cache more, so the cap is a locality setting and CPU time is the 
   loading is checked once more after the load.
 - Parked threads (heavy gate, loaded frontier) wake every 50 ms to look at the first failure; a wake-up
   hook on the board would make that unnecessary.
-- Not implemented and not tested: namespace order, heavy-lane threads, a machine engine as primary (only
-  fakes play that role; `no-fallback` is tested with fakes only), native-image specifics (the code uses no
+- The machine as primary engine is exercised by the invariance suite (`invariance.sh --engine machine`) and by
+  the wave-7 measurements, not by the unit tests (fakes play that role there; `no-fallback` is tested with
+  fakes only; `rlvm-machine` cannot be a test dependency of this module: reactor cycle through `rlvm-testkit`).
+- Not implemented and not tested: namespace order, heavy-lane threads, native-image specifics (the code uses no
   reflection, no `java.management`, no `ThreadLocal`; `RunStats` reads `/proc/thread-self/schedstat`;
   `gc-after-mib` relies on `Runtime.totalMemory() - freeMemory()` and `System.gc()`).

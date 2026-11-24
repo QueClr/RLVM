@@ -10,8 +10,9 @@
                                                          also  ratio:TAG:CONTROL[:corpora][:threads]  (paired
                                                          ratios against one configuration) and
                                                          legend:TAG[:config,...]  (what each configuration is),
-                                                         scaling:TAG[:config,...][:BASE]  (CPU time and wall
-                                                         clock by worker count, relative to BASE workers)
+                                                         scaling:TAG[:config,...][:BASE][:threads,...]  (CPU time
+                                                         and wall clock by worker count, relative to BASE
+                                                         workers of the same repeat)
 
 Input: the JSON lines written by scripts/platform-matrix.py. One table row per (corpus, workers,
 configuration), columns in the project's order: CPU time, wall clock, peak RSS, instructions.
@@ -192,18 +193,22 @@ def ratios(rows: list[dict], control: str, corpora: list[str] | None = None, thr
     return "\n".join(out) + "\n"
 
 
-def scaling(rows: list[dict], configs: list[str] | None = None, base: int = 1) -> str:
+def scaling(rows: list[dict], configs: list[str] | None = None, base: int = 1, threads: list[int] | None = None) -> str:
     """Worker scaling per (corpus, configuration): CPU time and wall clock at every measured worker
-    count (minimum over the repeats), and what more workers cost and buy against `base` workers:
-    CPU time relative to `base` (the price: above 1.00 = the workers disturb each other or idle
-    threads are billed) and the speed-up in wall clock. The question behind the run line's
-    `--threads`."""
+    count (minimum over the repeats), and what more workers cost and buy against `base` workers IN
+    THE SAME REPEAT (the runs of a repeat are minutes apart and saw nearly the same host load; the
+    minima of different worker counts can come from different hours): the median over the repeats of
+    CPU(N) / CPU(base) with its range (the price: above 1.00 = the workers disturb each other or idle
+    threads are billed) and of wall(base) / wall(N) (the speed-up). The question behind the run
+    line's `--threads`. A worker count without a `base` run in its repeat has no ratio."""
     groups: dict[tuple, list[dict]] = {}
     order: list[str] = []
     for r in rows:
         if r.get("exit_code") != 0 or r.get("timed_out"):
             continue
         if configs and r["config"] not in configs:
+            continue
+        if threads and r["threads"] not in threads:
             continue
         if r["config"] not in order:
             order.append(r["config"])
@@ -214,8 +219,9 @@ def scaling(rows: list[dict], configs: list[str] | None = None, base: int = 1) -
         order = [c for c in configs if c in order]
     ts = sorted({k[2] for k in groups})
     cs = sorted({k[0] for k in groups}, key=lambda c: (CORPUS_ORDER.index(c) if c in CORPUS_ORDER else 99, c))
+    others = [t for t in ts if t != base]
     head = ["Corpus", "Configuration"] + ["CPU s, %d w" % t for t in ts] + ["Wall s, %d w" % t for t in ts] \
-        + ["CPU %d w / %d w" % (t, base) for t in ts if t != base] + ["Wall %d w / %d w" % (base, t) for t in ts if t != base] \
+        + ["CPU %d w / %d w (median; range)" % (t, base) for t in others] + ["Wall %d w / %d w" % (base, t) for t in others] \
         + ["Peak RSS, %d w" % ts[-1], "Runs"]
     out = ["| " + " | ".join(head) + " |", "|---|---|" + "--:|" * (len(head) - 2)]
     for corpus in cs:
@@ -224,10 +230,21 @@ def scaling(rows: list[dict], configs: list[str] | None = None, base: int = 1) -
             wall = {t: min(r["wall_time_s"] for r in groups[(corpus, c, t)]) for t in ts if (corpus, c, t) in groups}
             if not cpu:
                 continue
+            by_run = {r["run"]: r for r in groups.get((corpus, c, base), [])}
             row = [corpus, "`%s`" % c] + [fmt_s(cpu[t]) if t in cpu else "-" for t in ts] \
                 + [fmt_s(wall[t]) if t in wall else "-" for t in ts]
-            row += ["%.2f" % (cpu[t] / cpu[base]) if t in cpu and base in cpu else "-" for t in ts if t != base]
-            row += ["%.2f" % (wall[base] / wall[t]) if t in wall and base in wall else "-" for t in ts if t != base]
+            cpu_cells, wall_cells = [], []
+            for t in others:
+                pairs = [(r, by_run[r["run"]]) for r in groups.get((corpus, c, t), []) if r["run"] in by_run]
+                if not pairs:
+                    cpu_cells.append("-")
+                    wall_cells.append("-")
+                    continue
+                q = [a["cpu_time_s"] / b["cpu_time_s"] for a, b in pairs]
+                w = [b["wall_time_s"] / a["wall_time_s"] for a, b in pairs]
+                cpu_cells.append("%.2f (%.2f - %.2f)" % (statistics.median(q), min(q), max(q)) if len(q) > 1 else "%.2f" % q[0])
+                wall_cells.append("%.2f" % statistics.median(w))
+            row += cpu_cells + wall_cells
             top = max(t for t in ts if (corpus, c, t) in groups)
             row.append(fmt_rss(max(r.get("max_rss_bytes") or 0 for r in groups[(corpus, c, top)])))
             row.append("/".join(str(len(groups.get((corpus, c, t), []))) for t in ts))
@@ -291,13 +308,14 @@ def main() -> int:
                               parts[2].split(",") if len(parts) > 2 and parts[2] not in ("", "-") else None,
                               [int(t) for t in parts[3].split(",")] if len(parts) > 3 and parts[3] not in ("", "-") else None)
             elif kind == "scaling":
-                # scaling:TAG[:config,...][:base workers]
+                # scaling:TAG[:config,...][:base workers][:threads,...]
                 parts = spec.split(":")
                 rows = []
                 for t in parts[0].split("+"):
                     rows += load(t)
                 body = scaling(rows, parts[1].split(",") if len(parts) > 1 and parts[1] not in ("", "-") else None,
-                               int(parts[2]) if len(parts) > 2 and parts[2] not in ("", "-") else 1)
+                               int(parts[2]) if len(parts) > 2 and parts[2] not in ("", "-") else 1,
+                               [int(t) for t in parts[3].split(",")] if len(parts) > 3 and parts[3] not in ("", "-") else None)
             else:
                 parts = spec.split(":")
                 rows = []

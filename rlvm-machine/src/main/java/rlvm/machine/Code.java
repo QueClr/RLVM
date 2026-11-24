@@ -157,6 +157,15 @@ final class Code {
         /** Elaborations by role ({@code Op.ROLE_*}) made by this session, and those that stayed generic. */
         final long[] elaborated = new long[Op.ROLE_COUNT];
         final long[] stayedGeneric = new long[Op.ROLE_COUNT];
+        /**
+         * Block id -> address ({@code CodeStore.address}) of the blocks this session has entered: a block never moves
+         * once published, so the session keeps what the directory answered and locates a block with one plain load
+         * instead of two acquire loads per lookup. Survives a reset (a function of the engine's code store);
+         * working storage, at most 4 bytes per block of the engine.
+         */
+        int[] addr = new int[1024];
+        /** The code store {@link #addr} was filled from (a machine belongs to one engine; checked at every reset). */
+        CodeStore addrOf;
         /** The upper tier of this machine (class {@link Tier}; ISA 8.4), or null. Asked for once, at the first declaration. */
         Tier tier;
         boolean tierAsked;
@@ -181,7 +190,13 @@ final class Code {
         }
 
         /** Session reset (ISA 1.6): forget everything, in O(used). The IC table is invalidated by the epoch. */
-        void reset(Machine m) {}
+        void reset(Machine m) {
+            CodeStore cs = m.engine == null ? null : m.engine.code;
+            if (cs != addrOf) {
+                addrOf = cs;
+                java.util.Arrays.fill(addr, 0);
+            }
+        }
 
         /** Start of a declaration: the machine's tier and the engine's heat accounting (class {@link Tier}). */
         void beginDecl(Machine m) {
@@ -247,21 +262,54 @@ final class Code {
     }
 
     /**
+     * The address of block {@code blk} ({@code CodeStore.address}: chunk and offset; 0 = no such block), through the
+     * session's cache: one plain load for a block this session has located before.
+     */
+    static int addressOf(Machine m, int blk) {
+        int[] t = m.x7.addr;
+        if (blk >= 0 && blk < t.length) {
+            int a = t[blk];
+            if (a != 0) {
+                return a;
+            }
+        }
+        return addressSlow(m, blk);
+    }
+
+    private static int addressSlow(Machine m, int blk) {
+        Ext x = m.x7;
+        if (x.addrOf != m.engine.code) {
+            x.addrOf = m.engine.code;
+            java.util.Arrays.fill(x.addr, 0);
+        }
+        int a = m.engine.code.address(blk);
+        if (a != 0) {
+            if (blk >= x.addr.length) {
+                x.addr = java.util.Arrays.copyOf(x.addr, Math.max(x.addr.length << 1, blk + 1));
+            }
+            x.addr[blk] = a;
+        }
+        return a;
+    }
+
+    /**
      * True if entry {@code e} of block {@code blk} has code (role RULE: rule e was elaborated; an entry word
      * of 0 means that rule is walked by the generic tier).
      */
     static boolean hasEntry(Machine m, int blk, int e) {
-        CodeStore cs = m.engine.code;
-        int[] c = cs.chunkOf(blk);
-        int o = cs.offsetOf(blk);
-        return c != null && e >= 0 && e < nentry(c[o + Op.BLK_HDR2]) && c[o + Op.BLK_ENTRIES + e] != 0;
+        int a = addressOf(m, blk);
+        if (a == 0) {
+            return false;
+        }
+        int[] c = m.engine.code.chunkAt(a);
+        int o = CodeStore.offsetAt(a);
+        return e >= 0 && e < nentry(c[o + Op.BLK_HDR2]) && c[o + Op.BLK_ENTRIES + e] != 0;
     }
 
     /** Number of arguments a block takes (the leading binders of its source term). */
     static int arityOf(Machine m, int blk) {
-        CodeStore cs = m.engine.code;
-        int a = cs.address(blk);
-        return arity(cs.chunkAt(a)[CodeStore.offsetAt(a) + Op.BLK_HDR2]);
+        int a = addressOf(m, blk);
+        return arity(m.engine.code.chunkAt(a)[CodeStore.offsetAt(a) + Op.BLK_HDR2]);
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -327,7 +375,7 @@ final class Code {
      */
     static int enter(Machine m, int blk, int e, int cap, int ls, int[] src, int from, int n, int d) {
         CodeStore cs = m.engine.code;
-        int a = cs.address(blk);
+        int a = addressOf(m, blk);
         if (a == 0) {
             return m.fault(MachineErrors.E_INTERNAL);
         }
@@ -378,7 +426,7 @@ final class Code {
     /** {@link #callClosure} with one argument given directly (INST of a PI closure: no scratch). */
     static int callClosure1(Machine m, int blk, int cap, int ls, int x, int d) {
         CodeStore cs = m.engine.code;
-        int a = cs.address(blk);
+        int a = addressOf(m, blk);
         if (a == 0) {
             return m.fault(MachineErrors.E_INTERNAL);
         }
@@ -422,7 +470,7 @@ final class Code {
      */
     static int run(Machine m, int blk, int pc, int rbase, int d) {
         CodeStore cs = m.engine.code;
-        int a = cs.address(blk);
+        int a = addressOf(m, blk);
         if (a == 0) {
             return m.fault(MachineErrors.E_INTERNAL);
         }
@@ -1216,6 +1264,9 @@ final class Code {
             return Layout.NONE;
         }
         int ho = head << Layout.REC_SHIFT;
+        if (m.vh[ho + Layout.C] < 0) {
+            return Layout.NONE; // a head with the wrong number of levels does not unfold (R02 section 10 row 14): DELTA says so
+        }
         int blk = blockFor(m, m.vh[ho + Layout.A], Op.ROLE_RULES);
         if (blk == 0 || blk >= SIG) {
             return blk;
@@ -1227,6 +1278,55 @@ final class Code {
         }
         int run = m.vh[o + Layout.B];
         int r = enter(m, blk, 0, 0, m.vh[ho + Layout.C], m.rs, run + Layout.RUN_H, k, d + 1);
+        return r >= SIG ? m.sig2(r, K_RULES_1, v, k) : k_rules1(m, v, k, r, d);
+    }
+
+    /**
+     * RULES(v) restricted to shape CASESON, for the unfolding step of lazy delta (ISA 4.4.2 l2; official
+     * {@code whnf_core(unfold_definition(t))}, R02 8.4): the head is a definition whose value is one direct
+     * {@code I.rec} over its own parameters with eta-expanded minors ({@code I.casesOn} itself). On a constructor
+     * major the tree's result is what DELTA, the recursor rule and beta give, and no state of the official loop
+     * lies between them: the unfolding is {@code I.rec ..}, which {@code whnf_core} reduces at once. A MATCHER
+     * tree is not taken here: after its first DELTA the official loop stands at {@code I.casesOn ..}, a state in
+     * which it compares the two sides again (ISA 3.6 "lazy delta keeps single DELTA steps").
+     * Experiment switch {@code m7a} on top of {@code SW_CASETREES}.
+     *
+     * @return the reduct (the caller continues with CORE, as after DELTA), {@code Layout.NONE}: use DELTA, or a signal
+     */
+    static int rulesCasesOn(Machine m, int v, int d) {
+        if ((m.sw & (Op.SW_CASETREES | Op.SW_M7A)) != (Op.SW_CASETREES | Op.SW_M7A) || m.strict) {
+            return Layout.NONE;
+        }
+        if (v <= Layout.HOLE || m.vh[v << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT != Layout.NEU) {
+            return Layout.NONE;
+        }
+        int o = v << Layout.REC_SHIFT;
+        if (m.vh[o + Layout.M_UNF] != 0) {
+            return Layout.NONE; // unfolded before: DELTA and CORE answer from their memos
+        }
+        int head = m.vh[o + Layout.A];
+        if (head <= Layout.HOLE || m.vh[head << Layout.REC_SHIFT] >>> Layout.KIND_SHIFT != Layout.CONST) {
+            return Layout.NONE;
+        }
+        int ho = head << Layout.REC_SHIFT;
+        if (m.vh[ho + Layout.C] < 0) {
+            return Layout.NONE; // a head with the wrong number of levels does not unfold (R02 section 10 row 14): DELTA says so
+        }
+        int blk = blockFor(m, m.vh[ho + Layout.A], Op.ROLE_RULES);
+        if (blk == 0 || blk >= SIG) {
+            return blk;
+        }
+        int a = addressOf(m, blk);
+        int[] code = m.engine.code.chunkAt(a);
+        int base = CodeStore.offsetAt(a);
+        int h2 = code[base + Op.BLK_HDR2];
+        int n = m.vh[o] & Layout.AUX_MASK;
+        int k = arity(h2);
+        if (flags(h2) >>> BLKF_SHAPE_SHIFT != Layout.SHAPE_CASESON || n < k) {
+            return Layout.NONE;
+        }
+        int run = m.vh[o + Layout.B];
+        int r = enterAt(m, code, base, blk, 0, 0, m.vh[ho + Layout.C], m.rs, run + Layout.RUN_H, k, d + 1);
         return r >= SIG ? m.sig2(r, K_RULES_1, v, k) : k_rules1(m, v, k, r, d);
     }
 
@@ -1285,7 +1385,7 @@ final class Code {
      */
     static int tele(Machine m, int blk, int ls, int xb, int n, int eb, int en, int lsSite, int mode, int expected, int d) {
         CodeStore cs = m.engine.code;
-        int a = cs.address(blk);
+        int a = addressOf(m, blk);
         if (a == 0) {
             return m.fault(MachineErrors.E_INTERNAL);
         }
@@ -1314,7 +1414,7 @@ final class Code {
      */
     static int teleValues(Machine m, int blk, int ls, int run, int n, int d) {
         CodeStore cs = m.engine.code;
-        int a = cs.address(blk);
+        int a = addressOf(m, blk);
         if (a == 0) {
             return m.fault(MachineErrors.E_INTERNAL);
         }

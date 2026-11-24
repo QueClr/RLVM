@@ -43,8 +43,9 @@ import rlvm.machine.T2Bridge;
  */
 final class BlockRoot extends RootNode {
 
-    /** The pseudo instruction index of the entry dispatch. */
+    /** The pseudo instruction indexes of the entry dispatch and of the exit. */
     private static final int START = -1;
+    private static final int END = -2;
 
     final T2Engine owner;
     final int blk;
@@ -241,9 +242,16 @@ final class BlockRoot extends RootNode {
             f.setIntStatic(lsSlot, T2Bridge.ls(m, rb));
         }
         int i = START;
+        int result = 0;
         outer:
         for (;;) {
             CompilerAsserts.partialEvaluationConstant(i);
+            if (i == END) {
+                // The one place an EXIT instruction leaves through. (Code after a loop exit is shared by all
+                // iterations of an exploded loop: there the instruction index is no longer a constant, so an
+                // instruction node must never be executed on an exit path.)
+                return result;
+            }
             if (i == START) {
                 for (int k = 0; k < entryIdx.length; k++) {
                     if (e == k) {
@@ -293,7 +301,9 @@ final class BlockRoot extends RootNode {
                     return T2Bridge.fault(m, MachineErrors.E_INTERNAL);
                 }
                 case Decoded.EXIT:
-                    return instr[i].exec(f, m, rb, d);
+                    result = instr[i].exec(f, m, rb, d);
+                    i = END;
+                    continue outer;
                 default: { // STEP: the stepper's body answers the next pc
                     int r = instr[i].exec(f, m, rb, d);
                     if (r < 0) {

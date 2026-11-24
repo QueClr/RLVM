@@ -11,6 +11,26 @@
 #                          work/status/machine-diff-NAME.txt. The first lines say whether the gate is
 #                          passed (DIFF-CLEAN), what stopped the machine how often, and how to reproduce
 #                          the first difference of every file.            exit 1 = a WRONG verdict
+#   report.sh gate [--switches LIST] [--session-mib N] [--parts conv,tier,audits,pipeline] [--name NAME] [CORPUS..]
+#                          THE GATE, one page: work/status/machine-gate-NAME.md (NAME = v0, or the switches
+#                          joined by +). For the machine with the given staging switches (none = the generic
+#                          tier), on tutorial, bugs, all 230 tests, Init, Std, reachability and the Cedar slice
+#                          (or the CORPUS names / files given): (1) differential against the reference engine
+#                          per declaration, (2) tier equivalence with the generic tier, (3) convention
+#                          equivalence (host depth 0 / the bound in force / unbounded), (4) the debug audits
+#                          (poison, scopeaudit, maskaudit; memocheck, shortcheck), (5) the real driver with
+#                          -X engine=machine on the 230 tests (1 worker) and the corpora (4 workers).
+#                          Parallel: --jobs passes at a time (default 12), about three minutes for everything.
+#                          Warm switch sets run with a session cap of 4 MiB unless --session-mib says otherwise.
+#                          exit 1 = a wrong verdict, a difference, a crash; declines alone do not fail it
+#   report.sh mutants [--switches LIST]... [--corpus NAME]... [--limit N] [--launcher-sample N]
+#                          the mutant corpora (work/mutants*, classified by the official checker) through the
+#                          real driver in one JVM, with -X engine=machine, once per switch set (--switches
+#                          may be repeated; "v0" or "" = the generic tier; default: the generic tier):
+#                          SOUNDNESS / COMPLETENESS of the final verdict against the official checker, and
+#                          how often the machine's own answer differs from the reference engine's (per
+#                          declaration, in-process; MACHINE-INCOMPLETE / WARM-ANOMALY from the driver):
+#                          work/status/machine-mutants.md                    exit 1 = any of them is not 0
 #   report.sh gates        tutorial, bugs, all, init, one after the other (the v0 gate of ISA section 11)
 #   report.sh diff NAME FILE_OR_DIR..     the same for any corpus
 #   report.sh conv NAME [FILE_OR_DIR..]   convention equivalence (stepper-convention H12 item 1): every
@@ -40,7 +60,13 @@
 #   --tree DIR             measure another copy of the module instead of the main tree, e.g. a sandbox:
 #                          --tree work/sandbox/M4/rlvm-machine. The report then says so in its header and
 #                          is named NAME-M4 (or NAME plus -Dm8.suffix): the plain names are the main tree's
-#   --heap SIZE            heap of the report JVM (default 24g; Init and Std need about 8g)
+#   --heap SIZE            heap of the report JVM (default 12g: the host is shared, and a Java heap that
+#                          was pushed into the swap makes a full collection last minutes; a file in which
+#                          the heap answered instead of an engine is run again on its own)
+#   --jobs N               gate, mutants: passes at a time (default 12)
+#   --no-pin               do not pin the report JVM. By default it runs on the CPUs outside the cpuset of the
+#                          measurement container (bench/arena-docker.sh --arena-limits), so that a report
+#                          never disturbs a measurement
 #   -Dkey=value            passed to the JVM: -Dm8.hostDepth=0 -Dm8.switches=warm,gated -Dm8.suffix=-d0
 #                          -Dm8.checkSeconds=N -Dm8.fileSeconds=N -Dm8.maxSteps=N -Dm8.seed=N ...
 #   --keep                 keep the compiled copy (work/m8/tree-PID) for inspection
@@ -59,15 +85,27 @@ while [ "$ROOT" != "/" ] && ! { [ -f "$ROOT/env.sh" ] && [ -f "$ROOT/rlvm-machin
 [ "$ROOT" != "/" ] || ROOT="${RLVM_ROOT:?report.sh: cannot find the project root (set RLVM_ROOT)}"
 MAIN="$ROOT/rlvm-machine"
 tree="$MAIN"
-heap="24g"
+heap="12g"
 keep=0
+pin=1
 jvmargs=()
 args=()
+orig="$*"
+switchsets=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tree) tree="$(cd "${2:?--tree needs a directory}" && pwd -P)"; shift 2 ;;
     --heap) heap="${2:?--heap needs a size}"; shift 2 ;;
     --keep) keep=1; shift ;;
+    --no-pin) pin=0; shift ;;
+    --jobs) jvmargs+=("-Dm8.jobs=${2:?--jobs needs a number}"); shift 2 ;;
+    --switches) switchsets+=("${2-}"); shift 2 ;;
+    --session-mib) jvmargs+=("-Dm8.sessionMib=${2:?--session-mib needs a number}"); shift 2 ;;
+    --parts) jvmargs+=("-Dm8.parts=${2:?--parts needs a list}"); shift 2 ;;
+    --name) jvmargs+=("-Dm8.name=${2:?--name needs a name}"); shift 2 ;;
+    --corpus) jvmargs+=("-Dm8.mutants.corpus=${m8corpus:+$m8corpus,}${2:?--corpus needs a name}"); m8corpus="${m8corpus:+$m8corpus,}$2"; shift 2 ;;
+    --limit) jvmargs+=("-Dm8.mutants.limit=${2:?--limit needs a number}"); shift 2 ;;
+    --launcher-sample) jvmargs+=("-Dm8.mutants.launcherSample=${2:?--launcher-sample needs a number}"); shift 2 ;;
     -D*) jvmargs+=("$1"); shift ;;
     -h|--help) sed -n '2,/^{ #/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) args+=("$1"); shift ;;
@@ -128,20 +166,62 @@ build_copy() {
     exit 2
   fi
   CP="$copy/rlvm-machine/target/test-classes:$copy/rlvm-machine/target/classes:$(cat "$copy/classpath.txt")"
+  # the launcher's entry (rlvm-main, rlvm-cli: the published jars) behind the tree's classes, for the runs
+  # through the real driver in this JVM (M8Pipeline); the engine "machine" it finds is the tree's
+  local m2="$ROOT/.toolchain/m2/rlvm" j
+  for j in rlvm-main rlvm-cli; do
+    [ -f "$m2/$j/0.1.0-SNAPSHOT/$j-0.1.0-SNAPSHOT.jar" ] && CP="$CP:$m2/$j/0.1.0-SNAPSHOT/$j-0.1.0-SNAPSHOT.jar"
+  done
 }
+
+# The CPUs a report may use: those outside the measurement container's cpuset.
+pin_prefix=()
+if [ "$pin" = 1 ] && command -v taskset >/dev/null 2>&1; then
+  arena="$("$ROOT/bench/arena-docker.sh" --arena-limits --print true 2>/dev/null | tr -d '\\' | sed -n 's/.*--cpuset-cpus \([0-9,]*\).*/\1/p' | head -n 1)"
+  if [ -n "$arena" ]; then
+    others="$(for ((i = 0; i < $(nproc --all); i++)); do case ",$arena," in *",$i,"*) ;; *) echo "$i" ;; esac; done | paste -sd, -)"
+    [ -z "$others" ] || pin_prefix=(taskset -c "$others")
+  fi
+fi
+
+# files at a time for the corpus commands (the gate and the mutants have their own default, also 12)
+case " ${jvmargs[*]-} " in *" -Dm8.jobs="*) ;; *) jvmargs+=("-Dm8.jobs=12") ;; esac
 
 # a report on another tree than the main tree says so and gets the tree's name as its suffix (Diff.sandbox)
 [ "$tree" = "$MAIN" ] || jvmargs+=("-Dm8.tree=$tree")
 
 run_main() {
-  # -Xss2m on purpose: the machine must not need a deep host stack (stepper-convention H9)
-  "$JAVA_HOME/bin/java" -Xss2m "-Xmx$heap" -XX:+UseSerialGC "-Drlvm.root=$ROOT" ${jvmargs[@]+"${jvmargs[@]}"} \
+  # -Xss2m on purpose: the machine must not need a deep host stack (stepper-convention H9).
+  # -Xmn1g: with the default young generation (a third of the heap) Machine.heapAllows counts free bytes that a
+  # large array cannot use (it must fit into the old generation), and a growth it allowed ends in OutOfMemoryError.
+  ${pin_prefix[@]+"${pin_prefix[@]}"} "$JAVA_HOME/bin/java" -Xss2m "-Xmx$heap" -Xmn1g -XX:+UseSerialGC \
+      --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow \
+      "-Drlvm.root=$ROOT" "-Dm8.command=rlvm-machine/src/test/resources/m8/report.sh $orig" ${jvmargs[@]+"${jvmargs[@]}"} \
       -cp "$CP" rlvm.machine.M8Main "$@"
 }
 
 case "$cmd" in
   tutorial|bugs|all|init|std|cedar|reachability)
     build_copy; run_main diff "$cmd" ;;
+  gate)
+    [ "${#switchsets[@]}" -le 1 ] || { echo "report.sh: gate takes one --switches (run it once per switch set)" >&2; exit 2; }
+    [ "${#switchsets[@]}" -eq 0 ] || { [ "${switchsets[0]}" = v0 ] || jvmargs+=("-Dm8.switches=${switchsets[0]}"); }
+    build_copy; run_main gate - ${rest[@]+"${rest[@]}"} ;;
+  mutants)
+    sets=""
+    for x in ${switchsets[@]+"${switchsets[@]}"}; do sets="${sets:+$sets;}${x:-v0}"; done
+    [ -z "$sets" ] || jvmargs+=("-Dm8.mutants.sets=$sets")
+    case " ${jvmargs[*]-} " in
+      *" -Dm8.mutants.launcherSample="*)
+        # the launcher sample runs the PUBLISHED machine jar (a distribution of the published jars, built here)
+        [ "$tree" = "$MAIN" ] || { echo "report.sh: --launcher-sample compares with the published jars: not with --tree" >&2; exit 2; }
+        sdist="$ROOT/work/m8/dist-sample-$$"
+        "$ROOT/scripts/build.sh" --published --jvm-only --dist "$sdist" > "$ROOT/work/m8/dist-sample-$$.log" 2>&1 \
+          || { echo "report.sh: scripts/build.sh --published failed (work/m8/dist-sample-$$.log)" >&2; exit 2; }
+        jvmargs+=("-Dm8.mutants.dist=$sdist")
+        trap 'cleanup; rm -rf "$sdist" "$ROOT/work/m8/dist-sample-$$.log"' EXIT ;;
+    esac
+    build_copy; run_main mutants - ${rest[@]+"${rest[@]}"} ;;
   gates)
     build_copy; st=0
     for c in tutorial bugs all init; do run_main diff "$c" || st=$?; done

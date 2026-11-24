@@ -79,6 +79,92 @@ class M8HarnessTest {
         }
     }
 
+    // ---- the pass runner (M8Lanes): the reference engine first, then every lane on its own ----------------------
+
+    private static M8Lanes.FileRun passes(String file, M8Lanes.Spec... specs) {
+        M8Lanes.Options o = new M8Lanes.Options();
+        return M8Lanes.run(file, java.util.Arrays.asList(specs), o);
+    }
+
+    private static M8Harness.Config observed(String label) {
+        return new M8Harness.Config(label).trace(true).traceDigestOnly(true);
+    }
+
+    @Test
+    void thePassRunnerComparesLanesAsTheLockstepHarnessDoes() {
+        int files = 0;
+        long calls = 0;
+        long framesD0 = 0;
+        for (String file : FILES) {
+            if (!Fixture.exists(file)) {
+                continue;
+            }
+            files++;
+            M8Lanes.FileRun run = passes(file, new M8Lanes.Spec("diff", observed("D")),
+                    new M8Lanes.Spec("conv", observed("D0").hostDepth(0)).against(0, M8Lanes.CONV),
+                    new M8Lanes.Spec("conv", observed("unbounded").hostDepth(Op.HOST_DEPTH_UNBOUNDED)).against(0, M8Lanes.CONV),
+                    new M8Lanes.Spec("audit", new M8Harness.Config("audits").debug("poison,scopeaudit,maskaudit")).against(0, M8Lanes.OUTCOME));
+            assertTrue(run.crash == null, String.valueOf(run.crash));
+            assertFalse(run.memory());
+            assertEquals("", TierEq.conventionEquivalence(file), "the lockstep comparison of the same file");
+            Diff.Options o = new Diff.Options();
+            o.progress = false;
+            Diff.FileResult lockstepCount = Diff.compare(file, o);
+            for (M8Lanes.LaneRun l : run.lanes) {
+                assertTrue(l.crash == null, l.spec.config.label + ": " + l.crash);
+                assertEquals(0, l.differing, l.spec.config.label + ": " + l.differences);
+                assertEquals(0, l.audits);
+                assertEquals(lockstepCount.compared, l.diff.compared, l.spec.config.label);
+                assertEquals(lockstepCount.agree, l.diff.agree, l.spec.config.label);
+                assertEquals(lockstepCount.status, l.diff.status, l.spec.config.label);
+            }
+            assertEquals(run.lanes[0].checks, run.lanes[1].comparedWithOther, "every engine check of the lead lane is compared");
+            assertEquals(0, run.lanes[2].framesTotal, "no frame without a depth bound (H1)");
+            calls += run.lanes[0].callsTotal;
+            framesD0 += run.lanes[1].framesTotal;
+        }
+        assumeTrue(files > 0, "no arena test present");
+        if (calls > 100) {
+            assertTrue(framesD0 > 0, "D = 0 writes frames (" + calls + " call events)");
+        }
+    }
+
+    @Test
+    void thePassRunnerSeesALaneThatDiffers() {
+        String file = FILES[1];
+        assumeTrue(Fixture.exists(file));
+        // a lane with a step budget of one tick cannot agree with a lane without: outcome and reason differ
+        M8Lanes.FileRun run = passes(file, new M8Lanes.Spec("diff", observed("D")),
+                new M8Lanes.Spec("conv", observed("starved").maxSteps(1)).against(0, M8Lanes.CONV),
+                new M8Lanes.Spec("tier", new M8Harness.Config("starved2").maxSteps(1)).against(0, M8Lanes.OUTCOME));
+        assumeTrue(run.lanes[0].accepted > 0, "the machine accepts nothing in this tree");
+        assertTrue(run.lanes[1].differing > 0 && !run.lanes[1].differences.isEmpty(), "CONV sees the starved lane");
+        assertTrue(run.lanes[2].differing > 0, "OUTCOME sees the starved lane");
+        assertTrue(run.lanes[1].differences.get(0).contains("unit "), run.lanes[1].differences.get(0));
+        // and against the reference engine a starved lane is declined, never wrong
+        assertEquals(0, run.lanes[1].diff.soundness + run.lanes[1].diff.completeness);
+        assertTrue(run.lanes[1].diff.declined > 0);
+    }
+
+    @Test
+    void aCheckThatTheJavaHeapEndsIsFlaggedAndTheLaneGoesOnWithANewMachine() {
+        String file = FILES[1];
+        assumeTrue(Fixture.exists(file));
+        M8Harness.Config ok = new M8Harness.Config("D");
+        M8Harness.Config oom = new M8Harness.Config("oom");
+        oom.simulateHeapExhaustionAtCheck = 0;
+        M8Lanes.FileRun run = passes(file, new M8Lanes.Spec("diff", ok), new M8Lanes.Spec("tier", oom).against(0, M8Lanes.OUTCOME));
+        assumeTrue(run.lanes[0].checks > 1);
+        assertTrue(run.memory(), "the run says that the heap answered somewhere");
+        assertEquals(1, run.lanes[1].memoryFailures);
+        assertTrue(run.lanes[1].diff.memory);
+        assertEquals(0, run.lanes[1].diff.soundness + run.lanes[1].diff.completeness, "a heap failure is a decline, never a verdict");
+        assertEquals(1, run.lanes[1].diff.declined - run.lanes[0].diff.declined, "exactly the one check is declined; the lane goes on");
+        assertEquals(0, run.lanes[1].differing, "and it is not held against the other lane as a difference");
+        assertTrue(run.lanes[1].diff.reasons.keySet().toString().contains("the Java heap of the test JVM"), run.lanes[1].diff.reasons.toString());
+        assertEquals(run.lanes[0].accepted, run.lanes[1].accepted + 1);
+    }
+
     @Test
     void aFileTheLoaderRejectsIsNotCompared() throws IOException {
         String file = T + "bad/tutorial/001_badFile.ndjson";

@@ -135,6 +135,8 @@ class QuotAdmissionTest {
         int q = e.quot(DeclKind.QUOT_TYPE, "Quotient", "u", "∀ (α : Sort u), " + REL + " → Sort u");
         QuotAdmission qa = ready(e);
         assertEquals(Reason.UNSUPPORTED_INPUT, assertThrows(ResourceException.class, () -> qa.admit(q)).reason());
+        // every decline states its cause
+        assertTrue(qa.lastDeclineDetail().contains("a name other than Quot"), qa.lastDeclineDetail());
     }
 
     @Test
@@ -155,5 +157,6 @@ class QuotAdmissionTest {
         int mk = e.quot(DeclKind.QUOT_MK, "Quot.mk", "u", "∀ (α : Sort u) (r : " + REL + "), α → Q.{u} α r");
         QuotAdmission qa = ready(e);
         assertEquals(Reason.UNSUPPORTED_INPUT, assertThrows(ResourceException.class, () -> qa.admit(mk)).reason());
+        assertTrue(qa.lastDeclineDetail().contains("no usable record for 'Quot'"), qa.lastDeclineDetail());
     }
 }

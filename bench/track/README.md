@@ -156,6 +156,24 @@ env    = stop-after=env minus stop-after=load (environment pass)
 check  = complete run minus stop-after=env (checking, verdict, exit)
 ```
 
+## State (2026-11-24, wave 7)
+
+- `benchmarks.py` writes **engine columns**: `RLVM machine | RLVM reference | gruszka | nano-lean | official`
+  (`--engines machine,reference`, `--launcher native`, `--threads 8`), one row per corpus that has a
+  machine result; a further table has the other launcher for both engines, and the corpora without a
+  machine result are listed with the reference engine. `--engine NAME` gives the former one-engine form,
+  `--note TEXT` adds a line to the legend (which machine jar was measured).
+- Machine entries are made with `track.py CORPUS --engine machine --launcher native --threads 8`
+  (configuration `rlvm/native/t8/-X engine=machine`). The machine's own counters (accepted / declined
+  units) are not part of an entry: a declined unit is checked by the reference engine and its time is in
+  the figure; `docs/PLATFORM.md` section I.6 has the counters of the measured distribution.
+- `track.py` and `ladder.py` pin the version of a versioned distribution at their start (above).
+- The measurement lock was the bottleneck of the day: thirty agents, up to ten queues behind
+  `work/perf-history/.ladder.lock`, holds of minutes. `ladder.py --batch N` takes the lock once for N
+  measurements; a queue that needs the lock for several tools holds it itself and calls `track.py`
+  directly (`work/steward/w7/queue2.sh`). Never build while holding it.
+- `selftest.py`: 55 host checks pass (two new: the engine columns, the one-engine form).
+
 ## State (2026-11-24, wave 4)
 
 - The ladder was run for the reference engine of the distribution built at 07:21Z (a copy:

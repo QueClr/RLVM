@@ -5,7 +5,9 @@ import java.util.Map;
 /**
  * Settings of the reference engine beyond {@link rlvm.api.EngineConfig}. Immutable.
  *
- * <p>From the launcher: {@code -X levels=complete|official} (default complete) and
+ * <p>From the launcher: {@code -X levels=official|complete} (default official: universe levels are
+ * compared as the official kernel compares them, the project owner's decision of 2026-11-24,
+ * OWNER-NOTES item 11; {@code complete} is the opt-in) and
  * {@code -X ref.imports=off|on|verify} (default off: with the overlay of wave 4, whose hash-consing
  * index follows its content, keeping imports costs more CPU time than it saves; see the README)
  * ({@link RefEngine.Provider#optionKeys()}); the same two are read from the system properties
@@ -25,11 +27,16 @@ public final class RefOptions {
     static final long DEFAULT_IMPORT_BYTES = 4L << 20;
     static final int DEFAULT_IMPORT_MIN_USES = 8;
 
+    /** The value of {@code -X levels=} when nothing is said: the official kernel's comparison. */
+    public static final String DEFAULT_LEVELS = "official";
+
     /**
      * How universe levels are compared in {@code is_def_eq} (sorts, level lists of constants):
-     * false = the complete relation ({@code LevelOps.isEquiv}), true = the official kernel's
-     * normal-form test ({@code LevelOps.isEquivOfficial}), which answers "different" for some levels
-     * that are equal under every assignment.
+     * true (the default) = the official kernel's {@code is_equivalent}, identity of the official
+     * normal forms ({@code LevelOps.isEquivOfficial}), which answers "different" for some levels
+     * that are equal under every assignment ({@code imax u 1} and {@code max u 1},
+     * {@code imax u v} and {@code imax (imax u v) v}); false ({@code -X levels=complete}) = the
+     * complete relation ({@code LevelOps.isEquiv}), which accepts a superset.
      */
     public final boolean officialLevels;
     /**
@@ -62,17 +69,17 @@ public final class RefOptions {
      * @throws IllegalArgumentException a value of one of this engine's keys (or properties) is not understood
      */
     public static RefOptions parse(Map<String, String> options) {
-        String levels = setting(options, KEY_LEVELS, "rlvm.levels", "complete");
+        String levels = setting(options, KEY_LEVELS, "rlvm.levels", DEFAULT_LEVELS);
         boolean official;
         switch (levels) {
-            case "complete":
-                official = false;
-                break;
             case "official":
                 official = true;
                 break;
+            case "complete":
+                official = false;
+                break;
             default:
-                throw new IllegalArgumentException("levels=" + levels + ": expected complete or official");
+                throw new IllegalArgumentException("levels=" + levels + ": expected official or complete");
         }
         String imports = setting(options, KEY_IMPORTS, "rlvm.ref.imports", "off");
         long bytes = number("rlvm.ref.importBytes", DEFAULT_IMPORT_BYTES);

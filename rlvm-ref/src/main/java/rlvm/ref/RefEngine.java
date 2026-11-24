@@ -156,7 +156,7 @@ public final class RefEngine implements Engine {
             return FACTORY;
         }
 
-        /** {@code -X levels=complete|official}, {@code -X ref.imports=on|off|verify} (see {@link RefOptions}). */
+        /** {@code -X levels=official|complete} (default official), {@code -X ref.imports=on|off|verify} (see {@link RefOptions}). */
         @Override
         public Set<String> optionKeys() {
             return Set.of(RefOptions.KEY_LEVELS, RefOptions.KEY_IMPORTS);

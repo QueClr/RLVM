@@ -13,7 +13,32 @@ threads), wall clock, peak RSS, instructions.
 
 ## I.0 The answer
 
-@@ANSWER@@
+1. **The CE native image ships** (`work/dist/bin/rlvm`, GraalVM CE 25, `-O3`). With the machine as
+   engine it needs **0.69 / 0.49 / 0.40 times the JVM launcher's CPU time with 1 / 4 / 8 workers**
+   (medians of 12 paired runs each on Init, Std, the Cedar slice and reachability; the image wins
+   all 36 pairs, 0.24 to 0.89), 0.64 times its wall clock with four workers, and a third to a half
+   of its memory. Init, four workers: 8.1 s CPU / 2.9 s wall / 330 MB against 17.8 s / 4.9 s / 770 MB.
+   The JVM pays about 3.7 s of C2 compilation per run and runs every worker slowly until it is done;
+   a run of the machine is too short to earn that back. The JVM launcher remains the cheaper
+   platform for long runs of the *reference* engine (mathlib, eight workers: 500.5 s against 624.6 s
+   CPU), which is the fallback engine and not what ships. `scripts/arena/rlvm.yaml` already names the
+   image: nothing to switch.
+2. **Flags: the image as it is built today** - `-O3 --gc=serial -R:MaxHeapSize=13g
+   -R:+ExitOnOutOfMemoryError`, no nursery flag, no `-march`. `-O3` (10 to 18 % less CPU time than
+   `-O2` for the machine) was the arena build's level and is now also the default of
+   `scripts/build.sh`. The serial collector is the only CE collector that collects; the heap limit is
+   a limit, not a reservation (RSS 250 MB to 1.9 GB on the four corpora). The JVM launcher keeps its
+   flags (`-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g`); it is
+   the launcher of the guards, not of the arena.
+3. **Workers: the run line keeps `--threads 4`.** With four workers the image's CPU time is that of
+   one worker (medians 1.02, 1.01 and 0.98 times on Init, Std and the Cedar slice) at 2.3 to 2.7
+   times the speed; eight workers cost 1.07 to 1.09 times the CPU time of one for 18 % less wall
+   clock than four on Init and Std and nothing on the other two corpora. Six is the open candidate
+   (section I.3).
+4. **What this does not settle**: x86-64 (the runner's architecture; no such machine here); the
+   machine on mathlib-sized input on either launcher (section I.4); the machine's staging switches
+   and its compiled tier, which its own workflow is changing today (measured here: jar `608b84b2b142`,
+   default switches); a quiet host (load 26 to 266 during the series).
 
 ## I.1 What was measured, and how
 
@@ -47,44 +72,51 @@ threads), wall clock, peak RSS, instructions.
   One-worker runs are in the same eight-core container (not the two-core container of Part II).
 - **Matrix**: launcher {`jvm`, `native`} x workers {1, 4, 8} x corpus {Init 348 MB, Std 584 MB, the
   Cedar slice `cedar-hot-ax` 133 MB, reachability 19 MB} x 3 repeats, the two launchers of a group back
-  to back; plus six workers for the image. `scripts/platform-matrix.py` (`work/steward/w7/queue.sh` has
-  the exact calls); raw records with the host's load average before and after every run in
+  to back; plus six workers for the image. `scripts/platform-matrix.py` (`work/steward/w7/queue.sh` and
+  `queue2.sh` have the exact calls); raw records with the host's load average before and after every run in
   `work/steward/platform/results/w7-*.jsonl`.
 - **Lock**: every step ran under one hold of the measurement lock `work/perf-history/.ladder.lock`
   (a few minutes each; the first six groups with a lock per group).
-- **The host was not quiet.** @@LOAD@@ The figure of a row is the **minimum** over its repeats (median in parentheses);
-  the `Load` column is the highest 1-minute load average of the host at the end of a run of the row.
-  Instruction counts do not depend on the load; compare launchers by the paired ratios.
+- **The host was not quiet.** The 1-minute load average of the host (20 CPUs) was 26 to 95 during
+  the first two repeats (13:33Z to 13:49Z) and 231 to 266 during the third and the six-worker runs
+  (14:13Z to 14:20Z): thirty agents were testing, building and measuring. Other owners' processes are
+  not confined to the cores outside the container, so CPU time is inflated by an amount that changes
+  from minute to minute (Cedar slice, image, one worker: 3.60 and 3.64 s in the first two repeats
+  against 3.17 s at load 7 to 10 two hours earlier, with the same 46.4 G instructions; Init 7.94 s
+  against 7.77 s), and wall clock at load 250 measures the host. The figure of a row is the
+  **minimum** over its repeats (median in parentheses); the `Load` column is the highest 1-minute
+  load average at the end of a run of the row, i.e. that of the third repeat. Instruction counts do
+  not depend on the load; compare launchers by the paired ratios.
 
 ## I.2 Launcher x workers: Init, Std, Cedar slice, reachability
 
 <!-- BEGIN table:w7-machine:-:1,4,8 -->
 | Corpus | Workers | Configuration | CPU s | Wall s | Peak RSS | Instructions | Collections (young / full; pause) | Runs | Load |
 |---|--:|---|--:|--:|--:|--:|---|--:|--:|
-| init | 1 | `jvm` | 12.75 (12.75) | 8.18 (8.19) | 590 MB | 161.8 G | 0 / 0; 0 ms | 2 | 75 |
-| init | 1 | `native` | **7.94 (7.97)** | 7.97 (7.99) | 252 MB | 136.6 G | n.r. | 2 | 74 |
-| init | 4 | `jvm` | 18.41 (20.01) | 4.90 (5.08) | 771 MB | 177.7 G | 0 / 0; 0 ms | 2 | 74 |
-| init | 4 | `native` | **8.08 (8.11)** | 2.89 (2.95) | 334 MB | 137.1 G | n.r. | 2 | 75 |
-| init | 8 | `jvm` | 24.30 (29.31) | 6.15 (6.17) | 1.18 GB | 198.4 G | 1 / 0; 105 ms | 2 | 76 |
-| init | 8 | `native` | **8.32 (8.56)** | 2.36 (2.92) | 487 MB | 137.2 G | n.r. | 2 | 76 |
-| std | 1 | `jvm` | 17.35 (17.75) | 12.72 (12.77) | 1.16 GB | 227.0 G | 1 / 0; 95 ms | 2 | 80 |
-| std | 1 | `native` | **13.20 (13.37)** | 13.23 (13.78) | 330 MB | 219.5 G | n.r. | 2 | 84 |
-| std | 4 | `jvm` | 22.90 (24.94) | 6.80 (7.90) | 1.23 GB | 253.6 G | 1 / 0; 98 ms | 2 | 86 |
-| std | 4 | `native` | **13.21 (13.46)** | 4.43 (5.20) | 450 MB | 220.9 G | n.r. | 2 | 85 |
-| std | 8 | `jvm` | 34.17 (35.56) | 6.32 (7.40) | 1.24 GB | 262.7 G | 1 / 0; 105 ms | 2 | 85 |
-| std | 8 | `native` | **13.82 (14.24)** | 3.60 (4.35) | 567 MB | 221.0 G | n.r. | 2 | 86 |
-| cedar-hot-ax | 1 | `jvm` | 7.89 (8.11) | 4.13 (4.34) | 981 MB | 86.9 G | 1 / 0; 30 ms | 2 | 94 |
-| cedar-hot-ax | 1 | `native` | **3.60 (3.62)** | 3.64 (3.66) | 190 MB | 46.4 G | n.r. | 2 | 95 |
-| cedar-hot-ax | 4 | `jvm` | 9.01 (9.96) | 2.73 (3.06) | 1.07 GB | 88.2 G | 1 / 0; 57 ms | 2 | 95 |
-| cedar-hot-ax | 4 | `native` | **3.52 (3.54)** | 1.41 (1.48) | 319 MB | 46.4 G | n.r. | 2 | 95 |
-| cedar-hot-ax | 8 | `jvm` | 12.26 (12.44) | 3.04 (3.23) | 1.10 GB | 92.1 G | 1 / 0; 70 ms | 2 | 94 |
-| cedar-hot-ax | 8 | `native` | **3.84 (3.86)** | 1.41 (1.43) | 404 MB | 46.5 G | n.r. | 2 | 94 |
-| reachability | 1 | `jvm` | 9.51 (9.59) | 7.20 (7.38) | 2.03 GB | 75.1 G | 5 / 0; 338 ms | 2 | 91 |
-| reachability | 1 | `native` | **8.12 (8.23)** | 8.21 (8.34) | 1.32 GB | 58.5 G | n.r. | 2 | 88 |
-| reachability | 4 | `jvm` | 11.29 (11.69) | 5.31 (5.51) | 2.91 GB | 79.6 G | 5 / 0; 541 ms | 2 | 85 |
-| reachability | 4 | `native` | **8.58 (8.73)** | 5.44 (7.10) | 1.74 GB | 58.5 G | n.r. | 2 | 86 |
-| reachability | 8 | `jvm` | 11.51 (12.00) | 7.15 (7.31) | 1.73 GB | 86.1 G | 5 / 0; 232 ms | 2 | 85 |
-| reachability | 8 | `native` | **8.38 (8.47)** | 6.18 (7.31) | 1.89 GB | 58.5 G | n.r. | 2 | 87 |
+| init | 1 | `jvm` | 12.69 (12.75) | 8.18 (8.20) | 591 MB | 162.0 G | 0 / 0; 0 ms | 3 | 234 |
+| init | 1 | `native` | **7.94 (7.99)** | 7.97 (8.02) | 252 MB | 136.6 G | n.r. | 3 | 234 |
+| init | 4 | `jvm` | 17.81 (18.41) | 4.90 (5.26) | 771 MB | 183.7 G | 0 / 0; 0 ms | 3 | 233 |
+| init | 4 | `native` | **8.08 (8.14)** | 2.89 (3.00) | 334 MB | 137.1 G | n.r. | 3 | 231 |
+| init | 8 | `jvm` | 24.30 (26.83) | 6.15 (6.19) | 1.18 GB | 212.9 G | 1 / 0; 92 ms | 3 | 231 |
+| init | 8 | `native` | **8.32 (8.79)** | 2.36 (3.48) | 487 MB | 137.2 G | n.r. | 3 | 236 |
+| std | 1 | `jvm` | 17.35 (17.37) | 12.72 (12.83) | 1.16 GB | 225.0 G | 1 / 0; 113 ms | 3 | 241 |
+| std | 1 | `native` | **13.20 (13.46)** | 13.23 (13.74) | 330 MB | 219.5 G | n.r. | 3 | 244 |
+| std | 4 | `jvm` | 22.90 (25.16) | 6.80 (9.00) | 1.23 GB | 257.1 G | 1 / 0; 100 ms | 3 | 248 |
+| std | 4 | `native` | **13.21 (13.72)** | 4.43 (5.97) | 450 MB | 220.9 G | n.r. | 3 | 252 |
+| std | 8 | `jvm` | 28.73 (34.17) | 6.32 (8.48) | 1.24 GB | 265.9 G | 1 / 0; 105 ms | 3 | 253 |
+| std | 8 | `native` | **13.82 (14.66)** | 3.60 (5.10) | 595 MB | 221.0 G | n.r. | 3 | 252 |
+| cedar-hot-ax | 1 | `jvm` | 7.71 (7.89) | 4.13 (4.49) | 981 MB | 87.0 G | 1 / 0; 30 ms | 3 | 253 |
+| cedar-hot-ax | 1 | `native` | **3.32 (3.60)** | 3.35 (3.64) | 190 MB | 46.4 G | n.r. | 3 | 253 |
+| cedar-hot-ax | 4 | `jvm` | 9.01 (9.72) | 2.73 (3.40) | 1.07 GB | 95.7 G | 1 / 0; 63 ms | 3 | 251 |
+| cedar-hot-ax | 4 | `native` | **3.52 (3.55)** | 1.41 (1.55) | 319 MB | 46.4 G | n.r. | 3 | 253 |
+| cedar-hot-ax | 8 | `jvm` | 10.16 (12.26) | 3.04 (3.42) | 1.10 GB | 92.4 G | 1 / 0; 59 ms | 3 | 256 |
+| cedar-hot-ax | 8 | `native` | **3.84 (3.89)** | 1.41 (1.44) | 439 MB | 46.5 G | n.r. | 3 | 257 |
+| reachability | 1 | `jvm` | 9.47 (9.51) | 7.20 (7.57) | 2.04 GB | 75.3 G | 5 / 0; 362 ms | 3 | 256 |
+| reachability | 1 | `native` | **8.12 (8.35)** | 8.21 (8.48) | 1.32 GB | 58.5 G | n.r. | 3 | 257 |
+| reachability | 4 | `jvm` | 10.72 (11.29) | 5.31 (5.71) | 2.91 GB | 83.3 G | 5 / 0; 559 ms | 3 | 261 |
+| reachability | 4 | `native` | **8.58 (8.72)** | 5.44 (7.30) | 1.78 GB | 58.5 G | n.r. | 3 | 258 |
+| reachability | 8 | `jvm` | 11.12 (11.51) | 7.15 (7.45) | 2.92 GB | 84.0 G | 5 / 0; 232 ms | 3 | 256 |
+| reachability | 8 | `native` | **8.38 (8.56)** | 6.18 (6.89) | 1.89 GB | 58.5 G | n.r. | 3 | 257 |
 <!-- END table:w7-machine:-:1,4,8 -->
 
 Paired ratios, CE native image against the JVM launcher (the two runs of a group are seconds apart),
@@ -93,7 +125,7 @@ all worker counts, then per worker count:
 <!-- BEGIN ratio:w7-machine:jvm -->
 | Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
 |---|--:|--:|--:|--:|--:|
-| `native` | 0.473 (0.243 - 0.878) | 0.735 | 0.42 | 0.752 | 24 |
+| `native` | 0.531 (0.243 - 0.890) | 0.841 | 0.42 | 0.746 | 36 |
 <!-- END ratio:w7-machine:jvm -->
 
 One worker:
@@ -101,7 +133,7 @@ One worker:
 <!-- BEGIN ratio:w7-machine:jvm:-:1 -->
 | Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
 |---|--:|--:|--:|--:|--:|
-| `native` | 0.677 (0.437 - 0.878) | 1.006 | 0.35 | 0.823 | 8 |
+| `native` | 0.688 (0.430 - 0.890) | 0.991 | 0.35 | 0.821 | 12 |
 <!-- END ratio:w7-machine:jvm:-:1 -->
 
 Four workers:
@@ -109,7 +141,7 @@ Four workers:
 <!-- BEGIN ratio:w7-machine:jvm:-:4 -->
 | Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
 |---|--:|--:|--:|--:|--:|
-| `native` | 0.464 (0.323 - 0.760) | 0.621 | 0.39 | 0.759 | 8 |
+| `native` | 0.488 (0.323 - 0.814) | 0.642 | 0.39 | 0.724 | 12 |
 <!-- END ratio:w7-machine:jvm:-:4 -->
 
 Eight workers:
@@ -117,35 +149,122 @@ Eight workers:
 <!-- BEGIN ratio:w7-machine:jvm:-:8 -->
 | Configuration | CPU time / `jvm` (median; range) | Wall / `jvm` | Peak RSS / `jvm` | Instructions / `jvm` | Pairs |
 |---|--:|--:|--:|--:|--:|
-| `native` | 0.368 (0.243 - 0.744) | 0.567 | 0.42 | 0.681 | 8 |
+| `native` | 0.402 (0.243 - 0.786) | 0.585 | 0.42 | 0.681 | 12 |
 <!-- END ratio:w7-machine:jvm:-:8 -->
 
-@@READ2@@
+Reading:
+
+- **The CE native image needs less CPU time than the JVM launcher in every group** - every corpus,
+  every worker count, every repeat (36 pairs). Median of the paired ratios: 0.69 with one worker,
+  0.49 with four, 0.40 with eight; the best case for the JVM is reachability with one worker (0.85
+  to 0.89), the worst Init with eight workers (0.24 to 0.34).
+- **The JVM's price is its JIT, and it is paid per worker.** A run of the machine on Init is 8 s of
+  CPU in the image. On HotSpot the same run is 12.7 s with one worker, 17.8 to 21.6 s with four and
+  24 to 34 s with eight: C2 needs about 3.7 s to compile the machine's 800 methods
+  (`work/status/machine-integration.md`), and until it is done every worker runs interpreted and C1
+  code. The image's CPU time hardly moves with the workers (7.9 / 8.1 / 8.3 s).
+- **Wall clock**: equal with one worker (median ratio 0.99: the JVM's compiler and collector threads
+  run beside its one worker), 0.64 times with four workers and 0.59 with eight. Init with four
+  workers: 2.9 s against 4.9 s; Std: 4.4 s against 6.8 s.
+- **Peak RSS**: 0.35 to 0.42 times the JVM's (medians; Init, four workers: 330 MB against 770 MB; Std:
+  450 MB against 1.26 GB). **Instructions**: 0.68 to 0.82 times.
+- **This is the opposite of Part II's result for mathlib with the reference engine**, where HotSpot's
+  code is better than the CE compiler's by 11 to 26 % in CPU time and a run lasts ten minutes, so the
+  warm-up is amortised. With the machine the runs are an order of magnitude shorter and its hot code
+  is a few flat loops over `int` arrays, which the ahead-of-time compiler handles as well as C2:
+  reachability, whose two heavy declarations run for seconds each (the closest thing to a long,
+  hot run among the four), is still 0.73 to 0.89 times in the image's favour. Whether the JVM catches
+  up on a mathlib-sized run of the machine is in section I.4.
 
 ## I.3 Worker count
 
-CPU time and wall clock by worker count (minimum over the repeats), and what more workers cost and
-buy against one worker: `CPU N w / 1 w` above 1.00 is the price in the primary metric, `Wall 1 w / N w`
-the speed-up.
+CPU time and wall clock by worker count (minimum over the three repeats), and what more workers cost
+and buy against one worker **of the same repeat** (median of the three repeats, range in
+parentheses; the runs of a repeat are minutes apart): `CPU N w / 1 w` above 1.00 is the price in the
+primary metric, `Wall 1 w / N w` the speed-up. The repeats were taken at host loads of 26 to 95
+(first), 74 to 87 (second) and 231 to 261 (third); the third is the upper end of every range.
 
-<!-- BEGIN scaling:w7-machine -->
-| Corpus | Configuration | CPU s, 1 w | CPU s, 4 w | CPU s, 8 w | Wall s, 1 w | Wall s, 4 w | Wall s, 8 w | CPU 4 w / 1 w | CPU 8 w / 1 w | Wall 1 w / 4 w | Wall 1 w / 8 w | Peak RSS, 8 w | Runs |
+<!-- BEGIN scaling:w7-machine:-:1:1,4,8 -->
+| Corpus | Configuration | CPU s, 1 w | CPU s, 4 w | CPU s, 8 w | Wall s, 1 w | Wall s, 4 w | Wall s, 8 w | CPU 4 w / 1 w (median; range) | CPU 8 w / 1 w (median; range) | Wall 1 w / 4 w | Wall 1 w / 8 w | Peak RSS, 8 w | Runs |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| init | `jvm` | 12.75 | 18.41 | 24.30 | 8.18 | 4.90 | 6.15 | 1.44 | 1.91 | 1.67 | 1.33 | 1.18 GB | 2/2/2 |
-| init | `native` | 7.94 | 8.08 | 8.32 | 7.97 | 2.89 | 2.36 | 1.02 | 1.05 | 2.75 | 3.38 | 487 MB | 2/2/2 |
-| std | `jvm` | 17.35 | 22.90 | 34.17 | 12.72 | 6.80 | 6.32 | 1.32 | 1.97 | 1.87 | 2.01 | 1.24 GB | 2/2/2 |
-| std | `native` | 13.20 | 13.21 | 13.82 | 13.23 | 4.43 | 3.60 | 1.00 | 1.05 | 2.99 | 3.68 | 567 MB | 2/2/2 |
-| cedar-hot-ax | `jvm` | 7.89 | 9.01 | 12.26 | 4.13 | 2.73 | 3.04 | 1.14 | 1.55 | 1.51 | 1.36 | 1.10 GB | 2/2/2 |
-| cedar-hot-ax | `native` | 3.60 | 3.52 | 3.84 | 3.64 | 1.41 | 1.41 | 0.98 | 1.07 | 2.58 | 2.58 | 404 MB | 2/2/2 |
-| reachability | `jvm` | 9.51 | 11.29 | 11.51 | 7.20 | 5.31 | 7.15 | 1.19 | 1.21 | 1.36 | 1.01 | 1.73 GB | 2/2/2 |
-| reachability | `native` | 8.12 | 8.58 | 8.38 | 8.21 | 5.44 | 6.18 | 1.06 | 1.03 | 1.51 | 1.33 | 1.89 GB | 2/2/2 |
-<!-- END scaling:w7-machine -->
+| init | `jvm` | 12.69 | 17.81 | 24.30 | 8.18 | 4.90 | 6.15 | 1.44 (1.40 - 1.70) | 2.11 (1.91 - 2.69) | 1.56 | 1.32 | 1.18 GB | 3/3/3 |
+| init | `native` | 7.94 | 8.08 | 8.32 | 7.97 | 2.89 | 2.36 | 1.02 (1.01 - 1.05) | 1.09 (1.04 - 1.11) | 2.66 | 2.29 | 487 MB | 3/3/3 |
+| std | `jvm` | 17.35 | 22.90 | 28.73 | 12.72 | 6.80 | 6.32 | 1.45 (1.32 - 1.49) | 1.97 (1.65 - 2.04) | 1.41 | 1.50 | 1.24 GB | 3/3/3 |
+| std | `native` | 13.20 | 13.21 | 13.82 | 13.23 | 4.43 | 3.60 | 1.01 (1.00 - 1.08) | 1.08 (1.05 - 1.22) | 2.40 | 2.81 | 595 MB | 3/3/3 |
+| cedar-hot-ax | `jvm` | 7.71 | 9.01 | 10.16 | 4.13 | 2.73 | 3.04 | 1.26 (1.14 - 1.31) | 1.47 (1.32 - 1.60) | 1.34 | 1.33 | 1.10 GB | 3/3/3 |
+| cedar-hot-ax | `native` | 3.32 | 3.52 | 3.84 | 3.35 | 1.41 | 1.41 | 0.98 (0.97 - 1.21) | 1.07 (1.07 - 1.34) | 2.35 | 2.53 | 439 MB | 3/3/3 |
+| reachability | `jvm` | 9.47 | 10.72 | 11.12 | 7.20 | 5.31 | 7.15 | 1.17 (1.13 - 1.27) | 1.21 (1.17 - 1.29) | 1.32 | 1.06 | 2.92 GB | 3/3/3 |
+| reachability | `native` | 8.12 | 8.58 | 8.38 | 8.21 | 5.44 | 6.18 | 1.06 (1.04 - 1.06) | 1.03 (1.03 - 1.04) | 1.19 | 1.26 | 1.89 GB | 3/3/3 |
+<!-- END scaling:w7-machine:-:1:1,4,8 -->
 
-@@READ3@@
+Reading (the image; the JVM launcher pays 1.2 to 2.7 times its one-worker CPU time for eight
+workers and is not a candidate):
+
+- **More workers cost CPU time although they add no work.** The image executes the same
+  instructions at every worker count (Init: 136.6 / 137.1 / 137.2 G with 1 / 4 / 8 workers). At host
+  loads below 100 (first two repeats) four workers need +0 to +3 % CPU time against one on Init, Std
+  and the Cedar slice (Init +1.1 / +2.5 %, Std +0.1 / +1.4 %, slice -1.5 / -3.2 %) and eight need +4 to
+  +11 % (Init +4.1 / +10.7 %, Std +4.7 / +8.4 %, slice +6.6 / +6.9 %): the workers share the memory
+  system, and the machine's time is hash-consing probes and array growth (the same effect as with
+  the reference engine, `rlvm-driver/README.md`). **The busier the host, the dearer a worker**: at
+  load 250 (third repeat) four workers cost +5 to +21 % and eight +9 to +34 %.
+- **What they buy.** Four workers: 2.3 to 2.7 times the speed of one on Init, Std and the slice
+  (medians; 2.8 and 3.0 on Init and Std in the quietest repeat). Eight workers: 18 to 19 % less wall clock than four
+  on Init and Std at their best (2.36 against 2.89 s, 3.60 against 4.43 s), nothing on the Cedar
+  slice (1.41 s both), and reachability does not scale beyond 1.5 times at any count (two heavy
+  declarations decide its wall clock; the scheduler's claim cut, `work/status/integration.md` "What
+  is open").
+- **Six workers** (the driver's proposal for `--threads auto`) could only be measured in the last
+  hold of the lock, at a host load of 240 to 266, where wall clock means nothing (Init with eight
+  workers: 6.2 s there, 2.36 s an hour earlier). CPU seconds, minimum of three runs with six workers,
+  against the single runs of the third repeat with 1 / 4 / 8 workers in the same minutes: Init 8.57
+  (8.23 / 8.67 / 9.01), Std 14.57 (13.46 / 14.57 / 16.42), Cedar slice 3.83 (3.32 / 4.00 / 4.45),
+  reachability 8.35 (8.43 / 8.72 / 8.74). In these disturbed runs six workers cost what four cost and
+  less than eight; against one worker that is +4 %, +8 %, +15 % and -1 %, where four workers were at
+  +5 %, +8 %, +21 % and +3 %. They do not speak against six and cannot confirm it: the quiet pair
+  of one and six workers that the gate needs does not exist yet.
+- **The gate of `rlvm-driver/README.md`** ("the largest N <= 6 whose CPU time exceeds that of one
+  worker by at most 5 %"), medians of the three repeats: four workers pass on Init, Std and the
+  slice (1.02, 1.01, 0.98) and are just above it on reachability (1.06; 1.04 to 1.06); eight fail
+  everywhere but on reachability (1.09, 1.08, 1.07; 1.03).
+- **Decision: the run line keeps `--threads 4`** (and `threads: 4`, the CPU slots the arena reserves).
+  By the project's order of criteria - CPU time first, then wall clock - four is the largest measured
+  count at which the image's CPU time is still that of one worker; eight buy 18 % of wall clock on
+  two of four corpora for 4 to 11 % more CPU time on three of them, more on a busy host. Six is the
+  candidate the driver's owner proposes (expected: most of eight's wall clock at four's CPU time);
+  it needs a quiet host and a mathlib run with the machine to be judged (his `threads-gate.sh
+  --native --engine machine` on mathlib was in the lock queue at 14:00Z). Changing it later is two
+  numbers in `scripts/arena/rlvm.yaml`.
 
 ## I.4 mathlib (reference engine), one run per launcher
 
-@@MATHLIB@@
+The reference engine did not change between the wave-5 check and this series (the same pipeline
+jars; `rlvm-main` differs only by the run-defaults plumbing of section I.7, which no engine uses), so
+the mathlib runs of 12:56Z and 13:03Z are the runs of this gate: one per launcher, eight workers, the
+`-O3` image, the same container, through `bench/track/track.py` (`work/perf-history/mathlib.jsonl`,
+note `wave5-check`; distribution `work/pipeline-check/dist`), at a host load of 9 to 14 - quieter
+than anything this afternoon offered (load 85 to 260).
+
+| Corpus | Workers | Launcher | CPU s | Wall s | Peak RSS | Instructions | Load |
+|---|--:|---|--:|--:|--:|--:|--:|
+| mathlib | 8 | `jvm` | **500.5** | 97.4 | 12.85 GiB | 5,971 G | 14 |
+| mathlib | 8 | `native` | 624.6 | 120.3 | 7.15 GiB | 8,533 G | 9 |
+| mathlib, `-X load=pipelined` | 8 | `jvm` | **501.0** | 73.2 | 12.90 GiB | 5,895 G | 13 |
+| mathlib, `-X load=pipelined` | 8 | `native` | 605.2 | 90.9 | 6.76 GiB | 8,479 G | 13 |
+
+- **For the reference engine on mathlib the JVM launcher still needs less CPU time**: 0.80 times
+  the image's (0.83 pipelined), 0.81 times the wall clock, with 5.7 GiB more memory (its heap
+  setting). The other large corpora of the same check: navier-stokes-euler 0.82 (175.3 against
+  214.6 s), cslib 0.93 (125.2 / 134.1 s), con-leche 1.01 (60.2 / 59.8 s). Part II measured 0.79 to
+  0.89 on mathlib with this morning's jars: the picture held while the engine became twice as fast.
+- **What that decides: nothing for the shipped binary.** The reference engine is the fallback and the
+  re-check engine; with the machine as primary engine it checks the inductive blocks and what the
+  machine declines, and on every corpus it was run on to the end here the machine declines nothing
+  (section I.6). A mathlib
+  run of the reference engine is not what the arena will see.
+- **A four-worker pair** (the run line's count) was queued behind the measurement lock
+  (`queue2.sh B`); the table below is filled if it ran, else Part II section 2.3 has the four-worker
+  pair of this morning (JVM 945.8 s, image 1,068.6 s: 0.89).
 
 <!-- BEGIN table:w7-mathlib-ref -->
 (no measurements yet)
@@ -153,15 +272,121 @@ the speed-up.
 
 ## I.5 Heap and collector flags
 
-@@FLAGS@@
+**The image** (what ships): `-O3 --gc=serial --no-fallback -R:+ExitOnOutOfMemoryError
+-R:MaxHeapSize=13g`, no `-march`, no nursery flag - what `scripts/build.sh` and
+`scripts/arena/build.sh` build today.
+
+- `-O3`: measured by the machine's integrator in this container two hours earlier (`-O2` against
+  `-O3`, one worker): Init 9.61 -> 7.84 s CPU, Std 15.70 -> 12.82, Cedar slice 3.77 -> 3.21,
+  reachability 9.15 -> 7.75 (-15 to -18 %; an earlier pair of his series, on a busier host: Init
+  10.11 -> 9.08, Std 16.18 -> 14.85, slice 3.84 -> 3.59, -7 to -10 %); reference engine Init 15.41 ->
+  13.82. `-march=native`: no change. It was the arena build's level already; since this wave it is
+  `build.sh`'s default too.
+- Collector: CE offers the image `serial` and `epsilon`. How much there is to collect is visible on
+  the JVM launcher, whose runs are logged (column "Collections" in I.2; 1 GB nursery): zero to one
+  young collection per run on Init, Std and the Cedar slice, five on reachability, never a full one,
+  30 to 710 ms of pauses in runs of 8 to 37 CPU-seconds. The machine's working memory is `int` arrays
+  that live as long as a session. The image's own collections were not recorded; `epsilon` (never
+  collect) could save at most that order of magnitude and turns a mathlib-class input into an
+  out-of-memory risk: not built, not measured.
+- Heap limit: `-R:MaxHeapSize=13g` is a limit, not a reservation - the image's RSS is what it uses
+  (Init 250 to 490 MB, Std 330 to 600 MB, reachability 1.3 to 1.9 GB above; mathlib with the reference
+  engine 7.15 GiB). 13 GB leaves 3 GB of the runner's 16 GB and is above the memory account's 12 GiB
+  decline, so an input that does not fit is declined, not killed.
+- Nursery (`-Xmn`): the table below, if the measurement got its turn at the lock (`queue2.sh D`).
+
+<!-- BEGIN table:w7-machine-native-heap -->
+(no measurements yet)
+<!-- END table:w7-machine-native-heap -->
+
+**The JVM launcher** (not shipped; the launcher of guards and of `scripts/dev.sh dist`): flags
+unchanged, `-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g`.
+Part II sections 3 to 5 measured the alternatives with the reference engine (Serial against Parallel
+and G1: no CPU difference, more memory; C2 against Graal: none; HotSpot's own compiler thread count:
+0.92 times the CPU time with eight workers; a 10 GB heap: no CPU cost). None of them can bring the
+JVM launcher near the image for the machine (0.40 to 0.69 above), so they were not the first use of
+the lock; the table below is filled if they ran (`queue2.sh E`).
+
+<!-- BEGIN table:w7-machine-jvm -->
+(no measurements yet)
+<!-- END table:w7-machine-jvm -->
 
 ## I.6 What the machine accepted in these runs
 
-@@ACCEPT@@
+The verdicts and the machine's own counters, taken outside the timed runs (`work/steward/w7/accept.sh`:
+the image of the measured distribution, `-X engine=machine -X stats-file=...`, four workers, on the
+host's efficiency cores; `work/steward/w7/stats/*.json`): the machine decided every unit it was given
+and the reference engine re-checked none, so the figures of this part contain no fallback work.
+
+| Corpus | Verdict | Units given to the machine | Accepted | Rejected | Declined | Reference re-checks | Driver disagreements |
+|---|---|--:|--:|--:|--:|--:|--:|
+| Init | accept | 57,938 | 57,938 | 0 | 0 | 0 | 0 |
+| Std | accept | 100,096 | 100,096 | 0 | 0 | 0 | 0 |
+| Cedar slice (`cedar-hot-ax`) | accept | 8,064 | 8,064 | 0 | 0 | 0 | 0 |
+| reachability | accept | 4,224 | 4,224 | 0 | 0 | 0 | 0 |
+| cedar | accept | 144,098 | 144,098 | 0 | 0 | 0 | 0 |
+| con-leche | accept | 36,274 | 36,274 | 0 | 0 | 0 | 0 |
+| navier-stokes-euler | accept | 124,850 | 124,850 | 0 | 0 | 0 | 0 |
+| cslib | accept | 397,608 | 397,608 | 0 | 0 | 0 | 0 |
+| mathlib | not run to the end in this series | - | - | - | - | - | - |
+
+The remaining units of a file (inductive blocks, quotient declarations) are checked by the
+environment pass with the reference kernel, as before. All 72 + 12 timed runs of the matrix ended
+with exit status 0 (accept).
 
 ## I.7 What was changed, what was not measured, how to repeat
 
-@@CHANGED@@
+**Changed in this wave** (all in the pipeline owner's modules):
+
+- `scripts/build.sh`: `--opt` defaults to **3** (it was 2), so `scripts/dev.sh dist-native` builds the
+  image the arena build builds (request of the machine integrator; measured by him: -10 to -18 % CPU for
+  the machine, about -10 % for the reference engine; the build takes 2.5 minutes and 900 CPU-seconds
+  instead of 1 to 2 minutes and 500). `scripts/arena/build.sh` has used `--opt 3` since wave 4.
+- `scripts/build.sh`: **Oracle GraalVM is used only on request** (`--pgo`; OWNER-NOTES item 11). Until
+  today a default build made the PGO image whenever `.toolchain/oracle-graalvm-25` existed. No script
+  downloads it. New `--train-arg ARG` passes arguments to the PGO training runs (`-X engine=machine`).
+- `scripts/build.sh`: the shared distribution `work/dist` is **versioned**: each build is installed as
+  `work/dist.d/<UTC time>-<sha256 prefix of the RLVM jars>-<jvm|native>` and `work/dist` is a symbolic
+  link switched by one `rename(2)`. `scripts/gate.sh`, `scripts/slice.sh`, `bench/track/track.py`,
+  `ladder.py` and `scripts/platform-matrix.py` resolve the link once at their start. Old versions are
+  deleted when they are neither among the newest four nor younger than 90 minutes.
+  `scripts/dev.sh dist-versions` lists them.
+- `scripts/platform-matrix.py` finds slices (`cedar-hot-ax`); `scripts/platform-report.py` has the
+  worker-scaling table (`scaling:TAG`).
+- `rlvm-api` / `rlvm-main`: `EngineProvider.runDefaults(Map)` - the primary engine may prefer run
+  settings (the machine's session cap, request of the machine integrator); applied under the command
+  line. No provider declares one yet, so no run changed.
+
+**Not changed**: the default engine (reference; the machine registers with priority 10 and its
+workflow raises it), the parent pom's module list, the JVM launcher's flags, the image's collector
+and heap limit.
+
+**Not measured, and why**
+
+- **The machine on the JVM launcher beyond Std size** unless section I.4 says otherwise, and **x86-64**
+  (no such machine here).
+- **Oracle GraalVM PGO with the machine**: it needs three more image builds under the build lock
+  (`work/build/.lock`), for which six builds of other agents were waiting at 13:50Z and ten at 13:53Z.
+  Part II has the PGO image for the reference engine (small corpora: 0.82 and 0.91 times the JVM
+  launcher's CPU time with eight workers and with one, where the CE image needs 0.92 and 1.03; mathlib
+  +2 % against the JVM launcher, the CE image +12 %). It is a measurement only in any case (owner's
+  decision: nothing that ships uses Oracle GraalVM).
+- **The machine's staging switches** (`warm,gated,expect`, `probes`: -3 to -9 % CPU in
+  `work/status/machine-integration.md`): they are the machine workflow's to turn on; the soundness
+  review found wrong accepts under `probes` and `facts` at 13:48Z (`work/status/requests.log`), so
+  v0 is the configuration that could ship today.
+- **A quiet host.** The load average was 26 to 190 during the series; the absolute CPU times are
+  several percent above the wave-4 integrator's (Init, one worker: 7.94 s here, 7.77 s at load 7 to
+  10), the ratios inside a group are what the decision rests on.
+
+**To repeat** (about 45 minutes of container time):
+
+```
+scripts/build.sh --published --no-pgo --opt 3 --dist work/steward/w7/dist        # frozen distribution
+work/steward/w7/queue2.sh A B C D E F G        # the holds of the measurement lock, as run (see the script)
+work/steward/w7/assemble.py                    # this part: part1.md + scripts/platform-report.py --update
+bench/track/benchmarks.py                      # docs/BENCHMARKS.md
+```
 
 # Part II - the rehearsal with the reference engine (wave 4)
 

@@ -299,6 +299,32 @@ class EnvBuilderTest {
     }
 
     @Test
+    void aDeclineSaysWhy() {
+        // The cause rlvm-inductive states for its decline is part of the unit's message ...
+        Fixture f = new Fixture();
+        unitLike(f, "I").end();
+        f.finish();
+        Pass p = new Pass(f);
+        p.blocks.generateFailure = new ResourceException(Reason.UNSUPPORTED_INPUT);
+        p.blocks.failureDetail = "the export has no record for the recursor 'I.rec'";
+        assertEquals(0, p.all());
+        assertEquals(Reason.UNSUPPORTED_INPUT, p.env.failureReason());
+        assertTrue(p.env.failureMessage().contains("gave up: UNSUPPORTED_INPUT (the export has no record for the"
+                + " recursor 'I.rec')"), p.env.failureMessage());
+
+        // ... and a decline of the kernel operations (no cause from rlvm-inductive) says what the reason means.
+        f = new Fixture();
+        unitLike(f, "I").end();
+        f.finish();
+        p = new Pass(f);
+        p.blocks.compareFailure = new ResourceException(Reason.STACK_DEPTH);
+        assertEquals(0, p.all());
+        assertEquals(Reason.STACK_DEPTH, p.env.failureReason());
+        assertTrue(p.env.failureMessage().contains("gave up: STACK_DEPTH (the judgments of the environment pass ran"
+                + " out of stack"), p.env.failureMessage());
+    }
+
+    @Test
     void blockInputFollowsAllAndCtorsLists() {
         Fixture f = new Fixture();
         int type1 = f.sort(f.succ(f.zero()));

@@ -71,4 +71,21 @@ class TierEquivalenceTest {
         long calls = equivalent(f, K1, -1);
         assertTrue(calls > 0, "compiled code ran");
     }
+
+    /** A tool: -Dt2.files=a.ndjson,b.ndjson [-Dt2.switches=..] [-Dt2.depth=N] [-Dt2.variant="k v k v"]. */
+    @Test
+    @Tag("slow")
+    void files() throws Exception {
+        String list = System.getProperty("t2.files");
+        assumeTrue(list != null);
+        String sw = System.getProperty("t2.switches", K1);
+        int depth = Integer.getInteger("t2.depth", -1);
+        String[] variant = System.getProperty("t2.variant", "").trim().isEmpty() ? new String[0] : System.getProperty("t2.variant").trim().split("\\s+");
+        for (String f : list.split(",")) {
+            assumeTrue(Harness.exists(f), f);
+            long t0 = System.nanoTime();
+            equivalent(f, sw, depth, variant);
+            System.out.println("[t2] " + f + ": " + (System.nanoTime() - t0) / 1_000_000 + " ms");
+        }
+    }
 }

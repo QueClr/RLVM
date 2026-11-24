@@ -45,6 +45,8 @@ final class Values {
     private static final int W0_HCLASS_SHIFT = Layout.FLAG_SHIFT + Layout.HCLASS_SHIFT;
     /** aux of a SUSP made by a {@code let} (the flag LET is a function of identity, I-FLAG). */
     static final int SUSP_LET = 1;
+    /** Copies of at most this many words are loops; longer ones {@code System.arraycopy} (NOTES-M1 section 5). */
+    static final int SMALL_COPY = 8;
 
     /**
      * Session state private to this package (caches, counters, scratch of its own): add fields here
@@ -69,9 +71,15 @@ final class Values {
          * cache levels (NOTES-M1 section 3). Records made by other code have no entry and are read from vh.
          */
         long[] openBits = new long[1 << 10];
-        /** Words of {@link #openBits} that may be non-zero: [openLo, openHi). */
-        int openLo = Integer.MAX_VALUE;
-        int openHi;
+        /**
+         * Words of {@link #openBits} that may be non-zero: [openLo, openTop]. Records are appended, so the word of
+         * the last record made is the highest one; the lowest is the word of the session's first record.
+         */
+        int openLo;
+        int openTop = -1;
+        static final int REST_SLOTS = 64;
+        /** REST chain cache of {@code Runs.restOf}: cells (eb, n, epoch, chain), direct-mapped, verified by content. */
+        final int[] restCache = new int[Layout.CELL_WORDS * REST_SLOTS];
 
         /** Session reset (ISA 1.6): forget everything, in O(used) (three fixed arrays of 128 words; CHEAD by epoch). */
         void reset(Machine m) {
@@ -79,18 +87,19 @@ final class Values {
             Arrays.fill(litImp, 0);
             if (m.epoch == 1) {
                 Arrays.fill(chead, 0); // the epoch counter wrapped: stale stamps could match again
+                Arrays.fill(restCache, 0);
             }
-            if (openHi > openLo) {
-                Arrays.fill(openBits, openLo, openHi, 0L); // O(used / 32)
+            if (openTop >= openLo) {
+                Arrays.fill(openBits, openLo, Math.min(openTop + 1, openBits.length), 0L); // O(used / 32)
             }
-            openLo = Integer.MAX_VALUE;
-            openHi = 0;
             if (openBits.length > 1 << 16) {
                 openBits = new long[1 << 10]; // back to the base size after a large session
             }
+            openLo = Math.min(m.vbase >>> 5, openBits.length); // Machine.reset has set the next session's first record
+            openTop = -1;
         }
 
-        /** Records the OPEN flag of the new record {@code r} (made with {@code w0}). */
+        /** Records the OPEN flag of the new record {@code r} (made with {@code w0}); records are appended (r grows). */
         void mark(int r, int w0) {
             int w = r >>> 5;
             if (w >= openBits.length) {
@@ -98,12 +107,7 @@ final class Values {
             }
             // FLAG_SHIFT is 16 and OPEN is flag bit 0: (w0 >>> 15) & 2 is 2 for an OPEN record
             openBits[w] |= (1L | (w0 >>> (Layout.FLAG_SHIFT - 1) & 2)) << ((r & 31) << 1);
-            if (w < openLo) {
-                openLo = w;
-            }
-            if (w >= openHi) {
-                openHi = w + 1;
-            }
+            openTop = w;
         }
 
         /** Start of a declaration. */
@@ -114,7 +118,7 @@ final class Values {
          * the OPEN bit table (1/128 of the records); the fixed caches are working storage and are not counted.
          */
         long bytes() {
-            return openHi > openLo ? 8L * (openHi - openLo) : 0;
+            return openTop >= openLo ? 8L * (openTop + 1 - openLo) : 0;
         }
     }
 
@@ -229,7 +233,8 @@ final class Values {
      */
     static int mkConst(Machine m, int row, int levelList) {
         int[] c = m.x1.chead;
-        int i = (Hash.cell(row, levelList) & ((1 << Ext.CHEAD_LOG2) - 1)) << Layout.CELL_SHIFT;
+        // two independent multiplications and the top bits (Hash.cell is two multiplications in sequence + fin)
+        int i = ((row * 0x9E3779B1 ^ levelList * 0x85EBCA6B) >>> (32 - Ext.CHEAD_LOG2)) << Layout.CELL_SHIFT;
         if (c[i] == row && c[i + 1] == levelList && c[i + 2] == m.epoch) {
             return c[i + 3];
         }
@@ -416,9 +421,19 @@ final class Values {
         int mask = tab.length - 1;
         int slot = hash & mask;
         int key0 = w0 & Hash.W0_KEY_MASK;
+        if (Runs.Stat.ON) {
+            Runs.Stat.cloProbe++;
+            Runs.Stat.cloKeptH[Runs.Stat.kept(m, frame)]++;
+            Runs.Stat.cloKind[w0 >>> Layout.KIND_SHIFT]++;
+        }
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
+                if (Runs.Stat.ON) {
+                    Runs.Stat.cloNew++;
+                    Runs.Stat.cloNewKeptH[Runs.Stat.kept(m, frame)]++;
+                    Runs.Stat.cloNewKind[w0 >>> Layout.KIND_SHIFT]++;
+                }
                 return add(m, slot, hash, w0 | (m.rs[frame] & Runs.RUN_OPEN) << Runs.RUN_OPEN_TO_W0, term, frame, ls);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
@@ -558,16 +573,20 @@ final class Values {
             return m.fail(MachineErrors.E_LIMIT);
         }
         int[] x = m.X;
-        int h = Hash.seed(n);
+        int h = 0;
         for (int i = 0; i < n; i++) {
-            h = Hash.step(h, x[xb + i]);
+            h += argHash(x[xb + i], i);
         }
-        int hash = Hash.neu(head, h);
+        int hash = neuHash(head, h);
         int[] tab = m.vtab;
         int[] v = m.vh;
         int mask = tab.length - 1;
         int slot = hash & mask;
         int key0 = Layout.NEU << Layout.KIND_SHIFT | n;
+        if (Runs.Stat.ON) {
+            Runs.Stat.neuProbe++;
+            Runs.Stat.neuLenH[Math.min(32, n)]++;
+        }
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
@@ -580,8 +599,27 @@ final class Values {
                     return e & Layout.TAB_INDEX_MASK;
                 }
             }
+            if (Runs.Stat.ON) {
+                Runs.Stat.neuSteps++;
+            }
             slot = (slot + 1) & mask;
         }
+    }
+
+    /**
+     * The contribution of argument {@code v} at position {@code j} to the hash of a NEU: the hash is
+     * {@link #neuHash} of the head and the SUM of the contributions, so the multiplications of a spine do not
+     * depend on each other (the chained {@code Hash.step} cost one dependent multiplication per argument). The
+     * hash of a NEU is private to this class: it is kept in word c of the record, which is what
+     * {@code Hash.ofRecord} reads when a table grows or is reset.
+     */
+    private static int argHash(int v, int j) {
+        int t = (v + j * 0x9E3779B1) * 0x85EBCA6B;
+        return t ^ (t >>> 15);
+    }
+
+    private static int neuHash(int head, int sum) {
+        return Hash.fin(sum + head * 0xC2B2AE35 + (Layout.NEU << Layout.KIND_SHIFT));
     }
 
     private static boolean sameArgs(int[] rs, int sb, int[] x, int xb, int n) {
@@ -605,20 +643,25 @@ final class Values {
         }
         int[] rs = m.rs;
         int[] x = m.X;
-        int h = Hash.seed(total);
+        int h = 0;
         int pb = pre + Layout.RUN_H;
         for (int i = 0; i < pn; i++) {
-            h = Hash.step(h, rs[pb + i]);
+            h += argHash(rs[pb + i], i);
         }
         for (int i = 0; i < n; i++) {
-            h = Hash.step(h, x[xb + i]);
+            h += argHash(x[xb + i], pn + i);
         }
-        int hash = Hash.neu(head, h);
+        int hash = neuHash(head, h);
         int[] tab = m.vtab;
         int[] v = m.vh;
         int mask = tab.length - 1;
         int slot = hash & mask;
         int key0 = Layout.NEU << Layout.KIND_SHIFT | total;
+        if (Runs.Stat.ON) {
+            Runs.Stat.neuProbe++;
+            Runs.Stat.neuExtProbe++;
+            Runs.Stat.neuLenH[Math.min(32, total)]++;
+        }
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
@@ -655,6 +698,11 @@ final class Values {
         int total = pn + n;
         int[] x = m.X;
         int[] vh = m.vh;
+        if (Runs.Stat.ON) {
+            Runs.Stat.neuNew++;
+            Runs.Stat.neuNewLenH[Math.min(32, total)]++;
+            Runs.Stat.wordsSpine += 2 + total;
+        }
         int w0 = vh[from << Layout.REC_SHIFT] & W0_INHERIT;
         // OPEN = or over head and arguments: stop at the first open one (each test loads a record header)
         for (int i = n - 1; i >= 0 && (w0 & Layout.W0_OPEN) == 0; i--) {
@@ -667,8 +715,17 @@ final class Values {
         }
         int[] rs = m.rs; // addRun may have reallocated the slab
         int sb = run + Layout.RUN_H;
-        System.arraycopy(rs, pre + Layout.RUN_H, rs, sb, pn);
-        System.arraycopy(x, xb, rs, sb + pn, n);
+        if (pn != 0) {
+            System.arraycopy(rs, pre + Layout.RUN_H, rs, sb, pn);
+            sb += pn;
+        }
+        if (n <= SMALL_COPY) {
+            for (int i = 0; i < n; i++) { // a spine has 3 arguments on average: a call of arraycopy costs more than the loop
+                rs[sb + i] = x[xb + i];
+            }
+        } else {
+            System.arraycopy(x, xb, rs, sb, n);
+        }
         return add(m, slot, hash, Layout.NEU << Layout.KIND_SHIFT | w0 | total, head, run, hash);
     }
 

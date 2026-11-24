@@ -17,7 +17,7 @@ trusted; comparison is structural (`TermOps.eqv`), never definitional.
 |---|---|
 | `BlockInput` | inputs of a block + the export's claims (names stay names, numbers stay `long`). Filled by `rlvm-admit`. |
 | `InductiveAdmission(store, ops)` `.generate(in, out)` | the official `add_inductive`: R03 6.1 - 6.12, checklist 27 - 48 (and the name half of 51). Throws `KernelException` (reject) or `ResourceException` (decline). |
-| `GeneratedBlock` | derived facts: `numNested`, `isRec`, `isReflexive`, `elimOnlyAtZero`, `k`, indices per type, fields and index per constructor, per recursor name / type / indices / rules / major's inductive type, `recLevelParams`, `recNumMotives`, `recNumMinors`; `declineReason`. Terms are overlay ids. |
+| `GeneratedBlock` | derived facts: `numNested`, `isRec`, `isReflexive`, `elimOnlyAtZero`, `k`, indices per type, fields and index per constructor, per recursor name / type / indices / rules / major's inductive type, `recLevelParams`, `recNumMotives`, `recNumMinors`; `declineReason`, `declineDetail`. Terms are overlay ids. |
 | `RecordCompare(store, ops)` `.compare(in, gen)` | checklist 49 - 51; `RECORD_MISMATCH` on the first difference; then `ResourceException(gen.declineReason)` if that is set; returns the set of derived recursors that have an exported record (first 64). |
 | `QuotAdmission(store, ops)` `.admit(cid)`, `.canonicalType(kind)` | R03 section 5, checklist 18 - 24. |
 
@@ -48,6 +48,17 @@ Wave 4 (all additive, null / unused = the old behaviour):
   and differs from the canonical type is `QUOT_MISMATCH` once the file is completely loaded (the
   comparison is by name; the official post-check compares whatever the order of the file) and
   `FORWARD_REFERENCE` only while it is loading.
+
+Wave 7 (additive): **every decline of this module states its cause.** `ResourceException` (rlvm-api)
+carries only the reason, so the words are kept here: `InductiveAdmission.lastDeclineDetail()`,
+`RecordCompare.lastDeclineDetail()`, `QuotAdmission.lastDeclineDetail()` return the cause of the
+`ResourceException` the last call of `generate` / `compare` / `admit` / `canonicalType` raised (null
+if it returned or rejected, or if the exception came from the kernel operations - a budget, the stack),
+and `GeneratedBlock.declineDetail` goes with `declineReason`. `rlvm-admit` puts the text into the
+message of the unit ("gave up: UNSUPPORTED_INPUT (the export has no record for the recursor 'T.rec',
+which the official kernel generates ...)"); before, 14 of the 20 non-metadata declines of the tutorial
+mutant corpus said only "gave up: UNSUPPORTED_INPUT". No check and no outcome changed.
+
 Conventions the skeleton left open: `BlockInput.ctorClaimInduct`, `recRuleCtorName` and the elements
 of `recAll` are NAME ids; `typeCtorStart/Count` ranges must not overlap; constructor records that no
 type lists come after the ranges; `GeneratedBlock.ctorIndex/ctorNumFields` are -1 for those;

@@ -21,6 +21,9 @@ final class ScriptedBlockOps implements BlockOps {
     RuntimeException generateFailure;
     RuntimeException compareFailure;
     Reason quotFailure;
+    /** What {@link #declineDetail()} answers after a scripted failure of {@code generate} / {@code compare}. */
+    String failureDetail;
+    private String detail;
     int generates;
     int compares;
     int quots;
@@ -31,7 +34,9 @@ final class ScriptedBlockOps implements BlockOps {
     public void generate(BlockInput in, GeneratedBlock out) {
         generates++;
         lastInput = in;
+        detail = null;
         if (generateFailure != null) {
+            detail = failureDetail;
             throw generateFailure;
         }
         script.accept(in, out);
@@ -40,10 +45,22 @@ final class ScriptedBlockOps implements BlockOps {
     @Override
     public long compare(BlockInput in, GeneratedBlock generated) {
         compares++;
+        detail = null;
         if (compareFailure != null) {
+            detail = failureDetail;
             throw compareFailure;
         }
         return present == -1L ? (generated.recCount >= 64 ? -1L : (1L << generated.recCount) - 1) : present;
+    }
+
+    @Override
+    public String declineDetail() {
+        return detail;
+    }
+
+    @Override
+    public void clearDeclineDetail() {
+        detail = null;
     }
 
     @Override

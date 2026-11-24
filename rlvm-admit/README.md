@@ -114,8 +114,11 @@ irregular records are decided only by that replay. Such files were declined unti
 
 **When.** The environment pass works in file order, exactly as before, until the first unit that file
 order cannot decide: a unit one of whose kernel-checked roots mentions something that was not declared
-when the loader wrote it (`depMax(root) > rank`: one word per root; the value of a theorem that is a proof
-block is decoded for the test only in files with at most 2^20 block records), or an inductive / quot unit
+when the loader wrote it (`depMax(root) > rank`: one word per root; for the value of a theorem that is a
+proof block the word is `ProofBlocks.hasUnresolved(block)`, and only a block that has something unresolved
+is decoded to see whether its root reaches it - wave 7; before, every proof block of a file with at most
+2^20 block records was decoded here and again by the worker, and larger files were not looked at), or an
+inductive / quot unit
 that file order declines (`FORWARD_REFERENCE`, `UNSUPPORTED_INPUT`, `UNSUPPORTED_PRELUDE`). The whole
 file must be loaded (`Store.loadComplete()`). Files in declaration order never get there: exporter output
 is admitted by the same code as before (environment pass on Init: 49 - 67 ms thread CPU with the new test
@@ -280,6 +283,70 @@ was passed in file order while the file was loading), the pass rejects at the fr
 - Generated constants, late names: declined as described above.
 - The official order of large files (see "Known gaps").
 
+## Wave 7 (2026-11-24): cost with the machine as engine, causes of declines
+
+**What admission costs.** `perf record` (4 kHz; mathlib 1 kHz, 8 workers) of the symbolised CE native
+image `-O3` in the arena-shaped container, `-X engine=machine`, one worker, jars of 11:57Z (the state
+before this wave; `work/admit7/perf/*-base.byclass.txt`, `*-base.syms.txt`; scripts `work/admit7/perf/`):
+
+@@SHARE@@
+
+So the environment pass and the per-unit admission together are about half a percent of the process: they
+are not what the rest of the pipeline costs (reader, loader, proof-block decoding: 13 - 21 %). Thread CPU
+time of the whole environment pass (JVM, `EnvPassBench`, real loader + `rlvm-inductive` + reference
+kernel, warm, driven one unit per call as the driver does, session reset at 16 MiB):
+
+@@ENVPASS@@
+
+**What was removed.**
+
+1. *Derived terms of a block are given back at once* (`EnvBuilder.blockUnit`: `Overlay.mark()` before
+   `generate`, and after the commit `KernelOps.begin(MAX, [])` + `Overlay.resetTo(mark)`, the protocol
+   `checkPlain` already used for a declaration). The rows hold exported shared terms and numbers, so
+   nothing derived is needed afterwards; without the release the derived terms of all blocks stayed in
+   the environment session until the driver reset it at its cap (16 MiB), the hash-consing index grew
+   with them and every `mk*` probe of the next block missed the cache (owner's note 10). This is the
+   -25 % to -35 % of the table above. `-Drlvm.admit.releaseBlocks=false` restores the old behaviour for
+   measurements.
+2. *No second decoding of proof blocks.* The test "does a root of this plain unit mention something
+   undeclared" decoded the proof block of every theorem in files with at most 2^20 block records (all
+   the arena's small tests, the Cedar slice), threw the nodes away, and the worker decoded the block
+   again. It is one word of the block's row now (`ProofBlocks.hasUnresolved`, rlvm-store 11:16Z; exact
+   when false; a block with something unresolved is still decoded to see whether the ROOT reaches it).
+   The size limit is gone with it (Known gaps).
+3. *The official-order simulation holds one decoded block at a time* (`OfficialOrder.blockMentions`:
+   mark / `resetTo` per block) instead of every proof block of the file until its end (160 MB for Init).
+
+Not removed, and why: the regeneration of recursors and the comparison with the exported records are the
+check itself (`RecordCompare` is 13 % of the pass, the official `check_recursors` 10 %): comparing "by
+id" needs the derived term to BE the exported node, and the overlay's hash-consing does not cover
+exported nodes (no index over the export exists; building one would cost more than the 0.07 % the
+comparison takes). The root checks of `StructuralChecks` were O(1) already (0.03 - 0.04 % of the process).
+
+**Statistics.** `EnvBuilder.blockNanos()` / `blockUnits()`: wall-clock time and number of the inductive
+and quot units decided in file order (always counted: two clock reads per such unit; for the driver's
+statistics file). `-Drlvm.admit.stats=true`: the pass and each worker's `Admission` time themselves and
+print one line each to standard error at the end of the file
+(`rlvm-admit-stats: environment pass N units in T us (inductive / quot units: B in Tb us; file order)`,
+`rlvm-admit-stats: structural checks of this worker: N units in T us`).
+
+**Every decline has a cause.** A `ResourceException` of `rlvm-inductive` used to be reported as "gave
+up: UNSUPPORTED_INPUT" (14 of the 20 non-metadata declines of the tutorial mutant corpus). The message
+now carries the cause `rlvm-inductive` states (`BlockOps.declineDetail()`), or, for an exception of the
+kernel operations, what the reason means for the environment session. The 20 by cause
+(`work/admit7/campaign-tutorial-1.txt`): 8 "the inductive block eliminates into every universe but the
+export has no recursor record ... (generated constants are deferred)", 2 "a recursor record flagged unsafe
+names no recursor of the block", 4 "the type of 'Quot.ind' mentions 'Quot.mk', for which the file has no
+usable record", 3 "constant 'Quot.ind' / 'Quot.lift' has no usable record, but the official kernel
+generates it", 1 quot record under a foreign name without `Quot`, 2 Nat literals without the constants
+behind them. Same counts as before (SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413).
+
+**Generated constants: still declined.** The store's region (`GeneratedBuilder`) and the bindings'
+`isSharedLevel` / `isSharedList` exist; what is missing is (1) a place for the level `u` of a generated
+recursor and its lists after the level base is frozen (request to the steward in `requests.log`,
+14:0xZ, with a proposal: 10 of the 18 declines need it) and (2) the calls from here for the quotient
+constants (7 + 1 declines), which need the dependency analysis and a probe set against leanchecker.
+
 ## Tests (`$MVN -o -q -pl rlvm-admit test`: 86 tests, 85 run, 1 skipped)
 
 | Suite | What |
@@ -350,9 +417,12 @@ machine during this session).
 - Dependency-order mode is one thread and the reference kernel, through `KernelOps`: no deep-stack
   retry (a stack overflow declines the unit and every later one), no cold re-check with a larger
   budget, the kernel's messages are the bare reason. It is meant for hand-made files.
-- A file with more than 2^20 proof-block records whose only out-of-order reference is inside a theorem's
-  proof block is declined by the worker as before (the block is not decoded by the pass; request for a
-  per-block flag in `requests.log`).
+- A LARGE file that is out of order is admitted in dependency order since wave 7 (the proof-block flag
+  removed the 2^20-record limit; two reorder mutants of `init.ndjson`, officially accepted, are accepted,
+  one of them declined before): from its first out-of-order unit on, every unit is checked by the
+  environment pass - one thread, the reference kernel. The official-order simulation of such a file has a
+  budget of 2^25 node visits; beyond it a unit whose official verdict depends on the replay order is
+  declined.
 - Generated constants (a recursor or quot constant without a record), an unsafe member record that
   differs from the constant the kernel generates, an unsafe constructor record that no type lists,
   safe member records of an unsafe inductive record (declined by the loader; request in
