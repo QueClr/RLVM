@@ -1,0 +1,39 @@
+init null default-jit        exit=0 instr=15.410G kernel=0.329G cpu=0.966s wall=0.380s rss=161MB
+init null c2                 exit=0 instr=4.503G kernel=0.241G cpu=0.496s wall=0.292s rss=63MB
+init null c2 notiered        exit=0 instr=3.981G kernel=0.236G cpu=0.472s wall=0.319s rss=61MB
+init null native-image       exit=0 instr=3.460G kernel=0.165G cpu=0.250s wall=0.251s rss=12MB
+init store default-jit       exit=0 instr=21.015G kernel=0.549G cpu=1.448s wall=0.565s rss=322MB
+init store c2                exit=0 instr=6.089G kernel=0.457G cpu=0.736s wall=0.446s rss=229MB
+init store c2 notiered       exit=0 instr=5.244G kernel=0.441G cpu=0.661s wall=0.466s rss=223MB
+init store native-image      exit=0 instr=4.045G kernel=0.352G cpu=0.393s wall=0.406s rss=160MB
+init null c2 buffered-io     exit=0 instr=4.365G kernel=0.220G cpu=0.511s wall=0.317s rss=62MB
+init null c2 threads=2       exit=0 instr=6.102G kernel=0.305G cpu=0.687s wall=0.225s rss=123MB
+init null c2 threads=4       exit=0 instr=6.563G kernel=0.340G cpu=0.898s wall=0.251s rss=174MB
+init null c2 threads=8       exit=0 instr=6.948G kernel=0.433G cpu=0.848s wall=0.240s rss=277MB
+init store c2 threads=4      exit=0 instr=9.246G kernel=0.605G cpu=1.191s wall=0.388s rss=377MB
+std null default-jit         exit=0 instr=15.035G kernel=0.435G cpu=1.049s wall=0.488s rss=157MB
+std null c2                  exit=0 instr=6.154G kernel=0.346G cpu=0.669s wall=0.432s rss=67MB
+std null c2 notiered         exit=0 instr=5.470G kernel=0.330G cpu=0.614s wall=0.460s rss=59MB
+std null native-image        exit=0 instr=5.784G kernel=0.259G cpu=0.410s wall=0.412s rss=12MB
+std store default-jit        exit=0 instr=23.263G kernel=0.795G cpu=1.770s wall=0.846s rss=425MB
+std store c2                 exit=0 instr=8.675G kernel=0.685G cpu=1.080s wall=0.713s rss=340MB
+std store c2 notiered        exit=0 instr=7.005G kernel=0.667G cpu=0.901s wall=0.717s rss=332MB
+std store native-image       exit=0 instr=6.766G kernel=0.571G cpu=0.667s wall=0.691s rss=257MB
+std null c2 buffered-io      exit=0 instr=6.052G kernel=0.309G cpu=0.694s wall=0.457s rss=63MB
+std null c2 threads=2        exit=0 instr=7.554G kernel=0.400G cpu=0.849s wall=0.284s rss=128MB
+std null c2 threads=4        exit=0 instr=8.113G kernel=0.431G cpu=0.920s wall=0.249s rss=172MB
+std null c2 threads=8        exit=0 instr=8.759G kernel=0.541G cpu=1.134s wall=0.300s rss=287MB
+std store c2 threads=4       exit=0 instr=10.391G kernel=0.828G cpu=1.452s wall=0.509s rss=480MB
+mathlib null default-jit     exit=0 instr=70.726G kernel=2.493G cpu=5.268s wall=3.420s rss=170MB
+mathlib null c2              exit=0 instr=40.144G kernel=2.275G cpu=4.010s wall=3.356s rss=93MB
+mathlib null c2 notiered     exit=0 instr=39.478G kernel=2.256G cpu=3.927s wall=3.535s rss=85MB
+mathlib null native-image    exit=0 instr=59.967G kernel=2.170G cpu=3.915s wall=3.921s rss=29MB
+mathlib store default-jit    exit=0 instr=87.796G kernel=6.104G cpu=8.830s wall=6.405s rss=3056MB
+mathlib store c2             exit=0 instr=49.452G kernel=5.874G cpu=6.468s wall=5.929s rss=2971MB
+mathlib store c2 notiered    exit=0 instr=50.462G kernel=5.844G cpu=6.919s wall=6.647s rss=2950MB
+mathlib store native-image   exit=0 instr=69.964G kernel=5.479G cpu=7.618s wall=7.884s rss=2458MB
+mathlib null c2 buffered-io  exit=0 instr=40.779G kernel=2.424G cpu=4.184s wall=3.532s rss=94MB
+mathlib null c2 threads=2    exit=0 instr=47.292G kernel=2.359G cpu=4.721s wall=1.847s rss=158MB
+mathlib null c2 threads=4    exit=0 instr=47.939G kernel=2.386G cpu=5.019s wall=1.329s rss=210MB
+mathlib null c2 threads=8    exit=0 instr=49.424G kernel=2.544G cpu=5.937s wall=1.599s rss=331MB
+mathlib store c2 threads=4   exit=0 instr=59.591G kernel=6.283G cpu=7.870s wall=3.253s rss=3213MB

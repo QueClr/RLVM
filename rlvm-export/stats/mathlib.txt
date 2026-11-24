@@ -1,0 +1,220 @@
+== export mathlib.ndjson
+  exporter lean4export 3.1.0, format 3.1.0, Lean 4.36.0 (611c117bfaf7b7ae1cfcf246ce6fba31e8f509e9)
+  6,326,141,213 bytes, 112,081,718 lines, 56.4 bytes per line
+  read in 5.19 s (MAPPED, 1 scanner thread); general JSON path: 111,443 lines (0.10 %)
+== records
+  names                              4,273,914     3.81 %
+    str                              2,278,453    53.31 %
+    num                              1,995,461    46.69 %
+  levels                                48,246     0.04 %
+    succ                                 4,514     9.36 %
+    max                                 39,861    82.62 %
+    imax                                 3,260     6.76 %
+    param                                  611     1.27 %
+  expressions                      107,037,712    95.50 %
+    bvar                                   360     0.00 %
+    sort                                 1,709     0.00 %
+    const                            1,442,301     1.35 %
+    app                             91,561,354    85.54 %
+    lam                              8,241,106     7.70 %
+    forallE                          5,475,525     5.12 %
+    letE                               255,403     0.24 %
+    proj                                34,595     0.03 %
+    natVal                               5,660     0.01 %
+    strVal                              19,699     0.02 %
+  declaration lines                    721,845     0.64 %
+  constants                            739,167   100.00 %
+    axiom                                    4     0.00 %
+    def                                187,271    25.34 %
+    thm                                524,582    70.97 %
+    opaque                               2,855     0.39 %
+    quot                                     4     0.00 %
+    inductive type                       7,162     0.97 %
+    constructor                         10,006     1.35 %
+    recursor                             7,283     0.99 %
+== id ranges (ids as written in the file)
+  names   1 .. 4,273,914  dense, in order
+  levels  1 .. 48,246  dense, in order
+  exprs   0 .. 107,037,711  dense, in order
+  id translation tables needed: no
+  ColumnarStore: 2,537 MB of columns (0.4 bytes per input byte)
+== sharing: references to an expression record (from other records and from declarations)
+  never referenced                           0     0.00 %
+  referenced once                   90,457,409    84.51 %
+  twice                              8,765,496     8.19 %
+  3 times                            3,018,940     2.82 %
+  4 times                            1,607,788     1.50 %
+  5 times or more                    3,188,079     2.98 %
+  largest in-degree 2,956,115; 1,464,060 references from declarations
+== ownership split and last use (Ownership)
+  proof-private                     68,285,951    63.80 %
+  shared                            38,751,761    36.20 %
+  unreachable                                0     0.00 %
+  dead after introducing decl       88,292,655    82.49 %
+  used by a later declaration       18,745,057    17.51 %
+  461,770 of 524,582 theorems own private expressions; largest private block 91,228 expressions
+  proof-private share by kind: app 66.36 %, lam 73.96 %, forallE 13.36 %, const 33.69 %
+== application spines
+  91,561,354 app records; longest spine 106 arguments
+  app records by position in their spine (1 = innermost application):
+  1                                 12,037,340    13.15 %  cumulative   13.15 %
+  2                                 17,404,597    19.01 %  cumulative   32.16 %
+  3                                 15,865,282    17.33 %  cumulative   49.48 %
+  4                                 12,953,583    14.15 %  cumulative   63.63 %
+  5                                 10,450,791    11.41 %  cumulative   75.04 %
+  6                                  9,166,356    10.01 %  cumulative   85.06 %
+  7-8                                6,720,032     7.34 %  cumulative   92.39 %
+  9-16                               6,199,990     6.77 %  cumulative   99.17 %
+  17-32                                720,432     0.79 %  cumulative   99.95 %
+  33-64                                 37,550     0.04 %  cumulative   99.99 %
+  65+                                    5,401     0.01 %  cumulative  100.00 %
+  30,628,311 maximal spines (app records used other than as the function of an app), by number of arguments:
+  1                                  1,378,047     4.50 %  cumulative    4.50 %
+  2                                  6,565,115    21.43 %  cumulative   25.93 %
+  3                                  5,038,370    16.45 %  cumulative   42.38 %
+  4                                  4,536,491    14.81 %  cumulative   57.20 %
+  5                                  2,988,676     9.76 %  cumulative   66.95 %
+  6                                  5,699,988    18.61 %  cumulative   85.56 %
+  7-8                                2,468,598     8.06 %  cumulative   93.62 %
+  9-16                               1,778,145     5.81 %  cumulative   99.43 %
+  17-32                                170,333     0.56 %  cumulative   99.99 %
+  33-64                                  4,354     0.01 %  cumulative  100.00 %
+  65+                                      194     0.00 %  cumulative  100.00 %
+  head of the maximal spines:
+    bvar                               295,281     0.96 %
+    const                           30,115,048    98.32 %
+    lam                                211,655     0.69 %
+    letE                                   204     0.00 %
+    proj                                 6,123     0.02 %
+== binders
+  deepest binder nesting in a declaration: 361
+  binder nesting depth of declaration types:
+  0                                     35,362     4.78 %  cumulative    4.78 %
+  1                                     38,695     5.23 %  cumulative   10.02 %
+  2                                     50,937     6.89 %  cumulative   16.91 %
+  3                                     59,536     8.05 %  cumulative   24.96 %
+  4                                     76,655    10.37 %  cumulative   35.34 %
+  5                                     76,148    10.30 %  cumulative   45.64 %
+  6                                     65,706     8.89 %  cumulative   54.53 %
+  7-8                                  112,785    15.26 %  cumulative   69.78 %
+  9-16                                 190,261    25.74 %  cumulative   95.52 %
+  17-32                                 31,392     4.25 %  cumulative   99.77 %
+  33-64                                  1,604     0.22 %  cumulative   99.99 %
+  65+                                       86     0.01 %  cumulative  100.00 %
+  binder nesting depth of declaration values (def, thm, opaque):
+  0                                     31,495     4.41 %  cumulative    4.41 %
+  1                                     26,336     3.68 %  cumulative    8.09 %
+  2                                     40,188     5.62 %  cumulative   13.71 %
+  3                                     45,455     6.36 %  cumulative   20.07 %
+  4                                     54,466     7.62 %  cumulative   27.70 %
+  5                                     64,352     9.00 %  cumulative   36.70 %
+  6                                     58,832     8.23 %  cumulative   44.93 %
+  7-8                                  105,369    14.74 %  cumulative   59.67 %
+  9-16                                 214,155    29.96 %  cumulative   89.64 %
+  17-32                                 63,936     8.95 %  cumulative   98.58 %
+  33-64                                  9,252     1.29 %  cumulative   99.88 %
+  65+                                      872     0.12 %  cumulative  100.00 %
+  loose bound variable range of expression records (0 = closed); largest 361:
+  0                                  4,417,927     4.13 %  cumulative    4.13 %
+  1                                  1,947,662     1.82 %  cumulative    5.95 %
+  2                                  2,624,787     2.45 %  cumulative    8.40 %
+  3                                  3,344,470     3.12 %  cumulative   11.52 %
+  4                                  4,166,281     3.89 %  cumulative   15.42 %
+  5                                  4,990,633     4.66 %  cumulative   20.08 %
+  6                                  5,445,719     5.09 %  cumulative   25.17 %
+  7-8                               11,739,197    10.97 %  cumulative   36.13 %
+  9-16                              37,413,318    34.95 %  cumulative   71.09 %
+  17-32                             23,537,289    21.99 %  cumulative   93.08 %
+  33-64                              6,275,721     5.86 %  cumulative   98.94 %
+  65+                                1,134,708     1.06 %  cumulative  100.00 %
+== closed sub-terms (no loose bound variable)
+  all expression records             4,417,927     4.13 %
+    app                              1,583,090     1.73 %
+    lam                                716,430     8.69 %
+    forallE                            647,998    11.83 %
+    letE                                   904     0.35 %
+    proj                                   136     0.39 %
+  maximal spines                       460,466     1.50 %
+  records with a level param        92,592,361    86.50 %
+== HEAT: constants as heads of application spines, and references to constants
+  30,115,048 maximal spines are headed by a constant; 14,617,638 references to const records
+  523,983 distinct constants head a spine, 560,063 are referenced, of 739,167 declared
+  by kind of constant:              spine heads              references
+  axiom                           78,029    0.26 %          75,158    0.51 %
+  def                         17,601,082   58.45 %       7,409,305   50.69 %
+  thm                          5,976,895   19.85 %       2,526,814   17.29 %
+  opaque                           4,208    0.01 %           5,155    0.04 %
+  quot                             7,154    0.02 %           3,355    0.02 %
+  inductive type               4,979,059   16.53 %       3,866,484   26.45 %
+  constructor                  1,412,358    4.69 %         706,569    4.83 %
+  recursor                        56,263    0.19 %          24,798    0.17 %
+  cumulative coverage of the hottest constants (each column ranked by itself):
+    top N        spine heads   references
+    1                7.79 %       3.79 %
+    10              24.93 %      20.42 %
+    100             52.38 %      45.31 %
+    1,000           75.42 %      68.42 %
+    10,000          89.99 %      83.81 %
+    100,000         97.52 %      94.85 %
+  the 60 constants that head the most spines:
+    rank    spine heads   share   cumulative   references  kind            name
+       1      2,344,934  7.79 %       7.79 %      330,352  inductive type  Eq
+       2        877,145  2.91 %      10.70 %      186,388  thm             congrArg
+       3        685,519  2.28 %      12.98 %      311,867  def             DFunLike.coe
+       4        657,815  2.18 %      15.16 %       49,665  thm             Eq.trans
+       5        556,907  1.85 %      17.01 %       20,739  def             HMul.hMul
+       6        522,367  1.73 %      18.74 %       62,014  def             Membership.mem
+       7        508,580  1.69 %      20.43 %       23,698  def             HAdd.hAdd
+       8        491,662  1.63 %      22.07 %       20,984  def             CategoryTheory.CategoryStruct.comp
+       9        451,001  1.50 %      23.56 %      416,096  def             id
+      10        412,265  1.37 %      24.93 %      283,039  inductive type  And
+      11        365,686  1.21 %      26.15 %       73,363  def             CategoryTheory.Functor.obj
+      12        354,427  1.18 %      27.32 %       24,904  def             LE.le
+      13        337,407  1.12 %      28.44 %       43,438  def             Quiver.Hom
+      14        329,016  1.09 %      29.54 %      319,031  def             Eq.mpr
+      15        262,097  0.87 %      30.41 %       75,674  inductive type  Exists
+      16        245,996  0.82 %      31.22 %       90,368  constructor     Eq.refl
+      17        242,839  0.81 %      32.03 %       39,312  thm             Eq.symm
+      18        220,439  0.73 %      32.76 %        9,567  def             HSub.hSub
+      19        202,453  0.67 %      33.43 %       46,506  thm             congrFun'
+      20        185,773  0.62 %      34.05 %      141,688  inductive type  Iff
+      21        175,521  0.58 %      34.63 %       14,299  def             HSMul.hSMul
+      22        165,758  0.55 %      35.18 %        5,769  def             LT.lt
+      23        164,102  0.54 %      35.73 %      179,966  def             Not
+      24        156,608  0.52 %      36.25 %      117,221  inductive type  HEq
+      25        142,591  0.47 %      36.72 %        9,376  def             HPow.hPow
+      26        139,676  0.46 %      37.19 %      135,139  thm             of_eq_true
+      27        137,532  0.46 %      37.64 %       48,077  def             Eq.ndrec
+      28        134,062  0.45 %      38.09 %       29,243  thm             congr
+      29        122,651  0.41 %      38.50 %      111,653  def             Eq.mp
+      30        117,029  0.39 %      38.88 %       52,281  def             OfNat.ofNat
+      31        111,946  0.37 %      39.26 %       21,015  def             Subtype.val
+      32        105,301  0.35 %      39.61 %        5,553  def             Lean.Omega.LinearCombo.eval
+      33        104,535  0.35 %      39.95 %       22,805  def             CategoryTheory.Functor.map
+      34         89,833  0.30 %      40.25 %       20,578  inductive type  Subtype
+      35         87,077  0.29 %      40.54 %       63,419  inductive type  Or
+      36         81,651  0.27 %      40.81 %       60,264  constructor     Lean.Expr.app
+      37         77,870  0.26 %      41.07 %        3,581  constructor     List.cons
+      38         77,379  0.26 %      41.33 %       74,687  axiom           propext
+      39         75,642  0.25 %      41.58 %       13,295  constructor     Prod.mk
+      40         75,501  0.25 %      41.83 %       14,911  def             CategoryTheory.NatTrans.app
+      41         74,253  0.25 %      42.07 %       41,206  def             Zero.toOfNat0
+      42         74,159  0.25 %      42.32 %       27,108  inductive type  LinearMap
+      43         72,686  0.24 %      42.56 %        7,704  def             ite
+      44         72,128  0.24 %      42.80 %       12,960  def             Module.toDistribMulAction
+      45         70,912  0.24 %      43.04 %       30,782  thm             eq_self
+      46         67,709  0.22 %      43.26 %       14,130  def             instHSMul
+      47         67,361  0.22 %      43.49 %       66,639  def             SetLike.instMembership
+      48         65,866  0.22 %      43.70 %       31,339  def             CategoryTheory.Functor.comp
+      49         64,955  0.22 %      43.92 %       33,896  def             AddZeroClass.toAddZero
+      50         63,263  0.21 %      44.13 %       22,189  def             rfl
+      51         62,954  0.21 %      44.34 %       32,253  def             AddMonoid.toAddZeroClass
+      52         61,720  0.20 %      44.54 %       43,277  def             AddCommGroup.toAddCommMonoid
+      53         61,502  0.20 %      44.75 %       13,794  constructor     Subtype.mk
+      54         59,579  0.20 %      44.95 %        1,618  def             HDiv.hDiv
+      55         59,569  0.20 %      45.14 %       42,297  inductive type  CategoryTheory.Functor
+      56         59,446  0.20 %      45.34 %        8,255  def             Neg.neg
+      57         59,305  0.20 %      45.54 %       58,951  def             EquivLike.toFunLike
+      58         58,525  0.19 %      45.73 %        9,539  def             Ne
+      59         58,005  0.19 %      45.93 %        9,578  constructor     Set.ofPred
+      60         56,495  0.19 %      46.11 %       19,793  constructor     Exists.intro
