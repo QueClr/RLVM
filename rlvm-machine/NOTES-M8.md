@@ -252,3 +252,31 @@ What was built (`M8Lanes`, the pass runner; `M8Harness` keeps lockstep for the s
 | D20 | the scoreboard | a machine jar is named by a hash of its classes (names and CRCs), not of the file | a publication of tests only installs a jar with other time stamps and the same code |
 | D21 | large corpora | "differential" = the machine's own statistics on a corpus the reference engine accepts unit for unit, not both engines on every unit | it is the same statement at a quarter of the CPU time on a host that was out of memory; `testkit diff --engine machine` stays the tool for a corpus with rejections |
 | D22 | resources | every report holds a host-wide slot, 4 passes, 6 GB, pinned outside the measurement cpuset | the orchestrator's rule of 14:32Z after the host thrashed; my first full gate (12 passes, 24 GB) was one of the jobs that pushed it into the swap and was killed after 25 minutes without a result |
+
+## 8. Wave 6: what was run and what it showed
+
+Host during all of this: shared with up to thirty agents, load average 75 to 270, out of memory and
+swapping between 13:55Z and 14:35Z (the orchestrator stopped a wave of profilers and introduced the
+host-wide slots). All M8 jobs after 14:35Z ran inside a slot with 4 passes / mutants at a time and 6 GB.
+Wall-clock figures below say how long a tool takes under that load, nothing about the machine.
+
+### 8.1 Mutants with the machine (priority 2)
+
+Campaign 1, main tree as copied at 14:42Z (after M1's official levels 14:22Z and M4's fix of the soundness
+findings S-F1 / S-F2 14:30Z), reference engine with `levels=official`, `report.sh mutants --switches v0
+--switches warm,gated,expect --switches warm,gated,expect,probes --launcher-sample 100`; 1158 s wall
+(`work/m8/machine-mutants-run1-1442Z.md`):
+
+| switch set | mutants | SOUNDNESS | COMPLETENESS | agree | declined | final verdict not the reference pipeline's | machine accepted / rejected / declined (engine checks) | MACHINE-INCOMPLETE / WARM-ANOMALY / disagreements | declarations compared in-process | machine accepts, reference rejects | machine rejects, reference accepts | machine declines | launcher sample differs / run |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `v0` | 17,775 | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,875 / 0 | 0 / 0 / 0 | 1,008,568 | 0 | 0 | 0 | 0 / 179 |
+| `warm,gated,expect` (4 MiB) | 17,775 | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,875 / 0 | 0 / 0 / 0 | 1,008,568 | 0 | 0 | 0 | 0 / 179 |
+| `warm,gated,expect,probes` (4 MiB) | 17,775 | 0 | 0 | 16,092 | 1,683 | 0 | 863,982 / 1,875 / 0 | 0 / 0 / 0 | 1,008,568 | 0 | 0 | 0 | 0 / 179 |
+| baseline: the pipeline with `-X engine=reference`, in-process | 17,775 | 0 | 0 | 16,092 | 1,683 | - | - | - | - | - | - | - | - |
+
+Per corpus (every set and the baseline alike): tutorial 12,260 = 11,847 agree + 413 declined; bugs 2,692 =
+2,627 + 65; prelude 847 = 839 + 8; mdata 1,976 = 779 + 1,197: exactly the published `testkit judge` table of
+the reference engine through the launcher (`work/status/mutants.md`, 12:42Z), which is the check of the
+in-process method (D18). The declines are the loader's and admission's, not the machine's (the machine
+declined no engine check). **No case in which the machine's own answer differs from the reference
+engine's**, per declaration or in the driver.

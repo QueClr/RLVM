@@ -81,6 +81,8 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private final boolean same;
     private final Budget warm;
     private final Budget cold;
+    private final int shardCount;
+    private final int shardIndex;
 
     private LaneSignals signals;
     private RunHost.Lane lane;
@@ -137,6 +139,38 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private long deferred;
     private long gated;
     private long restsReleasedInUnit;
+    private long shardSkipped;
+
+    // ---- time accounting (statistics only: all zero unless statsOn) ------------------------------------------
+    /** Columns of {@link #times()}. */
+    static final String[] TIME_COLUMNS = {"wallNanos", "cpuNanos", "runQueueNanos", "unitNanos", "claimNanos",
+        "waitEnvNanos", "waitLoaderNanos", "waitTailNanos", "gateWaitNanos", "loadEndWaitNanos", "openNanos",
+        "resetNanos", "claims", "parks", "startAtNanos", "firstClaimAtNanos", "lastUnitEndAtNanos", "endAtNanos",
+        "lazyEnvNanos"};
+    /** A point of the worker's time series is recorded at a claim boundary at most this often. */
+    private static final long SERIES_NANOS = 100_000_000L;
+    static final String[] SERIES_COLUMNS = {"atNanos", "accepted", "unitNanos", "claimNanos"};
+    private UnitStats unitStats;
+    private long startAt;
+    private long endAt;
+    private long firstClaimAt;
+    private long lastUnitEndAt;
+    /** Inside {@code Scheduler.claim}: parked, or waiting for the scheduler's lock. */
+    private long claimNanos;
+    /** Inside units: admission, re-checks, session resets; the two waits below included. */
+    private long unitNanos;
+    private long gateWaitNanos;
+    private long loadEndWaitNanos;
+    private long openNanos;
+    private long resetNanos;
+    /** One worker, batch: the environment pass, which this worker advances itself (part of {@code unitNanos}). */
+    private long lazyEnvNanos;
+    private long claimsTaken;
+    private long cpuNanos = -1;
+    private long runQueueNanos = -1;
+    private long[] series;
+    private int seriesLen;
+    private long seriesNext;
 
     public Worker(int id, Run run, Engine primary, Scheduler scheduler, VerdictBoard board) {
         this.id = id;
@@ -152,6 +186,8 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         this.same = run.primaryIsReference();
         this.warm = new Budget(config.warmSteps, run.warmUnitBytes(), config.warmDepth);
         this.cold = Budget.cold(config.memoryLimitBytes);
+        this.shardCount = config.shardCount;
+        this.shardIndex = config.shardIndex;
     }
 
     /** Pseudo outcome of {@link #unit(int)}: a decline was withheld until the file is completely loaded. */
@@ -160,6 +196,11 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     @Override
     public void run() {
         long[] sched0 = statsOn ? RunStats.currentThreadSched() : null;
+        if (statsOn) {
+            unitStats = new UnitStats();
+            series = new long[64 * SERIES_COLUMNS.length];
+            startAt = System.nanoTime();
+        }
         try {
             claim = new int[config.chunkUnits];
             // With one worker there is nobody to give units back to.
@@ -169,7 +210,21 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             final boolean collect = config.gcAfterBytes > 0;
             for (;;) {
                 claimLen = 0;
+                final long c0 = statsOn ? System.nanoTime() : 0;
                 int n = scheduler.claim(id, claim);
+                if (statsOn) {
+                    long c1 = System.nanoTime();
+                    claimNanos += c1 - c0;
+                    if (n > 0) {
+                        claimsTaken++;
+                        if (firstClaimAt == 0) {
+                            firstClaimAt = c1;
+                        }
+                        if (c1 >= seriesNext) {
+                            seriesPoint(c1);
+                        }
+                    }
+                }
                 if (n == 0) {
                     break;
                 }
@@ -179,7 +234,11 @@ public final class Worker implements Runnable, LaneSignals.Probe {
                 if (!opened) {
                     // Not before the first claim: in a pipelined run nothing is published before it,
                     // and a context needs a published frontier to look at.
+                    final long o0 = statsOn ? System.nanoTime() : 0;
                     open();
+                    if (statsOn) {
+                        openNanos += System.nanoTime() - o0;
+                    }
                 }
                 long t0 = timed ? System.nanoTime() : 0;
                 claimLen = n;
@@ -196,8 +255,12 @@ public final class Worker implements Runnable, LaneSignals.Probe {
                     }
                     if (timed) {
                         long t1 = System.nanoTime();
-                        if (statsOn && o >= 0) {
-                            stats.unit(u, id, unitSteps, t1 - t0, o);
+                        if (statsOn) {
+                            unitNanos += t1 - t0;
+                            lastUnitEndAt = t1;
+                            if (o >= 0) {
+                                unitStats.unit(u, id, unitSteps, t1 - t0, o);
+                            }
                         }
                         if (spill > 0 && t1 - t0 > spill) {
                             releaseRest();
@@ -213,9 +276,12 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             close();
             if (statsOn) {
                 long[] sched1 = RunStats.currentThreadSched();
-                stats.threadTimes(Thread.currentThread().getName(),
-                        sched0[0] < 0 || sched1[0] < 0 ? -1 : sched1[0] - sched0[0],
-                        sched0[1] < 0 || sched1[1] < 0 ? -1 : sched1[1] - sched0[1]);
+                cpuNanos = sched0[0] < 0 || sched1[0] < 0 ? -1 : sched1[0] - sched0[0];
+                runQueueNanos = sched0[1] < 0 || sched1[1] < 0 ? -1 : sched1[1] - sched0[1];
+                stats.threadTimes(Thread.currentThread().getName(), cpuNanos, runQueueNanos);
+                stats.mergeUnits(unitStats);
+                endAt = System.nanoTime();
+                seriesPoint(endAt);
             }
         }
     }
@@ -282,7 +348,12 @@ public final class Worker implements Runnable, LaneSignals.Probe {
      */
     private int again(int u) {
         deferred++;
-        if (!run.awaitLoadEnd(u)) {
+        final long w0 = statsOn ? System.nanoTime() : 0;
+        final boolean alive = run.awaitLoadEnd(u);
+        if (statsOn) {
+            loadEndWaitNanos += System.nanoTime() - w0;
+        }
+        if (!alive) {
             cancelled++;
             return -1;
         }
@@ -304,7 +375,11 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             return -1;
         }
         if (env != null && u >= host.envUnits()) {
+            final long e0 = statsOn ? System.nanoTime() : 0;
             int n = env.advanceTo(u + 1);
+            if (statsOn) {
+                lazyEnvNanos += System.nanoTime() - e0;
+            }
             if (n <= u) {
                 // The environment pass stopped at or before u; its listener recorded why.
                 if (u <= board.firstFailure() && board.status(u) == VerdictBoard.NONE) {
@@ -317,6 +392,13 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         int cls = host.unitClass(u);
         if (cls != RunHost.CHECK) {
             other(u, cls);
+            return -1;
+        }
+        if (shardCount > 0 && (u >>> RunConfig.SHARD_BLOCK_LOG2) % shardCount != shardIndex) {
+            // A measurement run over one shard of the units (the board was stopped at the start of the
+            // run: its verdict is DECLINE whatever happens here). The unit is passed over.
+            board.accept(u);
+            shardSkipped++;
             return -1;
         }
         if (u >= host.envUnits()) {
@@ -691,7 +773,12 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         // A memory retry is slow, and the gate may be busy: the rest of the claim does not wait for it.
         releaseRest();
         HeavyGate gate = run.gate();
-        if (!gate.enter(u, id)) {
+        final long w0 = statsOn ? System.nanoTime() : 0;
+        final boolean entered = gate.enter(u, id);
+        if (statsOn) {
+            gateWaitNanos += System.nanoTime() - w0;
+        }
+        if (!entered) {
             return false;
         }
         gateHeld = true;
@@ -713,8 +800,12 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private void resetWarm() {
         // The driver's own reading of the frontier (before the reset) and the context's: the smaller one.
         int frontier = frontierNow();
+        final long r0 = statsOn ? System.nanoTime() : 0;
         session.reset();
         lane.reset();
+        if (statsOn) {
+            resetNanos += System.nanoTime() - r0;
+        }
         laneUnits = Math.min(frontier, lane.coveredUnits());
         laneBaseSlack = lane.slackBytes();
         idleUnits = 0;
@@ -905,6 +996,55 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     }
 
     // ---- statistics -------------------------------------------------------------------------------------------
+
+    private void seriesPoint(long now) {
+        int w = SERIES_COLUMNS.length;
+        if (seriesLen + w > series.length) {
+            series = java.util.Arrays.copyOf(series, series.length * 2);
+        }
+        series[seriesLen] = now - run.startNanos();
+        series[seriesLen + 1] = accepted;
+        series[seriesLen + 2] = unitNanos;
+        series[seriesLen + 3] = claimNanos;
+        seriesLen += w;
+        seriesNext = now + SERIES_NANOS;
+    }
+
+    /**
+     * Where this worker's wall clock went, one value per {@link #TIME_COLUMNS} entry (statistics;
+     * read after the thread has ended). {@code wall = cpu + runQueue + blocked}; of the blocked time
+     * the driver knows the parks in the scheduler ({@code waitEnv / waitLoader / waitTail}, part of
+     * {@code claimNanos}), the heavy gate and the wait for the end of the load; the rest is the
+     * runtime's (collections stop every thread) or a lock inside a unit. The {@code ...At} values
+     * are nanoseconds since the start of the run.
+     */
+    long[] times() {
+        long base = run.startNanos();
+        long parks = 0;
+        for (int c = 0; c < Scheduler.WAIT_CLASSES; c++) {
+            parks += scheduler.waitCount(id, c);
+        }
+        return new long[] {endAt - startAt, cpuNanos, runQueueNanos, unitNanos, claimNanos,
+            scheduler.waitNanos(id, Scheduler.WAIT_ENV), scheduler.waitNanos(id, Scheduler.WAIT_LOADER),
+            scheduler.waitNanos(id, Scheduler.WAIT_TAIL), gateWaitNanos, loadEndWaitNanos, openNanos, resetNanos,
+            claimsTaken, parks, startAt - base, firstClaimAt == 0 ? -1 : firstClaimAt - base,
+            lastUnitEndAt == 0 ? -1 : lastUnitEndAt - base, endAt - base, lazyEnvNanos};
+    }
+
+    /** The worker's time series: rows of {@link #SERIES_COLUMNS}, one about every 100 ms at a claim boundary. */
+    long[][] series() {
+        int w = SERIES_COLUMNS.length;
+        long[][] rows = new long[seriesLen / w][];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = java.util.Arrays.copyOfRange(series, i * w, i * w + w);
+        }
+        return rows;
+    }
+
+    /** Units of other shards that this worker passed over without checking ({@code RunConfig.shardCount}). */
+    long shardSkipped() {
+        return shardSkipped;
+    }
 
     public int id() {
         return id;

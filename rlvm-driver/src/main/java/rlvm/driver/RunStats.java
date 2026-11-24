@@ -20,11 +20,10 @@ import rlvm.api.StatsSink;
  * <p>JSON layout: {@code {"phases": {name: {"wallNanos": n}}, "threads": {name: {"cpuNanos": n, "runQueueNanos": n}},
  * "values": {dotted.key: value}, "tables": {key: {"columns": [...], "rows": [{"label": s, "values":
  * [...]}]}}, "units": {"count": n, "steps": n, "nanos": n, "accepted": n, "rejected": n, "declined":
- * n, "top": [{"unit": u, "worker": w, "steps": s, "nanos": t, "outcome": o}]}}}.
+ * n, "top": [{"unit": u, "worker": w, "steps": s, "nanos": t, "outcome": o}], "slow": [the same, by nanos],
+ * "histogram": [{"belowMicros": 2^k, "units": n, "nanos": t}]}}}.
  */
 public final class RunStats implements StatsSink {
-
-    private static final int TOP = 50;
 
     private final boolean enabled;
 
@@ -47,13 +46,8 @@ public final class RunStats implements StatsSink {
     private String[] tableJson;
     private int tableCount;
 
-    private long unitCount;
-    private long unitSteps;
-    private long unitNanos;
-    private long[] byOutcome;
-    /** Min-heap on steps of the heaviest units: 5 longs per entry (steps, nanos, unit, worker, outcome). */
-    private long[] top;
-    private int topCount;
+    /** Everything recorded per unit; workers keep one of their own and merge it at their end. */
+    private UnitStats units;
 
     public RunStats(boolean enabled) {
         this.enabled = enabled;
@@ -68,8 +62,7 @@ public final class RunStats implements StatsSink {
             values = new String[64];
             tableKeys = new String[8];
             tableJson = new String[8];
-            top = new long[TOP * 5];
-            byOutcome = new long[3];
+            units = new UnitStats();
         }
     }
 
@@ -175,76 +168,26 @@ public final class RunStats implements StatsSink {
         return out;
     }
 
-    /** Records one checked unit (called by workers only when statistics are enabled). */
+    /**
+     * Records one checked unit. Takes this object's lock: a worker records into a {@link UnitStats}
+     * of its own instead and hands it over once, with {@link #mergeUnits(UnitStats)}.
+     */
     public void unit(int unit, int worker, long steps, long nanos, int outcome) {
         if (!enabled) {
             return;
         }
         synchronized (this) {
-            unitCount++;
-            unitSteps += steps;
-            unitNanos += nanos;
-            if (outcome >= 0 && outcome < byOutcome.length) {
-                byOutcome[outcome]++;
-            }
-            if (topCount < TOP) {
-                setTop(topCount++, steps, nanos, unit, worker, outcome);
-                siftUp(topCount - 1);
-            } else if (heavier(steps, nanos, top[0], top[1])) {
-                setTop(0, steps, nanos, unit, worker, outcome);
-                siftDown(0);
-            }
+            units.unit(unit, worker, steps, nanos, outcome);
         }
     }
 
-    private static boolean heavier(long steps, long nanos, long steps2, long nanos2) {
-        return steps > steps2 || (steps == steps2 && nanos > nanos2);
-    }
-
-    private void setTop(int i, long steps, long nanos, int unit, int worker, int outcome) {
-        int o = i * 5;
-        top[o] = steps;
-        top[o + 1] = nanos;
-        top[o + 2] = unit;
-        top[o + 3] = worker;
-        top[o + 4] = outcome;
-    }
-
-    private void swapTop(int i, int j) {
-        for (int k = 0; k < 5; k++) {
-            long t = top[i * 5 + k];
-            top[i * 5 + k] = top[j * 5 + k];
-            top[j * 5 + k] = t;
+    /** Adds the per-unit statistics a checking thread collected by itself. */
+    void mergeUnits(UnitStats of) {
+        if (!enabled || of == null) {
+            return;
         }
-    }
-
-    private void siftUp(int i) {
-        while (i > 0) {
-            int p = (i - 1) / 2;
-            if (!heavier(top[p * 5], top[p * 5 + 1], top[i * 5], top[i * 5 + 1])) {
-                break;
-            }
-            swapTop(i, p);
-            i = p;
-        }
-    }
-
-    private void siftDown(int i) {
-        for (;;) {
-            int l = 2 * i + 1;
-            int r = l + 1;
-            int m = i;
-            if (l < topCount && heavier(top[m * 5], top[m * 5 + 1], top[l * 5], top[l * 5 + 1])) {
-                m = l;
-            }
-            if (r < topCount && heavier(top[m * 5], top[m * 5 + 1], top[r * 5], top[r * 5 + 1])) {
-                m = r;
-            }
-            if (m == i) {
-                return;
-            }
-            swapTop(i, m);
-            i = m;
+        synchronized (this) {
+            units.merge(of);
         }
     }
 
@@ -352,26 +295,39 @@ public final class RunStats implements StatsSink {
         for (int i = 0; i < tableCount; i++) {
             sb.append(i == 0 ? "\n    " : ",\n    ").append(quote(tableKeys[i])).append(": ").append(tableJson[i]);
         }
-        sb.append(tableCount == 0 ? "" : "\n  ").append("},\n  \"units\": {\"count\": ").append(unitCount);
-        sb.append(", \"steps\": ").append(unitSteps).append(", \"nanos\": ").append(unitNanos);
-        sb.append(", \"accepted\": ").append(byOutcome[0]).append(", \"rejected\": ").append(byOutcome[1]);
-        sb.append(", \"declined\": ").append(byOutcome[2]).append(", \"top\": [");
-        // heaviest first: selection over a copy of the heap (at most 50 entries)
-        boolean[] used = new boolean[topCount];
-        for (int n = 0; n < topCount; n++) {
-            int best = -1;
-            for (int i = 0; i < topCount; i++) {
-                if (!used[i] && (best < 0 || heavier(top[i * 5], top[i * 5 + 1], top[best * 5], top[best * 5 + 1]))) {
-                    best = i;
-                }
-            }
-            used[best] = true;
-            int o = best * 5;
-            sb.append(n == 0 ? "\n    " : ",\n    ").append("{\"unit\": ").append(top[o + 2]).append(", \"worker\": ")
-                    .append(top[o + 3]).append(", \"steps\": ").append(top[o]).append(", \"nanos\": ")
-                    .append(top[o + 1]).append(", \"outcome\": ").append(top[o + 4]).append('}');
+        sb.append(tableCount == 0 ? "" : "\n  ").append("},\n  \"units\": {\"count\": ").append(units.count);
+        sb.append(", \"steps\": ").append(units.steps).append(", \"nanos\": ").append(units.nanos);
+        sb.append(", \"accepted\": ").append(units.byOutcome[0]).append(", \"rejected\": ").append(units.byOutcome[1]);
+        sb.append(", \"declined\": ").append(units.byOutcome[2]).append(", \"top\": [");
+        // heaviest first (at most 50 entries)
+        int[] order = UnitStats.descending(units.top, units.topCount);
+        for (int n = 0; n < order.length; n++) {
+            int o = order[n] * UnitStats.W;
+            sb.append(n == 0 ? "\n    " : ",\n    ").append("{\"unit\": ").append(units.top[o + 2]).append(", \"worker\": ")
+                    .append(units.top[o + 3]).append(", \"steps\": ").append(units.top[o]).append(", \"nanos\": ")
+                    .append(units.top[o + 1]).append(", \"outcome\": ").append(units.top[o + 4]).append('}');
         }
-        sb.append(topCount == 0 ? "" : "\n  ").append("]}\n}\n");
+        // slowest first: the same entries ordered by wall time
+        sb.append(order.length == 0 ? "" : "\n  ").append("], \"slow\": [");
+        order = UnitStats.descending(units.slow, units.slowCount);
+        for (int n = 0; n < order.length; n++) {
+            int o = order[n] * UnitStats.W;
+            sb.append(n == 0 ? "\n    " : ",\n    ").append("{\"unit\": ").append(units.slow[o + 2]).append(", \"worker\": ")
+                    .append(units.slow[o + 3]).append(", \"steps\": ").append(units.slow[o + 1]).append(", \"nanos\": ")
+                    .append(units.slow[o]).append(", \"outcome\": ").append(units.slow[o + 4]).append('}');
+        }
+        // wall time by duration class: units that took less than 2^k microseconds
+        sb.append(order.length == 0 ? "" : "\n  ").append("], \"histogram\": [");
+        boolean first = true;
+        for (int k = 0; k < UnitStats.HIST; k++) {
+            if (units.hist[2 * k] == 0) {
+                continue;
+            }
+            sb.append(first ? "" : ", ").append("{\"belowMicros\": ").append(1L << k).append(", \"units\": ")
+                    .append(units.hist[2 * k]).append(", \"nanos\": ").append(units.hist[2 * k + 1]).append('}');
+            first = false;
+        }
+        sb.append("]}\n}\n");
         return sb.toString();
     }
 

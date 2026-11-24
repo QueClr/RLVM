@@ -184,13 +184,19 @@ final class M8Gate {
         return Fixture.root().resolve("work/m8/heavy.txt");
     }
 
-    private static Set<String> readHeavy() {
-        Set<String> out = new HashSet<>();
+    /** Path -> the peak session footprint in bytes that an earlier run measured ({@code Long.MAX_VALUE}: it ran out of heap beside others). */
+    private static Map<String, Long> readHeavy() {
+        Map<String, Long> out = new java.util.HashMap<>();
         try {
             if (Files.isRegularFile(heavyFile())) {
                 for (String l : Files.readAllLines(heavyFile(), StandardCharsets.UTF_8)) {
                     if (!l.isEmpty() && !l.startsWith("#")) {
-                        out.add(l.split("\t")[0]);
+                        String[] f = l.split("\t");
+                        long peak = Long.MAX_VALUE;
+                        if (f.length == 2 && f[1].endsWith(" MiB")) {
+                            peak = Long.parseLong(f[1].substring(0, f[1].length() - 4).trim()) << 20;
+                        }
+                        out.put(f[0], peak);
                     }
                 }
             }
@@ -238,10 +244,12 @@ final class M8Gate {
     static Map<String, M8Lanes.FileRun> runAll(String what, List<String> paths, List<M8Lanes.Spec> specs, int jobs, long fileMillis) {
         final Semaphore cpu = new Semaphore(Math.max(1, jobs));
         final Map<String, M8Lanes.FileRun> done = new ConcurrentHashMap<>();
-        final Set<String> knownHeavy = readHeavy();
+        final Map<String, Long> knownHeavy = readHeavy();
         final boolean noMemory = knownHeavy.isEmpty();
+        final long heap = Runtime.getRuntime().maxMemory();
         List<String> big = new ArrayList<>();
         final ConcurrentLinkedQueue<String> heavy = new ConcurrentLinkedQueue<>();
+        final ConcurrentLinkedQueue<String> alone = new ConcurrentLinkedQueue<>();
         final ConcurrentLinkedQueue<String> small = new ConcurrentLinkedQueue<>();
         for (String p : paths) {
             long size;
@@ -250,9 +258,13 @@ final class M8Gate {
             } catch (IOException e) {
                 size = 0;
             }
+            Long peak = knownHeavy.get(p);
             if (size >= BIG_BYTES) {
                 big.add(p);
-            } else if (knownHeavy.contains(p) || (noMemory && p.contains("/perf/"))) {
+            } else if (peak != null && peak > heap / 6) {
+                // a session of a sixth of the heap is up to half of it in allocated arrays: nothing beside it
+                alone.add(p);
+            } else if (peak != null || (noMemory && p.contains("/perf/"))) {
                 heavy.add(p);
             } else {
                 small.add(p);
@@ -303,10 +315,11 @@ final class M8Gate {
         for (int i = 0; i < smallWorkers; i++) {
             threads.add(worker("m8-gate-small", drainSmall));
         }
-        // heavy files: each may hold gigabytes (the reference kernel on perf/app-lam: 1.2 GB of overlay), so only
-        // as many at a time as a fifth of the heap in gigabytes, at most a third of the jobs; in a heap below
-        // 10 GB they wait until everything else is done and then run one at a time
-        int heavyWorkers = heavy.isEmpty() || heapGb < 10 ? 0 : (int) Math.max(1, Math.min(Math.max(1, jobs / 3), heapGb / 5));
+        // heavy files (an earlier run measured a session above 256 MiB; without such a memory: the perf tests):
+        // as many at a time as a third of the heap in gigabytes, at most half of the jobs. Those whose session was
+        // above a sixth of the heap (and those that ran out of heap beside others) wait until everything else is
+        // done and then run one at a time, their lanes one after the other.
+        int heavyWorkers = heavy.isEmpty() ? 0 : (int) Math.max(1, Math.min(Math.max(1, jobs / 2), heapGb / 3));
         for (int i = 0; i < heavyWorkers; i++) {
             threads.add(worker("m8-gate-heavy", drainHeavy));
         }
@@ -316,10 +329,16 @@ final class M8Gate {
         for (Thread t : threads) {
             join(t);
         }
-        if (!heavy.isEmpty()) {
-            // (a small heap) one heavy file at a time, its lanes one after the other, nothing else running
-            M8Pipeline.log.println("m8 " + what + ": " + heavy.size() + " heavy files, one at a time (heap " + heapGb + " GiB)");
-            Thread t = worker("m8-gate-heavy", drainHeavy);
+        if (!alone.isEmpty()) {
+            M8Pipeline.log.println("m8 " + what + ": " + alone.size() + " files with a session above a sixth of the heap (" + heapGb + " GiB), one at a time");
+            Thread t = worker("m8-gate-alone", () -> {
+                String p;
+                while ((p = alone.poll()) != null) {
+                    M8Lanes.FileRun r = M8Lanes.run(p, specs, options(null, fileMillis));
+                    done.put(p, r);
+                    progress(what, finished.incrementAndGet(), total, r, t0);
+                }
+            });
             t.start();
             join(t);
         }

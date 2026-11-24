@@ -77,6 +77,13 @@ public final class Run {
     private long[][] passResults = new long[0][];
     private long checkStartNanos;
     private long checkEndNanos;
+    /** {@code System.nanoTime()} at the start of {@link #execute()}: the origin of every {@code driver.time.*} value. */
+    private long startNanos;
+    /** 2 .. N for a later pass ({@link #laterPass}); its statistics go to a file of their own. */
+    private int passIndex = 1;
+    /** Statistics: the loader's publications as (nanoseconds since the start, units) pairs; loading thread only. */
+    private long[] loaderSeries = new long[0];
+    private int loaderSeriesLen;
 
     private HeavyGate gate;
     private final AtomicLong givenBack = new AtomicLong();
@@ -263,7 +270,16 @@ public final class Run {
         }
         long total = stats.phaseStart("total");
         final long wall0 = System.nanoTime();
+        startNanos = wall0;
         final long cpu0 = processCpuNanos();
+        final boolean shard = config.shardCount > 0;
+        if (shard) {
+            // A measurement over one shard of the units: stopped before anything runs, so that no
+            // path of this run can end in ACCEPT.
+            board.stopped("measurement run: only shard " + config.shardIndex + " of " + config.shardCount
+                    + " was checked (shard=K/N)");
+            stats.put("driver.shard", config.shardIndex + "/" + config.shardCount);
+        }
         try {
             if (wiring != null && !laterPass) {
                 applyEnvironment();
@@ -306,7 +322,7 @@ public final class Run {
             throw (Error) t;
         }
         long cpu1 = processCpuNanos();
-        passResults = new long[][] {{board.exitCode(), System.nanoTime() - wall0,
+        passResults = new long[][] {{shard ? board.exitCodeIgnoringStop() : board.exitCode(), System.nanoTime() - wall0,
                 checkEndNanos > checkStartNanos ? checkEndNanos - checkStartNanos : -1,
                 cpu0 < 0 || cpu1 < 0 ? -1 : cpu1 - cpu0}};
         if (!laterPass && config.passes > 1) {
@@ -330,7 +346,9 @@ public final class Run {
         final RunHost h = host;
         boolean whole;
         try {
-            whole = h != null && fatal.get() == null && board.exitCode() == Outcome.ACCEPT && config.stopAfter == null
+            // A shard run (measurement) is stopped by design: what it did check decides here.
+            whole = h != null && fatal.get() == null && config.stopAfter == null
+                    && (config.shardCount > 0 ? board.exitCodeIgnoringStop() : board.exitCode()) == Outcome.ACCEPT
                     && h.loadComplete() && h.envUnits() >= h.loadedUnits();
         } catch (RuntimeException e) {
             whole = false;
@@ -344,6 +362,7 @@ public final class Run {
             Run pass = wiring != null ? new Run(config, wiring, h.store(), null, null, primaryFactory, referenceFactory)
                     : new Run(config, null, null, h, null, primaryFactory, referenceFactory);
             pass.laterPass = true;
+            pass.passIndex = k;
             pass.minUnitsPerWorker = minUnitsPerWorker;
             pass.err = null;
             long[] result;
@@ -366,8 +385,9 @@ public final class Run {
 
     private void passLine(int k, long[] r, String note) {
         if (err != null) {
-            err.println("rlvm: pass " + k + " of " + config.passes + ": " + Outcome.name((int) r[0]) + ", wall "
-                    + seconds(r[1]) + " s (check " + seconds(r[2]) + " s), cpu " + seconds(r[3]) + " s" + note);
+            err.println("rlvm: pass " + k + " of " + config.passes + ": " + Outcome.name((int) r[0])
+                    + (config.shardCount > 0 ? " (shard " + config.shardIndex + "/" + config.shardCount + " only)" : "")
+                    + ", wall " + seconds(r[1]) + " s (check " + seconds(r[2]) + " s), cpu " + seconds(r[3]) + " s" + note);
         }
     }
 
@@ -419,6 +439,7 @@ public final class Run {
 
     /** Batch: the whole file on the calling thread, then {@link #check()}. */
     private void load(long inputBytes) {
+        mark("driver.time.loadStartNanos");
         long phase = stats.phaseStart("load");
         Store store = null;
         try {
@@ -429,6 +450,7 @@ public final class Run {
             loadFailed(e, published(store));
         } finally {
             stats.phaseEnd(phase);
+            mark("driver.time.loadEndNanos");
         }
         loadReport(store);
         if (store != null && published(store) > 0) {
@@ -504,6 +526,7 @@ public final class Run {
         final LoadFrontier f = new LoadFrontier(board);
         frontier = f;
         loadEnded = false;
+        mark("driver.time.loadStartNanos");
         long phase = stats.phaseStart("load");
         Store store = null;
         try {
@@ -538,6 +561,7 @@ public final class Run {
             fatal(e);
         } finally {
             stats.phaseEnd(phase);
+            mark("driver.time.loadEndNanos");
         }
         loadReport(store);
         if (!pipelineStarted) {
@@ -586,11 +610,19 @@ public final class Run {
                     return; // the file in one piece: the batch check follows when the load has returned
                 }
                 pipelineStarted = true;
+                mark("driver.time.firstPublicationNanos");
                 prepare(h, resolveWorkers(config.workers), false);
                 startThreads(h, -1, false);
             }
             if (account != null) {
                 account.setShared(sharedBytes());
+            }
+            if (stats.enabled()) {
+                if (loaderSeriesLen + 2 > loaderSeries.length) {
+                    loaderSeries = java.util.Arrays.copyOf(loaderSeries, Math.max(64, loaderSeries.length * 2));
+                }
+                loaderSeries[loaderSeriesLen++] = System.nanoTime() - startNanos;
+                loaderSeries[loaderSeriesLen++] = units;
             }
             frontier.published(units);
         } catch (Throwable t) {
@@ -747,8 +779,12 @@ public final class Run {
         sessionBytes = config.sessionBytesFor(nameOf(primary));
         stats.put("driver.sessionBytes", sessionBytes);
         Scheduler s = new Scheduler(null, OrderPolicy.FILE_ORDER, workerCount, config.chunkUnits, board);
+        if (stats.enabled()) {
+            s.timed();
+        }
         scheduler = s;
         checkStartNanos = System.nanoTime();
+        mark("driver.time.checkStartNanos");
         checkPhase = stats.phaseStart("check");
         final long stack = Math.max(config.workerStackBytes, config.deepStackBytes);
         envThread = null;
@@ -796,6 +832,7 @@ public final class Run {
         }
         stats.phaseEnd(checkPhase);
         checkEndNanos = System.nanoTime();
+        mark("driver.time.checkEndNanos");
         stats.put("driver.units", units);
         if (interrupted) {
             Thread.currentThread().interrupt();
@@ -854,6 +891,18 @@ public final class Run {
             return host.sharedBytes();
         } catch (RuntimeException e) {
             return 0;
+        }
+    }
+
+    /** {@code System.nanoTime()} at the start of {@link #execute()}. */
+    long startNanos() {
+        return startNanos;
+    }
+
+    /** Statistics: records the time since the start of the run under {@code key}. */
+    void mark(String key) {
+        if (stats.enabled()) {
+            stats.put(key, System.nanoTime() - startNanos);
         }
     }
 
@@ -1023,15 +1072,34 @@ public final class Run {
                 stats.table("driver.workers", new String[] {"accepted", "sessionResets", "cancelled", "rechecks",
                         "envResets", "mirrorFailures", "giveBacks", "givenBackBytes", "maxSlackBytes", "snapshotResets",
                         "deferredUnits", "gatedStages"}, rows, labels);
+                // Where each worker's wall clock went, and its progress over time (see Worker.times()).
+                long[][] times = new long[workers.length][];
+                long skipped = 0;
+                for (int i = 0; i < workers.length; i++) {
+                    times[i] = workers[i].times();
+                    skipped += workers[i].shardSkipped();
+                    stats.table("driver.series.worker-" + i, Worker.SERIES_COLUMNS, workers[i].series(), null);
+                }
+                stats.table("driver.workerTimes", Worker.TIME_COLUMNS, times, labels);
+                if (config.shardCount > 0) {
+                    stats.put("driver.shard.unitsPassedOver", skipped);
+                }
+            }
+            if (loaderSeriesLen > 0) {
+                long[][] rows = new long[loaderSeriesLen / 2][];
+                for (int i = 0; i < rows.length; i++) {
+                    rows[i] = new long[] {loaderSeries[2 * i], loaderSeries[2 * i + 1]};
+                }
+                stats.table("driver.series.loader", new String[] {"atNanos", "loadedUnits"}, rows, null);
             }
             String[] events = board.events();
             for (int i = 0; i < events.length; i++) {
                 stats.put("driver.event." + i, events[i]);
             }
             try {
-                if (!laterPass) {
-                    stats.writeJson(config.statsFile);
-                }
+                // A later pass (RunConfig.passes) has statistics of its own: FILE.pass2, FILE.pass3, ...
+                stats.writeJson(laterPass ? config.statsFile.resolveSibling(config.statsFile.getFileName() + ".pass"
+                        + passIndex) : config.statsFile);
             } catch (IOException | RuntimeException e) {
                 if (err != null) {
                     err.println("rlvm: cannot write statistics to " + config.statsFile + ": " + e);
@@ -1137,6 +1205,24 @@ public final class Run {
      * loading is decided again after the end of the load ({@link EnvLane#retry()}).
      */
     private static final class EnvRunner implements Runnable {
+        /** Statistics: this many of the slowest steps of the pass are kept. */
+        private static final int SLOWEST = 12;
+
+        /** Keeps the {@link #SLOWEST} longest steps: (nanos, first unit, units) triples, unordered. */
+        private static void slowest(long[] list, long nanos, int from, int units) {
+            int min = 0;
+            for (int i = 1; i < SLOWEST; i++) {
+                if (list[3 * i] < list[3 * min]) {
+                    min = i;
+                }
+            }
+            if (nanos > list[3 * min]) {
+                list[3 * min] = nanos;
+                list[3 * min + 1] = from;
+                list[3 * min + 2] = units;
+            }
+        }
+
         private final Run run;
         /** The number of units of a completely loaded host, or -1: follow the loader. */
         private final int fixedUnits;
@@ -1157,9 +1243,25 @@ public final class Run {
             EnvLane env = null;
             long waits = 0;
             long waitsForEnd = 0;
+            // Statistics: where the environment thread's wall clock goes, its slowest steps, its frontier over time.
+            final boolean timed = stats.enabled();
+            final long startAt = timed ? System.nanoTime() : 0;
+            long advanceNanos = 0;
+            long advances = 0;
+            long announceNanos = 0;
+            long waitLoaderNanos = 0;
+            long waitLoadEndNanos = 0;
+            long openNanos = 0;
+            final long[] slowest = new long[SLOWEST * 3];
+            long[] series = new long[timed ? 192 : 0];
+            int seriesLen = 0;
+            long seriesNext = 0;
             try {
                 LaneSignals signals = new LaneSignals(board, run.account, slot, true);
                 env = new EnvLane(run, signals);
+                if (timed) {
+                    openNanos = System.nanoTime() - startAt;
+                }
                 final EnvLane lane = env;
                 final long[] last = new long[1];
                 signals.setProbe(new LaneSignals.Probe() {
@@ -1192,7 +1294,13 @@ public final class Run {
                             break;
                         }
                         waits++;
+                        scheduler.frontierState(Scheduler.FRONTIER_WAITS_FOR_LOADER);
+                        final long w0 = timed ? System.nanoTime() : 0;
                         loader.awaitBeyond(frontier);
+                        if (timed) {
+                            waitLoaderNanos += System.nanoTime() - w0;
+                        }
+                        scheduler.frontierState(Scheduler.FRONTIER_WORKING);
                         continue;
                     }
                     // An inductive block or quot record is advanced alone, after everything below it was
@@ -1207,7 +1315,9 @@ public final class Run {
                         }
                     }
                     signals.guard(frontier);
+                    final long a0 = timed ? System.nanoTime() : 0;
                     int n = env.advanceTo(target);
+                    final long a1 = timed ? System.nanoTime() : 0;
                     signals.guard(-1);
                     run.refreshSharedBytes();
                     Engine p = run.primary;
@@ -1215,6 +1325,22 @@ public final class Run {
                         p.environmentAdvanced(n);
                     }
                     scheduler.unitsReady(Math.min(n, loaded));
+                    if (timed) {
+                        final long a2 = System.nanoTime();
+                        advanceNanos += a1 - a0;
+                        announceNanos += a2 - a1;
+                        advances++;
+                        slowest(slowest, a1 - a0, frontier, n - frontier);
+                        if (a2 >= seriesNext) {
+                            if (seriesLen + 3 > series.length) {
+                                series = java.util.Arrays.copyOf(series, series.length * 2);
+                            }
+                            series[seriesLen++] = a2 - run.startNanos;
+                            series[seriesLen++] = Math.max(n, frontier);
+                            series[seriesLen++] = loaded;
+                            seriesNext = a2 + 100_000_000L;
+                        }
+                    }
                     if (n > frontier) {
                         frontier = n;
                     }
@@ -1224,11 +1350,22 @@ public final class Run {
                         // nothing and waits (EnvBuilder.waitingForLoad), or it reported a decline that
                         // was withheld; either way once more after the end of the load.
                         int pending = env.pendingUnit();
+                        final boolean wait = pending >= 0 || env.waitingForLoad();
+                        final long w0 = timed ? System.nanoTime() : 0;
+                        boolean alive = false;
+                        if (wait) {
+                            scheduler.frontierState(Scheduler.FRONTIER_WAITS_FOR_LOADER);
+                            alive = run.awaitLoadEnd(pending >= 0 ? pending : n);
+                            scheduler.frontierState(Scheduler.FRONTIER_WORKING);
+                            if (timed) {
+                                waitLoadEndNanos += System.nanoTime() - w0;
+                            }
+                        }
                         if (pending >= 0) {
-                            if (!run.awaitLoadEnd(pending) || !env.retry()) {
+                            if (!alive || !env.retry()) {
                                 break;
                             }
-                        } else if (!env.waitingForLoad() || !run.awaitLoadEnd(n)) {
+                        } else if (!alive) {
                             break;
                         } else {
                             waitsForEnd++;
@@ -1239,6 +1376,32 @@ public final class Run {
                 run.fatal(t);
             } finally {
                 scheduler.close();
+                if (timed) {
+                    final long closedAt = System.nanoTime();
+                    stats.put("driver.time.envStartNanos", startAt - run.startNanos);
+                    stats.put("driver.time.envClosedNanos", closedAt - run.startNanos);
+                    stats.put("driver.env.wallNanos", closedAt - startAt);
+                    stats.put("driver.env.openNanos", openNanos);
+                    stats.put("driver.env.advanceNanos", advanceNanos);
+                    stats.put("driver.env.advances", advances);
+                    stats.put("driver.env.announceNanos", announceNanos);
+                    stats.put("driver.env.waitLoaderNanos", waitLoaderNanos);
+                    stats.put("driver.env.waitLoadEndNanos", waitLoadEndNanos);
+                    long[][] rows = new long[SLOWEST][];
+                    int k = 0;
+                    for (int i = 0; i < SLOWEST; i++) {
+                        if (slowest[3 * i] > 0) {
+                            rows[k++] = new long[] {slowest[3 * i], slowest[3 * i + 1], slowest[3 * i + 2]};
+                        }
+                    }
+                    stats.table("driver.env.slowest", new String[] {"nanos", "fromUnit", "units"},
+                            java.util.Arrays.copyOf(rows, k), null);
+                    rows = new long[seriesLen / 3][];
+                    for (int i = 0; i < rows.length; i++) {
+                        rows[i] = new long[] {series[3 * i], series[3 * i + 1], series[3 * i + 2]};
+                    }
+                    stats.table("driver.series.env", new String[] {"atNanos", "envUnits", "loadedUnits"}, rows, null);
+                }
                 if (env != null) {
                     stats.put("driver.env.sessionResets", env.resets());
                     stats.put("driver.env.unitsDecided", env.decided());

@@ -177,16 +177,20 @@ class M7ElabTest {
     }
 
     @Test
-    void rentToOwnElaboratesAtTheTenthRequest() {
+    void rentToOwnElaboratesAtTheThresholdOfTheRole() {
         Fixture f = Fixture.prelude();
         f.seal();
         f.switches("code,tele");
         int add = f.cid("Nat.add");
-        for (int i = 1; i < Op.ELAB_AT; i++) {
+        for (int i = 1; i < f.engine.code.elabAt; i++) {
             assertEquals(0, Code.blockFor(f.m, add, Op.ROLE_BODY), "request " + i);
         }
         int b = Code.blockFor(f.m, add, Op.ROLE_BODY);
         assertTrue(b > 0, "the ELAB_AT-th request elaborates");
+        for (int i = 1; i < f.engine.code.teleAt; i++) {
+            assertEquals(0, Code.blockFor(f.m, add, Op.ROLE_TELE), "TELE request " + i);
+        }
+        assertTrue(Code.blockFor(f.m, add, Op.ROLE_TELE) > 0, "the tenth request elaborates TELE");
         assertEquals(b, Code.blockFor(f.m, add, Op.ROLE_BODY));
         assertEquals(b, f.engine.code.blockOf(add, Op.ROLE_BODY));
         assertEquals(2, Code.arityOf(f.m, b));

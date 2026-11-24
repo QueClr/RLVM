@@ -79,11 +79,18 @@ final class CodeStore {
     private volatile long publishedWords;
 
     /**
-     * The rent-to-own threshold (ISA 3.1 {@code ELAB_AT}, default {@code Op.ELAB_AT} = 10; to be swept over
-     * 4 / 8 / 16 / 32 by CPU time, of which the 4-bit counter covers 1..15): system property
-     * {@code rlvm.machine.elabAt}, read once at engine creation.
+     * The rent-to-own thresholds (ISA 3.1 {@code ELAB_AT}; the 4-bit request counter covers 1..15), read once at
+     * engine creation. {@link #elabAt}: the reduction roles (BODY, RULE, RULES), default {@link #REDUCE_AT} = 1:
+     * elaboration at the first request costs nothing measurable on Init, the Cedar slice and reachability
+     * (instructions per run equal at 1, 3 and 10; 2.2 MiB of code on Init instead of 0.9) and a closure that is
+     * hot inside a body that is unfolded only a few times gets its sub-block (perf/unfold-before-literal: half the
+     * time, M3's measurement). {@link #teleAt}: TELE (and FIELDS), default {@code Op.ELAB_AT} = 10: telescope
+     * blocks are large (152 words on average on Init). System property {@code rlvm.machine.elabAt} sets both
+     * (sweeps); NOTES-M7 section 8.
      */
     final int elabAt;
+    final int teleAt;
+    static final int REDUCE_AT = 1;
 
     /**
      * Case trees inline the trees of the definitions they call (matchers; {@code Elab.inline}). On; system
@@ -94,8 +101,9 @@ final class CodeStore {
 
     CodeStore(Store store) {
         this.store = store;
-        int at = Integer.getInteger("rlvm.machine.elabAt", Op.ELAB_AT);
-        this.elabAt = at < 1 ? 1 : at > 15 ? 15 : at;
+        Integer at = Integer.getInteger("rlvm.machine.elabAt");
+        this.elabAt = at == null ? REDUCE_AT : at < 1 ? 1 : at > 15 ? 15 : at;
+        this.teleAt = at == null ? Op.ELAB_AT : this.elabAt;
         this.inlineTrees = !"off".equals(System.getProperty("rlvm.machine.m7.inline"));
     }
 
@@ -189,7 +197,7 @@ final class CodeStore {
     // Request counters (ISA 3.1, 8.3): racy, saturating, 4 bits per role
     // ---------------------------------------------------------------------------------------------------
 
-    /** Counts a request of {@code (row, role)}; true exactly when the count reaches {@link #elabAt} (racy). */
+    /** Counts a request of {@code (row, role)}; true exactly when the count reaches the role's threshold ({@link #elabAt}, {@link #teleAt}; racy). */
     boolean request(int row, int role) {
         if (row < 0 || (row >>> ROW_SHIFT) >= MAX_ROW_CHUNKS) {
             return false;
@@ -206,7 +214,7 @@ final class CodeStore {
             return false;
         }
         c[i] = w + (1 << sh);
-        return n + 1 == elabAt;
+        return n + 1 == (role == Op.ROLE_TELE || role == Op.ROLE_FIELDS ? teleAt : elabAt);
     }
 
     /** The current request count of {@code (row, role)} (0..15; tests and statistics). */

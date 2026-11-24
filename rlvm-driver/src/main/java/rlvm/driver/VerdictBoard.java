@@ -389,6 +389,19 @@ public final class VerdictBoard {
 
     /** The exit code under the rule above; never EXIT_ACCEPT before {@link #complete(int)} was called. */
     public int exitCode() {
+        return exitCode(false);
+    }
+
+    /**
+     * What {@link #exitCode()} would be had {@link #stopped(String)} not been called: for a
+     * measurement run that is stopped by design and still wants to know whether everything it did
+     * check was accepted. Never the run's verdict.
+     */
+    int exitCodeIgnoringStop() {
+        return exitCode(true);
+    }
+
+    private int exitCode(boolean ignoreStop) {
         if (internalFailure) {
             return Outcome.EXIT_DECLINE;
         }
@@ -415,7 +428,7 @@ public final class VerdictBoard {
         if (u >= 0) {
             return status(u) == REJECTED ? Outcome.EXIT_REJECT : Outcome.EXIT_DECLINE;
         }
-        if (input != null || complete < 0 || stopped) {
+        if (input != null || complete < 0 || (stopped && !ignoreStop)) {
             return Outcome.EXIT_DECLINE;
         }
         // Every unit below `complete` is accepted or skipped. Counts must be consistent: no status at or above it.

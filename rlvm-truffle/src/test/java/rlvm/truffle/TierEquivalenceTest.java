@@ -125,11 +125,22 @@ class TierEquivalenceTest {
         String sw = System.getProperty("t2.switches", K1);
         int depth = Integer.getInteger("t2.depth", -1);
         String[] variant = System.getProperty("t2.variant", "").trim().isEmpty() ? new String[0] : System.getProperty("t2.variant").trim().split("\\s+");
+        int n = 0;
+        int skipped = 0;
+        long calls = 0;
         for (String f : list.split(",")) {
             assumeTrue(Harness.exists(f), f);
             long t0 = System.nanoTime();
-            equivalent(f, sw, depth, variant);
+            try {
+                calls += equivalent(f, sw, depth, variant);
+                n++;
+            } catch (rlvm.load.MalformedExportException | rlvm.load.UnsupportedExportException e) {
+                skipped++; // a file the loader refuses never reaches an engine
+                System.out.println("[t2] " + f + ": not loaded (" + e.getClass().getSimpleName() + ")");
+                continue;
+            }
             System.out.println("[t2] " + f + ": " + (System.nanoTime() - t0) / 1_000_000 + " ms");
         }
+        System.out.println("[t2] TOTAL: " + n + " files equivalent, " + skipped + " refused by the loader, " + calls + " compiled activations");
     }
 }

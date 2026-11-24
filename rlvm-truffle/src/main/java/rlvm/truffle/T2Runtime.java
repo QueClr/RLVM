@@ -103,7 +103,8 @@ final class T2Runtime {
         }
         try {
             TruffleRuntime rt = Truffle.getRuntime();
-            if (!(rt instanceof OptimizedTruffleRuntime)) {
+            // by name first: with the interpreter-only fallback runtime the optimising runtime's classes may not even link
+            if (rt.getClass().getName().equals("com.oracle.truffle.api.impl.DefaultTruffleRuntime") || !(rt instanceof OptimizedTruffleRuntime)) {
                 broken = "no optimising Truffle runtime (" + rt.getName() + ")";
                 return false;
             }

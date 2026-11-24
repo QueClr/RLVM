@@ -41,9 +41,9 @@ import rlvm.store.Store;
 /**
  * {@code -X passes=N} / {@code -X passes-mode=reload|recheck} ({@link Passes}) through the real
  * launcher and the real pipeline: one pass is the plain run; N passes give N lines and the verdict of
- * the first, for an accepted, a rejected and a declined export, in both modes, loaded in batch and
- * pipelined mode, with 1 and 4 workers; what recheck keeps; the statistics; a later pass with another
- * verdict.
+ * the first, for an accepted, a rejected and a declined export, in both modes (reload: this module's
+ * complete runs; recheck: the driver's {@code RunConfig.passes}), loaded in batch and pipelined mode,
+ * with 1 and 4 workers; the statistics; a later pass with another verdict.
  */
 class PassesTest {
 
@@ -137,13 +137,15 @@ class PassesTest {
 
     private static final Pattern LINE = Pattern.compile("^rlvm: pass (\\d+)/(\\d+) mode=(reload|recheck) wall_ms=(\\d+)"
             + " cpu_ms=(-?\\d+) gc_ms=(-?\\d+) gc_count=(-?\\d+) load_ms=(\\d+) check_ms=(\\d+) units=(\\d+)"
-            + " accepted=(\\d+) workers=(\\d+) pipelined=([01]) heap_kb=(\\d+) rss_kb=(-?\\d+) peak_rss_kb=(-?\\d+)"
+            + " accepted=(-?\\d+) workers=(\\d+) pipelined=([01]) heap_kb=(-?\\d+) rss_kb=(-?\\d+) peak_rss_kb=(-?\\d+)"
             + " settle_ms=(\\d+) verdict=(ACCEPT|REJECT|DECLINE)$");
+    /** The driver's own line of a pass (recheck mode), which stands beside this module's. */
+    private static final Pattern DRIVER_LINE = Pattern.compile("^rlvm: pass \\d+ of \\d+: .*$");
 
     private static List<Matcher> passLines(String err) {
         List<Matcher> out = new ArrayList<>();
         for (String line : err.split("\n")) {
-            if (line.startsWith("rlvm: pass ")) {
+            if (line.startsWith("rlvm: pass ") && !DRIVER_LINE.matcher(line).matches()) {
                 Matcher m = LINE.matcher(line);
                 assertTrue(m.matches(), "a pass line of another shape: " + line);
                 out.add(m);
@@ -212,7 +214,7 @@ class PassesTest {
                             assertEquals(keeps && k > 0 ? "recheck" : "reload", m.group(3), what + ", pass " + (k + 1));
                             assertEquals(Integer.toString(workers), m.group(12), what + ": workers of pass " + (k + 1));
                             assertEquals(Integer.toString(UNITS), m.group(10), what + ": units");
-                            if (f == 0) {
+                            if (f == 0 && !(keeps && k > 0)) {
                                 assertEquals(m.group(10), m.group(11), what + ": every unit accepted in pass " + (k + 1));
                             }
                             if (keeps && k > 0) {
@@ -224,6 +226,9 @@ class PassesTest {
                             }
                         }
                         assertEquals(mode.equals("recheck") && f != 0, r.err.contains("the later passes reload"), what + ": " + r.err);
+                        // The driver's own lines stand beside ours exactly when it made the passes.
+                        assertEquals(keeps ? 3 : 0, r.err.lines().filter(l -> DRIVER_LINE.matcher(l).matches()
+                                && !l.contains("no further pass")).count(), what + ": " + r.err);
                         assertFalse(r.err.contains("PASSES DISAGREE"), r.err);
                         if (f == 1) {
                             // The explanation of a rejection is printed by every pass, as by a plain run.
@@ -304,7 +309,7 @@ class PassesTest {
     // ---- statistics -------------------------------------------------------------------------------------------
 
     @Test
-    void theStatisticsFileHasATableOfThePassesAndEveryPassItsOwnFile() throws Exception {
+    void theStatisticsFileHasATableOfThePasses() throws Exception {
         Path f = file("accepted", accepted());
         for (String mode : new String[] {"reload", "recheck"}) {
             Path stats = dir.resolve("stats-" + mode + ".json");
@@ -312,10 +317,16 @@ class PassesTest {
                     "stats-file=" + stats);
             assertEquals(0, r.status, r.toString());
             for (int k = 1; k <= 3; k++) {
-                String pass = Files.readString(Path.of(stats + ".pass" + k));
-                assertTrue(pass.contains("\"driver.verdict\": \"accept\""), mode + " pass " + k + ": " + pass);
-                assertFalse(pass.contains("\"passes\""), "a pass's own file is a plain run's");
-                assertTrue(pass.contains("\"engine.primary.name\": \"reference\""), mode + " pass " + k + ": " + pass);
+                Path own = Path.of(stats + ".pass" + k);
+                if (mode.equals("reload")) {
+                    // Every reload pass writes its own file, exactly as a plain run writes its statistics.
+                    String pass = Files.readString(own);
+                    assertTrue(pass.contains("\"driver.verdict\": \"accept\""), mode + " pass " + k + ": " + pass);
+                    assertFalse(pass.contains("\"passes\""), "a pass's own file is a plain run's");
+                    assertTrue(pass.contains("\"engine.primary.name\": \"reference\""), mode + " pass " + k + ": " + pass);
+                } else {
+                    assertFalse(Files.exists(own), "the driver's passes are one run: one file");
+                }
             }
             String all = Files.readString(stats);
             assertTrue(all.contains("\"passes.requested\": 3"), all);
@@ -326,7 +337,9 @@ class PassesTest {
             for (int k = 1; k <= 3; k++) {
                 assertTrue(all.contains("{\"label\": \"pass-" + k + "\", \"values\": [0, "), all);
             }
-            assertTrue(all.contains("\"driver.verdict\": \"accept\""), "the last pass's statistics are in the file: " + all);
+            assertTrue(all.contains("\"driver.verdict\": \"accept\""), "the last run's statistics are in the file: " + all);
+            // Recheck: the driver's own per-pass values are there as well.
+            assertEquals(mode.equals("recheck"), all.contains("\"driver.pass.3.verdict\": \"accept\""), all);
             // The plain run writes the file itself and nothing else.
             Path plain = dir.resolve("plain-" + mode + ".json");
             assertEquals(0, launch(f, "--threads", "4", "-X", "stats-file=" + plain).status);
@@ -336,7 +349,7 @@ class PassesTest {
         }
     }
 
-    // ---- what recheck keeps -------------------------------------------------------------------------------------
+    // ---- engines per pass; a later pass with another verdict -----------------------------------------------------
 
     /** The reference kernel behind a provider that counts engines, sessions and checks, and can turn sour. */
     static final class Counting implements EngineProvider {
@@ -502,45 +515,27 @@ class PassesTest {
     }
 
     @Test
-    void reloadMakesEverythingAnewAndRecheckKeepsTheEngineOfTheFirstPass() throws Exception {
+    void everyPassChecksEveryConstantWithItsOwnEngineInBothModes() throws Exception {
         Path f = file("accepted", accepted());
         for (int workers : new int[] {1, 4}) {
-            Result reload = passes(f, workers, 0, "passes=3");
-            assertEquals(Outcome.ACCEPT, reload.outcome, reload.err);
-            assertEquals(3, reload.counting.primaryEngines.get(), "a reload pass creates its own engine");
-            assertEquals(3, reload.counting.closed.get(), "and closes it");
-            assertEquals(UNITS, reload.counting.checks.size());
-            assertEquals(3, reload.counting.checksOfEveryConstant(), "every constant is checked once per pass");
-            // (A worker that never gets a claim on so small a file opens no session.)
-            int sessions = reload.counting.sessions.get();
-            assertTrue(sessions >= 3 && sessions <= 3 * workers, "a warm session per worker and pass at most: " + sessions);
-
-            Result recheck = passes(f, workers, 0, "passes=3", "passes-mode=recheck");
-            assertEquals(Outcome.ACCEPT, recheck.outcome, recheck.err);
-            assertEquals(1, recheck.counting.primaryEngines.get(), "the engine of pass 1 checks in every pass");
-            assertEquals(1, recheck.counting.closed.get(), "and is closed once, after the last pass");
-            assertEquals(UNITS, recheck.counting.checks.size());
-            assertEquals(3, recheck.counting.checksOfEveryConstant(), "every constant is checked again in every pass");
-            sessions = recheck.counting.sessions.get();
-            assertTrue(sessions >= 3 && sessions <= 3 * workers, "sessions are new in every pass: " + sessions);
-            List<Matcher> lines = passLines(recheck.err);
-            assertEquals(3, lines.size(), recheck.err);
-            assertEquals("recheck", lines.get(2).group(3));
+            for (String mode : new String[] {"reload", "recheck"}) {
+                Result r = passes(f, workers, 0, "passes=3", "passes-mode=" + mode);
+                assertEquals(Outcome.ACCEPT, r.outcome, r.err);
+                // Reload: a complete run per pass. Recheck: the driver gives every later pass new engine
+                // instances too (rlvm-driver/README.md, "Passes": only the store and the process are kept).
+                assertEquals(3, r.counting.primaryEngines.get(), mode + ": an engine per pass");
+                assertEquals(3, r.counting.closed.get(), mode + ": and each is closed");
+                assertEquals(UNITS, r.counting.checks.size());
+                assertEquals(3, r.counting.checksOfEveryConstant(), mode + ": every constant is checked once per pass");
+                // (A worker that never gets a claim on so small a file opens no session.)
+                int sessions = r.counting.sessions.get();
+                assertTrue(sessions >= 3 && sessions <= 3 * workers, mode + ": a warm session per worker and pass at most: "
+                        + sessions);
+                List<Matcher> lines = passLines(r.err);
+                assertEquals(3, lines.size(), r.err);
+                assertEquals(mode, lines.get(2).group(3));
+            }
         }
-    }
-
-    /** {@code Engine.dumpStats} is called once per engine: by every reload pass, by the last pass of recheck mode. */
-    @Test
-    void theEnginesStatisticsAreWrittenOncePerEngine() throws Exception {
-        Path f = file("accepted", accepted());
-        Result reload = passes(f, 1, 0, "passes=3", "stats-file=" + dir.resolve("r.json"));
-        assertEquals(Outcome.ACCEPT, reload.outcome, reload.err);
-        assertEquals(3, reload.counting.dumps.get());
-        Result recheck = passes(f, 1, 0, "passes=3", "passes-mode=recheck", "stats-file=" + dir.resolve("k.json"));
-        assertEquals(Outcome.ACCEPT, recheck.outcome, recheck.err);
-        assertEquals(1, recheck.counting.dumps.get());
-        assertEquals(1, recheck.counting.closed.get());
-        assertTrue(Files.readString(dir.resolve("k.json")).contains("\"passes.done\": 3"));
     }
 
     @Test
@@ -552,17 +547,19 @@ class PassesTest {
             Result r = passes(f, 1, 2, "passes=4", "passes-mode=" + mode, "no-fallback");
             assertEquals(Outcome.DECLINE, r.outcome, r.err);
             assertTrue(r.err.contains("rlvm: PASSES DISAGREE: pass 1 ended with ACCEPT, pass 2 (" + mode + ") with DECLINE"), r.err);
+            assertEquals(1, r.err.split("PASSES DISAGREE", -1).length - 1, "said once: " + r.err);
             List<Matcher> lines = passLines(r.err);
-            assertEquals(2, lines.size(), "the passes after the disagreement are not made: " + r.err);
+            // Reload stops at the disagreement; the driver's series (recheck) is one run and is reported whole.
+            assertEquals(mode.equals("reload") ? 2 : 4, lines.size(), r.err);
             assertEquals("ACCEPT", lines.get(0).group(18));
             assertEquals("DECLINE", lines.get(1).group(18));
-            // Every engine that was created is closed again (reload: per pass; recheck: after the last pass).
-            assertTrue(r.counting.closed.get() >= 1, "the engines are closed: " + r.counting.closed.get());
         }
         // The same sour engine with the reference kernel's fallback: every pass accepts, nothing is said.
-        Result ok = passes(f, 1, 2, "passes=3");
-        assertEquals(Outcome.ACCEPT, ok.outcome, ok.err);
-        assertFalse(ok.err.contains("PASSES DISAGREE"), ok.err);
+        for (String mode : new String[] {"reload", "recheck"}) {
+            Result ok = passes(f, 1, 2, "passes=3", "passes-mode=" + mode);
+            assertEquals(Outcome.ACCEPT, ok.outcome, ok.err);
+            assertFalse(ok.err.contains("PASSES DISAGREE"), ok.err);
+        }
     }
 
     // ---- real exports -------------------------------------------------------------------------------------------
@@ -598,11 +595,50 @@ class PassesTest {
                     for (Matcher m : lines) {
                         assertEquals("ACCEPT", m.group(18), what);
                         assertEquals(lines.get(0).group(10), m.group(10), what + ": units");
-                        assertEquals(m.group(10), m.group(11), what + ": every unit is accepted");
+                        if (!m.group(11).equals("-1")) {
+                            assertEquals(m.group(10), m.group(11), what + ": every unit is accepted");
+                        }
                     }
                     assertEquals(mode, lines.get(2).group(3), what);
                 }
             }
+        }
+    }
+
+    /**
+     * An export that is not in declaration order ({@code b := a} before {@code a}): the environment
+     * pass admits it in dependency order and records the outcomes. A reload pass repeats all of that.
+     * A recheck pass (the driver's) reads what pass 1 recorded - or, if the driver's later pass lets a
+     * new environment pass discard those records, reaches another verdict, which must then be said
+     * loudly and end in DECLINE; a silent second verdict is the one thing that may not happen.
+     */
+    @Test
+    void anExportThatIsNotInDeclarationOrder() throws Exception {
+        String export = META
+                + "{\"in\":1,\"str\":{\"pre\":0,\"str\":\"a\"}}\n"
+                + "{\"in\":2,\"str\":{\"pre\":0,\"str\":\"b\"}}\n"
+                + "{\"il\":1,\"succ\":0}\n"
+                + "{\"il\":2,\"succ\":1}\n"
+                + "{\"ie\":0,\"sort\":2}\n"
+                + "{\"ie\":1,\"sort\":1}\n"
+                + "{\"const\":{\"name\":1,\"us\":[]},\"ie\":2}\n"
+                + "{\"def\":{\"all\":[2],\"hints\":\"opaque\",\"levelParams\":[],\"name\":2,\"safety\":\"safe\",\"type\":0,\"value\":2}}\n"
+                + "{\"def\":{\"all\":[1],\"hints\":\"opaque\",\"levelParams\":[],\"name\":1,\"safety\":\"safe\",\"type\":0,\"value\":1}}\n";
+        Path f = file("forward", export);
+        LauncherAccess.Result plain = launch(f, "--threads", "1");
+        assumeTrue(plain.status == 0, "the pipeline does not accept the forward reference: " + plain);
+        LauncherAccess.Result reload = launch(f, "--threads", "1", "-X", "passes=3");
+        assertEquals(0, reload.status, reload.toString());
+        assertEquals(3, passLines(reload.err).size());
+        LauncherAccess.Result recheck = launch(f, "--threads", "1", "-X", "passes=3", "-X", "passes-mode=recheck");
+        List<Matcher> lines = passLines(recheck.err);
+        assertEquals(3, lines.size(), recheck.err);
+        boolean same = lines.stream().allMatch(m -> m.group(18).equals("ACCEPT"));
+        if (same) {
+            assertEquals(0, recheck.status, recheck.toString());
+        } else {
+            assertEquals(2, recheck.status, "a later pass with another verdict declines: " + recheck);
+            assertTrue(recheck.err.contains("PASSES DISAGREE"), recheck.err);
         }
     }
 

@@ -216,6 +216,23 @@ public final class RunConfig {
      */
     public int passes = 1;
 
+    /**
+     * MEASUREMENT ONLY ({@code -X shard=K/N}): workers check only the def / thm / axiom / opaque units
+     * of shard {@link #shardIndex} of {@code shardCount} (blocks of {@code 2^SHARD_BLOCK_LOG2}
+     * consecutive units, block number modulo N) and pass over the others; everything else of the run
+     * (load, environment pass) is complete. Such a run NEVER accepts: its verdict is DECLINE
+     * ("only shard K of N was checked"). N processes with one worker each over the N shards against
+     * one process with N workers separate what the hardware gives (memory bandwidth, shared cache)
+     * from what one process costs (collections, scheduler, shared tables). 0 = off.
+     */
+    public int shardCount = 0;
+
+    /** See {@link #shardCount}: 0 .. shardCount - 1. */
+    public int shardIndex = 0;
+
+    /** See {@link #shardCount}: a shard is made of blocks of 1024 consecutive units. */
+    public static final int SHARD_BLOCK_LOG2 = 10;
+
     /** Print WARM-ANOMALY and MACHINE-INCOMPLETE events to stderr (at most 8 lines per run). */
     public boolean logAnomalies = true;
 
@@ -223,7 +240,7 @@ public final class RunConfig {
 
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "env-batch", "spill-ms", "publish-units", "publish-mib",
-        "pipeline-min-mib", "no-fallback", "passes"
+        "pipeline-min-mib", "no-fallback", "passes", "shard"
     };
 
     /** Environment variable with driver settings for experiments: {@code key=value[,key=value]...}. */
@@ -280,9 +297,10 @@ public final class RunConfig {
      * passes=N            check the loaded export N times in one process; the verdict is pass 1's  {@link #passes}
      * no-fallback         the reference kernel does not decide what the primary engine declines
      *                     (a flag: no value, or true / false)                          {@link #referenceFallback}
+     * shard=K/N           measurement only: check shard K (0 .. N-1) of N; the run declines   {@link #shardCount}
      * </pre>
-     * None of the numeric settings can change a verdict; {@code no-fallback} can only turn an ACCEPT
-     * into a DECLINE.
+     * None of the numeric settings can change a verdict; {@code no-fallback} and {@code shard} can only
+     * turn an ACCEPT into a DECLINE.
      *
      * @throws IllegalArgumentException with a message for the user: unknown key, missing or malformed
      *     value, value out of range
@@ -299,6 +317,23 @@ public final class RunConfig {
             } else {
                 throw new IllegalArgumentException("no-fallback=" + value + ": expected no value, true or false");
             }
+            return;
+        }
+        if (key.equals("shard")) {
+            int slash = value == null ? -1 : value.indexOf('/');
+            int k;
+            int of;
+            try {
+                k = Integer.parseInt(value.substring(0, slash).trim());
+                of = Integer.parseInt(value.substring(slash + 1).trim());
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException("shard=" + value + ": expected K/N");
+            }
+            if (of < 1 || of > 1024 || k < 0 || k >= of) {
+                throw new IllegalArgumentException("shard=" + value + ": need 0 <= K < N <= 1024");
+            }
+            shardIndex = k;
+            shardCount = of;
             return;
         }
         if (value == null || value.isEmpty()) {

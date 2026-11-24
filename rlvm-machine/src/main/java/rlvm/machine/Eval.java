@@ -242,6 +242,17 @@ final class Eval {
     }
 
     /**
+     * EVAL of a term that is entered like the body of a beta step: a binder body under {@code ENTER(frame)} plus
+     * arguments that the caller bound itself (M5's TWALK in telescope mode instantiates a Pi telescope this way).
+     * With SW_M2A without a tabling record ({@link #evalNT}, NOTES-M2 D19), else {@link #eval}: same values.
+     * Entry frame: EVAL[NB](t, eb, en, ls) or EVAL[0](t, eb, en, ls).
+     * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
+     */
+    static int evalBody(Machine m, int t, int eb, int en, int ls, int d) {
+        return (m.sw & Op.SW_M2A) != 0 ? evalNT(m, t, eb, en, ls, d) : eval(m, t, eb, en, ls, d);
+    }
+
+    /**
      * EVAL of the body of a beta step or of INST under {@code X_NOBODY} (SW_M2A): the judgment of {@link #eval} without a
      * tabling record. A body is entered once per APPLY / INST, never through an inert nest, so no DAG is walked as a
      * tree by this (NOTES-M2 D19); the memo it gives up is the one of a second application of the same closure to the

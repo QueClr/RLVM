@@ -108,7 +108,7 @@ class M7CodeStoreTest {
             boolean f = cs.request(123, Op.ROLE_BODY);
             if (f) {
                 fired++;
-                assertEquals(Op.ELAB_AT, i, "fires at the ELAB_AT-th request");
+                assertEquals(cs.elabAt, i, "fires at the ELAB_AT-th request of a reduction role");
             }
         }
         assertEquals(1, fired);
@@ -116,16 +116,20 @@ class M7CodeStoreTest {
         // roles and rows are counted separately
         assertEquals(0, cs.requests(123, Op.ROLE_TELE));
         assertEquals(0, cs.requests(124, Op.ROLE_BODY));
-        for (int i = 1; i < Op.ELAB_AT; i++) {
+        assertEquals(CodeStore.REDUCE_AT, cs.elabAt, "reduction roles: at the first request by default");
+        assertEquals(Op.ELAB_AT, cs.teleAt, "TELE: at the tenth request by default");
+        for (int i = 1; i < cs.teleAt; i++) {
             assertFalse(cs.request(123, Op.ROLE_TELE));
         }
         assertTrue(cs.request(123, Op.ROLE_TELE));
+        assertFalse(cs.request(123, Op.ROLE_TELE), "fires once");
         assertEquals(15, cs.requests(123, Op.ROLE_BODY));
         // a row far beyond the first chunk
-        for (int i = 1; i < Op.ELAB_AT; i++) {
+        for (int i = 1; i < cs.elabAt; i++) {
             assertFalse(cs.request(2_000_000, Op.ROLE_RULES));
         }
         assertTrue(cs.request(2_000_000, Op.ROLE_RULES));
+        assertFalse(cs.request(2_000_000, Op.ROLE_RULES), "fires once");
         // rows beyond the tables stay generic for good
         assertFalse(cs.request(1 << 30, Op.ROLE_BODY));
         assertEquals(0, cs.blockOf(1 << 30, Op.ROLE_BODY));

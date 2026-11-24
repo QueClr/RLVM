@@ -68,6 +68,23 @@ public final class Scheduler {
     private long splits;
     private long spilled;
 
+    // ---- time accounting (statistics only; guarded by `this` except frontierState) ------------------------
+    /** A worker parked in {@link #claim(int, int[])} because the environment lane has not announced more units. */
+    static final int WAIT_ENV = 0;
+    /** ... because the environment lane itself was waiting for the loader (pipelined load). */
+    static final int WAIT_LOADER = 1;
+    /** ... after {@link #close()}: the only units left are inside the claims of busy workers. */
+    static final int WAIT_TAIL = 2;
+    static final int WAIT_CLASSES = 3;
+    /** {@link #frontierState(int)}: the thread that announces units is working. */
+    static final int FRONTIER_WORKING = 0;
+    /** {@link #frontierState(int)}: the thread that announces units waits for the loader. */
+    static final int FRONTIER_WAITS_FOR_LOADER = 1;
+    private boolean timed;
+    private long[] waitNanos;
+    private long[] waitCounts;
+    private volatile int frontierState;
+
     /** The skeleton's constructor: frontier = {@code Store.envUnits()}, worker count and chunk from the configuration. */
     public Scheduler(Store store, OrderPolicy order, RunConfig config, VerdictBoard board) {
         this(new StoreFrontier(store), order, Run.resolveWorkers(config.workers), config.chunkUnits, board);
@@ -127,6 +144,9 @@ public final class Scheduler {
                     return n;
                 }
                 waiting++;
+                final boolean t = timed;
+                final long t0 = t ? System.nanoTime() : 0;
+                final int why = closed ? WAIT_TAIL : frontierState == FRONTIER_WAITS_FOR_LOADER ? WAIT_LOADER : WAIT_ENV;
                 try {
                     wait();
                 } catch (InterruptedException e) {
@@ -134,6 +154,10 @@ public final class Scheduler {
                     return 0;
                 } finally {
                     waiting--;
+                    if (t) {
+                        waitNanos[worker * WAIT_CLASSES + why] += System.nanoTime() - t0;
+                        waitCounts[worker * WAIT_CLASSES + why]++;
+                    }
                 }
             }
         }
@@ -470,6 +494,36 @@ public final class Scheduler {
     }
 
     // ---- statistics ---------------------------------------------------------------------------------------
+
+    /**
+     * Turns the accounting of parked time on (statistics): how long each worker waited in
+     * {@link #claim(int, int[])}, by cause. Costs two clock readings per park, nothing per claim.
+     */
+    synchronized void timed() {
+        if (!timed) {
+            waitNanos = new long[workers * WAIT_CLASSES];
+            waitCounts = new long[workers * WAIT_CLASSES];
+            timed = true;
+        }
+    }
+
+    /**
+     * What the thread that announces units is doing ({@link #FRONTIER_WORKING},
+     * {@link #FRONTIER_WAITS_FOR_LOADER}); only read to name the cause of a worker's wait.
+     */
+    void frontierState(int state) {
+        frontierState = state;
+    }
+
+    /** Nanoseconds worker {@code worker} was parked for cause {@code why}; 0 unless {@link #timed()}. */
+    synchronized long waitNanos(int worker, int why) {
+        return timed ? waitNanos[worker * WAIT_CLASSES + why] : 0;
+    }
+
+    /** Number of parks of worker {@code worker} for cause {@code why}; 0 unless {@link #timed()}. */
+    synchronized long waitCount(int worker, int why) {
+        return timed ? waitCounts[worker * WAIT_CLASSES + why] : 0;
+    }
 
     public synchronized long claimCount() {
         return claims;

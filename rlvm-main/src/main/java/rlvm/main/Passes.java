@@ -7,21 +7,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import rlvm.admit.EnvBuilder;
-import rlvm.api.Engine;
-import rlvm.api.EngineConfig;
-import rlvm.api.EngineFactory;
 import rlvm.api.EngineProvider;
 import rlvm.api.Outcome;
 import rlvm.api.RunSignals;
-import rlvm.api.Session;
-import rlvm.api.StatsSink;
 import rlvm.api.WorkerContext;
 import rlvm.driver.Run;
-import rlvm.driver.RunConfig;
-import rlvm.driver.RunHost;
 import rlvm.driver.RunStats;
-import rlvm.driver.StoreHost;
 import rlvm.driver.Wiring;
 import rlvm.load.LoadOptions;
 import rlvm.load.LoadReport;
@@ -34,62 +25,59 @@ import rlvm.store.Store;
  * the same export again). A measuring mode: it never runs for a plain check ({@code passes} absent or
  * 1 takes the path of {@link RlvmChecker} it always took).
  *
- * <p><b>{@code -X passes-mode=reload}</b> (default). Every pass is a complete run, exactly the code
- * path of a plain run: new settings and configuration, new engine factories, a new
- * {@link MainWiring} (store, loader, bindings), a new {@code Run} with its own engines, threads,
- * lanes and sessions. Only the process is warm. Nothing of a pass is referenced when the next one
- * starts, and a {@code System.gc()} is made between two passes, outside the timed region, so the heap
- * does not grow with the number of passes.
+ * <p><b>{@code -X passes-mode=reload}</b> (the default: the owner's metric is a warm pass that loads
+ * and checks, with the load pipelined). Every pass is a complete run, exactly the code path of a
+ * plain run: new settings and configuration, new engine factories, a new {@link MainWiring} (store,
+ * loader, bindings), a new {@code Run} with its own engines, threads, lanes and sessions. Only the
+ * process is warm. Nothing of a pass is referenced when the next one starts, and a
+ * {@code System.gc()} is made between two passes, outside the timed region, so the heap does not
+ * grow with the number of passes. This mode lives here.
  *
- * <p><b>{@code -X passes-mode=recheck}</b>. Pass 1 is a complete run. If it ACCEPTS, every later
- * pass keeps
- * <ul>
- *   <li>the loaded store, with the environment the environment pass built (inductive blocks, quot
- *       records, and their recorded outcomes) and the wiring's bindings (levels, lists, literals);
- *   <li>the engine instances of pass 1 (primary; the strict and the reference instance once a pass
- *       created them), i.e. whatever an engine keeps per store across units and sessions - for the
- *       machine its shared code objects and shared facts;
- *   <li>the worker count of pass 1;
- * </ul>
- * and makes everything else anew: verdict board, scheduler, memory account, threads, worker
- * contexts, sessions. It is the driver's batch path over a store whose environment is complete: all
- * units are ready at once and are claimed in file order; an axiom, definition, theorem or opaque unit
- * goes through the admission and the primary engine as in any run; a unit the environment pass
- * decided (an inductive block, a quot record, and, in a file that is not in declaration order, the
- * units it admitted in dependency order) is not decided again, its recorded outcome is read, as a
- * worker of any run reads it. No environment pass is created (a new {@code rlvm.admit.EnvBuilder}
- * would discard the dependency-order outcomes of pass 1). This is the state of a long-running
- * checker: it measures checking alone. If pass 1 does not accept, the store of the failed run is
- * incomplete and is not kept: the later passes are reload passes (one line says so).
+ * <p><b>{@code -X passes-mode=recheck}</b> (pure checking in steady state). This is the DRIVER's
+ * {@code RunConfig.passes} (rlvm-driver/README.md, "Passes"), to which this class only delegates: one
+ * {@code Run}; pass 1 is the run itself; if it accepts, each later pass is a check-only run of the
+ * driver over the same loaded store - new engine instances, sessions, scheduler and verdict board,
+ * every def / thm / axiom / opaque unit checked again, inductive blocks and quot records with the
+ * outcome the environment pass of pass 1 recorded, no load, no collection between passes. What is
+ * kept is therefore the store and the process, not what an engine instance holds (the machine's
+ * shared code objects and facts are rebuilt in every pass). If pass 1 does not accept, the driver
+ * makes no later pass (the store of a failed run is incomplete); the remaining passes are then reload
+ * passes, and one line says so.
  *
- * <p><b>Report.</b> One line per pass on the diagnostics stream (not with {@code --quiet}):
+ * <p><b>Report.</b> One line per pass on the diagnostics stream (not with {@code --quiet}), the same
+ * shape in both modes; a number that the mode cannot know is -1:
  * <pre>
  * rlvm: pass K/N mode=reload|recheck wall_ms=.. cpu_ms=.. gc_ms=.. gc_count=.. load_ms=.. check_ms=..
  *       units=.. accepted=.. workers=.. pipelined=0|1 heap_kb=.. rss_kb=.. peak_rss_kb=.. settle_ms=.. verdict=ACCEPT|REJECT|DECLINE
  * </pre>
- * {@code wall_ms}: the pass, from before its configuration is built to the return of
- * {@code Run.execute()}; {@code cpu_ms}: CPU time of the whole process in that interval (all threads:
- * workers, loader, JIT compiler, collector; 10 ms steps); {@code gc_ms} / {@code gc_count}: collector
- * time and collections in that interval (-1 where the runtime has no collector beans);
- * {@code load_ms}: the wiring's load (reader and loader, on the calling thread; 0 in a recheck pass);
- * {@code check_ms}: from the first worker context of the pass (the start of the checking threads) to
- * the end of the run - in a pipelined pass it overlaps {@code load_ms}; {@code units}: units of the
- * store; {@code accepted}: units accepted or skipped on the board; {@code heap_kb}: heap in use when
- * the pass starts (from pass 2 on: right after the collection between the passes, i.e. what the
- * previous passes left reachable); {@code rss_kb} / {@code peak_rss_kb}: resident set after the pass
- * and its peak since the process started; {@code settle_ms}: the collection before the pass (not
- * part of any pass's time).
+ * A reload pass (measured here): {@code wall_ms} from before its configuration is built to the
+ * return of {@code Run.execute()}; {@code cpu_ms}: CPU time of the whole process in that interval (all
+ * threads: workers, loader, JIT compiler, collector; 10 ms steps); {@code gc_ms} / {@code gc_count}:
+ * collector time and collections in that interval (-1 where the runtime has no collector beans);
+ * {@code load_ms}: the wiring's load (reader and loader, on the calling thread); {@code check_ms}:
+ * from the first worker context of the pass (the start of the checking threads) to the end of the
+ * run - in a pipelined pass it overlaps {@code load_ms}; {@code units}: units of the store;
+ * {@code accepted}: units accepted or skipped on the board; {@code heap_kb}: heap in use when the
+ * pass starts (from pass 2 on: right after the collection between the passes, i.e. what the previous
+ * passes left reachable); {@code rss_kb} / {@code peak_rss_kb}: resident set after the pass and its
+ * peak since the process started; {@code settle_ms}: the collection before the pass (not part of any
+ * pass's time). A pass the driver made (recheck mode; its lines are printed when the run has
+ * returned, after the driver's own {@code rlvm: pass K of N: ..} lines): {@code wall_ms},
+ * {@code check_ms}, {@code cpu_ms} and the verdict are the driver's ({@code Run.passResults()});
+ * {@code load_ms} is the wiring's for pass 1 and 0 for a later pass; {@code gc_ms}, {@code gc_count},
+ * {@code accepted} of a later pass and {@code heap_kb} are -1; {@code rss_kb} / {@code peak_rss_kb}
+ * are read once, after the last pass, and stand in its line only.
  *
- * <p>Statistics: with {@code -X stats-file=F} pass K writes {@code F.passK} exactly as a plain run
- * writes F, and F is the last pass's statistics plus the values {@code passes.*} and the table
- * {@code passes} (one row per pass, the columns of the line above). In recheck mode the engines' own
- * statistics ({@code engine.*}; written once, when an engine is closed) appear in the last pass only
- * and are sums over all passes. {@code --stats}: the checker's line gains {@code passes=done/N
- * passes-mode=..}; its {@code wall_ms} is the sum of everything.
+ * <p>Statistics ({@code -X stats-file=F}). Reload: pass K writes {@code F.passK} exactly as a plain
+ * run writes F, and F is the last pass's statistics plus the values {@code passes.*} and the table
+ * {@code passes} (one row per pass, the columns of the line above). Recheck: F is the run's file
+ * (with the driver's {@code driver.pass.K.*}) plus the same values and table. {@code --stats}: the
+ * checker's line gains {@code passes=done/N passes-mode=..}; its {@code wall_ms} is the sum of
+ * everything.
  *
  * <p><b>Verdict.</b> The verdict of the run is the first pass's. A later pass with another verdict
- * is a determinism bug: a loud line is printed (also with {@code --quiet}), the remaining passes are
- * not made and the run DECLINES.
+ * is a determinism bug: a loud line is printed (also with {@code --quiet}) and the run DECLINES; in
+ * reload mode the remaining passes are not made.
  */
 final class Passes {
 
@@ -103,8 +91,6 @@ final class Passes {
     private final PrintStream err;
     private final boolean quiet;
 
-    /** Recheck mode: what pass 1 left for the later passes; null in reload mode and after a pass 1 that failed. */
-    private Kept kept;
     /** The statistics of the pass that ran last (small: no reference to the store or the run). */
     private RunStats lastStats;
 
@@ -186,66 +172,53 @@ final class Passes {
         final Path statsFile = first.mo.statsFile;
         final long t0 = System.nanoTime();
         final List<Pass> done = new ArrayList<>(n);
-        int verdict = Outcome.DECLINE;
-        int result = Outcome.DECLINE;
-        int workers = 0;
         RlvmChecker.Setup s = first;
         first = null;
-        try {
-            for (int k = 1; k <= n; k++) {
-                Pass p = new Pass(k);
-                if (k > 1) {
-                    // Between two passes, outside the timed region: what the previous pass left is
-                    // garbage by now (this frame holds only numbers, `kept` in recheck mode and the
-                    // previous pass's statistics) and is collected here, not during the next pass.
-                    long g0 = System.nanoTime();
-                    System.gc();
-                    p.settleNanos = System.nanoTime() - g0;
-                }
-                p.heapStartKb = ProcessClock.heapUsedKb();
-                Meter meter = new Meter();
-                if (k > 1) {
-                    // New settings, configuration and factories for every pass: a run may write into
-                    // its configuration, and a reload pass is a complete run in every respect.
-                    s = checker.setup(export, threads, stats, stackBytes, extra, providers, err, quiet);
-                }
-                Path passStats = statsFile == null ? null : Path.of(statsFile + ".pass" + k);
-                if (s == null) {
-                    meter.stop(); // not reachable after a first pass that was set up; DECLINE if it ever is
-                } else if (kept != null) {
-                    further(p, s, passStats, k == n, meter);
-                } else {
-                    full(p, s, passStats, recheck && k == 1, meter);
-                }
-                s = null;
-                meter.fill(p);
-                long[] rss = ProcessClock.rssKb();
-                p.rssKb = rss[0];
-                p.peakRssKb = rss[1];
-                done.add(p);
-                if (!quiet) {
-                    err.println(p.line(n));
-                }
-                if (k == 1) {
-                    verdict = p.outcome;
-                    result = verdict;
-                    workers = p.workers;
-                    if (recheck && kept == null && !quiet) {
-                        err.println("rlvm: passes-mode=recheck: pass 1 ended with " + verdict(verdict)
-                                + " (only a store that was loaded, admitted and accepted completely is kept): "
-                                + "the later passes reload");
-                    }
-                } else if (p.outcome != verdict) {
-                    // Loud, and never silenced: the same export got two verdicts in one process.
-                    err.println("rlvm: PASSES DISAGREE: pass 1 ended with " + verdict(verdict) + ", pass " + k
-                            + " (" + (p.recheck ? "recheck" : "reload") + ") with " + verdict(p.outcome)
-                            + " on the same export in the same process. This is a determinism bug; the run DECLINES.");
-                    result = Outcome.DECLINE;
-                    break;
-                }
+        if (recheck) {
+            // The driver's passes: one run. It makes the later passes itself if pass 1 accepts.
+            driverPasses(done, s, n);
+            s = null;
+            if (done.size() == 1 && n > 1 && done.get(0).outcome != Outcome.ACCEPT && !quiet) {
+                err.println("rlvm: passes-mode=recheck: pass 1 ended with " + verdict(done.get(0).outcome)
+                        + " (the driver checks only an accepted export again): the later passes reload");
             }
-        } finally {
-            closeKept();
+        }
+        int result = done.isEmpty() ? Outcome.DECLINE : disagreement(done);
+        boolean agreed = done.isEmpty() || result == done.get(0).outcome;
+        // Reload passes: all of them in reload mode; in recheck mode the ones after a pass 1 that failed.
+        for (int k = done.size() + 1; k <= n && agreed; k++) {
+            Pass p = new Pass(k);
+            if (k > 1) {
+                // Between two passes, outside the timed region: what the previous pass left is garbage
+                // by now (this frame holds only numbers and the previous pass's statistics) and is
+                // collected here, not during the next pass.
+                long g0 = System.nanoTime();
+                System.gc();
+                p.settleNanos = System.nanoTime() - g0;
+            }
+            p.heapStartKb = ProcessClock.heapUsedKb();
+            Meter meter = new Meter();
+            if (k > 1) {
+                // New settings, configuration and factories for every pass: a run may write into its
+                // configuration, and a reload pass is a complete run in every respect.
+                s = checker.setup(export, threads, stats, stackBytes, extra, providers, err, quiet);
+            }
+            if (s == null) {
+                meter.stop(); // not reachable after a first pass that was set up; DECLINE if it ever is
+            } else {
+                full(p, s, statsFile == null ? null : Path.of(statsFile + ".pass" + k), meter);
+            }
+            s = null;
+            meter.fill(p);
+            long[] rss = ProcessClock.rssKb();
+            p.rssKb = rss[0];
+            p.peakRssKb = rss[1];
+            done.add(p);
+            if (!quiet) {
+                err.println(p.line(n));
+            }
+            result = disagreement(done);
+            agreed = result == done.get(0).outcome;
         }
         if (statsFile != null && lastStats != null && lastStats.enabled()) {
             lastStats.put("passes.requested", n);
@@ -271,39 +244,109 @@ final class Passes {
             // The plain run's line, from a setup of the same settings (the passes' own are gone).
             RlvmChecker.Setup again = checker.setup(export, threads, stats, stackBytes, extra, providers, err, true);
             if (again != null) {
-                err.println(RlvmChecker.statsLine(again, result, workers, System.nanoTime() - t0) + " passes=" + done.size()
-                        + "/" + n + " passes-mode=" + (recheck ? "recheck" : "reload"));
+                err.println(RlvmChecker.statsLine(again, result, done.isEmpty() ? 0 : done.get(0).workers,
+                        System.nanoTime() - t0) + " passes=" + done.size() + "/" + n + " passes-mode="
+                        + (recheck ? "recheck" : "reload"));
             }
         }
         return result;
     }
 
-    // ---- a complete run ---------------------------------------------------------------------------------------
+    /**
+     * The verdict of the passes made so far: the first pass's, or DECLINE - with the loud line, once -
+     * if the newest pass ended with another outcome than the first.
+     */
+    private int disagreement(List<Pass> done) {
+        int verdict = done.get(0).outcome;
+        for (int i = 1; i < done.size(); i++) {
+            Pass p = done.get(i);
+            if (p.outcome != verdict) {
+                if (!disagreed) {
+                    disagreed = true;
+                    // Loud, and never silenced: the same export got two verdicts in one process.
+                    err.println("rlvm: PASSES DISAGREE: pass 1 ended with " + verdict(verdict) + ", pass " + p.number
+                            + " (" + (p.recheck ? "recheck" : "reload") + ") with " + verdict(p.outcome)
+                            + " on the same export in the same process. This is a determinism bug; the run DECLINES.");
+                }
+                return Outcome.DECLINE;
+            }
+        }
+        return verdict;
+    }
+
+    private boolean disagreed;
+
+    // ---- recheck: the driver's passes ---------------------------------------------------------------------------
 
     /**
-     * One pass as a complete run (pass 1, and every pass of reload mode).
-     *
-     * @param keep recheck mode, pass 1: the engines are created through {@link KeptEngines} and, if
-     *     the pass accepts, they and the store stay for the later passes ({@link #kept})
+     * {@code passes-mode=recheck}: one run with {@code RunConfig.passes = n}. The driver loads and
+     * checks (pass 1) and, if that accepted, checks the loaded store again n - 1 times; what it
+     * measured per pass ({@code Run.passResults()}) becomes one {@link Pass} each.
      */
-    private void full(Pass p, RlvmChecker.Setup s, Path passStats, boolean keep, Meter meter) {
-        EngineFactory primary = s.primaryFactory;
-        EngineFactory reference = s.referenceFactory;
-        KeptEngines keptPrimary = null;
-        KeptEngines keptReference = null;
-        if (keep) {
-            keptPrimary = new KeptEngines(primary);
-            // The driver recognises "the reference kernel is the primary engine" by the SAME factory object.
-            keptReference = primary == reference ? keptPrimary : new KeptEngines(reference);
-            primary = keptPrimary;
-            reference = keptReference;
+    private void driverPasses(List<Pass> done, RlvmChecker.Setup s, int n) {
+        s.config.passes = n;
+        long heap = ProcessClock.heapUsedKb();
+        Meter meter = new Meter();
+        TimedWiring wiring = new TimedWiring(new MainWiring(export, s.mo));
+        Run run = null;
+        int outcome;
+        try {
+            run = Pipeline.newRun(s.config, wiring, s.primaryFactory, s.referenceFactory, quiet ? null : err);
+            outcome = run.execute();
+        } catch (UnsupportedOperationException e) {
+            outcome = RlvmChecker.declineNotImplemented(e, err, quiet);
+            run = null;
         }
+        meter.stop();
+        Pass first = new Pass(1);
+        first.heapStartKb = heap;
+        finish(first, run, outcome, wiring, meter);
+        long[][] results = run == null ? new long[0][] : run.passResults();
+        if (results.length == 0) {
+            // No run, or a driver that reports no passes: this class's own clocks for the one pass.
+            meter.fill(first);
+            results = new long[][] {{outcome, first.wallNanos, first.checkNanos, -1}};
+            first.cpuMillis = -1;
+        } else {
+            first.gcMillis = -1;
+            first.gcCount = -1;
+        }
+        long[] rss = ProcessClock.rssKb();
+        for (int k = 1; k <= results.length; k++) {
+            long[] r = results[k - 1];
+            Pass p = k == 1 ? first : new Pass(k);
+            p.recheck = k > 1;
+            p.outcome = (int) r[0];
+            p.wallNanos = Math.max(0, r[1]);
+            p.checkNanos = Math.max(0, r[2]);
+            p.cpuMillis = r[3] < 0 ? -1 : r[3] / 1_000_000L;
+            if (k > 1) {
+                p.units = first.units;
+                p.workers = first.workers; // the configured count; the driver does not report a later pass's
+                p.accepted = -1;
+                p.heapStartKb = -1;
+            }
+            if (k == results.length) {
+                p.rssKb = rss[0];
+                p.peakRssKb = rss[1];
+            }
+            done.add(p);
+            if (!quiet) {
+                err.println(p.line(n));
+            }
+        }
+    }
+
+    // ---- a complete run ---------------------------------------------------------------------------------------
+
+    /** One pass as a complete run. */
+    private void full(Pass p, RlvmChecker.Setup s, Path passStats, Meter meter) {
         s.config.statsFile = passStats;
         TimedWiring wiring = new TimedWiring(new MainWiring(export, s.mo));
         Run run = null;
         int outcome;
         try {
-            run = Pipeline.newRun(s.config, wiring, primary, reference, quiet ? null : err);
+            run = Pipeline.newRun(s.config, wiring, s.primaryFactory, s.referenceFactory, quiet ? null : err);
             outcome = run.execute();
         } catch (UnsupportedOperationException e) {
             outcome = RlvmChecker.declineNotImplemented(e, err, quiet);
@@ -311,62 +354,6 @@ final class Passes {
         }
         meter.stop();
         finish(p, run, outcome, wiring, meter);
-        if (!keep) {
-            return;
-        }
-        Store store = wiring.store();
-        boolean whole = false;
-        if (run != null && outcome == Outcome.ACCEPT && store != null) {
-            try {
-                whole = store.loadComplete() && store.envUnits() >= store.loadedUnits();
-            } catch (RuntimeException e) {
-                whole = false;
-            }
-        }
-        if (whole) {
-            LoadReport report = wiring.loadReport();
-            kept = new Kept(wiring, store, keptPrimary, keptReference, run.workerCount(),
-                    report == null ? -1 : report.declRecords);
-        } else {
-            keptPrimary.closeAll();
-            keptReference.closeAll();
-        }
-    }
-
-    // ---- a recheck pass over the kept store ---------------------------------------------------------------------
-
-    private void further(Pass p, RlvmChecker.Setup s, Path passStats, boolean last, Meter meter) {
-        final Kept k = kept;
-        p.recheck = true;
-        RunConfig config = s.config;
-        config.statsFile = passStats;
-        // A run over a host does not read the driver's environment variable (the driver reads it for a
-        // run that loads): the tuning of pass 1 applies to the later passes too.
-        String tuning = null;
-        try {
-            tuning = System.getenv(RunConfig.ENV);
-            if (tuning != null && !tuning.isEmpty()) {
-                config.setAll(tuning);
-            }
-        } catch (RuntimeException e) {
-            tuning = null; // pass 1 reported a faulty value
-        }
-        // The independent unit count of pass 1's load (ARCHITECTURE.md 8.1), as in a run that loads.
-        if (k.declRecords >= 0 && k.declRecords <= Integer.MAX_VALUE) {
-            config.expectedUnits = (int) k.declRecords;
-        }
-        k.wiring.restartClock();
-        k.primary.lastPass = last;
-        k.reference.lastPass = last;
-        RunHost host = new KeptHost(new StoreHost(k.store, config.policy, k.wiring), k.store);
-        Run run = Pipeline.newRun(config, host, k.workers, k.primary, k.reference, quiet ? null : err);
-        if (tuning != null && !tuning.isEmpty()) {
-            run.stats().put("driver.environment", tuning);
-        }
-        int outcome = run.execute();
-        meter.stop();
-        finish(p, run, outcome, k.wiring, meter);
-        p.loadNanos = 0; // nothing was loaded in this pass
     }
 
     private void finish(Pass p, Run run, int outcome, TimedWiring wiring, Meter meter) {
@@ -392,15 +379,6 @@ final class Passes {
             lastStats = run.stats();
         } else {
             lastStats = null;
-        }
-    }
-
-    private void closeKept() {
-        Kept k = kept;
-        kept = null;
-        if (k != null) {
-            k.primary.closeAll();
-            k.reference.closeAll();
         }
     }
 
@@ -432,7 +410,7 @@ final class Passes {
     /**
      * The {@link MainWiring} of a pass with two clocks: the time its load took and the moment the
      * first worker context was asked for (the checking threads have started). Keeps the store for the
-     * report and for recheck passes.
+     * report.
      */
     static final class TimedWiring implements Wiring {
         private final MainWiring inner;
@@ -491,210 +469,6 @@ final class Passes {
         /** Nanoseconds from the first worker context to {@code endNanos}; 0 if no context was made. */
         long sinceFirstContext(long endNanos) {
             return contextSeen ? Math.max(0, endNanos - firstContextNanos) : 0;
-        }
-
-        /** Before a further pass over the same wiring: its first context starts the clock again. */
-        synchronized void restartClock() {
-            contextSeen = false;
-            loadNanos = 0;
-        }
-    }
-
-    // ---- recheck: what is kept ----------------------------------------------------------------------------------
-
-    /** What pass 1 of recheck mode left for the later passes. */
-    private static final class Kept {
-        final TimedWiring wiring;
-        final Store store;
-        final KeptEngines primary;
-        final KeptEngines reference;
-        final int workers;
-        /** Declaration records the loader counted, or -1. */
-        final long declRecords;
-
-        Kept(TimedWiring wiring, Store store, KeptEngines primary, KeptEngines reference, int workers, long declRecords) {
-            this.wiring = wiring;
-            this.store = store;
-            this.primary = primary;
-            this.reference = reference;
-            this.workers = workers;
-            this.declRecords = declRecords;
-        }
-    }
-
-    /**
-     * An engine factory whose engines outlive the run that asked for them: {@code create} answers
-     * with the engine it made before for the same store and configuration, and an engine's
-     * {@code close()} does nothing until {@link #closeAll()}. So every pass of recheck mode works
-     * with the engine instances of pass 1 (the driver asks for the primary engine, for its strict
-     * twin and for the reference kernel with one configuration each).
-     */
-    static final class KeptEngines implements EngineFactory {
-        private final EngineFactory inner;
-        private final List<KeptEngine> engines = new ArrayList<>();
-        /** The pass in progress is the last one: the engines' statistics are written now. */
-        volatile boolean lastPass;
-
-        KeptEngines(EngineFactory inner) {
-            this.inner = inner;
-        }
-
-        @Override
-        public synchronized Engine create(Store store, EngineConfig config) {
-            for (KeptEngine e : engines) {
-                if (e.store == store && same(e.config, config)) {
-                    return e;
-                }
-            }
-            KeptEngine e = new KeptEngine(this, inner.create(store, config), store, config);
-            engines.add(e);
-            return e;
-        }
-
-        private static boolean same(EngineConfig a, EngineConfig b) {
-            if (a == null || b == null) {
-                return a == b;
-            }
-            return a.profile == b.profile && a.strict == b.strict && a.memoCheck == b.memoCheck
-                    && a.truffleTier == b.truffleTier && a.stats == b.stats && a.workers == b.workers;
-        }
-
-        /** Closes the engines for good. */
-        synchronized void closeAll() {
-            for (KeptEngine e : engines) {
-                try {
-                    e.real.close();
-                } catch (RuntimeException ex) {
-                    // the process is about to end; a failing close changes nothing
-                }
-            }
-            engines.clear();
-        }
-    }
-
-    private static final class KeptEngine implements Engine {
-        private final KeptEngines owner;
-        final Engine real;
-        final Store store;
-        final EngineConfig config;
-
-        KeptEngine(KeptEngines owner, Engine real, Store store, EngineConfig config) {
-            this.owner = owner;
-            this.real = real;
-            this.store = store;
-            this.config = config;
-        }
-
-        @Override
-        public String name() {
-            return real.name();
-        }
-
-        @Override
-        public Session newSession(WorkerContext ctx) {
-            return real.newSession(ctx);
-        }
-
-        @Override
-        public void environmentAdvanced(int units) {
-            real.environmentAdvanced(units);
-        }
-
-        @Override
-        public void dumpStats(StatsSink sink) {
-            // Engine.dumpStats is called once per engine: in the pass that is the last one.
-            if (owner.lastPass) {
-                real.dumpStats(sink);
-            }
-        }
-
-        @Override
-        public void close() {
-            // The engine outlives the run: KeptEngines.closeAll() closes it after the last pass.
-        }
-    }
-
-    /**
-     * The host of a recheck pass: the kept store through the driver's {@link StoreHost}, with an
-     * environment pass that has nothing to do. The store's environment is complete (checked before
-     * the store was kept), so the driver never needs to advance it; and a new
-     * {@code rlvm.admit.EnvBuilder}, which {@code StoreHost.newEnvPass} would create, discards the
-     * outcomes that the pass of the first run recorded for units it admitted in dependency order -
-     * the workers would then check those units in file order and reach another verdict.
-     */
-    static final class KeptHost implements RunHost {
-        private final StoreHost host;
-        private final Store store;
-
-        KeptHost(StoreHost host, Store store) {
-            this.host = host;
-            this.store = store;
-        }
-
-        @Override
-        public Store store() {
-            return host.store();
-        }
-
-        @Override
-        public int loadedUnits() {
-            return host.loadedUnits();
-        }
-
-        @Override
-        public boolean loadComplete() {
-            return host.loadComplete();
-        }
-
-        @Override
-        public int envUnits() {
-            return host.envUnits();
-        }
-
-        @Override
-        public int unitClass(int unit) {
-            return host.unitClass(unit);
-        }
-
-        @Override
-        public int unitRank(int unit) {
-            return host.unitRank(unit);
-        }
-
-        @Override
-        public String unitName(int unit) {
-            return host.unitName(unit);
-        }
-
-        @Override
-        public long sharedBytes() {
-            return host.sharedBytes();
-        }
-
-        @Override
-        public void unitDecided(int unit, int boardStatus) {
-            // The status column keeps what pass 1 wrote (a final status is never overwritten).
-            host.unitDecided(unit, boardStatus);
-        }
-
-        @Override
-        public Lane newLane(int workerId, RunSignals signals, long overlayMaxBytes) {
-            return host.newLane(workerId, signals, overlayMaxBytes);
-        }
-
-        @Override
-        public EnvPass newEnvPass(Lane lane, Session referenceSession, EnvBuilder.Listener listener) {
-            return new EnvPass() {
-                @Override
-                public int advanceTo(int unit) {
-                    return store.envUnits(); // complete: nothing is admitted in a recheck pass
-                }
-
-                @Override
-                public void cancel() {
-                    // nothing runs
-                }
-            };
         }
     }
 }
