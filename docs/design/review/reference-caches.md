@@ -1,6 +1,6 @@
 # The caches of the reference engine against the official kernel's (R2)
 
-2026-11-24, 21:28Z - @@END@@. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
+2026-11-24, 21:28Z - 23:55Z. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
 21:21Z), a wrong ACCEPT of the reference engine, the oracle of every gate. Official source read:
 `refs/lean4/src/kernel/` at v4.36.0 (`type_checker.cpp/.h`, `expr_eq_fn.cpp`, `expr_maps.h`, `replace_fn.cpp`,
 `instantiate.cpp`, `inductive.h/.cpp`, `environment.cpp`, `local_ctx.cpp`, `level.cpp`), the reader
@@ -224,7 +224,41 @@ The one wrong REJECT of the practical mode: `s3-mdata-eager-hidden-ok` (the load
 
 ## 7. What the strict mode costs on real input
 
-@@COST@@
+**No declaration of the eight corpora is declined in the strict mode, and every corpus is accepted in both
+modes** (JVM launcher of `work/r2/dist-cand3`, `-X engine=reference`, one worker; practical = no option, strict =
+`-X policy=strict`, i.e. the kernel's `ref.exact=official` and the loader's `strictMetadata`; rows
+`work/r2/data/corpora.tsv`, labels `final-practical` / `final-strict`; mathlib with the launcher's 13 GB heap):
+
+| Corpus | practical | strict | identity events (first check of a declaration) | cleared by the probe | hazards decided both ways (declarations) | declined |
+|---|---|---|--:|--:|--:|--:|
+| Init | accept | accept | 0 | 0 | 0 | 0 |
+| Std | accept | accept | 5 | 4 | 1 (1) | 0 |
+| cedar | accept | accept | 6 | 6 | 0 | 0 |
+| reachability | accept | accept | 0 | 0 | 0 | 0 |
+| navier-stokes-euler | accept | accept | 50 | 50 | 0 | 0 |
+| cslib | accept | accept | 123 | 115 | 8 (8) | 0 |
+| con-leche | accept | accept | 1 | 1 | 0 | 0 |
+| mathlib (714,712 declarations) | accept | accept | 263 | 252 | 11 (11) | 0 |
+
+- **Object identity**: the event is in real exports (448 comparisons in the eight corpora), so declining at every
+  event would not do (a first version of the rule declined Std, cedar, navier-stokes-euler, cslib and con-leche).
+  The probe shows for 428 of them that the official second pass repeats nothing; the other 20 hazards, in 20
+  declarations, are decided by checking the declaration both ways, and both ways give the same verdict every time.
+  (Events are counted in the practical run, hazards in the strict run; a strict run counts the events of a
+  declaration again each time it checks it.)
+  The one hazard of Std: `Entrypoint.aig (mkFullAdderOut ..)).0` against `(FullAdderOutput.aig (mkFullAdder ..)).0`
+  - the same projection of two structures; the second pass would run `lazy_delta_proj_reduction` again and write
+  a new `m_whnf_core` entry, i.e. the official kernel's state after this comparison does depend on whether the
+  two occurrences are one object; its verdict on the declaration does not.
+- **`mdata`**: 0 records in the eight corpora and in the arena tests. **`nondep = true`**: 0 of 550,621 `letE`
+  records (grep over `work/arena-run/_build/tests`). Both declines of the strict loader cost nothing there.
+- **Admission with fresh judgment caches**: all inductive blocks of the eight corpora are admitted as before.
+- **CPU** (quiet window, one worker): `-X ref.exact=official` and `-X policy=strict` are within the noise of the
+  practical mode (section 8: Init 14.7 s, Std 22.0 - 23.3 s in every configuration). On the loaded host the
+  mathlib run took 582 s (practical) and 498 s (strict) of CPU with one worker.
+- **On adversarial files** the strict mode declines where the practical mode accepts or rejects against the
+  official verdict: 14 of the 1,239 review exports (section 8), among them the exports of this audit whose
+  official verdict really depends on object identity.
 
 ## 8. Gates
 
