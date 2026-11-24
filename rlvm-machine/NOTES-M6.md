@@ -80,7 +80,33 @@ Not done by the skeleton (stated, not hidden):
 | F27 | `Machine.copyOrNull`, `newTable`, `YOUNG_RESERVE`, `heapAllows` | every growth allocation of a session array goes through one place that turns an `OutOfMemoryError` of THAT allocation into a refused growth (`E_MEM`, DECLINE); `heapAllows` no longer counts the young generation as space for a large array (min(1 GiB, heap / 3) on a JVM, 0 in a native image). ISA 12 R11 says an `Error` is never caught | found by the driver's invariance suite: `-Xmx6g`, a 2 GiB record slab, 2.5 GiB "free" of which 1 GiB young: `OutOfMemoryError` in `growRecords`, the run died instead of declining one unit. The catch is around one allocation whose failure leaves the heap as it was; an `Error` out of a judgment is still never caught. A launcher that runs with `ExitOnOutOfMemoryError` ends at the first such error whatever is caught, which is why the estimate was corrected too. Not tested directly (no unit test can exhaust the heap cheaply); `M6FacadeTest` has the refusal rows per growth path |
 | F28 | `Op.SW_*`, `Debug.parseSwitches`, `SWITCHES.md` | switch lists are read left to right (`name`, `+name`, `-name`, `none`, `default`, `all`); two experiment bits per package (`m1a .. m7b`, bits 11-22), never in `all` or in the default set; new named switches `t2` (23), `lazyeval` (24), `levels-complete` (25); `Op.SW_ALL`, `Op.SW_DEFAULT`; the launcher's `-X levels=official|complete` is read by `MachineProvider` too. `rlvm-machine/SWITCHES.md` is the one list | requests of T2, M4, the owner decision on levels (OWNER-NOTES item 11), L; packages can put an experiment behind a bit without waiting for M6 |
 | F30 | `Op.SW_DEFAULT`, `pom.xml`, `Fixture.v0Engine` | **the default switch set is `warm,gated,expect`** (staging step 1) since 16:24Z; the module's tests run with the system property `rlvm.machine.switches=none` and a fixture engine has no switch unless the test names some. `MachineProvider.priority()` stays 10 | brief of wave 6 ("once all 230 tests and the four corpora are diff-clean with them at the default cap"): differential campaign on the jar with the eager-reduction rule at the 1 MiB cap: 0 differences on all 230 + Cedar slice + reachability + Init + Std (only eager-reduction declines and `loop-unfolded-once` not compared); S's matrix clean; batch D1 (jar 09bef1d6276f, load 57, two rounds, CPU s, v0 -> set): one worker Init 7.37 -> 7.11, Cedar slice 2.69 -> 2.70, reachability 8.18 -> 7.96; eight workers Init 8.35 -> 8.03, Cedar slice 3.46 -> 3.24, Std 14.59 -> 14.36, reachability 8.78 -> 8.33 (`SWITCHES.md`) |
+| F31 | `MachineEngine.unitTicks`, `-X machine.unit-ticks=N`, `MachineSession.run` | the machine has a TICK BOUND OF ITS OWN per unit, default 2^27 (0 = none): where the driver gives no step limit (warm units, RECONCILIATION section 3) or a larger one, the unit is cut there and declined (`E_STEPS`, `BUDGET_STEPS`; `machine.unitBoundDeclines`), the cold retry is answered at once, the reference engine decides it | request of the orchestrator (16:14Z): on `either/corner-cases/eta-struct-major-no-whnf` and `eta-struct-major-and-no-whnf` the official checker does not terminate, the reference engine declines by its cycle test, the machine ran until a time limit killed the process (1,500 s tried). With the bound: exit 2 after 3.2 s and 5.9 s (JVM launcher). Largest legitimate units, v0: mathlib 5.36 M ticks, perf/magma-list-deep-n36 41.9 M, perf/magma-list-pair-n21 28.7 M (`work/m6/tmp/ticks/`): 3.2 times below the bound; the native image runs about 9 M ticks per second. A cycle test in the delta loops (M3 / M4) would end such units in milliseconds; not done |
 | F29 | `-X machine.declines=FILE`, `Machine.Counters`, `Layout.RUN_CNT_* / RUN_DERIVED`, `OWNERS.tsv` | one line per non-ACCEPT outcome of the machine (outcome, code, unit, rank, units accepted in the session before it, name, message); an `Ext` class that implements `Machine.Counters` has its counters summed into the statistics as `machine.<name>`; the run header's count bits (M1); package S in the ownership table | the large corpora need every decline by name, not `firstFailures.0..3`; requests of M5, M1, S |
+
+Open after wave 6 (M6), most valuable first:
+
+- **Declarations that enter eager reduction go to the reference engine** (F26): 6,711 units of mathlib (0.93 %),
+  11-12 % of the worker CPU there (P8), 11 declarations = 18 % of the machine's ticks on the Cedar slice (M5). An
+  official-exact way to keep them: pair entries tagged with the mode they were derived in and read only in that
+  mode (then every answer is the official DIRECT answer of that mode, which the official cache can only extend),
+  WHNF / CORE memo words of OPEN values neither read nor written under ER (M3's offer, 15:34Z), and a session of
+  its own; to be attacked by S before it replaces the decline.
+- **The intern tables of giant sessions** (M1, 15:58Z): on reachability 39 % of the process waits for slots of
+  64-256 MiB tables. A young set in front of `vtab` / `rtab` (new entries in a small table, moved in batches) and
+  4x growth above 2^20 slots are `Machine` designs (reset and growth assume every record and run is in the
+  table); not started.
+- **Slabs outside the Java heap** (growth by `mremap` instead of copy + page faults; F25): needs one accessor for
+  `m.vh[..]` / `m.rs[..]`; not started. The pooled-array A/B and the H10 inline lists on the native image were
+  queued behind the measurement lock for the last 70 minutes of the session (rows `E-*` of `work/m6/measure.tsv`
+  if they arrived).
+- **A later pass of `-X passes` gets a new `MachineEngine`** (T2, 16:20Z): the code store and a compiled tier start
+  cold in every pass; a per-`Store` code store inside the machine, or the driver keeping the engine, is open.
+- `Op.HOST_DEPTH` 2048 (M3, 15:34Z: reachability with `code,casetrees` writes 1.5 % of its call events as frames at
+  128): not changed; needs the deep tests on a 512 KiB stack at that depth.
+- Next candidates for the default set, ready per their owners: `pchk`, `match`, `joint` (M5), `lazyeval` (M4),
+  `same` (M4, after S), `code,casetrees` (M7: reachability 8.79 -> 1.56 s). `SWITCHES.md` says how a default changes.
+- `MachineProvider.priority()` is still 10. Before it is raised: the items the orchestrator listed at 16:14Z
+  (done: the tick bound, F31) and S's open row S-F3 (levels, both engines).
 
 Not done / not measured (M6):
 

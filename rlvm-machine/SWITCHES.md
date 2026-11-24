@@ -21,7 +21,7 @@ section 11 except `k2` (bits 0-10; not `t2`, `lazyeval`, `levels-complete`, no e
 Without the setting an engine runs `Op.SW_DEFAULT`. Examples: `none` = v0; `default,probes`;
 `default,-warm`; `all,-tele`; `default,m2a`.
 
-Related settings (not switches): `-X machine.session-kib=N` (the machine's own cap on a warm session,
+Related settings (not switches): `-X machine.unit-ticks=N` (the machine's own tick bound per unit, default 2^27, NOTES-M6 F31), `-X machine.session-kib=N` (the machine's own cap on a warm session,
 section "Sessions" below), `-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine),
 `-X machine.debug=...` (audits, README), `-X machine.hostDepth=N`, `-Drlvm.machine.sizes=...` (base table
 sizes, NOTES-INT I1), `-Drlvm.machine.keep=R,W,S` and `-Drlvm.machine.pool=off` (kept and pooled session

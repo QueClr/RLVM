@@ -38,6 +38,7 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
 |---|---|---|
 | `machine.switches` | staging switches, read left to right: `name` / `+name` adds, `-name` removes, `none` = v0, `default` = `Op.SW_DEFAULT`, `all` = the switches of ISA section 11 but `k2`. **`SWITCHES.md` is the one list** (name, bit, owner, state, evidence). Ignored by a strict engine | `Op.SW_DEFAULT` = `warm,gated,expect` since 2026-11-24 16:24Z (`none` = v0) |
 | `machine.session-kib` | the machine's own cap on a warm session, in KiB of `Machine.engineBytes()`; 0 = none. The driver's `-X session-mib` applies as well; the smaller cap resets first | 1024 |
+| `machine.unit-ticks` | the machine's own tick bound per unit (0 = none): beyond it the unit is declined (`BUDGET_STEPS`) and the reference engine decides it | 2^27 |
 | `machine.declines` | a file that receives one line per non-ACCEPT outcome of the machine: outcome, error code, unit, rank, units accepted in the session before it, name, message | none |
 | `levels` | the launcher's `official` / `complete` (shared with the reference engine): `complete` turns the switch `levels-complete` on | official |
 | `machine.debug` | debug modes of ISA 5.5: `memocheck`, `shortcheck`, `poison`, `scopeaudit`, `maskaudit`, `sharecheck`, `pubcheck`, `trace`, or `all` (all but `trace`) | none |

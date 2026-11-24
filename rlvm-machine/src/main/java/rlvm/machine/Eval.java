@@ -367,10 +367,13 @@ final class Eval {
         }
     }
 
-    /** MKLAM / MKPI over the pruned frame (ISA 4.2). */
+    /**
+     * MKLAM / MKPI over the pruned frame (ISA 4.2), by M1's combined operation: the record of
+     * {@code (t, PRUNE(env, mask t), ls')} in one step, the same frame and the same id as the two steps (M1's request
+     * of 15:43Z: the probes of the frame and of the record overlap); it runs the mask audit of {@link #frame}.
+     */
     private static int closure(Machine m, int t, int kind, int eb, int en, int ls) {
-        final int fr = frame(m, t, eb, en);
-        return kind == Kind.LAM ? Values.mkLam(m, t, fr, ls) : Values.mkPi(m, t, fr, ls);
+        return kind == Kind.LAM ? Values.mkLamAt(m, t, eb, en, ls) : Values.mkPiAt(m, t, eb, en, ls);
     }
 
     /**
@@ -430,7 +433,7 @@ final class Eval {
         if ((m.sw & Op.SW_GATED_TABLING) != 0 && !gate(m, t, u)) {
             return -t;
         }
-        return Values.suspRecord(m, t, frame(m, t, eb, en), ls);
+        return Values.suspRecordAt(m, t, eb, en, ls);
     }
 
     /**
@@ -968,7 +971,7 @@ final class Eval {
      * its place. Official: a delayed {@code instantiate}. (LET suspensions are made by INFER only, see {@link #let}.)
      */
     private static int suspend(Machine m, int t, int eb, int en, int ls) {
-        return Values.mkSusp(m, t, frame(m, t, eb, en), ls, false);
+        return Values.mkSuspAt(m, t, eb, en, ls);
     }
 
     // =====================================================================================================

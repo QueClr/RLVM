@@ -11,6 +11,7 @@ import rlvm.api.Session;
 import rlvm.api.WorkerContext;
 import rlvm.store.DeclKind;
 import rlvm.store.DeclTable;
+import rlvm.store.Node;
 import rlvm.store.Store;
 
 /**
@@ -96,11 +97,15 @@ public final class StoreHost implements RunHost {
 
     /**
      * The store says it without decoding anything (the load path's proposal, requests.log 14:35:27Z):
-     * a value kept as a proof block in which something was unresolved when the loader wrote it (a
-     * constant that was not declared by then, a literal before its prerequisites). The type root and
-     * a shared value root need no test here: the environment pass looks at their summaries itself and
-     * waits for the end of the load ({@code EnvBuilder.waitingForLoad()}); the block is the one root
-     * it does not look at while the file is loading (it would have to decode it).
+     * a type root or a shared value root whose summary names something beyond the unit's own rank
+     * ({@code depMax}: a constant that was not declared when the loader wrote the node, a literal
+     * before its prerequisites), or a value kept as a proof block in which something was unresolved
+     * when the loader wrote it. The environment pass makes the first test itself and waits for the
+     * end of the load ({@code EnvBuilder.waitingForLoad()}), but it asks the STORE whether the file
+     * is complete, which becomes true a moment before the driver's lane covers the file: in that
+     * window it took the unit for an ordinary one and moved on (one of 16,928 mutants, with a
+     * publication after every unit). The block it does not look at while the file is loading at
+     * all (it would have to decode it). Asked here, before the pass sees the unit, both are closed.
      */
     @Override
     public boolean unitNeedsCompleteFile(int unit) {
@@ -119,12 +124,27 @@ public final class StoreHost implements RunHost {
         }
         int first = decls.unitFirstCid(unit);
         for (int i = 0; i < n; i++) {
-            int v = decls.value(first + i);
-            if (v < 0 && store.blocks().hasUnresolved(-(v + 1))) {
+            int cid = first + i;
+            int rank = decls.rank(cid);
+            if (rootBeyond(decls.type(cid), rank)) {
+                return true;
+            }
+            int v = decls.value(cid);
+            if (v > 0 ? rootBeyond(v, rank) : v < 0 && store.blocks().hasUnresolved(-(v + 1))) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** True if the summary of the shared term {@code root} names a constant of a rank above {@code rank} (or an unresolved one). */
+    private boolean rootBeyond(int root, int rank) {
+        if (root <= 0 || root >= Node.OVERLAY_BIT) {
+            return false;
+        }
+        int[] region = root < Node.GEN_BASE ? store.terms().exportArray() : store.terms().generatedArray();
+        int w = ((root & Node.INDEX_MASK) << 3) + Node.W_DEPMAX;
+        return w < region.length && region[w] > rank;
     }
 
     @Override

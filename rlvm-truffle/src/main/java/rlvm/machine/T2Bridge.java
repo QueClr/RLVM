@@ -327,6 +327,83 @@ public final class T2Bridge {
         return v > Layout.HOLE ? Code.ctorIndex(m, v, ind) : -1;
     }
 
+    /** {@link #lastArgs} without a boundary: array reads only. */
+    public static int lastArgsInline(Machine m, int v, int n) {
+        if (v <= Layout.HOLE) {
+            return -1;
+        }
+        int o = v << Layout.REC_SHIFT;
+        int[] vh = m.vh;
+        if (vh[o] >>> Layout.KIND_SHIFT != Layout.NEU) {
+            return -1;
+        }
+        int len = vh[o] & Layout.AUX_MASK;
+        if (len < n) {
+            return -1;
+        }
+        int run = vh[o + Layout.B];
+        return run + Layout.RUN_H + (m.rs[run] & Layout.RUN_FAR) + len - n;
+    }
+
+    /** {@link #kvalHit} without a boundary: the probe of one cell of the inline cache (array reads; PEEK of the value). */
+    public static int kvalHitInline(Machine m, int blk, int pc, int key) {
+        if (pc >= 4096) {
+            return Op.MISS;
+        }
+        int site = blk << 12 | pc;
+        return Code.icGet(m, (Hash.cell(site, key) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT, site, key);
+    }
+
+    /**
+     * The hit of {@code Code.kConst} for a constant with level parameters: the value in the inline cache cell of
+     * site {@code (blk, pc)} under substitution {@code ls}, or {@code Op.MISS} ({@link #kConstFill} then does what
+     * the stepper does on a miss). Array reads only.
+     */
+    public static int kConstHit(Machine m, int blk, int pc, int ls) {
+        if (pc >= 4096) {
+            return Op.MISS;
+        }
+        int site = blk << 12 | pc;
+        int c = (Hash.cell(site, ls) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT;
+        int[] ic = m.ic;
+        if (ic[c + Layout.IC_SITE] == site && ic[c + Layout.IC_EPOCH] == m.epoch && ic[c + Layout.IC_KEY] == ls) {
+            return ic[c + Layout.IC_VALUE];
+        }
+        return Op.MISS;
+    }
+
+    /** The miss of {@code Code.kConst}: {@code CHEAD(row, LSUB(list, ls))}, and the fill of the site's cache cell. */
+    @TruffleBoundary(allowInlining = false, transferToInterpreterOnException = false)
+    public static int kConstFill(Machine m, int row, int list, int blk, int pc, int ls) {
+        int v = Values.mkConst(m, row, Levels.lsubList(m, list, ls));
+        if (v >= Op.SIG || pc >= 4096) {
+            return v;
+        }
+        int site = blk << 12 | pc;
+        int c = (Hash.cell(site, ls) & (1 << Layout.IC_LOG2) - 1) << Layout.CELL_SHIFT;
+        int[] ic = m.ic;
+        ic[c + Layout.IC_SITE] = site;
+        ic[c + Layout.IC_EPOCH] = m.epoch;
+        ic[c + Layout.IC_KEY] = ls;
+        ic[c + Layout.IC_VALUE] = v;
+        return v;
+    }
+
+    /**
+     * The hit of {@code Values.mkConst} (its cache of CONST heads in front of the record table): the record of
+     * {@code CHEAD(row, levelList)} if the cell of the pair holds it for this session, else {@code Op.MISS}
+     * ({@link #mkConst} then). A cell is identified by its content, so a hit is the record whatever cell index
+     * {@code Values} uses; the index formula is the one of {@code Values.mkConst} so that hits are the rule.
+     */
+    public static int mkConstHit(Machine m, int row, int levelList) {
+        int[] c = m.x1.chead;
+        int i = ((row * 0x9E3779B1 ^ levelList * 0x85EBCA6B) >>> (32 - Values.Ext.CHEAD_LOG2)) << Layout.CELL_SHIFT;
+        if (c[i] == row && c[i + 1] == levelList && c[i + 2] == m.epoch) {
+            return c[i + 3];
+        }
+        return Op.MISS;
+    }
+
     public static int mkAppInline(Machine m, int h, int xb, int n) {
         m.xp = xb + n;
         int r = Values.mkApp(m, h, xb, n);
@@ -363,6 +440,46 @@ public final class T2Bridge {
     /** The heat accounting of the engine of {@code m} (switched on by the call), or null. */
     public static Tier.Heat heat(Machine m) {
         return m.engine == null ? null : Tier.heat(m.engine);
+    }
+
+    /** A copy of the words of block {@code blk} of machine engine {@code engine} ({@code Tier.block} without a machine), or null. */
+    public static int[] blockWords(Object engine, int blk) {
+        CodeStore cs = ((MachineEngine) engine).code;
+        int a = cs.address(blk);
+        if (a == 0) {
+            return null;
+        }
+        int[] c = cs.chunkAt(a);
+        int o = CodeStore.offsetAt(a);
+        return java.util.Arrays.copyOfRange(c, o, o + Code.len(c[o + Op.BLK_HDR0]));
+    }
+
+    /** Number of blocks machine engine {@code engine} has published so far. */
+    public static int blockCount(Object engine) {
+        return ((MachineEngine) engine).code.blockCount();
+    }
+
+    /** One line about block {@code blk} of machine engine {@code engine} (as {@code Tier.describe}). */
+    public static String describeBlock(Object engine, int blk) {
+        CodeStore cs = ((MachineEngine) engine).code;
+        int a = cs.address(blk);
+        if (a == 0) {
+            return "block " + blk + ": none";
+        }
+        int[] c = cs.chunkAt(a);
+        int o = CodeStore.offsetAt(a);
+        int h0 = c[o + Op.BLK_HDR0];
+        int h2 = c[o + Op.BLK_HDR2];
+        int row = c[o + Op.BLK_ROW];
+        String[] roles = {"?", "TELE", "BODY", "RULE", "FIELDS", "CONG", "RULES"};
+        String who = row > 0 ? cs.store().names().toString(cs.store().decls().name(row)) : "sub-block of term " + c[o + Op.BLK_FACTS];
+        return "block " + blk + " " + roles[Code.role(h0) < roles.length ? Code.role(h0) : 0] + "(" + who + ") arity " + Code.arity(h2)
+                + " nreg " + Code.nreg(h0) + " words " + Code.len(h0) + ((Code.flags(h2) & Op.BLKF_LEAF) != 0 ? " LEAF" : "");
+    }
+
+    /** True if machine engine {@code engine} is strict (no tier, ISA 14.2). */
+    public static boolean strict(Object engine) {
+        return ((MachineEngine) engine).config.strict;
     }
 
     /** The machine of a machine session, or null. */
