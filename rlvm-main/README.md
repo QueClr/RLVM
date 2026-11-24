@@ -1,0 +1,220 @@
+# rlvm-main — the kernel as a plug-in of the launcher (wiring)
+
+Package `rlvm.main`. No kernel logic: it turns the launcher's options into a `RunConfig`, finds the
+engines, supplies the driver with what the driver cannot construct (store, load, worker contexts) and
+maps the driver's outcome to the launcher's `Verdict`. Nothing depends on this module.
+
+```
+. ./env.sh && $MVN -o -q -pl rlvm-main test                       # unit tests
+$MVN -o -q -pl rlvm-main test -Drlvm.e2e=tutorial                 # + the 141 tutorial tests in-process (steward's gate)
+scripts/dev.sh dist && scripts/dev.sh run FILE.ndjson -- --stats  # the same through the distribution
+scripts/dev.sh slice                                              # table for module owners: work/status/slice.md
+```
+
+## Classes
+
+| Class | Role |
+|---|---|
+| `RlvmChecker implements rlvm.cli.Checker` | name `rlvm`, priority 100 (the launcher's default); registered in `META-INF/services/rlvm.cli.Checker`. `check(Path, Options)`, plus the skeleton's `checkExport(...)` and `configure(...)` |
+| `MainOptions` | the `-X KEY[=VALUE]` settings (table below); an unknown or malformed one is a `UsageError`, never ignored |
+| `Engines` | `ServiceLoader.load(EngineProvider.class)`: `primary(name)` (never the differential harness by default), `reference()`, `names(...)`, `optionKeys(...)`, `factory(provider, settings)`, `underTest(...)` (the engine `-X engine=diff` compares with the reference kernel) |
+| `MainWiring implements rlvm.driver.Wiring` | `newStore` (`new Store(bytes, baseLists, baseLevelInfo)`), `load`, `loadReport`, `newWorkerContext`, on top of `rlvm.api.bind.Bindings` and the loader's own glue (`rlvm.load.ExportLoader`, `LevelStoreInterner`, `NatStoreDecoder`) |
+| `Pipeline` | the one place that constructs `rlvm.driver.Run` (`Run(config, wiring, primary, reference)`, diagnostics to the launcher's stderr) |
+| `UsageError` | an `IllegalArgumentException` for bad settings |
+
+## Settings (`-X`, ARCHITECTURE 7.4)
+
+| Key | Meaning | Default |
+|---|---|---|
+| `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. An engine with a lower priority (the machine registers with 10 until it has passed its gates) is in the distribution as a candidate: it runs when named or compared, never by default |
+| `engine=diff` | differential run. With the test kit's provider `diff` on the class path (`scripts/dev.sh diff`): its `DiffEngine` is the primary engine (engine under test and oracle per unit; the driver's own differential mode stays off). Without it: the best non-reference engine is the primary engine and the driver runs the reference kernel beside it on every unit (`RunConfig.differential`); a usage error (64) if the reference kernel is the only engine | - |
+| `load=batch\|pipelined` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver (jar of 09:39Z) loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `batch` |
+| `order=file\|namespace` | order of ready units | the driver's (`file`) |
+| `session-mib=N`, `memory-mib=N` | session reset threshold, memory account limit | the driver's |
+| `scan-threads=K` | scanner threads of the reader (they run only on mapped input: `io=mapped` or `auto`; on buffered input the reader stays on the calling thread) | 0 |
+| `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `buffered` (plain `read`; ARCHITECTURE 1.4) |
+| `stop-after=load\|env` | stop after a phase | - |
+| `stats-file=F` | statistics as JSON | - |
+| `no-recheck`, `no-truffle`, `no-proof-blocks` | flags | off |
+| `profile=4.36\|4.37` | official kernel release to imitate | 4.36 |
+| `engine.KEY=VALUE` | Truffle engine options | handed to the engines with the engine settings; no engine reads them today |
+| any `KEY[=VALUE]` an engine declares | **engine settings**: every key some `EngineProvider` on the class path returns from `optionKeys()` is accepted and handed to `EngineProvider.factory(Map)` of the run's primary and reference engines (the reference factory also makes the environment pass's and the re-checks' kernels). The engine parses the value; `IllegalArgumentException` is a usage error. Example: the reference kernel's `levels=...` once `rlvm-ref` declares it | the engine's |
+
+| any `KEY[=VALUE]` the driver knows | **driver settings** (`RunConfig.knows(key)` / `config.set(key, value)`; today `unit-mib`, `keep-mib`, `gc-after-mib`, `chunk`, `env-batch`, `spill-ms`, `publish-units`, `publish-mib`, `pipeline-min-mib`, `no-fallback`; the list and the meaning are the driver's, `rlvm-driver/README.md`). A new knob of the driver needs no change here | the driver's |
+
+An unknown key, a malformed value, an engine name without a provider, a value an engine or the driver
+refuses and `engine=diff` without a second engine all end the run with status **64** before the export
+is opened. Order of ownership of a key: the wiring's own keys first, then the engines' declared keys,
+then the driver's.
+
+Launcher options: `--threads N` becomes `RunConfig.workers`; automatic (`--threads auto`, `0`, or no
+option) is passed on as 0 and the driver decides (`Run.resolveWorkers`: `max(1, min(processors, 8) - 2)`,
+capped at one worker per 128 units; it was a fixed 1 until wave 4). The arena run line names its count;
+`--stack-size` becomes `deepStackBytes` and caps `workerStackBytes`; `--quiet` turns `explain` off;
+`--stats` prints one line (`outcome, engine, reference, workers, load, wall_ms`) on stderr.
+
+## Invariants
+
+- **Fail closed.** `Verdict.ACCEPT` is returned in one place, for the driver's exact `Outcome.ACCEPT`;
+  any other number throws (launcher status 3). An `UnsupportedOperationException` from a part of the
+  pipeline that is deferred or not yet published makes the run DECLINE with
+  `rlvm: declined: not implemented: ...` on stderr; it is never a verdict about the input. `Error`s are
+  not caught. No `System.exit`.
+- No compile-time dependency on an engine: `rlvm-ref` is a `runtime`-scope dependency (it must be in
+  every distribution and on this module's test class path); engines arrive as `EngineFactory`.
+- Exactly one reference engine must be on the class path (`IllegalStateException` otherwise). When the
+  reference kernel is the primary engine, the *same* `EngineFactory` object is passed to the driver as
+  primary and as reference (the driver then confirms a rejection with one fresh cold run, not two).
+- The driver prints the explanation line; this module adds a line only if a non-ACCEPT run has none.
+- Batch load: the level base is frozen by `MainWiring.load` after the loader returned
+  (`LevelStoreInterner(base, freezeOnPublish = false)`), together with the number base; worker contexts
+  exist only after that.
+- Pipelined load (`-X load=pipelined`): `newStore` creates the store on a `rlvm.load.LevelChain`
+  (`new Store(bytes, chain.lists(), chain.info())`) and binds the factory to its snapshots
+  (`Bindings.bindLevelSnapshots`); `load` hands the driver's `LoadOptions` to the loader unchanged; worker
+  contexts are overlays of the newest snapshot and follow it at `WorkerContext.reset()`
+  (`coveredUnits()` says how far a context reaches). The base is never frozen by this class then.
+- **A load-level decline is per unit**: `load` always sets `LoadOptions.withPublishOnDecline(true)` and
+  freezes the level base on the `UnsupportedExportException` path too, so the driver checks the units
+  that were loaded completely before the record the loader cannot represent. A rejection among them is
+  the verdict (the official checker rejects such a file as well); otherwise the run declines; the store
+  stays incomplete, so it is never accepted (`LoadDeclineTest`).
+
+## Deviations from the design documents, with reasons
+
+- (Resolved 2026-11-24, wave 4.) An unknown `-X` key, a malformed value or an unknown engine name ends
+  the run with launcher status **64**: `rlvm.cli.UsageException` is public and `RlvmChecker.check`
+  throws it for every `UsageError` (all of them are raised while the run is configured, before the
+  export is opened).
+- The reader runs in `BUFFERED` mode by default instead of its own default (mapped + `madvise`), as
+  ARCHITECTURE 1.4 asks; `-X io=mapped` selects the reader's measured-best mode.
+- The loader's adapters live in `rlvm-load` (`LevelStoreInterner`, `NatStoreDecoder`, `ExportLoader`),
+  not here; this module only passes them the run's base stores.
+
+## Packaging and steward scripts (`scripts/`)
+
+| Command | What it does |
+|---|---|
+| `scripts/dev.sh dist` | `build.sh --published --jvm-only`: `rlvm-main` compiled from the tree, every other RLVM module as its owner last published it in `.toolchain/m2`; `work/dist/bin/rlvm-jvm`; a few seconds |
+| `scripts/dev.sh dist-native` | the same plus the CE native image `work/dist/bin/rlvm` (about 40 s wall, 460 s CPU on this host) |
+| `scripts/dev.sh dist-tree` | plain `build.sh`: everything from the working tree (what `scripts/arena/build.sh` does) |
+| `scripts/dev.sh suite [--jvm]` | `bench/rlvm/suite.sh`: `bench/run-suite.py` over the 230 published tests with the distribution (uses the JVM launcher automatically when no native image is built) |
+| `scripts/dev.sh slice [--all] [--native\|--jvm] [--probe]` | `scripts/slice.sh`: tutorial tests (or all 230), reference engine, one worker, batch load; writes `work/status/slice.md` / `slice-all.md` (summary, wrong verdicts, failures grouped by message with a guess at the owning module, every test); `--probe` runs the driverless probe instead (`slice-probe*.md`) |
+| `scripts/dev.sh diff ARGS`, `oracle`, `judge`, `mutate`, `corpus`, `track` | pass-throughs to `rlvm-testkit/bin/testkit` and `bench/track/track.py`; `diff` is the test kit's differential campaign; `diff-launcher EXPORT` runs the JVM launcher once with the test kit's `diff` engine provider on `RLVM_EXTRA_CP` |
+| `scripts/dev.sh gate [--dist DIR] [--corpus NAME\|all] [--load pipelined] [--engine NAME] [-X K=V] [--pin CPUS]` | `scripts/gate.sh` (wave 4): the end-to-end guards in one command - distribution, the 230 published tests through the JVM launcher, the mutant campaign(s) with `scripts/check-light.sh`, the differential self-test. Pinned to the efficiency cores by default so that guards do not spoil measurements (a pinned gate checks verdicts without the arena's per-test time limits). `--dist` guards a distribution built before publication: `scripts/build.sh --published --jvm-only --modules MODULE,rlvm-main --dist work/ME/dist-pre` |
+| `scripts/slice.sh --dist DIR`, `--no-arena-timeouts` | the table on another distribution; a verdict run without the arena's time limits (for loaded hosts; the table says so in its header) |
+| `scripts/dev.sh platform ...`, `platform-report`, `scripts/platform-all.sh STEP...` | the platform comparison of `docs/PLATFORM.md`: `scripts/platform-matrix.py` (configurations x corpora x worker counts x repeats in the arena-shaped container, under the measurement lock), the series as run, and the tables |
+| `scripts/dev.sh machine ARGS` | pass-through to `scripts/machine-sandbox.sh` (the machine workflow's script) |
+| `scripts/dev.sh steward-install MODULE...` | `scripts/steward-install.sh`: copies the module's sources, runs its suite on the copy, installs the jar built from that copy (`--if-changed` for refreshes) |
+
+`work/dist/BUILD-INFO.txt` lists every RLVM jar of the distribution with its sha256 prefix and the time
+its owner published it. Heap flags follow ARCHITECTURE 7.2: JVM `-Xms13g -Xmx13g -Xmn1g`, image
+`-R:MaxHeapSize=13g`; `-R:MaxNewSize=1g` is not baked into the image because a run-time `-Xmx` below 1g
+then stops the image at start-up with status 1. `docs/PLATFORM.md` (wave 4) has the measurements
+behind the launchers' flags and the candidates for a change (none was changed). Since 11:18Z a
+`--published` build also copies the published `rlvm-machine` jar into `lib/` (the machine workflow's
+integrator added the module to the parent pom and that block to `scripts/build.sh`); the machine
+registers with priority 10 and is therefore never the default engine (`Engines`).
+
+## What runs today
+
+The whole pipeline: `rlvm FILE` loads the export (`rlvm-export` reader, `rlvm-load`, `rlvm-store`), runs
+the environment pass and admission (`rlvm-admit`, `rlvm-inductive`) and checks every unit with the
+reference engine (`rlvm-ref`) under `rlvm-driver`, with 1..N workers. Results of 2026-11-24 (tables with
+the exact jars: `work/status/slice.md`, `slice-all.md`; history in `work/status/steward.log`):
+
+| run (jars as published by 06:05Z) | correct | wrong | declined | CPU (sum over tests) | wall (8 at a time) |
+|---|---|---|---|---|---|
+| tutorial, native image, `--threads 1` | 141 / 141 | 0 | 0 | below 10 ms per test | 0.4 s |
+| tutorial, JVM launcher, `--threads 1` (jars of 05:49Z) | 141 / 141 | 0 | 0 | 28.6 s (0.2 s JVM start per test) | 3.2 s |
+| all published tests, native image, `--threads 1` | 230 / 230 | 0 | 0 | 276 s | 65 s |
+| all published tests, native image, arena run line (`--threads 4`, `scripts/dev.sh suite`) | 230 / 230 | 0 | 0 | 264 s | 70 s |
+
+Every test ended within its arena timeout; the closest is `perf/app-lam` (26 s of 70 s; 4 GB RSS).
+`scripts/dev.sh arena-test --reuse` (the arena definition built from the working tree in the
+container, `-O3`) passes.
+
+Larger corpora, native image, reference engine, batch load (all ACCEPTED):
+
+| corpus | threads | CPU time | wall | peak RSS | instructions | where |
+|---|---|---|---|---|---|---|
+| Init (348 MB, 57,938 units) | 1 | 24.9 s | 24.9 s | 286 MB | 333.1 G | arena-shaped container (`scripts/dev.sh measure`) |
+| Init | 8 | 24.8 s | 6.4 s | 581 MB | 331.7 G | container |
+| Std (584 MB) | 1 | 54.4 s | 56.7 s | 438 MB | not measured | host, GNU time, loaded machine |
+| Std | 8 | 63.7 s | 13.0 s | 703 MB | not measured | host |
+| reachability (19 MB) | 8 | 16.5 s | 15.8 s | 1.09 GB | not measured | host |
+| cedar (905 MB) | 8 | 77.8 s | 12.6 s | 790 MB | not measured | host |
+| mathlib (6.3 GB, 739k constants) | 8 | 1,486.8 s | 363.3 s | 9.27 GB | 12,404 G | container, one run |
+
+These are numbers of the *reference* engine (jars of 05:52Z), for scale only: gruszka needs 2.8 s CPU on
+Init, 5.7 s on Std and 62.4 s CPU / 18.1 s wall / 2.53 GB on mathlib on this host. M3's bound for the
+reference engine on Init is 300 G instructions (333 G measured).
+
+init-prelude: 0.11 s CPU / 0.11 s wall / 33 MB with the native image, 0.97 s CPU / 0.43 s wall /
+106 MB with the JVM launcher (one worker, host).
+
+Tests of this module: unit tests of options, engine lookup and registration; `MainWiringTest` and
+`MainWiringLoadTest` (all 230 files through reader + loader + store + worker contexts);
+`SliceE2ETest` (opt-in, `-Drlvm.e2e=tutorial|all`: the published tests through the real launcher
+in-process); `ProbeSliceTest` + `ProbeRun` (opt-in, `scripts/slice.sh --probe`): a driverless
+sequential pipeline in the test tree - wiring load, one `EnvBuilder`, one `Admission`, two reference
+sessions - used as an early integration check and as an independent cross-check of the driver.
+
+## Integration results (integrator, 2026-11-24 07:35Z; supersede the tables above)
+
+Full log, measurements and decline lists: `work/status/integration.md`. With the final jars
+(`work/dist/BUILD-INFO.txt`), reference engine, batch load:
+
+| run | correct | wrong | declined | where |
+|---|---|---|---|---|
+| tutorial, JVM launcher, `--threads 1` | 141 / 141 | 0 | 0 | host |
+| all published tests, JVM launcher, `--threads 1` | 230 / 230 | 0 | 0 | host; 208 s CPU summed |
+| all published tests, JVM launcher, arena run line (`--threads 4`) | 230 / 230 | 0 | 0 | arena-limits container; 182.5 s CPU, 1,210 G instructions, max RSS 6.0 GB |
+| all published tests, native image, `--threads 1` | 230 / 230 | 0 | 0 | host; 189.3 s CPU |
+
+Init in the arena-limits container: JVM 15.1 - 19.4 s CPU / 12.4 - 16.8 s wall / 1.11 GB / 209 G instructions
+with one worker, 20.6 s CPU / 3.9 s wall with eight; native image 18.6 s CPU / 18.6 s wall / 310 MB /
+286 G with one worker, 16.3 s CPU / 3.2 s wall with eight. mathlib, eight workers, same container: JVM
+841.8 s CPU / 139.2 s wall / 13.1 GB / 6,374 G; native 1,027.6 s CPU / 178.0 s wall / 9.4 GB / 10,207 G.
+Std, cedar, cslib, con-leche, reachability and navier-stokes-euler are accepted (JVM, eight workers, host).
+Mutant corpora (16,949 mutants in four corpora): no soundness and no completeness difference.
+
+## Wave 4 (steward, 2026-11-24; details in `work/status/rlvm-main.log` and `steward.log`)
+
+With the jars published by 10:56Z (`work/dist/BUILD-INFO.txt`), reference engine:
+
+| run | result |
+|---|---|
+| all published tests, JVM launcher, `--threads 1`, batch | 230 / 230 correct, 0 wrong, 0 declined (`work/status/slice-all.md`; a verdict run, see its header) |
+| all published tests, `--threads auto` (the driver's count) | 230 / 230 (08:19Z jars) |
+| all published tests, `-X load=pipelined` | 230 / 230 |
+| Init, Std, reachability, `-X load=pipelined`, 1 and 6 workers | accepted |
+| mutant corpora (17,775 in four corpora, `scripts/dev.sh gate --corpus all`) | SOUNDNESS 0, COMPLETENESS 0, agree 15,473, declined 2,302 (`work/status/mutants.md`) |
+| `-X levels=official` on the two `either` corner cases | rejected, as the official checker (default `complete`: accepted) |
+| `-X engine=diff` with the test kit's broken engine | the difference is caught (`scripts/dev.sh gate`, last step) |
+| arena definition end to end (`scripts/dev.sh arena-test --reuse --strict`) | PASS (tree of 10:26Z) |
+
+Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, collectors, heap):
+`docs/PLATFORM.md`.
+
+## Known gaps
+
+- `-X order=namespace` ends as a decline (`UnsupportedOperationException` in the driver: deferred).
+  `-X load=pipelined` runs end to end since the driver's jar of 09:39Z (guards in
+  `work/status/rlvm-main.log`); batch stays the default. `-X engine=diff` was run end to end with the
+  test kit's provider (reference against reference: tutorial tests and init-prelude); the driver's own
+  differential mode has no second engine in the distribution yet.
+- `engine.*` options are parsed and handed to the engines, none of which reads them; `-X stats-file`
+  is passed to the driver, which owns the statistics (not checked here); `-X scan-threads` with mapped
+  input was not measured by this module (the loader's owner reports 11.3 s instead of 14.4 s wall for
+  the mathlib load with two scanner threads).
+- `--threads auto` and N > 1: all 230 published tests and the tutorial mutant corpus pass with automatic
+  workers (wave 4 guards, `work/status/steward.log`); the driver owner's schedule-independence runs are in
+  `work/status/rlvm-driver.log`.
+- `SliceE2ETest -Drlvm.e2e=all` runs inside the test JVM (4 GB heap, parent pom): 229 of 230 pass and
+  `good/perf/gf3-matrix-product` ends with launcher status 3 (OutOfMemoryError: its intermediate big
+  numbers need more than 4 GB; see `rlvm-api/README.md`). Through the distribution (13 GB heap) it
+  passes. `-Drlvm.e2e=tutorial` passes 141 / 141.
+- The steward scripts are not covered by tests of their own. (`bench/rlvm/run.sh --selftest` expected the
+  arena run line to *decline* the smoke export; the integrator changed that expectation to accept, and
+  `scripts/dev.sh selftest` passes 29 / 29 for both launchers.)

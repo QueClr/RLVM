@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  rlvm-cli: the `rlvm` command (rlvm.cli.Main), the fail-closed verdict protocol, the Checker plug-in
+  interface, and the Truffle runtime-compilation probe (rlvm.cli.probe).
+
+  Test:          . ./env.sh && $MVN -o -q -pl rlvm-cli test          (or: scripts/dev.sh test rlvm-cli)
+  Distribution:  scripts/build.sh                                    (JVM launcher + native image in work/dist/)
+
+  The Truffle artifacts are here for one reason: scripts/build.sh builds the native image with Truffle
+  runtime compilation and verifies it with the launcher's truffle-probe option, which needs a call
+  target to compile.
+  Their version (graalvm.version, parent pom) must equal GRAALVM_VERSION of the GraalVM that builds the
+  image; scripts/build.sh overrides it with -Dgraalvm.version=... for the Oracle GraalVM variant.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>rlvm</groupId>
+    <artifactId>rlvm-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>rlvm-cli</artifactId>
+  <packaging>jar</packaging>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.graalvm.polyglot</groupId>
+      <artifactId>polyglot</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.graalvm.truffle</groupId>
+      <artifactId>truffle-api</artifactId>
+      <version>${graalvm.version}</version>
+    </dependency>
+    <!-- The optimizing runtime: without it Truffle silently runs on the interpreter-only fallback. -->
+    <dependency>
+      <groupId>org.graalvm.truffle</groupId>
+      <artifactId>truffle-runtime</artifactId>
+      <version>${graalvm.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <!-- Only build.properties is filtered (project version, Truffle version). -->
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+        <includes>
+          <include>rlvm/cli/build.properties</include>
+        </includes>
+      </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+        <excludes>
+          <exclude>rlvm/cli/build.properties</exclude>
+        </excludes>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- Generates the provider class and service entry for @TruffleLanguage.Registration. -->
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.graalvm.truffle</groupId>
+              <artifactId>truffle-dsl-processor</artifactId>
+              <version>${graalvm.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- The last two flags silence JDK 25 warnings about Truffle's use of Unsafe and native access. -->
+          <argLine>-Xss512m -Xmx1g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>rlvm.cli.Main</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

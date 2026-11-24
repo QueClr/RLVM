@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>rlvm</groupId>
+    <artifactId>rlvm-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>rlvm-main</artifactId>
+  <packaging>jar</packaging>
+  <!--
+    The kernel as a plug-in of the launcher (rlvm.cli.Checker). Compile-time dependencies: the launcher's
+    SPI, the reader, the bindings' modules and the pipeline (store, api, load, admit, driver).
+    Engines are found through ServiceLoader (rlvm.api.EngineProvider): no engine class is on the compile
+    class path. rlvm-ref is a RUNTIME dependency only, so that the reference engine is in every
+    distribution and on this module's test class path.
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-cli</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-export</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-level</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-nat</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-store</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-load</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-admit</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-driver</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-ref</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+</project>

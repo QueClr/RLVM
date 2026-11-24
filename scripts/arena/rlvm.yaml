@@ -1,0 +1,69 @@
+# DRAFT arena checker definition for RLVM (lean-kernel-arena: checkers/rlvm.yaml).
+# Not submitted. Before submitting: set url / ref / rev to the published repository and commit, and
+# re-read the description against the binary once more.
+#
+# State of the binary on 2026-11-24 (wave 5 check, work/status/integration.md): the complete
+# pipeline, checking with the REFERENCE engine. All 230 published tests correct with this run line
+# (0 declined); Init, Std, cedar, cslib, con-leche, reachability, navier-stokes-euler and mathlib
+# accepted. The machine (rlvm-machine: worklist stepper, code objects, Truffle tier) is being built
+# by another workflow. Since 11:18Z its module is in the parent pom, so its classes are compiled
+# into this binary (`rlvm --version` lists the engines "machine, reference*"), but it is only a
+# candidate engine (run with -X engine=machine or compared with -X engine=diff) until it registers
+# with a priority of at least 100 (rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY; today 10), so
+# this definition checks with the reference engine. The description below says only what the
+# binary does today.
+#
+# Which launcher: the CE native image (work/dist/bin/rlvm). docs/PLATFORM.md has the comparison with
+# the JVM launcher (work/dist/bin/rlvm-jvm, built by the same build step) and with an Oracle GraalVM
+# PGO image, measured with the reference engine on this aarch64 host; the binding platform gate
+# (RECONCILIATION section 3) is run when the machine accepts Init. To try the JVM launcher, replace
+# `bin/rlvm` by `bin/rlvm-jvm` in the run line: nothing else changes.
+#
+# bench/rlvm/run.sh, suite.sh and measure.sh read the `run:` line of this file, so that local
+# measurements execute exactly the command the arena would. Keep it on one line.
+description: |
+  **RLVM** (Rabdos Lean VM) is a Lean 4 kernel written in Java and shipped as a GraalVM native
+  image (no JVM start-up, no warm-up).
+
+  This version checks every declaration with its *reference engine*: a direct port of the official
+  kernel's algorithm (type inference, weak-head normalisation, definitional equality with lazy
+  delta reduction, the official caches, the Nat and String literal extensions) to hash-consed
+  terms that are integer ids into flat primitive arrays, which the garbage collector does not
+  trace. The engine the project is named after - a worklist machine whose instructions are the
+  judgments of the kernel algorithm, with the environment's constants elaborated into code for
+  it - is under construction: its code is in this binary, but nothing is checked with it yet; the
+  reference engine will remain as the engine that confirms every rejection.
+
+  Nothing derived in the export is trusted: recursors, constructor data and flags of inductive
+  types are regenerated and compared with the exported records, the quotient declarations are
+  checked against their expected form, and theorem values are checked like definitions.
+
+  Declarations are checked by parallel workers over a frozen shared store; a declaration sees only
+  the declarations before it in the file, and the verdict is the first failure in file order
+  whatever the number of workers. A rejection found by a worker is reported only after a second,
+  cold run of the kernel has confirmed it.
+
+  The process fails closed: the exit status starts as "internal error" and becomes 0 only after
+  the whole export has been processed successfully; an exception, an out-of-memory error or a
+  stack overflow, on any thread, is a non-zero status and can never read as acceptance. Input
+  that RLVM cannot represent exactly (for example metadata inside an inductive declaration) is
+  declined, never guessed.
+
+  The build step downloads a pinned GraalVM Community Edition and Maven for the runner's
+  architecture, verifies their checksums and those of the third-party jars that go into the
+  image, and builds from source.
+language: java
+url: https://example.invalid/rlvm.git
+ref: main
+rev: "0000000"
+version: "0.1.0-SNAPSHOT"
+# Fetches GraalVM CE 25.5.5.0.3 (linux-x64 or linux-aarch64, sha256-pinned) and Maven 3.9.16
+# (sha512-pinned) into .toolchain/, builds all modules and the native image work/dist/bin/rlvm,
+# and verifies the image (exit-status protocol, Truffle runtime compilation) before it finishes.
+build: scripts/arena/build.sh
+# The run line maps the binary's status back: RLVM_STATUS_BASE=10 makes rlvm exit with 10 / 11 / 12
+# for accept / reject / decline, and everything else becomes 3. A runtime that fails before the
+# checker starts (it would exit with 1, e.g. on a bad VM option or a heap it cannot reserve), a
+# crash or a kill is thereby reported as an error and never as a rejection.
+run: RLVM_STATUS_BASE=10 work/dist/bin/rlvm --threads 4 "$IN"; case $? in 10) exit 0;; 11) exit 1;; 12) exit 2;; *) exit 3;; esac
+threads: 4

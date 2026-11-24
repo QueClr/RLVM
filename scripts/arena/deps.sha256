@@ -1,0 +1,15 @@
+# sha256 of the third-party jars that end up on the class path of the RLVM native image
+# (org.graalvm.polyglot / org.graalvm.truffle / org.graalvm.sdk 25.5.5.0.3 from Maven Central).
+# Checked by scripts/arena/build.sh via `scripts/build.sh --verify-deps`; the build fails on any
+# difference (a changed hash, a missing jar, an unexpected extra jar).
+# Regenerate after changing a dependency or the GraalVM version:
+#   scripts/build.sh --print-deps > /tmp/deps && review it, then replace the lines below.
+# On 2026-11-23 all eight matched the .sha256 files published next to the jars on repo.maven.apache.org.
+694c52b4536e744fd091257d190af6ba95c78f37a2eb1cb7b5d1cfc8e7c1efca  collections-25.5.5.0.3.jar
+1c46ac4d58434d9118026ab2f4a585102460ec07a4cfcf31973b0fb13f84268e  jniutils-25.5.5.0.3.jar
+b8d337a9d413169953285b600bb1bd243f1b294a10654a324751f56b2a88d749  nativeimage-25.5.5.0.3.jar
+51096bb48c663a82a720358d9f5f9145b9809ea3d155459211a6a05759f4f43c  polyglot-25.5.5.0.3.jar
+ce6662ca5f319c329eb8867f4aa809ea3e892e07b2975bf9d364d94bdad166d0  truffle-api-25.5.5.0.3.jar
+f12a579e489daea109d7e19d231b48fe33b2a8a34033251618ef7a54579a236d  truffle-compiler-25.5.5.0.3.jar
+a4b8df5041e6001d00019d92617cad6b7f5628a4f84d4d94b53b9e56c6b80a0e  truffle-runtime-25.5.5.0.3.jar
+11a21c7f6a132bd21c566ec4b8b397fb06656db5d293ff52966ee8582b79ddd1  word-25.5.5.0.3.jar

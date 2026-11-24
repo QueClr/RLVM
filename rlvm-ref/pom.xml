@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>rlvm</groupId>
+    <artifactId>rlvm-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>rlvm-ref</artifactId>
+  <packaging>jar</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-store</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- Tests only: the kernel-level corpus harness reads export files with the wave-2a reader. -->
+    <dependency>
+      <groupId>rlvm</groupId>
+      <artifactId>rlvm-export</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

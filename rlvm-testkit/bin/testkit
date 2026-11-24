@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# rlvm-testkit/bin/testkit - command line of the test kit (rlvm.testkit.Main).
+#
+#   rlvm-testkit/bin/testkit oracle  [--tests DIR] [--out DIR] [-j N] [--timeout S] [--only GLOB]
+#   rlvm-testkit/bin/testkit verdict FILE...
+#   rlvm-testkit/bin/testkit mutate  SOURCE KIND|all COUNT OUTDIR [--seed N]
+#   rlvm-testkit/bin/testkit corpus  [--sources DIR] [--only GLOB] [--out DIR] [--per-kind N] [--seed N] [-j N]
+#   rlvm-testkit/bin/testkit judge   [--corpus DIR] [-j N] [--timeout S] [--kind KIND] -- CHECKER COMMAND '"$IN"'
+#   rlvm-testkit/bin/testkit diff    [--engine NAME] [--cp PATH] [--threads N] [-j N] [--sample N] EXPORT|DIR...
+#
+# See rlvm-testkit/README.md. Uses the test kit's jar published in .toolchain/m2 (the module's
+# compiled classes in rlvm-testkit/target/classes with RLVM_TESTKIT_TREE=1, or when nothing is
+# published); the other RLVM jars come from .toolchain/m2.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# shellcheck source=../../env.sh
+. "$ROOT/env.sh"
+# The published jar (what other modules' owners are meant to run: it does not change under a running
+# campaign when the module is rebuilt). RLVM_TESTKIT_TREE=1: the module's own target/classes instead
+# (for work on the test kit itself); also used when no jar is published yet.
+cp="$(ls "$M2_REPO"/rlvm/rlvm-testkit/*/rlvm-testkit-*.jar 2>/dev/null | head -n 1 || true)"
+if [ "${RLVM_TESTKIT_TREE:-0}" = 1 ] || [ -z "$cp" ]; then
+  [ -f "$ROOT/rlvm-testkit/target/classes/rlvm/testkit/Main.class" ] && cp="$ROOT/rlvm-testkit/target/classes"
+  [ -n "$cp" ] || { echo "testkit: not built; run: \$MVN -o -q -pl rlvm-testkit install -DskipTests" >&2; exit 70; }
+fi
+for jar in "$M2_REPO"/rlvm/rlvm-*/*/rlvm-*.jar; do
+  case "$jar" in */rlvm-testkit/*) ;; *) [ -f "$jar" ] && cp="$cp:$jar" ;; esac
+done
+export RLVM_ROOT="$ROOT"
+exec "$JAVA_HOME/bin/java" -Xss64m -Xmx2g -cp "$cp" rlvm.testkit.Main "$@"

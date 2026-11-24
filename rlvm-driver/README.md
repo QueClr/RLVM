@@ -1,0 +1,710 @@
+# rlvm-driver
+
+Package `rlvm.driver`, work package D2 of `docs/design/ARCHITECTURE.md` 10.2: runs one check of one export
+from a loaded (or to be loaded) store to a verdict. Threads, scheduler, sessions' lifecycle, re-check
+protocol, verdict, memory account, statistics. It never calls `System.exit`, never sees an engine class
+(engines arrive as `EngineFactory`), and never sees the reader (`rlvm-export`), the level or the number
+module: those come through `Wiring`, implemented by `rlvm-main`.
+
+Authority: `OWNER-NOTES.md` > `RECONCILIATION.md` > `ARCHITECTURE.md` sections 3.5, 4.1, 6, 8. Where this
+module follows `RECONCILIATION.md` instead of `ARCHITECTURE.md`, or deviates from both, the table at the end
+says so.
+
+## What is implemented
+
+| Area | State |
+|---|---|
+| Batch load through `Wiring` on the calling thread, or a store the caller loaded | done |
+| **Pipelined load** (`RunConfig.loadMode = PIPELINED`, `-X load=pipelined`): the calling thread loads, the environment thread and the workers check what is published | done; unit-tested with a fake loader, integration-tested with the real loader (`rlvm.load.LevelChain`, `LoadListener`); **not the default** (see "Pipelined loading") |
+| One worker (`-j 1`), batch: strict file order, environment pass driven lazily by the worker | done |
+| N workers, and every pipelined run: environment thread ahead of the workers, contiguous runs per worker, stealing, give-back of slow claims | done |
+| **Automatic worker count** (`--threads auto`, `RunConfig.workers = 0`): `Run.autoWorkers(processors) = max(1, min(processors - 2, 6))` | done; gate measurable by one command (see "Worker count") |
+| Re-check protocol (8.2, 6.5, 6.6), inline on the worker thread, fresh sessions, cold budget | done |
+| **Memory retries one at a time** (the heavy lane of RECONCILIATION section 3, as a gate instead of a thread) | done |
+| Verdict rule of RECONCILIATION section 2, fail-closed chain of 8.1 | done |
+| Cancellation on first failure; **memory account by allocated capacity, one victim at the watermark** | done |
+| Sessions reset by footprint, after any outcome but ACCEPT, when the rank steps back, **before a unit beyond the lane's snapshot, and when a lane's unused capacity grew (give-back)** | done |
+| Statistics (`RunStats`, JSON), explanation line on stderr | done |
+| Differential mode (`RunConfig.differential`); **`RunConfig.referenceFallback = false` (`no-fallback`)**: the engine under test alone | done |
+| Namespace ordering (`OrderPolicy.Kind.NAMESPACE_WINDOW`, `RunConfig.order`) | **deferred**: `OrderPolicy.of`, `Scheduler` constructor and `Run.execute()` throw `UnsupportedOperationException` |
+| Heavy-lane threads | **not used**: re-checks run on the worker's own deep-stack thread; `Scheduler.defer` / `claimHeavy` work as a plain queue that nothing in `Run` feeds |
+| `Run(RunConfig, EngineFactory, EngineFactory)` (the skeleton's constructor) | throws `UnsupportedOperationException`: a run needs a `Wiring` |
+| Scan helpers (`RunConfig.scanThreads`), `RunConfig.truffleTier`, `proofBlocks` | passed on (`proofBlocks` to `LoadOptions`, `truffleTier` to `EngineConfig`); `scanThreads` is the wiring's business (`-X scan-threads` reaches the reader through `rlvm-main`) |
+
+## Public API
+
+```java
+interface Wiring   { Store newStore(long inputBytes); void load(Store, LoadOptions) throws Exception;   // BATCH or PIPELINED options
+                     LoadReport loadReport(); WorkerContext newWorkerContext(int workerId, Store, RunSignals, long overlayMaxBytes); }
+final class Run    { Run(RunConfig, Wiring, EngineFactory primary, EngineFactory reference);          // load + check
+                     Run(RunConfig, Wiring, Store loaded, EngineFactory primary, EngineFactory reference);  // check only
+                     Run(RunConfig, RunHost, EngineFactory primary, EngineFactory reference);         // fakes
+                     void inputFailure(Reason, String);  void setMinUnitsPerWorker(int);  void setDiagnostics(PrintStream);
+                     int execute();                       // Outcome code; rethrows the first Error of any thread
+                     VerdictBoard verdicts(); RunStats stats(); MemoryAccount account(); Worker[] workers(); int workerCount();
+                     boolean pipelined();
+                     static int resolveWorkers(int requested); static int autoWorkers(int processors); }
+final class RunConfig     { arena defaults; see the fields. Settings by name: static keys(), knows(key); set(key, value), setAll("k=v,k=v") }
+final class VerdictBoard  { accept(u), skip(u), reject(u, reason, msg), decline(u, reason, msg), inputFailure([unitsLoaded,] reason, msg),
+                            internalFailure(msg), stopped(msg), complete(units), firstFailure(), status(u), decidingUnit(),
+                            exitCode(), explanation(), warmAnomalies(), machineIncomplete(), disagreements(), events() }
+final class Scheduler     { Scheduler(Frontier, OrderPolicy, workers, chunk, VerdictBoard); Scheduler(Store, OrderPolicy, RunConfig, VerdictBoard);
+                            int claim(int worker, int[] out); int claim(int[] out) /* worker 0 */; int tryClaim(int worker, int[] out);
+                            void giveBack(int[], int from, int n); void retire(int worker); void unitsReady(); void unitsReady(int units);
+                            void close(); void wake(); void defer(int unit); int claimHeavy(); void closeHeavy(); counters }
+interface   OrderPolicy   { void arrange(int[] units, int from, int n); FILE_ORDER; static of(Kind, Store); }
+final class Worker        { Worker(int id, Run, Engine primary, Scheduler, VerdictBoard); run(); unitsDone(); sessionResets(); unitsCancelled();
+                            rechecks(); giveBacks(); }
+final class MemoryAccount { MemoryAccount(limitBytes, slots); setShared(bytes); report(slot, bytes); setExempt(slot); setLastResort(slot);
+                            exhausted(); exhausted(slot); exhaustedAlone(slot); exhaustedLastResort(slot);
+                            accountedBytes(); peakBytes(); peakSessionBytes(); victimCount(); }
+final class RunStats      implements rlvm.api.StatsSink { phaseStart/phaseEnd, threadCpu/threadTimes (CPU and run-queue wait), unit, put, table, toJson, writeJson }
+interface   RunHost       { the seam below the driver: unit table, frontiers, Lane (context + admission; coveredUnits(), slackBytes()),
+                            EnvPass, retryEnvUnit(unit) }
+final class StoreHost     implements RunHost over Store + rlvm.admit (Admission, EnvBuilder) + Wiring
+```
+
+How `rlvm-main` uses it: `new Run(config, wiring, primary, reference).execute()`. Pass **the same
+`EngineFactory` object twice** when the reference kernel is the primary engine (`-X engine=reference`): the
+driver then knows that "strict primary" and "reference" are the same thing and confirms a rejection with one
+fresh run instead of two.
+
+`Wiring.newWorkerContext` is called on the thread that uses the context; in a pipelined run while `load`
+runs on the loading thread, never before the loader's first publication. `workerId` is unique among the
+sessions of one engine instance, not among all contexts: worker `w` uses `w` for its warm lane (primary
+engine), its strict lane (strict primary engine) and its reference lane (reference engine); the environment
+lane (reference engine) uses the worker count. Engines are created with `EngineConfig.workers` = workers
+(primary, strict) and workers + 1 (reference).
+
+### Settings by name
+
+`RunConfig.set(key, value)` / `setAll("key=value,key=value")` / `knows(key)` cover the driver's own knobs, so
+that the launcher needs no code per knob (`rlvm-main` is asked to pass unknown `-X` keys through). Until it
+does, `Run` reads the same list from the environment variable `RLVM_DRIVER` (only when it has a `Wiring`;
+a faulty value is reported on stderr and ignored). None of the numeric settings can change a verdict.
+
+| Key | Field | Default |
+|---|---|--:|
+| `unit-mib=N` | `unitBytes`: warm byte budget of a unit | 0 = the whole headroom |
+| `keep-mib=N` | `keepBytes`: give-back threshold of a lane | 256 |
+| `gc-after-mib=N` | `gcAfterBytes`: ask for a collection when the heap holds N MiB of unaccounted bytes | 0 = never |
+| `chunk=N` | `chunkUnits` | 32 |
+| `env-batch=N` | `envBatchUnits` | 4096 |
+| `spill-ms=N` | `spillNanos` | 20 |
+| `publish-units=N`, `publish-mib=N` | pipelined hand-off interval | 4096 units, 32 MiB |
+| `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
+| `no-fallback` | `referenceFallback = false` | off |
+
+## How a run goes
+
+```
+execute
+  batch (default; also -X load=pipelined for an input below pipelineMinBytes, and stop-after runs):
+    load: Wiring.newStore, Wiring.load (LoadOptions BATCH) on the calling thread
+        MalformedExportException            -> REJECT at once, nothing is checked
+        UnsupportedExportException, IOException, any other Exception -> never ACCEPT; published units are still checked
+    W = min(configured workers, units / 128), at least 1        (verdict-neutral; small files get one worker)
+    W = 1: one worker thread; before unit u it advances the environment pass to u + 1   -> strict file order
+    W > 1: an environment thread advances the pass ahead of the workers: runs of plain units in batches of
+           envBatchUnits, every inductive block / quot record alone after announcing everything below it
+  pipelined:
+    Wiring.newStore; Wiring.load(store, LoadOptions.pipelined(bytes) with the hand-off interval and the driver's
+        LoadListener) on the calling thread
+    first publication that is not the end of the file: start the environment thread and W = configured workers
+        (a file that is published in one piece is a batch run from here on)
+    environment thread: follows the loaded frontier; parks when it has caught up, is woken by the next publication
+    end of the load (complete or failed): frontier final, outcomes obtained from now on are final
+  workers claim units from the Scheduler and admit them (Worker, below); join
+  VerdictBoard.complete(units) only if the load was complete and the store's unit count equals the
+      loader's count of declaration records (LoadReport.declRecords) or the caller's (RunConfig.expectedUnits)
+  statistics, one explanation line on stderr unless ACCEPT; return VerdictBoard.exitCode()
+```
+
+Worker threads and the environment thread get `max(workerStackBytes, deepStackBytes)` (1 GiB reservation):
+the reference kernel runs on them (as primary engine, for re-checks, for the environment pass). A worker
+creates its lane and session at its first claim, not at thread start.
+
+### Per unit (`Worker`)
+
+```
+u > firstFailure            -> skipped (cancelled)
+inductive / quot unit       -> decided by the environment pass (its listener told the board)
+dropped record (size 0)     -> SKIPPED, counts as accepted
+u >= lane's covered units   -> reset the warm session first (pipelined: the lane's level / list / literal snapshot)
+rank(u) <= last rank        -> reset the warm session first (I5)
+o = admit(u) in the warm session; budget: no step limit, unitBytes, no depth limit
+ACCEPT                      -> final. Reset the session if Session.footprintBytes() > sessionBytes, or if the lane's
+                               unused capacity grew by more than keepBytes and the last units did not need it (give-back)
+anything else               -> reset the session; if u is still <= firstFailure: re-check now, on this thread
+```
+
+### Re-check protocol (ARCHITECTURE 8.2 / 6.5 / 6.6)
+
+Every stage runs in a freshly reset session with `Budget.cold(memoryLimitBytes)`; after every stage the unit
+is abandoned without a record if it now lies above the first failure (the stage may have been cancelled).
+
+| Warm outcome | Stages | Final status |
+|---|---|---|
+| REJECT | 1. strict primary: ACCEPT | accepted, WARM-ANOMALY |
+| | 2. reference: REJECT | REJECTED (confirmed; the reference kernel's reason and message) |
+| | reference: ACCEPT | accepted, MACHINE-INCOMPLETE |
+| | reference: DECLINE or exception | `Policy.unconfirmedReject`: DECLINED(UNCONFIRMED_REJECT) (default) or REJECTED |
+| DECLINE | 1. primary, cold budget: ACCEPT | accepted |
+| | primary cold: REJECT | as "REJECT" above |
+| | 2. reference: ACCEPT / REJECT / DECLINE | accepted / REJECTED / DECLINED (its reason) |
+| RuntimeException | session and lane discarded; reference: ACCEPT / REJECT / DECLINE | accepted / REJECTED / DECLINED |
+| | reference throws too | DECLINED(INTERNAL_ERROR) |
+| invalid outcome code | treated as DECLINE(INTERNAL_ERROR) at every stage | |
+
+primary == reference (same factory object): the stages "strict primary" and "primary, cold budget" do not
+exist; one fresh cold run of the reference kernel decides, and a warm REJECT that the fresh run accepts is a
+WARM-ANOMALY. `recheckRejections = false` makes a REJECT of the primary engine final (measurement only).
+An ACCEPT of the primary engine is never re-checked. Structural rejections and rejections of the environment
+pass need no confirmation; a structural rejection simply repeats in the stages at no cost.
+
+**Memory retries.** A stage that ends with `BUDGET_MEMORY` is repeated while the worker holds the heavy gate
+(below); a warm decline for memory takes the gate before its first cold stage. The outcome table is
+unchanged; only "declined for memory" now means "does not fit into the limit by itself".
+
+**`referenceFallback = false`** (`no-fallback`; the gate of an engine under test, requested by the machine
+workflow): the reference kernel never turns a non-ACCEPT of the primary engine into an ACCEPT. A unit the
+primary engine declines (after its own cold attempt) or throws on is DECLINED with its reason, without
+asking the reference kernel; a rejection that the reference kernel accepts is DECLINED(ENGINE_DISAGREEMENT)
+with the MACHINE-INCOMPLETE event. Rejections are still confirmed (REJECT only when confirmed) and the
+environment pass stays the reference kernel's. The run's exit status is then ACCEPT iff the primary engine
+accepted every def / thm / axiom / opaque unit by itself.
+
+### Verdict (`VerdictBoard`)
+
+The verdict is the status of the first unit in file order that is not ACCEPTED or SKIPPED: REJECTED gives
+REJECT, DECLINED or "no status" gives DECLINE; later units never change it (RECONCILIATION section 2,
+C3.13). Malformed input gives REJECT regardless of units. ACCEPT needs all of: `complete(n)` was called, no
+input failure, not stopped (`stop-after`), no internal failure, every unit below `n` ACCEPTED or SKIPPED, no
+status at or above `n`. A unit status is written once (compare-and-set from "none"); a second report for a
+unit is an internal inconsistency and turns the verdict into DECLINE. `firstFailure()` is the smallest unit
+with a recorded REJECTED / DECLINED status, -1 once the whole run is cancelled (malformed input, internal
+failure). A rejection is only ever recorded when confirmed.
+
+### Scheduler (RECONCILIATION section 3)
+
+Units that became ready since the last split form a batch. When a worker without a run finds a batch it is
+cut into `min(W, |batch| / chunk)` contiguous runs (at least one), one per worker starting with the caller;
+runs are appended to the workers' queues. A worker takes chunks of `chunkUnits` (32) from the front of its
+first run. A worker without a run and without a batch steals the back half of the largest remaining run (the
+whole run if it is no longer than a chunk). A unit that took longer than `spillNanos` (20 ms) makes its
+worker give back the unstarted rest of its claim; given-back units are served before anything else, except
+that a worker never takes them ahead of a lower unit waiting in its own run. Units above the first failure
+are never handed out. One lock, taken once per claim; idle workers wait on its monitor.
+
+**Progress.** Warm sessions have no step limit, so a unit behind an ill-typed unit may never finish; it
+ends when the failure of the ill-typed unit is recorded and its session polls `firstFailure`. This needs
+the lowest undecided unit to be reached whatever the other workers are stuck in: (a) a worker's units
+ascend while it has a run of its own (that is why given-back units do not jump ahead of it), so the
+lowest undecided unit of a queue is next for its owner or is stolen by repeated halving; (b) the
+environment thread announces everything below an inductive block or quot record before it starts that
+record; (c) the environment pass itself is cancelled (`LaneSignals.guard`; the reference kernel also polls
+`firstFailure` in `KernelOps` mode since its jar of 06:37Z); (d) the heavy gate goes to the lowest waiting
+unit and a holder gives way to a lower one; (e) a worker never waits for the loader while it holds the
+gate or a claim's unstarted rest. With one worker in batch mode the order is the file order and the
+question does not arise.
+
+## Memory
+
+### Account (`MemoryAccount`, `LaneSignals`)
+
+Shared store bytes + one slot per checking thread. A thread's slot is the sum over its sessions of
+`Session.footprintBytes()` (bytes in use) **plus `Lane.slackBytes()`**: what the lane's context has
+allocated beyond that (for `StoreHost`: `Overlay.allocatedBytes() - usedBytes()`, i.e. the node array's
+unused capacity and the hash index). The reference session forgets everything after each unit
+(`Overlay.resetTo`), so its footprint between units is near zero while the arrays a heavy unit made grow
+stay allocated: before this change the account saw 3.9 GB at the peak of mathlib where 4.9 GB to 5.4 GB
+were held (its peak now, and what a full collection finds reachable). A thread reports at unit boundaries and at every `RunSignals.memoryExhausted()` poll of its
+sessions, when its total moved by 1 MiB.
+
+Above `memoryLimitBytes` (12 GiB) not every session gives up:
+
+- the thread that holds the most is the **victim**: `memoryExhausted()` is true for its sessions only. Its
+  unit is declined warm, the session is reset, and the unit is checked again holding the gate;
+- above the limit plus a margin (1/8 of the limit, at most 1 GiB), or when the largest holder has nothing to
+  give back, every thread gives up (the former behaviour, as a backstop);
+- the holder of the heavy gate is exempt: it gives up only when the shared store plus its own sessions exceed
+  the limit;
+- the environment thread is the last resort (nothing checks its units again): it gives up only above the
+  margin, or when it does not fit by itself.
+
+### Heavy gate (`HeavyGate`): memory retries one at a time
+
+RECONCILIATION section 3: "the heavy lane is for memory retries". Here it is mutual exclusion on the
+worker's own deep-stack thread instead of a thread: one memory retry at a time, the holder exempt from the
+watermark, everybody else giving way. A unit is therefore declined for memory only if it does not fit into
+the limit **by itself**, whatever the other workers were doing: the exception to verdict invariance that the
+former README listed ("declines caused by the global memory watermark") is gone, and the warm byte budget
+could become the whole headroom (below). The gate goes to the lowest waiting unit, and a holder gives way to
+a lower unit that starts waiting (its stage ends with a decline that is not recorded; it enters again), so
+the lowest undecided unit never waits for a higher one. Waiters leave when their unit comes to lie above the
+first failure. Counters: `driver.heavy.entries / waits / yields`, per worker `gatedStages`.
+
+### Warm byte budget (`unitBytes`)
+
+0 = automatic = `max(256 MiB, memoryLimitBytes - shared)`: the whole headroom, whatever the worker count. The
+former share `headroom / (2 W)` (654 MiB on mathlib with 8 workers, 789 MiB on con-leche) cut three units
+short that fit easily and made them run twice; the account's victim rule and the gate are what protects the
+run now. See "Measured" for the sweep.
+
+### Give-back after a heavy declaration (`keepBytes`)
+
+A lane whose unused capacity grew by more than `keepBytes` (256 MiB) since its last reset is reset after
+the unit (`Session.reset()` + `WorkerContext.reset()`: the overlay falls back to its base arrays) once the
+capacity was not needed by 8 units in a row (a unit "needs" it when its sampled peak footprint is above a
+quarter of the growth): a heavy declaration's arrays go back to the collector a few units later, a run of heavy
+declarations keeps them (no thrashing between growing and giving back). Re-check lanes are reset after every
+stage anyway. Counters per worker: `giveBacks`, `givenBackBytes`, `maxSlackBytes`.
+
+### Collections (`gcAfterBytes`, off by default)
+
+The JVM's serial collector collects the old generation only when the heap is full, and the launcher's heap
+is 13 GB: there the peak resident set of a long run is the heap size, not what the run holds; the native
+image's collector is more eager but still leaves 1 GB to 2 GB of garbage at the peak (see "Where mathlib's
+memory goes"). `gc-after-mib=N` makes a worker ask for a collection (`System.gc()`) between two claims when the
+heap holds N MiB more than the account knows of (measured against what was left unaccounted after the
+previous collection). It trades CPU time and wall clock for resident memory, which is the wrong direction
+for the project's order of goals unless the trade is nearly free: the numbers are in "Measured".
+
+## Pipelined loading (ARCHITECTURE 3.5, 6.1)
+
+Agreed interface (requests.log 07:56Z - 08:50Z): no new `Wiring` method. The driver hands
+`LoadOptions.pipelined(bytes).withPublishEvery(units, bytes).withProofBlocks(..).withListener(l)` to
+`Wiring.load(store, options)`; the wiring passes them to `rlvm.load.Loader` unchanged; the loader calls
+`l.published(units, complete)` on the loading thread after `LevelInterner.publish(units)` and
+`Store.publishLoaded(units, complete)`. `rlvm-main` (published 08:47Z) builds the store on a
+`rlvm.load.LevelChain` for `-X load=pipelined`; worker contexts are overlays of the newest level snapshot
+and tell how far they reach (`WorkerContext.coveredUnits()`).
+
+What the driver adds:
+
+- **Threads.** loader = the thread that called `execute()`; environment thread; W workers. They are started
+  by the first publication that is not the end of the file, so a file that arrives in one piece (smaller
+  than the hand-off interval: 4,096 units and 32 MiB) is a batch run with the batch worker count.
+- **Nobody polls.** The environment thread parks on the loaded frontier (`LoadFrontier`) and is woken by
+  the listener; workers park in the scheduler as before. Parked threads look at the first failure every
+  50 ms as a safety net against a lost wake-up (no CPU time to speak of).
+- **Snapshots.** A lane is reset before the first unit at or beyond
+  `min(Store.loadedUnits() read before the lane's last reset, WorkerContext.coveredUnits())` (worker
+  counter `snapshotResets`; the environment lane likewise, between two `advanceTo` calls).
+- **"Not loaded yet" is not a verdict.** While the file is loading, `rlvm-admit` declines what it could
+  only decide with the whole file (a reference to a name that is not declared so far: forward reference or
+  unknown constant?), and a rejection may rest on a name that a later record still provides. So **nothing
+  but an ACCEPT is recorded for a unit that started before the end of the load**: the worker returns the
+  rest of its claim, waits for the end of the load and runs the unit's protocol once more (`deferredUnits`);
+  that outcome is recorded. The environment pass: a failure reported while loading is withheld and the unit
+  is decided again after the load by a new pass (`RunHost.retryEnvUnit`; `driver.env.retries`; if the host
+  cannot do that, the unit is DECLINED, never rejected); a pass that says nothing and waits
+  (`EnvBuilder.waitingForLoad()`, `rlvm-admit` since 10:34Z) is advanced again after the load
+  (`driver.env.waitsForLoadEnd`). The price is paid by failing runs only: their failing unit is checked
+  twice, and the verdict comes after the end of the load.
+- **After the end of the load the lane is reset and the pass replaced** (`driver.env.renewals`):
+  `rlvm-admit`'s admission in dependency order (`Policy.ForwardRefs.REORDER`, the arena policy since 10:34Z)
+  reads units beyond the frontier, which needs a lane whose level and list view reaches the end of the
+  file. The pass is told how far the lane reaches (`EnvBuilder.setCoverage`, `rlvm-admit` 11:20Z) and enters
+  dependency order only then. (Found the hard way: advancing the pass over a stale lane view gave REJECT for
+  reordered exports that batch mode accepts. The invariance suite caught it with the `rlvm-admit` jar of
+  10:34Z, before anything of this module was published against that jar.)
+- **Fail closed where the driver cannot see.** If the failed attempt of the pass on the incomplete file
+  had written down failures of other units as well (`RunHost.RETRY_TAINTED`: `StoreHost` erases them; not
+  observed with the published `rlvm-admit`), the run records no rejection any more: what would be REJECTED
+  is DECLINED(UNCONFIRMED_REJECT) (`driver.pipeline.rejectionsTainted`).
+- **What is still different from batch mode** (less complete, never another verdict): a file that is not in
+  declaration order can be DECLINED (FORWARD_REFERENCE) in a pipelined run where the batch run decides it,
+  because the pass, in file order while the file loads, moves the frontier past a plain unit that mentions a
+  later declaration, and dependency order starts only at the frontier (reported to `rlvm-admit`). The
+  invariance suite counts these as "pipelined declines". Exporter output is in declaration order.
+- **Failures of the load.** Malformed input: REJECT whatever was checked (the official reader rejects before
+  any checking). Unsupported input, I/O errors: the published units are checked; REJECT if one of them is
+  rejected (confirmed), else DECLINE; never ACCEPT. An `Error` in the loader cancels the run, the checking
+  threads are joined, then it is rethrown.
+- **Verdict.** The same as the batch run's, with the same deciding unit, or (the case above) a DECLINE where
+  the batch run has a verdict: `InvarianceTest.sameVerdictWhateverThePipeline` (fakes, 1,600 runs),
+  `ArenaIntegrationTest` (the 141 tutorial tests, real loader: equal) and the invariance suite below.
+
+Not the default: `RunConfig.loadMode` is `BATCH` and `rlvm-main` sets `PIPELINED` only for
+`-X load=pipelined`. See "Measured" and "Open" for what a default switch needs.
+
+## Worker count (`--threads auto`)
+
+`Run.resolveWorkers(0) = Run.autoWorkers(Runtime.availableProcessors()) = max(1, min(P - 2, 6))`: 6 on the
+arena's 8-vCPU runner (ARCHITECTURE 6.8: two CPUs for the loader, the environment thread and the runtime's
+compiler and collector threads). A batch run additionally caps it at one worker per 128 units. `rlvm-main`
+passes `--threads auto` through since 08:19Z; the arena run line still names `--threads 4`.
+
+The gate ("the largest N <= 6 whose total CPU time exceeds that of one worker by at most G %") is one
+command:
+
+```
+rlvm-driver/bin/threads-gate.sh [--dist DIR] [--jvm|--native] [--threads 1,2,4,6,8] [--repeat K] [--gate 5]
+                                [--set k=v,..] [-X KEY=VALUE] EXPORT.ndjson...
+```
+
+It runs the distribution's launcher in the arena-shaped container (8 performance cores, 16 GB, `perf stat`),
+every single run under the ladder lock, and prints CPU time, wall clock, peak RSS, instructions, the verdict,
+the CPU overhead against one worker and the N the gate selects. Results: "Measured".
+
+## Invariants
+
+- Fail closed: `exitCode()` is DECLINE until `complete(n)`; any `RuntimeException` at a unit boundary
+  ends in the reference kernel's verdict or DECLINE(INTERNAL_ERROR); any throwable elsewhere records an
+  internal failure (verdict DECLINE, everything cancelled); an `Error` is additionally rethrown by
+  `execute()` on the calling thread, after all threads were joined and engines closed.
+- The verdict and the deciding unit do not depend on the worker count, the chunk size, the environment
+  batch size, the session cap, the give-back threshold, the warm byte budget or the load mode, provided
+  engines honour `rlvm.api.Session`'s obligations (an ACCEPT is a semantic fact; a fresh session is
+  deterministic) and poll `RunSignals` (both signals). A unit is declined for memory only if it does not fit
+  into the limit by itself.
+- No time-based decision affects a verdict (`spillNanos` only moves units between workers; the 50 ms
+  re-checks of parked threads only bound how long a cancelled waiter stays parked).
+- Sessions are created, used and closed on one thread. Engines are closed and `dumpStats` is called after
+  the last session is closed.
+- Nothing is allocated per unit on the accept path; statistics off = one predictable branch per unit.
+
+## Tests and commands
+
+`. ./env.sh; $MVN -o -q -pl rlvm-driver test` (96 tests, 3 of them opt-in; about 40 s). All but
+`ArenaIntegrationTest` use fake engines, a fake admission, a fake environment pass and a fake loader (`Fakes`).
+
+- `VerdictBoardTest`: the status chain by enumeration (every assignment of 5 statuses to up to 4 units x
+  input failure kinds and positions x `complete` x internal failure x stopped, reported in random order,
+  against an independent statement of the rule); double reports; C3.13.
+- `SchedulerTest`: runs, stealing, give-back, first-failure cut, blocking; every unit exactly once under
+  contention; **all interleavings** of small cases (2-3 workers, 4-5 units, all 3^n scripts, pipelined
+  publication, give-back) by state-space search (430,000 states; `-Drlvm.driver.explore=big` adds 3.1 million):
+  verdict, first failure, no deadlock, no unit twice.
+- `RecheckProtocolTest`: the protocol table by enumeration (2 x 2 x 2 x 4^4 = 2048 cases): final status,
+  which engines ran, fresh sessions and cold budgets, events, reported reason.
+- `InvarianceTest`: 400 random workloads (`-Drlvm.driver.invariance=N -Drlvm.driver.seed=S` for soak runs)
+  with injected failures (true and wrong rejections, declines for memory and for other reasons, exceptions,
+  session-dependent rejections, non-terminating units behind a failure) x 1 / 2 / 4 / 8 workers with random
+  chunk, batch and session-cap settings: verdict and deciding unit equal the oracle. The same **pipelined**:
+  1 to 6 publications at random points with random pauses, units that cannot be decided before the end of the
+  file (worker units and environment units, both protocols of the environment pass); fake lanes report a
+  violation when a unit is admitted beyond their snapshot.
+- `PipelineTest`: a file in pieces, a file in one piece, malformed / unsupported / unreadable input in the
+  middle of a load, units that need the rest of the file, an `Error` in the loader, a loader that returns
+  early, the snapshot rule with a deterministic loader.
+- `MemoryAndGateTest`: the account (victim, margin, exempt holder, last resort), the gate (order, giving way,
+  cancellation), memory retries in runs, a non-terminating gate holder behind an ill-typed unit, give-back,
+  the settings by name, the automatic worker count.
+- `RunTest`: fail-closed paths (Error, exceptions outside a unit, incomplete load, count mismatch),
+  environment failures, non-termination behind a failure, session reset rules, memory watermark, load
+  failures through a `Wiring`, stop-after, `no-fallback`, deferred features, diagnostics, statistics JSON.
+- `ArenaIntegrationTest` (real reader, loader, store, admission, reference kernel; `TestWiring` mirrors
+  `rlvm.main.MainWiring`, batch and pipelined): the 141 tutorial tests with one worker; the same verdict and
+  deciding unit for 1 / 2 / 4 / 8 workers and a 1-byte session cap; the same when the file is checked while
+  it loads (a publication after every unit and every third unit, 1 and 4 workers). `-Drlvm.it=all` adds the
+  other published tests and `init-prelude`.
+
+Commands (all in `rlvm-driver/bin/`, none touches another module):
+
+| Command | What it does |
+|---|---|
+| `invariance.sh [CORPUS...]` | **the invariance suite as one command**, to run before every publication: every file 9 times (batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication after every unit / 7 units / 64 units and 1 / 4 / 8 workers); verdict and deciding unit must be equal and the verdict the expected one. A pipelined run that DECLINES what the batch run decides is counted apart ("pipelined declines") and is not a failure; any ACCEPT / REJECT difference is. Corpora: `published` (231 files), `tutorial` (12,260 mutants), `bugs` (2,692), `mdata` (1,976), `prelude` (847), `big` (init-prelude, Init, Std, cedar), `all`. Pinned to the efficiency cores. Exit 0 = PASS |
+| `threads-gate.sh EXPORT...` | the worker-count gate (above) |
+| `measure-bench.sh EXPORT [DriverBench options]` | one measured run of `DriverBench` in the arena-shaped container (for what the launcher cannot run yet) |
+| `freeze-cp.sh [TAG]` | a frozen copy of the test class path for long runs |
+
+`DriverBench` (a `main` in the test tree): any export or directory through the driver with a `Wiring` equal to
+`MainWiring`: `-j N`, `--compare`, `--pipelined [--publish-units N]`, `--set k=v,..`, `--stats F`,
+`--mem-trace F [--gc-every S]` (accounted, shared and heap bytes every second; with `--gc-every` what is
+reachable).
+
+## Measured
+
+<!-- measured:begin -->
+All numbers: reference kernel as primary engine, batch load unless noted, arena-shaped container (8
+performance cores, 16 GB, `perf stat`; `rlvm-driver/bin/threads-gate.sh`, which runs the launcher of a
+distribution built from this module's tree and the published jars: `work/rlvm-driver/dist-native`, built
+09:10Z with rlvm-ref 9089b0a558f3 and rlvm-store 90b8cf9432cb, i.e. before the store and reference jars of
+10:33Z / 10:37Z; the driver in it is publication 1 without the later pipelined fixes and with immediate
+give-back). Columns in the project's order: CPU
+time, wall clock, peak RSS, instructions. **One run each, on 2026-11-24 between 09:15Z and 11:30Z, while
+the host's load average was 70 to 180** (sixteen agents running guards; other measurements shared the
+container's eight cores, not all of them under the ladder lock): CPU time is inflated by up to 50 % against
+a quiet machine and wall clock by more (the same Init run took 15.1 s CPU at 07:30Z and 23.9 s now), and
+two runs of one configuration differ by 10 % and more. Instruction counts and peak RSS do not depend on the
+load; where the two disagree with the CPU time, the instruction count is the one to believe. Raw data:
+`work/rlvm-driver/gate/*.jsonl` (`threads-gate.sh --table FILE` prints a table again).
+
+### Warm byte budget (task: "two mathlib units and one con-leche unit are re-checked cold")
+
+con-leche (36,747 units; unit 24018 needs 2.49 GB of session memory), JVM launcher, 8 workers, back to back:
+
+| `unit-mib` | CPU | wall | peak RSS | instructions | units checked twice |
+|---|--:|--:|--:|--:|--:|
+| 789 (the former automatic share, headroom / 2W) | 111.4 s | 67.8 s | 9.83 GB | 740.1 G | 1 |
+| 0 = automatic = the whole headroom (now) | 80.6 s | 43.7 s | 7.52 GB | 637.7 G | 0 |
+
+-27.7 % CPU time, -35.6 % wall clock, -23.5 % peak RSS, -13.8 % instructions. Any budget below what the unit
+needs (2.49 GB) gives the first line and any budget above it the second, so there is nothing to tune between
+them: the budget is the headroom, and the account's victim rule plus the heavy gate do what the share was
+for. mathlib: units 113469 and 415533 (0.96 GB) are checked once (0 re-checks in every run of the new
+driver; with the 654 MiB share they cost about 47 s of 829 s CPU, 5.7 %); instructions of the native image
+at 8 workers 10,207 G -> 10,068 G (-1.4 %).
+
+### Worker count (`--threads auto`)
+
+`rlvm-driver/bin/threads-gate.sh --dist work/rlvm-driver/dist-native --jvm init.ndjson std.ndjson cedar.ndjson`
+(JVM launcher; "CPU vs 1" is what the gate looks at):
+
+| Corpus | workers | CPU | wall | peak RSS | instructions | CPU vs 1 worker | instructions vs 1 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Init (58,547 units) | 1 | 23.91 s | 22.07 s | 1,107 MB | 205.7 G | | |
+| | 2 | 23.59 s | 11.72 s | 1,082 MB | 212.0 G | -1.4 % | +3.1 % |
+| | 4 | 26.37 s | 9.14 s | 1,153 MB | 224.8 G | +10.3 % | +9.3 % |
+| | 6 | 25.30 s | 8.65 s | 1,156 MB | 228.7 G | +5.8 % | +11.2 % |
+| | 8 | 28.70 s | 9.74 s | 1,471 MB | 226.1 G | +20.0 % | +9.9 % |
+| Std (101,146 units) | 1 | 46.95 s | 44.94 s | 1,331 MB | 335.3 G | | |
+| | 2 | 41.09 s | 20.49 s | 1,335 MB | 329.8 G | -12.5 % | -1.6 % |
+| | 4 | 37.70 s | 10.37 s | 1,393 MB | 331.8 G | -19.7 % | -1.0 % |
+| | 6 | 40.66 s | 8.22 s | 1,652 MB | 343.7 G | -13.4 % | +2.5 % |
+| | 8 | 41.34 s | 7.88 s | 1,795 MB | 342.5 G | -11.9 % | +2.1 % |
+| cedar (905 MB) | 1 | 54.39 s | 52.31 s | 1,460 MB | 412.1 G | | |
+| | 2 | 54.54 s | 26.76 s | 1,502 MB | 421.6 G | +0.3 % | +2.3 % |
+| | 4 | 46.48 s | 13.69 s | 1,593 MB | 407.0 G | -14.5 % | -1.2 % |
+| | 6 | 51.50 s | 11.00 s | 1,725 MB | 425.6 G | -5.3 % | +3.3 % |
+| | 8 | 48.46 s | 8.88 s | 1,855 MB | 416.5 G | -10.9 % | +1.1 % |
+
+The same with the native image (`--native`; no JIT, so the instruction count shows what more workers add
+by themselves: nothing):
+
+| Corpus | workers | CPU | wall | peak RSS | instructions | CPU vs 1 worker | instructions vs 1 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Init | 1 | 24.40 s | 24.43 s | 309 MB | 286.1 G | | |
+| | 2 | 23.20 s | 12.11 s | 328 MB | 286.2 G | -4.9 % | +0.0 % |
+| | 4 | 20.75 s | 6.15 s | 457 MB | 286.5 G | -14.9 % | +0.1 % |
+| | 6 | 21.30 s | 5.41 s | 488 MB | 286.7 G | -12.7 % | +0.2 % |
+| | 8 | 22.73 s | 5.61 s | 624 MB | 286.8 G | -6.8 % | +0.2 % |
+| Std | 1 | 45.85 s | 45.96 s | 400 MB | 478.6 G | | |
+| | 2 | 42.36 s | 22.30 s | 526 MB | 478.9 G | -7.6 % | +0.1 % |
+| | 4 | 42.87 s | 12.72 s | 599 MB | 479.2 G | -6.5 % | +0.1 % |
+| | 6 | 40.02 s | 10.21 s | 626 MB | 479.4 G | -12.7 % | +0.2 % |
+| | 8 | 41.39 s | 10.84 s | 667 MB | 479.7 G | -9.7 % | +0.2 % |
+| cedar | 1 | 57.70 s | 57.77 s | 545 MB | 603.4 G | | |
+| | 2 | 54.75 s | 28.87 s | 548 MB | 603.6 G | -5.1 % | +0.0 % |
+| | 4 | 49.86 s | 14.92 s | 630 MB | 603.9 G | -13.6 % | +0.1 % |
+| | 6 | 50.30 s | 11.51 s | 718 MB | 604.1 G | -12.8 % | +0.1 % |
+| | 8 | 52.56 s | 10.54 s | 790 MB | 604.5 G | -8.9 % | +0.2 % |
+
+mathlib (721,845 units), 8 workers, the new driver: JVM launcher 953.5 s CPU / 185.0 s wall / 13.15 GB
+(the heap) / 6,290 G instructions (wave 3: 841.8 s / 139.2 s / 13.08 GB / 6,374 G on a quieter host; the
+workers of this run waited 382 s for a CPU); native image 1,267.8 s / 374.7 s / 6.80 GB / 10,068 G (wave 3:
+1,027.6 s / 178.0 s / 9.42 GB / 10,207 G; 1,436 s of run-queue wait in this run). Instructions fell by 1.3 %
+and 1.4 %; the CPU times of the two days cannot be compared.
+
+mathlib, JVM launcher, worker counts (`threads-gate.sh --lock run --jvm --threads 8,6,4,2,1`; the runs with
+8, 6 and 4 workers between 10:42Z and 11:12Z, the one-worker run last, when the host was quieter):
+
+| workers | CPU | wall | peak RSS | instructions | CPU vs 1 worker | instructions vs 1 |
+|--:|--:|--:|--:|--:|--:|--:|
+| 1 | 874.1 s | 870.5 s | 11.3 GB | 6,171.2 G | | |
+| 2 | 907.1 s | 459.0 s | 13.3 GB | 6,227.0 G | +3.8 % | +0.9 % |
+| 4 | 907.1 s | 239.6 s | 13.1 GB | 6,196.9 G | +3.8 % | +0.4 % |
+| 6 | 930.6 s | 226.3 s | 12.9 GB | 6,208.8 G | +6.5 % | +0.6 % |
+| 8 | 953.5 s | 185.0 s | 13.1 GB | 6,290.1 G | +9.1 % | +1.9 % |
+
+Here the CPU time does rise with the workers while the instructions do not (within 2 %): the same work
+costs more per instruction when six or eight workers share the memory system (the reference kernel's time
+is cache misses of its hash-consing probes, integration.md): +2.6 % from 4 to 6 workers, another +2.5 % from
+6 to 8. (The wall clock of the 4- and 6-worker runs is the host's: 240 s and 226 s for the same CPU time.)
+
+Reading: with the reference engine a session keeps nothing between units, so more workers add no work of
+their own. The native image shows it exactly: +0.2 % instructions from 1 to 8 workers on all three corpora
+(the scheduler, the environment thread, the per-worker contexts). CPU time is lower with several workers
+than with one in 22 of the 24 rows of Init, Std and cedar, which is the load on the host and not a
+property of the checker (a one-worker run is a long single thread among 100 runnable ones). On the JVM, Init is a 20 s run: with W
+workers W times as much runs in the interpreter and the first compiler tier before the optimised code
+arrives (+10 % instructions from 4 workers on, flat from 4 to 8); Std and cedar stay within 3 %. On wall
+clock 6 workers take 5.4 / 10.2 / 11.5 s (native) and 8.7 / 8.2 / 11.0 s (JVM), 8 workers 5.6 / 10.8 /
+10.5 s and 9.7 / 7.9 / 8.9 s: 8 is not reliably better than 6 while the loader, the environment thread and
+the runtime's own threads compete for the same 8 CPUs.
+
+**Proposed default: 6** (`Run.autoWorkers`: the CPUs minus two, at most 6), i.e. `--threads auto` instead
+of the run line's `--threads 4`, **subject to one confirmation**. For it: the gate of ARCHITECTURE 6.8 as
+written (instructions within 2 % of one worker) selects 6 on all four corpora and both launchers except
+Init on the JVM (JIT warm-up of a 20 s run, not removed by fewer workers on longer inputs); a gate of 5 %
+CPU time selects 6 on Init, Std and cedar; against 4 workers, 6 save 12 % to 25 % of the wall clock on
+those corpora. Against it: on mathlib the CPU-time gate reads +6.5 % for 6 workers (4 workers: +3.8 %),
+from single runs taken at different loads, whose noise is as large as the difference. The confirmation is
+`rlvm-driver/bin/threads-gate.sh --lock run --repeat 3 --jvm --native work/exports/mathlib.ndjson` on a
+quiet host (about 2.5 hours of lock time); if 6 workers stay above the gate there, the rule says 4, which
+is what the arena run line names today. The gate must be run again in any case for the machine engine,
+whose warm sessions are what ARCHITECTURE 6.8 expected to cost 0.8 % to 1.6 %.
+
+### Session cap
+
+Std, JVM launcher, 8 workers, `-X session-mib=N` (RECONCILIATION section 3 asks for a sweep over 8 / 16 /
+32 / 64 MiB "once the machine runs Std"; with the reference engine it only shows that there is nothing to
+tune):
+
+| `session-mib` | CPU | wall | peak RSS | instructions | session resets per worker |
+|---|--:|--:|--:|--:|---|
+| 8 | 40.14 s | 9.63 s | 1,559 MB | 342.3 G | 4 to 12 |
+| 16 (default) | 39.17 s | 11.06 s | 1,586 MB | 332.1 G | 2 to 7 |
+| 64 | 42.61 s | 11.99 s | 1,704 MB | 349.2 G | 1 to 3 |
+
+### Pipelined against batch
+
+JVM launcher, 6 workers, `-X load=pipelined` (through `rlvm-main`'s wiring and the real loader; the
+distribution is the one of the other tables, i.e. the driver before the last pipelined fixes, which do not
+touch a file in declaration order):
+
+| Corpus | load | CPU | wall | peak RSS | instructions |
+|---|---|--:|--:|--:|--:|
+| Init | batch | 25.18 s | 7.49 s | 1,180 MB | 218.2 G |
+| Init | pipelined | 23.59 s | 5.25 s | 1,158 MB | 220.2 G |
+| Std | batch | 37.77 s | 8.88 s | 1,590 MB | 336.7 G |
+| Std | pipelined | 38.30 s | 8.83 s | 1,576 MB | 326.9 G |
+| mathlib | batch (11:55Z) | 896.4 s | 173.0 s | 13.1 GB | 6,146.2 G |
+| mathlib | pipelined (12:00Z, right after it) | 876.0 s | 156.5 s | 13.0 GB | 6,200.5 G |
+| mathlib | pipelined (11:44Z, a quieter quarter of an hour) | 805.8 s | 140.9 s | 13.2 GB | 6,005.3 G |
+
+Pipelining costs no CPU time and no instructions beyond the noise (the level snapshots are cheap: 205
+publications on mathlib, 1 or 2 forced session resets per worker), and it takes the load out of the wall
+clock: on mathlib the batch run is 14.2 s of loading followed by 157.7 s of checking (172.0 s in the
+driver), the pipelined run right after it 17.4 s of loading inside 154.6 s of checking (155.2 s), i.e.
+-9.8 % wall clock; the environment thread waited for the loader 170 times and nobody polled. On Init and
+Std the load is 0.8 s and 1.4 s, less than what two single runs on this host differ by (Init -2.2 s, Std
+-0.05 s). The load becomes the larger part of the wall clock as soon as the machine engine checks mathlib
+in tens of seconds: ARCHITECTURE 3.5's model is 35 s batch against 20 s pipelined.
+
+### Where mathlib's memory goes (8 workers)
+
+JVM launcher flags, `DriverBench --mem-trace --gc-every 10` (a full collection every 10 s shows what is
+reachable; 86 samples after the load; the run itself was slowed down by the collections and the host):
+
+| Part | Bytes | Accounted |
+|---|--:|---|
+| shared store (`Store.sharedBytes()`) | 2.30 GB | yes |
+| loader transients at the end of the load (gone a few seconds later) | about 0.6 GB | no |
+| workers' and environment lane's sessions, allocated capacity | mean 1.23 GB, peak 2.30 GB | yes (new) |
+| reachable but not accounted (level overlays of 9 contexts, literal pools, young objects, the runtime) | mean 0.36 GB, peak 1.16 GB | no |
+| **reachable in total** | mean 3.9 GB, **peak 5.28 GB** | |
+| garbage waiting for a collection | everything else up to the heap size | |
+
+So the workers' share of what is reachable is 1.2 GB on average and 2.3 GB at the peak (the former account
+counted nodes in use, about 0.2 GB between units, and reported 3.9 GB for the whole run where 4.6 GB to
+5.3 GB were held). The peak resident set is something else: the JVM collected its old generation twice in
+the whole run (208 ms and 100 ms), each time when the 13 GB heap was full, so it shows 13.4 GB whatever the
+run holds; with a collection every 10 s the same run stays at 6.8 GB.
+
+Peak RSS, mathlib, 8 workers, arena-shaped container:
+
+| Launcher | Driver | peak RSS | instructions |
+|---|---|--:|--:|
+| native image | wave 3 (integration.md) | 9.42 GB | 10,207 G |
+| native image | now (`keep-mib` 256, no collection requests) | **6.80 GB** | 10,068 G |
+| native image | now, `keep-mib=64,gc-after-mib=1024` (9 collections requested, 66 give-backs) | 6.32 GB | 10,075 G |
+| JVM launcher | wave 3 and now | 13.1 GB (the heap setting) | 6,374 G -> 6,290 G |
+
+**The target of 6 GB is not reached**: 6.80 GB with the default settings, 6.32 GB with the two knobs. The
+account's own peak in those two runs was 4.92 GB and 5.39 GB (shared store 2.42 GB + sessions 2.51 GB and
+3.08 GB: the two units of 0.96 GB overlap or not, depending on the schedule; each holds 1.3 GB of overlay
+capacity while it runs), so less than 1 GB of the resident set is garbage any more. What would bring it
+under 6 GB: (1) the store's overlay growing without copies and without doubling (a unit of 0.96 GB would
+hold 1.0 GB instead of 1.3 GB, and leave no garbage of the same size behind); (2) the heavy gate also for
+units that are merely large, so that two of them never overlap (expected: 0.6 GB to 0.9 GB less at the
+peak, at the price of a parked worker for the seconds two such units coincide; not done, see "Open");
+(3) the machine engine, whose sessions are a different animal.
+
+What reduced it from 9.42 GB: no unit is checked twice any more (a cold re-check grew a second lane to the
+size of the first), and a lane returns its arrays after a heavy unit. `gc-after-mib=N` bounds the garbage
+part; its effect by itself, on con-leche, native image, 8 workers (host, efficiency cores, GNU time):
+
+| `gc-after-mib` | CPU (user) | peak RSS | collections requested |
+|---|--:|--:|--:|
+| 0 (default) | 194.9 s | 4.40 GB | 0 |
+| 1024 | 184.1 s | 4.40 GB | 2 |
+| 512 | 194.7 s | 3.72 GB | 2 |
+
+(Std: no effect, 0.70 GB to 0.78 GB with and without; nothing there leaves 256 MiB of garbage behind.) On
+mathlib the nine collections cost +0.07 % instructions. The setting stays off by default: what a full
+collection costs in wall clock (it stops all workers) has to be measured on a quiet machine before it may
+trade time for memory, the project's fourth goal.
+
+### Guards and invariance (the final jar, eb0944caa630)
+
+| Guard | Result |
+|---|---|
+| `$MVN -o -q -pl rlvm-driver test` | 96 tests, 93 run green, 3 opt-in |
+| `scripts/dev.sh gate --dist work/rlvm-driver/dist-final --corpus tutorial` (this tree + the jars published until 11:20Z; JVM launcher, 1 worker, batch) | PASS: 230 / 230 published tests correct, 0 wrong, 0 declined; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,847, declined 413, errors 0; differential self-test caught |
+| `rlvm-driver/bin/invariance.sh published` (231 files x 9 runs) | PASS: 231 correct, 0 wrong, 0 declined, 0 schedule differences, 0 pipelined declines (38 minutes on the loaded host) |
+| `rlvm-driver/bin/invariance.sh tutorial bugs mdata` (16,928 mutants x 9 runs: 152,352 runs) | PASS: 0 wrong verdicts, 0 schedule differences, 1,675 declined in every mode alike (413 + 65 + 1,197), 27 pipelined declines (out-of-order files, see "Pipelined loading"); 3 minutes |
+
+Earlier states of the tree went through the same guards four times during the day (publication 1 at
+09:39Z: 230 / 230 and SOUNDNESS 0 twice); the list is in `work/status/rlvm-driver.log`. With the arena's
+time limits enforced the slice lost up to 9 `perf/*` tests to the host's load (load average 150 to 180);
+without the limits, and in the invariance suite, each of them has the expected verdict.
+<!-- measured:end -->
+
+## Deviations from the design documents
+
+| Document says | This module does | Why |
+|---|---|---|
+| ARCH 6.3: one global claim front | per-worker contiguous runs per batch, stealing | RECONCILIATION section 3 (C2.4) |
+| ARCH 6.5: warm budget 5 x 10^7 steps | no step limit warm (`warmSteps`), no depth limit warm (`warmDepth`) | RECONCILIATION section 3 (C2.5); a depth limit only made deep units run twice, workers have deep stacks |
+| ARCH 6.5: warm byte budget 1 GiB | the whole headroom, `memoryLimit - shared` (at least 256 MiB) | any smaller budget made units run twice (measured); the account's victim rule and the heavy gate bound the run instead |
+| ARCH 6.4: `sessionBytes` 32 MiB, footprint = session + context | 16 MiB, `Session.footprintBytes()` alone; the context's unused capacity is a separate trigger (`keepBytes`) | RECONCILIATION section 3 (C1.6): footprint = bytes in use, counted once |
+| ARCH 6.7: above the limit `memoryExhausted()` is true (for everybody) | true for the largest holder only; for everybody above limit + margin | everybody giving up at once threw away the work of all workers and made the re-checks compete again |
+| ARCH 6.1 / 6.5: heavy-lane threads (0-2) with deep stacks | re-checks run at once on the worker's own thread, which has a deep stack; memory retries one at a time through `HeavyGate` | a deferred re-check lets units behind an ill-typed unit run on (possibly forever, there is no step limit); a second thread only adds a hand-off. Costs W stack reservations of 1 GiB (virtual) |
+| ARCH 0.6 / 6.6: "REJECT iff some rejection was confirmed" | status of the first non-accepted unit in file order | RECONCILIATION section 2 (C3.13) |
+| ARCH 6.6: `Error` "not handled" | recorded, run cancelled, threads joined, then rethrown by `execute()` | the calling thread would otherwise wait for workers parked in the scheduler; the launcher still sees the `Error` |
+| ARCH 8.1: status column of `DeclTable` is the unit status | `VerdictBoard` keeps its own column; `StoreHost.unitDecided` mirrors final statuses into `DeclTable` best effort | the verdict must not depend on who else writes that column (the environment pass does) |
+| Skeleton `Run(RunConfig, EngineFactory, EngineFactory)` | needs a `Wiring` | the driver may not depend on `rlvm-export` / `rlvm-level` / `rlvm-nat` (agreed with rlvm-main) |
+| `RunConfig.loadMode` default PIPELINED (ARCH 3.5: "the arena default") | BATCH | see "Open" |
+| ARCH 3.5: a worker takes "the newest snapshot" when a unit lies beyond its own | the same, plus: a decline obtained while the file was loading is decided again after the load | `rlvm-admit` cannot tell a forward reference from an unknown constant before the file is complete |
+| ARCH 6.8: `workers = max(1, min(processors, 8) - 2)`, W = 6 whatever the input | `max(1, min(processors - 2, 6))`; a batch run uses at most `units / 128` workers | the same number on 8 CPUs; on a larger machine still 6 (the gate is measured on 8 CPUs only); threads and sessions for a ten-unit test cost more than the check |
+
+## Open, and things to know
+
+- **Pipelined loading is not the default.** What a switch of `RunConfig.loadMode` / `-X load` needs: (1)
+  `rlvm-admit` waiting (`waitingForLoad()`) instead of moving the frontier past a plain unit that mentions a
+  later declaration while the file loads: then a pipelined run decides what the batch run decides (today:
+  the "pipelined declines" of the invariance suite, 27 of 50,784 pipelined runs on the mutant corpora, none
+  on the published tests), and an answer from `rlvm-admit` to whether a small file that the official replay
+  order rejects can slip through a pass that follows the loader (the driver loads files below 8 MiB in batch
+  mode, so only tests with `pipeline-min-mib=0` get there); (2) the end-to-end guards in pipelined mode
+  through the launcher (`scripts/dev.sh gate --load pipelined`, with
+  `RLVM_DRIVER=pipeline-min-mib=0,publish-units=7` so that the small tests really take the pipelined path);
+  (3) the wall-clock gain on a quiet machine (see "Measured": with the reference engine the load is 6-8 %
+  of the wall clock; it becomes the larger part with the machine engine).
+- **Default worker count**: see "Measured". The arena run line names `--threads 4`; the steward decides.
+- **Peak resident set**: 6.8 GB with the native image on mathlib (was 9.4 GB), not the 6 GB asked for (see
+  "Where mathlib's memory goes"). Left to do, in the order of what they would bring: an overlay that grows
+  without copying and doubling (the store: a heavy unit holds 1.3 times what it uses and leaves as much
+  garbage behind; a unit of 2.5 GB needs about 7.5 GB of heap while its node array doubles); the heavy gate
+  from a size threshold on, so that two large units never run at the same time (the driver: `LaneSignals`
+  would take the gate in place when a warm unit passes, say, 512 MiB, and give way to a lower unit as the
+  gate's holders do today; it needs the full guards and a quiet machine to see what the parked worker
+  costs); the reference kernel's tables, which are reallocated per unit; and, for the JVM launcher, a heap
+  setting or `gc-after-mib`, because its resident set is the heap size whatever the run holds.
+- **A unit that grows without bound** ends the process with `OutOfMemoryError` (launcher status 3) before
+  the account sees it: the overlay doubles its node array, so the last step from 4 GiB to 8 GiB needs
+  12 GiB of heap at once. Capping a lane's overlay at a third of the heap would turn that into a decline; not
+  done here (the store's growth policy is the store owner's).
+- **Give-back waits for 8 units**: a worker that draws fewer than 8 more units after a heavy one, or a
+  long unit right after it, keeps the capacity that long (con-leche: unit 24018 is the last one its worker
+  checks, 2.7 GB stay allocated to the end). An immediate give-back for very large lanes would be the
+  refinement.
+- **Session cap** (`sessionBytes`, 16 MiB): without effect with the reference engine, whose sessions keep
+  nothing from one unit to the next. The sweep over 8 / 16 / 32 / 64 MiB that RECONCILIATION section 3 asks
+  for belongs to the machine engine ("once the machine runs Std"); `-X session-mib=N` is there for it.
+- **Batch splitting**: workers start as soon as the first units are announced, so the first batches of a
+  file are small, and a worker's runs are `envBatchUnits / W` units long. Whether longer contiguous runs save
+  CPU time is a question for an engine with warm sessions (`env-batch=N`).
+- `Engine.environmentAdvanced` is called only by the environment thread, not in batch `-j 1` runs.
+- With primary == reference a rejected unit is checked twice (warm, then the confirming fresh run): the
+  failing unit of a `perf/*-bad` test costs double. In a pipelined run a unit that fails while the file is
+  loading is checked once more after the load.
+- Parked threads (heavy gate, loaded frontier) wake every 50 ms to look at the first failure; a wake-up
+  hook on the board would make that unnecessary.
+- Not implemented and not tested: namespace order, heavy-lane threads, a machine engine as primary (only
+  fakes play that role; `no-fallback` is tested with fakes only), native-image specifics (the code uses no
+  reflection, no `java.management`, no `ThreadLocal`; `RunStats` reads `/proc/thread-self/schedstat`;
+  `gc-after-mib` relies on `Runtime.totalMemory() - freeMemory()` and `System.gc()`).
