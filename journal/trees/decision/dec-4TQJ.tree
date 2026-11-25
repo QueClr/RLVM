@@ -9,9 +9,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{rlvm-main/README.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted and implemented in the launcher on 2026-11-24.}
+\p{\strong{Status:} accepted and implemented in the launcher on 2026-11-24. One figure below changed the same evening: the default number of scanner threads for inputs of at least 256 MiB went from 2 to 1, see [the settings of a plain run](dec-EGMG). The load mode and the worker count were measured again there with the machine as engine and stand.}
 
 \p{\strong{Context.} The architecture planned loading, environment construction and checking to overlap from the start, see [the export loader](design-export-loader). The reconciliation of the design review deferred it behind a vertical slice: batch load first, the pipeline only once the small tests passed. When the pipeline existed, the driver's default stayed \code{batch}, because a pipelined run could decline a file that the batch run decides: while the file is loading, admission cannot tell a forward reference from an unknown constant. The driver's owner set three conditions for a change of default: a pipelined run decides what the batch run decides, the end-to-end guards pass in that mode, and there is a gain on quiet cores. Then the maintainer's note 12 made "wall clock after warm-up, with loading pipelined with checking" the goal itself, see [dec-7QMU](dec-7QMU).}
 

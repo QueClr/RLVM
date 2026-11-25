@@ -1,0 +1,22 @@
+\title{A cap on what the congruence segments of one declaration may spend}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{f52e43f}
+\import{base-macros}
+
+\p{The switch \code{congruence} of [the proof-comparison shortcuts](design-proof-comparison-shortcuts) answers a comparison from the arguments in speculative segments: the same-head probe and the closure congruence. The debt that existed bounds what failing probes cost. A probe that answers "true" can still cost more than the unfolding it replaces, when the arguments are large closures that are walked slot by slot. The heaviest unit of con-leche, \code{\verb~|ConLeche.Cached.reduceNatI._mutual.eq_def~}, needs 3.84 M ticks without the switch and 7.21 M with it, and after [the repair of the eager probes](log-P6FV) the warm pass of that corpus was 4.3 \% slower with \code{congruence} and 8.5 \% slower with both shortcuts than with the set of wave 6 and \code{eager} (JVM launcher, 8 workers, two rounds).}
+
+\p{\strong{The change.} The machine sums what the congruence segments of a declaration used, a segment inside a segment counting twice, and at \code{\verb~|-X machine.cong-spend=N~} ticks it starts no further segment in that declaration; the complete procedure goes on. The default is 2^18 ticks, 0 is no cap. With it the unit above needs 4.17 M ticks.}
+
+\p{\strong{What the cap costs where the switch wins}, in ticks of the whole corpus with both shortcuts, without the cap and with it: navier-stokes-euler 144.4 M and 149.5 M (548.2 M without the shortcuts), cslib 217.6 M and 217.6 M (350.2 M), con-leche 80.1 M and 76.7 M (84.4 M). In warm wall clock, JVM launcher, 8 workers, quiet windows on the aarch64 development host: con-leche with both shortcuts 1.433 s without the cap and 1.407 s with it, against 1.400 s for the set of wave 6 with \code{eager} in the same window; Mathlib 12.72 s and 12.40 s, one round each; navier-stokes-euler 3.10 s and 3.07 s in one window. Caps of 2^16 and 2^20 were also queued for a window; no figure for them is recorded.}
+
+\p{Published as a machine jar of its own on 2026-11-25 at 02:15 UTC, with one regression test; the fast group of the machine has 420 tests. The same publication put the seven metadata exports of [finding R2-F4](ex-FD6K) into the hostile suite, which has 1,196 rows since, 83 of them of the tolerated kind. The gates of the set that contains the cap are those of [the default switch set](log-HS1E).}
+
+\p{Detail: [the switch reference](design-switches-document), the paragraph on the cap under its table of named switches. Commit \commit{f52e43f}. Related: [the decision on the default set](dec-YP0N), whose question on the cost of \code{congruence} on con-leche this answers.}

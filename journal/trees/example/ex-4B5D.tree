@@ -7,9 +7,10 @@
 \tag{loader}
 \tag{reference-engine}
 \meta{origin}{docs/design/review/reference-caches.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{The loader drops metadata records, so the reference engine saw \code{\verb~|a = b~} where the export says \code{\verb~|a = mdata b~}. Officially the node is a term of its own. Source: \src{docs/design/review/reference-caches.md}, sections 0 and 1, and finding S3-F2 of \src{docs/design/review/soundness-default-set.md}; [the exactness session](ses-874D).}
+\p{The loader drops metadata records, so the reference engine saw \code{\verb~|a = b~} where the export says \code{\verb~|a = mdata b~}. Officially the node is a term of its own. Source: [the audit of the reference engine's caches](rep-reference-caches), sections 0 and 1, and finding S3-F2 of [the adversarial review of the default set](rep-soundness-default-set); [the exactness session](ses-874D).}
 \pre{\verb~|
 -- a, b, use as in the box example;  b' = mdata b
 -- one theorem:  And.intro W (And.intro W0 W2)
@@ -24,6 +25,7 @@ s3-mdata-eager-hidden-ok   official: accept    reference engine: reject
 \li{If \code{\verb~|b'~} is the same term as \code{\verb~|b~} for the caches, the set of successful pairs answers \code{\verb~|W2~} and the theorem is accepted. Officially \code{\verb~|mdata b~} is a different key, the cheap reduction of \code{\verb~|a~} now answers \code{\verb~|5~}, and \code{\verb~|W2~} fails.}
 \li{The second export goes the other way: officially a metadata node hides an application of \code{\verb~|eagerReduce~} from the syntactic test, the comparison is plain and true. An engine that sees through the node compares in eager mode and rejects.}
 \li{The statement accepted in the first export is derivable, so the divergence is of the tolerated kind. Under the practical policy metadata stays transparent; the strict mode declines a declaration whose type or value carries a metadata node.}
+\li{The rejection of the second export is not tolerated, and it is gone since the evening of 2026-11-24: the loader declines a declaration with a node around an application of \code{\verb~|eagerReduce~} under both policies, see [the changelog entry](log-6K9N). A second way in which a dropped node makes the engines reject an official accept is [the example of the beta redex](ex-FD6K).}
 }
 \p{Used by [metadata nodes and the nondep flag are part of the official term identity](ins-61D4).}
 \p{See also: [the caches of the reference engine](design-reference-caches).}

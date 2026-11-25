@@ -1,0 +1,60 @@
+\title{What the finalization of 2026-11-24 leaves open}
+\taxon{Problem}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{soundness}
+\tag{platform}
+\meta{status}{open}
+\meta{created}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} open.}
+
+\p{\strong{State.} On the evening of 2026-11-24 [the machine became the default engine](log-65Z0) with [the default switch set](dec-YP0N), the release became [one executable](design-packaging), and the set of jars was frozen. The items below were known at that point and are not in the release: some were measured and kept out, some were bounded and not explained, some were never started. Each names what is known and what would close it. Source: [the finalization session](ses-A14B).}
+
+\subtree{
+\title{Bounded, not explained}
+
+\ul{
+\li{\strong{The root cause of finding INT7-F1.} With \code{eager}, a probe of the plain phase evaluated one unit of con-leche for 28.6 M ticks into the limit of a session; [a tick budget](log-P6FV) of 2^22 now cuts it and the unit goes to the reference engine. Known: the probe is the Nat folding of an open pair, it evaluates the arguments of an open term, and the official plain procedure never starts that evaluation; the largest probe that completes on the eight corpora needs 2.75 M ticks; the switch still costs con-leche 2.2 \% against the set without it (1.257 s against 1.230 s, JVM launcher, warm, 8 workers). Not known: why that probe is so large, and whether a probe can be recognised as hopeless before it is paid for. What would close it: the unit decided by the machine, or the probe not started, with the gate of \code{eager} unchanged.}
+\li{\strong{The 2 percent of the shortcuts on reachability.} The default set is 1.7 \% slower than the set with \code{eager} alone on reachability in a window of six rounds and 1.8 \% in a window of eight; \code{congruence} costs it 2.6 \% against the final set without it, and \code{skipargs} on top of \code{congruence} is the borderline cell of [the decision](dec-YP0N), +3.7 \% by the median and +2.1 \% by the mean. On the native image the two sets are equal there, 0.545 s. Not known: where the time goes on this corpus of closed evaluation; the tables have only the times. What would close it: a profile of that pass, and a threshold or a cheaper derivation if the cost is real.}
+\li{\strong{The gap in the argument for eager reduction}, carried over from [the closed problem of the switch](prob-8MJ2): a reduction by the K rule whose plain and eager computation the machine both skips because its two operands are one value. No export for it could be produced and it cannot be excluded.}
+}
+}
+
+\subtree{
+\title{Measured and kept out}
+
+\ul{
+\li{\strong{The pooled session arrays with the young reserve of finding J1-F1}: correct by its gates, and [3.7 percent slower on Mathlib with more resident memory](ins-JJ7I) on the default set. Not separated: which of the two parts costs. The reserve belongs to a decision about the heap line of the JVM launcher, where a heap of 6 GB for the machine waits for it.}
+\li{\strong{The layout of the level stores.} A memo in front of universe instantiation [does not pay](ins-258N): the cost is the first touch, in each session, of level data that every worker holds in its own copy. What the census points at is one shared base instead of a copy per worker, and records instead of parallel arrays. That layout was not prototyped.}
+\li{The visit filter on the tabling keys of evaluation was measured again on the set of wave 6 and is a no-go there, see [the report](rep-O1); it is closed, not open, and is listed here because it had been in the same queue.}
+}
+}
+
+\subtree{
+\title{Not started}
+
+\ul{
+\li{\strong{Identity on demand}, the switch \code{lazyid} of [the decision](dec-36MX). Known: the seven patches of the prototype apply to the main tree of the evening without a failed hunk. Not done: the named switch that stays off (the modes are bits of a system property today), the proof that the off state costs nothing (one test per key-forming call and per application built; it needs a comparison on the eight corpora under the guard of 3 \%), and the gates with the switch on. The open question of the prototype itself is unchanged: [no gain at eight workers in the native image](prob-BHBU).}
+\li{\strong{x86-64.} Every timing and every instruction count of the project is from the aarch64 development host; the arena's runner is x86-64. The native image and the release workflow never ran on x86-64. The pin of the toolchain for it was compared with the published checksum; the archive was not downloaded on the development host. The module tests run on the hosted runner of the continuous integration, with that toolchain, and pass there; nothing was timed there. Not established for the optional profile-guided build: whether a profile recorded on aarch64 serves an x86-64 build. See also [the projected board places](ins-G5UB).}
+}
+}
+
+\subtree{
+\title{Settled by review, not proven}
+
+\p{\strong{The list of tolerated rows.} The hostile suite has 1,196 rows with official verdicts; 83 carry the mark of the tolerated kind, and through the machine-default launcher 68 of them are accepted against the official rejection. That every one of these statements is derivable is what makes the accepts tolerable under [the exactness contract](design-exactness-contract). It rests on four kinds of evidence, none of them a proof:}
+\ul{
+\li{certificates, a proof of the same statement that the official checker accepts: 15 rows of the shortcuts' review one by one, and certificates or accepted twins for the classes of stand-in types and of cache order, as the reviews that found them record;}
+\li{a family argument without a certificate per row: the 19 rows of one family under eager reduction;}
+\li{the integrator's own use of a reviewer's family argument for four rows, published with the request to object, and for the two twins without a node of [the metadata finding](ex-FD6K);}
+\li{the argument of [the divergence note](design-official-divergence) that every step of the machine is a conversion that holds in the theory. Nothing of it is mechanised.}
+}
+\p{What would close it: a certificate accepted by the official checker for every row of the kind, kept beside the row; or a mechanised statement of the argument. As it is, the manifest of the suite names for every marked row who gave it the kind and on which ground.}
+}
+
+\p{See also: [the gap to gruszka on Mathlib](prob-TJK3), [the strict mode and object identity](prob-1YXM), [the cost of one machine operation](prob-28KQ).}

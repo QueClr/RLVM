@@ -7,9 +7,10 @@
 \tag{performance}
 \tag{soundness}
 \meta{origin}{docs/research/profiles/P8.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P8.md}; the 8-worker wall clock is from \src{docs/design/review/exact-proof-conversion.md}, section 6.2; [the profiling session](ses-JRSD). Per declaration, instructions inside the checks, joined by name over 714,712 units of Mathlib; native image \code{\verb~|-O3~}, one worker, machine with \code{\verb~|warm,gated,expect~}, in the arena container on the aarch64 development host. Counts are exact; the leaders were profiled per declaration with their arena builds.}
+\p{Source: [report P8](rep-P8); the 8-worker wall clock is from [the report on exact proof conversion](rep-exact-proof-conversion), section 6.2; [the profiling session](ses-JRSD). Per declaration, instructions inside the checks, joined by name over 714,712 units of Mathlib; native image \code{\verb~|-O3~}, one worker, machine with \code{\verb~|warm,gated,expect~}, in the arena container on the aarch64 development host. Counts are exact; the leaders were profiled per declaration with their arena builds.}
 \ul{
 \li{In instructions the machine is 6.5 times gruszka on Mathlib, 2,438.6 G against 373.8 G, and 4.7 times on Init; nano-lean needs 319.3 G.}
 \li{The whole Mathlib-specific part is one class of work. 48 percent of the instructions of the machine are in 142,000 units, 20 percent of the units, in which it needs 8 to 200 times the instructions of gruszka. The other 80 percent of the units are at 4.1 times, the Init ratio.}
@@ -31,5 +32,5 @@
 \li{On Init, Std and cedar the same options are worth 3.6, 5.0 and 6.0 percent: the mechanism is specific to the algebraic hierarchy and the category theory of Mathlib.}
 \li{In the project metric: all of Mathlib with 8 workers, pipelined, warm, native image, on top of the larger default switch set, 25.39 s becomes 19.15 s, -24.6 percent of the wall clock.}
 }
-\p{So the answer to "why is Mathlib worse" is a policy, not a defect. The machine contains both shortcuts and kept them off because they are not the verdict of the official algorithm on hostile exports; they are [sound in the theory](ins-T1F1), and [no official-exact route recovers the cost](ins-FIXO). Under the practical policy of the maintainer they are admissible; see [standing policies](standing-policies).}
+\p{So the answer to "why is Mathlib worse" is a policy, not a defect. The machine contains both shortcuts and kept them off because they are not the verdict of the official algorithm on hostile exports; they are [sound in the theory](ins-T1F1), and [no official-exact route recovers the cost](ins-FIXO). Under the practical policy of the maintainer they are admissible; see [standing policies](standing-policies). Since the evening of 2026-11-24 they are on by default: measured on all eight corpora, warm with 8 workers on the JVM launcher, they take Mathlib from 18.02 s to 12.72 s, see [the decision on the default switch set](dec-YP0N).}
 \p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}

@@ -1,0 +1,76 @@
+\title{The default switch set is the set of wave 6 with eager, skipargs and congruence, chosen by the geometric mean of eight warm passes under a guard of 3 percent}
+\taxon{Decision}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{completed}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} accepted and implemented. The set is the machine's default since 2026-11-25 02:55 UTC (21:55 local time on 2026-11-24), see [the changelog entry](log-HS1E), and ten minutes later [the machine became the default engine](log-65Z0) with it. It replaces [the set of the wave-6 integration](dec-LZFX) as the default.}
+
+\p{\strong{Context.} Three switches were built, gated and off: \code{eager}, which keeps a declaration that enters [eager reduction](design-eager-reduction) on the machine, and the two [proof-comparison shortcuts](design-proof-comparison-shortcuts), \code{skipargs} and \code{congruence}. The maintainer's notes had settled what decides them: the shortcuts are [admissible](dec-GL11) under practical exactness, and whether they are on by default is decided by warm wall clock over all corpora, because they cost on con-leche; the release is one executable whose plain run is the fastest configuration there is, see [standing policies](standing-policies). The adversarial pass that [a default set needs](dec-QN1O) had been made on the set with all three and had found no accept of an underivable statement. What was missing was the measurement on all eight corpora. Five candidates: the set of wave 6; with \code{eager}; with \code{eager} and \code{skipargs}; with \code{eager} and \code{congruence}; with all three.}
+
+\p{\strong{The rule.} As first given, the default would be the candidate with the lowest sum over the eight corpora that makes no corpus more than 2 \% slower than the set with \code{eager} alone. The first table showed that this was too blunt: with two rounds per cell it read +7.7 \% on Std, 80 ms, and would have thrown away -24.9 \% on Mathlib, -42.5 \% on navier-stokes-euler and -16.3 \% on cslib for it. The rule that decided:}
+\ul{
+\li{\strong{Primary:} the geometric mean of the eight warm pass times on the JVM launcher, so that every corpus counts the same.}
+\li{\strong{Guard:} no corpus more than 3 \% slower than the set without the switch in question, measured over at least three interleaved rounds, because two rounds do not resolve 2 \%.}
+\li{If both shortcuts meet the guard, both go in; if only one does, that one goes in and the other stays a named switch that is off.}
+\li{\strong{Refinement for short passes}, made when the borderline cell below was on the table: on a pass shorter than 0.5 s, where one reporting step of 10 ms is more than 2 \% of the pass, the statistic is the mean of the warm passes of the interleaved rounds, not their median.}
+}
+
+\p{\strong{Decision.} The default switch set is the set of wave 6 with \code{eager}, \code{skipargs} and \code{congruence}, with the probe budget of eager reduction at 2^22 ticks and the cap on congruence segments at 2^18.}
+
+\p{\strong{Evidence.} Warm wall clock of a pass that reloads the file with pipelined loading, 8 workers, JVM launcher with the machine's heap line, aarch64 development host. Every row was taken inside a quiet-core window, the five sets interleaved round by round inside one window per corpus. A cell is the mean over the rounds of the median later pass of one process, in seconds; a process makes 15 passes on reachability, 10 on Init and Std, 8 on cedar, 6 on con-leche, cslib and navier-stokes-euler and 4 on Mathlib. con-leche and reachability were measured with the final budget and cap; the other corpora with the budget at 2^23 and no cap.}
+
+\table{
+\tr{\th{Corpus (rounds)}\th{wave 6}\th{with eager}\th{with eager, skipargs}\th{with eager, congruence}\th{with all three}\th{all three against eager alone}}
+\tr{\td{Init (3)}\td{0.573}\td{0.573}\td{0.567}\td{0.570}\td{0.567}\td{-1.2 \%}}
+\tr{\td{Std (3)}\td{1.143}\td{1.020}\td{1.017}\td{1.010}\td{1.027}\td{+0.7 \%}}
+\tr{\td{cedar (3)}\td{1.507}\td{1.430}\td{1.457}\td{1.427}\td{1.433}\td{+0.2 \%}}
+\tr{\td{reachability (6)}\td{0.383}\td{0.390}\td{0.388}\td{0.372}\td{0.397}\td{+1.7 \%}}
+\tr{\td{con-leche (3)}\td{1.230}\td{1.257}\td{1.287}\td{1.273}\td{1.240}\td{-1.3 \%}}
+\tr{\td{cslib (2)}\td{5.650}\td{5.265}\td{4.875}\td{4.780}\td{4.555}\td{-13.5 \%}}
+\tr{\td{navier-stokes-euler (3)}\td{6.137}\td{6.080}\td{4.037}\td{3.793}\td{3.217}\td{-47.1 \%}}
+\tr{\td{Mathlib (1)}\td{20.490}\td{18.020}\td{13.390}\td{12.950}\td{12.720}\td{-29.4 \%}}
+\tr{\td{\strong{sum}}\td{37.11}\td{34.03}\td{27.02}\td{26.17}\td{\strong{25.16}}\td{-26.1 \%}}
+\tr{\td{\strong{geometric mean}}\td{2.065}\td{1.980}\td{1.801}\td{1.758}\td{\strong{1.720}}\td{-13.2 \%}}
+}
+
+\ul{
+\li{\strong{Primary.} The set with all three has the lowest geometric mean: 1.720 s, against 1.980 s with \code{eager} alone (-13.2 \%) and 2.065 s for the set of wave 6 (-16.7 \%). Mathlib is 29.4 \% and 37.9 \% shorter. With the cap, Mathlib is 12.40 s in the one round taken.}
+\li{\strong{Guard, the set against eager alone.} No corpus is more than 1.8 \% slower: reachability +1.7 \% in the window of six rounds and +1.8 \% in a second window of eight, Std +0.7 \%, cedar +0.2 \%.}
+\li{\strong{Guard, eager against the set of wave 6.} At most +2.2 \%, on con-leche, and +1.7 \% on reachability; Std is 10.8 \% shorter and Mathlib 12.1 \%. Before [the repair of finding INT7-F1](log-P6FV) the switch cost con-leche ten seconds.}
+\li{\strong{Guard, each shortcut against the final set without it.} \code{congruence}: at most +2.6 \%, on reachability in eight rounds. \code{skipargs}: at most +1.7 \%, on Std, except for the cell below.}
+\li{\strong{The borderline cell}, recorded as measured: \code{skipargs} on top of \code{congruence} on reachability, 0.3475 s against 0.3350 s. That is +3.7 \% by the median statistic of the window of eight rounds, 12 ms on a pass that is reported in steps of 10 ms, and +2.1 \% by the mean of the warm passes of the same window (0.3422 s against 0.3352 s); the window of six rounds gives +6.7 \% and +3.2 \%. On top of \code{congruence} the same switch is worth -17.0 \% on navier-stokes-euler, -4.7 \% on cslib, -2.6 \% on con-leche and -1.8 \% on Mathlib. By the refinement for short passes the cell is +2.1 \%, inside the guard, and both shortcuts stay.}
+}
+
+\p{\strong{What made the guard hold.} Three things were found and settled between the first table and the second. The switch \code{eager} cost con-leche 10.5 s through one unit, and its probes got [a tick budget](log-P6FV). \code{congruence} took the heaviest unit of con-leche from 3.84 M to 7.21 M ticks, and its segments got [a cap per declaration](log-9636). And the +6.0 \% and +3.4 \% that \code{skipargs} had shown on Init and Std were differences between windows, not a cost of the switch: inside one window with three interleaved rounds Init takes 0.637 s without it and 0.607 s with it, the same with the derivation of its fact records switched off, see [the insight](ins-MBQS).}
+
+\p{\strong{The native image}, measured after the decision; these rows did not decide. Image of the final jar, the same passes, 8 workers, the three sets interleaved, two rounds on Init, Std, cedar and reachability and one on the rest. The set of wave 6, with \code{eager}, and the default set: geometric mean 2.560, 2.413 and 2.090 s; Mathlib 24.53, 21.29 and 14.55 s; navier-stokes-euler 7.67, 7.32 and 3.91 s. The largest loss of the default set against the set with \code{eager} is cedar, 1.660 to 1.705 s, +2.7 \%.}
+
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{\em{The set of wave 6 with eager only.} The shortcuts are of the tolerated kind and not the official algorithm; without them the set is 13.2 \% slower in the geometric mean and Mathlib takes 18.0 s instead of 12.7 s.}
+\li{\em{One shortcut only}, \code{congruence}, with \code{skipargs} a named switch that is off: what a strict reading of the guard for the borderline cell would have given. Geometric mean 1.758 s against 1.720 s; navier-stokes-euler 3.79 s against 3.22 s.}
+\li{\em{The lowest sum with a guard of 2 percent over two rounds}, the first form of the rule: a sum weighs each corpus by its length, where the geometric mean lets every corpus count the same, and two rounds do not resolve 2 \%.}
+}
+
+\p{\strong{Gates.} The gates of exactly this set, the hostile matrix and the differential engine are listed in [the changelog entry](log-HS1E); the gate of the distribution in which the machine is the default is in [the gate](design-gate).}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{The default configuration accepts more statements that the official checker rejects for reasons of its own than the set of wave 6 did: through the machine-default launcher 68 of the 1,196 hostile rows are tolerated accepts. See [the divergence classes](design-official-divergence).}
+\li{With the shortcuts the comparison of two proofs is no longer a second check of what inference let through; soundness rests on inference.}
+\li{A change that is proposed on top of this set is judged by the same guard, on all eight corpora. The first one judged so, the pooled session arrays, [did not pass](ins-JJ7I).}
+\li{The profile of the optional profile-guided build has to be recorded with this set, see [packaging](design-packaging).}
+}
+
+\p{\strong{Not measured.} One worker. x86-64, the architecture of the arena runner. The rule asks for at least three interleaved rounds; Mathlib has one round per set and cslib two, with differences of 13 to 29 \% there. The baselines of the arena were not run in these windows.}
+
+\p{Detail: [the switch reference](design-switches-document), section "The default set of 2026-11-25" (a UTC date), which has the table with the spread of every cell. Commits \commit{1fccaf9} (the first table), \commit{455395f} (the set). Source: [the finalization session](ses-A14B).}

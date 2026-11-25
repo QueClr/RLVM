@@ -9,9 +9,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/design/OWNER-NOTES.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Decided by the maintainer on 2026-11-24 with one word, "practical"; it is note 13 of \src{docs/design/OWNER-NOTES.md} and is implemented as the launcher option \code{\verb~|-X policy=practical|strict~} with practical as the default.}
+\p{\strong{Status:} accepted. Decided by the maintainer on 2026-11-24 with one word, "practical"; it is note 13 of [the owner's notes](owner-notes) and is implemented as the launcher option \code{\verb~|-X policy=practical|strict~} with practical as the default.}
 
 \p{\strong{Context.} Until that evening the rule was the maintainer's earlier note, "resemble official by default", read as: the verdict of the official checker on every input. The adversarial reviews of the day showed that no engine on values can keep that reading. The official kernel's verdict can depend on the order in which its caches were filled, on the non-transitivity of its comparison, and on whether a subterm is one export record or two. On files built to show this, the machine, and in three cases the reference engine, accepts a statement that the official checker rejects. Every such statement is true in the theory, and no false accept was found. The reviewer of the default set concluded that under the strict reading even the generic tier of the machine is not a candidate, with or without any switch. The machine had been [withdrawn as default engine](dec-T79V) earlier that evening for a family of the same nature.}
 
@@ -37,7 +38,7 @@
 \li{transparent metadata and the dropped let flag in the loader (S3-F2, R2-F1), object identity of export records (R2-F2), cache lifetime in admission (R2-F3).}
 }
 
-\p{\strong{What it does not tolerate.} Any kind F, in any mode. A wrong verdict on a real input. A rejection of something the official checker accepts that the pipeline does not repair on real input. And it does not make every kind T acceptable by itself: the derived rules, whose wrong accept S3-F6 is of kind T, [stay off](dec-MOCU) because their argument is false as built and they also disagree with the machine's own lazy unfolding.}
+\p{\strong{What it does not tolerate.} Any kind F, in any mode. A wrong verdict on a real input. A rejection of something the official checker accepts that the pipeline does not repair on real input; when hand-made files with such a rejection were found later on 2026-11-24, this was read as holding for them too, and they were closed, see [the decision](dec-7UAL). And it does not make every kind T acceptable by itself: the derived rules, whose wrong accept S3-F6 is of kind T, [stay off](dec-MOCU) because their argument is false as built and they also disagree with the machine's own lazy unfolding.}
 
 \p{\strong{Evidence.}}
 
@@ -45,8 +46,8 @@
 \li{No kind F: the adversarial review of the default set, and its second pass over the candidate default with eager reduction and the two shortcuts, on 987 hostile rows with official verdicts. See [the review method](design-adversarial-review).}
 \li{Kind T is what it claims to be: for the shortcuts, 15 of 15 statements accepted against the official verdict were accepted by the official checker once the congruence step was written out as a term; for the cache classes, the twin of each export with its sub-proofs in the other order is accepted officially.}
 \li{The leaders are practical in the same sense: of the 14 hostile exports of the first review that the shortcut profile accepts against the official verdict, gruszka accepts all 14 and nano-lean 6, and both accept three more that the machine rejects even with the shortcuts.}
-\li{What the strict reading would give up: comparing proofs exactly as the official kernel does was measured as 40 \% of the machine's instructions on Mathlib (profile P8), and a prototype found that none of it can be recovered while every verdict stays the official one, within a resolution of 1 \% of the checking time. The two non-official shortcuts are worth 24.6 \% of the warm wall clock on all of Mathlib: 25.39 s per pass for the default set against 19.15 s with them, native image, 8 workers, pipelined load, on the development host.}
-\li{What the strict mode costs where it stays: the audit of the reference engine reports no declaration declined on the eight corpora by the strict options; the section that was to list those runs was not filled in.}
+\li{What the strict reading would give up: comparing proofs exactly as the official kernel does was measured as 40 \% of the machine's instructions on Mathlib (profile P8), and a prototype found that none of it can be recovered while every verdict stays the official one, within a resolution of 1 \% of the checking time. The two non-official shortcuts are worth 24.6 \% of the warm wall clock on all of Mathlib: 25.39 s per pass for the default set against 19.15 s with them, native image, 8 workers, pipelined load, on the development host. They are on by default since the evening of 2026-11-24, see [the decision on the default switch set](dec-YP0N).}
+\li{What the strict mode costs where it stays: no declaration of the eight corpora, Mathlib included, is declined by the strict options, and the CPU time is within the noise of the practical mode; the finished audit of the reference engine lists the runs, see [its caches](design-reference-caches).}
 }
 
 \p{\strong{Consequences.}}
@@ -61,6 +62,6 @@
 \li{The record of what is tolerated is kept for reviewers in [accepted risks](accepted-risks-divergence), so that a later review does not raise the classes again.}
 }
 
-\p{Detail: \src{docs/design/OWNER-NOTES.md} note 13, \src{docs/design/review/official-divergence.md}, \src{docs/design/review/soundness-default-set.md}, \src{docs/design/review/soundness-shortcuts.md}, \src{docs/design/review/exact-proof-conversion.md}, \src{docs/research/profiles/P8.md}, \src{rlvm-main/README.md} section "Policy". Source: [the exactness session](ses-874D).}
+\p{Detail: note 13 of the owner's notes, [the record of the divergence classes](rep-official-divergence), [the adversarial review of the default set](rep-soundness-default-set), [the soundness review of the shortcuts](rep-soundness-shortcuts), [the report on exact proof conversion](rep-exact-proof-conversion), [report P8](rep-P8), \src{rlvm-main/README.md} section "Policy". Source: [the exactness session](ses-874D).}
 
 \p{Findings, examples and open problems: [the official comparison is not transitive](ins-4VH2), [its answer depends on what was reduced before](ins-PO1G), [object identity of export records](ins-E3MS).}

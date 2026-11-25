@@ -1,0 +1,47 @@
+\title{A metadata node on the head path of a beta redex: accepted officially, rejected with the node dropped}
+\taxon{Example}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{loader}
+\tag{reference-engine}
+\import{base-macros}
+
+\p{Finding R2-F4 of 2026-11-24: four hand-made exports that the official checker of Lean v4.36.0 accepts and that the default configuration rejected (an application type mismatch) because the loader drops metadata nodes in the practical mode. The mechanism needs two things together: a syntactic test of the official kernel that stops at the node, and the official cache of successful comparisons, which is keyed by terms. Source: [the audit of the reference engine's caches](rep-reference-caches), section 6.1; [the finalization session](ses-A14B).}
+
+\pre{\verb~|
+A1 = (F intro).1      a full reduction without unfolding gives Nat
+B1 = (F h).1          stuck: h is an axiom
+                      A1 = B1 holds only while the cache has no entry for A1
+T1 = (mdata (fun x => A1)) 0          v : T1
+
+step 1   check  fun y => v  against  True -> B1
+           official       the body's type stays T1: the cheap beta reduction
+                          stops at the node.  The pair (T1, B1) is recorded.
+           node dropped   the body's type is reduced to A1.  The pair (A1, B1)
+                          is recorded.
+step 2   a full reduction caches  A1 = Nat
+step 3   compare the explicit T1, the type of v, with B1
+           official       answered by the recorded pair (T1, B1): true
+           node dropped   the redex (fun x => A1) 0 against B1 is a new
+                          comparison, and A1 is Nat now: false
+
+                                  official   default before   default now   strict
+r2-mdata-beta-hidden-ok           accept     REJECT           decline       decline
+r2-mdata-beta-hidden-def-ok       accept     REJECT           decline       decline
+r2-mdata-beta-arg-hidden-ok       accept     REJECT           decline       decline
+r2-mdata-beta-bvar-hidden-ok      accept     REJECT           decline       decline
+r2-mdata-beta-nofill-ok           accept     accept           accept        decline
+r2-mdata-beta-plainform-bad       reject     reject           reject        reject
+r2-mdata-beta-arg-plainform-bad   reject     reject           reject        reject
+~}
+
+\ul{
+\li{The columns "default" are the default configuration with the reference engine as primary engine, before and after [the launcher's safety net](log-TRJ0). The audit records that the machine of that evening accepted the four files as primary engine.}
+\li{In the first two files the node is on the head path of a redex that is written in the export. In the third it stands around a lambda in argument position, \code{\verb~|g (mdata (fun x => A1))~} with \code{\verb~|g : (m : Nat -> Type) -> m 0~}: the redex exists only after the kernel instantiated the codomain of \code{g}. In the fourth it stands around a bound variable in function position, \code{\verb~|g : (m : Nat -> Type) -> (mdata m) 0~}. Mutants of arena tests that are handled correctly have nodes in the same positions, which is why [no rule on the position closes the class](dec-7UAL).}
+\li{\code{nofill} is the first file without step 2: without the cache fill both sides agree. The two \code{plainform} files are the twins without a node, which the official checker rejects; they show that the accepted files are accepted only through the node. In the machine's hostile suite the two are rows of the tolerated kind: the plain machine accepts them, and their statement is that of their officially accepted twins.}
+\li{The earlier example of this class, a node around an application of \code{eagerReduce}, is the second export of [a metadata node](ex-4B5D); it fools a test directly, this one only through the cache.}
+}
+
+\p{See also: [metadata nodes are part of the official term identity](ins-61D4), [the order-dependence pair](ex-YTJ5) for the construction of \code{A1} and \code{B1}, [the caches of the reference engine](design-reference-caches).}

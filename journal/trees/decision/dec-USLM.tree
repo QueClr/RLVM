@@ -9,9 +9,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{rlvm-load/README.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted and implemented in the loader as the option \code{strictMetadata}, off by default, which \code{\verb~|-X policy=strict~} turns on. The same option declines a let whose \code{nondep} flag is set.}
+\p{\strong{Status:} accepted and implemented in the loader as the option \code{strictMetadata}, off by default, which \code{\verb~|-X policy=strict~} turns on. The same option declines a let whose \code{nondep} flag is set. Revised on 2026-11-24: two things were added later that day so that transparent metadata cannot make the practical mode reject what the official checker accepts. The loader declines, under both policies, a declaration with a node around an application of \code{eagerReduce}; and the launcher checks a practical rejection of a file with a dropped node again under the strict policy and reports that verdict. See [the decision on closing the class](dec-7UAL).}
 
 \p{\strong{Context.} An export can wrap an expression in a metadata record, \code{mdata}. The store has no such node: by the architecture's first design the loader returns the wrapped expression, on the argument that the node has no meaning for type checking. For the official kernel the node is nevertheless a term of its own. Every cache of the kernel is keyed by terms, so \code{\verb~|a = mdata b~} is another key than \code{\verb~|a = b~}; and the node hides what is under it from the kernel's syntactic tests, among them the test that starts eager reduction. Three things were found on 2026-11-24:}
 
@@ -27,7 +28,7 @@
 
 \table{
 \tr{\th{Where the metadata is}\th{Practical, the default}\th{Strict}}
-\tr{\td{Type or value of an axiom, definition, theorem or opaque}\td{Transparent: the wrapped term stands for the node.}\td{The declaration is declined, per unit.}}
+\tr{\td{Type or value of an axiom, definition, theorem or opaque}\td{Transparent: the wrapped term stands for the node. Since the evening of 2026-11-24 with one exception, a node around an application of \code{eagerReduce} declines the declaration, and with a guard: if the file is rejected it is checked again under the strict policy.}\td{The declaration is declined, per unit.}}
 \tr{\td{A let with the flag \code{nondep} set, anywhere}\td{The flag is ignored, as before.}\td{Treated like a metadata node: the declaration or record that contains it is declined.}}
 \tr{\td{An inductive or quotient record}\td{Declined at load, for the rest of the file from that record on; the units before it are still checked.}\td{The same.}}
 }
@@ -37,20 +38,20 @@
 \ul{
 \li{\strong{The accepts are of kind T.} The certificate for \code{s3-wc-pos-mdata-bad} is \code{s3-wc-pos-mdata-ok}: the same term without the earlier full reduction, which the official checker accepts. Nothing false is accepted: every accept path of the kernel is a derivation, and an entry that is in a cache "too early" changes only which true facts the incomplete official procedure finds.}
 \li{\strong{No real input has the node or the flag.} The exporter writes metadata records only when asked to, and the eight corpora and the arena tests have none; of their 550,621 let records none has the flag set. With the option off the loader is, record for record, the loader without it; a file without metadata pays one null test per record.}
-\li{\strong{What the official checker does with metadata}, from the mutant corpus that wraps one expression reference in a metadata record, 1,976 mutants of 186 tests, 461 accepted and 1,515 rejected officially: it accepts metadata in the roots of definitions, theorems and axioms (all 247 such mutants of good sources) and rejects it in constructor types (87 of 87), recursor types (66 of 66), right-hand sides of rules (80 of 80) and quotient types (15 of 15). The reference pipeline, with the rule for inductive and quotient records, agrees on 779 of these mutants and declines 1,197, with no wrong verdict; they are 1,197 of the 1,683 declines over all four mutant corpora.}
-\li{\strong{Cost of the strict decline on real input}: the summary of the audit states that the strict options decline no declaration of the eight corpora. The section of the document that was to list those runs was not filled in.}
+\li{\strong{What the official checker does with metadata}, from the mutant corpus that wraps one expression reference in a metadata record, 1,976 mutants of 186 tests, 461 accepted and 1,515 rejected officially: it accepts metadata in the roots of definitions, theorems and axioms (all 247 such mutants of good sources) and rejects it in constructor types (87 of 87), recursor types (66 of 66), right-hand sides of rules (80 of 80) and quotient types (15 of 15). The reference pipeline, with the rule for inductive and quotient records, agrees on 779 of these mutants and declines 1,197, with no wrong verdict; they are 1,197 of the 1,683 declines over all four mutant corpora. Since the launcher's re-check the figures are 532 and 1,444 of 2,034: 247 correct rejections of these mutants are reported as declines.}
+\li{\strong{Cost of the strict decline on real input}: the strict options decline no declaration of the eight corpora, Mathlib included; the finished audit lists the runs.}
 }
 
 \p{\strong{Consequences.}}
 
 \ul{
 \li{Transparent metadata is an [accepted risk](accepted-risks-divergence) of the default configuration and class 5 of [the divergence note](design-official-divergence-reference).}
-\li{The practical mode has one known wrong reject, \code{s3-mdata-eager-hidden-ok}. It needs a file with metadata records; item (c) of the [contract](design-exactness-contract) is about real inputs, which have none.}
+\li{When this was decided the practical mode had one known wrong reject, \code{s3-mdata-eager-hidden-ok}, with the argument that it needs a file with metadata records and that item (c) of the [contract](design-exactness-contract) is about real inputs, which have none. That argument did not stand: a rejection of an official accept is a wrong verdict on a hand-made file too. The export, and four more that were built later the same day through another official test ([the example](ex-FD6K)), no longer get a rejection.}
 \li{A strict run of a file with metadata gives no verdict. An export of real code written with the exporter's metadata option is such a file. Representing the node exactly would need a node kind in the store and in every engine; it is not planned.}
-\li{Keeping the let flag exactly, as a header bit in the identity of a let node, was designed across six modules and not started. The audit of the reference engine was written before the strict decline for the flag was in the loader and still calls it an unpublished patch; the loader's document records it as implemented, with a test.}
-\li{The hostile rows with metadata belong to the strict mode's suite, not to the rows that the default configuration must get right.}
+\li{Keeping the let flag exactly, as a header bit in the identity of a let node, was designed across six modules and not started. The strict decline for the flag is published with the loader, with a test.}
+\li{As decided here, the hostile rows with metadata belonged to the strict mode's suite and not to the rows that the default configuration must get right. Since the launcher's re-check the rule of a row in which a node hides something from an official test is the official verdict or a decline through the launcher.}
 }
 
-\p{Detail: \src{rlvm-load/README.md} (deviation 7 and the table of hostile input), \src{docs/design/review/reference-caches.md} (the audit, divergences D1 and D2), \src{rlvm-store/README.md} (what is not in the store), \src{rlvm-main/README.md} section "Policy", \src{rlvm-testkit/README.md} (the mutant corpus). Related: [the export loader](design-export-loader), [the caches of the reference engine](design-reference-caches). Source: [the exactness session](ses-874D).}
+\p{Detail: \src{rlvm-load/README.md} (deviation 7 and the table of hostile input), [the audit of the reference engine's caches](rep-reference-caches) (the audit, divergences D1 and D2), \src{rlvm-store/README.md} (what is not in the store), \src{rlvm-main/README.md} section "Policy", \src{rlvm-testkit/README.md} (the mutant corpus). Related: [the export loader](design-export-loader), [the caches of the reference engine](design-reference-caches). Source: [the exactness session](ses-874D) and, for the two additions, [the finalization session](ses-A14B).}
 
-\p{Findings, examples and open problems: [metadata and the nondep flag are part of the official term identity](ins-61D4), [a metadata node](ex-4B5D).}
+\p{Findings, examples and open problems: [metadata and the nondep flag are part of the official term identity](ins-61D4), [a metadata node](ex-4B5D), [a node on the head path of a beta redex](ex-FD6K).}

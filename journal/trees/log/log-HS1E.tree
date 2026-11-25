@@ -1,0 +1,30 @@
+\title{The default switch set: the set of wave 6 with eager, skipargs and congruence}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\tag{soundness}
+\meta{release}{Unreleased}
+\meta{commit}{455395f}
+\import{base-macros}
+
+\p{Since 2026-11-25 02:55 UTC (21:55 local time on 2026-11-24) a machine engine without the setting \code{\verb~|-X machine.switches~} runs the set of the wave-6 integration plus \code{eager}, \code{skipargs} and \code{congruence}, with the probe budget of [eager reduction](log-P6FV) at 2^22 ticks and [the cap on congruence segments](log-9636) at 2^18. \code{skipargs} brings \code{facts} and \code{congruence} brings \code{probes}. The set of wave 6 is now \code{\verb~|-X machine.switches=default,-eager,-skipargs,-congruence,-facts,-probes~}; the plain machine stays \code{\verb~|-X machine.switches=none~}; a strict engine has no switch. The engine reports the set through the note of its defaults, so \code{\verb~|rlvm --version~} prints it. Why this set, with the table: [the decision](dec-YP0N).}
+
+\p{\strong{What came before it the same evening}, in three publications of the machine.}
+\ul{
+\li{\strong{The two shortcuts are named switches.} \code{skipargs} and \code{congruence} were reachable only through a system property, together with \code{facts} and \code{probes}, without which they do nothing. Each switch now brings the one it needs, whatever the order of the list; neither is in \code{all}. The property is still read and means the shortcut without the implication, so older command lines reproduce. An optional patch of the shortcuts' reviewer was taken with it: the plan of an argument comparison applies the masks of one head only if the two heads are one record or have equal level lists.}
+\li{\strong{Finding S3-F7 is fixed}: the compiled code had no case for a capture list that holds an immediate value, so a closure in a compiled body that captures a variable bound to a small numeral ended in an internal error and the unit was declined. No unit of the corpora changes: the ticks and declines of the five parts of the gate and of 16 Mathlib slices are the same before and after.}
+\li{\strong{The hostile suite is complete}: the rows of every review, each with the verdict of the official checker taken again and its kind; 1,189 rows at first and 1,196 with the seven metadata exports of [finding R2-F4](ex-FD6K), 83 of them of the tolerated kind. See [the gate](design-gate).}
+}
+
+\p{\strong{Gates of exactly this set}, on the frozen tree that was published: the fast group of the machine, 420 tests; the slow hostile matrix, 56 switch sets by 1,196 rows, without a failure; the full gate of the machine for the set, pass with declines, no wrong verdict and no difference (all 230 arena tests: 15,804 engine checks accepted, 41 rejected, none declined; Init 57,938 accepted; Std 100,095 accepted and 1 declined by a rule of the typed-binding fix; reachability 4,224; the Cedar slice 8,064; no soundness and no completeness difference); the mutants through the real driver for the plain machine and for the set, 17,775 each, with no soundness and no completeness difference and the driver's two anomaly counters at 0 (a unit the machine rejects and the reference engine accepts; a strict accept after a warm reject); the differential engine through the launcher on the published tests, Init, Std, cedar, cslib and 16 Mathlib slices, 1,141,195 checks without a difference; all eight corpora accepted with 8 and with 4 workers on the JVM launcher and on the native image. The adversarial pass with official verdicts that [the rule](dec-QN1O) asks for was made on these switches earlier the same evening, on 987 hostile rows, and found no accept of an underivable statement; its four conditions (named switches that bring \code{facts} and \code{probes}, its rows in the suite with their kinds, S3-F7 fixed or counted, the strict re-check still deciding every rejection of the machine) are met. The two bounds added after that pass only stop speculative work: a cut probe ends in a decline, the cap in the complete procedure.}
+
+\p{\strong{What it is worth}, warm wall clock of a pipelined pass, 8 workers, JVM launcher, the sets interleaved round by round in one quiet window per corpus, aarch64 development host: the geometric mean over the eight corpora falls from 2.065 s for the set of wave 6 to 1.720 s, the sum from 37.11 s to 25.16 s, Mathlib from 20.49 s to 12.72 s. No corpus is more than 1.8 \% slower than with \code{eager} alone. Not measured for the choice: one worker, and x86-64.}
+
+\p{With this set [the machine became the default engine](log-65Z0) ten minutes later.}
+
+\p{Detail: [the switch reference](design-switches-document), sections "The default configuration" and "The default set of 2026-11-25" (the date in its text is the UTC date). Commits \commit{455395f} (the set), \commit{533165e} (the gate of the candidate), \commit{1fccaf9} (the first table).}

@@ -5,18 +5,19 @@
 \contributor{queclr}
 \tag{machine}
 \tag{performance}
-\meta{status}{accepted}
+\meta{status}{superseded}
 \meta{created}{2026-11-24}
 \meta{origin}{rlvm-machine/SWITCHES.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. It is the set the machine runs under \code{\verb~|-X engine=machine~}. It is not, by itself, the decision to make the machine the default engine; that one was made on the same gates and withdrawn within the hour, see [the machine as default engine](dec-T79V).}
+\p{\strong{Status:} superseded as the default on the evening of 2026-11-24 by [the set with eager reduction and the two shortcuts](dec-YP0N): the default set is now this set plus \code{eager}, \code{skipargs} and \code{congruence}, which bring \code{facts} and \code{probes}. Every switch of this set is still in the default; the set by itself stays reachable as \code{\verb~|-X machine.switches=default,-eager,-skipargs,-congruence,-facts,-probes~} and is the base against which the later set was measured. The gates and measurements below are those of the afternoon. The decision was not, by itself, the decision to make the machine the default engine; that one was made on the same gates, withdrawn within the hour and made again with the later set, see [the machine as default engine](dec-T79V).}
 
 \p{\strong{Context.} Every optimisation of the machine sits behind a [staging switch](design-switches). Since 2026-11-24 16:24Z the default set had been \code{\verb~|warm,gated,expect~}, the first staging step. During the speed wave the owners of the machine's packages measured further switches, each behind gates of its own, and reported them ready. One integrator then owned the whole module and had to say which of them run by default.}
 
 \p{\strong{Decision.} The default set is \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}, with the session cap at 1 MiB and the host depth bound at 128, both unchanged and both measured again with the new set. Left out, each for a stated reason:}
 \ul{
-\li{\code{facts} and \code{probes}: official-exact since the fix of the soundness findings S-F1 and S-F2, but they cost 1.0 to 2.1 \% and 1.4 to 3.2 \% of CPU time on Init, Std and the Cedar slice.}
+\li{\code{facts} and \code{probes}: official-exact since the fix of the soundness findings S-F1 and S-F2, but they cost 1.0 to 2.1 \% and 1.4 to 3.2 \% of CPU time on Init, Std and the Cedar slice. (In the later default set they are on, because the two shortcuts need them.)}
 \li{\code{tele}: no corpus gains in three native batches, and the Cedar slice loses 2 to 6 \%.}
 \li{\code{k2}: small gains and green gates, but its derivation variables are not the dedicated value kind the reconciliation of the design review demands; see [the decision on derived rules](dec-MOCU).}
 \li{\code{m2b}: undecided, needs three quiet repeats. \code{t2}: see [the Truffle tier](dec-ADIK). \code{\verb~|levels-complete~}: never a default, by the maintainer's decision.}
@@ -49,4 +50,6 @@
 \li{The ways back stay: \code{none} is v0, \code{\verb~|default,-same~} removes the switch that the list singled out at the time as having had no independent review, and a strict engine is unaffected by any default.}
 }
 
-\p{Related: [staging switches](design-switches), [the session cap](dec-KXE1), [the gate](design-gate). Detail: \src{rlvm-machine/SWITCHES.md}, \src{rlvm-machine/NOTES-INT.md} section 3, \src{docs/design/review/soundness-default-set.md}. Source: [the speed wave](ses-CVTE).}
+\p{Related: [staging switches](design-switches), [the session cap](dec-KXE1), [the gate](design-gate). Detail: [the switch reference](design-switches-document), [the integration notes of the machine](rep-machine-INT) section 3, [the adversarial review of the default set](rep-soundness-default-set). Source: [the speed wave](ses-CVTE).}
+
+\p{Superseded by: [the default switch set of the evening of 2026-11-24](dec-YP0N).}

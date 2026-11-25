@@ -9,10 +9,11 @@
 \meta{status}{open}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/design/VALUES-V2.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} open.}
-\p{\strong{The symptom.} [Identity on demand](ins-PMD4) takes 16.7 percent off the warm wall clock of reachability at one worker on the JVM and 11.9 percent in the native image, both with disjoint ranges. At eight workers the JVM shows -10.0 percent, 460 against 511 ms with ranges that touch, and the native image shows nothing: +3.1 percent, inside the scatter, with the CPU of the workers at -1 percent. Source: \src{docs/design/VALUES-V2.md}, sections 10.2 and 12; quiet windows, a measuring tool that keeps one engine, without loading; [the profiling session](ses-JRSD).}
+\p{\strong{Status:} open. Nothing changed on 2026-11-24 after this was written: the switch was not integrated for the release of that evening, see [the decision](dec-36MX) and [what the release leaves open](prob-HC9J).}
+\p{\strong{The symptom.} [Identity on demand](ins-PMD4) takes 16.7 percent off the warm wall clock of reachability at one worker on the JVM and 11.9 percent in the native image, both with disjoint ranges. At eight workers the JVM shows -10.0 percent, 460 against 511 ms with ranges that touch, and the native image shows nothing: +3.1 percent, inside the scatter, with the CPU of the workers at -1 percent. Source: [the document on the second value model](design-values-v2-document), sections 10.2 and 12; quiet windows, a measuring tool that keeps one engine, without loading; [the profiling session](ses-JRSD).}
 \p{\strong{What is known.}}
 \ul{
 \li{The reason for the difference between the platforms is not known. No profile was taken: "the probes that are not made" is the mechanism by construction, and the share of the time it explains was not measured.}

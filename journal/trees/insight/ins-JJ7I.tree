@@ -1,0 +1,22 @@
+\title{The pooled session arrays do not pay on the final default set: Mathlib 3.7 percent slower and more resident memory}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{gc}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: the integration attempt of 2026-11-24, after the machine had become the default engine; [the finalization session](ses-A14B). The patch is the one of [the report on session memory](rep-V1): a process-wide pool for the large arrays of the sessions that outgrow the kept slabs, see [where the machine's garbage comes from](ins-2ELY). It was integrated together with the fix of finding J1-F1, which sizes the machine's young reserve from the real young generation instead of a third of the heap, see [the heap of the machine](ins-P0RA). Conditions of the timing: JVM launcher with its heap limit of 7 GB, warm pipelined passes, 8 workers, the default switch set (the set of wave 6 with \code{eager}, \code{skipargs} and \code{congruence}), the machine jar of the default set against the same tree with the patch, interleaved inside packed quiet windows, aarch64 development host.}
+
+\ul{
+\li{\strong{Correct by its gates.} The fast group of the machine, 420 tests; the full gate of the default set, pass with declines and every tick count identical; the slow hostile matrix, 56 switch sets by 1,196 rows.}
+\li{\strong{It fails the guard} of [the rule for a default](dec-YP0N), no corpus more than 3 \% slower. Before and after, in seconds: Init 0.573 and 0.563, Std 0.953 and 0.947, cedar 1.360 and 1.357, reachability 0.357 and 0.343, con-leche 1.215 and 1.210, cslib 4.355 and 4.450 (+2.2 \%), navier-stokes-euler 3.580 and 3.660 (+2.2 \%), Mathlib 12.655 and 13.125 (+3.7 \%; two rounds each, 12.59 and 12.72 against 13.10 and 13.15). The geometric mean is 1.680 s before and 1.683 s after.}
+\li{\strong{Peak resident memory is higher on six of the eight corpora}: Mathlib 6,266 to 7,078 MiB, which is the launcher's heap limit, navier-stokes-euler 2,264 to 2,681, con-leche 1,858 to 2,470, cslib 2,964 to 3,186, Init 827 to 976; Std falls from 1,618 to 1,410.}
+\li{\strong{Why the earlier gain is gone.} The report measured -4.8 \% on Mathlib (29.9 s instead of 31.4 s) on the machine of the afternoon of 2026-11-24, in the native image with a heap of 4 GB, with the switches \code{\verb~|warm,gated,expect~} that were the default then. The integrator's reading: with the default set of the evening the sessions are smaller, and the pooled arrays and the smaller young reserve only hold more memory.}
+}
+
+\p{It was not published and is not in the release. \strong{Not separated:} which of the two parts costs, the pool or the reserve. The reserve alone cannot matter for the released executable, where it is 0 in a native image; it belongs to a decision about the heap line of the JVM launcher, see [dec-E3EX](dec-E3EX). Not measured: the native image with the patch, one worker. It is carried as an open item in [what is left open after the release](prob-HC9J).}
+
+\p{What to take from it: a gain measured on one switch set does not carry over to a later one. The patch waited through two changes of the default set; it had to be measured again on all eight corpora, under the guard, before it could enter, and that measurement is what kept it out.}

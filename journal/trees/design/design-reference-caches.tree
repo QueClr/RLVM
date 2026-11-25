@@ -8,9 +8,10 @@
 \meta{status}{implemented}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/design/review/reference-caches.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} implemented: the reference engine has a practical and a strict mode. The cost and gate sections of the review document were still empty when this note was written.}
+\p{\strong{Status:} implemented: the reference engine has a practical and a strict mode. Revised on 2026-11-24 from the finished audit: its cost and gate sections are filled in, the strict decline for the \code{nondep} flag is published, and the rejections of official accepts that dropped metadata caused in the practical mode are closed, the last of them late that evening. The first version of this note was written while the audit was still open.}
 
 \p{[The reference engine](design-reference-engine) is the oracle of every gate, so a wrong accept of it (finding S3-F2, found by [the adversarial review](design-adversarial-review)) called for an audit of every cache against the official source, with exports judged by the official checker of Lean v4.36.0 and never by an engine of RLVM. The audit asks two questions: what does the official kernel take for \em{the same term}, and is every cache read, written and cleared where the official one is.}
 
@@ -64,12 +65,13 @@ if (!is_eqp(t_n_n, t_n) || !is_eqp(s_n_n, s_n)) return is_def_eq_core(t_n_n, s_n
 \subtree[design-reference-caches-kind]{
 \title{Kind, cost and what is not established}
 
-\p{All four findings are of kind T: the accepted statement is derivable, and for each export the official checker accepts the same proof term in another cache state or with another sharing of records. The caches hold facts; an entry that is there too early, or one object too many, changes which true facts the incomplete procedure finds. The practical mode has one wrong \em{reject}: with the metadata around an \code{eagerReduce} application dropped, the kernel enters eager reduction and rejects a statement the official checker accepts. Only a file with metadata records can do this, and none of the corpora or tests has one.}
+\p{All four findings are of kind T: the accepted statement is derivable, and for each export the official checker accepts the same proof term in another cache state or with another sharing of records. The caches hold facts; an entry that is there too early, or one object too many, changes which true facts the incomplete procedure finds. The practical mode also had wrong \em{rejects}, all through dropped metadata, and all closed on 2026-11-24. First one export: with the metadata around an \code{eagerReduce} application dropped, the kernel enters eager reduction and rejects a statement the official checker accepts; the loader now declines a declaration with a node in that position under both policies, see [the changelog entry](log-6K9N). Then four exports of a second mechanism, the cheap beta reduction of an inferred type together with the cache of successful pairs: [finding R2-F4](ex-FD6K). No rule on the position of a node separates these from files that are handled correctly, so the class is closed in the launcher: a practical rejection of a file with a dropped node is checked again under the strict policy and that verdict is reported, see [the decision](dec-7UAL) and [the changelog entry](log-TRJ0). Only a file with metadata records is affected, and none of the corpora or tests has one.}
 
-\p{On the eight corpora the strict mode declines no declaration; one declaration of Std and 8 of cslib are decided by checking both ways. A golden test replays 30 exports with the official answers in both modes.}
+\p{On the eight corpora, Mathlib included, the strict mode declines no declaration and every corpus is accepted in both modes (reference engine, one worker). The pointer event of the section above occurs in 448 comparisons of real exports; the probe clears 428 of them, and the other 20, in 20 declarations (1 of Std, 8 of cslib, 11 of Mathlib), are decided by checking the declaration both ways, with the same verdict each time. The CPU time of the strict mode is within the noise of the practical mode: one worker in a quiet window, Init 14.7 s and Std 22.0 to 23.3 s in every configuration. On the 1,239 hostile exports of the reviews the strict mode has no verdict opposite to the official one and 14 declines. A golden test replays 30 exports with the official answers in both modes.}
 
 \ul{
-\li{The review describes the strict decline for the \code{nondep} flag as a patch that was not yet published, with the strict mode still accepting \code{r2-id-let-nondep-bad} until then. The loader's document, which is later, records the decline as implemented and tested under the loader option of the strict mode, see [dec-USLM](dec-USLM). The exact solution, the flag as part of a let node's identity, is not implemented.}
+\li{The strict decline for the \code{nondep} flag is published: under the loader option of the strict mode a let with the flag declines its declaration, and \code{r2-id-let-nondep-bad} is declined, see [dec-USLM](dec-USLM). The exact solution, the flag as part of a let node's identity, is not implemented: it would change the store format and six modules for a flag that none of the 550,621 let records of the corpora and tests has.}
+\li{The safety net of the launcher covers metadata only. A rejection of an official accept on a file without a metadata record would be outside it; none is known.}
 \li{Metadata and the flag are declined, not represented: a strict run of a file that has them gives no verdict.}
 \li{The both-ways check assumes that the two continuations are the only official behaviours at such a point.}
 \li{The effect of the kernel's sharing step on theorems was read in the source and not shown by an export.}
@@ -77,6 +79,6 @@ if (!is_eqp(t_n_n, t_n) || !is_eqp(s_n_n, s_n)) return is_def_eq_core(t_n_n, s_n
 }
 }
 
-\p{Related: [the exactness contract](design-exactness-contract), [the divergence classes](design-official-divergence), [dec-USLM](dec-USLM) on metadata, [dec-TQSI](dec-TQSI) on the policy. Detail: \src{docs/design/review/reference-caches.md} and the section "Exactness" of \src{rlvm-ref/README.md}. Source: [the exactness session](ses-874D).}
+\p{Related: [the exactness contract](design-exactness-contract), [the divergence classes](design-official-divergence), [dec-USLM](dec-USLM) on metadata, [dec-TQSI](dec-TQSI) on the policy. Detail: [the audit](rep-reference-caches), the full record with every table, and the section "Exactness" of \src{rlvm-ref/README.md}. Source: [the exactness session](ses-874D) and, for the closure of the metadata class, [the finalization session](ses-A14B).}
 
 \p{Findings, examples and open problems: [the verdict can depend on whether a subterm is one export record or two](ins-E3MS), [the duplicated projection record](ex-7CCC), [the strict mode and object identity](prob-1YXM).}

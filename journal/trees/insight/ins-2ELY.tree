@@ -7,9 +7,10 @@
 \tag{machine}
 \tag{performance}
 \meta{origin}{docs/research/profiles/V1.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/V1.md}; [the profiling session](ses-JRSD). A prototype in a private copy; nothing of it was published by the report itself. Allocation accounts on the JVM; timings in the native image, 8 workers, later passes of a process that loads pipelined, quiet cores, Mathlib with a heap of 4 GB.}
+\p{Source: [report V1](rep-V1); [the profiling session](ses-JRSD). A prototype in a private copy; nothing of it was published by the report itself. Allocation accounts on the JVM; timings in the native image, 8 workers, later passes of a process that loads pipelined, quiet cores, Mathlib with a heap of 4 GB.}
 \ul{
 \li{The first reading, "arrays regrown after each reset", was wrong. The garbage of the machine comes from the sessions whose one declaration needs more than the kept slab sizes, 8 MiB of records and 4 MiB of run words: each of them doubles its slabs copy by copy and drops them at its reset. On Mathlib that is 4.9 GB of slabs and 0.56 GB of tables per pass, 39 percent of the 13.8 GB that 8 workers allocate.}
 \li{The prototype gives these arrays a process-wide pool: taken at the growth, given back at the reset, softly held. On cedar the machine then allocates nothing from the second pass on: 1,847 MB becomes 382 MB over three passes, 374 MB of them in the first.}
@@ -18,4 +19,5 @@
 \li{The other 61 percent of the bytes are the reference kernel re-checking the units the machine declines.}
 \li{A session already is two bump regions that a reset rewinds. A reset costs 8 to 9 microseconds, 0.2 to 0.3 percent of the worker CPU; the growths of the tables inside a session cost twenty times more.}
 }
+\p{\strong{Later the same day} the pool was integrated on top of the default switch set of the evening and measured again on all eight corpora on the JVM launcher: [it does not pay there](ins-JJ7I) and is not in the release. The numbers above are the prototype's, on the switches \code{\verb~|warm,gated,expect~}.}
 \p{See also: [warm sessions and the session cap](design-warm-sessions).}

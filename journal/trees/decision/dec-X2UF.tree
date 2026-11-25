@@ -8,9 +8,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{rlvm-machine/NOTES-M6.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted and in force in every configuration. The switch \code{eager}, which lets the machine keep such declarations, is published, off by default and proposed for the default switch set.}
+\p{\strong{Status:} accepted. The rule is in force in every configuration without the switch \code{eager}, the plain machine and every strict engine included. The switch, which lets the machine keep such declarations, is in the default switch set since the evening of 2026-11-24, see [the decision on the default set](dec-YP0N): a plain run declines such a declaration only where the mechanism of the switch itself declines, or where one of its probes runs out of [its budget](log-P6FV).}
 
 \p{\strong{Context.} Eager reduction is the one \em{mode} of the official comparison. For an argument of the form \code{\verb~|eagerReduce _ _~} the kernel compares the argument's type with its domain under a flag that lifts two guards: Nat folding and the \code{Bool.true} test also run when a side has a free variable. A pair can be convertible in plain mode and not under the flag, and the reverse. The official kernel answers from its success cache whatever the mode, but that cache lives for one declaration and is keyed by terms whose free variables are unique per binder instance. The machine's pair table and memo words are keyed by values with canonical variables and, in warm sessions, outlive the declaration. Three observations on 2026-11-24 showed the consequence:}
 \ul{
@@ -42,11 +43,11 @@
 \p{\strong{Consequences.}}
 \ul{
 \li{A gate that reads "the machine declined nothing" must subtract the eager-reduction declines; the reports name them.}
-\li{The reference engine stays on the hot path of every real corpus as long as the switch is off.}
-\li{What decides the switch: it enters the default set like any other, after the owners' gates and under [the rule of an adversarial pass with official verdicts](dec-QN1O). The review of the candidate default has attacked it and found no false accept.}
+\li{The reference engine stays on the hot path of every real corpus as long as the switch is off. It is on by default since the evening of 2026-11-24.}
+\li{What decides the switch: it enters the default set like any other, after the owners' gates and under [the rule of an adversarial pass with official verdicts](dec-QN1O). The review of the candidate default has attacked it and found no false accept. It entered on the evening of 2026-11-24. The measurement on all eight corpora that decided it first showed a cost nobody had seen on Std, cedar and Mathlib: one unit of con-leche on which a probe of the plain phase ran into the limit of a session. With a budget on the probes the switch is worth 4.1 \% of the geometric mean of the eight warm passes, 12.1 \% of Mathlib and 10.8 \% of Std, and costs con-leche 2.2 \% (JVM launcher, 8 workers).}
 \li{With the switch alone no divergence from the official verdict is known: the machine decides such a declaration officially or declines it. Combined with [the proof-comparison shortcuts](dec-GL11) the hostile exports of the eager family are accepted; those accepts are of the kind tolerated under [practical exactness](dec-TQSI).}
 }
 
-\p{Related: [staging switches](design-switches), [warm sessions](design-warm-sessions), [conversion](design-conversion). Detail: \src{rlvm-machine/NOTES-M6.md} (F26), \src{docs/design/review/soundness-machine.md} (S-F4, S-F5), \src{docs/design/review/eager-reduction.md}, \src{rlvm-machine/SWITCHES.md}, \src{docs/research/profiles/P8.md}. Sources: [the machine session](ses-Z72N), [the speed wave](ses-CVTE) and [the profiles and prototypes](ses-JRSD).}
+\p{Related: [staging switches](design-switches), [warm sessions](design-warm-sessions), [conversion](design-conversion). Detail: [the working notes of package M6](rep-machine-M6) (F26), [the soundness review of the machine](rep-soundness-machine) (S-F4, S-F5), [the review of eager reduction](rep-eager-reduction), [the switch reference](design-switches-document), [report P8](rep-P8). Sources: [the machine session](ses-Z72N), [the speed wave](ses-CVTE), [the profiles and prototypes](ses-JRSD) and [the finalization session](ses-A14B).}
 
-\p{Findings, examples and open problems: [what the declined units cost](ins-47IQ), [the open problem](prob-8MJ2).}
+\p{Findings, examples and open problems: [what the declined units cost](ins-47IQ), [the problem of the switch being off](prob-8MJ2), which is closed.}

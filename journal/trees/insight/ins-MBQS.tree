@@ -1,0 +1,24 @@
+\title{A JVM pass under one second moves by up to 5 percent between quiet windows: only interleaved rounds inside one window compare}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{performance}
+\tag{machine}
+\import{base-macros}
+
+\p{Source: the two tables that chose [the default switch set](dec-YP0N), and the three questions between them; [the finalization session](ses-A14B). Conditions: JVM launcher, warm pipelined passes of the machine, 8 workers, every row inside a quiet-core window of [the measurement method](design-measurement-method), aarch64 development host. A cell is the median of the later passes of one process; the launcher reports a pass in steps of 10 ms.}
+
+\ul{
+\li{\strong{What the first table said.} With two rounds per cell, taken in different windows, \code{skipargs} cost +6.0 \% on Init and +3.4 \% on Std, and the set with both shortcuts was +7.7 \% on Std (1.09 and 1.15 s against 1.03 and 1.05 s). By the rule of that hour, no corpus more than 2 \% slower, the shortcuts would have stayed off.}
+\li{\strong{What one window said.} Init, three interleaved rounds in one window: 0.637 s without \code{skipargs}, 0.607 s with it, and 0.607 s again with the derivation of its fact records switched off. Std in one window: 1.080 s, 1.083 s with \code{skipargs}, 1.070 s with both shortcuts. With five and six rounds the +7.7 \% on Std became +1.2 \% (1.090 s against 1.077 s), and in the final table +0.7 \%. The percentages of the first table were differences between windows, not a cost of the switch.}
+\li{\strong{The size of the effect.} A JVM pass of 0.4 to 1 s moves by up to 5 \% from one quiet window to the next, with the same jars and the same switch set. A quiet window removes the other load of the host; it does not make two windows equal.}
+\li{\strong{Under half a second the median is too coarse.} On reachability, a pass of 0.34 s, one reporting step is about 3 \% of the pass. The same eight rounds give +3.7 \% by the median of the later passes (0.3475 s against 0.3350 s) and +2.1 \% by their mean (0.3422 s against 0.3352 s); a window of six rounds gives +6.7 \% and +3.2 \%.}
+}
+
+\p{\strong{What follows.} Two switch sets are compared only by rounds that alternate inside one window, at least three of them: two rounds do not resolve 2 \%. On a pass shorter than 0.5 s the statistic is the mean of the warm passes, not the median. A row taken alone in its own window is good for a table of absolute times and not for a difference of a few percent. The same care applies to a single pair of runs taken apart in time. The packaging work had one pair of cold Mathlib runs of the native image for its new settings, 20 minutes apart, which said 16.2 s before and 16.9 s after; three alternating runs each then gave 17.4 s and 16.4 s, the opposite sign, see [the settings of a plain run](dec-EGMG).}
+
+\p{\strong{Not measured:} why the windows differ (the state of the machine after the previous load, the placement of the process's memory, the JIT's choices were not separated), and whether the native image shows the same; its runs repeat more closely in instructions, see [the JVM against the image in instructions](ins-8FP8).}
+
+\p{See also: [timings from a loaded host are not evidence](ins-I3W2), which this refines; [eight busy cores make each of them slower](ins-RPLD).}

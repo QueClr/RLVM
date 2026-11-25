@@ -7,6 +7,7 @@
 \tag{performance}
 \tag{machine}
 \meta{origin}{docs/BENCHMARKS.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
 \p{Source: \src{docs/BENCHMARKS.md}, section "Warm wall clock"; [the session on wave 6 and the pipeline](ses-CVTE). One process checks the same export again, every pass loads pipelined with checking, 8 workers on the 8 quiet performance cores of the aarch64 development host; warm is the median of the later passes. The baselines ran their arena run line with 8 threads in the arena container on the same cores, second of two runs. This is not the arena configuration.}
@@ -30,5 +31,6 @@
 \li{In CPU time the distance is larger than in wall clock: 1.5, 1.8, 1.5 and 2.5 times gruszka in the first table.}
 \li{The baselines do not get faster in a second run; their spread on this host is 5 to 15 percent, so differences below that are noise, ours included.}
 }
-\p{The second table is what the machine gives when selected by option. In that distribution it was the default engine for an hour and was taken back, see [making the machine the default engine](prob-W2FV). What separates it from gruszka on Mathlib is in [the gap to gruszka](prob-TJK3).}
+\p{The second table is what the machine gave when selected by option in the afternoon of 2026-11-24. In that distribution it was the default engine for an hour and was taken back, see [making the machine the default engine](prob-W2FV). What separated it from gruszka on Mathlib is in [the gap to gruszka](prob-TJK3).}
+\p{\strong{Later the same day} the default switch set gained eager reduction and the two proof-comparison shortcuts and the machine became the default engine. With that configuration the tables of the released jars, [the benchmark tables](rep-benchmarks), have Mathlib at 12.44 s on the JVM launcher and 15.46 s for the executable against 14.20 s for gruszka, 0.88 and 1.09 times; the executable is at 1.00, 0.95, 1.05 and 0.23 times gruszka on Init, Std, cedar and reachability. The title of this tree is the state of the two tables above.}
 \p{See also: [the measurement method](design-measurement-method); [staging switches and the default switch set](design-switches).}

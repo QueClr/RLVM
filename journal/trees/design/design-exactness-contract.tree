@@ -9,9 +9,10 @@
 \meta{status}{implemented}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/design/OWNER-NOTES.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} implemented. The practical policy is the default since 2026-11-24; one launcher option selects the strict mode. Both strict-mode options, of the loader and of the reference kernel, are in the tree.}
+\p{\strong{Status:} implemented. The practical policy is the default since 2026-11-24; one launcher option selects the strict mode. Both strict-mode options, of the loader and of the reference kernel, are published. Revised on 2026-11-24 for the end of that day: the machine is the default engine under this contract, and item (c) is guarded, on files with metadata, by a re-check under the strict policy.}
 
 \p{RLVM answers accept, reject or decline for an export. The contract says which of these answers the default configuration owes on which input. It exists because "the verdict of the official checker on every input" turned out not to be a property an engine on values can have: the official kernel's answer depends on its cache order, on the non-transitivity of its comparison and on the object identity of export records, see [the divergence classes](design-official-divergence). The maintainer chose between two readings on 2026-11-24, see [the decision](dec-TQSI); the lasting form is in [standing policies](standing-policies-exactness).}
 
@@ -30,11 +31,11 @@
 \ul{
 \li{\strong{(a)} Never accept a statement that is not derivable (kind F). Absolute.}
 \li{\strong{(b)} The official verdict on every real input: everything the exporter writes (the corpora), the arena's good and bad tests, and the mutant corpora with their stored official verdicts.}
-\li{\strong{(c)} Everything the official checker accepts is accepted. A rejection of the primary engine is always confirmed by the reference engine, and a unit the primary engine declines goes to it; see [the verdict protocol](design-verdict-protocol).}
+\li{\strong{(c)} Everything the official checker accepts is accepted. A rejection of the primary engine is always confirmed by the reference engine, and a unit the primary engine declines goes to it; see [the verdict protocol](design-verdict-protocol). The item was read as holding on any file, a hand-made one included: where both engines can reject an official accept because the loader dropped a metadata node, the launcher does not report the rejection but checks the file again under the strict policy, see [the decision](dec-7UAL).}
 \li{\strong{(d)} A kind T accept is tolerated. The known classes are written down with one export each.}
 }
 
-\p{What shows each item. For (a): [adversarial reviews](design-adversarial-review) with hostile exports whose strict rows must all be rejected, and seeded faults that show the rows reach the code. For (b) and (c): [the gate](design-gate), that is the differential runs on the corpora, the 230 arena tests and the 17,775 mutants. For (d): the record in \src{docs/design/review/official-divergence.md}. The order is fixed by the maintainer's note: the machine may be the default engine once (a) to (c) are shown by the gates and an adversarial review of the candidate has found no kind F.}
+\p{What shows each item. For (a): [adversarial reviews](design-adversarial-review) with hostile exports whose strict rows must all be rejected, and seeded faults that show the rows reach the code. For (b) and (c): [the gate](design-gate), that is the differential runs on the corpora, the 230 arena tests and the 17,775 mutants. For (d): [the record of the divergence classes](rep-official-divergence). The order is fixed by the maintainer's note: the machine may be the default engine once (a) to (c) are shown by the gates and an adversarial review of the candidate has found no kind F. That was shown on the evening of 2026-11-24 and the machine is the default engine since, see [the decision](dec-T79V); for (d), 68 of the 1,196 rows of the hostile suite are tolerated accepts in that configuration.}
 }
 
 \subtree[design-exactness-contract-policy]{
@@ -46,11 +47,11 @@
 \tr{\th{}\th{\code{practical}}\th{\code{strict}}}
 \tr{\td{Engine}\td{The default engine by priority, or the one named with \code{\verb~|-X engine=NAME~}.}\td{The reference engine, whatever the priorities say. Another engine, or the differential engine, with it is a usage error with status 64: the strict mode is one engine.}}
 \tr{\td{Exactness-only settings of the engines}\td{None is passed; each engine's own default, off, holds.}\td{\code{\verb~|ref.exact=official~} for the reference kernel: where the official verdict depends on object identity, the kernel probes the official second pass and, if that pass can change anything, checks the declaration again under both continuations; it declines the declaration only if the two verdicts differ. Judgments of admission start with empty caches.}}
-\tr{\td{Loader}\td{A metadata node around a term is transparent: the wrapped term stands for it.}\td{\code{strictMetadata}: a declaration whose type or value carries a metadata node, or a let with the flag \code{nondep} set, is declined, per unit.}}
+\tr{\td{Loader}\td{A metadata node around a term is transparent: the wrapped term stands for it. One position is declined under both policies, a node around an application of \code{eagerReduce}. A rejection of a file in which a node was dropped is not reported: the launcher runs the file again under \code{strict}.}\td{\code{strictMetadata}: a declaration whose type or value carries a metadata node, or a let with the flag \code{nondep} set, is declined, per unit.}}
 \tr{\td{Other engines}\td{An engine that declares the key \code{policy} receives \code{\verb~|policy=practical~}.}\td{It receives \code{\verb~|policy=strict~}, so a further engine can follow the policy without a change of the launcher.}}
 }
 
-\p{A strict run says what it had: the statistics line prints \code{\verb~|policy=strict[ref.exact=official,metadata]~}, with empty brackets when the jars of the run have neither option. Neither policy can turn a rejection into an acceptance of something underivable: strict only adds declines. The summary of the audit of the reference engine states that the strict declines cost no declaration on the eight corpora; the section of that document that was to list the runs was not filled in.}
+\p{A strict run says what it had: the statistics line prints \code{\verb~|policy=strict[ref.exact=official,metadata]~}, with empty brackets when the jars of the run have neither option. Neither policy can turn a rejection into an acceptance of something underivable: strict only adds declines. The audit of the reference engine lists the runs: no declaration of the eight corpora, Mathlib included, is declined in the strict mode, and its CPU time is within the noise of the practical mode; see [the caches of the reference engine](design-reference-caches).}
 }
 
 \subtree[design-exactness-contract-strict-engine]{
@@ -63,12 +64,12 @@
 \title{What the strict mode does not reach}
 
 \ul{
-\li{Metadata and the \code{nondep} flag of a let are declined, not represented: a strict run of a file that has them gives no verdict. No let record of the eight corpora or of the arena tests has the flag set, 0 of 550,621, and none of them has a metadata record. The audit of the reference engine still describes the decline for the flag as an unpublished patch; the loader's document, which is later, records it as implemented and tested.}
+\li{Metadata and the \code{nondep} flag of a let are declined, not represented: a strict run of a file that has them gives no verdict. No let record of the eight corpora or of the arena tests has the flag set, 0 of 550,621, and none of them has a metadata record. The strict decline for the flag is published with the loader.}
 \li{In three groups of judgments of inductive admission the official kernel shares one checker; the strict kernel gives each judgment empty caches and is fresher than the official one there.}
 \li{An object-identity hazard inside a judgment of admission is declined at once, since there is no session to check it both ways. It was not seen on the corpora.}
 }
 }
 
-\p{Related: [accepted risks](accepted-risks) is the policy summary of what is tolerated; [metadata only in the strict mode](dec-USLM), [typed bindings stay](dec-0DSI) and [the shortcuts as a profile](dec-GL11) are the decisions that follow from the contract; [the reference engine](design-reference-engine) and [its caches](design-reference-caches) describe the strict engine. Detail: \src{docs/design/OWNER-NOTES.md} note 13, \src{rlvm-main/README.md} section "Policy", \src{docs/design/review/reference-caches.md}, \src{docs/design/ISA.md} section 14.2. Source: [the exactness session](ses-874D).}
+\p{Related: [accepted risks](accepted-risks) is the policy summary of what is tolerated; [metadata only in the strict mode](dec-USLM), [typed bindings stay](dec-0DSI) and [the shortcuts as a profile](dec-GL11) are the decisions that follow from the contract; [the reference engine](design-reference-engine) and [its caches](design-reference-caches) describe the strict engine. Detail: [the owner's notes](owner-notes) note 13, \src{rlvm-main/README.md} section "Policy", [the audit of the reference engine's caches](rep-reference-caches), [the instruction-set document](design-isa-document) section 14.2. Source: [the exactness session](ses-874D) and, for the end of the day, [the finalization session](ses-A14B).}
 
-\p{Findings, examples and open problems: [the official comparison is not transitive](ins-4VH2), [the strict mode and object identity](prob-1YXM).}
+\p{Findings, examples and open problems: [the official comparison is not transitive](ins-4VH2), [the strict mode and object identity](prob-1YXM), [a rejection of an official accept through a dropped node](ex-FD6K).}

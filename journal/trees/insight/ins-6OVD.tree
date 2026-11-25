@@ -7,9 +7,10 @@
 \tag{benchmark}
 \tag{machine}
 \meta{origin}{docs/research/profiles/AR1.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Source: the arena dry run \src{docs/research/profiles/AR1.md}, [the profiling session](ses-JRSD). The complete arena test set of 270 tests and Mathlib were run with the arena run line in an arena-shaped container on the aarch64 development host: 8 performance cores, 16 GB, no network, 4 workers, a cold process, batch load, native image. Instruction counts repeat to 0.2 percent. The places are a projection: RLVM has never been measured on the x86-64 runner, and the counts were converted with the ratio that a leader measured in the same session shows between this host and the published board, 0.90 to 1.05.}
+\p{Source: the arena dry run, [report AR1](rep-AR1); [the profiling session](ses-JRSD). The complete arena test set of 270 tests and Mathlib were run with the arena run line in an arena-shaped container on the aarch64 development host: 8 performance cores, 16 GB, no network, 4 workers, a cold process, batch load, native image. Instruction counts repeat to 0.2 percent. The places are a projection: RLVM has never been measured on the x86-64 runner, and the counts were converted with the ratio that a leader measured in the same session shows between this host and the published board, 0.90 to 1.05.}
 \table{
 \tr{\th{Configuration}\th{Mathlib, instructions}\th{Times nano-lean}\th{Wall clock}\th{Projected place on the board}}
 \tr{\td{reference engine, the arena definition as it was}\td{8,427.1 G}\td{23.33}\td{177.7 s}\td{15}}
@@ -27,4 +28,5 @@
 \li{With the switch set \code{\verb~|warm,gated,expect~} the test \code{\verb~|perf/loop-unfolded-once~}, [described here](ex-IIVH), takes 31.6 s of its 40 s limit on this host and would probably time out on the slower runner.}
 }
 \p{This is information, not a target: the arena metric is not the project metric, see [the arena clock](ins-0Q3P).}
+\p{\strong{At the end of 2026-11-24} the last row of the table is the default configuration: the machine is the default engine, with eager reduction and the two shortcuts in its default set. With 8 threads its cold process needs 1,652.9 G on Mathlib, see [the benchmark tables](rep-benchmarks). pestka, the entry it would have to pass next, needs 1,339.6 G on this host, so the projection is still the sixth place, also for the optional profile-guided build and for the JVM launcher, see [the instruction counts of the launchers](ins-8FP8).}
 \p{See also: [the decision for warm wall clock](dec-7QMU).}

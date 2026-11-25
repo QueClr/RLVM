@@ -1,0 +1,26 @@
+\title{A profile is worth 9 to 12 percent of the image's instructions on Mathlib, only Oracle GraalVM has it, and the image has no warm-up to remove}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{arena}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report on profile-guided optimisation](rep-PG1), a measurement with Oracle GraalVM that changed no default; [the finalization session](ses-A14B). The question was whether a release can carry its warm-up, so that a fresh process of the arena runs the hot path at once. Conditions: Mathlib, the machine with the switch set that became its default (the set of wave 6 with \code{eager}, \code{skipargs} and \code{congruence}), 8 workers, one fresh process per row in the arena-shaped container, timings inside quiet-core windows, user-space instructions of all threads, aarch64 development host.}
+
+\ul{
+\li{\strong{The mechanism is profile-guided optimisation, and only Oracle GraalVM has it.} A binary compiled ahead of time has no warm-up phase to move; a training run can give it what a JIT learns while warming up. GraalVM Community Edition 25 rejects the option. So it can only be an option of the build, see [the decision on Oracle GraalVM](dec-6E82) and [packaging](design-packaging).}
+\li{\strong{The numbers.} Image of the Community Edition as shipped, Oracle GraalVM without a profile, Oracle GraalVM with a profile trained on Init: 1,687.6 G, 1,705.6 G and 1,483.2 G instructions (-12.1 \%); cold wall clock 17.82 s, 16.73 s and 15.57 s; warm wall clock, the median of passes 2 to 4 of one process, 17.11 s, 17.49 s and 15.18 s. A profile trained on Std and cedar gives 1,542.8 G (-8.6 \%), one trained on two Mathlib slices and Std 1,528.2 G (-9.4 \%). Oracle's compiler alone is worth nothing in instructions.}
+\li{\strong{The image has no warm-up to remove.} A cold Mathlib process takes 17.82 s and a later pass of the same process 17.11 s; the second pass of a two-pass process costs 1,697.9 G where a cold process costs 1,689.7 G. A profile makes the image's code better. It does not remove a start-up phase, because there is none.}
+\li{\strong{The cheapest training set is the best}: Init alone, on every corpus. The profile has to be recorded with the configuration that ships: a profile of another switch set loses a third of the gain, and a run of the reference engine beside the machine's costs the machine 2.9 \% of Mathlib (1,526.0 G against 1,483.2 G).}
+\li{\strong{A stale profile degrades gently and silently}: after 4.3 hours of the project's changes it kept a half to three quarters of the gain and made no measured cell slower than the Community Edition image, and the build output does not tell it from a fresh one.}
+\li{\strong{Same verdicts}: on each of the 270 tests of the arena the profile-guided image gives the status and the exit code of the Community Edition image.}
+\li{\strong{It buys no place on the arena's board}: pestka needs 1,339.6 G on this host.}
+}
+
+\p{\strong{Not established:} anything on x86-64, the architecture of the arena runner; whether a profile recorded on aarch64 serves an x86-64 build; timing differences below 5 \%, since the timed cells are one run each.}
+
+\p{See also: [on Mathlib the JVM launcher needs fewer instructions than every image](ins-8FP8), [an ahead-of-time cache for the JVM](ins-M0WQ), [warm against cold on the two launchers](ins-GJ75).}

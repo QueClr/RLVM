@@ -8,9 +8,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/design/VALUES-V2.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted as the form in which the change may enter the machine. Not applied: on 2026-11-24 the patches are a recorded queue for the owners of the machine's files, and the switch is not in the list of \src{rlvm-machine/SWITCHES.md}.}
+\p{\strong{Status:} accepted as the form in which the change may enter the machine. Not applied, and not in the release that was finalized on the evening of 2026-11-24: the integrator of the machine found that the seven patches apply to the main tree of that evening without a failed hunk and did not start the rest, which could not be gated without haste before the set of jars was frozen: the named switch that stays off, the proof that the off state costs nothing, and the gates with the switch on. The switch is not in the list of the switch reference. See [what the release leaves open](prob-HC9J).}
 
 \p{\strong{Context.} [The value model](design-value-model) interns every record in the operation that makes it. [Its proposed second version](design-values-v2) lets an application be born private, in no table, and identifies it only when it becomes a memo subject, a component of a key or a side of a comparison. The proposal came with a prototype on a private copy of the machine and with measurements. The project's metric is warm wall clock with eight workers, see [the decision on the metric](dec-7QMU), and every optimisation of the machine that changes what is computed sits behind a [staging switch](design-switches).}
 
@@ -54,6 +55,6 @@
 
 \p{\strong{Consequences.} The stages of the design note apply: plumbing with no behaviour change, the switch, then completing the classes until the tick count with the switch equals the count without it and making that a gate, then the Truffle tier. A session's footprint grows with the switch, so the session cap is reached earlier. If the switch is wrong it costs one bit test per key-forming call while a large session has private records, and nothing otherwise. Not established: the eight-worker gain, any timing on Init, Std, cedar or Mathlib, the launcher path with the real pipeline, and the mutant corpora with the mode.}
 
-\p{Related: [the Truffle tier](design-truffle-tier), [the decision against reference-count bits](dec-80ZZ), [warm sessions](design-warm-sessions). Detail: \src{docs/design/VALUES-V2.md}, sections 0, 10 and 11. Source: [the session of profiles and prototypes](ses-JRSD).}
+\p{Related: [the Truffle tier](design-truffle-tier), [the decision against reference-count bits](dec-80ZZ), [warm sessions](design-warm-sessions). Detail: [the document on the second value model](design-values-v2-document), sections 0, 10 and 11. Source: [the session of profiles and prototypes](ses-JRSD).}
 
 \p{Findings, examples and open problems: [an application can be born private](ins-PMD4), [no gain at eight workers in the native image](prob-BHBU).}

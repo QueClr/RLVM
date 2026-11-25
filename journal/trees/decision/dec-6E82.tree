@@ -8,9 +8,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/design/OWNER-NOTES.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. \src{scripts/build.sh} uses Oracle GraalVM only when asked with \code{\verb~|--pgo~}, and no script downloads it.}
+\p{\strong{Status:} accepted, and refined on 2026-11-24 by owner note 16: nothing default downloads or uses Oracle GraalVM; an explicitly requested build may. \src{scripts/build.sh} uses Oracle GraalVM only when asked with \code{\verb~|--oracle-pgo~} (it was \code{\verb~|--pgo~} when this was written), and downloads it only with an explicit flag that accepts its licence. See [packaging](design-packaging).}
 
 \p{\strong{Context.} RLVM is built with GraalVM Community Edition 25. Oracle GraalVM, licensed under the GFTC (free to use, not to redistribute), has two things for a native image that the Community Edition lacks: profile-guided optimisation and the G1 collector. The architecture kept an image with profile-guided optimisation as one of three candidates of the platform gate, and noted that the arena build would then have to fetch Oracle GraalVM. Until this decision a default build made that image whenever an Oracle GraalVM was present in the toolchain directory. What it is worth had been measured:}
 \ul{
@@ -25,10 +26,10 @@
 \p{\strong{Consequences.}}
 \ul{
 \li{The shipped image is the Community image: \code{\verb~|-O3~}, serial collector, see [the launchers](design-launchers). The arena definition uses the Community Edition only.}
-\li{An image with profiles, \code{\verb~|bin/rlvm-pgo~}, is built only with \code{\verb~|scripts/build.sh --pgo~}, and only if somebody has put an Oracle GraalVM into the toolchain directory by hand. The modules are then compiled a second time against that GraalVM's Truffle version, an instrumented image runs the training exports (by default the prelude and, if present, Init; others with \code{\verb~|--train FILE~}), and the final image is built from the profiles. A table that contains such a row names it as Oracle GraalVM with profiles.}
-\li{The gain that profiles gave the reference engine, about a tenth of the CPU time of the Community image on Mathlib, is not available to a default build. With the machine as engine it was never measured: it would have needed three more image builds.}
+\li{As first implemented: an image with profiles, \code{\verb~|bin/rlvm-pgo~}, is built only with \code{\verb~|scripts/build.sh --pgo~}, and only if somebody has put an Oracle GraalVM into the toolchain directory by hand. The modules are then compiled a second time against that GraalVM's Truffle version, an instrumented image runs the training exports (by default the prelude and, if present, Init; others with \code{\verb~|--train FILE~}), and the final image is built from the profiles. A table that contains such a row names it as Oracle GraalVM with profiles. Since the evening of 2026-11-24 no build makes a second binary: \code{\verb~|--oracle-pgo~} builds the one executable into a distribution of its own, from profiles that are kept in the repository and recorded on Init in the default configuration, and warns when the profiles are older than the jars.}
+\li{The gain that profiles gave the reference engine, about a tenth of the CPU time of the Community image on Mathlib, is not available to a default build. With the machine as engine it had not been measured when this was written. It was on the evening of 2026-11-24: [a profile is worth 9 to 12 percent of the instructions on Mathlib](ins-W0H4), and Oracle's compiler without a profile nothing.}
 \li{The image has no collector but the serial one, which closes the collector question for the arena, see [dec-Z6DD](dec-Z6DD).}
-\li{Steady-state speed beyond the Community image is sought on the JVM launcher instead, see [dec-WX9Z](dec-WX9Z).}
+\li{Steady-state speed beyond the Community image was sought on the JVM launcher instead, see [dec-WX9Z](dec-WX9Z), which is superseded: the release is one executable, the Community image, and the JVM launcher is a development tool.}
 }
 
-\p{Recorded as a standing policy: [standing policies](standing-policies-conduct). Documents: \src{docs/design/OWNER-NOTES.md} (note 11), \src{docs/PLATFORM.md} (Part II for the labelled measurements), \src{docs/design/ARCHITECTURE.md} (sections 7.1 and 7.6), \src{scripts/build.sh}. Source: [the session of the pipeline wave](ses-CVTE), in which the build script was changed.}
+\p{Recorded as a standing policy: [standing policies](standing-policies-conduct). Documents: [the owner's notes](owner-notes) (note 11), [the platform document](design-platform-document) (Part II for the labelled measurements), [the architecture document](design-architecture-document) (sections 7.1 and 7.6), \src{scripts/build.sh}. Source: [the session of the pipeline wave](ses-CVTE), in which the build script was changed.}

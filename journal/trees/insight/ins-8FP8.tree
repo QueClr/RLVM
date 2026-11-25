@@ -1,0 +1,34 @@
+\title{On Mathlib the JVM launcher needs fewer instructions than every native image}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{arena}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report on profile-guided optimisation](rep-PG1), section 4.2; [the finalization session](ses-A14B). The arena ranks by instructions of a fresh process, and the working assumption was that a JIT cannot win that metric, because its compiler threads and its interpreted start are counted. Conditions: Mathlib, the machine with the set of wave 6 with \code{eager}, \code{skipargs} and \code{congruence}, 8 workers, one cold process in the arena-shaped container on 8 quiet cores, compiler threads counted, aarch64 development host.}
+
+\table{
+\tr{\th{Launcher}\th{Instructions}\th{CPU time}\th{Wall clock}\th{Peak RSS}}
+\tr{\td{JVM launcher as shipped: GraalVM Community Edition, C2, no profile}\td{1,368.7 G}\td{125.1 s}\td{16.66 s}\td{5,800 MiB}}
+\tr{\td{The same with an AOT cache of JDK 25 trained on Init}\td{1,364.8 G}\td{123.3 s}\td{16.35 s}\td{5,380 MiB}}
+\tr{\td{Native image of the Community Edition}\td{1,687.6 G}\td{127.5 s}\td{17.82 s}\td{4,087 MiB}}
+\tr{\td{Native image of Oracle GraalVM with the Init profile, measurement only}\td{1,483.2 G}\td{111.4 s}\td{15.57 s}\td{4,495 MiB}}
+}
+
+\ul{
+\li{The first row is the run in a quiet window. The count of the JVM moves with the scheduling of its compiler threads: 1,411.0 G and 1,425.2 G in two further runs that were squeezed onto two cores. An image repeats to 0.1 \%.}
+\li{One warm Mathlib pass costs 1,180 to 1,240 G on the JVM and about 1,700 G in the Community Edition image. The JVM has a warm-up, the image has none, and the cold process of the JVM is still the cheaper one.}
+\li{On everything short the JVM costs more: Init 196.8 G against 81.2 G, cedar 340.0 G against 204.1 G; with an AOT cache trained on Std 121.5 G and 251.2 G. The two launchers are about equal from the size of navier-stokes-euler on (546.0 G against 527.2 G; cslib 579.4 G against 569.3 G). A small test takes 0.22 s against 0.014 s.}
+\li{All 270 tests of the arena through the JVM launcher under the arena's limits: the same status and exit code as the image on every test and no timeout; the closest took 19 s of 110 s.}
+\li{None of this passes pestka, which needs 1,339.6 G on this host: sixth place with the image, with the profile-guided image and with the JVM launcher alike.}
+}
+
+\p{So "a JIT cannot win the arena's metric" holds for 269 tests and not for the one corpus that decides the rank. No default was changed for it: the release is [one executable](design-packaging), the native image, and the project's metric is warm wall clock, not the arena's instructions.}
+
+\p{\strong{Not established:} anything on x86-64; timing differences below 5 \%. The instruction counts of the short corpora on the JVM are from runs outside quiet windows.}
+
+\p{See also: [a profile is worth 9 to 12 percent and only Oracle has it](ins-W0H4), [the arena's clock is an instruction count](ins-0Q3P), [what the board places are worth](ins-6OVD), [warm against cold on the two launchers](ins-GJ75).}

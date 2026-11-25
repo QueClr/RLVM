@@ -1,0 +1,32 @@
+\title{The launcher's safety net: a practical rejection of a file with a dropped metadata node is checked again under the strict policy}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\tag{reference-engine}
+\tag{loader}
+\meta{release}{Unreleased}
+\meta{commit}{694c8fb}
+\import{base-macros}
+
+\p{[Finding R2-F4](ex-FD6K): four hand-made exports that the official checker accepts and the default configuration of that hour, with the reference engine, rejected, because the loader drops metadata nodes in the practical mode and the official caches treat a node as a term of its own. The cause is in the terms the loader hands to an engine, not in an engine. No rule on the position of the node separates such files from files that are handled correctly, so the class is closed in the launcher; see [the decision](dec-7UAL).}
+
+\p{\strong{The change}, in \code{rlvm-main}. In the practical mode a rejection of a file in which the loader dropped at least one metadata node is not reported. The file is checked once more as a plain run under \code{\verb~|-X policy=strict~} (fresh stores, the reference engine in its strict mode, the loader's decline of metadata), and that verdict is the verdict of the run: accept, reject or decline. An accept or a decline of the practical run is untouched, and so is every file without a metadata record, which is every file of the eight corpora and every one of the 270 arena tests. A run with several passes has the net too, as one strict run after the passes. The diagnostics say that the first verdict is not reported and quote its explanation; the statistics line of the reported run ends with \code{\verb~|net=strict-recheck(practical=reject,metadata=N,practical_wall_ms=T)~}. The counter counts records read, so a node in a record that no declaration uses also starts the second run, which then ends as the first did.}
+
+\p{\strong{Gate on the published jar}, with the reference engine as default engine.}
+\ul{
+\li{The suite of the module: 64 tests, 61 run and 3 opt-in, with a new class of 9 tests for the net.}
+\li{The gate of the default configuration on all corpora with the hostile exports: 230 of 230 arena tests, none declined; 17,775 mutants with no soundness and no completeness difference, 15,741 in agreement and 2,034 declined. Against the record of before (16,092 and 1,683) exactly 351 agreements became declines: 67 of the tutorial mutants, 37 of the bugs mutants and 247 of the metadata mutants. Checked file by file, all 351 are correct rejections of mutants with a metadata record. No accepted file and no file without a metadata record changed.}
+\li{All 1,245 hostile exports with official verdicts: exactly four verdicts change, the four files of the finding, from reject to decline. No rejection of an official accept is left; the six verdicts opposite to the official one are accepts of the tolerated kind; the strict mode has none.}
+\li{Init, Std and reachability are accepted as before, without a second run.}
+\li{The same gate through the executable gives the same counts.}
+}
+
+\p{\strong{Cost}, where the net fires: one more strict check of the file. JVM launcher, default options, five alternating rounds in one quiet window on the aarch64 development host, whole process, median with minimum and maximum, on the two largest such files. A mutant of 593 kB, which the strict load declines: 0.16 s (0.15 to 0.18) without the net, 0.18 s (0.18 to 0.19) with it. A mutant of 297 kB, which the strict run checks up to the rejection: 0.14 s (0.12 to 0.14) and 0.17 s (0.16 to 0.19). The files on which the net fires have a median size of 5 kB.}
+
+\p{\strong{With the machine as default engine}, which came [later the same evening](log-65Z0), the rule for the four rows in the machine's hostile suite is the official verdict or a decline through the launcher; in process an engine may reject them. The audit records that the machine of that evening accepted the four files as primary engine, without a second run. The gate of the machine-default distribution over the 1,196 rows of the hostile suite has no wrong accept and no wrong reject, see [the gate](design-gate).}
+
+\p{Detail: [the audit of the reference engine's caches](rep-reference-caches), section 6.1, with the three counts and the cost. Commit \commit{694c8fb}. Related: [the loader's rule around eagerReduce](log-6K9N), [metadata in the two policies](dec-USLM), [the exactness contract](design-exactness-contract).}

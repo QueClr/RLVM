@@ -1,0 +1,29 @@
+\title{The loader declines a declaration with a metadata node around an application of eagerReduce}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\tag{loader}
+\tag{reference-engine}
+\meta{release}{Unreleased}
+\meta{commit}{dd7a06e}
+\import{base-macros}
+
+\p{Under the practical policy the loader drops metadata nodes and the wrapped term stands for the node, see [the decision](dec-USLM). That may make RLVM accept more than the official checker, which is tolerated, and must not make it reject what the official checker accepts. One export did: \code{s3-mdata-eager-hidden-ok}. The official test for eager reduction looks at an argument of the form \code{\verb~|eagerReduce _ _~} syntactically and stops at a metadata node, so the official kernel checks that argument without eager reduction and accepts. With the node dropped the reference engine entered eager reduction, where the official kernel itself rejects the statement, and rejected; so did the machine with the set of wave 6 and \code{eager}, while the set with the two shortcuts accepted the file.}
+
+\p{\strong{The rule}, in \code{rlvm-load}, under both policies. A declaration is declined (exit status 2, with a message that names the node) if a metadata node stood around a record that is, or cannot be shown not to be, the constant \code{eagerReduce} applied to at most two arguments: the node is then on the path from such an argument to its head, around the argument itself, the partial application or the constant. Everything else with metadata stays transparent in the practical mode: a node inside the two arguments, around an application with three arguments, or anywhere else. The rule can fire only in a file that has a metadata record and names \code{eagerReduce}; there the loader fails closed where it cannot read a record back, an application that belongs to an earlier declaration or lies in a packed run. Files without metadata are loaded as before.}
+
+\p{\strong{Evidence on the published jar.}}
+\ul{
+\li{The suite of the loader, 81 tests, with one new test of ten variants: the argument, the partial application or the constant wrapped; the constant or the application in an earlier declaration; and what must not be declined.}
+\li{The digest of the store is identical in all 14 reader configurations, Mathlib among them: the rule fires on none of those files. The eight corpora have no metadata record.}
+\li{The gate on all corpora: 230 of 230 arena tests and none declined; 17,775 mutants with no soundness and no completeness difference, 16,092 in agreement and 1,683 declined, the same counts as before in every corpus. In the corpus of metadata mutants (779 in agreement, 1,197 declined) no agreement became a decline.}
+\li{1,239 hostile exports with official verdicts: exactly one verdict changes, \code{s3-mdata-eager-hidden-ok} from reject to decline. The practical mode then had 6 verdicts opposite to the official one, all accepts of the tolerated kind and none a rejection of an official accept; the strict mode none opposite and 14 declines, as before.}
+}
+
+\p{\strong{What it did not close.} The audit listed which other syntactic tests of the official kernel a dropped node can fool. One more can turn an official accept into a rejection, through the caches: the cheap beta reduction of an inferred type. It was built as an export a few minutes after this publication ([finding R2-F4](ex-FD6K)) and is closed for the whole class by [the launcher's safety net](log-TRJ0), not by a second rule of this kind; see [the decision](dec-7UAL). Since the net exists this rule is no longer needed for the contract: it turns a decline after two runs into a decline at load.}
+
+\p{Detail: [the audit of the reference engine's caches](rep-reference-caches), section 6.1, with the table of the official tests. Commit \commit{dd7a06e}. Related: [the caches of the reference engine](design-reference-caches), [the export loader](design-export-loader).}

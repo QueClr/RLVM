@@ -6,29 +6,39 @@
 \tag{machine}
 \tag{soundness}
 \tag{reference-engine}
-\meta{status}{open}
+\meta{status}{closed}
 \meta{created}{2026-11-24}
+\meta{completed}{2026-11-24}
 \meta{origin}{rlvm-machine/SWITCHES.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} open.}
-\p{\strong{State in the documents of 2026-11-24.} The reference engine is the default engine. The machine is selected by option; the reference engine then re-checks every rejection and decides every unit the machine declines. The machine was the default from 19:41Z to 20:35Z and was taken back because new hostile exports showed wrong accepts against the official checker, see [typing values](ins-AAXM). Source: the note at the top of \src{rlvm-machine/SWITCHES.md} and \src{docs/BENCHMARKS.md}.}
+\p{\strong{Status:} closed on 2026-11-24. The machine is the default engine since 2026-11-25 03:05 UTC, which is 22:05 local time on 2026-11-24: see [the changelog entry](log-65Z0). The paragraphs below are the problem as it stood in the afternoon, with what happened to each condition added; the last paragraph says what closed it.}
+\p{\strong{State when this was written, the afternoon of 2026-11-24.} The reference engine was the default engine. The machine was selected by option; the reference engine then re-checked every rejection and decided every unit the machine declined. The machine had been the default from 19:41 to 20:35 UTC that day and was taken back because new hostile exports showed wrong accepts against the official checker, see [typing values](ins-AAXM). Source: the list of switches and the benchmark tables as they were that afternoon; the list in its final state is [the switch reference](design-switches-document).}
 \p{\strong{The contract.} Since the decision of the maintainer for practical exactness, the default configuration must never accept a statement that is not derivable, must give the official verdict on every real input, and must accept everything the official checker accepts; accepting a derivable statement that the official checker rejects for reasons internal to its implementation is tolerated and written down. See [standing policies](standing-policies) and [accepted risks](accepted-risks). The machine may be the default once the gates show the first three and an adversarial review of the candidate has found no false accept.}
-\p{\strong{What is done.}}
+\p{\strong{What was done by then.}}
 \ul{
-\li{The findings E1-F1 to E1-F6 are fixed; E1-F7 is of the tolerated kind. With the fixed machine the full gate of the plain machine and of the default set shows no wrong verdict, 17,775 mutants show no soundness and no completeness difference, and 1,153,493 engine checks over the arena tests, the corpora and 16 Mathlib slices show no verdict difference from the reference engine. Source: \src{docs/design/review/official-divergence.md}, section 6.}
-\li{The adversarial review found no false accept in the default set and none in the candidate, the default set with \code{\verb~|eager~} and both shortcuts, on 987 hostile rows with official verdicts and 200 random programs. Source: \src{docs/design/review/soundness-default-set.md}, section 10.}
+\li{The findings E1-F1 to E1-F6 are fixed; E1-F7 is of the tolerated kind. With the fixed machine the full gate of the plain machine and of the default set shows no wrong verdict, 17,775 mutants show no soundness and no completeness difference, and 1,153,493 engine checks over the arena tests, the corpora and 16 Mathlib slices show no verdict difference from the reference engine. Source: [the record of the divergence classes](rep-official-divergence), section 6.}
+\li{The adversarial review found no false accept in the default set and none in the candidate, the default set with \code{\verb~|eager~} and both shortcuts, on 987 hostile rows with official verdicts and 200 random programs. Source: [the adversarial review of the default set](rep-soundness-default-set), section 10.}
 \li{The launcher has one option for the policy; the strict policy is the reference engine alone. Source: \src{rlvm-main/README.md}.}
 \li{A gate for a default configuration exists whose hostile step uses stored official verdicts and lets only rows marked as tolerated be accepted.}
 }
-\p{\strong{What is open}, from the conditions of the review:}
+\p{\strong{What was open}, from the conditions of the review, and how each ended:}
 \ul{
-\li{The named switches for the two shortcuts must switch the behaviour of \code{\verb~|facts~} and \code{\verb~|probes~} on with them; the options are inert without those switches.}
-\li{The 423 rows of the review enter the hostile suite with their kinds, the rows for the seeded faults first. Done at the end of 2026-11-24: the suite has 1,189 rows, the rows of all reviews, each with its official verdict taken again from the official checker and its kind; 81 rows are of the tolerated kind.}
-\li{A finding that is no wrong verdict, S3-F7: the compiled code declines a valid unit whose body builds a closure over a variable bound to a small numeral. It is to be fixed or counted. Fixed on the evening of 2026-11-24, with a regression test of the rows that found it: \src{rlvm-machine/NOTES-M7.md}, commit \commit{5bd53c6}.}
-\li{The strict re-check of the pipeline stays what decides a rejection of the machine. An accept of the plain machine there is final, so a wrong accept of the plain machine is a wrong accept of the pipeline whatever the switch set does.}
-\li{Not covered by the review: parallel workers, the native image, and the corpora and mutants under the candidate.}
-\li{The choice of the default switch set itself: with or without \code{\verb~|eager~}, with or without the shortcuts, by warm wall clock over all corpora.}
+\li{The named switches for the two shortcuts must switch the behaviour of \code{\verb~|facts~} and \code{\verb~|probes~} on with them; the options are inert without those switches. \strong{Done:} \code{skipargs} brings \code{facts} and \code{congruence} brings \code{probes}, whatever the order of the list, see [the changelog entry of the default set](log-HS1E).}
+\li{The 423 rows of the review enter the hostile suite with their kinds, the rows for the seeded faults first. \strong{Done:} the suite got the rows of all reviews, each with its official verdict taken again from the official checker and its kind, 1,189 rows with 81 of the tolerated kind; with the seven exports of [the metadata finding](ex-FD6K) it has 1,196 rows, 83 of the tolerated kind.}
+\li{A finding that is no wrong verdict, S3-F7: the compiled code declines a valid unit whose body builds a closure over a variable bound to a small numeral. It is to be fixed or counted. \strong{Fixed} on the evening of 2026-11-24, with a regression test of the rows that found it: [the working notes of package M7](rep-machine-M7), commit \commit{5bd53c6}.}
+\li{The strict re-check of the pipeline stays what decides a rejection of the machine. An accept of the plain machine there is final, so a wrong accept of the plain machine is a wrong accept of the pipeline whatever the switch set does. \strong{Unchanged:} the reference engine re-checks every rejection and decides every decline.}
+\li{Not covered by the review: parallel workers, the native image, and the corpora and mutants under the candidate. \strong{Covered by the gates of the set:} 17,775 mutants through the real driver with no soundness and no completeness difference, the differential engine through the launcher on 1,141,195 checks without a difference, and all eight corpora accepted with 8 and with 4 workers on the JVM launcher and on the native image.}
+\li{The choice of the default switch set itself: with or without \code{\verb~|eager~}, with or without the shortcuts, by warm wall clock over all corpora. \strong{Decided:} with all three, see [the decision](dec-YP0N).}
 }
-\p{\strong{What would close it.} The gate for a default configuration green on a distribution in which the machine has the default priority, with the hostile suite extended as above, and the benchmark tables regenerated for that distribution.}
-\p{See also: [the decision on the machine as default engine](dec-T79V); [the exactness contract](design-exactness-contract); [the gate](design-gate).}
+\p{\strong{What would close it}, as written in the afternoon. The gate for a default configuration green on a distribution in which the machine has the default priority, with the hostile suite extended as above, and the benchmark tables regenerated for that distribution.}
+\p{\strong{What closed it.} Two more conditions came up during the evening and were met first: the level-store fix of [finding LV1-F1](log-XNVE) had to be in the distribution that is gated, and the rejection of official accepts through dropped metadata, [finding R2-F4](ex-FD6K), had to be closed, which [the launcher's safety net](log-TRJ0) did. Then, in this order:}
+\ol{
+\li{The gate for a default configuration, with no option anywhere, on a distribution whose machine jar has the default priority and is byte for byte the jar that was published afterwards: 230 of 230 published tests correct and none declined; 17,775 mutants with no soundness and no completeness difference (15,741 in agreement, 2,034 declined); the differential self-test; the hostile suite of 1,196 rows with 1,124 in agreement, 68 tolerated accepts, 4 declined, no wrong accept and no wrong reject.}
+\li{The integrator's statement of all evidence before the publication, the publication of the priority as a change of its own at 03:05 UTC, and the arena's build-and-run test on the machine-default main tree right after it, which passed.}
+\li{The same gate on the distribution the team shares, rebuilt from the frozen set of jars, through the executable and through the jars, with the same counts.}
+\li{The benchmark tables regenerated for that distribution: [the benchmark tables](rep-benchmarks).}
+}
+\p{What the release leaves open is collected in [a problem tree of its own](prob-HC9J).}
+\p{See also: [the decision on the machine as default engine](dec-T79V); [the exactness contract](design-exactness-contract); [the gate](design-gate). Source of the closure: [the finalization session](ses-A14B).}

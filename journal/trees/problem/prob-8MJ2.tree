@@ -1,4 +1,4 @@
-\title{Eager reduction on the machine is built and off by default}
+\title{Eager reduction on the machine was built and off by default}
 \taxon{Problem}
 \date{2026-11-24}
 \author{claude-fable-5-2}
@@ -6,13 +6,15 @@
 \tag{machine}
 \tag{soundness}
 \tag{performance}
-\meta{status}{open}
+\meta{status}{closed}
 \meta{created}{2026-11-24}
+\meta{completed}{2026-11-24}
 \meta{origin}{docs/design/review/eager-reduction.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} open.}
-\p{\strong{State.} The switch \code{\verb~|eager~} was published in the main tree on 2026-11-24 and is off. Without it a declaration that enters eager reduction is declined by the machine and decided by the reference engine, which costs [a tenth of the worker time](ins-47IQ) on Mathlib, cslib, Std and cedar. With it the machine decides such a declaration with the official verdict or declines. Source: \src{docs/design/review/eager-reduction.md}; [the profiling session](ses-JRSD).}
+\p{\strong{Status:} closed on 2026-11-24: the switch is in the default switch set since that evening, by [the decision on the default set](dec-YP0N). The paragraphs below are the problem as it stood in the afternoon; the last one says what closed it and what it leaves.}
+\p{\strong{State in the afternoon of 2026-11-24.} The switch \code{\verb~|eager~} was published in the main tree on 2026-11-24 and was off. Without it a declaration that enters eager reduction is declined by the machine and decided by the reference engine, which costs [a tenth of the worker time](ins-47IQ) on Mathlib, cslib, Std and cedar. With it the machine decides such a declaration with the official verdict or declines. Source: [the review of eager reduction](rep-eager-reduction); [the profiling session](ses-JRSD).}
 \p{\strong{What is known.}}
 \ul{
 \li{Declines go to 0 on Init, Std, cedar, reachability and Mathlib, at 2.5 to 4.4 percent more machine steps. The differential gate against the reference engine per declaration is clean on the tutorial and bugs tests, the Cedar slice, reachability, Init, Std, 16 Mathlib slices and all 230 published tests.}
@@ -23,4 +25,11 @@
 }
 \p{\strong{What is open.} Warm wall clock was measured for Std and cedar only, on the JVM launcher with check-only passes: -11 and -22 percent, -7 and -10 percent. Mathlib, the native image, one worker and passes that load were not measured. The review did not cover parallel workers, the native image, or the corpora and mutants under the candidate.}
 \p{\strong{What would close it.} Those measurements and gates, and then the decision on the default switch set that is part of [making the machine the default engine](prob-W2FV).}
-\p{See also: [eager reduction on the machine](design-eager-reduction).}
+\p{\strong{What closed it.} The measurement on all eight corpora with passes that load, on the JVM launcher and on the native image, and the gates of the set that contains the switch.}
+\ul{
+\li{The first table found what the measurements on Std and cedar could not: with the switch, one unit of con-leche ran a probe of the plain phase into the limit of a session and made that corpus's pass 14.0 s long. The probes got [a tick budget](log-P6FV).}
+\li{With the budget, JVM launcher, 8 workers, warm passes that reload the file, the switch against the set of wave 6: Mathlib 20.49 to 18.02 s (-12.1 \%), Std -10.8 \%, cslib -6.8 \%, cedar -5.1 \%, at most +2.2 \% on con-leche and +1.7 \% on reachability; geometric mean -4.1 \%. On the native image Mathlib 24.53 to 21.29 s.}
+\li{Parallel workers, the native image, the corpora and the mutants under the set are covered by the gates of [the default switch set](log-HS1E).}
+}
+\p{\strong{What it leaves}, carried to [the open items of the release](prob-HC9J): the gap of the K rule in the list above, which is argued and not demonstrated, and the cause of the oversized probe, which the budget bounds and does not explain. One worker was not measured.}
+\p{See also: [eager reduction on the machine](design-eager-reduction). Source of the closure: [the finalization session](ses-A14B).}

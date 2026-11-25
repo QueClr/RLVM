@@ -8,9 +8,10 @@
 \tag{store}
 \tag{reference-engine}
 \meta{origin}{docs/design/review/reference-caches.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Source: \src{docs/design/review/reference-caches.md}, sections 0 and 1, findings S3-F2 and R2-F1; [the exactness session](ses-874D). The audit compared, part by part, what the official caches take for the same term with what the loader and the store keep.}
+\p{Source: [the audit of the reference engine's caches](rep-reference-caches), sections 0 and 1, findings S3-F2 and R2-F1; [the exactness session](ses-874D). The audit compared, part by part, what the official caches take for the same term with what the loader and the store keep.}
 \table{
 \tr{\th{Part of a term}\th{Official equality}\th{RLVM}\th{Same}}
 \tr{\td{binder name and binder info}\td{ignored}\td{not stored}\td{yes}}
@@ -25,7 +26,8 @@
 \li{The finding that started the audit was a wrong accept of the reference engine, the oracle of every gate, and it was not a kernel cache: the loader drops metadata records, so the wrapped expression stands for the node.}
 \li{Officially a metadata node is a term of its own for every cache and hides what is under it from the syntactic tests of the kernel.}
 \li{The \code{\verb~|nondep~} flag is the same class: \code{\verb~|r2-id-let-nondep-bad~} is rejected officially and accepted by the reference engine.}
-\li{Both findings are of the tolerated kind. In the strict mode the loader declines a declaration that carries a metadata node; the decline for \code{\verb~|nondep~} was a patch not yet published when the audit was written, so the strict mode still accepted that export.}
+\li{Both findings are of the tolerated kind. In the strict mode the loader declines a declaration that carries a metadata node, and since the evening of 2026-11-24 also one that carries a let with the flag \code{\verb~|nondep~}; when this was first written that decline was not yet published.}
+\li{The other direction, a rejection of what the official checker accepts, is not tolerated. Two mechanisms were found, both a syntactic test of the official kernel that stops at a node: the test for eager reduction, and the cheap beta reduction of an inferred type together with the cache of successful pairs, see [the example](ex-FD6K). Both are closed since the evening of 2026-11-24, see [the decision](dec-7UAL).}
 }
 \transclude{ex-4B5D}
 \p{Everything else that decides what "the same term" is agrees with the official kernel. The third row marked "no" is [object identity](ins-E3MS).}

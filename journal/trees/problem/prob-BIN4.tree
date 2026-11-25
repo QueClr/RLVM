@@ -9,17 +9,18 @@
 \meta{status}{open}
 \meta{created}{2026-11-24}
 \meta{origin}{docs/research/profiles/P7.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} open.}
+\p{\strong{Status:} open. Revised on 2026-11-24 with three things that changed that evening, none of which closes it. The image is now built with another collection policy of the serial collector, chosen on cold runs of the executable: a Mathlib run makes 41 collections instead of 184, for 1 to 6 \% of the wall clock and more resident memory, see [the settings of a plain run](dec-EGMG). Eager reduction is in the default switch set, so the reference kernel re-checks far fewer units, which was the larger source of garbage named below. And the pool for the session arrays was integrated, measured on the default set of the evening and [not adopted](ins-JJ7I). The second way of closing it that is named below is gone: the release is the native image alone, see [packaging](design-packaging).}
 \p{\strong{The question.} The native image of GraalVM CE has only the serial collector and Epsilon. [Every pause stops all workers](ins-561G): 10 percent of a pipelined Mathlib run with 8 workers, and the 5 to 8 percent between one process and [the hardware ceiling](ins-RPLD). The image is the binary of the arena definition; the JVM launcher, whose young generation of 1 GB makes collections rare, is the faster platform once warm.}
 \p{\strong{What is known.}}
 \ul{
 \li{A larger young generation does not help in the image, because each collection copies the live session arrays.}
-\li{[The garbage of the machine](ins-2ELY) is the sessions that outgrow the kept slabs. A process-wide pool for those arrays, a prototype, takes 4.8 percent off a warm Mathlib pass; the published machine pools its session arrays per machine, finding F25 of \src{rlvm-machine/NOTES-M6.md}. The pause share on Mathlib stayed near 10 percent: softly held arrays are taken back by every complete collection of a heap that is 2.8 GB live.}
+\li{[The garbage of the machine](ins-2ELY) is the sessions that outgrow the kept slabs. A process-wide pool for those arrays, a prototype, takes 4.8 percent off a warm Mathlib pass; the published machine pools its session arrays per machine, finding F25 of [the working notes of package M6](rep-machine-M6). The pause share on Mathlib stayed near 10 percent: softly held arrays are taken back by every complete collection of a heap that is 2.8 GB live.}
 \li{61 percent of the bytes of the workers are the reference kernel re-checking the units the machine declines. Keeping those units on the machine, see [eager reduction on the machine](prob-8MJ2), removes most of that at the source.}
 \li{Publishing a large file in fewer pieces [cut the garbage of the pipelined load](ins-E1DU) from 36.9 to 20.9 GB.}
 \li{Not tried: slabs outside the Java heap. That needs every access to the record and run slabs to go through one accessor.}
 }
-\p{\strong{What would close it.} Collections under 2 percent of a warm 8-worker pass over Mathlib in the image, which was the target of the memory work and was not reached; or the decision that the warm platform is the JVM launcher and the image is only the cold binary. Source: \src{docs/research/profiles/P7.md}, section 8, and \src{docs/research/profiles/V1.md}.}
+\p{\strong{What would close it.} Collections under 2 percent of a warm 8-worker pass over Mathlib in the image, which was the target of the memory work and was not reached; or the decision that the warm platform is the JVM launcher and the image is only the cold binary. Source: [report P7](rep-P7), section 8, and [report V1](rep-V1).}
 \p{See also: [the decision on the two platforms](dec-WX9Z); [the decision that the Serial collector stays](dec-Z6DD).}

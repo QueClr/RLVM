@@ -1,0 +1,49 @@
+\title{The metadata class is closed by a strict re-check, not by a position rule}
+\taxon{Decision}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{soundness}
+\tag{reference-engine}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\meta{completed}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} accepted and implemented in the launcher, see [the changelog entry](log-TRJ0).}
+
+\p{\strong{Context.} Under the practical policy [metadata is transparent](dec-USLM): the loader drops a metadata node and the wrapped term stands for it, while for the official kernel the node is a term of its own that hides what is under it from the kernel's syntactic tests. Accepting more than the official checker through this is tolerated. Rejecting what the official checker accepts is not, also on a hand-made file: it is item (c) of [the exactness contract](design-exactness-contract). One such file was known, a node around an application of \code{eagerReduce}, and it had just been closed by [a rule of the loader](log-6K9N) that declines exactly that position. The audit that wrote the rule also listed the other syntactic tests a dropped node can fool, and one of them, the cheap beta reduction of an inferred type, was then built into four exports that the official checker accepts and the default configuration rejected: [finding R2-F4](ex-FD6K). The question was how to close the class. A census had shown that nothing real is affected by any answer: there is no metadata record in the eight corpora, in the 270 tests of the arena or in its 230 published tests.}
+
+\p{\strong{Decision.} No second position rule. In the practical mode a rejection of a file in which the loader dropped at least one metadata node is not reported; the file is checked again under the strict policy, which keeps the node as part of the term as the official kernel does, and that verdict is reported. An accept or a decline of the practical mode and every file without a metadata record are untouched. The trigger is metadata only. The rule around \code{eagerReduce} stays.}
+
+\p{\strong{Why it is enough.} A wrong rejection of the practical mode on such a file now needs a wrong rejection of the strict mode, which never normalises a node away. And it costs nothing on an accepted file or on real input.}
+
+\p{\strong{Alternatives considered.} The condition set for a loader rule was that it declines nothing real and turns no agreement of the mutant corpora into a decline. The corpus of metadata mutants wraps one expression of an arena test in a metadata record; the pipeline agreed with the official verdict on 779 of its files, 421 accepted and 358 rejected.}
+\table{
+\tr{\th{Alternative}\th{What it does}\th{Why not}}
+\tr{\td{The rule that covers the mechanism: decline a declaration with a node around a term whose head is a lambda or a bound variable}\td{The cheap beta reduction also stops at a node between two lambdas and at a node around the bound-variable body, and instantiation moves a wrapped lambda, or a lambda under a wrapped variable, into function position. The rule has to cover all of these.}\td{Read back from the files, it turns 234 of the 779 agreements into declines: 123 of the 421 accepted mutants and 111 of the 358 rejected ones.}}
+\tr{\td{The narrow rule: decline a declaration with a node on the head path of a beta redex that is written in the export}\td{Covers the first two files of the finding.}\td{It turns 2 agreements into declines, both rejections, and leaves two files of the finding rejected: in them the redex exists only after the kernel instantiated a codomain.}}
+\tr{\td{Any rule on the position and the kind of the wrapped term}\td{}\td{None can separate the two remaining files from mutants that are handled correctly. One mutant of the arena test \code{\verb~|bugs/open-term-cache-context~} wraps a lambda in argument position and another a bound variable in function position, exactly as the two files do. What makes the files hostile is the cache history of the kernel, which a loader does not see.}}
+\tr{\td{Decline every declaration with metadata in the practical mode}\td{The strict behaviour as the default.}\td{Already decided against: behaviour that exists only for agreement on adversarial files belongs to the strict mode. It would turn every agreement on a file with metadata into a decline.}}
+\tr{\td{Keep the node in the store}\td{The exact treatment.}\td{A node kind in the store and in every reader of it: both engines and admission. Not planned.}}
+\tr{\td{A wider trigger for the re-check: also the let flag, or every rejection}\td{Counted, not built.}\td{The seven files of the test sets that have a let with the flag are all accepted, so the flag would change nothing there. A strict re-check of every rejection adds no decline on these sets and costs a second check of every rejected file.}}
+}
+
+\p{\strong{Evidence}, with the reference engine as default engine, on the published jars.}
+\ul{
+\li{The four mutant corpora have 17,775 files, 2,802 of them with a metadata record. The practical mode rejects 485 of those, every one a correct rejection. Under the strict policy 351 of them become declines (67 tutorial mutants, 37 bugs mutants, 247 metadata mutants) and 134 stay rejections, because the rejected declaration stands before the first declaration with a node. The agreement of the mutant gate goes from 16,092 to 15,741 and its declines from 1,683 to 2,034, with no soundness and no completeness difference.}
+\li{No accepted file changes: the 657 accepted files with a metadata record, 655 mutants and 2 hostile exports, are never run twice.}
+\li{Of 1,245 hostile exports with official verdicts, 4 are practical rejections of a file with a metadata record: the four files of the finding. The strict run declines all four. The net alone would also have caught the earlier file around \code{eagerReduce}.}
+\li{The cost of the second run on the two largest files on which the net fires is 20 to 30 ms of a process of 0.14 to 0.18 s, see [the changelog entry](log-TRJ0).}
+}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{The price is 351 correct rejections of metadata mutants that are now reported as declines. It is paid only on files that the exporter writes on request.}
+\li{The default configuration has no known rejection of an official accept. The accepts of the tolerated kind that transparent metadata gives are unchanged.}
+\li{The rule of the loader around \code{eagerReduce} is no longer needed for the contract; it turns a decline after two runs into a decline at load.}
+\li{The hostile suite of the machine has the seven exports of the finding; the four accepted ones carry a note that their rule is the official verdict or a decline through the launcher.}
+}
+
+\p{Detail: [the audit of the reference engine's caches](rep-reference-caches), section 6.1: the table of the official tests, the census, the argument against a position rule, the three counts and the judgement. Commit \commit{694c8fb}. Source: [the finalization session](ses-A14B). Related: [the caches of the reference engine](design-reference-caches), [the divergence classes](design-official-divergence).}

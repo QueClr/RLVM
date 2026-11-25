@@ -1,0 +1,26 @@
+\title{Eager reduction: the probes of the plain phase run under a tick budget}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{4f9c707}
+\import{base-macros}
+
+\p{\strong{Finding INT7-F1}, a cost of the switch \code{eager} and no wrong verdict. It was found when the candidate default sets were timed on all eight corpora for the first time; the earlier measurements of the switch, on Std, cedar and Mathlib, had not seen it. With \code{eager} the warm pass of con-leche took 14.0 s on the JVM launcher with 8 workers, at 22.5 s of CPU time, which is one thread. One unit carried it: \code{\verb~|ConLeche.lpOfData_pack~}, a proof by evaluation that uses \code{eagerReduce}. Without the switch the machine declines the unit at once by [the eager rule](dec-X2UF) and the reference engine decides it in under a millisecond. With the switch the machine evaluated it for 28.6 M ticks into the hard limit of a session (2^28 run words, 60 M records, 3.3 GB), declined, did the same again in the driver's cold retry, and only then left it to the reference engine. The other 87 units of con-leche that enter eager reduction need at most 99,310 ticks. On the native image the unit made a cold run of con-leche with 8 workers 41 s long at 8.6 GB resident.}
+
+\p{\strong{Cause.} Not the deferred comparison of [eager reduction on the machine](design-eager-reduction) but a probe of the plain phase. A declaration that may defer eager comparisons checks, at the two points where the official kernel answers differently under eager reduction (a Nat folding of an open pair, and the test against \code{\verb~|Bool.true~} of an open term), what the eager branch would do, by running it. The official plain procedure never starts that evaluation, and it can be of any size: here the fold probe evaluated the arguments of an open term. A tick bound on a unit that has entered eager reduction, the first idea, would not have helped, because this unit had not reached its \code{eagerReduce} argument yet.}
+
+\p{\strong{The change.} A probe is a speculative segment with a tick budget, \code{\verb~|-X machine.eager-probe=N~}, 0 for none. A probe that is cut leaves its point undecided, no further probe is started in the declaration, and the declaration is declined if it has entered or enters eager reduction: the reference engine decides it, and the cold retry is answered at once. The budget can only turn a verdict of the machine into a decline: a cut probe never answers, the plain procedure that follows it is the official one, and a declaration with a cut probe is never accepted or rejected by the machine once it defers an eager comparison. A test runs the eager rows of the hostile suite with a budget of one tick, and no row gets a verdict it does not allow. New statistics count the budget, the cuts, the largest probe and the declines.}
+
+\p{\strong{The size of the budget.} The first publication had 2^23 ticks: the unit of con-leche is cut at 8.4 M ticks and declined, where it had used 57 M ticks and 3.3 GB twice. The largest probes that complete on the eight corpora: 63,654 ticks on Init, Std and cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler, and 2,752,617 on cslib and Mathlib, one unit of Mathlib, which a budget of 2^21 would send to the reference engine. What the one cut probe costs con-leche, JVM launcher, warm, 8 workers, three interleaved rounds in one quiet window on the aarch64 development host: 1.287 s without \code{eager}; with it 1.403 s at 2^23 (+9.1 \%), 1.307 s at 2^22 (+1.6 \%), 1.283 s at 2^21 and at 2^20. The default is 2^22 since the publication of [the default switch set](log-HS1E).}
+
+\p{\strong{Gate of the first publication}, on the frozen tree that was published: the slow hostile matrix, 50 switch sets by 1,189 rows, without a failure; the tier part of the machine's gate for the set of wave 6 with \code{eager} and for the set of wave 6, pass with declines and every tick count identical to the gates before the change, so no probe of the 230 arena tests, Init, Std, reachability or the Cedar slice is cut or costs a tick more; on cslib and Mathlib no probe is cut and the same 2,394 and 6,629 units stay on the machine. The fast group of the machine has 419 tests.}
+
+\p{\strong{After it.} The warm pass of con-leche with \code{eager} went from 14.0 s to 1.26 s, and in the table that [chose the default set](dec-YP0N) the switch costs that corpus 2.2 \% against the set without it. The budget bounds the probe and does not remove it: why the probe of this unit is so large was not examined, see [what is left open](prob-HC9J).}
+
+\p{Detail: [the switch reference](design-switches-document), the paragraph on the probes under its table of named switches. Commits \commit{4f9c707} (the budget, 2^23) and \commit{455395f} (2^22 with the default set).}

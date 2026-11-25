@@ -9,9 +9,10 @@
 \meta{status}{accepted}
 \meta{created}{2026-11-24}
 \meta{origin}{rlvm-load/README.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} accepted and published on 2026-11-24 in the reader, the store and the loader. Two scanner threads run by default for inputs of 256 MiB and more.}
+\p{\strong{Status:} accepted and published on 2026-11-24 in the reader, the store and the loader. Two scanner threads ran by default for inputs of 256 MiB and more when this was decided; since the evening of 2026-11-24 the default is one, chosen on cold runs of the executable with the machine as engine, where the second scanner thread took a core from eight workers on eight cores: see [the settings of a plain run](dec-EGMG). The packing is unchanged, and \code{\verb~|-X scan-threads=2~} is the setting of before.}
 
 \p{\strong{Context.} After the load path was tuned for cache misses, the loader thread of [the export loader](design-export-loader) still did everything itself for every expression record: the reader's replay, the segment record, the sweep and the block record. The scanner threads that existed only tokenised, and two of them took the load of Mathlib from 9.2 to 9.6 s down to 7.2 to 7.5 s on the JVM. A scout had found that on exporter output four fifths of the expression records are proof-private and recognisable by their ids, and that leaving them in the file for the workers does not pay ([dec-RN77](dec-RN77)).}
 

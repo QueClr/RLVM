@@ -6,9 +6,10 @@
 \tag{soundness}
 \tag{machine}
 \meta{origin}{docs/design/review/soundness-shortcuts.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Source: the adversarial review \src{docs/design/review/soundness-shortcuts.md}, and the second pass of \src{docs/design/review/soundness-default-set.md}, section 10; [the exactness session](ses-874D). The options are \code{\verb~|skipargs~}, which does not compare proof positions, unread positions and proof fields of structure eta, and \code{\verb~|congruence~}, which tries a same-head probe, a closure congruence and proofs by type before unfolding.}
+\p{Source: [the soundness review of the shortcuts](rep-soundness-shortcuts), and the second pass of [the adversarial review of the default set](rep-soundness-default-set), section 10; [the exactness session](ses-874D). The options are \code{\verb~|skipargs~}, which does not compare proof positions, unread positions and proof fields of structure eta, and \code{\verb~|congruence~}, which tries a same-head probe, a closure congruence and proofs by type before unfolding.}
 \ul{
 \li{Every equation the two options assume is derivable from delta, beta, zeta, structure eta, proof irrelevance and congruence, under one precondition that they do not establish themselves: both sides of a comparison are well-typed terms. Inference establishes it.}
 \li{No false claim was accepted: 95 hand-written ones under nine configurations, 362 random ones, 358 targeted mutants of a Mathlib slice, the 92 bad tests of the arena. On nine exports up to a Mathlib slice, 474,228 answers of the shortcuts were derived again by the complete official procedure without one disagreement.}
@@ -19,5 +20,5 @@
 \li{The second review attacked the candidate default, the default set with \code{\verb~|eager~} and both options, for a false accept only: none on 987 hostile rows with official verdicts and 200 random programs.}
 }
 \transclude{ex-6DLX}
-\p{What the options are worth is in [the official way of comparing proofs](ins-HPBW); they cost on con-leche, see [the three corpora](ins-K2I2). Whether they are on by default is decided by warm wall clock over all corpora, see [standing policies](standing-policies).}
+\p{What the options are worth is in [the official way of comparing proofs](ins-HPBW); they cost on con-leche, see [the three corpora](ins-K2I2). Whether they are on by default was to be decided by warm wall clock over all corpora, see [standing policies](standing-policies); it was decided on the evening of 2026-11-24, and they are on, see [the decision on the default switch set](dec-YP0N).}
 \p{See also: [the two proof-comparison shortcuts](design-proof-comparison-shortcuts); [the decision for practical exactness](dec-TQSI).}

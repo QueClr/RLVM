@@ -7,9 +7,10 @@
 \tag{reference-engine}
 \tag{performance}
 \meta{origin}{docs/research/profiles/P8.md}
+\meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Sources: \src{docs/research/profiles/P8.md}, section 4.3; \src{docs/research/profiles/P7.md}, finding P7-F3; \src{docs/research/profiles/P9.md}, section 4.3; \src{docs/design/review/eager-reduction.md}; [the profiling session](ses-JRSD). Machine as primary engine, native image.}
+\p{Sources: [report P8](rep-P8), section 4.3; [report P7](rep-P7), finding P7-F3; [report P9](rep-P9), section 4.3; [the review of eager reduction](rep-eager-reduction); [the profiling session](ses-JRSD). Machine as primary engine, native image.}
 \p{The machine declines every declaration that enters eager reduction, for exactness; see [eager reduction is a mode](ins-O23C). The reference engine then checks it at its own speed. These are also the heaviest proofs of Mathlib for both leaders.}
 \table{
 \tr{\th{Corpus}\th{Declined units}\th{Share of the worker time}\th{Conditions}}
@@ -25,7 +26,7 @@
 \li{For gruszka the same Mathlib units are 6.3 percent of its corpus and 3.5 s.}
 \li{Each unit is declined twice, in the warm attempt and in the cold retry of the driver; the second decline costs the machine nothing.}
 \li{With several workers these units are also the longest of the run; see [one heavy unit](ins-OEXH).}
-\li{The switch \code{\verb~|eager~} keeps them on the machine: declines go from 164, 203, 423, 8 and 6,711 units to 0 on Init, Std, cedar, reachability and Mathlib, at 2.5 to 4.4 percent more machine steps. Warm wall clock with 8 workers on the JVM launcher, check-only passes, two rounds on quiet cores: Std -11 and -22 percent, cedar -7 and -10 percent. Mathlib, the native image and one worker were not measured.}
+\li{The switch \code{\verb~|eager~} keeps them on the machine: declines go from 164, 203, 423, 8 and 6,711 units to 0 on Init, Std, cedar, reachability and Mathlib, at 2.5 to 4.4 percent more machine steps. Warm wall clock with 8 workers on the JVM launcher, check-only passes, two rounds on quiet cores: Std -11 and -22 percent, cedar -7 and -10 percent. Mathlib, the native image and one worker were not measured then. On the evening of 2026-11-24 the switch was measured on all eight corpora with passes that load: Mathlib 20.49 to 18.02 s on the JVM launcher and 24.53 to 21.29 s in the native image, 8 workers; one worker is still not measured.}
 }
-\p{The switch was published on 2026-11-24 and is off by default; see [eager reduction on the machine](prob-8MJ2).}
+\p{The switch was published on 2026-11-24, off at first, and is in the default switch set since that evening; see [the decision](dec-YP0N) and [the problem it closed](prob-8MJ2).}
 \p{See also: [eager reduction on the machine](design-eager-reduction).}

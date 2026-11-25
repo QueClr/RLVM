@@ -11,9 +11,9 @@
 \meta{origin}{docs/design/ISA.md}
 \import{base-macros}
 
-\p{\strong{Status:} implemented. The complete procedure is what the machine runs with no switch (v0, and every strict engine). Of the additions described here, \code{same} and \code{lazyeval} are in the default switch set, \code{probes} and \code{facts} are off, and the two congruence families are not reachable through any switch set, see [the two proof-comparison shortcuts](design-proof-comparison-shortcuts).}
+\p{\strong{Status:} implemented. The complete procedure is what the machine runs with no switch (v0, and every strict engine). Of the additions described here, \code{same} and \code{lazyeval} are in the default switch set. Since the evening of 2026-11-24 so are the two congruence families, as the named switches \code{skipargs} and \code{congruence} with \code{facts} and \code{probes}, see [the two proof-comparison shortcuts](design-proof-comparison-shortcuts) and [the decision on the default set](dec-YP0N); when this note was written \code{probes} and \code{facts} were off and the two families were not reachable through any switch set.}
 
-\p{\strong{What it is.} The judgment \code{CONV} decides whether two well-typed values are definitionally equal. Decision 10 of the instruction set fixes its form: the complete procedure is the official \code{\verb~|is_def_eq~} transcribed to values, state for state. Anything faster is either a fact derived from the store or a speculative segment that can only answer "true" or hand over. The states, in the order of \src{docs/design/ISA.md} section 4.4.1:}
+\p{\strong{What it is.} The judgment \code{CONV} decides whether two well-typed values are definitionally equal. Decision 10 of the instruction set fixes its form: the complete procedure is the official \code{\verb~|is_def_eq~} transcribed to values, state for state. Anything faster is either a fact derived from the store or a speculative segment that can only answer "true" or hand over. The states, in the order of [the instruction-set document](design-isa-document) section 4.4.1:}
 
 \ol{
 \li{\strong{Quick checks.} Identical references are equal; two literals are compared by content; a suspension is forced; the pair table is read; two sorts compare their levels with the official relation; two binders of one kind are compared binder by binder (domains first, then the bodies under one variable).}
@@ -32,7 +32,7 @@
 \ul{
 \li{\code{POS} holds exact pairs only. There is no union-find and no congruence closure.}
 \li{\code{NEG} is written only for a "false" of the complete procedure, never under eager reduction and never when a side is a lambda, and it is not read under eager reduction.}
-\li{\code{FAILED} holds only comparisons that \em{completed}. A probe that ran out of budget goes to a separate per-declaration table that only suppresses another probe of that size; the complete procedure never reads it (resolution of the design review, \src{docs/design/RECONCILIATION.md} section 2).}
+\li{\code{FAILED} holds only comparisons that \em{completed}. A probe that ran out of budget goes to a separate per-declaration table that only suppresses another probe of that size; the complete procedure never reads it (resolution of the design review, [the reconciliation of the design review](design-reconciliation-document) section 2).}
 \li{A memo is written by the frame that owns the judgment, in its final state. A frame removed by a cut writes nothing, so no entry holds an answer that depends on a budget.}
 }
 
@@ -48,6 +48,6 @@
 
 \p{\strong{Where the time goes.} On Init, with the switches \code{\verb~|warm,gated,expect~}, 64 \% of all value records are made while a comparison is on the stack, and 78 \% of the lazy-delta steps unfold one side only: lazy delta is used as an evaluator. On Mathlib 40 \% of the machine's instructions are the official way of comparing proofs (profile P8, same switches, one worker), which no official-exact shortcut recovers.}
 
-\p{Related: [the machine](design-machine-worklist), [the value model](design-value-model), [eager reduction](design-eager-reduction), [staging switches](design-switches). Detail: \src{docs/design/ISA.md} sections 4.4, 5.4 and 6, \src{rlvm-machine/NOTES-M4.md} (deviations D1 to D29 and every measurement), \src{docs/design/review/soundness-default-set.md} sections 4.1 and 4.8. Sources: [the design session](ses-EMMW), [the machine session](ses-Z72N) and [the speed wave](ses-CVTE).}
+\p{Related: [the machine](design-machine-worklist), [the value model](design-value-model), [eager reduction](design-eager-reduction), [staging switches](design-switches). Detail: the instruction-set document sections 4.4, 5.4 and 6, [the working notes of package M4](rep-machine-M4) (deviations D1 to D29 and every measurement), [the adversarial review of the default set](rep-soundness-default-set) sections 4.1 and 4.8. Sources: [the design session](ses-EMMW), [the machine session](ses-Z72N) and [the speed wave](ses-CVTE).}
 
 \p{Findings, examples and open problems: [equal terms that are two different closures](ex-IIVH), [not transitive and not a congruence](ins-4VH2).}
