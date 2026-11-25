@@ -1,0 +1,476 @@
+\title{X5 - proofs read lazily from the file: analysis, prototype, recommendation}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{origin}{docs/research/profiles/X5.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Scout X5, 2026-11-24. Question: the loader is one thread and the floor of a pipelined run (mathlib: 12.4 s native \code{\verb~|-O3~} after wave 7; 11.3 s wall with two scanner threads before it). On exporter output the proof-only records of a theorem are an id range that is recognisable without parsing them (finding F1). Can the loader leave those byte ranges in the file and the worker that checks the theorem parse them itself?}
+
+\p{Everything here is outside the published modules: private copies and a private build under \code{\verb~|work/prof/X5/~} (\code{\verb~|build.sh~}, javac, nothing installed), two simulations on the published reader, a prototype on the real store. Living summary: \code{\verb~|work/status/prof-X5.md~}.}
+
+\subtree{
+\title{0. Result}
+
+\p{\strong{It works and it agrees with the eager loader, but it buys much less than F1 suggested. The serial load gets 1.6 to 1.75 times faster (not five times), the workers pay 3 to 5 times the block decode for it, and today the wall clock of a pipelined run gets worse, not better.}}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{mathlib}}
+\tr{\td{expression records the loader still parses (simulation)}\td{17.9 \%}\td{21.9 \%}\td{23.4 \%}\td{27.7 \%}}
+\tr{\td{bytes left to the workers}\td{76.9 \%}\td{72.1 \%}\td{71.1 \%}\td{68.7 \%}}
+\tr{\td{\strong{load phase, one thread, eager -> lazy} (JVM, warm)}\td{\strong{0.52 -> 0.32 s} (x 0.61)}\td{\strong{0.93 -> 0.53 s} (x 0.57)}\td{\strong{1.43 -> 0.92 s} (x 0.64)}\td{\strong{10.64 -> 6.35 s} (x 0.60)}}
+\tr{\td{\strong{proofs decoded by 8 workers, CPU, blocks -> ranges}}\td{\strong{0.16 -> 0.51 s} (x 3.2)}\td{\strong{0.23 -> 0.92 s} (x 4.0)}\td{\strong{0.31 -> 1.65 s} (x 5.3)}\td{\strong{2.65 -> 9.58 s} (x 3.6)}}
+\tr{\td{- of that, the foreign records}\td{0.27 s}\td{0.52 s}\td{1.08 s}\td{4.74 s}}
+\tr{\td{load + decode, CPU}\td{+23 \%}\td{+25 \%}\td{+47 \%}\td{+20 \%}}
+\tr{\td{eager against lazy: every constant's type and value}\td{equal (59,979)}\td{equal (103,885)}\td{equal (151,772)}\td{equal (739,167)}}
+}
+
+\p{(JVM C2 with the launcher's flags, quiet cores, medians of warm passes; mathlib one run. Sections 1 to 5.)}
+
+\ol{
+\li{\strong{The rule holds and needs five guards.} A \code{\verb~|thm~} whose value is the last expression record of its segment and whose type is an earlier record: the records after the type are the proof. The loader keeps 18 - 28 \% of the expression records, all names and levels, and still looks at the first bytes and the end of every line. On 18,005 small files (230 arena tests, 17,775 mutants) and on Init, Std, cedar and mathlib the lazy load gives, for every constant, the same type and value as the eager load, or fails with the same message, or restarts (309 files). Without the binding guard 14 \code{\verb~|reorder_decl~} mutants load differently (sections 5.5, 6).}
+\li{\strong{Foreign records are the expensive part.} 5.5 - 6.9 \% of the references of proof records go to a proof record of an earlier theorem that no shared record needed. Served by the worker from the file (binary search over 28-byte range rows, interpolation on the bytes, memo per declaration) they are 16 - 23 \% more nodes and half or more of the worker's decode time (280 - 315 ns each). A table shared by the workers would halve their number; parsing whole ranges on first use would parse 83 - 94 \% of everything again (section 2).}
+\li{\strong{The serial part does not shrink with the record count.} Pass one over every line (4.0 - 4.3 GB/s), names, levels, declaration rows, page faults and the shared prefix stay. Measured lazy / eager: 0.57 - 0.64 (0.60 on mathlib: 10.6 s -> 6.4 s on the JVM); projected from the published profile of the native load of mathlib: 12.4 s -> 7.3 s, 5.7 s if a scanner thread takes pass one (section 3).}
+\li{\strong{End to end} (section 5.6): under pipelining wall = max(serial loader, checking). With the machine's check phase of today (8 workers, quiet cores: Std 1.85 s, cedar 2.26 s, mathlib 42 s) checking is the larger term everywhere, so lazy ranges only add worker time: Std +6 \%, cedar +8 \%, mathlib +3 \%. They win once the check phase is shorter than the eager load, i.e. with checking 1.9 (Std), 1.6 (cedar), 3.9 (mathlib) times faster than today, and then by at most 36 - 43 \% of a loader-bound wall clock. In the check-only reading of "warm" (\code{\verb~|-X passes=N~}, later passes do not load) they can only lose.}
+}
+
+\p{\strong{Recommendation: NO-GO now; keep the design and the prototype for the day the loader is the floor.}}
+
+\ul{
+\li{Nothing of this should enter \code{\verb~|rlvm-load~} / \code{\verb~|rlvm-store~} / \code{\verb~|rlvm-driver~} while the check phase is longer than the load on the corpora that count. The switch point is measurable with numbers the team already produces: check phase with 8 workers against \code{\verb~|stop-after=load~}. Std and cedar are within a factor of two of it, mathlib a factor of four.}
+\li{If it is built then, build it as section 7 says: a range is a proof block whose records are still text (no consumer of \code{\verb~|Overlay.blockRoot~} changes), restart instead of guessing, only ACCEPT final under lazy loading, and variant B for the foreign records; and cost the variant of section 7.5 first (scanner threads pack the ranges: no text in the workers, no second read, no restart). Size of the prototype: reader side 1,300 lines, loader sink 350, store decoder 600; to that come the publication of \code{\verb~|loc~} and of the range rows, the driver's restart rule and a mutation campaign aimed at ranges.}
+\li{The cheaper step toward the same floor, which needs no new trust argument: \code{\verb~|-X load=pipelined~} with \code{\verb~|-X scan-threads=2~} as the default (the load path owner's proposal of 14:35Z; -21 \% wall of the load, measured by them). Pass one is context-free, so the same scanner threads could classify and count for a lazy mode later.}
+\li{By-products usable now: \code{\verb~|X5Tool diff~} (structural digest of every constant of two loads of one file; it found the binding difference in minutes) and the measured unit costs for anybody who wants to cost another split: line end + class 13 ns per line, template tokenising 28 - 32 ns per record (1.7 - 2.0 GB/s), node write 20 - 35 ns, block decode 28 - 34 ns per node, a record fetched at random from the file 280 - 315 ns.}
+}
+}
+
+\subtree{
+\title{1. The rule}
+
+\p{F1 (first half of this scout, \code{\verb~|work/prof/X5/sim/LazySim.java~}): lean4export writes the records a declaration needs right before its declaration line, children first, the type's records before the value's. With ids dense and in file order, at a \code{\verb~|thm~} / \code{\verb~|opaque~} line with type id T and value id V the records of the segment with id <= T are what the type reaches and the records with id in \verb~|(~T, V\verb~|]~ are the proof-only records; V is the last expression record of the segment. The eager loader finds the same split by parsing everything and marking what the type reaches.}
+
+\p{The guarded rule that the prototype implements (and section 6 proves equal to the eager split):}
+
+\blockquote{
+\p{A unit is \strong{lazy} iff the reader has seen names, levels and expressions with ids 0, 1, 2, ... in file order so far, every line of the segment starts like a name, level, leaf, structure, projection or declaration record, the declaration line is a \code{\verb~|thm~} in template form, its value id V is the id of the last expression line of the segment, and its type id T is smaller than V. Then the \strong{prefix} is the expression lines with id <= T and the \strong{range} is the rest. The loader parses all name and level lines of the segment, the prefix, the \strong{leaf lines of the range} (\code{\verb~|const~}, \code{\verb~|sort~}, \code{\verb~|bvar~}, literals: they need the loader's name, level and literal tables) and the declaration line. The \strong{structure lines of the range} (\code{\verb~|app~}, \code{\verb~|lam~}, \code{\verb~|forallE~}, \code{\verb~|letE~}, \code{\verb~|proj~}) stay in the file; the loader records \code{\verb~|[first ordinal, record count, file offset, byte length]~} of the range and nothing per record.}
+}
+
+\p{Simulation of exactly this rule on the published reader (\code{\verb~|work/prof/X5/sim/LazySim2.java~}, \code{\verb~|work/prof/X5/data/lazysim2-*.txt~}; \code{\verb~|thm~} and \code{\verb~|opaque~} units; the prototype takes \code{\verb~|thm~} only, hence its slightly smaller numbers in section 5):}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{con-leche}\th{mathlib}}
+\tr{\td{expression records}\td{6,137,092}\td{9,928,514}\td{14,728,503}\td{12,221,252}\td{107,037,712}}
+\tr{\td{\code{\verb~|thm~} / \code{\verb~|opaque~} units}\td{42,695}\td{72,148}\td{83,996}\td{21,672}\td{527,437}}
+\tr{\td{lazy units (= ranges)}\td{37,600}\td{64,516}\td{73,305}\td{20,093}\td{475,131}}
+\tr{\td{not lazy: the value is an earlier record}\td{5,095}\td{7,632}\td{10,691}\td{1,579}\td{52,306}}
+\tr{\td{not lazy: any other guard}\td{0}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{\strong{the loader still parses} (prefix + eager units + leaves in ranges)}\td{17.9 \%}\td{21.9 \%}\td{23.4 \%}\td{18.6 \%}\td{\strong{27.7 \%}}}
+\tr{\td{- prefix records of lazy units}\td{7.5 \%}\td{10.3 \%}\td{7.3 \%}\td{3.9 \%}\td{15.2 \%}}
+\tr{\td{- records of eager units}\td{9.9 \%}\td{11.1 \%}\td{15.6 \%}\td{14.5 \%}\td{11.8 \%}}
+\tr{\td{- leaf records inside ranges}\td{0.57 \%}\td{0.58 \%}\td{0.49 \%}\td{0.22 \%}\td{0.73 \%}}
+\tr{\td{\strong{structure records left in the file}}\td{5.04 M (82.1 \%)}\td{7.75 M (78.1 \%)}\td{11.28 M (76.6 \%)}\td{9.94 M (81.4 \%)}\td{\strong{77.43 M (72.3 \%)}}}
+\tr{\td{projections among them}\td{1,828}\td{7,068}\td{5,729}\td{7,998}\td{18,818}}
+\tr{\td{promoted on demand from the file (requests / records)}\td{27,443 / 117,950}\td{42,859 / 175,923}\td{57,460 / 211,906}\td{49,123 / 169,191}\td{577,640 / 2,069,973}}
+\tr{\td{- as a share of the records left}\td{2.34 \%}\td{2.27 \%}\td{1.88 \%}\td{1.70 \%}\td{2.67 \%}}
+\tr{\td{(the eager loader promotes)}\td{593,925}\td{1,015,436}\td{1,503,967}\td{-}\td{9,909,017}}
+}
+
+\p{So the loader keeps 18 - 28 \% of the expression records, all 4.3 M name and level records (25 - 45 \% of them lie inside ranges), every declaration line, and one look at the first bytes and the end of every line.}
+}
+
+\subtree{
+\title{2. Foreign records: how to serve them (question a)}
+
+\p{A structure record of a range refers to: its own range 61 - 64 \%, its own prefix 0.5 - 1.7 \%, a shared term 28 - 32 \%, \strong{a structure record that an earlier range left in the file and that no shared record ever needed ("foreign") 5.5 - 6.9 \%}, a record of a proof block 0 (2 to 12 references per export, into the one ownerless block). The eager loader sees every such reference and promotes the target; the lazy loader does not, so a worker has to get the record, and what it reaches among such records, from the file.}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{con-leche}\th{mathlib}}
+\tr{\td{references of range records}\td{10.08 M}\td{15.51 M}\td{22.58 M}\td{19.92 M}\td{155.04 M}}
+\tr{\td{foreign references}\td{689,829 (6.84 \%)}\td{1,044,064 (6.73 \%)}\td{1,567,050 (6.94 \%)}\td{1,330,215 (6.68 \%)}\td{8,597,279 (5.55 \%)}}
+\tr{\td{ranges with any foreign record}\td{27,972 of 37,600}\td{48,948 of 64,516}\td{54,728 of 73,305}\td{15,276 of 20,093}\td{309,338 of 475,131}}
+\tr{\td{\strong{A. parsed by the worker, memo per declaration}}\td{1.15 M (22.9 \%)}\td{2.13 M (27.5 \%)}\td{3.78 M (33.5 \%)}\td{2.32 M (23.3 \%)}\td{\strong{18.29 M (23.6 \%)}}}
+\tr{\td{- earlier ranges entered (per declaration with any)}\td{197,761 (7.1)}\td{323,937 (6.6)}\td{394,425 (7.2)}\td{183,575 (12.0)}\td{2,473,720 (8.0)}}
+\tr{\td{- records per entered range}\td{5.8}\td{6.6}\td{9.6}\td{12.6}\td{7.4}}
+\tr{\td{- largest closure of one declaration}\td{3,707}\td{9,683}\td{49,757}\td{19,708}\td{21,778}}
+\tr{\td{\strong{B. a table shared by all workers, keyed by record}: distinct foreign records}\td{0.50 M (10.0 \%)}\td{0.88 M (11.4 \%)}\td{1.34 M (11.9 \%)}\td{0.92 M (9.2 \%)}\td{\strong{8.36 M (10.8 \%)}}}
+\tr{\td{\strong{C. whole range parsed on first use into a shared table}: ranges entered by anybody}\td{46.6 \%}\td{41.8 \%}\td{42.5 \%}\td{54.6 \%}\td{42.4 \%}}
+\tr{\td{- structure records they hold}\td{83.4 \%}\td{82.7 \%}\td{85.7 \%}\td{94.4 \%}\td{83.9 \%}}
+}
+
+\p{(percentages of A and B: of the structure records left in the file.)}
+
+\p{\strong{The index.} The record id is written in every line and the ids of a range are dense, so no per-record index is needed (4 bytes per record would be 310 MB on mathlib): the range of an ordinal is a binary search over the first ordinals of the ranges (mathlib: 475,131 ints = 1.9 MB, 19 steps), the line is found by interpolation on the bytes of the range and a short walk (\code{\verb~|RangeFile.find~}): measured 1.02 - 1.07 interpolation probes and 2.4 - 2.5 lines walked per record; a child of a foreign record is searched from its parent's position (usually a few lines back). Every answer is verified against the id in the line (section 6, W5).}
+
+\p{\strong{Cost, measured} (prototype, variant A; the same decode run with the foreign references replaced by a constant, section 5.3): Init 0.27 s of CPU time for 0.96 M records (279 ns each; 53 \% of the whole decode); Std 0.52 s of CPU time for 1.85 M records (280 ns each; 56 \% of the whole decode); cedar 1.08 s of CPU time for 3.42 M records (315 ns each; 65 \% of the whole decode); mathlib 4.74 s of CPU time for 15.33 M records (309 ns each; 49 \% of the whole decode). The search itself is probably not what costs (replacing its per-byte reads by 8-byte steps changed nothing measurable); the likely cost is memory latency: the line, the range rows, and above all the shared children of the record, scattered over the export region, which the eager design pays on the loader thread when it promotes. Not profiled.}
+
+\p{\strong{Assessment.}}
+
+\ul{
+\li{\strong{A (prototype)} needs nothing shared and nothing concurrent, and costs as much as the worker's own range or more (49 - 65 \% of the decode).}
+\li{\strong{B} would parse 2.2 - 2.8 times fewer records (mathlib 8.36 M instead of 18.29 M: about 2.6 s of CPU time less at the measured unit cost) and gives the records shared ids again, which every table keyed by shared id (facts, warm sessions) likes. It needs what the store does not have today: a region written by several workers (a compare-and-set slot per ordinal, nodes published before the slot; 32 bytes per node: mathlib 268 MB, less than the 317 MB of the eager loader's 9.9 M promoted copies). The binding guard of section 6 is what makes such a node independent of the worker that builds it. Worth building only together with the rest.}
+\li{\strong{C} is no option: the ranges that some later proof enters hold 83 - 94 \% of the records, so "on first use" means parsing nearly everything a second time, serialised on a lock per range.}
+\li{A second pass of the loader cannot help: it would have to parse the ranges to learn the references.}
+\li{The loader's own promotion on demand (a shared record refers into a range: 1.7 - 2.7 \% of the records left) uses the same search and is in the measured load times.}
+}
+}
+
+\subtree{
+\title{3. What the loader's serial part becomes (question b)}
+
+\p{\strong{It still looks at every line.} The loader learns the kind of a segment only at its declaration line, and the name and level records that lie inside ranges (25 - 45 \% of all name records) are its own business, so it needs the start and the first bytes of every line. What it saves is the tokenising of the structure lines of the ranges and everything the sink does with them (segment record, block record, promotion). The number of expression lines of a segment gives the range without tokenising them: the range is the last \code{\verb~|V - T~} expression lines, and "V is the id of the last expression line" is a count of line starts.}
+
+\p{Measured on one thread (JVM C2, warm; \code{\verb~|X5Tool scan~} / \code{\verb~|reader~}; section 5.1): copying the mapped file through the reader's buffer 18 - 30 GB/s; one newline search per line 4.4 - 5.1 GB/s; the class of every line from its first bytes plus the newline search \strong{4.0 - 4.3 GB/s (13 ns per line)}; the template scanner on every line (reader alone, null sink) 1.7 - 2.0 GB/s; the lazy reader alone 2.3 - 2.6 GB/s. A \code{\verb~|memchr~}-speed pass exists only for the copy; the per-line floor in this code base is the eight-byte-step newline search, which the classification (one load and compare per line) raises by 10 \%.}
+
+\table{
+\tr{\th{Loader thread, lazy}\th{bytes}\th{records}}
+\tr{\td{pass one: line ends and classes}\td{all (mathlib 6.33 GB: 1.47 s measured)}\td{none}}
+\tr{\td{names and levels}\td{their lines}\td{all (mathlib 4.3 M)}}
+\tr{\td{expression records}\td{prefix lines, lines of eager units, leaf lines of ranges: 23 - 31 \% of the bytes}\td{18 - 28 \% (mathlib 29.6 M of 107.0 M)}}
+\tr{\td{declaration lines}\td{all}\td{all (mathlib 721,845 units)}}
+\tr{\td{promotion on demand}\td{random access into ranges}\td{1.7 - 2.7 \% of the records left (mathlib 2.07 M)}}
+\tr{\td{not done any more}\td{-}\td{72 - 82 \% of the segment records, all block records (mathlib 78.2 M, 361 MB), 79 \% of the promotions (mathlib 9.9 M -> 2.1 M), the writes of \code{\verb~|loc~} for the ranges}}
+}
+
+\p{\strong{Expected load time of mathlib from the published profile} (\src{rlvm-load/README.md} "Wave 7", \src{rlvm-store/README.md} "Wave 7"; native \code{\verb~|-O3~}, final figure 12.40 s, \code{\verb~|work/status/rlvm-load.log~}): reader 22 \% = 2.7 s, kernel (page faults) 11 \% = 1.4 s, \code{\verb~|Loader.exprApp~} 12 \% = 1.5 s, promotion 10 \% = 1.2 s, \code{\verb~|NodeCtx.writeApp~} 8 \% = 1.0 s, names 7 \% = 0.9 s, block writer and \code{\verb~|ref~} 8 \% = 1.0 s, the rest 22 \% = 2.7 s. Lazy: reader 1.6 s (pass one) + 0.31 x 2.7 s = 2.4 s; page faults of the input stay, those of blocks, memo and three quarters of \code{\verb~|loc~} go: about 1.0 s; names 0.9 s; \code{\verb~|exprApp~} x 0.28 = 0.4 s; node writes x 0.82 (31.7 M instead of 38.7 M export nodes) = 0.8 s; promotion from the file, 2.07 M records at 0.3 us = 0.6 s; block writer 0; the rest x 0.45 = 1.2 s. \strong{Sum 7.3 s, 59 \% of the eager load}; with pass one on a scanner thread 5.7 s. The prototype measures the same ratio (section 5.1): 0.57 - 0.64 on Init, Std and cedar, 0.60 on mathlib.}
+
+\p{\strong{Why not a fifth.} F1 counted records. The sink's time is not proportional to them: names, levels, declaration rows and page faults do not shrink, the reader has a per-line floor, and the 18 - 28 \% of the records that stay are the shared ones, whose nodes are the expensive ones to write (derived facts, children in a region far larger than the caches).}
+}
+
+\subtree{
+\title{4. The prototype}
+
+\p{Private copies of \code{\verb~|rlvm-export~}, \code{\verb~|rlvm-store~}, \code{\verb~|rlvm-load~} (sources of the jars published at 14:51Z / 14:52Z) under \code{\verb~|work/prof/X5/~}, built by \code{\verb~|work/prof/X5/build.sh~} (javac into \code{\verb~|work/prof/X5/classes~}, against the installed \code{\verb~|rlvm-level~} / \code{\verb~|rlvm-nat~} jars; nothing is installed). 2,950 lines new, 350 lines changed in \code{\verb~|Loader~}.}
+
+\table{
+\tr{\th{File}\th{What}}
+\tr{\td{\code{\verb~|rlvm-export/.../LazyRead.java~} (556 lines), \code{\verb~|LazySink.java~}, \code{\verb~|LazyRestartException.java~}}\td{the lazy reader and its sink protocol (started by the first half of this scout; completed: visibility in table mode, class verification)}}
+\tr{\td{\code{\verb~|rlvm-export/.../Lines.java~}}\td{line classes from first bytes; \code{\verb~|RangeScanner~} / \code{\verb~|RangeOut~}: the template scanner for workers}}
+\tr{\td{\code{\verb~|rlvm-export/.../RangeFile.java~}, \code{\verb~|LazyRanges.java~}}\td{one record of a range by id; the range table}}
+\tr{\td{\code{\verb~|rlvm-export/.../IdSpace.java~} (+35 lines)}\td{\code{\verb~|show / showAll~}: which ids are visible while the lines of a segment are parsed out of file order}}
+\tr{\td{\code{\verb~|rlvm-load/.../Loader.java~} (+350 lines)}\td{\code{\verb~|implements LazySink~}: ranges, leaves, promotion on demand from the file, binding guard}}
+\tr{\td{\code{\verb~|rlvm-store/.../RangeDecoder.java~} (602 lines)}\td{worker: range -> overlay nodes (as \code{\verb~|ProofBlocks.decode~}), foreign records, checks W1 - W5}}
+\tr{\td{\code{\verb~|rlvm-store/.../X5Digest.java~}, \code{\verb~|rlvm-load/.../tools/X5Tool.java~}}\td{structural digest; \code{\verb~|load~}, \code{\verb~|reader~}, \code{\verb~|scan~}, \code{\verb~|decode~}, \code{\verb~|run~}, \code{\verb~|diff~}, \code{\verb~|explain~}}}
+\tr{\td{\code{\verb~|sim/LazySim.java~}, \code{\verb~|sim/LazySim2.java~}}\td{the two simulations on the published reader}}
+\tr{\td{\code{\verb~|measure.sh~}, \code{\verb~|measure-mathlib.sh~}, \code{\verb~|tools/summ.py~}, \code{\verb~|runs/*.txt~}, \code{\verb~|data/*.txt~}}\td{measurement windows and their raw output}}
+}
+
+\p{What the prototype is not: it is a batch load (the workers decode after the load, so nothing is published concurrently); \code{\verb~|opaque~} records are loaded eagerly; the theorem's value word in the store is 0 for a range (the range table is beside the store); no engine runs on it. Its store is compared with the eager store instead (section 5.5).}
+}
+
+\subtree{
+\title{5. Measurements}
+
+\p{Method: \code{\verb~|bench/quiet.py -- work/prof/X5/measure.sh CORPUS HEAP~} (one window per corpus; 8 performance cores; containers of other agents parked since 16:04Z), JVM (GraalVM CE 25, C2, \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler~}, the launcher's flags), one process per step, 3 or 4 passes, \strong{median of the warm passes} (the first is dropped). Windows 16:14Z - 16:18Z (\code{\verb~|runs/{init,std,cedar}-q5.txt~}); the windows before 16:04Z (\code{\verb~|*-q3.txt~}, \code{\verb~|*-q4.txt~}) were contended and are kept only as a second sample of the single-threaded numbers (lazy load: Init 0.307 / 0.318 s, Std 0.503 / 0.574 s, cedar 0.805 s). mathlib: \strong{one} run (\code{\verb~|runs/mathlib-final.txt~}), one process, 13 GB heap, after a warm-up on Init in the same process, one pass per mode, an explicit collection in front of every load (collector time including that collection: 339 ms up to the end of the eager load, 151 ms more up to the end of the lazy load).}
+
+\subtree{
+\title{5.1 Load phase alone (one thread, wall = CPU)}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{mathlib}}
+\tr{\td{input}\td{347.8 MB}\td{584.3 MB}\td{904.7 MB}\td{6326.1 MB}}
+\tr{\td{copy through the buffer alone}\td{0.011 s}\td{0.025 s}\td{0.030 s}\td{0.349 s}}
+\tr{\td{one newline search per line}\td{0.077 s (4.5 GB/s)}\td{0.133 s (4.4 GB/s)}\td{0.190 s (4.8 GB/s)}\td{1.229 s (5.1 GB/s)}}
+\tr{\td{line ends + class of every line (pass one)}\td{0.086 s (4.0 GB/s)}\td{0.145 s (4.0 GB/s)}\td{0.218 s (4.2 GB/s)}\td{1.468 s (4.3 GB/s)}}
+\tr{\td{reader alone (null sink), eager}\td{0.205 s (1692 MB/s)}\td{0.336 s (1739 MB/s)}\td{0.493 s (1833 MB/s)}\td{3.148 s (2010 MB/s)}}
+\tr{\td{reader alone (null sink), lazy}\td{0.147 s (2366 MB/s)}\td{0.254 s (2300 MB/s)}\td{0.387 s (2341 MB/s)}\td{2.441 s (2592 MB/s)}}
+\tr{\td{\strong{load, eager} (reader + loader + store)}\td{\strong{0.519 s} (670 MB/s)}\td{\strong{0.929 s} (629 MB/s)}\td{\strong{1.429 s} (633 MB/s)}\td{\strong{10.637 s} (595 MB/s)}}
+\tr{\td{\strong{load, lazy ranges}}\td{\strong{0.318 s} (1094 MB/s)}\td{\strong{0.532 s} (1098 MB/s)}\td{\strong{0.915 s} (989 MB/s)}\td{\strong{6.351 s} (996 MB/s)}}
+\tr{\td{lazy / eager}\td{0.61 (-39 \%, 1.63 times faster)}\td{0.57 (-43 \%, 1.75 times faster)}\td{0.64 (-36 \%, 1.56 times faster)}\td{0.60 (-40 \%, 1.67 times faster)}}
+\tr{\td{loader + store share (load minus reader alone), eager -> lazy}\td{0.314 -> 0.171 s}\td{0.593 -> 0.278 s}\td{0.935 -> 0.528 s}\td{7.489 -> 3.910 s}}
+\tr{\td{lazy load without pass one (if a scanner thread does it)}\td{0.232 s}\td{0.387 s}\td{0.697 s}\td{4.883 s}}
+}
+
+\p{The warmed-up JVM loads mathlib eagerly in 10.6 s; the native image needs 12.4 s for the same store (its reader's \code{\verb~|Mem.u64~} and \code{\verb~|Scanner.num~} are out-of-line calls), and a cold JVM process 14 - 15 s (\src{rlvm-load/README.md}). The ratio lazy / eager is what the next sections use.}
+}
+
+\subtree{
+\title{5.2 What the lazy load leaves and does}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{mathlib}}
+\tr{\td{ranges (\code{\verb~|thm~} only)}\td{37,447}\td{64,250}\td{72,351}\td{473,119}}
+\tr{\td{bytes of the ranges (left to the workers)}\td{267.3 MB (76.9 \%)}\td{421.3 MB (72.1 \%)}\td{643.3 MB (71.1 \%)}\td{4343.8 MB (68.7 \%)}}
+\tr{\td{structure records left in the file}\td{5,035,567}\td{7,748,827}\td{11,274,220}\td{77,414,424}}
+\tr{\td{leaf records of ranges, parsed by the loader}\td{34,706}\td{57,916}\td{71,643}\td{777,544}}
+\tr{\td{projection names kept}\td{1,828}\td{7,068}\td{5,729}\td{18,818}}
+\tr{\td{promotion on demand from the file: requests / records}\td{27,394 / 117,780}\td{42,786 / 175,700}\td{57,245 / 211,156}\td{577,142 / 2,068,117}}
+\tr{\td{range table}\td{1.1 MB}\td{1.9 MB}\td{2.1 MB}\td{13.4 MB}}
+\tr{\td{export nodes, eager -> lazy}\td{1,659,805 -> 1,218,620}\td{3,135,679 -> 2,354,210}\td{4,880,122 -> 3,660,256}\td{38,739,557 -> 31,679,180}}
+\tr{\td{proof blocks (records), eager -> lazy}\td{37,601 (5,071,212) -> 154 (939)}\td{64,517 (7,808,271) -> 267 (1,528)}\td{73,306 (11,352,348) -> 955 (6,485)}\td{475,132 (78,207,172) -> 2,013 (15,204)}}
+\tr{\td{block bytes, eager -> lazy}\td{22.1 MB -> 0.005 MB}\td{34.3 MB -> 0.008 MB}\td{51.4 MB -> 0.035 MB}\td{363.5 MB -> 0.085 MB}}
+\tr{\td{shared structures of the store, eager -> lazy}\td{122 -> 96 MB}\td{212 -> 175 MB}\td{323 -> 267 MB}\td{2125 -> 1742 MB}}
+}
+}
+
+\subtree{
+\title{5.3 The parse cost moved to the workers}
+
+\p{All proofs of the export decoded once into worker overlays (\code{\verb~|Overlay.blockRoot(block)~} against \code{\verb~|RangeDecoder.decode(range)~}, \code{\verb~|resetTo~} after each), by 8 threads taking runs of 32 in file order; CPU time summed over the threads (\code{\verb~|ThreadMXBean~}). "Without foreign" = the same run with every foreign reference answered by a constant; "tokenise" = the bytes of all ranges through the template scanner, nothing built, one thread.}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{mathlib}}
+\tr{\td{proofs decoded, blocks / ranges}\td{37,600 / 37,447}\td{64,516 / 64,250}\td{73,305 / 72,351}\td{475,131 / 473,119}}
+\tr{\td{overlay nodes, from blocks}\td{5,071,208}\td{7,808,269}\td{11,352,346}\td{78,207,170}}
+\tr{\td{overlay nodes, from ranges (of which foreign)}\td{6,000,156 (964,561 = 16.1 \%)}\td{9,597,147 (1,848,246 = 19.3 \%)}\td{14,695,526 (3,421,144 = 23.3 \%)}\td{92,748,947 (15,334,165 = 16.5 \%)}}
+\tr{\td{\strong{CPU, 8 workers, from blocks}}\td{\strong{0.159 s} (31.3 ns / node, 4.2 us / proof)}\td{\strong{0.230 s} (29.4 ns / node, 3.6 us / proof)}\td{\strong{0.313 s} (27.6 ns / node, 4.3 us / proof)}\td{\strong{2.653 s} (33.9 ns / node, 5.6 us / proof)}}
+\tr{\td{\strong{CPU, 8 workers, from ranges}}\td{\strong{0.512 s} (85.4 ns / node, 13.7 us / proof)}\td{\strong{0.921 s} (96.0 ns / node, 14.3 us / proof)}\td{\strong{1.648 s} (112.2 ns / node, 22.8 us / proof)}\td{\strong{9.583 s} (103.3 ns / node, 20.3 us / proof)}}
+\tr{\td{moved to the workers (ranges minus blocks)}\td{+0.354 s (x 3.2)}\td{+0.692 s (x 4.0)}\td{+1.335 s (x 5.3)}\td{+6.930 s (x 3.6)}}
+\tr{\td{- from ranges, without foreign records}\td{0.243 s (x 1.5)}\td{0.404 s (x 1.8)}\td{0.570 s (x 1.8)}\td{4.841 s (x 1.8)}}
+\tr{\td{- the foreign records}\td{0.269 s (279 ns each, 53 \% of the decode)}\td{0.517 s (280 ns each, 56 \% of the decode)}\td{1.079 s (315 ns each, 65 \% of the decode)}\td{4.742 s (309 ns each, 49 \% of the decode)}}
+\tr{\td{- tokenising the ranges alone (1 thread)}\td{0.152 s (1753 MB/s, 30.3 ns / record)}\td{0.245 s (1716 MB/s, 31.7 ns / record)}\td{0.340 s (1895 MB/s, 30.1 ns / record)}\td{2.137 s (2033 MB/s, 27.6 ns / record)}}
+\tr{\td{foreign: requests / range lookups / probes per search / lines walked}\td{342,576 / 427,172 / 1.02 / 2,336,900}\td{538,550 / 713,396 / 1.03 / 4,407,524}\td{799,235 / 1,061,899 / 1.07 / 8,690,629}\td{3,752,961 / 4,809,926 / 1.02 / 36,637,804}}
+\tr{\td{CPU, 1 worker, blocks -> ranges}\td{0.168 -> 0.560 s}\td{0.243 -> 0.986 s}\td{0.322 -> 1.554 s}\td{not run}}
+\tr{\td{wall clock, 8 workers, blocks -> ranges}\td{0.023 -> 0.067 s}\td{0.036 -> 0.126 s}\td{0.046 -> 0.270 s}\td{0.338 -> 1.397 s}}
+}
+
+\p{Reading: the worker's own range costs 1.5 - 1.8 times the block decode (28 - 32 ns of tokenising per record on top of 20 - 35 ns for the node and its location reads; text is 53 - 56 bytes per record, a block record 4.4 - 4.7). The foreign records cost as much again or more: 16 - 23 \% more nodes at 280 - 315 ns each. One worker and eight workers spend about the same CPU time (cedar: 6 \% more with eight); the file pages were in the page cache.}
+}
+
+\subtree{
+\title{5.4 Whole load + decode, CPU time}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{cedar}\th{mathlib}}
+\tr{\td{eager: load + decode (8 workers)}\td{0.519 + 0.159 = 0.677 s}\td{0.929 + 0.230 = 1.159 s}\td{1.429 + 0.313 = 1.742 s}\td{10.637 + 2.653 = 13.290 s}}
+\tr{\td{lazy: load + decode (8 workers)}\td{0.318 + 0.512 = 0.831 s}\td{0.532 + 0.921 = 1.454 s}\td{0.915 + 1.648 = 2.563 s}\td{6.351 + 9.583 = 15.934 s}}
+\tr{\td{serial part}\td{-0.201 s}\td{-0.397 s}\td{-0.514 s}\td{-4.286 s}}
+\tr{\td{workers}\td{+0.354 s}\td{+0.692 s}\td{+1.335 s}\td{+6.930 s}}
+\tr{\td{total CPU}\td{+0.153 s (+23 \%)}\td{+0.295 s (+25 \%)}\td{+0.821 s (+47 \%)}\td{+2.644 s (+20 \%)}}
+}
+}
+
+\subtree{
+\title{5.5 Agreement with the eager loader}
+
+\p{\code{\verb~|X5Tool diff~} loads a file eagerly and lazily and compares, for EVERY constant, a structural digest of its type and of its value (the proof decoded from its block, respectively parsed from its range with its foreign records): kind, constants and structures by name and bound / unbound, level lists by content, literals by value, children by digest; plus the derived facts of every root (flags, free-variable mask, \code{\verb~|depMax~}). Term ids are not compared (they differ by construction: the lazy store has fewer promoted copies), nor are level-list ids (the store interns its \code{\verb~|lpSet~} unions in the same table, so their numbering depends on which nodes it writes).}
+
+\table{
+\tr{\th{Input}\th{Files}\th{Loaded by both, all digests and root facts equal}\th{Fail alike (same exception and message)}\th{Lazy restart (eager decides)}\th{Different}}
+\tr{\td{Init / Std / cedar / mathlib}\td{4}\td{59,979 / 103,885 / 151,772 / 739,167 constants}\td{-}\td{0}\td{\strong{0}}}
+\tr{\td{230 arena tests}\td{230}\td{224}\td{6}\td{0}\td{\strong{0}}}
+\tr{\td{mutants (tutorial, bugs, other, mdata, prelude)}\td{17,775}\td{12,671}\td{4,795}\td{309}\td{\strong{0}}}
+}
+
+\p{122,179 ranges in 3,584 of the 18,005 small files were really left in the file and parsed back. Restarts by cause: 197 a constant named in a range is declared later (or has the wrong number of levels), 87 the ids of names / levels lose their order after expression lines of the segment were classified (mostly \code{\verb~|drop_record~}), 13 a range refers to a proof block with unresolved records, 9 a projection of a structure that is declared later, 3 a name id used before its definition inside a range. Per mutation kind: \code{\verb~|work/prof/X5/data/x5diff-mutants.txt~}. \strong{Without the binding guard 14 \code{\verb~|reorder_decl~} mutants load to a different store} (\code{\verb~|x5diff-mutants-noguard.txt~}): a \code{\verb~|CONST~} first written inside a proof is unbound there, and the eager loader binds its promoted copy when a later unit refers to it; the lazy path, which writes the leaf once, did not.}
+
+\p{The simulation's view of the same corpora by mutation kind (\code{\verb~|data/lazysim2-mutants.tsv~}, 18,005 files, 176,230 \code{\verb~|thm~} / \code{\verb~|opaque~} units, 174,971 of them lazy): 141 units whose value is not the last record of its segment (2 in the unmutated arena tests and inherited by their mutants; 15 in \code{\verb~|swap_decl_root~}, 30 in \code{\verb~|wrap_mdata~}), 2 with the type after the value (\code{\verb~|swap_decl_root~}), 117 with a prefix record that the type does not reach (\code{\verb~|drop_decl~} 43, \code{\verb~|reorder_decl~} 41, \code{\verb~|swap_child~} 18, \code{\verb~|change_binder_type~} 7, \code{\verb~|swap_decl_root~} 6, \code{\verb~|change_decl_kind~} 2), 999 whose value is an earlier record; all 880 \code{\verb~|renumber_ids~} files and 2,238 of the 2,802 \code{\verb~|wrap_mdata~} files leave dense mode; 2,107 files are the reader's rejection.}
+}
+
+\subtree{
+\title{5.6 End to end with 8 workers: wall = max(serial loader, checking)}
+
+\p{The prototype has no engine, so this is arithmetic on measured terms. Under pipelining a pass costs max(serial loader, checking); lazy ranges shorten the first term and lengthen the second by the extra decode CPU divided by the parallelism of the check phase. The published terms: load of the native image, one thread (\code{\verb~|work/status/p7.log~} 15:47Z: Std 1.1 s, cedar 1.6 s; \code{\verb~|rlvm-load.log~} 15:19Z: mathlib 12.40 s); check phase of the machine with 8 workers on quiet cores (P7, 15:47Z: Std 1.85 s at 6.3 times one worker, cedar 2.26 s at 7.1 times; mathlib 42.3 s wall and 206 s CPU for the whole run, machine owners 13:30Z, \src{rlvm-driver/README.md}). The lazy terms: the measured ratio of the load and the measured extra decode CPU of section 5.3 (JVM; one decode per proof).}
+
+\table{
+\tr{\th{8 workers, pipelined}\th{Std}\th{cedar}\th{mathlib}}
+\tr{\td{load, eager, native \code{\verb~|-O3~}, one thread (published)}\td{1.1 s}\td{1.6 s}\td{12.4 s}}
+\tr{\td{load, lazy = eager x the measured ratio}\td{0.63 s (x 0.57)}\td{1.02 s (x 0.64)}\td{7.40 s (x 0.60)}}
+\tr{\td{checking today: wall of the check phase (CPU / wall)}\td{1.85 s (6.3)}\td{2.26 s (7.1)}\td{42.30 s (4.9)}}
+\tr{\td{extra decode CPU with lazy ranges (measured, JVM)}\td{+0.69 s}\td{+1.34 s}\td{+6.93 s}}
+\tr{\td{- as wall clock at that parallelism}\td{+0.11 s}\td{+0.19 s}\td{+1.41 s}}
+\tr{\td{\strong{wall today: eager = max(load, check)}}\td{\strong{1.85 s} (check-bound)}\td{\strong{2.26 s} (check-bound)}\td{\strong{42.30 s} (check-bound)}}
+\tr{\td{\strong{wall today: lazy}}\td{\strong{1.96 s} (+5.9 \%)}\td{\strong{2.45 s} (+8.3 \%)}\td{\strong{43.71 s} (+3.3 \%)}}
+\tr{\td{lazy starts to win when the check phase is below}\td{0.99 s (1.9 times faster than today)}\td{1.41 s (1.6 times faster than today)}\td{10.99 s (3.9 times faster than today)}}
+\tr{\td{largest possible gain (check phase below the lazy load)}\td{1.10 -> 0.63 s (-43 \%)}\td{1.60 -> 1.02 s (-36 \%)}\td{12.40 -> 7.40 s (-40 \%)}}
+}
+
+\ul{
+\li{\strong{Today lazy ranges make every corpus slower} (+6 \%, +8 \%, +3 \%): checking is the larger term, the load's share of the wall clock is already gone through pipelining, and the workers get more to do.}
+\li{They start to win when the check phase drops below the eager load minus the extra decode time: 1.9 times faster checking than today on Std, 1.6 times on cedar, 3.9 times on mathlib. From there the gain grows until the check phase is as short as the lazy load; the most that can ever be gained is the load's own reduction, 36 - 43 \% of the wall clock of a loader-bound run.}
+\li{Against the eager loader with scanner threads (\code{\verb~|-X scan-threads=2~}: mathlib 14.4 -> 11.3 s wall before wave 7, -21 \%) half of that largest gain is already available without any change; lazy ranges could use scanner threads too (pass one, 23 - 27 \% of the lazy load, off the sink thread: last row of table 5.1), which was estimated, not built.}
+\li{With \code{\verb~|-X passes=N~} in its check-only form (\code{\verb~|passes-mode=recheck~}) the load is not part of a measured pass: lazy ranges then cost the extra decode in every pass and gain nothing, unless the packed form of a range is kept after its first decode.}
+\li{At the CPU cost of the fastest competitor on mathlib (about 18 s wall with 4 threads, 62 s CPU): with 8 workers at today's parallelism of 4.9 the check phase would be 12.7 s, the eager run 12.7 s and the lazy run max(7.4, (62 + 6.9) / 4.9) = 14.1 s; at a parallelism of 7 (what P7 measures on Std and cedar) the check phase would be 8.9 s, the eager run 12.4 s (loader-bound; about 10 s with scanner threads) and the lazy run max(7.4, (62 + 6.9) / 7) = 9.8 s.}
+}
+}
+}
+
+\subtree{
+\title{6. Soundness: what is verified, by whom, and what happens to a file that is not exporter output}
+
+\p{The eager path stays as it is and decides every file the lazy path does not take. The lazy path can only ever contribute an ACCEPT; the argument has to show: \em{lazy ACCEPT implies eager ACCEPT}.}
+
+\subtree{
+\title{6.1 What the loader thread verifies before it leaves anything in the file (per unit, at the declaration line)}
+
+\p{L1. The reader is in the state "ids are 0, 1, 2, ... in file order" for names and levels and "dense without a table" for expressions, since the start of the file (\code{\verb~|IdSpace.denseInOrder()~} / \code{\verb~|dense~}). Lost once = lazy mode ends for the rest of the file; lost after expression lines of the open segment were classified = restart.}
+
+\p{L2. Every line of the segment starts like a name, level, leaf, structure, projection or declaration record (\code{\verb~|Lines.classify~}: the first 8 bytes; for \code{\verb~|{"ie":N,~} the 8 bytes after the number). Any other first bytes (\code{\verb~|mdata~}, whitespace, another key order, CRLF, a blank line): lazy mode ends, the open segment is parsed eagerly in file order.}
+
+\p{L3. Every line the loader parses itself is what its first bytes say: a NAME / LEVEL line binds exactly one name / level and nothing else; a run of n expression-class lines binds exactly n expression ids and no name or level; a leaf-class line inside a range gives exactly one leaf record (the sink refuses a structure record there). Otherwise restart. (Needed because the names and levels of a segment are read ahead of its expression lines; with L3 that reordering is not observable, and "defined before use" stays exact: while an expression line is parsed, exactly the names and levels of the lines before it are visible, \code{\verb~|IdSpace.show~}.)}
+
+\p{L4. The declaration line is a \code{\verb~|thm~} in template form, its value id V is the id of the LAST expression-class line of the segment (first id of the segment + number of expression-class lines - 1), its type id T is smaller than V. Else the unit is loaded eagerly.}
+
+\p{L5. Binding guard, after the theorem's name is claimed: every record of the range that names something is resolved NOW: the CONST leaves are bound with the right number of levels, the literal leaves have their prerequisites, every projection names a declared structure (\code{\verb~|LoadTarget.unresolvedRefs~}, \code{\verb~|isUnresolved~}, \code{\verb~|isDeclared~} in the prototype). Else restart.}
+
+\p{What the loader has then parsed, exactly as the eager loader parses it: all names and levels, the expression records with id <= T (the prefix; the usual mark / sweep: reached by the type -> shared, not reached -> the unit's proof block, which then is ownerless), the leaf records of the range, the declaration line. What it has NOT looked at beyond their first bytes and their line ends: the structure lines of the range.}
+}
+
+\subtree{
+\title{6.2 What the worker verifies when it parses a range (\code{\verb~|RangeDecoder~}), before the unit can be accepted}
+
+\p{W1. The range's bytes end with a newline and split into lines each of which is, for the same classifier and the reader's own template scanner: a name line, a level line, a leaf line (these three were parsed completely by the loader, L3), or an application / lambda / forall / let / projection \strong{in exact template form, byte for byte}. Anything else: restart.}
+
+\p{W2. The k-th expression line of the range carries the id \code{\verb~|first + k~} (so the ids of the range are dense, in order, not repeated), and the number of expression lines is the number the loader counted.}
+
+\p{W3. Every reference of a structure record goes to an expression id smaller than its own (defined before use, as the reader requires); every binder name and structure name is a name id smaller than the number of names defined before that line (names before the range + name lines of the range seen so far).}
+
+\p{W4. A projection index is at most 2^31 - 1 (the eager loader declines above it); the projection was announced by the loader (its structure name translated on the loader thread).}
+
+\p{W5. A reference to an earlier record without a location (a "foreign" record, in the range of an earlier theorem) is served by parsing that one line: it is found by id inside the byte range the loader recorded, starts after a newline, is in template form, carries exactly that id, refers only backward. A reference to a record of a proof block the loader wrote (ownerless blocks, eager theorems, opaques) decodes the block, and restarts if the block has an unresolved record (\code{\verb~|ProofBlocks.hasUnresolved~}): the eager loader would have promoted the record and bound it again for this unit.}
+}
+
+\subtree{
+\title{6.3 Why the result is the eager loader's}
+
+\ol{
+\li{\em{Same records.} By L1-L3 and W1-W3 for every range, the eager reader reads the same file in dense mode and delivers the same records with the same ordinals; nothing it would reject or decline is present in a parsed range (W1-W4 are the reader's and loader's own conditions on such lines; any line that needs the general JSON path restarts instead of being interpreted).}
+\li{\em{Same split.} With dense ids in file order a record refers only to smaller ids. So nothing reachable from the type T has an id above T, and every record of \verb~|(~T, V\verb~|]~ is unmarked for the eager loader: its block is exactly the unreached records of the prefix plus the range. The lazy path keeps the unreached prefix records in a block and the range in the file; the value is record V in both.}
+\li{\em{Same promotions.} A shared record of a later unit that refers into a range (a later declaration's type that uses a proof record, a definition that shares a subterm with an earlier proof) is the eager loader's promotion: the lazy loader parses the record and what it reaches among records without a location from the file at that moment (W5's checks) and writes the same shared nodes. It promotes less only because it does not see the references that proof records make; those are the foreign records of W5, which the worker builds as overlay nodes.}
+\li{\em{Same bindings.} The eager loader binds a block record when the theorem is declared and a promoted copy when it promotes it. By L5 every name-bearing record of a range is bound at the theorem's declaration; a name is declared once (a second declaration is the loader's rejection); so the record denotes the same constant whenever and for whomever it is materialised. Without L5 this fails: 14 \code{\verb~|reorder_decl~} mutants (section 5.5).}
+\li{\em{ACCEPT needs every range parsed.} A unit is accepted only after its worker parsed its range (W1-W5 hold for it); a run is accepted only if every unit is. So at ACCEPT every range of the file has passed W1-W5, the loader finished without a restart, and by 1-4 the eager store is isomorphic to what was checked (per constant: the same type and value up to term ids). A foreign line read by an earlier-finishing worker belongs to a range whose own worker validates it before the run can be accepted.}
+}
+}
+
+\subtree{
+\title{6.4 The rules that make it exact}
+
+\p{R1. \strong{Restart, never guess.} Any failure of L1 (after the fact), L3, L5, W1-W5, and any \code{\verb~|LazyRestartException~} of the loader's promotion on demand, ends the lazy run: every outcome obtained so far is discarded and the file is read again by the eager path (which then rejects, declines or accepts it as today).}
+
+\p{R2. \strong{Only ACCEPT is final under lazy loading.} A REJECT or DECLINE reached while ranges are unparsed is not exact (an earlier bad line may sit in a range nobody parsed; a message and line number would differ; a loader rejection assumes the ids of the skipped ranges): the run is repeated eagerly. Failing runs pay one extra load; they already pay a second check of the failing unit in pipelined mode.}
+
+\p{R3. \strong{Every range is parsed before ACCEPT}, also the range of a unit whose value an engine never asked for: the store keeps a "validated" bit per range, the board accepts only when all are set (a worker validates the rest at the end: tokenising alone runs at 1.7 GB/s per core).}
+
+\p{R4. The export must not change during the run (it is read twice). The eager path has the same assumption for the one pass it makes; it is stated here because a change between the two reads is not detected.}
+}
+
+\subtree{
+\title{6.5 Hostile and mutated files against the rule}
+
+\table{
+\tr{\th{File property}\th{What happens}}
+\tr{\td{ids not dense / not in order (880 \code{\verb~|renumber_ids~}, sparse ids, ids >= 2^63)}\td{L1: never lazy, or lazy until the first such line}}
+\tr{\td{ids not dense INSIDE a range (a structure line with another id, an id twice)}\td{W2: restart}}
+\tr{\td{a shared record refers into a range; a later type or definition uses a proof record}\td{promotion on demand from the file (6.3.3); 1.7 - 2.7 \% of the records left on exporter output}}
+\tr{\td{value is not the last record of its segment; type id >= value id; value is an earlier record}\td{L4: the unit is eager (141 + 2 units in the mutants; 52,306 theorems and opaques of mathlib have an earlier record as value and no range)}}
+\tr{\td{prefix record not reached by the type (records written early, \code{\verb~|drop_decl~}, \code{\verb~|reorder_decl~}, \code{\verb~|swap_child~}: 117 units)}\td{the record goes to the unit's block as today; a range that refers to it decodes the block (W5)}}
+\tr{\td{a proof names a constant that is declared later (\code{\verb~|reorder_decl~}, \code{\verb~|drop_decl~}, \code{\verb~|swap_name~}, \code{\verb~|forge_flag~})}\td{L5 / W5: restart (219 mutants)}}
+\tr{\td{a structure line of a range uses a name or expression id defined later}\td{W3: restart (3 mutants)}}
+\tr{\td{\code{\verb~|mdata~}, reformatted JSON, CRLF, blank line}\td{L2: lazy mode ends at that line (\code{\verb~|wrap_mdata~}: 2,238 of 2,802 files leave it at their first \code{\verb~|mdata~} record; \code{\verb~|reformat_json~}: 875 of 880 files have no range at all)}}
+\tr{\td{a line that starts like one kind and is another}\td{L3 (loader side), W1 (worker side): restart}}
+\tr{\td{a record dropped or duplicated (\code{\verb~|drop_record~}, \code{\verb~|duplicate_record~})}\td{the reader's rejection on the loader thread, or restart when the id spaces lose their order after expression lines were classified (87)}}
+\tr{\td{a segment above 1 GiB}\td{lazy mode ends there (the segment buffer is bounded); long lines are no problem (mathlib has one of 2.7 MB)}}
+}
+
+\p{Evidence (section 5.5): the prototype against the eager loader on 18,005 files and on Init, Std, cedar, mathlib.}
+}
+}
+
+\subtree{
+\title{7. The design, for the owners}
+
+\p{Terms as in \src{rlvm-load/README.md} ("What the loader does", "Pipelined loading"), \src{rlvm-store/README.md} (proof blocks, decoder, frontiers) and \src{rlvm-driver/README.md} ("Per unit", "Pipelined loading").}
+
+\subtree{
+\title{7.1 rlvm-export (reader)}
+
+\ul{
+\li{\code{\verb~|LazyRead~} (prototype: \code{\verb~|work/prof/X5/rlvm-export/.../LazyRead.java~}, 556 lines): a third mode next to \code{\verb~|sequential~} and \code{\verb~|ParallelScan~}, chosen by \code{\verb~|ExportReader.Options.lazy~} when the sink is a \code{\verb~|LazySink~} and the input is mapped. Per segment: pass one classifies every line (\code{\verb~|Lines.classify~}) and finds its end, parses name and level lines at once; at the declaration line the rules L1 - L4 decide; pass two parses the prefix (or the whole segment) in file order; the range is announced with \code{\verb~|lazyBegin / lazySkip(n) / lazyProj(name, index) / lazyEnd(fileOffset, byteLength, count, ..)~}, its leaf lines are delivered as ordinary \code{\verb~|expr*~} calls.}
+\li{\code{\verb~|IdSpace.show(n) / showAll()~}: visibility of names and levels while the expression lines of a segment are parsed after its name lines (exact "defined before use"), in dense and in table mode (the real store numbers names itself, so names are in table mode from the first special name on).}
+\li{\code{\verb~|Lines.RangeScanner~} + \code{\verb~|RangeOut~} (public): the template scanner for the workers; \code{\verb~|RangeFile~}: one record of a range by id (interpolation on the bytes, then a short walk; every answer verified against the id in the line).}
+\li{For \code{\verb~|ParallelScan~} (scan threads): the classification is context-free, so pass one can run on the helper threads per 4 MiB chunk (line starts + classes + the tokens of name / level / leaf / declaration lines and of the lines up to T); a segment that crosses a chunk border is tokenised completely, as today. Not built. It takes pass one (23 - 27 \% of the lazy load in the prototype) off the sink thread.}
+\li{\code{\verb~|opaque~} records need the two ids from the general path (the template scanner has no \code{\verb~|opaque~} shape); the prototype loads them eagerly (0.4 - 1.3 \% of the ranges of section 1).}
+}
+}
+
+\subtree{
+\title{7.2 rlvm-load (loader)}
+
+\ul{
+\li{\code{\verb~|Loader implements LazySink~} (prototype: 350 lines added to a private copy). State per range, nothing per record: \code{\verb~|LazyRanges~} = first ordinal, record count, file offset, byte length, names defined before, owner cid, structure count (28 bytes per range: mathlib 475,131 ranges = 13 MB) and, per projection record left in the file, (ordinal, store name id) (8 bytes; mathlib 18,818), because only the loader thread can translate a name id.}
+\li{\code{\verb~|loc[ordinal] == 0~} now also means "left in the file" for an ordinal below the segment (today it never is 0 there). \code{\verb~|resolvePending~} / \code{\verb~|rootRef~}: \code{\verb~|l < 0~} promotes from a block as today, \code{\verb~|l == 0~} promotes from the file (\code{\verb~|lazyPromote~}: range by binary search over the first ordinals, line by \code{\verb~|RangeFile.find~}, children first, no recursion, same \code{\verb~|LoadTarget.app / lam / pi / let / proj~} calls as the sweep). \code{\verb~|loc~} of a range is not written at all (mathlib: 310 MB of the 428 MB stay untouched).}
+\li{The leaf records of a range are written as shared nodes at the theorem's declaration (after the claim, so they bind as the block record would). The binding guard L5 is what makes this the eager loader's node.}
+\li{The theorem's value: the range (new value word, 7.3) unless V is a leaf (then the shared term: 33 / 86 / 122 units on Init / Std / cedar).}
+\li{New in \code{\verb~|LoadOptions~}: \code{\verb~|withLazyRanges(boolean)~} (off for \code{\verb~|withProofBlocks(false)~}), \code{\verb~|withLazyMinRecords(n)~}; \code{\verb~|LoadReport~}: ranges, bytes and records left, leaves, promotions from the file. \code{\verb~|ExportLoader~} lets \code{\verb~|LazyRestartException~} through as a third outcome ("read again eagerly"), not a verdict.}
+\li{Pipelined mode: the range rows, the projection rows and \code{\verb~|loc~} have to be published with the frontier (today \code{\verb~|loc~} is the loader's private array): the workers read \code{\verb~|loc~} for every reference of a range to an earlier record. Rule for a reader on frontier n: a location above the export end of that frontier (a promotion made for a later unit) counts as 0, i.e. the record is parsed from the file. \code{\verb~|loc~} has to stop moving when it grows (chunks), or be handed over like the other published arrays.}
+\li{\code{\verb~|MalformedExportException.line()~}: the loader derives the line from its record counters; with skipped records that still holds (ordinals advance), but an error inside a range has no loader line: by R2 the eager rerun reports it.}
+}
+}
+
+\subtree{
+\title{7.3 rlvm-store}
+
+\ul{
+\li{\strong{A range is a proof block whose records are still text.} \code{\verb~|ProofBlocks~} gets a second row kind: file offset, byte length, first ordinal, record count instead of chunk and position; \code{\verb~|DeclTable.value(cid)~} stays \code{\verb~|-(block + 1)~}. Then \code{\verb~|Overlay.blockRoot(block)~}, the block map, \code{\verb~|mark / resetTo / reset~}, \code{\verb~|nodeCount(block)~} and every consumer (\code{\verb~|rlvm-machine~} \code{\verb~|Decl~} / \code{\verb~|Reduce~}, \code{\verb~|rlvm-ref~} \code{\verb~|RefKernel~}, \code{\verb~|rlvm-admit~} \code{\verb~|StructuralChecks~} / \code{\verb~|OfficialOrder~} / \code{\verb~|EnvBuilder~}, the test kit) work unchanged; \code{\verb~|hasUnresolved(block)~} is false for a file block by L5. The prototype does exactly this inside the overlay (\code{\verb~|RangeDecoder.decode~} ends with \code{\verb~|commitBlock~}).}
+\li{\code{\verb~|ProofBlocks.decode~} dispatches on the row kind to the range decoder (prototype: \code{\verb~|rlvm.store.RangeDecoder~}, 602 lines, same \code{\verb~|NodeCtx~} writers and the same sharing-flag rule as \code{\verb~|decode~}). It needs the mapped export (\code{\verb~|Store.attachExport(MemorySegment)~}), the published \code{\verb~|loc~}, the range and projection rows, and the template scanner: either \code{\verb~|rlvm-store~} depends on \code{\verb~|rlvm-export~} (as the prototype's private copy does; the store's own rule today is "nothing but the JDK"), or the scanner is handed in through a small interface.}
+\li{Promotion from the file as a store operation (\code{\verb~|StoreBuilder.promoteRecord(kind, children..)~} setting \code{\verb~|F_SHARED~} like \code{\verb~|promote~} does; the prototype uses the plain appends, whose flags come from the open unit only).}
+\li{Memory: no block bytes (mathlib 361 MB), no promotion memo (up to 313 MB), no sparse record index; the export region ends smaller (mathlib 38.7 M -> 31.7 M nodes). In exchange the export stays mapped and its pages are read a second time, by the workers (section 8).}
+\li{Optional, for check-only passes (\code{\verb~|-X passes=N~}) and re-checks: keep the packed form of a range after its first decode (write the block bytes then), so that only the first decode pays for text.}
+}
+}
+
+\subtree{
+\title{7.4 rlvm-driver (P7)}
+
+\ul{
+\li{Nothing in \code{\verb~|Worker~}'s per-unit flow if the store hides ranges behind block indices.}
+\li{\strong{Restart} (R1): a \code{\verb~|LazyRestartException~} from the loading thread or from any worker cancels the run like an \code{\verb~|Error~} in the loader does today (checking threads joined, outcomes discarded), then \code{\verb~|execute()~} runs once more with lazy ranges off. Statistic \code{\verb~|driver.lazy.restarts~}.}
+\li{\strong{Verdict} (R2, R3): with lazy ranges only ACCEPT is recorded as final, and only when every range is validated; anything else reruns eagerly. This composes with the existing rule "nothing but an ACCEPT is recorded for a unit that started before the end of the load".}
+\li{Scheduling: the frontier advances about 1.6 - 1.75 times faster, a theorem costs its worker 10 - 19 us more on average (section 5.3); \code{\verb~|-X scan-threads~} can take pass one.}
+\li{\code{\verb~|-X lazy-ranges=on|off~} (default off until the gate is green in that mode), in \code{\verb~|rlvm-main~} / \code{\verb~|MainOptions~}.}
+}
+}
+
+\subtree{
+\title{7.5 If the worker price is the obstacle: let the scanner threads pack (not built, not measured)}
+
+\p{Pass one is context-free, so a scanner thread can do per chunk what \code{\verb~|RangeDecoder~} does per range, without the store: tokenise the structure lines of a range and write them as block records whose references are still ordinals (own range: back distance; earlier record: its ordinal). The sink thread then appends the bytes of that block and never sees its records; a worker decodes an "ordinal block" with one \code{\verb~|loc~} read per reference to an earlier record, and fetches a foreign record by index from the earlier block instead of searching text. From the measured terms: the sink thread's time is the lazy load without pass one (last row of table 5.1); the worker's time for its own range is about the "without foreign records" row minus the tokenising (Init 0.09 s, Std 0.16 s, cedar 0.23 s: less than today's block decode, because the leaves are shared nodes already), plus the foreign records at a lower unit cost than from text. Every line is then parsed during the load, by the reader's own code and with its own verdicts, so the restart rule, the second read of the file and the dependence on the page cache disappear; the binding guard, the published \code{\verb~|loc~} and the foreign records remain. It needs two scanner threads that compete with the workers while the file loads (tokenising mathlib's ranges is 2.1 s of CPU time). If the loader ever is the floor, this variant should be costed before the text one is built.}
+}
+}
+
+\subtree{
+\title{8. What was not established}
+
+\ul{
+\li{\strong{Native image.} Every time here is JVM C2 with the launcher's flags. The target platform's load is 12.4 s for mathlib (native \code{\verb~|-O3~}), where \code{\verb~|Mem.u64~} and \code{\verb~|Scanner.num~} are out-of-line calls (22 \% of the load is the reader): pass one and the workers' tokenising use the same primitives, so both sides of the trade may be slower there. The ratio lazy / eager is what should carry over; it was not measured.}
+\li{\strong{Pipelined operation.} The prototype decodes after the load. Not measured: workers and loader running together (memory bandwidth: the loader writes the store while eight workers read 4.3 GB of text), the publication of \code{\verb~|loc~} and of the range table, the frontier rule for late promotions (7.2).}
+\li{\strong{How often a proof is decoded in a real run.} Admission's structural checks and the engine call \code{\verb~|Overlay.blockRoot~} on the same worker overlay (\code{\verb~|WorkerContext.overlay~}), so normally once per unit; a session reset between the two, a re-check and every later pass of \code{\verb~|-X passes=N~} decode again. There is no counter. The worker price of section 5.3 is per decode.}
+\li{\strong{The page cache.} The lazy run reads the export twice, the second time at random from eight threads, up to the end of the run. All measurements had the file in the page cache (the mathlib run was preceded by a \code{\verb~|cat~}). On the arena's 16 GB runner mathlib's 6.3 GB of file pages compete with the store; if they are reclaimed the workers wait for the disk. The eager loader drops the pages behind it (\code{\verb~|unloadMapped~}).}
+\li{\strong{Scanner threads together with lazy ranges} (pass one on helper threads): estimated from the measured pass one, not built.}
+\li{\strong{A table shared by the workers for foreign records} (variant B of section 2): counted, not built.}
+\li{\strong{\code{\verb~|opaque~} units}: loaded eagerly by the prototype (0.4 - 1.3 \% of the ranges of the simulation).}
+\li{\strong{mathlib}: one run, no repetition (a first attempt at 16:24Z measured nothing: the tool's newline micro-measurement looped on mathlib's 2.7 MB line and held the measurement lock for 270 s before it was killed; fixed and tested on a synthetic export with 3 MB lines, \code{\verb~|work/prof/X5/testdata/~}); con-leche: simulation only.}
+\li{\strong{Files that change while they are read}, and exotic inputs beyond the 18,005 files (the generators of \code{\verb~|rlvm-testkit~} were not rerun with new mutation kinds aimed at ranges: a structure line with a foreign id, a range line with trailing bytes, a leaf-class line that is a structure record). The checks W1 - W3 and L3 are written for them and three of the 309 restarts come from W3, but a campaign that targets the range rule directly is owed before this could ship.}
+}
+}
+
+\subtree{
+\title{9. Files}
+
+\table{
+\tr{\th{Path}\th{Content}}
+\tr{\td{\code{\verb~|work/status/prof-X5.md~}}\td{living summary, newest first}}
+\tr{\td{\code{\verb~|work/prof/X5/build.sh~}, \code{\verb~|classes-final/~}}\td{private build; the classes all measurements used}}
+\tr{\td{\code{\verb~|work/prof/X5/rlvm-export~}, \code{\verb~|rlvm-store~}, \code{\verb~|rlvm-load~}}\td{private copies with the prototype (section 4)}}
+\tr{\td{\code{\verb~|work/prof/X5/sim/LazySim.java~}, \code{\verb~|LazySim2.java~}}\td{simulations on the published reader}}
+\tr{\td{\code{\verb~|work/prof/X5/data/lazysim-*.txt~}, \code{\verb~|lazysim2-*.txt~}, \code{\verb~|lazysim2-mutants.tsv~}}\td{simulation results}}
+\tr{\td{\code{\verb~|work/prof/X5/data/x5diff-mutants.txt~} (\code{\verb~|-noguard~}, \code{\verb~|-guard1~}, \code{\verb~|-guard2~})}\td{differential runs over the arena tests and the mutant corpora}}
+\tr{\td{\code{\verb~|work/prof/X5/runs/{init,std,cedar}-q5.txt~}, \code{\verb~|mathlib-final.txt~}}\td{the measurement windows (raw); \code{\verb~|*-q3.txt~}, \code{\verb~|*-q4.txt~}: the contended windows}}
+\tr{\td{\code{\verb~|work/prof/X5/measure.sh~}, \code{\verb~|measure-mathlib.sh~}, \code{\verb~|tools/summ.py~}}\td{how they were taken and summarised}}
+}
+
+\p{Commands:}
+
+\pre{\verb~|
+work/prof/X5/build.sh
+CP=$(cat work/prof/X5/classes/classpath.txt)
+java -cp $CP rlvm.load.tools.X5Tool run  work/exports/init.ndjson --repeat 4 --threads 1,8 --rounds 3
+java -cp $CP rlvm.load.tools.X5Tool diff work/arena-site/tests work/mutants/suite        # eager against lazy, per file
+java -cp $CP rlvm.load.tools.X5Tool explain FILE CID                                       # first differing node of a constant
+bench/quiet.py -- work/prof/X5/measure.sh cedar 4g
+~}
+}

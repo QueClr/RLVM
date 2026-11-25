@@ -1,0 +1,370 @@
+\title{AR1 - The arena's own procedure on today's published jars, and where RLVM would stand on the board}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{benchmark}
+\tag{performance}
+\meta{origin}{docs/research/profiles/AR1.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Agent AR1, 2026-11-24, 18:28Z - 19:30Z. No module code was changed or published. Everything of mine is under \code{\verb~|work/ar1/~} (distributions, reports, logs, scripts); living summary \code{\verb~|work/status/prof-AR1.md~}.}
+
+\p{\strong{Framing (owner note 12).} The arena ranks by user-space instructions on Mathlib. That is the arena's metric, not the project's: the owner's target is warm wall clock (\code{\verb~|work/status/warm.md~}). This report says where the published code stands by the arena's rule and what the rule would reward; it is information, not a target. Instruction counts are exact and repeat to 0.2 \%; every wall-clock and CPU figure that is quoted as evidence was taken inside a \src{bench/quiet.py} window and is marked as such.}
+
+\subtree{
+\title{0. Tables first}
+
+\subtree{
+\title{0.1 Verdicts: the complete arena test set (270 tests: 148 good incl. the 8 corpora, 92 bad, 30 either)}
+
+\p{One arena-shaped container per configuration (8 performance cores, 16 GB, no network), tests one after the other, the arena's time limit per test, \code{\verb~|perf stat~} + GNU time around the run line (\code{\verb~|bench/run-suite.py --perf --arena-timeouts~}).}
+
+\table{
+\tr{\th{configuration (run line = \src{scripts/arena/rlvm.yaml} + the options shown)}\th{good: accepted / rejected / declined / error / timeout}\th{bad: rejected / accepted / declined}\th{either: accepted / rejected / declined}\th{\strong{wrong accepts}}\th{\strong{wrong rejects}}\th{declined + error + timeout}}
+\tr{\td{\strong{(a)} as it is today: \strong{reference engine, \code{\verb~|--threads 4~}}}\td{148 / 0 / 0 / 0 / 0}\td{92 / 0 / 0}\td{9 / 19 / 2}\td{\strong{0}}\td{\strong{0}}\td{2}}
+\tr{\td{\strong{(b)} \code{\verb~|-X engine=machine~} (default switches \code{\verb~|warm,gated,expect~})}\td{147 / 0 / 0 / 0 / \strong{1}}\td{92 / 0 / 0}\td{9 / 19 / 2}\td{\strong{0}}\td{\strong{0}}\td{3}}
+\tr{\td{\strong{(c*)} \code{\verb~|-X engine=machine -X machine.switches=gated,pchk,expect,warm,code,casetrees,bodies,directrules,same,match,joint,lazycases,lazyeval~} (INT6's CANDIDATE default; see the note)}\td{148 / 0 / 0 / 0 / 0}\td{92 / 0 / 0}\td{9 / 19 / 2}\td{\strong{0}}\td{\strong{0}}\td{2}}
+\tr{\td{(d) extra, NOT official-exact: \code{\verb~|-X engine=machine -X machine.switches=default,facts,probes -Drlvm.machine.m4=congruence,skipargs~}}\td{148 / 0 / 0 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{\strong{0}}\td{\strong{0}}\td{2}}
+}
+
+\p{Every test that is not "correct" or a verdict on an \code{\verb~|either~} test, by name:}
+
+\table{
+\tr{\th{configuration}\th{test}\th{expected}\th{got}\th{cause}}
+\tr{\td{(a), (b), (c*), (d)}\td{\code{\verb~|corner-cases/eta-struct-major-no-whnf~}, \code{\verb~|corner-cases/eta-struct-major-and-no-whnf~}}\td{either}\td{declined (exit 2)}\td{\code{\verb~|BUDGET_STEPS ...: the reduction returns to a term it started from; the official kernel does not terminate here~} (the published \code{\verb~|official~} row is a timeout on both). (a): 5 and 17 ms, 0.01 G instructions. (b), (d): 0.88 s and 24.0 G each, (c*): 1.85 s and 55.2 G each - the machine first runs into its own bound of 2^27 ticks per unit, then the reference engine declines}}
+\tr{\td{(b)}\td{\code{\verb~|perf/loop-unfolded-once~}}\td{accept}\td{\strong{timeout} in the suite run (killed at the arena's 40 s); \strong{accepted in 31.6 s} when repeated alone in a quiet window (199.2 G instructions, 31.3 s CPU, \strong{8,686 MiB})}\td{not a wrong verdict. The machine works on one unit until its own tick bound cuts it, then the reference engine accepts the file (the reference engine alone: 76 ms, 1.5 G, 60 MiB; with the shortcuts of (d): 58 ms, 0.85 G). 31.6 s of a 40 s limit on this host's cores; the arena's runner is slower (nano-lean's Mathlib wall: 29.5 s here, 36.8 s published; gruszka 20.0 s and 32.5 s), so \strong{on the arena this test is a likely timeout with the machine's default switches}. With the candidate set (c*) it is accepted in 75 ms (0.77 G): \code{\verb~|same~} answers what the removed shortcuts used to}}
+}
+
+\p{No wrong accept and no wrong reject in any configuration. With (a) RLVM gives the published verdict of \code{\verb~|official~} (v4.35.0) on 268 of the 270 tests; the two others are the non-terminating \code{\verb~|either~} files above.}
+
+\p{Note on (c*): at the time of the runs (19:14Z) the integrator's log (\code{\verb~|work/status/machine-INT6.log~}, entry of 19:06:35Z) calls NO switch set beyond the default "gated": it reports a candidate default with hostile exports and mutants clean, the full gate failing only on a harness artefact and re-gated on cedar + Std. Strictly, (c) is therefore skipped; (c*) is that candidate, run so that its arena figure exists when the integrator decides. It is not a gated configuration.}
+}
+
+\subtree{
+\title{0.2 Mathlib: instructions, wall clock, CPU time, peak RSS - RLVM and the leaders, same container, same session}
+
+\p{One fresh arena-shaped container per run, \src{bench/measure.sh} (= the arena's \code{\verb~|perf stat ... time ... sh -c RUN~}). All rows inside a \src{bench/quiet.py} window unless marked. "second sample" = the Mathlib run inside the suite of 0.1 (container parked on two cores during other agents' windows: its times are not evidence, its count is).}
+
+\table{
+\tr{\th{checker / configuration}\th{status}\th{\strong{instructions}}\th{virtual s (/6e9)}\th{x nano-lean}\th{wall s}\th{CPU s}\th{peak RSS MiB}\th{second sample}}
+\tr{\td{RLVM (a) reference engine, 4 workers}\td{accepted}\td{\strong{8,427.1 G}}\td{1,404.5}\td{23.33}\td{177.7}\td{622.4}\td{5,513}\td{8,408.3 G (-0.22 \%)}}
+\tr{\td{RLVM (b) machine \code{\verb~|warm,gated,expect~}, 4 workers}\td{accepted}\td{\strong{2,978.5 G}}\td{496.4}\td{8.25}\td{61.3}\td{205.1}\td{2,886}\td{2,980.5 G (+0.07 \%)}}
+\tr{\td{RLVM (c*) machine, INT6's candidate set, 4 workers}\td{accepted}\td{\strong{2,747.7 G}}\td{458.0}\td{7.61}\td{56.8}\td{187.0}\td{2,932}\td{2,748.3 G (+0.02 \%)}}
+\tr{\td{RLVM (d) machine + \code{\verb~|facts,probes~} + \code{\verb~|congruence,skipargs~} (not official-exact)}\td{accepted}\td{\strong{1,977.0 G}}\td{329.5}\td{5.47}\td{not quiet}\td{not quiet}\td{2,921}\td{1,976.7 G (-0.02 \%)}}
+\tr{\td{nano-lean v0.4.2 (local build of the arena's definition, 4 threads)}\td{accepted}\td{361.2 G}\td{60.2}\td{1.00}\td{29.5}\td{102.0}\td{5,157}\td{published x86-64: 394.9 G; here / published 0.915}}
+\tr{\td{gruszka (4 workers)}\td{accepted}\td{419.1 G}\td{69.9}\td{1.16}\td{20.0}\td{71.5}\td{2,525}\td{462.0 G; 0.907}}
+\tr{\td{sokonanoda (4 threads)}\td{accepted}\td{505.6 G}\td{84.3}\td{1.40}\td{33.7}\td{114.9}\td{5,171}\td{527.4 G; 0.959}}
+\tr{\td{rpylean (1 thread)}\td{accepted}\td{544.4 G}\td{90.7}\td{1.51}\td{125.8}\td{125.4}\td{4,537}\td{578.1 G; 0.942}}
+}
+
+\p{Same machine, earlier today (\code{\verb~|bench/baselines.json~}, 04:23Z - 05:33Z, not repeated): pestka 1,339.6 G, nanoda 5,533.3 G, tenet-jvm with C2 9,313.0 G, official v4.35.0 11,423.7 G.}
+}
+
+\subtree{
+\title{0.3 Projected board position (published board of \code{\verb~|work/arena-site/results.json~}: 37 checkers, 21 of them with no wrong verdict and an accepted Mathlib run)}
+
+\p{A PROJECTION: RLVM has never been measured on x86-64. Its aarch64 count is divided by the ratio "count here / published count" of a leader measured in this session; the last two columns are the extremes that any baseline in the arena's configuration has shown on a big corpus (\src{docs/research/12-baselines.md} section 3).}
+
+\table{
+\tr{\th{configuration}\th{here}\th{via nano-lean (0.915)}\th{via gruszka (0.907)}\th{via sokonanoda (0.959)}\th{lowest ratio seen (0.90)}\th{highest ratio seen (1.05)}\th{\strong{place}}}
+\tr{\td{(a) reference engine}\td{8,427.1 G}\td{9,212 G}\td{9,289 G}\td{8,791 G}\td{9,363 G}\td{8,026 G}\td{\strong{15} in every column (after pestka-wasm 7,015.4 G, before tenet-jvm 9,798.4 G)}}
+\tr{\td{(b) machine, default switches}\td{2,978.5 G}\td{3,256 G}\td{3,283 G}\td{3,107 G}\td{3,309 G}\td{2,837 G}\td{\strong{8} in every column (after palladium 2,833.0 G, before con-ron 3,473.9 G); at the 1.05 edge it is 0.13 \% behind palladium}}
+\tr{\td{(c*) machine, candidate set}\td{2,747.7 G}\td{3,004 G (place 8)}\td{3,029 G (place 8)}\td{2,866 G (place 8)}\td{3,053 G (place 8)}\td{2,617 G (place 7)}\td{\strong{8} (after palladium, before con-ron) in four columns; \strong{7} at the 1.05 edge (between kefir 2,577.3 G and palladium)}}
+\tr{\td{(d) machine with the shortcuts}\td{1,977.0 G}\td{2,161 G}\td{2,179 G}\td{2,062 G}\td{2,197 G}\td{1,883 G}\td{\strong{6} in every column (after pestka 1,475.3 G, before kefir 2,577.3 G)}}
+}
+
+\p{Board (x86-64 G instructions): 1 nano-lean 394.9, 2 gruszka 462.0, 3 sokonanoda 527.4, 4 rpylean 578.1, 5 pestka 1,475.3, 6 kefir 2,577.3, 7 palladium 2,833.0, 8 con-ron 3,473.9, 9 kefir-wasm 3,496.0, 10 con-agua 3,925.9, 11 nanobruijn 4,704.7, 12 nanoda 5,773.3, 13 con-leche 6,133.9, 14 pestka-wasm 7,015.4, 15 tenet-jvm 9,798.4, 16 official-nightly 9,815.1, 17 eink0rn 10,611.2, 18 official 12,095.3.}
+
+\p{What costs places: nothing but the Mathlib count. The sort key is (bad tests accepted, good tests rejected, Mathlib instructions, declined count); RLVM has 0 / 0 in every configuration, so its place is its Mathlib count, and the 2 or 3 declines / timeouts only break an exact tie in instructions. A single wrong reject would put the entry behind all 27 checkers that have neither (place 28), a single wrong accept behind the 29 that have no wrong accept (place 30), whatever the speed.}
+}
+
+\subtree{
+\title{0.4 What it would take, in instructions (aarch64 counts of this host, whole process, 4 workers)}
+
+\p{Places are projected with nano-lean's ratio (0.915); "range" = the 0.90 .. 1.05 extremes. Thresholds in this host's counts: place 7 below 2,592 G (2,550 .. 2,975), place 6 below 2,358 G (2,320 .. 2,706), place 5 below pestka's 1,339.6 G measured here, place 4 below rpylean's 544.4 G, place 3 below 505.6 G, place 2 below 419.1 G, place 1 below 361.2 G.}
+
+\table{
+\tr{\th{\verb~|#~}\th{item}\th{what it is today}\th{instructions saved}\th{basis}\th{total after it}\th{projected place}}
+\tr{\td{0}\td{start: the definition as it is, (a)}\td{reference engine checks everything}\td{-}\td{measured}\td{8,427.1 G}\td{15}}
+\tr{\td{1}\td{the machine becomes the default engine (provider priority >= 100; today 10)}\td{(b)}\td{\strong{-5,448.6 G} (-64.7 \%)}\td{measured}\td{2,978.5 G}\td{\strong{8}}}
+\tr{\td{2}\td{INT6's candidate switch set instead of \code{\verb~|warm,gated,expect~}}\td{(c*)}\td{-230.8 G (-7.7 \%) against (b)}\td{measured}\td{2,747.7 G}\td{8 (7 if RLVM's ratio is 0.97 or more)}}
+\tr{\td{3}\td{units that enter eager reduction stay on the machine (prototype E1)}\td{6,711 units (0.94 \%) are declined twice by the machine and checked by the reference engine: about 290 - 350 G of (b) are reference-engine work on worker threads (section 6.3), plus about 15 G of abandoned machine work (P8)}\td{about -150 .. -210 G}\td{estimate: fallback minus what the machine would need at its own ratio to gruszka on those units (6.5 x 23.9 G = 155 G)}\td{about 2,770 - 2,830 G}\td{8 (7 only if RLVM's ratio is 0.98 or more)}}
+\tr{\td{4}\td{proof-comparison shortcuts \code{\verb~|congruence,skipargs~} (+ \code{\verb~|facts,probes~}), owner's decision, review S2 says theory-sound, NOT the official algorithm}\td{(d)}\td{\strong{-1,001.5 G} against (b) (-33.6 \%)}\td{measured}\td{1,977.0 G}\td{\strong{6}}}
+\tr{\td{5}\td{the same official-exact (prototype C1)}\td{unknown share of item 4}\td{0 .. -1,000 G}\td{not built}\td{-}\td{8 .. 6}}
+\tr{\td{6}\td{loader at the leaders' cost}\td{load 133.2 G = 21 instructions per byte; leaders 37 - 41 G = 6 per byte}\td{up to -93 G}\td{measured bound}\td{-}\td{no place by itself}}
+\tr{\td{7}\td{admission (environment pass)}\td{25.1 G; inductive types cost the leaders under 3 G}\td{up to -22 G}\td{measured bound}\td{-}\td{none}}
+\tr{\td{8}\td{garbage collection}\td{0.6 G in (b), 8.7 G in (a): 0.0 \% and 0.1 \%}\td{0}\td{measured (profile)}\td{-}\td{none}}
+\tr{\td{9}\td{items 1 + 2 + 3 + 6 + 7 together (everything official-exact that exists or is being prototyped)}\td{-}\td{-}\td{sum of the above}\td{about 2,420 - 2,480 G}\td{\strong{7} (below the 2,592 G of palladium; 6 only at the 1.05 edge of the range)}}
+\tr{\td{10}\td{items 1 + 3 + 4 + 6 + 7 (+ the part of item 2 that survives the shortcuts)}\td{-}\td{-}\td{sum}\td{about 1,500 - 1,650 G}\td{\strong{6}; place 5 needs 1,339.6 G: another 160 - 310 G (10 - 19 \%) that nothing in sight provides}}
+\tr{\td{11}\td{place 4 (rpylean: 544.4 G here)}\td{with a leader-class loader and admission (43 G) the checking would have to cost 500 G = 1.3 x gruszka's 381 G; the machine's checking is 2,820 G in (b) (7.4 x) and 1,819 G in (d) (4.8 x)}\td{about -1,000 G after row 10}\td{-}\td{544 G}\td{4: needs the cost per machine operation (2,133 instructions per tick against gruszka's 823, 1.5 x its ticks; P8 section 4.6) to fall by a factor of about 3 ON TOP of the shortcuts}}
+}
+
+\p{Reading: making the machine the default is worth seven places (15 -> 8). After that the only single step that moves a place for certain is the shortcut policy (8 -> 6). The candidate switch set is worth 7.7 \% on Mathlib and stays 8th (7th only at the edge of the projection range); with everything official-exact that exists or is being prototyped the entry reaches 7th. Places 5 and better are not reachable by switching on anything that exists: they need the per-operation cost.}
+}
+
+\subtree{
+\title{0.5 The arena definition (\code{\verb~|scripts/arena/rlvm.yaml~}): what the integrator has to update}
+
+\p{Checked, fine: valid against the arena's schema; the run line works under \code{\verb~|sh -c~} (dash) with \code{\verb~|$IN~} and maps 10 / 11 / 12 to 0 / 1 / 2 (exercised 270 x 4 times here); \code{\verb~|threads: 4~} = \code{\verb~|--threads 4~}; \code{\verb~|version: "0.1.0-SNAPSHOT"~} = the first line of \code{\verb~|rlvm --version~}; the build uses GraalVM CE only (\code{\verb~|--no-pgo~}; builder banner "GraalVM CE 25.5.5.0.3+1.1"; the cached tarball has the pinned sha256 \code{\verb~|41741c06...~}); the eight third-party jars on the image class path match \code{\verb~|scripts/arena/deps.sha256~} in both builds of this session; the \code{\verb~|build:~} line run in a clean copy of the tree \strong{without network} succeeds (section 8).}
+
+\p{To do before submission:}
+
+\ol{
+\li{\code{\verb~|url~}, \code{\verb~|ref~}, \code{\verb~|rev~} are placeholders (\code{\verb~|https://example.invalid/rlvm.git~}, \code{\verb~|main~}, \code{\verb~|"0000000"~}): set them to the public repository, its branch and the full commit hash. The arena fetches exactly that commit with depth 1, so the commit must contain \code{\verb~|pom.xml~}, \code{\verb~|env.sh~}, \code{\verb~|scripts/~} and all 15 modules.}
+\li{\strong{The arena build is a tree build and puts \code{\verb~|rlvm-testkit~} on the image class path} (23 jars), which no distribution that anybody gates or measures has (\code{\verb~|scripts/build.sh --published~}: 22 jars). The image still lists the engines \code{\verb~|machine, reference*~} and gives the right verdicts, but it is not the gated binary. Either leave the test kit out of the arena image or gate a tree-built image.}
+\li{The header comment is stale: it describes the wave-5 state (14 modules; "nothing is checked with \verb~|[~the machine\verb~|]~ yet" is still true, but the machine's default switch set, its own tick bound, the eager-reduction fallback, \code{\verb~|rlvm-truffle~} in the parent pom since 18:16Z and the versioned \code{\verb~|work/dist~} link are not in it). "All 230 published tests correct (0 declined)" should read: 270 of 270 without a wrong verdict, 2 \code{\verb~|either~} tests declined.}
+\li{When the machine becomes the default engine: rewrite the second paragraph of \code{\verb~|description~} (it says the reference engine checks every declaration), say that units the machine declines are checked by the reference engine, and first settle \code{\verb~|perf/loop-unfolded-once~} (0.1: 31.6 s of a 40 s limit here, 8.7 GB) - with the default switches the change of engine trades a correct verdict for a probable timeout on the arena's slower runner; the candidate set (c*) does settle it (75 ms).}
+\li{Not pinned by hash: the Maven plugins and their dependencies (an 88 MB local repository; only \code{\verb~|--strict-checksums~} against the repository's own checksum files). The description's sentence "verifies their checksums and those of the third-party jars that go into the image" is accurate, but the build is not hermetic. If that matters, add a hash list for the plugin set or vendor the repository.}
+\li{Decide M6's request of 17:12Z (H10 inline lists in the native-image build, \src{rlvm-machine/h10/native-image-args.sh}): it is not in \src{scripts/build.sh}; if adopted, the build line of the arena image changes and needs its own end-to-end run.}
+\li{\code{\verb~|threads: 4~} is a wall-clock choice only; it does not move the ranking metric measurably for the leaders (research 12, section 4) and was not re-measured for RLVM today. If the owner's 8 workers / pipelined load (P7-F4) become the launcher's default, change BOTH numbers and run this procedure again: the arena's limits are per test and \code{\verb~|perf/~} tests are single units.}
+\li{Observation, not verified further: the pinned COMMUNITY tarball itself ships modules with "enterprise" in their names (\code{\verb~|com.oracle.graal.graal_enterprise~}, \code{\verb~|com.oracle.svm.svm_enterprise~}, ... in \code{\verb~|jmods/~} and in the \code{\verb~|MODULES~} line of \code{\verb~|release~}; \code{\verb~|IMPLEMENTOR="GraalVM Community"~}, GPL licence file). Nothing was downloaded or changed by me; the Oracle GraalVM directory \code{\verb~|.toolchain/oracle-graalvm-25~} is not touched by any build of this session.}
+}
+}
+
+\subtree{
+\title{0.6 What could not be established}
+
+\ul{
+\li{\strong{RLVM's own aarch64 / x86-64 ratio.} Every place above is a projection. (b) is 8th for every ratio a baseline has shown, but at the 1.05 edge it is 4 G (0.13 \%) behind palladium, and (c*) is 7th there.}
+\li{\strong{Wall clock of \code{\verb~|perf/loop-unfolded-once~} on the arena's runner} with the machine: 31.6 s here in a quiet window; the runner's speed is only known through the leaders' published wall times.}
+\li{\strong{A gated configuration (c).} The integrator's log calls no set beyond the default gated; (c*) is its candidate.}
+\li{\strong{The size of item 3 and item 5} of table 0.4: E1 and C1 are prototypes; the fallback's share is an estimate from class names in a sampled profile (290 - 350 G), not a per-unit measurement.}
+\li{\strong{The arena build on the arena's runner}: whether its nix shell has \code{\verb~|curl~} / \code{\verb~|wget~} and a C compiler that links \code{\verb~|-lz~} (the flake lists neither \code{\verb~|zlib~} nor \code{\verb~|curl~}; the build has a zlib-from-source path, which downloads). The online path (Maven Central, the GraalVM tarball) was not exercised by me: no downloads were allowed. The last online run is the steward's of 12:40Z.}
+\li{\strong{Whether the arena counts kernel instructions too} (research 01, section 1.2). If it does: (a) +208.9 G (2.5 \%), (b) +29.5 G (1.0 \%), nano-lean +4.9 G; no place changes.}
+\li{\strong{Thread count against instructions for RLVM} (4 against 8 workers, batch against pipelined): not measured.}
+\li{Wall and CPU of (d) on Mathlib: measured outside a window (162 s / 168 s on a parked container) and not quoted.}
+}
+}
+}
+
+\<html:hr>{}
+
+\subtree{
+\title{1. What was run}
+
+\p{\strong{Distribution} \code{\verb~|work/ar1/dist~}, built 2026-11-24T18:30:30Z from the published jars, offline, with the arena build's flags:}
+
+\pre{\verb~|
+bench/slot.sh -c ni -n 2 -- scripts/build.sh --published --no-pgo --opt 3 \
+    --verify-deps scripts/arena/deps.sha256 --dist work/ar1/dist
+~}
+
+\p{GraalVM CE 25.5.5.0.3 (25.0.5.0.3+1-jvmci-25.5-b26); native-image flags \code{\verb~|-O3 --gc=serial --no-fallback -R:+ExitOnOutOfMemoryError -R:MaxHeapSize=13g -H:+ReportExceptionStackTraces~}; 322 s wall, 898 s CPU, peak 4.2 GB; \code{\verb~|bin/rlvm~} 66,062,456 bytes, sha256 \code{\verb~|26a5f96c59cd...~}. \code{\verb~|rlvm --version~}: \code{\verb~|rlvm 0.1.0-SNAPSHOT~}, engines \code{\verb~|machine, reference*~} (the reference engine is the default).}
+
+\table{
+\tr{\th{jar}\th{sha256 (first 12)}\th{published}}
+\tr{\td{rlvm-admit}\td{\code{\verb~|398a117d4ad8~}}\td{18:01:13Z}}
+\tr{\td{rlvm-api}\td{\code{\verb~|6ff40825ca1d~}}\td{13:34:23Z}}
+\tr{\td{rlvm-cli}\td{\code{\verb~|f2af2657a704~}}\td{07:54:30Z}}
+\tr{\td{rlvm-driver}\td{\code{\verb~|31fa08d9ce61~}}\td{18:27:41Z}}
+\tr{\td{rlvm-export}\td{\code{\verb~|392c19f95db4~}}\td{08:53:55Z}}
+\tr{\td{rlvm-inductive}\td{\code{\verb~|c15b14fffdd3~}}\td{18:01:07Z}}
+\tr{\td{rlvm-level}\td{\code{\verb~|75bb0db242c5~}}\td{04:53:25Z}}
+\tr{\td{rlvm-load}\td{\code{\verb~|26242def2701~}}\td{14:52:21Z}}
+\tr{\td{rlvm-machine}\td{\code{\verb~|8a8ea5644b24~}}\td{18:12:45Z}}
+\tr{\td{rlvm-main}\td{\code{\verb~|2c4a55f5a8ae~}}\td{compiled from the tree by \code{\verb~|--published~}; byte-identical to the published jar \code{\verb~|2c4a55f5a8ae~}}}
+\tr{\td{rlvm-nat}\td{\code{\verb~|b1dda7562adb~}}\td{06:53:51Z}}
+\tr{\td{rlvm-ref}\td{\code{\verb~|ca1f9bd918bb~}}\td{14:08:59Z}}
+\tr{\td{rlvm-store}\td{\code{\verb~|f85c730603b8~}}\td{14:51:53Z}}
+\tr{\td{rlvm-truffle}\td{\code{\verb~|ad3256d0751d~}}\td{18:16:25Z}}
+\tr{\td{collections, jniutils, nativeimage, polyglot, truffle-api, truffle-compiler, truffle-runtime, word 25.5.5.0.3}\td{as in \code{\verb~|scripts/arena/deps.sha256~}}\td{-}}
+}
+
+\p{Full hashes: \code{\verb~|work/ar1/logs/dist-jars.sha256~}; the state of \code{\verb~|.toolchain/m2~} just before the build: \code{\verb~|work/ar1/logs/m2-jars-before-build.txt~}. \code{\verb~|work/dist~} was not touched.}
+
+\p{\strong{Tests.} \code{\verb~|work/exports/all~}: the arena's complete test set (the 230 files of the published tarball, the two \code{\verb~|perf/magma-string-*~} tests and the eight corpora that the tarball leaves out, the 30 \code{\verb~|either~} tests; 270 files, byte-identical to the arena's by \code{\verb~|manifest.json~}), with the arena's outcome and time limit per test. Tests without an arena limit ran with 1,800 s.}
+
+\p{\strong{Procedure}, per configuration (\code{\verb~|work/ar1/scripts/suite.sh~}):}
+
+\pre{\verb~|
+bench/slot.sh -- bench/arena-docker.sh --arena-limits --no-network \
+    bench/run-suite.py --perf --arena-timeouts --timeout 1800 --tests work/exports/all \
+    --cwd work/ar1/src --report work/ar1/reports/LABEL.json -v -- 'RUN LINE'
+~}
+
+\p{\code{\verb~|work/ar1/src/work/dist~} is a link to \code{\verb~|work/ar1/dist~}, so the run line of \code{\verb~|rlvm.yaml~} is executed verbatim with the checker's checkout as working directory, through \code{\verb~|sh -c~}, with \code{\verb~|$IN~} and \code{\verb~|LC_ALL=C~}, under \code{\verb~|perf stat -e instructions:u~} (all threads and children) and GNU time, tests strictly one after the other. Mathlib was run a second time per configuration in a container of its own inside a \src{bench/quiet.py} window (\code{\verb~|work/ar1/scripts/one.sh --quiet~}); so were the leaders (\code{\verb~|work/ar1/scripts/leaders.sh~}) and the one test that timed out.}
+
+\p{Run lines:}
+
+\ul{
+\li{(a) \code{\verb~|RLVM_STATUS_BASE=10 work/dist/bin/rlvm --threads 4 "$IN"; case $? in 10) exit 0;; 11) exit 1;; 12) exit 2;; *) exit 3;; esac~} (the \code{\verb~|run:~} line of \code{\verb~|rlvm.yaml~}, sha256 of the file \code{\verb~|390d58c2a289...~})}
+\li{(b) the same with \code{\verb~|-X engine=machine~} after \code{\verb~|--threads 4~}}
+\li{(c*) (b) plus \code{\verb~|-X machine.switches=gated,pchk,expect,warm,code,casetrees,bodies,directrules,same,match,joint,lazycases,lazyeval~}}
+\li{(d) (b) plus \code{\verb~|-X machine.switches=default,facts,probes -Drlvm.machine.m4=congruence,skipargs~}}
+}
+
+\p{Times (UTC): suite (a) 18:36:52 - 18:52:12, (b) 18:52:21 - 19:01:15, (d) 19:07:26 - 19:13:51, (c*) 19:22:00 - 19:26:40 (it waited for a host slot from 19:14:29); quiet windows: Mathlib (a) ended 18:49:17, (b) 18:58:41, the three Rust leaders 19:04:02, \code{\verb~|loop-unfolded-once~} 19:09:43, rpylean about 19:18, (c*) 19:21:46.}
+
+\p{\strong{A caveat that turned out not to matter.} The host was busy (load average 35 - 60 on 20 cores) and the quiet lock was taken back to back by other agents, so my suite containers spent most of their time parked on the two spare performance cores (the checker's own statistics show \code{\verb~|processors=2~}). Instruction counts of the parked runs agree with the quiet-window runs to -0.22 \% (a), +0.07 \% (b) and -0.02 \% (d); wall and CPU of the suite runs are not evidence, and one arena time limit was hit only because of the parking (\code{\verb~|perf/loop-unfolded-once~}, 0.1).}
+}
+
+\subtree{
+\title{2. Verdicts in detail}
+
+\p{\code{\verb~|either~} tests (free in the ranking; listed because they show the policy): (a), (b) and (c*) give the same 28 verdicts - 9 accepted (\code{\verb~|alg-conv-trans-acc-left~}, \code{\verb~|-acc-right~}, \code{\verb~|alg-conv-trans-quot-left-def~}, \code{\verb~|-quot-right~}, \code{\verb~|nested-redex-aux~}, \code{\verb~|proj-maybe-prop~}, \code{\verb~|proj-maybe-prop-past~}, \code{\verb~|subject-reduction-redex~}, \code{\verb~|vanishing-occurrence~}) and 19 rejected, among them \code{\verb~|imax-right-successor~} and \code{\verb~|imax-nested-absorption~} (owner note 11) - and decline the two non-terminating files. That is the published \code{\verb~|official~} verdict on every one of the 28. (d) accepts two more, \code{\verb~|alg-conv-trans-quot-left~} and \code{\verb~|eta-struct-major-and~}: the verdicts of gruszka, sokonanoda and rpylean on those files.}
+
+\p{Against the published results of others, configuration (a): \code{\verb~|official~} (v4.35.0) differs on 2 tests (the non-terminating pair: timeout there, decline here); \code{\verb~|official-nightly~} on 9 \code{\verb~|either~} tests; nano-lean on 4 (its decline of \code{\verb~|bugs/nat-shift-huge~}, which RLVM accepts, and 3 \code{\verb~|either~}); gruszka on 4 \code{\verb~|either~}; sokonanoda on 11; rpylean on 8. Declines, errors and timeouts of the leaders on the published board: nano-lean 3, gruszka 0, sokonanoda 6, rpylean 4, pestka 0, kefir 0, palladium 6.}
+}
+
+\subtree{
+\title{3. Cost per corpus (suite runs; the instruction counts are exact, the times are of a parked container)}
+
+\table{
+\tr{\th{corpus (arena limit)}\th{(a): instructions / virtual s / RSS MiB}\th{(b)}\th{(c*)}\th{(d)}\th{nano-lean, gruszka (published virtual s)}}
+\tr{\td{init (370 s)}\td{246.3 G / 41.0 / 350}\td{115.2 G / 19.2 / 326}\td{82.8 G / 13.8 / 262}\td{112.4 G / 18.7 / 331}\td{4.1, 4.1}}
+\tr{\td{std (600 s)}\td{406.0 G / 67.7 / 468}\td{195.5 G / 32.6 / 509}\td{148.5 G / 24.8 / 481}\td{188.7 G / 31.5 / 552}\td{6.7, 6.7}}
+\tr{\td{reachability (220 s)}\td{112.7 G / 18.8 / 1,929}\td{57.3 G / 9.5 / 2,247}\td{16.4 G / 2.7 / 564}\td{57.2 G / 9.5 / 2,165}\td{1.9, 2.4}}
+\tr{\td{cedar (640 s)}\td{516.8 G / 86.1 / 529}\td{263.7 G / 43.9 / 598}\td{207.8 G / 34.6 / 530}\td{251.6 G / 41.9 / 596}\td{10.5, 10.3}}
+\tr{\td{con-leche (920 s)}\td{809.7 G / 134.9 / 4,074}\td{232.0 G / 38.7 / 684}\td{173.2 G / 28.9 / 579}\td{231.6 G / 38.6 / 596}\td{10.3, 9.2}}
+\tr{\td{navier-stokes-euler (1,840 s)}\td{3,075.4 G / 512.6 / 813}\td{1,151.1 G / 191.9 / 978}\td{973.5 G / 162.3 / 971}\td{507.9 G / 84.6 / 837}\td{17.2, 21.8}}
+\tr{\td{cslib (1,600 s)}\td{2,173.8 G / 362.3 / 2,030}\td{852.3 G / 142.1 / 1,143}\td{753.7 G / 125.6 / 1,157}\td{689.2 G / 114.9 / 1,142}\td{23.6, 27.4}}
+\tr{\td{mathlib (4,120 s)}\td{8,408.3 G / 1,401.4 / 5,550}\td{2,980.5 G / 496.7 / 2,824}\td{2,748.3 G / 458.1 / 2,978}\td{1,976.7 G / 329.4 / 2,938}\td{65.8, 77.0}}
+\tr{\td{all 270 tests}\td{17,062.9 G}\td{6,589.0 G (without the test that timed out)}\td{5,783.5 G}\td{4,706.9 G}\td{-}}
+\tr{\td{the 262 small tests}\td{1,314.0 G}\td{741.5 G}\td{679.1 G}\td{691.6 G}\td{-}}
+}
+
+\p{All eight corpora are accepted in every configuration, far inside the arena's limits (the largest share of a limit: Mathlib (a), 177.7 s of 4,120 s in the quiet window). Against (b), the candidate set (c*) saves 71 \% on reachability, 28 \% on init, 25 \% on con-leche, 24 \% on std, 21 \% on cedar, 15 \% on navier-stokes-euler, 12 \% on cslib and 7.7 \% on Mathlib: the corpus the arena ranks by is the one it helps least (P8: Mathlib's extra cost is the conversion of proofs, which no official-exact switch touches). The shortcuts of (d) are worth 33.6 \% on Mathlib, 55.9 \% on navier-stokes-euler, 19.1 \% on cslib and 0 - 5 \% on the other five corpora.}
+
+\p{Small tests with the largest counts (instructions; wall of the parked suite run in brackets is NOT evidence): \code{\verb~|perf/magma-list-deep-n36~} (limit 360 s) (a) 181.0 G, (b) 60.8 G; \code{\verb~|perf/magma-list-pair-n21~} (240 s) 115.4 G, 50.2 G; \code{\verb~|perf/ite-taken-branch~} (230 s) 109.6 G, 39.9 G; \code{\verb~|perf/gf3-matrix-product~} (70 s) 97.5 G, 19.4 G; \code{\verb~|perf/app-lam~} (70 s) 55.3 G, 0.8 G; the four \code{\verb~|*-bad~} perf tests 52 - 72 G in (a) and 54 - 62 G in (b) (a rejection is confirmed by the reference engine in either configuration). Peak RSS of a small test: 4,042 MiB (\code{\verb~|perf/app-lam~}, (a)); with the machine 3,722 MiB (\code{\verb~|perf/magma-list-deep-n36~}) apart from the 8,686 MiB of \code{\verb~|perf/loop-unfolded-once~}.}
+}
+
+\subtree{
+\title{4. The leaders, same container, same session}
+
+\p{Table 0.2. The local builds are those of \code{\verb~|bench/baselines/~} (arena revision \code{\verb~|99195b6b~}); each ran through its generated wrapper (\code{\verb~|bench/baselines/NAME.sh~}, the arena's run line) in a container of its own inside a quiet window (gruszka, nano-lean, sokonanoda in one window, rpylean in another). Their counts repeat this morning's (361.3 / 418.7 / 504.3 / 544.6 G) to 0.02 - 0.26 \%. Quiet wall clock with their 4 threads: gruszka 20.0 s, nano-lean 29.5 s, sokonanoda 33.7 s; rpylean (one thread) 125.8 s. RLVM with 4 workers, same windows: (a) 177.7 s, (b) 61.3 s, (c*) 56.8 s - 3.1 times gruszka and 2.1 times nano-lean for (b), a much smaller distance than in instructions (7.1 and 8.2 times), because the machine retires about 14.5 G instructions per CPU second against gruszka's 5.9 and nano-lean's 3.5. (Cold process, batch load, 4 workers: the arena's configuration, not the owner's; the owner's table is \code{\verb~|work/status/warm.md~}.)}
+}
+
+\subtree{
+\title{5. The projection}
+
+\p{\code{\verb~|place~} = 1 + the number of published checkers whose key (bad accepted, good rejected, Mathlib instructions, declined) sorts before RLVM's (\code{\verb~|work/ar1/board.py~}, \code{\verb~|work/ar1/scripts/mathlib-table.py~}: the arena's \code{\verb~|compute_checker_stats~} and \code{\verb~|sort_key~} recomputed from \code{\verb~|results.json~}; they reproduce the published order). RLVM's x86-64 count is unknown; the columns of table 0.3 divide the count of this host by a ratio (count here / published count) measured in this session for a leader, and by the two extremes any baseline has shown. A native image of Java code is neither a Rust binary nor a JVM, so the truth can lie anywhere in that range; the places of (a), (b) and (d) do not depend on where.}
+
+\p{Same-machine cross-check without any ratio: (a) at 8,427 G lies between nanoda (5,533 G here, 12th) and tenet-jvm with C2 (9,313 G here, 15th); (b) at 2,979 G and (d) at 1,977 G lie between pestka (1,340 G here, 5th) and nanoda. kefir, palladium, con-ron (6th to 8th) are not built here, which is where the ratio is needed.}
+}
+
+\subtree{
+\title{6. Where the instructions go on Mathlib (arena configuration)}
+
+\subtree{
+\title{6.1 By phase (\code{\verb~|-X stop-after~}, the measured image, \code{\verb~|perf stat~})}
+
+\table{
+\tr{\th{phase}\th{instructions}\th{per byte / line / constant}\th{the leaders (research 12, section 5.2)}}
+\tr{\td{start-up of the image}\td{0.003 G (a tutorial test end to end)}\td{-}\td{a JVM: 0.5 - 0.9 G}}
+\tr{\td{reading and loading the export (\code{\verb~|stop-after=load~})}\td{\strong{133.2 G}}\td{21.1 per byte, 1,188 per line}\td{nano-lean 40.9 G, gruszka 37.5 G, sokonanoda 36.9 G: 5.8 - 6.5 per byte}}
+\tr{\td{environment pass / admission (\code{\verb~|stop-after=env~} minus load)}\td{\strong{25.1 G}}\td{34,000 per constant}\td{inductive types, constructors, recursors: under 3 G}}
+\tr{\td{checking, (a)}\td{8,268.8 G}\td{11.6 M per unit}\td{nano-lean 320.4 G, gruszka 381.2 G}}
+\tr{\td{checking, (b)}\td{2,820.2 G}\td{3.9 M per unit}\td{7.4 x gruszka, 8.8 x nano-lean}}
+\tr{\td{checking, (d)}\td{1,818.7 G}\td{2.5 M per unit}\td{4.8 x gruszka}}
+}
+
+\p{The load is 1.6 \% of (a), 4.5 \% of (b), 6.7 \% of (d), and 37 \% of nano-lean's WHOLE run.}
+}
+
+\subtree{
+\title{6.2 By thread and module (\code{\verb~|perf record -e instructions:u -c N~}, all threads, in the container)}
+
+\p{Profile image \code{\verb~|work/ar1/dist-sym~}: the same jars and flags plus \code{\verb~|-H:-DeleteLocalSymbols~}; 167,969 samples of 50 M instructions for (a), 149,103 samples of 20 M for (b). Native-image symbols carry no package, so classes are mapped to their jar by simple name (\code{\verb~|work/ar1/scripts/prof-class.py~}); \code{\verb~|IntIntMap~} exists in two jars.}
+
+\table{
+\tr{\th{}\th{(a) reference engine: 8,398.5 G sampled}\th{(b) machine: 2,982.1 G sampled}}
+\tr{\td{worker threads (checking)}\td{8,239.6 G (98.1 \%)}\td{2,822.4 G (94.6 \%)}}
+\tr{\td{main thread (reader + loader)}\td{133.1 G (1.6 \%)}\td{133.1 G (4.5 \%)}}
+\tr{\td{environment thread (admission)}\td{25.8 G (0.3 \%)}\td{26.6 G (0.9 \%)}}
+\tr{\td{\code{\verb~|rlvm-machine~}}\td{-}\td{2,378.6 G (79.8 \%): \code{\verb~|Values~} 855.0 G, \code{\verb~|Eval~} 776.7 G, \code{\verb~|Infer~} 274.9 G, \code{\verb~|Conv~} 119.4 G, \code{\verb~|Runs~} 97.1 G, \code{\verb~|Levels~} 60.6 G, \code{\verb~|Machine~} 60.6 G, \code{\verb~|Reduce~} 55.6 G, \code{\verb~|Pairs~} 37.6 G}}
+\tr{\td{\code{\verb~|rlvm-store~} (hash-consed terms: interning, substitution, memo tables)}\td{6,092.8 G (72.5 \%): \code{\verb~|Overlay~} 2,588.7 G, \code{\verb~|TermOps$Rewriter~} 1,567.8 G, \code{\verb~|Terms~} 936.6 G, \code{\verb~|TermOps$Memo~} 690.1 G, \code{\verb~|NodeCtx~} 223.8 G}\td{378.0 G (12.7 \%; 320.6 G on worker threads): \code{\verb~|Overlay~} 111.6 G, \code{\verb~|Rewriter~} 76.2 G, \code{\verb~|Terms~} 65.3 G, \code{\verb~|NodeCtx~} 31.3 G, \code{\verb~|Memo~} 26.4 G, \code{\verb~|ProofBlocks~} 37.7 G}}
+\tr{\td{\code{\verb~|rlvm-ref~} (+ \code{\verb~|IntIntMap~})}\td{1,179.8 G + 824.5 G (23.9 \%)}\td{43.7 G + 36.0 G (2.7 \%)}}
+\tr{\td{\code{\verb~|rlvm-export~} + \code{\verb~|rlvm-load~} (reader, loader)}\td{88.9 G (1.1 \%)}\td{85.4 G (2.9 \%)}}
+\tr{\td{\code{\verb~|rlvm-level~}, \code{\verb~|rlvm-api~}}\td{178.7 G (2.1 \%)}\td{40.0 G (1.3 \%)}}
+\tr{\td{\strong{garbage collector} (\code{\verb~|com.oracle.svm.core.genscavenge~})}\td{\strong{8.7 G (0.1 \%)}}\td{\strong{0.6 G (0.0 \%)}}}
+\tr{\td{other Substrate VM runtime (array copies), JDK code, libc, vdso, no symbol}\td{21.2 G (0.3 \%)}\td{15.4 G (0.5 \%)}}
+\tr{\td{JIT compiler}\td{none: the image is compiled ahead of time; no compiler thread exists}\td{none}}
+}
+
+\p{Top symbols, (a): \code{\verb~|Overlay.mkApp~} 21.7 \%, \code{\verb~|TermOps$Rewriter.leaf~} 9.9 \%, \code{\verb~|Rewriter.run~} 8.7 \%, \code{\verb~|IntIntMap.get~} 7.1 \%, \code{\verb~|TermOps$Memo.put~} 5.8 \%, \code{\verb~|Terms.kind~} 5.1 \%; the kernel's own control code (\code{\verb~|RefKernel.*~}) is 13.7 \%. (b): \code{\verb~|Values.neu~} 8.0 \%, \code{\verb~|Values.closureProbe~} 5.3 \%, \code{\verb~|Eval.argvFast~} 4.3 \%, \code{\verb~|Eval.app~} 4.0 \%, \code{\verb~|Eval.gate~} 4.0 \%, \code{\verb~|Values.frameProbe~} 3.8 \%, \code{\verb~|Values.closureOverNew~} 2.9 \%, \code{\verb~|Values.mkConst~} 2.8 \%. Full tables: \code{\verb~|work/ar1/prof/a.tables.md~}, \code{\verb~|b.tables.md~}; raw sums per symbol: \code{\verb~|a.syms.tsv~}, \code{\verb~|b.syms.tsv~}.}
+
+\p{In the arena's currency the collector is nothing (the stores are primitive arrays), there is no JIT to pay for, and reading the file is the only fixed cost of any size. For the reference engine three quarters of all instructions are interning and substitution in the term store; for the machine 80 \% are its own value store and evaluator, which is the per-operation cost of P8's section 4.6.}
+}
+
+\subtree{
+\title{6.3 The eager-reduction fallback inside (b)}
+
+\p{\code{\verb~|-X machine.declines~} of the profile run lists 13,422 declines = \strong{6,711 units, each declined twice} (\code{\verb~|UNSUPPORTED_INPUT (E_LIMIT) ... eager reduction~}), as P8 counted. Those units are checked by the reference engine. On the worker threads of (b) the classes that carry the reference engine in (a) (\code{\verb~|RefKernel~}, \code{\verb~|PairSet~}, \code{\verb~|LongIntMap~}, \code{\verb~|IntIntMap~}, \code{\verb~|Overlay~}, \code{\verb~|TermOps$Rewriter~}, \code{\verb~|TermOps$Memo~}) sum to 287 G; in (a) the same classes are 83 \% of the workers' instructions, so the fallback is about \strong{290 - 350 G, 10 - 12 \% of (b)}, for units that cost gruszka 23.9 G (P8). This is an estimate from class names, not a per-unit count: if the machine itself calls into the term store's interner, it is too high. Cross-check: P8 measured 23.5 s of thread CPU for the fallback; at the reference engine's 13.5 G instructions per CPU second (table 0.2) that is 317 G.}
+}
+}
+
+\subtree{
+\title{7. What it would take: how table 0.4 was made}
+
+\ul{
+\li{Items 1, 2 and 4 are measured end to end with the arena's procedure (tables 0.1 - 0.3).}
+\li{Item 3: fallback of 6.3 (290 - 350 G) plus the machine's abandoned attempts (15.3 G, P8 section 4.3) minus what the machine would spend on those units at its present ratio to gruszka (6.5 x 23.9 G = 155 G; 3.9 x with the shortcuts = 93 G).}
+\li{Item 5 (C1) has no number: it aims at the comparisons that item 4 removes while keeping the official verdict.}
+\li{Items 6 and 7 are bounds: today's count minus the leaders' for the same phase.}
+\li{Rows 9 and 10 add the items; savings measured on different switch sets do not add exactly, so they are rounded and carry the uncertainty of item 3.}
+\li{Row 11 uses research 12 (gruszka reads for 37.5 G and checks for 381 G) and P8 (after the shortcuts the machine is at 1.5 x gruszka's ticks and 2.6 x its instructions per tick).}
+\li{Not in the table because they are not instruction items: the worker count, pipelined loading, heap sizing (\code{\verb~|-Xms~}), the collector choice. They move wall clock, which the board shows and does not rank.}
+}
+}
+
+\subtree{
+\title{8. The arena definition, run end to end from a clean copy without network}
+
+\p{\code{\verb~|work/ar1/scripts/e2e.sh~}: a clean copy of the tree as of 18:38:38Z (parent pom, \code{\verb~|env.sh~}, \code{\verb~|scripts/~}, the 15 modules without \code{\verb~|target/~}; 1,231 files) in \code{\verb~|work/ar1/e2e/src~}; its \code{\verb~|.toolchain~} = links to the pinned GraalVM CE and Maven of the host and a COPY of the third-party part of \code{\verb~|.toolchain/m2~} (no \code{\verb~|rlvm~} artifact); then, in the arena image with \code{\verb~|--no-network~}, 8 CPUs, 16 GB:}
+
+\pre{\verb~|
+sh -c "scripts/arena/build.sh"        # the build: line of rlvm.yaml
+~}
+
+\p{Result: status 0 after 513 s. Maven built all 15 modules in 12.6 s (the whole tree compiles); the third-party jars match \code{\verb~|deps.sha256~}; the JVM launcher and the image passed the build's verification (exit-status protocol, Truffle probe); native-image \code{\verb~|-O3~} 496 s wall, 1,067 s CPU, peak 3.8 GB; \code{\verb~|work/dist~} is a link into \code{\verb~|work/dist.d/20261124T185419Z-d7be406ab8dd-native~} and the run line resolves through it; \code{\verb~|bin/rlvm~} 66,062,456 bytes (sha256 \code{\verb~|7ca470b6ae5a...~}), dynamic dependencies libz, libc. Then (\code{\verb~|work/ar1/scripts/e2e-check.sh~}, same image, no network): the yaml validates against \code{\verb~|refs/lean-kernel-arena/schemas/checker.json~}; the run line gives accept on \code{\verb~|init-prelude~} (0.95 G instructions), \code{\verb~|tutorial/001_basicDef~}, \code{\verb~|perf/app-lam~} (55.3 G) and \code{\verb~|init~} (245.1 G), reject on \code{\verb~|tutorial/002_badDef~} and \code{\verb~|corner-cases/imax-right-successor~}.}
+
+\p{Tree against published jars (class files compared by name and CRC): identical for admit, api, cli, driver, export, inductive, level, machine, main, nat, ref; \strong{different for rlvm-load, rlvm-store and rlvm-truffle} (the tree is ahead of the published jars: LP2 and T3 at work); \code{\verb~|rlvm-testkit~} only in the tree build. On \code{\verb~|init~} the tree-built image needs 245.1 G against 246.3 G for the published jars (-0.45 \%).}
+
+\p{What this does and does not show: with the pinned toolchain and a Maven repository that already holds the plugins, nothing else is fetched and the build is reproducible offline; that the downloads themselves work was not tested here.}
+}
+
+\subtree{
+\title{9. Known open items: can they show on the arena's test set?}
+
+\table{
+\tr{\th{item (board, \code{\verb~|work/status/requests.log~})}\th{on today's 270 tests}\th{if it showed}}
+\tr{\td{A2-F1: two level records for one universe parameter - RLVM accepts files that the official checker rejects}\td{no: 0 of the 270 files and none of the eight corpora contain a repeated level record (A2's scanner over the 230 published tests and the corpora; the 30 \code{\verb~|either~} tests and the two extra \code{\verb~|perf/~} tests scanned for this report)}\td{a hand-made \code{\verb~|bad~} test of that shape would be a WRONG ACCEPT: place 30 whatever the speed. The only open item that can cost the whole ranking, so it should be closed (decline is enough) before any submission}}
+\tr{\td{the \code{\verb~|either~} tests}\td{all 30 answered or declined; verdicts = \code{\verb~|official~} on 28}\td{free: \code{\verb~|either~} never counts}}
+\tr{\td{the two non-terminating \code{\verb~|either~} files with the machine (orchestrator 16:14Z)}\td{declined after 0.88 s and 24 G each (the machine's tick bound of 16:45Z, then the reference engine); the arena's limit is 60 s}\td{closed for the arena}}
+\tr{\td{the machine's tick bound on a \code{\verb~|good~} test: \code{\verb~|perf/loop-unfolded-once~}}\td{(b): timeout at 40 s in the suite run, accepted in 31.6 s in a quiet window (199 G, 8.7 GB). (c*): accepted in 75 ms (0.77 G); (d): 58 ms}\td{a timeout = one more "declined": no place lost, a red cell on a test that the reference engine passes in 76 ms}}
+\tr{\td{eager-reduction declines of the machine}\td{unit-level only: the reference engine decides those units, no test is declined for it; 6,711 units on Mathlib}\td{costs instructions (0.4, item 3), never a verdict}}
+\tr{\td{generated constants (admission declines an export that needs a kernel-generated constant without a record)}\td{0 of 270: no test is declined for it}\td{a decline: tie-breaker only}}
+\tr{\td{the machine is not the default (\code{\verb~|MachineProvider.priority()~} = 10)}\td{the definition as it is runs the reference engine: place 15 instead of 8}\td{seven places}}
+}
+}
+
+\subtree{
+\title{10. Reproduction and files}
+
+\pre{\verb~|
+# distribution from the published jars, arena flags (5-6 min; one of the host's two native-image slots)
+bench/slot.sh -c ni -n 2 -- scripts/build.sh --published --no-pgo --opt 3 \
+    --verify-deps scripts/arena/deps.sha256 --dist work/ar1/dist
+mkdir -p work/ar1/src/work && ln -sfn ../../dist work/ar1/src/work/dist
+RUN="$(sed -n 's/^run:[[:space:]]*//p' scripts/arena/rlvm.yaml | head -n 1)"
+work/ar1/scripts/suite.sh a "$RUN"                                  # all 270 tests, report work/ar1/reports/a.json
+work/ar1/scripts/one.sh --quiet mathlib-a-quiet work/exports/mathlib.ndjson 4120 "$RUN"   # Mathlib in a quiet window
+bench/slot.sh -- bench/quiet.py -- work/ar1/scripts/leaders.sh gruszka nano-lean sokonanoda
+python3 -I work/ar1/scripts/tables.py a b c d                        # verdict and cost tables
+python3 -I work/ar1/scripts/mathlib-table.py                         # Mathlib table and projection
+python3 -I work/ar1/board.py --row "rlvm:0:0:3.256e12:3"             # the board with a hypothetical row
+# phases, profile
+work/ar1/scripts/one.sh mathlib-stop-load work/exports/mathlib.ndjson 4120 'work/dist/bin/rlvm --threads 4 -X stop-after=load "$IN"'
+bench/slot.sh -c ni -n 2 -- work/ar1/scripts/build-sym.sh            # the same jars with symbols: work/ar1/dist-sym
+bench/slot.sh -- bench/arena-docker.sh --arena-limits --no-network work/ar1/scripts/prof-in.sh \
+    $PWD/work/ar1/prof/b 20000000 -- $PWD/work/ar1/dist-sym/bin/rlvm --threads 4 -X engine=machine $PWD/work/exports/mathlib.ndjson
+python3 -I work/ar1/scripts/prof-class.py work/ar1/prof/b.syms.tsv   # one perf record at a time (the ring buffers are per user)
+# the arena build line from a clean copy, no network
+work/ar1/scripts/e2e.sh && bench/arena-docker.sh --arena-limits --no-network work/ar1/scripts/e2e-check.sh
+~}
+
+\p{Files: \code{\verb~|work/ar1/reports/{a,b,c,d}.json~} (every test: status, exit code, instructions, times, RSS, the checker's output), \code{\verb~|tables-*.md~}, \code{\verb~|mathlib-*-quiet.json~}, \code{\verb~|leader-*.json~}, \code{\verb~|loop-b-quiet.json~}, \code{\verb~|mathlib-stop-*.json~}; \code{\verb~|work/ar1/logs/~} (suite logs, run lines, jar hashes, the offline build's log \code{\verb~|e2e-build.log~}, \code{\verb~|e2e-check.log~}); \code{\verb~|work/ar1/prof/~} (profiles; \code{\verb~|b.declines.txt~}: the machine's declines on Mathlib).}
+}
