@@ -284,7 +284,12 @@ The published jars: `rlvm-ref` a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-exp
   errors 0 (tutorial 11,847 / 413, bugs 2,627 / 65, prelude 839 / 8, mdata 779 / 1,197: the published record);
   differential self-test passed. The same gate had passed its 230-test step on the two earlier candidates of the
   reference jar.
-- **The same gate with `-X policy=strict`** (`--corpus tutorial --corpus bugs`): @@STRICTGATE@@
+- **The same gate with `-X policy=strict`** (`--corpus tutorial --corpus bugs`): PASS. The 230 published tests 230
+  correct, 0 wrong, 0 declined; mutants tutorial 12,260: SOUNDNESS 0, COMPLETENESS 0, agree 11,587, declined 673;
+  bugs / other / corner-cases 2,692: SOUNDNESS 0, COMPLETENESS 0, agree 2,579, declined 113; self-test passed. The
+  strict mode declines 260 + 48 mutants more than the practical one and agrees on all the others; the additional
+  declines were not classified one by one (LP2's strict digest of the same files shows the loader's part: 1,084
+  small files with a metadata node in a declaration, 2 with a `nondep = true` let).
 - **Review exports** (one JVM, real pipeline; `work/r2/bin/judge-all.sh`, results `work/r2/out/judge-cand3-*`),
   1,239 exports with official verdicts:
 
