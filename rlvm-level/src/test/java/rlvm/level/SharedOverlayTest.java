@@ -741,6 +741,7 @@ class SharedOverlayTest extends OverlayTest {
                 try {
                     Published on = current.get();
                     LevelStore shared = on.store.newSharedOverlay();
+                    LevelStore flat = null;
                     Random rnd = new Random(900 + tid);
                     int session = 0;
                     boolean last = false;
@@ -751,11 +752,21 @@ class SharedOverlayTest extends OverlayTest {
                             shared.rebase(newest.store);
                             on = newest;
                             rebases.incrementAndGet();
+                            flat = null;
                         } else {
                             shared.reset();
                         }
-                        // the reference of this session: a private copy of the same snapshot, used and reset a few times
-                        LevelStore flat = on.store.newOverlay();
+                        // The reference of this session: a private copy of the same snapshot, used and reset as the
+                        // shared overlay is - a NEW copy only where the shared overlay was rebased. (Until INV-1 it
+                        // was a new copy in every round: a worker that found no new snapshot then held an overlay
+                        // that was reset, with the cache entries of base ids that survive a reset, against a copy
+                        // without them, and the ids that follow differ. The test failed for that reason of its own
+                        // whenever the publisher was slower than a worker, on a loaded host.)
+                        if (flat == null) {
+                            flat = on.store.newOverlay();
+                        } else {
+                            flat.reset();
+                        }
                         Ctx cf = on.ctx.copy();
                         Ctx cs = on.ctx.copy();
                         int inner = 1 + rnd.nextInt(3);

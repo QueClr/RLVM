@@ -117,7 +117,10 @@ w.rebase(laterSnapshot);                        // pipelined load: move to a lar
   every overlay reads before it reads anything else of its base.
 - `reset()` costs time proportional to what the overlay created. Memo slots of reissued ids are
   fresh; cache entries that involve overlay ids die with an epoch counter; entries made only of base
-  ids survive (LV1-F1: "base ids only" includes both lists of the substitution).
+  ids survive. "Base ids only" is meant by content: the id of the substitution and of both its lists
+  (LV1-F1), and every level in a level list the entry rests on - a base list id says nothing about the
+  levels in it, because a level list of the session is found as a base list when the base holds a
+  list of the same ints (INV-1; *agentic-note*: rep-INV-1).
 - **Two kinds of overlay, the same ids and answers operation by operation** (`SharedOverlayTest`):
   - `newSharedOverlay()`, the overlay of a worker. It reads the frozen base in place (node arrays,
     lists, memoised forms, both hash tables) and holds only what its session adds; any number of

@@ -222,9 +222,28 @@ final class NodeCtx {
     }
 
     /** True if a CONST of constant {@code cid} with level list {@code levelList} has the wrong number of levels. */
-    /** True if a level list of a CONST node may be stored in a shared term. */
+    /**
+     * True if a level list of a CONST node may be stored in a shared term: a shared list
+     * ({@link IntLists#isSharedList}) whose every level is a shared level ({@link LevelInfo#isSharedLevel}).
+     * The id of the list is not enough (finding INV-1; *agentic-note*: rep-INV-1): where level lists share
+     * their store with other lists of ints, equal contents give equal ids, so a list of levels that only the
+     * calling thread's overlay has is found as a shared list when the base holds a list of the same ints (a
+     * list of parameter names), and every other thread would read other levels from that id.
+     */
     boolean listIsShared(int levelList) {
-        return levelList == 0 || lists.isSharedList(levelList);
+        if (levelList == 0) {
+            return true;
+        }
+        LevelInfo lv = levels;
+        if (lv == null || !lists.isSharedList(levelList)) {
+            return false;
+        }
+        for (int i = 0, n = lists.length(levelList); i < n; i++) {
+            if (!lv.isSharedLevel(lists.get(levelList, i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     boolean arityMismatch(int cid, int levelList) {

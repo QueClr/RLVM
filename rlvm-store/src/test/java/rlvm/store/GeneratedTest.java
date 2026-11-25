@@ -237,6 +237,45 @@ class GeneratedTest {
         assertTrue(g.isFree(name), "a refused constant claims nothing");
     }
 
+    /**
+     * Finding INV-1: the id of a level list does not say whose levels are in it. Where level lists share their store
+     * with other lists of ints, a list of levels of the calling thread's overlay is found as a shared list when the
+     * base holds a list of the same ints. A shared term takes the level list of a constant only if every level in
+     * it is a shared level.
+     */
+    @Test
+    void aSharedListOfWorkerLevelsIsNotTheLevelListOfASharedConstant() {
+        Model fx = new Model();
+        fx.declareLiteralPrerequisites(false);
+        fx.builder.constant(fx.constNames[2], fx.levelLists[2]);
+        fx.builder.finish();
+        Store store = fx.store;
+        ArrayIntLists base = (ArrayIntLists) store.lists();
+        base.freeze();
+        ArrayIntLists workerLists = base.newOverlay();
+        Overlay o = new Overlay(store, workerLists, store.levelInfo(), store.lits(), 1L << 24);
+        Terms t = new Terms(store.terms(), o);
+        GeneratedBuilder g = store.generated();
+        TermStore ts = store.terms();
+        // c2.{v, 1}: a list of the base
+        int list = fx.levelLists[2];
+        int v = fx.levelIds[3];
+        assertTrue(base.isSharedList(list) && workerLists.isSharedList(list));
+        assertEquals(v, base.get(list, 0));
+        int c = o.mkConst(fx.constCids[2], list);
+        // the same ints with v a level that only this worker has (the fake of TestLevels: ids from v on are not shared)
+        fx.levels.sharedBelow = v;
+        int end = ts.generatedEnd();
+        GeneratedTermException e = assertThrows(GeneratedTermException.class, () -> g.term(t, c));
+        assertTrue(e.getMessage().contains("not a shared list"), e.getMessage());
+        assertEquals(end, ts.generatedEnd(), "nothing was added");
+        // with every level of the list shared it is the level list of a shared constant
+        fx.levels.sharedBelow = Integer.MAX_VALUE;
+        int gc = g.term(t, c);
+        assertTrue(Node.isGenerated(gc));
+        assertEquals(list, t.b(gc));
+    }
+
     @Test
     void generatedConstantsLateNamesAndRebinding() throws Exception {
         Model fx = new Model();

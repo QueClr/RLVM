@@ -140,8 +140,9 @@ public final class LevelStore {
     private volatile boolean frozen;
 
     // ---- instantiation caches (direct mapped). An entry is valid if its stamp is the current epoch (it was
-    // made in this session) or the current "forever" stamp (it is made of base ids only, see substIsBase, and
-    // survives reset()). epoch is positive, forever negative, 0 marks an empty slot. ----
+    // made in this session) or the current "forever" stamp (it is made of base ids only, BY CONTENT: see
+    // substIsBase and isBaseLevelList; it survives reset()). epoch is positive, forever negative, 0 marks an
+    // empty slot. ----
     private final long[] icKey = new long[1 << CACHE_BITS];
     private final int[] icVal = new int[1 << CACHE_BITS];
     private final int[] icStamp = new int[1 << CACHE_BITS];
@@ -1705,14 +1706,46 @@ public final class LevelStore {
     }
 
     /**
-     * True if the substitution is made of base ids only: its id AND its two lists. The id alone does not say so
-     * (finding LV1-F1): a substitution is an interned pair of list ids in the store of the level lists and name
-     * lists, so the pair of this session can be FOUND as a base list of two ints while its level list is a list
-     * of the overlay - and that id names another substitution after {@link #reset()}. Only an entry of base ids
-     * may get the stamp 0 that survives a reset.
+     * True if the substitution is made of base ids only: its id, its two lists AND the levels in its level list.
+     * The id alone does not say so (finding LV1-F1): a substitution is an interned pair of list ids in the store
+     * of the level lists and name lists, so the pair of this session can be FOUND as a base list of two ints
+     * while its level list is a list of the overlay - and that id names another substitution after
+     * {@link #reset()}. Nor does the id of its level list (finding INV-1, see {@link #isBaseLevelList}). Only an
+     * entry of base ids may get the stamp that survives a reset. (The list of parameter names holds name ids,
+     * which mean the same in every session: its id is enough.)
      */
     private boolean substIsBase(int subst) {
-        return subst < baseListTop && lists.get(subst, 0) < baseListTop && lists.get(subst, 1) < baseListTop;
+        return subst < baseListTop && lists.get(subst, 0) < baseListTop && isBaseLevelList(lists.get(subst, 1));
+    }
+
+    /**
+     * True if {@code list}, read as a list of LEVELS, is the same level list in every overlay of this store's
+     * base and after every {@link #reset()}: its id is a base id AND each of its elements is a base level. The id
+     * alone does not say so (finding INV-1, the family of LV1-F1; *agentic-note*: rep-INV-1): equal contents give
+     * equal ids whatever a list holds, and level lists share their store with name lists, name sets and
+     * substitution pairs. The level list of a session is therefore FOUND as a base list whenever the base holds a
+     * list of the same ints - a list of parameter names whose name ids are, as numbers, the ids this overlay gave
+     * to its levels - and that base id then reads as another level list in the next session, or as a list of ids
+     * that do not exist. Whatever is kept across a reset on the strength of a list id must ask this for a list of
+     * levels. Linear in the length of the list. The empty list qualifies. On a store that is not an overlay the
+     * question is whether the list is one of its lists and holds levels of the store.
+     */
+    boolean isBaseLevelList(int list) {
+        boolean root = baseTop == 0;
+        if (list < 0 || list >= (root ? lists.size() : baseListTop)) {
+            return false;
+        }
+        int n = lists.length(list);
+        int s = lists.start(list);
+        int[] p = lists.poolOf(list);
+        int bound = root ? top : baseTop;
+        for (int i = 0; i < n; i++) {
+            int l = p[s + i];
+            if (l <= 0 || l >= bound) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private int instRec(int l, int[] pp, int ps, int[] lp, int ls, int n) {
@@ -1795,7 +1828,8 @@ public final class LevelStore {
         sp = sp0;
         lcKey[slot] = key;
         lcVal[slot] = res;
-        lcStamp[slot] = (list < baseListTop && res < baseListTop && substIsBase(subst)) || baseTop == 0 ? forever : epoch;
+        // base ids only, by content: a result of session levels can be FOUND as a base list (isBaseLevelList)
+        lcStamp[slot] = (isBaseLevelList(list) && isBaseLevelList(res) && substIsBase(subst)) || baseTop == 0 ? forever : epoch;
         return res;
     }
 
