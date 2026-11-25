@@ -1,0 +1,21 @@
+\title{The re-check of a rejection and the strict re-run change no verdict on real input; the decline fallback decides 95 units of the eight corpora, of two classes}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{reference-engine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Source: [the report of package MO-1](rep-MO-1), sections 2 to 5. Conditions: the published build of 2026-11-25 20:00 UTC, its executable, the default configuration with automatic workers, run on every input set under three configurations (as published; with a rejection of the machine final; with the fallback off as well), 19,319 files, judged by the stored official verdicts; and the same files again on a build with the patch of that report. Not a timing.}
+
+\ul{
+\li{\strong{The re-check.} The machine rejects no unit of the eight corpora. On the 262 small arena tests and the 17,775 mutants it rejects 1,960 units and the re-check changes none of them. On the hostile suite it changes 16 of 737: 12 official accepts that the machine rejects (8 through a memo of an earlier declaration, which a fresh strict machine accepts; 4 through its tables keyed by values, which only the reference engine accepts) and 4 official rejections that the strict machine accepts.}
+\li{\strong{The strict re-run of a rejected file with metadata.} With the machine as default engine it fires on no hostile row, no arena test and no corpus: the four files it was built for are accepted by the machine. It fires on 485 mutants and reports 351 correct rejections as declines.}
+\li{\strong{The fallback.} 95 units of the corpora, 80 declarations, are declined by the machine and accepted by the reference engine: 86 by the rule of finding E1-F6, the K rule after an applied let variable, and 9 because a probe of eager reduction is cut. By corpus 0, 1, 1, 0, 2, 16, 11 and 64 for Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and Mathlib. The machine alone accepts Init and reachability and declines the other six.}
+\li{\strong{One direction only.} Turning any of the three off turns accepts into rejections or declines and never the reverse, so it cannot add an accept of a statement that is not derivable; on the 19,319 files it added none.}
+\li{\strong{A fourth use.} Admission checks every inductive block and the quotient package with judgments of the reference engine in every configuration: 17,409 units of the eight corpora.}
+}
+
+\p{\strong{Not measured:} x86-64; hostile files beyond the suite.}

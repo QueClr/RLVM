@@ -58,6 +58,9 @@ class ArenaIntegrationTest {
         c.workers = workers;
         c.explain = false;
         c.logAnomalies = false;
+        // The reference kernel is the primary engine here: its rejection is confirmed by a fresh cold run of
+        // it, as in the launcher (verify=reference; the driver's default is no verification).
+        c.recheckRejections = true;
         c.deepStackBytes = 256L << 20;
         if (sessionBytes > 0) {
             c.sessionBytes = sessionBytes;

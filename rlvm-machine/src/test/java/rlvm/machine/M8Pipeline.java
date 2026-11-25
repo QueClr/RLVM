@@ -25,7 +25,8 @@ import rlvm.api.Outcome;
  * pipeline or the machine), the heap is the report's, and several runs share it. {@code report.sh
  * mutants} therefore holds a sample against the real launcher ({@code --launcher-sample N}).
  *
- * <p>The verdict alone proves nothing about the machine: the driver re-checks a rejection and a decline
+ * <p>The verdict alone proves nothing about the machine: in the verified pipeline this gate runs
+ * ({@code -X verify=reference}, set by {@link #machine}) the driver re-checks a rejection and a decline
  * of the primary engine with the reference kernel. The statistics do ({@code -X stats-file}): how many
  * engine checks the machine accepted, rejected and declined, {@code driver.machineIncomplete} (the
  * machine rejected, the reference kernel accepts), {@code driver.warmAnomalies} (rejected in a warm
@@ -114,6 +115,12 @@ final class M8Pipeline {
     static Map<String, String> machine(String switches, String debug, int sessionMib) {
         Map<String, String> x = new LinkedHashMap<>();
         x.put("engine", "machine");
+        // The gate means the VERIFIED pipeline: a rejection of the machine is re-checked by the reference engine (which
+        // is what fills driver.machineIncomplete and driver.warmAnomalies, the counters this gate reads) and a rejected
+        // file with metadata is checked again under the strict policy, as the reference pipeline it is compared with
+        // does. That is not the default since 2026-11-25 (a plain run: the machine's rejection is final), so the gate
+        // asks for it by name. *agentic-note*: rep-MO-1
+        x.put("verify", "reference");
         // always explicit: without the setting the engine runs Op.SW_DEFAULT, which is warm,gated,expect since M6's
         // publication of 16:24Z; "none" is the generic tier (v0)
         x.put("machine.switches", switches == null || switches.isEmpty() ? "none" : switches);

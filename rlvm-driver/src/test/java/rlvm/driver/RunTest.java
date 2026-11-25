@@ -913,6 +913,12 @@ class RunTest {
         Run run = host.run(c, false);
         assertEquals(Outcome.REJECT, run.execute());
         assertEquals(0, host.strictChecks.get(6) + host.refChecks.get(6));
+        // ... which is the driver's default: a configuration that says nothing does the same
+        assertFalse(new RunConfig().recheckRejections);
+        FakeHost host2 = new FakeHost(Fakes.copy(script));
+        Run run2 = host2.run(Fakes.defaultConfig(1), false);
+        assertEquals(Outcome.REJECT, run2.execute());
+        assertEquals(0, host2.strictChecks.get(6) + host2.refChecks.get(6));
     }
 
     // ---- input failures (through a Wiring) ----------------------------------------------------------------------------

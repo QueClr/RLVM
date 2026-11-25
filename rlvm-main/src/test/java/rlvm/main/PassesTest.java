@@ -545,8 +545,9 @@ class PassesTest {
         Path f = file("accepted", accepted());
         for (String mode : new String[] {"reload", "recheck"}) {
             // Sour from the second check of a constant on; without the reference kernel's help (no-fallback)
-            // the second pass declines what the first accepted.
-            Result r = passes(f, 1, 2, "passes=4", "passes-mode=" + mode, "no-fallback");
+            // the second pass declines what the first accepted. (verify=reference: the rejection of the sour
+            // engine is re-checked - by the reference kernel, which accepts; the fallback is off, so: DECLINED.)
+            Result r = passes(f, 1, 2, "passes=4", "passes-mode=" + mode, "no-fallback", "verify=reference");
             assertEquals(Outcome.DECLINE, r.outcome, r.err);
             assertTrue(r.err.contains("rlvm: PASSES DISAGREE: pass 1 ended with ACCEPT, pass 2 (" + mode + ") with DECLINE"), r.err);
             assertEquals(1, r.err.split("PASSES DISAGREE", -1).length - 1, "said once: " + r.err);
@@ -556,11 +557,20 @@ class PassesTest {
             assertEquals("ACCEPT", lines.get(0).group(18));
             assertEquals("DECLINE", lines.get(1).group(18));
         }
-        // The same sour engine with the reference kernel's fallback: every pass accepts, nothing is said.
+        // The same sour engine with the verification and the reference kernel's fallback: every pass accepts,
+        // nothing is said.
         for (String mode : new String[] {"reload", "recheck"}) {
-            Result ok = passes(f, 1, 2, "passes=3", "passes-mode=" + mode);
+            Result ok = passes(f, 1, 2, "passes=3", "passes-mode=" + mode, "verify=reference");
             assertEquals(Outcome.ACCEPT, ok.outcome, ok.err);
             assertFalse(ok.err.contains("PASSES DISAGREE"), ok.err);
+        }
+        // A plain run (no verification): the rejection of the sour engine is final, so the second pass REJECTS
+        // what the first accepted - which is said, and the run declines.
+        for (String mode : new String[] {"reload", "recheck"}) {
+            Result plain = passes(f, 1, 2, "passes=3", "passes-mode=" + mode);
+            assertEquals(Outcome.DECLINE, plain.outcome, plain.err);
+            assertTrue(plain.err.contains("rlvm: PASSES DISAGREE: pass 1 ended with ACCEPT, pass 2 (" + mode + ") with REJECT"),
+                    plain.err);
         }
     }
 

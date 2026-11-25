@@ -18,7 +18,9 @@ import rlvm.api.Reason;
  * REJECT   else if the loader reported malformed input (the official reader rejects before checking)
  * else     let u = the first unit in file order whose status is not ACCEPTED or SKIPPED
  *          (below the position of a non-malformed input failure, if there is one):
- *            status(u) = REJECTED            -> REJECT   (a rejection is only ever recorded confirmed)
+ *            status(u) = REJECTED            -> REJECT   (a rejection as the worker recorded it: the primary
+ *                                                         engine's own by default, a confirmed one with
+ *                                                         RunConfig.recheckRejections)
  *            status(u) = DECLINED or none    -> DECLINE
  *          no such u:
  *            input failure                   -> DECLINE
@@ -38,7 +40,10 @@ public final class VerdictBoard {
     public static final int ACCEPTED = 1;
     /** Unsafe or partial record: not admitted, not checked; counts as accepted. */
     public static final int SKIPPED = 2;
-    /** Rejected, and the rejection is confirmed (reference kernel, structural check, environment pass). */
+    /**
+     * Rejected: by the primary engine (final by default; confirmed first by its strict run and the reference
+     * kernel with {@code RunConfig.recheckRejections}), by a structural check or by the environment pass.
+     */
     public static final int REJECTED = 3;
     public static final int DECLINED = 4;
 
@@ -111,7 +116,7 @@ public final class VerdictBoard {
         }
     }
 
-    /** A rejection confirmed by the re-check protocol (or produced by the reference kernel). */
+    /** A rejection: the primary engine's (final by default), one confirmed by the re-check protocol, or the reference kernel's. */
     public void reject(int unit, Reason reason, String message) {
         fail(unit, REJECTED, reason, message);
         rejected.incrementAndGet();

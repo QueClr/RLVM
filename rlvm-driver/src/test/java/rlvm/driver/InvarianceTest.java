@@ -20,6 +20,14 @@ import rlvm.driver.Fakes.Unit;
  * injected failures the verdict and the unit that decides it are the same for 1, 2, 4 and 8 workers,
  * for every chunk size, environment batch size and session cap, and equal to what the verdict rule
  * says independently of any schedule.
+ *
+ * <p>The suite means the VERIFIED protocol ({@code RunConfig.recheckRejections}, which {@code Fakes.config}
+ * asks for by name): its workloads contain an engine whose rejection comes out of a warm session (WARMTH),
+ * and such a rejection is repaired - and the verdict independent of the schedule - only when it is re-checked
+ * in a fresh session. Under the driver's default (a rejection of the primary engine is final) the invariance
+ * holds for engines whose rejections do not depend on the session:
+ * {@link #sameVerdictWithoutTheVerificationWhenNoRejectionDependsOnTheSession}; for the others it does not
+ * ({@code RecheckProtocolTest.byDefaultARejectionOutOfAWarmSessionIsFinalAndDependsOnTheSession}).
  */
 class InvarianceTest {
 
@@ -199,6 +207,62 @@ class InvarianceTest {
             assertEquals(iterations * 4, runs);
             assertTrue(iterations < 400 || (verdicts[0] > 60 && verdicts[1] > 20 && verdicts[2] > 20),
                     "the workloads cover all verdicts: " + java.util.Arrays.toString(verdicts));
+        });
+    }
+
+    /**
+     * The driver's default protocol (no verification: a rejection of the primary engine is final), on the same
+     * random workloads with every session-dependent rejection replaced by a rejection of the engine's own: the
+     * verdict and the deciding unit are those of the verdict rule for any number of workers, chunk size,
+     * environment batch and session cap.
+     */
+    @Test
+    void sameVerdictWithoutTheVerificationWhenNoRejectionDependsOnTheSession() {
+        assertTimeoutPreemptively(Duration.ofSeconds(3000), () -> {
+            final int iterations = Integer.getInteger("rlvm.driver.invariance", 400) / 2;
+            Random rnd = new Random(Long.getLong("rlvm.driver.seed", 20261124L) + 2);
+            int[] verdicts = new int[3];
+            long final_ = 0;
+            for (int iter = 0; iter < iterations; iter++) {
+                boolean same = rnd.nextBoolean();
+                int n = 1 + rnd.nextInt(iter % 10 == 0 ? 1500 : 220);
+                int failures = iter % 3 == 0 ? 0 : 1 + rnd.nextInt(6);
+                Unit[] script = randomScript(rnd, n, failures, same);
+                for (Unit u : script) {
+                    if (u.cls == RunHost.CHECK && u.warm == Fakes.WARMTH) {
+                        u.warm = R; // what such an engine says in a session that has checked something
+                    }
+                }
+                Policy.Unconfirmed policy = rnd.nextInt(5) == 0 ? Policy.Unconfirmed.REJECT : Policy.Unconfirmed.DECLINE;
+                Expect expect = Fakes.expect(script, same, false, policy, true);
+                verdicts[expect.verdict]++;
+                for (int w : WORKERS) {
+                    RunConfig c = Fakes.defaultConfig(w);
+                    c.policy = new Policy(true, Policy.ForwardRefs.DECLINE, policy, true, false);
+                    c.chunkUnits = 1 + rnd.nextInt(rnd.nextBoolean() ? 4 : 40);
+                    c.envBatchUnits = 1 + rnd.nextInt(rnd.nextBoolean() ? 8 : 400);
+                    c.sessionBytes = rnd.nextBoolean() ? 1 + rnd.nextInt(3000) : 16L << 20;
+                    c.spillNanos = rnd.nextInt(3) == 0 ? 1 : 20_000_000L;
+                    FakeHost host = new FakeHost(Fakes.copy(script));
+                    Run run = host.run(c, same);
+                    int verdict = run.execute();
+                    String where = "no verification, iteration " + iter + ", " + w + " workers, " + n + " units, same=" + same
+                            + ", chunk " + c.chunkUnits + ", envBatch " + c.envBatchUnits + ", expected " + expect;
+                    assertEquals("", host.describeViolations(), where);
+                    assertEquals(expect.verdict, verdict, where + ": " + run.verdicts().explanation());
+                    assertEquals(expect.unit, run.verdicts().decidingUnit(), where);
+                    check(host, run, script, expect, where);
+                    assertEquals(0, run.verdicts().warmAnomalies() + run.verdicts().machineIncomplete(), where);
+                    if (expect.unit >= 0 && script[expect.unit].cls == RunHost.CHECK && script[expect.unit].warm == R) {
+                        // the deciding rejection was the primary engine's own: nobody else was asked about it
+                        assertEquals(0, host.strictChecks.get(expect.unit) + host.refChecks.get(expect.unit), where);
+                        final_++;
+                    }
+                }
+            }
+            assertTrue(iterations < 200 || (verdicts[0] > 30 && verdicts[1] > 10 && verdicts[2] > 5),
+                    "the workloads cover all verdicts: " + java.util.Arrays.toString(verdicts));
+            assertTrue(iterations < 200 || final_ > 40, "runs decided by a final rejection of the primary engine: " + final_);
         });
     }
 

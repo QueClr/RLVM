@@ -159,8 +159,21 @@ final class Fakes {
         return u;
     }
 
-    /** A configuration for tests: small stacks, no stderr, statistics off. */
+    /**
+     * A configuration for tests: small stacks, no stderr, statistics off - and THE VERIFICATION ON
+     * ({@code RunConfig.recheckRejections}, off by default since 2026-11-25): the suites of the driver are the
+     * suites of the re-check protocol and of the invariance of the verdict, which hold for an engine whose
+     * rejection may come out of a warm session (WARMTH) only with it, so they ask for it by name, here. The
+     * default is tested by name too: {@link #defaultConfig(int)}.
+     */
     static RunConfig config(int workers) {
+        RunConfig c = defaultConfig(workers);
+        c.recheckRejections = true;
+        return c;
+    }
+
+    /** {@link #config(int)} with the driver's default protocol: a rejection of the primary engine is final. */
+    static RunConfig defaultConfig(int workers) {
         RunConfig c = new RunConfig();
         c.workers = workers;
         c.unitBytes = 1L << 30; // distinct from the cold budget (memoryLimitBytes) whatever the worker count

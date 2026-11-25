@@ -1,0 +1,21 @@
+\title{On hostile input the machine's verdict depends on the schedule, with the re-check on 12 rows and without it on 21; on the published tests and the mutants on none}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{driver}
+\tag{soundness}
+\import{base-macros}
+
+\p{Source: [the report of package MO-1](rep-MO-1), section 5.4. Conditions: the driver's invariance suite, which runs every file under nine schedules (batch with 1, 2, 4 and 8 forced workers, a session cap of one byte with 1 and 4 workers, pipelined loading with a publication after every 1, 7 and 64 units), with the machine and its default switch set as primary engine, on the JVM, in a private tree of 2026-11-25 with the patch of that report; the hostile suite of 1,274 rows, the 231 published tests of the suite's list, and the mutant corpora tutorial, bugs and metadata.}
+
+\ul{
+\li{\strong{With the re-check}, the protocol that was the default: 12 hostile rows get different verdicts under different schedules. Eleven are tolerated accepts that need a memo of an earlier declaration (\code{warm}): accepted when one session checks the file, rejected when every declaration has a fresh session. So [the invariant of the driver](design-driver-invariants), that the verdict does not depend on the session cap, did not hold for the machine on these rows before anything was switched off.}
+\li{\strong{Without the re-check}: 21 rows. The same eleven, and ten rows that a warm session rejects by its history and a fresh one accepts: eight official accepts and two official rejections. One of them changes with the worker count alone, because its two declarations then go to two sessions.}
+\li{\strong{On the published tests and on 16,928 mutants}, without the re-check: no file with a schedule difference.}
+\li{\strong{What the re-check did.} A fresh strict machine repairs exactly the rejections that a history produces, so the re-check made the rejecting half of this invisible; it never touched the accepting half.}
+\li{\strong{The lesson.} An answer of a comparison, a checked type or a full reduction that is kept from one declaration to the next makes the verdict a function of the schedule wherever the official checker's answer depends on its own cache history. Without such answers kept across declarations both halves go, and so do 15 of the 74 tolerated accepts and 8 of the 12 known wrong rejects of the default configuration.}
+}
+
+\p{\strong{Not measured:} the reference engine as primary engine; the prelude mutants and the large corpora; a machine whose sessions keep values only.}

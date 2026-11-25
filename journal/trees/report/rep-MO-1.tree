@@ -1,0 +1,394 @@
+\title{MO-1: the reference engine in the default configuration, a census, and the switch-off of the re-check}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{reference-engine}
+\tag{soundness}
+\tag{driver}
+\import{base-macros}
+
+\p{Package "MO-1", 2026-11-25. The maintainer's instruction of that day, verbatim: "turn off reference engine recheck on default. try make machine align with official behavior. reference engine is just a fallback that is used to verify the behavior during development. It shall not affect real production." The target is a default configuration in which the machine is the whole checker and gives the official verdict by itself. This report has two parts. Part A is the census: on every input set of the project, where the default configuration of the published build uses [the reference engine](design-reference-engine) today, and what the machine answers without it. Part B is a patch, not applied and not published, that turns the re-check of a rejection and the launcher's strict re-run off by default and keeps them as one development option. The decline fallback is not turned off; the option that would is in the patch, and what it gives is counted.}
+
+\subtree{
+\title{0. Answer}
+
+\ul{
+\li{\strong{The default configuration uses the reference engine in four places, not three.} (1) Every rejection of the machine is re-checked: a strict machine, then the reference engine, see [the verdict protocol](design-verdict-protocol-recheck). (2) Every unit the machine declines is tried again cold and then decided by the reference engine. (3) The launcher checks a rejected file with a dropped metadata node again under the strict policy, see [the decision](dec-7UAL). (4) The environment pass admits every inductive block and the quotient package with judgments of the reference engine, in every configuration: 609 units of Init and 7,133 of Mathlib (section 2.4). The fourth was not part of the task and is not touched; it is counted here because the target cannot be reached without it.}
+\li{\strong{(1), the re-check, changes no verdict on real input.} On the eight corpora the machine rejects nothing. On the 262 small arena tests it rejects 54 units and on the 17,775 mutants 1,906, and the re-check turns none of these 1,960 rejections into anything else. Only on the hostile suite does the re-check change anything: of 737 rejections it turns 16 into accepts, 12 through the strict machine and 4 through the reference engine. 12 of the 16 are accepts of the official checker, so without the re-check the default configuration has \strong{12 known wrong rejects}; the other 4 are rejections of the official checker that the re-check had turned into tolerated accepts, and without it they get the official verdict.}
+\li{\strong{(3), the strict re-run, never fires on a hostile row, an arena test or a corpus.} With the machine as default engine it fires on 485 mutants and changes 351 verdicts, each from a correct rejection to a decline. The four metadata files of [finding R2-F4](ex-FD6K), for which it was built when the reference engine was the default engine, are accepted by the machine itself. Without the net the mutant gate goes from 15,741 in agreement and 2,034 declined to 16,092 and 1,683, with SOUNDNESS 0 and COMPLETENESS 0 as before.}
+\li{\strong{(2), the fallback, is what real input needs.} The machine declines 95 units of the eight corpora, 80 different declarations: 86 by the rule of finding E1-F6 (the K rule after an applied let variable) and 9 because a probe of eager reduction was cut. Init and reachability have none; Std 1, cedar 1, con-leche 2, navier-stokes-euler 16, cslib 11, Mathlib 64. The machine alone therefore declines six of the eight corpora at their first such unit. On the small inputs it declines 8 more units that matter: 4 hostile rows, the 2 arena tests on which the official kernel does not terminate, and 2 mutants for memory.}
+\li{\strong{The machine alone gives no wrong accept that the default configuration does not give.} Turning any of the three off can only turn an accept into a rejection or a decline. Measured, file by file, against the official verdicts: no accept of a statement that is not derivable on any input set, in any of the three configurations.}
+\li{\strong{The tolerated accepts.} 78 hostile rows are accepted against the official rejection today, 74 without the re-check. By what produces them (section 5.3): 45 need the shortcut \code{congruence} or \code{skipargs}, 22 of those under eager reduction; 15 need a memo that survives a declaration (\code{warm}, \code{pchk}); 1 the tabling gate; 13 are accepted by the machine without any switch, 4 of them by the reference engine too. Aligning the first group costs what the two shortcuts gain: without them the geometric mean of the eight warm passes was 15 \% longer and Mathlib 42 \% longer when the default set was chosen. The second costs what warm sessions gain, between nothing and 5 \% of one worker's CPU time where it was measured.}
+\li{\strong{The schedule.} A rejection or an accept that rests on a memo of an earlier declaration depends on which session checked that declaration. The driver's own invariance suite, with the machine as primary engine on the hostile suite, finds 12 rows whose verdict differs between its nine schedules \em{with} the re-check, and 21 without it. On the published tests and the mutant corpora it finds none, without the re-check: 17,159 files (section 5.4, and [the insight](ins-RPOG)).}
+\li{\strong{The patch.} Five diffs: the driver's default, one launcher option \code{\verb~|-X verify=none|reference~}, the gate scripts, one line of the machine's gate, twelve marks in the hostile manifest. A plain run says \code{\verb~|verify=none fallback=reference~}; \code{\verb~|-X verify=reference~} is the configuration that was the default; \code{\verb~|-X fallback=none~} is the machine alone. The gates of the patched build: the suites of the three modules; the gate of the default configuration through the executable with 230 of 230 tests, 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (16,092 in agreement, 1,683 declined) and on the hostile suite 1,184 in agreement, 74 tolerated, 12 known wrong rejects, 4 declined, no wrong accept and no other wrong reject; the same gate with \code{\verb~|-X verify=reference~} gives the published counts, 15,741 and 2,034, 1,192 and 78 and 4; the gate of the default configuration through the jars on the JVM has the counts of the executable; the eight corpora accepted with 8 and 4 workers on both launchers; every one of 19,319 files gets, under each of the three configurations, the verdict that the census of the published build predicted for it.}
+\li{\strong{Verdict.} The switch-off of (1) and (3) costs nothing on anything real and 12 wrong rejects on hand-made files, all of two known classes. It contradicts one sentence of [the standing policies](standing-policies-exactness), "never a rejection of what the official checker accepts ... also on a hand-made file", which the maintainer's instruction supersedes for the time until the machine is aligned; the gate records the twelve by name with a count that may only go down. (2) cannot go yet: Mathlib, cslib, navier-stokes-euler, con-leche, cedar and Std would be declined.}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{The published build}: the shared distribution of 2026-11-25 20:00 UTC, jars sha256 \code{f5517aa135d2}, the build of [the integration of the second wave](rep-INT9); a private byte-identical copy of it. Everything in sections 2 to 5 is from its executable (GraalVM Community Edition native image) unless a line says otherwise.}
+\li{\strong{The configurations.} "Old default": a run without any \code{-X} option, which re-checks, falls back and has the net. "New default": \code{\verb~|-X no-recheck~}. "Machine alone": \code{\verb~|-X no-recheck -X no-fallback~}. The published build has no option that turns the net off, and the net also fires in the last two; where it fired, the statistics line names it, the verdict of the practical run was a rejection by definition, and that rejection is the verdict counted for the configuration. The patched build of section 7 has the three as \code{\verb~|-X verify=reference~}, no option, and \code{\verb~|-X fallback=none~}; every file was run again on it (section 8).}
+\li{\strong{The input sets}, with their oracles. The eight corpora. The 270 tests of the arena, 148 good, 92 bad and 30 of the class \code{either}; the oracle is the stored verdict of the official checker of Lean 4.36.0 for 260 of them and the arena's class for the corpora and two large good tests. The four mutant corpora, 17,775 files with stored official verdicts (12,260 tutorial, 2,692 bugs, 1,976 metadata, 847 prelude). The hostile suite, 1,274 rows with official verdicts and marks, see [the gate](design-gate-hostile). 19,319 files in all, the eight corpora counted once.}
+\li{\strong{A run} is the default configuration as a user runs it: automatic workers (8 on the corpora, one per 128 units on small files), the default load mode, the default switch set. The mutants and the hostile rows ran with the heap cap of 4 GB that \src{scripts/gate.sh} gives them. All runs were made on the 10 cores outside the measurement set, four at a time for the small files, one at a time for the corpora. \strong{Nothing in this report is a timing.}}
+\li{\strong{What was read per run}: the exit status; the checker's statistics line; the statistics file (\code{\verb~|-X stats-file~}): the driver's counts and events and the counts of the machine, of the strict machine and of the reference engine; and the machine's log of every outcome that is not an accept (\code{\verb~|-X machine.declines~}: outcome, error code, unit, declaration, message). A unit "the machine declines" is a unit whose warm attempt ends in a decline; a decline of the strict machine behind a warm rejection is a stage of the re-check and is not counted as one.}
+\li{\strong{The switch ablation} of sections 5.2 and 5.3 ran the rows in question with the default set less one switch (\code{\verb~|-X machine.switches=default,-NAME~}), with no switch, and with the machine's session forgotten before every declaration (\code{\verb~|-X machine.session-kib=1~}).}
+}
+}
+
+\subtree{
+\title{2. The units the machine declines}
+
+\subtree{
+\title{2.1 The eight corpora}
+
+\p{Old default, 8 workers. "Environment pass" are the units decided by admission with the reference engine (section 2.4). "Repeats" are admitted without a check on the word of their original, see [the driver](design-driver-repeats); their number moves by a few units between runs with more than one worker. The machine rejects no unit of any corpus, so the re-check never runs there, and no corpus has a metadata record.}
+
+\table{
+\tr{\th{Corpus}\th{Units}\th{Environment pass}\th{Repeats}\th{Checked by the machine}\th{Rejected by it}\th{Declined by it, decided by the reference engine}\th{of them E1-F6}\th{of them a cut probe}\th{The machine alone}}
+\tr{\td{Init}\td{58,547}\td{609}\td{5,826}\td{52,112}\td{0}\td{0}\td{0}\td{0}\td{accept}}
+\tr{\td{Std}\td{101,146}\td{1,050}\td{8,518}\td{91,578}\td{0}\td{1}\td{1}\td{0}\td{decline at unit 20,634}}
+\tr{\td{cedar}\td{146,058}\td{1,960}\td{15,137}\td{128,961}\td{0}\td{1}\td{1}\td{0}\td{decline at unit 36,506}}
+\tr{\td{reachability}\td{4,413}\td{189}\td{199}\td{4,025}\td{0}\td{0}\td{0}\td{0}\td{accept}}
+\tr{\td{con-leche}\td{36,747}\td{473}\td{4,271}\td{32,003}\td{0}\td{2}\td{1}\td{1}\td{decline at unit 13,027}}
+\tr{\td{navier-stokes-euler}\td{126,468}\td{1,618}\td{13,014}\td{111,836}\td{0}\td{16}\td{16}\td{0}\td{decline at unit 38,006}}
+\tr{\td{cslib}\td{401,985}\td{4,377}\td{30,209}\td{367,399}\td{0}\td{11}\td{7}\td{4}\td{decline at unit 71,375}}
+\tr{\td{Mathlib}\td{721,845}\td{7,133}\td{59,434}\td{655,278}\td{0}\td{64}\td{60}\td{4}\td{decline at unit 34,631}}
+\tr{\td{\strong{sum}}\td{1,597,209}\td{17,409}\td{136,608}\td{1,443,192}\td{0}\td{\strong{95}}\td{86}\td{9}\td{2 accept, 6 decline}}
+}
+
+\p{The reference engine accepts all 95; the counts 0, 1, 1, 0, 2, 16, 11, 64 are the ones known before. Every one of the units is declined twice by the machine, warm and in its cold retry, with the same reason. The 95 units are 80 different declarations, because the corpora share libraries: 75 of class E1-F6 and 5 of the cut probes.}
+
+\ul{
+\li{\strong{E1-F6}, error code \code{E_LIMIT}, text "K rule after the application of a let variable whose declared type is not the type of its value (finding E1-F6): the type of the major premise may differ from the official one; the reference engine checks this declaration". Examples: \code{\verb~|Std.IterM.Equiv.lift_step_bind_congr~}, the one unit of Std and of cedar, also in cslib and Mathlib; \code{\verb~|ConLeche.Model.harvestDefn~} on con-leche; \code{\verb~|FormalMultilinearSeries.comp_assoc~}, the first of navier-stokes-euler and of cslib, also in Mathlib; \code{\verb~|LinearMap.exists_basis_basis_of_span_eq_top_of_mem_algebraMap~}, the first of Mathlib. Of the 16 of navier-stokes-euler, 12 are declarations of the project itself and 4 of Mathlib. Of Mathlib's 60, 17 are in \code{CategoryTheory} and 7 are private auxiliary declarations; the rest are spread over analysis, measure and probability theory, algebraic geometry and linear algebra.}
+\li{\strong{A cut probe}, error code \code{E_LIMIT}, text "eager reduction, and a probe of the PLAIN phase (the test 'X = Bool.true' or a Nat folding on an open term, which only eager reduction evaluates) was not decided within its budget (-X machine.eager-probe)". Five declarations: \code{\verb~|ConLeche.lpOfData_pack~} on con-leche, and four private proofs of \code{\verb~|Batteries.Data.Char.Basic~} (of \code{Char.all}, \code{Char.any} and two of \code{\verb~|Char.of_any_eq_false_aux~}) on cslib and on Mathlib. These are the five units of [the probe budget](design-switches).}
+\li{\strong{No unit} of a corpus was declined for a tick bound or for memory in these runs.}
+}
+}
+
+\subtree{
+\title{2.2 The small inputs}
+
+\table{
+\tr{\th{Input set}\th{Files}\th{Units the machine declines}\th{Class}\th{What the reference engine answers}}
+\tr{\td{arena, 262 small tests}\td{262}\td{2 in 2 files}\td{the machine's bound of 2^27 ticks per unit: \code{\verb~|corner-cases/eta-struct-major-no-whnf~}, \code{\verb~|corner-cases/eta-struct-major-and-no-whnf~}}\td{declines too: the reduction returns to a term it started from, the official kernel does not terminate. Both tests are of the class \code{either}.}}
+\tr{\td{hostile suite}\td{1,274}\td{4 in 4 files}\td{3 of E1-F6: \code{\verb~|e1-sys-let-krule-major-applied-bad~}, \code{\verb~|e1-sys-let-krule-major-applied-ok~}, \code{\verb~|e1-sib-krule-major-proj-applied-let-bad~}. 1 of eager reduction, "eager reduction lifts a hasFVar guard (Nat folding) INSIDE the comparison of the K rule": \code{\verb~|e1-krule-benign-eager-alone-ok~}}\td{the official verdict in all four: reject, accept, reject; accept}}
+\tr{\td{mutants, bugs}\td{2,692}\td{2 in 2 files}\td{memory, \code{BUDGET_MEMORY}: the \code{\verb~|change_literal~} mutants \code{s1.0000} of \code{\verb~|bugs/proj-of-subst-prop~} and of \code{\verb~|bugs/rec-of-subst-prop~}. The machine alone also declines them with the executable's own heap of 13 GB, after a minute and 7.8 GB resident.}\td{rejects both, as the official checker does}}
+\tr{\td{mutants, prelude}\td{847}\td{13 in 7 files}\td{\code{INTERNAL_ERROR}: units that lie above the deciding unit of a file whose earlier declaration was rejected for a loose bound variable; with 8 workers they are started before the rejection is recorded}\td{no verdict depends on them}}
+\tr{\td{mutants, tutorial and metadata}\td{14,236}\td{0}\td{}\td{}}
+}
+
+\p{The four declines of the hostile suite that every configuration has are not the machine's: one by admission (a string literal without its prerequisites) and three by the loader (a metadata node around \code{eagerReduce}, and inside an inductive record twice). The 1,683 declined mutants of the new default are likewise declines of the loader and of admission, the ones the reference pipeline has.}
+}
+
+\subtree{
+\title{2.3 The classes, and what the machine would have to do}
+
+\table{
+\tr{\th{Class}\th{Units on real input}\th{Files}\th{What the machine would have to do to decide it officially}}
+\tr{\td{E1-F6: the K rule after the application of a let variable whose declared type is not the type of its value}\td{86 of the corpora, 75 declarations}\td{6 corpora; 3 hostile rows}\td{Type the major premise of the K rule as the official kernel does, from the unreduced term: the machine's value of such an application has the let variable reduced away, so the type of the value can be a stand-in that is only convertible with the official one, see [class 1](design-official-divergence-standin). The value has to keep the let variable, or its declared type, to where the K rule asks. A second package works on this.}}
+\tr{\td{A probe of the plain phase of eager reduction cut at its budget}\td{9 of the corpora, 5 declarations}\td{3 corpora}\td{Decide the probe: learn whether the plain and the eager mode agree at that point without evaluating what the official plain procedure never starts. The root cause of the large probe of con-leche is open, see [what the release leaves open](prob-HC9J). A third package works on this.}}
+\tr{\td{Eager reduction inside the comparison of the K rule lifting a guard}\td{0}\td{1 hostile row}\td{The same question for the K rule: the result of a reduction would depend on the mode. Of the 20 rows with the note \code{eager-hard}, which the switch \code{eager} alone declines by design, the default set declines only this one; it accepts 10 official accepts by itself and 9 official rejections through the shortcut \code{congruence} (section 5.3).}}
+\tr{\td{Memory}\td{0}\td{2 mutants}\td{Reject before the evaluation that needs more than the memory limit: the reference engine rejects both files within the limit, so the machine does work here that the reference engine does not. Not analysed further.}}
+\tr{\td{The tick bound per unit}\td{0}\td{2 arena tests of the class \code{either}}\td{Nothing: the official kernel does not terminate, and a decline is the answer of both engines.}}
+}
+}
+
+\subtree{
+\title{2.4 The fourth use: the environment pass}
+
+\p{Inductive blocks and the quotient package are not checked by the machine in any configuration. [Admission](design-inductive-admission) regenerates and compares them with judgments of the reference engine, on the environment thread, and the driver records its outcome without confirmation because "the environment pass is the reference kernel". The column "Environment pass" of section 2.1 is that work: 17,409 units of the eight corpora, 1.1 \% of all units, 7,133 of Mathlib. Neither \code{\verb~|-X no-fallback~} nor anything in the patch changes it; "the machine alone" in this report means alone for definitions, theorems, axioms and opaques. A machine that is the whole checker needs admission to ask its judgments of the machine; admission asks them through one interface, which is where that would be done. How much the answers of the two engines can differ there was not examined.}
+}
+}
+
+\subtree{
+\title{3. The rejections of the machine, and what the re-check does with them}
+
+\p{Old default. "Rejected by the machine" counts units whose warm attempt ends in a rejection; the strict machine and the reference engine then run on each.}
+
+\table{
+\tr{\th{Input set}\th{Files}\th{Units rejected by the machine}\th{in files}\th{Accepted by the strict machine (WARM-ANOMALY)}\th{Accepted by the reference engine (MACHINE-INCOMPLETE)}\th{Not confirmed: the reference engine declines}\th{Files whose verdict differs without the re-check}}
+\tr{\td{eight corpora}\td{8}\td{0}\td{0}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{arena, small tests}\td{262}\td{54}\td{54}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{mutants, tutorial}\td{12,260}\td{1,185}\td{1,185}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{mutants, bugs}\td{2,692}\td{425}\td{421}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{mutants, metadata}\td{1,976}\td{158}\td{158}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{mutants, prelude}\td{847}\td{138}\td{111}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{hostile suite}\td{1,274}\td{737}\td{737}\td{12}\td{4}\td{0}\td{16}}
+\tr{\td{\strong{sum}}\td{19,319}\td{2,697}\td{2,666}\td{12}\td{4}\td{0}\td{16}}
+}
+
+\p{Every other rejection was confirmed by the reference engine or abandoned because the unit lay above an earlier failure of its file (a run with several workers rejects more than one unit of some mutants). On the corpora, the arena tests and the mutants the re-check ran on 1,960 rejections of the machine and changed none. The 16 hostile rows, with the official verdict:}
+
+\table{
+\tr{\th{Row}\th{Official}\th{Old default}\th{New default}\th{Who accepts in the re-check}\th{The switch that makes the machine reject}}
+\tr{\td{\code{\verb~|s3-wc-proj-two-decls-ok~}, \code{\verb~|s3-wc-warm-samehead-two-decls-ok~}, \code{\verb~|r2-ptr-alone-ok~}, \code{\verb~|r2-ptr-other-record-order-ok~}, \code{\verb~|r2-ptr-same-record-ok~}, \code{\verb~|r2-ptr-same-record-def-ok~}, \code{\verb~|oh-kept-false-reused-ok~}, \code{\verb~|oh-kept-false-then-true-ok~}}\td{accept}\td{accept}\td{\strong{reject, wrong}}\td{the strict machine}\td{\code{warm}: without it, or with the session forgotten before each declaration, the machine accepts}}
+\tr{\td{\code{\verb~|s3-wc-canon-fvar-full-first-ok~}, \code{\verb~|r2-id-binder-name-ok~}, \code{\verb~|r2-id-binder-name-def-ok~}, \code{\verb~|r2-id-binder-info-ok~}}\td{accept}\td{accept}\td{\strong{reject, wrong}}\td{the reference engine only}\td{none: the machine rejects with no switch too}}
+\tr{\td{\code{\verb~|r2-ptr-other-record-bad~}, \code{\verb~|r2-ptr-other-record-def-bad~}}\td{reject}\td{accept, tolerated}\td{reject, official}\td{the strict machine}\td{\code{warm}}}
+\tr{\td{\code{\verb~|s3-wc-inner-caseson-bad~}, \code{\verb~|s3-wc-inner-matcher-bad~}}\td{reject}\td{accept, tolerated}\td{reject, official}\td{the strict machine}\td{\code{casetrees}}}
+}
+
+\p{So the re-check repairs 12 wrong rejects and makes 4 tolerated accepts. A re-check by the strict machine alone, without the reference engine, would repair 8 of the 12; it was not built, because the instruction as read for this work is a rejection that is final. The 13th row with the note \code{recheck} in the manifest, \code{\verb~|s3-k2-krule-subst-hot-ok~}, is rejected only with the switch \code{k2}, which is in no default set.}
+}
+
+\subtree{
+\title{4. The safety net}
+
+\table{
+\tr{\th{Input set}\th{Files on which the net fires}\th{What it changes}}
+\tr{\td{eight corpora, 270 arena tests}\td{0}\td{nothing: no file has a metadata record}}
+\tr{\td{hostile suite}\td{0}\td{nothing. 10 rows carry a metadata record and no practical run rejects one of them: 7 are accepted (6 that the official checker accepts and one tolerated accept) and 3 are declined by the loader. The four accepted files of finding R2-F4 (\code{\verb~|r2-mdata-beta-hidden-ok~}, \code{\verb~|-hidden-def-ok~}, \code{\verb~|-arg-hidden-ok~}, \code{\verb~|-bvar-hidden-ok~}) are accepted by the machine in all three configurations; the net was needed for them while the reference engine was the default engine, which rejects them under the practical policy.}}
+\tr{\td{mutants, tutorial}\td{71}\td{67 correct rejections become declines; 4 stay rejections}}
+\tr{\td{mutants, bugs}\td{56}\td{37 become declines; 19 stay}}
+\tr{\td{mutants, metadata}\td{358}\td{247 become declines; 111 stay}}
+\tr{\td{mutants, prelude}\td{0}\td{}}
+\tr{\td{\strong{sum}}\td{485}\td{351 correct rejections reported as declines; no accept, no wrong verdict in either direction}}
+}
+
+\p{These are the 351 of [the decision that introduced the net](dec-7UAL). Without the net every one of the 485 files is rejected, which is the official verdict of each. All 351 are mutants of the kind that wraps one expression in a metadata record (\code{\verb~|wrap_mdata~}) and whose source test the official checker rejects: 67 in the tutorial corpus, 37 in the bugs corpus, 247 in the metadata corpus, from 104 source tests. The patch comes with the list of every mutant whose verdict moves, by name.}
+}
+
+\subtree{
+\title{5. The machine alone against the official verdicts}
+
+\subtree{
+\title{5.1 Every input set under the three configurations}
+
+\p{"Agree" is the official verdict. "Tolerated" is an accept of a row or test whose statement is derivable and which the official checker rejects, the kind T of [the exactness contract](design-exactness-contract-kinds). No file of any set is an accept of a statement that is not derivable, kind F, in any configuration: turning the re-check, the net or the fallback off can only turn an accept into a rejection or a decline, and the files show nothing else.}
+
+\table{
+\tr{\th{Input set}\th{Configuration}\th{Agree}\th{Tolerated accept}\th{Wrong reject}\th{Declined}\th{Wrong accept}}
+\tr{\td{eight corpora}\td{old default}\td{8}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{}\td{new default}\td{8}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{}\td{machine alone}\td{2}\td{0}\td{0}\td{6}\td{0}}
+\tr{\td{arena, 262 small tests: 140 good, 92 bad, 30 \code{either}}\td{all three}\td{258: 140 accepted, 92 rejected, and 26 of the \code{either} tests}\td{2 of the \code{either} tests}\td{0}\td{2 of the \code{either} tests, on which the official kernel does not terminate}\td{0}}
+\tr{\td{mutants, 17,775}\td{old default}\td{15,741}\td{0}\td{0}\td{2,034}\td{0}}
+\tr{\td{}\td{new default}\td{16,092}\td{0}\td{0}\td{1,683}\td{0}}
+\tr{\td{}\td{machine alone}\td{16,090}\td{0}\td{0}\td{1,685}\td{0}}
+\tr{\td{hostile suite, 1,274}\td{old default}\td{1,192}\td{78}\td{0}\td{4}\td{0}}
+\tr{\td{}\td{new default}\td{1,184}\td{74}\td{\strong{12}}\td{4}\td{0}}
+\tr{\td{}\td{machine alone}\td{1,180}\td{74}\td{\strong{12}}\td{8}\td{0}}
+}
+
+\p{The two tolerated accepts of the arena are \code{\verb~|corner-cases/alg-conv-trans-quot-left~} and \code{\verb~|corner-cases/eta-struct-major-and~}: the default set accepts them, the machine without the two shortcuts, the machine without any switch and the reference engine reject them as the official checker does. The arena allows either verdict there. By corpus the mutants of the new default are 11,847 and 413 (tutorial), 2,627 and 65 (bugs), 779 and 1,197 (metadata), 839 and 8 (prelude).}
+}
+
+\subtree{
+\title{5.2 The twelve known wrong rejects}
+
+\p{All twelve are official accepts that the machine's primary lane rejects; all twelve carried the note \code{recheck} in the manifest of the hostile suite, which said that the pipeline repairs them. Two causes.}
+
+\table{
+\tr{\th{Cause}\th{Rows}\th{What makes the machine reject}\th{Who accepts}}
+\tr{\td{A memo that survives a declaration (the switch \code{warm}; [class 3](design-official-divergence-memo), finding S3-F3)}\td{8: \code{\verb~|s3-wc-proj-two-decls-ok~}, \code{\verb~|s3-wc-warm-samehead-two-decls-ok~}, \code{\verb~|r2-ptr-alone-ok~}, \code{\verb~|r2-ptr-other-record-order-ok~}, \code{\verb~|r2-ptr-same-record-ok~}, \code{\verb~|r2-ptr-same-record-def-ok~}, \code{\verb~|oh-kept-false-reused-ok~}, \code{\verb~|oh-kept-false-then-true-ok~}}\td{An earlier declaration of the file left the full reduction of a projection, or a negative comparison result, in the session; a later declaration asks the cheap question and gets the full answer. Officially every cache lives for one declaration.}\td{The machine itself in a fresh session: with \code{\verb~|default,-warm~}, with the session forgotten before every declaration, and as the strict machine of the re-check.}}
+\tr{\td{Tables keyed by values, with canonical variables ([class 2](design-official-divergence-pairs), finding S3-F1)}\td{4: \code{\verb~|s3-wc-canon-fvar-full-first-ok~}, \code{\verb~|r2-id-binder-name-ok~}, \code{\verb~|r2-id-binder-name-def-ok~}, \code{\verb~|r2-id-binder-info-ok~}}\td{Inside one declaration. Officially the second lambda has a new variable and an empty cache for its terms, or the accept is an answer of the cache of successful pairs for two terms that differ in a binder name or a binder info only; the machine's memo of the full reduction is keyed by the value under one canonical variable.}\td{The reference engine only; the machine rejects with every switch set, the one without switches included.}}
+}
+
+\p{What aligning would take is written down in [the review of the default set](rep-soundness-default-set), section 5, cheapest first: a two-answer rule that decides a comparison for the stuck projection and for its full reduction and declines when the verdicts differ; no use of a comparison result, a checked type or a full reduction across declarations; or the official caches themselves, keyed by terms, per declaration, with a fresh variable per binder instance. The second closes the 8 rows of the first cause and is what the next section prices; only the third closes the 4 of the second cause without a decline, and its cost was never measured.}
+}
+
+\subtree{
+\title{5.3 The tolerated accepts, by what produces them}
+
+\p{The 74 tolerated accepts of the new default, each attributed by removing switches until the machine alone no longer accepts the row. The last column is what the journal has measured for the mechanism; none of it was measured again here. The times of the shortcuts and of \code{eager} are those of [the decision on the default set](dec-YP0N): warm wall clock of a pass that reloads the file, 8 workers, JVM launcher, aarch64 development host, the sets interleaved in quiet windows on 2026-11-24, before the two waves of 2026-11-25; "geometric mean" is over the eight corpora.}
+
+\table{
+\tr{\th{Mechanism}\th{Rows}\th{Which}\th{Aligning means}\th{What the mechanism is worth, as measured}}
+\tr{\td{The shortcut \code{congruence}, outside eager reduction}\td{16}\td{the nine \code{probe-b1} and \code{probe-b12} rows, \code{\verb~|open-flag-closed-bad~}, \code{\verb~|s3-k2-krule-subst-bad~} and \code{\verb~|-hot-bad~}, \code{\verb~|s3-same-closure-proof-slot-bad~}, \code{\verb~|s2-acc-rec-intro-vs-axiom~}, the two \code{c1-fuse} rows}\td{The official argument comparison instead of the same-head probe, closure congruence and proofs by type, see [the shortcuts](design-proof-comparison-shortcuts).}\td{With \code{skipargs} already on: the geometric mean of the eight warm passes is 1.720 s with it and 1.801 s without, 4.7 \% longer; navier-stokes-euler 3.22 against 4.04 s, Mathlib 12.72 against 13.39 s.}}
+\tr{\td{\code{congruence} under eager reduction}\td{22}\td{the family of the eager rows: 13 that the machine rejects without the shortcut, 9 that it declines without it (the rows with the note \code{eager-hard})}\td{The same, inside a declaration that enters eager reduction. Without the switch \code{eager} the machine declines all 22 and the reference engine gives the official rejection.}\td{As the row above. \code{eager} itself: 1.980 s against 2.065 s for the set of the wave-6 integration, Mathlib 18.02 against 20.49 s.}}
+\tr{\td{The shortcut \code{skipargs}}\td{4}\td{the three \code{\verb~|e1-lam-fvar-type-in-conv~} rows, \code{\verb~|e1-sib-proj-let-pi-bad~}}\td{Compare proof positions and the positions a definition does not read.}\td{With \code{congruence} already on: 1.720 s with it, 1.758 s without, 2.2 \% longer; navier-stokes-euler 3.22 against 3.79 s.}}
+\tr{\td{Either shortcut}\td{3}\td{the three accepted \code{facts} rows}\td{Both off.}\td{Both shortcuts together: 1.720 s against 1.980 s, the set without them is 15.1 \% longer; Mathlib 12.72 against 18.02 s, navier-stokes-euler 3.22 against 6.08 s, cslib 4.56 against 5.27 s.}}
+\tr{\td{A memo that survives a declaration: \code{warm}}\td{11}\td{\code{\verb~|s3-wc-warm-pair-reused-bad~}, \code{\verb~|s3-wc-warm-term-reused-bad~} and \code{\verb~|-reset-bad~}, the four \code{oh-kept-true} rows, the four \code{oh-shape} rows}\td{No comparison result, checked type or full reduction kept across declarations. This is the same change that closes 8 of the wrong rejects of section 5.2.}\td{One worker, native image, the switches \code{\verb~|warm,gated,expect~}, median CPU time of three rounds, warm sessions at the better of the caps of 2 and 4 MiB against no warm session: Init 7.71 against 8.13 s, Std 13.80 against 13.72 s, the Cedar slice 3.32 against 3.40 s, see [the session cap](dec-KXE1). Not measured with the present default set, and not for a session that keeps only values.}}
+\tr{\td{\code{pchk} or \code{warm}: the shared check facts}\td{4}\td{the four \code{s3-pchk} rows}\td{Neither; each alone still accepts the rows.}\td{\code{pchk}: 1.5 to 1.8 \% fewer instructions on Init and Std alone, 3.7 and 4.3 \% with \code{match} and \code{joint}, see [the switch reference](design-switches-document). Instructions, not time.}}
+\tr{\td{The tabling gate \code{gated}}\td{1}\td{\code{\verb~|e1-sib-krule-major-redex-bad~}}\td{The raw major premise of the K rule typed as a term, finding E1-F7.}\td{No time of its own in the journal: without it every node is tabled, and a nest of 4,000 unshared levels costs 8,038,031 ticks instead of 60,017.}}
+\tr{\td{No switch: the machine on values}\td{9}\td{\code{\verb~|e1-sib-proj-applied-let-pi-bad~}, \code{\verb~|e1-sib-proj-redex-pi-bad~} (stand-in types, [class 1](design-official-divergence-standin)); \code{\verb~|s3-wc-canon-fvar-bad~}, \code{\verb~|s3-wc-pos-beta-bad~}, \code{\verb~|s3-wc-inner-rec-minor-bad~} (the pair table, class 2); \code{\verb~|r2-id-beta-control-bad~}, \code{\verb~|r2-id-literal-vs-offset-bad~}, \code{\verb~|r2-mdata-beta-plainform-bad~}, \code{\verb~|r2-mdata-beta-arg-plainform-bad~}}\td{The official type of an unreduced term, and the official caches keyed by terms.}\td{Not a switch, so nothing to turn off; the cost of an exact treatment was never measured.}}
+\tr{\td{No switch: both engines}\td{4}\td{\code{\verb~|s3-wc-pos-mdata-bad~} (a dropped metadata node), \code{\verb~|r2-id-let-nondep-bad~} and \code{\verb~|-def-bad~} (the flag of a let), \code{\verb~|r2-adm-param-success-bad~} (the caches of admission)}\td{The loader and admission, not the machine: the reference engine accepts them under the practical policy too, see [class 5](design-official-divergence-reference).}\td{Nothing in time.}}
+}
+
+\ul{
+\li{\strong{The four that only the re-check made.} \code{\verb~|s3-wc-inner-caseson-bad~} and \code{\verb~|s3-wc-inner-matcher-bad~} are rejected by the default set (through \code{casetrees}) and accepted by the machine without switches; \code{\verb~|r2-ptr-other-record-bad~} and \code{\verb~|-def-bad~} are rejected by a warm session and accepted by a fresh one. The old default accepted the four because the strict machine of the re-check accepted them. They are the reason why the suite has 78 tolerated accepts today and 74 without the re-check.}
+\li{\strong{Outside the suite.} The two \code{either} tests of the arena of section 5.1 need the two shortcuts. The one hostile file with a repeated theorem, see [the accept of a repeat](design-verdict-protocol-repeats), is accepted through the repeat skip, which is worth 1.4 \% of the geometric mean in the executable (1.855 to 1.829 s) and 0.7 \% on the JVM launcher.}
+\li{\strong{Read as a work list.} 45 of the 74 rows, and both arena tests, are the two proof-comparison shortcuts, which are also by far the largest single gain of the default set; 15 rows and 8 of the 12 wrong rejects are the memos of a warm session, which gain little where they were measured; 13 rows and 4 wrong rejects need the official caches and types, for which no design exists.}
+}
+}
+
+\subtree{
+\title{5.4 The schedule}
+
+\p{[The driver](design-driver-invariants) states that the verdict does not depend on the worker count, the session cap or the load mode. Its invariance suite, \src{rlvm-driver/bin/invariance.sh}, runs every file under nine schedules: batch with 1, 2, 4 and 8 forced workers, a session cap of one byte with 1 and 4 workers, and pipelined loading with a publication after every 1, 7 and 64 units. Run here with the machine as primary engine, in the patched private tree:}
+
+\table{
+\tr{\th{Input}\th{Protocol}\th{Files}\th{Files with a schedule difference}\th{Which}}
+\tr{\td{hostile suite}\td{re-check on, the old default}\td{1,274}\td{12}\td{the 11 tolerated accepts that need \code{warm}: accepted with the history of a session, rejected when every declaration has a fresh one. And \code{\verb~|oh-kept-false-then-false-bad~}, rejected in eight schedules and accepted with 4 workers and a publication every 7 units.}}
+\tr{\td{hostile suite}\td{re-check off, the new default}\td{1,274}\td{21}\td{the same 11; the 8 wrong rejects of the first cause of section 5.2 and the two \code{\verb~|r2-ptr-other-record~} rows, all rejected with the history and accepted without. \code{\verb~|r2-ptr-same-record-def-ok~} is also accepted with 8 workers, where its two declarations go to two sessions.}}
+\tr{\td{the 231 published tests of the suite's list}\td{re-check off}\td{231}\td{0}\td{}}
+\tr{\td{mutants, tutorial}\td{re-check off}\td{12,260}\td{0}\td{}}
+\tr{\td{mutants, bugs and metadata}\td{re-check off}\td{4,668}\td{0}\td{}}
+}
+
+\p{So the invariant never held for the machine on hostile input: an accept that rests on a warm memo already depends on the schedule today. Without the re-check the same is true of the rejections that rest on one, which nearly doubles the rows, and one of them moves with the worker count alone. On the published tests and the mutants no verdict moves. The re-check hid the second half of this because a fresh strict machine repairs exactly the rejections a history produces. The property that would restore the invariant in both directions is the one priced in section 5.3: no answer of a comparison, a checked type or a full reduction kept from one declaration to the next. Recorded as [an insight](ins-RPOG).}
+}
+}
+
+\subtree{
+\title{6. The classes in order, and what turning each use off costs today}
+
+\table{
+\tr{\th{Class}\th{Real units}\th{Real files}\th{Hand-made files}\th{Direction}\th{What the machine would have to do}}
+\tr{\td{E1-F6, the K rule after an applied let variable}\td{86}\td{6 corpora}\td{3 hostile rows}\td{decline}\td{type the major premise from the unreduced term (section 2.3)}}
+\tr{\td{A cut probe of eager reduction}\td{9}\td{3 corpora}\td{0}\td{decline}\td{decide the probe (section 2.3)}}
+\tr{\td{Inductive blocks and the quotient package}\td{17,409}\td{8 corpora}\td{every file with an inductive type}\td{decided by the reference engine in every configuration}\td{admission asking its judgments of the machine (section 2.4)}}
+\tr{\td{The two proof-comparison shortcuts}\td{0}\td{2 arena tests of the class \code{either}}\td{45 hostile rows}\td{tolerated accept}\td{the official argument comparison; 15 \% of the geometric mean, 42 \% of Mathlib}}
+\tr{\td{A memo that survives a declaration}\td{0}\td{0}\td{15 tolerated accepts, 8 wrong rejects, 2 further rows; 21 rows depend on the schedule}\td{both, and the schedule}\td{keep values only across declarations; at most the gain of warm sessions}}
+\tr{\td{Tables keyed by values, stand-in types}\td{0}\td{0}\td{9 tolerated accepts, 4 wrong rejects, 1 through the tabling gate}\td{both}\td{the official caches and the official type of an unreduced term; no design, no cost}}
+\tr{\td{Memory}\td{0}\td{2 mutants}\td{0}\td{decline}\td{reject before the evaluation (section 2.3)}}
+\tr{\td{Eager reduction inside the K rule}\td{0}\td{0}\td{1 hostile row}\td{decline}\td{as the cut probes}}
+\tr{\td{The loader and admission under the practical policy}\td{0}\td{0}\td{4 tolerated accepts}\td{tolerated accept, both engines}\td{not the machine's}}
+\tr{\td{The tick bound}\td{0}\td{2 arena tests of the class \code{either}}\td{0}\td{decline, as the reference engine}\td{nothing}}
+}
+
+\p{\strong{What each use costs to turn off, today}, counted in verdicts that get worse (the short form is [an insight](ins-7V7X)):}
+
+\table{
+\tr{\th{Input set}\th{(1) the re-check off}\th{(3) the net off}\th{(2) the fallback off as well: the machine alone}}
+\tr{\td{eight corpora}\td{nothing; the re-check never runs}\td{nothing}\td{6 of 8 declined: Std, cedar, con-leche, navier-stokes-euler, cslib, Mathlib; 95 units}}
+\tr{\td{270 arena tests}\td{nothing}\td{nothing}\td{nothing on the 262 small tests; of the 148 good tests the 6 corpora above}}
+\tr{\td{17,775 mutants}\td{nothing}\td{nothing worse: 351 declines become the official rejection}\td{2 official rejections become declines}}
+\tr{\td{1,274 hostile rows}\td{12 wrong rejects; 4 tolerated accepts become the official rejection}\td{nothing}\td{4 more declines: 2 official accepts, 2 official rejections}}
+}
+}
+
+\subtree{
+\title{7. Part B: the switch-off of the re-check and of the safety net, as a patch}
+
+\p{The patch is five files of unified diffs against the main tree of 2026-11-25 (the tree the published build was made from). It is not applied and not published. What it does, by module:}
+
+\table{
+\tr{\th{Patch}\th{What changes}}
+\tr{\td{1, \code{rlvm-driver}}\td{\code{\verb~|RunConfig.recheckRejections~} is \code{false} by default: a rejection of the primary engine, warm or in its own cold retry of a decline, is recorded as it is; no strict run, no reference engine, no event. The driver gets two settings by name, \code{\verb~|verify=none|reference~} for that field and \code{\verb~|fallback=reference|none~} for \code{\verb~|RunConfig.referenceFallback~} (the existing \code{no-fallback} stays), and writes \code{driver.verify} and \code{driver.fallback} into the statistics file. No line of the protocol itself changed: the code path of a final rejection existed, as \code{\verb~|-X no-recheck~}. The suites of the driver ask for the verification by name in one place, their fixture; the enumeration of the protocol table starts from the default; four tests are new (the rejection out of a warm session that is final and depends on the session cap, the primary engine alone, the two settings by name, the invariance of the verdict under the default protocol for engines whose rejections do not depend on the session) and the test of a final rejection now also runs a configuration that says nothing. The invariance script and the driver's bench mirror the launcher.}}
+\tr{\td{2, \code{rlvm-main}}\td{One option, \code{\verb~|-X verify=none|reference~}. \code{none}: the driver's default, and the launcher's safety net is off. \code{reference}: the re-check and the net, as before. Not given: \code{none}, unless the reference engine is the primary engine of the run (\code{\verb~|-X engine=reference~}, \code{\verb~|-X policy=strict~}) or its oracle (\code{\verb~|-X engine=diff~}); those runs verify unasked and are what they were. \code{\verb~|-X no-recheck~} is \code{\verb~|verify=none~}; with \code{\verb~|verify=reference~} it is a usage error, as is \code{no-fallback} beside \code{\verb~|fallback=...~}. The line \code{default:} of \code{\verb~|rlvm --version~}, the help text and the statistics line say what is on.}}
+\tr{\td{3, \code{scripts}}\td{\src{scripts/gate-hostile.py} knows the mark \code{wrong-reject} and a ceiling; \src{scripts/gate.sh} carries the ceiling as a constant, passes it, prints every known wrong reject by name on every run, and says in its header which configuration a gate means.}}
+\tr{\td{4, the gate of the machine}\td{One line of the test harness of \code{rlvm-machine} (\code{M8Pipeline.machine}): the pipeline step of the machine's gate and the mutant campaign of the machine run with \code{\verb~|-X verify=reference~}, because they read the counters that only the re-check fills and compare the final verdict with the reference pipeline's. No class of the machine itself is touched.}}
+\tr{\td{5, the hostile manifest}\td{The mark \code{wrong-reject} on the twelve rows of section 5.2, beside the note \code{recheck} they have, each with its cause in the text of the row; the header of the manifest explains the mark.}}
+}
+
+\p{\strong{What a run says.} The executable of the patched build prints, for the default engine:}
+
+\pre{\verb~|
+default: engine machine (switches ...), policy practical, verify none (a rejection of the machine is final;
+         -X verify=reference: re-checked by the reference engine), fallback reference (the reference engine
+         decides a declaration the machine declines; -X fallback=none: the machine alone); one worker per CPU, ...
+rlvm: stats: outcome=accept engine=machine reference=reference policy=practical verify=none fallback=reference workers=8(auto) ...
+~}
+
+\table{
+\tr{\th{Command}\th{Rejection of the machine}\th{Unit the machine declines}\th{Rejected file with metadata}}
+\tr{\td{\code{\verb~|rlvm FILE~}, also \code{\verb~|-X no-recheck~}, \code{\verb~|-X verify=none~}, \code{\verb~|-X engine=machine~}}\td{final}\td{decided by the reference engine}\td{rejected}}
+\tr{\td{\code{\verb~|rlvm -X verify=reference FILE~} (what a plain run of the published build does)}\td{re-checked: strict machine, then the reference engine}\td{decided by the reference engine}\td{checked again under the strict policy}}
+\tr{\td{\code{\verb~|rlvm -X fallback=none FILE~}, also \code{\verb~|-X no-fallback~}: the machine alone}\td{final}\td{declined}\td{rejected}}
+\tr{\td{\code{\verb~|rlvm -X verify=reference -X fallback=none FILE~}: the gate of an engine under test, as before}\td{confirmed, or declined as a disagreement}\td{declined}\td{checked again under the strict policy}}
+\tr{\td{\code{\verb~|rlvm -X engine=reference FILE~}, \code{\verb~|-X policy=strict~}, \code{\verb~|-X engine=diff~}}\td{unchanged}\td{unchanged}\td{unchanged}}
+}
+
+\p{\strong{What is still the reference engine's in a plain run}, after the patch: the units the machine declines (section 2), and the environment pass (section 2.4).}
+
+\subtree{
+\title{7.1 Decisions inside the patch that are not in the instruction}
+
+\ul{
+\li{\strong{The runs of the reference engine keep the verification.} "The strict policy and \code{\verb~|-X engine=reference~} and \code{\verb~|-X engine=diff~} are untouched" was a condition of the work. A rejection of the reference engine as primary engine is confirmed by one fresh cold run of itself, which is that engine's own protocol and not a second engine's opinion; under the practical policy such a run also keeps the net, for which it was built. So the default of \code{verify} is by engine: \code{none} for the machine and any engine that is not the reference engine, \code{reference} where the reference engine is the primary engine or the oracle. The mutant gate of the reference engine therefore keeps its counts, 15,741 and 2,034. If the maintainer wants the net off there too, it is one condition in \code{\verb~|MainOptions.resolveVerify~}.}
+\li{\strong{\code{no-recheck} now means no net either.} In the published build \code{\verb~|-X no-recheck~} turns the driver's re-check off and leaves the launcher's net on. As the synonym of the new default it turns both off. A script that passes it gets a rejection instead of the net's verdict on a rejected file with metadata, and nothing else changes for it.}
+\li{\strong{The driver's default changes with the launcher's}, so that a tool that drives the driver in process gets the production protocol unless it asks. The driver's own suites, the invariance script and the driver's bench ask.}
+\li{\strong{"The machine alone" is not a new mechanism.} The driver had \code{no-fallback} for the gate of an engine under test; with a rejection that is final it means the primary engine alone. The patch gives it the value form \code{\verb~|fallback=reference|none~} beside \code{\verb~|verify=none|reference~} and makes the statistics say both. The environment pass stays the reference engine's under it.}
+\li{\strong{No re-check by the strict machine alone.} It would repair 8 of the 12 wrong rejects without the reference engine and cost nothing on an accepted file. It was not built: the instruction as read is "a rejection of the primary engine is final; no strict re-run", and a fresh run that changes a verdict is exactly the thing that hides a dependence on the schedule (section 5.4).}
+}
+}
+
+\subtree{
+\title{7.2 What means the old behaviour and how it asks for it}
+
+\table{
+\tr{\th{Tool}\th{What it needs}\th{In the patch}}
+\tr{\td{\src{scripts/gate.sh} with \code{\verb~|--defaults~}}\td{It gates what a user runs, so it gates the new default: the hostile step counts the known wrong rejects under their mark against the ceiling; the mutant step has 351 fewer declines. A gate of the verified configuration is \code{\verb~|scripts/gate.sh --defaults -X verify=reference~}, which gives the counts of before. Without \code{\verb~|--defaults~} the gate runs the reference engine and is unchanged.}\td{yes: the header, the constant, the option \code{\verb~|--known-wrong-rejects~}}}
+\tr{\td{\src{scripts/gate-hostile.py}}\td{The mark \code{wrong-reject}, the ceiling, a line per known wrong reject and per marked row that is no longer rejected.}\td{yes}}
+\tr{\td{The suites of \code{rlvm-driver}: the protocol table, the invariance suite on scripted engines, the runs on the arena tests}\td{The verification by name: the fixture sets it; the suite on the arena tests, where the reference engine is the primary engine, sets it as the launcher does.}\td{yes}}
+\tr{\td{\src{rlvm-driver/bin/invariance.sh} and the driver's bench behind it}\td{\code{\verb~|verify=reference~} on every run unless the caller names the protocol; the bench keeps the verification for the reference engine as primary engine, as the launcher does.}\td{yes}}
+\tr{\td{The gate of the machine, package M8: the pipeline step and the mutant campaign (\code{M8Pipeline.machine})}\td{\code{\verb~|-X verify=reference~}: both read \code{driver.machineIncomplete} and \code{driver.warmAnomalies}, which only the re-check fills, and the campaign compares the final verdict with the reference pipeline's, which has the net.}\td{yes, one line; it must be applied together with the patch of \code{rlvm-main}, which knows the option}}
+\tr{\td{The differential tools: \code{\verb~|-X engine=diff~} of the test kit, the driver's differential mode, \code{\verb~|testkit diff~}, the self-test of the gate}\td{Nothing: a comparison of engines verifies by the rule of section 7.1.}\td{no change}}
+\tr{\td{\code{\verb~|testkit judge~}, \src{scripts/check-light.sh}, \src{scripts/slice.sh}}\td{Nothing: they run what the gate tells them.}\td{no change}}
+\tr{\td{The benchmark tools: \src{bench/warm.py}, the tables of [the benchmarks](rep-benchmarks), the arena run line}\td{Nothing, and the rows stay comparable across the switch-off: on a file that is accepted the re-check never ran, and the machine rejects no unit of the eight corpora.}\td{no change}}
+\tr{\td{The in-process hostile suite of the machine (\code{SHostile})}\td{Nothing to run differently: it judges the machine's own answers. Its word "repaired by the re-check" for the rows with the note \code{recheck} now describes \code{\verb~|-X verify=reference~}; the rows are known wrong rejects of a plain run.}\td{only the manifest}}
+}
+}
+}
+
+\subtree{
+\title{8. The gates of the patch}
+
+\p{The patched build is a development distribution, executable and JVM launcher, built whole from a private copy of the main tree with the five diffs applied (jars sha256 \code{3babbe8de8f3}). Its jars of \code{rlvm-machine}, \code{rlvm-ref}, \code{rlvm-load}, \code{rlvm-store}, \code{rlvm-export}, \code{rlvm-level}, \code{rlvm-nat}, \code{rlvm-admit}, \code{rlvm-api} and \code{rlvm-cli} are byte for byte the published ones; \code{rlvm-driver} and \code{rlvm-main} differ by the patch; \code{rlvm-inductive} differs in its embedded build file only; \code{rlvm-truffle} has the classes of the main tree where the published jar is older, a difference that exists without the patch and concerns a tier that is off by default.}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{Suites, in the private copy}\td{\code{rlvm-driver} 120 tests, 3 skipped, 0 failures (116 before; the 4 new ones are of section 7). \code{rlvm-main} 69 tests, 3 skipped, 0 failures (5 new). \code{rlvm-machine}: fast group 424, default group 455, and the slow hostile matrix, 56 switch sets by 1,274 rows, with the marked manifest: 0 failures.}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~} of the patched tree on the patched build: the new default}\td{230 of 230 published tests correct, none declined. 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683 (tutorial 11,847 and 413, bugs 2,627 and 65, prelude 839 and 8, metadata 779 and 1,197). The differential self-test caught. Hostile suite: agree 1,184, tolerated 74, known wrong rejects 12 of 12 marked and at most 12 allowed, wrong accept 0, wrong reject 0, declined 4. PASS.}}
+\tr{\td{The same with \code{\verb~|-X verify=reference~}: the old default by name}\td{230 of 230. Mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034. Hostile: agree 1,192, tolerated 78, known wrong rejects 0, the 12 marked rows listed as no longer rejected, declined 4. PASS. These are the counts of the published build.}}
+\tr{\td{The new default through the jars on the JVM}\td{The same command without \code{\verb~|--native~}: 230 of 230; mutants SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683, no error and no timeout; the differential self-test caught; hostile agree 1,184, tolerated 74, known wrong rejects 12, wrong accept 0, wrong reject 0, declined 4. PASS.}}
+\tr{\td{The eight corpora, 8 and 4 workers, executable and JVM launcher, no option}\td{32 of 32 runs accept. Each statistics line says \code{\verb~|verify=none fallback=reference~}; the reference engine decides 0, 1, 1, 0, 2, 16, 11 and 64 units in every run, as in the published build. Largest peak resident set 4.9 GB (Mathlib, JVM launcher, 8 workers).}}
+\tr{\td{Every file of the census again, on the patched build, under \code{\verb~|-X verify=reference~}, no option, and \code{\verb~|-X fallback=none~}}\td{19,319 files by 3 configurations: 0 verdicts differ from what the published build gave under its default, under \code{\verb~|-X no-recheck~} and under \code{\verb~|-X no-recheck -X no-fallback~} with the net discounted. In the 14,238 verified runs with one worker every counter of the machine, of the reference engine and of the driver that was compared is identical; runs with more workers differ in who checks a repeat, as two runs of one build do.}}
+\tr{\td{The runs of the reference engine, patched build against published build, file by file: the hostile suite, the metadata mutants and the 262 small arena tests, 3,512 files}\td{\code{\verb~|-X engine=reference~}: 0 verdicts differ; the net fires on the same files in both builds, the 4 files of finding R2-F4 and 358 mutants. \code{\verb~|-X policy=strict~}: 0 verdicts differ. \code{\verb~|-X engine=reference -X no-recheck~}: 251 verdicts differ, the 4 files and 247 mutants, from a decline to a rejection. That is the one change of meaning of an existing option: \code{no-recheck} used to leave the net on and now is \code{\verb~|verify=none~}, which has none.}}
+\tr{\td{The pipeline step of the machine's gate in the patched tree, default switch set (the one-line change of the fourth diff)}\td{The 175 tutorial and bugs tests: 175 verdicts right, the machine rejects 31 units, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0. On the hostile row \code{\verb~|s3-wc-proj-two-decls-ok~} alone the step gives the right verdict and counts one WARM-ANOMALY, so the verification is in force in that harness. The complete gate of the machine and its mutant campaign were not run.}}
+\tr{\td{The driver's invariance suite on real files, machine as primary engine}\td{section 5.4: with the re-check 12 hostile rows with a schedule difference, without it 21; 0 on the 17,159 files of the published tests and of the mutant corpora tutorial, bugs and metadata.}}
+}
+
+\p{\strong{The exact verdict changes of the default configuration}, patched against published, over all 19,319 files: 12 hostile rows from accept to reject, the wrong rejects of section 5.2; 4 hostile rows from accept to reject, the official verdict, section 5.3; 351 mutants from decline to reject, the official verdict, section 4. Nothing else. The eight corpora, the 148 good and 92 bad tests of the arena and its 30 tests of the class \code{either} are unchanged.}
+
+\p{\strong{How the gate records the known wrong rejects.} A mark in the manifest, \code{wrong-reject}, like the mark of the tolerated kind but for the other direction, with the cause in the text of the row. \src{scripts/gate-hostile.py} judges a rejection of an official accept on a marked row as "known wrong reject" and on any other row as a wrong reject, which fails the gate as before. It prints every known wrong reject by name on every run and \src{scripts/gate.sh} repeats the lines, so the count is never only a number. The number may only go down: \src{scripts/gate.sh} carries it as a constant, 12, and passes it as a ceiling, so a new wrong reject is not admitted by a mark alone; a marked row that gets the official verdict is listed as "no longer rejected", and then the mark goes and the constant with it. The summary line reads: \code{\verb~|hostile: 1274 rows: agree 1184, kind-T accepts tolerated 74, KNOWN WRONG REJECT 12 (12 marked, at most 12), WRONG ACCEPT 0, WRONG REJECT 0, declined 4, errors 0~}.}
+}
+
+\subtree{
+\title{9. What the READMEs and the contract notes must say after the switch-off}
+
+\p{Nothing below was edited; the patch touches no README and no tree but this one. The sentences are given as they should read once the patch is applied. The counts are those of section 8.}
+
+\table{
+\tr{\th{Where}\th{Says today}\th{Must say}}
+\tr{\td{\src{README.md}, the two engines}\td{the reference engine "confirms every rejection, decides every declaration the machine declines, and alone it is the strict mode"}\td{the reference engine admits the inductive types and the quotient package, decides every declaration the machine declines, and alone it is the strict mode; with \code{\verb~|-X verify=reference~}, a development option, it re-checks every rejection of the machine.}}
+\tr{\td{\src{README.md}, "A plain run"}\td{"the reference engine re-checks every rejection and decides what the machine declines"}\td{A plain run checks with the machine; a rejection of the machine is the verdict, and the reference engine decides only what the machine declines. \code{\verb~|rlvm --version~} prints the engine, its switch set and what verifies.}}
+\tr{\td{\src{README.md}, exit status 1}\td{"a rejection is reported only after the reference engine has confirmed it"}\td{rejected: by the machine itself; with \code{\verb~|-X verify=reference~} only after the reference engine has confirmed it.}}
+\tr{\td{\src{README.md}, the option table}\td{no row}\td{\code{\verb~|-X verify=reference~}: development; every rejection is re-checked by the reference engine and a rejected file with metadata is checked again under the strict policy (the default before the switch-off). \code{\verb~|-X fallback=none~}: the machine alone; a declaration it declines is declined.}}
+\tr{\td{\src{README.md}, item (c) of the promise}\td{"everything the official checker accepts is accepted (a rejection is confirmed by the reference engine, a decline goes to it)"}\td{everything the official checker accepts is accepted on real input, and a declaration the machine declines goes to the reference engine. On hand-made hostile exports the machine is not aligned with the official checker yet: 12 exports that it accepts are rejected by a plain run; they are listed in the journal, counted by the gate, and \code{\verb~|-X verify=reference~} gives the official accept or a decline.}}
+\tr{\td{\src{README.md}, "What stands behind this today", and the header of \src{scripts/arena/rlvm.yaml}}\td{mutants "agree 15,741, declined 2,034"; hostile "no wrong accept, no wrong reject; agree 1,124, 68 accepts of kind (d), 4 declined" (stale since the suite has 1,274 rows: 1,192, 78, 4)}\td{the counts of section 8: mutants agree 16,092, declined 1,683; hostile 1,274 rows, agree 1,184, 74 accepts of kind (d), 12 known wrong rejects, 4 declined.}}
+\tr{\td{\src{scripts/arena/rlvm.yaml}, header and description}\td{"The reference engine ... re-checks every rejection before it is reported and decides every declaration the machine declines"; "so a rejection is never the machine's word alone"}\td{The reference engine decides every declaration the machine declines and admits the inductive types; a rejection is the machine's own. The second sentence goes, and so does "A rejection of a file in which the loader dropped a metadata node is checked again in the strict mode before it is reported".}}
+\tr{\td{\src{rlvm-main/README.md}, the table of settings}\td{row \code{engine=NAME}: "the reference engine re-checks every rejection and decides what the machine declines"; row "\code{no-recheck}, \code{no-truffle}, \code{no-proof-blocks}: flags, off"; the driver's settings without \code{fallback}}\td{a row \code{\verb~|verify=none|reference~} with the rule of section 7 and its default by engine; \code{no-recheck} = \code{\verb~|verify=none~}; \code{\verb~|fallback=reference|none~} among the driver's settings; the row of \code{engine}: the reference engine decides what the machine declines.}}
+\tr{\td{\src{rlvm-main/README.md}, "Policy", item (c) and "The safety net of the practical policy"}\td{"a rejection is always confirmed by the reference engine"; the net described as unconditional}\td{item (c) as in the root README; the net is part of \code{\verb~|-X verify=reference~} and of the runs whose primary engine is the reference engine; a plain run reports its rejection. The statistics line carries \code{verify=} and \code{fallback=}.}}
+\tr{\td{\src{rlvm-driver/README.md}, "Re-check protocol" and "Verdict"}\td{"\code{\verb~|recheckRejections = false~} makes a REJECT of the primary engine final (measurement only)"; "A rejection is only ever recorded when confirmed"; "Rejections are still confirmed" under \code{no-fallback}}\td{\code{\verb~|recheckRejections = false~} is the default; the table of a warm REJECT is the development protocol (\code{\verb~|verify=reference~}); a rejection is recorded as the primary engine gave it, or after confirmation with the verification; \code{\verb~|fallback=none~} without the verification is the primary engine alone. The settings \code{verify} and \code{fallback} in the table of settings by name. The invariance suite asks for the verification by name.}}
+\tr{\td{\src{rlvm-machine/README.md}}\td{"the reference engine re-checks every rejection and decides what the machine declines" (three places); "a kernel error is REJECT (confirmed by the driver with the reference kernel)"}\td{a kernel error is REJECT, and the driver reports it; with \code{\verb~|-X verify=reference~} the driver confirms it first. The gate of the machine runs with that option.}}
+\tr{\td{[the verdict protocol](design-verdict-protocol)}\td{status 1 is "a rejection confirmed by the reference engine"; "A rejection is only ever recorded when it is confirmed"; the re-check table as the protocol of every run; "it is what gives item (c)"}\td{status 1 is a rejection of the primary engine, of the environment pass or of a structural check. The re-check table is the protocol of \code{\verb~|-X verify=reference~} and of the runs of the reference engine; the rows of a warm decline and of an exception are the decline fallback, which stays in every run until the machine decides those units. New: without the re-check a rejection that comes out of a warm session depends on what the session checked before; on such input the verdict depends on the schedule (section 5.4).}}
+\tr{\td{[the driver](design-driver), invariants}\td{"The verdict and the deciding unit do not depend on the worker count, the chunk and slice sizes, the session cap ..."}\td{that holds with the verification, and without it for every input on which no rejection of the primary engine depends on its session; the hostile rows of section 5.4 are the known exceptions.}}
+\tr{\td{[the exactness contract](design-exactness-contract), item (c), the row "Loader" of the policy table, "the strict engine of the facade"}\td{"A rejection of the primary engine is always confirmed by the reference engine"; "A rejection of a file in which a node was dropped is not reported"; "the driver creates a second machine engine for the cold re-check of a rejection"}\td{item (c) holds on real input by the gates; on hostile input it has the 12 known exceptions of the default configuration, to be closed by aligning the machine, not by the reference engine. The strict re-run and the strict machine engine exist with \code{\verb~|-X verify=reference~}.}}
+\tr{\td{[the reference engine](design-reference-engine)}\td{its role as the engine that confirms rejections}\td{three roles in a plain run: the environment pass, the decline fallback, nothing else; the re-check is a development option.}}
+\tr{\td{[the machine as default engine](dec-T79V)}\td{"As primary engine the machine has every rejection re-checked and every decline decided by the reference engine"; among the conditions of step 4: "the strict re-check still deciding every rejection of the machine"}\td{a note that this condition of the adversarial pass no longer holds for a plain run since the switch-off, by the maintainer's instruction, and that the pass was made with it.}}
+\tr{\td{[the metadata class](dec-7UAL)}\td{status implemented; "The default configuration has no known rejection of an official accept"}\td{the strict re-run is off by default since the switch-off; the four files of the finding are rejected by a plain run; the 351 correct rejections are rejections again.}}
+\tr{\td{[the gate](design-gate) and [the divergence classes](design-official-divergence)}\td{"no wrong accept and no wrong reject"; "which the pipeline's re-check repairs"; "It is closed" for the metadata class}\td{the hostile step has a third count, the known wrong rejects, with a ceiling that may only go down; the wrong rejects of classes 2, 3 and 5 are repaired only with \code{\verb~|-X verify=reference~}.}}
+\tr{\td{[standing policies](standing-policies-exactness)}\td{"a rejection is always confirmed by the reference engine, and a decline goes to it"; "Never a rejection of what the official checker accepts ... also on a hand-made file"}\td{the maintainer's instruction of 2026-11-25, verbatim, with its consequence: the second sentence is the goal for the machine itself and has 12 known exceptions on hand-made files until it is reached.}}
+}
+}
+
+\subtree{
+\title{10. Not established}
+
+\ul{
+\li{\strong{x86-64.} Everything ran on the aarch64 development host. No timing was taken: the patch changes what happens after a rejection, which no corpus has, and the machine's jar is the published one byte for byte.}
+\li{\strong{Whether the list of twelve is complete.} It is complete for the 1,274 rows of the suite. The two causes are classes, and other hand-made files of the same classes will be rejected too; the suite was not extended.}
+\li{\strong{The environment pass with the machine.} Section 2.4 counts the units; nothing was built or compared.}
+\li{\strong{The cost of aligning}, section 5.3, is the journal's measurements of what each mechanism gains, taken with earlier switch sets and builds. No aligned variant was built or timed. For warm sessions that keep values only, for the official caches and for the official type of an unreduced term there is no number at all.}
+\li{\strong{The two mutants declined for memory} were not analysed: why the machine needs more than the memory limit where the reference engine rejects within it.}
+\li{\strong{The arena's own procedure} (the 270 tests in the arena's container) was not repeated on the patched build; the 262 small tests and the eight corpora were run through the executable outside it.}
+\li{\strong{The invariance suite} was run with the machine as primary engine only, and not on the prelude mutants or the large corpora.}
+\li{\strong{The standing policy.} "Never a rejection of what the official checker accepts, also on a hand-made file" and the maintainer's instruction of 2026-11-25 cannot both hold until the machine is aligned. The report takes the instruction as the later word and records the twelve; the policy tree was not edited.}
+}
+}

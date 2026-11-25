@@ -24,6 +24,13 @@ import rlvm.cli.LauncherAccess;
  * reported - the file is checked again under {@code policy=strict} and that verdict is the run's.
  * Through the real launcher.
  *
+ * <p>The net belongs to the verification ({@code -X verify=reference}). The only engine on this module's
+ * class path is the reference kernel, and a run whose primary engine is the reference kernel verifies
+ * unasked, so the launcher tests below are what they were. A PLAIN run of another engine has no net (the
+ * maintainer's instruction of 2026-11-25): the tests at the end run the same files with a second engine
+ * that is not the reference engine ({@link PassesTest.Counting}: the reference kernel behind another
+ * provider), with and without the option.
+ *
  * <p>Fixtures ({@code src/test/resources/net}: hand-made exports of finding R2-F4, described in
  * *agentic-note*: rep-reference-caches, section 6.1; the verdicts are those of leanchecker
  * v4.36.0):
@@ -212,6 +219,112 @@ class SafetyNetTest {
                 META + def(1, "withNode", true, false, 0, 1) + def(2, "badDef", false, false, 10, 3)));
         assertEquals(1, plain.status, plain.toString());
         assertFalse(plain.err.contains(NOT_REPORTED), plain.toString());
+    }
+
+    // ---- an engine that is not the reference engine: no net unless the run verifies -----------------------------
+
+    private static final class Out {
+        int outcome;
+        String err;
+    }
+
+    /** One run of the checker with the engine "counting" (not the reference engine) as primary engine. */
+    private static Out other(Path file, String... settings) {
+        java.util.List<rlvm.api.EngineProvider> all = new java.util.ArrayList<>(Engines.providers());
+        all.add(new PassesTest.Counting(Engines.reference(all).factory()));
+        Map<String, String> extra = new LinkedHashMap<>();
+        extra.put("engine", "counting");
+        for (String s : settings) {
+            int eq = s.indexOf('=');
+            extra.put(eq < 0 ? s : s.substring(0, eq), eq < 0 ? "true" : s.substring(eq + 1));
+        }
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        Out o = new Out();
+        try (java.io.PrintStream err = new java.io.PrintStream(bytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            o.outcome = new RlvmChecker().run(file, 1, true, 0, extra, err, false, all);
+        }
+        o.err = bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        return o;
+    }
+
+    /** The checker's {@code --stats} line of the run whose verdict is reported: the last one (the passes and the net add theirs before it). */
+    private static String statsLine(Out o) {
+        String found = null;
+        for (String line : o.err.split("\\R")) {
+            if (line.startsWith("rlvm: stats: outcome=")) {
+                found = line;
+            }
+        }
+        assertNotNull(found, o.err);
+        return found;
+    }
+
+    @Test
+    void aPlainRunOfAnotherEngineReportsItsRejectionAndHasNoNet() throws Exception {
+        Path f = fixture("r2-mdata-beta-arg-hidden-ok");
+        for (String[] mode : new String[][] {{}, {"load=pipelined"}, {"verify=none"}, {"no-recheck"}, {"passes=2"}}) {
+            Out o = other(f, mode);
+            String what = String.join(" ", mode) + ": " + o.err;
+            // The official checker accepts this file: a KNOWN WRONG REJECT of a plain run (*agentic-note*: rep-MO-1).
+            assertEquals(rlvm.api.Outcome.REJECT, o.outcome, what);
+            assertFalse(o.err.contains(NOT_REPORTED), what);
+            if (mode.length == 0 || !mode[0].startsWith("passes")) {
+                assertTrue(o.err.contains("rlvm: reject"), "the rejection is explained as it is: " + what);
+            }
+            String stats = statsLine(o);
+            assertTrue(stats.contains("outcome=reject"), stats);
+            assertTrue(stats.contains(" engine=counting "), stats);
+            assertTrue(stats.contains(" policy=practical verify=none fallback=reference "), stats);
+            assertFalse(stats.contains(" net="), stats);
+        }
+        // ... and a correct rejection behind a declaration with a node is a rejection, not a decline
+        Path g = text("node-then-bad-plain", META + def(1, "withNode", true, true, 0, 1) + def(2, "badDef", false, false, 10, 3));
+        Out plain = other(g);
+        assertEquals(rlvm.api.Outcome.REJECT, plain.outcome, plain.err);
+        assertTrue(plain.err.contains("badDef"), plain.err);
+    }
+
+    @Test
+    void theVerificationBringsTheNetBackForAnotherEngine() throws Exception {
+        Path f = fixture("r2-mdata-beta-arg-hidden-ok");
+        for (String[] mode : new String[][] {{"verify=reference"}, {"verify=reference", "load=pipelined"},
+            {"verify=reference", "passes=2"}}) {
+            Out o = other(f, mode);
+            String what = String.join(" ", mode) + ": " + o.err;
+            assertEquals(rlvm.api.Outcome.DECLINE, o.outcome, "the strict verdict (decline), never the practical reject: " + what);
+            assertTrue(o.err.contains(NOT_REPORTED), what);
+            String stats = statsLine(o);
+            assertTrue(stats.contains("outcome=decline"), stats);
+            assertTrue(stats.contains("policy=strict["), stats);
+            assertTrue(stats.contains(" verify=reference "), stats);
+            assertTrue(stats.contains(" net=strict-recheck(practical=reject,metadata=1,practical_wall_ms="), stats);
+        }
+        // a file without metadata: the verification changes nothing, and no net is named
+        Out bad = other(fixture("r2-mdata-beta-arg-plainform-bad"), "verify=reference");
+        assertEquals(rlvm.api.Outcome.REJECT, bad.outcome, bad.err);
+        assertTrue(statsLine(bad).contains(" policy=practical verify=reference fallback=reference "), bad.err);
+        assertFalse(statsLine(bad).contains(" net="), bad.err);
+    }
+
+    @Test
+    void theStatisticsLineSaysWhatVerifies() throws Exception {
+        Path ok = fixture("r2-mdata-beta-nofill-ok");
+        // the reference engine as primary engine verifies unasked; asked not to, it does not
+        assertTrue(statsLine(run(ok)).contains(" policy=practical verify=reference fallback=reference "), run(ok).err);
+        assertTrue(statsLine(run(ok, "-X", "verify=none")).contains(" policy=practical verify=none fallback=reference "));
+        assertTrue(statsLine(run(ok, "-X", "policy=strict")).contains("] verify=reference fallback=reference "));
+        // another engine: a plain run, the engine alone, the verified run
+        assertTrue(statsLine(other(ok)).contains(" verify=none fallback=reference "));
+        assertTrue(statsLine(other(ok, "fallback=none")).contains(" verify=none fallback=none "));
+        assertTrue(statsLine(other(ok, "no-fallback")).contains(" verify=none fallback=none "));
+        assertTrue(statsLine(other(ok, "verify=reference")).contains(" verify=reference fallback=reference "));
+        // without the net a rejected file with metadata is rejected by the reference engine too, when it is told not to verify
+        LauncherAccess.Result r = run(fixture("r2-mdata-beta-arg-hidden-ok"), "-X", "verify=none");
+        assertEquals(1, r.status, r.toString());
+        assertFalse(r.err.contains(NOT_REPORTED), r.toString());
+        // the one contradiction is a usage error before anything is read
+        assertEquals(64, run(ok, "-X", "no-recheck", "-X", "verify=reference").status);
+        assertEquals(64, run(ok, "-X", "no-fallback", "-X", "fallback=reference").status);
     }
 
     @Test

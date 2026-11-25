@@ -20,23 +20,31 @@ import rlvm.api.Session;
  *   o := admit(u) in the warm session, warm budget (no step limit)
  *   ACCEPT  -> board.accept(u); reset the session if its footprint exceeds the session cap
  *              (RunConfig.sessionBytes, or the primary engine's default)
- *   other   -> reset the session (nothing of a failed unit is kept); if u is still at or below the
- *              first failure, run the re-check protocol at once, on this thread, in fresh sessions
+ *   REJECT  -> reset the session; REJECTED, final (the default, RunConfig.recheckRejections = false);
+ *              with the verification (verify=reference): the re-check protocol below
+ *   DECLINE -> reset the session (nothing of a failed unit is kept); if u is still at or below the
+ *              first failure, run the protocol below at once, on this thread, in fresh sessions
  * </pre>
  *
- * <p>Re-check protocol (*agentic-note*: design-architecture-document, 8.2 and 6.5; "primary" is the engine under test, "reference"
- * the reference kernel; every stage runs in a freshly reset session with the cold budget):
+ * <p>The protocol of a unit that was not accepted (*agentic-note*: design-architecture-document, 8.2 and 6.5; "primary" is the
+ * engine under test, "reference" the reference kernel; every stage runs in a freshly reset session with the cold budget).
+ * THE DEFAULT (*agentic-note*: rep-MO-1; the maintainer's instruction of 2026-11-25): a REJECT of the primary engine,
+ * warm or in its cold retry of a decline, is final - the lines "warm REJECT" below exist only with
+ * {@code RunConfig.recheckRejections} (the development option verify=reference). The lines "warm DECLINE" and
+ * "RuntimeException" are the decline fallback ({@code RunConfig.referenceFallback}, on by default); without it
+ * (fallback=none) a unit the primary engine declines twice, or throws on, is DECLINED and the reference kernel is
+ * never asked: the primary engine alone.
  * <pre>
  * warm REJECT:   1. strict primary            ACCEPT -> accepted, WARM-ANOMALY
  *                2. reference                 REJECT -> REJECTED (confirmed, the reference's reason)
  *                                             ACCEPT -> accepted, MACHINE-INCOMPLETE
  *                                             other  -> Policy.unconfirmedReject: DECLINED(UNCONFIRMED_REJECT) or REJECTED
- * warm DECLINE:  1. primary, cold budget      ACCEPT -> accepted;  REJECT -> as "warm REJECT"
+ * warm DECLINE:  1. primary, cold budget      ACCEPT -> accepted;  REJECT -> as a warm REJECT
  *                2. reference                 ACCEPT -> accepted;  REJECT -> REJECTED;  DECLINE -> DECLINED
  * RuntimeException out of the warm session: session discarded;
  *                   reference                 as step 2 above; a second exception -> DECLINED(INTERNAL_ERROR)
  * primary == reference: the steps "strict primary" and "primary, cold budget" are skipped; the single
- *                cold run of the reference kernel decides.
+ *                cold run of the reference kernel decides (a warm REJECT: with recheckRejections only).
  * </pre>
  * After every stage the unit is abandoned without a record if it now lies above the first failure:
  * its stage may have been cancelled, and its outcome can no longer matter.
@@ -1223,7 +1231,7 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         return cancelled;
     }
 
-    /** Units whose warm attempt did not end with ACCEPT and went through the re-check protocol. */
+    /** Units whose warm attempt did not end with ACCEPT (a REJECT that is final without the verification included). */
     public long rechecks() {
         return rechecks;
     }

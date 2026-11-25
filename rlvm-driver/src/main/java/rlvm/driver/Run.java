@@ -34,7 +34,8 @@ import rlvm.store.Store;
  *   pipelined: at the loader's first publication the environment thread and the workers are started;
  *              they check what is published while the calling thread goes on loading
  *              (*agentic-note*: design-architecture-document, 3.5, 6.1). A file that is published in one piece is a batch run.
- *   a unit the primary engine does not ACCEPT goes through the re-check protocol at once (Worker)
+ *   a unit the primary engine REJECTS is rejected (with RunConfig.recheckRejections: re-checked first); a
+ *   unit it DECLINES goes through the decline fallback at once (Worker)
  *   join; VerdictBoard.complete(units) if the load was complete; VerdictBoard.exitCode()
  * </pre>
  * A {@code RuntimeException} that reaches this class becomes a decline. An {@code Error} on any
@@ -1067,6 +1068,10 @@ public final class Run {
             stats.put("driver.machineIncomplete", board.machineIncomplete());
             stats.put("driver.disagreements", board.disagreements());
             stats.put("driver.primaryIsReference", primaryIsReference() ? 1 : 0);
+            // what this run asked of the reference kernel beside the primary engine (RunConfig.recheckRejections,
+            // RunConfig.referenceFallback): "reference" / "none" each
+            stats.put("driver.verify", config.recheckRejections ? "reference" : "none");
+            stats.put("driver.fallback", config.referenceFallback ? "reference" : "none");
             if (account != null) {
                 stats.put("driver.memory.peakAccountedBytes", account.peakBytes());
                 stats.put("driver.memory.peakSessionBytes", account.peakSessionBytes());

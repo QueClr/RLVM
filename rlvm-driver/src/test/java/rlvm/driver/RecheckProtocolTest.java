@@ -24,7 +24,9 @@ class RecheckProtocolTest {
     private static final int T = Fakes.T;
 
     private static RunConfig config(boolean recheck, Policy.Unconfirmed policy) {
-        RunConfig c = Fakes.config(1);
+        // recheck = false is the driver's default (a rejection of the primary engine is final); true is verify=reference
+        RunConfig c = Fakes.defaultConfig(1);
+        assertEquals(false, c.recheckRejections, "the default: no verification");
         c.recheckRejections = recheck;
         c.policy = new Policy(true, Policy.ForwardRefs.DECLINE, policy, true, false);
         return c;
@@ -149,6 +151,93 @@ class RecheckProtocolTest {
             assertEquals(0, run.verdicts().machineIncomplete());
             assertTrue(run.verdicts().events()[0].contains("WARM-ANOMALY unit 3 'decl3'"), run.verdicts().events()[0]);
             assertEquals("", host.describeViolations());
+        }
+    }
+
+    /**
+     * The default (no verification): the rejection out of the warm cache is the verdict, nobody is asked, no
+     * event is counted - and the verdict depends on the session: with a session that is reset after every
+     * unit the same file is accepted. With the verification (the test above) it is accepted either way.
+     */
+    @Test
+    void byDefaultARejectionOutOfAWarmSessionIsFinalAndDependsOnTheSession() {
+        Unit[] script = Fakes.units(6);
+        script[3].warm = Fakes.WARMTH;
+        FakeHost host = new FakeHost(Fakes.copy(script));
+        Run run = host.run(Fakes.defaultConfig(1), false);
+        assertEquals(Outcome.REJECT, run.execute());
+        assertEquals(3, run.verdicts().decidingUnit());
+        assertEquals(0, host.strictChecks.get(3) + host.refChecks.get(3) + host.coldChecks.get(3));
+        assertEquals(0, run.verdicts().warmAnomalies() + run.verdicts().machineIncomplete());
+        assertEquals(0, run.verdicts().events().length);
+        assertEquals("", host.describeViolations());
+
+        RunConfig fresh = Fakes.defaultConfig(1);
+        fresh.sessionBytes = 1; // every unit in a fresh session
+        FakeHost host2 = new FakeHost(Fakes.copy(script));
+        assertEquals(Outcome.ACCEPT, host2.run(fresh, false).execute());
+        assertEquals("", host2.describeViolations());
+    }
+
+    /**
+     * The primary engine alone (no verification, no fallback: {@code verify=none}, {@code fallback=none}):
+     * the reference kernel and the strict engine are never asked about a unit; what the primary engine
+     * rejects is rejected, what it declines twice or throws on is declined.
+     */
+    @Test
+    void thePrimaryEngineAlone() {
+        int[][] cases = {
+            // warm, cold, strict, ref -> verdict
+            {A, A, A, A, Outcome.ACCEPT},
+            {R, A, A, A, Outcome.REJECT},   // would be a WARM-ANOMALY
+            {R, R, R, A, Outcome.REJECT},   // would be MACHINE-INCOMPLETE
+            {R, R, R, R, Outcome.REJECT},
+            {D, A, R, R, Outcome.ACCEPT},   // the engine's own cold attempt accepts
+            {D, R, A, A, Outcome.REJECT},   // ... or rejects: final
+            {D, D, A, A, Outcome.DECLINE},  // declined twice: nobody else is asked
+            {T, A, A, A, Outcome.DECLINE},  // an exception: declined
+        };
+        for (int[] c : cases) {
+            Unit[] script = Fakes.units(8);
+            script[4].warm = c[0];
+            script[4].cold = c[1];
+            script[4].strict = c[2];
+            script[4].ref = c[3];
+            FakeHost host = new FakeHost(script);
+            RunConfig config = Fakes.defaultConfig(2);
+            config.set("fallback", "none");
+            Run run = host.run(config, false);
+            String where = java.util.Arrays.toString(c);
+            assertEquals(c[4], run.execute(), where + ": " + run.verdicts().explanation());
+            assertEquals(0, host.strictChecks.get(4) + host.refChecks.get(4), "nobody else was asked: " + where);
+            assertEquals(c[0] == D ? 1 : 0, host.coldChecks.get(4), where);
+            assertEquals(c[4] == Outcome.ACCEPT ? -1 : 4, run.verdicts().decidingUnit(), where);
+            assertEquals(0, run.verdicts().warmAnomalies() + run.verdicts().machineIncomplete(), where);
+            assertEquals("", host.describeViolations(), where);
+        }
+    }
+
+    /** The two settings by name: {@code verify=none|reference}, {@code fallback=reference|none}. */
+    @Test
+    void theVerificationAndTheFallbackByName() {
+        RunConfig c = new RunConfig();
+        assertEquals(false, c.recheckRejections, "the default: a rejection of the primary engine is final");
+        assertEquals(true, c.referenceFallback, "the default: the reference kernel decides what the primary engine declines");
+        assertTrue(RunConfig.knows("verify") && RunConfig.knows("fallback") && RunConfig.knows("no-fallback"));
+        c.set("verify", "reference");
+        assertEquals(true, c.recheckRejections);
+        c.set("verify", "none");
+        assertEquals(false, c.recheckRejections);
+        c.setAll("verify=reference,fallback=none");
+        assertEquals(true, c.recheckRejections);
+        assertEquals(false, c.referenceFallback);
+        c.set("fallback", "reference");
+        assertEquals(true, c.referenceFallback);
+        for (String[] bad : new String[][] {{"verify", "strict"}, {"verify", null}, {"verify", ""}, {"fallback", "machine"},
+            {"fallback", null}}) {
+            IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> new RunConfig().set(bad[0], bad[1]));
+            assertTrue(e.getMessage().contains("expected"), e.getMessage());
         }
     }
 

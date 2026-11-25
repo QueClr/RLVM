@@ -130,22 +130,33 @@ public final class RunConfig {
     public EngineConfig.KernelProfile profile = EngineConfig.KernelProfile.LEAN_4_36;
 
     /**
-     * Re-check a rejection of the primary engine before it becomes the verdict: cold strict run of the
-     * primary engine, then the reference kernel (*agentic-note*: design-architecture-document, 8.2). False: the primary engine's
-     * REJECT is final (measurement and debugging only).
+     * VERIFICATION, a development option ({@code verify=reference}): re-check a rejection of the primary
+     * engine before it becomes the verdict - a cold strict run of the primary engine, then the reference
+     * kernel (*agentic-note*: design-architecture-document, 8.2); when the reference kernel is itself the
+     * primary engine, one fresh cold run of it. False ({@code verify=none}), THE DEFAULT since the
+     * maintainer's instruction of 2026-11-25 ("turn off reference engine recheck on default ... It shall
+     * not affect real production"): a REJECT of the primary engine is final - no strict run, no reference
+     * kernel, no WARM-ANOMALY or MACHINE-INCOMPLETE event. What the primary engine rejects wrongly is then
+     * a wrong reject of the run, and a rejection that comes out of a warm session depends on what that
+     * session checked before, so on such input the verdict can depend on the schedule: everything that
+     * means the verified protocol (the suites of the protocol, the invariance suite, the gates of an
+     * engine under test) asks for it by name. The launcher keeps the verification on, unasked, where the
+     * reference kernel is the primary engine ({@code rlvm.main.RlvmChecker}). *agentic-note*: rep-MO-1
      */
-    public boolean recheckRejections = true;
+    public boolean recheckRejections = false;
 
     /**
      * The reference kernel decides what the primary engine cannot (*agentic-note*: design-architecture-document, 8.2): a unit the
      * primary engine declines or throws on, and a rejection of the primary engine that the reference
-     * kernel does not confirm. False ({@code -X no-fallback}; gate runs of an engine under test): the
-     * reference kernel never turns a non-ACCEPT of the primary engine into an ACCEPT. Such a unit is
-     * DECLINED (the primary engine's reason; {@code ENGINE_DISAGREEMENT} for a rejection the
-     * reference kernel accepts), so the run is accepted only if the primary engine accepted every
-     * unit by itself. Rejections are still confirmed by the reference kernel, and the environment
-     * pass (inductive blocks, quot) is the reference kernel's in any case. No effect when the
-     * reference kernel is the primary engine.
+     * kernel does not confirm. False ({@code -X fallback=none}, also written {@code -X no-fallback}; gate
+     * runs of an engine under test): the reference kernel never turns a non-ACCEPT of the primary engine
+     * into an ACCEPT. Such a unit is DECLINED (the primary engine's reason; {@code ENGINE_DISAGREEMENT}
+     * for a rejection the reference kernel accepts), so the run is accepted only if the primary engine
+     * accepted every unit by itself. With {@link #recheckRejections} rejections are still confirmed by
+     * the reference kernel; WITHOUT it (the default) this is THE PRIMARY ENGINE ALONE: no worker ever
+     * asks the reference kernel about a definition, theorem, axiom or opaque. The environment pass
+     * (inductive blocks, quot) is the reference kernel's in any case. No effect when the reference
+     * kernel is the primary engine.
      */
     public boolean referenceFallback = true;
 
@@ -301,7 +312,7 @@ public final class RunConfig {
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "slice", "env-batch", "spill-ms", "publish-units", "publish-mib",
         "publish-scale",
-        "pipeline-min-mib", "no-fallback", "passes", "passes-keep", "shard", "unit-trace", "repeats"
+        "pipeline-min-mib", "no-fallback", "fallback", "verify", "passes", "passes-keep", "shard", "unit-trace", "repeats"
     };
 
     /** Environment variable with driver settings for experiments: {@code key=value[,key=value]...}. */
@@ -360,6 +371,11 @@ public final class RunConfig {
      * passes=N            check the loaded export N times in one process; the verdict is pass 1's  {@link #passes}
      * no-fallback         the reference kernel does not decide what the primary engine declines
      *                     (a flag: no value, or true / false)                          {@link #referenceFallback}
+     * fallback=reference|none  the same setting by value: reference (the default) = the reference kernel
+     *                     decides what the primary engine declines; none = no-fallback  {@link #referenceFallback}
+     * verify=none|reference  none (the default): a rejection of the primary engine is final; reference:
+     *                     it is re-checked first, by a strict run of the primary engine and then by the
+     *                     reference kernel (development)                               {@link #recheckRejections}
      * passes-keep=engines|none  the later passes use the engine instances of pass 1     {@link #passesKeepEngines}
      * shard=K/N           measurement only: check shard K (0 .. N-1) of N; the run declines   {@link #shardCount}
      * unit-trace          statistics: one line per checked unit in STATSFILE.units.tsv (a flag)  {@link #unitTrace}
@@ -367,7 +383,9 @@ public final class RunConfig {
      *                     (skip, the default) or is (check)                            {@link #skipRepeats}
      * </pre>
      * None of the numeric settings can change a verdict. {@code repeats} can, on one kind of hostile input only: a file that
-     * only a shortcut of the primary engine accepts ({@link #skipRepeats}). {@code no-fallback} and {@code shard} can only turn an ACCEPT into a DECLINE.
+     * only a shortcut of the primary engine accepts ({@link #skipRepeats}). {@code no-fallback} / {@code fallback=none} and
+     * {@code shard} can only turn an ACCEPT into a DECLINE. {@code verify=reference} changes a verdict exactly where the
+     * primary engine rejects and its strict run or the reference kernel does not ({@link #recheckRejections}).
      *
      * @throws IllegalArgumentException with a message for the user: unknown key, missing or malformed
      *     value, value out of range
@@ -383,6 +401,26 @@ public final class RunConfig {
                 referenceFallback = true;
             } else {
                 throw new IllegalArgumentException("no-fallback=" + value + ": expected no value, true or false");
+            }
+            return;
+        }
+        if (key.equals("fallback")) {
+            if ("reference".equals(value)) {
+                referenceFallback = true;
+            } else if ("none".equals(value)) {
+                referenceFallback = false;
+            } else {
+                throw new IllegalArgumentException("fallback=" + value + ": expected reference or none");
+            }
+            return;
+        }
+        if (key.equals("verify")) {
+            if ("reference".equals(value)) {
+                recheckRejections = true;
+            } else if ("none".equals(value)) {
+                recheckRejections = false;
+            } else {
+                throw new IllegalArgumentException("verify=" + value + ": expected none or reference");
             }
             return;
         }

@@ -152,6 +152,73 @@ class PolicyTest {
         assertSame(ref, checker.setup(export, 1, false, 0, map("policy", "strict"), List.of(ref), System.err, true).primary);
     }
 
+    /**
+     * The verification by the engines of the run (the maintainer's instruction of 2026-11-25): a plain run of
+     * the default engine, or of any engine that is not the reference engine, does not re-check a rejection
+     * ({@code RunConfig.recheckRejections} false, no safety net); the runs of the reference engine - strict,
+     * {@code engine=reference}, {@code engine=diff} - verify as before; {@code -X verify} decides when given.
+     */
+    @Test
+    void aPlainRunDoesNotVerifyAndTheRunsOfTheReferenceEngineDo() throws Exception {
+        Path export = dir.resolve("x.ndjson");
+        Files.writeString(export, "{}\n");
+        RlvmChecker checker = new RlvmChecker();
+        Fake ref = new Fake("reference", 1000, true);
+        Fake machine = new Fake("machine", 100, false);
+        List<EngineProvider> all = List.of(machine, ref);
+        Object[][] cases = {
+            // settings, primary, verification
+            {map(), machine, false},
+            {map("engine", "machine"), machine, false},
+            {map("policy", "practical"), machine, false},
+            {map("no-recheck", ""), machine, false},
+            {map("verify", "none"), machine, false},
+            {map("verify", "reference"), machine, true},
+            {map("engine", "machine", "verify", "reference"), machine, true},
+            {map("engine", "reference"), ref, true},
+            {map("policy", "strict"), ref, true},
+            {map("engine", "reference", "verify", "none"), ref, false},
+            {map("engine", "reference", "no-recheck", ""), ref, false},
+            {map("policy", "strict", "verify", "none"), ref, false},
+            {map("engine", "diff"), machine, true},
+            {map("engine", "diff", "verify", "none"), machine, false},
+        };
+        for (Object[] c : cases) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> extra = (Map<String, String>) c[0];
+            RlvmChecker.Setup s = checker.setup(export, 1, false, 0, extra, all, System.err, true);
+            assertSame(c[1], s.primary, extra.toString());
+            assertEquals(c[2], s.mo.verifyReference, extra.toString());
+            assertEquals(c[2], s.config.recheckRejections, "the driver's re-check follows: " + extra);
+            assertEquals((boolean) c[2] ? "reference" : "none", s.mo.verifyName(), extra.toString());
+            assertTrue(s.config.referenceFallback, "the decline fallback is not part of the verification: " + extra);
+            String stats = RlvmChecker.statsLine(s, rlvm.api.Outcome.ACCEPT, 1, 0);
+            assertTrue(stats.contains(" verify=" + s.mo.verifyName() + " fallback=reference "), stats);
+        }
+        // the engine alone: no verification and no fallback
+        for (Map<String, String> alone : List.of(map("fallback", "none"), map("no-fallback", "true"))) {
+            RlvmChecker.Setup s = checker.setup(export, 1, false, 0, alone, all, System.err, true);
+            assertFalse(s.config.recheckRejections || s.config.referenceFallback, alone.toString());
+            assertTrue(RlvmChecker.statsLine(s, rlvm.api.Outcome.ACCEPT, 1, 0).contains(" verify=none fallback=none "));
+        }
+        assertTrue(checker.setup(export, 1, false, 0, map("fallback", "reference"), all, System.err, true).config.referenceFallback);
+        assertTrue(assertThrows(UsageError.class,
+                () -> checker.setup(export, 1, false, 0, map("fallback", "machine"), all, System.err, true)).getMessage()
+                .contains("fallback=machine: expected reference or none"));
+        assertTrue(assertThrows(UsageError.class,
+                () -> checker.setup(export, 1, false, 0, map("no-fallback", "true", "fallback", "none"), all, System.err, true))
+                .getMessage().contains("give one of the two"));
+
+        // rlvm --version: the line "default:" says what a plain run asks of the reference engine
+        String d = RlvmChecker.defaults(all);
+        assertTrue(d.startsWith("engine machine, policy practical, verify none (a rejection of the machine is final; "
+                + "-X verify=reference: re-checked by the reference engine), fallback reference (the reference engine "
+                + "decides a declaration the machine declines; -X fallback=none: the machine alone); one worker per CPU"), d);
+        assertTrue(RlvmChecker.defaults(List.of(ref)).startsWith("engine reference, policy practical; one worker per CPU"));
+        assertTrue(new RlvmChecker().usage().contains("verify=none|reference"));
+        assertTrue(new RlvmChecker().usage().contains("fallback=reference|none"));
+    }
+
     /** An engine that declares the key "policy" is told the policy of every run; others see nothing. */
     @Test
     void enginesThatDeclareThePolicyKeyAreToldThePolicy() throws Exception {

@@ -37,7 +37,12 @@ import rlvm.ref.RefEngine;
  *              what the batch run decides (less complete, never another verdict)
  * --pipelined: the loader publishes while it reads and the workers check meanwhile, whatever the size
  *              of the file (RunConfig.pipelineMinBytes = 0)
- * --set:       driver settings by name (RunConfig.setAll)
+ * --set:       driver settings by name (RunConfig.setAll), e.g. verify=reference: the verified protocol
+ *              (a rejection of the primary engine is re-checked by its strict run and the reference
+ *              kernel). The driver's default is verify=none (the rejection is final); as in the
+ *              launcher the verification is on, unasked, when the reference kernel is the primary
+ *              engine. --compare with an engine that has warm sessions is schedule-invariant on
+ *              every input only with verify=reference (rlvm-driver/bin/invariance.sh asks for it)
  * --files-from F: one export per line of F (the invariance suite's shards)
  * --mem-trace F [--gc-every S]: every second one line "seconds accountedMB sharedMB heapUsedMB" to F;
  *              with --gc-every S a full collection every S seconds and a line "... live" right after
@@ -228,6 +233,9 @@ public final class DriverBench {
         if (session > 0) {
             c.sessionBytes = session;
         }
+        // As the launcher (rlvm.main.RlvmChecker): a rejection of the reference kernel as primary engine is
+        // confirmed by a fresh cold run of it; any other engine's is final unless --set verify=reference.
+        c.recheckRejections = primaryFactory == RefEngine.FACTORY;
         if (settings != null) {
             c.setAll(settings);
         }

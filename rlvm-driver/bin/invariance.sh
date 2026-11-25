@@ -19,7 +19,12 @@
 #   -P N          JVMs in parallel (default 6)
 #   --no-pin      do not pin the run to the CPUs outside the arena-shaped container's cpuset
 #   --no-compile  use rlvm-driver/target as it is (default: mvn -o -q -pl rlvm-driver test-compile)
-#   --set K=V,..  driver settings for every run (RunConfig.setAll)
+#   --set K=V,..  driver settings for every run (RunConfig.setAll). The suite means the VERIFIED protocol
+#                 (verify=reference: a rejection of the primary engine is re-checked by its strict run and
+#                 by the reference kernel), under which the verdict is schedule-invariant for any engine,
+#                 and asks for it by name on every run; --set verify=none runs the default protocol
+#                 instead (a rejection of the primary engine is final: on input where a warm session of
+#                 the machine rejects by its history, schedule differences are then expected)
 #   --engine NAME primary engine (default: reference). "machine" = the published rlvm-machine jar
 #                 (.toolchain/m2) as primary engine, the reference kernel for re-checks and the
 #                 environment pass: the launcher's "-X engine=machine"
@@ -64,6 +69,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "${#corpora[@]}" -gt 0 ] || corpora=(published tutorial)
+# The verified protocol by name, unless the caller names the protocol (see --set above).
+case ",$settings," in *,verify=*) ;; *) settings="verify=reference${settings:+,$settings}" ;; esac
 if [ "${corpora[0]}" = all ]; then corpora=(published tutorial bugs mdata prelude big); fi
 
 cd "$ROOT" || exit 2

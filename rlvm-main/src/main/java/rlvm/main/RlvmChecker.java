@@ -34,14 +34,28 @@ import rlvm.load.LoadReport;
  * <p>{@code -X passes=N} (N &gt; 1) checks the export N times in this process and reports every pass
  * ({@link Passes}: warm wall clock); without it nothing of that class runs.
  *
- * <p><b>The safety net of the practical policy</b> ({@link #strictRecheck}; OWNER-NOTES 13 (c): the
- * default never rejects what the official checker accepts). The practical loader drops metadata
- * nodes, which the official kernel keeps as terms of their own, and some of its syntactic tests look
- * at such a node, not through it (finding R2-F4: {@code cheap_beta_reduce} behind a node). So a
- * REJECT of a practical run on a file in which the loader dropped a metadata node is not reported:
- * the file is checked once more under {@code policy=strict}, where such a declaration is declined
- * instead of normalised, and THAT verdict is the run's. An ACCEPT or a DECLINE of the practical run
- * and every file without a metadata record are untouched.
+ * <p><b>The verification</b> ({@code -X verify=none|reference}, {@code MainOptions.resolveVerify}; the
+ * maintainer's instruction of 2026-11-25: "turn off reference engine recheck on default ... reference
+ * engine is just a fallback that is used to verify the behavior during development. It shall not affect
+ * real production"; *agentic-note*: rep-MO-1). A plain run is {@code verify=none}: a rejection of the
+ * primary engine is the verdict - the driver does not re-check it ({@code RunConfig.recheckRejections}
+ * false) and the safety net below is off. {@code -X verify=reference} is the development option that
+ * turns both on; it is in force unasked where the reference engine is the primary engine
+ * ({@code -X engine=reference}, {@code -X policy=strict}) or the oracle of a comparison
+ * ({@code -X engine=diff}). What still goes to the reference engine in a plain run: a unit the primary
+ * engine DECLINES (the driver's fallback, {@code -X fallback=none} turns it off: the primary engine
+ * alone) and the environment pass (inductive blocks, quot).
+ *
+ * <p><b>The safety net of the practical policy</b> ({@link #strictRecheck}; with {@code verify=reference}
+ * only; OWNER-NOTES 13 (c): nothing is rejected that the official checker accepts). The practical loader
+ * drops metadata nodes, which the official kernel keeps as terms of their own, and some of its syntactic
+ * tests look at such a node, not through it (finding R2-F4: {@code cheap_beta_reduce} behind a node). So
+ * a REJECT of a verified practical run on a file in which the loader dropped a metadata node is not
+ * reported: the file is checked once more under {@code policy=strict}, where such a declaration is
+ * declined instead of normalised, and THAT verdict is the run's. An ACCEPT or a DECLINE of the practical
+ * run and every file without a metadata record are untouched. Without the net (the default) the practical
+ * rejection is reported: the four files of R2-F4 are then rejected although the official checker accepts
+ * them, and a correct rejection of a file with metadata is a rejection, not a decline.
  */
 public final class RlvmChecker implements Checker {
 
@@ -73,7 +87,8 @@ public final class RlvmChecker implements Checker {
     private static String defaultEngineNote() {
         try {
             return "; default engine: " + Engines.primary(null, Engines.providers()).name()
-                    + " (policy practical; -X policy=strict = the reference engine)";
+                    + " (policy practical; -X policy=strict = the reference engine; -X verify=reference = every "
+                    + "rejection re-checked by the reference engine)";
         } catch (RuntimeException | java.util.ServiceConfigurationError e) {
             return "";
         }
@@ -95,14 +110,20 @@ public final class RlvmChecker implements Checker {
                 "                            strict: the reference engine and every exactness-only check, as close to",
                 "                            the official checker as RLVM gets (slower)",
                 "  engine=NAME               reference | machine | diff (default: by the engines' priorities, see",
-                "                            --version; a rejection is always confirmed by the reference engine)",
+                "                            --version)",
+                "  verify=none|reference     none (default): a rejection of the engine is final. reference (development):",
+                "                            every rejection is re-checked by the reference engine before it is reported,",
+                "                            and a rejected file with metadata is checked again under policy=strict.",
+                "                            Runs of the reference engine (engine=reference|diff, policy=strict) verify",
+                "  fallback=reference|none   reference (default): the reference engine decides a declaration the engine",
+                "                            declines. none: it is declined - the engine alone",
                 "  load=auto|batch|pipelined how the file is loaded (default auto: pipelined with checking when two or",
                 "                            more workers run and the file has 8 MiB or more)",
                 "  scan-threads=K|auto, io=buffered|mapped|auto",
                 "                            the reader (default: 1 scanner thread on mapped input from 256 MiB)",
                 "  passes=N, passes-mode=reload|recheck",
                 "                            check the export N times in this process and report every pass",
-                "  stats-file=F, stop-after=load|env, session-mib=N, memory-mib=N, profile=4.36|4.37, no-recheck, ...",
+                "  stats-file=F, stop-after=load|env, session-mib=N, memory-mib=N, profile=4.36|4.37, ...",
                 "                            and the engines' and the driver's own settings: rlvm-main/README.md",
                 "");
     }
@@ -116,20 +137,45 @@ public final class RlvmChecker implements Checker {
      * the line that says which one that is.
      */
     public String defaults() {
-        String engine;
+        java.util.List<EngineProvider> all;
         try {
-            EngineProvider primary = Engines.primary(null, Engines.providers());
+            all = Engines.providers();
+        } catch (RuntimeException | java.util.ServiceConfigurationError e) {
+            all = null;
+        }
+        return defaults(all);
+    }
+
+    /** {@link #defaults()} for these engine providers (null: none could be loaded). */
+    static String defaults(java.util.List<EngineProvider> all) {
+        String engine;
+        // What a plain run asks of the reference engine (MainOptions.resolveVerify, RunConfig.referenceFallback).
+        String verification = "";
+        try {
+            if (all == null) {
+                throw new IllegalStateException("no engine providers");
+            }
+            EngineProvider primary = Engines.primary(null, all);
             engine = primary.name();
             // The engine's own defaults in its own words (the machine: its switch set), if it says any.
             String note = primary.defaultsNote();
             if (note != null && !note.isBlank()) {
                 engine += " (" + note.strip() + ")";
             }
+            if (primary != Engines.reference(all)) {
+                verification = ", verify " + MainOptions.VERIFY_NONE + " (a rejection of the " + primary.name()
+                        + " is final; -X verify=reference: re-checked by the reference engine), fallback "
+                        + (new RunConfig().referenceFallback
+                                ? "reference (the reference engine decides a declaration the " + primary.name()
+                                        + " declines; -X fallback=none: the " + primary.name() + " alone)"
+                                : "none (the " + primary.name() + " alone; -X fallback=reference: the reference "
+                                        + "engine decides a declaration it declines)");
+            }
         } catch (RuntimeException | java.util.ServiceConfigurationError e) {
             engine = "unavailable";
         }
         long pipelineMib = new RunConfig().pipelineMinBytes >> 20;
-        return "engine " + engine + ", policy practical; one worker per CPU, at most " + AUTO_MAX_WORKERS
+        return "engine " + engine + ", policy practical" + verification + "; one worker per CPU, at most " + AUTO_MAX_WORKERS
                 + "; a file of " + pipelineMib + " MiB or more is checked while it is read (pipelined), with "
                 + MainOptions.DEFAULT_SCAN_THREADS + (MainOptions.DEFAULT_SCAN_THREADS == 1 ? " scanner thread from " : " scanner threads from ")
                 + (MainOptions.SCAN_THREADS_MIN_BYTES >> 20) + " MiB";
@@ -181,13 +227,20 @@ public final class RlvmChecker implements Checker {
     private int run(Path export, int threads, boolean stats, long stackBytes, Map<String, String> extra,
             PrintStream err, boolean quiet) {
         // One ServiceLoader pass, so that "the primary engine is the reference engine" is an identity.
-        java.util.List<EngineProvider> all = Engines.providers();
+        return run(export, threads, stats, stackBytes, extra, err, quiet, Engines.providers());
+    }
+
+    /** {@link #run} with the engine providers given (tests: an engine that is not on the class path). */
+    int run(Path export, int threads, boolean stats, long stackBytes, Map<String, String> extra,
+            PrintStream err, boolean quiet, java.util.List<EngineProvider> all) {
         Setup s = setup(export, threads, stats, stackBytes, extra, all, err, quiet);
         if (s == null) {
             return Outcome.DECLINE; // a part of the pipeline is not implemented; said on the diagnostics stream
         }
-        // The safety net exists for the practical policy only: a strict run is its own last word.
+        // The safety net exists for the practical policy only (a strict run is its own last word) and belongs to
+        // the verification (-X verify=reference): a plain run reports the rejection of its engine.
         final boolean practical = !s.mo.strict;
+        final boolean net = practical && s.mo.verifyReference;
         if (s.mo.passes > 1) {
             // -X passes=N: the same export N times in this process (warm passes). Never on a plain run.
             Passes passes = new Passes(this, export, threads, stats, stackBytes, extra, all, err, quiet);
@@ -196,16 +249,16 @@ public final class RlvmChecker implements Checker {
             s = null;
             long dropped = passes.droppedMetadata();
             passes = null;
-            if (practical && outcome == Outcome.REJECT && dropped != 0) {
+            if (net && outcome == Outcome.REJECT && dropped != 0) {
                 return strictRecheck(export, threads, stats, stackBytes, extra, all, err, quiet, dropped,
                         System.nanoTime() - t0, null);
             }
             return outcome;
         }
         // The driver prints its lines (anomaly events, the explanation of a failure) when the run ends.
-        // Those of a practical run are held until it is known whether the verdict they explain is the
-        // one this run reports; everything else goes straight to the diagnostics stream.
-        java.io.ByteArrayOutputStream held = practical && !quiet ? new java.io.ByteArrayOutputStream() : null;
+        // Those of a run with the safety net are held until it is known whether the verdict they explain is
+        // the one this run reports; everything else goes straight to the diagnostics stream.
+        java.io.ByteArrayOutputStream held = net && !quiet ? new java.io.ByteArrayOutputStream() : null;
         PrintStream diagnostics = quiet ? null
                 : held == null ? err : new PrintStream(held, true, java.nio.charset.StandardCharsets.UTF_8);
         Done d;
@@ -221,7 +274,7 @@ public final class RlvmChecker implements Checker {
         }
         int outcome = d.outcome;
         long dropped = droppedMetadata(d.report);
-        if (practical && outcome == Outcome.REJECT && dropped != 0) {
+        if (net && outcome == Outcome.REJECT && dropped != 0) {
             long nanos = d.nanos;
             d = null; // nothing of the practical run is referenced while the strict one runs
             s = null;
@@ -321,8 +374,8 @@ public final class RlvmChecker implements Checker {
     }
 
     /**
-     * THE SAFETY NET (class comment). The practical run ended with REJECT and the loader had dropped
-     * metadata: the file is checked again, as a plain run with fresh stores, under the strict policy
+     * THE SAFETY NET (class comment; {@code -X verify=reference} only). The practical run ended with REJECT and
+     * the loader had dropped metadata: the file is checked again, as a plain run with fresh stores, under the strict policy
      * (the reference engine, its exactness-only checks, the loader's metadata decline), and the
      * outcome of that run is returned - accept, reject or decline.
      *
@@ -387,8 +440,13 @@ public final class RlvmChecker implements Checker {
     static String statsLine(Setup s, int outcome, int workerCount, long wallNanos) {
         // '(auto)' = decided by this checker's defaults, not given: the worker count (--threads auto),
         // the load mode (MainOptions.resolveLoadDefaults), the reader's scanner threads.
+        // verify / fallback: what this run asked of the reference engine beside the primary engine - verify=reference
+        // = every rejection re-checked (and the safety net of the practical policy), verify=none = a rejection of the
+        // primary engine is final; fallback=reference = the reference engine decides what the primary engine declines,
+        // fallback=none = it does not (with verify=none: the primary engine alone).
         return "rlvm: stats: outcome=" + Outcome.name(outcome) + " engine=" + s.primary.name()
                 + " reference=" + s.reference.name() + " policy=" + s.mo.policyName() + strictNote(s.mo)
+                + " verify=" + s.mo.verifyName() + " fallback=" + (s.config.referenceFallback ? "reference" : "none")
                 + " workers=" + workerCount
                 + (s.autoWorkers ? "(auto)" : "") + " load="
                 + s.config.loadMode.name().toLowerCase(java.util.Locale.ROOT) + (s.mo.loadGiven ? "" : "(auto)")
@@ -486,6 +544,9 @@ public final class RlvmChecker implements Checker {
             config = configure(export, threads, stats, stackBytes, mo);
             config.differential = driverDifferential;
         }
+        // The verification, now that the engines are known: none for a plain run, reference where the reference
+        // engine is the primary engine or the oracle of a comparison, the command line's if it says so.
+        mo.resolveVerify(primary == reference, config);
         config.explain = !quiet;
         Setup s = new Setup();
         s.mo = mo;
@@ -565,7 +626,9 @@ public final class RlvmChecker implements Checker {
      * Builds the run configuration. Recognised {@code -X} keys: {@code engine} (machine | reference |
      * diff), {@code load} (pipelined | batch), {@code order} (file | namespace), {@code session-mib},
      * {@code memory-mib}, {@code scan-threads}, {@code io}, {@code stop-after} (load | env),
-     * {@code stats-file}, {@code no-recheck}, {@code no-truffle}, {@code profile} (4.36 | 4.37),
+     * {@code stats-file}, {@code verify} (none | reference; {@code no-recheck} = none; without it the
+     * configuration returned here has no verification - a run decides by its engines, {@link #setup}),
+     * {@code no-truffle}, {@code profile} (4.36 | 4.37),
      * {@code no-proof-blocks}; {@code engine.*} keys are kept for the Truffle tier; every key an engine
      * on the class path declares ({@code EngineProvider.optionKeys()}) goes to the engines. An unknown
      * key is a usage error ({@link UsageError}), never ignored.

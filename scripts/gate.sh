@@ -15,7 +15,20 @@
 #   5. with --hostile: the hostile exports (scripts/gate-hostile.py; default manifest
 #      rlvm-machine/src/test/resources/s/manifest.tsv) in the gate's configuration, judged by the
 #      official verdict stored with each row: a row of kind T (OWNER-NOTES 13 (d)) may be accepted,
-#      every other row must get the official verdict
+#      every other row must get the official verdict - except the KNOWN WRONG REJECTS of the default
+#      configuration: rows with the mark `wrong-reject`, official accepts that the machine rejects by
+#      itself since the reference engine no longer re-checks a rejection by default
+#      (*agentic-note*: rep-MO-1). They are counted and listed by name on every run, and at most
+#      KNOWN_WRONG_REJECTS_MAX of them may be rejected (--known-wrong-rejects N): the constant below
+#      may only go down
+#
+# WHAT IS GATED. `--defaults` gates the distribution as a user runs it: the default engine, a rejection of
+# which is FINAL (verify=none), with the reference engine deciding only what the engine declines. A gate
+# that means the VERIFIED configuration - every rejection re-checked by the reference engine, the strict
+# re-run of a rejected file with metadata; the default until 2026-11-25 - asks for it by name:
+#   scripts/gate.sh --defaults -X verify=reference ...
+# and the engine alone (no fallback either; declines are then the engine's own) is -X fallback=none.
+# Without --defaults the gate runs -X engine=reference, which verifies itself as it always did.
 #
 # The oracle of every step is an OFFICIAL verdict (the arena's expected outcome of a published test,
 # the test kit's stored verdicts of leanchecker for the mutants, the manifest's column for a hostile
@@ -44,6 +57,8 @@
 #   --no-slice        skip step 2
 #   --hostile [FILE]  also step 5; FILE = a manifest (see scripts/gate-hostile.py --help), default the
 #                     machine's suite. --kind-mark REGEX names the marks of a kind T row
+#   --known-wrong-rejects N  step 5: at most N rows may be rejected under the mark `wrong-reject`
+#                     (default: KNOWN_WRONG_REJECTS_MAX in this script; the number may only go down)
 #   --no-diff-selftest  skip step 4
 #   --threads N       worker threads of both steps (default 1; 0 = automatic)
 #   --engine NAME     -X engine=NAME (default reference; `default` = no -X engine at all: the
@@ -80,7 +95,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # heavy (hundreds of JVMs), so it takes a slot itself unless its caller already holds one (the slot
 # is a file lock that this process inherited: an open descriptor on work/build/slots/heavy.N).
 for a in "$@"; do  # the help text needs no slot
-  case "$a" in -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+  case "$a" in -h|--help) sed -n '2,89p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 done
 if [ -x "$ROOT/bench/slot.sh" ] && [ -z "${RLVM_NO_SLOT:-}" ] \
     && ! ls -l "/proc/$$/fd" 2>/dev/null | grep -q 'work/build/slots/heavy\.'; then
@@ -102,6 +117,12 @@ diffself=1
 hostile=0
 hostile_manifest=""
 kind_mark=""
+# The hostile rows that the DEFAULT configuration rejects although the official checker accepts them (mark
+# `wrong-reject` in the manifest; the list with the cause of each: *agentic-note*: rep-MO-1). MAY ONLY GO DOWN: a
+# row leaves the list when the machine gives the official verdict by itself. A new wrong reject is not admitted
+# by a mark in the manifest alone - it fails the gate until this number is raised, which nobody should do.
+KNOWN_WRONG_REJECTS_MAX=12
+known_wrong_rejects="$KNOWN_WRONG_REJECTS_MAX"
 launcher=jvm
 
 while [ "$#" -gt 0 ]; do
@@ -125,7 +146,8 @@ while [ "$#" -gt 0 ]; do
     --hostile) hostile=1
       case "${2:-}" in ''|-*) shift ;; *) hostile_manifest="$(realpath -m "$2")"; shift 2 ;; esac ;;
     --kind-mark) kind_mark="${2:?--kind-mark needs a regular expression}"; shift 2 ;;
-    -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --known-wrong-rejects) known_wrong_rejects="${2:?--known-wrong-rejects needs a number}"; shift 2 ;;
+    -h|--help) sed -n '2,89p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "gate.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -286,11 +308,14 @@ if [ "$hostile" = 1 ]; then
   hargs=(-j "$(lanes 4)" --report "$ROOT/work/logs/gate/hostile-$stamp.json")
   [ -z "$hostile_manifest" ] || hargs+=(--manifest "$hostile_manifest")
   [ -z "$kind_mark" ] || hargs+=(--kind-mark "$kind_mark")
+  hargs+=(--max-known-wrong-rejects "$known_wrong_rejects")
   rc=0
   RLVM_DIST="$dist" RLVM_THREADS="$threads" RLVM_ENGINE="$engine" RLVM_LOAD="$load" RLVM_EXTRA_CP="$extra_cp" \
     RLVM_CHECK_ARGS="$check_args" "${prefix[@]}" python3 -I "$ROOT/scripts/gate-hostile.py" "${hargs[@]}" >"$log" 2>&1 || rc=$?
   echo "gate: $(tail -n 1 "$log") | exit $rc | log $log"
-  [ "$rc" = 0 ] || { fail=1; grep -E '^  (WRONG|ERROR)' "$log" | head -n 20 >&2; echo "gate: FAILED: hostile exports (a wrong verdict on a row that is not of kind T, or an error)" >&2; }
+  # The known wrong rejects are never silent: every one is named on every run, pass or fail.
+  grep -E '^  (KNOWN WRONG REJECT|NO LONGER REJECTED)' "$log" | sed 's/^/gate: /'
+  [ "$rc" = 0 ] || { fail=1; grep -E '^  (WRONG|ERROR|TOO MANY)' "$log" | head -n 20 >&2; echo "gate: FAILED: hostile exports (a wrong verdict on a row that is neither of kind T nor a known wrong reject, more known wrong rejects than allowed, or an error)" >&2; }
 fi
 
 if [ "$fail" = 0 ]; then echo "gate: PASS"; else echo "gate: FAIL"; fi

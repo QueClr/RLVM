@@ -42,7 +42,17 @@ import rlvm.load.LoadOptions;
  *                        without scanner threads, auto (mapped if a regular file) with them
  * stop-after=load|env    stop after a phase (per-phase measurements); the verdict is then DECLINE
  * stats-file=F           write statistics as JSON
- * no-recheck             do not re-check a rejection of the primary engine
+ * verify=none|reference  what verifies a rejection ({@link #verifyReference}; *agentic-note*: rep-MO-1). none: a
+ *                        rejection of the primary engine is final, and no file is checked a second time -
+ *                        the DEFAULT of a run whose primary engine is not the reference engine (the
+ *                        maintainer's instruction of 2026-11-25: the reference engine does not affect
+ *                        production). reference, a DEVELOPMENT option: every rejection is re-checked before
+ *                        it is reported (a strict run of the primary engine, then the reference engine), and
+ *                        the safety net of the practical policy is on (a rejection of a file in which the
+ *                        loader dropped a metadata node: the file is checked again under policy=strict);
+ *                        it is what a run does unasked where the reference engine is the primary engine
+ *                        (engine=reference, policy=strict) or the oracle (engine=diff)
+ * no-recheck             the same as verify=none (the flag of the time when the re-check was the default)
  * no-truffle             no Truffle tier
  * no-proof-blocks        every record becomes a shared term
  * profile=4.36|4.37      which official kernel release to imitate (default 4.36)
@@ -55,7 +65,10 @@ import rlvm.load.LoadOptions;
  * KEY=VALUE              any key an engine on the class path declares (rlvm.api.EngineProvider.optionKeys(),
  *                        e.g. the reference kernel's levels=...): handed to the engines of the run
  * KEY[=VALUE]            any key the driver says it knows ({@link DriverSettings}: its own tuning knobs,
- *                        e.g. unit-mib, publish-units, no-fallback): the driver parses the value
+ *                        e.g. unit-mib, publish-units, and fallback=reference|none, also written no-fallback:
+ *                        whether the reference engine decides a unit the primary engine declines - with
+ *                        fallback=none and verify=none the primary engine is the whole checker of every
+ *                        definition, theorem, axiom and opaque): the driver parses the value
  * </pre>
  *
  * <p>The primary engine may prefer other defaults for the wiring's and the driver's keys
@@ -139,7 +152,24 @@ final class MainOptions {
     static final int DEFAULT_SCAN_THREADS = 1;
     String stopAfter;
     Path statsFile;
-    boolean recheck = true;
+    /**
+     * {@code -X verify=none|reference} / {@code -X no-recheck} as given: {@code Boolean.TRUE} = reference,
+     * {@code Boolean.FALSE} = none, null = not given ({@link #resolveVerify} then decides by the engine).
+     */
+    Boolean verifyGiven;
+    /** True if {@code -X no-recheck} was given (a contradiction with {@code verify=reference} is a usage error). */
+    private boolean noRecheck;
+    /**
+     * THE VERIFICATION of a run, in force once {@link #resolveVerify} has seen the engines: true =
+     * {@code verify=reference} (the driver re-checks every rejection of the primary engine,
+     * {@code RunConfig.recheckRejections}, and {@code RlvmChecker}'s safety net is on); false =
+     * {@code verify=none} (a rejection of the primary engine is final and the file is checked once).
+     * Until then it is what the command line gave, and false without it.
+     */
+    boolean verifyReference;
+    /** The names of the two values on the command line and in the statistics. */
+    static final String VERIFY_NONE = "none";
+    static final String VERIFY_REFERENCE = "reference";
     boolean truffle = true;
     boolean proofBlocks = true;
     EngineConfig.KernelProfile profile = EngineConfig.KernelProfile.LEAN_4_36;
@@ -238,6 +268,16 @@ final class MainOptions {
             throw new UsageError("-X policy=strict checks with the reference engine alone: -X engine=diff "
                     + "(a comparison of two engines) contradicts it");
         }
+        if (noRecheck && Boolean.TRUE.equals(verifyGiven)) {
+            throw new UsageError("-X no-recheck means -X verify=none: -X verify=reference contradicts it (drop one of the two)");
+        }
+        if (noRecheck) {
+            verifyGiven = Boolean.FALSE;
+        }
+        verifyReference = Boolean.TRUE.equals(verifyGiven);
+        if (driverOptions.containsKey("no-fallback") && driverOptions.containsKey("fallback")) {
+            throw new UsageError("-X no-fallback is -X fallback=none: give one of the two");
+        }
         if (engineKeys.contains(POLICY_KEY)) {
             engineOptions.put(POLICY_KEY, policyName());
         }
@@ -254,6 +294,27 @@ final class MainOptions {
     /** {@code "strict"} or {@code "practical"}. */
     String policyName() {
         return strict ? STRICT : PRACTICAL;
+    }
+
+    /**
+     * Decides the verification of the run once its engines are known, and writes it into {@code config}
+     * ({@code RunConfig.recheckRejections}). Given on the command line: that. Not given: {@code none} -
+     * a rejection of the primary engine is final, the file is checked once - unless the reference engine is
+     * the primary engine ({@code -X engine=reference}, {@code -X policy=strict}: its rejection is confirmed
+     * by a fresh cold run of itself, and under the practical policy the safety net stays) or the run compares
+     * engines ({@code -X engine=diff}); those runs are the development and verification tools and are what
+     * they were.
+     *
+     * @param referenceIsPrimary the primary engine of the run is the reference engine
+     */
+    void resolveVerify(boolean referenceIsPrimary, RunConfig config) {
+        verifyReference = verifyGiven != null ? verifyGiven : referenceIsPrimary || differential;
+        config.recheckRejections = verifyReference;
+    }
+
+    /** {@code "reference"} or {@code "none"}: the verification in force ({@link #resolveVerify}). */
+    String verifyName() {
+        return verifyReference ? VERIFY_REFERENCE : VERIFY_NONE;
     }
 
     private void set(String key, String value) {
@@ -347,9 +408,12 @@ final class MainOptions {
             case "stats-file":
                 statsFile = Path.of(need(key, value));
                 break;
+            case "verify":
+                verifyGiven = choose(key, value, VERIFY_NONE, Boolean.FALSE, VERIFY_REFERENCE, Boolean.TRUE);
+                break;
             case "no-recheck":
                 flag(key, value);
-                recheck = false;
+                noRecheck = true;
                 break;
             case "no-truffle":
                 flag(key, value);
@@ -382,7 +446,7 @@ final class MainOptions {
                 }
                 throw new UsageError("unknown checker setting -X " + key + (value == null || value.isEmpty() ? ""
                         : "=" + value) + " (known: policy, engine, load, order, session-mib, memory-mib, scan-threads, io, "
-                        + "stop-after, stats-file, no-recheck, no-truffle, no-proof-blocks, profile, passes, "
+                        + "stop-after, stats-file, verify, no-recheck, no-truffle, no-proof-blocks, profile, passes, "
                         + "passes-mode, engine.*"
                         + (engineKeys.isEmpty() ? "" : "; engine settings: " + String.join(", ", new TreeSet<>(engineKeys)))
                         + "; and the driver's settings, see rlvm-driver/README.md)");
@@ -484,7 +548,8 @@ final class MainOptions {
             config.memoryLimitBytes = memoryLimitBytes;
         }
         config.profile = profile;
-        config.recheckRejections = recheck;
+        // What the command line says; RlvmChecker.setup decides the rest once the engines are known (resolveVerify).
+        config.recheckRejections = verifyReference;
         config.differential = differential;
         config.truffleTier = truffle;
         config.statsFile = statsFile;

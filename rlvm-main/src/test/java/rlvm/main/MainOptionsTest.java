@@ -44,7 +44,11 @@ class MainOptionsTest {
             assertEquals(ExportReader.Io.BUFFERED, o.io);
             assertEquals(0, o.scanThreads);
             assertFalse(o.loadGiven || o.scanThreadsGiven || o.ioGiven);
-            assertTrue(o.recheck && o.truffle && o.proofBlocks);
+            assertTrue(o.truffle && o.proofBlocks);
+            // No verification is asked for: the engines of the run decide (resolveVerify), none until then.
+            assertNull(o.verifyGiven);
+            assertFalse(o.verifyReference);
+            assertEquals("none", o.verifyName());
             assertEquals(EngineConfig.KernelProfile.LEAN_4_36, o.profile);
             assertNull(o.stopAfter);
             assertNull(o.statsFile);
@@ -68,7 +72,8 @@ class MainOptionsTest {
         assertTrue(o.loadGiven && o.scanThreadsGiven && o.ioGiven);
         assertEquals("env", o.stopAfter);
         assertEquals(Path.of("/tmp/s.json"), o.statsFile);
-        assertFalse(o.recheck);
+        assertEquals(Boolean.FALSE, o.verifyGiven, "no-recheck is verify=none");
+        assertFalse(o.verifyReference);
         assertFalse(o.truffle);
         assertFalse(o.proofBlocks);
         assertEquals(EngineConfig.KernelProfile.LEAN_4_37, o.profile);
@@ -108,8 +113,62 @@ class MainOptionsTest {
         assertEquals(untouched.memoryLimitBytes, c.memoryLimitBytes);
         assertEquals(untouched.order, c.order);
         assertEquals(LoadOptions.Mode.BATCH, c.loadMode, "batch is this checker's default whatever the driver's is");
-        assertTrue(c.recheckRejections);
+        assertEquals(untouched.recheckRejections, c.recheckRejections);
+        assertFalse(c.recheckRejections, "a rejection of the primary engine is final unless the run verifies");
+        assertTrue(c.referenceFallback, "the reference engine still decides what the primary engine declines");
         assertTrue(c.proofBlocks);
+    }
+
+    /**
+     * {@code -X verify=none|reference} (the maintainer's instruction of 2026-11-25: the reference engine's
+     * re-check is off by default). Not given: none, except where the reference engine is the primary engine
+     * or the oracle of a comparison; given: that, whatever the engine. {@code no-recheck} is verify=none.
+     */
+    @Test
+    void theVerificationIsOffUnlessAskedForOrTheReferenceEngineIsTheEngine() {
+        // not given: by the engines of the run
+        for (boolean referenceIsPrimary : new boolean[] {false, true}) {
+            MainOptions o = MainOptions.parse(map());
+            RunConfig c = new RunConfig();
+            o.applyTo(c);
+            o.resolveVerify(referenceIsPrimary, c);
+            assertEquals(referenceIsPrimary, o.verifyReference);
+            assertEquals(referenceIsPrimary, c.recheckRejections);
+            assertEquals(referenceIsPrimary ? "reference" : "none", o.verifyName());
+        }
+        MainOptions diff = MainOptions.parse(map("engine", "diff"));
+        RunConfig dc = new RunConfig();
+        diff.resolveVerify(false, dc);
+        assertTrue(diff.verifyReference && dc.recheckRejections, "a comparison of engines verifies");
+
+        // given: the command line wins in both directions
+        for (boolean referenceIsPrimary : new boolean[] {false, true}) {
+            MainOptions on = MainOptions.parse(map("verify", "reference"));
+            assertEquals(Boolean.TRUE, on.verifyGiven);
+            RunConfig c = new RunConfig();
+            on.applyTo(c);
+            assertTrue(c.recheckRejections, "applyTo carries what the command line says");
+            on.resolveVerify(referenceIsPrimary, c);
+            assertTrue(on.verifyReference && c.recheckRejections);
+
+            for (Map<String, String> none : java.util.List.of(map("verify", "none"), map("no-recheck", ""),
+                    map("no-recheck", "true", "verify", "none"), map("engine", "diff", "verify", "none"))) {
+                MainOptions off = MainOptions.parse(none);
+                assertEquals(Boolean.FALSE, off.verifyGiven, none.toString());
+                RunConfig c2 = new RunConfig();
+                c2.recheckRejections = true;
+                off.applyTo(c2);
+                off.resolveVerify(referenceIsPrimary, c2);
+                assertFalse(off.verifyReference || c2.recheckRejections, none.toString());
+                assertEquals("none", off.verifyName());
+            }
+        }
+        // malformed, and the one contradiction
+        assertTrue(usage("verify", "strict").contains("-X verify=strict: expected none or reference"));
+        assertTrue(usage("verify", "").contains("needs a value"));
+        assertTrue(usage("verify", null).contains("needs a value"));
+        String msg = usage("no-recheck", "", "verify", "reference");
+        assertTrue(msg.contains("-X no-recheck means -X verify=none") && msg.contains("verify=reference"), msg);
     }
 
     /** Keys an engine declares are accepted and collected for EngineProvider.factory(Map); others are not. */
@@ -182,6 +241,7 @@ class MainOptionsTest {
         assertTrue(usage("enigne", "reference").contains("unknown checker setting -X enigne=reference"));
         assertTrue(usage("threads", "4").contains("unknown"));
         assertTrue(usage("no-rechek", "").contains("unknown checker setting -X no-rechek"));
+        assertTrue(usage("verfy", "reference").contains("unknown checker setting -X verfy=reference"));
         assertTrue(usage("", "x").contains("needs a key"));
         assertTrue(usage("engine", "").contains("needs a value"));
         assertTrue(usage("engine", null).contains("needs a value"));
