@@ -1,0 +1,135 @@
+\title{INV-1: a cached universe instantiation survives a level reset on a base list id whose content is session levels}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{levels}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Investigation "INV-1" of 2026-11-25 (14:23 to 15:40 UTC for the part recorded here; the campaign of section 5 was still running when this version was written). It started from a finding of the package that studies the session tables of the machine: the machine's debug mode \code{memocheck} declines one unit of Init, \code{\verb~|Array.ofFn.go.eq_def~}, with \code{\verb~|IllegalArgumentException: not a level id: 852~} when the session cap of the gate is 16 MiB instead of 1 or 4 MiB. The question was whether [the shared level base](rep-OPT-C), which had gone into the main tree six hours earlier, lets a level id outlive its overlay. It does not. The defect is older, it is in \code{rlvm-level} and therefore under both engines, it is of the family of [finding LV1-F1](log-XNVE), and it is not a defect of a debug mode: the level store hands out a level list that means other levels than the instantiation it was asked for. This tree is the record: what was shown, what was not, and the fix.}
+
+\subtree{
+\title{0. Answer}
+
+\ul{
+\li{\strong{Not new, and not the shared level base.} The sources and jars of the release tree before the wave (\code{rlvm-level} \code{c57947b218af}, \code{rlvm-api} \code{9abf2ef6620a}) fail in the same lane at the same unit with the same id and the same overlay sizes as the current main tree; the gate of package M8 run on both trees gives the same page. By source the rule that is wrong is in every tree that has the cache, the oldest one looked at being of 2026-11-23.}
+\li{\strong{Root cause.} The two instantiation caches of \code{\verb~|LevelStore~} keep an entry across \code{\verb~|reset()~} when the ids of the level or list, of the result and of the substitution with its two lists are below the base bounds (the rule LV1-F1 left). A base list \em{id} does not mean a list of base \em{levels}: the list store hash-conses level lists together with the lists of parameter names, name sets and substitution pairs, so a level list made of levels of the session is \em{found} as a base list when the base holds a list of the same ints. The entry then survives, and every later session reads the same base list with its own levels at those ids, or with ids that do not exist.}
+\li{\strong{It is used without a debug mode, at the default session caps.} Counted with an instrumented build that has the same ids and answers (section 3): Std, machine engine, default caps, 4 workers, batch load: 17 later hits of such an entry in one run, 15 of which handed the machine another level list than the instantiation and 2 a level id that did not exist; the reference engine by name, 8 workers, batch load: 2 hits at its default cap. Every run accepted its corpus, which is the right verdict. A run without any option (8 workers, load pipelined with checking) and a run with one worker had no hit on the corpora finished so far; the entries are made there too.}
+\li{\strong{No wrong verdict was seen, and none was excluded.} What the affected declarations were checked against was not what the export says. No export was built that turns the wrong level into a wrong accept; a hostile export controls the name ids and the level ids that have to coincide. Batch load is what the checker does by itself for one worker and for every file under 8 MiB.}
+\li{\strong{The fix} is two small changes, as patches for the integrator: the survival rule of the caches asks the content of the lists (\src{rlvm-level/src/main/java/rlvm/level/LevelStore.java}), and the term store asks the same of the level list of a constant before it writes it into a shared term (\src{rlvm-store/src/main/java/rlvm/store/NodeCtx.java}). With it the instrumented runs have no such entry and no hit, and the counters of a deterministic run are identical to the main tree's on Init, Std and cslib (section 4).}
+}
+}
+
+\subtree{
+\title{1. Is it new}
+
+\p{The gate command of the finding, \code{\verb~|report.sh gate --switches default --session-mib 16 --parts audits -Drlvm.machine.session-kib=16384 init~}, in two private copies of the tree: the release tree before the wave of 2026-11-25 with the jars published then, and the main tree of 14:25 UTC with its jars. The machine's sources are the same in both; the copies differ in \code{rlvm-level} and \code{rlvm-api} (the shared level base) and in the loader's modules.}
+
+\table{
+\tr{\th{Tree}\th{Result of the gate}\th{Lane \code{memocheck,shortcheck}}\th{Declarations compared}}
+\tr{\td{before the wave}\td{FAIL}\td{unit 10107 \code{\verb~|Array.ofFn.go.eq_def~}: accept against decline, \code{\verb~|not a level id: 852~}}\td{57,938, 1 different}}
+\tr{\td{main tree, 14:25 UTC}\td{FAIL, the same line}\td{the same unit, id and message}\td{57,938, 1 different}}
+}
+
+\p{One lane of the gate's harness run alone on both trees up to unit 10200 gives the same picture to the last number: the lane resets its session and its level overlay after units 2665, 3999, 4400, 4719, 5879, 8260 and 9951, the overlay holds 763 base levels and 837 levels in all when unit 10107 starts, and the machine has reset itself 17 times. So the level overlay and the machine's session were consistent, reset together, and no reset lies between the last one and the failure: the id 852 was not kept by anything of the machine across a reset.}
+}
+
+\subtree{
+\title{2. Root cause, with the code path}
+
+\ol{
+\li{\strong{Where 852 comes from.} The machine evaluates a constant of a code block, \code{\verb~|Code.kConst~}, and asks for the level list of the block under the substitution of its frame: \code{\verb~|Levels.lsubList~}, a miss of the machine's own cache, then \code{\verb~|LevelStore.instantiateList(#59, subst #2103)~}. List 59 is \code{\verb~|{(max 1 u)+1}~}, the substitution is \code{\verb~|u := u+1~}; both are lists of the base. The level store answers from its cache with list 121.}
+\li{\strong{What list 121 is.} A list of the base with the one int 852, a list of parameter names. In the level session in which the entry was made, the second of the lane, the instantiation had computed \code{\verb~|(max 1 (u+1))+1~}, a level that the base does not have and that got the id 852 in that session. The result list is the list of the one int 852, and interning it found the base list of the same content. Equal contents give equal ids: that is the design of the list store.}
+\li{\strong{Why the entry survived.} \code{\verb~|instantiateListSlow~} gave it the stamp that survives a reset because the list, the result and the substitution with its two lists all had ids below the base bound. The test is on ids; the result's content was a level of the session.}
+\li{\strong{What made it "no longer a level id".} Nothing was reset wrongly. In every later session the entry answers list 121, and list 121 reads as whatever level has the id 852 then. Sessions 6 and 7 of the lane had more than 852 levels: the machine got \code{\verb~|{max 2 ((max (u+1) 1)+1)}~} and \code{\verb~|{max 1 (u_2+1) (u_1+1)}~} for an instantiation whose value is \code{\verb~|{(max 1 (u+1))+1}~}, built a constant with those levels and went on; both units were accepted. Session 8 had 832 levels when the entry was hit: the constant got a level list with an id that does not exist, and the first operation that checks its argument, \code{\verb~|LevelStore.succ~} called for the type of a sort, threw. That is the decline of the finding.}
+\li{\strong{When a level overlay is reset relative to the machine's session.} Always together with it or less often, never alone: the driver and the gate's harness reset the session and the worker context in one step, the environment thread does the same, and the machine resets itself alone (its own cap, an outcome other than accept, an eager restart), which is legal because nothing of the context refers to the machine. That is as it was before the wave, with the private copy and with the shared overlay, at every cap. The shared overlay changed one thing in this respect: a rebase onto a newer snapshot ends the entries that survive a reset, so a pipelined run loses them at every publication it follows.}
+}
+
+\p{The same assumption, "a base list id is a list of base levels", is made in three more places. The first two are in the patches. (a) The level cache of single levels, through the substitution: its level list may be such a list. No wrong answer could be constructed through this alone, because a result that is a base level does not contain the session levels of the substitution; the fix closes it without relying on that argument. (b) The generated region of the term store accepts the level list of a constant that a worker built when the base list store calls the id shared, which it does for every base id. In the runs of Std counted so far the region was never asked for a level list. (c) The check of a code block of the machine accepts a list operand below the base bound. Its list operands come from terms of the export, whose lists the loader made of base levels, so no such list can reach it; it is left as it is.}
+}
+
+\subtree{
+\title{3. Can a run without a debug mode use it}
+
+\p{Yes. The stale list comes out of the level store on the plain path; the debug mode only met it at a call that checks its argument. Evidence: a private build of the main tree whose level store has the same ids and gives the same answers and, in addition, (1) checks every level id, list id and substitution id that a caller hands to a public method, the elements of every list handed in as a level list and every result of an instantiation against the current bounds, (2) examines by content every cache entry that gets the surviving stamp, and (3) at every later hit of an entry whose content was not base computes the instantiation again from scratch, without any cache, takes back what that created, and compares. "Wrong" below means: the list returned is not the instantiation. JVM launcher, aarch64 development host, no timing.}
+
+\table{
+\tr{\th{Run (Std, batch load)}\th{entries that survive on a content that is not base}\th{later hits}\th{of them wrong}\th{of them an id that does not exist}\th{verdict}}
+\tr{\td{machine, default caps, 4 workers}\td{5}\td{17}\td{15}\td{2}\td{accept}}
+\tr{\td{machine, default caps, 4 workers, a second run}\td{5}\td{3}\td{2}\td{1}\td{accept}}
+\tr{\td{machine, machine cap and driver cap 16 MiB, 1 / 4 / 8 workers}\td{3 / 3 / 2}\td{2 / 3 / 4}\td{2 / 3 / 4}\td{0}\td{accept}}
+\tr{\td{reference engine by name, default cap of 16 MiB, 8 workers}\td{5}\td{2}\td{2}\td{0}\td{accept}}
+\tr{\td{reference engine by name, default cap, 8 workers, a second run}\td{12}\td{4}\td{2}\td{2}\td{accept}}
+\tr{\td{reference engine by name, driver cap 1 MiB, 4 / 8 workers}\td{6 / 7}\td{14 / 6}\td{6 / 0}\td{8 / 6}\td{accept}}
+}
+
+\p{The first run of each pair was counted with the first form of the instrument, which calls a hit "different" when the list reads as other levels than when the entry was made; the second run of each pair and the lane of section 2 were counted with the from-scratch comparison. With several workers the schedule decides which worker makes and which hits an entry, so two runs differ.}
+
+\p{State of the campaign when this version was written: 152 of the 192 runs of the matrix (eight corpora, 1 / 4 / 8 workers, two caps, pipelined and batch, machine and reference engine by name) had ended, all with the verdict accept. Hits occurred in 7 runs, all of them Std with batch load. In the 80 pipelined runs entries of the bad kind were made in 24 runs and none was hit later. Runs with one worker at the default caps, which load in batch by themselves: entries made on Init (1), Std (7), cedar (1) and cslib (3), no later hit on any corpus finished (Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib). The final table replaces this paragraph.}
+}
+
+\subtree{
+\title{4. The fix}
+
+\ul{
+\li{\strong{The rule.} An entry of the instantiation caches survives a reset only if every id it rests on is a base id \em{by content}: the level or the list, the result, the substitution, its list of names and its list of levels as ids, and every level in each of those level lists. \code{\verb~|LevelStore.isBaseLevelList~} is the test, linear in the list, on the slow path only. The list of parameter names needs no content test: name ids mean the same in every session.}
+\li{\strong{The term store.} \code{\verb~|NodeCtx.listIsShared~} takes the level list of a constant into a shared term only if the list is shared and every level in it is a shared level, asked through the interfaces that exist (\code{\verb~|IntLists.isSharedList~}, \code{\verb~|LevelInfo.isSharedLevel~}). \code{rlvm-api} is not changed: the generated region asks the store's own list view, which is the base binding, and \code{\verb~|isSharedList~} is also asked for lists of names, for which the id is the right answer.}
+\li{\strong{Tests that fail without it.} In the overlay suite of the level module, on both kinds of overlay: a deterministic one (a base with lists of "parameter names" whose ids are the numbers the first levels of an overlay get; the result of an instantiation and the list that is instantiated are found as base lists; the next session must compute the instantiation and not read the old list) and a random one (400 sessions on an overlay that is reset against a new overlay and the reference instantiation, compared as structures, because the stale answer has the same id). With the survival rule of the main tree 4 of the 72 tests of the module fail; with the fix none (1 skipped: the depth limit). Single faults put into the fix: the list by id, the result by id, the element bound off by one: each makes the suite fail; the substitution's level list by id does not when the other two conditions are in place, see (a) of section 2. In the term store: a test with a shared list one of whose levels is not shared; it fails on the main tree.}
+\li{\strong{A test of the module that could fail for a reason of its own.} \code{\verb~|SharedOverlayTest.workersShareTheSnapshotsOfAPublisher~} held the shared overlay of a worker against a \em{new} private copy in every round. A worker that found no new snapshot had only reset its overlay, which keeps the surviving entries, and a hit of one skips the levels its computation would create: the ids that follow differ from the new copy's. With the publisher slowed from 1 ms to 25 ms per snapshot the unchanged test of the main tree fails in 2 of 3 runs; as it is it passed 40 of 40 runs alone and failed twice next to other load. The reference is now a private copy that is kept and reset like the shared overlay and made anew only at a rebase: 6 of 6 runs pass with the slowed publisher.}
+\li{\strong{Gates on the private build.} \code{rlvm-level} 72 tests (1 skipped), \code{rlvm-store} 73 (1 skipped), \code{rlvm-api} 32, \code{rlvm-ref} 148 (1 skipped), the fast group of \code{rlvm-machine} 420 (3 skipped): no failure. Std through the instrumented launcher with the fix, machine with 4 workers and batch load at the default caps and the reference engine with 8 workers and batch load: no surviving entry on a content that is not base, no later hit, no id out of range; the same two runs without the fix at the same time: 5 entries and 3 hits, 12 entries and 4 hits.}
+\li{\strong{Cost only where no stale entry was hit.} One worker, batch load, JVM launcher, the main tree against the fix, every counter that is not a time or a size:}
+}
+
+\table{
+\tr{\th{Corpus}\th{counters compared}\th{different}\th{ticks}\th{records}\th{run words}\th{pairs}\th{units of the machine}\th{declined by the machine}\th{resets of the machine}}
+\tr{\td{Init}\td{182}\td{0}\td{34,490,709}\td{15,271,167}\td{70,628,736}\td{1,856,757}\td{57,938}\td{0}\td{796}}
+\tr{\td{Std}\td{185}\td{0}\td{56,957,035}\td{26,050,886}\td{128,075,185}\td{3,455,031}\td{100,097}\td{2}\td{1,350}}
+\tr{\td{cslib}\td{187}\td{0}\td{215,956,521}\td{112,841,885}\td{460,901,102}\td{11,694,439}\td{397,615}\td{14}\td{5,881}}
+}
+
+\p{A run in which a stale entry was hit computes something else with the fix, by design: the entry is no longer there, the instantiation is computed again, and the ids that follow differ.}
+}
+
+\subtree{
+\title{5. The arena tests and the hostile rows}
+
+\p{The 230 published arena tests and the 1,196 hostile exports of the machine's suite, each through four light JVM runs (C1 only, 4 GB heap, as the light checker of the gates): the main tree with the counting level store, without any option and with one worker, and the fix, without any option and with one worker. These files are below 8 MiB, so the checker loads every one of them in batch.}
+
+\table{
+\tr{\th{Corpus}\th{files}\th{main tree: verdicts}\th{fix: verdicts}\th{files whose verdict differs}\th{main tree: entries that survive on a content that is not base}\th{later hits}\th{ids out of range}}
+\tr{\td{arena tests}\td{230}\td{138 accept, 92 reject: the expected verdict of every file, in both runs}\td{the same}\td{0}\td{1, in one file, in the run without options}\td{0}\td{0}}
+\tr{\td{hostile rows}\td{1,196}\td{agree 1,124, tolerated accepts of kind T 68, wrong accept 0, wrong reject 0, declined 4, in both runs}\td{the same}\td{0}\td{0}\td{0}\td{0}}
+}
+
+\ul{
+\li{\strong{No verdict changes with the fix}, and the hostile counts are those of the release.}
+\li{\strong{The small files do not reach the defect}: their level sessions are short, one entry of the bad kind is made in one arena test (\code{\verb~|perf/short-circuit-and-bad~}) and nothing hits it.}
+\li{\strong{The generated region was never asked} for the level list of a constant in any of the 1,426 files nor in the runs of Std: the second patch closes a path that these inputs do not take.}
+\li{Two arena tests that the loader rejects wrote no counter page; their verdict is reject in all four runs.}
+}
+}
+
+\subtree{
+\title{6. The attempt at an export with a wrong verdict}
+
+\p{A hand-made export on which the unfixed default configuration accepts what the official checker rejects, through a wrong universe instantiation, was attempted and not achieved. The reasoning, which is the result:}
+
+\ul{
+\li{\strong{What a wrong accept needs.} One \code{\verb~|instantiateList(list, subst)~} with \code{list} and \code{subst} both base ids, whose true result is a level list \code{\verb~|{L}~} with \code{L} a level built in the session, where \code{\verb~|{L}~} is found as a base list because the base holds a one-parameter name list \code{\verb~|[k]~} with name id \code{k} equal, as an int, to \code{L}'s id. The entry must then survive a reset and be hit in a later session in which the level at id \code{k} is a different, specific level that makes a conversion pass where it must fail.}
+\li{\strong{Why it is hard from a static file.} Three things must align that the export text does not control directly. (a) A numeric coincidence between two id spaces: the name id of a base one-parameter list and a session level id, which is the number of base levels plus how many levels the machine built in the session before this one. (b) A session boundary: the entry must be made in one session and hit in a later one, with a driver-level reset between them that keeps the cache but reissues the level at id \code{k}; which worker checks which unit and when a warm session is reset is the schedule's, not the file's. (c) The wrong level must flip a real conversion from reject to accept. The hits the instrument saw all arise on the machine's code-block path (\code{\verb~|Code.kConst~} then \code{\verb~|lsubList~}), driven by the reduction of real proofs, not by a two-line abbreviation.}
+\li{\strong{What was built and run.} An export of two abbreviations \code{\verb~|T.{0} -> T.{0}~} and \code{\verb~|T.{0} -> T.{1}~} over \code{\verb~|T.{u} : Sort (u+2) := Sort (u+1)~}, padded with up to 600 one-parameter definitions so that one-parameter name lists exist for a range of name ids, run with one worker and the smallest session cap to force a reset after every unit. The second abbreviation is rejected by the main tree and by the fix alike (the official verdict), and the counting store makes no entry that survives on a content that is not base: the two instantiations \code{\verb~|T.{0}~} and \code{\verb~|T.{1}~} are different keys, so no one entry is hit across sessions with two meanings, and the abbreviations do not reduce through a code block.}
+\li{\strong{Conclusion.} The defect is real and is used without a debug mode at the default caps (section 3), but a wrong accept through it was neither produced nor excluded. A construction would have to drive the machine's warm code-block reduction, across a session reset, with a base name list whose id meets a session level id - which asks for control of the schedule and the id spaces that a static export does not give. The structural repair of section 7 would remove the coincidence at its root and make the question moot.}
+}
+}
+
+\subtree{
+\title{7. What was not established, and a follow-up}
+
+\ul{
+\li{\strong{The executable.} Every run here is the JVM launcher; the level store is the same code in the image, the schedules are not.}
+\li{\strong{The launcher gates} of the default configuration with the fix (the 230 tests, the mutants, the hostile suite, the eight corpora on both launchers) were not run in this investigation; the integrator runs them on the shared build.}
+\li{\strong{A structural repair}, as follow-up, not folded into the urgent patch: level lists and lists of parameter names in separate stores, or a tag in the id, so that a list id says what its ints are. The assumption fixed here - that a base list id is a list of base levels - was made in four places (the two caches, the term store, the code-block check); as long as one id space holds both kinds of list it will be made again, and each site has to defend itself by content. Separate stores, or one bit of the id for the kind, would let the id carry the answer.}
+}
+}

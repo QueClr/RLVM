@@ -1,0 +1,18 @@
+\title{A base list id is not a list of base levels: the level store shares one id space for level lists and name lists}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{levels}
+\tag{soundness}
+\tag{machine}
+\import{base-macros}
+
+\p{Source: [the report of INV-1](rep-INV-1). The level store (\code{rlvm-level}) hash-conses level lists, parameter-name lists, name sets and substitution pairs in one \code{\verb~|IntListStore~}: equal contents give equal ids whatever a list holds. So a list id below the base bound tells you the list is one of the base's; it does not tell you the list is a list of base \em{levels}. A level list that a worker's session builds, say \code{\verb~|{852}~} with 852 the id of a level the session created, is \em{found} as a base list whenever the base holds a list of the same ints - here a one-parameter name list whose parameter has name id 852. That base id then reads as another level list in the next session, or as a list of ids that no longer exist.}
+
+\ul{
+\li{\strong{Where it bites.} Any rule that keeps something across a session reset, or shares it between threads, on the strength of a list id. Two were defects: the two instantiation caches of the store kept an entry past a reset because the ids of the list, the result and the substitution were base ids (the rule [LV1-F1](log-XNVE) left), and a later session read the stale base list with its own levels; and the term store took the level list of a generated constant into a shared term when the list store called the id shared. Both are used without a debug mode at the default session caps; no wrong verdict was seen, a wrong accept by a hostile export was not excluded.}
+\li{\strong{The fix, and why by content.} An entry survives, or a list is called a shared list of levels, only if every list it rests on holds base levels \em{by content} (\code{\verb~|LevelStore.isBaseLevelList~}, and \code{\verb~|NodeCtx.listIsShared~} through \code{\verb~|LevelInfo.isSharedLevel~}), not merely a base id. Linear in the list, on the slow path. The list of parameter names needs no content test: name ids mean the same in every session.}
+\li{\strong{The test that catches it.} A base that holds, as "name lists", lists of the very ints that the first levels of an overlay get as ids; a session that makes an instantiation whose result or whose list is found as one of them; a reset; and then a comparison against a new overlay and against the reference instantiation \em{as structures}, because the stale answer has the same id - comparing ids would miss it, as it missed [the shared-base gate](ins-6S1P).}
+\li{\strong{The root is the shared id space.} As long as one store holds level lists and name lists, every site that trusts a list id has to defend itself by content, and the next one added will trust the id again. Separating the stores, or spending one bit of the id on the kind, would let the id carry the answer. Not done; a follow-up.}
+}
