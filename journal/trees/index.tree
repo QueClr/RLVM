@@ -40,6 +40,7 @@
 \li{[Changelog](changelog): dated entries, by month and [by area](release-unreleased).}
 \li{[Sessions](sessions): one tree per phase of the work, with what was done and where it is recorded.}
 \li{[Standing policies](standing-policies): the maintainer's lasting instructions, with their dates.}
+\li{[The owner's notes](owner-notes): the maintainer's instructions 1 to 16 as they were given, each with its reading.}
 \li{[Accepted risks](accepted-risks): trade-offs decided on purpose, among them where the default configuration may differ from the official checker.}
 \li{[People and agents](agents): who wrote what.}
 \li{[Licence](licence).}
