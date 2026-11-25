@@ -73,6 +73,9 @@ class Oracle {
 
         abstract int[] uClaims(int unit);
 
+        /** The unit that {@code unit} repeats according to the loader ({@code LoadTarget.repeatOf}), or -1. */
+        abstract int uRepeatOf(int unit);
+
         abstract int blockFirst(int block);
 
         abstract int blockRoot(int block);
@@ -452,6 +455,12 @@ class Oracle {
         int unit = -1;
         int lastDecl = 0;
         long droppedCount = 0;
+        // Repeated declarations, found again here from the reference records: (kind, universe parameters, hint,
+        // type record, value record) -> the first unit. A metadata record has an id of its own in the reference
+        // store and none in the loader (the wrapped record stands for it), so the two agree on files without one.
+        java.util.Map<java.util.List<Long>, Integer> firstUnitOf = new java.util.HashMap<>();
+        long repeatsExpected = 0;
+        long repeatsSaid = 0;
         int[] declFirst = s.declFirstConstColumn();
         for (int c = 1; c <= s.constCount(); c++) {
             int d = s.constDeclColumn()[c];
@@ -513,6 +522,36 @@ class Oracle {
             if (kind >= ColumnarStore.CONST_INDUCT && firstOfUnit) {
                 verifyClaims(d, unit, cid);
             }
+            int said = firstOfUnit ? f.uRepeatOf(unit) : -1;
+            if (said >= 0) {
+                repeatsSaid++;
+                assertTrue(said < unit, what + ": repeats the later unit " + said);
+                assertEquals(-1, f.uRepeatOf(said), what + ": repeats unit " + said + ", which is a repeat itself");
+                int first = f.uFirstCid(said);
+                assertEquals(1, f.uSize(said), what);
+                assertEquals(f.cKind(first), f.cKind(cid), what + ": kind of the unit it repeats");
+                assertEquals(f.cLparams(first), f.cLparams(cid), what + ": universe parameters of the unit it repeats");
+                assertEquals(f.cHint(first), f.cHint(cid), what + ": hint of the unit it repeats");
+                assertEquals(f.cType(first), f.cType(cid), what + ": type of the unit it repeats");
+                assertEquals(valueHash(f.cValue(first)), valueHash(f.cValue(cid)), what + ": value of the unit it repeats");
+            }
+            if (kind == ColumnarStore.CONST_DEF || kind == ColumnarStore.CONST_THM || kind == ColumnarStore.CONST_OPAQUE) {
+                java.util.List<Long> key = java.util.List.of((long) kind, refNameListHash(30, s.constLevelParamsColumn()[c]),
+                        kind == ColumnarStore.CONST_DEF ? (long) f.cHint(cid) : -1L, (long) s.constType(c), (long) s.constValue(c));
+                Integer first = firstUnitOf.putIfAbsent(key, unit);
+                if (first != null) {
+                    repeatsExpected++;
+                }
+                if (report.exprMData == 0) {
+                    assertEquals(first == null ? -1 : first.intValue(), said, what + ": the unit it repeats");
+                }
+            } else {
+                assertEquals(-1, said, what + ": only a definition, theorem or opaque repeats a unit");
+            }
+        }
+        assertEquals(repeatsSaid, report.repeatUnits, "repeated declarations");
+        if (report.exprMData == 0) {
+            assertEquals(repeatsExpected, report.repeatUnits, "repeated declarations");
         }
         assertEquals(cid, f.consts(), "constants");
         assertEquals(cid, report.constants);
@@ -863,6 +902,11 @@ class Oracle {
         @Override
         int[] uClaims(int unit) {
             return fake.uClaims[unit];
+        }
+
+        @Override
+        int uRepeatOf(int unit) {
+            return fake.uRepeat[unit] - 1;
         }
 
         @Override

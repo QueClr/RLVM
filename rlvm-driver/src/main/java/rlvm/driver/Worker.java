@@ -79,6 +79,8 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private final MemoryAccount account;
     private final boolean statsOn;
     private final boolean same;
+    /** {@code RunConfig.skipRepeats}, and the primary engine is not the reference engine. */
+    private final boolean skipRepeats;
     private final Budget warm;
     private final Budget cold;
     private final int shardCount;
@@ -140,6 +142,9 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     private long gated;
     private long restsReleasedInUnit;
     private long shardSkipped;
+    private long repeatsSkipped;
+    /** Repeats that were checked, not accepted, and then admitted on the word of their original ({@link #awaitOriginal}). */
+    private long repeatsAwaited;
 
     // ---- time accounting (statistics only: all zero unless statsOn) ------------------------------------------
     /** Columns of {@link #times()}. */
@@ -189,6 +194,7 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         this.account = run.account();
         this.statsOn = stats.enabled();
         this.same = run.primaryIsReference();
+        this.skipRepeats = config.skipRepeats && !same;
         this.warm = new Budget(config.warmSteps, run.warmUnitBytes(), config.warmDepth);
         this.cold = Budget.cold(config.memoryLimitBytes);
         this.shardCount = config.shardCount;
@@ -197,6 +203,53 @@ public final class Worker implements Runnable, LaneSignals.Probe {
 
     /** Pseudo outcome of {@link #unit(int)}: a decline was withheld until the file is completely loaded. */
     private static final int DEFERRED = -2;
+
+    /**
+     * The "session" of a unit that repeats an ACCEPTED unit word for word ({@code RunConfig.skipRepeats}):
+     * the lane's admission runs with it exactly as with the warm session - the environment frontier, the
+     * name, the universe parameters, the roots, a recorded outcome of the environment pass - and where it
+     * would hand the constant to the engine, the answer is the one the engine gave for the same type and
+     * value under the earlier name. Whatever the admission itself finds is reported as for any unit.
+     */
+    private static final Session ADMIT_ONLY = new Session() {
+        @Override
+        public int check(int cid, Budget budget) {
+            return Outcome.ACCEPT;
+        }
+
+        @Override
+        public Reason lastReason() {
+            return null;
+        }
+
+        @Override
+        public String lastMessage() {
+            return null;
+        }
+
+        @Override
+        public rlvm.api.KernelOps ops() {
+            return null;
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public long footprintBytes() {
+            return 0;
+        }
+
+        @Override
+        public long steps() {
+            return 0;
+        }
+
+        @Override
+        public void close() {
+        }
+    };
 
     @Override
     public void run() {
@@ -439,11 +492,14 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         signals.clearMemoryDeclined();
         unitPeak = 0;
         long s0 = statsOn ? session.steps() : 0;
+        // A unit that repeats an accepted unit is admitted and not checked again (RunConfig.skipRepeats).
+        final int original = skipRepeats ? originalOf(u, rank) : -1;
+        final boolean repeat = original >= 0 && board.status(original) == VerdictBoard.ACCEPTED;
         int o;
         Reason reason = null;
         boolean thrown = false;
         try {
-            o = lane.admit(u, session, warm);
+            o = lane.admit(u, repeat ? ADMIT_ONLY : session, warm);
         } catch (RuntimeException e) {
             o = Outcome.DECLINE;
             thrown = true;
@@ -451,6 +507,9 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             stageMessage = e.toString();
         }
         if (o == Outcome.ACCEPT) {
+            if (repeat) {
+                repeatsSkipped++;
+            }
             if (config.differential && !same && !agrees(u, Outcome.ACCEPT)) {
                 resetWarm();
                 return Outcome.ACCEPT;
@@ -494,11 +553,65 @@ public final class Worker implements Runnable, LaneSignals.Probe {
             cancelled++;
             return o;
         }
+        if (original >= 0 && !repeat) {
+            // The unit repeats a unit that had no status when this one came up, so it was checked - and the
+            // check did not accept it. Had its original been accepted a moment earlier, the unit would have
+            // been admitted on the original's word; the status of a unit must not depend on that moment
+            // (on input that only a shortcut of the primary engine accepts the two can differ). So the
+            // original's status is waited for: ACCEPTED, and the unit goes through the path of a repeat;
+            // anything else, and the first failure lies at or before the original.
+            releaseRest();
+            if (awaitOriginal(u, original)) {
+                repeatsAwaited++;
+                return unit0(u);
+            }
+            if (u > board.firstFailure()) {
+                cancelled++;
+                return o;
+            }
+        }
         if (o == Outcome.REJECT && config.differential && !same && !agrees(u, Outcome.REJECT)) {
             return o;
         }
         resolve(u, o, reason, message, thrown);
         return o;
+    }
+
+    /**
+     * The unit that {@code u} repeats word for word ({@code RunHost.unitRepeatOf}), or -1: an earlier unit of
+     * the file that also comes earlier in admission order, so that every constant it could see is visible to
+     * {@code u}. If that unit is ACCEPTED on the board when {@code u} comes up - a status is written once, so
+     * an ACCEPTED read is final - {@code u} is admitted and not checked. Otherwise (not decided yet: in flight
+     * on another worker; rejected or declined: the verdict is decided before {@code u}) it is checked, and
+     * nobody waits unless that check fails ({@link #awaitOriginal}).
+     */
+    private int originalOf(int u, int rank) {
+        int first = host.unitRepeatOf(u);
+        return first >= 0 && first < u && host.unitRank(first) < rank ? first : -1;
+    }
+
+    /**
+     * Waits until {@code original}, a smaller unit that another worker holds, has its final status or
+     * {@code u} lies above the first failure (which a cancelled run sets below every unit).
+     *
+     * <p>Rare: the unit was checked because its original was still in flight, and the check did not
+     * accept it. The worker holds no gate and its warm session is reset; the rest of its claim was given
+     * back. Whoever holds the original does not wait for this worker: a wait is always for a smaller unit,
+     * and the holder of the smallest undecided unit waits for none.
+     *
+     * @return true if the original is ACCEPTED
+     */
+    private boolean awaitOriginal(int u, int original) {
+        for (;;) {
+            int st = board.status(original);
+            if (st == VerdictBoard.ACCEPTED) {
+                return true;
+            }
+            if (st != VerdictBoard.NONE || u > board.firstFailure()) {
+                return false;
+            }
+            java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
+        }
     }
 
     /** A unit that no worker checks: decided by the environment pass, skipped, or of unknown kind. */
@@ -1080,6 +1193,16 @@ public final class Worker implements Runnable, LaneSignals.Probe {
     /** Units of other shards that this worker passed over without checking ({@code RunConfig.shardCount}). */
     long shardSkipped() {
         return shardSkipped;
+    }
+
+    /** Units admitted without a check because they repeat an accepted unit ({@code RunConfig.skipRepeats}). */
+    long repeatsSkipped() {
+        return repeatsSkipped;
+    }
+
+    /** Of those: units that were checked first, while their original was in flight, and not accepted by that check. */
+    long repeatsAwaited() {
+        return repeatsAwaited;
     }
 
     public int id() {

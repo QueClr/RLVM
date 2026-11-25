@@ -55,6 +55,11 @@ Every skeleton signature still exists, with one exception: `StoreBuilder.dropUns
   sparse record index and the coarse record-to-block index back (`releaseLoaderState()`, idempotent):
   `promote` and a further block throw `IllegalStateException` afterwards. A load that ends without
   `finish()` keeps the state.
+- **`StoreBuilder.repeatOf(firstUnit)` / `DeclTable.repeatOf(unit)`**: the loader's statement that the open
+  unit is the declaration record of an earlier unit under another name (same kind, universe parameters, hint,
+  and the same type and value records of the input); one int per unit in chunks that exist only where a unit
+  repeats another, written before the unit is published, -1 for every other unit. A hint for the driver
+  (*agentic-note*: rep-OPT-I); the store reads it nowhere.
 - **`StoreBuilder.touch(sharedId)`** (wave 7): a hint of the loader that the export node will be named as
   a child of a node appended soon; it loads the node's first and last word (a node can straddle two cache
   lines) and changes nothing. An id that is not an export term is ignored.
@@ -390,6 +395,13 @@ writer's own loop writes the common records without a call and without a data-de
 every other record with the checks of the single calls. `PackedRunTest` compares both with the
 record-by-record writes.
 
+`NameTable` (2026-11-25, *agentic-note*: rep-OPT-F): the intern index is far larger than the caches, so
+a probe of it is a miss; the names of the last thousand stand in a small table that is searched first
+and go into the index together, with their probes overlapping, and a name whose prefix is not in the
+index yet is not looked up there at all (it cannot be there: a name is younger than its prefix) - two
+names of three in an export are such components of a name introduced a few lines earlier. No id and
+no word of the store depends on it.
+
 ### Exactness and allocation items taken on 2026-11-24 (LP2)
 
 - **`LitPool.addNat` / `addString` on a worker pool look in the worker's own table first** (R2): a
@@ -417,7 +429,7 @@ record-by-record writes.
 | `TermOpsTest` (13) | every operation against a naive model on random DAGs (shared and overlay inputs); inverse laws; `eqv` against structural digests incl. mutants; depth 300,000; a DAG with 2^64 paths; overflow |
 | `OverlayTest` (7) | hash-consing of every constructor; reset; random marks with blocks and free variables in between; growth to the cap with two readers; **`resetTo` gives back node array and index** (three ways of cleaning the index); **an id below a mark is never handed out again** (400 random rounds against a model); **`resetTo` releases the declaration's literals**, keeps the ones made before the newest mark, drops stale marks |
 | `ProofBlocksTest` (6) | random files (definitions, theorems, cross references, interleaved segments): round trip, promotion copies exactly the reachable unpromoted records, block table, chunk limits, every record encoding; **sharing flags against a naive referrer count**; **promotion over 150 blocks and more than 12,288 records** (several chunks of the promotion memo, many entries of the coarse record index, 1,500 promotions in random order, the loader's block lookup against the binary search for every record) |
-| `NameTableTest` (5) | interning, big numerals, queries, claims, **`compare` against a reference of Lean's order on 10^5 pairs**, growth |
+| `NameTableTest` (6) | interning, big numerals, queries, claims, **`compare` against a reference of Lean's order on 10^5 pairs**, growth, the deferred index against a map on 240,000 requests |
 | `LitPoolTest` (5) | interning by content, code points of 1..4-byte scalars, worker pools and publication, chunked big naturals; **marks against a model: no index is issued twice in a session, a released entry cannot be read, memory follows the live payload** (naturals and strings) |
 | `MachineAccessTest` (5) | the one-dispatch accessor against the field accessors in every region; `regionOf` after growth and reset; the binder hint (only export and generated binders, nothing else changes, a writer racing with a growing region); `unitFirstTerm` |
 | `GeneratedTest` (5) | shared copies node for node against the model (40 seeds), every refusal leaves the region as it was, lists and parameter sets against a frozen list store, generated constants + late names + `rebind` + a second thread reading them, region growth |

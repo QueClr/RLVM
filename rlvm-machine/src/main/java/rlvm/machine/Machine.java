@@ -28,11 +28,12 @@ import rlvm.store.Terms;
  * <h2>Stores (ISA 1.1, 1.6)</h2>
  * <pre>
  * vh / vp            value records, 8 words each; record r at vh[8r]; vp = next record index (first = 2)
- * vtab               intern table over record indices (Layout: tag:4 | index:28; linear probing)
+ * vtab / vold        intern tables over record indices (Layout: tag:4 | index:28; linear probing): the YOUNG
+ *                    table of fixed size and the OLD one that grows ("Young and old tables" below)
  * rs / rsp           run slab; run id = offset of its header; rsp = next free word (first = 1)
- * rtab               intern table over FRAME and REST runs
+ * rtab / rold        intern tables over FRAME and REST runs, young and old
  * es / ep            environment slab (LIFO, not interned);  envBase = second result of Ops.push / Ops.enter
- * pair / plog        pair table (4 ints per entry) and the log of inserted slots
+ * pair / pold        pair tables (4 ints per entry), young and old, with the logs of their entries (ylog, plog)
  * ic, lsub, lsubList, limp, sigt, fv0, undec     direct-mapped caches, each cell stamped (Layout)
  * W / wp             worklist: the SUSPENDED frames (H1);  S / sp: side buffer of an unwind (H6)
  * SC / ssp           scope stack: the open binders' FVAR refs
@@ -41,6 +42,18 @@ import rlvm.store.Terms;
  * </pre>
  * ISA 1.6 calls the run-slab pointer {@code rp}; here it is {@code rsp}, because the convention gives
  * {@code rp} to the register stack.
+ *
+ * <h2>Young and old tables (*agentic-note*: rep-OPT-D)</h2>
+ * Each of the three tables that find something again - records, runs, compared pairs - is two tables. The
+ * YOUNG one has the fixed base size of {@link Sizes} and holds what was entered since it was last emptied; when
+ * it is half full its entries are moved, in batches, into the OLD one, which grows by doubling and is the only
+ * table of a session that gets larger than the cache. Every probe starts in the young table. It goes on to the
+ * old one only if the key could have been entered before the young table was last emptied, and that is decided
+ * from the key alone: ids are given in creation order and a key is made of ids that exist, so a key that
+ * holds a record or a run made after that moment ({@code >= } the boundary kept for the table: {@link #vY} and
+ * {@link #rYv}, {@link #vYr} and {@link #rY}, {@link #vYp}) names something that was itself entered after it.
+ * The result of a probe is the record, run or entry that a single table would give: nothing that is computed
+ * depends on which of the two tables holds an entry.
  *
  * <h2>Registers (ISA 1.2, as changed by H7)</h2>
  * The result register A is the Java return value of a step; {@code tryp} does not exist. {@code fuel}
@@ -124,9 +137,15 @@ public final class Machine {
          * slots, 2^20 run words, 2^17 pairs: about 20 MiB per worker, the field initialisers above). Measured
          * on Init and the Cedar slice (integration log, 2026-11-24), those tables cost CPU time: a declaration
          * makes about 900 records, and every probe of a 1-2 MiB table that holds them is a cache miss. The
-         * arrays therefore start small - a small declaration's tables stay in the first-level cache - and grow
-         * by doubling; {@link Machine#reset()} returns them to the base. Default 2^14 records, 2^15 / 2^14 table
-         * slots, 2^16 run words, 2^12 pairs, 2^10 plog (the tables are 256 KiB together). Sweep with
+         * arrays therefore start small - a small declaration's tables stay in the first-level cache - and the
+         * slabs grow by doubling; {@link Machine#reset()} returns them to the base. The three tables do not grow:
+         * the sizes given here are those of the YOUNG tables, which are emptied into the old ones when half
+         * full ({@link Machine}, "Young and old tables"). Default 2^14 records, 2^16 / 2^14 table slots, 2^16 run
+         * words, 2^13 pairs, 2^10 plog (the young tables are 448 KiB together): a session that ends at the
+         * machine's cap of 1 MiB holds about 20,000 records and 3,300 pairs, so with these sizes it never moves
+         * anything into an old table (with 2^15 slots and 2^12 pairs, the sizes until 2026-11-25, nine sessions in
+         * ten rehashed their records once and their pairs once or twice: 1 to 4 % of the CPU time of a warm pass,
+         * *agentic-note*: rep-OPT-D). Sweep with
          * {@code -Drlvm.machine.sizes=records,vtab,runWords,rtab,pairs,plog} (log2 each; {@code isa} = the
          * ISA 1.6 sizes).
          */
@@ -179,7 +198,7 @@ public final class Machine {
         private static final int[] BASE = baseSizes(System.getProperty("rlvm.machine.sizes"));
 
         static int[] baseSizes(String p) {
-            int[] dflt = {14, 15, 16, 14, 12, 10};
+            int[] dflt = {14, 16, 16, 14, 13, 10};
             if (p == null || p.isEmpty()) {
                 return dflt;
             }
@@ -266,24 +285,56 @@ public final class Machine {
      * The records in use are {@code [vbase, vp)}.
      */
     int vbase = Layout.FIRST_RECORD;
+    /** The YOUNG intern table of records: those in {@code [vY, vp)}; 2^sizes.vtab slots, never grown (class comment). */
     int[] vtab;
     int vtabMask;
+    /** The OLD intern table of records: those in {@code [vbase, vY)}; {@link #NO_TABLE} while the session has none. */
+    int[] vold = NO_TABLE;
+    /** The first record of the young table ({@code vp} when it was last emptied): a key that holds a record ref {@code >= vY} is in {@link #vtab} or nowhere. */
+    int vY = Layout.FIRST_RECORD;
+    /** {@code rsp} when {@link #vtab} was last emptied: a closure or suspension over a run {@code >= rYv} is in {@link #vtab} or nowhere. */
+    int rYv = Layout.FIRST_RUN;
     int[] rs;
     int rsp = Layout.FIRST_RUN;
     /** First run word of the current session ({@code Layout.FIRST_RUN}; moved by a reset under {@code Op.DBG_POISON}). */
     int rbase = Layout.FIRST_RUN;
+    /** The YOUNG intern table of FRAME and REST runs: those in {@code [rY, rsp)}; 2^sizes.rtab slots, never grown. */
     int[] rtab;
     int rtabMask;
+    /** The OLD intern table of runs: the interned runs in {@code [rbase, rY)}; {@link #NO_TABLE} while the session has none. */
+    int[] rold = NO_TABLE;
+    /** The first run word of the young table ({@code rsp} when it was last emptied): a run with a REST run {@code >= rY} is in {@link #rtab} or nowhere. */
+    int rY = Layout.FIRST_RUN;
+    /** {@code vp} when {@link #rtab} was last emptied: a run that holds a record ref {@code >= vYr} is in {@link #rtab} or nowhere. */
+    int vYr = Layout.FIRST_RECORD;
+    /** Interned runs of the session (both tables; part of the footprint). */
     int rtabUsed;
+    /** Interned runs in the young table. */
+    int rtabYoung;
     int[] es;
     int ep;
     /** Second result of {@code Ops.push} / {@code Ops.enter}: the base of the environment they produced. */
     int envBase;
+    /** The YOUNG pair table: 2^sizes.pairs entries, never grown; its entries are the {@link #ylogN} slots of {@link #ylog}. */
     int[] pair;
     int pairMask;
+    /** Pair entries of the session (both tables; part of the footprint). */
     int pairUsed;
+    /** The OLD pair table ({@link #NO_TABLE} while the session has none) and the log of its entries, in the order they were made. */
+    int[] pold = NO_TABLE;
+    int poldMask;
     int[] plog;
     int plogN;
+    /** The slots of the young pair table in the order they were filled (at most half of its entries). */
+    int[] ylog;
+    int ylogN;
+    /** {@code vp} when {@link #pair} was last emptied: a pair with a record ref {@code >= vYp} is in {@link #pair} or nowhere. */
+    int vYp = Layout.FIRST_RECORD;
+    /**
+     * The old table of a session that has none: one empty slot, never written. A probe of it ends at once, so
+     * the probes need no test for "no old table".
+     */
+    static final int[] NO_TABLE = new int[1];
     final int[] ic = new int[Layout.CELL_WORDS << Layout.IC_LOG2];
     final int[] lsub = new int[Layout.CELL_WORDS << Layout.LSUB_LOG2];
     final int[] lsubList = new int[Layout.CELL_WORDS << Layout.LSUB_LOG2];
@@ -598,6 +649,7 @@ public final class Machine {
         es = new int[1 << sizes.env];
         pair = new int[Layout.PAIR_WORDS << sizes.pairs];
         pairMask = (1 << sizes.pairs) - 1;
+        ylog = new int[Math.max(1, 1 << sizes.pairs >> 1)];
         plog = new int[1 << sizes.plog];
         W = new int[1 << sizes.worklist];
         S = new int[1 << sizes.side];
@@ -645,8 +697,9 @@ public final class Machine {
     // ---------------------------------------------------------------------------------------------------
 
     /**
-     * Appends the record {@code (w0, a, b, c)} with empty memo words and enters it into vtab at
-     * {@code slot}, which the caller found empty at the end of the probe sequence of {@code hash}.
+     * Appends the record {@code (w0, a, b, c)} with empty memo words and enters it into the young table
+     * {@link #vtab} at {@code slot}, which the caller found empty at the end of the probe sequence of {@code hash}
+     * there (after it had made sure that the old table does not hold the key).
      *
      * @return the record ref, or FATAL ({@code E_MEM}: 2^28 records)
      */
@@ -667,11 +720,69 @@ public final class Machine {
         v[o + Layout.M3] = 0;
         vp = r + 1;
         vtab[slot] = Layout.tabWord(hash, r);
-        if ((vp - vbase << 1) > vtab.length && !growVtab()) {
+        if ((vp - vY << 1) >= vtab.length && !flushRecords()) {
             return fault(MachineErrors.E_MEM); // the record exists; the session ends with this declaration
         }
         return r;
     }
+
+    /**
+     * The record of {@link #vold} with key {@code (key0 = kind and aux, a, b, c)} and hash {@code hash}, or 0
+     * ({@code Layout.NONE}). Not for NEU. The second half of a record probe that did not find its key among the
+     * young records (class comment, "Young and old tables").
+     */
+    int oldRecord(int hash, int key0, int a, int b, int c) {
+        int[] tab = vold;
+        int[] v = vh;
+        int mask = tab.length - 1;
+        int slot = hash & mask;
+        for (;;) {
+            int e = tab[slot];
+            if (e == 0) {
+                return 0;
+            }
+            if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
+                int o = (e & Layout.TAB_INDEX_MASK) << Layout.REC_SHIFT;
+                if (v[o + Layout.A] == a && v[o + Layout.B] == b && v[o + Layout.C] == c
+                        && (v[o] & Hash.W0_KEY_MASK) == key0) {
+                    return e & Layout.TAB_INDEX_MASK;
+                }
+            }
+            slot = (slot + 1) & mask;
+        }
+    }
+
+    /**
+     * True if a record with this key can only be a young one: a component of the key is a record or a run that
+     * was made after {@link #vtab} was last emptied. The components by kind (ISA 2.5): the frame of a closure or
+     * suspension (word b), the type of an FVAR, the struct of a PROJ, the base of an NSUC (word a). Every other
+     * kind (and NEU, whose arguments the caller tests) gives false, which is always a correct answer: it only
+     * sends the probe to the old table.
+     */
+    boolean youngKey(int w0, int a, int b) {
+        switch (w0 >>> Layout.KIND_SHIFT) {
+            case Layout.LAM:
+            case Layout.PI:
+            case Layout.PII:
+            case Layout.SUSP:
+                return ((b - rYv) >>> RUN_YOUNG_SHIFT) == 0;
+            case Layout.FVAR:
+            case Layout.PROJ:
+            case Layout.NSUC:
+                return ((a - vY) >>> YOUNG_SHIFT) == 0;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * {@code ((ref - boundary) >>> YOUNG_SHIFT) == 0} is "ref is a record at or above the boundary": a record
+     * index is below 2^28 ({@code Layout.RECORD_MAX}), so the difference of an older record is negative, that of
+     * an immediate (bit 31) or of a signal (0x7FFFFFFC and above) has a bit above 27 set, and NONE and HOLE are
+     * below every boundary. The same holds for run ids ({@code Layout.RUN_WORDS_MAX}).
+     */
+    static final int YOUNG_SHIFT = 28;
+    static final int RUN_YOUNG_SHIFT = 28;
 
     /**
      * The reference probe: the record with key {@code (kind and aux of w0, a, b, c)}, made if absent
@@ -688,6 +799,12 @@ public final class Machine {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
+                if (!youngKey(w0, a, b)) {
+                    int r = oldRecord(hash, key0, a, b, c);
+                    if (r != 0) {
+                        return r;
+                    }
+                }
                 return addRecordAt(slot, hash, w0, a, b, c);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
@@ -746,27 +863,93 @@ public final class Machine {
     long allocResets;
     long allocResetBytes;
 
-    private boolean growVtab() {
-        if (!heapAllows(8L * vtab.length)) {
-            return false;
-        }
-        int[] tab = takeTable(vpool, Integer.numberOfTrailingZeros(vtab.length) + 1);
-        int mask = tab.length - 1;
-        int[] v = vh;
-        for (int r = vbase; r < vp; r++) {
-            int h = Hash.ofRecord(v, r);
-            int slot = h & mask;
-            while (tab[slot] != 0) {
-                slot = (slot + 1) & mask;
+    /**
+     * The young table of records is half full: its records go into the old table, which is made or doubled
+     * first if the session's records would fill more than half of it, and the young table starts empty again.
+     * One loop of independent probes per table (the loads of the slots do not wait for each other).
+     *
+     * @return false if the heap refuses the larger old table: nothing was changed
+     */
+    private boolean flushRecords() {
+        int n = vp - vbase;
+        int[] tab = vold;
+        if ((long) n << 1 > tab.length) {
+            int k = tableLog2(n, sizes.vtab, voldHint);
+            if (!heapAllows(4L << k)) {
+                if ((vp - vY << 2) > 3 * vtab.length) {
+                    throw new HeapLimit(limitDetail); // the young table must keep an empty slot (probes end there)
+                }
+                return false;
             }
-            tab[slot] = Layout.tabWord(h, r);
+            int[] grown = takeTable(vpool, k);
+            enterRecords(grown, vbase, vY);
+            if (tab != NO_TABLE) {
+                giveTable(vpool, tab);
+            }
+            vold = tab = grown;
         }
-        int[] old = vtab;
-        vtab = tab;
-        vtabMask = mask;
-        giveTable(vpool, old);
+        enterRecords(tab, vY, vp);
+        Arrays.fill(vtab, 0);
+        vY = vp;
+        rYv = rsp;
         return true;
     }
+
+    /**
+     * Enters the records {@code [from, to)} into {@code tab}, which holds none of them and has room. In batches of
+     * {@link #BATCH}: the first loop of a batch computes the hashes and reads the slot each record starts at -
+     * loads that do not depend on each other, so the cache misses of a large table overlap - and the second
+     * loop, which probes and writes, finds the lines in the cache. (A loop that probes at once waits for a slot
+     * whenever the branch on its content was mispredicted.)
+     */
+    private void enterRecords(int[] tab, int from, int to) {
+        int mask = tab.length - 1;
+        int[] v = vh;
+        int[] hs = batch;
+        int touched = 0;
+        for (int r = from; r < to; r += BATCH) {
+            int n = Math.min(BATCH, to - r);
+            for (int i = 0; i < n; i++) {
+                int h = Hash.ofRecord(v, r + i);
+                hs[i] = h;
+                touched += tab[h & mask];
+            }
+            for (int i = 0; i < n; i++) {
+                int h = hs[i];
+                int slot = h & mask;
+                while (tab[slot] != 0) {
+                    slot = (slot + 1) & mask;
+                }
+                tab[slot] = Layout.tabWord(h, r + i);
+            }
+        }
+        batchSink += touched;
+    }
+
+    /** Entries per batch of a move into an old table ({@link #enterRecords}): their slots are 8 KiB of cache lines at most. */
+    private static final int BATCH = 128;
+    /** Scratch of a batch: hashes (records, pairs) or hashes and run ids. */
+    private final int[] batch = new int[2 * BATCH];
+    /** Keeps the early loads of a batch alive (their sum is never read). */
+    private int batchSink;
+
+    /**
+     * log2 of the size of an old table that holds {@code n} entries at a load of at most 0.5: at least the size
+     * of the young table (2^base), and at least 2^hint, the size the old table of the last session had when it
+     * ended (0 = none): sessions that end at the cap need the same table again, and a table that starts at
+     * its final size is never rehashed.
+     */
+    private static int tableLog2(int n, int base, int hint) {
+        int k = 32 - Integer.numberOfLeadingZeros(Math.max(1, (n << 1) - 1));
+        return Math.max(k, Math.max(base, hint));
+    }
+
+    /** log2 of the size of the old table of records / of runs / of pairs when the last session ended; 0 if it had none (and with {@link #OLD_HINT} off). */
+    private int voldHint;
+    private int roldHint;
+    private int poldHint;
+    /** {@code -Drlvm.machine.oldhint=off}: an old table starts at the size of the young one and doubles (the A/B of the hint). */
+    private static final boolean OLD_HINT = !"off".equals(System.getProperty("rlvm.machine.oldhint"));
 
     // ---------------------------------------------------------------------------------------------------
     // Retired intern tables (NOTES-INT I5)
@@ -825,6 +1008,9 @@ public final class Machine {
         if (!pristine() || !allZero(vtab) || !allZero(rtab)) {
             return false;
         }
+        if (vold != NO_TABLE || rold != NO_TABLE || pold != NO_TABLE || NO_TABLE[0] != 0 || ylogN != 0 || rtabYoung != 0) {
+            return false;
+        }
         for (int k = 0; k <= TAB_POOL_MAX; k++) {
             if ((vpool[k] != null && !allZero(vpool[k])) || (rpool[k] != null && !allZero(rpool[k]))) {
                 return false;
@@ -878,11 +1064,15 @@ public final class Machine {
         return r;
     }
 
-    /** Enters run {@code run} (FRAME or REST) into rtab at the empty {@code slot} its probe sequence ended in. */
+    /**
+     * Enters run {@code run} (FRAME or REST) into the young table {@link #rtab} at the empty {@code slot} its probe
+     * sequence ended in there (the caller has made sure that the old table does not hold the key).
+     */
     void putRunAt(int slot, int hash, int run) {
         rtab[slot] = Layout.tabWord(hash, run);
-        if ((++rtabUsed << 1) > rtab.length) {
-            growRtab();
+        rtabUsed++;
+        if ((++rtabYoung << 1) >= rtab.length) {
+            flushRuns();
         }
     }
 
@@ -909,29 +1099,60 @@ public final class Machine {
         return true;
     }
 
-    private void growRtab() {
-        if (!heapAllows(8L * rtab.length)) {
-            throw new HeapLimit(limitDetail);
+    /** The young table of runs is half full: as {@link #flushRecords()}, for the interned runs. */
+    private void flushRuns() {
+        int[] tab = rold;
+        if ((long) rtabUsed << 1 > tab.length) {
+            int k = tableLog2(rtabUsed, sizes.rtab, roldHint);
+            if (!heapAllows(4L << k)) {
+                throw new HeapLimit(limitDetail);
+            }
+            int[] grown = takeTable(rpool, k);
+            enterRuns(grown, rbase, rY);
+            if (tab != NO_TABLE) {
+                giveTable(rpool, tab);
+            }
+            rold = tab = grown;
         }
-        int[] tab = takeTable(rpool, Integer.numberOfTrailingZeros(rtab.length) + 1);
+        enterRuns(tab, rY, rsp);
+        Arrays.fill(rtab, 0);
+        rtabYoung = 0;
+        rY = rsp;
+        vYr = vp;
+    }
+
+    /**
+     * Enters the FRAME and REST runs of the slab words {@code [from, to)} into {@code tab}, which holds none of them
+     * and has room; in batches, as {@link #enterRecords}.
+     */
+    private void enterRuns(int[] tab, int from, int to) {
         int mask = tab.length - 1;
         int[] a = rs;
-        for (int r = rbase; r < rsp;) {
-            int hdr = a[r];
-            if (Layout.runKind(hdr) != Layout.RUN_SPINE) {
-                int h = a[r + Layout.RUN_HASH];
+        int[] b = batch;
+        int touched = 0;
+        for (int r = from; r < to;) {
+            int n = 0;
+            while (r < to && n < BATCH) {
+                int hdr = a[r];
+                if (Layout.runKind(hdr) != Layout.RUN_SPINE) {
+                    int h = a[r + Layout.RUN_HASH];
+                    b[2 * n] = h;
+                    b[2 * n + 1] = r;
+                    n++;
+                    touched += tab[h & mask];
+                }
+                r += Layout.runHeaderWords(hdr) + Layout.runLen(hdr);
+            }
+            for (int i = 0; i < n; i++) {
+                int h = b[2 * i];
                 int slot = h & mask;
                 while (tab[slot] != 0) {
                     slot = (slot + 1) & mask;
                 }
-                tab[slot] = Layout.tabWord(h, r);
+                tab[slot] = Layout.tabWord(h, b[2 * i + 1]);
             }
-            r += Layout.runHeaderWords(hdr) + Layout.runLen(hdr);
         }
-        int[] old = rtab;
-        rtab = tab;
-        rtabMask = mask;
-        giveTable(rpool, old);
+        batchSink += touched;
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -939,64 +1160,104 @@ public final class Machine {
     // ---------------------------------------------------------------------------------------------------
 
     /**
-     * Writes a new entry {@code (lo, hi, status)} at the empty entry index {@code slot} (the end of the
-     * probe sequence of {@code Hash.pair(lo, hi)}) and logs it for the reset. {@code lo}, {@code hi} are
-     * ordered as unsigned numbers; {@code lo != 0}.
+     * Writes a new entry {@code (lo, hi, status)} at the empty entry index {@code slot} of the young table
+     * {@link #pair} (the end of the probe sequence of {@code Hash.pair(lo, hi)} there; the caller has made sure
+     * that the old table does not hold the pair) and logs it. {@code lo}, {@code hi} are ordered as unsigned
+     * numbers; {@code lo != 0}.
      */
     void addPairAt(int slot, int lo, int hi, int status) {
-        // the log first (finding F-V1-M2 of V1, 2026-11-24): a growth of the log that the heap refuses (HeapLimit) must
-        // not leave an entry in the table that the log does not know - reset() clears the logged entries only
-        if (plogN == plog.length) {
-            int[] grown = copyOrNull(plog, plogN << 1);
-            if (grown == null) {
-                throw new HeapLimit(limitDetail);
-            }
-            plog = grown;
-            allocGrows++;
-            allocGrowBytes += 8L * plogN;
-        }
         int o = slot << Layout.PAIR_SHIFT;
         pair[o + Layout.PAIR_LO] = lo;
         pair[o + Layout.PAIR_HI] = hi;
         pair[o + Layout.PAIR_STATUS] = status;
-        plog[plogN++] = slot;
-        if ((++pairUsed << 1) > pairMask + 1) {
-            growPairs();
+        ylog[ylogN++] = slot;
+        pairUsed++;
+        if ((ylogN << 1) >= pairMask + 1) {
+            flushPairs();
         }
     }
 
-    private void growPairs() {
-        int entries = (pairMask + 1) << 1;
-        if (entries > 1 << 28) {
-            limitDetail = "pair table: 2^27 entries per session";
-            throw new HeapLimit(limitDetail);
-        }
-        if (!heapAllows(4L * (entries << Layout.PAIR_SHIFT))) {
-            throw new HeapLimit(limitDetail);
-        }
-        int[] tab = takePairs(Integer.numberOfTrailingZeros(entries), false);
-        int mask = entries - 1;
-        int[] old = pair;
-        for (int i = 0; i < plogN; i++) {
-            int o = plog[i] << Layout.PAIR_SHIFT;
-            int lo = old[o + Layout.PAIR_LO];
-            int hi = old[o + Layout.PAIR_HI];
-            int slot = Hash.pair(lo, hi) & mask;
-            while (tab[slot << Layout.PAIR_SHIFT] != 0) {
-                slot = (slot + 1) & mask;
+    /**
+     * The young pair table is half full: its entries go into the old table in the order they were made (the old
+     * table is made or doubled first if the session's pairs would fill more than half of it), are logged
+     * there, and the young table starts empty again. A growth that the heap refuses is a {@link HeapLimit}
+     * before anything was moved.
+     */
+    private void flushPairs() {
+        // the log first (finding F-V1-M2 of V1, 2026-11-24): a growth of the log that the heap refuses (HeapLimit) must
+        // not leave an entry in the old table that the log does not know - reset() clears the logged entries only
+        if (pairUsed > plog.length) {
+            int[] grown = copyOrNull(plog, grown(plog.length, pairUsed));
+            if (grown == null) {
+                throw new HeapLimit(limitDetail);
             }
-            int n = slot << Layout.PAIR_SHIFT;
-            tab[n + Layout.PAIR_LO] = lo;
-            tab[n + Layout.PAIR_HI] = hi;
-            tab[n + Layout.PAIR_STATUS] = old[o + Layout.PAIR_STATUS];
-            old[o + Layout.PAIR_LO] = 0; // the old table is all zero when the loop ends: it can be pooled as it is
-            old[o + Layout.PAIR_HI] = 0;
-            old[o + Layout.PAIR_STATUS] = 0;
-            plog[i] = slot;
+            allocGrows++;
+            allocGrowBytes += 4L * grown.length;
+            plog = grown;
         }
-        poolPairs(old);
-        pair = tab;
-        pairMask = mask;
+        int[] tab = pold;
+        int mask = poldMask;
+        if ((long) pairUsed << 1 > mask + 1) {
+            int k = tableLog2(pairUsed, sizes.pairs, poldHint);
+            if (k > 27) {
+                limitDetail = "pair table: 2^27 entries per session";
+                throw new HeapLimit(limitDetail);
+            }
+            if (!heapAllows(4L << (k + Layout.PAIR_SHIFT))) {
+                throw new HeapLimit(limitDetail);
+            }
+            int[] grown = takePairs(k, false);
+            int gmask = (1 << k) - 1;
+            for (int i = 0; i < plogN; i++) {
+                int o = plog[i] << Layout.PAIR_SHIFT;
+                plog[i] = enterPair(grown, gmask, tab[o + Layout.PAIR_LO], tab[o + Layout.PAIR_HI], tab[o + Layout.PAIR_STATUS]);
+                tab[o + Layout.PAIR_LO] = 0; // the table that is left is all zero when the loop ends: it can be pooled as it is
+                tab[o + Layout.PAIR_HI] = 0;
+                tab[o + Layout.PAIR_STATUS] = 0;
+            }
+            if (tab != NO_TABLE) {
+                poolPairs(tab);
+            }
+            pold = tab = grown;
+            poldMask = mask = gmask;
+        }
+        int[] y = pair;
+        int touched = 0;
+        for (int i = 0; i < ylogN; i += BATCH) { // in batches, as enterRecords: the entries the pairs start at are read first
+            int n = Math.min(i + BATCH, ylogN);
+            for (int j = i; j < n; j++) {
+                int o = ylog[j] << Layout.PAIR_SHIFT;
+                touched += tab[(Hash.pair(y[o + Layout.PAIR_LO], y[o + Layout.PAIR_HI]) & mask) << Layout.PAIR_SHIFT];
+            }
+            for (int j = i; j < n; j++) {
+                int o = ylog[j] << Layout.PAIR_SHIFT;
+                plog[plogN++] = enterPair(tab, mask, y[o + Layout.PAIR_LO], y[o + Layout.PAIR_HI], y[o + Layout.PAIR_STATUS]);
+                y[o + Layout.PAIR_LO] = 0;
+                y[o + Layout.PAIR_HI] = 0;
+                y[o + Layout.PAIR_STATUS] = 0;
+            }
+        }
+        batchSink += touched;
+        ylogN = 0;
+        vYp = vp;
+    }
+
+    /** Writes the entry {@code (lo, hi, status)} into the pair table {@code tab}, which does not hold the pair and has room; its entry index. */
+    private static int enterPair(int[] tab, int mask, int lo, int hi, int status) {
+        int slot = Hash.pair(lo, hi) & mask;
+        while (tab[slot << Layout.PAIR_SHIFT] != 0) {
+            slot = (slot + 1) & mask;
+        }
+        int n = slot << Layout.PAIR_SHIFT;
+        tab[n + Layout.PAIR_LO] = lo;
+        tab[n + Layout.PAIR_HI] = hi;
+        tab[n + Layout.PAIR_STATUS] = status;
+        return slot;
+    }
+
+    /** Entry {@code i} of the session's pair entries in the order they were made, {@code 0 <= i < pairUsed}: its word {@code w} ({@code Layout.PAIR_LO}, {@code PAIR_HI}, {@code PAIR_STATUS}). For tests and digests. */
+    int pairWord(int i, int w) {
+        return i < plogN ? pold[(plog[i] << Layout.PAIR_SHIFT) + w] : pair[(ylog[i - plogN] << Layout.PAIR_SHIFT) + w];
     }
 
     /**
@@ -2249,6 +2510,12 @@ public final class Machine {
     private static final int RESET_FILL_SHIFT = 5;
 
     void reset() {
+        if (Debug.TABLE_AUDIT) {
+            String wrong = Debug.tablesAudit(this);
+            if (wrong != null) {
+                throw new AssertionError("rlvm.machine.tableaudit: " + wrong);
+            }
+        }
         resets++;
         erSens = false;
         bytesAtReset += engineBytes();
@@ -2257,18 +2524,14 @@ public final class Machine {
         pairsMade += pairUsed;
         long done = ticks();
         boolean poison = (debug & Op.DBG_POISON) != 0;
-        // vtab
-        if (vtab.length != 1 << sizes.vtab) {
-            giveTable(vpool, vtab); // zeroed there: O(size), at most 4 slots per record
-            vtab = takeTable(vpool, sizes.vtab);
-            vtabMask = vtab.length - 1;
-        } else if ((long) (vp - vbase) << RESET_FILL_SHIFT >= vtab.length) {
+        // vtab: the young table holds the records [vY, vp), the old one the others
+        if ((long) (vp - vY) << RESET_FILL_SHIFT >= vtab.length) {
             Arrays.fill(vtab, 0); // a sequential fill of a small table is cheaper than one probe per record
         } else {
             int[] tab = vtab;
             int mask = vtabMask;
             int[] v = vh;
-            for (int r = vbase; r < vp; r++) {
+            for (int r = vY; r < vp; r++) {
                 int slot = Hash.ofRecord(v, r) & mask;
                 int n = 0;
                 while ((tab[slot] & Layout.TAB_INDEX_MASK) != r && n++ <= mask) {
@@ -2278,6 +2541,12 @@ public final class Machine {
                     tab[slot] = 0;
                 }
             }
+        }
+        voldHint = 0;
+        if (vold != NO_TABLE) {
+            voldHint = OLD_HINT ? Math.min(Integer.numberOfTrailingZeros(vold.length), TAB_POOL_MAX) : 0;
+            giveTable(vpool, vold); // zeroed there: O(size), at most 4 slots per record (8 with the hint of a larger session)
+            vold = NO_TABLE;
         }
         if (vh.length > keptRecordWords()) {
             // a slab beyond the kept size goes back to the heap; the kept array it left behind is taken back
@@ -2304,17 +2573,13 @@ public final class Machine {
         vhKept = null;
         vbase = vp;
         // rtab
-        if (rtab.length != 1 << sizes.rtab) {
-            giveTable(rpool, rtab);
-            rtab = takeTable(rpool, sizes.rtab);
-            rtabMask = rtab.length - 1;
-        } else if ((long) rtabUsed << RESET_FILL_SHIFT >= rtab.length) {
+        if ((long) rtabYoung << RESET_FILL_SHIFT >= rtab.length) {
             Arrays.fill(rtab, 0);
         } else {
             int[] tab = rtab;
             int mask = rtabMask;
             int[] a = rs;
-            for (int r = rbase; r < rsp;) {
+            for (int r = rY; r < rsp;) {
                 int hdr = a[r];
                 if (Layout.runKind(hdr) != Layout.RUN_SPINE) {
                     int slot = a[r + Layout.RUN_HASH] & mask;
@@ -2328,6 +2593,12 @@ public final class Machine {
                 }
                 r += Layout.runHeaderWords(hdr) + Layout.runLen(hdr);
             }
+        }
+        roldHint = 0;
+        if (rold != NO_TABLE) {
+            roldHint = OLD_HINT ? Math.min(Integer.numberOfTrailingZeros(rold.length), TAB_POOL_MAX) : 0;
+            giveTable(rpool, rold);
+            rold = NO_TABLE;
         }
         if (rs.length > keptRunWords()) {
             if (rsKept != null) {
@@ -2352,20 +2623,36 @@ public final class Machine {
         rsKept = null;
         rbase = rsp;
         rtabUsed = 0;
+        rtabYoung = 0;
+        // the boundaries of the next session's young tables: nothing is older than its first record and run
+        vY = vbase;
+        vYr = vbase;
+        vYp = vbase;
+        rY = rbase;
+        rYv = rbase;
         // pairs
         {
-            // the entries in use are those of the log: zeroed in O(used), whatever the table's size
+            // the entries in use are those of the two logs: zeroed in O(used), whatever the tables' sizes
             int[] t = pair;
-            for (int i = 0; i < plogN; i++) {
-                int o = plog[i] << Layout.PAIR_SHIFT;
+            for (int i = 0; i < ylogN; i++) {
+                int o = ylog[i] << Layout.PAIR_SHIFT;
                 t[o + Layout.PAIR_LO] = 0;
                 t[o + Layout.PAIR_HI] = 0;
                 t[o + Layout.PAIR_STATUS] = 0;
             }
-            if (pairMask + 1 != 1 << sizes.pairs) {
+            poldHint = 0;
+            if (pold != NO_TABLE) {
+                t = pold;
+                for (int i = 0; i < plogN; i++) {
+                    int o = plog[i] << Layout.PAIR_SHIFT;
+                    t[o + Layout.PAIR_LO] = 0;
+                    t[o + Layout.PAIR_HI] = 0;
+                    t[o + Layout.PAIR_STATUS] = 0;
+                }
+                poldHint = OLD_HINT ? Math.min(Integer.numberOfTrailingZeros(poldMask + 1), ppool.length - 1) : 0;
                 poolPairs(t); // all zero now
-                pair = takePairs(sizes.pairs, true);
-                pairMask = (1 << sizes.pairs) - 1;
+                pold = NO_TABLE;
+                poldMask = 0;
             }
         }
         if (plog.length > keptStackWords(sizes.plog)) {
@@ -2374,6 +2661,7 @@ public final class Machine {
             allocResetBytes += 4L * plog.length;
         }
         plogN = 0;
+        ylogN = 0;
         pairUsed = 0;
         // numbers made in this session (NBIG records are gone: no id of the overlay is referenced any more)
         if (ownNats && nats.nextId() != nats.firstId()) {
@@ -2443,7 +2731,7 @@ public final class Machine {
 
     /** True if the session holds nothing: no record, run or pair entry (a reset would change nothing but the epoch). */
     boolean pristine() {
-        return vp == vbase && rsp == rbase && plogN == 0;
+        return vp == vbase && rsp == rbase && pairUsed == 0;
     }
 
     /**
@@ -2454,7 +2742,7 @@ public final class Machine {
      */
     long engineBytes() {
         long records = vp - vbase;
-        return Layout.REC_BYTES * records + 4L * ((rsp - rbase) + ((long) pairUsed << Layout.PAIR_SHIFT) + plogN)
+        return Layout.REC_BYTES * records + 4L * ((rsp - rbase) + ((long) pairUsed << Layout.PAIR_SHIFT) + pairUsed)
                 + 4L * (records + rtabUsed) + (ownNats ? nats.bytesUsed() : 0) + x1.bytes() + x2.bytes() + x3.bytes()
                 + x4.bytes() + x5.bytes() + x7.bytes();
     }

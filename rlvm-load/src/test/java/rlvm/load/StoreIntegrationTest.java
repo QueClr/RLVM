@@ -349,6 +349,70 @@ class StoreIntegrationTest {
         return cid;
     }
 
+    /**
+     * A definition, theorem or opaque whose record names the type and value RECORDS of an earlier one of the same
+     * kind, universe parameters and hint is marked as its repeat ({@code DeclTable.repeatOf}); nothing else is.
+     */
+    @Test
+    void repeatedDeclarationsAreMarkedInTheRealStore() throws IOException {
+        Nd nd = new Nd();
+        int u = nd.name("u");
+        int v = nd.name("v");
+        int prop = nd.sort(0);
+        int p = nd.name("P");
+        nd.axiom(p, prop);                                       // unit 0
+        int cp = nd.cnst(p);
+        int ty = nd.pi(cp, cp);
+        int val = nd.lam(cp, nd.bvar(0));
+        nd.thm(nd.name("t1"), ty, val);                          // unit 1: the first theorem (value: a proof block)
+        nd.thm(nd.name("t2"), ty, val);                          // unit 2: repeats 1 (value: the promoted block root)
+        nd.def(nd.name("d1"), ty, val);                          // unit 3: another kind, the first definition
+        nd.thm(nd.name("t3"), ty, val);                          // unit 4: repeats 1
+        nd.def(nd.name("d2"), ty, val);                          // unit 5: repeats 3
+        nd.def(nd.name("d3"), ty, val, "\"abbrev\"", "safe");    // unit 6: another hint
+        nd.def(nd.name("d4"), ty, val, "{\"regular\":2}", "safe"); // unit 7: another height
+        nd.def(nd.name("d5"), ty, val, "\"abbrev\"", "safe");    // unit 8: repeats 6
+        nd.thm(nd.name("t4"), ty, val, u);                       // unit 9: other universe parameters
+        nd.thm(nd.name("t5"), ty, val, v);                       // unit 10: again others
+        nd.thm(nd.name("t6"), ty, val, u);                       // unit 11: repeats 9
+        nd.opaque(nd.name("o1"), ty, val, false);                // unit 12: the first opaque
+        nd.opaque(nd.name("o2"), ty, val, false);                // unit 13: repeats 12
+        nd.def(nd.name("loop"), ty, val, "\"opaque\"", "unsafe"); // unit 14: dropped
+        int val2 = nd.lam(cp, nd.bvar(0));                       // the same term as another record
+        nd.thm(nd.name("t7"), ty, val2);                         // unit 15: not the same record
+        nd.thm(nd.name("t8"), ty, val2);                         // unit 16: repeats 15
+        int ty2 = nd.pi(cp, cp);
+        nd.thm(nd.name("t9"), ty2, val);                         // unit 17: another type record
+        nd.axiom(nd.name("Q"), prop);                            // unit 18: an axiom repeats nothing
+        nd.thm(nd.name("t10"), ty, val);                         // unit 19: repeats 1
+        StoreOracle o = load(nd);
+        DeclTable d = o.store.decls();
+        int[] expect = {-1, -1, 1, -1, 1, 3, -1, -1, 6, -1, -1, 9, -1, 12, -1, -1, 15, -1, -1, 1};
+        assertEquals(expect.length, d.unitCount());
+        for (int unit = 0; unit < expect.length; unit++) {
+            assertEquals(expect[unit], d.repeatOf(unit), "unit " + unit);
+        }
+        assertEquals(8, o.report.repeatUnits);
+        assertEquals(8, d.repeatCount());
+        // the first theorem keeps its proof as a block; its repeats share ONE promoted copy of it
+        assertTrue(d.value(d.unitFirstCid(1)) < 0);
+        int promoted = d.value(d.unitFirstCid(2));
+        assertTrue(promoted > 0);
+        assertEquals(promoted, d.value(d.unitFirstCid(4)));
+        assertEquals(promoted, d.value(d.unitFirstCid(19)));
+
+        // the same file published unit by unit, and without proof blocks, says the same
+        for (LoadOptions options : new LoadOptions[] {LoadOptions.pipelined(nd.bytes().length).withPublishEvery(1, 1L),
+            LoadOptions.batch(nd.bytes().length).withProofBlocks(false)}) {
+            StoreOracle q = new StoreOracle(nd.bytes(), false);
+            q.load(options);
+            q.verify();
+            for (int unit = 0; unit < expect.length; unit++) {
+                assertEquals(expect[unit], q.store.decls().repeatOf(unit), "unit " + unit + ", " + options.mode);
+            }
+        }
+    }
+
     @Test
     void droppedRecordsAndDuplicatesOnTheRealStore() throws IOException {
         Nd nd = new Nd();

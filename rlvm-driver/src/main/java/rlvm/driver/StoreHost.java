@@ -91,6 +91,11 @@ public final class StoreHost implements RunHost {
     }
 
     @Override
+    public int unitRepeatOf(int unit) {
+        return decls.repeatOf(unit);
+    }
+
+    @Override
     public long sharedBytes() {
         return store.sharedBytes();
     }

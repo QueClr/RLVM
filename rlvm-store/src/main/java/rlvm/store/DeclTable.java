@@ -90,6 +90,13 @@ public final class DeclTable {
     private volatile int unitCount;
     private int openUnit = -1;
     private final int[][] status = new int[STATUS_DIR][];
+    /**
+     * Per unit, chunked like {@link #status}: 1 + the unit this one repeats ({@link #repeatOf}), 0 = none. A
+     * chunk is allocated when the first unit of it repeats another. Written by the loader while the unit is
+     * open, never after its publication: the frontier that publishes the unit publishes the word.
+     */
+    private final int[][] repeat = new int[STATUS_DIR][];
+    private int repeatCount;
     private int[][] claims = new int[16][];
     private volatile int[][] claimsPub = claims;
 
@@ -382,6 +389,26 @@ public final class DeclTable {
         return INT_ELEMENTS.compareAndSet(status[unit >>> STATUS_SHIFT], unit & (STATUS_CHUNK - 1), expect, update);
     }
 
+    /**
+     * The first unit of the file whose declaration record is, word for word, the record of {@code unit} under
+     * another name, or -1: a definition, theorem or opaque of the same kind with the same list of universe
+     * parameter names, the same reducibility hint and the SAME EXPRESSION RECORDS of the export as type and as
+     * value (the loader says so, {@link StoreBuilder#repeatOf}: record identity, not structural equality, so
+     * the two declarations are also the same objects to a checker that looks at object identity). The unit
+     * returned is smaller than {@code unit} and is not itself a repeat. A hint for the driver: the check of
+     * such a declaration is a function of exactly these inputs and of the constants they mention, and the
+     * constants an earlier unit could see are visible to a later one. Nothing in the store depends on it.
+     */
+    public int repeatOf(int unit) {
+        int[] c = repeat[unit >>> STATUS_SHIFT];
+        return c == null ? -1 : c[unit & (STATUS_CHUNK - 1)] - 1;
+    }
+
+    /** Units with a {@link #repeatOf}. Writer-side counter. */
+    public int repeatCount() {
+        return repeatCount;
+    }
+
     /** The claims blob of an inductive unit ({@link StoreBuilder#blockClaims}), or null. */
     public int[] claims(int unit) {
         int[][] c = claimsPub;
@@ -631,6 +658,23 @@ public final class DeclTable {
         return openUnit;
     }
 
+    /** Loader thread: the open unit repeats the earlier unit {@code first} ({@link #repeatOf}). */
+    void setRepeatOf(int unit, int first) {
+        if (unit != openUnit || first < 0 || first >= unit) {
+            throw new IllegalArgumentException("unit " + unit + " cannot repeat unit " + first + " (open unit " + openUnit + ")");
+        }
+        int chunk = unit >>> STATUS_SHIFT;
+        int[] c = repeat[chunk];
+        if (c == null) {
+            c = new int[STATUS_CHUNK];
+            repeat[chunk] = c;
+        }
+        if (c[unit & (STATUS_CHUNK - 1)] == 0) {
+            repeatCount++;
+        }
+        c[unit & (STATUS_CHUNK - 1)] = first + 1;
+    }
+
     /** Loader thread, before publication: marks a unit that holds a dropped (unsafe / partial) record. */
     void setStatusUnpublished(int unit, int st) {
         INT_ELEMENTS.setVolatile(status[unit >>> STATUS_SHIFT], unit & (STATUS_CHUNK - 1), st);
@@ -794,6 +838,11 @@ public final class DeclTable {
     public long bytes() {
         long statusBytes = 0;
         for (int[] c : status) {
+            if (c != null) {
+                statusBytes += 4L * c.length;
+            }
+        }
+        for (int[] c : repeat) {
             if (c != null) {
                 statusBytes += 4L * c.length;
             }

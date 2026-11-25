@@ -685,14 +685,14 @@ final class Debug {
             }
             case Op.CONV: {
                 int e = pairEntry(m, a, b);
-                int saved = e < 0 ? 0 : m.pair[e + Layout.PAIR_STATUS];
+                int saved = e < 0 ? 0 : pairStatus(m, e);
                 if (e >= 0) {
-                    m.pair[e + Layout.PAIR_STATUS] = saved & ~(Layout.POS | Layout.NEG);
+                    setPairStatus(m, e, saved & ~(Layout.POS | Layout.NEG));
                 }
                 r = m.drive(Conv.conv(m, a, b, 0));
-                e = pairEntry(m, a, b); // the table may have grown
+                e = pairEntry(m, a, b); // the entry may have moved (to the old table, or with a growth of it)
                 if (e >= 0) {
-                    m.pair[e + Layout.PAIR_STATUS] |= saved;
+                    setPairStatus(m, e, pairStatus(m, e) | saved);
                 }
                 break;
             }
@@ -710,7 +710,11 @@ final class Debug {
         return memoExit(m, op, a, b, hit, r);
     }
 
-    /** Word offset in {@code m.pair} of the entry of the unordered pair (a, b), or -1 (the frozen probe of Layout / Hash). */
+    /**
+     * The entry of the unordered pair (a, b) (the frozen probe of Layout / Hash, in both pair tables whatever the
+     * key says): its word offset in the young table {@code m.pair}, or {@code PAIR_OLD +} its word offset in the old
+     * table {@code m.pold}, or -1. Read and written through {@link #pairStatus} / {@link #setPairStatus}.
+     */
     static int pairEntry(Machine m, int a, int b) {
         int lo = a;
         int hi = b;
@@ -718,20 +722,319 @@ final class Debug {
             lo = b;
             hi = a;
         }
+        int hash = Hash.pair(lo, hi);
         int[] t = m.pair;
         int mask = m.pairMask;
-        int slot = Hash.pair(lo, hi) & mask;
-        for (;;) {
-            int o = slot << Layout.PAIR_SHIFT;
-            int l = t[o + Layout.PAIR_LO];
-            if (l == 0) {
+        for (int old = 0;; old = PAIR_OLD) {
+            int slot = hash & mask;
+            for (;;) {
+                int o = slot << Layout.PAIR_SHIFT;
+                int l = t[o + Layout.PAIR_LO];
+                if (l == 0) {
+                    break;
+                }
+                if (l == lo && t[o + Layout.PAIR_HI] == hi) {
+                    return old + o;
+                }
+                slot = (slot + 1) & mask;
+            }
+            if (old != 0) {
                 return -1;
             }
-            if (l == lo && t[o + Layout.PAIR_HI] == hi) {
-                return o;
-            }
-            slot = (slot + 1) & mask;
+            t = m.pold;
+            mask = m.poldMask;
         }
+    }
+
+    /** {@link #pairEntry}: the entry is in the old pair table (a word offset is below 2^30). */
+    static final int PAIR_OLD = 1 << 30;
+
+    /** The status word of the entry {@code e >= 0} of {@link #pairEntry}. */
+    static int pairStatus(Machine m, int e) {
+        return e >= PAIR_OLD ? m.pold[e - PAIR_OLD + Layout.PAIR_STATUS] : m.pair[e + Layout.PAIR_STATUS];
+    }
+
+    static void setPairStatus(Machine m, int e, int status) {
+        if (e >= PAIR_OLD) {
+            m.pold[e - PAIR_OLD + Layout.PAIR_STATUS] = status;
+        } else {
+            m.pair[e + Layout.PAIR_STATUS] = status;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // The audit of the session tables (young and old; *agentic-note*: rep-OPT-D)
+    // ---------------------------------------------------------------------------------------------------
+
+    /**
+     * {@code -Drlvm.machine.tableaudit=true}: {@link Machine#reset()} audits the tables of the session that ends
+     * ({@link #tablesAudit}) and a failed audit is an {@code AssertionError} (the run ends with status 3). O(session)
+     * per reset with a map of every key: for gates, never for a timing.
+     */
+    static final boolean TABLE_AUDIT = Boolean.getBoolean("rlvm.machine.tableaudit");
+
+    /**
+     * Checks what the probes of the young and old tables rest on ({@code Machine}, "Young and old tables"), for
+     * the live session, without using those probes:
+     * <ul>
+     *   <li>I-ID: no two records have the same key, no two interned runs the same content, no two pair entries
+     *       the same pair (a probe that skipped the old table wrongly would have made the second one);
+     *   <li>every record, interned run and pair entry is in exactly one table, the one its id says: the young
+     *       one from the boundary on ({@code vY}, {@code rY}, the young log), the old one below;
+     *   <li>nothing in an old table holds a record or a run from the table's boundary on ({@code vY} and
+     *       {@code rYv} for records, {@code vYr} and {@code rY} for runs, {@code vYp} for pairs): the rule by
+     *       which a probe decides from the key alone that the old table cannot hold it;
+     *   <li>the counters ({@code rtabUsed}, {@code rtabYoung}, {@code pairUsed}) and the occupied slots agree.
+     * </ul>
+     * @return null, or the first thing that is wrong
+     */
+    static String tablesAudit(Machine m) {
+        if (!(m.vbase <= m.vY && m.vY <= m.vp && m.vbase <= m.vYr && m.vYr <= m.vp && m.vbase <= m.vYp && m.vYp <= m.vp
+                && m.rbase <= m.rY && m.rY <= m.rsp && m.rbase <= m.rYv && m.rYv <= m.rsp)) {
+            return "a boundary is outside the session: vY " + m.vY + " vYr " + m.vYr + " vYp " + m.vYp + " in [" + m.vbase + ", " + m.vp
+                    + "], rY " + m.rY + " rYv " + m.rYv + " in [" + m.rbase + ", " + m.rsp + "]";
+        }
+        if (Machine.NO_TABLE[0] != 0) {
+            return "the empty old table was written";
+        }
+        int[] vh = m.vh;
+        int[] rs = m.rs;
+        java.util.HashMap<Long, Integer> seen = new java.util.HashMap<>();
+        // records
+        for (int r = m.vbase; r < m.vp; r++) {
+            int o = r << Layout.REC_SHIFT;
+            int w0 = vh[o];
+            int kind = w0 >>> Layout.KIND_SHIFT;
+            long d = mix64(mix64(0x5DEECE66DL, w0 & Hash.W0_KEY_MASK), vh[o + Layout.A]);
+            if (kind == Layout.NEU) {
+                int n = w0 & Layout.AUX_MASK;
+                int sb = vh[o + Layout.B] + Layout.RUN_H;
+                for (int i = 0; i < n; i++) {
+                    d = mix64(d, rs[sb + i]);
+                }
+            } else {
+                d = mix64(mix64(d, vh[o + Layout.B]), vh[o + Layout.C]);
+            }
+            for (;; d = d * 0x9E3779B97F4A7C15L + 1) {
+                Integer q = seen.putIfAbsent(d, r);
+                if (q == null) {
+                    break;
+                }
+                if (sameRecordKey(m, q, r)) {
+                    return "records " + q + " and " + r + " have one key (kind " + kind + "): I-ID is broken";
+                }
+            }
+            int hash = Hash.ofRecord(vh, r);
+            boolean young = r >= m.vY;
+            if (!holds(young ? m.vtab : m.vold, hash, r)) {
+                return "record " + r + " is not in the " + (young ? "young" : "old") + " table of records (vY " + m.vY + ")";
+            }
+            if (holds(young ? m.vold : m.vtab, hash, r)) {
+                return "record " + r + " is in both tables of records";
+            }
+            if (!young) {
+                String e = null;
+                switch (kind) {
+                    case Layout.LAM:
+                    case Layout.PI:
+                    case Layout.PII:
+                    case Layout.SUSP:
+                        if (vh[o + Layout.B] >= m.rYv) {
+                            e = "its frame " + vh[o + Layout.B] + " is not below rYv " + m.rYv;
+                        }
+                        break;
+                    case Layout.FVAR:
+                    case Layout.PROJ:
+                    case Layout.NSUC:
+                        if (isRecordFrom(vh[o + Layout.A], m.vY)) {
+                            e = "its component " + vh[o + Layout.A] + " is not below vY " + m.vY;
+                        }
+                        break;
+                    case Layout.NEU: {
+                        int n = w0 & Layout.AUX_MASK;
+                        int sb = vh[o + Layout.B] + Layout.RUN_H;
+                        if (isRecordFrom(vh[o + Layout.A], m.vY)) {
+                            e = "its head " + vh[o + Layout.A] + " is not below vY " + m.vY;
+                        }
+                        for (int i = 0; i < n && e == null; i++) {
+                            if (isRecordFrom(rs[sb + i], m.vY)) {
+                                e = "its argument " + rs[sb + i] + " is not below vY " + m.vY;
+                            }
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+                if (e != null) {
+                    return "record " + r + " (kind " + kind + ") is in the old table and " + e;
+                }
+            }
+        }
+        if (used(m.vtab) != m.vp - m.vY || used(m.vold) != m.vY - m.vbase) {
+            return "occupied slots: young " + used(m.vtab) + " for " + (m.vp - m.vY) + " records, old " + used(m.vold) + " for " + (m.vY - m.vbase);
+        }
+        // runs
+        seen.clear();
+        int interned = 0;
+        int youngRuns = 0;
+        for (int r = m.rbase; r < m.rsp;) {
+            int hdr = rs[r];
+            int hw = Layout.runHeaderWords(hdr);
+            int len = Layout.runLen(hdr);
+            if (Layout.runKind(hdr) != Layout.RUN_SPINE) {
+                interned++;
+                int rest = (hdr & Layout.RUN_FAR) != 0 ? rs[r + Layout.RUN_REST_WORD] : 0;
+                long d = mix64(mix64(0x2545F4914F6CDD1DL, hdr & ~Layout.RUN_DERIVED), rest);
+                for (int i = 0; i < len; i++) {
+                    d = mix64(d, rs[r + hw + i]);
+                }
+                for (;; d = d * 0x9E3779B97F4A7C15L + 1) {
+                    Integer q = seen.putIfAbsent(d, r);
+                    if (q == null) {
+                        break;
+                    }
+                    if (sameRun(rs, q, r)) {
+                        return "runs " + q + " and " + r + " have one content: I-ID is broken";
+                    }
+                }
+                int hash = rs[r + Layout.RUN_HASH];
+                boolean young = r >= m.rY;
+                if (young) {
+                    youngRuns++;
+                }
+                if (!holds(young ? m.rtab : m.rold, hash, r)) {
+                    return "run " + r + " is not in the " + (young ? "young" : "old") + " table of runs (rY " + m.rY + ")";
+                }
+                if (holds(young ? m.rold : m.rtab, hash, r)) {
+                    return "run " + r + " is in both tables of runs";
+                }
+                if (!young) {
+                    if (rest >= m.rY) {
+                        return "run " + r + " is in the old table and its REST run " + rest + " is not below rY " + m.rY;
+                    }
+                    for (int i = 0; i < len; i++) {
+                        if (isRecordFrom(rs[r + hw + i], m.vYr)) {
+                            return "run " + r + " is in the old table and its slot " + rs[r + hw + i] + " is not below vYr " + m.vYr;
+                        }
+                    }
+                }
+            }
+            r += hw + len;
+        }
+        if (interned != m.rtabUsed || youngRuns != m.rtabYoung || used(m.rtab) != youngRuns || used(m.rold) != interned - youngRuns) {
+            return "interned runs: " + interned + " (young " + youngRuns + ") against rtabUsed " + m.rtabUsed + ", rtabYoung " + m.rtabYoung
+                    + ", occupied slots " + used(m.rtab) + " and " + used(m.rold);
+        }
+        // pairs
+        if (m.plogN + m.ylogN != m.pairUsed) {
+            return "pair entries: " + m.plogN + " old and " + m.ylogN + " young against pairUsed " + m.pairUsed;
+        }
+        java.util.HashSet<Long> pairs = new java.util.HashSet<>();
+        for (int i = 0; i < m.pairUsed; i++) {
+            int lo = m.pairWord(i, Layout.PAIR_LO);
+            int hi = m.pairWord(i, Layout.PAIR_HI);
+            if (lo == 0 || Integer.compareUnsigned(lo, hi) > 0) {
+                return "pair entry " + i + " (" + lo + ", " + hi + ") is not an ordered pair";
+            }
+            if (!pairs.add((long) lo << 32 | (hi & 0xFFFFFFFFL))) {
+                return "the pair (" + lo + ", " + hi + ") has two entries";
+            }
+            if (i < m.plogN && (isRecordFrom(lo, m.vYp) || isRecordFrom(hi, m.vYp))) {
+                return "the pair (" + lo + ", " + hi + ") is in the old table and a side is not below vYp " + m.vYp;
+            }
+        }
+        int youngPairs = 0;
+        for (int o = 0; o < m.pair.length; o += Layout.PAIR_WORDS) {
+            if (m.pair[o] != 0) {
+                youngPairs++;
+            }
+        }
+        int oldPairs = 0;
+        for (int o = 0; o + Layout.PAIR_WORDS <= m.pold.length; o += Layout.PAIR_WORDS) {
+            if (m.pold[o] != 0) {
+                oldPairs++;
+            }
+        }
+        if (youngPairs != m.ylogN || oldPairs != m.plogN) {
+            return "occupied pair entries: young " + youngPairs + " for " + m.ylogN + " logged, old " + oldPairs + " for " + m.plogN;
+        }
+        return null;
+    }
+
+    /** True if {@code ref} is a record ref at or above {@code boundary} (not an immediate, not NONE / HOLE, not a signal). */
+    private static boolean isRecordFrom(int ref, int boundary) {
+        return ref >= boundary && ref < Layout.RECORD_MAX;
+    }
+
+    private static long mix64(long h, int x) {
+        h = (h ^ (x & 0xFFFFFFFFL)) * 0xFF51AFD7ED558CCDL;
+        return h ^ (h >>> 29);
+    }
+
+    private static int used(int[] tab) {
+        int n = 0;
+        for (int e : tab) {
+            if (e != 0) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** True if the probe sequence of {@code hash} in the intern table {@code tab} reaches a slot that names {@code index}. */
+    private static boolean holds(int[] tab, int hash, int index) {
+        int mask = tab.length - 1;
+        for (int slot = hash & mask, n = 0; n <= mask; slot = (slot + 1) & mask, n++) {
+            int e = tab[slot];
+            if (e == 0) {
+                return false;
+            }
+            if ((e & Layout.TAB_INDEX_MASK) == index) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean sameRecordKey(Machine m, int p, int q) {
+        int[] vh = m.vh;
+        int a = p << Layout.REC_SHIFT;
+        int b = q << Layout.REC_SHIFT;
+        if ((vh[a] & Hash.W0_KEY_MASK) != (vh[b] & Hash.W0_KEY_MASK) || vh[a + Layout.A] != vh[b + Layout.A]) {
+            return false;
+        }
+        if ((vh[a] >>> Layout.KIND_SHIFT) != Layout.NEU) {
+            return vh[a + Layout.B] == vh[b + Layout.B] && vh[a + Layout.C] == vh[b + Layout.C];
+        }
+        int n = vh[a] & Layout.AUX_MASK;
+        int[] rs = m.rs;
+        int sa = vh[a + Layout.B] + Layout.RUN_H;
+        int sb = vh[b + Layout.B] + Layout.RUN_H;
+        for (int i = 0; i < n; i++) {
+            if (rs[sa + i] != rs[sb + i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameRun(int[] rs, int p, int q) {
+        int hdr = rs[p];
+        if (((hdr ^ rs[q]) & ~Layout.RUN_DERIVED) != 0) {
+            return false;
+        }
+        int hw = Layout.runHeaderWords(hdr);
+        if (hw > Layout.RUN_H && rs[p + Layout.RUN_REST_WORD] != rs[q + Layout.RUN_REST_WORD]) {
+            return false;
+        }
+        int len = Layout.runLen(hdr);
+        for (int i = 0; i < len; i++) {
+            if (rs[p + hw + i] != rs[q + hw + i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -754,14 +1057,14 @@ final class Debug {
         int sw = m.sw;
         m.sw = 0;
         int e = pairEntry(m, a, b);
-        int saved = e < 0 ? 0 : m.pair[e + Layout.PAIR_STATUS];
+        int saved = e < 0 ? 0 : pairStatus(m, e);
         if (e >= 0) {
-            m.pair[e + Layout.PAIR_STATUS] = 0;
+            setPairStatus(m, e, 0);
         }
         int r = m.drive(Conv.conv(m, a, b, 0));
         e = pairEntry(m, a, b);
         if (e >= 0) {
-            m.pair[e + Layout.PAIR_STATUS] |= saved;
+            setPairStatus(m, e, pairStatus(m, e) | saved);
         }
         m.sw = sw;
         r = memoExit(m, Op.CONV, a, b, answer, r);

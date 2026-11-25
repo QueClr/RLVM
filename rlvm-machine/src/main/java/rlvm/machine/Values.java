@@ -17,7 +17,10 @@ import rlvm.store.Specials;
  * flags and tags, {@code CHEAD}, the sort cache. Owner: M1.
  *
  * <p>Table format and hash functions are frozen in {@link Layout} and {@link Hash}; {@link Machine} owns
- * the arrays, growth and reset ({@code addRecordAt}, {@code internRecord} is the reference probe).
+ * the arrays, growth and reset ({@code addRecordAt}, {@code internRecord} is the reference probe). Every
+ * probe here looks in the young table {@code m.vtab} first and in the old one {@code m.vold} only for a key
+ * that holds no record or run younger than the young table (class comment of {@link Machine}, "Young and old
+ * tables").
  * Invariants I-ID, I-FLAG, I-SESSION of ISA 2.5 are this class's responsibility.
  *
  * <h2>Identity keys (ISA 2.5), as implemented</h2>
@@ -64,8 +67,6 @@ final class Values {
         final int[] litImp = new int[2 * LIT_SLOTS];
         /** Limb scratch of the literal import. */
         long[] limbs = new long[8];
-        /** Never written ({@code Values.closureAtSlow}). */
-        int pin;
         /**
          * The OPEN flags of the records this class made, two bits per record (bit 0: known, bit 1: OPEN), 32
          * records per word: {@link Values#openOf}. A copy of flag bit OPEN that is 128 times denser than the
@@ -79,13 +80,6 @@ final class Values {
          */
         int openLo;
         int openTop = -1;
-        static final int SEEN_SLOTS = 256;
-        /**
-         * The content hashes of the frames that {@code closureAt} looked up last, direct-mapped: a prediction only
-         * ("this frame exists, and its table slots are in the cache"), never an answer. Not cleared: a stale
-         * word costs one early load or saves none.
-         */
-        final int[] seen = new int[SEEN_SLOTS];
         static final int REST_SLOTS = 64;
         /** REST chain cache of {@code Runs.restOf}: cells (eb, n, epoch, chain), direct-mapped, verified by content. */
         final int[] restCache = new int[Layout.CELL_WORDS * REST_SLOTS];
@@ -179,6 +173,12 @@ final class Values {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
+                if (!m.youngKey(w0, a, b)) { // not a young record: an old one, unless the key holds something young
+                    int r = m.oldRecord(hash, key0, a, b, c);
+                    if (r != 0) {
+                        return r;
+                    }
+                }
                 return add(m, slot, hash, w0, a, b, c);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
@@ -449,6 +449,12 @@ final class Values {
                     Runs.Stat.cloNewKind[w0 >>> Layout.KIND_SHIFT]++;
                     Runs.Stat.rec(m, 0, hash, m.vp, true);
                 }
+                if (((frame - m.rYv) >>> Machine.RUN_YOUNG_SHIFT) != 0) { // an older record over this frame is possible only if the frame is older than the young table
+                    int r = m.oldRecord(hash, key0, term, frame, ls);
+                    if (r != 0) {
+                        return r;
+                    }
+                }
                 return add(m, slot, hash, w0 | (m.rs[frame] & Runs.RUN_OPEN) << Runs.RUN_OPEN_TO_W0, term, frame, ls);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
@@ -497,18 +503,13 @@ final class Values {
     /**
      * The record {@code (kind and flags of w0, term, PRUNE(env, mask of term), ls')}: exactly
      * {@code closure(m, w0, term, Runs.prune(m, eb, en, m.terms.fvMask(term)), ls)} - the same frame, the same
-     * record - with table loads that do not wait for each other (NOTES-M1 section 5).
+     * record - in one operation (NOTES-M1 section 5; *agentic-note*: rep-OPT-D for what it became).
      *
-     * <p>The two probes of the two-step construction depend on each other: the frame in rtab, then the record,
-     * whose key holds the frame's id, in vtab. Once a session's tables have outgrown the cache that is two cache
-     * misses in a row (reachability: four fifths of PRUNE and of the record probe are the one load of the
-     * table slot). Here the vtab slot of the record <em>that a new frame would give</em> is loaded before the
-     * rtab probe, so that the two loads overlap: the id of a new frame is known in advance (the top of the run
-     * slab), and a record over a frame that did not exist cannot exist, so if the frame is new the record is
-     * written at the first free slot from there, without a comparison. If the frame exists the early load was
-     * for nothing and the record is probed as usual; to keep that rare, a frame whose content hash was looked
-     * up a moment ago ({@link Ext#seen}; it exists and its slots are in the cache) is not speculated on.
-     * Measured on reachability, native, one worker: -7% CPU; Init, Std, the Cedar slice unchanged.
+     * <p>The id of a new frame is known in advance (the top of the run slab), and a record over a frame that did
+     * not exist cannot exist: if the frame is new the record is written at the first free slot of its probe
+     * sequence, without a comparison. (Before the young tables, *agentic-note*: rep-OPT-D, the slot of that record
+     * was loaded before the frame was probed, so that two cache misses overlapped; a new frame and the record
+     * over it now touch the young tables only.)
      */
     private static int closureAt(Machine m, int w0, int term, int eb, int en, int ls) {
         if ((m.debug & Op.DBG_MASKAUDIT) != 0 && Debug.maskAudit(m, term) != 0) {
@@ -539,40 +540,28 @@ final class Values {
         }
         int fh = Runs.runHash(sum, Layout.RUN_FRAME, 0);
         int hdr = Layout.runHeader(len, Layout.RUN_FRAME, false) | (cnt < Runs.CNT_MAX ? cnt : Runs.CNT_MAX) << Runs.CNT_SHIFT;
-        int[] seen = m.x1.seen;
-        int si = fh & (Ext.SEEN_SLOTS - 1);
-        if (seen[si] == fh) { // looked up a moment ago: the frame exists and its table slots are in the cache
-            int f = frameProbe(m, fh, hdr, top, len, mask);
-            return f >= SIG ? f : closureProbe(m, w0, term, f, ls);
-        }
-        seen[si] = fh;
-        return closureOverNew(m, w0, term, ls, fh, hdr, top, len, mask);
-    }
-
-    /**
-     * {@link #closureAt} for a frame that is probably new: the slot of the record over a new frame is loaded
-     * first, then the frame is probed (and made), then the record is written - or, if the frame existed after
-     * all, probed.
-     */
-    private static int closureOverNew(Machine m, int w0, int term, int ls, int fh, int hdr, int top, int len, long mask) {
         int guess = m.rsp; // the id a new frame gets
-        int hg = Hash.record(w0, term, guess, ls);
-        int[] vtab = m.vtab;
-        int vslot = hg & (vtab.length - 1);
-        int ve = vtab[vslot];
-        if (ve == SPEC_PIN) {
-            m.x1.pin++; // never true (record 0 is not interned); the test keeps this load in front of the rtab probe
-        }
         int frame = frameProbe(m, fh, hdr, top, len, mask);
         if (frame != guess) {
             return frame >= SIG ? frame : closureProbe(m, w0, term, frame, ls);
         }
-        // a record over a frame that did not exist a moment ago does not exist: the first free slot of its sequence
-        while (ve != 0) {
-            vslot = (vslot + 1) & (vtab.length - 1);
-            ve = vtab[vslot];
+        return closureNew(m, w0, term, frame, ls);
+    }
+
+    /**
+     * The record of {@link #closureProbe} over a frame that did not exist a moment ago: it does not exist either,
+     * and it is written at the first free slot of its sequence in the young table, without a comparison. (The
+     * table is read after the frame was made: entering the frame may have emptied the young tables.)
+     */
+    private static int closureNew(Machine m, int w0, int term, int frame, int ls) {
+        int hash = Hash.record(w0, term, frame, ls);
+        int[] tab = m.vtab;
+        int mask = tab.length - 1;
+        int slot = hash & mask;
+        while (tab[slot] != 0) {
+            slot = (slot + 1) & mask;
         }
-        return add(m, vslot, hg, w0 | (m.rs[frame] & Runs.RUN_OPEN) << Runs.RUN_OPEN_TO_W0, term, frame, ls);
+        return add(m, slot, hash, w0 | (m.rs[frame] & Runs.RUN_OPEN) << Runs.RUN_OPEN_TO_W0, term, frame, ls);
     }
 
     /**
@@ -589,7 +578,7 @@ final class Values {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
-                return Runs.pruneSlow(m, slot, fh, hdr, top - len + 1, len, mask, 0);
+                return Runs.pruneOld(m, slot, fh, hdr, top - len + 1, len, mask, 0);
             }
             if (((e ^ fh) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int r = e & Layout.TAB_INDEX_MASK;
@@ -602,9 +591,6 @@ final class Values {
             slot = (slot + 1) & tmask;
         }
     }
-
-    /** A vtab word that no table holds: tag 8 and record 0 (NONE is never interned). */
-    private static final int SPEC_PIN = 8 << Layout.TAB_TAG_SHIFT;
 
     /**
      * Delayed {@code EVAL(term, frame, ls)} (ISA 2.2 SUSP, 4.2 MKSUSP), also the tabling record of that term under that
@@ -825,10 +811,7 @@ final class Values {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
-                if (Runs.Stat.ON) {
-                    Runs.Stat.rec(m, 1, hash, m.vp, true);
-                }
-                return neuSlow(m, slot, hash, head, head, Layout.RUN_EMPTY, 0, xb, n);
+                return neuOld(m, slot, hash, head, head, Layout.RUN_EMPTY, 0, xb, n);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int o = (e & Layout.TAB_INDEX_MASK) << Layout.REC_SHIFT;
@@ -861,6 +844,70 @@ final class Values {
 
     private static int neuHash(int head, int sum) {
         return Hash.fin(sum + head * 0xC2B2AE35 + (Layout.NEU << Layout.KIND_SHIFT));
+    }
+
+    /**
+     * The second half of the probes of {@link #neu} and {@link #neuExt}, which did not find the application among
+     * the young records ({@code slot}: the empty slot their sequence ended in): the record of the old table, unless
+     * the key holds a young record ({@link #youngSpine}); else the application is new ({@link #neuSlow}).
+     */
+    private static int neuOld(Machine m, int slot, int hash, int head, int from, int pre, int pn, int xb, int n) {
+        int[] x = m.X;
+        int pb = pre + Layout.RUN_H;
+        if (!youngSpine(m, head, from, pb, pn, x, xb, n)) {
+            int[] tab = m.vold;
+            int[] v = m.vh;
+            int[] rs = m.rs;
+            int mask = tab.length - 1;
+            int key0 = Layout.NEU << Layout.KIND_SHIFT | (pn + n);
+            for (int s = hash & mask;; s = (s + 1) & mask) {
+                int e = tab[s];
+                if (e == 0) {
+                    break;
+                }
+                if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
+                    int o = (e & Layout.TAB_INDEX_MASK) << Layout.REC_SHIFT;
+                    if (v[o + Layout.C] == hash && v[o + Layout.A] == head && (v[o] & Hash.W0_KEY_MASK) == key0
+                            && sameSpine(rs, v[o + Layout.B] + Layout.RUN_H, pb, pn, x, xb, n)) {
+                        return e & Layout.TAB_INDEX_MASK;
+                    }
+                }
+            }
+        }
+        if (Runs.Stat.ON && pn == 0) {
+            Runs.Stat.rec(m, 1, hash, m.vp, true);
+        }
+        return neuSlow(m, slot, hash, head, from, pre, pn, xb, n);
+    }
+
+    /**
+     * True if the application of {@code head} to the {@code pn} arguments at rs[pb ..] (those of the NEU {@code from}
+     * that is extended; {@code pn} = 0 and {@code from} = the head otherwise) and to X[xb .. xb + n) can only be a
+     * young record: the head, a prefix argument or a new argument is a record at or above {@code m.vY}
+     * ({@code Machine}, "Young and old tables"). The last argument first: it is the one most often made a moment
+     * ago. The NEU {@code from} itself is not part of the key (the same application may have been made in one step
+     * before {@code from} existed), but if it is older than the young table, so are its head and its arguments.
+     */
+    private static boolean youngSpine(Machine m, int head, int from, int pb, int pn, int[] x, int xb, int n) {
+        int vY = m.vY;
+        for (int i = n - 1; i >= 0; i--) {
+            if (((x[xb + i] - vY) >>> Machine.YOUNG_SHIFT) == 0) {
+                return true;
+            }
+        }
+        if (((from - vY) >>> Machine.YOUNG_SHIFT) != 0) {
+            return false;
+        }
+        if (((head - vY) >>> Machine.YOUNG_SHIFT) == 0) {
+            return true;
+        }
+        int[] rs = m.rs;
+        for (int i = pn - 1; i >= 0; i--) {
+            if (((rs[pb + i] - vY) >>> Machine.YOUNG_SHIFT) == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean sameArgs(int[] rs, int sb, int[] x, int xb, int n) {
@@ -906,7 +953,7 @@ final class Values {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
-                return neuSlow(m, slot, hash, head, from, pre, pn, xb, n);
+                return neuOld(m, slot, hash, head, from, pre, pn, xb, n);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int o = (e & Layout.TAB_INDEX_MASK) << Layout.REC_SHIFT;

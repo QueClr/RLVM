@@ -86,6 +86,10 @@ final class Fakes {
         int delayMicros;
         /** {@link #HOLD}: the unit that must be decided before this one's check returns. */
         int holdFor = -1;
+        /** {@link #HOLD}: it is enough that the primary engine has checked {@link #holdFor} once (decided or not). */
+        boolean holdUntilChecked;
+        /** {@link #HOLD}: what the check says once the hold ends (A, R or D). */
+        int afterHold = A;
         /**
          * Pipelined loading: every stage of this unit that starts while the file is not completely
          * loaded declines with FORWARD_REFERENCE, whatever the script says (a reference to a name
@@ -119,6 +123,8 @@ final class Fakes {
             u.footprint = footprint;
             u.delayMicros = delayMicros;
             u.holdFor = holdFor;
+            u.holdUntilChecked = holdUntilChecked;
+            u.afterHold = afterHold;
             u.late = late;
             u.outOfOrder = outOfOrder;
             u.slack = slack;
@@ -276,6 +282,15 @@ final class Fakes {
         @Override
         public String unitName(int unit) {
             return "decl" + unit;
+        }
+
+        /** Per unit the unit it repeats word for word, or -1; null = no unit repeats another. */
+        volatile int[] repeatOf;
+
+        @Override
+        public int unitRepeatOf(int unit) {
+            int[] r = repeatOf;
+            return r == null ? -1 : r[unit];
         }
 
         @Override
@@ -801,7 +816,8 @@ final class Fakes {
                 long t0 = System.nanoTime();
                 for (;;) {
                     signals.memoryExhausted(); // at least one poll, after the scripted delay
-                    if (host.decided.get(s.holdFor) != 0 || unit > signals.firstFailure()) {
+                    if ((s.holdUntilChecked ? host.warmChecks.get(s.holdFor) : host.decided.get(s.holdFor)) != 0
+                            || unit > signals.firstFailure()) {
                         break;
                     }
                     LockSupport.parkNanos(20_000);
@@ -810,7 +826,7 @@ final class Fakes {
                         break;
                     }
                 }
-                behaviour = A;
+                behaviour = s.afterHold;
             }
             if (behaviour == LOOP) {
                 if (spin(host, signals, unit)) {

@@ -102,6 +102,11 @@ A failed audit is `fault(E_AUDIT)`: the unit is declined and `lastMessage()` say
 | `pubcheck` | published records hold only export / generated term ids, constant ids and base level ids | publication of facts and blocks (`Debug.pubTerm` ...) |
 | `trace` | records the call events of the frame trace in `Machine.trace` | `Machine.call` |
 
+The session tables have an audit of their own, outside the modes: with `-Drlvm.machine.tableaudit=true` every
+reset checks the tables of the session that ends (`Debug.tablesAudit`: no key twice, every record, run and pair
+in the table its id says, nothing in an old table that holds something younger) and a failure ends the run
+with an `AssertionError` (exit status 3). It is for gates, not for timings (*agentic-note*: rep-OPT-D).
+
 ## State (2026-11-24, 13:05Z; the integrator's runs; log `work/status/machine-integration.md`, notes *agentic-note*: rep-machine-INT)
 
 The module is in the reactor (`<module>rlvm-machine</module>`) and in every distribution (`scripts/build.sh`: a tree
@@ -136,7 +141,10 @@ CPU time, CE native image `-O3`, arena-shaped container, one worker (four worker
 
 Where the time goes (perf on the native image, v0): frames (`Runs`, PRUNE) 17-31%, `Eval` 15-26%, value records
 (`Values`) 12-20%, `Infer` 8-11% (not on reachability), conversion 4%, reduction 1-3%. By judgment family (JFR): EV
-55-81% of the worker. The staging switches are described above; base sizes: `-Drlvm.machine.sizes=...` (NOTES-INT I1).
+55-81% of the worker. The staging switches are described above; base sizes: `-Drlvm.machine.sizes=...` (NOTES-INT I1). The
+three tables that find something again (records, runs, compared pairs) are a young table of that base size and an
+old one that grows: a probe starts in the young table and goes on to the old one only for a key made of things
+older than the young table (`Machine`, "Young and old tables"; *agentic-note*: rep-OPT-D).
 
 ## State, wave 6 (2026-11-24, M6; logs `work/status/machine-M6.log`, rows `work/m6/measure.tsv`)
 

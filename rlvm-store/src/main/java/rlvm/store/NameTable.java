@@ -49,8 +49,30 @@ public final class NameTable {
     private byte[] pool;
     private volatile byte[] poolPub;
     private int poolUsed;
-    /** Open addressing over name ids; 0 = empty. Load at most 0.5. */
+    /** Open addressing over name ids; 0 = empty. Load at most 0.5. Holds the names below {@link #indexed}. */
     private int[] table;
+    /**
+     * The names {@code indexed .. count - 1} are not in {@link #table} yet: they stand in the small
+     * table {@link #recent} (open addressing over name ids by the same hash; 0 = empty), which is
+     * searched first, and go into the large one {@link #RECENT_MAX} at a time ({@link #indexRecent}).
+     *
+     * <p>Why: the large table is far larger than the caches (64 MiB for mathlib), so every probe of
+     * it is a miss of the cache and of the TLB, about 0.2 microseconds, and a file brings four
+     * million names one probe at a time. Two thirds of them are components of a name that the file
+     * introduced a few lines earlier ({@code x._@.M._hygCtx._hyg.41}: three names in a row). A name
+     * whose prefix is not indexed yet cannot stand in the large table - every name is younger than
+     * its prefix - so it is looked up here alone, without that miss; and when the recent names are
+     * moved into the large table, their probes are issued together and overlap (*agentic-note*:
+     * rep-OPT-F). Which names exist, and their ids, do not depend on any of this.
+     */
+    private int indexed = 1;
+    private static final int RECENT_MAX = 1024;
+    private static final int RECENT_MASK = 4 * RECENT_MAX - 1;
+    private final int[] recent = new int[RECENT_MASK + 1];
+    /** Scratch of {@link #indexRecent}: the slots of the recent names in the large table. */
+    private final int[] recentSlots = new int[RECENT_MAX];
+    /** Keeps the loads of the first loop of {@link #indexRecent} alive. */
+    private int touched;
 
     public NameTable(int expectedNames) {
         int n = Math.max(expectedNames, 64);
@@ -75,12 +97,12 @@ public final class NameTable {
         int lo = (int) unsignedValue;
         int hi = (int) (unsignedValue >>> 32);
         int h = mix(prefix, lo * 0x9E3779B1 ^ hi * 0x85EBCA6B ^ 0x5bd1e995);
-        int[] t = table;
-        int mask = t.length - 1;
-        int slot = h & mask;
         int[] r = rows;
+        // the names that are not indexed yet
+        int[] rc = recent;
+        int rslot = h & RECENT_MASK;
         for (;;) {
-            int id = t[slot];
+            int id = rc[rslot];
             if (id == 0) {
                 break;
             }
@@ -88,10 +110,27 @@ public final class NameTable {
             if (r[w] == prefix && (r[w + 1] & (NUMERIC | BIG)) == NUMERIC && r[w + 2] == lo && r[w + 3] == hi) {
                 return id;
             }
-            slot = (slot + 1) & mask;
+            rslot = (rslot + 1) & RECENT_MASK;
+        }
+        // the index, unless the prefix is younger than every name in it
+        if (prefix < indexed) {
+            int[] t = table;
+            int mask = t.length - 1;
+            int slot = h & mask;
+            for (;;) {
+                int id = t[slot];
+                if (id == 0) {
+                    break;
+                }
+                int w = id * W;
+                if (r[w] == prefix && (r[w + 1] & (NUMERIC | BIG)) == NUMERIC && r[w + 2] == lo && r[w + 3] == hi) {
+                    return id;
+                }
+                slot = (slot + 1) & mask;
+            }
         }
         int id = newRow(prefix, NUMERIC | rootBits(prefix, null, 0, 0), lo, hi);
-        addToTable(id, slot);
+        addRecent(id, rslot);
         return id;
     }
 
@@ -144,14 +183,14 @@ public final class NameTable {
         }
         int ch = hashBytes(b, off, len);
         int h = mix(prefix, ch + kindBits);
-        int[] t = table;
-        int mask = t.length - 1;
-        int slot = h & mask;
         int[] r = rows;
         byte[] p = pool;
         int want = kindBits | (len << 8);
+        // the names that are not indexed yet
+        int[] rc = recent;
+        int rslot = h & RECENT_MASK;
         for (;;) {
-            int id = t[slot];
+            int id = rc[rslot];
             if (id == 0) {
                 break;
             }
@@ -166,7 +205,31 @@ public final class NameTable {
                     return id;
                 }
             }
-            slot = (slot + 1) & mask;
+            rslot = (rslot + 1) & RECENT_MASK;
+        }
+        // the index, unless the prefix is younger than every name in it
+        if (prefix < indexed) {
+            int[] t = table;
+            int mask = t.length - 1;
+            int slot = h & mask;
+            for (;;) {
+                int id = t[slot];
+                if (id == 0) {
+                    break;
+                }
+                int w = id * W;
+                if (r[w] == prefix && r[w + 3] == ch && (r[w + 1] & ~ROOT_BITS) == want) {
+                    int at = r[w + 2];
+                    int i = 0;
+                    while (i < len && p[at + i] == b[off + i]) {
+                        i++;
+                    }
+                    if (i == len) {
+                        return id;
+                    }
+                }
+                slot = (slot + 1) & mask;
+            }
         }
         if (!insert) {
             return 0;
@@ -185,7 +248,7 @@ public final class NameTable {
         poolUsed += len;
         int bits = kindBits | (kindBits == 0 ? rootBits(prefix, b, off, len) : rootBits(prefix, null, 0, 0));
         int id = newRow(prefix, bits | (len << 8), at, ch);
-        addToTable(id, slot);
+        addRecent(id, rslot);
         return id;
     }
 
@@ -242,23 +305,45 @@ public final class NameTable {
         return id;
     }
 
-    private void addToTable(int id, int slot) {
-        if ((long) id * 2 > table.length) {
-            if (table.length >= 1 << 30) {
-                throw new StoreLimitException("too many names");
-            }
-            int[] t = new int[table.length * 2];
-            int mask = t.length - 1;
-            int[] r = rows;
-            for (int k = 1; k <= id; k++) {
-                int w = k * W;
-                int h;
-                if ((r[w + 1] & (NUMERIC | BIG)) == NUMERIC) {
-                    h = mix(r[w], r[w + 2] * 0x9E3779B1 ^ r[w + 3] * 0x85EBCA6B ^ 0x5bd1e995);
-                } else {
-                    h = mix(r[w], r[w + 3] + (r[w + 1] & (NUMERIC | BIG)));
+    /** The new name {@code id} takes the empty slot of {@link #recent} that its lookup ended at. */
+    private void addRecent(int id, int rslot) {
+        recent[rslot] = id;
+        if (id + 1 - indexed >= RECENT_MAX) {
+            indexRecent();
+        }
+    }
+
+    /** The hash of name {@code k}, as the lookups compute it. */
+    private static int rowHash(int[] r, int k) {
+        int w = k * W;
+        if ((r[w + 1] & (NUMERIC | BIG)) == NUMERIC) {
+            return mix(r[w], r[w + 2] * 0x9E3779B1 ^ r[w + 3] * 0x85EBCA6B ^ 0x5bd1e995);
+        }
+        return mix(r[w], r[w + 3] + (r[w + 1] & (NUMERIC | BIG)));
+    }
+
+    /**
+     * Moves the recent names into the large table and empties the small one. The table doubles, and
+     * is filled anew, when the names exceed half of it. Otherwise the slots of the recent names are
+     * loaded in a loop of their own first: the loads do not depend on each other, so their misses
+     * overlap, and the loop that fills the slots finds them in the cache.
+     */
+    private void indexRecent() {
+        final int from = indexed;
+        final int to = count;
+        final int[] r = rows;
+        if ((long) (to - 1) * 2 > table.length) {
+            int cap = table.length;
+            while ((long) (to - 1) * 2 > cap) {
+                if (cap >= 1 << 30) {
+                    throw new StoreLimitException("too many names");
                 }
-                int s = h & mask;
+                cap <<= 1;
+            }
+            int[] t = new int[cap];
+            int mask = cap - 1;
+            for (int k = 1; k < to; k++) {
+                int s = rowHash(r, k) & mask;
                 while (t[s] != 0) {
                     s = (s + 1) & mask;
                 }
@@ -266,8 +351,26 @@ public final class NameTable {
             }
             table = t;
         } else {
-            table[slot] = id;
+            final int[] t = table;
+            final int mask = t.length - 1;
+            final int[] slots = recentSlots;
+            int seen = 0;
+            for (int k = from; k < to; k++) {
+                int s = rowHash(r, k) & mask;
+                slots[k - from] = s;
+                seen += t[s];
+            }
+            touched = seen;
+            for (int k = from; k < to; k++) {
+                int s = slots[k - from];
+                while (t[s] != 0) {
+                    s = (s + 1) & mask;
+                }
+                t[s] = k;
+            }
         }
+        Arrays.fill(recent, 0);
+        indexed = to;
     }
 
     private static int hashBytes(byte[] b, int off, int len) {

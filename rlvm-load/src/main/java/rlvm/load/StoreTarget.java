@@ -272,6 +272,11 @@ final class StoreTarget implements LoadTarget {
     }
 
     @Override
+    public void repeatOf(int firstUnit) {
+        b.repeatOf(firstUnit);
+    }
+
+    @Override
     public void unitClaims(int[] blob, int len) {
         // roots the builder does not see: the right-hand sides of the recursor rules
         int recs = BlockClaims.numRecs(blob);

@@ -72,7 +72,7 @@ rlvm.machine.Eval.evalBody
 rlvm.machine.Eval.done
 rlvm.machine.Eval.codeArity
 rlvm.machine.Values.frameProbe
-rlvm.machine.Values.closureOverNew
+rlvm.machine.Values.closureNew
 
 # --- INFER: the walk over an application and the type patterns
 rlvm.machine.Infer.inferApp

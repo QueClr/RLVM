@@ -122,8 +122,10 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <!-- The last two flags silence JDK 25 warnings about Truffle's use of Unsafe and native access.
-               -XX:-UseJVMCICompiler: C2 as the host JIT, Graal (libgraal) for Truffle only, as the launcher. -->
-          <argLine>-Xss8m -Xmx8g -XX:+UseSerialGC -XX:-UseJVMCICompiler --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
+               -XX:-UseJVMCICompiler: C2 as the host JIT, Graal (libgraal) for Truffle only, as the launcher;
+               -XX:+UnlockExperimentalVMOptions in front of it because a stock OpenJDK refuses the flag
+               without it (*agentic-note*: rep-OPT-J). -->
+          <argLine>-Xss8m -Xmx8g -XX:+UseSerialGC -XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
           <groups>${groups}</groups>
           <excludedGroups>${excludedGroups}</excludedGroups>
           <systemPropertyVariables>

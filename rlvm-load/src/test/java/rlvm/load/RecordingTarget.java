@@ -242,6 +242,11 @@ final class RecordingTarget implements LoadTarget {
     }
 
     @Override
+    public void repeatOf(int firstUnit) {
+        to.repeatOf(firstUnit);
+    }
+
+    @Override
     public void unitClaims(int[] blob, int len) {
         to.unitClaims(blob, len);
     }

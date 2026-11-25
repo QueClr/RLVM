@@ -193,6 +193,11 @@ final class StoreOracle extends Oracle {
         }
 
         @Override
+        int uRepeatOf(int unit) {
+            return decls.repeatOf(unit);
+        }
+
+        @Override
         int blockFirst(int block) {
             return blocks.firstRecord(block);
         }

@@ -35,6 +35,7 @@ says so.
 | **A large file is published in larger pieces** (`RunConfig.publishScaleMax` = 4, `-X publish-scale=N`: the pipelined hand-off interval times the input's size in GiB, at most 4) | done (wave 8; see "Pipelined loading"; mathlib pipelined with 8 workers -8 %) |
 | **`-X passes-keep=engines`**: the later passes of `passes=N` use the engine instances of pass 1 (`KeptEngines`) | done (wave 8; see "Passes") |
 | Differential mode (`RunConfig.differential`); **`RunConfig.referenceFallback = false` (`no-fallback`)**: the engine under test alone | done |
+| **A declaration is not checked twice** (`RunConfig.skipRepeats`, `-X repeats=skip\|check`): a unit that the loader marked as the record of an earlier unit under another name (`DeclTable.repeatOf`) goes through its admission, and the primary engine is not run on it if the earlier unit is ACCEPTED on the board at that moment; otherwise it is checked as before, and only if that check does not accept it does the worker wait for the earlier unit's status (ACCEPTED: the unit is admitted as it would have been a moment later, so no status depends on the schedule). Off when the primary engine is the reference engine (so under the strict policy). Statistics `driver.repeatsSkipped`, `driver.repeatsAwaited` | done (*agentic-note*: rep-OPT-I) |
 | Namespace ordering (`OrderPolicy.Kind.NAMESPACE_WINDOW`, `RunConfig.order`) | **deferred**: `OrderPolicy.of`, `Scheduler` constructor and `Run.execute()` throw `UnsupportedOperationException` |
 | Heavy-lane threads | **not used**: re-checks run on the worker's own deep-stack thread; `Scheduler.defer` / `claimHeavy` work as a plain queue that nothing in `Run` feeds |
 | `Run(RunConfig, EngineFactory, EngineFactory)` (the skeleton's constructor) | throws `UnsupportedOperationException`: a run needs a `Wiring` |
@@ -113,6 +114,7 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `passes-keep=engines\|none` | `passesKeepEngines`: the later passes use the engine instances of pass 1 | none |
 | `shard=K/N` | `shardIndex`, `shardCount`: measurement only, check shard K of N (blocks of 1,024 units, block number mod N); the run's verdict is DECLINE | off |
 | `unit-trace` | `unitTrace`: with a statistics file, one line per checked unit in `STATSFILE.units.tsv` (unit, worker, start, nanoseconds, steps, outcome, size) | off |
+| `repeats=skip\|check` | `skipRepeats`: a definition, theorem or opaque whose record repeats an ACCEPTED earlier unit word for word (`RunHost.unitRepeatOf`) is admitted and not checked again; never with the reference engine as primary engine (*agentic-note*: rep-OPT-I) | skip |
 
 ## How a run goes
 

@@ -4,8 +4,9 @@ package rlvm.machine;
  * The pair table {@code PAIR} and {@code UNDEC} (ISA 1.5, 1.6, 5.4). Entry format and hash are frozen in
  * {@link Layout} and {@link Hash}; {@link Machine#addPairAt} appends (log, growth). Owner: M4.
  *
- * <p>{@code PAIR} is one open-addressing table of 16-byte entries {@code lo | hi | status | 0}: one probe
- * (one cache line in the common case) serves the three memos of conversion, the status bits
+ * <p>{@code PAIR} is an open-addressing table of 16-byte entries {@code lo | hi | status | 0} in two parts, the
+ * young table {@code m.pair} and the old one {@code m.pold} ({@code Machine}, "Young and old tables"; a pair has
+ * one entry, in one of them): one probe (one cache line in the common case) serves the three memos of conversion, the status bits
  * {@code POS} (the official {@code m_success}, R02 section 5: exact pairs only, no closure), {@code NEG}
  * (an {@code F} of the complete procedure) and {@code FAILED} (the official {@code m_failure}: a
  * same-head argument comparison that completed with {@code F}). The key is the unordered pair; the two
@@ -34,18 +35,33 @@ final class Pairs {
         }
         int[] t = m.pair;
         int mask = m.pairMask;
-        int slot = Hash.pair(lo, hi) & mask;
+        int hash = Hash.pair(lo, hi);
+        int slot = hash & mask;
         for (;;) {
             int o = slot << Layout.PAIR_SHIFT;
             int l = t[o];
             if (l == 0) {
-                return 0;
+                if (t != m.pair || young(lo, hi, m.vYp)) {
+                    return 0;
+                }
+                t = m.pold; // not a young entry, and both sides are older than the young table: the old table
+                mask = m.poldMask;
+                slot = hash & mask;
+                continue;
             }
             if (l == lo && t[o + Layout.PAIR_HI] == hi) {
                 return t[o + Layout.PAIR_STATUS];
             }
             slot = (slot + 1) & mask;
         }
+    }
+
+    /**
+     * True if a side of the pair is a record at or above {@code vY}: its entry is in the young table or does not
+     * exist ({@code Machine}, "Young and old tables"; an entry is made after both of its sides).
+     */
+    private static boolean young(int lo, int hi, int vY) {
+        return ((lo - vY) >>> Machine.YOUNG_SHIFT) == 0 || ((hi - vY) >>> Machine.YOUNG_SHIFT) == 0;
     }
 
     /**
@@ -65,13 +81,22 @@ final class Pairs {
         }
         int[] t = m.pair;
         int mask = m.pairMask;
-        int slot = Hash.pair(lo, hi) & mask;
+        int hash = Hash.pair(lo, hi);
+        int slot = hash & mask;
+        int free = -1; // the empty entry of the young table, once its sequence has ended
         for (;;) {
             int o = slot << Layout.PAIR_SHIFT;
             int l = t[o];
             if (l == 0) {
-                m.addPairAt(slot, lo, hi, bits);
-                return;
+                if (free >= 0 || young(lo, hi, m.vYp)) {
+                    m.addPairAt(free >= 0 ? free : slot, lo, hi, bits);
+                    return;
+                }
+                free = slot; // not a young entry, and both sides are older than the young table: the old table
+                t = m.pold;
+                mask = m.poldMask;
+                slot = hash & mask;
+                continue;
             }
             if (l == lo && t[o + Layout.PAIR_HI] == hi) {
                 t[o + Layout.PAIR_STATUS] |= bits;

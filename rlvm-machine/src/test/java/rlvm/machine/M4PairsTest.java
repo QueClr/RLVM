@@ -25,7 +25,7 @@ class M4PairsTest {
         Pairs.add(m, 9, 5, Layout.FAILED);
         assertEquals(Layout.POS | Layout.FAILED, Pairs.status(m, 5, 9));
         assertEquals(1, m.pairUsed, "one entry serves POS, NEG and FAILED");
-        assertEquals(1, m.plogN);
+        assertEquals(1, m.plogN + m.ylogN);
         Pairs.add(m, 5, 10, Layout.NEG);
         assertEquals(Layout.NEG, Pairs.status(m, 10, 5));
         assertEquals(Layout.POS | Layout.FAILED, Pairs.status(m, 5, 9));
@@ -59,6 +59,9 @@ class M4PairsTest {
     @Test
     void agreesWithTheReferenceProbeOfTheFrozenFormat() {
         Machine m = new Machine(Machine.Sizes.tiny());
+        for (int i = 0; i < 64; i++) { // the records that the keys below name (ref): a pair is made of values that exist
+            m.internRecord(Layout.w0(Layout.STR, 0, 0), i + 1, 0, 0);
+        }
         Random rnd = new Random(42);
         int[][] keys = new int[500][];
         for (int i = 0; i < keys.length; i++) {
@@ -71,14 +74,19 @@ class M4PairsTest {
                 TestTables.pairAdd(m, a, b, keys[i][2]);
             }
         }
-        assertTrue(m.pairMask + 1 >= 2 * m.pairUsed, "load at most 0.5 after growth");
+        assertTrue(m.plogN > 0 && m.poldMask + 1 >= 2 * m.plogN, "the old table: load at most 0.5 after growth");
+        assertTrue(m.pairMask + 1 >= 2 * m.ylogN, "the young table: load at most 0.5");
         for (int[] k : keys) {
             int st = Pairs.status(m, k[0], k[1]);
             assertTrue((st & k[2]) != 0, "the bits that were added are present");
             assertEquals(TestTables.pairStatus(m, k[0], k[1]), st);
             assertEquals(st, Pairs.status(m, k[1], k[0]));
         }
-        assertEquals(m.pairUsed, m.plogN, "every entry is logged once");
+        assertEquals(m.pairUsed, m.plogN + m.ylogN, "every entry is logged once");
+        java.util.HashSet<Long> seen = new java.util.HashSet<>();
+        for (int i = 0; i < m.pairUsed; i++) {
+            assertTrue(seen.add((long) m.pairWord(i, Layout.PAIR_LO) << 32 | (m.pairWord(i, Layout.PAIR_HI) & 0xFFFFFFFFL)), "one entry per pair");
+        }
     }
 
     private static int ref(Random rnd) {
@@ -94,7 +102,7 @@ class M4PairsTest {
         int e1 = TestTables.findPair(m, 11, 12);
         m.reset();
         assertEquals(0, m.pairUsed);
-        assertEquals(0, m.plogN);
+        assertEquals(0, m.plogN + m.ylogN);
         assertEquals(0, Pairs.status(m, 11, 12));
         assertEquals(0, Pairs.status(m, Layout.imm(1), 12));
         assertEquals(0, m.pair[e1 << Layout.PAIR_SHIFT]);

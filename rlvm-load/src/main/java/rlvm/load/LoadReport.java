@@ -80,6 +80,8 @@ public final class LoadReport {
     public long packedEarlyRefs;
     /** Constants dropped because their record was unsafe or partial. */
     public long droppedUnsafe;
+    /** Definitions, theorems and opaques whose record repeats an earlier one word for word ({@link LoadTarget#repeatOf}). */
+    public long repeatUnits;
     /** Expression records after the last admitted declaration (never written anywhere). */
     public long trailingExprRecords;
     /**

@@ -863,10 +863,13 @@ class M6FacadeTest {
         assertEquals(Outcome.ACCEPT, s.check(plain, Budget.warm()));
         assertEquals(5001, ticked[0]);
         assertEquals(1, s.eagerWhy[Machine.ER_WHY_PROBE]);
-        // the default: above every probe of the eight corpora that completes (the largest: 2,752,617 ticks, one unit of
-        // Mathlib; statistic machine.eager.probeMaxTicks), below the probe that never does (28.6 M ticks and E_MEM)
-        assertTrue(MachineEngine.DEFAULT_EAGER_PROBE >= 1L << 22 && MachineEngine.DEFAULT_EAGER_PROBE <= 1L << 24,
+        // the default lies in the gap of the probe sizes of the eight corpora (MachineEngine.DEFAULT_EAGER_PROBE): above
+        // the four probes of Init.Data.Char.Ordinal that complete and stay on the machine (the largest: 63,654 ticks),
+        // below the six of Batteries.Data.Char.Basic that the reference engine decides in a fraction of the work (the
+        // smallest: 458,881 ticks) and the probe of con-leche that never completes
+        assertTrue(MachineEngine.DEFAULT_EAGER_PROBE > 63_654 && MachineEngine.DEFAULT_EAGER_PROBE < 458_881,
                 "the budget of a probe: " + MachineEngine.DEFAULT_EAGER_PROBE);
+        assertEquals(1L << 17, MachineEngine.DEFAULT_EAGER_PROBE);
         // no budget: 0
         options.put("machine.eager-probe", "0");
         assertEquals(0, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults())).eagerProbe);

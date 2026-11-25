@@ -64,7 +64,8 @@ ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # Flags every JVM configuration needs (fail-closed exit on OOM; silence JDK 25 warnings of Truffle).
 BASE = "-XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
-C2 = "-XX:-UseJVMCICompiler"
+# Two words: a stock OpenJDK refuses -XX:-UseJVMCICompiler without the unlock (*agentic-note*: rep-OPT-J).
+C2 = "-XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler"
 GRAAL = "-XX:+UseJVMCICompiler"
 CI2 = "-XX:CICompilerCount=2"
 SERIAL = "-XX:+UseSerialGC"

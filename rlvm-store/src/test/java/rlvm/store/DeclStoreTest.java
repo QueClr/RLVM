@@ -79,6 +79,50 @@ class DeclStoreTest {
         assertThrows(IllegalStateException.class, () -> b.complete(def, ty, 0, 0), "no open unit");
     }
 
+    /** The repeat column ({@code DeclTable.repeatOf}): written through the builder while the unit is open, -1 elsewhere. */
+    @Test
+    void aUnitCanBeMarkedAsTheRepeatOfAnEarlierUnit() {
+        Model fx = new Model();
+        DeclTable d = fx.store.decls();
+        StoreBuilder b = fx.builder;
+        int units = d.unitCount();
+        for (int u = 0; u < units; u++) {
+            assertEquals(-1, d.repeatOf(u));
+        }
+        int ty = b.sort(fx.levelIds[1]);
+        int val = b.constant(fx.constNames[0], 0);
+        int first = b.beginUnit(DeclKind.DEFN);
+        int cid = b.reserve(DeclKind.DEFN, fx.name("first"), 0);
+        b.complete(cid, ty, val, DeclKind.hintRegular(1));
+        b.endUnit();
+        assertEquals(-1, d.repeatOf(first));
+        int again = b.beginUnit(DeclKind.DEFN);
+        assertEquals(first + 1, again);
+        cid = b.reserve(DeclKind.DEFN, fx.name("again"), 0);
+        b.complete(cid, ty, val, DeclKind.hintRegular(1));
+        // only an earlier unit, and only for the open unit
+        assertThrows(IllegalArgumentException.class, () -> b.repeatOf(again));
+        assertThrows(IllegalArgumentException.class, () -> b.repeatOf(again + 1));
+        assertThrows(IllegalArgumentException.class, () -> b.repeatOf(-1));
+        b.repeatOf(first);
+        b.endUnit();
+        assertThrows(IllegalStateException.class, () -> b.repeatOf(first), "no open unit");
+        assertEquals(first, d.repeatOf(again));
+        assertEquals(-1, d.repeatOf(first));
+        assertEquals(1, d.repeatCount());
+        // unit 0 can be repeated (the word holds 1 + the unit), and a unit of a later chunk has no word yet
+        int third = b.beginUnit(DeclKind.DEFN);
+        cid = b.reserve(DeclKind.DEFN, fx.name("third"), 0);
+        b.complete(cid, ty, val, DeclKind.hintRegular(1));
+        b.repeatOf(0);
+        b.endUnit();
+        assertEquals(0, d.repeatOf(third));
+        assertEquals(2, d.repeatCount());
+        assertEquals(-1, d.repeatOf(1 << 20));
+        long bytes = d.bytes();
+        assertTrue(bytes > 0);
+    }
+
     @Test
     void namesAreClaimedBeforeTheTermsAreWritten() {
         Model fx = new Model();

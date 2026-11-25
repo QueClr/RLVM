@@ -89,7 +89,8 @@ class M1ValuesTest {
             assertTrue(other == null || other == key, "two keys, one id");
         }
         assertEquals(seen.size() + 2, t.vp - Layout.FIRST_RECORD, "exactly one record per distinct value");
-        assertEquals(t.vp - Layout.FIRST_RECORD, used(t.vtab), "one intern slot per record");
+        assertEquals(t.vp - Layout.FIRST_RECORD, used(t.vtab) + used(t.vold), "one intern slot per record, in the young table or in the old one");
+        assertEquals(t.vp - t.vY, used(t.vtab), "the young table holds the records from vY on");
     }
 
     private static int make(Machine t, int kind, int a, int b, int c, int x0) {

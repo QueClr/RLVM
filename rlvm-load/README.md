@@ -164,12 +164,21 @@ after it; the promotions are requested in the same order as before).
    no root reached, i.e. records of later declarations that the file wrote early;
 5. the rows are completed and the unit is closed.
 
+Between the two calls of step 5 a definition, theorem or opaque that is the record of an earlier one under
+another name is reported to the target (`LoadTarget.repeatOf(firstUnit)`, a hint; `StoreTarget` ->
+`StoreBuilder.repeatOf` -> `DeclTable.repeatOf`): same kind, same list of universe-parameter names, same
+reducibility hint, and the same two record ordinals as type and as value (`Repeats`: an exact key, one
+entry per declaration; a declaration with a root in its own segment is added without a search). Only the
+loader can say it: a repeated theorem's value is the promoted copy of the first theorem's proof block.
+Nothing else the loader writes depends on it; the driver uses it (*agentic-note*: rep-OPT-I).
+
 Two paths of the loader thread take records in stretches instead of one by one, with the store and
-every failure unchanged (*agentic-note*: rep-OPT-B): `Loader.exprApps` appends a stretch of `app`
-records to the segment in one loop (the reader's `ExportSink.exprApps`; refused whenever the
-record-by-record path has something else to do: metadata, referrer counting, the segment limit), and
-the sweep hands a stretch of consecutive proof-private APP / LAM / PI / LET records to the target in
-one call (`LoadTarget.blockRecords`, default: the single `block*` calls; `StoreTarget`:
+every failure unchanged (*agentic-note*: rep-OPT-B): `Loader.exprStretch` appends a stretch of `app`,
+`lam` and `forallE` records to the segment in one loop (the reader's `ExportSink.exprStretch`, since
+*agentic-note*: rep-OPT-F for the two binder kinds as well; refused whenever the record-by-record
+path has something else to do: metadata, referrer counting, the segment limit), and the sweep hands
+a stretch of consecutive proof-private APP / LAM / PI / LET records to the target in one call
+(`LoadTarget.blockRecords`, default: the single `block*` calls; `StoreTarget`:
 `ProofBlocks.Writer.records`).
 
 Consequences: references to the unit's own names bind (members of an inductive block see each other; a

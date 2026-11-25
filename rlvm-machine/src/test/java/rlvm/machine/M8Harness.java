@@ -422,7 +422,7 @@ final class M8Harness implements AutoCloseable {
 
         /** {@link Config#incrementalDigest}: what the declaration added since the previous digest of this session. */
         private void digestSince(Obs o) {
-            if (m.resets != digResets || m.vp < digVp || m.rsp < digRsp || m.plogN < digPlog) {
+            if (m.resets != digResets || m.vp < digVp || m.rsp < digRsp || m.pairUsed < digPlog) {
                 digResets = m.resets;
                 digVp = m.vbase;
                 digRsp = m.rbase;
@@ -431,15 +431,13 @@ final class M8Harness implements AutoCloseable {
             o.hasDigest = true;
             o.records = m.vp - digVp;
             o.runWords = m.rsp - digRsp;
-            o.pairs = m.plogN - digPlog;
+            o.pairs = m.pairUsed - digPlog;
             o.recordDigest = digest(m.vh, digVp << Layout.REC_SHIFT, m.vp << Layout.REC_SHIFT) ^ digVp;
             o.runDigest = digest(m.rs, digRsp, m.rsp) ^ digRsp;
             long h = 0x9E3779B97F4A7C15L;
             long set = 0;
-            int[] pair = m.pair;
-            for (int i = digPlog; i < m.plogN; i++) {
-                int e = m.plog[i] << Layout.PAIR_SHIFT;
-                long x = mix(mix(mix(0x1234567L, pair[e + Layout.PAIR_LO]), pair[e + Layout.PAIR_HI]), pair[e + Layout.PAIR_STATUS]);
+            for (int i = digPlog; i < m.pairUsed; i++) {
+                long x = mix(mix(mix(0x1234567L, m.pairWord(i, Layout.PAIR_LO)), m.pairWord(i, Layout.PAIR_HI)), m.pairWord(i, Layout.PAIR_STATUS));
                 h = mix(h, (int) x) ^ (x >>> 32);
                 set += x * 0xD6E8FEB86659FD93L;
             }
@@ -447,7 +445,7 @@ final class M8Harness implements AutoCloseable {
             o.pairSetDigest = set;
             digVp = m.vp;
             digRsp = m.rsp;
-            digPlog = m.plogN;
+            digPlog = m.pairUsed;
         }
 
         boolean resetAfterUnit;
@@ -921,15 +919,13 @@ final class M8Harness implements AutoCloseable {
         // [vbase, vp) and [rbase, rsp): the session's records and run words (the bases move only under DBG_POISON)
         o.records = m.vp - m.vbase;
         o.runWords = m.rsp - m.rbase;
-        o.pairs = m.plogN;
+        o.pairs = m.pairUsed;
         o.recordDigest = digest(m.vh, m.vbase << Layout.REC_SHIFT, m.vp << Layout.REC_SHIFT) ^ m.vbase;
         o.runDigest = digest(m.rs, m.rbase, m.rsp) ^ m.rbase;
         long h = 0x9E3779B97F4A7C15L;
         long set = 0;
-        int[] pair = m.pair;
-        for (int i = 0; i < m.plogN; i++) {
-            int e = m.plog[i] << Layout.PAIR_SHIFT;
-            long x = mix(mix(mix(0x1234567L, pair[e + Layout.PAIR_LO]), pair[e + Layout.PAIR_HI]), pair[e + Layout.PAIR_STATUS]);
+        for (int i = 0; i < m.pairUsed; i++) {
+            long x = mix(mix(mix(0x1234567L, m.pairWord(i, Layout.PAIR_LO)), m.pairWord(i, Layout.PAIR_HI)), m.pairWord(i, Layout.PAIR_STATUS));
             h = mix(h, (int) x) ^ (x >>> 32);
             set += x * 0xD6E8FEB86659FD93L;
         }

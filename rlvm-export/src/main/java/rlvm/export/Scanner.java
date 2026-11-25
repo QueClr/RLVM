@@ -28,8 +28,11 @@ import java.lang.invoke.VarHandle;
  * while the ahead-of-time compiler of the native image, which has no profile, left the call of the
  * one-line method (and the calls of {@link #num}) in the scan loop: six calls for an {@code app}
  * line, each with a stack check, a frame and a safepoint poll, about twenty instructions for one
- * load (*agentic-note*: rep-OPT-B). For the same reason the {@code app} lines, six lines of seven,
- * have a loop of their own ({@link #appStretch}) in which the three numbers are converted in place.
+ * load (*agentic-note*: rep-OPT-B). For the same reason the {@code app}, {@code lam} and
+ * {@code forallE} lines, nineteen lines of twenty, have a loop of their own ({@link #exprStretch}) in
+ * which the numbers are converted in place and the end of a line is found without waiting for its
+ * numbers (*agentic-note*: rep-OPT-F); {@code app} lines with a number of nine digits are taken by
+ * a second loop ({@link #appStretch}).
  */
 final class Scanner {
     private Scanner() {}
@@ -40,8 +43,15 @@ final class Scanner {
     /** Bytes that must be readable after the {@code end} passed to {@link #scan}. */
     static final int PAD = 16;
 
-    /** Number of {@code app} lines that {@link #scan} collects before it hands them over. */
+    /** Number of lines of a stretch that {@link #scan} collects before it hands them over. */
     private static final int APPS = 256;
+
+    /**
+     * {@link #exprStretch} loads up to this many bytes behind the start of a line without having
+     * verified that they belong to it: a line that starts nearer to the end of the buffer is left
+     * to the other paths.
+     */
+    private static final int REACH = 112;
 
     /** Lines longer than this are not supported (a line must fit one buffer). */
     static final int MAX_LINE = 1 << 30;
@@ -272,24 +282,31 @@ final class Scanner {
         // Measured and rejected: comparing the id of an app line with the text of the expected next id
         // instead of parsing it (the trick of the Susz packer). Under C2 it made the scan 16 % faster
         // in time but cost 12 % more instructions, and instructions are what the arena counts.
-        final int[] apps = new int[3 * APPS + 1];
+        final int[] recs = new int[RecordOut.REC * APPS + 1];
         while (pos < end) {
-            // {"app":{"arg":A,"fn":F},"ie":N}\n - six lines of seven, in long stretches. A stretch is
-            // scanned by appStretch (no call in its loop) and handed over as a whole.
-            final int na = appStretch(s, pos, end, apps);
-            if (na != 0) {
-                pos = apps[3 * na];
-                out.apps(apps, na);
-                if (na == APPS) {
+            // app, lam and forallE lines - nineteen lines of twenty, in long stretches. A stretch is
+            // scanned by exprStretch (no call in its loop) and handed over as a whole.
+            final int ne = exprStretch(s, pos, end, recs);
+            if (ne != 0) {
+                pos = recs[RecordOut.REC * ne];
+                out.exprs(recs, ne);
+                if (ne == APPS) {
                     continue;
                 }
+                if (pos >= end) {
+                    break;
+                }
             }
-            if (pos >= end) {
-                break;
-            }
-            // one line of another kind, or an app line that is not the template
+            // one line of another kind, or a line of these kinds that exprStretch does not take
             long w = (long) LE64.get(s, pos);
             if (w == APP_0) {
+                // app lines with a number of nine digits: the stretch of them, by the second loop
+                final int na = appStretch(s, pos, end, recs);
+                if (na != 0) {
+                    pos = recs[RecordOut.REC * na];
+                    out.exprs(recs, na);
+                    continue;
+                }
                 if ((long) LE64.get(s, pos + 6) == APP_6) {
                     int q = pos + 14;
                     long r = num(s, q);
@@ -333,8 +350,9 @@ final class Scanner {
 
     /**
      * Scans the {@code app} lines from {@code pos} on, at most {@link #APPS} of them, up to the first
-     * line that is not the template (or to {@code end}): id, fn and arg of line {@code i} go to
-     * {@code apps[3 * i ..]}, the position behind the last line taken to {@code apps[3 * n]}. Returns
+     * line that is not the template (or to {@code end}): line {@code i} goes to
+     * {@code apps[REC * i ..]} as a record of {@link RecordOut#exprs}, the position behind the last
+     * line taken to {@code apps[REC * n]}. Returns
      * the number {@code n} of lines taken. It takes a line only if {@link #scan}'s own test of the
      * template, with {@link #num}, takes it, and reads the same numbers.
      *
@@ -395,13 +413,310 @@ final class Scanner {
                 break;
             }
             // the numbers have at most nine digits
-            apps[3 * n] = (int) id;
-            apps[3 * n + 1] = (int) fn;
-            apps[3 * n + 2] = (int) arg;
+            apps[RecordOut.REC * n] = (int) id;
+            apps[RecordOut.REC * n + 1] = (int) fn;
+            apps[RecordOut.REC * n + 2] = (int) arg;
+            apps[RecordOut.REC * n + 3] = 0;
             n++;
             pos = q + 2;
         }
-        apps[3 * n] = pos;
+        apps[RecordOut.REC * n] = pos;
+        return n;
+    }
+
+    /**
+     * Scans the {@code app}, {@code lam} and {@code forallE} lines from {@code pos} on, at most
+     * {@link #APPS} of them, up to the first line that it does not take (or to {@code end}): line
+     * {@code i} goes to {@code recs[REC * i ..]} as a record of {@link RecordOut#exprs}, the position
+     * behind the last line taken to {@code recs[REC * n]}. Returns the number {@code n} of lines
+     * taken.
+     *
+     * <p>It takes a line only if {@link #scan}'s own test of the template takes it, and reads the same
+     * numbers; of the lines of the three templates it leaves to that test those with a number of
+     * more than eight digits, those with the binder info {@code strictImplicit} and those that start
+     * in the last {@link #REACH} bytes of the buffer.
+     *
+     * <p>Like {@link #appStretch} the loop is written for a compiler without a profile: no call, and
+     * no branch on the number of digits of a number or on the binder info. Two things make it
+     * faster than that loop. A number has at most eight digits here, so the byte behind the eight
+     * is not looked at: a ninth digit stands where the template has a literal, and the test of that
+     * literal ends the stretch. And the loop does not wait for the numbers of a line to know where
+     * the next line begins: the address of each number of a line is known only when the length of
+     * the one before it is, three or four loads that wait for each other, and with the position of
+     * the next line at the end of that chain the lines of a stretch were scanned one after the
+     * other. Here the end of the line is taken from loads at fixed places - the first byte below
+     * 0x20 in the window where the {@code '\n'} of a line of the template must stand - and the
+     * exact test of the template, which every byte of the line still has to pass, only confirms it
+     * ({@code next}): the processor works on several lines at a time. A window that holds another
+     * byte below 0x20 in front of the newline, or none, gives a position that the test does not
+     * confirm: the line is then left to the other paths.
+     */
+    private static int exprStretch(byte[] s, int pos, int end, int[] recs) {
+        int n = 0;
+        final int lim = Math.min(end, s.length - REACH + 1);
+        while (n < APPS && pos < lim) {
+            final long w = (long) LE64.get(s, pos);
+            final int next;
+            final int r0;
+            final int r1;
+            final int r2;
+            final int r3;
+            if (w == APP_0) {
+                // {"app":{"arg":A,"fn":F},"ie":N}\n: 32 to 53 bytes; the '\n' is byte 31 .. 52
+                if ((long) LE64.get(s, pos + 6) != APP_6) {
+                    break;
+                }
+                long x = (long) LE64.get(s, pos + 31);
+                long ends = ~(x | x << 1 | x << 2) & HIGH;
+                x = (long) LE64.get(s, pos + 39);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 1;
+                x = (long) LE64.get(s, pos + 47);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 2;
+                final int eb = Long.numberOfTrailingZeros(ends);
+                next = pos + 32 + ((7 - (eb & 7)) << 3) + (eb >>> 3);
+                int q = pos + 14;
+                long t = (long) LE64.get(s, q) ^ ZEROS;
+                int bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long arg = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if (((long) LE64.get(s, q) & M6) != FN6) {
+                    break;
+                }
+                q += 6;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long fn = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if (((long) LE64.get(s, q) & M7) != IE7) {
+                    break;
+                }
+                q += 7;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long id = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if (((long) LE64.get(s, q) & M2) != END2 || q + 2 != next) {
+                    break;
+                }
+                r0 = (int) id;
+                r1 = (int) fn;
+                r2 = (int) arg;
+                r3 = 0;
+            } else if ((w & M6) == IE6) {
+                // {"ie":N,"lam":{"binderInfo":"I","body":B,"name":M,"type":T}}\n with I of 7 to 12
+                // bytes: 67 to 100 bytes; the '\n' is byte 66 .. 99
+                long x = (long) LE64.get(s, pos + 66);
+                long ends = ~(x | x << 1 | x << 2) & HIGH;
+                x = (long) LE64.get(s, pos + 74);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 1;
+                x = (long) LE64.get(s, pos + 82);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 2;
+                x = (long) LE64.get(s, pos + 90);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 3;
+                x = (long) LE64.get(s, pos + 98);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 4;
+                final int eb = Long.numberOfTrailingZeros(ends);
+                next = pos + 67 + ((7 - (eb & 7)) << 3) + (eb >>> 3);
+                int q = pos + 6;
+                long t = (long) LE64.get(s, q) ^ ZEROS;
+                int bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long id = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if ((long) LE64.get(s, q) != LAM8 || (long) LE64.get(s, q + 8) != BI_0
+                        || (long) LE64.get(s, q + 14) != BI_6) {
+                    break; // also a letE or proj line, and an id of nine digits
+                }
+                q += 22;
+                // the binder info, as binderInfo() reads it, without a branch: its length up to the
+                // closing quote and its code; neither of the three: the length is 0
+                long b = (long) LE64.get(s, q);
+                long z = b ^ BI_DEFAULT;
+                final int dflt = (int) ((z | -z) >>> 63) ^ 1;
+                z = b ^ BI_IMPLICIT;
+                final int impl = (int) ((z | -z) >>> 63) ^ 1;
+                z = (b ^ BI_INST_0) | (((long) LE64.get(s, q + 8) & M4) ^ BI_INST_8);
+                final int inst = (int) ((z | -z) >>> 63) ^ 1;
+                final int infoLen = 7 * dflt + 8 * impl + 12 * inst;
+                final int info = impl * ExportSink.BINDER_IMPLICIT + inst * ExportSink.BINDER_INST_IMPLICIT;
+                q += infoLen;
+                if (infoLen == 0 || (long) LE64.get(s, q) != QBODY_0 || (long) LE64.get(s, q + 1) != QBODY_1) {
+                    break;
+                }
+                q += 9;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long body = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if ((long) LE64.get(s, q) != NAME8) {
+                    break;
+                }
+                q += 8;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long name = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if ((long) LE64.get(s, q) != TYPE8) {
+                    break;
+                }
+                q += 8;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long type = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if (((long) LE64.get(s, q) & M3) != END3 || q + 3 != next) {
+                    break;
+                }
+                r0 = (int) id | RecordOut.R_LAM << RecordOut.KIND_SHIFT;
+                r1 = (int) type;
+                r2 = (int) body;
+                r3 = (int) name | info << RecordOut.KIND_SHIFT;
+            } else if (w == FORALL_0) {
+                // {"forallE":{"binderInfo":"I","body":B,"name":M,"type":T},"ie":N}\n with I of 7 to 12
+                // bytes: 71 to 104 bytes; the '\n' is byte 70 .. 103
+                if ((long) LE64.get(s, pos + 8) != FORALL_8 || (long) LE64.get(s, pos + 16) != FORALL_16
+                        || ((long) LE64.get(s, pos + 24) & M2) != FORALL_24) {
+                    break;
+                }
+                long x = (long) LE64.get(s, pos + 70);
+                long ends = ~(x | x << 1 | x << 2) & HIGH;
+                x = (long) LE64.get(s, pos + 78);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 1;
+                x = (long) LE64.get(s, pos + 86);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 2;
+                x = (long) LE64.get(s, pos + 94);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 3;
+                x = (long) LE64.get(s, pos + 102);
+                ends |= (~(x | x << 1 | x << 2) & HIGH) >>> 4;
+                final int eb = Long.numberOfTrailingZeros(ends);
+                next = pos + 71 + ((7 - (eb & 7)) << 3) + (eb >>> 3);
+                int q = pos + 26;
+                long b = (long) LE64.get(s, q);
+                long z = b ^ BI_DEFAULT;
+                final int dflt = (int) ((z | -z) >>> 63) ^ 1;
+                z = b ^ BI_IMPLICIT;
+                final int impl = (int) ((z | -z) >>> 63) ^ 1;
+                z = (b ^ BI_INST_0) | (((long) LE64.get(s, q + 8) & M4) ^ BI_INST_8);
+                final int inst = (int) ((z | -z) >>> 63) ^ 1;
+                final int infoLen = 7 * dflt + 8 * impl + 12 * inst;
+                final int info = impl * ExportSink.BINDER_IMPLICIT + inst * ExportSink.BINDER_INST_IMPLICIT;
+                q += infoLen;
+                if (infoLen == 0 || (long) LE64.get(s, q) != QBODY_0 || (long) LE64.get(s, q + 1) != QBODY_1) {
+                    break;
+                }
+                q += 9;
+                long t = (long) LE64.get(s, q) ^ ZEROS;
+                int bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long body = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if ((long) LE64.get(s, q) != NAME8) {
+                    break;
+                }
+                q += 8;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long name = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if ((long) LE64.get(s, q) != TYPE8) {
+                    break;
+                }
+                q += 8;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long type = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if (((long) LE64.get(s, q) & M7) != IE7) {
+                    break;
+                }
+                q += 7;
+                t = (long) LE64.get(s, q) ^ ZEROS;
+                bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+                if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                    break;
+                }
+                t <<= 64 - bits;
+                t = ((t * 2561) >>> 8) & 0x00FF00FF00FF00FFL;
+                t = ((t * 6553601) >>> 16) & 0x0000FFFF0000FFFFL;
+                final long id = (t * 42949672960001L) >>> 32;
+                q += bits >>> 3;
+                if (((long) LE64.get(s, q) & M2) != END2 || q + 2 != next) {
+                    break;
+                }
+                r0 = (int) id | RecordOut.R_PI << RecordOut.KIND_SHIFT;
+                r1 = (int) type;
+                r2 = (int) body;
+                r3 = (int) name | info << RecordOut.KIND_SHIFT;
+            } else {
+                break;
+            }
+            // the numbers have at most eight digits
+            recs[RecordOut.REC * n] = r0;
+            recs[RecordOut.REC * n + 1] = r1;
+            recs[RecordOut.REC * n + 2] = r2;
+            recs[RecordOut.REC * n + 3] = r3;
+            n++;
+            pos = next;
+        }
+        recs[RecordOut.REC * n] = pos;
         return n;
     }
 

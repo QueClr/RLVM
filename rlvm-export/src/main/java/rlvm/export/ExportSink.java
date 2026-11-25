@@ -148,24 +148,31 @@ public interface ExportSink {
     int RUN_REFUSED = Integer.MIN_VALUE;
 
     /**
-     * Optional fast path of the reader for a stretch of consecutive {@code app} records, in place of
-     * {@code count} calls of {@link #exprApp}: record {@code i} has the file id
-     * {@code firstFileId + i}, its function is the expression with file id {@code recs[off + 3 * i + 1]}
-     * and its argument the one with file id {@code recs[off + 3 * i + 2]} (the ints at
-     * {@code off + 3 * i} are the file ids of the records themselves).
+     * Optional fast path of the reader for a stretch of consecutive {@code app}, {@code lam} and
+     * {@code forallE} records, in place of {@code count} calls of {@link #exprApp}, {@link #exprLam}
+     * and {@link #exprForall}. Record {@code i} has the file id {@code firstFileId + i} and stands in
+     * the four ints from {@code recs[off + 4 * i]} on:
+     * <pre>
+     *   0  bits 30 and 31: 0 an app record, 1 a lam record, 2 a forallE record (below them: its file id)
+     *   1  the file id of the function (app) or of the binder type (lam, forallE)
+     *   2  the file id of the argument (app) or of the body (lam, forallE)
+     *   3  lam, forallE: the FILE id of the binder name, and in bits 30 and 31 the binder info
+     * </pre>
      *
      * <p>As for {@link #exprRun}, the reader offers a stretch only while the expression ids of the
      * file are dense, in order and numbered consecutively by the sink (sink id = file id +
      * {@code delta} for every expression so far, so the sink ids of the children are the file ids
-     * plus {@code delta}), and only if both children of every record are earlier expressions. The
-     * sink either takes the stretch - then it must behave exactly as if it had received the
-     * {@code count} calls, and return the id of the first record, the others being the following
-     * ids - or returns {@link #RUN_REFUSED} without any other effect, and the reader makes the
-     * {@code count} calls. The array is the reader's scratch: valid during the call only.
+     * plus {@code delta}), and only if both children of every record are earlier expressions and
+     * every binder name is bound. The sink either takes the stretch - then it must behave exactly
+     * as if it had received the {@code count} calls, and return the id of the first record, the
+     * others being the following ids - or returns {@link #RUN_REFUSED} without any other effect,
+     * and the reader makes the {@code count} calls. The sink id of a binder name is not part of a
+     * stretch: a sink that needs it refuses. The array is the reader's scratch: valid during the
+     * call only.
      *
      * @return the sink id of the first record ({@code firstFileId + delta}), or {@link #RUN_REFUSED}
      */
-    default int exprApps(int firstFileId, int count, int delta, int[] recs, int off) throws ExportException {
+    default int exprStretch(int firstFileId, int count, int delta, int[] recs, int off) throws ExportException {
         return RUN_REFUSED;
     }
 

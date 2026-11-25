@@ -536,6 +536,7 @@ public final class Run {
                 stats.put("load.blockBytes", report.blockBytes);
                 stats.put("load.promotedNodes", report.promotedNodes);
                 stats.put("load.droppedUnsafe", report.droppedUnsafe);
+                stats.put("load.repeatUnits", report.repeatUnits);
                 stats.put("load.unresolvedRefs", report.unresolvedRefs);
                 stats.put("load.wallNanos", report.wallNanos);
             }
@@ -1120,15 +1121,24 @@ public final class Run {
                 // Where each worker's wall clock went, and its progress over time (see Worker.times()).
                 long[][] times = new long[workers.length][];
                 long skipped = 0;
+                long repeats = 0;
+                long awaited = 0;
                 for (int i = 0; i < workers.length; i++) {
                     times[i] = workers[i].times();
                     skipped += workers[i].shardSkipped();
+                    repeats += workers[i].repeatsSkipped();
+                    awaited += workers[i].repeatsAwaited();
                     stats.table("driver.series.worker-" + i, Worker.SERIES_COLUMNS, workers[i].series(), null);
                 }
                 stats.table("driver.workerTimes", Worker.TIME_COLUMNS, times, labels);
                 if (config.shardCount > 0) {
                     stats.put("driver.shard.unitsPassedOver", skipped);
                 }
+                // Units that repeat an accepted unit word for word: admitted, the primary engine not run
+                // (RunConfig.skipRepeats); they are in driver.units and not in the engine's own unit count.
+                stats.put("driver.repeatsSkipped", repeats);
+                // of them: checked first while the original was in flight, not accepted, then admitted on its word
+                stats.put("driver.repeatsAwaited", awaited);
             }
             if (loaderSeriesLen > 0) {
                 long[][] rows = new long[loaderSeriesLen / 2][];

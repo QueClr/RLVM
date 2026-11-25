@@ -96,17 +96,28 @@ public final class MachineEngine implements Engine {
 
     /**
      * [eager] The tick budget of one probe of the plain phase of a declaration that may defer eager comparisons
-     * ({@code Machine.erProbeBudget}; switch {@code eager}; {@code -X machine.eager-probe}, 0 = none). 2^22 ticks,
-     * from two measurements (INT7, 2026-11-25). (1) The largest probe that completes on the eight corpora, with
-     * {@code default,eager} and with the two shortcuts (statistic {@code machine.eager.probeMaxTicks}): 63,654 ticks
-     * on Init / Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler and 2,752,617
-     * on cslib and mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^21 declines it, 2^20 two more).
-     * (2) What the one probe that is cut costs ({@code ConLeche.lpOfData_pack}, finding INT7-F1; uncut it runs for
-     * 28.6 M ticks into the hard limit of a session): con-leche's warm pass (JVM, 8 workers, three interleaved
-     * rounds) is 1.287 s without {@code eager} and, with it, 1.403 s at 2^23 (+9.1 %), 1.307 s at 2^22 (+1.6 %),
-     * 1.283 s at 2^21 and at 2^20. So 2^22: every unit the machine decides stays, with a factor of 1.5 to spare.
+     * ({@code Machine.erProbeBudget}; switch {@code eager}; {@code -X machine.eager-probe}, 0 = none). 2^17 ticks.
+     * A probe evaluates what the official plain procedure never evaluates, so a probe that is large is work the
+     * reference engine does not have: a probe that is cut makes the unit a decline that the reference engine decides.
+     * The sizes of all probes of the eight corpora (OPT-I, 2026-11-25; every probe with its own ticks, one worker in
+     * file order; the same sizes with 8 workers and with sessions of one declaration) fall into three groups:
+     * <ul>
+     *   <li>below 1,600 ticks: all but thirteen probes of the eight corpora (the largest: 1,593 ticks, Mathlib);
+     *   <li>34,096 to 63,654 ticks: four units of {@code Init.Data.Char.Ordinal}, in every corpus that contains Init,
+     *       and two of {@code Batteries.Data.Fin.Coding} on Mathlib; they complete and stay on the machine;
+     *   <li>458,881 ticks and more: six probes in four units of {@code Batteries.Data.Char.Basic} (cslib, Mathlib: a
+     *       recursion over the literal 57,344 of the statement; 458,881 to 2,752,589 ticks, 8.39 M ticks for the four
+     *       units, which the reference engine decides in 15,760 steps) and the one probe of con-leche's
+     *       {@code ConLeche.lpOfData_pack} that never completes (finding INT7-F1: 28.6 M ticks into the hard limit
+     *       of a session without a budget).
+     * </ul>
+     * The budget lies in the gap between the last two groups: 2.06 times the largest probe that is worth completing
+     * and 3.5 times below the smallest that is not. The first value, 2^22 (INT7, 2026-11-25), was chosen so that the
+     * machine declined nothing it could decide; it let the four units of Batteries run (1.5 % of the machine's ticks
+     * on Mathlib, 3.9 % on cslib) and con-leche's probe run to 4.19 M ticks (5.9 % of that corpus's ticks).
+     * *agentic-note*: rep-OPT-I
      */
-    static final long DEFAULT_EAGER_PROBE = 1L << 22;
+    static final long DEFAULT_EAGER_PROBE = 1L << 17;
 
     /**
      * Switch {@code congruence}: the cap on the ticks its segments (the same-head probe B1, closure congruence B12)

@@ -315,25 +315,24 @@ final class TierEq {
         if (a.rsp != b.rsp) {
             return "run words: " + (a.rsp - a.rbase) + " against " + (b.rsp - b.rbase);
         }
-        if (a.plogN != b.plogN) {
-            return "pair entries: " + a.plogN + " against " + b.plogN;
+        if (a.pairUsed != b.pairUsed) {
+            return "pair entries: " + a.pairUsed + " against " + b.pairUsed;
         }
         Map<Long, Integer> pairs = new HashMap<>();
-        for (int i = 0; i < a.plogN; i++) {
-            int e = a.plog[i] << Layout.PAIR_SHIFT;
-            pairs.put((long) a.pair[e + Layout.PAIR_LO] << 32 | (a.pair[e + Layout.PAIR_HI] & 0xFFFFFFFFL), a.pair[e + Layout.PAIR_STATUS]);
+        for (int i = 0; i < a.pairUsed; i++) {
+            pairs.put((long) a.pairWord(i, Layout.PAIR_LO) << 32 | (a.pairWord(i, Layout.PAIR_HI) & 0xFFFFFFFFL), a.pairWord(i, Layout.PAIR_STATUS));
         }
-        for (int i = 0; i < b.plogN; i++) {
-            int e = b.plog[i] << Layout.PAIR_SHIFT;
-            int lo = b.pair[e + Layout.PAIR_LO];
-            int hi = b.pair[e + Layout.PAIR_HI];
+        for (int i = 0; i < b.pairUsed; i++) {
+            int lo = b.pairWord(i, Layout.PAIR_LO);
+            int hi = b.pairWord(i, Layout.PAIR_HI);
+            int status = b.pairWord(i, Layout.PAIR_STATUS);
             Integer st = pairs.get((long) lo << 32 | (hi & 0xFFFFFFFFL));
             if (st == null) {
-                return "pair (" + lo + ", " + hi + ") with status " + b.pair[e + Layout.PAIR_STATUS] + " exists in one machine only: "
+                return "pair (" + lo + ", " + hi + ") with status " + status + " exists in one machine only: "
                         + Show.value(b, lo) + "  ~  " + Show.value(b, hi);
             }
-            if (st != b.pair[e + Layout.PAIR_STATUS]) {
-                return "pair (" + lo + ", " + hi + ") has status " + st + " against " + b.pair[e + Layout.PAIR_STATUS] + ": "
+            if (st != status) {
+                return "pair (" + lo + ", " + hi + ") has status " + st + " against " + status + ": "
                         + Show.value(b, lo) + "  ~  " + Show.value(b, hi);
             }
         }

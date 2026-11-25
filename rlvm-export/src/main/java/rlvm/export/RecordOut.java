@@ -11,15 +11,37 @@ package rlvm.export;
 interface RecordOut {
     void app(long id, long fn, long arg) throws ExportException;
 
+    /** Ints per record of a stretch ({@link #exprs}). */
+    int REC = 4;
+    /** The kind of a record of a stretch stands above its id (an id is below 10^9, so below 2^30). */
+    int KIND_SHIFT = 30;
+    int ID_MASK = (1 << KIND_SHIFT) - 1;
+    int R_APP = 0;
+    int R_LAM = 1;
+    int R_PI = 2;
+
     /**
-     * {@code count} consecutive {@code app} lines, three ints each from {@code recs[0]} on: id, fn,
-     * arg, as {@link #app} gets them. Exactly the {@code count} calls of {@link #app} in this order,
+     * {@code count} consecutive {@code app}, {@code lam} and {@code forallE} lines, {@link #REC} ints
+     * each from {@code recs[0]} on:
+     * <pre>
+     *   0  the id of the line, and above it ({@link #KIND_SHIFT}) R_APP, R_LAM or R_PI
+     *   1  app: fn     lam, forallE: type
+     *   2  app: arg    lam, forallE: body
+     *   3  app: 0      lam, forallE: the binder name, and above it ({@link #KIND_SHIFT}) the binder info
+     * </pre>
+     * Exactly the {@code count} calls of {@link #app}, {@link #lam} and {@link #pi} in this order,
      * which is what the default makes; {@link Linker} takes the stretch in one loop. The array is
      * scratch owned by the caller.
      */
-    default void apps(int[] recs, int count) throws ExportException {
-        for (int i = 0, o = 0; i < count; i++, o += 3) {
-            app(recs[o], recs[o + 1], recs[o + 2]);
+    default void exprs(int[] recs, int count) throws ExportException {
+        for (int i = 0, o = 0; i < count; i++, o += REC) {
+            final int id = recs[o] & ID_MASK;
+            switch (recs[o] >>> KIND_SHIFT) {
+                case R_APP -> app(id, recs[o + 1], recs[o + 2]);
+                case R_LAM -> lam(id, recs[o + 3] >>> KIND_SHIFT, recs[o + 3] & ID_MASK, recs[o + 1], recs[o + 2]);
+                case R_PI -> pi(id, recs[o + 3] >>> KIND_SHIFT, recs[o + 3] & ID_MASK, recs[o + 1], recs[o + 2]);
+                default -> throw new IllegalArgumentException("kind of a stretch record: " + (recs[o] >>> KIND_SHIFT));
+            }
         }
     }
 

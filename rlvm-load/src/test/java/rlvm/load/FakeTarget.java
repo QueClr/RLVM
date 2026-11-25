@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 
+import rlvm.store.DeclKind;
 import rlvm.store.Kind;
 
 /**
@@ -75,6 +76,8 @@ final class FakeTarget implements LoadTarget {
     /** Shared node count when the unit was opened (the unit's first export id). */
     int[] uFirstNode = new int[64];
     int[][] uClaims = new int[64][];
+    /** 1 + the unit the loader said this unit repeats ({@link #repeatOf}), 0 = none. */
+    int[] uRepeat = new int[64];
     int units;
     boolean unitOpen;
     int published;
@@ -544,7 +547,9 @@ final class FakeTarget implements LoadTarget {
             uSize = Arrays.copyOf(uSize, u * 2);
             uFirstNode = Arrays.copyOf(uFirstNode, u * 2);
             uClaims = Arrays.copyOf(uClaims, u * 2);
+            uRepeat = Arrays.copyOf(uRepeat, u * 2);
         }
+        uRepeat[u] = 0;
         uKind[u] = recordKind;
         uFirstCid[u] = consts;
         uSize[u] = 0;
@@ -599,6 +604,20 @@ final class FakeTarget implements LoadTarget {
         cValue[cid] = value;
         cHint[cid] = hint;
         cComplete[cid] = true;
+    }
+
+    @Override
+    public void repeatOf(int firstUnit) {
+        int u = units - 1;
+        if (!unitOpen || blockOpen || uSize[u] != 1 || !cComplete[uFirstCid[u]] || uRepeat[u] != 0) {
+            throw new IllegalStateException("repeatOf(" + firstUnit + ") out of protocol");
+        }
+        int kind = uKind[u];
+        if (firstUnit < 0 || firstUnit >= u || uKind[firstUnit] != kind || uSize[firstUnit] != 1 || uRepeat[firstUnit] != 0
+                || (kind != DeclKind.DEFN && kind != DeclKind.THM && kind != DeclKind.OPAQUE)) {
+            throw new IllegalArgumentException("unit " + u + " cannot repeat unit " + firstUnit);
+        }
+        uRepeat[u] = firstUnit + 1;
     }
 
     @Override

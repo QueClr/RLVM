@@ -629,6 +629,11 @@ echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X 
 #   -XX:-UseJVMCICompiler        C2 instead of Graal as the *host* JIT: same steady state (*agentic-note*: rep-J1, 2.2: 1.98 s
 #                                against 1.99-2.10 s on cedar with 8 workers), 400 MB less resident memory.
 #                                Truffle runtime compilation still uses libgraal
+#   -XX:+UnlockExperimentalVMOptions   in front of it, for a stock OpenJDK (RLVM_JAVA): there the flag
+#                                above is an experimental one, and the VM refuses to start on it
+#                                without the unlock (exit status 1 before the checker runs); both VMs
+#                                accept the pair, and on the GraalVM JDK it changes nothing else
+#                                (*agentic-note*: rep-OPT-J, section 2)
 #   -XX:CICompilerCount=8        compiler threads (a cap: they are created on demand). The JVM launcher is
 #                                the WARM platform (OWNER-NOTES 12: warm-up is reported, not charged): with
 #                                the old value 2 a tiered VM has ONE C2 thread beside eight workers and
@@ -660,7 +665,7 @@ echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X 
 #                                on mathlib), also for -X engine=diff (two engines in one process)
 # The class path is spelled out, jar by jar, in the shell's sorted order: "lib/*" is expanded by the VM in
 # directory order, which differs between file systems (and with it the order of ServiceLoader providers).
-JVM_FLAGS="-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
+JVM_FLAGS="-XX:+UseSerialGC -XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
 JVM_HEAP_FLAGS="-Xms13g -Xmx13g -Xmn1g"
 JVM_HEAP_FLAGS_MACHINE="-Xmx7g -Xmn1g"
 if [ "$dev" = 1 ]; then

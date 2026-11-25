@@ -72,6 +72,18 @@ public interface RunHost {
         return 0;
     }
 
+    /**
+     * The first unit of the file that {@code unit} (a {@link #CHECK} unit) repeats word for word under
+     * another name, or -1: a smaller unit with a declaration of the same kind (definition, theorem or
+     * opaque), the same universe parameters, the same reducibility hint and the same type and value as
+     * records of the input (production: {@code DeclTable.repeatOf}, which the loader fills). Only a hint:
+     * a worker does not run the primary engine on such a unit once the earlier one is ACCEPTED
+     * ({@code RunConfig.skipRepeats}). The default says that no unit repeats another.
+     */
+    default int unitRepeatOf(int unit) {
+        return -1;
+    }
+
     /** Bytes held by the shared store, for the memory account. */
     long sharedBytes();
 

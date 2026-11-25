@@ -234,6 +234,15 @@ public interface LoadTarget {
      */
     void complete(int cid, int type, int value, int hint);
 
+    /**
+     * A hint, never required: the open unit, a definition, theorem or opaque whose row is complete, is the
+     * record of the earlier unit {@code firstUnit} under another name - same kind, same list of universe
+     * parameter names, same reducibility hint, and the same expression records of the input as type and as
+     * value ({@link Repeats}). Called between {@link #complete} and {@link #endUnit}. The default does nothing.
+     */
+    default void repeatOf(int firstUnit) {
+    }
+
     /** The claims of an inductive unit ({@link BlockClaims}); the array is the loader's scratch. */
     void unitClaims(int[] blob, int len);
 

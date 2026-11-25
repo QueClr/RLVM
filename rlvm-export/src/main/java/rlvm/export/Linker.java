@@ -159,36 +159,42 @@ final class Linker implements RecordOut {
     }
 
     /**
-     * A stretch of {@code app} lines. While the expression ids are dense with a known delta, the
-     * longest prefix of records that the fast path of {@link #app} would take - the id is the next
-     * one, both children are earlier expressions - is offered to the sink as a whole
-     * ({@link ExportSink#exprApps}); a sink that refuses, and every record that is not of that kind
-     * (it may be an error, or leave the dense mode), go through {@link #app} one by one, so the
-     * calls, the error and its line are those of the single records.
+     * A stretch of {@code app}, {@code lam} and {@code forallE} lines. While the expression ids are
+     * dense with a known delta, the longest prefix of records that the fast paths of {@link #app},
+     * {@link #lam} and {@link #pi} would take - the id is the next one, both children are earlier
+     * expressions, the binder name is bound - is offered to the sink as a whole
+     * ({@link ExportSink#exprStretch}); a sink that refuses, and every record that is not of that
+     * kind (it may be an error, or leave the dense mode), go through {@link #app}, {@link #lam} and
+     * {@link #pi} one by one, so the calls, the error and its line are those of the single records.
      */
     @Override
-    public void apps(int[] recs, int count) throws ExportException {
+    public void exprs(int[] recs, int count) throws ExportException {
         final IdSpace e = exprs;
         int i = 0;
         while (i < count) {
             int j = i;
             if (e.denseWithDelta()) {
                 long next = e.limit;
-                for (int o = 3 * i; j < count; j++, o += 3, next++) {
-                    int id = recs[o];
+                // no name is bound while the stretch is read
+                final long boundNames = names.boundPrefix();
+                for (int o = REC * i; j < count; j++, o += REC, next++) {
+                    final int id = recs[o] & ID_MASK;
                     // ids of the fast path are decimal numbers below 10^9: never negative
                     if (id != next || recs[o + 1] >= id || recs[o + 2] >= id || (recs[o + 1] | recs[o + 2]) < 0) {
+                        break;
+                    }
+                    if (recs[o] >>> KIND_SHIFT != R_APP && (recs[o + 3] & ID_MASK) >= boundNames) {
                         break;
                     }
                 }
             }
             if (j > i) {
                 final int n = j - i;
-                final int firstId = recs[3 * i];
-                int first = sink.exprApps(firstId, n, e.delta, recs, 3 * i);
+                final int firstId = recs[REC * i] & ID_MASK;
+                int first = sink.exprStretch(firstId, n, e.delta, recs, REC * i);
                 if (first != ExportSink.RUN_REFUSED) {
                     if (first - firstId != e.delta) {
-                        throw new IllegalStateException("the sink numbered the app records it took from " + first
+                        throw new IllegalStateException("the sink numbered the records it took from " + first
                                 + " instead of " + (firstId + e.delta));
                     }
                     e.bindRun(n);
@@ -198,12 +204,23 @@ final class Linker implements RecordOut {
                 }
                 // refused: these records one by one
                 for (; i < j; i++) {
-                    app(recs[3 * i], recs[3 * i + 1], recs[3 * i + 2]);
+                    single(recs, REC * i);
                 }
                 continue;
             }
-            app(recs[3 * i], recs[3 * i + 1], recs[3 * i + 2]);
+            single(recs, REC * i);
             i++;
+        }
+    }
+
+    /** The record of a stretch at {@code recs[o]} as the single call it stands for. */
+    private void single(int[] recs, int o) throws ExportException {
+        final int id = recs[o] & ID_MASK;
+        switch (recs[o] >>> KIND_SHIFT) {
+            case R_APP -> app(id, recs[o + 1], recs[o + 2]);
+            case R_LAM -> lam(id, recs[o + 3] >>> KIND_SHIFT, recs[o + 3] & ID_MASK, recs[o + 1], recs[o + 2]);
+            case R_PI -> pi(id, recs[o + 3] >>> KIND_SHIFT, recs[o + 3] & ID_MASK, recs[o + 1], recs[o + 2]);
+            default -> throw new IllegalArgumentException("kind of a stretch record: " + (recs[o] >>> KIND_SHIFT));
         }
     }
 

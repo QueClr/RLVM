@@ -239,4 +239,78 @@ class NameTableTest {
         }
         assertEquals(n + 1, t.size());
     }
+
+    /**
+     * The deferred index (the names of the last thousand are looked up in a small table and go into the
+     * large one together): against a map from (prefix, component) to id, the table gives the id of
+     * the first request for a name whenever it is asked again - at once, a few names later, after the
+     * names moved into the large table, after that table doubled - and a new id, the next one, for
+     * every name it has not seen. Prefixes are young (chains, as an exporter writes them) and old.
+     */
+    @Test
+    void theIndexOfRecentNamesAgainstAModel() {
+        for (int expected : new int[] {4, 64, 5000, 200_000}) {
+            Random rnd = new Random(expected);
+            NameTable t = new NameTable(expected);
+            Map<String, Integer> model = new HashMap<>();
+            List<String> keys = new ArrayList<>();
+            List<Integer> ids = new ArrayList<>();
+            ids.add(0);
+            int next = 1;
+            for (int step = 0; step < 60_000; step++) {
+                int kind = rnd.nextInt(10);
+                int prefix;
+                if (kind < 5) {
+                    prefix = ids.get(ids.size() - 1 - rnd.nextInt(Math.min(ids.size(), 3))); // a chain
+                } else if (kind < 7) {
+                    prefix = ids.get(Math.max(0, ids.size() - 1 - rnd.nextInt(3000))); // around the edge of the recent names
+                } else {
+                    prefix = ids.get(rnd.nextInt(ids.size())); // any age
+                }
+                boolean again = rnd.nextInt(6) == 0 && !keys.isEmpty();
+                String key;
+                if (again) {
+                    // a name that exists: the newest ones, and any
+                    key = keys.get(rnd.nextBoolean() ? keys.size() - 1 - rnd.nextInt(Math.min(keys.size(), 2000))
+                            : rnd.nextInt(keys.size()));
+                } else {
+                    int form = rnd.nextInt(8);
+                    key = prefix + (form < 4 ? "/s" + rnd.nextInt(40) : form < 7 ? "/n" + rnd.nextInt(40)
+                            : "/b1844674407370955161" + (6 + rnd.nextInt(4)) + rnd.nextInt(3));
+                }
+                int cut = key.indexOf('/');
+                int pre = Integer.parseInt(key.substring(0, cut));
+                String comp = key.substring(cut + 2);
+                char form = key.charAt(cut + 1);
+                Integer known = model.get(key);
+                if (form == 's' && rnd.nextInt(4) == 0) {
+                    // lookup without insertion
+                    byte[] b = comp.getBytes(StandardCharsets.UTF_8);
+                    assertEquals(known == null ? 0 : known, t.findStr(pre, b, 0, b.length), "findStr " + key + " at step " + step);
+                }
+                int id = form == 's' ? str(t, pre, comp) : form == 'n' ? t.internNum(pre, Long.parseLong(comp)) : big(t, pre, comp);
+                if (known == null) {
+                    assertEquals(next, id, "a new name gets the next id: " + key + " at step " + step);
+                    model.put(key, id);
+                    keys.add(key);
+                    ids.add(id);
+                    next++;
+                } else {
+                    assertEquals(known, id, "the id of " + key + " at step " + step);
+                }
+                assertEquals(next, t.size());
+            }
+            // everything is still found, and nothing else
+            for (int i = 0; i < keys.size(); i += 7) {
+                String key = keys.get(i);
+                int cut = key.indexOf('/');
+                if (key.charAt(cut + 1) == 's') {
+                    byte[] b = key.substring(cut + 2).getBytes(StandardCharsets.UTF_8);
+                    assertEquals(model.get(key), t.findStr(Integer.parseInt(key.substring(0, cut)), b, 0, b.length));
+                    byte[] other = (key.substring(cut + 2) + "x").getBytes(StandardCharsets.UTF_8);
+                    assertEquals(0, t.findStr(Integer.parseInt(key.substring(0, cut)), other, 0, other.length));
+                }
+            }
+        }
+    }
 }

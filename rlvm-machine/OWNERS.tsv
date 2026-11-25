@@ -56,6 +56,7 @@ src/test/java/rlvm/machine/Toy.java	M6
 src/test/java/rlvm/machine/TestTables.java	M6
 src/test/java/rlvm/machine/ControlTest.java	M6
 src/test/java/rlvm/machine/MachineStateTest.java	M6
+src/test/java/rlvm/machine/YoungOldTablesTest.java	M6
 src/test/java/rlvm/machine/FixtureTest.java	M6
 src/test/java/rlvm/machine/StepSizeTest.java	M6
 src/test/java/rlvm/machine/Quote.java	M8

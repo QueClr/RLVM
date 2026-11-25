@@ -453,7 +453,7 @@ final class Runs {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
-                return pruneSlow(m, slot, hash, hdr, base, len, mask, rest);
+                return pruneOld(m, slot, hash, hdr, base, len, mask, rest);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int r = e & Layout.TAB_INDEX_MASK;
@@ -472,6 +472,66 @@ final class Runs {
             }
             slot = (slot + 1) & tmask;
         }
+    }
+
+    /**
+     * The second half of the probe of {@link #pruneNear} (and of {@code Values.frameProbe}), which did not find the
+     * frame among the young runs ({@code slot}: the empty slot its sequence ended in): the frame of the old table,
+     * unless a kept binding or the REST run is younger than the young table; else the frame is new
+     * ({@link #pruneSlow}). The comparison is the one of {@link #pruneNear}.
+     */
+    static int pruneOld(Machine m, int slot, int hash, int hdr, int base, int len, long mask, int rest) {
+        int[] es = m.es;
+        int top = base + len - 1;
+        if (((rest - m.rY) >>> Machine.RUN_YOUNG_SHIFT) != 0 && !youngKept(es, top, mask, m.vYr)) {
+            int[] tab = m.rold;
+            int[] rs = m.rs;
+            int tmask = tab.length - 1;
+            int far = hdr & Layout.RUN_FAR;
+            for (int s = hash & tmask;; s = (s + 1) & tmask) {
+                int e = tab[s];
+                if (e == 0) {
+                    break;
+                }
+                if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
+                    int r = e & Layout.TAB_INDEX_MASK;
+                    if ((rs[r] & ~RUN_OPEN) == hdr && rs[r + Layout.RUN_HASH] == hash
+                            && (rest == 0 || rs[r + Layout.RUN_REST_WORD] == rest)
+                            && sameKept(rs, r + Layout.RUN_H + far + len - 1, es, top, mask)
+                            && ((hdr & CNT_MASK) != CNT_MASK || sameMasked(rs, r + Layout.RUN_H + far, es, base, len, mask))) {
+                        if (Stat.ON) {
+                            Stat.prune(m, base, len, mask, rest, r, false);
+                        }
+                        return r;
+                    }
+                }
+            }
+        }
+        return pruneSlow(m, slot, hash, hdr, base, len, mask, rest);
+    }
+
+    /**
+     * True if a binding that the mask keeps below es[top] is a record at or above {@code vY}: a frame that holds it is
+     * in the young table of runs or does not exist ({@code Machine}, "Young and old tables"). The innermost binding
+     * first: it is the one most often made a moment ago.
+     */
+    static boolean youngKept(int[] es, int top, long mask, int vY) {
+        for (long b = mask; b != 0; b &= b - 1) {
+            if (((es[top - Long.numberOfTrailingZeros(b)] - vY) >>> Machine.YOUNG_SHIFT) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** {@link #youngKept} for the n slots at src[sb ..]. */
+    private static boolean youngSlots(int[] src, int sb, int n, int vY) {
+        for (int i = n - 1; i >= 0; i--) {
+            if (((src[sb + i] - vY) >>> Machine.YOUNG_SHIFT) == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The kept positions of a candidate agree with the environment: rs[s0 - i] == es[top - i] for every bit i of the mask. */
@@ -565,7 +625,7 @@ final class Runs {
         for (;;) {
             int e = tab[slot];
             if (e == 0) {
-                return internRunSlow(m, slot, hash, hdr, src, sb, n, rest);
+                return internRunOld(m, slot, hash, hdr, src, sb, n, rest);
             }
             if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
                 int r = e & Layout.TAB_INDEX_MASK;
@@ -577,6 +637,34 @@ final class Runs {
             }
             slot = (slot + 1) & tmask;
         }
+    }
+
+    /**
+     * The second half of the probe of {@link #internRun}, which did not find the run among the young ones
+     * ({@code slot}: the empty slot its sequence ended in): the run of the old table, unless a slot or the REST run
+     * is younger than the young table; else the run is new ({@link #internRunSlow}).
+     */
+    private static int internRunOld(Machine m, int slot, int hash, int hdr, int[] src, int sb, int n, int rest) {
+        if (((rest - m.rY) >>> Machine.RUN_YOUNG_SHIFT) != 0 && !youngSlots(src, sb, n, m.vYr)) {
+            int[] tab = m.rold;
+            int[] rs = m.rs;
+            int tmask = tab.length - 1;
+            for (int s = hash & tmask;; s = (s + 1) & tmask) {
+                int e = tab[s];
+                if (e == 0) {
+                    break;
+                }
+                if (((e ^ hash) >>> Layout.TAB_TAG_SHIFT) == 0) {
+                    int r = e & Layout.TAB_INDEX_MASK;
+                    if ((rs[r] & ~RUN_OPEN) == hdr && rs[r + Layout.RUN_HASH] == hash
+                            && (rest == 0 || rs[r + Layout.RUN_REST_WORD] == rest)
+                            && same(rs, r + Layout.RUN_H + (hdr & Layout.RUN_FAR), src, sb, n)) {
+                        return r;
+                    }
+                }
+            }
+        }
+        return internRunSlow(m, slot, hash, hdr, src, sb, n, rest);
     }
 
     private static boolean same(int[] rs, int rb, int[] src, int sb, int n) {

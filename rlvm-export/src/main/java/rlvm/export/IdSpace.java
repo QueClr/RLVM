@@ -277,6 +277,14 @@ final class IdSpace {
         return (dense || inOrder) && maxId < (dense ? limit : count);
     }
 
+    /**
+     * A bound {@code b} such that every id in {@code [0, b)} is bound: all bound ids in dense mode and
+     * while the ids came in order, 0 otherwise (nothing is known without a lookup).
+     */
+    long boundPrefix() {
+        return dense ? limit : inOrder ? count : 0;
+    }
+
     /** Number of bound ids (including the implicit id 0 of names and levels). */
     long boundCount() {
         return dense ? limit : count;

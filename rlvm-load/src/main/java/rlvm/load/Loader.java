@@ -127,6 +127,8 @@ public final class Loader implements ExportSink, RecordSink {
     /** Universe parameters with two level records (finding A2-F1). */
     private final DoubledParams paramRecords = new DoubledParams();
     private final LoadReport report = new LoadReport();
+    /** The definitions, theorems and opaques declared so far, by their record ids ({@link LoadTarget#repeatOf}). */
+    private final Repeats repeats = new Repeats();
     private final boolean proofBlocks;
     /** {@code S_BODY | RC_TWO_PLUS} if sharing flags are computed, else 0. */
     private final int flagMask;
@@ -465,6 +467,7 @@ public final class Loader implements ExportSink, RecordSink {
         r.packedEarlyRefs = nRunEarly;
         r.promotedNodes = out.sharedNodes() - nSharedWritten;
         r.droppedUnsafe = nDropped;
+        r.repeatUnits = repeats.found();
         r.unresolvedRefs = out.unresolvedRefs();
         r.unresolvedBlockRefs = out.unresolvedBlockRefs();
         r.trailingExprRecords = segLen;
@@ -1129,15 +1132,18 @@ public final class Loader implements ExportSink, RecordSink {
     }
 
     /**
-     * A stretch of {@code app} records ({@link ExportSink#exprApps}): what {@link #exprApp} does for
-     * each of them, in one loop. Taken unless something makes the record-by-record path necessary
-     * (metadata was seen, referrer counting, the segment limit, a child that is not an earlier
-     * record): then the reader delivers the records one by one, and what that path does (also where
-     * it fails) is by definition what this loader does. Nothing is changed before the stretch is
-     * known to be taken.
+     * A stretch of {@code app}, {@code lam} and {@code forallE} records
+     * ({@link ExportSink#exprStretch}): what {@link #exprApp}, {@link #exprLam} and
+     * {@link #exprForall} do for each of them, in one loop. The three differ in the kind they write
+     * and in the counter they raise and in nothing else here: the name and the info of a binder are
+     * not kept, and the body of a binder is marked only when referrers are counted. Taken unless
+     * something makes the record-by-record path necessary (metadata was seen, referrer counting, the
+     * segment limit, a child that is not an earlier record): then the reader delivers the records
+     * one by one, and what that path does (also where it fails) is by definition what this loader
+     * does. Nothing is changed before the stretch is known to be taken.
      */
     @Override
-    public int exprApps(int firstFileId, int count, int delta, int[] recs, int off) {
+    public int exprStretch(int firstFileId, int count, int delta, int[] recs, int off) {
         if (mdata != null || counting || count <= 0 || firstFileId + delta != exprCount + 1
                 || exprCount > MAX_EXPR_RECORDS - count) {
             return ExportSink.RUN_REFUSED;
@@ -1162,11 +1168,16 @@ public final class Loader implements ExportSink, RecordSink {
         final int base = segBase;
         final int first = exprCount + 1;
         int p = segLen << 2;
-        for (int i = 0, o = off + 1; i < count; i++, o += 3, p += 4) {
-            // the children as exprApp gets them; both must be earlier records (ordinals 1 .. first + i - 1)
-            final int f = recs[o] + delta;
-            final int a = recs[o + 1] + delta;
-            if (f <= 0 || a <= 0 || f >= first + i || a >= first + i) {
+        int lams = 0;
+        int pis = 0;
+        for (int i = 0, o = off; i < count; i++, o += 4, p += 4) {
+            // 0 an app record, 1 a lam record, 2 a forallE record
+            final int k = recs[o] >>> 30;
+            // the children as exprApp / exprLam / exprForall get them; both must be earlier records
+            // (ordinals 1 .. first + i - 1)
+            final int f = recs[o + 1] + delta;
+            final int a = recs[o + 2] + delta;
+            if (k > 2 || f <= 0 || a <= 0 || f >= first + i || a >= first + i) {
                 return ExportSink.RUN_REFUSED; // nothing was counted yet: the record is found one by one
             }
             // child(): a record of the segment is its index there; an earlier one is PENDING and its
@@ -1180,14 +1191,18 @@ public final class Loader implements ExportSink, RecordSink {
             np -= earlierF;
             pd[np] = p + 2;
             np -= earlierA;
-            s[p] = Kind.APP;
+            s[p] = Kind.APP + k;
             s[p + 1] = (lf & ~earlierF) | (-(PENDING + f) & earlierF);
             s[p + 2] = (la & ~earlierA) | (-(PENDING + a) & earlierA);
             s[p + 3] = 0;
+            lams += k & 1;
+            pis += k >>> 1;
         }
         pendCount = np;
         segLen += count;
-        nApp += count;
+        nApp += count - lams - pis;
+        nLam += lams;
+        nPi += pis;
         exprCount += count;
         return first;
     }
@@ -1939,11 +1954,15 @@ public final class Loader implements ExportSink, RecordSink {
             }
         }
         int lp = lparams(ids, lpOff, lpCount);
-        out.beginUnit(kind);
+        final int unit = out.beginUnit(kind);
         int cid = out.reserve(kind, name, lp);
         if (cid == 0) {
             throw duplicate(name);
         }
+        // Before the segment is written (segBase moves with it): the record of an earlier declaration under
+        // another name? Only a declaration whose type and value are both records of earlier segments can be.
+        final int first = value == 0 ? -1
+                : repeats.firstOrAdd(kind == DeclKind.DEFN, kind, lp, hint, type, value, unit, type <= segBase && value <= segBase);
         if (runCount != 0) {
             decideRuns(asBlock && proofBlocks ? Math.max(type, segBase) : Integer.MAX_VALUE);
         }
@@ -1959,6 +1978,9 @@ public final class Loader implements ExportSink, RecordSink {
         }
         int valueWord = sweep(valueEnc);
         out.complete(cid, sharedOf(typeEnc), valueWord, hint);
+        if (first >= 0) {
+            out.repeatOf(first);
+        }
         out.endUnit();
         nConstants++;
         nUnits++;

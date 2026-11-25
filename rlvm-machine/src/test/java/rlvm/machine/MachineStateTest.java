@@ -105,7 +105,7 @@ class MachineStateTest {
         assertEquals(Layout.FIRST_RECORD, m.vp);
         assertEquals(Layout.FIRST_RUN, m.rsp);
         assertEquals(0, m.pairUsed);
-        assertEquals(0, m.plogN);
+        assertEquals(0, m.plogN + m.ylogN);
         assertEquals(0, m.rtabUsed);
         assertEquals(epoch + 1, m.epoch, "the direct-mapped caches are invalidated by the epoch");
         assertAllZero(m.vtab, "vtab");
@@ -274,7 +274,9 @@ class MachineStateTest {
         for (int i = 0; i < n; i++) {
             assertEquals(ids[i], sort(m, i), "found again after the tables grew");
         }
-        assertTrue(m.vtab.length >= 2 * n, "load <= 0.5");
+        assertEquals(n, m.vp - m.vbase);
+        assertTrue(m.vold.length >= 2 * (m.vY - m.vbase) && m.vtab.length >= 2 * (m.vp - m.vY), "load <= 0.5 in the old and in the young table");
+        assertTrue(m.vY - m.vbase >= n - (1 << tiny.vtab >> 1), "the young table was emptied into the old one when it was half full");
         int[] runs = new int[3000];
         for (int i = 0; i < runs.length; i++) {
             runs[i] = TestTables.internRun(m, Layout.RUN_FRAME, 0, i, 2 * i);

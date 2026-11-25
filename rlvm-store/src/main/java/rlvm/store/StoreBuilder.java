@@ -202,6 +202,17 @@ public final class StoreBuilder {
         decls.setClaims(requireUnit(), java.util.Arrays.copyOf(blob, len));
     }
 
+    /**
+     * The open unit (a definition, theorem or opaque that is complete) is the declaration record of the
+     * earlier unit {@code firstUnit} under another name: same kind, same universe-parameter list, same
+     * reducibility hint, and the same expression records of the input as type and as value
+     * ({@link DeclTable#repeatOf}). Only the loader knows it: the value of a theorem is a proof block in the
+     * first unit and a promoted copy in the repeat. The caller vouches for all of it; the store checks the range.
+     */
+    public void repeatOf(int firstUnit) {
+        decls.setRepeatOf(requireUnit(), firstUnit);
+    }
+
     /** Closes the open unit and its segment. */
     public void endUnit() {
         requireUnit();

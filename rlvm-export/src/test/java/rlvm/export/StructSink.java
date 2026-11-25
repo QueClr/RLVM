@@ -45,26 +45,41 @@ final class StructSink extends TraceSink {
         return ++exprs;
     }
 
-    /** Stretches of app records taken ({@link #exprApps}) and their records. */
+    /** Stretches of app / lam / forallE records taken ({@link #exprStretch}) and their records. */
     int appStretches;
     int appStretchRecords;
+    /** The lam and forallE records among them. */
+    int stretchBinders;
 
     @Override
-    public int exprApps(int firstFileId, int count, int delta, int[] recs, int off) {
+    public int exprStretch(int firstFileId, int count, int delta, int[] recs, int off) {
         if (take == 0 || (take == 2 && rnd.nextBoolean())) {
             return RUN_REFUSED;
         }
         if (firstFileId + delta != exprs + 1 || count < 1) {
-            throw new AssertionError("stretch of " + count + " app records from file id " + firstFileId + ", delta " + delta
+            throw new AssertionError("stretch of " + count + " records from file id " + firstFileId + ", delta " + delta
                     + ", after " + exprs + " expressions");
         }
         int first = exprs + 1;
-        for (int i = 0, o = off; i < count; i++, o += 3) {
-            if (recs[o] != firstFileId + i || recs[o + 1] < 0 || recs[o + 1] >= recs[o] || recs[o + 2] < 0
-                    || recs[o + 2] >= recs[o]) {
-                throw new AssertionError("app record " + recs[o] + " of a stretch: fn " + recs[o + 1] + ", arg " + recs[o + 2]);
+        for (int i = 0, o = off; i < count; i++, o += 4) {
+            int id = recs[o] & 0x3FFF_FFFF;
+            int kind = recs[o] >>> 30;
+            if (id != firstFileId + i || kind > 2 || recs[o + 1] < 0 || recs[o + 1] >= id || recs[o + 2] < 0
+                    || recs[o + 2] >= id) {
+                throw new AssertionError("record " + id + " of a stretch: kind " + kind + ", children " + recs[o + 1] + ", "
+                        + recs[o + 2]);
             }
-            ev("app", recs[o + 1] + delta, recs[o + 2] + delta, exprs + 1);
+            if (kind != 0) {
+                // the binder name is a FILE id and bound: the names of these tests are dense
+                int name = recs[o + 3] & 0x3FFF_FFFF;
+                if (name < 0 || name >= names) {
+                    throw new AssertionError("record " + id + " of a stretch: binder name " + name + " of " + names);
+                }
+                stretchBinders++;
+            } else if (recs[o + 3] != 0) {
+                throw new AssertionError("app record " + id + " of a stretch: fourth int " + recs[o + 3]);
+            }
+            ev(kind == 0 ? "app" : kind == 1 ? "lam" : "pi", recs[o + 1] + delta, recs[o + 2] + delta, exprs + 1);
             exprs++;
         }
         appStretches++;

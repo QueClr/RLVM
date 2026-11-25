@@ -13,7 +13,9 @@ CP=rlvm-export/target/classes
 TOOL=rlvm.export.tools.ExportLoad
 FILES="work/arena-site/generated/init.ndjson work/arena-site/generated/std.ndjson work/exports/mathlib.ndjson"
 [ "${1:-}" = quick ] && FILES="work/arena-site/generated/init.ndjson work/arena-site/generated/std.ndjson"
-C2="-XX:-UseJVMCICompiler"
+# two words (used unquoted): a stock OpenJDK refuses -XX:-UseJVMCICompiler without the unlock
+# (*agentic-note*: rep-OPT-J)
+C2="-XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler"
 for f in $FILES; do
   [ -e "$f" ] || { echo "skip $f (not present)"; continue; }
   n=$(basename "$f" .ndjson)

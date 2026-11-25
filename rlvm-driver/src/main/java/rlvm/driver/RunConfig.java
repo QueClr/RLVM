@@ -270,6 +270,29 @@ public final class RunConfig {
      */
     public boolean unitTrace = false;
 
+    /**
+     * A declaration is not checked twice ({@code -X repeats=skip}, the default; {@code repeats=check}
+     * checks every unit). A definition, theorem or opaque whose record is the record of an earlier unit
+     * under another name ({@link RunHost#unitRepeatOf}: same kind, universe parameters, reducibility hint,
+     * and the same type and value records of the input) is admitted like any unit - the environment
+     * frontier, its name, its universe parameters, its roots - but the primary engine is not run on it
+     * when the earlier unit is ACCEPTED on the board at that moment: the check of a declaration reads its
+     * kind, universe parameters, type and value and the constants they mention, never its own name, and
+     * what the earlier unit could see the later one sees. Otherwise (the earlier unit is still in flight on
+     * another worker, or failed) the unit is checked as before, and nobody waits - unless that check does
+     * not accept it: then the worker waits for the earlier unit's status and, if it is ACCEPTED, admits the
+     * unit as it would have a moment later, so that the status of a unit does not depend on the schedule.
+     * (The two can differ only on input that a shortcut of the primary engine accepts and the official
+     * checker rejects: the engine's answer for the first record need not be its answer for the copy.) A unit
+     * is therefore ACCEPTED without a check, or against one, only when its original was accepted.
+     *
+     * <p>Never when the primary engine is the reference engine ({@code -X engine=reference}, and so the
+     * strict policy): there every declaration is checked, as the official checker checks it. The statistic
+     * {@code driver.repeatsSkipped} counts the units; in a differential run the reference engine still
+     * checks each of them. *agentic-note*: rep-OPT-I
+     */
+    public boolean skipRepeats = true;
+
     /** Print WARM-ANOMALY and MACHINE-INCOMPLETE events to stderr (at most 8 lines per run). */
     public boolean logAnomalies = true;
 
@@ -278,7 +301,7 @@ public final class RunConfig {
     private static final String[] KEYS = {
         "unit-mib", "keep-mib", "gc-after-mib", "chunk", "slice", "env-batch", "spill-ms", "publish-units", "publish-mib",
         "publish-scale",
-        "pipeline-min-mib", "no-fallback", "passes", "passes-keep", "shard", "unit-trace"
+        "pipeline-min-mib", "no-fallback", "passes", "passes-keep", "shard", "unit-trace", "repeats"
     };
 
     /** Environment variable with driver settings for experiments: {@code key=value[,key=value]...}. */
@@ -340,9 +363,11 @@ public final class RunConfig {
      * passes-keep=engines|none  the later passes use the engine instances of pass 1     {@link #passesKeepEngines}
      * shard=K/N           measurement only: check shard K (0 .. N-1) of N; the run declines   {@link #shardCount}
      * unit-trace          statistics: one line per checked unit in STATSFILE.units.tsv (a flag)  {@link #unitTrace}
+     * repeats=skip|check  a unit that repeats an accepted unit word for word is not checked again
+     *                     (skip, the default) or is (check)                            {@link #skipRepeats}
      * </pre>
-     * None of the numeric settings can change a verdict; {@code no-fallback} and {@code shard} can only
-     * turn an ACCEPT into a DECLINE.
+     * None of the numeric settings can change a verdict, nor can {@code repeats}; {@code no-fallback} and
+     * {@code shard} can only turn an ACCEPT into a DECLINE.
      *
      * @throws IllegalArgumentException with a message for the user: unknown key, missing or malformed
      *     value, value out of range
@@ -378,6 +403,16 @@ public final class RunConfig {
                 unitTrace = false;
             } else {
                 throw new IllegalArgumentException("unit-trace=" + value + ": expected no value, true or false");
+            }
+            return;
+        }
+        if (key.equals("repeats")) {
+            if ("skip".equals(value)) {
+                skipRepeats = true;
+            } else if ("check".equals(value)) {
+                skipRepeats = false;
+            } else {
+                throw new IllegalArgumentException("repeats=" + value + ": expected skip or check");
             }
             return;
         }
