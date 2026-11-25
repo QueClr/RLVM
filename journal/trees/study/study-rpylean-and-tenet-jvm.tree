@@ -1,0 +1,641 @@
+\title{07 — rpylean (RPython, \verb~|#~4 at 96.3 s) deep-dive and tenet-jvm (Java, 27.2 min) post-mortem}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{machine}
+\tag{loader}
+\tag{truffle}
+\tag{platform}
+\tag{gc}
+\tag{soundness}
+\tag{performance}
+\meta{origin}{docs/research/07-leader-rpylean-and-tenet-jvm.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Sources (read-only clones, nothing built or run):}
+
+\ul{
+\li{\code{\verb~|refs/rpylean~} — \<html:a>[href]{\verb~|https://github.com/Julian/rpylean~}{https://github.com/Julian/rpylean} at \code{\verb~|bbf354d3adbfe84d297ea2159cc707b48d96a90a~} (the arena pin, v2026.11.11, HEAD of the clone; 718 commits of history read). ~21 k lines of RPython, of which \code{\verb~|rpylean/machine.py~} (12 879 lines) is the kernel.}
+\li{\code{\verb~|refs/tenet-jvm~} — \<html:a>[href]{\verb~|https://github.com/keithadler/tenet-jvm~}{https://github.com/keithadler/tenet-jvm}. The arena pins \code{\verb~|4cc6e20~} (v0.1.5); the clone's HEAD is \code{\verb~|53cf8a4~} (3 commits later). Unless stated otherwise, tenet-jvm line numbers refer to \strong{\code{\verb~|4cc6e20~}} (read with \code{\verb~|git show 4cc6e20:<path>~}), because that is the revision that scored 27.2 min / 11.8 GB.}
+\li{\code{\verb~|refs/lean4~} (branch at \code{\verb~|611c117~}, v4.36 line) was used to check two claims about the official kernel.}
+}
+
+\p{All paths below are relative to \code{\verb~|refs/~}. Bare file names in §1 (\code{\verb~|machine.py~}, \code{\verb~|objects.py~}, \code{\verb~|parser.py~}, \code{\verb~|_eval.py~}, \code{\verb~|cli.py~}, \code{\verb~|environment.py~}, \code{\verb~|_inductive.py~}, \code{\verb~|_stack.py~}) live in \code{\verb~|rpylean/rpylean/~}; \code{\verb~|targetrpylean.py~} and \code{\verb~|justfile~} in \code{\verb~|rpylean/~}. Bare Java file names in §2 live in \code{\verb~|tenet-jvm/src/main/java/tenet/~}. "Commit \code{\verb~|abc1234~}" means a commit in the respective repository; quoted numbers are the authors' own measurements from commit messages (rpylean: Apple M4, ARM64 instruction counts) unless marked otherwise. Items I could not verify are marked \strong{\verb~|[~unverified\verb~|]~}; my own inferences are marked \strong{\verb~|[~inference\verb~|]~}.}
+
+\subtree{
+\title{0. Decision-relevant findings first}
+
+\ol{
+\li{\strong{rpylean is not a JIT-driven checker.} The translated binary is built with \code{\verb~|--opt=jit~} (\code{\verb~|rpylean/justfile:59~}), but the \em{only} \code{\verb~|JitDriver~} in the code base sits in \code{\verb~|rpylean/rpylean/_eval.py:1421~} and drives a call-by-need CEK machine that is entered solely when a \em{closed compound term is compared with a \code{\verb~|Bool~}/\code{\verb~|Nat~} scalar} (\code{\verb~|machine.py:11743-11761~}, \code{\verb~|machine.py:8361-8389~}). Everything Mathlib spends time on — parsing, import, substitution, whnf, infer, def_eq — is RPython translated ahead-of-time to C. Measured effect of the JIT machine on library corpora: "init: ~0\% delta, std +1.3\%, cedar +1.6\%, cslib −0.1\%" (commit \code{\verb~|dd8949e~}).}
+\li{\strong{The authors tried a tracing JIT on the kernel loops and removed it.} With \code{\verb~|JitDriver~}s on \code{\verb~|whnf~}, \code{\verb~|_def_eq_core~}, \code{\verb~|_instantiate~} and the app-spine loop (commits \code{\verb~|83555d3~}, \code{\verb~|78ca705~}, \code{\verb~|5479807~}): "init.ndjson runs 136.7s with --jit off vs 162.4s with the JIT on … Setting the compile threshold absurdly high reproduces the slow times, so the cost is not poor trace quality but the merge-point bookkeeping itself … ~15\% of wall time on a megamorphic tree-walk the tracer can't speed up" (commit \code{\verb~|1ba28a8~}); removed in \code{\verb~|c2be56a~}. \strong{Consequence for RLVM: do not put Truffle partial evaluation on the kernel's term-walking loops; reserve it for evaluation of closed Lean code.}}
+\li{\strong{The single largest win was moving the working set out of the GC heap}: terms as 16-byte records in unmanaged \code{\verb~|u32~} arrays addressed by integer handles, hash-consed per declaration, with all caches as parallel integer arrays. init: 752 B → 184 B instructions, 3478 → 963 MB; std: 9.66 T → 348 B (28×) (commits \code{\verb~|0866ac8~}, \code{\verb~|2ec1abf~}). Stated motivation: GC tracing of retained reduction products was "~45\% of the run" on the std tail (commit \code{\verb~|d3e30e2~}). On the JVM the exact analogue is primitive \code{\verb~|int[]~}/\code{\verb~|long[]~} arrays (the collector never scans their contents).}
+\li{\strong{rpylean's kernel is substitution-based (de Bruijn + locally-nameless FVars), not NbE.} Its speed comes from (a) hash-consing ⇒ handle identity ⇒ O(1) equality and array-indexed memo slots, (b) memoised, allocation-free multi-substitution, (c) aggressively \em{not doing work}: skipping proof arguments via per-constant Prop masks, comparing un-instantiated patterns against targets instead of instantiating (\code{\verb~|inst_eq~}), importing only what is needed from the parsed AST, warm caches across declarations. Closures were tried in the old object kernel and abandoned because fresh closure objects defeated identity-keyed caches (commit \code{\verb~|4c45e81~}); see §4.}
+\li{\strong{Budget reference.} Arena: 96.3 s × 6e9 = \strong{5.78e11 instructions} for Mathlib, single-threaded, peak 4.4 GB. Own numbers on M4 at the pinned revision: init 28.7 G, std 50.2 G, cedar 68.8 G, cslib 115.5 G, navier-stokes-euler 193.6 G instructions (commit \code{\verb~|1f30f95~}). The last Mathlib figure recorded in git is 1285.5 G at \code{\verb~|ff75c0a~} (2026-11-21); the later commits cut NSE by 2.15× (415.6 G → 193.6 G), which extrapolates to ≈600 G \strong{\verb~|[~inference\verb~|]~}, consistent with the arena's 578 G. Mathlib has ~670 k declarations (commit \code{\verb~|a31ca02~}) and ~107 M expression nodes in the export (commit \code{\verb~|291ae24~}), so the bar is \strong{≈0.85 M instructions per declaration / ≈5.4 k instructions per exported expression node, everything included}.}
+\li{\strong{tenet-jvm costs 9.8e12 instructions (17× rpylean) and 11.8 GB} for structural reasons that are all avoidable: a \code{\verb~|LinkedHashMap<String,Object>~} JSON tree per line, \code{\verb~|HashMap<Expr,Expr>~} caches with structural \code{\verb~|equals~}, non-interned \code{\verb~|Name~}s as \code{\verb~|HashMap~} keys, fresh FVars on every binder opening, closure-based generic \code{\verb~|replace~}, \code{\verb~|ArrayList~} spines, and a launcher (\code{\verb~|-XX:+UseParallelGC -XX:MaxRAMPercentage=75~}) that lets the heap grow to 12 GB on the 16 GB runner while all GC worker threads' instructions are billed. What is worth copying: the fail-closed verdict protocol, the large-stack checker thread, derive-then-compare for inductives, and its catalogue of Lean-version-dependent rules (§2.6).}
+}
+}
+
+\subtree{
+\title{1. rpylean}
+
+\subtree{
+\title{1.1 Architecture map}
+
+\table{
+\tr{\th{File (under \code{\verb~|rpylean/rpylean/~})}\th{Lines}\th{Role}}
+\tr{\td{\code{\verb~|parser.py~}}\td{2837}\td{NDJSON reader: SWAR chunk fast path + general cursor parser; refcount prescan; streaming hook per declaration}}
+\tr{\td{\code{\verb~|objects.py~}}\td{6391}\td{Parsed term language (\code{\verb~|W_Expr~}, \code{\verb~|Name~}, \code{\verb~|W_Level~}), declarations and their admission checks, interning tables, Nat ops, static Prop-mask / ctor-body analyses}}
+\tr{\td{\code{\verb~|machine.py~}}\td{12 879}\td{The kernel: \code{\verb~|TermStore~} (records, consing, substitution, import/export), \code{\verb~|Machine~} (whnf, infer, def_eq, check_value), raw \code{\verb~|IntMap~}/\code{\verb~|IntSet~}/\code{\verb~|U32Map~}/\code{\verb~|PairMap~}, warm-machine \code{\verb~|acquire~}/\code{\verb~|release~}}}
+\tr{\td{\code{\verb~|_eval.py~}}\td{2031}\td{Call-by-need CEK machine over compiled \code{\verb~|CodeNode~}s for closed terms; the only JIT-traced loop}}
+\tr{\td{\code{\verb~|_inductive.py~}}\td{1234}\td{Regenerates recursors of an inductive block (mutual + nested) for comparison}}
+\tr{\td{\code{\verb~|environment.py~}}\td{612}\td{\code{\verb~|Environment~} (name → decl), \code{\verb~|TypeChecker~} (per-declaration limits, ordering/safety rules), \code{\verb~|type_check_one~}}}
+\tr{\td{\code{\verb~|cli.py~}}\td{1139}\td{\code{\verb~|check~} command, streaming checker, prescan orchestration, exit codes}}
+\tr{\td{\code{\verb~|_stack.py~}}\td{120}\td{Re-exec with a larger \code{\verb~|RLIMIT_STACK~}}}
+\tr{\td{\code{\verb~|targetrpylean.py~} (repo root)}\td{94}\td{Translation target; patches the GC nursery floor}}
+}
+
+\p{Data flow for \code{\verb~|./rpylean-c check FILE~} (\code{\verb~|cli.py:532-587~}):}
+
+\pre{\verb~|
+open FILE unbuffered ──► pass 1: prescan_refcounts (raw bytes → RefCountTable u32[exprIdx])   parser.py:2827, cli.py:491
+        seek(0)      ──► pass 2: _consume_stream: 256 KiB chunks, SWAR fast path per line       parser.py:2722-2816
+                              │ names/levels/exprs → GC objects (W_Expr AST), pool slot freed when refcount hits 0
+                              ▼ each declaration line → EnvironmentBuilder.register_declaration → hook.on_declaration
+                         _StreamingChecker.on_declaration (cli.py:274) → Environment.type_check_one (environment.py:406)
+                              │ TypeChecker(env, decl) → acquire(warm Machine)                  machine.py:12809
+                              ▼ decl.w_kind.type_check → Machine.check_value(type, value, prop) machine.py:12690
+                         on success: decl.w_kind.drop_checked_value()  (theorem/opaque bodies freed) cli.py:363
+exit 1 if any failure else 0 (cli.py:184)
+~}
+
+\p{Single-threaded; declarations are checked strictly in file order, interleaved with parsing. No decline exit code exists: deep recursion, per-declaration limits and malformed lines are all rejections (exit 1); an uncaught RPython exception aborts the process.}
+}
+
+\subtree{
+\title{1.2 Two term representations}
+
+\p{\strong{(A) Parsed AST — GC objects, immutable, persistent} (\code{\verb~|objects.py~}). Used only as the \em{source} from which the kernel store imports.}
+
+\ul{
+\li{\p{\code{\verb~|W_Expr~} base: two words, \code{\verb~|_packed~} and \code{\verb~|_cache~} (\code{\verb~|objects.py:2808-2850~}).}
+\ul{
+\li{\code{\verb~|_packed~}: bits 0-31 content hash; bit 32 \code{\verb~|has_fvar~}; bits 33-61 \code{\verb~|loose_bvar_range~}; bit 62 \code{\verb~|has_level_param~}. Computed in each constructor (\code{\verb~|W_App.__init__~}, \code{\verb~|objects.py:4314-4324~}).}
+\li{\code{\verb~|_cache~}: \code{\verb~|(generation << 32) | handle~} — an \em{intrusive, generation-stamped import memo} (see §1.4).}
+}}
+\li{\code{\verb~|W_App{fn,arg}~}, \code{\verb~|W_Lambda/W_ForAll{binder,body}~} with \code{\verb~|Binder{name,type,_pos_style,_fvar}~}, \code{\verb~|W_Let{name,type,value,body}~}, \code{\verb~|W_Proj{struct_name,field_index,struct_expr}~}, \code{\verb~|W_Const{name,levels,_canonical}~}, \code{\verb~|W_Sort{level}~}, \code{\verb~|W_BVar{id}~}, \code{\verb~|W_FVar{id,binder,_uid}~}, \code{\verb~|W_LitNat{val: rbigint}~}, \code{\verb~|W_LitStr{val}~}.}
+\li{Interning policy (\code{\verb~|objects.py:1024-1047~}): \code{\verb~|Name~}s globally hash-consed in append-only open-addressed tables storing \code{\verb~|(hash31 << 32) | (entryIdx+1)~} in a pointer-free int list (\code{\verb~|objects.py:961-1100~}) ⇒ name equality is pointer identity; levels hash-consed in per-kind dicts; \code{\verb~|W_Const~} in a fixed 65 536-slot direct-mapped cache (\code{\verb~|_CONST_CACHE~}); \code{\verb~|W_BVar~}/small \code{\verb~|W_LitNat~} in 1024-entry arrays; \code{\verb~|W_Sort~}, \code{\verb~|W_LitStr~} interned. \strong{\code{\verb~|W_App~}/\code{\verb~|W_Proj~}/\code{\verb~|W_Let~}/binders are deliberately \em{not} globally interned} — "lean4export already DAG-shares parsed terms by \code{\verb~|ie~} index and \code{\verb~|TermStore~} hash-conses them per declaration; keeping strong refs in global dicts pinned dead theorem proofs across Mathlib".}
+\li{Per-\code{\verb~|Name~} inline cache of the declaration lookup: \code{\verb~|get_decl~} is two field reads (\code{\verb~|name._decl_dict is declarations → name._decl_cached~}, \code{\verb~|objects.py:47-64~}); −4.8\% instructions on a grind workload (commit \code{\verb~|7073bce~}).}
+\li{Levels: parsed verbatim (no simplification at parse, commit \code{\verb~|eed3160~}); \code{\verb~|eq~} = identity, else syntactic equality of cached normal forms, else \code{\verb~|leq~} both ways (\code{\verb~|objects.py:2196-2208~}); \code{\verb~|normalize()~} cached on the level object. Constant and sort leaves are canonicalised to normal-form levels on import so \code{\verb~|C.{max u v}~} and \code{\verb~|C.{max v u}~} become the same leaf (\code{\verb~|machine.py:517-552~}; commit \code{\verb~|c147f1d~}: one declaration 22 s / 4.87 M def_eq calls → 1.2 s / 200 calls).}
+}
+
+\p{\strong{(B) Kernel store — \code{\verb~|TermStore~}, unmanaged memory, per declaration (warm-reused)} (\code{\verb~|machine.py:83-152~}, \code{\verb~|1114-1272~}).}
+
+\ul{
+\li{\strong{Handle} = tagged int. bit 0 set ⇒ leaf with index \code{\verb~|h >> 1~}; bit 0 clear and ≠ 0 ⇒ record with index \code{\verb~|(h >> 1) − 1~}; \code{\verb~|0~} = invalid/empty marker of every table.}
+\li{\p{\strong{Record} = 4 × \code{\verb~|u32~} (16 bytes) in \code{\verb~|recs~}:}
+\ul{
+\li{word 0: \code{\verb~|(meta << 3) | kind~}, \code{\verb~|meta = (loose_bvar_range << 1) | has_fvar~}. Hence \code{\verb~|word0 < 16 ⇔ no loose bvars~} — a one-compare "nothing to substitute here" test used everywhere (\code{\verb~|machine.py:2500~}).}
+\li{word 1 \code{\verb~|a~}, word 2 \code{\verb~|b~}: child handles. \code{\verb~|APP(fn,arg)~}, \code{\verb~|LAMBDA/FORALL(binderType, body)~}, \code{\verb~|PROJ(struct, (nameId << 10) | fieldIdx)~}, \code{\verb~|LET(type, PAIR(value, body))~}, \code{\verb~|PAIR~}.}
+\li{word 3: \code{\verb~|(sizeEnc:8 << 24) | info:24~}. \code{\verb~|sizeEnc~} = saturating tree size (255 = "heavy", ≥ 256 nodes), computed on cons as \code{\verb~|ea + eb + 2~} (\code{\verb~|machine.py:1632-1639~}); \code{\verb~|info~} = index into a GC side list holding the \code{\verb~|Binder~} (name, style — not part of identity) or the projection/let \code{\verb~|Name~}.}
+}}
+\li{\strong{Identity}: \code{\verb~|(kind, a, b)~}. Binders are consed on (type, body) only ⇒ alpha-equal binders share a record. Projection identity includes the structure name (bug fixed in \code{\verb~|2ec1abf~}: \code{\verb~|PProd.0 x~} and \code{\verb~|LE.0 x~} had shared a record).}
+\li{\strong{Memo slots}: 6 × \code{\verb~|u32~} per record in \code{\verb~|memos~} (\code{\verb~|machine.py:145-158~}): \code{\verb~|M_WHNF_CORE~}, \code{\verb~|M_WHNF~}, \code{\verb~|M_INFER~}, \code{\verb~|M_CHECKED_GEN~}, \code{\verb~|M_WHNF_CORE_CHEAP~} (also holds the one-step delta unfold of a delta-headed app, tagged with bit 31), \code{\verb~|M_EQV~} (union-find parent). 0 = unknown. Plus one \code{\verb~|i64~} \code{\verb~|call_slot~} per record (scratch memo of the substitution in progress, §1.5).}
+\li{\p{\strong{Consing tables} (open addressing, linear probing, load ≤ 50\%, single multiply-xorshift hash \code{\verb~|_spread~}, \code{\verb~|machine.py:329-336~}):}
+\ul{
+\li{\code{\verb~|app_table~}: one \code{\verb~|i64~} per slot = \code{\verb~|(fn:21 | arg:21 | recIdx+1:21)~}. A hit needs \strong{one probe of one array and no load from \code{\verb~|recs~}} (\code{\verb~|cons_app~}, \code{\verb~|machine.py:1589-1605~}). When any handle ≥ 2²¹ the table is promoted to a 16-byte \code{\verb~|(key64, handle)~} layout (\code{\verb~|_promote_apps_to_wide~}).}
+\li{\code{\verb~|table~} for the other kinds: \code{\verb~|(kind:3 | a:20 | b:20 | recIdx+1:20)~}, promoted above 2²⁰.}
+}
+\pre{\verb~|
+cons_app(fn, arg):                                   # machine.py:1589-1647
+  if (fn | arg) >= 2^21: return cons_app_wide(fn, arg)
+  pair = (fn << 21) | arg
+  i = spread(pair) & mask                            # spread(k): x = (k ^ k>>>30) * 0xbf58476d1ce4e5b9; x ^= x>>>27
+  loop:
+    e = app_table[i]
+    if (e >> 21) == pair: return (e & (2^21-1)) << 1  # hit: handle = (recIdx+1) << 1, no load from recs
+    if e == 0: break
+    i = (i + 1) & mask
+  # miss (out of line): append record
+  meta = max(looseRange(fn), looseRange(arg)) << 1 | (hasFVar(fn) | hasFVar(arg))
+  size = min(255, sizeEnc(fn) + sizeEnc(arg) + 2)     # leaves count 0
+  recs[4*n .. 4*n+3] = [(meta << 3) | APP, fn, arg, size << 24];  n += 1
+  if ++napps * 2 > tableSize: rehash_apps() else app_table[i] = (pair << 21) | n
+  return n << 1
+~}}
+\li{\strong{Leaves} (constants, sorts, bvars, fvars, literals) stay GC objects in a list \code{\verb~|leaves[j]~}, canonicalised on entry (\code{\verb~|leaf_for~}, \code{\verb~|machine.py:2144-2219~}: bvars by index, fvars by identity, the rest by content after level normalisation). Parallel unmanaged per-leaf arrays: \code{\verb~|leaf_meta~}, \code{\verb~|leaf_whnf~}, \code{\verb~|leaf_infer~}, \code{\verb~|leaf_checked~}, \code{\verb~|leaf_delta~} (imported unfolded value), \code{\verb~|leaf_delta_body~} (stripped body + arity, or a tagged fast-path encoding), \code{\verb~|leaf_eqv~}, \code{\verb~|leaf_head_kind~} (classification flags \code{\verb~|_LF_RECURSOR | _LF_QUOT_LIFT | _LF_DELTA | _LF_CTOR | _LF_NAT_BINOP | _LF_ITE | _LF_SHORT_BOOL | _LF_NAT_SUCC | _LF_NAT_ZERO~} + the reducibility hint in the high 16 bits), \code{\verb~|leaf_prop_mask~} (\code{\verb~|machine.py:1166-1190~}, flags at \code{\verb~|427-439~}). A head constant is classified once per store; afterwards "is this head a recursor / unfoldable / a ctor / a native Nat op, and what is its height" is one array load.}
+\li{\strong{Spine buffer}: \code{\verb~|_spine_buf~} (\code{\verb~|u32[]~}) with a stack discipline — \code{\verb~|mark = top; head = unapp_push(h); n = top − mark; …; unapp_pop(mark)~} (\code{\verb~|machine.py:2335-2358~}). Application arguments are never materialised as lists; beta, iota, delta, infer and def_eq all read arguments from this buffer.}
+\li{Size per record of capacity ≈ 16 (recs) + 24 (memos) + 8 (call_slot) + 16 (app_table at 2 slots/record) ≈ 64 bytes; no per-node object header, nothing traced by the GC.}
+}
+}
+
+\subtree{
+\title{1.3 Export parsing}
+
+\ul{
+\li{\p{Two passes over the file when it is seekable (\code{\verb~|cli.py:546-557~}):}
+\ol{
+\li{\strong{Prescan} (\code{\verb~|_prescan_chunk_fast~}, \code{\verb~|parser.py:1353-1548~}): raw-byte scan that, per expression index, counts how many later lines reference it, into a pre-sized unmanaged \code{\verb~|u32~} \code{\verb~|RefCountTable~} (size hint \code{\verb~|fileSize/50~}). Name and level lines are skipped with a SWAR newline search (\code{\verb~|_find_nl~}, \code{\verb~|parser.py:604-615~}).}
+\li{\strong{Parse}: every reference goes through \code{\verb~|ref_expr~}, which decrements the count and nulls the pool slot at zero (\code{\verb~|parser.py:256-277~}). Together with dropping theorem/opaque bodies after their check this bounds the live AST to "declarations still in play": cslib 14.8 → 8.6 GB and 1.5× faster; "mathlib live heap collapses from ~8 GB to ~1.5 GB as it checks"; "~68\% of cslib's distinct expressions are reachable only from theorem values" (commit \code{\verb~|1f6d220~}).}
+}}
+\li{I/O: unbuffered \code{\verb~|read(262144)~}; chunks are parsed \strong{in place}; only the line straddling a chunk boundary is concatenated (\code{\verb~|parser.py:2727-2816~}). Before this, \code{\verb~|memmove~} was "59\% of all L1D store misses"; fixing it cut footprint 48-57\% and init wall time 10.8\% (commit \code{\verb~|291ae24~}).}
+\li{Fast path = word-at-a-time (SWAR) matching of the \em{canonical lean4export key order} with unaligned 64/32/16-bit loads compared against compile-time packed literals (\code{\verb~|parser.py:427-522~}): \code{\verb~|{"app":{"arg":A,"fn":F},"ie":E}~} ("~73\% of all lines", \code{\verb~|parser.py:1381~}), \code{\verb~|{"ie":E,"lam":{"binderInfo":…,"body":B,"name":N,"type":T}}~}, \code{\verb~|{"forallE":{…},"ie":E}~}; a second tier (\code{\verb~|_compact_rare~}) handles const/sort/bvar/letE/proj/natVal/strVal/names/levels/def/thm/opaque; anything else (different key order, whitespace) falls back to a general cursor parser (\code{\verb~|parse_cursor_general~}, \code{\verb~|parser.py:1570~}). No JSON tree, no per-line object except the AST node itself. Gain of the SWAR rewrite: −5.1…−6.0\% of \em{total} instructions on init/std/cedar/cslib, −3.0\% on NSE (commit \code{\verb~|437cefa~}).}
+\li{No mmap, no parallel parsing, no binary cache format. Parse share of the total is not reported anywhere \strong{\verb~|[~unverified\verb~|]~}; the −5…6\% figure above is a lower bound on what it was before the rewrite.}
+\li{Robustness rules worth copying: metadata line validated (\code{\verb~|EXPORT_VERSION = "3.1.0"~}, a missing version is tolerated, \code{\verb~|parser.py:381-395~}); a malformed line is an \code{\verb~|ExportError~} ⇒ rejection, never a crash (commits \code{\verb~|f9ccf0e~}, \code{\verb~|3041b64~}); UTF-16 surrogate pairs in \code{\verb~|\u~} escapes are combined and string literals are expanded per Unicode scalar, not per byte (commit \code{\verb~|c7a68d7~}, arena \code{\verb~|bugs/str-lit-utf8*~}).}
+}
+}
+
+\subtree{
+\title{1.4 Import: AST → store, fused with level and argument substitution}
+
+\p{This is the part with no counterpart in the Rust checkers and worth understanding precisely.}
+
+\ul{
+\li{\code{\verb~|import_term(e)~} (\code{\verb~|machine.py:5989-6164~}): memoised by \code{\verb~|e._cache == (store_gen << 32) | handle~}; iterative along application spines (explicit \code{\verb~|_import_spine~} stack), recursive elsewhere with a stack check every 32 frames.}
+\li{\code{\verb~|import_const_term(const, decl, target)~} (\code{\verb~|machine.py:6555-6587~}): imports \code{\verb~|target~} (a declaration's type, value or recursor-rule RHS) \strong{with \code{\verb~|decl.levels := const.levels~} substituted during the walk}, never building an instantiated AST. Sub-terms without level params (\code{\verb~|has_level_param~} bit) reuse the plain memo. The memo for the level-instantiated walk uses a \em{different generation number} per (params, levels) pair, obtained from a 512-slot direct-mapped table (\code{\verb~|_level_cache_gen~}, \code{\verb~|machine.py:6489-6553~}), so one \code{\verb~|_cache~} word per AST node serves "this node under this level instantiation in this store epoch". Identity instantiations (\code{\verb~|C.{u}~} inside a declaration polymorphic in \code{\verb~|u~}) short-circuit to the plain import.}
+\li{\strong{Never import what beta will discard} (commit \code{\verb~|90bc723~}, NSE −3.4\%): for an applied definition, the leading lambdas of the value are peeled \em{on the AST} and only the body is imported; \code{\verb~|leaf_delta_body[j] = (arity << 32) | bodyHandle~}. Same for recursor rules (\code{\verb~|_rule_rhs_stripped~}, \code{\verb~|machine.py:9386~}).}
+\li{\strong{First-use fusion} (commit \code{\verb~|e974694~}; \code{\verb~|_try_unfold_first_use~}, \code{\verb~|machine.py:8133-8270~}): the first time a definition is unfolded in a store, level substitution \em{and} argument substitution are done in one walk of the AST (\code{\verb~|import_const_subst_buf~}), producing the beta-reduct directly; only the second unfold imports the stripped body into the store ("single-use definitions are ~40-55\% of \code{\verb~|_delta_body~} records").}
+\li{\strong{Delta fast paths by body shape} (commit \code{\verb~|769f42b~}; \code{\verb~|_unfold_fast~}, \code{\verb~|machine.py:8058-8130~}): if the value is \code{\verb~|λ x₁…xₘ. BVar b~} (argument picker: \code{\verb~|outParam~}, \code{\verb~|inferInstance~}, \code{\verb~|id~}-likes) or \code{\verb~|λ x₁…xₘ. Proj(S, i, BVar b)~} (structure/class parent projections), the unfold is computed from the spine without any import or instantiate.}
+\li{Analogous AST-direct paths exist for inference of constant applications on first use (\code{\verb~|_infer_app_const_ast_buf~}, \code{\verb~|machine.py:10898~}; "single-use constants are ~78\% of \code{\verb~|_infer_leaf~} records", \code{\verb~|machine.py:463-468~}) and for projection field types (\code{\verb~|W_Inductive.init_proj_cache~}, \code{\verb~|objects.py:5900-5925~}).}
+}
+}
+
+\subtree{
+\title{1.5 Substitution engine}
+
+\p{All of \code{\verb~|instantiate~}, \code{\verb~|instantiate_multi*~}, \code{\verb~|shift~}, \code{\verb~|bind_fvar(s)~} (\code{\verb~|machine.py:2451-5950~}) follow one scheme:}
+
+\pre{\verb~|
+instantiate(h, sub, depth):
+  if looseRange(h) <= depth: return h                      # one load + compare
+  if leaf(h): bvar hit → sub (shifted by depth unless sub closed); else bvar(id-1)
+  r = persistentMemo[(h, sub, depth)]  (packed 25|25|13 bits into one i64 key; capped table) ; if r: return r
+  epoch = ++callEpoch
+  r = walk(h)        # recursive; per record ri visited:
+                     #   if callSlot[ri] >> 32 == (epoch << 8 | depth): return low 32 bits   ← O(1) one-shot memo
+                     #   rebuild children; if unchanged return h itself (no cons)
+                     #   left spines of APP are unrolled iteratively onto _subst_stack
+                     #   callSlot[ri] = ((epoch << 8 | depth) << 32) | result
+  persistentMemo[(h, sub, depth)] = r
+~}
+
+\ul{
+\li{The \strong{one-shot memo} (\code{\verb~|call_slot~}, \code{\verb~|machine.py:1253-1255~}, \code{\verb~|2502-2505~}, \code{\verb~|2659~}) makes substitution linear in the DAG with no hashing: one \code{\verb~|i64~} array indexed by record, validated by a per-call epoch. A record seen at a second depth within one call falls back to a small \code{\verb~|IntMap~} (\code{\verb~|_call_memo~}). Replacing per-call \code{\verb~|IntMap~} hashing by this: "−10\% to −15\% cycles & instructions across the board" (commit \code{\verb~|53c4861~}, together with 32-bit arrays and the spine buffer).}
+\li{\strong{Multi-substitution} takes its substitutes directly from a slice of the spine buffer (\code{\verb~|instantiate_multi_buf(h, start, count)~}), so an n-ary beta/iota/delta step is one walk with zero list allocation; specialised variants exist for depth 0 and for "all substitutes closed" (no shifting) (\code{\verb~|machine.py:3891-3920~}; commits \code{\verb~|ff75c0a~}, \code{\verb~|7e11d57~}).}
+\li{The persistent memos (\code{\verb~|_inst_memo~}, \code{\verb~|_shift_memo~}, \code{\verb~|_bind_memo~}, \code{\verb~|_multi_memo~}) are capped (\code{\verb~|_MEMO_LIMIT = 1 << 18~} slots, \code{\verb~|machine.py:503-506~}) and wiped when full: "a substitution memo only pays for itself while a lookup is cheaper than redoing the work, which stops being true once the table has outgrown the caches" (commit \code{\verb~|19c0af8~}).}
+\li{\strong{Telescopes are opened at once} (commit \code{\verb~|6087a53~}): a k-binder lambda is instantiated with k fvars in one multi-substitution and re-abstracted in one \code{\verb~|bind_fvars~} pass; before, "a k-binder lambda cost k walks of each"; the abstraction memo of the slowest Mathlib declaration shrank 53 M → 5 M entries.}
+}
+}
+
+\subtree{
+\title{1.6 Reduction}
+
+\p{\code{\verb~|whnf_core(h, cheap_proj)~} (\code{\verb~|machine.py:7728-7911~}) — beta, zeta, proj-of-ctor, iota, \code{\verb~|Quot.lift~}; never delta. Memo slot per mode; a result known in \code{\verb~|M_WHNF~} also answers \code{\verb~|whnf_core~}. One step (\code{\verb~|_whnf_core_step~}):}
+
+\ul{
+\li{\p{\code{\verb~|APP~}: walk to the head without materialising the spine.}
+\ul{
+\li{head is a record \code{\verb~|LAMBDA~} → push spine, \strong{multi-arg beta} (\code{\verb~|_beta_spine_buf~}: strip up to n lambdas, one multi-instantiate, re-apply leftovers).}
+\li{head is a leaf: one flag load; unless \code{\verb~|_LF_RECURSOR~}/\code{\verb~|_LF_QUOT_LIFT~}, \strong{stuck in O(1)}.}
+\li{recursor → \code{\verb~|_try_iota_spine~} (below); \code{\verb~|Quot.lift~} with ≥ 6 args → whnf the 6th, must be \code{\verb~|Quot.mk~} with 3 args → \code{\verb~|f a extra…~} (\code{\verb~|machine.py:9146-9164~}).}
+\li{head is \code{\verb~|PROJ~}/\code{\verb~|LET~} → reduce head, re-apply (beta directly if it became a lambda).}
+}}
+\li{\code{\verb~|LET~} → instantiate body with value. \code{\verb~|PROJ~} → \code{\verb~|try_proj~}.}
+}
+
+\p{\code{\verb~|whnf(h)~} (\code{\verb~|machine.py:7913-7943~}): \code{\verb~|loop { h = whnf_core(h); if APP and try_reduce_nat(h) → continue; u = try_unfold_head(h); if u == 0 break; h = u }~}, memoised in \code{\verb~|M_WHNF~} / \code{\verb~|leaf_whnf~}. One delta layer per iteration; the one-step unfold of an app is itself memoised (commit \code{\verb~|cb628e6~}).}
+
+\p{\strong{Iota} (\code{\verb~|_try_iota_spine~}, \code{\verb~|machine.py:9166-9384~}):}
+
+\ol{
+\li{\code{\verb~|Nat.rec~} on a literal major: done in one step without constructing \code{\verb~|Nat.succ~} (builds \code{\verb~|succ_case pred (Nat.rec … pred)~} with \code{\verb~|pred~} a literal).}
+\li{\code{\verb~|major = whnf(major)~}; if the recursor is K-like, \code{\verb~|_to_cnstr_when_k~} (infer + whnf the major's type, build the nullary-field ctor applied to the type's params, require \code{\verb~|def_eq(type, infer(ctor))~}; \code{\verb~|machine.py:9404-9446~}).}
+\li{literal major → expose one constructor; otherwise try structure-eta of a stuck major (\code{\verb~|_to_cnstr_when_structure~}, see §1.12 for a deviation).}
+\li{head must be a ctor; rule looked up by ctor name (\code{\verb~|rec.rule_for_ctor~}).}
+\li{\strong{Rule fast paths} (commits \code{\verb~|769f42b~}, \code{\verb~|b486214~}): \code{\verb~|W_RecRule.simple_minor~} (\code{\verb~|objects.py:4498-4585~}) recognises, once per rule, the standard shape \code{\verb~|λ params motives minors fields ⇒ minor_i fields (rec … field_r)…~} and records the minor index and the list of recursive field positions. Then iota is computed straight from the spine: pick the minor, push fields and the IH applications \code{\verb~|rec_prefix field_r~} (re-using the \code{\verb~|rec params motives minors~} prefix record of the redex), and beta in one step — the rule RHS is never imported or instantiated. Otherwise the stripped RHS is imported once per (recursor leaf, ctor leaf) and applied by one multi-instantiate.}
+}
+
+\p{\strong{Projection} (\code{\verb~|try_proj~} / \code{\verb~|_try_proj_fused~}, \code{\verb~|machine.py:8997-9144~}; commits \code{\verb~|cdc2edb~}, \code{\verb~|70a43a3~}, \code{\verb~|6d4475f~}): nested projections are peeled onto an index stack; when the struct reduces to an application of a \em{definition whose body is a constructor application} (statically analysed once: \code{\verb~|W_Definition.init_ctor_body~} → \code{\verb~|_CtorBody{m, num_params, let_vals, args, delegate_const}~}, \code{\verb~|objects.py:5114-5338~}, including wrappers delegating to another such definition up to depth 6), \strong{only the projected field is imported and instantiated}, with only the arguments it mentions; fields that are a bare \code{\verb~|BVar~} are read from the spine. This is the type-class-instance fast path (\code{\verb~|instFoo.toBar.op~} without materialising the whole instance).}
+
+\p{\strong{Nat literals} (\code{\verb~|machine.py:8361-8505~}, ops in \code{\verb~|objects.py:3500-3579~}): \code{\verb~|add sub mul pow gcd mod div beq ble land lor xor shiftLeft shiftRight~} on \code{\verb~|rbigint~}; \code{\verb~|pow~}/\code{\verb~|shiftLeft~} decline when the exponent/shift exceeds 2²⁴. \code{\verb~|try_reduce_nat~} whnf's both arguments (so it evaluates) and is therefore called only from the evaluating \code{\verb~|whnf~} loop; lazy delta uses \code{\verb~|try_reduce_nat_cheap~} (arguments must already be syntactic numerals) and only on fvar-free terms (commit \code{\verb~|2c7d435~} explains the blow-up otherwise). Arguments that are closed non-literals go to the CEK machine first (\code{\verb~|_whnf_nat_arg~}).}
+
+\p{\strong{String literals}: expanded lazily to \code{\verb~|String.ofList [Char.ofNat n, …]~} (per code point) only when projected, matched by a recursor, or as the last resort of def_eq (\code{\verb~|objects.py:3156-3165~}, \code{\verb~|machine.py:12369-12380~}).}
+}
+
+\subtree{
+\title{1.7 Definitional equality — exact order}
+
+\p{\code{\verb~|def_eq(h1, h2)~} (\code{\verb~|machine.py:11591-11622~}):}
+
+\pre{\verb~|
+1. h1 == h2                                             → true      (hash-consing: syntactic equality)
+2. eqvCount > 0 and find(h1) == find(h2)                → true      (union-find in M_EQV / leaf_eqv, path compression)
+3. symmetric pair key in _neq                           → false     (negative cache: IntSet, 8 B/slot, capped at 4M slots)
+4. both APP and eqvCount > 0: _spine_cheap_eq           → union; true
+      lockstep walk down both spines; every arg pair identical or in the same UF class,
+      heads identical or same class; no recursion, no reduction             (machine.py:11682-11701)
+5. r = _def_eq_uncached(h1, h2);  r ? union(h1,h2) : _neq.add(key)
+~}
+
+\p{\code{\verb~|_def_eq_uncached~} (\code{\verb~|machine.py:11740-11813~}):}
+
+\pre{\verb~|
+a. if one side is a Bool/Nat scalar leaf and the other a closed compound term (not a Nat.succ chain):
+       v = eval_closed_scalar(other); if v == scalar → true; else continue with v     (§1.10)
+b. h1 = whnf_core(h1, cheap_proj=true); h2 likewise; identical → true
+c. proof irrelevance (before any delta): t1 = infer(h1); s1 = infer(t1) (whnf only if not literally Prop);
+       if Prop: same for h2; if def_eq(t1, t2) → true          (falls through on failure)
+d. Nat offset: both literals → compare; both Nat.zero → true; peel matching Nat.succ/literal layers in a loop
+e. if one side is the leaf Bool.true: whnf(other) == Bool.true → true
+f. status = lazy_delta(h1, h2)  → true, or continue with the advanced forms; identical → true
+g. _def_eq_proj_lazy: two projections (bare or applied heads) with the same (struct name, index):
+       bounded comparison of the structs (shared budget of 8 unfold steps, recursion depth 3), guarded by _failed
+h. n1 = whnf_core(h1) (full, projections evaluated), n2 likewise; if either changed → def_eq(n1, n2)
+i. _def_eq_core:
+     leaves: sorts → level eq; consts → same name and level-wise eq; distinct literals/fvars → fall through
+     APP/APP → _def_eq_app;  binders of same kind → _def_eq_binders;  PROJ/PROJ same field → def_eq(structs)
+     eta (lambda vs non-lambda whose whnf'd type is a Pi) in both directions
+     structure eta in both directions (ctor app with exactly params+fields args; def_eq of the types; field-wise def_eq with projections)
+     unit-like (type is a non-recursive, index-free structure whose ctor has 0 fields; def_eq of the types)
+     Nat literal → one constructor step; String literal → String.ofList expansion
+~}
+
+\p{\strong{Lazy delta} (\code{\verb~|_try_lazy_delta~}, \code{\verb~|machine.py:12059-12285~}), per iteration (cap 100 000):}
+
+\pre{\verb~|
+1. identical → true
+2. peel Nat offsets (as in d); if peeled, cheap whnf_core both
+3. if neither side has fvars: try_reduce_nat_cheap on either APP → continue
+4. d1/d2 = head has _LF_DELTA.  neither → return UNDEF(h1,h2)
+5. exactly one unfoldable: unfold it (native Nat op first if closed); if the *other* head is a PROJ,
+   try _def_eq_proj_lazy on the cheap-whnf'd result before full whnf_core
+6. both unfoldable:
+   a. exactly one is @[reducible]/abbrev → unfold that one
+   b. exactly one is a fully applied ite/dite whose Decidable instance is closed → unfold that one   ← not in Lean
+   c. same constant (name equal, levels eq) with a *regular* hint: unless it is Bool.and/or with a
+      reducible first argument (short-circuit, not in Lean), compare arguments pairwise left to right —
+      skipping positions in the head's Prop mask — guarded by the _failed pair cache; all equal → true
+   d. exactly one head is a native Nat binop → unfold the *other* side first                         ← not in Lean
+   e. greater height unfolds; equal heights → unfold both, cheap whnf_core, identical or proj-lazy → true
+~}
+
+\p{Deliberate differences from the official kernel that matter for performance:}
+
+\ul{
+\li{\strong{Prop-argument masks} (\code{\verb~|_prop_mask_for~}, \code{\verb~|machine.py:7585-7665~}; static analysis \code{\verb~|W_Declaration.init_prop_mask~}, \code{\verb~|objects.py:4843-4967~}). For a head constant, a 62-bit mask of argument positions whose domain is a proposition. In \code{\verb~|_def_eq_app~}, lazy delta's same-head comparison and \code{\verb~|_proj_lazy_eq~}, once all earlier arguments agreed, an unequal argument pair at a masked position is \strong{skipped} (proof irrelevance without inferring anything). Computed from the declared type without the store for "~99.7\% of constant heads": binder domain is \code{\verb~|∀…, Sort l~} (never a proof position); or \code{\verb~|BVar~} applied to as many args as an earlier binder's \code{\verb~|∀…, Sort l~} arity (position is Prop iff \code{\verb~|l~} is zero); or \code{\verb~|C args~} with \code{\verb~|C : ∀ (m args), Sort l~} fully applied (Prop iff the instantiated \code{\verb~|l~} normalises to zero). Level-dependent cases get a small "plan" evaluated per level instantiation; the trailing result type must provably not unfold to further Prop-domain Pis; anything else falls back to a dynamic computation with fvars and \code{\verb~|infer~}. Active only while a declaration is being checked. \strong{Effect: NSE −24.4\% instructions (339.3 → 256.7 G), proof-irrelevance fallbacks −99.8\% (1.41 M → 3.3 K), beta reductions −54.4\%} (commit \code{\verb~|c87c5b4~}).}
+\li{\strong{Negative cache \code{\verb~|_neq~} for every def_eq} (the reference kernel caches only the same-head failure). Sound because a handle pair determines the answer within a store (fvars are canonical, §1.8).}
+\li{\strong{Spine congruence pre-pass} (step 4; "modeled on nanobruijn's spec_app_congruence", −1.4\% instructions and −16\% peak memory on init, commit \code{\verb~|b249a47~}).}
+\li{\strong{Lazy projection equality} and \strong{closed-ite / Bool short-circuit / Nat-binop ordering} heuristics (steps g, 6b-6d).}
+\li{Stats from the earlier object kernel on init, still indicative of where def_eq calls end: "83\% of the 129M def_eq calls resolve by pointer identity, the eqv union-find hits 86\% of the calls that get past it"; the failed-pair cache had only 952 hits in 286 k probes but each "is insurance against re-exploring a pathologically expensive same-head args refutation" (commit \code{\verb~|4746484~}).}
+}
+}
+
+\subtree{
+\title{1.8 Type inference}
+
+\p{\code{\verb~|infer(h, check)~} (\code{\verb~|machine.py:9570-9607~}), two modes as in Lean:}
+
+\ul{
+\li{\code{\verb~|check = false~} (everything reached from inside def_eq/whnf): only computes; memo in \code{\verb~|M_INFER~} / \code{\verb~|leaf_infer~}. An application's type is obtained by walking the head type's Pi telescope \strong{without instantiating}, keeping a count \code{\verb~|plen~} of pending arguments and substituting them all at once only when a non-Pi is hit or at the end (\code{\verb~|_infer_app_only_buf~}, \code{\verb~|machine.py:11134-11172~}).}
+\li{\code{\verb~|check = true~} (only the declaration's own type and value): additionally argument-type-vs-domain def_eq, binder domains are sorts, let values, universe params declared, and the reference rules (declared earlier, not less safe). The memo is the same \code{\verb~|M_INFER~} slot, validated by \code{\verb~|M_CHECKED_GEN >= machine.check_gen~} — one generation counter instead of a second cache.}
+}
+
+\p{Tricks:}
+
+\ul{
+\li{\strong{Canonical free variables} (\code{\verb~|fvar_for_domain~}, \code{\verb~|machine.py:9505-9534~}): opening binder record \code{\verb~|h~} whose instantiated domain is \code{\verb~|d~} always yields the same fvar leaf, via the map \code{\verb~|(h, d) → fvar~}. Re-opening a shared lambda therefore produces the \em{same} instantiated body handle, so every memo (infer, whnf, def_eq) hits. The fvar's type lives in \code{\verb~|leaf_infer~}. (For top-level telescopes a second map \code{\verb~|(position, domain) → fvar~} gives consecutive declarations with a common \code{\verb~|variable~} prefix the same fvars, \code{\verb~|_top_fvar~}, \code{\verb~|machine.py:9546~}.)}
+\li{\p{\strong{\code{\verb~|inst_eq~}: compare instead of instantiate} (\code{\verb~|inst_eq_buf~}, \code{\verb~|machine.py:3120-3125~}; commits \code{\verb~|d749f43~}, \code{\verb~|489f178~}). When checking argument \em{i} of \code{\verb~|f a₁…aₙ~}, the domain is \code{\verb~|Aᵢ[a₁…aᵢ₋₁]~}. Instead of building it, the inferred argument type (a handle) is compared structurally against the \em{pattern} \code{\verb~|Aᵢ~} + the pending arguments in the spine buffer (budget 512 steps). Only on mismatch is the domain instantiated and \code{\verb~|def_eq~} called.}
+\pre{\verb~|
+inst_eq(pat, args[0..n), target, depth = 0, budget = 512) -> bool      # "instantiate(pat, args) == target ?" without consing
+  if looseRange(pat) <= depth: return pat == target                     # closed part: handle identity
+  if leaf(pat):  # a loose bvar
+      k = bvarIndex(pat) - depth                                        # k >= 0 here
+      if k < n:  return args[k] == target and (depth == 0 or looseRange(args[k]) == 0)   # no shifting ⇒ else give up
+      return target == bvar(bvarIndex(pat) - n)
+  if --budget < 0 or leaf(target) or kind(target) != kind(pat): return false
+  APP:           iterate down both spines: inst_eq(arg_p, arg_t) for each, then heads
+  LAMBDA/FORALL: inst_eq(type_p, type_t, depth) and inst_eq(body_p, body_t, depth + 1)
+  PROJ:          same (name, index) and inst_eq(struct_p, struct_t)
+# false means "unknown": the caller instantiates and runs the full def_eq
+~}
+\p{The same test against an \em{expected type} lets \code{\verb~|_infer_app~} return the expected handle without instantiating the result type (\code{\verb~|infer_expected~}, \code{\verb~|machine.py:9609~}), and a pattern-vs-pattern variant (\code{\verb~|inst_eq_inst_buf~}) handles nested applications; there is even an AST-direct variant that never imports the constant's type (\code{\verb~|_ast_inst_eq~}, \code{\verb~|machine.py:3137~}).}}
+\li{\strong{Joint telescope check} (\code{\verb~|_check_value_joint_ast~}, \code{\verb~|machine.py:12600-12688~}; commit \code{\verb~|8d7da87~}: init −4.7\%, cslib −5.9\%, NSE −7.3\% instructions): for \code{\verb~|def/theorem c : ∀ xs, T := λ xs, v~} with identical leading domains, each domain is checked once, the fvars are shared between type and value, and \code{\verb~|v~} is inferred with \code{\verb~|T~} as expected type; then \code{\verb~|def_eq(T, typeof v)~}.}
+\li{\strong{Inference without substitution for heavy terms} (\code{\verb~|_infer_open*~}, \code{\verb~|machine.py:10249-10450~}; commit \code{\verb~|1f0405e~}): once a declaration's store exceeds 2¹⁷ records, a term of ≥ 256 nodes under binders is inferred against a \em{context} (list of fvars / let values, plus a consed "chain" handle used as cache key) and sub-terms are materialised only when light or when a type comes to depend on them. \code{\verb~|perf/app-lam~}: 32 B → 0.43 B instructions, 10 GB → 86 MB. \strong{Important counter-datum for an environment-machine design: "Inferring everything this way cost init 4\%, and probing every binder for heaviness 6\%"}, because what is inferred of a closed (fvar-instantiated) term is shared across all occurrences at any depth, whereas what is inferred of an open term under an environment is not.}
+\li{Projection types: pre-stripped field domain per structure; a field type that is a bare parameter is read off the spine (\code{\verb~|machine.py:11421-11462~}).}
+\li{\code{\verb~|_cheap_beta~} on inferred lambda body types (only when the beta is free: body closed or a bare variable, \code{\verb~|machine.py:11302~}).}
+}
+}
+
+\subtree{
+\title{1.9 Declaration admission}
+
+\ul{
+\li{\strong{def/theorem/opaque}: \code{\verb~|check_value~} (\code{\verb~|machine.py:12690-12727~}): value closed; type's type whnf's to a sort (Prop for theorems); \code{\verb~|def_eq(type, infer_expected(value, type))~}. Theorem and opaque values are dropped after a successful check (\code{\verb~|objects.py:5411-5430~}, \code{\verb~|5385~}).}
+\li{\strong{Ordering and safety} (\code{\verb~|TypeChecker.check_reference~}, \code{\verb~|environment.py:182-206~}; commit \code{\verb~|463a310~}): each declaration gets an \code{\verb~|index~}; a constant may refer only to earlier indices, except within its own group (an inductive block; an unsafe definition with its mutual block; a partial mutual block), with staged scoping inside inductive blocks (\code{\verb~|STAGE_PRE_BLOCK~}, \code{\verb~|STAGE_IND_ONLY~}); a referenced declaration may not be less safe. Arena tests fixed by this: \code{\verb~|014_selfProof~}, \code{\verb~|141_falseFromUnsafe~}, \code{\verb~|142_falseFromPartial~}.}
+\li{\strong{Inductives}: recursors are \strong{regenerated and compared} (\code{\verb~|_inductive.py~}: \code{\verb~|collect_members~} incl. nested occurrences as extra block members, \code{\verb~|check_types~}, \code{\verb~|check_constructors~} with strict positivity and universe checks, \code{\verb~|init_elim_level~}, \code{\verb~|is_k_target~}, \code{\verb~|recursors~}; entry \code{\verb~|recursors_of~}, \code{\verb~|_inductive.py:1201-1234~}). A declared recursor must have a name the kernel would generate, the same universe params, counts and K flag, and type and rule RHSs \code{\verb~|alpha_eq~} to the generated ones, falling back to "well-typed and def_eq" (\code{\verb~|objects.py:6199-6345~}). On init-prelude, Std and Mathlib all recursors were alpha-equal without the fallback (commit \code{\verb~|a31ca02~}). A constructor must be listed on its inductive (\code{\verb~|objects.py:6066-6080~}).}
+\li{\strong{Quot}: names, universe arities, prerequisites (\code{\verb~|Quot~} before \code{\verb~|mk/lift/ind~}; \code{\verb~|Eq~} with \code{\verb~|Eq.refl~} of the prelude shape for \code{\verb~|lift~}) and def_eq of each type against the canonical signature (\code{\verb~|objects.py:5485-5750~}; commit \code{\verb~|076fbf8~}, arena \code{\verb~|bugs/quot-bad-type~}).}
+\li{\strong{Axioms}: accepted if the type is a sort (\code{\verb~|objects.py:5455-5466~}); no allow-list. \code{\verb~|Lean.reduceBool~}/\code{\verb~|reduceNat~}/\code{\verb~|trustCompiler~} are not special-cased anywhere (grep finds no occurrence) ⇒ such constants are opaque and proofs needing native reduction fail def_eq and are rejected.}
+\li{Loose bvars and undeclared universe params are rejected (\code{\verb~|LooseBoundVariable~}, \code{\verb~|UndeclaredLevelParam~}; commit \code{\verb~|8b20c3a~}).}
+}
+}
+
+\subtree{
+\title{1.10 The closed-term CEK machine and the JIT (\code{\verb~|_eval.py~})}
+
+\ul{
+\li{\strong{Trigger}: only steps (a) of §1.7 and Nat-op argument evaluation; disabled under tracing. Any stuck neutral, opaque constant, free variable, K-recursor on a non-constructor, or unsupported shape raises \code{\verb~|_EvalBail~} and the ordinary machine continues (\code{\verb~|_eval.py:2003-2031~}).}
+\li{\strong{Compilation}: a per-\code{\verb~|Environment~} \code{\verb~|CodeCache~} compiles \code{\verb~|W_Expr~}/handles once into immutable \code{\verb~|CodeNode~} graphs (\code{\verb~|CVal, CBVar, CLam, CApp(fn, args[]) (flattened spine), CLet, CProj, CCtor, CFullCtor, CDef (lazy body), CRec (rules pre-resolved), CNatOp, CQuotLift, COpaque~}; \code{\verb~|_eval.py:481-703~}, \code{\verb~|969-1389~}). Types and constructor \em{parameters are erased} at compile time; 0-field constructors are shared singletons; 1- and 2-field constructors have dedicated classes without arrays; the 14 Nat ops are first-class native closures so "typeclass-dispatched arithmetic never unfolds to unary \code{\verb~|Nat.brecOn~}"; small Nats are unboxed machine words (\code{\verb~|VSmallNat~}).}
+\li{\strong{Machine}: state \code{\verb~|(code, env, args, cont)~}; \code{\verb~|Env~} = immutable linked list of slots (de Bruijn); a slot is a \code{\verb~|Val~} or a \code{\verb~|Thunk{code, env, val}~} updated in place when forced (call-by-need); continuations \code{\verb~|KUpdate, KProj, KRecMajor, KNatOp1/2, KNatSucc, KQuotLift~} (\code{\verb~|_eval.py:314-476~}, loop \code{\verb~|1568-1998~}). \code{\verb~|Nat.rec~} on a literal builds a lazy \code{\verb~|RecNatThunk~} for the IH.}
+\li{\strong{JIT}: \code{\verb~|JitDriver(greens=['rec_edge', 'code'], reds=['steps','env','args','cont','cache','tc'])~} (\code{\verb~|_eval.py:1421-1426~}); \code{\verb~|jit_merge_point~} at the top of the loop (\code{\verb~|1578~}); \strong{\code{\verb~|can_enter_jit~} only on true recursive back-edges} — after an iota step on a recursive rule or \code{\verb~|Nat.rec~} on \code{\verb~|n > 0~} lands on the minor premise (\code{\verb~|rec_edge~} flag set at \code{\verb~|1827-1850~}, \code{\verb~|1894~}; consumed at \code{\verb~|1654-1658~}, \code{\verb~|1762-1776~}; \code{\verb~|can_enter_jit~} at \code{\verb~|1994~}). \code{\verb~|jit.promote~} on the code pointer of forced thunks, closure lambdas, constructor nodes, recursor nodes, projection indices (\code{\verb~|1753-1980~}); \code{\verb~|_immutable_fields_~} everywhere, quasi-immutable \code{\verb~|body?~}/\code{\verb~|is_compiled?~} on \code{\verb~|CDef~}; \code{\verb~|@jit.elidable~} on \code{\verb~|CRec.rule_index~}; \code{\verb~|@jit.unroll_safe~} on the small arg/field loops; \code{\verb~|@jit.dont_look_inside~} on compilation, bigint ops and environment lookups deeper than 8. No virtualizables; the linked \code{\verb~|Env~}/\code{\verb~|ArgNode~}/\code{\verb~|Cont~} objects rely on the tracer's allocation removal. No thresholds or trace limits are set in the source (RPython defaults apply; \code{\verb~|--jit~} passes user parameters through, \code{\verb~|_rlib/rcli.py:52-57~}). Warm-up cost is kept small structurally: nothing enters the machine unless a closed term meets a scalar, and nothing is counted as hot except recursor back-edges.}
+\li{\strong{Measured} (commit \code{\verb~|dd8949e~}): \code{\verb~|perf/magma-list-deep-n36~} 113.8 B instr / 64.5 s / 13.5 GB → 1.81 B / 0.11 s / 94 MB, of which "12.4× from the JIT alone vs 22.4B with \code{\verb~|--jit off~}"; \code{\verb~|perf/beta-ladder~} 3.51 B → 0.28 B; \code{\verb~|perf/grind-ring-5~} 5.90 B → 5.08 B. The interpreter-level change (call-by-need machine, erased params, native Nat) is worth ~5× and the JIT a further ~12× on these loop-heavy tests; neither moves library totals.}
+}
+}
+
+\subtree{
+\title{1.11 Scheduling, warm reuse, memory management}
+
+\ul{
+\li{No parallelism. The unit of work is one declaration, in file order.}
+\li{\strong{One machine reused for all declarations} (commit \code{\verb~|7af8244~}, −5\% instructions on init/std): reset cost is proportional to what was used (zero the used prefix of memo/leaf arrays; delete consing entries record by record unless > 1/16 full, then memset; \code{\verb~|machine.py:1306-1433~}), tables grown by one huge declaration are given back above \code{\verb~|_STORE_KEEP_CAP = 2¹⁸~} records.}
+\li{\p{\strong{Warm cross-declaration caches} (\code{\verb~|acquire~}, \code{\verb~|machine.py:12809-12867~}; commits \code{\verb~|b9a7d66~}: NSE −25.8\% wall; \code{\verb~|ea2606b~}: thresholds doubled, NSE −8.0\%; \code{\verb~|85a2dc4~}: −2.3\%): for consecutive standalone def/theorem/opaque declarations of the same environment, arriving in increasing index order, the store is \strong{not reset} while it stays below \code{\verb~|_WARM_MAX_RECS = 196 608~} records, 65 536 leaves and 131 072 eqv/neq/failed entries (\code{\verb~|machine.py:452-457~}, \code{\verb~|7496-7507~}). Pure memos (whnf, whnf_core, infer in non-check mode, union-find, neq, import) stay valid because the environment only grows. Check-mode results are re-validated by bumping \code{\verb~|check_gen~}, except (i) consecutive \em{safe} declarations whose universe-parameter set includes the previous one's share a generation, and (ii) closed, level-param-free, safe sub-terms referencing only earlier declarations get the permanent stamp \code{\verb~|_CHECKED_PERM~} (\code{\verb~|machine.py:458-462~}, \code{\verb~|10238-10246~}, \code{\verb~|10469-10476~}). A rejection under a warm machine is \strong{re-checked on a cold machine} before being reported (\code{\verb~|environment.py:480-487~}).}
+\pre{\verb~|
+acquire(decl):                                                     # machine.py:12809-12867
+  warmable = decl is standalone def/thm/opaque (group < 0, has an index) and no tracing and no memory limit
+  if warmable and spare machine exists and same Environment and decl.index >= machine.lastIndex
+     and store.nrecs < 196608 and nleaves < 65536 and eqv/neq/failed < 131072 each:
+       if decl is safe and previous cohort was safe and prev.levelParams ⊆ decl.levelParams:
+            keep check_gen                                         # verified subterms stay verified
+       else check_gen += 1                                         # re-run reference/level/safety checks lazily
+       can_perm = decl is safe;  decl_start_recs = store.nrecs;  open_memo.clear()
+       return machine                                              # whnf / infer / eqv / neq / import memos stay
+  else: machine.reset() (cost ∝ used entries);  check_gen = 1;  return machine
+release(machine, failed): if failed or not warm-ready: reset
+~}}
+\li{Memory: live GC heap = names, levels, types of all declarations, values of definitions, plus AST nodes not yet released by the refcount protocol; the kernel working set is unmanaged and bounded by the caps above except for a single huge declaration. Bounded caches: \code{\verb~|_neq~}/\code{\verb~|_failed~} 4 M slots × 8 B ("cutting mathlib peak memory footprint from 11.02 GiB to 6.53 GiB", commit \code{\verb~|aeae8c5~}), substitution memos 2¹⁸ slots, \code{\verb~|_open_memo~} capped. Removing the process-global \code{\verb~|W_App~}/\code{\verb~|W_Proj~}/\code{\verb~|W_Let~} intern dicts: "full Mathlib now peaks at 9.61 GiB / 6.31 GiB RSS" (commit \code{\verb~|8b20c3a~}); arena reports 4.4 GB at the pin.}
+\li{GC: RPython incminimark (generational, incremental major). The nursery estimate is floored at \strong{32 MB} at translation time (\code{\verb~|targetrpylean.py:14-46~}): "cuts wall time ~29\% on our benchmarks vs the 4 MB auto-estimate, and plateaus from there". \code{\verb~|PYPY_GC_*~} variables are used only for diagnostics in the history (\code{\verb~|PYPY_GC_MAJOR_COLLECT=1.1~} for true-live probes, commits \code{\verb~|abcef98~}, \code{\verb~|f724408~}); the arena run command sets none.}
+\li{Stack: at start the process raises \code{\verb~|RLIMIT_STACK~} towards 1 GiB (as far as the hard limit allows) and re-\code{\verb~|exec~}s itself once, then sizes RPython's stack budget and shadow stack from the real limit (\code{\verb~|_stack.py~}, \code{\verb~|targetrpylean.py:84-88~}). Recursive walkers call \code{\verb~|stack_almost_full()~} every 32 frames (\code{\verb~|(rdepth & 31) == 31~}) and raise \code{\verb~|W_DeepRecursion~} — reported as a \em{rejection} of the declaration.}
+}
+
+\p{Thresholds in one place (all from \code{\verb~|machine.py~} unless noted):}
+
+\table{
+\tr{\th{Constant}\th{Value}\th{Meaning}}
+\tr{\td{\code{\verb~|_WARM_MAX_RECS~} / \code{\verb~|_WARM_MAX_LEAVES~} / \code{\verb~|_WARM_MAX_EQV,NEQ,FAILED~}}\td{196 608 / 65 536 / 131 072}\td{store stays warm below these (\code{\verb~|:452-457~})}}
+\tr{\td{\code{\verb~|_STORE_KEEP_CAP~}}\td{2¹⁸ records}\td{capacity kept across resets (\code{\verb~|:452~})}}
+\tr{\td{\code{\verb~|_OPEN_RECORDS~}, \code{\verb~|_HEAVY~}}\td{2¹⁷ records since declaration start, 256 nodes}\td{switch to substitution-free inference (\code{\verb~|:497-501~})}}
+\tr{\td{\code{\verb~|_MEMO_LIMIT~}}\td{2¹⁸ slots}\td{persistent substitution memos, wiped when full (\code{\verb~|:506~})}}
+\tr{\td{\code{\verb~|_neq~}, \code{\verb~|_failed~} limit}\td{2²² slots × 8 B}\td{negative caches, wiped when full (\code{\verb~|:7467-7469~})}}
+\tr{\td{app / other consing key width}\td{21 / 20 bits per handle}\td{above: promote table to wide entries (\code{\verb~|:354-357~})}}
+\tr{\td{\code{\verb~|_LGEN_SIZE~}}\td{512}\td{direct-mapped (level params, levels) → generation cache (\code{\verb~|:362~})}}
+\tr{\td{\code{\verb~|_BVAR_ARR_LEN~}}\td{256}\td{bvar leaves by index (\code{\verb~|:361~})}}
+\tr{\td{Prop mask width}\td{62 argument positions}\td{(\code{\verb~|objects.py:4595~})}}
+\tr{\td{\code{\verb~|inst_eq~} budget}\td{512 steps}\td{(\code{\verb~|:3125~})}}
+\tr{\td{\code{\verb~|_proj_lazy_eq~} budget}\td{8 unfolds, depth 3 (2 for extra args)}\td{(\code{\verb~|:11943-11945~}, \code{\verb~|:11982~})}}
+\tr{\td{\code{\verb~|_LAZY_DELTA_MAX_ITER~}}\td{100 000}\td{(\code{\verb~|:7443~})}}
+\tr{\td{stack probe period}\td{every 32 recursive frames}\td{(\code{\verb~|:2506~}, \code{\verb~|:7765~})}}
+\tr{\td{\code{\verb~|_REDUCE_POW_MAX_EXP~}}\td{2²⁴}\td{native \code{\verb~|Nat.pow~} / \code{\verb~|shiftLeft~} decline above (\code{\verb~|objects.py:3425~})}}
+\tr{\td{\code{\verb~|_CONST_CACHE_SIZE~}}\td{65 536}\td{direct-mapped \code{\verb~|W_Const~} cache (\code{\verb~|objects.py:1033~})}}
+\tr{\td{parse chunk}\td{262 144 bytes}\td{(\code{\verb~|parser.py:2732~})}}
+\tr{\td{GC nursery floor}\td{32 MB}\td{(\code{\verb~|targetrpylean.py:38~})}}
+\tr{\td{stack wanted}\td{1 GiB via \code{\verb~|RLIMIT_STACK~} + re-exec}\td{(\code{\verb~|_stack.py:18~})}}
+}
+}
+
+\subtree{
+\title{1.12 Soundness-sensitive or fragile short-cuts — do not copy blindly}
+
+\ol{
+\li{\strong{Theorems are never delta-unfolded; their values are freed after checking.} The official kernel can unfold theorems (\code{\verb~|constant_info::has_value~} is \code{\verb~|is_theorem() || is_definition()~}, \code{\verb~|lean4/src/kernel/declaration.h:447-449~}, used by \code{\verb~|is_delta~}, \code{\verb~|lean4/src/kernel/type_checker.cpp:551-559~}). rpylean tried theorem delta (commit \code{\verb~|fb4c26a~}) and reverted it (commit \code{\verb~|f484d44~}) because it broke other Mathlib proofs in \em{its} strategy. Outcome can only be a wrong rejection, not a wrong acceptance, and Mathlib passes — but a proof that needs a theorem's body unfolded would be rejected. RLVM should keep theorem bodies re-materialisable (tenet-jvm does: lazily rebuilt from its compact store).}
+\li{\strong{Structure eta of a recursor's stuck major is applied even when the structure is a proposition} (\code{\verb~|_to_cnstr_when_structure~}, \code{\verb~|machine.py:9448-9496~}, no Prop test; commit \code{\verb~|f484d44~} "drops the Prop guard"), whereas the reference at v4.36 returns early for propositions (\code{\verb~|lean4/src/kernel/inductive.h:61-72~}). This is how rpylean reduces \code{\verb~|And.casesOn h (…) : Rat~} without unfolding the theorem \code{\verb~|h~}. It manufactures projections \code{\verb~|h.i~} out of Prop structures; illegal ones (data field of a Prop structure) raise in \code{\verb~|_infer_proj~} if their type is ever inferred. Per tenet-jvm's notes the reference itself changed this area in 4.37 (§2.6) \strong{\verb~|[~unverified against lean4 master\verb~|]~}. Treat as version-dependent behaviour to be decided deliberately.}
+\li{\strong{Prop-argument masks.} Sound only if (i) the mask is exactly right for the instantiated head type, (ii) both applications are well-typed, (iii) all earlier arguments were found def-eq (so the two proofs have def-eq types). rpylean enforces (iii) by left-to-right order and (ii) by enabling masks only while checking a declaration; (i) rests on ~130 lines of syntactic analysis plus level "plans" (\code{\verb~|objects.py:4651-4967~}). An over-approximate mask is a soundness hole (unequal data arguments skipped). If copied: derive the mask by actual inference with fvars (rpylean's dynamic fallback, \code{\verb~|machine.py:7604-7665~}) or validate the static analysis against it in tests.}
+\li{\strong{Warm caches across declarations.} Equivalence classes, negative results and inferred types computed while checking declaration \em{n} are trusted for \em{n+1}. Sound because def_eq/whnf/infer(non-check) depend only on already-admitted declarations and handles are canonical — but it requires that \em{nothing} declaration-specific leaks into those memos: universe-parameter validity, reference ordering and safety are exactly the things re-validated per \code{\verb~|check_gen~}. \code{\verb~|_CHECKED_PERM~} additionally assumes monotone declaration order. Only failures are cross-checked cold; a wrong acceptance from a stale memo would go unnoticed.}
+\li{\strong{Canonical fvars shared between binders with identical (record, domain)} — sound because a closed binder record cannot contain itself and the fvar's type is the domain; the old object kernel had a real bug of this family when binders were interned ("\code{\verb~|∀ p p, Eq p p~} checks even where the declared signature was \code{\verb~|∀ p a, Eq p a~}", \code{\verb~|objects.py:1342-1349~}).}
+\li{\strong{Negative def_eq cache} and \strong{bounded heuristics} (\code{\verb~|_proj_lazy_eq~} budget 8/depth 3, \code{\verb~|inst_eq~} budget 512, lazy-delta iteration cap 100 000): each must fail \em{open} (fall through to the complete procedure). They do in the code read; the iteration cap returns UNDEF, not false.}
+\li{\strong{Untyped CEK evaluation}: parameters and types are erased and K-like reduction is not performed there (bail instead). Any divergence between its reduction rules and the kernel's is a soundness risk confined to \code{\verb~|decide~}-style goals; rpylean returns the scalar as a \em{handle that then goes through the normal comparison}.}
+\li{Resource failures are verdicts: deep recursion ⇒ reject (exit 1). For the arena a wrongly rejected good proof is ranking criterion 2, so RLVM should prefer not to convert resource exhaustion into "reject" \strong{\verb~|[~inference; scoring details owned by the arena research doc\verb~|]~}.}
+\li{Historical bugs that the arena caught in rpylean and that are cheap to test for: level order accepted \code{\verb~|1 ≤ imax (u+1) v~} (commit \code{\verb~|6a33667~}); \code{\verb~|imax~} not collapsing to \code{\verb~|max~} when the right side is never zero (9 Mathlib false rejections, commit \code{\verb~|c126c31~}); recursors checked for shape only (commit \code{\verb~|a31ca02~}); argument checks performed inside def_eq-internal inference rejected valid terms with beta-redex domains (13+ Mathlib declarations, commit \code{\verb~|68de64f~}); \code{\verb~|is_prop~} compared the sort syntactically instead of after whnf (commit \code{\verb~|cf55c56~}); the same-head args shortcut must be limited to \em{regular} definitions, not abbrevs (commit \code{\verb~|8072e12~}); failing a same-class structural comparison must still try eta/struct-eta (commit \code{\verb~|34dc110~}).}
+}
+}
+
+\subtree{
+\title{1.13 Build-level}
+
+\p{\code{\verb~|pypy rpython --opt=jit --output=rpylean-c targetrpylean.py~} (\code{\verb~|rpylean/justfile:59~}); the arena build clones PyPy for the toolchain (\code{\verb~|lean-kernel-arena/checkers/rpylean.yaml~}). No PGO, LTO or target-cpu flags appear; the C is whatever RPython's default makefile produces \strong{\verb~|[~flags not inspected\verb~|]~}. The micro-tuning that replaces PGO is manual: \code{\verb~|@always_inline~} on accessors, \code{\verb~|@dont_inline~} on every miss/slow path so that hit paths compile to leaf functions without callee-saved spills (commits \code{\verb~|aeae8c5~}, \code{\verb~|90d0b58~}: "\code{\verb~|Machine.def_eq~} (8 inst), \code{\verb~|Machine.whnf~} (16 inst)"), packing live values to cut ARM64 stack spills (commit \code{\verb~|7e11d57~}: 115 → 62 spills, −1.1\% instructions), \code{\verb~|zero=False~} allocation of write-before-read arrays, tuple-free returns through out-fields.}
+}
+
+\subtree{
+\title{1.14 Optimisation history with measured gains}
+
+\table{
+\tr{\th{Date}\th{Commit}\th{Change}\th{Measured}}
+\tr{\td{2026-05-16}\td{\code{\verb~|b6f3ab1~}}\td{GC nursery floor 32 MB}\td{−29\% wall}}
+\tr{\td{2026-06-10}\td{\code{\verb~|0a9a45d~}}\td{whnf_core/delta split, lazy delta one layer per step, UF eq cache, failure cache}\td{\code{\verb~|assemble₄._proof_3~}: 4 M whnf steps / 23 GB / > 120 s → 5 948 steps / 2.5 s; 25 init decls > 30 s now pass}}
+\tr{\td{2026-06-10}\td{\code{\verb~|8072e12~}}\td{same-head args shortcut only for regular hints}\td{last init timeouts → ~3 s}}
+\tr{\td{2026-06-10}\td{\code{\verb~|3bfeb58~}}\td{hash-cons reduction-built binders per declaration}\td{init 381 → 162 s, peak 12.5 → 4.9 GB}}
+\tr{\td{2026-06-10}\td{\code{\verb~|1ba28a8~}}\td{tracing JIT off for kernel loops}\td{init 162.4 → 136.7 s}}
+\tr{\td{2026-06-10}\td{\code{\verb~|4746484~}}\td{drop low-hit persistent intern probe}\td{init 136.7 → 107.3 s}}
+\tr{\td{2026-07-11}\td{\code{\verb~|1f08589~}}\td{lazy cache side objects, flat intern tables}\td{init 105 → 91 s, 5.22 → 4.31 GB}}
+\tr{\td{2026-07-12}\td{\code{\verb~|9ef360d~}}\td{explicit per-node id instead of GC identity hash}\td{cedar 163 → 129 s (identity-hash machinery was ~14\% of samples)}}
+\tr{\td{2026-07-13}\td{\code{\verb~|1f6d220~}}\td{refcount prescan + drop theorem values}\td{cslib 14.8 → 8.6 GB and 1.5× faster}}
+\tr{\td{2026-09-02}\td{\code{\verb~|0866ac8~}, \code{\verb~|2ec1abf~}}\td{\strong{raw TermStore machine}}\td{init 752 B → 184-200 B instr, 3478 → 963 MB; cedar 1.24 T → 426 B; std 9.66 T → 348 B}}
+\tr{\td{2026-09-02}\td{\code{\verb~|c147f1d~}}\td{canonical levels on leaves; same-name heads}\td{one decl 22 s → 1.2 s; a 71-min decl's file → 12.8 s}}
+\tr{\td{2026-09-03}\td{\code{\verb~|455e163~}}\td{object kernel deleted}\td{Mathlib 850 s CPU}}
+\tr{\td{2026-09-19}\td{\code{\verb~|7af8244~}}\td{reuse one machine}\td{−5\% instr init/std}}
+\tr{\td{2026-11-20}\td{\code{\verb~|dd8949e~}}\td{CEK + JIT for closed scalars}\td{deep-reduction tests 12-60×; libraries ±0}}
+\tr{\td{2026-11-21}\td{\code{\verb~|b9a7d66~}}\td{warm cross-declaration caches}\td{NSE −25.8\% wall; Mathlib 173.5 s / 1.99 T}}
+\tr{\td{2026-11-21}\td{\code{\verb~|53c4861~}}\td{32-bit arrays, one-shot subst memo, spine buffer}\td{−10…−15\%; Mathlib 1.73 T}}
+\tr{\td{2026-11-21}\td{\code{\verb~|bae6a21~}…\code{\verb~|ff75c0a~}}\td{packed consing tables, U32Map, intrusive import memo, level-gen caches, depth-0 subst}\td{Mathlib 1577 → 1526 → 1439 → 1335 → 1285.5 G; 130.8 s}}
+\tr{\td{2026-11-21}\td{\code{\verb~|aeae8c5~}}\td{cap neq/failed caches}\td{Mathlib peak 11.02 → 6.53 GiB}}
+\tr{\td{2026-11-21}\td{\code{\verb~|291ae24~}}\td{in-place chunk parsing, raw refcounts}\td{footprint −48…57\%; init −10.8\% wall}}
+\tr{\td{2026-11-21}\td{\code{\verb~|c87c5b4~}}\td{\strong{Prop-argument masks}}\td{NSE −24.4\% instr}}
+\tr{\td{2026-11-21}\td{\code{\verb~|90bc723~}, \code{\verb~|769f42b~}}\td{skip discarded binder types; BVar/Proj delta and simple-minor iota fast paths}\td{NSE −3.4\%, then 248.7 → 242.4 G}}
+\tr{\td{2026-11-21}\td{\code{\verb~|437cefa~}}\td{SWAR chunk parser}\td{−5.1…−6.0\% instr (NSE −3.0\%)}}
+\tr{\td{2026-11-22}\td{\code{\verb~|ea2606b~}}\td{warm thresholds ×2, level-gen table 128 → 512}\td{NSE −8.0\%, std −5.1\%}}
+\tr{\td{2026-11-22}\td{\code{\verb~|8d7da87~}}\td{joint telescope check, expected types}\td{NSE −7.3\%, cslib −5.9\%, init −4.7\%}}
+\tr{\td{2026-11-22}\td{\code{\verb~|85a2dc4~}, \code{\verb~|489f178~}, \code{\verb~|ecb00ac~}, \code{\verb~|e28f6b9~}, \code{\verb~|949fc0a~}, \code{\verb~|1f30f95~}, \code{\verb~|a264931~}, \code{\verb~|7e11d57~}}\td{check_gen reuse, pattern matching of expected types, fewer fvar openings, compact name tables, register-pressure work}\td{0.3-2.3\% each}}
+}
+
+\p{Net: init 752 B (object kernel, Sept) → 28.7 B (pin): \strong{26×}, of which ≈4× from the store, the rest from caching policy and work avoidance.}
+}
+
+\subtree{
+\title{1.15 RPython mechanism → Truffle/Graal equivalent}
+
+\table{
+\tr{\th{RPython (where used in rpylean)}\th{Purpose}\th{Truffle / Graal / HotSpot equivalent}}
+\tr{\td{\code{\verb~|JitDriver(greens=[rec_edge, code], reds=[…])~}, \code{\verb~|jit_merge_point~} (\code{\verb~|_eval.py:1421, 1578~})}\td{meta-trace the CEK loop keyed on the Lean code position}\td{One Truffle \code{\verb~|RootNode~}/\code{\verb~|CallTarget~} per compiled Lean definition or rule RHS; \code{\verb~|CodeNode~} → \code{\verb~|Node~} subclasses with \code{\verb~|execute~}; compilation is per call target (method-based partial evaluation) rather than per trace}}
+\tr{\td{\code{\verb~|can_enter_jit~} only at recursor back-edges (\code{\verb~|_eval.py:1994~})}\td{count hotness only where loops are}\td{Call-count / loop-count thresholds (\code{\verb~|engine.FirstTierCompilationThreshold~}, \code{\verb~|engine.LastTierCompilationThreshold~}), \code{\verb~|LoopNode~} + OSR for self-recursion through IHs; keep cold code in the interpreter}}
+\tr{\td{\code{\verb~|jit.promote(x)~} (\code{\verb~|_eval.py:1753-1980~})}\td{make a runtime value a guarded trace constant}\td{Inline cache: \code{\verb~|@Specialization(guards = "code == cachedCode", limit = "N")~} with \code{\verb~|@Cached~}; \code{\verb~|DirectCallNode~} vs \code{\verb~|IndirectCallNode~}; \code{\verb~|CompilerDirectives.isPartialEvaluationConstant~} for assertions}}
+\tr{\td{\code{\verb~|_immutable_fields_~}, \code{\verb~|fields[*]~}}\td{let the JIT fold reads from constant objects}\td{\code{\verb~|final~} fields, \code{\verb~|@CompilationFinal~}, \code{\verb~|@CompilationFinal(dimensions = 1)~} arrays, \code{\verb~|@Child~}/\code{\verb~|@Children~}}}
+\tr{\td{quasi-immutable \code{\verb~|'body?'~}, \code{\verb~|'is_compiled?'~} (\code{\verb~|_eval.py:607~}), \code{\verb~|'tracer?'~} (\code{\verb~|environment.py:281~})}\td{field treated as constant; a write invalidates compiled code}\td{\code{\verb~|@CompilationFinal~} + \code{\verb~|CompilerDirectives.transferToInterpreterAndInvalidate()~} on write, or an \code{\verb~|Assumption~} checked in compiled code}}
+\tr{\td{\code{\verb~|@jit.elidable~} (\code{\verb~|_eval.py:659~}, \code{\verb~|objects.py:67~})}\td{pure call folded when arguments are constants}\td{methods on PE-constant receivers fold automatically; otherwise \code{\verb~|@TruffleBoundary~} + cache in a \code{\verb~|@CompilationFinal~} field}}
+\tr{\td{\code{\verb~|@jit.unroll_safe~} (\code{\verb~|_eval.py:1464-1531~})}\td{unroll loops with small constant trip counts}\td{\code{\verb~|@ExplodeLoop~}}}
+\tr{\td{\code{\verb~|@jit.dont_look_inside~}}\td{residual call, opaque to the tracer}\td{\code{\verb~|@TruffleBoundary~}}}
+\tr{\td{allocation removal of \code{\verb~|Env~}/\code{\verb~|ArgNode~}/\code{\verb~|Cont~} (no virtualizables are used)}\td{keep interpreter state in registers}\td{Graal partial escape analysis; \code{\verb~|VirtualFrame~} slots for locals instead of linked environments}}
+\tr{\td{\code{\verb~|lltype.malloc(flavor='raw')~} arrays (\code{\verb~|machine.py:186-326~})}\td{data the GC never traces or moves}\td{\code{\verb~|int[]~}/\code{\verb~|long[]~} (a primitive array has no references, so the collector never scans its contents; it may still be copied while young, so allocate the big ones once and keep them) or off-heap \code{\verb~|MemorySegment~}}}
+\tr{\td{\code{\verb~|@always_inline~} / \code{\verb~|@dont_inline~} hit/miss splitting}\td{leaf-function fast paths}\td{small hot methods + out-of-line slow paths. HotSpot C2 inlines by bytecode size (\code{\verb~|MaxInlineSize=35~}, \code{\verb~|FreqInlineSize=325~} defaults); the Graal compiler uses its own heuristics, so verify with compilation logs. \code{\verb~|HostCompilerDirectives.InliningCutoff~} for Truffle host code}}
+\tr{\td{nursery floor via patched \code{\verb~|estimate_best_nursery_size~} (\code{\verb~|targetrpylean.py~})}\td{fewer minor GCs}\td{\code{\verb~|-Xmn~} / \code{\verb~|-XX:NewSize~}}}
+\tr{\td{\code{\verb~|rstack.stack_almost_full()~} + re-exec with larger \code{\verb~|RLIMIT_STACK~}}\td{deep recursion}\td{checker thread with explicit large stack size (tenet-jvm \code{\verb~|Main.java:31-41~}); catch \code{\verb~|StackOverflowError~} at the declaration boundary}}
+\tr{\td{\code{\verb~|rbigint~}, unboxed \code{\verb~|VSmallNat~}}\td{Nat literals}\td{\code{\verb~|long~} fast path with \code{\verb~|Math.*Exact~}, \code{\verb~|BigInteger~} slow path}}
+\tr{\td{identity dicts on interned \code{\verb~|Name~}; inline cache fields \code{\verb~|Name._decl_cached~}}\td{no hashing on hot lookups}\td{put the data in a field of the interned object; avoid \code{\verb~|HashMap~}/\code{\verb~|IdentityHashMap~}}}
+\tr{\td{\code{\verb~|compute_identity_hash~} was 14\% of samples (commit \code{\verb~|9ef360d~})}\td{—}\td{avoid \code{\verb~|System.identityHashCode~} in hot paths; explicit \code{\verb~|int id~} field}}
+\tr{\td{weak-dict interning, maps/shapes}\td{\strong{not used} in rpylean}\td{—}}
+}
+}
+
+\subtree{
+\title{1.16 What RLVM cannot get from Truffle here}
+
+\p{The kernel's hot loops (\code{\verb~|cons_app~}, \code{\verb~|_inst_*~}, \code{\verb~|whnf_core~}, \code{\verb~|def_eq~}) operate on \em{data} (handles whose kinds vary unpredictably), not on a program with a stable position to specialise on. rpylean's measurement (finding 2) says a trace/PE compiler has nothing to fold there and its bookkeeping costs ~15-19\%. On the JVM these loops should be ordinary Java, kept monomorphic (switch on an \code{\verb~|int~} kind, no virtual dispatch, no boxing), compiled once by the top-tier compiler — and since compiler threads are billed, the size and number of hot methods is a budget item. Truffle belongs where rpylean put its JIT: evaluating closed Lean code (\code{\verb~|decide~}, \code{\verb~|Nat.rec~}/\code{\verb~|List.rec~} loops, recursor-heavy reflection), behind an explicit boundary, entered rarely.}
+}
+}
+
+\subtree{
+\title{2. tenet-jvm post-mortem (what not to do on the JVM)}
+
+\subtree{
+\title{2.1 Facts}
+
+\ul{
+\li{Arena: 27.2 min virtual = \strong{9.79e12 instructions}, 11.8 GB, single checker thread (\code{\verb~|lean-kernel-arena/checkers/tenet-jvm.yaml~}: \code{\verb~|build: make~}, \code{\verb~|run: bin/tenet-jvm "$IN"~}). Its README reports 30.1 min wall on the arena runner and 14-19 min on an Apple-silicon laptop with \code{\verb~|-Xmx9g~}.}
+\li{~3 500 lines of plain Java, no dependencies, compiled by \code{\verb~|javac~} (\code{\verb~|Makefile~}). Launcher (\code{\verb~|bin/tenet-jvm:5~}): \code{\verb~|java ${JAVA_OPTS:--XX:+UseParallelGC -XX:MaxRAMPercentage=75} -cp out tenet.Main~}.}
+\li{It is a faithful port of the reference algorithm (substitution-based, locally nameless, \code{\verb~|HashMap~} caches), by design: "matching its decisions is what makes an independent implementation useful as a cross-check" (\code{\verb~|docs/design.md~}).}
+}
+}
+
+\subtree{
+\title{2.2 Architecture (at \code{\verb~|4cc6e20~})}
+
+\p{\code{\verb~|ExportReader~} (line → \code{\verb~|Json.parse~} → \code{\verb~|Map~}) → \code{\verb~|ExprStore~} (flat \code{\verb~|byte[] kind~}, \code{\verb~|int[] a,b,c,d~}: ~17 B/node; expressions become \code{\verb~|Expr~} objects on demand via a memo) → \code{\verb~|Kernel.add~} → \code{\verb~|TypeChecker~} (infer / whnfCore / whnf / isDefEq / lazy delta) and \code{\verb~|InductiveChecker~} + \code{\verb~|NestedInductive~} (regenerate recursors, compare). Theorem values are built into a scratch memo and released after checking but can be rebuilt from the store (\code{\verb~|Decl.Thm.value()~}, \code{\verb~|Decl.java:44-72~}), so theorems remain unfoldable.}
+}
+
+\subtree{
+\title{2.3 Where instructions and memory go (structural; no profile is published, so shares are \strong{\verb~|[~unverified\verb~|]~})}
+
+\p{Parsing — every one of the >100 M lines:}
+
+\ol{
+\li{\code{\verb~|BufferedReader.readLine()~} decodes UTF-8 into a fresh \code{\verb~|String~} (\code{\verb~|ExportReader.java:101~}).}
+\li{\code{\verb~|Json.parse(line)~} builds a generic tree: a \code{\verb~|LinkedHashMap<String,Object>~} per object (two per \code{\verb~|app~} line), a \code{\verb~|StringBuilder~} + new \code{\verb~|String~} \strong{for every key} ("app", "fn", "arg", "ie" are re-allocated and re-hashed on every line), boxed \code{\verb~|Long~} per number, \code{\verb~|ArrayList~} per array (\code{\verb~|Json.java:40, 75, 99~}).}
+\li{Dispatch by a chain of \code{\verb~|containsKey~} probes: an \code{\verb~|app~} line pays "meta", "in", "il", "ie", then "bvar", "sort", "const", "app" (\code{\verb~|ExportReader.java:120-170~}).}
+}
+
+\p{Contrast: rpylean handles the same line with three 8-byte compares and three integer parses.}
+
+\p{Term objects and equality:}
+
+\<html:ol>[start]{4}{
+\<html:li>{\code{\verb~|Expr~} nodes are heap objects with five header fields (\code{\verb~|kind~} enum ref, \code{\verb~|hash~}, \code{\verb~|looseBVarRange~}, two booleans) plus children (\code{\verb~|Expr.java:14-30~}); "roughly 45 bytes" each by the author's estimate (\code{\verb~|ExprStore.java~} class comment).}
+\<html:li>{Sharing is a \em{lossy} direct-mapped table of 2¹⁸ entries (\code{\verb~|Expr.java:162-188~}), so pointer equality is only probabilistic; every cache is therefore keyed by \strong{structural} \code{\verb~|equals~}: \code{\verb~|hash~} compare, then a recursive walk with a 256-step budget, then a second walk allocating a \code{\verb~|Pair~} per node into a \code{\verb~|HashSet~} using \code{\verb~|System.identityHashCode~} (\code{\verb~|Expr.java:194-240~}, \code{\verb~|293-339~}).}
+\<html:li>{\code{\verb~|Name~} is not interned; \code{\verb~|equals~} walks the component chain comparing strings (\code{\verb~|Name.java:35-47~}); \code{\verb~|Env.get~} is \code{\verb~|HashMap<Name,Decl>.get~} (\code{\verb~|Env.java:8, 30~}) and is called for every head constant in \code{\verb~|whnfCore~}, \code{\verb~|deltaInfo~}, \code{\verb~|reduceRecursor~}, \code{\verb~|reduceProj~}, structure-eta.}
+}
+
+\p{Checker caches:}
+
+\<html:ol>[start]{7}{
+\<html:li>{Seven hash containers per declaration: \code{\verb~|Map<Expr,Expr>~} ×5 (+ \code{\verb~|deltaStepCache~}), \code{\verb~|Set<List<Expr>>~} ×2 (\code{\verb~|TypeChecker.java:33-39, 527~}); each entry is a \code{\verb~|HashMap.Node~} (≈32-48 B) and each pair lookup allocates \code{\verb~|List.of(t, s)~} (\code{\verb~|TypeChecker.java:635, 642, 901~}). They are re-allocated per declaration when larger than 256 entries (\code{\verb~|TypeChecker.java:43-63~}). The author notes that caching cheap \code{\verb~|whnfCore~} results "grows to tens of millions of entries on large Mathlib declarations and the checker ends up in GC" (comment at \code{\verb~|TypeChecker.java:302-304~}) — the JVM-specific failure mode of object-per-entry caches.}
+\<html:li>{No union-find over proven equalities ("EquivManager reverted", commit \code{\verb~|07e3d63~}); at the pinned revision def_eq failures are cached only for the same-head case. The later commit \code{\verb~|53cf8a4~} added a general failure cache after one 226-node proof ran "25 min at 104 GB".}
+\<html:li>{Fresh free variables on every binder opening: \code{\verb~|long id = ++fvarCounter; lctx.put(id, new Local(…))~} with \code{\verb~|Map<Long, Local>~} (boxing) (\code{\verb~|TypeChecker.java:26, 31, 69-73~}). Instantiated bodies are therefore new terms each time and no cache entry from a previous opening can hit (rpylean's canonical fvars exist precisely to avoid this).}
+}
+
+\p{Substitution and spines:}
+
+\<html:ol>[start]{10}{
+\<html:li>{One generic \code{\verb~|replace(e, Replacer f)~} taking a lambda (\code{\verb~|Expr.java:371-474~}); all of instantiate / lift / lower / abstract / level-instantiate go through the same megamorphic \code{\verb~|f.apply(e, off)~} call site. Small terms are walked without a memo; after 4 096 steps a preallocated exception restarts the walk with a \code{\verb~|HashMap<Key,Expr>~} (a \code{\verb~|Key~} object and \code{\verb~|identityHashCode~} per node) — the first 4 096 steps are wasted.}
+\<html:li>{\code{\verb~|getAppArgs()~} allocates an array \em{and} an \code{\verb~|ArrayList~} per call (\code{\verb~|Expr.java:356-364~}) and is called on every \code{\verb~|whnfCore~} of an application, every recursor/projection reduction and every \code{\verb~|isDefEqApp~}; \code{\verb~|args.subList(…).toArray(new Expr[0])~} in inference (\code{\verb~|TypeChecker.java:180-214~}). Level instantiation of a definition body is cached per constant (\code{\verb~|unfoldCache~}) but of a constant's \em{type} is not (\code{\verb~|inferConst~} re-instantiates, \code{\verb~|TypeChecker.java:136-146~}).}
+}
+
+\p{Memory and GC:}
+
+\<html:ol>[start]{12}{
+\<html:li>{At the pin, types and definition bodies stay materialised as \code{\verb~|Expr~} objects for the whole run in \code{\verb~|keptMemo~} (\code{\verb~|ExprStore.java:153-158~}) on top of the flat store.}
+\<html:li>{\code{\verb~|-XX:MaxRAMPercentage=75~} ⇒ a 12 GB heap limit on the 16 GB runner; with a throughput collector the heap simply grows to the limit before full collections reclaim it, so the reported 11.8 GB is the \em{limit}, not the need (the author measures a live heap of 2.86 GB for a 42.3 M-expression Mathlib slice at the pinned design and 1.16 GB after commit \code{\verb~|f210e4d~}). \code{\verb~|-XX:+UseParallelGC~} runs one GC worker per CPU; under the arena metric every worker's instructions, including work-stealing spin, are billed \strong{\verb~|[~inference; the GC share was not measured\verb~|]~}.}
+\<html:li>{Recursion: a 4 GiB-stack thread (\code{\verb~|Main.java:41~}); \code{\verb~|StackOverflowError~} inside one declaration is caught and counted as a \em{rejection} of that declaration (\code{\verb~|Main.java:75-82~}); \code{\verb~|OutOfMemoryError~} ⇒ exit 3.}
+}
+
+\p{What happened after the pin (HEAD \code{\verb~|53cf8a4~}): chunked store at ~10.6 B/node, declarations hold ids, object memo dropped beyond 2²¹ nodes (commit \code{\verb~|f210e4d~}: live heap 2.86 → 1.16 GB, 282 → 263 s on the slice), failure cache with cold re-check (\code{\verb~|53cf8a4~}). The direction — ids and primitive arrays instead of objects — is the same one rpylean took, but the checker itself still works on \code{\verb~|Expr~} objects and \code{\verb~|HashMap~}s.}
+}
+
+\subtree{
+\title{2.4 Worth copying}
+
+\ul{
+\li{\strong{Fail-closed verdict} (\code{\verb~|Main.java:29-44~}): exit code starts at 3; set to 0 only by a normal return after the whole file (non-empty, with a metadata record) was processed; every \code{\verb~|Throwable~} maps to non-zero; an empty input or a first line that is not the metadata record is a rejection (\code{\verb~|ExportReader.java:113, 116~}).}
+\li{\strong{Large-stack checker thread}: \code{\verb~|new Thread(null, runnable, "checker", 4L << 30)~}; \code{\verb~|main~} only joins and exits. (Stack pages are committed on touch; a deep excursion stays resident afterwards.)}
+\li{\strong{Derive, then compare} for inductives, including bookkeeping flags (\code{\verb~|isRec~}, \code{\verb~|isReflexive~}, \code{\verb~|numNested~}, \code{\verb~|k~}, \code{\verb~|cidx~}, \code{\verb~|numFields~}) and nested inductives via auxiliary types translated back (\code{\verb~|docs/design.md~}); counts and indices beyond 32 bits are refused rather than truncated (\code{\verb~|ExportReader.java:85-90~}); a loose bvar in an inductive declaration is refused up front.}
+\li{\strong{Cold re-check of any rejection} when heuristics that can only cause false negatives were in play (HEAD) — same policy as rpylean's warm-machine re-check.}
+\li{\strong{Explicit heap sizing rather than a percentage}: decide \code{\verb~|-Xmx~} from the measured live set. For RLVM: young generation sized explicitly (rpylean's nursery lesson), old generation small because the working set lives in primitive arrays, GC thread count fixed and small \strong{\verb~|[~recommendation, to be validated by instruction counts\verb~|]~}.}
+}
+}
+
+\subtree{
+\title{2.5 Not worth copying}
+
+\p{\code{\verb~|-XX:MaxRAMPercentage=75~}; ParallelGC with default thread count; \code{\verb~|String~}-per-line parsing; any \code{\verb~|Map<String,Object>~}; object-per-term with structural-equality caches; \code{\verb~|HashMap~}s created per declaration; boxed keys; lambda-parameterised traversals on hot paths; \code{\verb~|List<Expr>~} argument lists; mapping \code{\verb~|StackOverflowError~} to "rejected".}
+}
+
+\subtree{
+\title{2.6 Kernel-rule notes from tenet-jvm that RLVM must track (from \code{\verb~|docs/divergences.md~}, not independently verified against lean4 master)}
+
+\ul{
+\li{Lean \strong{4.37.0-rc1 changed three def_eq rules}, selected in tenet-jvm from the export's metadata version (\code{\verb~|LeanVersion.kernelHasEta437~}): (i) proof irrelevance is tried \em{before} the first \code{\verb~|whnfCore~} (lean4\verb~|#~15103); (ii) a recursor major that is a proof is not reduced, and structure-eta on the major is skipped only when the recursor has as many universe params as its inductive (so \code{\verb~|And.rec~} gets eta) (lean4\verb~|#~15371); (iii) structure eta against a \em{partially applied} constructor by applying both sides to fresh variables (lean4\verb~|#~15373). "Neither direction is the lenient one"; test exports \code{\verb~|tests/exports/eta437.ndjson~} and \code{\verb~|acc436.ndjson~} hold one direction each.}
+\li{\code{\verb~|Nat~} literal arithmetic must \strong{not} refuse terms mentioning free variables inside \code{\verb~|reduce_nat~} (only the lazy-delta call site has that test): otherwise Lean 4.37's \code{\verb~|Nat.trailingZeros_rec_eq_bits~} compares two copies of 2⁶⁴ unarily.}
+\li{"Is this level zero" must be decided up to equivalence (\code{\verb~|Sort (imax 1 0)~} is \code{\verb~|Prop~}; lean4\verb~|#~14613), and a type whose sort does not reduce to a \code{\verb~|Sort~} is an error rather than "not a proposition" (lean4\verb~|#~14807).}
+\li{Level comparison bug class: \code{\verb~|u+2 ≥ 1~} decided false / \code{\verb~|3 ≥ u+1~} decided true by comparing offsets in the wrong case (commit \code{\verb~|21307e3~}) — found by the arena on navier-stokes-euler.}
+\li{String literals expand through \code{\verb~|String.ofList~} when the environment has it, else \code{\verb~|String.mk~}.}
+\li{\code{\verb~|isDefEqApp~} must compare arguments first-to-last ("a Mathlib declaration that ran for over 10 minutes now checks in about 3 s", commit \code{\verb~|7a40037~}).}
+\li{Cheap and full \code{\verb~|whnfCore~} results must not be mixed in one cache (found on \code{\verb~|Int32~} range instances in Init).}
+}
+}
+}
+
+\subtree{
+\title{3. Ranked tricks and their JVM/Truffle realisation}
+
+\p{Ranking is by measured effect in rpylean's history, then by how directly tenet-jvm's cost profile is the absence of the trick.}
+
+\table{
+\tr{\th{\verb~|#~}\th{Trick}\th{Evidence}\th{Realisation in RLVM (allocation cheap; pointer chasing, megamorphism, boxing, GC tracing and JIT work are the costs)}}
+\tr{\td{1}\td{Hash-consed term store in primitive arrays, int handles, per declaration}\td{init 4.1×, std 28× fewer instructions, 3.6× less memory (\code{\verb~|0866ac8~}, \code{\verb~|2ec1abf~}); GC tracing was ~45\% before (\code{\verb~|d3e30e2~})}\td{\code{\verb~|int[] recs~} (4 ints/record), \code{\verb~|long[] appTable~} with the packed \code{\verb~|(fn|arg|idx)~} entry, handles as \code{\verb~|int~} with the low-bit leaf tag. No \code{\verb~|Expr~} objects in the kernel. Growth by doubling+copy is fine below the warm cap; pre-size from the previous declaration}}
+\tr{\td{2}\td{Memo slots parallel to records; union-find inside them; negative cache as a packed-\code{\verb~|long~} open-addressed set}\td{83\% identity hits, 86\% UF hits of the rest (\code{\verb~|4746484~}); capped sets cut Mathlib peak 11.0 → 6.5 GiB (\code{\verb~|aeae8c5~})}\td{\code{\verb~|int[] memos~} (6 per record), \code{\verb~|long[]~} sets; clearing = \code{\verb~|Arrays.fill~} of the used prefix. Zero objects per cache entry (tenet-jvm's \code{\verb~|HashMap.Node~} + \code{\verb~|List.of~} per lookup is the anti-pattern)}}
+\tr{\td{3}\td{Prop-argument masks: skip proof arguments in same-head comparisons}\td{NSE −24.4\% instructions (\code{\verb~|c87c5b4~})}\td{one \code{\verb~|long~} per declaration (+ level-dependent plans); compute by real inference first, add the static analysis only with a cross-check (§1.12 item 3)}}
+\tr{\td{4}\td{Warm caches across consecutive declarations with check generations; reuse of one machine}\td{NSE −25.8\% wall, then −8\%, −2.3\% (\code{\verb~|b9a7d66~}, \code{\verb~|ea2606b~}, \code{\verb~|85a2dc4~}); −5\% (\code{\verb~|7af8244~})}\td{keep arrays; bump an \code{\verb~|int~} generation instead of clearing; caps sized to stay cache-resident (rpylean: 196 608 records ≈ 13 MB). With parallel workers each worker has its own store ⇒ warm reuse per worker; file-order locality then matters for chunking}}
+\tr{\td{5}\td{Lazy def_eq discipline: \code{\verb~|whnf_core~} never deltas; one delta layer per step; proof irrelevance before delta; same-head args only for regular hints; failure cache}\td{\code{\verb~|0a9a45d~}, \code{\verb~|8072e12~}: 25 init declarations from > 30 s to seconds}\td{algorithmic; language-independent}}
+\tr{\td{6}\td{Fused import from the parsed AST: level substitution during import, generation-stamped intrusive memo, strip lambdas beta will discard, first-use level+argument fusion, shape-specialised unfolds (\code{\verb~|λ…BVar~}, \code{\verb~|λ…Proj~}) and iota (\code{\verb~|simple_minor~})}\td{Mathlib −7.2\% (\code{\verb~|5c6b8fe~}); NSE −3.4\% (\code{\verb~|90bc723~}), −5.2\% cycles (\code{\verb~|769f42b~})}\td{parsed terms as a compact persistent int store (tenet-jvm's \code{\verb~|ExprStore~} layout is right for this); per-worker import memo \code{\verb~|int[]~} indexed by export id + generation stamp instead of a field on a shared object; per-declaration precomputed "unfold plan" objects}}
+\tr{\td{7}\td{One-shot epoch-stamped substitution memo + multi-argument instantiate from a spine buffer}\td{−10…−15\% (\code{\verb~|53c4861~})}\td{\code{\verb~|long[] callSlot~}; \code{\verb~|int[] spine~} used as an explicit stack; no \code{\verb~|List~}/varargs; recursion depth guard by counter}}
+\tr{\td{8}\td{Compare-instead-of-instantiate (\code{\verb~|inst_eq~}), expected-type propagation, joint ∀/λ telescope check, pending-argument Pi walks}\td{NSE −7.3\%, cslib −5.9\% (\code{\verb~|8d7da87~}); \code{\verb~|d749f43~}, \code{\verb~|489f178~}}\td{same code shape; in a closure/NbE design this is "conversion-check a closure body against a value without quoting" — keep the idea whichever evaluator is chosen}}
+\tr{\td{9}\td{Streaming parse interleaved with checking; refcount prescan to free terms at last use; drop (but keep re-materialisable) theorem bodies}\td{cslib 14.8 → 8.6 GB, 1.5× faster (\code{\verb~|1f6d220~})}\td{if the parsed export is kept as packed int arrays (≈11-17 B/node ⇒ ~1.2-1.8 GB for 107 M nodes) the prescan may be unnecessary; decide by peak-memory target}}
+\tr{\td{10}\td{Fixed-shape SWAR parser for the three hot line shapes with a general fallback; in-place chunks}\td{−5…−6\% of total instructions (\code{\verb~|437cefa~}); footprint −50\% (\code{\verb~|291ae24~})}\td{\code{\verb~|byte[]~} chunks or a mapped \code{\verb~|MemorySegment~}; 8-byte little-endian loads via \code{\verb~|VarHandle~}/\code{\verb~|ByteBuffer.getLong~} compared with constants; hand-rolled integer parse; no \code{\verb~|String~} per line}}
+\tr{\td{11}\td{Call-by-need CEK machine with compiled code for closed terms, JIT only there, entered only against Bool/Nat scalars}\td{12-63× on deep-reduction tests, ±0 on libraries (\code{\verb~|dd8949e~})}\td{the Truffle part of RLVM: nodes per \code{\verb~|CodeNode~} kind, call targets per definition/rule, thunks, erased params, unboxed small Nats, native Nat ops; high compilation thresholds; \code{\verb~|_EvalBail~} ⇒ fall back to the kernel}}
+\tr{\td{12}\td{No JIT bookkeeping on kernel loops}\td{init 162.4 → 136.7 s when removed (\code{\verb~|1ba28a8~})}\td{kernel as plain Java behind \code{\verb~|@TruffleBoundary~}; measure total instructions including compiler threads; consider ahead-of-time compilation of the kernel if JIT cost is material \strong{\verb~|[~to be measured\verb~|]~}}}
+\tr{\td{13}\td{Young-generation sizing}\td{−29\% wall from a 32 MB nursery (\code{\verb~|b6f3ab1~})}\td{\code{\verb~|-Xmn~} explicit; keep survivors rare by not retaining per-declaration objects}}
+\tr{\td{14}\td{Per-name inline cache of the declaration; head classification flags + height in one int per leaf}\td{−4.8\% (\code{\verb~|7073bce~}); \code{\verb~|5af5b15~}}\td{\code{\verb~|Decl~} reference in the interned \code{\verb~|Name~}/constant object; \code{\verb~|int flags~} per leaf}}
+\tr{\td{15}\td{Canonical fvars per (binder record, domain)}\td{prerequisite for memo hits under binders; absent in tenet-jvm (§2.3 item 9)}\td{\code{\verb~|long~}-keyed open-addressed map \code{\verb~|(binder, domain) → fvarLeaf~}}}
+}
+}
+
+\subtree{
+\title{4. What this says about the HOAS/NbE question}
+
+\ul{
+\li{rpylean reaches \verb~|#~4 \strong{without} NbE: substitution on a hash-consed store, with memoisation making each substitution linear in the DAG and with most substitutions avoided (§1.4, §1.8). The leaders above it are one substitution-based hash-consing checker (nano-lean) and one NbE checker with hash-consed values (gruszka), so on Mathlib the evaluator family is not the discriminator; cache identity and work avoidance are \strong{\verb~|[~inference from the leaderboard and the gain table\verb~|]~}.}
+\li{rpylean's history contains a negative result about \em{closures without canonical identity}: \code{\verb~|W_Closure~} (deferred substitution, commits \code{\verb~|27874fd~}, \code{\verb~|0debdae~}, \code{\verb~|86da6e8~}, \code{\verb~|4619582~}) gave batched beta, but "the fresh identity-hashed closures it allocates per beta poison downstream \code{\verb~|W_App~} identity checks" and it was withdrawn (commit \code{\verb~|4c45e81~}); forcing the same closure repeatedly had to be memoised (commit \code{\verb~|e4f3ede~}: \code{\verb~|_instantiate_multi~} was ~45\% of a profile; 43.5 → 25.4 s) and the walk inside a force too (\code{\verb~|7fe61f7~}: → 8.0 s). \strong{An NbE/closure design must give values a canonical identity (hash-consed environments/values, or caches keyed on \code{\verb~|(code, env)~} handles); otherwise whnf/infer/def_eq memoisation — which resolves the large majority of calls — stops working.}}
+\li{A second datum: environment-based inference (no substitution, \code{\verb~|_infer_open~}) was 4\% \em{slower} than substitution on init for ordinary terms because results on open terms are not shareable across depths (commit \code{\verb~|1f0405e~}); it wins by 70× only on deeply nested heavy terms. A hybrid (environment for deep/heavy terms, instantiate-and-share for light ones) is what rpylean ships.}
+\li{Where rpylean does use an abstract machine with thunks (closed terms, §1.10), call-by-need plus erasure plus native Nat is worth ~5× before any JIT and the JIT ~12× more — exactly the workload where Truffle can pay for itself.}
+\li{Many of rpylean's late optimisations (\code{\verb~|inst_eq~}, pending-argument Pi walks, first-use fusion, never importing discarded binder types) are substitution-world emulations of what closures provide natively (a body plus an environment that is never materialised unless needed). An NbE kernel gets these for free but must then solve the identity/caching problem above.}
+}
+}
+
+\subtree{
+\title{5. Unverified / open}
+
+\ul{
+\li{Parse share of rpylean's Mathlib total and the final Mathlib instruction count on the authors' machine are not recorded (extrapolated ≈600 G on ARM64; arena 578 G on x86-64).}
+\li{The C compiler flags RPython uses for the translated binary were not inspected.}
+\li{tenet-jvm's split between parsing, GC, JIT and checking is not published; §2.3 lists mechanisms, not shares.}
+\li{The lean4 4.37 rule changes (§2.6) are taken from tenet-jvm's documentation; \code{\verb~|refs/lean4~} is on the 4.36 line, where \code{\verb~|to_cnstr_when_structure~} still returns early for propositions.}
+\li{Whether rpylean's Prop-mask static analysis is exactly equivalent to its inference-based fallback was not proven here; only its structure was read.}
+}
+}

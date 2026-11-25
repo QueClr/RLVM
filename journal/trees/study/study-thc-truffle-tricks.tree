@@ -1,0 +1,542 @@
+\title{08 — THC and Cadenza (Kmett): Truffle tricks for a lazy evaluation VM, and what transfers to RLVM}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{platform}
+\tag{performance}
+\meta{origin}{docs/research/08-thc-truffle-tricks.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Sources (all paths below are relative to \code{\verb~|refs/~}): \code{\verb~|thc/~} (main @ \code{\verb~|7b97d82d~}, 2026-11-12, shallow history 2026-09-28..2026-11-12, 1642 commits), \code{\verb~|cadenza/~} (master @ \code{\verb~|e2b66e2~}, 2026-09-22, full history from 2019), plus \code{\verb~|normalization-bench-kovacs/~}, \code{\verb~|normalization-bench-guest0x0/~} for JVM-relevant HOAS/NbE numbers. Truffle facts marked \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~} were read out of the project toolchain itself (\code{\verb~|.toolchain/graalvm-ce-25~}, \code{\verb~|.toolchain/m2/org/graalvm/truffle/*/25.5.5.0.3/*.jar~}) with \code{\verb~|javap~}/\code{\verb~|strings~}, not taken from memory. Nothing from the external repos was built or run. Markers: \strong{\verb~|[~inference\verb~|]~} = my conclusion from cited facts; \strong{\verb~|[~unverified\verb~|]~} = not checked against source.}
+
+\subtree{
+\title{0. Decision-relevant findings first}
+
+\ol{
+\li{\strong{Neither project shows that Truffle pays for a proof checker; both show what it costs.} THC publishes no benchmark numbers at all (\code{\verb~|thc/AGENTS.md:100-101~}: "Keep development benchmark results private"). Cadenza publishes careful ones (§6): compiled guest code is ~64× faster than the same AST run in Truffle interpreter mode (711.6 µs vs 11.2 µs, \code{\verb~|cadenza/bench/results/2026-09-22/argument-array.md~}), and one Graal tier-2 compilation of a small root costs 0.03–12 s of compiler time in THC's archived logs (118 compilations: median 532 ms, mean 1424 ms, of which PE 219 ms; graph dumping was on, so treat as an upper bound; \code{\verb~|thc/docs/**/*.log~}, §6.3). At ~3·10⁹ instr/s the median is ~1.6 G instructions per compiled root, against a whole-Mathlib budget of 400–600 G; even if the true cost is 5–10× lower, \strong{a root must run for a large fraction of a second in the interpreter before compiling it is a net win.}}
+\li{\strong{Truffle's own interpreter tier is the wrong tier-0 for RLVM.} From Cadenza's numbers: ~150 ns per guest call in Truffle interpreter mode vs ~2.4 ns compiled (§6.1, my division). Kernel checking is a workload "where the amount of computation is small but term sizes are large" (\code{\verb~|normalization-bench-guest0x0/README.md:729-731~}), so most code runs once. Recommendation: a plain-Java evaluator is tier 0; Truffle is an optional accelerator for the few closed, hot definitions/recursor rules (§1). The sibling doc \src{docs/research/07-leader-rpylean-and-tenet-jvm.md} §0.2/§1.16 reaches the same conclusion from rpylean's removed kernel-loop JIT.}
+\li{\strong{Cadenza's NbE-on-Truffle lesson, with numbers:} neutrals routed through an exception (\code{\verb~|SlowPathException~}) cost nothing on closed code but make symbolic evaluation 16–28× slower than value-returning neutrals; value-returning neutrals made compiled closed code 80\% slower and +91\% allocation (\code{\verb~|cadenza/bench/results/2026-09-22/neutral-tracing.md~}). So: \strong{open-term evaluation (the kernel's normal case) needs first-class neutral values and therefore belongs in tier 0; the Truffle tier should evaluate closed terms only and treat "stuck" as a bail-out}, exactly Cadenza's split. Cadenza implements only \code{\verb~|eval~} + neutral propagation; there is \strong{no quote/readback/conversion} in it (grep over \code{\verb~|cadenza/src~}: no fresh-variable or quote function exists).}
+\li{\strong{"JAM-patched GraalVM" is a custom garbage collector, not a JIT feature.} RLVM needs none of it and none of THC's Truffle/Sulong patches; stock GraalVM 25.5.5.0.3 + Maven \code{\verb~|org.graalvm.truffle:*:25.5.5.0.3~} is a coherent pair (§5). The "silently stays in the interpreter" hazard is Truffle's runtime/compiler version check falling back to \code{\verb~|DefaultTruffleRuntime~}; guard against it at startup (§5.3).}
+\li{\strong{The transferable engineering is the calling convention and the PE discipline}, not the Haskell machinery: flat \code{\verb~|Closure{code, env, pap[], arity}~} with eval/apply dispatch nodes and a 3-entry target cache; a 3-field thunk that drops its captures on update; one-shot \code{\verb~|@CompilationFinal~} booleans instead of DSL rewriting; "cold in compiled code ⇒ go generic behind a boundary, never deopt"; no retry after \code{\verb~|UnexpectedResultException~}; single compilation tier at threshold 10 000 with 1–2 compiler threads (§2–§4).}
+\li{\strong{Defaults that will burn the instruction budget if left alone} \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~}: \code{\verb~|engine.FirstTierCompilationThreshold=400~} (a second, last-tier compilation follows at 10 000), \code{\verb~|engine.DynamicCompilationThresholds=true~} (thresholds are rescaled with compile-queue load, so they are not deterministic), \code{\verb~|engine.Splitting=true~}, \code{\verb~|engine.CompilerThreads=-1~} (scaled with cores), \code{\verb~|engine.MaximumCompilations=100~} per target, \code{\verb~|compiler.InliningRecursionDepth=2~}. Settings in §1.7.}
+}
+}
+
+\subtree{
+\title{1. Recommended RLVM model (derived from §2–§6; this is the part to implement)}
+
+\subtree{
+\title{1.1 Tiers}
+
+\table{
+\tr{\th{Tier}\th{What}\th{Implemented as}\th{Entered}}
+\tr{\td{K}\td{type inference, definitional equality, caches, environment, export store}\td{plain Java, monomorphic \code{\verb~|switch~} on term kind}\td{always}}
+\tr{\td{T0}\td{WHNF / NbE evaluator over the kernel term store, open terms, first-class neutrals, call-by-need}\td{plain Java (no \code{\verb~|Node~}, no \code{\verb~|VirtualFrame~})}\td{every reduction}}
+\tr{\td{T2}\td{closed-term evaluator for \em{promoted} code objects}\td{Truffle AST nodes + \code{\verb~|RootNode~}/\code{\verb~|CallTarget~}, compiled by Graal}\td{only when a code object's T0 heat counter crosses the promotion threshold}}
+}
+
+\p{There is deliberately no "T1 = Truffle AST in interpreter mode" as a general tier: a promoted root is expected to be compiled almost immediately (its heat already proved it hot).}
+}
+
+\subtree{
+\title{1.2 Values (plain Java, shared by T0 and T2)}
+
+\p{\code{\verb~|Object~} is the value type; dispatch by exact-class \code{\verb~|instanceof~} on \code{\verb~|final~} classes (Graal and C2 turn this into one klass compare). No Truffle \code{\verb~|DynamicObject~}, no \code{\verb~|StaticShape~} (see §3.6 for why not).}
+
+\pre{\verb~|
+// java.lang.Long        Nat literal < 2^63 (canonical: a value < 2^63 is never a BigInteger)
+// java.math.BigInteger  Nat literal >= 2^63
+// VStr                  String literal; expands to String.mk (List Char) only when inspected
+final class Closure {            // thc/src/main/java/thc/runtime/Closure.java:11-33, cadenza/src/cadenza/data/Closure.kt:28-34
+    final Code code;             // immutable; code.arity = #binders of the lambda telescope
+    final Object env;            // captured environment in T0's representation; null if closed
+    final Object[] pap;          // arguments already supplied; shared EMPTY array when none
+    final int arity;             // remaining = code.arity - pap.length (> 0)
+}
+final class VCtor {              // constructor application in WHNF
+    final CtorInfo info;         // info.idx, info.nparams, info.nfields (all final)
+    final Object[] args;         // params ++ fields; fields may be Thunks.  Nullary: one shared instance per ctor
+}
+final class Thunk { Object v; Code code; Object env; }      // code == null  <=>  evaluated, v is WHNF
+final class Code {               // one per lambda telescope / delayed sub-term / recursor rule RHS / definition body
+    final int term;              // T0 view: handle into the term store
+    final int arity; final int[] captures;      // captures: de Bruijn indices of free bvars actually used
+    @CompilationFinal volatile RootCallTarget target;        // T2 view; null until promoted
+    long heat;                   // T0 counter, plain (racy increments are fine)
+    boolean t2Hostile;           // set when T2 bailed on this code; never promote / re-enter
+}
+// T0 only (never inspected by T2 fast paths): VNeutral{head, spine}, VPi, VSort, VLazyConst{c, spine, Thunk unfolded}
+~}
+
+\p{Rules taken from the sources:}
+
+\ul{
+\li{\strong{Constant closures.} A lambda with no captures has exactly one preallocated \code{\verb~|Closure~} (\code{\verb~|thc/.../MakeClosure.java:24,28~}; \code{\verb~|cadenza/src/cadenza/jit/code.kt:184-189~}; measured 72 → 40 B/op, \code{\verb~|cadenza/bench/results/2026-09-22/ast-followup.md~}).}
+\li{\strong{No wrapper around the environment.} Cadenza's port to \code{\verb~|StaticShape~} added a \code{\verb~|CapturedFrame~} wrapper and regressed escaping closures 104 → 136 B/op until removed (\code{\verb~|.../README.md~}, \code{\verb~|.../ast-followup.md~}).}
+\li{\strong{PAP creation copies once}, off the fast path (\code{\verb~|Closure.pap~}, \code{\verb~|thc/.../Closure.java:34-47~}; 248 → 224 B/op in \code{\verb~|cadenza/.../ast-calls.md~}). Skip the prefix \code{\verb~|arraycopy~} when \code{\verb~|pap.length == 0~} (\code{\verb~|thc/.../Applications.java~} \code{\verb~|appendWithHeader~}, commit \code{\verb~|d5d741c6~}).}
+\li{\strong{Small-value caches.} THC caches boxed \code{\verb~|I#~} for −16…255 and \code{\verb~|C#~} for 0…255 per layout (\code{\verb~|thc/docs/boxed-values.md~}, \code{\verb~|thc/.../DataLayout.java:175-180,243-248~}) and keeps one shared instance per nullary constructor (\code{\verb~|DataLayout.java:171,253-255~}). RLVM: \code{\verb~|Long.valueOf~} already caches −128…127; add an own table (e.g. 0…1023) only if allocation profiles show boxed Nats.}
+\li{\strong{Thunk drops its captures when updated} (\code{\verb~|thc/.../Thunk.java:56-62~}: \code{\verb~|value = result; target = null; environment = null~}). Mandatory to avoid leaking whole environments.}
+}
+}
+
+\subtree{
+\title{1.3 Thunk protocol (pure kernel ⇒ far simpler than THC's)}
+
+\p{THC's thunk has six states and a monitor (\code{\verb~|thc/.../Thunk.java:21-22~}: 0 unevaluated, 1 owned, 2 WHNF, 3 failure, 4 interrupted, 5 parked) because Haskell needs blackholing, exceptions and concurrency. Kernel terms have no \code{\verb~|letrec~}, so a thunk cannot demand itself; no blackhole state is needed.}
+
+\pre{\verb~|
+static Object force(Object x) {                 // hot path shape = thc/.../Force.java:43-44, 73-76
+    if (!(x instanceof Thunk t)) return x;      // most values are not thunks: test first, return
+    Code c = t.code;
+    if (c == null) return t.v;                  // already WHNF
+    Object r = T0.whnf(c, t.env);               // or c.target.call(...) when promoted
+    // convention: r is never a Thunk  (thc Force.java:696 "Thunk target violated WHNF convention")
+    t.v = r; t.env = null; t.code = null;       // write v BEFORE clearing code
+    return r;
+}
+~}
+
+\ul{
+\li{\strong{Do not create a thunk for atoms.} bvar (pass the existing value/thunk through), const, literal, sort, lambda (closure creation is O(1)) need no \code{\verb~|Thunk~}. THC gets this from GHC certificates (\code{\verb~|knownWhnf~}/\code{\verb~|safeToEvaluate~}, \code{\verb~|thc/docs/core-evidence.md~}); for Lean terms it is a syntactic check at the \code{\verb~|app~}/\code{\verb~|let~} site.}
+\li{\strong{Strict positions need no thunk either}: recursor major premise, the struct of \code{\verb~|proj~}, both operands of accelerated Nat ops. THC's analogue is \code{\verb~|entryStrict~} ("a known saturated call can avoid constructing a thunk whose only purpose would be immediate evaluation", \code{\verb~|thc/docs/entry-contracts.md~}).}
+\li{\strong{Write-back after forcing a local} (T2 only, needs mutable slots): after \code{\verb~|force(slot)~} succeeds, store the result into the frame slot if it still holds that thunk, so later reads skip the state check (\code{\verb~|thc/.../LocalRead.java:73-86~}, \code{\verb~|thc/.../BytecodeRoot.java:616-653~}, \code{\verb~|thc/docs/thunk-updates.md~}).}
+\li{\strong{Threads.} If a \code{\verb~|Thunk~} can be reached from two checker threads (e.g. through a cached constant value), either forbid it (publish only fully evaluated values across threads) or read/write \code{\verb~|code~} with \code{\verb~|VarHandle.getAcquire/setRelease~} as THC does for \code{\verb~|state~} (\code{\verb~|Thunk.java:13-18~}, commit \code{\verb~|25303817~}). Double evaluation is harmless in a pure language; a reader seeing \code{\verb~|code == null~} with a stale \code{\verb~|v~} is not.}
+}
+}
+
+\subtree{
+\title{1.4 Application: eval/apply with arity (the Cadenza convention)}
+
+\p{Both projects use \strong{eval/apply}: the callee's remaining arity is stored in the closure and the \em{call site} decides exact / under / over application (\code{\verb~|cadenza/README.md~} TODO, \code{\verb~|cadenza/src/cadenza/jit/dispatch.kt~}, \code{\verb~|thc/.../Dispatch.java:18~} "Cadenza exact/PAP/overapplication specializations with fixed site arity"). Flatten \code{\verb~|app~} spines so a site has a fixed argument count \code{\verb~|n~}.}
+
+\p{T0 (no arrays for small arities; Cadenza measured that packed argument arrays are 99.75\% of surviving allocation in compiled recursion, \code{\verb~|cadenza/bench/results/2026-09-22/fib-allocation.md~}):}
+
+\pre{\verb~|
+Object apply(Object f, Object[] args, int off, int n) {      // generic, loops on over-application
+    for (;;) {                                               // = cadenza dispatch.kt:118-153 GenericDispatch
+        if (!(f instanceof Closure c)) return stuck(f, args, off, n);    // T0: build VNeutral
+        if (c.arity > n) return c.pap(args, off, n);                      // under: copy once
+        Object r = enter(c, args, off, c.arity);                          // exact prefix
+        if (c.arity == n) return r;
+        off += c.arity; n -= c.arity; f = force(r);                       // over: continue with result
+    }
+}
+// plus apply1/apply2/apply3(Closure, a, b, c) fast entries that avoid Object[] when c.arity matches
+~}
+
+\p{T2 call site (\code{\verb~|AppNode~} with \code{\verb~|@Child Dispatch~}), specializations in this order (\code{\verb~|cadenza/.../dispatch.kt:51-112~}, \code{\verb~|thc/.../Dispatch.java:40-127~}):}
+
+\table{
+\tr{\th{\verb~|#~}\th{Guard}\th{Action}}
+\tr{\td{1}\td{\code{\verb~|fn.arity == n && fn.code == cachedCode~}, \code{\verb~|limit = "3"~}}\td{\code{\verb~|DirectCallNode~} to \code{\verb~|cachedCode.target~}; args array = \code{\verb~|[env, pap…, actual…]~}; \code{\verb~|pap.length~} and \code{\verb~|env != null~} are \code{\verb~|@Cached~} constants}}
+\tr{\td{2}\td{\code{\verb~|fn.arity < n && fn.arity == cachedArity && fn.code == cachedCode~}, \code{\verb~|limit = "3"~}}\td{direct call with first \code{\verb~|cachedArity~} args, \code{\verb~|force~} result, recurse into a child \code{\verb~|Dispatch(n - cachedArity)~}}}
+\tr{\td{3}\td{\code{\verb~|fn.arity > n~}}\td{\code{\verb~|fn.pap(args)~} (behind \code{\verb~|@TruffleBoundary~})}}
+\tr{\td{4}\td{\code{\verb~|fn.arity == n~}, \code{\verb~|replaces = 1~}}\td{one \code{\verb~|IndirectCallNode~} for every target}}
+\tr{\td{5}\td{\code{\verb~|fn.arity < n~}, \code{\verb~|replaces = 2~}}\td{one generic loop (as T0 above); "avoid a second bounded cache of arities: the same application site can observe arbitrarily many currying shapes" (\code{\verb~|dispatch.kt:106-112~})}}
+}
+
+\p{All inline caches in both code bases use \code{\verb~|limit = "3"~} (7 of 7 \code{\verb~|limit=~} occurrences in \code{\verb~|thc/src/main/java/thc/runtime~}). The cache key is the \strong{code/call target}, not the closure (\code{\verb~|cadenza/TODO.md~}: "arity equality == too weak; callTarget equality (+ pap arity); closure equality == too specific"). Add a \strong{known-call fast path}: when the head is \code{\verb~|const c~} and \code{\verb~|n == arity(c)~}, emit a node holding a \code{\verb~|DirectCallNode~} and skip closure/arity checks entirely.}
+
+\p{If \code{\verb~|code.target == null~} at a T2 call site (callee not promoted), call T0 through a \code{\verb~|@TruffleBoundary(transferToInterpreterOnException = false)~} helper; never promote from inside compiled code.}
+}
+
+\subtree{
+\title{1.5 T2 node set for kernel terms}
+
+\p{Mirror rpylean's \code{\verb~|CodeNode~} list (sibling doc 07 §1.10); the Truffle realisation below is what THC/Cadenza add. All metadata arrays are \code{\verb~|@CompilationFinal(dimensions = 1)~}, all loops over them \code{\verb~|@ExplodeLoop~}.}
+
+\table{
+\tr{\th{Kernel term}\th{T2 node}\th{Behaviour / source pattern}}
+\tr{\td{\code{\verb~|bvar i~}}\td{\code{\verb~|ReadLocal(slot)~} / entry preamble copying \code{\verb~|env[k]~} → slot}\td{Cadenza copies only the captures the body uses into frame slots at entry (\code{\verb~|envPreamble~}, \code{\verb~|cadenza/src/cadenza/jit/nodes.kt:169-198~}); THC \code{\verb~|FunctionRoot.buildFrame~} (\code{\verb~|thc/.../FunctionRoot.java:454-481~})}}
+\tr{\td{\code{\verb~|lam~}}\td{\code{\verb~|MakeClosure(code, captureSlots)~}}\td{constant closure when no captures (§1.2)}}
+\tr{\td{\code{\verb~|app~}}\td{\code{\verb~|AppNode~} + \code{\verb~|Dispatch(n)~}; args are atom nodes or \code{\verb~|DelayNode~}}\td{§1.4; fill the argument array directly, no intermediate collection (−12.9\% interpreter allocation, \code{\verb~|cadenza/.../argument-array.md~})}}
+\tr{\td{\code{\verb~|let x := v; b~}}\td{\code{\verb~|LetNode(slot, DelayNode(v) | atom, b)~}}\td{lazy zeta}}
+\tr{\td{\code{\verb~|const c~}, definition}\td{\code{\verb~|ConstNode(c)~} reading a per-constant cell}\td{cell = lazily prepared, then constant-folded: \code{\verb~|@CompilationFinal volatile boolean prepared; Object preparedValue;~} with a re-check behind a boundary so publication never needs invalidation (\code{\verb~|thc/.../GlobalBinding.java:15-19,40-56,88-114~})}}
+\tr{\td{\code{\verb~|const C~}, constructor, saturated}\td{\code{\verb~|CtorNode(info, argNodes)~}}\td{\code{\verb~|new VCtor~}; nullary → shared instance}}
+\tr{\td{recursor applied to ≥ major}\td{\code{\verb~|RecNode(recInfo)~}}\td{force major; \code{\verb~|VCtor v~} → \code{\verb~|switch~}/cache on \code{\verb~|v.info.idx~} → direct call of rule RHS root with \code{\verb~|[params, motives, minors, fields…]~}; \code{\verb~|Long~} major for \code{\verb~|Nat.rec~}: \code{\verb~|0~} → zero rule, \code{\verb~|k>0~} → succ rule with \code{\verb~|k-1~}; IH is a \code{\verb~|DelayNode~} (lazy)}}
+\tr{\td{\code{\verb~|proj S i e~}}\td{\code{\verb~|ProjNode(i)~}}\td{force \code{\verb~|e~}; \code{\verb~|VCtor~} → \code{\verb~|args[nparams + i]~}; else bail}}
+\tr{\td{Nat literal ops (\code{\verb~|Nat.add~} …)}\td{\code{\verb~|NatBinNode~}}\td{\code{\verb~|long~} path with \code{\verb~|Math.addExact~}; overflow → \code{\verb~|BigInteger~} path behind \code{\verb~|@TruffleBoundary~}. Never retry the operands after an overflow (see §4.2 rule 3)}}
+\tr{\td{\code{\verb~|lit~}}\td{constant node}\td{}}
+\tr{\td{anything type-level (\code{\verb~|sort~}, \code{\verb~|forallE~}), \code{\verb~|mvar~}, free variables}\td{none}\td{T2 code is only built for closed, computational code; reaching one ⇒ \code{\verb~|EvalBail~}}}
+}
+
+\p{\strong{Case dispatch.} THC's \code{\verb~|Case~} node is an exploded linear scan over alternatives with a class-identity or layout test per arm, switching to a binary search over a sorted key array when there are more than 8 literal labels (\code{\verb~|thc/.../Case.java:46-88,187-206~}, \code{\verb~|thc/docs/ast-case-boundaries.md~} "Literal label selection"). RLVM has a dense \code{\verb~|ctorIdx~}, so use a direct array index in the interpreter and a \code{\verb~|limit = "3"~} cache on \code{\verb~|idx~} (then indirect call) for compiled code \strong{\verb~|[~inference\verb~|]~}.}
+
+\p{\strong{Bail-out, not neutrals.} T2 never constructs a neutral. On any stuck shape throw one preallocated \code{\verb~|EvalBail extends ControlFlowException~} from a \code{\verb~|@TruffleBoundary(transferToInterpreterOnException = false)~} method; catch it only in the plain-Java caller of \code{\verb~|target.call(...)~}, mark \code{\verb~|code.t2Hostile = true~}, and redo the reduction in T0. No \code{\verb~|catch~} blocks inside guest nodes: Cadenza's attempt to make its neutral exception compiler-visible failed with \code{\verb~|BailoutException: Code installation failed: code is too large~} on AArch64 because the handlers became part of every compiled body (\code{\verb~|cadenza/bench/results/2026-09-22/neutral-tracing.md~} "Compiler gates").}
+}
+
+\subtree{
+\title{1.6 Recursion depth, tail calls, loops}
+
+\ul{
+\li{Kernel terms have no general recursion; every unbounded loop passes through a recursor and (lazily) through forcing induction hypotheses. The Cadenza/THC bloom-filter tail-call machinery (§3.4) is therefore \strong{not needed} in RLVM \strong{\verb~|[~inference\verb~|]~}; what is needed is protection against deep \em{non-tail} recursion when IH thunks are forced in a chain.}
+\li{THC bounds nesting with a depth counter (\code{\verb~|AstStackScope.MAX_DEPTH = 64~}, \code{\verb~|thc/.../AstStackScope.java:7~}, bytecode op \code{\verb~|StackLimit~} \code{\verb~|thc/.../BytecodeRoot.java:228-235~}) and then spills the Java stack into heap continuations — this required resumable interpreters (\code{\verb~|enableYield~}), patched Truffle and ~3 500 lines of capture/continuation classes (\code{\verb~|Ast*~}, \code{\verb~|Delimited*~}, \code{\verb~|CallSegment*~}, \code{\verb~|BytecodeContinuations~}, …: 3 571 lines by \code{\verb~|wc -l~}) plus most of \code{\verb~|Force.java~}. Do not copy.}
+\li{RLVM: run each checker on a thread created with an explicit large stack size, keep a depth counter in T2 and \code{\verb~|EvalBail~} above a limit so that pathological depth is handled by T0 (which can use an explicit continuation stack). JVM evidence that deep stacks hurt: Scala HOAS is on par with GHC on shallow tree benchmarks but 1.5–17× slower on 5M/10M-deep Church numerals (3.7× and 17× for normalisation) even with \code{\verb~|-Xss1000M~} (\code{\verb~|normalization-bench-kovacs/README.md:94-105,113-119~}).}
+\li{Self-recursion to loops and OSR matter only if T2 gets a real loop node. If one is added (e.g. a literal-driven \code{\verb~|Nat.rec~} with a strict accumulator), use Truffle \code{\verb~|LoopNode~} exactly as Cadenza's \code{\verb~|SelfTailCallLoop~} (\code{\verb~|cadenza/src/cadenza/jit/tail_calls.kt:193-221~}): first iteration peeled, loop body re-entered by rewriting frame slots; OSR then triggers at \code{\verb~|engine.OSRCompilationThreshold=100352~} back-edges \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~}.}
+}
+}
+
+\subtree{
+\title{1.7 JIT budget when the metric is total instructions}
+
+\p{Promotion policy (all in plain Java, T0 side):}
+
+\pre{\verb~|
+on T0 entry of a Code object c (closure body, thunk body, rule RHS):
+    if (c.target != null && !c.t2Hostile)  -> call c.target            // already promoted
+    else if (++c.heat == PROMOTE && budget.tryAcquire() && isClosedComputational(c))
+         -> c.target = lowerToTruffle(c)                               // creates nodes + RootNode
+~}
+
+\ul{
+\li{\code{\verb~|PROMOTE~} should be of the order 10⁵–10⁶ entries, not Truffle's 400/1 000/10 000 \strong{\verb~|[~inference\verb~|]~}: break-even entries ≈ compile cost / (T0 cost − compiled cost per entry) ≈ 3·10⁸ / 500 ≈ 6·10⁵, assuming 100 ms (3·10⁸ instructions) per compilation — 5× below the dumped median of §6.3 — and 500 instructions saved per entry. Measure both numbers and tune; expose as an option.}
+\li{\code{\verb~|budget~}: a global cap on the number of promoted roots and on cumulative compile time (read \code{\verb~||Time …ms|~} from \code{\verb~|engine.TraceCompilation~} during tuning). Start with ≤ 50 roots per run.}
+\li{Each T2 \code{\verb~|RootNode~} overrides \code{\verb~|prepareForCompilation(boolean rootCompilation, int tier, boolean lastTier)~} and returns \code{\verb~|false~} when the budget is exhausted. Javadoc (graal master \code{\verb~|RootNode.java~}, \code{\verb~|@since 24.2~}): "By default, this method returns true to indicate sufficient profiling for compilation, but implementations can return false if not"; paraphrased remainder: for a root compilation \code{\verb~|false~} defers the compilation, during inlining it disables inlining of that call site, and a thrown exception fails compilation of the root permanently. Method present \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~}; THC uses it at \code{\verb~|thc/.../FunctionRoot.java:834-836~}, \code{\verb~|thc/.../BytecodeRoot.java:133-135~}.}
+\li{Leave \code{\verb~|isCloningAllowed()~} at its default \code{\verb~|false~} (no splitting ⇒ no duplicate compilations). THC and Cadenza return \code{\verb~|true~} to recover monomorphism (\code{\verb~|cadenza/.../nodes.kt:59,130,206~}, \code{\verb~|thc/.../FunctionRoot.java:838-840~}); RLVM should instead keep T2 roots few and already specialised.}
+}
+
+\p{Engine/compiler options. THC's launcher values are from \code{\verb~|thc/src/main/java/thc/Main.java:35-47~}; defaults are \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~}.}
+
+\table{
+\tr{\th{Option}\th{Default}\th{THC}\th{RLVM starting point}\th{Why}}
+\tr{\td{\code{\verb~|engine.Compilation~}}\td{true}\td{true}\td{\strong{false for the first milestone}, then true}\td{T0-only baseline first}}
+\tr{\td{\code{\verb~|engine.MultiTier~}}\td{true}\td{\strong{false}}\td{false}\td{one compilation per root}}
+\tr{\td{\code{\verb~|engine.SingleTierCompilationThreshold~}}\td{1000}\td{\strong{10000}}\td{100–1000}\td{hotness is decided by \code{\verb~|PROMOTE~}; but inline caches and one-shot flags must warm up in the Truffle interpreter first, otherwise the first compilation bakes in uninitialised sites and deopts (\code{\verb~|engine.MinInvokeThreshold~} default 3)}}
+\tr{\td{\code{\verb~|engine.FirstTierCompilationThreshold~} / \code{\verb~|LastTier…~}}\td{400 / 10000}\td{n/a}\td{n/a (single tier)}\td{}}
+\tr{\td{\code{\verb~|engine.DynamicCompilationThresholds~}}\td{true (\code{\verb~|MinNormalLoad~} 0, \code{\verb~|MaxNormalLoad~} 90, \code{\verb~|MinScale~} 0.1)}\td{default}\td{\strong{false}}\td{deterministic thresholds. Option text: thresholds are decreased when queue load falls below \code{\verb~|MinNormalLoad~} (down to \code{\verb~|MinScale~}) and increased above \code{\verb~|MaxNormalLoad~}; with the shipped \code{\verb~|MinNormalLoad=0~} only the increase can apply \strong{\verb~|[~behaviour not tested\verb~|]~}}}
+\tr{\td{\code{\verb~|engine.CompilerThreads~}}\td{-1 (scaled with cores)}\td{2 if ≥ 4 CPUs else 1}\td{\strong{1}}\td{compiler threads are billed}}
+\tr{\td{\code{\verb~|engine.BackgroundCompilation~}}\td{true}\td{true (false in tests)}\td{true}\td{measure \code{\verb~|false~} as an alternative}}
+\tr{\td{\code{\verb~|engine.Splitting~}}\td{true}\td{default}\td{\strong{false}}\td{belt and braces with \code{\verb~|isCloningAllowed() == false~}}}
+\tr{\td{\code{\verb~|engine.OSR~}}\td{true}\td{default}\td{false unless a \code{\verb~|LoopNode~} exists}\td{}}
+\tr{\td{\code{\verb~|engine.MaximumCompilations~}}\td{100}\td{default}\td{\strong{2–3}}\td{hard cap on deopt/recompile cycles per root}}
+\tr{\td{\code{\verb~|engine.CompilationFailureAction~}}\td{Silent (enum Silent/Print/Throw/Diagnose/ExitVM)}\td{Print}\td{Silent in the arena run, Print while developing}\td{\code{\verb~|Diagnose~} retries the compilation with diagnostics}}
+\tr{\td{\code{\verb~|compiler.DiagnoseFailure~}}\td{false}\td{false (explicit)}\td{false}\td{}}
+\tr{\td{\code{\verb~|compiler.MaximumGraalGraphSize~}}\td{-1 (disabled)}\td{\strong{1000}}\td{5000–20000}\td{bounds worst-case PE cost; a bail-out is wasted work, so do not set it as low as THC (§4.4)}}
+\tr{\td{\code{\verb~|compiler.CompilationTimeout~}}\td{100 s}\td{30 s}\td{5–10 s}\td{}}
+\tr{\td{\code{\verb~|compiler.InliningRecursionDepth~}}\td{2}\td{default}\td{\strong{0–1}}\td{Cadenza: recursive inlining "uses up inlining budget on recursive occs" and slowed fib; faster with max recursive inlining 1 (\code{\verb~|cadenza/benckmarks.md~})}}
+\tr{\td{\code{\verb~|compiler.InliningExpansionBudget~} / \code{\verb~|InliningInliningBudget~}}\td{12000 / 12000}\td{default}\td{tune down}\td{compile cost grows with inlined IR}}
+\tr{\td{\code{\verb~|compiler.DeoptCycleDetectionThreshold~}}\td{15}\td{default}\td{default}\td{}}
+}
+
+\p{JVM flags seen in THC that are relevant: \code{\verb~|-XX:+UseCompactObjectHeaders~} and \code{\verb~|-XX:+UseCompressedOops~} in its benchmark launcher (\code{\verb~|thc/bin/benchmark-jvm-options.sh:11-18~}; flag exists and defaults to \code{\verb~|false~} in the project toolchain \strong{\verb~|[~verified\verb~|]~}), \code{\verb~|-Xss2m~} (THC app default, \code{\verb~|thc/build.gradle:271~}), \code{\verb~|-Xss32m~} (Cadenza benchmarks). THC's \code{\verb~|-Xshare:off~}, \code{\verb~|-Xms256m -Xmx256m~}, \code{\verb~|-XX:-UseCompactObjectHeaders~}, \code{\verb~|-XX:+UseJamGC~} (\code{\verb~|thc/build.gradle:267-268~}) are JAM requirements, not tuning advice.}
+}
+
+\subtree{
+\title{1.8 What should be plain Java vs Truffle}
+
+\table{
+\tr{\th{Piece}\th{Where}\th{Reason}}
+\tr{\td{Export parsing, term store, hash-consing, caches}\td{plain Java}\td{data, not program}}
+\tr{\td{\code{\verb~|inferType~}, \code{\verb~|isDefEq~}, lazy delta heuristics, eta, proof irrelevance}\td{plain Java}\td{megamorphic tree walk; rpylean measured a JIT on these loops as a 15–19\% loss (doc 07 §0.2)}}
+\tr{\td{WHNF / NbE with neutrals, quote, conversion}\td{plain Java (T0)}\td{neutrals on the fast path are fatal for PE'd code (§6.2)}}
+\tr{\td{Closed evaluation of hot definitions, recursor rules, Nat/Bool/\code{\verb~|decide~}-style computation}\td{Truffle (T2)}\td{only place where a \em{program position} is stable enough for PE}}
+\tr{\td{Values, thunks, closures}\td{plain Java classes used by both}\td{THC/Cadenza keep values strictly separate from nodes (\code{\verb~|thc/docs/site/jvm.md~} "Values, nodes and descriptions")}}
+\tr{\td{Lazily mapped export}\td{plain Java \code{\verb~|MemorySegment~}}\td{THC maps its Core containers with \code{\verb~|FileChannel.map(READ_ONLY, 0, size, Arena.ofShared())~} and decodes a binding only when first demanded (\code{\verb~|thc/src/main/java/thc/CoreFileMappings.java:135-139~}, \code{\verb~|thc/docs/compact-core-format.md~}: ULEB128 records, \code{\verb~|(start,len)~} string spans, sorted 24-byte fingerprint→offset table)}}
+}
+}
+}
+
+\subtree{
+\title{2. THC architecture (item 1)}
+
+\ul{
+\li{\strong{Pipeline} (\code{\verb~|thc/docs/architecture.md~}): GHC 9.14.1 does parsing/typechecking/optimisation; a Core plugin exports post-Tidy Core plus "evidence" (runtime representation, evaluatedness, entry strictness, demand, join points) into a compact binary container (CBD); the JVM runtime links, lowers lazily ("Eligible cold bindings are decoded and lowered on demand") and executes.}
+\li{\p{\strong{Two backends over one value model} (\code{\verb~|thc/docs/bytecode.md~}, \code{\verb~|thc/README.md:168-172~}):}
+\ul{
+\li{\em{AST}: \code{\verb~|Program.java~} (2 797 lines) lowers Core to \code{\verb~|Expr~} nodes (\code{\verb~|thc/.../Expr.java~}), one \code{\verb~|FunctionRoot~} per lambda/thunk body (\code{\verb~|FunctionRoot.java~}, 841 lines).}
+\li{\em{Bytecode (default)}: \code{\verb~|BytecodeProgram.java~} (8 574 lines) lowers Core to \strong{Truffle Bytecode DSL} operations declared in \code{\verb~|BytecodeRoot.java~} (7 880 lines): \code{\verb~|@GenerateBytecode(languageClass = Language.class, enableYield = true, enableTagInstrumentation = true, boxingEliminationTypes = {int.class, long.class, float.class, double.class, boolean.class})~} (\code{\verb~|BytecodeRoot.java:51-52~}). No uncached interpreter tier is enabled (Cadenza's prototype does enable \code{\verb~|enableUncachedInterpreter~}, \code{\verb~|cadenza/src/cadenza/bytecode/BytecodeRoot.java:33-37~}).}
+}}
+\li{\strong{DSL usage is minimal.} Only 6 files in \code{\verb~|thc/src/main/java/thc/runtime~} contain \code{\verb~|@Specialization~} (the bytecode operations and the dispatch caches). Everything else is hand-written nodes with explicit \code{\verb~|@CompilationFinal~} state. Counts in that directory (656 files): 612 \code{\verb~|@TruffleBoundary~} annotations, 196 \code{\verb~|@CompilationFinal~}, 123 \code{\verb~|transferToInterpreterAndInvalidate~}, 111 \code{\verb~|@ExplodeLoop~}, 35 \code{\verb~|inCompiledCode()~} tests, 35 profile uses, 22 \code{\verb~|Assumption~} uses.}
+\li{\strong{Frames.} Indexed \code{\verb~|FrameDescriptor~} slots allocated at lowering time (\code{\verb~|thc/.../FrameLayout.java:15-45~}; slot 0 is the tail-call bloom filter). Slot kinds start \code{\verb~|Illegal~} and widen monotonically primitive → Object (\code{\verb~|thc/.../FrameAccess.java~}, \code{\verb~|cadenza/.../frame_layout.kt:43-73~}). Frames are never captured by closures: "\code{\verb~|CapturedFrame~} is selective heap storage, not a saved \code{\verb~|VirtualFrame~}" (\code{\verb~|thc/docs/site/jvm.md~}).}
+\li{\strong{Object model.} Truffle \strong{Static Object Model} (\code{\verb~|StaticShape~}) for closure environments (\code{\verb~|thc/.../CaptureLayout.java:109-147,212-240~}) and constructor payloads (\code{\verb~|thc/.../DataLayout.java~}), to get typed final primitive/reference fields per shape. No \code{\verb~|DynamicObject~}.}
+\li{\strong{Language registration}: \code{\verb~|contextPolicy = SHARED~} (\code{\verb~|thc/src/main/java/thc/Language.java:25-28~}); per-context heap state, shareable code ("reusable AST code", \code{\verb~|thc/docs/reusable-code.md~}).}
+}
+}
+
+\subtree{
+\title{3. THC/Cadenza runtime representation and calls (item 3)}
+
+\subtree{
+\title{3.1 Closures and PAPs}
+
+\p{\code{\verb~|Closure{CapturedFrame environment; Object[] supplied; int arity; RootCallTarget target; int suppliedCount; HandoffStorage typedSupplied}~}, annotated \code{\verb~|@CompilerDirectives.ValueType~}, \code{\verb~|supplied~} is \code{\verb~|@CompilationFinal(dimensions = 1)~} (\code{\verb~|thc/.../Closure.java:11-33~}). A PAP is the same class with a longer \code{\verb~|supplied~} and smaller \code{\verb~|arity~}. Call packet layout: \code{\verb~|[bloom, env?, supplied…, args…]~} (\code{\verb~|thc/.../Dispatch.java:49-51~}, \code{\verb~|cadenza/.../dispatch.kt:63-64~}). Truffle's residual call ABI is \code{\verb~|Object[] → Object~}; primitives survive only inside one compilation unit (\code{\verb~|thc/docs/call-boundaries.md~}).}
+}
+
+\subtree{
+\title{3.2 Thunks, indirections, update}
+
+\p{\code{\verb~|Thunk{RootCallTarget target; CapturedFrame environment; volatile int state; Object value; Thread owner;…}~} (\code{\verb~|thc/.../Thunk.java~}). Forcing is a node (\code{\verb~|thc/.../Force.java~}): non-thunk → return; state 2 → value; otherwise claim under the thunk's monitor, call the body through a 3-entry target cache (\code{\verb~|DispatchThunkTarget.java:19-29~}, packet \code{\verb~|{0L}~} or \code{\verb~|{0L, env}~}), publish. There are \strong{no update frames}: the \code{\verb~|Force~} activation is the update frame (\code{\verb~|Force.java:676-698~}). Blackholing = state 1 with \code{\verb~|owner == currentThread~} ⇒ \code{\verb~|"Blackhole: cyclic thunk entered while evaluating"~} (\code{\verb~|Force.java:264-267~}). Recursive \code{\verb~|let~} uses \code{\verb~|RecCell~} indirections captured by identity and published after the group is initialised (\code{\verb~|thc/.../RecCell.java~}, \code{\verb~|thc/docs/core-evidence.md~} "Physical recursive cells"); Cadenza's equivalent is \code{\verb~|Indirection~} (\code{\verb~|cadenza/.../nodes.kt:209-212~}, \code{\verb~|code.kt:305-327~}).}
+}
+
+\subtree{
+\title{3.3 Data, unboxed primitives, typed execution}
+
+\p{\code{\verb~|DataValue~} + \code{\verb~|DataLayout~} (StaticShape with exact primitive/reference fields; strict fields of known type get concrete Java field types, lazy or polymorphic fields stay \code{\verb~|Object~}, \code{\verb~|thc/docs/core-evidence.md~} "Precise reference storage"). Constructor match = Java class identity where a generated storage class has a unique layout owner, else an explicit layout-pointer compare; an \code{\verb~|Assumption~}-guarded "exclusive carrier class" variant is an opt-in experiment (\code{\verb~|thc/.../DataLayout.java:216-227~}, \code{\verb~|thc/.../ConstructorClassIdentity.java~}, \code{\verb~|thc/docs/entry-contracts.md~}). \code{\verb~|Expr~} has typed entry points \code{\verb~|executeInt/Long/Float/Double/Closure/DataValue~} backed by a Truffle type system (\code{\verb~|thc/.../Expr.java:91-167~}). THC explicitly does \strong{not} do small/big integer widening (\code{\verb~|thc/docs/typed-tail.md~}); Cadenza does: \code{\verb~|int~} fast path, \code{\verb~|BigInt~} on overflow (\code{\verb~|cadenza/src/cadenza/data/DataTypes.java~}, \code{\verb~|cadenza/bench/results/2026-09-22/six-hour-impact.md~}).}
+}
+
+\subtree{
+\title{3.4 Tail calls (Cadenza design, kept by THC)}
+
+\ol{
+\li{Mark tail positions syntactically (\code{\verb~|cadenza/src/cadenza/jit/code_transforms.kt:3-10~}).}
+\li{Every root has a 64-bit mask with ≤ 5 bits from its identity hash (\code{\verb~|cadenza/.../nodes.kt:40-46~}, \code{\verb~|thc/.../GuestRoot.java:100-106~}); frame slot 0 / \code{\verb~|args[0]~} carry the OR of masks on the current tail chain (\code{\verb~|0L~} for a non-tail call).}
+\li{Tail call to target T (\code{\verb~|cadenza/.../tail_calls.kt:44-61~}, \code{\verb~|thc/.../TailCheck.java:21-28~}): if \code{\verb~|(mask & T.mask) == T.mask~} throw \code{\verb~|TailCallException(T, args)~} (a \code{\verb~|ControlFlowException~}); else perform an ordinary nested call passing \code{\verb~|mask~}. Each nested tail call adds ≥ 1 new bit, so at most 64 frames accumulate; distinct functions in a tail chain stay ordinary (inlinable) calls.}
+\li{A root catches a transfer aimed at its own body identity and loops via a \code{\verb~|LoopNode~}, rewriting its frame (\code{\verb~|cadenza/.../nodes.kt:142-155~}, \code{\verb~|tail_calls.kt:193-221~}; clones keep \code{\verb~|bodyIdentity~}, \code{\verb~|nodes.kt:177-188~}, \code{\verb~|thc/.../GuestRoot.java:107-109~}). The first iteration is peeled ("constant recursive arguments can still fold").}
+\li{Non-tail call sites wrap the call in \code{\verb~|try … catch (TailCallException)~} and run a trampoline \code{\verb~|LoopNode~} whose \code{\verb~|RepeatingNode~} holds a 3-entry target cache (\code{\verb~|tail_calls.kt:128-189~}; copied from Enso's \code{\verb~|LoopingCallOptimiserNode~}, comment at \code{\verb~|tail_calls.kt:141-142~}).}
+\li{THC adds: cycles close at the \em{matching} active root, not only at the outer trampoline (\code{\verb~|thc/docs/typed-tail.md~} "A → B → C → D → E → C"); bytecode self-tail calls restore locals and branch to a Bytecode DSL back-edge without building a packet (\code{\verb~|thc/docs/bytecode.md~}, \code{\verb~|thc/.../BytecodeRoot.java:2893-2918,2962-2991~}).}
+}
+}
+
+\subtree{
+\title{3.5 What comes from GHC rather than from the runtime}
+
+\p{Let-floating, case-of-known-constructor, worker/wrapper, join points and strictness analysis are done by GHC before export. THC only consumes the results as certificates: \code{\verb~|evaluated~} (WHNF), \code{\verb~|entryStrict~} (call-by-value entry obligations enforced at saturation, including PAP prefixes), \code{\verb~|callDemand~} (caller-side demand, opt-in \code{\verb~|-Dthc.callDemands=true~}, default off), \code{\verb~|knownWhnf~}/\code{\verb~|safeToEvaluate~} (\code{\verb~|thc/docs/core-evidence.md~}, \code{\verb~|thc/docs/entry-contracts.md~}, \code{\verb~|thc/docs/demand-probe.md~}). Joins become local control flow (\code{\verb~|thc/docs/architecture.md~}). RLVM has no such front end; the cheap syntactic equivalents are listed in §1.3.}
+}
+
+\subtree{
+\title{3.6 Memory tricks actually present (item 6)}
+
+\ul{
+\li{Typed \code{\verb~|StaticShape~} fields avoid boxing in environments/constructors; cost: one generated class per shape, plus the wrapper problem measured by Cadenza (§1.2). For RLVM's \code{\verb~|Object~}-only kernel values (no unboxed doubles/ints inside constructors) this buys nothing \strong{\verb~|[~inference\verb~|]~}.}
+\li{Shared empty arrays, constant closures, nullary singletons, boxed small-int cache (§1.2).}
+\li{Thunk releases \code{\verb~|target~}/\code{\verb~|environment~} on update; a forced local is overwritten with its value.}
+\li{Fresh-thunk escape analysis: \code{\verb~|Thunk.publishSuccess~} is \code{\verb~|@TruffleBoundary(transferToInterpreterOnException = false, allowInlining = true)~} so "partial evaluation leaves the publication body outside its graph, while later Java inlining can recover escape analysis for fresh local thunks" (\code{\verb~|thc/.../Thunk.java:56~}, commit \code{\verb~|2af0147f~}).}
+\li{\strong{In-place reuse / uniqueness: none.} "Immutable constructor fields and capture properties are not rewritten" (\code{\verb~|thc/docs/thunk-updates.md~}). The only reuse scheme is the opt-in argument "handoff slab" (\code{\verb~|-Dthc.handoffSlabs=true~}, default off, \code{\verb~|thc/docs/handoff-slabs.md~}): a per-context, per-layout reusable argument record with loan/generation checks; the doc itself says it "does not by itself prove allocation elimination or a performance gain". No evidence here for RLVM's few-bit refcount idea.}
+\li{No arenas for guest values. Off-heap only for mapped input files and byte arrays.}
+}
+}
+}
+
+\subtree{
+\title{4. Keeping partial evaluation effective and cheap (item 4)}
+
+\subtree{
+\title{4.1 Mechanisms in use}
+
+\ul{
+\li{\code{\verb~|@CompilationFinal(dimensions = 1)~} on every metadata array (\code{\verb~|thc/.../FunctionRoot.java:63-87~}, \code{\verb~|GuestRoot.java:34-53~}), \code{\verb~|@ExplodeLoop~} over them (frame building \code{\verb~|FunctionRoot.java:454~}, capture \code{\verb~|CaptureLayout.java:109~}, case arms \code{\verb~|Case.java:187~}), and \code{\verb~|@ExplodeLoop(kind = FULL_UNROLL_UNTIL_RETURN)~} for the thunk-claim loop (\code{\verb~|Force.java:211~}, commit \code{\verb~|a03f5571~}).}
+\li{\code{\verb~|@CompilerDirectives.ValueType~} on \code{\verb~|Closure~} (\code{\verb~|Closure.java:11~}; Cadenza on \code{\verb~|Closure~} and \code{\verb~|NeutralValue~}).}
+\li{\code{\verb~|BranchProfile~} on rare control paths (tail bounce, resume, suspension: \code{\verb~|Force.java:32-34~}, \code{\verb~|DirectCallerNode.java~}), \code{\verb~|InlinedConditionProfile~} in the generic dispatch (\code{\verb~|cadenza/.../dispatch.kt:128-129~}), \code{\verb~|@ReportPolymorphism~} on dispatch nodes so splitting can de-pessimise them (\code{\verb~|Dispatch.java:19~}, \code{\verb~|DispatchCallTarget.java~}).}
+\li{Assumptions only for rare global mode flips (trace sink on/off \code{\verb~|thc/docs/hints-and-tracing.md~}; constructor-class exclusivity; "no graph failure" \code{\verb~|thc/.../ContextRoot.java:18~}). Where a flip would retire much code they deliberately use "the context's irreversible volatile guest-admission bit instead of an invalidatable assumption" (\code{\verb~|thc/docs/reusable-code.md~}).}
+\li{Boundary placement: cold protocol code (contention, failures, PAP construction, continuation capture) sits behind \code{\verb~|@TruffleBoundary~}, usually with \code{\verb~|transferToInterpreterOnException = false~} (\code{\verb~|Force.java:59,67,83~}, \code{\verb~|Closure.java:35,38~}). Commit subjects show this was iterative work: "Keep contended thunk retries outside ordinary inline demand" (\code{\verb~|339d6f0c~}), "Keep contended thunk notifications outside partial evaluation" (\code{\verb~|84576e9a~}), "Keep host wait bookkeeping outside guest compilation" (\code{\verb~|4fcf8796~}), "Keep operand resume construction outside guest compilation" (\code{\verb~|ac50aade~}).}
+}
+}
+
+\subtree{
+\title{4.2 Deoptimisation-loop rules they converged on (copy these)}
+
+\ol{
+\li{\strong{One-shot monotone flags instead of rewriting.} e.g. \code{\verb~|@CompilationFinal volatile boolean seenThunk~} in \code{\verb~|Force~} (\code{\verb~|Force.java:35,50-56~}), \code{\verb~|observed~} in \code{\verb~|PreparedDispatch~} (\code{\verb~|PreparedDispatch.java:30,51-73~}), \code{\verb~|genericLong/genericClosure/genericDataValue~} in \code{\verb~|Evaluate~} (\code{\verb~|Evaluate.java:86-151~}). Each flips at most once ⇒ bounded invalidations per node.}
+\li{\strong{Unobserved site reached from compiled code ⇒ take a generic \code{\verb~|@TruffleBoundary~} path, do not deopt.} \code{\verb~|if (!seenThunk) { if (CompilerDirectives.inCompiledCode()) return executeCold(…); transferToInterpreterAndInvalidate(); seenThunk = true; }~} (\code{\verb~|Force.java:50-56~}); same for call sites: "An untouched compiled site shares the existing generic application algorithm" (\code{\verb~|PreparedDispatch.java:14-18,50-73~}) and for unobserved bytecode branches (\code{\verb~|thc/docs/bytecode.md~}).}
+\li{\strong{Never re-execute after \code{\verb~|UnexpectedResultException~}.} "Widening consumes the value saved in \code{\verb~|UnexpectedResultException~}; it never retries the expression … repeatedly throwing that exception would repeatedly invalidate compiled code" (\code{\verb~|thc/docs/typed-tail.md~}; code \code{\verb~|Evaluate.java:106-111~}).}
+\li{\strong{Publication without invalidation.} A lazily initialised global is read as \code{\verb~|prepared ? preparedValue : prepareValue()~} where \code{\verb~|prepareValue~} is a boundary that re-reads the volatile flag, so code compiled before publication stays valid (\code{\verb~|GlobalBinding.java:15-19,40-41,88-91~} comments).}
+\li{\strong{Monotone frame-slot widening} (primitive → Object, never back). Cadenza tried per-frame tags (\code{\verb~|FrameDescriptor.Builder.useSlotKinds(false)~}) and rejected it: no gain, +16 B/op (\code{\verb~|cadenza/bench/results/2026-09-22/frame-recovery.md~}).}
+\li{\strong{Megamorphic sites get exactly one generic node}, never a second bounded cache (§1.4 row 5).}
+\li{\strong{Check order for the interpreter}: test \code{\verb~|CompilerDirectives.inCompiledCode()~} before loading a volatile flag, so the interpreter never pays the load (\code{\verb~|FunctionRoot.java:636~}, commit \code{\verb~|25f9c855~} "Skip cold-entry flag loads in the AST interpreter").}
+}
+}
+
+\subtree{
+\title{4.3 Engine options}
+
+\p{See §1.7 table (\code{\verb~|thc/src/main/java/thc/Main.java:35-47~}). Also: automatic loop vectorisation is disabled (\code{\verb~|-Djdk.graal.VectorizeLoops=false~}, \code{\verb~|thc/README.md:232-237~}); test contexts use \code{\verb~|engine.BackgroundCompilation=false~} and \code{\verb~|engine.CompilationFailureAction=Throw~}.}
+}
+
+\subtree{
+\title{4.4 The 1 000-node graph budget and "terminal targets" (a war story, not a recommendation)}
+
+\p{THC sets \code{\verb~|compiler.MaximumGraalGraphSize=1000~} ("speculative graph budget", \code{\verb~|thc/docs/ast-case-boundaries.md~} "Fresh-entry recovery"; option semantics \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~}: "Stop partial evaluation when the graph exceeded this size, disabled if < 0. (default: -1)"). Consequences visible in the repo:}
+
+\ul{
+\li{compilation failures are routine; the failed target is \em{retired} and, at the next fresh entry, the function is cloned with one case arm / join argument outlined into a side root, then retried (\code{\verb~|thc/docs/ast-case-boundaries.md~}, \code{\verb~|thc/tools/truffle-protocol/README.md~} "Graph-budget recovery lifecycle", \code{\verb~|thc/.../GraphRecovery.java~});}
+\li{this needed three runtime patches (\code{\verb~|graph-budget-runtime~}, \code{\verb~|terminal-target-runtime~}, \code{\verb~|terminal-splitting-runtime~}) to stop stock Truffle from re-queuing or re-arming failed targets through splitting and partial-block retries (\code{\verb~|thc/docs/truffle-patches.md~});}
+\li{bytecode roots are pre-partitioned: constructor cases whose arms reach a preparation weight of 64 get one side root per arm "from the first compilation" (\code{\verb~|thc/docs/bytecode.md~});}
+\li{it is still not closed: "FastSmoke still fails its original first-compilation check at the unchanged graph limit" (commit \code{\verb~|d5d741c6~}, 2026-11-11).}
+}
+
+\p{Lesson for RLVM: small compilation units are good (rule RHS and lambda bodies are natural units), but an aggressive graph cap converts compile cost into failure-handling complexity. Use the cap as a safety net only.}
+}
+}
+
+\subtree{
+\title{5. "JAM-patched GraalVM" and the Truffle patches (item 2)}
+
+\subtree{
+\title{5.1 What JAM is}
+
+\p{A separate project (\code{\verb~|github.com/ekmett/jam~}) providing \strong{a new garbage collector integrated into HotSpot, the Graal compiler and SubstrateVM}, selected with \code{\verb~|-XX:+UseJamGC~} / \code{\verb~|--gc=jam~}. Purpose: Haskell \code{\verb~|System.Mem.Weak~} semantics (key→(value, finalizer) associations resolved to a fixed point, finalizers that may resurrect keys) via \code{\verb~|jam.vm.Weak~} and the \code{\verb~|jam.vm.Lifted~} value protocol (\code{\verb~|resolve()~}, \code{\verb~|project(n)~}) (\code{\verb~|thc/docs/jam-runtime.md:1-16,96-152~}). Evidence that it is a GC port, not a JIT change: \code{\verb~|thc/src/vm/patches/hotspot-jam.patch~} (3 680 lines) adds \code{\verb~|src/hotspot/share/gc/jam/*~} (heap, barrier sets for C1/C2/assembler, \code{\verb~|jamWeak.cpp~}); \code{\verb~|thc/src/vm/patches/graal-jam.patch~} (990 lines) touches \code{\verb~|HotSpotAllocationSnippets~}, write-barrier snippets, \code{\verb~|CompressionNode~}, Truffle safepoint phases and SubstrateVM heap/thread classes. Operational constraints: ordinary (non-compact) object headers, CDS off, fixed heap \code{\verb~|-Xms == -Xmx~} (\code{\verb~|thc/build.gradle:263-268~}, \code{\verb~|thc/docs/jam-runtime.md:49-53~}). Pinned package: "Jam VM" 25.3.4.1-dev, Java 25.0.4.1 (\code{\verb~|thc/etc/jam-graalvm.json~}).}
+}
+
+\subtree{
+\title{5.2 The separate Truffle/Sulong JAR patches (\code{\verb~|thc/docs/truffle-patches.md~}, \code{\verb~|thc/tools/truffle-protocol/~})}
+
+\table{
+\tr{\th{Patch}\th{Purpose}\th{Needed by RLVM?}}
+\tr{\td{\code{\verb~|materializable-root~}}\td{declare before first compile that a root's frame may be materialised (continuations)}\td{no (no continuations)}}
+\tr{\td{\code{\verb~|declared-return-*~}}\td{root may return a value \em{or} a saved continuation: start with a polymorphic return profile}\td{no}}
+\tr{\td{\code{\verb~|RootNode.assumeArgumentCount~}}\td{expose exact argument-array length to PE}\td{no (minor)}}
+\tr{\td{\code{\verb~|graph-budget-*~}, \code{\verb~|terminal-target~}, \code{\verb~|terminal-splitting~}}\td{retire failed compile targets permanently}\td{no, if the graph cap is not abused (§4.4); use \code{\verb~|engine.MaximumCompilations~}, \code{\verb~|CompilationFailureAction=Silent~}, \code{\verb~|prepareForCompilation~}}}
+\tr{\td{OSR submission locking, \code{\verb~|mount-carrier-lookup~} (virtual threads), AOT exception profile}\td{concurrency / AOT cache}\td{no}}
+\tr{\td{Sulong globals / Windows lookup}\td{native C dependencies of Haskell packages}\td{no}}
+}
+
+\p{\code{\verb~|-Pthc.stockTruffle=true~} builds THC against unpatched artifacts, with the stated loss of those first-compilation/recovery contracts only.}
+}
+
+\subtree{
+\title{5.3 The version-mismatch hazard, and RLVM's situation}
+
+\p{\code{\verb~|thc/README.md:50-52~}: "incompatible Graal and Truffle compiler versions can disable runtime compilation and leave execution in the interpreter." Mechanism \strong{\verb~|[~verified 25.5.5.0.3\verb~|]~}: since Truffle is consumed from Maven, \code{\verb~|truffle-runtime~} checks the JDK's compiler version at start-up (\code{\verb~|com.oracle.truffle.runtime.hotspot.HotSpotTruffleRuntimeAccess~} contains \code{\verb~|MIN_COMPILER_VERSION~}, \code{\verb~|MIN_JDK_VERSION~}, \code{\verb~|MAX_JDK_VERSION~} and the message "Your Java runtime '\%s' with compiler version '\%s' is incompatible with polyglot version '\%s'."); on failure \code{\verb~|com.oracle.truffle.api.Truffle~} falls back to \code{\verb~|com.oracle.truffle.api.impl.DefaultTruffleRuntime~} (strings: "No optimizing Truffle runtime found on the module or class-path."; explicit selection via \code{\verb~|-Dtruffle.UseFallbackRuntime~}).}
+
+\ul{
+\li{RLVM toolchain: \code{\verb~|release~} says \code{\verb~|GRAALVM_VERSION="25.5.5.0.3"~}, \code{\verb~|lib/truffle/truffle-compiler.jar~} manifest \code{\verb~|Implementation-Version: 25.5.5.0.3~}, \code{\verb~|UseJVMCICompiler=true~}, \code{\verb~|EnableJVMCI=true~}. Maven Central lists \code{\verb~|org.graalvm.truffle:truffle-api:25.5.5.0.3~} (checked 2026-11-23). \strong{Pin all \code{\verb~|org.graalvm.*~} artifacts to exactly 25.5.5.0.3}; nothing needs patching.}
+\li{Add a start-up assertion: if compilation is expected and \code{\verb~|Truffle.getRuntime().getClass().getName().equals("com.oracle.truffle.api.impl.DefaultTruffleRuntime")~}, fail loudly (exit code ≠ 0/1/2) instead of silently running slow. The arena runner is x86-64 while the dev host is aarch64: run this check on both.}
+}
+}
+}
+
+\subtree{
+\title{6. Benchmarks and war stories (item 7)}
+
+\subtree{
+\title{6.1 Cadenza, 2026-09-22 (Apple M3, GraalVM 25.3.4.1, JMH, 2 forks; \code{\verb~|cadenza/bench/results/2026-09-22/~})}
+
+\table{
+\tr{\th{Measurement}\th{Result}\th{File}}
+\tr{\td{Fibonacci 15–18, guest compiled vs \code{\verb~|engine.Compilation=false~}}\td{11.16 µs vs 711.6 µs (\strong{64×}); 10–13: 1.03 vs 67.4 µs}\td{\code{\verb~|argument-array.md~}}}
+\tr{\td{Per guest call \strong{\verb~|[~my arithmetic: mean 4 673 calls/op for n=15..18\verb~|]~}}\td{≈ 2.4 ns compiled, ≈ 152 ns Truffle-interpreted (workload goes through a \code{\verb~|fixNatF~} builtin)}\td{—}}
+\tr{\td{AST backend vs Bytecode-DSL backend (both JIT)}\td{bytecode slower: counter 1.36×, accumulator 2.49×, fib 7.32×; escaping closures 0.90× (80 vs 120 B)}\td{\code{\verb~|README.md~}}}
+\tr{\td{Self-tail accumulator after frame reuse + typed slots}\td{9.10 → 3.18 µs, 110 776 → 56 B/op (2.86×)}\td{\code{\verb~|final-comparison.md~}}}
+\tr{\td{Fibonacci after six hours of call-path work}\td{69.4 → 15.1 µs, 748 080 → 50 173 B/op (4.6×, −93\% allocation)}\td{\code{\verb~|final-comparison.md~}}}
+\tr{\td{Primitive capture restored directly into typed frame slot}\td{6.78 → 5.19 µs, 16 360 → 224 B/op}\td{\code{\verb~|capture-restore.md~}}}
+\tr{\td{Remaining allocation in compiled fib}\td{99.75\% = 32-byte argument arrays \code{\verb~|[bloom, self, x]~}}\td{\code{\verb~|fib-allocation.md~}}}
+\tr{\td{2020 data: plain Kotlin de Bruijn interpreter vs Truffle-compiled (\code{\verb~|cadenza/benckmarks.md~})}\td{Fib 0.234 vs 0.026 ms (9×); Add 0.102 vs 0.001 ms (~100×, loop folded away)}\td{\code{\verb~|benckmarks.md~}}}
+}
+
+\p{\strong{\verb~|[~inference\verb~|]~} Combining rows 1 and 8 (different years, machines and inputs — order of magnitude only): a plain JVM interpreter is ~9× slower than Truffle-compiled code but ~7× \em{faster} than Truffle AST nodes running uncompiled. This is the quantitative basis for §0.2.}
+}
+
+\subtree{
+\title{6.2 Cadenza neutral-path experiment (\code{\verb~|neutral-tracing.md~})}
+
+\table{
+\tr{\th{Workload}\th{Exception design (shipped)}\th{Value-returning neutrals (rejected)}}
+\tr{\td{Closed Fibonacci 15–18}\td{10.87 µs, 50 173 B/op}\td{19.59 µs (+80\%), 95 745 B/op (+91\%)}}
+\tr{\td{Symbolic arithmetic DAG}\td{0.578 µs}\td{0.0355 µs (16.3× faster)}}
+\tr{\td{Symbolic conditional/recursive sums}\td{5.525 µs}\td{0.200 µs (27.7× faster)}}
+\tr{\td{Symbolic higher-order/partial application}\td{0.610 µs}\td{0.0304 µs (20.1× faster)}}
+}
+
+\p{Also: with the shipped design, a test that feeds neutrals into \em{compiled} code fails "because repeated deoptimizations triggered the configured compilation failure action" — every neutral deoptimises. Their decision: keep the exception; "Selecting a separate normalizer at a known normalization boundary is a possible future design." That separate normaliser is RLVM's T0.}
+}
+
+\subtree{
+\title{6.3 THC compile-cost data (my aggregation of archived trace lines)}
+
+\p{\code{\verb~|grep 'opt done'~} over \code{\verb~|thc/docs/**/*.log~} (24 files, e.g. \code{\verb~|thc/docs/bytecode-graphs/ast-capture.log~}, \code{\verb~|thc/docs/cadenza-graphs/*-run.log~}), all Tier 2, Apple M3, \strong{IGV graph dumping enabled} (inflates mostly the back-end part): n = 118; total 168 s; mean 1 424 ms (PE 219 ms + back end 1 205 ms); median 532 ms; p90 3 519 ms; max 12 341 ms; mean AST size 299 nodes → mean IR 5 635 nodes → mean code 25.5 KB. Example line: \code{\verb~|lambda sc, x, ds1 |Tier 2|Time 3294( 425+2869)ms|AST 772|Inlined 9Y 21N|IR 5612/11018|CodeSize 52392~}. The same logs contain 17 deopt/invalidation events. THC publishes no throughput figures.}
+}
+
+\subtree{
+\title{6.4 What gave the largest gains (Cadenza, measured)}
+
+\ol{
+\li{Frame reuse for self tail calls + typed frame slots (2.8×, allocation → ~0).}
+\li{Removing per-call allocations on the fixed-point path: retained self closure, direct original-target call (fib 4.6×, −93\% allocation).}
+\li{Keeping primitives primitive across capture restore (1.3–1.6× on affected loops).}
+\li{Allocation-only wins without measurable time change: constant closures, no env wrapper, single-copy PAP, direct argument-array fill.}
+}
+}
+
+\subtree{
+\title{6.5 What failed (measured and reverted)}
+
+\table{
+\tr{\th{Experiment}\th{Outcome}\th{File}}
+\tr{\td{Unary "bound self" entry root (smaller arg array)}\td{−17\% allocation but \strong{2.5–2.6× slower}}\td{\code{\verb~|bound-self-root.md~}}}
+\tr{\td{Identity profile on the recursive closure argument}\td{allocation unchanged, small fib \strong{+69\% time}}\td{\code{\verb~|fixed-self-profile.md~}}}
+\tr{\td{Per-frame slot tags instead of shared descriptor kinds}\td{no gain, +16 B/op}\td{\code{\verb~|frame-recovery.md~}}}
+\tr{\td{Value-returning neutrals}\td{closed fib 80\% slower (10.87 → 19.59 µs), +91\% allocation}\td{\code{\verb~|neutral-tracing.md~}}}
+\tr{\td{Neutral exception as \code{\verb~|ControlFlowException~}}\td{compiled code too large to install (AArch64)}\td{\code{\verb~|neutral-tracing.md~}}}
+\tr{\td{Recursive inlining + loop peeling (2020)}\td{fib 0.077 ms vs 0.026 ms without}\td{\code{\verb~|cadenza/benckmarks.md~}}}
+\tr{\td{Bytecode-DSL backend (Cadenza, current state)}\td{1.4–7.3× slower than AST}\td{\code{\verb~|README.md~}}}
+\tr{\td{THC opt-in experiments still default-off, no claimed gain}\td{handoff slabs, boxed-value cache, call demands, leading-case return, static-shape unchecked, constructor class identity}\td{\code{\verb~|thc/docs/handoff-slabs.md~}, \code{\verb~|boxed-values.md~}, \code{\verb~|demand-probe.md~}, \code{\verb~|call-boundaries.md~}, \code{\verb~|entry-contracts.md~}}}
+}
+
+\p{Pattern: "obvious" micro-optimisations of the calling convention frequently made Graal's output worse; every change was gated on a matched before/after measurement. RLVM should gate on instruction counts the same way.}
+}
+}
+
+\subtree{
+\title{7. Interpreter-mode performance (item 5)}
+
+\p{What the sources contain:}
+
+\ul{
+\li{\strong{No host-inlining annotations anywhere}: no \code{\verb~|HostCompilerDirectives.BytecodeInterpreterSwitch~}, \code{\verb~|InliningCutoff~}, \code{\verb~|EarlyInline~} in \code{\verb~|thc/src/main/java~} or \code{\verb~|cadenza/src~} (grep). Interpreter speed is not a goal of either project; THC measures after warm-up against native GHC.}
+\li{\strong{No superinstructions.} THC relies on what the Bytecode DSL generates: quickening and boxing elimination for \code{\verb~|int/long/float/double/boolean~} (\code{\verb~|BytecodeRoot.java:51-52~}), typed operations (\code{\verb~|ForceValue~}, \code{\verb~|ReadDataField~}, \code{\verb~|CaptureRead~} have primitive specialisations, \code{\verb~|BytecodeRoot.java:551-601, 3124-3138~}), constant operands for layouts/arity (\code{\verb~|@ConstantOperand~}), and \code{\verb~|ForceLocal~} fusing force + write-back (\code{\verb~|BytecodeRoot.java:616-653~}).}
+\li{\strong{Interpreter-relevant micro-rules} that do appear: direct argument-array fill (Cadenza, −7.8…−12.9\% interpreter allocation); skip empty-prefix copies; \code{\verb~|needsCallState()~} so leaf bodies skip per-call bookkeeping (\code{\verb~|thc/.../Expr.java:79-90~}, \code{\verb~|FunctionRoot.java:647-650~}); "Return evaluated force operands before AST root lookup" (commit \code{\verb~|24490d1f~}); rule 7 in §4.2.}
+\li{\strong{Lazy lowering} is the main cold-code trick: bindings are decoded and lowered only when first read (\code{\verb~|GlobalBinding.defer~}, \code{\verb~|thc/docs/architecture.md~}), with an optional parallel pre-lowering pool (\code{\verb~|thc/docs/reusable-code.md~}).}
+}
+
+\p{What the toolchain offers beyond the sources \strong{\verb~|[~verified 25.5.5.0.3 for existence; effect unmeasured\verb~|]~}: \code{\verb~|@GenerateBytecode~} has \code{\verb~|enableUncachedInterpreter~}, \code{\verb~|defaultUncachedThreshold~}, \code{\verb~|enableQuickening~}, \code{\verb~|enableThreadedSwitch~}, \code{\verb~|enableInstructionRewriting~}, \code{\verb~|inlinePrimitiveConstants~}; \code{\verb~|HostCompilerDirectives.{BytecodeInterpreterSwitch, BytecodeInterpreterHandler, InliningCutoff, InliningRoot}~} exist; Graal host inlining is on by default (\code{\verb~|TruffleHostInlining=true~}, base budget 5 000, explore budget 10 000, bytecode-interpreter budget 100 000, min call frequency 0.001). External evidence: Larose, Kaleba, Burchell, Marr, "AST vs. Bytecode: Interpreters in the Age of Meta-Compilation" (OOPSLA 2023, doi:10.1145/3622808): on GraalVM and RPython, AST and bytecode interpreters are on par after JIT, AST is on par or slightly faster interpreter-only, bytecode is more compact.}
+
+\p{Consequence for RLVM: T0's speed must come from ordinary Java engineering (monomorphic switch, no boxing, fixed-arity apply entries, few objects per step), not from Truffle. If a Truffle tier-0 is ever reconsidered, the only candidate is a Bytecode-DSL \em{uncached} interpreter, and Cadenza's current numbers say its bytecode backend is slower than its AST even when compiled.}
+}
+
+\subtree{
+\title{8. Cadenza: NbE on Truffle nodes and frames (item 8)}
+
+\ul{
+\li{\strong{Values} (\code{\verb~|cadenza/src/cadenza/data/~}): \code{\verb~|Closure~}, \code{\verb~|int~}, \code{\verb~|boolean~}, \code{\verb~|BigInt~}, \code{\verb~|Unit~}, and \code{\verb~|NeutralValue(type, Neutral)~} with \code{\verb~|Neutral = NIf(cond, then, else) | NCallBuiltin(builtin, args) | NApp(rator, rands)~} (\code{\verb~|nbe.kt:16-38,41-70~}); listed in the type system \code{\verb~|DataTypes.java~}. Neutrals carry their type (needed for arity).}
+\li{\strong{Two execute protocols on every node} (\code{\verb~|cadenza/src/cadenza/jit/code.kt:41-57~}): \code{\verb~|execute(frame)~} — the fast path, \code{\verb~|@Throws(NeutralException)~}, never \em{returns} a neutral; \code{\verb~|executeAny(frame) = try { execute(frame) } catch (e: NeutralException) { e.get() }~} — used wherever a value is merely transported (arguments, \code{\verb~|let~} right-hand sides, function results). \code{\verb~|NeutralException extends SlowPathException~} (\code{\verb~|NeutralException.kt:6~}), so PE compiles no handler code.}
+\li{\strong{Where neutrals are produced/consumed}: \code{\verb~|Var.execute~}/\code{\verb~|Arg.execute~} raise if the slot holds a \code{\verb~|NeutralValue~}, \code{\verb~|executeAny~} returns it as is (\code{\verb~|code.kt:110-115,201-215~}); \code{\verb~|App.execute~} on a neutral head evaluates the operands with \code{\verb~|executeAny~} and rethrows \code{\verb~|NApp~} (\code{\verb~|code.kt:92-102~}); over-application of a neutral result extends the spine (\code{\verb~|dispatch.kt:87,149~}); \code{\verb~|If~} on a neutral condition normalises \strong{both} branches (each under its own trampoline, since they are no longer tail positions) and throws \code{\verb~|NIf~} (\code{\verb~|code.kt:129-150~}); builtins with any neutral operand build \code{\verb~|NCallBuiltin~} (\code{\verb~|code.kt:240-272~}, \code{\verb~|nodes.kt:122-128~}).}
+\li{\strong{Closures and frames}: one \code{\verb~|ClosureRootNode~} per lambda; frame slots for parameters and for the used captures, copied in at entry (\code{\verb~|nodes.kt:190-198~}); environment = \code{\verb~|StaticShape~} object with a primitive and an object arm per \code{\verb~|Nat~}/\code{\verb~|Bool~} capture (\code{\verb~|cadenza/src/cadenza/frame/capture_layout.kt:45-104~}). Evaluation is \strong{call-by-value}; there are no thunks (\code{\verb~|cadenza/TODO.md~}: "Eventual laziness or CBPV").}
+\li{\strong{Missing half}: no \code{\verb~|quote~}, no fresh variables, no conversion check; neutrals are injected only by tests/interop (\code{\verb~|cadenza/test/neutral.kt:26-27~}). The README still says the package "will eventually provide" NbE. The bytecode backend "targets closed terms with concrete runtime values" (\code{\verb~|cadenza/docs/bytecode.md~}).}
+\li{\strong{Lessons}: (1) the exceptional-neutral design is right exactly when neutrals are rare — true for a closed-term accelerator, false for a type checker; (2) a single evaluator cannot serve both without paying on one side (§6.2); (3) under a binder, "tail position" stops being tail position (the \code{\verb~|If~} case), so symbolic evaluation needs its own control structure; (4) the closure/PAP/dispatch design is independent of the neutral question and can be reused as is.}
+}
+}
+
+\subtree{
+\title{9. HOAS/NbE on the JVM: what the two normalization-bench repos add}
+
+\p{(Full treatment: sibling document \src{docs/research/09-nbe-hoas-tricks.md}; only the JVM-relevant points here.)}
+
+\ul{
+\li{\code{\verb~|normalization-bench-kovacs/scala/normalization-bench/HOAS.scala~} is 170 lines of deep HOAS (\code{\verb~|VLam(t: Val => Val)~}). With \code{\verb~|-Xss1000M -Xmx4G~} on OpenJDK 8 it matches GHC HOAS on tree benchmarks (Tree 2M normalisation 85 ms vs 86 ms; Tree 8M conversion 625 vs 723 ms) and collapses on deep ones (Nat 10M normalisation 3 908 ms vs 227 ms; GraalVM 21 as JIT: 5 833 ms) (\code{\verb~|normalization-bench-kovacs/README.md:94-105~}). Author's remarks: Scala/nodejs "performance becomes dismal without free RAM", occasional multi-second GC pauses and OOM kills; all JIT entries are CBV and "CBN is essential for type checking … there is a good chance that CBN would be a significant performance hit" (\code{\verb~|README.md:158-172~}); conclusion "At the moment it does not seem worth to write high-performance proof assistant implementation in any of the JIT languages" (\code{\verb~|README.md:182-190~}).}
+\li{\code{\verb~|normalization-bench-guest0x0/README.md~} (OCaml): closures-with-environment and HOAS perform the same (\code{\verb~|:387-393~}); linked-list environments beat trees and skew lists (\code{\verb~|:366-386~}); the abstract machine with heap-allocated continuations has "a stable constant overhead" over recursive NbE (\code{\verb~|:400-408~}); for machines, inlining the continuation's tail into each frame object beats list or array stacks (\code{\verb~|:613-652~}); compiling terms to host code is fast to run but "the overly long compilation time renders these efficient approaches impractical for most everyday type checking, where the amount of computation is small but term sizes are large" (\code{\verb~|:729-731~}); "data layout in memory seems to have a very significant effect … one less indirection means more performance" (\code{\verb~|:733-737~}).}
+\li{Implications for RLVM \strong{\verb~|[~inference\verb~|]~}: (a) plain closures on the JVM are competitive when the stack is shallow and the heap roomy — both are scarce under a 16 GB / instruction-count regime, so depth control and allocation discipline come first; (b) the compile-time warning applies verbatim to Truffle PE.}
+}
+}
+
+\subtree{
+\title{10. Other Truffle (or meta-compiled) lazy/functional/proof-assistant implementations}
+
+\table{
+\tr{\th{Project}\th{What}\th{Transferable point}\th{Status of my check}}
+\tr{\td{\strong{Montuno} — J. Zárybnický, MSc thesis, Brno UT 2021, "Just-in-Time Compilation of the Dependently-Typed Lambda Calculus"}\td{λΠ dependently typed language; a plain Kotlin interpreter and a Truffle one compared on normalisation and elaboration tasks}\td{Abstract: "The results are strongly negative … the influence of JIT compilation is not noticeable given the large overhead of the JVM platform." Closest prior art to RLVM; supports §0.1–0.2}\td{abstract read (fit.vut.cz thesis 24198); thesis body not read}}
+\tr{\td{\strong{Enso} (enso-org/enso)}\td{functional, Truffle}\td{source of Cadenza's trampoline (\code{\verb~|LoopingCallOptimiserNode~}); \code{\verb~|TailCallException~} design}\td{only the Cadenza comment verified; Enso source not read}}
+\tr{\td{\strong{FastR} (R promises are thunks)}\td{lazy arguments on Truffle}\td{eager evaluation of cheap promise expressions under an assumption}\td{\verb~|[~unverified, from memory\verb~|]~}}
+\tr{\td{\strong{rpylean} (RPython, not Truffle)}\td{JIT-driven CEK machine for closed Lean terms only}\td{the scope RLVM's T2 should have; see doc 07 §1.10}\td{sibling doc}}
+\tr{\td{Larose et al., OOPSLA 2023}\td{AST vs bytecode on Truffle/RPython}\td{§7}\td{abstract-level}}
+\tr{\td{Mozart-Graal (Oz), Yona, shen-truffle, Horák 2023 thesis}\td{strict or dataflow functional languages on Truffle}\td{tail-call optimisation via exceptions/loop nodes}\td{search results only}}
+}
+
+\p{No Truffle implementation of Lean, Coq, Agda or Idris was found.}
+}
+
+\subtree{
+\title{11. Risks, and things not verified}
+
+\ul{
+\li{THC compile times in §6.3 include graph dumping; real Graal costs on the arena's x86-64 runner are unmeasured. The \code{\verb~|PROMOTE~} threshold and budget in §1.7 are derived, not measured.}
+\li{The fraction of Mathlib instructions spent in closed, repeatedly executed code (the only thing T2 can speed up) is unknown here; rpylean reports ~0–1.6\% effect of its JIT on library corpora (doc 07 §0.1). If RLVM's T0 profile says the same, T2 should stay switched off for the arena run.}
+\li{\code{\verb~|prepareForCompilation == false~} "defers" a root compilation; how often the runtime re-attempts and what each attempt costs was not measured.}
+\li{\code{\verb~|enableThreadedSwitch~}, \code{\verb~|enableTailCallHandlers~}, \code{\verb~|enableInstructionRewriting~} exist on \code{\verb~|@GenerateBytecode~} in 25.5.5.0.3; their semantics/effects were not examined.}
+\li{Whether \code{\verb~|-XX:-UseJVMCICompiler~} (C2 for host code, Graal only for Truffle) lowers total instructions for a short, Java-heavy run was not tested; with it, Graal host inlining of Truffle interpreter code is lost.}
+\li{THC history before 2026-09-28 was not fetched (\code{\verb~|--depth 500~}); the \code{\verb~|legacy~} branch is an unrelated 2015 C++ RTS. THC issues on GitHub were not read.}
+\li{Enso, FastR and the Montuno thesis body were not read; statements about them are limited as marked.}
+}
+}

@@ -1,0 +1,627 @@
+\title{05 - Leaders: Gruszka (NbE, \verb~|#~2), Pestka (substitution), Susz (binary export)}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{machine}
+\tag{loader}
+\tag{driver}
+\tag{soundness}
+\tag{performance}
+\meta{origin}{docs/research/05-leader-gruszka-pestka.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Scope: source-level deep dive of three repositories by the same author, read (not built, not run):}
+
+\table{
+\tr{\th{repo}\th{clone (refs/)}\th{arena rev}\th{clone HEAD read}\th{language}}
+\tr{\td{gruszka}\td{\code{\verb~|refs/gruszka~}}\td{\code{\verb~|ebc80dc~} (0.1.2)}\td{\code{\verb~|88aca33~} (2026-11-23)}\td{Rust, 19.2 k lines in \code{\verb~|src/~}}}
+\tr{\td{pestka}\td{\code{\verb~|refs/pestka~}}\td{\code{\verb~|cea66e6~}}\td{\code{\verb~|f42d35e~} (2026-11-24)}\td{Aver (compiles to Rust / wasm-gc), 32.9 k lines}}
+\tr{\td{susz}\td{\code{\verb~|refs/susz~}}\td{crate 0.1.4}\td{\code{\verb~|9fe3950~} (0.3.0, same file format "Susz 1")}\td{Rust}}
+}
+
+\p{All line numbers are at the clone HEAD. What HEAD has that the arena revs do not: gruszka milestone 52 (loop states), milestone 53 (derived rules, \code{\verb~|src/tc/rules.rs~}) and the \code{\verb~|blits~} fix; pestka decisions \code{\verb~|FieldReducedFirst~} and \code{\verb~|LossesCountAsHits~}. Everything else described is in the arena revisions. "Measured" numbers are quoted from the authors' docs, commit messages and \code{\verb~|decision~} blocks; I ran nothing. Items I could not verify are tagged \strong{\verb~|[~unverified\verb~|]~}.}
+
+\subtree{
+\title{0. Decision summary (read this first)}
+
+\ol{
+\li{\strong{Gruszka's whole design is "integers in flat arrays, nothing is ever built, everything is hash-consed, memos live inside the value record".} No heap objects per term or value, no reference counting, no GC: a worker frees memory by truncating arrays at the end of an 8 MiB \em{session}. Mathlib: 369 G instructions on 1 worker, 372 G on 4, 2.0-2.4 GB (M2 Pro, PGO); 445 G / 2.47 GB / 25.7 s on the arena's x86 runner including the ndjson->Susz conversion (\code{\verb~|refs/gruszka/README.md:227-248~}).}
+\li{\strong{The export is converted once to a binary columnar file and two thirds of it is never materialised globally.} Of mathlib's 105 M expressions, 67 M are reachable from exactly one theorem's proof; they stay as bytes and are decoded into a worker-local scratch arena only when that theorem is checked. Conversion of the 6.18 GB ndjson costs 32-35 G instructions (about 5.5 instructions/byte). Decoding the \em{whole} Susz file through the reader's visitor costs 13.6 G; Gruszka loads only MAIN (38 M expressions) in 1.24 s wall, instruction count not published (\code{\verb~|refs/susz/README.md:69-76,305-313~}, \code{\verb~|refs/gruszka/README.md:153-156~}).}
+\li{\strong{The same author's substitution kernel (Pestka) with every trick applied needs 1.07-1.11 T instructions for mathlib; the NbE kernel needs 0.37 T.} Same machine, same input, same "what not to compute" list. That 3x is the measured value of NbE + hash-consed values over locally-nameless substitution.}
+\li{\strong{Pestka compiled to wasm-gc on V8 (every term, map and closure a GC object) needs 5.78 T instructions and 11.3 GB for mathlib, 5.2x the native build} (\code{\verb~|refs/pestka/docs/benchmarks.md:99-125~}). This is the best available estimate of what an "objects everywhere" managed-runtime kernel costs on this workload. RLVM must not be that design.}
+\li{The "what not to compute" list is cheap to implement and each item is worth 1-10 \% (section 6): unread binder arguments never evaluated, proof arguments not compared, proofs recognised syntactically before inferring, casesOn/matcher go straight to the branch, congruence check after every delta step, failures cached.}
+\li{\strong{Cache reuse across declarations is the second big lever}: sessions that only move forward in file order, free variables named by their type so re-opened binders hit the caches, declarations grouped by namespace, contiguous chunks per worker. Pestka measured -9 \% (namespace order), -18..20 \% and a further -4..5 \% (variable naming) on mathlib slices; Gruszka measured -5 \% for contiguous parts vs round robin.}
+\li{The elaborate machinery for pathological declarations (regions, ghost keys, ground machine, the race of lazy-delta strategies, deep-work trampoline) exists for CFSG-scale certificates and adversarial tests. On Init/mathlib it is within 0.2-0.7 \% either way. RLVM should implement the reference order plus the cheap shortcuts first, and add budgets later only where the arena's perf tests require them.}
+\li{Build-level: PGO trained on Init at 1 worker is worth roughly -11 \% for Gruszka (419.9 G plain at 0.1.2 vs 372 G PGO in the README; the two figures come from different milestones, so approximate) and -12..15 \% for Pestka (stated directly); \code{\verb~|lto = "fat"~}, \code{\verb~|codegen-units = 1~}, \code{\verb~|target-cpu=native~}, mimalloc.}
+}
+
+\p{Budget implied for RLVM (x86 arena runner, instructions): 445 G total for the \verb~|#~2 place = about 35 G ndjson->Susz conversion + about 410 G for Gruszka itself (load + check; the split is not published). To beat it RLVM has about 400 G for \em{everything including JIT and GC}.}
+
+\p{Where each requested topic is covered:}
+
+\table{
+\tr{\th{topic}\th{Gruszka}\th{Pestka}}
+\tr{\td{architecture map, data flow}\td{2.1}\td{3.1}}
+\tr{\td{term / level / name representation, hash-consing}\td{2.2, 2.3}\td{3.1, 3.2}}
+\tr{\td{export parsing, intermediate format}\td{1 (Susz), 2.1}\td{1, 3.1}}
+\tr{\td{evaluation strategy, reductions, compiled forms}\td{2.4, 2.11 (rules)}\td{3.3}}
+\tr{\td{definitional equality order, lazy delta differences}\td{2.5, 2.6}\td{3.5}}
+\tr{\td{type inference, caches}\td{2.7}\td{3.4, 3.6}}
+\tr{\td{declaration admission}\td{2.8}\td{3.1, 3.7}}
+\tr{\td{parallelism, sessions, stamping}\td{2.9, 2.10}\td{3.7}}
+\tr{\td{memory management}\td{2.11}\td{3.6}}
+\tr{\td{build tricks}\td{2.12}\td{3.1, 3.8}}
+\tr{\td{optimisation history with numbers}\td{2.13}\td{3.3-3.8}}
+\tr{\td{what not to compute + soundness arguments}\td{4}\td{4}}
+\tr{\td{ranked tricks + JVM realisation}\td{5}\td{5}}
+\tr{\td{fragile / soundness-sensitive}\td{6}\td{6}}
+}
+}
+
+\subtree{
+\title{1. Susz: the binary export (\code{\verb~|refs/susz/docs/spec.md~})}
+
+\subtree{
+\title{1.1 Layout (Susz 1, normative sections 3-6)}
+
+\pre{\verb~|
+file      = header body trailer
+header    = "SUSZ\r\n\x1a\n" major:u16=1 reserved:u16 reserved:u32            ; 16 bytes
+body      = MAIN [PROOFS] [INDEX] SOURCE      ; sections tile the body exactly, no gaps
+trailer   = names:u32 levels:u32 exprs:u32 decls:u32          ; counts, hints only until verified
+            section-count:u32 { id:u16 flags:u16 reserved:u32 offset:u64 length:u64 }*   ; 24 B each
+            trailer-length:u32 "ZSUS"
+~}
+
+\p{Primitives: unsigned LEB128 varints (must be minimal, at most 10 bytes), \code{\verb~|bytes~} = varint length + data, \code{\verb~|nat~} = minimal little-endian base-256 digits (maps directly to bignum limbs; decimal would be quadratic), strings are strict UTF-8.}
+
+\p{MAIN is a stream of tagged records; ids are implicit and dense per kind (names from 1, levels from 1, expressions from 0, declarations from 0). Name and level fields hold ids; \strong{an expression field holds a back distance \code{\verb~|d~}} (the referenced expression is \code{\verb~|next_id - d~}), so references are small varints and can only point backwards.}
+
+\table{
+\tr{\th{tag}\th{record}\th{fields}}
+\tr{\td{1 / 2}\td{name str / num}\td{prefix name id, component (string / u64 varint)}}
+\tr{\td{3 4 5 6}\td{level succ / max / imax / param}\td{level ids / name id}}
+\tr{\td{7}\td{bvar}\td{index}}
+\tr{\td{8}\td{sort}\td{level}}
+\tr{\td{9}\td{const}\td{name, list of levels}}
+\tr{\td{10}\td{app}\td{fn back, arg back}}
+\tr{\td{11 / 12}\td{lam / forallE}\td{binder enum, name, type back, body back}}
+\tr{\td{13}\td{letE}\td{name, type, value, body}}
+\tr{\td{14 / 15}\td{natVal / strVal}\td{nat / string}}
+\tr{\td{16}\td{proj}\td{struct name, field index, expr back}}
+\tr{\td{18}\td{declaration}\td{kind 0 axiom, 1 definition, 2 theorem, 3 opaque, 4 quot, 5 inductive block, 6 theorem with proof block}}
+\tr{\td{19}\td{frontier entry}\td{kind (name/level/expr), back distance}}
+}
+
+\p{Dropped by packing: \code{\verb~|mdata~} (references are redirected to the wrapped expression), \code{\verb~|letE.nondep~}, the export's own numeric ids. Declaration order is preserved exactly; it alone defines "declared before".}
+}
+
+\subtree{
+\title{1.2 How "terms are never built" works}
+
+\ul{
+\li{\strong{Ownership split (packer).} An expression reached only from one theorem's value (directly or through other such expressions) is written into \em{that theorem's proof block} in section PROOFS; every other expression stays in MAIN. The packer computes this with one backward walk over an \code{\verb~|owner:u32~} column (\code{\verb~|refs/susz/src/pack/write.rs:1-10~}). Mathlib: 38 M MAIN expressions, 67 M block expressions in 452 k blocks.}
+\li{\strong{Frontier.} A block may reference MAIN items only through the \em{frontier}: tag-19 records in MAIN list, right after the item they name, every name/level/expression some block needs. Inside the block of theorem T: a name or level field is a frontier index; an expression reference \code{\verb~|r~} from the block's expression \code{\verb~|k~} means block expression \code{\verb~|k - r~} if \code{\verb~|1 <= r <= k~}, otherwise frontier expression \code{\verb~|r - k - 1~}. Frontier indices must have been listed before T's declaration record. So a block is decodable with only the three frontier tables and is position independent.}
+\li{\strong{Kind-6 declaration record} carries \code{\verb~|block-length~} and \code{\verb~|block-exprs~}; blocks are laid out consecutively in PROOFS in declaration order, so a block's offset is a prefix sum computed while reading MAIN.}
+\li{\strong{Rule P}: every \code{\verb~|const~}/\code{\verb~|proj~} name inside T's block must be declared before T (compared by name value). This is what makes out-of-order (namespace-grouped) checking sound without per-block marks.}
+\li{\strong{Reader contract}: nothing in the file is trusted; no hashes, loose-bvar ranges or flags are stored; every count/offset is re-derived. Declared names must be unique (structural rule).}
+\li{\strong{Gruszka's use}: MAIN expressions become rows of a 16-byte node column whose index \em{is} the Susz id (section 2.2). A kind-6 theorem keeps only a \code{\verb~|BlockRef~}. When a worker checks the theorem (or unfolds it) it calls \code{\verb~|susz::read::decode_block~} with a closure that appends the block's nodes to the worker's block arena at ids \code{\verb~|m + len~} (\code{\verb~|refs/gruszka/src/tc.rs:5000-5040~}), computes range and used-mask per node from its children, and uses the last node as the proof term. When the session ends the arena is truncated. No expression is ever interned, hashed or copied; the "term" a closure refers to is a \code{\verb~|u32~}.}
+}
+}
+
+\subtree{
+\title{1.3 The ndjson packer (what a competitive parser looks like)}
+
+\p{\code{\verb~|refs/susz/src/pack/{lines,par,pk,write}.rs~}:}
+
+\ul{
+\li{Reads the file in 16 MiB chunks cut at newlines; never holds the text.}
+\li{\strong{Positional parsing of the canonical line shapes lean4export writes}, generic JSON parser only as a fallback: 8-byte unaligned loads compared against literal key strings (\code{\verb~|lit~}), SWAR digit parsing 8 digits at a time (\code{\verb~|digits8~}, \code{\verb~|num~}), strings scanned 8 bytes at a time for \code{\verb~|"~}, \code{\verb~|\~}, newline (\code{\verb~|plain_str~}), and \strong{the line's own id is compared against the expected next id as ASCII digits instead of being parsed} (\code{\verb~|Dg~}, \code{\verb~|lines.rs:11-200~}).}
+\li{\strong{Parallel}: the file is cut into \code{\verb~|threads~} ranges at newlines; each worker parses its range \em{assuming ids are dense} and writes columns at global ids into one shared allocation; a merge verifies the assumption range by range and falls back to a single-threaded parse if it fails (\code{\verb~|par.rs:1-10~}).}
+\li{State held: 1 kind byte + two u32 children + one u32 owner per expression (13 bytes x 105 M for mathlib; peak footprint 1.6-1.8 GB, max RSS 2.0-2.3 GB); finished columns are \code{\verb~|madvise~}d away as it goes.}
+\li{Cost, mathlib 6.18 GB -> 637 MB (M2 Pro): 1 thread 5.1 s / 34.0 G instr; 4 threads 2.2 s / 34.4 G; \code{\verb~|--no-index~} 31.9-32.4 G; cold cache 29-32 s. Susz is 10x smaller than ndjson.}
+\li{Reader fast paths (0.1.1): varints of 2-8 bytes with one 8-byte load, common records read from a fixed window with unchecked loads and re-read by the checked reader only when a check fails; \code{\verb~|verify~} of mathlib 8.1 G instr, \code{\verb~|decode~} with a visitor 13.6 G (5 G of it the visitor).}
+}
+}
+}
+
+\subtree{
+\title{2. Gruszka}
+
+\subtree{
+\title{2.1 Architecture map}
+
+\table{
+\tr{\th{file}\th{lines}\th{content}}
+\tr{\td{\code{\verb~|src/main.rs~}}\td{826}\td{CLI, mmap, namespace order, worker threads, verdict}}
+\tr{\td{\code{\verb~|src/env.rs~}}\td{1304}\td{Susz -> columns, constants table, known names, address-space regions, \code{\verb~|Slab~}}}
+\tr{\td{\code{\verb~|src/level.rs~}}\td{423}\td{level interner (global + per-worker layer), \code{\verb~|max~}/\code{\verb~|imax~} simplification, normalize, equiv, geq, subst}}
+\tr{\td{\code{\verb~|src/tc.rs~}}\td{9210}\td{\code{\verb~|Worker~}: values, eval, whnf, defeq, infer, sessions, declarations}}
+\tr{\td{\code{\verb~|src/tc/spines.rs~}}\td{319}\td{spines as slices, hash-consed neutral values}}
+\tr{\td{\code{\verb~|src/tc/frames.rs~}}\td{164}\td{pruned environments ("frames") hash-consed by content}}
+\tr{\td{\code{\verb~|src/tc/names.rs~}}\td{369}\td{"names": substituted-term ids, only in heavy declarations}}
+\tr{\td{\code{\verb~|src/tc/region.rs~}}\td{1498}\td{in-declaration memory give-back}}
+\tr{\td{\code{\verb~|src/tc/ground.rs~}}\td{2337}\td{call-by-need machine for closed computations past 2^26 values}}
+\tr{\td{\code{\verb~|src/tc/rules.rs~}}\td{867}\td{derived rules (HEAD only)}}
+\tr{\td{\code{\verb~|src/induct.rs~}}\td{1553}\td{inductive blocks, nested inductives, recursor regeneration}}
+\tr{\td{\code{\verb~|src/quot.rs~}}\td{183}\td{quotient package}}
+\tr{\td{\code{\verb~|src/nat.rs~}}\td{113}\td{thin layer over \code{\verb~|num-bigint~}}}
+}
+
+\p{Data flow: \code{\verb~|scripts/arena-run~} runs \code{\verb~|susz pack --no-index $IN tmp~} (exit 1 -> rejected, other failure -> declined), then \code{\verb~|gruszka tmp 4~}. \code{\verb~|main~}: mmap file -> \code{\verb~|env::load_part~} (one pass of \code{\verb~|susz::read::decode~} with a visitor that pushes nodes; blocks are \em{not} opened) -> level interning, level-list canonicalisation, name->row table (parallel chunks) -> \code{\verb~|Region::layout~} -> \code{\verb~|remap~} (re-mmap the file over itself so the pages copied into columns stop counting as RSS; repeated once a second while workers read blocks, \code{\verb~|main.rs:60-84,587-604~}) -> namespace order -> worker threads (\code{\verb~|check_decl~} per declaration under \code{\verb~|catch_unwind~}) -> first non-OK status in file order is the verdict (\code{\verb~|main.rs:802-825~}).}
+}
+
+\subtree{
+\title{2.2 Term / level / name representation}
+
+\p{\strong{Term node} (\code{\verb~|env.rs:36-61~}), 16 bytes, \code{\verb~|repr(C)~}: \code{\verb~|a:u32, b:u32, p:u32, rng:u16, kind:u8, pad:u8~}.}
+
+\table{
+\tr{\th{kind}\th{a}\th{b}\th{p}}
+\tr{\td{BVAR 0}\td{-}\td{-}\td{de Bruijn index}}
+\tr{\td{SORT 1}\td{-}\td{-}\td{global level id}}
+\tr{\td{CONST 2}\td{name id}\td{-}\td{offset of level list in side table (0 = empty)}}
+\tr{\td{APP 3}\td{fn}\td{arg}\td{-}}
+\tr{\td{LAM 4..7, PI 8..11 (kind + binder info)}\td{type}\td{body}\td{binder name id}}
+\tr{\td{LET 12}\td{type}\td{value}\td{index into \code{\verb~|lets~} side table (name, body)}}
+\tr{\td{NAT 13 / STR 14}\td{-}\td{-}\td{literal table index}}
+\tr{\td{PROJ 15}\td{struct expr}\td{field index}\td{structure name id}}
+}
+
+\p{Per node, parallel columns: \code{\verb~|rng~} = 1 + largest loose bvar index (0 = closed; >= 65535 declines) and a \strong{used mask} \code{\verb~|u64~} (bit i = loose bvar \verb~|#~i occurs, i < 63; bit 63 = some index >= 63), plus a second word only for range > 63 covering \verb~|#~63..\verb~|#~125 (\code{\verb~|env.rs:471-506~}). Both are computed bottom-up while pushing (\code{\verb~|push_expr~}, \code{\verb~|env.rs:516-617~}); \code{\verb~|used_bind~} shifts the mask when leaving a binder. The mask being \em{exact} below 63 is what the skip rules (2.4, 6) rely on.}
+
+\p{De Bruijn indices throughout; no locally-nameless instantiation ever happens. Binder names/infos are kept in the node but never read for typing (binder info is read only by a heuristic that decides whether an argument probe is worth trying, \code{\verb~|explicit_mask~}).}
+
+\p{\strong{One address range for all terms} (\code{\verb~|env.rs:63-215~}): 64 GiB (nodes) + 32 GiB (masks) + 32 GiB are reserved with \code{\verb~|mmap(MAP_NORESERVE)~}; node \code{\verb~|t~} is at \code{\verb~|base + 16 t~} for MAIN \em{and} every worker's block arena, so a term read is one unchecked load. Ids: MAIN \code{\verb~|[0, main_len)~}, then two overflow arenas, then two slabs (session, scratch) per worker, all below 2^31.}
+
+\p{\strong{Names} stay Susz name ids; \code{\verb~|st.name_canon[id]~} gives a canonical id (equal by value); a dense \code{\verb~|row_of_name: Vec<u32>~} maps any name id to a constant row. Known names (\code{\verb~|Nat~}, \code{\verb~|Nat.zero~}, \code{\verb~|Nat.succ~}, 14 Nat operations, \code{\verb~|Nat.log2~}, \code{\verb~|String~}, \code{\verb~|String.ofList~}, \code{\verb~|List.*~}, \code{\verb~|Char~}, \code{\verb~|Char.ofNat~}, \code{\verb~|Bool.*~}, \code{\verb~|Eq~}, \code{\verb~|Eq.refl~}, \code{\verb~|Quot.*~}) are found once by path lookup (\code{\verb~|env.rs:1192-1263~}). \code{\verb~|nat_op: Vec<u8>~} per constant row.}
+
+\p{\strong{Levels} (\code{\verb~|level.rs~}): triples \code{\verb~|(kind:u8, a:u32, b:u32)~} interned in a global table at load, with a per-worker layer on top; \code{\verb~|max~}/\code{\verb~|imax~} constructors simplify as Lean's \code{\verb~|mk_max~}/\code{\verb~|mk_imax~}; \code{\verb~|normalize~} memoised per level id; \code{\verb~|equiv~} = equal ids or equal normal forms; \code{\verb~|zeroish~} = syntactic "is Prop for every assignment". Level lists of CONST nodes are canonicalised by content at load so a list is named by its side-table offset (\code{\verb~|env.rs:1119-1157~}).}
+
+\p{\strong{Universe instantiation is lazy.} A closure carries \code{\verb~|ls: u32~}, an interned pair (parameter-name class of the constant, level list); \code{\verb~|ls = 0~} is the identity. Levels are substituted only when a SORT or CONST node is evaluated (\code{\verb~|lsub~}, direct-mapped 2^12 cache + map, \code{\verb~|tc.rs:2369-2414~}). The identity substitution (constant used at its own parameters) is mapped to \code{\verb~|ls = 0~} so those terms share everything known at \code{\verb~|ls = 0~} (\code{\verb~|mk_ls~}, \code{\verb~|tc.rs:2318-2352~}).}
+
+\p{\strong{Constants}: \code{\verb~|ConstInfo { name, lparams, ty, decl, group, kind }~} in a \code{\verb~|Vec~}; visibility test at every lookup and delta step: \code{\verb~|c.decl < cur_decl || (c.decl == cur_decl && c.group < self_vis)~} (\code{\verb~|tc.rs:3215~}).}
+}
+
+\subtree{
+\title{2.3 Values, environments, spines and their hash-consing}
+
+\pre{\verb~|
+type V = u32;                                   // index into the worker's `vals` slab
+enum Head { FVar(u32), Const(row, level_list_ref), Stuck(V) }
+enum Val {                                      // 16 bytes
+    Sort(level), Lit(lit_index),
+    Clo  { term, env, ls },                     // lambda or Pi term + environment + level subst
+    CloI { term, env, ls },                     // "the type of this lambda" (lazy Pi, see 2.6)
+    Neu  { head, spine },                       // fvar / constant / stuck value applied to elims
+    Thunk{ term, env, ls },                     // delayed argument
+}
+struct Memo { whnf: u32,   // thunk: forced value; other: whnf
+              core: u32,   // whnf_core result; bit 30 = "full" (else cheap-projection form)
+              infer: u32,  // type of the value
+              uf: u32 }    // bits 0..29 unfolding (NONE / "does not unfold"), bits 30..31 has_fvar tri-state
+struct Rec { v: Val, m: Memo }                  // 32 bytes: value and its memos in one cache line
+~}
+
+\p{(\code{\verb~|tc.rs:523-541, 600-618, 691-699~}.) Value ids are < 2^28 per session.}
+
+\ul{
+\li{\strong{Every value is hash-consed} (\code{\verb~|intern~}, \code{\verb~|tc.rs:2518-2596~}): key = two u64 words packing \code{\verb~|(tag, a, b, c)~} (\code{\verb~|vkey~}); table \code{\verb~|vmap: HashMap<(u64,u64), V>~} with FxHash. Fast paths before the map: sorts through \code{\verb~|stab[level]~}, constants without arguments through \code{\verb~|ktab[row]~} (both generation-stamped direct tables). One \code{\verb~|entry()~} probe finds or inserts.}
+\li{\strong{Neutral values with a spine} are hash-consed as a whole in \code{\verb~|Spines~} (\code{\verb~|spines.rs~}): spine storage is one \code{\verb~|u32~} slab of \code{\verb~|[len|flags, elim...]~}, an elim is a value id or \code{\verb~|0x8000_0000 | proj_index~}; the table is open addressing with linear probing over \code{\verb~|(hash tag, value id)~}; head + all elims are hashed once ("one probe per neutral, where cons cells took one probe per cell"). Flags cache "has a projection" and "an argument has a free variable".}
+\li{\strong{Environments} (\code{\verb~|tc.rs:2629-2816~}): env id -> \code{\verb~|(start, len, frame_mask)~} in \code{\verb~|eloc~}; entries live in one \code{\verb~|eslots: Slab<u32>~} oldest first; \code{\verb~|env_get(env, i) = eslots[start + len - 1 - i]~} (one load). \code{\verb~|push_env~} is hash-consed by key \code{\verb~|(value << 32 | parent_env)~}; if the parent's run ends at the top of \code{\verb~|eslots~} it is extended in place, otherwise the run is copied to the top first.}
+\li{\strong{Pruning} (\code{\verb~|prune~}, \code{\verb~|tc.rs:2708-2802~}): before a closure or thunk is made, its environment is cut to the entries its term reads (\code{\verb~|used_mask & ((1 << rng) - 1)~}); unread entries become \code{\verb~|HOLE~}; the frame is hash-consed \em{by content} (\code{\verb~|FrameTab~}), with a direct-mapped \code{\verb~|(env, mask) -> frame~} cache in front. A closed term gets \code{\verb~|EMPTY~}. Consequence: two closures over environments that differ only where the term never looks are the same value id.}
+\li{\strong{Canonical first-order applications} (\code{\verb~|canon_app~}, \code{\verb~|tc.rs:3454-3580~}): a delayed argument that is an application whose head is a visible constant or a bound variable holding a neutral value is not made a \code{\verb~|Thunk~}; it is made the \code{\verb~|Neu~} value it would evaluate to (no reduction is involved), arguments recursively. Equal substituted terms reached through different bodies become one id. Direct-mapped memo \code{\verb~|cdm~} keyed \code{\verb~|(term, env, ls)~}, 2^14 slots.}
+\li{\strong{What sharing buys}: \code{\verb~|defeq(a, b)~} starts with \code{\verb~|a == b~}; every route to a computation shares its forced value, whnf, whnf_core, unfolding and type. The doc states that without it "two unfoldings of the same definition produce equal but separate graphs ... In Init, that was the difference between seconds and divergence" (\code{\verb~|docs/architecture.md:105-113~}).}
+\li{\strong{Direct-mapped, generation-stamped side tables} (lossy; reset in O(1) by bumping \code{\verb~|cgen~}, \code{\verb~|tc.rs:1981-1997~}): \code{\verb~|cdm~} 2^14, \code{\verb~|pdm~} 2^14, \code{\verb~|udm~} 2^14 (used-entry ids), \code{\verb~|tdm~} 2^13 (structural comparison pairs), \code{\verb~|lam_dm~} 2^12, \code{\verb~|cll_dm~} 2^12, \code{\verb~|lsub_dm~} 2^12, \code{\verb~|tnp_dm~} 2^12. Sized for L2: shrinking \code{\verb~|cdm~} from 2^16 to 2^14 gave cycles -4..-5 \% for +0.2..0.3 \% instructions at 4 workers (\code{\verb~|tc.rs:9131-9135~}).}
+}
+}
+
+\subtree{
+\title{2.4 Evaluation (\code{\verb~|tc.rs:3222-3758~})}
+
+\p{Call-by-need NbE with defunctionalised closures. Pseudo-code of the hot loop:}
+
+\pre{\verb~|
+eval(t, env, ls):                         # iterative in tail positions, one tick per iteration
+  BVAR i   -> env_get(env, i)
+  SORT l   -> intern(Sort(lsub(l, ls)))
+  CONST c  -> decline if not visible; intern(Neu(Const(row, const_ll(t, ls)), EMPTY))
+  LAM/PI   -> intern(Clo(t, prune(t, env), ls))
+  NAT/STR  -> literal value (small Nats shared by value)
+  PROJ     -> proj_val(eval(struct), idx)          # appends a projection elim to a neutral spine
+  LET      -> env' = push_arg(value, env, ls, env, body); continue with body   # zeta by sharing
+  APP      -> push all argument *term ids* on a shared argstack, f = head
+              fv = eval(f)
+              loop over args:
+                fv = force(fv)
+                if fv is Clo(lam):        # walk the lambda telescope as (term, env) pairs:
+                    e2 = push_arg(arg_i, env, ls, cenv, body)   # NO closure value per lambda
+                    if body is a lambda: continue with (body, e2)
+                    if last arg: tail-call eval(body, e2, cls)
+                    else fv = eval(body, e2, cls)
+                elif fv is Neu:  return neu(head, spine ++ thunks of remaining args)   # one value
+                else: fv = apply(fv, thunk(arg_i))
+
+push_arg(a, aenv, ls, env, body):         # tc.rs:2619
+  if rng(body) == 0:            return EMPTY          # closed body: no environment at all
+  if used_mask(body) & 1 == 0:  return push_env(HOLE, env)   # argument never read: never evaluated
+  return push_env(thunk(a, aenv, ls), env)
+
+thunk(t, env, ls):                        # tc.rs:3381
+  BVAR -> env_get;  leaves and binders -> eval_node (already values)
+  APP  -> canon_app(...) if applicable else intern(Thunk(t, prune(t, env), ls))
+force(v): if Thunk: memo.whnf or (eval(term, env, ls) then store)            # memoised, shared by id
+~}
+
+\ul{
+\li{\code{\verb~|beta_from~} (\code{\verb~|tc.rs:3732~}) applies a lambda to already-made values the same way (used by iota and unfolding): lambdas are peeled as (term, env) pairs, only the result is a value (Pestka's \code{\verb~|RuleLambdasAtOnce~}).}
+\li{\strong{Delta} (\code{\verb~|unfold~}, \code{\verb~|tc.rs:5063-5133~}): memoised in the value record. Unfolds definitions of any hint and theorems (a theorem's block is decoded on demand, \code{\verb~|decl_value~}), never opaques/axioms; requires as many levels as parameters and no projection in the spine. Before plain beta of the body it tries \code{\verb~|cases_direct~} then \code{\verb~|match_direct~}. A Nat operation without free variables is computed instead of unfolded.}
+\li{\strong{casesOn direct} (\code{\verb~|cases_shape~}, \code{\verb~|cases_direct~}, \code{\verb~|tc.rs:4596-4846~}): a definition is recognised \em{by the shape of its value}, not its name: \code{\verb~|np + 1 + ni + 1 + nm~} lambdas over the recursor (one motive, at the definition's own levels) applied to them in recursor order, each minor wrapped as \code{\verb~|fun fields ihs => minor_j fields~}. Then: bring only the major premise to a constructor (\code{\verb~|rec_rule~}), apply that constructor's minor to the fields and the remaining arguments. The motive and the other minors are never touched. K-like recursors are excluded. The per-constant result is cached in a shared atomic byte array.}
+\li{\strong{Matcher direct} (\code{\verb~|match_shape~}, \code{\verb~|match_direct~}, \code{\verb~|tc.rs:4722-4822~}): a definition whose body under its lambdas is an application of a casesOn-shaped constant: build the environment from the arguments, evaluate \em{only} the major-premise argument term and, after \code{\verb~|rec_rule~}, \em{only} the chosen alternative.}
+\li{\strong{whnf_core} (\code{\verb~|tc.rs:4333-4475~}): loop of head steps: projection (structure reduced by full \code{\verb~|whnf~}, or by \code{\verb~|whnf_core~} only in the \em{cheap} mode used first by defeq; a structure that does not reach a constructor leaves the projection untouched), recursor iota, \code{\verb~|Quot.lift~}/\code{\verb~|Quot.ind~}. Result memoised (cheap and full share one word; a full result answers a cheap query, never the reverse).}
+\li{\strong{iota} (\code{\verb~|iota~}, \code{\verb~|rec_rule~}, \code{\verb~|tc.rs:4515-4588~}): major index = params + motives + minors + indices; K-like: \code{\verb~|to_ctor_when_k~} (infer major's type, whnf, build the nullary constructor at the type's params, check its type is defeq); else structure eta \em{before} reducing the major (\code{\verb~|to_ctor_when_structure~}, only when the recursor eliminates into every sort, lean4\verb~|#~15351/\verb~|#~15371); then \code{\verb~|whnf(major)~}; Nat literal -> \code{\verb~|Nat.zero~} / \code{\verb~|Nat.succ (n-1)~}; string literal -> \code{\verb~|String.ofList [Char.ofNat ..]~}; rule looked up by constructor name; \code{\verb~|rhs~} beta-applied to params, motives, minors, the last \code{\verb~|nfields~} constructor args and the arguments after the major.}
+\li{\strong{whnf} (\code{\verb~|tc.rs:5138-5192, 5487-5511~}): \code{\verb~|loop { c = whnf_core(t); if reduce_nat(c) -> done; match unfold(c) { Some(u) => t = u, None => done } }~}, result memoised on the original value.}
+\li{\strong{Nat literals} (\code{\verb~|reduce_nat~}, \code{\verb~|tc.rs:4277-4327~}): 14 binary operations + \code{\verb~|succ~} + \code{\verb~|log2~} on \code{\verb~|BigUint~} after \code{\verb~|whnf~} of the operands; first operand must be a literal before the second is forced; results over 128 MiB reject (Lean's \code{\verb~|LEAN_NAT_MAX_SIZE~}). Small Nats are interned by value (\code{\verb~|nat_map~}), big ones by a content key (length + 3 limbs, confirmed by comparison).}
+\li{No special compiled form for \code{\verb~|brecOn~}/\code{\verb~|below~}/well-founded recursion at the arena rev; HEAD adds derived rules (2.11).}
+}
+}
+
+\subtree{
+\title{2.5 Definitional equality: exact order}
+
+\p{\code{\verb~|defeq(a, b)~} (\code{\verb~|tc.rs:6509-6754~}):}
+
+\ol{
+\li{\code{\verb~|a == b~} -> true (inlined at call sites).}
+\li{tick; same \code{\verb~|(term, env, ls)~} identity for thunks/closures -> true.}
+\li{inside a budgeted attempt: if the pair is marked "undecided with at least this much budget" -> stop the attempt now (never an answer).}
+\li{\code{\verb~|eq_cache~} hit: \code{\verb~|HashMap<ordered (V,V) as u64, u8>~} holding \strong{both outcomes} for the session.}
+\li{both sides closed MAIN thunks/closures: cross-declaration table \code{\verb~|eqp~} (true results only, stamped with the declaration that found it, used only if \code{\verb~|stamp < cur_decl~}).}
+\li{\code{\verb~|closure_congr~}: bounded structural walk (\code{\verb~|same_val~}, fuel 16384 nodes) comparing terms node by node with bound variables looked up in the environments, neutral spines elementwise, forced thunks by value; only \code{\verb~|true~} decides; decided structural differences are cached as a separate bit. Skipped for two lambdas of different terms (cost 0.4-0.75 \% and decided little) and, after 400 k wasted nodes in a declaration, for same-head neutral pairs.}
+\li{heavy declarations only (1 M values or 10 k unfoldings): "names" (2.9).}
+\li{\code{\verb~|defeq_core~}; cache the outcome.}
+}
+
+\p{\code{\verb~|defeq_core(a, b)~} (\code{\verb~|tc.rs:7224-7292~}):}
+
+\ol{
+\li{force both; \code{\verb~|quick~}: sorts by level equivalence; literals by content; lambda/lambda or Pi/Pi by \code{\verb~|binder_defeq~} (domains, then bodies under one shared fresh variable) - final.}
+\li{\em{ProofsComparedBeforeReduced}: if either side is a recursor applied at least to its major whose motive ends in \code{\verb~|Sort 0~} at these levels (read syntactically from the recursor's type), answer \code{\verb~|defeq(infer(a), infer(b))~} - final.}
+\li{\code{\verb~|whnf_core~} with cheap projections on both; if anything changed: \code{\verb~|quick~} again, then structural \code{\verb~|quick_parts~} (only true decides).}
+\li{proof irrelevance (\code{\verb~|proof_irrel~}, \code{\verb~|tc.rs:7499~}): skipped if \code{\verb~|a~} is a sort, literal or Pi, or \code{\verb~|surely_not_proof(a)~} (syntactic: the head constant's/variable's declared type past \code{\verb~|n~} Pis ends in a sort, or in a family whose sort is never zero at any levels; projections read the field's type in the constructor); otherwise infer \code{\verb~|a~}'s type, and if it is a Prop the answer is \code{\verb~|defeq(type a, type b)~}.}
+\li{\code{\verb~|lazy_delta~} (2.6) -> decided, or the stuck pair \code{\verb~|(a2, b2)~}.}
+\li{\code{\verb~|proj_eq~}: both sides end in the same projection field: with trailing arguments, \code{\verb~|whnf_core~} first and compare the results if either changed, else compare projection prefixes then arguments; bare projections: \code{\verb~|lazy_delta_proj~} on the two structures, then \strong{only the asked field} (constructor field vs constructor field, or field vs projection of the other side).}
+\li{otherwise \code{\verb~|defeq_app~}: same fvar / same constant with equivalent levels / stuck heads, spines pairwise (with proof positions skipped for constant heads).}
+\li{full \code{\verb~|whnf_core~} of both; if anything changed, restart \code{\verb~|defeq~}.}
+\li{lambda eta (both directions); structure eta (\code{\verb~|try_eta_struct~}: types equal, then fields against projections, proof fields skipped); string literal vs \code{\verb~|String.ofList~} application; unit-like types (structure with zero fields: equal iff types equal); else \code{\verb~|false~}.}
+}
+
+\p{Deviation from the reference order as I recall it \strong{\verb~|[~unverified against lean4 source here\verb~|]~}: the reference retries full \code{\verb~|whnf_core~} before application congruence; Gruszka tries congruence first. Sound (a \code{\verb~|true~} from congruence is a \code{\verb~|true~}; a \code{\verb~|false~} falls through).}
+}
+
+\subtree{
+\title{2.6 Lazy delta: the reference loop and every deliberate difference}
+
+\p{Reference loop R (\code{\verb~|lazy_delta_loop~}, \code{\verb~|delta_step~}, \code{\verb~|tc.rs:8043-8229~}), per iteration:}
+
+\ol{
+\li{both sides \code{\verb~|Nat.succ x~} / non-zero literal -> compare predecessors (final); both zero -> true.}
+\li{if \strong{neither side has a free variable} (per-value memoised \code{\verb~|has_fvar~}, exact: counts only environment entries the term reads): \code{\verb~|reduce_nat(a)~} -> \code{\verb~|defeq(result, b)~} final; same for \code{\verb~|b~}.}
+\li{\p{\code{\verb~|delta_step~}: neither unfolds -> stuck. Only one unfolds: if the \em{other} is a projection application that \code{\verb~|whnf_core~} reduces, do that instead; else unfold + cheap \code{\verb~|whnf_core~}. Both unfold: abbrev first, then the greater height, opaque (theorems) last. Equal hints and same constant:}
+\ul{
+\li{regular definition: unless this pair's arguments were already found different (\code{\verb~|EQ_ARGS_NO~} bit), levels equivalent and \code{\verb~|args_refuted~} false -> \code{\verb~|spines_defeq_skip(unfold = true)~} -> equal; else record the failure;}
+\li{non-regular (abbreviation/instance/projection function): \code{\verb~|probe_args~} under 1024 ticks, only when \code{\verb~|probe_worth~} (shape heuristics: projection functions and instances yes; eliminator-like bodies only when every differing pair is neutral/neutral or closure/closure); then unfold both, cheap \code{\verb~|whnf_core~}.}
+}}
+\li{\code{\verb~|quick~}, then \code{\verb~|quick_parts~}; loop.}
+}
+
+\p{Differences from the reference (all change order or add shortcuts; none adds a reduction rule):}
+
+\table{
+\tr{\th{\verb~|#~}\th{where}\th{what}\th{status of a negative result}}
+\tr{\td{D1}\td{\code{\verb~|defeq_core~} step 2}\td{recursor-into-Prop proofs compared by type before \code{\verb~|whnf_core~}}\td{final (same as proof irrelevance)}}
+\tr{\td{D2}\td{\code{\verb~|lazy_delta~} (\code{\verb~|tc.rs:7637~})}\td{\strong{race}: round 0 = R alone under \code{\verb~|RACE_B0 = 4096~} ticks. If it runs out: rounds with doubling budgets of K, M, N, then R resumed where it stopped. Once K and M are out R continues unbudgeted}\td{only R may answer "different"}}
+\tr{\td{D2-K}\td{\code{\verb~|race_k~}}\td{common head: each differing argument pair under an equal share (last first), then all in order}\td{"different" only marks arguments different}}
+\tr{\td{D2-M}\td{\code{\verb~|race_m~}}\td{\em{meeting}: the two sides take one step in turn (projection step, closed Nat op on literals, or delta + cheap whnf_core); each new form is tested against the other side's origin and last 8 forms by identity, pair table, structure, then common-head arguments under a doubling allowance}\td{out when a side is stuck}}
+\tr{\td{D2-wait}\td{\code{\verb~|m_step~}}\td{\em{NatFoldWaits}: a closed Nat operation whose operands are not literals yet does not fold while the other side can still step; two waiting sides with the same operation compare operands}\td{fold runs once the other side cannot move}}
+\tr{\td{D2-N}\td{\code{\verb~|race_n~}}\td{closed computation vs data by the ground machine (heavy declarations only)}\td{undecided -> kernel}}
+\tr{\td{D3}\td{\code{\verb~|args_refuted~} (\code{\verb~|tc.rs:8390~})}\td{before the same-regular-head argument comparison each pair gets 256 ticks, last argument first; a pair found different skips the shortcut}\td{only skips the shortcut}}
+\tr{\td{D4}\td{\code{\verb~|probe_args~}}\td{arguments-first for the same \em{non-regular} head (the reference unfolds both at once)}\td{failure -> unfold both}}
+\tr{\td{D5}\td{\code{\verb~|spines_defeq_skip~}}\td{proof positions and (with \code{\verb~|unfold~}) positions the body never reads are not compared}\td{see section 6}}
+\tr{\td{D6}\td{\code{\verb~|unfold_raw~} (\code{\verb~|tc.rs:5087~})}\td{a Nat operation without free variables is computed, not unfolded, even when the other side has free variables (the reference would unfold \code{\verb~|Nat.add~}'s definition there)}\td{-}}
+\tr{\td{D7}\td{nesting}\td{a comparison inside a round races too, but only one round past round 0 (doubling at every level multiplied)}\td{-}}
+}
+
+\p{Budget mechanics (\code{\verb~|attempt~}, \code{\verb~|tc.rs:2150-2194~}): one global tick counter; an attempt sets a stop tick; stops form a stack combined by minimum; \code{\verb~|Stop::Budget~} unwinds to the attempt that owns the stop; a pair an attempt left undecided is tagged with \code{\verb~|ceil(log2 remaining) + 1~} so a later attempt with no more budget gives up immediately; nothing budgeted is ever cached as \code{\verb~|false~}.}
+
+\p{Measured: \code{\verb~|RACE_B0~} sweep (con-leche / Init, 1 worker, G): off 45.72 / 22.49, 256: 50.59 / 24.93, 1024: 46.47 / 22.57, \strong{4096: 45.40 / 22.47}, 16384: 45.47 / 22.48. So on ordinary libraries the race is worth under 1 \%; its purpose is three CFSG "walls" that the official kernel also fails (past 100 GB / deep recursion), which drop to 0.05-2.5 G.}
+}
+
+\subtree{
+\title{2.7 Type inference (\code{\verb~|tc.rs:5540-5978, 6357-6466~})}
+
+\p{\code{\verb~|infer(term, env, ls, check) -> V~}. Types are values; nothing is quoted back.}
+
+\ul{
+\li{BVAR: the type of the environment value (memo in the value record; free variables carry their type in \code{\verb~|fv_ty~}).}
+\li{APP: arguments on the argstack; infer the head; then \strong{walk the function type as a syntactic Pi \code{\verb~|(term, env, ls)~} while it is one} (no closure value per argument); in check mode infer the argument and \code{\verb~|defeq~} it with the domain thunk; push the argument with \code{\verb~|push_arg~} (so an argument the codomain never mentions is never evaluated); only when the codomain is not syntactically a Pi is it evaluated and \code{\verb~|whnf~}ed.}
+\li{LAM (check mode): for each lambda infer the domain, require a sort, \code{\verb~|open_var(domain)~}, extend the environment, infer the body; \strong{the result is \code{\verb~|CloI { term, env, ls }~}}, a lazy Pi whose codomain at \code{\verb~|x~} is \code{\verb~|infer(body, env + x)~} (\code{\verb~|bind_body~}), so no Pi term is built. In infer-only mode the lambda is not entered at all. A direct-mapped \code{\verb~|lam_dm~} remembers the body type of a lambda in head position when that type has no free variable at all (so it cannot mention the bound one), and \code{\verb~|(fun x => b) a~} re-uses it instead of inferring \code{\verb~|b~} again at \code{\verb~|a~} (fixes a quadratic "beta ladder").}
+\li{PI: open the telescope, infer body sort, fold \code{\verb~|imax~}.}
+\li{LET: check mode checks type and value; the value is pushed as a thunk (never as a free variable).}
+\li{CONST: visibility, safety, level count; in check mode every level parameter must be declared; type = \code{\verb~|eval(c.ty, EMPTY, mk_ls(row, levels))~}.}
+\li{PROJ: \code{\verb~|proj_type~} follows the reference, including the Prop-structure restriction.}
+\li{\strong{infer-only vs check}: one cache entry per key holds \code{\verb~|(type, level-param-list id or NONE)~}; a checked result answers an infer-only query, never the reverse (\code{\verb~|icache_hit~}, \code{\verb~|tc.rs:572-588~}).}
+\li{\strong{Cache keys} (\code{\verb~|infer_full~}, \code{\verb~|tc.rs:5599-5729~}): a closed term is keyed \code{\verb~|(term, EMPTY, ls)~}; an open term under at most 63 entries is keyed \code{\verb~|(term, used_env_id, ls)~} where \code{\verb~|used_env_id~} interns \em{the mask and the values at its set bits} - so the result is shared by every environment that agrees on what the term reads. Wider environments use the plain key.}
+\li{\strong{Cross-declaration facts} (\code{\verb~|Shared.checked~}, one \code{\verb~|AtomicU64~} per MAIN expression, \code{\verb~|tc.rs:38-64~}): (a) "closed MAIN term \code{\verb~|t~} passed check-mode inference at \code{\verb~|ls = 0~} in safe declaration \code{\verb~|d~} under level parameter list \code{\verb~|g~}": reused by a later declaration (\code{\verb~|d < cur_decl~}) whose parameter list is a superset; the type is then re-derived in infer-only mode. (b) "open facts": the lambda body and the Pi codomain of every checked safe definition; reused when the current declaration's type telescope has the same domain \em{term ids} (equation lemmas restate a definition's body and type).}
+\li{\code{\verb~|infer_chain~}: a closed right-nested chain of at least 256 applications of one constant (list/string literals) is inferred innermost first, iteratively.}
+}
+}
+
+\subtree{
+\title{2.8 Declaration admission (\code{\verb~|check_decl_in~}, \code{\verb~|tc.rs:9066-9127~})}
+
+\ul{
+\li{All: duplicate universe parameter names reject.}
+\li{Axiom: type is a closed well-formed type. No whitelist (axioms are assumptions).}
+\li{Definition / opaque: \code{\verb~|check_type~}, then \code{\verb~|infer(value, check)~} and \code{\verb~|defeq~} with \code{\verb~|eval(type)~}. Unsafe definitions may see themselves; unsafe/partial ones run in the scratch arena and add no session facts.}
+\li{Theorem: decode the block (or take the MAIN value), \code{\verb~|check_type~}, \strong{type must be a Prop}, check value.}
+\li{Quotient (\code{\verb~|quot.rs~}): the four names are reserved (anything else under those names rejects at load, \code{\verb~|env.rs:1264-1283~}); each record's type is compared structurally against the expected shape after \code{\verb~|Eq~}'s shape is checked.}
+\li{Inductive block (\code{\verb~|induct.rs~}): parameters, universes, nested occurrences (auxiliary types are never built: an auxiliary type \em{is} the triple \code{\verb~|(J, levels, Ds)~}), constructor fields' universes, strict positivity, return types; then the facts the file states (\code{\verb~|isRec~}, \code{\verb~|isReflexive~}, \code{\verb~|numNested~}, K flag, large elimination, recursor universe parameters) are recomputed and compared; each recursor type is walked against the expected telescope and each rule must be the canonical one. Nothing in the record is trusted. Runs in the scratch arena.}
+\li{\code{\verb~|reduceBool~} / \code{\verb~|ofReduceBool~} / \code{\verb~|trustCompiler~}: no special handling anywhere in either kernel (grep); they are ordinary constants.}
+\li{Nat operations and literal constructors are recognised \strong{by canonical name only} (\code{\verb~|env.rs:1253-1263~}). I found no check that \code{\verb~|Nat.add~} etc. have the expected definitions \strong{\verb~|[~unverified whether the reference checks this either\verb~|]~}.}
+}
+}
+
+\subtree{
+\title{2.9 Sessions, stamping, scratch, names}
+
+\ul{
+\li{\strong{Session} (\code{\verb~|reset~}, \code{\verb~|tc.rs:1851-1917~}): a worker keeps \em{all} arena state (block arena, values, spines, environments, free variables and every cache keyed by their ids) across consecutive declarations. It ends (everything truncated/cleared at once, direct tables invalidated by a generation bump) when: session tables exceed \code{\verb~|SESSION_MIB = 8~} MiB of entries; the next declaration is not strictly later in file order than the last one checked (\code{\verb~|d <= sess_last~}); the level tables pass their bound; the previous declaration failed/panicked; or a Bool/Nat constructor needed by a literal was not declared yet (\code{\verb~|known_miss~}, because a \code{\verb~|false~} found then could become \code{\verb~|true~} later).}
+\li{\strong{Why it is sound}: every constant mentioned by a value made in declaration D is declared before D; the environment only grows and definitions never change; so reduction, typing and (non-)equality of those values are the same in any later declaration. Check-mode results carry the level-parameter list.}
+\li{\strong{Facts that outlive a session} are only: \code{\verb~|Shared.checked~} (2.7), \code{\verb~|eqp~} (true equalities between closed MAIN thunks/closures), closed-name pair outcomes, pure level memos, per-constant file properties. Each is stamped with the declaring index and used only when \code{\verb~|stamp < cur_decl~}: nothing travels backwards whatever order the workers take declarations in.}
+\li{\strong{Free variables} (\code{\verb~|open_var~} / \code{\verb~|pick_var~}, \code{\verb~|tc.rs:2944-3005~}): a binder takes \em{the first variable of its type (by type value id) that is not in scope}; \code{\verb~|fv_busy~} marks scope; closing releases it. A binder opened again therefore gets the same variable id and every cache keyed under it hits. Keying by the type's structural hash instead was tried and rejected (Init +4.4 \%, std +8 \%).}
+\li{\strong{Scratch arena}: inductive blocks, quotient records and unsafe/partial declarations swap in an empty set of tables and swap the session back afterwards.}
+\li{\strong{Names} (\code{\verb~|names.rs~}): past 1 M values or 10 k unfoldings in one declaration, values are additionally mapped to an id of "the substituted, unreduced term they stand for" (hash-consed node table, closed MAIN terms are leaves); whnf/infer/defeq are then also cached under names. This is the substitution kernel's identity, paid for only in heavy declarations, with a cost model that switches it off when hits do not pay for the name walks.}
+}
+}
+
+\subtree{
+\title{2.10 Parallelism and scheduling (\code{\verb~|main.rs:482-768~})}
+
+\ul{
+\li{Unit: one declaration. Order: declarations grouped by the first two components of their namespace (private-name prefixes stripped; a declaration goes with the names under it), groups in order of first appearance, file order inside a group (\code{\verb~|ns_order_fast~}, stable counting sort).}
+\li{Each of W workers starts with a contiguous \code{\verb~|1/W~} slice of that order and takes chunks of 32 from its front; an empty worker takes \strong{the back half of the largest remaining part}. A declaration that ran longer than 20 ms spills the rest of its chunk to a shared stack for other workers.}
+\li{Shared between workers: the read-only environment, \code{\verb~|Shared.checked~} and per-constant property arrays (relaxed atomics; any worker computes the same value), an interned list of level-parameter lists behind a mutex, \code{\verb~|first_fail: AtomicU32~}. Everything else is per worker.}
+\li{Determinism: a worker cancels declarations after \code{\verb~|first_fail~}; workers poll it every 4096 ticks; the verdict is the lowest-index non-OK status. Panics are caught and become a decline of that declaration.}
+\li{Scaling cost in instructions (mathlib): 1 worker 369 G, 4: 372 G (+0.8 \%), 8: 375 G (+1.6 \%).}
+\li{Each worker thread has a 1 GiB stack; stack use is measured every 256 ticks; past the limit -> decline.}
+}
+}
+
+\subtree{
+\title{2.11 Memory management and the heavy-declaration machinery}
+
+\p{Normal operation: per-worker \code{\verb~|Slab~}s (reserved address range, pages committed on first write, never moved), truncated at session end; pages above \code{\verb~|KEEP_BYTES = 4 MiB~} per table are returned (\code{\verb~|mmap(MAP_FIXED)~}); per-worker caps divided when more than 4 workers. Mathlib peak 2.0 GB (1 worker), 2.4 GB (4); by my estimate mostly MAIN columns (38 M x 24 B = 0.9 GB) plus the per-MAIN-term \code{\verb~|u64~} facts (0.3 GB, pages touched lazily) and name/constant tables.}
+
+\p{Heavy declarations (all thresholds are per session):}
+
+\table{
+\tr{\th{mechanism}\th{trigger}\th{what it does}\th{measured}}
+\tr{\td{Regions (\code{\verb~|region.rs~})}\td{arena >= 2^22 values or 64 MiB big literals}\td{every \code{\verb~|whnf~} miss notes table lengths and logs writes that could retain new ids (\code{\verb~|Undo~}); on return, if >= 256 values were made and the result (plus logged memos, pinned roots, a few closed thunks) reaches <= 1/4 of them, copy the survivors out, undo the log, truncate}\td{one CFSG certificate: 286 GB -> bounded}}
+\tr{\td{Ghost/pin}\td{a rolled-back region root that cost >= 256 ticks is remembered by content key; if the same work is opened again it is pinned}\td{prevents redoing dropped work}\td{p6: 517 G -> 15.4 G}}
+\tr{\td{Checkpoints / late regions}\td{a whnf or lazy-delta loop that made 2^21 values since its region opened closes and reopens it with only its current term}\td{long tail loops give memory back}\td{Fi24P7-a0: 11.4 GB of literals held before; 0.18 GB / 216 G after}}
+\tr{\td{Deep hand-up (\code{\verb~|trampoline~}, \code{\verb~|tc.rs:5230~})}\td{whnf nested 8192 deep (doubling) or past half the stack; closed inference/comparison past half the stack}\td{\code{\verb~|Stop::Deep~} unwinds to the outermost whnf / the declaration, which computes the deep job first from a shallow stack and retries (memo hit)}\td{1 M-step lazy accumulator: decline -> 81 G}}
+\tr{\td{Ground machine (\code{\verb~|ground.rs~})}\td{arena >= \strong{2^26 values}}\td{closed whnf and "computation vs data" comparisons run in a separate call-by-need machine: \code{\verb~|Rc~} objects, thunks updated in place, environment dropped after forcing, environments trimmed to what a delayed term reads, \strong{no hash-consing}; K, quotients, stuck cases go back to the kernel one step at a time; answers \code{\verb~|true~} alone only for equal constructors/literals}\td{removes O(n^2) retention of lazy \code{\verb~|Array.push~} chains; but 10x slower where work repeats (677 G vs 68 G), hence the high threshold}}
+\tr{\td{Loop states (HEAD)}\td{inside regions}\td{whnf-loop states made only of older values get the loop's result as memo and survive rollbacks}\td{magma-list-deep-n36: 56.7 -> 22.8 G}}
+\tr{\td{Derived rules (HEAD, \code{\verb~|rules.rs~})}\td{a definition reaching a recursor on one of its lambdas, unfolded 32 times in a session}\td{apply to opaque fresh variables, whnf, split variables a non-K non-structure recursor waits on into constructors (3 deep, 8 ctors, 64 forms); keep the pattern tree with result \em{templates} (no arena ids); fire in whnf's loop only}\td{n36: 23.0 -> 3.0 G; arena's 236 local tests 53.2 -> 30.6 G; Init -1.0 \%, mathlib -0.1 \%}}
+}
+
+\p{In a JVM most of the "regions" row is what a tracing collector gives for free - \em{provided} the interning tables do not hold everything strongly. The ground machine is what a naive object-graph evaluator looks like, and its 10x loss on repeated work is the price of dropping hash-consing.}
+}
+
+\subtree{
+\title{2.12 Build (\code{\verb~|Cargo.toml~}, \code{\verb~|scripts/build-pgo.sh~})}
+
+\p{\code{\verb~|codegen-units = 1~}, \code{\verb~|lto = "fat"~}, \code{\verb~|panic = "unwind"~} (panics are caught to decline), \code{\verb~|debug = 1~}; mimalloc as global allocator (glibc malloc: RH run 3:32 vs 3:13); \code{\verb~|-C target-cpu=native~}; \strong{PGO}: instrumented build checks \code{\verb~|init.susz~} at 1 worker, \code{\verb~|llvm-profdata merge~}, rebuild with \code{\verb~|-Cprofile-use~}. A \code{\verb~|release-da~} profile keeps debug assertions on for the invariants behind the unchecked array reads; a \code{\verb~|knobs~} feature turns every constant into an environment variable for sweeps (off in release so hot paths test nothing). Adversarial vectors, a region gate that poisons dead ids, and Pestka parity runs gate every change.}
+}
+
+\subtree{
+\title{2.13 Measured gains quoted in the Gruszka sources}
+
+\table{
+\tr{\th{change}\th{effect}\th{source}}
+\tr{\td{PGO (Init profile)}\td{mathlib w4 419.9 G (plain, 0.1.2) vs 372 G (PGO, README, earlier milestone): about -11 \%, approximate}\td{commit \code{\verb~|d70f1bf~} vs README}}
+\tr{\td{contiguous namespace parts per worker vs round-robin chunks}\td{mathlib w8 -5 \% instr}\td{\code{\verb~|main.rs:483-487~}}}
+\tr{\td{\code{\verb~|cdm~} 2^16 -> 2^14 slots}\td{cycles -4..-5 \%, instr +0.2..0.3 \%}\td{\code{\verb~|tc.rs:9131~}}}
+\tr{\td{\code{\verb~|KEEP_BYTES~} 16 / 4 / 1 / 0.25 MiB}\td{419.5 / 419.4 / 421.5 / 434.0 G}\td{\code{\verb~|tc.rs:147-152~}}}
+\tr{\td{re-growing tables each session (room divided)}\td{+3.5 \%}\td{\code{\verb~|tc.rs:161-164~}}}
+\tr{\td{bounds check in \code{\verb~|Slab::push~}}\td{+0.5 \% (Init), so moved to the slow tick}\td{\code{\verb~|env.rs:255~}}}
+\tr{\td{\code{\verb~|Stop~} as 1 byte (result fits registers)}\td{(motivation: every \code{\verb~|R<_>~} was 32 B through memory)}\td{\code{\verb~|tc.rs:88-90~}}}
+\tr{\td{value + memo in one 32-byte record}\td{"one index, one cache line"}\td{\code{\verb~|tc.rs:692-694~}}}
+\tr{\td{lambda body types in a map instead of direct-mapped}\td{+1 \% (cedar, con-leche)}\td{\code{\verb~|tc.rs:9173~}}}
+\tr{\td{outermost-inference trampoline vs declaration-level}\td{+1.7 \% / +0.5 \% vs +0.25 \% (Init)}\td{arch doc 394-397}}
+\tr{\td{variables keyed by structural hash of type}\td{+4.4 \% Init, +8 \% std (rejected)}\td{\code{\verb~|tc.rs:2967-2970~}}}
+\tr{\td{walking two different lambdas structurally at defeq entry}\td{0.4-0.75 \% wasted (removed)}\td{\code{\verb~|tc.rs:6794-6803~}}}
+\tr{\td{malachite instead of num-bigint}\td{10-23 \% faster on Nat-heavy certificates, flat elsewhere (not taken, LGPL)}\td{commit \code{\verb~|dfae0d7~}}}
+\tr{\td{reference points}\td{Init 20.5 G, std 34.5 G (w4, PGO)}\td{commit \code{\verb~|d70f1bf~}}}
+}
+}
+}
+
+\subtree{
+\title{3. Pestka}
+
+\subtree{
+\title{3.1 Architecture and representation}
+
+\ul{
+\li{Aver source -> Rust (\code{\verb~|aver compile~}, then \code{\verb~|cargo build --release~}, PGO via \code{\verb~|bin/build-pgo~}, mimalloc, \code{\verb~|panic = "abort"~}). Pure functional: the checker state \code{\verb~|St~} is a record threaded through every call; maps are updated in place only because there is always a single owner (persistent tries cost +17 \% on Init; \code{\verb~|decision MapCaches~}, \code{\verb~|core/cache.av~}).}
+\li{Modules: \code{\verb~|export/~} (Susz reader, own packer, ndjson reader), \code{\verb~|core/~} (names, levels, exprs with metadata word, substitution, caches), \code{\verb~|check/~} (\code{\verb~|state~}, \code{\verb~|tc~} 8979 lines, \code{\verb~|decl~}, inductive files, \code{\verb~|ground~}).}
+\li{\strong{Terms}: an algebraic type \code{\verb~|Expr = BVar | FVar | Sort | Const | App | Lam | Pi | Let | NatLit | StrLit | Proj~}, each node carrying one 62-bit metadata word: structural hash (bits 31+), loose range (14 bits), \strong{10 "variable bits"} (which free variables may occur, one of ten bits per variable by serial number), a has-universe-parameter bit, and a saturating size (6 bits) (\code{\verb~|core/exprs.av:283-322,1202-1210~}). Locally nameless: binders are opened by substituting a free variable and closed by abstraction. Terms are \strong{not} hash-consed; caches are maps from the hash word to buckets compared structurally (one-entry buckets stored inline).}
+\li{Binder names and infos are not stored at all (\code{\verb~|BindersUnnamed~}: -2..3 \%); equality is alpha-equality.}
+\li{Environment: one map; each constant carries its \em{place} (number of constants before it); a declaration sees only constants placed before it (\code{\verb~|PlacedConstants~}), instead of a persistent environment version per declaration (which cost 3.2 GB on mathlib).}
+\li{Proof blocks are read from the file by the worker just before the theorem is checked and dropped afterwards (\code{\verb~|BlockReadForItsCheck~}: peak -0.32 GB; mathlib reads 452,619 blocks plus 702 more that later declarations unfold).}
+}
+}
+
+\subtree{
+\title{3.2 Free variables named by what they are (\code{\verb~|decision CountedVariables~}, \code{\verb~|check/state.av:592~})}
+
+\p{A free variable is identified by \code{\verb~|(type term, optional let-value, k)~} where \code{\verb~|k~} is the number of variables of the same type and value currently open. Rules:}
+
+\ul{
+\li{two binders open at once with the same type/value get different \code{\verb~|k~}, so they are distinct;}
+\li{two binders that get the same variable are never open at once and have the same type and value, so any fact about a term containing one holds for the other;}
+\li{with more than 1023 variables open, a variable is fresh and never reused;}
+\li{counts per kind are kept in a map (\code{\verb~|KindsCounted~}), not recounted.}
+}
+
+\p{Effect: a binder opened again - or "a type and its instance that are the third binders of one theorem and the seventh of the next" - gets the same variable, so \strong{open-term cache entries are reusable across binders and across declarations}. Measured: variables named by telescope position: -18..20 \% on mathlib slices; by kind instead: a further -4..5 \% (qb9 194.4 -> 184.7 G, cslib 2.35 -> 2.27 T).}
+}
+
+\subtree{
+\title{3.3 Reduction}
+
+\ul{
+\li{\code{\verb~|whnf~} runs a \strong{lazy abstract machine} over terms (\code{\verb~|lcore~}, \code{\verb~|check/tc.av~}): arguments wait as closures (term + environment) and are materialised to terms only when needed, at most once; the loop has five arms; "what to do at a constant" (rule, branch, unfolding target) is computed by plain functions and the machine takes one step (\code{\verb~|UnfoldPicked~}: loop 24 -> 11 arms, perf tests -6 \%; two extra arms in that loop cost Init/std/con-leche about 1 \% by themselves, \code{\verb~|LiteralCases~}).}
+\li{\code{\verb~|VariableIsItsClosure~}: an argument that is a bound variable reuses the closure already in the environment (perf tests -5 \%).}
+\li{\code{\verb~|RuleLambdasAtOnce~}: a recursor rule's lambdas are consumed in one pass (perf tests -5 \%).}
+\li{\code{\verb~|CasesOnDirect~} (-5 \% perf, reachability 70.1 -> 65.8 G), \code{\verb~|RecHeadedDirect~} (the compiler's sparse casesOn), \code{\verb~|LiteralCases~} (Nat.casesOn on a literal goes to its branch without building \code{\verb~|Nat.succ~}).}
+\li{\code{\verb~|MatchersInlined~}: the body a definition unfolds to is rewritten \em{once} with the matcher at its head unfolded into it and the resulting redexes on atoms reduced (delta + beta only); kept in the unfolding cache: magma-list-deep-n36 124.3 -> 92.4 G, Init -1.5 \%, std -1.1 \%, con-leche -2.5 \%. \code{\verb~|BetasShared~}: that rewrite must memoise per DAG node (one Std body: 2.35 M tree nodes over 850 distinct).}
+\li{\code{\verb~|DerivedRules~} / \code{\verb~|RulesThatSave~} / \code{\verb~|RulesCarried~} (\code{\verb~|check/tc.av:3321-3377~}): a definition whose body reaches a recursor on a parameter and is unfolded 32 times in a declaration is reduced once on fresh variables, split on the constructors its recursor waits on (3 levels, 64 forms, fuel 4096 unfoldings); the pattern tree is its rule, kept across declarations; not for K-like/structure recursors or kernel-computed Nat operations; kept only when the derivation unfolded more than once per form: reachability 26.9 -> 23.7 G, perf 49.9 -> 41.9 G, n36 12.5 -> 7.0 G, mathlib -0.3 \%.}
+\li{\code{\verb~|ValuesInTheKey~}: an operand of Nat arithmetic is also cached under "the operation applied to the \em{values} of its closed arithmetic arguments": n36 65.9 -> 17.1 G, arena perf tests 124.6 -> 69.3 G.}
+\li{\code{\verb~|ArgumentsByNeed~}, \code{\verb~|ClosedHeadsKnown~}, \code{\verb~|GroundByNeed~} (opt-in \code{\verb~|--ground~}): CFSG-only.}
+\li{\code{\verb~|ZeroAtTheLevels~}, \code{\verb~|EquivByMaxima~}: "is this sort Prop at these levels" and level equivalence without building instantiated/normalised levels (levels without \code{\verb~|imax~} are equivalent iff per-parameter maximal successor counts and the dominating numeral agree): mathlib -5 \% instr, -10 \% peak together with related level work.}
+}
+}
+
+\subtree{
+\title{3.4 Type checking shortcuts}
+
+\ul{
+\li{\code{\verb~|DomainsNotBuilt~}: an application spine is checked from its head; each argument's type is compared with the domain \em{as the earlier arguments would instantiate it} without building it (\code{\verb~|fitsUnder~}); 9 of 10 comparisons succeed that way; previously a quarter of all nodes built were such instantiated rests.}
+\li{\code{\verb~|TelescopeOnce~} / \code{\verb~|DomainsCheckedWithType~} / \code{\verb~|DeclaredBodyUnbuilt~}: when a value's lambda domains are syntactically the declared type's Pi domains (99.8 \% of cases) the body's type is compared with the declared codomain under the same variables; no Pi is built or re-opened; the domains are not checked twice (etale 51.0 -> 49.3 G).}
+\li{\code{\verb~|ParamsInTheKey~}: checked types of terms with universe parameters are cached under the term tagged with the declaration's parameter list.}
+\li{\code{\verb~|BodiesCopied~} (negative result): inferring bodies under an environment \em{inside the substitution design} was built and measured: etale 31.8 -> 59.0 G, Init 78.5 -> 190.8 G. NbE has to be the design from the start (Gruszka), not a retrofit.}
+}
+}
+
+\subtree{
+\title{3.5 Definitional equality deviations (all bounded by \code{\verb~|meetFirst = 4096~} ticks, reference path afterwards)}
+
+\p{\code{\verb~|ProofsComparedBeforeReduced~}; \code{\verb~|ArithmeticWhenWanted~} (a Nat operation on non-literal arguments waits while the other side can still unfold; same operation: compare arguments first); \code{\verb~|HeadsMetFromBelow~} -> \code{\verb~|SidesRace~} / \code{\verb~|RaceInLazyFrom~} (two definitions of different names: reference under a probe, then both sides step in turn looking for a form the other had); \code{\verb~|SidesMeet~} / \code{\verb~|ProjectionsRaced~} / \code{\verb~|ProjectionAppsCompared~} (two applications of one projection: heads and arguments first, then steps by turns; mathlib 1987.6 -> 1921.8 G); \code{\verb~|FieldNotStructure~} (compare only the requested field); \code{\verb~|ZetaBeforeDelta~}; \code{\verb~|LiteralRecursionsComputed~} (two \code{\verb~|Nat.rec~} on one literal computed bottom-up). \code{\verb~|CongruenceAfterSteps~} ("after each reduction step, are both sides made of parts already known equal?"): the heaviest mathlib declaration 198 s / 4.9 GB -> 12 s / 0.5 GB, \strong{all of mathlib 31 -> 16 minutes}. \code{\verb~|StepRemembered~}, \code{\verb~|CoreResultsKept~}: lazy-delta steps and full whnfCore results cached. Failures are cached per declaration (one std proof: 211 s -> 3 s).}
+}
+
+\subtree{
+\title{3.6 Bounded caches (\code{\verb~|check/state.av:82-130~}, \code{\verb~|check/decl.av:1471~})}
+
+\ul{
+\li{Every cache carried across declarations has a limit and is \strong{emptied} (not evicted) when it passes it. Limits were derived from measured \em{reuse distances}: for the checked-types cache, 112 M hits, 4.8 M uses of already-dropped keys at distances 2^17..2^22 puts, 19.5 k instructions each to recompute (4 \% of mathlib), 848 instructions to drop and about 470 B to keep an entry.}
+\li{Unit \code{\verb~|u = 262144~} hashes for one worker (shared budget only 1/8 larger for any number of workers, \code{\verb~|FrugalWorkers~}: peak stays near one worker's). Fast mode: checked types \code{\verb~|3u~}, equal pairs \code{\verb~|1.5u~}, others \code{\verb~|0.75u~}, closed-term facts unbounded. \strong{Low-memory mode (default, used on the arena)}: checked types \code{\verb~|u~}, infer/whnf/core/equal pairs/constant types/closed facts \code{\verb~|u/4~}, variables/failures/unfoldings \code{\verb~|u/8~}: mathlib +4.0..5.4 \% instructions for 5.5-6.2 GB -> 3.9 GB.}
+\li{After namespace ordering "a GB buys 0.4-0.8 \% where it bought 1-3 \%".}
+\li{Within a declaration the whnf cache is two generations (young becomes old past a weight; hits in old are re-stored young) plus a separate two-generation store for \em{dear} results (whose computation stored >= 1024 results).}
+}
+}
+
+\subtree{
+\title{3.7 Parallelism}
+
+\p{Environment built in file order (inductive blocks and the quotient checked while reading); remaining declarations checked on 4 workers; namespace grouping (-9 \% on mathlib: 1475.9 -> 1347.9 G; two namespace components beat one and beat grouping by the conclusion's constants); a literal prefix (everything up to the declaration placing the last of \code{\verb~|Nat~}, \code{\verb~|String~}, \code{\verb~|String.ofList~}, \code{\verb~|List~}, \code{\verb~|Char~}, \code{\verb~|Char.ofNat~}) is checked in file order first; runs cut by proof size, 64 runs per worker. 4 workers cost +3.7 \% instructions (each worker refills its own caches).}
+}
+
+\subtree{
+\title{3.8 Pestka's bottom line}
+
+\table{
+\tr{\th{build}\th{mathlib instructions}\th{peak}\th{wall}}
+\tr{\td{native, PGO, 1 worker, high-memory}\td{1074 G}\td{5.5 GB}\td{175 s}}
+\tr{\td{native, PGO, 4 workers, low-memory (arena config)}\td{1174 G}\td{3.9 GB}\td{67 s}}
+\tr{\td{wasm-gc on V8 (Node 26), 1 thread}\td{5780 G}\td{11.3 GB}\td{403 s}}
+\tr{\td{Pestka reading ndjson itself (own Aver packer)}\td{1516 G}\td{6.2 GB}\td{126 s}}
+}
+
+\p{Init: 42-49 G (vs Gruszka 20.5 G). PGO from \code{\verb~|init-prelude~} alone: -12..15 \%; from all of Init: 1-1.5 \% more.}
+}
+}
+
+\subtree{
+\title{4. "What not to compute": the list, with the soundness argument for each}
+
+\table{
+\tr{\th{\verb~|#~}\th{rule}\th{implementation}\th{soundness argument}\th{measured}}
+\tr{\td{S1}\td{An argument whose binder body never reads it is never evaluated}\td{\code{\verb~|push_arg~} / \code{\verb~|push_for~}: bit 0 of the body's used mask clear -> push \code{\verb~|HOLE~} (\code{\verb~|tc.rs:2602-2628~}); also in \code{\verb~|infer~} for dependent codomains}\td{the mask is exact for index < 63 and bit 0 is "no subterm reads entry 0"; evaluation cannot observe the entry. Type checking of the argument itself is \em{not} skipped (check mode infers and compares it before \code{\verb~|push_arg~}). An over-approximated mask is safe; an under-approximated one would be unsound}\td{(part of milestone 25; adopted from nano-lean)}}
+\tr{\td{S2}\td{Closed binder bodies get no environment}\td{\code{\verb~|rng(body) == 0 -> EMPTY~}}\td{closed terms do not read environments}\td{-}}
+\tr{\td{S3}\td{Proof arguments of one constant are not compared}\td{\code{\verb~|prop_positions(row, levels)~}: bitmask of argument positions whose declared domain is \em{surely} a proposition (domain's head is a bound variable or constant whose own type, past as many Pis as it has arguments, ends in a sort that is zero at these levels; a Pi counts if its codomain does); \code{\verb~|spines_defeq_skip~} skips them (\code{\verb~|tc.rs:8573-8721~})}\td{both applications are well typed with the same head at equivalent levels; by induction over positions, once all earlier arguments are definitionally equal the two domains at position j are equal; both arguments are proofs of that proposition; proof irrelevance}\td{Pestka: etale 59.2 -> 53.9 G, qb9 109.4 -> 103.3 G, "about 9 \% on a mathlib declaration"}}
+\tr{\td{S4}\td{Same \em{definition} on both sides in lazy delta: arguments the body never reads are not compared}\td{\code{\verb~|unused_args(row)~}: bitmask over the leading lambdas of the value (\code{\verb~|tc.rs:8603-8634~}), applied only when the spine covers all leading lambdas}\td{both sides unfold to the same body with those variables absent; equality of the remaining arguments gives equality of the unfoldings by congruence}\td{-}}
+\tr{\td{S5}\td{Structure eta skips proof fields}\td{\code{\verb~|try_eta_struct~} with \code{\verb~|prop_positions~} of the constructor (\code{\verb~|tc.rs:8823-8852~})}\td{types of both sides were compared first; earlier fields equal => the field's proposition is the same; proof irrelevance}\td{etale 24.31 -> 24.14 G (683 comparisons, 1.5 \% of steps)}}
+\tr{\td{S6}\td{"Is it a proof?" answered without inference}\td{\code{\verb~|surely_not_proof~} before \code{\verb~|proof_irrel~} (\code{\verb~|tc.rs:7297-7429~})}\td{purely a negative filter: a value whose declared result sort can never be zero is not a proof, so proof irrelevance cannot apply; when unsure, infer}\td{Pestka: qb9 30 k projections cost 2.6 G (90 k instr each); etale 53.9 -> 52.4 G}}
+\tr{\td{S7}\td{Proofs headed by a recursor into Prop are compared by type before being reduced}\td{\code{\verb~|proof_by_rec~} (\code{\verb~|tc.rs:7436-7460~})}\td{such a term's type is the motive applied, a proposition; \code{\verb~|whnf_core~} preserves types up to defeq; the reference asks the same proof-irrelevance question after \code{\verb~|whnf_core~}}\td{avoids forcing K-like majors (a whole Schreier-Sims run in CFSG)}}
+\tr{\td{S8}\td{casesOn reduces only its major premise}\td{\code{\verb~|cases_direct~}}\td{the result is exactly what delta, the recursor rule and beta produce; recognised from the value's shape; K excluded}\td{Pestka: perf tests -5 \%}}
+\tr{\td{S9}\td{Matchers evaluate only the major and the chosen alternative}\td{\code{\verb~|match_direct~}}\td{same; other alternatives are never forced by the reference either, only allocated}\td{Pestka: n36 -26 \%, Init -1.5 \%}}
+\tr{\td{S10}\td{A call walks its function's lambdas without making closures}\td{\code{\verb~|eval~} APP arm, \code{\verb~|beta_from~}}\td{intermediate partial applications are unobservable}\td{Pestka: perf -5 \%}}
+\tr{\td{S11}\td{Congruence of closures: same term + level subst and pairwise equal \em{read} environment entries => equal}\td{\code{\verb~|closure_congr~} / \code{\verb~|same_term~}}\td{congruence of substitution; only \code{\verb~|true~} decides}\td{Pestka \code{\verb~|CongruenceAfterSteps~}: mathlib 31 -> 16 min}}
+\tr{\td{S12}\td{Negative results cached}\td{\code{\verb~|eq_cache~} both outcomes per session; \code{\verb~|EQ_ARGS_NO~}}\td{inside a session a value id denotes one computation and the visible environment only grows monotonically w.r.t. what the value mentions}\td{Pestka: 211 s -> 3 s on one proof}}
+}
+
+\p{\strong{Caveat on S3 + S4 combined (Gruszka only).} \code{\verb~|spines_defeq_skip(unfold = true)~} ORs the two masks. The induction for S3 assumes all \em{earlier} arguments are equal, but an earlier position skipped by S4 may differ, and a later proof position's domain may depend on it. I believe the result is still sound (every use of the proof variable inside a body that does not mention the earlier variable is typed against a type not mentioning it), but neither repository states this argument, and Pestka does \strong{not} combine the two (its same-definition path uses unused flags only, \code{\verb~|check/tc.av:8245-8252~}; it reports that adding proof skipping there "gave nothing"). RLVM should either not combine them, or skip a proof position only when its domain does not depend on an S4-skipped position.}
+}
+
+\subtree{
+\title{5. Ranked tricks and how to realise them on the JVM / Truffle}
+
+\p{Ranking is by evidence of effect on mathlib-class input. "JVM" notes assume the metric counts GC and JIT instructions.}
+
+\ol{
+\li{\strong{Flat integer representation of terms and values; no object per node.} Evidence: Gruszka 0.37 T vs Pestka-native 1.1 T vs Pestka-wasm-gc 5.8 T on identical input. JVM: MAIN as primitive arrays (\code{\verb~|int[]~} stride 4 for \code{\verb~|a, b, p, kind|rng~}, \code{\verb~|long[]~} used masks) or one off-heap \code{\verb~|MemorySegment~}; ids are \code{\verb~|int~}. Values as an \code{\verb~|int[]~} slab with stride 8 (4 words value, 4 words memo) per worker. The collector never traces or moves any of it if allocated once, large, and reused. Session reset = set \code{\verb~|length = 0~}. This removes GC from the instruction count almost entirely and removes megamorphic dispatch (a \code{\verb~|switch~} on a kind byte instead of virtual calls on node classes).}
+\li{\strong{Hash-consing of values, environments and spines with memo words in the record.} JVM: open-addressing tables in \code{\verb~|int[]~}/\code{\verb~|long[]~} (no boxing, no \code{\verb~|HashMap<Long,Integer>~}); two-word key \code{\verb~|(tag<<32|a, b<<32|c)~}; one probe that finds or inserts. Keep generation-stamped direct-mapped caches (2^12-2^14 entries, sized to L2) in front of exact tables; invalidate by incrementing an \code{\verb~|int~}.}
+\li{\strong{Lazy, single-owner proof decoding from a binary/columnar intermediate.} JVM options: (a) run \code{\verb~|susz pack~} in the arena build/run command exactly as Gruszka does and read Susz in Java (varint decode loop over a mapped segment; spec section 5-6 is small); (b) port the positional ndjson parser. Either way: compute "single owner" once, keep only 38 M shared nodes resident, decode a proof into a per-worker \code{\verb~|int[]~} scratch arena when its theorem is checked. Reference costs in Rust: 35 G to convert, 13.6 G to decode the whole Susz file through a visitor.}
+\li{\strong{Skip lists as per-constant 64-bit masks} (S1, S3, S4, S5, S6, S8, S9): prop positions per \code{\verb~|(constant, level list)~}, unused leading-lambda mask, explicit-binder mask, casesOn/matcher shape. JVM: \code{\verb~|long[]~} indexed by constant row, filled lazily; benign races are fine (idempotent). The per-node used mask is one \code{\verb~|long~} per MAIN node (304 MB for mathlib) and is also what makes environment pruning and used-entry cache keys possible - it is worth its memory.}
+\li{\strong{Sessions + forward-only stamping} for cross-declaration reuse. JVM: identical; a session is the lifetime of the per-worker slabs. Stamp the few long-lived facts with the declaration index.}
+\li{\strong{Free-variable reuse by type} (Pestka: -18..25 \% cumulative; Gruszka: \code{\verb~|pick_var~} by type value id). JVM: \code{\verb~|open(typeId)~}: probe \code{\verb~|(typeId, k)~} for k = 0, 1, ... until a variable not in scope; \code{\verb~|boolean[]~} in-scope flags. Requires hash-consed types so that "same type" is an int comparison.}
+\li{\strong{Namespace-grouped, contiguous work distribution} (-9 \% Pestka, -5 \% Gruszka at 8 workers) with "steal the back half of the largest part" and a 20 ms spill. JVM: plain threads, one mutex.}
+\li{\strong{Environment pruning + used-entry cache keys} (hash-consing precision; inference cache hits across environments). JVM: same arrays; \code{\verb~|Long.numberOfTrailingZeros~} loop over the mask.}
+\li{\strong{Canonical first-order applications} (\code{\verb~|canon_app~}): make neutral values eagerly instead of thunks. Cheap and increases sharing; no JVM-specific issue.}
+\li{\strong{Lazy universe substitution} (\code{\verb~|ls~} id carried by closures; identity substitution = 0). Avoids all level instantiation of terms. JVM: an \code{\verb~|int~} per closure and a small \code{\verb~|(level, ls)~} cache.}
+\li{\strong{Types as values; lambda types as lazy \code{\verb~|CloI~}; Pi telescopes walked syntactically} in \code{\verb~|infer~}. Avoids building any term during inference. JVM: same.}
+\li{\strong{casesOn / matcher / (later) derived rules.} For mathlib the effect is small (-0.1..-2.5 \%); for the arena's perf tests it is 2x-7x. Truffle angle: a per-constant "unfold plan" node (plain delta, casesOn-direct, matcher-direct, rule tree) selected once and cached in the constant's row is the natural specialisation point; keep it a data-driven \code{\verb~|switch~}, not a class hierarchy.}
+\li{\strong{Budgeted attempts / race.} Under 1 \% on libraries; needed only against pathological inputs. Implement the single tick counter and \code{\verb~|Budget~} unwinding early (cheap), add strategies later. JVM: use a preallocated exception without stack trace or an explicit status return; do not allocate.}
+\li{\strong{Deep-recursion handling.} 1 GiB native stacks + stack-depth polling + hand-up trampoline. JVM: create worker threads with an explicit large \code{\verb~|stackSize~}; count depth explicitly; implement the hand-up (memoise the deep job, unwind, retry) rather than relying on \code{\verb~|StackOverflowError~}. Kovacs' normalization-bench (\code{\verb~|refs/normalization-bench-kovacs/README.md~}) reports JVM and GraalVM HOAS evaluators degrading sharply on deep-stack workloads while being competitive on tree-shaped ones.}
+\li{\strong{PGO, LTO, native CPU, allocator} (-11..15 \%). JVM analogue: ahead-of-time compilation with profiles if the toolchain allows it \strong{\verb~|[~toolchain question, not verified here\verb~|]~}; otherwise keep the hot loop small enough that JIT cost stays far below the 400 G budget.}
+}
+
+\p{Why \em{not} host-language HOAS closures for RLVM, given the above: Gruszka's closures are defunctionalised triples \code{\verb~|(term id, env id, ls id)~} precisely so that they can be hash-consed, compared structurally (S11), keyed in caches, pruned to their free variables and given memo words. A Java lambda or Truffle \code{\verb~|CallTarget~} closure offers none of these.}
+}
+
+\subtree{
+\title{6. Soundness-sensitive or fragile points RLVM must not copy blindly}
+
+\ol{
+\li{\strong{Used masks must never under-approximate.} S1, pruning, frame hash-consing, \code{\verb~|has_fvar~} and used-entry cache keys all trust them. Gruszka declines terms with >= 65535 loose variables and keeps a second word past index 62 after a precision bug (milestone 51: masks saturated under > 63 binders). A \code{\verb~|HOLE~} must be unreadable (Gruszka asserts in its debug-assertion build).}
+\li{\strong{S3 + S4 combination} (section 4 caveat).}
+\li{\strong{\code{\verb~|prop_positions~} is syntactic and must stay conservative}: it reads at most 64 positions, only heads that are bound variables or constants, and requires the sort to be zero \em{at the given levels} (levels are substituted first). A mutant "read the motive's sort without the levels" is one of their own test mutants.}
+\li{\strong{Cached negative equalities across declarations of a session} are valid only because (a) sessions move strictly forward in file order, (b) every constant in a value was visible when the value was made, (c) a session ends when a literal needed a constructor that was not declared yet. If RLVM keeps any cache longer than one declaration it needs all three.}
+\li{\strong{Free-variable reuse}: sound only with the invariant "no two binders in scope share a variable, and a variable has exactly one type". Budget unwinding must restore the open-binder depth (\code{\verb~|vdepth_to~}). Gruszka substitutes let values (no let-variables); Pestka includes the value in the variable's kind.}
+\li{\strong{Budgeted work must never be cached as \code{\verb~|false~}}, and a budget stop must propagate to the attempt that owns it (Pestka: swallowing inner stops made a test run forever).}
+\li{\strong{\code{\verb~|Shared.checked~}}: a check-mode success is reusable only under a superset of the level parameters and only from an earlier, \em{safe} declaration; the type itself is re-derived in infer-only mode. The "open facts" variant compares domain \em{term ids} of telescopes - correct only because ids denote identical terms in the same file.}
+\li{\strong{Proof blocks and theorem unfolding}: theorems \em{are} unfolded by whnf (Acc.rec-style reductions); a design that frees proof terms after checking must be able to re-read them (Pestka re-reads the block; a "free theorem values" mode was tried and had to decline Init and etale).}
+\li{\strong{Out-of-order checking} relies on rule P, unique declared names (a re-declaration after a skipped unsafe declaration would otherwise leak facts) and visibility by declaration index at \em{every} constant lookup and delta step.}
+\li{\strong{Name-based built-ins}: both kernels recognise \code{\verb~|Nat.add~}, \code{\verb~|Nat.succ~}, \code{\verb~|String.ofList~}, ... by name; the quotient names are reserved and checked; I found no shape check for the Nat operations.}
+\li{\strong{Structure eta before reducing the major} applies only to non-recursive single-constructor, index-free inductives whose recursor eliminates into every sort (Lean issues \verb~|#~15351/\verb~|#~15371); the projection of a stuck structure must stay a projection.}
+\li{\strong{Derived rules} must not split under K-like or structure recursors (they fire without forcing the major), must run under a budget, and must be disabled for kernel-computed Nat operations.}
+\li{The converter is outside the trust base only because the reader re-validates everything; if RLVM reads Susz it must implement the reader's checks (bounds on every back distance, frontier index, name/level id, block length and count, UTF-8, minimal varints, unique names, rule P).}
+\li{\code{\verb~|Gruszka~}'s statement "where the kernel deliberately reduces less than Lean it can only reject" refers to an older treatment of big literals in open Nat operations; milestone 50 changed that code. I could not determine whether any such case remains.}
+}
+}
+
+\subtree{
+\title{7. Open points for implementers}
+
+\ul{
+\li{Per-phase instruction split of Gruszka's 372 G (eval vs defeq vs infer vs table probes) is not published; the \code{\verb~|cnt~} feature counts probes per value but no numbers are in the repository.}
+\li{Gruszka's \code{\verb~|STATUS.md~} and \code{\verb~|data/~} (milestone reports, sweeps) are excluded from the public repository; only the numbers copied into comments and \code{\verb~|docs/architecture.md~} are available.}
+\li{The arena revision of Gruszka reaches \verb~|#~2 without derived rules; the HEAD numbers for the arena's perf tests (53.2 -> 30.6 G) suggest those tests, not mathlib, are where rules matter.}
+}
+}

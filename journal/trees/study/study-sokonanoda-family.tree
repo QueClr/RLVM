@@ -1,0 +1,497 @@
+\title{06 - Leaders: the nanoda lineage (sokonanoda \verb~|#~3, mathgraph, nanoclo, nanobruijn, nanoda_lib)}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{machine}
+\tag{loader}
+\tag{soundness}
+\tag{performance}
+\meta{origin}{docs/research/06-leader-sokonanoda-family.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Scope: source-level deep dive, read only (nothing built, nothing run). All paths are relative to \code{\verb~|refs/~}.}
+
+\table{
+\tr{\th{repo}\th{clone}\th{arena rev}\th{clone HEAD read}\th{arena mathlib}\th{= instructions}\th{threads}}
+\tr{\td{sokonanoda}\td{\code{\verb~|sokonanoda~}}\td{\code{\verb~|9a021b6~}}\td{\code{\verb~|15f5eaa~} (differs from arena rev only by 62 deleted test lines)}\td{87.9 s / 5.0 GB}\td{527 G}\td{4}}
+\tr{\td{mathgraph}\td{\code{\verb~|mathgraph-lean-kernel~} (branch \code{\verb~|flash~})}\td{\code{\verb~|78c7502~}}\td{same}\td{2.5 min}\td{~900 G}\td{2}}
+\tr{\td{nanoclo}\td{\code{\verb~|nanoclo~}}\td{\code{\verb~|b8cefd0~}}\td{same}\td{8.4 min}\td{~3.0 T (own figure 2.78 T)}\td{4}}
+\tr{\td{nanobruijn}\td{\code{\verb~|nanobruijn~}}\td{\code{\verb~|2712fa6~}}\td{same}\td{13.1 min}\td{~4.7 T (own figure 4.53 T)}\td{4}}
+\tr{\td{nanoda_lib}\td{\code{\verb~|nanoda_lib~}}\td{\code{\verb~|0da9f98~}}\td{same}\td{16 min}\td{~5.8 T}\td{4}}
+}
+
+\p{"Instructions" = arena virtual time x 6e9. Numbers called \em{measured} are quoted from the authors' READMEs, commit messages, PLAN.md or experiment manifests; I measured nothing. Anything inferred or not checkable in source is tagged \strong{\verb~|[~unverified\verb~|]~} or \strong{\verb~|[~inferred\verb~|]~}.}
+
+\p{Lineage (from README history, \code{\verb~|git show f1c4b12:README.md~} in sokonanoda): \code{\verb~|nanoda_lib~} (ammkrn; faithful Rust port of the C++ kernel: locally nameless, substitution, per-declaration hash-consed DAG) -> \code{\verb~|sonanoda~} (fewer type comparisons in proof irrelevance, later made conservative again) -> \code{\verb~|still-nanoda~} (interning tweaks) -> \strong{sokonanoda} (2026-06-12: conversion and later inference rewritten as NbE on closures, "as in smalltt"). \code{\verb~|mathgraph~} = sokonanoda at commit \code{\verb~|28c03d0~} (2026-09-12) + 5 micro-optimisations. \code{\verb~|nanoclo~} = nanoda_lib + own closure machine + sokonanoda's value conversion as of August + sokonanoda's parser fast path. \code{\verb~|nanobruijn~} = nanoda_lib with pure de Bruijn terms and shift-carrying pointers, still substitution based.}
+
+\subtree{
+\title{0. Decision summary (read this first)}
+
+\ol{
+\li{\strong{Sokonanoda is an AST interpreter \code{\verb~|eval(env, expr) -> value-id~} over a hash-consed value graph stored in flat arrays; nothing is substituted and no type is ever read back to a term during type checking.} A value is a 40-byte record addressed by a \code{\verb~|u32~}; structurally equal constructions always get the same id, so most conversion questions end at an integer comparison. Memo results (one-step reduct, WHNF, type) live \em{inside} the record. Same design family as gruszka (doc 05); independently arrived at.}
+\li{\strong{Call-by-need thunks were tried and deleted.} Sokonanoda created thunks for non-trivial arguments until 2026-08-14 (\code{\verb~|9b4ea12~} "eagerness in some places") and removed the dead machinery on 2026-09-30 (\code{\verb~|1fd5693~}). Laziness now comes from three other places: (a) a constant application \code{\verb~|c a1..an~} evaluates to a \em{folded neutral} (\code{\verb~|Unfold~}) whose unfolding is computed on demand and memoised in the node - every such node is a shared memoised thunk; (b) lambdas evaluate to closures in O(1); (c) recursors only fire during evaluation when the major premise is already a constructor/literal. Argument evaluation itself is strict and memoised in \code{\verb~|(pruned env, expr) -> value~} tables. Implication for RLVM: do not build a general thunk mechanism first.}
+\li{\strong{The dominant cost is evaluation and environment keying, not conversion.} Mathgraph's profile of the September code: \code{\verb~|eval~} self 29.8 \%, \code{\verb~|prune_env_cold~} self 11.6 \%, \code{\verb~|infer_value~} self 9.7 \%, \code{\verb~|unify_general~} self 1.6 \%, universe \code{\verb~|leq~} ~1.1 \% (\code{\verb~|mathgraph-lean-kernel/experiments/flash_closure_v1_evidence.json~}, event \code{\verb~|current-cost-atlas~}). 28.8 \% of all \code{\verb~|eval~} entries are a bare variable lookup. Scale: about 1.7 G \code{\verb~|eval~} entries per run, i.e. roughly 500 instructions per entry all-in at 900 G \strong{\verb~|[~derived from their census, section 3\verb~|]~} - that is the per-node budget a JVM interpreter has to match.}
+\li{\strong{Cache keys are made insensitive to irrelevant bindings by pruning the environment to the free-variable mask of the expression} (sokonanoda "sparse environments", nanoclo "read sets"). This is the single most important idea for making caches work in a closure world; nanoclo measured -10 \% instructions on its mathlib corpus from one application of it, and on one mathlib declaration inference cache misses fell from 131 K to 12 K (a subterm reached under 543 telescopes is inferred once instead of 543 times).}
+\li{\strong{Work is shared across declarations.} Caches and the value arena survive from one declaration to the next inside a \em{session} (reset when the value arena exceeds 9 MiB); a thread-lifetime set records closed export subterms already type-checked; a thread-lifetime store keeps WHNFs of closed terms as expressions, verified exactly on reuse. nanoclo paid +47 \% instructions on its BitVec corpus (126.6 G -> 186.4 G) when it had to give up cross-declaration caches for memory reasons (\code{\verb~|5c911e1~}).}
+\li{\strong{Type inference returns values and is lazy in the codomain.} The type of \code{\verb~|fun x => b~} is a Pi value whose codomain closure means "infer \code{\verb~|b~} under this environment and context" and is only run when applied. In \code{\verb~|InferOnly~} mode a lambda costs O(1). Application spines walk the head's Pi telescope syntactically and never materialise intermediate function types; non-dependent arguments are not evaluated at all.}
+\li{\strong{Exported recursors, \code{\verb~|numFields~}, \code{\verb~|isRec~}, \code{\verb~|k~}, \code{\verb~|numIndices~} and quotient types are ignored and re-derived} (\code{\verb~|4fe08fc~} "ignore ndjson poisoned pawn"). This closes a whole class of arena \code{\verb~|bugs/~} tests by construction.}
+\li{\strong{Parsing is ~4 \% of a run} (measured by nanoclo on a BitVec corpus, not on mathlib) thanks to exact-byte matching of lean4export's canonical line shapes, SWAR digit parsing, no hash-consing of export expressions, and no binder names or binder info in memory.}
+\li{\strong{Per-thread caches mean parallelism costs instructions.} Workers share only the immutable export. Mathgraph dropped to 2 threads; for an instruction-count metric RLVM should default to one checking thread \strong{\verb~|[~inferred; neither repo publishes instructions vs. thread count\verb~|]~}.}
+\li{\strong{nanobruijn is the negative result:} delaying \em{shifts} (pointer+offset, canonical shift normal form, depth-bucketed caches) while keeping substitution-based reduction gains ~20 \% over nanoda on mathlib and costs months of fragility (pointer equality missed alpha-equivalent terms -> 37 800x slowdown on one lemma). Delaying \em{substitution} (closures) is what pays.}
+\li{\strong{nanoclo is the cautionary middle:} closures + interned environments + skew-binary lookup, but types are still expressions that must be reified at every lambda, caches are reset per declaration, and it is 5.7x slower than sokonanoda. Its wrapper fusion (inlining \code{\verb~|match_n~}/\code{\verb~|casesOn~}/\code{\verb~|brecOn~} into definition bodies) is a 9x win on evaluation-heavy tests but \em{doubles} mathlib if always on.}
+\li{\strong{Three soundness bugs in sokonanoda were found by differential testing and are now arena tests} (closures compared without their "eval vs infer" mode; empty environments compared without their universe substitution; unit-eta without comparing types). Every one is a hash-consing/fast-path identity that forgot a component. Section 8 lists the invariants RLVM must encode in its value identity.}
+}
+}
+
+\subtree{
+\title{1. Why 16 min -> 88 s: attribution}
+
+\table{
+\tr{\th{step}\th{evidence}\th{effect}}
+\tr{\td{nanoda_lib -> still-nanoda: probe the per-declaration intern table before the huge export table; skip the export probe for terms that contain local nodes}\td{README at \code{\verb~|06a07b7~}}\td{"5 \%" + "another 10 \%" on mathlib (measured by authors)}}
+\tr{\td{4-byte aligned \code{\verb~|Ptr~} (dag marker in bit 31)}\td{nanoda_lib commit \code{\verb~|4219437~}}\td{-12.6 \% / -12.3 \% cycles on two arena tests}}
+\tr{\td{NbE with glued constants replaces WHNF-by-substitution in conversion}\td{README at \code{\verb~|f1c4b12~}}\td{"another 35 \% speedup in Mathlib ... 40 \% more peak memory"}}
+\tr{\td{July-Aug: mimalloc, own parser, sessions, level-substitution environments, infer closures, persistent WHNF store, relevance signatures for proof irrelevance, pointer equality on spines/levels}\td{commits \code{\verb~|6e2dd3f~}..\code{\verb~|ba5814a~}; README at \code{\verb~|0668a6f~}}\td{"about 9x faster than the official kernel, measured on mathlib" (official is 33.7 min -> ~3.7 min)}}
+\tr{\td{Aug-Sep: probe budget, streaming parser, no thunks, binder names dropped, sparse environments, interned env/app nodes}\td{\code{\verb~|b38b875~}..\code{\verb~|28c03d0~}}\td{mathgraph (this state plus single-digit-percent tweaks, section 3) runs 2.5 min on the arena \strong{\verb~|[~inferred\verb~|]~}}}
+\tr{\td{Oct: session-scoped level caches, own hash map (\code{\verb~|PtrMap~}), infer telescope, signature templates, reader thread, near-63 pruning, check memos, arena reuse, index-based 40-byte value records, literal reduction strategy}\td{\code{\verb~|f6a74e8~}..\code{\verb~|869f4b6~}}\td{2.5 min -> 87.9 s, i.e. ~1.7x \strong{\verb~|[~inferred from arena numbers; commit messages carry no measurements\verb~|]~}}}
+}
+
+\p{For comparison, same-input ablations published by nanoclo (August, instruction counts on its "mathlib" corpus, 2.3-2.9 T total): thunks shared across environments that agree on the read set -276 G (-10.2 \%, \code{\verb~|a54f726~}); exact wide read sets -109 G (\code{\verb~|f9b137f~}); view memo -70.6 G (\code{\verb~|fffe293~}); app/proj spine interning split -40 G (\code{\verb~|f07f79e~}); canonical-line parser -9.4 \% on a 200 G corpus (\code{\verb~|97f5cb9~}).}
+}
+
+\subtree{
+\title{2. sokonanoda in detail}
+
+\p{14.7 k lines of Rust, one crate. Files: \code{\verb~|src/frontend/parser.rs~} (parse), \code{\verb~|src/term/{expr,level,name,intern,id}.rs~} (term store), \code{\verb~|src/checker/value.rs~} (value/env/ctx stores), \code{\verb~|eval.rs~} + \code{\verb~|eval/{environment,reduction,whnf_cache}.rs~} (evaluator), \code{\verb~|conv.rs~} (conversion), \code{\verb~|infer.rs~} (inference), \code{\verb~|relevance.rs~} (proof-relevance signatures), \code{\verb~|quote.rs~} (read-back, used only by the WHNF store and inductive checking), \code{\verb~|cache.rs~} + \code{\verb~|ptrmap.rs~} (caches), \code{\verb~|tc.rs~} (driver, sessions, threads), \code{\verb~|inductive/*~} + \code{\verb~|quot.rs~} (admission), \code{\verb~|context.rs~} (per-thread context).}
+
+\subtree{
+\title{2.1 Data flow}
+
+\pre{\verb~|
+stdin --reader thread (4 MiB blocks cut at '\n')--> Parser.run_over (1 thread)
+   -> Terms {names, levels, level lists, exprs, strings, bignums}  +  declars: IndexMap<NameId, Declar>
+   -> Parser.finish: build name cache, then check_inductives()        [serial, dedicated 2 GiB-stack thread]
+        for every inductive block / Quot in export order: validate, DERIVE ctors' numFields, numIndices, isRec,
+        recursors, rules, K flag, Quot types; replace the parsed declarations by the derived ones;
+        promote the terms built on the way into the global store (inductive/persist.rs)
+   -> ExportFile (immutable, shared by reference)
+   -> check_all_declars: N worker threads; each claims chunks of 64 consecutive declaration indices from an
+      atomic counter and checks Axiom/Definition/Theorem/Opaque (inductives etc. are already done)
+   -> exit 0 accept / 1 reject / 2 decline / 3 internal error (src/main.rs:17-20)
+~}
+
+\p{Rejection is implemented as a typed panic (\code{\verb~|reject!~} -> \code{\verb~|panic_any(Rejection)~}, \code{\verb~|src/outcome.rs:74-79~}) caught per declaration by \code{\verb~|Reporter::check~}; a first failure sets \code{\verb~|stopped~}, other workers stop at their next chunk claim.}
+}
+
+\subtree{
+\title{2.2 Terms, levels, names}
+
+\ul{
+\li{All ids are \code{\verb~|u32~} newtypes; bit 31 = "local" (created by the checking thread, lives in the thread's \code{\verb~|Terms~}), clear = global (from the export) (\code{\verb~|term/id.rs:4-41~}). Two base pointers make \code{\verb~|node(e)~} branch-free (\code{\verb~|checker/context.rs:249-260~}).}
+\li{\code{\verb~|ExprNode~} is \strong{32 bytes}: \code{\verb~|expr: Expr~} (16 B tagged union of up to three \code{\verb~|u32~}), \code{\verb~|loose: u16~} (number of loose bvars = max index + 1), \code{\verb~|mask: u64~} (\code{\verb~|term/expr.rs:139-147~}). Pure de Bruijn, no free-variable node at all. \strong{Binder names and binder info are not stored} ("presentation metadata", \code{\verb~|expr.rs:20~}), \code{\verb~|nondep~} of \code{\verb~|let~} is stored but unused by the checker.}
+\li{\code{\verb~|mask~}: bit \code{\verb~|i~} (i < 63) set iff loose bvar \code{\verb~|i~} may occur; bit 63 (\code{\verb~|FAR~}) set iff some loose index >= 63 occurs. Computed bottom-up: \code{\verb~|app = f|a~}; binder body \code{\verb~|under_binder(m, loose) = (m >> 1) | (loose > 64 ? FAR : 0)~} (\code{\verb~|expr.rs:168-184,211-271~}). It is an over-approximation only around the FAR boundary.}
+\li{Export expressions are \strong{appended, not hash-consed}: \code{\verb~|Parser::push_expr~} calls \code{\verb~|Interner::push~} (\code{\verb~|frontend/parser.rs:684-687~}, \code{\verb~|term/intern.rs:48-52~}). The exporter already deduplicates. Only thread-local expressions built during checking are interned (\code{\verb~|context.rs:375-379~}). Names and levels are interned and a duplicate in the export is a rejection (\code{\verb~|parser.rs:665-681~}).}
+\li{Levels: \code{\verb~|Zero | Succ(l) | Max(l,r) | IMax(l,r) | Param(name)~}, interned, compared by id first. \code{\verb~|simplify~} memoised per level id for the whole thread; \code{\verb~|leq~} memoised per \code{\verb~|(l,r)~}; \code{\verb~|subst_level~} memoised per \code{\verb~|(level, params, args)~}; level-list substitution memoised per \code{\verb~|(list, params, args)~} (\code{\verb~|term/level.rs:31-123,207-219~}). The \code{\verb~|leq~} algorithm is nanoda's (\code{\verb~|leq_core~} with \code{\verb~|leq_imax_by_cases~}), unchanged.}
+\li{Declarations: \code{\verb~|Axiom|Quot|Theorem|Definition{hint}|Opaque|Inductive|Constructor|Recursor~} (\code{\verb~|checker/env.rs:57-80~}). Lookup is \code{\verb~|decl_of[name_index] -> declaration index~}, visible iff \code{\verb~|index < cutoff~} where cutoff = the index of the declaration being checked (\code{\verb~|env.rs:264-276~}). This is the whole ordering mechanism: a declaration can only see earlier declarations, whichever thread checks it.}
+}
+}
+
+\subtree{
+\title{2.3 Export parser (\code{\verb~|frontend/parser.rs~})}
+
+\ul{
+\li{Input: \code{\verb~|--stdin~} with stdin redirected from the file. A reader thread reads 4 MiB chunks, cuts at the last newline and hands blocks through a bounded channel of 2, recycling buffers (\code{\verb~|:271-327~}). Streaming replaced mmap of the whole file "to reduce peak memory" (\code{\verb~|84023dd~}); the path-argument mode still mmaps (\code{\verb~|src/config.rs:122-130~}). File length (fstat on stdin) presizes \code{\verb~|exprs~} and the index tables at \code{\verb~|len/48~} entries (\code{\verb~|:642-663~}).}
+\li{One parser thread, line at a time, no intermediate JSON tree. \code{\verb~|fast_line~} (\code{\verb~|:790-813~}) tests \code{\verb~|s[pos+2]=='a'~} and matches the most common line by literal bytes; everything else dispatches on bytes 2..3 in \code{\verb~|fast_body~} (\code{\verb~|:834-1053~}). Exact shapes matched (keys are alphabetical, no spaces; any mismatch falls back to \code{\verb~|serde_json~} for that line, so the accepted language is unchanged):}
+}
+
+\pre{\verb~|
+{"app":{"arg":A,"fn":F},"ie":I}                        {"bvar":K,"ie":I}
+{"const":{"name":N,"us":[L,..]},"ie":I}                {"forallE":{"binderInfo":"..","body":B,"name":N,"type":T},"ie":I}
+{"ie":I,"lam":{"binderInfo":"..","body":B,"name":N,"type":T}}
+{"ie":I,"letE":{"body":B,"name":N,"nondep":true|false,"type":T,"value":V}}
+{"ie":I,"natVal":"digits"}   {"ie":I,"proj":{"idx":K,"struct":S,"typeName":N}}   {"ie":I,"sort":L}   {"ie":I,"strVal":".."}
+{"il":I,"imax":[A,B]}  {"il":I,"max":[A,B]}  {"il":I,"param":N}  {"il":I,"succ":L}
+{"in":I,"num":{"i":K,"pre":P}}   {"in":I,"str":{"pre":P,"str":".."}}
+{"def":{"all":[..],"hints":"abbrev"|"opaque"|{"regular":H},"levelParams":[..],"name":N,"safety":"safe","type":T,"value":V}}
+{"thm":{"all":[..],"levelParams":[..],"name":N,"type":T,"value":V}}
+~}
+
+\p{Slow path (serde): \code{\verb~|meta~}, \code{\verb~|axiom~}, \code{\verb~|opaque~}, \code{\verb~|quot~}, \code{\verb~|inductive~}, strings containing a backslash, unsafe/partial definitions (declined), \code{\verb~|mdata~} (declined).}
+
+\ul{
+\li{Integers: SWAR, 8 digits per step (\code{\verb~|:350-371,422-449~}): \code{\verb~|x = le64(p) ^ 0x3030303030303030; nd = ((x + 0x7676767676767676) | x) & 0x8080808080808080; run = nd==0 ? 8 : ctz(nd)/8; v = x << ((8-run)*8); t = v*10 + (v>>8); val = (((t & 0x000000FF000000FF) * 0x000F424000000064) + (((t>>16) & 0x000000FF000000FF) * 0x0000271000000001)) >> 32~}. Newline search is SWAR too (\code{\verb~|:373-395~}).}
+\li{Export indices may be sparse or out of order: \code{\verb~|exprs_by_idx: Vec<Option<ExprId>>~} translates (dropped after parsing). A reference to an undefined index is a rejection.}
+\li{Per \code{\verb~|app~} line the work is: 3 integer parses, 2 table reads, \code{\verb~|loose = max~}, \code{\verb~|mask = or~}, one 32-byte append.}
+\li{Cost share: "Parsing was 13 \% of the bitvec run against 4 \% in sokonanoda, whose parser this mirrors" (nanoclo \code{\verb~|97f5cb9~}). Not parallel, not lazy: every expression including all proofs is materialised.}
+}
+}
+
+\subtree{
+\title{2.4 Value, spine, environment, context stores (\code{\verb~|checker/value.rs~})}
+
+\p{One \code{\verb~|Vals~} per worker thread, cleared per session. Everything is an index.}
+
+\pre{\verb~|
+VNode (40 bytes, :241-255)
+  kind: u8   Sort|NatLit|StrLit|BVar|Axiom|Ctor|Recursor|QuotConst|Inductive|Unfold|Lam|Pi   (Dummy at index 0)
+  flags: u8  SPINE_PROJ=1 (some projection in spine) | HAS_BVAR=2 | HEAD_ACTIVE=4 | IS_APP=8 | IS_PROJ=16
+  loose: u16 closure: loose-bvar count of the body;  proj node: field index
+  a,b,c,d: u32   payload (below)
+  step: u32  memo: one delta/iota step ("= self" means stuck); for Lam: the evaluated binder type
+  whnf: u32  memo: weak head normal form
+  ty:   u32  memo: type (a value)
+  key:  u64  lazily computed structural digest; bit 63 = present, bit 0 = "closed" (no BVar, no infer closure)
+
+payload by kind
+  Sort: a=level        NatLit: a=bignum id        StrLit: a=string id
+  Lam:  a=env, b=binder type ExprId (unevaluated), c=body ExprId
+  Pi:   a=domain value, b=env, c=body ExprId, d=ctx+1 (0 = plain eval closure, else an INFER closure, 2.8)
+  head: BVar: a=de Bruijn LEVEL, b=type value;   constants: a=name, b=level-list id
+  application node (IS_APP):  a=function value (the spine prefix), b=argument value, c=head node, d=spine length,
+                              kind copied from the head, flags inherited
+  projection node (IS_PROJ):  a=struct value (prefix), b=structure name, c=head, d=length, loose=field index
+~}
+
+\ul{
+\li{A neutral \code{\verb~|h a1 a2 a3~} is the left-nested chain \code{\verb~|((h a1) a2) a3~}; \strong{the value id is the spine id}. Every prefix is itself a value and is shared. Head kind, head pointer and length are O(1) from any node.}
+\li{Hash-consing: applications in a dedicated table \code{\verb~|apps: (f,a) -> id~} (\code{\verb~|:1038-1065~}), everything else in one table keyed on the packed fields (\code{\verb~|:979-994~}). A fresh variable is \code{\verb~|BVar(level, type)~}: interned, so opening the same binder twice at the same depth with the same type yields the same value and everything built on it coincides.}
+\li{\code{\verb~|Unfold~} = a constant that has a body (Definition or Theorem), kept folded: smalltt's "glued" value. Its head node memoises the evaluated body in \code{\verb~|step~}; every application node memoises its own unfolding in \code{\verb~|step~}.}
+\li{Closure = \code{\verb~|(env: E, ctx: Option<C>, body: ExprId, loose: u16)~}; lives inside Lam/Pi nodes, not a separate object.}
+\li{Environments (\code{\verb~|EnvNode~}, 24 B, \code{\verb~|:320-328~}): \code{\verb~|Nil(lsub)~} | \code{\verb~|Cons{v, parent}~} (interned on \code{\verb~|(parent, v)~}) | \code{\verb~|Framed{mask, start, cut, rest}~} = a pruned frame: for indices \code{\verb~|0..cut~} the present ones (bits of \code{\verb~|mask~}) are stored densely in a side array \code{\verb~|env_slots[start..]~}; lookup of index \code{\verb~|i < cut~} is \code{\verb~|slot[start + popcount(mask & ((1<<i)-1))]~} (\code{\verb~|:858-890~}). No jump pointers: a \code{\verb~|Cons~} chain is walked linearly.}
+\li{\strong{Universe instantiation is part of the environment}: the \code{\verb~|Nil~} node carries an optional \code{\verb~|lsub~} id naming \code{\verb~|(params, args)~}. \code{\verb~|eval~} of \code{\verb~|Sort~}/\code{\verb~|Const~} applies the substitution on the fly (memoised). Definition bodies, types and recursor rules are therefore \em{never copied per universe instantiation} (\code{\verb~|eval/environment.rs:64-72~}, \code{\verb~|eval.rs:151-171~}).}
+\li{Typing contexts (\code{\verb~|CtxNode{ty, parent}~}) are a plain linked list, not interned; used only by inference.}
+\li{Digest (\code{\verb~|:687-795~}): 64-bit structural hash through closures (body id + the first \code{\verb~|loose-1~} environment slots), used only for the cross-session WHNF store.}
+}
+}
+
+\subtree{
+\title{2.5 Evaluation (\code{\verb~|checker/eval.rs~})}
+
+\pre{\verb~|
+eval(env, e):                                   # :29-70
+  Var i          -> env_lookup(env, i)          # no cache, no forcing (values are never thunks)
+  loose(e) == 0  -> lsub(env) is None ? closed_eval_cache[e] : closed_lsub_eval_cache[(e, lsub)]
+                    (computed under the bare Nil(lsub) environment)
+  open App|Proj|Let|Pi|Lambda -> te = prune_env(env, mask(e)); open_eval_cache[(te, e)]   (computed under te)
+
+eval_no_cache(env, e):                          # :72-207
+  Sort l            -> Sort(simplify(subst(l)))
+  Const c ls        -> const_head_value_cache[(c, subst(ls))]: Unfold head | Ctor | Recursor | Quot | Inductive | Axiom
+                       (Opaque and unknown constants are Axiom heads)
+  Lambda t b        -> Lam{env = prune_env(env, mask(e)), binder type t unevaluated, body b}       # O(1)
+  Pi t b            -> Pi{domain = eval(env,t), closure(prune_env(env, mask(e)), b)}
+  Let x := v; b ... -> env' = env + eval(env, v) for each nested let; eval(env', body)             # zeta = bind
+  Proj S i s        -> do_proj(S, i, eval(env, s))                                                 # forces WHNF of s!
+  App               -> peel the spine (16 inline args); f = eval(head); eval_spine(f, args)
+     special case: argument is itself an application, e.g. succ (succ (.. x)) -> iterative loop, no recursion
+
+eval_spine(f, args):                            # :219-257
+  f is a bare Recursor/Quot head: evaluate all args; if the major is ALREADY a constructor / Nat / String
+       literal -> fire the rule now (fire_saturated :259-301); else neutral
+  f is Lam: extend the closure env with as many evaluated args as there are nested lambdas, eval the body once
+  else: apply(f, a) = existing application node if (f,a) is interned and inert, else
+        Lam -> eval(body, env+a) | Nat.succ on a literal -> literal | neutral application node
+~}
+
+\p{Consequences: beta, zeta and projection-of-constructor are done at evaluation time; \strong{delta and iota are lazy} (except iota on syntactic constructor majors); arguments are evaluated strictly but an argument that is a constant application costs one interned node. There is no separate \code{\verb~|whnf_core~}.}
+
+\p{\code{\verb~|prune_env(env, mask)~} (\code{\verb~|eval/environment.rs:75-214~}) returns an interned environment that agrees with \code{\verb~|env~} on the indices in \code{\verb~|mask~} and has nothing else: \code{\verb~|mask==0~} -> bare \code{\verb~|Nil(lsub)~}; already minimal -> itself; else a 2^14-entry direct-mapped cache on \code{\verb~|(env, mask)~}; else build a \code{\verb~|Framed~} node from the first 63 positions and, if \code{\verb~|FAR~} is set, keep the untouched tail as \code{\verb~|rest~}. Frames are interned by content.}
+}
+
+\subtree{
+\title{2.6 Reduction (\code{\verb~|eval/reduction.rs~})}
+
+\ul{
+\li{\strong{Delta} \code{\verb~|unfold_value~} (\code{\verb~|:373-441~}): memo in \code{\verb~|step~}; evaluate the constant's body once per \code{\verb~|(name, levels)~} per session (\code{\verb~|unfold_const_cache~}), then apply it to the already evaluated spine in runs (\code{\verb~|apply_many~} extends the closure env by k arguments for k nested lambdas, \code{\verb~|eval.rs:427-450~}), interleaving projections.}
+\li{\strong{WHNF} \code{\verb~|whnf_head~}/\code{\verb~|force_all~} (\code{\verb~|eval.rs:579-619~}, \code{\verb~|reduction.rs:140-216~}): loop \verb~|{~Unfold -> unfold; Recursor/Quot -> iota step\verb~|}~ with the result memoised in \code{\verb~|whnf~}. \code{\verb~|force_reducible~} keeps an explicit stack of recursors waiting for their major premise instead of recursing.}
+\li{\strong{Iota} \code{\verb~|fire_recursor~} (\code{\verb~|:520-558~}): order is (1) for K recursors, K \em{before} touching the major (\code{\verb~|k_pre_reduce~}: needs only the major's type); (2) WHNF of the major; (3) Nat literal major on \code{\verb~|Nat.rec~}: direct \code{\verb~|zero~}/\code{\verb~|succ (n-1)~} step without building constructors; (4) literal -> constructor; (5) K again; (6) structure eta: neutral major of a structure-like type becomes \code{\verb~|mk params (major.0) .. (major.n)~}; (7) pick the rule by constructor name, take its RHS value from \code{\verb~|rec_rule_cache[(rule, levels)]~} (evaluated once), apply to params+motives+minors, then the constructor fields, then the extra arguments.}
+\li{\strong{K} (\code{\verb~|try_k_reduce :639-671~}): major must be neutral; build \code{\verb~|ctor params~} from the major's \em{type}, infer its type and require \code{\verb~|conv(type(major), type(ctor params))~} (run outside any probe budget).}
+\li{\strong{Projection} \code{\verb~|do_proj~} (\code{\verb~|:33-70~}): takes the WHNF of the structure immediately; constructor -> field; literal -> constructor first; otherwise appends a \code{\verb~|Proj~} elimination to the \em{reduced} neutral. This is eager where the official kernel is lazy (\code{\verb~|whnf_core~} with cheap projections, lazy-delta on \code{\verb~|s.i =?= t.i~}).}
+\li{\strong{Quot} \code{\verb~|fire_quot~} (\code{\verb~|:720-754~}): \code{\verb~|Quot.lift~} (major at 5) / \code{\verb~|Quot.ind~} (major at 4) on \code{\verb~|Quot.mk _ _ a~}.}
+\li{\strong{Nat literals} (\code{\verb~|:373-402,756-802~}, \code{\verb~|eval.rs:621-635~}): \code{\verb~|Nat.add/sub/mul/pow/div/mod/gcd/beq/ble/land/lor/xor/ shiftLeft/shiftRight~}, \code{\verb~|Nat.succ~}, plus \code{\verb~|Nat.div.go~}/\code{\verb~|Nat.modCore.go~} are recognised by name. They stay folded \code{\verb~|Unfold~} neutrals; when \em{unfolded} the checker first tries GMP-style arithmetic if both arguments reduce to literals. Two guards: (a) "symbolic" mode - when either side of the current comparison has a free variable, native arithmetic is not attempted and the unfolding is memoised in a separate table; (b) "defer" - for \code{\verb~|add/sub/mul/pow~} whose second argument is a literal wider than 8 bits, structural unfolding is refused unless the caller demands it (\code{\verb~|force~}), which avoids unary recursion against a big literal.}
+\li{\strong{String literals}: converted to \code{\verb~|String.ofList [Char.ofNat n, ..]~} and evaluated only when a projection or recursor needs a constructor (\code{\verb~|:681-686~}).}
+\li{No compiled forms for matchers / \code{\verb~|casesOn~} / \code{\verb~|brecOn~} / well-founded recursion: they are ordinary \code{\verb~|Unfold~} constants. No \code{\verb~|eagerReduce~} gadget, no \code{\verb~|reduceBool~}/\code{\verb~|reduceNat~} (they are opaque constants, never reduce).}
+}
+}
+
+\subtree{
+\title{2.7 Definitional equality (\code{\verb~|checker/conv.rs~}) - exact order}
+
+\p{Entry points: \code{\verb~|def_eq_at(x,y) = proof_irrel(x,y) || unify(x,y)~}; \code{\verb~|conv_types_at(a,b) = a==b || unify(a,b)~}; both run "unbudgeted" (they suspend any enclosing probe, \code{\verb~|:40-59~}).}
+
+\pre{\verb~|
+unify(x, y):
+ 0. x == y (ids)                                               -> true
+ 1. if either kind is Pi|Lam|Unfold|Recursor|Quot: pair caches, key = sorted (x,y)
+      conv_cache_pos hit -> true;  conv_cache_neg hit (not if a side is Lam) -> false
+      inside a probe: conv_cache_neg_probe hit -> mark probe exhausted, false
+ 2. inside a probe: budget==0 -> exhausted, false; else budget -= 1
+ 3. conv_nat: both zero -> true; both have a predecessor (succ n | literal>0) -> unify(pred, pred)
+ 4. same-shape cases (unify_direct :154-450)
+    Sort/Sort           level antisymmetry (leq both ways, cached)
+    lit/lit             id equality
+    BVar/BVar           same level -> spines
+    Ctor/Ctor, Inductive/Inductive, Axiom/Axiom   same name, levels equal -> spines with relevance signature
+    Recursor|Quot pair  if same head: PROBE spines -> true;  proof_irrel;  one iota step on each side, recurse
+                        if either moved;  else same head -> spines;  else false
+    Pi/Pi               fast path: same body ExprId && same domain id && same ctx && envs equal -> true
+                        else unify domains; fresh = BVar(depth, domain); apply both closures; unify at depth+1
+    Lam/Lam             same, with the binder types evaluated lazily (memo in `step`)
+    Unfold/Unfold       same head: PROBE spines -> true;  proof_irrel;  then
+                          same head            -> unfold both, recurse
+                          hint(x) < hint(y)    -> unfold y; if stuck unfold x; if stuck force-unfold y
+                          hint(y) < hint(x)    -> symmetric;      equal hints -> unfold both
+                        (Abbrev highest, then Regular(h) by height, Theorem/Opaque lowest: env.rs:27-34)
+    Unfold/other        proof_irrel; unfold the Unfold side (then forced); recurse
+    Recursor|Quot/other proof_irrel; iota on it; else iota/unfold the other side; else false
+ 5. otherwise (unify_cold :690-715): proof_irrel; eta (Lam vs non-Lam: apply both to a fresh variable);
+    structure eta: if a side's type is structure-like: types must unify, then unit-like -> true,
+    else compare `x.i` with the constructor fields of y (both directions)
+ 6. record the result in pos / neg (or neg_probe if the probe was truncated)
+~}
+
+\ul{
+\li{\strong{Spine comparison} (\code{\verb~|unify_spine :614-661~}) recurses to the common prefix first (id-equal prefixes stop it), then left to right. Arguments at \em{ignorable} positions are skipped.}
+\li{\strong{Relevance signature} \code{\verb~|Sig~} per \code{\verb~|(constant, levels)~} (\code{\verb~|relevance.rs:13-62,103-218~}), computed once from the constant's type telescope (up to 64 arguments): \code{\verb~|prop_arg~} (argument i is a proof, i.e. its type's sort is 0 under the level instantiation), \code{\verb~|absent_arg~} (for definitions: binder i is used neither in the value's body nor in the rest of the type), \code{\verb~|prop_result~}/\code{\verb~|result_known~} (after k arguments the result is / is not a proof). Uses: skip proof and absent arguments in spines; \code{\verb~|statically_not_proof(v)~} skips the whole proof-irrelevance test (which needs a type) when the head says the result cannot be a proof.}
+\li{\strong{Proof irrelevance} (\code{\verb~|:749-799~}): both neutral, neither statically a non-proof, \code{\verb~|type(x)~} is a Prop, \code{\verb~|type(y)~} is a Prop, \code{\verb~|conv(type x, type y)~}. Under lambdas: unify domains, apply both to a fresh variable, recurse. Positive only (nanoda has a 3-valued version: proofs of non-convertible props are unequal). "Is a Prop" = \code{\verb~|level_of_type(t)~} is syntactically always zero; \code{\verb~|level_of_type~} reads the result sort of the head constant's telescope (\code{\verb~|const_result_level~}, cached) and only falls back to computing a type.}
+\li{\strong{Probe = bounded speculation} (\code{\verb~|:501-535~}, \code{\verb~|PROBE_CAP = 2048~}): for two applications of the same constant (or recursor) each pair of relevant arguments is compared with a fresh budget of 2048 \code{\verb~|unify~} steps. All pairs equal within budget -> equal. A pair definitely unequal -> stop probing and unfold. Budget exhausted -> undecided, unfold. Negatives found by a truncated probe go to a quarantine set that is consulted only inside probes and cleared when a probe is exhausted; inside a probe "forced" unfolding is disabled. Anything that feeds a memoised \em{reduction} (K check, structure eta, proof irrelevance, inference) runs unbudgeted so that memo slots never contain budget-dependent answers.}
+\li{smalltt ideas actually present: glued neutrals with lazy unfolding; spine-first comparison with backtracking to unfolding; de Bruijn levels for fresh variables. smalltt's three unfolding modes survive only as a dead \code{\verb~|const RIGID: bool~} parameter that is \code{\verb~|true~} at every entry point; the budgeted probe replaced them. Not from smalltt: hash-consing of values, pair caches, pruning, signatures.}
+\li{Differences from the official kernel that are deliberate: no syntactic \code{\verb~|whnf_core~} phase; projections are eager; lazy delta compares spines \em{under a budget} before unfolding; lambdas compare binder types; proof and unused arguments are never compared; no \code{\verb~|Bool.true~} eager-evaluation special case; no union-find.}
+}
+
+\p{Checklist of what is \em{not} computed (each verified in the code above, effect sizes not published): id equality at every entry; pair caches; Pi/Lam fast path without going under the binder; shared spine prefixes; proof and unused arguments; the proof-irrelevance type when the head rules it out; unfolding when the probe settles it; binder types of lambdas until two lambdas are compared; the major premise for K recursors; unary recursion against big literals; intermediate function types in application spines; non-dependent arguments in \code{\verb~|InferOnly~}; codomains of lambdas in \code{\verb~|InferOnly~}; re-checking closed export subterms; universe-parameter checks of a leaf more than once per declaration.}
+}
+
+\subtree{
+\title{2.8 Type inference (\code{\verb~|checker/infer.rs~})}
+
+\p{\code{\verb~|infer_value(flag, depth, env, ctx, e) -> V~}. \code{\verb~|env~} maps bvars to values (fresh \code{\verb~|BVar~} for binders, the \em{value} for lets); \code{\verb~|ctx~} maps bvars to type values. Result is a value; nothing is quoted.}
+
+\pre{\verb~|
+Var i     -> ctx_lookup(ctx, i)
+Sort l    -> (Check: every Param of l is declared; memo per (expr, declaration) in a 4096-slot stamp table) Sort(l+1)
+Const     -> (Check: same for its levels) const_head_type_cache[(name, levels)] = eval(type under lsub)
+literals  -> Nat / String
+App|Lam|Pi|Let|Proj:
+   key = (prune_env(env, mask(e)), e);  type_cache hit if (flag == InferOnly || entry.checked_under == current uparams)
+   if Check && e is closed && e is an export expression && (e, uparams) in checked_closed: downgrade to InferOnly
+   Lam t b : dom = eval(t);  Check: t infers to a sort; infer b under env+BVar(depth,dom), ctx+dom (result kept
+             only in type_cache, apart from one sharing special case for `A -> A`)
+             result = Pi{dom, INFER closure(prune_env(env, mask(e)), ctx, b)}        # codomain not computed
+   Pi t b  : l1 = sort of t; l2 = sort of b under a fresh variable; Sort(simplify(imax l1 l2))
+   Let     : dom = eval(t); Check: t is a sort, conv(dom, infer v); env+eval(v), ctx+dom; infer body
+   Proj    : infer s, WHNF, must be the named inductive, exactly one constructor, fully applied; walk the
+             constructor telescope substituting params and earlier projections `s.j`; Prop structure: a
+             dependent earlier field or the projected field must be a proof (rejects data out of Prop)
+   App     : see below
+   after a successful Check of a closed export expression: checked_closed += (e, uparams)
+~}
+
+\p{Applying an \em{infer closure} to a value \code{\verb~|a~} runs \code{\verb~|infer_value(InferOnly, env+a, ctx+dom, body)~} (\code{\verb~|eval.rs:452-474~}): "substitution into the inferred type" is re-inference under an extended environment, memoised by \code{\verb~|type_cache~}. When the body was just checked under the same fresh variable, that is a cache hit.}
+
+\p{\code{\verb~|infer_app_v~} (\code{\verb~|:270-337~}): infer the head; then keep the function type as a pair \code{\verb~|(tenv, T)~} where \code{\verb~|T~} is a Pi \em{expression}: for each argument, if \code{\verb~|T = Pi dom body~} syntactically: (Check: \code{\verb~|conv(eval(tenv, dom), infer arg)~}), then \code{\verb~|tenv += (body ignores its binder ? placeholder : eval(arg))~}, \code{\verb~|T = body~} - no value is built for the intermediate type. Only when \code{\verb~|T~} is not a syntactic Pi is it evaluated and forced to a Pi value. The final type is \code{\verb~|eval(tenv, T)~}. The placeholder (one shared dummy value) for non-dependent binders both skips the argument's evaluation in \code{\verb~|InferOnly~} mode and makes environments coincide.}
+
+\p{What is skipped and why it is sound: \code{\verb~|InferOnly~} skips argument/let conversion checks and all binder-type checks; it is used (a) for terms the checker itself built or already checked, (b) for closed export terms found in \code{\verb~|checked_closed~}, which is keyed by the universe-parameter list and is only populated by declarations checked in export order (\code{\verb~|ordered_declaration~}, \code{\verb~|tc.rs:64~}), so everything visible then is visible now.}
+}
+
+\subtree{
+\title{2.9 Caches (all per worker thread; \code{\verb~|checker/cache.rs:99-131~}, \code{\verb~|context.rs:184-202~})}
+
+\table{
+\tr{\th{cache}\th{key -> value}\th{lifetime}}
+\tr{\td{value interning (\code{\verb~|apps~}, \code{\verb~|table~}, \code{\verb~|env_table~}, \code{\verb~|frames~})}\td{structure -> id}\td{session}}
+\tr{\td{node memo slots \code{\verb~|step~}, \code{\verb~|whnf~}, \code{\verb~|ty~}, \code{\verb~|key~}}\td{value id}\td{session}}
+\tr{\td{\code{\verb~|closed_eval_cache~} / \code{\verb~|closed_lsub_eval_cache~}}\td{\code{\verb~|ExprId~} / \code{\verb~|(ExprId, lsub)~} -> V}\td{session}}
+\tr{\td{\code{\verb~|open_eval_cache~}}\td{\code{\verb~|(pruned E, ExprId)~} -> V}\td{session}}
+\tr{\td{\code{\verb~|type_cache~}}\td{\code{\verb~|(pruned E, ExprId)~} -> (type V, checked-under scope)}\td{session}}
+\tr{\td{\code{\verb~|conv_cache_pos~}, \code{\verb~|conv_cache_neg~}, \code{\verb~|conv_cache_neg_probe~}}\td{sorted \code{\verb~|(V,V)~}}\td{session (probe set: one probe)}}
+\tr{\td{\code{\verb~|unfold_const_cache~}, \code{\verb~|const_head_type_cache~}, \code{\verb~|const_head_value_cache~}, \code{\verb~|const_result_level_cache~}, \code{\verb~|rec_rule_cache~}}\td{\code{\verb~|(name, levels)~} or \code{\verb~|(rule ExprId, levels)~}}\td{session}}
+\tr{\td{\code{\verb~|prune_dm~}}\td{direct-mapped 2^14 x \code{\verb~|(mask, E) -> E~}}\td{session}}
+\tr{\td{\code{\verb~|quote_cache~}, \code{\verb~|global_value_cache~}}\td{\code{\verb~|(V, depth)~}}\td{session}}
+\tr{\td{\code{\verb~|struct_eta_cache~}, \code{\verb~|arithmetic_delta_cache~}, \code{\verb~|level_subs~}}\td{\code{\verb~|(V, name)~}, \code{\verb~|V~}, \code{\verb~|(ks, vs)~}}\td{session}}
+\tr{\td{\code{\verb~|whnf_store~} (+ two 64 Kbit filters + 4 M-entry admission counters)}\td{digest -> (128-bit key, source ExprId, result ExprId)}\td{thread}}
+\tr{\td{\code{\verb~|checked_closed~}}\td{\code{\verb~|(ExprId, uparams)~}}\td{thread}}
+\tr{\td{\code{\verb~|sig_cache~}, \code{\verb~|sig_templates~}}\td{\code{\verb~|(name, levels)~}, \code{\verb~|name~}}\td{thread}}
+\tr{\td{level caches (\code{\verb~|simplify~}, \code{\verb~|leq~}, \code{\verb~|subst_level~}, \code{\verb~|subst_levels~})}\td{level ids}\td{thread}}
+\tr{\td{\code{\verb~|leaf_checked~}}\td{4096 slots \code{\verb~|(ExprId, declaration stamp)~}}\td{declaration}}
+}
+
+\ul{
+\li{\strong{Session} (\code{\verb~|tc.rs:83-118~}): after each declaration, if the value store holds more than \code{\verb~|SESSION_BUDGET = 9 MiB~} (nodes x 40 + envs x 24 + ...), every session cache is reset; otherwise the next declaration starts with all of them warm. If the arena's capacity grew beyond 36 MiB it is freed instead of reused.}
+\li{\strong{WHNF store} (\code{\verb~|eval/whnf_cache.rs~}): on the first WHNF of a value in a session that took >= 1 step and is closed: bump an admission counter; on the third sighting quote source and result to (interned, thread-local) expressions and store them. Lookup: head filter bit -> closed? -> digest filter bit -> table -> 128-bit key equal -> \strong{\code{\verb~|quote(v) == stored source ExprId~}} (exact structural check: a digest collision can only cost a miss) -> \code{\verb~|eval(result)~}. An earlier shortcut that accepted two recursor applications as convertible when their 64-bit structural hashes were equal was removed as unsound (\code{\verb~|70bd739~}).}
+\li{\code{\verb~|PtrMap~} (\code{\verb~|checker/ptrmap.rs~}): open addressing, linear probing, a separate 1-byte tag array (7 hash bits | 0x80, 0 = vacant), Fibonacci hashing of 1-3 packed \code{\verb~|u64~} words, 75 \% load, no deletion. \code{\verb~|find~} returns the vacant slot so the following insert does not probe again (guarded by an epoch counter). \code{\verb~|reset~} = fill the tag bytes; \code{\verb~|reset_shrink~} reallocates when the table is 4x larger than needed, so small declarations keep small tables.}
+}
+}
+
+\subtree{
+\title{2.10 Declaration admission}
+
+\ul{
+\li{Definitions/theorems/opaques (\code{\verb~|infer.rs:425-450~}): no duplicate universe params; type infers to a sort (Prop for theorems); \code{\verb~|infer(Check, value)~}; \code{\verb~|def_eq(inferred, eval(type))~}. Axioms: type only. All theorem proofs are fully checked.}
+\li{Inductives (\code{\verb~|inductive/mod.rs:26-156~}), per mutual block, against only the declarations before the block: check the types, uniform parameter occurrences, constructor types, nested occurrences (specialised to auxiliary types as the C++ kernel does), positivity, universe constraints; \strong{generate} large-elimination level, motives, minors, recursor types and rules, K flag; type-check the generated recursors and that each rule's LHS and RHS have convertible types (\code{\verb~|recursor.rs:326-369~}); for nested blocks translate the auxiliary recursors back. The derived declarations replace the block. The parser does not even read \code{\verb~|recs~}, \code{\verb~|numIndices~}, \code{\verb~|isRec~} or constructor \code{\verb~|numFields~} (\code{\verb~|parser.rs:253-259,1353-1416~}).}
+\li{Quot: only the name is read; \code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~} types are constructed by the checker after verifying \code{\verb~|Eq~}/\code{\verb~|Eq.refl~} have the expected shape (\code{\verb~|quot.rs:48-111,114-293~}).}
+\li{Axioms: arena runs with \code{\verb~|--axiom-allow-all~}; default policy allows \code{\verb~|propext~}, \code{\verb~|Classical.choice~}, \code{\verb~|Quot.sound~} and warns otherwise (\code{\verb~|config.rs:13,49-65~}). Unsafe/partial declarations: decline (exit 2).}
+\li{A loose bound variable in a declaration is not rejected but panics ("internal error", exit 3; arena \code{\verb~|tests/bugs/loose-bvar-value.yaml~}).}
+}
+}
+
+\subtree{
+\title{2.11 Parallelism, memory, build}
+
+\ul{
+\li{Workers: \code{\verb~|--threads 4~}; chunk = 64 consecutive declarations per atomic \code{\verb~|fetch_add~} (\code{\verb~|tc.rs:13,134-167~}); 2 GiB thread stacks, plain recursion (\code{\verb~|lib.rs:15~}). No shared mutable state except the counter and the reporter. Verdict is deterministic (all declarations must pass); which failure is reported first is not.}
+\li{Each worker owns: a \code{\verb~|TcCtx~} (thread-local \code{\verb~|Terms~} for expressions/levels/names it creates, level caches, signatures, \code{\verb~|checked_closed~}) and a \code{\verb~|TcCache~} (sessions). Nothing learned by one worker is visible to another.}
+\li{Memory: 32 B per export expression + 9-36 MiB of session arena per worker + 4 MiB admission table per worker. Peak 5.0 GB on the arena. No lazy loading; the streaming reader exists to keep the input file out of RSS.}
+\li{Build: \code{\verb~|opt-level=3~}, \code{\verb~|lto="fat"~}, \code{\verb~|codegen-units=1~}, \code{\verb~|overflow-checks=false~}, mimalloc as global allocator, arena adds \code{\verb~|-C target-cpu=native~} (\code{\verb~|Cargo.toml:10-14~}, \code{\verb~|main.rs:14-15~}). No PGO in the arena build (commit \code{\verb~|792a5f9~} "ignore *.profdata" shows it was tried). nanobruijn measured PGO < 1 \% and \code{\verb~|target-cpu=native~} as a regression on its code; mathgraph uses PGO only to make its Callgrind comparisons deterministic.}
+}
+}
+}
+
+\subtree{
+\title{3. mathgraph (delta to sokonanoda@\code{\verb~|28c03d0~}, the pointer-based September representation)}
+
+\p{Source delta is 150 lines in \code{\verb~|src/eval.rs~}, \code{\verb~|src/infer.rs~}, \code{\verb~|src/util.rs~}, \code{\verb~|src/flash.rs~}; the rest of the 75 commits is an experiment-tracking harness (\code{\verb~|experiments/*.py~}, workflows). Flags in \code{\verb~|src/flash.rs~}:}
+
+\table{
+\tr{\th{change}\th{where}\th{measured (their manifests)}}
+\tr{\td{\code{\verb~|DIRECT_VAR_EVAL~}: test "is this a bare variable" before any cache logic in \code{\verb~|eval~}}\td{\code{\verb~|eval.rs:607~}}\td{mathlib 1.020x}}
+\tr{\td{\code{\verb~|DIRECT_FRAMED_PRUNE~}: pruning an already-\code{\verb~|Framed~} environment selects slots by mask arithmetic instead of walking}\td{\code{\verb~|eval.rs:197~}}\td{mathlib 1.041x (re-run), -1.40 \% (first run); std -4.5 \%}}
+\tr{\td{\code{\verb~|RIGID_INDUCTIVE_NEUTRAL~}: applying an inductive-type head goes straight to the app intern table}\td{\code{\verb~|eval.rs:740~}}\td{not recorded in repo \strong{\verb~|[~unverified\verb~|]~}}}
+\tr{\td{\code{\verb~|APP_HC_PREALLOC~}: app intern table starts at 2^16}\td{\code{\verb~|util.rs:1114~}}\td{not recorded \strong{\verb~|[~unverified\verb~|]~}}}
+\tr{\td{\code{\verb~|INFER_PI_DEMAND_BYPASS~}: \code{\verb~|infer_app~} does not call \code{\verb~|force_all~} when the function type is already a Pi}\td{\code{\verb~|infer.rs:178~}}\td{not recorded \strong{\verb~|[~unverified\verb~|]~}}}
+\tr{\td{2 worker threads instead of 4}\td{arena yaml}\td{not recorded \strong{\verb~|[~unverified\verb~|]~}}}
+\tr{\td{\code{\verb~|ORDINARY_UNFOLD_NEUTRAL~} (same shortcut for folded constants)}\td{disabled}\td{1.027x in isolation, not promoted}}
+}
+
+\p{Rejected with numbers: general memo for universe-level equality (mathlib 3.2 \% slower); two variants of "skip the app table on first sight" (+2.6 \%, +1.2 \%); continuing lazy delta on the same head without re-entering \code{\verb~|unify~} (regressed std/cedar/mathlib). Census of the September evaluator (run on the manifest's target, presumably mathlib): 284.6 M "simple apply" events = 16.9 \% of \code{\verb~|eval~} entries (so ~1.7 G \code{\verb~|eval~} entries in total \strong{\verb~|[~derived\verb~|]~}), 61 \% of them with a folded-constant function, 28 \% with an inductive head; app intern table hit rate 44 \%; arguments already canonical 90 \%. Sokonanoda later absorbed all of this differently (October rewrite); nothing in mathgraph is missing from sokonanoda HEAD except the 2-thread choice.}
+}
+
+\subtree{
+\title{4. nanoclo}
+
+\p{Design (README; \code{\verb~|src/closure.rs~}, \code{\verb~|nbe*.rs~}, \code{\verb~|tc.rs~}, \code{\verb~|fuse.rs~}):}
+
+\ul{
+\li{\strong{Inference on closures \code{\verb~|(ExprPtr, EnvId)~}, values only for conversion.} Environment entry = \code{\verb~|Val(expr, env)~} (delayed argument) | \code{\verb~|Neu(local)~} (opened binder, a nanoda \code{\verb~|Local~} expression carrying its type) | \code{\verb~|V(value id)~}. Types are closures; \code{\verb~|infer_lambda~} must \em{reify} the body type (substitute the environment into the expression, memoised per \code{\verb~|(expr, env, offset)~}) and abstract the opened binders to build a Pi expression (\code{\verb~|tc.rs:693-731~}). \code{\verb~|infer_app~} threads \code{\verb~|(body, env + arg closure)~} and first tries a syntactic equality-modulo-environment test \code{\verb~|eq_mod~} before evaluating both types (\code{\verb~|tc.rs:771-835~}, \code{\verb~|closure.rs:893-1008~}).}
+\li{\strong{Interned environments} (\code{\verb~|closure.rs:36-44,382-429~}): node \code{\verb~|{entry, parent, len, next_level, jump}~}, interned on \code{\verb~|(parent, entry)~}; entries are normalised first (variable chains chased, closed terms drop their env) so the same binding reached two ways gives the same environment.}
+\li{\strong{Skew-binary (Myers) jump pointers}: \code{\verb~|jump(new) = (len(p)-len(jump(p)) == len(jump(p))-len(jump(jump(p)))) ? jump(jump(p)) : p~}; lookup of index \code{\verb~|i~} descends by \code{\verb~|jump~} when it does not overshoot, else by \code{\verb~|parent~}: O(log i) (\code{\verb~|closure.rs:416-423,583-607~}). Measured: beta ladder n = 32000, 0.93 s -> 0.12 s (\code{\verb~|1ec0690~}).}
+\li{\strong{Read sets} (\code{\verb~|closure.rs:76-99,434-489~}): per expression \code{\verb~|Dense | Mask(u64) | Wide(<= 8 words) | Deep~}. A cache key is \code{\verb~|(expr, env projected on the read set)~}; for thunks an interned \em{view} (the list of read entries) replaces rebuilding an environment (\code{\verb~|:633-717~}). Past 512 indices the whole environment is the key, because exact projection at every node of an n-binder ladder is quadratic (measured, \code{\verb~|554586c~}).}
+\li{Values (\code{\verb~|nbe.rs:66-99~}) are sokonanoda's August design, \em{with} thunks (\code{\verb~|Thunk{env, expr, forced}~}), interned per kind in separate hash maps; the first stuck head takes all remaining arguments in one step.}
+\li{Conversion = sokonanoda's, plus \strong{iterative deepening of the probe}: budget 4096 steps for a comparison and everything nested; an aborted probe records its spine pair (never probed again) and grants the next probe on the unfolding chain twice the budget, capped at 2^20 (\code{\verb~|nbe_conv.rs:380-420~}). "One comparison in the FLT export needs ~10^7 steps; restarting it from zero every 4096 steps kept the checker on one theorem for 13 hours. With the deepening the theorem checks in 0.25 s" (\code{\verb~|4cdd12f~}).}
+\li{\strong{Wrapper fusion} (\code{\verb~|fuse.rs~}): rewrite a definition's body once: unfold matchers, \code{\verb~|casesOn~}, \code{\verb~|recOn~}, \code{\verb~|brecOn~}, \code{\verb~|binductionOn~}, \code{\verb~|_sparseCasesOn*~} and small abbreviations (<= 512 / 256 nodes), contract the exposed beta redexes when no costly argument is duplicated, fire recursors on syntactic constructors, project out of constructors. Measured: magma-list-deep-n36 67.4 G -> 7.3 G cycles and 4.2 -> 0.7 GB; Init -22 \%, Std -10 \% instructions (\code{\verb~|35c2a76~}). \strong{But always-on fusion doubled mathlib (177 -> 339 s)} because conversion often succeeds by comparing two \em{folded} matcher/instance applications. Final policy: check without fusion, count wrapper unfoldings, past 20 000 abort and re-check the declaration with fused bodies; 6 mathlib declarations cross the gate (\code{\verb~|e1307e1~}).}
+\li{Caches are reset per declaration (\code{\verb~|tc.rs:91-92~}); only the serial driver keeps the scratch DAG. Memo eviction was tried and removed: evicting the WHNF memo mid-declaration turned 2.1 s into > 300 s on a nested-beta family ("a 250x cliff on one family is not worth 6 GB on another", \code{\verb~|006d5aa~}); two-generation maps are kept only for memos that are safe to drop.}
+\li{Misc measured: rustc-hash 1.x low-bit weakness on \code{\verb~|(parent<<32 | x)~} keys cost 2.5x on one test, fixed by upgrading (\code{\verb~|add955e~}); reserving the expression table from the file size cut peak RSS 6.8 -> 6.0 GB (\code{\verb~|62671ff~}); K-before-WHNF turned a > 500 s declaration into 33 ms (\code{\verb~|3a0964a~}); merging two specialised traversals into one generic one cost 0.6-0.9 \% instructions and was reverted (\code{\verb~|faa32e9~}).}
+}
+
+\p{Why it is 5.7x behind sokonanoda \strong{\verb~|[~inferred\verb~|]~}: reification at every lambda, no sessions/cross-declaration reuse in the parallel driver, thunks and per-kind \code{\verb~|FxHashMap~} interning, linear scans of \code{\verb~|Vec<Value>~} enums, and none of sokonanoda's October work.}
+}
+
+\subtree{
+\title{5. nanobruijn}
+
+\p{Idea: keep nanoda's substitution-based algorithm but never substitute on binder entry. \code{\verb~|ExprPtr = (core, shift:u16)~}; \code{\verb~|(p,k)~} means "p with all free indices raised by k"; closed terms carry a sentinel shift. Every compound node is kept in Outermost-Shift Normal Form (minimum child shift 0), so terms differing by a uniform shift share a core. Caches are bucketed by \code{\verb~|depth - shift~}; closed terms live in a bucket that is never evicted; leaving a binder hides its bucket and re-entering a binder of the same type revives it (PLAN.md "Design").}
+
+\p{Results (PLAN.md "Results", "Current performance"): in the same binary nanoda's algorithm 320 s vs nanobruijn 345 s on mathlib (1.08x \em{slower}) and 1.14x slower on Init; app-lam N=4000 8.3 s -> 10 ms. Later, with canonical binders, 9.95 T -> 7.88 T, and with upstream's \code{\verb~|def_eq~} failure memo 4.72 T / 4.53 T. Individual wins: speculative application congruence using only O(1) "already known equal" tests before any WHNF, \strong{-16.7 \% on mathlib}; keeping lazy shifts in \code{\verb~|infer_app~}, -21 \%; a 2-way 64 K-entry \code{\verb~|mk_app~} cache right-sized to L2, 14 \% on Init.}
+
+\p{Why it did not pay off:}
+
+\ul{
+\li{Reduction still substitutes (\code{\verb~|inst_beta~}), and shifted variants of the same term miss the caches: "50 \% more infer calls and 56 \% more def_eq calls" than nanoda for 2 \% more nodes.}
+\li{Pointer equality is only as good as the canonical form. Until shifts were extracted through binders, lazy delta failed to recognise an unfolded term as identical to the other side and explored exponentially: one con-leche lemma took 25.2 min vs 40 ms (def_eq calls 484 M vs 9 278). The fix needed an exact per-node free-variable bitset and a formalised uniqueness proof (\code{\verb~|canon.rs~}, \code{\verb~|Theory.lean~}).}
+\li{Lazy zeta/let in inference diverged or thrashed (0.05 \% WHNF cache hit rate) because each variable occurrence produced a differently shifted copy.}
+}
+
+\p{Transferable negative results (PLAN.md "Paths not taken"; all measured by them): union-find equivalence cache produced 0.7 \% more hits than a plain pair set and cost more than it saved (and makes \code{\verb~|def_eq~} non-monotone in time, the root of exploits in arena \code{\verb~|bugs/proj-of-stuck-prop~}); reusing hash maps across declarations \em{without} shrinking was a 2x regression, with shrinking 8 \% (cache pressure from large tables on small declarations); jemalloc -45 \% vs glibc on their allocation pattern; direct-mapped caches help only when they fit L1/L2 (4 K entries +3 \%, 64 K entries -2 \%); per-node eager free-variable sets cost +7 \% on Init (what survived is a 64-bit mask with a rare out-of-line tail); wall-clock on mathlib is noise at the 4-5 \% level, "instruction counts are the honest metric".}
+}
+
+\subtree{
+\title{6. nanoda_lib baseline (what everyone started from)}
+
+\ul{
+\li{Locally nameless: a run of binders is opened by one \code{\verb~|inst~} pass that replaces the bound variables with \code{\verb~|Local~} nodes named by de Bruijn level, and closed by one \code{\verb~|abstr~} pass (\code{\verb~|src/tc.rs:658-686~}); every open/close is a traversal of the body. Expressions hash-consed in an \code{\verb~|IndexSet~} per declaration plus one for the export; ids are 4-byte \code{\verb~|(dag bit, index)~}.}
+\li{\code{\verb~|infer~} with check / no-check caches keyed by expression; \code{\verb~|whnf~} and \code{\verb~|whnf_no_unfolding~} caches; \code{\verb~|def_eq~} is the C++ algorithm: quick check, \code{\verb~|whnf_core~} with cheap projections, \code{\verb~|Bool.true~} eager evaluation for closed terms, proof irrelevance (now 3-valued), lazy delta by reducibility height with same-head argument comparison and a congruence-failure cache, then eta, structure eta, string literals, unit eta (\code{\verb~|src/tc.rs:990-1042,1312-1352~}). Positive pair set (union-find removed in \code{\verb~|05024bd~}) and a per-declaration failure memo keyed \code{\verb~|(x, y, eager_mode)~} (\code{\verb~|0928383~}).}
+\li{A fresh \code{\verb~|TcCache~} and DAG per declaration; threads pull single declarations from an atomic counter (\code{\verb~|tc.rs:150-185~}). Parser: \code{\verb~|read_line~} + \code{\verb~|serde_json::from_str~} per line, every name/level/expression interned in an \code{\verb~|IndexSet~} (\code{\verb~|src/parser.rs:393,609-690~}).}
+\li{Admission: recursors, rules, \code{\verb~|numFields~}, K etc. are generated and compared with the exported ones; a string of fixes in 2026 (\code{\verb~|1283899~}, \code{\verb~|f04456a~}, \code{\verb~|8a327a1~}, \code{\verb~|2dbe93c~}, \code{\verb~|14a85b7~}, \code{\verb~|c1155e8~}, PR \verb~|#~22) each closed an arena \code{\verb~|bugs/~} test where an exported field was trusted or compared too weakly.}
+}
+}
+
+\subtree{
+\title{7. Ranked tricks and how to realise them on the JVM / Truffle}
+
+\p{Ranking is by evidence of effect on mathlib-scale input. "JVM" notes assume the metric counts GC and JIT instructions and that pointer chasing, megamorphic calls and boxing are the expensive things.}
+
+\table{
+\tr{\th{\verb~|#~}\th{trick}\th{evidence}\th{JVM / Truffle realisation}}
+\tr{\td{1}\td{Evaluate to a hash-consed value graph with glued (lazily unfolded) constant applications; memo slots in the node}\td{lineage 16 min -> 88 s; "+35 \%" at introduction; gruszka converged on the same (doc 05)}\td{Do \strong{not} allocate a Java object per value. Use parallel primitive arrays (\code{\verb~|byte[] kind/flags~}, \code{\verb~|int[] a,b,c,d,step,whnf,ty~}, \code{\verb~|long[] key~}) or one \code{\verb~|int[]~} with stride 10, ids are \code{\verb~|int~}. No object headers, no GC tracing, no boxing; a session reset is \code{\verb~|top = 1~}. Interning tables are open-addressed \code{\verb~|long[]~}/\code{\verb~|int[]~} with a \code{\verb~|byte[]~} tag array.}}
+\tr{\td{2}\td{Prune environments to the free-variable mask before using them as cache keys or capturing them}\td{sokonanoda "sparse environments"; nanoclo -10 \% and 131 K -> 12 K inference misses on one declaration; \code{\verb~|prune_env_cold~} is still 11.6 \% self time, so the \em{implementation} matters}\td{Precompute \code{\verb~|mask: long~} and \code{\verb~|loose: short~} per expression at parse. \code{\verb~|Long.bitCount~}/\code{\verb~|numberOfTrailingZeros~} are intrinsics. Frames as slices of one \code{\verb~|int[]~} slot array. Add a direct-mapped \code{\verb~|(env, mask) -> env~} cache. Consider nanoclo's jump pointers for un-pruned chains (ladders).}}
+\tr{\td{3}\td{Types are values; lambda codomain = lazy "infer closure"; application telescopes walked syntactically; placeholder for non-dependent arguments}\td{sokonanoda vs nanoclo (which reifies at every lambda) is the largest design difference between a 88 s and a 8.4 min checker}\td{A Pi node with a mode field (eval vs infer + context id) - and that field must be part of identity (section 8). \code{\verb~|infer~} and \code{\verb~|eval~} are two interpreters over the same expression arrays; keep them as two switch loops rather than one polymorphic node hierarchy.}}
+\tr{\td{4}\td{Cross-declaration reuse: sessions with a byte budget, \code{\verb~|checked_closed~}, persistent closed-WHNF store verified by exact read-back}\td{nanoclo +47 \% on BitVec without cross-declaration caches (single caches +8..38 \%, \code{\verb~|8106d4f~}); gruszka uses 8 MiB sessions too}\td{Sessions are natural with array arenas (reset indices, \code{\verb~|Arrays.fill~} on tag bytes, or epoch-stamped slots for O(1) clear). \code{\verb~|checked_closed~} can be a bitset indexed by export expression id per universe-parameter list (most declarations have few distinct lists). Allocate the arrays once per thread and reuse them, so the collector never sees per-session garbage; keep the budget near L2/L3 size.}}
+\tr{\td{5}\td{Relevance signatures: never compare proof arguments or unused arguments; decide "cannot be a proof" from the head}\td{commit "Much better algorithm for proof irrelevance in spines" (\code{\verb~|4f0bc57~}); arena perf tests \code{\verb~|irrelevance-*~}}\td{Two \code{\verb~|long~} bitmasks per \code{\verb~|(constant, levels)~}; compute once per constant as a template over level parameters. Pure integer work.}}
+\tr{\td{6}\td{Budgeted speculative argument comparison before unfolding a shared head, with quarantined negatives and unbudgeted type-level checks; iterative deepening}\td{nanoclo: 3076 M -> 56 M on \code{\verb~|discarded-argument-match~}, cost 0.04-0.47 \% on corpora; FLT 13 h -> 0.25 s}\td{A fuel counter in the conversion state; exceptions are not needed (return a tri-state). Make sure nothing written to a memo slot depends on fuel.}}
+\tr{\td{7}\td{Universe substitution carried by the environment instead of instantiating expressions}\td{no measurement; removes \code{\verb~|subst_expr_levels~} copying that nanoda memoises per \code{\verb~|(expr, ks, vs)~}}\td{One \code{\verb~|int lsub~} in the environment root; \code{\verb~|Sort~}/\code{\verb~|Const~} evaluation looks up a small memo \code{\verb~|(levelsId, lsub) -> levelsId~}.}}
+\tr{\td{8}\td{Parser: exact-byte fast path, SWAR integers, append-only expression store, no binder names/info, streaming input}\td{parse 13 \% -> 4 \% of a run (nanoclo)}\td{Read \code{\verb~|byte[]~} blocks (or a \code{\verb~|MemorySegment~}), \code{\verb~|VarHandle~} little-endian \code{\verb~|long~} reads for SWAR. The loop is small and hot: it must be compiled early (or AOT). Write straight into the primitive expression arrays. Reject loose bvars in declarations here: \code{\verb~|loose(type)==0 && loose(value)==0~} is O(1).}}
+\tr{\td{9}\td{Derive, do not trust: ignore exported recursors, rules, \code{\verb~|numFields~}, \code{\verb~|isRec~}, \code{\verb~|k~}, Quot types}\td{should close arena \code{\verb~|bugs/{nat-rec-rules,unit-rec-rule,orphan-rec,ctor-num-fields,rec-k-lie,nat-rec-k-lie,rec-rule-proof-irrel*,rec-type-proof-irrel,nested-rec-rule-nfields}~} and \code{\verb~|other/{extra-rec,orphan-ctor}~} by construction \strong{\verb~|[~inferred from the test descriptions; I ran nothing\verb~|]~}}\td{Language independent. Cost is one serial pass over inductive blocks.}}
+\tr{\td{10}\td{Strict arguments, no thunks; laziness only at constant granularity; eager iota only on syntactic constructor majors}\td{thunks deleted after measurement (\code{\verb~|9b4ea12~}, \code{\verb~|1fd5693~}); nanoclo kept thunks and needed read-set views to make them share}\td{Fewer node kinds, no forcing checks on every variable read (28.8 \% of eval entries are variable reads). If RLVM wants uniqueness/in-place reuse, note that hash-consing and in-place update are mutually exclusive for the same node.}}
+\tr{\td{11}\td{K before reducing the major; structure eta on the major; rule RHS evaluated once per \code{\verb~|(rule, levels)~}; Nat-literal \code{\verb~|Nat.rec~} step without constructors}\td{nanoclo: > 500 s -> 33 ms on one Std declaration}\td{Straightforward.}}
+\tr{\td{12}\td{Literal arithmetic that waits: stay folded, native only on closed operands, refuse structural unfolding against big literals unless demanded}\td{arena perf tests \code{\verb~|unfold-before-literal*~}, \code{\verb~|let-fold~}; sokonanoda \code{\verb~|869f4b6~}}\td{\code{\verb~|BigInteger~} only at the leaves; small literals as tagged ints inside the value id space to avoid boxing.}}
+\tr{\td{13}\td{Compact purpose-built hash tables; one probe per construction; tables sized to the session}\td{nanoda 4-byte ids -12 \%; nanoclo one-probe interning -7 \%, presizing -11 \% on small tests; nanobruijn L2-sized caches}\td{No \code{\verb~|HashMap<Long,Integer>~}: boxing and megamorphic \code{\verb~|equals/hashCode~} would dominate. Open addressing over primitive arrays, Fibonacci hash, tag bytes.}}
+\tr{\td{14}\td{Wrapper fusion of matchers/\code{\verb~|casesOn~}/\code{\verb~|brecOn~} into definition bodies, gated}\td{nanoclo 9x on evaluation-heavy tests, 2x \em{worse} on mathlib when always on}\td{This is where Truffle specialisation/JIT belongs: only for declarations that cross an unfolding-count threshold, and only for the evaluator; conversion must still see folded applications first.}}
+\tr{\td{15}\td{Few worker threads; contiguous chunks so sessions stay warm}\td{mathgraph's 2 threads; per-thread caches everywhere}\td{One checking thread unless wall-clock limits force more. Chunking by 64 keeps consecutive (related) declarations in one session.}}
+}
+
+\p{Expression storage on the JVM follows from \verb~|#~1 and \verb~|#~8: the export has on the order of 10^8 expression nodes (nanoclo: 67 M table entries for its mathlib; nanobruijn: 60.9-87.4 M cores; doc 05 quotes 105 M for a newer export). One Truffle node object per export expression is out of the question (>= 3-5 GB of traced objects). Keep the export in primitive arrays (about 24-32 B per node as in sokonanoda) and interpret it with a switch loop; materialise Truffle ASTs only for the bodies of constants that prove hot.}
+}
+
+\subtree{
+\title{8. Soundness-sensitive and fragile points (do not copy blindly)}
+
+\p{Bugs that actually shipped in this lineage, each now an arena test:}
+
+\table{
+\tr{\th{defect}\th{test}\th{lesson}}
+\tr{\td{Two Pi closures with the same body, domain and environment were equal although one \em{evaluates} the body and the other \em{infers its type}}\td{\code{\verb~|bugs/pi-closure-context~} (fix \code{\verb~|918dcb1~})}\td{closure mode/context is part of value identity, of the interning key and of every fast path}}
+\tr{\td{Two empty environments with different universe substitutions were equal}\td{\code{\verb~|bugs/closure-level-subst~} (fix \code{\verb~|fc50c18~})}\td{anything carried by the environment root (level substitution) is part of environment identity}}
+\tr{\td{Unit-like eta returned true as soon as one side had a unit-like type, so a forged \code{\verb~|PUnit.rec~} rule compared equal to the derived one}\td{\code{\verb~|bugs/unit-rec-rule~} (sokonanoda \code{\verb~|fbcf100~}; mechanism spelled out in nanoclo \code{\verb~|ea32c35~})}\td{compare the two types first}}
+\tr{\td{K-like reduction created its fresh variables at the wrong depth (\code{\verb~|d245a52~} "k-rec bug: thread the proper depth")}\td{\code{\verb~|bugs/k-rec-conv~}, "regression test for sokonanoda" \strong{\verb~|[~link between commit and test inferred\verb~|]~}}\td{depth must be threaded through every reduction that opens binders}}
+\tr{\td{Equal 64-bit structural hashes of two recursor applications were accepted as convertible}\td{removed in \code{\verb~|70bd739~}}\td{a hash is never an equality proof; verify structurally}}
+\tr{\td{Probe-truncated "not equal" answers reached a memo used by reduction}\td{nanoclo \code{\verb~|a2aa37e~} (mathlib declaration wrongly rejected)}\td{budgeted results never enter memo slots}}
+\tr{\td{Trusting exported \code{\verb~|numFields~}, \code{\verb~|k~}, recursor rules, orphan recursors, Quot types, temporary nested names}\td{nanoda fixes listed in section 6}\td{derive everything}}
+}
+
+\p{Design choices that are sound only under stated invariants:}
+
+\ol{
+\li{\strong{\code{\verb~|type_cache~} keyed by \code{\verb~|(pruned env, expr)~} without the typing context.} Sound because a fresh variable is \code{\verb~|BVar(level, type-value)~}, so the environment determines the context. A checker whose variables do not carry their types needs the context in the key (\code{\verb~|bugs/open-term-cache-context~}).}
+\li{\strong{Session-lifetime positive \em{and negative} conversion caches, and \code{\verb~|checked_closed~}.} Require that each thread checks declarations in increasing export order and that a constant's status never changes while a cache lives. Sokonanoda clears everything around inductive checking, where temporary declarations exist.}
+\li{\strong{Skipping "absent" arguments} relies on the definition's value and type really not mentioning the binder; it is computed from the free-variable masks, which over-approximate use (safe direction).}
+\li{\strong{Structure eta on a recursor's major premise is applied to every structure-like inductive, including propositions} (\code{\verb~|reduction.rs:595-637~} has no Prop test). The official kernel refuses it for Prop; the arena marks And-like cases "either" and says it "must not be done for propositions that eliminate only into Prop, like Exists" (\code{\verb~|corner-cases/eta-struct-major-and~}). nanoclo restricts it to large-eliminating structures (\code{\verb~|b8cefd0~}). RLVM should follow nanoclo's rule.}
+\li{\strong{Proof irrelevance decides "is a proof" from \code{\verb~|level_of_type~}}, which for a constant-headed type reads the result sort of the head's telescope \em{computed once under generic variables} (\code{\verb~|const_result_level~}, \code{\verb~|eval.rs:333-358~}) and does not look at the actual arguments. The exploits in \code{\verb~|bugs/rec-of-subst-prop~} and \code{\verb~|bugs/proj-of-stuck-prop~} are built on a result sort that reduces to \code{\verb~|Prop~} for a variable and is stuck for a closed argument; the official kernel was tightened to require the inferred type to reduce to a sort. Mirror the official rule. \strong{\verb~|[~sokonanoda's verdict on these two tests was not checked\verb~|]~}}
+\li{\strong{Unchecked bodies are unfolded.} Inductives are checked before any definition, and workers unfold definitions that another worker has not checked yet. The verdict is still right (everything must pass) but an ill-typed body can crash the evaluator first: sokonanoda exits 3 instead of 1 on a loose bvar, and it has no step limit, so a diverging ill-typed body would run into the timeout \strong{\verb~|[~divergence case inferred\verb~|]~}. RLVM needs evaluator robustness (loose-bvar check at parse, step/stack limits that degrade to "retry after dependencies are checked" or to rejection).}
+\li{\strong{Eager projection} forces the WHNF of every projected structure at evaluation time and compares stuck projections on reduced structures. Arena perf tests \code{\verb~|proj-lazy-struct~}, \code{\verb~|proj-app-lazy-delta~}, \code{\verb~|proj-stuck-struct~} are written against exactly this; I could not check how sokonanoda fares on them \strong{\verb~|[~unverified\verb~|]~}.}
+\li{Transitive equivalence caches (union-find) make \code{\verb~|def_eq~} answers depend on history; both nanoda and nanobruijn removed them. Plain pair sets only.}
+\li{Nested inductives: the official kernel detects nested occurrences syntactically; normalising first changes the number of motives (\code{\verb~|corner-cases/nested-redex-aux~}, sokonanoda issue 12).}
+\li{Memo eviction inside a declaration can turn linear work exponential (nanoclo \code{\verb~|006d5aa~}). Bound memory by session resets \em{between} declarations, not by evicting during one.}
+}
+}
+
+\subtree{
+\title{9. Relation to the HOAS / NbE trick space}
+
+\p{The lineage settles on \em{defunctionalised} closures: a closure is \code{\verb~|(body expression id, pruned interned environment id)~}, applied by re-entering the interpreter. That is what makes closures hashable, comparable in O(1) (same body, same environment -> equal, no need to go under the binder) and usable as cache keys, and it is why inference can use the same closure record with a different mode. A host-language closure (HOAS, a Java lambda or a Truffle \code{\verb~|CallTarget~} with an opaque frame) gives none of this. If RLVM compiles hot bodies, the compiled closure must still expose \code{\verb~|(code id, captured value ids)~} as its identity. The classic NbE recipe "environments as arrays, evaluation to machine closures" therefore does not carry over unchanged: in a checker whose cost is dominated by repeated sub-problems, cache keys need \em{interned, pruned} environments. The two normalization-bench repositories named in the request are not part of this document's sources.}
+}
+
+\subtree{
+\title{10. Not verified / open}
+
+\ul{
+\li{No instruction breakdown exists for sokonanoda HEAD; the only profile is mathgraph's of the September code.}
+\li{The October 1.7x is attributed to a batch of unmeasured commits; which of them matter is unknown.}
+\li{Instructions vs. number of threads is unpublished for all five checkers.}
+\li{Hit rates of \code{\verb~|whnf_store~} and \code{\verb~|checked_closed~} on mathlib are unpublished.}
+\li{Whether sokonanoda passes every current arena test at rev \code{\verb~|9a021b6~} was not checked (nothing was run).}
+\li{Export expressions that are equal up to binder names stay distinct ids in sokonanoda (no parse-time interning); how much sharing that loses is unknown.}
+}
+}
