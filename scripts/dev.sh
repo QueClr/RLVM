@@ -48,12 +48,12 @@
 #   profiles [--train FILE]... [options]
 #                             regenerate profiles/ for release-oracle: scripts/build.sh --oracle-pgo
 #                             --train-profiles (instrumented image, training runs, profiles/*.iprof.gz
-#                             + profiles/PROFILE-INFO.txt). Each training input is checked once in the
-#                             default configuration and once with the settings of PROFILE_TRAIN_ALSO
-#                             (below: the engine that the default configuration does not check with),
-#                             so that the profile covers both engines. Default training input:
-#                             work/exports/init.ndjson (the journal, design-packaging: what the
-#                             measurements of the profile found best)
+#                             + profiles/PROFILE-INFO.txt). The training input is checked once, in
+#                             the default configuration: the profile is recorded with what ships.
+#                             Default training input: work/exports/init.ndjson (the best input on
+#                             all eight corpora: docs/research/profiles/PG1.md). It is the LAST step
+#                             of a release, after the last jar is in; --train-also 'ARGS' adds a
+#                             second run with other settings
 #   info                      print work/dist/BUILD-INFO.txt and the toolchain versions
 #
 # Test kit (rlvm-testkit/bin/testkit; see rlvm-testkit/README.md):
@@ -146,12 +146,18 @@ ni_slot() {
 # The default training inputs of `profiles` (paths below the repository root; the exports are not part
 # of the repository: bench/README.md says how to fetch the arena's corpora).
 PROFILE_TRAINING="work/exports/init.ndjson"
-# The second training run of every input (scripts/build.sh --train-also): code that no training run
-# executes is treated as cold by a profile-guided build, so the profile must see BOTH engines.
-# While the reference engine is the default engine: the machine with the switch set its integrator is
-# about to publish as its default. ONCE THE MACHINE IS THE DEFAULT ENGINE, change this to
-# '-X engine=reference' (the default run then covers the machine with its published set).
-PROFILE_TRAIN_ALSO="-X engine=machine -X machine.switches=default,eager,skipargs,congruence"
+# THE RULE FOR THE SHIPPED PROFILE (the orchestrator's decision on the report docs/research/profiles/PG1.md):
+# ONE training input, Init, recorded with the configuration that ships - a plain run without options
+# of the final build - and NO second run with another engine or switch set (a reference-engine run
+# beside the machine's costs the machine 2.9 % on mathlib; a profile of another switch set loses a
+# third of the gain). Once the machine is the default engine a plain run trains the machine and,
+# through its declines and re-checks, the reference engine in their real proportion. The profile is
+# retrained as the LAST step of a release, after the last jar is in; `scripts/build.sh --oracle-pgo`
+# says loudly when the profiles are older than the jars it builds from.
+# PROFILE_TRAIN_ALSO is therefore empty. `--train-also 'ARGS'` on the command line adds a second run
+# (the profiles made on 2026-11-25, while the reference engine was still the default engine, were made
+# with one for the machine: profiles/PROFILE-INFO.txt says so).
+PROFILE_TRAIN_ALSO=""
 
 # run / suite / measure default to the native image; when the distribution has only the JVM
 # launcher (scripts/dev.sh dist) and the caller named no launcher, use that one.

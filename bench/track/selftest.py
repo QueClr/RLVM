@@ -227,10 +227,10 @@ def test_benchmarks() -> None:
               result.returncode == 0 and all(i >= 0 for i in order) and order == sorted(order), result.stderr[-300:] + str(order))
         first = text.split("## 2.")[0]
         check("the DEFAULT configuration is the first row, and a cell is the LATEST quiet row with an allowed label and an accepting verdict",
-              "| Checker, platform | init" in first and first.find("RLVM default configuration") < first.find("-X engine=machine")
-              and "| RLVM `-X engine=machine`, JVM launcher | **1.00** (0.90) | - |" in first
-              and "| RLVM `-X engine=machine`, native image | **1.50** (1.40) | - |" in first
-              and "| **RLVM default configuration** (reference engine), JVM launcher | - | **1.20** (1.10) |" in first, first[-900:])
+              "| Checker, platform | init" in first and first.find("default configuration") < first.find("-X engine=machine")
+              and "| RLVM `-X engine=machine`, JVM launcher (development tool) | **1.00** (0.90) | - |" in first
+              and "| RLVM `-X engine=machine`, the executable | **1.50** (1.40) | - |" in first
+              and "| RLVM default configuration (reference engine) on the JVM launcher (development tool) | - | **1.20** (1.10) |" in first, first[-900:])
         check("ratios against gruszka and between the platforms are rows of their own",
               "| *machine, JVM / gruszka* | 2.00x | - |" in first and "| *machine: JVM / native* | 0.67x | - |" in first, first[-500:])
         check("one worker has its own table", "**6.00** (5.90)" in text.split("## 2.")[1].split("## 3.")[0])
@@ -238,15 +238,15 @@ def test_benchmarks() -> None:
                                   "--history", "/nonexistent", "--notes", "/nonexistent", "--default-engine", "machine"],
                                  capture_output=True, text=True).stdout.split("## 2.")[0]
         check("--default-engine machine puts the machine's rows first, as the default configuration",
-              "| **RLVM default configuration** (machine engine), JVM launcher | **1.00** (0.90) | - |" in flipped
-              and flipped.find("RLVM default configuration") < flipped.find("-X engine=reference"), flipped[-700:])
+              "| RLVM default configuration (machine engine) on the JVM launcher (development tool) | **1.00** (0.90) | - |" in flipped
+              and flipped.find("default configuration") < flipped.find("-X engine=reference"), flipped[-700:])
         with open(tsv, "a") as handle:
             handle.write(row(utc="2026-11-24T23:00:00Z", what="default", median_later_s="1.11", best_later_s="1.01",
                              walls_s="3.00 1.21 1.01 1.11") + "\n")
         again = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
                                 "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout
         check("a row measured without -X engine is a row of the default configuration",
-              "| **RLVM default configuration** (reference engine), JVM launcher | **1.11** (1.01) | **1.20** (1.10) |" in again.split("## 2.")[0],
+              "| RLVM default configuration (reference engine) on the JVM launcher (development tool) | **1.11** (1.01) | **1.20** (1.10) |" in again.split("## 2.")[0],
               again.split("## 2.")[0][-700:])
         long = row(utc="2026-11-24T23:10:00Z", what="machine", passes="10", median_later_s="1.30", best_later_s="0.90",
                    walls_s="5.00 3.00 2.00 1.00 1.00 1.10 0.90 1.00 1.00 1.00")
@@ -255,7 +255,7 @@ def test_benchmarks() -> None:
         again = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
                                 "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout
         check("a process with 8 or more passes is judged by passes 4..N (the first later passes are warm-up)",
-              "| RLVM `-X engine=machine`, JVM launcher | **1.00** (0.90) |" in again.split("## 2.")[0], again.split("## 2.")[0][-600:])
+              "| RLVM `-X engine=machine`, JVM launcher (development tool) | **1.00** (0.90) |" in again.split("## 2.")[0], again.split("## 2.")[0][-600:])
         prov = text.split("## Provenance")[1]
         check("the provenance names the row, its passes and its build", "2026-11-24T22:10:00Z" in prov
               and "3.00 1.10 0.90 1.00 / 2.90" in prov and "`work/x/dist`" in prov and "sha256 `abc`" in prov, prov[:600])

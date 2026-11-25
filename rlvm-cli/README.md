@@ -134,7 +134,7 @@ optional build.
 
 ## The executable and the distributions (`scripts/build.sh`)
 
-The release is ONE executable (journal: `design-packaging`). `scripts/build.sh` builds it as
+The release is ONE executable (*agentic-note*: design-packaging). `scripts/build.sh` builds it as
 `work/dist/bin/rlvm` (native image, GraalVM CE) with `BUILD-INFO.txt` beside it and nothing else;
 `--dev` adds `lib/*.jar` and `bin/rlvm-jvm` (a sh launcher that runs the jars on the build's JDK: a
 development tool for the warm benchmarks, the gates and the test kit, never packaged); `--jvm-only`

@@ -61,7 +61,7 @@
 # - The Truffle tier (rlvm-truffle) is compiled into the binary and OFF (switch t2 of the machine): its
 #   owner's verdict is NO-GO as a default (rlvm-truffle/NOTES-T3.md, section 1).
 #
-# ONE EXECUTABLE (owner note 16; the journal: design-packaging): the build makes exactly one file,
+# ONE EXECUTABLE (owner note 16; *agentic-note*: design-packaging): the build makes exactly one file,
 # `work/dist/bin/rlvm`, a GraalVM CE native image (-O3, serial collector) that needs no JDK and no jars,
 # and the run line executes it. It is the same executable a release archive holds, and a run without
 # options is its fastest configuration (`rlvm --version` says which engine, worker rule, load rule and

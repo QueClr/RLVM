@@ -242,8 +242,8 @@ ORACLE_HOME_DIR="${RLVM_ORACLE_GRAALVM:-$ROOT/.toolchain/oracle-graalvm-25}"
 # MEMORY SETTINGS BAKED INTO THE EXECUTABLE (run-time defaults of the image; -Xmx / -Xms / -Xmn and
 # -XX:... on its command line still override them). Decided by measurement for what one invocation
 # of an executable is - a single run of a fresh process on each of the corpora, 8 workers - within the
-# 16 GB of the arena's runner and without a cost for small inputs (the journal: decision dec-EGMG,
-# design note design-packaging; the numbers below are the machine with the switch set
+# 16 GB of the arena's runner and without a cost for small inputs (*agentic-note*: dec-EGMG,
+# *agentic-note*: design-packaging; the numbers below are the machine with the switch set
 # default,eager,skipargs,congruence on the aarch64 development host, 2026-11-25).
 #   -R:MaxHeapSize=13g   the heap limit: 13 GB leaves 3 GB of a 16 GB machine for stacks, code and the
 #                        page cache; the memory account of the driver declines at 12 GiB, before it
@@ -267,6 +267,10 @@ ORACLE_HOME_DIR="${RLVM_ORACLE_GRAALVM:-$ROOT/.toolchain/oracle-graalvm-25}"
 #   A small input is not affected: nothing is pre-touched (a tutorial test: 20 MB resident, as before).
 # IMAGE_HEAP_TEXT is what `rlvm --version` says about them.
 IMAGE_HEAP=(-R:MaxHeapSize=13g -R:InitialCollectionPolicy=BySpaceAndTime)
+# The same settings for the optional Oracle GraalVM build: Oracle GraalVM 25.0.4 knows the collection
+# policy only as an option of the image BUILD (-H:, experimental; its own default is Adaptive), not as
+# a run-time default (-R:) as GraalVM CE 25.5.5 does, so there it cannot be changed on the command line.
+IMAGE_HEAP_ORACLE=(-R:MaxHeapSize=13g -H:+UnlockExperimentalVMOptions -H:InitialCollectionPolicy=BySpaceAndTime -H:-UnlockExperimentalVMOptions)
 IMAGE_HEAP_TEXT="heap at most 13g, collection policy BySpaceAndTime"
 # ------------------------------------------------------------------------------------------------
 
@@ -459,9 +463,9 @@ native_build() {
   local args=("-O$opt" "--gc=$gc" --no-fallback
               # An out-of-memory error ends the process at once with status 3 (= internal error).
               -R:+ExitOnOutOfMemoryError
-              # The memory settings of the executable (IMAGE_HEAP at the top of this script).
-              "${IMAGE_HEAP[@]}"
               -H:+ReportExceptionStackTraces)
+  # The memory settings of the executable (IMAGE_HEAP at the top of this script).
+  if [ "$variant" = oracle ]; then args+=("${IMAGE_HEAP_ORACLE[@]}"); else args+=("${IMAGE_HEAP[@]}"); fi
   [ -z "$march" ] || args+=("-march=$march")
   args+=("${ni_extra[@]}" "$@")
   # The words for logs and BUILD-INFO.txt: the arguments so far (none of them contains a blank).
@@ -833,8 +837,34 @@ if [ "$flavor" = oracle-pgo ]; then
       || log "[oracle] WARNING: $profiles_dir/PROFILE-INFO.txt does not describe these profile files (id ${profile_id:-missing})"
     profile_id="$(cat "$profiles_dir"/*.iprof.gz | sha256sum | cut -c1-12)"
   fi
+  # STALENESS GUARD: the profiles were recorded with the jars that profiles/PROFILE-INFO.txt lists; if
+  # the jars of this build differ, the profile is stale. A stale profile still helps (measured, report
+  # PG1: hours-old profiles keep a half to three quarters of the gain and are never slower than the CE
+  # executable), so the build goes on, but it says so loudly, in BUILD-INFO.txt and in `rlvm --version`.
+  # `--train-profiles` (scripts/dev.sh profiles) makes fresh ones.
+  profile_stale=""
+  if [ -f "$profiles_dir/PROFILE-INFO.txt" ]; then
+    n_all=0; n_diff=0; names=""
+    while read -r m h; do
+      j="$(ls "$LIB/$m"-[0-9]*.jar 2>/dev/null | head -n 1)"
+      n_all=$((n_all + 1))
+      if [ -z "$j" ] || [ "$(sha256sum "$j" | cut -c1-12)" != "$h" ]; then n_diff=$((n_diff + 1)); names="$names ${m#rlvm-}"; fi
+    done < <(sed -n 's/^ *\(rlvm-[a-z]*\)  *\([0-9a-f]\{12\}\) *$/\1 \2/p' "$profiles_dir/PROFILE-INFO.txt")
+    if [ "$n_all" = 0 ]; then
+      profile_stale="it is not known which jars the profiles were recorded with"
+    elif [ "$n_diff" -gt 0 ]; then
+      profile_stale="profile stale: $n_diff of $n_all jars differ from the ones it was recorded with (${names# })"
+    fi
+  else
+    profile_stale="it is not known which jars the profiles were recorded with (no PROFILE-INFO.txt)"
+  fi
+  if [ -n "$profile_stale" ]; then
+    echo "build.sh: ====== WARNING: $profile_stale. The build goes on with the stale profile (it keeps part of its gain); 'scripts/dev.sh profiles' records a fresh one. ======" >&2
+  else
+    log "[oracle] the profiles were recorded with exactly the jars of this build"
+  fi
   profiles="$(ls "$prof"/*.iprof | LC_ALL=C sort | paste -sd, -)"
-  build_text="$(image_text "Oracle GraalVM, profile-guided native image") [profiles $profile_id]"
+  build_text="$(image_text "Oracle GraalVM, profile-guided native image") [profiles $profile_id${profile_stale:+; ${profile_stale%% (*}}]"
   native_build oracle "$ORACLE_HOME_DIR" rlvm "--pgo=$profiles"
   verify "$BUILD/oracle/rlvm" "rlvm (native, Oracle GraalVM, profile-guided)"
   "$BUILD/oracle/rlvm" --version | grep -q '^build: Oracle GraalVM, profile-guided' \
@@ -845,6 +875,7 @@ if [ "$flavor" = oracle-pgo ]; then
     echo "  licence:        Oracle GraalVM $img_version is under the GraalVM Free Terms and Conditions (GFTC); this build was asked for with --oracle-pgo"
     echo "  says:           $build_text"
     echo "  flags:          $(echo "$ni_flags" | sed "s:$prof/::g")"
+    echo "  profile state:  ${profile_stale:-fresh: recorded with exactly the jars of this build}"
     echo "  profiles:       $(ls "$profiles_dir"/*.iprof.gz | wc -l) files of $(realpath --relative-to="$ROOT" "$profiles_dir" 2>/dev/null || echo "$profiles_dir"), id $profile_id$([ "$train_profiles" = 1 ] && echo " (made by this build: instrumented image in ${instr_wall}s, $instr_size bytes; training ${train_secs}s)")"
     echo "  builder:        $ni_summary"
     echo "  truffle probe:  $probe_line"

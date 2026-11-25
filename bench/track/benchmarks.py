@@ -72,15 +72,25 @@ CORPORA = ["init", "std", "cedar", "reachability", "con-leche", "navier-stokes-e
 ENGINES = ("reference", "machine")
 
 
+ORACLE = "native-oracle-pgo"   # launcher key of rows whose label starts with "oracle-pgo" (see select)
+
+
 def checkers(default_engine: str) -> list:
     """(key, heading) per table row: key = (checker as warm.py's "what" up to the first '+', launcher).
-    The default configuration first (OWNER-NOTES 13: what a run without any option is)."""
+    The executable in its default configuration first (OWNER-NOTES 16: the release is one executable and
+    a run without options is the fastest configuration; OWNER-NOTES 13: what that configuration promises),
+    then the OPTIONAL build of the same executable with Oracle GraalVM and the shipped profile, then the
+    JVM launcher of a development distribution, then the other engine, then the baselines."""
     other = [e for e in ENGINES if e != default_engine][0]
-    return [((default_engine, "jvm"), f"**RLVM default configuration** ({default_engine} engine), JVM launcher"),
-            ((default_engine, "native"), f"**RLVM default configuration** ({default_engine} engine), native image"),
-            ((other, "jvm"), f"RLVM `-X engine={other}`, JVM launcher"),
-            ((other, "native"), f"RLVM `-X engine={other}`, native image"),
+    return [((default_engine, "native"), f"**RLVM, the executable** (`rlvm FILE`: default configuration, {default_engine} engine)"),
+            ((default_engine, ORACLE), "RLVM, the OPTIONAL executable built with Oracle GraalVM and the shipped profile (`--oracle-pgo`; not the default build)"),
+            ((default_engine, "jvm"), f"RLVM default configuration ({default_engine} engine) on the JVM launcher (development tool)"),
+            ((other, "native"), f"RLVM `-X engine={other}`, the executable"),
+            ((other, ORACLE), f"RLVM `-X engine={other}`, the OPTIONAL Oracle GraalVM executable"),
+            ((other, "jvm"), f"RLVM `-X engine={other}`, JVM launcher (development tool)"),
             (("gruszka", "rust"), "gruszka"), (("nano-lean", "rust"), "nano-lean")]
+
+
 NOTES = os.path.join(HERE, "benchmarks-notes.md")
 
 
@@ -114,21 +124,24 @@ def select(rows: list[dict], labels: list[str], since: str | None, default_engin
     """cells[(corpus, checker, launcher)] = {"warm8": row, "warm1": row, "cold8": row}: the latest eligible row each."""
     cells: dict = {}
     for row in sorted(rows, key=lambda r: r["utc"]):
-        if row["quiet"] != "quiet" or (labels and row["label"] not in labels) or (since and row["utc"] < since):
+        if row["quiet"] != "quiet" or (labels and row["label"] not in labels and not row["label"].startswith("oracle-pgo")) or (since and row["utc"] < since):
             continue
         if not row["verdict"].startswith("ACCEPT"):
             continue
         what = row["what"].split("+")[0]
         if what == "default":
             what = default_engine   # measured without -X engine: the default configuration itself
-        key = (row["corpus"], what, row["launcher"])
+        # A row of the optional Oracle GraalVM build is a native-image row of another distribution: its
+        # label starts with "oracle-pgo" (bench/warm.sh --launcher native --dist DIR --label oracle-pgo...).
+        launcher = ORACLE if row["launcher"] == "native" and row["label"].startswith("oracle-pgo") else row["launcher"]
+        key = (row["corpus"], what, launcher)
         cell = cells.setdefault(key, {})
         workers = row["workers"]
         if num(row["median_later_s"]) is not None and workers in ("8", "1"):
             cell["warm" + workers] = row
         if num(row["cold_wall_s"]) is not None and workers in ("8", "1"):
             cell["cold" + workers] = row
-        elif row["launcher"] in ("jvm", "native") and workers == "8" and num(row["pass1_s"]) is not None and "cold8" not in cell:
+        elif launcher in ("jvm", "native", ORACLE) and workers == "8" and num(row["pass1_s"]) is not None and "cold8" not in cell:
             cell["pass1_8"] = row   # no separate cold process (mathlib): pass 1 of the warm process stands for it
     return cells
 
@@ -331,7 +344,8 @@ def main() -> int:
             return "-", None
         return f"{f2(w, 0)} / {f2(c, 0)}", w
 
-    dj, dn, oj, on, gr, nl = [k for k, _h in CHECKERS]
+    dn, dp, dj, on, op, oj, gr, nl = [k for k, _h in CHECKERS]
+    other = oj[0]
     if args.headline:
         # The README's one table: what `rlvm FILE` (the executable, no option) costs, per corpus.
         def run(cell):
@@ -342,13 +356,13 @@ def main() -> int:
             if cold_s is None and warm_s is None:
                 return "-", None
             return (f2(cold_s) if cold_s is not None else "-") + (f" ({f2(warm_s)})" if warm_s is not None else ""), cold_s if cold_s is not None else warm_s
-        rows_of = [(dn, f"**`rlvm FILE`** (the executable, default configuration: {args.default_engine} engine)"), (gr, "gruszka"), (nl, "nano-lean")]
+        rows_of = [(dn, f"**`rlvm FILE`** (the executable, default configuration: {args.default_engine} engine)"),
+                   (on, f"`rlvm -X engine={other} FILE`"), (gr, "gruszka"), (nl, "nano-lean")]
         lines = table("x", "", cells, corpora, rows_of, run, [("rlvm / gruszka", dn, gr), ("rlvm / nano-lean", dn, nl)])[4:]
         if lines and lines[0].startswith("| Checker, platform"):
             lines[0] = lines[0].replace("| Checker, platform", "| One run, 8 cores: wall clock in s (warm pass)", 1)
         sys.stdout.write("\n".join(l for l in lines if l) + "\n")
         return 0
-    other = oj[0]
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     head, tail = "", ""
     try:
@@ -374,7 +388,8 @@ def main() -> int:
                  "with 8 or more passes (a JVM is still compiling in passes 2 and 3), passes 2..N otherwise; the provenance lists every "
                  "pass. gruszka and nano-lean: the second of two runs with 8 threads (no JIT: their run is their steady state).",
                  cells, corpora, CHECKERS, warm("8"),
-                 [("default configuration, JVM / gruszka", dj, gr), ("default configuration, native / gruszka", dn, gr),
+                 [("the executable / gruszka", dn, gr), ("optional Oracle build / the executable", dp, dn),
+                  ("default configuration, JVM / gruszka", dj, gr),
                   (f"{other}, JVM / gruszka", oj, gr), (f"{other}, native / gruszka", on, gr),
                   ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
     out += table("2. Warm wall clock, 1 worker (s)",
@@ -388,7 +403,8 @@ def main() -> int:
                  "\"(pass 1)\" = no separate cold process was run: the first pass of the warm process, without the launcher's start. "
                  "Baselines: the first of the two runs.",
                  cells, corpora, CHECKERS, cold,
-                 [("default configuration, native / gruszka", dn, gr), (f"{other}, native / gruszka", on, gr),
+                 [("the executable / gruszka", dn, gr), ("optional Oracle build / the executable", dp, dn),
+                  (f"{other}, native / gruszka", on, gr),
                   ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
     out += table("4. CPU time, 8 workers (s): median warm pass / cold process",
                  "A diagnostic, not the target: process CPU time (all threads: workers, loader, environment thread, JIT compiler, "

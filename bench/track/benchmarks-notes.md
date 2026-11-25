@@ -15,10 +15,12 @@
   - (b) the official verdict on every real input: what lean4export writes (the corpora), the arena's good and bad tests, the mutant corpora;
   - (c) everything the official checker accepts is accepted (a rejection is confirmed by the reference engine, a decline goes to it);
   - (d) a derivable statement that the official checker rejects only through its own incompleteness, non-transitivity, cache order or object identity may be accepted (`docs/design/review/official-divergence.md`).
-- **Platforms** (`docs/PLATFORM.md`, Part 0): **JVM launcher** = `bin/rlvm-jvm`, the warm platform (HotSpot of GraalVM
-  CE 25, C2, serial collector, 8 compiler threads, transparent huge pages; heap by engine: machine 7 GB, others 13 GB);
-  **native image** = `bin/rlvm`, the cold platform and what the arena definition runs (CE, `-O3`, serial collector,
-  13 GB cap). Same jars in both.
+- **Platforms.** The release is ONE executable (*agentic-note*: design-packaging): **native image** = `bin/rlvm`, built
+  with GraalVM CE at `-O3` with the serial collector and the heap settings its `rlvm --version` prints; it is what a
+  user runs and what the arena definition runs, and its rows are the ones that count for a release. **JVM launcher**
+  = `bin/rlvm-jvm` of a development distribution (HotSpot of GraalVM CE 25, C2, serial collector, 8 compiler
+  threads, transparent huge pages; heap by engine: machine 7 GB, others 13 GB): the same jars on a JIT, the
+  platform on which the warm metric was first measured and a tool of the repository, not part of a release.
 - **Configuration of every RLVM row**: `--threads 8` (what `--threads auto` chooses on 8 cores) or `--threads 1`; the
   load and the reader as the build decides them (pipelined for two or more workers, two scanner threads for these
   file sizes); the machine with its default switch set. Heap below mathlib: 6 GB (`-Xmx6g -Xmn1g` for the machine on

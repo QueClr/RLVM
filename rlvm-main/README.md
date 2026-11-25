@@ -33,7 +33,7 @@ scripts/dev.sh slice                                              # table for mo
 | `load=batch\|pipelined\|auto` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `auto` (since 2026-11-24, owner note 12): **`pipelined` when two or more workers run and the input is a file of at least `pipeline-min-mib`** and no `stop-after` phase is asked for, else `batch` (`MainOptions.resolveLoadDefaults`; section "Load defaults and the automatic worker count"). It was `batch` |
 | `order=file\|namespace` | order of ready units | the driver's (`file`) |
 | `session-mib=N`, `memory-mib=N` | session reset threshold, memory account limit | the driver's, unless the primary engine prefers another (below) |
-| `scan-threads=K\|auto` | scanner threads of the reader: they tokenise and pack file ranges (rlvm-load "packed runs") and run only on mapped input | `auto`: **1 for inputs of 256 MiB and more**, none below (`MainOptions.SCAN_THREADS_MIN_BYTES`, `DEFAULT_SCAN_THREADS`; 1 since 2026-11-25, it was 2: beside eight workers on eight cores one scanner thread is as fast or faster on every corpus with the machine, journal `dec-EGMG`) |
+| `scan-threads=K\|auto` | scanner threads of the reader: they tokenise and pack file ranges (rlvm-load "packed runs") and run only on mapped input | `auto`: **1 for inputs of 256 MiB and more**, none below (`MainOptions.SCAN_THREADS_MIN_BYTES`, `DEFAULT_SCAN_THREADS`; 1 since 2026-11-25, it was 2: beside eight workers on eight cores one scanner thread is as fast or faster on every corpus with the machine, *agentic-note*: dec-EGMG) |
 | `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `auto` (mapped if a regular file) when scanner threads run, whoever asked for them; `buffered` (plain `read`; ARCHITECTURE 1.4) otherwise. It was `buffered` |
 | `stop-after=load\|env` | stop after a phase | - |
 | `stats-file=F` | statistics as JSON | - |
@@ -231,7 +231,7 @@ Measurements and gates: `docs/PLATFORM.md`, sections 0.5 to 0.7.
 | `scripts/dev.sh dist` | `build.sh --published --jvm-only`: `rlvm-main` compiled from the tree, every other RLVM module as its owner last published it in `.toolchain/m2`; `work/dist/bin/rlvm-jvm`; a few seconds. Since wave 7 the shared `work/dist` is **versioned**: every build is installed as `work/dist.d/<UTC time>-<jars sha256 prefix>-<jvm\|native>` and `work/dist` is a symbolic link switched to it by one `rename(2)`; `gate.sh`, `slice.sh`, `bench/track` and the platform matrix resolve the link once at their start, so a rebuild can no longer change the build under a running guard. Old versions are deleted when they are neither among the newest 4 nor younger than 90 minutes (`RLVM_DIST_KEEP`, `RLVM_DIST_MIN_AGE_MIN`). Copy it with `cp -aL` |
 | `scripts/dev.sh dist-native` | `build.sh --published --dev`: the same plus the executable, the CE native image `work/dist/bin/rlvm` at **`-O3`** (wave 7: the default of `build.sh --opt`, the arena's flags; 2.5 min wall, about 900 s CPU on this host; `--opt 2` halves the build and costs 10-18 % CPU at run time, `work/status/machine-integration.md`) |
 | `scripts/dev.sh dist-versions` | the versions in `work/dist.d/` and the one `work/dist` names |
-| `scripts/dev.sh dist-tree` | `build.sh --dev`: a development distribution with everything compiled from the working tree. Plain `scripts/build.sh` (what `scripts/arena/build.sh` runs) builds THE RELEASE layout instead: one executable `bin/rlvm`, no jars, no JVM launcher (journal: `design-packaging`) |
+| `scripts/dev.sh dist-tree` | `build.sh --dev`: a development distribution with everything compiled from the working tree. Plain `scripts/build.sh` (what `scripts/arena/build.sh` runs) builds THE RELEASE layout instead: one executable `bin/rlvm`, no jars, no JVM launcher (*agentic-note*: design-packaging) |
 | `scripts/dev.sh release`, `scripts/package.sh` | the release archive `rlvm-<version>-linux-<arch>.tar.gz` with exactly `rlvm`, `LICENSE`, `README.md`; `scripts/dev.sh release-oracle` / `profiles`: the OPTIONAL build with Oracle GraalVM (GFTC licence) and the profiles shipped in `profiles/`, and their regeneration. GraalVM CE is the only compiler of every default build |
 | `scripts/dev.sh suite [--jvm]` | `bench/rlvm/suite.sh`: `bench/run-suite.py` over the 230 published tests with the distribution (uses the JVM launcher automatically when no native image is built) |
 | `scripts/dev.sh slice [--all] [--native\|--jvm] [--probe]` | `scripts/slice.sh`: tutorial tests (or all 230), reference engine, one worker, batch load; writes `work/status/slice.md` / `slice-all.md` (summary, wrong verdicts, failures grouped by message with a guess at the owning module, every test); `--probe` runs the driverless probe instead (`slice-probe*.md`) |
@@ -339,10 +339,10 @@ Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, 
 
 ## State of 2026-11-25 (packaging owner; supersedes what the sections below say about defaults)
 
-- The release is ONE executable (journal: `design-packaging`); `rlvm --version` ends with `default: ...`,
+- The release is ONE executable (*agentic-note*: design-packaging); `rlvm --version` ends with `default: ...`,
   this checker's own statement of what a run without options does (`RlvmChecker.defaults()`).
 - One scanner thread instead of two for inputs of 256 MiB and more (`MainOptions.DEFAULT_SCAN_THREADS`;
-  journal: decision `dec-EGMG`); the worker rule (one per CPU, at most 8) and the load rule (pipelined
+  *agentic-note*: dec-EGMG); the worker rule (one per CPU, at most 8) and the load rule (pipelined
   from 8 MiB) were measured again with the machine as engine and stay.
 
 ## State of 2026-11-24, 23Z (steward B2; the scanner-thread count below is superseded by the section above)
