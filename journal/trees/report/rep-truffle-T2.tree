@@ -1,0 +1,186 @@
+\title{NOTES-T2 - the Truffle tier (owner: T2)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-truffle/NOTES-T2.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Module \code{\verb~|rlvm-truffle~}, package \code{\verb~|rlvm.truffle~} (+ \code{\verb~|rlvm.machine.T2Bridge~}). What it is and how to use it: \src{rlvm-truffle/README.md}. This file: deviations from ISA 8.4 / 8.5, what the tests showed, the measurements, every experiment kept or rejected, and the go / no-go. All of 2026-11-24.}
+
+\subtree{
+\title{1. As built against ISA 8.4 / 8.5}
+
+\table{
+\tr{\th{\verb~|#~}\th{ISA}\th{As built}\th{Reason}}
+\tr{\td{D1}\td{"one final \code{\verb~|Instr~} subclass per opcode ... calls the \code{\verb~|Ops~} fast method"}\td{own nodes for 23 opcodes; \code{\verb~|BUNREAD~}, \code{\verb~|MATCH~}, \code{\verb~|TARG~} and any unknown opcode run through the stepper's own body (\code{\verb~|Tier.step~}, behind a boundary)}\td{their bodies hold logic of M7's (term walks, the site registers of a telescope); executing the body itself keeps one semantics and makes every future opcode executable without a change here}}
+\tr{\td{D2}\td{registers are static \code{\verb~|int~} frame slots}\td{so, except the registers pinned to the window: in a \code{\verb~|TELE~} block the telescope variables and the 8 site registers; in a block with an unknown opcode all of them}\td{the stepper's body reads and writes the window}}
+\tr{\td{D3}\td{"written to the \code{\verb~|ACT~} frame in \code{\verb~|W~} only when the root suspends"}\td{on a suspension the slot registers that are LIVE at the resume point are written to the register window (\code{\verb~|RS~}); the frame is written by \code{\verb~|Tier.suspend~}}\td{under convention H the registers of an activation live in the window \code{\verb~|RS[rb..]~}, not in the frame (NOTES-M7 D1); liveness keeps the write-back to what the rest of the block reads}}
+\tr{\td{D4}\td{\code{\verb~|selectEntry(m.entryPc)~}, \code{\verb~|loadRegisters~}}\td{entries = the block's entry table + every resume point (successor of a class-j instruction); an entry loads its live slot registers; the entry number, \code{\verb~|rb~}, \code{\verb~|d~} travel in fields of the per-machine \code{\verb~|T2Tier~}, which is the root's one argument}\td{no allocation per call; \code{\verb~|rlvm.t2.resume=false~} leaves resumes to the stepper}}
+\tr{\td{D5}\td{calls between promoted blocks: \code{\verb~|DirectCallNode~}, at most 64 deep}\td{none: a block applies a closure through \code{\verb~|Eval.apply~} (behind a boundary), which reaches the callee's block through the stepper's hook}\td{\code{\verb~|APPLY~} does not know its callee statically; a direct call would need the fast path of \code{\verb~|Eval.apply~} (tick, call event, depth test, binder arithmetic of \code{\verb~|applyFrom~}) a second time inside the node. This is the main thing the tier does NOT have (section 6)}}
+\tr{\td{D6}\td{cut of \code{\verb~|W~}: every nested compiled activation propagates \code{\verb~|UNWIND~}}\td{a signal (\code{\verb~|>= Op.SIG~}) returned by an operation is returned at once by the node and by the root, as the stepper does (convention H has no UNWIND status: SUSP / ABORT / FATAL are return values)}\td{H3}}
+\tr{\td{D7}\td{inline caches: the \code{\verb~|IC~} table shared with the base tier}\td{\code{\verb~|KVAL~} probes the same cell through \code{\verb~|Code.icGet~}; a miss runs the stepper's body, which fills it}\td{one cache}}
+\tr{\td{D8}\td{governor: RENT = 2 C / sigma = 210 ms, compile CPU <= 1\% of process CPU, promoted < 64}\td{\code{\verb~|spent(b) >= rent * cost(b)~} with \code{\verb~|cost(b)~} = c0 + c1 * instructions, learned from the compilations; share 2\%, max 256 (profile \code{\verb~|cpu~}); profile \code{\verb~|warm~} for OWNER-NOTES 12}\td{the fixed 18 ms of the spike is not the cost of a block here (4 ms for 2 instructions, 90 ms for 27); \code{\verb~|spent~} is the machine's own heat accounting (M7), self time without nested blocks}}
+\tr{\td{D9}\td{\code{\verb~|heat[block]~} summed over the workers every 4096 entries}\td{\code{\verb~|Tier.Heat~} (M7): per session counters, listener every \code{\verb~|period~} entries (1024 / 256)}\td{M7 owns the counters}}
+\tr{\td{D10}\td{\code{\verb~|compiler.MaximumGraalGraphSize=20000~}}\td{not set; blocks of more than 256 instructions are not promoted}\td{Graal's own limit showed up as "code is too large" on one block of 846 words; the instruction cap avoids the wasted compilation}}
+\tr{\td{D11}\td{-}\td{a promoter thread builds roots and submits them; workers never touch Truffle except to call valid code}\td{workers do not wait; the Truffle context is entered on one thread only}}
+\tr{\td{D12}\td{"No-go: \code{\verb~|rlvm-truffle~} is not built and the Truffle runtime is not linked" (0.5)}\td{the module is built, tested and off by default (staging switch \code{\verb~|t2~})}\td{the brief of this wave; the Truffle runtime was already linked into the image for the launcher's probe}}
+}
+}
+
+\subtree{
+\title{2. Defects found while building it (all in this module; none changed a verdict)}
+
+\ol{
+\li{\strong{An instruction node executed on a loop-exit path} (first compilation attempt): \code{\verb~|return instr[i].exec(..)~} inside the exploded loop is code after the loop exit, where the instruction index is a phi, not a constant: partial evaluation could not inline the virtual call and the virtual frame escaped ("should not be materialized"). Every compilation failed, i.e. the tier ran nothing. Fixed: \code{\verb~|EXIT~} instructions leave through one shared exit state inside the loop.}
+\li{\strong{Native image: setter helpers} (\code{\verb~|T2Bridge.setReg / setX / setXp / pop~}): "reachable during compilation, but was not seen during Bytecode parsing: ..\%\%D". A method whose body is one store is inlined before the image's analysis, and its deoptimisation target is then missing. Reproduced with a 60-line program (GraalVM CE 25.5.5.0.3, \code{\verb~|-O3~}). Fixed by not having such methods: array stores at the call site, pointer writes behind the operations' boundaries and in \code{\verb~|T2Tier.run~}.}
+\li{\strong{Native image: the compilation listener} threw \code{\verb~|IllegalAccessError~} on \code{\verb~|com.oracle.truffle.compiler.TruffleCompilerListener$CompilationResultInfo~} (the Truffle jars are modules in an image), which Truffle reported as a failed compilation: no block was ever installed in the first image. Fixed: \code{\verb~|--add-exports~} for that package too, and every listener callback catches what its bookkeeping throws.}
+\li{\strong{Lost promotions}: the runtime's compile queue holds a call target weakly. Nothing else referenced a root between submission and compilation, so a collection in that window dropped the task silently: 17 of 89 promoted blocks of reachability (the earliest, i.e. the hottest) were never compiled and stayed "pending". Found because the warm tool waited for them. Fixed: the promotion record holds the root until it is installed or failed; a dequeued compilation is a failed promotion.}
+}
+}
+
+\subtree{
+\title{3. Correctness (all with the final nodes; JVM unless stated)}
+
+\p{Tier equivalence = two runs of one export, tier off and on, ONE machine session each, compared after every unit: outcome, ticks, and a digest of every record word (identity AND memo words) and every run word of the session (\code{\verb~|T2Bridge.digest~}). Equal digests = the same value ids with the same contents.}
+
+\table{
+\tr{\th{Run}\th{Promotion}\th{Result}}
+\tr{\td{init-prelude, \code{\verb~|code,casetrees,tele~}, ELAB_AT 1}\td{every block at its first entry, compiled synchronously}\td{2,121 constants; 3,937 blocks compiled, 1 refused by Graal ("code is too large", 846 words: stays in the stepper); 33,401 compiled activations; digests, ticks, outcomes identical at every unit; 0 deoptimisations}}
+\tr{\td{tutorial + bugs (175 files), \code{\verb~|code,casetrees,tele~}, ELAB_AT 1}\td{the same}\td{169 files identical at every unit (25,907 compiled activations); the other 6 are refused by the loader before any engine runs; a file whose declarations never enter a block has no tier and is compared all the same (work/t2/gates/tiereq-tutorial-bugs.txt)}}
+\tr{\td{4 tutorial files; 2 of them under host depth 0; variants (registers in the window, all instructions through the stepper's body, no resume entries)}\td{the same}\td{identical (fast group)}}
+\tr{\td{perf/: magma-list-pair-n7, proj-app-lazy-delta, discarded-argument-match, fueled-chain, shared-subterm, folded-constant-first, args-before-unfold; two of them under host depth 0}\td{the same}\td{identical; e.g. proj-app-lazy-delta: 64 blocks, 800,219 compiled activations, 204,726 frames written}}
+\tr{\td{reachability (4,413 units), perf/unfold-before-literal-fallback, proj-applied-struct, magma-list-pair-n21, \code{\verb~|code,casetrees~}, ELAB_AT 10}\td{production path: rent 0.05, background compilation}\td{identical; reachability 78 blocks / 3.05 M compiled activations / 348,827 frames; unfold-before-literal-fallback 6.2 M compiled activations / 3.3 M frames (deep recursion: the suspension and resume protocol at work)}}
+\tr{\td{Init (58,547 units), \code{\verb~|code,casetrees~}, ELAB_AT 10}\td{the same}\td{identical; 331 blocks, 7.2 M compiled activations}}
+}
+
+\p{Differential gate against the reference engine with the tier on (\code{\verb~|testkit diff --engine machine --launcher work/t2/dist-n2/bin/rlvm-jvm~}, i.e. the real launcher and driver):}
+
+\table{
+\tr{\th{Corpus}\th{Switches, promotion}\th{Units compared}\th{Differences}}
+\tr{\td{tutorial + bugs, 175 exports, \code{\verb~|-j 4~}}\td{\code{\verb~|code,casetrees,tele,t2~}, ELAB_AT 1, every block compiled at first entry}\td{1,342 of 1,342 (1,311 both accept, 31 both reject), 0 declines}\td{\strong{0} (SOUNDNESS 0, COMPLETENESS 0)}}
+\tr{\td{reachability, cedar-hot-ax, Init, Std, \code{\verb~|--threads 4~}}\td{\code{\verb~|code,casetrees,t2~}, rent 0.05, background (Std: 559 blocks promoted, 391 installed when the run ended, 7.7 M compiled activations, 0 deoptimisations)}\td{170,322 of 170,322, 0 declines}\td{\strong{0}}}
+}
+
+\p{Reports: \code{\verb~|work/t2/gates/~}. Fail-safe paths exercised: no optimising runtime (\code{\verb~|-Dtruffle.UseFallbackRuntime=true~}: one warning, the tier disables itself, exit status and verdict unchanged); a compilation Graal refuses; an export that is rejected with the tier on.}
+}
+
+\subtree{
+\title{4. How the measurements were taken, and what they can show}
+
+\p{Two kinds of rows, kept apart everywhere below.}
+
+\ul{
+\li{\strong{Container rows} (\code{\verb~|work/t2/measure.tsv~}, tool \code{\verb~|work/t2/m.py~}, batches \code{\verb~|work/t2/batch-cold.sh~} / \code{\verb~|batch-warm.sh~} / \code{\verb~|container-all.sh~}): arena-shaped container (\code{\verb~|bench/arena-docker.sh --arena-limits~}), \code{\verb~|perf stat~} (CPU time, instructions:u) + GNU time, each batch under ONE hold of \code{\verb~|work/perf-history/.ladder.lock~}. On 2026-11-24 the lock queue was 6-10 batches long and waits of 30-60 minutes were normal; several containers ran at once all afternoon, so even these rows are not from a quiet host. Instruction counts are the reliable column.}
+\li{\strong{Host rows} (\code{\verb~|work/t2/host-warm.tsv~}, tool \code{\verb~|work/t2/host-warm.py~}): the multi-pass tool \code{\verb~|rlvm.truffle.WarmMain~} (test tree; \code{\verb~|bin/warm~} of a \code{\verb~|build-dist.sh --warm~} distribution, or the same class on the JVM) run directly on the host, configurations interleaved, NOT under the lock: one process, one engine, pass 1 cold, later passes warm with fresh sessions. The number to read is the process CPU time of a warm pass (\code{\verb~|/proc/self/stat~}, 10 ms resolution). The host was at load average 70-250 throughout. \strong{What these rows can show is very little.} Inside one process the same configuration varies by about +-15\% from pass to pass (JVM, reachability, base tier, passes 3-8: 1700 - 2220 ms); ACROSS processes minutes apart the CPU time of identical work moves by a factor of 1.5 - 2 (native \code{\verb~|dist-n2~}, base tier, reachability: cold / warm 3920 / 3470-3930 ms at 15:44Z and 6040 / 5540 ms at 16:04Z; \code{\verb~|dist-n3~}: 3510 / 2830-3110 ms at 16:00Z and 2060 / 1880-2350 ms for a configuration that does strictly more work two minutes later), and the load average does not predict the direction; part of it was my own host runs overlapping. Rows of one label were taken sequentially over many minutes, so a difference between two configurations of a host run is NOT evidence about the configurations. Only back-to-back pairs (label \code{\verb~|Pn~}, below) are read as comparisons, and only for their sign.}
+}
+
+\p{\code{\verb~|WarmMain~} is not the driver: no admission pipeline, no re-check, no pipelined loading; the workers of a warm pass claim chunks of 16 units from a shared counter. It was written at 14:55Z, when the driver had no \code{\verb~|-X passes=N~}. Since 15:41Z the launcher has it (\code{\verb~|-X passes=N~} = reload passes, \code{\verb~|-X passes=N -X passes-mode=recheck~} = later passes over the same store; requests.log 15:46Z): that is the tool to use from here on, and none of the rows below were taken with it. A reload pass builds a new store and therefore a new machine engine and code store, so the tier starts cold in every reload pass; whether recheck mode keeps the engine (and with it the installed blocks) is section 7, open point 1.}
+
+\p{Distributions: \code{\verb~|work/t2/dist-n2~} (machine jar of 14:46Z; tier WITH defect 4 of section 2: about one promoted block in five was never compiled) and \code{\verb~|work/t2/dist-n3~} (the same sources plus the fix of defect 4, the governor profiles and \code{\verb~|minInstr~}). The tree is two small changes ahead of \code{\verb~|dist-n3~}: the default of \code{\verb~|rlvm.t2.timing~} (64 in the image, 4096 in the tree) and the model for a block without a timed sample. Every tier row of \code{\verb~|dist-n3~} passes \code{\verb~|-Drlvm.t2.timing=4096~} explicitly, so the rows describe the tree's default timing; the model fallback was not in any measured image.}
+
+\p{\strong{Discarded}: every tier row measured before 15:54Z (labels without a timing argument: the first JVM and native host runs, \code{\verb~|Hj1~}, the first \code{\verb~|Mj1~} rows, \code{\verb~|BenchTest~} runs). They carry the cost of the heat accounting's timing (next section) mixed with whatever the tier itself costs, so they cannot be used for either. That does not mean the tier is neutral: nothing measured on the host so far says whether compiled blocks are faster or slower than the stepper.}
+
+\p{\code{\verb~|dist-n2~} and \code{\verb~|dist-n3~} contain different machine jars (\code{\verb~|a089fd2aef4b~} of 14:51Z, \code{\verb~|a5313e0b6c32~} of 15:38Z). The newer one declines 8 of the 4,413 units of reachability by itself (\code{\verb~|UNSUPPORTED_INPUT~}, "eager reduction (an argument 'eagerReduce _ _')", first at unit 2373), in the base tier, without \code{\verb~|t2~}: rows of the two distributions measure different work and are never compared.}
+
+\p{\strong{Which machine jar the correctness runs of section 3 used.} \code{\verb~|rlvm-machine~} was republished about forty times between 14:00Z and 16:08Z (\code{\verb~|work/sandbox/publish.log~}), so there is no single "machine jar of this wave":}
+
+\table{
+\tr{\th{Run}\th{Machine jar}}
+\tr{\td{both differential gates (through \code{\verb~|dist-n2~})}\td{\code{\verb~|a089fd2aef4b~}, staged 14:51:59Z - one known jar}}
+\tr{\td{tier equivalence, init-prelude, every block compiled (ended 14:40Z)}\td{the jar published when the run started, about 14:23Z; hash not recorded}}
+\tr{\td{tier equivalence, reachability + heavy perf/ (ended 15:05Z)}\td{as published about 15:01Z; hash not recorded}}
+\tr{\td{tier equivalence, Init (ended 15:35Z)}\td{as published about 15:30Z; hash not recorded}}
+\tr{\td{tier equivalence, tutorial + bugs digests (ended 15:49Z)}\td{as published about 15:37Z; hash not recorded}}
+\tr{\td{default test group on the final tree (15:58:51Z - 16:01:25Z)}\td{as published 15:42Z or 15:59Z (a publication landed while the run started); hash not recorded}}
+}
+
+\p{Inside one run the tier-on and the tier-off machine are the same jar, so each row is a valid tier equivalence result for its snapshot; the tier was thus compared against five different states of the machine. None of them is the jar in \code{\verb~|.toolchain/m2~} at the time of writing (\code{\verb~|4023ec9211dd~}, 16:07:38Z), and the differential gates were NOT repeated on a jar later than 14:51Z.}
+}
+
+\subtree{
+\title{5. Experiments (kept / rejected, with numbers)}
+
+\ol{
+\li{\p{\strong{Heat timing rate 64 -> 4096: KEPT (default of the tier), size of the effect NOT measured.} The tier switches the machine's heat accounting on (\code{\verb~|Tier.heat(engine)~}); at its default of one timed entry in 64, a timed entry also times every block entered beneath it. Host rows, native image \code{\verb~|dist-n2~}, reachability, \code{\verb~|code,casetrees~}, one worker, process CPU of warm passes 2-4 (label \code{\verb~|Tn1~}):}
+\table{
+\tr{\th{configuration}\th{warm passes, ms}}
+\tr{\td{base tier, no heat accounting}\td{3470, 3800, 3930}}
+\tr{\td{tier attached, nothing promoted (\code{\verb~|rlvm.t2.max=0~}), timing 64}\td{5590, 5880, 4540}}
+\tr{\td{the same, timing 4096}\td{3980, 4250, 3760}}
+\tr{\td{tier promoting (134 blocks installed, 8.0 M compiled activations), timing 64}\td{4810, 6710, 4830}}
+\tr{\td{tier promoting (122 blocks installed, 15.5 M compiled activations), timing 4096}\td{7060, 6100, 5940}}
+}
+\p{\strong{Read this table for its mechanism, not its numbers.} The five rows were taken between 15:44Z and 16:01Z, 2-17 minutes apart, under the host conditions described in section 4. I first read rows 1-3 as "the accounting costs 30-50\%" and reported that to M7 (15:56Z), then read row 5 as "the promoting tier is 55-80\% slower"; neither magnitude is established, and the first was withdrawn in requests.log at 16:06Z. A second set on \code{\verb~|dist-n3~} (label \code{\verb~|Vn1~}, 16:00-16:02Z) shows base 2830-3110 ms, timing 64 1910-2700 ms, timing 4096 1880-2350 ms while the host was emptying: no usable difference. What stands is the reading of \code{\verb~|Tier.exec~}: while a sampled entry is on the stack, every block entered beneath it is timed (two clock calls), so the share of timed entries grows with nesting depth, 1 - (63/64)^depth. The tier asks for timing 4096 because that cannot hurt; whether 64 hurts, and how much, needs instruction counts from the container.}}
+\li{\strong{Promotion record holds the root: KEPT} (defect 4): without it 17 of 89 promoted blocks of reachability were never compiled (native, trace of 15:33Z).}
+\li{\strong{No setter helpers in compiled code: KEPT} (defect 2): the precondition for an image to build at all.}
+\li{\strong{Minimum block size (\code{\verb~|rlvm.t2.minInstr~}): implemented, default 0, NOT measured.} The idea: entering compiled code has a fixed cost, so a block of two instructions may lose where a block of twenty gains. The only direct observation is from the heat accounting's samples of three tiny LEAF blocks in a native run (2 instructions each: 45 -> 55, 45 -> 54, 82 -> 87 ns per entry, stepper -> compiled), which points that way; the host rows with \code{\verb~|minInstr~} 8 / 16 are unusable (section 4). No default was chosen from data.}
+\li{\strong{Probes inlined (\code{\verb~|rlvm.t2.inline~} = 1 / 2): implemented behind a class constant, default 0, NO RESULT.} Partial evaluation continues into \code{\verb~|Values.peek~} / \code{\verb~|Code.ctorIndex~} (1) and \code{\verb~|Values.mkApp~} / \code{\verb~|Values.mkConst~} (2) instead of stopping at a boundary. One attempt on the JVM (\code{\verb~|perfTests~} with every block compiled at its first entry, \code{\verb~|inline=2~}) ran for 27 minutes without finishing its first file and was stopped; it was never built into an image and never run with the production promotion. Whether it compiles in reasonable time, whether an image builds with it, and what it gains are all open.}
+\li{\strong{Variants \code{\verb~|rlvm.t2.slots=false~}, \code{\verb~|rlvm.t2.nodes=false~}, \code{\verb~|rlvm.t2.resume=false~}: tested for equivalence (fast group), NOT measured for speed.} Compile cost with resume entries is visible in the reports (a \code{\verb~|TELE~} block of 16 instructions has 12 entries and 7.3 KB of code) but was not compared against \code{\verb~|resume=false~}.}
+\li{\strong{Process clock read moved out of the listener's common path: KEPT, effect not measured.} \code{\verb~|T2Engine.consider~} read \code{\verb~|/proc/self/stat~} (the governor's process CPU time) before the rent test, i.e. on the worker thread at every listener call: every \code{\verb~|period~} entries of every block that is not promoted yet. It is now read only for a block that has passed the rent test. Found by reading the code while planning a measurement, 16:13Z; in the tree, not in \code{\verb~|dist-n3~}.}
+\li{\p{\strong{Compile cost model: \code{\verb~|rlvm.t2.cost1~} 0.15 -> 2.5 ms per instruction: KEPT.} The model is used until three blocks have been compiled; measured costs are an order of magnitude above the old default:}
+\table{
+\tr{\th{Log (compiler thread's CPU clock from start to success of each compilation)}\th{Blocks}\th{median}\th{p90}\th{max}\th{per instruction}\th{code per instruction}\th{instructions / entries per block}}
+\tr{\td{JVM (libgraal), init-prelude, every block at first entry, \code{\verb~|code,casetrees,tele~}, 14:27-14:40Z, host load 200+ (\code{\verb~|prelude-all.log~} in T2's temporary directory, outside the repository)}\td{3,937}\td{12.9 ms}\td{64.9 ms}\td{1,125 ms}\td{2.16 ms}\td{849 B}\td{12.9 / 6.9}}
+\tr{\td{native \code{\verb~|dist-n2~}, reachability, \code{\verb~|code,casetrees~}, rent 0.05, 15:33Z, host load 90-140 (\code{\verb~|warm-trace.log~} in T2's temporary directory, outside the repository)}\td{72}\td{15.0 ms}\td{42.7 ms}\td{126.6 ms}\td{3.05 ms}\td{1,184 B}\td{6.9 / 1.4}}
+}
+\p{The two rows are different populations of blocks (a library prelude with telescopes against the hot blocks of closed evaluation) on a contended host: they give the order of magnitude of one compilation (about 15 ms, 2-3 ms per instruction, about 1 KB of machine code per instruction), not a comparison of the platforms. A resume point is an entry: the prelude's blocks have 6.9 entries on average.}}
+\li{\p{\strong{The tier against the base tier, back-to-back pairs on the host: NO GAIN OBSERVED; whether and how much it loses is not determined.} Native \code{\verb~|dist-n3~} (\code{\verb~|bin/warm~}), reachability, one worker, \code{\verb~|code,casetrees~} against \code{\verb~|code,casetrees,t2~} with \code{\verb~|rlvm.t2.mode=warm rlvm.t2.timing=4096~}, three passes per process, the two configurations alternating, one process of mine at a time, 16:07Z - 16:17Z, load average 55-67 (label \code{\verb~|Pn1~}). Process CPU in ms (it contains the compiler threads); every row accepted 4,405 units; a tier run made 6.40 - 6.49 M compiled activations.}
+\table{
+\tr{\th{pair}\th{base: cold, pass 2, pass 3 (wall/CPU)}\th{tier: cold, pass 2, pass 3 (wall/CPU)}\th{blocks installed, compile CPU}\th{tier / base, pass 2, pass 3}}
+\tr{\td{1}\td{2360, 1970, 1950 (2.4, 2.5)}\td{3720, 3700, 3800 (6.1, 5.6)}\td{74, 2327 ms}\td{1.88, 1.95 - FLAGGED: the base run fell into a quiet moment}}
+\tr{\td{2}\td{3280, 3030, 2930 (8.3, 4.6)}\td{4330, 3320, 3900 (5.2, 6.4)}\td{76, 2557 ms}\td{1.10, 1.33}}
+\tr{\td{3}\td{3410, 2840, 2870 (5.9, 6.0)}\td{3500, 2510, 2960 (6.8, 3.7)}\td{72, 1720 ms}\td{0.88, 1.03}}
+\tr{\td{4}\td{3160, 2170, 1630 (5.4, 2.2)}\td{3400, 2470, 3930 (3.0, 4.3)}\td{76, 1929 ms}\td{1.14, 2.41 - pass 3 FLAGGED: quiet moment of the base run}}
+\tr{\td{5}\td{3360, 3030, 3200 (12.1, 4.9)}\td{4860, 3890, 3780 (5.2, 3.1)}\td{79, 2742 ms}\td{1.28, 1.18}}
+\tr{\td{6}\td{3570, 2970, 3180 (2.0, 5.5)}\td{4380, 3050, 3200 (2.5, 4.2)}\td{73, 2429 ms}\td{1.03, 1.01}}
+}
+\p{Reading, and its limits. The tier is at or above the base tier in 11 of 12 comparisons and never clearly below it (0.88 once). But the base tier's own value for the same pass ranges from 1630 to 3200 ms over these ten minutes, a factor of two, which is more than any ratio that is not flagged; passes inside one process differ by up to 1.6x. A tier run also spends 1.7 - 2.7 s compiling, spread over its three passes (blocks keep crossing the \code{\verb~|warm~} profile's threshold), and that is inside the process clock: an attempt to explain the excess as "exactly the compiler" fitted pair 2 and failed on pairs 3 and 4. So these rows do not separate slower compiled code from compilation still in progress, and they are one corpus, one platform, one worker.}}
+}
+}
+
+\subtree{
+\title{6. Go / no-go}
+
+\p{\strong{Not established by measurement.} Neither criterion was evaluated under its own conditions:}
+
+\ul{
+\li{ISA 0.5 as revised (go iff total CPU time, compiler included, falls by at least 5\% on reachability or 3\% on the Cedar slice, wall clock is not higher, and no corpus loses more than 0.5\%): needs container rows with instruction counts. The batches for it (\code{\verb~|work/t2/container-all.sh~}: reachability, Cedar slice, Init, three perf/ tests, con-leche; native and JVM launcher; one and four workers; base / tier attached without promotion / both governor profiles) were queued at 15:58Z and never got the measurement lock (11 batches waiting, the oldest for 40 minutes, at 16:10Z). \code{\verb~|work/t2/measure.tsv~} does not exist.}
+\li{OWNER-NOTES 12 (does the tier lower warm wall clock, 8 workers and 1): wall clock on this host was not usable all afternoon (wall / CPU between 2 and 12 for the same run), and no run with more than one worker produced a usable row.}
+}
+
+\p{What exists instead: the paired host rows of 5.9 (no gain observed on reachability, native, one worker; a loss suggested, size unknown), compile costs of about 15 ms per block (5.8), and three samples of two-instruction LEAF blocks that were 5 - 19 ns slower per entry compiled than stepped (5.4).}
+
+\p{\strong{Recommendation on that basis: \code{\verb~|t2~} stays off; it is not ready to be a default, and nothing measured here argues for it.} That is a recommendation from the absence of any observed gain, not the no-go verdict the brief asks for; the verdict needs the container rows.}
+
+\p{Expectation, from the structure of the tier (reasoning, not measurement; ISA 0.5 states the same expectation): a promoted block is short (6.9 instructions on average among reachability's promoted blocks, 12.9 in the prelude); what compiled code removes is the stepper's dispatch and operand decoding for those few instructions; what it adds is the hand-over (hook, table lookup, Truffle call boundary, entry dispatch, register loads) once per activation; and every operation that does the real work (interning, frames, \code{\verb~|Eval.apply~}) is the same out-of-line call as before. Section 1, D5 is the consequence that matters: a block reaches the next block through \code{\verb~|Eval.apply~} and the stepper's hook, never directly.}
+
+\p{What could change the picture, none of it built or measured:}
+
+\ol{
+\li{Calls between promoted blocks without leaving compiled code. \code{\verb~|APPLY~} would need the fast path of \code{\verb~|Eval.apply~} for "closure whose block is promoted" as one shared operation that both the stepper and a node can call (a request for M2 / M7), so that Truffle can call or inline the callee's root.}
+\li{Blocks that iterate inside one activation (a recursor chain as a backward jump; K2 trees published as blocks): note to M3 in requests.log, 15:02:16Z.}
+\li{Operations compiled into the block (\code{\verb~|rlvm.t2.inline~}): implemented, no result (5.5).}
+\li{The tier being warm at all under the driver's passes (section 7, open point 1).}
+}
+}
+
+\subtree{
+\title{7. Open points}
+
+\ol{
+\li{\strong{The tier is cold in every pass of the driver's \code{\verb~|-X passes~}.} Checked through the launcher of \code{\verb~|dist-n3~} (16:20Z, \code{\verb~|work/t2/gates/passes-recheck-n3.log~}): \code{\verb~|-X passes=3 -X passes-mode=recheck~} on perf/proj-app-lazy-delta with \code{\verb~|code,casetrees,t2~}: all three passes accept, and in each pass the same two blocks are promoted and compiled again (80.9 / 60.5 / 54.4 ms and 6.2 / 6.5 / 5.5 ms); three tier instances report at exit. The tier is keyed by the machine engine, so each recheck pass had a new engine with a new code store; reload mode has a new store per pass. As wired, the warm-pass metric of OWNER-NOTES 12 cannot credit a compiled tier (or a warm code store) at all. Reported to the driver's owner and M6 (requests.log 16:20:31Z). \code{\verb~|WarmMain~} keeps one engine across passes, which is why its tier rows show blocks staying installed; it measures something the launcher does not do today.}
+\li{\strong{No go / no-go by measurement} (section 6). The container batches never ran: \code{\verb~|work/t2/container-all.sh~} (waits for \code{\verb~|dist-n3~}, takes the measurement lock once per batch, rows to \code{\verb~|work/t2/measure.tsv~}) was queued from 15:58Z to 16:20Z behind up to eleven other batches and was then stopped by me, because nothing of mine may be left running. Re-run it as it is; its warm rows use \code{\verb~|bin/warm~}, because of open point 1.}
+\li{\strong{Not measured at all}: the JVM launcher against the native image with the tier; four or eight workers; the Cedar slice; Init; the evaluation-heavy perf/ tests; con-leche; break-even executions (the saving per execution is not established, not even its sign). The only comparison rows are 5.9.}
+\li{\strong{No image of the final tree.} \code{\verb~|dist-n3~} (15:38Z) lacks four small changes: the timing default 4096 (every measured tier row passed it explicitly), the model for a block without a timed sample, the process clock read after the rent test, and \code{\verb~|cost1~} 2.5. The tree with them compiles and passes the fast group (3 tests, machine jar \code{\verb~|4023ec9211dd~} before and after the run, 16:16-16:17Z) and the default group (5 tests, 16:17:54Z - 16:19:18Z; started on \code{\verb~|4023ec9211dd~}, the repository jar changed to \code{\verb~|f9b6d253065a~} during the run). \code{\verb~|work/t2/build-dist.sh --native --warm dist-n4~} builds the image.}
+\li{\strong{The differential gates were run on one machine jar only} (\code{\verb~|a089fd2aef4b~}, 14:51Z; section 4). The machine has been republished about forty times since. To repeat: \code{\verb~|rlvm-testkit/bin/testkit diff --engine machine --launcher work/t2/DIST/bin/rlvm-jvm --threads 4 --fail-on-decline reachability cedar-hot-ax init std -- -Xmx8g -X machine.switches=code,casetrees,t2 -Drlvm.t2.mode=warm -Drlvm.t2.timing=4096~} and the tutorial + bugs form of section 3. With the newer machine jars \code{\verb~|--fail-on-decline~} will report the machine's own 8 declines on reachability (section 4), tier or no tier.}
+\li{\strong{Heat timing}: the mechanism is reported to M7, its cost is not measured (5.1).}
+\li{\strong{Experiments without a result}: \code{\verb~|rlvm.t2.inline~}, \code{\verb~|rlvm.t2.minInstr~}, the speed of the three variants (5.4 - 5.6).}
+\li{\strong{Tied to this GraalVM}: \code{\verb~|OptimizedCallTarget.compile / isValid / callIndirect~} and the compilation listener are internal API of the optimising runtime; the "no setter helper in compiled code" rule works around a limitation of native-image CE 25.5.5.0.3 (defect 2) that another version may not have, or may have differently.}
+\li{\strong{Two incidents of mine} (machine-T2.log 14:27Z and 15:54Z): a \code{\verb~|pkill -f~} that matched its own shell, and a kill loop over a process-name pattern that the permission system refused and that would have terminated my own running image build. Nothing of anybody else's was touched either time. Processes of mine were stopped only through their task ids afterwards.}
+}
+}

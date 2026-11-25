@@ -1,0 +1,388 @@
+\title{NOTES-T3 - the Truffle tier after T2 (owner: T3, 2026-11-24)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{truffle}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-truffle/NOTES-T3.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Continues \src{rlvm-truffle/NOTES-T2.md} (what the tier is, its deviations from ISA 8.4, its correctness record). This file: the measurements T2 could not take, what the tier costs and gains on each platform and why, what was changed, and the go / no-go. Scratch, scripts, logs and raw rows: \code{\verb~|work/t3/~} (\code{\verb~|warm.tsv~}, \code{\verb~|logs/~}). Section 10 is the second task of the same day: the prototype of U1, the CALL instruction (NO-GO).}
+
+\subtree{
+\title{1. Verdict: NO-GO as a default; what the tier is worth, and under which policy}
+
+\p{\strong{The Truffle tier does not pay on Cedar-level work and cannot under the present value model; on closed evaluation (reachability) it is worth 4 - 5\% of the warm wall clock in the native image and 7 - 10\% on the JVM, with a promotion policy that compiles only the dozen blocks that carry the run. On the Cedar slice it is neutral in the image and a loss on the JVM. \code{\verb~|t2~} stays off by default.} Nothing here argues for switching it on in the launcher. Nothing argues for deleting it either: it is correct (section 8), and it is the place where U1 / U2 of section 7 would pay.}
+
+\p{Warm wall clock per pass in ms: median of the later half of the warm passes of all runs of the configuration in the window (in brackets, where it matters, the range of those passes). \code{\verb~|K1~} = \code{\verb~|default,code,casetrees~}; tier = the same + \code{\verb~|t2~}, \code{\verb~|-Drlvm.t2.mode=warm~}, without the rejected run-ahead. Every row is one \src{bench/quiet.py} window, K1 and tier back to back on the same distribution (\code{\verb~|work/t3/warm.tsv~}, \code{\verb~|launcher.tsv~}; labels in the tables).}
+
+\p{\strong{Table A - the final tree and the final policy} (promotion at 20000 entries and 2\% of all activations; fixes C7 / C8 of section 4 in; machine jar \code{\verb~|8a8ea5644b24~}):}
+
+\table{
+\tr{\th{Workload}\th{Platform, tool}\th{Workers}\th{K1}\th{K1 + t2}\th{blocks compiled}\th{window}}
+\tr{\td{reachability}\td{JVM, WarmMain}\td{1}\td{1118 (2 runs)}\td{1006 (\strong{-10.0\%})}\td{12}\td{J9}}
+\tr{\td{reachability}\td{JVM, WarmMain}\td{8}\td{572 (2 runs)}\td{529 (\strong{-7.5\%})}\td{12}\td{J9}}
+\tr{\td{reachability}\td{JVM, LAUNCHER, kept-engine passes}\td{8}\td{439 (2 runs)}\td{394 (\strong{-10.2\%})}\td{11}\td{L1}}
+\tr{\td{reachability}\td{JVM, LAUNCHER, kept-engine passes}\td{1}\td{1036}\td{1020 (-1.5\%)}\td{12}\td{L1}}
+\tr{\td{reachability}\td{native, WarmMain}\td{1}\td{1448 (2 runs)}\td{1392 (\strong{-3.8\%})}\td{12}\td{N5}}
+\tr{\td{reachability}\td{native, WarmMain}\td{8}\td{737 (2 runs)}\td{701 (\strong{-4.8\%})}\td{12}\td{N5}}
+\tr{\td{Cedar slice}\td{JVM, WarmMain}\td{1}\td{1426 (1417-1504)}\td{1487 (\strong{+4.3\%}; 1484-1491)}\td{2}\td{J9}}
+\tr{\td{Cedar slice}\td{JVM, WarmMain}\td{8}\td{220 (211-227)}\td{286 (\strong{+30\%}; 272-343)}\td{2}\td{J9}}
+\tr{\td{Cedar slice}\td{native, WarmMain}\td{1}\td{1808 (1800-1812)}\td{1802 (-0.3\%; 1796-1814)}\td{2}\td{N5}}
+\tr{\td{Cedar slice}\td{native, WarmMain}\td{8}\td{316 (2 runs, 293-348)}\td{324 (+2.4\%; 296-353): inside the scatter}\td{2}\td{N5}}
+\tr{\td{full cedar}\td{JVM, WarmMain}\td{8}\td{1469 (1274-1696)}\td{1355 (1345-1546): no difference to be seen}\td{12}\td{J9}}
+\tr{\td{full cedar}\td{JVM, LAUNCHER}\td{8}\td{1574 (1543-1578)}\td{1664 (+5.7\%; 1622-1693, passes still falling)}\td{12}\td{L1}}
+\tr{\td{Init}\td{JVM, WarmMain (C7 only)}\td{8}\td{551 (536-628; all five passes 536-718)}\td{632 (581-641; all five 581-722): no gain; five passes are not a steady state here}\td{10}\td{J8}}
+\tr{\td{Std}\td{JVM, WarmMain}\td{8}\td{949 (895-1036; passes still falling)}\td{1004 (920-1042; still falling): no gain}\td{12}\td{J8}}
+}
+
+\p{The Cedar slice at 8 workers on the launcher did not reach a steady state in 7 passes (K1's own two runs: 398-928 ms) and is not in the table.}
+
+\p{\strong{Table B - the promotion policy} (earlier windows, before C7 / C8, machine jar \code{\verb~|4bc20d3e46ef~}; C7 keeps one machine per session reachable in the tier runs, so the 8-worker rows are biased against the tier by an amount I did not separate; they are here for the comparison of the policies with each other):}
+
+\table{
+\tr{\th{Workload}\th{Platform}\th{Workers}\th{K1}\th{tier, at 1000 entries, unbounded}\th{tier, at 20000 entries, at most 96 blocks}\th{windows}}
+\tr{\td{reachability}\td{JVM}\td{1}\td{1015 (4 runs: 986-1058)}\td{973 (-4.2\%; 212 blocks)}\td{949 (-6.5\%; 26 blocks)}\td{J6}}
+\tr{\td{reachability}\td{JVM}\td{8}\td{520}\td{529 (+1.7\%; 177 blocks)}\td{-}\td{J4}}
+\tr{\td{reachability}\td{native}\td{1}\td{1475 (2 runs)}\td{1370 against 1424 in its window (-3.8\%; 252 blocks)}\td{1392 (-5.6\%; 26 blocks)}\td{N3, N2}}
+\tr{\td{reachability}\td{native}\td{8}\td{761 (2 runs)}\td{779 (+2.3\%; 182 blocks)}\td{707 (-7.1\%; 28 blocks)}\td{N3}}
+\tr{\td{Cedar slice}\td{JVM}\td{1}\td{1359 (2 runs)}\td{1489 against 1438 in its window (+3.5\%; 804 blocks)}\td{1462 (+7.6\%; 96 blocks)}\td{J6, J3}}
+\tr{\td{Cedar slice}\td{JVM}\td{8}\td{232}\td{321 (+38\%; 686 blocks)}\td{-}\td{J4}}
+\tr{\td{Cedar slice}\td{native}\td{1}\td{1869}\td{-}\td{1888 (+1.0\%; 88 blocks)}\td{N3}}
+\tr{\td{Cedar slice}\td{native}\td{8}\td{319}\td{391 (+23\%; 713 blocks)}\td{351 (+10\%; 96 blocks)}\td{N3}}
+\tr{\td{full cedar}\td{JVM}\td{8}\td{1315}\td{1827 (+39\%; 1,820 blocks, 52.6 s of compilation)}\td{-}\td{J4}}
+}
+
+\p{Compilation: a block takes about 30 ms of compiler CPU on the JVM (7.6 s for 252 blocks of reachability, 27 s for 804 of the Cedar slice) and about 20 ms in the image (5.4 s for 252). Deoptimisations: 0 in every measured run (the nodes have no profile and no assumption; \code{\verb~|engine.MaximumCompilations=1~}). Failed compilations: 0 in every run of the tier without the run-ahead; with it 1 of 804, 2 of 692 and 6 of 1,821 blocks (they stay in the stepper).}
+
+\p{What the numbers say:}
+
+\ol{
+\li{\strong{Closed evaluation gains, and only with few blocks.} Reachability is 83\% inside code blocks and three blocks have two thirds of its 2.5 M activations per pass. Compiling the 11-14 blocks that pass the final policy gives -7.5 to -10\% on the JVM (WarmMain and the launcher, 8 workers) and -3.8 to -4.8\% in the image; 26 blocks gave -5.6 to -7.1\% (both platforms, table B); 180-250 blocks give less (-4\%) or nothing (8 workers: +2\%). The ceiling is the stepper's own share of such a run, 17\% (section 5); the rest is interning, which compiled code repeats call for call. One row does not fit: the launcher at one worker (-1.5\%), one run.}
+\li{\strong{Cedar-level work has nothing to gain and, on the JVM, something to lose.} The Cedar slice spends 14\% of its time inside blocks at all, spread over hundreds of them. With the final policy two blocks are compiled, 45 k compiled activations per pass. In the image that is neutral (-0.3\% at one worker, +2.4\% at eight, inside the scatter). On the JVM the pass is 60 ms slower at one worker (+4.3\%) and at eight (+30\% of 220 ms, at unchanged CPU time of the workers): more than 1 microsecond per compiled activation, which compiled code cannot cost. C7 and C8 were found while looking for the cause and are not it (J7 before them: +27\% with one block); section 9, point 3 has what I know. With an unbounded count everything is compiled in the end, because the count is cumulative: 804 blocks on the slice, 1,820 on full cedar, the compiler threads busy through every measured pass and, with 8 workers on 8 cores, taking cores from them: +23 to +39\% (table B).}
+\li{\strong{T2's "55-80\% loss on the native image"} was the heat accounting and the measurement, not the code (section 3).}
+\li{\strong{Platform}: K1 itself is 20-30\% faster on the JVM than in the native image in steady state, same machine jar (\code{\verb~|4bc20d3e46ef~}): reachability 1.02 s against 1.42-1.48 s, Cedar slice 1.36-1.44 s against 1.78-1.87 s (one worker), Cedar slice with 8 workers 232 ms against 298-319 ms. That is not a tier result, but under OWNER-NOTES 12 it is the larger number in this file. (WarmMain, not the driver: no loading, no admission pipeline.)}
+}
+
+\p{\strong{Promotion policy} (what \code{\verb~|mode=warm~} now does; \code{\verb~|rlvm.t2.at~}, \code{\verb~|.hot~}, \code{\verb~|.max~}): the tier counts, per machine, the activations it does not take; a block is promoted when the engine has seen 20000 of them AND the block has at least 2\% of ALL activations of the engine so far (compiled ones included), at most 256 blocks; the machine's heat accounting is never switched on; two compiler threads. In a warm-up-is-free world the threshold could be lower - but a cumulative count below "this block carries the run" is what produces table B's Cedar rows, so the test that matters is the share, not the count.}
+
+\p{\strong{If the integrator wants it on for an evaluation-heavy run anyway}: \code{\verb~|-X machine.switches=default,code,casetrees,t2 -Drlvm.t2.mode=warm~}, with \code{\verb~|rlvm-truffle~}'s jar on the class path (module not in the parent pom: README "Build, test"); with \code{\verb~|-X passes=N -X passes-mode=recheck -X passes-keep=engines~} (rlvm-driver \code{\verb~|150aed4bf1bf~}) the launcher shows it.}
+}
+
+\subtree{
+\title{2. How the numbers were taken}
+
+\ul{
+\li{\strong{Tool}: \code{\verb~|rlvm.truffle.WarmMain~} (test tree): one process, ONE machine engine kept over all passes; pass 1 cold with the environment pass, every later pass checks all units again with fresh sessions of the same engine on W worker threads (chunks of 16 units from a shared counter). This is what "warm" has to mean for this tier: until 18:04Z the launcher's \code{\verb~|-X passes=N -X passes-mode=recheck~} built new engines per pass (T2's finding of 16:20Z), so no launcher run could credit a code store or compiled blocks. Not the driver: no admission pipeline, no re-check, no pipelined loading.}
+\li{\strong{Launcher rows} (label L1, \code{\verb~|work/t3/launchrun.py~}, \code{\verb~|launcher.tsv~}): \code{\verb~|bin/rlvm-jvm --threads W FILE -X engine=machine -X passes=N -X passes-mode=recheck -X passes-keep=engines~} with rlvm-driver \code{\verb~|150aed4bf1bf~} (P7, 18:04Z): the real driver, the engine instances of pass 1 kept; the number read is \code{\verb~|check_ms~} of the later passes.}
+\li{\strong{Quiet}: every number in a table below comes from inside \code{\verb~|bench/quiet.py -- work/t3/wN.sh~} (one measurement at a time on the 8 reserved performance cores; \code{\verb~|quiet.log~} has each window). Runs of one window are back to back; a configuration is repeated inside the window where the table says so. Rows: \code{\verb~|work/t3/warm.tsv~} (column \code{\verb~|quiet~} = the window), complete outputs \code{\verb~|work/t3/logs/~}.}
+\li{\strong{What is read}: warm WALL clock per pass (OWNER-NOTES 12). With one worker the worker thread's CPU time is within 1-3\% of it; compiler threads run on the other measurement cores.}
+\li{\strong{Platforms}: JVM = the launcher's flags (\code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2~}, C2 for the host, libgraal for Truffle), \code{\verb~|-Xmx6g~}; native = CE native image \code{\verb~|-O3 --gc=serial~} of \code{\verb~|WarmMain~} (\code{\verb~|work/t3/build-dist.sh --warm~}).}
+\li{\strong{K1} = \code{\verb~|-X machine.switches=default,code,casetrees~} (the default set of 16:24Z plus the K1 blocks and case trees); \strong{K1 + t2} = the same plus \code{\verb~|t2~}.}
+\li{\strong{Machine jars}: \code{\verb~|rlvm-machine~} is republished every few minutes. A distribution of mine is a snapshot (\code{\verb~|BUILD-INFO.txt~}); K1 and K1 + t2 of one table row are always the same distribution, rows of different distributions are not compared.}
+}
+}
+
+\subtree{
+\title{3. T2's tier as it was left: parity on the JVM, a small loss on the native image, and why}
+
+\p{Warm wall clock per pass in ms (median of the later passes; in brackets the range of all warm passes); one worker unless stated; \code{\verb~|quiet.log~} windows of 16:46Z, 17:00Z (JVM, distribution \code{\verb~|work/t3/j1~}, machine jar \code{\verb~|a7e37a04cf90~}) and 17:09Z (native, \code{\verb~|work/t3/n1~}, machine jar \code{\verb~|ba557722c184~}).}
+
+\table{
+\tr{\th{Workload, platform}\th{K1}\th{K1 + t2, as T2 left it (\code{\verb~|mode=warm~}, heat timing 4096)}\th{K1 + t2, promote at 2000 entries, heat counting only}\th{tier attached, NOTHING promoted, heat counting only}\th{the same, heat timing 4096}}
+\tr{\td{reachability, JVM (window 1)}\td{1027 / 980 (962-1103)}\td{1031 / 971 (910-1061)}\td{-}\td{-}\td{1138 (1095-1187)}}
+\tr{\td{reachability, JVM (window 2)}\td{1049 (993-1113)}\td{1023 (980-1095)}\td{1023 (970-1070)}\td{1074 (1052-1190)}\td{-}}
+\tr{\td{reachability, JVM, 8 workers}\td{552 (496-623)}\td{-}\td{552 (496-699)}\td{-}\td{-}}
+\tr{\td{Cedar slice, JVM}\td{1443 (1369-1559)}\td{-}\td{1505 (1407-1581)}\td{-}\td{-}}
+\tr{\td{reachability, native}\td{1399 (1358-1501)}\td{1449 (1393-1475)}\td{1445 (1356-1480)}\td{1470 (1454-1490)}\td{1518 (1457-1617)}}
+\tr{\td{Cedar slice, native}\td{1844 (1838-1851)}\td{-}\td{1879 (1843-1934)}\td{-}\td{-}}
+}
+
+\p{Blocks installed / compile CPU / compiled activations per warm pass: reachability 105-148 blocks, 2.0-2.7 s, 2.5 M (JVM) and 107-138, 1.7-2.1 s, 2.6 M (native); Cedar slice 576 blocks, 15.5 s, 0.88 M (JVM) and 468, 14.1 s, 0.87 M (native) - on the Cedar slice blocks were still being promoted in the last measured pass. Deoptimisations: 0 everywhere.}
+
+\p{What the table says:}
+
+\ol{
+\li{\strong{The machine's heat accounting is most of what the tier costs.} Counting every entry (\code{\verb~|Tier.count~}): +2.4\% (JVM), +5.0\% (native). Timing on top, even at one sampled entry in 4096 (a sampled entry times every block entered beneath it): +11\% (JVM), +8.5\% (native) against K1. T2's tier switched it on because its governor rents by measured time.}
+\li{\strong{Compiled blocks win back about that much and no more}: against "tier attached, nothing promoted" they gain 4.7\% (JVM) and 1.7\% (native) on reachability. Net against K1: -2.5\% to parity on the JVM, +3.3\% on the native image, +2 to +4\% on the Cedar slice.}
+\li{\strong{The cause of T2's "55-80\% loss on the native image"} (its row Tn1): not the compiled code and not a deoptimisation loop. In a quiet window the tier costs 3-4\% there (points 1 and 2). T2's row was process CPU on the open host with the heat timing at 64 or 4096: it adds the compiler threads (0.25-0.4 s per pass while blocks are still promoted: process CPU 1640-1870 ms against 1392-1480 ms of wall clock in the same passes here) and the host's own factor of 1.5-2 between runs minutes apart.}
+\li{The JVM's K1 is faster than the image's in these windows too (1.03-1.05 s against 1.40 s on reachability), but the two distributions hold different machine jars; the same-jar comparison is section 1, point 4.}
+}
+}
+
+\subtree{
+\title{4. What was changed in the tier (all inside \code{\verb~|rlvm-truffle~}; nothing in \code{\verb~|rlvm-machine~})}
+
+\table{
+\tr{\th{\verb~|#~}\th{Change}\th{Where}\th{State}}
+\tr{\td{C1}\td{\strong{Promotion by the tier's own entry counters, without the machine's heat accounting} (\code{\verb~|rlvm.t2.count~}, default in \code{\verb~|mode=warm~}; policy C9). \code{\verb~|T2Tier.run~} counts the activations it does NOT take (per machine, reported to the engine in batches, C8); an activation that compiled code takes is counted and timed by nobody. \code{\verb~|Tier.heat(engine)~} is not called, so \code{\verb~|Tier.exec~} is a plain call of the tier. \code{\verb~|mode=cpu~} keeps T2's rent-to-own governor on the heat accounting}\td{\code{\verb~|T2Tier~}, \code{\verb~|T2Engine.bump~}, \code{\verb~|Settings~}}\td{kept; removes the 2.4-11\% of section 3}}
+\tr{\td{C2}\td{\strong{Pure-read helpers compiled into the block} (\code{\verb~|rlvm.t2.inline~}, a class constant, now 1): \code{\verb~|PEEK~} of an operand, the constructor test of \code{\verb~|SWITCH~}, the argument base of \code{\verb~|FIELDS~}, the inline-cache probe of \code{\verb~|KVAL~}, the cache of CONST heads in front of \code{\verb~|KCONST~}. Everything that can write or grow a store stays a call behind a boundary}\td{\code{\verb~|Instr~}, \code{\verb~|T2Bridge.*Inline / *Hit~}}\td{kept}}
+\tr{\td{C3}\td{\strong{\code{\verb~|KCONST~} with level parameters uses the site's inline cache as the stepper does} (\code{\verb~|Code.kConst~}: one probe; miss: \code{\verb~|CHEAD(D, LSUB(LL, ls))~} and fill). T2's node called \code{\verb~|lsubList~} + \code{\verb~|mkConst~} every time (the stepper's cache is of wave 6, NOTES-M7; the mirror did not have it)}\td{\code{\verb~|Instr.Konst~}, \code{\verb~|T2Bridge.kConstHit / kConstFill~}}\td{kept (a drift, not a wrong value)}}
+\tr{\td{C4}\td{\strong{Nat literals natively} (owner note 7): \code{\verb~|NSUCC~} of an immediate below the limit is \code{\verb~|v + 1~} in the block (overflow guard: the operation), the predecessor view of \code{\verb~|FIELDS~} is \code{\verb~|v - 1~}, \code{\verb~|SWITCH~} on an immediate is a compare}\td{\code{\verb~|Instr.Unary1 / Fields / Switch~}}\td{kept; the value model already has the immediates, so this removes two calls, not a boxing}}
+\tr{\td{C5}\td{Run-ahead of the interning probes (\code{\verb~|rlvm.t2.ahead~}, section 6)}\td{\code{\verb~|BlockRoot.ahead~}, \code{\verb~|Instr.*.ahead~}, \code{\verb~|T2Bridge~}}\td{\strong{rejected by measurement, default off}}}
+\tr{\td{C6}\td{No one-call forwarders in code that partial evaluation reaches (\code{\verb~|T2Bridge.peekInline~} and the hash functions are written out; \code{\verb~|T2Bridge.hashOk()~} compares them with the machine's once per engine and switches the inline-cache probes back to the boundary operations if they ever differ)}\td{\code{\verb~|T2Bridge~}}\td{needed for the native image: a method whose body is one call is inlined before the image's analysis and its deoptimisation target is then missing - the rule T2 found for one-store setters holds for forwarders too}}
+\tr{\td{C7}\td{\strong{The engine keeps the tiers' counters, not the tiers.} \code{\verb~|T2Engine~} had a list of every \code{\verb~|T2Tier~} it ever made (for the report), a tier references its machine, and an engine outlives its sessions: every machine that ever ran in an engine stayed reachable, with its arenas. With fresh sessions per pass (WarmMain; the driver's kept engines) the heap grew by the workers' arenas each pass, for the tier runs only}\td{\code{\verb~|T2Tier.Counts~}, \code{\verb~|T2Engine.register~}}\td{fixed 18:30Z (a defect since T2's first version). The rows of sections 1 and 3 taken before it (labels J1-J7, N1-N3) carry it; with one worker it is one machine per pass. Rows after it: J8, J9, L1, N5}}
+\tr{\td{C8}\td{\strong{Count mode reports per 256 stepped activations of a block} (was 64) and carries the machine's compiled activations along, in one short critical section (before: a second lock and a loop over all tiers at every report of a block above the threshold)}\td{\code{\verb~|T2Tier.miss~}, \code{\verb~|T2Engine.bump~}}\td{fixed 18:34Z; eight workers met in that section often enough to show (section 1, rows J7 against J9)}}
+\tr{\td{C9}\td{\strong{Promotion policy of \code{\verb~|mode=warm~}}: at 20000 entries AND 2\% of all activations of the engine (\code{\verb~|rlvm.t2.hot~}), at most 256 blocks (was: at 1000 entries, at most 4096)}\td{\code{\verb~|Settings~}, \code{\verb~|T2Engine.bump~}}\td{section 1}}
+\tr{\td{C10}\td{\code{\verb~|T2Engine.retire()~}: an engine whose harness closes cancels its queued compilations (tools and tests with several engines in one process)}\td{\code{\verb~|T2Engine~}, \code{\verb~|T2Runtime.promote~}, \code{\verb~|Harness.close~}}\td{section 8}}
+}
+
+\p{Not done, and why: direct calls between compiled blocks (section 7, U1).}
+}
+
+\subtree{
+\title{5. Where the time of a block goes (why removing the dispatch buys so little)}
+
+\p{JFR execution samples of warm K1 passes on the JVM (one worker; open host, so SHARES only; \code{\verb~|work/t3/jfr/*.top.txt~}):}
+
+\table{
+\tr{\th{}\th{reachability}\th{Cedar slice}}
+\tr{\td{inside code blocks, inclusive (\code{\verb~|Code.enter~})}\td{83\%}\td{14\%}}
+\tr{\td{the stepper's own code (\code{\verb~|Code.*~} self: dispatch, operand decoding, register traffic, \code{\verb~|go~})}\td{16.8\%}\td{6.9\%}}
+\tr{\td{value construction BY BLOCK INSTRUCTIONS, inclusive: \code{\verb~|Code.mkApp~} / \code{\verb~|Code.mkClosure~} / \code{\verb~|Code.mkProj~}}\td{42\% / 14\% / 4\%}\td{3\% / 3\% / 0.3\%}}
+\tr{\td{self time of the probes and inserts, whoever calls them (\code{\verb~|Values.neu~}, \code{\verb~|closureProbe~}, \code{\verb~|Runs.internRun~}, \code{\verb~|Values.rec~}, \code{\verb~|neuExt~}, \code{\verb~|Machine.addRecordAt~}, \code{\verb~|growVtab~}, \code{\verb~|growRtab~})}\td{57\%}\td{26\%}}
+\tr{\td{generic judgments (\code{\verb~|Infer.check~} inclusive)}\td{8\%}\td{59\%}}
+}
+
+\p{A compiled block calls the same operations as the stepper (one semantics, the same records in the same order - the tier-equivalence rule). What partial evaluation can remove is the second row; the third and fourth rows are identical work in both tiers. That bounds the gain of ANY compilation of single blocks at 17\% on reachability and 7\% on the Cedar slice before its own entry costs; measured on reachability: 4-10\% (section 1).}
+
+\p{The hottest blocks of reachability (activations per warm pass; \code{\verb~|work/t3/logs/listing-reach-t2-0.log~}):}
+
+\pre{\verb~|
+570 k  RULE(List.rec)        BUNREAD A3, 2/3, r1, L1 ; KCONST r0, List.rec ; MKAPP r1, r0, A0, A1, A2, A3, A5 ; L1: TAILAPPLY A3, A4, A5, r1
+560 k  BODY(#913)            (entry 3) BKIND C1 .. ; MKSUSP r0 ; MKSUSP r3 ; KCONST ; MKAPP r5 (List.below C0 C1 A1) ; KCONST ; MKAPP r7 (PProd r3 r5) ;
+                             MKSUSP r8 ; KCONST ; MKAPP r12 (PProd.mk r0 r7 r8 A2) ; RET r12        - 3 frames + 3 suspensions + 3 applications interned
+500 k  RULES(List.elem._f)   WHNF r0, A3 ; SWITCH r0, List ; FIELDS r2, r0, 2 ; KCONST r4, BEq.beq ; MKAPP r5, r4, A0, A1, A2, r2 ; WHNF r6, r5 ; SWITCH r6, Bool ; ..
+ 40 k  RULES(instDecidableEqFin)  KCONST x3 ; MKAPP r3 (Fin.val A0 A1) ; MKAPP r5 (Fin.val A0 A2) ; MKAPP r7 (decEq Nat inst r3 r5) ; WHNF r8, r7 ; SWITCH ; FIELDS ;
+                             MKAPP (Fin A0) ; MKAPP (Eq ..) ; MKAPP (.._proof_1 A0 A1 A2 r9) ; MKAPP (Decidable.isFalse ..) ; RET
+~}
+
+\p{A block is "build the graph, then ask a generic judgment to reduce it": the redex \code{\verb~|decEq Nat inst a b~} is an interned record before \code{\verb~|WHNF~} looks at it, the types \code{\verb~|List.below ..~} / \code{\verb~|PProd ..~} and the proof terms are interned although nothing ever inspects them, and the callee is reached through \code{\verb~|Reduce.whnf~} / \code{\verb~|Eval.apply~}, never called. There is no arithmetic and no branch a JIT could specialise beyond what the stepper already does: \code{\verb~|Nat~} literals are immediates in the value model (owner note 7 is satisfied by the machine itself; the tier now adds the native paths for \code{\verb~|NSUCC~} and the predecessor view of \code{\verb~|FIELDS~}).}
+}
+
+\subtree{
+\title{6. Experiment REJECTED: run-ahead of the interning probes (\code{\verb~|rlvm.t2.ahead~}, default 0)}
+
+\p{\strong{Idea.} The cost that dominates a block is interning, and M1 had measured on the generic tier (v0, native, perf annotate; requests.log 15:58Z) that 76-83\% of the samples of a probe are ONE instruction, the load of the table slot of a 64-256 MiB table. A block issues its probes one after the other (each is a call that ends before the next starts, and often needs the previous result: \code{\verb~|MKSUSP~} = the frame's probe, then the record's probe over the frame's id). A compiled block, unlike the stepper, has its whole future in front of it as constants, so it could load the slots EARLY and let the cache misses overlap.}
+
+\p{\strong{As built} (\code{\verb~|BlockRoot.ahead~}, \code{\verb~|Instr.*.ahead~}, \code{\verb~|T2Bridge.neuFind / recordFind / runFind / *Hash~}; reads of the machine only, one store into a field of the tier object to keep the loads; tier equivalence is not touched, and the differential gate of section 8 ran with it on). At an entry of a root, and again after every instruction that called a judgment, the block walks the stretch of value construction that follows with PREDICTED registers: \code{\verb~|MOV~}, \code{\verb~|PEEK~}, \code{\verb~|KCONST~} / \code{\verb~|KVAL~} (cache hits), \code{\verb~|FIELDS~}, \code{\verb~|BKIND~} / \code{\verb~|BEQ~} / \code{\verb~|SWITCH~} on known values, and for \code{\verb~|MKAPP~}, \code{\verb~|MKLAM~}, \code{\verb~|MKPI~}, \code{\verb~|MKSUSP~} the hash of the key exactly as \code{\verb~|Values.neu~} / \code{\verb~|Runs.internRun~} / \code{\verb~|Values.closureProbe~} compute it and the load of the table word where the probe will start. A key that is not in the table is predicted to get the next record id (\code{\verb~|vp~}) or run offset (\code{\verb~|rsp~}), so that the keys built on it can be hashed before it exists. Two forms: "assume new" (never waits for a loaded word) and exact (\code{\verb~|rlvm.t2.aheadExact~}: the loaded word is read - empty = new, the key = the existing record; first four slots of the probe sequence; the frame / application predicted new a moment ago is remembered for sibling closures). \code{\verb~|rlvm.t2.aheadCheck=true~} counts the predictions: on reachability the exact form names the record the operation then returns for 90.3\% of 13.6 M records per run; "assume new" 28\% - HALF of the records that reachability's blocks build exist already.}
+
+\p{\strong{Result} (quiet windows J3 of 17:55Z, JVM, and N2 of 18:00Z, native; promotion at 1000 entries; warm wall clock per pass in ms, median of the later half of the passes of both runs, the two runs' own medians in brackets; the same tier with and without the run-ahead):}
+
+\table{
+\tr{\th{Workload}\th{K1}\th{tier, no run-ahead}\th{tier + run-ahead, exact}\th{tier + run-ahead, "assume new"}\th{compile CPU without / with (exact)}}
+\tr{\td{reachability, JVM, 1 worker}\td{1069 (1022, 1105)}\td{1021 (1012, 1041)}\td{1116 (1082, 1120)}\td{1147 (1167, 1109)}\td{7.6 s / 36-37 s (252 blocks)}}
+\tr{\td{reachability, native, 1 worker}\td{1424 (1408, 1442)}\td{1370 (one run)}\td{1484 (1500, 1462)}\td{-}\td{5.4 s / 14.5 s}}
+\tr{\td{Cedar slice, JVM, 1 worker (one run each)}\td{1438}\td{1489}\td{1742}\td{-}\td{27 s / 140 s (804 blocks)}}
+\tr{\td{Cedar slice, native, 1 worker (one run each)}\td{1775}\td{-}\td{2061}\td{-}\td{- / 56 s}}
+}
+
+\p{Against the same tier without it, the run-ahead is 8-12\% SLOWER on reachability and far slower on the Cedar slice (where the compiler threads are then busy through every measured pass). JFR on reachability with the exact form (\code{\verb~|work/t3/jfr/t3-reach.top.txt~}; against the K1 profile of section 5): \code{\verb~|Values.neu~} has 15.5\% of the samples instead of 22\%, and the run-ahead itself has 17\% (\code{\verb~|MkApp.ahead~} 10.3\%): the waiting moves into the run-ahead, it does not overlap. Why, as far as I can say (readings, not measurements): (1) the probes of one stretch depend on each other - in the hottest block (41) nine probes form chains of depth four (frame -> suspension -> application over it -> application over that) - so most of the chain is as long as before, whoever walks it first; (2) M1's profile was of v0; with \code{\verb~|code,casetrees~} the same corpus needs 5.6 times less CPU (M7: 8.79 -> 1.56 s), half the block-built keys exist already, and a hit is not one load but three (table, record, spine): "one cache miss per probe" is not the cost model of these blocks; (3) the root's code doubles (block 41: 4,638 -> 11,481 graph nodes, 31 -> 74 KB, measured with the checking counters compiled in).}
+
+\p{\strong{Kept in the tree, off}, because the differential and equivalence gates ran over it and the next owner may want the predictor (\code{\verb~|aheadCheck~}) as an instrument; deleting it is \code{\verb~|Instr.*.ahead~}, \code{\verb~|BlockRoot.ahead / aheadInit / aheadKind / probes~}, the run-ahead block of \code{\verb~|T2Bridge~} and the four \code{\verb~|rlvm.t2.ahead*~} settings. It is NOT a candidate for the stepper either: the result above is an upper bound for a generic version of the same walk.}
+}
+
+\subtree{
+\title{7. Design finding: what a JIT for the checking process needs from the machine (for the owners, M1, M3, M6, M7)}
+
+\p{The Truffle tier is correct and it is fed the right programs (the judgment chains of constants, owner note 5), and still there is almost nothing in them for a compiler to remove. The reason is the value model, not the tier:}
+
+\ol{
+\li{\strong{Every intermediate value is a globally interned record} (I-ID: identity = structure). A block that builds a value pays a hash, a probe of a table far larger than the cache, and usually a new record and a new spine or frame run. On reachability that is 57\% of the warm time in the probes and inserts themselves (section 5); M1 measured that 96\% of the application probes of the generic tier are for NEW keys (15:58Z); of the records that reachability's blocks build, about half exist already (section 6) - either way the block cannot know without the probe. Tier equivalence (same records, same order) obliges compiled code to repeat every one of them. Escape analysis, scalar replacement, unboxing - the optimisations a JIT lives on - have no object to work on: nothing a block makes is ever private to it.}
+\li{\strong{A block builds the redex and asks a generic judgment to reduce it.} \code{\verb~|MKAPP r7 (decEq Nat inst a b)~}, \code{\verb~|WHNF r8, r7~}: the callee is known when the block is elaborated, yet control reaches it through \code{\verb~|Reduce.whnf~} -> \code{\verb~|Rules.unfold~} -> \code{\verb~|Code.rules~} -> \code{\verb~|Code.enter~} -> the hook, with the arguments unpacked again from the record's spine. There is no call for Truffle to inline, so "one constant's code object inlined into its caller" cannot happen whatever the tier does. \code{\verb~|APPLY~} is the same through \code{\verb~|Eval.apply~}.}
+\li{\strong{Arguments nobody inspects are built eagerly}: the motive and the \code{\verb~|List.below~} / \code{\verb~|PProd~} types of every structural-recursion step, the proof terms of \code{\verb~|Decidable.isTrue / isFalse~} (block 41 and \code{\verb~|instDecidableEqFin~} of section 5). In a strict machine they would be dead code; here they are the components of an interned record, so they must exist and be interned first.}
+}
+
+\p{What would unlock a compiler (and, each of them, also the stepper):}
+
+\ul{
+\li{\strong{U1 - call instructions.} \code{\verb~|CALL d, c, a1..an~} = WHNF of the application of constant \code{\verb~|c~} to the registers: enter \code{\verb~|c~}'s RULES / BODY block directly, intern the application only if the call is stuck or its result is to be tabled. One operation shared by the stepper and the tier, so tier equivalence is kept; the redex record, its spine run, the unpacking and the generic dispatch in between disappear for both, and the tier gets a call it can inline (\code{\verb~|DirectCallNode~}, T2's D5).}
+\li{\strong{U2 - records that are not interned until they have to be} (M1's "young set", 15:58Z, is the table-side half of the same idea): a value made by a block lives in a per-activation or per-session nursery without a table entry and gets an identity only when it is stored into an interned record, used as a memo key, compared by identity or returned to a generic judgment. Then the values of point 3 are never interned, and in compiled code they are not even allocated. This changes I-ID from "always" to "once tenured" and therefore the tabling keys and the tick counts: it is a machine design decision, not a tier feature, and the equivalence rule between tiers has to become "same verdicts, same tenured records".}
+\li{\strong{What does NOT work without them}: leaving the work and only overlapping its cache misses (section 6, measured: a loss).}
+}
+
+\p{Without U1 or U2 the upper bound of any compiled tier on closed evaluation is the stepper's own share (17\% on reachability; measured gain 4-10\%), and on library corpora (Cedar: 14\% of the time inside blocks at all) it is nothing or a loss.}
+
+\p{\strong{CORRECTION (20:30Z, after U1 was prototyped and measured: section 10).} Point 2 describes the code correctly and its weight wrongly, and U1 does not pay. The redex of \code{\verb~|MKAPP ; WHNF~} is a memo key that hits: on reachability 77\% of those WHNFs are answered by the memo of the application's record, so "do not build the redex" means "compute it again" (ticks +8.3\%). With the record kept as the key (the tabled form) CALL changes no count by more than 0.3\% and no time outside the scatter, in the stepper and in the tier; on library corpora such sites are 1-3\% of the activations. Of the two unlocks only U2 is left, and the census of section 10.3 says where it can and cannot reach.}
+}
+
+\subtree{
+\title{8. Tests and gates on the final tree}
+
+\p{On machine jar \code{\verb~|4bc20d3e46ef~} (the one in \code{\verb~|.toolchain/m2~} from 17:30Z to about 18:20Z) unless the row names another. "Final tree" = the sources as they are now; the rows say which of the changes of section 4 a run did not have yet. The tutorial + bugs gate was NOT repeated after C7 - C10 (they do not touch a node: C7 which object the engine lists, C8 how often a machine reports its counts, C9 which blocks are promoted, C10 cancelling queued compilations).}
+
+\table{
+\tr{\th{Gate}\th{Configuration}\th{Result}}
+\tr{\td{fast group, \code{\verb~|$MVN -o -q -f rlvm-truffle/pom.xml test -Dgroups=fast~} (\code{\verb~|work/t3/test-fast-2.txt~}, 17:25Z)}\td{4 tests: T2's three + \code{\verb~|countMode~}}\td{4 / 0 failures / 0 errors}}
+\tr{\td{default group (\code{\verb~|work/t3/test-default-2.txt~}, 18:00Z, tree of 17:48Z: \code{\verb~|rlvm.t2.ahead~} still 2 by default, so the run-ahead was on in every test)}\td{7 tests: T2's five + \code{\verb~|countMode~} + \code{\verb~|perfTestsWarmMode~}}\td{7 / 0 failures / 0 errors / 0 skipped; 0 deoptimisations}}
+\tr{\td{default group, tree of 18:22Z (before C7 / C8; \code{\verb~|work/t3/test-default-3.txt~}, 18:23Z; machine jar \code{\verb~|8a8ea5644b24~}, published while it was queued)}\td{the same 7 tests; run-ahead off, final policy defaults}\td{7 / 0 failures / 0 errors / 0 skipped}}
+\tr{\td{tier equivalence (heap digest, ticks, outcome at every unit), \code{\verb~|TierEquivalenceTest#files~}, production promotion (\code{\verb~|mode=warm~}, at 200 entries, background), \code{\verb~|default,code,casetrees~}, tree of 18:00Z (before C7 - C10; \code{\verb~|work/t3/tiereq-corpora-2.txt~})}\td{Cedar slice / Init / reachability}\td{identical: 215 blocks, 177 k compiled activations / 811 blocks, 6.36 M / 113 blocks, 1.83 M}}
+\tr{\td{differential gate against the reference engine through the launcher (\code{\verb~|testkit diff --engine machine --launcher work/t3/j3/bin/rlvm-jvm -j 4~}), tutorial + bugs, 175 exports, \code{\verb~|code,casetrees,tele,t2~}, ELAB_AT 1, EVERY block compiled at its first entry (count mode, synchronous), run-ahead ON (\code{\verb~|work/t3/gates/diff-tb-at1.txt~})}\td{1,342 checks}\td{1,341 compared (1,311 both accept, 30 both reject), \strong{0 differences}; 1 not compared (the machine's eager-reduction decline of \code{\verb~|Issue.forallFalse~}, tier or no tier)}}
+\tr{\td{the same harness, reachability + Cedar slice + Init + Std, \code{\verb~|--threads 4~}, launcher \code{\verb~|work/t3/j4/bin/rlvm-jvm~} (tree of 18:00Z: before C7 - C9), \code{\verb~|default,code,casetrees,t2~}, \code{\verb~|mode=warm~}, at 200 entries (\code{\verb~|work/t3/gates/diff-corpora.txt~})}\td{170,322 checks}\td{169,936 compared, all both accept, \strong{0 differences}; 386 not compared (eager-reduction declines); Std: 723 blocks installed, 8.55 M compiled activations, 0 deoptimisations}}
+\tr{\td{the same on the FINAL tree: launcher \code{\verb~|work/t3/j7/bin/rlvm-jvm~} (C7 - C10 in; machine jar \code{\verb~|8a8ea5644b24~}, driver \code{\verb~|150aed4bf1bf~}), \code{\verb~|mode=warm~}, at 200 entries, \code{\verb~|hot=0~}, \code{\verb~|max=4096~} so that many blocks are compiled (\code{\verb~|work/t3/gates/diff-corpora-final.txt~}, 18:38-18:41Z)}\td{170,322 checks}\td{169,936 compared, all both accept, \strong{0 differences}; 386 not compared; Std: 691 blocks installed, 8.79 M compiled activations, 0 failed, 0 deoptimisations}}
+\tr{\td{\strong{default group on the FINAL tree} (C7 - C10 in; \code{\verb~|work/t3/test-default-5.txt~}, 18:36Z, machine jar \code{\verb~|8a8ea5644b24~}; it contains the four tests of the fast group)}\td{the 7 tests}\td{7 / 0 failures / 0 errors / 0 skipped}}
+}
+
+\p{Not covered: the native image under a differential gate (the images \code{\verb~|work/t3/n2~}, \code{\verb~|n3~}, \code{\verb~|n5~} are the measuring tool only; no \code{\verb~|bin/rlvm~} of this tree was built); \code{\verb~|tele~} blocks under the production promotion; 8 workers under the equivalence test (it is single-session by construction; the launcher gate ran with 4 threads).}
+
+\p{A defect of the test tooling found on the way (not of the tier): with background compilation, a second engine in the same process got nothing compiled, because the compiler threads were still working through the first engine's queue (T2's \code{\verb~|perfTestsBackground~} printed "blocks compiled 0" for its second file on this tree, and so did the first equivalence run for the Cedar slice and Init - rows that proved nothing and are not in the table). \code{\verb~|T2Engine.retire()~} (called by \code{\verb~|Harness.close~}) cancels an engine's queued compilations; \code{\verb~|perfTestsWarmMode~} asserts that compiled code ran in each file.}
+}
+
+\subtree{
+\title{9. Open points, requests, next step}
+
+\ol{
+\li{\strong{Most rows are \code{\verb~|WarmMain~}, not the launcher.} P7 published kept-engine passes at 18:04Z (\code{\verb~|-X passes-keep=engines~}); one launcher window was taken with them (L1: reachability and full cedar). The Cedar slice on the launcher was not steady in 7 passes; Init, Std and the native launcher were not run through it. No request of mine is open with anybody.}
+\li{\strong{Not measured}: con-leche, cslib, mathlib, navier-stokes-euler; \code{\verb~|tele~} blocks under the tier in a timing run; the native image at Init / Std / full cedar; the launcher's native \code{\verb~|bin/rlvm~} with this tree (only the measuring tool was built as an image: \code{\verb~|work/t3/n5~} is the one of the final tree).}
+\li{\strong{OPEN: why the Cedar slice on the JVM is 60 ms per pass slower with TWO compiled blocks} (J9: +4.3\% at one worker, +30\% at eight, CPU time of the workers unchanged at eight). What I know: the two blocks are \code{\verb~|RULE(List.rec)~} (5 instructions, the hottest block of reachability too, where it gains) and \code{\verb~|RULE(Bool.rec)~} (2 instructions), 45 k compiled activations per pass, compiled in 107 ms, 0 deoptimisations of the roots; it is not the retention of machines (C7) and not the report lock (C8): the row was +27\% before them. JFR of a slice run with 96 blocks (\code{\verb~|work/t3/jfr/t3-cedarslice.top.txt~}, open host): the hook's own frames (\code{\verb~|Tier.offer~} 1.0\%, \code{\verb~|T2Tier.run~} 0.5\%, \code{\verb~|OptimizedCallTarget.doInvoke~} 0.5\%) are about 2\% of the samples - the path \code{\verb~|Code.go -> Tier.exec -> Tier.offer -> T2Tier.run~} that EVERY activation takes once the switch is on, compiled or not - and the host's C2 compiler thread still has 9\% of the thread load in late passes. In the image the same workload is neutral with the same two blocks (N5) and +1.0\% with 88 (N3). So part of the one-worker figure may be the price of the hook on a workload with a million stepped activations per pass; the rest, and the 8-worker figure, is not explained. First things to try: the run with \code{\verb~|rlvm.t2.max=0~} on the final tree (the hook alone); \code{\verb~|-XX:+PrintCompilation~} for \code{\verb~|Code.resumeOne~} (the body that \code{\verb~|BUNREAD~} of \code{\verb~|RULE(List.rec)~} runs through; only the tier calls it, 45 k times per pass); the driver's per-unit times (\code{\verb~|-X unit-trace~}) for the unit on the critical path.}
+\li{\strong{\code{\verb~|rlvm.t2.inline=1~} against 0}: 1021 ms (two runs) against 974 (one run), reachability, JVM, window J3: no difference that the per-process variance (8\% between two K1 runs of that window) lets one see. Kept at 1 because it removes calls and never showed a loss; the image is built with 1.}
+\li{\strong{The tier follows the machine by hand.} \code{\verb~|Instr.*~} mirrors \code{\verb~|Code.java~} statement by statement; the stepper answers \code{\verb~|KCONST~} of a level-polymorphic constant from the site's inline cache (NOTES-M7: "since wave 6"), T2's node did not (C3). The tier-equivalence tests do not see such a drift, because the values are the same. As long as \code{\verb~|rlvm-machine~} is republished every few minutes, an owner of this module has to diff \code{\verb~|Code.java~} against \code{\verb~|Instr.java~} before every measurement.}
+\li{\strong{Internal API}: as NOTES-T2 section 7.8 (\code{\verb~|OptimizedCallTarget.compile / isValid / callIndirect / cancelCompilation~}, the compilation listener; the "no one-store setter, no one-call forwarder in compiled code" rule of native-image CE 25.5.5.0.3).}
+}
+
+\p{\strong{Next step, if anybody continues} (as written at 18:58Z): not more work inside this module. U1 of section 7 in the machine (a call instruction that does not build the redex; M7 / M3), measured in the stepper first - it should pay there by itself - and then direct calls between compiled blocks on top of it, which is the first point at which Truffle can do something the stepper cannot. \strong{Done in the second task (section 10): it does not pay there, and nothing is left for the tier on top of it.}}
+}
+
+\subtree{
+\title{10. U1: the CALL instruction (second task, 19:00Z - 20:50Z): NO-GO in the stepper, nothing for \code{\verb~|t2~} on top}
+
+\p{Proposed ISA section: \code{\verb~|work/t3/isa-call.md~} (design sections 1-8 written before the prototype, section 9 after it). Prototype: private tree \code{\verb~|work/t3/tree-call/tree~} (rlvm-machine + a copy of this module), switch \code{\verb~|call~} (bit 26, off by default); patches per owner in \code{\verb~|work/t3/patches-call/~} (README.txt there). Nothing of it is in the main tree and nothing in this module's sources.}
+
+\subtree{
+\title{10.1 Verdict}
+
+\p{\strong{U1 is a NO-GO: the instruction is correct, gated, and worth nothing measurable} - in the stepper and in the Truffle tier, on the JVM and in the native image, on reachability and on Cedar-level work.}
+
+\ul{
+\li{The form I proposed (the application is never built: "form U") saves 1.9\% of reachability's records and costs 8.3\% more ticks and 21\% more block activations, because 77\% of the applications at CALL sites were answered by the WHNF memo of their record. On library corpora it saves 0.1-0.8\% of the records at equal ticks.}
+\li{The form that keeps the application as the memo key ("form T", the prototype's default) changes no count by more than 0.3\% on any corpus.}
+\li{Warm wall clock (bench/quiet.py, one engine kept; 10.4): \code{\verb~|call~} against the default set in twelve cells (JVM, launcher, image; reachability, Cedar slice, Init, Std, full cedar; 1 and 8 workers): between -4.5\% and +6.9\%, mean +0.4\%; in the steadiest cells (the image at one worker) it is 0.5-1.9\% slower.}
+\li{For the tier there is nothing on top: \code{\verb~|t2~} and \code{\verb~|t2 + call~} are the same within the scatter, and the direct call node the task asked for was NOT built, because its object was counted first: 68 k calls per pass on reachability have a compiled caller and a compiled callee (4.5\% of the compiled activations), none on the Cedar slice (10.5).}
+}
+}
+
+\subtree{
+\title{10.2 What was built}
+
+\ul{
+\li{\strong{Elaboration} (\code{\verb~|Elab~}, switch \code{\verb~|call~} only): the major premise of an inlined case tree whose term is an application of a definition becomes \code{\verb~|KCONST ; CALL r, h, args ; WHNF rM, r~} instead of \code{\verb~|KCONST ; MKAPP ; WHNF~}; an application of a definition in tail position becomes \code{\verb~|TAILAPPLY h, args~} instead of \code{\verb~|MKAPP ; RET~} (the same record at the same ticks in value mode).}
+\li{\strong{\code{\verb~|CALLV~}} (\code{\verb~|Code.callLoop~}, shared by stepper and tier): one tick per head; the head's RULES block (case tree) or BODY block is entered directly on the arguments in scratch, in CALL MODE (marker in the window word of the captured frame); in call mode a \code{\verb~|TAILAPPLY~} of a constant hands head and arguments back (\code{\verb~|Op.TCALL~}) and the loop continues with the next head; over-application of a constant result is again a call; a suspended block leaves a frame \code{\verb~|K_CALL~} that re-enters the loop.}
+\li{\strong{The generic path} (the application is built and the complete WHNF runs on it), exactly: head not a CONST record; head class not DEFN (constructors, axioms, opaque constants, recursors, Quot); a Nat function; a wrong number of levels or "does not unfold"; no RULES and no BODY block or fewer arguments than the block's arity; eager reduction active. Theorem heads are called (class DEFN); hints do not matter (CALL exists only where WHNF is asked; lazy delta keeps single DELTA steps on records); budgets are kept by the tick per iteration; K and literals are CORE's and NATFOLD's in the WHNF that follows.}
+\li{\strong{Two forms} (a static of \code{\verb~|Code~}, one per JVM). Form U (\code{\verb~|-Drlvm.t3.callUntabled=true~}): \code{\verb~|CALL~} is \code{\verb~|CALLV~}, the application exists only if the call is stuck. Form T (default): the application is interned first as the memo key; a WHNF flag or a WHNF memo answers; else \code{\verb~|CALLV~}, then the complete WHNF of its result, which is written into the application's WHNF memo (frames \code{\verb~|K_CALLT_1~}, \code{\verb~|K_CALLT_2~}).}
+\li{\strong{Tier} (private copy of this module): \code{\verb~|Op.CALL~} is decoded like \code{\verb~|APPLY~}; \code{\verb~|Instr.Apply~} calls \code{\verb~|T2Bridge.callv~} (a boundary into \code{\verb~|Code.callTabled~} / \code{\verb~|Code.callv~}) and, for a \code{\verb~|TAILAPPLY~} of a constant in an activation in call mode, \code{\verb~|T2Bridge.tailCall~}. No direct call node (10.5).}
+\li{\strong{Counters}: \code{\verb~|call.entered / memo / tail / builtAtSite / builtAfterTail~} (always), the census of block instructions and of record-table probes (\code{\verb~|-Drlvm.t3.census=true~}), CALLs in compiled code and where the callee runs (\code{\verb~|-Drlvm.t3.callCount=true~}); \code{\verb~|WarmMain~} prints them per pass.}
+}
+}
+
+\subtree{
+\title{10.3 Counts per warm pass (one worker; off / form T / form U)}
+
+\table{
+\tr{\th{corpus}\th{ticks}\th{records built}\th{record-table probes}\th{block activations}\th{blocks entered by CALL / answered by the memo}}
+\tr{\td{reachability}\td{9,095,141 / 9,094,072 / \strong{9,849,776 (+8.3\%)}}\td{4,819,810 / 4,818,323 / 4,727,624 (-1.9\%)}\td{8,369,951 / 8,391,415 / 8,650,323 (+3.4\%)}\td{1,755,468 / 1,755,477 / 2,128,006 (+21\%)}\td{T: 92,151 / 382,961; U: 464,637 / -}}
+\tr{\td{Cedar slice}\td{9,772,239 / 9,765,614 / 9,777,052}\td{5,031,495 / 5,029,993 / 5,025,412 (-0.12\%)}\td{10,924,782 / 10,923,479 / 10,920,964}\td{597,341 / 597,372 / 601,758}\td{T: 6,700 / 2,275; U: 9,197 / -}}
+\tr{\td{Init}\td{39,101,002 / 39,001,150 / 39,070,324}\td{16,194,242 / 16,154,662 (-0.24\%) / 16,080,771 (-0.70\%)}\td{33,213,640 / 33,175,585 / 33,117,125 (-0.29\%)}\td{4,310,644 / 4,312,342 / 4,347,413}\td{T: 106,605 / 29,626; U: 136,032 / -}}
+\tr{\td{Std (4 workers)}\td{64,816,271 / 64,748,034 / 64,690,161}\td{28,212,804 / 28,184,641 / 27,986,777 (-0.80\%)}\td{-}\td{6,605,897 / 6,623,541 / 6,649,179}\td{T: 147,422 / 38,860; U: 185,000 / -}}
+\tr{\td{full cedar (4 workers)}\td{84,572,859 / 84,471,043 / 84,472,532}\td{38,622,220 / 38,599,907 / 38,406,381 (-0.56\%)}\td{-}\td{7,750,183 / 7,757,163 / 7,795,745}\td{T: 155,505 / 43,955; U: 198,267 / -}}
+}
+
+\p{JVM and native image give the same counts; so do the stepper and the tier with form T on reachability under the production policy (13 blocks, 1.53 M compiled activations per pass: ticks 9,094,072, records 4,818,323, run words 24,417,655 in both). With 4 workers the split of the units over the sessions moves the counts by up to 1\% from run to run; only the one-worker rows are exact.}
+
+\p{\strong{Census of what block instructions build} (switch off, \code{\verb~|-Drlvm.t3.census=true~}; new record / existing record found, per pass):}
+
+\table{
+\tr{\th{corpus}\th{records per pass}\th{\code{\verb~|MKAPP~}}\th{\code{\verb~|MKLAM~} + \code{\verb~|MKPI~} + \code{\verb~|MKSUSP~}}\th{\code{\verb~|MKPROJ~}}\th{share of the records made by block instructions}\th{\code{\verb~|WHNF~} instructions: flag / memo / computed}}
+\tr{\td{reachability}\td{4,819,810}\td{2,274,137 / 2,114,595}\td{706,202 / 922,985}\td{408,525 / 65,382}\td{70\%}\td{536,216 / 387,018 / 378,619}}
+\tr{\td{Cedar slice}\td{5,031,495}\td{387,400 / 213,341}\td{293,107 / 709,494}\td{30,218 / 53,723}\td{14\%}\td{70,059 / 23,975 / 17,117}}
+\tr{\td{Init}\td{16,194,242}\td{3,389,093 / 1,796,109}\td{944,506 / 1,254,409}\td{331,269 / 895,017}\td{29\%}\td{412,820 / 283,317 / 207,742}}
+}
+
+\p{Reading: the applications that cost are not redexes handed to WHNF but ARGUMENTS and RESULTS (they are stored in other records and frames at once); half of reachability's \code{\verb~|MKAPP~} executions and most closure constructions find an existing record; on Cedar-level work six of seven records are made by the generic judgments, where no block instruction reaches. This is the table U2 needs (sent 19:32Z).}
+}
+
+\subtree{
+\title{10.4 Times}
+
+\p{All through \src{bench/quiet.py} (windows C1 19:41Z, C2 20:15Z, C3 20:38Z, C4 20:42Z), one engine kept over the passes, fresh sessions per pass; warm wall clock per pass in ms, median of the later half of the warm passes of all processes of a cell. \code{\verb~|K1~} = \code{\verb~|default~} (the published default set), \code{\verb~|call~} = \code{\verb~|default,call~} (form T), \code{\verb~|t2~} = \code{\verb~|default,t2~} with \code{\verb~|rlvm.t2.mode=warm~}. Distribution \code{\verb~|work/t3/cc1~} (prototype machine jar 3a65e373446f, private tier jar b41eabdb6506; the image is \code{\verb~|cc1/bin/warm~}, CE \code{\verb~|-O3~}, built from the same jars). Rows: \code{\verb~|work/t3/warm.tsv~}, \code{\verb~|work/t3/launcher.tsv~}.}
+
+\table{
+\tr{\th{platform, window}\th{corpus}\th{workers}\th{K1}\th{call}\th{call, form U}\th{t2}\th{t2 + call}\th{processes x warm passes per cell}}
+\tr{\td{JVM, C1}\td{reachability}\td{1}\td{977}\td{976 (-0.1\%)}\td{960 (-1.8\%)}\td{918}\td{929}\td{2 x 6}}
+\tr{\td{JVM, C1}\td{Cedar slice}\td{1}\td{1110}\td{1118 (+0.8\%)}\td{-}\td{-}\td{-}\td{2 x 6}}
+\tr{\td{JVM, C1}\td{reachability}\td{8}\td{523}\td{499 (-4.5\%)}\td{-}\td{513}\td{512}\td{1 x 7}}
+\tr{\td{JVM, C4}\td{Init}\td{8}\td{439}\td{451 (+2.7\%)}\td{-}\td{448}\td{454}\td{2 x 8}}
+\tr{\td{JVM, C2}\td{Std}\td{8}\td{800}\td{779 (-2.7\%)}\td{-}\td{-}\td{-}\td{1 x 4}}
+\tr{\td{JVM, C2}\td{full cedar}\td{8}\td{1127}\td{1111 (-1.4\%)}\td{-}\td{-}\td{-}\td{1 x 4}}
+\tr{\td{JVM launcher, C2}\td{reachability}\td{8}\td{431}\td{442 (+2.5\%)}\td{-}\td{409}\td{402}\td{1 x 7}}
+\tr{\td{image, C3}\td{reachability}\td{1}\td{1321}\td{1345 (+1.9\%)}\td{-}\td{1238}\td{1239}\td{2 x 6}}
+\tr{\td{image, C3}\td{Cedar slice}\td{1}\td{1345}\td{1352 (+0.5\%)}\td{-}\td{-}\td{-}\td{1 x 6}}
+\tr{\td{image, C3}\td{reachability}\td{8}\td{604}\td{646 (+6.9\%)}\td{-}\td{573}\td{624}\td{1 x 7}}
+\tr{\td{image, C3}\td{Init}\td{8}\td{573}\td{564 (-1.6\%)}\td{-}\td{-}\td{-}\td{1 x 5}}
+\tr{\td{image, C3}\td{full cedar}\td{8}\td{1281}\td{1280 (-0.1\%)}\td{-}\td{-}\td{-}\td{1 x 4}}
+}
+
+\p{The launcher row is the real launcher with P7's kept-engine passes (\code{\verb~|-X passes=8 -X passes-mode=recheck -X passes-keep=engines~}), \code{\verb~|check_ms~} of the later passes. Init on the JVM is given from C4 (two processes, eight warm passes); its first row in C2 had five passes that were still falling and showed K1 461, call 465, t2 486, t2 + call 527 - the 14\% of the last cell did not repeat. Not measured: the native launcher (\code{\verb~|bin/rlvm~}) with the prototype, Std in the image, the tier on Std / full cedar (section 1 has the tier's rows there).}
+
+\p{Reading:}
+
+\ul{
+\li{\strong{\code{\verb~|call~} against K1}: twelve cells, between -4.5\% and +6.9\%, both signs on both platforms, mean +0.4\%. The passes of one process spread by 5-15\% on the JVM and by up to 12\% in the image at eight workers; the only steady cells are the image at one worker, and there \code{\verb~|call~} is 0.5-1.9\% SLOWER (reachability: every pass of the second K1 process is between 1304 and 1327, every pass of the second \code{\verb~|call~} process between 1329 and 1360). That is what the counts predict: the same records, the same probes, a slightly longer way to them.}
+\li{\strong{\code{\verb~|t2 + call~} against \code{\verb~|t2~}}: 929 / 918, 512 / 513, 454 / 448, 402 / 409 on the JVM, 1239 / 1238 and 624 / 573 in the image: nothing at one worker; +9\% in the one eight-worker image cell (one process each).}
+\li{The tier's own figure of section 1 is confirmed on the new default set: reachability -6\% on the JVM (918 against 977) and -6.3\% in the image (1238 against 1321) at one worker with 13 blocks.}
+}
+}
+
+\subtree{
+\title{10.5 The tier on top of CALL, and why the direct call node was not built}
+
+\p{The task asked for "a direct call node so Truffle can inline callee blocks into callers". What exists is a node that reaches the callee through the shared operation (a boundary). Before building more I counted its object (\code{\verb~|-Drlvm.t3.callCount=true~}, form T, production policy, one worker, per steady pass):}
+
+\table{
+\tr{\th{corpus}\th{blocks installed}\th{compiled activations}\th{CALLs executed by compiled code}\th{callee's block entered as compiled code}\th{entered in the stepper}\th{no activation (memo answer, generic path)}}
+\tr{\td{reachability}\td{13}\td{1,528,166}\td{461,720}\td{68,116}\td{21,374}\td{372,230}}
+\tr{\td{Cedar slice}\td{2}\td{21,929}\td{0}\td{0}\td{0}\td{0}}
+}
+
+\p{So a direct call can serve 68 k calls per pass on reachability (4.5\% of the compiled activations) and none on the Cedar slice. What it would remove per call is the way from the node to the callee's root (\code{\verb~|T2Bridge.callv~} -> \code{\verb~|Code.callTabled~} -> \code{\verb~|callLoop~} -> \code{\verb~|Code.enter~} -> \code{\verb~|Tier.exec~} -> \code{\verb~|T2Tier.run~} -> \code{\verb~|callIndirect~}), not the key probe, the tick, the window, the callee's body, the WHNF of its result or the memo write. The hook's own frames were about 2\% of the samples of a Cedar-slice tier run in which each of the 600 k activations of a pass crosses it (section 9.3): some 40 ns per crossing. Taken generously as 150 ns per call (the hook, the boundary, the way through \code{\verb~|callTabled~} and \code{\verb~|callLoop~}), 68 k calls are 10 ms of a 920 ms pass, about 1\%, where two processes of one configuration differ by 5-8\%. And if those callee activations vanished entirely, bodies included, they are 4.5\% of the compiled activations of a pass: that share of the compiled part is the bound of inlining too, and inlining does not remove the bodies - what a callee body does is intern its results (section 5), which stays. I therefore stopped at the count. If somebody wants the node anyway, the place is \code{\verb~|Instr.Apply~} (\code{\verb~|call == true~}): the head is a \code{\verb~|KCONST~} of the same block, the callee root is known if it is installed when the caller is built (a later installation needs a rebuild of the caller: compiled blocks never run in the Truffle interpreter); the fast path is "key, memo miss, callable, tick, window, \code{\verb~|DirectCallNode.call~}", everything else (NONE, TCALL, over-application, signals, the WHNF of the result and the memo write) goes back to \code{\verb~|Code.callLoop~} at phase 1, which is already written to be re-entered with a block's result (it is how the frame \code{\verb~|K_CALL~} resumes).}
+}
+
+\subtree{
+\title{10.6 Gates on the prototype}
+
+\ul{
+\li{\strong{M8 gate, form T} (\code{\verb~|rlvm-machine/src/test/resources/m8/report.sh gate --switches default,call --tree work/t3/tree-call/tree/rlvm-machine --name call-tabled -Dm8.suffix=-T3 tutorial bugs all cedar reachability init~}; 233 files x 6 lanes, 1373 s): \strong{PASS WITH DECLINES; 0 SOUNDNESS, 0 COMPLETENESS; tier equivalence (generic tier against the set) 0 different outcomes and 0 different values; convention equivalence D0 / unbounded against D128: 0 different; audits: 0 different, 0 ended by an audit; the driver: 233 runs, verdict right in all}. The declines are the eager-reduction units (1 + 4 in the tests, 11 Cedar slice, 8 reachability, 164 Init), as on the main tree. Report \code{\verb~|work/status/machine-gate-call-tabled-T3.md~}, output \code{\verb~|work/t3/gate-call-tabled.out~}. (The gate's corpus "cedar" is the Cedar slice.)}
+\li{\strong{S hostile suite} (\code{\verb~|T3CallHostileTest~}, in the prototype tree: \code{\verb~|SHostile.run~} on all 329 exports under \code{\verb~|code,casetrees,call~}, \code{\verb~|default,call~}, S's candidate set + \code{\verb~|same,call~}, \code{\verb~|all,call~}, \code{\verb~|default,call,tele~}): form T and form U: 0 unexpected, 0 known findings open, 0 declines (\code{\verb~|work/t3/hostile-call-tabled.txt~}, \code{\verb~|hostile-call-untabled.txt~}). That the second run really was form U: its surefire report lists \code{\verb~|rlvm.t3.callUntabled=true~} among the system properties of the forked test JVM (\code{\verb~|work/t3/hostile-call-untabled.surefire.xml~}).}
+\li{\strong{Tier equivalence, \code{\verb~|default,call~} in both tiers} (\code{\verb~|EqMain~} = \code{\verb~|TierEquivalenceTest.equivalent~}: outcome, heap digest and ticks at every unit; private build \code{\verb~|cc1~} / \code{\verb~|c6~}): every block compiled at its first entry, 10 files at host depth unbounded (920,969 compiled activations) and 4 files at depth 0: 0 different (\code{\verb~|work/t3/eq-cc1-small.txt~}). Whole corpora with blocks promoted at 2,000 entries (synchronously): reachability 4,413 units, 27 blocks, 1,651,792 compiled activations; Cedar slice 8,418 units, 67 blocks, 126,930 compiled activations: 0 different (\code{\verb~|work/t3/eq-c6-reach.txt~}, \code{\verb~|eq-c6-cedarslice.txt~}).}
+\li{\strong{Form U has no M8 gate run.} It is the worse form and was not worth 23 minutes of a heavy slot; it passed the hostile suite and the tier equivalence above was run on form T only.}
+\li{Not run: \code{\verb~|TierEquivalenceTest~} of the main module with the switch (the main module cannot reference \code{\verb~|Code.callv~}; \code{\verb~|EqMain~} runs the same comparison on the private build), the mutants, Std / cedar / mathlib through the differential.}
+\li{The base of the prototype (the published tree, machine jar 78c74ca92785) has the wrong accept E1-F1 that the orchestrator posted at 20:10Z (INFER's let rule); the prototype inherits it and has nothing to do with it. The patches are against that base and touch neither \code{\verb~|Infer~} nor the let rule.}
+\li{This module's own sources (no CALL in them) against the published machine jar 78c74ca92785: default test group 7 tests, 0 failures (20:12Z).}
+}
+}
+
+\subtree{
+\title{10.7 Files}
+
+\ul{
+\li{\code{\verb~|work/t3/isa-call.md~} - the proposed ISA section, with what the prototype taught (section 9).}
+\li{\code{\verb~|work/t3/tree-call/~} - \code{\verb~|base~} (main tree of 19:04:35Z), \code{\verb~|base2~} (the published tree of 19:53:37Z, machine jar 78c74ca92785), \code{\verb~|tree~} (the prototype, refreshed to \code{\verb~|base2~}: rlvm-machine and a copy of this module).}
+\li{\code{\verb~|work/t3/patches-call/~} - patches per owner against \code{\verb~|base2~} and against this module (M6: Op, Debug; M7: Code, Elab, CodeShow; M1 / M6: the probe census in Values / Machine, measurement only; the hostile test; rlvm-truffle). Applied to the base they give the prototype tree exactly (\code{\verb~|work/t3/patch-check~}).}
+\li{\code{\verb~|work/t3/build-call.sh NAME~} - builds the private machine jar (Maven) and the private copy of this module (javac) into the JVM distribution \code{\verb~|work/t3/NAME~}; \code{\verb~|work/t3/ni-warm.sh NAME~} - the native image of the measuring tool from it; \code{\verb~|work/t3/eq.sh~} - tier equivalence on such a build; \code{\verb~|work/t3/wc1.sh~}, \code{\verb~|wc2.sh~}, \code{\verb~|wc3.sh~}, \code{\verb~|wc4.sh~} - the quiet windows. Distributions: \code{\verb~|cc1~} (the timed one, JVM + \code{\verb~|bin/warm~}; built at 19:31Z, before the refresh: the refreshed tree differs from it in \code{\verb~|MachineProvider.priority~}, one comment and the counters added later, not in the reduction code), \code{\verb~|c5~} (census of probes), \code{\verb~|c6~} (CALL counters of the tier; built from the refreshed tree).}
+\li{Rows: \code{\verb~|work/t3/warm.tsv~} (labels C1 - C4), \code{\verb~|work/t3/launcher.tsv~} (LC2); count runs \code{\verb~|work/t3/smoke.tsv~} (labels cen5, cnt8, opp, nat0); logs \code{\verb~|work/t3/logs/~}.}
+}
+}
+
+\subtree{
+\title{10.8 What follows from it}
+
+\ol{
+\li{\strong{Do not integrate \code{\verb~|call~}.} It is one more code path through the reduction core (about 440 added lines in \code{\verb~|Code~} and \code{\verb~|Elab~}) for no gain. The opcode 0x88 / 0x89 rows of ISA 4.1 can stay reserved or go. \strong{No variant of it can do much better}: the applications at CALL sites are 497 k of reachability's 8.4 M record-table probes per pass (6\%) and 92 k of its 4.8 M new records (1.9\%), and below 1\% of the records of a library corpus; that is the ceiling of "do not build the redex" however it is tabled. A side table keyed by head and arguments instead of the record would have to store the arguments to compare them - that is the record. The other shapes the task named do not have the redex to save: \code{\verb~|APPLY~} of a closure is already direct (beta without a record), the generic tier's EVAL builds the application because it is the value there, and CONV's lazy delta compares both sides by identity first, so it needs the records.}
+\li{\strong{The WHNF memo of applications is doing the work on closed evaluation}: 77\% of the scrutinee reductions of reachability's case trees are memo answers. Anything that makes applications private or lazy (U2) has to keep exactly these as identified records - they are few (1-3\% of the activations of a library corpus) and they are the ones that are looked up again.}
+\li{\strong{Where the records are} (census, 10.3): arguments and results of applications, and closures - values that are stored at once. For a compiler that means: with CALL or without, there is still nothing private to a block. The only remaining unlock of section 7 is U2, and on Cedar-level work even U2 reaches at most the 14\% of the records that blocks make unless the generic judgments use it too.}
+\li{\strong{\code{\verb~|t2~} stays off}; nothing in this task changes the verdict of section 1.}
+}
+}
+}

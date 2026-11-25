@@ -1,0 +1,376 @@
+\title{Adversarial review of the machine's default switch set, of \code{\verb~|k2~}, and of the candidate default (reviewer S3)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\tag{reference-engine}
+\meta{origin}{docs/design/review/soundness-default-set.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{2026-11-24, 21:06Z - 22:50Z. Two passes. \strong{Pass 1} (sections 0 - 9): \code{\verb~|rlvm-machine~} as published at 20:28Z (jar \code{\verb~|15cb3777e598~}; my private copy \code{\verb~|work/s3/tree~} packages to the same hash), through the JVM launcher of \code{\verb~|work/s3/dist~} (the published jars of the shared distribution of 21:02Z: machine \code{\verb~|15cb3777e598~}, reference \code{\verb~|ca1f9bd918bb~}), \code{\verb~|-Xmx4g~}, one worker. \strong{Pass 2} (section 10, after the owner's decision "practical", OWNER-NOTES note 13): the CANDIDATE default - the default set + \code{\verb~|eager~} + the proof-comparison shortcuts \code{\verb~|skipargs~} and \code{\verb~|congruence~} - on machine jar \code{\verb~|df36be3c8cc9~} (E1's publications of 21:26Z typed bindings, 21:57Z \code{\verb~|eager~}, 22:12Z; my copy \code{\verb~|work/s3/tree2~} packages to the same hash; distribution \code{\verb~|work/s3/dist-cand~}), attacked for a FALSE accept only. No production file was changed; everything of this review is under \code{\verb~|work/s3/~}. Ground truth everywhere: the official checker (\code{\verb~|leanchecker --from-export~}, Lean v4.36.0, inside Docker: \code{\verb~|work/s3/official.sh~}), never the reference engine.}
+
+\p{Switches reviewed: \code{\verb~|same~}, \code{\verb~|pchk~}, \code{\verb~|bodies~}, \code{\verb~|match~}, \code{\verb~|joint~}, \code{\verb~|lazycases~}, \code{\verb~|directrules~}, \code{\verb~|lazyeval~}, \code{\verb~|code~}, \code{\verb~|casetrees~} (the ten that entered \code{\verb~|Op.SW_DEFAULT~} at the wave-6 integration without an adversarial review) and \code{\verb~|k2~} (off). \code{\verb~|warm~} is in the default set and is touched by two findings; \code{\verb~|expect~}, the binder / let / application rules and eager reduction are E1's.}
+
+\p{Words used below. \strong{Kind T}: the machine accepts a statement that is derivable in Lean's type theory and that the official checker rejects only through its own incompleteness, non-transitivity or cache order (evidence: the official checker accepts the same statement in another order, or with the missing step written out). \strong{Kind F}: the accepted statement is not derivable. A machine cell \code{\verb~|M/P~} is the verdict of the PRIMARY machine engine under the switch set (from \code{\verb~|engine.primary.machine.*~}) and the exit status of the pipeline.}
+
+\subtree{
+\title{0. Verdict}
+
+\p{\strong{No kind F finding, in the default set and in the candidate (section 10).} Six findings of kind T (certificates in section 3): one in v0 and therefore in every switch set (S3-F1), one in the REFERENCE engine (S3-F2, the default pipeline), one in \code{\verb~|warm~} (S3-F3), and three that are specific to a switch: \code{\verb~|lazyeval~} (S3-F4), \code{\verb~|pchk~} (S3-F5), \code{\verb~|k2~} (S3-F6, with its default thresholds). One finding that is no wrong verdict: \code{\verb~|code~} declines valid units with an internal fault (S3-F7). Under the owner's policy of 22:25Z (kind T tolerated and documented, kind F absolute) the kind T findings are the documented divergences of the default configuration, not blockers. They have one root that none of the gates could see (section 2): \strong{the official \code{\verb~|is_def_eq~} is not a function of its two arguments, not even in plain mode} - the cache \code{\verb~|m_whnf_core~} is read by the cheap \code{\verb~|whnf_core~} calls and written only by the full ones - so every memo of the machine that answers a comparison, a checked type or a cheap CORE is exact only if it mirrors the official per-declaration, term-keyed caches, and none of them does.}
+
+\table{
+\tr{\th{Switch}\th{What it assumes}\th{Own difference from the official verdict (beyond v0)}\th{Verdict}}
+\tr{\td{(v0, for comparison)}\td{the pair table POS, the tabled CHECKED types and the full-CORE memos are what the official \code{\verb~|m_success~}, \code{\verb~|m_infer_type[0]~}, \code{\verb~|m_whnf_core~} hold}\td{wrong ACCEPT and wrong REJECT, kind T: S3-F1 (9 rows marked \code{\verb~|cache~})}\td{not exact}}
+\tr{\td{\code{\verb~|same~}}\td{two values that read back to ONE expression are convertible for the official procedure}\td{none found (0 rows differ from v0)}\td{exact relative to v0 as coded; inherits S3-F1}}
+\tr{\td{\code{\verb~|pchk~}}\td{"a closed term without level parameter that passed check mode once passes it in every later declaration"}\td{\strong{wrong ACCEPT, kind T: S3-F5} (4 rows; v0 rejects them)}\td{\strong{not exact}: \code{\verb~|s3-pchk-def-reused-bad~}}}
+\tr{\td{\code{\verb~|bodies~}}\td{the value of a beta body does not depend on having a tabling record; \code{\verb~|(fun .. x .. => x.i) .. a ..~} is \code{\verb~|MKPROJ(a, i)~}}\td{none found}\td{exact relative to v0 as coded}}
+\tr{\td{\code{\verb~|match~}}\td{an argument type that equals the domain pattern under the telescope, up to equivalent levels, is convertible with the built domain}\td{none found}\td{exact relative to v0 as coded}}
+\tr{\td{\code{\verb~|joint~}}\td{leading binders of type and value with the SAME domain term can be opened once}\td{none found}\td{exact relative to v0 as coded}}
+\tr{\td{\code{\verb~|lazycases~}}\td{no state of the official lazy-delta loop lies between the unfolding of a \code{\verb~|casesOn~}-shaped definition and the reduct of its recursor}\td{none found}\td{exact relative to v0 as coded (shape CASESON only; a MATCHER tree in the lazy step is NOT exact: row \code{\verb~|s3-lazycases-matcher-over-regular-cases-ok~}, seeded fault 10)}}
+\tr{\td{\code{\verb~|directrules~}}\td{the rule's right-hand side has the plain form (verified on the term): one APPLY of the minor is the same reduct}\td{none found}\td{exact relative to v0 as coded}}
+\tr{\td{\code{\verb~|lazyeval~}}\td{"order-only": a one-sided unfolding against a weak-head normal side may run as one WHNF}\td{\strong{wrong ACCEPT, kind T: S3-F4} (v0 rejects)}\td{\strong{not exact}: \code{\verb~|s3-wc-inner-caseson-lazy-bad~}}}
+\tr{\td{\code{\verb~|code~}, \code{\verb~|casetrees~}}\td{a compiled body / case tree computes the reduct of DELTA + rule + beta}\td{no wrong verdict found; they change which full-CORE memos exist - in my rows always TOWARDS the official verdict (two v0 wrong accepts become rejects of the primary machine); \strong{S3-F7: \code{\verb~|code~} declines valid units (internal fault)}}\td{no difference of their own found; not provably exact (see 4.9); S3-F7 costs a decline}}
+\tr{\td{\code{\verb~|warm~} (not on my list)}\td{everything a session keeps is declaration-independent}\td{wrong ACCEPT and wrong REJECT, kind T: S3-F3}\td{not exact}}
+\tr{\td{\code{\verb~|k2~} (off)}\td{"the leaf is a reduct of \code{\verb~|c x̄~} by official steps, and reduction commutes with substitution"}\td{\strong{wrong ACCEPT with the default thresholds, kind T, and a wrong REJECT: S3-F6}; with test thresholds also the memo class of S3-F1}\td{\strong{not exact; must stay off} (section 7)}}
+}
+
+\p{What follows from it for the default set: under the strict reading of owner note 11 (the official verdict on every input) v0 itself is not a candidate, with or without the ten switches; under the reading "official verdict on real inputs, never a kind F accept" I found nothing against the ten switches - the two that add kind T accepts of their own are \code{\verb~|pchk~} and \code{\verb~|lazyeval~}, and \code{\verb~|warm~} adds its own as well.}
+
+\p{One thing of the PIPELINE, not of a switch: with \code{\verb~|-X engine=machine~} a rejection of the warm machine is re-checked by the strict machine (v0) first and an ACCEPT there is final (E1 saw it for E1-F3). Rows \code{\verb~|s3-wc-inner-caseson-bad~} and \code{\verb~|s3-wc-inner-matcher-bad~}: the default set REJECTS (the case tree leaves the right memo), v0 accepts, exit status 0. A wrong accept of v0 is a wrong accept of the pipeline whatever the switch set does.}
+}
+
+\subtree{
+\title{1. Method and tools (all kept under \code{\verb~|work/s3/~})}
+
+\table{
+\tr{\th{What}\th{Where}}
+\tr{\td{exports (423, NDJSON; 200 of them random programs) and the generators' row lists}\td{\code{\verb~|work/s3/exports/s3-*.ndjson~}, \code{\verb~|exports/batch*.tsv~}}}
+\tr{\td{manifest in the form of \code{\verb~|rlvm-machine/src/test/resources/s/manifest.tsv~} with one more column: name, OFFICIAL verdict, KIND (\code{\verb~|T~} or \code{\verb~|strict~}), marks, attack}\td{\code{\verb~|work/s3/manifest.tsv~} (\code{\verb~|mkmanifest.py~})}}
+\tr{\td{generators (on package S's builder \code{\verb~|tools/lk.py~} and E1's \code{\verb~|common.py~})}\td{\code{\verb~|work/s3/gen/s3lib.py~}, \code{\verb~|batchA.py~} (cache, pair table, sessions, mdata), \code{\verb~|batchC.py~} (reduction routes against the cache), \code{\verb~|batchD.py~} (pchk), \code{\verb~|batchE.py~} (shapes and shortcuts), \code{\verb~|batchF.py~} (rows for the seeded faults), \code{\verb~|batchG.py~} (kind F hunt in the case trees), \code{\verb~|batchK.py~} (k2), \code{\verb~|batchR.py~} (random programs with a Python evaluator), \code{\verb~|batchH.py~} (reductions of S3-F7), \code{\verb~|batchN.py~}, \code{\verb~|batchP.py~} (the candidate: eager, the shortcuts' masks, admission)}}
+\tr{\td{official verdicts (Docker), cached by content hash}\td{\code{\verb~|work/s3/official.sh~}, \code{\verb~|work/s3/official/NAME.{out,verdict}~}}}
+\tr{\td{judge: official + reference + machine under named switch sets, cells \code{\verb~|M/P~}, flags}\td{\code{\verb~|work/s3/judge.py~}}}
+\tr{\td{the matrices: pass 1 (358 exports x 13 switch sets + reference: \code{\verb~|matrix.tsv~}, \code{\verb~|matrix3.tsv~}), k2 with test thresholds (\code{\verb~|matrix-k2test.tsv~}), the candidate jar (\code{\verb~|cand-plain.tsv~}, \code{\verb~|cand-plain2.tsv~}: none / default / default,eager; \code{\verb~|cand-full.tsv~}: the candidate and the candidate without \code{\verb~|eager~}; \code{\verb~|cand-sx.tsv~}: package S's, E1's and S2's rows under the candidate)}\td{\code{\verb~|work/s3/out/~}}}
+\tr{\td{private copies: pristine (\code{\verb~|tree~}, \code{\verb~|tree2~}: jar hashes = the published ones), with seeded faults (\code{\verb~|seeded~}: 1 - 11 on the first jar; \code{\verb~|seeded2~}: 12 - 15 on the candidate jar; \code{\verb~|-Ds3.bug=N~}), their distributions}\td{\code{\verb~|work/s3/tree~}, \code{\verb~|tree2~}, \code{\verb~|seeded~}, \code{\verb~|seeded2~}, \code{\verb~|dist-tree~}, \code{\verb~|dist-cand~}, \code{\verb~|dist-seeded~}, \code{\verb~|dist-seeded2~}, \code{\verb~|mkdist.sh~}, \code{\verb~|seeded.py~}}}
+}
+
+\p{Reproduce: \code{\verb~|python3 work/s3/gen/batchA.py~} (and C, D, E, F, G, K; \code{\verb~|batchR.py 40 1~}), then \code{\verb~|bench/slot.sh -- python3 work/s3/judge.py -j 3 --sets v0,step1,same,pchk,bodies,mj,lazyeval,direct,code,ct,ctl,default,def+k2 work/s3/exports/s3-*.ndjson~}. k2 with its test thresholds: \code{\verb~|S3_JVM_EXTRA="-Drlvm.machine.k2Hot=1 -Drlvm.machine.k2Share=0"~}. Seeded faults: \code{\verb~|python3 work/s3/seeded.py~}.}
+
+\p{The three gadgets every row is built from (A = \code{\verb~|And True True~}, \code{\verb~|intro~} its constructor application, \code{\verb~|h : A~} an axiom):}
+
+\ul{
+\li{package S's triple: \code{\verb~|d x := And.rec (fun _ _ => 5) x~} (regular). \code{\verb~|d intro = d h~} and \code{\verb~|d intro = 5~} are accepted officially, \code{\verb~|d h = 5~} is rejected.}
+\li{\strong{the box} (new): \code{\verb~|structure S.B where n : Nat~}, \code{\verb~|f x := S.B.mk (And.rec (fun _ _ => 5) x)~} (regular), \code{\verb~|a = (f intro).1~}, \code{\verb~|b = (f h).1~}. The cheap \code{\verb~|whnf_core~} leaves both projections stuck and \code{\verb~|lazy_delta_proj_reduction~} compares \code{\verb~|f intro~} with \code{\verb~|f h~}: same head, arguments by proof irrelevance: \code{\verb~|a = b~} is TRUE. The full \code{\verb~|whnf_core~} gives \code{\verb~|5~} for \code{\verb~|a~} and the stuck \code{\verb~|And.rec .. h~} for \code{\verb~|b~}: FALSE. Which of the two the official kernel computes depends on whether its cache has an entry for the term \code{\verb~|a~}.}
+\li{\strong{the substitution-unstable pair} (new, for k2): \code{\verb~|t x = Nat.rec M Z S x intro~}, \code{\verb~|s x = Nat.rec M Z S x h~} with \code{\verb~|M = fun _ => A -> Nat~}, \code{\verb~|Z = fun q => And.rec (fun _ _ => 5) q~}, \code{\verb~|S = fun _ _ q => And.rec (fun _ _ => 5) q~}: convertible officially while \code{\verb~|x~} is a variable (two stuck recursors, arguments pairwise), not convertible for any numeral \code{\verb~|x~}.}
+}
+}
+
+\subtree{
+\title{2. The root: the official \code{\verb~|is_def_eq~} depends on the declaration's history}
+
+\p{\code{\verb~|refs/lean4/src/kernel/type_checker.cpp~} (v4.36.0), \code{\verb~|whnf_core~}: after the easy cases, "check cache" (\code{\verb~|m_st->m_whnf_core.find(e)~}) is done for EVERY call, also with \code{\verb~|cheap_proj = true~}; the insert at the end happens only \code{\verb~|if (!cheap_rec && !cheap_proj)~}. \code{\verb~|is_def_eq_core~} starts with \code{\verb~|whnf_core(t, false, true)~} and every lazy-delta step is \code{\verb~|whnf_core(unfold_definition(t), false, true)~}; the full call comes in step 7 of \code{\verb~|is_def_eq_core~} (\code{\verb~|whnf_core(t_n)~}), in \code{\verb~|whnf~} (every term its loop passes, and the recursion of \code{\verb~|whnf_core~} inserts every intermediate term: the instantiated body of an unfolded definition, the applied minor premise, a projection reached at the head), in \code{\verb~|reduce_nat~}, in the major premise of a recursor, in \code{\verb~|ensure_pi~} / \code{\verb~|ensure_sort~} / \code{\verb~|infer_proj~}, the K rule, eta and unit-like. All caches of \code{\verb~|type_checker::state~} are keyed by TERMS (structural equality: an \code{\verb~|mdata~} node, a beta redex, another free variable are other keys) and live for ONE declaration.}
+
+\p{So \code{\verb~|whnf_core(e, cheap_proj = true)~} of a projection \code{\verb~|e = p.i~} whose structure needs delta is \code{\verb~|e~} itself while the cache has no entry for the term \code{\verb~|e~}, and the reduced field once any full \code{\verb~|whnf_core(e)~} ran. With the box:}
+
+\table{
+\tr{\th{Export (one theorem; \code{\verb~|use : forall (P : Prop), P -> True~} an axiom, the kernel checks arguments left to right)}\th{Official}\th{Reference}\th{Machine v0}}
+\tr{\td{\code{\verb~|s3-wc-proj-alone-ok~}: \code{\verb~|Eq.refl a : a = b~}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{\verb~|s3-wc-proj-after-full-bad~}: \code{\verb~|And.intro (use (a = 5) (Eq.refl 5)) (use (a = b) (Eq.refl a))~}}\td{\strong{reject}}\td{reject}\td{reject}}
+\tr{\td{\code{\verb~|s3-wc-proj-before-full-ok~}: the same two arguments in the other order}\td{accept}\td{accept}\td{accept}}
+}
+
+\p{The other caches freeze answers of an earlier cache state: \code{\verb~|m_infer_type[0]~} (a term that was checked is not checked again in this declaration), \code{\verb~|m_success~} (a TERM pair that succeeded answers T again; \code{\verb~|s3-wc-pos-otheruse-bad~} is accepted officially for that reason), \code{\verb~|m_failure~} (only for the same-head argument comparison). Nothing else in plain mode depends on history (\code{\verb~|m_whnf~}, \code{\verb~|m_infer_type[1]~}, \code{\verb~|m_unfold~} cache deterministic results). The direction is monotone inside a declaration: more entries can only turn a T into an F for a NEW term pair; an F never becomes T.}
+
+\p{What the machine has in their place: the full-CORE memo on a projection value (\code{\verb~|Reduce.core~}: "a full result answers both modes, a cheap one only cheap queries" - the designers knew the quirk), the pair table POS / NEG, the tabled CHECKED types with stamps, the PCHK bits. They differ from the official caches in four ways, and each way is a row below: keyed by VALUES (beta, zeta, \code{\verb~|mdata~} are gone), free variables are canonical (\code{\verb~|FVAR(type, depth)~}: another binder instance is the same key), a \code{\verb~|warm~} session and PCHK keep them across declarations, and some reduction routes do not write the full-CORE memo where the official kernel writes its entry.}
+}
+
+\subtree{
+\title{3. Findings}
+
+\p{All verdicts: official from Docker; machine and reference through the launcher of \code{\verb~|work/s3/dist~}. \code{\verb~|W = use (a = b) (Eq.refl a)~}, \code{\verb~|W0 = use (a = 5) (Eq.refl 5)~}.}
+
+\table{
+\tr{\th{Id}\th{Kind}\th{Where}\th{Export (\code{\verb~|work/s3/exports/~})}\th{Official}\th{Reference}\th{Machine}}
+\tr{\td{\strong{S3-F1}}\td{T}\td{v0 and every switch set: POS pair by VALUE answers a new TERM pair}\td{\code{\verb~|s3-wc-pos-beta-bad~}: \code{\verb~|And.intro W (And.intro W0 (use (a = (fun x => (f x).1) h) (Eq.refl a)))~}}\td{reject}\td{reject}\td{\strong{accept} (every set)}}
+\tr{\td{}\td{T}\td{canonical free variables (the plain-mode sibling of S-F5)}\td{\code{\verb~|s3-wc-canon-fvar-bad~}: \code{\verb~|And.intro (fun p => W p) (fun p => snd (W0 p) (W p))~}}\td{reject}\td{reject}\td{\strong{accept} (every set)}}
+\tr{\td{}\td{T}\td{the full-CORE memo is not written when iota continues inside one CORE}\td{\code{\verb~|s3-wc-inner-rec-minor-bad~} (the minor of a direct \code{\verb~|Nat.rec~} is the projection)}\td{reject}\td{reject}\td{\strong{accept} (every set, also the default pipeline)}}
+\tr{\td{}\td{T}\td{the same}\td{\code{\verb~|s3-wc-inner-caseson-bad~}, \code{\verb~|s3-wc-inner-matcher-bad~}}\td{reject}\td{reject}\td{\strong{accept} under none, step 1, \code{\verb~|bodies~}, \code{\verb~|lazyeval~}, \code{\verb~|directrules~}, \code{\verb~|code~}, default minus the case trees; with \code{\verb~|casetrees~} the primary machine rejects and the pipeline still exits 0 (strict re-check = v0)}}
+\tr{\td{}\td{wrong REJECT}\td{canonical free variables keep the full-CORE memo of another binder instance}\td{\code{\verb~|s3-wc-canon-fvar-full-first-ok~}: \code{\verb~|And.intro (fun p => W0 p) (fun p => W p)~}}\td{accept}\td{accept}\td{\strong{reject} (every set; the pipeline repairs it)}}
+\tr{\td{\strong{S3-F2}}\td{T}\td{the REFERENCE engine: \code{\verb~|mdata~} is transparent for its caches}\td{\code{\verb~|s3-wc-pos-mdata-bad~}: as \code{\verb~|-pos-beta-bad~} with \code{\verb~|use (a = mdata b) (Eq.refl a)~}}\td{reject}\td{\strong{accept}}\td{accept (every set)}}
+\tr{\td{}\td{wrong REJECT}\td{the reference engine: \code{\verb~|mdata~} hides \code{\verb~|eagerReduce~} from the official \code{\verb~|is_eager_reduce~}}\td{\code{\verb~|s3-mdata-eager-hidden-ok~}: the argument \code{\verb~|mdata (eagerReduce (X = X) (Eq.refl X))~} is compared in PLAIN mode officially}\td{accept}\td{\strong{reject}}\td{declines (eager), pipeline rejects}}
+\tr{\td{\strong{S3-F3}}\td{T}\td{\code{\verb~|warm~}: the tabled CHECKED type / the POS pair of an earlier declaration}\td{\code{\verb~|s3-wc-warm-term-reused-bad~}, \code{\verb~|s3-wc-warm-pair-reused-bad~}, \code{\verb~|s3-wc-warm-term-reused-reset-bad~}}\td{reject}\td{reject}\td{none: reject; \code{\verb~|warm~}, step 1, default: \strong{accept}}}
+\tr{\td{}\td{wrong REJECT}\td{\code{\verb~|warm~}: the full-CORE memo of an earlier declaration}\td{\code{\verb~|s3-wc-proj-two-decls-ok~}: \code{\verb~|S.a : a = 5~}, then \code{\verb~|S.ok : a = b~}}\td{accept}\td{accept}\td{none: accept; \code{\verb~|warm~}, step 1, default: \strong{reject} (repaired by the strict re-check)}}
+\tr{\td{\strong{S3-F4}}\td{T}\td{\code{\verb~|lazyeval~} alone and the default set without the case trees}\td{\code{\verb~|s3-wc-inner-caseson-lazy-bad~}: \code{\verb~|W0' = use (gc 0 intro = 5) (Eq.refl 5)~}, \code{\verb~|gc n x := Nat.casesOn n (f x).1 (fun _ => 0)~}}\td{reject}\td{reject}\td{none, step 1, default: reject; \code{\verb~|lazyeval~}, \code{\verb~|default,-code,-casetrees,-lazycases~}: \strong{accept}}}
+\tr{\td{\strong{S3-F5}}\td{T}\td{\code{\verb~|pchk~} alone, and through \code{\verb~|warm~} in the default set}\td{\code{\verb~|s3-pchk-def-reused-bad~} (\code{\verb~|def S.a : True := W~}, then \code{\verb~|def S.bad := And.intro W0 W~}), \code{\verb~|-reset-bad~} (an eager unit between: the session is reset, the bit stays), \code{\verb~|s3-pchk-type-reused-bad~} (the bit is set by an axiom's type), \code{\verb~|s3-pchk-history-pass-bad~}}\td{reject}\td{reject}\td{none: reject; \code{\verb~|pchk~}, step 1, default, \code{\verb~|default,-pchk~}: \strong{accept}}}
+\tr{\td{\strong{S3-F6}}\td{T}\td{\code{\verb~|k2~}, default thresholds}\td{\code{\verb~|s3-k2-krule-subst-hot-bad~}}\td{reject}\td{reject}\td{none, default: reject; \code{\verb~|default,k2~}, all + \code{\verb~|k2~}: \strong{accept}}}
+\tr{\td{}\td{T}\td{\code{\verb~|k2~}, test thresholds (\code{\verb~|k2Hot=1~}, \code{\verb~|k2Share=0~})}\td{\code{\verb~|s3-k2-krule-subst-bad~}; and the memo class: \code{\verb~|s3-wc-inner-natfold-bad~}, \code{\verb~|-major-bad~}, \code{\verb~|-select-bad~} (accepted by \code{\verb~|k2~} alone, rejected by v0)}\td{reject}\td{reject}\td{\code{\verb~|k2~}, \code{\verb~|k2,directrules~}, \code{\verb~|default,k2~}: \strong{accept}}}
+\tr{\td{}\td{wrong REJECT}\td{\code{\verb~|k2~} alone: WHNF answers through the rule, lazy delta does not}\td{\code{\verb~|s3-k2-krule-subst-hot-ok~}}\td{accept}\td{accept}\td{\code{\verb~|k2~}, \code{\verb~|k2,directrules~}: \strong{reject} (repaired)}}
+\tr{\td{\strong{S3-F7}}\td{no wrong verdict (a decline)}\td{\code{\verb~|code~} (default set, both jars): \code{\verb~|Code.raw~} faults (\code{\verb~|E_INTERNAL~}) when a closure built in a compiled body captures a variable that a let or a beta redex binds to a numeral below 2^31}\td{\code{\verb~|s3-code-capture-let-literal-ok~}, \code{\verb~|-beta-literal-ok~}, \code{\verb~|-let-literal-casesOn-ok~}, \code{\verb~|-let-literal-succ-arm-ok~}; found by the random programs (\code{\verb~|s3-r2-005/006/010-ok~}, \code{\verb~|s3-r3-001-ok~})}\td{accept}\td{accept}\td{none: accept; \code{\verb~|code~}, default, candidate: the primary machine DECLINES, the reference engine decides (exit 0)}}
+}
+
+\p{Kind and certificates. S3-F1 .. F5: every wrongly accepted declaration has the type \code{\verb~|True /\ True~} (or \code{\verb~|True~}) and is built from the two sub-proofs \code{\verb~|W0~} and \code{\verb~|W~}; the certificate is the twin of each row - the same declaration with the arguments in the other order - which the official checker accepts (\code{\verb~|*-ok~}), and \code{\verb~|s3-wc-proj-alone-ok~}. S3-F6: \code{\verb~|s3-k2-krule-subst-certificate-ok~} (official accept): \code{\verb~|Nat.add (c 0) 0 = 7~} with the step written out (\code{\verb~|S.lem : forall b (e : t 0 = b), Eq.rec 7 e = 7~} by \code{\verb~|Eq.rec~} on \code{\verb~|e~}). Why they cannot be kind F by this mechanism: a memo that answers T was written by a T of the complete procedure, and an official T is a valid conversion; the machine re-uses a valid conversion where the official kernel would have recomputed and failed.}
+
+\p{Causes, one paragraph each.}
+
+\p{\strong{S3-F1.} \code{\verb~|Conv.pairHit~} answers POS for the value pair \code{\verb~|(a, b)~}. Officially the third argument compares a new term pair (\code{\verb~|a~} against a beta redex whose value is \code{\verb~|b~}), \code{\verb~|m_success~} has no entry, the cheap \code{\verb~|whnf_core(a)~} is answered \code{\verb~|5~} by the cache and \code{\verb~|5~} against \code{\verb~|(f h).1~} is false. The same with two binders: officially the second lambda has a new free variable and empty caches for its terms; the machine has one \code{\verb~|FVAR(Nat, 0)~} and answers from the first scope (tabled type of \code{\verb~|W p~}, or the pair). The third form is a missing memo: when a full CORE runs through iota (the generic rule, or the direct rule) and the applied minor premise is a projection, CORE goes on inside the same call and the projection value gets no full-CORE memo; officially the recursion of \code{\verb~|whnf_core~} inserts it. Where the projection is reached through DELTA, beta or zeta, CORE is a call of its own and the memo is written (\code{\verb~|s3-wc-inner-natfold / -onesided / -major / -select / -beta / -let~}: right in every set).}
+
+\p{\strong{S3-F2} (owner R2). The reference engine, or the loader in front of it, treats \code{\verb~|a = mdata b~} as the term \code{\verb~|a = b~} and answers from its infer / success cache; the official caches see another term. The second row: officially \code{\verb~|is_eager_reduce(app_arg(e))~} looks at \code{\verb~|get_app_fn~} of the \code{\verb~|mdata~} node, which is the node, so the comparison is plain; the reference engine enters eager reduction. Both are verdicts of the DEFAULT pipeline.}
+
+\p{\strong{S3-F3.} A warm session keeps what the official kernel forgets at the end of a declaration: the CHECKED type of \code{\verb~|W~} (so \code{\verb~|S.bad~} does not check \code{\verb~|W~} again after \code{\verb~|W0~}), the POS pair of its types, and the full-CORE memo of \code{\verb~|a~} (so a later declaration's cheap query gets \code{\verb~|5~} where the official cache is empty). The FAILED mark of the same-head argument comparison is kept as well (not attacked).}
+
+\p{\strong{S3-F4.} Officially the one-sided lazy delta unfolds \code{\verb~|gc~}, \code{\verb~|Nat.casesOn~}, iota with the CHEAP \code{\verb~|whnf_core~}, stands at the stuck projection \code{\verb~|a~} and step 7 runs the full \code{\verb~|whnf_core(a)~}: entry. v0 does the same (LSTEP = DELTA + cheap CORE, then c7) and writes the memo. \code{\verb~|Conv.evalT / evalS~} take \code{\verb~|WHNF(gc 0 intro)~} at once; inside that WHNF the projection is reached through iota (the hole of S3-F1) and gets no memo. \code{\verb~|lazyeval~} therefore changes which full-CORE memos exist; "order-only" (soundness-machine 4.3) does not hold. In the other direction it can write memos the official loop never makes when that loop leaves early through \code{\verb~|m_success~} (not demonstrated).}
+
+\p{\strong{S3-F5.} \code{\verb~|Infer.inferMiss / inferKnown~}: a PCHK hit infers the term in ONLY mode. Officially the term is checked again in every declaration, in that declaration's cache state, and \code{\verb~|W~} fails after \code{\verb~|W0~}; the fourth row sets the bit for a term that passed only because its pair was in \code{\verb~|m_success~}. Theorem VALUES are not affected (they are overlay terms and have no bit); definition values and types are. Not a finding: unsafe / partial constants - the loader drops such declarations and a safe user is rejected as \code{\verb~|UNKNOWN_CONSTANT~} before any engine (\code{\verb~|s3-pchk-unsafe-const-bad~}, \code{\verb~|-partial-const-bad~}, \code{\verb~|-unsafe-in-type-bad~}: official reject, pipeline reject).}
+
+\p{\strong{S3-F6.} Section 7.}
+}
+
+\subtree{
+\title{4. The switches one by one}
+
+\p{For each: what the code does, the fact it assumes, the E1 question (where can a stand-in, a cached answer, a skipped comparison, another order decide a verdict), the rows, the result. "No row differs" refers to the matrix \code{\verb~|work/s3/out/matrix.tsv~} (318 exports; the later rows were judged under the same sets in \code{\verb~|matrix3.tsv~} and on the candidate jar).}
+
+\subtree{
+\title{4.1 \code{\verb~|same~} (\code{\verb~|Same.same~}, \code{\verb~|Conv.sameShape~}, \code{\verb~|Conv.convStart~})}
+
+\p{As coded: at the start of CONV, after identity and the pair table missed and before any forcing, for a pair of two SUSP / LAM / PI / PII / PROJ values or two NEU values with the same ACTIVE head that is not a regular definition and the same number of arguments, a bounded walk (256 / 96 nodes, depth 40) compares the two values structurally: records by kind and parts, closures by their terms under their frames (a variable is replaced by its slot, constants and sorts by row and level under \code{\verb~|ls~}, binder variables by index, far frames through the REST chain). T adds a POS pair; F means "not seen" and the complete procedure runs.}
+
+\p{Assumes: two values with the same read-back are convertible for the official procedure at this point. That is the assumption of v0's identity test (\code{\verb~|a == b~}), extended to closures that are two records. A slot holds either a suspension of the argument TERM (compared as a term) or the value of an inert argument, so the walk sees the official instantiated terms up to beta / zeta / projection-of-constructor / literal canonicalisation, and the official procedure is reflexive up to these (whnf_core at the head, argument by argument below).}
+
+\p{E1 question: (a) a T where the official terms differ and the official comparison fails - not constructible by my analysis (no type is read, no two different sub-terms are ever equated) and not found; (b) a T that skips official work with side effects on the cache (the official comparison of two syntactically different terms may run a full \code{\verb~|whnf_core~}): the class of S3-F1, not \code{\verb~|same~}-specific - I could not build a row where \code{\verb~|same~} skips it and v0 does not.}
+
+\p{Rows (\code{\verb~|s3-same-*~}, 16): closures equal up to their frames (accept), frames that differ (\code{\verb~|3~} against \code{\verb~|4~}; \code{\verb~|intro~} against \code{\verb~|h~} under an abbrev head: reject, with the accepting twin), binder indices (\code{\verb~|fun x y => x~} against \code{\verb~|fun x y => y~}), domains (\code{\verb~|Nat -> Nat~} against \code{\verb~|Bool -> Nat~} as Pi closures; the twin through a beta redex), projection indices, levels of constants inside closures, one closure term under two level substitutions (directly and as an argument), far frames (two closures under 70 binders reading the outermost / the second outermost variable). All have the official verdict under \code{\verb~|same~} alone and in the default set; no row of the matrix differs between \code{\verb~|none~} and \code{\verb~|same~}, or between \code{\verb~|default~} and \code{\verb~|default,-same~}.}
+}
+
+\subtree{
+\title{4.2 \code{\verb~|pchk~} (\code{\verb~|Infer.inferMiss~}, \code{\verb~|pchkKnown~}, \code{\verb~|pchkSet~}, \code{\verb~|inferKnown~}, \code{\verb~|storeChecked~})}
+
+\p{As coded: a term of the export region that is closed and has no level parameter gets the store's CHECKED bit when a CHECKED inference of it completes (not after the declaration compared under eager reduction); a later CHECKED inference of the term, in any declaration on any worker whose roots passed the summaries, runs in ONLY mode.}
+
+\p{Assumes: passing check mode is a property of the term and the environment below it. Officially it is a property of the term AND the declaration's cache state: S3-F5 (kind T). What I checked for kind F: the bit needs a closed term (row \code{\verb~|s3-pchk-open-term-bad~}: one shared open body under two binder types; caught by seeded fault 3), no level parameter (the trusted regime masks a fault there), safety (not the machine's: the loader). By reading: the bit is set only by a completed CHECKED inference (\code{\verb~|k_infer1~}), never by an ONLY one; a PCHK hit of a lambda still compares its PII with the expected type (\code{\verb~|check~} falls through to \code{\verb~|infer~} + \code{\verb~|k_check1~}).}
+}
+
+\subtree{
+\title{4.3 \code{\verb~|bodies~} (\code{\verb~|Eval.evalBody~}, \code{\verb~|evalNT~}, \code{\verb~|betaProj~})}
+
+\p{As coded: the body of a beta step / INST and the domains and results of a telescope are evaluated without a tabling record (\code{\verb~|X_NOBODY~}); a body that is a projection of one of the variables bound by this step is \code{\verb~|MKPROJ~} of that argument (\code{\verb~|X_SELECT~}). Assumes: same values. The record that is not made is the EVAL memo of a second application of the same closure to the same arguments; INFER / CHECK make their own record; the full-CORE memo sits on the value record, not on the tabling record (\code{\verb~|s3-wc-inner-select-*~}: right in every set). Rows \code{\verb~|s3-bodies-select-*~} (4: the right argument, the right field, a stuck argument). No row of the matrix differs between \code{\verb~|none~} and \code{\verb~|bodies~}.}
+}
+
+\subtree{
+\title{4.4 \code{\verb~|match~} (\code{\verb~|Infer.twMatchDom~}, \code{\verb~|tmatch~}, \code{\verb~|tmNode~}, \code{\verb~|tmApp~}, \code{\verb~|tmSame~})}
+
+\p{As coded: in telescope mode the argument's inferred type is matched against the domain PATTERN term under the arguments: a variable against the stored argument (same record through PEEK), a constant by row and EQUIVALENT levels (\code{\verb~|Levels.listsEq~}), a sort by equivalent levels, an application against a NEU argument by argument, a binder against the closure EVAL would return. T: no domain is built, no CONV. F = unknown: the complete procedure.}
+
+\p{Assumes: a type that equals the built domain up to level equivalence is convertible with it officially - true for the official procedure, which compares levels by \code{\verb~|is_equivalent~} wherever it meets them. It never equates two different sub-terms (the "congruence" of its comment is identity up to levels), so the non-transitive triple cannot enter (\code{\verb~|s3-match-proof-arg-nontransitive-*~}). The skipped comparison has no cache effect: a structurally equal pair is answered by \code{\verb~|t == s~} officially. Rows \code{\verb~|s3-match-*~} (9): dependent domains, another argument, another level in an argument, another level of the pattern's own head constant (a phantom level; this row was missing until seeded fault 5). Package S's \code{\verb~|tele-*~} (14) stand as well.}
+}
+
+\subtree{
+\title{4.5 \code{\verb~|joint~} (\code{\verb~|Decl.joint~}, \code{\verb~|jointBinder~}, \code{\verb~|jointRest~})}
+
+\p{As coded: while the declared type is a Pi and the value a lambda with the SAME domain term id, the domain is checked once, one variable is opened for both, then INFER (rest of the type), the theorem's Prop test, CHECK (rest of the value against the value of the rest of the type). Assumes: with identical domain terms the official \code{\verb~|is_def_eq_binding~} compares no domain and the bodies under one variable. Officially the type, the value and the comparison each have their own free variable; v0 has one canonical variable for the three anyway, so \code{\verb~|joint~} shares nothing v0 does not (the canonical-variable rows of S3-F1 behave identically with and without it). Rows \code{\verb~|s3-joint-*~} (6): a stuck body type, a theorem that is not a proposition, the wrong body type behind a second binder, another domain (seeded fault 6), a convertible but different domain term (no joint binder).}
+}
+
+\subtree{
+\title{4.6 \code{\verb~|lazycases~} (\code{\verb~|Rules.unfoldLazy~}, \code{\verb~|Code.rulesCasesOn~})}
+
+\p{As coded: in the unfolding step of lazy delta a head whose case tree has shape CASESON (its value is one direct \code{\verb~|I.rec~} over its own parameters with eta-expanded minors) runs the tree; every other head, every miss: DELTA. Assumes: \code{\verb~|whnf_core(unfold_definition(t))~} of such a head reduces the recursor at once, so no state of the official loop lies between. Correct for this shape (the same-head argument comparison happens in \code{\verb~|lstepBoth~} before any unfolding, whatever the hints of the definition). Note: \code{\verb~|And.casesOn~} of \code{\verb~|init-prelude~} is \code{\verb~|fun .. t intro => intro t.1 t.2~} (projections, no recursor; \code{\verb~|Prod.casesOn~}, \code{\verb~|Nat.casesOn~}, \code{\verb~|List.casesOn~}, \code{\verb~|Eq.casesOn~} are direct recursor applications): \code{\verb~|dc h = 5~} with \code{\verb~|dc x := And.casesOn x (fun _ _ => 5)~} is ACCEPTED officially (\code{\verb~|s3-ct-proof-major-axiom-ok~}; my expectation was wrong) and by every set, while package S's \code{\verb~|d~} over \code{\verb~|And.rec~} is stuck on \code{\verb~|h~}.}
+
+\p{A MATCHER tree must not run there, and the reason is stronger than the comment in \code{\verb~|Code.rulesCasesOn~} says: between the unfolding of the matcher and the reduct the official loop can stand at a REGULAR cases function and compare its arguments. Row \code{\verb~|s3-lazycases-matcher-over-regular-cases-ok~} (official accept): \code{\verb~|S.cz~} is \code{\verb~|Nat.casesOn~} under another name with regular hints, \code{\verb~|S.m3~} an abbrev matcher over it, \code{\verb~|m3 M 0 A0 A1 intro = m3 M 0 A0 A1 h~} under a function motive: both sides stand at \code{\verb~|S.cz .. intro~} / \code{\verb~|S.cz .. h~}, same head, arguments by proof irrelevance: true; the tree's reduct is \code{\verb~|5~} against a stuck recursor. Seeded fault 10 (every shape in the lazy step) is caught by it. Rows \code{\verb~|s3-lazycases-*~} (5), \code{\verb~|s3-ct-proof-major-*~} (3). No row differs between \code{\verb~|code,casetrees~} and \code{\verb~|code,casetrees,lazycases~}.}
+}
+
+\subtree{
+\title{4.7 \code{\verb~|directrules~} (\code{\verb~|Reduce.direct~}, \code{\verb~|directSlow~}, \code{\verb~|iotaDirect~}, \code{\verb~|pushHyps~})}
+
+\p{As coded: if the term of a recursor rule is \code{\verb~|fun params motive minors fields => minor_j fields (rec params motive minors field_a) ..~} (one motive, no indices; checked on the term once per recursor constant, rule and session), IOTA is ONE APPLY of the minor to fields ++ hypotheses ++ the arguments after the major; a hypothesis the minor's body does not read is not built. Assumes: the same reduct as the right-hand side applied and beta-reduced. The lambda count, the minor's position, the field order and every hypothesis (same recursor, same levels, parameters / motive / minors in order, a field as last argument) are verified; admission regenerates the rules, so a hostile rule term does not reach it. It inherits the missing full-CORE memo of the generic iota (\code{\verb~|s3-wc-inner-rec-minor-bad~}, S3-F1; the same verdict with and without the switch). Rows \code{\verb~|s3-dr-*~} (9): a function motive with an argument after the major, an unread hypothesis, two recursive fields with the second hypothesis read (and the value the first would give), a neutral minor. No row differs between \code{\verb~|none~} and \code{\verb~|directrules~}.}
+}
+
+\subtree{
+\title{4.8 \code{\verb~|lazyeval~} (\code{\verb~|Conv.lstepOnlyT / lstepOnlyS~}, \code{\verb~|evalT / evalS~})}
+
+\p{As coded: when only one side unfolds and the other is weak-head normal by flag or memo and not a projection, the unfolding side is replaced by its WHNF in one step, then the quick test. Assumes: the official loop would unfold that side step by step with the other fixed, no same-head state can occur, an intermediate term is never identical to a weak-head normal one. The verdict of the comparison itself is the same by that argument (rows \code{\verb~|s3-lazyeval-*~}, the natfold / onesided rows). What the argument misses is the SIDE EFFECT: S3-F4. Seeded fault 7 (the one WHNF also when both sides unfold) is caught by three rows.}
+}
+
+\subtree{
+\title{4.9 \code{\verb~|code~}, \code{\verb~|casetrees~} (\code{\verb~|Code~}, \code{\verb~|Elab~}, \code{\verb~|Rules.unfold~}, \code{\verb~|Code.rules~})}
+
+\p{As coded: BODY / RULE / LEAF blocks compiled from the terms at the first request; in the WHNF loop a head with a case tree (CASESON, or MATCHER with the matchers it calls inlined) runs the tree on its first lamArity arguments and applies the alternative to the rest; NONE: DELTA. Assumes: the tree computes the reduct of DELTA + rule + beta on a constructor major, no K-like or structure-like major, shape recognised by structure. Lazy delta does not use them (except 4.6).}
+
+\p{Value (kind F hunt): 29 rows \code{\verb~|s3-ct-*~} / 29 rows \code{\verb~|s3-g-*~} with a true claim and the value a slip would give - swapped minors, swapped and duplicated fields, a non-unit alternative argument, a matcher nested in an alternative of itself reading the outer field, the same variable split twice, a major that is an expression, numerals at 2^31, 2^32, 2^63, 2^64, a tree that computes a type, two nested enumerations, a list with its parameter, \code{\verb~|Nat.succ~} of a variable and offsets, a stuck major, over- and under-application, a function motive whose alternatives split again, structure eta in iota, projections and lets in leaves - and 200 random exports (batch R, three seeds: 100 files of 6 random definitions with 20 true claims each, whose values a Python evaluator computed, and 100 twins with 5 true claims and a false one; splits over \code{\verb~|Nat.casesOn~}, \code{\verb~|Bool.casesOn~}, an abbrev matcher, \code{\verb~|Nat.rec~}, projections, lets, beta redexes, calls; the third seed puts every claim behind the Nat fold so that the case tree runs in the WHNF loop under every set; the official checker accepts the 100 and rejects the 100, which validates the evaluator). Every row has the official verdict under \code{\verb~|code~}, \code{\verb~|code,casetrees~}, \code{\verb~|code,casetrees,lazycases~} and the default set, except that four of the random files are DECLINED by \code{\verb~|code~} (S3-F7).}
+
+\p{Cache: a tree's leaf and a compiled body hand their result back to the loop, so a projection at the head is reduced by a CORE of its own and gets its memo - which is why the two v0 wrong accepts \code{\verb~|s3-wc-inner-caseson-bad~} / \code{\verb~|-matcher-bad~} are rejected by the primary machine with \code{\verb~|casetrees~}. I found no row where the blocks lose a memo that v0 writes; I cannot exclude one (a block that reduces a projection inside itself would), and the general statement of section 5 applies: which memos exist is part of the verdict.}
+}
+
+\subtree{
+\title{4.10 \code{\verb~|warm~} (not on my list)}
+
+\p{S3-F3. Package S reviewed \code{\verb~|warm~} against the eager mode (S-F4) and judged the plain mode a function of the pair ("everything a session keeps is declaration-independent"); section 2 shows it is not.}
+}
+}
+
+\subtree{
+\title{5. The cache-history class: what an exact treatment would need (input for \src{docs/design/review/official-divergence.md})}
+
+\p{The official verdict is a function of the pair AND of the set Q of terms whose full \code{\verb~|whnf_core~} ran in this declaration (it matters for projection terms whose structure is not a constructor application under cheap reduction), plus the frozen answers \code{\verb~|m_success~} / \code{\verb~|m_infer_type[0]~} for identical terms.}
+
+\table{
+\tr{\th{Machine table}\th{Official counterpart}\th{Larger than it (wrong reject; wrong accept through a frozen T)}\th{Smaller (wrong accept)}}
+\tr{\td{full-CORE memo on a PROJ value}\td{Q}\td{value-keyed (beta / zeta / mdata); canonical variables (\code{\verb~|s3-wc-canon-fvar-full-first-ok~}); \code{\verb~|warm~} (\code{\verb~|s3-wc-proj-two-decls-ok~}); \code{\verb~|lazyeval~} when the official loop leaves early}\td{iota inside one CORE (\code{\verb~|-inner-rec-minor~}, \code{\verb~|-caseson~}, \code{\verb~|-matcher~}); \code{\verb~|lazyeval~} (S3-F4); \code{\verb~|k2~} rules (test thresholds)}}
+\tr{\td{pair table POS}\td{\code{\verb~|m_success~}}\td{value-keyed (\code{\verb~|-pos-beta~}, \code{\verb~|-pos-mdata~}); canonical variables (\code{\verb~|-canon-fvar-bad~}); \code{\verb~|warm~} (\code{\verb~|-warm-pair-reused~})}\td{-}}
+\tr{\td{tabled CHECKED type, PCHK bit}\td{\code{\verb~|m_infer_type[0]~}}\td{canonical variables; \code{\verb~|warm~} (\code{\verb~|-warm-term-reused~}); \code{\verb~|pchk~} (S3-F5)}\td{\code{\verb~|gated~} (an untabled node is checked again; not attacked)}}
+\tr{\td{NEG, FAILED}\td{- / \code{\verb~|m_failure~}}\td{harmless inside a declaration (an F stays F); \code{\verb~|warm~}: wrong reject only}\td{-}}
+}
+
+\p{Exact options, cheapest first (none built, no cost measured - I was asked for no timings):}
+
+\ol{
+\li{\strong{Two-answer rule (a decline, no mirror).} A cheap CORE of a projection whose structure is not a constructor under cheap reduction has two candidate answers, the stuck projection and its full CORE. Where a comparison used one of them, decide it for the other as well; if the two verdicts differ, DECLINE the unit (the reference engine decides). Concretely: (a) a projection pair decided T through the struct comparison is also compared through the fields; (b) a comparison that ended F after a cheap query was answered from a full memo is repeated with the stuck answer. Honest terms agree, so nothing real is declined; the cost is the field comparison after every successful struct comparison of \code{\verb~|p.i =?= q.i~} - the unfolding \code{\verb~|lazy_delta_proj_reduction~} exists to avoid. Frozen T answers (POS, CHECKED, PCHK) need the same question asked when they are WRITTEN: was any struct-route T used below this answer; if so the answer is marked and a marked answer is not re-used across a change of Q.}
+\li{\strong{Mirror Q where it is cheap.} Write the full-CORE memo on EVERY projection value a full CORE reduces at its head, also inside its own loop after iota (closes the "smaller" column for v0, \code{\verb~|directrules~}, \code{\verb~|lazyeval~}); no cross-declaration use of POS / CHECKED / full-CORE (\code{\verb~|warm~} keeps only what is not an answer: values, WHNF memos of non-projections) and no PCHK. This still leaves value keys and canonical variables (the "larger" column inside one declaration): not exact.}
+\li{\strong{The official caches themselves}: term-keyed, per declaration, a fresh variable per binder instance - that is the reference engine.}
+}
+}
+
+\subtree{
+\title{6. Seeded faults}
+
+\p{\code{\verb~|work/s3/seeded~} = the published sources + 11 faults behind \code{\verb~|-Ds3.bug=N~} (\code{\verb~|S3.java~}; the patched lines are marked \code{\verb~|S3.BUG~}), distribution \code{\verb~|work/s3/dist-seeded~}. For each fault: every export under the switch alone and under the default set, with the fault and with \code{\verb~|-Ds3.bug=0~}; CAUGHT = the primary machine's verdict changes to one that is not the official one (\code{\verb~|work/s3/seeded.py~}, outputs \code{\verb~|work/s3/out/seeded.out~}, \code{\verb~|seeded2.out~}).}
+
+\table{
+\tr{\th{N}\th{Switch}\th{The fault}\th{Caught by (verdict without -> with the fault)}}
+\tr{\td{1}\td{\code{\verb~|same~}}\td{binder domains of two closures are not compared}\td{\code{\verb~|s3-same-pi-domain-bad~}: R -> A (wrong accept), \code{\verb~|same~} alone and default}}
+\tr{\td{2}\td{\code{\verb~|same~}}\td{the level substitutions of two closures of ONE term are not compared}\td{first run: NOT CAUGHT (\code{\verb~|s3-same-ls-differs-bad~} is decided by the binder case of the quick test); \code{\verb~|s3-same-ls-in-arg-bad~} (added): R -> A}}
+\tr{\td{3}\td{\code{\verb~|pchk~}}\td{the bit is set and read for open terms too}\td{\code{\verb~|s3-pchk-open-term-bad~}: R -> A}}
+\tr{\td{4}\td{\code{\verb~|bodies~}}\td{SELECT takes the projection of the wrong argument}\td{\code{\verb~|s3-bodies-select-bad~}: R -> A; \code{\verb~|s3-bodies-select-ok~}: A -> R}}
+\tr{\td{5}\td{\code{\verb~|match~}}\td{a constant of the pattern matches whatever its levels}\td{first run: NOT CAUGHT (\code{\verb~|s3-match-const-level-only-bad~}: the levels sit in the arguments, which are compared by record identity); \code{\verb~|s3-match-phantom-level-bad~} (added): R -> A}}
+\tr{\td{6}\td{\code{\verb~|joint~}}\td{every leading Pi / lambda pair is a joint binder}\td{\code{\verb~|s3-joint-other-domain-bad~}: R -> A}}
+\tr{\td{7}\td{\code{\verb~|lazyeval~}}\td{the one WHNF also when both sides unfold and the hints choose one}\td{\code{\verb~|s3-lazyeval-step-samehead-ok~}, \code{\verb~|s3-lazycases-intermediate-samehead-ok~}, \code{\verb~|s3-lazycases-caseson-step-ok~}: A -> R (wrong reject)}}
+\tr{\td{8}\td{\code{\verb~|directrules~}}\td{every induction hypothesis is built from the first field}\td{\code{\verb~|s3-dr-two-hypotheses-bad~}: R -> A; \code{\verb~|-ok~}: A -> R}}
+\tr{\td{9}\td{\code{\verb~|casetrees~}}\td{the arguments after the arity of a case tree are dropped}\td{\code{\verb~|s3-ct-over-application-ok~}: A -> R (default set; with \code{\verb~|code,casetrees~} alone the row is not affected)}}
+\tr{\td{10}\td{\code{\verb~|lazycases~}}\td{every case tree runs in the lazy step, not only shape CASESON}\td{first run: NOT CAUGHT; \code{\verb~|s3-lazycases-matcher-over-regular-cases-ok~} (added): A -> R}}
+\tr{\td{11}\td{\code{\verb~|code~}}\td{MKPROJ of a block reads the neighbouring field}\td{20 cells of 10 rows, e.g. \code{\verb~|s3-bodies-select-stuck-bad~}: R -> A, \code{\verb~|s3-bodies-select-ok~}: A -> R}}
+}
+
+\p{A suite that cannot catch a seeded fault has not tested the switch: three of the eleven were NOT caught by the suite as it stood at the first run (2, 5, 10). Each pointed at a path I had not exercised - \code{\verb~|same~} is not reached for two closures that the binder case of the quick test compares first; a level difference in an ARGUMENT of a pattern is found by record identity, only a level of the pattern's own constants reaches \code{\verb~|Levels.listsEq~}; a matcher tree in the lazy step differs from the official loop only if a regular cases function lies between - and the rows that catch them were added (\code{\verb~|s3-same-ls-in-arg-*~}, \code{\verb~|s3-match-phantom-level-*~}, \code{\verb~|s3-lazycases-matcher-over-regular-cases-*~}).}
+}
+
+\subtree{
+\title{7. \code{\verb~|k2~}: recommendation}
+
+\p{\strong{Keep it off (decided by the orchestrator, 21:58Z). As built it cannot be made exact by tuning.}}
+
+\p{What it does: a definition without a K1 tree that the WHNF loop unfolds 32 times in a session, inside a declaration that ran 16,384 ticks, gets a rule: \code{\verb~|WHNF(c x̄)~} is run once with \code{\verb~|x̄~} free variables of a reserved type, the result becomes a SPLIT (stuck on a variable as a non-K major or a projected struct) or a LEAF (a template of the normal form), and a firing substitutes the actual arguments.}
+
+\p{The argument in \code{\verb~|Rules~} / NOTES-M3 D17 is "the leaf is a reduct of \code{\verb~|c x̄~} by official steps, and reduction commutes with substitution". The second half is false for every step that is decided by a COMPARISON, because the official \code{\verb~|is_def_eq~} is not stable under substitution (the pair \code{\verb~|t x~} / \code{\verb~|s x~} of section 1). \strong{S3-F6}: for the axiom \code{\verb~|E : forall x, t x = s x~} and \code{\verb~|c x := Eq.rec (motive := fun _ _ => Nat) 7 (E x)~} the K rule fires in the derivation (INFER answers the type of \code{\verb~|E x~}, CONV compares \code{\verb~|t x = s x~} with \code{\verb~|t x = t x~} under the variable: true), the leaf is the constant \code{\verb~|7~}, and the rule answers \code{\verb~|c 0 = 7~}; officially the K comparison fails for \code{\verb~|0~} and \code{\verb~|c 0~} is stuck. \code{\verb~|s3-k2-krule-subst-hot-bad~} (ONE theorem: 200 walks of 400 recursor steps for the ticks, 40 comparisons \code{\verb~|Nat.add (c k) 0 = c k~} that make \code{\verb~|c~} hot without being decided by its value, then \code{\verb~|Nat.add (c 0) 0 = 7~}): official reject, \code{\verb~|default,k2~} ACCEPT with the default thresholds. The same family gives a wrong REJECT of \code{\verb~|k2~} alone (\code{\verb~|-hot-ok~}: WHNF answers \code{\verb~|7~} through the rule, lazy delta uses no rule and finds \code{\verb~|c 0~} stuck - the machine disagrees with itself). With the test thresholds the rules also skip the full-CORE memos of the generic walk (\code{\verb~|s3-wc-inner-natfold-bad~}, \code{\verb~|-major-bad~}, \code{\verb~|-select-bad~}: accepted by \code{\verb~|k2~}, rejected by v0).}
+
+\p{What a next attempt needs, in this order:}
+
+\ol{
+\li{\strong{No step of a derivation may be decided by a comparison or a type-directed test that mentions a derivation variable.} Today only K-like MAJORS are excluded from SPLIT; K itself fires inside the derivation. The node must be abandoned (or made a leaf at the term before that step) whenever the derivation's WHNF calls CONV, the proof test, unit-like, eta or structure eta with a variable in an operand. This is what RECONCILIATION section 2 asked for ("a dedicated value kind; any type-directed judgment abandons"): the free variable of a reserved type answers exactly the queries that should have stopped the derivation.}
+\li{With 1, what is left is beta, delta, iota on constructor forms, projection of a constructor and literal folds on closed operands: these do commute with substitution. The leaf is then a reduct; the official WHNF of the instance is reached from it by the generic loop.}
+\li{A rule must not change WHICH answers lazy delta and WHNF give for one value (the wrong reject above), and it must leave the full-CORE memos the generic walk leaves, or the policy of section 5 must cover it.}
+\li{The rows of \code{\verb~|batchK.py~} as strict rows, and a new adversarial pass, before any gate is read. Nothing in this review says the gains (reachability -4.7 \% CPU, \code{\verb~|perf/magma-list-deep-n36~}) cannot be had with 1 - 3.}
+}
+}
+
+\subtree{
+\title{8. Rows for the hostile suite (reclassified: official verdict AND kind)}
+
+\p{\code{\verb~|work/s3/manifest.tsv~} (\code{\verb~|mkmanifest.py~}): 423 rows (204 official accept, 219 official reject; 30 carry a mark), five columns: name, OFFICIAL verdict, kind, marks, what the export attacks.}
+
+\ul{
+\li{\strong{kind \code{\verb~|T~}} (31 rows, all \code{\verb~|reject~}): the declaration is derivable AS WRITTEN in the declarative theory - every comparison its proof term needs is a valid conversion (proof irrelevance, congruence, delta / iota) - and the official checker rejects it through cache order or non-transitivity. Expected from the machine: the official verdict OR accept. These are the rows of S3-F1 / F3 / F4 / F5 / F6 and the claims of the shape \code{\verb~|d h = 5~} over the non-transitive triple (\code{\verb~|s3-joint-same-domain-bad~}, \code{\verb~|s3-lazyeval-step-samehead-bad~}, \code{\verb~|s3-lazycases-*-samehead-bad~}, \code{\verb~|s3-lazycases-matcher-over-regular-cases-bad~}, \code{\verb~|s3-match-proof-arg-nontransitive-bad~}, \code{\verb~|s3-same-closure-proof-slot-bad~}, \code{\verb~|s3-mdata-eager-plainform-bad~}). Note the definition: a row whose STATEMENT is derivable but whose proof term is ill-typed (\code{\verb~|s3-joint-second-binder-domain-bad~}) is \code{\verb~|strict~}.}
+\li{\strong{kind \code{\verb~|strict~}}: every other row. A \code{\verb~|reject~} row of this kind accepted by the machine would be kind F; an \code{\verb~|accept~} row must be accepted by the pipeline (the reference engine repairs a rejection or a decline of the machine).}
+\li{marks: what the matrices showed - \code{\verb~|cache~} (S3-F1: differs in v0), \code{\verb~|warm~} (S3-F3), \code{\verb~|pchk~} (S3-F5), \code{\verb~|lazyeval~} (S3-F4), \code{\verb~|k2~} (S3-F6), \code{\verb~|ref~} (S3-F2: the reference engine differs), \code{\verb~|code-decline~} (S3-F7), \code{\verb~|eager-decline~}.}
+}
+
+\p{To make them rows of \code{\verb~|rlvm-machine/src/test/resources/s/~}: gzip the exports, append the manifest lines (the kind column is new there). \code{\verb~|s3-wc-pos-mdata-bad~} and \code{\verb~|s3-mdata-eager-hidden-ok~} are R2's (the strict mode). The 200 random exports (\code{\verb~|s3-r1-*~}, \code{\verb~|s3-r2-*~}, \code{\verb~|s3-r3-*~}, 20 - 65 KB each) are regenerated by \code{\verb~|batchR.py 40 1~}, \code{\verb~|40 2~}, \code{\verb~|20 3~}; keeping the four that hit S3-F7 and a handful of the others is enough.}
+}
+
+\subtree{
+\title{9. Not established}
+
+\ul{
+\li{\strong{Costs.} No timing of anything (the exact options of section 5, what \code{\verb~|pchk~} / \code{\verb~|lazyeval~} are worth without their kind T accepts).}
+\li{\strong{E1's jar.} Sections 0 - 8 ran on machine jar \code{\verb~|15cb3777e598~}. On the candidate jar \code{\verb~|df36be3c8cc9~} (typed bindings, \code{\verb~|eager~}) every row was judged again under none / default / default,eager and the candidate (section 10): the verdicts of none and default are the same on every row; the seeded faults 1 - 11 were not repeated on it.}
+\li{\strong{Parallel workers, native image.} One worker, JVM launcher. PCHK across workers and the publication of code blocks under contention were not attacked.}
+\li{\strong{More history sources.} I claim (section 2) that \code{\verb~|m_whnf_core~} read by cheap calls is the only plain-mode source and the other caches only freeze answers; that is by reading the official source, with three confirming exports, not a proof. The FAILED mark across declarations and \code{\verb~|gated~} (an untabled node is re-checked where the official infer cache answers) follow from the analysis and have no row.}
+\li{\strong{\code{\verb~|same~} as a skipped comparison} (4.1 (b)) and \strong{a block that loses a memo} (4.9): looked for, not found, not excluded.}
+\li{\strong{Kind F.} Not found; the hunt covered value routes (case trees, bodies, rules, SELECT), the syntactic shortcuts (\code{\verb~|same~}, MATCH, joint) and PCHK's side conditions. Not covered: strings, quotients, mutual and nested inductive types in trees, \code{\verb~|Acc.rec~}, structure eta of a scrutinee beyond \code{\verb~|Prod~}, K-like recursors in trees (package S's \code{\verb~|krule-*~} / \code{\verb~|k-eq-rec-*~} stand), admission (forged recursor / constructor metadata).}
+\li{Package S's 329 and E1's 67 rows were not re-run by me; INT6's and E1's matrices stand for them.}
+}
+}
+
+\subtree{
+\title{10. Pass 2: the candidate default (default set + \code{\verb~|eager~} + \code{\verb~|skipargs~} + \code{\verb~|congruence~})}
+
+\p{Asked for after the owner's decision (note 13): find a FALSE accept (kind F) in the combination, and completeness failures that the pipeline does not repair. Machine jar \code{\verb~|df36be3c8cc9~} (\code{\verb~|work/s3/dist-cand~}; my copy \code{\verb~|work/s3/tree2~} packages to the same hash).}
+
+\p{\strong{The configuration.} \code{\verb~|-X engine=machine -X machine.switches=default,eager,facts,probes -Drlvm.machine.m4=congruence,skipargs~}. The two options act only with their switches: \code{\verb~|Conv.congruence~} needs \code{\verb~|probes~}, \code{\verb~|Conv.skipArgs~} needs \code{\verb~|facts~}; \code{\verb~|default,eager~} with the two options alone is \code{\verb~|default,eager~} (this is what a named-switch version has to reproduce). "Candidate" below is the full line.}
+
+\subtree{
+\title{10.1 Result}
+
+\table{
+\tr{\th{Rows}\th{Judged under}\th{Official reject, candidate ACCEPTS}\th{of them \code{\verb~|strict~} (kind F)}\th{Official accept, pipeline does not accept}}
+\tr{\td{my 423 rows (\code{\verb~|work/s3/manifest.tsv~})}\td{the candidate, and the candidate without \code{\verb~|eager~} (\code{\verb~|cand-full.tsv~}, \code{\verb~|cand-full3.tsv~})}\td{15 (14 without \code{\verb~|eager~}), all kind \code{\verb~|T~}}\td{\strong{0}}\td{0 (machine: 8 declines S3-F7, 3 wrong rejects of S3-F1 / F3, all repaired)}}
+\tr{\td{the same}\td{none, default, default,eager on the candidate jar (\code{\verb~|cand-plain*.tsv~})}\td{11 under default,eager, all kind \code{\verb~|T~}}\td{\strong{0}}\td{1: \code{\verb~|s3-mdata-eager-hidden-ok~} under default,eager (10.4)}}
+\tr{\td{package S's and E1's suite, 419 rows (\code{\verb~|rlvm-machine/src/test/resources/s/~}, unpacked to \code{\verb~|work/s3/out/sx/~}) and S2's 145 (\code{\verb~|work/s2/attacks~}, \code{\verb~|attacks2~})}\td{the candidate (\code{\verb~|cand-sx.tsv~}; official verdicts re-taken in Docker)}\td{40}\td{\strong{0}: all 40 belong to the families already classified kind T - the statement \code{\verb~|X = Y p~} and its K-rule forms under eager reduction (S-F4 / S-F5 and E1's \code{\verb~|e1-*-eager-*~} rows; 20), the congruence / skip rows of S-F1 / S-F2 (\code{\verb~|probe-b1-*~}, \code{\verb~|probe-b12-*~}, \code{\verb~|facts-*-noncongruent-*~}; 12), E1-F4 / E1-F7 (\code{\verb~|e1-lam-fvar-type-in-conv-*~}, \code{\verb~|e1-sib-*~}; 7), S2's \code{\verb~|acc-rec-intro-vs-axiom~} (section 4 of its review)}\td{0}}
+}
+
+\p{The kind T rows the candidate accepts in my suite: the cache / warm / pchk rows of section 3, and - new with the shortcuts - \code{\verb~|s3-k2-krule-subst-bad~} / \code{\verb~|-hot-bad~} (WITHOUT \code{\verb~|k2~}: congruence lets the K comparison succeed; the certificate of S3-F6 applies), \code{\verb~|s3-same-closure-proof-slot-bad~}, \code{\verb~|s3-mdata-eager-plainform-bad~}.}
+}
+
+\subtree{
+\title{10.2 What was attacked (rows of \code{\verb~|batchN.py~}, \code{\verb~|batchP.py~}; every \code{\verb~|-bad~} row is \code{\verb~|strict~}: an accept would be kind F)}
+
+\ul{
+\li{\strong{\code{\verb~|eager~}: deferred comparisons.} The comparison of an \code{\verb~|eagerReduce _ _~} argument is recorded with its open binders (\code{\verb~|Machine.erSite~}), taken as T, and run at \code{\verb~|Decl.accepted~} (\code{\verb~|erDischarge~}) after the binders are re-opened (\code{\verb~|erOpen~} checks that \code{\verb~|Scope.open~} returns the recorded variable, else the unit is not accepted). Rows: a site under one and two binders whose comparison variable would be one of them if the binders stayed closed (\code{\verb~|s3-eager-scope-capture-bad~}, \code{\verb~|-second-binder-bad~}), the same inside a lambda ARGUMENT (binders opened by the expected-type rule: \code{\verb~|-arg-bad~}), two recorded sites of which the first is wrong (\code{\verb~|s3-eager-two-recorded-sites-first-wrong-bad~}; in \code{\verb~|-two-sites-one-wrong-bad~} the right site is syntactically equal to its domain and is not recorded), a wrong site that shares its argument term with a right one of an earlier definition (\code{\verb~|-site-in-def-reused-bad~}: pchk, warm), a wrong site at a proof position that \code{\verb~|skipargs~} skips (\code{\verb~|-proof-position-bad~}). By reading: \code{\verb~|erSeen~} is set at the first site, so no PCHK bit is ever set for a term that contains a site (the term completes after it); a declaration whose discharge fails, declines or faults is not an ACCEPT and its session is reset; the sites of a declaration cannot justify each other (a site's two types can contain another site's application only as a subterm; nesting is acyclic), so "taken as T" is used only by declarations whose every site was then checked.}
+\li{\strong{\code{\verb~|skipargs~}: the masks.} A position is skipped if it is a proof position (B3: the domain's sort is manifestly 0 at the levels of the head) or the definition does not read it (B4, same definition on both sides). Rows where a mask that is slightly too large equates two numerals or two different stuck terms: a data argument after a proof argument (\code{\verb~|s3-short-data-under-proof-head-bad~}, and \code{\verb~|-data-after-proof-stuck-bad~} with terms no quick refutation decides), a position that is a proof position only at level 0 (\code{\verb~|-sort-poly-position-*~}, \code{\verb~|-imax-position-bad~}, \code{\verb~|-prop-mask-family-*~}), an argument of type Prop next to its proof (\code{\verb~|-prop-arg-is-data-bad~}), a definition head with a proof parameter (\code{\verb~|-prop-mask-def-head-bad~}), and nine shapes of "does the value read this argument" (\code{\verb~|s3-short-unread-*~}: one lambda applied to two arguments, no lambda at all, first / second only, a shadowing binder, through a let, under an inner binder, only in a type and a proof). Ill-typed proof arguments must be refused by inference whatever is skipped later (\code{\verb~|-wrong-proof-arg-bad~}, \code{\verb~|-proof-of-other-prop-bad~}).}
+\li{\strong{\code{\verb~|congruence~}.} Two propositions are not proofs (\code{\verb~|s3-short-props-not-proofs-bad~}, \code{\verb~|-prop-valued-functions-bad~}, \code{\verb~|-bool-data-bad~}); closures of one lambda term whose frames differ in a data slot, as a suspended redex and as a value after an unfolding (\code{\verb~|s3-short-closure-frames-differ-bad~}, \code{\verb~|-closure-frames-in-def-bad~}; twins with a proof slot are accepted officially).}
+\li{\strong{Inference under the shortcuts} (with skipped proof positions the official double check - the type comparison of two proofs - is gone, soundness rests on inference): the rows of pass 1 for \code{\verb~|match~}, \code{\verb~|joint~}, \code{\verb~|pchk~} (open terms), levels (\code{\verb~|s3-same-ls-*~}, \code{\verb~|s3-match-*level*~}), projections and literals in the random programs, all under the candidate; E1's rows for the typed bindings and the let rule and package S's \code{\verb~|chk-*~}, \code{\verb~|lvl-*~}, \code{\verb~|proj-*~}, \code{\verb~|pirr-*~} rows are in the 419.}
+\li{\strong{Admission} (not the machine; asked for): an inductive proposition with two constructors and a recursor into \code{\verb~|Sort u~}, one with a \code{\verb~|Nat~} field and a recursor into \code{\verb~|Sort u~}, a two-constructor type whose recursor is marked K, a rule that returns the other minor premise, a non-positive occurrence, a field one universe too high (\code{\verb~|s3-adm-*-bad~}): official reject, pipeline reject, before any engine.}
+}
+}
+
+\subtree{
+\title{10.3 Seeded faults on the candidate (\code{\verb~|work/s3/seeded2~}, \code{\verb~|dist-seeded2~}, \code{\verb~|-Ds3.bug=N~})}
+
+\table{
+\tr{\th{N}\th{The fault}\th{Caught by}}
+\tr{\td{12}\td{\code{\verb~|eager~}: a deferred comparison runs with its binders closed}\td{\code{\verb~|s3-eager-scope-capture-bad~}, \code{\verb~|-arg-bad~}: R -> A (wrong accept) under default,eager and the candidate. The capture is real: \code{\verb~|erOpen~} is what stands between the design and a kind F}}
+\tr{\td{13}\td{\code{\verb~|eager~}: only the last deferred comparison of a declaration is run}\td{first run: NOT CAUGHT (my two-site row had only one RECORDED site); \code{\verb~|s3-eager-two-recorded-sites-first-wrong-bad~} (added): R -> A}}
+\tr{\td{14}\td{\code{\verb~|skipargs~}: the position after a skipped proof position is skipped as well}\td{first run: NOT CAUGHT (numerals are refuted before the mask is asked); \code{\verb~|s3-short-data-after-proof-stuck-bad~} (added): R -> A}}
+\tr{\td{15}\td{\code{\verb~|congruence~}: two closures of one term are equal whatever their frames hold}\td{first run: NOT CAUGHT (two suspended redexes are forced, the closure rule sees only values); \code{\verb~|s3-short-closure-frames-in-def-bad~} (added): R -> A}}
+}
+}
+
+\subtree{
+\title{10.4 Completeness (official accept, the candidate does not)}
+
+\ul{
+\li{\strong{S3-F7} (section 3): \code{\verb~|code~} declines a unit whose compiled body builds a closure over a variable bound to a small numeral; the reference engine decides. No wrong verdict; a decline on a shape real code has.}
+\li{\code{\verb~|s3-mdata-eager-hidden-ok~} (adversarial): officially an \code{\verb~|mdata~} node hides \code{\verb~|eagerReduce~}, the comparison is plain and true. \code{\verb~|default,eager~} rejects (it sees through \code{\verb~|mdata~}, the eager comparison is false) and the reference engine rejects too: the pipeline exits 1 on an export the official checker accepts. The CANDIDATE accepts it (with the shortcuts the eager comparison succeeds). Transparency of \code{\verb~|mdata~} is the owner's decision; the row belongs to the documented divergences.}
+\li{Three wrong rejects of the machine that the pipeline repairs (\code{\verb~|s3-wc-canon-fvar-full-first-ok~}, \code{\verb~|s3-wc-proj-two-decls-ok~}, \code{\verb~|s3-wc-warm-samehead-two-decls-ok~}: S3-F1 / F3).}
+\li{The random programs: 200 exports (about 2,500 true claims, 100 false ones) - no rejection of a true claim, no accept of a false one, under every set and the candidate; 4 declines (S3-F7).}
+}
+}
+
+\subtree{
+\title{10.5 Verdict on the candidate}
+
+\p{On everything I could put in front of it - 987 hostile rows with official verdicts (mine, package S's, E1's, S2's), of which every \code{\verb~|strict~} reject row is rejected and every official accept is accepted by the pipeline - the candidate \strong{accepts no statement that is not derivable}, and I found no path to one by reading: the three additions are each sound under a condition that the code establishes (\code{\verb~|eager~}: every deferred comparison is run in its own scope before ACCEPT; \code{\verb~|skipargs~} / \code{\verb~|congruence~}: both sides are well-typed, which inference - not weakened by any switch of the default set as far as rows and reading show - guarantees). What it does accept beyond the official checker is kind T, and more of it than the default set alone: the whole \code{\verb~|X = Y p~} eager family, the congruence rows of S-F1 / S-F2, K comparisons that succeed by congruence. That is the documented price of the practical policy, not a blocker. Conditions I would attach: (1) the named switches for the two shortcuts must switch \code{\verb~|facts~} and \code{\verb~|probes~} behaviour on with them (today the options are inert without those switches); (2) the rows of \code{\verb~|work/s3/manifest.tsv~} enter the suite with their kinds, the seeded-fault rows in particular (three of the four candidate faults were invisible to my first set of rows); (3) S3-F7 is fixed or counted (it turns accepted units into reference-engine work); (4) the pipeline's strict re-check stays what decides a machine REJECT - a v0 accept there is a kind T accept at worst only as long as v0 has no kind F, which is the assumption every row above also tests.}
+}
+
+\subtree{
+\title{10.6 Not established for the candidate}
+
+\ul{
+\li{No seeded fault for B1 (the same-head probe) and B2 (proofs by type); S2's own seeded faults stand for the masks.}
+\li{The typed bindings (E1, 21:26Z) were exercised by the rows, not attacked on their own.}
+\li{Parallel workers, the native image, the corpora and the mutants under the candidate: not mine; the gates.}
+\li{\code{\verb~|eager~}: a deferred comparison inside a speculative segment that is cut, and the session rules (\code{\verb~|erSens~}, restart, forget) were read, not attacked beyond E1's rows.}
+\li{The 40 kind T accepts of the earlier suites are classified by family (statement shape), not certified one by one; S2 certified 15 of its own, E1 and package S argue theirs.}
+}
+}
+}

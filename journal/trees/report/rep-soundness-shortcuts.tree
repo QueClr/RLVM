@@ -1,0 +1,411 @@
+\title{Are \code{\verb~|skipargs~} and \code{\verb~|congruence~} sound with respect to Lean's type theory? (reviewer S2)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{soundness}
+\tag{machine}
+\meta{origin}{docs/design/review/soundness-shortcuts.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{2026-11-24, 16:45Z - 18:30Z. Adversarial review of the two non-official options of the machine's conversion checker (\code{\verb~|-Drlvm.machine.m4=congruence,skipargs~}; owner M4: \code{\verb~|Conv.java~}, \code{\verb~|Cargs.java~}; masks: \code{\verb~|Facts.java~}, \code{\verb~|FactStore.java~}, owner M5). No production code was changed. Everything of this review is under \code{\verb~|work/s2/~} (generators \code{\verb~|gen/~}, exports \code{\verb~|attacks/~}, \code{\verb~|attacks-dat/~}, \code{\verb~|attacks2/~}, \code{\verb~|attacks/fuzz/~}, \code{\verb~|attacks/mut-mathlib/~}, certificates \code{\verb~|certify/~}, results \code{\verb~|out/~}, tools \code{\verb~|judge.py~}, \code{\verb~|campaign.sh~}, \code{\verb~|campaign2.sh~}, \code{\verb~|stats.sh~}, \code{\verb~|corpus-shortcheck.sh~}, \code{\verb~|leaders.sh~}, \code{\verb~|leaders-summary.py~}, \code{\verb~|seeded-summary.py~}, a private copy of the module with seeded faults \code{\verb~|mcopy/~} and its distribution \code{\verb~|dist3/~}, an optional patch \code{\verb~|patches/~}).}
+
+\p{Code reviewed: the main tree as published until 17:25Z. Runs: the JVM launcher of two private distributions built from the published jars (\code{\verb~|scripts/build.sh --published --jvm-only~}): \code{\verb~|work/s2/dist~} (machine jar \code{\verb~|ba557722c184~}, published 16:45:07Z; the first run of the hand-written attacks) and \code{\verb~|work/s2/dist2~} (machine jar \code{\verb~|54eeb7cc50dd~}, published 17:16:51Z; everything else). Between the two only \code{\verb~|Conv.sameShape~} (switch \code{\verb~|same~}) changed; the publication of 17:25Z changed comments of \code{\verb~|Conv.java~} / \code{\verb~|Cargs.java~} only (checked by \code{\verb~|diff~} against my copy); the jar published at 18:12Z was not run: \code{\verb~|Conv~}, \code{\verb~|Cargs~}, \code{\verb~|Facts~}, \code{\verb~|FactStore~}, \code{\verb~|Pairs~}, \code{\verb~|Infer~}, \code{\verb~|Reduce~}, \code{\verb~|Values~} and \code{\verb~|Levels~} are unchanged in the tree at 18:27Z. Official verdicts: \code{\verb~|rlvm-testkit/bin/testkit verdict~} (\code{\verb~|leanchecker --from-export~}, Lean 4.36.0).}
+
+\p{The question: \strong{is every equation the two options assume a valid definitional equality of well-typed terms, so that they can never accept a declaration that is not derivable; and are the known exports that they accept and the official checker rejects all cases of the official ALGORITHM's incompleteness?}}
+
+\subtree{
+\title{0. Verdict}
+
+\p{\strong{Theory-sound as implemented; I could not break either option.} Every equation that \code{\verb~|skipargs~} (B3: proof positions of CARGS; B4: unread positions; the Prop mask of structure eta) and \code{\verb~|congruence~} (B1: same-head probe; B12: closure congruence; B2: proofs by type before reduction) assume is derivable in Lean's type theory from delta, beta, zeta, structure eta, proof irrelevance and congruence, under ONE precondition that the options do not establish themselves and that the machine's inference establishes for them: both sides of a comparison are well-typed terms (2.1). The masks are computed soundly (a proof position needs a manifest sort of its domain that is always zero AFTER instantiation at the levels of the head being compared; an unread position comes from a superset of the occurrences in the body and is used only where both sides unfold; a proof position whose domain mentions an unread position that differs is compared, a precaution neither leader takes). No refutable or underivable claim was accepted under any configuration, and the exports that the options accept against the official verdict are all cases of the official ALGORITHM's incompleteness, not of a false equation: for each of them the official checker itself accepts a proof of the same statement once the congruence step is written out as a term (section 4). \strong{A named opt-in profile with the two options is as sound as the machine's inference is; it is not the official verdict on exports of the kind of section 4, exactly as gruszka's is not.}}
+
+\p{The evidence, in numbers:}
+
+\ul{
+\li{False claims REJECTED under every configuration with the options (sections 3.1 - 3.3, 3.7): 95 hand-written ones under nine configurations and their 95 non-literal twins; 6 of a second batch (\code{\verb~|Acc.rec~}, \code{\verb~|Quot~}, unit-like, structures in Prop); 362 random ones; 358 targeted mutants of a Mathlib slice; none accepted of the 2,040 officially rejected mutants of the arena's \code{\verb~|bugs~} / \code{\verb~|other~} tests (1,977 rejected, 63 declined by the pipeline); the 289 officially rejected exports of package S outside the class of section 4; the arena's 92 \code{\verb~|bad~} tests.}
+\li{On nine exports up to Mathlib's \code{\verb~|Scheme~} slice, 474,228 T answers of the shortcuts were re-derived by the complete official procedure without one disagreement (3.6).}
+\li{The suite does catch seeded faults of the masks: an off-by-one position, an off-by-one de Bruijn index, a wrong universe instantiation (3.4).}
+\li{Accepted with an option, rejected officially: 14 of the 304 officially rejected exports of package S (the 13 rows of S-F1 / S-F2 and \code{\verb~|open-flag-closed-bad~}, which was in no list) and one \code{\verb~|Acc.rec~} analogue written for this review. All 15 statements are proved for the official checker by \code{\verb~|Eq.rec~} over an \code{\verb~|Eq.refl~} between two proofs (\code{\verb~|work/s2/certify/~}, 15 of 15 accepted officially).}
+\li{With the options OFF nothing differs from the official verdict (\code{\verb~|v0~} on 1,235 exports, \code{\verb~|rich~} on 603: the official verdict or a decline of the pipeline on every one).}
+}
+
+\p{What the owner should weigh before a named opt-in profile uses them:}
+
+\ol{
+\li{\strong{They change verdicts, by design, and only towards accepting theorems.} Exports exist that the official checker rejects and the profile accepts (section 4). Both leaders accept exports of the same class (section 5): gruszka accepts all 14 exports of package S that the profile accepts, nano-lean 6 of them, and both accept three more that the machine rejects even with the options. The arena's 92 \code{\verb~|bad~} tests are ALL rejected under \code{\verb~|skip~}, \code{\verb~|cong~}, \code{\verb~|both~} and \code{\verb~|bothrich~} (as under \code{\verb~|v0~}), including the two whose statements are true in the theory and that the arena nevertheless requires to be rejected (\code{\verb~|125_accRecNoEta~}, \code{\verb~|101_ruleKAcc~}): the options never build a constructor form out of a proof. An arena test of the kind of section 4 would be accepted by the profile - and by gruszka.}
+\li{\strong{They remove a redundancy.} The official comparison of two proofs compares their TYPES, which also catches an ill-typed proof argument that inference let through; \code{\verb~|skipargs~} does not look at a proof or unread position at all. With the options, soundness rests on inference alone. I found no path on which an unchecked term reaches a comparison (2.1, group \code{\verb~|ctx~} of the attacks), and a seeded inference fault shows the difference concretely (3.5: v0 rejects, the options accept). A profile with the options should therefore run where the inference side has the evidence it has today (the differential gates), not as a place to try inference shortcuts.}
+\li{\strong{No patch is needed.} One optional line of defence in depth is offered (\code{\verb~|work/s2/patches/H1-cargs-plan-levels.diff~}, owner M4, applies and compiles on a private copy): the plan of CARGS would test the equivalence of the two heads' level lists itself instead of relying on its three callers.}
+\li{\strong{One row is missing from the guards}: \code{\verb~|open-flag-closed-bad~} is accepted under \code{\verb~|congruence~} and is neither in \code{\verb~|M4OfficialTest~}'s list nor marked in package S's manifest (it was written after M4's fix). It is of the same class and changes nothing in the verdict; a profile's list of expected differences should contain it.}
+}
+}
+
+\subtree{
+\title{1. The shortcuts, exactly as the code implements them}
+
+\p{Notation: \code{\verb~|c.{ls} a_0 .. a_(n-1)~} is a NEU record with a CONST head (row \code{\verb~|c~}, level list \code{\verb~|ls~}) and a spine of \code{\verb~|n~} arguments; "telescope of \code{\verb~|c~}" = the leading SYNTACTIC \code{\verb~|Pi~} binders of the type term \code{\verb~|decls.type(c)~} (no reduction, no instantiation); \code{\verb~|arity(c)~} their number; \code{\verb~|lamArity(c)~} the number of leading syntactic lambdas of the value term.}
+
+\subtree{
+\title{1.1 The fact record of a constant (\code{\verb~|Facts.sigd~}, \code{\verb~|syntaxSlow~}, \code{\verb~|sigLoop~}; one immutable record per constant and engine)}
+
+\table{
+\tr{\th{Field}\th{How it is computed}\th{What it claims}}
+\tr{\td{\code{\verb~|arity~}}\td{count of leading \code{\verb~|Pi~} nodes of the type term (stops at anything else: \code{\verb~|let~}, a constant that unfolds to a Pi, ..); a telescope longer than 65,535 gets no facts}\td{-}}
+\tr{\td{\code{\verb~|dep[i]~}, \code{\verb~|i < min(arity, 64)~}}\td{the free de Bruijn indices of the domain TERM of binder \code{\verb~|i~}, from the node's \code{\verb~|fvMask~} (\code{\verb~|rlvm-store~} \code{\verb~|NodeCtx~}: bit \code{\verb~|j < 63~} = index \code{\verb~|j~} occurs free, bit 63 = some index >= 63; under a binder \code{\verb~|mask >>> 1~}, plus bit 63 when the body's loose range exceeds 64) translated to binder numbers (\code{\verb~|Facts.binders~})}\td{a SUPERSET of the binders the domain mentions}}
+\tr{\td{\code{\verb~|manifest~} bit \code{\verb~|i~}, \code{\verb~|slvl[i]~}}\td{\code{\verb~|Ti = INFER(A_i, env, ONLY)~} under canonical variables for binders \code{\verb~|0 .. i-1~}; the bit is set iff the value RETURNED is a SORT record (no WHNF, no ENSORT), \code{\verb~|slvl[i]~} = its level over the constant's own universe parameters, stored as a structural encoding (zero / succ / max / imax / param NAME)}\td{the domain of binder \code{\verb~|i~} has type \code{\verb~|Sort slvl[i]~}}}
+\tr{\td{\code{\verb~|rlvl~}}\td{the same for the term after the last \code{\verb~|Pi~}}\td{used by B7 only (static PROOF; official-exact, not under review)}}
+\tr{\td{\code{\verb~|lamArity~}, \code{\verb~|unread~}}\td{only for definitions, theorems and opaque constants whose value is a term of the export region (a theorem kept as a proof block has none): strip the leading \code{\verb~|lam~} nodes; \code{\verb~|read~} = \code{\verb~|binders(fvMask(body), lamArity)~}; \code{\verb!!|unread = ~read!!} restricted to the first \code{\verb~|min(lamArity, 64)~} positions. With 64 or more lambdas every index >= 63 marks ALL far binders read}\td{bit \code{\verb~|i~} set: the body term does not mention parameter \code{\verb~|i~} (through lets, nested binders, binder types, projections: purely syntactic occurrence). The mask errs only towards "read"}}
+\tr{\td{\code{\verb~|F_NONE~}}\td{the type part ran out of \code{\verb~|B_SIGD~} = 65,536 ticks or met a kernel error}\td{no facts: nothing is skipped}}
+}
+
+\p{\code{\verb~|Facts.propMask(c.{ls})~} (cached per CONST record and session epoch): bit \code{\verb~|i~} iff \code{\verb~|manifest[i]~} and \code{\verb~|isAlwaysZero(slvl[i][ls])~}, where \code{\verb~|[ls]~} is the simultaneous substitution of the head's own level list (\code{\verb~|Values.mkConst~}: 0 = identity, i.e. the levels ARE the parameters by name) with the official smart constructors, and \code{\verb~|isAlwaysZero~} is the syntactic, exact test (zero; \code{\verb~|max~} of two such; \code{\verb~|imax _ l~} with \code{\verb~|l~} such). So "position \code{\verb~|i~} is a proof" is established by: a manifest sort of the domain UNDER THE TELESCOPE, then instantiation of the universe parameters at the levels of the head that is being compared. \code{\verb~|Sort u~} at \code{\verb~|u := 0~} is a proof position, at \code{\verb~|u := 1~} or at a level parameter it is not; \code{\verb~|Sort (imax u v)~} follows \code{\verb~|v~}.}
+}
+
+\subtree{
+\title{1.2 \code{\verb~|skipargs~}: the comparison plan of CARGS (B3, B4) - \code{\verb~|Cargs.plan~}, \code{\verb~|skipMask~}, \code{\verb~|cargsFrom~}}
+
+\p{CARGS compares the spines of two NEU records. It is called from exactly three places:}
+
+\table{
+\tr{\th{Call}\th{Heads}\th{Policy}\th{When}}
+\tr{\td{c8, \code{\verb~|Conv.k_conv2_1~} (official \code{\verb~|is_def_eq_app~})}\td{any two heads for which \code{\verb~|CONV(head, head) = T~} and equal spine lengths; both sides are weak-head normal and stuck (lazy delta returned "unknown", full \code{\verb~|whnf_core~} changed nothing)}\td{APP, first to last}\td{every comparison of two applications that nothing else decided}}
+\tr{\td{lazy delta, \code{\verb~|Conv.lstepBoth~} (official \code{\verb~|is_def_eq_args~} in \code{\verb~|lazy_delta_reduction_step~})}\td{the SAME definition with a REGULAR hint on both sides, level lists \code{\verb~|listsEq~}, pair not in FAILED}\td{SAMEDEF, last to first}\td{before both sides are unfolded}}
+\tr{\td{B1, \code{\verb~|Conv.convB1~} (only with \code{\verb~|congruence~})}\td{the SAME constant, level lists \code{\verb~|listsEq~}, that constant a definition (any hint) or a theorem with matching level count, or a recursor, or \code{\verb~|Quot.lift~} / \code{\verb~|Quot.ind~}; equal spine lengths}\td{SAMEDEF, under \code{\verb~|TRY(budget)~}}\td{at the start of every pass of CONV, before anything is reduced}}
+}
+
+\p{With \code{\verb~|facts~} + \code{\verb~|skipargs~}, equal spine lengths and both heads CONST records of ONE row, \code{\verb~|plan~} computes a skip mask over positions \code{\verb~|i < min(n, arity(c), 64)~} from left to right (a fact record that does not exist yet is derived on the spot; \code{\verb~|F_NONE~} or no record: mask 0):}
+
+\ol{
+\li{(B4) policy SAMEDEF and \code{\verb~|n >= lamArity(c)~} and \code{\verb~|unread[i]~}: SKIP; if the two arguments are not the identical record, \code{\verb~|i~} enters the set \code{\verb~|differ~}.}
+\li{(B3) else if \code{\verb~|propMask(head of side a)[i]~} and \code{\verb~|dep[i]~} is disjoint from \code{\verb~|differ~}: SKIP.}
+\li{else: compare (complete CONV).}
+}
+
+\p{Positions from 64 on and positions beyond the syntactic telescope are always compared. The answer is T iff every compared pair is T. With \code{\verb~|probes~}, the quick refutation of pass A (two different literals, two different constructors of non-proofs) runs BEFORE the plan and answers F; pass B probes the non-skipped pairs under \code{\verb~|TRY(256)~}.}
+
+\p{Which constants can have positions skipped:}
+
+\table{
+\tr{\th{Head}\th{B3 (proof positions)}\th{B4 (unread positions)}}
+\tr{\td{definition, regular hint}\td{yes: lazy delta same-head step; B1}\td{yes: the same two places}}
+\tr{\td{definition, abbrev / opaque hint; theorem (value in the export region)}\td{only in B1 (they are unfolded before c8 is reached)}\td{only in B1}}
+\tr{\td{theorem whose value is a proof block}\td{only in B1}\td{never (no value facts)}}
+\tr{\td{\code{\verb~|opaque~} constant, axiom, \code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, inductive type, constructor}\td{yes: c8}\td{never (SAMEDEF is never used for these heads; \code{\verb~|syntaxSlow~} would compute an unread mask for an \code{\verb~|opaque~} row, in the runs of this review such a row had none; S: \code{\verb~|facts-unread-opaque-head-bad~})}}
+\tr{\td{recursor, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~}}\td{yes: c8 when stuck; B1 always}\td{never (no value)}}
+\tr{\td{projection function, matcher, \code{\verb~|casesOn~}, \code{\verb~|recOn~}, \code{\verb~|brecOn~}}\td{they are definitions: as above}\td{as above}}
+\tr{\td{a free variable, a projection or a stuck term as head}\td{never (no CONST head)}\td{never}}
+\tr{\td{\code{\verb~|unsafe~} / \code{\verb~|partial~}}\td{not in the environment (dropped by the loader; a reference is rejected)}\td{-}}
+}
+}
+
+\subtree{
+\title{1.3 \code{\verb~|skipargs~}: the Prop mask of structure eta - \code{\verb~|Conv.etasFields~}}
+
+\p{\code{\verb~|ETAS(a, b)~}: \code{\verb~|b~} is a constructor applied to exactly \code{\verb~|nparams + nfields~} arguments, its inductive type a non-recursive structure without indices (recomputed flags). The types are compared FIRST (\code{\verb~|CONV(VTYPE(a), VTYPE(b)) = T~}, as officially). Then for each field \code{\verb~|i~}: if \code{\verb~|propMask(head of b)[nparams + i]~} the field is not compared; else \code{\verb~|CONV(proj_i(a), b_(nparams+i))~}. No \code{\verb~|differ~} set (nothing else is skipped).}
+}
+
+\subtree{
+\title{1.4 \code{\verb~|congruence~}: B1, B12, B2}
+
+\table{
+\tr{\th{}\th{Trigger}\th{Assumes}\th{Budget / on failure}}
+\tr{\td{B1 \code{\verb~|convB1~}}\td{both sides NEU, same constant head as in 1.2}\td{CARGS(SAMEDEF) = T (with the plan of 1.2 when \code{\verb~|skipargs~} is also on) implies the two applications are convertible}\td{\code{\verb~|TRY(16,384)~} for a regular definition, \code{\verb~|TRY(1,024)~} otherwise. T: the answer (POS recorded). F: the pair enters FAILED (lazy delta then unfolds at once), U: UNDEC; in both cases the complete procedure continues at c2. A per-declaration probe debt (2^17 ticks) stops further probes}}
+\tr{\td{B12 \code{\verb~|convB12~} / \code{\verb~|cclo~}}\td{at c0, before forcing: both SUSP, or both LAM, or both PI, or both PII, with the SAME term node and level substitution, near frames}\td{the frames' slots are pairwise identical or \code{\verb~|CONV = T~} (HOLE only against HOLE) implies the two closures are convertible}\td{\code{\verb~|TRY(1,024)~}. T: the answer. F / U: forced and compared by the complete procedure}}
+\tr{\td{B2 \code{\verb~|convCore1~}}\td{side \code{\verb~|a~} has the flag PROOF = yes (from an earlier dynamic \code{\verb~|is_prop(infer a)~} or the static B7)}\td{proofs are compared by type BEFORE \code{\verb~|whnf_core~}: \code{\verb~|CONV(VTYPE(a), VTYPE(b))~} is the answer, T or F}\td{no budget; the F is final (as the official F of \code{\verb~|is_def_eq_proof_irrel~}, but on the unreduced terms: a completeness difference only)}}
+}
+}
+}
+
+\subtree{
+\title{2. Preconditions: what makes each equation a theorem, and where the code establishes it}
+
+\p{"Theorem of the theory" below means: derivable with the conversion rules of Lean's type theory as the official kernel implements them - delta (definitions and theorems), beta, zeta, eta, structure eta for non-recursive structures without indices, iota, proof irrelevance (two terms whose common type is a proposition), congruence - which is the theory of Carneiro's thesis (consistent relative to ZFC with inaccessibles) plus structure eta.}
+
+\table{
+\tr{\th{\verb~|#~}\th{Equation assumed}\th{Precondition}\th{Established by the code?}}
+\tr{\td{E1 (B3)}\td{\code{\verb~|c a_0 .. a_(n-1) = c b_0 .. b_(n-1)~} when every non-skipped pair is convertible}\td{(P1) both applications are well typed; (P2) each skipped \code{\verb~|i~} lies in the syntactic telescope, so \code{\verb~|a_i : D_i[a_<i]~}, \code{\verb~|b_i : D_i[b_<i]~}; (P3) \code{\verb~|D_i : Sort 0~} at the levels of BOTH heads; (P4) \code{\verb~|D_i[a_<i] = D_i[b_<i]~}}\td{P2: yes (\code{\verb~|i < min(n, arity, 64)~}). P3: yes for side a (manifest sort + instantiation); for side b by the callers, who compare the level lists (lazy delta, B1) or the heads (c8) before CARGS - the plan itself does not test it (optional patch H1). P4: yes, by induction from left to right: the domain reads only binders in \code{\verb~|dep[i]~}, each of them is identical, compared equal, or itself a skipped proof position with the same property; a domain that reads an unread-and-different position is compared like data. P1: \strong{assumed} (section 2.1)}}
+\tr{\td{E2 (B4)}\td{\code{\verb~|c a = c b~} when the pairs at the read positions are convertible, \code{\verb~|c~} a definition or theorem}\td{(P5) \code{\verb~|n >= lamArity~}: both sides delta-reduce and beta-reduce to the SAME body term under frames that differ only in slots the body does not mention; (P6) the mask never calls a mentioned parameter unread}\td{P5: yes. P6: yes (the mask is the complement of a superset; boundary cases attacked in section 3). The head is unfoldable by construction of the call sites (SAMEDEF only for definition / theorem rows with matching level count)}}
+\tr{\td{E3 (ETAS mask)}\td{\code{\verb~|a = S.mk p f_1 .. f_k~} when the types agree and the non-proof fields agree with the projections of \code{\verb~|a~}}\td{structure eta \code{\verb~|a = S.mk p a.1 .. a.k~} at the common type, then E1 for the constructor with \code{\verb~|differ~} empty}\td{types: compared first; shape: \code{\verb~|etasShape~}; the rest as E1}}
+\tr{\td{E4 (B1)}\td{\code{\verb~|c a = c b~} from CARGS = T}\td{congruence of application (same constant, equivalent levels), plus E1 / E2 for skipped positions}\td{yes (\code{\verb~|b1Budget~}: same row, \code{\verb~|listsEq~}, same length)}}
+\tr{\td{E5 (B12)}\td{\code{\verb~|t[f] = t[f']~} from slot-wise convertibility}\td{congruence of substitution; a HOLE slot is a slot the term does not read (PRUNE by the same \code{\verb~|fvMask~})}\td{yes (same term node, same level substitution; near frames only)}}
+\tr{\td{E6 (B2)}\td{\code{\verb~|a = b~} for a proof \code{\verb~|a~} whose type is convertible with the type of \code{\verb~|b~}}\td{proof irrelevance}\td{yes: the flag is \code{\verb~|is_prop(infer a)~} (dynamic) or a manifest always-zero result sort of a saturated constant (B7)}}
+}
+
+\subtree{
+\title{2.1 The one assumption: both sides of a comparison are well-typed terms}
+
+\p{E1 and E3 replace the official type comparison of two proofs by an argument about the SIGNATURE of the head: "both arguments inhabit the instantiated domain". That is true only if both applications are well typed. The official \code{\verb~|is_def_eq_proof_irrel~} does not need it: it infers both types and compares them, so for an ill-typed proof argument it answers F. The same holds for B4 (an ill-typed argument in an unread position is never looked at).}
+
+\p{Where the machine guarantees it (read, and attacked in section 3, group \code{\verb~|ctx~}):}
+
+\ul{
+\li{CONV is called by inference only on (inferred type, domain) / (inferred type, expected type) / (type of a let value, its annotation) / (lambda domain, expected domain): \code{\verb~|Infer.twD~}, \code{\verb~|k_check1~}, \code{\verb~|k_ck5~}, the let rule, \code{\verb~|Code.targConv~}. In CHECKED mode every argument, every domain, every let value is inferred BEFORE the comparison that involves it, with \code{\verb~|expect~} (B9: the lambda's domain is inferred and ENSORTed, then compared), with \code{\verb~|tele~} / \code{\verb~|code~} (TARG: INFER then CONV), with \code{\verb~|joint~} (identical domain nodes are checked once), with \code{\verb~|pchk~} (the bit says the closed term passed CHECKED once; with the options on it says "is well typed in the theory", which is all the argument needs).}
+\li{Reduction calls CONV for the K rule (\code{\verb~|Reduce.k_iota3~}: type of the major against the type of the constructor application it builds) on types of well-typed terms; structure eta and eta build projections / applications of well-typed terms after their types were compared.}
+\li{The terms CONV itself builds (\code{\verb~|proj_i(a)~}, \code{\verb~|b x~}, constructor forms of literals) are well typed.}
+\li{Inductive types, constructors, recursors and their rules are NOT checked by the machine: admission uses the reference kernel, and exported recursor records are compared structurally (\code{\verb~|RecordCompare~}: "deliberately no fallback to definitional equality"). So no unchecked term enters the environment through a comparison that a shortcut could shorten.}
+\li{A definition whose check is still running on another worker may be unfolded; if it is ill typed its own check rejects it and the run is REJECT. Fact records are derived from the TYPE of a constant that is visible to the declaration being checked; a record derived from an ill-typed type only matters if that constant is accepted, which it is not.}
+}
+
+\p{I found no path on which a comparison meets a term that inference did not check (section 3, group \code{\verb~|ctx~}, 8 exports; all rejected under every configuration). This is the same invariant the official kernel relies on for its own argument-wise comparisons; what changes with \code{\verb~|skipargs~} is that a violation would no longer be caught by the type comparison of proof irrelevance (section 0, point 2; section 3.5).}
+}
+
+\subtree{
+\title{2.2 Why "T on well-typed terms" is closed under the shortcuts (the induction, in short)}
+
+\p{Claim: if CONV answers T for two well-typed terms then they are convertible in the theory and their types are convertible. Every official rule preserves it (reduction preserves types; binder domains are compared; proof irrelevance, unit-like and structure eta compare the types; an application rule compares the heads, whose types then agree, so the argument types agree pairwise from left to right). E1 preserves it by P4. E2 preserves it because both sides reduce to instances of ONE body term whose mentioned slots are convertible; the types of the two sides are then types of convertible terms. E4 / E5 are congruences; E6 is proof irrelevance with the types compared. Note that conversion is only ever ASKED about types (and, inside, about arguments whose expected types agree by this induction); two proofs are never the top of a query, which is why even a skip without the \code{\verb~|differ~} rule (what both leaders do, section 5) has no false consequence that I could construct.}
+}
+}
+
+\subtree{
+\title{3. Attacks}
+
+\p{All exports claim their equation by \code{\verb~|Eq.refl~}. A \code{\verb~|-bad~} export claims a closed equation that is refutable (two different numerals, Booleans, constructor fields: \code{\verb~|False~} is one \code{\verb~|noConfusion~} away) or at least not derivable (an axiom applied to different data); a \code{\verb~|-true~} export claims a derivable one and shows that the shortcut under attack is reached. Configurations (\code{\verb~|work/s2/judge.py~}; A = exit 0, R = exit 1, D = exit 2 of the launcher):}
+
+\table{
+\tr{\th{name}\th{switches}\th{options}}
+\tr{\td{\code{\verb~|v0~}}\td{\code{\verb~|none~}}\td{-}}
+\tr{\td{\code{\verb~|rich~}}\td{\code{\verb~|warm,gated,expect,facts,probes,tele,code,casetrees,lazyeval,same~}}\td{-}}
+\tr{\td{\code{\verb~|skip~} / \code{\verb~|skip0~}}\td{\code{\verb~|warm,gated,expect,facts~} / \code{\verb~|facts~}}\td{\code{\verb~|skipargs~}}}
+\tr{\td{\code{\verb~|cong~}}\td{\code{\verb~|warm,gated,expect,facts,probes~}}\td{\code{\verb~|congruence~}}}
+\tr{\td{\code{\verb~|both~} / \code{\verb~|both0~} / \code{\verb~|both4~}}\td{\code{\verb~|warm,gated,expect,facts,probes~} / \code{\verb~|facts,probes~} / the first with 4 workers}\td{\code{\verb~|congruence,skipargs~}}}
+\tr{\td{\code{\verb~|bothrich~}}\td{the \code{\verb~|rich~} set}\td{\code{\verb~|congruence,skipargs~}}}
+\tr{\td{\code{\verb~|bothall~}}\td{\code{\verb~|all,lazyeval,same,match,joint,k2~}, \code{\verb~|-Drlvm.machine.elabAt=1~}}\td{\code{\verb~|congruence,skipargs~}}}
+\tr{\td{\code{\verb~|bothcap~}}\td{as \code{\verb~|both~}, \code{\verb~|-X machine.session-kib=1~} (a session reset before nearly every declaration)}\td{\code{\verb~|congruence,skipargs~}}}
+}
+
+\p{\strong{Outcome of all of them: no export that the official checker rejects for a FALSE (underivable) claim is accepted under any configuration. No accept exists with the options off that the official checker does not give.}}
+
+\subtree{
+\title{3.1 Hand-written attacks (\code{\verb~|work/s2/gen/attacks.py~}, \code{\verb~|work/s2/attacks/~}, 134 exports: 96 \code{\verb~|-bad~}, 38 \code{\verb~|-true~})}
+
+\p{Judged under all nine configurations of the table (\code{\verb~|work/s2/out/attacks-judged.tsv~}, jar \code{\verb~|ba557722c184~}) and again under \code{\verb~|skip~}, \code{\verb~|both~}, \code{\verb~|bothall~}, \code{\verb~|bothcap~} on jar \code{\verb~|54eeb7cc50dd~} (\code{\verb~|attacks-judged2.tsv~}): the same verdicts.}
+
+\table{
+\tr{\th{Group}\th{Exports}\th{What is attacked}\th{Machine, every configuration}\th{Official}}
+\tr{\td{\code{\verb~|lvl-*~}}\td{17 bad, 2 true}\td{the Prop mask and universe levels. \code{\verb~|f.{u} : (A : Sort u) -> A -> Nat~} as an axiom and as a definition with hint regular / abbrev / opaque; after \code{\verb~|f.{0} True p1 = f.{0} True p2~} (true; fills the mask cache at \code{\verb~|u = 0~}) the claim \code{\verb~|f.{1} Nat 1 = f.{1} Nat 2~}; the same under the theorem's own level parameter (\code{\verb~|thm.{u} : forall A a b, f.{u} A a = f.{u} A b~}, identity substitution), under a renamed parameter and \code{\verb~|max u 0~}; \code{\verb~|Sort (imax v u)~} with the parameters listed in the other order; a domain \code{\verb~|True -> A~} of sort \code{\verb~|imax 0 u~}; both instances in ONE declaration; \code{\verb~|Box.{u} (A : Sort u) := (val : A)~} through structure eta (\code{\verb~|Box.mk.{1} Nat (succ b.val) = b~}) and through constructor heads}\td{bad: REJECT; true: ACCEPT}\td{the same}}
+\tr{\td{\code{\verb~|rec-*~}, \code{\verb~|quot-*~}}\td{5 bad, 1 true}\td{stuck recursors and B1 on recursor / quotient heads: \code{\verb~|Eq.rec.{1,1}~} with different minor premises on an axiom \code{\verb~|h : a = b~} after a pair at \code{\verb~|u = 0~} where the minor is a proof; different indices; \code{\verb~|And.rec~}, \code{\verb~|Nat.rec~} with different minors; \code{\verb~|Quot.lift.{1,1}~} with different functions after a pair at \code{\verb~|v = 0~} (the function is a proof there)}\td{bad: REJECT; true: ACCEPT}\td{the same}}
+\tr{\td{\code{\verb~|unread-*~}}\td{48 bad, 34 true}\td{B4. The parameter occurs only in a minor premise of a recursor / as a let value / in a let body / as the argument of a beta redex / below a projection / under an inner lambda / in a binder domain; under-application and over-application; an alias type hiding the Pis; an abbrev and an opaque-hint definition (B1). de Bruijn arithmetic: definitions with 3, 63, 64, 65, 70, 130 parameters whose body is parameter \code{\verb~|j~} for \code{\verb~|j~} at every boundary (0, 1, 62 .. 69, 127 .. 129): the \code{\verb~|-bad~} twin changes exactly \code{\verb~|j~}, the \code{\verb~|-true~} twin changes every other parameter; nested binders below 66 unread parameters; a theorem head next to a data position; the \code{\verb~|differ~} rule (true and refutable variants)}\td{bad: REJECT; true: ACCEPT}\td{the same}}
+\tr{\td{\code{\verb~|prop-*~}}\td{8 bad, 1 true (+ 1 declined)}\td{what counts as a proposition: a domain that IS \code{\verb~|Prop~}; a Bool position after a proposition; data after a proof; a function type; over-application through a definition that unfolds to a Pi; a sort hidden behind a definition; 70 positions with data at 64 and 65; data at 63 between proofs; \code{\verb~|@Eq.{0} True p1 p2 = @Eq.{0} True p3 p4~} (true). \code{\verb~|prop-mdata-domain-bad~} is declined by the pipeline in every configuration, v0 included (mdata around a definition's lambdas; nothing to do with the options)}\td{bad: REJECT (1 DECLINE); true: ACCEPT}\td{the same (the declined one: reject)}}
+\tr{\td{\code{\verb~|etas-*~}}\td{5 bad}\td{the ETAS mask: the data field after two proof fields; a field of type \code{\verb~|Prop~} before its proof; a proof PARAMETER; structure eta below structure eta}\td{REJECT}\td{reject}}
+\tr{\td{\code{\verb~|cong-*~}}\td{4 bad}\td{B12 / B1 / B2 with data: one closure body under frames \code{\verb~|[1]~} and \code{\verb~|[2]~}; a lambda closure below a constant; frames whose slots are proofs of different propositions; a theorem head whose applications prove different propositions below a function that keeps the proposition}\td{REJECT}\td{reject}}
+\tr{\td{\code{\verb~|ctx-*~}}\td{8 bad}\td{section 2.1: an ill-typed proof argument that conversion would skip - in the statement, in the value (\code{\verb~|Eq.refl (f 1 (pf 2))~} for the statement \code{\verb~|f 1 (pf 1) = f 1 (pf 1)~}), in a lambda argument checked against an expected type (B9), in an unread position of a definition, in a let value, in the type of a definition, in a later declaration after six warm ones with the well-typed twin of the node, on one side of a data claim}\td{REJECT (by inference)}\td{reject}}
+}
+
+\p{The same 134 with every Nat literal written \code{\verb~|Nat.add k 0~} (\code{\verb~|work/s2/attacks-dat/~}, \code{\verb~|S2_DAT=1~}), so that the quick refutation of pass A cannot answer before the plan in \code{\verb~|both~} (with literal arguments the plan paths of B4 were reached under \code{\verb~|skip~} only): under \code{\verb~|v0~}, \code{\verb~|skip~}, \code{\verb~|both~}, \code{\verb~|bothall~} the 95 \code{\verb~|-bad~} exports are REJECTED, the 38 \code{\verb~|-true~} exports ACCEPTED, the mdata one is declined (\code{\verb~|work/s2/out/attacks-dat-judged.tsv~}); the official verdicts are those of the literal twins.}
+}
+
+\subtree{
+\title{3.2 Second batch (\code{\verb~|work/s2/gen/attacks2.py~}, \code{\verb~|work/s2/attacks2/~}, 11 exports)}
+
+\p{Base for the \code{\verb~|Acc~} exports: the arena's \code{\verb~|124_accRecReduction~} (it declares \code{\verb~|Acc~}, \code{\verb~|Eq~}, \code{\verb~|Bool~}). Configurations \code{\verb~|v0~}, \code{\verb~|rich~}, \code{\verb~|skip~}, \code{\verb~|cong~}, \code{\verb~|both~}, \code{\verb~|bothrich~}, \code{\verb~|bothall~} (\code{\verb~|work/s2/out/attacks2-judged.tsv~}).}
+
+\table{
+\tr{\th{Export}\th{Claim}\th{Machine}\th{Official}}
+\tr{\td{\code{\verb~|acc-rec-minor-bad~}}\td{after a stuck pair of \code{\verb~|Acc.rec.{0,1}~} with two axioms as minor premises (proofs), \code{\verb~|Acc.rec.{1,1} (fun _ _ _ => true) h = Acc.rec.{1,1} (fun _ _ _ => false) h~}}\td{REJECT, all 7}\td{reject}}
+\tr{\td{\code{\verb~|acc-rec-intro-vs-axiom-minor-bad~}}\td{\code{\verb~|Acc.rec (fun _ _ _ => true) (Acc.intro true k) = Acc.rec (fun _ _ _ => false) h~}}\td{REJECT, all 7}\td{reject}}
+\tr{\td{\code{\verb~|acc-rec-major-true~}}\td{\code{\verb~|Acc.rec F h = Acc.rec F h2~}, two axioms of \code{\verb~|Acc R true~}}\td{ACCEPT, all 7}\td{accept}}
+\tr{\td{\code{\verb~|acc-rec-intro-vs-axiom~}}\td{\code{\verb~|Acc.rec F (Acc.intro true k) = Acc.rec F h~}: the \code{\verb~|Acc~} analogue of S-F1, TRUE (section 4)}\td{REJECT under \code{\verb~|v0~}, \code{\verb~|rich~}, \code{\verb~|skip~}; \strong{ACCEPT under \code{\verb~|cong~}, \code{\verb~|both~}, \code{\verb~|bothrich~}, \code{\verb~|bothall~}} (B1 on the recursor head)}\td{reject}}
+\tr{\td{\code{\verb~|acc-rec-no-eta-axiom~}}\td{the arena's \code{\verb~|125_accRecNoEta~} on an axiom: \code{\verb~|Acc.rec (fun _ _ _ => true) h = true~}; true in the theory, \code{\verb~|bad~} for the arena}\td{REJECT, all 7}\td{reject}}
+\tr{\td{\code{\verb~|quot-mk-data-bad~}}\td{\code{\verb~|Quot.mk r 1 = Quot.mk r 2~}}\td{REJECT, all 7}\td{reject}}
+\tr{\td{\code{\verb~|quot-lift-mk-vs-axiom~}}\td{\code{\verb~|Quot.lift f h (Quot.mk r 1) = Quot.lift f h q~}, \code{\verb~|q~} an axiom (DATA: not derivable)}\td{REJECT, all 7}\td{reject}}
+\tr{\td{\code{\verb~|quot-lift-proof-true~}}\td{\code{\verb~|Quot.lift f h1 q = Quot.lift f h2 q~}}\td{ACCEPT, all 7}\td{accept}}
+\tr{\td{\code{\verb~|unitlike-family-bad~}}\td{\code{\verb~|W.mk 1 (UF.mk 1) = W.mk 2 (UF.mk 2)~}, \code{\verb~|UF n~} unit-like}\td{REJECT, all 7}\td{reject}}
+\tr{\td{\code{\verb~|prop-struct-arg-true~}}\td{\code{\verb~|g (PS.mk 1 r1) = g (PS.mk 2 r2)~}, \code{\verb~|PS : Prop~} with a Nat field}\td{ACCEPT, all 7}\td{accept}}
+\tr{\td{\code{\verb~|prop-struct-data-wrapper-bad~}}\td{\code{\verb~|k 1 (PS.mk 1 r1) = k 2 (PS.mk 2 r2)~}, \code{\verb~|k n p := n~}}\td{REJECT, all 7}\td{reject}}
+}
+}
+
+\subtree{
+\title{3.3 Random exports (\code{\verb~|work/s2/gen/fuzz.py~}, seeds 11 - 14, \code{\verb~|work/s2/attacks/fuzz/~}, 498 exports)}
+
+\p{One random constant per export - an axiom (125 exports), a definition with hint regular (151) / abbrev (56) / opaque (63), or the constructor of a random structure (103) - over a random telescope of 2 to 8 positions drawn from: a sort \code{\verb~|Sort u_k~} (level parameters shared or not), an element of an earlier sort (a proof when that sort is instantiated at 0, a Nat or Bool at 1), a Nat, a proof of \code{\verb~|Q n~} for an earlier Nat, a proposition, a proof of an earlier proposition, a proof of \code{\verb~|True~}, a member of an axiom family \code{\verb~|Fam n~}, a function, a proof of a Pi into Prop. A definition's body reads a random subset through axioms into Nat, each read wrapped at random in a let, a beta redex, an inner lambda or a \code{\verb~|Nat.rec~}. Each export makes 4 to 12 TRUE claims (the sides differ in proofs, in the representation of equal data, and in unread parameters, at several level vectors); a \code{\verb~|-bad~} export ends with one FALSE claim that changes the value of one data position that matters. The official verdict was the predicted one for all 498.}
+
+\table{
+\tr{\th{}\th{exports}\th{\code{\verb~|v0~}}\th{\code{\verb~|skip~}}\th{\code{\verb~|both~}}\th{\code{\verb~|skip0~}}\th{official}}
+\tr{\td{\code{\verb~|-bad~}}\td{362}\td{362 R}\td{362 R}\td{362 R}\td{362 R}\td{362 reject}}
+\tr{\td{\code{\verb~|-true~}}\td{136}\td{136 A}\td{136 A}\td{136 A}\td{136 A}\td{136 accept}}
+}
+}
+
+\subtree{
+\title{3.4 Do the attacks have teeth? Seeded faults (\code{\verb~|work/s2/mcopy/~}, \code{\verb~|work/s2/dist3~}, \code{\verb~|-Ds2.bug=N~})}
+
+\p{A private copy of the module with one fault at a time, \code{\verb~|skip~} configuration, on the \code{\verb~|-bad~} exports of 3.1, of half of 3.3 and of package S's \code{\verb~|facts-*~} / \code{\verb~|mask-*~} (301 exports: 96 + 183 + 22). "Caught" = at least one false claim is ACCEPTED by the faulty build (so the suite would have shown the fault).}
+
+\table{
+\tr{\th{Fault}\th{What is broken}\th{False claims ACCEPTED that the unmodified build rejects}\th{Caught by}}
+\tr{\td{1}\td{\code{\verb~|propMask~}: a manifest sort that MAY be zero (a level parameter) counts as a proposition}\td{8}\td{\code{\verb~|lvl-*-generic-bad~}, \code{\verb~|-renamed-bad~} (8). The random exports cannot catch it: their claims are closed}}
+\tr{\td{5}\td{\code{\verb~|propMask~} shifted by one position}\td{41}\td{fuzz 35, \code{\verb~|etas~} 2, S's \code{\verb~|facts~} 2 and \code{\verb~|mask~} 1, \code{\verb~|prop~} 1}}
+\tr{\td{2}\td{\code{\verb~|unreadMask~} shifted by one position}\td{18}\td{\code{\verb~|unread~} 11, fuzz 6, S's \code{\verb~|facts~} 1}}
+\tr{\td{7}\td{de Bruijn arithmetic of the unread mask off by one (\code{\verb~|binders(mask, lam + 1)~})}\td{40}\td{\code{\verb~|unread~} 21, fuzz 13, \code{\verb~|prop~} 3, S's \code{\verb~|facts~} 3}}
+\tr{\td{4}\td{ETAS mask indexed by the field number instead of \code{\verb~|nparams + field~}}\td{2}\td{\code{\verb~|etas-param-proof-bad~}, one random structure}}
+\tr{\td{6}\td{the unread mask also under APP}\td{0}\td{no effect to catch: no head that reaches c8 has an unread mask (the one candidate, an \code{\verb~|opaque~} constant, has no value facts: \code{\verb~|facts.use.unreadSet~} stays 0)}}
+\tr{\td{3}\td{the \code{\verb~|differ~} rule dropped (a proof position is skipped whatever its domain reads)}\td{0}\td{consistent with 2.2: I could not build a false claim from the absence of the rule, and none of the 301 is one}}
+}
+
+\p{So a mask that is wrong by a position, by a de Bruijn index or by a universe instantiation IS shown by the suite (\code{\verb~|work/s2/out/seeded-bug*.tsv~}, \code{\verb~|work/s2/seeded-summary.py~}); the suite is weakest on the ETAS index (2 exports).}
+}
+
+\subtree{
+\title{3.5 What the options remove: a seeded fault of INFERENCE}
+
+\p{Fault 10 of the private copy makes \code{\verb~|Infer.twD~} skip the comparison of an argument's type with its domain (an inference bug). \code{\verb~|ctx-wrong-proof-in-value-bad~} - statement \code{\verb~|f 1 (pf 1) = f 1 (pf 1)~}, value \code{\verb~|Eq.refl (f 1 (pf 2))~}, \code{\verb~|pf 2 : Q 2~} where \code{\verb~|Q 1~} is required - is then still REJECTED by v0, because the official comparison of the two proof arguments compares their types (\code{\verb~|Q 2~} against \code{\verb~|Q 1~}), and ACCEPTED under \code{\verb~|skip~} and \code{\verb~|both~}, which do not look at a proof position. With the options, conversion is no longer a second check of what inference let through.}
+}
+
+\subtree{
+\title{3.6 Real corpora under \code{\verb~|shortcheck~} (\code{\verb~|work/s2/corpus-shortcheck.sh~}, \code{\verb~|both~}, one worker)}
+
+\p{Every T that skipped a position (CARGS, ETAS) or came from B1 / B12 is re-derived at once by the complete official procedure with all switches off; a T that the complete procedure does not find is an audit failure (\code{\verb~|E_AUDIT~}, the unit is declined). A wrong mask would show here as soon as a comparison that the official procedure answers F is answered T (failed same-head comparisons of unequal data are frequent in these files).}
+
+\table{
+\tr{\th{Export}\th{units}\th{accepted by the machine}\th{declined}\th{T answers of a shortcut that were re-derived (\code{\verb~|audits~})}\th{not found by the complete procedure (\code{\verb~|E_AUDIT~})}\th{re-derivation out of budget (inconclusive)}\th{B1 T}\th{B3 plans}\th{B4 plans}\th{B12 T}}
+\tr{\td{\code{\verb~|init-prelude~} (arena test)}\td{1,710}\td{1,710}\td{0}\td{324}\td{\strong{0}}\td{0}\td{139}\td{124}\td{67}\td{3}}
+\tr{\td{\code{\verb~|Mathlib.Algebra.Group.Basic.cone~}}\td{1,724}\td{1,720}\td{4}\td{5,204}\td{\strong{0}}\td{2}\td{2,880}\td{133}\td{2,185}\td{16}}
+\tr{\td{\code{\verb~|Mathlib.Data.Nat.Basic.cone~}}\td{2,711}\td{2,701}\td{10}\td{5,656}\td{\strong{0}}\td{14}\td{3,706}\td{200}\td{1,501}\td{271}}
+\tr{\td{\code{\verb~|Mathlib.Topology.Basic.cone~}}\td{3,318}\td{3,316}\td{2}\td{6,371}\td{\strong{0}}\td{23}\td{3,530}\td{692}\td{2,025}\td{276}}
+\tr{\td{\code{\verb~|Mathlib.Data.Fintype.Basic.cone~}}\td{4,520}\td{4,492}\td{28}\td{10,033}\td{\strong{0}}\td{41}\td{5,917}\td{1,128}\td{2,821}\td{366}}
+\tr{\td{\code{\verb~|Mathlib.Data.List.Basic.cone~}}\td{4,278}\td{4,204}\td{74}\td{10,460}\td{\strong{0}}\td{23}\td{6,307}\td{1,069}\td{2,745}\td{458}}
+\tr{\td{\code{\verb~|Mathlib.Order.Basic.cone~}}\td{7,663}\td{7,655}\td{8}\td{64,058}\td{\strong{0}}\td{574}\td{44,339}\td{1,705}\td{18,321}\td{380}}
+\tr{\td{\code{\verb~|Mathlib.GroupTheory.Sylow.cone~}}\td{13,663}\td{13,619}\td{44}\td{70,112}\td{\strong{0}}\td{1,072}\td{41,396}\td{4,508}\td{25,001}\td{638}}
+\tr{\td{\code{\verb~|Mathlib.AlgebraicGeometry.Scheme.cone~} (P8's slice)}\td{21,155}\td{21,099}\td{56}\td{317,642}\td{\strong{0}}\td{13,883}\td{185,816}\td{24,089}\td{119,640}\td{4,301}}
+}
+
+\p{All 226 declines are the eager-reduction rule (\code{\verb~|E_LIMIT~}, \code{\verb~|eagerDeclines~}), none is an audit failure. On these files every T of a shortcut whose re-derivation completed is also a T of the complete official procedure (489,860 audits; 15,632 of them = 3.2 \% ran out of the audit budget of 65,536 ticks and are NOT confirmed): the masks never turned an official F into a T. (The control: the same script on S's \code{\verb~|facts-agreement-noncongruent-app-bad~} reports the two \code{\verb~|E_AUDIT~} declines it should.) This is evidence for the masks on real signatures, not a proof: a wrong mask bit on a position whose arguments never differ in these files would not show.}
+}
+
+\subtree{
+\title{3.7 Mutants: a Mathlib slice and the official \code{\verb~|bugs~} corpus}
+
+\p{The official mutant corpus \code{\verb~|work/mutants-bugs-other~} (mutants of the arena's \code{\verb~|bugs~}, \code{\verb~|other~}, \code{\verb~|corner-cases~} tests, 22 kinds, classified by the official checker): the 2,040 mutants that the official KERNEL rejects, under \code{\verb~|skip~} and \code{\verb~|both~} (\code{\verb~|work/s2/out/mutants-bugs-judged.tsv~}): \strong{1,977 REJECT, 63 DECLINE (declines of the pipeline: never an accept), 0 ACCEPT.}}
+
+\p{\strong{Targeted mutants of a Mathlib slice} (\code{\verb~|work/s2/gen/mutate.py~} = S's mutator restricted to the kinds \code{\verb~|SIBLING_ARG~}, \code{\verb~|LIT_SUCC_NE~}, \code{\verb~|LEVEL_ARG~}):}
+
+\p{360 mutants of \code{\verb~|Mathlib.Algebra.Group.Basic.cone~} (1,724 units; each mutant edits ONE occurrence inside ONE declaration: the argument of an application replaced by the argument of another application of the same function, a Nat literal \code{\verb~|n~} by \code{\verb~|Nat.succ n~}, one universe argument of a constant by another level; 174 in a declared type, 186 in a value). \code{\verb~|work/s2/out/mut-mathlib-judged.tsv~}; the 360 files (1.9 GB) were deleted after the run, their descriptions and SHA-256 sums are in \code{\verb~|work/s2/attacks/mut-mathlib/~} and the command of section 7 regenerates them:}
+
+\table{
+\tr{\th{kind}\th{mutants}\th{official reject}\th{of them rejected under \code{\verb~|skip~} and \code{\verb~|both~}}\th{official accept (accepted under both)}}
+\tr{\td{\code{\verb~|SIBLING_ARG~}}\td{120}\td{118}\td{\strong{118}}\td{2}}
+\tr{\td{\code{\verb~|LIT_SUCC_NE~}}\td{120}\td{120}\td{\strong{120}}\td{0}}
+\tr{\td{\code{\verb~|LEVEL_ARG~}}\td{120}\td{120}\td{\strong{120}}\td{0}}
+}
+
+\p{In a sample of 12 of them the machine's rejection is \code{\verb~|E_APP_MISMATCH~} (the type of an argument against its domain: a comparison) in 9 and a declaration-level type mismatch in 1 more: these mutants are decided by comparisons of the kind the options shorten, on Mathlib's own signatures (instance arguments, proof fields).}
+}
+}
+
+\subtree{
+\title{4. The known exports that the options accept and the official checker rejects}
+
+\p{Notation: \code{\verb~|I = And.intro True True True.intro True.intro~}; \code{\verb~|h~}, \code{\verb~|h2~} axioms of \code{\verb~|And True True~}; \code{\verb~|R x = And.rec (motive := fun _ => Nat) (fun _ _ => 5) x~}; PI = proof irrelevance; "cong" = congruence of application / of substitution. Verdicts of this review's run (jar \code{\verb~|54eeb7cc50dd~}, \code{\verb~|work/s2/out/known-judged.tsv~}): A = accepted, R = rejected; the official checker rejects every row.}
+
+\table{
+\tr{\th{Export}\th{Claim}\th{\code{\verb~|skip~}}\th{\code{\verb~|cong~}}\th{\code{\verb~|both~}}\th{Derivation in the theory}\th{Class}}
+\tr{\td{\code{\verb~|probe-b1-rec-proof-major-bad~}, \code{\verb~|-flipped-bad~} (S-F1; pinned by \code{\verb~|M4OfficialTest~})}\td{\code{\verb~|R I = R h~}}\td{R}\td{A}\td{A}\td{\code{\verb~|h = I~} by PI (both inhabit the proposition \code{\verb~|And True True~}); cong under \code{\verb~|And.rec .. _~}. (Then \code{\verb~|R I = 5~} by iota, beta: the official procedure reduces the left side and cannot move the right)}\td{TRUE; official incompleteness}}
+\tr{\td{\code{\verb~|probe-b12-closure-proof-slot-bad~} (S-F1; pinned)}\td{\code{\verb~|(fun x => g (R x)) I = (fun x => g (R x)) h~}}\td{R}\td{A}\td{A}\td{beta on both sides, then the row above under \code{\verb~|g~}}\td{TRUE}}
+\tr{\td{\code{\verb~|probe-b12-let-proof-slot-bad~}}\td{\code{\verb~|(let x := I; g (R x)) = (let x := h; g (R x))~}}\td{R}\td{A}\td{A}\td{zeta, then as above}\td{TRUE}}
+\tr{\td{\code{\verb~|probe-b12-lam-closure-proof-slot-bad~}}\td{\code{\verb~|(fun x => g (fun n => R x)) I = (..) h~}}\td{R}\td{A}\td{A}\td{beta; cong under the lambda (xi) and \code{\verb~|g~}; \code{\verb~|R I = R h~}}\td{TRUE}}
+\tr{\td{\code{\verb~|probe-b1-abbrev-proof-arg~}}\td{\code{\verb~|F I = F h~}, \code{\verb~|F := fun x => R x~} an abbrev}\td{R}\td{A}\td{A}\td{\code{\verb~|I = h~} by PI, cong under \code{\verb~|F~} (or delta on both sides and the first row). Officially an abbrev head is unfolded without comparing arguments}\td{TRUE}}
+\tr{\td{\code{\verb~|probe-b1-theorem-head~}}\td{the same, \code{\verb~|F~} with hint opaque}\td{R}\td{A}\td{A}\td{the same}\td{TRUE}}
+\tr{\td{\code{\verb~|probe-b1-rec-under-ctor-bad~}}\td{\code{\verb~|Nat.succ (R I) = Nat.succ (R h)~}}\td{R}\td{A}\td{A}\td{the first row under \code{\verb~|Nat.succ~}}\td{TRUE}}
+\tr{\td{\code{\verb~|probe-b1-rec-under-axiom-bad~}}\td{\code{\verb~|g (R I) = g (R h)~}}\td{R}\td{A}\td{A}\td{the first row under \code{\verb~|g~}}\td{TRUE}}
+\tr{\td{\code{\verb~|facts-agreement-noncongruent-app-bad~} (S-F2; pinned)}\td{\code{\verb~|w I p1 = w h p2~}, \code{\verb~|w : (x : And True True) -> Q (R x) -> Nat~}, \code{\verb~|p1 : Q (R I)~}, \code{\verb~|p2 : Q (R h)~}}\td{A}\td{A}\td{A}\td{\code{\verb~|I = h~} by PI; so \code{\verb~|Q (R I) = Q (R h)~} by cong; \code{\verb~|p1~}, \code{\verb~|p2~} are then proofs of one proposition: \code{\verb~|p1 = p2~} by PI; cong under \code{\verb~|w~}}\td{TRUE}}
+\tr{\td{\code{\verb~|facts-agreement-noncongruent-samedef-bad~}}\td{the same, \code{\verb~|w~} a regular definition}\td{A}\td{A}\td{A}\td{the same (or delta first)}\td{TRUE}}
+\tr{\td{\code{\verb~|facts-etas-prop-mask-noncongruent-bad~}}\td{\code{\verb~|S.mk I p1 s.3 = s~}, \code{\verb~|s~} an axiom of the structure}\td{A}\td{A}\td{A}\td{structure eta: \code{\verb~|s = S.mk s.1 s.2 s.3~}; \code{\verb~|s.1 = I~} by PI; \code{\verb~|s.2 : Q (R s.1) = Q (R I)~}, so \code{\verb~|s.2 = p1~} by PI; cong under \code{\verb~|S.mk~}}\td{TRUE}}
+\tr{\td{\code{\verb~|facts-unread-noncongruent-bad~}}\td{\code{\verb~|d 0 I = d 1 h~}, \code{\verb~|d u x := R x~}}\td{A}\td{R}\td{R}\td{delta, beta: \code{\verb~|d 0 I = R I~}, \code{\verb~|d 1 h = R h~}; the first row. (\code{\verb~|both~} rejects only because the quick refutation of pass A answers F on \code{\verb~|0~} / \code{\verb~|1~} before the plan; the equation is the same)}\td{TRUE}}
+\tr{\td{\code{\verb~|open-flag-closed-bad~} (package S, batch 8; NOT in the list of S-F1 / S-F2, it was written after M4's fix)}\td{\code{\verb~|Nat.add (G I) 0 = Nat.add (G h) 0~}, \code{\verb~|G x := And.rec (fun _ _ => 0) x~} regular, both sides closed}\td{R}\td{A}\td{A}\td{\code{\verb~|I = h~} by PI, cong under \code{\verb~|G~} and \code{\verb~|Nat.add _ 0~}. Officially both sides are closed, so the left side is folded to \code{\verb~|0~} before any same-head comparison, and \code{\verb~|0~} against the stuck right side is false; B1 compares the arguments of the two \code{\verb~|Nat.add~} first}\td{TRUE}}
+\tr{\td{\code{\verb~|acc-rec-intro-vs-axiom~} (new, \code{\verb~|work/s2/attacks2/~})}\td{\code{\verb~|Acc.rec F (Acc.intro true k) = Acc.rec F h~}, \code{\verb~|h~} an axiom of \code{\verb~|Acc R true~}}\td{R}\td{A}\td{A}\td{\code{\verb~|h = Acc.intro true k~} by PI; cong under \code{\verb~|Acc.rec F _~}}\td{TRUE}}
+}
+
+\p{\strong{The classification is checked by the official checker itself} (\code{\verb~|work/s2/gen/certify.py~}, \code{\verb~|work/s2/certify/~}, 15 exports, one per row above, both directions of the first): each proves the SAME statement not by \code{\verb~|Eq.refl~} but by the derivation of the table written as a term - \code{\verb~|Eq.rec~} (congruence) over \code{\verb~|Eq.refl x : x = y~} for the two proofs \code{\verb~|x~}, \code{\verb~|y~}, an equation the official checker accepts by proof irrelevance; for the agreement and structure eta rows the motive quantifies over the dependent proof (\code{\verb~|fun x _ => forall (p : Q (R x)), w I p1 = w x p~}). \strong{The official checker accepts all 15} (so do the machine under \code{\verb~|v0~}, \code{\verb~|rich~}, \code{\verb~|both~} and both leaders). What this certifies: every statement that the options accept against the official verdict is a THEOREM for the official checker, so its acceptance is not the acceptance of a false statement. That the equation is moreover DEFINITIONAL in the theory is the derivation of the table: proof irrelevance and congruence are conversion rules of the theory, the certificate uses nothing else (\code{\verb~|Eq.rec~} on \code{\verb~|Eq.refl~} is how one writes them as a term). The official \code{\verb~|is_def_eq~} fails to FIND these equations - it reduces one side before it compares, and it does not compare the arguments of an abbrev, a recursor or a closure -; none of them is false.}
+
+\p{The whole run (\code{\verb~|work/s2/out/known-judged.tsv~}, configurations \code{\verb~|v0~}, \code{\verb~|rich~}, \code{\verb~|skip~}, \code{\verb~|cong~}, \code{\verb~|both~}, \code{\verb~|bothrich~}):}
+
+\table{
+\tr{\th{Set}\th{exports}\th{official reject}\th{of them accepted under an option}\th{rejected under every configuration}\th{official accept (accepted under every configuration)}}
+\tr{\td{package S (\code{\verb~|work/soundness/exports/~})}\td{351}\td{304}\td{\strong{14} (the rows above without the last)}\td{289 (+ 1 declined by the pipeline in every configuration, \code{\verb~|str-lit-missing-prerequisites-bad~})}\td{47}}
+\tr{\td{the arena's \code{\verb~|bad~} tests (\code{\verb~|work/arena-site/tests/bad/~}: 32 bugs, 5 other, 8 perf, 47 tutorial)}\td{92}\td{92}\td{\strong{0}}\td{\strong{92}}\td{-}}
+}
+
+\p{No export is accepted under \code{\verb~|v0~} or \code{\verb~|rich~} that the official checker rejects.}
+
+\p{Rejected by the options although TRUE in the theory (so the options are not complete for the theory either, and do not need to be): \code{\verb~|nontransitive-regular-def-bad~}, \code{\verb~|nontransitive-same-decl-bad~} (\code{\verb~|d h = 5~}: delta, the first row, iota; nothing in the machine closes pairs transitively), the arena's \code{\verb~|125_accRecNoEta~} and \code{\verb~|101_ruleKAcc~} (\code{\verb~|Acc.rec (fun _ _ _ => p) h = p~} for a variable \code{\verb~|h~}: TRUE by PI against \code{\verb~|Acc.intro~} + iota; the arena lists them as \code{\verb~|bad~}; no shortcut synthesises a constructor form from a proof, every configuration rejects), and \code{\verb~|acc-rec-no-eta-axiom~} of this review.}
+
+\p{Not in this class (false or not derivable; rejected by every configuration): the other 289 + 92 officially rejected exports of package S and of the arena, among them the eager-reduction rows (declined by the machine by rule M6-F26, rejected by the reference engine) and \code{\verb~|100_ruleKbad~} (\code{\verb~|Eq.rec a (h : true = false) = a~}: not derivable, \code{\verb~|h~} is no \code{\verb~|Eq.refl~}).}
+}
+
+\subtree{
+\title{5. The leaders}
+
+\p{Read: \code{\verb~|refs/gruszka/src/tc.rs~} (\code{\verb~|spines_defeq_skip~} 8573, \code{\verb~|unused_args~} 8603, \code{\verb~|prop_positions~} / \code{\verb~|surely_prop~} 8641-8721, \code{\verb~|defeq_app~} 8770, \code{\verb~|try_eta_struct~} 8823, \code{\verb~|closure_congr~} 6792, the same-head step of lazy delta 8180, \code{\verb~|race_k~} 7831, \code{\verb~|probe_args~} 8414), \code{\verb~|refs/nano-lean/src/value_checker/conv.rs~} (\code{\verb~|def_eq_core~} 246, \code{\verb~|relevant~} 389, \code{\verb~|prop_type~} 433, \code{\verb~|args_eq~} 455, \code{\verb~|probe_args~} 359, \code{\verb~|def_eq_app~} 587, \code{\verb~|eta_struct~} 628, \code{\verb~|same~} 107). Both are the same family of shortcuts (gruszka names its source: Pestka's ProofArgsSkipped, unusedArgs, EtaProofFieldsSkipped).}
+
+\table{
+\tr{\th{}\th{machine (\code{\verb~|skipargs~}, \code{\verb~|congruence~})}\th{gruszka}\th{nano-lean}}
+\tr{\td{"position is a proof"}\td{INFER (infer-only) of the domain under the telescope returns a SORT record; level instantiated at the head's levels; exact always-zero test}\td{syntactic: after the domain's own Pis, a variable or constant applied to as many arguments as its type has Pis, that type ending in a sort; level instantiated at the head's levels (\code{\verb~|zeroish~})}\td{syntactic, the same shape; the sort must be always zero AS WRITTEN (zero, \code{\verb~|max~}, \code{\verb~|imax _ 0~}): no instantiation of universe parameters (\code{\verb~|Sort u~} at \code{\verb~|u := 0~} is compared)}}
+\tr{\td{proof position whose domain mentions a skipped, different unread position}\td{compared (\code{\verb~|differ~} rule)}\td{skipped}\td{skipped}}
+\tr{\td{unread positions}\td{definitions and theorems, spine >= lamArity, superset mask up to 65,535 lambdas, first 64 positions}\td{definitions only (not theorems), at most 64 lambdas, spine >= lambdas}\td{definitions and theorems, also for a spine shorter than the lambdas (the rest of the lambdas counts as body)}}
+\tr{\td{where the masks are used}\td{c8 (proof positions), same-head step of lazy delta for a regular definition, B1}\td{\code{\verb~|defeq_app~} (proof positions), same-head step for a regular definition, budgeted probes (\code{\verb~|race_k~}, \code{\verb~|probe_args~}, refutation)}\td{\code{\verb~|def_eq_app~}, \code{\verb~|probe_args~} before \code{\verb~|whnf_core~} for every unfoldable same head (budget)}}
+\tr{\td{same-head probe on recursors / \code{\verb~|Quot.lift~}}\td{yes (B1, NOTES-M4 D19)}\td{none in the code I read (it accepts the \code{\verb~|And.rec~} rows of section 4 by a route I did not trace)}\td{no}}
+\tr{\td{structure eta: proof fields}\td{skipped}\td{skipped}\td{compared (proof irrelevance)}}
+\tr{\td{closure congruence}\td{slots by the complete CONV (B12)}\td{slots by identity and by pairs ALREADY found equal (\code{\verb~|same_val~}), never a comparison of its own}\td{structural identity only (\code{\verb~|same~}, fuel 512)}}
+\tr{\td{proofs by type before \code{\verb~|whnf_core~}}\td{B2, when the value is already known to be a proof}\td{no}\td{yes, always (\code{\verb~|proof_irrel~} precedes \code{\verb~|whnf_core~})}}
+}
+
+\p{Precautions the machine takes and the leaders do not: the \code{\verb~|differ~} rule; exact level instantiation with a semantic sort (nano-lean is MORE conservative here: no instantiation). Precautions the leaders take and the machine does not: none that bears on soundness. gruszka restricts unread positions to definitions and to 64 lambdas, nano-lean compares proof fields in structure eta and never compares closure slots by conversion: all three are restrictions of completeness / cost, not conditions of the equations. I could not construct a false equation from the absence of the \code{\verb~|differ~} rule (section 2.2: the two proofs then have types that the consumer's side forces to agree, or the pair is never asked), so I do not claim the leaders are unsound there; the machine's rule is the more careful one and costs a mask intersection.}
+
+\p{Run (Docker, no network, the arena's run lines; \code{\verb~|work/s2/leaders.sh~}, \code{\verb~|work/s2/out/leaders.tsv~}):}
+
+\table{
+\tr{\th{official}\th{gruszka}\th{nano-lean}\th{exports (872: all of 3.1 with their non-literal twins, 3.2, 3.3, the certificates of section 4, S's conversion groups \code{\verb~|facts-*~}, \code{\verb~|probe-*~}, \code{\verb~|mask-*~}, \code{\verb~|pirr-*~}, \code{\verb~|nontransitive-*~}, \code{\verb~|eta-*~}, \code{\verb~|unitlike-*~}, \code{\verb~|k-eq-rec-*~}, \code{\verb~|krule-*~}, \code{\verb~|open-flag-*~}, the arena's \code{\verb~|100_ruleKbad~}, \code{\verb~|101_ruleKAcc~}, \code{\verb~|125_accRecNoEta~})}}
+\tr{\td{accept}\td{accept}\td{accept}\td{253}}
+\tr{\td{reject}\td{reject}\td{reject}\td{600}}
+\tr{\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{9}}
+\tr{\td{reject}\td{\strong{accept}}\td{reject}\td{10}}
+}
+
+\ul{
+\li{Neither leader accepts any FALSE claim of this review (the 96 hand-written and 362 random \code{\verb~|-bad~} exports) or of package S.}
+\li{\strong{gruszka accepts all 14 exports of package S} that the machine accepts under the options (the 13 of S-F1 / S-F2 and \code{\verb~|open-flag-closed-bad~}); \strong{nano-lean accepts 6 of them} (\code{\verb~|facts-agreement-noncongruent-app-bad~}, \code{\verb~|-samedef-bad~}, \code{\verb~|facts-unread-noncongruent-bad~}, \code{\verb~|probe-b1-abbrev-proof-arg~}, \code{\verb~|probe-b1-theorem-head~}, \code{\verb~|open-flag-closed-bad~}): its probe is for unfoldable heads only and it has no closure congruence and no ETAS mask.}
+\li{Both leaders accept three more officially rejected exports that the machine REJECTS also with the options: \code{\verb~|krule-eager-alone-bad~}, \code{\verb~|krule-memo-across-binders-eager-bad~}, \code{\verb~|krule-memo-across-declarations-eager-bad~} (by package S's description the same class, inside the K rule under eager reduction; the machine declines such a declaration, the reference engine rejects it). gruszka also accepts \code{\verb~|nontransitive-regular-def-bad~} and \code{\verb~|nontransitive-same-decl-bad~} (\code{\verb~|d h = 5~}, true in the theory; by which route I did not trace).}
+\li{Neither leader accepts \code{\verb~|acc-rec-intro-vs-axiom~} (B1 on a recursor head is the machine's alone; why gruszka accepts the \code{\verb~|And.rec~} rows and not this one I did not trace), nor the arena's \code{\verb~|125_accRecNoEta~}, \code{\verb~|101_ruleKAcc~}, \code{\verb~|100_ruleKbad~}. Both accept the 15 certificates of section 4, as the official checker does.}
+}
+
+\p{So "as the leaders do" is literally true for gruszka: on these 872 exports gruszka differs from the official verdict on 19, nano-lean on 9, the machine on 15 under some configuration with an option (14 of package S and the \code{\verb~|Acc~} analogue; 14 of the 15 under \code{\verb~|both~}), on 4 with \code{\verb~|skipargs~} alone, on none without the options.}
+}
+
+\subtree{
+\title{6. Not established}
+
+\ul{
+\li{\strong{No proof.} The verdict rests on reading the code, on the argument of section 2 and on the attacks; nothing is mechanised. The induction of 2.2 uses the standard meta-theory of the official algorithm (subject reduction, uniqueness of types up to conversion, soundness of the official rules), which is itself not mechanised for all of Lean 4.}
+\li{\strong{The precondition of 2.1} (every comparison is between well-typed terms) was established by reading the call sites of \code{\verb~|Conv.conv~} / \code{\verb~|Cargs.cargs~} and by the \code{\verb~|ctx~} attacks, not exhaustively. Not read line by line: the K1 code objects (\code{\verb~|Code~}, \code{\verb~|Elab~}, case trees, BODY / RULE / LEAF blocks), \code{\verb~|Rules~} (\code{\verb~|k2~}), \code{\verb~|Tier~} (\code{\verb~|t2~}), \code{\verb~|Same~} (the \code{\verb~|same~} switch; it was ON in \code{\verb~|rich~} / \code{\verb~|bothrich~} / \code{\verb~|bothall~} runs, but it is M4's official-exact claim and S's to attack). They reduce and identify; a fault there is a fault of the machine without the options.}
+\li{\strong{Inference is now the only line of defence} for proof arguments and unread arguments (section 0, point 2). How likely a fault of INFER is that the type comparison of proof irrelevance would have caught, I cannot say; one seeded example shows the mechanism, no real one is known.}
+\li{\strong{Parallel workers}: the publication of fact records (\code{\verb~|FactStore~}: one compare-and-set per row, immutable records) was reviewed by reading; one configuration with four workers ran the 134 hand-written attacks only. No export targets a race.}
+\li{\strong{Native image}: every run is the JVM launcher.}
+\li{\strong{Scale}: \code{\verb~|shortcheck~} ran on the slices listed in 3.6, not on all of Mathlib, Std or Init (Init: M4, before D27, NOTES-M4). The whole-Mathlib runs of P8 show that every unit is accepted, which says nothing about soundness.}
+\li{\strong{Shapes without a hand-written attack}: mutual and nested inductive types, string literals (\code{\verb~|String~} is a structure with a proof field in this toolchain: the ETAS mask applies to it), \code{\verb~|Nat~} literal views. They occur in the Mathlib slices of 3.6 / 3.7 only.}
+\li{\strong{Positions from 64 on} are always compared; nothing was skipped there to attack. Telescopes above 65,535 binders get no facts (not exercised).}
+\li{\strong{The leaders} were run on the hostile exports only as black boxes; their sources were read for the shortcuts, not audited.}
+\li{\strong{Universe levels} (finding S-F3 of package S, the official incomplete relation against the complete one) are outside this review; every run used the default (official) relation.}
+\li{\strong{Eager reduction}: a declaration that enters it is declined by the machine in every configuration, with the options as without; the options were therefore never exercised under ER.}
+}
+}
+
+\subtree{
+\title{7. Reproduction}
+
+\pre{\verb~|
+python3 -I work/s2/gen/attacks.py                      # work/s2/attacks/*.ndjson (134) + attacks.tsv
+S2_DAT=1 python3 -I work/s2/gen/attacks.py             # work/s2/attacks-dat/ (the same, no literal arguments)
+python3 -I work/s2/gen/attacks2.py                     # work/s2/attacks2/ (Acc.rec, Quot, unit-like, Prop structures)
+python3 -I work/s2/gen/certify.py                      # work/s2/certify/cert-*.ndjson: section 4 as terms for the official checker
+for f in work/s2/certify/cert-*.ndjson; do rlvm-testkit/bin/testkit verdict $f; done     # 15 x accept
+python3 -I work/s2/gen/fuzz.py SEED 100 work/s2/attacks/fuzz      # seeds 11..14
+python3 -I work/s2/gen/mutate.py work/s2/attacks/mut-mathlib --per 120 --seed 7 work/exports/slices/good/Mathlib.Algebra.Group.Basic.cone.ndjson
+scripts/build.sh --published --jvm-only --dist work/s2/dist2
+bench/slot.sh -- python3 -I work/s2/judge.py --manifest work/s2/attacks/attacks.tsv --out OUT.tsv -j 3   # one line per export
+bench/slot.sh -- work/s2/campaign.sh                   # known exports, leaders (Docker), corpora with shortcheck, mutants, seeded faults
+bench/slot.sh -- work/s2/campaign2.sh                  # attacks2, certificates under the machine, leaders on them
+python3 -I work/s2/leaders-summary.py                  # official / gruszka / nano-lean on every hostile export
+work/s2/stats.sh congruence,skipargs warm,gated,expect,facts,probes FILE     # one run with the shortcut counters
+~}
+}
