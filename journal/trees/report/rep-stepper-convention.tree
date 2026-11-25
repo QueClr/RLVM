@@ -1,0 +1,365 @@
+\title{The host-level control convention of the RLVM machine}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/design/review/stepper-convention.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Decision record for RECONCILIATION B4 (critic finding C2.1), from the measurements of \code{\verb~|spikes/stepper~} (README and \src{spikes/stepper/results/tables.md} there). Sections 2 and 3 are written as rules for the implementers of \code{\verb~|rlvm-machine~}; they replace the "Decision" paragraph of ISA 8.2 and refine its candidate (ii).}
+
+\subtree{
+\title{1. Decision}
+
+\p{\strong{The machine runs judgments by bounded host recursion and writes frames lazily (convention H, host depth bound 64).} A sub-judgment is a Java call while at most 64 judgments are on the host stack; a judgment is written once, as a chain of small step methods whose parameter lists are the frame payloads of ISA 1.3; a frame is written only when the bound is passed (one judgment in 9,000 on Init, one in 4,000 on Cedar), and from then on \code{\verb~|W~} is run like any worklist. With the bound set to 0 the same source \em{is} the worklist machine of ISA 1.3. No fused family loops, no reserved frame slots, no frame for a \code{\verb~|TRY~} that completes.}
+
+\p{CPU time relative to plain host recursion R, same operations, same results (geometric mean over four workloads: Init and Cedar, declaration types only and types + definition values, 16 MiB sessions; first number: ratio of the minimum pass times; in brackets: median of the per-round paired ratios; aarch64, Docker with the arena limits; the same code measured twice differs by up to 3 points, see section 6):}
+
+\table{
+\tr{\th{convention}\th{native image CE}\th{native CE, steps force-inlined}\th{JVM, Graal JIT}\th{Graal JIT, steps force-inlined}\th{JVM, C2}\th{C2, steps force-inlined}}
+\tr{\td{W0: ISA 1.3 as first written (\code{\verb~|run()~} -> \code{\verb~|X.step(m)~} -> \code{\verb~|switch (st)~}, registers in fields)}\td{1.35 (1.32)}\td{}\td{1.31 (1.28)}\td{}\td{1.57 (1.50)}\td{}}
+\tr{\td{W1: fused loop per family, registers in locals, dense dispatch, inert nests in one loop (candidate (i) of ISA 8.2)}\td{1.11 (1.10)}\td{1.13 (1.12)}\td{1.03 (1.02)}\td{1.00 (1.02)}\td{1.17 (1.14)}\td{1.16 (1.15)}}
+\tr{\td{\strong{H64: bounded host recursion, D = 64}}\td{\strong{1.04 (1.06)}}\td{\strong{1.05 (1.04)}}\td{\strong{1.05 (1.06)}}\td{\strong{1.03 (1.04)}}\td{\strong{1.02 (1.02)}}\td{\strong{1.03 (1.01)}}}
+\tr{\td{Hi64: H64 with the inert-nest loop of W1}\td{1.02 (1.05)}\td{1.06 (1.07)}\td{1.01 (1.02)}\td{0.99 (1.02)}\td{1.04 (1.03)}\td{1.05 (1.02)}}
+\tr{\td{H8 / H32 / H256 / no bound}\td{1.14 / 1.07 / 1.08 / 1.07}\td{1.14 / 1.04 / 1.03 / 1.05}\td{1.13 / 1.05 / 1.03 / 1.03}\td{1.12 / 1.03 / 1.06 / 1.01}\td{1.12 / 1.00 / 1.02 / 1.08}\td{1.13 / 1.04 / 1.02 / 1.02}}
+}
+
+\ul{
+\li{The target of RECONCILIATION B4 (at most +15\% CPU over plain recursion on the declaration types of Init and Cedar) is met by H on every runtime and both corpora: +0\% to +7\% over the 24 estimates (six runtime configurations, two corpora, two estimators; per-workload tables in \src{spikes/stepper/results/tables.md}, section 2). W0 misses it everywhere (+26\% to +51\%). W1 meets it on the Graal JIT (+1\% to +4\%), is at +10\% to +18\% on the native image and at +15\% to +18\% on C2.}
+\li{H is the only candidate whose cost does not depend on which compiler runs it, which matters because the platform gate (JVM with JIT against native image) is still open.}
+\li{Instruction counts overstate every candidate: W1 executes 20\% more instructions than R and H64 15\% more (6\% with the steps inlined) in the native image, for +10\% and +6\% CPU. The instructions a convention adds are cheap ones; what costs is the data-dependent dispatch of an explicit stack. Reading the Init types workload with \code{\verb~|perf stat~} (\code{\verb~|spikes/stepper/results/counters.txt~}, net of set-up): W1 takes 25\% more branch misses than R, W0 27\%, the inert-nest loop alone 14\%, H64 none.}
+\li{Frames written per judgment: W0 0.19, W1 0.064, H64 0.00011 (Init, types + values).}
+\li{1,000,000-deep application, binder and mixed nests run under H64 on a 512 KiB thread stack (64 KiB is enough in the native image, 128 KiB on a cold JVM) with the same results as R, which needs a 256 MiB stack for them (128 MiB overflows).}
+\li{Budgets are exact and rollback works without materialising anything: \code{\verb~|CONV~} under a \code{\verb~|TRY~} gives the same outcome and the same tick count per root with D = 0, D = 64 and no bound (section 2, H11).}
+}
+}
+
+\subtree{
+\title{2. The convention, as rules}
+
+\p{Names: \code{\verb~|m~} is the worker's \code{\verb~|Machine~}; a \em{judgment} is an operation of ISA section 4 that may need sub-judgments (\code{\verb~|EVAL~}, \code{\verb~|WHNF~}, \code{\verb~|CONV~}, \code{\verb~|INFER~}, ...); an \em{operation} of the library \code{\verb~|Ops~} never does. \code{\verb~|D~} is the constant \code{\verb~|Op.HOST_DEPTH~} (rule H9).}
+
+\subtree{
+\title{H1. The specification does not change}
+
+\p{The transition system of ISA 1.3 stays the specification: the frames, their payload layouts, \code{\verb~|call~}, \code{\verb~|ret~}, \code{\verb~|tail~}, \code{\verb~|open~}, \code{\verb~|close~}, \code{\verb~|try~}, \code{\verb~|cut~}, the observables. What changes is \em{when a frame exists in memory}: a judgment that is running on the host stack has no frame; its frame \code{\verb~|op[k](payload)~} is written at the moment the judgment is suspended, and it then has exactly the layout of 1.3. \code{\verb~|W~} holds the suspended part of the computation, the host stack the running top of it (at most \code{\verb~|D + 2~} judgments).}
+
+\p{With \code{\verb~|D = 0~} every \code{\verb~|call~} of 1.3 writes its frame and the driver loop is the stepper: the same source is the worklist machine. That build is a test configuration (H12), not a second implementation.}
+}
+
+\subtree{
+\title{H2. A judgment is a chain of step methods, written once}
+
+\ul{
+\li{One static method per state of the judgment: the \em{entry step} \code{\verb~|J(m, operands.., d)~} is state 0; there is one \em{continuation step} \code{\verb~|k_Jk(m, payload.., r, d)~} for every resume state \code{\verb~|k~} (the prefix \code{\verb~|k_~} is how the build finds them, H10).}
+\li{The parameters of a continuation step are the payload words of the frame \code{\verb~|J[k]~} in the order of 1.3, then the result register \code{\verb~|r~} (the ISA's \code{\verb~|A~}: the result of the sub-judgment that was awaited), then the host depth \code{\verb~|d~}. A step may therefore be entered from two places with no difference: by the step before it, on the host stack, or by the driver, from a frame.}
+\li{A step runs from its resume point to the next sub-judgment call or to the end of the judgment. It returns the judgment's result as an \code{\verb~|int~} (value ref, level id, truth value) or a signal (H5).}
+\li{A step reads its parameters, the stores and the machine stacks it owns (H7). It never reads \code{\verb~|W~}.}
+}
+}
+
+\subtree{
+\title{H3. Calling a sub-judgment}
+
+\pre{\verb~|
+int r = K(m, x.., d + 1);                                      // call K(x) => k
+return r >= SIG ? m.sigN(r, KEY_J_k, live..) : k_Jk(m, live.., r, d);
+~}
+
+\ul{
+\li{\code{\verb~|live..~} are the payload words of \code{\verb~|J[k]~}: what the rest of the judgment needs. \code{\verb~|m.sigN~} (one per payload size N) is out of line: on SUSP it writes the frame \code{\verb~|J[k](live..)~} and returns SUSP; on any other signal it returns the signal unchanged.}
+\li{\em{Tail position} (the \code{\verb~|tail~} rule: the judgment owns no open binder and no scratch): \code{\verb~|return K(m, x.., d + 1);~} with no test.}
+\li{\em{Inside a loop} (spines, telescopes, the \code{\verb~|WHNF~} and \code{\verb~|LAZYD~} loops): the loop is a method whose parameters include the loop variables; the call site is \code{\verb~|if (r >= SIG) return m.sigN(r, KEY_J_k, live.., i);~}; the continuation step finishes the interrupted iteration and calls the loop method with the next index (template, \code{\verb~|args~} / \code{\verb~|k_args1~}). A resumed loop costs one host frame, not one per iteration.}
+\li{A call that the inline fast path of \code{\verb~|K~} would answer is still written as a call of \code{\verb~|K~}: the fast path is the first lines of \code{\verb~|K~}'s entry step (H4). Where a caller wants the answer without the call it tests the cheapest case itself (\code{\verb~|x == y~}, a flag bit) and calls otherwise.}
+}
+}
+
+\subtree{
+\title{H4. The entry step: fast path, tick, depth test, body - in this order}
+
+\pre{\verb~|
+static int J(Machine m, int x, int d) {
+    // 1. inline answers (identity, flag, memo, cache): return at once. No tick, no event, no frame.
+    // 2. if (--m.fuel < 0) return m.exhaust();                       TICK (H11)
+    // 3. if (d > D) return m.spillN(KEY_J_0, x..);                   too deep: become the frame J[0](x)
+    // 4. the body (H3)
+}
+~}
+
+\p{Step 1 is the \code{\verb~|inline~} transition of 1.3, steps 2-4 are the \code{\verb~|call~}. \code{\verb~|spillN~} gives the tick back (\code{\verb~|m.fuel++~}): the frame is run later by the driver, which enters \code{\verb~|J~} again. The \code{\verb~|call~} counter of the frame regression test (ISA section 11) is incremented between 2 and 3 in statistics builds; it does not depend on \code{\verb~|D~}. Leaf cases that need no sub-judgment return before step 3 and can never be frames.}
+}
+
+\subtree{
+\title{H5. Signals}
+
+\p{Three \code{\verb~|int~}s that no judgment returns as a result:}
+
+\table{
+\tr{\th{signal}\th{meaning}\th{what a step does with it}}
+\tr{\td{\code{\verb~|SUSP = 0x7FFF_FFFF~}}\td{the judgment just called is suspended; its frames are in the side buffer}\td{writes its own continuation frame (\code{\verb~|sigN~}), returns SUSP}}
+\tr{\td{\code{\verb~|ABORT = 0x7FFF_FFFE~}}\td{the budget of the innermost \code{\verb~|TRY~} ran out, or a kernel error / recoverable limit was raised (\code{\verb~|m.err~} holds the code)}\td{returns it; writes nothing}}
+\tr{\td{\code{\verb~|FATAL = 0x7FFF_FFFD~}}\td{\code{\verb~|fault(E)~} of ISA 1.4}\td{returns it; writes nothing; \code{\verb~|TRY~} does not intercept it}}
+}
+
+\p{\code{\verb~|SIG = FATAL~}; \code{\verb~|r >= SIG~} is the only test on the normal path. It is correct for the value encoding of ISA 2.1 (small naturals are negative \code{\verb~|int~}s, record refs are below 2^28, truth values are 0..3); \code{\verb~|Op.java~} must assert that level, list and substitution ids stay below \code{\verb~|SIG~}. (The spike's values use the sign bit differently, so its signals are the two smallest \code{\verb~|int~}s and its test is \code{\verb~|r <= SIG~}.)}
+}
+
+\subtree{
+\title{H6. Frames, the side buffer and the driver}
+
+\ul{
+\li{Frame layout: payload \code{\verb~|p0 .. p(n-1)~}, then the header \code{\verb~|key:12 | 0:4 | n:16~} with \code{\verb~|key = op << 4 | st~}, as in ISA 1.3. The payload of \code{\verb~|J[k]~} is the parameter list of \code{\verb~|k_Jk~} (H2).}
+\li{An unwind writes frames innermost first. \code{\verb~|sigN~} and \code{\verb~|spillN~} write them into the \em{side buffer} \code{\verb~|m.S~}, which grows downwards, so that its contents are in worklist order. A buffer of \code{\verb~|(D + 3) * maxFrameWords~} words never overflows.}
+\li{\code{\verb~|Machine.drive(r)~} is the only code that knows \code{\verb~|W~}. With \code{\verb~|r~} the outcome of a judgment called at depth 0:}
+}
+
+\pre{\verb~|
+drive(r):  loop:
+    r is a result and W is at the caller's level:   return r
+    r == SUSP:    W[wp ..] := S[sp ..];  wp += length;  sp := end of S          one arraycopy
+    r == ABORT:   cut W to the innermost TRY frame (or to DECL: REJECT / DECLINE with m.err)
+    r == FATAL:   cut W to DECL: DECLINE with m.err, session reset
+    pop the top frame f = op[k](p);  r := Family(op).resume(m, key, W, base of p, r)     entered with d = 0
+~}
+
+\ul{
+\li{\code{\verb~|resume~} is one \code{\verb~|switch~} on \code{\verb~|key~} per family; each case calls the step method with the payload words as arguments (template). The driver's own loop is a few lines.}
+\li{\code{\verb~|DECL~} is the Java method that calls \code{\verb~|drive~}; its locals are the declaration's phase state.}
+}
+}
+
+\subtree{
+\title{H7. Registers and machine stacks}
+
+\ul{
+\li{The result register \code{\verb~|A~} is the Java return value; operands are Java parameters; \code{\verb~|d~} is a parameter. Hot code keeps nothing in \code{\verb~|Machine~} fields except what the library needs (store bases, \code{\verb~|fuel~}).}
+\li{\code{\verb~|W~}, \code{\verb~|wp~}, \code{\verb~|S~}, \code{\verb~|sp~} are fields used only by \code{\verb~|drive~}, \code{\verb~|sigN~}, \code{\verb~|spillN~}.}
+\li{\code{\verb~|SC~} / \code{\verb~|ssp~} (binders), \code{\verb~|X~} / \code{\verb~|xp~} (scratch), \code{\verb~|es~} / \code{\verb~|ep~} (working environments) and the mode register \code{\verb~|ER~} stay machine state owned by judgments, with the invariants I-SCOPE and I-STACKS read as: a step that returns a \em{result} has restored what its judgment pushed; a step that returns SUSP leaves it in place (the judgment is alive, in \code{\verb~|W~}; a base index the continuation needs, such as \code{\verb~|xb~}, is a payload word); a step that returns ABORT or FATAL restores nothing: the \code{\verb~|TRY~} or \code{\verb~|DECL~} that receives the signal restores \code{\verb~|ssp~}, \code{\verb~|xp~}, \code{\verb~|ep~}, \code{\verb~|ER~} from the values it saved (the \code{\verb~|cut~} of ISA 1.4). \code{\verb~|SC~} entries need no owner position.}
+\li{A judgment with two results (\code{\verb~|LAZYD~}) returns one and leaves the other in \code{\verb~|m.A2~}, which the continuation step of its caller reads before it calls anything.}
+\li{Activations of code objects (K1): the registers of an activation live in a register stack \code{\verb~|m.RS~} (a LIFO window per activation, \code{\verb~|rp~} saved by \code{\verb~|TRY~}), not in the frame, because a frame has no address until it is written. \code{\verb~|Code.run(m, blk, pc, rbase, d)~} is entry and continuation step at once (the state is the pc); a class-j instruction is rule H3 with the frame \code{\verb~|ACT [blk, pc, dst, argRun, capRun, ls, rbase]~}. This item is a consequence of the convention, not something the spike measured.}
+}
+}
+
+\subtree{
+\title{H8. Fast paths}
+
+\ol{
+\li{The fast path of a judgment is straight-line code at the head of its entry step (H4): identity, flag, memo slot, pair table, inline cache. There is no separate \code{\verb~|J.fast~}, no MISS value and no protocol.}
+\li{Keep the entry step small enough to be compiled well: leaf answers inline, everything that allocates, probes on a miss, grows or reports behind a call of an out-of-line method (\code{\verb~|Ops~} slow parts).}
+\li{Inert evaluation: an application nest whose heads are constants and whose leaves are variables, sorts, constants, literals and binders (closures) is evaluated by one loop over a scratch buffer (\code{\verb~|Inert.eval~} in the spike) called from \code{\verb~|EVAL~}'s entry step when the node carries the flag. 82\% to 95\% of the term nodes evaluated in Init and Cedar are in such nests. Measured effect of the loop on H (Hi64 against H64): 2 to 5 points faster on the Graal JIT, within the noise (-3 to +2 points) on the native image and on C2; on plain recursion (Ri against R) it is neutral on the Graal JIT and 2 to 4 points \em{slower} on the native image and C2. Keep it behind the node flag and decide per platform when \code{\verb~|EVAL~} is profiled on the real machine; it is not part of the control convention.}
+\li{Loops that the algorithm has anyway (spine walks, let chains, telescopes, the \code{\verb~|WHNF~} loop) are Java loops inside one step; they do not recurse on the host and do not count against \code{\verb~|D~}.}
+}
+}
+
+\subtree{
+\title{H9. The depth bound}
+
+\ul{
+\li{\code{\verb~|D = Op.HOST_DEPTH = 64~}. Every sub-judgment call passes \code{\verb~|d + 1~}, tail calls included (a Java tail call still occupies a host frame). The driver and \code{\verb~|DECL~} enter with \code{\verb~|d = 0~}.}
+\li{Only the entry step tests \code{\verb~|d~} (H4), once per judgment that is not answered by its fast path.}
+\li{Why 64. Frames written per judgment on Init (types + values): D = 8: 0.13; D = 32: 0.0024; D = 64: 0.00011; D = 256: 0.000003; Cedar: 0.13, 0.0034, 0.00025, 0.00001. CPU time: D = 8 costs 7 to 10 points more than D = 64; D = 32, 64, 256 and "no bound" cannot be told apart (they differ by less than the 3-point noise). Host stack: the 1,000,000-deep terms run with D = 64 on a 64 KiB thread stack in the native image and on 128 KiB on a cold JVM (interpreter frames); D = 256 needs 384 KiB on a cold JVM. So 64 costs nothing measurable, leaves a default thread stack (1-2 MiB) almost entirely to the library below the judgments (\code{\verb~|rlvm-level~}, \code{\verb~|rlvm-nat~} and their declared recursion bounds), and keeps the collector's stack scan at about 200 frames (R11 B.11: 680 instructions per frame per young collection, here 0.14 M per collection).}
+\li{\code{\verb~|D = 0~} must keep working at every commit (H12).}
+}
+}
+
+\subtree{
+\title{H10. Method sizes and inlining}
+
+\p{Facts (this host, GraalVM CE 25; byte counts from \code{\verb~|javap~} on the spike's classes):}
+
+\table{
+\tr{\th{compiler}\th{limits that matter here}}
+\tr{\td{HotSpot, any JIT}\td{a method above 8,000 bytecodes is never compiled (\code{\verb~|DontCompileHugeMethods~})}}
+\tr{\td{C2}\td{inlines a callee of at most 35 bytecodes always (\code{\verb~|MaxInlineSize~}) and of at most 325 when the call site is hot (\code{\verb~|FreqInlineSize~}); one level of recursive inlining; depth 15}}
+\tr{\td{Graal JIT (CE)}\td{cost-benefit inliner; trivial below 10 nodes, never above 300 nodes (\code{\verb~|MaximumInliningSize~}); recursive inlining up to 5 levels. Observed with \code{\verb~|-Djdk.graal.TraceInlining=true~}: it does \strong{not} inline the continuation steps on its own ("not worth inlining according to the cost-benefit analysis")}}
+\tr{\td{native-image CE}\td{the same inliner without profiles; the continuation steps are not inlined either: H64 executes 15\% more instructions than R, 6\% when they are}}
+}
+
+\table{
+\tr{\th{code}\th{bytecodes}}
+\tr{\td{R: \code{\verb~|eval~}, \code{\verb~|readback~}, \code{\verb~|conv~}}\td{248 / 265 / 300}}
+\tr{\td{H: entry steps \code{\verb~|eval~}, \code{\verb~|rb~}, \code{\verb~|conv~}}\td{276 / 311 / 250}}
+\tr{\td{H: continuation steps}\td{28 to 94}}
+\tr{\td{H: \code{\verb~|drive~} with 22 resume points in one \code{\verb~|switch~}}\td{877}}
+\tr{\td{W1: fused loops of the spike's three small families}\td{1,049 / 1,279 / 1,418}}
+\tr{\td{W0: \code{\verb~|step~} methods of the three judgments}\td{750 / 923 / 1,068}}
+}
+
+\p{Rules:}
+
+\ol{
+\li{An entry step stays below 325 bytecodes (C2's limit for inlining a hot callee, and a size both JITs compile well), a continuation step below 150. A step that grows beyond that is split at a sub-judgment call (that is a new state) or sheds its slow part into an \code{\verb~|Ops~} method.}
+\li{The \code{\verb~|resume~} switch is per family (about 40 bytecodes per case; at most 50 cases per method); \code{\verb~|drive~} itself only dispatches on the family.}
+\li{\p{Continuation steps carry a common name prefix (\code{\verb~|k_conv1~}, \code{\verb~|k_args1~}, ...; entry steps and loop methods do not), so that one pattern selects them, and the build inlines them into their callers and keeps the cold helpers out of line:}
+\ul{
+\li{JVM: \code{\verb~|-XX:CompileCommandFile=<file>~} with \code{\verb~|inline rlvm/machine/*.k_*~} and \code{\verb~|dontinline rlvm/machine/Machine.sig*~}, \code{\verb~|dontinline rlvm/machine/Machine.spill*~} (both JITs honour it);}
+\li{native image: \code{\verb~|-H:+UnlockExperimentalVMOptions -H:PriorityForceInline=rlvm.machine.*.k_* -H:PriorityNeverInline=rlvm.machine.Machine.sig*,rlvm.machine.Machine.spill*~}.}
+}
+\p{This is tuning, not correctness: measured gain 0 to 3 points of CPU on the native image and the Graal JIT, none on C2 (8 points of instructions in the native image). Without the flags the convention still meets the target on every runtime.}}
+\li{Never mark an entry step for inlining (they are recursive), and never inline \code{\verb~|sigN~} / \code{\verb~|spillN~}.}
+\li{The fused-loop alternative needs every family in one method: the spike's three \em{small} families are already 1,000 to 1,400 bytecodes each; the real families (ISA 8.2: 4 to 10 operations of up to 16 states) would sit at the 8,000-bytecode limit that ISA 8.2 has to legislate against. Step methods are two orders of magnitude below it.}
+}
+}
+
+\subtree{
+\title{H11. Budgets, \code{\verb~|TRY~} and failure classes}
+
+\ul{
+\li{\code{\verb~|TICK~}: \code{\verb~|if (--m.fuel < 0) return m.exhaust();~} in the entry step after the fast path (H4), and once per iteration in the \code{\verb~|WHNF~} and \code{\verb~|LAZYD~} loops. \code{\verb~|exhaust()~} records \code{\verb~|E_STEPS~} and returns ABORT. Every 4096 ticks the slow part polls \code{\verb~|firstFailure~} and the memory watermarks and returns FATAL if they fire.}
+\li{\code{\verb~|fail(E)~} is \code{\verb~|return m.fail(E)~} (ABORT with \code{\verb~|m.err = E~}), \code{\verb~|fault(E)~} is \code{\verb~|return m.fault(E)~} (FATAL). There are no Java exceptions on these paths.}
+\li{\code{\verb~|TRY b; call J(x) => k~} is a step like any other (template, \code{\verb~|tryConv~} / \code{\verb~|k_try~}): it saves \code{\verb~|fuel~}, \code{\verb~|ssp~}, \code{\verb~|xp~}, \code{\verb~|ep~}, \code{\verb~|ER~} in locals, sets \code{\verb~|fuel = min(b, fuel)~}, calls \code{\verb~|J~}. If \code{\verb~|J~} returns a result the step settles the fuel and returns it. If \code{\verb~|J~} returns ABORT the step restores the saved stacks and fuel and continues with \code{\verb~|U~} (or passes ABORT on when its budget was capped by an enclosing budget that is now empty). If \code{\verb~|J~} returns SUSP the step writes the \code{\verb~|TRY~} frame of ISA 1.3 like any continuation frame.}
+\li{A \code{\verb~|TRY~} is therefore \em{not} written to \code{\verb~|W~} when it starts, and nothing is materialised for it. The rollback of a segment is: every step between the failing judgment and the \code{\verb~|TRY~} step returns at once (at most \code{\verb~|D + 2~} of them), and whatever part of the segment is in \code{\verb~|W~} is cut by the driver, which pops frames by their \code{\verb~|n~} down to the innermost \code{\verb~|TRY~} frame (cost proportional to the frames discarded, each of which cost more to create; \code{\verb~|tryp~} chaining is not needed).}
+\li{Exactness. A tick is charged per judgment that does work and per loop iteration, independent of \code{\verb~|D~} and of whether frames exist; a spilled judgment returns its tick (the spike charges every judgment it starts, leaves included). The outcome \code{\verb~|T / F / U~} and the fuel left are therefore functions of the judgment and the budget alone. Measured: \code{\verb~|CONV~} of every Init root under budgets of 10, 100, 1,000 and 100,000 ticks gives the same outcomes, the same ticks per root and the same number of interned values with \code{\verb~|D = 0~} (every frame written, \code{\verb~|W~} cut to the \code{\verb~|TRY~} frame), \code{\verb~|D = 64~} and no bound (host unwinding only) - \code{\verb~|spikes/stepper/results/verify.txt~}.}
+\li{I-MEMO holds by construction: a memo is written by the step that completes the judgment, which a signal never reaches.}
+}
+}
+
+\subtree{
+\title{H12. Tests that belong to the convention}
+
+\ol{
+\li{\code{\verb~|D = 0~} build: every declaration of the tutorial and \code{\verb~|bugs/~} tests gives the same value ids, memo contents, tick counts and outcomes as the \code{\verb~|D = 64~} build (this is the equivalence test of ISA 8.2 and the differential stepping mode: with \code{\verb~|D = 0~}, \code{\verb~|drive~} sees every \code{\verb~|call~}).}
+\li{Frames per declaration: the \code{\verb~|call~} counter of H4 (regression on its value per declaration), and the number of frames written with \code{\verb~|D = 64~}, which must stay below 0.1\% of the calls on Init.}
+\li{Deep terms: 1,000,000-deep application, binder and mixed nests on a 512 KiB thread stack, and under a \code{\verb~|TRY~} with a budget that runs out inside the nest.}
+\li{A static check (unit test over the class files) that no step method exceeds the size limits of H10 and that every \code{\verb~|KEY~} has exactly one \code{\verb~|resume~} case.}
+}
+}
+}
+
+\subtree{
+\title{3. Template: one judgment family}
+
+\p{The conversion family, reduced to what shows the convention (the real \code{\verb~|CONV~} has more cases; \code{\verb~|Ops.*~} and \code{\verb~|Eval.*~} stand for the library and another family).}
+
+\pre{\verb~|
+final class Conv {                                   // results T = 1, F = 0, U = 2; signals SUSP, ABORT, FATAL >= SIG
+  /** CONV(a, b): entry step = state 0. Its frame, if it is ever written: CONV[0](a, b). */
+  static int conv(Machine m, int a, int b, int d) {
+    if (a == b) return T;                                            // 1. inline answers: no tick, no frame
+    int r = Ops.pairLookup(m, a, b);
+    if (r != Ops.MISS) return r;
+    if (--m.fuel < 0) return m.exhaust();                            // 2. TICK
+    if (d > Op.HOST_DEPTH) return m.spill2(Op.CONV_0, a, b);         // 3. too deep: become a frame
+    switch (Ops.kind(m, a)) {                                        // 4. body
+      case Op.NEU: return args(m, a, b, 0, d);                       //    a loop of this judgment
+      case Op.LAM: { int da = Eval.dom(m, a, d + 1);                 //    call DOM(a) => 1
+                     return da >= SIG ? m.sig2(da, Op.CONV_1, a, b) : k_conv1(m, a, b, da, d); }
+      default:     return Reduce.lazyDelta(m, a, b, d + 1);          //    tail position: no test, no frame
+    }
+  }
+  static int k_conv1(Machine m, int a, int b, int r, int d) {        // state 1, frame CONV[1](a, b); r = dom a
+    int db = Eval.dom(m, b, d + 1);                                  // call DOM(b) => 2
+    return db >= SIG ? m.sig3(db, Op.CONV_2, a, b, r) : k_conv2(m, a, b, r, db, d);
+  }
+  static int k_conv2(Machine m, int a, int b, int da, int r, int d) { // state 2, frame CONV[2](a, b, da); r = dom b
+    int c = conv(m, da, r, d + 1);                                   // call CONV(da, db) => 3
+    return c >= SIG ? m.sig2(c, Op.CONV_3, a, b) : k_conv3(m, a, b, c, d);
+  }
+  static int k_conv3(Machine m, int a, int b, int r, int d) {        // state 3, frame CONV[3](a, b); r = domains?
+    if (r != T) return r;
+    int x = Ops.open(m, Ops.domOf(m, a));                            // SC entry owned by this judgment
+    int c = bodies(m, a, b, x, d + 1);                               // call BODIES(a, b, x) => 4
+    return c >= SIG ? m.sig0(c, Op.CONV_4) : k_conv4(m, c, d);       // a signal leaves the binder to H7
+  }
+  static int k_conv4(Machine m, int r, int d) { Ops.close(m, 1); return r; }   // state 4, frame CONV[4]()
+  static int args(Machine m, int a, int b, int i, int d) {           // a loop inside the judgment, from pair i on
+    for (int n = Ops.spineLen(m, a); i < n; i++) {
+      int x = Ops.arg(m, a, i), y = Ops.arg(m, b, i);
+      if (x == y) continue;                                          // cheapest case tested by the caller
+      int r = conv(m, x, y, d + 1);                                  // call CONV(x, y) => 5
+      if (r >= SIG) return m.sig3(r, Op.CONV_5, a, b, i);
+      if (r != T) return r;
+    }
+    return T;
+  }
+  static int k_args1(Machine m, int a, int b, int i, int r, int d) { // state 5, frame CONV[5](a, b, i); r = pair i
+    return r != T ? r : args(m, a, b, i + 1, d);                     // finish the iteration, re-enter the loop
+  }
+  static int tryConv(Machine m, int a, int b, long budget, int d) {  // TRY budget; CONV(a, b) => T, F or U
+    long saved = m.fuel, given = Math.min(budget, saved);  int ssp = m.ssp, xp = m.xp;
+    m.fuel = given;
+    int r = conv(m, a, b, d + 1);
+    return r == SUSP ? m.saveTry(saved, given, budget, ssp, xp) : k_try(m, saved, given, budget, ssp, xp, r);
+  }
+  static int k_try(Machine m, long saved, long given, long budget, int ssp, int xp, int r) {
+    if (r == FATAL) return r;
+    if (r != ABORT) { m.fuel = saved - (given - m.fuel); return r; } // T or F: charge what was used
+    m.closeBindersAbove(ssp);  m.xp = xp;  m.fuel = saved - given;   // the segment is gone (host returns + cut of W)
+    return given < budget && m.fuel == 0 ? ABORT : U;                // capped by an enclosing budget, now empty
+  }
+  static int resume(Machine m, int key, int[] w, int p, int r) {     // the family's part of the driver:
+    switch (key) {                                                   // payload = the step's parameter list
+      case Op.CONV_0: return conv(m, w[p], w[p + 1], 0);
+      case Op.CONV_1: return k_conv1(m, w[p], w[p + 1], r, 0);
+      case Op.CONV_2: return k_conv2(m, w[p], w[p + 1], w[p + 2], r, 0);
+      case Op.CONV_3: return k_conv3(m, w[p], w[p + 1], r, 0);
+      case Op.CONV_4: return k_conv4(m, r, 0);
+      case Op.CONV_5: return k_args1(m, w[p], w[p + 1], w[p + 2], r, 0);
+      default:        return m.fault(Err.E_INTERNAL);
+    }
+  }
+}
+~}
+}
+
+\subtree{
+\title{4. Why this convention}
+
+\p{\strong{The host stack is the cheapest stack Java has.} A Java call pushes and pops without bounds checks, keeps live values in callee-saved registers, and its return is predicted by the return-address stack. An explicit stack in an \code{\verb~|int[]~} pays a capacity test and bounds checks per push, loads per pop, and one data-dependent dispatch per returned result. The measurements show the second effect directly: the inert-nest loop, the tightest explicit-stack loop of the spike (no frame header, no machine state), is no faster than recursion on the Graal JIT and 2 to 4 points slower on the native image and on C2 (Ri against R), and it takes 14\% more branch misses; the fused loops of W1 cost 10 to 13 points on the native image and 14 to 17 on C2, and 0 to 3 on the Graal JIT, whose profile-guided layout suits a big \code{\verb~|switch~}. Bounded recursion keeps the host stack for the judgments that are shallow, more than 99.9\% of them, and pays an \code{\verb~|int~} compare per call for the right to leave it.}
+
+\p{\strong{What H costs.} Per sub-judgment call: one parameter (\code{\verb~|d~}), one compare of the result against \code{\verb~|SIG~}; per judgment that is not a leaf: one compare of \code{\verb~|d~}. Measured: +1\% to +6\% CPU by runtime; +15\% instructions in the native image, +6\% with the steps inlined. One tick per judgment for budgets (\code{\verb~|m.fuel~}) costs a further 1 to 4 points (HT64 against H64; 5 points of instructions), under every convention alike.}
+
+\p{\strong{What the comparison leaves out, and whom that favours.} In the spike a sub-judgment of \em{another family} is rare for W1 (READBACK and CONV call EVAL for a binder's domain and body: 0.9 M fresh frames per 303 M judgments on Init), and each one costs a frame for the callee, a return to \code{\verb~|run()~}, a second dispatch and the reload of the registers. In the real machine such calls are the common case (\code{\verb~|INFER~} -> \code{\verb~|WHNF~} -> \code{\verb~|CONV~} -> \code{\verb~|EVAL~}, the families EV / RD / CV / TY of ISA 8.2). Under H a call is a call whatever the family. The spike therefore understates W1 and not H. ISA 8.2's candidate (ii) as written (fused loops inside a family, host calls with reserved slots across families) was not built; it lies between W1 and H, and the result for the inert-nest loop says that the fused part is the part that costs.}
+
+\p{\strong{Other properties that decided between two candidates only a few points apart:}}
+
+\table{
+\tr{\th{}\th{H}\th{W1 (fused loops)}}
+\tr{\td{a judgment is written}\td{once, as steps that read like the recursive algorithm: 230 lines for the spike's three judgments (R: 110), plus 300 lines of machinery that exists once (frame helpers, driver, \code{\verb~|TRY~})}\td{as cases of a family loop with labelled \code{\verb~|continue~}s; multi-step sequences need a second \code{\verb~|switch~} on a local state or duplicated code: 735 lines for the same three judgments}}
+\tr{\td{cost depends on the compiler}\td{no: +1\% to +6\% on native image, Graal JIT, C2}\td{yes: +0\% to +3\% (Graal JIT), +10\% to +13\% (native image), +14\% to +17\% (C2)}}
+\tr{\td{cost depends on the family partition}\td{no}\td{yes: every call across families goes through \code{\verb~|run()~}}}
+\tr{\td{method sizes}\td{steps of 30 to 310 bytecodes}\td{one method per family; 1,000 to 1,400 bytecodes for the spike's small families, near the 8,000 limit for real ones}}
+\tr{\td{frames written per judgment (Init)}\td{0.00011}\td{0.064}}
+\tr{\td{the worklist machine of ISA 1.3}\td{the same source with D = 0 (1.4x to 2.1x the CPU time of R; a test configuration)}\td{is the implementation}}
+\tr{\td{host stack}\td{bounded: at most D + 2 judgments, about 200 frames; no enlarged stacks}\td{constant: about 3 frames}}
+\tr{\td{budgets, \code{\verb~|TRY~}, cut}\td{exact; a completed \code{\verb~|TRY~} writes nothing; cut = signal returns + popping frames}\td{exact; \code{\verb~|TRY~} frame always written; cut = set \code{\verb~|wp~}}}
+\tr{\td{deep terms}\td{frames in \code{\verb~|W~} beyond the bound}\td{frames in \code{\verb~|W~}}}
+}
+
+\p{\strong{Costs and risks of H that the implementers take on.}}
+
+\ol{
+\li{Every call of a judgment must be followed by the signal test or be a tail return. A forgotten test is a bug that only shows on deep terms or under a budget. Mitigation: the \code{\verb~|D = 0~} test configuration turns every non-leaf call into a suspension, so the tutorial tests exercise every call site's signal path; add a budget sweep (TRY with 1, 2, 3, ... ticks on a few declarations) for the ABORT path.}
+\li{The host stack depth is bounded, not constant (ISA section 9 says "constant"): at most 66 judgments, each a few host frames. A library routine called from a judgment must have its own bound, as ISA section 9 already requires of \code{\verb~|rlvm-level~} and \code{\verb~|rlvm-nat~}.}
+\li{The inlining flags of H10 are per-platform tuning and one of them is an experimental \code{\verb~|native-image~} option. Without them H still meets the target.}
+\li{Registers of code-object activations move to a register stack (H7); \code{\verb~|tryp~} and \code{\verb~|ownerFramePos~} disappear.}
+}
+}
+
+\subtree{
+\title{5. What changes in ISA.md}
+
+\ul{
+\li{8.2, "Decision": candidate (ii) in the form of sections 2 and 3 above, \code{\verb~|HOST_DEPTH = 64~}. Three points differ from the text of (ii): no fused loop inside a family (every sub-judgment is a host call); no reserved frame slot (frames reach \code{\verb~|W~} through the side buffer, so the normal path never touches \code{\verb~|W~}); a \code{\verb~|TRY~} marker is not written unless the segment is suspended, and the 4096-tick poll raises FATAL instead of requesting materialisation. The list "common to both candidates" loses its family-loop items; the code stepper becomes entry and continuation step of \code{\verb~|ACT~}.}
+\li{1.3: \code{\verb~|ACT~} registers live in the register stack (frame: \code{\verb~|[blk, pc, dst, argRun, capRun, ls, rbase]~}); \code{\verb~|SC[k]~} holds the variable only. 1.4: \code{\verb~|tryp~} is not a register; \code{\verb~|cut~} is "ABORT / FATAL returns, then the driver pops frames down to the \code{\verb~|TRY~} frame or \code{\verb~|DECL~}"; \code{\verb~|TRY~} saves \code{\verb~|rp~} as well.}
+\li{Section 0, cost of the vision ("worklist against host recursion"): replace the estimate by the measured +1\% to +6\% CPU (H64 against R, by runtime); section 9: "bounded by \code{\verb~|HOST_DEPTH + 2~} judgments" instead of "constant"; the frame regression test of section 11 counts \code{\verb~|call~} events (H4), which do not depend on \code{\verb~|D~}.}
+\li{Section 13: \code{\verb~|Op.HOST_DEPTH~}, \code{\verb~|Op.SUSP / ABORT / FATAL / SIG~}; \code{\verb~|Machine.sig0..sigN~}, \code{\verb~|spill1..spillN~}, \code{\verb~|saveTry~}, \code{\verb~|drive~}; one \code{\verb~|resume(m, key, w, p, r)~} per family file; the name prefix of continuation steps and the two inlining flag sets in the build.}
+}
+}
+
+\subtree{
+\title{6. Limits of the evidence}
+
+\ul{
+\li{The workload is three small judgments (evaluation without delta, readback, structural conversion) with hash-consing and no tabling. Real judgments do more work per call (the convention's share shrinks) and call across families far more often (which hurts fused loops only).}
+\li{aarch64 (Cortex-X925) only; the arena runner is x86-64. Branch prediction and call costs differ there.}
+\li{The host was shared: a pass varied by 10 to 20\% between repetitions. Ratios come from interleaved passes in one process and are good to about 3 points: H32, H64, H256 and "no bound" are one code path and still spread by up to 5 points within a runtime. Differences of that size between H variants, and between Hi64 and W1 on the Graal JIT, are not established.}
+\li{Candidate (ii) of ISA 8.2 exactly as written was not built (see section 4).}
+\li{\code{\verb~|TRY~} was exercised with one segment per root around \code{\verb~|CONV~} (D = 0, 64, unbounded). Nested \code{\verb~|TRY~}, FATAL, and the restoring of \code{\verb~|SC~} / scratch on a cut are specified above but not measured; the register stack for activations is a design consequence, not an experiment.}
+\li{Machine state is static in the spike; a per-worker \code{\verb~|Machine~} parameter adds one argument to every step, for R and H alike.}
+\li{Native image: GraalVM CE, no PGO (Oracle GraalVM was not measured here).}
+}
+}

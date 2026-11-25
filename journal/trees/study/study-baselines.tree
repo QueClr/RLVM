@@ -1,0 +1,684 @@
+\title{12 — Baselines on this machine: the numbers RLVM has to beat}
+\taxon{Study}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{arena}
+\tag{performance}
+\meta{origin}{docs/research/12-baselines.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Measured 2026-11-24 on the project host (aarch64, Cortex-X925 + Cortex-A725, 20 cores, 121 GB) inside the \code{\verb~|rlvm-arena~} container, with the arena's own checker builds (\code{\verb~|bench/baselines/~}, arena revision \code{\verb~|99195b6b~}) on the arena's own exports (\code{\verb~|work/exports/~}, byte-identical to the published ones). Everything here is a measurement made for this document; nothing is taken from the checkers' READMEs.}
+
+\ul{
+\li{Machine-readable results: \code{\verb~|bench/baselines.json~} (every run, medians, ratios, published numbers).}
+\li{Raw runs: \code{\verb~|work/baselines/big/runs.jsonl~}, logs in \code{\verb~|work/baselines/big/logs/~}.}
+\li{Per-declaration profiles of mathlib: \code{\verb~|work/baselines/mathlib-profile.json~}, \code{\verb~|mathlib-profile.top200.tsv~}, \code{\verb~|mathlib-profile.<profile>.tsv.gz~} (every declaration, most expensive first), \code{\verb~|mathlib-profile.by-name.tsv.gz~} (one row per declaration name with its cost in nano-lean, gruszka, rpylean and sokonanoda).}
+\li{Scripts: \src{bench/baselines/big.sh}, \code{\verb~|big-all.sh~}, \code{\verb~|big-summary.py~}, \code{\verb~|profile-mathlib.sh~}, \code{\verb~|instrtap.c~}, \code{\verb~|profile-summary.py~}; commands in section 8 and in \src{bench/README.md}.}
+}
+
+\p{The tables between \code{\verb~|<!-- BEGIN ... -->~} and \code{\verb~|<!-- END ... -->~} markers are generated from those files by \code{\verb~|bench/baselines/render-tables.py docs/research/12-baselines.md~}; do not edit them by hand.}
+
+\subtree{
+\title{0. Summary}
+
+\ol{
+\li{\strong{The number to beat on this machine is 361.3e9 instructions = 60.2 virtual seconds on mathlib} (nano-lean, median of 3 runs, spread 0.04 \%). Then gruszka 418.7e9 (69.8 s, 1.16 x), sokonanoda 504.3e9 (84.1 s, 1.40 x) and rpylean 544.6e9 (90.8 s, 1.51 x): the arena's top four, in the arena's order. After a gap: mathgraph 880.4e9, pestka 1.34e12, nanoda 5.53e12, tenet-jvm 9.31e12 (25.9 virtual minutes with C2; 11.96e12 with the Graal JIT) and the official kernel 11.42e12 (31.7 virtual minutes). All ten accept all three corpora.}
+\li{\strong{aarch64 counts are not the published ones.} Native checkers execute 3-10 \% fewer instructions here than on the arena's x86-64 runner (nano-lean 0.915, gruszka 0.906, sokonanoda 0.956, rpylean 0.942, official 0.945); the JVM checker has no stable ratio (1.03 on init, 1.05 on std, 0.951 on mathlib with C2). RLVM's own ratio is unknown, so "ahead of nano-lean on the arena" is only safe below about 355e9 here (59 virtual s); section 3.}
+\li{\strong{Instruction counts repeat, times do not.} Spread over 3 runs: at most 0.3 \% for the fast checkers on mathlib, 0.7 \% on init and std; up to 5 \% for tenet-jvm on init. Wall time of the same command varied by up to a factor of 2 with the load of the host (gruszka on mathlib: 18.1 s to 35.3 s).}
+\li{\strong{Worker threads are free in the metric.} 1, 2, 4 and 8 workers cost nano-lean 361.0e9, 361.2e9, 361.3e9 and 361.9e9 instructions; gruszka +1.0 \% and sokonanoda +3.5 \% from 1 to 4 workers; section 4.}
+\li{\strong{Reading the export is 7-11 \% of a leader's run}: 37-41e9 instructions for 6.3 GB, about 6 per byte; section 5.2.}
+\li{\strong{Checking has no hot spot.} Measured per declaration with instruction counters: the most expensive declaration of mathlib is 0.35 \% of nano-lean's checking cost, the top 200 are 5.6 \%, the top 1,000 are 12 \%, the top 10,000 are 36 \%; half the cost is in 23,301 declarations and the other half in 715,866. gruszka, sokonanoda and rpylean show the same curve. Theorems are 89 \% of the cost, definitions 10 \%, inductive types under 1 \%; the compiler-generated \code{\verb~|_proof_N~} theorems alone are 18.5 \%; section 5.}
+\li{\strong{A checker that wants to be first must average under 434,000 instructions per constant} (median 78,000) after reading 112 million lines at about 365 instructions each. Per-declaration fixed costs and run-time compilation have to fit into that; section 6.}
+\li{\strong{Instruction count is not time.} The JVM baseline with the Graal JIT instead of C2 takes 1.4 \% more CPU time on mathlib and 28.4 \% more instructions (7.0 \% more on init). Choices for RLVM have to be compared by instruction count, on mathlib.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\p{\strong{Checkers.} The ten baselines built by \src{bench/baselines/build-checker.sh} from the arena's yaml recipes (\src{bench/README.md}, "Baseline checkers"), run through the generated wrappers \code{\verb~|bench/baselines/NAME.sh~}, i.e. the yaml's \code{\verb~|run:~} line through \code{\verb~|sh -c~} with cwd = the build tree, \code{\verb~|$IN~} = the export, \code{\verb~|LC_ALL=C~}:}
+
+\table{
+\tr{\th{baseline}\th{version}\th{run line: workers}\th{note}}
+\tr{\td{nano-lean}\td{v0.4.2 \code{\verb~|5cd4a25~}}\td{\code{\verb~|nl-fast -q -j 4~}: 4}\td{arena \verb~|#~1 on mathlib}}
+\tr{\td{gruszka}\td{\code{\verb~|ebc80dc~}}\td{\code{\verb~|scripts/arena-run "$IN" 4~}: \code{\verb~|susz pack~}, then 4 workers}\td{arena \verb~|#~2}}
+\tr{\td{sokonanoda}\td{\code{\verb~|9a021b6~}}\td{\code{\verb~|--threads 4~}: 4}\td{arena \verb~|#~3}}
+\tr{\td{rpylean}\td{v2026.11.11 \code{\verb~|bbf354d~}}\td{\code{\verb~|./rpylean-c check~}: 1}\td{arena \verb~|#~4; RPython, meta-tracing JIT}}
+\tr{\td{mathgraph}\td{\code{\verb~|flash~} \code{\verb~|78c7502~}}\td{\code{\verb~|num_threads~} 2}\td{accepts 8 bad proofs on the small tests, so not a ranking competitor}}
+\tr{\td{pestka}\td{\code{\verb~|cea66e6~}}\td{\code{\verb~|bin/arena-run "$IN" 4~}}\td{}}
+\tr{\td{nanoda}\td{\code{\verb~|0da9f98~}}\td{\code{\verb~|num_threads~} 4}\td{}}
+\tr{\td{tenet-jvm-c2}\td{0.1.5 \code{\verb~|4cc6e20~}}\td{\code{\verb~|bin/tenet-jvm~}: 1 + GC and JIT threads}\td{the project's GraalVM CE 25 with \code{\verb~|-XX:-UseJVMCICompiler~} (C2): the closest to the arena's stock OpenJDK}}
+\tr{\td{tenet-jvm}\td{0.1.5 \code{\verb~|4cc6e20~}}\td{the same}\td{the same JVM with its default Graal JIT; not what the arena runs, but what a GraalVM-hosted checker gets}}
+\tr{\td{official}\td{Lean v4.35.0}\td{\code{\verb~|leanchecker --from-export~}: 1}\td{the C++ kernel}}
+}
+
+\p{\strong{Corpora.} \code{\verb~|work/exports/init.ndjson~} (348 MB, 59,979 constants), \code{\verb~|std.ndjson~} (584 MB, 103,885 constants), \code{\verb~|mathlib.ndjson~} (6,326,141,213 bytes, 112,081,718 lines, 107,037,712 expressions, 739,167 constants; sha256 \code{\verb~|f749dfd084fc…~}, equal to the arena's).}
+
+\p{\strong{One run} = one fresh container, nothing else in it:}
+
+\pre{\verb~|
+bench/arena-docker.sh --arena-limits --no-network bench/measure.sh --timeout T \
+    --in work/exports/CORPUS.ndjson -o RAW.json -c 'bench/baselines/NAME.sh "$IN"'
+~}
+
+\ul{
+\li{\code{\verb~|--arena-limits~}: 8 performance cores (CPUs 5-9,15-17) and 16 GB, the size of the arena runner; \code{\verb~|--no-network~}.}
+\li{\src{bench/measure.sh} is the arena's measurement (\code{\verb~|lka.py~}, \code{\verb~|measure_perf_with_fallback~}): \code{\verb~|perf stat~} over the whole process tree, all threads and children, user-space instructions; \code{\verb~|virtual time = instructions / 6e9~}, the arena's ranking metric; CPU time = perf's task-clock; wall time = perf's duration_time; max RSS from GNU time.}
+\li{Timeout \code{\verb~|T~} = 2 x the arena's (init 370 s, std 600 s, mathlib 4120 s); no run came near it.}
+\li{Runs of the series were made one after the other (\src{bench/baselines/big-all.sh}): 3 runs of every baseline on init and std; on mathlib 3 runs of the six fast checkers and 1 run of the four slow ones. The single run of the official kernel on mathlib (single-threaded, deterministic to 0.05 \%) ran next to the series on two performance cores of its own (CPUs 18,19, 16 GB), to save half an hour.}
+\li{The figure quoted for a (checker, corpus) is the \strong{median} over its runs; \code{\verb~|spread~} = (max - min) / median.}
+}
+
+\p{\strong{Caveat on times.} Other agents were using the host during the whole series (1-minute load average between 5 and 35 on 20 cores, at times on the same 8 cores). Instruction counts do not depend on that (the three mathlib runs of nano-lean differ by 0.04 \% while their wall time went from 25.5 s to 42.1 s); wall and CPU times do. The wall column therefore gives the minimum and the median; read it as "no better than".}
+}
+
+\subtree{
+\title{2. Results per corpus}
+
+\p{\code{\verb~|x fastest~} = instructions over those of the fastest checker on that corpus. \code{\verb~|arena x86-64 virtual~} is the published figure (results of 2026-11-23, \code{\verb~|work/arena-site/results.json~}); \code{\verb~|aarch64/x86-64~} = our count over the published count (section 3).}
+
+% <!-- BEGIN big:corpora -->
+
+\subtree{
+\title{init  (348 MB, 6,495,296 lines, arena timeout 370 s)}
+
+\table{
+\tr{\th{checker}\th{runs}\th{status}\th{instructions}\th{virtual time}\th{x fastest}\th{spread}\th{CPU s}\th{wall s (min / median)}\th{max RSS MiB}\th{arena x86-64 virtual}\th{aarch64/x86-64}}
+\tr{\td{nano-lean}\td{3}\td{accepted}\td{22.3e9}\td{3.71 s}\td{1.00}\td{0.18 \%}\td{4.5}\td{1.3 / 1.3}\td{956}\td{4.05 s}\td{0.915}}
+\tr{\td{gruszka}\td{3}\td{accepted}\td{22.6e9}\td{3.76 s}\td{1.01}\td{0.57 \%}\td{2.8}\td{0.8 / 0.8}\td{379}\td{4.14 s}\td{0.909}}
+\tr{\td{sokonanoda}\td{3}\td{accepted}\td{27.7e9}\td{4.62 s}\td{1.25}\td{0.72 \%}\td{4.5}\td{1.3 / 1.4}\td{764}\td{4.81 s}\td{0.962}}
+\tr{\td{rpylean}\td{3}\td{accepted}\td{30.2e9}\td{5.03 s}\td{1.36}\td{0.00 \%}\td{4.9}\td{4.6 / 4.9}\td{365}\td{5.42 s}\td{0.927}}
+\tr{\td{mathgraph}\td{3}\td{accepted}\td{43.2e9}\td{7.20 s}\td{1.94}\td{0.50 \%}\td{8.1}\td{3.9 / 4.2}\td{838}\td{7.44 s}\td{0.967}}
+\tr{\td{pestka}\td{3}\td{accepted}\td{58.6e9}\td{9.77 s}\td{2.63}\td{0.02 \%}\td{11.5}\td{3.4 / 3.4}\td{538}\td{10.91 s}\td{0.896}}
+\tr{\td{nanoda}\td{3}\td{accepted}\td{215.4e9}\td{35.89 s}\td{9.67}\td{0.06 \%}\td{26.0}\td{8.5 / 8.6}\td{529}\td{37.30 s}\td{0.962}}
+\tr{\td{tenet-jvm-c2}\td{3}\td{accepted}\td{230.9e9}\td{38.48 s}\td{10.37}\td{4.95 \%}\td{32.3}\td{26.1 / 28.5}\td{4,550}\td{37.28 s}\td{1.032}}
+\tr{\td{tenet-jvm}\td{3}\td{accepted}\td{247.0e9}\td{41.17 s}\td{11.10}\td{1.81 \%}\td{35.5}\td{25.4 / 30.6}\td{4,639}\td{37.28 s}\td{1.105}}
+\tr{\td{official}\td{3}\td{accepted}\td{381.2e9}\td{63.53 s}\td{17.12}\td{0.06 \%}\td{35.4}\td{35.1 / 35.4}\td{604}\td{66.92 s}\td{0.949}}
+}
+}
+
+\subtree{
+\title{std  (584 MB, 10,611,507 lines, arena timeout 600 s)}
+
+\table{
+\tr{\th{checker}\th{runs}\th{status}\th{instructions}\th{virtual time}\th{x fastest}\th{spread}\th{CPU s}\th{wall s (min / median)}\th{max RSS MiB}\th{arena x86-64 virtual}\th{aarch64/x86-64}}
+\tr{\td{gruszka}\td{3}\td{accepted}\td{36.5e9}\td{6.08 s}\td{1.00}\td{0.23 \%}\td{5.7}\td{1.8 / 1.9}\td{484}\td{6.72 s}\td{0.905}}
+\tr{\td{nano-lean}\td{3}\td{accepted}\td{37.0e9}\td{6.16 s}\td{1.01}\td{0.17 \%}\td{9.2}\td{3.3 / 3.6}\td{1,158}\td{6.71 s}\td{0.918}}
+\tr{\td{sokonanoda}\td{3}\td{accepted}\td{46.4e9}\td{7.73 s}\td{1.27}\td{0.74 \%}\td{8.8}\td{3.1 / 3.3}\td{887}\td{8.06 s}\td{0.959}}
+\tr{\td{rpylean}\td{3}\td{accepted}\td{51.2e9}\td{8.54 s}\td{1.40}\td{0.01 \%}\td{10.7}\td{10.2 / 10.7}\td{520}\td{9.19 s}\td{0.929}}
+\tr{\td{mathgraph}\td{3}\td{accepted}\td{72.2e9}\td{12.04 s}\td{1.98}\td{0.24 \%}\td{14.9}\td{7.6 / 7.7}\td{1,013}\td{12.45 s}\td{0.967}}
+\tr{\td{pestka}\td{3}\td{accepted}\td{96.9e9}\td{16.15 s}\td{2.65}\td{0.01 \%}\td{21.6}\td{6.7 / 6.7}\td{727}\td{17.95 s}\td{0.899}}
+\tr{\td{nanoda}\td{3}\td{accepted}\td{332.4e9}\td{55.40 s}\td{9.11}\td{0.08 \%}\td{46.4}\td{15.1 / 15.5}\td{764}\td{57.60 s}\td{0.962}}
+\tr{\td{tenet-jvm-c2}\td{3}\td{accepted}\td{379.0e9}\td{63.16 s}\td{10.38}\td{0.83 \%}\td{53.4}\td{44.8 / 47.3}\td{4,996}\td{60.20 s}\td{1.049}}
+\tr{\td{tenet-jvm}\td{3}\td{accepted}\td{393.3e9}\td{65.56 s}\td{10.78}\td{0.83 \%}\td{60.9}\td{54.8 / 54.9}\td{4,963}\td{60.20 s}\td{1.089}}
+\tr{\td{official}\td{3}\td{accepted}\td{632.0e9}\td{105.3 s}\td{17.32}\td{0.04 \%}\td{68.5}\td{65.9 / 68.6}\td{956}\td{110.9 s}\td{0.950}}
+}
+}
+
+\subtree{
+\title{mathlib  (6,326 MB, 112,081,718 lines, arena timeout 4120 s)}
+
+\table{
+\tr{\th{checker}\th{runs}\th{status}\th{instructions}\th{virtual time}\th{x fastest}\th{spread}\th{CPU s}\th{wall s (min / median)}\th{max RSS MiB}\th{arena x86-64 virtual}\th{aarch64/x86-64}}
+\tr{\td{nano-lean}\td{3}\td{accepted}\td{361.3e9}\td{60.22 s}\td{1.00}\td{0.04 \%}\td{107.2}\td{25.5 / 36.9}\td{5,157}\td{65.81 s}\td{0.915}}
+\tr{\td{gruszka}\td{3}\td{accepted}\td{418.7e9}\td{69.78 s}\td{1.16}\td{0.30 \%}\td{75.9}\td{18.1 / 22.3}\td{2,592}\td{77.00 s}\td{0.906}}
+\tr{\td{sokonanoda}\td{3}\td{accepted}\td{504.3e9}\td{84.05 s}\td{1.40}\td{0.11 \%}\td{113.2}\td{30.4 / 35.7}\td{5,228}\td{87.90 s}\td{0.956}}
+\tr{\td{rpylean}\td{3}\td{accepted}\td{544.6e9}\td{90.77 s}\td{1.51}\td{0.05 \%}\td{131.8}\td{117.9 / 132.2}\td{4,545}\td{96.35 s}\td{0.942}}
+\tr{\td{mathgraph}\td{3}\td{accepted}\td{880.4e9}\td{146.7 s}\td{2.44}\td{0.01 \%}\td{156.3}\td{78.5 / 80.6}\td{6,543}\td{152.0 s}\td{0.966}}
+\tr{\td{pestka}\td{3}\td{accepted}\td{1.340e12}\td{223.3 s}\td{3.71}\td{0.01 \%}\td{348.4}\td{89.0 / 125.9}\td{3,627}\td{245.9 s}\td{0.908}}
+\tr{\td{nanoda}\td{1}\td{accepted}\td{5.533e12}\td{922 s (15.4 min)}\td{15.31}\td{-}\td{973.4}\td{290.8}\td{6,053}\td{962 s (16.0 min)}\td{0.958}}
+\tr{\td{tenet-jvm-c2}\td{1}\td{accepted}\td{9.313e12}\td{1552 s (25.9 min)}\td{25.77}\td{-}\td{1144.5}\td{1064.0}\td{12,134}\td{1633 s (27.2 min)}\td{0.951}}
+\tr{\td{official}\td{1}\td{accepted}\td{11.424e12}\td{1904 s (31.7 min)}\td{31.62}\td{-}\td{1752.2}\td{1757.2}\td{10,167}\td{2016 s (33.6 min)}\td{0.945}}
+\tr{\td{tenet-jvm}\td{1}\td{accepted}\td{11.960e12}\td{1993 s (33.2 min)}\td{33.10}\td{-}\td{1160.5}\td{1082.8}\td{12,558}\td{1633 s (27.2 min)}\td{1.221}}
+}
+}
+
+% <!-- END big:corpora -->
+
+\p{Reading the tables:}
+
+\ul{
+\li{\strong{The target.} nano-lean checks mathlib in 361.3e9 instructions = 60.2 virtual seconds here (65.8 s published). gruszka needs 1.16 x that, sokonanoda 1.40 x, rpylean 1.51 x. These four are the arena's top four, in the same order, with nearly the same gaps (section 3).}
+\li{\strong{Init and std are not mathlib in small.} gruszka and nano-lean are within 1.5 \% of each other on init and std (gruszka ahead on std) but 16 \% apart on mathlib; sokonanoda is 1.25-1.27 x the fastest on the small corpora and 1.40 x on mathlib, rpylean 1.36-1.40 x and 1.51 x. Decide on mathlib (or its slices), not on Init.}
+\li{\strong{Scale.} mathlib costs nano-lean 16.2 times its Init count, for 18.2 times the bytes and 12.3 times the constants.}
+\li{\strong{The JVM baseline is far away.} tenet-jvm with C2 costs 10.4 x the fastest on init, 10.4 x on std and 25.8 x on mathlib (9.31e12, 25.9 virtual minutes). Its max RSS is 4.4-4.9 GiB on init and std and 11.9 GiB on mathlib, where the Rust leaders need 2.5-5.1 GiB.}
+\li{\strong{Graal JIT against C2}, same bytecode, same JVM, default settings of \code{\verb~|bin/tenet-jvm~}: +7.0 \% instructions on init (247.0e9 against 230.9e9), +3.8 \% on std and +28.4 \% on mathlib (11.96e12 against 9.31e12; one run each there, a JVM run varies by 1-2 \%). On mathlib the two runs took about the same CPU time (1,160 s and 1,144 s) and wall time (1,083 s and 1,064 s): the Graal run retired 28 \% more instructions in 1.4 \% more CPU time (10.3 against 8.1 instructions per nanosecond). The arena ranks by instructions, so by its metric the Graal JIT is the worse choice for this checker although the clock sees no difference. The cause was not investigated.}
+\li{\strong{The official kernel} needs 11.42e12 (31.7 virtual minutes, 1757 s of wall time on one X925 core, 9.9 GiB): 31.6 x nano-lean. nanoda, the reference Rust port of the same algorithm, 5.53e12 (15.3 x).}
+\li{\strong{Wall time} of the least-disturbed mathlib run with 4 workers on 8 cores: gruszka 18 s, nano-lean 26 s, sokonanoda 30 s; rpylean (one thread) 118 s.}
+}
+}
+
+\subtree{
+\title{3. aarch64 against the published x86-64 numbers}
+
+\p{The arena runs on x86-64, so its published counts are not ours. The ratio ours/published per checker, on the 230 small tests (totals of \src{bench/baselines/validate.sh}, previous infra step) and on the three big corpora:}
+
+% <!-- BEGIN big:arch -->
+
+\subtree{
+\title{aarch64 (this host) / x86-64 (arena) instruction counts}
+
+\table{
+\tr{\th{checker}\th{230 small tests}\th{init}\th{std}\th{mathlib}}
+\tr{\td{nano-lean}\td{0.934}\td{0.915}\td{0.918}\td{0.915}}
+\tr{\td{gruszka}\td{0.926}\td{0.909}\td{0.905}\td{0.906}}
+\tr{\td{sokonanoda}\td{0.933}\td{0.962}\td{0.959}\td{0.956}}
+\tr{\td{rpylean}\td{1.006}\td{0.927}\td{0.929}\td{0.942}}
+\tr{\td{mathgraph}\td{0.991}\td{0.967}\td{0.967}\td{0.966}}
+\tr{\td{pestka}\td{0.873}\td{0.896}\td{0.899}\td{0.908}}
+\tr{\td{nanoda}\td{0.933}\td{0.962}\td{0.962}\td{0.958}}
+\tr{\td{tenet-jvm-c2}\td{0.892}\td{1.032}\td{1.049}\td{0.951}}
+\tr{\td{tenet-jvm}\td{1.539}\td{1.105}\td{1.089}\td{1.221}}
+\tr{\td{official}\td{0.944}\td{0.949}\td{0.950}\td{0.945}}
+}
+}
+
+% <!-- END big:arch -->
+
+\ul{
+\li{\strong{Native checkers: 0.90 to 0.97, stable per checker across the three big corpora} (nano-lean 0.915-0.918, gruszka 0.905-0.909, sokonanoda 0.956-0.962, nanoda 0.958-0.962, official 0.944-0.950, mathgraph 0.966-0.967, pestka 0.896-0.908, rpylean 0.927-0.942). The same program executes 3-10 \% fewer instructions on aarch64; compilers, PGO profiles and \code{\verb~|-C target-cpu=native~} differ too (\src{bench/README.md}, "Differences from the arena's build").}
+\li{\strong{The ranking carries over.} gruszka / nano-lean on mathlib is 1.159 here and 1.170 published; sokonanoda / nano-lean 1.396 and 1.336; rpylean / nano-lean 1.507 and 1.464.}
+\li{\strong{The JVM checker has no stable ratio}: tenet-jvm with C2 is 1.03 on init, 1.05 on std and 0.951 on mathlib. The comparison is not clean either: the arena's JVM is the stock OpenJDK of its nix flake, ours is GraalVM CE 25 with its Graal compiler switched off, and what GC and JIT threads execute depends on timing and on the heap the JVM chooses. It is the only JVM data point there is, and it does not support assuming the native checkers' 0.92 for RLVM. (The 0.892 and 1.539 in the small-tests column are one test, \code{\verb~|bugs/nat-shift-huge~}, where tenet-jvm runs out of memory; without it 0.96 and 1.09.)}
+\li{\strong{Consequence for RLVM's target.} nano-lean's published count is 394.9e9. If RLVM's ratio (count here / count on the arena) is anywhere between the lowest and the highest seen above on a big corpus for a baseline in the arena's configuration (0.90 to 1.05), nano-lean's arena count corresponds to between 355e9 and 415e9 here. Until RLVM has been measured on an x86-64 machine with these same scripts, read \strong{355e9 here (59 virtual s) as "ahead of nano-lean whatever the ratio"} and 361e9 as "ahead on this machine".}
+}
+}
+
+\subtree{
+\title{4. Thread scaling}
+
+\p{nano-lean, gruszka and sokonanoda run with 4 workers on the arena. The same three on mathlib with 1, 2 and 8 workers (one run each; the 4-worker row is the median of the three arena-configuration runs):}
+
+% <!-- BEGIN big:threads -->
+
+\subtree{
+\title{thread scaling on mathlib}
+
+\table{
+\tr{\th{checker}\th{threads}\th{instructions}\th{virtual time}\th{vs 1 thread}\th{CPU s}\th{wall s}\th{max RSS MiB}}
+\tr{\td{nano-lean}\td{1}\td{361.0e9}\td{60.16 s}\td{1.000}\td{90.5}\td{89.9}\td{5,157}}
+\tr{\td{nano-lean}\td{2}\td{361.2e9}\td{60.20 s}\td{1.001}\td{82.5}\td{43.7}\td{5,157}}
+\tr{\td{nano-lean}\td{4}\td{361.3e9}\td{60.22 s}\td{1.001}\td{107.2}\td{36.9}\td{5,157}}
+\tr{\td{nano-lean}\td{8}\td{361.9e9}\td{60.31 s}\td{1.002}\td{99.1}\td{17.9}\td{5,452}}
+\tr{\td{gruszka}\td{1}\td{414.6e9}\td{69.10 s}\td{1.000}\td{61.3}\td{58.1}\td{2,211}}
+\tr{\td{gruszka}\td{2}\td{417.0e9}\td{69.50 s}\td{1.006}\td{71.7}\td{36.8}\td{2,301}}
+\tr{\td{gruszka}\td{4}\td{418.7e9}\td{69.78 s}\td{1.010}\td{75.9}\td{22.3}\td{2,592}}
+\tr{\td{gruszka}\td{8}\td{421.6e9}\td{70.26 s}\td{1.017}\td{68.2}\td{14.4}\td{2,831}}
+\tr{\td{sokonanoda}\td{1}\td{487.2e9}\td{81.19 s}\td{1.000}\td{95.2}\td{94.4}\td{4,630}}
+\tr{\td{sokonanoda}\td{2}\td{497.2e9}\td{82.86 s}\td{1.021}\td{90.3}\td{48.1}\td{4,759}}
+\tr{\td{sokonanoda}\td{4}\td{504.3e9}\td{84.05 s}\td{1.035}\td{113.2}\td{35.7}\td{5,228}}
+\tr{\td{sokonanoda}\td{8}\td{510.7e9}\td{85.12 s}\td{1.048}\td{106.6}\td{19.7}\td{5,607}}
+}
+}
+
+% <!-- END big:threads -->
+
+\ul{
+\li{\strong{More workers cost almost nothing in the arena's metric.} From 1 to 4 workers nano-lean's count rises by 0.09 \% (361.0e9 to 361.3e9), gruszka's by 1.0 \%, sokonanoda's by 3.5 \%; from 1 to 8 workers by 0.24 \%, 1.7 \% and 4.8 \%. The instruction count of these checkers is, to within a few percent, their single-threaded work.}
+\li{\strong{What the workers buy is wall time}, which the arena shows but does not rank by: nano-lean 90 s with one worker, 18 s with eight; gruszka 58 s and 14 s; sokonanoda 94 s and 20 s (a busy host; see section 1).}
+\li{Memory grows little: nano-lean 5.0 GiB with 1 to 4 workers and 5.3 GiB with 8; gruszka 2.2 to 2.8 GiB; sokonanoda 4.5 to 5.5 GiB.}
+\li{The three leaders declare 4 threads on an 8-vCPU runner. With 8 workers they finished mathlib here in 14-20 s instead of 18-30 s (least-disturbed runs), for 0.2-1.3 \% more instructions than with 4.}
+\li{For RLVM: checking declarations in parallel is free in the ranking metric \strong{if} idle workers sleep instead of spinning and workers do not repeat each other's work. Section 5.6 shows that this holds per declaration, not only in total. What is not free for a JVM is the runtime's own parallelism: GC and JIT compiler threads are sized by the CPUs the JVM sees, and every instruction they execute is counted.}
+}
+}
+
+\subtree{
+\title{5. Where the instructions go on mathlib}
+
+\subtree{
+\title{5.1 How the profiles were obtained}
+
+\p{Four of the baselines can print something per declaration. None of them can count instructions per declaration on Linux, so the counts were added from outside, without changing the checkers:}
+
+\table{
+\tr{\th{checker}\th{switch (found in its source)}\th{what it prints}}
+\tr{\td{nano-lean}\td{\code{\verb~|nl-fast --trace~} (\code{\verb~|src/fast.rs~})}\td{\code{\verb~|start IDX NAME~} and \code{\verb~|end IDX elapsed T arena N bytes~} on stderr around every declaration}}
+\tr{\td{nano-lean}\td{\code{\verb~|nl-fast --import-only~}}\td{stops after reading the export}}
+\tr{\td{gruszka}\td{\code{\verb~|SK_DECL_INSTR=1~} (\code{\verb~|src/main.rs~})}\td{\code{\verb~|DI<TAB>index<TAB>name<TAB>instructions<TAB>ns<TAB>ticks …~} after every declaration; the instruction field is 0 on Linux (it is read from a macOS-only API)}}
+\tr{\td{sokonanoda}\td{\code{\verb~|--verbose~}, \code{\verb~|--parse-only~} (\code{\verb~|src/main.rs~}, \code{\verb~|src/report.rs~})}\td{one line per declaration with kind and wall time in ms (buffered on stdout)}}
+\tr{\td{rpylean}\td{\code{\verb~|check --print jsonl~} (\code{\verb~|rpylean/cli.py~})}\td{one JSON object per declaration: \code{\verb~|elapsed~}, \code{\verb~|gc_elapsed~}, \code{\verb~|bytes_allocated~}, \code{\verb~|live_memory~}, \code{\verb~|peak_growth~}}}
+\tr{\td{official, nanoda, pestka, mathgraph}\td{none for exports}\td{—}}
+\tr{\td{tenet-jvm}\td{\code{\verb~|TENET_TRACE=1~} prints the name before each item, no cost}\td{not used}}
+}
+
+\p{\code{\verb~|bench/baselines/instrtap.c~} is a small \code{\verb~|LD_PRELOAD~} library that interposes \code{\verb~|write~} and \code{\verb~|fwrite~}: whenever the checker starts one of those lines, it first prints \code{\verb~|#I <tid> <count>~}, the calling thread's user-space instruction count from its own \code{\verb~|perf_event_open~} counter (INST_RETIRED, user mode, one event per PMU of this big.LITTLE host, summed). That is the counter \code{\verb~|perf stat -e instructions:u~} uses, per thread. The difference of two such lines of a thread is the cost of what the thread did in between. Self-test (\code{\verb~|profile-mathlib.sh selftest~}): a loop of 1,200,000,000 instructions between a \code{\verb~|start~} and an \code{\verb~|end~} line reads as 1,200,000,522 on each of 4 threads.}
+
+\p{What an interval contains differs per checker, which matters for the small declarations:}
+
+\ul{
+\li{\strong{nano-lean}: \code{\verb~|start~} to \code{\verb~|end~} of the same declaration: the check and nothing else (a few hundred instructions of printing). This is the cleanest profile and the reference below.}
+\li{\strong{gruszka}: from one \code{\verb~|DI~} line to the next of the same worker: the check plus printing the previous \code{\verb~|DI~} line, which is long. The same run without \code{\verb~|SK_DECL_INSTR~} and without the library is 22.8e9 instructions cheaper, i.e. about 31,600 per declaration; that constant is subtracted from every declaration (raw values are kept in the \code{\verb~|.tsv.gz~}). A "declaration" of gruszka is an export record: an inductive block counts once (721,845 records against 739,167 constants).}
+\li{\strong{rpylean} reads and checks declaration by declaration, so an interval is "read this declaration's lines, check it", plus whatever the runtime does in between: collections, table growth, JIT compilation. A second view uses rpylean's own \code{\verb~|elapsed~} (wall time of the check alone).}
+\li{\strong{sokonanoda}: wall time only (its lines are buffered, so the library cannot attribute them). Inductive types, constructors and recursors are reported with 0 ms.}
+}
+
+\p{All profile runs used one worker (4-worker runs in 5.6) and were measured as a whole with \src{bench/measure.sh} as well; the instrumented single-worker runs cost 1.1 \% more than the plain single-worker runs for nano-lean (364.9e9 against 361.0e9), 0.9 \% for sokonanoda (491.4e9 against 487.2e9), 1.9 \% for rpylean (554.8e9 against 544.6e9) and 5.9 \% for gruszka (407.8e9 against 385.0e9 for \code{\verb~|gruszka export.susz 1~} alone).}
+}
+
+\subtree{
+\title{5.2 Reading the export against checking}
+
+% <!-- BEGIN profile:split -->
+
+\subtree{
+\title{Instructions spent reading mathlib.ndjson, and what is left for checking}
+
+\table{
+\tr{\th{checker}\th{arena run (4 workers)}\th{reading the export}\th{share}\th{checking}\th{how measured}}
+\tr{\td{nano-lean}\td{361.32e9}\td{40.88e9}\td{11.3 \%}\td{320.44e9}\td{\code{\verb~|nl-fast -q -j 4 --import-only~}}}
+\tr{\td{gruszka}\td{418.66e9}\td{37.49e9 = pack 29.60e9 + load 7.90e9}\td{9.0 \%}\td{381.16e9}\td{\code{\verb~|susz pack --no-index~} measured alone; load = the 1-worker run outside declarations}}
+\tr{\td{sokonanoda}\td{504.31e9}\td{36.91e9}\td{7.3 \%}\td{467.40e9}\td{\code{\verb~|sokonanoda --parse-only --threads 4~}}}
+\tr{\td{rpylean}\td{544.61e9}\td{interleaved}\td{19.0 \% of wall time}\td{-}\td{wall 124 s, of which checking 100 s (GC inside checks 3.1 s)}}
+}
+}
+
+% <!-- END profile:split -->
+
+\ul{
+\li{\strong{Reading mathlib costs the three Rust leaders 37-41e9 instructions}: 7-11 \% of their totals, 5.8-6.5 instructions per byte of NDJSON, 330-365 per line (6,326,141,213 bytes, 112,081,718 lines). gruszka's packer alone (\code{\verb~|susz pack~}, NDJSON to its binary Susz format) is 29.6e9 = 4.7 per byte and 264 per line; loading the packed file into the environment is another 7.9e9. The parts add up: pack + \code{\verb~|gruszka export.susz 4~} = 29.60e9 + 389.11e9 = 418.71e9 against 418.66e9 for the arena run line.}
+\li{At nano-lean's level, reading is one ninth of the whole budget. A reader that costs 20 instructions per byte would spend 126e9 instructions on mathlib, a third of nano-lean's whole run.}
+\li{nano-lean reads the whole file before it checks anything (5.2 s on one thread, 1.2 GB/s) and reaches its maximum RSS there: \code{\verb~|--import-only~} already peaks at 5,157 MiB, the same as the full run.}
+\li{rpylean interleaves reading and checking; 19 \% of its wall time lies outside the per-declaration checks (reading, collections between declarations, table growth); inside the checks rpylean itself reports 3.1 s of collection time.}
+}
+}
+
+\subtree{
+\title{5.3 The distribution is flat}
+
+% <!-- BEGIN profile:distribution -->
+
+\subtree{
+\title{Cumulative distribution: share of the per-declaration total in the N most expensive declarations}
+
+\table{
+\tr{\th{profile}\th{metric}\th{declarations}\th{total}\th{top 1}\th{top 10}\th{top 100}\th{top 200}\th{top 1,000}\th{top 10,000}\th{top 100,000}}
+\tr{\td{nano-lean.j1}\td{instructions}\td{739,167}\td{321.55e9}\td{0.35 \%}\td{1.25 \%}\td{4.1 \%}\td{5.6 \%}\td{12.2 \%}\td{36.0 \%}\td{77.5 \%}}
+\tr{\td{gruszka.w1}\td{instructions}\td{721,845}\td{377.10e9}\td{0.50 \%}\td{1.49 \%}\td{4.2 \%}\td{5.7 \%}\td{12.1 \%}\td{34.6 \%}\td{75.4 \%}}
+\tr{\td{rpylean}\td{instructions}\td{739,167}\td{516.35e9}\td{0.58 \%}\td{2.36 \%}\td{7.0 \%}\td{8.5 \%}\td{14.4 \%}\td{35.5 \%}\td{73.2 \%}}
+\tr{\td{rpylean (check wall time)}\td{wall time}\td{739,167}\td{100.5 s}\td{0.88 \%}\td{1.66 \%}\td{3.5 \%}\td{4.6 \%}\td{9.8 \%}\td{28.8 \%}\td{70.0 \%}}
+\tr{\td{sokonanoda.t1}\td{wall time}\td{739,167}\td{80.9 s}\td{1.06 \%}\td{3.23 \%}\td{5.5 \%}\td{6.7 \%}\td{11.8 \%}\td{31.2 \%}\td{71.8 \%}}
+}
+}
+
+\subtree{
+\title{Declarations needed for a share of the total, and cost per declaration}
+
+\table{
+\tr{\th{profile}\th{50 \%}\th{80 \%}\th{90 \%}\th{95 \%}\th{99 \%}\th{mean}\th{median}\th{p90}\th{p99}\th{p99.9}\th{max}}
+\tr{\td{nano-lean.j1}\td{23,301}\td{114,626}\td{212,183}\td{316,765}\td{531,766}\td{0.44e6}\td{77,674}\td{0.83e6}\td{6.04e6}\td{22.61e6}\td{1.12e9}}
+\tr{\td{gruszka.w1}\td{26,022}\td{127,997}\td{231,773}\td{335,826}\td{524,676}\td{0.52e6}\td{0.11e6}\td{1.01e6}\td{6.77e6}\td{25.77e6}\td{1.89e9}}
+\tr{\td{rpylean}\td{27,011}\td{144,712}\td{262,317}\td{381,596}\td{596,527}\td{0.70e6}\td{0.17e6}\td{1.28e6}\td{8.30e6}\td{31.86e6}\td{3.00e9}}
+\tr{\td{rpylean (check wall time)}\td{37,786}\td{159,777}\td{267,493}\td{370,665}\td{558,522}\td{0.14 ms}\td{0.04 ms}\td{0.29 ms}\td{1.54 ms}\td{5.78 ms}\td{886.52 ms}}
+\tr{\td{sokonanoda.t1}\td{33,210}\td{149,337}\td{254,458}\td{354,184}\td{535,215}\td{0.11 ms}\td{0.03 ms}\td{0.22 ms}\td{1.27 ms}\td{4.45 ms}\td{860.14 ms}}
+}
+}
+
+% <!-- END profile:distribution -->
+
+% <!-- BEGIN profile:classes -->
+
+\subtree{
+\title{nano-lean.j1: declarations by cost class}
+
+\table{
+\tr{\th{instructions per declaration}\th{declarations}\th{share of declarations}\th{share of cost}}
+\tr{\td{1e+03..1e+04}\td{46,732}\td{6.32 \%}\td{0.1 \%}}
+\tr{\td{1e+04..1e+05}\td{364,127}\td{49.26 \%}\td{4.5 \%}}
+\tr{\td{1e+05..1e+06}\td{266,630}\td{36.07 \%}\td{27.0 \%}}
+\tr{\td{1e+06..1e+07}\td{58,362}\td{7.90 \%}\td{46.5 \%}}
+\tr{\td{1e+07..1e+08}\td{3,273}\td{0.44 \%}\td{19.1 \%}}
+\tr{\td{1e+08..1e+09}\td{42}\td{0.01 \%}\td{2.4 \%}}
+\tr{\td{1e+09..1e+10}\td{1}\td{0.00 \%}\td{0.3 \%}}
+}
+}
+
+\subtree{
+\title{gruszka.w1: declarations by cost class}
+
+\table{
+\tr{\th{instructions per declaration}\th{declarations}\th{share of declarations}\th{share of cost}}
+\tr{\td{0e+00..1e+03}\td{463}\td{0.06 \%}\td{0.0 \%}}
+\tr{\td{1e+03..1e+04}\td{59,884}\td{8.30 \%}\td{0.1 \%}}
+\tr{\td{1e+04..1e+05}\td{276,774}\td{38.34 \%}\td{3.4 \%}}
+\tr{\td{1e+05..1e+06}\td{312,066}\td{43.23 \%}\td{27.2 \%}}
+\tr{\td{1e+06..1e+07}\td{68,692}\td{9.52 \%}\td{46.2 \%}}
+\tr{\td{1e+07..1e+08}\td{3,915}\td{0.54 \%}\td{20.1 \%}}
+\tr{\td{1e+08..1e+09}\td{50}\td{0.01 \%}\td{2.6 \%}}
+\tr{\td{1e+09..1e+10}\td{1}\td{0.00 \%}\td{0.5 \%}}
+}
+}
+
+% <!-- END profile:classes -->
+
+\ul{
+\li{\strong{There is no hot spot.} The most expensive declaration of mathlib is 0.35 \% of nano-lean's checking cost (1.12e9 instructions, 0.19 virtual seconds). The top 10 are 1.25 \%, the top 200 are 5.6 \%, the top 1,000 are 12.2 \%, the top 10,000 are 36 \%. Half of the cost is in the 23,301 most expensive declarations (3.2 \% of them), 90 \% in 212,183 (29 \%).}
+\li{\strong{All four checkers see the same shape}, whatever their design: the top 200 are 5.7 \% for gruszka, 6.7 \% for sokonanoda (wall time) and 4.6 \% for rpylean (its own check time).}
+\li{\strong{The bulk is in mid-size declarations.} For nano-lean, 58,362 declarations of 1e6 to 1e7 instructions carry 46.5 \% of the checking cost, 266,630 of 1e5 to 1e6 carry 27.0 \%, and 3,273 of 1e7 to 1e8 carry 19.1 \%. The 410,859 declarations below 1e5 instructions (56 \% of all) carry 4.6 \%; the 43 above 1e8 carry 2.7 \%.}
+\li{Mean cost per constant 435,000 instructions, median 78,000 (nano-lean); 522,000 and 114,000 for gruszka's 721,845 records.}
+\li{mathlib is therefore 739,167 small, independent jobs, and \strong{per-declaration fixed cost is a first-order term}: 10,000 instructions of set-up or tear-down per declaration are 7.4e9, 2 \% of nano-lean's total; the median declaration costs nano-lean only eight times that.}
+}
+}
+
+\subtree{
+\title{5.4 By kind and by name}
+
+% <!-- BEGIN profile:kinds -->
+
+\subtree{
+\title{Cost by kind of declaration}
+
+\table{
+\tr{\th{kind}\th{nano-lean.j1: declarations}\th{nano-lean.j1: share}\th{nano-lean.j1: mean}\th{gruszka.w1: declarations}\th{gruszka.w1: share}\th{gruszka.w1: mean}\th{sokonanoda.t1: declarations}\th{sokonanoda.t1: share}\th{sokonanoda.t1: mean}}
+\tr{\td{theorem}\td{524,582}\td{88.76 \%}\td{0.54e6}\td{524,582}\td{89.35 \%}\td{0.64e6}\td{524,582}\td{89.96 \%}\td{0.14 ms}}
+\tr{\td{def}\td{187,271}\td{10.51 \%}\td{0.18e6}\td{187,271}\td{9.77 \%}\td{0.20e6}\td{187,271}\td{10.03 \%}\td{0.04 ms}}
+\tr{\td{inductive}\td{7,162}\td{0.70 \%}\td{0.31e6}\td{7,129}\td{0.87 \%}\td{0.46e6}\td{7,162}\td{0.00 \%}\td{0.00 ms}}
+\tr{\td{opaque}\td{2,855}\td{0.01 \%}\td{17,126}\td{2,855}\td{0.01 \%}\td{18,761}\td{2,855}\td{0.02 \%}\td{0.01 ms}}
+\tr{\td{ctor}\td{10,006}\td{0.01 \%}\td{3,627}\td{-}\td{-}\td{-}\td{10,006}\td{0.00 \%}\td{0.00 ms}}
+\tr{\td{recr}\td{7,283}\td{0.01 \%}\td{3,528}\td{-}\td{-}\td{-}\td{7,283}\td{0.00 \%}\td{0.00 ms}}
+\tr{\td{quot}\td{4}\td{0.00 \%}\td{0.10e6}\td{4}\td{0.00 \%}\td{29,823}\td{4}\td{0.00 \%}\td{0.00 ms}}
+\tr{\td{axiom}\td{4}\td{0.00 \%}\td{12,030}\td{4}\td{0.00 \%}\td{48,745}\td{4}\td{0.00 \%}\td{0.00 ms}}
+}
+}
+
+% <!-- END profile:kinds -->
+
+% <!-- BEGIN profile:names -->
+
+\subtree{
+\title{nano-lean.j1: cost by last name component, for the suffixes Lean generates (numbers as N)}
+
+\table{
+\tr{\th{last component}\th{declarations}\th{share of cost}\th{mean instructions}}
+\tr{\td{\code{\verb~|(other)~}}\td{533,189}\td{75.60 \%}\td{0.46e6}}
+\tr{\td{\code{\verb~|_proof_N~}}\td{100,876}\td{18.46 \%}\td{0.59e6}}
+\tr{\td{\code{\verb~|noConfusion~}}\td{9,864}\td{1.22 \%}\td{0.40e6}}
+\tr{\td{\code{\verb~|_unary~}}\td{459}\td{0.81 \%}\td{5.70e6}}
+\tr{\td{\code{\verb~|match_N~}}\td{14,320}\td{0.61 \%}\td{0.14e6}}
+\tr{\td{\code{\verb~|eq_def~}}\td{767}\td{0.57 \%}\td{2.41e6}}
+\tr{\td{\code{\verb~|congr_simp~}}\td{5,389}\td{0.50 \%}\td{0.30e6}}
+\tr{\td{\code{\verb~|eq_N~}}\td{17,854}\td{0.41 \%}\td{73,592}}
+\tr{\td{\code{\verb~|injEq~}}\td{4,380}\td{0.33 \%}\td{0.24e6}}
+\tr{\td{\code{\verb~|_mutual~}}\td{19}\td{0.28 \%}\td{48.10e6}}
+\tr{\td{\code{\verb~|noConfusionType~}}\td{4,588}\td{0.28 \%}\td{0.20e6}}
+\tr{\td{\code{\verb~|casesOn~}}\td{6,990}\td{0.27 \%}\td{0.12e6}}
+\tr{\td{\code{\verb~|inj~}}\td{4,415}\td{0.19 \%}\td{0.14e6}}
+\tr{\td{\code{\verb~|sizeOf_spec~}}\td{5,552}\td{0.11 \%}\td{65,517}}
+}
+}
+
+\subtree{
+\title{nano-lean.j1: cost by first name component}
+
+\table{
+\tr{\th{namespace}\th{declarations}\th{share of cost}}
+\tr{\td{\code{\verb~|_private~}}\td{109,275}\td{18.49 \%}}
+\tr{\td{\code{\verb~|CategoryTheory~}}\td{79,060}\td{12.97 \%}}
+\tr{\td{\code{\verb~|Std~}}\td{41,881}\td{3.68 \%}}
+\tr{\td{\code{\verb~|AlgebraicGeometry~}}\td{7,788}\td{2.66 \%}}
+\tr{\td{\code{\verb~|Algebra~}}\td{3,743}\td{1.98 \%}}
+\tr{\td{\code{\verb~|MeasureTheory~}}\td{12,159}\td{1.92 \%}}
+\tr{\td{\code{\verb~|Lean~}}\td{54,168}\td{1.16 \%}}
+\tr{\td{\code{\verb~|Polynomial~}}\td{5,101}\td{1.10 \%}}
+\tr{\td{\code{\verb~|LinearMap~}}\td{3,688}\td{1.09 \%}}
+\tr{\td{\code{\verb~|Matrix~}}\td{5,146}\td{1.04 \%}}
+\tr{\td{\code{\verb~|Module~}}\td{3,195}\td{0.97 \%}}
+\tr{\td{\code{\verb~|List~}}\td{9,171}\td{0.87 \%}}
+\tr{\td{\code{\verb~|Ideal~}}\td{2,764}\td{0.83 \%}}
+\tr{\td{\code{\verb~|TensorProduct~}}\td{1,268}\td{0.80 \%}}
+}
+}
+
+% <!-- END profile:names -->
+
+\ul{
+\li{\strong{Theorems are 89 \% of the checking cost} in all three profiles, definitions 10 \%, everything else together under 1 \%. Inductive types with their constructors and recursors are 0.7 \% for nano-lean and 0.9 \% for gruszka (sokonanoda does not time them): the speed of the inductive-type machinery does not show in the ranking, only its correctness does.}
+\li{An average theorem costs nano-lean 0.54e6 instructions, an average definition 0.18e6.}
+\li{\strong{Compiler-generated proofs are a large share}: the 100,876 \code{\verb~|_proof_N~} constants (proof terms that Lean abstracts out of definitions and tactic blocks) are 18.5 \% of the cost. \code{\verb~|noConfusion~} is 1.2 \%; the other generated families (\code{\verb~|match_N~}, \code{\verb~|eq_N~}, \code{\verb~|injEq~}, \code{\verb~|sizeOf_spec~}, \code{\verb~|casesOn~}, \code{\verb~|congr_simp~}, ...) are below 1 \% each, about 5 \% together.}
+\li{By namespace: \code{\verb~|_private~} (mostly those \code{\verb~|_proof_N~} and private lemmas) 18.5 \%; \code{\verb~|CategoryTheory~} 13.0 \% with 10.7 \% of the declarations; \code{\verb~|Std~} 3.7 \%; \code{\verb~|AlgebraicGeometry~} 2.7 \% with 1.1 \% of the declarations. Lean's own \code{\verb~|Lean.*~} (54,168 declarations) is 1.2 \%.}
+}
+}
+
+\subtree{
+\title{5.5 The most expensive declarations}
+
+\p{The full lists (200 per profile, with share and cumulative share) are in \code{\verb~|work/baselines/mathlib-profile.json~} (\code{\verb~|profiles.<name>.top~}) and side by side in \code{\verb~|work/baselines/mathlib-profile.top200.tsv~}; every declaration is in \code{\verb~|mathlib-profile.<name>.tsv.gz~}.}
+
+% <!-- BEGIN profile:top -->
+
+\subtree{
+\title{The 40 most expensive declarations for nano-lean (1 worker), with their place elsewhere}
+
+\table{
+\tr{\th{\verb~|#~}\th{declaration}\th{instructions}\th{share}\th{cumulative}\th{gruszka.w1}\th{sokonanoda.t1 (wall)}\th{rpylean (wall)}}
+\tr{\td{1}\td{\code{\verb~|_private.Mathlib.AlgebraicGeometry.EllipticCurve.Affine.AddSubMap.0.WeierstrassCurve.Affine.Point.sym2x_add_sub_eq_addSubMap_sym2x._proof_1_8~}}\td{1.12e9}\td{0.348 \%}\td{0.35 \%}\td{\verb~|#~1 1.89e9}\td{\verb~|#~1 860 ms}\td{\verb~|#~1 887 ms}}
+\tr{\td{2}\td{\code{\verb~|Std.Tactic.BVDecide.BVExpr.bitblast.goCache_Inv_of_Inv._mutual~}}\td{0.53e9}\td{0.164 \%}\td{0.51 \%}\td{\verb~|#~5 0.42e9}\td{\verb~|#~9 89 ms}\td{\verb~|#~3 140 ms}}
+\tr{\td{3}\td{\code{\verb~|_private.Init.Data.String.Lemmas.Lossy.0.String.fromUTF8Lossy_surrogate_append._proof_1_10~}}\td{0.38e9}\td{0.118 \%}\td{0.63 \%}\td{\verb~|#~3 0.43e9}\td{\verb~|#~2 412 ms}\td{\verb~|#~10 48 ms}}
+\tr{\td{4}\td{\code{\verb~|CategoryTheory.Functor.IsDenseSubsite.isIso_ranCounit_app_of_isDenseSubsite~}}\td{0.33e9}\td{0.102 \%}\td{0.73 \%}\td{\verb~|#~6 0.41e9}\td{\verb~|#~15 43 ms}\td{\verb~|#~84 14 ms}}
+\tr{\td{5}\td{\code{\verb~|CategoryTheory.Limits.colimitLimitToLimitColimit_surjective~}}\td{0.31e9}\td{0.097 \%}\td{0.83 \%}\td{\verb~|#~2 0.71e9}\td{\verb~|#~14 45 ms}\td{\verb~|#~77 15 ms}}
+\tr{\td{6}\td{\code{\verb~|Std.Tactic.BVDecide.BVExpr.bitblast.goCache_decl_eq._mutual~}}\td{0.31e9}\td{0.095 \%}\td{0.92 \%}\td{\verb~|#~15 0.21e9}\td{\verb~|#~16 39 ms}\td{\verb~|#~12 45 ms}}
+\tr{\td{7}\td{\code{\verb~|_private.Mathlib.Combinatorics.SimpleGraph.Regularity.Chunk.0.SzemerediRegularity.edgeDensity_star_not_uniform._proof_1_10~}}\td{0.30e9}\td{0.093 \%}\td{1.02 \%}\td{\verb~|#~7 0.39e9}\td{\verb~|#~7 101 ms}\td{\verb~|#~7 65 ms}}
+\tr{\td{8}\td{\code{\verb~|_private.Mathlib.NumberTheory.EllipticDivisibilitySequence.0.IsEllipticNet.atomRel_of_even_odd._proof_1_15~}}\td{0.30e9}\td{0.092 \%}\td{1.11 \%}\td{\verb~|#~4 0.42e9}\td{\verb~|#~8 93 ms}\td{\verb~|#~9 49 ms}}
+\tr{\td{9}\td{\code{\verb~|_private.Mathlib.LinearAlgebra.RootSystem.Finite.G2.0.RootPairing.EmbeddedG2.isOrthogonal_short_and_long_aux._proof_1_1~}}\td{0.23e9}\td{0.073 \%}\td{1.18 \%}\td{\verb~|#~14 0.22e9}\td{\verb~|#~21 31 ms}\td{\verb~|#~26 26 ms}}
+\tr{\td{10}\td{\code{\verb~|Ideal.Quotient.stabilizerHom_surjective_of_profinite~}}\td{0.23e9}\td{0.072 \%}\td{1.25 \%}\td{\verb~|#~17 0.20e9}\td{\verb~|#~24 29 ms}\td{\verb~|#~160 11 ms}}
+\tr{\td{11}\td{\code{\verb~|_private.Mathlib.NumberTheory.EllipticDivisibilitySequence.0.IsEllipticNet.atomRel_of_even_odd._proof_1_13~}}\td{0.22e9}\td{0.068 \%}\td{1.32 \%}\td{\verb~|#~11 0.26e9}\td{\verb~|#~11 62 ms}\td{\verb~|#~11 46 ms}}
+\tr{\td{12}\td{\code{\verb~|CategoryTheory.StrictlyUnitaryLaxFunctor.ext~}}\td{0.21e9}\td{0.066 \%}\td{1.39 \%}\td{\verb~|#~8 0.36e9}\td{\verb~|#~23 29 ms}\td{> 200}}
+\tr{\td{13}\td{\code{\verb~|Algebra.IsInvariant.exists_smul_of_under_eq_of_profinite~}}\td{0.21e9}\td{0.066 \%}\td{1.45 \%}\td{\verb~|#~13 0.25e9}\td{\verb~|#~39 21 ms}\td{\verb~|#~60 17 ms}}
+\tr{\td{14}\td{\code{\verb~|AlgebraicGeometry.isIso_pushoutSection_of_iSup_eq~}}\td{0.19e9}\td{0.060 \%}\td{1.51 \%}\td{\verb~|#~12 0.25e9}\td{\verb~|#~20 32 ms}\td{\verb~|#~4 93 ms}}
+\tr{\td{15}\td{\code{\verb~|AlgebraicGeometry.Proj.lift_awayMapₐ_awayMapₐ_surjective~}}\td{0.19e9}\td{0.058 \%}\td{1.57 \%}\td{\verb~|#~9 0.31e9}\td{\verb~|#~30 24 ms}\td{\verb~|#~29 25 ms}}
+\tr{\td{16}\td{\code{\verb~|Algebra.exists_etale_isIdempotentElem_forall_liesOver_eq_aux~}}\td{0.18e9}\td{0.056 \%}\td{1.63 \%}\td{\verb~|#~20 0.17e9}\td{\verb~|#~13 46 ms}\td{\verb~|#~42 20 ms}}
+\tr{\td{17}\td{\code{\verb~|_private.Init.Data.Array.Extract.0.Array.extract_append._proof_1_1~}}\td{0.18e9}\td{0.054 \%}\td{1.68 \%}\td{\verb~|#~24 0.15e9}\td{\verb~|#~19 33 ms}\td{\verb~|#~24 27 ms}}
+\tr{\td{18}\td{\code{\verb~|_private.Init.Data.String.Lemmas.Pattern.String.ForwardSearcher.0.String.Slice.Pattern.Model.ForwardSliceSearcher.Invariants.isValidSearchFrom_toList~}}\td{0.16e9}\td{0.050 \%}\td{1.73 \%}\td{\verb~|#~39 0.11e9}\td{\verb~|#~29 25 ms}\td{> 200}}
+\tr{\td{19}\td{\code{\verb~|Std.Tactic.BVDecide.BVExpr.bitblast.blastAdd.go_denote_eq._unary~}}\td{0.16e9}\td{0.050 \%}\td{1.78 \%}\td{\verb~|#~54 96.88e6}\td{\verb~|#~66 15 ms}\td{> 200}}
+\tr{\td{20}\td{\code{\verb~|CategoryTheory.Bicategory.mateEquiv_vcomp~}}\td{0.16e9}\td{0.049 \%}\td{1.83 \%}\td{\verb~|#~16 0.21e9}\td{\verb~|#~48 19 ms}\td{\verb~|#~108 13 ms}}
+\tr{\td{21}\td{\code{\verb~|Ideal.Quotient.stabilizerHomSurjectiveAuxFunctor._proof_1~}}\td{0.16e9}\td{0.049 \%}\td{1.88 \%}\td{\verb~|#~23 0.16e9}\td{\verb~|#~40 20 ms}\td{> 200}}
+\tr{\td{22}\td{\code{\verb~|_private.Init.Data.Vector.Extract.0.Vector.extract_append._proof_1~}}\td{0.16e9}\td{0.048 \%}\td{1.93 \%}\td{\verb~|#~98 72.19e6}\td{\verb~|#~17 37 ms}\td{\verb~|#~13 42 ms}}
+\tr{\td{23}\td{\code{\verb~|_private.Mathlib.Data.Int.Fib.Lemmas.0.Int.fib_add_sq_sub_fib_mul_fib_add_two_mul._proof_1_2~}}\td{0.15e9}\td{0.046 \%}\td{1.97 \%}\td{\verb~|#~18 0.19e9}\td{\verb~|#~22 30 ms}\td{\verb~|#~14 37 ms}}
+\tr{\td{24}\td{\code{\verb~|_private.Mathlib.AlgebraicGeometry.EllipticCurve.Affine.AddSubMap.0.WeierstrassCurve.addSubMapCoeff_condition._proof_1_3~}}\td{0.15e9}\td{0.046 \%}\td{2.02 \%}\td{\verb~|#~10 0.27e9}\td{\verb~|#~10 77 ms}\td{\verb~|#~31 24 ms}}
+\tr{\td{25}\td{\code{\verb~|Ideal.Quotient.stabilizerHomSurjectiveAuxFunctor._proof_3~}}\td{0.14e9}\td{0.045 \%}\td{2.07 \%}\td{\verb~|#~29 0.14e9}\td{\verb~|#~108 12 ms}\td{> 200}}
+\tr{\td{26}\td{\code{\verb~|_private.Mathlib.RingTheory.Etale.QuasiFinite.0.Algebra.exists_etale_completeOrthogonalIdempotents_forall_liesOver_eq'~}}\td{0.14e9}\td{0.044 \%}\td{2.11 \%}\td{\verb~|#~31 0.13e9}\td{\verb~|#~28 25 ms}\td{\verb~|#~16 36 ms}}
+\tr{\td{27}\td{\code{\verb~|String.firstDiffPos_loop_eq._unary~}}\td{0.14e9}\td{0.042 \%}\td{2.15 \%}\td{\verb~|#~80 79.80e6}\td{\verb~|#~92 13 ms}\td{> 200}}
+\tr{\td{28}\td{\code{\verb~|_private.Mathlib.NumberTheory.Height.EllipticCurve.0.WeierstrassCurve.Affine.approx_parallelogram_law._proof_1_3~}}\td{0.13e9}\td{0.041 \%}\td{2.19 \%}\td{\verb~|#~26 0.15e9}\td{\verb~|#~12 49 ms}\td{\verb~|#~28 26 ms}}
+\tr{\td{29}\td{\code{\verb~|Algebra.exists_etale_isIdempotentElem_forall_liesOver_eq~}}\td{0.13e9}\td{0.040 \%}\td{2.23 \%}\td{\verb~|#~58 94.55e6}\td{\verb~|#~33 23 ms}\td{\verb~|#~49 18 ms}}
+\tr{\td{30}\td{\code{\verb~|CategoryTheory.MonoidalCategory.ofBifunctor.Pentagon.secondMap~}}\td{0.13e9}\td{0.040 \%}\td{2.27 \%}\td{> 200}\td{> 200}\td{> 200}}
+\tr{\td{31}\td{\code{\verb~|Std.IterM.stepAsHetT_filterMapWithPostcondition~}}\td{0.12e9}\td{0.039 \%}\td{2.31 \%}\td{\verb~|#~27 0.14e9}\td{\verb~|#~71 14 ms}\td{> 200}}
+\tr{\td{32}\td{\code{\verb~|AlgebraicGeometry.exists_appTop_π_eq_of_isLimit~}}\td{0.12e9}\td{0.037 \%}\td{2.35 \%}\td{\verb~|#~30 0.14e9}\td{\verb~|#~42 20 ms}\td{\verb~|#~15 37 ms}}
+\tr{\td{33}\td{\code{\verb~|Field.finSepDegree_eq_finrank_of_isSeparable~}}\td{0.12e9}\td{0.037 \%}\td{2.38 \%}\td{\verb~|#~104 70.10e6}\td{\verb~|#~75 14 ms}\td{> 200}}
+\tr{\td{34}\td{\code{\verb~|_private.Mathlib.NumberTheory.EllipticDivisibilitySequence.0.IsEllipticNet.atomRel_of_even_odd._proof_1_16~}}\td{0.12e9}\td{0.036 \%}\td{2.42 \%}\td{\verb~|#~33 0.12e9}\td{\verb~|#~26 27 ms}\td{\verb~|#~19 33 ms}}
+\tr{\td{35}\td{\code{\verb~|WeierstrassCurve.variableChange_Δ~}}\td{0.12e9}\td{0.036 \%}\td{2.46 \%}\td{\verb~|#~19 0.18e9}\td{\verb~|#~107 12 ms}\td{> 200}}
+\tr{\td{36}\td{\code{\verb~|_private.Init.Data.Vector.Extract.0.Vector.extract_extract._proof_1~}}\td{0.11e9}\td{0.036 \%}\td{2.49 \%}\td{\verb~|#~45 0.11e9}\td{\verb~|#~35 22 ms}\td{\verb~|#~27 26 ms}}
+\tr{\td{37}\td{\code{\verb~|_private.Mathlib.NumberTheory.EllipticDivisibilitySequence.0.IsEllipticNet.atom_mul_atomRel._proof_1_2~}}\td{0.11e9}\td{0.035 \%}\td{2.53 \%}\td{\verb~|#~22 0.16e9}\td{\verb~|#~18 33 ms}\td{\verb~|#~46 19 ms}}
+\tr{\td{38}\td{\code{\verb~|AlgebraicGeometry.Scheme.exists_π_app_comp_eq_of_locallyOfFinitePresentation~}}\td{0.11e9}\td{0.034 \%}\td{2.56 \%}\td{\verb~|#~21 0.17e9}\td{\verb~|#~106 12 ms}\td{\verb~|#~47 19 ms}}
+\tr{\td{39}\td{\code{\verb~|_private.Mathlib.Analysis.ODE.ExistUnique.0.ODE_solution_unique_univ._proof_1_2~}}\td{0.11e9}\td{0.034 \%}\td{2.60 \%}\td{\verb~|#~42 0.11e9}\td{\verb~|#~49 18 ms}\td{\verb~|#~20 32 ms}}
+\tr{\td{40}\td{\code{\verb~|Std.Iter.atIdxSlow?_intermediateZip~}}\td{0.11e9}\td{0.033 \%}\td{2.63 \%}\td{\verb~|#~49 0.10e9}\td{\verb~|#~82 13 ms}\td{> 200}}
+}
+}
+
+% <!-- END profile:top -->
+
+% <!-- BEGIN profile:agreement -->
+
+\subtree{
+\title{Agreement between checkers: declarations in common among the N most expensive}
+
+\table{
+\tr{\th{pair}\th{top 10}\th{top 50}\th{top 200}}
+\tr{\td{nano-lean.j1 / gruszka.w1}\td{7}\td{38}\td{153}}
+\tr{\td{nano-lean.j1 / sokonanoda.t1}\td{5}\td{32}\td{130}}
+\tr{\td{nano-lean.j1 / rpylean (check wall time)}\td{5}\td{28}\td{85}}
+\tr{\td{nano-lean.j1 / rpylean}\td{1}\td{13}\td{95}}
+\tr{\td{gruszka.w1 / sokonanoda.t1}\td{6}\td{33}\td{131}}
+\tr{\td{gruszka.w1 / rpylean (check wall time)}\td{5}\td{26}\td{84}}
+\tr{\td{gruszka.w1 / rpylean}\td{1}\td{12}\td{90}}
+\tr{\td{sokonanoda.t1 / rpylean (check wall time)}\td{6}\td{28}\td{102}}
+\tr{\td{sokonanoda.t1 / rpylean}\td{1}\td{14}\td{98}}
+\tr{\td{rpylean (check wall time) / rpylean}\td{3}\td{18}\td{128}}
+}
+
+\p{gruszka / nano-lean, same declarations, 1 worker each: 1.173 in total; per declaration (the 61,678 above 1e6 instructions in nano-lean): p05 0.414, p25 0.898, median 1.164, p75 1.373, p95 1.739.}
+}
+
+% <!-- END profile:agreement -->
+
+\ul{
+\li{\strong{The checkers agree on what is expensive, less on the order.} nano-lean and gruszka share 153 of their 200 most expensive declarations and 7 of their top 10; nano-lean and sokonanoda 130 and 5. The most expensive declaration is the same in all four: \code{\verb~|…sym2x_add_sub_eq_addSubMap_sym2x._proof_1_8~} (1.12e9 instructions for nano-lean, 1.89e9 for gruszka, 860 ms for sokonanoda, 887 ms for rpylean).}
+\li{\strong{Neither leader dominates the other declaration by declaration.} Over the 61,678 declarations that cost nano-lean more than 1e6 instructions, gruszka's cost is 1.16 x nano-lean's at the median, but 0.41 x at the 5th percentile and 1.74 x at the 95th. Each is fast where the other is not, so neither is at a floor.}
+\li{Going by their names (not checked against the terms), the heavy declarations are of a few families: auxiliary proofs of polynomial identities on elliptic curves and division sequences (\code{\verb~|…EllipticCurve…._proof_1_N~}, \code{\verb~|IsEllipticNet.atomRel…~}), bit-blasting lemmas of \code{\verb~|Std.Tactic.BVDecide~} (\code{\verb~|…goCache…._mutual~}), string and array lemmas of core (\code{\verb~|fromUTF8Lossy…~}, \code{\verb~|extract_append~}), and coherence proofs in category theory and algebraic geometry.}
+\li{\strong{rpylean's instruction intervals need care.} 16 of its 25 largest intervals belong to declarations whose own check took under 4 ms; the interval then holds 0.4e9 to 0.96e9 instructions of runtime work that happened to fall between two declarations (my reading: major collections, whose cost grows with the heap; not verified). That is real cost (the 100 largest intervals hold 7.0 \% of rpylean's per-declaration total, the 100 longest checks 3.5 \% of its check time), but it is not the declaration's. Rank rpylean by \code{\verb~|by_check_wall_time~} in the JSON.}
+}
+}
+
+\subtree{
+\title{5.6 One worker against four, per declaration}
+
+% <!-- BEGIN profile:workers -->
+
+\subtree{
+\title{Per-declaration totals with 1 and 4 workers (instrumented runs)}
+
+\table{
+\tr{\th{profile}\th{workers}\th{whole run}\th{inside declarations}\th{outside}\th{top 200 share}\th{median}}
+\tr{\td{nano-lean.j1}\td{1}\td{364.88e9}\td{321.55e9}\td{43.34e9}\td{5.6 \%}\td{77,674}}
+\tr{\td{nano-lean.j4}\td{4}\td{365.40e9}\td{322.07e9}\td{43.33e9}\td{5.6 \%}\td{77,985}}
+\tr{\td{gruszka.w1}\td{1}\td{407.84e9}\td{399.95e9}\td{7.90e9}\td{5.7 \%}\td{0.11e6}}
+\tr{\td{gruszka.w4}\td{4}\td{412.08e9}\td{404.16e9}\td{7.92e9}\td{5.7 \%}\td{0.11e6}}
+}
+}
+
+% <!-- END profile:workers -->
+
+\ul{
+\li{nano-lean: the sum over all declarations is 321.55e9 with one worker and 322.07e9 with four (+0.16 \%); what lies outside declarations (import, reordering, start-up) is 43.3e9 in both. Four workers, each with caches of its own, do not repeat a measurable amount of work, and the median declaration costs the same (77,674 and 77,985 instructions).}
+\li{gruszka: 399.95e9 and 404.16e9 (+1.1 \%; raw intervals, printing included), 7.9e9 outside in both.}
+\li{sokonanoda has no per-declaration counts; its summed per-declaration wall time is 80.9 s with one worker and 98.0 s with four on a busier host, which is not a clean comparison. Its instruction total rises by 3.5 \%.}
+}
+}
+}
+
+\subtree{
+\title{6. What this means for RLVM}
+
+\ol{
+\li{\strong{The ladder} (mathlib, this machine, instructions): 361.3e9 nano-lean, 418.7e9 gruszka, 504.3e9 sokonanoda, 544.6e9 rpylean; then 880.4e9, 1.34e12, 5.53e12, 9.31e12 (the only JVM checker) and 11.42e12 (official). Below 544.6e9 is top four here; below about 355e9 is first whatever RLVM's aarch64/x86-64 ratio is (section 3).}
+\li{\p{\strong{The budget of a 60-second checker}, as nano-lean spends it:}
+\table{
+\tr{\th{part}\th{instructions}\th{per unit}}
+\tr{\td{reading the 6.3 GB export}\td{40.9e9 (11 \%)}\td{6.5 per byte, 365 per line, 382 per exported expression}}
+\tr{\td{checking 739,167 constants}\td{320.4e9 (89 \%)}\td{434,000 per constant on average, 78,000 at the median; 2,990 per exported expression}}
+\tr{\td{start-up, reordering, teardown}\td{under 2.5e9 (0.7 \%)}\td{upper bound: the 1-worker trace run outside declarations minus the import-only run, tracing included}}
+}
+\p{gruszka reads for 37.5e9 (pack 29.6e9 + load 7.9e9) and checks for 381e9; sokonanoda 36.9e9 and 467e9.}}
+\li{\p{\strong{No warm-up to hide behind.} The cost is spread over hundreds of thousands of declarations (5.3), and each declaration's own terms are used once. What is hot for the whole run is the kernel's generic machinery (weak-head normalisation, definitional equality, inference, substitution or evaluation, hash-consing), not anything derived from one declaration. A run-time compiler pays for itself only on that machinery, and what it spends is counted: the instructions of JIT compiler threads are part of the total.}
+\p{\strong{Instructions and time are different currencies.} The data point here is tenet-jvm, the same bytecode on the same JVM: with the Graal JIT instead of C2 it executes +7.0 \% instructions on init, +3.8 \% on std and +28.4 \% on mathlib, in 1.4 \% more CPU time on mathlib. A compiler, a collector or a coding style that is equally fast on the clock can cost a quarter more in the ranking, and Init does not predict it. Compare RLVM's alternatives (native image or JVM, C2 or Graal, GC and heap settings, thread counts) by instruction count on mathlib itself.}}
+\li{\strong{Per-declaration fixed cost is a first-order term.} 739,167 declarations: every 10,000 instructions of per-declaration set-up, cache reset, scheduling or bookkeeping are 7.4e9 = 2 \% of the leader's total, and the median declaration only costs 78,000. gruszka's \code{\verb~|DI~} line, a single formatted line per declaration, cost it 31,600 instructions each, 5.9 \% of its run.}
+\li{\strong{Theorems are the workload} (89 \%), a fifth of it compiler-generated \code{\verb~|_proof_N~} terms; definitions 10 \%; inductive types, constructors and recursors under 1 \%. Everything that is neither a theorem nor a definition can be written for clarity and correctness with little regard to speed.}
+\li{\strong{Parallel checking is free, runtime threads are not.} nano-lean pays 0.09 \% more instructions for 4 workers than for 1 and per declaration nothing (5.6). For a JVM the comparable risk is elsewhere (not measured here): parallel GC and JIT threads sized by the 8 CPUs it sees. Measure with \code{\verb~|--arena-limits~} only.}
+\li{\strong{The leaders are not at a floor.} Declaration by declaration gruszka is between 0.41 x and 1.74 x nano-lean (5th to 95th percentile over the declarations above 1e6 instructions), and it is the cheaper of the two on 201,657 of the 721,844 declarations both name (28 \%). Taking the cheaper of the two on every declaration gives 289.8e9 instructions of checking, against 321.5e9 for nano-lean and 377.1e9 for gruszka alone: 10 \% below the leader with techniques that already exist in one of the two (computed from \code{\verb~|mathlib-profile.by-name.tsv.gz~}; gruszka's figures carry the uniform correction of 5.1).}
+\li{\strong{Memory.} Peak RSS on mathlib: gruszka 2.5 GiB, pestka 3.5, rpylean 4.4, nano-lean 5.0, sokonanoda 5.1, nanoda 5.9, mathgraph 6.4, official 9.9, tenet-jvm 11.9 GiB. The runner has 16 GB; nano-lean reaches its peak while reading (the import alone peaks at 5.0 GiB).}
+\li{\strong{What a JVM checker costs today.} tenet-jvm, a Lean kernel in plain Java: 10.4 x the leader on init, 25.8 x on mathlib, 11.9 GiB. That is the distance between "a kernel on a JVM" and the leaderboard's top; it is not explained by the JVM's start-up (0.5-0.9e9 instructions per run on the smallest tests, 0.15-0.25 \% of nano-lean's mathlib count).}
+}
+}
+
+\subtree{
+\title{7. How to measure RLVM the same way}
+
+\p{All from the project root. RLVM's arena run line is the \code{\verb~|run:~} entry of \src{scripts/arena/rlvm.yaml}; \code{\verb~|bench/rlvm/run.sh --print~} prints it (\code{\verb~|--jvm~}, \code{\verb~|--pgo~}, \code{\verb~|--threads N~} select another launcher or worker count). Measure that command, not a wrapper around it.}
+
+\pre{\verb~|
+# 0. build: work/dist/bin/rlvm (native image), rlvm-jvm, rlvm-pgo
+scripts/build.sh
+
+# 1. one run on mathlib exactly as the arena measures it: one JSON line with
+#    exit_code, instructions, virtual_time_s (= instructions / 6e9), cpu_time_s, wall_time_s, max_rss_bytes
+bench/arena-docker.sh --arena-limits --no-network bench/measure.sh --timeout 4120 \
+    --in work/exports/mathlib.ndjson -c "$(bench/rlvm/run.sh --print)"
+
+# 2. the series the baselines got: 3 runs each on init, std and mathlib, one fresh container per run
+#    (records in work/rlvm/big/runs.jsonl, the checker's output in work/rlvm/big/logs/)
+bench/baselines/big.sh --runs 3 --out work/rlvm/big --label rlvm --cwd . --cmd "$(bench/rlvm/run.sh --print)"
+
+# 3. RLVM in the same tables as the baselines: instructions, virtual time, ratio to the fastest
+bench/baselines/big-summary.py --no-json --runs work/baselines/big/runs.jsonl --runs work/rlvm/big/runs.jsonl
+
+# other launchers and worker counts: give each its own label (a row of its own) ...
+bench/baselines/big.sh --runs 3 --out work/rlvm/big --label rlvm-jvm --cwd . --cmd "$(bench/rlvm/run.sh --jvm --print)"
+# ... or, for worker counts, a variant threads-N (they appear in the thread-scaling table)
+for n in 1 2 8; do
+  bench/baselines/big.sh --corpora mathlib --out work/rlvm/big --label rlvm --variant threads-$n --cwd . \
+      --cmd "$(bench/rlvm/run.sh --threads $n --print)"
+done
+# (bench/rlvm/measure.sh --threads 1,4,8 --repeat 3 work/exports/mathlib.ndjson does a similar matrix in one container)
+
+# 4. fast loop while developing: Init (3.7 virtual s for nano-lean) and the mathlib slices
+bench/baselines/big.sh --corpora init --out work/rlvm/big --label rlvm --cwd . --cmd "$(bench/rlvm/run.sh --print)"
+bench/arena-docker.sh --arena-limits --no-network bench/run-suite.py --perf --tests work/exports/slices \
+    --timeout 1200 --label rlvm --cwd . -- "$(bench/rlvm/run.sh --print)"
+
+# 5. a baseline again, for a same-day comparison (instruction counts repeat to well under 1 %)
+bench/baselines/big.sh --corpora mathlib --runs 1 --out work/rlvm/big nano-lean gruszka
+~}
+
+\p{These command lines were run as written on 2026-11-24 against the RLVM build of that moment (step 1 and the slices on small exports, step 2 on init-prelude and init), to check that they work; no RLVM result is recorded here.}
+
+\p{Rules that keep the numbers comparable with the tables above:}
+
+\ul{
+\li{Always \code{\verb~|--arena-limits~} (8 CPUs, 16 GB): a JVM, and a native image's serial or parallel GC, size their threads and heap by what they see, and their instruction count follows.}
+\li{Always the instruction count, never wall or CPU time, and always the whole command: start-up, reading the export, JIT compiler threads and GC threads are all counted by the arena.}
+\li{A JVM's count varies by 1-2 \% per run on a workload of this size (5 \% was seen on init for tenet-jvm), the native baselines' by less than 1 \%: take the median of at least 3 runs before claiming a difference.}
+\li{The exit status must be 0: the arena takes the mathlib figure only from an accepted run, and a checker without one sorts after all that have one (\code{\verb~|lka.py~}, "Track mathlib performance metrics only if the test was accepted").}
+\li{Compare with the numbers in this document (aarch64), not with the arena's web page (x86-64); section 3 says how far apart they are.}
+}
+
+\p{\strong{Per-declaration profile of RLVM.} If RLVM prints a line at the start and at the end of every declaration on stderr (as \code{\verb~|nl-fast --trace~} does: \code{\verb~|start <index> <name>~} / \code{\verb~|end <index> ...~}), the same library gives its per-declaration instruction counts, comparable declaration by declaration with \code{\verb~|work/baselines/mathlib-profile.nano-lean.j1.tsv.gz~}:}
+
+\pre{\verb~|
+bench/arena-docker.sh --arena-limits --no-network bench/baselines/profile-mathlib.sh build selftest
+bench/arena-docker.sh --arena-limits --no-network sh -c '
+  LD_PRELOAD=$PWD/work/baselines/profile/libinstrtap.so INSTRTAP_PREFIXES="start |end " \
+  work/dist/bin/rlvm-jvm --threads 1 --trace work/exports/mathlib.ndjson 2> work/rlvm/mathlib.trace'
+~}
+
+\p{Checked with a plain Java program on the project's GraalVM in JVM mode (\code{\verb~|profile-mathlib.sh selftest-java~}, \src{bench/baselines/InstrtapTest.java}): \code{\verb~|System.err.println("start …")~} goes through libc's \code{\verb~|write~}, and a loop of 1.2e9 instructions between two lines reads as 1.2007e9 and 1.2026e9 once the JIT has compiled it (0.64e9 to 0.80e9 in the three rounds before, while it runs on-stack-replaced code). The count is that of the Java thread alone: JIT compiler and GC threads are not in it, which is what one wants when asking what the checker itself spends per declaration (the difference to the whole run is then the runtime's share). Not tried with a native image; \code{\verb~|--trace~} is a suggestion, RLVM has no such switch yet. \code{\verb~|INSTRTAP_FD=1~} taps stdout instead of stderr; \code{\verb~|INSTRTAP_PREFIXES~} takes any \code{\verb~||~}-separated line prefixes.}
+}
+
+\subtree{
+\title{8. Reproducing}
+
+\pre{\verb~|
+cd .
+
+# the baselines on init, std, mathlib (about 2 h; stages can be named one by one)
+bench/baselines/big-all.sh                 # = mathlib-fast-1 small mathlib-fast-23 threads mathlib-slow mathlib-official
+bench/baselines/big-summary.py             # tables + bench/baselines.json
+
+# per-declaration profiles (about 10 min) and their summary (1 min)
+bench/arena-docker.sh --arena-limits --no-network bench/baselines/profile-mathlib.sh build selftest \
+    nano-lean-import nano-lean-j1 gruszka-pack gruszka-w1 gruszka-check-w1 sokonanoda-parse sokonanoda-v1 \
+    rpylean-jsonl nano-lean-j4 gruszka-w4 gruszka-check-w4 sokonanoda-v4
+bench/baselines/profile-summary.py         # work/baselines/mathlib-profile.{json,top200.tsv,by-name.tsv.gz,*.tsv.gz}
+
+# the generated tables of this document and of bench/README.md
+bench/baselines/render-tables.py docs/research/12-baselines.md bench/README.md
+~}
+
+\p{As run on 2026-11-24: the single-worker profile steps ran in a container on CPUs 18,19 (\code{\verb~|--cpuset-cpus 18,19 --memory 16g~} instead of \code{\verb~|--arena-limits~}) while the series was using the other eight performance cores, the 4-worker steps under \code{\verb~|--arena-limits~} between two stages of the series, and the official kernel's mathlib run as \code{\verb~|OFFICIAL_CPUSET=18,19 bench/baselines/big-all.sh mathlib-official~}. Per-thread instruction counts do not depend on which performance core a thread runs on (\src{bench/README.md}, validation).}
+}
+
+\subtree{
+\title{9. Caveats and what was not done}
+
+\ul{
+\li{\strong{One machine, one day.} aarch64, not the arena's x86-64; Rust 1.100.0 / 1.97.1 from rustup, not the arena's nixpkgs toolchain; PGO profiles trained here. Section 3 quantifies the difference for the baselines; for RLVM it is unknown.}
+\li{\strong{Wall and CPU times were taken on a shared host} (1-minute load average 5 to 35 during the runs; other agents' containers at times on the same eight cores). They are upper bounds. Instruction counts are not affected: see the spreads.}
+\li{\strong{Single runs.} nanoda, tenet-jvm-c2, tenet-jvm and official have one mathlib run each; the 1-, 2- and 8-worker rows of section 4 are one run each. The native ones repeat to 0.1 \% on init and std; a JVM run varies by 1-2 \% (5 \% was seen on init). The +28 \% of the Graal JIT over C2 on mathlib is one run against one run: far outside that noise, but not repeated and not explained.}
+\li{\strong{The official kernel's mathlib run} was made on CPUs 18,19 with 16 GB instead of \code{\verb~|--arena-limits~}, next to the rest of the series. Its count (ratio to the published one 0.945; 0.949 and 0.950 on init and std) shows no effect of that.}
+\li{\strong{tenet-jvm} runs on the project's GraalVM CE 25, not on the arena's OpenJDK; \code{\verb~|tenet-jvm-c2~} only switches the top-tier compiler to C2.}
+\li{\strong{Profiles are from instrumented runs} (tracing switched on, the library preloaded), 1-6 \% dearer than the plain runs. gruszka's per-declaration figures are corrected by a uniform 31,600 instructions; small declarations are therefore only roughly right for gruszka (463 come out at 0). rpylean's intervals include reading and runtime work between declarations. sokonanoda has wall times only. Kinds come from sokonanoda's listing joined by name; 18,349 of rpylean's names did not match (it prints some names differently).}
+\li{\strong{Not profiled:} official, nanoda, pestka, mathgraph and tenet-jvm have no per-declaration switch for exports; nothing was patched to add one.}
+\li{\strong{Not measured:} the other big corpora (cslib, cedar, con-leche, navier-stokes-euler, reachability); x86-64; energy or cache behaviour; \code{\verb~|instrtap~} with a native image.}
+\li{sokonanoda's bimodal count on \code{\verb~|perf/magma-list-deep-n36~} (previous infra step) did not show on the big corpora: 0.11 \% spread over 3 mathlib runs.}
+\li{The "families" of expensive declarations in 5.5 are read off their names, not off their terms.}
+}
+}

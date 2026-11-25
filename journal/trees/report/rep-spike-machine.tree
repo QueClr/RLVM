@@ -1,0 +1,373 @@
+\title{Machine-tier spike: result tables}
+\taxon{Report}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{truffle}
+\tag{platform}
+\tag{performance}
+\meta{origin}{spikes/machine/results/tables.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\subtree{
+\title{Experiment 1, whole Init - JVM mode (GraalVM CE 25 JDK, HotSpot + Graal JIT, SerialGC), 2088996 spines}
+
+\table{
+\tr{\th{variant}\th{process instr (G)}\th{spread over reps (G)}\th{net of \code{\verb~|null~} (G)}\th{instr / spine}\th{first pass wall (ms)}\th{process wall (s)}\th{max RSS (MB)}}
+\tr{\td{none: setup only: load cache, derive masks, find spines}\td{6.190}\td{0.315}\td{-}\td{-}\td{-}\td{0.64}\td{669}}
+\tr{\td{null: driver loop with an empty instantiator}\td{6.676}\td{0.081}\td{-}\td{-}\td{23}\td{0.63}\td{669}}
+\tr{\td{a0: (a) generic interpretation}\td{32.348}\td{1.771}\td{25.672}\td{12289}\td{1055}\td{1.69}\td{714}}
+\tr{\td{a1: (a) generic + closed-term memo}\td{27.847}\td{2.261}\td{21.171}\td{10135}\td{894}\td{1.52}\td{722}}
+\tr{\td{elab: elaboration of all used constants, nothing executed}\td{11.530}\td{0.518}\td{4.854}\td{2324}\td{131}\td{0.66}\td{710}}
+\tr{\td{b: (b) code objects, plain stepper (includes elaboration)}\td{27.684}\td{3.844}\td{21.008}\td{10057}\td{866}\td{1.50}\td{735}}
+\tr{\td{c.never: (c) promotion machinery present, threshold never reached}\td{26.571}\td{7.426}\td{19.895}\td{9524}\td{819}\td{1.52}\td{738}}
+\tr{\td{c.T1000.i2: (c) promote at heat 1000, probes inlined}\td{97.161}\td{3.081}\td{90.485}\td{43315}\td{1503}\td{2.64}\td{843}}
+\tr{\td{c.T1000.i0: (c) promote at heat 1000, call-threaded}\td{38.461}\td{5.690}\td{31.785}\td{15215}\td{1302}\td{1.97}\td{837}}
+\tr{\td{c.T10000.i2: (c) promote at heat 10000, probes inlined}\td{48.486}\td{11.487}\td{41.810}\td{20014}\td{1109}\td{1.84}\td{850}}
+\tr{\td{c.T10000.i0: (c) promote at heat 10000, call-threaded}\td{34.360}\td{2.916}\td{27.684}\td{13252}\td{1226}\td{1.89}\td{820}}
+\tr{\td{c.T100000.i2: (c) promote at heat 100000, probes inlined}\td{35.872}\td{9.418}\td{29.196}\td{13976}\td{1125}\td{1.83}\td{811}}
+\tr{\td{c.T100000.i0: (c) promote at heat 100000, call-threaded}\td{32.125}\td{5.941}\td{25.449}\td{12182}\td{1181}\td{1.76}\td{798}}
+\tr{\td{c.T1000000.i2: (c) promote at heat 1000000, probes inlined}\td{31.557}\td{0.566}\td{24.881}\td{11911}\td{834}\td{1.60}\td{743}}
+\tr{\td{c.T1000000.i0: (c) promote at heat 1000000, call-threaded}\td{29.771}\td{0.649}\td{23.095}\td{11056}\td{839}\td{1.49}\td{741}}
+}
+
+\p{Derived: driver = 233 instr/spine; elaboration = 4.854 G (122012 instr per elaborated constant); (b) without elaboration = 7733 instr/spine; (a0)/(b) = 1.22x, (a1)/(b) = 1.01x, (a1)/(b without elaboration) = 1.31x. Steady state (passes 2 and 3: every value already interned): (a1) 4520, (b) 2833 instr/spine net of the driver. Match mode: one pass that matches every domain against an existing value and builds only the result type = 5911 instr/spine net of the driver (build pass in steady state: 2833).}
+
+\table{
+\tr{\th{threshold}\th{inlining}\th{roots compiled}\th{spines run in compiled code}\th{process instr (G)}\th{extra over (b) (G)}\th{compile-only run \code{\verb~|cc~} (G)}\th{compile cost per root (M instr)}\th{saved by using the code (G)}}
+\tr{\td{1000}\td{probes inlined}\td{184}\td{1155867 (55.3\%)}\td{97.161}\td{+69.477}\td{99.545}\td{397}\td{2.384}}
+\tr{\td{1000}\td{call-threaded}\td{184}\td{1398232 (66.9\%)}\td{38.461}\td{+10.777}\td{39.506}\td{70}\td{1.045}}
+\tr{\td{10000}\td{probes inlined}\td{33}\td{804226 (38.5\%)}\td{48.486}\td{+20.802}\td{53.296}\td{810}\td{4.810}}
+\tr{\td{10000}\td{call-threaded}\td{33}\td{842064 (40.3\%)}\td{34.360}\td{+6.676}\td{33.515}\td{210}\td{-0.845}}
+\tr{\td{100000}\td{probes inlined}\td{2}\td{127049 (6.1\%)}\td{35.872}\td{+8.188}\td{30.435}\td{1932}\td{-5.437}}
+\tr{\td{100000}\td{call-threaded}\td{2}\td{131997 (6.3\%)}\td{32.125}\td{+4.441}\td{30.081}\td{1755}\td{-2.044}}
+\tr{\td{1000000}\td{probes inlined}\td{0}\td{0 (0.0\%)}\td{31.557}\td{+3.873}\td{26.418}\td{-}\td{-5.139}}
+\tr{\td{1000000}\td{call-threaded}\td{0}\td{0 (0.0\%)}\td{29.771}\td{+2.087}\td{31.477}\td{-}\td{1.706}}
+}
+}
+
+\subtree{
+\title{Experiment 1, whole Init - native image, GraalVM CE 25.5.5.0.3, 2088996 spines}
+
+\table{
+\tr{\th{variant}\th{process instr (G)}\th{spread over reps (G)}\th{net of \code{\verb~|null~} (G)}\th{instr / spine}\th{first pass wall (ms)}\th{process wall (s)}\th{max RSS (MB)}}
+\tr{\td{none: setup only: load cache, derive masks, find spines}\td{2.708}\td{0.000}\td{-}\td{-}\td{-}\td{0.32}\td{269}}
+\tr{\td{null: driver loop with an empty instantiator}\td{3.178}\td{0.000}\td{-}\td{-}\td{22}\td{0.33}\td{269}}
+\tr{\td{a0: (a) generic interpretation}\td{9.723}\td{0.000}\td{6.545}\td{3133}\td{980}\td{1.29}\td{344}}
+\tr{\td{a1: (a) generic + closed-term memo}\td{7.592}\td{0.000}\td{4.414}\td{2113}\td{857}\td{1.17}\td{355}}
+\tr{\td{elab: elaboration of all used constants, nothing executed}\td{3.800}\td{0.000}\td{0.622}\td{298}\td{142}\td{0.44}\td{352}}
+\tr{\td{b: (b) code objects, plain stepper (includes elaboration)}\td{6.377}\td{0.000}\td{3.199}\td{1531}\td{799}\td{1.13}\td{392}}
+\tr{\td{c.never: (c) promotion machinery present, threshold never reached}\td{6.494}\td{0.000}\td{3.316}\td{1587}\td{766}\td{1.07}\td{395}}
+\tr{\td{c.T1000.i2: (c) promote at heat 1000, probes inlined}\td{68.876}\td{0.018}\td{65.698}\td{31450}\td{753}\td{1.65}\td{484}}
+\tr{\td{c.T1000.i0: (c) promote at heat 1000, call-threaded}\td{15.122}\td{0.001}\td{11.944}\td{5718}\td{748}\td{1.06}\td{464}}
+\tr{\td{c.T10000.i2: (c) promote at heat 10000, probes inlined}\td{21.678}\td{0.016}\td{18.500}\td{8856}\td{696}\td{1.00}\td{474}}
+\tr{\td{c.T10000.i0: (c) promote at heat 10000, call-threaded}\td{8.255}\td{0.000}\td{5.077}\td{2430}\td{768}\td{1.07}\td{465}}
+\tr{\td{c.T100000.i2: (c) promote at heat 100000, probes inlined}\td{7.355}\td{0.000}\td{4.177}\td{2000}\td{748}\td{1.08}\td{458}}
+\tr{\td{c.T100000.i0: (c) promote at heat 100000, call-threaded}\td{6.627}\td{0.000}\td{3.449}\td{1651}\td{760}\td{1.06}\td{422}}
+\tr{\td{c.T1000000.i2: (c) promote at heat 1000000, probes inlined}\td{6.494}\td{0.000}\td{3.316}\td{1587}\td{729}\td{1.02}\td{396}}
+\tr{\td{c.T1000000.i0: (c) promote at heat 1000000, call-threaded}\td{6.494}\td{0.000}\td{3.316}\td{1587}\td{762}\td{1.07}\td{396}}
+}
+
+\p{Derived: driver = 225 instr/spine; elaboration = 0.622 G (15635 instr per elaborated constant); (b) without elaboration = 1234 instr/spine; (a0)/(b) = 2.05x, (a1)/(b) = 1.38x, (a1)/(b without elaboration) = 1.71x. Steady state (passes 2 and 3: every value already interned): (a1) 2030, (b) 1167 instr/spine net of the driver. Match mode: one pass that matches every domain against an existing value and builds only the result type = 1124 instr/spine net of the driver (build pass in steady state: 1167).}
+
+\table{
+\tr{\th{threshold}\th{inlining}\th{roots compiled}\th{spines run in compiled code}\th{process instr (G)}\th{extra over (b) (G)}\th{compile-only run \code{\verb~|cc~} (G)}\th{compile cost per root (M instr)}\th{saved by using the code (G)}}
+\tr{\td{1000}\td{probes inlined}\td{184}\td{1036389 (49.6\%)}\td{68.876}\td{+62.499}\td{69.284}\td{341}\td{0.407}}
+\tr{\td{1000}\td{call-threaded}\td{184}\td{1400074 (67.0\%)}\td{15.122}\td{+8.745}\td{15.368}\td{48}\td{0.245}}
+\tr{\td{10000}\td{probes inlined}\td{33}\td{800250 (38.3\%)}\td{21.678}\td{+15.301}\td{21.919}\td{467}\td{0.241}}
+\tr{\td{10000}\td{call-threaded}\td{33}\td{845625 (40.5\%)}\td{8.255}\td{+1.878}\td{8.396}\td{58}\td{0.141}}
+\tr{\td{100000}\td{probes inlined}\td{2}\td{129736 (6.2\%)}\td{7.355}\td{+0.978}\td{7.369}\td{437}\td{0.013}}
+\tr{\td{100000}\td{call-threaded}\td{2}\td{137515 (6.6\%)}\td{6.627}\td{+0.250}\td{6.640}\td{73}\td{0.013}}
+\tr{\td{1000000}\td{probes inlined}\td{0}\td{0 (0.0\%)}\td{6.494}\td{+0.117}\td{6.494}\td{-}\td{0.000}}
+\tr{\td{1000000}\td{call-threaded}\td{0}\td{0 (0.0\%)}\td{6.494}\td{+0.117}\td{6.494}\td{-}\td{0.000}}
+}
+}
+
+\subtree{
+\title{Experiment 1, whole Init - native image, Oracle GraalVM 25.0.4, 2088996 spines}
+
+\table{
+\tr{\th{variant}\th{process instr (G)}\th{spread over reps (G)}\th{net of \code{\verb~|null~} (G)}\th{instr / spine}\th{first pass wall (ms)}\th{process wall (s)}\th{max RSS (MB)}}
+\tr{\td{none: setup only: load cache, derive masks, find spines}\td{1.750}\td{0.000}\td{-}\td{-}\td{-}\td{0.23}\td{306}}
+\tr{\td{null: driver loop with an empty instantiator}\td{2.189}\td{0.000}\td{-}\td{-}\td{20}\td{0.24}\td{306}}
+\tr{\td{a0: (a) generic interpretation}\td{8.053}\td{0.000}\td{5.864}\td{2807}\td{792}\td{1.02}\td{356}}
+\tr{\td{a1: (a) generic + closed-term memo}\td{6.149}\td{0.000}\td{3.960}\td{1896}\td{738}\td{0.98}\td{368}}
+\tr{\td{elab: elaboration of all used constants, nothing executed}\td{2.863}\td{0.000}\td{0.674}\td{323}\td{134}\td{0.36}\td{359}}
+\tr{\td{b: (b) code objects, plain stepper (includes elaboration)}\td{5.172}\td{0.000}\td{2.983}\td{1428}\td{692}\td{0.94}\td{402}}
+\tr{\td{c.never: (c) promotion machinery present, threshold never reached}\td{5.288}\td{0.000}\td{3.099}\td{1483}\td{696}\td{0.94}\td{403}}
+\tr{\td{c.T1000.i2: (c) promote at heat 1000, probes inlined}\td{58.105}\td{0.051}\td{55.916}\td{26767}\td{749}\td{1.27}\td{600}}
+\tr{\td{c.T1000.i0: (c) promote at heat 1000, call-threaded}\td{13.771}\td{0.009}\td{11.582}\td{5544}\td{830}\td{1.07}\td{477}}
+\tr{\td{c.T10000.i2: (c) promote at heat 10000, probes inlined}\td{17.951}\td{0.013}\td{15.762}\td{7545}\td{816}\td{1.06}\td{577}}
+\tr{\td{c.T10000.i0: (c) promote at heat 10000, call-threaded}\td{7.014}\td{0.001}\td{4.825}\td{2310}\td{726}\td{0.96}\td{473}}
+\tr{\td{c.T100000.i2: (c) promote at heat 100000, probes inlined}\td{6.117}\td{0.000}\td{3.928}\td{1880}\td{708}\td{0.97}\td{489}}
+\tr{\td{c.T100000.i0: (c) promote at heat 100000, call-threaded}\td{5.425}\td{0.000}\td{3.236}\td{1549}\td{679}\td{0.93}\td{450}}
+\tr{\td{c.T1000000.i2: (c) promote at heat 1000000, probes inlined}\td{5.288}\td{0.000}\td{3.099}\td{1483}\td{702}\td{0.95}\td{403}}
+\tr{\td{c.T1000000.i0: (c) promote at heat 1000000, call-threaded}\td{5.288}\td{0.000}\td{3.099}\td{1483}\td{686}\td{0.94}\td{403}}
+}
+
+\p{Derived: driver = 210 instr/spine; elaboration = 0.674 G (16942 instr per elaborated constant); (b) without elaboration = 1105 instr/spine; (a0)/(b) = 1.97x, (a1)/(b) = 1.33x, (a1)/(b without elaboration) = 1.72x. Steady state (passes 2 and 3: every value already interned): (a1) 1843, (b) 1090 instr/spine net of the driver. Match mode: one pass that matches every domain against an existing value and builds only the result type = 1099 instr/spine net of the driver (build pass in steady state: 1090).}
+
+\table{
+\tr{\th{threshold}\th{inlining}\th{roots compiled}\th{spines run in compiled code}\th{process instr (G)}\th{extra over (b) (G)}\th{compile-only run \code{\verb~|cc~} (G)}\th{compile cost per root (M instr)}\th{saved by using the code (G)}}
+\tr{\td{1000}\td{probes inlined}\td{184}\td{1109777 (53.1\%)}\td{58.105}\td{+52.934}\td{58.354}\td{288}\td{0.248}}
+\tr{\td{1000}\td{call-threaded}\td{184}\td{1412268 (67.6\%)}\td{13.771}\td{+8.599}\td{14.075}\td{48}\td{0.305}}
+\tr{\td{10000}\td{probes inlined}\td{33}\td{800992 (38.3\%)}\td{17.951}\td{+12.779}\td{18.132}\td{389}\td{0.181}}
+\tr{\td{10000}\td{call-threaded}\td{33}\td{845263 (40.5\%)}\td{7.014}\td{+1.843}\td{7.182}\td{57}\td{0.168}}
+\tr{\td{100000}\td{probes inlined}\td{2}\td{129060 (6.2\%)}\td{6.117}\td{+0.945}\td{6.128}\td{420}\td{0.011}}
+\tr{\td{100000}\td{call-threaded}\td{2}\td{136884 (6.6\%)}\td{5.425}\td{+0.253}\td{5.438}\td{75}\td{0.013}}
+\tr{\td{1000000}\td{probes inlined}\td{0}\td{0 (0.0\%)}\td{5.288}\td{+0.116}\td{5.288}\td{-}\td{0.000}}
+\tr{\td{1000000}\td{call-threaded}\td{0}\td{0 (0.0\%)}\td{5.288}\td{+0.116}\td{5.288}\td{-}\td{0.000}}
+}
+}
+
+\subtree{
+\title{JVM mode, steady state: (21 passes - 11 passes) / 10, instructions per spine net of the driver}
+
+\p{One process pair per row. Unreliable to about +-40\% (see the long-run table below): the two processes do not JIT-compile alike.}
+
+\p{Driver: 103 instr/spine (whole Init), 116 (hot subset).}
+
+\table{
+\tr{\th{whole Init (2,088,996 spines)}\th{instr / spine}}
+\tr{\td{(a) generic}\td{1711}}
+\tr{\td{(a) generic + closed-term memo}\td{1517}}
+\tr{\td{(b) stepper}\td{975}}
+\tr{\td{(b) match mode: domains matched, result built}\td{122}}
+\tr{\td{(b) stepper, arena access = int\verb~|[]~}\td{1123}}
+\tr{\td{(b) stepper, arena access = sun.misc.Unsafe}\td{539}}
+\tr{\td{(b) stepper, arena access = MemorySegment.getAtIndex(JAVA_INT)}\td{763}}
+\tr{\td{(b) stepper, arena access = MemorySegment.get(JAVA_INT_UNALIGNED)}\td{743}}
+}
+
+\table{
+\tr{\th{hot subset (184 constants, 1,619,861 spines)}\th{instr / spine}\th{saving vs (b)}\th{compile cost per root (M instr, from the hot-jvm batch)}\th{break-even heat}}
+\tr{\td{(a1) generic + memo}\td{1411}\td{-}\td{-}\td{-}}
+\tr{\td{(b) stepper}\td{1099}\td{-}\td{-}\td{-}}
+\tr{\td{(c) call-threaded}\td{488}\td{611}\td{165}\td{269679}}
+\tr{\td{(c) APP probes inlined}\td{848}\td{251}\td{346}\td{1376538}}
+\tr{\td{(c) all probes inlined}\td{648}\td{451}\td{449}\td{997475}}
+\tr{\td{(c) all probes inlined, callIndirect}\td{443}\td{656}\td{449}\td{685037}}
+}
+
+\table{
+\tr{\th{experiment 2, JVM steady state}\th{recursive (G / pass)}\th{worklist \code{\verb~|wl~}}\th{worklist \code{\verb~|wl2~}}\th{wl / rec}\th{wl2 / rec}}
+\tr{\td{hash-consed}\td{1.097}\td{1.433}\td{1.522}\td{\strong{1.306}}\td{\strong{1.388}}}
+\tr{\td{bump-allocated, no interning}\td{1.037}\td{1.238}\td{0.569}\td{\strong{1.194}}\td{\strong{0.549}}}
+}
+}
+
+\subtree{
+\title{JVM mode, steady state from long runs: (longer run - shorter run) / extra passes, instr/spine INCLUDING the driver}
+
+\p{Each estimate compares two separate JVM processes (21 vs 41 or 41 vs 81 passes). The spread between estimates is JIT non-determinism, not measurement error.}
+
+\table{
+\tr{\th{variant}\th{estimates}\th{min}\th{max}}
+\tr{\td{driver}\td{127, 124}\td{124}\td{127}}
+\tr{\td{(a) generic + memo}\td{1273, 1686}\td{1273}\td{1686}}
+\tr{\td{(b) stepper}\td{742, 926, 767, 894}\td{742}\td{926}}
+\tr{\td{(b2) stepper with the probe expanded in place}\td{665, 991, 718}\td{665}\td{991}}
+\tr{\td{(b) match mode pass}\td{760, 823}\td{760}\td{823}}
+\tr{\td{(b) stepper, Unsafe arena}\td{989}\td{989}\td{989}}
+}
+}
+
+\subtree{
+\title{JVM mode with C2 as host JIT and no tiered compilation (-XX:-UseJVMCICompiler -XX:-TieredCompilation), whole Init}
+
+\table{
+\tr{\th{variant}\th{process instr (G), median of 3}\th{min - max}\th{net of \code{\verb~|null~} (G)}\th{first pass wall (ms)}}
+\tr{\td{none}\td{3.704}\td{3.623 - 3.773}\td{-}\td{-}}
+\tr{\td{null}\td{3.996}\td{3.783 - 4.126}\td{-}\td{19}}
+\tr{\td{a0}\td{9.619}\td{9.611 - 9.795}\td{5.623}\td{932}}
+\tr{\td{a1}\td{7.997}\td{7.916 - 8.289}\td{4.001}\td{810}}
+\tr{\td{elab}\td{5.851}\td{5.737 - 6.076}\td{1.855}\td{161}}
+\tr{\td{b}\td{8.864}\td{8.851 - 8.936}\td{4.868}\td{734}}
+\tr{\td{b2}\td{9.000}\td{8.922 - 9.673}\td{5.004}\td{736}}
+\tr{\td{c.never}\td{9.504}\td{9.313 - 9.777}\td{5.508}\td{762}}
+\tr{\td{c.T100000.i0}\td{11.787}\td{11.461 - 12.398}\td{7.791}\td{1007}}
+\tr{\td{c.T100000.i2}\td{12.971}\td{12.377 - 13.158}\td{8.975}\td{1049}}
+\tr{\td{c.T10000.i0}\td{13.805}\td{13.749 - 13.853}\td{9.809}\td{976}}
+\tr{\td{c.T10000.i2}\td{29.090}\td{28.767 - 29.519}\td{25.094}\td{1080}}
+}
+
+\p{Steady state, (41 passes - 21 passes) / 20, instr/spine INCLUDING the driver; one estimate per repetition:}
+
+\table{
+\tr{\th{variant}\th{estimates}}
+\tr{\td{driver}\td{119}}
+\tr{\td{(a) generic + memo}\td{1501, 1472}}
+\tr{\td{(b) stepper}\td{1076, 1033}}
+\tr{\td{(b2) stepper, probe expanded in place}\td{1134, 1161}}
+\tr{\td{(b) match-mode pass}\td{986}}
+}
+
+\table{
+\tr{\th{experiment 2, steady state (21 passes - 11 passes) / 10}\th{recursive (G / pass)}\th{wl / rec}\th{wl2 / rec}}
+\tr{\td{hash-consed}\td{1.052}\td{\strong{2.452}}\td{\strong{1.564}}}
+\tr{\td{bump-allocated}\td{0.853}\td{\strong{2.528}}\td{\strong{1.428}}}
+}
+}
+
+\subtree{
+\title{Base tier in different native images (plain images, whole Init)}
+
+\table{
+\tr{\th{image}\th{none (G)}\th{driver instr/spine}\th{(a1) first pass, instr/spine}\th{(b) first pass incl. elaboration}\th{(a1) steady}\th{(b) steady}\th{(b2) first pass}\th{(b2) steady}\th{match mode pass}}
+\tr{\td{GraalVM CE, default (-O2)}\td{2.699}\td{225}\td{2104}\td{1531}\td{2021}\td{1167}\td{1314}\td{927}\td{923}}
+\tr{\td{GraalVM CE, -O3}\td{2.226}\td{209}\td{1919}\td{1344}\td{1874}\td{1066}\td{-}\td{-}\td{-}}
+\tr{\td{Oracle GraalVM, default (-O2, ML-inferred profile)}\td{1.749}\td{210}\td{1896}\td{1415}\td{1842}\td{1085}\td{1345}\td{998}\td{880}}
+\tr{\td{Oracle GraalVM, --pgo with a profile of this very workload}\td{1.465}\td{217}\td{1987}\td{1264}\td{1941}\td{996}\td{-}\td{-}\td{-}}
+}
+}
+
+\subtree{
+\title{Calibration: instructions per primitive operation ((2N run - N run) / N, minus the empty loop)}
+
+\table{
+\tr{\th{runtime}\th{empty loop iteration}\th{mkApp, value exists (hit)}\th{the same probe hand-inlined, arrays in locals}\th{mkApp, new value (insert)}\th{closure with 2 captures (hit)}}
+\tr{\td{jvm}\td{9.6}\td{38}\td{33}\td{n/a (run too short for the JVM)}\td{48}}
+\tr{\td{nce}\td{11.0}\td{110}\td{45}\td{156}\td{192}}
+\tr{\td{nee}\td{11.0}\td{96}\td{50}\td{125}\td{187}}
+}
+}
+
+\subtree{
+\title{Hot subset - JVM mode (GraalVM CE 25 JDK, HotSpot + Graal JIT, SerialGC)}
+
+\table{
+\tr{\th{configuration}\th{1 pass (G)}\th{3 passes (G)}\th{first pass, instr/spine net of driver}\th{steady state, instr/spine net of driver}\th{compile cost per root (M instr)}\th{saving per spine vs (b), steady}\th{break-even heat}}
+\tr{\td{(a1) generic + memo}\td{18.279}\td{39.753}\td{6939}\td{6396}\td{-}\td{-}\td{-}}
+\tr{\td{(b) stepper}\td{16.172}\td{35.487}\td{5638}\td{5730}\td{-}\td{-}\td{-}}
+\tr{\td{(c) call-threaded}\td{32.151}\td{37.705}\td{-3204}\td{1482}\td{165}\td{4248}\td{38769}}
+\tr{\td{(c) APP probes inlined}\td{71.885}\td{82.585}\td{774}\td{3070}\td{346}\td{2659}\td{129962}}
+\tr{\td{(c) all probes inlined}\td{84.082}\td{94.291}\td{-3492}\td{2919}\td{449}\td{2811}\td{159899}}
+\tr{\td{(c) all probes inlined, entered with callIndirect}\td{81.561}\td{88.783}\td{-5049}\td{1997}\td{449}\td{3733}\td{120404}}
+\tr{\td{(c) all probes inlined, first-tier compilation requested}\td{61.080}\td{81.703}\td{6690}\td{6133}\td{235}\td{-404}\td{never}}
+}
+}
+
+\subtree{
+\title{Hot subset - native image, GraalVM CE 25.5.5.0.3}
+
+\table{
+\tr{\th{configuration}\th{1 pass (G)}\th{3 passes (G)}\th{first pass, instr/spine net of driver}\th{steady state, instr/spine net of driver}\th{compile cost per root (M instr)}\th{saving per spine vs (b), steady}\th{break-even heat}}
+\tr{\td{(a1) generic + memo}\td{6.413}\td{12.777}\td{1810}\td{1739}\td{-}\td{-}\td{-}}
+\tr{\td{(b) stepper}\td{5.253}\td{9.297}\td{1094}\td{1023}\td{-}\td{-}\td{-}}
+\tr{\td{(c) call-threaded}\td{13.605}\td{17.136}\td{920}\td{865}\td{47}\td{158}\td{296287}}
+\tr{\td{(c) APP probes inlined}\td{52.552}\td{55.373}\td{750}\td{646}\td{260}\td{377}\td{689196}}
+\tr{\td{(c) all probes inlined}\td{64.900}\td{67.589}\td{735}\td{605}\td{327}\td{418}\td{782861}}
+\tr{\td{(c) all probes inlined, entered with callIndirect}\td{64.820}\td{67.391}\td{686}\td{569}\td{327}\td{455}\td{720126}}
+\tr{\td{(c) all probes inlined, first-tier compilation requested}\td{44.218}\td{60.195}\td{9614}\td{4707}\td{137}\td{-3684}\td{never}}
+}
+}
+
+\subtree{
+\title{Hot subset - native image, Oracle GraalVM 25.0.4}
+
+\table{
+\tr{\th{configuration}\th{1 pass (G)}\th{3 passes (G)}\th{first pass, instr/spine net of driver}\th{steady state, instr/spine net of driver}\th{compile cost per root (M instr)}\th{saving per spine vs (b), steady}\th{break-even heat}}
+\tr{\td{(a1) generic + memo}\td{5.006}\td{10.763}\td{1610}\td{1567}\td{-}\td{-}\td{-}}
+\tr{\td{(b) stepper}\td{4.026}\td{7.820}\td{1005}\td{961}\td{-}\td{-}\td{-}}
+\tr{\td{(c) call-threaded}\td{12.264}\td{15.412}\td{790}\td{762}\td{47}\td{199}\td{234187}}
+\tr{\td{(c) APP probes inlined}\td{44.606}\td{47.516}\td{766}\td{688}\td{223}\td{273}\td{815465}}
+\tr{\td{(c) all probes inlined}\td{55.127}\td{57.947}\td{756}\td{660}\td{280}\td{301}\td{931471}}
+\tr{\td{(c) all probes inlined, entered with callIndirect}\td{54.986}\td{57.607}\td{670}\td{599}\td{280}\td{362}\td{772720}}
+\tr{\td{(c) all probes inlined, first-tier compilation requested}\td{38.726}\td{53.059}\td{8122}\td{4214}\td{126}\td{-3253}\td{never}}
+}
+}
+
+\subtree{
+\title{Experiment 2 - recursive vs worklist NbE (59,979 declaration types of Init, one pass)}
+
+\table{
+\tr{\th{runtime}\th{values}\th{none (G)}\th{recursive (G)}\th{worklist \code{\verb~|wl~} (G)}\th{worklist \code{\verb~|wl2~} (G)}\th{recursive net (G)}\th{wl / recursive}\th{wl2 / recursive}\th{pass wall rec / wl / wl2 (ms)}}
+\tr{\td{jvm}\td{hash-consed}\td{6.177}\td{8.304}\td{10.920}\td{12.200}\td{2.127}\td{\strong{2.230}}\td{\strong{2.832}}\td{236 / 284 / 419}}
+\tr{\td{jvm}\td{bump-allocated, no interning}\td{6.227}\td{7.611}\td{9.358}\td{13.066}\td{1.384}\td{\strong{2.262}}\td{\strong{4.941}}\td{75 / 102 / 237}}
+\tr{\td{nce}\td{hash-consed}\td{2.651}\td{4.516}\td{5.111}\td{4.850}\td{1.865}\td{\strong{1.319}}\td{\strong{1.179}}\td{432 / 453 / 372}}
+\tr{\td{nce}\td{bump-allocated, no interning}\td{2.651}\td{3.821}\td{4.416}\td{4.155}\td{1.170}\td{\strong{1.509}}\td{\strong{1.285}}\td{74 / 87 / 79}}
+\tr{\td{nee}\td{hash-consed}\td{1.720}\td{3.485}\td{4.185}\td{3.874}\td{1.765}\td{\strong{1.397}}\td{\strong{1.220}}\td{355 / 326 / 362}}
+\tr{\td{nee}\td{bump-allocated, no interning}\td{1.720}\td{2.912}\td{3.607}\td{3.297}\td{1.192}\td{\strong{1.583}}\td{\strong{1.323}}\td{66 / 89 / 77}}
+}
+}
+
+\subtree{
+\title{Experiment 3 - arena access (whole Init, arena and table pre-sized)}
+
+\table{
+\tr{\th{runtime}\th{access}\th{none (G)}\th{(b) (G)}\th{(b) net (G)}\th{vs int\verb~|[]~}\th{(a1) net (G)}\th{vs int\verb~|[]~}\th{(b) pass wall (ms)}}
+\tr{\td{jvm}\td{int\verb~|[]~ (bounds-checked)}\td{6.222}\td{26.687}\td{20.465}\td{1.00x}\td{20.207}\td{1.00x}\td{752}}
+\tr{\td{jvm}\td{sun.misc.Unsafe}\td{6.241}\td{20.709}\td{14.468}\td{0.71x}\td{18.363}\td{0.91x}\td{761}}
+\tr{\td{jvm}\td{MemorySegment.getAtIndex(JAVA_INT)}\td{6.293}\td{18.836}\td{12.543}\td{0.61x}\td{21.504}\td{1.06x}\td{771}}
+\tr{\td{jvm}\td{MemorySegment.get(JAVA_INT_UNALIGNED)}\td{6.250}\td{18.699}\td{12.449}\td{0.61x}\td{21.003}\td{1.04x}\td{772}}
+\tr{\td{nce}\td{int\verb~|[]~ (bounds-checked)}\td{2.706}\td{6.374}\td{3.668}\td{1.00x}\td{4.866}\td{1.00x}\td{793}}
+\tr{\td{nce}\td{sun.misc.Unsafe}\td{2.662}\td{6.385}\td{3.723}\td{1.01x}\td{4.869}\td{1.00x}\td{756}}
+\tr{\td{nce}\td{MemorySegment.getAtIndex(JAVA_INT)}\td{2.768}\td{8.292}\td{5.524}\td{1.51x}\td{6.725}\td{1.38x}\td{950}}
+\tr{\td{nce}\td{MemorySegment.get(JAVA_INT_UNALIGNED)}\td{2.768}\td{8.157}\td{5.389}\td{1.47x}\td{6.588}\td{1.35x}\td{938}}
+\tr{\td{nee}\td{int\verb~|[]~ (bounds-checked)}\td{1.749}\td{5.143}\td{3.394}\td{1.00x}\td{4.399}\td{1.00x}\td{736}}
+}
+}
+
+\subtree{
+\title{Experiment 4, whole Std - native image, GraalVM CE 25.5.5.0.3, 3115533 spines}
+
+\table{
+\tr{\th{variant}\th{process instr (G)}\th{spread over reps (G)}\th{net of \code{\verb~|null~} (G)}\th{instr / spine}\th{first pass wall (ms)}\th{process wall (s)}\th{max RSS (MB)}}
+\tr{\td{none: setup only: load cache, derive masks, find spines}\td{4.558}\td{0.000}\td{-}\td{-}\td{-}\td{0.52}\td{600}}
+\tr{\td{null: driver loop with an empty instantiator}\td{5.270}\td{0.000}\td{-}\td{-}\td{33}\td{0.56}\td{600}}
+\tr{\td{a0: (a) generic interpretation}\td{22.122}\td{0.000}\td{16.852}\td{5409}\td{1932}\td{2.46}\td{600}}
+\tr{\td{a1: (a) generic + closed-term memo}\td{17.193}\td{0.000}\td{11.923}\td{3827}\td{1690}\td{2.23}\td{617}}
+\tr{\td{elab: elaboration of all used constants, nothing executed}\td{6.797}\td{0.000}\td{1.527}\td{490}\td{314}\td{0.88}\td{601}}
+\tr{\td{b: (b) code objects, plain stepper (includes elaboration)}\td{10.981}\td{0.000}\td{5.711}\td{1833}\td{1398}\td{1.96}\td{676}}
+\tr{\td{c.never: (c) promotion machinery present, threshold never reached}\td{11.157}\td{0.000}\td{5.887}\td{1890}\td{1412}\td{1.97}\td{677}}
+\tr{\td{c.T1000.i2: (c) promote at heat 1000, probes inlined}\td{109.789}\td{0.164}\td{104.519}\td{33548}\td{1560}\td{3.01}\td{779}}
+\tr{\td{c.T1000.i0: (c) promote at heat 1000, call-threaded}\td{24.044}\td{0.002}\td{18.774}\td{6026}\td{1509}\td{2.08}\td{746}}
+\tr{\td{c.T10000.i2: (c) promote at heat 10000, probes inlined}\td{31.227}\td{0.015}\td{25.957}\td{8331}\td{1498}\td{2.13}\td{750}}
+\tr{\td{c.T10000.i0: (c) promote at heat 10000, call-threaded}\td{13.698}\td{0.000}\td{8.428}\td{2705}\td{1455}\td{2.05}\td{747}}
+\tr{\td{c.T100000.i2: (c) promote at heat 100000, probes inlined}\td{12.692}\td{0.001}\td{7.422}\td{2382}\td{1439}\td{2.06}\td{746}}
+\tr{\td{c.T100000.i0: (c) promote at heat 100000, call-threaded}\td{11.346}\td{0.000}\td{6.076}\td{1950}\td{1386}\td{1.94}\td{707}}
+\tr{\td{c.T1000000.i2: (c) promote at heat 1000000, probes inlined}\td{11.157}\td{0.000}\td{5.887}\td{1890}\td{1376}\td{1.93}\td{677}}
+\tr{\td{c.T1000000.i0: (c) promote at heat 1000000, call-threaded}\td{11.157}\td{0.000}\td{5.887}\td{1890}\td{1408}\td{1.96}\td{677}}
+}
+
+\p{Derived: driver = 229 instr/spine; elaboration = 1.527 G (21904 instr per elaborated constant); (b) without elaboration = 1343 instr/spine; (a0)/(b) = 2.95x, (a1)/(b) = 2.09x, (a1)/(b without elaboration) = 2.85x.}
+
+\table{
+\tr{\th{threshold}\th{inlining}\th{roots compiled}\th{spines run in compiled code}\th{process instr (G)}\th{extra over (b) (G)}\th{compile-only run \code{\verb~|cc~} (G)}\th{compile cost per root (M instr)}\th{saved by using the code (G)}}
+\tr{\td{1000}\td{probes inlined}\td{255}\td{1603945 (51.5\%)}\td{109.789}\td{+98.808}\td{110.404}\td{389}\td{0.615}}
+\tr{\td{1000}\td{call-threaded}\td{255}\td{2073185 (66.5\%)}\td{24.044}\td{+13.063}\td{24.393}\td{52}\td{0.349}}
+\tr{\td{10000}\td{probes inlined}\td{50}\td{1258262 (40.4\%)}\td{31.227}\td{+20.245}\td{31.630}\td{409}\td{0.404}}
+\tr{\td{10000}\td{call-threaded}\td{50}\td{1292993 (41.5\%)}\td{13.698}\td{+2.717}\td{13.909}\td{55}\td{0.211}}
+\tr{\td{100000}\td{probes inlined}\td{3}\td{280240 (9.0\%)}\td{12.692}\td{+1.711}\td{12.735}\td{526}\td{0.043}}
+\tr{\td{100000}\td{call-threaded}\td{3}\td{288217 (9.3\%)}\td{11.346}\td{+0.365}\td{11.377}\td{73}\td{0.031}}
+\tr{\td{1000000}\td{probes inlined}\td{0}\td{0 (0.0\%)}\td{11.157}\td{+0.176}\td{11.157}\td{-}\td{0.000}}
+\tr{\td{1000000}\td{call-threaded}\td{0}\td{0 (0.0\%)}\td{11.157}\td{+0.176}\td{11.157}\td{-}\td{0.000}}
+}
+}
+
+\subtree{
+\title{Experiment 4, whole Std - JVM mode (GraalVM CE 25 JDK, HotSpot + Graal JIT, SerialGC), 3115533 spines}
+
+\table{
+\tr{\th{variant}\th{process instr (G)}\th{spread over reps (G)}\th{net of \code{\verb~|null~} (G)}\th{instr / spine}\th{first pass wall (ms)}\th{process wall (s)}\th{max RSS (MB)}}
+\tr{\td{none: setup only: load cache, derive masks, find spines}\td{7.608}\td{0.143}\td{-}\td{-}\td{-}\td{0.69}\td{932}}
+\tr{\td{null: driver loop with an empty instantiator}\td{8.803}\td{0.780}\td{-}\td{-}\td{29}\td{0.74}\td{927}}
+\tr{\td{a0: (a) generic interpretation}\td{39.564}\td{3.497}\td{30.761}\td{9873}\td{1618}\td{2.30}\td{995}}
+\tr{\td{a1: (a) generic + closed-term memo}\td{39.663}\td{7.069}\td{30.860}\td{9905}\td{1349}\td{2.01}\td{1007}}
+\tr{\td{elab: elaboration of all used constants, nothing executed}\td{15.422}\td{1.828}\td{6.619}\td{2125}\td{209}\td{0.95}\td{1029}}
+\tr{\td{b: (b) code objects, plain stepper (includes elaboration)}\td{34.163}\td{4.417}\td{25.360}\td{8140}\td{1131}\td{1.82}\td{1043}}
+\tr{\td{c.never: (c) promotion machinery present, threshold never reached}\td{36.711}\td{5.227}\td{27.908}\td{8958}\td{1135}\td{1.91}\td{1066}}
+\tr{\td{c.T1000.i0: (c) promote at heat 1000, call-threaded}\td{47.317}\td{6.186}\td{38.514}\td{12362}\td{1424}\td{2.12}\td{1156}}
+\tr{\td{c.T10000.i0: (c) promote at heat 10000, call-threaded}\td{37.149}\td{5.608}\td{28.346}\td{9098}\td{1523}\td{2.27}\td{1144}}
+}
+
+\p{Derived: driver = 384 instr/spine; elaboration = 6.619 G (94948 instr per elaborated constant); (b) without elaboration = 6015 instr/spine; (a0)/(b) = 1.21x, (a1)/(b) = 1.22x, (a1)/(b without elaboration) = 1.65x.}
+
+\table{
+\tr{\th{threshold}\th{inlining}\th{roots compiled}\th{spines run in compiled code}\th{process instr (G)}\th{extra over (b) (G)}\th{compile-only run \code{\verb~|cc~} (G)}\th{compile cost per root (M instr)}\th{saved by using the code (G)}}
+\tr{\td{1000}\td{call-threaded}\td{255}\td{2068165 (66.4\%)}\td{47.317}\td{+13.154}\td{53.340}\td{65}\td{6.023}}
+\tr{\td{10000}\td{call-threaded}\td{50}\td{1285180 (41.3\%)}\td{37.149}\td{+2.986}\td{42.778}\td{121}\td{5.629}}
+}
+}

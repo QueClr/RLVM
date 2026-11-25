@@ -1,0 +1,491 @@
+\title{13 - Workload characterization: what the kernel does on Cedar-level corpora}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{machine}
+\tag{performance}
+\meta{origin}{docs/research/13-workload-characterization.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Question (owner, on the static heat spike of \code{\verb~|spikes/machine~}): "You need to check Cedar level workload. Init may not be interesting enough." How hot do the code objects of the machine (\code{\verb~|TELE~}, \code{\verb~|BODY~}, \code{\verb~|RULE~}, ISA §3.2) get on realistic corpora, and which specialisations does the data argue for?}
+
+\p{Evidence tags: \strong{\verb~|[~meas\verb~|]~} measured here (tools and raw data in section 8), \strong{\verb~|[~est\verb~|]~} my estimate with the arithmetic shown, \strong{\verb~|[~src\verb~|]~} read in a checker's source. Numbers without a tag are measured. Instruction counts are user-mode instructions on this aarch64 host (cedar: 71 per byte here, 70 published for x86). Corpora: \code{\verb~|work/exports/{init,std,cedar,reachability,con-leche,navier-stokes-euler,cslib,mathlib}.ndjson~}.}
+
+\subtree{
+\title{0. Decision summary}
+
+\ol{
+\li{\strong{Cedar is not more reduction-heavy than Init; it is less.} Share of nano-lean's checking instructions spent under a reduction (whnf, delta, iota, projection, including the evaluation and interning it triggers): Init 38\%, cedar's own 22,454 declarations 17\%, NSE's own 17\%, cslib's own 24\%, con-leche's own 34\%, reachability's own 99\%. What distinguishes Cedar-level declarations is \strong{size and conversion}: 1.02 M instructions per declaration against 0.38 M for Init, 30\% of their instructions under \code{\verb~|def_eq~} against 16\%. Real kernel computation exists in exactly three places: reachability (5 \code{\verb~|decide~} proofs = 92.5\% of the file), con-leche (one 5.8 G declaration, 20 reduction-heavy proofs in its top 50) and the arena's \code{\verb~|perf/~} tests.}
+\li{\strong{The corpora contain their libraries.} By instructions cedar's export is 39.5\% Init, 14.8\% Std, 5.9\% Batteries/Mathlib and 39.8\% Cedar; cslib is 70\% Mathlib and 5.4\% Cslib; NSE is 72\% project, con-leche 94\%, reachability 93\% (section 3.2). A per-corpus number is mostly a statement about Lean's core library.}
+\li{\strong{Dynamic heat is low in absolute terms and never reaches the promotion rent.} Whole cedar (64 G instructions): 4.15 M delta unfoldings, 1.24 M iota steps, 1.06 M projections of constructors, 7.5 M application inferences. No \code{\verb~|BODY~}, \code{\verb~|RULE~} or projection object is executed 10^6 times in any corpus, mathlib included (hottest: \code{\verb~|PProd.mk.0~} 723 k, \code{\verb~|DFunLike.coe~} 685 k, \code{\verb~|List.rec~} cons rule 582 k); one \code{\verb~|TELE~} object (\code{\verb~|Eq~}: 3.1 M on mathlib, 1.4 M on cslib) is. Objects above 10^5 executions: cedar 7 bodies, 3 rules, 3 projections, 10 telescopes; mathlib 40, 11, 17, 61 (section 3.4). At 3-4 k instructions per reduction step \verb~|[~est\verb~|]~ the ISA's rent of 3.3 G needs about 10^6 executions of one block: \strong{no corpus reaches it; two \code{\verb~|perf/~} tests do} (\code{\verb~|unfold-before-literal-fallback~}, \code{\verb~|proj-applied-struct-arg-bad~}: 3.15 M \code{\verb~|Nat.rec~} steps and 1.57 M \code{\verb~|HAdd.hAdd~}/\code{\verb~|Add.add~} unfoldings each).}
+\li{\strong{The hot set is Lean's core library, and it is the same everywhere.} 93.6\% of cedar's delta unfoldings and 94.9\% of its iota steps are of constants declared in Init; Cedar's own definitions receive 2.9\% (con-leche's: 6.5\%). The 300 bodies that are hottest on Init cover 86\% of cedar's unfoldings, 82\% of con-leche's, 74\% of reachability's, but only 31-51\% on the Mathlib-based corpora, whose heat is in Mathlib's structure projections (\code{\verb~|DFunLike.coe~}, \code{\verb~|AddCommMonoid.toAddMonoid~}, \code{\verb~|CategoryTheory.Functor.obj~}). By role (cedar): \code{\verb~|casesOn~} 21.5\%, structure projection functions 19.8\%, matchers 14.2\%, \code{\verb~|brecOn~}/\code{\verb~|below~} 6.4\%, compiler auxiliaries (\code{\verb~|_f~}, \code{\verb~|.go~}) 8.8\%, other definitions 26.5\%.}
+\li{\strong{Derived reduction rules (nano-lean's, the model of K2) are the one specialisation with a measured large effect, and only on evaluation}: switching them off costs 1.9x on reachability, 10.3x on \code{\verb~|magma-list-deep-n36~}, 3.2x on \code{\verb~|ite-taken-branch-bad~}, 1.6x on \code{\verb~|magma-list-pair-n21~}, but 1.04-1.06x on init, std, cedar, con-leche and 1.00-1.02x on NSE, cslib, mathlib.}
+\li{\strong{Where instructions go on Cedar-level work} (whole cedar, nano-lean): inference 42\%, reduction 25\%, conversion 20\%, parsing 9\%. By what the code is doing: walking terms and environments (\code{\verb~|eval~}/\code{\verb~|apply~}/\code{\verb~|trim~}) 33\%, building and interning values 21\% (+4\% hash tables), inference proper 18\%, conversion proper 7\%; on the evaluation tests interning is 33-49\%. Hash-consing is the part no code tier removes.}
+}
+
+\p{Conclusions for the machine (details in section 5):}
+
+\ul{
+\li{(i) \code{\verb~|BODY~}/\code{\verb~|RULE~} heat is far more concentrated than \code{\verb~|TELE~} heat (cedar: 100 bodies = 74\%, 10 rules = 85\%, 100 telescopes = 62\%; Init static telescopes: 100 = 72\%) but 10-100 times smaller in volume than the rent assumes. Objects at >= 10^4 / 10^5 / 10^6 / 10^7 executions (bodies + rules + projections + telescopes): cedar 175 / 23 / 0 / 0, reachability 39 / 10 / 0 / 0, con-leche 176 / 22 / 0 / 0, NSE 307 / 18 / 0 / 0, cslib 463 / 42 / 1 / 0, mathlib 1073 / 129 / 1 / 0.}
+\li{(ii) Compiled (Truffle) code has no target on init, std, cedar, NSE, cslib, mathlib. Its only candidates are closed evaluation loops: the \code{\verb~|perf/~} evaluation tests, reachability's \code{\verb~|decide~} proofs, a handful of con-leche proofs. Elaborated code (K1) for \code{\verb~|TELE~} and for the Init hot set pays everywhere because a third of all instructions is term walking; K2 pays on evaluation only. 57\% of cedar's declarations perform no reduction step at all and 81\% at most ten: for them the generic walk (K0) and the memo tables are the whole machine.}
+\li{(iii) Argued for by frequency: instance-projection shortcuts (structure projection function + projection of a constructor: 20\% of unfoldings on cedar, 37-49\% on Mathlib corpora), \code{\verb~|casesOn~}/matcher decision trees (36\% on cedar, 68\% on reachability), derived rules for structural recursion (\code{\verb~|brecOn~}: 6\% of unfoldings, and \code{\verb~|PProd.mk.0~} alone is 28\% of all projections). Argued for only by the \code{\verb~|perf/~} tests: Nat immediates (94-99.8\% of Nat literal operations fit 31 bits, but a whole corpus performs 54 k-481 k of them). Not argued for by any corpus: packed \code{\verb~|String~}/\code{\verb~|Array~}/\code{\verb~|BitVec~} (at most 4.3 k string literal expansions per corpus, longest 19 characters), packed \code{\verb~|List~} (lists are built by evaluation, not given as literals).}
+\li{(iv) Fast benchmarks (section 6): \code{\verb~|work/workloads/slices/cedar-hot-ax.ndjson~} (133 MB, 13.6 G, 3.4 s in nano-lean: Cedar's 172 most expensive own declarations over a statements-only library; inference 47\%, conversion 35\%, reduction 13\%) for Cedar-level work, \code{\verb~|reachability.ndjson~} (19 MB, 11 G, 3.4 s) for evaluation, \code{\verb~|perf/unfold-before-literal-bad~} (5.3 G, 184 MiB of native stack) for depth and Nat literals.}
+}
+}
+
+\subtree{
+\title{1. Method, and what the numbers are}
+
+\table{
+\tr{\th{Source}\th{What it gives}\th{How}}
+\tr{\td{\code{\verb~|bench/workloads/static-shape.rs~} (ours)}\td{static shape; reproduces the spike's HEAT lines exactly on init}\td{one pass over the NDJSON, host}}
+\tr{\td{nano-lean v0.4.2, instrumented copy (\code{\verb~|work/workloads/build/nano-lean-instrumented~})}\td{per-declaration instructions; per-constant delta, iota, projection, telescope counts; Nat/String literal events; whnf chains; stack depth; phase split}\td{Docker; three builds: plain + per-declaration \code{\verb~|perf_event~} counter (\code{\verb~|di~}), \code{\verb~|vstats~} (nano-lean's own counters + ours), frame pointers (\code{\verb~|perf record~})}}
+\tr{\td{rpylean \code{\verb~|check --stats --print jsonl~} (unmodified binary)}\td{delta per constant, iota per recursor, native Nat ops, def_eq totals, time per declaration}\td{leader's own facility}}
+\tr{\td{gruszka \code{\verb~|--features knobs~}, \code{\verb~|SK_DECL_INSTR=1~} (unmodified source, rebuilt)}\td{ticks, whnf misses, unfolds, def_eq, infer misses per declaration; ground-machine runs}\td{leader's own facility}}
+}
+
+\p{Why nano-lean: arena \verb~|#~1, the architecture RLVM follows (folded constants, memo on values, hash-consed closures, derived rules), per-declaration counters already there, an 80 s rebuild. The patch adds counters only (\code{\verb~|src/wl.rs~}, \code{\verb~|wl!~} sites); the \code{\verb~|di~} build has identical checking code. The leaders' costs on the \code{\verb~|perf/~} tests are read from the baseline team's \code{\verb~|work/baselines/small/*.json~}.}
+
+\p{Definitions (all counted where nano-lean's memo misses, i.e. real executions). \strong{BODY} = a definition's body is applied to a spine (delta), from \code{\verb~|whnf~} or from lazy delta; with derived rules on, a \strong{rule firing} replaces the unfolding and the iota steps under it. \strong{RULE} = a recursor rule is applied, keyed \code{\verb~|(recursor, rule index)~}. \strong{PROJ} = projection of a constructor application, keyed \code{\verb~|(constructor, field)~}. \strong{TELE} = an application spine with a constant head is inferred, or a neutral value with a constant head is typed. \strong{Phase} of an instruction sample = the innermost enclosing function among inference, conversion, reduction, import (frame-pointer call graphs, one sample per 2,000,003 user instructions; \code{\verb~|eval~}, \code{\verb~|apply~} and interning helpers are charged to the phase that called them).}
+
+\p{Caveats. (a) One checking thread and no PGO: totals are 10\% above the arena build (mathlib 399 G against the baseline team's 361 G). (b) Counts are nano-lean's: its memo tables, budgeted argument probes and declaration order decide how often a body runs; rpylean (substitution kernel) and gruszka (NbE) agree on the order of magnitude (section 3.7), the official kernel was not instrumented. (c) Wall times are from a loaded host. (d) "Origin" of a name is the first of the init, std, mathlib exports that declares it; everything else is "project" (for cedar, "Mathlib" means Batteries and the part of Mathlib it imports).}
+}
+
+\subtree{
+\title{2. Static shape}
+
+\p{Declarations by kind, literal counts and incremental sizes are in \code{\verb~|work/exports/STATS.md~}; full tables of this section in \code{\verb~|work/workloads/tables/static.md~}. Static heat of constant-headed application spines (the spike's HEAT table; a spine = an \code{\verb~|app~} node referenced from a non-function position):}
+
+\table{
+\tr{\th{corpus}\th{spines}\th{heads used}\th{top1}\th{top10}\th{top100}\th{top1000}\th{N50\%}\th{N80\%}\th{N90\%}\th{N95\%}\th{>=1e4}\th{>=1e5}}
+\tr{\td{init}\td{2.09M}\td{39,783}\td{11.1\%}\td{37.9\%}\td{71.7\%}\td{89.3\%}\td{23}\td{246}\td{1,133}\td{3,549}\td{33}\td{2}}
+\tr{\td{std}\td{3.12M}\td{69,712}\td{11.3\%}\td{33.8\%}\td{66.8\%}\td{85.2\%}\td{30}\td{448}\td{2,349}\td{7,054}\td{50}\td{3}}
+\tr{\td{cedar}\td{4.61M}\td{102,722}\td{13.2\%}\td{34.1\%}\td{66.0\%}\td{84.1\%}\td{29}\td{530}\td{2,954}\td{9,676}\td{55}\td{5}}
+\tr{\td{reachability}\td{103k}\td{4,436}\td{14.4\%}\td{37.7\%}\td{70.8\%}\td{93.7\%}\td{21}\td{220}\td{602}\td{1,246}\td{1}\td{0}}
+\tr{\td{con-leche}\td{4.41M}\td{36,363}\td{11.7\%}\td{35.7\%}\td{72.7\%}\td{92.0\%}\td{22}\td{201}\td{716}\td{1,838}\td{70}\td{3}}
+\tr{\td{navier-stokes-euler}\td{8.44M}\td{117,266}\td{7.6\%}\td{31.2\%}\td{64.5\%}\td{85.1\%}\td{37}\td{466}\td{2,520}\td{8,287}\td{102}\td{11}}
+\tr{\td{cslib}\td{12.0M}\td{278,800}\td{8.9\%}\td{27.0\%}\td{55.2\%}\td{77.5\%}\td{65}\td{1,389}\td{7,012}\td{25,144}\td{133}\td{17}}
+\tr{\td{mathlib}\td{30.1M}\td{523,983}\td{7.8\%}\td{24.9\%}\td{52.4\%}\td{75.4\%}\td{83}\td{1,819}\td{10,027}\td{36,008}\td{306}\td{33}}
+}
+
+\p{Who receives it (share of spines):}
+
+\table{
+\tr{\th{}\th{init}\th{std}\th{cedar}\th{reach}\th{con-leche}\th{NSE}\th{cslib}\th{mathlib}}
+\tr{\td{theorems (\code{\verb~|Eq.trans~}, \code{\verb~|congrArg~}, ...)}\td{32.8\%}\td{29.0\%}\td{24.8\%}\td{22.2\%}\td{15.7\%}\td{26.0\%}\td{22.1\%}\td{19.8\%}}
+\tr{\td{inductive types (\code{\verb~|Eq~}, \code{\verb~|And~}, ...)}\td{18.1\%}\td{19.7\%}\td{23.6\%}\td{24.5\%}\td{21.4\%}\td{10.9\%}\td{18.4\%}\td{16.5\%}}
+\tr{\td{structure projection functions}\td{16.3\%}\td{15.8\%}\td{13.4\%}\td{17.6\%}\td{14.5\%}\td{33.4\%}\td{23.1\%}\td{28.9\%}}
+\tr{\td{other definitions (instances excluded: 1.2-4.3\%)}\td{22.4\%}\td{23.8\%}\td{24.5\%}\td{20.3\%}\td{28.8\%}\td{23.4\%}\td{24.4\%}\td{24.1\%}}
+\tr{\td{constructors}\td{6.6\%}\td{7.5\%}\td{8.9\%}\td{8.0\%}\td{13.2\%}\td{2.4\%}\td{6.0\%}\td{4.7\%}}
+\tr{\td{matchers + \code{\verb~|casesOn~} + \code{\verb~|brecOn~}/\code{\verb~|below~} + recursors}\td{2.1\%}\td{2.5\%}\td{3.1\%}\td{4.5\%}\td{4.7\%}\td{0.5\%}\td{1.6\%}\td{1.1\%}}
+\tr{\td{declared in Init / Std / Mathlib / project}\td{100/0/0/0}\td{90/10/0/0}\td{85/5/2/8}\td{95/0/5/0}\td{76/1/0/24}\td{49/0/43/8}\td{63/2/34/2}\td{49/1/50/0}}
+}
+
+\p{Differences from Init: cedar shares 23 of its 30 hottest static heads and 82 of its 100 with Init; the non-Init entries of its top 100 are \code{\verb~|Cedar.Thm.InstanceOfType~}, \code{\verb~|Std.DTreeMap.Internal.Impl.inner~}, \code{\verb~|Cedar.SymCC.Term.WellFormed~}, \code{\verb~|Cedar.Data.Map.find?~}, \code{\verb~|Cedar.Thm.Residual.WellTyped~}, \code{\verb~|Cedar.Validation.typeOf~} (type formers and plain definitions, no matcher or recursor). con-leche differs most among the non-Mathlib corpora (16 of 30 shared; \code{\verb~|PSum.inr~} 5.0\%, \code{\verb~|PSigma.mk~} 1.7\%, \code{\verb~|List.filter.match_1~} 1.2\%, \code{\verb~|ConLeche.Semantics.interp~} 0.9\%): its proofs carry packed mutual/well-founded arguments. The Mathlib corpora replace the equality lemmas by projections of the algebraic hierarchy (\code{\verb~|HMul.hMul~} 7.6\% on NSE, \code{\verb~|DFunLike.coe~} 2.3\% on mathlib).}
+
+\p{Evaluation-related occurrences (static spines headed by the pattern; literals as node counts):}
+
+\table{
+\tr{\th{pattern}\th{init}\th{std}\th{cedar}\th{reach}\th{con-leche}\th{NSE}\th{cslib}\th{mathlib}}
+\tr{\td{recursors \code{\verb~|*.rec~}}\td{7.2k}\td{12.2k}\td{17.5k}\td{1.2k}\td{8.3k}\td{6.8k}\td{31.5k}\td{56.3k}}
+\tr{\td{\code{\verb~|*.casesOn~}}\td{15.2k}\td{29.4k}\td{44.5k}\td{1.2k}\td{68.1k}\td{32.0k}\td{94.7k}\td{188k}}
+\tr{\td{matchers \code{\verb~|*.match_N~}}\td{19.3k}\td{31.3k}\td{70.6k}\td{1.1k}\td{123k}\td{4.0k}\td{47.0k}\td{74.8k}}
+\tr{\td{\code{\verb~|*.brecOn~} / \code{\verb~|*.below~}}\td{4.5k}\td{5.7k}\td{8.5k}\td{1.2k}\td{10.7k}\td{3.0k}\td{14.7k}\td{19.1k}}
+\tr{\td{\code{\verb~|WellFounded.fix~}, \code{\verb~|fixF~}, \code{\verb~|Acc.rec~}}\td{238}\td{339}\td{451}\td{23}\td{84}\td{65}\td{604}\td{741}}
+\tr{\td{\code{\verb~|Decidable.decide~}}\td{2.9k}\td{3.7k}\td{7.2k}\td{216}\td{2.9k}\td{674}\td{5.0k}\td{6.4k}}
+\tr{\td{\code{\verb~|OfNat.ofNat~}}\td{1.7k}\td{2.0k}\td{2.3k}\td{335}\td{720}\td{24.0k}\td{45.7k}\td{117k}}
+\tr{\td{structure projection functions}\td{359k}\td{518k}\td{646k}\td{19.0k}\td{663k}\td{2.89M}\td{2.88M}\td{9.01M}}
+\tr{\td{natVal nodes (references to them)}\td{285 (3.9k)}\td{453 (7.6k)}\td{707 (14.7k)}\td{60 (404)}\td{291 (4.5k)}\td{1.1k (50.6k)}\td{849 (44.9k)}\td{5.7k (150k)}}
+\tr{\td{strVal nodes (references)}\td{1.8k (3.0k)}\td{3.1k (5.4k)}\td{7.4k (29.8k)}\td{37 (46)}\td{574 (1.7k)}\td{98 (130)}\td{16.7k (30.6k)}\td{19.7k (35.3k)}}
+}
+
+\p{Proof sizes (expression records first written for the declaration): theorem median 31-71 nodes in every corpus, p99 984 (reachability) to 7,493 (con-leche), maximum 26 k (init), 86 k (cedar), 373 k (con-leche), 641 k (NSE), 92 k (mathlib); the largest 100 declarations hold 12.7\% of cedar's nodes, 22.7\% of con-leche's, 2.6\% of mathlib's. \strong{93-95\% of all expression nodes are private to one declaration} in every corpus (never referenced by a record of a later declaration; theorem segments 94-96\%, definition segments 89-92\%), which confirms ISA decision 3 (run-once terms are walked, not elaborated) on every corpus. Declarations whose \code{\verb~|(type, value)~} ids equal an earlier declaration's (private copies such as \code{\verb~|_sparseCasesOn_N~}): 15,042 on cedar = 1.26\% of its checking instructions, 0.06-1.0\% elsewhere.}
+}
+
+\subtree{
+\title{3. Dynamic profile}
+
+\subtree{
+\title{3.1 Totals and where the instructions go}
+
+\table{
+\tr{\th{corpus}\th{decls}\th{instr (process)}\th{instr/byte}\th{in declarations}\th{rules off / on}\th{inference}\th{reduction}\th{conversion}\th{import}}
+\tr{\td{init}\td{59,979}\td{24.6G}\td{71}\td{90.1\%}\td{1.06}\td{39.3\%}\td{34.5\%}\td{15.0\%}\td{9.0\%}}
+\tr{\td{std}\td{103,885}\td{41.1G}\td{70}\td{89.7\%}\td{1.05}\td{40.2\%}\td{30.3\%}\td{18.1\%}\td{9.3\%}}
+\tr{\td{cedar}\td{151,772}\td{64.1G}\td{71}\td{89.8\%}\td{1.04}\td{42.2\%}\td{25.0\%}\td{20.4\%}\td{9.3\%}}
+\tr{\td{reachability}\td{4,846}\td{11.1G}\td{581}\td{98.6\%}\td{1.89}\td{4.1\%}\td{93.0\%}\td{1.2\%}\td{1.2\%}}
+\tr{\td{con-leche}\td{38,246}\td{61.9G}\td{88}\td{92.8\%}\td{1.05}\td{38.0\%}\td{31.2\%}\td{20.7\%}\td{6.8\%}}
+\tr{\td{navier-stokes-euler}\td{129,845}\td{103G}\td{66}\td{90.7\%}\td{1.00}\td{53.8\%}\td{15.8\%}\td{19.3\%}\td{8.7\%}}
+\tr{\td{cslib}\td{413,186}\td{144G}\td{58}\td{87.8\%}\td{1.02}\td{46.4\%}\td{23.8\%}\td{16.0\%}\td{11.1\%}}
+\tr{\td{mathlib}\td{739,167}\td{399G}\td{63}\td{89.6\%}\td{1.02}\td{47.0\%}\td{23.9\%}\td{17.5\%}\td{9.6\%}}
+}
+
+\p{(\code{\verb~|instr~}: \code{\verb~|di~} build, whole process. \code{\verb~|rules off / on~}: \code{\verb~|vstats~} build with nano-lean's derived rules disabled over enabled. Phases: share of all samples; the rest is inductive checking 0.3-1.0\% and driver 0.2-2.8\%.)}
+
+\p{The same samples by what the code is doing (self instructions, share of all samples):}
+
+\table{
+\tr{\th{}\th{init}\th{std}\th{cedar}\th{reach}\th{con-leche}\th{NSE}\th{cslib}\th{mathlib}}
+\tr{\td{term and environment walking (\code{\verb~|eval~}, \code{\verb~|apply~}, \code{\verb~|inst~}, \code{\verb~|trim~})}\td{33.8\%}\td{33.5\%}\td{32.7\%}\td{32.4\%}\td{35.3\%}\td{33.6\%}\td{32.2\%}\td{32.9\%}}
+\tr{\td{value construction and interning (\code{\verb~|neu~}, \code{\verb~|mk~}, \code{\verb~|frame~}, \code{\verb~|push~})}\td{20.0\%}\td{18.7\%}\td{20.8\%}\td{35.1\%}\td{23.4\%}\td{16.9\%}\td{17.6\%}\td{19.8\%}}
+\tr{\td{hash tables (memo and intern probes, rehash)}\td{3.9\%}\td{4.3\%}\td{4.3\%}\td{7.3\%}\td{4.1\%}\td{4.3\%}\td{3.8\%}\td{3.9\%}}
+\tr{\td{inference proper (\code{\verb~|infer_slow~}, \code{\verb~|infer~}, \code{\verb~|type_of~})}\td{17.4\%}\td{17.4\%}\td{17.6\%}\td{1.8\%}\td{14.1\%}\td{20.2\%}\td{19.7\%}\td{18.6\%}}
+\tr{\td{conversion proper (\code{\verb~|def_eq_*~}, \code{\verb~|lazy_delta~}, \code{\verb~|args_eq~})}\td{6.8\%}\td{7.3\%}\td{6.9\%}\td{0.4\%}\td{7.1\%}\td{8.7\%}\td{6.6\%}\td{6.7\%}}
+\tr{\td{reduction control (\code{\verb~|whnf~}, \code{\verb~|whnf_core~}, \code{\verb~|unfold~}, \code{\verb~|reduce_*~})}\td{3.5\%}\td{3.4\%}\td{2.6\%}\td{6.2\%}\td{1.7\%}\td{2.3\%}\td{2.9\%}\td{2.5\%}}
+\tr{\td{substitution into derived-rule templates and zeta}\td{1.9\%}\td{1.7\%}\td{1.2\%}\td{11.7\%}\td{1.2\%}\td{0.5\%}\td{0.7\%}\td{0.7\%}}
+}
+
+\p{Reading for RLVM: the first line is what elaborated code replaces (operands in registers instead of a DAG walk with environment lookups); the second and third are what no tier removes while every value is interned. Inside the reduction phase of cedar (25.0\%): walking 11.6\%, construction 8.3\%, control 2.6\%, templates 1.1\%. Inside inference (42.2\%): inference proper 17.6\%, walking 12.9\% (evaluation of arguments and instantiation of Pi codomains, i.e. the \code{\verb~|TELE~} work), construction 8.7\%.}
+}
+
+\subtree{
+\title{3.2 The corpora contain their libraries: the project's own declarations}
+
+\table{
+\tr{\th{corpus}\th{part}\th{decls}\th{share of checking instr}\th{instr/decl}\th{infer misses}\th{conversions}\th{delta}\th{rule firings}\th{iota}\th{reductions per infer miss}}
+\tr{\td{init}\td{Init}\td{59,979}\td{100\%}\td{369k}\td{4.60M}\td{1.89M}\td{1.48M}\td{364k}\td{491k}\td{0.64}}
+\tr{\td{cedar}\td{Init}\td{59,978}\td{39.5\%}\td{379k}\td{4.58M}\td{1.90M}\td{1.60M}\td{388k}\td{523k}\td{0.69}}
+\tr{\td{cedar}\td{Std}\td{30,717}\td{14.8\%}\td{278k}\td{2.00M}\td{1.15M}\td{392k}\td{65k}\td{73k}\td{0.32}}
+\tr{\td{cedar}\td{Batteries/Mathlib}\td{38,623}\td{5.9\%}\td{88k}\td{1.00M}\td{257k}\td{153k}\td{26k}\td{66k}\td{0.29}}
+\tr{\td{cedar}\td{\strong{Cedar}}\td{22,454}\td{\strong{39.8\%}}\td{\strong{1.02M}}\td{6.10M}\td{2.34M}\td{631k}\td{214k}\td{196k}\td{\strong{0.20}}}
+\tr{\td{reachability}\td{\strong{project}}\td{125}\td{\strong{93.4\%}}\td{81.5M}\td{6.7k}\td{3.7k}\td{113k}\td{882k}\td{1.05M}\td{378}}
+\tr{\td{con-leche}\td{Init + Std}\td{9,821}\td{6.0\%}\td{349k}\td{714k}\td{302k}\td{222k}\td{44k}\td{78k}\td{0.61}}
+\tr{\td{con-leche}\td{\strong{ConLeche}}\td{28,424}\td{\strong{94.0\%}}\td{\strong{1.90M}}\td{10.6M}\td{3.74M}\td{2.57M}\td{513k}\td{1.37M}\td{\strong{0.50}}}
+\tr{\td{NSE}\td{Init + Mathlib}\td{70,241}\td{27.6\%}\td{369k}\td{6.94M}\td{2.96M}\td{1.25M}\td{89k}\td{116k}\td{0.29}}
+\tr{\td{NSE}\td{\strong{project}}\td{59,604}\td{\strong{72.4\%}}\td{\strong{1.14M}}\td{12.1M}\td{8.51M}\td{2.58M}\td{488k}\td{162k}\td{\strong{0.38}}}
+\tr{\td{cslib}\td{Init + Std + Mathlib}\td{397,712}\td{94.6\%}\td{302k}\td{29.7M}\td{12.5M}\td{6.91M}\td{763k}\td{1.16M}\td{0.39}}
+\tr{\td{cslib}\td{\strong{Cslib}}\td{15,474}\td{\strong{5.4\%}}\td{445k}\td{1.79M}\td{585k}\td{316k}\td{73k}\td{150k}\td{0.36}}
+\tr{\td{mathlib}\td{Mathlib (beyond Init, Std)}\td{635,283}\td{89.4\%}\td{503k}\td{69.7M}\td{33.4M}\td{17.4M}\td{1.98M}\td{2.51M}\td{0.43}}
+}
+
+\p{(reductions = delta + firings + iota + projections in \code{\verb~|whnf_core~}; derived rules on.)}
+
+\p{Phase split of the project's own declarations only (\code{\verb~|nl-fast --only~}, import excluded, share of the rest):}
+
+\table{
+\tr{\th{own declarations of}\th{inference}\th{conversion}\th{reduction}\th{other}}
+\tr{\td{Init (whole export)}\td{43.2\%}\td{16.5\%}\td{37.9\%}\td{2.4\%}}
+\tr{\td{cedar}\td{47.2\%}\td{30.3\%}\td{16.9\%}\td{5.6\%}}
+\tr{\td{con-leche}\td{40.1\%}\td{22.3\%}\td{33.7\%}\td{3.9\%}}
+\tr{\td{navier-stokes-euler}\td{58.7\%}\td{21.5\%}\td{16.6\%}\td{3.2\%}}
+\tr{\td{cslib}\td{44.5\%}\td{14.9\%}\td{24.1\%}\td{16.5\%}}
+\tr{\td{reachability}\td{0.2\%}\td{0.1\%}\td{99.5\%}\td{0.2\%}}
+}
+}
+
+\subtree{
+\title{3.3 Per-declaration cost}
+
+\p{Concentration (share of the summed per-declaration instructions; exact):}
+
+\table{
+\tr{\th{corpus}\th{top1}\th{top10}\th{top100}\th{top1000}\th{N50\%}\th{N90\%}\th{median}\th{p99}\th{max}}
+\tr{\td{init}\td{1.8\%}\td{7.3\%}\td{20.6\%}\td{49.4\%}\td{1,037}\td{14,484}\td{55k}\td{5.5M}\td{397M}}
+\tr{\td{cedar}\td{0.7\%}\td{5.1\%}\td{20.3\%}\td{44.1\%}\td{1,552}\td{31,031}\td{47k}\td{5.3M}\td{409M}}
+\tr{\td{cedar, own decls only}\td{1.8\%}\td{12.2\%}\td{42.7\%}\td{75.9\%}\td{172}\td{2,951}\td{}\td{}\td{}}
+\tr{\td{reachability}\td{32.5\%}\td{93.5\%}\td{95.6\%}\td{98.7\%}\td{2}\td{4}\td{39k}\td{2.1M}\td{3.55G}}
+\tr{\td{con-leche}\td{10.1\%}\td{14.0\%}\td{29.7\%}\td{62.0\%}\td{493}\td{5,494}\td{93k}\td{23.2M}\td{5.79G}}
+\tr{\td{navier-stokes-euler}\td{2.4\%}\td{7.5\%}\td{12.6\%}\td{28.4\%}\td{4,147}\td{32,394}\td{104k}\td{9.1M}\td{2.25G}}
+\tr{\td{cslib}\td{0.3\%}\td{1.4\%}\td{4.9\%}\td{15.7\%}\td{15,074}\td{133,236}\td{67k}\td{4.0M}\td{395M}}
+\tr{\td{mathlib}\td{0.3\%}\td{1.2\%}\td{4.0\%}\td{12.2\%}\td{23,288}\td{208,281}\td{85k}\td{6.7M}\td{1.19G}}
+}
+
+\p{Theorems carry 88-98\% of the checking instructions, definitions 1.5-11.6\%, inductive blocks 0.2-2.0\%. The three checkers agree on which declarations are expensive: of nano-lean's 50 most expensive declarations per corpus, 33-43 are also in gruszka's top 50 by time and 14-37 in rpylean's (\code{\verb~|tables/cross.md~}). \strong{The 50 most expensive declarations of each corpus}, with counters and a one-line reason each, are in \code{\verb~|work/workloads/tables/top50-<corpus>.md~}. Their classes (count and share of the corpus's checking instructions):}
+
+\table{
+\tr{\th{corpus}\th{top 50 hold}\th{large term, inference and conversion}\th{reduction-heavy inside a large term}\th{kernel evaluation on a small term}\th{other (mixed, inductive blocks)}}
+\tr{\td{init}\td{15.4\%}\td{20 (4.9\%)}\td{4 (2.6\%)}\td{1 (1.8\%)}\td{25 (6.1\%)}}
+\tr{\td{cedar}\td{14.2\%}\td{32 (9.9\%)}\td{3 (0.9\%)}\td{1 (0.7\%)}\td{14 (2.7\%)}}
+\tr{\td{reachability}\td{94.8\%}\td{3 (0.3\%)}\td{0}\td{5 (92.5\%)}\td{42 (2.1\%)}}
+\tr{\td{con-leche}\td{23.3\%}\td{27 (8.0\%)}\td{20 (4.8\%)}\td{0}\td{3 (10.5\%)}}
+\tr{\td{navier-stokes-euler}\td{10.6\%}\td{45 (10.0\%)}\td{1 (0.1\%)}\td{1 (0.1\%)}\td{3 (0.3\%)}}
+\tr{\td{cslib}\td{3.4\%}\td{28 (1.7\%)}\td{7 (0.7\%)}\td{1 (0.3\%)}\td{14 (0.8\%)}}
+\tr{\td{mathlib}\td{2.9\%}\td{25 (1.3\%)}\td{15 (0.8\%)}\td{4 (0.5\%)}\td{6 (0.2\%)}}
+}
+
+\p{What the expensive declarations are:}
+
+\table{
+\tr{\th{corpus}\th{declaration(s)}\th{cost}\th{what makes it expensive}}
+\tr{\td{cedar}\td{\code{\verb~|Cedar.Thm.checked_eval_entity_reachable._unary~}, \code{\verb~|level_based_no_dne_expr._unary~}, \code{\verb~|level_based_slicing_is_sound_expr._unary~}}\td{409M, 283M, 223M}\td{well-founded recursion proofs of 30-50 k nodes; 44-66 k infer misses, 51-88 k conversions driven by lazy delta (21-36 k iterations), 2-3 k reductions}}
+\tr{\td{cedar}\td{\code{\verb~|Cedar.Spec.call.match_5.eq_23~} (6 private copies), \code{\verb~|Cedar.Validation.typeOfCall.match_1.eq_23~} (3), \code{\verb~|Cedar.Spec.apply₂.match_1.eq_18~} (3), \code{\verb~|compileApp₂.match_1.eq_18~} (3)}\td{260M, 143M, 112M, 120M each}\td{matcher equation lemmas (\code{\verb~|eq_18~}, \code{\verb~|eq_23~}: matches with at least that many alternatives): 5 k-node terms inferred under many contexts (66 k infer misses, 19 k conversions, 800 reductions); each is a \code{\verb~|_private~} copy per module, not shared by expression id}}
+\tr{\td{cedar}\td{\code{\verb~|Cedar.Thm.Duration.parseDuration?_eq_duration?_of_wf~}, \code{\verb~|Cedar.Thm.Op.mkName.neq~}}\td{315M, 229M}\td{86 k and 61 k nodes; the second expands 2,112 string literals (12,672 characters) and fires 16 k derived rules}}
+\tr{\td{cedar}\td{\code{\verb~|String.fromUTF8Lossy_surrogate_append._proof_1_10~} (Init)}\td{397M}\td{the only evaluation in cedar's top 50: a 65-node \code{\verb~|decide~} over \code{\verb~|UInt32~}/\code{\verb~|BitVec~}: 66 k rule firings, 8.5 k iota, 10.9 k Nat ops; 1.46x without derived rules}}
+\tr{\td{cedar}\td{\code{\verb~|Array.extract_append._proof_1_1~}, \code{\verb~|Vector.extract_append._proof_1~} (Init)}\td{195M, 187M}\td{\code{\verb~|omega~} certificates: 19 k delta + 9 k iota on \code{\verb~|List.casesOn~}, \code{\verb~|List.zipWithAll~}, \code{\verb~|List.map._f~}, \code{\verb~|instDecidableEqList~} inside 24 k-node terms}}
+\tr{\td{reachability}\td{\code{\verb~|Bench.Arena.{dag,path,grid}_reachable._proof_1~}, \code{\verb~|path_unreachable._proof_1~}, \code{\verb~|grid_shortest._proof_1~}}\td{3.55G, 2.63G, 1.24G, 2.53G, 141M}\td{\code{\verb~|decide~} on 19-96-node terms; the four large ones: 124-273 k rule firings, 128-361 k iota, 5-46 k Nat \code{\verb~|beq~}; hottest \code{\verb~|List.elem._f~} (166 k), \code{\verb~|Nat.decEq~}, \code{\verb~|instDecidableEqFin~}; 1.45-2.4x without derived rules}}
+\tr{\td{con-leche}\td{\code{\verb~|ConLeche.Cached.reduceNatI._mutual.eq_def~}}\td{5.79G}\td{372,576-node unfolding lemma of a mutual well-founded definition: 1.14 M infer misses, 220 k conversions, 292 k \code{\verb~|PSum.casesOn~} unfoldings + 292 k \code{\verb~|PSum.rec~} iota in lazy delta}}
+\tr{\td{con-leche}\td{\code{\verb~|ConLeche.Frontend.keyAt_eq~}, \code{\verb~|keyOf_105 .. keyOf_118~}}\td{331M, 165-172M each}\td{closed list and string computation inside 17-75 k-node proofs: 17 k delta, 9 k iota (\code{\verb~|List.filter.match_1~}, \code{\verb~|List.find?._f~}, \code{\verb~|Bool.casesOn~}), up to 130 string literal expansions each}}
+\tr{\td{con-leche}\td{\code{\verb~|ConLeche.Model.Rules.{prop_pt_io,red_sound,defeq_sound,infer_sound}.match_2~}}\td{162-249M}\td{matchers of 9-32 k nodes with at most 9 reductions: pure inference (19-29 k misses) and conversion (9-13 k)}}
+\tr{\td{NSE}\td{\code{\verb~|NavierStokes.{FiveProfileMoments,TerminalCompensation}.quadraticBilin._proof_{6,9}~}}\td{2.25G, 1.46G, 1.29G, 879M}\td{130-641 k-node proof terms over \code{\verb~|Matrix.vecCons~} vectors: 199-476 k infer misses, 88-237 k conversions, 15-39 k delta (\code{\verb~|Fin.induction~}, \code{\verb~|Nat.brecOn~}, \code{\verb~|Matrix.vecCons~})}}
+\tr{\td{NSE}\td{\code{\verb~|EulerSourcePotentialCoefficient.potentialTimePath_translation~}}\td{141M}\td{366 nodes: 23.5 k unfoldings of instance projections (\code{\verb~|DFunLike.coe~} 5.1 k, \code{\verb~|AddHom.toFun~} 3.0 k) in lazy delta}}
+\tr{\td{cslib}\td{Init's \code{\verb~|fromUTF8Lossy~} and \code{\verb~|extract_append~} proofs; own: \code{\verb~|Cslib.Automata.NA.loop_fin_run_exists._proof_*~}}\td{395M, 202M; 154M}\td{the corpus's top 10 are Init, Std and Mathlib declarations; Cslib's own most expensive proof is a 52 k-node term with 14 k reductions}}
+\tr{\td{mathlib}\td{\code{\verb~|WeierstrassCurve.Affine.Point.sym2x_add_sub_eq_addSubMap_sym2x._proof_1_8~}}\td{1.19G}\td{\code{\verb~|decide~}-style evaluation on 4 k nodes: 159 k rule firings, 116 k iota, 30 k Nat ops; 2.5x without derived rules}}
+}
+}
+
+\subtree{
+\title{3.4 Dynamic heat per constant}
+
+\p{Coverage in the form of the static HEAT table (derived rules off = every delta runs a body, the K1 view; cslib, std and \code{\verb~|PROJ~} rows in \code{\verb~|tables/dyn-summary.md~}):}
+
+\table{
+\tr{\th{series}\th{corpus}\th{executions}\th{objects}\th{top1}\th{top10}\th{top30}\th{top100}\th{top1000}\th{N50\%}\th{N80\%}\th{N90\%}\th{N95\%}}
+\tr{\td{BODY}\td{init}\td{2.27M}\td{6,463}\td{10.4\%}\td{37.4\%}\td{62.8\%}\td{83.2\%}\td{98.3\%}\td{18}\td{82}\td{167}\td{330}}
+\tr{\td{BODY}\td{cedar}\td{4.15M}\td{18,962}\td{7.9\%}\td{31.2\%}\td{54.0\%}\td{73.8\%}\td{94.9\%}\td{25}\td{150}\td{383}\td{1,016}}
+\tr{\td{BODY}\td{reachability}\td{3.42M}\td{1,042}\td{13.9\%}\td{78.4\%}\td{97.1\%}\td{99.3\%}\td{100\%}\td{4}\td{11}\td{18}\td{25}}
+\tr{\td{BODY}\td{con-leche}\td{4.10M}\td{6,936}\td{13.6\%}\td{44.6\%}\td{69.2\%}\td{85.7\%}\td{98.2\%}\td{13}\td{64}\td{145}\td{286}}
+\tr{\td{BODY}\td{NSE}\td{4.47M}\td{20,147}\td{3.1\%}\td{15.8\%}\td{32.2\%}\td{58.8\%}\td{91.3\%}\td{67}\td{369}\td{859}\td{1,833}}
+\tr{\td{BODY}\td{mathlib}\td{24.6M}\td{81,809}\td{2.8\%}\td{15.4\%}\td{28.3\%}\td{48.8\%}\td{85.5\%}\td{107}\td{632}\td{1,629}\td{3,822}}
+\tr{\td{RULE}\td{init}\td{675k}\td{551}\td{49.3\%}\td{94.0\%}\td{98.6\%}\td{99.6\%}\td{100\%}\td{2}\td{6}\td{9}\td{11}}
+\tr{\td{RULE}\td{cedar}\td{1.24M}\td{2,807}\td{37.5\%}\td{85.2\%}\td{92.8\%}\td{97.0\%}\td{99.4\%}\td{3}\td{8}\td{17}\td{52}}
+\tr{\td{RULE}\td{reachability}\td{1.69M}\td{59}\td{54.9\%}\td{99.8\%}\td{100\%}\td{100\%}\td{100\%}\td{1}\td{2}\td{3}\td{4}}
+\tr{\td{RULE}\td{con-leche}\td{1.82M}\td{314}\td{49.1\%}\td{91.1\%}\td{98.4\%}\td{99.6\%}\td{100\%}\td{2}\td{5}\td{9}\td{16}}
+\tr{\td{RULE}\td{mathlib}\td{4.52M}\td{6,760}\td{12.9\%}\td{70.9\%}\td{91.9\%}\td{98.6\%}\td{99.4\%}\td{6}\td{15}\td{26}\td{41}}
+\tr{\td{TELE}\td{init}\td{2.97M}\td{39,785}\td{10.0\%}\td{34.4\%}\td{51.4\%}\td{69.6\%}\td{89.9\%}\td{28}\td{262}\td{1,015}\td{2,873}}
+\tr{\td{TELE}\td{cedar}\td{7.51M}\td{102,714}\td{12.0\%}\td{29.2\%}\td{45.1\%}\td{61.7\%}\td{84.9\%}\td{42}\td{546}\td{2,249}\td{6,762}}
+\tr{\td{TELE}\td{con-leche}\td{7.59M}\td{36,342}\td{10.9\%}\td{36.5\%}\td{54.7\%}\td{72.9\%}\td{93.4\%}\td{23}\td{182}\td{555}\td{1,399}}
+\tr{\td{TELE}\td{NSE}\td{12.9M}\td{117,264}\td{6.7\%}\td{27.5\%}\td{42.2\%}\td{62.2\%}\td{86.6\%}\td{48}\td{432}\td{1,827}\td{5,924}}
+\tr{\td{TELE}\td{mathlib}\td{46.8M}\td{523,964}\td{6.7\%}\td{20.3\%}\td{32.8\%}\td{48.3\%}\td{76.4\%}\td{113}\td{1,497}\td{7,010}\td{23,970}}
+}
+
+\p{Dynamic \code{\verb~|TELE~} heat is the static heat times 1.3-1.7 with the same shape (cedar: 7.51 M executions against 4.61 M static spines; top 100 61.7\% against 66.0\%): applications are inferred about once each, plus re-inference under other environments. The spike's static table was a good proxy for \code{\verb~|TELE~}, and says nothing about \code{\verb~|BODY~}/\code{\verb~|RULE~}, which are far more concentrated (cedar, objects for 90\%: 383 bodies, 17 rules, 2,249 telescopes).}
+
+\p{Objects with at least N executions (count; in parentheses the share of the series' executions that happens after the object crossed N, i.e. what a tier entered at N can touch):}
+
+\table{
+\tr{\th{series}\th{N}\th{init}\th{cedar}\th{reach}\th{con-leche}\th{NSE}\th{cslib}\th{mathlib}}
+\tr{\td{BODY}\td{1e4}\td{40 (51\%)}\td{62 (51\%)}\td{31 (88\%)}\td{51 (65\%)}\td{88 (37\%)}\td{152 (45\%)}\td{391 (57\%)}}
+\tr{\td{BODY}\td{1e5}\td{1 (6\%)}\td{7 (8\%)}\td{6 (53\%)}\td{8 (20\%)}\td{1 (1\%)}\td{8 (7\%)}\td{40 (16\%)}}
+\tr{\td{RULE}\td{1e4}\td{10 (79\%)}\td{11 (78\%)}\td{5 (96\%)}\td{14 (87\%)}\td{10 (49\%)}\td{21 (78\%)}\td{39 (86\%)}}
+\tr{\td{RULE}\td{1e5}\td{1 (35\%)}\td{3 (30\%)}\td{3 (75\%)}\td{3 (57\%)}\td{0}\td{7 (28\%)}\td{11 (49\%)}}
+\tr{\td{PROJ}\td{1e4}\td{9 (66\%)}\td{12 (66\%)}\td{2 (92\%)}\td{10 (77\%)}\td{47 (48\%)}\td{60 (55\%)}\td{147 (70\%)}}
+\tr{\td{PROJ}\td{1e5}\td{1 (15\%)}\td{3 (22\%)}\td{1 (72\%)}\td{1 (42\%)}\td{1 (2\%)}\td{5 (17\%)}\td{17 (26\%)}}
+\tr{\td{TELE}\td{1e4}\td{48 (43\%)}\td{90 (49\%)}\td{1 (6\%)}\td{101 (60\%)}\td{162 (57\%)}\td{230 (50\%)}\td{496 (59\%)}}
+\tr{\td{TELE}\td{1e5}\td{3 (7\%)}\td{10 (16\%)}\td{0}\td{10 (23\%)}\td{16 (21\%)}\td{22 (19\%)}\td{61 (29\%)}}
+}
+
+\p{At 10^6: one telescope (\code{\verb~|Eq~}) on cslib and on mathlib and nothing else; at 10^7: nothing. Who receives the \code{\verb~|BODY~} executions (derived rules off):}
+
+\table{
+\tr{\th{}\th{init}\th{std}\th{cedar}\th{reach}\th{con-leche}\th{NSE}\th{cslib}\th{mathlib}}
+\tr{\td{\code{\verb~|casesOn~}}\td{21.5\%}\td{20.3\%}\td{21.5\%}\td{35.2\%}\td{32.6\%}\td{5.8\%}\td{11.5\%}\td{8.7\%}}
+\tr{\td{matchers}\td{14.8\%}\td{13.8\%}\td{14.2\%}\td{32.3\%}\td{18.8\%}\td{4.4\%}\td{8.1\%}\td{6.4\%}}
+\tr{\td{structure projection functions}\td{21.1\%}\td{21.7\%}\td{19.8\%}\td{1.3\%}\td{11.2\%}\td{49.0\%}\td{36.9\%}\td{42.8\%}}
+\tr{\td{\code{\verb~|brecOn~} / \code{\verb~|below~}}\td{6.2\%}\td{6.2\%}\td{6.4\%}\td{1.7\%}\td{5.8\%}\td{2.5\%}\td{4.1\%}\td{2.8\%}}
+\tr{\td{compiler auxiliaries (\code{\verb~|_f~}, \code{\verb~|.go~}, \code{\verb~|_unary~})}\td{8.9\%}\td{8.0\%}\td{8.8\%}\td{13.6\%}\td{14.0\%}\td{2.6\%}\td{4.9\%}\td{3.8\%}}
+\tr{\td{instances}\td{1.6\%}\td{2.6\%}\td{1.9\%}\td{6.1\%}\td{1.1\%}\td{5.3\%}\td{4.4\%}\td{4.6\%}}
+\tr{\td{other definitions}\td{25.6\%}\td{27.2\%}\td{26.5\%}\td{9.9\%}\td{16.2\%}\td{30.3\%}\td{29.8\%}\td{30.6\%}}
+\tr{\td{declared in Init}\td{100\%}\td{95.5\%}\td{93.6\%}\td{98.9\%}\td{93.4\%}\td{40.7\%}\td{61.3\%}\td{47.5\%}}
+\tr{\td{declared in Std / Mathlib}\td{0}\td{4.5\%}\td{3.6\%}\td{1.0\%}\td{0.1\%}\td{55.3\%}\td{38.3\%}\td{52.5\%}}
+\tr{\td{declared in the project}\td{}\td{}\td{2.9\%}\td{0.0\%}\td{6.5\%}\td{4.1\%}\td{0.4\%}\td{}}
+}
+
+\p{\code{\verb~|RULE~}: 94.9-100\% of iota steps are on recursors declared in Init in every corpus (project recursors: cedar 3.5\%, con-leche 3.9\%). \code{\verb~|PROJ~}: Init constructors 98.6\% on cedar, 99.4\% on con-leche; Mathlib constructors 62.5\% on NSE, 65.3\% on mathlib. \code{\verb~|TELE~}: project constants receive 12.6\% on cedar, 24.4\% on con-leche, 7.0\% on NSE. A hot set prepared on Init carries over: share of a corpus's executions received by the K objects hottest on Init (derived rules off):}
+
+\table{
+\tr{\th{hot set from Init}\th{init}\th{std}\th{cedar}\th{reach}\th{con-leche}\th{NSE}\th{cslib}\th{mathlib}}
+\tr{\td{BODY top 300}\td{94.5\%}\td{88.8\%}\td{86.1\%}\td{73.5\%}\td{81.6\%}\td{30.7\%}\td{50.7\%}\td{34.7\%}}
+\tr{\td{BODY top 1000}\td{98.3\%}\td{93.0\%}\td{90.8\%}\td{80.0\%}\td{91.4\%}\td{35.8\%}\td{58.1\%}\td{43.2\%}}
+\tr{\td{RULE top 100}\td{99.6\%}\td{98.3\%}\td{94.3\%}\td{94.1\%}\td{95.7\%}\td{96.3\%}\td{96.9\%}\td{96.9\%}}
+\tr{\td{PROJ top 100}\td{99.2\%}\td{97.3\%}\td{97.5\%}\td{99.4\%}\td{98.8\%}\td{34.2\%}\td{49.9\%}\td{34.2\%}}
+}
+
+\p{Hottest names (count; the top 30 of every series and corpus are in \code{\verb~|work/workloads/tables/heat-<corpus>.md~}):}
+
+\ul{
+\li{\strong{cedar BODY} \code{\verb~|List.casesOn~} 329k, \code{\verb~|Int.casesOn~} 130k, \code{\verb~|HAdd.hAdd~} 129k, \code{\verb~|Add.add~} 129k, \code{\verb~|Nat.casesOn~} 106k, \code{\verb~|List.brecOn~} 103k, \code{\verb~|Bool.casesOn~} 101k, \code{\verb~|List.brecOn.go~} 92k, \code{\verb~|List.zipWithAll.match_1~} 89k, \code{\verb~|List.zipWithAll._f~} 89k, \code{\verb~|Option.casesOn~} 84k, \code{\verb~|instDecidableEqList.match_1~} 78k, \code{\verb~|List.map._f~} 73k, \code{\verb~|Decidable.decide~} 67k, \code{\verb~|dite~} 57k. First Cedar name: \code{\verb~|Cedar.SymCC.Term.casesOn~}, rank 189, 2.5k. \strong{RULE} \code{\verb~|List.rec~} cons 466k, \code{\verb~|Nat.rec~} succ 107k, \code{\verb~|Int.rec~} ofNat 100k, \code{\verb~|List.rec~} nil 91k, \code{\verb~|Bool.rec~} false 84k; first project recursor \code{\verb~|Cedar.Spec.Value.rec~} 2.1k (rank 28). \strong{PROJ} \code{\verb~|PProd.mk.0~} 299k, \code{\verb~|HAdd.mk.0~} 120k, \code{\verb~|Add.mk.0~} 118k, \code{\verb~|Decidable.intro.0~} 63k. \strong{TELE} \code{\verb~|Eq~} 904k, \code{\verb~|HAdd.hAdd~} 185k, \code{\verb~|Eq.trans~} 183k, \code{\verb~|congrArg~} 170k, \code{\verb~|List.cons~} 164k, \code{\verb~|And~} 140k (98-99\% in check mode).}
+\li{\strong{reachability BODY} \code{\verb~|Bool.casesOn~} 476k, \code{\verb~|List.casesOn~} 463k, \code{\verb~|List.getLast?.match_1~} 446k, \code{\verb~|List.filter.match_1~} 384k, \code{\verb~|List.elem._f~} 384k, \code{\verb~|Decidable.casesOn~} 260k, then \code{\verb~|Nat.decEq~}, \code{\verb~|decEq~}, \code{\verb~|instDecidableEqFin~} at 68k each. \strong{RULE} \code{\verb~|List.rec~} cons 929k, \code{\verb~|Bool.rec~} false 474k, \code{\verb~|Decidable.rec~} 160k + 100k. \strong{PROJ} \code{\verb~|PProd.mk.0~} 455k (91.6\%).}
+\li{\strong{con-leche BODY} \code{\verb~|List.casesOn~} 556k, \code{\verb~|PSum.casesOn~} 314k, \code{\verb~|Bool.casesOn~} 153k. \strong{RULE} \code{\verb~|List.rec~} cons 895k, \code{\verb~|PSum.rec~} inr 303k. \strong{TELE} \code{\verb~|PSum.inr~} 824k, \code{\verb~|Eq~} 740k, \code{\verb~|And~} 268k.}
+\li{\strong{NSE / mathlib BODY} \code{\verb~|DFunLike.coe~} 139k / 685k, \code{\verb~|HAdd.hAdd~} 85k, \code{\verb~|CategoryTheory.Functor.obj~} - / 488k. \strong{RULE} (mathlib) \code{\verb~|List.rec~} cons 582k, \code{\verb~|Bool.rec~} true 499k, \code{\verb~|Nat.rec~} succ 387k. \strong{PROJ} \code{\verb~|DFunLike.mk.0~} 133k / 647k, \code{\verb~|PProd.mk.0~} 87k / 723k. \strong{TELE} NSE \code{\verb~|HMul.hMul~} 873k, \code{\verb~|Eq~} 692k; mathlib \code{\verb~|Eq~} 3.12M, \code{\verb~|DFunLike.coe~} 917k, \code{\verb~|congrArg~} 908k.}
+}
+
+\p{Derived rules (nano-lean derives a constructor decision tree for a definition unfolded 32 times; RLVM's K2):}
+
+\table{
+\tr{\th{corpus}\th{rules derived}\th{firings}\th{delta on / off}\th{iota on / off}\th{eval misses on / off}\th{instructions off / on}}
+\tr{\td{init}\td{282}\td{364k}\td{1.48M / 2.27M}\td{491k / 675k}\td{20.6M / 23.8M}\td{1.06}}
+\tr{\td{cedar}\td{553}\td{693k}\td{2.77M / 4.15M}\td{857k / 1.24M}\td{50.3M / 55.7M}\td{1.04}}
+\tr{\td{reachability}\td{142}\td{886k}\td{143k / 3.42M}\td{1.05M / 1.69M}\td{6.47M / 22.0M}\td{1.89}}
+\tr{\td{con-leche}\td{380}\td{557k}\td{2.79M / 4.10M}\td{1.45M / 1.82M}\td{46.4M / 52.6M}\td{1.05}}
+\tr{\td{navier-stokes-euler}\td{668}\td{577k}\td{3.82M / 4.47M}\td{278k / 393k}\td{91.4M / 93.4M}\td{1.00}}
+\tr{\td{cslib}\td{878}\td{836k}\td{7.23M / 8.81M}\td{1.31M / 1.79M}\td{133M / 139M}\td{1.02}}
+\tr{\td{mathlib}\td{2,240}\td{2.60M}\td{19.8M / 24.6M}\td{3.22M / 4.52M}\td{375M / 393M}\td{1.02}}
+}
+}
+
+\subtree{
+\title{3.5 Calls, hit rates, declarations without reduction}
+
+\p{Whole cedar (other corpora: \code{\verb~|tables/dyn-summary.md~} D3): 42.0 M infer calls (13.7 M misses), 94.6 M eval calls (50.3 M misses), 36.2 M \code{\verb~|def_eq~} calls (5.66 M not answered at once), 2.85 M \code{\verb~|whnf~} calls (1.09 M misses), 2.77 M delta, 693 k rule firings, 857 k iota, 1.06 M projections, 117 k Nat operations; 34.8 M values made for 7.5 M inferred applications (4.6 each, all phases included). Hit rates (cedar; the other library corpora are within 5 points): infer memo 67\%, eval memo 47\%, \code{\verb~|def_eq~} answered by pointer identity or the equality cache 84\% (rpylean: 85.5\% identity + 5.4\% union-find; gruszka counts only non-identical pairs and hits its cache on 37\%), whnf memo 62\%, unfold memo 14\%, Pi-instantiation memo 60\%.}
+
+\p{Declarations by number of reduction steps (delta + firings + iota + projection + Nat ops + quotient; share of checked declarations / share of their instructions):}
+
+\table{
+\tr{\th{corpus}\th{0 steps}\th{<= 10}\th{<= 100}\th{>= 10,000 steps}}
+\tr{\td{init}\td{55.8\% / 9.2\%}\td{78.9\% / 18.6\%}\td{94.3\% / 37.0\%}\td{24 decls / 10.5\%}}
+\tr{\td{cedar}\td{57.5\% / 9.0\%}\td{81.3\% / 18.2\%}\td{95.8\% / 37.4\%}\td{32 / 5.9\%}}
+\tr{\td{reachability}\td{64.0\% / 1.5\%}\td{84.9\% / 2.7\%}\td{97.8\% / 4.7\%}\td{6 / 93.4\%}}
+\tr{\td{con-leche}\td{47.6\% / 4.9\%}\td{68.3\% / 10.4\%}\td{86.9\% / 27.0\%}\td{44 / 18.5\%}}
+\tr{\td{navier-stokes-euler}\td{42.0\% / 3.6\%}\td{64.3\% / 10.1\%}\td{89.1\% / 33.1\%}\td{11 / 7.7\%}}
+\tr{\td{mathlib}\td{44.9\% / 6.5\%}\td{69.2\% / 15.2\%}\td{91.6\% / 38.0\%}\td{100 / 3.1\%}}
+}
+}
+
+\subtree{
+\title{3.6 Evaluation-style work}
+
+\table{
+\tr{\th{corpus}\th{Nat literal ops}\th{<= 31 bits}\th{>= 2^63}\th{max bits}\th{by operation}\th{iota on a Nat literal}\th{String literal -> constructors (chars; longest)}\th{K-rule}\th{structure eta in iota}\th{Quot}}
+\tr{\td{init}\td{54.0k}\td{96.8\%}\td{720}\td{65}\td{gcd 30\%, beq 18\%, ble 15\%, succ 12\%}\td{17.5k}\td{10 (0; 0)}\td{242}\td{1.4k}\td{216}}
+\tr{\td{cedar}\td{117k}\td{97.1\%}\td{1.7k}\td{129}\td{beq 28\%, gcd 19\%, ble 12\%, succ 9\%}\td{37.6k}\td{2,380 (13.5k; 17)}\td{2.3k}\td{9.0k}\td{4.8k}}
+\tr{\td{reachability}\td{74.3k}\td{99.8\%}\td{0}\td{39}\td{beq 92\%, add 3\%}\td{1.8k}\td{0}\td{898}\td{15}\td{3.6k}}
+\tr{\td{con-leche}\td{79.2k}\td{94.4\%}\td{1.2k}\td{66}\td{gcd 47\%, beq 23\%, land 6\%, shr 6\%}\td{25.1k}\td{4,320 (18.5k; 15)}\td{1.2k}\td{9.4k}\td{129}}
+\tr{\td{navier-stokes-euler}\td{58.2k}\td{99.7\%}\td{12}\td{2,231}\td{add 29\%, mul 19\%, sub 14\%, beq 13\%}\td{33.0k}\td{0}\td{7.2k}\td{1.5k}\td{5.0k}}
+\tr{\td{cslib}\td{166k}\td{98.9\%}\td{612}\td{65}\td{beq 31\%, gcd 13\%, ble 13\%, add 12\%}\td{77.6k}\td{41 (209; 17)}\td{5.8k}\td{10.9k}\td{16.7k}}
+\tr{\td{mathlib}\td{481k}\td{98.7\%}\td{3.0k}\td{3,603}\td{beq 34\%, add 19\%, ble 16\%, mul 7\%}\td{278k}\td{96 (698; 19)}\td{26.1k}\td{24.7k}\td{37.6k}}
+}
+
+\p{Chains and depth. A non-memoised \code{\verb~|whnf~} call takes one iteration (a \code{\verb~|whnf_core~} and at most one delta or Nat step) in 46\% of the cases on cedar, 2-7 in 51\%, 8-63 in 3.3\%, 64 or more in 205 calls; the longest chain is 194 on cedar, 325 on con-leche, 307 on reachability (1,498 with derived rules off), 630 on mathlib (3,149 off). The deepest native recursion of nano-lean in any corpus declaration is 952 KiB of stack (mathlib, \code{\verb~|Real.sin_pos_of_pos_of_le_one._proof_1_3~}; 937 KiB on reachability): no corpus declaration needs 1 MiB, the \code{\verb~|perf/~} tests need 184 MiB (section 4). Closed terms: 56\% of cedar's delta steps and 68\% of its \code{\verb~|whnf_core~} steps have no free variable in the subject (reachability 84\% / 99\%, NSE 29\% / 34\%, mathlib 22\% / 35\%).}
+
+\p{Closed-term engines of the leaders. gruszka's ground machine (call-by-need, entered when a declaration's arena passes 2^26 values) ran \strong{0 times on all eight corpora} (its own counter \code{\verb~|gr~}, knobs build). rpylean's CEK machine has no counter. Its \code{\verb~|--stats~} reports 25 k delta unfoldings on reachability against 1.69 M iota and 31 M beta steps (nano-lean: 3.42 M delta with rules off, gruszka 2.29 M), consistent with the six \code{\verb~|Bench.Arena.*._proof_1~} theorems (\code{\verb~|Decidable.decide p = true~}) running inside the machine or in untraced fast paths \verb~|[~inferred; src: \code{\verb~|eval_closed_scalar~} is called only when a closed term meets a \code{\verb~|Bool~}/\code{\verb~|Nat~} scalar\verb~|]~.}
+}
+
+\subtree{
+\title{3.7 Cross-checks with rpylean and gruszka}
+
+\table{
+\tr{\th{corpus}\th{rpylean def_eq calls}\th{identity}\th{beta}\th{delta (constants)}\th{iota (recursors)}\th{Nat ops}\th{gruszka ticks}\th{whnf misses}\th{unfolds}\th{def_eq calls}\th{infer misses}}
+\tr{\td{cedar}\td{34.2M}\td{85.5\%}\td{65.9M}\td{1.55M (18,896)}\td{2.43M (1,687)}\td{345k}\td{67.7M}\td{723k}\td{2.17M}\td{7.57M}\td{11.4M}}
+\tr{\td{reachability}\td{577k}\td{87.3\%}\td{31.2M}\td{25k (1,037)}\td{1.69M (25)}\td{75k}\td{13.5M}\td{905k}\td{2.29M}\td{119k}\td{221k}}
+\tr{\td{con-leche}\td{35.2M}\td{87.4\%}\td{74.7M}\td{894k (6,946)}\td{3.03M (92)}\td{269k}\td{58.1M}\td{751k}\td{2.16M}\td{5.52M}\td{8.95M}}
+\tr{\td{navier-stokes-euler}\td{89.1M}\td{80.8\%}\td{151M}\td{8.22M (20,091)}\td{884k (67)}\td{224k}\td{132M}\td{1.36M}\td{3.58M}\td{17.1M}\td{18.5M}}
+\tr{\td{mathlib}\td{239M}\td{85.5\%}\td{350M}\td{17.8M (81,339)}\td{7.35M (4,722)}\td{1.03M}\td{464M}\td{7.21M}\td{18.2M}\td{54.7M}\td{73.0M}}
+}
+
+\p{Three independent implementations agree: a library corpus needs one delta step per 200-600 bytes of export and 5-20 times as many inference and conversion events (cedar delta: rpylean 1.55 M, gruszka 2.17 M, nano-lean 2.77 M + 0.69 M firings). rpylean's iota is concentrated like nano-lean's (cedar: \code{\verb~|List.rec~} 946k, \code{\verb~|Int.rec~} 517k, \code{\verb~|Bool.rec~} 249k, \code{\verb~|Option.rec~} 216k, \code{\verb~|Nat.rec~} 181k; top 10 recursors = 91.7\%); its hottest delta entry is a type-level wrapper (\code{\verb~|outParam~}, 59.5k on cedar, 630k on mathlib): telescopes run trivial bodies too.}
+}
+}
+
+\subtree{
+\title{4. The arena's \code{\verb~|perf/~} evaluation tests}
+
+\p{Ranking by cost (teammate's baseline suite; instructions in G; \code{\verb~|!~} = timeout):}
+
+\table{
+\tr{\th{test}\th{nano-lean}\th{gruszka}\th{sokonanoda}\th{rpylean}\th{official}}
+\tr{\td{unfold-before-literal-fallback}\td{14.65}\td{19.92}\td{14.32}\td{!}\td{82.1}}
+\tr{\td{proj-applied-struct-arg-bad (reject)}\td{14.66}\td{5.79}\td{4.78}\td{13.32}\td{26.7}}
+\tr{\td{magma-list-pair-n21}\td{12.60}\td{17.19}\td{28.46}\td{6.28}\td{103.8}}
+\tr{\td{gf3-matrix-product}\td{6.59}\td{16.92}\td{24.01}\td{19.48}\td{13.9}}
+\tr{\td{proj-applied-struct-bad / unfold-before-literal-bad (reject)}\td{4.89 / 4.88}\td{5.79}\td{4.77 / 4.80}\td{4.15 / 4.14}\td{27.8 / 27.6}}
+\tr{\td{magma-list-deep-n36}\td{2.33}\td{50.95}\td{22.26}\td{1.37}\td{200.1}}
+\tr{\td{ite-taken-branch-bad (reject)}\td{1.50}\td{3.41}\td{6.00}\td{173.5}\td{38.5}}
+}
+
+\p{Dynamic numbers of the five most expensive plus the two with the largest spread (instrumented nano-lean):}
+
+\table{
+\tr{\th{test}\th{instr}\th{heavy decls}\th{delta / firings}\th{iota (on Nat literal)}\th{proj}\th{Nat ops (size)}\th{longest whnf chain}\th{stack}\th{rules off / on}\th{reduction phase}\th{interning / walking (self)}}
+\tr{\td{unfold-before-literal-fallback}\td{15.4G}\td{3 x 5.1G}\td{301 / 3.15M}\td{3.15M (3.15M)}\td{3.15M}\td{1.57M add (<= 22 bits)}\td{6}\td{184 MiB}\td{0.88}\td{99.6\%}\td{41\% / 28\%}}
+\tr{\td{proj-applied-struct-arg-bad}\td{16.0G}\td{3 x 5.3G}\td{390 / 3.15M}\td{3.15M (3.15M)}\td{3.15M}\td{1.57M add}\td{8}\td{184 MiB}\td{0.88}\td{99.6\%}\td{33\% / 30\%}}
+\tr{\td{magma-list-pair-n21}\td{13.2G}\td{\code{\verb~|countermodel~} 99.8\%}\td{196k / 1.43M}\td{204k (127)}\td{411k}\td{197k beq (<= 5 bits)}\td{11}\td{69 KiB}\td{1.60}\td{99.6\%}\td{46\% / 26\%}}
+\tr{\td{gf3-matrix-product}\td{5.44G}\td{\code{\verb~|Gf3Bench.big._proof_1_1~} 99.5\%}\td{892 / 4.7k}\td{2.6k (2.4k)}\td{263}\td{52.4k, 97\% > 4096 bits, max 1,219,921}\td{1,571}\td{6 KiB}\td{1.01}\td{99.1\%}\td{bignum 86\% (24\% hashing literals)}}
+\tr{\td{unfold-before-literal-bad}\td{5.35G}\td{1 x 5.3G}\td{106 / 1.05M}\td{1.05M (1.05M)}\td{1.05M}\td{524k add}\td{6}\td{184 MiB}\td{0.88}\td{not profiled}\td{not profiled}}
+\tr{\td{magma-list-deep-n36}\td{2.60G}\td{\code{\verb~|countermodel~} 98.5\%}\td{3.3k / 892k}\td{4.8k}\td{881k}\td{11.8k add, mod}\td{1,296 (5,188 off)}\td{583 KiB}\td{10.25}\td{98.0\%}\td{49\% / 6\% (+17\% templates)}}
+\tr{\td{magma-string-pair-n9}\td{2.83G}\td{\code{\verb~|countermodel~} 57.7\%}\td{99k / 270k}\td{70k}\td{217k}\td{49k add, mod, mul}\td{756}\td{317 KiB}\td{1.63}\td{73.2\%}\td{26\% / 27\%}}
+}
+
+\p{Hot objects: \code{\verb~|unfold-before-literal-*~} and \code{\verb~|proj-applied-struct-*~} run one loop per theorem, 2^19 iterations and 2^19 deep: per iteration two \code{\verb~|Nat.rec~} steps on a literal (nano-lean builds a \code{\verb~|Nat.succ~} cell each time), two rule firings (\code{\verb~|HAdd.hAdd~}, \code{\verb~|Add.add~}), two projections and one native add; derived rules make it slower (0.88). \code{\verb~|magma-list-pair-n21~}: \code{\verb~|Nat.decidableBallLT._f~}, \code{\verb~|Bool.casesOn~}, \code{\verb~|Decidable.decide~}, \code{\verb~|Nat.decEq~}, \code{\verb~|instDecidableEqFin~} at 194-204k each. \code{\verb~|magma-list-deep-n36~}: \code{\verb~|List.get!Internal._f~} 841k (list indexing by structural recursion; with derived rules off 3.44 M unfoldings and 1.70 M \code{\verb~|List.rec~} steps). \code{\verb~|magma-string-pair-n9~}: one 179-character literal expanded once, then \code{\verb~|List.concat._f~} 31k, \code{\verb~|List.get._f~} 16k. These are the only inputs on which code objects exceed 10^6 executions (2 bodies and 2 rules in the first two tests; 12 bodies and 3 rules above 10^5 in \code{\verb~|magma-list-pair-n21~}), and on which the leaders differ by 10-100x; they are decided by algorithmic choices (literal folding order, derived rules, a call-by-need machine without interning: rpylean is best on both magma-list tests) before any code quality matters.}
+}
+
+\subtree{
+\title{5. Conclusions for the machine}
+
+\p{\strong{(i) Heat and promotion thresholds.} Counts per corpus are in section 3.4. Translating executions into the ISA's rent: reduction-phase instructions per reduction step are 16.0 G / 5.4 M = 3.0 k on cedar and 10.3 G / 2.6 M = 4.0 k on reachability \verb~|[~est: phase share x process instructions / (delta + firings + iota + proj); nano-lean's cost, including the evaluation and interning under the step\verb~|]~. A block that owns 3 k instructions per execution reaches RENT = 3.3 G after 1.1 M executions. Nothing in a corpus does; the hottest body of mathlib (\code{\verb~|DFunLike.coe~}, 685 k) has consumed at most about 2 G by the end of the run. A threshold that would let T2 see anything on cedar has to sit at 10^4-10^5 executions (62 / 7 bodies, 11 / 3 rules), where the remaining work is 51\% / 8\% of unfoldings, i.e. at most 25\% x 0.51 = 13\% (10^4) or 2\% (10^5) of cedar's instructions \verb~|[~est: reduction share x share after crossing\verb~|]~, of which compiled code removes only the walking part (11.6 / 25.0). An upper bound for T2 on cedar is therefore about 6\% at a 10^4 threshold, before compilation cost (0.4-0.5 G per root x 73 roots = 29-37 G, half of cedar's total) \verb~|[~est\verb~|]~. \strong{T2 cannot pay on library corpora under any threshold.} ISA §8.5 expects the hottest telescopes and projection bodies of mathlib to run 10^6-10^7 times; measured with one worker: \code{\verb~|Eq~} 3.1 M, the next telescope 0.92 M, the hottest projection body 0.69 M, the hottest rule 0.58 M - and a quarter of that per worker with four workers.}
+
+\p{\strong{(ii) Which tier for which workload.}}
+
+\table{
+\tr{\th{workload}\th{where}\th{K0 generic walk}\th{K1 elaborated code}\th{K2 derived rules}\th{T2 compiled}}
+\tr{\td{large inference/conversion proofs}\td{all library corpora; 57-81\% of declarations do <= 10 reductions}\td{carries 60-75\% of instructions (inference + conversion phases)}\td{\code{\verb~|TELE~} of the top 100-1000 constants (62-85\% of 7.5 M executions on cedar); \code{\verb~|BODY~} of the Init hot set}\td{1.00-1.06x}\td{nothing to compile}}
+\tr{\td{reduction-heavy proofs inside large terms (\code{\verb~|omega~}/\code{\verb~|grind~} certificates, con-leche \code{\verb~|keyOf_*~}, mathlib \code{\verb~|decide~})}\td{3-20 of a corpus's top 50; 5-18\% of instructions}\td{}\td{\code{\verb~|BODY~}/\code{\verb~|RULE~} of 100-300 Init objects}\td{1.1-1.5x per declaration, 2.5x at most (measured \code{\verb~|nod x~})}\td{no: 10^4-10^5 steps per declaration}}
+\tr{\td{closed evaluation (reachability's 5 proofs, \code{\verb~|magma-*~}, \code{\verb~|unfold-before-literal*~}, \code{\verb~|proj-applied-struct*~}, \code{\verb~|ite-taken-branch-bad~})}\td{1 corpus + about 15 \code{\verb~|perf/~} tests}\td{}\td{all of the work}\td{1.6-10x (0.88x on the literal loops)}\td{the only candidate: 2-17 blocks at >= 10^5-10^6 executions; bounded by interning (33-49\% of instructions)}}
+\tr{\td{big-number arithmetic (\code{\verb~|gf3-matrix-product~})}\td{1 test}\td{}\td{}\td{}\td{no: 86\% in the bignum library, 24\% hashing literals}}
+}
+
+\p{For the first row the levers are the ones the leaders already use and RLVM's design already has: memo hit rates (infer 67\%, eval 47\%, def_eq 84\%), not evaluating unread arguments, cheap interning. One third of all instructions is term walking in every corpus, which is the argument for elaborating \strong{telescopes} (12.9\% of cedar's instructions are evaluation under inference) at least as much as bodies.}
+
+\p{\strong{(iii) Specialisations, with the measured frequency of each pattern.}}
+
+\table{
+\tr{\th{specialisation}\th{pattern frequency}\th{verdict}}
+\tr{\td{instance-projection shortcut (a structure projection function applied to a constructor: \code{\verb~|HAdd.hAdd α α α inst a b~} -> field)}\td{structure projection functions are 19.8\% of unfoldings on cedar, 49.0\% on NSE, 42.8\% on mathlib; projections of constructors 1.06 M on cedar, 9.6 M on mathlib; \code{\verb~|HAdd.mk.0~} + \code{\verb~|Add.mk.0~} = 22\% of cedar's}\td{do it in K1 (the ISA's \code{\verb~|PROJARG~} LEAF shape): the most frequent reduction pattern of every Mathlib-based corpus}}
+\tr{\td{\code{\verb~|casesOn~} / matcher decision trees (case of known constructor without building motive and minors)}\td{\code{\verb~|casesOn~} + matchers = 35.7\% of unfoldings on cedar, 67.5\% on reachability, 51.4\% on con-leche, 15\% on mathlib; each is followed by an iota step (1.24 M on cedar)}\td{do it (K2 \code{\verb~|RULES~}): this is what nano-lean's rules buy, 1.9x on reachability}}
+\tr{\td{derived rules for structural recursion (\code{\verb~|brecOn~}/\code{\verb~|below~}, \code{\verb~|PProd~} tables, \code{\verb~|_f~} auxiliaries)}\td{\code{\verb~|brecOn~}/\code{\verb~|below~} 6.4\% + auxiliaries 8.8\% of cedar's unfoldings; \code{\verb~|PProd.mk.0~} = 28.2\% of cedar's projections, 91.6\% of reachability's}\td{do it together with the previous line; removes most \code{\verb~|PProd~} traffic}}
+\tr{\td{packed mutual/well-founded arguments (\code{\verb~|PSum~}, \code{\verb~|PSigma~}, \code{\verb~|WellFounded.fix~})}\td{con-leche: \code{\verb~|PSum.casesOn~} 314 k unfoldings, \code{\verb~|PSum.rec~} 303 k iota, \code{\verb~|PSum.inr~} 824 k telescope executions (one declaration is 10\% of the corpus); \code{\verb~|WellFounded.fix~}/\code{\verb~|Acc.rec~}: 451 static spines on cedar}\td{cover \code{\verb~|PSum~}/\code{\verb~|PSigma~} \code{\verb~|casesOn~} by the decision-tree rule; nothing special for \code{\verb~|WellFounded.fix~}}}
+\tr{\td{Nat small-integer fast path (owner note 7)}\td{94.4-99.8\% of Nat literal operations have operands <= 31 bits, but a corpus executes only 54 k-481 k of them (cedar: 117 k in 64 G instructions) and 17 k-278 k iota steps on literals; \code{\verb~|perf/~}: 1.57 M adds + 3.15 M literal iota in one test, 197 k \code{\verb~|beq~} in another}\td{cheap and right, but invisible on corpora; it is a \code{\verb~|perf/~} feature (literal \code{\verb~|Nat.rec~} without a \code{\verb~|Nat.succ~} cell is the measurable part). Big operands (>= 2^63: 0-3.0 k operations per corpus; 50.8 k on 1.2 Mbit numbers = 86\% of \code{\verb~|gf3-matrix-product~}) need only a good bignum library and cheap hashing of big literals}}
+\tr{\td{packed \code{\verb~|String~} / \code{\verb~|Char~}}\td{string literal expansions: 0-4,320 per corpus, at most 19 characters, 13-18 k characters in total on cedar and con-leche; \code{\verb~|magma-string-pair-n9~}: one 179-character literal}\td{not justified}}
+\tr{\td{packed \code{\verb~|List~} / \code{\verb~|Array~} / \code{\verb~|BitVec~} storage strategies (owner note 8)}\td{\code{\verb~|List.rec~} is the hottest rule everywhere (cedar 45\% of iota, reachability 56\%) but the lists are produced by evaluation (\code{\verb~|List.map._f~}, \code{\verb~|List.filter~}), not literals; \code{\verb~|Array.rec~} 2.4 k, \code{\verb~|ByteArray.rec~} 3.6 k, \code{\verb~|BitVec.ofFin.0~} 6.8 k on cedar}\td{not justified by any corpus; keep the tag space, build nothing}}
+\tr{\td{not interning transient values}\td{construction + interning + hash tables = 25\% of instructions on cedar, 42\% on reachability; construction alone 33-49\% on the evaluation tests; rpylean's CEK machine (no interning) is 2x faster than nano-lean on \code{\verb~|magma-list-pair-n21~} and 1.7x on \code{\verb~|magma-list-deep-n36~}}\td{the largest lever on evaluation workloads, and the one a compiled tier needs (escape analysis cannot remove a hash-cons probe); design question for ISA §10}}
+}
+}
+
+\subtree{
+\title{6. Fast benchmarks for iterating on the machine}
+
+\p{\src{bench/workloads/slice-export.py} cuts an export down to the dependency cone of named declarations and renumbers the ids; with \code{\verb~|--axiomatize~}, library theorems are kept as axioms (statement only), so that only the named declarations and the definitions they need are checked. All three slices below are accepted by the official \code{\verb~|leanchecker --from-export~} (4.36.0) and by nano-lean.}
+
+\table{
+\tr{\th{benchmark}\th{file}\th{size}\th{decls}\th{nano-lean \code{\verb~|di~}}\th{phases (inference / conversion / reduction / import)}\th{use}}
+\tr{\td{Cedar's 172 most expensive own declarations (50\% of Cedar's own cost), statements-only library}\td{\code{\verb~|work/workloads/slices/cedar-hot-ax.ndjson~}}\td{133 MB}\td{9,747}\td{13.6 G, 3.4 s}\td{43.7 / 32.3 / 11.9 / 6.7\%}\td{\strong{the Cedar-level benchmark}: 91.6\% of its checking instructions are in the 172 proofs; official checker 20 s}}
+\tr{\td{the same with the full cone (library proofs checked)}\td{\code{\verb~|slices/cedar-hot.ndjson~}}\td{294 MB}\td{24,176}\td{25.0 G, 7.4 s}\td{44.1 / 26.9 / 17.9 / 7.6\%}\td{arena-faithful variant (no added axioms); 50\% in the 172 proofs}}
+\tr{\td{every 16th of Cedar's own declarations by cost rank, full cone}\td{\code{\verb~|slices/cedar-s16.ndjson~}}\td{337 MB}\td{30,301}\td{26.6 G, 8.5 s}\td{43.3 / 25.4 / 20.0 / 8.2\%}\td{unbiased sample of Cedar proofs (1,403 targets = 1.5 G), dominated by its library cone}}
+\tr{\td{evaluation}\td{\code{\verb~|work/exports/reachability.ndjson~}}\td{19 MB}\td{4,846}\td{11.1 G, 3.4 s}\td{4.1 / 1.2 / 93.0 / 1.2\%}\td{\code{\verb~|casesOn~}/matcher/\code{\verb~|brecOn~} on \code{\verb~|List~}, \code{\verb~|Bool~}, \code{\verb~|Decidable~}; 68 k Nat \code{\verb~|beq~}; derived rules worth 1.9x}}
+\tr{\td{depth and literals}\td{\code{\verb~|work/arena-site/tests/bad/perf/unfold-before-literal-bad.ndjson~}}\td{65 kB}\td{59}\td{5.3 G, 1.4 s}\td{reduction 99.6\% (measured on the \code{\verb~|-fallback~} variant)}\td{one \code{\verb~|Nat.rec~} loop on a literal, 2^19 deep, 524 k native adds; expected verdict: reject}}
+}
+
+\p{Cedar's own declarations as a whole are 47 / 30 / 17\% inference / conversion / reduction (section 3.2); \code{\verb~|cedar-hot-ax~} is 47 / 35 / 13\% of its checking instructions, in 3.4 s instead of 30 s and 133 MB instead of 905 MB; the full-cone slice has cedar's heat shape (\code{\verb~|BODY~}, rules on: top 100 = 72\%, cedar 70\%). Not recommended: \code{\verb~|init.ndjson~} (38\% reduction, more than Cedar's own declarations), con-leche (one declaration is 10\% of it), cslib (94.6\% of it is Mathlib).}
+}
+
+\subtree{
+\title{7. What this changes in the design documents}
+
+\ul{
+\li{ISA §8.5 (promotion): the expectation for mathlib does not hold (section 5 (i)). Either T2 is scoped to closed evaluation, entered by a per-declaration signal such as "10^4 reduction steps in this declaration" (reached by 0.01-0.14\% of declarations: 2-18\% of a library corpus's instructions, 93\% of reachability's), or it is dropped from v1 without loss on any library corpus.}
+\li{ISA §3.6 (K2 trigger at 32 executions): workable as it is (nano-lean derives 553 rules on cedar, 2,240 on mathlib with it); rules are not free: the \code{\verb~|unfold-before-literal~} family is 12\% slower with them.}
+\li{ISA §3.1 ("about 80\% of all nodes are executed once"): 93-95\% of nodes are private to one declaration, and infer misses per node are about 1 (cedar: 13.7 M misses for 14.7 M nodes).}
+\li{A prepared hot set: because 82-91\% of cedar's and con-leche's \code{\verb~|BODY~} executions fall on the 300-1000 bodies hottest on Init and 94-96\% of their \code{\verb~|RULE~} executions on Init's 100 hottest rules, elaboration (and K2 derivation) of those objects can be done eagerly when their declarations are admitted, without heat counters, for every corpus that contains Init - which is all of them. Mathlib-based corpora need the same for Mathlib's structure projections, which a generic rule for structure projection functions covers.}
+}
+}
+
+\subtree{
+\title{8. Reproduction and raw data}
+
+\p{Scripts (\code{\verb~|bench/workloads/~}): \code{\verb~|static-shape.rs~} + \code{\verb~|static-report.py~} (section 2); \code{\verb~|build-nano-lean-instrumented.sh~}, \code{\verb~|nl-run.sh VARIANT NAME~} (\code{\verb~|di~} | \code{\verb~|stats~} | \code{\verb~|nod~}), \code{\verb~|nl-perf-tests.sh~}, \code{\verb~|nl-perf-record.sh~} + \code{\verb~|perf-phases.py~} (phases), \code{\verb~|dyn-report.py~} (sections 3-4), \code{\verb~|origin-split.py~} (3.2), \code{\verb~|portable-hot-set.py~} (3.4), \code{\verb~|rpylean-stats.sh~}, \code{\verb~|build-gruszka-knobs.sh~}, \code{\verb~|gruszka-stats.sh~}, \code{\verb~|cross-report.py~} (3.7), \code{\verb~|slice-export.py~} (section 6). All third-party code ran in \src{bench/arena-docker.sh} containers pinned to CPUs 0-4 and 10-12 (one PMU, outside \code{\verb~|--arena-limits~}). Raw data (\code{\verb~|work/workloads/~}):}
+
+\table{
+\tr{\th{path}\th{content}}
+\tr{\td{\code{\verb~|static/<corpus>/{heat.txt,consts.tsv,segs.tsv,summary.txt}~}}\td{HEAT lines in the spike's format; per-constant kind, flags, static heat; per-declaration nodes and private nodes}}
+\tr{\td{\code{\verb~|dyn/nl/<corpus>.di.tsv~}; \code{\verb~|.stats.tsv~}, \code{\verb~|.nod.tsv~}}\td{per declaration: instructions and ns (uninstrumented checking code); 58 counters and the hottest unfolded constants and recursors (derived rules on / off)}}
+\tr{\td{\code{\verb~|dyn/nl/<corpus>.dump.tsv~}, \code{\verb~|.nod.dump.tsv~}}\td{per constant: \code{\verb~|C~} delta (whnf, lazy, closed), firings, telescope executions; \code{\verb~|I~} iota per rule; \code{\verb~|PW~}/\code{\verb~|PE~} projections; \code{\verb~|N~} Nat ops by size; \code{\verb~|S~} string expansions; \code{\verb~|W~} whnf chain histogram}}
+\tr{\td{\code{\verb~|dyn/nl-perf/~}, \code{\verb~|dyn/nl-slices/~}}\td{the same for 17 \code{\verb~|perf/~} tests and the three slices}}
+\tr{\td{\code{\verb~|dyn/rpylean/<corpus>.{stats.txt,decls.jsonl}~}, \code{\verb~|dyn/gruszka/<corpus>.di.tsv~}}\td{the leaders' own statistics}}
+\tr{\td{\code{\verb~|perf/<name>.phases.txt~}, \code{\verb~|.folded.gz~}}\td{phase and self-instruction split, collapsed stacks (\code{\verb~|project-*~} = own declarations only, \code{\verb~|perf-*~} = perf tests, \code{\verb~|slice-*~} = slices)}}
+\tr{\td{\code{\verb~|tables/~}, \code{\verb~|slices/~}}\td{\code{\verb~|static.md~}, \code{\verb~|dyn-summary.md~}, \code{\verb~|origin.md~}, \code{\verb~|portable.md~}, \code{\verb~|cross.md~}, \code{\verb~|top50-<corpus>.md~}, \code{\verb~|heat-<corpus>.md~}, \code{\verb~|perf/~}, \code{\verb~|slices/~}; name lists and the sliced exports of section 6}}
+\tr{\td{\code{\verb~|build/nano-lean-instrumented/~} (+ \code{\verb~|.patch~}), \code{\verb~|build/gruszka-knobs/~}}\td{the instrumented copy and its diff against v0.4.2 (\code{\verb~|src/wl.rs~} and the \code{\verb~|wl!~} call sites, 10 files), and the unmodified gruszka tree built with \code{\verb~|--features knobs~}}}
+}
+}
+
+\subtree{
+\title{9. Not measured, and limits}
+
+\ul{
+\li{The official kernel's own unfold counts (it cannot be instrumented); sokonanoda and pestka were not profiled; lengths of list literals (cons chains in the export) were not measured, only \code{\verb~|List.rec~} steps.}
+\li{Instructions were attributed to phases by sampling and to declarations exactly, \strong{not} to individual constants: "cost per execution" figures are phase averages \verb~|[~est\verb~|]~.}
+\li{nano-lean's \code{\verb~|-j 1~} session sees every declaration; with the arena's 4 workers each worker's counts are about a quarter, which makes every threshold of section 3.4 harder to reach, not easier.}
+\li{rpylean's CEK entries are inferred from its counters, not counted; mathlib's top-50 list was inspected by hand only for the first 16 entries; roles are classified by name (\code{\verb~|*.casesOn~}, \code{\verb~|*.match_N~}, \code{\verb~|*.brecOn~}, \code{\verb~|inst*~}, \code{\verb~|_f~}) and by the shape \code{\verb~|fun .. self => self.i~}, so unusual names fall under "other definitions".}
+}
+}
