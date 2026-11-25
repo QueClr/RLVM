@@ -74,6 +74,12 @@ final class SHostile {
     /** The candidate default of staging step 1. */
     static final String STEP1 = "warm,gated,expect";
 
+    /**
+     * The default set of the integration of wave 6 ({@code Op.SW_WAVE6}), by name: what "default" meant until the default
+     * set of 2026-11-25 (+ eager, skipargs, congruence). The tests of a mechanism name it, so that they do not move with the default.
+     */
+    static final String WAVE6 = "warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same";
+
     /** One row of {@code manifest.tsv}. */
     static final class Row {
         final String name;

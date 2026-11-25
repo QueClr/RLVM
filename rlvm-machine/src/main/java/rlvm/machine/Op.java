@@ -574,10 +574,20 @@ public final class Op {
     /** The staging switches that {@code all} names: every named switch of ISA section 11 but {@code k2}; no experiment switch. */
     public static final int SW_ALL = (1 << 11) - 1 & ~SW_K2;
     /**
+     * The default set of the integration of wave 6 (2026-11-24 19:10Z - 2026-11-25): {@code warm,gated,expect} (step 1)
+     * + {@code bodies} + {@code pchk,match,joint} + {@code code,casetrees,lazycases} (step 4) + {@code directrules} +
+     * {@code lazyeval} + {@code same}. Part of {@link #SW_DEFAULT}; the tests that mean "the default set without the
+     * additions of 2026-11-25" name it explicitly.
+     */
+    public static final int SW_WAVE6 = SW_WARM | SW_GATED_TABLING | SW_EXPECT | SW_BODIES | SW_PCHK | SW_MATCH | SW_JOINT
+            | SW_CODE | SW_CASETREES | SW_LAZY_CASES | SW_DIRECT_RULES | SW_LAZY_EVAL | SW_SAME;
+    /**
      * The switches a non-strict engine runs with when neither {@code -X machine.switches} nor the system
      * property {@code rlvm.machine.switches} is given ({@code rlvm-machine/SWITCHES.md} has the gate and the
      * measurement for every member). {@code -X machine.switches=none} is v0 (the generic tier, the complete
-     * procedure). Since 2026-11-24 19:10Z (integration of wave 6):
+     * procedure). Since 2026-11-25 (INT7; OWNER-NOTES 13 and 16; decided by warm wall clock on the eight corpora,
+     * {@code SWITCHES.md} "The default configuration"): {@link #SW_WAVE6} + {@code eager,skipargs,congruence} (the two proof-comparison shortcuts bring {@code facts} / {@code probes}: kind T accepts are tolerated by the practical policy).
+     * The wave-6 set (2026-11-24 19:10Z):
      * {@code warm,gated,expect} (step 1) + {@code bodies} + {@code pchk,match,joint} + {@code code,casetrees,lazycases}
      * (step 4) + {@code directrules} + {@code lazyeval} + {@code same}, with the machine's own session cap
      * ({@code MachineEngine.DEFAULT_SESSION_CAP}). Not in it: {@code facts}, {@code probes}, {@code tele}
@@ -586,8 +596,10 @@ public final class Op {
      * The module's tests run with the system property {@code rlvm.machine.switches=none} (pom.xml), so a test
      * engine is v0 unless the test says otherwise.
      */
-    public static final int SW_DEFAULT = SW_WARM | SW_GATED_TABLING | SW_EXPECT | SW_BODIES | SW_PCHK | SW_MATCH | SW_JOINT
-            | SW_CODE | SW_CASETREES | SW_LAZY_CASES | SW_DIRECT_RULES | SW_LAZY_EVAL | SW_SAME;
+    public static final int SW_DEFAULT = SW_WAVE6
+            | SW_EAGER
+            | SW_SKIPARGS | SW_FACTS
+            | SW_CONGRUENCE | SW_PROBES;
 
     // ---------------------------------------------------------------------------------------------------
     // Debug modes (5.5). Machine.debug holds the set; a failed audit is fault(E_AUDIT).

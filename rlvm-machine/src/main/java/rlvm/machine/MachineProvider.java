@@ -77,6 +77,12 @@ public final class MachineProvider implements EngineProvider {
         return "machine";
     }
 
+    /** What a machine engine does without {@code -X machine.switches}: its default switch set by name ({@code rlvm --version}). */
+    @Override
+    public String defaultsNote() {
+        return "switches " + Debug.switchNames(Op.SW_DEFAULT);
+    }
+
     @Override
     public int priority() {
         // 10 = not the default engine. It was 100 (Engines.DEFAULT_ENGINE_MIN_PRIORITY, the default engine)

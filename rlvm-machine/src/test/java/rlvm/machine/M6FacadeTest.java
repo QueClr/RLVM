@@ -52,6 +52,8 @@ class M6FacadeTest {
         assertTrue(p.runDefaults(new java.util.HashMap<>()).isEmpty(), "the machine caps its sessions itself: no driver setting is needed");
         assertEquals(10, p.priority(), "not the default engine while the wrong accepts E1-F1 .. E1-F4 are open (it was 100 = Engines.DEFAULT_ENGINE_MIN_PRIORITY from 19:41Z to 20:35Z on 2026-11-24)");
         assertTrue(p.optionKeys().contains("machine.debug") && p.optionKeys().contains("machine.switches"));
+        assertEquals("switches " + Debug.switchNames(Op.SW_DEFAULT), p.defaultsNote(), "'rlvm --version' names the default switch set");
+        assertEquals(Op.SW_DEFAULT, Debug.parseSwitches(p.defaultsNote().substring("switches ".length())));
         Fixture f = Fixture.prelude0();
         java.util.Map<String, String> options = new java.util.HashMap<>();
         options.put("machine.debug", "memocheck,poison");
@@ -863,7 +865,7 @@ class M6FacadeTest {
         assertEquals(1, s.eagerWhy[Machine.ER_WHY_PROBE]);
         // the default: above every probe of the eight corpora that completes (the largest: 2,752,617 ticks, one unit of
         // Mathlib; statistic machine.eager.probeMaxTicks), below the probe that never does (28.6 M ticks and E_MEM)
-        assertTrue(MachineEngine.DEFAULT_EAGER_PROBE >= 1L << 23 && MachineEngine.DEFAULT_EAGER_PROBE <= 1L << 24,
+        assertTrue(MachineEngine.DEFAULT_EAGER_PROBE >= 1L << 22 && MachineEngine.DEFAULT_EAGER_PROBE <= 1L << 24,
                 "the budget of a probe: " + MachineEngine.DEFAULT_EAGER_PROBE);
         // no budget: 0
         options.put("machine.eager-probe", "0");
@@ -1095,8 +1097,11 @@ class M6FacadeTest {
         assertEquals(0, Op.SW_EXPERIMENTS & Op.SW_ALL);
         assertEquals(0, Op.SW_DEFAULT & (Op.SW_EXPERIMENTS | Op.SW_K2), "no experiment is a default");
         assertEquals(Debug.parseSwitches("warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same"),
-                Op.SW_DEFAULT, "the default set of the wave-6 integration (SWITCHES.md)");
-        assertEquals(0, Op.SW_DEFAULT & (Op.SW_FACTS | Op.SW_PROBES | Op.SW_TELE | Op.SW_T2 | Op.SW_M2B | Op.SW_LEVELS_COMPLETE | Op.SW_INERT_LOOP),
+                Op.SW_WAVE6, "the default set of the wave-6 integration (SWITCHES.md)");
+        assertEquals(Debug.parseSwitches("warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same,eager,skipargs,congruence"),
+                Op.SW_DEFAULT, "the default set of 2026-11-25 (SWITCHES.md): wave 6 + eager, skipargs, congruence");
+        assertEquals(Op.SW_DEFAULT, Op.implied(Op.SW_DEFAULT), "a shortcut in the default set has the switch it needs");
+        assertEquals(0, Op.SW_DEFAULT & (Op.SW_TELE | Op.SW_T2 | Op.SW_M2B | Op.SW_LEVELS_COMPLETE | Op.SW_INERT_LOOP | Op.SW_CONV_EXPECT),
                 "not in the default set (SWITCHES.md says why)");
         assertEquals("none", System.getProperty("rlvm.machine.switches", "none"), "the module's tests run v0 unless they say otherwise (pom.xml)");
         assertThrows(IllegalArgumentException.class, () -> Debug.parseSwitches("warm,-fast"));

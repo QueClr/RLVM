@@ -19,7 +19,7 @@ import rlvm.api.Outcome;
  */
 class SHostileEagerTest {
 
-    static final String[] SETS = {"eager", SHostile.STEP1 + ",eager", "default,eager"};
+    static final String[] SETS = {"eager", SHostile.STEP1 + ",eager", SHostile.WAVE6 + ",eager"};
 
     /** No verdict that the official checker does not give, with the switch on. */
     @Test
@@ -110,7 +110,7 @@ class SHostileEagerTest {
             }
             Diff.Options o = new Diff.Options();
             o.progress = false;
-            o.config.switches("default,eager");
+            o.config.switches(SHostile.WAVE6 + ",eager");
             o.config.checkMillis = 60_000;
             o.fileMillis = 180_000;
             Diff.FileResult r = Diff.compare(SHostile.export(row), o);

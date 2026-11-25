@@ -42,18 +42,18 @@ brings `probes` - `default,skipargs,-facts` still runs `facts`. A strict engine 
 Related settings (not switches): `-X machine.session-kib=N` (the machine's own cap on a warm session,
 section "Sessions"), `-X machine.unit-ticks=N` (the machine's own tick bound per unit, default 2^27,
 NOTES-M6 F31), `-X machine.hostDepth=N` (host depth bound, default `Op.HOST_DEPTH` = 128),
-`-X machine.eager-probe=N` (with `eager`: the tick budget of one probe of the plain phase, default 2^23, 0 = none;
+`-X machine.eager-probe=N` (with `eager`: the tick budget of one probe of the plain phase, default 2^22, 0 = none;
 finding INT7-F1 below the table of named switches), `-X machine.cong-spend=N` (with `congruence`: the ticks its
 segments may use in one declaration, default 2^18, 0 = no cap; below the table), `-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine), `-X machine.debug=...` (audits,
 README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.machine.keep=R,W,S` and
 `-Drlvm.machine.pool=off` (kept and pooled session arrays, NOTES-M6 F25).
 
-## The default configuration (integration of wave 6, 2026-11-24)
+## The default configuration (integration of wave 6, 2026-11-24; the switch set of 2026-11-25)
 
 | What | Default | Decided by |
 |---|---|---|
 | engine | **the reference engine** (`MachineProvider.priority()` = 10 since 20:35Z; 100 = the default engine from 19:41Z to 20:35Z). `-X engine=machine` runs the machine as primary engine: the reference engine then re-checks every rejection and decides every unit the machine declines | NOT the machine while E1-F1 .. E1-F5 are open (the note at the top); the gates below and step 4 of the integration (eight corpora, DiffEngine) were green |
-| switch set `Op.SW_DEFAULT` | **`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same`** | gates and measurements below, one line per switch in "Named switches" |
+| switch set `Op.SW_DEFAULT` | **`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same`** (`Op.SW_WAVE6`, the set of 2026-11-24) **+ `eager,skipargs,congruence`** (2026-11-25; `skipargs` brings `facts`, `congruence` brings `probes`; with the probe budget `-X machine.eager-probe` = 2^22 and the cap `-X machine.cong-spend` = 2^18): section "The default set of 2026-11-25" | gates and measurements below, one line per switch in "Named switches" |
 | session cap `MachineEngine.DEFAULT_SESSION_CAP` | **1 MiB** (`-X machine.session-kib=1024`) | section "Sessions": 512 KiB and 1 MiB are equal within 2 % everywhere, 2 and 4 MiB cost 3-4 % CPU and wall clock on mathlib |
 | host depth bound `Op.HOST_DEPTH` | **128** | 512 and 2048 measured: no gain (section "Host depth bound") |
 | Truffle tier (`t2`, module `rlvm-truffle`) | **off**; the jar is in every distribution and is used only under the switch | T3's quiet numbers: parity on reachability, +38 % wall at 8 workers on the Cedar slice, +39 % on cedar (section "Truffle tier") |
@@ -64,6 +64,44 @@ README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.ma
 gives the test JVM `rlvm.machine.switches=none`, and a `Fixture` engine has no switch unless the test names
 some. In force in EVERY configuration, v0 included, is the eager-reduction rule (section "Sessions": a
 declaration that enters eager reduction is declined) - a correctness rule, not an optimisation.
+
+### The default set of 2026-11-25 (INT7): wave 6 + `eager` + `skipargs` + `congruence`
+
+Decided by warm wall clock on all eight corpora under the owner's notes 12 (warm wall clock, 8 workers, pipelined),
+13 (the "practical" policy: kind T accepts are tolerated) and 16 (the fastest default), by the orchestrator's rule
+of 2026-11-25 00:17Z: primary = the geometric mean of the eight warm JVM pass times; guard = no corpus more than 3 %
+slower than the set without the switch in question, over at least three interleaved rounds. JVM launcher, 8 workers,
+pipelined reload passes, every row in a `bench/quiet.py` window, the five sets interleaved round by round inside ONE
+window per corpus (rows `work/int7/warm.tsv`, table and the stages `work/status/machine-int7.md`). A cell = the mean
+over the rounds of the median later pass, s [rounds; min..max]; change against `default,eager` (here `default` is the
+set of wave 6). con-leche and reachability with the final settings (probe budget 2^22, cap 2^18).
+
+| corpus | `default` | `default,eager` | `default,eager,skipargs` | `default,eager,congruence` | `default,eager,skipargs,congruence` | eager against default |
+|---|--:|--:|--:|--:|--:|--:|
+| init | 0.573 (+0.0 %) [3; 0.56..0.58] | 0.573 [3; 0.57..0.58] | 0.567 (-1.2 %) [3; 0.55..0.58] | 0.570 (-0.6 %) [3; 0.57..0.57] | 0.567 (-1.2 %) [3; 0.55..0.58] | -0.0 % |
+| std | 1.143 (+12.1 %) [3; 1.12..1.16] | 1.020 [3; 0.99..1.06] | 1.017 (-0.3 %) [3; 1.01..1.02] | 1.010 (-1.0 %) [3; 1.00..1.03] | 1.027 (+0.7 %) [3; 1.01..1.04] | -10.8 % |
+| cedar | 1.507 (+5.4 %) [3; 1.48..1.54] | 1.430 [3; 1.41..1.44] | 1.457 (+1.9 %) [3; 1.43..1.50] | 1.427 (-0.2 %) [3; 1.41..1.44] | 1.433 (+0.2 %) [3; 1.43..1.44] | -5.1 % |
+| reachability | 0.383 (-1.7 %) [6; 0.36..0.41] | 0.390 [6; 0.37..0.42] | 0.388 (-0.4 %) [6; 0.36..0.42] | 0.372 (-4.7 %) [6; 0.36..0.39] | 0.397 (+1.7 %) [6; 0.38..0.41] | +1.7 % |
+| con-leche | 1.230 (-2.1 %) [3; 1.17..1.30] | 1.257 [3; 1.22..1.28] | 1.287 (+2.4 %) [3; 1.18..1.38] | 1.273 (+1.3 %) [3; 1.24..1.30] | 1.240 (-1.3 %) [3; 1.20..1.31] | +2.2 % |
+| cslib | 5.650 (+7.3 %) [2; 5.54..5.76] | 5.265 [2; 4.99..5.54] | 4.875 (-7.4 %) [2; 4.79..4.96] | 4.780 (-9.2 %) [2; 4.72..4.84] | 4.555 (-13.5 %) [2; 4.40..4.71] | -6.8 % |
+| navier-stokes-euler | 6.137 (+0.9 %) [3; 5.89..6.48] | 6.080 [3; 5.98..6.19] | 4.037 (-33.6 %) [3; 3.92..4.18] | 3.793 (-37.6 %) [3; 3.68..4.01] | 3.217 (-47.1 %) [3; 3.14..3.26] | -0.9 % |
+| mathlib | 20.490 (+13.7 %) [1; 20.49..20.49] | 18.020 [1; 18.02..18.02] | 13.390 (-25.7 %) [1; 13.39..13.39] | 12.950 (-28.1 %) [1; 12.95..12.95] | 12.720 (-29.4 %) [1; 12.72..12.72] | -12.1 % |
+| **total** (8 corpora) | **37.11** (+9.0 %) | **34.03** | **27.02** (-20.6 %) | **26.17** (-23.1 %) | **25.16** (-26.1 %) | -8.3 % |
+| **geometric mean** (8 corpora) | **2.065** (+4.3 %) | **1.980** | **1.801** (-9.1 %) | **1.758** (-11.2 %) | **1.720** (-13.2 %) | -4.1 % |
+
+`default,eager,skipargs,congruence` has the lowest geometric mean (1.720 s; `default,eager` 1.980 s; the set of wave 6
+2.065 s) and is at most 1.8 % slower than `default,eager` on any corpus (reachability); `eager` is at most 2.2 %
+slower than the set without it (con-leche, after the repair of INT7-F1 below). The one borderline cell: `skipargs` on
+top of `congruence` on reachability, +3.7 % by the median of an eight-round window (12 ms on a pass measured in steps
+of 10 ms; +2.1 % by the mean of its warm passes), against -17 % on navier-stokes-euler and -4.7 % on cslib.
+Adversarial pass with official verdicts for exactly this set: reviewer S3, no kind F
+(`docs/design/review/soundness-default-set.md` section 10); the shortcuts are theory-sound as implemented (S2,
+`soundness-shortcuts.md`). Gates of the set (frozen tree = this jar; reports `work/status/machine-gate-int7-tF-default-tree.md`,
+`machine-mutants-tree.md`): M8 full gate PASS WITH DECLINES (all 230 tests 15,804 accepted / 41 rejected / 0 declined;
+Init 57,938 / 0; Std 100,095 / 1 declined by the E1-F6 rule; reachability 4,224 / 0; Cedar slice 8,064 / 0; SOUNDNESS
+0, COMPLETENESS 0); mutants 17,775 for v0 and for the set: SOUNDNESS 0, COMPLETENESS 0; `SHostileSlowTest` 56 switch
+sets x 1,196 rows; DiffEngine through the launcher 1,141,195 checks (230 tests, Init, Std, cedar, cslib, 16 Mathlib
+slices), 0 differences; the eight corpora accepted with 8 and 4 workers.
 
 ### Gates of the default set (all on the main tree of 2026-11-24 19:10Z; reports in `work/status/`, logs in `work/int6/`)
 
@@ -126,11 +164,11 @@ distribution against the reference engine, gruszka, nano-lean and the official c
 | `pchk` | 1 `SW_PCHK` | M5 | shared check facts: a closed, level-parameter-free export term that passed check mode is inferred in ONLY mode by later declarations and workers (never after an eager-reduction comparison) | **ON by default** (wave-6 integration) | M5: -1.5 to -1.8 % instructions on Init / Std alone, -3.7 / -4.3 % with `match,joint`; 9,110 tutorial mutants 0 / 0; the gates above |
 | `expect` | 2 `SW_EXPECT` | M5 | B9: lambdas and applications are checked against the expected type | **ON by default** (16:24Z) | part of step 1 (NOTES-M5) |
 | `warm` | 3 `SW_WARM` | M6, M5 | a machine session survives an ACCEPT; forward in file order only; reset on every other outcome and at the caps | **ON by default** (16:24Z) | part of step 1; safe because of the machine's own cap and the eager-reduction rule |
-| `facts` | 4 `SW_FACTS` | M5, M4 | fact records; of the consumers only B7 (static PROOF) since M4's fix of S-F2 | off | official-exact, but +1.0 to +2.1 % CPU at -0.1 % instructions on Init, Std and the Cedar slice (M4 batch b3): pays only for itself |
+| `facts` | 4 `SW_FACTS` | M5, M4 | fact records; of the consumers only B7 (static PROOF) since M4's fix of S-F2 | **ON by default** since 2026-11-25, brought by `skipargs` | official-exact, but +1.0 to +2.1 % CPU at -0.1 % instructions on Init, Std and the Cedar slice (M4 batch b3): pays only for itself |
 | `tele` | 5 `SW_TELE` | M7, M5 | K1 TELE blocks, MATCH (B5), the IC table | off | M7, three native batches: no corpus gains, the Cedar slice loses 2-6 % (10 % fewer records on Init, 5.4 M more activations) |
 | `code` | 6 `SW_CODE` | M7, M3 | K1 BODY / RULE blocks, LEAF blocks (B11), elaborated at the first request | **ON by default** (wave-6 integration) | M7 batch 3 (with `casetrees`, against v0, one worker): reachability 8.79 -> 1.56 s CPU, Init -16 %, Std -14 %, Cedar slice -5 %; hostile exports `k1-*` (43), `quot-*`; the gates above |
 | `casetrees` | 7 `SW_CASETREES` | M3, M7 | CASESON / MATCHER case trees (B8), with the matchers they call inlined | **ON by default** (wave-6 integration) | as `code`; inlining alone: reachability 3.03 -> 1.56 s |
-| `probes` | 8 `SW_PROBES` | M4 | pass B of CARGS, the quick refutation, UNDEC and the probe debt (order only) since M4's fix of S-F1 | off | official-exact, but +1.4 to +3.2 % CPU on Init, Std and the Cedar slice (M4 batch b3) |
+| `probes` | 8 `SW_PROBES` | M4 | pass B of CARGS, the quick refutation, UNDEC and the probe debt (order only) since M4's fix of S-F1 | **ON by default** since 2026-11-25, brought by `congruence` | official-exact, but +1.4 to +3.2 % CPU on Init, Std and the Cedar slice (M4 batch b3) |
 | `k2` | 9 `SW_K2` | M3 | derived rule trees of `Rules` (ISA 3.6) for hot definitions without a K1 tree | off | gates green and small gains (M3 batch 4: reachability -4.7 % CPU, others -0.5 to -1 %; `perf/magma-list-deep-n36` 12.6 -> 1.4 s), hostile matrix clean with it, BUT its derivation variables are free variables of a reserved type and not the dedicated value kind of RECONCILIATION section 2 (NOTES-M3 D17): needs the orchestrator's decision and a review before it can be a default |
 | `inert` | 10 `SW_INERT_LOOP` | M2 | nothing (the scratch loop was removed in wave 6; the bit is dead) | off | - |
 | `bodies` | 13 `SW_BODIES` (= `m2a`) | M2 | the body of a beta step / of INST and a telescope's domains and results are evaluated without a tabling record; a body that is a projection of a bound variable is MKPROJ of the argument | **ON by default** (wave-6 integration) | M2 batch 2 (on step 1 + probes, one worker): CPU -10.5 % Cedar slice, -37.6 % reachability, -10.4 % Init, -9.8 % Std; RSS on reachability 1,136 -> 774 MiB; 0 differences on all 230 and the four corpora |
@@ -143,10 +181,10 @@ distribution against the reference engine, gruszka, nano-lean and the official c
 | `t2` | 23 `SW_T2` | T2 / T3 (`rlvm-truffle`) | hot K1 blocks are offered to the Truffle tier a `Tier.Factory` installs | off | section "Truffle tier" |
 | `lazyeval` | 24 `SW_LAZY_EVAL` | M4 | a one-sided lazy-delta step against a weak-head normal side is one WHNF instead of DELTA + cheap CORE per LSTEP | **ON by default** (wave-6 integration) | M4 batch b3, on top of `code,casetrees`: Init 6.35 -> 5.88 s, Std 12.29 -> 11.47 s CPU; order-only by construction (soundness review 4.3) |
 | `levels-complete` | 25 `SW_LEVELS_COMPLETE` | M1 (`Levels`) | universe levels compared by the complete relation instead of the official kernel's algorithm | off **by owner decision** (OWNER-NOTES item 11) | never a default |
-| `eager` | 26 `SW_EAGER` | E1 (M4, M5, M6, M3) | a declaration that enters eager reduction (`eagerReduce _ _`) stays on the machine instead of being declined (M6-F26): the eager comparison is deferred to the end of the declaration and run under the official mode; the mode-dependent points of the plain phase are recorded and verified there (a difference declines); an eager-only event inside the K rule's comparison declines; such a declaration does not share a warm session (`docs/design/review/eager-reduction.md`) | off (published 2026-11-24 as an experiment, proposed for the default set) | E1: declines Init 164 / Std 203 / cedar 423 / Mathlib 6,711 -> 0; differential `default,eager` clean on every corpus; 18 hostile rows declined by design (`eager-hard`); warm wall clock 8 workers JVM: Std -11 % .. -22 %, cedar -7 % .. -10 % |
+| `eager` | 26 `SW_EAGER` | E1 (M4, M5, M6, M3) | a declaration that enters eager reduction (`eagerReduce _ _`) stays on the machine instead of being declined (M6-F26): the eager comparison is deferred to the end of the declaration and run under the official mode; the mode-dependent points of the plain phase are recorded and verified there (a difference declines); an eager-only event inside the K rule's comparison declines; such a declaration does not share a warm session (`docs/design/review/eager-reduction.md`) | **ON by default** (2026-11-25, INT7; section "The default set of 2026-11-25") | E1: declines Init 164 / Std 203 / cedar 423 / Mathlib 6,711 -> 0; differential `default,eager` clean on every corpus; 18 hostile rows declined by design (`eager-hard`); warm wall clock 8 workers JVM: Std -11 % .. -22 %, cedar -7 % .. -10 % |
 | `convexpect` | 27 `SW_CONV_EXPECT` | E1 (M5) | B9 (`expect`) also when the lambda's domain is only convertible with the expected one, as before the fix of E1-F4 (off: only when they are one value); accepts the kind T rows `e1-lam-fvar-type-in-conv-*` (`docs/design/review/official-divergence.md`) | off | E1: ticks -2.4 % on the Cedar slice, -0.3 % on Std; no gain in warm wall clock on cedar / Std (native, 8 workers) |
-| `skipargs` | 28 `SW_SKIPARGS` | M4 (`Conv.skipArgs`, `Cargs.plan` / `skipMask`, `Conv.k_etas3`; masks in `Facts`) | CARGS and ETAS do not compare the positions the fact record of the head allows: proof positions under the agreement rule (B3), positions the definition does not read under SAMEDEF (B4), the Prop mask of structure eta. **Brings `facts`** (`Op.implied`: it reads the fact records). The answer is derivable but not always the official verdict: KIND T (finding S-F2; OWNER-NOTES 13). Never in `all`; off in strict mode like every switch. Until 2026-11-25 the option `-Drlvm.machine.m4=skipargs` (still read: the same shortcut without the implication) | off until the measurement of INT7 (section "The two shortcuts") | theory-sound as implemented (S2, `docs/design/review/soundness-shortcuts.md`; optional patch H1 taken: `Cargs.plan` tests the level lists of the two heads itself); no kind F in `default,eager` + both shortcuts on 987 hostile rows (S3, `soundness-default-set.md` section 10); with `congruence`: Mathlib -24.6 % native warm (25.4 -> 19.2 s), cslib -15 %, navier-stokes-euler about -50 % of the checks, con-leche +5.6 % CPU (P9) |
-| `congruence` | 29 `SW_CONGRUENCE` | M4 (`Conv.congruence`, `convB1`, `convB12`, `convCore1`; `Same`, `Cong`) | the same-head probe B1 (arguments of two applications of one head compared before either side is unfolded), closure congruence B12 (two closures of one term: slots by CONV) and proofs by type B2, as speculative segments under the probe budget and debt. **Brings `probes`** (`Op.implied`). KIND T (finding S-F1). Never in `all`; off in strict mode. Until 2026-11-25 the option `-Drlvm.machine.m4=congruence` | off until the measurement of INT7 | as `skipargs`; the same-head probe costs on con-leche's hot unit (P9, P8) |
+| `skipargs` | 28 `SW_SKIPARGS` | M4 (`Conv.skipArgs`, `Cargs.plan` / `skipMask`, `Conv.k_etas3`; masks in `Facts`) | CARGS and ETAS do not compare the positions the fact record of the head allows: proof positions under the agreement rule (B3), positions the definition does not read under SAMEDEF (B4), the Prop mask of structure eta. **Brings `facts`** (`Op.implied`: it reads the fact records). The answer is derivable but not always the official verdict: KIND T (finding S-F2; OWNER-NOTES 13). Never in `all`; off in strict mode like every switch. Until 2026-11-25 the option `-Drlvm.machine.m4=skipargs` (still read: the same shortcut without the implication) | **ON by default** (2026-11-25, INT7; section "The default set of 2026-11-25") | theory-sound as implemented (S2, `docs/design/review/soundness-shortcuts.md`; optional patch H1 taken: `Cargs.plan` tests the level lists of the two heads itself); no kind F in `default,eager` + both shortcuts on 987 hostile rows (S3, `soundness-default-set.md` section 10); with `congruence`: Mathlib -24.6 % native warm (25.4 -> 19.2 s), cslib -15 %, navier-stokes-euler about -50 % of the checks, con-leche +5.6 % CPU (P9) |
+| `congruence` | 29 `SW_CONGRUENCE` | M4 (`Conv.congruence`, `convB1`, `convB12`, `convCore1`; `Same`, `Cong`) | the same-head probe B1 (arguments of two applications of one head compared before either side is unfolded), closure congruence B12 (two closures of one term: slots by CONV) and proofs by type B2, as speculative segments under the probe budget and debt. **Brings `probes`** (`Op.implied`). KIND T (finding S-F1). Never in `all`; off in strict mode. Until 2026-11-25 the option `-Drlvm.machine.m4=congruence` | **ON by default** (2026-11-25, INT7; section "The default set of 2026-11-25") | as `skipargs`; the same-head probe costs on con-leche's hot unit (P9, P8) |
 
 **`eager`: the probes of the plain phase run under a budget (finding INT7-F1, 2026-11-25).** A declaration that may
 defer eager comparisons checks, in its plain phase, the two points where the official kernel answers differently
@@ -156,12 +194,14 @@ evaluation, and it can be of any size: with `eager` as published on 2026-11-24 t
 con-leche (`ConLeche.lpOfData_pack`) for 28.6 M ticks into the hard limit of a session (`E_MEM`, 3.3 GB), twice
 (cold retry), before the reference engine decided it in under a millisecond: 14.0 s instead of about 3 s for the
 warm pass of that corpus (JVM, 8 workers), and 8.6 to 11 GB resident on the native image. A probe is now a
-speculative segment with a budget of 2^23 ticks (`-X machine.eager-probe`); cut at it, the plain procedure goes on as
+speculative segment with a budget of 2^22 ticks (`-X machine.eager-probe`; 2^23 until the measurement below); cut at it, the plain procedure goes on as
 the official one does, no further probe is started in the declaration, and the declaration is DECLINED if it has
 entered or enters eager reduction (`machine.eager.declined.probe`; the reference engine decides it; the cold retry is
 answered at once). Probes that complete on the eight corpora (`machine.eager.probeMaxTicks`): 63,654 ticks on Init /
 Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler, 2,752,617 on cslib and
-mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^20 declines it and two more units). Regression tests:
+mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^21 declines it, 2^20 two more units). What the
+one cut probe costs con-leche (JVM, warm, 8 workers, three interleaved rounds): 1.287 s without `eager`; with it
+1.403 s at 2^23 (+9.1 %), 1.307 s at 2^22 (+1.6 %), 1.283 s at 2^21 and 2^20 - hence 2^22. Regression tests:
 `M6FacadeTest.aProbeThatIsCutDeclinesTheUnitIfItEntersEagerReduction`,
 `SHostileEagerTest.aBudgetOfOneTickForTheProbesNeverChangesAVerdict`.
 

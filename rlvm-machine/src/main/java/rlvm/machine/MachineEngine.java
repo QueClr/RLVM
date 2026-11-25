@@ -96,16 +96,17 @@ public final class MachineEngine implements Engine {
 
     /**
      * [eager] The tick budget of one probe of the plain phase of a declaration that may defer eager comparisons
-     * ({@code Machine.erProbeBudget}; switch {@code eager}; {@code -X machine.eager-probe}, 0 = none). 2^23 ticks:
-     * measured on the eight corpora with {@code default,eager} and with the two shortcuts (INT7, 2026-11-25,
-     * statistic {@code machine.eager.probeMaxTicks}): the largest probe that completes needs 63,654 ticks on Init /
-     * Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler and 2,752,617 on cslib
-     * and mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^20 declines it and two more), so 2^23
-     * keeps every unit the machine decides with a factor of three to spare; the one probe it cuts
-     * ({@code ConLeche.lpOfData_pack}, finding INT7-F1) would otherwise run for 28.6 M ticks into the hard limit of
-     * a session and be declined anyway.
+     * ({@code Machine.erProbeBudget}; switch {@code eager}; {@code -X machine.eager-probe}, 0 = none). 2^22 ticks,
+     * from two measurements (INT7, 2026-11-25). (1) The largest probe that completes on the eight corpora, with
+     * {@code default,eager} and with the two shortcuts (statistic {@code machine.eager.probeMaxTicks}): 63,654 ticks
+     * on Init / Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler and 2,752,617
+     * on cslib and mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^21 declines it, 2^20 two more).
+     * (2) What the one probe that is cut costs ({@code ConLeche.lpOfData_pack}, finding INT7-F1; uncut it runs for
+     * 28.6 M ticks into the hard limit of a session): con-leche's warm pass (JVM, 8 workers, three interleaved
+     * rounds) is 1.287 s without {@code eager} and, with it, 1.403 s at 2^23 (+9.1 %), 1.307 s at 2^22 (+1.6 %),
+     * 1.283 s at 2^21 and at 2^20. So 2^22: every unit the machine decides stays, with a factor of 1.5 to spare.
      */
-    static final long DEFAULT_EAGER_PROBE = 1L << 23;
+    static final long DEFAULT_EAGER_PROBE = 1L << 22;
 
     /**
      * Switch {@code congruence}: the cap on the ticks its segments (the same-head probe B1, closure congruence B12)

@@ -25,7 +25,7 @@ The machine is NOT the default engine (`MachineProvider.priority()` is 10; the l
 100 = `Engines.DEFAULT_ENGINE_MIN_PRIORITY`): name it. It was the default from 2026-11-24T19:41Z to 20:35Z
 (integration of wave 6) and was taken back because of the wrong accepts E1-F1 .. E1-F5 against the official
 checker (`SWITCHES.md`, the note at its top). With `-X engine=machine` it runs its default switch set of
-`SWITCHES.md`, the reference engine re-checks every rejection and decides what the machine declines;
+`SWITCHES.md` (since 2026-11-25: the set of wave 6 + `eager,skipargs,congruence`), the reference engine re-checks every rejection and decides what the machine declines;
 `-X machine.switches=none` is the generic tier v0.
 
 ```
