@@ -1,0 +1,89 @@
+\title{NOTES-INT - the machine integrator (after work packages M1-M8)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{platform}
+\tag{performance}
+\tag{soundness}
+\meta{origin}{rlvm-machine/NOTES-INT.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{From 2026-11-24T11:15Z the whole module has one owner (the integrator); the sandboxes are no longer used: work in the main tree, \code{\verb~|$MVN -o -q -pl rlvm-machine install~} from the project root. The log with every run and number is \code{\verb~|work/status/machine-integration.md~}; tools are in \code{\verb~|work/machine-int/~} (\code{\verb~|m.py~} = one measured run in the arena-shaped container, \code{\verb~|batch*.sh~}, \code{\verb~|family.py~}, \code{\verb~|prof/prof.sh~} + \code{\verb~|prof/byclass.py~}).}
+
+\subtree{
+\title{1. Wiring (rlvm-main, parent pom, scripts)}
+
+\ul{
+\li{\code{\verb~|pom.xml~}: \code{\verb~|<module>rlvm-machine</module>~}. The module is last in the list; Maven orders by dependency.}
+\li{\code{\verb~|rlvm-main~} does NOT depend on \code{\verb~|rlvm-machine~}: \code{\verb~|rlvm-machine -> rlvm-testkit (test) -> rlvm-main (test)~}, so a dependency would be a reactor cycle. Engines are found through \code{\verb~|ServiceLoader~}; the jar only has to be on the class path.}
+\li{\src{scripts/build.sh}: a tree build (\code{\verb~|dist-tree~}, the arena build) packages every reactor module, so the machine jar is in \code{\verb~|lib/~}; a \code{\verb~|--published~} build (\code{\verb~|scripts/dev.sh dist~}, \code{\verb~|dist-native~}) now copies the published rlvm-machine jar from \code{\verb~|.toolchain/m2~} into \code{\verb~|lib/~} and lists it in BUILD-INFO.txt.}
+\li{\code{\verb~|-X engine=machine~} selects the machine as primary engine; the reference engine is the driver's re-check engine (cold re-check of a REJECT, fallback for a DECLINE). Without \code{\verb~|-X engine=...~} the reference engine runs: \code{\verb~|MachineProvider.priority()~} stays 10 (\code{\verb~|Engines.DEFAULT_ENGINE_MIN_PRIORITY~} is 100) until the orchestrator records the gates.}
+\li{The CE native image builds with the machine inside (\code{\verb~|scripts/build.sh --published --no-pgo~}, 72 s) and passes the build's verification; no reflection or build-time configuration was needed.}
+}
+}
+
+\subtree{
+\title{2. Deviations from ISA.md made by the integrator}
+
+\table{
+\tr{\th{\verb~|#~}\th{ISA}\th{What}\th{Why}}
+\tr{\td{I1}\td{1.6 "Cap and sizes"}\td{Base sizes of a session are 2^14 records, 2^15 \code{\verb~|vtab~} slots, 2^16 run words, 2^14 \code{\verb~|rtab~} slots, 2^12 pair entries, 2^10 \code{\verb~|plog~} entries (ISA: 2^18 / 2^19 / 2^20 / 2^18 / 2^17 / 2^16). \code{\verb~|-Drlvm.machine.sizes=isa~} restores the ISA sizes, six numbers set others}\td{CPU time. A declaration makes about 860 records (Init); with 1-2 MiB tables every probe was a cache miss. Native image, arena container, one worker, Init / Cedar slice / Std: ISA sizes 13.54 / 3.98 / 21.79 s, 2^12-based 10.11 / 3.84 / 16.18 s, 2^14-based 9.27 / 3.70 / 15.80 s, 2^16-based 9.26 / 3.74 / 15.39 s. M1 had measured the direction and requested it}}
+\tr{\td{I2}\td{1.6 "Reset is O(used)"}\td{A table of base size is cleared by one \code{\verb~|Arrays.fill~} when it has at most 32 slots per entry; otherwise by the per-record probe of the ISA. Still O(used)}\td{a fill is sequential; the probe recomputes each record's hash and is a random access}}
+\tr{\td{I3}\td{1.6 "the arrays return to the base size at the next reset"}\td{The record slab and the run slab keep the capacity they grew to, up to the ISA base sizes (2^18 records, 2^20 run words = 12 MiB per worker); only larger slabs return to the base. \code{\verb~|Machine.Sizes.keepRecords / keepRunWords~} (0 in \code{\verb~|Sizes.tiny()~})}\td{slabs are filled by a bump pointer: capacity costs no locality, and shrinking them made every larger declaration copy them again}}
+\tr{\td{I4}\td{13.3 (\code{\verb~|Hash~}, frozen by M6)}\td{\code{\verb~|Hash.record~} has three multiplications instead of six (the form M1 measured in \code{\verb~|M1ProbeBench.hashAlt~}), \code{\verb~|Hash.fin~} one instead of two}\td{M1's request: 67 -> 46 instructions per probe on a hit. Only table positions change; identity does not depend on the hash}}
+\tr{\td{I5}\td{1.6}\td{Intern tables that grew are pooled by size (up to 2^20 slots each for \code{\verb~|vtab~} and \code{\verb~|rtab~}), zeroed when they are released, and reused by the next declaration that grows; \code{\verb~|reset()~} swaps the grown table for the base one. Invariant: every pooled table is all zero (\code{\verb~|Machine.tablesClean()~}, \code{\verb~|MachineStateTest.pooledTablesAreZeroAfterGrowthAndReset~})}\td{no allocation per larger declaration. Measured: no CPU change (within 1-3\%), JVM peak RSS on Init 866 -> 590 MiB}}
+}
+
+\p{What the measurements say about ISA 1.6 and the staging table (details in the log):}
+
+\ul{
+\li{the session cap of warm sessions should be about \strong{4 MiB}, not 16 (16 MiB is slower than no warm session); \code{\verb~|-X session-mib=4~} sets it, the driver's default is still 16 MiB;}
+\li{the platform of the machine is the \strong{CE native image built with \code{\verb~|-O3~}} (\code{\verb~|scripts/build.sh --opt 3~}): 10\% less CPU than \code{\verb~|-O2~}, and 35-60\% less than the JVM launcher on Init, Std and the Cedar slice, whose C2 warm-up costs 3.7 s of compiler time and is paid once per worker thread in slow code.}
+}
+
+\p{Tests changed: \code{\verb~|MachineStateTest.footprintIsBytesInUseNotCapacity~} and \code{\verb~|M6FacadeTest.footprint...~} asserted "capacity is 8 MiB" literally; they now assert that the capacity is many times the bytes in use (the property under test: the footprint is not the capacity).}
+}
+
+\subtree{
+\title{3. Wave 6 (integrator of wave 6, 2026-11-24 17:57Z - 21:1xZ): the default switch set; default engine for 54 minutes}
+
+\p{\strong{Outcome.} The machine was made the default engine at 19:41Z on the gates of section 3.1 of the log and was taken back at 20:35Z by the orchestrator: E1's hostile exports show wrong accepts against the official checker (E1-F1 .. E1-F5: a bound variable typed by what its slot holds instead of by its binder's declared type, an expected type kept as a lambda's own), three of them in v0. \code{\verb~|MachineProvider.priority()~} is 10; the default SWITCH SET below, the cap and the measurements stand for \code{\verb~|-X engine=machine~}. The integrator's mistake to record: every gate it ran compares the machine with the reference engine (or with exports written before this family was known), so "0 differences on 760,839 units" said nothing about verdicts that need a declared type to differ from a convertible one; a review with NEW hostile exports belongs before a default-engine change, not after it.}
+
+\p{The log with every run, count and command is \code{\verb~|work/status/machine-integration.md~}, heading "Wave 6"; the list of switches with the gate and measurement of each is \code{\verb~|SWITCHES.md~}; tools and outputs are in \code{\verb~|work/int6/~}.}
+
+\subtree{
+\title{3.1 What the integrator changed}
+
+\ul{
+\li{\strong{Wiring.} \code{\verb~|rlvm-truffle~} is a module of the parent pom and its jar is in every distribution (\src{scripts/build.sh}: tree builds have it as a reactor module, \code{\verb~|--published~} builds take the published jar). The tier runs only under \code{\verb~|t2~}, which is off. \code{\verb~|MachineProvider.priority()~} was 100 from 19:41Z to 20:35Z (without \code{\verb~|-X engine=~} a distribution then checks with the machine; the reference engine re-checks every rejection and decides what the machine declines) and is 10 again (the outcome above). Nothing in \code{\verb~|rlvm-main~} has to change for either state (\code{\verb~|Engines.DEFAULT_ENGINE_MIN_PRIORITY~}).}
+\li{\strong{Default set.} \code{\verb~|Op.SW_DEFAULT~} = \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}; \code{\verb~|bodies~} / \code{\verb~|directrules~} / \code{\verb~|lazycases~} are the new names of \code{\verb~|m2a~} / \code{\verb~|m3a~} / \code{\verb~|m7a~} (same bits; the old names are read). Cap 1 MiB, host depth bound 128: unchanged, both re-measured with the new set.}
+\li{\strong{M8-F1} (\code{\verb~|Code.kval~}, \code{\verb~|Code.resume~}, \code{\verb~|Code.kvalFill~}; deviation from the letter of ISA 4.2, which has no frame form of \code{\verb~|KVAL~}): the frame of an activation that waits for the value of a \code{\verb~|KVAL~} is \code{\verb~|ACT[blk, pc + 2, DST_KVAL | DST_KVAL_LS? | reg, ..]~}, and the resume stores the value into the register AND into the inline cache cell of the site \code{\verb~|(blk << 12 | pc, key)~}, exactly the words the unsuspended path writes. Without it the tick count was a function of the host depth bound (the cache was empty after a suspended evaluation, and under \code{\verb~|gated~} the closed term is not tabled, so the next execution paid its ticks again).}
+}
+}
+
+\subtree{
+\title{3.2 What the gate's harness taught (test tree; relevant to anybody who runs several engines over one store)}
+
+\p{Two pieces of state live in the STORE, not in the engine, and are therefore shared by every \code{\verb~|MachineEngine~} made over it: the PCHK bits (\code{\verb~|Store.facts()~}, by design: workers share them) and the \strong{binder hints} of the code store (\code{\verb~|CodeStore.addSub~} writes the sub-block id of a binder into the node's reserved \code{\verb~|c~} word through \code{\verb~|TermStore.setBinderHint~}; \code{\verb~|CodeStore.hint~} validates the id against the reader's own directory and answers 0 for a foreign one, i.e. "walk the term"). One engine per store - the real pipeline - is unaffected. M8's gate runs up to six engines over one store: lanes that elaborate in the same order assign the same ids and agree, an audit lane (memo re-computations) does not, and its hints silently turned block activations of the other lanes into walks: tick differences without outcome differences, different in every run. \code{\verb~|M8Lanes~} now runs the compared lanes before the others and \code{\verb~|M8Harness~} gives every lane a PCHK table of its own. \code{\verb~|-X passes=N -X passes-mode=recheck~} (new engines per pass over one store) has the same property in a milder form: a new engine finds stale hints, walks, and overwrites them when it elaborates the parent again.}
+}
+
+\subtree{
+\title{3.3 Kept and rejected, with numbers (native \code{\verb~|-O3~}, 8 workers, pipelined, \src{bench/quiet.py} windows; wall s / CPU s of a warm pass)}
+
+\table{
+\tr{\th{Experiment}\th{Init}\th{Std}\th{Cedar slice}\th{reachability}\th{cedar}\th{mathlib}\th{Decision}}
+\tr{\td{\code{\verb~|warm,gated,expect~} -> the new default set}\td{1.09 / 7.14 -> 0.81 / 5.26}\td{1.84 / 12.59 -> 1.51 / 10.09}\td{0.55 / 3.00 -> 0.46 / 2.40}\td{2.49 / 7.37 -> 0.62 / 1.64}\td{2.45 / 17.29 -> 2.09 / 13.99}\td{30.68 / 215.7 -> 29.28 / 204.8}\td{KEPT (the default)}}
+\tr{\td{the set without \code{\verb~|same~} -> with it}\td{0.82 / 5.32 -> 0.81 / 5.26}\td{1.52 / 10.32 -> 1.51 / 10.09}\td{0.53 / 2.75 -> 0.46 / 2.40}\td{0.61 / 1.60 -> 0.62 / 1.64}\td{2.44 / 14.78 -> 2.09 / 13.99}\td{-}\td{KEPT; reachability +2.5 \% CPU in one row, inside the spread of two more readings (1.60, 1.55)}}
+\tr{\td{cap 1 MiB -> 512 KiB}\td{5.26 -> 5.22 CPU}\td{10.09 -> 9.92}\td{2.40 -> 2.36}\td{1.64 -> 1.58}\td{13.99 -> 13.73}\td{204.8 -> 202.6 (29.28 -> 29.20 s)}\td{NOT ADOPTED: 1-2 \% in one row each, wall equal; needs three rounds}}
+\tr{\td{cap 1 MiB -> 2 MiB / 4 MiB}\td{5.49 / 5.58}\td{10.48 / 10.84}\td{2.45 / 2.61}\td{1.61 / 1.62}\td{14.51 / 14.92}\td{211.8 / 212.2 (30.55 / 30.26 s)}\td{REJECTED}}
+\tr{\td{host depth 128 -> 512 / 2048}\td{-}\td{-}\td{2.50 -> 2.53 / 2.43 CPU}\td{1.58 -> 1.64 / 1.66}\td{14.13 -> 14.47 / 14.18}\td{-}\td{REJECTED (no gain)}}
+\tr{\td{H10 inline lists (same jars, two interleaved rounds)}\td{5.38, 5.37 -> 5.29, 5.32}\td{10.23, 10.19 -> 10.22, 10.06}\td{2.50, 2.51 -> 2.39, 2.40}\td{1.60, 1.55 -> 1.60, 1.59}\td{14.01, 14.25 -> 13.91, 13.97}\td{-}\td{MEASURED, not wired into the build (SWITCHES.md)}}
+\tr{\td{the Truffle tier (\code{\verb~|t2~})}\td{}\td{}\td{+38 \% wall (T3, JVM, 8 workers)}\td{parity}\td{+39 \%}\td{}\td{OFF}}
+}
+
+\p{Not built in this pass (and why): X1's \code{\verb~|once~} filter for EVAL tabling (measured only against sets without \code{\verb~|bodies~} and the K1 blocks; a change of \code{\verb~|Eval~} after the gates would have needed all of them again); an exact treatment of eager reduction (the declined declarations are 0.2-0.9 \% of the units and about a tenth of the workers' time on mathlib and Std: the first item of "what is left").}
+}
+}

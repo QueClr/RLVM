@@ -1,0 +1,316 @@
+\title{rlvm-machine - work packages M1..M8}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\meta{origin}{rlvm-machine/WORK-PACKAGES.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Written by the skeleton agent (workflow \code{\verb~|rlvm-wave4-machine~}, 2026-11-24). It adjusts ISA 13.6 to the host convention that was decided after ISA revision 2 (\src{docs/design/review/stepper-convention.md}, rules H1-H12) and to the sandbox workflow. Order of authority: \code{\verb~|OWNER-NOTES.md~} > \code{\verb~|RECONCILIATION.md~} > \code{\verb~|ISA.md~} / \code{\verb~|stepper-convention.md~} > this file. Deviations of the skeleton from the ISA are listed in \code{\verb~|NOTES-M6.md~}, section "Skeleton", and in the change log of ISA section 15.}
+
+\p{Contents: 1 what exists - 2 the sandbox workflow - 3 how a judgment is written - 4 shared definitions - 5 the staging rule - 6 testing and the differential test - 7 the packages - 8 who calls whom.}
+
+\subtree{
+\title{1. What exists}
+
+\p{Module \code{\verb~|rlvm-machine~}, package \code{\verb~|rlvm.machine~}, engine provider \code{\verb~|machine~}. Everything is package-private static code over one \code{\verb~|Machine~} object per session; tests live in the same package.}
+
+\table{
+\tr{\th{Kind}\th{Files}\th{State}}
+\tr{\td{shared definitions (frozen)}\td{\code{\verb~|Layout~}, \code{\verb~|Op~}, \code{\verb~|Hash~}}\td{complete}}
+\tr{\td{machine state and control}\td{\code{\verb~|Machine~} (arrays and registers of ISA section 1, growth, \code{\verb~|reset()~} in O(used), footprint, \code{\verb~|sigN~} / \code{\verb~|spillN~} for payloads 0..12, \code{\verb~|sigX~}, \code{\verb~|drive~}, ticks, polls, \code{\verb~|fail~} / \code{\verb~|fault~}, \code{\verb~|tryEnter~} / \code{\verb~|saveTry~}, \code{\verb~|beginDecl~} / \code{\verb~|abandon~}), \code{\verb~|Frames~} (\code{\verb~|k_try~}, \code{\verb~|k_erf~}, family CTL), \code{\verb~|Scope~} (\code{\verb~|OPEN~} / \code{\verb~|CLOSE~})}\td{complete, tested (\code{\verb~|ControlTest~}, \code{\verb~|MachineStateTest~})}}
+\tr{\td{facade}\td{\code{\verb~|Ops~}, \code{\verb~|MachineProvider~}, \code{\verb~|MachineEngine~}, \code{\verb~|MachineSession~}, \code{\verb~|MachineOps~}, \code{\verb~|Debug~}, \code{\verb~|Show~}}\td{\code{\verb~|Ops~} delegates; engine and session work and decline everything; \code{\verb~|MachineOps~} and the audits of \code{\verb~|Debug~} are stubs}}
+\tr{\td{stubs}\td{every other class of ISA 13.2}\td{entry steps and operations with their final signatures; bodies throw \code{\verb~|UnsupportedOperationException("Mk: Class.method is not implemented yet")~}; the state-0 cases of every \code{\verb~|resume~} switch are in place}}
+\tr{\td{delivered implemented inside package files}\td{\code{\verb~|Values.mkFVar / kind / flags / a / b / c / aux / memo / setMemo~}, \code{\verb~|Runs.len / arg / fget / get~}, all of \code{\verb~|Scope~}}\td{yours to keep or replace (M1); signatures frozen}}
+\tr{\td{tests}\td{\code{\verb~|Fixture~} (+ \code{\verb~|Sexp~}, \code{\verb~|Prelude~}), \code{\verb~|Toy~}, \code{\verb~|TestTables~}, \code{\verb~|ControlTest~}, \code{\verb~|MachineStateTest~}, \code{\verb~|FixtureTest~}, \code{\verb~|StepSizeTest~}; stubs \code{\verb~|Quote~}, \code{\verb~|TierEq~}, \code{\verb~|Diff~}}\td{38 tests green}}
+}
+
+\p{End to end today: \code{\verb~|RLVM_EXTRA_CP=<rlvm-machine jar> work/dist/bin/rlvm-jvm -X engine=machine FILE~} runs, the machine declines every unit and the driver falls back to the reference kernel (section 6).}
+}
+
+\subtree{
+\title{2. The sandbox workflow (mandatory)}
+
+\p{The judgments are mutually recursive, so the packages cannot be Maven sub-modules. Each package works in a private copy of the module and publishes only the files it owns. \strong{Never edit the main tree \code{\verb~|rlvm-machine/~} directly, never run Maven on it} (the publish command does, under the lock).}
+
+\pre{\verb~|
+scripts/machine-sandbox.sh init M3              # once: work/sandbox/M3/rlvm-machine (+ a copy of the parent pom)
+scripts/machine-sandbox.sh test M3              # compile + test your copy   (extra Maven arguments allowed:
+scripts/machine-sandbox.sh test M3 -Dtest='M3*' #   -Dtest=..., -Dgroups=fast, -Dgroups=slow -DexcludedGroups=)
+scripts/machine-sandbox.sh pull M3              # refresh every file you do NOT own from the main tree
+scripts/machine-sandbox.sh publish M3           # under work/sandbox/.lock: your owned files -> main tree,
+                                                #   compile main, run its fast tests; failure = main restored,
+                                                #   exit 1; success = jar installed, line in work/status/machine-M3.log
+scripts/machine-sandbox.sh status               # who published what and when; who holds the lock
+scripts/machine-sandbox.sh changed M3           # your owned files that differ from the main tree
+scripts/machine-sandbox.sh claim M3 src/main/java/rlvm/machine/WhnfLoop.java    # a NEW file becomes yours
+scripts/machine-sandbox.sh owner PATH           # who owns a file
+~}
+
+\p{Rules:}
+
+\ol{
+\li{\strong{Ownership} is \code{\verb~|rlvm-machine/OWNERS.tsv~} (pattern -> package, first match wins). By naming convention you also own the test classes \code{\verb~|src/test/java/rlvm/machine/M<k>*.java~} (e.g. \code{\verb~|M3WhnfTest.java~}), the resources \code{\verb~|src/test/resources/m<k>/~}, and \code{\verb~|NOTES-M<k>.md~}. A new main class needs \code{\verb~|claim~} first. Files nobody owns (\code{\verb~|OWNERS.tsv~}, \code{\verb~|OWNERSHIP.md~}, this file) are never published from a sandbox.}
+\li{\strong{Publish early and often}: as soon as a coherent part compiles in the main tree and its fast tests are green. Before a publish: \code{\verb~|pull~}, \code{\verb~|test -Dgroups=fast~}. Other packages see your code after their next \code{\verb~|pull~}. A publish that fails changed nothing: read the output it prints, \code{\verb~|pull~}, fix, try again.}
+\li{\strong{The fast group} is what guards the main tree: every test class or method tagged \code{\verb~|@Tag("fast")~} (JUnit 5), from all packages. Keep your fast tests below about 5 s in total and make them independent of files outside the module, except through \code{\verb~|Fixture.exists(..)~} + \code{\verb~|assumeTrue~}. Tag corpus runs (arena directories, Init) \code{\verb~|@Tag("slow")~}: they run with \code{\verb~|test Mk -Dgroups=slow -DexcludedGroups=~}. Untagged tests run in the default \code{\verb~|test~} but not at publish. A fast test must not assert that \em{another} package's stub still throws.}
+\li{\strong{Foreign files in your copy} may be edited as a temporary local fake (for example a two-line body for a stub you need today); they are never published and the next \code{\verb~|pull~} replaces them. Say in your status log which fakes you run with.}
+\li{\strong{Requests}: a change to a file you do not own - a signature, a constant, a \code{\verb~|Fixture~} method - is a line \code{\verb~|M3 -> M6: request~} in \code{\verb~|work/status/requests.log~}; log progress in \code{\verb~|work/status/machine-M3.log~} (the publish command appends there too); read the logs of the packages you depend on every few minutes. Do not wait idle for more than about 15 minutes in total: work around it locally.}
+\li{Deviations from \code{\verb~|ISA.md~} go into your \code{\verb~|NOTES-M<k>.md~} with the reason.}
+\li{Leave no background process; do not run git commands that modify the repository.}
+}
+
+\p{Self-test of the script: \src{scripts/machine-sandbox-selftest.sh} (two fake packages publishing concurrently, rollback of a publish that does not compile or whose fast tests fail; 18 checks).}
+}
+
+\subtree{
+\title{3. How a judgment is written (normative)}
+
+\p{\code{\verb~|stepper-convention.md~} sections 2 and 3 are the rules; \code{\verb~|src/test/java/rlvm/machine/Toy.java~} is the smallest complete example (recursion, two sub-calls, a memo, a loop, binders, TRY segments, a 12-word frame) and \code{\verb~|ControlTest~} runs it under D = 0, 1, 2, 7, 64 and unbounded. The template, with the two lines that differ from the convention document (NOTES-M6 S3-S5):}
+
+\pre{\verb~|
+/** CONV(a, b) (ISA 4.4.1; official is_def_eq, R02 8.1). Entry frame: CONV[0](a, b). */
+static int conv(Machine m, int a, int b, int d) {
+    if (a == b) return Layout.T;                                    // 1. inline answers (identity, flag, memo,
+    int s = Pairs.status(m, a, b);  ...                             //    cache): return at once. No tick, no
+                                                                    //    event, no frame.
+    if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) return m.sig;      // 2. TICK
+    if (m.stats) m.call(Op.CONV);                                                     // 2b. call event
+    if (d > m.hostDepth) return m.spill2(Op.K_CONV, a, b);          // 3. too deep: become the frame CONV[0](a, b)
+    int da = Eval.dom(m, a, d + 1);                                 // 4. body: call DOM(a) => 1
+    return da >= Op.SIG ? m.sig2(da, K_CONV_1, a, b) : k_conv1(m, a, b, da, d);
+}
+static final int K_CONV_1 = Op.K_CONV | 1;                          // your own state keys, constants in your file
+static int k_conv1(Machine m, int a, int b, int r, int d) { ... }   // continuation step: frame CONV[1](a, b); r = dom a
+~}
+
+\ul{
+\li{\strong{Entry step} \code{\verb~|J(m, operands.., d)~}: lines 1, 2, 2b, 3, then the body, in this order. Leaf cases that need no sub-judgment return before line 2 or between 2b and 3 and can never be frames. The operands of the entry step are the payload of \code{\verb~|J[0]~} and the arguments of its \code{\verb~|resume~} case (already in your stub).}
+\li{\strong{Continuation step} \code{\verb~|k_Jk(m, payload.., r, d)~}: the payload words of frame \code{\verb~|J[k]~}, then the result register \code{\verb~|r~}, then \code{\verb~|d~}. The prefix \code{\verb~|k_~} is mandatory (inlining flags, \code{\verb~|StepSizeTest~}).}
+\li{\strong{Calling a sub-judgment} \code{\verb~|K~}: \code{\verb~|int r = K(m, x.., d + 1); return r >= Op.SIG ? m.sigN(r, K_J_k, live..) : k_Jk(m, live.., r, d);~} where \code{\verb~|live..~} is exactly the parameter list of \code{\verb~|k_Jk~}. Every call of a judgment is followed by this test, or is a tail return (\code{\verb~|return K(m, x.., d + 1);~}, only if the judgment owns no open binder and no scratch at that point and returns K's result unchanged).}
+\li{\strong{Loops} (spines, telescopes, the WHNF and LAZYD loops): the loop is a method whose parameters include the loop variables; inside it \code{\verb~|if (r >= Op.SIG) return m.sigN(r, K_J_k, live.., i);~}; the continuation step finishes the interrupted iteration and calls the loop method with the next index (\code{\verb~|Toy.loopFrom~} / \code{\verb~|k_loop1~}). One tick per iteration in WHNF and LAZYD (the TICK line, without 2b and 3).}
+\li{\strong{Add one case per continuation step to your \code{\verb~|resume~} switch} (\code{\verb~|case K_CONV_1: return k_conv1(m, w[p], w[p + 1], r, 0);~}). A key without a case is \code{\verb~|fault(E_INTERNAL)~} at run time - and only when a frame is actually written, i.e. on deep terms. Test every judgment with \code{\verb~|Fixture.hostDepth(0)~} as well: then every non-leaf call is a suspension and every \code{\verb~|sigN~} / \code{\verb~|resume~} case runs.}
+\li{\strong{Results and signals}: a step returns a result (value ref, level id, \code{\verb~|Layout.T / F / U / UNDEF~}, \code{\verb~|Layout.NONE~}) or a signal \code{\verb~|Op.SUSP / ABORT / FATAL~} (all \code{\verb~|>= Op.SIG~}). \code{\verb~|fail(E)~} is \code{\verb~|return m.fail(E);~} (kernel error or recoverable limit), \code{\verb~|fault(E)~} is \code{\verb~|return m.fault(E);~}. No Java exception on these paths. An operation of the library that can fail (\code{\verb~|Values.mkApp~}, \code{\verb~|Scope.open~}, \code{\verb~|Runs.get~}, ...) returns a signal too: test \code{\verb~|>= Op.SIG~} and return it (it is never SUSP).}
+\li{\strong{Machine stacks} (H7): scratch \code{\verb~|X~} / \code{\verb~|xp~}, environments \code{\verb~|es~} / \code{\verb~|ep~}, registers \code{\verb~|RS~} / \code{\verb~|rp~}, binders \code{\verb~|SC~} / \code{\verb~|ssp~}, the mode \code{\verb~|ER~}. A step that returns a \em{result} has restored what its judgment pushed (I-STACKS, I-SCOPE); a step that returns SUSP leaves it in place (keep base indices such as \code{\verb~|xb~} in the payload); a step that returns ABORT or FATAL restores nothing - the TRY or the DECL driver does. Check capacity with \code{\verb~|m.ensureScratch(n)~}, \code{\verb~|m.ensureEnv(n)~}, \code{\verb~|m.ensureRegs(n)~} (false -> \code{\verb~|fault(E_MEM)~}). \strong{Never keep a Java reference to \code{\verb~|m.vh~}, \code{\verb~|m.rs~}, \code{\verb~|m.es~}, \code{\verb~|m.X~} across a call that can allocate}: the arrays grow by reallocation; re-read the field.}
+\li{\strong{Memos} (I-MEMO, ISA 5.4): written only by the step that completes the judgment. Nothing computed under a budget that ran out is in a memo, because a signal never reaches that step.}
+\li{\strong{A segment under a budget} (step 5 only; not in v0): the template in the class comment of \code{\verb~|Frames~}. \code{\verb~|m.tryEnter(budget)~}, the call, then \code{\verb~|m.saveTry(..)~} on SUSP or \code{\verb~|Frames.k_try(..)~}; the result is T, F or U; a fatal fault passes through.}
+\li{\strong{Two results} (LAZYD): one is returned, the others are left in \code{\verb~|m.A2~}, \code{\verb~|m.A3~}, which the continuation step of the caller reads before it calls anything.}
+\li{\strong{Sizes} (H10, enforced by \code{\verb~|StepSizeTest~} for every judgment class): a continuation step at most 150 bytecodes, every other method at most 325; exempt are \code{\verb~|resume*~} methods (at most 50 cases each: split by op) and methods whose name ends in \code{\verb~|Slow~} (out-of-line slow parts), both at most 2,500.}
+\li{\strong{No allocation, boxing, \code{\verb~|java.util~} collection, lambda, stream or exception on a normal path}; values, runs, frames and tables are \code{\verb~|int~} ids in the flat arrays of \code{\verb~|Machine~}.}
+\li{\strong{Every judgment and operation carries a comment citing the ISA section and the official rule} (the stubs already do; keep the comment when you fill the body).}
+}
+}
+
+\subtree{
+\title{4. Shared definitions and how they change}
+
+\ul{
+\li{\code{\verb~|Layout~}, \code{\verb~|Op~}, \code{\verb~|Hash~}, \code{\verb~|Machine~}, \code{\verb~|Frames~}, the signatures in \code{\verb~|Ops~}, \code{\verb~|Fixture~} and the other shared test files belong to M6 and are frozen: request a change (\code{\verb~|Mk -> M6: ...~}), do not work around a missing constant with a private copy of its value.}
+\li{The \strong{entry-step signatures} in the stubs are the cross-package interface. You may add methods to your own classes at any time (other packages call them after your publish); changing an existing signature needs a request to its callers through the log.}
+\li{\strong{Your own session state} (caches, counters, scratch) goes into the \code{\verb~|Ext~} class of your main file (\code{\verb~|Values.Ext~} = \code{\verb~|m.x1~}, \code{\verb~|Eval.Ext~} = \code{\verb~|m.x2~}, \code{\verb~|Reduce.Ext~} = \code{\verb~|m.x3~}, \code{\verb~|Conv.Ext~} = \code{\verb~|m.x4~}, \code{\verb~|Infer.Ext~} = \code{\verb~|m.x5~}, \code{\verb~|Code.Ext~} = \code{\verb~|m.x7~}): fields plus the hooks \code{\verb~|reset(m)~} (O(used)!), \code{\verb~|beginDecl(m)~}, \code{\verb~|bytes()~} (bytes in use, added to the footprint).}
+\li{Table formats: \code{\verb~|vtab~} / \code{\verb~|rtab~} words, run headers, pair entries, direct-mapped cache cells are in \code{\verb~|Layout~}; the hash of a record, a NEU, a run, a pair and a cache cell is in \code{\verb~|Hash~}. \code{\verb~|Machine~} appends (\code{\verb~|addRecordAt~}, \code{\verb~|addRun~}, \code{\verb~|putRunAt~}, \code{\verb~|addPairAt~}), grows and resets; the owner probes. \code{\verb~|Machine.internRecord~} and \code{\verb~|TestTables~} (test tree) are reference probes.}
+\li{Names that differ from the ISA text: the run-slab pointer is \code{\verb~|m.rsp~} (\code{\verb~|rp~} is the register stack); \code{\verb~|Op.CHECKED~} is INFER's check mode (\code{\verb~|CHECK~} is the op); \code{\verb~|Op.OFFSET_F~} / \code{\verb~|STRX_F~} / \code{\verb~|ENSORT_F~} / \code{\verb~|ENPI_F~} / \code{\verb~|ISPROP_F~} / \code{\verb~|MATCH_F~} are the frame ops of judgments that are also code instructions.}
+}
+}
+
+\subtree{
+\title{5. The staging rule}
+
+\p{\strong{v0 first.} v0 = generic tier (K0), the complete official procedure (ISA 6.3 rule 3), every non-leaf node tabled, session = one declaration, only the exact shortcuts B6 and B10. Everything later is behind a switch of \code{\verb~|Op.SW_*~} (\code{\verb~|m.on(Op.SW_FACTS)~}), and \strong{every switch is off by default}; nothing of a later stage may change what v0 computes when its switch is off, and strict mode (\code{\verb~|m.strict~}) forces all of them off.}
+
+\table{
+\tr{\th{Switch}\th{Stage (ISA section 11)}\th{Packages}}
+\tr{\td{\code{\verb~|SW_WARM~}, \code{\verb~|SW_GATED_TABLING~}, \code{\verb~|SW_PCHK~}, \code{\verb~|SW_EXPECT~}}\td{1: sessions that survive a declaration, tabling by node flags, shared check facts, B9}\td{M6, M2, M5}}
+\tr{\td{\code{\verb~|SW_FACTS~}}\td{2: fact records, plans (B3, B4), static PROOF (B7), ETAS mask}\td{M5, M4, M7 (\code{\verb~|Cong~})}}
+\tr{\td{\code{\verb~|SW_TELE~}}\td{3: K1 TELE, MATCH (B5), IC}\td{M7, M5}}
+\tr{\td{\code{\verb~|SW_CODE~}, \code{\verb~|SW_CASETREES~}}\td{4: K1 BODY / RULE, LEAF, case trees (B8)}\td{M7, M3}}
+\tr{\td{\code{\verb~|SW_PROBES~}}\td{5: TRY, B1, B2, B12, pass B, UNDEC}\td{M4}}
+\tr{\td{\code{\verb~|SW_K2~}}\td{later}\td{-}}
+\tr{\td{\code{\verb~|SW_INERT_LOOP~}}\td{tuning of EVAL (H8 item 3), results identical}\td{M2}}
+}
+
+\p{Run with switches: \code{\verb~|-Drlvm.machine.switches=warm,gated~} (launcher: \code{\verb~|JAVA_TOOL_OPTIONS~}; tests: \code{\verb~|Fixture.switches("warm,gated")~}). Debug modes likewise: \code{\verb~|-Drlvm.machine.debug=memocheck,trace~}, \code{\verb~|Fixture.debug(..)~}. Gates: \strong{v0} = diff-clean against the reference engine on the tutorial and \code{\verb~|bugs/~} tests through \code{\verb~|-X engine=machine~}, then on all 230 tests, then Init. Correctness first: a wrong verdict is worse than anything else; when in doubt DECLINE (\code{\verb~|m.fault(E_INTERNAL)~} or a recoverable limit), never guess.}
+}
+
+\subtree{
+\title{6. Testing and the differential test against the reference engine}
+
+\p{In a unit test (your \code{\verb~|M<k>*Test.java~}, same package):}
+
+\pre{\verb~|
+Fixture f = Fixture.prelude();                        // Nat, Bool, Eq, Prod, Unit, True, And, Or, Exists, Sig, List,
+                                                      //   Quot, Nat.add, id, axioms ... (Prelude.java); or Fixture.empty()
+f.inductive("W", "W.mk : (-> Nat W)");                // declarations BEFORE the first use; recursors are generated
+f.def("three", "Nat", "(Nat.succ two)", Fixture.regular(2));       //   by rlvm-inductive with the reference kernel
+int x = f.fvar("n", "Nat");                           // a free variable of the fixture's context (OPEN)
+int t = f.term("(Nat.add (Nat.succ n) (lit 2))");     // Sexp term language (Sexp.java); n is a loose bound variable
+int v = f.eval(t);  int w = f.whnf(v);  f.conv(v, w);  f.inferCheck(t);  f.vtype(v);  f.apply(fn, a, b);
+f.expectFail(MachineErrors.E_APP_MISMATCH, () -> f.inferCheck(bad));
+f.hostDepth(0);                                       // every frame materialised: run each row a second time
+f.record(v); f.run2slots(r); f.pair(a, b); f.show(v); f.showTerm(t); Show.record(f.m, v); Show.worklist(f.m);
+~}
+
+\p{A judgment that ends with a signal throws \code{\verb~|Fixture.MachineFailure~} (code + signal); \code{\verb~|f.m~} is the machine; \code{\verb~|f.session~} the \code{\verb~|MachineSession~}. Per judgment against the oracle: build the same term for \code{\verb~|new RefKernel(f.ctx, EngineConfig.defaults())~} and compare through \code{\verb~|Quote~} (M8) or by \code{\verb~|isDefEq~}.}
+
+\p{Whole files, in-process (reference engine and machine side by side, per declaration):}
+
+\pre{\verb~|
+Fixture g = Fixture.load("work/arena-site/tests/good/tutorial/001_basicDef.ndjson");   // real loader + environment pass
+Fixture.DiffReport r = g.diffAgainstReference();      // agree / declined / SOUNDNESS / COMPLETENESS, one line each
+Fixture.Verdict v = g.checkAll();                     // the machine alone, verdict rule of the driver
+g.referenceVerdict();  g.frameTrace(cid);  g.close();
+~}
+
+\p{The gate value is \code{\verb~|r.clean()~} (no difference at all); \code{\verb~|r.soundness + r.completeness~} must be 0 at every commit, also in the middle of the work (a decline is honest, a wrong verdict is not). \code{\verb~|rlvm.testkit~} (\code{\verb~|DiffEngine~}, \code{\verb~|OfficialVerdicts~}, the mutant corpus) is on the test class path.}
+
+\p{Through the launcher (the gate's form; the distribution does not contain the machine jar yet):}
+
+\pre{\verb~|
+scripts/dev.sh dist                                             # once: work/dist/bin/rlvm-jvm from the published jars
+JAR=.toolchain/m2/rlvm/rlvm-machine/0.1.0-SNAPSHOT/rlvm-machine-0.1.0-SNAPSHOT.jar      # installed by every publish
+RLVM_EXTRA_CP=$JAR work/dist/bin/rlvm-jvm -X engine=machine -X stats-file=/tmp/s.json FILE.ndjson; echo $?
+~}
+
+\p{\strong{The exit status alone proves nothing}: the driver re-checks a unit the machine declines with the reference kernel, so the verdict is right even when the machine does nothing. Read the statistics: \code{\verb~|values.engine.primary.machine.declined~} and \code{\verb~|units.declined~} must be 0 and \code{\verb~|values.engine.primary.machine.accepted~} must equal the number of checked units. Always pass \code{\verb~|-X engine=machine~} explicitly: with the jar on the class path and no \code{\verb~|-X engine~} the launcher picks the machine by default. Official verdicts: \code{\verb!!|~/.elan/toolchains/leanprover--lean4---v4.36.0/bin/leanchecker --from-export FILE!!}, cached in \code{\verb~|work/oracle/~}. CPU time, wall clock, RSS and instructions under the arena's limits: \src{bench/README.md}, \code{\verb~|bench/track/~} (CPU time is the metric; report it first).}
+}
+
+\subtree{
+\title{7. The packages}
+
+\p{Common to all: read ISA sections 0-2 and 13-14, the convention document, and the sections named below; \src{docs/research/02-kernel-typechecker.md} (R02) is the official rule for every judgment and \code{\verb~|rlvm-ref~} (\code{\verb~|RefKernel.java~}, README) is the same rule already implemented over terms - read it for exact behaviour.}
+
+\subtree{
+\title{M1 - values and runs with interning; levels; literals; scope}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Values~}, \code{\verb~|Runs~}, \code{\verb~|Lits~}, \code{\verb~|Levels~}, \code{\verb~|Scope~}; tests \code{\verb~|M1*~}; \code{\verb~|NOTES-M1.md~}.}
+\li{\strong{Read}: ISA 2 (all), 1.5, 1.6, 4.2 (KSORT .. PEEK), 13.3; R05 for gruszka's value model; READMEs of \code{\verb~|rlvm-level~} (\code{\verb~|mkSubst~}, \code{\verb~|instantiate(level, subst)~}, \code{\verb~|isEquiv~}), \code{\verb~|rlvm-nat~} (\code{\verb~|Nat~}, \code{\verb~|NatStore~}), \code{\verb~|rlvm-store~} (\code{\verb~|Terms~}, \code{\verb~|DeclTable~}, \code{\verb~|Specials~}, \code{\verb~|LitPool~}).}
+\li{\strong{Implements}: every stub of the four classes: constructors with canonical forms and flags (2.1-2.3), \code{\verb~|CHEAD~} and the sort cache, NEU interning with its spine in one probe (\code{\verb~|Hash.neu~}, hash in word c), \code{\verb~|mkApp~} with the \code{\verb~|Nat.succ~} rule, \code{\verb~|mkProj~}, \code{\verb~|nsucc~}, \code{\verb~|peek~}; \code{\verb~|spine~}, \code{\verb~|frame~} (key includes the REST run), \code{\verb~|prune~} (HOLE outside the mask, far frames), \code{\verb~|push~} (in place at the top of \code{\verb~|es~}), \code{\verb~|enter~}; \code{\verb~|klit~}, \code{\verb~|sameContent~}, Nat handles; \code{\verb~|substOf~}, \code{\verb~|lsub~}, \code{\verb~|lsubList~}, \code{\verb~|lvlEq~}, \code{\verb~|listsEq~}, \code{\verb~|importLevel~} (step 2).}
+\li{\strong{May call}: \code{\verb~|Machine~} (\code{\verb~|addRecordAt~}, \code{\verb~|addRun~}, \code{\verb~|putRunAt~}, \code{\verb~|internRecord~}, caches, \code{\verb~|fault~}), \code{\verb~|Layout~}, \code{\verb~|Hash~}, \code{\verb~|Op~}; \code{\verb~|m.terms~}, \code{\verb~|m.decls~}, \code{\verb~|m.specials~}, \code{\verb~|m.levels~}, \code{\verb~|m.lists~}, \code{\verb~|m.lits~}, \code{\verb~|m.nats~}. No judgment.}
+\li{\strong{Acceptance}: I-ID property tests on random records (two constructions, one id; PI against PII; \code{\verb~|ls~} in closure identity); intern and reset in O(used) (a session of one record does not touch a full table); far-frame identity with the REST run; a pair key with an immediate; literal content comparison of two NBIG / STR refs with different ids; the substitution regression of ISA 2.7 (\code{\verb~|Prelude~} has \code{\verb~|c1.{u,v}~} and \code{\verb~|c2.{v,u}~} with one body term); \code{\verb~|OPEN~} / \code{\verb~|CLOSE~} reproduce ids; closure identity independent of the path to the environment (same mask positions, HOLE elsewhere); \code{\verb~|Nat.succ~} rows (\code{\verb~|Nat.zero~} -> literal 1, NBIG at 2^31, WHNF flag only on a normal base); probe cost reported in ns and instructions per \code{\verb~|mkApp~} hit (target at most 60 instructions inlined).}
+\li{\strong{Notes}: everybody waits for this package: publish constructors first (\code{\verb~|mkSort~}, \code{\verb~|mkConst~}, \code{\verb~|mkNeu~} / \code{\verb~|mkApp~}, \code{\verb~|mkLam~} / \code{\verb~|mkPi~} / \code{\verb~|mkPii~} / \code{\verb~|mkSusp~}, \code{\verb~|prune~}, \code{\verb~|push~}, \code{\verb~|enter~}, \code{\verb~|lsub~}), within the first hour, then literals and the rest. \code{\verb~|Scope~}, \code{\verb~|mkFVar~} and the accessors already work. Stage: v0; \code{\verb~|importLevel~} step 2.}
+}
+}
+
+\subtree{
+\title{M2 - eval, force, apply, inst}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Eval~}; tests \code{\verb~|M2*~}; \code{\verb~|NOTES-M2.md~}.}
+\li{\strong{Read}: ISA 4.2 (EVAL, ARGV), 4.3.1, 2.4, 2.6, 3.1 (\code{\verb~|tabled~}), 5.1-5.2; convention H8 (inert nests).}
+\li{\strong{Implements}: \code{\verb~|eval~}, \code{\verb~|force~}, \code{\verb~|apply~}, \code{\verb~|inst~}, \code{\verb~|argv~}, \code{\verb~|dom~}, \code{\verb~|forceFast~}, \code{\verb~|instFast~}, the resume switch. v0 tables every non-leaf node on its SUSP record; let values are always LET suspensions; unread binders receive HOLE (B6, from the node mask); inert application nests are evaluated by one loop over scratch (no host recursion: a 913,500-element list literal must not recurse).}
+\li{\strong{May call}: M1; \code{\verb~|Infer.infer~} (ONLY mode, for \code{\verb~|INST~} of a PII); \code{\verb~|Code.run~} only behind \code{\verb~|SW_CODE~}.}
+\li{\strong{Acceptance}: per-instruction rows of ISA 4.2 and 4.3.1; closure identity independent of the path to the environment; HOLE for unread binders and \code{\verb~|fault(E_HOLE)~} on reading one; LET suspensions kept; inert nests give one call event (frame trace); a 913,500-element list literal (ISA section 9; build the term in a test) and a 1,000,000-deep application, binder and mixed nest on a 512 KiB thread stack under D = 64 and D = 0; identical value ids under D = 0 / 64.}
+\li{\strong{Notes}: until \code{\verb~|Infer.infer~} is published, \code{\verb~|inst~} of a PII cannot be tested end to end: test PI closures first and say so in your log. Stage: v0; gating by node flags (\code{\verb~|SW_GATED_TABLING~}) step 1.}
+}
+}
+
+\subtree{
+\title{M3 - reduction: delta, core, whnf, iota, quot, Nat, String}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Reduce~}, \code{\verb~|NatRed~}, \code{\verb~|StrRed~}, \code{\verb~|Rules~}; tests \code{\verb~|M3*~}; \code{\verb~|NOTES-M3.md~}.}
+\li{\strong{Read}: ISA 4.3 (all), 2.9, 3.6 (case trees: step 4 only); R02 section 7 and section 10 (trap list); \code{\verb~|rlvm-nat~} README (the 15 operations and their guards).}
+\li{\strong{Implements}: \code{\verb~|delta~}, \code{\verb~|core~} (cheap and full), \code{\verb~|whnf~}, \code{\verb~|iota~} (K, structure eta, literal views), \code{\verb~|quotr~}, \code{\verb~|natop~}, \code{\verb~|natFold~}, \code{\verb~|offset~} / \code{\verb~|offsetFast~}, \code{\verb~|strView~}, the \code{\verb~|..Fast~} queries, the resume switch; \code{\verb~|Rules.rules~} at step 4.}
+\li{\strong{May call}: M1, M2; \code{\verb~|Conv.conv~} (K: \code{\verb~|to_cnstr_when_K~}; \code{\verb~|offset~}); \code{\verb~|Infer.vtype~}, \code{\verb~|Infer.isprop~} (\code{\verb~|to_cnstr_when_structure~}); \code{\verb~|Facts~} behind switches.}
+\li{\strong{Acceptance}: rows of ISA 4.3 against R02 section 7; \code{\verb~|bugs/k-rec-conv~}, \code{\verb~|nat-rec-k-lie~}, \code{\verb~|nat-shift-huge~}, \code{\verb~|str-lit-utf8*~}, \code{\verb~|other/nat-lit-*~}; the \code{\verb~|Nat.succ~} rows of ISA section 11 (\code{\verb~|Nat.ble (Nat.succ (f 2)) 7~}, the same with \code{\verb~|Nat.mod~}); a stuck projection returns the ORIGINAL cell; WHNF of an NSUC folds exactly when the official whnf does; case trees equal \code{\verb~|DELTA~} + \code{\verb~|IOTA~} on random arguments (step 4).}
+\li{\strong{Notes}: theorem values kept as proof blocks are decoded into the overlay (\code{\verb~|Overlay.blockRoot~}) and the term arrays re-read (ISA 12 R4). Stage: v0; case trees step 4.}
+}
+}
+
+\subtree{
+\title{M4 - conversion}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Conv~}, \code{\verb~|Cargs~}, \code{\verb~|Pairs~}; tests \code{\verb~|M4*~}; \code{\verb~|NOTES-M4.md~}.}
+\li{\strong{Read}: ISA 4.4 (all), 6 (all), 5.4, 1.5; R02 section 8 (the state order is the official one).}
+\li{\strong{Implements}: \code{\verb~|Pairs~} (status bits in one entry, unsigned key order, \code{\verb~|UNDEC~} stamped by \code{\verb~|m.declStamp~}); \code{\verb~|conv~} as the complete procedure (c0 without B12, c2 first line, c3..c13), \code{\verb~|convFast~}, \code{\verb~|cbind~}, \code{\verb~|lazyd~} (final pair in \code{\verb~|m.A2~}, \code{\verb~|m.A3~}), \code{\verb~|projd~}, \code{\verb~|pirr~}, \code{\verb~|eta~}, \code{\verb~|etas~}, \code{\verb~|unitl~}, \code{\verb~|strx~}; \code{\verb~|Cargs.cargs~} (v0: every position SAME; pass A and pass C in the official order); resume switch. Step 2: plans and the agreement rule; step 5: B1, B2, B12 (\code{\verb~|cclo~}), pass B, UNDEC, all under \code{\verb~|TRY~}.}
+\li{\strong{May call}: M1-M3; \code{\verb~|Infer.vtype~}, \code{\verb~|Infer.isprop~}; \code{\verb~|Scope~}; \code{\verb~|Facts~} / \code{\verb~|Cong~} behind \code{\verb~|SW_FACTS~}.}
+\li{\strong{Acceptance}: the state order c0-c13 against R02 section 8, one row per state and per LAZYD branch; \code{\verb~|bugs/unit-rec-rule~}, \code{\verb~|eta-ctor-alias~}, \code{\verb~|rec-missing-ih~}, \code{\verb~|perf/irrelevance-refutes~}, \code{\verb~|proj-lazy-struct~}; NEG not written under ER or for a LAM side and not read under ER; FAILED only for a completed F; a probe that ends in U leaves FAILED unset (step 5); the agreement rule on a crafted unread-then-proof telescope (step 2); \code{\verb~|shortcheck~} clean on Init (step 2+).}
+\li{\strong{Notes}: stage v0 = complete procedure; plans step 2; probes step 5.}
+}
+}
+
+\subtree{
+\title{M5 - inference, checking, the DECL driver, facts}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Infer~}, \code{\verb~|Decl~}, \code{\verb~|Facts~}, \code{\verb~|FactStore~}; tests \code{\verb~|M5*~}; \code{\verb~|NOTES-M5.md~}.}
+\li{\strong{Read}: ISA 4.5 (all), 5.3, 3.5 (step 2), 14.1; R02 section 6, R03 section 4.}
+\li{\strong{Implements}: \code{\verb~|infer~} (both modes, every term kind, TWALK, IPROJ internal), \code{\verb~|check~} (v0: generic rule + tabling; B9 behind \code{\verb~|SW_EXPECT~}), \code{\verb~|vtype~}, \code{\verb~|ensort~}, \code{\verb~|enpi~}, \code{\verb~|isprop~}, the \code{\verb~|..Fast~} queries, resume switch; \code{\verb~|Decl.check(m, cid)~} (returns a \code{\verb~|MachineErrors~} code, 0 = ACCEPT; each phase is \code{\verb~|m.drive(J(m, .., 0))~}; on ABORT / FATAL: \code{\verb~|m.abandon()~} and return \code{\verb~|m.err~}); step 2: \code{\verb~|Facts~}, \code{\verb~|SIGD~}, \code{\verb~|FactStore~}.}
+\li{\strong{May call}: M1-M4.}
+\li{\strong{Acceptance}: every \code{\verb~|throw~} of R02 section 6 as a row; the tutorial projection tests, \code{\verb~|projIndexData2~}, a field index beyond \code{\verb~|nfields~}, \code{\verb~|x.1~} on \code{\verb~|P.mk (n : N) (p : True) : P n~}; tabled CHECK on \code{\verb~|perf/app-lam~}; \code{\verb~|theorem_type_is_not_prop~}; check stamps: a type inferred without checking never answers a checking query; facts (step 2): one record per constant, published once, \code{\verb~|SIG~} for every constructor and recursor of Init, the manifest mutation tests, concurrent derivation by 6 threads gives identical records.}
+\li{\strong{Notes}: \code{\verb~|Decl.check~} is the first thing every end-to-end test needs: publish a version that handles axioms and definitions as soon as INFER covers sort / const / app / lam / pi. Stage: v0; facts step 2.}
+}
+}
+
+\subtree{
+\title{M6 - sessions, facade, budgets, debug modes; shared files; module build}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Layout~}, \code{\verb~|Op~}, \code{\verb~|Hash~}, \code{\verb~|Machine~}, \code{\verb~|Frames~}, \code{\verb~|Ops~}, \code{\verb~|MachineProvider~}, \code{\verb~|MachineEngine~}, \code{\verb~|MachineSession~}, \code{\verb~|MachineOps~}, \code{\verb~|Debug~}, \code{\verb~|Show~}, \code{\verb~|package-info~}, \code{\verb~|pom.xml~}, the service registration, \code{\verb~|README.md~}; shared tests (\code{\verb~|Fixture~}, \code{\verb~|Sexp~}, \code{\verb~|Prelude~}, \code{\verb~|Toy~}, \code{\verb~|TestTables~}, \code{\verb~|ControlTest~}, \code{\verb~|MachineStateTest~}, \code{\verb~|FixtureTest~}, \code{\verb~|StepSizeTest~}) and tests \code{\verb~|M6*~}; \code{\verb~|NOTES-M6.md~}. Answers the requests of the other packages for shared files quickly (that is the package's first duty).}
+\li{\strong{Read}: ISA 1, 9, 14, 5.5; RECONCILIATION sections 2-3; the driver's and \code{\verb~|rlvm-main~}'s READMEs.}
+\li{\strong{Implements}: the facade to completion (Reason table of 14.3, strict mode 14.2, cancellation 14.4, footprint and steps 14.5, \code{\verb~|dumpStats~} 14.5, \code{\verb~|MachineOps~} 14.6 with M8's \code{\verb~|Quote~}); the debug modes (\code{\verb~|memocheck~}, \code{\verb~|poison~}, \code{\verb~|scopeaudit~}, \code{\verb~|maskaudit~}, \code{\verb~|sharecheck~}, \code{\verb~|shortcheck~} with M4, \code{\verb~|pubcheck~} with M7); warm sessions (\code{\verb~|SW_WARM~}: reset rule, generation rule of 5.3 with M5, footprint cap); the inlining flag sets of H10 for the launchers; later the engine-wide tables under contention (step 6).}
+\li{\strong{May call}: everything through \code{\verb~|Ops~} and the entry steps.}
+\li{\strong{Acceptance}: \code{\verb~|Session.check~} on the 141 tutorial tests through \code{\verb~|rlvm-main~} with \code{\verb~|-X engine=machine~} and zero machine declines in the statistics (section 6); the Reason table; strict mode equals rule 3 of ISA 6.3; cancellation within 4096 ticks (unit-tested on toy judgments already; repeat on a real declaration); a fatal fault inside a TRY declines; footprint equals bytes in use and is not capacity; reset after every outcome other than ACCEPT; \code{\verb~|memocheck~}, \code{\verb~|poison~}, \code{\verb~|scopeaudit~} runs of Init.}
+\li{\strong{Notes}: see \code{\verb~|NOTES-M6.md~} for what the skeleton decided and what it left undone. Stage: v0, step 1, step 6.}
+}
+}
+
+\subtree{
+\title{M7 - K1 elaborator and code stepper}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Elab~}, \code{\verb~|Code~}, \code{\verb~|CodeStore~}, \code{\verb~|Match~}, \code{\verb~|Cong~}; tests \code{\verb~|M7*~}; \code{\verb~|NOTES-M7.md~}.}
+\li{\strong{Read}: ISA 3 (all), 4.1, 4.4.4, 4.5.4, 6.1, 8.2 (code stepper), 8.3; convention H7 (register stack).}
+\li{\strong{Implements}: nothing that runs in v0. In order: \code{\verb~|Cong~} (step 2, with M5's facts), \code{\verb~|CodeStore~} + \code{\verb~|Elab~} + \code{\verb~|Code.run~} for TELE with \code{\verb~|Match~} and the IC table (step 3), BODY / RULE and LEAF blocks (step 4). All behind \code{\verb~|SW_FACTS~} / \code{\verb~|SW_TELE~} / \code{\verb~|SW_CODE~}.}
+\li{\strong{May call}: everything; publication rule of ISA 3.3 (only export or generated term ids, constant ids, name ids, base level ids; derived levels structurally).}
+\li{\strong{Acceptance}: the listings of ISA 3.7 reproduced; \code{\verb~|pubcheck~} on every block of Init and Std; theorem block values never elaborated; \code{\verb~|MATCH~} = build + \code{\verb~|CONV~} on sampled sites; two workers elaborating one role publish equal blocks; the rent-to-own counter; tier equivalence K0 = K1 with M8.}
+\li{\strong{Notes}: starts after the v1 gate of step 1 (ISA 13.6). Before that: design review of the stepper against H7, an elaborator that only \em{prints} blocks for the listings (no execution), and help for M8. Stage: steps 2 (plans), 3, 4.}
+}
+}
+
+\subtree{
+\title{M8 - quote, tier and convention equivalence, differential tests}
+
+\ul{
+\li{\strong{Owns}: \code{\verb~|Quote~}, \code{\verb~|TierEq~}, \code{\verb~|Diff~} (test tree); tests \code{\verb~|M8*~}; \code{\verb~|NOTES-M8.md~}.}
+\li{\strong{Read}: ISA section 11 (testing), 13.5, 14.6; convention H12; \code{\verb~|rlvm-testkit~} README; \src{bench/README.md}.}
+\li{\strong{Implements}: \code{\verb~|Quote~} (readback of a value into the overlay, memoised by value and depth, never on a checking path); \code{\verb~|Diff.directory~} and the slow test classes that run \code{\verb~|Fixture.diffAgainstReference~} over the tutorial, \code{\verb~|bugs/~}, then all 230 tests, then Init, writing \code{\verb~|work/status/machine-diff-*.txt~}; \code{\verb~|TierEq.conventionEquivalence~} (D = 0 against D = 64: value ids, memo contents, ticks, outcomes, call trace, per declaration); judgment-level differential tests against \code{\verb~|RefKernel~} (\code{\verb~|whnf~} and \code{\verb~|infer~} read back and compared up to the reference's \code{\verb~|isDefEq~} on sampled sub-terms); frames per declaration and the 0.1\% bound on frames written under D = 64; the per-stage cost table (CPU, wall, RSS, instructions) by one command; later K0 = K1.}
+\li{\strong{May call}: everything, from the test tree.}
+\li{\strong{Acceptance}: the reports above exist and are regenerated by one command each; the gate reports are what the orchestrator reads.}
+\li{\strong{Notes}: start with the report tooling on the current state (every unit declined, 0 wrong) so that the first judgments that land are measured the minute they are published. Stage: all.}
+}
+}
+}
+
+\subtree{
+\title{8. Who calls whom (v0)}
+
+\pre{\verb~|
+Decl.check (M5) -> Infer.infer / check / ensort / isprop (M5) -> Eval.eval / inst / dom (M2), Reduce.whnf (M3),
+                                                                 Conv.conv (M4), Scope.open / close (M1)
+Conv.conv (M4)  -> Reduce.core / whnf / delta / NatRed.natFold / offset (M3), Eval.force / inst / apply / dom (M2),
+                   Infer.vtype / isprop (M5), Cargs.cargs (M4), Scope (M1), Pairs (M4)
+Reduce.* (M3)   -> Eval.force / eval / apply (M2), Conv.conv (M4: K), Infer.vtype / isprop (M5: structure eta)
+Eval.* (M2)     -> Values / Runs / Levels / Lits (M1), Infer.infer (M5: INST of a PII)
+~}
+
+\p{Expected order of first publications: M1 (constructors), M2 (\code{\verb~|eval~} without tabling subtleties), M3 (\code{\verb~|whnf~} on closed terms), M5 (\code{\verb~|infer~} for the simple kinds, \code{\verb~|Decl.check~}), M4 (\code{\verb~|conv~} identity .. lazy delta), M6 / M8 alongside. Until a callee is published, its stub throws \code{\verb~|UnsupportedOperationException~}, which \code{\verb~|MachineSession.check~} turns into DECLINE: the main tree is always sound.}
+}
+
+\subtree{
+\title{9. Additions by M6 after the skeleton (2026-11-24)}
+
+\ul{
+\li{\strong{\code{\verb~|publish~} is atomic also when it is interrupted} (\src{scripts/machine-sandbox.sh}, since 09:50Z; self-test: 23 checks). SIGINT / SIGTERM / SIGHUP no longer stop it between "files replaced" and its verdict; if its Maven run is stopped it restores the main tree and reinstalls the jar; if the script itself is killed (SIGKILL), the next command that takes the lock finds the journal \code{\verb~|work/sandbox/.inflight~} and either completes the publication (Maven had ended with status 0) or undoes it (log line \code{\verb~|publish Mk: DIED before its verdict, main tree restored~} in \code{\verb~|machine-Mk.log~}: publish again). Do not wrap \code{\verb~|publish~} in \code{\verb~|timeout~}. The main tree's fast group takes about a minute now and the lock may add several: a publication can outlast a 2-minute command limit; let it run in the background and read \code{\verb~|work/sandbox/publish.log~}.}
+\li{\strong{The gate through the launcher}: \code{\verb~|rlvm-machine/src/test/resources/m6/launcher-gate.sh [tutorial | bugs | perf | other | corner-cases | all | FILE | DIR].. [-X KEY=VALUE].. [--jar CLASSES-OR-JAR]~} runs the tests through \code{\verb~|work/dist/bin/rlvm-jvm -X engine=machine~}, reads the statistics and writes \code{\verb~|work/status/machine-gate-<label>.txt~} (verdicts, machine accepted / rejected / declined by error code, the first failure messages). \code{\verb~|--jar work/sandbox/Mk/rlvm-machine/target/classes~} runs your sandbox.}
+\li{\strong{Engine settings on the command line}: \code{\verb~|-X machine.debug=memocheck,poison,scopeaudit,maskaudit~}, \code{\verb~|-X machine.switches=warm,..~}, \code{\verb~|-X machine.hostDepth=0~}, \code{\verb~|-X machine.memocheck.every=N~}, \code{\verb~|-X machine.memocheck.budget=N~} (also as system properties \code{\verb~|rlvm.machine.*~}).}
+\li{\strong{Failure messages}: raise a mismatch with \code{\verb~|m.fail(code, a, b)~} and \code{\verb~|Session.lastMessage()~} shows the two values; a memory or stack decline names its limit (\code{\verb~|Machine.limitDetail~}) and the footprint by part; a failed audit carries its detail (\code{\verb~|m.auditFail(text)~}), a memo disagreement also the first difference of the two values. The statistics keep the first four messages (\code{\verb~|machine.firstFailures.i~}).}
+\li{\strong{Records in use are \code{\verb~|[m.vbase, m.vp)~}, run words \code{\verb~|[m.rbase, m.rsp)~}} (the bases move under debug mode \code{\verb~|poison~}). \strong{\code{\verb~|m.nats~} is the machine's own number overlay} (emptied at every reset, counted in the footprint); a handle of it crosses to the context's \code{\verb~|NatBinding~} only through \code{\verb~|Nat.transfer~}.}
+\li{\strong{Debug hooks} (class comment of \code{\verb~|Debug~}): memo hits call \code{\verb~|Debug.memoCheck~} or \code{\verb~|memoEnter~} / \code{\verb~|memoExit~} (a re-computation is compared by id, then up to PEEK, then by \code{\verb~|CONV~}); \code{\verb~|Debug.scopeAudit~} at GET, \code{\verb~|Debug.maskAudit~} before PRUNE, \code{\verb~|Debug.shareCheck~} on untabled nodes, \code{\verb~|Debug.shortCheck~} for shortcuts, \code{\verb~|Debug.pubTerm / pubLevel / pubList / pubConst~} at publication. Statistics on the hit branch: \code{\verb~|if (m.stats) m.hits[Op.J]++;~}; probe outcomes \code{\verb~|m.probe(Op.B1, Layout.T)~}.}
+\li{\strong{H10 inlining directives}: \code{\verb~|rlvm-machine/h10/hotspot-inline.cmd~} (\code{\verb~|-XX:CompileCommandFile=~}) and \code{\verb~|h10/native-image-args.sh~} (prints the \code{\verb~|-H:PriorityForceInline=..~} list from the class files); not wired into a launcher and not measured on the real machine yet.}
+\li{\code{\verb~|Fixture.defShared(name, lparams, type, valueOfConstant, hint)~}: a definition whose value is another constant's value node (one term id under two parameter lists; \code{\verb~|c1~} / \code{\verb~|c2~} of the prelude). \code{\verb~|Fixture.diffAgainstReference~} counts a unit the reference itself declines as "not judged".}
+}
+}

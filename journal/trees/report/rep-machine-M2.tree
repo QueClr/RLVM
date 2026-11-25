@@ -1,0 +1,272 @@
+\title{NOTES-M2 - family EV: EVAL, FORCE, APPLY, INST, ARGV, DOM (owner: M2)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\meta{origin}{rlvm-machine/NOTES-M2.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{File: \code{\verb~|src/main/java/rlvm/machine/Eval.java~}. Tests: \code{\verb~|M2EvalTest~} (rows of ISA 4.2 / 4.3.1, fast), \code{\verb~|M2EquivTest~} (convention and inert-loop equivalence, fast), \code{\verb~|M2DeepTest~} (stack safety; the full sizes are group \code{\verb~|slow~}), helper \code{\verb~|M2~}. Spec: ISA 4.2, 4.3 (FORCE, APPLY, INST), 4.3.1, 4.4.3 (DOM), 2.4, 2.6, 3.1, 5.1-5.2; convention H1-H12.}
+
+\subtree{
+\title{1. What a caller must know}
+
+\table{
+\tr{\th{Point}\th{Rule}}
+\tr{\td{A result may be a suspension}\td{\code{\verb~|EVAL~}, \code{\verb~|APPLY~}, \code{\verb~|INST~} return a value \strong{or a SUSP}: a delayed argument that the term passes on (a variable bound to a suspension, a field taken out of a constructor application, a let variable). Call \code{\verb~|FORCE~} where the value is needed. \code{\verb~|DOM~} always returns a forced value. \code{\verb~|FORCE~} never returns a SUSP}}
+\tr{\td{\code{\verb~|VAL~} is never a SUSP}\td{ISA 2.6. \code{\verb~|FORCE~} forces the result of its \code{\verb~|EVAL~} again if that is a suspension; a tabled \code{\verb~|EVAL~} whose result is still a suspension after \code{\verb~|PEEK~} is \strong{not tabled} (D1)}}
+\tr{\td{Variables are \code{\verb~|PEEK~}ed}\td{\code{\verb~|EVAL~} / \code{\verb~|ARGV~} of a variable is \code{\verb~|PEEK(GET)~}: a plain suspension whose value is known is replaced by the value before it enters a spine or a register; a LET suspension is kept (ISA 2.1, 2.8) (D8)}}
+\tr{\td{\code{\verb~|let~}}\td{A \code{\verb~|let~} inside an evaluated term is zeta by sharing with \strong{plain} values (D9). Only INFER makes LET suspensions (the let variable of \code{\verb~|infer_let~}); \code{\verb~|EVAL~} keeps one when it reads it through a variable, and what is built from it is OPEN}}
+\tr{\td{HOLE}\td{An argument of \code{\verb~|APPLY~} / \code{\verb~|INST~} may be HOLE iff the binder is not read. \code{\verb~|APPLY~} raises \code{\verb~|fault(E_HOLE)~} if a HOLE argument would enter a spine (\code{\verb~|MKAPP~}); reading HOLE through a variable is \code{\verb~|fault(E_HOLE)~} (in \code{\verb~|Runs.get~})}}
+\tr{\td{Scratch and environments}\td{\code{\verb~|APPLY(f, xb, n)~} reads \code{\verb~|X[xb .. xb + n)~} and leaves it to the caller. Every judgment restores \code{\verb~|xp~} and \code{\verb~|ep~} when it returns a result; the saved \code{\verb~|ep~} / \code{\verb~|xb~} are payload words of its frames (H7)}}
+\tr{\td{Inert nests}\td{The evaluation of an inert application that \code{\verb~|ARGV~} performs at once (constant head, or a variable head bound to a neutral) is an iteration of the inert-nest loop of the enclosing \code{\verb~|EVAL~}: \strong{one tick per application node, no call event}. A whole nest of constant-headed applications is therefore one \code{\verb~|EVAL~} call event. \code{\verb~|SW_INERT_LOOP~} no longer selects anything (D12)}}
+\tr{\td{Ticks}\td{One per \code{\verb~|EVAL~} of an application, let or projection node that is not a memo hit (inert nodes included); one per \code{\verb~|FORCE~} of a pending suspension, per \code{\verb~|APPLY~} of a closure or pending suspension, per \code{\verb~|INST~} without \code{\verb~|COD~}, per \code{\verb~|DOM~} without \code{\verb~|M_DOM~}. Leaves, closures, \code{\verb~|MKAPP~} of a neutral, \code{\verb~|MKSUSP~} and memo hits are free}}
+\tr{\td{\code{\verb~|Eval.Ext~} (\code{\verb~|m.x2~})}\td{\code{\verb~|body~}, \code{\verb~|en~}, \code{\verb~|amOpen~}: second results of helpers (like \code{\verb~|m.envBase~}); \code{\verb~|ownFirst~} (gated tabling); \code{\verb~|cm~} (closed-term memo), \code{\verb~|am~} (APPLY memo) with its governor \code{\verb~|amWin~}, \code{\verb~|amWinHits~}, \code{\verb~|amOff~}; \code{\verb~|xsw~}, \code{\verb~|depthK~} (measurement bits, section 6); statistics \code{\verb~|hits~}, \code{\verb~|lazy~}, \code{\verb~|amHits~} (only with \code{\verb~|m.stats~})}}
+\tr{\td{\code{\verb~|Eval.evalBody~}}\td{For a caller that binds the arguments of a binder body itself (M5's \code{\verb~|TWALK~} in telescope mode): \code{\verb~|EVAL~} of a term entered like the body of a beta step: without a tabling record under \code{\verb~|SW_M2A~} (D19), else \code{\verb~|Eval.eval~}}}
+\tr{\td{Switches of this package}\td{\code{\verb~|SW_GATED_TABLING~} (\code{\verb~|gated~}): tabling by node flags, with the depth rule (D14, D21). \code{\verb~|SW_M2A~} (\code{\verb~|m2a~}): bodies without a tabling record, projection selector (D19, D22). \code{\verb~|SW_M2B~} (\code{\verb~|m2b~}): the APPLY memo (D23). Without a switch, changing no result: the closed-term memo (D20), the argument picker (D22). Section 6}}
+\tr{\td{Debug hooks (ISA 5.5)}\td{scopeaudit is in \code{\verb~|Runs.get~} (M1), which every variable read of this family goes through; maskaudit before every \code{\verb~|PRUNE~} made here (closures, suspensions, tabling records), sharecheck when the walk enters an untabled node (gated tabling), memocheck on \code{\verb~|VAL~}, \code{\verb~|COD~}, \code{\verb~|M_DOM~} (D16)}}
+}
+
+\p{Frames (the payload is the parameter list of the continuation step):}
+
+\pre{\verb~|
+EVAL[0](t, eb, en, ls)                   the entry step (spilled)
+EVAL[NB](t, eb, en, ls)                  the entry step of a body evaluated without a tabling record (SW_M2A), spilled
+EVAL[IN](t, lo, u, eb, en, ls)           an inert application met by ARGV, beyond the depth bound (no call event);
+                                         lo = first id of the parent's export segment (-1: a root), u = depth in the nest
+EVAL[HEAD](s, xb, n, eb, en, ls)         waits for the value of the head          s = tabling record, or -t (t is not
+                                         tabled); X[xb - 1] = the depth of the node in its inert nest
+EVAL[HEADF](s, xb, n, eb, en, ls)        waits for the forced head
+EVAL[ARG](s, f, xb, n, i, eb, en, ls)    waits for argument i (an inert application); f = the forced head
+EVAL[APP](s, xb)                         waits for APPLY
+EVAL[BODY](s, ep0)                       waits for the body of a let chain
+EVAL[PROJ](t, s)                         waits for the struct of a projection
+EVAL[LET](t, s, eb, en, ls, ep0)         waits for the value bound by let node t (an inert application)
+FORCE[0](s)   FORCE[1](s, ep0)   FORCE[2](s)
+APPLY[0](f, xb, n)   APPLY[1](xb, n, k)   APPLY[2](xb, n, k, ep0)          k = arguments consumed
+APPLY[3](xb, n, k, ep0, g, j)                                               as APPLY[2]; the step applied closure g to j
+                                                                            arguments and is recorded in the APPLY memo (SW_M2B)
+INST[0](pi, x)   INST[1](memo, ep0)   INST[2](memo, xb)                     memo = the record whose COD is written, or 0;
+                                                                            INST[2]: the closure's block (SW_CODE)
+DOM[0](v)   DOM[1](v, ep0)   DOM[2](v)
+ARGV[0](t, eb, en, ls)                   never written (D7)
+~}
+}
+
+\subtree{
+\title{2. Deviations from ISA.md, with the reason}
+
+\table{
+\tr{\th{\verb~|#~}\th{Where}\th{Deviation}\th{Reason}}
+\tr{\td{D1}\td{4.2 \code{\verb~|tabled(t)~}: "\code{\verb~|VAL(s) = result~}"}\td{The result is \code{\verb~|PEEK~}ed; if it is still a SUSP (pending, or a LET suspension) it is returned and \strong{not} stored. Evaluating the node again redoes one level; its sub-terms are tabled}\td{ISA 2.6: \code{\verb~|VAL~} is never a SUSP, and \code{\verb~|PEEK~} / \code{\verb~|forceFast~} / every consumer rely on that. Forcing instead would make \code{\verb~|EVAL~} strict where the ISA and the official \code{\verb~|instantiate~} are lazy}}
+\tr{\td{D2}\td{4.3 \code{\verb~|FORCE~}: "\code{\verb~|call EVAL(term, frame, ls)~}, \code{\verb~|VAL <- A~}"}\td{\code{\verb~|VAL <- FORCE(A)~}: the result of the \code{\verb~|EVAL~} is forced again while it is a suspension (frame \code{\verb~|FORCE[2]~})}\td{same invariant; \code{\verb~|(fun x => x) a~} with an active \code{\verb~|a~} evaluates to the suspension of \code{\verb~|a~}}}
+\tr{\td{D3}\td{4.3 \code{\verb~|FORCE~}}\td{A plain suspension is evaluated by \code{\verb~|evalAt~}, the \code{\verb~|EVAL~} judgment without the tabling probe: the suspension \em{is} the tabling record of its term. A LET suspension is a record of its own (M1: aux 1) and goes through \code{\verb~|eval~}, so the plain record is tabled as usual}\td{saves \code{\verb~|PRUNE~} + one probe per \code{\verb~|FORCE~}; same call events (\code{\verb~|FORCE~}, \code{\verb~|EVAL~}), same ticks}}
+\tr{\td{D4}\td{4.4.3 / 2.6 \code{\verb~|DOM~}: "memo m1, else call \code{\verb~|EVAL(domain term, frame, ls)~}"}\td{\code{\verb~|DOM~} forces the value of the domain term; \code{\verb~|M_DOM~} never holds a suspension}\td{the domain is the type of the variable \code{\verb~|OPEN~} picks (2.8) and is compared at once by every caller; a memo word should hold a value. A top-level LET suspension loses nothing by being forced (\code{\verb~|CONV~} forces a suspension before it looks at flags; \code{\verb~|OPEN~}-ness matters for arguments inside a spine only)}}
+\tr{\td{D5}\td{11 "v0: every non-leaf node tabled"}\td{Lambda and Pi nodes have no tabling record in \code{\verb~|EVAL~}: their value is the closure, whose interning is the memo (class p: no tick, no event). Application, let and projection nodes are tabled}\td{a SUSP record per binder node would double the probes for nothing; \code{\verb~|INFER~} (M5) keeps its own record for a lambda node}}
+\tr{\td{D6}\td{4.2 \code{\verb~|EVAL~} app / 4.3.1 \code{\verb~|APPLY~}}\td{\code{\verb~|EVAL~} forces the head \strong{before} it builds the arguments (\code{\verb~|EVAL[HEAD]~}, \code{\verb~|EVAL[HEADF]~}), and an argument whose binder the forced closure does not read is not built at all: its scratch slot is HOLE. \code{\verb~|APPLY~} then substitutes HOLE for unread binders again (for callers that pass values)}\td{decision 8 "never evaluated when the callee's binder is unread", 4.1 \code{\verb~|BUNREAD~}, B6. Same values; fewer suspensions made. Only the first group of leading lambdas is known before the arguments are built; later groups get built arguments and HOLE in \code{\verb~|APPLY~}}}
+\tr{\td{D7}\td{13.7 "ARGV has a frame op of its own"}\td{\code{\verb~|ARGV~} never ticks and never becomes a frame: atoms and \code{\verb~|MKSUSP~} are inline, and its one sub-judgment is \code{\verb~|evalIn~}, whose frame is \code{\verb~|EVAL[IN]~}. \code{\verb~|K_ARGV~} has its \code{\verb~|resume~} case and is never written}\td{under H a judgment without work of its own before its only tail call needs no frame}}
+\tr{\td{D8}\td{4.2 "variable -> GET"}\td{\code{\verb~|PEEK(GET)~}}\td{ISA 2.1 "a SUSP whose value is known is never stored where its value could be stored (PEEK, 4.2)": a variable's value is copied into spines and registers. \strong{Consequence for M7 / tier equivalence}: operands of modes R / A / C must be \code{\verb~|PEEK~}ed when they enter a spine or a frame, or K0 = K1 holds only up to \code{\verb~|PEEK~}}}
+\tr{\td{D9}\td{4.2 \code{\verb~|let~}: "env = PUSH(env, MKSUSP(value, env, LET)) ... always a SUSP (2.8)"; 2.8 "\code{\verb~|let~} never creates a variable: the bound value is always a SUSP with flag LET"; 3.4 "let -> MKSUSP(value, LET) always"}\td{\strong{EVAL's let is zeta by sharing without the LET flag}: the bound value is what the argument of a beta step is (\code{\verb~|ARGV~}): an atom, an inert application built at once (frame \code{\verb~|EVAL[LET]~}), or a \em{plain} suspension of an active term; an unread let variable gets HOLE (B6). LET suspensions are made by INFER only (M5: the let variable of \code{\verb~|infer_let~}); EVAL keeps them when it meets them (\code{\verb~|PEEK~})}\td{\strong{The ISA's rule is wrong for evaluation and costs a factor of 1000 on Cedar.} Officially a let variable is a free variable only inside \code{\verb~|infer_let~} (R02 6.6; \code{\verb~|perf/let-fold~} is that case); \code{\verb~|whnf_core~} reduces a \code{\verb~|let~} of a term it evaluates by \code{\verb~|instantiate(body, value)~} (R02 7.1): no variable, no \code{\verb~|hasFVar~}. Flagging the lets of unfolded definition bodies made every value built from them OPEN, which switches off the Nat literal folding of lazy delta (R02 8.4) and the \code{\verb~|Bool.true~} shortcut (8.1 step 2); the machine then unfolded \code{\verb~|Nat.div~} / \code{\verb~|Nat.mod~} / \code{\verb~|gcd~} on literals near 2^63 by their fuel recursion. Measured on \code{\verb~|cedar-hot-ax~} unit 7008 (\code{\verb~|BitVec.neg_toInt_eq_neg_64._proof_1_1~}, an \code{\verb~|omega~} certificate whose definitions bind \code{\verb~|let~}s): 73.7 M ticks and E_MEM before, \strong{60,569 ticks and 38 ms after} (reference engine: 42 ms). ISA 2.3 allowed OPEN to over-approximate because it "only steers" those guards; it steers them into non-termination. To be applied to K1 as well (M7: \code{\verb~|MKSUSP .. LET~} in BODY / RULE blocks)}}
+\tr{\td{D10}\td{4.3.1 \code{\verb~|APPLY~}: neutral -> \code{\verb~|MKAPP~}}\td{\code{\verb~|fault(E_HOLE)~} if a HOLE is among the arguments that go into the spine; \code{\verb~|APPLY~} of HOLE itself is \code{\verb~|fault(E_HOLE)~}, of any other non-function \code{\verb~|fault(E_ILLTYPED)~}}\td{a HOLE inside a NEU could be compared and found "identical"; fail closed}}
+\tr{\td{D11}\td{4.3 \code{\verb~|INST~}}\td{(a) the result is \code{\verb~|PEEK~}ed and may be a suspension; \code{\verb~|COD~} is written only for a value. (b) a PII whose lambda body does not read its variable also gets HOLE and \code{\verb~|COD~} (ISA writes \code{\verb~|PUSH(frame, x)~} for PII; 2.6 lists \code{\verb~|COD~} for PI and PII). (c) \code{\verb~|INST~} / \code{\verb~|DOM~} of a record of another kind: \code{\verb~|fault(E_INTERNAL)~}}\td{(a) D1; (b) the type of a body that does not mention the variable cannot depend on it; (c) fail closed}}
+\tr{\td{D12}\td{8.2 "inert evaluation is one EVAL frame looping over scratch"; \code{\verb~|Op.SW_INERT_LOOP~}}\td{\strong{Wave 6: the loop over scratch is removed; \code{\verb~|SW_INERT_LOOP~} selects nothing} (the nest runs by host recursion, beyond the depth bound as the frame \code{\verb~|EVAL[IN]~}; the 913,500-element list literal and the 1,000,000-deep nests of \code{\verb~|M2DeepTest~} pass on a 512 KiB stack under D = 64 and 0). It was measured twice as not faster (section 5), and every change of the tabling gate had to be written twice. Before: two implementations of the inert-nest loop with \strong{identical observables} (records and runs word by word, memo words, ticks, call events): default = host recursion (\code{\verb~|evalIn~}; beyond the depth bound the frame \code{\verb~|EVAL[IN]~}), \code{\verb~|SW_INERT_LOOP~} = one loop over scratch (\code{\verb~|inertLoop~}). In both the nested inert applications cost a tick each and are not call events}\td{skeleton note "behind SW_INERT_LOOP only if results stay identical"; convention H8 item 3 leaves the choice to a per-platform measurement. \code{\verb~|M2EquivTest~} compares the two word by word}}
+\tr{\td{D13}\td{H4 \code{\verb~|spillN~}}\td{\code{\verb~|EVAL[IN]~} is written with \code{\verb~|m.fuel++; m.sig4(Op.SUSP, K_EVAL_IN, ..)~} instead of \code{\verb~|spill4~}}\td{\code{\verb~|spillN~} also takes back a call event, and an inner inert evaluation has none}}
+\tr{\td{D14}\td{3.1 \code{\verb~|tabled(t)~} (\code{\verb~|SW_GATED_TABLING~}, step 1, off)}\td{(\code{\verb~|Eval.gate~}; with the depth rule of D21.) SHARED / BODY / INVARIANT, or an export id below the unit's first one, or a generated id. Overlay nodes go by their flags only (the decoded block of \em{another} unit's theorem is not recognised as foreign). \strong{In addition a flat inert application} (constant head; every argument a variable, constant, sort or literal) \strong{is never tabled} under the switch, whatever its flags}\td{(a) the machine cannot tell whose block an overlay node belongs to; hash-consed overlay nodes are SHARED and decoded blocks carry their segment's flags, so sharing is never under-approximated. (b) evaluating a flat application is one \code{\verb~|MKAPP~} of atoms: cheaper than its tabling probe (\code{\verb~|PRUNE~} + SUSP probe; on a miss a frame run and a 32-byte record), and there is no sub-term whose walk a memo could save, so no DAG is walked as a tree. On Init through the launcher: 10\% fewer records and 7\% fewer run words than gating by flags alone, 5\% more ticks (re-evaluations are ticks); CPU time could not be measured (host load 170+)}}
+\tr{\td{D15}\td{2.4 mask bit 63}\td{A binder whose de Bruijn index in the body is 63 or more counts as read when bit 63 of the body's mask is set (no HOLE)}\td{bits 0..62 are per index; bit 63 only says "some index >= 63"}}
+\tr{\td{D16}\td{5.5 \code{\verb~|memocheck~}}\td{\code{\verb~|VAL~} (at \code{\verb~|FORCE~} and at every tabled \code{\verb~|EVAL~} hit) and \code{\verb~|COD~} are checked \strong{up to PEEK}: \code{\verb~|Eval.checkVal~} / \code{\verb~|checkCod~} re-compute with the entry bypassed and accept a result that \code{\verb~|Eval.samePeekedSlow~} finds structurally equal with known \code{\verb~|VAL~}s followed; \code{\verb~|M_DOM~} uses M6's one-line check (id-stable). A LET suspension's \code{\verb~|VAL~} is not checked separately (it is the plain record's)}\td{the re-evaluation meets suspensions whose value became known after the entry was written (\code{\verb~|PEEK~}, \code{\verb~|MKSUSP~} "known VAL") and builds \code{\verb~|NEU(c, [VAL a])~} where the first run built \code{\verb~|NEU(c, [SUSP a])~}: the same value, another id. Test \code{\verb~|M2EquivTest.aMemoCheckOfValIsUpToPeek~}}}
+\tr{\td{D17}\td{2.6 / 4.3.1 \code{\verb~|CODE~}}\td{Staging step 4, behind \code{\verb~|SW_CODE~} (off in v0): \code{\verb~|APPLY~} of a LAM closure and \code{\verb~|INST~} of a PI closure look the block of the binder term up once (\code{\verb~|Code.closureBlock~}, memo word \code{\verb~|CODE~}, \code{\verb~|NOCODE~} if none) and call \code{\verb~|Code.callClosure~} for \code{\verb~|j = min(leading lambdas, arguments, arity of the block)~} binders if the block has that entry; frame \code{\verb~|INST[2](memo, xb)~} for the scratch word of the argument. With the switch off the memo word is never read or written}\td{M7's request of 08:58Z; tested on M7's sub-blocks of \code{\verb~|Nat.add~} and of two Pi-making definitions (\code{\verb~|M2CodeTest~}: same value ids as the walk, call trace \code{\verb~|APPLY, ACT~} / \code{\verb~|INST, ACT~}, under D = 64 and 0)}}
+\tr{\td{D18}\td{results that are no value}\td{\code{\verb~|EVAL~} / \code{\verb~|FORCE~} raise \code{\verb~|fault(E_HOLE)~} / \code{\verb~|fault(E_INTERNAL)~} when a result is HOLE / NONE (a field of a constructor application that some caller built with a HOLE) instead of storing it in \code{\verb~|VAL~}}\td{fail closed}}
+\tr{\td{D19}\td{3.1 \code{\verb~|tabled(t)~}: "BODY(t): body of a binder"; 5.1 (\code{\verb~|SW_M2A~}, off)}\td{\strong{The body of a beta step (\code{\verb~|APPLY~}) and of \code{\verb~|INST~} of a PI closure is evaluated without a tabling record}, whatever its flags (\code{\verb~|evalNT~}, frame \code{\verb~|EVAL[NB]~}). The body's own inert arguments keep the gate of D14}\td{A body is entered once per \code{\verb~|APPLY~} / \code{\verb~|INST~}: its key \code{\verb~|SUSP(body, PRUNE(frame + arguments))~} is new for every new argument tuple, so the probe is a \code{\verb~|PRUNE~}, a frame run and a 32-byte record for a memo that is asked again only when the same closure meets the same read arguments (measured hit rate at this site, step 1: Init 16 \%, Cedar slice 23 \%, reachability 0.8 \%; two thirds of Init's hits are projection bodies, which cost less than the probe). It was 39 \% of all tabling probes on Init, 30 \% on the Cedar slice and \strong{81 \% on reachability}. No DAG is walked as a tree by this: \code{\verb~|EVAL~} descends strictly only into the head, the struct of a projection, a let body and the inert arguments of an inert application; a body is reached through \code{\verb~|APPLY~} (one per application node evaluated, per forced suspension, per reduction step of a value, each of which is memoised by identity), never through the fan-out of an inert nest, so the number of body evaluations is bounded by the number of beta steps, with and without the record}}
+\tr{\td{D20}\td{4.2 \code{\verb~|KVAL~} "closed-term cache"; 5.1 (no switch: no result changes)}\td{\strong{Closed-term memo} \code{\verb~|Ext.cm~}: 4,096 cells \code{\verb~|(term, epoch, value)~} direct-mapped by the term id, read by the inline part of \code{\verb~|EVAL~} / \code{\verb~|ARGV~} for a closed application, let or projection under ls' = 0 (no level parameter, or the identity substitution) and written where \code{\verb~|VAL~} is written (\code{\verb~|done~}). Where the node is tabled the entry is a copy of \code{\verb~|VAL(SUSP(t, EMPTY, 0))~}: the memo saves the probe and changes no id, record, run or tick (\code{\verb~|M2EconomyTest.theClosedMemoChangesNothing~}). Where the node is not tabled (gated: flat applications, untabled nests) it is the only memo, and saves the evaluation. Bypassed under the debug modes that own a memo hit or a variable read}\td{the task's "direct-mapped memo indexed by term id for closed terms under the identity level substitution"; closed nodes are 11 \% (Init) to 17 \% (Cedar slice) of the tabling probes of v0, 80-94 \% of them hits}}
+\tr{\td{D21}\td{3.1 "the test must never under-approximate sharing" (\code{\verb~|SW_GATED_TABLING~})}\td{\strong{Depth rule}: an inert application that lies \code{\verb~|depthK~} = 4 or more inert levels below the root of its nest is tabled whatever its flags (\code{\verb~|gate~}, argument \code{\verb~|u~}; the depth travels in \code{\verb~|X[xb - 1]~} and in \code{\verb~|EVAL[IN]~})}\td{\strong{Gating by flags alone is quadratic on an unshared dependent nest.} \code{\verb~|INFER~} evaluates the argument of every dependent application (\code{\verb~|TWALK~}: \code{\verb~|ARGV(t_i)~}), bottom-up; each of these evaluations walked the whole untabled nest below it again. Measured on \code{\verb~|c (c (.. x))~} with \code{\verb~|c : (x : T) -> G x~}, 4,000 applications under one binder (\code{\verb~|work/m2/gen/depnest.py~}; resource \code{\verb~|m2/depnest-open-300.ndjson~}): v0 44,030 ticks, \code{\verb~|gated~} as published in wave 4 \strong{8,038,031 ticks}, \code{\verb~|gated~} with the rule 60,017. \code{\verb~|sharecheck~} reports such walks (it fails on 196 units of init-prelude under \code{\verb~|gated~}, before and after this wave: an untabled node is legitimately visited once per evaluation root above it); with the rule each node is visited at most \code{\verb~|depthK~} + 1 times. On the corpora the rule costs nothing measurable (Cedar slice: +0.5 \% records, -6 \% ticks together with D20)}}
+\tr{\td{D22}\td{4.3.1 \code{\verb~|APPLY~} (argument picker: no switch; projection selector: \code{\verb~|SW_M2A~})}\td{A beta step whose body is one of the variables it binds returns that argument, PEEKed (\code{\verb~|pick~}: what \code{\verb~|EVAL~} of the variable returns; HOLE is \code{\verb~|fault(E_HOLE)~}), without building the environment: no record, run or tick differs. With \code{\verb~|SW_M2A~} a body that is a projection of a bound variable is \code{\verb~|MKPROJ~} of the argument (\code{\verb~|betaProj~}): no environment, no tick, no call event of the body}\td{selector patterns of the task (item 2). Bodies at \code{\verb~|APPLY~} on Init: projection of a variable 10.6 \%, argument 3.1 \% (reachability 4.8 \% / 5.6 \%)}}
+\tr{\td{D23}\td{4.3.1 \code{\verb~|APPLY~} (\code{\verb~|SW_M2B~}, off)}\td{\strong{APPLY memo} \code{\verb~|Ext.am~}: 2,048 cells \code{\verb~|(closure, a0, a1, a2, epoch, j, value)~}, direct-mapped and lossy, for a beta step of j <= 3 binders whose body is not a binder; the key holds the arguments as \code{\verb~|bind~} binds them (HOLE for a binder the body does not read), so it is the key of the body's tabling record without the \code{\verb~|PRUNE~}. Written when the step completes (frame \code{\verb~|APPLY[3]~} on the worklist path, so D = 0 and D = 64 fill it alike). \strong{Governor} (\code{\verb~|amLive~}): after a window of 4,096 lookups with fewer than 256 hits the memo is passed by for 65,536 beta steps, then tried again (a function of the session's history only)}\td{gives back the memo that D19 removes, for 2 probes of 32 bytes instead of a \code{\verb~|PRUNE~} and two records: repeated steps are 17 \% (Init), 23 \% (Cedar slice), 1.2 \% (reachability) of all beta steps}}
+}
+}
+
+\subtree{
+\title{3. Why the two inert-nest implementations were the same machine (historic: the loop was removed in wave 6, D12)}
+
+\p{Per node of a nest both do, in this order: tabling probe (\code{\verb~|PRUNE~}, SUSP record; hit: the value), tick, spine into scratch, head value (\code{\verb~|KCONST~}, or the variable's neutral), the arguments left to right (atom / \code{\verb~|MKSUSP~} of an active term / the nested inert application, recursively), \code{\verb~|MKAPP~}, \code{\verb~|VAL := result~}. Records and runs are appended in that order, so the session arrays are equal word by word. Scratch layout differs (recursion: the arguments only; loop: a 5-word header \code{\verb~|[prev, s, f, n, i]~} per node) and is not observable.}
+}
+
+\subtree{
+\title{4. Open points}
+
+\ul{
+\li{\strong{Gated tabling} (D14, D21) is gated on all 230 tests and the four corpora (section 6). \strong{\code{\verb~|sharecheck~} is not a gate for it}: the hook reports every second visit of an untabled node under one frame in a declaration, and such visits are legitimate (an evaluation root above the node, a second application of an untabled body under \code{\verb~|m2a~}); it fails on 196 units of init-prelude under \code{\verb~|gated~}. A version that counts visits per evaluation root would need an activation serial in the audit's key (M6's \code{\verb~|Debug.shareCheck~}); not done.}
+\li{\strong{What \code{\verb~|m2a~} gives up}: a second application of one closure to the same read arguments evaluates the body again (\code{\verb~|m2b~} gives most of it back). The number of body evaluations is bounded by the number of beta steps (D19), so no walk becomes exponential; the perf/ tests need at most 1.12 times the ticks (section 6).}
+\li{\strong{Unread arguments of constant spines} (the facts' unread masks; task item 2) are not used: an argument of a NEU is part of its identity and of its type, so leaving it out needs the fact "neither the body nor the type telescope reads it" (M5's fact records, \code{\verb~|SW_FACTS~}) and a HOLE-aware \code{\verb~|CARGS~}; nothing of it is in this file.}
+\li{\strong{\code{\verb~|K_ARGV~}} stays in \code{\verb~|Op~} and in the \code{\verb~|resume~} switch although no such frame is written (D7).}
+\li{\strong{Callers and suspensions}: \code{\verb~|Infer~} opens binders with \code{\verb~|OPEN(EVAL(A))~}, which may be a suspension, while \code{\verb~|CBIND~} / \code{\verb~|ETA~} use \code{\verb~|DOM~} (forced): the same binder can get two different variables (never a wrong answer; advice sent to M5).}
+\li{\strong{Tier equivalence} (M7 / M8, step 4): K1 operands must be \code{\verb~|PEEK~}ed where K0 does (D8), or the comparison is up to \code{\verb~|PEEK~} (\code{\verb~|Eval.samePeekedSlow~} is that relation).}
+\li{The depth of \code{\verb~|samePeekedSlow~} is 24; beyond it a memo check is inconclusive (accepted).}
+}
+}
+
+\subtree{
+\title{5. Measurements (not gates)}
+
+\p{Host: the project machine (aarch64, 20 cores), \strong{shared with 15 other agents running builds and tests}, JVM with the Graal JIT (\code{\verb~|-Xss2m -Xmx6g -XX:+UseSerialGC~}, the module's surefire settings), no Docker, no arena limits. CPU time of the worker thread (\code{\verb~|ThreadMXBean~}), minimum over the timed rounds after one warm-up round. Run-to-run spread on this host was 10-15\%, so differences below that are not established.}
+
+\p{\code{\verb~|M2PerfTest~} on \code{\verb~|work/exports/init.ndjson~} (59,979 constants): for every constant \code{\verb~|EVAL(type)~} and the walk of its Pi telescope (\code{\verb~|DOM~}, \code{\verb~|OPEN~}, \code{\verb~|INST~}, \code{\verb~|FORCE~} per binder); for every definition \code{\verb~|EVAL(value)~} and the walk of its lambda telescope (\code{\verb~|DOM~}, \code{\verb~|OPEN~}, \code{\verb~|APPLY~}); then every suspension reachable from the body's value is forced. Sessions reset at 16 MiB. No environment pass (so no projection-of-constructor and no \code{\verb~|Nat.succ~} folding in this run).}
+
+\table{
+\tr{\th{Configuration}\th{CPU time}\th{Ticks}\th{Frames written (per call event)}\th{Records / run words made}}
+\tr{\td{D = 64 (v0 default)}\td{180 ms}\td{746,071}\td{198 (0.00032)}\td{716,442 / 1,809,042}}
+\tr{\td{D = unbounded}\td{202 ms}\td{746,071}\td{0}\td{the same}}
+\tr{\td{D = 64, \code{\verb~|SW_INERT_LOOP~}}\td{192 ms}\td{746,071}\td{0}\td{the same}}
+\tr{\td{D = 0 (worklist machine)}\td{224 ms}\td{746,071}\td{392,894 (0.63)}\td{the same}}
+\tr{\td{D = 64, \code{\verb~|SW_GATED_TABLING~}}\td{177 ms}\td{754,647}\td{198}\td{677,864 / 1,770,339}}
+\tr{\td{D = 64, gated + inert loop}\td{189 ms}\td{754,647}\td{0}\td{the same}}
+}
+
+\p{A first run without the forcing phase gave 160 / 158 / 165 / 186 / 181 / 166 ms for the same six rows (742,097 ticks). Call events in the D = 64 row: EVAL 78,767, FORCE 1,293, APPLY 55,465, INST 227,922, DOM 260,799; tabled-EVAL hits 206,273; 291,748 binders opened; 730,028 values visited by the forcing phase, of which 1,293 were pending suspensions.}
+
+\p{Readings: (1) about 240 ns of CPU per tick including session resets, \code{\verb~|OPEN~} / \code{\verb~|CLOSE~} and 716 k new records (at the 55 ns per new record of ISA 0.3 that alone is 40 ms); (2) frames written per call event at D = 64 are 0.03\%, below the 0.1\% bound of convention H12; (3) D = 0 costs about +25\% on this workload, D = 64 against unbounded is inside the noise; (4) the inert-nest loop is not faster than bounded recursion here (inside the noise), as the stepper spike found, so it stays off; (5) on Init's types and definition bodies under variables almost every argument is an atom or inert: 1,293 pending suspensions among 730 k values; (6) gated tabling saves 5\% of the records on this workload (its nodes are mostly foreign to the unit under evaluation or flagged).}
+
+\p{The whole machine on Init through the launcher (\code{\verb~|work/dist/bin/rlvm-jvm -X engine=machine --threads 1 work/exports/init.ndjson~}, HotSpot C2, published jar of 09:09Z, v0: a session per declaration): 57,938 declarations accepted, 0 declined; 93.57 M ticks, 79.17 M call events, of which \strong{46.5 M (59\%) are family EV}: EVAL 13.69 M, INST 13.51 M, APPLY 11.89 M, DOM 6.93 M, FORCE 0.55 M. 54.68 M records and 241.4 M run words were made. Worker CPU time 12.7 s in the quietest run (host load about 100) and 16-20 s later (load 170-190): not a usable number, only an order of magnitude (reference engine 54 s, gruszka 2.8 s). A JFR profile of that run (441 samples of the worker thread; self time): \code{\verb~|PRUNE~} 21\% (\code{\verb~|Runs.pruneSlow~} 12\%, \code{\verb~|pruneNear~} 8\%), \code{\verb~|Machine.addRecordAt~} 12.5\%, \code{\verb~|Values.rec~} 7.5\%, \code{\verb~|Eval.eval~} + \code{\verb~|atom~} + \code{\verb~|node~} + \code{\verb~|app~} 17\%, \code{\verb~|Values.neu~} 4.5\%, \code{\verb~|Machine.reset~} 3.6\%. About two thirds of the \code{\verb~|PRUNE~} time is under \code{\verb~|Eval.table~} (the tabling probe of every application, let and projection node), the rest under closure construction.}
+
+\p{Tabling variants on the same run (records / run words / ticks; all 57,938 accepted):}
+
+\table{
+\tr{\th{Switches}\th{Records}\th{Run words}\th{Ticks}}
+\tr{\td{none (v0: every node tabled)}\td{54.68 M}\td{241.4 M}\td{93.57 M}}
+\tr{\td{\code{\verb~|gated~} by the node flags alone (before D14's flat rule)}\td{53.34 M}\td{239.6 M}\td{93.96 M}}
+\tr{\td{\code{\verb~|gated~} with the flat rule (published)}\td{48.17 M}\td{222.3 M}\td{98.38 M}}
+\tr{\td{\code{\verb~|inert~}}\td{54.68 M}\td{241.4 M}\td{93.57 M (frames written 168,809 instead of 185,128)}}
+}
+
+\p{Reading: the node flags alone gate little on Init because most evaluated nodes are foreign to the unit being checked (types and bodies of earlier constants); what remains to be saved is in the \code{\verb~|PRUNE~} itself (M1: dense frames, the OPEN-bit loads) and in sessions that survive a declaration (M6, step 1).}
+
+\p{\strong{Cedar level} (owner note 9): \code{\verb~|work/workloads/slices/cedar-hot-ax.ndjson~} through the launcher (\code{\verb~|-X engine=machine --threads 1~}, v0 switches, C2, host load about 130), before and after the let fix of D9:}
+
+\table{
+\tr{\th{Jar}\th{Machine accepted / declined}\th{Worker CPU}\th{Ticks}\th{Records}\th{Run words}\th{Reference re-checks}}
+\tr{\td{09:59Z (every let value a LET suspension, as ISA 2.8 / 4.2 say)}\td{8,059 / 10 (E_MEM)}\td{168 s}\td{786 M}\td{554 M}\td{2.9 G}\td{5 units, 348,591 steps}}
+\tr{\td{10:26Z (EVAL's let = zeta by sharing, plain values)}\td{\strong{8,064 / 0}}\td{\strong{4.63 s}}\td{18.1 M}\td{10.4 M}\td{103 M}\td{0}}
+}
+
+\p{For scale: nano-lean 3.4 s, the official checker 20 s on this slice (R13 section 6). Five \code{\verb~|omega~} certificates carried the first row: each ran 73.7 M ticks into E_MEM where the reference engine needs about 70,000 steps. After the fix the call events are INFER 1.77 M, CONV 1.38 M, CBIND 0.97 M, EVAL 2.41 M (hit rate 66\%), APPLY 2.26 M, INST 1.98 M, DOM 2.57 M, DELTA 0.52 M, LSTEP 0.32 M.}
+
+\p{\code{\verb~|work/exports/reachability.ndjson~} (closed evaluation) with the same jar and settings: 4,224 engine checks accepted, 0 declined; worker CPU 7.3 s; 34.6 M ticks; EVAL 8.35 M, APPLY 8.20 M, FORCE 0.51 M, INST 0.13 M, DOM 0.17 M; 22.9 M records, 138 M run words, 356,561 frames written.}
+
+\p{Stack safety (\code{\verb~|M2DeepTest~}, group \code{\verb~|slow~}, 38 s for all five): a 913,500-element list literal (913,501 ticks, one call event), 1,000,000-deep application, binder and mixed nests and a 1,000,000-long chain of suspensions, each on a 512 KiB thread stack under D = 64 and D = 0, with and without the inert loop: identical value ids, records, runs and ticks in the four configurations.}
+}
+
+\subtree{
+\title{6. Wave 6: the evaluation economy (what is tabled, what is built), with every experiment}
+
+\p{Where the tabling probes of \code{\verb~|EVAL~} went (counting copy of the wave-5 \code{\verb~|Eval~}, JVM launcher, one worker; \code{\verb~|work/m2/Eval-prof.java~}, \code{\verb~|work/m2/profagg.py~}; v0 = every node tabled, step 1 = \code{\verb~|warm,gated,expect,probes~} at 4 MiB):}
+
+\table{
+\tr{\th{}\th{Init v0}\th{Init step 1}\th{Cedar slice step 1}\th{reachability step 1}}
+\tr{\td{tabling probes (\code{\verb~|PRUNE~} + SUSP probe)}\td{32.8 M}\td{14.1 M}\td{3.88 M}\td{8.78 M}}
+\tr{\td{... of the body of a beta step (\code{\verb~|APPLY~})}\td{11.1 M (hit 14 \%)}\td{5.56 M (16 \%)}\td{1.17 M (23 \%)}\td{7.14 M (0.8 \%)}}
+\tr{\td{... of an inert argument (\code{\verb~|ARGV~})}\td{11.5 M (47 \%)}\td{4.76 M (50 \%)}\td{1.18 M (61 \%)}\td{1.50 M (34 \%)}}
+\tr{\td{... from outside the family (INFER's \code{\verb~|ARGV~}, \code{\verb~|EVAL~})}\td{8.7 M (57 \%)}\td{3.14 M (65 \%)}\td{0.97 M (65 \%)}\td{0.11 M}}
+\tr{\td{closed terms among the probes}\td{3.65 M (80 \% hits)}\td{-}\td{-}\td{-}}
+\tr{\td{\code{\verb~|PRUNE~} for closures (\code{\verb~|LAM~} / \code{\verb~|PI~})}\td{14.7 M}\td{8.27 M}\td{3.72 M (22.8 slots each)}\td{9.22 M}}
+\tr{\td{beta steps; of them a repeat of (closure, read arguments)}\td{12.3 M; 14 \%}\td{6.80 M; 17 \%}\td{1.45 M; 23 \%}\td{8.66 M; 1.2 \%}}
+\tr{\td{body of the step: projection of a bound variable / a bound variable}\td{13.4 \% / 3.6 \%}\td{10.6 \% / 3.1 \%}\td{4.5 \% / 3.1 \%}\td{4.8 \% / 5.6 \%}}
+}
+
+\p{What follows from it, by switch (D19-D23): without a switch the closed-term memo, the argument picker and \code{\verb~|MKAPP~} at once for a neutral head; under \code{\verb~|gated~} the depth rule; \code{\verb~|m2a~} = bodies without a tabling record + the projection selector; \code{\verb~|m2b~} = the APPLY memo. Sub-switches for measurements: \code{\verb~|-Drlvm.m2.x=16~} (no depth rule), \code{\verb~|32~} (no closed-term memo), \code{\verb~|-Drlvm.m2.k=N~} (the depth of the rule, 4).}
+
+\subtree{
+\title{Experiments (kept / rejected), CPU seconds first}
+
+\p{All rows: CE native image \code{\verb~|-O3~}, arena-shaped container, one worker, \code{\verb~|-X stats-file~} on (as the integrator's rows), tool \code{\verb~|work/m2/m.py~} (a copy of the integrator's; rows in \code{\verb~|work/m2/measure.tsv~}). "Locked" rows hold \code{\verb~|work/perf-history/.ladder.lock~} for the whole batch; the host's load average was 80 to 130 during them (fifteen other agents), so single CPU figures move by about 5 \%; the instruction counts repeat to 0.1 \%. Step 1 = \code{\verb~|warm,gated,expect,probes~} at 4 MiB.}
+
+\p{Batch 1 (15:08Z-15:13Z, locked; \code{\verb~|work/m2/batch1.sh~}; base = main tree of 13:23Z, r1 = the same tree with this wave's \code{\verb~|Eval~} as of 14:10Z; the sub-switches of that build were bits of \code{\verb~|rlvm.m2.x~}: 16 = depth rule, 1 = untabled bodies, 2 = selector, 8 = segment-relative gating, 64 = INVARIANT alone does not table). CPU s / instructions G:}
+
+\table{
+\tr{\th{Configuration}\th{Cedar slice}\th{reachability}\th{Init}\th{Std}}
+\tr{\td{base, v0}\td{3.43 / 47.0}\td{8.49 / 59.4}\td{8.17 / 139.0}\td{14.08 / 223.2}}
+\tr{\td{r1, v0 (closed-term memo, picker, direct \code{\verb~|MKAPP~})}\td{3.42 / 46.9}\td{8.60 / 59.9}\td{8.27 / 139.1}\td{13.60 / 223.5}}
+\tr{\td{r1, v0 without the closed-term memo}\td{3.54 / 47.3}\td{8.51 / 59.9}\td{8.18 / 140.0}\td{14.01 / 224.7}}
+\tr{\td{base, step 1}\td{3.13 / 41.8}\td{8.15 / 60.8}\td{8.18 / 106.6}\td{13.11 / 177.8}}
+\tr{\td{r1, step 1 + depth rule (= \code{\verb~|gated~} now)}\td{3.13 / 40.4}\td{8.10 / 61.2}\td{8.13 / 105.2}\td{13.15 / 175.7}}
+\tr{\td{r1, + untabled bodies}\td{2.74 / 39.1}\td{5.20 / 51.5}\td{6.90 / 99.3}\td{12.89 / 167.8}}
+\tr{\td{r1, + projection selector (= \code{\verb~|m2a~} now)}\td{\strong{2.75 / 39.1}}\td{\strong{5.20 / 51.5}}\td{\strong{7.38 / 98.9}}\td{\strong{12.08 / 167.3}}}
+\tr{\td{r1, + segment-relative gating}\td{2.94 / 39.1}\td{5.15 / 51.5}\td{7.35 / 99.1}\td{13.65 / 168.5}}
+\tr{\td{r1, + segment-relative gating + no INVARIANT}\td{2.74 / 39.2}\td{4.96 / 51.7}\td{7.39 / 99.1}\td{12.38 / 168.4}}
+}
+
+\table{
+\tr{\th{Experiment}\th{Verdict}\th{Numbers}}
+\tr{\td{Closed-term memo (D20)}\td{\strong{kept}, no switch}\td{v0 instructions with / without: Cedar 46.9 / 47.3 G, Init 139.1 / 140.0, Std 223.5 / 224.7, reachability 59.9 / 59.9; CPU inside the noise. Under \code{\verb~|gated~} it is the only memo of an untabled closed node (the closed dependent nest of D21 is linear by it alone)}}
+\tr{\td{Argument picker, \code{\verb~|MKAPP~} at once for a neutral head (D22)}\td{\strong{kept}, no switch}\td{no record, run or tick differs; in the v0 rows above together with the memo: instructions 0.0 to +0.8 \% against the base (reachability 59.4 -> 59.9 G), CPU -3.4 \% to +1.3 \%, inside the noise of single runs}}
+\tr{\td{Depth rule (D21)}\td{\strong{kept}, part of \code{\verb~|gated~}}\td{removes a quadratic walk (8.04 M -> 60 k ticks on the 4,000-level nest). Corpora, step 1: Cedar 41.8 -> 40.4 G, Init 106.6 -> 105.2, Std 177.8 -> 175.7, reachability 60.8 -> 61.2 (+0.7 \%); CPU equal}}
+\tr{\td{Untabled bodies (D19)}\td{\strong{kept}, \code{\verb~|m2a~}}\td{step 1 -> step 1 + bodies: Cedar \strong{3.13 -> 2.74 s} (41.8 -> 39.1 G), reachability \strong{8.15 -> 5.20 s} (60.8 -> 51.5 G, peak RSS 1,341 -> 946 MiB), Init \strong{8.18 -> 6.90 s} (106.6 -> 99.3 G), Std \strong{13.11 -> 12.89 s} (177.8 -> 167.8 G). Records made (JVM counters): Init 24.3 -> 19.1 M, Cedar 7.25 -> 6.37 M, reachability 20.6 -> 13.5 M; run words 125 -> 94 M, 84.6 -> 76.1 M, 127 -> 82 M}}
+\tr{\td{Projection selector (D22)}\td{\strong{kept}, \code{\verb~|m2a~}}\td{ticks -1.3 \% on Init (EVAL call events 11.62 -> 10.94 M), instructions Init 99.3 -> 98.9 G, Std 167.8 -> 167.3 G, Cedar and reachability equal; CPU inside the noise (Init 6.90 -> 7.38 s is two single runs of one instruction count)}}
+\tr{\td{Segment-relative gating of inert arguments (a foreign argument in its parent's export segment goes by its flags; bisection over \code{\verb~|DeclTable.unitFirstTerm~} behind a 256-cell cache)}\td{\strong{rejected}, code removed}\td{instructions equal (Cedar 39.1 -> 39.1 G, reachability 51.5 -> 51.5, Init 98.9 -> 99.1, Std 167.3 -> 168.5); records -1.3 \% (Cedar), -3 \% (Init)}}
+\tr{\td{INVARIANT alone does not table}\td{\strong{rejected}, code removed}\td{on top of the previous row: Cedar 39.1 -> 39.2 G, reachability 51.5 -> 51.7, Init 99.1 -> 99.1, Std 168.5 -> 168.4; with \code{\verb~|m2a~} alone (unlocked run, instructions only): Cedar 37.6 -> 37.6, reachability 50.0 -> 50.0, Init 98.6 -> 98.9}}
+\tr{\td{A memo of \code{\verb~|INST~} by (Pi closure, argument)}\td{\strong{not built}}\td{counted: 7 \% of the INST evaluations of Init v0 repeat a pair (12 \% under step 1)}}
+\tr{\td{A closed prefix of a spine (\code{\verb~|@HAdd.hAdd Nat Nat Nat inst~} under open arguments) answered by the closed-term memo and extended}\td{\strong{not built}}\td{counted (step 1 + \code{\verb~|m2a~}): prefixes of two or more arguments cover 9.3 \% of the arguments of constant-headed applications on Init, 7 \% on the Cedar slice, 0.9 \% on reachability; an argument of such a prefix is an atom (a CHEAD or literal lookup), so about 0.1 \% of the instructions}}
+\tr{\td{A beta step whose body is closed evaluated without \code{\verb~|ENTER~}}\td{\strong{not built}}\td{counted: 1 \% of the beta steps on Init, 4.4 \% on the Cedar slice, 0.3 \% on reachability}}
+\tr{\td{One pass over the spine of an application (arguments met last first, reversed in scratch; more than 16 arguments: the two passes as before), \code{\verb~|flat~} and \code{\verb~|ARGV~} with one read of the node, the head of a spine from word c}\td{\strong{kept}, no switch (no result changes)}\td{instructions, unlocked container on the CPUs outside the arena's eight, round 3 -> round 4 of the same tree: v0 Cedar 38.9 -> 38.4 G, reachability 58.3 -> 56.8, Init 132.9 -> 130.1; step 1 + \code{\verb~|m2a~} 37.6 -> 36.8, 50.0 -> 48.1, 98.6 -> 95.7}}
+\tr{\td{APPLY memo (D23), first form: key computed at the lookup and again at the store, no governor}\td{\strong{rejected}}\td{step 1 + \code{\verb~|m2a~} -> + memo, instructions: Cedar 37.6 -> 36.9 G, Init 98.6 -> 98.8, \strong{reachability 50.0 -> 51.7 (+3.4 \%)} for a hit rate of 1 \%}}
+\tr{\td{APPLY memo, key computed once, binder bodies excluded}\td{\strong{rejected} as it stood}\td{Cedar 36.8 -> 35.9 G, Init 95.7 -> 95.1, reachability 48.1 -> 48.8 (+1.5 \%)}}
+\tr{\td{APPLY memo with the governor (D23)}\td{\code{\verb~|m2b~}: see the final table}\td{Cedar 39.4 -> 38.7 G (-1.8 \%), Init 98.7 -> 98.2, Std 174.0 -> 172.9, reachability 48.5 -> 48.7 (+0.4 \%)}}
+}
+
+\p{perf/ tests (JVM launcher, machine ticks, step 1 -> + \code{\verb~|m2a~} -> + \code{\verb~|m2b~}; \code{\verb~|work/m2/perfticks.sh~}): no test needs more than 1.12 times the ticks (proj-applied-struct, unfold-before-literal: 37.75 M -> 42.47 M; the tiny repeated-subproblem 348 -> 443 -> 405), records fall by 20 \% to 45 \% (magma-list-deep-n36 21.5 M -> 12.1 M, ite-taken-branch 15.3 M -> 10.8 M, short-circuit-and 16.6 M -> 11.6 M).}
+}
+
+\subtree{
+\title{Final A/B of the published code}
+
+\p{base = the main tree of 15:26Z with the wave-5 \code{\verb~|Eval~} (\code{\verb~|work/m2/base2~}, image \code{\verb~|work/m2/dist-base2n~}); new = the same tree with \code{\verb~|Eval~} as published at 15:26Z (\code{\verb~|work/m2/dist-r5n~}; the entry \code{\verb~|evalBody~} of 15:34Z is not called by anything measured). Both trees hold the other packages' work of this wave, among it M6's eager-reduction rule: 11 / 8 / 164 / 203 units of the Cedar slice / reachability / Init / Std are declined by design and checked by the reference engine in every row.}
+
+\p{Instructions G (unlocked container on the CPUs outside the arena's eight, one run each; they repeat to 0.1 \%):}
+
+\table{
+\tr{\th{Configuration}\th{Cedar slice}\th{reachability}\th{Init}\th{Std}}
+\tr{\td{base, v0}\td{41.1}\td{57.6}\td{134.4}\td{221.7}}
+\tr{\td{new, v0}\td{40.8 (-0.7 \%)}\td{57.1 (-0.9 \%)}\td{132.7 (-1.3 \%)}\td{219.2 (-1.1 \%)}}
+\tr{\td{base, step 1}\td{42.0}\td{59.3}\td{109.3}\td{190.0}}
+\tr{\td{new, step 1 (\code{\verb~|gated~} with the depth rule)}\td{40.2 (-4.3 \%)}\td{58.1 (-2.0 \%)}\td{105.4 (-3.6 \%)}\td{183.8 (-3.3 \%)}}
+\tr{\td{new, step 1 + \code{\verb~|m2a~}}\td{\strong{39.4 (-6.2 \%)}}\td{\strong{48.5 (-18.2 \%)}}\td{\strong{98.7 (-9.7 \%)}}\td{\strong{174.0 (-8.4 \%)}}}
+\tr{\td{new, step 1 + \code{\verb~|m2a,m2b~}}\td{38.7 (-7.9 \%)}\td{48.7 (-17.9 \%)}\td{98.2 (-10.2 \%)}\td{172.9 (-9.0 \%)}}
+}
+
+\p{Batch 2 (locked, 16:15:29Z-16:24:24Z, load average 52-64; \code{\verb~|work/m2/batch2.sh~}, rows \code{\verb~|b2-*~}; one worker, two interleaved passes): CPU s of pass 1 / pass 2, and the mean against the base row of the same configuration family:}
+
+\table{
+\tr{\th{Configuration}\th{Cedar slice}\th{reachability}\th{Init}\th{Std}}
+\tr{\td{base, v0}\td{2.83 / 2.76}\td{8.16 / 8.11}\td{7.37 / 7.36}\td{13.01 / 12.71}}
+\tr{\td{new, v0}\td{2.95 / 2.77 (+2.3 \%)}\td{8.22 / 8.03 (-0.1 \%)}\td{7.33 / 7.32 (-0.5 \%)}\td{12.80 / 12.50 (-1.6 \%)}}
+\tr{\td{base, step 1}\td{2.96 / 3.11}\td{8.06 / 7.77}\td{7.09 / 7.09}\td{13.18 / 13.13}}
+\tr{\td{new, step 1}\td{2.74 / 2.80 (-8.7 \%)}\td{7.82 / 7.75 (-1.6 \%)}\td{7.07 / 6.87 (-1.7 \%)}\td{12.82 / 12.91 (-2.2 \%)}}
+\tr{\td{new, step 1 + \code{\verb~|m2a~}}\td{\strong{2.56 / 2.87 (-10.5 \%)}}\td{\strong{4.90 / 4.98 (-37.6 \%)}}\td{\strong{6.31 / 6.39 (-10.4 \%)}}\td{\strong{11.79 / 11.95 (-9.8 \%)}}}
+\tr{\td{new, step 1 + \code{\verb~|m2a,m2b~}}\td{2.56 / 2.71 (-13.2 \%)}\td{5.03 / 5.08 (-36.1 \%)}\td{6.31 / 6.35 (-10.7 \%)}\td{11.73 / 12.02 (-9.7 \%)}}
+\tr{\td{base, step 1, no \code{\verb~|stats-file~} (the arena's run line)}\td{2.90}\td{8.01}\td{7.08}\td{13.16}}
+\tr{\td{new, step 1 + \code{\verb~|m2a~}, no \code{\verb~|stats-file~}}\td{2.64}\td{4.96}\td{6.20}\td{11.81}}
+\tr{\td{new, step 1 + \code{\verb~|m2a,m2b~}, no \code{\verb~|stats-file~}}\td{2.62}\td{4.97}\td{6.41}\td{11.70}}
+}
+
+\p{Peak RSS, step 1 -> step 1 + \code{\verb~|m2a~}: Cedar slice 182 -> 176 MiB, reachability 1,136 -> 774 MiB, Init 246 -> 214 MiB, Std 366 -> 372 MiB. The v0 row of the Cedar slice (+2.3 \%) is two readings of 2.95 and 2.77 s against 2.83 and 2.76 s with 0.7 \% fewer instructions: noise of that pass, not a cost (the second pass is equal).}
+
+\p{Reading: \strong{\code{\verb~|gated~} with the depth rule and \code{\verb~|m2a~} are ready}: every corpus is faster in CPU time (10 \% to 38 \% against step 1) and none is slower. \strong{\code{\verb~|m2b~} is not decided}: it lowers the Cedar slice (instructions -1.8 \%, CPU -3 \% in means of two noisy readings) and Init / Std by 0.5 \% of the instructions, and raises reachability by 0.4 \% of the instructions and by 2.3 \% of the CPU time in the rows with statistics (0.2 \% in the row without): inside the noise, but above the 1 \% rule on the face of the numbers. It stays off.}
+
+\p{Against the yardstick (gruszka on this host: Init 2.63 s, Std 5.62 s, Cedar slice 1.91 s, reachability 3.97 s): step 1 + \code{\verb~|m2a~} is at 6.35 / 11.87 / 2.72 / 4.94 s (2.41x / 2.11x / 1.42x / 1.24x).}
+
+\p{Gates of the published code (jar of 15:34Z, \code{\verb~|work/m2/dist-r6p~}; \code{\verb~|testkit diff --engine machine~} through the launcher, reports in \code{\verb~|work/m2/diff/~}): tutorial + bugs (1,342 units) with v0, step 1 + \code{\verb~|m2a~}, step 1 + \code{\verb~|m2a,m2b~} and \code{\verb~|gated,m2a,m2b~} at hostDepth 0: 0 differences, 0 declines. All 230 tests with each of v0, step 1 + \code{\verb~|m2a~}, step 1 + \code{\verb~|m2a,m2b~}: 0 differences; 15,839 of 15,845 units compared in each run (the four memory-hungry perf files in a run of their own with a 10 GiB heap), not compared: five units that M6's eager-reduction rule declines by design and \code{\verb~|loop_unfolded_once~} (E_MEM, as before this wave without M4's former B12 probe). Four corpora with each of the three configurations: Cedar slice 8,053 of 8,064, reachability 4,216 of 4,224, Init 57,774 of 57,938, Std 99,893 of 100,096 units compared, all agree, 0 differences; the units not compared are the eager-reduction declines (11 / 8 / 164 / 203). On the code of 15:10Z, before that rule arrived in the tree, the same four corpora with v0 and step 1 + \code{\verb~|m2a~}: every unit compared, 0 differences, 0 declines.}
+
+\p{Batch 3 (locked, 17:08:20Z-17:10:11Z, load average 43-45; \code{\verb~|work/m2/batch3.sh~}, rows \code{\verb~|b3-*~}): \strong{four workers}, the same two images, base step 1 against step 1 + \code{\verb~|m2a~}, three interleaved passes; median CPU s / median wall s (the three wall readings):}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{Cedar slice}\th{reachability}}
+\tr{\td{base, step 1}\td{7.47 / 2.68 (2.41, 4.12, 2.68)}\td{14.13 / 7.76 (8.07, 7.76, 6.91)}\td{3.06 / 1.05 (1.05, 1.12, 1.02)}\td{8.11 / 4.37 (3.87, 5.21, 4.37)}}
+\tr{\td{new, step 1 + \code{\verb~|m2a~}}\td{6.46 / 2.48 (2.15, 2.79, 2.48)}\td{12.48 / 7.09 (7.09, 7.18, 4.85)}\td{2.85 / 0.96 (3.30, 0.96, 0.92)}\td{5.24 / 2.13 (4.71, 1.95, 2.13)}}
+}
+
+\p{Four workers cost the CPU of one (Init 6.46 against 6.35 s), and peak RSS falls with the records (reachability 2,191-2,498 -> 1,437-1,637 MiB). The wall clock of a loaded host scatters by a factor of two between passes; the medians are lower with \code{\verb~|m2a~} on every corpus.}
+
+\p{After these batches: the request of M1 (16:48:45Z: \code{\verb~|Eval.closure~} / \code{\verb~|table~} / \code{\verb~|suspend~} call M1's combined constructors \code{\verb~|Values.mkLamAt~} / \code{\verb~|mkPiAt~} / \code{\verb~|suspRecordAt~} / \code{\verb~|mkSuspAt~}; the same frames, records and ids; M1 measured reachability v0 8.29 -> 7.69 s with it) and M5's use of \code{\verb~|Eval.evalBody~} in \code{\verb~|TWALK~} (16:03Z). Gates of that jar (\code{\verb~|work/m2/dist-r8p~}): tutorial + bugs with v0, step 1 + \code{\verb~|m2a~} and \code{\verb~|gated,m2a,m2b~} at hostDepth 0, the four corpora with v0 and with step 1 + \code{\verb~|m2a~}, all 230 with step 1 + \code{\verb~|m2a~}: 0 differences (not compared: the eager-reduction declines and \code{\verb~|loop_unfolded_once~}, as above). Instructions of that tree (\code{\verb~|work/m2/dist-r8n~}, unlocked, one run): the machine's default switch set is \code{\verb~|warm,gated,expect~} since about 16:00Z (M6) and has a session cap of its own, which doubles the resets on Init (1,129 -> 2,160) and raises the ticks of every warm configuration by 20 \% (54.95 M -> 66.11 M; \code{\verb~|-X machine.session-kib=0~} gives the old figure): Init default 116.4 G, default + \code{\verb~|m2a~} 106.2 G (-8.8 \%); step 1 + \code{\verb~|m2a~}: Cedar slice 38.8 G, reachability 48.0 G, Init 108.0 G, Std 186.3 G.}
+}
+}
