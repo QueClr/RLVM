@@ -1,0 +1,854 @@
+\title{10 - GraalVM / Truffle platform engineering for RLVM (measured)}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{truffle}
+\tag{gc}
+\tag{arena}
+\tag{performance}
+\meta{origin}{docs/research/10-graalvm-platform.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Status: experiments run on the project host (aarch64, Cortex-X925/A725, 20 cores, 121 GB) with GraalVM CE 25.5.5.0.3 (\code{\verb~|.toolchain/graalvm-ce-25~}) and Oracle GraalVM 25.0.4 (\code{\verb~|.toolchain/oracle-graalvm-25~}). Spikes, scripts and raw logs: \code{\verb~|spikes/platform/~} (README there). All "G" figures are \strong{user-space instructions in units of 1e9, summed over all threads}, measured with \code{\verb~|perf stat -e instructions:u~} inside the infra team's container (\code{\verb~|bench/arena-docker.sh --arena-limits~} = 8 CPUs / 16 GB, \src{bench/measure.sh}), i.e. the arena's ranking metric. Arena "virtual seconds" = G / 6. CPU-time figures are labelled as such.}
+
+\p{Scope note. The maintainer's request for this workflow was to check HOAS/NbE tricks and the two normalization-bench repositories. This document is the platform half of that: the benchmark of \code{\verb~|refs/normalization-bench-kovacs~} was ported to Java and both repositories' conclusions were re-measured on JDK 25 / native-image (section 10); the algorithmic side is in \code{\verb~|09-nbe-hoas-tricks.md~}.}
+
+\subtree{
+\title{1. Decisions first}
+
+\subtree{
+\title{1.1 Recommendation table}
+
+\table{
+\tr{\th{}\th{A. JVM mode, C2 host JIT, SerialGC (GraalVM CE JDK)}\th{B. native-image CE}\th{C. native-image Oracle GraalVM + PGO}}
+\tr{\td{Fixed overhead per run}\td{JVM start 0.3-1.2 G; +3.5 G if a Truffle engine is created; host JIT warm-up 0.1-0.3 G for a 10-method kernel, 65 G for a javac-sized hot code base (C2 only), 110 G (C2 tiered)}\td{0.015 G}\td{0.015 G}}
+\tr{\td{Steady-state host code (instructions, lower is better)}\td{1.00 (reference)}\td{1.19-1.60 x}\td{0.88-1.44 x (up to 1.9 x on code the training run did not cover)}}
+\tr{\td{GC cost on a 2.5 GB live hash-consed heap (GcBench, total incl. mutator)}\td{54-58 G (mutator alone 35.7 G)}\td{112 G with \code{\verb~|-Xmn4g~}, 233 G with defaults}\td{64 G (serial); G1 255-279 G}}
+\tr{\td{Truffle guest compilation}\td{works (libgraal); guest code 0.85-2.4 x the instructions it needs under SVM; first compilations pay JVM warm-up}\td{works; cheapest fixed cost}\td{works; same code quality as CE in our tests}}
+\tr{\td{Object header}\td{12 B (8 B with \code{\verb~|-XX:+UseCompactObjectHeaders~}, +2-3 \% instructions)}\td{8 B}\td{8 B}}
+\tr{\td{RSS overhead beyond the Java heap}\td{40-300 MB}\td{15-60 MB}\td{15-60 MB}}
+\tr{\td{Build}\td{\code{\verb~|javac~} + 9 jars (8 runtime, 1 annotation processor); 15 s; no C toolchain}\td{+ gcc and zlib; 40-120 s; 460-660 CPU-s; 39 MB binary}\td{+ training run and two more image builds (+2-3 min); 43 MB}}
+\tr{\td{Main risks}\td{JIT cost grows with the amount of warm code; run-to-run variation about 1 \%}\td{C toolchain/zlib in the arena shell unverified; slow GC; \code{\verb~|MemorySegment~}/\code{\verb~|VarHandle~} traps}\td{GFTC licence accepted by whoever runs the build; mis-training makes code slower; training input needed at build time}}
+}
+}
+
+\subtree{
+\title{1.2 Recommended configurations}
+
+\p{\strong{Primary: A (JVM mode).} It has the best steady-state code and by far the cheapest GC in instructions, the simplest build, and its fixed costs are small against a 400-600 G budget as long as the hot kernel stays compact.}
+
+\pre{\verb~|
+$GRAALVM/bin/java \
+  -XX:+UseSerialGC -Xms8g -Xmx12g -Xmn4g \
+  -XX:-UseJVMCICompiler \
+  -XX:-TieredCompilation \
+  -XX:-UsePerfData \
+  --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow \
+  -Dpolyglot.engine.WarnInterpreterOnly=false \
+  -cp rlvm.jar:lib/* rlvm.Main "$IN"
+~}
+
+\ul{
+\li{\code{\verb~|-XX:+UseSerialGC~}: G1 (the default) costs 3.8-5.7 x the instructions of Serial on GcBench; ZGC 4 x; Parallel 1.25-1.4 x (section 8.1).}
+\li{\code{\verb~|-Xms~} = large and \code{\verb~|-Xmn4g~}: Serial with JVM default sizing does 106 young collections instead of 3 (83.8 G instead of 54.4 G); with deep recursion every extra collection walks the whole stack (section 9.2).}
+\li{\code{\verb~|-XX:-UseJVMCICompiler~}: makes C2 the top-tier host JIT. On the GraalVM JDK the default is the Graal JIT (libgraal), which spent 1.7-2.4 x the total instructions of C2 on the javac workload (section 6). Truffle keeps using libgraal for guest code with this flag (verified).}
+\li{\code{\verb~|-XX:-TieredCompilation~}: 20-24 \% fewer total instructions on javac, equal on the plain interpreter workload; never worse in our tests. Re-validate on the real checker (A/B, one flag).}
+\li{Optional \code{\verb~|-XX:+UseCompactObjectHeaders~} if RSS is at risk (2-ref node 24 -> 16 B); it cost +1.6-3 \% instructions.}
+\li{Run the checker in \code{\verb~|new Thread(null, r, "checker", 4L << 30)~}; do not rely on \code{\verb~|-Xss~}.}
+\li{If Truffle compilation is used at all, add \code{\verb~|-Dpolyglot.engine.FirstTierCompilationThreshold=25000 -Dpolyglot.engine.LastTierCompilationThreshold=2000000000 -Dpolyglot.engine.CompilerThreads=1~} (tier 2 off) and never \code{\verb~|engine.Mode=latency~} or \code{\verb~|engine.BackgroundCompilation=false~} (section 5).}
+}
+
+\p{\strong{Fallback 1: C (Oracle native image with PGO, serial GC)} if the measured JIT overhead of the real checker on mathlib exceeds about 15 \% of its total, or if Truffle-compiled guest code turns out to dominate:}
+
+\pre{\verb~|
+native-image --pgo=<profiles> -march=native -cp rlvm.jar:lib/* rlvm.Main -o rlvm
+./rlvm -Xms8g -Xmx12g -Xmn4g "$IN"
+~}
+
+\p{\strong{Fallback 2: B (CE native image)}, same run flags, when Oracle binaries may not be downloaded. \code{\verb~|-Xmn~} is mandatory: the default young generation is at most 10 \% of the maximum heap.}
+}
+
+\subtree{
+\title{1.3 The twelve findings that drive this}
+
+\ol{
+\li{\strong{CPU time is a misleading proxy on this host.} It executes 7.7 G instr/s on a C loop, 17.6 G/s on CPython, 24 G/s on Java interpreter loops but only 1.6 G/s in memory-bound phases. Cache misses are free in the arena metric; instruction-dense code is not. Everything below is in instructions.}
+\li{\strong{GC choice is the largest single platform lever}: Serial 54 G, Parallel 75 G, G1 204 G, ZGC 221 G on the same workload (mutator 35.7 G).}
+\li{\strong{CE native-image code executes 19-60 \% more instructions than HotSpot-JIT code} on our interpreters and NbE kernels, and JIT warm-up is small for small kernels. Oracle PGO closes part of the gap (0-20 \%) and beat the JIT only on one workload.}
+\li{\strong{The Graal JIT as host compiler is expensive}: javac x60 costs 439 G (CE) / 315 G (Oracle) against 181-228 G with C2.}
+\li{\strong{A Truffle compilation costs about 1 M instructions per AST node at tier 1 and about 2.5 M per inlined node at tier 2.} With default thresholds (400 / 10 000 calls) compiling was a net loss until a function had run more than about 100 000 times.}
+\li{\strong{Truffle interpreters are slower than a plain-Java interpreter before compilation}: AST 1.5-2.7 x, Bytecode DSL 2.1-4.2 x the instructions of the plain closure-tree interpreter on the same programs.}
+\li{\strong{Truffle-compiled code is 10-50 x cheaper than interpretation} on hot recursive guest code, but given finding 5 compilation is worth it only for code that is provably hot and long-running.}
+\li{\strong{Deep host recursion multiplies GC cost}: one collection with a 10-million-frame stack costs about 10 G on HotSpot and 5 G on SVM. Keep collections rare or the stack shallow.}
+\li{\strong{JVM start-up is irrelevant} (0.3-0.5 G); the JDK 25 AOT cache does not reduce total instructions.}
+\li{\strong{\code{\verb~|int[]~} is the right packed storage on both platforms}; \code{\verb~|MemorySegment~} is 20-250 x slower in a CE native image.}
+\li{\strong{Bytecode DSL in 25.x is usable but young}: three generator/runtime defects hit in one day (section 4.3); API differs between 25.0.x and 25.5.x.}
+\li{\strong{The arena's \code{\verb~|jdk~} is OpenJDK 21} (no Graal compiler, no compact headers): RLVM must download its own GraalVM in the build step; a tested script is in \code{\verb~|spikes/platform/arena/~}.}
+}
+}
+}
+
+\subtree{
+\title{2. Method and calibration}
+
+\ul{
+\li{Host perf counters are closed (\code{\verb~|perf_event_paranoid=4~}). \src{spikes/platform/scripts/perf.sh} wraps \code{\verb~|bench/arena-docker.sh [--arena-limits] bench/measure.sh -- cmd~}. The infra team validated the counter against a C loop with a known count (ratio 1.0000, \code{\verb~|work/perf-validate/report.json~}).}
+\li{Steady state per iteration = (long run - short run) / (iteration difference). Fixed overhead = short run - iterations x steady.}
+\li{Instruction rate of this host by workload: C loop 7.7 G/s; CPython 17.6 G/s; plain-Java interpreter 23.9 G/s (76.0 G in 3.18 s CPU); Truffle compiler threads about 8 G/s (estimate from 27 M instructions per 3.24 ms compilation); GcBench with SerialGC 1.56 G/s (54.4 G in 34.8 s). One CPU-second here is therefore 0.26-4 arena virtual seconds depending on what runs.}
+\li{Not verified: x86-64. Absolute counts will differ on the arena runner; conclusions rely on ratios of 1.2 x and more.}
+\li{Run-to-run variation seen on repeated JVM runs: about 1 \% (311.9 vs 312.0 G; 274.9 vs 277.2 G).}
+}
+
+\p{Benchmarks (all self-written, \code{\verb~|spikes/platform/~}):}
+
+\table{
+\tr{\th{name}\th{what it models}}
+\tr{\td{\code{\verb~|lc~} spike, programs \code{\verb~|fib~}, \code{\verb~|tree~}, \code{\verb~|many:K~}}\td{guest-language evaluation in three back-ends (plain Java, Truffle AST, Truffle Bytecode DSL)}}
+\tr{\td{\code{\verb~|NbeBench~}}\td{NbE kernel: eval / quote / conversion on untyped terms (port of Kovacs' benchmark)}}
+\tr{\td{\code{\verb~|GcBench 40 200~}}\td{40 M long-lived hash-consed nodes (1.3 GB + 0.5 GB table) and 200 M short-lived nodes}}
+\tr{\td{\code{\verb~|JavacBench~}}\td{javac in-process on 21 081 lines: thousands of warm methods, tree walking, allocation}}
+}
+}
+
+\subtree{
+\title{3. Dependencies and build (question 1)}
+
+\subtree{
+\title{3.1 Versions}
+
+\p{\code{\verb~|$JAVA_HOME/release~} of the installed CE build: \code{\verb~|JAVA_VERSION="25.0.5.0.3"~}, \code{\verb~|GRAALVM_VERSION="25.5.5.0.3"~}, \code{\verb~|JAVA_RUNTIME_VERSION="25.0.5.0.3+1-jvmci-25.5-b26"~}. The Truffle artifacts must carry the \strong{GRAALVM_VERSION}:}
+
+\table{
+\tr{\th{Maven coordinate}\th{version}\th{scope}}
+\tr{\td{\code{\verb~|org.graalvm.polyglot:polyglot~}}\td{25.5.5.0.3}\td{compile}}
+\tr{\td{\code{\verb~|org.graalvm.truffle:truffle-api~}}\td{25.5.5.0.3}\td{compile}}
+\tr{\td{\code{\verb~|org.graalvm.truffle:truffle-runtime~}}\td{25.5.5.0.3}\td{runtime (pulls \code{\verb~|truffle-compiler~}, \code{\verb~|org.graalvm.sdk:{collections,nativeimage,word,jniutils}~})}}
+\tr{\td{\code{\verb~|org.graalvm.truffle:truffle-dsl-processor~}}\td{25.5.5.0.3}\td{annotation processor path only}}
+\tr{\td{\code{\verb~|org.graalvm.truffle:truffle-enterprise~}}\td{25.5.5.0.3 / 25.0.4}\td{optional, GFTC licence (per its POM); not tested}}
+}
+
+\p{Maven Central lists two lines for JDK 25: \code{\verb~|25.0.x~} (matches Oracle GraalVM 25.0.4 and CE \code{\verb~|jdk-25.0.x~} releases) and "innovation" releases \code{\verb~|25.1.3 ... 25.5.5.0.3~} (CE tags \code{\verb~|graal-25.N...~}, file names \code{\verb~|graalvm-community-jdk-25iN-...~}). \code{\verb~|org.graalvm.nativeimage:truffle-runtime-svm~} exists on Central only up to 25.0.5.x; for 25.5 it is inside the GraalVM (\code{\verb~|lib/truffle/builder/truffle-runtime-svm.jar~}) and is selected by \code{\verb~|--macro:truffle-svm~}, which \code{\verb~|truffle-runtime.jar~} requests through its embedded \code{\verb~|META-INF/native-image/org.graalvm.truffle/truffle-runtime/native-image.properties~}.}
+
+\p{Mismatch behaviour (verified):}
+
+\table{
+\tr{\th{combination}\th{result}}
+\tr{\td{Truffle 25.0.4 jars on CE 25.5.5.0.3 JDK}\td{\code{\verb~|java.lang.InternalError~} in \code{\verb~|LibGraal.initializeLibgraal~} (crash)}}
+\tr{\td{Truffle 25.5.5.0.3 jars on Oracle 25.0.4 JDK}\td{silent fallback to the interpreter-only runtime plus the warning below}}
+\tr{\td{\code{\verb~|-XX:-EnableJVMCI~}}\td{\code{\verb~|InternalError: JVMCI is not enabled~}}}
+\tr{\td{\code{\verb~|-Dtruffle.UseFallbackRuntime=true~}}\td{interpreter-only runtime plus warning}}
+}
+
+\p{The warning text in 25.x: \code{\verb~|[engine] WARNING: The polyglot engine uses a fallback runtime that does not support runtime compilation to native code.~} followed by the cause (for example \code{\verb~|Version check failed. Your Java runtime '25.0.4+7-LTS-jvmci-b01' with compiler version '25.0.4' is incompatible with polyglot version '25.5.5.0.3'~}). Treat its appearance as a build failure in CI. It is suppressed by \code{\verb~|engine.WarnInterpreterOnly=false~}.}
+}
+
+\subtree{
+\title{3.2 Enabling the optimising runtime in JVM mode}
+
+\p{Nothing is needed on a GraalVM JDK: \code{\verb~|-XX:+PrintFlagsFinal~} shows \code{\verb~|EnableJVMCI=true~}, \code{\verb~|UseJVMCICompiler=true~}, \code{\verb~|UseJVMCINativeLibrary=true~}, and \code{\verb~|lib/libjvmcicompiler.so~} (libgraal, 40.6 MB) contains the Truffle compiler. With the jars on the \strong{class path} and no flags, \code{\verb~|--engine.TraceCompilation=true~} prints}
+
+\pre{\verb~|
+[engine] opt done   engine=1  id=2  fib  |Tier 1|Time  74( 65+10 )ms|AST 23|Inlined 0Y 2N|IR 150/ 450|CodeSize 1872|...
+[engine] opt done   engine=1  id=2  fib  |Tier 2|Time  57( 28+29 )ms|AST 23|Inlined 6Y 8N|IR 398/1260|CodeSize 5480|...
+~}
+
+\p{and fib(30) drops from 114 ms (first iteration) to 13 ms. Two JDK warnings appear and are silenced by \code{\verb~|--enable-native-access=ALL-UNNAMED~} (module path: \code{\verb~|=org.graalvm.truffle~}) and \code{\verb~|--sun-misc-unsafe-memory-access=allow~}. Truffle on the module path with the application on the class path also works (\code{\verb~|-p lib --add-modules org.graalvm.polyglot,org.graalvm.truffle.runtime -cp rlvm.jar~}); there is no measured benefit, and the internal compile API of section 5.4 then needs \code{\verb~|--add-exports~}. Recommendation: class path.}
+
+\p{A stock OpenJDK (the arena's \code{\verb~|jdk~} is OpenJDK 21, section 11) has JVMCI but no Graal compiler; it would need the compiler jars on \code{\verb~|--upgrade-module-path~} and would run the compiler as interpreted then JIT-compiled Java. Not tested; not recommended.}
+}
+
+\subtree{
+\title{3.3 Build tool}
+
+\p{Recommendation: \strong{Maven for development, no build tool on the arena.}}
+
+\ul{
+\li{Maven 3.9.16 project (\src{spikes/platform/truffle-lc/pom.xml}): three dependencies, the processor under \code{\verb~|maven-compiler-plugin~} \code{\verb~|<annotationProcessorPaths>~}, \code{\verb~|maven-dependency-plugin:copy-dependencies~} into \code{\verb~|target/lib~}. First build 10 s including downloads; afterwards \code{\verb~|mvn -o~} works offline (4-5 s). A private repository is selected with \code{\verb~|-Dmaven.repo.local=.toolchain/m2~}.}
+\li{Gradle works too (\code{\verb~|refs/cadenza/build.gradle.kts~} uses the same coordinates with \code{\verb~|kapt~}), but adds a daemon and a wrapper download for no benefit here.}
+\li{The arena build needs neither: \code{\verb~|javac --release 25 -cp <8 jars> -processorpath truffle-dsl-processor-25.5.5.0.3.jar -s gen -d classes @sources.txt~} followed by \code{\verb~|jar~} is the whole build (\src{spikes/platform/arena/build.sh}, tested in the container: 13.5 s including a 325 MB download).}
+\li{A Truffle language jar must contain \code{\verb~|META-INF/native-image/<group>/<artifact>/native-image.properties~} with \code{\verb~|Args = --initialize-at-build-time=<language package>~}; without it the image build fails with "An object of type '...LcLanguageProvider' was found in the image heap".}
+}
+}
+}
+
+\subtree{
+\title{4. The Truffle spike and the Bytecode DSL (questions 1 and 2)}
+
+\subtree{
+\title{4.1 Design of the spike language}
+
+\p{Front-end (\code{\verb~|Parser.java~}): s-expressions to a lexically addressed IR (\code{\verb~|Expr.java~}) with flat closures. Values are \code{\verb~|Long~}, \code{\verb~|Boolean~} and \code{\verb~|Closure(RootCallTarget target, Object[] caps)~}. Calling convention: \code{\verb~|arguments[0]~} = captured array, \code{\verb~|arguments[1..]~} = actual arguments. Globals are cells with a \code{\verb~|@CompilationFinal~} value, so a call through a global is a constant-target direct call.}
+
+\ul{
+\li{\code{\verb~|plain~}: one Java object per IR node with \code{\verb~|Object exec(Object[] args, Object[] caps, Object[] locals)~}.}
+\li{\code{\verb~|ast~}: Truffle nodes; arithmetic through DSL \code{\verb~|@Specialization~}; calls through a \code{\verb~|DispatchNode~} with a 3-entry inline cache on the call target (\code{\verb~|DirectCallNode~}) and an \code{\verb~|IndirectCallNode~} fallback.}
+\li{\code{\verb~|bc~}: \code{\verb~|@GenerateBytecode(enableUncachedInterpreter = true, enableQuickening = true, boxingEliminationTypes = {long.class, boolean.class})~}; custom operations \code{\verb~|Add Sub Mul Less Eq LoadCap LoadGlobal MakeClosure Call~}; every lambda is its own nested root. \code{\verb~|Call~} takes \code{\verb~|@Variadic(startOffset = 1) Object[] argv~} so the argument array is reused for the call.}
+}
+}
+
+\subtree{
+\title{4.2 Interpreter and compiled speed (G per iteration, steady state)}
+
+\p{fib(32) = 7.05 M guest calls per iteration:}
+
+\table{
+\tr{\th{back-end}\th{JVM CE}\th{native CE}\th{native Oracle PGO}}
+\tr{\td{plain Java interpreter}\td{2.37}\td{3.80}\td{3.01}}
+\tr{\td{Truffle AST, interpreter only}\td{3.80}\td{5.78}\td{-}}
+\tr{\td{Truffle BC, interpreter only}\td{8.50}\td{10.99 (8.82 with \code{\verb~|enableTailCallHandlers~})}\td{-}}
+\tr{\td{Truffle AST, compiled}\td{0.252}\td{0.106}\td{0.108}}
+\tr{\td{Truffle BC, compiled}\td{0.223}\td{0.097}\td{-}}
+}
+
+\p{tree(20) (Church-encoded full binary tree, 1 M leaves; closure-heavy):}
+
+\table{
+\tr{\th{back-end}\th{JVM CE}\th{native CE}\th{native Oracle PGO}}
+\tr{\td{plain Java interpreter}\td{1.36 (Graal JIT), 1.5 (C2)}\td{1.90}\td{1.96}}
+\tr{\td{Truffle AST, interpreter only}\td{3.61}\td{3.69}\td{3.77}}
+\tr{\td{Truffle BC, interpreter only}\td{5.76}\td{6.86 (6.05 with tail-call handlers)}\td{7.12}}
+\tr{\td{Truffle AST, compiled}\td{0.108}\td{0.088}\td{0.086}}
+\tr{\td{Truffle BC, compiled}\td{0.073}\td{0.086}\td{-}}
+}
+
+\p{Per guest call on fib: plain 336 (JVM) / 539 (native CE) instructions; AST interpreter 539 / 820; BC interpreter 1206 / 1559; compiled 36 (JVM) / 15 (native).}
+
+\p{Fixed overhead of a short Truffle run (short run minus steady state):}
+
+\table{
+\tr{\th{}\th{JVM CE}\th{native CE}}
+\tr{\td{engine start only (\code{\verb~|ast fib 20~}, one iteration)}\td{4.6 G (plain back-end, no Truffle: 1.16 G)}\td{0.022 G (plain: 0.015 G)}}
+\tr{\td{\code{\verb~|ast fib 32~} x20 (2 compilations)}\td{9.0 G}\td{0.37 G}}
+\tr{\td{\code{\verb~|ast tree 20~} x20 (19 compilations)}\td{9.6 G}\td{2.4 G}}
+\tr{\td{\code{\verb~|bc tree 20~} x20}\td{14.3 G}\td{3.5 G}}
+}
+
+\p{Reading: in JVM mode the Truffle runtime's own classes are interpreted and JIT-compiled by HotSpot first, which costs 4-9 G once. That is about 1-2 \% of the budget, acceptable.}
+}
+
+\subtree{
+\title{4.3 Bytecode DSL in 25.x: features and maturity}
+
+\p{Features present in \code{\verb~|com.oracle.truffle.api.bytecode~} 25.5.5.0.3 (read from the sources jar):}
+
+\table{
+\tr{\th{feature}\th{switch}\th{since}}
+\tr{\td{uncached tier, then cached tier, then compiled (\code{\verb~|BytecodeTier~})}\td{\code{\verb~|enableUncachedInterpreter~}, \code{\verb~|defaultUncachedThreshold = "16"~}}\td{24.2}}
+\tr{\td{quickening}\td{\code{\verb~|enableQuickening~} (default true), \code{\verb~|@ForceQuickening~}}\td{24.2}}
+\tr{\td{boxing elimination}\td{\code{\verb~|boxingEliminationTypes~}}\td{24.2}}
+\tr{\td{serialization (replays builder calls, not a raw dump)}\td{\code{\verb~|enableSerialization~}}\td{24.2}}
+\tr{\td{continuations (stackless coroutines)}\td{\code{\verb~|enableYield~}, custom \code{\verb~|@Yield~}}\td{24.2}}
+\tr{\td{materialized local access for closures}\td{\code{\verb~|enableMaterializedLocalAccesses~}}\td{24.2}}
+\tr{\td{tag instrumentation}\td{\code{\verb~|enableTagInstrumentation~}}\td{24.2}}
+\tr{\td{reserved slots in variadic arrays}\td{\code{\verb~|@Variadic(startOffset = n)~}}\td{25.0}}
+\tr{\td{threaded switch}\td{\code{\verb~|enableThreadedSwitch~} (default true)}\td{25.1}}
+\tr{\td{peephole instruction rewriting}\td{\code{\verb~|enableInstructionRewriting~} (default true)}\td{25.1}}
+\tr{\td{one compilation per bytecode handler}\td{\code{\verb~|enableTailCallHandlers~} (default false)}\td{25.1}}
+\tr{\td{inlined primitive constants, \code{\verb~|@Operation(storeBytecodeIndex)~}}\td{}\td{25.1}}
+\tr{\td{unwind exceptions}\td{\code{\verb~|unwindExceptions~}}\td{25.5}}
+\tr{\td{user-defined superinstructions / tracing-derived decisions}\td{absent: \code{\verb~|decisionsFile~} and \code{\verb~|forceTracing~} are commented out with "This feature is not yet supported" (TODO GR-57220); the word "superinstruction" does not occur in the package}\td{-}}
+}
+
+\p{Defects hit while writing 260 lines of bytecode back-end:}
+
+\ol{
+\li{25.5.5.0.3: \code{\verb~|enableInstructionTracing = false~} generates code that does not compile (\code{\verb~|cannot find symbol: method publishOldBytecodes()~}). Leave the attribute at its default.}
+\li{25.0.4: a constant operand parameter named \code{\verb~|root~} clashes with a generated local (\code{\verb~|variable root is already defined in method validateBytecodes()~}). Rename the parameter.}
+\li{25.0.4: with \code{\verb~|boxingEliminationTypes~}, recursive \code{\verb~|fib~} enters a deoptimisation loop and the compilation fails permanently (\code{\verb~|opt failed ... Deopt taken too many times~}); fib then stays in the interpreter (245-290 ms instead of 3.6 ms per fib(30)). Without boxing elimination it compiles. 25.5.5.0.3 is not affected.}
+\li{API drift: \code{\verb~|@Operation(storeBytecodeIndex = ...)~} does not exist in 25.0.4; source that targets both lines must avoid 25.1+ attributes.}
+}
+
+\p{Measured assessment for RLVM:}
+
+\ul{
+\li{Interpreter speed: the bytecode interpreter executed 1.6-2.2 x the instructions of the AST interpreter on these call-heavy programs (JVM and native). \code{\verb~|enableTailCallHandlers~} recovers 12-20 \% in a native image. Each call allocates a frame with operand-stack slots; the AST version of these programs has no locals.}
+\li{Compiled code: equal or slightly better than AST (0.097 vs 0.106; 0.073 vs 0.108 in JVM mode).}
+\li{Footprint (\code{\verb~|--mem~}, program \code{\verb~|many:2000~}, interpreter only, per defined function of 26 AST nodes including its call targets): AST 1.95 KB after parsing, 2.28 KB after first execution; bytecode 2.23 KB (uncached), 2.65 KB (cached). No footprint advantage at this function size; fixed per-call-target overhead dominates.}
+\li{Caveat: one small spike, generic operations, no tuning. The result says the Bytecode DSL is not an automatic win for call-dominated code, not that it cannot be made fast.}
+}
+}
+}
+
+\subtree{
+\title{5. Truffle compilation economics (question 4, guest side)}
+
+\subtree{
+\title{5.1 Cost of one compilation}
+
+\p{Program \code{\verb~|many:300~}: 300 distinct functions of 26 AST nodes, \code{\verb~|f_i~} calls \code{\verb~|f_(i-1)~}; each function is called 1 000 times per iteration (300 000 guest calls per iteration). Native CE, \code{\verb~|--engine.CompilationStatistics=true~}, 300 iterations:}
+
+\table{
+\tr{\th{}\th{tier 1}\th{tier 2}}
+\tr{\td{compilations}\td{303}\td{60 (plus 13 cancelled or interrupted)}}
+\tr{\td{time per compilation, average}\td{3.24 ms (PE 1.82 + Graal 1.23 + install 0.19)}\td{102 ms (max 436 ms)}}
+\tr{\td{Graal nodes after partial evaluation, average}\td{130}\td{2 071}}
+\tr{\td{AST nodes per unit including inlined callees}\td{26}\td{286 average, 4 356 max}}
+\tr{\td{machine code, average}\td{601 B}\td{1 921 B}}
+}
+
+\p{In instructions (differences between runs): about \strong{27 M per tier-1 compilation (1.0 M per AST node)} and about \strong{0.7 G per tier-2 compilation (2.5 M per inlined AST node)}.}
+
+\p{Cost per guest call in this program: plain Java interpreter 972 (native CE) / 733 (JVM); Truffle AST interpreter 1 420 / 1 118; tier-1 code 43; tier-2 code 9.3.}
+
+\p{Break-even for tier 1 against the AST interpreter: 27 M / (1 420 - 43) = about 20 000 calls of a 26-node function; against the plain-Java interpreter about 29 000 calls. Tier 2 after tier 1 pays only after millions of executions of the compiled unit.}
+
+\p{End-to-end confirmation in JVM mode (C2 host), \code{\verb~|many:300~}, each function called N times:}
+
+\table{
+\tr{\th{calls per function}\th{plain Java}\th{AST, no compilation}\th{AST, default thresholds}\th{AST, 25 000 / 2 000 000}\th{same + 1 compiler thread}\th{tier 1 only (25 000)}}
+\tr{\td{30 000}\td{10.8}\td{14.0}\td{24.3}\td{19.8}\td{-}\td{-}}
+\tr{\td{300 000}\td{70.4}\td{100.6}\td{56.1}\td{39.6}\td{-}\td{-}}
+\tr{\td{3 000 000}\td{664}\td{-}\td{188.7}\td{187.7}\td{155.5}\td{152.4}}
+}
+
+\p{(In the 300 000 and 3 000 000 rows the \code{\verb~|plain Java~} and \code{\verb~|no compilation~} cells ran with the Graal host JIT, everything else with C2; the host JIT changes these by about 10 \%.) Compilation with default thresholds made the 30 000-call case 1.7 x worse than not compiling at all: in JVM mode the compiler's own warm-up (section 4.2) comes on top of the per-compilation cost. Tier 2 never paid for itself here, even at 3 M calls per function.}
+}
+
+\subtree{
+\title{5.2 Engine options (names and defaults verified against the running engine)}
+
+\p{Full dump: \code{\verb~|spikes/platform/results/engine-options-25.5.5.0.3.tsv~}. Options are set with \code{\verb~|Context.newBuilder().allowExperimentalOptions(true).option("engine.X", "v")~} or \code{\verb~|-Dpolyglot.engine.X=v~}.}
+
+\table{
+\tr{\th{option}\th{default}\th{measured effect (native CE unless noted)}}
+\tr{\td{\code{\verb~|engine.Compilation~}}\td{true}\td{false: \code{\verb~|tree~} x200 costs 736.9 G instead of 20.0 G}}
+\tr{\td{\code{\verb~|engine.Mode~}}\td{default}\td{\strong{\code{\verb~|latency~}: 110.0 G instead of 20.0 G (JVM: 140.4 vs 31.5)}; \code{\verb~|throughput~}: no change}}
+\tr{\td{\code{\verb~|engine.MultiTier~}}\td{true}\td{false: 19.7 G on \code{\verb~|tree~}; 47.7 G instead of 30.2 G on \code{\verb~|many:300~} x300}}
+\tr{\td{\code{\verb~|engine.FirstTierCompilationThreshold~}}\td{400}\td{see 5.1; raise to 25 000 or more}}
+\tr{\td{\code{\verb~|engine.LastTierCompilationThreshold~}}\td{10 000}\td{2e9 disables tier 2: 12.8 G instead of 30.2 G on \code{\verb~|many:300~} x300}}
+\tr{\td{\code{\verb~|engine.SingleTierCompilationThreshold~}}\td{1 000}\td{used when MultiTier=false}}
+\tr{\td{\code{\verb~|engine.MinInvokeThreshold~} / \code{\verb~|FirstTierMinInvokeThreshold~}}\td{3 / 1}\td{not varied}}
+\tr{\td{\code{\verb~|engine.BackgroundCompilation~}}\td{true}\td{\strong{false: 376.8 G instead of 30.2 G on \code{\verb~|many:300~}} (every queued tier-2 unit is compiled; in the background most are dropped as "Target inlined into only caller")}}
+\tr{\td{\code{\verb~|engine.CompilerThreads~}}\td{-1 (auto)}\td{1: 26.7 G instead of 30.2 G; JVM long run 155.5 G instead of 187.7 G}}
+\tr{\td{\code{\verb~|engine.Splitting~}}\td{true}\td{false: no change on these programs}}
+\tr{\td{\code{\verb~|engine.OSR~}, \code{\verb~|engine.OSRCompilationThreshold~}}\td{true, 100 352}\td{OSR=false: no change (no guest loops)}}
+\tr{\td{\code{\verb~|compiler.Inlining~}}\td{on (default not shown by the engine)}\td{false: 15.9 G instead of 30.2 G at x300, 46.2 G instead of 61.2 G at x3000 on \code{\verb~|many:300~}}}
+\tr{\td{\code{\verb~|compiler.FirstTierUseEconomy~}}\td{default not shown}\td{false: no change}}
+\tr{\td{\code{\verb~|engine.CompileOnly~}}\td{none}\td{comma-separated root-name filter; accepted (\code{\verb~|node,leaf~})}}
+\tr{\td{\code{\verb~|engine.DynamicCompilationThresholds~}}\td{true}\td{scales thresholds with queue load; not varied; set false for reproducible behaviour}}
+\tr{\td{\code{\verb~|engine.CompilationFailureAction~}}\td{Silent}\td{set \code{\verb~|Print~} in CI to see deopt loops like 4.3 item 3}}
+\tr{\td{\code{\verb~|engine.TraceCompilation~}, \code{\verb~|TraceCompilationDetails~}, \code{\verb~|CompilationStatistics~}}\td{false}\td{diagnostics used above}}
+\tr{\td{\code{\verb~|engine.MaximumCompilations~}}\td{100}\td{per call target}}
+}
+
+\p{Host JIT choice for the Truffle interpreter in JVM mode (\code{\verb~|ast tree 20~} x200): Graal 31.5 G, C2 (\code{\verb~|-XX:-UseJVMCICompiler~}) 27.9 G, C1 only 26.3 G.}
+}
+
+\subtree{
+\title{5.3 Policy for RLVM}
+
+\ol{
+\li{Default thresholds are 50-200 x too eager for an instruction budget. Use first tier 25 000 or more and disable tier 2 unless a unit is known to run for millions of calls.}
+\li{One compiler thread. Never synchronous compilation, never \code{\verb~|Mode=latency~}.}
+\li{Prefer deciding in the kernel what to compile (5.4) over global thresholds: mathlib has on the order of 10^5 definitions and the budget allows only a few hundred tier-1 compilations (300 compilations of 26-node functions = 8 G).}
+\li{Keep compilation units small: tier-2 cost is driven by inlining (4 356 inlined nodes for one root here).}
+}
+}
+
+\subtree{
+\title{5.4 Querying and driving compilation programmatically}
+
+\p{Public, supported hooks (read in \code{\verb~|truffle-api~} sources):}
+
+\ul{
+\li{\code{\verb~|RootNode.prepareForCompilation(boolean rootCompilation, int compilationTier, boolean lastTier)~} (since 24.2), called on the compiler thread; returning \code{\verb~|false~} means "not sufficiently profiled". Verified with \code{\verb~|-Dlc.veto=fib~}: the root is never compiled, \strong{but the runtime re-queues it continuously: 5 747 queue/start/unqueue cycles during 8 iterations of fib(30) and about 3 s of extra CPU}. Use it as a safety net, not as the policy.}
+\li{\code{\verb~|LoopNode.reportLoopCount(node, n)~} adds \code{\verb~|n~} to the enclosing root's call-and-loop count, so an interpreter can report its own hotness measure. Not exercised in the spike.}
+\li{\code{\verb~|engine.CompileOnly~}, thresholds.}
+}
+
+\p{Internal API of the optimising runtime (\code{\verb~|org.graalvm.truffle.runtime~}, package \code{\verb~|com.oracle.truffle.runtime~}, qualified exports only; reachable from the class path, or with \code{\verb~|--add-exports org.graalvm.truffle.runtime/com.oracle.truffle.runtime=ALL-UNNAMED~}):}
+
+\pre{\verb~|
+// every RootCallTarget is an OptimizedCallTarget when the optimising runtime is active
+boolean compile(boolean lastTierCompilation);   void waitForCompilation();
+boolean isValid();  boolean isValidLastTier();  int highestCompiledTier();
+int getCallCount(); int getCallAndLoopCount();  int getNonTrivialNodeCount();
+boolean isSubmittedForCompilation();  boolean cancelCompilation(CharSequence reason);
+boolean invalidate(CharSequence reason);        void resetCompilationProfile();
+// OptimizedTruffleRuntime: addListener(OptimizedTruffleRuntimeListener) with onCompilationQueued /
+// Started / Success / Failed / Invalidated / Deoptimized; int getCompilationQueueSize()
+~}
+
+\p{Verified (\code{\verb~|scripts/lc.sh --compile-at=fib:3:2~} with both thresholds at 2e9): no automatic compilation happens; the explicit call compiles \code{\verb~|fib~} straight at tier 2 in 107 ms (\code{\verb~|opt done ... |Tier 2|~}), and later iterations run compiled. This is the mechanism for "compile only what is provably hot and long-running": thresholds effectively infinite, the kernel counts reductions per definition, and submits a target when its own cost model says so. Risk: internal API, may change between releases; in a native image the call must be made directly (no reflection) and the build needs the \code{\verb~|--add-exports~} above (not tested in a native image).}
+}
+}
+
+\subtree{
+\title{6. Host JIT economics (question 4, host side)}
+
+\subtree{
+\title{6.1 Start-up}
+
+\table{
+\tr{\th{configuration (\code{\verb~|Hello~})}\th{G}}
+\tr{\td{defaults (G1, CDS archive, Graal JIT)}\td{0.47}}
+\tr{\td{\code{\verb~|-XX:+UseSerialGC~}}\td{0.46}}
+\tr{\td{\code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler~}}\td{0.29}}
+\tr{\td{\code{\verb~|-XX:TieredStopAtLevel=1~}}\td{0.22}}
+\tr{\td{\code{\verb~|-Xint~}}\td{0.08}}
+\tr{\td{\code{\verb~|-Xshare:off~} (no CDS)}\td{0.63}}
+\tr{\td{\code{\verb~|-XX:AOTCache=...~} (JEP 483/514)}\td{0.62}}
+\tr{\td{recommended flags with \code{\verb~|-Xms6g~}, tiny workload}\td{1.16}}
+\tr{\td{native image, tiny workload}\td{0.015}}
+}
+
+\p{Start-up is below 0.3 \% of the budget in every configuration. The AOT cache needs a jar class path (directories fail with "Cannot have non-empty directory in paths").}
+}
+
+\subtree{
+\title{6.2 Warm-up of a large code base (JavacBench, heap 2 GB, SerialGC)}
+
+\table{
+\tr{\th{configuration}\th{x1}\th{x5}\th{x20}\th{x60}}
+\tr{\td{C2, tiered (HotSpot default without Graal)}\td{33.7}\td{80.3}\td{136.9}\td{227.7}}
+\tr{\td{\strong{C2 only (\code{\verb~|-XX:-TieredCompilation~})}}\td{-}\td{-}\td{\strong{103.7}}\td{\strong{181.1}}}
+\tr{\td{C2 tiered, tier-4 thresholds x4}\td{-}\td{-}\td{106.3}\td{193.6}}
+\tr{\td{C2 tiered, \code{\verb~|CICompilerCount=2~}}\td{-}\td{-}\td{109.0}\td{222.6}}
+\tr{\td{C2 only, \code{\verb~|-XX:-BackgroundCompilation~}}\td{-}\td{-}\td{102.7}\td{-}}
+\tr{\td{C2 only, \code{\verb~|CompileThreshold=30000~}}\td{-}\td{-}\td{121.4}\td{-}}
+\tr{\td{C1 only (\code{\verb~|TieredStopAtLevel=1~})}\td{10.1}\td{-}\td{83.4}\td{232.0}}
+\tr{\td{Graal JIT, CE (GraalVM default)}\td{46.6}\td{-}\td{232.6}\td{438.9}}
+\tr{\td{Graal JIT, Oracle}\td{-}\td{-}\td{182.0}\td{314.7}}
+\tr{\td{C2 tiered + JDK 25 AOT cache trained on 5 iterations}\td{33.7}\td{75.6}\td{136.0}\td{-}}
+\tr{\td{all JVM defaults (Graal JIT + G1)}\td{-}\td{-}\td{225.5}\td{-}}
+}
+
+\p{Steady state is about 1.94 G per iteration with C2 and 3.71 G with C1. Fixed warm-up cost of this code base: \strong{C2 only about 65 G, C2 tiered about 110 G, C1 only about 9 G, Graal CE more than 300 G and still compiling after 60 iterations.} In CPU-time terms (C2 tiered, x60) the main thread used 11.6 s of 27.4 s; the rest is compiler threads.}
+
+\p{The JDK 25 AOT cache (class loading and linking plus method profiles) brings compiled code earlier in wall-clock terms but does not reduce total instructions, because every compilation still happens.}
+}
+
+\subtree{
+\title{6.3 Warm-up of a small kernel (NbeBench \code{\verb~|tag tree4m-norm~}, heap 4 GB, young 2 GB)}
+
+\table{
+\tr{\th{configuration}\th{x10}\th{x100}\th{steady per iteration}}
+\tr{\td{JVM C2 + Serial}\td{21.6}\td{214.9}\td{2.15}}
+\tr{\td{JVM Graal JIT + Serial}\td{23.5}\td{232.0}\td{2.32}}
+\tr{\td{JVM C1 only + Serial}\td{32.7}\td{328.7}\td{3.29}}
+\tr{\td{native CE (\code{\verb~|-O2~})}\td{28.2}\td{309.3}\td{3.12}}
+\tr{\td{native CE \code{\verb~|-O3~}}\td{27.4}\td{302.2}\td{3.05}}
+\tr{\td{native CE \code{\verb~|-march=native~}}\td{28.2}\td{309.3}\td{3.12}}
+\tr{\td{native Oracle}\td{27.4}\td{282.8}\td{2.84}}
+\tr{\td{native Oracle \code{\verb~|-O3~}}\td{28.0}\td{290.1}\td{2.91}}
+\tr{\td{native Oracle PGO}\td{29.0}\td{281.2}\td{2.80}}
+\tr{\td{native Oracle PGO + G1}\td{29.5}\td{320.7}\td{3.24}}
+}
+
+\p{JIT warm-up here is 0.1-0.3 G. Mutator only (Epsilon GC, x10): JVM C2 18.75, JVM Graal 20.65, native CE 25.40, native Oracle PGO 24.13.}
+}
+
+\subtree{
+\title{6.4 What this means for a 400-600 G run}
+
+\p{JIT overhead scales with the amount of warm code, not with run length. A checker whose hot path is a few hundred methods should land between the two measurements: an estimated 5-30 G (1-7 \% of the budget) with C2; this is an interpolation, not a measurement. Native-image removes that and pays 19-60 \% more per steady-state instruction (CE) or between -12 \% and +44 \% (Oracle PGO). Against CE, JVM mode wins whenever warm-up is below 19 \% of steady-state work (the smallest gap measured), which holds for mathlib and fails for sub-second tests (which do not affect the ranking).}
+
+\p{Rules that follow: keep one implementation of each hot operation (no duplicated evaluators kept warm side by side), keep rarely-used paths out of the hot classes, and measure the JIT share early with \code{\verb~|-Xlog:jit+compilation=debug~} or \code{\verb~|CompilationMXBean.getTotalCompilationTime()~}.}
+}
+}
+
+\subtree{
+\title{7. Native Image (question 3)}
+
+\subtree{
+\title{7.1 Building the spike}
+
+\pre{\verb~|
+native-image -cp lc.jar:lib/* rlvm.spike.lc.Main -o lc        # CE or Oracle; Truffle is detected automatically
+~}
+
+\p{Build output confirms \code{\verb~|com.oracle.svm.truffle.TruffleFeature: Provides internal support for Truffle runtime compilation~} and \code{\verb~|2,007 runtime compiled methods~}; at run time \code{\verb~|--engine.TraceCompilation=true~} prints tier-1 and tier-2 \code{\verb~|opt done~} lines (7 ms and 10 ms for fib). \code{\verb~|--no-fallback~} is deprecated in 25 and has no effect.}
+
+\table{
+\tr{\th{image}\th{build wall / CPU / peak RSS (20 cores)}\th{size}}
+\tr{\td{Truffle spike, CE}\td{37-40 s / 460-490 CPU-s / 3.1 GB (1 min 57 s in the 8-CPU container including javac)}\td{38.7 MB}}
+\tr{\td{Truffle spike, Oracle}\td{48-70 s / 550-575 CPU-s / 4.1-4.3 GB}\td{50 MB}}
+\tr{\td{Truffle spike, Oracle \code{\verb~|--pgo-instrument~}}\td{61-90 s / 625-660 CPU-s / 5.7-5.9 GB}\td{114 MB}}
+\tr{\td{Truffle spike, Oracle \code{\verb~|--pgo~}}\td{48-62 s / 515-530 CPU-s / 4.3-4.8 GB}\td{43 MB}}
+\tr{\td{Truffle spike, Oracle \code{\verb~|--gc=G1~}}\td{52-88 s}\td{62 MB}}
+\tr{\td{plain NbeBench, CE / Oracle}\td{44 s / 200 CPU-s / 1.9 GB ; 57 s / 250 CPU-s / 2.1 GB}\td{10 MB / 14 MB}}
+}
+
+\p{Start-up plus a trivial workload: 0.015 G, RSS 15-20 MB. Peak throughput against JVM mode: sections 4.2 and 6.3.}
+}
+
+\subtree{
+\title{7.2 What CE offers and what Oracle adds (verified by running the option)}
+
+\table{
+\tr{\th{feature}\th{CE 25.5.5.0.3}\th{Oracle 25.0.4}}
+\tr{\td{\code{\verb~|--gc=~}}\td{\code{\verb~|serial~}, \code{\verb~|epsilon~} only ("'G1' is not an accepted value")}\td{+ \code{\verb~|G1~}}}
+\tr{\td{\code{\verb~|--pgo-instrument~}, \code{\verb~|--pgo=~}}\td{"Unrecognized option"}\td{yes; \code{\verb~|--pgo~} raises the level to 3}}
+\tr{\td{\code{\verb~|-O3~}}\td{accepted ("optimization level: 3"); 2 \% fewer instructions on NbeBench}\td{accepted; no gain over \code{\verb~|-O2~} in our runs}}
+\tr{\td{\code{\verb~|-march=native~}}\td{accepted; no change on NbeBench (aarch64)}\td{not run}}
+\tr{\td{ML-based profile inference}\td{no}\td{reported in the build output as "PGO: ML-inferred" when no profile is given; what it changes (for example inlining) was not examined}}
+\tr{\td{Truffle enterprise compiler feature}\td{no}\td{active automatically (\code{\verb~|EnterpriseTruffleCompilerFeature~})}}
+}
+
+\p{Odd but harmless: \code{\verb~|java --list-modules~} of the CE build lists modules named \code{\verb~|com.oracle.graal.graal_enterprise~}, \code{\verb~|com.oracle.svm.enterprise.truffle~} and similar; the corresponding features are nevertheless rejected as shown.}
+}
+
+\subtree{
+\title{7.3 Oracle GraalVM availability and licence}
+
+\ul{
+\li{Downloadable without login for both architectures; pinned URLs with published checksums: \code{\verb~|https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz~} (sha256 \code{\verb~|76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276~}, 380.5 MB) and \code{\verb~|..._linux-aarch64_bin.tar.gz~} (sha256 \code{\verb~|7031aead8da4c6a7816c4e2be4eabfddaf7f4abcfe8e5f16134c4da69a5e70de~}, 351.6 MB). \code{\verb~|.../25/latest/...~} currently serves the same files.}
+\li{Licence (\code{\verb~|LICENSE.txt~} in the archive): GraalVM Free Terms and Conditions. It grants a licence to "internally use the unmodified Programs for the purposes of developing, testing, prototyping and demonstrating your applications, and running the Program for Your own personal use or internal business operations" and to redistribute the unmodified Program provided no fee is charged; output of Native Image "shall be deemed to be an unmodified Program". An arena build step that downloads it makes the arena operator the licensee. That is a policy question for the arena maintainers, not a technical one (open question 3).}
+\li{Oracle GraalVM 25.0.4 needs Truffle 25.0.4 jars, where the Bytecode DSL defects 2-4 of section 4.3 apply.}
+}
+}
+
+\subtree{
+\title{7.4 PGO and G1 gains (Oracle)}
+
+\table{
+\tr{\th{workload}\th{CE}\th{Oracle}\th{Oracle + PGO}\th{Oracle + G1}}
+\tr{\td{plain interpreter, fib(32), G per iteration}\td{3.80}\td{3.77}\td{3.01 (-20 \%)}\td{3.80}}
+\tr{\td{plain interpreter, tree(20)}\td{1.90}\td{1.88}\td{1.96 (+3 \%)}\td{2.07}}
+\tr{\td{plain interpreter, \code{\verb~|many:300~} x300, total}\td{87.5}\td{88.2}\td{76.1 (-13 \%)}\td{88.6}}
+\tr{\td{Truffle AST interpreter only, \code{\verb~|many:300~} x300}\td{127.8}\td{135.7}\td{107.8 (-16 \%)}\td{139.9}}
+\tr{\td{Truffle-compiled fib / tree, per iteration}\td{0.106 / 0.088}\td{0.108 / 0.087}\td{0.108 / 0.086}\td{0.108 / 0.099}}
+\tr{\td{NbeBench steady (6.3)}\td{3.12}\td{2.84}\td{2.80}\td{2.89}}
+\tr{\td{GcBench mutator only (Epsilon)}\td{42.5}\td{-}\td{31.3 (JVM: 35.7)}\td{-}}
+\tr{\td{GcBench total, serial, \code{\verb~|-Xmn4g~}}\td{112.0}\td{73.4}\td{64.0}\td{254.7-278.9}}
+}
+
+\ul{
+\li{PGO: 0-20 \% on host code, nothing on Truffle-compiled guest code. It beat the HotSpot JIT only on the GcBench mutator.}
+\li{\strong{Mis-training hazard}: an image trained only on the \code{\verb~|tag~} evaluator ran the other evaluators slower than the untrained CE image (\code{\verb~|hoas~} 23.0 vs 14.1 G, \code{\verb~|pat~} 36.6 vs 26.1 G). Training must cover every hot path, and it needs a representative export at build time (precedent: \code{\verb~|checkers/gruszka.yaml~} downloads \code{\verb~|init.susz~} for its PGO build).}
+\li{G1 in a native image never reduced instructions (+0 to +14 \% on evaluation, 3.8-5 x on GcBench). It only helps wall-clock time on several cores.}
+}
+}
+
+\subtree{
+\title{7.5 Serial GC tuning in a native image}
+
+\p{Run-time options accepted by the image: \code{\verb~|-Xms~}, \code{\verb~|-Xmx~}, \code{\verb~|-Xmn~}, \code{\verb~|-XX:+PrintGC~}, \code{\verb~|-XX:ProfilesDumpFile=~} (instrumented images). Build-time defaults worth knowing (\code{\verb~|native-image --expert-options-all~}): \code{\verb~|-H:MaximumHeapSizePercent=80~}, \strong{\code{\verb~|-H:MaximumYoungGenerationSizePercent=10~}}, \code{\verb~|-H:+CompactingOldGen~}, \code{\verb~|-H:AlignedHeapChunkSize=524288~}, \code{\verb~|-H:LargeArrayThreshold=131072~} (arrays of 128 KB and more get their own chunk; whether that avoids copying them was not measured), \code{\verb~|-H:-AlwaysPreTouch~}, \code{\verb~|-H:+UseCompressedReferences~} (maximum heap 32 GB: \code{\verb~|-Xmx40g~} is rejected). GcBench: defaults 233 G, \code{\verb~|-Xms8g -Xmx8g~} 143 G, plus \code{\verb~|-Xmn4g~} 112 G.}
+}
+
+\subtree{
+\title{7.6 Traps}
+
+\ul{
+\li{\code{\verb~|MemorySegment~} and \code{\verb~|VarHandle~} access is not optimised unless the holder class is initialised at build time, and \code{\verb~|MemorySegment~} stays slow even then (section 8.5).}
+\li{Fields that are never read are removed by the closed-world analysis (object-size probes must read their fields).}
+\li{The G1 image defaults to a maximum heap of 25 \% of RAM, the serial image to 80 \%.}
+\li{The linker needs \code{\verb~|gcc~} and zlib (\code{\verb~|4 native libraries: dl, pthread, rt, z~}).}
+}
+}
+}
+
+\subtree{
+\title{8. GC and memory on JDK 25 (question 5)}
+
+\subtree{
+\title{8.1 Collectors, in instructions (GcBench 40 200, heap 8 GB, 8 CPUs / 16 GB)}
+
+\table{
+\tr{\th{JVM configuration}\th{G}\th{CPU s}\th{RSS MB}\th{collections}}
+\tr{\td{Epsilon, \code{\verb~|-Xmx14g~} (no GC: mutator only)}\td{35.7}\td{32.0}\td{8 097}\td{0}}
+\tr{\td{\strong{Serial, \code{\verb~|-Xms8g -Xmx8g~}}}\td{\strong{54.4}}\td{34.8}\td{4 517}\td{3}}
+\tr{\td{Serial + \code{\verb~|-Xmn4g~}}\td{57.8}\td{34.7}\td{5 549}\td{2}}
+\tr{\td{Serial + \code{\verb~|-Xmn1g~}}\td{63.5}\td{35.2}\td{3 249}\td{9}}
+\tr{\td{Serial + \code{\verb~|-Xmn4g~} + compact headers}\td{58.8}\td{34.1}\td{5 250}\td{1}}
+\tr{\td{Serial, JVM default sizing}\td{83.8}\td{43.5}\td{2 442}\td{106}}
+\tr{\td{Parallel (8 threads)}\td{74.9}\td{39.7}\td{4 530}\td{4}}
+\tr{\td{Parallel, 1 / 2 / 4 threads}\td{75.5 / 75.1 / 75.0}\td{34.2 / 33.9 / 35.7}\td{4 271-4 531}\td{4}}
+\tr{\td{Parallel 4 threads + \code{\verb~|-Xmn4g~}}\td{67.9}\td{35.2}\td{5 456}\td{2}}
+\tr{\td{G1 (default collector)}\td{204.2}\td{53.7}\td{5 328}\td{10}}
+\tr{\td{G1, \code{\verb~|ParallelGCThreads=1 ConcGCThreads=1~}}\td{312.1}\td{65.1}\td{2 848}\td{18}}
+\tr{\td{G1, 4 parallel / 1 concurrent}\td{281.6}\td{66.8}\td{2 851}\td{18}}
+\tr{\td{ZGC (generational)}\td{221.2}\td{105.0}\td{6 565}\td{42 cycles}}
+\tr{\td{all defaults (G1, default sizing)}\td{262.8}\td{63.5}\td{3 221}\td{55}}
+}
+
+\p{Native images on the same workload: section 7.4.}
+
+\ul{
+\li{Serial costs 18.7 G over the mutator here, almost all of it for promoting the 40 M long-lived nodes once (about 470 instructions per promoted object including card scanning of the 512 MB table).}
+\li{G1 and ZGC pay for barriers and remembered-set / concurrent work on every reference store into the large table; thread-count flags do not fix that.}
+\li{Parallel GC spends more instructions than Serial at every thread count; more threads only shorten the pause.}
+\li{CPU-time view on the bare host (20 cores, \code{\verb~|results/gc-matrix-aarch64.txt~}): Serial 33.5 s, Parallel 44.4 s, G1 43.3 s, ZGC 94.5 s, Epsilon 27.2 s: the ranking by CPU time understates G1's cost by 3 x.}
+}
+}
+
+\subtree{
+\title{8.2 Design consequences}
+
+\ol{
+\li{Objects that live for the whole run should not be small Java objects created in the young generation: each is copied once (about 470 instructions) and its table slot dirties a card. Packed \code{\verb~|int[]~} storage is copied by \code{\verb~|memmove~} at most once per array instead of object by object (cost of large-array promotion not measured separately).}
+\li{Size the young generation so that the number of collections is small (2-10 for the whole run).}
+\li{Fixed heap (\code{\verb~|-Xms~} = most of \code{\verb~|-Xmx~}): growth steps cost collections.}
+}
+}
+
+\subtree{
+\title{8.3 Other flags}
+
+\table{
+\tr{\th{flag}\th{finding}}
+\tr{\td{\code{\verb~|-XX:+AlwaysPreTouch~}}\td{+4.3 s system time, RSS 8.5 GB instead of 5.7 GB; page faults are kernel instructions and are not counted, so pre-touching buys nothing and costs RSS. Do not use.}}
+\tr{\td{\code{\verb~|-XX:+UseTransparentHugePages~}}\td{CPU time -4 \% (30.6 vs 31.8 s); instruction effect not measured; host THP mode is \code{\verb~|madvise~}, the runner's is unknown. Harmless.}}
+\tr{\td{\code{\verb~|-XX:-UseAdaptiveSizePolicy~}}\td{only relevant to Parallel and not isolated: 4 threads with \code{\verb~|-Xmn4g~} and adaptive sizing off used 31.4 s CPU against 36.1 s with defaults}}
+\tr{\td{compressed oops / class pointers}\td{on by default below 32 GB; \code{\verb~|-XX:-UseCompressedOops~} (or a heap above 32 GB) makes a 2-ref node 32 B instead of 24 B. Stay below 32 GB.}}
+\tr{\td{\code{\verb~|-XX:+UseStringDeduplication~}}\td{G1/ZGC/Shenandoah feature; irrelevant with Serial. Intern names once in the parser instead.}}
+\tr{\td{\code{\verb~|-XX:+UseCompactObjectHeaders~} (JEP 519, product in 25)}\td{works with Serial, C2, the Graal JIT via libgraal, Truffle runtime compilation in JVM mode, and on the Oracle JDK (all run). Costs +1.6 \% (GcBench) to +3 \% (plain interpreter) instructions.}}
+}
+}
+
+\subtree{
+\title{8.4 Object sizes (bytes; exact allocation counter on HotSpot, Epsilon heap delta in the image)}
+
+\table{
+\tr{\th{class}\th{HotSpot default}\th{compact headers}\th{no compressed oops}\th{native-image}}
+\tr{\td{\code{\verb~|Object~}}\td{16}\td{8}\td{16}\td{8}}
+\tr{\td{\code{\verb~|{int}~}}\td{16}\td{16}\td{16}\td{16}}
+\tr{\td{\code{\verb~|{long}~} / boxed \code{\verb~|Long~}}\td{24}\td{16}\td{24}\td{16}}
+\tr{\td{\code{\verb~|{ref}~}}\td{16}\td{16}\td{24}\td{16}}
+\tr{\td{\code{\verb~|{ref, ref}~}}\td{24}\td{16}\td{32}\td{16}}
+\tr{\td{\code{\verb~|{byte, ref, ref}~}}\td{24}\td{24}\td{32}\td{24}}
+\tr{\td{\code{\verb~|{ref, ref, int}~}}\td{24}\td{24}\td{32}\td{24}}
+\tr{\td{\code{\verb~|{ref, ref, int, int}~}}\td{32}\td{24}\td{40}\td{24}}
+\tr{\td{\code{\verb~|{ref, ref, ref}~}}\td{24}\td{24}\td{40}\td{24}}
+\tr{\td{\code{\verb~|{ref, ref, ref, int}~}}\td{32}\td{24}\td{40}\td{24}}
+\tr{\td{\code{\verb~|{ref x4}~}}\td{32}\td{24}\td{48}\td{24}}
+\tr{\td{\code{\verb~|{long, ref}~}}\td{24}\td{24}\td{32}\td{24}}
+\tr{\td{\code{\verb~|int[0]~}}\td{16}\td{16}\td{16}\td{8}}
+\tr{\td{\code{\verb~|int[3]~} / \code{\verb~|int[4]~}}\td{32 / 32}\td{24 / 32}\td{32 / 32}\td{24 / 24}}
+\tr{\td{\code{\verb~|Object[1]~} / \code{\verb~|[2]~} / \code{\verb~|[4]~}}\td{24 / 24 / 32}\td{16 / 24 / 32}\td{24 / 32 / 48}\td{16 / 16 / 24}}
+\tr{\td{lambda capturing 1 / 2 refs}\td{16 / 24}\td{16 / 16}\td{24 / 32}\td{16 / 16}}
+}
+
+\p{Headers: HotSpot 12 B (arrays 16 B), compact 8 B (arrays 12 B), native-image 8 B (arrays 8 B; the identity hash is appended only when used, \code{\verb~|-H:+OptionalIdentityHashCodes~}). Layout rule: with an 8 B header a node with two references and no extra field is 16 B; a \code{\verb~|byte~} tag field costs a whole 8 B. Use the class as the tag, or pack the tag into an existing \code{\verb~|int~}.}
+}
+
+\subtree{
+\title{8.5 Packed storage access (ns per 12-byte record; sequential scan / random chase)}
+
+\table{
+\tr{\th{store}\th{HotSpot C2}\th{HotSpot Graal JIT}\th{native CE}\th{native CE, holder class initialised at build time}}
+\tr{\td{\code{\verb~|int[]~}}\td{0.57 / 3.6}\td{0.70 / 3.4}\td{0.91 / 3.8}\td{0.94 / 3.8}}
+\tr{\td{heap \code{\verb~|IntBuffer~}}\td{1.83 / 4.6}\td{0.99 / 3.8}\td{4.14 / 4.6}\td{4.09 / 4.6}}
+\tr{\td{direct \code{\verb~|IntBuffer~}}\td{1.89 / 4.2}\td{0.72 / 3.7}\td{3.89 / 4.6}\td{3.90 / 4.6}}
+\tr{\td{\code{\verb~|MemorySegment.ofArray~}}\td{3.40 / 4.4}\td{0.86 / 4.2}\td{\strong{141 / 148}}\td{17.2 / 17.2}}
+\tr{\td{native \code{\verb~|MemorySegment~}}\td{5.01 / 5.2}\td{0.82 / 3.6}\td{\strong{143 / 151}}\td{17.3 / 17.3}}
+\tr{\td{\code{\verb~|byte[]~} + \code{\verb~|VarHandle~}}\td{0.57 / 3.9}\td{0.76 / 4.0}\td{\strong{128 / 130}}\td{0.99 / 4.1}}
+\tr{\td{\code{\verb~|Unsafe~} on a native address}\td{0.57 / 4.2}\td{0.51 / 3.3}\td{2.0 / 3.9}\td{1.9 / 3.6}}
+}
+
+\p{(20 M records, 228 MB; times, not instructions.) \code{\verb~|int[]~} is the fastest or tied everywhere, needs no flags, and its bounds checks are hoisted by both JITs. Off-heap storage buys nothing for access speed; its only advantage is that the GC never sees it, which large \code{\verb~|int[]~} arrays nearly achieve.}
+}
+}
+
+\subtree{
+\title{9. Deep recursion (question 6)}
+
+\subtree{
+\title{9.1 Limits and frame sizes (\code{\verb~|DeepRec~}, a 3-local recursive step that allocates)}
+
+\table{
+\tr{\th{runtime}\th{bytes per frame}\th{default stack}\th{8 GB thread stack}}
+\tr{\td{HotSpot C2}\td{32}\td{\code{\verb~|ThreadStackSize=2040~} KB on this aarch64 build; overflow at depth 15-17 k while still interpreted}\td{depth 268 M reached}}
+\tr{\td{HotSpot Graal JIT}\td{48}\td{same}\td{1 GB tested: depth 22 M}}
+\tr{\td{HotSpot C1}\td{112}\td{}\td{}}
+\tr{\td{HotSpot interpreter}\td{160}\td{}\td{}}
+\tr{\td{native-image CE}\td{64}\td{main thread uses \code{\verb~|ulimit -s~} (8 MB here): depth 130 k}\td{depth 134 M reached}}
+}
+
+\ul{
+\li{\code{\verb~|new Thread(null, runnable, name, stackSizeBytes)~} honours multi-gigabyte sizes on both runtimes; only touched pages are committed (10 M frames x 32 B = 320 MB of RSS). \code{\verb~|-Xss1g~} also enlarges the Java main thread on HotSpot (depth 33 M). \code{\verb~|refs/tenet-jvm/src/main/java/tenet/Main.java:47~} uses \code{\verb~|4L << 30~}.}
+\li{\code{\verb~|StackOverflowError~} is catchable and the thread stays usable (four consecutive overflows tested on both). Cost: about 100-130 ns per unwound frame on HotSpot (33 M frames: 3.4 s per overflow), about the same on SVM; the first descent also pays page faults.}
+\li{\strong{Anomaly with the Graal JIT (CE 25.5.5.0.3 and Oracle 25.0.4), reproducible 3 of 3 runs}: after one \code{\verb~|StackOverflowError~} on the main thread, a later thread with a 64 MB stack threw \code{\verb~|StackOverflowError~} at depth of about 1 000 in freshly compiled code. It does not happen with \code{\verb~|-XX:-UseJVMCICompiler~}, with \code{\verb~|-XX:-BackgroundCompilation~}, or when the first overflow is skipped (\code{\verb~|-Ddeeprec.skipMain=true~}). Not root-caused. Another reason to use C2, and to use an explicit depth counter rather than catching \code{\verb~|StackOverflowError~} as control flow.}
+\li{Truffle frames: a guest call in the AST interpreter is several host frames (\code{\verb~|callBoundary~}, \code{\verb~|executeRootNode~}, \code{\verb~|execute~} of each node on the path), so interpreted guest recursion is far shallower per megabyte than host recursion; compiled guest frames were 64-160 B in the spike (\code{\verb~|Total frame size~} in the compilation statistics).}
+}
+}
+
+\subtree{
+\title{9.2 Deep stacks and GC (NbeBench \code{\verb~|nat10m-norm~} x5: quote recursion 10 M frames deep)}
+
+\table{
+\tr{\th{configuration}\th{G}\th{collections}}
+\tr{\td{JVM C2, Epsilon}\td{14.3}\td{0}}
+\tr{\td{JVM C2, Serial \code{\verb~|-Xmn4g~}}\td{16.7}\td{1}}
+\tr{\td{JVM C2, Serial \code{\verb~|-Xmn1g~}}\td{68.7}\td{5}}
+\tr{\td{JVM C2, Serial \code{\verb~|-Xmn256m~}}\td{87.1}\td{21}}
+\tr{\td{JVM C2, Parallel \code{\verb~|-Xmn1g~}}\td{79.3}\td{5}}
+\tr{\td{JVM C2, G1}\td{102.3}\td{8}}
+\tr{\td{JVM C2, ZGC}\td{94.7}\td{16}}
+\tr{\td{JVM \code{\verb~|-Xint~}, Serial \code{\verb~|-Xmn256m~}, one iteration}\td{63.5}\td{4}}
+\tr{\td{native CE, Epsilon}\td{18.1}\td{0}}
+\tr{\td{native CE, \code{\verb~|-Xmn4g~}}\td{18.1}\td{1}}
+\tr{\td{native CE, \code{\verb~|-Xmn1g~}}\td{51.5}\td{7}}
+\tr{\td{native CE, \code{\verb~|-Xmn256m~}}\td{234.1}\td{43}}
+}
+
+\p{A collection that happens while the stack is 10 M frames deep costs about 10 G on HotSpot (about 1 000 instructions per frame) and about 5 G on SVM. With default heap settings the first iteration of the HOAS variant took 7.3 s instead of 0.09 s because the deep frames were still interpreted.}
+
+\p{Rules: (1) recursion on the host stack is fine and cheapest per step while collections are rare; (2) for traversals whose depth follows the data (long application spines, long \code{\verb~|let~} chains, deep binder telescopes) use loops or explicit worklists held in arrays; (3) never combine a small young generation with deep recursion.}
+}
+}
+
+\subtree{
+\title{10. HOAS / NbE on the JVM: the two normalization-bench repositories, re-measured}
+
+\subtree{
+\title{10.1 What the repositories say (platform-relevant parts)}
+
+\p{\code{\verb~|refs/normalization-bench-kovacs/README.md~} (Scala HOAS on OpenJDK 8 and GraalVM 21, 2020):}
+
+\ul{
+\li{JVM HOAS was the best of the JIT platforms and competitive with GHC on the tree benchmarks, but "performance ... degrades sharply from 5M to 10M with natural numbers; perhaps there is some issue with deep stacks" (lines 115-119); GraalVM made that case worse.}
+\li{It needed \code{\verb~|-Xss1000M -Xmx4G~} (line 28); "Scala and nodejs performance becomes dismal without free RAM" (lines 157-160); occasional multi-second pauses and memory spikes (lines 164-169).}
+\li{All JIT entries are call-by-value; call-by-need was not measured.}
+}
+
+\p{\code{\verb~|refs/normalization-bench-guest0x0/README.md~} (OCaml, many normaliser variants):}
+
+\ul{
+\li{Plain untyped NbE with closures and a linked-list environment (\code{\verb~|NBE.closure.list~}) is among the fastest everywhere; list environments beat balanced trees and skew lists (line 370).}
+\li{HOAS and first-order closures perform the same in OCaml (line 388); the lazy variant is slower (line 395).}
+\li{An abstract machine with heap-allocated continuations has a stable constant overhead against recursion on the native stack (line 406).}
+\li{A memo slot for the quoted term is nearly free when stored inside the value object (variant \code{\verb~|v3~}, one indirection, line 563) and expensive behind a wrapper.}
+\li{Full hash-consing has a significant overhead except under extreme sharing (line 585); sharing only leaf nodes is a cheap, reliable win (line 592).}
+\li{Compiling terms through the host compiler is impractical because of compile time (lines 686, 729).}
+}
+}
+
+\subtree{
+\title{10.2 Re-measurement on JDK 25 (\code{\verb~|plain/NbeBench.java~})}
+
+\p{Kovacs' table, best of 10 iterations in ms, JVM defaults (G1, Graal JIT), this host:}
+
+\table{
+\tr{\th{workload}\th{hoas}\th{tag}\th{virt}\th{pat}\th{Scala 2020 (README)}}
+\tr{\td{tree 2M normalisation}\td{33.5}\td{66.1}\td{58.0}\td{60.8}\td{85}}
+\tr{\td{tree 2M conversion}\td{119.7}\td{100.1}\td{114.1}\td{101.8}\td{118}}
+\tr{\td{nat 5M normalisation}\td{85.3}\td{104.5}\td{98.6}\td{104.6}\td{374}}
+\tr{\td{nat 5M conversion}\td{76.8}\td{100.6}\td{87.4}\td{98.7}\td{138}}
+}
+
+\p{Mutator instructions (Epsilon GC, tree 4M normalisation x10):}
+
+\table{
+\tr{\th{evaluator}\th{JVM C2}\th{native CE}\th{native Oracle PGO (trained on \code{\verb~|tag~})}}
+\tr{\td{\code{\verb~|hoas~} (Java lambdas)}\td{12.35}\td{14.14}\td{22.97}}
+\tr{\td{\code{\verb~|tag~} (closure = env + term, \code{\verb~|switch~} on a byte tag)}\td{18.75}\td{25.40}\td{24.13}}
+\tr{\td{\code{\verb~|virt~} (virtual \code{\verb~|eval~} method per term class)}\td{20.73}\td{24.61}\td{27.07}}
+\tr{\td{\code{\verb~|pat~} (sealed hierarchy, pattern \code{\verb~|switch~})}\td{19.95}\td{26.12}\td{36.59}}
+}
+}
+
+\subtree{
+\title{10.3 Platform conclusions}
+
+\ol{
+\li{The deep-stack degradation Kovacs saw is the stack-walking cost of section 9.2, plus interpreted frames early in the run. It disappears with a large young generation (\code{\verb~|-Xmn4g~}: 16.7 G against 14.3 G without any GC) and gets worse with G1.}
+\li{"Needs free RAM" is the same effect as section 8.1: collection count, not heap size, is what costs. Fixed heap plus large young generation is the cure.}
+\li{On the JVM, host-closure HOAS is 34 \% cheaper than the environment machine, unlike in OCaml, because the lambda bodies are JIT-compiled Java. It applies only to code that exists as Java at build time (primitives, recursor schemes, built-in reductions). For terms that arrive at run time the equivalent is a closure tree (\code{\verb~|PlainInterp~}) or generated classes, whose compile cost is the Truffle economics of section 5.}
+\li{Dispatch style matters little on HotSpot (within 10 \%); a \code{\verb~|switch~} on a small tag is the cheapest, and the Java 21+ pattern \code{\verb~|switch~} is fine. In a native image virtual dispatch was marginally best.}
+\li{Value layout advice carries over directly: put cache slots in the value object itself, share leaf nodes through preallocated arrays, and avoid wrapper objects. Section 8.4 gives the sizes.}
+\li{Guest0x0's verdict on compile-to-host matches our numbers: about 1 M instructions per AST node compiled.}
+}
+}
+}
+
+\subtree{
+\title{11. Packaging for the arena (question 7)}
+
+\subtree{
+\title{11.1 Facts about the runner}
+
+\ul{
+\li{Runner label \code{\verb~|nscloud-ubuntu-22.04-amd64-8x16-with-cache~} (\code{\verb~|refs/lean-kernel-arena/.github/workflows/build-and-deploy.yml:89~}); steps run in \code{\verb~|nix develop -c bash~}. Generic glibc binaries such as a downloaded GraalVM should therefore run (Ubuntu host loader); inferred, not tested on the runner.}
+\li{\code{\verb~|flake.nix~} lists \code{\verb~|jdk~}; in the pinned nixpkgs (\code{\verb~|flake.lock~} rev \code{\verb~|0ad6f47e...~}, \code{\verb~|pkgs/top-level/all-packages.nix:4051~}) \strong{\code{\verb~|jdk = jdk21~}}. OpenJDK 21 has no Graal compiler, no compact headers and no AOT cache. \code{\verb~|checkers/tenet-jvm.yaml~} uses it with plain \code{\verb~|javac~}.}
+\li{Build steps may download: \code{\verb~|checkers/rpylean.yaml~} clones pypy, \code{\verb~|checkers/gruszka.yaml~} and \code{\verb~|pestka.yaml~} fetch a training file with \code{\verb~|curl~} and check it with \code{\verb~|sha256sum -c~}, \code{\verb~|checkers/kefir-wasm.yaml~} installs rustup.}
+\li{Measurement: \code{\verb~|perf stat -e instructions~} around GNU \code{\verb~|time~} around \code{\verb~|sh -c "$RUN"~} (\code{\verb~|refs/lean-kernel-arena/lka.py:496-501~}), all child processes and threads included.}
+}
+}
+
+\subtree{
+\title{11.2 Build and run commands}
+
+\p{Tested end to end in the arena-shaped container on aarch64 (\src{spikes/platform/arena/build.sh}, \code{\verb~|run.sh~}; 13.5 s for the JVM build, 1 min 57 s with \code{\verb~|RLVM_NATIVE=1~}). Checker YAML:}
+
+\pre{\verb~|
+build: sh arena/build.sh .
+run: sh arena/run.sh "$IN"
+~}
+
+\p{\code{\verb~|build.sh~}, in outline (the script in the spike is complete and runnable):}
+
+\pre{\verb~|
+case "$(uname -m)" in
+  x86_64)  ARCH=x64;     GRAAL_SHA=c6438dee6c3ade2220d40b7ccdcad24b512d30e233e61bb4fc70519522de34ef ;;
+  aarch64) ARCH=aarch64; GRAAL_SHA=41741c0650ae7564a78335f9e4fc353a902e6ff1d4140f2e4fabd1c55d5cce66 ;;
+esac
+F=graalvm-community-jdk-25i5-25.0.5.0.3_linux-${ARCH}_bin.tar.gz
+curl -sSfL --retry 3 -o .build/dl/$F https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/$F
+echo "$GRAAL_SHA  .build/dl/$F" | sha256sum -c -
+tar -xzf .build/dl/$F -C .build/graalvm --strip-components=1
+# 9 jars from https://repo1.maven.org/maven2/org/graalvm/{polyglot,sdk,truffle}/..., each sha256-checked
+javac --release 25 -cp "$CP" -processorpath .build/proc/truffle-dsl-processor-25.5.5.0.3.jar -s .build/gen -d .build/classes @.build/sources.txt
+jar --create --file .build/rlvm.jar -C .build/classes .
+~}
+
+\p{Pinned jar checksums (25.5.5.0.3): polyglot \code{\verb~|51096bb4...~}, collections \code{\verb~|694c52b4...~}, nativeimage \code{\verb~|b8d337a9...~}, word \code{\verb~|11a21c7f...~}, jniutils \code{\verb~|1c46ac4d...~}, truffle-api \code{\verb~|ce6662ca...~}, truffle-runtime \code{\verb~|a4b8df50...~}, truffle-compiler \code{\verb~|f12a579e...~}, truffle-dsl-processor \code{\verb~|39daafb0...~} (full values in \code{\verb~|arena/build.sh~}). The x64 GraalVM checksum is the digest published by the GitHub release API; the aarch64 one was verified against the local archive.}
+
+\p{Measured in the container with the recommended flags: \code{\verb~|ast tree 20~} x200 29.6 G (JVM) and 19.8 G (native); \code{\verb~|plain tree 20~} x200 321.9 G (JVM, C2 only) and 379.8 G (native CE).}
+}
+
+\subtree{
+\title{11.3 Reproducibility and offline concerns}
+
+\ul{
+\li{Every download is pinned by sha256; the script re-verifies cached files and supports \code{\verb~|RLVM_OFFLINE=1~}. Vendoring the 9 jars (24 MB) in the repository removes the Maven Central dependency; the GraalVM archive (351 MB for x64) is too large to vendor.}
+\li{GitHub release assets and Maven Central artifacts are immutable; Oracle's \code{\verb~|archive/~} URLs are versioned, \code{\verb~|latest/~} is not: never use \code{\verb~|latest~}.}
+\li{The build output is about 1 GB (unpacked JDK 635 MB). Delete the archive after unpacking.}
+\li{JIT-compiled runs are not bit-reproducible in instruction count (about 1 \%).}
+\li{If RLVM does not use Truffle at all, the checker could run on the arena's own \code{\verb~|jdk~} 21 with zero downloads (as tenet-jvm does), giving up compact headers and JDK 25 improvements. Not measured.}
+\li{Native image only: the link step needs \code{\verb~|gcc~} and zlib in the \code{\verb~|nix develop~} environment. zlib is not listed in \code{\verb~|flake.nix~}; whether it is reachable (for example propagated by \code{\verb~|libllvm~}) was not verified. The infra team's Ubuntu-based container has \code{\verb~|zlib1g-dev~}, so success there proves nothing about the runner.}
+}
+}
+}
+
+\subtree{
+\title{12. Risks, unverified items, open questions}
+
+\p{Unverified or out of reach on this host:}
+
+\ul{
+\li{x86-64 instruction counts and the behaviour of \code{\verb~|-march~} / default x86-64-v3 targets.}
+\li{OpenJDK 21 from nixpkgs with or without Truffle.}
+\li{Whether the arena's nix shell can link a native image (zlib, gcc wrapper).}
+\li{\code{\verb~|truffle-enterprise~} on the class path; explicit \code{\verb~|compile()~} inside a native image; \code{\verb~|LoopNode.reportLoopCount~} as a hotness channel; Bytecode DSL continuations and serialization.}
+\li{The cause of the Graal JIT \code{\verb~|StackOverflowError~} anomaly and of the 25.0.4 deopt loop.}
+\li{JIT overhead of the real checker: estimated between the two measured extremes, not measured.}
+}
+
+\p{Open questions for the design team:}
+
+\ol{
+\li{Is Truffle needed at all? On these spikes a plain-Java closure-tree interpreter beats both Truffle interpreters before compilation, and compilation pays only above about 10^5 executions per function. What fraction of mathlib's reduction work sits in definitions that hot?}
+\li{If Truffle stays: does the kernel drive compilation explicitly (internal API) or through raised global thresholds?}
+\li{May an arena build download Oracle GraalVM under GFTC? If not, configuration C is unavailable.}
+\li{How much of the long-lived term store can be \code{\verb~|int[]~}-packed, so that GC cost approaches the Epsilon line?}
+\li{Is \code{\verb~|-XX:-TieredCompilation~} still a win on the real checker?}
+}
+}
+
+\subtree{
+\title{Appendix: reproducing}
+
+\pre{\verb~|
+. spikes/platform/env.sh && spikes/platform/scripts/build-all.sh
+spikes/platform/scripts/lc.sh --engine.TraceCompilation=true ast fib 32 20
+spikes/platform/scripts/perf.sh --limits "nbe" -- $JAVA_HOME/bin/java -XX:+UseSerialGC -Xms4g -Xmx4g -Xmn2g \
+    -XX:-UseJVMCICompiler -cp $OUT/plain NbeBench tag tree4m-norm 10
+spikes/platform/scripts/gc-matrix-perf.sh
+~}
+
+\p{Raw logs: \code{\verb~|spikes/platform/results/~} (\code{\verb~|truffle-instr.txt~}, \code{\verb~|truffle-many-instr.txt~}, \code{\verb~|truffle-options-instr.txt~}, \code{\verb~|truffle-ee-instr.txt~}, \code{\verb~|nbe-instr.txt~}, \code{\verb~|javac-instr.txt~}, \code{\verb~|gc-matrix-instr.txt~}, \code{\verb~|gc-native-instr.txt~}, \code{\verb~|deepstack-gc-instr.txt~}, \code{\verb~|deeprec.txt~}, \code{\verb~|objsize.txt~}, \code{\verb~|memaccess.txt~}, \code{\verb~|startup-instr.txt~}, \code{\verb~|native-build.txt~}, \code{\verb~|arena-sim.txt~}, \code{\verb~|jit-plain-interp-instr.txt~}, \code{\verb~|engine-options-25.5.5.0.3.tsv~}).}
+}
