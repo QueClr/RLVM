@@ -77,6 +77,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-5S2G}
 \transclude{log-YGJO}
 \transclude{log-QMC7}
 \transclude{log-QJD9}

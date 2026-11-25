@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # rlvm-machine/src/test/resources/m6/launcher-gate.sh - the acceptance run of work package M6 (and the
 # form of the v0 gate, *agentic-note*: rep-machine-work-packages, section 6): the published arena tests through the real launcher
-# (rlvm-main, driver, admission) with `-X engine=machine`, judged by the STATISTICS, not by the exit status
+# (rlvm-main, driver, admission) with `-X engine=machine -X verify=reference` (since 2026-11-25 a rejection of the
+# machine is final by default: the gate asks for the re-check by name, or its two conditions on
+# driver.warmAnomalies and driver.machineIncomplete would be vacuous), judged by the STATISTICS, not by the exit status
 # alone: the driver re-checks a unit the machine declines with the reference kernel, so the verdict is
 # right even when the machine does nothing.
 #
@@ -87,7 +89,7 @@ run_one() { # run_one INDEX FILE
   # a small heap for small tests (the launcher's default is sized for mathlib: host memory, orchestrator 15:20Z)
   case "$f" in */perf/*) ;; *) [ "$heap" = launcher ] || hp=("-Xmx$heap") ;; esac
   set +e
-  RLVM_EXTRA_CP="$jar" timeout "$timeout" "$dist/bin/rlvm-jvm" "${hp[@]}" -X engine=machine -X stats-file="$work/$idx.json" \
+  RLVM_EXTRA_CP="$jar" timeout "$timeout" "$dist/bin/rlvm-jvm" "${hp[@]}" -X engine=machine -X verify=reference -X stats-file="$work/$idx.json" \
       "${extra[@]}" "$f" > "$work/$idx.out" 2> "$work/$idx.err"
   st=$?
   set -e
@@ -177,7 +179,7 @@ verdicts = tot['wrong'] == 0
 with open(out, 'w') as f:
     w = lambda s='': f.write(s + '\n')
     w('machine launcher gate: %s   %s   (%s s wall)' % (label, datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), secs))
-    w('command per test: RLVM_EXTRA_CP=%s work/dist/bin/rlvm-jvm -X engine=machine -X stats-file=F %s TEST' % (os.path.relpath(jar), extra))
+    w('command per test: RLVM_EXTRA_CP=%s work/dist/bin/rlvm-jvm -X engine=machine -X verify=reference -X stats-file=F %s TEST' % (os.path.relpath(jar), extra))
     w()
     w('RESULT: %s' % ('CLEAN (every verdict right, the machine declined nothing but declarations that enter eager reduction)' if clean else
                       'verdicts right, but NOT clean (machine declines or events below)' if verdicts else 'WRONG VERDICTS'))

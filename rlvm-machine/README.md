@@ -24,8 +24,10 @@ scripts/machine-sandbox.sh publish M3                      # your files into the
 The machine IS the default engine since 2026-11-25 (`MachineProvider.priority()` is 100 =
 `Engines.DEFAULT_ENGINE_MIN_PRIORITY`; *agentic-note*: design-switches-document, the note at its top, has the contract and the evidence; it was
 the default from 2026-11-24T19:41Z to 20:35Z and was taken back until the wrong accepts E1-F1 .. E1-F6 were fixed).
-It runs its default switch set of *agentic-note*: design-switches-document (the set of wave 6 + `eager,skipargs,congruence`), the reference
-engine re-checks every rejection and decides what the machine declines; `-X engine=reference` or `-X policy=strict`
+It runs its default switch set of *agentic-note*: design-switches-document (the set of wave 6 + `eager,skipargs,congruence`). Since
+2026-11-25 a rejection of the machine is the verdict of the run (*agentic-note*: dec-PUU0): the reference engine decides
+what the machine declines and no longer re-checks a rejection; `-X verify=reference` is the development option that
+re-checks every rejection, and the gate of the machine runs with it; `-X engine=reference` or `-X policy=strict`
 runs the reference engine alone;
 `-X machine.switches=none` is the generic tier v0.
 
@@ -53,7 +55,8 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
 ## The facade (ISA section 14; owner M6)
 
 - `MachineSession.check(cid, budget)` never throws for a property of the input. ACCEPT only from
-  `Decl.check` returning 0; a kernel error is REJECT (confirmed by the driver with the reference kernel);
+  `Decl.check` returning 0; a kernel error is REJECT, and the driver reports it (with `-X verify=reference`
+  the driver confirms it first, with a strict machine and then the reference kernel);
   everything else is DECLINE: limits, fatal faults, failed audits, cancellation, a `RuntimeException` of a
   library limit or of a judgment that is not implemented yet. An `Error` is never caught.
 - Reasons: `rlvm.api.MachineErrors.reason(code)`, the table of ISA 14.3 (`M6FacadeTest` has one row per code).
@@ -83,7 +86,10 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
 - **The exit status alone proves nothing**: the driver re-checks a unit the machine declines with the
   reference kernel. A gate reads `machine.declined == machine.eagerDeclines` (the machine
   gave up on nothing but eager reduction), `driver.declined == 0`, `driver.warmAnomalies == 0`,
-  `driver.machineIncomplete == 0`; `launcher-gate.sh` does (`-Xmx4g` per test, four at a time).
+  `driver.machineIncomplete == 0`; `launcher-gate.sh` does (`-Xmx4g` per test, four at a time). The last
+  two counters are filled only by the re-check of a rejection, which is off by default since 2026-11-25:
+  the gate of the machine (`m8/report.sh gate`, `M8Pipeline`) runs with `-X verify=reference`, and
+  `launcher-gate.sh` needs `-X verify=reference` on its command line for them to mean anything.
 - `Session.ops()` is null (admission uses the reference kernel). `MachineOps` serves `KernelOps` for
   differential tests, with the test tree's `Quote` as its readback.
 
@@ -111,7 +117,8 @@ with an `AssertionError` (exit status 3). It is for gates, not for timings (*age
 
 The module is in the reactor (`<module>rlvm-machine</module>`) and in every distribution (`scripts/build.sh`: a tree
 build has it as a reactor module, a `--published` build copies the published jar; the CE native image builds with
-it). `-X engine=machine` selects it; the reference engine re-checks every rejection and takes every decline.
+it). `-X engine=machine` selects it; the reference engine re-checked every rejection (until 2026-11-25; now only
+with `-X verify=reference`) and takes every decline.
 Default group: 386 tests green; slow group: see the log.
 
 v0 (generic tier, complete procedure, no switch), machine jar 608b84b2b142:

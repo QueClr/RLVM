@@ -1,0 +1,70 @@
+\title{The default verdict is the machine's: no confirmation by the reference engine}
+\taxon{Decision}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{machine}
+\tag{reference-engine}
+\tag{soundness}
+\meta{status}{implemented}
+\meta{created}{2026-11-25}
+\meta{completed}{2026-11-25}
+\import{base-macros}
+
+\p{\strong{Status:} accepted and implemented. In the main tree and in the published jars of \code{rlvm-driver} and \code{rlvm-main} since \commit{a8dc6dd}, the build published at 22:50 UTC on 2026-11-25 (17:50 local time); see [the changelog entry](log-5S2G). The decline fallback, which the same instruction also means, is not turned off yet; see "What was decided", item 4.}
+
+\p{\strong{Context.} The maintainer's instruction of 2026-11-25, verbatim: "turn off reference engine recheck on default. try make machine align with official behavior. reference engine is just a fallback that is used to verify the behavior during development. It shall not affect real production." It is recorded as the standing policy "The machine is the whole checker in production", see [standing policies](standing-policies-conduct). Until then a plain run checked with the machine, see [the decision on the default engine](dec-T79V), and used [the reference engine](design-reference-engine) in the ways that [the census of package MO-1](rep-MO-1) counted on the published build of that day: (1) every rejection of the machine was re-checked, by a strict machine and then by the reference engine, see [the re-check protocol](design-verdict-protocol-recheck); (2) every declaration the machine declines was decided by the reference engine; (3) the launcher checked a rejected file with a dropped metadata node again under the strict policy, see [the decision on the metadata class](dec-7UAL); (4) the environment pass admits every inductive block and the quotient package with judgments of the reference engine. Item (c) of [the exactness contract](design-exactness-contract-items), "everything the official checker accepts is accepted", rested on (1) to (3).}
+
+\subtree{
+\title{What was decided}
+
+\ol{
+\li{\strong{A rejection of the machine is final.} The driver no longer re-checks a rejection of the primary engine: no strict run, no reference engine, no event. The driver's default changed with the launcher's, so that a tool which drives the driver in process gets the production protocol unless it asks.}
+\li{\strong{No strict re-run.} The launcher reports the rejection of a file in which the loader dropped a metadata node as it reports any other; no file is checked twice.}
+\li{\strong{One development option turns both back on}: \code{\verb~|-X verify=reference~}, the configuration that was the default. \code{\verb~|-X verify=none~} is the new default, and \code{\verb~|-X no-recheck~} is its old spelling. Where the reference engine is the primary engine of a run or its oracle (\code{\verb~|-X engine=reference~}, \code{\verb~|-X policy=strict~}, \code{\verb~|-X engine=diff~}) the verification is on as before, unasked: those runs are the tools of development and verification, and a rejection of the reference engine is confirmed by a fresh cold run of itself, which is that engine's own protocol and not a second engine's opinion.}
+\li{\strong{The fallback stays for now.} A declaration the machine declines is still decided by the reference engine, because real input needs it: 95 units of six of the eight corpora, 80 different declarations, 86 units of one kind (the K rule after the application of a let variable, finding E1-F6) and 9 cut probes of eager reduction. \code{\verb~|-X fallback=none~} turns it off, and then those six corpora (Std, cedar, con-leche, navier-stokes-euler, cslib and Mathlib) are declined. Two packages are making the machine decide these declarations; when it does, the fallback goes off too.}
+\li{\strong{The environment pass is not touched.} Admission asks its judgments of the reference engine in every configuration, 17,409 units of the eight corpora, and no option changes that. It is a fourth use that the target of the instruction cannot be reached without, and it is on [the work list](prob-HC9J).}
+\li{\strong{The wrong rejects that follow are recorded by name and may only become fewer.} Twelve rows of the hostile suite carry the mark \code{wrong-reject} in the manifest; \src{scripts/gate.sh} prints each of them on every run and carries a ceiling of 12, so a thirteenth fails the gate, see [the gate](design-gate-hostile).}
+}
+}
+
+\subtree{
+\title{The alternatives the census weighed}
+
+\table{
+\tr{\th{Alternative}\th{What it does, as counted on 19,319 files}\th{Why not}}
+\tr{\td{Keep the re-check of a rejection, the default until then}\td{It changes no verdict on real input: the machine rejects no unit of the eight corpora, and of its 1,960 rejections on the 262 small arena tests and the 17,775 mutants the re-check changes none. On the hostile suite it changes 16 of 737 rejections: it repairs 12 wrong rejects, and it turns 4 official rejections into tolerated accepts.}\td{The instruction: the reference engine is not to affect production. And the re-check hid a dependence of the verdict on the schedule, because a fresh strict machine repairs exactly the rejections that the history of a session produces, see [the insight](ins-RPOG).}}
+\tr{\td{A re-check by a strict machine only, without the reference engine}\td{It would repair 8 of the 12 wrong rejects, the ones a fresh session of the machine accepts, and cost nothing on an accepted file.}\td{Not built. The instruction as read is that a rejection of the primary engine is final, with no strict re-run; and a fresh run that changes a verdict is the very thing that hides a dependence on the schedule. The 8 rows are to be closed in the machine, by keeping no answer of a comparison across declarations.}}
+\tr{\td{Keep the strict re-run of a rejected file with metadata}\td{With the machine as default engine it fires on no corpus, no arena test and no hostile row: the four files of [finding R2-F4](ex-FD6K), for which it was built while the reference engine was the default engine, are accepted by the machine itself. It fires on 485 mutants and reports 351 correct rejections as declines.}\td{It is a second run under the reference engine, which the instruction excludes, and without it 351 verdicts get better and none worse.}}
+\tr{\td{Turn the fallback off as well: the machine alone}\td{6 of the 8 corpora are declined at their first such unit; on the small inputs 4 more hostile rows and 2 mutants are declined.}\td{Not yet: Mathlib would be declined as a whole. It is the next step of the same instruction.}}
+}
+}
+
+\subtree{
+\title{Consequences}
+
+\ul{
+\li{\strong{Verdicts of the default configuration against the build before}, on the 19,319 files of the census, each with its official verdict. The eight corpora and the 270 arena tests: none changes. The 17,775 mutants: 351, all mutants that wrap one expression of an officially rejected test in a metadata record, go from a decline to the official rejection; the mutant gate has 16,092 in agreement and 1,683 declined where it had 15,741 and 2,034, with SOUNDNESS 0 and COMPLETENESS 0 as before. The hostile suite of 1,274 rows: 1,184 in agreement (1,192 before), 74 tolerated accepts (78 before: four now get the official rejection), 4 declined, and \strong{12 known wrong rejects} (none before). Nothing else.}
+\li{\strong{The twelve.} Hand-made files that the official checker accepts and the default configuration now rejects: eight through a memo that a warm session keeps from an earlier declaration, four through the machine's tables keyed by values with canonical variables. They are named, with what closes them, in [accepted risks](accepted-risks-wrong-rejects), and with their analysis in [the census](rep-MO-1), section 5.2.}
+\li{\strong{The contract.} Item (a), never an accept of a statement that is not derivable, is unchanged and absolute: turning a use of the reference engine off can only turn an accept into a rejection or a decline, and the files show nothing else. Item (c), "everything the official checker accepts is accepted", is no longer true of the default configuration as it was read, for any file: it holds on every real input measured (the corpora, the arena tests, the mutants) and fails on the twelve known hand-made files, by this decision, until the machine is aligned. The sentences that said otherwise are marked in [the exactness contract](design-exactness-contract-items), [the verdict protocol](design-verdict-protocol-recheck) and [standing policies](standing-policies-exactness).}
+\li{\strong{The schedule.} A rejection that comes out of a warm session depends on what the session checked before. With the machine as primary engine the driver's invariance suite finds 21 hostile rows whose verdict differs between its nine schedules without the re-check, and 12 with it; on the 17,159 files of the published tests and of three mutant corpora it finds none. See [the driver's invariants](design-driver-invariants).}
+\li{\strong{Who asks for the old protocol by name.} The gate of the machine and its mutant campaign run with \code{\verb~|-X verify=reference~}, because they read the counters that only the re-check fills; the suites of the driver and its invariance script ask for the verification in their fixtures; \code{\verb~|scripts/gate.sh --defaults -X verify=reference~} gates the verified configuration and gives the counts of before. The differential tools verify by the rule of item 3.}
+\li{\strong{One existing option changed its meaning.} \code{\verb~|-X no-recheck~} used to turn the driver's re-check off and leave the launcher's strict re-run on; as the spelling of the new default it turns both off. With \code{\verb~|-X engine=reference -X no-recheck~} that moves 251 of 3,512 files from a decline to a rejection, the 4 files of finding R2-F4 and 247 mutants.}
+\li{\strong{Timings are not affected.} On an accepted file the re-check never ran, and the machine rejects no unit of the eight corpora, so the benchmark rows stay comparable across the change. No timing was taken for it.}
+}
+}
+
+\subtree{
+\title{What would reverse it}
+
+\ul{
+\li{The maintainer's word. The decision follows an instruction and not a measurement; the census only says what it costs.}
+\li{A wrong reject on real input, that is on something an exporter writes, on an arena test or on a mutant. None is known, and item (b) of the contract does not allow one. \code{\verb~|-X verify=reference~} is the configuration to go back to; it is gated with the counts of the build before.}
+\li{The decision is meant to end by going further, not back: the fallback goes off when the machine decides the 95 declined units, the ceiling of the gate goes to 0 when the machine gives the official accept on the twelve rows, and the environment pass is the last use. The work list is in [what is left open](prob-HC9J).}
+}
+}
+
+\p{\strong{Not established.} Nothing ran on x86-64. The list of twelve is complete for the 1,274 rows of the suite and not beyond it: other hand-made files of the same classes will be rejected too, and a further class is already known outside the suite, with at least one file that a plain run rejects against the official accept, see the work list. The arena's own procedure for its 270 tests was not repeated on the new build; the 262 small tests and the eight corpora were run through the executable outside the arena's container.}
+
+\p{Detail: [the census and the patch](rep-MO-1); the short forms are [what each use of the reference engine changes](ins-7V7X) and [the verdict and the schedule](ins-RPOG). Related: [the machine as default engine](dec-T79V), whose adversarial pass was made with the re-check in force; [the metadata class](dec-7UAL), whose safety net is now part of the development verification; [the rule for a change of a default](dec-QN1O), which asks for an adversarial pass before a switch enters a default set or the default engine changes: this change adds no accept, its evidence is the census, every file of every input set judged by its official verdict under the old and the new protocol, and the hostile suite was not extended for it.}

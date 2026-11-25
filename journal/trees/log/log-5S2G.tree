@@ -1,0 +1,32 @@
+\title{A rejection of the machine is final by default; the re-check and the strict re-run are one development option, -X verify=reference}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\tag{machine}
+\tag{reference-engine}
+\tag{soundness}
+\meta{release}{Unreleased}
+\meta{commit}{a8dc6dd}
+\import{base-macros}
+
+\p{The default configuration no longer uses the reference engine to confirm anything, by the maintainer's instruction of 2026-11-25 that the reference engine is a tool of development and is not to affect production, see [the decision](dec-PUU0). A rejection of the machine is the verdict of the run, and the launcher makes no second run under the strict policy for a rejected file with dropped metadata. One development option turns both back on, \code{\verb~|-X verify=reference~}; \code{\verb~|-X no-recheck~} is the old spelling of the new default, \code{\verb~|-X verify=none~}. \strong{Still the reference engine's in a plain run:} a declaration the machine declines (the fallback, 95 units of six of the eight corpora; \code{\verb~|-X fallback=none~} turns it off and those corpora are then declined) and the admission of inductive types and of the quotient package (17,409 units of the eight corpora, in every configuration).}
+
+\p{\strong{The change}, the patch of [package MO-1](rep-MO-1), section 7, published as the jars of \code{rlvm-driver} (\code{5addc83aa866}) and \code{rlvm-main} (\code{c378ac368c24}) and a rebuilt executable.}
+\ul{
+\li{\code{rlvm-driver}: \code{\verb~|RunConfig.recheckRejections~} is false by default. A rejection of the primary engine, warm or in its own cold retry of a decline, is recorded as it is: no strict run, no reference engine, no event. No line of the protocol itself changed; the path of a final rejection existed as \code{\verb~|-X no-recheck~}. Two settings by name, \code{\verb~|verify=none|reference~} and \code{\verb~|fallback=reference|none~} (the flag \code{no-fallback} stays), and the values \code{driver.verify} and \code{driver.fallback} in the statistics file. The suites of the driver and its invariance script ask for the verification by name; the driver's bench decides it as the launcher does.}
+\li{\code{rlvm-main}: the option \code{\verb~|-X verify=none|reference~}. Not given, it is \code{none}, unless the reference engine is the primary engine of the run (\code{\verb~|-X engine=reference~}, \code{\verb~|-X policy=strict~}) or its oracle (\code{\verb~|-X engine=diff~}); those runs verify unasked and are what they were. With \code{reference} the driver re-checks and the launcher's strict re-run is on. \code{\verb~|-X no-recheck~} beside \code{\verb~|verify=reference~} is a usage error, as is \code{no-fallback} beside a \code{fallback} setting. The line \code{default:} of \code{\verb~|rlvm --version~}, the help text and the statistics line say what is on; a plain run prints \code{\verb~|verify=none fallback=reference~}.}
+\li{The gates: \src{scripts/gate-hostile.py} knows the mark \code{wrong-reject} and a ceiling; \src{scripts/gate.sh} carries the ceiling as a constant, 12, prints every known wrong reject by name on every run and fails at a thirteenth, see [the gate](design-gate-hostile). The pipeline step of the machine's gate and its mutant campaign run with \code{\verb~|-X verify=reference~}, because they read the counters that only the re-check fills.}
+\li{The manifest of the hostile suite, \src{rlvm-machine/src/test/resources/s/manifest.tsv}: the mark \code{wrong-reject} on twelve rows, each with its cause.}
+}
+
+\p{\strong{One existing option changed its meaning.} \code{\verb~|-X no-recheck~} used to leave the launcher's strict re-run on; now it turns it off as well. A script that passes it gets a rejection instead of the verdict of the second run on a rejected file with metadata.}
+
+\p{\strong{Verdicts of the default configuration against the build before}, on the 19,319 files of the census, each with its official verdict: none changes on the eight corpora and the 270 arena tests; 351 mutants, metadata mutants of officially rejected tests, go from a decline to the official rejection; on the hostile suite 4 tolerated accepts become the official rejection and \strong{12 official accepts become rejections}, the known wrong rejects, see [accepted risks](accepted-risks-wrong-rejects). No accept of a statement that is not derivable, on any file.}
+
+\p{\strong{Gates.} Of the published build, the gate of the default configuration through the rebuilt executable: 230 of 230 published tests; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0, 16,092 in agreement and 1,683 declined (15,741 and 2,034 before); the hostile suite of 1,274 rows with 1,184 in agreement, 74 tolerated accepts, 12 known wrong rejects, 4 declined, no wrong accept and no other wrong reject; the arena's build-and-run test passes. Of the build of the patch before its publication, see the report, section 8: the suites of the three modules (\code{rlvm-driver} 120 tests, \code{rlvm-main} 69, the fast and default groups of \code{rlvm-machine} and its slow hostile matrix of 56 switch sets by 1,274 rows); the same gate through the executable and through the jars with these counts, and with \code{\verb~|-X verify=reference~} the counts of the build before; the eight corpora accepted with 8 and 4 workers on both launchers; and every one of the 19,319 files with the verdict the census predicted under each of three configurations. All on the aarch64 development host; no timing was taken, because the change acts after a rejection, which no corpus has.}
+
+\p{Detail: [the census and the patch](rep-MO-1). Related: [the re-check protocol](design-verdict-protocol-recheck), which is now the protocol of the development option; [the driver's invariants](design-driver-invariants) and [the verdict and the schedule](ins-RPOG); [what each use of the reference engine changes](ins-7V7X); [the standing policy](standing-policies-conduct); [the work list of the alignment](prob-HC9J). Commit \commit{a8dc6dd}.}

@@ -9,9 +9,10 @@
 \meta{status}{implemented}
 \meta{created}{2026-11-24}
 \meta{completed}{2026-11-24}
+\meta{updated}{2026-11-25}
 \import{base-macros}
 
-\p{\strong{Status:} accepted and implemented in the launcher, see [the changelog entry](log-TRJ0).}
+\p{\strong{Status:} accepted and implemented in the launcher, see [the changelog entry](log-TRJ0). \strong{Superseded for the default configuration on 2026-11-25:} since the change of that day (\commit{a8dc6dd}) a plain run reports its rejection and checks no file twice; the strict re-check of this decision is part of the development verification, \code{\verb~|-X verify=reference~}, and of the practical runs that verify unasked, those with the reference engine as primary engine or as oracle. What replaced it for the default is [the decision that the default verdict is the machine's](dec-PUU0). The text below is as it was decided; the last section says what the change means for it.}
 
 \p{\strong{Context.} Under the practical policy [metadata is transparent](dec-USLM): the loader drops a metadata node and the wrapped term stands for it, while for the official kernel the node is a term of its own that hides what is under it from the kernel's syntactic tests. Accepting more than the official checker through this is tolerated. Rejecting what the official checker accepts is not, also on a hand-made file: it is item (c) of [the exactness contract](design-exactness-contract). One such file was known, a node around an application of \code{eagerReduce}, and it had just been closed by [a rule of the loader](log-6K9N) that declines exactly that position. The audit that wrote the rule also listed the other syntactic tests a dropped node can fool, and one of them, the cheap beta reduction of an inferred type, was then built into four exports that the official checker accepts and the default configuration rejected: [finding R2-F4](ex-FD6K). The question was how to close the class. A census had shown that nothing real is affected by any answer: there is no metadata record in the eight corpora, in the 270 tests of the arena or in its 230 published tests.}
 
@@ -40,10 +41,24 @@
 
 \p{\strong{Consequences.}}
 \ul{
-\li{The price is 351 correct rejections of metadata mutants that are now reported as declines. It is paid only on files that the exporter writes on request.}
-\li{The default configuration has no known rejection of an official accept. The accepts of the tolerated kind that transparent metadata gives are unchanged.}
+\li{The price is 351 correct rejections of metadata mutants that are now reported as declines. It is paid only on files that the exporter writes on request. (Since 2026-11-25 a plain run no longer pays it: the 351 are rejections again.)}
+\li{The default configuration has no known rejection of an official accept. The accepts of the tolerated kind that transparent metadata gives are unchanged. (True until 2026-11-25. Since then the default configuration has twelve known rejections of official accepts, none of them through metadata; see the last section.)}
 \li{The rule of the loader around \code{eagerReduce} is no longer needed for the contract; it turns a decline after two runs into a decline at load.}
 \li{The hostile suite of the machine has the seven exports of the finding; the four accepted ones carry a note that their rule is the official verdict or a decline through the launcher.}
+}
+
+\subtree{
+\title{Since 2026-11-25: part of the development verification, not of the default}
+
+\p{The maintainer's instruction of 2026-11-25 is that the reference engine does not affect production, and the strict re-check is a second run under the reference engine. It went off by default together with the driver's re-check of a rejection, and one option turns both back on. What [the census of package MO-1](rep-MO-1), sections 4 and 8, counted for it on the build before the change:}
+
+\ul{
+\li{\strong{With the machine as default engine the net fired on no hostile row, no arena test and no corpus.} Ten rows of the hostile suite carry a metadata record, and no practical run rejects one of them: seven are accepted (six official accepts and one tolerated accept) and three are declined by the loader. The four accepted files of [finding R2-F4](ex-FD6K), for which the net was built, are accepted by the machine itself, with and without the net; the net was needed for them while the reference engine was the default engine, which rejects them under the practical policy.}
+\li{\strong{It fired on 485 mutants and changed 351 verdicts}, each from a correct rejection to a decline: the 351 of the evidence above, 67 tutorial, 37 bugs and 247 metadata mutants from 104 source tests, all of the kind that wraps one expression of an officially rejected test in a metadata record. Without the net every one of the 485 files is rejected, which is the official verdict of each. The mutant gate of the default configuration is back at 16,092 in agreement and 1,683 declined, with no soundness and no completeness difference.}
+\li{\strong{Where the net still runs.} With \code{\verb~|-X verify=reference~}; and in a practical run of the reference engine, \code{\verb~|-X engine=reference~}, where it fires as before the change: on the 3,512 files compared between the two builds (the hostile suite, the metadata mutants and the 262 small arena tests) on the same files, the four files of the finding and 358 mutants, and the mutant gate of the reference engine keeps the counts 15,741 and 2,034. Under \code{\verb~|-X policy=strict~} there was never a net to fire.}
+\li{\strong{One option changed its meaning.} \code{\verb~|-X no-recheck~} used to leave the net on and is now the spelling of \code{\verb~|-X verify=none~}, which has none. With \code{\verb~|-X engine=reference -X no-recheck~} the four files of the finding are rejected again, against the official accept, and 247 mutants go from a decline to the official rejection.}
+\li{\strong{The sentence "no known rejection of an official accept" no longer holds for the default configuration}, for another reason than metadata: twelve rows of the hostile suite that the driver's re-check used to repair are rejected by a plain run, see [accepted risks](accepted-risks-wrong-rejects). The rule of the loader around \code{eagerReduce} stays in every configuration.}
+}
 }
 
 \p{Detail: [the audit of the reference engine's caches](rep-reference-caches), section 6.1: the table of the official tests, the census, the argument against a position rule, the three counts and the judgement. Commit \commit{694c8fb}. Source: [the finalization session](ses-A14B). Related: [the caches of the reference engine](design-reference-caches), [the divergence classes](design-official-divergence).}

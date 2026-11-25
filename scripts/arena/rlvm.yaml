@@ -12,14 +12,24 @@
 #   the engine, the binary follows the priority). A run without options checks with the machine and the
 #   switch set that `rlvm --version` prints (the set of wave 6 plus eager reduction and the two
 #   proof-comparison shortcuts, skipargs and congruence). The reference engine (rlvm-ref: the official
-#   kernel's algorithm on hash-consed terms) re-checks every rejection before it is reported and decides
-#   every declaration the machine declines; `-X engine=reference` or `-X policy=strict` checks with it
-#   alone.
+#   kernel's algorithm on hash-consed terms) admits the inductive types and the quotient package and
+#   decides every declaration the machine declines (95 declarations of six of the eight corpora);
+#   `-X engine=reference` or `-X policy=strict` checks with it alone.
+# - A REJECTION IS THE MACHINE'S OWN since 2026-11-25 (the maintainer's instruction: the reference
+#   engine is a tool of development and is not to affect production; *agentic-note*: dec-PUU0). Until
+#   then the reference engine re-checked every rejection before it was reported, and a rejected file in
+#   which the loader had dropped a metadata node was checked again in the strict mode; both are now one
+#   development option, `-X verify=reference`. The change moves no verdict on the eight corpora and
+#   the arena's 270 tests (*agentic-note*: rep-MO-1).
 # - GATED on the machine-default launcher, no -X anywhere (scripts/gate.sh --defaults --corpus all
 #   --hostile; the oracle of every step is an official verdict): 230 of 230 published arena tests
 #   correct, none declined; 17,775 mutants of them: no accepted bad mutant, no rejected good one (agree
-#   15,741, declined 2,034); 1,196 hostile exports: no wrong accept, no wrong reject (agree 1,124, 68
-#   accepts of the tolerated kind, 4 declined); all eight corpora accepted.
+#   16,092, declined 1,683); 1,274 hostile exports: no wrong accept (agree 1,184, 74 accepts of the
+#   tolerated kind, 12 KNOWN WRONG REJECTS, 4 declined); all eight corpora accepted. The twelve are
+#   hand-made exports that the official checker accepts and a plain run rejects, eight through a memo
+#   that a warm session keeps from an earlier declaration and four through the machine's tables keyed
+#   by values; the gate prints each by name and fails at a thirteenth
+#   (*agentic-note*: accepted-risks-wrong-rejects).
 # - THE ARENA'S COMPLETE TEST SET (270 tests: 148 good incl. the eight corpora, 92 bad, 30 `either`) by
 #   the arena's own procedure, on the machine-default binary (2026-11-25, the development image and
 #   the release-layout image, same status on all 270; first on the release's jar set, *agentic-note*:
@@ -30,17 +40,21 @@
 #   exits with 2. Two `either` tests are accepted that the official checker (v4.35.0) and RLVM's
 #   reference engine reject: `corner-cases/alg-conv-trans-quot-left` and `eta-struct-major-and` (the
 #   two proof-comparison shortcuts; with the reference engine the split is 9 / 19 / 2). The largest
-#   share of a time limit is 5 %. Not measured on x86-64.
-# - THE POLICY of the default configuration is "practical" (the maintainer's decision; *agentic-note*:
-#   design-exactness-contract): (a) never accept a statement that is not derivable in Lean's type
-#   theory; (b) the official verdict on every real input - what lean4export writes, the arena's good and
-#   bad tests, the mutant corpora; (c) everything the official checker accepts is accepted; (d) a
-#   derivable statement that the official checker rejects only through its own incompleteness,
-#   non-transitivity, cache order or object identity may be accepted (the known classes: *agentic-note*:
-#   design-official-divergence; on the arena's test set only the two `either` tests named above). A rejection of a file in which the
-#   loader dropped a metadata node is checked again in the strict mode before it is reported. The strict
-#   mode is one option, `-X policy=strict`: the reference engine alone, declining where it would need
-#   the official object identity. The run line below is the default policy.
+#   share of a time limit is 5 %. Not measured on x86-64. These runs are of the builds before the
+#   change of 2026-11-25 to a final rejection; with the change the 262 small tests and the eight
+#   corpora were run again through the executable, outside the arena's container, with the same
+#   verdicts, and the arena's own procedure was not repeated.
+# - THE POLICY of the default configuration is "practical" (the maintainer's decision;
+#   *agentic-note*: design-exactness-contract): (a) never accept a statement that is not derivable in
+#   Lean's type theory; (b) the official verdict on every real input - what lean4export writes, the
+#   arena's good and bad tests, the mutant corpora; (c) everything the official checker accepts is
+#   accepted on real input - on hand-made hostile exports the machine is not aligned with the official
+#   checker yet, see the twelve known wrong rejects above; (d) a derivable statement that the official
+#   checker rejects only through its own incompleteness, non-transitivity, cache order or object
+#   identity may be accepted (the known classes: *agentic-note*: design-official-divergence; on the
+#   arena's test set only the two `either` tests named above). The strict mode is one option,
+#   `-X policy=strict`: the reference engine alone, declining where it would need the official object
+#   identity. The run line below is the default policy.
 # - The Truffle tier (rlvm-truffle) is compiled into the binary and OFF (switch t2 of the machine).
 #
 # ONE EXECUTABLE (owner note 16; *agentic-note*: design-packaging): the build makes exactly one file,
@@ -89,10 +103,10 @@ description: |
   environment's constants elaborated into code for it, over hash-consed terms that are integer ids
   into flat primitive arrays, which the garbage collector does not trace. A second engine is in
   the same binary: the *reference engine*, a direct port of the official kernel's algorithm. It
-  re-checks every rejection of the machine before it is reported and decides every declaration
-  the machine declines, so a rejection is never the machine's word alone. Universe levels are
-  compared as the official kernel compares them. The policy is *practical* (see below);
-  `-X policy=strict` checks with the reference engine alone.
+  admits the inductive types and the quotient declarations and decides every declaration the
+  machine declines; a rejection is the machine's own. Universe levels are compared as the
+  official kernel compares them. The policy is *practical* (see below); `-X policy=strict`
+  checks with the reference engine alone.
 
   Policy: *practical*. RLVM gives the official verdict on everything a Lean exporter writes and
   on the arena's good and bad tests, and never accepts a statement that is not derivable in Lean's
@@ -100,7 +114,11 @@ description: |
   a hand-made export that the official checker rejects only for such a reason (a term against the
   same term inside a metadata node, two `let` terms that differ in the non-dependence flag, one
   subterm written as two export records) may be accepted - what it states is derivable. With
-  `-X policy=strict` RLVM declines such input instead of accepting it.
+  `-X policy=strict` RLVM declines such input instead of accepting it. In the other direction
+  the machine is not aligned with the official checker on every hand-made export yet: twelve
+  known hostile exports that the official checker accepts are rejected, because the machine
+  keeps a result from an earlier declaration or keys its tables by values where the official
+  caches are keyed by terms and live for one declaration.
 
   Nothing derived in the export is trusted: recursors, constructor data and flags of inductive
   types are regenerated and compared with the exported records, the quotient declarations are
@@ -108,9 +126,10 @@ description: |
 
   Declarations are checked by parallel workers while the file is still being read; a declaration
   sees only the declarations before it in the file, and the verdict is the first failure in file
-  order whatever the number of workers and however the reading and the checking interleave. A
-  rejection found by a worker is reported only after a second, cold run of the kernel has
-  confirmed it.
+  order. On the arena's published tests and on mutants of them it does not depend on the number
+  of workers or on how the reading and the checking interleave; on hostile exports of the kind
+  above it can, because a result kept from an earlier declaration is in the session of the
+  worker that checked it.
 
   The process fails closed: the exit status starts as "internal error" and becomes 0 only after
   the whole export has been processed successfully; an exception, an out-of-memory error or a

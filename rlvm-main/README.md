@@ -28,7 +28,7 @@ scripts/dev.sh slice                                              # table for mo
 | Key | Meaning | Default |
 |---|---|---|
 | `policy=practical\|strict` | what the run promises (owner note 13; section "Policy" below). `strict` = the reference engine plus every exactness-only option the jars of the run have; `practical` = the default engine by priority and none of them | `practical` |
-| `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. **Since 2026-11-25 that engine is the machine** (its provider's priority is 100; `rlvm --version` prints `default engine: machine` and its switch set); the reference engine re-checks every rejection and decides what the machine declines, and a run that means the reference engine says `-X engine=reference` or `-X policy=strict`. An engine with a lower priority is in the distribution as a candidate: it runs when named or compared, never by default |
+| `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. **Since 2026-11-25 that engine is the machine** (its provider's priority is 100; `rlvm --version` prints `default engine: machine` and its switch set); the reference engine decides what the machine declines, a rejection of the machine is final (row `verify`), and a run that means the reference engine says `-X engine=reference` or `-X policy=strict`. An engine with a lower priority is in the distribution as a candidate: it runs when named or compared, never by default |
 | `engine=diff` | differential run. With the test kit's provider `diff` on the class path (`scripts/dev.sh diff`): its `DiffEngine` is the primary engine (engine under test and oracle per unit; the driver's own differential mode stays off). Without it: the best non-reference engine is the primary engine and the driver runs the reference kernel beside it on every unit (`RunConfig.differential`); a usage error (64) if the reference kernel is the only engine | - |
 | `load=batch\|pipelined\|auto` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `auto` (since 2026-11-24, owner note 12): **`pipelined` when two or more workers run and the input is a file of at least `pipeline-min-mib`** and no `stop-after` phase is asked for, else `batch` (`MainOptions.resolveLoadDefaults`; section "Load defaults and the automatic worker count"). It was `batch` |
 | `order=file\|namespace` | order of ready units | the driver's (`file`) |
@@ -37,14 +37,16 @@ scripts/dev.sh slice                                              # table for mo
 | `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `auto` (mapped if a regular file) when scanner threads run, whoever asked for them; `buffered` (plain `read`; ARCHITECTURE 1.4) otherwise. It was `buffered` |
 | `stop-after=load\|env` | stop after a phase | - |
 | `stats-file=F` | statistics as JSON | - |
-| `no-recheck`, `no-truffle`, `no-proof-blocks` | flags | off |
+| `verify=none\|reference` | what verifies a rejection (*agentic-note*: dec-PUU0, *agentic-note*: rep-MO-1). `none`: a rejection of the primary engine is final and no file is checked a second time. `reference`, a development option: the driver re-checks every rejection before it is reported (a strict run of the primary engine, then the reference engine) and the safety net of the practical policy is on (section "Policy") | `none` since 2026-11-25, unless the reference engine is the primary engine of the run (`engine=reference`, `policy=strict`) or its oracle (`engine=diff`): those runs verify unasked (`MainOptions.resolveVerify`) |
+| `no-recheck` | the same as `verify=none` (the flag of the time when the re-check was the default; since 2026-11-25 it turns the safety net off too); with `verify=reference` a usage error | off |
+| `no-truffle`, `no-proof-blocks` | flags | off |
 | `profile=4.36\|4.37` | official kernel release to imitate | 4.36 |
 | `passes=N` (1..1000) | check the export N times in this process and report every pass (section "Passes") | 1 = a plain run |
 | `passes-mode=reload\|recheck` | what a later pass is: `reload` = a complete run (new store, loader, engines); `recheck` = the driver's check-only pass over the loaded store. No effect with `passes=1` | `reload` |
 | `engine.KEY=VALUE` | Truffle engine options | handed to the engines with the engine settings; no engine reads them today |
 | any `KEY[=VALUE]` an engine declares | **engine settings**: every key some `EngineProvider` on the class path returns from `optionKeys()` is accepted and handed to `EngineProvider.factory(Map)` of the run's primary and reference engines (the reference factory also makes the environment pass's and the re-checks' kernels). The engine parses the value; `IllegalArgumentException` is a usage error. Example: the reference kernel's `levels=...` once `rlvm-ref` declares it | the engine's |
 
-| any `KEY[=VALUE]` the driver knows | **driver settings** (`RunConfig.knows(key)` / `config.set(key, value)`; today `unit-mib`, `keep-mib`, `gc-after-mib`, `chunk`, `env-batch`, `spill-ms`, `publish-units`, `publish-mib`, `pipeline-min-mib`, `no-fallback`; the list and the meaning are the driver's, `rlvm-driver/README.md`). A new knob of the driver needs no change here | the driver's |
+| any `KEY[=VALUE]` the driver knows | **driver settings** (`RunConfig.knows(key)` / `config.set(key, value)`; today `unit-mib`, `keep-mib`, `gc-after-mib`, `chunk`, `env-batch`, `spill-ms`, `publish-units`, `publish-mib`, `pipeline-min-mib`, `fallback=reference\|none`, also written `no-fallback`: whether the reference engine decides a unit the primary engine declines - with `fallback=none` and `verify=none` the primary engine is the whole checker of every definition, theorem, axiom and opaque; `no-fallback` beside `fallback=...` is a usage error; the list and the meaning are the driver's, `rlvm-driver/README.md`). A new knob of the driver needs no change here | the driver's |
 
 **Run defaults of the primary engine** (wave 7; request of the machine integrator, a session cap of
 4 MiB for the machine's warm sessions): `EngineProvider.runDefaults(Map engineOptions)` returns
@@ -120,8 +122,9 @@ option) is decided HERE since 2026-11-24 (`RlvmChecker.autoWorkers`: one worker 
 and passed on like an explicit count; the driver still caps it at one worker per 128 units, and its
 own automatic rule (CPUs - 2, at most 6) is no longer consulted. The arena run line names its count;
 `--stack-size` becomes `deepStackBytes` and caps `workerStackBytes`; `--quiet` turns `explain` off;
-`--stats` prints one line (`outcome, engine, reference, policy, workers, load, scan-threads, io,
-[engine-defaults,] wall_ms`; `(auto)` behind a value = decided by the defaults, not given) on stderr.
+`--stats` prints one line (`outcome, engine, reference, policy, verify, fallback, workers, load,
+scan-threads, io, [engine-defaults,] wall_ms`; `(auto)` behind a value = decided by the defaults, not
+given; `verify=none fallback=reference` in a plain run) on stderr.
 `rlvm --help` ends with this checker's settings (`RlvmChecker.usage()` through `rlvm.cli.Checker.usage()`),
 `rlvm --version` names the default engine and ends with `default: ...`, what a run without options
 does (`RlvmChecker.defaults()` through `rlvm.cli.Checker.defaults()`: the engine by priority, the
@@ -136,8 +139,12 @@ configuration (OWNER-NOTES 13):
 - (a) never accept a statement that is not derivable in Lean's type theory ("kind F"): absolute;
 - (b) the official verdict on every real input: everything lean4export writes (the corpora), the
   arena's good and bad tests, the mutant corpora with their stored official verdicts;
-- (c) everything the official checker accepts is accepted (a rejection is always confirmed by the
-  reference engine; a unit the primary engine declines goes to it);
+- (c) everything the official checker accepts is accepted on real input, and a unit the primary engine
+  declines goes to the reference engine. Since 2026-11-25 a rejection of the machine is final
+  (*agentic-note*: dec-PUU0), and on hand-made hostile exports the machine is not aligned with the
+  official checker yet: 12 exports of the hostile suite that the official checker accepts are rejected
+  by a plain run (listed in the journal, counted by the gate); `-X verify=reference` gives the official
+  accept or a decline;
 - (d) accepting a derivable statement that the official checker rejects only through its own
   incompleteness, non-transitivity, cache order or object identity ("kind T") is tolerated; the
   known classes are written down with one export each (*agentic-note*: rep-official-divergence).
@@ -159,9 +166,13 @@ have neither, `policy=strict` is the reference engine alone. A strict run says w
 heap). Neither policy can turn a rejection into an acceptance of something underivable: strict only
 ADDS declines.
 
-**The safety net of the practical policy** (`RlvmChecker.strictRecheck`; contract (c); finding R2-F4,
-*agentic-note*: rep-reference-caches, 6.1). The practical loader drops metadata nodes; the official
-kernel keeps them, and some of its syntactic tests stop at one. So a REJECT of a practical run on a
+**The safety net of the practical policy** (`RlvmChecker.strictRecheck`; finding R2-F4,
+*agentic-note*: rep-reference-caches, 6.1). **Since 2026-11-25 it is part of the verification**: it is
+on with `-X verify=reference` and in the practical runs that verify unasked (the reference engine as
+primary engine, `-X engine=reference`, or as oracle, `-X engine=diff`); a plain run reports its
+rejection and checks no file twice (*agentic-note*: dec-PUU0; the net: *agentic-note*: dec-7UAL). Where it is on: the practical loader
+drops metadata nodes; the official kernel keeps them, and some of its syntactic tests stop at one. So
+with the verification a REJECT of a practical run on a
 file in which the loader dropped a metadata node (`LoadReport.exprMData` > 0) is not reported: the
 file is checked once more as a plain run under `policy=strict` (fresh stores; the command line
 without `engine`, `passes`, `passes-mode` and the exactness-only engine settings), and that verdict
@@ -274,7 +285,8 @@ provider has priority 100 since 2026-11-25, so it is the default engine of every
 The whole pipeline: `rlvm FILE` loads the export (`rlvm-export` reader, `rlvm-load`, `rlvm-store`), runs
 the environment pass and admission (`rlvm-admit`, `rlvm-inductive`) and checks every unit with the
 default engine under `rlvm-driver`, with 1..N workers: the machine (`rlvm-machine`) since 2026-11-25,
-with the reference engine (`rlvm-ref`) re-checking every rejection and deciding every decline. The table
+with the reference engine (`rlvm-ref`) deciding every unit the machine declines (and, until the change
+of 2026-11-25 described under "Policy", re-checking every rejection). The table
 below is of 2026-11-24, when the reference engine checked by default (`-X engine=reference` today; tables with
 the exact jars: `work/status/slice.md`, `slice-all.md`; history in `work/status/steward.log`):
 
@@ -354,9 +366,10 @@ Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, 
 
 ## Defaults of a run without options
 
-- Engine: the machine, with the switch set `rlvm --version` prints; policy `practical`. The reference
-  engine re-checks every rejection and decides every declaration the machine declines; `-X engine=reference`
-  or `-X policy=strict` checks with it alone.
+- Engine: the machine, with the switch set `rlvm --version` prints; policy `practical`; `verify=none`,
+  `fallback=reference`: a rejection of the machine is final, and the reference engine decides every
+  declaration the machine declines. `-X verify=reference` re-checks every rejection (development);
+  `-X engine=reference` or `-X policy=strict` checks with the reference engine alone.
 - Load `auto`: pipelined for two or more workers on a file of 8 MiB or more; one scanner thread on mapped
   input from 256 MiB (`MainOptions.DEFAULT_SCAN_THREADS`). `--threads auto`: one worker per CPU, at most 8
   (decided here, not by the driver). The measurements behind both: *agentic-note*: dec-EGMG.

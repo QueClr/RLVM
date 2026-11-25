@@ -7,11 +7,11 @@
 \tag{soundness}
 \meta{status}{implemented}
 \meta{created}{2026-11-23}
-\meta{updated}{2026-11-24}
+\meta{updated}{2026-11-25}
 \meta{origin}{rlvm-ref/README.md}
 \import{base-macros}
 
-\p{\strong{Status:} implemented in \code{rlvm-ref}. It is the re-check engine of every run and the strict mode. It was the default engine of a distribution until the evening of 2026-11-24; since then the machine is, and a run that means this engine says \code{\verb~|-X engine=reference~} or \code{\verb~|-X policy=strict~}.}
+\p{\strong{Status:} implemented in \code{rlvm-ref}. It is the strict mode, and in a plain run it admits the inductive types and decides the declarations the machine declines. Until 2026-11-25 it was also the re-check engine of every run; since the change of that day (\commit{a8dc6dd}) it confirms a rejection of the machine only with the development option \code{\verb~|-X verify=reference~}, see [the decision](dec-PUU0). It was the default engine of a distribution until the evening of 2026-11-24; since then the machine is, and a run that means this engine says \code{\verb~|-X engine=reference~} or \code{\verb~|-X policy=strict~}.}
 
 \p{The reference engine is a straight port of the type checker of the official Lean 4 kernel, v4.36.0, function by function: inference in check and infer-only mode, the two weak-head normalisers with the cheap flags, delta with the Nat extension, quotients, iota with the K rule and structure eta, projections, and the definitional equality test with the exact official order of steps. It works on the ids of [the term store](design-term-store) and opens binders with free-variable nodes in the worker's overlay. It is a complete engine, not a helper, which is why the pipeline could be built and tested before the machine existed.}
 
@@ -19,8 +19,9 @@
 \title{Its roles}
 
 \ul{
-\li{\strong{The environment pass.} Every judgment of the admission of inductive blocks and of the quotient package is asked of it ([admission](design-inductive-admission)).}
-\li{\strong{The re-check engine.} When the machine is the primary engine, every rejection it issues is confirmed by a cold check here before it counts, and every unit it declines is decided here ([the verdict protocol](design-verdict-protocol)).}
+\li{\strong{The environment pass.} Every judgment of the admission of inductive blocks and of the quotient package is asked of it ([admission](design-inductive-admission)), in every configuration and whatever the primary engine is: 17,409 units of the eight corpora, 7,133 of them Mathlib's. No option changes this.}
+\li{\strong{The decline fallback.} When the machine is the primary engine, every unit it declines is decided here ([the verdict protocol](design-verdict-protocol)): 95 units of six of the eight corpora, 86 by the machine's rule for the K rule after the application of a let variable and 9 because a probe of eager reduction was cut. \code{\verb~|-X fallback=none~} turns the fallback off, and it is to go off by default once the machine decides these units itself.}
+\li{\strong{The verification of a rejection, a development option.} With \code{\verb~|-X verify=reference~} every rejection the machine issues is confirmed by a cold check here before it counts. Until 2026-11-25 this was part of every run, and this item and the one above were one, "the re-check engine"; a plain run now takes the rejection of the machine as final, by the maintainer's instruction that this engine is a tool of development and is not to affect production. So a plain run has two roles for this engine, the environment pass and the decline fallback, and nothing else. See [the census](rep-MO-1) for what each role decides on every input set.}
 \li{\strong{The oracle} of the differential engine and of the kernel-level differential tests ([the gate](design-gate)).}
 \li{\strong{The default engine, until the evening of 2026-11-24.} It was the primary engine until the machine existed, and again while the machine was withdrawn as the default; the machine is the default engine since ([dec-T79V](dec-T79V)). \code{\verb~|-X engine=reference~} selects this engine explicitly.}
 \li{\strong{The strict mode.} \code{\verb~|-X policy=strict~} selects this engine whatever the priorities say and turns on its exactness option ([the exactness contract](design-exactness-contract)).}
@@ -53,7 +54,7 @@
 \subtree[design-reference-engine-cost]{
 \title{What it costs}
 
-\p{In a run whose primary engine is the machine, the reference engine executes the environment pass and the re-checks only. As primary engine it is the slow, exact path. Warm wall clock with 8 workers and pipelined loading, median later pass of one process, on quiet cores of the aarch64 development host (first warm table of 2026-11-24):}
+\p{In a run whose primary engine is the machine, the reference engine executes the environment pass and the units the machine declines; with the verification, also the re-checks of rejections. As primary engine it is the slow, exact path. Warm wall clock with 8 workers and pipelined loading, median later pass of one process, on quiet cores of the aarch64 development host (first warm table of 2026-11-24):}
 
 \table{
 \tr{\th{Corpus}\th{JVM launcher}\th{Native image}}
@@ -66,7 +67,7 @@
 
 \p{For comparison, the machine with its default switch set later measured 21.23 s on the JVM launcher and 27.43 s in the native image for a warm pass of Mathlib. Cold, with the JVM launcher in the arena-shaped container on a loaded host, Mathlib with 8 workers took 549.1 s of CPU time and 132.8 s of wall clock at a 13.17 GB peak resident set (median of three runs). In this kernel CPU time follows the size of the tables probed per term, not the number of instructions: a table of imported constant terms that outlives a declaration saved 3 to 8 \% of the instructions and cost up to 7 \% of the CPU time on Mathlib, and is off by default.}
 
-\p{Gates of the published engine: the 230 arena tests all correct with no decline; 17,775 mutants in four corpora with no soundness and no completeness difference from the official verdicts (16,092 agree, 1,683 declined). Known gaps: the rules of Lean 4.37 are not implemented; the peak resident set of one heavy declaration is 3 to 4 times the bytes in use.}
+\p{Gates of the published engine: the 230 arena tests all correct with no decline; 17,775 mutants in four corpora with no soundness and no completeness difference from the official verdicts (16,092 agree, 1,683 declined; that was before the launcher's second run under the strict policy for a rejected file with metadata, which a practical run of this engine still has and with which the counts are 15,741 and 2,034, see [the decision on the metadata class](dec-7UAL)). Known gaps: the rules of Lean 4.37 are not implemented; the peak resident set of one heavy declaration is 3 to 4 times the bytes in use.}
 }
 
 \p{Detail: \src{rlvm-ref/README.md}; the design is section 5 of [the architecture document](design-architecture-document); the numbers are from [rep-benchmarks](rep-benchmarks). Source: [the session that built the pipeline](ses-BQZM) and [the exactness session](ses-874D).}

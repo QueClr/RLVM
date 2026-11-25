@@ -109,7 +109,8 @@ a faulty value is reported on stderr and ignored). None of the numeric settings 
 | `publish-units=N`, `publish-mib=N` | pipelined hand-off interval | 4096 units, 32 MiB |
 | `publish-scale=N` | `publishScaleMax`: both intervals times the input's size in GiB, at most N (1 = off): a large file is published in larger pieces | 4 |
 | `pipeline-min-mib=N` | `pipelineMinBytes`: smaller inputs are loaded in batch mode | 8 |
-| `no-fallback` | `referenceFallback = false` | off |
+| `fallback=reference\|none` | `referenceFallback`: the reference kernel decides a unit the primary engine declines; `none` (also the flag `no-fallback`) = `referenceFallback = false` (see "Re-check protocol") | reference |
+| `verify=none\|reference` | `recheckRejections`: `none` = a REJECT of the primary engine is final; `reference` = it is re-checked first, by a strict run of the primary engine and then by the reference kernel (development; see "Re-check protocol") | none (since 2026-11-25; *agentic-note*: dec-PUU0) |
 | `passes=N` | `passes`: check the export N times in one process (see "Passes") | 1 |
 | `passes-keep=engines\|none` | `passesKeepEngines`: the later passes use the engine instances of pass 1 | none |
 | `shard=K/N` | `shardIndex`, `shardCount`: measurement only, check shard K of N (blocks of 1,024 units, block number mod N); the run's verdict is DECLINE | off |
@@ -222,17 +223,27 @@ smallest one that is in force resets first.
 
 ### Re-check protocol (ARCHITECTURE 8.2 / 6.5 / 6.6)
 
+**Since 2026-11-25 `recheckRejections` is false by default** (`verify=none`; the maintainer's instruction of
+that day, *agentic-note*: dec-PUU0, census and patch *agentic-note*: rep-MO-1): a REJECT of the primary engine,
+warm or in its own cold retry of a decline, is recorded as it is - no strict run, no reference kernel, no
+event. The rows of a warm REJECT in the table below are the development protocol, `verify=reference`; the
+launcher sets it unasked where the reference kernel is the primary engine or the oracle of the run. The
+rows of a warm DECLINE and of an exception are the decline fallback, which stays in every run with
+`fallback=reference` (the default). Without the re-check a rejection that comes out of a warm session depends
+on what the session checked before, so on such input the verdict can depend on the schedule ("Invariants").
+
 Every stage runs in a freshly reset session with `Budget.cold(memoryLimitBytes)`; after every stage the unit
 is abandoned without a record if it now lies above the first failure (the stage may have been cancelled).
 
 | Warm outcome | Stages | Final status |
 |---|---|---|
-| REJECT | 1. strict primary: ACCEPT | accepted, WARM-ANOMALY |
+| REJECT, `verify=none` (default) | none | REJECTED (the primary engine's reason and message) |
+| REJECT, `verify=reference` | 1. strict primary: ACCEPT | accepted, WARM-ANOMALY |
 | | 2. reference: REJECT | REJECTED (confirmed; the reference kernel's reason and message) |
 | | reference: ACCEPT | accepted, MACHINE-INCOMPLETE |
 | | reference: DECLINE or exception | `Policy.unconfirmedReject`: DECLINED(UNCONFIRMED_REJECT) (default) or REJECTED |
 | DECLINE | 1. primary, cold budget: ACCEPT | accepted |
-| | primary cold: REJECT | as "REJECT" above |
+| | primary cold: REJECT | as "REJECT" above: final with `verify=none`, re-checked with `verify=reference` |
 | | 2. reference: ACCEPT / REJECT / DECLINE | accepted / REJECTED / DECLINED (its reason) |
 | RuntimeException | session and lane discarded; reference: ACCEPT / REJECT / DECLINE | accepted / REJECTED / DECLINED |
 | | reference throws too | DECLINED(INTERNAL_ERROR) |
@@ -240,21 +251,24 @@ is abandoned without a record if it now lies above the first failure (the stage 
 
 primary == reference (same factory object): the stages "strict primary" and "primary, cold budget" do not
 exist; one fresh cold run of the reference kernel decides, and a warm REJECT that the fresh run accepts is a
-WARM-ANOMALY. `recheckRejections = false` makes a REJECT of the primary engine final (measurement only).
-An ACCEPT of the primary engine is never re-checked. Structural rejections and rejections of the environment
+WARM-ANOMALY. `recheckRejections = false`, the default since 2026-11-25, makes a REJECT of the primary engine
+final. An ACCEPT of the primary engine is never re-checked. Structural rejections and rejections of the environment
 pass need no confirmation; a structural rejection simply repeats in the stages at no cost.
 
 **Memory retries.** A stage that ends with `BUDGET_MEMORY` is repeated while the worker holds the heavy gate
 (below); a warm decline for memory takes the gate before its first cold stage. The outcome table is
 unchanged; only "declined for memory" now means "does not fit into the limit by itself".
 
-**`referenceFallback = false`** (`no-fallback`; the gate of an engine under test, requested by the machine
-workflow): the reference kernel never turns a non-ACCEPT of the primary engine into an ACCEPT. A unit the
-primary engine declines (after its own cold attempt) or throws on is DECLINED with its reason, without
-asking the reference kernel; a rejection that the reference kernel accepts is DECLINED(ENGINE_DISAGREEMENT)
-with the MACHINE-INCOMPLETE event. Rejections are still confirmed (REJECT only when confirmed) and the
-environment pass stays the reference kernel's. The run's exit status is then ACCEPT iff the primary engine
-accepted every def / thm / axiom / opaque unit by itself.
+**`referenceFallback = false`** (`fallback=none`, also written `no-fallback`; the gate of an engine under
+test, requested by the machine workflow): the reference kernel never turns a non-ACCEPT of the primary engine
+into an ACCEPT. A unit the primary engine declines (after its own cold attempt) or throws on is DECLINED with
+its reason, without asking the reference kernel. With the verification (`verify=reference`, what the gate of
+an engine under test asks for) rejections are still confirmed (REJECT only when confirmed), and a rejection
+that the reference kernel accepts is DECLINED(ENGINE_DISAGREEMENT) with the MACHINE-INCOMPLETE event. Without
+it (the default) this is the primary engine alone: a rejection is final, and no worker asks the reference
+kernel about a def / thm / axiom / opaque unit. The environment pass stays the reference kernel's in either
+case. The run's exit status is then ACCEPT iff the primary engine accepted every def / thm / axiom / opaque
+unit by itself.
 
 ### Verdict (`VerdictBoard`)
 
@@ -265,7 +279,8 @@ input failure, not stopped (`stop-after`), no internal failure, every unit below
 status at or above `n`. A unit status is written once (compare-and-set from "none"); a second report for a
 unit is an internal inconsistency and turns the verdict into DECLINE. `firstFailure()` is the smallest unit
 with a recorded REJECTED / DECLINED status, -1 once the whole run is cancelled (malformed input, internal
-failure). A rejection is only ever recorded when confirmed.
+failure). A rejection is recorded as the primary engine gave it (`verify=none`, the default since 2026-11-25),
+or only when confirmed (`verify=reference`).
 
 ### Scheduler (RECONCILIATION section 3)
 
@@ -530,7 +545,10 @@ the CPU overhead against one worker and the N the gate selects. Results: "Measur
   batch size, the session cap, the give-back threshold, the warm byte budget or the load mode, provided
   engines honour `rlvm.api.Session`'s obligations (an ACCEPT is a semantic fact; a fresh session is
   deterministic) and poll `RunSignals` (both signals). A unit is declined for memory only if it does not fit
-  into the limit by itself.
+  into the limit by itself. With `verify=none`, the default since 2026-11-25, this also needs that no
+  rejection of the primary engine depends on the history of its session; with the machine as primary engine
+  21 rows of the hostile suite are the known exceptions (12 with `verify=reference`), no published test and
+  no mutant (*agentic-note*: ins-RPOG).
 - No time-based decision affects a verdict (`spillNanos` only moves units between workers; the 50 ms
   re-checks of parked threads only bound how long a cancelled waiter stays parked).
 - Sessions are created, used and closed on one thread. Engines are closed and `dumpStats` is called after
@@ -588,7 +606,7 @@ Commands (all in `rlvm-driver/bin/`, none touches another module):
 
 | Command | What it does |
 |---|---|
-| `invariance.sh [CORPUS...]` | **the invariance suite as one command**, to run before every publication: every file 9 times (batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication after every unit / 7 units / 64 units and 1 / 4 / 8 workers); verdict and deciding unit must be equal and the verdict the expected one. A pipelined run that DECLINES what the batch run decides is counted apart ("pipelined declines") and is not a failure; any ACCEPT / REJECT difference is. Corpora: `published` (231 files), `tutorial` (12,260 mutants), `bugs` (2,692), `mdata` (1,976), `prelude` (847), `big` (init-prelude, Init, Std, cedar), `all`. Pinned to the efficiency cores. Exit 0 = PASS |
+| `invariance.sh [CORPUS...]` | **the invariance suite as one command**, to run before every publication: every file 9 times (batch with 1 / 2 / 4 / 8 workers, 1-byte session caps with 1 and 4 workers, pipelined with a publication after every unit / 7 units / 64 units and 1 / 4 / 8 workers); verdict and deciding unit must be equal and the verdict the expected one. The suite means the verified protocol and, since 2026-11-25, asks for it by name on every run (`verify=reference`); `--set verify=none` runs the default protocol instead. A pipelined run that DECLINES what the batch run decides is counted apart ("pipelined declines") and is not a failure; any ACCEPT / REJECT difference is. Corpora: `published` (231 files), `tutorial` (12,260 mutants), `bugs` (2,692), `mdata` (1,976), `prelude` (847), `big` (init-prelude, Init, Std, cedar), `all`. Pinned to the efficiency cores. Exit 0 = PASS |
 | `threads-gate.sh EXPORT...` | the worker-count gate (above); `--engine machine [-X machine.switches=...]` for the machine |
 | `measure-bench.sh EXPORT [DriverBench options]` | one measured run of `DriverBench` in the arena-shaped container (for what the launcher cannot run yet) |
 | `freeze-cp.sh [TAG]` | a frozen copy of the test class path for long runs |
