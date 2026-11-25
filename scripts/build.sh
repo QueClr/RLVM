@@ -609,7 +609,7 @@ echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X 
 
 # --- JVM launcher (development distributions only) ----------------------------------------------
 # bin/rlvm-jvm is a TOOL OF THIS REPOSITORY, not part of the release (OWNER-NOTES 16: the release is
-# one executable): the warm benchmarks (bench/warm.sh; warm, HotSpot needs 0.74-0.81 times the image's
+# one executable): the warm benchmarks (bench/warm.sh; warm, HotSpot needs 0.6-0.85 times the image's
 # wall clock), the gates and the test kit run the jars through it. It is written only into a --dev or
 # --jvm-only distribution and never packaged.
 # Default VM flags. The line is the one proposed by the profiler J1 (docs/research/profiles/J1.md, section 5;

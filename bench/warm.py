@@ -76,7 +76,7 @@ COLUMNS = ["utc", "quiet", "corpus", "what", "launcher", "workers", "load", "mod
 # dist / build (since 2026-11-24T22Z; older rows end with "label"): the distribution's path below the
 # project root and what it is - the "built:" time of its BUILD-INFO.txt and the first 12 hex digits of
 # the sha256 over its RLVM jars (the id scripts/build.sh gives a versioned distribution) - so that a
-# table can say for every row which jars it measured (docs/BENCHMARKS.md).
+# table can say for every row which jars it measured (bench/track/benchmarks.py: the tree rep-benchmarks).
 
 
 def build_id(dist):

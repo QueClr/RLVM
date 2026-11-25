@@ -24,7 +24,7 @@
 \li{\strong{Heap}: at most 13 GB, as before, and the collection policy \code{BySpaceAndTime} of the serial collector in place of its default, \code{Adaptive2}. No minimum heap and no bound on the young generation is baked in.}
 }
 
-\p{\strong{How it was measured.} Every figure is the wall clock of one fresh process of the CE native image, from exec to exit, with 8 workers on the 8 measurement cores of the aarch64 development host, inside a quiet-core window, while the other 12 cores were busy with builds and gates. The configurations of a comparison alternate inside each round, a cell is the median of its runs and the number of runs is given; two runs of one configuration differ by up to 5 \%, on reachability by up to 10 \%. The engine is the machine with the switch set \code{\verb~|default,eager,skipargs,congruence~}, which its integrator was about to publish as its default set when this was measured, unless the reference engine is named. The memory settings were given on the command line of one image; they are run-time defaults, so baking them in changes nothing else.}
+\p{\strong{How it was measured.} Every figure is the wall clock of one fresh process of the CE native image, from exec to exit, with 8 workers on the 8 measurement cores of the aarch64 development host, inside a quiet-core window, while the other 12 cores were busy with builds and gates. The configurations of a comparison alternate inside each round, a cell is the median of its runs and the number of runs is given; two runs of one configuration differ by up to 5 \%, on reachability by up to 10 \%. In the screening the engine is the machine with the switch set \code{\verb~|default,eager,skipargs,congruence~} named on the command line, which became its default set two hours later; the tables of the released image are runs without any option. The memory settings were given on the command line of one image; they are run-time defaults, so baking them in changes nothing else.}
 
 \subtree[dec-EGMG-heap]{
 \title{The heap and the collector}
@@ -68,39 +68,47 @@
 \tr{\td{geometric mean of the ratios}\td{1.000}\td{1.046 over 6}\td{}\td{}}
 }
 
-\p{\strong{The image as it is built now}, against the same image with the settings of before on its command line, the collection policy and the scanner threads together. The machine with the candidate set:}
+\p{\strong{The image as it is released}: built from the jars of the release, the machine the default engine with its final switch set, against the same image with the settings of before on its command line, the collection policy and the scanner threads together. The default configuration, no other option, three interleaved rounds; Mathlib three alternating runs each, one per window:}
 
 \table{
 \tr{\th{Corpus}\th{before (Adaptive2, 2 scanner threads): wall s (runs)}\th{now (BySpaceAndTime, 1 scanner thread): wall s, ratio}\th{peak RSS MiB: before (Adaptive2, 2 scanner threads)}\th{peak RSS MiB: now (BySpaceAndTime, 1 scanner thread)}}
-\tr{\td{init}\td{0.79 (3)}\td{0.78, 0.986 (3)}\td{410}\td{397}}
-\tr{\td{std}\td{1.40 (3)}\td{1.38, 0.983 (3)}\td{603}\td{619}}
-\tr{\td{cedar}\td{2.08 (3)}\td{1.91, 0.922 (3)}\td{836}\td{776}}
-\tr{\td{reachability}\td{0.62 (3)}\td{0.67, 1.064 (3)}\td{597}\td{699}}
-\tr{\td{con-leche}\td{2.35 (1)}\td{1.89, 0.805 (1)}\td{1,256}\td{1,639}}
-\tr{\td{navier-stokes-euler}\td{5.28 (3)}\td{4.53, 0.858 (3)}\td{1,264}\td{1,244}}
-\tr{\td{cslib}\td{6.52 (3)}\td{6.15, 0.943 (3)}\td{1,779}\td{1,993}}
-\tr{\td{mathlib}\td{16.23 (1)}\td{16.87, 1.039 (1)}\td{4,148}\td{5,581}}
-\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.946 over 8}\td{}\td{}}
+\tr{\td{init}\td{0.77 (3)}\td{0.79, 1.018 (3)}\td{416}\td{390}}
+\tr{\td{std}\td{1.37 (3)}\td{1.32, 0.961 (3)}\td{603}\td{618}}
+\tr{\td{cedar}\td{1.98 (3)}\td{1.90, 0.963 (3)}\td{852}\td{776}}
+\tr{\td{reachability}\td{0.64 (3)}\td{0.61, 0.944 (3)}\td{634}\td{714}}
+\tr{\td{con-leche}\td{2.18 (3)}\td{1.80, 0.825 (3)}\td{1,238}\td{1,199}}
+\tr{\td{navier-stokes-euler}\td{5.11 (3)}\td{4.39, 0.859 (3)}\td{1,412}\td{1,379}}
+\tr{\td{cslib}\td{6.28 (3)}\td{6.10, 0.972 (3)}\td{1,799}\td{1,900}}
+\tr{\td{mathlib}\td{17.40 (3)}\td{16.39, 0.942 (3)}\td{4,054}\td{5,557}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.934 over 8}\td{}\td{}}
 }
 
-\p{The reference engine, the default engine when this was measured:}
+\p{Mathlib, the two settings one at a time, three alternating runs each:}
+
+\table{
+\tr{\th{Corpus}\th{Adaptive2, 2 scanner threads (before): wall s (runs)}\th{BySpaceAndTime, 2 scanner threads: wall s, ratio}\th{Adaptive2, 1 scanner thread: wall s, ratio}\th{BySpaceAndTime, 1 scanner thread (now): wall s, ratio}\th{peak RSS MiB: Adaptive2, 2 scanner threads (before)}\th{peak RSS MiB: BySpaceAndTime, 2 scanner threads}\th{peak RSS MiB: Adaptive2, 1 scanner thread}\th{peak RSS MiB: BySpaceAndTime, 1 scanner thread (now)}}
+\tr{\td{mathlib}\td{17.40 (3)}\td{16.66, 0.957 (3)}\td{16.94, 0.973 (3)}\td{16.39, 0.942 (3)}\td{4,054}\td{5,771}\td{3,980}\td{5,557}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.957 over 1}\td{0.973 over 1}\td{0.942 over 1}\td{}\td{}\td{}\td{}}
+}
+
+\p{The reference engine by name, the same comparison, two interleaved rounds:}
 
 \table{
 \tr{\th{Corpus}\th{before (Adaptive2, 2 scanner threads): wall s (runs)}\th{now (BySpaceAndTime, 1 scanner thread): wall s, ratio}\th{peak RSS MiB: before (Adaptive2, 2 scanner threads)}\th{peak RSS MiB: now (BySpaceAndTime, 1 scanner thread)}}
-\tr{\td{init}\td{2.14 (2)}\td{1.97, 0.922 (2)}\td{538}\td{691}}
-\tr{\td{std}\td{3.50 (2)}\td{3.26, 0.930 (2)}\td{669}\td{902}}
-\tr{\td{cedar}\td{4.56 (2)}\td{4.30, 0.943 (2)}\td{856}\td{956}}
-\tr{\td{reachability}\td{4.64 (2)}\td{4.70, 1.014 (2)}\td{2,259}\td{3,090}}
-\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.952 over 4}\td{}\td{}}
+\tr{\td{init}\td{2.17 (2)}\td{2.06, 0.951 (2)}\td{516}\td{658}}
+\tr{\td{std}\td{3.74 (2)}\td{3.51, 0.937 (2)}\td{636}\td{888}}
+\tr{\td{cedar}\td{4.80 (2)}\td{4.55, 0.948 (2)}\td{864}\td{954}}
+\tr{\td{reachability}\td{5.00 (2)}\td{5.07, 1.016 (2)}\td{2,254}\td{3,384}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.962 over 4}\td{}\td{}}
 }
 
-\p{The eight slowest published arena tests stress the reference engine on one thread. They were measured with the variant that has the young generation at 1 \% of the heap, two runs each: 0.83 (gf3-matrix-product) to 1.03 (magma-list-deep-n36) times the wall clock, 0.98 in the geometric mean, and up to 45 \% more resident memory on the tests that fill the old generation (magma-list-deep-n36 3.8 against 5.3 GB). With the policy as it is baked in, perf/app-lam ran in 11.2 s with 4.8 GB in the arena-shaped container, against 11.1 s with 4.0 GB before. All of them are far from the arena's limits.}
+\p{The eight slowest published arena tests stress the reference engine on one thread. They were measured an hour earlier with the variant that has the young generation at 1 \% of the heap, two runs each: 0.83 (gf3-matrix-product) to 1.03 (magma-list-deep-n36) times the wall clock, 0.98 in the geometric mean, and up to 45 \% more resident memory on the tests that fill the old generation (magma-list-deep-n36 3.8 against 5.3 GB). With the policy as it is baked in, perf/app-lam ran in 11.2 s with 4.8 GB in the arena-shaped container, against 11.1 s with 4.0 GB before, when the reference engine checked it; the machine, the default engine now, checks it in 0.06 s. All of them are far from the arena's limits.}
 
 \ul{
-\li{With the machine and the candidate set the two changes together are worth 5 \% in the geometric mean of the eight corpora, and most on the middle ones: con-leche 0.81, navier-stokes-euler 0.86, cedar 0.92, cslib 0.94 times the wall clock. Init and Std gain 1 to 2 \%. The runs of reachability, 0.6 s each, scatter by 10 \% under either setting, and the figure of a window has gone both ways.}
-\li{\strong{Mathlib is not settled on the final image.} The one pair of runs there, 20 minutes apart and so not comparable to within 5 \%, gave 16.2 s before and 16.9 s now. In the screening, on the image and the machine jar of an hour earlier, four alternating pairs gave 17.9 s with the default policy and 17.3 s with \code{BySpaceAndTime}, and one pair 18.9 s with two scanner threads and 17.4 s with one. Mathlib has to be taken again, as three alternating pairs, on the jars that ship.}
-\li{With the reference engine, the default engine at the time, the same settings gain 6 to 8 \% on Init, Std and cedar and nothing on reachability.}
-\li{The price is resident memory where the old generation holds garbage longer: up to 37 \% more (the reference engine on reachability, 2.3 against 3.1 GB), Mathlib with the machine 4.1 against 5.6 GB; half of the machine's rows are within 5 \% of before.}
+\li{The two changes together are worth 7 \% in the geometric mean of the eight corpora, most on the middle ones: con-leche 0.83, navier-stokes-euler 0.86 times the wall clock. Init is level within the scatter of its runs, 1.02; no corpus is slower by more than that.}
+\li{\strong{Mathlib is settled}: 17.4 s before, 16.4 s now, 0.94. The two settings add: the collection policy alone gives 0.96, the one scanner thread alone 0.97. An hour earlier, on the image of the previous machine jar, a single pair of runs 20 minutes apart had said 16.2 against 16.9 s; that pair was not comparable.}
+\li{The price is resident memory where the old generation holds garbage longer: Mathlib 4.1 against 5.6 GB. With the default configuration the other corpora are within 13 \% of before, in either direction.}
+\li{The reference engine by name gains 5 to 6 \% on Init, Std and cedar, is level on reachability, and holds 10 to 50 \% more memory.}
 }
 }
 
@@ -141,6 +149,6 @@
 \li{The JVM launcher of a development distribution keeps its own heap flags; only the scanner-thread default reaches it.}
 }
 
-\p{\strong{Not measured.} x86-64, the architecture of the arena's runner. More than 8 cores: the cap of the automatic worker count is the one found on 8. A machine with less memory than the corpora need. The settings together with the switch set the integrator of the machine finally publishes, if it differs from the one used here; con-leche with that set is dominated by one unit under eager reduction (finding INT7-F1) and was left out of the choice.}
+\p{\strong{Not measured.} x86-64, the architecture of the arena's runner. More than 8 cores: the cap of the automatic worker count is the one found on 8. A machine with less memory than the corpora need. The screening row of con-leche is one run with the machine jar of that hour, in which one unit of the corpus ran for 40 s under eager reduction (finding INT7-F1, repaired before the release); the tables of the released image have the corpus as it is now.}
 
 \p{Source: \src{scripts/build.sh} (\code{\verb~|IMAGE_HEAP~}), \src{rlvm-main/README.md}, \src{docs/research/profiles/P10.md} for the profile of the Mathlib pass; the tables of the default configuration are regenerated by \src{bench/track/benchmarks.py}.}

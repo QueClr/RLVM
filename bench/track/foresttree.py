@@ -16,6 +16,8 @@ lines in a small, fixed subset; this module turns that list into Forester markup
     inline                  `code` -> \\code{\\verb~|code~}, **strong**, *emphasis*, [text](target): a URL
                             becomes an html:a, a path of the repository \\src{path}, a tree address a link
     <!-- ... -->            dropped
+    %%tree: MARKUP          a line of Forester markup for the tree alone, emitted as it is (the generators
+                            use it for \\transclude{address}); a Markdown output drops the line
 
 Every character that is syntax in Forester (% \\ { } [ ] # and an unbalanced parenthesis) is escaped or
 put into a verbatim span. Python stdlib only; nothing here reads or writes the journal by itself.
@@ -166,6 +168,10 @@ def body(lines: list[str]) -> tuple[str | None, list[str]]:
         if not stripped:
             i += 1
             continue
+        if stripped.startswith("%%tree:"):
+            out.append(stripped[len("%%tree:"):].strip())
+            i += 1
+            continue
         if stripped.startswith("<!--"):
             while i < len(lines) and "-->" not in lines[i]:
                 i += 1
@@ -282,6 +288,7 @@ def selftest() -> int:
         ("no alignment row", "---" not in text),
         ("list with continuation and nesting", "\\li{first item with \\code{\\verb~|code~} and a continuation line\n\\ul{\n\\li{nested item}\n}\n}" in text),
         ("code block", "\\pre{\\verb~|\nrlvm --version   # {braces}\n~}" in text),
+        ("a raw line for the tree", "\n\\transclude{some-notes}\n" in tree(["%%tree: \\transclude{some-notes}", "", "text"], author="t")),
     ]
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:

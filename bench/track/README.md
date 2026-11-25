@@ -22,7 +22,7 @@ bench/track/ladder.py                          # ALL corpora, JVM + native, refe
 bench/track/ladder.py --tier small --engine machine --launcher jvm --extra-cp rlvm-machine/target/classes
 bench/track/ladder.py --tier small --launcher jvm --passes 5      # warm entries for a tier
 bench/track/ladder.py --list                   # what is recorded for the ladder; measures nothing
-bench/track/benchmarks.py --tsv work/perf-history/warm.tsv --labels bench   # docs/BENCHMARKS.md: one table per metric, owner's order
+bench/track/benchmarks.py --tsv work/perf-history/warm.tsv --labels bench --tree-author ADDRESS   # journal/trees/report/rep-benchmarks.tree: one table per metric
 bench/track/benchmarks_cold.py --stdout        # the cold tables from the history (superseded form of that document)
 ```
 
@@ -30,7 +30,7 @@ bench/track/benchmarks_cold.py --stdout        # the cold tables from the histor
 |---|---|
 | `track.py` | one corpus, one configuration: measure, record, compare, apply the rule (host; starts containers; Python stdlib only) |
 | `ladder.py` | `track.py` over all corpora for one engine and one or more launchers, then the baselines that this host has no measurement of; one measurement in the container at a time (lock `work/perf-history/.ladder.lock`, taken per measurement) |
-| `benchmarks.py` | generates `docs/BENCHMARKS.md` from rows of `bench/warm.sh` (and the history for instruction counts): corpus x {RLVM machine, RLVM reference} x {JVM, native} + gruszka + nano-lean, one table per metric in the owner's order (warm wall 8 workers, warm wall 1 worker, cold wall, CPU, RSS, instructions), and for every cell the row, its `bench/quiet.py` window and its jars; the text around the tables is `benchmarks-notes.md` |
+| `benchmarks.py` | generates the benchmark tables as a TREE of the journal, `journal/trees/report/rep-benchmarks.tree` (*agentic-note*: rep-benchmarks; taxon Report; root `AGENTS.md`: a generated table is a tree, not a Markdown file), from rows of `bench/warm.sh` and the history for instruction counts: one table per metric (warm wall 8 workers, warm wall 1 worker, cold wall, CPU, RSS, instructions); rows: the executable in its default configuration (`--default-engine`, default machine; a row measured without `-X engine` belongs to the default engine of its time, `--default-since`), the optional Oracle GraalVM executable (rows whose label starts with `oracle-pgo`), the JVM launcher of a development distribution, the other engine, gruszka and nano-lean (`--baseline-labels`: their rows may be older); for every cell the row, its `bench/quiet.py` window and its jars. The text around the tables is the hand-written tree `rep-benchmarks-notes`, which the generated tree includes. `--headline` prints the one table of the root README; `--stdout` prints the document as Markdown, `--markdown FILE` writes it as a file on request (nothing writes `docs/BENCHMARKS.md` any more). `--tree-author ADDRESS` is required to write the tree | host or container |
 | `foresttree.py` | writes generated tables as a tree of the journal (`journal/`, a Forester forest: root `AGENTS.md`, "tables that a tool generates are emitted as trees"): the Markdown subset the generators emit -> `\\subtree`, `\\p`, `\\table{\\tr{\\th{..}}..}`, `\\ul`, verbatim spans for syntax characters, plus the journal's frontmatter. `benchmarks.py --tree FILE.tree --tree-author ADDRESS [--tree-contributor ADDRESS] [--no-markdown]` writes the benchmark document that way (the Markdown output stays until `docs/` has moved); `benchmarks.py --headline` prints the one table of the root README (a run of the executable in its default configuration against gruszka and nano-lean). `foresttree.py --selftest` | host or container |
 | `benchmarks_cold.py` | the generator of that document until 2026-11-24T23Z: cold tables (CPU time, wall clock, RSS, instructions of a fresh process on a batch load) from the tracker's history; superseded as the statement of where RLVM stands, kept as a tool |
 | `selftest.py` | 79 checks of the rule, the pass lines, the summaries, phase differencing, baseline lookup, the command line, the ladder and both generators on the host (independent of what is built in `work/dist`); `--docker` adds 10 checks of the whole command with a fake checker in the container |
@@ -238,7 +238,7 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
 
 - The ladder was run for the reference engine of the distribution built at 07:21Z (a copy:
   `work/rlvm-testkit/dist-0721Z`; JVM launcher and CE native image, 8 workers). Histories are in
-  `work/perf-history/`, the table in `docs/BENCHMARKS.md` (its provenance section lists every cell's
+  `work/perf-history/`, the table was in `docs/BENCHMARKS.md` (now the tree `rep-benchmarks`; its provenance section lists every cell's
   runs, date and host load). Every recorded entry is valid (right verdict, full counter coverage).
 - **The host was not quiet.** Other agents' guard runs kept the 1-minute load average between 7 and
   190 (20 CPUs; median 103 at the start of the 86 RLVM runs, 7 to 35 during the small and large tiers); they are pinned to the 12 CPUs outside the container's cpuset, and measurements

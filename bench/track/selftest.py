@@ -270,6 +270,20 @@ def test_benchmarks() -> None:
         check("without options the machine is the default engine, and an option-less row belongs to the default engine of its time",
               "| RLVM default configuration (machine engine) on the JVM launcher (development tool) | **0.77** (0.70) | - |" in timed
               and "| RLVM `-X engine=reference`, JVM launcher (development tool) | **1.11** (1.01) | **1.20** (1.10) |" in timed, timed[-800:])
+        # The tool's result is a TREE of the journal (taxon Report), not a Markdown file: sections as subtrees, the
+        # hand-written notes included by address, no path of this machine in it. No Markdown file unless asked for.
+        tree_file = os.path.join(tmp, "rep-benchmarks.tree")
+        made = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench",
+                               "--history", "/nonexistent", "--tree", tree_file, "--tree-author", "tester"], capture_output=True, text=True)
+        tree_text = open(tree_file).read() if os.path.exists(tree_file) else ""
+        check("the default output is a tree of the journal: Report, subtrees, tables, the notes included, no Markdown file",
+              made.returncode == 0 and "\\taxon{Report}" in tree_text and "\\author{tester}" in tree_text
+              and "\\transclude{rep-benchmarks-notes}" in tree_text and "\\subtree{\\title{1. Warm wall clock, 8 workers" in tree_text
+              and "\\table{" in tree_text and ROOT not in tree_text and not os.path.exists(os.path.join(tmp, "BENCHMARKS.md"))
+              and "wrote the tree" in made.stdout and "Markdown" not in made.stdout, made.stdout[-300:] + made.stderr[-300:])
+        refused = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench",
+                                  "--history", "/nonexistent", "--tree", tree_file], capture_output=True, text=True)
+        check("writing the tree needs an author", refused.returncode != 0 and "--tree-author" in refused.stderr, refused.stderr[-200:])
         prov = text.split("## Provenance")[1]
         check("the provenance names the row, its passes and its build", "2026-11-24T22:10:00Z" in prov
               and "3.00 1.10 0.90 1.00 / 2.90" in prov and "`work/x/dist`" in prov and "sha256 `abc`" in prov, prov[:600])

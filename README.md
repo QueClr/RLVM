@@ -97,38 +97,37 @@ Nothing outside the checkout is touched (no `~/.m2`); `--online` lets Maven down
 first time.
 
 An optional build uses **Oracle GraalVM** and profile-guided optimisation from the profiles in `profiles/`
-(recorded as the last step of a release; `scripts/dev.sh profiles` records them): `scripts/build.sh --oracle-pgo`
-(measured on this project's corpora: 11 to 15 % fewer instructions and 7 to 16 % less wall clock than the default executable). Oracle GraalVM is not open source: it is licensed
-under the GraalVM Free Terms and Conditions, the option says so, and it downloads Oracle GraalVM only when
-`--accept-oracle-licence` is given too. The default build, the release workflow and CI use GraalVM Community
-Edition only.
+(recorded as the last step of a release; `scripts/dev.sh profiles` records them): `scripts/build.sh --oracle-pgo`.
+Measured with the profiles of the repository, that executable needs 0.85 to 0.89 times the default executable's
+wall clock on the eight corpora.
+Oracle GraalVM is not open source: it is licensed under the GraalVM Free Terms and Conditions, the option says
+so, and it downloads Oracle GraalVM only when `--accept-oracle-licence` is given too. The default build, the
+release workflow and CI use GraalVM Community Edition only.
 
 For development: `. ./env.sh && $MVN test` runs the unit tests of every module, and `scripts/dev.sh --help`
 lists the rest (development distributions that also run the jars on a JVM, the gates, the benchmarks).
 
 ## Numbers
 
-<!-- table: bench/track/benchmarks.py --headline (the rows of bench/warm.sh; *agentic-note*: dec-EGMG) -->
+<!-- table: bench/track/benchmarks.py --headline (the rows of bench/warm.sh; *agentic-note*: rep-benchmarks) -->
 | One run, 8 cores: wall clock in s (warm pass) | init (348 MB) | std (584 MB) | cedar (905 MB) | reachability (19 MB) | con-leche (702 MB) | navier-stokes-euler (1.56 GB) | cslib (2.50 GB) | mathlib (6.33 GB) |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|
-| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.78 | 1.38 | 1.91 | 0.67 | 1.89 | 4.53 | 6.15 | 16.87 |
-| `rlvm -X engine=reference FILE` | 2.10 (1.98) | 3.56 (3.38) | 4.51 (4.41) | 5.10 (4.74) | - | - | - | 92.00 (91.76) |
-| gruszka | 0.71 (0.71) | 1.40 (1.28) | 2.74 (1.73) | - | - | - | - | 13.28 (14.20) |
-| nano-lean | 1.05 (1.03) | 1.75 (1.74) | 2.65 (2.64) | - | - | - | - | 18.68 (18.66) |
-| *rlvm / gruszka* | 1.10x | 0.99x | 0.70x | - | - | - | - | 1.27x |
-| *rlvm / nano-lean* | 0.74x | 0.79x | 0.72x | - | - | - | - | 0.90x |
+| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.74 (0.71) | 1.33 (1.21) | 1.86 (1.81) | 0.63 (0.56) | 1.78 (1.65) | 4.41 (4.26) | 6.09 (5.72) | 16.31 (15.46) |
+| `rlvm -X engine=reference FILE` | 2.07 (1.96) | 3.53 (3.44) | 4.60 (4.43) | 4.94 (4.63) | 39.15 | 27.71 | 18.93 | 85.76 |
+| gruszka | 0.71 (0.71) | 1.40 (1.28) | 2.74 (1.73) | 2.38 (2.42) | 1.36 (1.22) | 2.86 (3.11) | 4.77 (4.63) | 13.28 (14.20) |
+| nano-lean | 1.05 (1.03) | 1.75 (1.74) | 2.65 (2.64) | 0.90 (0.75) | 2.20 (2.16) | 4.13 (4.14) | 6.52 (6.48) | 18.68 (18.66) |
+| *rlvm / gruszka* | 1.04x | 0.95x | 0.68x | 0.26x | 1.31x | 1.54x | 1.28x | 1.23x |
+| *rlvm / nano-lean* | 0.70x | 0.76x | 0.70x | 0.70x | 0.81x | 1.07x | 0.93x | 0.87x |
 <!-- end table -->
 
 Conditions: one host (aarch64, Cortex-X925), 8 cores reserved for one measurement at a time while the other 12
-cores were busy, 2026-11-24 and 2026-11-25; each figure is one fresh process of the executable (8 workers, the
-file checked while it is read), in brackets the median later pass of one process that checks the export several
-times, where one was taken on the same build. The first row is the default configuration, a run without any
-option (the machine with its default switch set; taken an hour before the last machine jar, with that switch set
-named on the command line: the median of three runs, con-leche and mathlib one run); the second row is the
-reference engine, as `-X engine=reference` gives it; "-" = not measured on this build. gruszka and nano-lean with their arena run lines and 8
-threads on the same cores, first (second) of two runs. Two identical rows differ by up to 5 %. Not the arena's metric (instructions) and not its
-architecture (x86-64). All tables, per metric and with the provenance of every cell: the journal (*agentic-note*: dec-EGMG, and
-`docs/BENCHMARKS.md` until it has moved there).
+cores were busy, 2026-11-25 (four of the baseline columns 2026-11-24); each figure is one fresh process (8 workers, the file
+checked while it is read), in brackets the median later pass of one process that checks the export several times.
+The first row is the executable without any option; the second is the reference engine alone; gruszka and
+nano-lean with their arena run lines and 8 threads on the same cores, first (second) of two runs; "-" = not
+measured. Two identical rows differ by up to 5 %. Not the arena's metric (instructions) and not its architecture
+(x86-64). All tables, per metric and with the provenance of every cell: the journal (*agentic-note*:
+rep-benchmarks); how the settings of a plain run were chosen: *agentic-note*: dec-EGMG.
 
 ## Where things are
 

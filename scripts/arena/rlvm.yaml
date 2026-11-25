@@ -45,13 +45,14 @@
 # options is its fastest configuration (`rlvm --version` says which engine, worker rule, load rule and
 # heap settings that is). The arena starts one fresh process per export, which is what an executable is
 # for: it starts in 0.02 s and is at its steady speed from the first second (a cold run of the image is
-# within 4 % of a warm pass). The JVM launcher that this repository also knows (`scripts/build.sh --dev`:
-# the jars on HotSpot, 0.74 to 0.81 times the image's wall clock once warm, 2 to 3.5 times slower on the
-# first run of Init, Std or cedar) is a development tool for the warm benchmarks and the gates; it is not
-# built by the arena's build line and not part of a release.
+# within 6 % of a warm pass on Mathlib). The JVM launcher that this repository also knows
+# (`scripts/build.sh --dev`: the jars on HotSpot, 0.6 to 0.85 times the image's wall clock once warm,
+# 1.3 to 4 times slower on the first run of every corpus below Mathlib; *agentic-note*: rep-benchmarks)
+# is a development tool for the warm benchmarks and the gates; it is not built by the arena's build
+# line and not part of a release.
 # The build uses GraalVM CE only; Oracle GraalVM is never downloaded or used by a default build
-# (the maintainer's standing policies, *agentic-note*: standing-policies: a profile-guided build with Oracle GraalVM exists as an
-# explicit option of scripts/build.sh and is not what this definition builds).
+# (the maintainer's standing policies, *agentic-note*: standing-policies: a profile-guided build with
+# Oracle GraalVM exists as an explicit option of scripts/build.sh and is not what this definition builds).
 #
 # WHAT THE BUILD LINE BUILDS: scripts/arena/build.sh = scripts/build.sh from the tree, online Maven with
 # the third-party jars pinned by sha256 (scripts/arena/deps.sha256). The image's class path is the 22
@@ -117,7 +118,7 @@ description: |
   architecture, verifies their checksums and those of the third-party jars that go into the
   image, and builds from source.
 language: java
-# `ref` and `rev` are PLACEHOLDERS until submission (nothing is pushed yet): see the first comment of this file.
+# `ref` and `rev` are PLACEHOLDERS until submission: see the first comment of this file.
 url: https://github.com/QueClr/RLVM
 ref: main
 rev: "0000000"
