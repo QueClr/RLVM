@@ -64,3 +64,15 @@
 \transclude{design-measurement-method}
 }
 }
+
+\subtree[designs-documents]{
+\title{The full design documents}
+
+\p{The long documents of the design phase, moved into the forest as they were written. The notes above state the point of each part and cite these for the detail.}
+
+\ul{
+\li{[The instruction set of the machine](design-isa-document), with its as-built notes.}
+\li{[The reconciliation of the design review](design-reconciliation-document), whose errata correct the instruction set.}
+\li{[The platform document](design-platform-document): JVM launcher against native image, collectors and heap settings, with the measurement tables.}
+}
+}
