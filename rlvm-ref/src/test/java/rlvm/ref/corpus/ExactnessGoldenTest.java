@@ -27,7 +27,7 @@ import rlvm.ref.RefEngine;
 import rlvm.ref.RefOptions;
 
 /**
- * The exports of the cache audit (docs/design/review/reference-caches.md) with the answers of the
+ * The exports of the cache audit (*agentic-note*: rep-reference-caches) with the answers of the
  * official checker (leanchecker v4.36.0 in the arena's Docker image): {@code src/test/resources/r2/},
  * one row per export in {@code manifest.tsv}. They show what the official kernel's caches take for
  * the same term (binder names and infos: yes; two records with one content: yes; literals by value;

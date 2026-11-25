@@ -25,7 +25,7 @@ import rlvm.store.Terms;
 
 /**
  * The official type checker ({@code refs/lean4/src/kernel/type_checker.cpp} at v4.36.0, specified in
- * {@code docs/research/02-kernel-typechecker.md}) on term ids: locally nameless (binders are opened
+ * *agentic-note*: study-kernel-typechecker) on term ids: locally nameless (binders are opened
  * with FVAR nodes of the worker's overlay), substitution-based, with the official order of every
  * strategy decision in {@code is_def_eq} and lazy delta reduction. Method names follow the C++
  * source; comments cite its functions.
@@ -54,7 +54,7 @@ import rlvm.store.Terms;
  * the cached copies (a sentinel node with a random payload is checked at every entry). Engines in
  * strict mode do not use it.
  *
- * <p><b>Exactness</b> (audit: {@code docs/design/review/reference-caches.md}; README, "Exactness").
+ * <p><b>Exactness</b> (audit: *agentic-note*: rep-reference-caches; README, "Exactness").
  * The caches are read, written and keyed as the official ones. Two things an engine over canonical
  * ids cannot have make the official verdict differ on adversarial files: the loader drops
  * {@code mdata} nodes and the {@code nondep} flag of a let (part of the official term identity),
@@ -320,7 +320,7 @@ public final class RefKernel implements KernelOps {
         this.officialLevels = options.officialLevels;
         this.identityMode = options.identity;
         this.freshJudgments = options.exact();
-        // Strict mode: no cache that survives a unit (RECONCILIATION.md section 2, facade).
+        // Strict mode: no cache that survives a unit (*agentic-note*: design-reconciliation-document, section 2, facade).
         boolean keep = options.importBytes >= 32L && (config == null || !config.strict);
         this.imports = keep ? new ImportCache() : null;
         this.importMinUses = options.importMinUses;
@@ -466,7 +466,7 @@ public final class RefKernel implements KernelOps {
 
     /**
      * The official {@code add_axiom / add_definition / add_theorem / add_opaque} body for constant
-     * {@code cid} (ARCHITECTURE.md 4.4), after the structural checks. Opens the constant's scope
+     * {@code cid} (*agentic-note*: design-architecture-document, 4.4), after the structural checks. Opens the constant's scope
      * itself ({@link #begin}). Throws {@link KernelException} on rejection.
      */
     public void checkConstant(int cid) {
@@ -1296,7 +1296,7 @@ public final class RefKernel implements KernelOps {
             throw new KernelException(Reason.LEVEL_ARITY_MISMATCH, e, 0);
         }
         if (!inferOnly) {
-            // Unsafe and partial constants are not in the store at all (ARCHITECTURE.md 4.5).
+            // Unsafe and partial constants are not in the store at all (*agentic-note*: design-architecture-document, 4.5).
             for (int i = 0; i < n; i++) {
                 checkLevel(lists.get(ls, i));
             }

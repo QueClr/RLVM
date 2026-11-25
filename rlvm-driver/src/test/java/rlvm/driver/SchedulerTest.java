@@ -17,7 +17,7 @@ import rlvm.api.Outcome;
 import rlvm.api.Reason;
 
 /**
- * The scheduler of RECONCILIATION.md section 3: contiguous runs per worker, stealing of the back
+ * The scheduler of *agentic-note*: design-reconciliation-document, section 3: contiguous runs per worker, stealing of the back
  * half of the largest remaining run, the first-failure cut; and, by exhaustive exploration of the
  * interleavings of small cases, the verdict and first failure under every schedule.
  */

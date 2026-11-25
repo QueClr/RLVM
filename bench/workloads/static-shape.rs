@@ -1,5 +1,5 @@
 // bench/workloads/static-shape.rs - static shape of a lean4export NDJSON file (format 3.x, canonical
-// exporter lines) for docs/research/13-workload-characterization.md.
+// exporter lines) for *agentic-note*: study-workload-characterization.
 //
 //   rustc -O -o work/workloads/bin/static-shape bench/workloads/static-shape.rs
 //   work/workloads/bin/static-shape EXPORT.ndjson OUTDIR

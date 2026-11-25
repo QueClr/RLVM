@@ -11,7 +11,7 @@ import rlvm.store.Terms;
 
 /**
  * The {@code DECL} driver (ISA 4.5.6): the Java method that calls {@link Machine#drive}; its locals are
- * the declaration's phase state (stepper-convention.md H6). Owner: M5.
+ * the declaration's phase state (*agentic-note*: rep-stepper-convention, H6). Owner: M5.
  */
 final class Decl {
     private Decl() {}

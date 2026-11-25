@@ -33,7 +33,7 @@ import rlvm.store.Store;
  *                    announces the frontier in batches; the workers claim runs from the Scheduler
  *   pipelined: at the loader's first publication the environment thread and the workers are started;
  *              they check what is published while the calling thread goes on loading
- *              (ARCHITECTURE.md 3.5, 6.1). A file that is published in one piece is a batch run.
+ *              (*agentic-note*: design-architecture-document, 3.5, 6.1). A file that is published in one piece is a batch run.
  *   a unit the primary engine does not ACCEPT goes through the re-check protocol at once (Worker)
  *   join; VerdictBoard.complete(units) if the load was complete; VerdictBoard.exitCode()
  * </pre>
@@ -208,7 +208,7 @@ public final class Run {
         }
     }
 
-    /** Workers the automatic rule never exceeds (ARCHITECTURE.md 6.8). */
+    /** Workers the automatic rule never exceeds (*agentic-note*: design-architecture-document, 6.8). */
     public static final int AUTO_MAX_WORKERS = 6;
 
     /** The requested number, or for 0 the automatic choice for this machine: {@link #autoWorkers(int)}. */
@@ -220,7 +220,7 @@ public final class Run {
     }
 
     /**
-     * The automatic worker count for a machine with {@code processors} CPUs (ARCHITECTURE.md 6.8):
+     * The automatic worker count for a machine with {@code processors} CPUs (*agentic-note*: design-architecture-document, 6.8):
      * two CPUs are left to the loader, the environment thread and the runtime's compiler and
      * collector threads, and no more than {@link #AUTO_MAX_WORKERS} workers are used:
      * {@code max(1, min(processors - 2, 6))}, i.e. 6 on the arena's 8-vCPU runner. The gate behind
@@ -488,7 +488,7 @@ public final class Run {
         }
     }
 
-    /** The failure classes of a load (ARCHITECTURE.md 6.6); {@code units}: published before the failure. */
+    /** The failure classes of a load (*agentic-note*: design-architecture-document, 6.6); {@code units}: published before the failure. */
     private void loadFailed(Exception e, int units) {
         if (e instanceof MalformedExportException) {
             MalformedExportException m = (MalformedExportException) e;
@@ -546,7 +546,7 @@ public final class Run {
 
     /**
      * Loads on the calling thread while the environment thread and the workers check what is
-     * published (ARCHITECTURE.md 3.5). The checking threads are started by the loader's first
+     * published (*agentic-note*: design-architecture-document, 3.5). The checking threads are started by the loader's first
      * publication that is not the end of the file; a load that publishes only at its end is followed
      * by the batch {@link #check()} (the caller does that when {@link #pipelineStarted} is false).
      */
@@ -890,7 +890,7 @@ public final class Run {
             return; // never ACCEPT: complete() is not called
         }
         // The count that drove the run (the store's) against an independent one: the caller's, else the
-        // loader's count of declaration records (ARCHITECTURE.md 8.1).
+        // loader's count of declaration records (*agentic-note*: design-architecture-document, 8.1).
         long expected = config.expectedUnits >= 0 ? config.expectedUnits : loaderUnits;
         if (expected >= 0 && expected != units) {
             board.inputFailure(units, Reason.INTERNAL_ERROR, "the reader counted " + expected

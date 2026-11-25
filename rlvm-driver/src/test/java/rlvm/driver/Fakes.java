@@ -925,7 +925,7 @@ final class Fakes {
     }
 
     /**
-     * The protocol table of ARCHITECTURE.md 8.2 / 6.5 as a pure function: the final status (an
+     * The protocol table of *agentic-note*: design-architecture-document, 8.2 / 6.5 as a pure function: the final status (an
      * {@code Outcome} code) of a CHECK unit whose warm attempt ended with {@code warm} (A, R, D or T).
      */
     static int finalOf(Unit u, int warm, boolean same, boolean recheck, Policy.Unconfirmed policy) {

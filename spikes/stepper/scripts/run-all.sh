@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the measurement batches one after the other and regenerates results/tables.md. Each batch is one
+# Runs the measurement batches one after the other and regenerates the tables under work/spikes/ (scratch; the record is a journal tree). Each batch is one
 # arena-shaped container (bench/arena-docker.sh --arena-limits: 8 performance cores, 16 GB); every run inside it
 # goes through bench/measure.sh (perf stat over the process tree + GNU time, as the arena measures).
 #   scripts/run-all.sh [batch ...]      default: the batches of the recorded campaign, the CPU-time duels first (about 2 hours)
@@ -15,4 +15,6 @@ for b in "$@"; do
   scripts/pbatch.sh "$OUT/batches/$b.batch" "results/$b.txt"
   echo "done $b $(date +%T)"
 done
-python3 -I scripts/tables.py > results/tables.md
+# the tables are a note: they go to scratch, the record is *agentic-note*: rep-spike-stepper
+mkdir -p ../../work/spikes/stepper
+python3 -I scripts/tables.py > ../../work/spikes/stepper/tables.md

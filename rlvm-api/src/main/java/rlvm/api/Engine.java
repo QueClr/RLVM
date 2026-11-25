@@ -1,7 +1,7 @@
 package rlvm.api;
 
 /**
- * A checking engine: the machine of {@code docs/design/ISA.md}, or the reference kernel. One instance
+ * A checking engine: the machine of *agentic-note*: design-isa-document, or the reference kernel. One instance
  * per run, shared by all worker threads; everything mutable lives in the {@link Session}s it hands
  * out, except engine-wide artefacts that are functions of the immutable store alone (for the machine:
  * the code objects elaborated from constants and whatever the Truffle tier compiled from them).

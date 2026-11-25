@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# rlvm-driver/bin/threads-gate.sh - the gate behind the automatic worker count (ARCHITECTURE.md 6.8,
-# RECONCILIATION.md section 0: CPU time first), as one command: measure a distribution for several
+# rlvm-driver/bin/threads-gate.sh - the gate behind the automatic worker count (*agentic-note*: design-architecture-document, 6.8,
+# *agentic-note*: design-reconciliation-document, section 0: CPU time first), as one command: measure a distribution for several
 # worker counts in the arena-shaped container (8 CPUs, 16 GB, perf stat), print the table
 #
 #   corpus  launcher  workers  CPU s  wall s  peak RSS  instructions  verdict  CPU vs 1 worker

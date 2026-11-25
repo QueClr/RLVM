@@ -5,7 +5,7 @@ package rlvm.store;
  * (the store itself depends on nothing but the JDK). Level ids and level-list ids are opaque here.
  *
  * <p>The structural view ({@link #hasParam}, {@link #paramName}, {@link #lhs}, {@link #rhs}) is used
- * to derive {@code lpSet}, the set of universe-parameter names below a term node (ARCHITECTURE.md
+ * to derive {@code lpSet}, the set of universe-parameter names below a term node (*agentic-note*: design-architecture-document,
  * 2.1); the store walks a level iteratively and memoises the result itself, so an implementation is
  * four one-line delegations. The two {@code instantiate} methods serve
  * {@link TermOps#instantiateLevelParams}; their signatures are those of {@code rlvm.api.LevelOps}.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # rlvm-machine/src/test/resources/m6/launcher-gate.sh - the acceptance run of work package M6 (and the
-# form of the v0 gate, WORK-PACKAGES.md section 6): the published arena tests through the real launcher
+# form of the v0 gate, *agentic-note*: rep-machine-work-packages, section 6): the published arena tests through the real launcher
 # (rlvm-main, driver, admission) with `-X engine=machine`, judged by the STATISTICS, not by the exit status
 # alone: the driver re-checks a unit the machine declines with the reference kernel, so the verdict is
 # right even when the machine does nothing.

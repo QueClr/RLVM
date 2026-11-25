@@ -1,7 +1,7 @@
 /**
  * RLVM module {@code rlvm-inductive}: admission of inductive blocks and of the quotient package, a
  * port of {@code refs/lean4/src/kernel/inductive.cpp} and {@code quot.cpp} at v4.36.0 as specified in
- * {@code docs/research/03-kernel-declarations.md}.
+ * *agentic-note*: study-kernel-declarations.
  *
  * <p>Regenerate and compare: from the inputs of a block (universe parameters, parameter count, names
  * and types of the types and constructors) {@link rlvm.inductive.InductiveAdmission} derives every

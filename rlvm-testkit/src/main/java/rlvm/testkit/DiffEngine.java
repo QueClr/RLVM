@@ -37,7 +37,7 @@ import rlvm.store.Store;
  * DECLINE      DECLINE    both                           DECLINE (reason of the engine under test)
  * </pre>
  * The default policy is {@link Policy#DECLINE}: a run in differential mode never ships a guess
- * (ARCHITECTURE.md 8.3), and the driver stops at the first disagreement. {@link Policy#FOLLOW_ORACLE}
+ * (*agentic-note*: design-architecture-document, 8.3), and the driver stops at the first disagreement. {@link Policy#FOLLOW_ORACLE}
  * (the table of the first design) lets a campaign continue past a disagreement on the oracle's word
  * and collect all of them in one run. In both policies the disagreements are collected
  * ({@link #disagreements()}, {@link #disagreementRecords()}, {@link Options#found}, optionally a

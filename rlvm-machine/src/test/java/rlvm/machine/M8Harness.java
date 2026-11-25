@@ -32,7 +32,7 @@ import rlvm.store.Store;
 /**
  * One loaded export with the reference engine and any number of machine configurations ("lanes") that
  * are run over its units in lockstep, one declaration at a time (ISA section 11: differential testing,
- * convention equivalence, tier equivalence; stepper-convention.md H12). Owner: M8.
+ * convention equivalence, tier equivalence; *agentic-note*: rep-stepper-convention, H12). Owner: M8.
  *
  * <p>The wiring is the one of {@link Fixture#load} (real loader, environment pass through
  * {@code rlvm-admit} / {@code rlvm-inductive} with the reference kernel, admission per unit), with three

@@ -1,14 +1,14 @@
 # rlvm-machine
 
 The RLVM machine: an instruction set for Lean 4 normalisation by evaluation and definitional equality
-(`docs/design/ISA.md`), registered as engine `machine` beside `reference`.
+(*agentic-note*: design-isa-document), registered as engine `machine` beside `reference`.
 
 | Read | For |
 |---|---|
-| `OWNERSHIP.md`, `OWNERS.tsv` | who owns which file; the module belongs to the workflow `rlvm-wave4-machine` |
-| `WORK-PACKAGES.md` | the work packages M1..M8, the sandbox workflow, the step template, the staging rule, differential testing |
-| `NOTES-M<k>.md` | deviations from `ISA.md`, per package |
-| `docs/design/review/stepper-convention.md` | the host control convention (rules H1-H12), normative |
+| *agentic-note*: rep-machine-ownership, `OWNERS.tsv` | who owns which file; the module belongs to the workflow `rlvm-wave4-machine` |
+| *agentic-note*: rep-machine-work-packages | the work packages M1..M8, the sandbox workflow, the step template, the staging rule, differential testing |
+| *agentic-note*: rep-machine-M1 .. *agentic-note*: rep-machine-M8 | deviations from *agentic-note*: design-isa-document, per package |
+| *agentic-note*: rep-stepper-convention | the host control convention (rules H1-H12), normative |
 
 ```
 . ./env.sh
@@ -22,9 +22,9 @@ scripts/machine-sandbox.sh publish M3                      # your files into the
 ## Running the machine
 
 The machine IS the default engine since 2026-11-25 (`MachineProvider.priority()` is 100 =
-`Engines.DEFAULT_ENGINE_MIN_PRIORITY`; `SWITCHES.md`, the note at its top, has the contract and the evidence; it was
+`Engines.DEFAULT_ENGINE_MIN_PRIORITY`; *agentic-note*: design-switches-document, the note at its top, has the contract and the evidence; it was
 the default from 2026-11-24T19:41Z to 20:35Z and was taken back until the wrong accepts E1-F1 .. E1-F6 were fixed).
-It runs its default switch set of `SWITCHES.md` (the set of wave 6 + `eager,skipargs,congruence`), the reference
+It runs its default switch set of *agentic-note*: design-switches-document (the set of wave 6 + `eager,skipargs,congruence`), the reference
 engine re-checks every rejection and decides what the machine declines; `-X engine=reference` or `-X policy=strict`
 runs the reference engine alone;
 `-X machine.switches=none` is the generic tier v0.
@@ -41,7 +41,7 @@ Settings (`-X KEY=VALUE`, or the system property `rlvm.KEY`):
 
 | Key | Values | Default |
 |---|---|---|
-| `machine.switches` | staging switches, read left to right: `name` / `+name` adds, `-name` removes, `none` = v0, `default` = `Op.SW_DEFAULT`, `all` = the switches of ISA section 11 but `k2`. **`SWITCHES.md` is the one list** (name, bit, owner, state, evidence). Ignored by a strict engine | `Op.SW_DEFAULT` = `warm,gated,expect` since 2026-11-24 16:24Z (`none` = v0) |
+| `machine.switches` | staging switches, read left to right: `name` / `+name` adds, `-name` removes, `none` = v0, `default` = `Op.SW_DEFAULT`, `all` = the switches of ISA section 11 but `k2`. *agentic-note*: design-switches-document **is the one list** (name, bit, owner, state, evidence). Ignored by a strict engine | `Op.SW_DEFAULT` = `warm,gated,expect` since 2026-11-24 16:24Z (`none` = v0) |
 | `machine.session-kib` | the machine's own cap on a warm session, in KiB of `Machine.engineBytes()`; 0 = none. The driver's `-X session-mib` applies as well; the smaller cap resets first | 1024 |
 | `machine.unit-ticks` | the machine's own tick bound per unit (0 = none): beyond it the unit is declined (`BUDGET_STEPS`) and the reference engine decides it | 2^27 |
 | `machine.declines` | a file that receives one line per non-ACCEPT outcome of the machine: outcome, error code, unit, rank, units accepted in the session before it, name, message | none |
@@ -102,7 +102,7 @@ A failed audit is `fault(E_AUDIT)`: the unit is declined and `lastMessage()` say
 | `pubcheck` | published records hold only export / generated term ids, constant ids and base level ids | publication of facts and blocks (`Debug.pubTerm` ...) |
 | `trace` | records the call events of the frame trace in `Machine.trace` | `Machine.call` |
 
-## State (2026-11-24, 13:05Z; the integrator's runs; log `work/status/machine-integration.md`, notes `NOTES-INT.md`)
+## State (2026-11-24, 13:05Z; the integrator's runs; log `work/status/machine-integration.md`, notes *agentic-note*: rep-machine-INT)
 
 The module is in the reactor (`<module>rlvm-machine</module>`) and in every distribution (`scripts/build.sh`: a tree
 build has it as a reactor module, a `--published` build copies the published jar; the CE native image builds with
@@ -120,9 +120,9 @@ v0 (generic tier, complete procedure, no switch), machine jar 608b84b2b142:
 
 With `-X machine.switches=warm,gated,expect -X session-mib=4` (staging step 1) and with `...,probes` (step 5) the same
 runs are clean as well; with `probes` `loop-unfolded-once` is accepted: 15,845 of 15,845, 0 declines on all 230.
-(State of 13:05Z. Since 16:24Z `warm,gated,expect` is the default set, see `SWITCHES.md`; `probes` lost its
+(State of 13:05Z. Since 16:24Z `warm,gated,expect` is the default set, see *agentic-note*: design-switches-document; `probes` lost its
 congruence shortcuts after the soundness finding S-F1. Since 19:10Z the default SWITCH SET is the one of the wave-6
-integration (`SWITCHES.md`, `work/status/machine-integration.md` "Wave 6"); `MachineProvider.priority()` is 10 again
+integration (*agentic-note*: design-switches-document, `work/status/machine-integration.md` "Wave 6"); `MachineProvider.priority()` is 10 again
 since 20:35Z.)
 
 CPU time, CE native image `-O3`, arena-shaped container, one worker (four workers: same CPU, wall / 3):

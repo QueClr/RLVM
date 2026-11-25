@@ -13,7 +13,7 @@ import rlvm.store.Store;
  * (the loader thread), which calls the {@link ExportSink} methods in file order and finally
  * {@link #finish()}.
  *
- * <p>What it does (ARCHITECTURE.md 3.2 - 3.5):
+ * <p>What it does (*agentic-note*: design-architecture-document, 3.2 - 3.5):
  * <ul>
  *   <li>names: structural interning in the {@code NameTable}; returns the store name id;
  *   <li>levels: interning through {@link LevelInterner}; returns the level id;
@@ -178,7 +178,7 @@ public final class Loader implements ExportSink, RecordSink {
     /**
      * One bit per expression ordinal: the record is wrapped by, or contains, a metadata node. Null until
      * the first {@code mdata} record (lean4export writes none unless asked to), so files without
-     * metadata pay one null test per record. Metadata is dropped (ARCHITECTURE.md 2.1), which is
+     * metadata pay one null test per record. Metadata is dropped (*agentic-note*: design-architecture-document, 2.1), which is
      * invisible to type checking but not to the syntactic checks and structural comparisons of
      * inductive and quot records: such a record is declined when a root of it carries the bit.
      */
@@ -247,7 +247,7 @@ public final class Loader implements ExportSink, RecordSink {
     private int largestSegment;
     private boolean finished;
 
-    // ---- publication (ARCHITECTURE.md 3.5) -----------------------------------------------------------
+    // ---- publication (*agentic-note*: design-architecture-document, 3.5) -----------------------------------------------------------
     /** Publish while reading ({@link LoadOptions.Mode#PIPELINED}). */
     private final boolean pipelined;
     private final int publishEveryUnits;
@@ -2081,7 +2081,7 @@ public final class Loader implements ExportSink, RecordSink {
         if (members == 0) {
             return; // {"types":[],"ctors":[],"recs":[]}: declares nothing, as in the official reader
         }
-        // Safety (ARCHITECTURE.md 4.5): a block whose type records are unsafe is dropped.
+        // Safety (*agentic-note*: design-architecture-document, 4.5): a block whose type records are unsafe is dropped.
         int unsafeTypes = 0;
         for (int m = 0; m < annTypes; m++) {
             if ((mFlags[m] & BlockClaims.F_UNSAFE) != 0) {
@@ -2162,7 +2162,7 @@ public final class Loader implements ExportSink, RecordSink {
             bl[q + BlockClaims.C_FLAGS] = mFlags[m];
         }
         bl[BlockClaims.H_RECS_OFFSET] = q;
-        // names first: the members of the block see each other (ARCHITECTURE.md 3.3)
+        // names first: the members of the block see each other (*agentic-note*: design-architecture-document, 3.3)
         for (int m = 0; m < n; m++) {
             int kind = m < annTypes ? DeclKind.INDUCT : m < annTypes + annCtors ? DeclKind.CTOR : DeclKind.REC;
             int cid = o.reserve(kind, mName[m], mLparams[m]);

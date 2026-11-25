@@ -280,7 +280,7 @@ public final class ProofBlocks {
     /**
      * Decodes {@code block} by appending its nodes to {@code into}; returns the root id (0 for a block
      * without a root). Called by {@link Overlay#blockRoot(int)}. Budget: 60 instructions per node
-     * (ARCHITECTURE.md 3.6).
+     * (*agentic-note*: design-architecture-document, 3.6).
      */
     int decode(int block, Overlay into) {
         int[] rw = rowsPub;
@@ -602,7 +602,7 @@ public final class ProofBlocks {
 
     /**
      * Copies global record {@code record} and everything it reaches inside its block into the export
-     * region ("promotion", ARCHITECTURE.md 3.3); returns the shared id. Records promoted earlier are
+     * region ("promotion", *agentic-note*: design-architecture-document, 3.3); returns the shared id. Records promoted earlier are
      * found in the promotion memo (global record number to shared id) and not copied again.
      * Loader thread only. An explicit-stack walk over the records that are reachable and not yet
      * promoted, children first; a record is found through the block's sparse offset index (at most

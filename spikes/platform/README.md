@@ -1,6 +1,6 @@
 # spikes/platform - GraalVM / Truffle platform experiments for RLVM
 
-Evidence behind `docs/research/10-graalvm-platform.md`. Everything here is small, self-written code;
+Evidence behind *agentic-note*: study-graalvm-platform. Everything here is small, self-written code;
 nothing from `refs/` is built or executed. Raw measurement logs are in `results/`.
 
 ## Layout

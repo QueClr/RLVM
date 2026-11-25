@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * An export file as the mutator sees it: its lines, each parsed as JSON, and for every line the
  * roles of its fields according to the lean4export 3.1.0 schema
- * ({@code docs/research/01-arena-and-export-format.md} section 2.3). Only syntax is modelled; nothing
+ * (*agentic-note*: study-arena-and-export-format, section 2.3). Only syntax is modelled; nothing
  * here knows what a term means.
  */
 final class ExportModel {

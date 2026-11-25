@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
  * the term {@code value a1 .. an} and {@code whnf_core} looks that term up and stores under it; the
  * kernel does not build it when the value is a lambda and keeps the entry under {@code c a1 .. an}.
  * The two must be ONE table: another constant with the same value, and the explicit redex
- * {@code value a1 .. an}, find the entry (docs/design/review/reference-caches.md, D4).
+ * {@code value a1 .. an}, find the entry (*agentic-note*: rep-reference-caches, D4).
  */
 class UnfoldKeyTest {
 

@@ -89,7 +89,7 @@ class LevelBindingTest {
     }
 
     /**
-     * RECONCILIATION.md B1: two constants share one body term but declare their universe parameters
+     * *agentic-note*: design-reconciliation-document, B1: two constants share one body term but declare their universe parameters
      * in swapped order. With a bare level list as the instantiation the two would be confused; the
      * substitution ids differ and so do the instantiated levels.
      */

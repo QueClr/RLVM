@@ -13,7 +13,7 @@ import rlvm.api.MachineErrors;
 import rlvm.api.RunSignals;
 
 /**
- * The control primitives of the host convention ({@code stepper-convention.md} H1-H12; ISA 1.3, 1.4) on
+ * The control primitives of the host convention (*agentic-note*: rep-stepper-convention, H1-H12; ISA 1.3, 1.4) on
  * the toy judgments of {@link Toy}: equivalence under every depth bound, deep recursion on a small
  * stack, budgets and TRY segments with rollback, the failure classes, polling.
  */

@@ -15,7 +15,7 @@ import rlvm.load.LoadOptions;
 
 /**
  * The checker's own settings, parsed from the launcher's {@code -X KEY[=VALUE]} map
- * (ARCHITECTURE.md 7.4). Every key is known here or is a usage error; nothing is ignored.
+ * (*agentic-note*: design-architecture-document, 7.4). Every key is known here or is a usage error; nothing is ignored.
  *
  * <pre>
  * policy=practical|strict  what the run promises (OWNER-NOTES 13; default practical). practical: the default

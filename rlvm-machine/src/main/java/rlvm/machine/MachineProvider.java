@@ -14,7 +14,7 @@ import rlvm.api.EngineProvider;
  *
  * <pre>
  * machine.switches=warm,gated,..   staging switches (Debug.parseSwitches: names, -name, none, default, all; without the
- *                                  setting: Op.SW_DEFAULT; ignored by a strict engine; rlvm-machine/SWITCHES.md)
+ *                                  setting: Op.SW_DEFAULT; ignored by a strict engine; *agentic-note*: design-switches-document)
  * machine.session-kib=N            the machine's own cap on a warm session: the machine forgets everything before a
  *                                  declaration once its arenas hold more than N KiB (default 1024; 0 = no cap of its
  *                                  own; the driver's -X session-mib applies in any case: the smaller one resets first)
@@ -43,14 +43,14 @@ import rlvm.api.EngineProvider;
  * distribution that contains it (since 2026-11-25, INT7; the contract of the default configuration is owner note 13,
  * the "practical" policy: never a statement that is not derivable; the official verdict on every real input;
  * everything the official checker accepts is accepted; kind T accepts are tolerated and documented,
- * {@code docs/design/review/official-divergence.md}). The reference engine re-checks every rejection of the machine
+ * *agentic-note*: rep-official-divergence). The reference engine re-checks every rejection of the machine
  * and decides every unit it declines; {@code -X engine=reference} or {@code -X policy=strict} runs the reference
  * engine alone (the strict mode). History: 100 from the integration of wave 6 (2026-11-24 19:41Z) until the
  * orchestrator took it back the same day at 20:28Z because the machine accepted exports the official checker
- * rejects (findings E1-F1 .. E1-F7, S3-F1 .. S3-F6; E1-F1 .. F6 are fixed, {@code NOTES-M5.md}; the others are kind T);
+ * rejects (findings E1-F1 .. E1-F7, S3-F1 .. S3-F6; E1-F1 .. F6 are fixed, *agentic-note*: rep-machine-M5; the others are kind T);
  * back to 100 after the adversarial pass of reviewer S3 on the default set with {@code eager} and the two shortcuts
- * (no kind F; {@code docs/design/review/soundness-default-set.md} section 10), the hostile suite with kinds (1,196
- * rows), and the gates of {@code rlvm-machine/SWITCHES.md}.
+ * (no kind F; *agentic-note*: rep-soundness-default-set, section 10), the hostile suite with kinds (1,196
+ * rows), and the gates of *agentic-note*: design-switches-document.
  */
 public final class MachineProvider implements EngineProvider {
 

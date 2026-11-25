@@ -5,8 +5,8 @@ import java.util.Arrays;
 import rlvm.store.Store;
 
 /**
- * Distributes units to workers (RECONCILIATION.md section 3 "Scheduler", replacing the claim rule of
- * ARCHITECTURE.md 6.3; the scheme is gruszka's, applied per publication batch).
+ * Distributes units to workers (*agentic-note*: design-reconciliation-document, section 3 "Scheduler", replacing the claim rule of
+ * *agentic-note*: design-architecture-document, 6.3; the scheme is gruszka's, applied per publication batch).
  *
  * <pre>
  * ready      units [0, ready) may be handed out (the frontier announced through unitsReady)

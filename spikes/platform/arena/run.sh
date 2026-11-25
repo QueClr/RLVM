@@ -1,6 +1,6 @@
 #!/bin/sh
 # Arena-style run command for the spike (JVM mode, instruction-frugal flags; see
-# docs/research/10-graalvm-platform.md section 1). Deep recursion is handled by the launcher, which
+# *agentic-note*: study-graalvm-platform, section 1). Deep recursion is handled by the launcher, which
 # runs the work in a thread created with an explicit large stack size (no -Xss needed).
 #   usage: sh arena/run.sh <launcher args...>      e.g.  sh arena/run.sh ast tree 20 200
 # A real checker would be:  run: sh arena/run.sh "$IN"   with exit codes 0 accept / 1 reject / 2 decline.

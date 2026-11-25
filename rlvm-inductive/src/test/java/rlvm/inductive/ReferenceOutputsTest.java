@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import org.junit.jupiter.api.Test;
 
 /**
- * The reference outputs of {@code docs/research/03-kernel-declarations.md} section 6.14 and the
+ * The reference outputs of *agentic-note*: study-kernel-declarations, section 6.14 and the
  * hand-built fixtures of the work package: Nat, List, Eq, Acc, a structure, a mutual pair, nested
  * types (Tree, Rose). Expected recursor types and rules are written with named binders and compared
  * structurally ({@code TermOps.eqv}).

@@ -4,7 +4,7 @@ package rlvm.store;
  * The environment thread's writer for constants that the official kernel generates itself and the
  * export does not list: a recursor {@code I.rec} / {@code I.rec_N} without a record, and
  * {@code Quot.mk}, {@code Quot.lift}, {@code Quot.ind} when a quot record exists without them
- * (ARCHITECTURE.md 2.2, 4.2, 4.6). Obtained from {@link Store#generated()}.
+ * (*agentic-note*: design-architecture-document, 2.2, 4.2, 4.6). Obtained from {@link Store#generated()}.
  *
  * <p><b>Who may write, and when.</b> One thread, the one that runs the environment pass, and only
  * after the loader has finished ({@link Store#loadComplete()}): from then on it is the single writer

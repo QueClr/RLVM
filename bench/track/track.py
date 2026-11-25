@@ -69,7 +69,7 @@ last accepted entry that was made the reference:
     otherwise                            ->  accepted; the reference stays where it is
 
 with threshold = 5 % (--threshold; two identical 8-worker rows of one quiet
-window differ by up to 5 %, J1.md section 1). The first valid entry of a
+window differ by up to 5 %, *agentic-note*: rep-J1, section 1). The first valid entry of a
 configuration is its first reference. A regression can be accepted on purpose
 with --accept "REASON" (the reason is stored; the entry becomes the reference).
 Because entries inside the band do not move the reference, a slow drift

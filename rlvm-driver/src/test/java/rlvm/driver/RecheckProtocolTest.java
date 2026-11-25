@@ -12,7 +12,7 @@ import rlvm.driver.Fakes.FakeHost;
 import rlvm.driver.Fakes.Unit;
 
 /**
- * The re-check protocol table of ARCHITECTURE.md 8.2 / 6.5 / 6.6, by enumeration of what every engine
+ * The re-check protocol table of *agentic-note*: design-architecture-document, 8.2 / 6.5 / 6.6, by enumeration of what every engine
  * says about one unit: which engines are consulted, in fresh sessions with the cold budget, and what
  * the unit's final status is.
  */

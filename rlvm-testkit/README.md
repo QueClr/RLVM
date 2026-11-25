@@ -1,6 +1,6 @@
 # rlvm-testkit
 
-Tools for the testing strategy of `docs/design/ARCHITECTURE.md` section 9 (work package T1). Not part
+Tools for the testing strategy of *agentic-note*: design-architecture-document, section 9 (work package T1). Not part
 of the shipped binary; nothing may depend on this module except tests and developer launchers.
 
 | Piece | What it is |

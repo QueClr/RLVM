@@ -20,7 +20,7 @@ import rlvm.store.Kind;
  *
  * <p>Every row runs twice on a machine that was reset in between: under the default host depth bound (64)
  * and under bound 0, where every non-leaf call of a judgment is a suspension, so that every {@code sigN}
- * call site and every {@code resume} case of the family runs (stepper-convention.md H12). The two runs
+ * call site and every {@code resume} case of the family runs (*agentic-note*: rep-stepper-convention, H12). The two runs
  * must give the same value id, the same printed value and the same number of ticks.
  *
  * <p>The rows need EVAL / APPLY (M2); the K and structure-eta rows also CONV (M4) and VTYPE / ISPROP

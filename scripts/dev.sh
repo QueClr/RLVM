@@ -51,7 +51,7 @@
 #                             + profiles/PROFILE-INFO.txt). The training input is checked once, in
 #                             the default configuration: the profile is recorded with what ships.
 #                             Default training input: work/exports/init.ndjson (the best input on
-#                             all eight corpora: docs/research/profiles/PG1.md). It is the LAST step
+#                             all eight corpora: *agentic-note*: rep-PG1). It is the LAST step
 #                             of a release, after the last jar is in; --train-also 'ARGS' adds a
 #                             second run with other settings
 #   info                      print work/dist/BUILD-INFO.txt and the toolchain versions
@@ -88,7 +88,7 @@
 #                             exports, judged by their official verdicts (scripts/gate.sh --help)
 #   machine ARGS...           scripts/machine-sandbox.sh (the machine workflow's script), passed through
 #   platform ...              scripts/platform-matrix.py: launcher / JIT / collector / heap matrix in
-#                             the arena-shaped container (docs/PLATFORM.md); `platform-report` prints
+#                             the arena-shaped container (*agentic-note*: design-platform-document); `platform-report` prints
 #                             its tables
 #
 # Running and measuring the built checker (see the headers of bench/rlvm/*.sh):
@@ -147,7 +147,7 @@ ni_slot() {
 # The default training inputs of `profiles` (paths below the repository root; the exports are not part
 # of the repository: bench/README.md says how to fetch the arena's corpora).
 PROFILE_TRAINING="work/exports/init.ndjson"
-# THE RULE FOR THE SHIPPED PROFILE (the orchestrator's decision on the report docs/research/profiles/PG1.md):
+# THE RULE FOR THE SHIPPED PROFILE (the orchestrator's decision on the report *agentic-note*: rep-PG1):
 # ONE training input, Init, recorded with the configuration that ships - a plain run without options
 # of the final build - and NO second run with another engine or switch set (a reference-engine run
 # beside the machine's costs the machine 2.9 % on mathlib; a profile of another switch set loses a

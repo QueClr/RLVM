@@ -108,7 +108,7 @@ public final class Bindings {
 
     /**
      * The base number store. It stays empty: export literals of 2^64 and above live in the store's
-     * {@code LitPool} and are imported into a worker's overlay on first use (RECONCILIATION.md,
+     * {@code LitPool} and are imported into a worker's overlay on first use (*agentic-note*: design-reconciliation-document,
      * "Literal identity").
      */
     public NatStore natBase() {

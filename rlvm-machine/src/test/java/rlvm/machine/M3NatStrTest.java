@@ -247,7 +247,7 @@ class M3NatStrTest {
     /**
      * 50,000 nested {@code Nat.succ} bases (each WHNF of an NSUC needs the WHNF of its base) and a 50,000-step
      * chain of head reductions run on a 512 KiB thread stack: beyond the depth bound the judgments are frames
-     * in W (stepper-convention.md H9, H12 item 3), and the chain of {@code whnf_core} steps is a loop.
+     * in W (*agentic-note*: rep-stepper-convention, H9, H12 item 3), and the chain of {@code whnf_core} steps is a loop.
      */
     @Test
     void deepReductionNeedsNoHostStack() throws InterruptedException {

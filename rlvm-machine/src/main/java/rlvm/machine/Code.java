@@ -17,7 +17,7 @@ import rlvm.store.Terms;
  * class runs unless a caller of another package asks for a block behind one of those switches, and
  * {@link #blockFor} answers 0 ("walk the term") while they are off and in strict mode.
  *
- * <h2>Activations under convention H (stepper-convention.md H7; NOTES-M7 D1)</h2>
+ * <h2>Activations under convention H (*agentic-note*: rep-stepper-convention, H7; NOTES-M7 D1)</h2>
  * <pre>
  * RS[rb - 3]  capRun   the frame run of the closure whose body the block is (0 for BODY / RULE / TELE / RULES)
  * RS[rb - 2]  ls       the substitution id of the activation (ISA 2.7)
@@ -490,7 +490,7 @@ final class Code {
     }
 
     /**
-     * The code stepper (ISA 8.2, stepper-convention.md H7): entry and continuation step of an activation at once (the
+     * The code stepper (ISA 8.2, *agentic-note*: rep-stepper-convention, H7): entry and continuation step of an activation at once (the
      * state is the pc); registers in {@code m.RS[rbase ..]}; a class-j instruction is rule H3 with the frame
      * ACT [blk, pc, dst, argRun, capRun, ls, rbase]. Staging steps 3 and 4.
      * @return the result, or a signal ({@code >= Op.SIG}): SUSP, ABORT, FATAL
@@ -1298,7 +1298,7 @@ final class Code {
     /**
      * TAILAPPLY f, a1..an (ISA 4.1, 4.3.1): the result of the application is the result of the block.
      * The arguments are scratch of this activation, so the call is followed by a pop, not a host tail
-     * call (stepper-convention.md H3 "tail position ... owns no scratch").
+     * call (*agentic-note*: rep-stepper-convention, H3 "tail position ... owns no scratch").
      */
     private static int tailApply(Machine m, int[] code, int at, int blk, int rb, int w, int d) {
         int n = (w >>> 8 & 255) - 1;

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Convention equivalence (stepper-convention.md H12 item 1; ISA 1.3 "what is observable"): the tools of
+ * Convention equivalence (*agentic-note*: rep-stepper-convention, H12 item 1; ISA 1.3 "what is observable"): the tools of
  * {@link TierEq} find every kind of difference between two machines, and the real machine gives the
  * same observables under the host depth bound in force, 64, 0 and unbounded on real declarations.
  *

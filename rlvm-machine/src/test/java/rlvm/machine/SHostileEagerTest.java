@@ -11,7 +11,7 @@ import rlvm.api.Outcome;
 
 /**
  * Eager reduction ON the machine ({@code Op.SW_EAGER}, switch {@code eager}; package E1,
- * {@code docs/design/review/eager-reduction.md}): the rows of the manifest that enter eager reduction (note
+ * *agentic-note*: rep-eager-reduction): the rows of the manifest that enter eager reduction (note
  * {@code eager-decline}: package S's and the exports {@code e1-*}, generator {@code src/test/resources/s/gen/batchE.py})
  * with the switch on. The verdict of the OFFICIAL checker is in the manifest. A decline of the machine is honest;
  * but a row without the note {@code eager-hard} is one the mechanism is built to DECIDE: there the machine's own

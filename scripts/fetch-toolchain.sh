@@ -37,7 +37,7 @@ GRAALVM_SHA256_x64="c6438dee6c3ade2220d40b7ccdcad24b512d30e233e61bb4fc70519522de
 GRAALVM_SHA256_aarch64="41741c0650ae7564a78335f9e4fc353a902e6ff1d4140f2e4fabd1c55d5cce66"
 
 # Oracle GraalVM (GFTC): only with --oracle --accept-gftc. The checksums are the ones Oracle publishes
-# beside the archives (recorded in docs/research/10-graalvm-platform.md, section 7.3).
+# beside the archives (recorded in *agentic-note*: study-graalvm-platform, section 7.3).
 ORACLE_VERSION="25.0.4"                          # GRAALVM_VERSION in <home>/release
 ORACLE_BASE_URL="https://download.oracle.com/graalvm/25/archive"
 ORACLE_FILE_PREFIX="graalvm-jdk-25.0.4_linux"

@@ -11,7 +11,7 @@ import rlvm.store.IntLists;
  * official normal form decides, which is sound); the {@code mk*} constructors are the official
  * simplifying ones and must be used wherever the kernel's generated terms are compared syntactically.
  *
- * <p><b>Substitutions</b> (RECONCILIATION.md B1). The universe instantiation of a constant is a
+ * <p><b>Substitutions</b> (*agentic-note*: design-reconciliation-document, B1). The universe instantiation of a constant is a
  * <em>substitution id</em>: {@code mkSubst(lparams(row), levels)}. It, not the bare level list, is
  * what closures, suspensions, memo keys and block calls carry: two constants that share a body term
  * under differently ordered parameter lists get different substitution ids for the same level list.
@@ -77,7 +77,7 @@ public interface LevelOps {
     /** Forgets the levels, lists and substitutions this worker created (session reset). */
     void reset();
 
-    // ---- substitution ids (RECONCILIATION.md B1) ---------------------------------------------------
+    // ---- substitution ids (*agentic-note*: design-reconciliation-document, B1) ---------------------------------------------------
 
     /**
      * The substitution {@code paramNames[i] := levels[i]} as an id.

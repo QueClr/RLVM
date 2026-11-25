@@ -56,7 +56,7 @@ public final class Store {
     public Store(long inputBytesHint, IntLists lists, LevelInfo levels) {
         long hint = Math.max(inputBytesHint, 0);
         this.lists = lists != null ? lists : new ArrayIntLists();
-        // ARCHITECTURE.md 2.2: one shared node per 144 input bytes; mathlib has one name per 1,480
+        // *agentic-note*: design-architecture-document, 2.2: one shared node per 144 input bytes; mathlib has one name per 1,480
         // bytes and one constant per 8,560. Every table grows if the estimate is too small.
         this.terms = new TermStore((int) Math.min(hint / 144 + 1024, Node.INDEX_MASK - 1));
         this.names = new NameTable((int) Math.min(hint / 1024 + 256, 1 << 28));

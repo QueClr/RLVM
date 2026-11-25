@@ -49,7 +49,7 @@ A caller that drives `ExportReader.read(file, loader)` itself must do the same t
 `RuntimeException` (`IllegalStateException`, `IllegalArgumentException`) is an internal error of reader,
 loader or store, never a verdict about the input.
 
-## Pipelined loading (work package L2, ARCHITECTURE.md 3.5)
+## Pipelined loading (work package L2, *agentic-note*: design-architecture-document, 3.5)
 
 **What happens at a hand-off** (after a unit ends, every `publishEveryUnits` units or
 `publishEveryBytes` input bytes, counted as lines of 56 bytes because the sink has no byte positions),
@@ -89,7 +89,7 @@ ids, literal indices, every word of every node except `SORT.a` and the contents 
 row, every block record, the location of every expression record. A batch load through the chain is
 bit-identical to a batch load through `LevelStoreInterner` (one snapshot, at the end).
 
-**Shared artefacts in a pipelined run** (publication rule B2 of RECONCILIATION.md, "only base level
+**Shared artefacts in a pipelined run** (publication rule B2 of *agentic-note*: design-reconciliation-document, "only base level
 and list ids"). In a batch run every worker has the same base. In a pipelined run two workers can be
 on different snapshots, and an id that exists in snapshot g but not in an older snapshot g' is, for a
 worker still on g', the id of nothing or of one of its own private overlay objects. So a level or list
@@ -212,7 +212,7 @@ non-binding position). See "Deviations" for who uses them.
   decline with `publishOnDecline`, the complete units; `Store.loadComplete()` becomes true only in
   `finish()`.
 
-## Non-canonical and hostile input (ARCHITECTURE.md 3.4)
+## Non-canonical and hostile input (*agentic-note*: design-architecture-document, 3.4)
 
 Verified against `leanchecker --from-export` v4.36.0 where marked (official); probe files in
 `work/rlvm-load/official/`.
@@ -376,7 +376,7 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
 
 ## Deviations from the design documents
 
-1. **Promotion is a step of its own, between the claim and the sweep** (ARCHITECTURE.md 3.3 does it
+1. **Promotion is a step of its own, between the claim and the sweep** (*agentic-note*: design-architecture-document, 3.3 does it
    inside the sweep). Same result and the same `loc` reads; it removes the interleaving of promotion
    and block writing. A record referenced only by records that end up as garbage is promoted too.
    Related: for definitions, axioms, quot and inductive records the pseudo-code of 3.3 writes the whole
@@ -405,7 +405,7 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
 6. `LoadReport.nonCanonicalLines` cannot mean "hand-written file": the reader's byte templates do not
    cover levels, `sort`, `bvar`, literals or non-ASCII names, so exporter output always has
    general-path lines. The exact number is in `generalPathLines`.
-7. `mdata` is dropped and `nondep` ignored, as ARCHITECTURE.md 2.1 decides, **except that an inductive
+7. `mdata` is dropped and `nondep` ignored, as *agentic-note*: design-architecture-document, 2.1 decides, **except that an inductive
    or quot record whose roots carry metadata is declined at load** (integrator, 2026-11-24). The
    official checker compares those records with the kernel's own declarations by `Expr.eqv`, which
    compares metadata, and tests their spines syntactically; four hand-written probes
@@ -441,7 +441,7 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
    name `eagerReduce` in the file; files without metadata pay one length test per name record and one
    compare per const record. Test: `SplitTest.metadataAroundAnApplicationOfEagerReduceIsDeclinedUnderBothPolicies`.
    The other official tests that a dropped node changes are listed in
-   `docs/design/review/reference-caches.md`, section 6.1.
+   *agentic-note*: rep-reference-caches, section 6.1.
    Binder names and binder infos are not part of the official term identity (`expr_eq_fn<false>`).
    **The `nondep` flag of a `letE` is** (R2, finding R2-F1, 2026-11-24): `expr_eq_fn` compares
    `let_nondep(a) == let_nondep(b)` and the hash does not see it, so `let x := v; b` with and without
@@ -461,11 +461,11 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
    before it are still checked (see "A decline is per unit"), so a file with an ill-typed earlier
    declaration is rejected, not declined. Keeping metadata exactly (MDATA nodes) would need a node
    kind in the store and in every engine; not done.
-8. **The header decides nothing** (ARCHITECTURE.md 3.4 and 4.9 decline another format major version).
+8. **The header decides nothing** (*agentic-note*: design-architecture-document, 3.4 and 4.9 decline another format major version).
    The official reader skips line 1 unread, so a file is what its records are; the decline is kept as
    an option (`LoadOptions.strictFormatVersion`) for a caller that wants it.
 9. **Level ids of a pipelined load are not those of a batch load** (see "What differs from a batch
-   load"). ARCHITECTURE.md 3.5 asks for a snapshot of `rlvm-level`; the chain builds snapshots from
+   load"). *agentic-note*: design-architecture-document, 3.5 asks for a snapshot of `rlvm-level`; the chain builds snapshots from
    `freeze()` + `newOverlay()` instead, at the price of that renumbering and of one copy of the level
    arrays per snapshot (loader) and per rebuilt worker view.
 
@@ -480,7 +480,7 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
   needed from the loader: a reference to such a name is an unbound node that admission resolves by
   name, and a later record of that name is found by admission ("already declared"). In pipelined mode
   the loader and the environment thread can claim the same name concurrently; that needs the late-name
-  table of ARCHITECTURE.md 4.2 in `rlvm-store` (`NameTable.claim` as a compare-and-set). The loader
+  table of *agentic-note*: design-architecture-document, 4.2 in `rlvm-store` (`NameTable.claim` as a compare-and-set). The loader
   already makes every claim through the store (`StoreBuilder.reserve` / `dropName`) and rejects on a
   failed claim, so it needs no change when the store offers it. Until then such files are declined by
   admission, in both modes.
@@ -591,9 +591,9 @@ loads in one process minus one (Init, per load):
 | total | 0.73 | 5.46 | 15.7 |
 | (loader's own flag counting, when a target wants it) | + 0.00 | + 0.35 | + 1.0 |
 
-Reading: (1) against ARCHITECTURE.md 3.6 (12 instructions per input byte at M3, 8 at M5, "minus process
+Reading: (1) against *agentic-note*: design-architecture-document, 3.6 (12 instructions per input byte at M3, 8 at M5, "minus process
 start") the steady state is at 15.7; a cold JVM process is at 31-38 on these small inputs, and that gap
-is the platform question of ARCHITECTURE.md 7.1, not loader code. (2) "reader alone" is a lower bound
+is the platform question of *agentic-note*: design-architecture-document, 7.1, not loader code. (2) "reader alone" is a lower bound
 that flatters the reader: with a sink that ignores its arguments the JIT can drop work, so part of the
 3.8 attributed to the loader may be the reader's (not separated). (3) Before the store's second publication
 `ProofBlocks.promote` re-parsed the block prefix on every call (141.8 M record parses for 250,743 calls
@@ -634,7 +634,7 @@ Reading:
 
 1. **Where the CPU time goes** (batch, 15.7 s): the reader 4.1 s, the loader's own work 3.4 s, the store
    8.1 s (nodes with derived facts, block packing, promotion; `rlvm-store`). 17.4 instructions per input
-   byte against the budget of ARCHITECTURE.md 3.6 (12 at M3, 8 at M5): not met. The whole load is a
+   byte against the budget of *agentic-note*: design-architecture-document, 3.6 (12 at M3, 8 at M5): not met. The whole load is a
    quarter of the best checker's total CPU time on this file (62.4 s), so it is worth a work package of
    its own (store and loader together); this package did not reduce it.
 2. **Parallel scanning** takes 3 s off the wall clock (14.4 s -> 11.3 s, -21 %) for about 0.7 s more CPU
@@ -916,6 +916,6 @@ as a whole**, not a shorter loading thread: see "Observations".
   One table load per name reference; not measured separately. Expression ordinals stay table-free.
 - `Loader.sweep` reads `loc` only for records of the segment; references to earlier records read it
   once each, at the declaration line (wave 7; before, when the record arrived). On mathlib `loc` is
-  428 MB of random-access memory (ARCHITECTURE.md 2.9); see "Wave 7" under "Loading cost".
+  428 MB of random-access memory (*agentic-note*: design-architecture-document, 2.9); see "Wave 7" under "Loading cost".
 - A promoted record stays in its block as well (12-13 % of the block records): a per-block "frontier"
-  or an exact prescan would remove the copies; ARCHITECTURE.md 3.3 decided against both.
+  or an exact prescan would remove the copies; *agentic-note*: design-architecture-document, 3.3 decided against both.

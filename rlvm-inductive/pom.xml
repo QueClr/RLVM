@@ -24,7 +24,7 @@
     <!--
       Test scope only: the integration tests run the module on the real pipeline (export reader,
       loader, reference kernel). The module itself must never depend on an engine, the loader or the
-      driver (ARCHITECTURE.md 1.2).
+      driver (*agentic-note*: design-architecture-document, 1.2).
     -->
     <dependency>
       <groupId>rlvm</groupId>

@@ -152,7 +152,7 @@ offers it to the sink in place of the single records (`ExportSink.exprRun`, defa
 lean4export writes the records a declaration needs right before its declaration line, children
 first, the type's records before the value's. So at a `thm` line with type id T the records since
 the previous declaration line with an id above T are the proof (finding F1 of scout X5,
-`docs/research/profiles/X5.md`). The packer keeps the entries since the last declaration line in a
+*agentic-note*: rep-X5). The packer keeps the entries since the last declaration line in a
 window; at a template `thm` line it copies the window to the tape and puts a run header in front of
 every stretch of at least `RunFormat.minRecords` consecutive `app` / `lam` / `forallE` / `letE` entries
 with consecutive ids above the bound `max(T, first expression id of the window - 1)` whose children

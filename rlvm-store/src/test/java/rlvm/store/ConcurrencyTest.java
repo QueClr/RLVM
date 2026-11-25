@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 import rlvm.store.Model.M;
 
 /**
- * The concurrency contract of the store (ARCHITECTURE.md 2.8): a frozen base read by several workers,
+ * The concurrency contract of the store (*agentic-note*: design-architecture-document, 2.8): a frozen base read by several workers,
  * each with its own overlay; and readers that follow the loaded frontier while the loader still
  * writes and its arrays grow.
  */

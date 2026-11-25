@@ -1,11 +1,11 @@
 /**
- * RLVM module {@code rlvm-machine}: the machine of {@code docs/design/ISA.md} - an instruction set for
+ * RLVM module {@code rlvm-machine}: the machine of *agentic-note*: design-isa-document - an instruction set for
  * Lean 4 normalisation by evaluation and definitional equality, the worklist mechanisation of the Lean
  * kernel's type checker. Registered as {@link rlvm.api.EngineProvider} "machine" beside "reference".
  *
- * <p>Reading order: {@code docs/design/OWNER-NOTES.md}, {@code RECONCILIATION.md}, {@code ISA.md},
- * {@code review/stepper-convention.md}, then {@code rlvm-machine/WORK-PACKAGES.md} and
- * {@code OWNERSHIP.md}. Shared definitions: {@link rlvm.machine.Layout}, {@link rlvm.machine.Op},
+ * <p>Reading order: *agentic-note*: owner-notes, *agentic-note*: design-reconciliation-document, *agentic-note*: design-isa-document,
+ * *agentic-note*: rep-stepper-convention, then *agentic-note*: rep-machine-work-packages and
+ * *agentic-note*: rep-machine-ownership. Shared definitions: {@link rlvm.machine.Layout}, {@link rlvm.machine.Op},
  * {@link rlvm.machine.Hash}, {@link rlvm.machine.Machine}, {@link rlvm.machine.Frames},
  * {@link rlvm.machine.Ops}.
  *

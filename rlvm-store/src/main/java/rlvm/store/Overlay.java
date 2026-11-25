@@ -544,7 +544,7 @@ public final class Overlay {
 
     /**
      * Root of proof block {@code block}, decoding the block into this overlay the first time
-     * (ARCHITECTURE.md section 2.6). Valid until the next {@link #reset()} (or a {@link #resetTo} below
+     * (*agentic-note*: design-architecture-document, section 2.6). Valid until the next {@link #reset()} (or a {@link #resetTo} below
      * it). Returns 0 for a block without a root.
      */
     public int blockRoot(int block) {

@@ -5,7 +5,7 @@ package rlvm.store;
  * holds) and bytes in use (what the data needs). Taken with {@link Store#memory()}; exact when the
  * loader is not writing (the counters are the writer's own).
  *
- * <p>The regions follow the budget table of ARCHITECTURE.md 2.9. Worker-local memory (term
+ * <p>The regions follow the budget table of *agentic-note*: design-architecture-document, 2.9. Worker-local memory (term
  * overlays, level and literal overlays, engine sessions) is not part of the store and not in here:
  * see {@link Overlay#allocatedBytes()} / {@link Overlay#usedBytes()} and
  * {@code Session.footprintBytes()}.

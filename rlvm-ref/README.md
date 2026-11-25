@@ -2,7 +2,7 @@
 
 Package `rlvm.ref`. A straight port of the official Lean 4 type checker (v4.36.0,
 `refs/lean4/src/kernel/type_checker.cpp`, `inductive.h`, `quot.h`, `instantiate.cpp`, `local_ctx.cpp`,
-`environment.cpp`; specified in `docs/research/02-kernel-typechecker.md`) over term ids of `rlvm-store`.
+`environment.cpp`; specified in *agentic-note*: study-kernel-typechecker) over term ids of `rlvm-store`.
 It is a complete engine: the judgments of inductive and quotient admission, the confirmation of every
 rejection, the oracle of the differential tests, and the primary engine until the machine exists.
 
@@ -14,7 +14,7 @@ rejection, the oracle of the differential tests, and the primary engine until th
 | `whnf_core` (beta, zeta, let variables, projections, iota, quotients; cheap-projection mode), `reduce_proj(_core)`, `reduce_recursor`, `inductive_reduce_rec`, `to_cnstr_when_K`, `to_cnstr_when_structure`, `quot_reduce_rec`, `nat_lit_to_constructor`, `string_lit_to_constructor` | `whnfCore`, `reduceProj(Core)`, `reduceRecursor`, `inductiveReduceRec`, `toCnstrWhenK`, `toCnstrWhenStructure`, `quotReduceRec`, `natLitToConstructor`, `stringLitToConstructor` |
 | `whnf`, `is_delta`, `unfold_definition(_core)`, `reduce_nat` (the 15 accelerated functions through `rlvm.api.NatOps`) | `whnfFull`, `deltaCid`, `unfoldDefinition`, `unfoldCore`, `reduceNat` |
 | `is_def_eq`, `is_def_eq_core` in the official order, `quick_is_def_eq`, `is_def_eq_binding`, `is_def_eq_proof_irrel`, `lazy_delta_reduction(_step)` with hints, `is_def_eq_offset`, `lazy_delta_proj_reduction`, `is_def_eq_args`, `is_def_eq_app`, `try_eta_expansion`, `try_eta_struct`, `try_string_lit_expansion`, `is_def_eq_unit_like`, `eagerReduce` | `isDefEqInt`, `isDefEqCore`, `quick`, `isDefEqBinding`, `isDefEqProofIrrel`, `lazyDeltaReduction`, `lazyDeltaStep`, `isDefEqOffset`, `lazyDeltaProjReduction`, `isDefEqArgs`, `isDefEqApp`, `tryEtaExpansionCore`, `tryEtaStructCore`, `tryStringLitExpansionCore`, `isDefEqUnitLike` |
-| the seven caches (`m_infer_type[2]`, `m_whnf_core`, `m_whnf`, `m_success`, `m_failure`, `m_unfold`) | open-addressing `int` tables (`IntIntMap`, `PairSet`, `LongIntMap`; cleared in O(entries)), cleared in `begin`; read, written and keyed as the official ones (audit: `docs/design/review/reference-caches.md`; section "Exactness" below) |
+| the seven caches (`m_infer_type[2]`, `m_whnf_core`, `m_whnf`, `m_success`, `m_failure`, `m_unfold`) | open-addressing `int` tables (`IntIntMap`, `PairSet`, `LongIntMap`; cleared in O(entries)), cleared in `begin`; read, written and keyed as the official ones (audit: *agentic-note*: rep-reference-caches; section "Exactness" below) |
 | `add_axiom / add_definition / add_theorem / add_opaque` | `checkConstant(cid)` |
 
 `RefEngine` / `RefEngine.RefSession` implement `rlvm.api.Engine` / `Session`; the provider
@@ -45,7 +45,7 @@ settings (`RefEngine.factory(RefOptions)`, `new RefKernel(ctx, config, options)`
 ## Exactness: the practical default and the strict mode (R2, 2026-11-24)
 
 Audit of every cache against the official source, with exports and official verdicts:
-`docs/design/review/reference-caches.md`. In short:
+*agentic-note*: rep-reference-caches. In short:
 
 - **What the same term is.** The official caches are keyed by structural equality that ignores
   binder names and infos and includes `mdata` nodes and the `nondep` flag of a let; canonical ids
@@ -90,7 +90,7 @@ Audit of every cache against the official source, with exports and official verd
 
 ### Evidence (R2, 2026-11-24; private distribution `work/r2/dist-cand3` = this jar a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-export` dc8c4f1ef79a, everything else as published at 23:08Z)
 
-Details and tables: `docs/design/review/reference-caches.md`, sections 7 and 8.
+Details and tables: *agentic-note*: rep-reference-caches, sections 7 and 8.
 
 - `scripts/gate.sh --corpus all`, practical (default): the 230 published tests 230 correct, 0 declined; mutants
   17,775: SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683 (the published record); self-test passed.
@@ -107,7 +107,7 @@ Details and tables: `docs/design/review/reference-caches.md`, sections 7 and 8.
 
 ## Universe levels: official by default
 
-Project owner's decision of 2026-11-24 (docs/design/OWNER-NOTES.md item 11, "resemble official by
+Project owner's decision of 2026-11-24 (*agentic-note*: owner-notes, item 11, "resemble official by
 default"): both engines compare universe levels as the official Lean kernel does, with its incomplete
 algorithm, and the complete relation is an opt-in switch only. For this engine:
 

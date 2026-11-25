@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The static check of {@code stepper-convention.md} H12 item 4 over the class files of the judgment
+ * The static check of *agentic-note*: rep-stepper-convention, H12 item 4 over the class files of the judgment
  * classes: method sizes within the limits of H10.
  *
  * <ul>
@@ -64,7 +64,7 @@ class StepSizeTest {
             }
         }
         assertTrue(methods > 100, "parsed " + methods + " methods");
-        assertTrue(tooBig.isEmpty(), "methods over the size limits of stepper-convention.md H10:\n" + String.join("\n", tooBig));
+        assertTrue(tooBig.isEmpty(), "methods over the size limits of *agentic-note*: rep-stepper-convention, H10:\n" + String.join("\n", tooBig));
     }
 
     /** The driver and the hot shared primitives are small too (sigN / spillN are never inlined, H10 rule 4). */

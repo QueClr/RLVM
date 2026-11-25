@@ -1,7 +1,7 @@
 package rlvm.admit;
 
 /**
- * Admission policies (ARCHITECTURE.md 4.9). Immutable; {@link #arena()} is the arena configuration.
+ * Admission policies (*agentic-note*: design-architecture-document, 4.9). Immutable; {@link #arena()} is the arena configuration.
  *
  * <p>Policies that need no knob because they are fixed: unsafe and partial records are dropped by the
  * loader and their users fail with "unknown constant"; {@code Lean.reduceBool}, {@code reduceNat},

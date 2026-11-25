@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import rlvm.store.DeclKind;
 import rlvm.store.Kind;
 
-/** The ownership split of ARCHITECTURE.md 3.3 on small hand-made exports. */
+/** The ownership split of *agentic-note*: design-architecture-document, 3.3 on small hand-made exports. */
 class SplitTest {
 
     private static Oracle load(Nd nd) throws IOException {

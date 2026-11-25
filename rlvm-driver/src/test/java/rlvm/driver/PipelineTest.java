@@ -19,7 +19,7 @@ import rlvm.load.MalformedExportException;
 import rlvm.load.UnsupportedExportException;
 
 /**
- * Pipelined loading (ARCHITECTURE.md 3.5, 6.1) over fake units and a fake loader: the calling thread
+ * Pipelined loading (*agentic-note*: design-architecture-document, 3.5, 6.1) over fake units and a fake loader: the calling thread
  * publishes the file in pieces while the environment thread and the workers check. What a batch run
  * says is what a pipelined run says; see also {@code InvarianceTest.sameVerdictWhateverThePipeline}.
  */

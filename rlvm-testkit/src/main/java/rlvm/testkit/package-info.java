@@ -1,6 +1,6 @@
 /**
  * RLVM module {@code rlvm-testkit}: tools for the testing strategy of
- * {@code docs/design/ARCHITECTURE.md} section 9. Not part of the shipped binary.
+ * *agentic-note*: design-architecture-document, section 9. Not part of the shipped binary.
  *
  * <ul>
  *   <li>{@link rlvm.testkit.DiffEngine}: an {@code Engine} that runs two engines on every unit and

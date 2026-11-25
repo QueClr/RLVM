@@ -4,9 +4,9 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * The constants the kernel knows by name, bound to constant ids once, and the result of the shape
- * guards that decide whether a kernel extension may be used (ARCHITECTURE.md 4.8).
+ * guards that decide whether a kernel extension may be used (*agentic-note*: design-architecture-document, 4.8).
  *
- * <p>The class is split in two halves (RECONCILIATION.md section 2, "Literal depMax"):
+ * <p>The class is split in two halves (*agentic-note*: design-reconciliation-document, section 2, "Literal depMax"):
  * <ul>
  *   <li><b>Loader half</b>: the 34 special names are interned when the table is created, so their name
  *       ids are fixed and small. When a declaration claims one of them
@@ -80,7 +80,7 @@ public final class Specials {
     };
     private static final String[] ANNOTATIONS = {"optParam", "autoParam", "outParam", "semiOutParam"};
 
-    /** The prerequisite names of Nat literals and of string literals (ARCHITECTURE.md 2.1). */
+    /** The prerequisite names of Nat literals and of string literals (*agentic-note*: design-architecture-document, 2.1). */
     private static final int[] NAT_PREREQ = {NAT, NAT_ZERO, NAT_SUCC};
     private static final int[] STRING_PREREQ = {NAT, NAT_ZERO, NAT_SUCC, STRING, STRING_OF_LIST, CHAR, CHAR_OF_NAT,
         LIST_NIL, LIST_CONS};

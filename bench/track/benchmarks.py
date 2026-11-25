@@ -159,7 +159,7 @@ def select(rows: list[dict], labels: list[str], since: str | None, default_engin
 
 def steady(row: dict):
     """The warm wall clock of a row: the median of passes 4..N when the process made 8 or more passes
-    (the first two or three later passes of a JVM are still warm-up: J1.md 3.2), else of passes 2..N."""
+    (the first two or three later passes of a JVM are still warm-up: *agentic-note*: rep-J1, 3.2), else of passes 2..N."""
     walls = [num(x) for x in (row.get("walls_s") or "").split()]
     walls = [w for w in walls if w is not None]
     later = walls[3:] if len(walls) >= 8 else walls[1:]

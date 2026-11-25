@@ -6,7 +6,7 @@ import java.util.List;
 import rlvm.store.Model.M;
 
 /**
- * Test support: a miniature of the loader's declaration sweep (ARCHITECTURE.md 3.3). A segment is a
+ * Test support: a miniature of the loader's declaration sweep (*agentic-note*: design-architecture-document, 3.3). A segment is a
  * list of model nodes, children first; the nodes reachable from the type root become shared terms,
  * the others go into one proof block; nodes of earlier segments are referenced as shared terms and
  * promoted on demand.

@@ -1,7 +1,7 @@
 /**
  * RLVM module {@code rlvm-driver}: runs a check from a store (or an export, through a
- * {@link rlvm.driver.Wiring}) to a verdict ({@code docs/design/ARCHITECTURE.md} sections 6 and 8 as
- * amended by {@code docs/design/RECONCILIATION.md} sections 2 and 3; see the module README).
+ * {@link rlvm.driver.Wiring}) to a verdict (*agentic-note*: design-architecture-document, sections 6 and 8 as
+ * amended by *agentic-note*: design-reconciliation-document, sections 2 and 3; see the module README).
  *
  * <ul>
  *   <li>{@link rlvm.driver.Run}: the orchestrator. Loads in batch mode through the wiring, starts the

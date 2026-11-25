@@ -12,7 +12,7 @@ import java.util.Arrays;
  * it may be used while checking a unit of rank {@code r} with universe parameters {@code L} iff
  * {@code depMax(t) < r} and {@code lpSet(t)} is a subset of {@code L}, which holds for every term
  * reachable from the roots of a unit that passed {@code StructuralChecks}. It is the machine's
- * {@code PCHK} table (ISA.md 1.5). Never read in strict mode.
+ * {@code PCHK} table (*agentic-note*: design-isa-document, 1.5). Never read in strict mode.
  *
  * <p>Sound under the optimistic environment: a fact recorded while an earlier declaration was still
  * unchecked can only matter in a run whose verdict is already "not accepted".
@@ -24,7 +24,7 @@ import java.util.Arrays;
 public final class SharedFacts {
 
     public static final int CHECKED = 1;
-    /** Bits 1..7 are free for the machine's static per-term facts (ISA.md). */
+    /** Bits 1..7 are free for the machine's static per-term facts (*agentic-note*: design-isa-document). */
     public static final int MACHINE_MASK = 0xFE;
 
     private static final byte[] NONE = new byte[0];

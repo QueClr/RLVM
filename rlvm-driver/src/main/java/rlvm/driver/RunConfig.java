@@ -18,7 +18,7 @@ public final class RunConfig {
 
     /**
      * How the store is filled. {@code BATCH}: the whole file is loaded on the calling thread, then
-     * checked. {@code PIPELINED} (ARCHITECTURE.md 3.5): the calling thread loads while the environment
+     * checked. {@code PIPELINED} (*agentic-note*: design-architecture-document, 3.5): the calling thread loads while the environment
      * thread and the workers check what was published so far; it needs a {@link Wiring} whose
      * {@link Wiring#load} honours the mode of the options (publishes while it reads). With a wiring
      * that publishes once, at the end, and for inputs below {@link #pipelineMinBytes}, a pipelined
@@ -29,7 +29,7 @@ public final class RunConfig {
     /** {@code PIPELINED}: the loader publishes after this many units ... */
     public int publishEveryUnits = 4096;
 
-    /** ... or this many input bytes, whichever comes first (ARCHITECTURE.md 3.5). */
+    /** ... or this many input bytes, whichever comes first (*agentic-note*: design-architecture-document, 3.5). */
     public long publishEveryBytes = 32L << 20;
 
     /**
@@ -82,7 +82,7 @@ public final class RunConfig {
      */
     public long sessionBytes = 0;
 
-    /** Session cap of an engine without an entry in {@link #defaultSessionBytes(String)}: 16 MiB (RECONCILIATION.md section 3). */
+    /** Session cap of an engine without an entry in {@link #defaultSessionBytes(String)}: 16 MiB (*agentic-note*: design-reconciliation-document, section 3). */
     public static final long DEFAULT_SESSION_BYTES = 16L << 20;
 
     /**
@@ -131,13 +131,13 @@ public final class RunConfig {
 
     /**
      * Re-check a rejection of the primary engine before it becomes the verdict: cold strict run of the
-     * primary engine, then the reference kernel (ARCHITECTURE.md 8.2). False: the primary engine's
+     * primary engine, then the reference kernel (*agentic-note*: design-architecture-document, 8.2). False: the primary engine's
      * REJECT is final (measurement and debugging only).
      */
     public boolean recheckRejections = true;
 
     /**
-     * The reference kernel decides what the primary engine cannot (ARCHITECTURE.md 8.2): a unit the
+     * The reference kernel decides what the primary engine cannot (*agentic-note*: design-architecture-document, 8.2): a unit the
      * primary engine declines or throws on, and a rejection of the primary engine that the reference
      * kernel does not confirm. False ({@code -X no-fallback}; gate runs of an engine under test): the
      * reference kernel never turns a non-ACCEPT of the primary engine into an ACCEPT. Such a unit is
@@ -170,11 +170,11 @@ public final class RunConfig {
 
     /**
      * Number of declaration units the reader counted, or -1 if the caller has no independent count. When
-     * set, the run is accepted only if the store holds exactly this many units (ARCHITECTURE.md 8.1).
+     * set, the run is accepted only if the store holds exactly this many units (*agentic-note*: design-architecture-document, 8.1).
      */
     public int expectedUnits = -1;
 
-    /** Step limit of a warm attempt. Unlimited by RECONCILIATION.md section 3. */
+    /** Step limit of a warm attempt. Unlimited by *agentic-note*: design-reconciliation-document, section 3. */
     public long warmSteps = Budget.UNLIMITED;
 
     /**

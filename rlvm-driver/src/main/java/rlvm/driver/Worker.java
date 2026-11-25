@@ -24,7 +24,7 @@ import rlvm.api.Session;
  *              first failure, run the re-check protocol at once, on this thread, in fresh sessions
  * </pre>
  *
- * <p>Re-check protocol (ARCHITECTURE.md 8.2 and 6.5; "primary" is the engine under test, "reference"
+ * <p>Re-check protocol (*agentic-note*: design-architecture-document, 8.2 and 6.5; "primary" is the engine under test, "reference"
  * the reference kernel; every stage runs in a freshly reset session with the cold budget):
  * <pre>
  * warm REJECT:   1. strict primary            ACCEPT -> accepted, WARM-ANOMALY
@@ -54,7 +54,7 @@ import rlvm.api.Session;
  *
  * <p><b>Pipelined loading.</b> A lane sees the levels, lists and literals published when it was
  * created or last reset; before a unit beyond that frontier the warm session is reset
- * (ARCHITECTURE.md 3.5). Nothing but an ACCEPT is recorded for a unit that started while the file
+ * (*agentic-note*: design-architecture-document, 3.5). Nothing but an ACCEPT is recorded for a unit that started while the file
  * was still loading: a decline may only say "not loaded yet" (a forward reference that will turn
  * out to be an unknown constant), and a rejection may rest on a name that a later record provides.
  * The worker returns the rest of its claim, waits for the end of the load and runs the unit's
@@ -552,7 +552,7 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         try {
             if (warmOutcome == Outcome.DECLINE && !thrown
                     && (warmReason == Reason.BUDGET_MEMORY || signals.memoryDeclined())) {
-                // A memory retry (the heavy lane of RECONCILIATION.md section 3): alone from the start.
+                // A memory retry (the heavy lane of *agentic-note*: design-reconciliation-document, section 3): alone from the start.
                 if (!enterGate(u)) {
                     cancelled++;
                     return;
@@ -620,7 +620,7 @@ public final class Worker implements Runnable, LaneSignals.Probe {
         }
     }
 
-    /** The primary engine rejected {@code u}: confirm (ARCHITECTURE.md 8.2). */
+    /** The primary engine rejected {@code u}: confirm (*agentic-note*: design-architecture-document, 8.2). */
     private void rejected(int u, Reason primaryReason) {
         if (!same) {
             int o = strict(u);

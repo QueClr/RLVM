@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import rlvm.store.Model.M;
 
 /**
- * What the machine reads from the store (ISA.md 12, R1 and R1'): the one-dispatch node accessor
+ * What the machine reads from the store (*agentic-note*: design-isa-document, 12, R1 and R1'): the one-dispatch node accessor
  * ({@link Terms#regionOf} + {@link Node#wordOf}), the writer of the reserved {@code c} word of
  * export LAM / PI nodes ({@link TermStore#setBinderHint}), and the first term of a unit's segment.
  */

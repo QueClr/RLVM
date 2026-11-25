@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  rlvm-truffle: the T2 tier of the machine (docs/design/ISA.md sections 0.5, 8.4 - 8.6): one Truffle
+  rlvm-truffle: the T2 tier of the machine (*agentic-note*: design-isa-document, sections 0.5, 8.4 - 8.6): one Truffle
   RootNode per promoted code block of rlvm-machine, compiled by Graal at run time. Owner: T2.
 
   It plugs into the machine through the hook rlvm.machine.Tier (service

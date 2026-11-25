@@ -6,7 +6,7 @@ import static rlvm.machine.Op.SIG;
 import rlvm.api.MachineErrors;
 
 /**
- * The control family CTL of the host convention ({@code stepper-convention.md} H6, H11; ISA 1.4): the
+ * The control family CTL of the host convention (*agentic-note*: rep-stepper-convention, H6, H11; ISA 1.4): the
  * continuation of a speculative segment ({@code TRY}), the mode frame {@code ERF}, and the family's part
  * of the driver. The frame writers ({@code sigN}, {@code spillN}, {@code saveTry}) and the driver loop
  * are in {@link Machine}; binders ({@code OPEN} / {@code CLOSE}) are in {@link Scope}.

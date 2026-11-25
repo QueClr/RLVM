@@ -40,7 +40,7 @@ public enum Reason {
     INTERNAL_ERROR(false),
     /**
      * The unit was abandoned because its result can no longer matter: an earlier unit already failed
-     * ({@link RunSignals#firstFailure()}) or the run is shutting down (RECONCILIATION.md, facade). It
+     * ({@link RunSignals#firstFailure()}) or the run is shutting down (*agentic-note*: design-reconciliation-document, facade). It
      * is never the reported reason of a run: the verdict is the status of the first non-ACCEPT unit
      * in file order, and a cancelled unit always lies behind that one.
      */

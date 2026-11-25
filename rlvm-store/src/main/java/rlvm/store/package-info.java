@@ -3,7 +3,7 @@
  *
  * <p>Everything here is plain data in flat primitive arrays (decision A of the architecture): terms,
  * names, literals, declarations and proof blocks are {@code int} ids; id 0 is "none". The module holds
- * no kernel logic and depends on nothing but the JDK. Design: {@code docs/design/ARCHITECTURE.md}
+ * no kernel logic and depends on nothing but the JDK. Design: *agentic-note*: design-architecture-document,
  * sections 2 (layouts) and 3 (how the loader fills it).
  *
  * <ul>

@@ -16,7 +16,7 @@ import java.util.zip.GZIPInputStream;
 import rlvm.api.Outcome;
 
 /**
- * The hostile exports of the independent soundness review (package S; {@code docs/design/review/soundness-machine.md}):
+ * The hostile exports of the independent soundness review (package S; *agentic-note*: rep-soundness-machine):
  * hand-written exports under {@code src/test/resources/s/}, each attacking one shortcut or memo of the machine,
  * with the verdict of the OFFICIAL checker ({@code leanchecker} 4.36.0) in {@code manifest.tsv}.
  *
@@ -37,10 +37,10 @@ import rlvm.api.Outcome;
  * of another package does not block publications; {@link SHostileSlowTest#noKnownFindingIsLeft} fails while
  * one is left. When the owner has fixed it, the mark is removed from the manifest and the row is strict.
  *
- * <p>KIND (owner's decision "practical", {@code docs/design/OWNER-NOTES.md} note 13, 2026-11-24): a row with the mark
+ * <p>KIND (owner's decision "practical", *agentic-note*: owner-notes, note 13, 2026-11-24): a row with the mark
  * {@code T} is a KIND T row - the statement of its planted declaration is derivable in the theory and the official
  * checker rejects it only through its own incompleteness, non-transitivity, cache order or object identity
- * ({@code docs/design/review/official-divergence.md} has the classes and the certificates). Such a row demands the
+ * (*agentic-note*: rep-official-divergence has the classes and the certificates). Such a row demands the
  * official verdict OR an accept (of the machine, or of the reference engine in its practical mode); an accept is
  * listed as tolerated. Every row without the mark is strict: the official verdict (a kind F row - a statement that is
  * not derivable - is always strict). A {@code T} mark is given only where a reviewer gave the kind with a

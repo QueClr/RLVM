@@ -141,7 +141,7 @@ entry that was made the reference and has that figure.
 | a run with the wrong verdict, a timeout, no counters or partial counter coverage | **INVALID**: recorded, never compared, never a reference | 2 |
 
 - The threshold is `--threshold` (percent, default 5: two identical 8-worker rows of one quiet window
-  differ by up to 5 %, `docs/research/profiles/J1.md` section 1; it was 3 for CPU time).
+  differ by up to 5 %, *agentic-note*: rep-J1, section 1; it was 3 for CPU time).
 - Entries inside the band do not move the reference, so small regressions cannot add up unnoticed: a
   drift of 2 % per step is flagged at the second step (`selftest.py`).
 - All corpora are accept tests: a valid run exits with 0. The placeholder checker in today's
@@ -190,7 +190,7 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
   wall clock**: warm for an entry with passes, cold otherwise; threshold 5 %. `ladder.py --passes N`
   makes warm entries for a tier. The comparison and history tables print warm wall, cold wall, CPU,
   RSS, instructions in that order.
-- `benchmarks.py` is new: `docs/BENCHMARKS.md` is generated from the rows of `bench/warm.sh` (the tool
+- `benchmarks.py` is new: *agentic-note*: rep-benchmarks is generated from the rows of `bench/warm.sh` (the tool
   that measures the owner's metric on the host, inside `bench/quiet.py` windows) and, for the
   instruction counts, from this history; one table per metric in the owner's order, a provenance row
   per cell (row, window, jars). The former generator is `benchmarks_cold.py`.
@@ -219,7 +219,7 @@ check  = complete run minus stop-after=env (checking, verdict, exit)
 - Machine entries are made with `track.py CORPUS --engine machine --launcher native --threads 8`
   (configuration `rlvm/native/t8/-X engine=machine`). The machine's own counters (accepted / declined
   units) are not part of an entry: a declined unit is checked by the reference engine and its time is in
-  the figure; `docs/PLATFORM.md` section I.6 has the counters of the measured distribution.
+  the figure; *agentic-note*: design-platform-document, section I.6 has the counters of the measured distribution.
 - **The machine entries in the history today** (Init, Std, reachability, `cedar-hot-ax`; image and JVM
   launcher, 8 workers) are the eight-worker runs of the platform matrix of 13:33Z to 13:49Z, entered by
   `work/steward/w7/import-matrix.py` (`imported_from` in the entry; the same `bench/measure.sh` run in

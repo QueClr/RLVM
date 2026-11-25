@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench/baselines/render-tables.py - refresh the generated tables of a document.
 
-    bench/baselines/render-tables.py docs/research/12-baselines.md [bench/README.md ...]
+    bench/baselines/render-tables.py bench/README.md [FILE.md ...]
 
 Replaces what stands between `<!-- BEGIN name -->` and `<!-- END name -->` by
 the output of the command that makes that block:

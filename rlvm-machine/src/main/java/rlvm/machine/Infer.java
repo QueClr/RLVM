@@ -21,7 +21,7 @@ import rlvm.store.Terms;
  *
  * <p>Entry steps are the frozen cross-package interface; {@code TWALK} and {@code IPROJ} are internal to
  * this file; continuation steps {@code k_*}, loop methods and frame keys are this file's own
- * (stepper-convention.md H2-H4; template in WORK-PACKAGES.md).
+ * (*agentic-note*: rep-stepper-convention, H2-H4; template in *agentic-note*: rep-machine-work-packages).
  *
  * <h2>How the judgments are laid out</h2>
  * <pre>

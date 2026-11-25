@@ -1,7 +1,7 @@
 package rlvm.driver;
 
 /**
- * The loader's frontier as the driver sees it during a pipelined load (ARCHITECTURE.md 3.5):
+ * The loader's frontier as the driver sees it during a pipelined load (*agentic-note*: design-architecture-document, 3.5):
  * {@link #published(int)} is called on the loading thread after every
  * {@code Store.publishLoaded(units, complete)}, so that the environment thread and the workers are
  * woken at hand-offs and nobody polls. In production the caller is the loader's own

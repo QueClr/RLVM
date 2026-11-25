@@ -6,7 +6,7 @@ import rlvm.api.MachineErrors;
 
 /**
  * Toy judgments in family EXT, written exactly as the host convention prescribes
- * ({@code stepper-convention.md} H2-H4, H11): the tests of the control primitives run them under several
+ * (*agentic-note*: rep-stepper-convention, H2-H4, H11): the tests of the control primitives run them under several
  * depth bounds. They are also the smallest complete examples of the step template.
  */
 final class Toy implements Machine.Resumer {

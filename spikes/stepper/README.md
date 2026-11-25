@@ -2,8 +2,8 @@
 
 Evidence for RECONCILIATION B4 (critic finding C2.1): how should Java execute the worklist transition
 system of ISA 1.3 with the least CPU time? The decision and the rules derived from it are in
-`docs/design/review/stepper-convention.md`; this file describes the experiment and how to repeat it.
-Result tables: `results/tables.md` (generated). Nothing from `refs/` is built or run.
+*agentic-note*: rep-stepper-convention; this file describes the experiment and how to repeat it.
+Result tables: *agentic-note*: rep-spike-stepper (generated). Nothing from `refs/` is built or run.
 
 **Result.** Bounded host recursion with lazy materialisation (variant H, depth bound 64) is chosen:
 
@@ -112,10 +112,10 @@ java -XX:+UseSerialGC -Xmx24g -Drlvm.stats=true -Drlvm.maxnodes=100000 -Drlvm.wr
 scripts/build-images.sh                            # native images stepper-ce and stepper-ce-fi (40 s each)
 scripts/verify.sh                                  # results/verify.txt   (CPUS=0-4 pins it)
 scripts/stats.sh                                   # results/stats.txt
-scripts/run-all.sh                                 # every batch in Docker, then results/tables.md
+scripts/run-all.sh                                 # every batch in Docker, then the tables under work/spikes/ (scratch)
 scripts/run-all.sh duel-nce duel-jvm               # chosen batches
 scripts/counters.sh                                # results/counters.txt (perf stat: branches, branch misses)
-python3 -I scripts/tables.py > results/tables.md
+python3 -I scripts/tables.py > ../../work/spikes/stepper/tables.md
 
 # single runs
 S="-Drlvm.session=16777216 -Drlvm.tbits=20 -Drlvm.hcap=4000000 -Drlvm.ttbits=20 -Drlvm.textra=1000000"
@@ -154,7 +154,7 @@ of the native image are exact. Two consequences:
 
 ## 5. Results
 
-All tables: `results/tables.md`. Summary of its section 1 (geometric mean over the four workloads - Init and
+All tables: *agentic-note*: rep-spike-stepper. Summary of its section 1 (geometric mean over the four workloads - Init and
 Cedar, types only and types + values, 16 MiB sessions - of `min(variant) / min(R)`; in brackets the same mean
 of the median paired ratio):
 
@@ -222,7 +222,7 @@ How to read it:
 | H64 | 34,493 | 0.00011 | 2.9 |
 | H256 | 1,031 | 0.000003 | 2.5 |
 
-Cedar and the types-only workloads: `results/tables.md`, section 4 (H64 on Cedar: 0.00025).
+Cedar and the types-only workloads: *agentic-note*: rep-spike-stepper, section 4 (H64 on Cedar: 0.00025).
 
 ### Deep terms
 
@@ -233,7 +233,7 @@ R's results on a **512 KiB** thread stack on all three runtimes, in times compar
 worklist grows to 8 M words (32 MiB; W0: 16 M). R itself overflows 512 KiB at once, as does Hinf; R needs a
 256 MiB stack for these terms (128 MiB overflows). Smallest stack that works for H: 64 KiB in the native
 image (D = 64 and D = 256); on a cold JVM 128 KiB for D = 64 and 384 KiB for D = 256. Tables:
-`results/tables.md`, section 5; the stack minima are host runs of `deep` with `-Drlvm.stackkb=N` /
+*agentic-note*: rep-spike-stepper, section 5; the stack minima are host runs of `deep` with `-Drlvm.stackkb=N` /
 `-Drlvm.stackmb=N` and are not part of the batches.
 
 ### Budgets and TRY
@@ -248,7 +248,7 @@ D = 64 and no bound (host unwinding only). `results/verify.txt`.
 ## 6. Findings for the machine
 
 1. Use bounded host recursion (H) with a depth bound of 64. Rules and a code template:
-   `docs/design/review/stepper-convention.md`.
+   *agentic-note*: rep-stepper-convention.
 2. The worklist machine of ISA 1.3 stays the specification and is available as the D = 0 build of the same
    source, at 1.4x to 2.1x the CPU time: a test configuration, not the production convention.
 3. Fused family loops (ISA 8.2, candidate (i)) are not needed and would make the cost depend on the compiler

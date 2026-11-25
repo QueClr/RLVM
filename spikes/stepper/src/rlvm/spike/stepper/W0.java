@@ -7,7 +7,7 @@ import static rlvm.spike.stepper.Vals.*;
 import java.util.Arrays;
 
 /**
- * (W0) The convention of ISA.md 1.3 as written.
+ * (W0) The convention of *agentic-note*: design-isa-document, 1.3 as written.
  *
  * <ul>
  * <li>Registers are fields of the machine: {@code W}, {@code wp}, {@code A}, the scratch {@code X}, {@code xp}.</li>

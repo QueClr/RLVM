@@ -2,7 +2,7 @@ package rlvm.machine;
 
 /**
  * Constants only (ISA 13.3, "Op"): the signals and the depth bound of the host control convention
- * ({@code docs/design/review/stepper-convention.md}, rules H1-H12), op numbers, families, frame keys and
+ * (*agentic-note*: rep-stepper-convention, rules H1-H12), op numbers, families, frame keys and
  * the payloads of the frames the shared control code owns, the instruction encoding of code objects,
  * operand modes, roles, modes, policies, budgets, limits, staging switches and debug modes.
  *
@@ -20,7 +20,7 @@ public final class Op {
     private Op() {}
 
     // ---------------------------------------------------------------------------------------------------
-    // Convention H: signals, depth bound (stepper-convention.md H5, H9)
+    // Convention H: signals, depth bound (*agentic-note*: rep-stepper-convention, H5, H9)
     // ---------------------------------------------------------------------------------------------------
 
     /** The judgment just called is suspended; its frames are in the side buffer. Write your frame, return SUSP. */
@@ -453,7 +453,7 @@ public final class Op {
      * Experiment switches, two per package (wave 6; names {@code m1a, m1b, m2a .. m7b}): a package puts a
      * new optimisation that changes behaviour behind one of ITS OWN two bits without asking M6, measures
      * and gates it, and asks M6 for a named switch (or for the default) when it stays. They are never part
-     * of {@code all} or of the default set, and {@code rlvm-machine/SWITCHES.md} lists what each one
+     * of {@code all} or of the default set, and *agentic-note*: design-switches-document lists what each one
      * currently guards (the owning package keeps its lines up to date through its NOTES file).
      */
     public static final int SW_M1A = 1 << 11;
@@ -488,7 +488,7 @@ public final class Op {
      */
     public static final int SW_LEVELS_COMPLETE = 1 << 25;
     /**
-     * Eager reduction on the machine (package E1, 2026-11-24; {@code docs/design/review/eager-reduction.md}):
+     * Eager reduction on the machine (package E1, 2026-11-24; *agentic-note*: rep-eager-reduction):
      * OFF = the rule of NOTES-M6 F26 (a declaration that enters eager reduction is DECLINED and the reference
      * engine checks it). ON = the declaration stays on the machine: the comparison of an {@code eagerReduce _ _}
      * argument is DEFERRED to the end of the declaration ({@code Machine.erSite}, {@code Machine.erDischarge})
@@ -507,8 +507,8 @@ public final class Op {
     public static final int SW_CONV_EXPECT = 1 << 27;
     /**
      * The two proof-comparison shortcuts (OWNER-NOTES 13, the "practical" policy; reviews
-     * {@code docs/design/review/soundness-shortcuts.md}: theory-sound as implemented, and
-     * {@code soundness-default-set.md} section 10: no kind F in the default set with them). Until 2026-11-25 they were
+     * *agentic-note*: rep-soundness-shortcuts: theory-sound as implemented, and
+     * *agentic-note*: rep-soundness-default-set, section 10: no kind F in the default set with them). Until 2026-11-25 they were
      * the options of the system property {@code rlvm.machine.m4}; what they answer is derivable but is not always
      * the verdict of the official checker (kind T: findings S-F1, S-F2), so they are named switches that are never
      * part of {@code all} and, like every switch, off in strict mode.
@@ -583,10 +583,10 @@ public final class Op {
             | SW_CODE | SW_CASETREES | SW_LAZY_CASES | SW_DIRECT_RULES | SW_LAZY_EVAL | SW_SAME;
     /**
      * The switches a non-strict engine runs with when neither {@code -X machine.switches} nor the system
-     * property {@code rlvm.machine.switches} is given ({@code rlvm-machine/SWITCHES.md} has the gate and the
+     * property {@code rlvm.machine.switches} is given (*agentic-note*: design-switches-document has the gate and the
      * measurement for every member). {@code -X machine.switches=none} is v0 (the generic tier, the complete
      * procedure). Since 2026-11-25 (INT7; OWNER-NOTES 13 and 16; decided by warm wall clock on the eight corpora,
-     * {@code SWITCHES.md} "The default configuration"): {@link #SW_WAVE6} + {@code eager,skipargs,congruence} (the two proof-comparison shortcuts bring {@code facts} / {@code probes}: kind T accepts are tolerated by the practical policy).
+     * *agentic-note*: design-switches-document, "The default configuration"): {@link #SW_WAVE6} + {@code eager,skipargs,congruence} (the two proof-comparison shortcuts bring {@code facts} / {@code probes}: kind T accepts are tolerated by the practical policy).
      * The wave-6 set (2026-11-24 19:10Z):
      * {@code warm,gated,expect} (step 1) + {@code bodies} + {@code pchk,match,joint} + {@code code,casetrees,lazycases}
      * (step 4) + {@code directrules} + {@code lazyeval} + {@code same}, with the machine's own session cap

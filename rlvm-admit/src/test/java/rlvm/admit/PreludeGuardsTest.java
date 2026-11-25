@@ -10,7 +10,7 @@ import rlvm.store.DeclKind;
 import rlvm.store.Specials;
 
 /**
- * The guard matrix of ARCHITECTURE.md 4.8 (level L1 of research doc 03 section 8): the standard
+ * The guard matrix of *agentic-note*: design-architecture-document, 4.8 (level L1 of research doc 03 section 8): the standard
  * prelude shapes are VALID, every deviation in kind, universe parameters, type or constructor list
  * is INVALID. No engine is involved.
  */

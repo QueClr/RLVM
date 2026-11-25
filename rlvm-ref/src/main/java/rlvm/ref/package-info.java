@@ -1,9 +1,9 @@
 /**
  * RLVM module {@code rlvm-ref}: the reference kernel, a straightforward port of the official
  * substitution-based type checker ({@code refs/lean4/src/kernel/type_checker.cpp} at v4.36.0, as
- * specified in {@code docs/research/02-kernel-typechecker.md}) over term ids.
+ * specified in *agentic-note*: study-kernel-typechecker) over term ids.
  *
- * <p>Purpose ({@code docs/design/ARCHITECTURE.md} section 5): (1) the judgments used by inductive and
+ * <p>Purpose (*agentic-note*: design-architecture-document, section 5): (1) the judgments used by inductive and
  * quotient admission, including the exact syntactic output of {@code whnf}; (2) the oracle of the
  * differential tests; (3) the re-check before a rejection is reported; (4) a complete
  * {@link rlvm.api.Engine} so that the whole pipeline runs before the machine exists.

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import rlvm.api.Outcome;
 
 /**
- * Regression test of finding S3-F7 (reviewer S3, {@code docs/design/review/soundness-default-set.md} section 3): a
+ * Regression test of finding S3-F7 (reviewer S3, *agentic-note*: rep-soundness-default-set, section 3): a
  * closure built inside a compiled body that captures a variable which a let or an inlined beta step binds to a small
  * numeral. The capture list then holds an immediate operand ({@code Elab.atom}); {@code Code.raw} had no case for
  * it, faulted with {@code E_INTERNAL}, and the machine DECLINED a valid unit (the reference engine decided it: no

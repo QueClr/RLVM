@@ -1,6 +1,6 @@
 # rlvm-store - the persistent data of a run
 
-Package `rlvm.store`, work packages A1, A2, A3 and `TermOps` of `docs/design/ARCHITECTURE.md` 10.2.
+Package `rlvm.store`, work packages A1, A2, A3 and `TermOps` of *agentic-note*: design-architecture-document, 10.2.
 Depends on nothing but the JDK (the two dependencies in `pom.xml`, `rlvm-export` and `rlvm-level`, are
 test scope). Everything is `int` ids into flat primitive arrays; id 0 is "none"; no object per term, name,
 level or literal; no reflection, no `java.util` collections, no lambdas on any path.
@@ -77,7 +77,7 @@ Every skeleton signature still exists, with one exception: `StoreBuilder.dropUns
   `recordCount`, `promotedCount`, `hasUnresolved(block)` (something in the block was unresolved when it was
   written; false guarantees a resolved decoded root), `loaderStateReleased`. **`TermStore`**: `segmentStart`, `setBinderHint`.
 
-## What the machine reads (ISA.md 12, R1 and R1')
+## What the machine reads (*agentic-note*: design-isa-document, 12, R1 and R1')
 
 - One dispatch per node: `int[] r = terms.regionOf(id); int w = Node.wordOf(id);` then `r[w + Node.W_*]`
   (`Node.kind / flags / looseRange` of `r[w]`). The array of an overlay id is valid until the overlay makes a

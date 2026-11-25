@@ -32,7 +32,7 @@
       <version>${project.version}</version>
     </dependency>
     <!-- Test scope only: the integration tests run real exports through the reference kernel. The
-         driver's main code never sees an engine class or the reader (ARCHITECTURE.md 1.1). -->
+         driver's main code never sees an engine class or the reader (*agentic-note*: design-architecture-document, 1.1). -->
     <dependency>
       <groupId>rlvm</groupId>
       <artifactId>rlvm-ref</artifactId>

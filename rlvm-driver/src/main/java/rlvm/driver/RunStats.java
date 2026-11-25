@@ -12,7 +12,7 @@ import rlvm.api.StatsSink;
  * enabled ({@code RunConfig.statsFile} is set); otherwise every method is a no-op and nothing is
  * allocated.
  *
- * <p>Content (ARCHITECTURE.md 6.9): wall time per phase (load, check), CPU time per thread, engine
+ * <p>Content (*agentic-note*: design-architecture-document, 6.9): wall time per phase (load, check), CPU time per thread, engine
  * steps, units and session resets per worker, peak accounted bytes, the 50 heaviest units by steps,
  * scheduler counters, and whatever the engines add through {@link StatsSink}. Everything is recorded
  * per unit or per phase, never per step. Thread-safe (one lock; statistics are off by default).

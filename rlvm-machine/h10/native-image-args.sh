@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # rlvm-machine/h10/native-image-args.sh - prints the native-image arguments of the host control convention
-# (docs/design/review/stepper-convention.md H10, rule 3) for the machine classes it is given. Owner: M6.
+# (*agentic-note*: rep-stepper-convention, H10, rule 3) for the machine classes it is given. Owner: M6.
 #
 #   rlvm-machine/h10/native-image-args.sh [JAR | CLASSES-DIR]      (default: the published jar in .toolchain/m2)
 #

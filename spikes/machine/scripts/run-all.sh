@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every measurement batch (about 45 minutes) and regenerates results/tables.md.
+# Runs every measurement batch (about 45 minutes) and regenerates the tables under work/spikes/ (scratch; the record is a journal tree).
 # Each batch is one arena-shaped container (bench/arena-docker.sh --arena-limits: 8 performance cores, 16 GB),
 # every run inside it goes through bench/measure.sh (perf stat -e instructions:u, whole process tree).
 set -uo pipefail
@@ -13,4 +13,6 @@ for b in exp1-nce hot-nce exp1-nee hot-nee exp1-jvm hot-jvm exp2 exp3 exp4-std-n
   scripts/pbatch.sh "$OUT/batches/$b.batch" "results/$b.txt" > /dev/null
   echo "done $b $(date +%T)"
 done
-python3 -I scripts/tables.py > results/tables.md
+# the tables are a note: they go to scratch, the record is *agentic-note*: rep-spike-machine
+mkdir -p ../../work/spikes/machine
+python3 -I scripts/tables.py > ../../work/spikes/machine/tables.md

@@ -21,7 +21,7 @@ import rlvm.store.Terms;
  * The official {@code add_inductive} on one block: pre-checks, nested-occurrence elimination, type
  * formers, constructors and positivity, elimination universe, K, motives and minor premises,
  * recursor types and rules, the defensive checks, restoration of nested blocks
- * ({@code docs/research/03-kernel-declarations.md} sections 6.1 - 6.12, checklist items 25 - 48;
+ * (*agentic-note*: study-kernel-declarations, sections 6.1 - 6.12, checklist items 25 - 48;
  * {@code refs/lean4/src/kernel/inductive.cpp} at v4.36.0, whose function names are quoted in the
  * comments below).
  *

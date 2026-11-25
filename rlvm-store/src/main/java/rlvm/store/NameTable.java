@@ -21,7 +21,7 @@ import java.util.Arrays;
  * One writer at a time: the loader thread until the load is complete, then the environment thread
  * (late names and claims of generated constants: {@link GeneratedBuilder}). Published name records
  * are immutable. The {@code constOf} word is the flat-namespace guard: a second declaration of a
- * name fails (ARCHITECTURE.md 4.2); with one writer at a time {@link #claim} is a plain test-and-set.
+ * name fails (*agentic-note*: design-architecture-document, 4.2); with one writer at a time {@link #claim} is a plain test-and-set.
  *
  * <p>Readers on other threads go through a volatile array reference per call; the intern index is
  * the writer's alone ({@link #findStr} is for the thread that currently writes).

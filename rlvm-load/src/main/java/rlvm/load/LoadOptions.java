@@ -7,7 +7,7 @@ public final class LoadOptions {
     public enum Mode {
         /** Publish once, at end of file (levels frozen once). The simple, always-correct mode. */
         BATCH,
-        /** Publish as units complete, so that checking overlaps loading (ARCHITECTURE.md 3.5). */
+        /** Publish as units complete, so that checking overlaps loading (*agentic-note*: design-architecture-document, 3.5). */
         PIPELINED
     }
 

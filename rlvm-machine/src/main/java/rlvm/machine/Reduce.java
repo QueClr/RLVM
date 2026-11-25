@@ -11,7 +11,7 @@ import rlvm.store.DeclTable;
  * resume switch (which also dispatches the frames of {@link NatRed} and {@link Rules}). Owner: M3.
  *
  * <p>Entry steps are the frozen cross-package interface; continuation steps {@code k_*}, loop methods
- * and frame keys are this file's own (stepper-convention.md H2-H4; template in WORK-PACKAGES.md).
+ * and frame keys are this file's own (*agentic-note*: rep-stepper-convention, H2-H4; template in *agentic-note*: rep-machine-work-packages).
  *
  * <h2>What reduces where (official rules: R02 section 7)</h2>
  * <pre>

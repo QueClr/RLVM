@@ -16,7 +16,7 @@ import rlvm.store.DeclKind;
 import rlvm.store.Kind;
 
 /**
- * The catalogue of ARCHITECTURE.md 3.4 (non-canonical and hostile input), row by row, through reader
+ * The catalogue of *agentic-note*: design-architecture-document, 3.4 (non-canonical and hostile input), row by row, through reader
  * and loader: what must load unchanged, what must be rejected ({@link MalformedExportException}: the
  * official reader fails) and what must be declined ({@link UnsupportedExportException}).
  */

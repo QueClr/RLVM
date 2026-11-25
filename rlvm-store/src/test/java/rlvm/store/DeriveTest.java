@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import rlvm.store.Model.M;
 
 /**
- * ARCHITECTURE.md 9.1 / WP-A1: node derivation (looseRange, fvMask, depMax, lpSet, flags) against a
+ * *agentic-note*: design-architecture-document, 9.1 / WP-A1: node derivation (looseRange, fvMask, depMax, lpSet, flags) against a
  * naive recursive recomputation on random DAGs, for the three writers: the export region, the
  * overlay constructors and the proof-block decoder.
  */

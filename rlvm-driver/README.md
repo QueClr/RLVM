@@ -1,13 +1,13 @@
 # rlvm-driver
 
-Package `rlvm.driver`, work package D2 of `docs/design/ARCHITECTURE.md` 10.2: runs one check of one export
+Package `rlvm.driver`, work package D2 of *agentic-note*: design-architecture-document, 10.2: runs one check of one export
 from a loaded (or to be loaded) store to a verdict. Threads, scheduler, sessions' lifecycle, re-check
 protocol, verdict, memory account, statistics. It never calls `System.exit`, never sees an engine class
 (engines arrive as `EngineFactory`), and never sees the reader (`rlvm-export`), the level or the number
 module: those come through `Wiring`, implemented by `rlvm-main`.
 
-Authority: `OWNER-NOTES.md` > `RECONCILIATION.md` > `ARCHITECTURE.md` sections 3.5, 4.1, 6, 8. Where this
-module follows `RECONCILIATION.md` instead of `ARCHITECTURE.md`, or deviates from both, the table at the end
+Authority: *agentic-note*: owner-notes > *agentic-note*: design-reconciliation-document > *agentic-note*: design-architecture-document, sections 3.5, 4.1, 6, 8. Where this
+module follows *agentic-note*: design-reconciliation-document instead of *agentic-note*: design-architecture-document, or deviates from both, the table at the end
 says so.
 
 ## What is implemented
@@ -989,7 +989,7 @@ touched). The give-back rule did not fire once (`giveBacks` 0) and no unit neede
 
 ### Wave 8: where the wall clock of 8 workers goes (2026-11-24, 15:30Z to 18:30Z; agent P7)
 
-The full report is `docs/research/profiles/P7.md`; this is what concerns the driver. All rows: machine engine
+The full report is *agentic-note*: rep-P7; this is what concerns the driver. All rows: machine engine
 `warm,gated,expect`, cap 4 MiB, CE native image `-O3`, **every wall-clock number through `bench/quiet.py`** (the
 8 performance cores reserved; load average of the host 45 - 140, of which about 3 % - 7 % still reach the
 measurement cores as run-queue time; single runs unless stated; differences below 3 % are not results; the same

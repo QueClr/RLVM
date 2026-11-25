@@ -1097,12 +1097,12 @@ class M6FacadeTest {
         assertEquals(0, Op.SW_EXPERIMENTS & Op.SW_ALL);
         assertEquals(0, Op.SW_DEFAULT & (Op.SW_EXPERIMENTS | Op.SW_K2), "no experiment is a default");
         assertEquals(Debug.parseSwitches("warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same"),
-                Op.SW_WAVE6, "the default set of the wave-6 integration (SWITCHES.md)");
+                Op.SW_WAVE6, "the default set of the wave-6 integration (*agentic-note*: design-switches-document)");
         assertEquals(Debug.parseSwitches("warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same,eager,skipargs,congruence"),
-                Op.SW_DEFAULT, "the default set of 2026-11-25 (SWITCHES.md): wave 6 + eager, skipargs, congruence");
+                Op.SW_DEFAULT, "the default set of 2026-11-25 (*agentic-note*: design-switches-document): wave 6 + eager, skipargs, congruence");
         assertEquals(Op.SW_DEFAULT, Op.implied(Op.SW_DEFAULT), "a shortcut in the default set has the switch it needs");
         assertEquals(0, Op.SW_DEFAULT & (Op.SW_TELE | Op.SW_T2 | Op.SW_M2B | Op.SW_LEVELS_COMPLETE | Op.SW_INERT_LOOP | Op.SW_CONV_EXPECT),
-                "not in the default set (SWITCHES.md says why)");
+                "not in the default set (*agentic-note*: design-switches-document says why)");
         assertEquals("none", System.getProperty("rlvm.machine.switches", "none"), "the module's tests run v0 unless they say otherwise (pom.xml)");
         assertThrows(IllegalArgumentException.class, () -> Debug.parseSwitches("warm,-fast"));
         // without the setting an engine runs the default set; a strict engine runs none

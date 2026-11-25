@@ -16,7 +16,7 @@ import rlvm.driver.Fakes.FakeHost;
 import rlvm.driver.Fakes.Unit;
 
 /**
- * The invariance suite of ARCHITECTURE.md 9.1 / 9.2 for the driver: on randomized fake workloads with
+ * The invariance suite of *agentic-note*: design-architecture-document, 9.1 / 9.2 for the driver: on randomized fake workloads with
  * injected failures the verdict and the unit that decides it are the same for 1, 2, 4 and 8 workers,
  * for every chunk size, environment batch size and session cap, and equal to what the verdict rule
  * says independently of any schedule.
@@ -248,7 +248,7 @@ class InvarianceTest {
     }
 
     /**
-     * Pipelined loading (ARCHITECTURE.md 3.5): the file appears in pieces while the environment thread
+     * Pipelined loading (*agentic-note*: design-architecture-document, 3.5): the file appears in pieces while the environment thread
      * and the workers check; some units cannot be decided before the end of the file. The verdict
      * and the deciding unit are those of the batch run, i.e. of the verdict rule.
      */

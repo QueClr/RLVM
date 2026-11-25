@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  rlvm-machine: the RLVM machine (docs/design/ISA.md), EngineProvider "machine".
-  Module build owner: work package M6 (rlvm-machine/OWNERSHIP.md). Created by the workflow
+  rlvm-machine: the RLVM machine (*agentic-note*: design-isa-document), EngineProvider "machine".
+  Module build owner: work package M6 (*agentic-note*: rep-machine-ownership). Created by the workflow
   "rlvm-wave4-machine".
 
   Compile:  rlvm-store, rlvm-api, rlvm-level, rlvm-nat   (ISA 13.1; no Truffle, no reflection)
@@ -100,14 +100,14 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <!-- A small thread stack on purpose: the machine must not need a deep host stack
-               (stepper-convention.md H9); tests that need one start their own thread. -->
+               (*agentic-note*: rep-stepper-convention, H9); tests that need one start their own thread. -->
           <argLine>-Xss2m -Xmx6g -XX:+UseSerialGC</argLine>
           <groups>${groups}</groups>
           <excludedGroups>${excludedGroups}</excludedGroups>
           <systemPropertyVariables>
             <rlvm.root>${rlvm.root}</rlvm.root>
             <!-- Test engines are v0 unless a test names its switches (Fixture.switches, M8Harness, ..): the
-                 production default set (Op.SW_DEFAULT, SWITCHES.md) must not change what a test of v0 tests. -->
+                 production default set (Op.SW_DEFAULT, *agentic-note*: design-switches-document) must not change what a test of v0 tests. -->
             <rlvm.machine.switches>none</rlvm.machine.switches>
           </systemPropertyVariables>
         </configuration>

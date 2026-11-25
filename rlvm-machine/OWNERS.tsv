@@ -1,12 +1,13 @@
 # rlvm-machine/OWNERS.tsv - file ownership inside the module (enforced by scripts/machine-sandbox.sh).
 # pattern<TAB>package. Patterns are relative to rlvm-machine/, bash globs (* also crosses /), FIRST MATCH WINS.
-# A file that matches no line belongs to nobody: it is never published from a sandbox (this table itself,
-# OWNERSHIP.md and WORK-PACKAGES.md are such files: they are edited in the main tree only, the table through
-# `scripts/machine-sandbox.sh claim WP PATH`).
+# A file that matches no line belongs to nobody: it is never published from a sandbox (this table itself is
+# such a file: it is edited in the main tree only, through `scripts/machine-sandbox.sh claim WP PATH`).
+# The module's notes are trees of the journal (*agentic-note*: rep-machine-ownership, rep-machine-work-packages,
+# rep-machine-M1 .. rep-machine-M8, rep-machine-S, design-switches-document): no sandbox owns or publishes one.
 #
 # Naming conventions (the glob lines at the end): a package owns the test classes whose name starts with
-# its key (src/test/java/rlvm/machine/M3*.java), its test resources (src/test/resources/m3/**) and its
-# notes (NOTES-M3.md). New main classes are claimed with `claim`.
+# its key (src/test/java/rlvm/machine/M3*.java) and its test resources (src/test/resources/m3/**).
+# New main classes are claimed with `claim`.
 #
 # ---- main tree: explicit files
 src/main/java/rlvm/machine/Values.java	M1
@@ -65,7 +66,6 @@ h10/hotspot-inline.cmd	M6
 h10/native-image-args.sh	M6
 src/main/java/rlvm/machine/CodeShow.java	M7
 src/main/java/rlvm/machine/Tier.java	M7
-SWITCHES.md	M6
 src/main/java/rlvm/machine/Same.java	M4
 src/test/java/rlvm/machine/M1*.java	M1
 src/test/java/rlvm/machine/M2*.java	M2
@@ -83,16 +83,7 @@ src/test/resources/m5/*	M5
 src/test/resources/m6/*	M6
 src/test/resources/m7/*	M7
 src/test/resources/m8/*	M8
-NOTES-M1.md	M1
-NOTES-M2.md	M2
-NOTES-M3.md	M3
-NOTES-M4.md	M4
-NOTES-M5.md	M5
-NOTES-M6.md	M6
-NOTES-M7.md	M7
-NOTES-M8.md	M8
 # ---- package S: the independent soundness review (wave 6; hostile exports and one test class asserting the official verdicts).
 #      S*.java also matches Sexp.java and StepSizeTest.java, which have explicit M6 lines above (first match wins).
 src/test/java/rlvm/machine/S*.java	S
 src/test/resources/s/*	S
-NOTES-S.md	S

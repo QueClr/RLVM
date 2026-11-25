@@ -9,7 +9,7 @@ package rlvm.machine;
  * {@code work/status/requests.log} ("Mx -> M6: ...") and recorded in the change log of ISA section 15.
  * Error codes are {@code rlvm.api.MachineErrors}; they are not redefined here.
  *
- * <p>Section references are to {@code docs/design/ISA.md}.
+ * <p>Section references are to *agentic-note*: design-isa-document.
  */
 public final class Layout {
     private Layout() {}

@@ -2,7 +2,7 @@
 
 Admission of inductive blocks and of the quotient package: a port of
 `refs/lean4/src/kernel/inductive.cpp` and `quot.cpp` (v4.36.0) as specified in
-`docs/research/03-kernel-declarations.md` (R03). Work packages I1 and I2 of `ARCHITECTURE.md` 10.2.
+*agentic-note*: study-kernel-declarations (R03). Work packages I1 and I2 of *agentic-note*: design-architecture-document, 10.2.
 Package `rlvm.inductive`; depends on `rlvm-store` and `rlvm-api` only (test scope: `rlvm-load`,
 `rlvm-export` and `rlvm-ref`, for the integration tests).
 
@@ -169,7 +169,7 @@ them; `lean4export` never writes such a file.
 
 ## Stand-ins (the one structural deviation from the design documents)
 
-`ARCHITECTURE.md` 4.1 / `KernelOps.exposeUnitMembers` foresee that the engine sees the block's own
+*agentic-note*: design-architecture-document, 4.1 / `KernelOps.exposeUnitMembers` foresee that the engine sees the block's own
 types, then constructors, then recursors as constants while the block is admitted. This module never
 calls `exposeUnitMembers`. Every member of the block in flight - user types, auxiliary types,
 constructors, recursors - is a free variable (`KernelOps.mkLocal`) whose type is the member's type;

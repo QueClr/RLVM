@@ -14,8 +14,8 @@ import rlvm.api.Outcome;
 import rlvm.api.Reason;
 
 /**
- * The status chain of ARCHITECTURE.md 8.1 over its whole input space for small unit counts, against
- * an independent statement of the verdict rule of RECONCILIATION.md section 2.
+ * The status chain of *agentic-note*: design-architecture-document, 8.1 over its whole input space for small unit counts, against
+ * an independent statement of the verdict rule of *agentic-note*: design-reconciliation-document, section 2.
  */
 class VerdictBoardTest {
 

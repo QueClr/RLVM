@@ -9,7 +9,7 @@ import rlvm.store.Kind;
 
 /**
  * In-memory {@link LoadTarget} for the loader's own tests: flat arrays, structural name interning,
- * proof blocks kept as decoded records, promotion as specified in ARCHITECTURE.md 3.3. It checks the
+ * proof blocks kept as decoded records, promotion as specified in *agentic-note*: design-architecture-document, 3.3. It checks the
  * protocol of {@link LoadTarget} as it goes (children exist, block references point backwards, units
  * are opened and closed, names are reserved before rows are completed).
  */

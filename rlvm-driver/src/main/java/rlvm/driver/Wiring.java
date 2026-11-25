@@ -21,7 +21,7 @@ public interface Wiring {
      * Reads the export into {@code store} on the calling thread: reader, loader, store; returns after
      * {@code Loader.finish()} and after everything the workers read is frozen.
      *
-     * <p><b>Pipelined</b> ({@code options.mode == PIPELINED}, ARCHITECTURE.md 3.5): the options are
+     * <p><b>Pipelined</b> ({@code options.mode == PIPELINED}, *agentic-note*: design-architecture-document, 3.5): the options are
      * passed to the loader as they are. They carry the hand-off interval and the driver's
      * {@code rlvm.load.LoadListener}: units are published while the file is read
      * ({@code Store.publishLoaded}) and every publication is announced to the listener on the calling

@@ -1,6 +1,6 @@
 /**
  * RLVM module {@code rlvm-load}: turns the record stream of an export into the shared store
- * ({@code docs/design/ARCHITECTURE.md} section 3).
+ * (*agentic-note*: design-architecture-document, section 3).
  *
  * <p>{@link rlvm.load.Loader} is an {@code rlvm.export.ExportSink}: structural name interning, the
  * per-declaration segment buffer with the ownership split (shared terms versus proof block),

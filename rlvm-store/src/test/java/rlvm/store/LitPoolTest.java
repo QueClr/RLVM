@@ -13,7 +13,7 @@ import java.util.Random;
 
 import org.junit.jupiter.api.Test;
 
-/** WP-A2: the literal pool. Interning by content (RECONCILIATION.md "Literal identity"), worker pools, code points. */
+/** WP-A2: the literal pool. Interning by content (*agentic-note*: design-reconciliation-document, "Literal identity"), worker pools, code points. */
 class LitPoolTest {
 
     private static int add(LitPool p, String s) {

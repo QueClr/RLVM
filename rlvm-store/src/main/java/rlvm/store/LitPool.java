@@ -10,7 +10,7 @@ import java.util.Arrays;
  * are stored once, in chunks that are never copied or moved (a declaration can compute gigabytes of
  * them: {@code perf/gf3-matrix-product}); a number of 1,024 limbs or more has an array of its own.
  *
- * <p>Both kinds are interned BY CONTENT (RECONCILIATION.md section 2, "Literal identity"): equal
+ * <p>Both kinds are interned BY CONTENT (*agentic-note*: design-reconciliation-document, section 2, "Literal identity"): equal
  * numbers, and equal strings, have equal indices. Naturals and strings have separate index spaces,
  * each starting at 1; index 0 is "none".
  *

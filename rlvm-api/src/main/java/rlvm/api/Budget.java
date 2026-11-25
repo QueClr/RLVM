@@ -4,7 +4,7 @@ package rlvm.api;
  * Deterministic resource limits for checking one unit. Limits are counted in engine steps and bytes,
  * never in time, so that a verdict cannot depend on machine load or on the number of workers.
  *
- * <p>RECONCILIATION.md section 3 (scheduler): a warm session has <em>no step limit</em>; the memory
+ * <p>*agentic-note*: design-reconciliation-document, section 3 (scheduler): a warm session has <em>no step limit</em>; the memory
  * watermark and first-failure polling ({@link RunSignals}) are what stops a unit there. Step budgets
  * exist only for strict and differential runs ({@link #strict(long, long)}).
  */
@@ -33,7 +33,7 @@ public final class Budget {
     }
 
     /**
-     * First attempt in a warm session: no step limit (RECONCILIATION.md: "no step limit in warm
+     * First attempt in a warm session: no step limit (*agentic-note*: design-reconciliation-document: "no step limit in warm
      * sessions"), a byte limit so that a heavy unit moves to the heavy lane, and a depth limit that
      * fits a worker's stack.
      */

@@ -1,8 +1,8 @@
 package rlvm.api;
 
 /**
- * The machine's error codes ({@code E_*} of {@code docs/design/ISA.md} sections 4 and 9) and their
- * mapping to the facade's {@link Reason}s (RECONCILIATION.md section 2, "Facade" and "Faults inside
+ * The machine's error codes ({@code E_*} of *agentic-note*: design-isa-document, sections 4 and 9) and their
+ * mapping to the facade's {@link Reason}s (*agentic-note*: design-reconciliation-document, section 2, "Facade" and "Faults inside
  * TRY"). Codes are small {@code int}s so that a machine can keep one in a register; an engine is
  * free to use them directly or to translate its own enum once, at the facade.
  *

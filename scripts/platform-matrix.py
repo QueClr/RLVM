@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/platform-matrix.py - the platform comparison behind docs/PLATFORM.md.
+"""scripts/platform-matrix.py - the platform comparison behind *agentic-note*: design-platform-document.
 
 Runs a matrix  configurations x corpora x worker counts x repeats  of the RLVM launchers, each run
 measured exactly like the arena measures a checker (bench/measure.sh: perf stat + GNU time around

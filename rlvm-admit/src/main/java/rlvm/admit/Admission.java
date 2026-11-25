@@ -12,7 +12,7 @@ import rlvm.store.Overlay;
 
 /**
  * The per-unit admission flow a worker runs for axiom, definition, theorem and opaque units
- * (ARCHITECTURE.md 4.4). Inductive and quot units are decided by the {@link EnvBuilder}; a worker
+ * (*agentic-note*: design-architecture-document, 4.4). Inductive and quot units are decided by the {@link EnvBuilder}; a worker
  * that draws one only reads its recorded outcome.
  *
  * <pre>

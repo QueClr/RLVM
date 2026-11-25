@@ -4,7 +4,7 @@ package rlvm.store;
  * Bit-level layout of a term node and of term ids. A node is 8 consecutive {@code int}s (32 bytes,
  * half a cache line) of one flat {@code int[]} per region; all facts every consumer needs sit in the
  * node itself. Flat, not chunked: a chunk directory costs about 25 % more instructions per access
- * ({@code docs/research/11-memory-reuse-parallelism.md} B.3).
+ * (*agentic-note*: study-memory-reuse-parallelism, B.3).
  *
  * <pre>
  * word 0  header   bits 0..3 kind ({@link Kind}) | bits 4..15 flags (F_*) | bits 16..31 looseRange
@@ -25,7 +25,7 @@ package rlvm.store;
  *
  * {@code looseRange} is "largest loose index + 1" (0 = closed), saturating at 0xFFFF with
  * {@link #F_LOOSE_SAT}. Derivation rules for looseRange, fvMask, depMax and lpSet are in
- * ARCHITECTURE.md section 2.1; they are computed once, when the node is written.
+ * *agentic-note*: design-architecture-document, section 2.1; they are computed once, when the node is written.
  */
 public final class Node {
     private Node() {}
@@ -62,8 +62,8 @@ public final class Node {
     /** NATLIT whose value is in the {@link LitPool}. */
     public static final int F_NAT_BIG = 1 << 12;
     /**
-     * Sharing flags (RECONCILIATION.md section 3; ISA.md R1'). They are the three header bits that
-     * ARCHITECTURE.md 2.1 reserved for the machine. All three are hints for the machine's tabling
+     * Sharing flags (*agentic-note*: design-reconciliation-document, section 3; *agentic-note*: design-isa-document, R1'). They are the three header bits that
+     * *agentic-note*: design-architecture-document, 2.1 reserved for the machine. All three are hints for the machine's tabling
      * gate and never under-approximate: a node that is not flagged has at most one referrer inside
      * its declaration's segment.
      *

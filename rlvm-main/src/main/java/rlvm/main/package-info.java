@@ -3,7 +3,7 @@
  * that the launcher's service lookup finds ({@link rlvm.main.RlvmChecker}, to implement
  * {@code rlvm.cli.Checker}) and the wiring: launcher options to {@code RunConfig}, engine lookup
  * through {@link rlvm.api.EngineProvider}, reader + loader + driver, exit code to verdict
- * ({@code docs/design/ARCHITECTURE.md} sections 1 and 8).
+ * (*agentic-note*: design-architecture-document, sections 1 and 8).
  *
  * <p>Depends on {@code rlvm-driver} and what it needs; later on {@code rlvm-cli} (the SPI),
  * {@code rlvm-export}, {@code rlvm-level}, {@code rlvm-nat}. It has no compile-time dependency on an

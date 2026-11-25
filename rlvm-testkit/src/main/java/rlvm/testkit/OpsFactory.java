@@ -7,7 +7,7 @@ import rlvm.api.WorkerContext;
 /**
  * Supplies the {@link KernelOps} of an engine whose sessions offer none: the machine's
  * {@code Session.ops()} is null in its release configuration, and its test tree has a
- * {@code MachineOps} (ISA.md 14.6). The {@link KernelSampler} of a differential run calls
+ * {@code MachineOps} (*agentic-note*: design-isa-document, 14.6). The {@link KernelSampler} of a differential run calls
  * {@link #open} once per session of the engine under test.
  *
  * <p>An implementation named by {@code rlvm.diff.ops} (or {@code testkit diff --ops CLASS}) needs a

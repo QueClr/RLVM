@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import rlvm.store.Model.M;
 
 /**
- * The generated region (ARCHITECTURE.md 2.2, 4.2): shared copies of terms the environment thread
+ * The generated region (*agentic-note*: design-architecture-document, 2.2, 4.2): shared copies of terms the environment thread
  * derived, generated constants, late names, and the rebinding of references written before the
  * constant existed.
  */

@@ -13,7 +13,7 @@ import rlvm.api.Reason;
 import rlvm.store.DeclKind;
 
 /**
- * Structural checks on hand-built stores (ARCHITECTURE.md 9.1): every row of the table in 4.3, the
+ * Structural checks on hand-built stores (*agentic-note*: design-architecture-document, 9.1): every row of the table in 4.3, the
  * exact walk, and the shapes of the arena reject tests whose reason is structural.
  */
 class StructuralChecksTest {

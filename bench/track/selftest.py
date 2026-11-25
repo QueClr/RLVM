@@ -185,7 +185,7 @@ def test_baselines() -> None:
 
 
 def test_benchmarks() -> None:
-    """docs/BENCHMARKS.md from rows of bench/warm.py: the owner's order, the latest quiet row per cell, provenance."""
+    """*agentic-note*: rep-benchmarks from rows of bench/warm.py: the owner's order, the latest quiet row per cell, provenance."""
     print("benchmarks document (OWNER-NOTES 12 order)")
     cols = ["utc", "quiet", "corpus", "what", "launcher", "workers", "load", "mode", "passes", "verdict", "best_later_s",
             "median_later_s", "pass1_s", "cold_wall_s", "cpu_median_s", "gc_median_ms", "peak_rss_mib", "cold_cpu_s",
@@ -402,7 +402,7 @@ def test_ladder() -> None:
                              "--baselines", "no-such-checker"], capture_output=True, text=True)
     check("a baseline without a wrapper is skipped with a warning", "no wrapper" in result.stderr and "track.py" not in result.stdout,
           result.stdout[-300:] + result.stderr[-300:])
-    # The cold tables from the tracker's history (the generator of docs/BENCHMARKS.md until 2026-11-24T23Z).
+    # The cold tables from the tracker's history (the generator of *agentic-note*: rep-benchmarks until 2026-11-24T23Z).
     result = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks_cold.py"), "--stdout", "--history", "/nonexistent"],
                             capture_output=True, text=True)
     text = result.stdout

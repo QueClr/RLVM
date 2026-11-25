@@ -1,9 +1,9 @@
 # rlvm-truffle - the T2 tier of the machine
 
 Owner: T3 (since 2026-11-24 16:31Z; built by T2). Package `rlvm.truffle` (+ one bridge class in package
-`rlvm.machine`, see "Bridge"). Design: `docs/design/ISA.md` sections 0.5, 8.1, 8.3 - 8.6. Hook:
-`rlvm.machine.Tier` (M7). How it was built and its correctness record: `NOTES-T2.md`. **The measurements, the
-go / no-go (NO-GO as a default) and everything changed since: `NOTES-T3.md`** - where this file and
+`rlvm.machine`, see "Bridge"). Design: *agentic-note*: design-isa-document, sections 0.5, 8.1, 8.3 - 8.6. Hook:
+`rlvm.machine.Tier` (M7). How it was built and its correctness record: *agentic-note*: rep-truffle-T2. **The measurements, the
+go / no-go (NO-GO as a default) and everything changed since: *agentic-note*: rep-truffle-T3** - where this file and
 NOTES-T3 differ, NOTES-T3 is right (in short: in `mode=warm` the tier now promotes by its own entry counters
 and does not switch the machine's heat accounting on; the read-only helpers are compiled into the blocks;
 `rlvm.t2.ahead` is a rejected experiment).

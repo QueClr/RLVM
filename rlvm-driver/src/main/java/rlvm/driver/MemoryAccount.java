@@ -3,7 +3,7 @@ package rlvm.driver;
 import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
- * The run's memory account (ARCHITECTURE.md 6.7): bytes of the shared store plus, per checking
+ * The run's memory account (*agentic-note*: design-architecture-document, 6.7): bytes of the shared store plus, per checking
  * thread, the bytes its sessions hold (allocated, not merely used: see {@code RunHost.Lane.slackBytes}).
  * Sessions poll it through {@code RunSignals.memoryExhausted()} and give up their unit with
  * {@code BUDGET_MEMORY} instead of letting the runner's OOM killer end the process.

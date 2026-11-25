@@ -36,7 +36,7 @@ git); data lives in `work/` (gitignored).
 | `baselines/profile-mathlib.sh` | per-declaration cost profiles of nano-lean, gruszka, sokonanoda and rpylean, from the profiling switches of those checkers | container |
 | `baselines/instrtap.c`, `baselines/instrtap-test.c`, `baselines/InstrtapTest.java` | `LD_PRELOAD` library: the calling thread's instruction count at every per-declaration line an unmodified checker prints; its self-tests (C, JVM) | container |
 | `baselines/profile-summary.py` | the profiles as `work/baselines/mathlib-profile.json`, `.tsv.gz` per checker, tables | host or container |
-| `baselines/render-tables.py` | refreshes the generated tables in `docs/research/12-baselines.md` and in this file | host |
+| `baselines/render-tables.py` | refreshes the generated tables in this file (the tables of the baseline study are in *agentic-note*: study-baselines) | host |
 
 ## Quick start
 
@@ -729,7 +729,7 @@ accepted, 0.90–0.96 of the published counts.
 
 ### Baselines on the big corpora: init, std, mathlib (2026-11-24)
 
-What RLVM has to beat on this machine. Full discussion: `docs/research/12-baselines.md`; machine-readable:
+What RLVM has to beat on this machine. Full discussion: *agentic-note*: study-baselines; machine-readable:
 `bench/baselines.json`.
 
 ```bash
@@ -833,7 +833,7 @@ corpus is the median over its runs.
 | sokonanoda | 8 | 510.7e9 | 85.12 s | 1.048 | 106.6 | 19.7 | 5,607 |
 <!-- END big:threads -->
 
-Ratios of these counts to the arena's published x86-64 counts are in `docs/research/12-baselines.md`, section 3
+Ratios of these counts to the arena's published x86-64 counts are in *agentic-note*: study-baselines, section 3
 (`bench/baselines/big-summary.py --section arch`).
 
 ### Per-declaration profiles on mathlib
@@ -868,7 +868,7 @@ LD_PRELOAD=$PWD/libinstrtap.so INSTRTAP_PREFIXES='start |end ' [INSTRTAP_FD=2] P
 `profile-mathlib.sh selftest` checks the library against a loop of known length on 4 threads (1,200,000,522
 counted for 1,200,000,000 + the two calls). `profile-mathlib.sh selftest-java` does the same with a JVM program
 (`System.err.println` ends in libc's `write`; the count is the Java thread's own, without JIT and GC threads).
-Results and their reading: `docs/research/12-baselines.md`, section 5.
+Results and their reading: *agentic-note*: study-baselines, section 5.
 
 As run on 2026-11-24, to fit next to the series: the single-worker steps in a container on CPUs 18,19
 (`bench/arena-docker.sh --cpuset-cpus 18,19 --memory 16g --no-network ...` instead of `--arena-limits`), the
@@ -1001,7 +1001,7 @@ bench/arena-docker.sh --arena-limits --no-network bench/baselines/profile-mathli
     nano-lean-import nano-lean-j1 gruszka-pack gruszka-w1 gruszka-check-w1 sokonanoda-parse sokonanoda-v1 \
     rpylean-jsonl nano-lean-j4 gruszka-w4 gruszka-check-w4 sokonanoda-v4
 bench/baselines/profile-summary.py
-bench/baselines/render-tables.py docs/research/12-baselines.md bench/README.md
+bench/baselines/render-tables.py bench/README.md
 ```
 
 ## Things to keep in mind
@@ -1032,7 +1032,7 @@ bench/baselines/render-tables.py docs/research/12-baselines.md bench/README.md
 - Rank by instruction count, on mathlib. The same JVM checker (tenet-jvm)
   with the Graal JIT instead of C2 needs 1.4 % more CPU time on mathlib and
   28 % more instructions (7 % more on init); gruszka and nano-lean are level
-  on init and std and 16 % apart on mathlib (`docs/research/12-baselines.md`).
+  on init and std and 16 % apart on mathlib (*agentic-note*: study-baselines).
 - `baselines/big.sh` stops its container when it gets SIGINT or SIGTERM; a
   measurement in progress is lost, the records already in `runs.jsonl` stay.
 

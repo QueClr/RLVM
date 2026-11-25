@@ -7,7 +7,7 @@ import java.util.Locale;
 
 /**
  * What the two skeleton deviations from the measured convention cost in CPU time (NOTES-M6 S3, S4;
- * stepper-convention.md H4, H9, H11): the depth bound as a per-machine field ({@code d > m.hostDepth})
+ * *agentic-note*: rep-stepper-convention, H4, H9, H11): the depth bound as a per-machine field ({@code d > m.hostDepth})
  * instead of the constant ({@code d > Op.HOST_DEPTH}), and the masked TICK line
  * ({@code (--m.fuel & POLL_MASK) == POLL_MASK && m.tickSlow()}) instead of {@code --m.fuel < 0}.
  * Owner: M8. Run by {@code rlvm-machine/src/test/resources/m8/convcost.sh}.

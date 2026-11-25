@@ -13,10 +13,10 @@ import org.junit.jupiter.api.Test;
 @Tag("slow")
 class SHostileSlowTest {
 
-    /** The default set proposed by the integrator of wave 6 (SWITCHES.md), without {@code same}. */
+    /** The default set proposed by the integrator of wave 6 (*agentic-note*: design-switches-document), without {@code same}. */
     static final String CANDIDATE = SHostile.STEP1 + ",bodies,code,casetrees,lazyeval,lazycases,match,joint,pchk,directrules";
 
-    /** The default set with `eager` and the two shortcuts: the candidate of S3's second pass ({@code soundness-default-set.md} section 10). */
+    /** The default set with `eager` and the two shortcuts: the candidate of S3's second pass (*agentic-note*: rep-soundness-default-set, section 10). */
     static final String SHORTCUTS = SHostile.WAVE6 + ",eager,skipargs,congruence";
 
     static final String[] SETS = {

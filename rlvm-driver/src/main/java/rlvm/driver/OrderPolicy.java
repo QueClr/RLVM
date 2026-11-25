@@ -4,11 +4,11 @@ import rlvm.store.Store;
 
 /**
  * The order in which ready units are offered to workers. Any order is sound: a unit is checked only
- * against constants of smaller rank, whatever was checked before it (ARCHITECTURE.md 6.2). The order
+ * against constants of smaller rank, whatever was checked before it (*agentic-note*: design-architecture-document, 6.2). The order
  * only decides how warm the session caches are.
  *
  * <p>Only {@link Kind#FILE} is implemented. Namespace grouping is deferred until the vertical slice
- * and the 230 small tests pass (RECONCILIATION.md section 3); {@link #of} throws
+ * and the 230 small tests pass (*agentic-note*: design-reconciliation-document, section 3); {@link #of} throws
  * {@code UnsupportedOperationException} for it and {@link Scheduler} accepts the file order only.
  */
 public interface OrderPolicy {

@@ -140,7 +140,7 @@ configuration (OWNER-NOTES 13):
   reference engine; a unit the primary engine declines goes to it);
 - (d) accepting a derivable statement that the official checker rejects only through its own
   incompleteness, non-transitivity, cache order or object identity ("kind T") is tolerated; the
-  known classes are written down with one export each (`docs/design/review/official-divergence.md`).
+  known classes are written down with one export each (*agentic-note*: rep-official-divergence).
 
 | | `policy=practical` (default) | `policy=strict` |
 |---|---|---|
@@ -160,7 +160,7 @@ heap). Neither policy can turn a rejection into an acceptance of something under
 ADDS declines.
 
 **The safety net of the practical policy** (`RlvmChecker.strictRecheck`; contract (c); finding R2-F4,
-`docs/design/review/reference-caches.md` 6.1). The practical loader drops metadata nodes; the official
+*agentic-note*: rep-reference-caches, 6.1). The practical loader drops metadata nodes; the official
 kernel keeps them, and some of its syntactic tests stop at one. So a REJECT of a practical run on a
 file in which the loader dropped a metadata node (`LoadReport.exprMData` > 0) is not reported: the
 file is checked once more as a plain run under `policy=strict` (fresh stores; the command line
@@ -197,7 +197,7 @@ A given setting always wins and is never changed. Nothing changes for one worker
 Tests: `LoadDefaultsTest` (the rule as a table; the run configuration for sparse files of 8 MiB and
 256 MiB; through the real launcher: a run with four workers and no `-X load` is pipelined for real,
 gives the batch run's verdict for an accepted and a rejected export, and says `load=pipelined(auto)`).
-Measurements and gates: `docs/PLATFORM.md`, sections 0.5 to 0.7.
+Measurements and gates: *agentic-note*: design-platform-document, sections 0.5 to 0.7.
 
 ## Invariants
 
@@ -251,13 +251,13 @@ Measurements and gates: `docs/PLATFORM.md`, sections 0.5 to 0.7.
 | `scripts/dev.sh diff ARGS`, `oracle`, `judge`, `mutate`, `corpus`, `track` | pass-throughs to `rlvm-testkit/bin/testkit` and `bench/track/track.py`; `diff` is the test kit's differential campaign; `diff-launcher EXPORT` runs the JVM launcher once with the test kit's `diff` engine provider on `RLVM_EXTRA_CP` |
 | `scripts/dev.sh gate [--dist DIR] [--corpus NAME\|all] [--load pipelined] [--engine NAME] [-X K=V] [--pin CPUS]` | `scripts/gate.sh` (wave 4): the end-to-end guards in one command - distribution, the 230 published tests through the JVM launcher, the mutant campaign(s) with `scripts/check-light.sh`, the differential self-test. Pinned to the efficiency cores by default so that guards do not spoil measurements (a pinned gate checks verdicts without the arena's per-test time limits). `--dist` guards a distribution built before publication: `scripts/build.sh --published --jvm-only --modules MODULE,rlvm-main --dist work/ME/dist-pre` |
 | `scripts/slice.sh --dist DIR`, `--no-arena-timeouts` | the table on another distribution; a verdict run without the arena's time limits (for loaded hosts; the table says so in its header) |
-| `scripts/dev.sh platform ...`, `platform-report`, `scripts/platform-all.sh STEP...` | the platform comparison of `docs/PLATFORM.md`: `scripts/platform-matrix.py` (configurations x corpora x worker counts x repeats in the arena-shaped container, under the measurement lock), the series as run, and the tables |
+| `scripts/dev.sh platform ...`, `platform-report`, `scripts/platform-all.sh STEP...` | the platform comparison of *agentic-note*: design-platform-document: `scripts/platform-matrix.py` (configurations x corpora x worker counts x repeats in the arena-shaped container, under the measurement lock), the series as run, and the tables |
 | `scripts/dev.sh machine ARGS` | pass-through to `scripts/machine-sandbox.sh` (the machine workflow's script) |
 | `scripts/dev.sh steward-install MODULE...` | `scripts/steward-install.sh`: copies the module's sources, runs its suite on the copy, installs the jar built from that copy (`--if-changed` for refreshes) |
 
 `work/dist/BUILD-INFO.txt` lists every RLVM jar of the distribution with its sha256 prefix and the time
 its owner published it, and the distribution's default engine. Since 2026-11-24T22:41Z the JVM
-launcher is the WARM platform (`docs/PLATFORM.md`, Part 0): `-XX:CICompilerCount=8
+launcher is the WARM platform (*agentic-note*: design-platform-document, Part 0): `-XX:CICompilerCount=8
 -XX:+UseTransparentHugePages`, VM messages on standard error, a sorted explicit class path, and the heap
 BY ENGINE - the machine `-Xmx7g -Xmn1g`, every other engine `-Xms13g -Xmx13g -Xmn1g` (ARCHITECTURE 7.2),
 where the engine is `-X engine=NAME`, else the distribution's default engine, and `-X policy=strict` is
@@ -350,7 +350,7 @@ With the jars published by 10:56Z (`work/dist/BUILD-INFO.txt`), reference engine
 | arena definition end to end (`scripts/dev.sh arena-test --reuse --strict`) | PASS (tree of 10:26Z) |
 
 Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, collectors, heap):
-`docs/PLATFORM.md`.
+*agentic-note*: design-platform-document.
 
 ## Defaults of a run without options
 

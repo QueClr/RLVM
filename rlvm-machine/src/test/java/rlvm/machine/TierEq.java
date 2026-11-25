@@ -14,7 +14,7 @@ import java.util.Map;
 import rlvm.api.Outcome;
 
 /**
- * Tier and convention equivalence (ISA section 11; stepper-convention.md H12): the same value ids, memo
+ * Tier and convention equivalence (ISA section 11; *agentic-note*: rep-stepper-convention, H12): the same value ids, memo
  * contents, tick counts, outcomes and frame trace under host depth bounds 0, 64, 128 and unbounded; the
  * regression data on call events and frames written per declaration; later K0 = K1. Owner: M8.
  *

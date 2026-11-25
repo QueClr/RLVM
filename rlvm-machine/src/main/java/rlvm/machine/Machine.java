@@ -20,7 +20,7 @@ import rlvm.store.Terms;
 
 /**
  * The per-session machine state (ISA section 1) and the control primitives of the host convention
- * ({@code docs/design/review/stepper-convention.md}, rules H1-H12). No judgment logic.
+ * (*agentic-note*: rep-stepper-convention, rules H1-H12). No judgment logic.
  *
  * <p>Shared file, owner M6. One instance per session, confined to its thread. Everything is primitive
  * arrays allocated once and reused; nothing here allocates on a normal path (growth doubles an array).
@@ -48,7 +48,7 @@ import rlvm.store.Terms;
  * {@code gen}, {@code epoch}; {@code err} = code of the failure that is propagating; {@code sig} = the
  * signal the tick slow path wants returned; {@code A2}, {@code A3} = extra results of LAZYD.
  *
- * <h2>The step protocol (normative; see WORK-PACKAGES.md for the full template)</h2>
+ * <h2>The step protocol (normative; see *agentic-note*: rep-machine-work-packages for the full template)</h2>
  * <pre>
  * static int J(Machine m, int x, int d) {
  *     // 1. inline answers (identity, flag, memo, cache): return at once. No tick, no event, no frame.
@@ -341,7 +341,7 @@ public final class Machine {
      * the unit whatever the driver returned.
      */
     boolean erDeclines;
-    // ---- [eager] package E1: eager reduction ON the machine (Op.SW_EAGER; docs/design/review/eager-reduction.md) ----
+    // ---- [eager] package E1: eager reduction ON the machine (Op.SW_EAGER; *agentic-note*: rep-eager-reduction) ----
     /** The rule of F26 fired: the declaration ends at the next tick (was: {@code erSeen && erDeclines}). */
     boolean erStop;
     /**
@@ -575,7 +575,7 @@ public final class Machine {
     /** Session state of the debug modes (allocated on first use by {@code Debug.state}; never touched on a normal path). */
     Debug.State dbg;
 
-    // per-package session state (owned by the package that owns the class; see WORK-PACKAGES.md)
+    // per-package session state (owned by the package that owns the class; see *agentic-note*: rep-machine-work-packages)
     final Values.Ext x1 = new Values.Ext();
     final Eval.Ext x2 = new Eval.Ext();
     final Reduce.Ext x3 = new Reduce.Ext();
@@ -1310,7 +1310,7 @@ public final class Machine {
     }
 
     // ---------------------------------------------------------------------------------------------------
-    // [eager] Eager reduction on the machine (Op.SW_EAGER; package E1, docs/design/review/eager-reduction.md)
+    // [eager] Eager reduction on the machine (Op.SW_EAGER; package E1, *agentic-note*: rep-eager-reduction)
     //
     // The official is_def_eq has ONE mode switch (m_eager_reduce lifts the hasFVar guards of the Nat folding
     // in lazy_delta_reduction and of the Bool.true test) and caches that live for one declaration and are

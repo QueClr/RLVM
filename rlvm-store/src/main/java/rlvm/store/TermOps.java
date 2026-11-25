@@ -290,7 +290,7 @@ public final class TermOps {
 
     /**
      * Instantiates universe parameters: {@code paramNames} and {@code levels} are list ids of equal
-     * length. Levels are rebuilt with the simplifying constructors (ARCHITECTURE.md 4.6, trap T3) by
+     * length. Levels are rebuilt with the simplifying constructors (*agentic-note*: design-architecture-document, 4.6, trap T3) by
      * the {@link LevelInfo} adapter. A term without universe parameters is returned as is.
      */
     public int instantiateLevelParams(int term, int paramNames, int levelList) {

@@ -59,7 +59,7 @@ public final class Terms {
 
     /**
      * The array that holds node {@code id}; its words are at {@code Node.wordOf(id) + Node.W_*}. For
-     * consumers that read several words of one node with a single region dispatch (ISA.md R1). The
+     * consumers that read several words of one node with a single region dispatch (*agentic-note*: design-isa-document, R1). The
      * array of an overlay id is valid until the overlay grows, i.e. until the next node is made.
      */
     public int[] regionOf(int id) {

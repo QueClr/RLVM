@@ -10,7 +10,7 @@ import rlvm.api.Reason;
  * Per-unit outcomes and the run's verdict. Thread-safe; the only shared mutable state of the checking
  * phase besides the scheduler's queues and the memory account.
  *
- * <p>Verdict rule (RECONCILIATION.md section 2, "Verdict rule"; ARCHITECTURE.md 8.1), independent of
+ * <p>Verdict rule (*agentic-note*: design-reconciliation-document, section 2, "Verdict rule"; *agentic-note*: design-architecture-document, 8.1), independent of
  * the number of workers and of timing:
  * <pre>
  * DECLINE  if an internal failure was recorded (a throwable outside a unit boundary), or two

@@ -3,7 +3,7 @@ package rlvm.store;
 import java.util.Arrays;
 
 /**
- * The derivation of a term node from its children (ARCHITECTURE.md 2.1), in one place: the loader's
+ * The derivation of a term node from its children (*agentic-note*: design-architecture-document, 2.1), in one place: the loader's
  * {@link StoreBuilder}, the block decoder, promotion and the overlay constructors all write nodes
  * through an instance of this class, so that a term has the same summaries wherever it is written.
  *

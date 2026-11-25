@@ -1,5 +1,5 @@
 # rlvm-machine/h10/hotspot-inline.cmd - the HotSpot inlining directives of the host control convention
-# (docs/design/review/stepper-convention.md H10, rule 3). Owner: M6.
+# (*agentic-note*: rep-stepper-convention, H10, rule 3). Owner: M6.
 #
 #   java -XX:CompileCommandFile=rlvm-machine/h10/hotspot-inline.cmd ...        (C2 and the Graal JIT honour it)
 #   work/dist/bin/rlvm-jvm -XX:CompileCommandFile=$PWD/rlvm-machine/h10/hotspot-inline.cmd -X engine=machine FILE

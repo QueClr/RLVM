@@ -25,7 +25,7 @@ import rlvm.cli.LauncherAccess;
  * Through the real launcher.
  *
  * <p>Fixtures ({@code src/test/resources/net}: hand-made exports of finding R2-F4, described in
- * {@code docs/design/review/reference-caches.md}, section 6.1; the verdicts are those of leanchecker
+ * *agentic-note*: rep-reference-caches, section 6.1; the verdicts are those of leanchecker
  * v4.36.0):
  * <ul>
  * <li>{@code r2-mdata-beta-arg-hidden-ok}: official ACCEPT. A metadata node around a lambda in

@@ -14,7 +14,7 @@ import rlvm.level.NameOracle;
 
 /**
  * Test support and measuring tool: loads a real lean4export file into the store with a miniature of
- * the loader's declaration sweep (ARCHITECTURE.md 3.3: names claimed first, shared part = what the
+ * the loader's declaration sweep (*agentic-note*: design-architecture-document, 3.3: names claimed first, shared part = what the
  * type reaches, one proof block per theorem / opaque, promotion on demand), over the real reader of
  * {@code rlvm-export} and the real level store of {@code rlvm-level}; then checks the result against
  * an oracle that never touches the store: a structural digest of every expression record, computed

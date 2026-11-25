@@ -9,7 +9,7 @@ package rlvm.api;
  * and shift-count limits, {@code Nat.sub} truncating at zero, division and modulo by zero.
  *
  * <p>This interface serves the reference kernel and admission code; the machine calls
- * {@code rlvm.nat} directly (RECONCILIATION.md, "Literal identity"). Two NATLIT term ids may denote
+ * {@code rlvm.nat} directly (*agentic-note*: design-reconciliation-document, "Literal identity"). Two NATLIT term ids may denote
  * the same number (a shared export literal and an overlay literal a worker computed): always compare
  * with {@link #natEquals}, never by term id alone, before answering "different".
  */

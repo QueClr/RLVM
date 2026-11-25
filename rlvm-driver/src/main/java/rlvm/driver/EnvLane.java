@@ -14,7 +14,7 @@ import rlvm.api.Session;
  *
  * <p>As the pass's listener it records the units the pass decides itself (inductive blocks, quot):
  * an admitted unit is ACCEPTED; a failed unit is REJECTED (no confirmation needed: the environment
- * pass is the reference kernel, ARCHITECTURE.md 8.2) or DECLINED, unless it lies above the first
+ * pass is the reference kernel, *agentic-note*: design-architecture-document, 8.2) or DECLINED, unless it lies above the first
  * failure, in which case its outcome can no longer matter and may be a cancellation.
  *
  * <p><b>Pipelined loading.</b> The session is reset before the pass moves beyond the frontier its

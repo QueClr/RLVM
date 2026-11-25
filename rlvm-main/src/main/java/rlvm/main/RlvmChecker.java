@@ -622,7 +622,7 @@ public final class RlvmChecker implements Checker {
      * The worker count of {@code --threads auto} on a machine with {@code processors} CPUs: one worker
      * per CPU, at most {@link #AUTO_MAX_WORKERS}. Decided by wall clock (OWNER-NOTES 12), warm and
      * cold, on 8 cores with the load pipelined and the reader's scanner threads: the measurements are
-     * in rlvm-main/README.md ("Automatic worker count") and docs/PLATFORM.md. The driver's own
+     * in rlvm-main/README.md ("Automatic worker count") and *agentic-note*: design-platform-document. The driver's own
      * automatic rule (processors - 2, at most 6: by CPU time, wave 4) is no longer consulted.
      */
     static int autoWorkers(int processors) {

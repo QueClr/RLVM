@@ -11,8 +11,8 @@ import rlvm.store.Terms;
  * Family EV (ISA 4.2, 4.3.1): {@code EVAL}, {@code FORCE}, {@code APPLY}, {@code INST}, {@code ARGV},
  * {@code DOM}. Owner: M2.
  *
- * <p>Every judgment is a chain of step methods (stepper-convention.md H2-H4; the template is in
- * WORK-PACKAGES.md): the entry steps below are the cross-package interface and are frozen; continuation
+ * <p>Every judgment is a chain of step methods (*agentic-note*: rep-stepper-convention, H2-H4; the template is in
+ * *agentic-note*: rep-machine-work-packages): the entry steps below are the cross-package interface and are frozen; continuation
  * steps {@code k_*}, loop methods and frame keys ({@code static final int K_EVAL_1 = Op.K_EVAL | 1;})
  * are this file's own.
  *

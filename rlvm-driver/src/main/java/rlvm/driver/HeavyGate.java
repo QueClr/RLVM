@@ -1,7 +1,7 @@
 package rlvm.driver;
 
 /**
- * The heavy lane of RECONCILIATION.md section 3 ("the heavy lane is for memory retries") as mutual
+ * The heavy lane of *agentic-note*: design-reconciliation-document, section 3 ("the heavy lane is for memory retries") as mutual
  * exclusion instead of a thread: a unit that was declined for memory is checked again while its
  * worker holds this gate, one such unit at a time, on the worker's own deep-stack thread. The
  * holder is exempt from the run's memory watermark (it gives up only when it does not fit into the

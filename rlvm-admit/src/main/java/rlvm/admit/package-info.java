@@ -1,6 +1,6 @@
 /**
  * RLVM module {@code rlvm-admit}: the declaration admission pipeline and its policies
- * ({@code docs/design/ARCHITECTURE.md} section 4).
+ * (*agentic-note*: design-architecture-document, section 4).
  *
  * <ul>
  *   <li>{@link rlvm.admit.StructuralChecks}: the checks every declaration passes before an engine

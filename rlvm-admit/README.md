@@ -1,6 +1,6 @@
 # rlvm-admit
 
-Declaration admission of RLVM (work package D1, `docs/design/ARCHITECTURE.md` section 4): the structural
+Declaration admission of RLVM (work package D1, *agentic-note*: design-architecture-document, section 4): the structural
 checks every declaration passes before an engine sees it, the environment pass that admits inductive
 blocks and the quotient package and writes all derived facts, the per-unit flow a worker runs, the prelude
 guards and the policies. Package `rlvm.admit`; depends on `rlvm-store`, `rlvm-api`, `rlvm-inductive` and

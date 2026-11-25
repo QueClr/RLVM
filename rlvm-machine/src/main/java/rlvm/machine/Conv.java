@@ -20,7 +20,7 @@ import rlvm.store.Specials;
  * the frames of {@link Cargs}). Owner: M4.
  *
  * <p>Entry steps are the frozen cross-package interface; continuation steps {@code k_*}, loop methods
- * and frame keys are this file's own (stepper-convention.md H2-H4; template in WORK-PACKAGES.md).
+ * and frame keys are this file's own (*agentic-note*: rep-stepper-convention, H2-H4; template in *agentic-note*: rep-machine-work-packages).
  *
  * <h2>What is implemented</h2>
  * v0 (all switches off): the complete procedure of ISA 6.3 rule 3: the official {@code is_def_eq} (R02 section

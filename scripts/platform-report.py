@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""scripts/platform-report.py - tables of the platform comparison (docs/PLATFORM.md).
+"""scripts/platform-report.py - tables of the platform comparison (*agentic-note*: design-platform-document).
 
     scripts/platform-report.py [TAG...]                 print the tables of these result files
-    scripts/platform-report.py --update docs/PLATFORM.md
+    scripts/platform-report.py --update FILE.md
                                                          rewrite every block
                                                              <!-- BEGIN table:TAG[:corpus,...][:threads][:config,...] -->
                                                              <!-- END table:... -->       (same text after END)

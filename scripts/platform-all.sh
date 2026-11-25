@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/platform-all.sh - the measurement series behind docs/PLATFORM.md, as it was run on
+# scripts/platform-all.sh - the measurement series behind *agentic-note*: design-platform-document, as it was run on
 # 2026-11-24 (each step appends to its tag; a step can be repeated to add runs).
 #
 #   scripts/platform-all.sh STEP...                                  (host)
@@ -8,7 +8,7 @@
 # Needs the frozen distribution with all three launchers:
 #   scripts/build.sh --published --pgo --opt 3 --dist work/steward/platform/dist
 # scripts/platform-matrix.py does the work; results in work/steward/platform/results/TAG.jsonl;
-# tables: scripts/platform-report.py --update docs/PLATFORM.md.
+# tables: scripts/platform-report.py TAG... (the tables of the series are in *agentic-note*: design-platform-document).
 #
 # EIGHT workers, in the arena-shaped container (8 performance cores, 16 GB), holding the measurement
 # lock of bench/track/ladder.py per group of runs (one group = the configurations of one repeat,

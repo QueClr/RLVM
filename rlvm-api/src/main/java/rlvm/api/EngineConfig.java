@@ -13,12 +13,12 @@ public final class EngineConfig {
 
     public final KernelProfile profile;
     /**
-     * Strict mode (RECONCILIATION.md section 2, facade): the generic tier only, the complete
+     * Strict mode (*agentic-note*: design-reconciliation-document, section 2, facade): the generic tier only, the complete
      * procedure, only the exact shortcuts, a fresh session per unit, no shared facts and no shared
      * code (nothing is read from or written to {@code SharedFacts} or engine-wide tables), no cache
      * that survives a unit. It is fixed at engine creation, so the driver creates a second engine
      * instance with {@link #withStrict(boolean) withStrict(true)} for the cold re-check of a
-     * rejection (ARCHITECTURE.md 8.2); the two instances share nothing. The reference kernel is
+     * rejection (*agentic-note*: design-architecture-document, 8.2); the two instances share nothing. The reference kernel is
      * always strict in this sense and ignores the flag.
      */
     public final boolean strict;

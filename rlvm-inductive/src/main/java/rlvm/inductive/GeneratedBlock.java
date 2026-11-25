@@ -2,7 +2,7 @@ package rlvm.inductive;
 
 /**
  * What the kernel derives for one inductive block: the facts that go into the declaration table's
- * side tables. Terms are ids of the admission overlay; {@code rlvm-admit} commits them (ARCHITECTURE.md
+ * side tables. Terms are ids of the admission overlay; {@code rlvm-admit} commits them (*agentic-note*: design-architecture-document,
  * 4.6: when an exported record is identical, the exported shared term is used; otherwise the term is
  * copied into the generated region).
  *

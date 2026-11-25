@@ -19,7 +19,7 @@ import rlvm.store.Model.M;
 
 /**
  * WP-A3: proof blocks. Round trips (write, decode), promotion, the block table, and the sharing
- * flags of RECONCILIATION.md section 3 against a naive referrer count.
+ * flags of *agentic-note*: design-reconciliation-document, section 3 against a naive referrer count.
  */
 class ProofBlocksTest {
 

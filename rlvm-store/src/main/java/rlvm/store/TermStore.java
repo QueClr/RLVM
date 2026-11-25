@@ -17,7 +17,7 @@ import java.util.Arrays;
  * volatile field before any id that needs it, and the old array stays valid for every id published
  * before. A reader therefore re-reads {@link #exportArray()} once per unit, never per access.
  *
- * <p>Sharing flags (RECONCILIATION.md section 3): the writer counts, per node of the unit being
+ * <p>Sharing flags (*agentic-note*: design-reconciliation-document, section 3): the writer counts, per node of the unit being
  * written (ids from {@link #segmentStart()} on), the references made by later nodes and by proof-block
  * records of the same unit, and sets {@link Node#F_SHARED} at the second reference, {@link Node#F_BODY}
  * on binder bodies and declaration roots, {@link Node#F_INVARIANT} when the first referrer has a
@@ -63,7 +63,7 @@ public final class TermStore {
     private int copyCount;
     private int[] copyStack = new int[64];
 
-    /** @param expectedNodes initial capacity of the export region (ARCHITECTURE.md 2.2: input bytes / 144) */
+    /** @param expectedNodes initial capacity of the export region (*agentic-note*: design-architecture-document, 2.2: input bytes / 144) */
     public TermStore(int expectedNodes) {
         long ints = ((long) Math.max(expectedNodes, 15) + 1) << 3;
         if (ints > MAX_INTS) {
@@ -173,7 +173,7 @@ public final class TermStore {
     /**
      * Appends a node to the export region and returns its id. {@code flags}, looseRange, fvMask,
      * depMax and lpSet are derived here from the children (which must already exist), following
-     * ARCHITECTURE.md section 2.1. Loader thread only.
+     * *agentic-note*: design-architecture-document, section 2.1. Loader thread only.
      *
      * <p>Payload by kind as in {@link Kind}; for CONST {@code a} is the constant id or {@code ~nameId}
      * and {@code c} the name id, for PROJ {@code c} is the constant id or {@code ~nameId}; a small
@@ -343,7 +343,7 @@ public final class TermStore {
 
     /**
      * Stores {@code value} in the reserved {@code c} word of a published export LAM / PI node: the
-     * machine's elaborator keeps a lossy hint there (ISA.md 3.3). Any thread; a plain racy store that
+     * machine's elaborator keeps a lossy hint there (*agentic-note*: design-isa-document, 3.3). Any thread; a plain racy store that
      * can be lost (for instance while the loader reallocates the region), so the reader must validate
      * what it finds. Nothing in the store reads that word. Ignored for other nodes.
      */

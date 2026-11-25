@@ -5,7 +5,7 @@ import rlvm.store.Terms;
 
 /**
  * The type checker's judgments on term ids, with the official kernel's meaning
- * ({@code docs/research/02-kernel-typechecker.md}). Admission code is written against this interface
+ * (*agentic-note*: study-kernel-typechecker). Admission code is written against this interface
  * and runs unchanged on the reference kernel or on the machine.
  *
  * <p>Terms are ids valid in {@link #terms()}: shared ids and ids of the session's overlay. Result

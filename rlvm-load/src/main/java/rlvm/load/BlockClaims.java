@@ -21,7 +21,7 @@ package rlvm.load;
  * </pre>
  * Inputs of admission in here: {@code numParams}, {@code all} and {@code ctors} of the types (and the
  * {@code cid}s, whose rows hold name, universe parameters and type). Everything else is a claim that is
- * either compared with the derived value or ignored (ARCHITECTURE.md 4.6).
+ * either compared with the derived value or ignored (*agentic-note*: design-architecture-document, 4.6).
  *
  * <p>{@link #F_UNSAFE} on a constructor or recursor entry: the record was flagged {@code isUnsafe}
  * inside a block whose types are safe; the official checker neither replays nor compares such a

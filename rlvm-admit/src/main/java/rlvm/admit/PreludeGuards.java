@@ -45,7 +45,7 @@ import rlvm.store.Terms;
  *
  * <p>The guards do not validate the BODIES of the accelerated functions (the official kernel does not
  * either; level L2 is future work). Every guard reads statements, not verdicts (optimistic
- * environment, ARCHITECTURE.md 4.1 I2): the run is accepted only if every unit is.
+ * environment, *agentic-note*: design-architecture-document, 4.1 I2): the run is accepted only if every unit is.
  *
  * <p>Holds no level, list or overlay id between calls. One instance per thread.
  */

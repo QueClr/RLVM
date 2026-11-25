@@ -5,7 +5,7 @@ package rlvm.store;
  * translates export ids before calling (it owns the export-id maps and the segment logic,
  * {@code rlvm-load}).
  *
- * <p>Protocol per declaration unit (ARCHITECTURE.md 3.3): open the unit and claim its name(s) FIRST
+ * <p>Protocol per declaration unit (*agentic-note*: design-architecture-document, 3.3): open the unit and claim its name(s) FIRST
  * ({@link #beginUnit} and {@link #reserve}; or {@link #beginDeclaration}; or {@link #beginBlock} and
  * {@link #claimMember}), then write the literals, shared terms (children first) and at most one
  * proof block the unit needs, then set the roots and close the unit ({@link #complete} and
@@ -54,7 +54,7 @@ public final class StoreBuilder {
     /**
      * A constant reference by name. Binds it to the constant currently declared under {@code name}
      * (then depMax = that constant's rank); otherwise the node is marked unresolved and resolved
-     * late, by name (ARCHITECTURE.md 4.2). A bound reference with the wrong number of levels is
+     * late, by name (*agentic-note*: design-architecture-document, 4.2). A bound reference with the wrong number of levels is
      * marked unresolved as well.
      */
     public int constant(int name, int levelList) {

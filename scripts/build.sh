@@ -310,7 +310,7 @@ all_modules="$(sed -n 's:.*<module>\(.*\)</module>.*:\1:p' "$ROOT/pom.xml" | pas
 # Modules of the reactor that are development tools and never part of a distribution: the test kit
 # (oracle cache, mutants, the differential engine; it reaches a launcher through RLVM_EXTRA_CP). A tree
 # build used to put its jar on the class path of the image (23 jars) while every distribution that is
-# gated and measured is built from the published jars and has 22 (AR1.md 0.5, item 2): the arena build
+# gated and measured is built from the published jars and has 22 (*agentic-note*: rep-AR1, 0.5, item 2): the arena build
 # is a tree build and must be the gated binary. So it is neither compiled by default nor ever copied
 # into lib/ (name it in --modules to have it compiled).
 NOT_SHIPPED="rlvm-testkit"
@@ -413,8 +413,8 @@ brief_flags() {
 }
 ni_soft_fail=0
 
-# H10 (docs/design/review/stepper-convention.md, rule 3; request of the machine's facade owner, measured
-# by the wave-6 integrator on matched images, rlvm-machine/SWITCHES.md "Build flag measured": CPU time of
+# H10 (*agentic-note*: rep-stepper-convention, rule 3; request of the machine's facade owner, measured
+# by the wave-6 integrator on matched images, *agentic-note*: design-switches-document, "Build flag measured": CPU time of
 # the machine -0.7 to -4.4 % on four of five corpora, wall clock equal): the CE image is built with
 #   -H:PriorityForceInline=<every continuation step k_* of rlvm-machine>
 #   -H:PriorityNeverInline=<its slow paths: Machine.sig*, spill*, *Slow>
@@ -612,32 +612,32 @@ echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X 
 # one executable): the warm benchmarks (bench/warm.sh; warm, HotSpot needs 0.6-0.85 times the image's
 # wall clock), the gates and the test kit run the jars through it. It is written only into a --dev or
 # --jvm-only distribution and never packaged.
-# Default VM flags. The line is the one proposed by the profiler J1 (docs/research/profiles/J1.md, section 5;
-# prototype work/j1/proto-src/rlvm-jvm.in) and re-measured on this script's launcher (docs/PLATFORM.md):
+# Default VM flags. The line is the one proposed by the profiler J1 (*agentic-note*: rep-J1, section 5;
+# prototype work/j1/proto-src/rlvm-jvm.in) and re-measured on this script's launcher (*agentic-note*: design-platform-document):
 #   -XX:+UseSerialGC             no collector beats it on the real checker with parallel workers
-#                                (docs/research/profiles/GC.md: Parallel and G1 1.00-1.03 times its CPU
+#                                (*agentic-note*: rep-GC: Parallel and G1 1.00-1.03 times its CPU
 #                                time, ZGC 1.04-1.07, Shenandoah 1.15-1.26; no collector improves the
 #                                8-worker wall clock; smallest resident set)
 #   -Xms13g -Xmx13g -Xmn1g       the heap of every engine but the machine (see "Heap BY ENGINE" below):
-#                                fixed heap and nursery, no resizing (ARCHITECTURE.md 7.2: the working set
+#                                fixed heap and nursery, no resizing (*agentic-note*: design-architecture-document, 7.2: the working set
 #                                is primitive arrays in the old generation, only big-number garbage fills
 #                                the nursery; 13 GB leaves 3 GB of the runner's 16 GB for stacks, code and
 #                                the page cache; the memory account declines at 12 GiB, before the heap
 #                                limit). Was 8g / 8g / 3g, sized for an object working set. Dropped when
 #                                the caller passes its own -Xmx/-Xms/-Xmn. Nothing is pre-touched, so a
 #                                small test costs no more memory than before
-#   -XX:-UseJVMCICompiler        C2 instead of Graal as the *host* JIT: same steady state (J1.md 2.2: 1.98 s
+#   -XX:-UseJVMCICompiler        C2 instead of Graal as the *host* JIT: same steady state (*agentic-note*: rep-J1, 2.2: 1.98 s
 #                                against 1.99-2.10 s on cedar with 8 workers), 400 MB less resident memory.
 #                                Truffle runtime compilation still uses libgraal
 #   -XX:CICompilerCount=8        compiler threads (a cap: they are created on demand). The JVM launcher is
 #                                the WARM platform (OWNER-NOTES 12: warm-up is reported, not charged): with
 #                                the old value 2 a tiered VM has ONE C2 thread beside eight workers and
 #                                needs five or six passes to reach its steady state; with 8 the third pass
-#                                is steady and the cold wall clock below mathlib nearly halves (J1.md 3.2:
+#                                is steady and the cold wall clock below mathlib nearly halves (*agentic-note*: rep-J1, 3.2:
 #                                Init 4.1-5.3 -> 2.8-3.6 s, Std 5.5 -> 3.1, cedar 8.5-9.9 -> 5.2-5.8), the
 #                                steady state unchanged. Was 2 ("compiler threads are billed": the arena's
 #                                metric, which this launcher does not serve)
-#   -XX:+UseTransparentHugePages the one flag with a consistent steady-state gain (J1.md 2.2: mathlib -6 %
+#   -XX:+UseTransparentHugePages the one flag with a consistent steady-state gain (*agentic-note*: rep-J1, 2.2: mathlib -6 %
 #                                warm wall in an A B A B, reachability -2 to -4 %): TLB reach for a store of
 #                                gigabytes. Takes effect where the host's setting is madvise or always;
 #                                with never the VM prints one warning (on standard error) and runs as before
@@ -645,8 +645,8 @@ echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X 
 #                                standard error; unified logging prints them on standard OUTPUT by default
 #   -XX:+ExitOnOutOfMemoryError  the VM exits with status 3 (= internal error) on the first OOM
 #   --enable-native-access / --sun-misc-unsafe-memory-access   silence JDK 25 warnings caused by Truffle
-#   NOT there: the JDK 25 AOT cache (J1.md 3.3: 0.4-1.1 s off the cold wall, every later pass 5-9 % slower)
-# Heap BY ENGINE (J1.md section 4). The engine of a run is what -X engine=NAME (or -Xengine=NAME) on its
+#   NOT there: the JDK 25 AOT cache (*agentic-note*: rep-J1, 3.3: 0.4-1.1 s off the cold wall, every later pass 5-9 % slower)
+# Heap BY ENGINE (*agentic-note*: rep-J1, section 4). The engine of a run is what -X engine=NAME (or -Xengine=NAME) on its
 # command line says; without it, the distribution's DEFAULT engine, which this script asks the jars for
 # ("default engine: NAME" in `rlvm --version`: the engines' priorities decide, rlvm-main) and writes into
 # the launcher - so a distribution whose default engine is the machine gets the machine's heap by itself;

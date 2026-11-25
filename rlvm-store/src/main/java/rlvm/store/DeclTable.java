@@ -36,7 +36,7 @@ import java.util.Arrays;
  * </pre>
  *
  * <p>Trust: rows w0..w7 of def/thm/axiom/opaque constants are inputs. Every side-table value is
- * DERIVED by admission (ARCHITECTURE.md 4.6) and is readable only for units below
+ * DERIVED by admission (*agentic-note*: design-architecture-document, 4.6) and is readable only for units below
  * {@link Store#envUnits()}; what the export claimed is held only in the per-unit claims blob
  * ({@link #claims(int)}), which admission drops after the comparison.
  *
@@ -410,7 +410,7 @@ public final class DeclTable {
      *
      * <p>{@code type} and {@code value} may be 0 and set later with {@link #setType} /
      * {@link #setValue}: the loader claims the names of a unit BEFORE it writes the unit's terms, so
-     * that references inside the unit bind (ARCHITECTURE.md 3.3).
+     * that references inside the unit bind (*agentic-note*: design-architecture-document, 3.3).
      */
     public int addConstant(int kind, int flags, int name, int lparams, int type, int value, int hint, int unit) {
         if (unit != openUnit) {

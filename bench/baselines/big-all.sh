@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bench/baselines/big-all.sh - the complete series of baseline measurements on
-# the big corpora, as run for bench/baselines.json and docs/research/12-baselines.md.
+# the big corpora, as run for bench/baselines.json and *agentic-note*: study-baselines.
 #
 #   bench/baselines/big-all.sh [STAGE...]            (run on the host; default: all stages)
 #

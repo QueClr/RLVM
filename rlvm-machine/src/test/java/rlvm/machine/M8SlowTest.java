@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
  * Each writes the report the corresponding {@code report.sh} command writes ({@code report.sh conv
  * tutorial}, {@code conv bugs}, {@code frames init}, {@code sample tutorial | bugs | init}) and fails on a
  * convention difference, on frames above 0.1% of the call events, on a sampled answer the reference kernel
- * refutes. ISA section 11; stepper-convention.md H12 items 1 and 2.
+ * refutes. ISA section 11; *agentic-note*: rep-stepper-convention, H12 items 1 and 2.
  */
 @Tag("slow")
 class M8SlowTest {

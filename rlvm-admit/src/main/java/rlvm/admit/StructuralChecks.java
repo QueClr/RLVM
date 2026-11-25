@@ -49,7 +49,7 @@ import rlvm.store.Terms;
  * the unit itself where {@code ownKindMask} exposes that kind) with the right number of levels; the
  * prerequisites of every literal are declared earlier. A root containing an unbound node
  * ({@code ~nameId}) never passes: v1 declines "late-bound" names instead of asking engines to
- * resolve names (deviation from ARCHITECTURE.md 4.3, which lets them pass; such a file has an earlier
+ * resolve names (deviation from *agentic-note*: design-architecture-document, 4.3, which lets them pass; such a file has an earlier
  * forward reference or reuses the expressions of a dropped record, neither of which the exporter
  * produces).
  *

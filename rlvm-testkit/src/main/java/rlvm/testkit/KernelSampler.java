@@ -15,7 +15,7 @@ import rlvm.store.TermOps;
 import rlvm.store.Terms;
 
 /**
- * The {@code KernelOps} sampler of ARCHITECTURE.md 9.2: compares the answers of two engines to
+ * The {@code KernelOps} sampler of *agentic-note*: design-architecture-document, 9.2: compares the answers of two engines to
  * {@code infer}, {@code whnf} and {@code isDefEq} on sub-problems drawn from the type and the value of
  * a constant of a real export. It finds a wrong judgment long before the judgment changes the verdict
  * of a declaration (most wrong reductions still end in an accepted proof).
