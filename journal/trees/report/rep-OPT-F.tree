@@ -1,0 +1,502 @@
+\title{OPT-F: the loader thread, second pass - where its page faults come from, a scanner that does not wait for its numbers, a name index that is asked less often, and what huge pages give the executable and can cost it}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\tag{platform}
+\import{base-macros}
+
+\p{Second optimisation wave after the first release, agent "OPT-F", 2026-11-25 (10:47 to 16:50 UTC). The lever is the loader thread again: one thread that reads the export, links, builds the store and packs the proof blocks. [The first pass](rep-OPT-B) took it from 12.1 to 10.6 s of CPU per Mathlib pass in the executable with loops without a call; [what it left](ins-2B4K) is memory, one chain of dependent loads and the record kinds it had no loop for. The task: itemise the thread again on the main tree as it is now, say where the page faults of the executable's loader come from and whether anything in \code{rlvm-export}, \code{rlvm-load} and \code{rlvm-store} removes them, and take the next items in the order of their measured size, with the store word for word as it was. Nothing in the repository was changed by this work: the result is three patches, measured and gated on a private copy of the tracked sources. \code{rlvm-machine} and \code{rlvm-level} were not touched.}
+
+\subtree{
+\title{0. Answer}
+
+\table{
+\tr{\th{base -> candidate, interleaved rounds on a busy host (section 1)}\th{Init}\th{cslib}\th{navier-stokes-euler}\th{Mathlib}}
+\tr{\td{the executable: instructions of one load, G}\td{5.99 -> 5.79}\td{43.7 -> 42.2}\td{not counted}\td{108.8 -> 106.4}}
+\tr{\td{the executable: user cycles of one load, G}\td{1.90 -> 1.63 (-14 \%)}\td{15.5 -> 13.2 (-15 \%)}\td{not counted}\td{37.0 -> 32.7 (-12 \%)}}
+\tr{\td{the executable: the load alone, s}\td{0.512 -> 0.431 (-16 \%)}\td{4.37 -> 3.84 (-12 \%)}\td{not measured}\td{10.20 -> 9.16 (-10 \%)}}
+\tr{\td{the executable: user cycles of the loader thread in a pass, G}\td{1.89 -> 1.65 (-13 \%)}\td{16.1 -> 14.1 (-12 \%)}\td{7.80 -> 6.73 (-14 \%)}\td{39.1 -> 34.9 (-11 \%)}}
+\tr{\td{the executable: CPU of the loader thread in a pass, s}\td{not measured}\td{4.61 -> 3.99}\td{not measured}\td{10.81 -> 9.78}}
+\tr{\td{the executable: warm pass, s (the guard)}\td{0.664 -> 0.640 (-3.6 \%)}\td{5.337 -> 5.238 (-1.9 \%)}\td{4.048 -> 3.949 (-2.4 \%)}\td{14.877 -> 14.425 (-3.0 \%)}}
+\tr{\td{the JVM launcher: warm pass, s (the guard)}\td{0.625 -> 0.621 (-0.5 \%)}\td{4.670 -> 4.426 (-5.2 \%)}\td{3.530 -> 3.427 (-2.9 \%)}\td{12.691 -> 12.274 (-3.3 \%)}}
+}
+
+\ol{
+\li{\strong{The thread, itemised again} (section 2). After the first pass the executable's loader thread costs a Mathlib pass 9.7 to 10.5 s of CPU, 119 G instructions at 2.9 per cycle. The kernel has 15 \% of it, the scanner 21 \%, and a third of it stands behind seven single load instructions: random reads in tables of 64 MB to 1.3 GB, each with a miss of the cache and a walk of the page table - the location of an earlier record, the probe of the name index, a child node, the promotion memo, a block record.}
+\li{\strong{The page faults} (section 3): 867,000 per Mathlib pass in the loader thread, each recorded with the instruction that took it. Four fifths are the first touch of the store itself and of the location table, arrays that are sized from the file length and never grow; a ninth is the mapped file. None of the causes the lever named is there: not growth by doubling (under 5 \%), not arrays per unit (none), not the collector between collections. The pages are fresh in every pass because the image's collector keeps no large array for the next pass, which matters to a process that checks an export several times and to no other. What the three modules could remove is a twentieth of the faults; it was left. The copy of the whole level store at every publication is 8.7 \%, in a module this work does not touch.}
+\li{\strong{What was changed} (section 4), two things. The scanner's loop takes the end of a line from loads at fixed places instead of waiting for the line's numbers, leaves numbers of nine digits to the loop of the first pass, and takes \code{lam} and \code{forallE} lines as well as \code{app} lines: nineteen lines of twenty in stretches of 43, at about 50 cycles a line where an \code{app} line took 64 and a binder line about 160. The name table keeps the names of the last thousand out of its index, which is far larger than the caches: a name whose prefix is one of them - two names of three - cannot be in the index and is not looked up there, and the index is filled a thousand names at a time with the probes overlapping. Both have the old behaviour as their definition: the stretch an interface default that makes the single calls, the name table the same id for every request.}
+\li{\strong{What it gives} (section 5): the load takes 2 to 3.5 \% fewer instructions and 12 to 15 \% fewer cycles, and 10 to 16 \% less time alone on both launchers; in a Mathlib pass the loader thread needs a second less CPU (10.81 to 9.78 s). The guard holds on both launchers over three interleaved rounds: in the executable the geometric mean of the eight warm passes goes from 2.072 to 2.022 s (-2.4 \%) and every corpus is faster, Mathlib from 14.88 to 14.43 s; on the JVM launcher the geometric mean goes down by 1.9 \%, six corpora are faster, con-leche is at +0.2 \% and reachability, whose load is 26 ms of the pass, at +2.2 \% inside the scatter of its rounds.}
+\li{\strong{The store is the same store} (section 6): the differential digest of everything a load builds is identical to the base's in 25 reader configurations on 17,158 small files, the 263 arena tests below 100 MB, 847 prelude mutants and the eight corpora, under both policies; tick counts, record counts and declines of every corpus are identical with one worker.}
+\li{\strong{One scanner thread stays the default} (section 5.5): with the faster loader two scanner threads are 4.5 to 16 \% slower than one on the four corpora measured.}
+\li{\strong{Outside the three modules} (section 7): the executable's heap has no huge pages and the JVM launcher's has. Advising them for the image's large mappings made the warm pass of cslib and of Mathlib about 4 \% shorter in a first window; in a second one, while the host had no free block of 2 MiB, the same advice made cslib 50 \% and navier-stokes-euler 13 \% \em{slower}, and Mathlib, minutes later with free blocks again, 1 \% faster. With the host's setting an advised first touch that finds no huge page compacts memory in the faulting thread, and the image touches its large arrays for the first time in every pass. Plain advice is not a candidate for a default; the lever became a work package of its own.}
+\li{\strong{Verdict} (section 11): \strong{GO} for the default configuration: a cost-only change with the store word for word the same, every gate passed with the release's counts, and the guard held on the executable and on the JVM launcher.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\ul{
+\li{\strong{Base.} A private copy of the tracked sources of the main tree, taken at 10:48 UTC, built as a whole by \src{scripts/build.sh} into a private development distribution: the executable (GraalVM CE 25.5.5.0.3 native image, \code{\verb~|-O3 --gc=serial~}, the heap settings and the inline lists of the build) and the JVM launcher (HotSpot of GraalVM CE 25 with C2, the launcher's flags, heap of the machine \code{\verb~|-Xmx7g -Xmn1g~}). Its jars are those of the shared distribution of 09:13 UTC, hash for hash (\code{rlvm-export} \code{\verb~|38c922c4fccd~}, \code{rlvm-load} \code{\verb~|a2a091b291fa~}, \code{rlvm-store} \code{\verb~|a93a52584ee7~}), except the machine jar, which differs in the copy of its \code{\verb~|pom.xml~} inside the jar and in no class. Its store digests equal those of the candidate of the first pass in all 25 reader configurations, file for file.}
+\li{\strong{Candidate.} The same copy with the three patches of section 9, built the same way: \code{rlvm-export} \code{\verb~|8fcc3cb37172~}, \code{rlvm-load} \code{\verb~|fcf04a8669c3~}, \code{rlvm-store} \code{\verb~|825e56cff445~}; every other jar is the base's.}
+\li{\strong{Symbolised images.} A second image of each with \code{\verb~|-g~} (the same code; DWARF with inlined frames) for \code{perf}, in the arena container. No guard time is from them.}
+\li{\strong{Engine and run line.} A run without \code{\verb~|-X engine~}: the machine with its default switch set, policy practical, 8 workers, load pipelined with checking, the reader on the loader thread: \code{\verb~|rlvm[-jvm] --threads 8 --stats -X passes=N FILE~}. "The load alone" is the same executable with \code{\verb~|-X stop-after=load~}: the reader, the loader and the store on one thread and nothing else, three loads in a process.}
+\li{\strong{Instruments.} Wall clock and CPU from the pass lines; CPU, kernel time and page faults per thread from the kernel's per-thread counters, polled every 100 ms (the poller of rep-P11); shares of the JVM's loader thread from \code{\verb~|jdk.CPUTimeSample~} (2 ms of CPU per sample, attached after pass 2 of 5); shares of the image's loader thread from \code{\verb~|perf record~} in the arena container (\code{\verb~|cpu-clock~} every 0.5 ms, cycles, instructions, last-level read misses, branch mispredictions, data TLB walks, cycles stalled on memory, and \strong{every page fault} with its instruction address; attached after pass 2 of 4), every sample address resolved to its chain of inlined frames, and the hottest addresses read in the disassembly; the allocations of a load by site from \code{\verb~|jdk.ObjectAllocationOutsideTLAB~} on the JVM launcher with thread-local buffers fixed at 128 KiB, so that every array of 128 KiB or more, the size from which the image's collector gives an array a chunk of its own, is recorded with its size and stack; user cycles, user instructions and kernel cycles of the load alone from \code{\verb~|perf stat~} of whole processes, and of the \em{loader thread inside the pipelined pass} from \code{\verb~|perf stat --per-thread --no-inherit~} attached after pass 1 of 3 (counts, not times: they were not taken in quiet windows).}
+\li{\strong{Host.} aarch64, 10 Cortex-X925 and 10 Cortex-A725, 121 GB, 4 KiB pages, transparent huge pages in \code{madvise} mode. Every time in seconds was taken inside a \src{bench/quiet.py} window on the 8 measurement cores, heavy jobs behind \src{bench/slot.sh}. \strong{The host was not quiet}: the other agents of the wave built, counted and measured during the whole work (load average 20 to 70), and the measurement cores share memory bandwidth and the last-level cache with the other 12. Only numbers of interleaved rounds inside one window are compared.}
+\li{\strong{Corpora.} Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib, Mathlib: the exports of the benchmark tables.}
+}
+}
+
+\subtree{
+\title{2. The loader thread of the main tree, itemised again}
+
+\subtree{
+\title{2.1 Level 1}
+
+\table{
+\tr{\th{Mathlib, pipelined pass, 8 workers (base)}\th{JVM launcher, passes 2 to 5}\th{executable, passes 1 to 4 (symbolised image, container)}}
+\tr{\td{pass, s}\td{11.83 to 12.95}\td{13.21 to 13.80}}
+\tr{\td{loader thread, CPU s}\td{7.71 to 8.19}\td{9.71 to 10.46}}
+\tr{\td{- of it kernel, s}\td{0.34 to 0.38}\td{1.05 to 1.33}}
+\tr{\td{minor page faults of the loader thread}\td{95,600 to 95,700}\td{853,000 to 872,000}}
+\tr{\td{workers, CPU s}\td{78.5 to 85.6}\td{89.4 to 93.9}}
+\tr{\td{- of it kernel, s}\td{0.00}\td{0.68 to 0.89}}
+\tr{\td{minor page faults of the workers}\td{340 to 19,400}\td{525,000 to 565,000}}
+\tr{\td{collections, pause ms}\td{5 to 6, 159 to 172}\td{17, 142 to 246}}
+}
+
+\p{The executable's loader needs 1.2 to 1.3 times the JVM's CPU after the first pass over its code, where it needed 1.33. A second of the difference is kernel time: the image's loader thread takes 0.76 million more page faults per pass than the JVM's, and its workers half a million where the JVM's take none. Per pass the image's loader thread executes 119.4 G instructions in 41.4 G cycles, 2.9 instructions per cycle, with 13.1 G cycles stalled on memory, 76 million last-level read misses, 33.7 million data TLB walks and 166 million mispredicted branches.}
+}
+
+\subtree{
+\title{2.2 The JVM launcher: shares of the loader thread}
+
+\p{11,572 CPU-time samples of the loader thread in three profiled passes (23.1 s), by the class of the innermost frame, inlined or not, and by the method that was compiled:}
+
+\table{
+\tr{\th{item}\th{share}\th{CPU s per pass}\th{what it is}}
+\tr{\td{\code{Scanner}}\td{25.8 \%}\td{1.99}\td{the template fast path; the loop for \code{app} lines alone is 19.1 \% as a compiled method, 1.47 s}}
+\tr{\td{\code{Loader}}\td{12.4 \%}\td{0.96}\td{the locations of earlier records 3.5 \%, the stretch between segment and block 3.4 \%, the arrival of \code{app} records 2.9 \%, the sweep 1.3 \%}}
+\tr{\td{\code{ProofBlocks}, promotion}\td{11.7 \%}\td{0.90}\td{the promotion memo 3.4 \%, reading the block records 2.9 \%, finding them 2.2 \%}}
+\tr{\td{\code{NameTable}}\td{8.4 \%}\td{0.65}\td{interning 4.27 million names}}
+\tr{\td{copying the mapped file into the scan buffer, giving its pages back}\td{8.6 \%}\td{0.66}\td{}}
+\tr{\td{\code{\verb~|ProofBlocks.WriterImpl~}}\td{7.2 \%}\td{0.56}\td{packing the proof-private records}}
+\tr{\td{\code{NodeCtx}, \code{TermStore}}\td{13.4 \%}\td{1.03}\td{shared nodes and their summaries: reading the children}}
+\tr{\td{level lists (\code{IntListStore}, \code{LevelStore}, \code{LevelChain})}\td{3.9 \%}\td{0.30}\td{the lists of \code{const} records}}
+\tr{\td{\code{IdSpace}, \code{Linker}}\td{3.6 \%}\td{0.28}\td{id translation: 2.1 \% is the lookup of a name id in a table}}
+\tr{\td{the rest}\td{5.0 \%}\td{0.39}\td{}}
+}
+}
+
+\subtree{
+\title{2.3 The executable: shares of the loader thread}
+
+\p{42,808 samples of the loader thread in two profiled passes of the symbolised base image (21.4 s). By compile unit (the symbol; inlined frames belong to it):}
+
+\table{
+\tr{\th{compile unit}\th{time}\th{what the hottest address is}}
+\tr{\td{kernel}\td{15.1 \%}\td{page faults (section 3)}}
+\tr{\td{\code{\verb~|Scanner.appStretch~}}\td{14.3 \%}\td{the instructions behind the loads of the second and the third number of a line: each waits for the length of the number before it}}
+\tr{\td{\code{\verb~|Scanner.num~}, \code{ieFirst}, \code{forall}, the other templates}\td{6.4 \%}\td{\code{lam} and \code{forallE} lines: four calls of the number conversion and one of the binder info per line}}
+\tr{\td{\code{\verb~|NodeCtx.writeApp~}}\td{4.9 \%}\td{the load of the header of a child node (74 \% of the unit's samples stand behind two loads)}}
+\tr{\td{\code{\verb~|Loader.resolvePending~}}\td{4.8 \%}\td{the load of the location of an earlier record (86 \% behind one load)}}
+\tr{\td{\code{\verb~|Loader.nameStr~} with the name table inlined}\td{4.6 \%}\td{the probe of the name index (82 \% behind one load)}}
+\tr{\td{\code{\verb~|ProofBlocks.WriterImpl.records~}}\td{4.3 \%}\td{136 instructions per block record, no single address}}
+\tr{\td{\code{\verb~|NameTable.internNum~}}\td{4.0 \%}\td{the probe of the name index (84 \% behind one load)}}
+\tr{\td{\code{\verb~|ProofBlocks.promote~}}\td{3.9 \%}\td{the promotion memo: the header of its chunk 45 \%, the entry 18 \%, the directory 12 \%}}
+\tr{\td{\code{\verb~|TermStore.touch~}}\td{3.7 \%}\td{the load that announces a child node}}
+\tr{\td{\code{\verb~|ProofBlocks.parse~}}\td{3.3 \%}\td{the first byte of a block record (64 \% behind one load)}}
+\tr{\td{copy of the mapped file}\td{2.9 \%}\td{}}
+\tr{\td{\code{\verb~|Loader.blockStretch~}}\td{2.5 \%}\td{}}
+\tr{\td{\code{\verb~|IdSpace~}}\td{2.5 \%}\td{the lookup of a binder name or a constant name in the table of name ids}}
+\tr{\td{\code{\verb~|Loader.exprApps~}, \code{\verb~|Linker.apps~}}\td{3.1 \%}\td{}}
+\tr{\td{\code{\verb~|IntListStore.intern~}}\td{2.0 \%}\td{}}
+\tr{\td{\code{\verb~|Loader.sweep~}, \code{\verb~|TermStore.appendExport~}, \code{ref}}\td{5.2 \%}\td{}}
+\tr{\td{\code{\verb~|ProofBlocks.seek~}, \code{pending}, \code{blockOfRecordLoader}}\td{3.0 \%}\td{the header of a chunk of the offset index (54 \% of \code{seek})}}
+}
+
+\ul{
+\li{\strong{Seven items, a third of the thread's time, are each one load.} The location of an earlier record, the probe of the name index, the header of a child node, the announcement of a child node, the promotion memo, the first byte of a block record, the offset index: in each compile unit most samples stand behind one load instruction, and that instruction also has the unit's last-level misses and its data TLB walks. \code{resolvePending} alone has 6.5 million TLB walks and 8.9 million last-level misses per pass on its one load. These are not loops that could be written better; they are random reads in tables of 64 MB to 1.3 GB through 4 KiB pages (section 7).}
+\li{\strong{A table in chunks costs a miss for the chunk's header.} The promotion memo is a directory of 19,000 arrays of 4,096 entries on Mathlib. Its lookup waits longest for the \em{length} of the inner array, which the bounds check of the access reads from the array's header: another cache line, and another page, than the entry. The same holds for the offset index of the proof blocks (1,200 arrays of 64 KiB). Larger chunks were tried and not kept (section 8).}
+\li{\strong{The name ids of an export are not dense for the reader.} The store interns names structurally and holds the special names before the file is read, so the first name of the file that is one of them gets an id that is not the next one, and from then on the reader translates name ids through a table (20 MB on Mathlib). Every \code{lam} and \code{forallE} line looked its binder name up there, a name the loader does not keep.}
+\li{\strong{An attribution to beware of.} The debug information of the image attributes three quarters of the samples of the block writer's loop to \code{\verb~|Arrays.copyOf~}, inlined through the allocation of a chunk of the offset index, and the name index's probe to the hash of the component. The disassembly shows the loop and the load. Shares by innermost inlined frame are not reliable in this image; shares by compile unit and by address are.}
+}
+}
+}
+
+\subtree{
+\title{3. The page faults of the executable's loader: where the fresh pages come from}
+
+\p{Every page fault of the two profiled passes was recorded with the address of the instruction that took it: 1,733,971 faults of the loader thread, 867,000 per Mathlib pass. By the code that touches the page first:}
+
+\table{
+\tr{\th{who touches the page}\th{faults per pass}\th{share}\th{MiB}\th{what it is}}
+\tr{\td{\code{\verb~|NodeCtx.writeApp~}, \code{writeBinder}, \code{writeConst}}\td{302,000}\td{35 \%}\td{1,180}\td{the export term region, one array sized from the length of the file: its pages as the nodes are appended}}
+\tr{\td{array copies into a new array}\td{118,000}\td{14 \%}\td{460}\td{the bytes of the proof blocks into their 1 MiB chunks (92,000); the copies when a table grows (26,000)}}
+\tr{\td{\code{\verb~|Loader.blockStretch~}, \code{sweep}}\td{104,500}\td{12 \%}\td{408}\td{the location table, one array sized from the length of the file}}
+\tr{\td{the copy of the mapped file into the scan buffer}\td{96,000}\td{11 \%}\td{-}\td{pages of the file mapping, not of the heap: one fault per 64 KiB; the JVM takes the same}}
+\tr{\td{\code{\verb~|LevelStore~} constructor}\td{75,600}\td{8.7 \%}\td{295}\td{the copy of the whole level store that every publication of a pipelined load makes: 52 copies of 5.7 MiB}}
+\tr{\td{\code{NameTable}}\td{53,600}\td{6.2 \%}\td{209}\td{rows, component bytes and the index; the index is read before it is written, so each of its pages faults twice}}
+\tr{\td{the collector promoting young objects}\td{38,600}\td{4.5 \%}\td{151}\td{small arrays that live to the end of the load (the 16 KiB pages of the promotion memo, the 64 KiB chunks of the offset index) copied into the old generation}}
+\tr{\td{\code{\verb~|ProofBlocks.WriterImpl.finish~}}\td{25,000}\td{2.9 \%}\td{98}\td{block rows and the two indexes of the block records, with their doubling}}
+\tr{\td{\code{\verb~|IdSpace.growTable~}}\td{15,400}\td{1.8 \%}\td{60}\td{the table of name ids, which grows by half 21 times}}
+\tr{\td{\code{DeclTable}, literals, the rest}\td{38,000}\td{4.4 \%}\td{}\td{}}
+}
+
+\p{The same from the side of the allocations: a load of cslib on the JVM launcher with 128 KiB thread-local buffers allocates 1,312 MiB on the loader thread per pass. 530 MiB is the export region and 170 MiB the location table, each allocated once; 124 MiB the 1 MiB chunks of the proof blocks; 97 MiB the three arrays of the name table; 116 MiB the 16 KiB pages of the promotion memo and 23 MiB the 64 KiB chunks of the offset index; 116 MiB the 47 copies of the level store; 40 MiB the 17 steps of the table of name ids; 28 MiB the declaration table; 33 MiB the doublings of the block indexes; the scan buffer and a line array of 3 KB per buffer are nothing.}
+
+\ul{
+\li{\strong{Not growth by doubling, not arrays per unit, not the collector between collections.} The questions the lever asked have one answer: four fifths of the faults are the \em{first touch} of the store itself and of the location table. The big columns are sized from the file length and do not grow on any of the eight corpora; nothing large is allocated per unit; and the collector gives a large array back to the system when it dies, which for these arrays is the end of the pass. In a process that checks the export once, the fresh pages are simply the memory the store needs. In a process that checks it several times, the image takes them again in every pass, because [its collector keeps no large chunk for reuse](dec-EGMG), and the JVM does not, because its heap stays mapped: that is the 0.76 million faults between the two, and it exists only in the warm metric.}
+\li{\strong{What can be removed inside the three modules is a twentieth.} The doublings of the block indexes and of the table of name ids, and the second fault of the name index's pages, are about 40,000 faults per pass, under 5 \%, 0.05 s. They were not changed: no measured gain stands behind them.}
+\li{\strong{What can be removed outside them is larger.} The copy of the level store at every publication is 8.7 \% of the loader's faults and 295 MiB of copying per Mathlib pass, in \code{rlvm-level} and in the publication interval of the driver. And the whole table is a table of 4 KiB pages: see section 7.}
+\li{\strong{Larger arrays are not cheaper.} Two changes that turn many small arrays into few large ones were measured (section 8). In this image a small array is allocated in young memory that is reused, zeroed in the cache and copied once by the collector; a large one is fresh pages. The fresh pages cost more.}
+}
+}
+
+\subtree{
+\title{4. The changes}
+
+\subtree{
+\title{4.1 The scanner: the end of a line before its numbers, and binder lines in the loop}
+
+\p{An \code{app} line is three numbers between fixed texts, and the address of each number is known only when the length of the one before it is: three loads that wait for each other, and at the end of the chain the position of the next line. So the lines of a stretch were scanned one after the other, 64 cycles for 260 instructions, however wide the processor. The new loop, \code{\verb~|Scanner.exprStretch~}, takes the end of the line from three loads at fixed places instead: the first byte below \code{\verb~|0x20~} among the bytes 31 to 54 of the line, where the newline of a line of the template with numbers of up to eight digits must stand. The exact test of the template, which every byte of the line still has to pass, then only confirms that position, with a branch that is never wrong on a real file; the processor starts the next lines while the numbers of this one are still being converted.}
+
+\ul{
+\li{\strong{What decides is unchanged.} The loop takes a line only if the old test of the template takes it, with the same numbers. The position from the fixed loads is a guess that the test must confirm; a window with another byte below \code{\verb~|0x20~} in front of the newline, or with none, gives a position that the test does not confirm, and the line goes to the code that was there before.}
+\li{\strong{Eight digits.} A number has at most eight digits in this loop, so the byte behind the eight loaded ones is not looked at: a ninth digit stands where the template has a literal, and the test of that literal ends the stretch. That removes 19 instructions per number. Lines with a number of nine digits, the last 7 \% of Mathlib's expression records, are taken by the loop of the first pass (\code{\verb~|Scanner.appStretch~}, unchanged but for the layout of its records) and by the single-line templates.}
+\li{\strong{\code{lam} and \code{forallE} lines} are 11 \% of the lines and 18 \% of the bytes of Mathlib, in stretches of 2.6 lines on average between the \code{app} lines; they went through a call per line, four calls of the number conversion and one for the binder info. They are now two more branches of the same loop, with the end of the line from five loads at fixed places, the four numbers converted in place and the binder info (\code{default}, \code{implicit}, \code{instImplicit}; 60, 24 and 16 \% of Mathlib's binders) read without a branch; \code{strictImplicit}, 0.4 \%, is left to the template of before. A stretch is now 43 lines long on average where it was 15 (counted in 150 MB from the middle of Mathlib), and nineteen lines of twenty are in one.}
+\li{\strong{Stretches of three kinds} (\code{rlvm-export}, \code{rlvm-load}). The scanner hands a stretch over as four ints per record (\code{\verb~|RecordOut.exprs~}; the default, which the tapes of the scanner threads use, makes the single calls \code{app}, \code{lam}, \code{pi}). The linker offers the longest prefix that the fast paths of the single calls would take - dense ids with a known delta, the next id, both children earlier expressions, the binder name bound - to the sink (\code{\verb~|ExportSink.exprStretch~}, default: refuse; it replaces \code{exprApps} of the first pass) and makes the single calls for a sink that refuses and for every record that is not of that kind. That a binder name is bound is one comparison: the name ids of an exporter's file come in order also when the sink's ids do not follow them, so the lookup in the table of name ids (section 2.3) is not made for a record of a stretch. The loader's loop writes the kind of the record where it wrote \code{APP} and counts the three kinds; binder name and binder info are not kept by the loader on any path.}
+}
+}
+
+\subtree{
+\title{4.2 The name table: an index that is asked less often}
+
+\p{Interning a name is one probe of an index of 64 MiB on Mathlib (a quarter full: 16.7 million slots for 4.27 million names), which is a miss of the cache and of the TLB every time: 0.19 microseconds per probe in the profile, 0.9 s per pass for nothing but that. The names of an export are distinct, so nearly every probe finds an empty slot. Two thirds of them are components of a name that the file introduced a few lines earlier: \code{\verb~|x._@.Mathlib.M._hygCtx._hyg.41~} is four names in a row, each with the one before it as its prefix.}
+
+\ul{
+\li{\strong{A name is younger than its prefix.} The names of the last thousand are kept out of the index, in a table of 4,096 slots that stays in the first-level cache and is searched first. A name whose prefix is one of them cannot stand in the index, because every name with that prefix was interned after the prefix: it is looked up in the small table alone. A name with an older prefix is looked up in both.}
+\li{\strong{The index is filled a thousand names at a time.} The slots of the names that move are loaded in a loop of their own first; those loads do not depend on each other, so the misses overlap, and the loop that fills the slots finds them in the cache.}
+\li{\strong{Nothing outside the table changes.} Which names exist and which id each has is what it was: an id is the arrival of the first request for a name. The index is the writer's own; no reader on another thread sees it. \code{findStr} searches both tables.}
+}
+}
+
+\p{Why the two are safe: no rule of the reader, the loader or the store changed. The stretch has the record-by-record path as its definition - an interface default that makes the single calls - and takes only the cases for which the two are the same by construction; the name table gives every request the id it gave before. The evidence is section 6. Both are cost only: the engines see the same store and count the same ticks.}
+}
+
+\subtree{
+\title{5. What it gives}
+
+\subtree{
+\title{5.1 The load alone, and the loader thread in the pass: counts}
+
+\p{Counts of one load (\code{\verb~|-X stop-after=load~}, three loads per process, the process's count divided by three), and of the loader thread alone inside the pipelined pass with 8 workers (the counters of that one thread, attached after the first pass of a process; per pass); \code{\verb~|perf stat~} in the arena container, base and candidate alternating, the median of the rounds. The cycles of a round depend on what else the host does, so only the two columns of one row are compared:}
+
+\table{
+\tr{\th{the executable, base -> candidate}\th{Init}\th{cslib}\th{navier-stokes-euler}\th{Mathlib}}
+\tr{\td{one load: instructions, G}\td{5.991 -> 5.788}\td{43.69 -> 42.17}\td{not counted}\td{108.85 -> 106.37}}
+\tr{\td{one load: user cycles, G}\td{1.900 -> 1.627 (0.856)}\td{15.48 -> 13.16 (0.850)}\td{not counted}\td{36.99 -> 32.66 (0.883)}}
+\tr{\td{one load: kernel cycles, G}\td{0.265 -> 0.251}\td{1.754 -> 1.760}\td{not counted}\td{4.367 -> 4.273}}
+\tr{\td{one load: mispredicted branches, millions}\td{8.4 -> 9.1}\td{68.6 -> 71.5}\td{not counted}\td{159.8 -> 164.2}}
+\tr{\td{rounds}\td{3}\td{3}\td{}\td{2}}
+\tr{\td{loader thread in the pass: user cycles per pass, G}\td{1.891 -> 1.645 (0.870)}\td{16.06 -> 14.13 (0.880)}\td{7.80 -> 6.73 (0.862)}\td{39.12 -> 34.91 (0.893)}}
+\tr{\td{loader thread in the pass: instructions per pass, G}\td{6.004 -> 5.789}\td{43.93 -> 42.42}\td{25.85 -> 25.12}\td{109.35 -> 106.90}}
+\tr{\td{loader thread in the pass: kernel cycles per pass, G}\td{0.290 -> 0.278}\td{2.38 -> 2.34}\td{1.24 -> 1.32}\td{5.69 -> 5.89}}
+\tr{\td{rounds}\td{3}\td{2}\td{2}\td{2}}
+}
+
+\ul{
+\li{\strong{An eighth of the loader's cycles for a thirtieth of its instructions.} The first pass took a fifth of the instructions and half as much of the time; this one takes 2 to 3.5 \% of the instructions and 12 to 15 \% of a load's cycles in user mode. The cycles were waiting: for the numbers of a line, and for the name index. The mispredicted branches go up by 3 to 8 \%: the end of a stretch of three line kinds is harder to guess than the end of a stretch of one.}
+\li{\strong{The kernel's part is unchanged}, as section 3 says it must be: none of the two changes touches a page less.}
+}
+}
+
+\subtree{
+\title{5.2 The load alone and the loader thread in the pass: seconds}
+
+\p{The load alone in one quiet window, three interleaved rounds, the median later load of a process, s:}
+
+\table{
+\tr{\th{the load alone}\th{Init}\th{cslib}\th{Mathlib}}
+\tr{\td{the executable (three loads in a process): base}\td{0.512 (0.493 0.512 0.516)}\td{4.365 (4.386 4.319 4.365)}\td{10.200 (10.288 10.094 10.200)}}
+\tr{\td{the executable: candidate}\td{0.431 (0.431 0.431 0.428)}\td{3.841 (3.841 3.799 3.863)}\td{9.164 (9.164 9.056 9.309)}}
+\tr{\td{candidate against base}\td{-15.9 \%}\td{-12.0 \%}\td{-10.2 \%}}
+\tr{\td{the JVM launcher (six loads in a process): base}\td{0.420 (0.420 0.433 0.420)}\td{3.223 (3.223 3.292 3.160)}\td{not measured}}
+\tr{\td{the JVM launcher: candidate}\td{0.362 (0.362 0.362 0.377)}\td{2.723 (2.866 2.723 2.723)}\td{not measured}}
+\tr{\td{candidate against base}\td{-13.8 \%}\td{-15.5 \%}\td{}}
+}
+
+\p{CPU per thread of the default pass, the executable, base and candidate interleaved in one window per corpus, two rounds, passes 2 and 3 of each process (cslib: passes 2 to 4, with the candidate's jars in an executable built an hour earlier):}
+
+\table{
+\tr{\th{the executable, pipelined pass, 8 workers}\th{cslib}\th{Mathlib}}
+\tr{\td{loader thread, CPU s: base}\td{4.57 to 4.63 (mean 4.61)}\td{10.37 to 11.08 (mean 10.81)}}
+\tr{\td{loader thread, CPU s: candidate}\td{3.80 to 4.09 (mean 3.99)}\td{9.68 to 9.87 (mean 9.78)}}
+\tr{\td{difference}\td{-0.62 s, -13 \%}\td{-1.03 s, -9.5 \%}}
+\tr{\td{of it kernel, s: base / candidate}\td{0.46 to 0.51 / 0.42 to 0.47}\td{1.07 to 1.14 / 1.11 to 1.20}}
+\tr{\td{CPU of the process per pass, s: base -> candidate}\td{41.3 -> 41.0}\td{112.0 -> 110.7}}
+\tr{\td{the passes of these windows, s: base / candidate}\td{5.58 5.49 5.49 5.51 5.47 5.46 / 5.54 5.43 5.38 5.43 5.47 5.34}\td{14.63 14.60 14.54 14.82 / 14.47 14.33 14.24 14.45}}
+}
+
+\ul{
+\li{\strong{The load is 10 to 16 \% shorter alone, on both platforms.} As with the first pass, what is written for the image's compiler is not an image-only gain: the JVM launcher's load gets 14 to 16 \% shorter.}
+\li{\strong{In a Mathlib pass the loader thread needs a second less CPU}: 10.81 to 9.78 s. It needed 12.1 s at the release, before the first pass; the kernel's second in it is where it was.}
+\li{\strong{The resident memory of a load is unchanged}: 172, 1,162 and 2,768 MiB for Init, cslib and Mathlib against 173, 1,162 and 2,767 MiB.}
+}
+}
+
+\subtree{
+\title{5.3 The guard: eight corpora, the executable and the JVM launcher}
+
+\p{The guard of [the rule for a default](dec-YP0N): warm wall clock of a pass that reloads the file, 8 workers, load pipelined, a run without options; base and candidate interleaved round by round inside one quiet window, three rounds; a process makes 15 passes on reachability, 10 on Init and Std, 8 on cedar, 6 on con-leche, cslib and navier-stokes-euler and 4 on Mathlib; a cell is the mean over the rounds of the median later pass of a process (for a pass under 0.5 s: of the mean later pass). "Loader thread busy" is the wall clock of the loading thread in the pass; peak RSS is the largest value any pass line of the rounds reports. The eight corpora were measured in two windows for the executable (the five small ones; the three large ones) and in one for the JVM launcher, because a window per corpus waited too long behind the windows of the other agents.}
+
+\table{
+\tr{\th{the executable: warm pass, 8 workers}\th{base, s}\th{candidate, s}\th{candidate against base}\th{loader thread busy, s}\th{CPU of the pass, s}\th{peak RSS, MiB}\th{rounds, base / candidate, ms}}
+\tr{\td{Init}\td{0.664}\td{0.640}\td{-3.6 \%}\td{0.55 -> 0.49}\td{4.7 -> 4.7}\td{381 -> 391}\td{667 664 662 / 639 644 638}}
+\tr{\td{Std}\td{1.162}\td{1.141}\td{-1.8 \%}\td{0.98 -> 0.89}\td{8.5 -> 8.4}\td{607 -> 606}\td{1172 1162 1152 / 1140 1128 1155}}
+\tr{\td{cedar}\td{1.636}\td{1.580}\td{-3.4 \%}\td{1.54 -> 1.38}\td{12.0 -> 11.8}\td{763 -> 790}\td{1643 1636 1629 / 1572 1597 1572}}
+\tr{\td{reachability}\td{0.538}\td{0.533}\td{-1.0 \%}\td{0.03 -> 0.03}\td{1.5 -> 1.5}\td{739 -> 737}\td{555.5 526.0 534.0 / 546.5 526.0 526.5}}
+\tr{\td{con-leche}\td{1.556}\td{1.523}\td{-2.1 \%}\td{1.05 -> 0.95}\td{10.0 -> 10.0}\td{1,355 -> 1,365}\td{1547 1573 1547 / 1543 1519 1508}}
+\tr{\td{navier-stokes-euler}\td{4.048}\td{3.949}\td{-2.4 \%}\td{2.73 -> 2.50}\td{29.8 -> 29.5}\td{1,557 -> 1,507}\td{4017 4055 4073 / 3972 3990 3886}}
+\tr{\td{cslib}\td{5.337}\td{5.238}\td{-1.9 \%}\td{4.60 -> 4.36}\td{40.3 -> 39.9}\td{1,993 -> 2,071}\td{5388 5268 5354 / 5221 5226 5266}}
+\tr{\td{Mathlib}\td{14.877}\td{14.425}\td{-3.0 \%}\td{13.10 -> 11.78}\td{112.3 -> 110.7}\td{4,469 -> 4,454}\td{14587 14634 15410 / 14448 14473 14354}}
+\tr{\td{\strong{sum}}\td{\strong{29.82}}\td{\strong{29.03}}\td{-2.6 \%}\td{}\td{}\td{}\td{}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.072}}\td{\strong{2.022}}\td{\strong{-2.4 \%}}\td{}\td{}\td{}\td{}}
+}
+
+\table{
+\tr{\th{the JVM launcher: warm pass, 8 workers}\th{base, s}\th{candidate, s}\th{candidate against base}\th{loader thread busy, s}\th{CPU of the pass, s}\th{peak RSS, MiB}\th{rounds, base / candidate, ms}}
+\tr{\td{Init}\td{0.625}\td{0.621}\td{-0.5 \%}\td{0.48 -> 0.43}\td{4.4 -> 4.4}\td{854 -> 839}\td{612 602 660 / 629 608 627}}
+\tr{\td{Std}\td{1.023}\td{1.001}\td{-2.2 \%}\td{0.82 -> 0.74}\td{7.4 -> 7.4}\td{1,440 -> 1,471}\td{1056 1000 1012 / 1035 965 1002}}
+\tr{\td{cedar}\td{1.451}\td{1.401}\td{-3.5 \%}\td{1.31 -> 1.19}\td{10.3 -> 10.0}\td{1,790 -> 1,774}\td{1459 1451 1443 / 1431 1404 1367}}
+\tr{\td{reachability (mean of the later passes)}\td{0.431}\td{0.440}\td{+2.2 \%}\td{0.03 -> 0.02}\td{1.3 -> 1.3}\td{1,592 -> 1,551}\td{396.3 437.7 457.9 / 445.1 430.6 444.1}}
+\tr{\td{con-leche}\td{1.323}\td{1.325}\td{+0.2 \%}\td{0.89 -> 0.76}\td{8.6 -> 8.6}\td{1,917 -> 1,846}\td{1286 1375 1307 / 1308 1295 1371}}
+\tr{\td{navier-stokes-euler}\td{3.530}\td{3.427}\td{-2.9 \%}\td{2.31 -> 2.17}\td{25.8 -> 25.2}\td{2,337 -> 2,307}\td{3490 3680 3421 / 3587 3347 3347}}
+\tr{\td{cslib}\td{4.670}\td{4.426}\td{-5.2 \%}\td{3.76 -> 3.35}\td{34.1 -> 33.1}\td{2,863 -> 2,858}\td{4673 4617 4719 / 4473 4385 4420}}
+\tr{\td{Mathlib}\td{12.691}\td{12.274}\td{-3.3 \%}\td{9.96 -> 9.04}\td{95.7 -> 94.2}\td{5,018 -> 5,100}\td{12537 12868 12669 / 12203 12259 12361}}
+\tr{\td{\strong{sum}}\td{\strong{25.74}}\td{\strong{24.91}}\td{-3.2 \%}\td{}\td{}\td{}\td{}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.801}}\td{\strong{1.766}}\td{\strong{-1.9 \%}}\td{}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The guard holds on both launchers.} The executable: the geometric mean goes down by 2.4 \%, and every corpus is faster, by 1.0 \% (reachability, whose load is 30 ms of a pass of 540 ms) to 3.6 \%; Mathlib 14.88 to 14.43 s. The JVM launcher: the geometric mean goes down by 1.9 \%; six corpora are 0.5 to 5.2 \% faster, con-leche is at +0.2 \% and reachability at +2.2 \%, with rounds of the base from 396 to 458 ms: the loader is 26 ms of this pass, and the difference is inside that scatter (the JVM launcher asks for huge pages, so its rounds also carry the state of the host's memory that section 7 describes, in base and candidate alike); eight further rounds on this corpus were queued and did not get a window. No corpus is more than 3 \% slower in either, and every pass of every round ended ACCEPT with every unit accepted.}
+\li{\strong{The loader thread is busy 8 to 11 \% less} in the executable on seven corpora (cslib 5 \%), \strong{and the pass gets 1.8 to 3.6 \% shorter} on the corpora whose pass is their load (Init, Std, cedar): the thread then waits for the workers. It is busy for 76 to 87 \% of the candidate's pass on these three, where it was busy for 82 to 94 \% of the base's. On Mathlib the loader thread is busy 1.32 s less (13.10 to 11.78 s) and the pass is 0.45 s shorter; the CPU of the pass goes from 112.3 to 110.7 s.}
+\li{\strong{Peak RSS} is the largest value of the three rounds. In the executable the rounds of base and candidate overlap on seven corpora (Mathlib round by round: 4,419 4,348 4,468 against 4,363 4,336 4,453 MiB; cslib 1,978 1,973 1,993 against 2,071 1,942 1,973 MiB), and cedar is 6 to 30 MiB, 1 to 4 \%, higher in every round (763 763 759 against 769 786 789 MiB). A likely cause, not verified: with a faster loader the workers lag further behind it, and more of what they have not checked yet is resident at the peak; the store itself is the same size, word for word. On the JVM launcher the differences are those of the collector from round to round (Mathlib 4,992 5,018 4,957 against 4,962 5,074 5,099 MiB).}
+}
+}
+
+\subtree{
+\title{5.4 The loader thread of the candidate, itemised}
+
+\p{From a profile of the same kind as section 2.3 (the candidate's symbolised image, two profiled passes of Mathlib, 40,815 samples of the loader thread). It was taken three and a half hours after the base's, on a busier host - the thread's cycles stalled on memory are 13.4 G per pass where the base's were 13.1 G, with 2 \% fewer instructions - so the two profiles are compared by their shares, and the cycles by the counts of section 5.1, which alternate. Per pass: 116.9 G instructions (base 119.4 G) at 2.9 instructions per cycle, 83 million last-level read misses, 37 million data TLB walks, 169 million mispredicted branches, 845,000 page faults (base 867,000). By compile unit, share of the thread's time:}
+
+\table{
+\tr{\th{compile unit}\th{candidate}\th{base}\th{}}
+\tr{\td{kernel}\td{16.4 \%}\td{15.1 \%}\td{the same faults in a shorter thread}}
+\tr{\td{the scanner: \code{\verb~|Scanner.exprStretch~}, \code{appStretch}, the other templates}\td{12.2 + 1.1 + 2.8 = 16.1 \%}\td{14.3 + 6.4 = 20.7 \%}\td{\code{exprStretch}: 249 instructions and 50 cycles per line, for \code{app}, \code{lam} and \code{forallE} lines together; the base took 64 cycles for an \code{app} line and about 160 for a binder line}}
+\tr{\td{\code{NameTable} (\code{internNum}, \code{internBytes}, \code{indexRecent})}\td{5.4 \%}\td{8.7 \%}\td{most of what is left stands in the loop that fills the index, 0.09 microseconds per name: its probes overlap, the walks of the page table behind them less}}
+\tr{\td{\code{\verb~|Loader.resolvePending~}}\td{5.7 \%}\td{4.8 \%}\td{}}
+\tr{\td{\code{\verb~|NodeCtx.writeApp~}, \code{\verb~|TermStore.touch~}, \code{appendExport}, \code{ref}}\td{13.4 \%}\td{11.8 \%}\td{}}
+\tr{\td{promotion (\code{\verb~|ProofBlocks.promote~}, \code{parse}, \code{seek}, \code{pending}, \code{blockOfRecordLoader})}\td{11.8 \%}\td{10.1 \%}\td{}}
+\tr{\td{\code{\verb~|ProofBlocks.WriterImpl.records~}, \code{\verb~|Loader.blockStretch~}, \code{sweep}}\td{9.3 \%}\td{8.7 \%}\td{}}
+\tr{\td{\code{\verb~|Loader.exprStretch~}, \code{\verb~|Linker.exprs~} (base: \code{exprApps}, \code{apps})}\td{4.5 \%}\td{3.1 \%}\td{they take the binder records as well}}
+\tr{\td{copy of the mapped file}\td{3.4 \%}\td{2.9 \%}\td{}}
+\tr{\td{\code{IdSpace}}\td{2.3 \%}\td{2.5 \%}\td{the binder names are no longer looked up; the names of \code{const} records and the bindings of new names are}}
+}
+
+\p{What the thread is now: a sixth kernel, a sixth scanner, and still a third the seven loads of section 2.3: the name table has gone from 8.7 to 5.4 \% of the thread, and the other six loads have grown from 22 to 26 \% of a thread that got shorter around them.}
+}
+
+\subtree{
+\title{5.5 The scanner threads: is one still the default?}
+
+\p{[The settings of a plain run](dec-EGMG) chose one scanner thread - the loader thread itself, scanning the mapped file - over two helper threads that tokenise and pack ahead of it, because beside eight workers on eight cores a helper takes a core from the checking; the first pass left the question open for a faster loader. The candidate executable with the default, with \code{\verb~|-X scan-threads=2~} and with \code{\verb~|-X scan-threads=0~} (no mapping: the file is read into the scan buffer), interleaved in one quiet window, two rounds, warm passes with 8 workers, the median later pass of a process:}
+
+\table{
+\tr{\th{candidate executable, warm pass}\th{1 (the default), s}\th{2 scanner threads, s}\th{none, plain read, s}\th{CPU of the pass, s: 1 / 2 / none}\th{peak RSS, MiB: 1 / 2 / none}\th{rounds, ms: 1 / 2 / none}}
+\tr{\td{Init}\td{0.641}\td{0.670 (+4.5 \%)}\td{0.648 (+1.2 \%)}\td{4.6 / 4.9 / 4.7}\td{390 / 528 / 382}\td{640 641 / 674 665 / 647 649}}
+\tr{\td{navier-stokes-euler}\td{3.935}\td{4.568 (+16.1 \%)}\td{3.882 (-1.3 \%)}\td{29.1 / 31.7 / 29.2}\td{1,535 / 1,804 / 1,511}\td{3970 3899 / 4538 4598 / 3903 3861}}
+\tr{\td{cslib}\td{5.208}\td{5.458 (+4.8 \%)}\td{5.224 (+0.3 \%)}\td{39.6 / 41.4 / 39.6}\td{2,006 / 2,230 / 2,059}\td{5245 5171 / 5472 5443 / 5252 5196}}
+\tr{\td{Mathlib}\td{14.286}\td{15.009 (+5.1 \%)}\td{14.449 (+1.1 \%)}\td{110.0 / 115.6 / 111.1}\td{4,423 / 4,730 / 4,410}\td{14174 14397 / 14889 15128 / 14463 14434}}
+}
+
+\ul{
+\li{\strong{One scanner thread stays the default.} Two are 4.5 to 16 \% slower on all four corpora, with 4 to 9 \% more CPU and 140 to 310 MiB more memory; when the decision was taken they were level on Init and Std and 13 \% slower on navier-stokes-euler. The faster the loader thread scans itself, the less a helper has to give, and the tapes of the helpers replay record by record.}
+\li{\strong{No scanner thread at all, with a plain read, is level with one} (-1.3 to +1.2 \%, inside the scatter of two rounds). The mapping and its 96,000 page faults per Mathlib pass (section 3) neither gain nor lose against the kernel copying the file into the buffer; nothing speaks for changing the rule.}
+}
+}
+}
+
+\subtree{
+\title{6. The gates}
+
+\p{All on the private candidate distribution, through its own launchers and with no \code{\verb~|-X~} option unless the row says so.}
+
+\table{
+\tr{\th{gate}\th{result}}
+\tr{\td{the suites of the three modules on the candidate's sources}\td{\code{rlvm-export} 82 tests, 0 failures, 1 skipped (the Mathlib differential, which has a switch of its own; run with it: 5 of 5 tests of its class, 0 failures: all 112 million lines of Mathlib through the fast path, through the general path alone, through 4 scanner threads and through buffered input leave the same hash of sink calls, binder names and binder infos included); \code{rlvm-store} 73, 0 failures, 1 skipped as in the main tree; \code{rlvm-load} 81, 0 failures, 0 skipped. New: three tests of \code{AppStretchTest} (the numbers and the binder info of a \code{lam} and a \code{forallE} line in every place, every binder info and seven texts that are none; random mixtures of the three line kinds longer than the scanner's buffer, cut by other lines, an unbound binder name, an unbound child, a blank, a carriage return, a control byte, an empty line, with ids of up to nine digits; lines at the end of read buffers of 56 sizes; every file through all reader configurations and the reference reader, with the sink taking the stretches and refusing them) and one of \code{NameTableTest} (240,000 requests against a map, with young and old prefixes, repeated names of every age, lookups without insertion, tables that start at 4 to 200,000 expected names). Six deliberate errors in the new code - a swapped pair of children, a wrong binder info, a binder name not tested, a leading zero taken, the index skipped for a prefix forty names too old, a recent name put into the wrong slot - were each caught by these tests}}
+\tr{\td{\strong{store equality}: the differential digest of the loader's tests (outcome or exception with message and line, every word of the export region, every block row, every word of every decoded block, every name, the structural digest of every unit), candidate against base}\td{\strong{IDENTICAL in 25 of 25 configurations}: one thread on 17,158 small files (the 230 published tests and 16,928 mutants), the 263 arena tests of the complete set below 100 MB, 847 prelude mutants, Init, Std, the Cedar slice, reachability, cedar, con-leche, navier-stokes-euler, cslib, Mathlib; 3 scanner threads with chunks of 256 bytes and 2 with 3,000 bytes on the three lists of small files; 2 and 3 scanner threads with chunks of 64 KiB, 1 MiB and 4 MiB on the corpora (71.8 to 77.1 million records through packed runs); the strict policy with one thread and with scanner threads on the small lists. Every configuration also equals the base's one-thread digest of the same list. Strict policy on the eight corpora and the Cedar slice: identical to the base and to the practical digest, nothing declined. The base's digests are, file for file, those of the candidate of the first pass}}
+\tr{\td{the gate of the default configuration through the executable (\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~})}\td{PASS: 230 of 230 tests correct, none declined; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034, 2 runs ended by the 60 s limit (below); the differential self-test caught; hostile suite 1,196 rows: agree 1,124, 68 tolerated accepts of kind (d), 0 wrong accept, 0 wrong reject, 4 declined}}
+\tr{\td{the same through the jars}\td{PASS: 230 of 230; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034, the same 2 runs ended by the limit; the differential self-test caught; hostile 1,196 rows: agree 1,124, 68 tolerated, 0 wrong accept, 0 wrong reject, 4 declined}}
+\tr{\td{the two runs that hit the limit}\td{the two \code{CHANGE_LITERAL} mutants of the bugs corpus that the first pass met (a literal 1 replaced by 2^64 - 1 and by 2^64; 22 to 26 s alone on a measurement core), in the base as in the candidate on the busy efficiency cores. Alone, with the gate's own command, on two spare cores of the busy host: base and candidate reject both, as the official checker does, through the executable and through the jars, 8 of 8 runs, in 51 to 571 s}}
+\tr{\td{the driver's invariance suite from the candidate's jars, machine as primary engine (every file 9 times: batch with 1, 2, 4, 8 workers, 1-byte session caps, pipelined with a publication after every unit, every 7 and every 64 units and 1, 4, 8 workers)}\td{PASS: published tests 231 files, 231 correct, 0 schedule differences; tutorial, bugs and metadata mutants 16,928 files, 0 wrong, 1,675 declined alike in every mode (413 + 65 + 1,197), 0 schedule differences, 0 pipelined declines; init-prelude, Init, Std, cedar: 4 correct, 0 schedule differences. The counts are those of the first pass}}
+\tr{\td{the eight corpora with 8 workers, both launchers (the guard's runs)}\td{ACCEPT, every unit accepted, in every pass}}
+\tr{\td{the eight corpora with 4 workers, both launchers}\td{ACCEPT, 0 declined, 16 of 16 runs}}
+\tr{\td{the eight corpora with 2 and with 3 scanner threads (\code{\verb~|-X scan-threads=N~}) through the candidate executable, where the stretches of the scanner arrive as tapes}\td{ACCEPT, 16 of 16 runs}}
+\tr{\td{cost only: every corpus with one worker through the base's and the candidate's executable}\td{IDENTICAL on all eight: verdict, units, the machine's ticks, records, runs, pairs, resets, calls and declines, the reference engine's units and steps, the loader's counters. Mathlib: 574,100,326 ticks, 288,313,296 records, 60 units decided by the reference engine in 5,277,996 steps, as in the first pass}}
+\tr{\td{the strict policy (\code{\verb~|-X policy=strict~}, the reference engine alone) on the eight corpora through the candidate executable}\td{ACCEPT on all eight, 0 declined}}
+}
+
+\p{No wrong accept and no wrong reject against the official checker was seen in the base or in the candidate.}
+
+\subtree{
+\title{6.1 The single-run gates again, on sources with the fix of the level store}
+
+\p{While this report was being written, a defect of the released build was found that is older than this work and outside the three modules: the instantiation caches of the level store could keep an entry across a reset ([the report of that finding](rep-INV-1)). Its fix entered the main tree at 15:49 UTC. It changes \code{LevelStore} in \code{rlvm-level} and one method of \code{NodeCtx} in \code{rlvm-store}, with their tests; the patches of this report touch none of those files, and the two sets of patches apply in either order. Everything else in this report - the gates above, the guard, every count - ran on the sources of 10:48 UTC \em{without} that fix, base and candidate alike. The gates that are single runs were then repeated on a base and a candidate that both carry it (the six files are those of the main tree byte for byte, and the fixed base's jars of the four modules \code{rlvm-level}, \code{rlvm-store}, \code{rlvm-export} and \code{rlvm-load} are those of the shared distribution built after the fix), jars only, through the JVM launcher:}
+
+\table{
+\tr{\th{gate, with the fix in base and candidate}\th{result}}
+\tr{\td{the suites, on the fixed candidate's sources}\td{\code{rlvm-export} 82 tests, 0 failures, 1 skipped; \code{rlvm-store} 74, 0 failures, 1 skipped (73 and the new test of the fix); \code{rlvm-load} 81, 0 failures, 0 skipped; \code{rlvm-level} 72, 0 failures, 2 skipped (the depth limit, and the level slices, which the private copy does not have); \code{rlvm-nat}, built on the way, 54, 0 failures, 1 skipped}}
+\tr{\td{\strong{store equality}: the digest of the fixed candidate in the 25 reader configurations, against the digests of the base \em{without} the fix}\td{IDENTICAL in 25 of 25 configurations (the same lists as above: 17,158 small files, 263 arena tests, 847 prelude mutants, the eight corpora; one, two and three scanner threads; both policies); the strict policy on the eight corpora and the Cedar slice is identical to the unfixed base's strict digest and to its practical digest. The fixed base with the reader defaults is identical to the unfixed base on all six lists: the fix does not change what a load builds}}
+\tr{\td{the gate of the default configuration without the mutant corpora, through the jars (\code{\verb~|scripts/gate.sh --defaults --corpus none --hostile~})}\td{PASS: 230 of 230 tests correct, none declined; the differential self-test caught; hostile suite 1,196 rows: agree 1,124, 68 tolerated accepts of kind (d), 0 wrong accept, 0 wrong reject, 4 declined - the counts of the unfixed candidate}}
+\tr{\td{cost only: every corpus with one worker, fixed base against fixed candidate}\td{IDENTICAL on all eight between the fixed base and the fixed candidate, and every one of these counts is also the count of the unfixed pair through the executable (Mathlib: 574,100,326 ticks, 288,313,296 records, 120 declines of the machine, 60 units decided by the reference engine in 5,277,996 steps): none of these runs with one worker meets the defect}}
+\tr{\td{the strict policy on the eight corpora, fixed candidate}\td{ACCEPT on all eight, 0 declined}}
+}
+
+\p{Not repeated with the fix: the four mutant corpora, the invariance suite, the gate through the executable, the runs with 4 workers and with scanner threads, and the guard.}
+}
+}
+
+\subtree{
+\title{7. A finding outside the three modules: huge pages for the executable, a gain when the host has them free and a loss when it has not}
+
+\p{The JVM launcher runs with \code{\verb~|-XX:+UseTransparentHugePages~}, which [the measurement of its flags](rep-J1) found to be the one flag with a consistent gain. The serial collector of the native image has no such option: every page of its heap is a 4 KiB page. Sections 2.3 and 3 are what that looks like from the loader thread: seven items that are each one load with a TLB walk, and 760,000 first touches of a page per Mathlib pass; the workers take another half million faults.}
+
+\p{\strong{The first experiment, about 11:30 UTC.} A library of thirty lines, preloaded into the \em{unchanged} base executable, that advises \code{\verb~|MADV_HUGEPAGE~} for every anonymous writable mapping of 2 MiB or more that the process makes. The image's collector commits each large array as one mapping, so the export region, the location table, the name table, the copies of the level store and the large arrays of the machine's sessions get huge pages where the host gives them on advice (this host: \code{enabled} is \code{madvise}, and so is \code{defrag}). Interleaved with the plain executable in quiet windows, warm passes with 8 workers, the median later pass of a process:}
+
+\table{
+\tr{\th{base executable, warm pass}\th{plain}\th{with the preloaded library}\th{}\th{loader thread busy, s}\th{CPU of the pass, s}\th{peak RSS, MiB}\th{rounds, plain / with the advice, ms}}
+\tr{\td{cslib (6 passes, 2 rounds)}\td{4.997 s}\td{4.797 s}\td{-4.0 \%}\td{4.41 -> 4.09}\td{37.6 -> 36.8}\td{1,941 -> 1,973}\td{5158 4836 / 4885 4708}}
+\tr{\td{Mathlib (4 passes, 2 rounds)}\td{14.281 s}\td{13.759 s}\td{-3.7 \%}\td{12.21 -> 10.76}\td{110.5 -> 106.8}\td{4,404 -> 4,487}\td{14114 14448 / 14220 13298}}
+}
+
+\p{With the scanner loop of section 4.1 in the executable the library gave the same again on cslib in that window: 4.842 s without it and 4.663 s with it (-3.7 \%). The sign was the same in five of the six pairs of rounds.}
+
+\p{\strong{The second experiment, 15:58 to 16:09 UTC.} The same test linked into the executable instead of preloaded, to see that the release can stay one executable: \src{scripts/build.sh} on the base's sources with two more arguments for the image builder (\code{\verb~|-H:NativeLinkerOption=-Wl,--wrap=mmap~} and, the same way, the object file of the C function below). That executable passes the build's own verification and held 1,042 of its 1,708 MiB in huge pages at the peak of a run of cslib (the plain executable none; with the preloaded library 1,234 of 1,917 MiB). Against the plain base executable, three interleaved rounds per corpus, the three corpora one after the other in one quiet window:}
+
+\table{
+\tr{\th{base executable, warm pass}\th{plain}\th{with the advice linked in}\th{}\th{loader thread busy, s}\th{CPU of the pass, s}\th{peak RSS, MiB}\th{rounds, plain / with the advice, ms}}
+\tr{\td{cslib (6 passes, 3 rounds), 15:58 to 16:01}\td{6.160 s}\td{9.225 s}\td{\strong{+49.8 \%}}\td{5.90 -> 8.91}\td{41.5 -> 46.9}\td{2,055 -> 2,127}\td{6273 6030 6177 / 8395 9469 9811}}
+\tr{\td{navier-stokes-euler (6 passes, 3 rounds), 16:01 to 16:04}\td{4.097 s}\td{4.619 s}\td{\strong{+12.8 \%}}\td{2.79 -> 3.69}\td{29.8 -> 31.6}\td{1,482 -> 1,498}\td{4024 4340 3926 / 5163 4733 3961}}
+\tr{\td{Mathlib (4 passes, 3 rounds), 16:04 to 16:09}\td{14.747 s}\td{14.598 s}\td{-1.0 \%}\td{12.56 -> 12.02}\td{113.4 -> 111.0}\td{4,410 -> 4,442}\td{14891 14754 14595 / 14503 14713 14579}}
+}
+
+\p{What the host's memory looked like inside that window, from \code{\verb~|/proc/buddyinfo~} (zone Normal) and \code{\verb~|/proc/vmstat~}; the counters are the host's, and other processes that ask for huge pages - every JVM launcher - move them too:}
+
+\table{
+\tr{\th{time, UTC}\th{what ran}\th{free blocks of 2 MiB}\th{free blocks of 4 MiB}\th{\code{compact_stall}}\th{\code{thp_fault_fallback}}}
+\tr{\td{16:01:22}\td{the rounds of cslib over, navier-stokes-euler running}\td{0 (25 GB free, all of it in blocks of 1 MiB and less)}\td{0}\td{6,104,161}\td{1,529,728}}
+\tr{\td{16:04:52}\td{the rounds of navier-stokes-euler over, Mathlib running}\td{1,530}\td{78}\td{6,118,556 (+14,395 in 3.5 minutes)}\td{1,534,501 (+4,773)}}
+\tr{\td{16:06:53}\td{Mathlib running}\td{963}\td{12}\td{6,122,153 (+3,597 in 2 minutes)}\td{1,535,678 (+1,177)}}
+\tr{\td{16:07:08 to 16:09:23, ten readings}\td{Mathlib running; the window ended at 16:09:34}\td{365 to 3,889}\td{310 to 676}\td{6,122,340 (+187 in 2.5 minutes)}\td{1,535,737 (+59)}}
+}
+
+\ul{
+\li{\strong{What the advice is worth is decided by the host's memory, not by the checker.} While the host has huge pages to give, a few percent: -4.0 and -3.7 \% with the preloaded library, -1.0 \% on Mathlib with the linked function. While it has none, the same advice costs 13 to 50 \% of the pass. With \code{defrag} set to \code{madvise}, the first touch of an advised mapping that finds no free huge page makes the \em{faulting thread} compact memory before it falls back to small pages; that is the loader thread, busy 5.90 s without the advice and 8.91 s with it on cslib. The image takes its large arrays fresh in every pass (section 3), so it asks in every pass; the JVM launcher keeps its heap mapped and asks when the heap grows. In the third round of navier-stokes-euler the two executables were level again, 3961 against 3926 ms, and the reading taken after it shows free blocks again.}
+\li{\strong{Plain advice is therefore not a candidate for a default}, and "about 4 \% of the warm pass", which is what the first experiment alone said, holds only with its condition. What could keep the gain without the exposure, none of it tried here: mappings that survive from pass to pass, advice that is withheld while the kernel is compacting, or collapsing the pages after the pass has touched them instead of asking at the first touch.}
+\li{\strong{The lever became a work package of its own} in this wave (OPT-G: the advice built into the executable with a switch, the eight corpora, the gate), which met the same two faces in its own windows; its report is the place for the complete measurement. What stands here is the finding and the two windows above.}
+\li{\strong{A timing of the JVM launcher carries the same exposure}, since it advises the same way: the guard of section 5.3 interleaves base and candidate, so both carry it, and it adds to the scatter of the rounds.}
+\li{\strong{It changes what else is worth doing, under the same condition.} With huge pages a large array is cheaper than many small ones, which is the opposite of what section 8 measured without them; the items of section 2.3 that are one load with a TLB walk shrink without any change of the loader.}
+}
+
+\p{The function that was linked in, so that the experiment can be repeated (compiled with the system's C compiler; the preloaded library is the same test around the C library's own \code{mmap}):}
+
+\pre{\verb~|
+#define _GNU_SOURCE
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <stddef.h>
+
+void *__real_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+
+void *__wrap_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    void *p = __real_mmap(addr, len, prot, flags, fd, off);
+    if (p != MAP_FAILED && (flags & MAP_ANONYMOUS) && (prot & PROT_WRITE) && len >= ((size_t) 1 << 21)) {
+        (void) madvise(p, len, MADV_HUGEPAGE);
+    }
+    return p;
+}
+~}
+}
+
+\subtree{
+\title{8. What was tried and not kept, and what was not done}
+
+\p{Each of these was built into a private executable and counted against the candidate of that hour: user cycles of the loader thread inside the pipelined pass of cslib, two interleaved rounds, and user and kernel cycles of the load alone.}
+
+\table{
+\tr{\th{variant}\th{loader thread in the cslib pass, user cycles per pass, G}\th{load of cslib alone: user / kernel cycles, G; instructions, G}\th{verdict}}
+\tr{\td{base}\td{16.06 (15.96 16.16)}\td{14.02 / 1.64; 43.69}\td{}}
+\tr{\td{the scanner loop of 4.1 alone}\td{not counted}\td{12.93 / 1.63; 41.88}\td{kept}}
+\tr{\td{with the name index of 4.2: \strong{the candidate}}\td{14.13 (14.25 14.02); a second window 14.24 (14.36 14.12)}\td{12.25 / 1.61; 42.17}\td{kept}}
+\tr{\td{candidate + the chunks of the promotion memo and of the offset index sized from the input (16 to 32 chunks instead of 19,000 and 1,200)}\td{not counted}\td{11.97 / 1.81; 42.20 against 12.13 / 1.61 for the candidate in that run}\td{not kept: 0.16 G user cycles less, 0.21 G kernel cycles more}}
+\tr{\td{candidate + the references of a segment resolved a window of 512 at a time, the block records among them announced to the store, which loads what their promotion reads in loops of independent loads}\td{14.26 (14.51 14.01); Mathlib 35.82 (36.14 35.51) against 35.79 (35.89 35.69)}\td{13.31 / 1.78; 44.23 against 12.80 / 1.68 for the candidate in that run}\td{not kept: 5 \% more instructions, no fewer cycles in the pass, more alone}}
+\tr{\td{the same + the shared terms a promoted record names loaded ahead + a memo for the level lists of \code{const} records}\td{14.33 (14.31 14.35)}\td{13.06 / 1.71; 44.78}\td{not kept}}
+\tr{\td{candidate + that memo + the shared terms loaded ahead during a promotion, without the announcement}\td{14.07 (13.95 14.20) against 14.24 (14.36 14.12) in that window}\td{not counted}\td{not kept: 1.2 \% is inside the scatter of the rounds}}
+\tr{\td{the first pass's loop for \code{app} lines with the end of the line from fixed loads and nothing else}\td{not counted}\td{13.32 / 1.64; 45.32 (cslib); Init 1.621 against 1.632 G user cycles}\td{superseded: 44 instructions more per line for 7 cycles less}}
+}
+
+\ul{
+\li{\strong{The end of a line from fixed loads is not enough alone.} It breaks the chain, and the loop then ran at 5.3 instructions per cycle instead of 4.1, but with 44 more instructions per line it gained 7 cycles of 64. The gain came when the loop also lost the instructions of the ninth digit: the chain and the instruction count both had to go.}
+\li{\strong{Announcing promotions did not pay.} A promotion waits for about three misses in a row (memo, offset indexes, block bytes), 3.6 million times per Mathlib pass, and loading those places for a window of references together is the same idea as the name index. It cost a second traversal of the references (2 G instructions on cslib, 5 G on Mathlib) and gave nothing in the pass: on Mathlib, where promotion is a larger share, the loader thread took 35.82 G user cycles per pass with it and 35.79 G without (two rounds: 36.14 35.51 against 35.89 35.69).}
+\li{\strong{Larger chunks for the promotion memo and the offset index} remove the miss for the chunk header (section 2.3) and the collector's copy of the small arrays, and turn reused young memory into fresh pages: the kernel took more than the cache gave back. With huge pages, when the host has them to give, this would be decided again (section 7).}
+\li{\strong{Not done, with what speaks for or against each.} A location table of two bits per record (a bitmap with ranks; shared ids and block records of a unit are two interleaved runs): it would take 400 MB and 104,000 faults out of a Mathlib pass and most TLB walks out of \code{resolvePending}, and it changes the table that the scanner threads read. Sizing the block indexes and the table of name ids from the file length: 40,000 faults, 0.05 s. The copy of the level store per publication (section 3): \code{rlvm-level}. A loop for \code{const} and name lines: 5 \% of the lines, and their cost is in the store. Parsing the mapped file in place: the copy is 2.9 \% of the thread. The block writer's loop at 136 instructions per record: perhaps 30 fewer.}
+}
+}
+
+\subtree{
+\title{9. The patches, and what an integrator must know}
+
+\ul{
+\li{Three unified diffs against the repository root, one per module, to be applied together: \code{rlvm-export} (\code{Scanner}, \code{RecordOut}, \code{Linker}, \code{IdSpace}, \code{ExportSink}; the tests \code{AppStretchTest}, \code{StructSink} and \code{T}; the README), \code{rlvm-store} (\code{NameTable}; the test \code{NameTableTest}; the README), \code{rlvm-load} (\code{Loader}; the README). They apply to the main tree as it was when the work ended without a failed hunk, and applied to the base they give the candidate's sources file for file. \code{rlvm-load} needs \code{rlvm-export}: it implements \code{\verb~|ExportSink.exprStretch~}. The patch of \code{rlvm-store} is independent of the other two.}
+\li{\strong{An interface of the first pass is replaced, not extended}: \code{\verb~|ExportSink.exprApps~} and \code{\verb~|RecordOut.apps~} become \code{exprStretch} and \code{exprs}, with four ints per record instead of three. Both are optional with a default; the only implementations are \code{Loader} and the test sink, both in the patches. A sink outside the repository that implemented \code{exprApps} would silently get the single calls again.}
+\li{No build script, no option and no default changed. Of the eight methods of \code{rlvm-store} that [the force-inline list of the machine](rep-OPT-A) names (\code{\verb~|Terms.a~}, \code{b}, \code{kind}, \code{fvMask}, \code{hasLevelParam}, \code{\verb~|ProofBlocks.rd~}, \code{\verb~|ProofBlocks.localRef~}, \code{\verb~|DeclTable.ctorInduct~}) none is renamed, split or touched: of \code{rlvm-store} only \code{NameTable} changes, and only its interning. No method that the patches add belongs on that list: the new loops call nothing, and the name table's small methods are inlined by the image as they are.}
+\li{The scanner's loop reads up to 112 bytes behind the start of a line before it has verified that they belong to it; it leaves the lines of the last 112 bytes of a buffer to the other paths, so the padding of the buffers (16 bytes) is as it was.}
+\li{The READMEs of the three modules are updated in place, with the marker of this report.}
+}
+}
+
+\subtree{
+\title{10. What was not measured}
+
+\ul{
+\li{Anything on x86-64; anything with Oracle GraalVM; a quiet host (section 1): the absolute times are those of a busy host, the differences are from interleaved rounds, and the windows of the guard waited up to 45 minutes behind those of the other agents.}
+\li{The patches together with whatever the other agents of this wave change in the machine: base and candidate were both built from the sources of 10:48 UTC.}
+\li{Which of the two changes gives how much in the pass: the loop of the scanner alone was counted only in the load alone (section 8).}
+\li{The scanner threads' own cost with the new loop: with scanner threads the tapes replay record by record as before.}
+\li{The first, cold pass of a process as a number of its own: the guard is the warm pass. The two changes do not depend on a pass having been made before.}
+\li{The huge-page advice of section 7 beyond what that section has: two windows of two and three rounds on two and three corpora, one host, no gate; the preloaded library and the linked function were never timed in one window, and the free blocks of the host were not read during the first window.}
+\li{With the fix of the level store (section 6.1): the mutant corpora, the invariance suite, the executable and the guard. They ran on the sources of 10:48 UTC, base and candidate alike.}
+\li{More rounds of reachability on the JVM launcher: eight were queued and did not get a window.}
+\li{Files that are not exporter output at speed: a file whose name ids are not in order gets no binder record in a stretch, a file with other control bytes than the newline falls back line by line; both are correct by the tests and by the mutant corpora, and neither was timed.}
+}
+}
+
+\subtree{
+\title{11. Verdict}
+
+\p{\strong{GO for the default configuration.} The reasons, in the order of [the rule for a default](dec-YP0N):}
+
+\ul{
+\li{\strong{It is a cost-only change.} The store the loader builds is the base's store word for word in every reader configuration the loader's tests know and under both policies, and the engines count the same ticks, records and declines on all eight corpora (section 6). Nothing a worker reads is different, so no verdict can be.}
+\li{\strong{Every gate passed with the release's counts}, through the executable and through the jars: 230 tests, 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0, the hostile suite with 0 wrong accept and 0 wrong reject; the invariance suite has no schedule difference; the strict policy accepts all eight corpora with nothing declined. The two mutant runs that ran into the gate's time limit are those the first pass met; they do so under the host's load in the base as in the candidate, and both give the official verdict when run alone.}
+\li{\strong{The guard holds on the executable and on the JVM launcher} (section 5.3): geometric mean -2.4 \% and -1.9 \%, the worst corpus -1.0 \% and +2.2 \%, three interleaved rounds each. Mathlib in the executable: 14.88 -> 14.43 s.}
+\li{\strong{The price} is source: about 570 added lines in the three modules, 330 of them one loop of the scanner in which the conversion of a number is written out eleven times, 130 in the name table, and 260 lines of tests; and an optional interface of the first pass that changes its name and its record layout (section 9). Peak RSS is 1 to 4 \% higher on cedar in the executable and not higher on any other corpus.}
+}
+
+\p{What the verdict rests on and does not cover: the base is the main tree of 10:48 UTC, which did not yet have the fix of the level store that was published at 15:50 UTC - the store equality, the suites, the 230 tests, the hostile suite, the counts with one worker and the strict policy were repeated with it and came out the same (section 6.1), the mutant corpora, the invariance suite, the executable's gate and the guard were not; the times are differences of interleaved rounds on a host that was busy, on aarch64; the JVM launcher's +2.2 \% on reachability is inside the scatter of that corpus's rounds and was not resolved further than section 5.3 says. The integrator's own guard on the merged tree is the measurement that counts. The finding of section 7 is not part of the verdict: it is not in the patches.}
+}

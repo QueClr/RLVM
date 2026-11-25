@@ -1,0 +1,21 @@
+\title{A miss that cannot be avoided can be asked for less often; asking for it earlier did not pay, and in this image fresh pages cost more than a miss saved}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the second report on the loader thread](rep-OPT-F), sections 2.3, 4, 5 and 8. Conditions: the executable (GraalVM CE 25.5.5.0.3 native image, \code{\verb~|-O3~}, serial collector, no profile, 4 KiB pages) and a second image of the same code with debug information under \code{perf} in the arena container; the loader thread of the pipelined pass with 8 workers, or the load alone; aarch64 development host, busy. Cycle and instruction counts are from \code{\verb~|perf stat~}; the times are from interleaved rounds.}
+
+\ul{
+\li{\strong{After the loops without a call, the loader thread is a list of single loads.} In a third of its time the thread stands behind seven load instructions, each a random read in a table of 64 MB to 1.3 GB with a miss of the cache and a walk of the page table: the location of an earlier record, the probe of the name index, a child node, the promotion memo, a block record. To see it, look at the samples by address and at the disassembly: the image's debug information put the probe of the name index into the hash function and the block writer's loop into an array copy.}
+\li{\strong{Asked less often: it worked.} The name index is probed once per name, 4.27 million times per Mathlib pass at 0.19 microseconds. Two names of three have a prefix that was introduced a few lines earlier, and a name is younger than its prefix: with the last thousand names in a small table of their own, such a name need not be looked up in the index at all, and the index is filled a thousand names at a time with the probes issued together. In the executable's profile of a Mathlib pass the name table went from 8.7 to 5.4 \% of the thread, and a load took 6 \% fewer cycles for it on Init (1.553 to 1.459 G) and 5 \% on cslib (12.93 to 12.25 G).}
+\li{\strong{Asked for together, earlier: it did not.} The same idea for promotion - read the locations of a window of 512 references first, and let the store load what the promotion of each block record among them reads, in loops of independent loads - cost 5 \% more instructions for a second traversal and left the cycles of the loader thread in a pass where they were (cslib 14.26 against 14.13 G, Mathlib 35.82 against 35.79 G); loading the shared children of a promoted record ahead changed nothing either. The misses of a promotion follow each other inside one record's walk, and the window did not reach them.}
+\li{\strong{A dependent chain needs both: break it, and take instructions out.} The scanner's loop for \code{app} lines waited for three loads in a row per line. Taking the end of the line from loads at fixed places, with the exact test only confirming it, raised the loop from 4.1 to 5.3 instructions per cycle and gained 7 cycles of 64, because the guess itself costs 44 instructions. With the handling of a ninth digit removed from the loop, and \code{lam} and \code{forallE} lines taken into it, the loop takes about 50 cycles for a line where an \code{app} line took 64 and a binder line about 160, and a load of cslib takes 8 \% fewer cycles for it (14.02 to 12.93 G).}
+\li{\strong{In this image a few large arrays are dearer than many small ones.} A table in 19,000 arrays of 16 KiB costs a miss for the header of the inner array at every lookup; the same table in 16 arrays of 32 MiB does not, and it cost 0.21 G more kernel cycles per load of cslib than the 0.16 G user cycles it saved: small arrays live in young memory that is reused, large ones are fresh 4 KiB pages. [Huge pages](ins-EQAW) turn that around while the host has them to give.}
+}
+
+\p{What to take from it: what is left of this thread in the three modules is the location table (a design of two bits per record is costed in the report and not built) and the transfer of proof-private records, 216 instructions each; the rest is the platform's pages and the copy of the level store at every publication. \strong{Not measured:} x86-64; a quiet host.}

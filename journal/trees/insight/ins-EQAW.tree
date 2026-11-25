@@ -1,0 +1,21 @@
+\title{Huge pages for the executable's heap: a few percent when the host has them free, 13 to 50 \% slower when it has not}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{gc}
+\tag{performance}
+\tag{loader}
+\import{base-macros}
+
+\p{Source: [the second report on the loader thread](rep-OPT-F), sections 2.1, 2.3, 3 and 7. Conditions: the executable of the main tree of 2026-11-25 10:48 UTC (GraalVM CE 25.5.5.0.3 native image, serial collector, no profile), a run without options, warm passes with 8 workers, load pipelined with checking, the 8 measurement cores of the aarch64 development host (4 KiB pages; transparent huge pages: \code{enabled} and \code{defrag} both \code{madvise}) while the other cores were busy.}
+
+\ul{
+\li{\strong{What the missing huge pages look like.} A Mathlib pass costs the executable's loader thread 867,000 page faults and 1.05 to 1.33 s of kernel time, its workers 525,000 to 565,000 faults and 0.7 to 0.9 s; the JVM launcher, which runs with \code{\verb~|-XX:+UseTransparentHugePages~} and keeps its heap mapped, takes 95,600 in the loader thread (the mapped file) and next to none in the workers. Four fifths of the loader's faults are the first touch of a 4 KiB page of the store, which the image's collector takes fresh in every pass. And in the profile of the loader thread seven items, a third of its time, are each one load with a TLB walk.}
+\li{\strong{With free huge pages the advice gives a few percent.} \code{\verb~|madvise(MADV_HUGEPAGE)~} after every anonymous writable mapping of 2 MiB or more - the image's collector commits each large array as one mapping. As a preloaded library on the unchanged executable, interleaved with the plain one, two rounds: cslib 4.997 to 4.797 s (-4.0 \%), Mathlib 14.28 to 13.76 s (-3.7 \%, loader thread busy 12.21 to 10.76 s); peak RSS 30 to 80 MiB higher. Linked into the executable, three rounds, at a time when the host had 400 to 3,900 free blocks of 2 MiB: Mathlib 14.75 to 14.60 s (-1.0 \%).}
+\li{\strong{Without them it costs 13 to 50 \%.} The linked executable in the same quiet window, minutes earlier, three interleaved rounds each: cslib 6.16 to 9.23 s (+49.8 \%, loader thread busy 5.90 to 8.91 s), navier-stokes-euler 4.10 to 4.62 s (+12.8 \%). A reading of \code{\verb~|/proc/buddyinfo~} between the two showed no free block of 2 MiB or more in the zone, with 25 GB free in smaller blocks, and the host's \code{compact_stall} counter rose by 14,395 in the next 3.5 minutes; during the Mathlib rounds it rose by 187 in 2.5 minutes. With \code{defrag} set to \code{madvise}, a first touch in an advised mapping that finds no free huge page makes the faulting thread compact memory. The image touches its large arrays for the first time in every pass, so it asks in every pass.}
+\li{\strong{It reverses a trade, under the same condition.} Without huge pages a table in many small arrays is cheaper in this image than the same table in a few large ones: the small arrays live in young memory that is reused, the large ones are fresh pages (measured for the promotion memo of the proof blocks: 0.16 G user cycles less, 0.21 G kernel cycles more per load of cslib).}
+}
+
+\p{What to take from it: plain advice is not a candidate for a default; the gain needs something that does not ask at the first touch of every pass - mappings that survive a pass, advice withheld while the kernel compacts, or a collapse afterwards. Before timing anything that advises huge pages, the JVM launcher included, read \code{\verb~|/proc/buddyinfo~}: a timing taken while the zone has no free 2 MiB block measures the kernel. \strong{Not measured:} the preloaded library and the linked function in one window; the free blocks during the first window; more than two and three rounds; a quiet host; the workers alone; x86-64; a host with transparent huge pages set to \code{never} or \code{always}, or with another \code{defrag} setting; the arena's container; any of the three remedies; the gate of an executable with the advice.}
