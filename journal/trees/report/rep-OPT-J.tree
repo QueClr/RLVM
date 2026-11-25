@@ -1,0 +1,321 @@
+\title{OPT-J: the JVM launcher on a stock OpenJDK 25 - the same verdicts, the same counters and the same warm pass as on the GraalVM JDK, once one flag is left out}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Measurement "OPT-J" of 2026-11-25, for a question of the maintainer of that day: does RLVM's JVM launcher need the GraalVM JDK at all, or does it run as well on a stock OpenJDK? RLVM has two launchers. The release is one executable, a GraalVM Community Edition native image. The other, \code{rlvm-jvm} of a development distribution, is a tool of the repository: it starts the same jars on a JVM, by default the java of the GraalVM CE JDK that builds the image, with GraalVM's own JIT compiler switched off, so that HotSpot's C2 compiles and the serial collector collects ([the launcher's flag line](rep-J1), [the platform note](design-platform-document)). On a quiet host it is the fastest configuration RLVM has: a warm pass of Mathlib in 11.00 s against 13.11 s for the executable ([the merged build of the first wave](rep-INT8), [the benchmark tables](rep-benchmarks)). No stock OpenJDK 25 was installed on the development host, so the launcher had never run on one, and what "the platform" of that number is was an assumption. This report fetches a stock JDK 25, runs the unedited launcher on it, compares what it answers and what it computes, times both under the same flags in quiet windows, and says what follows for the launcher and the build. No tracked file was changed, the shared distribution and the toolchain of the repository were not touched, and nothing of Oracle GraalVM was used.}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{No, the JVM launcher does not need the GraalVM JDK.} On a stock OpenJDK 25 it gives the same verdicts, computes the same counters and runs a warm pass in the same time, once one flag of its line is left out. What GraalVM contributes to RLVM is the native image, which is the release, and the Truffle tier, which is off.}
+\li{\strong{The stock JDK} (section 1): Eclipse Temurin 25.0.5.1+2 for linux-aarch64, the archive \code{\verb~|OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.5.1_2.tar.gz~}, sha256 \code{\verb~|c37879e0d08eeb1baa69fcbb7758cd455b7b1c0ceab1e2a136ccb1713c530984~}, checked against the published checksum before it was unpacked. The JDK inside GraalVM CE 25.5.5.0.3 is OpenJDK 25.0.5.0.3, an earlier patch level.}
+\li{\strong{The launcher as shipped does not start on it} (section 2): the stock VM refuses \code{\verb~|-XX:-UseJVMCICompiler~}, which is an experimental flag there, and exits with status 1 before the checker runs. With that one flag left out it runs; nothing else of the line differs, and \code{\verb~|-XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler~} is a spelling both VMs accept. Under the two lines every VM flag has the same final value but four, which are about JVMCI and thread priorities. The Truffle jars on the class path cause no warning and no failure: a default run loads none of their classes on either JDK.}
+\li{\strong{The same answers} (section 3): the arena's 270 tests through the launcher have the same status and exit code on 270 of 270 (148 good accepted, 92 bad rejected, of the 30 either 11 accepted, 17 rejected, 2 declined; no error, no timeout) and the same output text; the eight corpora accept with 8, 4 and 1 workers (48 of 48 runs); with one worker all 1,698 counters of the statistics are identical, Mathlib included (574,100,326 ticks on both). The Maven step run with the stock JDK gives the same 22 jars byte for byte.}
+\li{\strong{The same speed} (section 4): warm pass, 8 workers, default configuration, three interleaved rounds per corpus inside one quiet window. Temurin against GraalVM CE under the launcher's flags: Init 0.996, Std 0.998, cedar 1.018, reachability 1.019, con-leche 1.011, navier-stokes-euler 1.011, cslib 1.003, Mathlib 1.000 (11.08 s on both); geometric mean 1.007, no corpus more than 1.9 \% slower; CPU of the pass 1.005. A second pair without the huge-page advice, three more rounds: 1.001, with Init at 1.035 and reachability at 0.959, the two shortest passes; both pairs together 1.004 and every corpus within 1.6 \%. The cold first pass is 1.029 and 1.019 in the geometric mean with cells from 0.971 (Mathlib) to 1.108 and rounds that scatter by 20 \%: no difference that holds. Peak RSS on Mathlib 5,172 against 5,139 MiB. Three rounds do not exclude a difference of about 1 \%.}
+\li{\strong{What the launcher's flags are worth} (section 4.5): the stock JDK with its own defaults (G1, four compiler threads, no huge-page advice) needs 8.5 \% more for a warm pass than with the launcher's line (4.5 to 16.3 \%; Mathlib 12.00 against 11.08 s), 12.5 \% more for the cold pass and 5,800 instead of 5,172 MiB on Mathlib. About half of it is the huge-page advice.}
+\li{\strong{What follows} (section 5): the platform of the launcher's 11.0 s on Mathlib is HotSpot of OpenJDK 25 with C2, the serial collector, eight compiler threads and huge pages; the GraalVM JDK supplies nothing to it. For the launcher and a \code{\verb~|--jvm-only~} build to take any JDK 25, one flag of the launcher's line and three places of \src{scripts/build.sh} would have to change (section 5.1); the executable keeps needing GraalVM CE.}
+\li{\strong{Measured on} one stock build, one patch level, the aarch64 development host. Section 6 has what was not measured.}
+}
+}
+
+\subtree{
+\title{1. The two JDKs}
+
+\ul{
+\li{\strong{GraalVM CE}, the toolchain of the repository (\src{env.sh}, \src{scripts/fetch-toolchain.sh}): \code{\verb~|.toolchain/graalvm-ce-25~}, \code{\verb~|openjdk version "25.0.5.0.3" 2026-10-24~}, \code{\verb~|OpenJDK 64-Bit Server VM GraalVM CE 25.5.5.0.3+1.1 (build 25.0.5.0.3+1-jvmci-25.5-b26, mixed mode, sharing)~}, linux-aarch64, 635 MB unpacked. In this JDK JVMCI is switched on and GraalVM's compiler is the top tier of the JIT by default (\code{\verb~|EnableJVMCI = true~}, \code{\verb~|UseJVMCICompiler = true~}, both product flags); the launcher switches the second off, see [the launcher's flag line](rep-J1).}
+\li{\strong{The stock JDK}: Eclipse Temurin 25.0.5.1+2 (LTS), the latest general-availability build of OpenJDK 25 for linux-aarch64 that Adoptium offered on 2026-11-25, HotSpot, \code{\verb~|openjdk version "25.0.5.1" 2026-11-17 LTS~}, \code{\verb~|OpenJDK Runtime Environment Temurin-25.0.5.1+2 (build 25.0.5.1+2-LTS)~}, \code{\verb~|OpenJDK 64-Bit Server VM Temurin-25.0.5.1+2 (build 25.0.5.1+2-LTS, mixed mode, sharing)~}, 303 MB unpacked. Licence: GPLv2 with the Classpath exception.}
+\li{\strong{Where it came from.} The answer of \<html:a>[href]{\verb~|https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=aarch64&image_type=jdk&os=linux~}{the Adoptium API} names the archive \code{\verb~|OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.5.1_2.tar.gz~} (140,197,557 bytes) at \<html:a>[href]{\verb~|https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5.1%2B2/OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.5.1_2.tar.gz~}{its release page} with the sha256 \code{\verb~|c37879e0d08eeb1baa69fcbb7758cd455b7b1c0ceab1e2a136ccb1713c530984~}. The checksum in the API's answer, the checksum file published next to the archive and the sha256 of the downloaded file are the same; the archive was unpacked only after that, into a directory of this work, not into the toolchain of the repository. The two requests were plain \code{\verb~|curl -fsSL~} calls that carried nothing about the project or the host.}
+\li{\strong{What the stock JDK has of JVMCI}: the module \code{\verb~|jdk.internal.vm.ci~} and the two empty placeholder modules \code{\verb~|jdk.graal.compiler~} and \code{\verb~|jdk.graal.compiler.management~}; no compiler library (GraalVM CE ships \code{\verb~|lib/libjvmcicompiler.so~}). Its JVMCI flags exist as experimental flags and are off (\code{\verb~|EnableJVMCI = false~}, \code{\verb~|UseJVMCICompiler = false~}).}
+\li{\strong{They are not the same patch level}: the GraalVM JDK is built from OpenJDK 25.0.5.0.3, Temurin's latest is 25.0.5.1. No stock build of exactly the GraalVM JDK's patch level was tried, and no other vendor's build.}
+\li{\strong{The distribution} that ran on both: a byte-identical copy (25 files, every sha256 equal) of the shared development distribution, built by \src{scripts/build.sh} from the published jars, its launcher \code{rlvm-jvm} unedited: the java binary and the VM flags were given through the launcher's own environment variables \code{RLVM_JAVA} and \code{RLVM_JAVA_OPTS}. There were two on that day. Everything in this report is from \strong{the distribution of 15:50 UTC} (jars sha256 \code{5b983297e76e}), which has the correction of the level store published that afternoon (\code{rlvm-level} \code{35e453f8c770}, \code{rlvm-store} \code{5328df68c01b}; every other jar as in [the merged build of the first wave](rep-INT8)). The checks of section 3 had been run before on the distribution of 09:12 UTC (jars \code{30dadd7f6cc5}), with the same results; where a number of that first series differs it is named.}
+}
+}
+
+\subtree{
+\title{2. The flags: one is refused, the rest is the same VM}
+
+\p{The launcher's default VM flags are \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow~} and the heap of the machine, \code{\verb~|-Xmx7g -Xmn1g~}.}
+
+\ul{
+\li{\strong{The stock VM refuses \code{\verb~|-XX:-UseJVMCICompiler~} and does not start}: \code{\verb~|Error: VM option 'UseJVMCICompiler' is experimental and must be enabled via -XX:+UnlockExperimentalVMOptions.~}, then \code{\verb~|Error: Could not create the Java Virtual Machine.~}, exit status 1. So \code{\verb~|RLVM_JAVA~} alone does not work: with the launcher's own flags every run on a stock JDK ends with status 1 before the checker starts. The arena's run line is safe against that (it adds 10 to every status of the checker, so a runtime that fails to start is not read as a rejection); a caller that reads the launcher's bare status would read a rejection.}
+\li{\strong{What was run on the stock JDK}: the same line without that one flag, given through \code{\verb~|RLVM_JAVA_OPTS~} together with the machine's heap, because that variable replaces the heap flags too. Nothing else differs: the stock VM accepts the other eight flags, and the flag that was dropped only asks for what the stock VM does anyway, HotSpot's C2 as the top tier.}
+\li{\strong{One line that both VMs accept}: \code{\verb~|-XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler~} in place of \code{\verb~|-XX:-UseJVMCICompiler~}. Both start with it, both accept Init, GraalVM CE still passes its Truffle probe. \code{\verb~|-XX:+IgnoreUnrecognizedVMOptions~} does not help: the stock VM knows the flag and refuses it all the same.}
+\li{\strong{The final values of every VM flag under the two lines} (\code{\verb~|-XX:+PrintFlagsFinal~} with the diagnostic and experimental flags unlocked: 919 flags in GraalVM CE, 917 in Temurin). Of the 917 flags both have, four differ: \code{EnableJVMCI} and \code{EnableJVMCIProduct} (true in GraalVM CE, false in Temurin), \code{UseJVMCINativeLibrary} (true, false) and \code{ThreadPriorityPolicy} (1 in GraalVM CE, set by its run-time image; 0 in Temurin); \code{SharedBaseAddress} is set at random at every start. The two flags only GraalVM CE has are JVMCI flags. Collector, heap, compiler threads, tiers, code cache, compressed pointers and huge pages are set alike. So on GraalVM CE the launcher runs HotSpot's own compilers with JVMCI enabled and idle: a default run of Init loads no class of \code{\verb~|jdk.vm.ci~} on either JDK (class-loading log).}
+\li{\strong{The Truffle jars} are on the class path of both (\code{lib/} has the Truffle API, runtime and compiler jars, the polyglot and SDK jars and \code{rlvm-truffle}). A default run loads none of their classes on either JDK: 244 classes from the jars of \code{lib/} on both, all of them RLVM's, none from the Truffle, polyglot or SDK jars and none from \code{rlvm-truffle} (Init, 8 workers). No run of this report on the stock JDK printed a line that was not the checker's own, with the launcher's flags or with none of them: 270 arena tests, 24 runs of the corpora, 72 timed processes. The two flags of the launcher that silence JDK warnings (\code{\verb~|--enable-native-access~}, \code{\verb~|--sun-misc-unsafe-memory-access~}) matter only when Truffle is loaded: without them \code{\verb~|--truffle-probe~} prints the JDK's warning about \code{\verb~|System::load~} called from the Truffle API jar, a default run prints nothing.}
+\li{\strong{What does fail on the stock JDK is the Truffle tier, which is off by default.} \code{\verb~|rlvm-jvm --truffle-probe~} says \code{\verb~|runtime: Interpreted (com.oracle.truffle.api.impl.DefaultTruffleRuntime)~} and \code{\verb~|FAIL: the fallback runtime is active; nothing will ever be compiled~}, status 3, also with \code{\verb~|-XX:+EnableJVMCI~}; on GraalVM CE it says \code{\verb~|OK: runtime compilation works~} with the launcher's flags, because Truffle uses the compiler library of the GraalVM JDK whichever compiler is the JIT of the VM. This is what [the platform study](study-graalvm-platform) expected of a stock OpenJDK, which has JVMCI but no Graal compiler.}
+}
+}
+
+\subtree{
+\title{3. The same answers}
+
+\subtree{
+\title{3.1 The arena's 270 tests}
+
+\p{The procedure of [AR2](rep-AR2) and of the JVM rows of [PG1](rep-PG1): the arena's run line (\src{scripts/arena/rlvm.yaml}), verbatim, over the complete test set (148 good with the eight corpora, 92 bad, 30 either), one test after the other in one container of the arena's size (8 CPUs, 16 GB, no network) under the arena's time limits, with a two-line wrapper named \code{rlvm} in front of the JVM launcher so that the same line runs it. One suite per JDK, on the efficiency cores of the host beside the load of the team: these are verdicts, not timings, and there are no instruction counts.}
+
+\table{
+\tr{\th{JDK of the launcher}\th{good: accepted / rejected / declined}\th{bad: rejected / accepted / declined}\th{either: accepted / rejected / declined}\th{error, timeout}\th{largest share of a time limit}}
+\tr{\td{GraalVM CE, the launcher as shipped}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{17 \% (20.7 s of 120 s)}}
+\tr{\td{Temurin 25, the same flags but one}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{16 \% (17.4 s of 110 s)}}
+}
+
+\ul{
+\li{\strong{The same status and the same exit code on 270 of 270 tests}, and the same output: with the times in it masked, the text a test wrote to standard output and standard error is identical between the two JDKs on all 270.}
+\li{No wrong accept and no wrong reject on either. The two declined tests are the two \code{either} tests on which the official kernel does not terminate, as in every suite before.}
+\li{The table is the one the executable of the release has in [AR2](rep-AR2): its report and the stock JDK's agree in status and exit code on 270 of 270.}
+\li{The first series, on the distribution of 09:12 UTC, gave the same table on both JDKs and the same status and exit code on 270 of 270, between the JDKs and against this series (largest share of a time limit 8 and 9 \%).}
+}
+}
+
+\subtree{
+\title{3.2 The eight corpora with 8, 4 and 1 workers}
+
+\p{Every corpus through the launcher on each JDK with \code{\verb~|--threads 8~}, \code{\verb~|--threads 4~} and \code{\verb~|--threads 1~}, no other option but the statistics: \strong{48 of 48 runs ACCEPT with status 0} (and the 16 runs of the corpora inside the two suites); the same 48 of 48 in the first series. The 120 processes of the timing windows (section 4), 8 workers and several passes each, accepted in every pass.}
+}
+
+\subtree{
+\title{3.3 What is computed: the counters of a run with one worker}
+
+\p{With one worker the machine's counters are deterministic. Each corpus once per JDK with \code{\verb~|--threads 1 --stats -X stats-file=F~}; compared are all values of the statistics file that are not times: the machine's (ticks, records, run words, pairs, calls and hits by kind, probes, the eager counters, declines, resets, allocation), the reference engine's, the driver's and the loader's.}
+
+\table{
+\tr{\th{corpus}\th{counters compared (of the machine)}\th{different}\th{ticks}\th{records}\th{run words}\th{pairs}\th{session resets}\th{units: machine accepted / declined}\th{driver: accepted / declined / rejected}}
+\tr{\td{init}\td{209 (133)}\td{0}\td{34,490,709}\td{15,271,167}\td{70,628,736}\td{1,856,757}\td{796}\td{57,938 / 0}\td{58,547 / 0 / 0}}
+\tr{\td{std}\td{212 (136)}\td{0}\td{56,957,035}\td{26,050,886}\td{128,075,185}\td{3,455,031}\td{1,350}\td{100,095 / 2}\td{101,146 / 0 / 0}}
+\tr{\td{cedar}\td{212 (136)}\td{0}\td{76,668,269}\td{36,675,335}\td{218,602,630}\td{4,543,441}\td{1,903}\td{144,097 / 2}\td{146,058 / 0 / 0}}
+\tr{\td{reachability}\td{209 (133)}\td{0}\td{9,014,777}\td{4,807,871}\td{24,366,666}\td{46,039}\td{34}\td{4,224 / 0}\td{4,413 / 0 / 0}}
+\tr{\td{con-leche}\td{214 (138)}\td{0}\td{70,755,128}\td{30,386,037}\td{234,890,164}\td{3,407,468}\td{1,301}\td{36,272 / 4}\td{36,747 / 0 / 0}}
+\tr{\td{navier-stokes-euler}\td{214 (138)}\td{0}\td{144,220,381}\td{69,470,249}\td{322,216,752}\td{11,346,649}\td{3,425}\td{124,834 / 32}\td{126,468 / 0 / 0}}
+\tr{\td{cslib}\td{214 (138)}\td{0}\td{215,956,521}\td{112,841,885}\td{460,901,102}\td{11,694,439}\td{5,881}\td{397,601 / 14}\td{401,985 / 0 / 0}}
+\tr{\td{mathlib}\td{214 (138)}\td{0}\td{574,100,326}\td{288,313,296}\td{1,255,939,258}\td{32,500,348}\td{14,838}\td{714,652 / 120}\td{721,845 / 0 / 0}}
+}
+
+\p{\strong{1,698 counters, none different}, in this series and in the first (whose table is the same, number for number: with one worker the correction of the level store changes no counter on these corpora). The JDK does not change what is computed, down to the number of array growths. The units the machine declines (2 on Std and cedar, 4 on con-leche, 32 on navier-stokes-euler, 14 on cslib, 120 on Mathlib) are the same and are decided by the reference engine on both.}
+}
+
+\subtree{
+\title{3.4 The launcher's protocol, the tests, the build}
+
+\ul{
+\li{\strong{The checks that \src{scripts/build.sh} runs on a launcher it has built} (the version, the nine modes of \code{\verb~|--protocol-selftest~} with their statuses 0, 1, 2 and 3, real heap exhaustion under \code{\verb~|-Xmx128m~}, no input, a usage error, an unknown setting, the placeholder checker, one good and one bad tutorial test, the Truffle probe), run by hand on both: GraalVM CE 19 of 19; Temurin 18 of 19, the one that fails being the Truffle probe (both distributions).}
+\li{\strong{The tests of the two modules that touch Truffle}, in a private copy of the sources (the tree before the correction of the level store) with the stock JDK: \code{rlvm-cli} 49 tests, 0 failures, 2 skipped (the two compilation tests of the probe skip themselves on the fallback runtime; on GraalVM CE 49 run and none is skipped). \code{rlvm-truffle}: no test runs, because its test VM is started with \code{\verb~|-XX:-UseJVMCICompiler~} (\src{rlvm-truffle/pom.xml}) and the stock VM refuses to start. The test suites of the other modules were not run on the stock JDK.}
+\li{\strong{The jars do not depend on the JDK that compiles them.} The Maven step of \src{scripts/build.sh} (all shipped modules from a private copy of the tracked sources, offline, a private copy of the local repository) run once with each JDK, on the tree before and on the tree after the correction of the level store: 22 jars each time, \strong{all 22 byte-identical} between the two JDKs. (Against the shared distribution, which is built from the published jars: 18 jars identical; three differ only in the copy of their \code{pom.xml} inside the jar; \code{rlvm-truffle} differs because the tree is ahead of the published jar. Neither is a matter of the JDK.)}
+}
+}
+}
+
+\subtree{
+\title{4. The same speed}
+
+\subtree{
+\title{4.1 Method}
+
+\ul{
+\li{\strong{The house's method} ([the measurement method](design-measurement-method), [interleaved rounds](ins-MBQS), [the guard](dec-YP0N)): every timing inside a \src{bench/quiet.py} window on the 8 measurement cores, behind \src{bench/slot.sh}, one JVM at a time; what is compared ran in alternating rounds inside one window. Three windows on 2026-11-25: 17:12 to 17:25 UTC (Init, Std, cedar, reachability, con-leche), 17:25 to 17:38 (navier-stokes-euler, cslib), 17:38 to 17:51 (Mathlib); a load of 6.8, 9.5 and 9.8 on the host before them, the rest of the team on the other cores.}
+\li{\strong{A process} is \code{\verb~|rlvm-jvm --threads 8 --stats -X passes=N FILE~} and nothing else: the default configuration, the machine with its default switch set, loading pipelined with checking, every pass reloads the file. N as in [the guard of the first wave](rep-INT8): 10 on Init and Std, 8 on cedar, 15 on reachability, 6 on con-leche, navier-stokes-euler and cslib, 4 on Mathlib.}
+\li{\strong{Five variants, three rounds each, per corpus}: (1) GraalVM CE, the launcher as shipped; (2) Temurin with the same flags but the refused one (section 2); (3) and (4) the same two without \code{\verb~|-XX:+UseTransparentHugePages~}; (5) Temurin with the VM's own defaults, \code{\verb~|RLVM_JAVA_OPTS=-Xmx7g~} and nothing else: G1 with 8 parallel and 2 concurrent threads, 4 compiler threads, no huge-page advice, a young generation the collector sizes. The two variants of a pair ran next to each other in every round, and which one went first alternated.}
+\li{\strong{Why a second pair.} It was found on the same afternoon that this host at times has no free 2 MiB blocks, and that a first touch in a mapping with huge-page advice then waits for the kernel to compact memory; a JVM timing with the launcher's flags carries that state. A trial run of this work at 15:54 UTC, outside any window, had no huge page served and 6,158 compaction stalls on the host during one process. So the comparison of the JDKs was also taken without the advice. In the three windows the state was good (section 4.6): free huge pages throughout, every huge-page fault served, no compaction stall. The second pair is therefore three more rounds of the same question under another flag set, and it shows what the advice was worth.}
+\li{\strong{The statistics.} Warm pass of a process: the median of the second half of its passes, or their mean where that median is under 0.5 s (reachability); CPU time of the pass the same way. Cold pass: pass 1 of the process, which contains the JIT's warm-up but not the start of the VM. A cell is the mean over the three rounds, in brackets the smallest and the largest round; a ratio is the ratio of two cells; "round by round" are the ratios of the two processes of each round. Peak RSS is the process's own (\code{rusage}), the largest of the rounds.}
+\li{\strong{120 processes} (72 of them on Temurin), every one ended with status 0, every pass ACCEPT, no line of output that was not the checker's.}
+}
+}
+
+\subtree{
+\title{4.2 The warm pass}
+
+\p{Seconds; 8 workers; the distribution of 15:50 UTC; aarch64 development host.}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{GraalVM CE}\th{Temurin}\th{Temurin / GraalVM CE}\th{round by round}\th{no huge-page advice: GraalVM CE}\th{Temurin}\th{Temurin / GraalVM CE}\th{round by round}\th{both pairs}}
+\tr{\td{init}\td{3 x 10}\td{0.549 (0.542 - 0.553)}\td{0.547 (0.533 - 0.561)}\td{\strong{0.996}}\td{1.014 0.991 0.983}\td{0.556 (0.537 - 0.581)}\td{0.576 (0.561 - 0.592)}\td{\strong{1.035}}\td{0.990 1.102 1.018}\td{1.016}}
+\tr{\td{std}\td{3 x 10}\td{0.889 (0.879 - 0.904)}\td{0.887 (0.869 - 0.918)}\td{\strong{0.998}}\td{0.995 0.984 1.015}\td{0.920 (0.914 - 0.930)}\td{0.944 (0.938 - 0.956)}\td{\strong{1.026}}\td{1.028 1.024 1.026}\td{1.012}}
+\tr{\td{cedar}\td{3 x 8}\td{1.262 (1.258 - 1.266)}\td{1.285 (1.250 - 1.329)}\td{\strong{1.018}}\td{1.011 1.056 0.987}\td{1.323 (1.296 - 1.343)}\td{1.309 (1.287 - 1.327)}\td{\strong{0.990}}\td{0.988 0.988 0.993}\td{1.004}}
+\tr{\td{reachability}\td{3 x 15}\td{0.312 (0.304 - 0.323)}\td{0.318 (0.314 - 0.322)}\td{\strong{1.019}}\td{1.045 1.043 0.973}\td{0.339 (0.326 - 0.348)}\td{0.325 (0.316 - 0.333)}\td{\strong{0.959}}\td{0.907 0.970 1.002}\td{0.989}}
+\tr{\td{con-leche}\td{3 x 6}\td{1.173 (1.165 - 1.184)}\td{1.185 (1.169 - 1.193)}\td{\strong{1.011}}\td{1.000 1.008 1.024}\td{1.207 (1.166 - 1.228)}\td{1.224 (1.202 - 1.245)}\td{\strong{1.014}}\td{0.997 1.015 1.031}\td{1.012}}
+\tr{\td{navier-stokes-euler}\td{3 x 6}\td{3.000 (2.929 - 3.046)}\td{3.032 (2.976 - 3.071)}\td{\strong{1.011}}\td{1.041 0.983 1.008}\td{3.174 (3.159 - 3.201)}\td{3.186 (3.126 - 3.222)}\td{\strong{1.004}}\td{1.016 1.019 0.977}\td{1.007}}
+\tr{\td{cslib}\td{3 x 6}\td{4.008 (3.978 - 4.027)}\td{4.021 (3.997 - 4.051)}\td{\strong{1.003}}\td{1.018 0.999 0.993}\td{4.357 (4.292 - 4.406)}\td{4.323 (4.281 - 4.371)}\td{\strong{0.992}}\td{0.997 0.987 0.992}\td{0.998}}
+\tr{\td{mathlib}\td{3 x 4}\td{11.078 (10.982 - 11.223)}\td{11.075 (11.018 - 11.144)}\td{\strong{1.000}}\td{0.999 0.986 1.015}\td{12.061 (11.893 - 12.171)}\td{11.940 (11.857 - 12.067)}\td{\strong{0.990}}\td{0.978 1.015 0.978}\td{0.995}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{1.007}}\td{0.996 to 1.019}\td{}\td{}\td{\strong{1.001}}\td{0.959 to 1.035}\td{\strong{1.004} (0.989 to 1.016)}}
+}
+
+\ul{
+\li{\strong{With the launcher's flags the stock JDK is within 2 \% of the GraalVM JDK on every corpus}: from 0.4 \% faster (Init) to 1.9 \% slower (reachability), 0.7 \% slower in the geometric mean. Mathlib is 11.08 s on both, the number of [the merged build](rep-INT8) (11.00 s) on the day's distribution.}
+\li{\strong{Without the advice}: 0.1 \% in the geometric mean, with Init 3.5 \% slower and reachability 4.1 \% faster on Temurin. Those are the two shortest passes (0.55 and 0.32 s), and one round each makes the cell: 1.102 on Init, 0.907 on reachability. Over both pairs, six rounds a corpus, every corpus is within 1.6 \% and the geometric mean is 1.004.}
+\li{\strong{What three rounds resolve.} Of the 48 round ratios 41 are within 3 \% of 1, six are above 1.03 and one below 0.97; the median is 1.000. A cell of three rounds of a pass under a second is good to about 3 \%, as [the insight on interleaved rounds](ins-MBQS) says. The measurement shows no difference between the JDKs and cannot exclude one of about 1 \%.}
+\li{\strong{With the other statistic}, the median of all later passes (2 to N), which the tables of [the default switch set](dec-YP0N) use and which includes passes in which the JIT still works: 1.016, 1.004, 1.039, 1.040, 1.007, 1.013, 1.004, 0.998 in the order of the table with the launcher's flags (geometric mean 1.015; cedar and reachability above 3 \%), and 1.031, 1.026, 0.988, 0.989, 1.008, 1.004, 0.993, 0.987 without the advice (1.003; Init above 3 \%); both pairs together 1.009, every corpus within 2.3 \%. The cells above 3 \% do not repeat in the other pair.}
+}
+}
+
+\subtree{
+\title{4.3 The CPU time of the warm pass}
+
+\p{Process CPU seconds of the same passes (all threads: workers, loader, environment thread, collector, compilers).}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{GraalVM CE}\th{Temurin}\th{Temurin / GraalVM CE}\th{round by round}\th{no huge-page advice: GraalVM CE}\th{Temurin}\th{Temurin / GraalVM CE}\th{round by round}\th{both pairs}}
+\tr{\td{init}\td{3 x 10}\td{3.95 (3.84 - 4.05)}\td{3.97 (3.91 - 4.05)}\td{\strong{1.006}}\td{1.000 1.000 1.018}\td{4.03 (3.92 - 4.18)}\td{4.13 (4.03 - 4.28)}\td{\strong{1.025}}\td{0.974 1.092 1.013}\td{1.015}}
+\tr{\td{std}\td{3 x 10}\td{6.63 (6.58 - 6.67)}\td{6.72 (6.58 - 6.92)}\td{\strong{1.013}}\td{0.999 1.000 1.041}\td{6.92 (6.88 - 6.96)}\td{7.08 (6.94 - 7.20)}\td{\strong{1.024}}\td{1.034 1.027 1.009}\td{1.018}}
+\tr{\td{cedar}\td{3 x 8}\td{9.37 (9.30 - 9.46)}\td{9.60 (9.29 - 9.96)}\td{\strong{1.025}}\td{1.010 1.070 0.995}\td{9.81 (9.77 - 9.88)}\td{9.71 (9.63 - 9.86)}\td{\strong{0.990}}\td{0.997 0.986 0.987}\td{1.007}}
+\tr{\td{reachability}\td{3 x 15}\td{0.96 (0.94 - 0.99)}\td{0.95 (0.93 - 0.98)}\td{\strong{0.990}}\td{1.043 0.932 0.997}\td{1.04 (0.98 - 1.08)}\td{1.04 (1.01 - 1.07)}\td{\strong{0.995}}\td{0.943 0.955 1.094}\td{0.992}}
+\tr{\td{con-leche}\td{3 x 6}\td{8.00 (7.96 - 8.04)}\td{8.03 (7.90 - 8.17)}\td{\strong{1.003}}\td{0.998 1.020 0.992}\td{8.26 (8.19 - 8.30)}\td{8.21 (8.10 - 8.38)}\td{\strong{0.994}}\td{1.012 0.976 0.995}\td{0.999}}
+\tr{\td{navier-stokes-euler}\td{3 x 6}\td{22.87 (22.53 - 23.06)}\td{23.08 (22.84 - 23.43)}\td{\strong{1.009}}\td{1.020 0.990 1.017}\td{24.12 (24.03 - 24.30)}\td{24.06 (23.76 - 24.38)}\td{\strong{0.997}}\td{1.000 1.015 0.978}\td{1.003}}
+\tr{\td{cslib}\td{3 x 6}\td{30.38 (30.15 - 30.66)}\td{30.38 (30.28 - 30.49)}\td{\strong{1.000}}\td{1.011 0.999 0.991}\td{32.49 (32.23 - 32.97)}\td{32.19 (31.97 - 32.54)}\td{\strong{0.991}}\td{0.991 0.995 0.987}\td{0.996}}
+\tr{\td{mathlib}\td{3 x 4}\td{85.60 (85.00 - 86.67)}\td{85.15 (85.02 - 85.25)}\td{\strong{0.995}}\td{1.001 0.981 1.003}\td{92.35 (90.64 - 93.53)}\td{90.23 (89.69 - 91.26)}\td{\strong{0.977}}\td{0.966 1.007 0.959}\td{0.986}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{1.005}}\td{0.990 to 1.025}\td{}\td{}\td{\strong{0.999}}\td{0.977 to 1.025}\td{\strong{1.002} (0.986 to 1.018)}}
+}
+
+\p{The same picture: 1.005 and 0.999 in the geometric mean, no corpus above 2.5 \%. The pass is bound by the CPU of the 8 cores ([the profile of the default configuration](rep-P11)), and the two JDKs spend the same.}
+}
+
+\subtree{
+\title{4.4 The cold first pass}
+
+\p{Pass 1 of each of the same processes, seconds: loading, checking and the JIT's warm-up, 8 workers and up to 8 compiler threads on 8 cores.}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{GraalVM CE}\th{Temurin}\th{Temurin / GraalVM CE}\th{round by round}\th{no huge-page advice: GraalVM CE}\th{Temurin}\th{Temurin / GraalVM CE}\th{round by round}\th{both pairs}}
+\tr{\td{init}\td{3 x 10}\td{2.74 (2.62 - 2.81)}\td{2.89 (2.77 - 3.13)}\td{\strong{1.056}}\td{1.123 0.985 1.060}\td{2.88 (2.84 - 2.93)}\td{2.88 (2.59 - 3.17)}\td{\strong{0.998}}\td{0.911 1.102 0.981}\td{1.027}}
+\tr{\td{std}\td{3 x 10}\td{3.31 (3.12 - 3.65)}\td{3.24 (3.14 - 3.32)}\td{\strong{0.979}}\td{0.858 1.053 1.047}\td{3.54 (3.38 - 3.85)}\td{3.61 (3.35 - 3.77)}\td{\strong{1.021}}\td{0.968 1.108 0.993}\td{1.000}}
+\tr{\td{cedar}\td{3 x 8}\td{3.84 (3.68 - 4.10)}\td{3.90 (3.69 - 4.21)}\td{\strong{1.015}}\td{1.002 1.029 1.014}\td{3.98 (3.79 - 4.19)}\td{4.39 (4.10 - 4.74)}\td{\strong{1.104}}\td{1.037 1.133 1.143}\td{1.059}}
+\tr{\td{reachability}\td{3 x 15}\td{1.10 (1.05 - 1.14)}\td{1.13 (1.08 - 1.21)}\td{\strong{1.021}}\td{0.977 0.947 1.147}\td{1.24 (1.23 - 1.25)}\td{1.27 (1.23 - 1.30)}\td{\strong{1.018}}\td{0.981 1.058 1.017}\td{1.019}}
+\tr{\td{con-leche}\td{3 x 6}\td{3.35 (3.24 - 3.49)}\td{3.71 (3.55 - 3.81)}\td{\strong{1.108}}\td{1.176 1.069 1.082}\td{3.60 (3.50 - 3.76)}\td{3.63 (3.53 - 3.71)}\td{\strong{1.009}}\td{1.059 0.999 0.971}\td{1.057}}
+\tr{\td{navier-stokes-euler}\td{3 x 6}\td{5.37 (5.21 - 5.66)}\td{5.53 (5.44 - 5.69)}\td{\strong{1.030}}\td{1.038 0.964 1.092}\td{6.12 (5.80 - 6.47)}\td{6.22 (6.03 - 6.39)}\td{\strong{1.017}}\td{0.933 1.051 1.076}\td{1.023}}
+\tr{\td{cslib}\td{3 x 6}\td{6.76 (6.63 - 6.90)}\td{7.06 (6.71 - 7.43)}\td{\strong{1.045}}\td{1.078 1.062 0.996}\td{7.70 (7.56 - 7.84)}\td{7.86 (7.63 - 8.04)}\td{\strong{1.021}}\td{1.009 1.046 1.008}\td{1.033}}
+\tr{\td{mathlib}\td{3 x 4}\td{14.77 (14.46 - 14.95)}\td{14.48 (14.29 - 14.74)}\td{\strong{0.980}}\td{0.956 0.967 1.019}\td{16.41 (15.91 - 16.97)}\td{15.93 (15.58 - 16.40)}\td{\strong{0.971}}\td{0.994 0.966 0.954}\td{0.976}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{1.029}}\td{0.979 to 1.108}\td{}\td{}\td{\strong{1.019}}\td{0.971 to 1.104}\td{\strong{1.024} (0.976 to 1.059)}}
+}
+
+\ul{
+\li{\strong{No difference that holds.} The geometric means are 1.029 and 1.019, but the cells run from 2 to 3 \% faster on Temurin (Mathlib, both pairs: 14.48 against 14.77 s and 15.93 against 16.41 s) to 10 to 11 \% slower (con-leche with the advice, cedar without it), each of the two not repeated in the other pair, and the rounds of one cell differ by up to 20 \%. A first pass is a race between the workers and the compilers; three rounds of it do not resolve 5 \%.}
+\li{\strong{What the JIT compiled}, from two cold runs of Init and of Mathlib on each JDK with \code{\verb~|-XX:+CITime~}, taken off the measurement cores (counts, not times): Init 4,053 and 4,008 methods on GraalVM CE, 3,852 and 3,860 on Temurin; Mathlib 5,750 and 5,774 against 5,671 and 5,672 methods, with 14.9 against 15.2 to 15.3 MB of compiled code. The same work within a few percent.}
+\li{No profile of a pass was taken on either JDK: there is no difference above 3 \% that repeats and that a profile could explain.}
+}
+}
+
+\subtree{
+\title{4.5 What the launcher's flags are worth on the stock JDK}
+
+\p{Temurin with the launcher's flag line, the same without the huge-page advice, and with the VM's defaults (G1, 4 compiler threads, no advice, 7 GB heap). Seconds, three rounds as above.}
+
+\table{
+\tr{\th{corpus}\th{launcher's flags: warm pass, s}\th{the same without huge-page advice}\th{VM defaults}\th{defaults / launcher's flags}\th{round by round}\th{defaults / no advice}\th{no advice / launcher's flags}\th{cold pass: launcher's flags, s}\th{VM defaults}\th{ratio}\th{CPU of the warm pass: launcher's flags, s}\th{VM defaults}\th{ratio}\th{collector in the warm pass, ms: launcher's flags}\th{VM defaults}}
+\tr{\td{init}\td{0.547 (0.533 - 0.561)}\td{0.576 (0.561 - 0.592)}\td{0.601 (0.580 - 0.621)}\td{\strong{1.097}}\td{1.071 1.058 1.165}\td{1.043}\td{1.052}\td{2.89}\td{2.99}\td{1.033}\td{3.97}\td{4.27}\td{1.076}\td{0}\td{13}}
+\tr{\td{std}\td{0.887 (0.869 - 0.918)}\td{0.944 (0.938 - 0.956)}\td{0.980 (0.964 - 0.991)}\td{\strong{1.105}}\td{1.127 1.109 1.080}\td{1.038}\td{1.064}\td{3.24}\td{3.88}\td{1.197}\td{6.72}\td{7.20}\td{1.072}\td{0}\td{11}}
+\tr{\td{cedar}\td{1.285 (1.250 - 1.329)}\td{1.309 (1.287 - 1.327)}\td{1.344 (1.315 - 1.381)}\td{\strong{1.046}}\td{1.031 1.005 1.106}\td{1.027}\td{1.019}\td{3.90}\td{4.70}\td{1.204}\td{9.60}\td{10.06}\td{1.048}\td{26}\td{26}}
+\tr{\td{reachability}\td{0.318 (0.314 - 0.322)}\td{0.325 (0.316 - 0.333)}\td{0.370 (0.357 - 0.383)}\td{\strong{1.163}}\td{1.166 1.108 1.217}\td{1.139}\td{1.022}\td{1.13}\td{1.14}\td{1.009}\td{0.95}\td{1.12}\td{1.175}\td{2}\td{17}}
+\tr{\td{con-leche}\td{1.185 (1.169 - 1.193)}\td{1.224 (1.202 - 1.245)}\td{1.239 (1.215 - 1.254)}\td{\strong{1.045}}\td{1.073 1.045 1.018}\td{1.012}\td{1.033}\td{3.71}\td{4.12}\td{1.109}\td{8.03}\td{8.52}\td{1.061}\td{28}\td{27}}
+\tr{\td{navier-stokes-euler}\td{3.032 (2.976 - 3.071)}\td{3.186 (3.126 - 3.222)}\td{3.196 (3.131 - 3.293)}\td{\strong{1.054}}\td{1.080 1.063 1.020}\td{1.003}\td{1.051}\td{5.53}\td{5.93}\td{1.073}\td{23.08}\td{24.55}\td{1.064}\td{54}\td{49}}
+\tr{\td{cslib}\td{4.021 (3.997 - 4.051)}\td{4.323 (4.281 - 4.371)}\td{4.399 (4.378 - 4.426)}\td{\strong{1.094}}\td{1.081 1.103 1.099}\td{1.018}\td{1.075}\td{7.06}\td{8.77}\td{1.241}\td{30.38}\td{33.28}\td{1.095}\td{86}\td{59}}
+\tr{\td{mathlib}\td{11.075 (11.018 - 11.144)}\td{11.940 (11.857 - 12.067)}\td{12.002 (11.944 - 12.046)}\td{\strong{1.084}}\td{1.091 1.079 1.081}\td{1.005}\td{1.078}\td{14.48}\td{16.75}\td{1.157}\td{85.15}\td{93.18}\td{1.094}\td{150}\td{74}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{1.085}}\td{1.045 to 1.163}\td{1.035}\td{1.049}\td{}\td{}\td{1.125}\td{}\td{}\td{1.085}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The VM's defaults cost 8.5 \% of the warm pass} in the geometric mean, 4.5 \% (con-leche) to 16.3 \% (reachability); Mathlib 12.00 against 11.08 s. The cold pass costs 12.5 \% more (cslib 24 \%, cedar and Std 20 \%: four compiler threads instead of eight), the CPU of a warm pass 8.5 \%.}
+\li{\strong{About half of it is the huge-page advice}: without it the launcher's line is 4.9 \% slower on Temurin in the geometric mean (7.5 to 7.8 \% on cslib and Mathlib) and 5.5 \% on GraalVM CE (next table). The rest, serial against G1 and eight against four compiler threads, is 3.5 \%, most of it on reachability (13.9 \%).}
+\li{This agrees with what [the launcher's flag line](rep-J1) and [the collector comparison](rep-GC) found on the GraalVM JDK: the reasons for the flags carry over to a stock JDK. G1 spends less time collecting on the large corpora (74 against 150 ms of a Mathlib pass) and holds more memory (5,800 against 5,172 MiB).}
+}
+
+\table{
+\tr{\th{corpus}\th{GraalVM CE: no advice / advice, warm pass}\th{round by round}\th{Temurin: no advice / advice}\th{round by round}}
+\tr{\td{init}\td{1.013}\td{1.051 0.971 1.017}\td{1.052}\td{1.025 1.080 1.053}}
+\tr{\td{std}\td{1.035}\td{1.058 1.037 1.011}\td{1.064}\td{1.093 1.079 1.022}}
+\tr{\td{cedar}\td{1.048}\td{1.064 1.057 1.024}\td{1.019}\td{1.040 0.989 1.030}}
+\tr{\td{reachability}\td{1.087}\td{1.145 1.111 1.008}\td{1.022}\td{0.993 1.034 1.038}}
+\tr{\td{con-leche}\td{1.029}\td{1.050 1.036 1.001}\td{1.033}\td{1.047 1.044 1.008}}
+\tr{\td{navier-stokes-euler}\td{1.058}\td{1.079 1.045 1.051}\td{1.051}\td{1.052 1.083 1.018}}
+\tr{\td{cslib}\td{1.087}\td{1.079 1.089 1.094}\td{1.075}\td{1.057 1.076 1.094}}
+\tr{\td{mathlib}\td{1.089}\td{1.099 1.060 1.108}\td{1.078}\td{1.076 1.091 1.068}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.055}}\td{}\td{\strong{1.049}}\td{}}
+}
+
+\p{The advice was worth 1 to 9 \% in these windows, with every huge-page fault served. That is a statement about these windows: when the host has no free 2 MiB blocks the same flag costs time instead (section 4.1).}
+}
+
+\subtree{
+\title{4.6 Memory and the state of the host}
+
+\p{Peak resident set of a process (all its passes), MiB, the largest of three rounds:}
+
+\table{
+\tr{\th{corpus}\th{GraalVM CE}\th{Temurin}\th{GraalVM CE, no advice}\th{Temurin, no advice}\th{Temurin, VM defaults}}
+\tr{\td{init}\td{808}\td{822}\td{818}\td{817}\td{1,035}}
+\tr{\td{std}\td{1,447}\td{1,480}\td{1,446}\td{1,449}\td{1,336}}
+\tr{\td{cedar}\td{1,775}\td{1,768}\td{1,747}\td{1,770}\td{1,605}}
+\tr{\td{reachability}\td{1,559}\td{1,564}\td{1,585}\td{1,567}\td{1,261}}
+\tr{\td{con-leche}\td{1,821}\td{1,992}\td{1,856}\td{2,075}\td{1,888}}
+\tr{\td{navier-stokes-euler}\td{2,295}\td{2,307}\td{2,319}\td{2,263}\td{2,207}}
+\tr{\td{cslib}\td{2,829}\td{2,855}\td{2,811}\td{2,808}\td{2,950}}
+\tr{\td{mathlib}\td{5,139}\td{5,172}\td{5,175}\td{5,125}\td{5,800}}
+}
+
+\p{The two JDKs hold the same memory under the same flags: Mathlib 5,139 MiB on GraalVM CE and 5,172 MiB on Temurin with the launcher's line; the largest difference is con-leche (1,821 against 1,992 MiB, 1,776 in its smallest round). A cold run of Mathlib in the arena-sized container peaked at 4,933 and 4,775 MiB in the first series of suites.}
+
+\p{The windows and the kernel: free blocks of 2 MiB and more before each process, huge-page faults and compaction stalls on the whole host while the processes ran (the counters are the system's, not the process's), and the system CPU time of a process (mean of the rounds):}
+
+\table{
+\tr{\th{corpus}\th{window, UTC}\th{free 2 MiB blocks before a process: fewest - most}\th{huge-page faults served / fallen back while the processes with advice ran}\th{compaction stalls in the window}\th{system CPU of a process, s: GraalVM CE}\th{Temurin}\th{GraalVM CE, no advice}\th{Temurin, no advice}\th{Temurin, VM defaults}}
+\tr{\td{init}\td{17:12 - 17:14}\td{5,865 - 8,351}\td{2,516 / 0}\td{0}\td{0.5}\td{0.5}\td{0.7}\td{0.7}\td{1.1}}
+\tr{\td{std}\td{17:15 - 17:17}\td{8,129 - 9,277}\td{3,791 / 0}\td{0}\td{0.6}\td{0.6}\td{1.0}\td{1.0}\td{1.5}}
+\tr{\td{cedar}\td{17:18 - 17:21}\td{9,276 - 9,280}\td{4,567 / 0}\td{0}\td{0.7}\td{0.7}\td{1.2}\td{1.2}\td{1.9}}
+\tr{\td{reachability}\td{17:21 - 17:23}\td{9,221 - 9,279}\td{3,921 / 0}\td{0}\td{0.3}\td{0.3}\td{0.7}\td{0.7}\td{1.7}}
+\tr{\td{con-leche}\td{17:23 - 17:25}\td{9,262 - 9,283}\td{4,820 / 0}\td{0}\td{0.5}\td{0.5}\td{0.9}\td{0.9}\td{1.9}}
+\tr{\td{navier-stokes-euler}\td{17:26 - 17:31}\td{9,244 - 9,282}\td{6,160 / 0}\td{0}\td{0.8}\td{0.8}\td{1.6}\td{1.3}\td{2.9}}
+\tr{\td{cslib}\td{17:31 - 17:38}\td{9,216 - 9,254}\td{11,337 / 0}\td{0}\td{1.2}\td{1.1}\td{2.1}\td{2.0}\td{3.9}}
+\tr{\td{mathlib}\td{17:39 - 17:51}\td{9,244 - 9,253}\td{18,737 / 0}\td{0}\td{1.7}\td{1.7}\td{3.2}\td{3.2}\td{5.3}}
+}
+}
+}
+
+\subtree{
+\title{5. What follows}
+
+\ul{
+\li{\strong{The JVM launcher needs no GraalVM.} With the same flags a stock OpenJDK 25 is as fast as the GraalVM JDK within the guard's 3 \% on every corpus (the largest loss 1.9 \%, the geometric mean 0.7 \%; six rounds a corpus over both flag sets: 1.6 \% and 0.4 \%), accepts and rejects the same, and computes the same.}
+\li{\strong{What "the platform" of the launcher's number is}: HotSpot of OpenJDK 25 - the tiered JIT with C2 on top and eight compiler threads, the serial collector with a heap of 7 GB and a young generation of 1 GB, transparent huge pages - on eight performance cores of the development host. On the GraalVM JDK the launcher runs exactly that, with JVMCI enabled and idle (section 2). The warm pass of Mathlib in 11.0 s is a number of OpenJDK, not of GraalVM.}
+\li{\strong{GraalVM's part in RLVM} is two things: the native image, which is the release and the one executable (GraalVM CE's \code{native-image}), and the Truffle tier of the machine, which is off by default and which on a stock JDK has only the fallback runtime (its probe fails there, section 2). Neither is touched by this result.}
+\li{\strong{What the flags are worth} is a second result: with its own defaults the stock VM needs 8.5 \% more for a warm pass and 12.5 \% more for the cold pass than with the launcher's line (section 4.5; the defaults of the GraalVM JDK were not timed here). A JDK alone is not the platform; the JDK with that line is.}
+\li{\strong{Nothing has to change}: the default java of the launcher is the build's JDK, and that is GraalVM CE because the build needs it for the image. What the result allows is to say so in [the platform note](design-platform-document) and in the tables that name the launcher's platform, and, if the maintainer wants the launcher to run on whatever JDK 25 a developer has, the changes of section 5.1.}
+}
+
+\subtree{
+\title{5.1 What would have to change for the launcher and the build to take any JDK 25}
+
+\p{Described, not done: no tracked file was edited. Each item names what was seen to fail or to hold on the stock JDK.}
+
+\ol{
+\li{\strong{The launcher's flag line} (\code{JVM_FLAGS} in \src{scripts/build.sh}, the template of \code{rlvm-jvm}): \code{\verb~|-XX:-UseJVMCICompiler~} stops a stock VM at its start (section 2). Written as \code{\verb~|-XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler~} the same line starts both VMs and still switches GraalVM's compiler off as the JIT where there is one; the other way is to leave the flag out when the JDK's \code{release} file has no \code{GRAALVM_VERSION}. The same flag is in the test VM of \src{rlvm-truffle/pom.xml} and in the constants of \src{scripts/platform-matrix.py} and \src{bench/modules/rlvm-export/measure-all.sh}.}
+\li{\strong{The launcher's java}: the template writes the build's \code{\verb~|$JAVA_HOME/bin/java~} into the launcher and falls back to \code{java} on the path; \code{RLVM_JAVA} overrides both. That already takes any JDK. What it does not do is say which JDK it found: a JDK older than 25 fails on the class-file version with status 1, like the refused flag.}
+\li{\strong{\src{env.sh}} sets \code{JAVA_HOME} to \code{\verb~|.toolchain/graalvm-ce-25~} for every script (\src{scripts/build.sh}, \src{scripts/dev.sh}, \src{scripts/steward-install.sh}). It is the one place where the JDK of Maven is chosen; it takes no value from outside. \src{scripts/check-light.sh}, \src{bench/docker/entrypoint.sh} and \src{bench/modules/rlvm-nat/natbench.py} name the same directory themselves.}
+\li{\strong{The Maven step works as it is.} With the stock JDK as \code{JAVA_HOME} it compiles every shipped module and gives the same 22 jars byte for byte (section 3.4): the Truffle API, runtime and compiler are Maven artifacts, and no source of RLVM names a class of \code{\verb~|jdk.vm.ci~} or of the Graal compiler.}
+\li{\strong{\src{scripts/build.sh} stops on a stock JDK in three places}, by reading: it reads \code{GRAALVM_VERSION} from \code{\verb~|$JAVA_HOME/release~} and dies when there is none (a stock JDK has none; the version of the Truffle artifacts is also the property \code{graalvm.version} of \src{pom.xml}, which the script already reads to compare); a build with the executable needs \code{\verb~|bin/native-image~}, which only GraalVM has; and its verification of the launcher ends with \code{\verb~|--truffle-probe~} and demands \code{\verb~|OK: runtime compilation works~}, which a stock JDK answers with status 3 (measured). For a \code{\verb~|--jvm-only~} distribution on a stock JDK the first needs the fallback to the pom and the third needs the probe to be a check of the Truffle tier and not of the launcher: skipped, or expected to say "fallback runtime", when the JDK is not a GraalVM. \code{BUILD-INFO.txt} has a line \code{graalvm:} that would have to name the JDK instead.}
+\li{\strong{\src{scripts/dev.sh}} needs nothing of its own: \code{dist} and \code{dist-quick} are \code{\verb~|build.sh --jvm-only~}, \code{build} / \code{test} / \code{install} are Maven with \src{env.sh}, \code{info} prints the JDK it finds. \code{dist-native}, \code{dist-tree}, \code{release} and the Oracle commands build an image and stay with GraalVM.}
+\li{\strong{The tests}: \code{rlvm-cli} passes on the stock JDK with its two compilation tests skipped; \code{rlvm-truffle} needs the flag of item 1 and, for what it tests, a JDK with the Graal compiler. The other modules' suites and the gates were not run on a stock JDK (section 6).}
+\li{\strong{\src{scripts/fetch-toolchain.sh}} fetches GraalVM CE and nothing else. The executable needs it in any case; a stock JDK would be a second, optional download with its own pinned checksum.}
+}
+}
+}
+
+\subtree{
+\title{6. What was not measured}
+
+\ul{
+\li{\strong{A difference of about 1 \%} between the JDKs: three interleaved rounds per pair, six over both pairs, resolve about 3 \% on the passes under a second and 1 to 2 \% on the three large corpora. With the statistic that includes the passes in which the JIT still works, two corpora of one pair and one of the other are above 3 \% and do not repeat (section 4.2); more rounds on Init, cedar and reachability were not taken.}
+\li{\strong{A profile of a pass} on either JDK (JFR): not taken, there being no difference above 3 \% that repeats.}
+\li{\strong{x86-64}, the arena's architecture: everything here is the aarch64 development host.}
+\li{\strong{Another stock build}: one vendor (Eclipse Temurin), one patch level (25.0.5.1+2, newer than the 25.0.5.0.3 the GraalVM JDK is built from). Not the OpenJDK archive of jdk.java.net, no other vendor, no JDK newer than 25.}
+\li{\strong{The reference engine by name and the strict policy} on the stock JDK, as timings (the launcher's other heap line, 13 GB). The reference engine did run there: it confirms every rejection of the 109 rejected arena tests and decides the units the machine declines.}
+\li{\strong{The gates} of \src{scripts/gate.sh} (230 published tests, 17,775 mutants, 1,196 hostile rows) and the test suites of the modules other than \code{rlvm-cli} and \code{rlvm-truffle} on the stock JDK. What stands in for them: the 270 arena tests, the corpora with 8, 4 and 1 workers, and the counters of the one-worker runs.}
+\li{\strong{Fewer than 8 workers, the cold process from start to exit with its start-up, instruction counts}: the cold row is pass 1 of a process that goes on; no \code{perf} counters were taken.}
+\li{\strong{The flags one by one} on the stock JDK: only the huge-page advice was taken out alone. The row with the VM's defaults changes the collector, the compiler threads and the young generation together.}
+\li{\strong{The Truffle tier on a stock JDK with the Graal compiler added} on the upgrade module path: not tried; the tier is off by default.}
+}
+}
