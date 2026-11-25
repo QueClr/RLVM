@@ -4,6 +4,13 @@ owner's order (OWNER-NOTES 12).
 
     bench/track/benchmarks.py --tsv work/perf-history/warm.tsv --labels bench [--since UTC] [--out docs/BENCHMARKS.md]
     bench/track/benchmarks.py ... --stdout           # print instead of writing
+    bench/track/benchmarks.py ... --tree journal/trees/insight/ins-XXXX.tree --tree-author claude-fable-5-2
+                                                     # ALSO write the same tables as a tree of the journal
+
+The notes of the project live in the journal (root AGENTS.md: a table that a tool generates is emitted
+as a tree). --tree FILE writes the document as a Forester tree (bench/track/foresttree.py: \\table{\\tr{\\th{..}}..}
+from the journal's base-macros, sections as subtrees) with the journal's frontmatter; the address is the
+file's name, allocated with `journal-new insight`. The Markdown output stays until docs/ has moved.
 
 Tables, in this order, one column per corpus and one row per checker and platform. THE FIRST ROWS
 ARE THE DEFAULT CONFIGURATION (the engine a run without -X engine checks with: --default-engine,
@@ -54,6 +61,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.realpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
+import foresttree  # noqa: E402
 import track  # noqa: E402
 
 # The columns of a bench/warm.py row (rows written before 2026-11-24T22Z end with "label").
@@ -269,7 +277,19 @@ def main() -> int:
     parser.add_argument("--notes", default=NOTES, help="markdown put in front of and behind the tables (default bench/track/benchmarks-notes.md)")
     parser.add_argument("--out", default=os.path.join(ROOT, "docs", "BENCHMARKS.md"))
     parser.add_argument("--stdout", action="store_true")
+    parser.add_argument("--headline", action="store_true",
+                        help="print ONE table instead of the document (the README's): a run of the executable in its default "
+                             "configuration - cold wall clock of a fresh process (median warm pass in brackets), 8 workers - "
+                             "against gruszka and nano-lean; nothing is written")
+    parser.add_argument("--no-markdown", action="store_true", help="do not write --out (with --tree: the tree only)")
+    parser.add_argument("--tree", help="also write the document as a tree of the journal (a Forester .tree file; its name is its address)")
+    parser.add_argument("--tree-author", help="address of the identity tree of whoever generates the tree (journal/trees/people/); required with --tree")
+    parser.add_argument("--tree-contributor", help="address of the identity tree of the person who directed the work")
+    parser.add_argument("--tree-date", help="the tree's creation date, YYYY-MM-DD (default: today, local time; keep the first date when regenerating)")
+    parser.add_argument("--tree-title", help="the tree's title (default: the document's)")
     args = parser.parse_args()
+    if args.tree and not args.tree_author:
+        parser.error("--tree needs --tree-author (the address of your identity tree in journal/trees/people/)")
     paths = args.tsv or [os.path.join(ROOT, "work", "perf-history", "warm.tsv")]
     labels = [x for x in args.labels.split(",") if x]
     cells = select(read_rows(paths), labels, args.since, args.default_engine)
@@ -312,6 +332,22 @@ def main() -> int:
         return f"{f2(w, 0)} / {f2(c, 0)}", w
 
     dj, dn, oj, on, gr, nl = [k for k, _h in CHECKERS]
+    if args.headline:
+        # The README's one table: what `rlvm FILE` (the executable, no option) costs, per corpus.
+        def run(cell):
+            c = cell.get("cold8") or cell.get("pass1_8")
+            w = cell.get("warm8")
+            cold_s = num(c["cold_wall_s"]) if c and c is cell.get("cold8") else (num(c["pass1_s"]) if c else None)
+            warm_s = steady(w) if w else None
+            if cold_s is None and warm_s is None:
+                return "-", None
+            return (f2(cold_s) if cold_s is not None else "-") + (f" ({f2(warm_s)})" if warm_s is not None else ""), cold_s if cold_s is not None else warm_s
+        rows_of = [(dn, f"**`rlvm FILE`** (the executable, default configuration: {args.default_engine} engine)"), (gr, "gruszka"), (nl, "nano-lean")]
+        lines = table("x", "", cells, corpora, rows_of, run, [("rlvm / gruszka", dn, gr), ("rlvm / nano-lean", dn, nl)])[4:]
+        if lines and lines[0].startswith("| Checker, platform"):
+            lines[0] = lines[0].replace("| Checker, platform", "| One run, 8 cores: wall clock in s (warm pass)", 1)
+        sys.stdout.write("\n".join(l for l in lines if l) + "\n")
+        return 0
     other = oj[0]
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     head, tail = "", ""
@@ -417,9 +453,20 @@ def main() -> int:
     if tail.strip():
         out += [tail.strip(), ""]
     text = "\n".join(out)
+    if args.tree:
+        # The same document as a tree of the journal. Paths under work/ are not part of the repository
+        # and a tree never links to them: they stay inline code (foresttree links repository paths only).
+        tree_text = foresttree.tree(out, author=args.tree_author, contributor=args.tree_contributor, date=args.tree_date,
+                                    title=args.tree_title, tags=("benchmark", "performance"),
+                                    meta=(("generated", "bench/track/benchmarks.py"), ("updated", datetime.date.today().isoformat())))
+        tmp = args.tree + ".tmp"
+        with open(tmp, "w") as handle:
+            handle.write(tree_text)
+        os.replace(tmp, args.tree)
+        print(f"benchmarks: wrote the tree {os.path.relpath(args.tree, ROOT)} ({len(tree_text.splitlines())} lines)", file=sys.stderr)
     if args.stdout:
         sys.stdout.write(text)
-    else:
+    elif not args.no_markdown:
         tmp = args.out + ".tmp"
         with open(tmp, "w") as handle:
             handle.write(text)

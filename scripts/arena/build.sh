@@ -20,8 +20,9 @@
 #                                   from the machine jar with the javap and jar of the GraalVM that step 1
 #                                   fetched; if that fails the image is built without them
 #
-# Result: work/dist/bin/rlvm, which the `run:` line of rlvm.yaml executes (and work/dist/bin/rlvm-jvm,
-# the JVM launcher over the same jars: the warm platform, docs/PLATFORM.md).
+# Result: work/dist/bin/rlvm, the ONE executable (the release layout of scripts/build.sh: no jars, no
+# second launcher), which the `run:` line of rlvm.yaml executes. GraalVM Community Edition only: the
+# optional Oracle GraalVM build (scripts/build.sh --oracle-pgo) is never used here.
 # Environment: RLVM_ARENA_OPT (native-image optimisation level, default 3),
 #              RLVM_ARENA_MARCH (e.g. native; default: native-image's portable default),
 #              RLVM_ARENA_FORCE_ZLIB=1 (build zlib even if the system has it; for testing).
@@ -45,7 +46,7 @@ scripts/fetch-toolchain.sh
 CC_BIN="$(command -v gcc || command -v cc || true)"
 [ -n "$CC_BIN" ] || die "no C compiler (gcc or cc) on PATH; native-image needs one to link"
 
-build_args=(--online --no-pgo --opt "${RLVM_ARENA_OPT:-3}" --verify-deps "$ROOT/scripts/arena/deps.sha256")
+build_args=(--online --opt "${RLVM_ARENA_OPT:-3}" --verify-deps "$ROOT/scripts/arena/deps.sha256")
 [ -z "${RLVM_ARENA_MARCH:-}" ] || build_args+=(--march "$RLVM_ARENA_MARCH")
 
 probe_dir="$(mktemp -d)"

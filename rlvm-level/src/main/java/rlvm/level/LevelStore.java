@@ -103,7 +103,7 @@ public final class LevelStore {
     private final int baseCanonTop;
     private volatile boolean frozen;
 
-    // ---- instantiation caches (direct mapped; stamp 0 = entry made of base ids only) ----
+    // ---- instantiation caches (direct mapped; stamp 0 = entry made of base ids only, see substIsBase) ----
     private final long[] icKey = new long[1 << CACHE_BITS];
     private final int[] icVal = new int[1 << CACHE_BITS];
     private final int[] icStamp = new int[1 << CACHE_BITS];
@@ -1425,9 +1425,20 @@ public final class LevelStore {
         if (!frozen) {
             icKey[slot] = key;
             icVal[slot] = r;
-            icStamp[slot] = (l < baseTop && r < baseTop && subst < baseListTop) || baseTop == 0 ? 0 : epoch;
+            icStamp[slot] = (l < baseTop && r < baseTop && substIsBase(subst)) || baseTop == 0 ? 0 : epoch;
         }
         return r;
+    }
+
+    /**
+     * True if the substitution is made of base ids only: its id AND its two lists. The id alone does not say so
+     * (finding LV1-F1): a substitution is an interned pair of list ids in the store of the level lists and name
+     * lists, so the pair of this session can be FOUND as a base list of two ints while its level list is a list
+     * of the overlay - and that id names another substitution after {@link #reset()}. Only an entry of base ids
+     * may get the stamp 0 that survives a reset.
+     */
+    private boolean substIsBase(int subst) {
+        return subst < baseListTop && lists.get(subst, 0) < baseListTop && lists.get(subst, 1) < baseListTop;
     }
 
     private int instRec(int l, int ps, int ls, int n) {
@@ -1511,7 +1522,7 @@ public final class LevelStore {
         sp = sp0;
         lcKey[slot] = key;
         lcVal[slot] = res;
-        lcStamp[slot] = (list < baseListTop && res < baseListTop && subst < baseListTop) || baseTop == 0 ? 0 : epoch;
+        lcStamp[slot] = (list < baseListTop && res < baseListTop && substIsBase(subst)) || baseTop == 0 ? 0 : epoch;
         return res;
     }
 

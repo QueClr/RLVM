@@ -4,6 +4,7 @@
 #
 #   1. the distribution: `scripts/dev.sh dist` (published jars + rlvm-main), unless --dist / --no-build
 #   2. all 230 published arena tests through the JVM launcher: scripts/slice.sh --jvm --all
+#      (with --native: through the executable bin/rlvm, scripts/slice.sh --native --all)
 #      -> every test correct, 0 wrong, 0 declined (pinned gates check the verdicts without the
 #      arena's per-test time limits: on the slow cores of a loaded host a 10 s test can take minutes)
 #   3. the mutant campaign(s): rlvm-testkit/bin/testkit judge --corpus DIR -- scripts/check-light.sh
@@ -34,6 +35,12 @@
 #                     prelude (work/mutants-prelude, 847), none, or a directory; `all` = the four in
 #                     one call of `testkit judge --all`, which also appends one summary table per
 #                     run to work/status/mutants.md (counts as rebuilt by rlvm-testkit at 08:27Z)
+#   --native          guard THE EXECUTABLE (bin/rlvm, the native image: what a release ships and the
+#                     arena runs) instead of the jars on the JVM: steps 2, 3 and 5 run bin/rlvm (the
+#                     mutants and the hostile exports with a 4 GB heap cap, as on the JVM). It needs
+#                     no bin/rlvm-jvm and no lib/, so it guards a release-layout distribution
+#                     (scripts/build.sh without --dev). Step 4 needs the test kit on a class path:
+#                     it runs only if the distribution also has bin/rlvm-jvm, and is skipped otherwise
 #   --no-slice        skip step 2
 #   --hostile [FILE]  also step 5; FILE = a manifest (see scripts/gate-hostile.py --help), default the
 #                     machine's suite. --kind-mark REGEX names the marks of a kind T row
@@ -73,7 +80,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # heavy (hundreds of JVMs), so it takes a slot itself unless its caller already holds one (the slot
 # is a file lock that this process inherited: an open descriptor on work/build/slots/heavy.N).
 for a in "$@"; do  # the help text needs no slot
-  case "$a" in -h|--help) sed -n '2,67p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+  case "$a" in -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 done
 if [ -x "$ROOT/bench/slot.sh" ] && [ -z "${RLVM_NO_SLOT:-}" ] \
     && ! ls -l "/proc/$$/fd" 2>/dev/null | grep -q 'work/build/slots/heavy\.'; then
@@ -95,6 +102,7 @@ diffself=1
 hostile=0
 hostile_manifest=""
 kind_mark=""
+launcher=jvm
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -102,6 +110,8 @@ while [ "$#" -gt 0 ]; do
     --no-build) build=0; shift ;;
     --corpus) corpora+=("${2:?--corpus needs a name}"); shift 2 ;;
     --no-slice) slice=0; shift ;;
+    --native) launcher=native; shift ;;
+    --jvm) launcher=jvm; shift ;;
     --threads) threads="${2:?--threads needs a number}"; shift 2 ;;
     --engine) engine="${2:?--engine needs a name}"; shift 2 ;;
     --load) load="${2:?--load needs a mode}"; shift 2 ;;
@@ -115,7 +125,7 @@ while [ "$#" -gt 0 ]; do
     --hostile) hostile=1
       case "${2:-}" in ''|-*) shift ;; *) hostile_manifest="$(realpath -m "$2")"; shift 2 ;; esac ;;
     --kind-mark) kind_mark="${2:?--kind-mark needs a regular expression}"; shift 2 ;;
-    -h|--help) sed -n '2,67p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "gate.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -175,8 +185,14 @@ fi
 # The shared distribution is a symbolic link into work/dist.d/ that every build switches
 # (scripts/build.sh): resolve it ONCE, so that all steps of this gate check the same build.
 if [ -L "$dist" ]; then dist="$(realpath -e "$dist" 2>/dev/null || echo "$dist")"; fi
-[ -x "$dist/bin/rlvm-jvm" ] || { echo "gate: $dist/bin/rlvm-jvm not built (scripts/dev.sh dist)" >&2; exit 70; }
-echo "gate: distribution $dist ($(sed -n 's/^built: *//p' "$dist/BUILD-INFO.txt" | cut -d' ' -f1)); engine $engine, load $load, threads $threads${extra[*]:+, -X ${extra[*]}}" >&2
+if [ "$launcher" = native ]; then
+  [ -x "$dist/bin/rlvm" ] || { echo "gate: --native: $dist/bin/rlvm not built (scripts/build.sh, scripts/dev.sh dist-native)" >&2; exit 70; }
+  [ -z "$extra_cp" ] || { echo "gate: --extra-cp needs the JVM launcher (the executable has no class path)" >&2; exit 2; }
+else
+  [ -x "$dist/bin/rlvm-jvm" ] || { echo "gate: $dist/bin/rlvm-jvm not built (a development distribution: scripts/dev.sh dist; or guard the executable with --native)" >&2; exit 70; }
+fi
+export RLVM_LAUNCHER="$launcher"   # scripts/check-light.sh (mutants, hostile exports): which launcher
+echo "gate: distribution $dist ($(sed -n 's/^built: *//p' "$dist/BUILD-INFO.txt" | cut -d' ' -f1)); launcher $launcher; engine $engine, load $load, threads $threads${extra[*]:+, -X ${extra[*]}}" >&2
 
 # Lanes of a step: the number asked for (-j, default 4), but never more than the memory available
 # now can hold: (MemAvailable - 14 GB reserve) / the bound of one lane, at least 1. bench/slot.sh
@@ -196,7 +212,7 @@ lanes() { # per-lane bound in GB -> lanes
 
 fail=0
 if [ "$slice" = 1 ]; then
-  args=(--dist "$dist" --jvm --all --engine "$engine" --load "$load" --threads "$threads" -j "$(lanes 8)")
+  args=(--dist "$dist" "--$launcher" --all --engine "$engine" --load "$load" --threads "$threads" -j "$(lanes 8)")
   # A gate never writes work/status/slice-all.md (the steward's record of the published state, made
   # with scripts/slice.sh --all): every gate has its own table under work/status/gate/.
   mkdir -p "$ROOT/work/status/gate"
@@ -208,6 +224,7 @@ if [ "$slice" = 1 ]; then
   # ... and the configuration when it is not the plain one (reference, batch, 1 worker): three gates of
   # one distribution (defaults, -X engine=machine, plain) wrote the same table on 2026-11-24.
   case "$engine/$load/$threads" in reference/batch/1) ;; *) gate_name="$gate_name-$engine-$load-t$threads" ;; esac
+  [ "$launcher" = jvm ] || gate_name="$gate_name-$launcher"
   args+=(--out "$ROOT/work/status/gate/slice-all-$gate_name.md" --tag "gate-$gate_name")
   # A pinned gate runs on the slow cores, usually beside other people's jobs: it guards verdicts,
   # not the arena's time limits (those are read from scripts/slice.sh on a quiet machine).
@@ -250,7 +267,9 @@ if [ "$judge_all" = 1 ]; then
 fi
 
 bad="$ROOT/work/arena-site/tests/bad/tutorial/002_badDef.ndjson"
-if [ "$diffself" = 1 ] && [ -f "$bad" ]; then
+if [ "$diffself" = 1 ] && [ -f "$bad" ] && [ ! -x "$dist/bin/rlvm-jvm" ]; then
+  echo "gate: differential self-test: SKIPPED (it puts the test kit on a class path: no bin/rlvm-jvm in this distribution)"
+elif [ "$diffself" = 1 ] && [ -f "$bad" ]; then
   mkdir -p "$ROOT/work/logs/gate"
   log="$ROOT/work/logs/gate/diff-selftest-$(date -u +%Y%m%dT%H%M%SZ).log"
   rc=0

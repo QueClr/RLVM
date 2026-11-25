@@ -84,13 +84,15 @@ def build_id(dist):
     import glob
     import hashlib
     built = ""
+    recorded = ""   # "jars sha256:" of BUILD-INFO.txt: a release-layout distribution has no lib/ to hash
     try:
         with open(os.path.join(dist, "BUILD-INFO.txt")) as f:
             for line in f:
-                if line.startswith("built:"):
+                if line.startswith("built:") and not built:
                     built = line.split()[1]
-                    break
-    except OSError:
+                elif line.startswith("jars sha256:"):
+                    recorded = line.split()[2]
+    except (OSError, IndexError):
         pass
     h = hashlib.sha256()
     jars = sorted(glob.glob(os.path.join(dist, "lib", "rlvm-*.jar")))
@@ -100,7 +102,9 @@ def build_id(dist):
                 h.update(f.read())
     except OSError:
         return built
-    return f"{built}/{h.hexdigest()[:12]}" if jars else built
+    if jars:
+        return f"{built}/{h.hexdigest()[:12]}"
+    return f"{built}/{recorded}" if recorded else built
 
 
 def corpus_path(name):

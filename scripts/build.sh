@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# scripts/build.sh - build RLVM and assemble a runnable distribution.
+# scripts/build.sh - build RLVM: the release executable, or a development distribution.
 #
 #   scripts/build.sh [options]            (scripts/build.sh --help)
 #
-# Result (default work/dist/):
-#   bin/rlvm-jvm     JVM-mode launcher (sh script; runs lib/*.jar on the build's GraalVM): the WARM
-#                    platform (OWNER-NOTES 12: steady-state wall clock; docs/PLATFORM.md)
-#   bin/rlvm         native image, GraalVM CE, with Truffle runtime compilation: the COLD platform,
-#                    what the arena definition runs (one fresh process per export)
-#   bin/rlvm-pgo     native image, Oracle GraalVM + profile-guided optimisation: ONLY with --pgo, for
-#                    measurements that are labelled as such (owner's decision of 2026-11-24, OWNER-NOTES
-#                    item 11: no default build or script downloads or uses Oracle GraalVM; nothing
-#                    that ships depends on it). See "PGO" below
+# THE RELEASE IS ONE EXECUTABLE (OWNER-NOTES 16). Result (default work/dist/):
+#   bin/rlvm         the native image, built with GraalVM Community Edition: self-contained (no JDK,
+#                    no jars, no second launcher), with Truffle runtime compilation; `rlvm FILE` checks
+#                    with the fastest configuration and `rlvm --version` says what that is. It is what
+#                    scripts/package.sh puts into the release archive and what the arena definition runs
+#   BUILD-INFO.txt   versions, flags, build times, sizes (not part of the release archive)
+# and nothing else. A DEVELOPMENT distribution (--dev, or --jvm-only without the executable) adds
 #   lib/*.jar        every module of the reactor plus its runtime dependencies (Truffle, polyglot)
-#   BUILD-INFO.txt   versions, flags, build times, sizes
+#   bin/rlvm-jvm     a shell launcher that runs those jars on the build's GraalVM (HotSpot + JIT): the
+#                    platform of the warm benchmarks (bench/warm.sh, OWNER-NOTES 12), of the gates
+#                    (scripts/gate.sh) and of the test kit. A tool of this repository: it carries the
+#                    path of the build's JDK and is never packaged
 # A history of build times and sizes is appended to work/build/build-times.tsv.
 #
 # How it builds
@@ -26,11 +27,13 @@
 #      i.e. the jar its owner last published with `mvn -pl MODULE install`. That is the mode for a
 #      tree in which several people work at once: a module that does not compile at the moment
 #      cannot break the distribution, and what is assembled is what was published.
-#   2. Maven packages the modules and copies their runtime dependencies; all jars go to lib/.
-#      The test kit (rlvm-testkit) is a development tool: no build puts it into lib/, so a tree
-#      build and a --published build ship the same set of jars.
-#   3. native-image builds bin/rlvm from exactly those jars. Image-wide options are set here;
-#      package-specific ones (build-time initialisation) come from each jar's own
+#   2. Maven packages the modules and copies their runtime dependencies. The test kit (rlvm-testkit)
+#      is a development tool: no build uses its jar, so a tree build and a --published build are made
+#      from the same set of jars.
+#   3. native-image builds bin/rlvm from exactly those jars. Image-wide options are set here - the
+#      optimisation level, the collector and the MEMORY SETTINGS that are baked in (IMAGE_HEAP below) -
+#      and the text `rlvm --version` prints as "build:" (-Drlvm.build=...); package-specific options
+#      (build-time initialisation) come from each jar's own
 #      META-INF/native-image/**/native-image.properties. The machine's inline lists ("H10": force-
 #      inline its continuation steps, never inline its slow paths) are generated from the machine
 #      jar of the build and added when that works (--no-h10: never).
@@ -49,19 +52,26 @@
 #      shared distribution is `cp -aL work/dist DIR` (-L: the files, not the link). A private
 #      distribution (--dist DIR) is replaced in place as before (--versioned gives it the same scheme).
 #
-# PGO (Oracle GraalVM only; `--pgo-instrument` does not exist in CE). Never part of a default build:
-# it needs --pgo and an Oracle GraalVM that somebody put into .toolchain/oracle-graalvm-25 by hand.
-#   a. the modules are compiled against the Truffle version of the Oracle GraalVM (its GRAALVM_VERSION);
-#   b. an instrumented image is built (native-image --pgo-instrument);
-#   c. TRAINING: the instrumented image runs `--truffle-probe` (so that the runtime compiler itself is
-#      profiled) and then checks every training export (--train FILE, repeatable; default: the arena's
-#      init-prelude and, if present, work/arena-site/generated/init.ndjson) with RLVM_EXIT=exit, because
-#      the profile is written by a shutdown hook that the launcher's default Runtime.halt would skip.
-#      Each run writes one .iprof file to work/build/oracle/profiles/;
-#   d. the final image is built with --pgo=<those files>.
-#   The profile is only as good as the training runs: with the placeholder checker it covers start-up
-#   and the Truffle compiler; once a kernel is plugged in, train on init.ndjson (348 MB) or larger.
-#   Oracle GraalVM is licensed under the GFTC; the arena definition (scripts/arena/) uses CE only.
+# ORACLE GraalVM WITH A SHIPPED PROFILE: an OPTION, never the default (OWNER-NOTES 16 and 11)
+#   scripts/build.sh --oracle-pgo        builds THE SAME single executable bin/rlvm with Oracle GraalVM
+#                                        and profile-guided optimisation from the profiles that are part
+#                                        of the repository (profiles/*.iprof.gz; profiles/PROFILE-INFO.txt
+#                                        says which sources, settings, training inputs and compiler made
+#                                        them): no training run is needed. `rlvm --version` of that
+#                                        binary says "Oracle GraalVM, profile-guided".
+#   Oracle GraalVM is licensed under the GraalVM Free Terms and Conditions (GFTC), not an open-source
+#   licence; the option says so on its first line of output. It uses .toolchain/oracle-graalvm-25 (or
+#   $RLVM_ORACLE_GRAALVM) when that exists and downloads the pinned Oracle GraalVM ONLY when
+#   --accept-oracle-licence is given as well (scripts/fetch-toolchain.sh --oracle --accept-gftc). The
+#   default build, the arena build and CI use GraalVM Community Edition and never download or run it.
+#   The modules are compiled against the Truffle version of the Oracle GraalVM (its GRAALVM_VERSION).
+#   REGENERATING THE PROFILES (scripts/dev.sh profiles = scripts/build.sh --oracle-pgo --train-profiles
+#   --train FILE...): an instrumented image is built (native-image --pgo-instrument), it runs
+#   `--truffle-probe` (so that the runtime compiler itself is profiled) and then checks every training
+#   export in the DEFAULT configuration (plus --train-arg ARG...), with RLVM_EXIT=exit because the
+#   profile is written by a shutdown hook that the launcher's default Runtime.halt would skip; the
+#   profiles are compressed into profiles/ with a new PROFILE-INFO.txt, and the executable is then
+#   built from them like any --oracle-pgo build. The profile is only as good as the training runs.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -70,12 +80,25 @@ usage() {
   cat <<'EOF'
 Usage: scripts/build.sh [options]
 
-What to build (default: JVM launcher + CE native image; GraalVM CE only):
-  --jvm-only            jars and bin/rlvm-jvm only (about 15 s)
-  --pgo                 also build bin/rlvm-pgo with Oracle GraalVM + PGO, for MEASUREMENTS ONLY
-                        (GFTC licence; never the default, never what ships; fails if
-                        .toolchain/oracle-graalvm-25 is missing - it is not downloaded by any script)
-  --no-pgo              no bin/rlvm-pgo (the default; kept for older command lines)
+What to build (default: THE RELEASE, one executable bin/rlvm built with GraalVM Community Edition):
+  --dev                 a development distribution: bin/rlvm plus lib/*.jar and bin/rlvm-jvm, the JVM
+                        launcher of the warm benchmarks, the gates and the test kit
+  --jvm-only            a development distribution without the executable: lib/*.jar and bin/rlvm-jvm
+                        (about 15 s)
+  --oracle-pgo          build the executable with ORACLE GraalVM (GFTC licence, not open source) and
+                        profile-guided optimisation from the profiles shipped in profiles/. Never the
+                        default. Uses .toolchain/oracle-graalvm-25 if it exists; downloads the pinned
+                        Oracle GraalVM only together with --accept-oracle-licence. Its distribution
+                        is work/dist-oracle-pgo unless --dist says otherwise (never the shared work/dist)
+  --accept-oracle-licence
+                        with --oracle-pgo: you accept the GraalVM Free Terms and Conditions; the pinned
+                        Oracle GraalVM may be downloaded (scripts/fetch-toolchain.sh --oracle --accept-gftc)
+  --profiles DIR        with --oracle-pgo: the directory of the profiles (default profiles/)
+  --train-profiles      with --oracle-pgo: make the profiles anew before building: instrumented image,
+                        training runs (--train), profiles/*.iprof.gz and profiles/PROFILE-INFO.txt
+  --train FILE          training export of --train-profiles (repeatable)
+  --train-arg ARG       extra argument of every training run (repeatable; default: none, i.e. the
+                        default configuration)
   --modules A,B         build only these modules (and what they depend on); default: all modules
                         of the parent pom
   --published           compile only the --modules (default: rlvm-main) and take every other RLVM
@@ -83,18 +106,15 @@ What to build (default: JVM launcher + CE native image; GraalVM CE only):
   --tests               run the unit tests during the Maven build (default: not even compiled)
 
 Native image:
-  --opt LEVEL           optimisation level: b (fast build), 1, 2, 3 (default; what the arena
-                        build uses: 10-18 % less CPU time than 2 for the machine, 2-3 minutes of
-                        build instead of 1-2)
+  --opt LEVEL           optimisation level: b (fast build), 1, 2, 3 (default; what the release and
+                        the arena build use: 10-18 % less CPU time than 2 for the machine, 2-3 minutes
+                        of build instead of 1-2)
   --march VALUE         e.g. native, compatibility (default: native-image's own default)
   --gc NAME             serial (default), epsilon, G1 (Oracle GraalVM only)
   --ni-arg ARG          extra native-image argument (repeatable), e.g. --ni-arg -R:MaxHeapSize=12g
+                        (it follows the baked-in memory settings: a later value wins)
   --no-h10              build the CE image without the machine's inline lists (default: with them
-                        when rlvm-machine is in the build; see "H10" in the header)
-  --train FILE          PGO training export (repeatable)
-  --train-arg ARG       extra argument of every PGO training run (repeatable), e.g.
-                        --train-arg -X --train-arg engine=machine to profile another engine than
-                        the default one
+                        when rlvm-machine is in the build; see "H10" in the script)
 
 Other:
   --dist DIR            where to put the distribution (default: work/dist, the shared one, which
@@ -103,7 +123,7 @@ Other:
   --versioned           install DIR as DIR.d/<version> + symbolic link, like the shared distribution
   --in-place            replace the directory itself (the default for --dist DIR)
   --online              let Maven download missing artifacts (default: offline)
-  --verify-deps FILE    check lib/ against a sha256 list (scripts/arena/deps.sha256)
+  --verify-deps FILE    check the third-party jars against a sha256 list (scripts/arena/deps.sha256)
   --print-deps          print such a list for the jars of this build and exit after the Maven step
   -h, --help
 
@@ -120,7 +140,12 @@ since() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
 
 DIST="$ROOT/work/dist"
 want_native=1
-want_pgo=no   # Oracle GraalVM is used only on request (--pgo): OWNER-NOTES item 11
+dev=0             # 1: lib/*.jar and bin/rlvm-jvm as well (a development distribution)
+flavor=ce         # ce | oracle-pgo. Oracle GraalVM is used only on request: OWNER-NOTES 11 and 16
+pgo_alias=0
+accept_oracle=0
+profiles_dir="$ROOT/profiles"
+train_profiles=0
 modules=""
 published=0
 run_tests=0
@@ -139,11 +164,16 @@ h10=auto
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --jvm-only) want_native=0; want_pgo=no; shift ;;
+    --dev) dev=1; shift ;;
+    --jvm-only) want_native=0; dev=1; shift ;;
     --no-h10) h10=no; shift ;;
     --h10) h10=auto; shift ;;
-    --no-pgo) want_pgo=no; shift ;;
-    --pgo) want_pgo=yes; shift ;;
+    --no-pgo) shift ;;   # older command lines: the default has always been GraalVM CE
+    --oracle-pgo) flavor=oracle-pgo; shift ;;
+    --pgo) flavor=oracle-pgo; pgo_alias=1; shift ;;
+    --accept-oracle-licence|--accept-oracle-license) accept_oracle=1; shift ;;
+    --profiles) profiles_dir="$(realpath -m "${2:?--profiles needs a directory}")"; shift 2 ;;
+    --train-profiles) train_profiles=1; shift ;;
     --modules) modules="${2:?--modules needs a list}"; shift 2 ;;
     --published) published=1; shift ;;
     --tests) run_tests=1; shift ;;
@@ -163,6 +193,17 @@ while [ "$#" -gt 0 ]; do
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
+if [ "$flavor" = oracle-pgo ]; then
+  # The first line of output of the option (OWNER-NOTES 16): what it uses and under which licence.
+  echo "build.sh: --oracle-pgo: this build uses ORACLE GraalVM, which is licensed under the GraalVM Free Terms and Conditions (GFTC), with profile-guided optimisation; the default build uses GraalVM Community Edition only and never downloads or runs Oracle GraalVM." >&2
+  [ "$pgo_alias" = 0 ] || log "--pgo is the old name of --oracle-pgo; it no longer builds a second binary bin/rlvm-pgo: the executable of this build is bin/rlvm"
+  [ "$dev" = 0 ] || die "--oracle-pgo builds the release layout only (one executable); for the JVM launcher build a --dev distribution with GraalVM CE"
+elif [ "$train_profiles" = 1 ] || [ "$accept_oracle" = 1 ]; then
+  die "--train-profiles and --accept-oracle-licence belong to --oracle-pgo"
+fi
+if [ "$train_profiles" = 1 ] && [ "${#train[@]}" -eq 0 ]; then
+  die "--train-profiles needs at least one --train FILE (scripts/dev.sh profiles names the inputs)"
+fi
 case "$opt" in b|1|2|3) ;; *) die "--opt must be b, 1, 2 or 3" ;; esac
 # The distribution's path is NOT resolved through a final symbolic link: for a versioned
 # distribution the link itself is what gets switched (the directories above it are resolved).
@@ -173,8 +214,16 @@ if [ -n "${dist_arg:-}" ]; then
   if [ "$versioned" = 0 ] && [ -L "$DIST" ]; then
     case "$(readlink "$DIST")" in "$(basename "$DIST").d/"*) versioned=1 ;; esac
   fi
+elif [ "$flavor" = oracle-pgo ]; then
+  # Never the shared distribution: work/dist is what the gates, the benchmarks and the arena definition
+  # use, and it is a GraalVM CE build. The optional build has a directory of its own.
+  DIST="$ROOT/work/dist-oracle-pgo"
+  [ "$versioned" != auto ] || versioned=0
 else
   [ "$versioned" != auto ] || versioned=1
+fi
+if [ "$flavor" = oracle-pgo ] && [ "$DIST" = "$ROOT/work/dist" ]; then
+  die "--oracle-pgo: work/dist is the shared GraalVM CE distribution (gates, benchmarks, the arena definition); give the Oracle build another --dist"
 fi
 
 # shellcheck source=../env.sh
@@ -183,12 +232,37 @@ fi
 CE_HOME="$JAVA_HOME"
 ORACLE_HOME_DIR="${RLVM_ORACLE_GRAALVM:-$ROOT/.toolchain/oracle-graalvm-25}"
 
+# ------------------------------------------------------------------------------------------------
+# MEMORY SETTINGS BAKED INTO THE EXECUTABLE (run-time defaults of the image; -Xmx / -Xms / -Xmn and
+# -XX:... on its command line still override them). Decided by measurement for what one invocation
+# of an executable is - a single run of a fresh process on each of the eight corpora - within the
+# 16 GB of the arena's runner and without a cost for small inputs (the journal: design-packaging and
+# its decision; the table is regenerated by bench/track/benchmarks.py).
+#   -R:MaxHeapSize=13g   the heap limit: 13 GB leaves 3 GB of a 16 GB machine for stacks, code and the
+#                        page cache; the memory account of the driver declines at 12 GiB, before it
+#   The nursery bound is NOT baked in as -R:MaxNewSize: with it a run-time -Xmx below that size makes
+#   the image refuse to start ("maximum new generation size must not be larger than the maximum heap
+#   size", exit status 1).
+# IMAGE_HEAP_TEXT is what `rlvm --version` says about them.
+IMAGE_HEAP=(-R:MaxHeapSize=13g)
+IMAGE_HEAP_TEXT="heap at most 13g"
+# ------------------------------------------------------------------------------------------------
+
 graalvm_version() { sed -n 's/^GRAALVM_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$1/release"; }
 
-if [ "$want_pgo" = yes ]; then
-  [ -x "$ORACLE_HOME_DIR/bin/native-image" ] || die "--pgo: no Oracle GraalVM at $ORACLE_HOME_DIR"
-fi
-if [ "$want_native" = 1 ]; then
+if [ "$flavor" = oracle-pgo ]; then
+  if [ ! -x "$ORACLE_HOME_DIR/bin/native-image" ]; then
+    if [ "$accept_oracle" = 1 ] && [ -z "${RLVM_ORACLE_GRAALVM:-}" ]; then
+      "$ROOT/scripts/fetch-toolchain.sh" --oracle --accept-gftc || die "--oracle-pgo: could not fetch the pinned Oracle GraalVM"
+    else
+      die "--oracle-pgo: no Oracle GraalVM at $ORACLE_HOME_DIR. It is not downloaded unless you also pass --accept-oracle-licence (you then accept the GraalVM Free Terms and Conditions)"
+    fi
+  fi
+  [ -x "$ORACLE_HOME_DIR/bin/native-image" ] || die "--oracle-pgo: no native-image in $ORACLE_HOME_DIR"
+  if [ "$train_profiles" = 0 ]; then
+    ls "$profiles_dir"/*.iprof.gz >/dev/null 2>&1 || die "--oracle-pgo: no profiles (*.iprof.gz) in $profiles_dir; make them with scripts/dev.sh profiles"
+  fi
+elif [ "$want_native" = 1 ]; then
   [ -x "$CE_HOME/bin/native-image" ] || die "no native-image in $CE_HOME"
 fi
 
@@ -221,7 +295,7 @@ fi
 
 STAGE="$BUILD/stage"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/dist/bin" "$STAGE/dist/lib"
+mkdir -p "$STAGE/dist/bin"
 INFO="$STAGE/dist/BUILD-INFO.txt"
 HISTORY="$BUILD/build-times.tsv"
 [ -f "$HISTORY" ] || printf 'utc\tartifact\tflags\tbuild_wall_s\tbuild_cpu_s\tbuild_peak_rss_mb\tsize_bytes\n' > "$HISTORY"
@@ -363,18 +437,19 @@ native_build() {
   local args=("-O$opt" "--gc=$gc" --no-fallback
               # An out-of-memory error ends the process at once with status 3 (= internal error).
               -R:+ExitOnOutOfMemoryError
-              # ARCHITECTURE.md 7.2: the JVM launcher's heap limit as the image's run-time default
-              # (-Xmx on the command line still overrides it). The nursery bound of 7.2
-              # (-R:MaxNewSize=1g) is NOT baked in: with it a run-time -Xmx below 1g makes the
-              # image refuse to start ("maximum new generation size must not be larger than the
-              # maximum heap size", exit status 1). Pass --ni-arg -R:MaxNewSize=1g to measure it.
-              -R:MaxHeapSize=13g
+              # The memory settings of the executable (IMAGE_HEAP at the top of this script).
+              "${IMAGE_HEAP[@]}"
               -H:+ReportExceptionStackTraces)
   [ -z "$march" ] || args+=("-march=$march")
   args+=("${ni_extra[@]}" "$@")
+  # The words for logs and BUILD-INFO.txt: the arguments so far (none of them contains a blank).
+  local shown="${args[*]}"
+  # What `rlvm --version` prints as "build:" (rlvm.cli.BuildInfo is initialised at image build time,
+  # so the property of the BUILD becomes a constant of the image). The text has blanks: one argument.
+  [ -z "${build_text:-}" ] || args+=("-Drlvm.build=$build_text")
   mkdir -p "$dir/ni-$name"
   tmp="$dir/ni-$name/time.txt"
-  log "[$variant] native-image $name: $(brief_flags "${args[*]}")"
+  log "[$variant] native-image $name: $(brief_flags "$shown")"
   local timer=() t0
   # GNU time gives CPU time and peak memory of the builder; without it only the wall time is recorded.
   if [ -n "$GNU_TIME" ]; then timer=("$GNU_TIME" -o "$tmp" -f '%e %U %S %M'); fi
@@ -393,7 +468,7 @@ native_build() {
   ni_cpu="$(awk -v u="$ni_user" -v s="$ni_sys" 'BEGIN { printf "%.1f", u + s }')"
   ni_rss_mb=$((ni_rss / 1024))
   ni_size="$(stat -c %s "$dir/$name")"
-  ni_flags="$(brief_flags "${args[*]}")"
+  ni_flags="$(brief_flags "$shown")"
   # CE prints " - Graal compiler: ...", Oracle GraalVM " Graal compiler: ...".
   line="$(grep -E '^ (- )?(Graal compiler|Garbage collector):' "$dir/ni-$name/build.log" | sed -E 's/^ (- )?//' | paste -sd';' - || true)"
   log "[$variant] $name: ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB, $((ni_size / 1024 / 1024)) MB binary | $line"
@@ -461,30 +536,55 @@ ce_version="$(graalvm_version "$CE_HOME")"
 pom_version="$(sed -n 's:.*<graalvm.version>\(.*\)</graalvm.version>.*:\1:p' "$ROOT/pom.xml")"
 [ "$pom_version" = "$ce_version" ] || log "WARNING: parent pom says graalvm.version=$pom_version but $CE_HOME is $ce_version; building against $ce_version"
 
-maven_build ce "$CE_HOME" "$ce_version"
-if [ "$print_deps" = 1 ]; then deps_list "$BUILD/ce/lib"; exit 0; fi
+# One compiler per build: GraalVM CE (the default), or Oracle GraalVM for --oracle-pgo. The modules are
+# compiled against the Truffle version of the GraalVM that builds the image.
+if [ "$flavor" = oracle-pgo ]; then
+  variant=oracle; img_home="$ORACLE_HOME_DIR"; img_label="Oracle GraalVM"
+  img_version="$(graalvm_version "$ORACLE_HOME_DIR")"
+  [ -n "$img_version" ] || die "cannot read GRAALVM_VERSION from $ORACLE_HOME_DIR/release"
+else
+  variant=ce; img_home="$CE_HOME"; img_label="GraalVM CE"; img_version="$ce_version"
+fi
+maven_build "$variant" "$img_home" "$img_version"
+LIB="$BUILD/$variant/lib"   # the jars of this build: the class path of the image, lib/ of a development distribution
+if [ "$print_deps" = 1 ]; then deps_list "$LIB"; exit 0; fi
 if [ -n "$verify_deps" ]; then
-  deps_list "$BUILD/ce/lib" > "$BUILD/ce/deps.sha256"
-  if ! diff -u <(grep -vE '^(#|[[:space:]]*$)' "$verify_deps") "$BUILD/ce/deps.sha256" >&2; then
+  deps_list "$LIB" > "$BUILD/$variant/deps.sha256"
+  if ! diff -u <(grep -vE '^(#|[[:space:]]*$)' "$verify_deps") "$BUILD/$variant/deps.sha256" >&2; then
     die "third-party jars differ from the pinned list $verify_deps"
   fi
-  log "[ce] third-party jars match $verify_deps"
+  log "[$variant] third-party jars match $verify_deps"
 fi
-cp "$BUILD"/ce/lib/*.jar "$STAGE/dist/lib/"
+jars_bytes="$(du -cb "$LIB"/*.jar | tail -n 1 | cut -f1)"
+if [ "$want_native" = 0 ]; then layout="development, JVM launcher only: lib/*.jar, bin/rlvm-jvm"
+elif [ "$dev" = 1 ]; then layout="development: bin/rlvm, lib/*.jar, bin/rlvm-jvm"
+else layout="release: one executable, bin/rlvm"; fi
 
 {
   echo "RLVM distribution"
   echo "built:            $stamp on $(uname -sm) by scripts/build.sh"
+  echo "layout:           $layout"
   echo "modules:          $modules$([ "$published" = 1 ] && echo ' (compiled); all other RLVM modules as published in .toolchain/m2:')"
-  [ "$published" = 0 ] || cat "$BUILD/ce/published.txt"
-  echo "java.home:        $CE_HOME"
-  echo "graalvm (CE):     $ce_version ($(sed -n 's/^JAVA_RUNTIME_VERSION="\(.*\)"$/\1/p' "$CE_HOME/release"))"
+  [ "$published" = 0 ] || cat "$BUILD/$variant/published.txt"
+  echo "java.home:        $img_home"
+  echo "graalvm:          $img_label $img_version ($(sed -n 's/^JAVA_RUNTIME_VERSION="\(.*\)"$/\1/p' "$img_home/release"))$([ "$flavor" = oracle-pgo ] && echo ' - GFTC licence; an explicitly requested build (--oracle-pgo), never the default')"
   echo "maven build:      ${maven_secs}s"
-  echo "jars:             $(du -cb "$STAGE"/dist/lib/*.jar | tail -n 1 | cut -f1) bytes in $(ls "$STAGE/dist/lib" | wc -l) files"
+  echo "jars:             $jars_bytes bytes in $(ls "$LIB" | wc -l) files$([ "$dev" = 1 ] && echo ' (lib/)' || echo ' (compiled into the executable; not part of this layout)')"
 } > "$INFO"
-record "jars" "maven package ($modules)" "$maven_secs" "" "" "$(du -cb "$STAGE"/dist/lib/*.jar | tail -n 1 | cut -f1)"
+record "jars" "maven package ($modules)" "$maven_secs" "" "" "$jars_bytes"
 
-# --- JVM launcher -------------------------------------------------------------------------------
+# The engine a run without -X engine checks with, as the jars of this build say it ("default engine:
+# NAME" in `rlvm --version`: the engines' priorities decide, rlvm-main).
+default_engine="$("$img_home/bin/java" -Xmx256m -XX:TieredStopAtLevel=1 -cp "$(classpath_of "$LIB")" rlvm.cli.Main --version 2>/dev/null \
+    | sed -n 's/.*default engine: \([A-Za-z0-9_.-]*\).*/\1/p' | head -n 1 || true)"
+log "default engine of this build: ${default_engine:-unknown (no rlvm-main in the build, or one that does not say)}"
+echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X policy=strict = the reference engine)" >> "$INFO"
+
+# --- JVM launcher (development distributions only) ----------------------------------------------
+# bin/rlvm-jvm is a TOOL OF THIS REPOSITORY, not part of the release (OWNER-NOTES 16: the release is
+# one executable): the warm benchmarks (bench/warm.sh; warm, HotSpot needs 0.74-0.81 times the image's
+# wall clock), the gates and the test kit run the jars through it. It is written only into a --dev or
+# --jvm-only distribution and never packaged.
 # Default VM flags. The line is the one proposed by the profiler J1 (docs/research/profiles/J1.md, section 5;
 # prototype work/j1/proto-src/rlvm-jvm.in) and re-measured on this script's launcher (docs/PLATFORM.md):
 #   -XX:+UseSerialGC             no collector beats it on the real checker with parallel workers
@@ -536,12 +636,13 @@ record "jars" "maven package ($modules)" "$maven_secs" "" "" "$(du -cb "$STAGE"/
 JVM_FLAGS="-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
 JVM_HEAP_FLAGS="-Xms13g -Xmx13g -Xmn1g"
 JVM_HEAP_FLAGS_MACHINE="-Xmx7g -Xmn1g"
-default_engine="$("$CE_HOME/bin/java" -Xmx256m -XX:TieredStopAtLevel=1 -cp "$(classpath_of "$STAGE/dist/lib")" rlvm.cli.Main --version 2>/dev/null \
-    | sed -n 's/.*default engine: \([A-Za-z0-9_.-]*\).*/\1/p' | head -n 1 || true)"
-log "default engine of this distribution: ${default_engine:-unknown (no rlvm-main in the build, or one that does not say)}"
+if [ "$dev" = 1 ]; then
+mkdir -p "$STAGE/dist/lib"
+cp "$LIB"/*.jar "$STAGE/dist/lib/"
 cat > "$STAGE/dist/bin/rlvm-jvm" <<LAUNCHER
 #!/bin/sh
-# RLVM, JVM mode: the WARM platform (docs/PLATFORM.md). Generated by scripts/build.sh on $stamp; do not edit.
+# RLVM on the JVM: a DEVELOPMENT launcher (warm benchmarks, gates, test kit); the release is the one
+# executable bin/rlvm. Generated by scripts/build.sh on $stamp; do not edit.
 #
 #   rlvm-jvm [-J<jvm flag>]... [rlvm options] [EXPORT.ndjson]        (export also via \$IN)
 #
@@ -596,13 +697,22 @@ if [ -n "\${RLVM_JAVA_OPTS:-}" ]; then flags="\$RLVM_JAVA_OPTS"; else flags="$JV
 exec "\$java" \$flags \$user -cp "\$cp\${RLVM_EXTRA_CP:+:\$RLVM_EXTRA_CP}" rlvm.cli.Main "\$@"
 LAUNCHER
 chmod +x "$STAGE/dist/bin/rlvm-jvm"
-echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X policy=strict = the reference engine)" >> "$INFO"
-echo "jvm flags:        $JVM_FLAGS + heap by engine: machine $JVM_HEAP_FLAGS_MACHINE; any other $JVM_HEAP_FLAGS" >> "$INFO"
+echo "jvm launcher:     bin/rlvm-jvm (development tool, not part of a release): $JVM_FLAGS + heap by engine: machine $JVM_HEAP_FLAGS_MACHINE; any other $JVM_HEAP_FLAGS" >> "$INFO"
 verify "$STAGE/dist/bin/rlvm-jvm" "rlvm-jvm"
+fi
 
-# --- native image, CE ---------------------------------------------------------------------------
-if [ "$want_native" = 1 ]; then
-  [ "$h10" = no ] || h10_lists "$BUILD/ce/lib"
+# --- the executable -----------------------------------------------------------------------------
+# Baked-in settings that came through --ni-arg (a later -R: value wins over IMAGE_HEAP): named in the
+# text of --version so that it stays true. Other extra arguments (library paths) are not shown.
+extra_r=""
+for x in "${ni_extra[@]}"; do case "$x" in -R:*) extra_r="$extra_r ${x#-R:}" ;; esac; done
+image_text() { # first words -> the text of "build:" in `rlvm --version`
+  echo "$1 ($img_label $img_version, -O$opt, $gc collector, $IMAGE_HEAP_TEXT${extra_r:+; also:$extra_r})"
+}
+
+if [ "$want_native" = 1 ] && [ "$flavor" = ce ]; then
+  build_text="$(image_text "GraalVM CE native image")"
+  [ "$h10" = no ] || h10_lists "$LIB"
   if [ "${#ni_h10[@]}" -gt 0 ]; then
     ni_soft_fail=1
     if ! native_build ce "$CE_HOME" rlvm "${ni_h10[@]}"; then
@@ -618,7 +728,8 @@ if [ "$want_native" = 1 ]; then
   verify "$BUILD/ce/rlvm" "rlvm (native, CE)"
   cp "$BUILD/ce/rlvm" "$STAGE/dist/bin/rlvm"
   {
-    echo "native (CE):      bin/rlvm  $ni_size bytes; built in ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB"
+    echo "executable:       bin/rlvm  $ni_size bytes; GraalVM CE native image; built in ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB"
+    echo "  says:           $build_text"
     echo "  flags:          $ni_flags"
     echo "  inline lists:   $([ "${#ni_h10[@]}" -gt 0 ] && echo "H10, generated from the machine jar of this build (rlvm-machine/h10/native-image-args.sh)" || echo "none")"
     echo "  builder:        $ni_summary"
@@ -627,52 +738,79 @@ if [ "$want_native" = 1 ]; then
   record "rlvm (native CE $ce_version)" "$ni_flags" "$ni_wall" "$ni_cpu" "$ni_rss_mb" "$ni_size"
 fi
 
-# --- native image, Oracle GraalVM + PGO ---------------------------------------------------------
-if [ "$want_pgo" = yes ]; then
-  oracle_version="$(graalvm_version "$ORACLE_HOME_DIR")"
-  [ -n "$oracle_version" ] || die "cannot read GRAALVM_VERSION from $ORACLE_HOME_DIR/release"
-  maven_build oracle "$ORACLE_HOME_DIR" "$oracle_version"
-  native_build oracle "$ORACLE_HOME_DIR" rlvm-instr --pgo-instrument
-  instr_wall="$ni_wall"; instr_size="$ni_size"
-  record "rlvm-instr (Oracle $oracle_version, instrumented)" "$ni_flags" "$ni_wall" "$ni_cpu" "$ni_rss_mb" "$ni_size"
-
-  # Training (step c of the header).
+# --- the executable, Oracle GraalVM + shipped profiles (--oracle-pgo only) ----------------------
+if [ "$flavor" = oracle-pgo ]; then
   prof="$BUILD/oracle/profiles"
   rm -rf "$prof"; mkdir -p "$prof"
-  if [ "${#train[@]}" -eq 0 ]; then
-    for f in "$ROOT/work/arena-site/tests/good/init-prelude.ndjson" "$ROOT/work/arena-site/generated/init.ndjson"; do
-      if [ -f "$f" ]; then train+=("$f"); fi
+  if [ "$train_profiles" = 1 ]; then
+    # Regenerate the profiles of the repository: instrumented image, training runs, profiles/.
+    build_text="Oracle GraalVM, instrumented for profiling: NOT a release ($img_label $img_version)"
+    native_build oracle "$ORACLE_HOME_DIR" rlvm-instr --pgo-instrument
+    instr_wall="$ni_wall"; instr_size="$ni_size"
+    record "rlvm-instr (Oracle $img_version, instrumented)" "$ni_flags" "$ni_wall" "$ni_cpu" "$ni_rss_mb" "$ni_size"
+    t0="$(now)"
+    training=("--truffle-probe -> probe.iprof.gz")
+    RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/probe.iprof" --truffle-probe > "$prof/probe.log" 2>&1 \
+      || { cat "$prof/probe.log" >&2; die "[oracle] training run --truffle-probe failed"; }
+    for f in "${train[@]}"; do
+      n="train-$(basename "$f" .ndjson | tr -c 'A-Za-z0-9._\n-' '_')"; rc=0
+      [ ! -e "$prof/$n.iprof" ] || die "[oracle] two training exports are called $(basename "$f")"
+      t1="$(now)"
+      RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/$n.iprof" --stats "$f" "${train_args[@]}" > "$prof/$n.log" 2>&1 || rc=$?
+      # A training run may accept, reject or decline; anything else means the profile is not to be trusted.
+      case "$rc" in 0|1|2) ;; *) cat "$prof/$n.log" >&2; die "[oracle] training run on $f ended with status $rc" ;; esac
+      [ -s "$prof/$n.iprof" ] || die "[oracle] the training run on $f wrote no profile"
+      training+=("$(basename "$f") ($(stat -Lc %s "$f") bytes, sha256 $(sha256sum "$f" | cut -c1-16)), exit $rc, $(since "$t1") s instrumented -> $n.iprof.gz")
+      log "[oracle] trained on $f (exit $rc)"
     done
+    train_secs="$(since "$t0")"
+    log "[oracle] training took ${train_secs}s: $(ls "$prof"/*.iprof | wc -l) profiles, $(du -cb "$prof"/*.iprof | tail -n 1 | cut -f1) bytes"
+    # Into the repository: compressed (a profile is JSON: about a seventh of its size), with the text
+    # file that says what made them. No host path goes into either.
+    mkdir -p "$profiles_dir"
+    rm -f "$profiles_dir"/*.iprof.gz
+    for p in "$prof"/*.iprof; do gzip -9 -n -c "$p" > "$profiles_dir/$(basename "$p").gz"; done
+    profile_id="$(cat "$profiles_dir"/*.iprof.gz | sha256sum | cut -c1-12)"
+    {
+      echo "RLVM profiles for 'scripts/build.sh --oracle-pgo' (profile-guided optimisation with Oracle GraalVM)."
+      echo "Made by 'scripts/build.sh --oracle-pgo --train-profiles' (scripts/dev.sh profiles); do not edit."
+      echo
+      echo "id:        $profile_id"
+      echo "made:      $stamp on $(uname -sm)"
+      echo "compiler:  Oracle GraalVM $img_version ($(sed -n 's/^JAVA_RUNTIME_VERSION="\(.*\)"$/\1/p' "$ORACLE_HOME_DIR/release")), native-image --pgo-instrument, -O$opt, $gc collector"
+      echo "settings:  the default configuration of the instrumented executable (default engine: ${default_engine:-unknown})${train_args[*]:+; training arguments: ${train_args[*]}}"
+      echo "sources:   the RLVM jars of the build, sha256 prefixes:"
+      ( cd "$LIB" && for j in rlvm-*.jar; do printf '             %-18s %s\n' "${j%-[0-9]*}" "$(sha256sum "$j" | cut -c1-12)"; done )
+      echo "training:  one run of the instrumented executable each, RLVM_EXIT=exit:"
+      for t in "${training[@]}"; do echo "             $t"; done
+      echo "files:     sha256, bytes, name"
+      ( cd "$profiles_dir" && for p in *.iprof.gz; do printf '             %s %9s %s\n' "$(sha256sum "$p" | cut -c1-16)" "$(stat -c %s "$p")" "$p"; done )
+    } > "$profiles_dir/PROFILE-INFO.txt"
+    log "[oracle] profiles written to $profiles_dir (id $profile_id)"
+  else
+    for p in "$profiles_dir"/*.iprof.gz; do gzip -dc "$p" > "$prof/$(basename "$p" .gz)" || die "[oracle] cannot unpack $p"; done
+    profile_id="$(sed -n 's/^id: *//p' "$profiles_dir/PROFILE-INFO.txt" 2>/dev/null | head -n 1)"
+    [ "$profile_id" = "$(cat "$profiles_dir"/*.iprof.gz | sha256sum | cut -c1-12)" ] \
+      || log "[oracle] WARNING: $profiles_dir/PROFILE-INFO.txt does not describe these profile files (id ${profile_id:-missing})"
+    profile_id="$(cat "$profiles_dir"/*.iprof.gz | sha256sum | cut -c1-12)"
   fi
-  t0="$(now)"
-  RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/probe.iprof" --truffle-probe > "$prof/probe.log" 2>&1 \
-    || { cat "$prof/probe.log" >&2; die "[oracle] training run --truffle-probe failed"; }
-  i=0
-  for f in "${train[@]}"; do
-    i=$((i + 1)); rc=0
-    RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/train-$i.iprof" --stats "$f" "${train_args[@]}" > "$prof/train-$i.log" 2>&1 || rc=$?
-    # A training run may accept, reject or decline; anything else means the profile is not to be trusted.
-    case "$rc" in 0|1|2) ;; *) cat "$prof/train-$i.log" >&2; die "[oracle] training run on $f ended with status $rc" ;; esac
-    log "[oracle] trained on $f (exit $rc)"
-  done
-  profiles="$(ls "$prof"/*.iprof 2>/dev/null | paste -sd, -)"
-  [ -n "$profiles" ] || die "[oracle] the training runs wrote no profile"
-  train_secs="$(since "$t0")"
-  log "[oracle] training took ${train_secs}s: $(ls "$prof"/*.iprof | wc -l) profiles, $(du -cb "$prof"/*.iprof | tail -n 1 | cut -f1) bytes"
-
-  native_build oracle "$ORACLE_HOME_DIR" rlvm-pgo "--pgo=$profiles"
-  verify "$BUILD/oracle/rlvm-pgo" "rlvm-pgo (native, Oracle GraalVM + PGO)"
-  cp "$BUILD/oracle/rlvm-pgo" "$STAGE/dist/bin/rlvm-pgo"
+  profiles="$(ls "$prof"/*.iprof | LC_ALL=C sort | paste -sd, -)"
+  build_text="$(image_text "Oracle GraalVM, profile-guided native image") [profiles $profile_id]"
+  native_build oracle "$ORACLE_HOME_DIR" rlvm "--pgo=$profiles"
+  verify "$BUILD/oracle/rlvm" "rlvm (native, Oracle GraalVM, profile-guided)"
+  "$BUILD/oracle/rlvm" --version | grep -q '^build: Oracle GraalVM, profile-guided' \
+    || log "[oracle] NOTE: 'rlvm --version' does not say 'Oracle GraalVM, profile-guided' (a launcher jar from before 2026-11-25 has no build line)"
+  cp "$BUILD/oracle/rlvm" "$STAGE/dist/bin/rlvm"
   {
-    echo "native (PGO):     bin/rlvm-pgo  $ni_size bytes; built in ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB"
-    echo "  graalvm:        Oracle GraalVM $oracle_version ($ORACLE_HOME_DIR), GFTC licence"
+    echo "executable:       bin/rlvm  $ni_size bytes; ORACLE GraalVM native image, profile-guided; built in ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB"
+    echo "  licence:        Oracle GraalVM $img_version is under the GraalVM Free Terms and Conditions (GFTC); this build was asked for with --oracle-pgo"
+    echo "  says:           $build_text"
     echo "  flags:          $(echo "$ni_flags" | sed "s:$prof/::g")"
+    echo "  profiles:       $(ls "$profiles_dir"/*.iprof.gz | wc -l) files of $(realpath --relative-to="$ROOT" "$profiles_dir" 2>/dev/null || echo "$profiles_dir"), id $profile_id$([ "$train_profiles" = 1 ] && echo " (made by this build: instrumented image in ${instr_wall}s, $instr_size bytes; training ${train_secs}s)")"
     echo "  builder:        $ni_summary"
-    echo "  instrumented:   built in ${instr_wall}s, $instr_size bytes"
-    echo "  training:       ${train_secs}s; --truffle-probe + ${#train[@]} export(s): ${train[*]:-none}${train_args[*]:+; training arguments: ${train_args[*]}}"
     echo "  truffle probe:  $probe_line"
   } >> "$INFO"
-  record "rlvm-pgo (Oracle $oracle_version, PGO)" "$(echo "$ni_flags" | sed "s:$prof/::g")" "$ni_wall" "$ni_cpu" "$ni_rss_mb" "$ni_size"
+  record "rlvm (Oracle $img_version, PGO)" "$(echo "$ni_flags" | sed "s:$prof/::g")" "$ni_wall" "$ni_cpu" "$ni_rss_mb" "$ni_size"
 fi
 
 echo "total build:      $(since "$total_t0")s" >> "$INFO"
@@ -685,7 +823,7 @@ if [ "$versioned" = 1 ]; then
   # the link before the switch keeps the complete old build (deleted only by the pruning below).
   store="$DIST.d"
   mkdir -p "$store"
-  version="$(date -u +%Y%m%dT%H%M%SZ)-$(cat "$STAGE"/dist/lib/rlvm-*.jar | sha256sum | cut -c1-12)-$([ -e "$STAGE/dist/bin/rlvm" ] && echo native || echo jvm)"
+  version="$(date -u +%Y%m%dT%H%M%SZ)-$(cat "$LIB"/rlvm-*.jar | sha256sum | cut -c1-12)-$([ -e "$STAGE/dist/bin/rlvm" ] && echo native || echo jvm)"
   [ ! -e "$store/$version" ] || version="$version.$$"
   echo "version:          $(basename "$store")/$version" >> "$INFO"
   mv "$STAGE/dist" "$store/$version"

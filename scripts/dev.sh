@@ -11,32 +11,46 @@
 #                             `build`/`test` on their own. Run it when your module's API changes.
 #   modules                   list the modules of the parent pom
 #
-# Distribution (builds from a snapshot of the sources in work/build/, safe while others work):
-#   dist [options]            the distribution in work/dist/ whose default checker is the real
-#                             pipeline (rlvm-main; the default ENGINE is decided by the engines'
-#                             priorities: `rlvm --version` prints it), built
-#                             from the PUBLISHED jars: scripts/build.sh --published --jvm-only, i.e.
-#                             rlvm-main is compiled from the tree and every other RLVM module is the
-#                             jar its owner last installed into .toolchain/m2. JVM launcher only
-#                             (bin/rlvm-jvm), a few seconds. Options are passed on to build.sh.
-#                             work/dist is SHARED and VERSIONED: each build is a new directory
-#                             work/dist.d/<UTC time>-<jars>-<jvm|native> and work/dist is a symbolic
-#                             link switched to it atomically; gate / slice / track / platform pin the
-#                             version at their start, old versions go after 90 minutes (build.sh
-#                             header). Copy it with `cp -aL work/dist DIR`
-#   dist-native [options]     the same plus the CE native image bin/rlvm at -O3, the arena's flags
-#                             and the machine's inline lists (2-3 minutes, about 900 s of CPU; the
-#                             JVM launcher is the warm platform, the image the cold one:
-#                             docs/PLATFORM.md): scripts/build.sh --published --no-pgo;
-#                             `--opt 2` builds in half the time and runs 10-18 % slower. Holds one
-#                             of the host's two native-image slots (bench/slot.sh -c ni -n 2), as
-#                             dist-tree does
+# Building (from a snapshot of the sources in work/build/, safe while others work). THE RELEASE IS ONE
+# EXECUTABLE, bin/rlvm (the GraalVM CE native image; OWNER-NOTES 16): plain `scripts/build.sh` builds
+# exactly that. The commands below build DEVELOPMENT distributions, which add lib/*.jar and
+# bin/rlvm-jvm, the JVM launcher that the gates, the warm benchmarks and the test kit run:
+#   dist [options]            the shared development distribution work/dist/ WITHOUT the executable:
+#                             lib/*.jar and bin/rlvm-jvm, built from the PUBLISHED jars
+#                             (scripts/build.sh --published --jvm-only: rlvm-main is compiled from
+#                             the tree and every other RLVM module is the jar its owner last installed
+#                             into .toolchain/m2), a few seconds. The default ENGINE is decided by the
+#                             engines' priorities: `rlvm --version` prints it. Options are passed on
+#                             to build.sh. work/dist is SHARED and VERSIONED: each build is a new
+#                             directory work/dist.d/<UTC time>-<jars>-<jvm|native> and work/dist is a
+#                             symbolic link switched to it atomically; gate / slice / track / platform
+#                             pin the version at their start, old versions go after 90 minutes
+#                             (build.sh header). Copy it with `cp -aL work/dist DIR`
+#   dist-native [options]     the same plus the executable bin/rlvm (CE native image at -O3 with the
+#                             machine's inline lists; 2-3 minutes, about 900 s of CPU):
+#                             scripts/build.sh --published --dev; `--opt 2` builds in half the time
+#                             and runs 10-18 % slower. Holds one of the host's two native-image slots
+#                             (bench/slot.sh -c ni -n 2), as dist-tree, release and profiles do
 #   dist-versions             list the versions in work/dist.d/ and the one work/dist names
-#   dist-tree [options]       everything compiled from the working tree, JVM launcher + CE native
-#                             image: plain scripts/build.sh (what the arena build does; it fails
-#                             if any module of the tree does not compile at the moment). The Oracle
-#                             GraalVM PGO image is built only with `--pgo` (measurements only)
+#   dist-tree [options]       a development distribution with everything compiled from the working
+#                             tree: scripts/build.sh --dev (it fails if any module of the tree does
+#                             not compile at the moment)
 #   dist-quick [options]      scripts/build.sh --jvm-only from the working tree
+#   release [options]         THE RELEASE: scripts/package.sh --out work/release --build [options]
+#                             = the one executable built from the working tree into
+#                             work/release/dist/bin/rlvm (GraalVM CE) and the archive
+#                             work/release/rlvm-<version>-linux-<arch>.tar.gz with exactly rlvm,
+#                             LICENSE and README.md. Options go to build.sh (--online, --published)
+#   release-oracle [options]  the OPTIONAL build with ORACLE GraalVM (GFTC licence; never a default)
+#                             and the profiles shipped in profiles/: scripts/build.sh --oracle-pgo
+#                             --dist work/dist-oracle-pgo [options]. Needs .toolchain/oracle-graalvm-25
+#                             (or --accept-oracle-licence to download the pinned one)
+#   profiles [--train FILE]... [options]
+#                             regenerate profiles/ for release-oracle: scripts/build.sh --oracle-pgo
+#                             --train-profiles (instrumented image, one training run per input in the
+#                             default configuration, profiles/*.iprof.gz + profiles/PROFILE-INFO.txt).
+#                             Default training inputs: work/exports/init.ndjson (see the journal,
+#                             design-packaging: what the measurements of the profile found best)
 #   info                      print work/dist/BUILD-INFO.txt and the toolchain versions
 #
 # Test kit (rlvm-testkit/bin/testkit; see rlvm-testkit/README.md):
@@ -53,7 +67,7 @@
 #                             kit's DiffProvider (rlvm-testkit/spi + its published jar) added to the
 #                             class path through RLVM_EXTRA_CP (the caller's RLVM_EXTRA_CP is kept,
 #                             e.g. an engine that is not in the distribution); never part of what is
-#                             shipped. Without the test kit, `rlvm-jvm -X engine=diff` uses the
+#                             released. Without the test kit, `rlvm -X engine=diff` uses the
 #                             driver's own differential mode (needs a second engine on the class path)
 #   track CORPUS [args]       bench/track/track.py: one measured run of a corpus in the arena-shaped
 #                             container, history in work/perf-history/, comparison with the baselines
@@ -92,7 +106,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 die() { echo "dev.sh: $*" >&2; exit 2; }
-usage() { sed -n '2,90p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,104p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [ "$#" -gt 0 ] || { usage; exit 2; }
 cmd="$1"; shift
@@ -115,8 +129,8 @@ mvn() {
 }
 
 # Host rule of 2026-11-24 (orchestrator, work/status/requests.log 14:32Z): at most two native-image
-# builds at a time on the whole host - `bench/slot.sh -c ni -n 2 -- BUILD`. dist-native and dist-tree
-# take that slot themselves unless the caller already holds one (an inherited descriptor on
+# builds at a time on the whole host - `bench/slot.sh -c ni -n 2 -- BUILD`. dist-native, dist-tree,
+# release, release-oracle and profiles take that slot themselves unless the caller already holds one (an inherited descriptor on
 # work/build/slots/ni.N) or RLVM_NO_SLOT is set. A direct `scripts/build.sh` call is the caller's to wrap.
 slot=()
 ni_slot() {
@@ -125,6 +139,10 @@ ni_slot() {
     slot=("$ROOT/bench/slot.sh" -c ni -n 2 --)
   fi
 }
+
+# The default training inputs of `profiles` (paths below the repository root; the exports are not part
+# of the repository: bench/README.md says how to fetch the arena's corpora).
+PROFILE_TRAINING="work/exports/init.ndjson"
 
 # run / suite / measure default to the native image; when the distribution has only the JVM
 # launcher (scripts/dev.sh dist) and the caller named no launcher, use that one.
@@ -163,11 +181,33 @@ case "$cmd" in
     ;;
   dist-native)
     ni_slot
-    exec "${slot[@]}" "$ROOT/scripts/build.sh" --published --no-pgo "$@"
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" --published --dev "$@"
     ;;
   dist-tree)
     ni_slot
-    exec "${slot[@]}" "$ROOT/scripts/build.sh" "$@"
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" --dev "$@"
+    ;;
+  release)
+    ni_slot
+    exec "${slot[@]}" "$ROOT/scripts/package.sh" --out "$ROOT/work/release" --build "$@"
+    ;;
+  release-oracle)
+    ni_slot
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" --oracle-pgo --dist "$ROOT/work/dist-oracle-pgo" "$@"
+    ;;
+  profiles)
+    # The training inputs: every --train FILE of the command line, else the default set.
+    has_train=0
+    for a in "$@"; do [ "$a" != --train ] || has_train=1; done
+    train=()
+    if [ "$has_train" = 0 ]; then
+      for f in $PROFILE_TRAINING; do
+        [ -f "$ROOT/$f" ] || die "profiles: the training input $f is missing (give --train FILE...)"
+        train+=(--train "$ROOT/$f")
+      done
+    fi
+    ni_slot
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" --oracle-pgo --train-profiles --dist "$ROOT/work/dist-oracle-pgo" "${train[@]}" "$@"
     ;;
   dist-versions)
     cur="$(readlink "$ROOT/work/dist" 2>/dev/null || true)"
@@ -191,7 +231,7 @@ case "$cmd" in
     ;;
   diff-launcher)
     [ "$#" -ge 1 ] || die "diff-launcher needs an export"
-    [ -x "$ROOT/work/dist/bin/rlvm-jvm" ] || die "work/dist/bin/rlvm-jvm not built (scripts/dev.sh dist)"
+    [ -x "$ROOT/work/dist/bin/rlvm-jvm" ] || die "work/dist/bin/rlvm-jvm not built (a development distribution: scripts/dev.sh dist)"
     jar="$(ls "$ROOT"/.toolchain/m2/rlvm/rlvm-testkit/*/rlvm-testkit-*.jar 2>/dev/null | head -n 1)"
     [ -n "$jar" ] || die "rlvm-testkit is not published in .toolchain/m2"
     # The caller's own RLVM_EXTRA_CP (e.g. an engine that is not in the distribution yet:
@@ -232,12 +272,12 @@ case "$cmd" in
     echo "root:    $ROOT"
     echo "java:    $("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 2p)"
     echo "maven:   $($MVN -v 2>/dev/null | head -n 1)"
-    # Oracle GraalVM is never run by a default command (OWNER-NOTES item 11): its version is read
-    # from the release file. Only `scripts/build.sh --pgo` uses it, for labelled measurements.
+    # Oracle GraalVM is never run by a default command (OWNER-NOTES 11 and 16): its version is read
+    # from the release file. Only the optional build `scripts/build.sh --oracle-pgo` uses it.
     if [ -r "$ROOT/.toolchain/oracle-graalvm-25/release" ]; then
-      echo "oracle:  present, not used by any default build ($(sed -n 's/^GRAALVM_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/Oracle GraalVM \1/p' "$ROOT/.toolchain/oracle-graalvm-25/release"); scripts/build.sh --pgo only: measurements)"
+      echo "oracle:  present, not used by any default build ($(sed -n 's/^GRAALVM_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/Oracle GraalVM \1/p' "$ROOT/.toolchain/oracle-graalvm-25/release"), GFTC licence; only scripts/build.sh --oracle-pgo)"
     else
-      echo "oracle:  not installed (scripts/build.sh --pgo is unavailable; nothing else needs it)"
+      echo "oracle:  not installed (only scripts/build.sh --oracle-pgo needs it; it downloads it with --accept-oracle-licence)"
     fi
     echo "modules: $(modules | paste -sd' ' -)"
     if [ -f "$ROOT/work/dist/BUILD-INFO.txt" ]; then

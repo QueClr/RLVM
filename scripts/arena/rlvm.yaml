@@ -61,20 +61,19 @@
 # - The Truffle tier (rlvm-truffle) is compiled into the binary and OFF (switch t2 of the machine): its
 #   owner's verdict is NO-GO as a default (rlvm-truffle/NOTES-T3.md, section 1).
 #
-# WHICH LAUNCHER, AND WHY (docs/PLATFORM.md, "The platform decision under owner note 12"): the build
-# makes two launchers from the same jars. The arena starts one fresh process per export, and for that
-# the CE native image `work/dist/bin/rlvm` (-O3, serial collector) is the platform: it is steady from
-# its first second, starts in 0.02 s where a JVM needs 0.2 s (most arena tests are that small) and holds a
-# third of the memory. Cold wall clock with 8 workers on the same cores, Init / Std / cedar: 2.30 / 3.89 /
-# 5.00 s with the reference engine (the JVM launcher's first run: 2.33 / 3.66 / 4.31 s - on a corpus the
-# reference engine runs long enough for the JIT to pay within the run) and 0.85 / 1.57 / 2.23 s with the
-# machine (JVM launcher: 2.84 / 4.04 / 4.45 s). The JVM launcher `work/dist/bin/rlvm-jvm` is the WARM platform - the
-# owner's target since OWNER-NOTES 12 is the wall clock of checking in steady state, and once warm
-# HotSpot needs 0.68 to 0.88 times the image's wall clock on Init, Std, cedar, reachability and mathlib
-# (docs/research/profiles/J1.md) - but it needs two or three passes to get there, which a single arena
-# run never makes. To try it, replace `bin/rlvm` by `bin/rlvm-jvm` in the run line: nothing else changes.
+# ONE EXECUTABLE (owner note 16; the journal: design-packaging): the build makes exactly one file,
+# `work/dist/bin/rlvm`, a GraalVM CE native image (-O3, serial collector) that needs no JDK and no jars,
+# and the run line executes it. It is the same executable a release archive holds, and a run without
+# options is its fastest configuration (`rlvm --version` says which engine, worker rule, load rule and
+# heap settings that is). The arena starts one fresh process per export, which is what an executable is
+# for: it starts in 0.02 s and is at its steady speed from the first second (a cold run of the image is
+# within 4 % of a warm pass). The JVM launcher that this repository also knows (`scripts/build.sh --dev`:
+# the jars on HotSpot, 0.74 to 0.81 times the image's wall clock once warm, 2 to 3.5 times slower on the
+# first run of Init, Std or cedar) is a development tool for the warm benchmarks and the gates; it is not
+# built by the arena's build line and not part of a release.
 # The build uses GraalVM CE only; Oracle GraalVM is never downloaded or used by a default build
-# (docs/design/OWNER-NOTES.md, item 11).
+# (docs/design/OWNER-NOTES.md, items 11 and 16: a profile-guided build with Oracle GraalVM exists as an
+# explicit option of scripts/build.sh and is not what this definition builds).
 #
 # WHAT THE BUILD LINE BUILDS: scripts/arena/build.sh = scripts/build.sh from the tree, online Maven with
 # the third-party jars pinned by sha256 (scripts/arena/deps.sha256). The image's class path is the 22

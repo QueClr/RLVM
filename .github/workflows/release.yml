@@ -1,0 +1,122 @@
+# The release: ONE executable per architecture, attached to a DRAFT release.
+#
+# Started by hand only (workflow_dispatch). For linux x86-64 and linux aarch64 it
+#   1. fetches the pinned toolchain - GraalVM COMMUNITY Edition and Maven, checksum-verified by
+#      scripts/fetch-toolchain.sh; Oracle GraalVM is never downloaded or used here (the optional
+#      profile-guided build, scripts/build.sh --oracle-pgo, is a local option and not a release);
+#   2. builds the executable with the arena definition's own build line, scripts/arena/build.sh
+#      (all modules from the checkout, Maven online with the third-party jars compared against
+#      scripts/arena/deps.sha256, the CE native image at -O3, verification of the image: exit-status
+#      protocol and Truffle runtime compilation);
+#   3. packs rlvm-<version>-linux-<arch>.tar.gz with exactly three files - rlvm, LICENSE, README.md -
+#      after running the executable from an empty directory with an empty environment
+#      (scripts/package.sh);
+# and then creates a DRAFT release with the archives and their .sha256 files. Nothing is published
+# until a maintainer reviews the draft and publishes it.
+#
+# STATUS: written on 2026-11-25 WITHOUT access to a hosted runner: this workflow has never run.
+# The steps are the commands that were run locally on linux-aarch64 (scripts/arena/build.sh in the
+# arena-shaped container from a clean copy of the sources; scripts/package.sh on its result). Not
+# verified: anything on x86-64 (the pinned x86-64 GraalVM tarball has the sha256 of the official
+# release page but was never unpacked or run by us), the runner label of the aarch64 job, and the
+# `gh release create` step.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag of the draft release, e.g. v0.1.0 (created at the commit this workflow runs on when the draft is published)'
+        type: string
+        required: true
+      aarch64:
+        description: 'also build linux aarch64 (hosted runner ubuntu-24.04-arm)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: executable and archive (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # x86-64 always; aarch64 when the input says so (no job is started for it otherwise).
+        include: ${{ fromJSON(inputs.aarch64 && '[{"arch":"x86_64","runner":"ubuntu-24.04"},{"arch":"aarch64","runner":"ubuntu-24.04-arm"}]' || '[{"arch":"x86_64","runner":"ubuntu-24.04"}]') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # .toolchain/ is where scripts/fetch-toolchain.sh puts GraalVM CE and Maven and where env.sh
+      # expects them. The key is the script's hash: a new pin is a new cache.
+      - name: Cache the pinned toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            .toolchain/graalvm-ce-25
+            .toolchain/apache-maven-3.9.16
+          key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-toolchain.sh') }}
+
+      # The `build:` line of scripts/arena/rlvm.yaml. Result: work/dist/bin/rlvm and
+      # work/dist/BUILD-INFO.txt, nothing else (the release layout).
+      - name: Build the executable (GraalVM Community Edition)
+        run: scripts/arena/build.sh
+
+      - name: The executable
+        run: |
+          work/dist/bin/rlvm --version
+          cat work/dist/BUILD-INFO.txt
+          ldd work/dist/bin/rlvm
+
+      # rlvm-<version>-linux-<arch>.tar.gz and its .sha256 in work/release/.
+      - name: Package
+        run: |
+          scripts/package.sh --dist work/dist --out work/release
+          ls -l work/release
+
+      - name: Keep the archive for the release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: rlvm-linux-${{ matrix.arch }}
+          path: |
+            work/release/rlvm-*.tar.gz
+            work/release/rlvm-*.tar.gz.sha256
+          if-no-files-found: error
+
+  draft:
+    name: draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: archives
+          merge-multiple: true
+
+      - name: Check the archives
+        run: |
+          cd archives
+          ls -l
+          sha256sum -c ./*.sha256
+          for a in ./*.tar.gz; do echo "$a:"; tar -tzf "$a"; done
+
+      # A draft: nothing is public and no tag exists until a maintainer publishes it.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" archives/*.tar.gz archives/*.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft \
+            --title "RLVM $TAG" \
+            --notes "One executable per architecture: unpack the archive and run \`rlvm EXPORT.ndjson\` (\`rlvm --version\` says how it was built and what a run without options does). Built with GraalVM Community Edition from commit $GITHUB_SHA by the release workflow; each archive holds exactly rlvm, LICENSE and README.md. Check an archive with its .sha256 file."

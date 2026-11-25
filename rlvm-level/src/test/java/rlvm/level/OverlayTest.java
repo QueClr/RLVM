@@ -463,4 +463,148 @@ class OverlayTest {
         }
         assertNotEquals(0, overlays.length);
     }
+
+    /**
+     * Finding LV1-F1. A substitution is the interned pair (parameter names list id, level list id) in the store of
+     * the level lists and name lists, so the pair of a session can be FOUND as a base list of two ints (an alias)
+     * while its level list is a list of the overlay. Such an id means another substitution after {@code reset()}:
+     * nothing computed with it may be remembered across the reset.
+     */
+    @Test
+    void aliasSubstitutionIsForgottenAtReset() {
+        Lv.Names n = names();
+        LevelStore base = new LevelStore(n);
+        int u = base.param(n.id("u"));
+        int su = base.succ(u);
+        int three = base.ofNat(3);
+        int four = base.ofNat(4);
+        int namesU = base.internList(new int[] {n.id("u")}, 0, 1);
+        int listSu = base.internList(new int[] {su}, 0, 1);
+        int listFour = base.internList(new int[] {four}, 0, 1); // the first result: a base list, as the forever stamp wants
+        // the id the first list of an overlay gets, once the alias below is in the base
+        int first = base.listCount() + 1;
+        while (base.size() <= first) {
+            base.succ(base.size() - 1);
+        }
+        assertTrue(namesU < base.size(), "the alias must be a well-formed level list");
+        // a LEVEL list of two levels whose ids are, as ints, (the names list, the first overlay list)
+        int alias = base.internList(new int[] {namesU, first}, 0, 2);
+        assertEquals(first, base.listCount());
+        base.freeze();
+        LevelStore ov = base.newOverlay();
+
+        // session 1: u := 3, with [3] a list of the overlay
+        int x1 = ov.internList(new int[] {three}, 0, 1);
+        assertEquals(first, x1);
+        int s1 = ov.mkSubst(namesU, x1);
+        assertEquals(alias, s1, "the pair is found as the base list");
+        assertEquals(listFour, ov.instantiateList(listSu, s1));
+        assertEquals(four, ov.instantiate(su, s1));
+        ov.reset();
+
+        // session 2: u := 5, and [5] gets the id [3] had
+        int five = ov.succ(four);
+        int x2 = ov.internList(new int[] {five}, 0, 1);
+        assertEquals(x1, x2);
+        int s2 = ov.mkSubst(namesU, x2);
+        assertEquals(alias, s2);
+        int six = ov.succ(five);
+        assertEquals(six, ov.instantiate(su, s2), "instantiate(u+1, u := 5)");
+        int r2 = ov.instantiateList(listSu, s2);
+        assertEquals(1, ov.listLength(r2));
+        assertEquals(six, ov.listGet(r2, 0), "instantiateList([u+1], u := 5)");
+        ov.reset();
+
+        // session 3: the first substitution again
+        int x3 = ov.internList(new int[] {three}, 0, 1);
+        int s3 = ov.mkSubst(namesU, x3);
+        assertEquals(four, ov.instantiate(su, s3));
+        assertEquals(listFour, ov.instantiateList(listSu, s3));
+    }
+
+    /**
+     * {@code reset()} is a fresh overlay: the same operations give the same ids on an overlay that was used and reset
+     * many times as on a new one. The base is full of two-element lists whose ints are (a names list, one of the
+     * first overlay list ids), so that the substitutions of a session are often found as base lists (LV1-F1).
+     */
+    @Test
+    void resetIsAFreshOverlayAlsoForAliasedSubstitutions() {
+        Lv.Names n = names();
+        List<RefLevel> made = new ArrayList<>();
+        LevelStore base = randomBase(n, 77, 120, made);
+        String[] ps = {"u", "v", "w", "x"};
+        int[] nameLists = new int[6];
+        nameLists[0] = base.internList(new int[] {n.id("u")}, 0, 1);
+        nameLists[1] = base.internList(new int[] {n.id("v")}, 0, 1);
+        nameLists[2] = base.internList(new int[] {n.id("u"), n.id("v")}, 0, 2);
+        nameLists[3] = base.internList(new int[] {n.id("v"), n.id("u")}, 0, 2);
+        nameLists[4] = base.internList(new int[] {n.id("w"), n.id("u"), n.id("x")}, 0, 3);
+        nameLists[5] = base.internList(new int[] {n.id("u"), n.id("u")}, 0, 2); // a duplicate name: the first one counts
+        Random rnd = new Random(78);
+        int[] baseLists = new int[40];
+        for (int i = 0; i < baseLists.length; i++) {
+            int len = 1 + rnd.nextInt(3);
+            int[] buf = new int[len];
+            for (int j = 0; j < len; j++) {
+                buf[j] = 1 + rnd.nextInt(base.size() - 1);
+            }
+            baseLists[i] = base.internList(buf, 0, len);
+        }
+        // the aliases: [names list, id] for the ids the first 12 lists of an overlay get
+        int span = 12;
+        int first = base.listCount() + nameLists.length * span;
+        while (base.size() <= first + span) {
+            base.succ(base.size() - 1);
+        }
+        for (int nl : nameLists) {
+            for (int j = 0; j < span; j++) {
+                base.internList(new int[] {nl, first + j}, 0, 2);
+            }
+        }
+        assertEquals(first, base.listCount(), "the aliases name the first overlay ids");
+        base.freeze();
+        LevelStore used = base.newOverlay();
+        int aliased = 0;
+        for (int session = 0; session < 300; session++) {
+            LevelStore fresh = base.newOverlay();
+            long seed = 1000 + session;
+            Random a = new Random(seed);
+            Random b = new Random(seed);
+            for (int step = 0; step < 40; step++) {
+                int[] x = sessionStep(used, a, n, ps, nameLists, baseLists);
+                int[] y = sessionStep(fresh, b, n, ps, nameLists, baseLists);
+                assertEquals(java.util.Arrays.toString(y), java.util.Arrays.toString(x), "session " + session + ", step " + step);
+                if (x[0] > 0 && x[0] < used.baseListCount()) {
+                    aliased++;
+                }
+            }
+            used.reset();
+        }
+        assertTrue(aliased > 100, "the test must exercise aliased substitutions: " + aliased);
+    }
+
+    /** One random step of a session: a new level list, a substitution over it or over a base list, instantiations. Returns the ids. */
+    private static int[] sessionStep(LevelStore s, Random rnd, Lv.Names n, String[] ps, int[] nameLists, int[] baseLists) {
+        int names = nameLists[rnd.nextInt(nameLists.length)];
+        int k = s.listLength(names);
+        int[] buf = new int[k];
+        for (int j = 0; j < k; j++) {
+            // closed levels, parameters and successors: often not in the base
+            int l = rnd.nextInt(3) == 0 ? s.param(n.id(ps[rnd.nextInt(ps.length)])) : s.ofNat(rnd.nextInt(9));
+            buf[j] = rnd.nextBoolean() ? l : s.succ(l);
+        }
+        int levels = rnd.nextInt(4) == 0 ? baseLists[rnd.nextInt(baseLists.length)] : s.internList(buf, 0, k);
+        int subst = s.mkSubst(names, levels);
+        if (subst < 0) {
+            return new int[] {subst, levels};
+        }
+        int l1 = 1 + rnd.nextInt(s.baseSize() - 1);
+        int l2 = 1 + rnd.nextInt(s.baseSize() - 1);
+        int li = baseLists[rnd.nextInt(baseLists.length)];
+        int r1 = s.instantiate(l1, subst);
+        int r2 = s.instantiate(l2, subst);
+        int r3 = s.instantiateList(li, subst);
+        int r4 = s.instantiateList(levels, subst);
+        return new int[] {subst, levels, r1, r2, r3, r4, s.size(), s.listCount()};
+    }
 }
