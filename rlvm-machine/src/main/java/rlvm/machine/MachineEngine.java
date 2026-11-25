@@ -107,6 +107,18 @@ public final class MachineEngine implements Engine {
      */
     static final long DEFAULT_EAGER_PROBE = 1L << 23;
 
+    /**
+     * Switch {@code congruence}: the cap on the ticks its segments (the same-head probe B1, closure congruence B12)
+     * may use in ONE declaration ({@code Conv.Ext.spend}, {@code Machine.congSpendMax}; {@code -X machine.cong-spend},
+     * 0 = no cap). A probe that answers T can cost more than the unfolding it replaces (P9 section 4.7): con-leche's
+     * {@code ConLeche.Cached.reduceNatI._mutual.eq_def} needs 3.84 M ticks without the switch, 7.21 M with it and
+     * 4.17 M with the cap (the heaviest unit of that corpus: its warm pass was 8.5 % slower with the two shortcuts).
+     * What the cap costs elsewhere, in ticks of a whole corpus with the two shortcuts (INT7, 2026-11-25):
+     * navier-stokes-euler 144.4 M -> 149.5 M (without the shortcuts: 548.2 M), cslib 217.6 M -> 217.6 M (350.2 M),
+     * con-leche 80.1 M -> 76.7 M (84.4 M).
+     */
+    static final long DEFAULT_CONG_SPEND = 1L << 18;
+
     /** The machine's own settings (system properties {@code rlvm.machine.*}, overridden by {@code -X machine.*}). */
     static final class Settings {
         int switches = Op.SW_DEFAULT;
@@ -117,6 +129,7 @@ public final class MachineEngine implements Engine {
         long sessionCapBytes = DEFAULT_SESSION_CAP;
         long unitTicks = DEFAULT_UNIT_TICKS;
         long eagerProbe = DEFAULT_EAGER_PROBE;
+        long congSpend = DEFAULT_CONG_SPEND;
         /** File that receives one line per non-ACCEPT outcome of the machine, or null. */
         String declines;
 
@@ -127,6 +140,7 @@ public final class MachineEngine implements Engine {
             s.sessionCapBytes = Math.max(0, Long.getLong("rlvm.machine.session-kib", DEFAULT_SESSION_CAP >> 10)) << 10;
             s.unitTicks = Math.max(0, Long.getLong("rlvm.machine.unit-ticks", DEFAULT_UNIT_TICKS));
             s.eagerProbe = Math.max(0, Long.getLong("rlvm.machine.eager-probe", DEFAULT_EAGER_PROBE));
+            s.congSpend = Math.max(0, Long.getLong("rlvm.machine.cong-spend", DEFAULT_CONG_SPEND));
             String d = System.getProperty("rlvm.machine.declines", "");
             s.declines = d.isEmpty() ? null : d;
             s.debug = Debug.parseModes(System.getProperty("rlvm.machine.debug", ""));
@@ -145,6 +159,8 @@ public final class MachineEngine implements Engine {
     final long unitTicks;
     /** [eager] The tick budget of one probe of an aware run ({@code -X machine.eager-probe}; 0 = none): {@code Machine.erProbeBudget}. */
     final long eagerProbe;
+    /** Switch {@code congruence}: the ticks its segments may use per declaration ({@code -X machine.cong-spend}; 0 = no cap). */
+    final long congSpend;
     private long statUnitBoundDeclines;
     /** Path of the decline log ({@code -X machine.declines}), or null. */
     final String declinesPath;
@@ -186,6 +202,7 @@ public final class MachineEngine implements Engine {
         this.sessionCapBytes = settings.sessionCapBytes;
         this.unitTicks = settings.unitTicks;
         this.eagerProbe = settings.eagerProbe;
+        this.congSpend = settings.congSpend;
         this.declinesPath = settings.declines;
     }
 

@@ -51,7 +51,8 @@ final class Frames {
             return trySignalSlow(m, saved, budget, ssp, xp, ep, rp, er, r);
         }
         long given = Math.min(budget, saved);
-        m.fuel = saved - (given - m.fuel);
+        m.tryUsed = given - m.fuel;
+        m.fuel = saved - m.tryUsed;
         m.tickBase += saved - given;
         return (saved >>> 12) != (m.fuel >>> 12) ? tryPollSlow(m, r) : r;
     }
@@ -68,13 +69,15 @@ final class Frames {
         m.rp = rp;
         m.ER = er;
         if (m.err == MachineErrors.E_STEPS) {
+            m.tryUsed = given;
             m.fuel = saved - given;
             m.tickBase += saved - given;
             if (saved < budget) {
                 return ABORT; // capped by the enclosing budget, which is now empty too
             }
         } else {
-            m.fuel = saved - (given - m.fuel);
+            m.tryUsed = given - m.fuel;
+            m.fuel = saved - m.tryUsed;
             m.tickBase += saved - given;
         }
         m.err = 0;

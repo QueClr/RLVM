@@ -24,8 +24,9 @@ import rlvm.cli.LauncherAccess;
  * reported - the file is checked again under {@code policy=strict} and that verdict is the run's.
  * Through the real launcher.
  *
- * <p>Fixtures ({@code src/test/resources/net}, from {@code work/r2/gen/batch4.py}; the verdicts are
- * those of leanchecker v4.36.0):
+ * <p>Fixtures ({@code src/test/resources/net}: hand-made exports of finding R2-F4, described in
+ * {@code docs/design/review/reference-caches.md}, section 6.1; the verdicts are those of leanchecker
+ * v4.36.0):
  * <ul>
  * <li>{@code r2-mdata-beta-arg-hidden-ok}: official ACCEPT. A metadata node around a lambda in
  * argument position; after the kernel instantiated a codomain the node is on the head path of a beta

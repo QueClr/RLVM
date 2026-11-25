@@ -126,6 +126,7 @@ public final class MachineSession implements Session {
         m.attach(ctx, engine);
         m.sw = engine.switches;
         m.erProbeBudget = engine.eagerProbe;
+        m.congSpendMax = engine.congSpend;
         m.debug = engine.debug;
         m.hostDepth = engine.hostDepth;
         m.stats = engine.config.stats;

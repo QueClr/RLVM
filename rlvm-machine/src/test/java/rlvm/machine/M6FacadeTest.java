@@ -871,6 +871,59 @@ class M6FacadeTest {
     }
 
     /**
+     * Switch {@code congruence}: the cap on the ticks its segments use in one declaration
+     * ({@code -X machine.cong-spend}, {@code Machine.congSpendMax}, {@code Conv.Ext.spend}; INT7, 2026-11-25: a
+     * same-head probe or a closure congruence that answers T can cost more than the unfolding it replaces - P9
+     * section 4.7, con-leche). {@code Frames.k_try} reports what a segment used; at the cap {@code Conv.congruence}
+     * starts no further segment; the next declaration starts at zero.
+     */
+    @Test
+    void theCongruenceSegmentsOfADeclarationHaveATickCap() {
+        Fixture f = Fixture.prelude0();
+        java.util.Map<String, String> options = new java.util.HashMap<>();
+        options.put("machine.switches", "congruence");
+        options.put("machine.cong-spend", "100");
+        MachineEngine e = (MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults());
+        assertEquals(100, e.congSpend);
+        assertEquals(Op.SW_CONGRUENCE | Op.SW_PROBES, e.switches);
+        MachineSession s = (MachineSession) e.newSession(f.ctx);
+        Machine m = s.m;
+        assertEquals(100, m.congSpendMax);
+        m.beginDecl(1, 0, 1_000_000, BIG);
+        m.x4.beginDecl(m);
+        assertTrue(Conv.congruence(m), "below the cap: segments are started");
+        // a segment that completes after 7 ticks, and one that is cut at its budget of 50
+        int ssp = m.ssp;
+        int xp = m.xp;
+        int ep = m.ep;
+        int rp = m.rp;
+        int er = m.ER;
+        long saved = m.tryEnter(50);
+        m.fuel -= 7;
+        assertEquals(Layout.T, Frames.k_try(m, saved, 50, ssp, xp, ep, rp, er, Layout.T));
+        assertEquals(7, m.tryUsed);
+        m.x4.spend += m.tryUsed;
+        assertTrue(Conv.congruence(m));
+        saved = m.tryEnter(50);
+        m.fuel = -1;
+        m.err = MachineErrors.E_STEPS;
+        assertEquals(Layout.U, Frames.k_try(m, saved, 50, ssp, xp, ep, rp, er, Op.ABORT));
+        assertEquals(50, m.tryUsed, "a segment that is cut used its whole budget");
+        m.x4.spend += m.tryUsed;
+        assertTrue(Conv.congruence(m), "57 of 100 ticks");
+        m.x4.spend += 43;
+        assertFalse(Conv.congruence(m), "at the cap: no further congruence segment in this declaration");
+        m.x4.beginDecl(m);
+        assertTrue(Conv.congruence(m), "the next declaration starts at zero");
+        // no cap: 0; the default is a cap
+        m.x4.spend = Long.MAX_VALUE >> 1;
+        m.congSpendMax = 0;
+        assertTrue(Conv.congruence(m));
+        assertTrue(MachineEngine.DEFAULT_CONG_SPEND >= 1L << 16 && MachineEngine.DEFAULT_CONG_SPEND <= 1L << 22, "the default cap");
+        m.abandon();
+    }
+
+    /**
      * The machine's own tick bound per unit ({@code -X machine.unit-ticks}; NOTES-M6 F31): a warm unit has no
      * step limit of the driver's, so a declaration that never ends (the official checker does not terminate on
      * either/corner-cases/eta-struct-major-no-whnf) is declined at the bound (BUDGET_STEPS; the reference engine

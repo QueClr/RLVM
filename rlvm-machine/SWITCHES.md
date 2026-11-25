@@ -43,7 +43,8 @@ Related settings (not switches): `-X machine.session-kib=N` (the machine's own c
 section "Sessions"), `-X machine.unit-ticks=N` (the machine's own tick bound per unit, default 2^27,
 NOTES-M6 F31), `-X machine.hostDepth=N` (host depth bound, default `Op.HOST_DEPTH` = 128),
 `-X machine.eager-probe=N` (with `eager`: the tick budget of one probe of the plain phase, default 2^23, 0 = none;
-finding INT7-F1 below the table of named switches), `-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine), `-X machine.debug=...` (audits,
+finding INT7-F1 below the table of named switches), `-X machine.cong-spend=N` (with `congruence`: the ticks its
+segments may use in one declaration, default 2^18, 0 = no cap; below the table), `-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine), `-X machine.debug=...` (audits,
 README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.machine.keep=R,W,S` and
 `-Drlvm.machine.pool=off` (kept and pooled session arrays, NOTES-M6 F25).
 
@@ -163,6 +164,18 @@ Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-e
 mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^20 declines it and two more units). Regression tests:
 `M6FacadeTest.aProbeThatIsCutDeclinesTheUnitIfItEntersEagerReduction`,
 `SHostileEagerTest.aBudgetOfOneTickForTheProbesNeverChangesAVerdict`.
+
+**`congruence`: a cap on what its segments use in one declaration (INT7, 2026-11-25).** The probe debt (NOTES-M4
+D25) bounds what FAILING probes cost; a same-head probe (B1) or a closure congruence (B12) that answers T can still
+cost more than the unfolding it replaces, when the arguments are large closures that are walked slot by slot (P9
+section 4.7). con-leche's `ConLeche.Cached.reduceNatI._mutual.eq_def`, the heaviest unit of that corpus, needs
+3.84 M ticks without the switch and 7.21 M with it, and the corpus's warm pass was 4.3 % slower with `congruence` and
+8.5 % with both shortcuts. `Frames.k_try` now reports what a segment used (`Machine.tryUsed`), `Conv.Ext.spend` sums
+it over the congruence segments of the declaration (a segment inside a segment counts twice), and at
+`-X machine.cong-spend` (default 2^18 ticks, 0 = no cap) `Conv.congruence` starts no further segment in that
+declaration: the unit needs 4.17 M ticks. What the cap costs where the switch wins, in ticks of the whole corpus with
+both shortcuts: navier-stokes-euler 144.4 M -> 149.5 M (548.2 M without the shortcuts), cslib 217.6 M -> 217.6 M
+(350.2 M), con-leche 80.1 M -> 76.7 M (84.4 M). Test: `M6FacadeTest.theCongruenceSegmentsOfADeclarationHaveATickCap`.
 
 The experiment bits that are still free or undecided: `m1a`, `m1b` (unused in published code), `m2b`
 (above), `m3b`, `m4b`, `m7b` (free). `Op.SW_EXPERIMENTS` names exactly these six; the six that entered the

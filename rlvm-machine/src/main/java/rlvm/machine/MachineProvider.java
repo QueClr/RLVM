@@ -21,6 +21,9 @@ import rlvm.api.EngineProvider;
  * machine.unit-ticks=N             the machine's own tick bound per unit (default MachineEngine.DEFAULT_UNIT_TICKS;
  *                                  0 = none): beyond it the unit is declined (BUDGET_STEPS) and the reference
  *                                  engine decides it
+ * machine.cong-spend=N             with the switch congruence: the ticks its segments (B1, B12) may use in one
+ *                                  declaration (default MachineEngine.DEFAULT_CONG_SPEND; 0 = no cap): beyond it no
+ *                                  further congruence segment is started in the declaration (Conv.Ext.spend)
  * machine.eager-probe=N            with the switch eager: the tick budget of one probe of the plain phase (the test
  *                                  X = Bool.true on an open X, which only eager reduction evaluates; default
  *                                  MachineEngine.DEFAULT_EAGER_PROBE; 0 = none): a probe cut at it leaves the point
@@ -56,6 +59,7 @@ public final class MachineProvider implements EngineProvider {
     static final String K_DECLINES = "machine.declines";
     static final String K_UNIT_TICKS = "machine.unit-ticks";
     static final String K_EAGER_PROBE = "machine.eager-probe";
+    static final String K_CONG_SPEND = "machine.cong-spend";
     /**
      * The launcher's {@code -X levels=official|complete}, shared with the reference engine's provider (the keys
      * of all providers are a union): {@code complete} turns {@code Op.SW_LEVELS_COMPLETE} on, {@code official}
@@ -64,7 +68,7 @@ public final class MachineProvider implements EngineProvider {
      */
     static final String K_LEVELS = "levels";
     private static final Set<String> KEYS = Set.of(K_SWITCHES, K_DEBUG, K_HOST_DEPTH, K_MEMO_EVERY, K_MEMO_BUDGET,
-            K_SESSION_KIB, K_DECLINES, K_LEVELS, K_UNIT_TICKS, K_EAGER_PROBE);
+            K_SESSION_KIB, K_DECLINES, K_LEVELS, K_UNIT_TICKS, K_EAGER_PROBE, K_CONG_SPEND);
 
     public MachineProvider() {}
 
@@ -139,6 +143,10 @@ public final class MachineProvider implements EngineProvider {
         v = options.get(K_UNIT_TICKS);
         if (v != null) {
             s.unitTicks = number(K_UNIT_TICKS, v, 0, Long.MAX_VALUE);
+        }
+        v = options.get(K_CONG_SPEND);
+        if (v != null) {
+            s.congSpend = number(K_CONG_SPEND, v, 0, Long.MAX_VALUE);
         }
         v = options.get(K_EAGER_PROBE);
         if (v != null) {

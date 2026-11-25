@@ -406,6 +406,13 @@ public final class Machine {
      * time: the same on every host.
      */
     long erProbeBudget;
+    /** The ticks the speculative segment that ended last used ({@code Frames.k_try}); read at once by its continuation. */
+    long tryUsed;
+    /**
+     * Step 5 with {@code congruence}: the ticks the congruence segments (B1, B12) of ONE declaration may use in all,
+     * 0 = no cap ({@code MachineEngine.congSpend}, {@code -X machine.cong-spend}; {@code Conv.Ext.spend}).
+     */
+    long congSpendMax;
     /** [eager] A probe of this declaration was cut at its budget (see {@link #erProbeBudget}). */
     boolean erCut;
     /** [eager] Statistics: probes cut at the budget; the most ticks a probe that completed used (outermost probes only). */

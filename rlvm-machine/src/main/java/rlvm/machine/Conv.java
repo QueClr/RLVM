@@ -68,6 +68,15 @@ final class Conv {
          */
         long debt;
         static final long DEBT_MAX = 1L << 17;
+        /**
+         * Switch {@code congruence}: the ticks the congruence segments (B1: same-head probe; B12: closure congruence)
+         * of this declaration have used, whatever their outcome (a segment inside a segment counts twice). The
+         * probe debt bounds only what FAILING probes cost; a probe that answers T can still cost more than the
+         * unfolding it replaces - walking two large closures slot by slot (P9 section 4.7: con-leche's
+         * {@code reduceNatI._mutual.eq_def}, 3.8 M ticks without the switch, 7.2 M with it). At
+         * {@code Machine.congSpendMax} no further congruence segment is started in the declaration.
+         */
+        long spend;
         /** {@link Same}: the fuel left of the running query; the nodes all queries of this machine visited (statistics). */
         int sameFuel;
         long sameNodes;
@@ -125,12 +134,14 @@ final class Conv {
         /** Session reset (ISA 1.6): forget everything, in O(used). */
         void reset(Machine m) {
             debt = 0;
+            spend = 0;
             sameWaste = 0;
         }
 
         /** Start of a declaration. */
         void beginDecl(Machine m) {
             debt = 0;
+            spend = 0;
             sameWaste = 0;
         }
 
@@ -1151,7 +1162,7 @@ final class Conv {
      * always a T of the official procedure; kind T, OWNER-NOTES 13).
      */
     static boolean congruence(Machine m) {
-        return probing(m) && congruenceOn(m);
+        return probing(m) && congruenceOn(m) && (m.congSpendMax == 0 || m.x4.spend < m.congSpendMax);
     }
 
     /** True if the switch {@code congruence} ({@code Op.SW_CONGRUENCE}) or the old option of that name is on. */
@@ -1294,6 +1305,7 @@ final class Conv {
         if (m.stats) {
             m.probe(Op.B12, r);
         }
+        m.x4.spend += m.tryUsed;
         settle(m, r, Op.B_CCLO);
         if (r != T) {
             return convForce(m, t, s, d);
@@ -1448,6 +1460,7 @@ final class Conv {
         if (m.stats) {
             m.probe(Op.B1, r);
         }
+        m.x4.spend += m.tryUsed;
         settle(m, r, b1Class(m, a));
         if (r == T) {
             if ((m.debug & Op.DBG_SHORTCHECK) != 0 && Debug.shortCheck(m, a, b, T) != 0) {

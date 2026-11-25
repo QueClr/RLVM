@@ -1,6 +1,6 @@
 # The caches of the reference engine against the official kernel's (R2)
 
-2026-11-24, 21:28Z - 2026-11-25, 02:5xZ. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
+2026-11-24, 21:28Z - 2026-11-25, 02:30Z. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
 21:21Z), a wrong ACCEPT of the reference engine, the oracle of every gate. Official source read:
 `refs/lean4/src/kernel/` at v4.36.0 (`type_checker.cpp/.h`, `expr_eq_fn.cpp`, `expr_maps.h`, `replace_fn.cpp`,
 `instantiate.cpp`, `inductive.h/.cpp`, `environment.cpp`, `local_ctx.cpp`, `level.cpp`), the reader
@@ -293,7 +293,7 @@ wrapped kind cannot tell those two files from agreeing mutants (`bugs/open-term-
 wraps a lambda argument, `.s1.0006` a bound variable in function position): what makes the files hostile is the
 cache history, which a loader does not see. No rule was published; the loader stays 58b0056c0417.
 
-**The safety net** (`rlvm-main` @@MAINJAR@@, `RlvmChecker.strictRecheck`; decision of the orchestrator, 01:38Z). In
+**The safety net** (`rlvm-main` 3729609561e3, `RlvmChecker.strictRecheck`; decision of the orchestrator, 01:38Z). In
 the practical mode a REJECT on a file in which the loader dropped at least one metadata node
 (`LoadReport.exprMData` > 0 when the run ends) is not reported: the file is checked once more as a plain run
 under `-X policy=strict` (fresh stores, the reference engine, `ref.exact=official`, the loader's metadata decline;
@@ -319,7 +319,14 @@ The three counts (published jars, reference engine, one JVM per set: `work/r2/ne
 - **(b) Caught by the net alone?** Yes, all of them: `r2-mdata-beta-hidden-ok`, `-hidden-def-ok`,
   `-arg-hidden-ok`, `-bvar-hidden-ok` (practical reject, strict decline), and `s3-mdata-eager-hidden-ok` with the
   loader before the rule of this section (b23a88e4c30b: practical reject, strict decline; `judge-cand3-*`).
-- **(c) Cost.** @@COST@@
+- **(c) Cost.** `bench/quiet.py` window, the JVM launcher of the distribution without and with the net, default
+  options, five alternating rounds, whole process, median [min, max] (`work/r2/net/cost.sh`, `cost.tsv`), on the
+  largest files on which the net fires. The largest of all (a mutant of 593 kB; the strict load declines it):
+  0.16 s [0.15, 0.18] -> 0.18 s [0.18, 0.19], CPU 0.51 -> 0.60 s; the practical run itself takes 73-83 ms, the
+  second run 8-16 ms. The largest on which the strict run checks up to the rejection (297 kB): 0.14 s
+  [0.12, 0.14] -> 0.17 s [0.16, 0.19], CPU 0.29 -> 0.43 s; practical run 49-61 ms, second run 18-22 ms. In general
+  the second run is bounded by one strict check of the file; the 489 files on which the net fires have a median
+  size of 5 kB.
 - **A wider trigger** (not implemented). The `nondep` flag of a let, the loader's only other practical-only
   normalisation: 7 files of the sets above have such a let (2 tutorial mutants, 1 prelude mutant, 4 hostile
   exports); the practical mode accepts all seven, so the wider trigger would change nothing there. "Every
@@ -426,6 +433,23 @@ The published jars: `rlvm-ref` a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-exp
   -> DECLINE (practical; strict: declined as before), so the practical mode has 6 opposite verdicts left, all
   "official reject, accepted" (kind T), and none of the kind "official accept, rejected"; Init, Std and
   reachability accepted through this loader (the digest shows the same store for all eight corpora).
+- **The launcher with the safety net of section 6.1** (`rlvm-main` 3729609561e3, published 02:18Z on 2026-11-25
+  on top of PK1's 90f97a28c07a; written in a private copy, `work/r2/main-copy`, gated on the private distribution
+  `work/r2/dist-net` = the published jars of 01:50Z (ref a20c24a26b7c, load 58b0056c0417, machine c2e04f2294ef;
+  default engine: reference) with this jar, then applied to the tree): module suite 64 tests (61 run green, 3
+  opt-in; new `SafetyNetTest`, 9 tests, three fixtures of `batch4`); `scripts/gate.sh --defaults --corpus all
+  --hostile work/r2/exports/manifest.tsv`: PASS - 230 / 230, 0 declined; mutants 17,775: SOUNDNESS 0,
+  COMPLETENESS 0, agree 15,741, declined 2,034 (tutorial 11,780 / 480, bugs 2,590 / 102, prelude 839 / 8, mdata
+  532 / 1,444). Against the record above exactly 351 agreements became declines; file by file (one JVM per
+  corpus, `work/r2/net/all-*.tsv`) all of them are correct rejects of mutants with a metadata record (67 + 37 +
+  247), no accepted file and no file without a metadata record changed. Self-test passed; the hostile rows of
+  the R2 manifest (32, with the seven of `batch4`): agree 23, kind-T accepts 5, wrong accept 0, wrong reject 0,
+  declined 4. **The same gate through the executable** (`--native`, `work/r2/dist-net-native`: the published jars
+  of 02:18Z, machine 123cba5f232e): PASS with the same counts. All 1,245 review exports (one JVM): four verdicts
+  change, the four `r2-mdata-beta-*-ok` files reject -> DECLINE; no "official accept, rejected" row is left, the
+  six opposite verdicts left are the kind T accepts; strict: 0 opposite (R2 19 official verdicts / 13 declined, S3
+  420 / 3, E1 92 / 0, S2 267 / 2, first review 418 / 1). Init, Std and reachability accepted as before
+  (`policy=practical`, no second run).
 - **Corpora**: section 7.
 - **Cost** (`bench/quiet.py` window, one worker, five alternating runs, CPU = user + sys, median [min, max];
   "before" = the same distribution with the published reference jar ca1f9bd918bb):
