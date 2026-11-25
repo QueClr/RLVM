@@ -1,6 +1,6 @@
 # The caches of the reference engine against the official kernel's (R2)
 
-2026-11-24, 21:28Z - 23:55Z. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
+2026-11-24, 21:28Z - 2026-11-25, 01:25Z. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
 21:21Z), a wrong ACCEPT of the reference engine, the oracle of every gate. Official source read:
 `refs/lean4/src/kernel/` at v4.36.0 (`type_checker.cpp/.h`, `expr_eq_fn.cpp`, `expr_maps.h`, `replace_fn.cpp`,
 `instantiate.cpp`, `inductive.h/.cpp`, `environment.cpp`, `local_ctx.cpp`, `level.cpp`), the reader
@@ -337,6 +337,16 @@ The published jars: `rlvm-ref` a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-exp
   The declines outside the R2 and mdata rows are older ones (metadata inside an inductive record, twice; a String
   literal without its prerequisites). Before this work the published engine gave 4 opposite verdicts on the R2 set
   as it stood then and 2 on S3's; in strict mode there is none now.
+- **The loader with the rule of section 6.1** (`rlvm-load` 58b0056c0417, published 01:2xZ on 2026-11-25; private
+  distribution `work/r2/dist-cand4` = the jars above with this loader): suite `rlvm-load` 81 green (new:
+  `SplitTest.metadataAroundAnApplicationOfEagerReduceIsDeclinedUnderBothPolicies`, ten variants); store digest
+  IDENTICAL in all 14 reader configurations (the rule fires on none of those files) and the strict digests
+  identical to the previous loader's; `scripts/gate.sh --corpus all`: PASS, 230 / 230, 0 declined, mutants 17,775
+  with exactly the counts above - in particular the metadata mutant corpus keeps agree 779 / declined 1,197: no
+  agreement becomes a decline; the 1,239 review exports: one verdict changes, `s3-mdata-eager-hidden-ok` reject
+  -> DECLINE (practical; strict: declined as before), so the practical mode has 6 opposite verdicts left, all
+  "official reject, accepted" (kind T), and none of the kind "official accept, rejected"; Init, Std and
+  reachability accepted through this loader (the digest shows the same store for all eight corpora).
 - **Corpora**: section 7.
 - **Cost** (`bench/quiet.py` window, one worker, five alternating runs, CPU = user + sys, median [min, max];
   "before" = the same distribution with the published reference jar ca1f9bd918bb):
