@@ -1,0 +1,20 @@
+\title{The four slow eager-reduction proofs are the machine's own probes, and a probe budget of 2^16 ticks hands them to the reference engine; the giant proofs of navier-stokes-euler run into the cap of the congruence segments}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-E](rep-OPT-E), sections 5 and 6. It answers two questions that [the profile of the final default configuration](rep-P11), section 5.3, left open. Conditions of the counts: one worker, file order, the machine with its default switch set in a private build with counters; of the times: the shipped executable of 2026-11-25 against itself with one setting, 8 workers, warm passes that reload the file, interleaved in one quiet-core window per corpus, three rounds, mean over the rounds of the median later pass, while other cores of the aarch64 development host were busy.}
+
+\ul{
+\li{\strong{The four proofs of \code{Batteries.Data.Char.Basic}} take the machine 0.98 to 3.2 M ticks each, 8.39 M together, on cslib and on Mathlib. RLVM's reference engine decides them in 1,904 to 8,138 steps and gruszka in 1,467 to 2,550 ticks. The ticks are probes of the switch \code{eager}: in the plain phase of a declaration with deferred eager comparisons the machine evaluates what the eager branch would have evaluated, here a recursion over a literal of 57,344, which the official plain procedure never starts. gruszka has no eager-reduction mode and no rule for these proofs.}
+\li{\strong{The setting.} With \code{\verb~|-X machine.eager-probe=65536~} instead of the default 2^22 the four probes are cut, the four units are declined and the reference engine decides them: 8.11 M ticks less on Mathlib (1.4 \%) and on cslib (3.8 \%), 4.13 M less on con-leche (5.8 \%, its one cut probe is cut earlier), no change on Init, Std, cedar, reachability and navier-stokes-euler, where the largest probe is 63,654 ticks or less. Timed: cslib 5.32 to 5.10 s on the executable (-4.3 \%, process CPU 40.3 to 38.7 s, peak resident set 2,008 to 1,600 MiB) and 4.56 to 4.38 s on the JVM launcher (-4.0 \%), every round with the budget below every round without; con-leche 1.447 to 1.416 s (-2.1 \%, rounds overlap). On Mathlib the expected 0.16 s is below the scatter of both windows (executable -1.9 \%, JVM launcher +3.1 \%, the rounds of one variant differing by more than that).}
+\li{\strong{The giant proofs.} The four \code{quadraticBilin} proofs of navier-stokes-euler (270,000 to 650,000 nodes) take 8.12 M ticks. The segments of \code{congruence} may spend 2^18 ticks per declaration; after that the official order unfolds both sides: 164,735 unfoldings in the largest where gruszka needs 8,601. Without the cap the four take 5.20 M ticks and the largest 9,294 unfoldings; con-leche, which the cap protects, takes 5.6 \% more ticks without it. gruszka treats a large proof term as the machine does (every value hash-consed, every node inferred once per environment it reads); its tick is cheaper there because 63 \% of its ticks are inference-cache hits.}
+\li{\strong{Declarations that repeat an earlier one} word for word are 8.4 \% of Mathlib's units, 10.7 \% of navier-stokes-euler's and 7.7 \% of cslib's, 1.3 to 1.9 \% of the machine's ticks; gruszka answers each in about 20 ticks from its check facts. Not checking them again is cost only: the official check is a function of kind, level parameters, type and value.}
+}
+
+\p{\strong{Not measured:} the guard of [the rule for a default](dec-YP0N) for the setting (eight corpora, both launchers); a cap of \code{congruence} that scales with the unit.}

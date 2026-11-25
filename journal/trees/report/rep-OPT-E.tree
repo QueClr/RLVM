@@ -1,0 +1,491 @@
+\title{OPT-E: where RLVM does more work than gruszka, unit by unit}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\tag{arena}
+\import{base-macros}
+
+\p{Research package "OPT-E" of the second optimisation wave, 2026-11-25 (10:49 to 12:10 UTC). The question was left open by [the profile of the final default configuration](rep-P11), sections 5.2 to 5.4 and 8, and by [the integration of the first wave](rep-INT8): RLVM's machine needs 8 to 22 \% more ticks than gruszka on Mathlib, navier-stokes-euler and cslib, the time is flat over the units, and three observations had no explanation. This report joins the two checkers declaration by declaration with counters added to private copies of both, takes both apart by switching their mechanisms off one at a time, and reads the two implementations where the counts differ. Nothing in the repository was changed, no patch is delivered, no Oracle GraalVM was used. The evidence is counts; the only times are two settings of the shipped executable against itself in quiet windows (section 6) and times quoted from rep-P11.}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{The two tick counters do not count the same events, so "22 \% more ticks" is not 22 \% more work.} gruszka ticks at nine sites, and 42 to 51 \% of its ticks are entries of inference \em{before} the cache is asked: 25 to 37 \% of all its ticks are inference-cache hits. The machine never ticks on a memo hit, and ticks where gruszka does not: once per node of an inert application nest (19 to 23 \% of its ticks), per code block, per \code{DOM}, \code{INST}, \code{APPLY}, \code{CARGS}. The events that can be matched say: unfoldings through a body 1.32 times gruszka's on Mathlib, 1.86 on navier-stokes-euler, 1.45 on cslib (rep-P11 read 0.93 to 1.09 from the same counters by subtracting memo hits that are not part of the call count); whnf 1.8 to 2.3 times; comparisons past the tables 1.00 to 1.47 times; hash-consed records 1.8 to 2.2 times gruszka's values (section 2).}
+\li{\strong{Checked in isolation, the two checkers unfold and compare alike.} With a session of one declaration and every fact that outlives a declaration switched off on both sides, navier-stokes-euler takes the machine 14.25 M unfoldings, 18.2 M comparisons and 7.6 M whnf, and gruszka 14.17 M unfoldings through a body, 17.1 M comparisons and 6.4 M whnf; cslib 12.07 M, 14.6 M and 8.2 M against 12.61 M, 16.4 M and 5.6 M. A small declaration checked alone by gruszka costs it what it costs the machine (1,432 ticks and 125 unfoldings against 1,410 and 123). Unfoldings agree within 4 \% and comparisons within 11 \%; only whnf stays 1.2 and 1.5 times gruszka's. The difference in reduction work is what is \em{remembered between declarations} (section 4).}
+\li{\strong{What gruszka remembers and RLVM does not.} (a) Its session holds 8 MiB against 1 MiB. (b) A table of comparison results for pairs of \em{closed} values, both outcomes, kept across declarations and sessions, written when a comparison needed at least one unfolding: 144,000 to 305,000 entries per corpus, 209,000 to 656,000 hits. Without it gruszka's unfoldings rise by 23 \% on Mathlib, 35 \% on cslib and 26 \% on navier-stokes-euler; at the machine's session size of 1 MiB the table is worth 12 \% of gruszka's ticks on navier-stokes-euler and 10 \% on cslib and 39 and 34 \% of its unfoldings, and without it gruszka unfolds as often as the machine does (through a body: 6.45 M against 6.22 M and 9.68 M against 9.29 M). (c) Check facts for closed shared terms with level parameters, where RLVM's \code{pchk} has them only without: worth 2 to 6 \% of gruszka's ticks, and a shadow counter in the machine shows that the extension would answer 0.02 to 0.22 \% of the machine's ticks: not a lever (section 4).}
+\li{\strong{Observation 1, the four eager-reduction proofs of \code{Batteries.Data.Char.Basic}}: no rule of gruszka decides them and the official kernel has no rule the machine lacks. The 1.0 to 3.2 M ticks are the machine's own \em{probes} of the switch \code{eager}, which evaluate what the official plain procedure never evaluates. RLVM's reference engine decides the four in 1,904 to 8,138 steps, gruszka in 1,467 to 2,550 ticks; gruszka has no eager-reduction mode at all. With a probe budget of 2^16 instead of 2^22 ticks the four are cut, declined and decided by the reference engine: 8.1 M ticks less on cslib and on Mathlib, 4.1 M less on con-leche (section 5.1).}
+\li{\strong{Observation 2, the four \code{quadraticBilin} proofs}: gruszka hash-conses everything, checks every node once per environment it reads, and re-checks no shared subproof, exactly as the machine does (378,000 inference misses against 418,000 in the largest). What it does not do there is unfold: 8,600 unfoldings against the machine's 164,700. The machine's same-head probe is cut off by the cap of 2^18 ticks per declaration that the switch \code{congruence} carries, after which the official order unfolds both sides. Without the cap the four take 5.20 M ticks instead of 8.12 M and 9,300 unfoldings in the largest. gruszka's tick gets cheaper with the size of a unit because 63 \% of its ticks there are inference-cache hits (section 5.2).}
+\li{\strong{Observation 3}: the excess is not a constant per unit. A third of the units take fewer ticks than in gruszka, 45 \% are within a quarter, and 9 \% of the units (ratio 2 and more) carry half of the excess. By kind: auxiliary proofs and equation lemmas are 1.26 to 1.85 times, the four eager proofs are 10 \% of Mathlib's excess and 28 \% of cslib's, and declarations that repeat an earlier declaration word for word (8 to 11 \% of all units) are 7 to 12 \% of it: gruszka's check facts answer them in about 20 ticks (section 3, 5.3).}
+\li{\strong{Proposals}, by measured size (section 6): (1) a closed-pair comparison table that survives sessions; (2) the probe budget of \code{eager} at 2^16; (3) a declaration that repeats an earlier one is not checked again; (4) the cap of \code{congruence} scaled with the unit. Not supported: check facts for terms with level parameters, a different treatment of large proof terms, any rule of gruszka for eager reduction.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\ul{
+\li{\strong{RLVM.} A private copy of the tracked sources of the main tree of 2026-11-25 10:50 UTC (the merged tree of rep-INT8), built with \src{scripts/build.sh} as a development distribution without the executable, with measurement aids added to \code{rlvm-machine} only: one line per unit with the differences of the machine's counters over the unit (ticks, records, run words, pair entries, call events and memo hits by op, outcomes of speculative segments), counters at the six tick sites that have no call event, a census by kind of the records the unit made, a census of the callers of four ops, and a shadow table for check facts (section 4.4). The aids are read only under statistics; with them off the build is the main tree's. Run line: the JVM launcher with \code{\verb~|--threads 1 --stats -X stats-file=F -X unit-trace~} and one further setting per experiment. One worker loads in batch and checks in file order. Engine: the machine with its default switch set, policy practical; "session of one declaration" is \code{\verb~|-X machine.switches=default,-warm~}.}
+\li{\strong{gruszka.} The arena revision \code{ebc80dc} as built for the baseline tables, and a second build of the same source in the arena container with its own features \code{cnt} and \code{knobs} (counters and switches read from the environment; not profile-guided), with additions in a private copy: ticks by site, values made by kind, the hits and entries of the closed-pair table, a second line per declaration with every counter of its statistics, and five switches (session size in KiB; no check facts; no closed-pair table; no open facts; no shortcut for closed Nat operations in unfolding). Run line: \code{\verb~|SK_DECL_INSTR=1 gruszka FILE.susz 1~} with \code{\verb~|SK_ORDER=file~}, so both checkers go through the file in the same order with one worker; \code{\verb~|SK_SESSION_DECLS=1~} is the session of one declaration.}
+\li{\strong{Corpora.} Mathlib (721,845 units, 714,712 checked by the machine), navier-stokes-euler (126,468 and 124,850), cslib (401,985 and 397,608), the exports of the benchmark tables; con-leche, Init, Std, cedar and reachability for two settings.}
+\li{\strong{The join.} The unit number of the driver is the index of the declaration record in file order, which is gruszka's index. A unit is joined when the machine accepted it in one run; the 60, 16 and 7 units the reference engine decides and the inductive blocks of the environment thread are left out (gruszka spends 9.4 M, 4.7 M and 2.6 M ticks on the latter).}
+\li{\strong{What the numbers are.} Counts of one deterministic run per row. With one worker and file order the machine's totals are 574.1 M ticks on Mathlib, 144.2 M on navier-stokes-euler and 216.0 M on cslib (rep-P11 with 8 workers: 575.8, 145.3 and 216.7 M); gruszka's are 495.5 M, 130.6 M and 188.0 M in file order (rep-P11 with 8 workers in its namespace order: 471.2, 134.5 and 177.8 M; one worker in namespace order here: 131.8 M and 173.8 M on the two small corpora). So the order moves gruszka's total by up to 8 \% and the join compares like with like only in file order.}
+\li{\strong{Not a timing.} No run of the instrumented builds is timed. Section 6 has the only new times: the shipped executable and the JVM launcher of the shared distribution of 09:13 UTC against themselves with one setting changed, interleaved inside \src{bench/quiet.py} windows on the 8 measurement cores of the aarch64 development host. Other times are quoted from rep-P11 with their conditions.}
+}
+}
+
+\subtree{
+\title{2. The two tick counters}
+
+\p{Both checkers count "ticks". The machine's rule is one tick per judgment that its inline answers (identity, flag, memo, cache) did not answer, plus one per iteration of its loops; a memo hit is never a tick. gruszka ticks at nine sites of its source, and at two of them before the cache is asked. One worker, the whole corpus:}
+
+\table{
+\tr{\th{RLVM's machine: ticks by site (one worker, warm sessions of 1 MiB)}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{all ticks}\td{574.10 M}\td{144.22 M}\td{215.96 M}}
+\tr{\td{a node of an inert nest evaluated (no call event)}\td{129.56 M (22.6 \%)}\td{30.68 M (21.3 \%)}\td{40.42 M (18.7 \%)}}
+\tr{\td{EVAL: a term evaluated past its memo}\td{70.83 M (12.3 \%)}\td{19.86 M (13.8 \%)}\td{27.01 M (12.5 \%)}}
+\tr{\td{INFER: inference past its memo}\td{55.43 M (9.7 \%)}\td{14.64 M (10.1 \%)}\td{22.78 M (10.5 \%)}}
+\tr{\td{ACT: a code block entered or resumed}\td{37.36 M (6.5 \%)}\td{8.04 M (5.6 \%)}\td{15.46 M (7.2 \%)}}
+\tr{\td{CONV: a comparison past identity and the pair table}\td{36.40 M (6.3 \%)}\td{11.74 M (8.1 \%)}\td{12.74 M (5.9 \%)}}
+\tr{\td{DELTA: an unfolding past its memo}\td{24.57 M (4.3 \%)}\td{6.22 M (4.3 \%)}\td{9.29 M (4.3 \%)}}
+\tr{\td{CORE: reduction without unfolding, past its memo}\td{24.35 M (4.2 \%)}\td{5.81 M (4.0 \%)}\td{9.41 M (4.4 \%)}}
+\tr{\td{DOM: the domain of a Pi value}\td{23.03 M (4.0 \%)}\td{4.38 M (3.0 \%)}\td{9.94 M (4.6 \%)}}
+\tr{\td{an iteration of the whnf loop (no call event)}\td{22.37 M (3.9 \%)}\td{4.70 M (3.3 \%)}\td{9.14 M (4.2 \%)}}
+\tr{\td{VTYPE: the type of a value}\td{18.08 M (3.1 \%)}\td{2.90 M (2.0 \%)}\td{7.55 M (3.5 \%)}}
+\tr{\td{CARGS: the arguments of two applications}\td{17.83 M (3.1 \%)}\td{7.24 M (5.0 \%)}\td{5.84 M (2.7 \%)}}
+\tr{\td{an iteration of the core loop (no call event)}\td{17.37 M (3.0 \%)}\td{3.97 M (2.8 \%)}\td{7.02 M (3.3 \%)}}
+\tr{\td{APPLY}\td{16.19 M (2.8 \%)}\td{4.32 M (3.0 \%)}\td{6.30 M (2.9 \%)}}
+\tr{\td{INST: a Pi closure instantiated}\td{15.05 M (2.6 \%)}\td{2.72 M (1.9 \%)}\td{6.52 M (3.0 \%)}}
+\tr{\td{LSTEP: a step of lazy delta}\td{14.69 M (2.6 \%)}\td{5.18 M (3.6 \%)}\td{5.12 M (2.4 \%)}}
+\tr{\td{WHNF past its memo}\td{14.65 M (2.6 \%)}\td{2.99 M (2.1 \%)}\td{6.28 M (2.9 \%)}}
+\tr{\td{CHECK against an expected type}\td{11.50 M (2.0 \%)}\td{2.86 M (2.0 \%)}\td{5.45 M (2.5 \%)}}
+\tr{\td{LAZYD}\td{7.28 M (1.3 \%)}\td{2.10 M (1.5 \%)}\td{2.54 M (1.2 \%)}}
+\tr{\td{the other 17 sites together}\td{17.58 M (3.1 \%)}\td{3.86 M (2.7 \%)}\td{7.17 M (3.3 \%)}}
+\tr{\td{not ticks: memo hits of EVAL / CONV / CORE / DELTA / WHNF}\td{110.48 M / 35.37 M / 13.10 M / 6.71 M / 6.17 M}\td{43.53 M / 16.93 M / 3.55 M / 2.49 M / 1.20 M}\td{28.61 M / 10.29 M / 4.28 M / 2.00 M / 2.34 M}}
+}
+
+\table{
+\tr{\th{gruszka: ticks by site (one worker, file order, sessions of 8 MiB)}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{all ticks}\td{495.49 M}\td{130.58 M}\td{187.99 M}}
+\tr{\td{an iteration of the evaluation loop (one application spine, one let, one binder)}\td{104.52 M (21.1 \%)}\td{20.88 M (16.0 \%)}\td{41.51 M (22.1 \%)}}
+\tr{\td{a step of whnf_core}\td{66.61 M (13.4 \%)}\td{12.81 M (9.8 \%)}\td{22.99 M (12.2 \%)}}
+\tr{\td{an iteration of the whnf loop}\td{20.74 M (4.2 \%)}\td{3.26 M (2.5 \%)}\td{6.82 M (3.6 \%)}}
+\tr{\td{an entry of inference, before its cache is asked}\td{209.66 M (42.3 \%)}\td{66.63 M (51.0 \%)}\td{83.33 M (44.3 \%)}}
+\tr{\td{the type of a value, past its memo}\td{6.39 M (1.3 \%)}\td{1.08 M (0.8 \%)}\td{2.74 M (1.5 \%)}}
+\tr{\td{a comparison past identity, before its caches are asked}\td{56.93 M (11.5 \%)}\td{17.05 M (13.1 \%)}\td{20.61 M (11.0 \%)}}
+\tr{\td{an iteration of lazy delta}\td{22.90 M (4.6 \%)}\td{5.42 M (4.2 \%)}\td{7.95 M (4.2 \%)}}
+\tr{\td{an iteration of the lazy delta of two projections}\td{732.6 k (0.1 \%)}\td{91.2 k (0.1 \%)}\td{198.3 k (0.1 \%)}}
+\tr{\td{of the inference entries: answered by the cache}\td{125.09 M (25.2 \% of all ticks)}\td{48.10 M (36.8 \% of all ticks)}\td{46.60 M (24.8 \% of all ticks)}}
+\tr{\td{of the comparisons: answered by the pair cache}\td{25.02 M (5.1 \% of all ticks)}\td{9.04 M (6.9 \% of all ticks)}\td{7.84 M (4.2 \% of all ticks)}}
+}
+
+\p{The events that exist on both sides, same runs:}
+
+\table{
+\tr{\th{event (RLVM / gruszka = ratio)}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{ticks (two different instruments)}\td{574.10 M / 495.49 M = 1.16}\td{144.22 M / 130.58 M = 1.10}\td{215.96 M / 187.99 M = 1.15}}
+\tr{\td{values made: records / values}\td{288.31 M / 158.50 M = 1.82}\td{69.47 M / 31.61 M = 2.20}\td{112.84 M / 60.35 M = 1.87}}
+\tr{\td{- suspensions (delayed terms and the memo keys of evaluation and inference) / thunks}\td{79.16 M / 4.25 M = 18.64}\td{22.13 M / 1.12 M = 19.79}\td{30.29 M / 1.64 M = 18.46}}
+\tr{\td{- gruszka's entries of its inference cache, which are not values (its inference misses)}\td{- / 81.33 M}\td{- / 18.08 M}\td{- / 35.19 M}}
+\tr{\td{- closures: LAM, PI, PII / closures and lazy Pi types}\td{40.39 M / 42.67 M = 0.95}\td{7.80 M / 7.51 M = 1.04}\td{17.21 M / 18.55 M = 0.93}}
+\tr{\td{- neutral applications, constants, projections}\td{158.56 M / 110.56 M = 1.43}\td{38.43 M / 22.88 M = 1.68}\td{60.93 M / 39.77 M = 1.53}}
+\tr{\td{pair entries of the comparison table / comparisons past the caches}\td{32.50 M / 31.91 M = 1.02}\td{11.35 M / 8.01 M = 1.42}\td{11.69 M / 12.77 M = 0.92}}
+\tr{\td{unfoldings done: DELTA calls / unfoldings}\td{24.57 M / 19.98 M = 1.23}\td{6.22 M / 3.50 M = 1.78}\td{9.29 M / 6.96 M = 1.34}}
+\tr{\td{- of gruszka's unfoldings: straight to the branch of a casesOn or a matcher (the machine's case trees do these without a DELTA call)}\td{- / 1.42 M}\td{- / 152.2 k}\td{- / 552.5 k}}
+\tr{\td{unfoldings through a body: DELTA calls / gruszka's without the direct ones}\td{24.57 M / 18.56 M = 1.32}\td{6.22 M / 3.35 M = 1.86}\td{9.29 M / 6.41 M = 1.45}}
+\tr{\td{unfoldings asked for (done + memo hits)}\td{31.28 M / 27.61 M = 1.13}\td{8.71 M / 4.95 M = 1.76}\td{11.29 M / 9.03 M = 1.25}}
+\tr{\td{comparisons past identity (calls + table hits / all)}\td{71.77 M / 56.93 M = 1.26}\td{28.67 M / 17.05 M = 1.68}\td{23.02 M / 20.61 M = 1.12}}
+\tr{\td{comparisons past the tables}\td{36.40 M / 31.91 M = 1.14}\td{11.74 M / 8.01 M = 1.47}\td{12.74 M / 12.77 M = 1.00}}
+\tr{\td{whnf past its memo}\td{14.65 M / 8.09 M = 1.81}\td{2.99 M / 1.31 M = 2.29}\td{6.28 M / 2.81 M = 2.23}}
+\tr{\td{iterations of lazy delta: LSTEP / lazy_delta_loop}\td{14.69 M / 22.90 M = 0.64}\td{5.18 M / 5.42 M = 0.96}\td{5.12 M / 7.95 M = 0.64}}
+\tr{\td{inference past its memo (gruszka also counts leaves)}\td{55.43 M / 81.33 M = 0.68}\td{14.64 M / 18.08 M = 0.81}\td{22.78 M / 35.19 M = 0.65}}
+\tr{\td{type of a value past its memo: VTYPE / infer_val_miss}\td{18.08 M / 6.39 M = 2.83}\td{2.90 M / 1.08 M = 2.68}\td{7.55 M / 2.74 M = 2.76}}
+\tr{\td{session resets}\td{13,814 / 2,625}\td{3,148 / 561}\td{5,548 / 1,041}}
+}
+
+\ul{
+\li{\strong{A quarter to a third of gruszka's ticks are inference-cache hits}, which cost one probe, and none of the machine's are. A fifth of the machine's ticks are nodes of inert nests, which gruszka builds without a tick (its canonical first-order applications). "CPU per tick" of the two checkers (rep-P11, section 5.2) compares two different mixtures, and so does the ratio of the totals.}
+\li{\strong{Unfoldings.} A \code{DELTA} call is counted after the memo word answered or did not (the hit returns before the tick), so the machine's unfoldings are its \code{DELTA} calls: 24.57 M, 6.22 M and 9.29 M. rep-P11 subtracted the hits from the calls and found 17.9 M, 3.8 M and 7.3 M, "within 3 to 9 \%" of gruszka; against all of gruszka's unfoldings that is 1.23, 1.78 and 1.34 times. gruszka's count includes the unfoldings that go straight to the branch of a casesOn or a matcher (7.1 \%, 4.3 \% and 7.9 \% of them); the machine does those in a case tree, which is a code block and not a \code{DELTA} call. Like for like, unfoldings through a body, the machine is at 1.32, 1.86 and 1.45 times. Every unfolding count of gruszka below is given through a body where it is set against the machine's.}
+\li{\strong{Records.} The machine makes 1.8 to 2.2 times as many hash-consed records as gruszka makes values. 27 to 32 \% of its records are suspensions, which are at once the delayed argument and the memo key of evaluation and inference; gruszka keeps that key in two hash maps outside its values (one entry per inference miss). Counted with those entries gruszka makes 239.8 M, 49.7 M and 95.5 M table entries against the machine's 288.3 M, 69.5 M and 112.8 M records: 1.20, 1.40 and 1.18 times. Closures are equal. Neutral applications are 1.43 to 1.68 times gruszka's and fall to 1.12 times on navier-stokes-euler when the machine's session cap is 8 MiB: they are values made again after a reset.}
+\li{\strong{whnf and the type of a value} are asked 1.8 to 2.8 times as often past their memo. Three quarters of the machine's whnf calls come from the projection rule of the reduction without unfolding, which reduces the structure by a full whnf (caller census, navier-stokes-euler, session of one declaration: 73.2 \% of 5.96 M calls; 17.8 \% from the one-sided step of lazy delta). Both follow the comparisons that are done again after a reset (section 4): with the 8 MiB cap the machine's whnf calls fall from 2.99 M to 1.86 M on navier-stokes-euler.}
+}
+}
+
+\subtree{
+\title{3. The per-class tables}
+
+\p{One worker, file order, the default configuration of each checker (the machine: warm sessions of 1 MiB; gruszka: sessions of 8 MiB, every cross-declaration fact on). "Share of the excess" is the class's part of the difference of the two totals. The last four columns are ratios machine / gruszka of the values made, the unfoldings through a body (section 2), the comparisons past the tables and the whnf calls past the memo; a dash is a ratio over fewer than 20,000 events (100,000 ticks). Two classes are taken out of the kinds: a unit whose kind, level-parameter names, safety, type and value repeat an earlier unit of the file, and the four eager-reduction proofs of observation 1.}
+
+\table{
+\tr{\th{Mathlib: kind of declaration}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{auxiliary proof (\code{\verb~|._proof_N~})}\td{107,798}\td{159.36 M}\td{126.12 M}\td{1.26}\td{37.8 \%}\td{1.72}\td{1.34}\td{1.25}\td{1.84}}
+\tr{\td{theorem (other)}\td{304,970}\td{316.85 M}\td{285.91 M}\td{1.11}\td{35.2 \%}\td{1.79}\td{1.26}\td{1.16}\td{1.51}}
+\tr{\td{the four eager-reduction proofs of Batteries.Data.Char.Basic}\td{4}\td{8.39 M}\td{8,048}\td{-}\td{9.5 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{a repeat of an earlier declaration (same kind, level parameters, type and value)}\td{59,923}\td{7.49 M}\td{1.06 M}\td{7.05}\td{7.3 \%}\td{12.33}\td{-}\td{5.93}\td{-}}
+\tr{\td{equation lemma}\td{18,928}\td{9.23 M}\td{4.99 M}\td{1.85}\td{4.8 \%}\td{2.79}\td{2.50}\td{1.54}\td{2.99}}
+\tr{\td{definition (other)}\td{93,300}\td{26.43 M}\td{23.45 M}\td{1.13}\td{3.4 \%}\td{1.74}\td{1.15}\td{0.89}\td{1.53}}
+\tr{\td{instance}\td{34,648}\td{15.00 M}\td{13.08 M}\td{1.15}\td{2.2 \%}\td{1.71}\td{1.15}\td{1.06}\td{1.48}}
+\tr{\td{compiler / wf auxiliaries}\td{20,748}\td{9.00 M}\td{7.96 M}\td{1.13}\td{1.2 \%}\td{1.85}\td{1.91}\td{1.02}\td{1.70}}
+\tr{\td{axiom}\td{4}\td{40}\td{47}\td{-}\td{-0.0 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{opaque}\td{2,045}\td{65.2 k}\td{103.1 k}\td{0.63}\td{-0.0 \%}\td{1.34}\td{-}\td{-}\td{-}}
+\tr{\td{matcher and its lemmas}\td{20,005}\td{8.28 M}\td{8.59 M}\td{0.96}\td{-0.4 \%}\td{1.77}\td{1.18}\td{0.97}\td{1.99}}
+\tr{\td{structure / inductive auxiliaries}\td{52,279}\td{13.00 M}\td{13.99 M}\td{0.93}\td{-1.1 \%}\td{1.71}\td{1.34}\td{0.70}\td{1.45}}
+\tr{\td{all joined units}\td{714,652}\td{573.10 M}\td{485.27 M}\td{1.18}\td{100 \%}\td{1.84}\td{1.33}\td{1.15}\td{1.82}}
+}
+
+\table{
+\tr{\th{navier-stokes-euler: kind of declaration}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{theorem (other)}\td{64,026}\td{108.09 M}\td{95.58 M}\td{1.13}\td{68.4 \%}\td{2.26}\td{1.80}\td{1.54}\td{2.36}}
+\tr{\td{auxiliary proof (\code{\verb~|._proof_N~})}\td{18,501}\td{24.51 M}\td{22.00 M}\td{1.11}\td{13.7 \%}\td{2.15}\td{2.16}\td{1.44}\td{2.14}}
+\tr{\td{a repeat of an earlier declaration (same kind, level parameters, type and value)}\td{13,336}\td{1.97 M}\td{180.2 k}\td{10.96}\td{9.8 \%}\td{20.05}\td{-}\td{-}\td{-}}
+\tr{\td{definition (other)}\td{16,678}\td{5.40 M}\td{4.28 M}\td{1.26}\td{6.1 \%}\td{2.08}\td{1.59}\td{1.16}\td{1.93}}
+\tr{\td{equation lemma}\td{1,352}\td{790.9 k}\td{522.9 k}\td{1.51}\td{1.5 \%}\td{2.20}\td{-}\td{1.42}\td{-}}
+\tr{\td{instance}\td{3,864}\td{1.19 M}\td{990.6 k}\td{1.20}\td{1.1 \%}\td{1.90}\td{1.39}\td{1.06}\td{-}}
+\tr{\td{opaque}\td{53}\td{4,175}\td{3,945}\td{-}\td{0.0 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{axiom}\td{3}\td{28}\td{40}\td{-}\td{-0.0 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{structure / inductive auxiliaries}\td{1,042}\td{480.8 k}\td{485.8 k}\td{0.99}\td{-0.0 \%}\td{1.98}\td{-}\td{1.01}\td{-}}
+\tr{\td{matcher and its lemmas}\td{2,278}\td{911.4 k}\td{942.5 k}\td{0.97}\td{-0.2 \%}\td{1.76}\td{-}\td{0.89}\td{-}}
+\tr{\td{compiler / wf auxiliaries}\td{3,701}\td{627.7 k}\td{692.1 k}\td{0.91}\td{-0.4 \%}\td{1.59}\td{-}\td{0.73}\td{-}}
+\tr{\td{all joined units}\td{124,834}\td{143.98 M}\td{125.68 M}\td{1.15}\td{100 \%}\td{2.25}\td{1.89}\td{1.49}\td{2.35}}
+}
+
+\table{
+\tr{\th{cslib: kind of declaration}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{auxiliary proof (\code{\verb~|._proof_N~})}\td{45,502}\td{55.96 M}\td{42.74 M}\td{1.31}\td{43.4 \%}\td{1.92}\td{1.73}\td{1.19}\td{2.50}}
+\tr{\td{the four eager-reduction proofs of Batteries.Data.Char.Basic}\td{4}\td{8.39 M}\td{7,970}\td{-}\td{27.5 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{theorem (other)}\td{171,200}\td{117.22 M}\td{110.41 M}\td{1.06}\td{22.4 \%}\td{1.74}\td{1.20}\td{1.01}\td{1.43}}
+\tr{\td{a repeat of an earlier declaration (same kind, level parameters, type and value)}\td{30,466}\td{4.13 M}\td{541.9 k}\td{7.62}\td{11.8 \%}\td{13.37}\td{-}\td{7.21}\td{-}}
+\tr{\td{equation lemma}\td{10,284}\td{3.78 M}\td{2.54 M}\td{1.49}\td{4.1 \%}\td{2.26}\td{1.85}\td{1.16}\td{2.16}}
+\tr{\td{instance}\td{19,096}\td{4.49 M}\td{4.29 M}\td{1.05}\td{0.7 \%}\td{1.65}\td{1.12}\td{0.90}\td{1.38}}
+\tr{\td{axiom}\td{4}\td{39}\td{50}\td{-}\td{-0.0 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{opaque}\td{1,882}\td{58.2 k}\td{92.8 k}\td{-}\td{-0.1 \%}\td{1.35}\td{-}\td{-}\td{-}}
+\tr{\td{compiler / wf auxiliaries}\td{13,170}\td{3.79 M}\td{3.84 M}\td{0.99}\td{-0.2 \%}\td{1.74}\td{1.52}\td{0.76}\td{1.56}}
+\tr{\td{matcher and its lemmas}\td{14,011}\td{4.06 M}\td{4.63 M}\td{0.88}\td{-1.9 \%}\td{1.69}\td{1.14}\td{0.72}\td{-}}
+\tr{\td{definition (other)}\td{57,155}\td{9.47 M}\td{10.42 M}\td{0.91}\td{-3.1 \%}\td{1.70}\td{1.15}\td{0.69}\td{1.45}}
+\tr{\td{structure / inductive auxiliaries}\td{34,827}\td{4.48 M}\td{5.86 M}\td{0.76}\td{-4.5 \%}\td{1.42}\td{1.23}\td{0.39}\td{0.97}}
+\tr{\td{all joined units}\td{397,601}\td{215.84 M}\td{185.36 M}\td{1.16}\td{100 \%}\td{1.89}\td{1.45}\td{1.00}\td{2.25}}
+}
+
+\p{By the size of the unit (nodes of its blocks and shared terms):}
+
+\table{
+\tr{\th{Mathlib: nodes of the unit}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{below 100}\td{508,222}\td{107.25 M}\td{95.33 M}\td{1.12}\td{13.6 \%}\td{1.79}\td{1.36}\td{0.78}\td{1.66}}
+\tr{\td{100 to 1,000}\td{186,815}\td{261.96 M}\td{215.58 M}\td{1.22}\td{52.8 \%}\td{1.90}\td{1.40}\td{1.10}\td{2.10}}
+\tr{\td{1,000 to 10,000}\td{19,285}\td{179.30 M}\td{153.52 M}\td{1.17}\td{29.4 \%}\td{1.77}\td{1.22}\td{1.43}\td{1.58}}
+\tr{\td{10,000 to 100,000}\td{330}\td{24.60 M}\td{20.84 M}\td{1.18}\td{4.3 \%}\td{1.77}\td{1.23}\td{1.73}\td{1.54}}
+\tr{\td{all joined units}\td{714,652}\td{573.10 M}\td{485.27 M}\td{1.18}\td{100 \%}\td{1.84}\td{1.33}\td{1.15}\td{1.82}}
+}
+
+\table{
+\tr{\th{navier-stokes-euler: nodes of the unit}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{below 100}\td{81,872}\td{15.84 M}\td{12.35 M}\td{1.28}\td{19.1 \%}\td{2.21}\td{2.12}\td{0.99}\td{2.88}}
+\tr{\td{100 to 1,000}\td{37,151}\td{61.14 M}\td{48.99 M}\td{1.25}\td{66.5 \%}\td{2.24}\td{1.81}\td{1.39}\td{2.35}}
+\tr{\td{1,000 to 10,000}\td{5,702}\td{53.19 M}\td{48.23 M}\td{1.10}\td{27.1 \%}\td{2.23}\td{1.69}\td{1.77}\td{2.17}}
+\tr{\td{10,000 to 100,000}\td{105}\td{5.67 M}\td{8.02 M}\td{0.71}\td{-12.8 \%}\td{2.10}\td{1.39}\td{1.50}\td{1.86}}
+\tr{\td{100,000 and more}\td{4}\td{8.12 M}\td{8.10 M}\td{1.00}\td{0.1 \%}\td{3.31}\td{-}\td{1.77}\td{-}}
+\tr{\td{all joined units}\td{124,834}\td{143.98 M}\td{125.68 M}\td{1.15}\td{100 \%}\td{2.25}\td{1.89}\td{1.49}\td{2.35}}
+}
+
+\table{
+\tr{\th{cslib: nodes of the unit}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{below 100}\td{305,093}\td{51.96 M}\td{50.44 M}\td{1.03}\td{5.0 \%}\td{1.72}\td{1.33}\td{0.70}\td{1.55}}
+\tr{\td{100 to 1,000}\td{86,662}\td{111.28 M}\td{90.33 M}\td{1.23}\td{68.7 \%}\td{2.02}\td{1.59}\td{1.03}\td{2.90}}
+\tr{\td{1,000 to 10,000}\td{5,782}\td{48.09 M}\td{40.61 M}\td{1.18}\td{24.5 \%}\td{1.83}\td{1.36}\td{1.34}\td{1.87}}
+\tr{\td{10,000 to 100,000}\td{64}\td{4.51 M}\td{3.99 M}\td{1.13}\td{1.7 \%}\td{1.69}\td{1.21}\td{1.49}\td{2.01}}
+\tr{\td{all joined units}\td{397,601}\td{215.84 M}\td{185.36 M}\td{1.16}\td{100 \%}\td{1.89}\td{1.45}\td{1.00}\td{2.25}}
+}
+
+\p{By the ratio of the unit's ticks:}
+
+\table{
+\tr{\th{Mathlib: ticks of RLVM / ticks of gruszka}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{below 0.5}\td{58,225}\td{2.78 M}\td{7.40 M}\td{0.38}\td{-5.3 \%}\td{0.92}\td{0.54}\td{0.17}\td{0.87}}
+\tr{\td{0.5 to 0.8}\td{183,922}\td{30.47 M}\td{44.16 M}\td{0.69}\td{-15.6 \%}\td{1.42}\td{0.97}\td{0.52}\td{1.18}}
+\tr{\td{0.8 to 1.25}\td{322,484}\td{325.10 M}\td{310.84 M}\td{1.05}\td{16.2 \%}\td{1.60}\td{1.09}\td{1.08}\td{1.35}}
+\tr{\td{1.25 to 2}\td{86,413}\td{155.37 M}\td{107.60 M}\td{1.44}\td{54.4 \%}\td{1.99}\td{1.40}\td{1.46}\td{1.76}}
+\tr{\td{2 to 4}\td{41,365}\td{34.49 M}\td{13.50 M}\td{2.55}\td{23.9 \%}\td{4.06}\td{3.84}\td{2.00}\td{6.34}}
+\tr{\td{4 to 16}\td{18,014}\td{9.86 M}\td{1.63 M}\td{6.06}\td{9.4 \%}\td{9.59}\td{11.05}\td{5.12}\td{-}}
+\tr{\td{16 and more}\td{4,229}\td{15.03 M}\td{151.7 k}\td{99.05}\td{16.9 \%}\td{104.63}\td{-}\td{-}\td{-}}
+\tr{\td{all joined units}\td{714,652}\td{573.10 M}\td{485.27 M}\td{1.18}\td{100 \%}\td{1.84}\td{1.33}\td{1.15}\td{1.82}}
+}
+
+\table{
+\tr{\th{navier-stokes-euler: ticks of RLVM / ticks of gruszka}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{below 0.5}\td{12,458}\td{906.5 k}\td{2.20 M}\td{0.41}\td{-7.0 \%}\td{0.94}\td{0.38}\td{0.29}\td{-}}
+\tr{\td{0.5 to 0.8}\td{31,643}\td{16.14 M}\td{24.20 M}\td{0.67}\td{-44.0 \%}\td{1.76}\td{1.27}\td{1.05}\td{1.76}}
+\tr{\td{0.8 to 1.25}\td{49,278}\td{68.41 M}\td{66.77 M}\td{1.02}\td{9.0 \%}\td{1.91}\td{1.56}\td{1.26}\td{1.73}}
+\tr{\td{1.25 to 2}\td{17,921}\td{39.27 M}\td{26.42 M}\td{1.49}\td{70.2 \%}\td{2.49}\td{1.93}\td{1.82}\td{2.44}}
+\tr{\td{2 to 4}\td{8,771}\td{13.64 M}\td{5.45 M}\td{2.50}\td{44.8 \%}\td{4.61}\td{4.04}\td{2.94}\td{5.63}}
+\tr{\td{4 to 16}\td{3,568}\td{3.68 M}\td{628.0 k}\td{5.85}\td{16.7 \%}\td{12.29}\td{-}\td{5.81}\td{-}}
+\tr{\td{16 and more}\td{1,195}\td{1.93 M}\td{28.3 k}\td{-}\td{10.4 \%}\td{-}\td{-}\td{-}\td{-}}
+\tr{\td{all joined units}\td{124,834}\td{143.98 M}\td{125.68 M}\td{1.15}\td{100 \%}\td{2.25}\td{1.89}\td{1.49}\td{2.35}}
+}
+
+\table{
+\tr{\th{cslib: ticks of RLVM / ticks of gruszka}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{ratio}\th{share of the excess of ticks}\th{values}\th{unfoldings}\th{comparisons}\th{whnf}}
+\tr{\td{below 0.5}\td{40,229}\td{1.41 M}\td{3.54 M}\td{0.40}\td{-7.0 \%}\td{0.98}\td{0.51}\td{0.15}\td{-}}
+\tr{\td{0.5 to 0.8}\td{123,341}\td{17.59 M}\td{25.64 M}\td{0.69}\td{-26.4 \%}\td{1.45}\td{1.03}\td{0.49}\td{1.26}}
+\tr{\td{0.8 to 1.25}\td{169,863}\td{120.88 M}\td{118.03 M}\td{1.02}\td{9.4 \%}\td{1.61}\td{1.11}\td{0.97}\td{1.37}}
+\tr{\td{1.25 to 2}\td{34,694}\td{46.07 M}\td{31.85 M}\td{1.45}\td{46.7 \%}\td{2.03}\td{1.49}\td{1.37}\td{1.87}}
+\tr{\td{2 to 4}\td{19,178}\td{14.52 M}\td{5.60 M}\td{2.60}\td{29.3 \%}\td{4.32}\td{4.52}\td{1.93}\td{8.57}}
+\tr{\td{4 to 16}\td{8,172}\td{3.91 M}\td{648.3 k}\td{6.03}\td{10.7 \%}\td{9.46}\td{11.04}\td{4.91}\td{-}}
+\tr{\td{16 and more}\td{2,124}\td{11.45 M}\td{63.6 k}\td{-}\td{37.4 \%}\td{199.13}\td{-}\td{-}\td{-}}
+\tr{\td{all joined units}\td{397,601}\td{215.84 M}\td{185.36 M}\td{1.16}\td{100 \%}\td{1.89}\td{1.45}\td{1.00}\td{2.25}}
+}
+
+\ul{
+\li{\strong{No class is at a constant factor.} 34 \% of the units of Mathlib take fewer ticks in the machine than in gruszka (41 \% on cslib, 35 \% on navier-stokes-euler); 45 \% are between 0.8 and 1.25 and hold 57 \% of the machine's ticks at 1.05 times. The units at 2 times and more are 8.9 \% of Mathlib's units, 7.4 \% of cslib's and 10.8 \% of navier-stokes-euler's and carry 50 \%, 77 \% and 72 \% of the excess; there the machine unfolds 4 to 11 times as often as gruszka.}
+\li{\strong{By kind}, the excess sits in proofs that reduce: auxiliary proofs (1.26 times on Mathlib, 1.31 on cslib, whnf 1.8 to 2.5 times) and equation lemmas (1.5 to 1.85 times). Structure and inductive auxiliaries, matchers and (on cslib) plain definitions take fewer ticks than in gruszka.}
+\li{\strong{By size} the ratio is 1.10 to 1.25 between 100 and 10,000 nodes on all three corpora, 1.13 to 1.18 above that on Mathlib and cslib and 0.71 on navier-stokes-euler, and lowest below 100 nodes on cslib and Mathlib (1.03 and 1.12): there is no per-unit constant. The smallest units show it directly: the 4 axioms of Mathlib take 40 ticks in the machine and 47 in gruszka.}
+}
+}
+
+\subtree{
+\title{4. Where the work differs: what is remembered between declarations}
+
+\subtree{
+\title{4.1 Both checkers, taken apart}
+
+\p{Each row is one run of the whole corpus with one worker in file order. "Kept" is what survives from one declaration to the next. Values are records for the machine and values for gruszka; comparisons are those past the tables.}
+
+\table{
+\tr{\th{navier-stokes-euler}\th{ticks}\th{unfoldings}\th{comparisons}\th{whnf}\th{values}}
+\tr{\td{gruszka, as shipped: sessions of 8 MiB, check facts, closed-pair table, open facts}\td{130.58 M}\td{3.50 M}\td{8.01 M}\td{1.31 M}\td{31.6 M}}
+\tr{\td{- without the check facts}\td{138.74 M}\td{3.60 M}\td{8.38 M}\td{1.35 M}\td{33.0 M}}
+\tr{\td{- without the closed-pair table}\td{137.83 M}\td{4.41 M}\td{8.51 M}\td{1.67 M}\td{34.2 M}}
+\tr{\td{- without check facts, closed-pair table and open facts}\td{148.93 M}\td{4.86 M}\td{9.11 M}\td{1.83 M}\td{36.5 M}}
+\tr{\td{gruszka with sessions of 1 MiB}\td{143.92 M}\td{4.14 M}\td{9.06 M}\td{1.65 M}\td{39.9 M}}
+\tr{\td{- and without the closed-pair table}\td{164.31 M}\td{6.75 M}\td{10.39 M}\td{2.78 M}\td{48.8 M}}
+\tr{\td{gruszka, session of one declaration}\td{166.95 M}\td{5.02 M}\td{10.72 M}\td{2.10 M}\td{57.3 M}}
+\tr{\td{- and without the check facts}\td{192.75 M}\td{5.61 M}\td{12.73 M}\td{2.39 M}\td{68.1 M}}
+\tr{\td{- and without closed-pair table and open facts: nothing kept}\td{260.57 M}\td{14.72 M}\td{17.12 M}\td{6.37 M}\td{100.7 M}}
+\tr{\td{\strong{the machine, default: sessions of 1 MiB, \code{pchk}}}\td{\strong{144.22 M}}\td{\strong{6.22 M}}\td{\strong{11.74 M}}\td{\strong{2.99 M}}\td{\strong{69.5 M}}}
+\tr{\td{- without \code{pchk}}\td{157.51 M}\td{6.94 M}\td{12.74 M}\td{3.42 M}\td{75.7 M}}
+\tr{\td{- with a session cap of 8 MiB}\td{116.97 M}\td{4.24 M}\td{9.78 M}\td{1.86 M}\td{50.2 M}}
+\tr{\td{the machine, session of one declaration}\td{207.13 M}\td{11.40 M}\td{15.41 M}\td{5.96 M}\td{126.5 M}}
+\tr{\td{- and without \code{pchk}: nothing kept but code blocks and fact records}\td{248.57 M}\td{14.25 M}\td{18.25 M}\td{7.65 M}\td{149.5 M}}
+}
+
+\table{
+\tr{\th{cslib}\th{ticks}\th{unfoldings}\th{comparisons}\th{whnf}\th{values}}
+\tr{\td{gruszka, as shipped}\td{187.99 M}\td{6.96 M}\td{12.77 M}\td{2.81 M}\td{60.3 M}}
+\tr{\td{- without the check facts}\td{191.70 M}\td{7.04 M}\td{13.08 M}\td{2.84 M}\td{61.9 M}}
+\tr{\td{- without the closed-pair table}\td{202.71 M}\td{9.38 M}\td{13.31 M}\td{3.52 M}\td{66.6 M}}
+\tr{\td{- without check facts, closed-pair table and open facts}\td{209.00 M}\td{9.79 M}\td{13.77 M}\td{3.66 M}\td{69.2 M}}
+\tr{\td{gruszka with sessions of 1 MiB}\td{196.37 M}\td{7.42 M}\td{13.24 M}\td{3.09 M}\td{67.4 M}}
+\tr{\td{- and without the closed-pair table}\td{219.07 M}\td{11.16 M}\td{14.06 M}\td{4.24 M}\td{77.5 M}}
+\tr{\td{gruszka, session of one declaration}\td{222.27 M}\td{8.47 M}\td{14.56 M}\td{3.67 M}\td{87.3 M}}
+\tr{\td{- and without the check facts}\td{224.98 M}\td{8.60 M}\td{15.07 M}\td{3.72 M}\td{91.1 M}}
+\tr{\td{- and without closed-pair table and open facts: nothing kept}\td{260.50 M}\td{14.56 M}\td{16.38 M}\td{5.60 M}\td{107.4 M}}
+\tr{\td{\strong{the machine, default}}\td{\strong{215.96 M}}\td{\strong{9.29 M}}\td{\strong{12.74 M}}\td{\strong{6.28 M}}\td{\strong{112.8 M}}}
+\tr{\td{- without \code{pchk}}\td{219.39 M}\td{9.45 M}\td{12.88 M}\td{6.38 M}\td{114.7 M}}
+\tr{\td{- with a session cap of 8 MiB}\td{203.08 M}\td{8.39 M}\td{12.28 M}\td{5.65 M}\td{101.5 M}}
+\tr{\td{the machine, session of one declaration}\td{257.99 M}\td{11.77 M}\td{14.36 M}\td{8.02 M}\td{151.6 M}}
+\tr{\td{- and without \code{pchk}}\td{264.37 M}\td{12.07 M}\td{14.56 M}\td{8.20 M}\td{155.2 M}}
+}
+
+\table{
+\tr{\th{Mathlib}\th{ticks}\th{unfoldings}\th{comparisons}\th{whnf}\th{values}}
+\tr{\td{gruszka, as shipped}\td{495.49 M}\td{19.98 M}\td{31.91 M}\td{8.09 M}\td{158.5 M}}
+\tr{\td{- without the check facts}\td{504.95 M}\td{20.14 M}\td{32.58 M}\td{8.15 M}\td{162.1 M}}
+\tr{\td{- without the closed-pair table}\td{524.42 M}\td{24.49 M}\td{32.98 M}\td{9.64 M}\td{171.2 M}}
+\tr{\td{\strong{the machine, default}}\td{\strong{574.10 M}}\td{\strong{24.57 M}}\td{\strong{36.40 M}}\td{\strong{14.65 M}}\td{\strong{288.3 M}}}
+}
+
+\ul{
+\li{\strong{Nothing kept, the two unfold and compare alike.} navier-stokes-euler with a session of one declaration and no cross-declaration fact: 14.25 M unfoldings in the machine, 14.17 M through a body in gruszka (14.72 M in all); 18.25 M and 17.12 M comparisons; 7.65 M and 6.37 M whnf. cslib: 12.07 M unfoldings in the machine and 12.61 M through a body in gruszka (14.56 M in all), 14.56 M and 16.38 M comparisons, 8.20 M and 5.60 M whnf. One declaration, \code{Euler.EulerExistenceAndSmoothness.pressure_smooth}, checked alone by gruszka through its subset mode (every earlier declaration admitted unchecked): 1,432 ticks, 125 unfoldings, 148 comparisons; by the machine with a session of one declaration and no \code{pchk}: 1,410 ticks, 123 unfoldings, 109 comparisons. In gruszka's run of the whole corpus with sessions of one declaration and no check facts the same declaration takes 391 ticks and no unfolding: the closed-pair table answers.}
+\li{\strong{The ladder on navier-stokes-euler.} gruszka goes from 14.72 M unfoldings with nothing kept to 5.61 M with the closed-pair table and the open facts, to 5.02 M with the check facts, to 3.50 M with its session. The machine goes from 14.25 M to 11.40 M with \code{pchk}, to 6.22 M with its session of 1 MiB, to 4.24 M at 8 MiB.}
+\li{\strong{At the machine's session size and without its closed-pair table gruszka unfolds as often as the machine}: at 1 MiB, through a body, 6.45 M against the machine's 6.22 M on navier-stokes-euler and 9.68 M against 9.29 M on cslib (6.75 M and 11.16 M in all). At its own 8 MiB without the table: 22.22 M through a body against the machine's 24.57 M on Mathlib, 8.26 M against 9.29 M on cslib, 4.18 M against 6.22 M on navier-stokes-euler; the rest is the size of the session.}
+}
+}
+
+\subtree{
+\title{4.2 gruszka's closed-pair table}
+
+\p{What it is, read from gruszka's source (the entry of its comparison, after the session's pair cache and the structural walk): when both values have no free variable and the pair of their head constants has been seen in the table before, each value gets a \em{name}, the hash-consed id of the substituted, unreduced term it stands for, in a table of the worker that outlives sessions. A pair of closed names that is in the table with a stamp of an earlier declaration is answered from it, "true" or "false". After a comparison that was computed and that unfolded at least once, the pair is written with the number of the declaration, a "false" only if no literal met a constructor that was not declared yet. The table is the worker's own; nothing is shared between workers.}
+
+\table{
+\tr{\th{gruszka, one worker, file order}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{entries written, sessions of 8 MiB}\td{304,741}\td{143,615}\td{173,813}}
+\tr{\td{hits, sessions of 8 MiB}\td{655,751}\td{208,809}\td{234,705}}
+\tr{\td{without the table, sessions of 8 MiB: ticks / unfoldings / whnf / values}\td{+5.8 \% / +22.6 \% / +19.2 \% / +8.0 \%}\td{+5.6 \% / +26.1 \% / +27.4 \% / +8.1 \%}\td{+7.8 \% / +34.8 \% / +25.4 \% / +10.4 \%}}
+\tr{\td{entries written / hits, sessions of 1 MiB}\td{not run}\td{149,299 / 413,600}\td{174,998 / 325,478}}
+\tr{\td{without the table, sessions of 1 MiB: ticks / unfoldings / whnf / values}\td{not run}\td{+14.2 \% / +63.3 \% / +68.4 \% / +22.3 \%}\td{+11.6 \% / +50.4 \% / +37.0 \% / +15.0 \%}}
+}
+
+\p{The pairs are the instance paths of the algebraic hierarchy: \code{\verb~|NormedField.toNormedCommRing Real _ =?= Real.normedCommRing~}, \code{\verb~|Field.toCommRing Real Real.instField =?= Real.commRing~} and the like are the comparisons of the declaration above that gruszka answers from the table. The machine has nothing with this lifetime: its pair table and its memo words end with the session, after 51 units on average on Mathlib (13,814 resets for 714,712 units), 40 on navier-stokes-euler and 72 on cslib, and gruszka's session ends after 275, 225 and 386 units with one worker.}
+}
+
+\subtree{
+\title{4.3 Check facts and repeated declarations}
+
+\p{gruszka keeps, per shared closed term, that it passed check mode in an earlier declaration under a list of level-parameter names, and then infers it without checking. The machine's \code{pchk} is the same fact for terms without a level parameter. Hits per pass with one worker: gruszka 11.99 M on Mathlib, 1.95 M on navier-stokes-euler, 5.59 M on cslib; the machine 1.22 M, 0.67 M and 0.58 M. In ticks the fact is worth 1.9 \%, 6.2 \% and 2.0 \% to gruszka and 9.2 \% and 1.6 \% to the machine on the two smaller corpora, where it was switched off.}
+
+\p{\strong{The shadow counter.} The instrumented machine kept a table of the closed export terms \em{with} level parameters that passed check mode at the declaration's own levels, and counted every later check-mode inference of such a term in a later declaration, with the ticks of the outermost one:}
+
+\table{
+\tr{\th{the machine, default set, one worker}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{closed shared terms with level parameters that were checked}\td{36,036}\td{2,161}\td{15,695}}
+\tr{\td{checked again in a later declaration with the same list of level parameters}\td{73,445}\td{1,528}\td{26,770}}
+\tr{\td{ticks of the outermost of these inferences (what inferring without checking could save at most)}\td{1.25 M (0.22 \%)}\td{29,151 (0.02 \%)}\td{348,262 (0.16 \%)}}
+\tr{\td{the same with any list}\td{1.68 M}\td{44,974}\td{426,295}}
+}
+
+\p{So the extension of \code{pchk} to terms with level parameters is worth at most a fifth of a percent of the machine's ticks: inside a session the machine's check stamps already answer these terms, and across sessions they are few.}
+
+\p{\strong{Repeated declarations.} Where gruszka's fact does pay is the root of a declaration. The export holds many declarations twice: the elaborator's auxiliary proofs, matchers and compiler auxiliaries are emitted again under another private name. Counted by identical kind, list of level-parameter names, safety, type id and value id against an \em{earlier} unit:}
+
+\table{
+\tr{\th{}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{units that repeat an earlier unit}\td{59,923 (8.4 \%)}\td{13,336 (10.7 \%)}\td{30,466 (7.7 \%)}}
+\tr{\td{their ticks in the machine}\td{7.49 M (1.3 \%)}\td{1.97 M (1.4 \%)}\td{4.13 M (1.9 \%)}}
+\tr{\td{their ticks in gruszka}\td{1.06 M}\td{0.18 M}\td{0.54 M}}
+\tr{\td{their time inside units in the unit traces of rep-P11 (8 workers, smallest of the later passes): JVM launcher / executable}\td{0.84 s of 74.9 s / 1.07 s (1.1 \%)}\td{0.16 s of 17.7 s / 0.21 s (0.9 \%)}\td{0.40 s of 24.7 s / 0.51 s (1.7 \%)}}
+\tr{\td{the largest in the machine}\td{44,499 ticks (gruszka: 20)}\td{15,920 (14)}\td{22,653 (5)}}
+\tr{\td{distance to the first occurrence, median, in units}\td{233,976}\td{25,619}\td{133,065}}
+}
+
+\p{By kind on Mathlib: 37,282 compiler auxiliaries (2.27 M ticks), 7,475 auxiliary proofs (3.27 M), 6,030 matchers and their lemmas, 6,977 definitions. The repeat is far from its original, so no session holds it.}
+}
+}
+
+\subtree{
+\title{5. The three observations}
+
+\subtree{
+\title{5.1 The four eager-reduction proofs of \code{Batteries.Data.Char.Basic}}
+
+\p{\code{Char.of_any_eq_false_aux._proof_1_15} and \code{_proof_1_18}, \code{Char.any._proof_1} and \code{Char.all._proof_1} are proofs about \code{\verb~|c + 57343 + 1 < 1114112~} with a variable \code{c}, built by automation; they enter eager reduction, with 1, 3 and 12 deferred comparisons in the three that were looked at.}
+
+\table{
+\tr{\th{}\th{\code{of_any_eq_false_aux._proof_1_15}}\th{\code{_proof_1_18}}\th{\code{Char.any._proof_1}}\th{\code{Char.all._proof_1}}}
+\tr{\td{the machine, default set: ticks}\td{3,212,971}\td{3,218,191}\td{982,310}\td{980,211}}
+\tr{\td{- of them whnf / reduction without unfolding / code blocks / unfoldings}\td{458,829 / 458,873 / 631,048 / 172,167}\td{459,110 / 459,294 / 631,858 / 172,601}\td{173,080 / 172,818 / 115,875 / 284}\td{172,633 / 172,593 / 115,420 / 259}}
+\tr{\td{RLVM's reference engine: steps (the fourth by difference, from the run with the smaller budget)}\td{1,904}\td{8,138}\td{2,923}\td{2,795}}
+\tr{\td{gruszka: ticks / unfoldings}\td{1,519 / 177}\td{2,434 / 121}\td{1,467 / 92}\td{2,550 / 228}}
+\tr{\td{time in rep-P11 (cslib, 8 workers): executable / JVM launcher / gruszka, ms}\td{531.5 / 282.4 / 0.2}\td{513.6 / 248.7 / 0.2}\td{131.0 / 62.0 / 0.2}\td{150.5 / 87.2 / 0.3}}
+}
+
+\ul{
+\li{\strong{It is the machine's probe.} In the plain phase of a declaration that defers eager comparisons the machine runs, at each of the two points where the eager mode would lift a guard, what the eager branch would have done, to record whether the two modes agree ([eager reduction on the machine](design-eager-reduction)). On an open pair that is \code{reduce_nat} or a full whnf of a term with a free variable: here a recursion of 57,344 steps, the literal of the statement, with 3 to 8 whnf calls per step. The statistics say so: the largest probe that completes on cslib and on Mathlib is 2,752,589 ticks, and the next largest on any corpus is 63,654. The official plain procedure never starts that evaluation; RLVM's reference engine, which follows it, needs 1,904 to 8,138 steps.}
+\li{\strong{gruszka has no rule for it and no eager mode.} Neither its arena revision nor its present head mentions \code{eagerReduce}; the constant is an ordinary definition to it, and it has no "side is \code{Bool.true}: reduce the other fully" step either. It decides the four by its ordinary lazy delta in the ticks of the table. Switching off its shortcut for closed Nat operations changes none of the four counts.}
+\li{\strong{The setting.} \code{\verb~|-X machine.eager-probe=N~} is the budget of one probe, 2^22 by default. A probe that is cut leaves its point undecided, the declaration is declined when it enters eager reduction, and the reference engine decides it. One worker, the whole corpus:}
+}
+
+\table{
+\tr{\th{corpus}\th{budget 2^22 (default): ticks}\th{2^16: ticks, probes cut, units more for the reference engine, its steps more}\th{2^12}}
+\tr{\td{Mathlib}\td{574.10 M}\td{565.99 M (-1.41 \%), 4, 4, +15,760}\td{565.47 M (-1.50 \%), 10, 10, +69,133}}
+\tr{\td{cslib}\td{215.96 M}\td{207.84 M (-3.76 \%), 4, 4, +15,760}\td{207.39 M (-3.97 \%), 8, 8, +57,411}}
+\tr{\td{con-leche (its one cut probe is cut earlier)}\td{70.76 M}\td{66.63 M (-5.84 \%), 1 as before, 0, 0}\td{66.56 M (-5.92 \%), 1, 0, 0}}
+\tr{\td{navier-stokes-euler}\td{144.22 M}\td{the same, 0}\td{the same, 0}}
+\tr{\td{Init}\td{34.49 M}\td{the same, 0}\td{34.28 M (-0.60 \%), 4, 4, +41,651}}
+\tr{\td{Std}\td{56.96 M}\td{the same, 0}\td{56.75 M (-0.37 \%), 4, 4, +41,651}}
+\tr{\td{cedar}\td{76.67 M}\td{the same, 0}\td{76.46 M (-0.27 \%), 4, 4, +41,651}}
+\tr{\td{reachability}\td{9.01 M}\td{the same, 0}\td{the same, 0}}
+}
+
+\p{At 2^16 the four proofs cost the machine about 0.28 M ticks before the cut and the reference engine 15,760 steps; the largest probe that still completes (63,654 ticks, four units of Init that every corpus built on it contains) is 3 \% under the budget, so 2^17 is the value with a margin. Which of the two probe sites carries the 2.75 M ticks was not separated.}
+}
+
+\subtree{
+\title{5.2 The four \code{quadraticBilin} proofs of navier-stokes-euler}
+
+\table{
+\tr{\th{}\th{\code{FiveProfileMoments ._proof_6} (647,064 nodes)}\th{\code{._proof_9} (441,964)}\th{\code{TerminalCompensation ._proof_6} (398,013)}\th{\code{._proof_9} (272,462)}}
+\tr{\td{the machine, default: ticks}\td{3,361,005}\td{2,072,461}\td{1,690,798}\td{1,000,660}}
+\tr{\td{- unfoldings / lazy delta steps / comparisons / records}\td{164,735 / 262,503 / 207,254 / 948,010}\td{105,335 / 166,139 / 139,628 / 694,119}\td{57,412 / 107,986 / 122,540 / 441,709}\td{31,546 / 58,585 / 81,890 / 324,830}}
+\tr{\td{the machine without the cap of \code{congruence} (\code{\verb~|-X machine.cong-spend=0~}; 2^22 gives the same): ticks}\td{2,045,507}\td{1,240,721}\td{1,185,717}\td{725,089}}
+\tr{\td{- unfoldings / lazy delta steps / comparisons / records}\td{9,294 / 12,527 / 211,345 / 594,597}\td{6,904 / 8,814 / 142,240 / 470,164}\td{1,506 / 1,949 / 121,660 / 320,408}\td{967 / 1,191 / 81,434 / 258,002}}
+\tr{\td{gruszka: ticks}\td{3,068,923}\td{2,059,331}\td{1,782,033}\td{1,192,986}}
+\tr{\td{- of them entries of inference / answered by its cache}\td{2,299,664 / 1,921,669}\td{1,542,222 / 1,287,818}\td{1,382,917 / 1,157,651}\td{928,045 / 776,155}}
+\tr{\td{- unfoldings / lazy delta iterations / comparisons past the caches / values}\td{8,601 / 47,904 / 116,557 / 276,703}\td{5,839 / 32,103 / 78,065 / 185,741}\td{1,195 / 17,181 / 70,772 / 158,588}\td{916 / 10,693 / 46,529 / 106,695}}
+\tr{\td{inference misses: the machine / gruszka}\td{418,134 / 377,823}\td{243,037 / 254,211}\td{232,767 / 225,260}\td{138,721 / 151,825}}
+\tr{\td{time in rep-P11 (8 workers; gruszka one worker): executable / JVM launcher / gruszka, ms}\td{744.1 / 521.1 / 236.0}\td{382.5 / 299.2 / 130.9}\td{377.0 / 264.7 / 135.7}\td{188.3 / 146.6 / 69.3}}
+}
+
+\ul{
+\li{\strong{What gruszka does on a large proof term is what the machine does}: every value hash-consed (2.51 M intern calls for 276,703 values in the largest), the proof's nodes decoded into its arena as exported, inference in check mode of every node once per environment the node reads, the cache answering the shared ones (1.92 M hits). It does not infer only, and it skips no subproof that the machine checks: the inference misses agree within 10 \%.}
+\li{\strong{What it does not do is unfold.} The comparisons of these proofs are two applications of one head with large arguments. gruszka compares the arguments first (its structural walk and its argument probes). The machine does the same in a speculative segment (the same-head probe of \code{congruence}), and the segments of one declaration may spend 2^18 ticks in all ([the cap](log-9636)). A proof of 3.4 M ticks uses that up early; from then on the complete procedure runs in the official order and unfolds both sides: 164,735 unfoldings where gruszka needs 8,601. Without the cap the same-head probe answers 117,796 times instead of 12,471, all "true", and the unit needs 9,294 unfoldings.}
+\li{\strong{The whole effect of the cap on this corpus is these four units}: 144.22 M ticks with it, 141.29 M without, and the four go from 8.12 M to 5.20 M. On cslib the cap changes nothing (215.96 M both ways), on Mathlib 0.06 \% (574.10 M and 573.74 M). con-leche, for whose heaviest unit it was made, takes 70.76 M ticks with the cap, 72.65 M with 2^22 and 74.73 M without.}
+\li{\strong{Why gruszka's tick gets cheaper with size and the machine's dearer.} In the largest proof 75 \% of gruszka's ticks are entries of inference and 63 \% of all its ticks are answered by the inference cache (37 \% over the corpus): its average tick there is a probe. The machine does not tick on those hits, and with the cap in force its ticks there are unfoldings and the comparisons under them. The rest is the size of the session, which is the third lever of rep-P11 and is not touched by anything here: the unit ends with a session of 64 MB with the cap and 43 MB without.}
+}
+}
+
+\subtree{
+\title{5.3 A constant overhead per unit, or classes of units}
+
+\p{Classes. The tables of section 3 show no constant: a third of the units are cheaper in the machine's ticks than in gruszka's, units below 100 nodes are at 1.03 to 1.28 times, and half to three quarters of the excess is carried by the 7 to 11 \% of units at 2 times and more. Of the candidates of the question: \strong{session start}: the machine's one judgment per unit, \code{SIGD}, is 0.1 \% of the ticks, and a reset has no tick; \strong{type inference of binder domains} is not more work than in gruszka (inference misses 0.65 to 0.81 times, gruszka counting leaves); \strong{level instantiation} has no tick in either checker and was not counted; \strong{re-derivation after a session reset} is the cause, and it is not constant per unit: it falls on the units whose comparisons meet closed instance paths and closed computations that an earlier declaration already compared. In numbers of Mathlib's excess of 87.8 M ticks: the four eager proofs 9.5 \%, repeated declarations 7.3 \%, the remaining units at 2 times and more about 33 \%, the units between 1.25 and 2 times 54 \%, those between 0.8 and 1.25 times 16 \%, and the units below 0.8 times give 21 \% back.}
+}
+}
+
+\subtree{
+\title{6. Proposals}
+
+\p{Ranked by the size of what each attacks. "Cost only" means the same judgments, cheaper; "strategy" a different order of rules with the official verdict kept, to be gated against the official checker on the hostile suite; "shortcut" something the official kernel does not have, named by the class of [the divergence classes](design-official-divergence) it would fall under. None was implemented. The pass is bound by its total CPU on 8 cores (rep-P11, section 3.1), so a CPU second of the workers is an eighth of a second of the pass.}
+
+\ol{
+\li{\p{\strong{A table of comparison results for closed pairs that survives sessions} (what gruszka's closed-pair table is). \em{What gruszka does}: section 4.2. \em{What RLVM does}: the pair table and every memo word end with the session of 1 MiB; comparisons of closed instance paths and closed computations are done again in the next session. \em{Measured size}: without the table gruszka unfolds 23 \% more on Mathlib, 26 \% more on navier-stokes-euler and 35 \% more on cslib at sessions of 8 MiB; at the machine's session size of 1 MiB the table removes 39 \% and 34 \% of gruszka's unfoldings on the two smaller corpora, with 12 \% and 10 \% of its ticks and 18 \% and 13 \% of its values; the machine's unfoldings are within 4 \% of those of gruszka at 1 MiB without the table. \em{Estimated gain}: unfolding and what it triggers is on the stack of 13.9 \% of the workers' CPU on Mathlib, 11.4 \% on navier-stokes-euler and 14.7 \% on cslib (rep-P11, section 2.3, JVM launcher). A third of the unfoldings gone is 4 to 5 \% of the workers' CPU, and gruszka's tick figure says 10 to 12 \%; so 4 to 10 \% of the workers' CPU, 0.4 to 1.0 s of the 13.1 s Mathlib pass. The estimate rests on another checker's counts. \em{Soundness class}: a shortcut, class 3 of the divergence classes (a memo that survives a declaration) with class 2 (a pair table keyed by values), both tolerated kinds and both already taken by warm sessions; a kept "false" can turn into a wrong reject of the machine, which the pipeline's re-check by the reference engine repairs, as it does for the session's own. It must not be written once a declaration has compared under eager reduction, and not after a budget cut. \em{Prototype}: a name for a closed value that does not depend on the session (constant, level list, names of the arguments; a closed export term is a leaf), interned in a table per worker or shared and read-only after publication; the lookup guarded as in gruszka by the pair of head constants, so that an open pair costs one flag test; the gate is the full gate of the machine, the hostile suite with official verdicts under the adversarial pass of [the rule for a default](dec-YP0N), and the differential engine. Whether one shared table beats eight private ones was not measured: gruszka's is private.}}
+\li{\p{\strong{The probe budget of \code{eager} at 2^16 or 2^17 ticks instead of 2^22.} \em{Measured size}: 8.11 M ticks less on Mathlib (1.4 \%) and on cslib (3.8 \%), 4.13 M less on con-leche (5.8 \%), nothing on the other five corpora; four units more go to the reference engine on Mathlib and cslib, 15,760 steps. In rep-P11 the four units are 1.33 s of the executable's time inside units on cslib and 1.3 s on Mathlib. \em{Timed}: the table below. \em{Soundness class}: cost only in the verdict. A cut probe is the path the switch already has: the declaration is declined and the reference engine, the engine that follows the official order, decides it. \em{What it takes}: one constant, \code{DEFAULT_EAGER_PROBE} of \code{MachineEngine}; the guard on eight corpora; the eager rows of the hostile suite, which already run with a budget of one tick.}}
+\li{\p{\strong{A declaration that repeats an earlier one is not checked again.} \em{What gruszka does}: its check fact for the closed value and type answers the root; 5 to 50 ticks. \em{What RLVM does}: checks it in full, 7.49 M ticks on Mathlib. \em{Measured size}: 8.4 \% of the units of Mathlib, 10.7 \% of navier-stokes-euler, 7.7 \% of cslib; 1.3 to 1.9 \% of the ticks; 0.9 to 1.7 \% of the time inside units (0.84 s of CPU per Mathlib pass on the JVM launcher, 1.07 s in the executable, 0.1 s of the pass). \em{Soundness class}: cost only, in the strongest sense: the official check of a declaration is a function of its kind, level parameters, type and value and of the constants they mention, and its caches live for one declaration, so the official checker computes the second verdict exactly as the first. No waiting is needed: if the first is rejected the file is rejected at or before it. \em{What it takes}: at load, a table from the five-tuple to the first unit (the loader or the driver); the repeat is reported with the verdict of its original. The tick-identity gate does not apply by construction; the verdict gates do.}}
+\li{\p{\strong{The cap of \code{congruence} scaled with the unit.} \em{Measured size}: without the cap navier-stokes-euler needs 2.93 M ticks less (2.0 \%), all of it in four units that are 1.69 s of the executable's 23.0 s inside units (rep-P11) and fall from 8.12 M to 5.20 M ticks; Mathlib 0.06 \% less, cslib nothing; con-leche 2.7 \% more with a cap of 2^22 and 5.6 \% more with none. A cap that grows with the nodes of the unit, or with the ticks the unit has used, would keep con-leche's protection and free the giant proofs. \em{Estimated gain}: 0.4 to 0.6 s of CPU on navier-stokes-euler, 2 \% of the pass. \em{Soundness class}: strategy inside a switch that is already in the default set: the segments answer more comparisons from the arguments, the tolerated kind of [the proof-comparison shortcuts](design-proof-comparison-shortcuts); the hostile suite decides. \em{What it takes}: \code{Conv.congruence} and the setting \code{machine.cong-spend}; what the segments of a giant unit spend without a cap was not counted and is the number the scaling needs.}}
+}
+
+\p{\strong{Timed: two settings of the shipped build against itself.} The executable and the JVM launcher of the shared distribution of 2026-11-25 09:13 UTC, a run without options but \code{\verb~|--threads 8 --stats -X passes=N~} and the one setting; warm passes that reload the file, pipelined load; variants interleaved round by round inside one quiet-core window per corpus, three rounds; a cell is the mean over the rounds of the median later pass, in seconds, with the process CPU of that pass in brackets.}
+
+\table{
+\tr{\th{corpus, launcher}\th{default}\th{\code{\verb~|-X machine.eager-probe=65536~}}\th{\code{\verb~|-X machine.cong-spend=4194304~}}\th{\code{\verb~|-X machine.cong-spend=0~}}\th{rounds}}
+\tr{\td{Mathlib, the executable}\td{13.748 (106.5)}\td{13.487 (103.4), -1.9 \%}\td{-}\td{-}\td{3}}
+\tr{\td{cslib, the executable}\td{5.324 (40.3)}\td{5.097 (38.7), -4.3 \%}\td{-}\td{-}\td{3}}
+\tr{\td{con-leche, the executable}\td{1.447 (9.8)}\td{1.416 (9.1), -2.1 \%}\td{1.482 (10.0), +2.5 \%}\td{-}\td{3}}
+\tr{\td{navier-stokes-euler, the executable}\td{3.634 (27.6)}\td{-}\td{3.652 (28.1), +0.5 \%}\td{3.588 (27.5), -1.3 \%}\td{3}}
+\tr{\td{Mathlib, the JVM launcher}\td{12.208 (93.7)}\td{12.582 (96.1), +3.1 \%}\td{-}\td{-}\td{3}}
+\tr{\td{cslib, the JVM launcher}\td{4.561 (34.4)}\td{4.380 (33.3), -4.0 \%}\td{-}\td{-}\td{3}}
+}
+
+\ul{
+\li{\strong{The probe budget shows where the counts say it should.} cslib: every round with the budget is below every round without it on both launchers, and the process CPU of a pass falls by 1.6 s in the executable, which is what the four units cost there. con-leche gains 2 \% with rounds that overlap. On Mathlib the expected 0.16 s is 1.2 \% of the pass and is not resolved by these windows: in the executable the rounds of one variant differ by up to 1.5 s; on the JVM launcher two of the three rounds with the budget ran with 4 to 8 \% more process CPU than any round without it, for 1.4 \% fewer ticks, and the third is equal (12.21 against 12.13 s). The counts cannot produce that; the load of the host can.}
+\li{\strong{The cap of \code{congruence} is not resolved in time}: navier-stokes-euler without the cap is 1.3 \% faster and with a cap of 2^22 0.5 \% slower, inside the scatter of the window, whose first round was 0.4 s slower than the later ones for every variant; con-leche with a cap of 2^22 is 2.5 \% slower, as its ticks say.}
+\li{\strong{Peak resident set} of the process, the largest over the rounds, default against the budget of 2^16: cslib 2,008 and 1,600 MiB in the executable, 3,771 and 2,421 MiB on the JVM launcher; con-leche 1,375 and 912 MiB; Mathlib 4,425 and 4,033 MiB, 5,234 and 4,822 MiB. A probe of millions of ticks is one session of that size.}
+\li{The windows were taken while other agents measured and built on the other cores of the host; the passes are 4 to 14 \% slower than the same build's rows in rep-INT8. They are a first reading, not the guard of the rule for a default: that needs eight corpora on both launchers.}
+}
+}
+
+\subtree{
+\title{7. What the data does not support}
+
+\ul{
+\li{\strong{Check facts for closed terms with level parameters}: 0.02 to 0.22 \% of the machine's ticks (section 4.3), although gruszka has 10 times the hits.}
+\li{\strong{gruszka's other cross-declaration stores}: the pair cache for closed export terms that are compared as thunks (10,621 hits on navier-stokes-euler) and the open facts for restated bodies (1,265 hits, 31,066 on Mathlib).}
+\li{\strong{A rule for eager reduction taken from gruszka}: there is none.}
+\li{\strong{A special treatment of large proof terms}: gruszka has none; it decodes, hash-conses and checks them as the machine does.}
+\li{\strong{gruszka's shortcut for closed Nat operations in unfolding}: switching it off changes cslib by 1,886 of 188.0 M ticks.}
+\li{\strong{A constant to remove per unit}: there is none (section 5.3).}
+\li{\strong{The ratio of the tick totals as a measure of work}, in either direction, and "CPU per tick" across the two checkers.}
+}
+}
+
+\subtree{
+\title{8. What was not determined}
+
+\ul{
+\li{What a closed-pair table gives the machine: it was measured in gruszka only. A shadow count in the machine needs the session-independent name, which is the prototype.}
+\li{Why the machine asks whnf 1.8 to 2.3 times as often beyond what the resets explain: at a session cap of 8 MiB it still asks 1.43 times on navier-stokes-euler and 2.0 times on cslib, and with nothing kept on either side 1.20 and 1.46 times. Three quarters of the calls are the projection rule; gruszka's count by caller was not taken.}
+\li{Why the machine's neutral records stay 1.34 times gruszka's on cslib at equal session size.}
+\li{What the repeated run of a declaration that reaches its first eager argument in a mode-sensitive session costs: 1,502 units of Mathlib, 812 of cslib are run twice; their ticks were not separated.}
+\li{Which of the two probe sites of \code{eager} the 2.75 M ticks belong to, and what the segments of \code{congruence} spend in a giant unit without a cap.}
+\li{Mathlib with sessions of one declaration and with gruszka's session size varied; gruszka with 8 workers (its closed-pair table and sessions are per worker, so its hits are lower there); anything on x86-64.}
+\li{What an event costs. In the arena's metric the executable needs 3.1 to 3.6 times gruszka's instructions on these corpora (rep-INT8), far above every ratio of matched events here (1.0 to 2.3), so per event the machine executes more instructions; no instruction count per event or per unit was taken.}
+\li{Times: every row but the table of section 6 is a count. The counter build of gruszka is not its measured binary.}
+}
+}
+
+\subtree{
+\title{9. Tools}
+
+\p{All outside the repository. For the machine: a per-unit counter line, the tick-site counters, the record census, the caller census and the shadow table, behind system properties of a private build of \code{rlvm-machine}. For gruszka: a private copy of the arena revision built with its features \code{cnt} and \code{knobs}, with ticks by site, values by kind, the counters of its statistics per declaration and five switches. A filter from gruszka's per-declaration lines to a table, a loader of both tables, the join by class, size and ratio, the table of repeated declarations (kind, level-parameter names, safety, type id, value id read from the export), an index of the export by expression id with a printer of one declaration, and the generator of the tables of this report. To repeat after a change: run both instrumented builds with one worker in file order on the corpus, and join.}
+}

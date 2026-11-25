@@ -1,0 +1,21 @@
+\title{The tick counters of the machine and of gruszka count different events; with nothing kept between declarations the two checkers unfold and compare alike}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{benchmark}
+\tag{arena}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-E](rep-OPT-E), sections 2 and 4. It corrects a reading of [the profile of the final default configuration](rep-P11), section 5.2. Conditions: counts of one run per row, one worker, file order, private builds of both checkers with counters added; the machine with its default switch set, gruszka at its arena revision; no time is involved.}
+
+\ul{
+\li{\strong{The instruments.} gruszka ticks at nine sites, two of them before a cache is asked: 42 to 51 \% of its ticks on Mathlib, navier-stokes-euler and cslib are entries of inference, and 25 to 37 \% of all its ticks are inference-cache hits. The machine never ticks on a memo hit and ticks where gruszka does not: 19 to 23 \% of its ticks are nodes of inert application nests. So neither the ratio of the totals (1.16, 1.10 and 1.15 with one worker in file order) nor "CPU per tick" compares work.}
+\li{\strong{The matched events.} Unfoldings through a body are 1.32, 1.86 and 1.45 times gruszka's, not 0.93 to 1.09: a memo hit of the machine's unfolding returns before the call is counted, so the hits must not be subtracted from the calls, and gruszka's count includes 4 to 8 \% that go straight to the branch of a casesOn or a matcher, which the machine does in a case tree. whnf past its memo is 1.8 to 2.3 times, comparisons past the tables 1.00 to 1.47 times, hash-consed records 1.8 to 2.2 times gruszka's values (1.2 to 1.4 times when gruszka's inference-cache entries, which the machine keeps as suspension records, are counted).}
+\li{\strong{Nothing kept, no difference in unfoldings.} navier-stokes-euler with a session of one declaration and every cross-declaration fact off on both sides: 14.25 M unfoldings, 18.2 M comparisons and 7.6 M whnf in the machine, 14.17 M through a body, 17.1 M and 6.4 M in gruszka; cslib 12.07 M unfoldings against 12.61 M. One declaration checked alone: 1,410 ticks and 123 unfoldings against 1,432 and 125. The difference in reduction work between the two checkers is what each remembers from one declaration to the next: see [the closed-pair table](ins-OMW4).}
+\li{\strong{No constant per unit.} A third of the units take fewer ticks in the machine than in gruszka; the 7 to 11 \% of units at twice gruszka's ticks and more carry 50 to 77 \% of the excess.}
+}
+
+\p{\strong{Not measured:} 8 workers (gruszka's total moves by up to 8 \% with its order of declarations); Mathlib with sessions of one declaration.}

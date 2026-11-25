@@ -1,0 +1,21 @@
+\title{gruszka's lead in unfoldings is a table of comparison results for closed pairs that survives sessions; the machine has nothing with that lifetime}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{arena}
+\tag{performance}
+\tag{soundness}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-E](rep-OPT-E), sections 4 and 6. Conditions: counts, one worker, file order, a private build of gruszka's arena revision with its mechanisms switchable and the machine with its default switch set; nothing was timed and nothing was built into the machine.}
+
+\ul{
+\li{\strong{The mechanism.} When two values without a free variable are compared and the comparison unfolds at least once, gruszka writes the outcome, "true" or "false", under the pair of their names, where a name is the hash-consed id of the unreduced closed term the value stands for, in a table of the worker that outlives its sessions; a later declaration reads it. The pairs are the instance paths of the algebraic hierarchy and closed computations. 144,000 to 305,000 entries per corpus, 209,000 to 656,000 hits.}
+\li{\strong{Its size in gruszka.} Without it gruszka unfolds 23 \% more on Mathlib, 26 \% more on navier-stokes-euler and 35 \% more on cslib. With sessions of 1 MiB, the machine's cap, the table removes 39 \% and 34 \% of gruszka's unfoldings on navier-stokes-euler and cslib, 12 \% and 10 \% of its ticks, 18 \% and 13 \% of its values; and at that session size without the table gruszka unfolds as often as the machine does at its default (unfoldings through a body: 6.45 M against 6.22 M, 9.68 M against 9.29 M).}
+\li{\strong{What the machine keeps.} Its pair table and memo words end with the session, every 40 to 72 units; \code{pchk} survives, and is worth 9 \% of the ticks on navier-stokes-euler and 2 \% on cslib. An extension of \code{pchk} to terms with level parameters, which gruszka has, would answer 0.02 to 0.22 \% of the machine's ticks (a shadow counter): not a lever.}
+\li{\strong{The estimate for the machine}: a third of its unfoldings, 4 to 10 \% of the workers' CPU. It is a shortcut of the tolerated kind that warm sessions already are (a memo that survives a declaration, a pair table keyed by values), so it needs the adversarial pass with official verdicts.}
+}
+
+\p{\strong{Not determined:} what the table gives in the machine; that needs a name for a closed value that does not depend on the session, which is the prototype. Whether a table shared by the workers beats gruszka's private ones.}
