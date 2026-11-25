@@ -33,6 +33,11 @@ public final class TestPluginChecker implements Checker {
     }
 
     @Override
+    public String defaults() {
+        return "the test double declines";
+    }
+
+    @Override
     public Verdict check(Path export, Options options) throws UsageException {
         lastExport = export;
         lastOptions = options;

@@ -217,10 +217,43 @@ of the same statement elsewhere:
 accept path of the kernel is a derivation; the caches hold facts, and an entry that is "there too early" or "one
 object too many" changes which true facts the incomplete procedure finds.
 
-The one wrong REJECT of the practical mode: `s3-mdata-eager-hidden-ok` (the loader drops the `mdata` around
-`eagerReduce`, the kernel enters eager reduction, where the official kernel itself rejects the statement:
-`s3-mdata-eager-plainform-bad`). Only a file with `mdata` records can do this; lean4export writes them only with
-`--export-mdata`, and none of the corpora or tests has one.
+### 6.1 Metadata in the practical mode: transparent, except around an application of `eagerReduce`
+
+Under the practical policy a dropped `mdata` node may make RLVM accept more than the official checker (kind T,
+tolerated), but it must not make RLVM REJECT what the official checker accepts (OWNER-NOTES 13 (c)).
+`s3-mdata-eager-hidden-ok` did: the node stands around `eagerReduce (X = X) (Eq.refl X)`, the official
+`is_eager_reduce` (`infer_app`: `is_const(get_app_fn(arg), eagerReduce) && get_app_num_args(arg) == 2`) looks AT the
+node, not through it, so the official kernel checks the argument without eager reduction and accepts; with the node
+dropped the kernel entered eager reduction, where the official kernel itself rejects the statement
+(`s3-mdata-eager-plainform-bad`).
+
+**Rule (`rlvm-load` 58b0056c0417, both policies).** A declaration is DECLINED if it contains a record around which
+a metadata node stood and which is - or cannot be shown not to be - the constant `eagerReduce` applied to at most
+two arguments (the node is then on the path from an argument `eagerReduce _ _` to its head: the argument itself, the
+partial application, or the constant). `Loader.exprMData` looks at the wrapped record in the segment being read
+(`mayBeEagerReduce`); a second bit per expression ordinal (`hidden`, a subset of the metadata bit, allocated at the
+first such record) is propagated to every record that contains it, and `declare` declines the axiom / definition /
+theorem / opaque that carries it. The rule can only fire in a file that has a metadata record AND names
+`eagerReduce`; there the loader fails closed where it cannot read a record back (an application that belongs to an
+earlier declaration or lies in a packed run counts as "may be"). Metadata inside the two arguments, around an
+application with three arguments, or anywhere else stays transparent. Cost: one `len == 11` test per name record,
+one compare per `const` record; files without metadata are loaded as before (store digest identical).
+
+**Which other official tests on un-normalised terms does a dropped node fool, and in which direction?**
+
+| Official test | With the node | With the node dropped | Can an official ACCEPT become our REJECT? |
+|---|---|---|---|
+| `is_eager_reduce(app_arg(e))` (infer_app, check mode) | not eager | eager | **yes, directly** (Nat folding with free variables decides `false` early): closed by the rule above |
+| `cheap_beta_reduce(r)` on the inferred type of a lambda / let body (`is_app`, `get_app_fn`, `is_lambda`) | the type stays `(mdata (fun x => C)) a` or `mdata ((fun x => C) a)` | reduced to `C` | not by itself (the two types are convertible and every comparison strips the node first). **Through the caches, yes in principle**: officially this occurrence and an explicit occurrence of the same term are one key of `m_success`; here one is `C` and the other the redex, so a pair recorded for the first does not answer the second, which is then recomputed in a later cache state (S3's pair with a full `whnf_core` in between would fail). Not built, not closed: the rule would be "decline a declaration with a metadata node on the head path of a beta redex" |
+| `is_pi(f_type)` / `ensure_pi_core` (infer_app, both modes), `ensure_sort_core`, the binder loops of `infer_lambda` / `infer_pi` / `infer_let`, `get_app_args` of infer-only `infer_app` | `whnf` strips the node, or the telescope is split in two | the direct path | no: the same types and the same judgments; only the place of an instantiation and function-memo entries differ |
+| `quick_is_def_eq`: `t == s`, the success set, the kind switch (`MData` against `MData` compares the bodies; mixed kinds fall through to `whnf_core`, which strips) | another key | the key of the bare term | no: more hits, i.e. accepts more (S3-F2, kind T); the mixed-kind path reaches the same binder / sort / literal comparison one step later |
+| the `Bool.true` shortcut (`is_constant(s, Bool.true)`) | no shortcut for `mdata Bool.true`; lazy delta reaches the same constant | shortcut | no: accepts as much, earlier |
+| `is_def_eq_binding`: `binding_domain(t) != binding_domain(s)`, the telescope loop | the domains are compared, the telescope stops at the node | equal ids, one telescope | no: fewer comparisons here, the same answer |
+| everything after a `whnf_core` / `whnf` (`is_delta`, `is_def_eq_offset`, `reduce_nat`, `is_def_eq_args` / `_app`, eta, structure eta, `infer_proj`, the recursor and quotient rules) | the head and the spine have been stripped: `whnf_core` rebuilds an application whose head changed | - | no difference |
+| `add_inductive` (the syntactic tests on inductive and constructor types) | - | - | metadata in an inductive or quot record is declined in both modes (LP2) |
+
+So one more official test (`cheap_beta_reduce`) could in principle turn an official accept into a reject, and only
+together with a cache-history construction; everything else can only make the practical mode accept more.
 
 ## 7. What the strict mode costs on real input
 
@@ -342,6 +375,9 @@ The published jars: `rlvm-ref` a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-exp
   that everything else in the kernel is the official procedure. The evidence for the first is section 3's table
   (each continuation reproduces the official verdict exactly where it is the truth); for the second, the gates.
   A hazard is decided by at most 63 checks of the declaration; more would be a decline (not seen).
-- **A wrong REJECT of the practical mode on a file with `mdata`** (`s3-mdata-eager-hidden-ok`) remains by design
-  (the loader's default drops metadata); contract (c) of OWNER-NOTES 13 is about real inputs, which have none.
+- **`cheap_beta_reduce` behind a dropped metadata node** (section 6.1): an official accept could in principle
+  become a reject of the practical mode through the caches; no export was built and no rule closes it.
+- The rule of section 6.1 fails closed in a file that names `eagerReduce`: there a metadata node around ANY record
+  of an earlier declaration (or of a packed run) declines the declaration, because the loader cannot read such a
+  record back.
 - Mathlib: see section 7 for what was run.

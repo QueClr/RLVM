@@ -207,16 +207,30 @@ public final class Main {
 
     private static int version(PrintStream out, Checker injected) {
         out.println("rlvm " + BuildInfo.VERSION);
+        out.println("build: " + BuildInfo.build());
         out.println("runtime: " + BuildInfo.runtime());
         out.println("truffle: " + BuildInfo.TRUFFLE_VERSION + " (compiled against)");
+        Checker dflt = injected;
         if (injected != null) {
             out.println("checker: " + injected.name() + " - " + injected.description());
         } else {
             boolean first = true;
             for (Checker c : Checkers.all()) {
                 out.println((first ? "checker: " : "         ") + c.name() + " - " + c.description() + (first ? " (default)" : ""));
+                if (first) {
+                    dflt = c;
+                }
                 first = false;
             }
+        }
+        // What `rlvm FILE` does without any option, in the words of the checker that would run.
+        try {
+            String defaults = dflt == null ? null : dflt.defaults();
+            if (defaults != null && !defaults.isBlank()) {
+                out.println("default: " + defaults.strip());
+            }
+        } catch (RuntimeException | java.util.ServiceConfigurationError | LinkageError e) {
+            // --version never fails because of a checker.
         }
         return 0;
     }
@@ -250,6 +264,7 @@ public final class Main {
                     "",
                     "Checks a lean4export NDJSON file with the RLVM Lean 4 kernel. Without an EXPORT argument the",
                     "path is taken from the environment variable IN (the Lean Kernel Arena's convention).",
+                    "A run without options is the fastest configuration: 'rlvm --version' says what it is.",
                     "",
                     "Options:",
                     "  -j N, --threads N     worker threads; 'auto' (default) lets the checker decide, up to 8",
@@ -261,8 +276,14 @@ public final class Main {
                     "  -X KEY[=VALUE]        setting passed through to the checker implementation (the settings of",
                     "                        the checker that would run are listed at the end of this text)",
                     "  -q, --quiet           print errors only",
-                    "  -V, --version         print version, runtime and available checkers",
+                    "  -V, --version         print version, build, runtime, the checkers and what a run without",
+                    "                        options does",
                     "  -h, --help            print this text",
+                    "",
+                    "Memory (the executable's own run-time options, written without a blank; defaults are baked",
+                    "in at build time and shown by --version):",
+                    "  -Xmx<size>            maximum heap, e.g. -Xmx8g",
+                    "  -Xms<size>, -Xmn<size>  minimum heap, maximum young generation",
                     "",
                     "Diagnostics:",
                     "      --truffle-probe   verify that Truffle runtime compilation works in this build; -X options",
@@ -338,10 +359,11 @@ public final class Main {
                         throw new UsageException("-X needs KEY[=VALUE]");
                     }
                     if (looksLikeVmOption(kv)) {
-                        // A native image consumes -Xmx/-Xms/-Xmn/-Xss/-XX: itself and bin/rlvm-jvm forwards
-                        // them to java, so one of them arriving here means it went to the wrong place.
-                        throw new UsageException("'-X" + kv + "' is a VM option, not a checker setting: run through bin/rlvm-jvm, "
-                                        + "or put it before the main class on the java command line");
+                        // The executable (a native image) consumes -Xmx/-Xms/-Xmn/-Xss/-XX: itself before
+                        // main runs, and the development JVM launcher forwards them to java: one of them
+                        // arriving here was written with a blank after -X, or went to a bare java command.
+                        throw new UsageException("'-X" + kv + "' is a VM option, not a checker setting: write it without a blank "
+                                        + "(-X" + kv + "), or put it before the main class on a java command line");
                     }
                     extra.put(key, k < 0 ? "true" : kv.substring(k + 1));
                     break;

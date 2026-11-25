@@ -46,6 +46,15 @@ public interface Checker {
         return "";
     }
 
+    /**
+     * What a run without any option does, for {@code --version}: one line (engine, policy, workers,
+     * load) that the launcher prints as {@code default: ...} for the checker that would run. Empty
+     * (the default): nothing is printed.
+     */
+    default String defaults() {
+        return "";
+    }
+
     /** The implementation with the highest priority is the default. The placeholder has {@link Integer#MIN_VALUE}. */
     default int priority() {
         return 0;

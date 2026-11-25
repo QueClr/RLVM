@@ -48,6 +48,27 @@ class RlvmCheckerTest {
         assertTrue(new RlvmChecker().description().contains("engines: "));
     }
 
+    /**
+     * The single executable says what a run without options is (OWNER-NOTES 16): one line made from
+     * the constants that decide it. On this module's class path the reference kernel is the only
+     * engine; a launcher that has {@code Checker.defaults()} prints the line as {@code default: ...}.
+     */
+    @Test
+    void defaultsLineSaysWhatARunWithoutOptionsDoes() throws Exception {
+        String d = new RlvmChecker().defaults();
+        assertEquals("engine reference, policy practical; one worker per CPU, at most 8; a file of 8 MiB or more is "
+                + "checked while it is read (pipelined), with 2 scanner threads from 256 MiB", d);
+        boolean launcherPrintsDefaults;
+        try {
+            rlvm.cli.Checker.class.getMethod("defaults");
+            launcherPrintsDefaults = true;
+        } catch (NoSuchMethodException e) {
+            launcherPrintsDefaults = false;
+        }
+        LauncherAccess.Result r = LauncherAccess.run(new HashMap<>(), "--version");
+        assertEquals(launcherPrintsDefaults, r.out.contains("\ndefault: " + d + "\n"), r.out);
+    }
+
     @Test
     void launcherOptionsBecomeARunConfig() {
         RlvmChecker checker = new RlvmChecker();

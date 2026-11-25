@@ -230,6 +230,7 @@ class MainTest {
             assertEquals(ExitCode.USAGE, run(env(), vm, in), vm);
         }
         assertTrue(stderr().contains("VM option"), stderr());
+        assertFalse(stderr().contains("rlvm-jvm"), "the release has one executable; no message names a second launcher: " + stderr());
         // Words that merely start like one are fine.
         assertEquals(ExitCode.DECLINE, run(env(), "-Xmsg=hello", "-Xmxyz", in));
     }
@@ -275,6 +276,10 @@ class MainTest {
         assertTrue(v.contains("test-plugin"), v);
         assertTrue(v.contains("placeholder"), v);
         assertFalse(v.contains("unknown"), "build.properties must be filtered by Maven: " + v);
+        // What the executable is (on a JVM: the jars; an image carries scripts/build.sh's text) and what a
+        // run without options does (Checker.defaults() of the checker that would run), each on one line.
+        assertTrue(v.contains("\nbuild: jars on a JVM"), v);
+        assertTrue(v.endsWith("default: the test double declines\n"), v);
         outBytes.reset();
         assertEquals(0, run(env("IN", export.toString()), "-V"), "IN alone does not make --version a check");
         assertEquals(null, TestPluginChecker.lastExport);

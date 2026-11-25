@@ -96,6 +96,27 @@ public final class RlvmChecker implements Checker {
                 "");
     }
 
+    /**
+     * What a run without any option does, for {@code rlvm --version} ({@code rlvm.cli.Checker.defaults()};
+     * without {@code @Override} for the same reason as {@link #usage()}): the engine by priority, the
+     * policy, the automatic worker count and the load rule, from the constants that decide them. The
+     * release is one executable whose plain run is the fastest configuration (OWNER-NOTES 16); this is
+     * the line that says which one that is.
+     */
+    public String defaults() {
+        String engine;
+        try {
+            engine = Engines.primary(null, Engines.providers()).name();
+        } catch (RuntimeException | java.util.ServiceConfigurationError e) {
+            engine = "unavailable";
+        }
+        long pipelineMib = new RunConfig().pipelineMinBytes >> 20;
+        return "engine " + engine + ", policy practical; one worker per CPU, at most " + AUTO_MAX_WORKERS
+                + "; a file of " + pipelineMib + " MiB or more is checked while it is read (pipelined), with "
+                + MainOptions.DEFAULT_SCAN_THREADS + " scanner threads from "
+                + (MainOptions.SCAN_THREADS_MIN_BYTES >> 20) + " MiB";
+    }
+
     /** Above the launcher's placeholder; the highest priority is the default checker. */
     @Override
     public int priority() {

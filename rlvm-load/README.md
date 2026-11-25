@@ -427,6 +427,21 @@ would decline 3 of the 20 mutants (two of which the official checker accepts).
    metadata even when it is referenced directly (over-approximation; it can only decline). Metadata in
    definitions, theorems, axioms and opaques is accepted by default: it is invisible to type checking
    in the theory (strict policy: declined, above).
+   **One exception to the transparency, under BOTH policies** (R2, 2026-11-25; OWNER-NOTES 13 (c): the
+   practical mode may accept more than the official checker, it must not reject what that accepts): a
+   declaration is declined if a metadata node stood around a record that is, or cannot be shown not to
+   be, the constant `eagerReduce` applied to at most two arguments. Officially the node hides the
+   application from `is_eager_reduce` (`infer_app`), so the argument is checked without eager reduction;
+   with the node dropped the kernel entered eager reduction and rejected
+   `work/s3/exports/s3-mdata-eager-hidden-ok.ndjson`, which the official checker accepts.
+   `Loader.exprMData` looks at the wrapped record (`mayBeEagerReduce`: the records of the segment being
+   read; an application of an earlier declaration or of a packed run cannot be read back and counts as
+   "may be"), a second bit per ordinal (`hidden`) travels with the metadata bit, `declare` declines
+   ("metadata (mdata) node around an application of eagerReduce"). It needs a metadata record and the
+   name `eagerReduce` in the file; files without metadata pay one length test per name record and one
+   compare per const record. Test: `SplitTest.metadataAroundAnApplicationOfEagerReduceIsDeclinedUnderBothPolicies`.
+   The other official tests that a dropped node changes are listed in
+   `docs/design/review/reference-caches.md`, section 6.1.
    Binder names and binder infos are not part of the official term identity (`expr_eq_fn<false>`).
    **The `nondep` flag of a `letE` is** (R2, finding R2-F1, 2026-11-24): `expr_eq_fn` compares
    `let_nondep(a) == let_nondep(b)` and the hash does not see it, so `let x := v; b` with and without
