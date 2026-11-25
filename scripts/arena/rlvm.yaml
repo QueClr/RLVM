@@ -21,19 +21,22 @@
 #   15,741, declined 2,034); 1,196 hostile exports: no wrong accept, no wrong reject (agree 1,124, 68
 #   accepts of the tolerated kind, 4 declined); all eight corpora accepted.
 # - THE ARENA'S COMPLETE TEST SET (270 tests: 148 good incl. the eight corpora, 92 bad, 30 `either`) by
-#   the arena's own procedure was run on EARLIER builds: with the reference engine as the default (no
-#   wrong verdict: 148 of 148 good accepted, 92 of 92 bad rejected, of the `either` tests 9 accepted, 19
-#   rejected and TWO DECLINED - `corner-cases/eta-struct-major-no-whnf` and
-#   `eta-struct-major-and-no-whnf`: the official kernel does not terminate there, RLVM says so and exits
-#   with 2) and with the machine and this switch set named on the run line (the same status on every
-#   test). It has NOT been run again on the machine-default binary: to do before submission.
+#   the arena's own procedure, on the machine-default binary of the frozen jar set (2026-11-25, the
+#   development image and the release-layout image, same status on all 270; *agentic-note*: rep-AR2):
+#   no wrong verdict, no error, no timeout - 148 of 148 good accepted, 92 of 92 bad rejected, of the
+#   `either` tests 11 accepted, 17 rejected and TWO DECLINED - `corner-cases/eta-struct-major-no-whnf`
+#   and `eta-struct-major-and-no-whnf`: the official kernel does not terminate there, RLVM says so and
+#   exits with 2. Two `either` tests are accepted that the official checker (v4.35.0) and RLVM's
+#   reference engine reject: `corner-cases/alg-conv-trans-quot-left` and `eta-struct-major-and` (the
+#   two proof-comparison shortcuts; with the reference engine the split is 9 / 19 / 2). The largest
+#   share of a time limit is 5 %. Not measured on x86-64.
 # - THE POLICY of the default configuration is "practical" (the maintainer's decision; *agentic-note*:
 #   design-exactness-contract): (a) never accept a statement that is not derivable in Lean's type
 #   theory; (b) the official verdict on every real input - what lean4export writes, the arena's good and
 #   bad tests, the mutant corpora; (c) everything the official checker accepts is accepted; (d) a
 #   derivable statement that the official checker rejects only through its own incompleteness,
 #   non-transitivity, cache order or object identity may be accepted (the known classes: *agentic-note*:
-#   design-official-divergence; none is on the arena's test set). A rejection of a file in which the
+#   design-official-divergence; on the arena's test set only the two `either` tests named above). A rejection of a file in which the
 #   loader dropped a metadata node is checked again in the strict mode before it is reported. The strict
 #   mode is one option, `-X policy=strict`: the reference engine alone, declining where it would need
 #   the official object identity. The run line below is the default policy.
@@ -91,8 +94,8 @@ description: |
   `-X policy=strict` checks with the reference engine alone.
 
   Policy: *practical*. RLVM gives the official verdict on everything a Lean exporter writes and
-  on the arena's tests, and never accepts a statement that is not derivable in Lean's type
-  theory. It does not reproduce the official implementation's object identity and cache order:
+  on the arena's good and bad tests, and never accepts a statement that is not derivable in Lean's
+  type theory. It does not reproduce the official implementation's object identity and cache order:
   a hand-made export that the official checker rejects only for such a reason (a term against the
   same term inside a metadata node, two `let` terms that differ in the non-dependence flag, one
   subterm written as two export records) may be accepted - what it states is derivable. With

@@ -1,0 +1,86 @@
+\title{AR2 - The arena's own procedure on the final build: the machine as default engine}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{benchmark}
+\tag{soundness}
+\tag{performance}
+\import{base-macros}
+
+\p{The arena's complete test set, run by the arena's procedure on the two executables of the frozen jar set, in the evening of 2026-11-24 (03:55 to 04:03 UTC on 2026-11-25). It repeats [the first run of the procedure](rep-AR1) on the build in which the machine is the default engine. This host is aarch64; the arena's runner is x86-64, so every place on the board below is a projection.}
+
+\subtree{
+\title{1. What was run}
+
+\ul{
+\li{\strong{Development image:} the shared distribution built at 03:21 UTC from the frozen jars: machine \code{fa6d5d3bf377}, main \code{3729609561e3}, load \code{58b0056c0417}, reference engine \code{a20c24a26b7c}, the level module compiled from the tree.}
+\li{\strong{Release image:} built for this run from the same jars with \src{scripts/build.sh} in the release layout, one file \code{\verb~|bin/rlvm~} and its build record; 68 s, peak 5.0 GB. Its \code{\verb~|--version~} output is identical to the development image's and says that the default engine is the machine. The two images have the same size and are not byte-identical: 58.7 M of 68.2 M bytes differ, as with every second build of a native image. The run through it is therefore the check of the release executable.}
+\li{\strong{Run line:} the run line of \src{scripts/arena/rlvm.yaml} as it stands, with no option beyond it: 8 worker threads, the practical policy, the machine as default engine, the launcher's re-check of a rejection under the strict policy.}
+\li{\strong{Procedure:} one container with the arena's limits, 8 performance cores, 16 GB, no network; the 270 tests one after the other with the arena's time limit per test, with instruction counters and GNU time around the run line; the whole suite inside one quiet measurement window, 94 s per image. Two more Mathlib runs per image, each in a container of its own.}
+}
+}
+
+\subtree{
+\title{2. Verdicts}
+
+\table{
+\tr{\th{image}\th{good: accepted / rejected / declined / error / timeout}\th{bad: rejected / accepted / declined}\th{either: accepted / rejected / declined}\th{wrong accepts}\th{wrong rejects}}
+\tr{\td{development}\td{148 / 0 / 0 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0}}
+\tr{\td{release layout}\td{148 / 0 / 0 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0}}
+}
+
+\ul{
+\li{The two images agree in status and exit code on all 270 tests. Instruction counts agree within 0.25 percent on every test above 1 G but one, \code{\verb~|perf/grind-ring-5~}, at 1.4 percent.}
+\li{\strong{Declined, both images:} \code{\verb~|corner-cases/eta-struct-major-no-whnf~} and \code{\verb~|corner-cases/eta-struct-major-and-no-whnf~}, both of the class either. The official kernel does not terminate on them; RLVM says so and declines after 1.90 s and 55.70 G instructions, against a limit of 60 s.}
+\li{\strong{Accepted here, rejected by the official checker 4.35.0 and by RLVM's reference engine:} \code{\verb~|corner-cases/alg-conv-trans-quot-left~} and \code{\verb~|corner-cases/eta-struct-major-and~}, both of the class either. They come from the two proof-comparison shortcuts of the default switch set; with the reference engine the either tests split 9 / 19 / 2. Of the 37 published checkers 5 accept the first and 19 the second. The official checker agrees with this run on 266 of the 270 tests: these two, and the pair on which it does not terminate.}
+\li{\code{\verb~|perf/loop-unfolded-once~}, which timed out at 40 s in the first run's machine configuration without the later switches, is accepted in 0.030 s.}
+\li{Against the runs of the same switch set named on the run line, taken for [the profile-guided report](rep-PG1), 0 of 270 tests differ.}
+\li{The largest share of a time limit is 5.0 percent, \code{\verb~|perf/ite-taken-branch-bad~} with 5.5 s of 110 s. The largest resident set of a small test is 2,368 MiB.}
+}
+}
+
+\subtree{
+\title{3. The eight corpora}
+
+\p{All accepted on both images, at 0.2 to 0.4 percent of their time limits. Development image, 8 workers, cold process, quiet window:}
+
+\table{
+\tr{\th{corpus}\th{instructions}\th{CPU s}\th{wall s}\th{peak RSS MiB}}
+\tr{\td{init}\td{79.5 G}\td{4.8}\td{0.71}\td{393}}
+\tr{\td{std}\td{137.3 G}\td{8.6}\td{1.24}\td{633}}
+\tr{\td{reachability}\td{16.3 G}\td{1.4}\td{0.55}\td{717}}
+\tr{\td{cedar}\td{194.8 G}\td{12.1}\td{1.75}\td{780}}
+\tr{\td{con-leche}\td{176.0 G}\td{10.3}\td{1.69}\td{1,192}}
+\tr{\td{navier-stokes-euler}\td{481.9 G}\td{29.3}\td{4.06}\td{1,412}}
+\tr{\td{cslib}\td{560.6 G}\td{39.4}\td{5.70}\td{1,974}}
+\tr{\td{mathlib}\td{1,652.6 G}\td{110.4}\td{15.17}\td{4,978}}
+\tr{\td{all 270 tests}\td{3,937.2 G}\td{}\td{}\td{}}
+}
+
+\p{The release image: mathlib 1,653.2 G, 15.32 s; the other corpora within 0.1 percent of the counts above. Four single Mathlib runs, two per image: 1,652.73 to 1,653.22 G, 15.20 to 15.38 s, peak RSS between 4,757 and 5,614 MiB from run to run. In the first run of the procedure the machine with both shortcuts needed 1,976.7 G on Mathlib with 4 workers; the final build is 16.4 percent below it.}
+
+\p{The leaders on this host, with their arena run lines and 4 threads, rpylean with 1, not measured again for this report: nano-lean 361.2 G and 29.5 s on Mathlib, gruszka 419.1 G and 20.0 s, sokonanoda 505.6 G and 33.7 s, rpylean 544.4 G and 125.8 s, pestka 1,339.6 G and 125.9 s. RLVM needs 4.58, 3.94, 3.27, 3.04 and 1.23 times their instructions, and 15.2 s of wall clock with its 8 workers.}
+}
+
+\subtree{
+\title{4. Standing by the arena's metric}
+
+\ul{
+\li{Sort key: no bad test accepted, no good test rejected, the Mathlib instructions, 2 declined.}
+\li{Measured here: 1,652.6 G, 275.4 virtual seconds. RLVM has never been measured on x86-64. Dividing by the ratio between a leader's count here and its published count gives 1,574 G to 1,836 G.}
+\li{Place 6 for every such ratio between 0.64 and 1.12: after pestka with 1,475.3 G published, before kefir with 2,577.3 G. Place 5 would need another 313 G, 18.9 percent.}
+}
+}
+
+\subtree{
+\title{5. What was not run}
+
+\ul{
+\li{Nothing on x86-64.}
+\li{The leaders were not measured again; their rows are those of the first run and of [the baselines](study-baselines).}
+\li{The arena's build line from a clean copy with an online Maven was not repeated; the release image came from the published jars, offline.}
+\li{The JVM launcher was not part of this run.}
+}
+}

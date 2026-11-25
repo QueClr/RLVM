@@ -42,8 +42,8 @@ REQUIRED = {
     "Example": ["\\date{", "\\author{"],
     "Motivation": ["\\date{", "\\author{"],
     "Session": ["\\date{", "\\author{", "\\meta{harness}{", "\\meta{model-id}{"],
-    "Study": ["\\date{", "\\author{", "\\meta{origin}{"],
-    "Report": ["\\date{", "\\author{", "\\meta{origin}{"],
+    "Study": ["\\date{", "\\author{"],
+    "Report": ["\\date{", "\\author{"],
 }
 
 # Moved documents (studies, reports, and design documents that carry
