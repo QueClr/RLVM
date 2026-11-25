@@ -183,6 +183,24 @@ public final class Loader implements ExportSink, RecordSink {
      * inductive and quot records: such a record is declined when a root of it carries the bit.
      */
     private long[] mdata;
+    /**
+     * One bit per expression ordinal, a subset of {@link #mdata}: the record is, or contains, a record
+     * that a metadata node was wrapped around and that is (or may be) an application of
+     * {@code eagerReduce} to at most two arguments. Officially such a node hides the application from
+     * {@code is_eager_reduce} (infer_app: {@code is_const(get_app_fn(arg), eagerReduce)} looks at the
+     * node, not through it), so the argument is checked WITHOUT eager reduction; with the node dropped
+     * the kernel enters eager reduction and can reject what the official checker accepts
+     * ({@code work/s3/exports/s3-mdata-eager-hidden-ok.ndjson}). A declaration that carries the bit
+     * is declined under BOTH policies: accepting more than the official checker is tolerated under the
+     * practical one, rejecting what it accepts is not (OWNER-NOTES 13 (c)). Null until the first such
+     * record, which needs a metadata record and the name {@code eagerReduce} in the file.
+     */
+    private long[] hidden;
+    /** Name id of {@code eagerReduce}, or -1 while the file has not named it. */
+    private int eagerName = -1;
+    /** Ordinals of the {@code const} records with that name (a handful per file). */
+    private int[] eagerConsts = new int[4];
+    private int eagerConstCount;
 
     // ---- counters (copied into the report on demand) -------------------------------------------------
     private long nNameStr;
@@ -548,8 +566,20 @@ public final class Loader implements ExportSink, RecordSink {
         nNameStr++;
         if (len >= 2 && len <= 4) {
             noteQuotName(prefix, utf8, off, len, id);
+        } else if (len == 11 && prefix == anonymous && utf8[off] == 'e' && isEagerReduce(utf8, off)) {
+            eagerName = id;
         }
         return id;
+    }
+
+    private static boolean isEagerReduce(byte[] b, int off) {
+        final String name = "eagerReduce";
+        for (int i = 0; i < 11; i++) {
+            if (b[off + i] != name.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Remembers the ids of the four quotient names (see {@link #drop}). */
@@ -1048,7 +1078,14 @@ public final class Loader implements ExportSink, RecordSink {
         s[p + 3] = 0;
         segLen++;
         nConst++;
-        return ++exprCount;
+        int id = ++exprCount;
+        if (name == eagerName) {
+            if (eagerConstCount == eagerConsts.length) {
+                eagerConsts = Arrays.copyOf(eagerConsts, eagerConstCount * 2);
+            }
+            eagerConsts[eagerConstCount++] = id;
+        }
+        return id;
     }
 
     @Override
@@ -1066,6 +1103,9 @@ public final class Loader implements ExportSink, RecordSink {
         int id = ++exprCount;
         if (mdata != null && (hasMData(fn) || hasMData(arg))) {
             markMData(id);
+            if (hidden != null && (hasHidden(fn) || hasHidden(arg))) {
+                markHidden(id);
+            }
         }
         return id;
     }
@@ -1085,6 +1125,9 @@ public final class Loader implements ExportSink, RecordSink {
         int id = ++exprCount;
         if (mdata != null && (hasMData(type) || hasMData(body))) {
             markMData(id);
+            if (hidden != null && (hasHidden(type) || hasHidden(body))) {
+                markHidden(id);
+            }
         }
         return id;
     }
@@ -1104,6 +1147,9 @@ public final class Loader implements ExportSink, RecordSink {
         int id = ++exprCount;
         if (mdata != null && (hasMData(type) || hasMData(body))) {
             markMData(id);
+            if (hidden != null && (hasHidden(type) || hasHidden(body))) {
+                markHidden(id);
+            }
         }
         return id;
     }
@@ -1130,6 +1176,9 @@ public final class Loader implements ExportSink, RecordSink {
             // a declaration that contains it is declined (LoadOptions.strictMetadata). The reader
             // never packs such a record into a run (RunPacker), so every one of them comes here.
             markMData(id);
+            if (hidden != null && (hasHidden(type) || hasHidden(value) || hasHidden(body))) {
+                markHidden(id);
+            }
         }
         return id;
     }
@@ -1153,6 +1202,9 @@ public final class Loader implements ExportSink, RecordSink {
         int id = ++exprCount;
         if (mdata != null && hasMData(struct)) {
             markMData(id);
+            if (hidden != null && hasHidden(struct)) {
+                markHidden(id);
+            }
         }
         return id;
     }
@@ -1214,7 +1266,79 @@ public final class Loader implements ExportSink, RecordSink {
         }
         nMData++;
         markMData(expr);
+        if (eagerName >= 0 && mayBeEagerReduce(expr)) {
+            markHidden(expr);
+        }
         return expr;
+    }
+
+    /**
+     * True if record {@code w}, around which a metadata node stands, is - or cannot be shown not to
+     * be - the constant {@code eagerReduce} applied to at most two arguments: then the node is on the
+     * path from an argument {@code eagerReduce _ _} to its head, where the official
+     * {@code is_eager_reduce} stops ({@link #hidden}). Only called in a file that names
+     * {@code eagerReduce}. The records of the segment being read are looked at; an application that
+     * belongs to an earlier declaration, or lies in a packed run, is not kept in a form this loader
+     * can read back, and counts as "may be" (fail closed: a decline, never a verdict).
+     */
+    private boolean mayBeEagerReduce(int w) {
+        int x = w;
+        for (int args = 0; args <= 2; args++) {
+            for (int i = 0; i < eagerConstCount; i++) {
+                if (eagerConsts[i] == x) {
+                    return true;
+                }
+            }
+            int local = x - segBase - 1;
+            if (local < 0) {
+                return true;
+            }
+            for (int r = 0; r < runCount; r++) {
+                int first = runs[r * RUN_WORDS + R_FIRST];
+                if (local >= first && local < first + runs[r * RUN_WORDS + R_COUNT]) {
+                    return true;
+                }
+            }
+            int p = local << 2;
+            if ((seg[p] & 0xF) != Kind.APP) {
+                return false;
+            }
+            int f = seg[p + 1];
+            if (f > 0) {
+                x = segBase + f;
+            } else if (f <= -PENDING) {
+                x = -f - PENDING;
+            } else {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasHidden(int ordinal) {
+        long[] t = hidden;
+        int w = ordinal >>> 6;
+        return t != null && w < t.length && (t[w] >>> ordinal & 1L) != 0;
+    }
+
+    private void markHidden(int ordinal) {
+        long[] t = hidden;
+        int w = ordinal >>> 6;
+        if (t == null || w >= t.length) {
+            int cap = Math.max(w + 1, t == null ? 64 : (int) Math.min((long) t.length * 2, (Integer.MAX_VALUE >>> 6) + 1));
+            hidden = t = t == null ? new long[cap] : Arrays.copyOf(t, cap);
+        }
+        t[w] |= 1L << ordinal;
+    }
+
+    /** Declines a declaration whose root {@code root} contains a metadata node around an application of eagerReduce. */
+    private void requireNoHiddenEagerReduce(int root) {
+        if (root >= 1 && root <= exprCount && hasHidden(root)) {
+            throw unsupportedDecl("metadata (mdata) node around an application of eagerReduce: the official kernel does"
+                    + " not see the application through the node and checks the argument without eager reduction;"
+                    + " with the node dropped RLVM would check it with eager reduction and could reject what the"
+                    + " official checker accepts");
+        }
     }
 
     private boolean hasMData(int ordinal) {
@@ -1657,6 +1781,14 @@ public final class Loader implements ExportSink, RecordSink {
             requireNoMDataInDeclaration(type);
             if (value != 0) {
                 requireNoMDataInDeclaration(value);
+            }
+        }
+        if (hidden != null) {
+            // BOTH policies: metadata stays transparent under the practical one, except where dropping it
+            // could turn an official accept into a reject (see the field).
+            requireNoHiddenEagerReduce(type);
+            if (value != 0) {
+                requireNoHiddenEagerReduce(value);
             }
         }
         int lp = lparams(ids, lpOff, lpCount);

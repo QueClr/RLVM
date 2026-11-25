@@ -379,6 +379,92 @@ class SplitTest {
     }
 
     /**
+     * A metadata node around an application of {@code eagerReduce} (S3's {@code s3-mdata-eager-hidden-ok}):
+     * officially the node hides the application from {@code is_eager_reduce}, so the argument is checked
+     * without eager reduction; with the node dropped the kernel would enter eager reduction and could
+     * reject what the official checker accepts. Declined under BOTH policies; metadata anywhere else
+     * stays transparent under the practical one.
+     */
+    @Test
+    void metadataAroundAnApplicationOfEagerReduceIsDeclinedUnderBothPolicies() {
+        String expected = "metadata (mdata) node around an application of eagerReduce";
+        for (int variant = 0; variant < 10; variant++) {
+            boolean hides = variant < 5 || variant == 9;
+            Nd nd = new Nd();
+            int prop = prop(nd);
+            int p = nd.name("P");
+            nd.axiom(p, prop);
+            int cp = nd.cnst(p);
+            int plain = nd.pi(cp, cp);
+            int id = nd.lam(cp, nd.bvar(0));
+            int er = nd.name(variant == 8 ? "eagerReduceX" : "eagerReduce");
+            nd.axiom(er, nd.pi(prop, nd.pi(nd.bvar(0), nd.bvar(1))));
+            int use = nd.name("use");
+            nd.axiom(use, nd.pi(plain, cp));
+            int cuse = nd.cnst(use);
+            switch (variant) {
+                case 0 -> {   // mdata (eagerReduce (P -> P) id), all records in the declaration's own segment
+                    int e = nd.app(nd.app(nd.cnst(er), plain), id);
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, nd.mdata(e)));
+                }
+                case 1 -> {   // (mdata (eagerReduce (P -> P))) id
+                    int e1 = nd.mdata(nd.app(nd.cnst(er), plain));
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, nd.app(e1, id)));
+                }
+                case 2 -> {   // (mdata eagerReduce) (P -> P) id
+                    int e0 = nd.mdata(nd.cnst(er));
+                    nd.def(nd.name("d"), cp, nd.app(cuse, nd.app(nd.app(e0, plain), id)));
+                }
+                case 3 -> {   // the constant record belongs to an earlier declaration
+                    int ce = nd.cnst(er);
+                    nd.axiom(nd.name("a"), nd.pi(nd.app(nd.app(ce, prop), cp), cp));
+                    int e = nd.app(nd.app(ce, plain), id);
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, nd.mdata(e)));
+                }
+                case 4 -> {   // the wrapped application belongs to an earlier declaration: cannot be read back, fail closed
+                    int e = nd.app(nd.app(nd.cnst(er), prop), cp);
+                    nd.axiom(nd.name("a"), nd.pi(e, cp));
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, nd.app(nd.lam(nd.mdata(e), id), id)));
+                }
+                case 5 -> {   // eagerReduce not wrapped, metadata elsewhere in the same declaration
+                    int e = nd.app(nd.app(nd.cnst(er), plain), id);
+                    nd.thm(nd.name("t"), cp, nd.app(nd.mdata(cuse), e));
+                }
+                case 6 -> {   // metadata INSIDE the arguments of eagerReduce: the official test sees the application
+                    int e = nd.app(nd.app(nd.cnst(er), nd.mdata(nd.pi(cp, cp))), nd.mdata(nd.lam(cp, nd.bvar(0))));
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, e));
+                }
+                case 7 -> {   // three arguments: not `eagerReduce _ _`
+                    int e = nd.app(nd.app(nd.app(nd.cnst(er), plain), id), cp);
+                    nd.def(nd.name("d"), cp, nd.app(nd.lam(cp, nd.bvar(0)), nd.mdata(e)));
+                }
+                case 8 -> {   // another constant
+                    int e = nd.app(nd.app(nd.cnst(er), plain), id);
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, nd.mdata(e)));
+                }
+                default -> {  // a file that names eagerReduce, metadata around a record of an EARLIER declaration that
+                              // is not such an application: the loader cannot read it back and fails closed
+                    nd.thm(nd.name("t"), cp, nd.app(cuse, nd.mdata(id)));
+                }
+            }
+            byte[] data = nd.bytes();
+            for (LoadOptions o : new LoadOptions[] {LoadOptions.batch(data.length),
+                    LoadOptions.pipelined(data.length).withPublishEvery(1, 1L << 40)}) {
+                Loaded practical = Loaded.load(data, o);
+                if (hides) {
+                    assertTrue(practical.failure instanceof UnsupportedExportException, "variant " + variant + ": " + practical.failure);
+                    assertTrue(practical.failure.getMessage().startsWith(expected), "variant " + variant + ": " + practical.failure.getMessage());
+                } else {
+                    assertTrue(practical.failure == null, "variant " + variant + ": " + practical.failure);
+                }
+                // strict: declined either way (metadata in a declaration)
+                Loaded strict = Loaded.load(data, o.withStrictMetadata(true));
+                assertTrue(strict.failure instanceof UnsupportedExportException, "variant " + variant + ": " + strict.failure);
+            }
+        }
+    }
+
+    /**
      * A let whose {@code nondep} flag is set (finding R2-F1): the flag is part of the official term
      * identity and is not stored, so in strict mode the declaration is declined like one with
      * metadata; by default, and with the flag clear, the file loads as it always did.

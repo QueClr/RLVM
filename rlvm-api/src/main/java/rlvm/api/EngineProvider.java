@@ -74,4 +74,17 @@ public interface EngineProvider {
     default Map<String, String> runDefaults(Map<String, String> options) {
         return Map.of();
     }
+
+    /**
+     * What this engine does when no setting of its own is given, in a few words for a person:
+     * {@code rlvm --version} prints it behind the name of the default engine, so that the single
+     * executable says what a run without options is (for example
+     * {@code "switches default,eager,skipargs,congruence"}). One line, no line break, no trailing
+     * full stop. Information only: nothing parses it and nothing depends on it.
+     *
+     * @return the note; empty (the default) if there is nothing to say
+     */
+    default String defaultsNote() {
+        return "";
+    }
 }
