@@ -1,0 +1,178 @@
+\title{P7: where the wall clock of 8 workers goes}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{gc}
+\tag{platform}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/P7.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Agent "P7" (parallel scaling), 2026-11-24, 15:28Z to 18:35Z. Question: the machine engine checked all of Mathlib with 8 workers in 80 s of wall clock for 278 s of CPU on the loaded host, a speed-up of about 3.4, and 4 workers were no slower. Where does the wall clock of a parallel run go, what of it is serial, and what can the driver (\code{\verb~|rlvm-driver~}, which this agent owns since 15:33Z) do about it?}
+
+\p{Short answer. On quiet cores the 3.4 was the host: the check phase scales 6.9x from 8 workers on Mathlib (7.4x in a check-only pass), 6.9x on Std, 6.3x on cedar. What keeps a whole pipelined run at 5.5x - 5.9x is, in this order: (1) \strong{collections}: every pause of the single-threaded collector stops all 8 workers and the loader: 3.9 s of a 37.7 s pipelined run (10 \%), 1.1 s of a 30.6 s check phase (3.5 \%); the garbage is session arrays of the machine and of the store's overlay that are grown again after each of 14,000 session resets per pass, plus the pipelined loader's; (2) \strong{10 runnable threads on 8 cores} while the file loads (loader 12 s + environment thread 3 - 5 s of CPU are part of the job; on 8 cores they are 2 s of wall clock); (3) \strong{the worker CPU itself grows} by 6 \% from 2 to 8 workers, which is the hardware's (eight one-worker processes over eight shards use the same CPU: section 5); (4) on the mid-size corpora \strong{one heavy unit} (a declined declaration re-checked by the reference kernel) decides when the run ends. Nothing is lost to locks, to the frontier or to the tail on Mathlib (parks 0.4 \% - 1.1 \%).}
+
+\p{What the driver could do about it, it now does: its own waits were 1 \% on Mathlib, so the scheduler changes move only the mid-size corpora (Std check-only passes with 8 workers 2.15 -> 1.65 s), but the pipelined hand-off did cost the workers something: every publication makes each worker context copy the level tables, and publishing a 6 GB file in 52 pieces instead of 205 takes Mathlib with 8 workers from 34.6 s to 31.8 s (-8 \%, two interleaved rounds). Curve now, pipelined: 208.3 s (1 worker), 104.9 (2), 53.8 (4), 31.8 (8): 6.5x from 8 workers (7.0x against a one-worker batch run), where the machine's ceiling for eight cores is 7.6x - 7.9x.}
+
+\p{Method: section 1. Numbers: sections 2 - 5. What was changed in the driver and what it bought: section 6. What was handed to other owners: section 7. The three next things: section 8.}
+
+\subtree{
+\title{1. Method}
+
+\ul{
+\li{\strong{Quiet cores.} Every wall-clock number went through \src{bench/quiet.py} (the 8 performance cores 5-9,15-17 reserved, one measurement at a time; between 16:02Z and 17:12Z through a private copy with a one-line parsing fix, same lock). The host's load average was 45 - 140 throughout; what leaks onto the measurement cores between two herding rounds shows as run-queue time of about 5 \% in the 8-worker rows (the driver measures it, so it is known rather than hidden). Single runs unless a table says otherwise; differences below 3 \% are not results.}
+\li{\strong{Binary.} CE native image \code{\verb~|-O3 --gc=serial~}, \code{\verb~|-X engine=machine -X machine.switches=warm,gated,expect~}, session cap 4 MiB. Private distributions that differ only in the driver jar (\code{\verb~|work/p7/tools/relink.sh~}: the jars of \code{\verb~|dist-a~} + one driver jar, the image's flags as \src{scripts/build.sh} sets them): \code{\verb~|dist-a~} = the published jars of 15:31Z (driver c0aeb3288f46, machine 904d8ff41d25, store f85c730603b8, load 26242def2701, admit 143aff8926eb); \code{\verb~|dist-b~} = + the time account (no behaviour change); \code{\verb~|dist-c~} = + a split bound, the kept pass, the parking rule; \code{\verb~|dist-d~} = + the shared-bytes fix; \code{\verb~|dist-e~} = + slices, the parking rule on all roots (published as 150aed4bf1bf with kept engines on top); \code{\verb~|dist-f~} = + the publication scale (published as 31fa08d9ce61). JVM launcher rows: the launcher of \code{\verb~|dist-d~} with its default flags (13 GB heap, \code{\verb~|-Xmn1g~}, serial).}
+\li{\strong{The driver's time account} (new; \src{rlvm-driver/README.md}, "Where the wall clock goes"): per worker, wall = on a CPU + runnable without a CPU (both from \code{\verb~|/proc/thread-self/schedstat~}) + parked in the scheduler by cause (nothing announced by the environment lane / the lane waits for the loader / tail: only busy claims left) + heavy gate + waiting for the end of the load + the rest (stopped by a collection, a page fault); the environment thread's account; time stamps; time series; slowest units; a per-unit trace. \src{rlvm-driver/bin/breakdown.py} prints it. Collections: \code{\verb~|-XX:+PrintGC~} of the image (\code{\verb~|gcsum.py~}), \code{\verb~|-Xlog:gc,safepoint~} on the JVM; allocation sites: JFR on the JVM launcher (every allocation outside a TLAB and every new TLAB).}
+\li{\strong{Warm and check-only}: \code{\verb~|RLVM_DRIVER=passes=N~} (the driver's passes: 2..N check the loaded store again).}
+\li{\strong{Hardware ceiling}: \code{\verb~|-X shard=K/N~} (new, measurement only): 8 one-worker processes over the 8 shards of the units, each pinned to one core, against one process with 8 workers.}
+}
+}
+
+\subtree{
+\title{2. Mathlib, native image (721,845 units, 6.33 GB)}
+
+\p{Wall clock in seconds (dist-b, 16:10Z - 16:36Z):}
+
+\table{
+\tr{\th{workers}\th{batch}\th{of it load}\th{check}\th{pipelined}\th{check-only pass 2}\th{speed-up of the check}\th{of the pipelined run}}
+\tr{\td{1}\td{224.05}\td{11.65}\td{212.21}\td{208.34}\td{}\td{1}\td{1}}
+\tr{\td{2}\td{113.40}\td{11.77}\td{101.39}\td{104.89}\td{}\td{2.09}\td{1.99}}
+\tr{\td{4}\td{64.58}\td{11.92}\td{52.66}\td{55.49}\td{53.28}\td{4.03}\td{3.75}}
+\tr{\td{8}\td{42.63}\td{12.06}\td{30.57}\td{38.06}\td{28.74}\td{6.94}\td{5.47}}
+}
+
+\p{(One worker, batch: the worker drives the environment pass itself, 2.2 s of the 212.2 s. Peak RSS 2.7 GB with one worker, 3.6 GB batch / 4.0 GB pipelined with 8.)}
+
+\p{Where \code{\verb~|workers x check wall~} goes:}
+
+\table{
+\tr{\th{workers}\th{mode}\th{worker CPU}\th{on a CPU}\th{run queue}\th{stopped (collections, faults)}\th{parked at the frontier}\th{parked, tail}\th{environment thread CPU}\th{collections in the check phase}}
+\tr{\td{1}\td{batch}\td{212.2 s}\td{100.0 \%}\td{0.0 \%}\td{0.0 \%}\td{0.0 \%}\td{0.0 \%}\td{(in the worker)}\td{295 / 0.97 s}}
+\tr{\td{1}\td{pipelined}\td{207.4 s}\td{99.7 \%}\td{0.0 \%}\td{0.3 \%}\td{0.0 \%}\td{0.0 \%}\td{2.91 s}\td{407 / 1.81 s}}
+\tr{\td{2}\td{batch}\td{201.2 s}\td{99.2 \%}\td{0.0 \%}\td{0.7 \%}\td{0.1 \%}\td{0.0 \%}\td{4.56 s}\td{312 / 1.04 s}}
+\tr{\td{2}\td{pipelined}\td{206.1 s}\td{98.5 \%}\td{0.0 \%}\td{1.5 \%}\td{0.0 \%}\td{0.0 \%}\td{2.97 s}\td{368 / 2.07 s}}
+\tr{\td{4}\td{batch}\td{204.8 s}\td{97.2 \%}\td{0.4 \%}\td{2.0 \%}\td{0.2 \%}\td{0.1 \%}\td{4.58 s}\td{245 / 1.01 s}}
+\tr{\td{4}\td{pipelined}\td{210.8 s}\td{95.5 \%}\td{0.0 \%}\td{4.5 \%}\td{0.0 \%}\td{0.0 \%}\td{3.03 s}\td{384 / 2.54 s}}
+\tr{\td{8}\td{batch}\td{212.7 s}\td{87.0 \%}\td{7.5 \%}\td{4.4 \%}\td{0.7 \%}\td{0.4 \%}\td{4.85 s}\td{194 / 1.06 s}}
+\tr{\td{8}\td{pipelined}\td{224.0 s}\td{74.5 \%}\td{13.6 \%}\td{11.6 \%}\td{0.1 \%}\td{0.3 \%}\td{3.33 s}\td{398 / 3.87 s}}
+}
+
+\p{Reading:}
+
+\ul{
+\li{\strong{Collections are the serial part.} The pause time per check pass is the same at every worker count (about 1 s; 1.8 s - 3.9 s with the pipelined loader's garbage on top), so its share of the wall clock is 0.5 \% with one worker and 3.5 \% (batch) / 10.3 \% (pipelined) with 8. A check pass frees 14 GB (20 KB per unit, 1 MB per session reset) whatever the worker count; the pipelined run frees 35.6 GB.}
+\li{\strong{Run queue.} Batch, 8 workers: 7.5 \% = the environment thread (4.85 s of CPU during the first 6.3 s) + about 5 \% of host noise. Pipelined: loader + environment thread + 8 workers on 8 cores for 21.65 s (the load alone takes 12.06 s): 13.6 \%.}
+\li{\strong{The workers never wait for the loader or the frontier}: loaded 334,030 units at 10 s, announced 333,268, accepted 204,673; parks 0.1 \%. Environment thread: 2.3 s inside the pass + 4.0 s adding up \code{\verb~|Store.sharedBytes()~} after each of its 12,744 steps (\code{\verb~|DeclTable.claimBytes~} walks one slot per unit: 0.3 ms): a driver bug, fixed (section 6).}
+\li{\strong{No unit and no chain bounds Mathlib}: slowest unit 2.15 s (376698, a declined unit re-checked by the reference kernel), then 0.74 s; the heaviest unit holds 0.2 \% of the machine's steps; the work is spread evenly along the file (10 \% of the steps in the first 12.8 \% of the units, 90 \% in the first 86.8 \%); "frontier complete" to "last unit checked" is simply the rest of the run, and the tail proper is 0.1 - 0.25 s per worker.}
+\li{\strong{Worker CPU}: 201 s with 2 workers, 205 s with 4, 213 s with 8 (batch); pipelined 206 / 211 / 224 s. Eight one-worker processes over eight shards use the same 210 - 213 s (section 5): the growth is the hardware's (eight busy cores), not the process's.}
+}
+}
+
+\subtree{
+\title{3. Mathlib, JVM launcher (8 workers; dist-d, 16:59Z)}
+
+\table{
+\tr{\th{}\th{wall}\th{check}\th{worker CPU}\th{on a CPU}\th{run queue}\th{stopped}\th{collections}}
+\tr{\td{batch, pass 1}\td{42.58 s (load 12.03)}\td{30.54 s}\td{217.4 s}\td{89.0 \%}\td{9.1 \%}\td{1.4 \%}\td{36 pauses / 1.23 s in both passes}}
+\tr{\td{\strong{check-only pass 2 (warm)}}\td{\strong{23.62 s}}\td{23.62 s}\td{173.5 s}\td{91.8 \%}\td{6.3 \%}\td{1.5 \%}\td{}}
+\tr{\td{pipelined}\td{34.63 s (load 20.09)}\td{33.20 s}\td{213.2 s}\td{80.3 \%}\td{11.8 \%}\td{7.0 \%}\td{47 pauses / 2.51 s}}
+}
+
+\p{The warm JVM checks Mathlib in 23.6 s with 8 workers against 28.7 s for the image (C2's code is 17 \% faster in worker CPU); cold it is as fast as the image. Its 1 GB young generation makes collections rare in a check pass (1.5 \%), but with the pipelined loader each young collection copies what the loader just made (50 - 100 ms): 7 \%. Peak RSS 6.3 GB (batch, two passes) and 11.2 GB (pipelined): the heap setting, not the need.}
+}
+
+\subtree{
+\title{4. Std and cedar (native; the mid-size corpora)}
+
+\table{
+\tr{\th{corpus}\th{workers}\th{batch wall}\th{check}\th{pipelined wall}\th{check-only pass}\th{speed-up of the check}}
+\tr{\td{Std (101,146 units)}\td{1}\td{12.45 s}\td{11.37 s}\td{11.73 s}\td{11.6 / 11.1 s}\td{1}}
+\tr{\td{}\td{2}\td{6.90 s}\td{5.82 s}\td{5.81 s}\td{5.67 / 5.64 s}\td{1.95}}
+\tr{\td{}\td{4}\td{4.05 s}\td{2.97 s}\td{3.23 s}\td{3.32 / 3.41 s}\td{3.83}}
+\tr{\td{}\td{8}\td{2.71 s}\td{1.65 s}\td{2.57 s}\td{2.10 / 2.16 s}\td{6.89}}
+\tr{\td{cedar (905 MB)}\td{1}\td{18.12 s}\td{16.42 s}\td{15.16 s}\td{15.7 / 15.0 s}\td{1}}
+\tr{\td{}\td{2}\td{9.40 s}\td{7.78 s}\td{7.95 s}\td{7.65 / 7.93 s}\td{2.11}}
+\tr{\td{}\td{4}\td{5.70 s}\td{4.05 s}\td{4.21 s}\td{3.97 / 4.12 s}\td{4.05}}
+\tr{\td{}\td{8}\td{4.29 s}\td{2.59 s}\td{2.78 s}\td{2.41 / 2.14 s}\td{6.34}}
+}
+
+\p{(dist-b, 16:03Z - 16:07Z; the baseline before the instrumentation, dist-a at 15:45Z, is the same within 3 \%.)}
+
+\ul{
+\li{\strong{Std with 8 workers is bounded by one unit.} Unit 23249 is the largest proof of the file (76,204 block nodes), is declined by the machine and re-checked by the reference kernel: 0.7 s on a quiet core, 1.09 s when ten threads share eight cores. 8 workers have 1.5 s of CPU each, and the unit sits at about half of the work. Share of the tail: 5.8 \% (batch), 17.6 \% (pipelined), and 27.7 \% in a check-only pass of the old scheduler, which cut the whole file into 8 contiguous eighths: the unit sat near the end of its eighth and started at 1.4 s of a run that could have ended at 1.5 s.}
+\li{Units the warm machine does not accept: Std 203 units = 9.7 \% of the time in units; Mathlib 6,711 units (0.94 \%) = 10.7 \% (per-unit traces; time shares from runs on the loaded host, counts exact).}
+\li{Size predicts cost: on Std the two slowest units are the two largest, 9 of the 12 slowest are among the 40 largest (of 100,096), Spearman rank correlation of size and machine steps 0.83.}
+\li{Pipelined against batch on the small files: the load (1.1 s / 1.6 s alone, 1.3 s / 2.4 s next to 8 workers) is the length of the run's first part; the gain is the load's CPU time moved onto idle cores (2 - 4 workers: all of it; 8 workers: a third).}
+}
+}
+
+\subtree{
+\title{5. The hardware ceiling}
+
+\p{\code{\verb~|-X shard=K/8~} makes a one-worker process check only shard K of the units (blocks of 1,024 units, block number modulo 8) after a complete load and environment pass; passes 2 and 3 are check-only. Eight such processes, each pinned to one of the eight measurement cores (\code{\verb~|work/p7/tools/ceiling.sh mathlib~}, dist-e, 17:35Z), against one process with eight workers:}
+
+\table{
+\tr{\th{}\th{check-only pass, wall}\th{CPU}}
+\tr{\td{8 one-worker processes at once, per shard}\td{23.7 / 24.2 / 25.1 / 25.2 / 26.7 / 28.7 / 29.3 / 31.2 s (mean 26.8 s; third pass mean 26.6 s)}\td{sum 213.0 s (third pass 210.7 s)}}
+\tr{\td{the same shard alone on its core (shards 0 and 4)}\td{23.89 s and 22.21 s (at once: 25.14 s and 23.71 s)}\td{at once +5.2 \% and +6.7 \%}}
+\tr{\td{one process, 8 workers}\td{27.9 - 28.7 s}\td{workers 209.5 - 212.7 s}}
+}
+
+\ul{
+\li{\strong{One process costs no more CPU than eight}: 210 - 213 s either way. Nothing that the workers share (store pages, the fact store, the scheduler, the verdict board) shows up as CPU.}
+\li{\strong{Eight busy cores make each of them 5 \% - 7 \% slower} (memory bandwidth and the shared cache; the store is 2.1 GB of mostly random reads): this is the growth of the worker CPU from 2 to 8 workers (201 -> 213 s) and it is the hardware's. So the ceiling of this machine for a check-only pass over Mathlib is about 26.6 s (the mean shard time at once = a perfectly balanced 8-way split), i.e. 7.6 - 7.9 times one worker.}
+\li{\strong{One process with 8 workers is 5 \% - 8 \% above that ceiling} (27.9 - 28.7 s): the collections (1.0 - 1.5 s of stop-the-world, which eight separate heaps do not share) and the host's noise. A static split is worse than the scheduler: the shards differ by 30 \% (23.7 s to 31.2 s), so eight independent processes end after 31.2 s.}
+\li{Std and cedar (the same experiment, 18:20Z): Std shards 1.13 - 2.21 s, mean 1.48 s (sum 11.7 - 12.0 s), one process 1.63 - 1.67 s; cedar 1.66 - 2.77 s, mean 2.02 s (sum 16.1 - 16.3 s), one process 2.15 - 2.20 s; a shard alone on its core is 4.5 \% - 5.1 \% faster on both. Same picture: no CPU lost to sharing a process; 7 \% - 13 \% above the ceiling, on Std because of the one heavy unit.}
+}
+}
+
+\subtree{
+\title{6. What was changed in the driver}
+
+\p{All in \code{\verb~|rlvm-driver~} (jars 150aed4bf1bf, published 18:03:49Z, and 31fa08d9ce61, published 18:27:41Z: + the publication scale); tests 107 (104 run green, 3 opt-in); guards at the end of this section. Default behaviour and every verdict are unchanged; what changed is who checks a unit and when, what the statistics say, and what a pipelined run decides for files that are not in declaration order (now what the batch run decides).}
+
+\table{
+\tr{\th{Change}\th{Why}\th{Measured}}
+\tr{\td{\strong{Slices} (\code{\verb~|RunConfig.sliceUnits~} = 256, \code{\verb~|-X slice=N~}; 0 = the former scheme): a worker without work takes the next slice of the ready units for itself; nothing is put into another worker's queue}\td{with one contiguous run per worker and batch, a worker that fell behind kept receiving its share of every later batch and nobody else touched it while anything was left to split: a heavy unit in that backlog started late; a later pass cut the whole file into W eighths}\td{Std, check-only passes: 8 workers 2.15 - 2.18 s -> 1.67 s (median of 20; -23 \%), 4 workers 3.37 - 3.53 -> 2.92 - 3.00 s. Pass 1 and pipelined on Std (ten rounds against a split that is merely bounded): medians 1.67 / 1.68 s and 2.03 / 1.99 s, i.e. equal; three of nineteen pass-1 samples of the former scheme at 2.2 - 2.4 s, none of twelve with slices (too few to call). cedar, Mathlib: no difference (Mathlib, 8 workers, one window: 41.4 / 28.4 / 34.7 s before, 41.5 / 27.9 / 35.9 s after for batch / check-only / pipelined; steals 286 -> 3)}}
+\tr{\td{\strong{The environment thread adds up the store's bytes at most every 20 ms} (was: after every step)}\td{\code{\verb~|Store.sharedBytes()~} walks one slot per unit: 4.0 of the thread's 4.85 s on Mathlib}\td{Mathlib, batch, 8 workers: environment thread 4.69 s CPU / 5.13 s wall -> 1.56 s / 1.67 s, the frontier is complete 3.5 s earlier, parks at the frontier 0.7 \% -> 0.0 \%; in wall clock inside the noise (0.4 s of 29 s expected). Std, cedar: nothing (small tables)}}
+\tr{\td{\strong{The environment pass is kept over the end of a pipelined load; parking rule} (\code{\verb~|RunHost.unitNeedsCompleteFile~})}\td{a replaced pass had lost the claims of blocks it had decided ahead; the pass moved past units whose proof (or, in a race, type) mentions a later declaration}\td{invariance suite: pipelined declines 5 -> 0 of 16,928 mutants with the machine, 0 with the reference engine; 0 parked units on Init, Std, Mathlib}}
+\tr{\td{\strong{A large file is published in larger pieces} (\code{\verb~|RunConfig.publishScaleMax~} = 4, \code{\verb~|-X publish-scale=N~}): the pipelined hand-off interval times the input's size in GiB, at most 4; unchanged below 2 GiB}\td{every publication makes each worker context copy the level tables at its next reset: about 110 MB of garbage and 45 ms of worker CPU per publication on Mathlib, and the collections stop all 8 workers}\td{\strong{Mathlib pipelined, 8 workers, two interleaved rounds: 34.25 / 35.00 s -> 31.71 / 31.90 s (-8 \%)}; 4 workers 55.71 -> 53.80 s (-3 \%); 205 -> 52 publications, garbage 36.9 -> 20.9 GB, pauses 3.75 -> 2.23 s, worker CPU 221.3 -> 214.8 s, peak RSS 4.1 -> 3.8 GB; Std, cedar: the same interval, the same time}}
+\tr{\td{\strong{Time account, per-unit trace, statistics of every later pass, \code{\verb~|shard=K/N~}}; per-unit statistics per worker instead of one lock per unit}\td{this report}\td{off without a statistics file}}
+\tr{\td{\strong{\code{\verb~|-X passes-keep=engines~}}: the later passes use the engine instances of pass 1}\td{asked for by the Truffle tier and the code store (requests.log 16:31Z, 16:57Z)}\td{3 passes over one set of engines through the launcher}}
+}
+
+\p{Guards (details in \src{rlvm-driver/README.md}, "Measured", wave 8): \src{scripts/gate.sh} on a private distribution, batch with one worker and pipelined with four (small files forced through the pipeline): 230 / 230 published tests, tutorial mutants 12,260 with SOUNDNESS 0 / COMPLETENESS 0 / agree 11,847 / declined 413 in both modes, differential self-test caught; slice + self-test again on the published jar; the driver's invariance suite (every file in 9 configurations: 1 / 2 / 4 / 8 workers, 1-byte session caps, pipelined with a publication after every 1 / 7 / 64 units): published tests 231 / 231, mutants 16,928 with the reference engine and with the machine, the four big corpora with the machine: 0 wrong, 0 schedule differences, 0 pipelined declines (5 before); Mathlib accepted by every build.}
+
+\p{Not done, with the measurement that says why: \strong{stealing from the tail of a busy claim} (tail 0.0 \% - 0.4 \% of 8 workers x wall on Mathlib; on Std the tail is one unit, not a claim); \strong{the environment lane's work on the workers} (1.6 s - 2.3 s of CPU on Mathlib, parks at the frontier 0.0 \% - 0.7 \%); \strong{wake-ups and lock hold times} (time inside \code{\verb~|Scheduler.claim~} that is not a park: below 0.05 s per worker in a 30 s run).}
+}
+
+\subtree{
+\title{7. What was handed to other owners (requests.log)}
+
+\table{
+\tr{\th{To}\th{Finding}\th{Numbers}}
+\tr{\td{machine (M6), store / load path}\td{P7-F1: session arrays grown again after every session reset are the garbage that the collections collect (16:37Z)}\td{workers' bytes on cedar (JFR): machine runs / records / tables 39 \%, store overlay 24 \%, reference kernel in re-checks 16 \%, rewriter memo 8 \%; 14 GB per Mathlib pass}}
+\tr{\td{rlvm-admit (A2)}\td{P7-F2: \code{\verb~|EnvBuilder.advance~} asks \code{\verb~|store.loadComplete()~} where it needs \code{\verb~|sessionCoversFile()~}; closed in the driver by the parking rule (17:22Z)}\td{1 pipelined decline of 16,928}}
+\tr{\td{machine (M6), integrator}\td{P7-F3: the declined units are 1 \% of the units and 10 \% of the time, and one of them bounds Std with 8 workers (17:22Z)}\td{Mathlib 6,711 units, 10.7 \%; Std 203, 9.7 \%}}
+\tr{\td{steward / warm / integrator (launcher defaults)}\td{P7-F4: \code{\verb~|load=pipelined~} as the default; \code{\verb~|-Xms6g~} for the image}\td{pipelined against batch on Mathlib: 208 / 105 / 55.5 / 34 - 38 s against 224 / 113 / 64.6 / 41 - 43 s for 1 / 2 / 4 / 8 workers; \code{\verb~|-Xms6g~}: 34.1 -> 32.5 s (two rounds), RSS 4.1 -> 4.9 GB}}
+\tr{\td{load path, rlvm-api (\code{\verb~|Bindings~}, \code{\verb~|LevelStore.newOverlay~})}\td{P7-F5: every publication of a pipelined load costs about 110 MB of garbage on Mathlib (each worker context copies the level tables at its next reset)}\td{205 publications: 37 GB freed, 3.5 s of pauses, 220 s of worker CPU; 48 publications: 20 GB, 2.2 s, 213 s}}
+}
+}
+
+\subtree{
+\title{8. The next three things for the 8-worker wall clock}
+
+\p{In the order of what they would bring on Mathlib with 8 workers (the driver's own waits being 1 \%):}
+
+\ol{
+\li{\strong{Do not make the garbage} (P7-F1; machine and store owners): a session reset that keeps its arrays, a worker context that does not copy the level tables at every snapshot, a re-check lane that keeps its overlay. The collector is the one serial component whose share grows with the worker count: 1.1 s of a 28 - 30 s check phase and, after the publication scale, still 2.2 s of a 31.8 s pipelined run; it is the 5 \% - 8 \% that separate one process from the hardware ceiling. A larger young generation does not do it (26 collections of 123 ms instead of 403 of 10 ms: each one copies the live session arrays).}
+\li{\strong{The units the machine declines} (P7-F3; machine owners): 0.94 \% of Mathlib's units take 10.7 \% of the time inside units (measured on the loaded host, so indicative) at reference-kernel speed: about 20 s of the 213 s of worker CPU, up to 2.5 s of wall clock with 8 workers; on Std one such unit is the end of the run. In the driver, the companion is to start large units first (the size predicts the cost; \src{rlvm-driver/README.md}, "Open", has the progress rule such a scheduler must keep): Std with 8 workers pipelined about 2.0 -> 1.7 s, Mathlib nothing.}
+\li{\strong{The warm JVM} (the platform question of owner note 12, for the steward): a check-only pass over Mathlib with 8 workers takes 23.6 s on the JVM launcher against 28.4 s in the native image (worker CPU 174 s against 210 s: C2's code), for 6 - 11 GB of resident set against 3.6 - 4.0 GB; cold, the two are equal (42.6 s batch, 34.6 s pipelined). Where steady state counts, this is 17 \% at once, more than anything the scheduler can still give.}
+}
+
+\p{Not on the list because it is not serial but simply work: loader (12 s) and environment thread (1.6 - 3 s) are 15 s of CPU, 1.9 s of wall clock on 8 cores, and with 8 workers on 8 cores they are why a pipelined run has ten runnable threads for 20 s. On a machine with ten cores the pipelined run would be the check-only time.}
+}

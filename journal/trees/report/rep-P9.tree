@@ -1,0 +1,484 @@
+\title{P9 - The gap to the leaders on navier-stokes-euler, cslib and con-leche, declaration by declaration}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{reference-engine}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/P9.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Profiler P9, 2026-11-24 (21:08Z - 21:55Z). No production code was changed. Scratch, tools and raw data: \code{\verb~|work/prof/P9/~}. Living summary: \code{\verb~|work/status/prof-P9.md~}. Board lines: \code{\verb~|work/status/requests.log~} (21:16Z, 21:26Z, 21:47Z). Model and tools: profile P8 (\src{docs/research/profiles/P8.md}, \code{\verb~|work/prof/P8/w9/~}).}
+
+\p{Question: the machine's CPU time against gruszka (integrator's table, fresh process) is 3.9 times on navier-stokes-euler, 1.8 times on cslib, 1.3 times on con-leche. P8 explained Mathlib's 3.0 times by the official way of comparing proofs (40 \% of the machine's work) and by the eager-reduction declines (10-12 \%). What is it on navier-stokes-euler: the same two mechanisms in another proportion, or something new? And does a class of declarations stick out on cslib and con-leche?}
+
+\subtree{
+\title{0. Answer}
+
+\table{
+\tr{\th{corpus}\th{units}\th{machine, instructions in the checks}\th{gruszka, same units}\th{ratio}\th{nano-lean ratio}\th{(a) removed by \code{\verb~|congruence,skipargs~} (NOT official-exact)}\th{(b) eager-reduction declines: units, share of the worker's CPU}\th{(c) the rest}}
+\tr{\td{navier-stokes-euler}\td{124,850}\td{886.4 G}\td{111.0 G}\td{\strong{7.98}}\td{10.83}\td{\strong{54.5 \%} of the instructions, 51.2 \% of the worker's CPU}\td{251 units, 1.5 \%}\td{47.3 \% of the CPU: 3.63 times gruszka in instructions}}
+\tr{\td{cslib}\td{397,608}\td{587.0 G}\td{142.4 G}\td{\strong{4.12}}\td{5.18}\td{22.4 \% of the instructions, 14.6 \% of the worker's CPU}\td{\strong{2,406 units, 12.6 \%}}\td{3.20 times}}
+\tr{\td{con-leche}\td{36,274}\td{146.9 G}\td{45.3 G}\td{\strong{3.24}}\td{2.85}\td{none: +9.2 \% instructions, +5.6 \% CPU of the checks (the options COST there)}\td{88 units, 2.9 \%}\td{3.24 times, flat}}
+\tr{\td{Mathlib (P8, the step-1 set of this morning)}\td{714,712}\td{2,438.6 G}\td{373.8 G}\td{6.52}\td{7.64}\td{40.5 \%}\td{6,711 units, 11-12 \%}\td{3.88 times}}
+}
+
+\p{(One worker, native -O3, the machine's default switch set of the published jars of 21:02Z, instructions and thread CPU inside \code{\verb~|Session.check~} per unit; gruszka and nano-lean per declaration with the arena builds, measured in the same hour; CPU shares from one \src{bench/quiet.py} window, section 4.8.)}
+
+\ol{
+\li{\strong{navier-stokes-euler is the same mechanism as Mathlib in a larger dose; nothing about numerals.} 54.5 \% of the machine's instructions there (51 \% of the worker's CPU time on quiet cores: 29.7 of 58.1 s) disappear with the two non-official options; with them the machine is at 3.63 times gruszka, which is where P8 found Mathlib with them (3.88, on this morning's switch set) and close to where con-leche and cslib are (3.2 - 3.5).}
+\li{\strong{Where}: 84 \% of the machine's instructions are in the PROJECT'S OWN 57,330 units, at 9.35 times gruszka (its Mathlib part: 4.63, Init: 2.58). Worst: the 690 \code{\verb~|Euler*~} namespaces (25,646 units, 57.7 \% of the machine's instructions, 13.4 times). Units at 8 times and more are 14.2 \% of the units and 61.6 \% of the machine's instructions (19.8 times as a class); the units below 8 are at 4.08 times (P8 found the same 4.08 on Mathlib, with this morning's switch set).}
+\li{\strong{What is compared}: (i) proofs by their types (the official rule), as on Mathlib, but the proofs are those of analysis: the two instance paths of the reals (\code{\verb~|Real.normedField ..~} against \code{\verb~|Real.semiring~} / \code{\verb~|Real.commRing~}), bundled maps (\code{\verb~|LinearMap.instAdd._proof_1/2~}, \code{\verb~|ContinuousLinearMap.add._proof_1~}, \code{\verb~|MultilinearMap~}, \code{\verb~|BoundedContinuousFunction~}) and subobjects (\code{\verb~|AddMemClass.add._proof_1~}: elements of \code{\verb~|Lp~}); (ii) a second class that \code{\verb~|skipargs~} does not touch and only \code{\verb~|congruence~} repairs, 14 \% of the corpus: applications of ONE HEAD or ONE TERM UNDER TWO ENVIRONMENTS, unfolded on both sides instead of compared by their arguments. The extreme unit (\code{\verb~|EulerSobolevBaseCommutator.baseCommutator_bound~}, 1.54 M ticks against gruszka's 13 k) compares a sum over a list of 5,461 Sobolev words with itself under another environment, element by element (section 4.2).}
+\li{\strong{What it is not}: Nat / Int literal arithmetic is 70,600 folding events and recursor reduction 277,300 IOTA events of 553 M (nano-lean counts 277,600 iota steps and 57,500 literal operations, 12 of them on big numbers); units in which recursors and literals are 3 \% or more of the events carry 0.3 \% of the machine's instructions; structure eta is 12,400 ETAS events. The large \code{\verb~|Finset.sum~} / \code{\verb~|Matrix.vecCons~} proofs (\code{\verb~|quadraticBilin._proof_N~}, the top 4 units for everybody) are at 3.7 times with the same number of operations as gruszka (section 4.6): cost per operation, not a missing rule. A sum is the cost in one unit only, and there it is the conversion of point 3 (ii).}
+\li{\strong{Eager-reduction declines are small on navier-stokes-euler (251 units, 0.87 s of 58 s) and as large as on Mathlib on cslib: 2,406 units, 5.9 s of 46.6 s (12.6 \% of the worker)}, for units that cost gruszka 1.0 s.}
+\li{\strong{cslib is Mathlib at a smaller dose, nothing sticks out}: 79 \% of the cost is in the 297,351 units of Mathlib and its dependencies (4.39 times; the options remove 27.5 \% there), the project's own 14,249 units are 3 \% of the cost at 2.63 times. \strong{con-leche is flat}: every kind of unit with more than 1 \% of the cost is between 2.6 and 3.9 times, the machine makes 1.30 times gruszka's ticks and 0.62 times its values; the factor is instructions per operation (1,979 per tick against 793). One unit is 5.2 \% of the corpus (\code{\verb~|ConLeche.Cached.reduceNatI._mutual.eq_def~}, 7.9 \% for gruszka).}
+\li{\strong{The two options are not a free win}: on con-leche \code{\verb~|congruence~} costs 8.4 \% of the instructions (that one unit goes from 7.65 G to 20.67 G: the congruence walks cost more than the unfoldings they replace, section 4.7). Whoever weighs an opt-in profile needs that row.}
+\li{\strong{In CPU time the ratios are smaller than in instructions} because the machine retires 15 to 18 G instructions per second inside the checks and gruszka 6 to 7: about 3.2 (navier-stokes-euler), 1.6 (cslib), 1.2 (con-leche) for the checks alone (gruszka's side is its own clock from the profile run, not a quiet measurement).}
+}
+
+\p{Numbers are instruction and event counts unless a unit of time is given. CPU seconds are thread CPU clocks of one \src{bench/quiet.py} window (section 4.8) unless marked otherwise.}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\table{
+\tr{\th{what}\th{how}}
+\tr{\td{distribution measured}\td{the published jars of 21:02Z (the shared distribution \code{\verb~|work/dist.d/20261124T210228Z-e4d255701001-native~}; \code{\verb~|work/prof/P9/dist-tap/JARS.txt~}): machine \strong{15cb3777e598}, driver 31fa08d9ce61, main 2c4a55f5a8ae, store 5b72707013bc, load bb5734f612c3, export 14faa521df15, ref ca1f9bd918bb, inductive c15b14fffdd3, admit 398a117d4ad8, api 6ff40825ca1d, level 75bb0db242c5, nat b1dda7562adb, truffle ad3256d0751d + P8's tap (\code{\verb~|rlvm-p8tap.jar~} 4314e68bcbf0: P8's source compiled against these jars); CE native image \code{\verb~|-O3~} with \code{\verb~|build.sh~}'s flags; one worker; batch load}}
+\tr{\td{configuration}\td{\code{\verb~|-X engine=p8tap~} = the published \code{\verb~|MachineEngine~} behind a wrapper of \code{\verb~|Session.check~} (the engine reports the name \code{\verb~|machine~}, so the driver treats it as \code{\verb~|-X engine=machine~}); NO switch list: the machine's own default set \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}, session cap 1 MiB, host depth 128 (read back from the statistics file)}}
+\tr{\td{machine, per unit}\td{ticks, records, run words, pairs, thread CPU ns, the CPU time between two checks (driver, inductive blocks, reference fallback); with \code{\verb~|-X stats-file~} the call events and inline hits per op (a second run on the host; ticks and records per unit are identical in the two runs: 543,149,102 ticks)}}
+\tr{\td{machine, instructions per unit}\td{marker lines around every check and \code{\verb~|bench/baselines/instrtap.c~} in the arena container (\code{\verb~|run-instr.sh~}), statistics off}}
+\tr{\td{the prize of the non-official options}\td{the same with \code{\verb~|-X machine.switches=<default>,facts,probes -Drlvm.machine.m4=congruence,skipargs~}; also \code{\verb~|<default>,facts~} + \code{\verb~|skipargs~} and \code{\verb~|<default>,facts,probes~} + \code{\verb~|congruence~} (the options act only with \code{\verb~|facts~} / \code{\verb~|probes~}), and \code{\verb~|<default>,facts,probes~} alone. A measurement of the prize only: the options are not official-exact and stay off}}
+\tr{\td{gruszka, per declaration}\td{measured now for the three corpora: arena build, \code{\verb~|SK_DECL_INSTR=1~} + instrtap, one worker (\code{\verb~|work/prof/P9/base/<corpus>/gruszka.w1.di~}: instructions, its ticks); its counters and census from P8's private copy with \code{\verb~|--features knobs,cnt~} (\code{\verb~|gruszka-cnt.raw~}). In Docker only}}
+\tr{\td{nano-lean, per declaration}\td{arena build, \code{\verb~|--trace -j 1~} + instrtap (\code{\verb~|nano-lean.j1.trace~}); its 58 counters from research 13 (\code{\verb~|work/workloads/dyn/nl/<corpus>.stats.tsv~})}}
+\tr{\td{traces}\td{a private copy of the machine's sources of 21:14Z (= the measured jar; the tree had not changed since 20:28Z) with P8's two hooks (DELTA and CONV events with the judgments on the host stack): \code{\verb~|work/prof/P9/mtrace~}, JVM, \code{\verb~|run-trace.sh~}. The traced units have the tick counts of the measured jar}}
+\tr{\td{flat instruction profile}\td{P6's \code{\verb~|rec-instr.sh~} (samples on retired user instructions, period 20,000,003) on the same image in the container: \code{\verb~|out/perf-*.ips~}, \code{\verb~|out/perfsum.md~}}}
+\tr{\td{CPU seconds}\td{two \src{bench/quiet.py} windows (21:30Z, 21:39Z), \code{\verb~|quiet-run.sh~}, \code{\verb~|quiet-run2.sh~}: thread CPU of the checks and of the gaps from the tap, process times from GNU time}}
+}
+
+\p{The join is by declaration name. The machine's units are the definitions, theorems, opaque constants and axioms; inductive types, constructors and recursors are checked by the driver between two units. All units of the three corpora are joined (gruszka 98.5 \% / 99.2 \% / 98.7 \%, nano-lean 98.0 \% / 99.3 \% / 99.5 \% of their per-declaration instructions are in the joined units). "Origin" of a unit: Init, Std, Mathlib-and-dependencies = the name is a unit of the arena's \code{\verb~|init~}, \code{\verb~|std~}, \code{\verb~|mathlib~} export (P8's unit lists) or a private name of those libraries; else the project's own.}
+
+\p{A unit the machine declines is in the join with what the machine spent before declining (both attempts); the reference engine's work on it is outside \code{\verb~|Session.check~} and appears only as thread CPU between two checks. Over the units the machine itself decides the ratios to gruszka are 8.04 (navier-stokes-euler), 4.29 (cslib), 3.25 (con-leche) instead of 7.98, 4.12, 3.24.}
+
+\p{The whole process: 972 G instructions on navier-stokes-euler (48,623 samples x 20,000,003; the integrator's table says 973.2 G), of which 886.4 G inside the checks; 757 G / 587.0 G on cslib; 174 G / 146.9 G on con-leche.}
+
+\p{E1 published a machine jar with fixes of wrong accepts at 21:26Z (5945b6568177); it is NOT what was measured.}
+}
+
+\subtree{
+\title{2. Per-declaration cost}
+
+\subtree{
+\title{2.1 Distribution (machine, default set)}
+
+\table{
+\tr{\th{corpus}\th{units}\th{ticks}\th{mean / median ticks per unit}\th{share of the ticks in the top 10 / 100 / 1,000 / 1 \% / 10 \% of the units}\th{instructions: top 10 / 100 / 1,000 / 1 \% / 10 \%}\th{thread CPU (quiet): top 10 / 100 / 1,000 / 1 \% / 10 \%}}
+\tr{\td{navier-stokes-euler}\td{124,850}\td{543.1 M}\td{4,350 / 271}\td{2.8 / 9.8 / 32.2 / 35.7 / 81.1 \%}\td{3.4 / 9.7 / 31.1 / 34.5 / 80.0 \%}\td{4.3 / 11.1 / 32.6 / 35.8 / 78.8 \%}}
+\tr{\td{cslib}\td{397,608}\td{323.8 M}\td{814 / 150}\td{1.5 / 5.9 / 19.0 / 34.2 / 72.0 \%}\td{1.2 / 5.2 / 17.8 / 32.8 / 70.7 \%}\td{1.2 / 4.8 / 15.5 / 28.6 / 65.7 \%}}
+\tr{\td{con-leche}\td{36,274}\td{74.2 M}\td{2,046 / 159}\td{9.8 / 26.2 / 56.6 / 40.9 / 80.2 \%}\td{9.6 / 25.4 / 58.0 / 41.9 / 80.3 \%}\td{14.0 / 29.0 / 58.3 / 44.0 / 79.2 \%}}
+}
+
+\p{The leaders on the same units, instructions, top 10 / 100 / 1,000 / 1 \% / 10 \%: navier-stokes-euler gruszka 6.5 / 11.4 / 27.0 / 29.6 / 69.8 \%, nano-lean 7.5 / 12.6 / 28.5 / 31.1 / 72.8 \%; cslib gruszka 1.0 / 3.9 / 12.9 / 24.6 / 60.0 \%; con-leche gruszka 12.5 / 28.7 / 58.8 / 43.6 / 79.4 \%. No hot declaration on navier-stokes-euler and cslib for anybody (the machine's top unit is 0.94 \% and 0.17 \%); con-leche has one (5.2 \% of the machine's instructions, 9.3 \% of its thread CPU, 7.9 \% of gruszka's instructions). A navier-stokes-euler unit costs the machine 4,350 ticks in the mean, gruszka 1,017: the machine's mean is 5.3 times a cslib unit's, gruszka's 2.4 times. With the two options the machine's distribution on navier-stokes-euler becomes the leaders': 5.7 / 9.9 / 25.8 / 28.6 / 72.5 \%.}
+}
+
+\subtree{
+\title{2.2 By kind of unit and by origin (instructions inside the checks; \code{\verb~|out/doctables.md~})}
+
+\subtree{
+\title{navier-stokes-euler}
+
+\table{
+\tr{\th{kind of unit}\th{units}\th{machine}\th{share}\th{thread CPU share (quiet)}\th{gruszka}\th{share}\th{ratio}\th{nano-lean ratio}\th{with \code{\verb~|congruence,skipargs~}: ratio}\th{saving}}
+\tr{\td{theorem, other}\td{64,782}\td{690.19 G}\td{77.9 \%}\td{77.9 \%}\td{84.05 G}\td{75.7 \%}\td{8.21}\td{11.17}\td{3.76}\td{54.2 \%}}
+\tr{\td{theorem, \code{\verb~|_proof_N~} (extracted proof)}\td{25,805}\td{120.79 G}\td{13.6 \%}\td{13.7 \%}\td{18.54 G}\td{16.7 \%}\td{6.51}\td{8.20}\td{3.28}\td{49.7 \%}}
+\tr{\td{definition, other}\td{17,961}\td{57.57 G}\td{6.5 \%}\td{6.4 \%}\td{5.09 G}\td{4.6 \%}\td{11.30}\td{17.78}\td{3.32}\td{70.6 \%}}
+\tr{\td{definition, instance (\code{\verb~|inst*~})}\td{3,041}\td{6.88 G}\td{0.8 \%}\td{0.8 \%}\td{613.87 M}\td{0.6 \%}\td{11.21}\td{18.04}\td{2.96}\td{73.6 \%}}
+\tr{\td{theorem, equation lemma}\td{1,815}\td{4.66 G}\td{0.5 \%}\td{0.5 \%}\td{780.86 M}\td{0.7 \%}\td{5.97}\td{8.22}\td{3.33}\td{44.3 \%}}
+\tr{\td{definition, generated (\code{\verb~|match_N~}, \code{\verb~|casesOn~}, \code{\verb~|brecOn~} ...)}\td{3,368}\td{3.47 G}\td{0.4 \%}\td{0.4 \%}\td{1.02 G}\td{0.9 \%}\td{3.40}\td{5.03}\td{2.94}\td{13.5 \%}}
+\tr{\td{theorem, generated (\code{\verb~|injEq~}, \code{\verb~|sizeOf_spec~}, \code{\verb~|congr_simp~} ...)}\td{495}\td{1.69 G}\td{0.2 \%}\td{0.2 \%}\td{359.27 M}\td{0.3 \%}\td{4.71}\td{7.73}\td{3.13}\td{33.6 \%}}
+\tr{\td{theorem, \code{\verb~|_simp_N~}}\td{7,527}\td{1.10 G}\td{0.1 \%}\td{0.2 \%}\td{540.45 M}\td{0.5 \%}\td{2.03}\td{6.09}\td{1.82}\td{10.0 \%}}
+}
+
+\table{
+\tr{\th{origin}\th{units}\th{machine}\th{share}\th{thread CPU share (quiet)}\th{gruszka}\th{share}\th{ratio}\th{nano-lean ratio}\th{with \code{\verb~|congruence,skipargs~}: ratio}\th{saving}}
+\tr{\td{the project's own}\td{57,330}\td{745.36 G}\td{84.1 \%}\td{83.4 \%}\td{79.71 G}\td{71.8 \%}\td{9.35}\td{12.67}\td{3.84}\td{59.0 \%}}
+\tr{\td{Mathlib and its dependencies}\td{60,858}\td{136.25 G}\td{15.4 \%}\td{16.0 \%}\td{29.46 G}\td{26.5 \%}\td{4.63}\td{6.33}\td{3.14}\td{32.1 \%}}
+\tr{\td{Init}\td{6,660}\td{4.75 G}\td{0.5 \%}\td{0.6 \%}\td{1.84 G}\td{1.7 \%}\td{2.58}\td{3.24}\td{2.56}\td{0.6 \%}}
+}
+
+\table{
+\tr{\th{area}\th{units}\th{machine}\th{share}\th{gruszka}\th{share}\th{ratio}\th{with the options}\th{saving}\th{ratio then}}
+\tr{\td{project: \code{\verb~|Euler*~} (690 namespaces)}\td{25,646}\td{511.33 G}\td{57.7 \%}\td{38.21 G}\td{34.4 \%}\td{13.38}\td{161.13 G}\td{68.5 \%}\td{4.22}}
+\tr{\td{project: \code{\verb~|NavierStokes.*~} (other sub-namespaces)}\td{29,457}\td{195.74 G}\td{22.1 \%}\td{33.34 G}\td{30.0 \%}\td{5.87}\td{117.38 G}\td{40.0 \%}\td{3.52}}
+\tr{\td{Mathlib: other areas}\td{56,578}\td{117.86 G}\td{13.3 \%}\td{25.98 G}\td{23.4 \%}\td{4.54}\td{80.12 G}\td{32.0 \%}\td{3.08}}
+\tr{\td{project: \code{\verb~|NavierStokes.FiveProfileMoments~}}\td{181}\td{16.06 G}\td{1.8 \%}\td{4.16 G}\td{3.7 \%}\td{3.86}\td{13.77 G}\td{14.3 \%}\td{3.31}}
+\tr{\td{Mathlib: \code{\verb~|MeasureTheory~}}\td{3,460}\td{11.62 G}\td{1.3 \%}\td{2.52 G}\td{2.3 \%}\td{4.61}\td{8.84 G}\td{24.0 \%}\td{3.50}}
+\tr{\td{project: \code{\verb~|NavierStokes.TerminalCompensation~}}\td{119}\td{8.87 G}\td{1.0 \%}\td{2.41 G}\td{2.2 \%}\td{3.68}\td{7.99 G}\td{9.9 \%}\td{3.32}}
+\tr{\td{project: \code{\verb~|NavierStokesR3~}}\td{951}\td{7.72 G}\td{0.9 \%}\td{988.75 M}\td{0.9 \%}\td{7.81}\td{3.51 G}\td{54.6 \%}\td{3.55}}
+\tr{\td{Mathlib: \code{\verb~|ContinuousLinearMap~}}\td{820}\td{6.77 G}\td{0.8 \%}\td{956.99 M}\td{0.9 \%}\td{7.07}\td{3.50 G}\td{48.2 \%}\td{3.66}}
+\tr{\td{project: other}\td{976}\td{5.65 G}\td{0.6 \%}\td{601.36 M}\td{0.5 \%}\td{9.39}\td{2.06 G}\td{63.5 \%}\td{3.43}}
+\tr{\td{Init / Std}\td{6,662}\td{4.75 G}\td{0.5 \%}\td{1.84 G}\td{1.7 \%}\td{2.58}\td{4.73 G}\td{0.6 \%}\td{2.56}}
+}
+
+\p{Single \code{\verb~|Euler*~} namespaces are between 12 and 56 times (\code{\verb~|EulerLpCylinderCoefficients~} 56.3, \code{\verb~|EulerBoundedFieldGramInverse~} 52.2, \code{\verb~|EulerPacketCorrectionCoefficients~} 40.3, \code{\verb~|EulerSourcePotentialCoefficient~} 28.8; \code{\verb~|out/report-navier-stokes-euler.md~} C4) and fall to 3.5 - 5.3 with the options.}
+}
+
+\subtree{
+\title{cslib}
+
+\table{
+\tr{\th{kind of unit}\th{units}\th{machine}\th{share}\th{thread CPU share (quiet)}\th{gruszka}\th{share}\th{ratio}\th{nano-lean ratio}\th{with \code{\verb~|congruence,skipargs~}: ratio}\th{saving}}
+\tr{\td{theorem, other}\td{173,893}\td{376.25 G}\td{64.1 \%}\td{65.8 \%}\td{82.41 G}\td{57.9 \%}\td{4.57}\td{5.98}\td{3.49}\td{23.6 \%}}
+\tr{\td{theorem, \code{\verb~|_proof_N~} (extracted proof)}\td{48,248}\td{121.09 G}\td{20.6 \%}\td{18.3 \%}\td{33.71 G}\td{23.7 \%}\td{3.59}\td{3.68}\td{2.88}\td{19.9 \%}}
+\tr{\td{definition, other}\td{59,682}\td{40.07 G}\td{6.8 \%}\td{7.0 \%}\td{9.99 G}\td{7.0 \%}\td{4.01}\td{5.52}\td{2.70}\td{32.8 \%}}
+\tr{\td{definition, generated (\code{\verb~|match_N~}, \code{\verb~|casesOn~}, \code{\verb~|brecOn~} ...)}\td{44,635}\td{18.87 G}\td{3.2 \%}\td{3.3 \%}\td{7.31 G}\td{5.1 \%}\td{2.58}\td{3.70}\td{2.58}\td{0.2 \%}}
+\tr{\td{theorem, equation lemma}\td{11,945}\td{14.88 G}\td{2.5 \%}\td{2.6 \%}\td{2.87 G}\td{2.0 \%}\td{5.18}\td{7.25}\td{3.96}\td{23.5 \%}}
+\tr{\td{theorem, generated (\code{\verb~|injEq~}, \code{\verb~|sizeOf_spec~}, \code{\verb~|congr_simp~} ...)}\td{13,196}\td{6.56 G}\td{1.1 \%}\td{1.1 \%}\td{2.30 G}\td{1.6 \%}\td{2.85}\td{4.62}\td{2.66}\td{6.5 \%}}
+\tr{\td{definition, instance (\code{\verb~|inst*~})}\td{15,665}\td{5.37 G}\td{0.9 \%}\td{1.0 \%}\td{1.80 G}\td{1.3 \%}\td{2.99}\td{5.06}\td{2.22}\td{25.7 \%}}
+\tr{\td{theorem, \code{\verb~|_simp_N~}}\td{27,704}\td{3.78 G}\td{0.6 \%}\td{0.8 \%}\td{1.90 G}\td{1.3 \%}\td{1.99}\td{6.58}\td{2.03}\td{-2.4 \%}}
+}
+
+\table{
+\tr{\th{origin}\th{units}\th{machine}\th{share}\th{thread CPU share (quiet)}\th{gruszka}\th{share}\th{ratio}\th{nano-lean ratio}\th{with \code{\verb~|congruence,skipargs~}: ratio}\th{saving}}
+\tr{\td{Mathlib and its dependencies}\td{297,351}\td{466.33 G}\td{79.4 \%}\td{80.4 \%}\td{106.17 G}\td{74.5 \%}\td{4.39}\td{5.92}\td{3.19}\td{27.5 \%}}
+\tr{\td{Init}\td{57,940}\td{71.62 G}\td{12.2 \%}\td{11.1 \%}\td{21.27 G}\td{14.9 \%}\td{3.37}\td{3.41}\td{3.28}\td{2.5 \%}}
+\tr{\td{Std}\td{28,068}\td{31.08 G}\td{5.3 \%}\td{5.6 \%}\td{8.15 G}\td{5.7 \%}\td{3.81}\td{4.19}\td{3.69}\td{3.1 \%}}
+\tr{\td{the project's own}\td{14,249}\td{17.97 G}\td{3.1 \%}\td{2.9 \%}\td{6.85 G}\td{4.8 \%}\td{2.63}\td{2.94}\td{2.54}\td{3.1 \%}}
+}
+
+\p{Areas of cslib above the corpus ratio (first name component; \code{\verb~|out/report-cslib.md~} C4): \code{\verb~|ContinuousAlternatingMap~} 17.8 (374 units, 0.8 \% of the machine's instructions), \code{\verb~|IntermediateField~} 14.3 (1.7 \%), \code{\verb~|ContinuousMultilinearMap~} 9.0, \code{\verb~|ContinuousLinearMap~} 8.0 (2.2 \%), \code{\verb~|Algebra~} 7.8 (2.3 \%), \code{\verb~|FormalMultilinearSeries~} 7.0, \code{\verb~|TensorProduct~} 6.1; all fall to 3.6 - 4.3 with the options. No area is more than 6 \% of the corpus (the private names of \code{\verb~|Init.Data~}: 6.0 \% at 3.8).}
+}
+
+\subtree{
+\title{con-leche}
+
+\table{
+\tr{\th{kind of unit}\th{units}\th{machine}\th{share}\th{thread CPU share (quiet)}\th{gruszka}\th{share}\th{ratio}\th{nano-lean ratio}\th{with \code{\verb~|congruence,skipargs~}: ratio}\th{saving}}
+\tr{\td{theorem, other}\td{12,348}\td{74.60 G}\td{50.8 \%}\td{48.7 \%}\td{23.33 G}\td{51.5 \%}\td{3.20}\td{3.29}\td{3.27}\td{-2.1 \%}}
+\tr{\td{theorem, \code{\verb~|_proof_N~} (extracted proof)}\td{5,673}\td{41.18 G}\td{28.0 \%}\td{25.5 \%}\td{10.66 G}\td{23.5 \%}\td{3.86}\td{2.62}\td{3.57}\td{7.5 \%}}
+\tr{\td{theorem, equation lemma}\td{2,098}\td{15.55 G}\td{10.6 \%}\td{14.8 \%}\td{5.54 G}\td{12.2 \%}\td{2.81}\td{2.08}\td{5.37}\td{-91.5 \%}}
+\tr{\td{definition, other}\td{7,869}\td{8.65 G}\td{5.9 \%}\td{6.3 \%}\td{2.99 G}\td{6.6 \%}\td{2.89}\td{3.34}\td{2.93}\td{-1.4 \%}}
+\tr{\td{definition, generated (\code{\verb~|match_N~}, \code{\verb~|casesOn~}, \code{\verb~|brecOn~} ...)}\td{6,116}\td{6.43 G}\td{4.4 \%}\td{4.3 \%}\td{2.50 G}\td{5.5 \%}\td{2.57}\td{2.23}\td{2.81}\td{-9.4 \%}}
+\tr{\td{definition, instance (\code{\verb~|inst*~})}\td{614}\td{235.83 M}\td{0.2 \%}\td{0.2 \%}\td{110.80 M}\td{0.2 \%}\td{2.13}\td{3.31}\td{2.26}\td{-6.2 \%}}
+}
+
+\p{93.3 \% of the machine's instructions on con-leche are in the project's own 27,368 units (3.28 times), 6.0 \% in Init (2.75), 0.7 \% in Std (3.04).}
+}
+}
+
+\subtree{
+\title{2.3 By judgment (machine, default set; call events + inline memo hits)}
+
+\table{
+\tr{\th{family}\th{navier-stokes-euler}\th{share}\th{with the options}\th{cslib}\th{share}\th{con-leche}\th{share}}
+\tr{\td{EV (evaluation: EVAL and its memo hits, ACT, APPLY, INST, DOM)}\td{211.2 M}\td{38.2 \%}\td{83.0 M}\td{125.6 M}\td{40.2 \%}\td{38.9 M}\td{49.4 \%}}
+\tr{\td{RD (reduction: CORE, DELTA, WHNF, IOTA, Nat folding)}\td{178.6 M}\td{32.3 \%}\td{20.6 M}\td{76.4 M}\td{24.5 \%}\td{13.3 M}\td{16.8 \%}}
+\tr{\td{CV (conversion: CONV, LSTEP, PIRR, LAZYD, CARGS, CBIND, PROJD)}\td{113.2 M}\td{20.5 \%}\td{44.4 M}\td{60.1 M}\td{19.3 \%}\td{13.9 M}\td{17.6 \%}}
+\tr{\td{IN (inference: VTYPE, INFER, CHECK, ISPROP)}\td{49.8 M}\td{9.0 \%}\td{20.8 M}\td{50.1 M}\td{16.0 \%}\td{12.8 M}\td{16.2 \%}}
+\tr{\td{all events}\td{552.8 M}\td{}\td{168.8 M}\td{312.3 M}\td{}\td{78.8 M}\td{}}
+}
+
+\p{navier-stokes-euler in detail: EVAL 33.6 M + 67.8 M hits, ACT 63.5 M, APPLY 23.9 M; CORE 57.4 M + 41.6 M hits, \strong{DELTA 47.1 M + 16.2 M hits}, WHNF 13.3 M, IOTA 277.3 k, Nat folding 70.6 k, QUOTR 20.9 k; CONV 22.8 M + 13.9 M pair hits, LSTEP 29.8 M, \strong{PIRR 17.3 M}, LAZYD 13.1 M, CARGS 10.7 M, CBIND 3.3 M, PROJD 2.3 M, ETAS 12.4 k; VTYPE 27.9 M, INFER 15.2 M, CHECK 3.0 M, ISPROP 3.7 M. The reduction family is a third of the events on navier-stokes-euler and a sixth on con-leche; with the options it falls by 88 \%. (The events are 1.8 \% / -3.6 \% / 6.2 \% off the tick counts: a tick is not exactly one event under the default set.)}
+
+\p{Units grouped by the family with most events in the unit, navier-stokes-euler: reduction-led units are 16,284 units, 34.3 \% of the machine's instructions, 14.0 \% of gruszka's, \strong{19.5 times} (3.85 with the options); evaluation-led units 65.4 \% of the machine's at 6.2; inference-led and conversion-led units 0.3 \% at 1.0 - 3.3. On con-leche 98 \% is evaluation-led at 2.9 - 3.5.}
+}
+}
+
+\subtree{
+\title{3. The join: machine / gruszka per unit (instructions)}
+
+\subtree{
+\title{navier-stokes-euler}
+
+\table{
+\tr{\th{ratio of the unit}\th{units}\th{share of the machine's instructions}\th{share of gruszka's}\th{ratio of the group}\th{machine ticks / gruszka ticks}\th{DELTA events per gruszka unfold}\th{CONV events per gruszka def_eq call}\th{INFER + CHECK per gruszka infer miss}\th{PIRR events}\th{with \code{\verb~|congruence,skipargs~}, units grouped by their ratio in that run: units}\th{share of the machine's}}
+\tr{\td{below 2}\td{43,563}\td{0.8 \%}\td{5.5 \%}\td{1.1}\td{0.57}\td{0.5}\td{0.26}\td{0.46}\td{88.6 k}\td{43,595}\td{2.3 \%}}
+\tr{\td{2 .. 4}\td{43,244}\td{15.1 \%}\td{36.7 \%}\td{3.3}\td{1.22}\td{3.2}\td{0.52}\td{0.93}\td{1.92 M}\td{59,495}\td{60.5 \%}}
+\tr{\td{4 .. 8}\td{20,368}\td{22.6 \%}\td{33.0 \%}\td{5.5}\td{2.64}\td{7.9}\td{0.94}\td{1.02}\td{3.55 M}\td{17,311}\td{30.4 \%}}
+\tr{\td{8 .. 16}\td{8,862}\td{21.2 \%}\td{15.3 \%}\td{11.1}\td{6.82}\td{16.7}\td{1.80}\td{1.14}\td{3.88 M}\td{3,007}\td{4.5 \%}}
+\tr{\td{16 .. 32}\td{4,628}\td{18.0 \%}\td{6.5 \%}\td{22.0}\td{15.42}\td{38.3}\td{3.23}\td{1.37}\td{3.55 M}\td{781}\td{1.2 \%}}
+\tr{\td{32 .. 64}\td{2,342}\td{11.7 \%}\td{2.2 \%}\td{42.2}\td{31.38}\td{85.7}\td{5.75}\td{1.72}\td{2.28 M}\td{291}\td{0.5 \%}}
+\tr{\td{64 and more}\td{1,843}\td{10.6 \%}\td{0.7 \%}\td{116.3}\td{86.60}\td{250.0}\td{14.12}\td{3.24}\td{2.05 M}\td{370}\td{0.6 \%}}
+\tr{\td{all}\td{124,850}\td{100 \%}\td{100 \%}\td{7.98}\td{4.27}\td{13.4}\td{1.35}\td{0.99}\td{17.32 M}\td{124,850}\td{100 \%}}
+}
+
+\p{Units at 8 times and more: 17,675 units (14.2 \%), \strong{61.6 \% of the machine's instructions, 24.8 \% of gruszka's, 19.8 times as a class}; below 8: 38.4 \% of the machine's, 75.2 \% of gruszka's, \strong{4.08 times}. With the options the units at 8 and more carry 6.8 \%. Over the corpus inference is at parity with gruszka (0.99), unfoldings are 13.4 times (Mathlib: 5.5). Against nano-lean (10.83 overall): units at 8 times and more carry 71.7 \% of the machine's instructions and 35.5 \% of nano-lean's.}
+}
+
+\subtree{
+\title{cslib and con-leche}
+
+\table{
+\tr{\th{ratio of the unit}\th{cslib: units}\th{share of the machine's}\th{share of gruszka's}\th{ratio of the group}\th{DELTA per gruszka unfold}\th{con-leche: units}\th{share of the machine's}\th{share of gruszka's}\th{ratio of the group}\th{DELTA per gruszka unfold}}
+\tr{\td{below 2}\td{167,070}\td{4.1 \%}\td{15.9 \%}\td{1.1}\td{0.4}\td{17,109}\td{4.2 \%}\td{9.1 \%}\td{1.5}\td{0.6}}
+\tr{\td{2 .. 4}\td{159,453}\td{38.2 \%}\td{51.9 \%}\td{3.0}\td{1.7}\td{13,790}\td{64.8 \%}\td{73.7 \%}\td{2.9}\td{1.2}}
+\tr{\td{4 .. 8}\td{52,591}\td{31.7 \%}\td{25.0 \%}\td{5.2}\td{4.4}\td{3,507}\td{24.7 \%}\td{16.0 \%}\td{5.0}\td{3.8}}
+\tr{\td{8 .. 16}\td{12,471}\td{14.3 \%}\td{5.5 \%}\td{10.8}\td{11.3}\td{804}\td{3.1 \%}\td{1.0 \%}\td{10.1}\td{9.0}}
+\tr{\td{16 .. 32}\td{3,994}\td{6.9 \%}\td{1.3 \%}\td{21.1}\td{26.2}\td{538}\td{0.8 \%}\td{0.1 \%}\td{20.6}\td{30.9}}
+\tr{\td{32 .. 64}\td{1,234}\td{2.8 \%}\td{0.3 \%}\td{40.9}\td{59.0}\td{193}\td{0.4 \%}\td{0.0 \%}\td{44.6}\td{101.4}}
+\tr{\td{64 and more}\td{795}\td{2.1 \%}\td{0.1 \%}\td{118.4}\td{292.5}\td{333}\td{2.0 \%}\td{0.0 \%}\td{151.1}\td{610.6}}
+\tr{\td{all}\td{397,608}\td{100 \%}\td{100 \%}\td{4.12}\td{3.4}\td{36,274}\td{100 \%}\td{100 \%}\td{3.24}\td{1.6}}
+}
+
+\p{cslib: units at 8 times and more are 4.7 \% of the units, 26.0 \% of the machine's instructions, 7.2 \% of gruszka's (15.0 times); below 8: 3.28 times. con-leche: 5.1 \% of the units, 6.3 \% of the machine's instructions (17.1 times); below 8: 3.08 times.}
+}
+
+\subtree{
+\title{Which option removes what (\code{\verb~|out/optsplit-<corpus>.md~}; instructions, default set = 100 \%)}
+
+\table{
+\tr{\th{}\th{navier-stokes-euler}\th{cslib}\th{con-leche}}
+\tr{\td{\code{\verb~|facts,probes~} alone (official-exact)}\td{+1.2 \%}\td{+0.6 \%}\td{+2.0 \%}}
+\tr{\td{\code{\verb~|skipargs~} alone}\td{-42.2 \%}\td{-17.7 \%}\td{-1.8 \%}}
+\tr{\td{\code{\verb~|congruence~} alone}\td{-47.3 \%}\td{-14.9 \%}\td{+8.4 \%}}
+\tr{\td{both}\td{\strong{-54.5 \%}}\td{\strong{-22.4 \%}}\td{\strong{+9.2 \%}}}
+\tr{\td{removed by either one alone}\td{35.0 \%}\td{10.2 \%}\td{2.5 \%}}
+\tr{\td{only with \code{\verb~|congruence~}}\td{12.3 \%}\td{4.6 \%}\td{-10.9 \%}}
+\tr{\td{only with \code{\verb~|skipargs~}}\td{7.2 \%}\td{7.5 \%}\td{-0.8 \%}}
+\tr{\td{ticks with both}\td{-74.1 \% (543.1 M -> 140.7 M)}\td{-39.6 \%}\td{-5.4 \%}}
+}
+
+\p{navier-stokes-euler, units by what repairs them:}
+
+\table{
+\tr{\th{class of unit}\th{units}\th{machine (default)}\th{share}\th{gruszka}\th{ratio}\th{saved by \code{\verb~|skipargs~} alone}\th{by \code{\verb~|congruence~} alone}\th{by both}\th{ratio with both}}
+\tr{\td{either option alone removes most of it}\td{17,009}\td{473.08 G}\td{53.4 \%}\td{30.36 G}\td{15.6}\td{35.0 \%}\td{36.5 \%}\td{39.4 \%}\td{4.09}}
+\tr{\td{\code{\verb~|congruence~} does it (\code{\verb~|skipargs~} alone under 60 \% of the saving)}\td{6,277}\td{124.21 G}\td{14.0 \%}\td{10.51 G}\td{11.8}\td{3.6 \%}\td{8.7 \%}\td{9.3 \%}\td{4.01}}
+\tr{\td{\code{\verb~|skipargs~} does it (\code{\verb~|congruence~} alone under 60 \%)}\td{4,783}\td{50.87 G}\td{5.7 \%}\td{6.25 G}\td{8.1}\td{2.8 \%}\td{1.0 \%}\td{3.1 \%}\td{3.68}}
+\tr{\td{only the two together}\td{2,034}\td{16.64 G}\td{1.9 \%}\td{2.49 G}\td{6.7}\td{0.3 \%}\td{0.2 \%}\td{0.9 \%}\td{3.48}}
+\tr{\td{neither helps much (both remove under a quarter of the unit)}\td{94,747}\td{221.56 G}\td{25.0 \%}\td{61.42 G}\td{3.6}\td{0.5 \%}\td{0.9 \%}\td{1.9 \%}\td{3.34}}
+}
+
+\p{(The "saved" columns are shares of the corpus.) Units the options make more expensive: 5.36 G = 0.6 \% of the default total on navier-stokes-euler; on con-leche the sum is larger than the savings (section 4.7).}
+}
+}
+
+\subtree{
+\title{4. Mechanisms}
+
+\subtree{
+\title{4.1 Proofs are compared by their types (the official rule); on navier-stokes-euler they are the proofs of analysis}
+
+\p{\strong{Size: the 53.4 \% + 5.7 \% rows above; \code{\verb~|skipargs~} alone removes 42.2 \% of the machine's navier-stokes-euler instructions (57.8 \% of its ticks), 17.7 \% on cslib, 1.8 \% on con-leche.} Owner of the place: M4 (\code{\verb~|Conv.java~}, \code{\verb~|Cargs.java~}), facts by M5 (\code{\verb~|Facts.java~}); the rule that keeps it off: NOTES-M4 D27, findings S-F1 / S-F2, owner note 11; reviewed as theory-sound and not official in \src{docs/design/review/soundness-shortcuts.md}; agent C1 found no official-exact route to it (\src{docs/design/review/exact-proof-conversion.md}).}
+
+\p{Traced unit (\code{\verb~|out/trace-nse-def.txt~}): \code{\verb~|EulerBoundedFieldGramInverse.inversePath._proof_1~}, a project theorem at 161 times.}
+
+\table{
+\tr{\th{}\th{ticks / steps}\th{instructions}\th{unfoldings}\th{conversion problems}\th{inference}}
+\tr{\td{machine, default set}\td{1,199,526}\td{1.69 G}\td{142,742 DELTA + 43,802 memo hits}\td{34,564 CONV + 8,506 pair hits, 32,363 PIRR, 41,798 VTYPE}\td{524 INFER, 48 CHECK}}
+\tr{\td{machine + \code{\verb~|facts~} + \code{\verb~|skipargs~}}\td{16,517}\td{40.4 M}\td{}\td{}\td{}}
+\tr{\td{machine + \code{\verb~|facts,probes~} + \code{\verb~|congruence~}}\td{28,255}\td{63.6 M}\td{}\td{}\td{}}
+\tr{\td{machine + both}\td{12,667}\td{33.7 M}\td{769 DELTA + 319}\td{881 CONV + 1,060, 31 PIRR, 502 VTYPE}\td{514 INFER, 48 CHECK}}
+\tr{\td{gruszka}\td{9,867}\td{10.5 M}\td{716}\td{1,319 def_eq, 673 cache hits, 89 closure congruences}\td{974 infer misses}}
+\tr{\td{nano-lean}\td{20,462}\td{10.0 M}\td{762}\td{5,512 def_eq, 4,353 pointer-equal}\td{894 infer misses}}
+}
+
+\p{What happens, from the trace:}
+
+\ul{
+\li{Events 1 - 27: the theorem's type is inferred; \code{\verb~|NormedSpace Real E (DenselyNormedField.toNormedField (RCLike.to.. Real.instRCLike)) ..~} is compared with \code{\verb~|NormedSpace Real E Real.normedField ..~}, then \code{\verb~|Module Real E (DivisionSemiring.toSemiring (.. NormedField.toField Real.normedField)) ..~} with \code{\verb~|Module Real E Real.semiring ..~}. Two instance paths to the semiring of \code{\verb~|Real~}: lazy delta unfolds both (\code{\verb~|Real.normedField~}, \code{\verb~|Real.semiring~}, \code{\verb~|inferInstance~}, \code{\verb~|Real.instCommSemiring~}, \code{\verb~|Real.commRing~} ...).}
+\li{Events 28 - 90: the two unfolded structures are compared field by field: \code{\verb~|AddCommMonoid.mk Real (..) Real.normedField._proof_1 =?= AddCommMonoid.mk Real (AddMonoid.mk ..) (fun a b => Real.commRing._proof_6 a b)~}. The proof field: CONV, not identical, \strong{PIRR}: both types are inferred and compared: \code{\verb~|(a b : Real) -> a + b = b + a~} with \code{\verb~|+~} through \code{\verb~|SubNegMonoid.toAddMonoid (.. NormedAddCommGroup.toAddCommGroup Real.normedAddCommGroup)~} against the same with \code{\verb~|Real.instAdd~}. \code{\verb~|HAdd.hAdd~}, \code{\verb~|instHAdd~}, \code{\verb~|Add.add~}, \code{\verb~|AddSemigroup.toAdd~} are projection functions (hint abbrev): the official order (\code{\verb~|refs/lean4/src/kernel/type_checker.cpp:995~}, arguments first only for REGULAR definitions) unfolds both sides down to the structure, for every \code{\verb~|+~}, \code{\verb~|*~}, \code{\verb~|0~} of every law (\code{\verb~|mul_zero~}, \code{\verb~|zero_mul~} follow).}
+\li{The rest of the unit is the same pattern on bundled maps: a sum of continuous linear maps unfolds to \code{\verb~|ContinuousLinearMap.mk (LinearMap.mk (AddHom.mk (fun x => f x + g x) proof) proof) proof~}, and two such values are compared constructor by constructor: \code{\verb~|LinearMap.instAdd._proof_1 =?= LinearMap.instAdd._proof_1~} (572 times), \code{\verb~|LinearMap.instAdd._proof_2~} (572), \code{\verb~|ContinuousLinearMap.add._proof_1~} (572; the unit poses 967 \code{\verb~|Continuous =?= Continuous~} problems), \code{\verb~|BoundedContinuousFunction.instAdd._proof_1/2~} (132 each), \code{\verb~|LinearMap.instSMul._proof_*~}, \code{\verb~|ContinuousLinearMap.neg._proof_1~} ... Each type mentions \code{\verb~|DFunLike.coe~} and \code{\verb~|+~} on both sides: of the 142,742 DELTA events 25,467 are \code{\verb~|HAdd.hAdd~}, 25,458 \code{\verb~|Add.add~}, 24,420 \code{\verb~|DFunLike.coe~}, 17,447 \code{\verb~|AddHom.toFun~}, 10,374 \code{\verb~|SMul.smul~}, 9,834 \code{\verb~|HSMul.hSMul~}, 7,168 \code{\verb~|Neg.neg~}, 4,147 \code{\verb~|LinearMap.toAddHom~}, 4,094 \code{\verb~|ContinuousLinearMap.toLinearMap~}; of the 34,564 conversion problems 10,437 are \code{\verb~|DFunLike.coe =?= DFunLike.coe~}, 6,653 \code{\verb~|HAdd.hAdd~}, 1,705 \code{\verb~|Eq~}, 1,704 Pi. Of the events in the 30 most frequent judgment chains, 72 \% of the CONV events and 40 \% of the DELTA events have a PIRR among the 12 innermost judgments on the host stack (a lower bound: the stack is cut at 12 labels and at frames).}
+}
+
+\p{Other traced units of this class (\code{\verb~|scripts/tracesum.py~}): \code{\verb~|AnalyticOnNhd.iteratedFDeriv~} (Mathlib; 496,077 ticks against gruszka's 25,061; proofs compared: \code{\verb~|ContinuousMultilinearMap.instAdd._proof_1~} 410, \code{\verb~|MultilinearMap.instAdd._proof_1/2~} 408 each, \code{\verb~|AddCommGroup.add_comm~} 194; 79 \% of the CONV events below a PIRR), \code{\verb~|EulerLpCylinderCoefficients.liftedOperatorPathMap~} (a project definition at 570 times: 413,359 ticks against 1,049; \code{\verb~|AddMemClass.add._proof_1~} 676 times - the membership proof of a sum of two elements of \code{\verb~|Lp~}, a subtype of \code{\verb~|AEEqFun~} -, \code{\verb~|MeasureTheory.Lp.instModule._proof_7~}, \code{\verb~|AddSubgroupClass.instZSMul._proof_1~}; DELTA \code{\verb~|Subtype.val~} 5,258, \code{\verb~|Membership.mem~} 4,466; with both options 751 ticks). So the three families of proofs on navier-stokes-euler are: the instance paths of \code{\verb~|Real~} and of the normed structures, the proof fields of bundled maps, the membership proofs of subobjects.}
+
+\p{What the leaders do instead (lines verified in \code{\verb~|refs/~}): gruszka \code{\verb~|src/tc.rs~}: \code{\verb~|spines_defeq_skip~} (8573: skips \code{\verb~|prop_positions~}, 8641, and inside lazy delta \code{\verb~|unused_args~}, 8603), \code{\verb~|try_eta_struct~} (8823) with the same mask, \code{\verb~|surely_not_proof~} (7297), \code{\verb~|proof_irrel~} (7499) only for what is left; nano-lean \code{\verb~|src/value_checker/conv.rs~}: \code{\verb~|relevant~} (389), \code{\verb~|probe_args~} (359), \code{\verb~|statically_not_proof~} (315). Official-exact? \strong{No} (S-F2: the official \code{\verb~|is_def_eq~} is not a congruence where a reduction inspects a proof; \code{\verb~|M4OfficialTest~}). The machine has the same masks behind \code{\verb~|skipargs~} (B3, B4, the Prop mask of ETAS; statistics of the options run on navier-stokes-euler: B3 answered 494,369 times, B4 2,406,940 times, B1 4,124,373, B12 916,448).}
+}
+
+\subtree{
+\title{4.2 Congruence before unfolding: the same head, the same term under two environments (only \code{\verb~|congruence~} repairs it)}
+
+\p{\strong{Size on navier-stokes-euler: 6,277 units, 14.0 \% of the machine's instructions, 11.8 times gruszka; 12.3 \% of the corpus is removed only when \code{\verb~|congruence~} is on} (cslib 4.6 \%; on Mathlib P8's figures give 9 \%). Owner: M4 (\code{\verb~|Conv.congruence~}: B1 same-head probe, B12 closure congruence, B2; \code{\verb~|Same.java~}). Off since D27 (S-F1).}
+
+\p{Traced unit (\code{\verb~|out/trace-nse-def-long.txt~}, \code{\verb~|trace-nse-def-mid.txt~}): \code{\verb~|EulerSobolevBaseCommutator.baseCommutator_bound~}, the unit with the largest excess of the corpus.}
+
+\table{
+\tr{\th{}\th{ticks / steps}\th{instructions}\th{unfoldings}\th{recursor steps}\th{conversion problems}}
+\tr{\td{machine, default set}\td{1,537,192}\td{2.17 G}\td{89,368 DELTA}\td{53,288 IOTA, 353 QUOTR}\td{30,439 CONV, 29,743 PIRR}}
+\tr{\td{machine + \code{\verb~|facts~} + \code{\verb~|skipargs~}}\td{1,450,455}\td{2.11 G}\td{}\td{}\td{}}
+\tr{\td{machine + \code{\verb~|facts,probes~} (official-exact)}\td{2,025,399}\td{2.60 G}\td{}\td{}\td{}}
+\tr{\td{machine + \code{\verb~|facts,probes~} + \code{\verb~|congruence~}}\td{41,200}\td{84.4 M}\td{}\td{}\td{}}
+\tr{\td{machine + both}\td{27,988}\td{65.6 M}\td{2,546 DELTA}\td{313 IOTA}\td{1,791 CONV, 9 PIRR}}
+\tr{\td{gruszka}\td{12,998}\td{47.9 M}\td{1,663}\td{}\td{917 def_eq, 476 cache hits, \strong{110 closure congruences}}}
+\tr{\td{nano-lean}\td{34,155}\td{16.3 M}\td{2,600 (+ 904 derived rules)}\td{352 iota}\td{7,106 def_eq, 5,110 pointer-equal, 220 probes}}
+}
+
+\p{What happens:}
+
+\ul{
+\li{\strong{The bulk (events 60,000 and after; a cycle of nine events): two sums over one list are compared element by element.} Both sides are \code{\verb~|List.foldr (fun a acc => a + acc) 0 l~} where \code{\verb~|l~} is a list of norms indexed by \code{\verb~|EulerCylinderSobolevSpace.SobolevWord~}s (a Sobolev norm written as a sum over words) and the summand closure differs only in its environment. Per element: \code{\verb~|List.foldr._f~} is unfolded on both sides, its matcher on both sides, \code{\verb~|HAdd.hAdd~} and \code{\verb~|Add.add~} on both sides, the two heads are compared (\code{\verb~|MeasureTheory.eLpNorm (AEEqFun.cast f) .. =?= MeasureTheory.eLpNorm (AEEqFun.cast g) ..~}: a regular definition, arguments first, down to \code{\verb~|Subtype.val~}), then the two tails. The counts give the length: \code{\verb~|List.foldr._f~} 10,922 unfoldings = 2 x 5,461, \code{\verb~|eLpNorm =?= eLpNorm~} 5,464, \code{\verb~|Norm.norm~} 10,948, \code{\verb~|Subtype.val~} 22,245, \code{\verb~|HAdd.hAdd~} 11,741, \code{\verb~|Add.add~} 11,739, 53,288 recursor steps (9.8 per element). 5,461 = (4^7 - 1) / 3, the number of words of length at most 6 over four letters. So: one comparison of a 5,461-term sum with itself under another environment is 1.5 M ticks. This is the only place where a \code{\verb~|Finset~} / list sum is the cost on this corpus, and it is conversion, not evaluation.}
+\li{\strong{The prelude (events 3,636 - 3,672) shows the closure case in small}: the metric of \code{\verb~|EuclideanSpace Real (Fin 3)~} (\code{\verb~|PiLp 2 fun _ : Fin 3 => Real~}) through two instance paths; the comparison reaches the definition of the distance, \code{\verb~|ite (2 = top) (iSup ..) ((Finset.sum univ fun i => dist (x i) (y i) ^ p.toReal) ^ (1 / p.toReal))~}, the same lambda on both sides under two environments whose entries are convertible but not identical. \code{\verb~|HPow.hPow~} is a projection function: both sides are unfolded (\code{\verb~|instHPow~}, \code{\verb~|Pow.pow~}, \code{\verb~|Real.instPow~}), then \code{\verb~|Finset.sum =?= Finset.sum~} (regular: arguments first), the two lambdas are opened (CBIND), \code{\verb~|HPow.hPow (dist ..)~} is unfolded again, \code{\verb~|Dist.dist~} down to \code{\verb~|PseudoMetricSpace.toDist Real (..)~}, then the other branch \code{\verb~|iSup ..~}, \code{\verb~|Finset.card (Set.Finite.toFinset ..)~}.}
+\li{\code{\verb~|skipargs~} leaves the unit as it is (1,450,455 ticks) and only 2 \% of the events of the 30 most frequent chains are below a PIRR: it is not a proof-position case.}
+}
+
+\p{Second traced unit, more typical of the class: \code{\verb~|NavierStokes.AxisContraction.natural_axis_profiles~} (894,995 ticks, 1.17 G; \code{\verb~|skipargs~} 622 M, \code{\verb~|congruence~} 127 M, both 100 M; gruszka 26.3 M). 40,569 of its 93,580 DELTA events are in the chain \code{\verb~|DELTA < LSTEP < LAZYD < CONV < CARGS < LSTEP < LAZYD < CONV < CARGS < LSTEP < LAZYD~}: applications of one head whose arguments are applications of one head ..., with projection functions unfolded at every level (\code{\verb~|DFunLike.coe~} 14,540, \code{\verb~|HAdd.hAdd~} 10,240, \code{\verb~|Add.add~} 10,237, \code{\verb~|ContinuousMap.toFun~} 6,055, \code{\verb~|BoundedContinuousFunction.toContinuousMap~} 3,146); 30 \% of the CONV events are below a PIRR (\code{\verb~|BoundedContinuousFunction.instAdd._proof_1/2~}, 634 each).}
+
+\p{What the leaders do instead: gruszka \code{\verb~|closure_congr~} (\code{\verb~|tc.rs:6792~}, at the entry of every comparison, 6650 / 6713) and \code{\verb~|same_term~} (7026): two closures or thunks of the same term and level substitution are equal when the environment entries the term uses are identical or already known equal; \code{\verb~|quick_parts~} (8543) after \code{\verb~|whnf_core~} and inside the lazy delta loops (7251, 8102, 8517). nano-lean: \code{\verb~|same(t, s, fuel)~} (\code{\verb~|conv.rs:107~}) and the same-head probe \code{\verb~|probe_args~} (359) before \code{\verb~|whnf_core~}, for every unfoldable head. The official kernel tries the arguments of two applications of one head first only for REGULAR definitions (\code{\verb~|type_checker.cpp:995-1002~}), never for a projection function, and has no closure comparison. Official-exact? \strong{No} (S-F1). The machine's default set contains the official-exact part (\code{\verb~|same~}, D28: the walk answers only for identical slots; B12 answered T 957,386 times and U 9,511,740 times in the default run): the gap is "entries convertible, not identical" and "same head, abbreviation".}
+
+\p{Other units of the class: \code{\verb~|EulerDriftGlobalInviscidGevrey.exists_global_inviscid_gevrey_PDE~} (792 M -> 216 M with \code{\verb~|congruence~}; \code{\verb~|skipargs~} 632 M), \code{\verb~|EulerCylinderDirichlet.Coefficients.coordinate_equation_ae~} (828 M -> 326 M; 532 M), \code{\verb~|EulerAllOrderDriftCorrection.finite_exists~} (763 M -> 179 M; 648 M).}
+}
+
+\subtree{
+\title{4.3 Eager-reduction declines (M6-F26)}
+
+\table{
+\tr{\th{corpus}\th{declined units}\th{of which}\th{machine before the decline (both attempts)}\th{reference engine after them (quiet)}\th{share of the worker}\th{reference steps}\th{the same units for gruszka}}
+\tr{\td{navier-stokes-euler}\td{251 (0.2 \%)}\td{249 \code{\verb~|_proof_N~}; 247 Mathlib, 4 Init}\td{0.04 s, 482 M instr}\td{0.87 s}\td{1.5 \%}\td{10.3 M}\td{891 M instr = 0.8 \% of its corpus, 0.13 s}}
+\tr{\td{cslib}\td{2,406 (0.6 \%)}\td{2,273 \code{\verb~|_proof_N~}, 118 other theorems; 1,614 Mathlib, 594 the project's, 164 Init, 34 Std}\td{0.27 s, 3.77 G}\td{\strong{5.89 s}}\td{\strong{12.6 \%}}\td{18.0 M}\td{6.55 G = 4.6 \%, 1.04 s}}
+\tr{\td{con-leche}\td{88 (0.2 \%)}\td{83 \code{\verb~|_proof_N~}; 81 the project's, 7 Init}\td{0.07 s, 1.27 G}\td{0.25 s}\td{2.9 \%}\td{0.86 M}\td{451 M = 1.0 \%, 0.07 s}}
+}
+
+\p{Every declined unit is declined twice (warm attempt, cold retry; the second costs the machine nothing: 13 us between the two) and then decided by the reference engine: per unit a median of 1.5 ms on cslib (10 \% of them under 0.58 ms, 10 \% above 5.2 ms, the largest about 70 ms: \code{\verb~|..ContinuousLinearMap.norm_eq_iSup_rayleighQuotient._proof_1_5~} and \code{\verb~|..Cslib.Automata.NA.loop_fin_run_exists._proof_1_88~}). The cost is not proportional to the reference steps (7.5 k steps per unit on cslib, 41 k on navier-stokes-euler, 2.4 ms and 3.5 ms per unit). Owner: M6 (\code{\verb~|MachineSession~}, \code{\verb~|Machine.enterER~}); E1's prototype (\src{docs/design/review/eager-reduction.md}, switch \code{\verb~|eager~}) keeps these units on the machine and reports a third of the reference engine's time for them on Std; on cslib that would be about 4 s of 46.6 s. Official-exactness is the reason for the rule.}
+}
+
+\subtree{
+\title{4.4 Between the checks: inductive blocks}
+
+\p{The CPU time between two checks that is neither a decline nor a session reset (quiet window): 2.58 s on navier-stokes-euler (4.4 \% of the worker), 2.04 s on cslib (4.4 \%), 0.53 s on con-leche (6.0 \%). The median gap is 1 to 2 us; the time is in the gaps in which the driver admits declarations that no engine checks (inductive blocks, \code{\verb~|rlvm-inductive~}): navier-stokes-euler 1,355 such gaps, \strong{1.98 s (1.46 ms each)}; cslib 3,218 gaps, 0.58 s; con-leche 301 gaps, 0.27 s. gruszka spends 0.27 s / 0.21 s / 0.08 s (its own clock) on ALL its declarations that are not machine units (1,618 / 4,377 / 473; 1.70 G / 1.22 G / 0.62 G instructions). The project's structures of navier-stokes-euler (\code{\verb~|EulerAllOrderDriftCorrection.ExactLiftedPacket~}: 35.6 M instructions for gruszka, 113 M for nano-lean) are the large ones. Session resets cost 0.33 s / 0.05 s / 0.03 s (7,105 / 6,167 / 1,268 resets seen between checks). Owner: \code{\verb~|rlvm-inductive~} / driver, not the machine. Size: 3.4 \% of the worker on navier-stokes-euler.}
+}
+
+\subtree{
+\title{4.5 Sessions: sibling proofs (con-leche)}
+
+\p{con-leche's units far above the corpus ratio (16 times and more: 1,064 units, 3.2 \% of the machine's instructions) are 427 \code{\verb~|_proof_N_N~}, 104 \code{\verb~|eq_N~}, 342 \code{\verb~|_sparseCasesOn_N~}, 106 \code{\verb~|match_N~} units: families of declarations with shared sub-terms. \code{\verb~|..ConLeche.Model.ctorsLoopAt._proof_1_9 / _10 / _11~}: gruszka 4,538 / 427 / 413 ticks (6.19 M / 0.32 M / 0.35 M instructions), the machine 47,976 / 44,847 / 44,592 ticks (82 - 88 M each): gruszka's later siblings are answered from what the first one left in the session (\code{\verb~|infer_u~} hits 55, \code{\verb~|udm~} hits 98 of 109 probes), the machine's session was reset (cap 1 MiB). Ticks of con-leche by session cap: 1 MiB (default) 74.2 M, 4 MiB 67.4 M (-9.2 \%), 16 MiB 62.0 M (-16.4 \%), 64 MiB 58.6 M (-21.1 \%); \code{\verb~|_proof_1_10~} 44,847 -> 10,170 -> 9,079 ticks, \code{\verb~|_proof_1_11~} 44,592 -> 498 -> 435. The integrator chose 1 MiB on the warm wall clock of Mathlib with 8 workers, and the quiet window confirms it for con-leche with one worker: thread CPU of the checks 7.86 s at 1 MiB, 8.02 s at 4 MiB, 8.61 s at 16 MiB, 10.16 s at 64 MiB (139 and 174 ns per tick against 106): the ticks fall and the time rises. As the sessions are built today these units are not a prize in time. On navier-stokes-euler the same kind of unit is what remains above 8 times WITH the options (6.8 \% of that run's instructions; \code{\verb~|EulerTransversePacketPrimary.Budget.future_derivative_bound~}: 17,589 ticks against gruszka's 744, 9 unfoldings, 171 \code{\verb~|infer_u~} hits).}
+}
+
+\subtree{
+\title{4.6 What remains: the cost of one operation}
+
+\table{
+\tr{\th{}\th{navier-stokes-euler: machine default}\th{machine + options}\th{gruszka}\th{cslib: machine default}\th{+ options}\th{gruszka}\th{con-leche: machine default}\th{gruszka}}
+\tr{\td{ticks}\td{543.1 M}\td{140.7 M}\td{127.1 M}\td{323.8 M}\td{195.7 M}\td{171.3 M}\td{74.2 M}\td{57.1 M}}
+\tr{\td{ticks against gruszka}\td{4.27}\td{1.11}\td{}\td{1.89}\td{1.14}\td{}\td{1.30}\td{}}
+\tr{\td{values made (records / interns)}\td{229.7 M}\td{68.7 M}\td{87.8 M}\td{151.2 M}\td{102.8 M}\td{105.9 M}\td{30.8 M}\td{49.3 M}}
+\tr{\td{values against gruszka}\td{2.62}\td{0.78}\td{}\td{1.43}\td{0.97}\td{}\td{0.62}\td{}}
+\tr{\td{instructions per tick}\td{1,632}\td{2,865}\td{874}\td{1,813}\td{2,328}\td{832}\td{1,979}\td{793}}
+\tr{\td{instructions per value}\td{3,859}\td{5,862}\td{1,265}\td{3,882}\td{4,434}\td{1,345}\td{4,772}\td{918}}
+\tr{\td{ns per tick (quiet)}\td{100}\td{175}\td{-}\td{119}\td{162}\td{-}\td{108}\td{-}}
+}
+
+\p{With the options the machine does gruszka's number of operations on navier-stokes-euler (1.11 times its ticks, 0.78 times its values) at 3.3 times its instructions per tick; on con-leche it does so without them. The largest units of navier-stokes-euler show it one by one: \code{\verb~|NavierStokes.FiveProfileMoments.quadraticBilin._proof_6~} (0.94 \% of the machine's corpus, 2.0 \% of gruszka's): machine 3,632,559 ticks, 415,947 INFER + 92,549 CHECK, 206,156 CONV + 346,046 pair hits, 184,549 DELTA; with the options 2,031,456 ticks and 9,294 DELTA; gruszka 3,068,095 ticks, 377,684 infer misses, 413,352 def_eq calls (296,817 cache hits), 8,588 unfoldings: the same work, 7.38 G against 2.28 G instructions (3.2 times; nano-lean 1.97 G).}
+
+\p{Where the instructions of the whole process are (flat profile by class of the native image, \code{\verb~|out/perfsum.md~}; the classes of loading and of the reference engine are in it):}
+
+\table{
+\tr{\th{class}\th{navier-stokes-euler default}\th{+ options}\th{cslib default}\th{con-leche default}}
+\tr{\td{\code{\verb~|Values~} (hash-consing: \code{\verb~|neu~} 8.4 / 4.1 / 5.1 / 5.2 \%, \code{\verb~|closureProbe~} 4.0 / 4.3 / 3.4 / 5.7 \%, \code{\verb~|mkConst~}, \code{\verb~|frameProbe~})}\td{23.1 \%}\td{15.5 \%}\td{16.3 \%}\td{19.0 \%}}
+\tr{\td{\code{\verb~|Eval~}}\td{18.2 \%}\td{16.1 \%}\td{16.4 \%}\td{14.3 \%}}
+\tr{\td{\code{\verb~|Infer~}}\td{11.0 \%}\td{17.9 \%}\td{14.1 \%}\td{16.8 \%}}
+\tr{\td{\code{\verb~|Code~}, \code{\verb~|CodeStore~} (the stepper of the K1 blocks)}\td{10.4 \%}\td{4.1 \%}\td{7.1 \%}\td{7.2 \%}}
+\tr{\td{\code{\verb~|Same~} (D28 walks)}\td{6.5 \%}\td{7.7 \%}\td{3.8 \%}\td{6.0 \%}}
+\tr{\td{\code{\verb~|Conv~} + \code{\verb~|Cargs~} + \code{\verb~|Pairs~}}\td{5.8 \%}\td{5.9 \%}\td{4.0 \%}\td{3.7 \%}}
+\tr{\td{\code{\verb~|Terms~} (store reads)}\td{3.8 \%}\td{5.7 \%}\td{4.5 \%}\td{4.7 \%}}
+\tr{\td{\code{\verb~|Runs~} (frames)}\td{3.0 \%}\td{3.1 \%}\td{3.6 \%}\td{6.4 \%}}
+\tr{\td{\code{\verb~|Reduce~}, \code{\verb~|Rules~}, \code{\verb~|NatRed~}}\td{3.1 \%}\td{0.8 \%}\td{1.9 \%}\td{1.9 \%}}
+\tr{\td{\code{\verb~|Overlay~}, \code{\verb~|TermOps~}, \code{\verb~|RefKernel~}, \code{\verb~|IntIntMap~}, \code{\verb~|LevelStore~} (reference engine and store rewriting)}\td{3.9 \%}\td{7.7 \%}\td{12.0 \%}\td{3.5 \%}}
+\tr{\td{\code{\verb~|Loader~}, \code{\verb~|Scanner~}, \code{\verb~|NodeCtx~}, \code{\verb~|ProofBlocks~}, \code{\verb~|ExportReader~}, \code{\verb~|DeclTable~}, \code{\verb~|Mem~} (reading the export)}\td{4.5 \%}\td{8.3 \%}\td{8.3 \%}\td{10.0 \%}}
+}
+
+\p{The comparison judgments themselves are small; what the proof comparisons cost is evaluation, hash-consing and the stepper for the terms they unfold. \code{\verb~|Same~} is 6 to 8 \% of the instructions wherever it is on. This part is the subject of the function-level profiles (P1, P5, P6), not of this report.}
+}
+
+\subtree{
+\title{4.7 The options cost on con-leche}
+
+\p{con-leche with \code{\verb~|congruence~}: +8.4 \% instructions (159.2 G against 146.9 G), with both +9.2 \%. One unit carries it: \code{\verb~|ConLeche.Cached.reduceNatI._mutual.eq_def~} (the equation lemma of a mutual structural recursion; 3,772,686 ticks, 64,163 IOTA, 74,782 DELTA; 7.65 G instructions for the machine, 3.56 G for gruszka, 5.21 G for nano-lean; 0.747 s of thread CPU on quiet cores against 0.72 s on gruszka's own clock): 7.65 G -> 20.67 G with \code{\verb~|congruence~} (7,404,544 ticks), unchanged with \code{\verb~|skipargs~}. In that unit the option does what it is for - DELTA 74,782 -> 7,544 events, IOTA 64,163 -> 12,514, PIRR 53,464 -> 2,294 - and pays more for it than it saves: CONV 130,878 -> 1,045,912 events, CBIND 64,655 -> 524,804, CARGS 58,706 -> 512,941, APPLY 398,696 -> 1,849,912, EVAL 606,302 -> 1,455,384 (the probes answer T: over the corpus B1 588,534 T / 13,038 F / 6,489 U, B12 441,008 T / 8,000 F). The closures compared are large case trees of a computational definition; walking two of them slot by slot is more work than reducing them. gruszka on the same unit: 2,476,198 ticks, 35,816 unfoldings, 245,178 def_eq calls, 6,147 closure congruences. \code{\verb~|ConLeche.Frontend.keyAt_eq~} 898 M -> 1.70 G, the \code{\verb~|keyOf_N~} family 350 - 430 M -> 580 - 750 M each. On navier-stokes-euler the units made more expensive sum to 0.6 \% of the corpus.}
+}
+
+\subtree{
+\title{4.8 CPU time on quiet cores}
+
+\p{\code{\verb~|bench/quiet.py -- work/prof/P9/quiet-run.sh~} (21:30Z - 21:33Z; the 8 reserved performance cores; native -O3, one worker, statistics off, batch load; thread CPU summed by the tap, process times by GNU time), one round:}
+
+\table{
+\tr{\th{run}\th{process user + sys, s}\th{thread CPU of the checks, s}\th{between the checks, s}\th{of which after declined units}\th{ticks}\th{ns per tick}}
+\tr{\td{navier-stokes-euler, default}\td{59.70 + 1.04}\td{54.27}\td{3.78}\td{0.87}\td{543.1 M}\td{100}}
+\tr{\td{navier-stokes-euler, default + \code{\verb~|facts,probes~} + \code{\verb~|congruence,skipargs~}}\td{30.00 + 0.86}\td{24.56 (\strong{-54.7 \%})}\td{3.62}\td{0.85}\td{140.7 M}\td{175}}
+\tr{\td{cslib, default}\td{50.35 + 1.75}\td{38.58}\td{7.98}\td{5.89}\td{323.8 M}\td{119}}
+\tr{\td{con-leche, default}\td{9.56 + 0.41}\td{8.01}\td{0.81}\td{0.25}\td{74.2 M}\td{108}}
+\tr{\td{cslib, default + \code{\verb~|facts,probes~} + \code{\verb~|congruence,skipargs~} (second window, 21:39Z)}\td{43.45 + 1.85}\td{31.77 (\strong{-17.7 \%})}\td{7.94}\td{5.9}\td{195.7 M}\td{162}}
+\tr{\td{con-leche, default (second window)}\td{9.36 + 0.42}\td{7.86}\td{0.79}\td{0.25}\td{74.2 M}\td{106}}
+\tr{\td{con-leche, default + \code{\verb~|facts,probes~} + \code{\verb~|congruence,skipargs~} (second window)}\td{9.83 + 0.39}\td{8.30 (\strong{+5.6 \%})}\td{0.79}\td{0.25}\td{70.2 M}\td{118}}
+\tr{\td{con-leche, session cap 4 MiB / 16 MiB / 64 MiB (second window)}\td{9.55 + 0.44 / 9.91 + 0.73 / 10.97 + 1.28}\td{8.02 / 8.61 / 10.16}\td{0.82 / 0.83 / 0.84}\td{}\td{67.4 M / 62.0 M / 58.6 M}\td{119 / 139 / 174}}
+}
+
+\p{navier-stokes-euler by origin (thread CPU of the checks): the project's own units 45.27 s -> 18.11 s with the options (-60.0 \%), Mathlib's 8.70 s -> 6.17 s (-29.0 \%), Init's 0.30 s -> 0.29 s. The instruction saving (54.5 \%) and the CPU saving (54.7 \%) agree on this corpus; the thread CPU of the same runs in the loaded container was 54.0 s and 24.0 s. cslib: Mathlib's units 31.02 s -> 24.23 s (-21.9 \%), Init's 4.29 s and Std's 2.16 s unchanged; instructions -22.4 \%, CPU -17.7 \%. con-leche: instructions +9.2 \%, CPU +5.6 \% (two default runs: 8.01 s and 7.86 s, so 2 \% is the noise).}
+
+\p{The split of the worker's CPU time (checks + gaps), one worker:}
+
+\table{
+\tr{\th{corpus}\th{worker, s}\th{(a) proof-comparison rule and congruence (what the two non-official options remove)}\th{(b) eager-reduction declines (reference engine)}\th{inductive blocks and driver between checks}\th{(c) everything else inside the checks}}
+\tr{\td{navier-stokes-euler}\td{58.05}\td{29.71 s = \strong{51.2 \%}}\td{0.87 s = 1.5 \%}\td{2.91 s = 5.0 \%}\td{24.56 s = 42.3 \%}}
+\tr{\td{cslib}\td{46.56}\td{6.81 s = 14.6 \%}\td{5.89 s = \strong{12.6 \%}}\td{2.09 s = 4.5 \%}\td{31.77 s = 68.2 \%}}
+\tr{\td{con-leche}\td{8.82}\td{none (the options cost 0.44 s in the same window)}\td{0.25 s = 2.9 \%}\td{0.56 s = 6.3 \%}\td{8.01 s = 90.8 \%}}
+}
+}
+}
+
+\subtree{
+\title{5. Owners, exactness, prize (summary)}
+
+\table{
+\tr{\th{\verb~|#~}\th{mechanism}\th{prize: navier-stokes-euler / cslib / con-leche (machine's checking instructions unless said)}\th{official-exact?}\th{owner (file)}}
+\tr{\td{1}\td{proof arguments of one head and proof fields of structure eta are not compared; unread positions (B3, B4, ETAS mask = \code{\verb~|skipargs~})}\td{42.2 \% / 17.7 \% / 1.8 \% alone}\td{no: S-F2, D27; theory-sound (review S2), what both leaders do (gruszka \code{\verb~|tc.rs~} 8573 - 8641, 8823; nano-lean \code{\verb~|conv.rs~} 389)}\td{M4 (\code{\verb~|Cargs.java~}, \code{\verb~|Conv.etasFields~}), M5 (\code{\verb~|Facts.java~})}}
+\tr{\td{2}\td{the same term under two environments / same head: congruence before unfolding (B1, B12, B2 = \code{\verb~|congruence~})}\td{47.3 \% / 14.9 \% / \strong{+8.4 \%} alone; 54.5 \% / 22.4 \% / +9.2 \% for 1 + 2; 12.3 \% / 4.6 \% only with 2}\td{no: S-F1, D27 (gruszka \code{\verb~|closure_congr~} 6792, \code{\verb~|same_term~} 7026, \code{\verb~|quick_parts~} 8543; nano-lean \code{\verb~|same~} 107, \code{\verb~|probe_args~} 359)}\td{M4 (\code{\verb~|Conv.congruence~}, \code{\verb~|Same.java~})}}
+\tr{\td{3}\td{units that enter eager reduction are decided by the reference engine}\td{1.5 \% / \strong{12.6 \%} / 2.9 \% of the worker's CPU}\td{the rule exists for exactness; E1's prototype keeps them on the machine}\td{M6 (\code{\verb~|MachineSession~}, \code{\verb~|Machine.enterER~}), E1's patch queue}}
+\tr{\td{4}\td{inductive blocks admitted between the checks}\td{3.4 \% / 1.2 \% / 3.1 \% of the worker's CPU (1.98 s / 0.58 s / 0.27 s; gruszka 0.27 s / 0.21 s / 0.08 s on all non-unit declarations)}\td{yes (cost only)}\td{\code{\verb~|rlvm-inductive~}, driver}}
+\tr{\td{5}\td{session cap 1 MiB: sibling declarations repeat work}\td{con-leche: -21 \% of the ticks at 64 MiB; units at 16 times and more are 3.2 \% of its instructions}\td{yes}\td{M6, driver (integrator's decision by warm wall clock)}}
+\tr{\td{6}\td{cost per operation: 1.9 to 3.3 times gruszka's instructions per tick at 1.1 to 1.3 times its ticks}\td{the remaining factor 3.2 - 3.6 on every corpus}\td{-}\td{M1 (\code{\verb~|Values~}), M2 (\code{\verb~|Eval~}), M5 (\code{\verb~|Infer~}), M7 (\code{\verb~|Code~}), M4 (\code{\verb~|Same~}): P1, P5, P6}}
+\tr{\td{-}\td{Nat / Int literals, recursors, structure eta, \code{\verb~|decide~}}\td{under 0.5 \% of navier-stokes-euler}\td{-}\td{-}}
+}
+}
+
+\subtree{
+\title{6. What could not be established}
+
+\ul{
+\li{\strong{gruszka's CPU time per unit on quiet cores.} Its instructions and counters per declaration are exact; the seconds quoted for it (0.13 s, 1.04 s, 0.72 s, the 6 - 7 G instructions per second) are its own clock from the profile run in a container on CPUs 18 and 19 while the host was loaded, with a marker line per declaration. The CPU ratios of point 8 of section 0 are therefore directions; the integrator's table is the quiet comparison of the whole processes.}
+\li{\strong{The machine with E1's fixes} (jar 5945b6568177 of 21:26Z and what follows): everything here is jar 15cb3777e598. The fixes change inference; I did not measure them.}
+\li{\strong{The warm wall clock with 8 workers}: everything is one worker, cold process, batch load.}
+\li{\strong{How much of class 4.2 is B12 (closure congruence) and how much B1 (same-head probe)}: the two are one option. The trace shows the closure case; the counters of the options run say B1 answered T 4.1 M times and B12 0.9 M times, which is not a cost split.}
+\li{\strong{Whether an official-exact form of 4.1 / 4.2 exists}: C1's report says no for 4.1; 4.2 ("entries convertible, not identical") is the same question for closures and I did not examine it.}
+\li{\strong{What the reference fallback's 2.4 ms per declined unit consists of} (it is not proportional to the reference steps): engine start, import of the unit, the steps themselves were not separated.}
+\li{\strong{Instructions of the inductive blocks on the machine's side} (only thread CPU of the gaps), and which blocks.}
+\li{\strong{The session cap in CPU time on navier-stokes-euler and cslib}; con-leche only (section 4.5).}
+\li{The origin classification uses the arena's \code{\verb~|mathlib~} export as "Mathlib and its dependencies"; 683 units of navier-stokes-euler are private names of Mathlib modules that are not in that export (another Mathlib version) and were assigned by their module name.}
+}
+}
+
+\subtree{
+\title{7. Reproduction}
+
+\pre{\verb~|
+P=work/prof/P9
+# the tap jar and the native image (published jars of 21:02Z + P8's tap)
+bench/slot.sh -c ni -n 2 -- $P/build-ni.sh $P/dist-tap
+# leaders per declaration (Docker): base/<corpus>/gruszka.w1.di, gruszka-cnt.raw, nano-lean.j1.trace
+bench/slot.sh -- bench/arena-docker.sh --cpuset-cpus 18,19 --memory 16g --no-network \
+    $P/base-leaders.sh navier-stokes-euler con-leche cslib
+# machine, instructions per unit (Docker): data/units-t-*.tsv, data/instr-t-*.txt
+bench/slot.sh -- bench/arena-docker.sh --cpuset-cpus 18,19 --memory 16g --no-network \
+    $P/batch-instr.sh navier-stokes-euler con-leche cslib          # t-def, t-dfp, t-dfp-cong
+bench/slot.sh -- bench/arena-docker.sh --cpuset-cpus 18,19 --memory 16g --no-network \
+    $P/batch-split.sh navier-stokes-euler cslib con-leche          # t-df-skip, t-dfp-congonly
+# machine, events per op (host): data/units-n-*.tsv, data/stats-n-*.json
+$P/run-tap.sh native n-def navier-stokes-euler default
+# tables
+python3 -I $P/scripts/report.py navier-stokes-euler   > $P/out/report-navier-stokes-euler.md
+python3 -I $P/scripts/optsplit.py navier-stokes-euler > $P/out/optsplit-navier-stokes-euler.md
+python3 -I $P/scripts/doctables.py                    > $P/out/doctables.md
+python3 -I $P/scripts/quietcpu.py navier-stokes-euler > $P/out/quiet-navier-stokes-euler.md
+# traces of named units (private machine copy with hooks, JVM): out/trace-TAG.txt
+$P/run-trace.sh nse-def navier-stokes-euler default Name1,Name2 [-Dp9.log=4000 -Dp9.clip=420]
+python3 -I $P/scripts/tracesum.py $P/out/trace-nse-def.txt
+# flat instruction profile (Docker) and the quiet windows
+bench/slot.sh -- bench/arena-docker.sh --cpuset-cpus 18,19 --memory 16g --no-network $P/batch-perf.sh
+bench/quiet.py -- $P/quiet-run.sh ; bench/quiet.py -- $P/quiet-run2.sh
+~}
+
+\p{Files: \code{\verb~|data/units-*.tsv~} (one line per check), \code{\verb~|data/instr-*.txt~}, \code{\verb~|data/stats-*.json~}, \code{\verb~|base/<corpus>/*~} (leaders), \code{\verb~|out/report-*.md~} (all tables per corpus, with the 40 worst units), \code{\verb~|out/optsplit-*.md~}, \code{\verb~|out/quiet-*.md~}, \code{\verb~|out/trace-*.txt~}, \code{\verb~|out/perf-*.ips~}, \code{\verb~|logs/runs.log~} (every run with its switches), \code{\verb~|logs/quiet.times~}.}
+}
