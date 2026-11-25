@@ -7,10 +7,140 @@
 \tag{performance}
 \tag{gc}
 \tag{benchmark}
-\meta{status}{draft}
+\meta{status}{accepted}
 \meta{created}{2026-11-24}
 \import{base-macros}
 
-\p{\strong{Status:} draft. The measurements are being taken; the table and the choice follow.}
+\p{\strong{Status:} accepted. \src{scripts/build.sh} bakes the collector policy into the image and \code{rlvm-main} has the scanner-thread default; \code{\verb~|rlvm --version~} prints both.}
 
-\p{\strong{Context.} The release is [one executable](design-packaging) whose plain run must be the fastest configuration. What one invocation of an executable is, is a single run of a fresh process, with the load pipelined and the automatic worker count; the settings are therefore chosen on cold single runs of the native image over the eight corpora, inside quiet-core windows, and not on the warm passes of [the metric](dec-7QMU).}
+\p{\strong{Context.} The release is [one executable](design-packaging) whose plain run must be the fastest configuration there is. What one invocation of an executable is, is a single run of a fresh process with the load pipelined and the automatic worker count, so the settings are chosen on cold single runs of the native image over the eight corpora, and not on the warm passes of [the metric](dec-7QMU); for the image the two are close, a cold run of Mathlib is within 4 \% of a warm pass. The settings in question: the worker count, the load mode and the scanner threads of the reader, which had been chosen with the reference engine and the machine's earlier switch set (see [which launcher was for what](dec-WX9Z)), and the memory settings that are baked into the image, which had never been measured: the image ran with a heap limit of 13 GB and the collector's own defaults. A profile of a Mathlib pass had charged the image 121 collections with 2.2 s of pauses and 7.7 s of kernel time on 6.3 million page faults.}
+
+\p{\strong{Decision.}}
+\ul{
+\li{\strong{Engine and switch set}: not decided here. The engine is the one the engines' priorities select and the switch set is the machine's own default; the integrator of the machine publishes both, and a run without options follows.}
+\li{\strong{Workers}: one per CPU, at most 8. Unchanged: 7 workers are level with 8, 6 are 5 \% slower.}
+\li{\strong{Load}: checked while it is read, for a file of 8 MiB or more and two or more workers. Unchanged: a batch load is 21 \% slower.}
+\li{\strong{Scanner threads of the reader}: one, for a file of 256 MiB or more. It was two.}
+\li{\strong{Heap}: at most 13 GB, as before, and the collection policy \code{BySpaceAndTime} of the serial collector in place of its default, \code{Adaptive2}. No minimum heap and no bound on the young generation is baked in.}
+}
+
+\p{\strong{How it was measured.} Every figure is the wall clock of one fresh process of the CE native image, from exec to exit, with 8 workers on the 8 measurement cores of the aarch64 development host, inside a quiet-core window, while the other 12 cores were busy with builds and gates. The configurations of a comparison alternate inside each round, a cell is the median of its runs and the number of runs is given; two runs of one configuration differ by up to 5 \%, on reachability by up to 10 \%. The engine is the machine with the switch set \code{\verb~|default,eager,skipargs,congruence~}, which its integrator was about to publish as its default set when this was measured, unless the reference engine is named. The memory settings were given on the command line of one image; they are run-time defaults, so baking them in changes nothing else.}
+
+\subtree[dec-EGMG-heap]{
+\title{The heap and the collector}
+
+\p{What the page faults are. The heap of a run is mostly large primitive arrays: in a trace of the heap chunks during an Init run, 94 \% of the old generation and 85 \% of the survivor spaces, by bytes, were arrays of 128 KiB or more, each in a chunk of its own. The serial collector of GraalVM CE 25 keeps freed chunks for reuse only if they are of the standard size, 512 KiB; it returns the chunk of a large array to the system as soon as the array dies, and a new large array is new memory from the system, which faults on first touch. So the number of page faults follows the number of bytes allocated, whatever the collector is told: with a minimum heap of 6 GB the collector never ran on cedar and the run had more page faults than before, not fewer. The option that bounds the memory kept for reuse (\code{MaxHeapFree}) does not apply to these chunks and changed nothing. Larger standard chunks, which would take arrays up to 1 MiB, are only allowed together with the copying old generation, and that image was 5 \% slower in the geometric mean. What the settings can change is the number and the kind of collections.}
+
+\p{The screening, on an image built with the defaults, each setting given on its command line:}
+
+\table{
+\tr{\th{Corpus}\th{as before: wall s (runs)}\th{by space and time, young 256 MB: wall s, ratio}\th{by space and time, young 1 \% of the heap: wall s, ratio}\th{minimum heap 6 GB: wall s, ratio}\th{peak RSS MiB: as before}\th{peak RSS MiB: by space and time, young 256 MB}\th{peak RSS MiB: by space and time, young 1 \% of the heap}\th{peak RSS MiB: minimum heap 6 GB}}
+\tr{\td{init}\td{0.82 (7)}\td{0.80, 0.979 (7)}\td{0.81, 0.988 (3)}\td{0.78, 0.959 (4)}\td{402}\td{514}\td{493}\td{610}}
+\tr{\td{std}\td{1.42 (7)}\td{1.41, 0.992 (7)}\td{1.39, 0.977 (3)}\td{1.39, 0.978 (4)}\td{611}\td{682}\td{674}\td{982}}
+\tr{\td{cedar}\td{2.04 (10)}\td{2.00, 0.979 (10)}\td{1.98, 0.970 (3)}\td{2.04, 0.999 (4)}\td{808}\td{997}\td{839}\td{1,744}}
+\tr{\td{reachability}\td{0.64 (10)}\td{0.65, 1.013 (10)}\td{0.61, 0.954 (3)}\td{0.63, 0.995 (4)}\td{601}\td{716}\td{555}\td{792}}
+\tr{\td{con-leche}\td{41.17 (1)}\td{39.81, 0.967 (1)}\td{-}\td{37.32, 0.907 (1)}\td{8,649}\td{9,326}\td{-}\td{10,317}}
+\tr{\td{navier-stokes-euler}\td{5.29 (9)}\td{5.07, 0.957 (9)}\td{5.09, 0.961 (3)}\td{5.78, 1.092 (3)}\td{1,317}\td{1,591}\td{1,498}\td{3,036}}
+\tr{\td{cslib}\td{6.60 (6)}\td{6.22, 0.942 (6)}\td{6.29, 0.952 (3)}\td{6.27, 0.950 (3)}\td{1,742}\td{2,244}\td{2,105}\td{3,080}}
+\tr{\td{mathlib}\td{17.89 (4)}\td{17.28, 0.966 (4)}\td{17.12, 0.957 (3)}\td{17.23, 0.963 (3)}\td{4,042}\td{5,484}\td{7,254}\td{5,174}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.974 over 8}\td{0.966 over 7}\td{0.979 over 8}\td{}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\code{BySpaceAndTime} keeps a young generation of fixed size, 256 MB, and divides the collector's time evenly between young and full collections. The default policy ran this workload with an eden of about 54 MB and a full collection every 12 to 15 young ones: a Mathlib run made 184 collections, 12 of them full; with \code{BySpaceAndTime} it makes 41, 7 of them full. The gain is 1 to 6 \% of the wall clock on every corpus but reachability, whose runs scatter by more than that.}
+\li{The price is memory: garbage stays longer in the old generation. Peak resident memory is 12 to 30 \% higher on the corpora, 4.0 against 5.4 GB on Mathlib. It is bounded by the heap limit, which was sized for the 16 GB of the arena's runner.}
+\li{A young generation of 1 \% of the heap, 133 MB, gains the same and holds as much as the default policy on the middle corpora, but 7.2 GB on Mathlib: rejected. Given as a percentage it follows a smaller \code{\verb~|-Xmx~}; an absolute bound makes the image refuse to start under a smaller run-time heap limit, with exit status 1.}
+\li{The policy's time ratio, measured with that young generation on cedar, navier-stokes-euler and cslib: 20 \% of the collector's time for young collections gives a third of the gain at the memory of the default policy; 80 \% gives no more than 50 \% and holds more.}
+\li{A minimum heap of 2 or 6 GB: nothing consistent, navier-stokes-euler 9 \% slower, up to 2.3 times the resident memory. The policies \code{Proportionate} and \code{Adaptive}, one round each on five corpora: within 1.5 \% of the default.}
+\li{A small input is not affected, since no setting touches memory in advance: a tutorial test peaks at 20 MB and the prelude at 48 MB before and after.}
+}
+
+\p{Heap chunks of 4 MiB with arrays up to 1 MiB inside them, which needs the copying old generation:}
+
+\table{
+\tr{\th{Corpus}\th{512 KiB chunks, compacting old generation (as built): wall s (runs)}\th{4 MiB chunks, arrays up to 1 MiB in them, copying old generation: wall s, ratio}\th{peak RSS MiB: 512 KiB chunks, compacting old generation (as built)}\th{peak RSS MiB: 4 MiB chunks, arrays up to 1 MiB in them, copying old generation}}
+\tr{\td{init}\td{0.81 (2)}\td{0.84, 1.044 (2)}\td{400}\td{420}}
+\tr{\td{std}\td{1.42 (2)}\td{1.47, 1.034 (2)}\td{594}\td{670}}
+\tr{\td{cedar}\td{2.06 (2)}\td{2.12, 1.028 (2)}\td{841}\td{896}}
+\tr{\td{reachability}\td{0.62 (2)}\td{0.69, 1.107 (2)}\td{557}\td{661}}
+\tr{\td{navier-stokes-euler}\td{5.37 (2)}\td{5.37, 1.000 (2)}\td{1,236}\td{1,331}}
+\tr{\td{cslib}\td{6.61 (2)}\td{7.04, 1.066 (2)}\td{1,832}\td{2,050}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{1.046 over 6}\td{}\td{}}
+}
+
+\p{\strong{The image as it is built now}, against the same image with the settings of before on its command line, the collection policy and the scanner threads together. The machine with the candidate set:}
+
+\table{
+\tr{\th{Corpus}\th{before (Adaptive2, 2 scanner threads): wall s (runs)}\th{now (BySpaceAndTime, 1 scanner thread): wall s, ratio}\th{peak RSS MiB: before (Adaptive2, 2 scanner threads)}\th{peak RSS MiB: now (BySpaceAndTime, 1 scanner thread)}}
+\tr{\td{init}\td{0.79 (3)}\td{0.78, 0.986 (3)}\td{410}\td{397}}
+\tr{\td{std}\td{1.40 (3)}\td{1.38, 0.983 (3)}\td{603}\td{619}}
+\tr{\td{cedar}\td{2.08 (3)}\td{1.91, 0.922 (3)}\td{836}\td{776}}
+\tr{\td{reachability}\td{0.62 (3)}\td{0.67, 1.064 (3)}\td{597}\td{699}}
+\tr{\td{con-leche}\td{2.35 (1)}\td{1.89, 0.805 (1)}\td{1,256}\td{1,639}}
+\tr{\td{navier-stokes-euler}\td{5.28 (3)}\td{4.53, 0.858 (3)}\td{1,264}\td{1,244}}
+\tr{\td{cslib}\td{6.52 (3)}\td{6.15, 0.943 (3)}\td{1,779}\td{1,993}}
+\tr{\td{mathlib}\td{16.23 (1)}\td{16.87, 1.039 (1)}\td{4,148}\td{5,581}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.946 over 8}\td{}\td{}}
+}
+
+\p{The reference engine, the default engine when this was measured:}
+
+\table{
+\tr{\th{Corpus}\th{before (Adaptive2, 2 scanner threads): wall s (runs)}\th{now (BySpaceAndTime, 1 scanner thread): wall s, ratio}\th{peak RSS MiB: before (Adaptive2, 2 scanner threads)}\th{peak RSS MiB: now (BySpaceAndTime, 1 scanner thread)}}
+\tr{\td{init}\td{2.14 (2)}\td{1.97, 0.922 (2)}\td{538}\td{691}}
+\tr{\td{std}\td{3.50 (2)}\td{3.26, 0.930 (2)}\td{669}\td{902}}
+\tr{\td{cedar}\td{4.56 (2)}\td{4.30, 0.943 (2)}\td{856}\td{956}}
+\tr{\td{reachability}\td{4.64 (2)}\td{4.70, 1.014 (2)}\td{2,259}\td{3,090}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.952 over 4}\td{}\td{}}
+}
+
+\p{The eight slowest published arena tests stress the reference engine on one thread. They were measured with the variant that has the young generation at 1 \% of the heap, two runs each: 0.83 (gf3-matrix-product) to 1.03 (magma-list-deep-n36) times the wall clock, 0.98 in the geometric mean, and up to 45 \% more resident memory on the tests that fill the old generation (magma-list-deep-n36 3.8 against 5.3 GB). With the policy as it is baked in, perf/app-lam ran in 11.2 s with 4.8 GB in the arena-shaped container, against 11.1 s with 4.0 GB before. All of them are far from the arena's limits.}
+
+\ul{
+\li{With the machine and the candidate set the two changes together are worth 5 \% in the geometric mean of the eight corpora, and most on the middle ones: con-leche 0.81, navier-stokes-euler 0.86, cedar 0.92, cslib 0.94 times the wall clock. Init and Std gain 1 to 2 \%. The runs of reachability, 0.6 s each, scatter by 10 \% under either setting, and the figure of a window has gone both ways.}
+\li{\strong{Mathlib is not settled on the final image.} The one pair of runs there, 20 minutes apart and so not comparable to within 5 \%, gave 16.2 s before and 16.9 s now. In the screening, on the image and the machine jar of an hour earlier, four alternating pairs gave 17.9 s with the default policy and 17.3 s with \code{BySpaceAndTime}, and one pair 18.9 s with two scanner threads and 17.4 s with one. Mathlib has to be taken again, as three alternating pairs, on the jars that ship.}
+\li{With the reference engine, the default engine at the time, the same settings gain 6 to 8 \% on Init, Std and cedar and nothing on reachability.}
+\li{The price is resident memory where the old generation holds garbage longer: up to 37 \% more (the reference engine on reachability, 2.3 against 3.1 GB), Mathlib with the machine 4.1 against 5.6 GB; half of the machine's rows are within 5 \% of before.}
+}
+}
+
+\subtree[dec-EGMG-workers]{
+\title{Workers, load mode and scanner threads}
+
+\table{
+\tr{\th{Corpus}\th{8 workers, pipelined (the default): wall s (runs)}\th{7 workers: wall s, ratio}\th{6 workers: wall s, ratio}\th{8 workers, batch load: wall s, ratio}}
+\tr{\td{init}\td{0.83 (2)}\td{0.80, 0.959 (2)}\td{0.86, 1.035 (2)}\td{0.99, 1.182 (2)}}
+\tr{\td{std}\td{1.41 (2)}\td{1.43, 1.016 (2)}\td{1.52, 1.077 (2)}\td{1.79, 1.273 (2)}}
+\tr{\td{cedar}\td{2.03 (2)}\td{2.07, 1.021 (2)}\td{2.13, 1.050 (2)}\td{2.91, 1.436 (2)}}
+\tr{\td{reachability}\td{0.62 (2)}\td{0.63, 1.019 (2)}\td{0.68, 1.096 (2)}\td{0.64, 1.030 (2)}}
+\tr{\td{navier-stokes-euler}\td{5.52 (2)}\td{5.32, 0.963 (2)}\td{5.27, 0.955 (2)}\td{6.12, 1.108 (2)}}
+\tr{\td{cslib}\td{6.48 (2)}\td{6.54, 1.009 (2)}\td{6.93, 1.069 (2)}\td{8.36, 1.291 (2)}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.997 over 6}\td{1.046 over 6}\td{1.213 over 6}}
+}
+
+\table{
+\tr{\th{Corpus}\th{2 (the default): wall s (runs)}\th{none: wall s, ratio}\th{1: wall s, ratio}\th{3: wall s, ratio}}
+\tr{\td{init}\td{0.82 (5)}\td{0.85, 1.047 (5)}\td{0.82, 1.005 (5)}\td{0.82, 1.000 (5)}}
+\tr{\td{std}\td{1.42 (5)}\td{1.40, 0.982 (5)}\td{1.42, 0.999 (5)}\td{1.43, 1.004 (5)}}
+\tr{\td{cedar}\td{2.08 (5)}\td{2.02, 0.973 (5)}\td{2.00, 0.960 (5)}\td{2.06, 0.991 (5)}}
+\tr{\td{navier-stokes-euler}\td{5.41 (5)}\td{4.80, 0.888 (5)}\td{4.69, 0.868 (5)}\td{5.24, 0.970 (5)}}
+\tr{\td{cslib}\td{7.35 (5)}\td{6.66, 0.906 (5)}\td{6.62, 0.901 (5)}\td{6.54, 0.890 (5)}}
+\tr{\td{geometric mean of the ratios}\td{1.000}\td{0.957 over 5}\td{0.945 over 5}\td{0.970 over 5}}
+}
+
+\ul{
+\li{With 8 workers on 8 cores a second scanner thread takes a core from the checking: one scanner thread is 13 \% faster than two on navier-stokes-euler, 4 \% on cedar and level on Init and Std; on cslib the figure of two is the median of two unequal windows, and in the cleaner one all counts are within 1 \%. On Mathlib one run each gave 17.4 s with one and 18.9 s with two. None at all is 4 \% slower than one on Init and level elsewhere; three are no better than one. Two had been chosen for the load alone, with the reference engine checking.}
+\li{The automatic worker count stays at one per CPU with a cap of 8, the count found on 8 cores.}
+}
+}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{\code{\verb~|rlvm FILE~} is the measured configuration; \code{\verb~|-XX:InitialCollectionPolicy=Adaptive2~} and \code{\verb~|-X scan-threads=2~} on its command line are the settings of before.}
+\li{The optional build with Oracle GraalVM is built with the same settings.}
+\li{The JVM launcher of a development distribution keeps its own heap flags; only the scanner-thread default reaches it.}
+}
+
+\p{\strong{Not measured.} x86-64, the architecture of the arena's runner. More than 8 cores: the cap of the automatic worker count is the one found on 8. A machine with less memory than the corpora need. The settings together with the switch set the integrator of the machine finally publishes, if it differs from the one used here; con-leche with that set is dominated by one unit under eager reduction (finding INT7-F1) and was left out of the choice.}
+
+\p{Source: \src{scripts/build.sh} (\code{\verb~|IMAGE_HEAP~}), \src{rlvm-main/README.md}, \src{docs/research/profiles/P10.md} for the profile of the Mathlib pass; the tables of the default configuration are regenerated by \src{bench/track/benchmarks.py}.}

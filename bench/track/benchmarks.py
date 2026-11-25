@@ -178,9 +178,13 @@ def corpus_title(name: str) -> str:
     return f"{name} ({size / 1e9:.2f} GB)" if size >= 1e9 else f"{name} ({size / 1e6:.0f} MB)"
 
 
-def table(title: str, lead: str, cells: dict, corpora: list[str], rows_of: list, value, ratios: list[tuple[str, tuple, tuple]] = ()) -> list[str]:
+def table(title: str, lead: str, cells: dict, corpora: list[str], rows_of: list, value, ratios: list[tuple[str, tuple, tuple]] = (),
+          kinds: tuple = ()) -> list[str]:
     """One row per checker (rows_of: (key, heading)), one column per corpus; value(cell) -> (text, number).
-    ratios: (heading, key of ours, key of theirs), one row each behind the checkers."""
+    ratios: (heading, key of ours, key of theirs), one row each behind the checkers. A ratio between two
+    builds of RLVM (the optional Oracle executable against the CE executable) is only formed when both
+    cells measured the same configuration (warm.py's "what": engine and switch set); kinds names the rows
+    of a cell this table reads ("warm8", "cold8", ...), for that comparison."""
     out = [f"## {title}", "", lead, ""]
     used = [c for c in corpora if any(value(cells.get((c,) + key, {}))[0] != "-" for key, _h in rows_of)]
     if not used:
@@ -196,8 +200,15 @@ def table(title: str, lead: str, cells: dict, corpora: list[str], rows_of: list,
             line.append(text)
         if any(x != "-" for x in line):
             out.append(f"| {heading} | " + " | ".join(line) + " |")
+    def same_config(c, a, b):
+        if ORACLE not in (a[1], b[1]):
+            return True
+        ra = next((cells.get((c,) + a, {}).get(k) for k in kinds if cells.get((c,) + a, {}).get(k)), None)
+        rb = next((cells.get((c,) + b, {}).get(k) for k in kinds if cells.get((c,) + b, {}).get(k)), None)
+        return bool(ra and rb and ra["what"] == rb["what"])
+
     for heading, a, b in ratios:
-        line = [ratio(nums.get((c,) + a), nums.get((c,) + b)) for c in used]
+        line = [ratio(nums.get((c,) + a), nums.get((c,) + b)) if same_config(c, a, b) else "-" for c in used]
         if any(x != "-" for x in line):
             out.append(f"| *{heading}* | " + " | ".join(line) + " |")
     out.append("")
@@ -351,6 +362,8 @@ def main() -> int:
         def run(cell):
             c = cell.get("cold8") or cell.get("pass1_8")
             w = cell.get("warm8")
+            if c and w and (c.get("dist"), c.get("build"), c.get("what")) != (w.get("dist"), w.get("build"), w.get("what")):
+                w = None   # a warm pass of another build or configuration does not belong behind this cold run
             cold_s = num(c["cold_wall_s"]) if c and c is cell.get("cold8") else (num(c["pass1_s"]) if c else None)
             warm_s = steady(w) if w else None
             if cold_s is None and warm_s is None:
@@ -389,9 +402,10 @@ def main() -> int:
                  "pass. gruszka and nano-lean: the second of two runs with 8 threads (no JIT: their run is their steady state).",
                  cells, corpora, CHECKERS, warm("8"),
                  [("the executable / gruszka", dn, gr), ("optional Oracle build / the executable", dp, dn),
+                  (f"{other}: optional Oracle build / the executable", op, on),
                   ("default configuration, JVM / gruszka", dj, gr),
                   (f"{other}, JVM / gruszka", oj, gr), (f"{other}, native / gruszka", on, gr),
-                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
+                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)], kinds=("warm8",))
     out += table("2. Warm wall clock, 1 worker (s)",
                  "As table 1 with `--threads 1` (one worker; the loader and the environment pass have threads of their own). "
                  "Baselines: one thread.",
@@ -404,8 +418,8 @@ def main() -> int:
                  "Baselines: the first of the two runs.",
                  cells, corpora, CHECKERS, cold,
                  [("the executable / gruszka", dn, gr), ("optional Oracle build / the executable", dp, dn),
-                  (f"{other}, native / gruszka", on, gr),
-                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)])
+                  (f"{other}, native / gruszka", on, gr), (f"{other}: optional Oracle build / the executable", op, on),
+                  ("default configuration: JVM / native", dj, dn), (f"{other}: JVM / native", oj, on)], kinds=("cold8", "pass1_8"))
     out += table("4. CPU time, 8 workers (s): median warm pass / cold process",
                  "A diagnostic, not the target: process CPU time (all threads: workers, loader, environment thread, JIT compiler, "
                  "collector) of the pass that is the median of table 1, and of the cold process of table 3. CPU / wall says how much "

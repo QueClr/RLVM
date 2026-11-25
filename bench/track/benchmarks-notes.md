@@ -21,6 +21,15 @@
   = `bin/rlvm-jvm` of a development distribution (HotSpot of GraalVM CE 25, C2, serial collector, 8 compiler
   threads, transparent huge pages; heap by engine: machine 7 GB, others 13 GB): the same jars on a JIT, the
   platform on which the warm metric was first measured and a tool of the repository, not part of a release.
+- **State of 2026-11-25** (the release became one executable; the machine was not the default engine yet). The rows
+  of the executable were taken on the image with the settings that are baked in now (collection policy
+  `BySpaceAndTime`, one scanner thread; *agentic-note*: dec-EGMG): the default configuration (reference engine) on
+  Init, Std, cedar and reachability, and the machine with the switch set its integrator was about to publish
+  (`default,eager,skipargs,congruence`) on all eight corpora, cold only (the median of three runs; con-leche and
+  mathlib one run). The rows of the OPTIONAL Oracle GraalVM executable are that machine configuration with a
+  provisional profile. The JVM launcher's rows, the baselines and the default configuration on mathlib are the rows
+  of 2026-11-24 (the earlier image and the machine's earlier default set). All of the executable's rows are taken
+  again when the machine has been published as the default engine.
 - **Configuration of every RLVM row**: `--threads 8` (what `--threads auto` chooses on 8 cores) or `--threads 1`; the
   load and the reader as the build decides them (pipelined for two or more workers, two scanner threads for these
   file sizes); the machine with its default switch set. Heap below mathlib: 6 GB (`-Xmx6g -Xmn1g` for the machine on

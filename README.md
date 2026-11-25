@@ -75,10 +75,9 @@ What stands behind this today (2026-11-25, reference engine as default; *agentic
   are declined); Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and mathlib accepted; the
   verdict does not depend on the number of workers or on how loading and checking interleave;
 - not established: (a) is supported by tests and adversarial review, not by a proof; the machine has open review
-  findings and is not the default engine yet; a hand-made export with a metadata node in the function position of
-  a redex is rejected where the official checker accepts it (a repair is in progress); nothing was ever run on
-  x86-64 (the arena's architecture; the build and the release workflow are prepared for it and untested there);
-  no release has been published; the checker definition for the arena (`scripts/arena/rlvm.yaml`) is a draft that
+  findings and is not the default engine yet; on x86-64 (the arena's architecture) only the unit tests have run
+  (continuous integration): the executable, the corpora and the release workflow have never run there; no release
+  has been published; the checker definition for the arena (`scripts/arena/rlvm.yaml`) is a draft that
   has not been submitted.
 
 ## Get it
@@ -97,8 +96,9 @@ scripts/package.sh             # -> work/release/rlvm-<version>-linux-<arch>.tar
 Nothing outside the checkout is touched (no `~/.m2`); `--online` lets Maven download the dependencies the
 first time.
 
-An optional build uses **Oracle GraalVM** and profile-guided optimisation from the profiles shipped in
-`profiles/`: `scripts/build.sh --oracle-pgo` (measured on this project's corpora: 11 to 15 % fewer instructions and 7 to 16 % less wall clock than the default executable). Oracle GraalVM is not open source: it is licensed
+An optional build uses **Oracle GraalVM** and profile-guided optimisation from the profiles in `profiles/`
+(recorded as the last step of a release; `scripts/dev.sh profiles` records them): `scripts/build.sh --oracle-pgo`
+(measured on this project's corpora: 11 to 15 % fewer instructions and 7 to 16 % less wall clock than the default executable). Oracle GraalVM is not open source: it is licensed
 under the GraalVM Free Terms and Conditions, the option says so, and it downloads Oracle GraalVM only when
 `--accept-oracle-licence` is given too. The default build, the release workflow and CI use GraalVM Community
 Edition only.
@@ -109,21 +109,24 @@ lists the rest (development distributions that also run the jars on a JVM, the g
 ## Numbers
 
 <!-- table: bench/track/benchmarks.py --headline (the rows of bench/warm.sh; *agentic-note*: dec-EGMG) -->
-| One run, 8 cores: wall clock in s (warm pass) | init (348 MB) | std (584 MB) | cedar (905 MB) | reachability (19 MB) | mathlib (6.33 GB) |
-|---|--:|--:|--:|--:|--:|
-| **`rlvm FILE`** (the executable, default configuration: reference engine) | 2.10 (1.98) | 3.56 (3.38) | 4.51 (4.41) | 5.10 (4.74) | 92.00 (91.76) |
-| `rlvm -X engine=machine FILE` | 0.82 (0.83) | 1.59 (1.50) | 2.16 (2.10) | - | 27.59 (28.18) |
-| gruszka | 0.71 (0.71) | 1.40 (1.28) | 2.74 (1.73) | - | 13.28 (14.20) |
-| nano-lean | 1.05 (1.03) | 1.75 (1.74) | 2.65 (2.64) | - | 18.68 (18.66) |
-| *rlvm / gruszka* | 2.96x | 2.54x | 1.65x | - | 6.93x |
-| *rlvm / nano-lean* | 2.00x | 2.03x | 1.70x | - | 4.93x |
+| One run, 8 cores: wall clock in s (warm pass) | init (348 MB) | std (584 MB) | cedar (905 MB) | reachability (19 MB) | con-leche (702 MB) | navier-stokes-euler (1.56 GB) | cslib (2.50 GB) | mathlib (6.33 GB) |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| **`rlvm FILE`** (the executable, default configuration: reference engine) | 2.10 (1.98) | 3.56 (3.38) | 4.51 (4.41) | 5.10 (4.74) | - | - | - | 92.00 (91.76) |
+| `rlvm -X engine=machine FILE` | 0.78 | 1.38 | 1.91 | 0.67 | 1.89 | 4.53 | 6.15 | 16.87 |
+| gruszka | 0.71 (0.71) | 1.40 (1.28) | 2.74 (1.73) | - | - | - | - | 13.28 (14.20) |
+| nano-lean | 1.05 (1.03) | 1.75 (1.74) | 2.65 (2.64) | - | - | - | - | 18.68 (18.66) |
+| *rlvm / gruszka* | 2.96x | 2.54x | 1.65x | - | - | - | - | 6.93x |
+| *rlvm / nano-lean* | 2.00x | 2.03x | 1.70x | - | - | - | - | 4.93x |
 <!-- end table -->
 
 Conditions: one host (aarch64, Cortex-X925), 8 cores reserved for one measurement at a time while the other 12
-cores were busy, 2026-11-24 and 2026-11-25; each figure is one fresh process of the executable without any option
-(8 workers, the file checked while it is read), in brackets the median later pass of one process that checks the
-export several times; gruszka and nano-lean with their arena run lines and 8 threads on the same cores, first
-(second) of two runs. Two identical rows differ by up to 5 %. Not the arena's metric (instructions) and not its
+cores were busy, 2026-11-24 and 2026-11-25; each figure is one fresh process of the executable (8 workers, the
+file checked while it is read), in brackets the median later pass of one process that checks the export several
+times, where one was taken on the same build. The first row is a run without any option; the second is the
+machine with the switch set its integrator is about to publish as its default
+(`-X engine=machine -X machine.switches=default,eager,skipargs,congruence`), the median of three runs, con-leche
+and mathlib one run; "-" = not measured on this build. gruszka and nano-lean with their arena run lines and 8
+threads on the same cores, first (second) of two runs. Two identical rows differ by up to 5 %. Not the arena's metric (instructions) and not its
 architecture (x86-64). All tables, per metric and with the provenance of every cell: the journal (*agentic-note*: dec-EGMG, and
 `docs/BENCHMARKS.md` until it has moved there).
 

@@ -286,7 +286,7 @@ if [ "$flavor" = oracle-pgo ]; then
   fi
   [ -x "$ORACLE_HOME_DIR/bin/native-image" ] || die "--oracle-pgo: no native-image in $ORACLE_HOME_DIR"
   if [ "$train_profiles" = 0 ]; then
-    ls "$profiles_dir"/*.iprof.gz >/dev/null 2>&1 || die "--oracle-pgo: no profiles (*.iprof.gz) in $profiles_dir; make them with scripts/dev.sh profiles"
+    ls "$profiles_dir"/*.iprof.gz >/dev/null 2>&1 || die "--oracle-pgo: no profiles (*.iprof.gz) in $profiles_dir - they are recorded as the last step of a release and may not be in this checkout: record them with 'scripts/dev.sh profiles' (= --oracle-pgo --train-profiles --train EXPORT.ndjson; the training input is Init)"
   fi
 elif [ "$want_native" = 1 ]; then
   [ -x "$CE_HOME/bin/native-image" ] || die "no native-image in $CE_HOME"
