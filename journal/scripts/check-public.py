@@ -46,7 +46,8 @@ REQUIRED = {
     "Report": ["\\date{", "\\author{", "\\meta{origin}{"],
 }
 
-# Moved documents keep the working-file names and the times of day they were
+# Moved documents (studies, reports, and design documents that carry
+# \meta{moved}) keep the working-file names and the times of day they were
 # written with: the notes are not printed for them, the errors are.
 MOVED = ("trees/study/", "trees/report/")
 
@@ -60,7 +61,7 @@ for tree in sorted((journal / "trees").rglob("*.tree")):
                 errors += 1
                 print(f"ERROR {name}:{number}: {what}")
         for pattern, what in NOTES:
-            if str(name).startswith(MOVED):
+            if str(name).startswith(MOVED) or "\\meta{moved}{" in text:
                 continue
             if re.search(pattern, line):
                 notes += 1

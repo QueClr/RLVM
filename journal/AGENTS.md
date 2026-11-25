@@ -227,7 +227,8 @@ everything in it.
 - Add the tree to its hub: `studies` and `reports` list by taxon; a design
   note is added to `trees/designs.tree` by hand.
 - `python3 scripts/check-public.py` does not print its notes (working files,
-  times of day) for `trees/study/` and `trees/report/`; its errors apply.
+  times of day) for `trees/study/`, `trees/report/` and any tree that carries
+  `\meta{moved}`; its errors apply.
 
 ## Numbers
 

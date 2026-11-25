@@ -1,0 +1,1038 @@
+\title{Platform: which launcher is for what, with which flags, with how many workers}
+\taxon{Design}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{gc}
+\tag{arena}
+\tag{performance}
+\tag{benchmark}
+\meta{status}{accepted}
+\meta{created}{2026-11-24}
+\meta{origin}{docs/PLATFORM.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. Part 0 is the platform decision in force; it supersedes the decisions of Parts I and II wherever they differ, and those two parts are kept as the record of their measurements.}
+
+\p{Three parts. \strong{Part 0} (2026-11-24, 21:40Z to 23:45Z; steward B2) is the platform decision under owner note 12 - \em{wall clock after warm-up, with pipelined loading, is the goal; warm-up is reported, not charged; the platform question is decided by warm wall clock} - with the numbers, the launcher line that follows from it, the collector, the default load mode and the worker count. It is the current answer and supersedes the decisions of the two older parts wherever they differ. \strong{Part I} (wave 7, 13:30Z to 14:25Z) is the platform gate of RECONCILIATION section 3 measured with the machine as engine on COLD processes by CPU time; \strong{Part II} (wave 4, 08:00Z to 11:50Z) is the rehearsal with the reference engine (launchers, host JIT, collectors, heap sizes). Both are kept as the record of a cold process per export, which is what an arena run is.}
+
+\p{Order of the columns in Part 0 (OWNER-NOTES 12): \strong{warm wall clock with 8 workers (load pipelined), warm wall clock with 1 worker, cold wall clock of a fresh process, CPU time, peak RSS, instructions}. Parts I and II still list CPU time first (owner note 10, the rule when they were measured).}
+
+\subtree{
+\title{Part 0 - the platform decision under owner note 12}
+
+\subtree{
+\title{0.0 The answer}
+
+\p{One build (\src{scripts/build.sh}) makes two launchers from the same 22 jars, and each has its job:}
+
+\table{
+\tr{\th{Launcher}\th{What it is}\th{What it is for}\th{Why}}
+\tr{\td{\code{\verb~|bin/rlvm-jvm~}}\td{the jars on HotSpot of GraalVM CE 25 (C2, serial collector)}\td{\strong{the WARM platform}: every measurement of the owner's metric (\code{\verb~|rlvm -X passes=N~}, \src{bench/warm.sh}), a process that checks more than one export or a mathlib-sized one, the guards (\src{scripts/gate.sh}, through the same jars)}\td{once warm it needs \strong{0.68 to 0.88 times the image's wall clock} with 8 workers on Init, Std, cedar, reachability and mathlib (J1.md 5.2, machine engine; 0.71 to 0.91 in the first warm table \code{\verb~|work/status/warm.md~}; 0.74 to 0.81 re-measured here) and 0.70 to 0.82 times with the reference engine (\code{\verb~|warm.md~}; 0.63 to 0.74 here). It pays for that at the start - its first run of a corpus takes 2.0 to 3.3 times the image's with the machine (0.9 to 1.0 times with the reference engine, whose runs are long enough for the JIT to pay within them), 0.2 s on a tiny input - and in memory: 1.4 to 3.7 times the image's resident set}}
+\tr{\td{\code{\verb~|bin/rlvm~}}\td{CE native image, \code{\verb~|-O3~}, serial collector, the machine's inline lists}\td{\strong{the COLD platform}: one fresh process per export - the arena definition (\src{scripts/arena/rlvm.yaml}), the 230 published tests, anything short}\td{steady from its first second: no warm-up to pay (cold wall Init / Std / cedar with 8 workers: 2.29 / 3.78 / 4.91 s with the reference engine, 0.82 / 1.59 / 2.16 s with the machine), a third to a half of the JVM's memory, 0.02 s on a tiny input where the JVM needs 0.2 s. In steady state it is the slower platform by the factors above}}
+\tr{\td{\src{scripts/check-light.sh}}\td{the same jars on HotSpot with C1 only and a 4 GB heap}\td{the mutant campaigns of the gates (thousands of small files)}\td{start-up dominates there; not a platform anybody measures}}
+\tr{\td{\code{\verb~|bin/rlvm-pgo~}}\td{Oracle GraalVM native image with profile-guided optimisation}\td{measurements that are labelled as such, only with \code{\verb~|scripts/build.sh --pgo~}}\td{owner note 11: nothing that ships or any default script downloads or uses Oracle GraalVM}}
+}
+
+\p{\strong{The engines and the contract of the default configuration} (OWNER-NOTES 13: the policy is "practical"). Both launchers carry both engines. The \strong{reference engine} (\code{\verb~|rlvm-ref~}, the official algorithm on hash-consed terms) is the default engine today; it confirms every rejection, decides every unit the other engine declines, and alone it is the strict mode. The \strong{machine} (\code{\verb~|rlvm-machine~}, the worklist machine) runs with \code{\verb~|-X engine=machine~} and becomes the default engine when its gates and its adversarial review are clean: its provider's priority decides, and nothing in a launcher, a script or the arena definition names the engine. One option selects the policy: \code{\verb~|-X policy=practical~} (the default) or \code{\verb~|-X policy=strict~} (the reference engine plus the exactness-only declines of the reference kernel and the loader; \src{rlvm-main/README.md}, "Policy"). Whatever engine is the default, the default configuration promises:}
+
+\ul{
+\li{(a) never an accept of a statement that is not derivable in Lean's type theory ("kind F");}
+\li{(b) the official verdict on every real input: what lean4export writes (the corpora), the arena's good and bad tests, the mutant corpora with their stored official verdicts;}
+\li{(c) everything the official checker accepts is accepted (a rejection is always confirmed by the reference engine, a decline goes to it);}
+\li{(d) a derivable statement that the official checker rejects only through its own incompleteness, non-transitivity, cache order or object identity ("kind T") may be accepted (\src{docs/design/review/official-divergence.md}).}
+}
+
+\p{The platform decision below does not depend on which engine is the default: every table has both engines, and the launchers follow the default engine by themselves (the JVM launcher's heap rule reads the distribution's default engine, which \src{scripts/build.sh} writes into it; \code{\verb~|-X policy=strict~} is the reference engine's heap).}
+
+\p{The decisions, each with its evidence below:}
+
+\ol{
+\li{\strong{Warm platform = the JVM launcher; cold / arena platform = the CE native image} (section 0.2). Under note 12 the JVM launcher is the faster platform for both engines and stays so with every switch set measured today; the arena starts one process per export - most of them tiny, where a JVM needs ten times the image's 0.02 s - and never reaches the JVM's steady state with the machine, so its definition stays on the image. Nothing has to choose between them at build time: both are in every distribution.}
+\li{\p{\strong{The JVM launcher line} (section 0.3; proposed by the profiler J1, re-measured here on the launcher \src{scripts/build.sh} now generates):}
+\pre{\verb~|
+-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages
+-Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError
+--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow
++ heap by engine:  machine        ->  -Xmx7g -Xmn1g          (no -Xms)
+                   anything else  ->  -Xms13g -Xmx13g -Xmn1g  (as before)
+  engine = -X engine=NAME, else the distribution's default engine; -X policy=strict = reference
+~}
+\p{an explicit \code{\verb~|-Xmx~} / \code{\verb~|-Xms~} / \code{\verb~|-Xmn~} on the command line still replaces the heap flags, and the class path is spelled out jar by jar in sorted order. Against the line before (\code{\verb~|CICompilerCount=2~}, no huge pages, 13 GB for every engine): with the machine the cold wall clock of Init / Std / cedar falls from 4.82 / 6.15 / 7.36 s to 2.84 / 4.04 / 4.45 s and the first pass over mathlib from 31.4 to 24.1 s; the warm wall clock is 0.62 / 1.22 / 1.61 s against 0.69 / 1.37 / 1.74 s (mathlib 21.1 against 22.2 s) and the peak RSS on mathlib 6.43 GiB against 8.84 GiB. With the reference engine (heap unchanged): cold 3.37 / 5.26 / 6.27 -> 2.33 / 3.66 / 4.31 s, warm 1.80 / 2.99 / 3.69 -> 1.61 / 2.77 / 3.20 s, mathlib first pass 68.3 -> 60.9 s and warm 61.6 -> 58.0 s.}}
+\li{\strong{No AOT cache, no CDS archive, C2 not Graal, tiers on} (J1.md sections 2 and 3): JDK 25's AOT cache takes 0.4 to 1.1 s off the cold wall and makes every later pass 5 to 9 \% slower (11 of 11 comparisons), which is the metric; class loading is 0.1 to 0.2 s of a start; Graal as the top tier reaches the same steady state with 400 MB more memory; no inlining flag moves the warm pass.}
+\li{\strong{The collector stays Serial} (section 0.4; \src{docs/research/profiles/GC.md}): no collector of GraalVM CE 25 beats it on the real checker with parallel workers, and the image has no other.}
+\li{\strong{The Truffle tier stays off} (\src{rlvm-truffle/NOTES-T3.md}, section 1: NO-GO as a default). It is compiled into both launchers and is reached only through the machine's switch \code{\verb~|t2~}; it changes nothing in the choice of platform.}
+\li{\strong{Load: pipelined by default} when two or more workers run and the input is at least the driver's \code{\verb~|pipeline-min-mib~} (8 MiB), with two scanner threads on mapped input for files of 256 MiB and more (section 0.5). Cold, native image, 8 workers, the old default (batch, plain reader) against the new one: reference Init 2.66 -> 2.29 s; reference Std 4.58 -> 3.78 s; reference cedar 6.16 -> 4.91 s; machine Init 1.30 -> 0.82 s; machine Std 2.33 -> 1.59 s; machine cedar 3.27 -> 2.16 s; machine mathlib 35.67 -> 27.59 s.}
+\li{\strong{Workers: \code{\verb~|--threads auto~} = one per CPU, at most 8, and the arena run line names 8} (section 0.6). Seven and eight are equal for the machine, eight is better for the reference engine, which is the default engine: cold, native image, reference, 8 / 7 / 4 workers: Init 2.30 / 2.49 / 3.67 s, Std 3.89 / 4.06 / 6.21 s, cedar 5.00 / 5.32 / 7.86 s; warm on the JVM launcher, 8 / 7: 1.55 / 1.62, 2.64 / 2.73, 3.38 / 3.43 s.}
+\li{\strong{Not settled}: x86-64 (the arena's architecture; every number here is aarch64, Cortex-X925); a host whose transparent huge pages are set to \code{\verb~|never~} (the flag then prints one warning on standard error and the VM runs as before: expected from the VM's documentation, not tested, the setting is the host's); one worker on mathlib; the 6 GB machine heap, which needs finding J1-F1 fixed in \code{\verb~|rlvm-machine~} first (\code{\verb~|Machine.YOUNG_RESERVE~}); and which ENGINE checks by default, which is not a platform question (the reference engine does; the machine runs with \code{\verb~|-X engine=machine~}).}
+}
+}
+
+\subtree{
+\title{0.1 What was measured, and how}
+
+\ul{
+\li{\strong{Distribution} \code{\verb~|work/b2/dist-a~}, built 2026-11-24T21:50:18Z with the build script of this part (\code{\verb~|scripts/build.sh --published~}): \code{\verb~|rlvm-main~} \code{\verb~|9995ff8855ab~} compiled from the tree (the load defaults and \code{\verb~|--threads auto~} of sections 0.5 and 0.6) and every other module as published at that minute - machine \code{\verb~|5945b6568177~} (E1's first fix publication; default switch set), driver \code{\verb~|31fa08d9ce61~}, load \code{\verb~|bb5734f612c3~}, store \code{\verb~|5b72707013bc~}, export \code{\verb~|14faa521df15~} (LP2's packed runs), ref \code{\verb~|ca1f9bd918bb~}, admit \code{\verb~|398a117d4ad8~}, inductive \code{\verb~|c15b14fffdd3~}, api \code{\verb~|6ff40825ca1d~}, cli \code{\verb~|f2af2657a704~}, truffle \code{\verb~|ad3256d0751d~}. \code{\verb~|bin/rlvm~} = CE native image \code{\verb~|-O3 --gc=serial -R:MaxHeapSize=13g~} with the H10 inline lists; \code{\verb~|bin/rlvm-jvm~} = the launcher of decision 2. \strong{The distribution that is published is \code{\verb~|work/b2/dist-c~}} (built 22:32Z; the shared \code{\verb~|work/dist~} is rebuilt from the same jars): it differs from \code{\verb~|dist-a~} in \code{\verb~|rlvm-main~} \code{\verb~|21150203e39d~} and \code{\verb~|rlvm-cli~} \code{\verb~|cac1433b287a~} (the \code{\verb~|-X policy~} option of owner note 13 and \code{\verb~|rlvm --help~}: nothing changes for a run without the option) and in the machine jar (\code{\verb~|df36be3c8cc9~}: E1's publications of 21:57Z and 22:12Z; the new switch \code{\verb~|eager~} is off). Its DEFAULT configuration - no \code{\verb~|-X engine~}, no \code{\verb~|-X load~}, \code{\verb~|--threads 8~} - was measured in a window of its own (\code{\verb~|b6~}): JVM launcher, 10 passes: warm 1.68 / 2.58 / 3.17 s, cold 2.63 / 3.66 / 4.21 s on Init / Std / cedar; native image: warm 2.26 / 3.81 / 4.90 s, cold 2.30 / 3.89 / 5.05 s - the reference-engine rows of \code{\verb~|dist-a~} within the spread between windows. All other rows of this part are \code{\verb~|dist-a~}.}
+\li{\strong{"Before"} in section 0.3 = the same jars and the same checker settings with the VM flags of the launcher until today, given through \code{\verb~|RLVM_JAVA_OPTS~} (\code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError ...~} and its heap): only the VM flags differ.}
+\li{\strong{Tool}: \src{bench/warm.sh} (one row = a cold process, exec to exit, and a process with \code{\verb~|-X passes=N~}: every pass a complete run, load included). warm = the median of passes 4..N of a row with 8 or more passes and of passes 2..N otherwise (best later pass in brackets). Rows: \code{\verb~|work/b2/warm.tsv~}; raw output of every process: \code{\verb~|work/b2/logs/~}; window scripts \code{\verb~|work/b2/w/*.sh~}; tables: \code{\verb~|work/b2/summ.py~}.}
+\li{\strong{Every timing was taken inside a \src{bench/quiet.py} window} (one measurement at a time on the host, the 8 measurement cores 5-9,15-17, the rest of the session off them): \code{\verb~|m1a~} (ended 21:59Z, 136 s), \code{\verb~|t1~} (ended 22:06Z, 132 s), \code{\verb~|t3~} (ended 22:17Z, 200 s), \code{\verb~|m1b~} (ended 22:24Z, 100 s), \code{\verb~|t2~} (ended 22:34Z, 146 s), \code{\verb~|r1a~} (ended 22:44Z, 132 s), \code{\verb~|b4~} (ended 22:45Z, 75 s), \code{\verb~|b6~} (ended 22:50Z, 134 s), \code{\verb~|t4~} (ended 22:55Z, 207 s), \code{\verb~|b5~} (ended 22:57Z, 107 s), \code{\verb~|b3~} (ended 23:00Z, 136 s), \code{\verb~|t6~} (ended 23:07Z, 99 s), \code{\verb~|b1~} (ended 23:09Z, 122 s), \code{\verb~|r1b~} (ended 23:18Z, 119 s), \code{\verb~|b2~} (ended 23:21Z, 155 s), \code{\verb~|r1c~} (ended 23:36Z, 131 s), \code{\verb~|am~} (ended 23:40Z, 92 s), \code{\verb~|im~} (ended 23:40Z, 28 s), \code{\verb~|t5~} (ended 23:44Z, 185 s). The other 12 cores were busy the whole time (load average 25 to 40): memory bandwidth and caches are shared, and two identical 8-worker rows of one window differ by up to 5 \% (J1.md section 1). Differences below that are not findings.}
+\li{\strong{Heap}: below mathlib \code{\verb~|-Xmx6g -Xmn1g~} (new line), \code{\verb~|-Xms6g -Xmx6g -Xmn1g~} (old line and the reference engine) and \code{\verb~|-Xmx6g~} for the image, as the host's memory rule asks; on mathlib each launcher's own default (machine 7 GB new / 13 GB old; reference 13 GB; image 13 GB cap, 7 GB for the machine).}
+\li{\strong{Engines}: \code{\verb~|-X engine=machine~} (default switch set of wave 6) and \code{\verb~|-X engine=reference~} (the default engine), each named explicitly. Load and reader: the build's defaults (pipelined, two scanner threads for these sizes) unless a row says otherwise.}
+}
+}
+
+\subtree{
+\title{0.2 JVM launcher against native image}
+
+\table{
+\tr{\th{engine}\th{corpus}\th{JVM warm 8w (best)}\th{native warm 8w (best)}\th{JVM / native warm}\th{JVM cold}\th{native cold}\th{JVM / native cold}\th{JVM RSS}\th{native RSS}}
+\tr{\td{machine}\td{init}\td{0.62 (0.61)}\td{0.83 (0.81)}\td{0.74}\td{2.84}\td{0.85}\td{3.34}\td{1014}\td{452}}
+\tr{\td{machine}\td{std}\td{1.22 (1.14)}\td{1.50 (1.50)}\td{0.81}\td{4.04}\td{1.57}\td{2.57}\td{1684}\td{722}}
+\tr{\td{machine}\td{cedar}\td{1.61 (1.54)}\td{2.10 (2.09)}\td{0.76}\td{4.45}\td{2.23}\td{2.00}\td{2047}\td{899}}
+\tr{\td{machine}\td{mathlib}\td{21.23 (21.23)}\td{28.18 (28.18)}\td{0.75}\td{24.31}\td{27.59}\td{0.88}\td{6624}\td{4654}}
+\tr{\td{reference}\td{init}\td{1.61 (1.55)}\td{2.25 (2.25)}\td{0.72}\td{2.33}\td{2.30}\td{1.01}\td{1833}\td{501}}
+\tr{\td{reference}\td{std}\td{2.77 (2.67)}\td{3.76 (3.75)}\td{0.74}\td{3.66}\td{3.89}\td{0.94}\td{2188}\td{827}}
+\tr{\td{reference}\td{cedar}\td{3.20 (3.14)}\td{4.88 (4.87)}\td{0.66}\td{4.31}\td{5.00}\td{0.86}\td{2458}\td{867}}
+\tr{\td{reference}\td{mathlib}\td{58.01 (58.01)}\td{91.76 (91.76)}\td{0.63}\td{60.85}\td{92.00}\td{0.66}\td{13272}\td{7388}}
+}
+
+\p{Reading. Warm, with 8 workers, the JVM launcher needs 0.74 to 0.81 times the image's wall clock with the machine and 0.63 to 0.74 times with the reference engine: the same picture as J1's 0.68 to 0.88 and the first warm table's 0.70 to 0.91, on newer jars, for both engines and on every corpus. Cold, with the machine, it is the other way round: the JVM's first run costs 2.0 to 3.3 times the image's. With the reference engine the two first runs take about the same time below mathlib (0.86 to 1.01 times): its runs are long enough for the JIT to pay within them, and the new launcher line took a third off the JVM's start. The JVM holds 1.4 to 3.7 times the memory. So the answer to "which platform" is the answer to "is warm-up charged": under owner note 12 it is not, and the JVM launcher is the platform of the metric; for one process per export it is - most of the arena's exports are tiny, where a JVM needs 0.2 s against the image's 0.02 s, and with the machine the image is two to three times faster cold on the corpora too - and the image is the platform of the arena.}
+
+\p{Earlier measurements of the same question, for the record: J1.md 5.2 (machine \code{\verb~|8a8ea5644b24~}, windows A, B, 4): warm wall JVM / image 0.79 (Init), 0.80 (Std), 0.76 (cedar), 0.68 (reachability), 0.88 (mathlib) with 8 workers, 0.67 to 0.87 with one; cold 3.0 / 1.75 / 2.1 / 0.97 / 0.93 (first pass). \code{\verb~|work/status/warm.md~} (machine \code{\verb~|7eb33a7a4ad7~}, reference \code{\verb~|ca1f9bd918bb~}): machine 0.90 / 0.91 / 0.84 / 0.71 / 0.73, reference 0.73 / 0.70 / 0.74 / 0.82 on Init / Std / cedar / reachability (/ mathlib). INT6 (\code{\verb~|work/status/machine-integration.md~}, machine \code{\verb~|78c74ca92785~}): mathlib 21.2 s on the JVM launcher against 27.4 s on the image. Part I of this document (cold processes, CPU time): the image needs 0.68 / 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers - the same two platforms seen from the other side: the JVM's first pass costs several times a warm one.}
+}
+
+\subtree{
+\title{0.3 The launcher line, before and after}
+
+\table{
+\tr{\th{engine}\th{corpus}\th{line}\th{cold wall s}\th{pass 1 s}\th{warm wall s: steady median (best)}\th{CPU of the median warm pass s}\th{peak RSS MiB}\th{passes s}}
+\tr{\td{machine}\td{init}\td{before}\td{4.82}\td{4.96}\td{\strong{0.69} (0.62)}\td{4.9}\td{813}\td{4.96 1.07 0.87 0.72 0.69 0.67 0.68 0.70 0.70 0.62}}
+\tr{\td{machine}\td{init}\td{after}\td{2.84}\td{3.00}\td{\strong{0.62} (0.61)}\td{4.8}\td{1014}\td{3.00 0.84 0.69 0.61 0.62 0.69 0.65 0.67 0.61 0.61}}
+\tr{\td{machine}\td{std}\td{before}\td{6.15}\td{7.09}\td{\strong{1.37} (1.21)}\td{10.5}\td{1819}\td{7.09 3.87 2.56 1.86 1.37 1.38 1.29 1.25 1.62 1.21}}
+\tr{\td{machine}\td{std}\td{after}\td{4.04}\td{4.02}\td{\strong{1.22} (1.14)}\td{8.2}\td{1684}\td{4.02 1.45 1.20 1.35 1.27 1.16 1.17 1.38 1.14 1.22}}
+\tr{\td{machine}\td{cedar}\td{before}\td{7.36}\td{7.35}\td{\strong{1.74} (1.62)}\td{14.0}\td{2112}\td{7.35 3.46 2.36 1.87 1.74 1.88 1.62 1.89 1.62 1.64}}
+\tr{\td{machine}\td{cedar}\td{after}\td{4.45}\td{4.17}\td{\strong{1.61} (1.54)}\td{12.2}\td{2047}\td{4.17 1.80 1.66 1.61 1.75 1.61 1.68 1.54 1.79 1.61}}
+\tr{\td{machine}\td{mathlib}\td{before}\td{(pass 1)}\td{31.36}\td{\strong{22.24} (22.24)}\td{167.3}\td{9052}\td{31.36 22.24}}
+\tr{\td{machine}\td{mathlib}\td{after}\td{(pass 1)}\td{24.11}\td{\strong{21.10} (21.10)}\td{154.9}\td{6587}\td{24.11 21.10}}
+\tr{\td{reference}\td{init}\td{before}\td{3.37}\td{3.71}\td{\strong{1.80} (1.66)}\td{12.8}\td{1794}\td{3.71 1.91 1.80 1.89 1.72 1.66}}
+\tr{\td{reference}\td{init}\td{after}\td{2.33}\td{2.31}\td{\strong{1.61} (1.55)}\td{12.0}\td{1833}\td{2.31 1.62 1.61 1.58 1.55 1.67}}
+\tr{\td{reference}\td{std}\td{before}\td{5.26}\td{5.05}\td{\strong{2.99} (2.90)}\td{21.5}\td{2135}\td{5.05 3.25 2.99 3.16 2.97 2.90}}
+\tr{\td{reference}\td{std}\td{after}\td{3.66}\td{3.52}\td{\strong{2.77} (2.67)}\td{19.6}\td{2188}\td{3.52 2.86 2.90 2.77 2.67 2.72}}
+\tr{\td{reference}\td{cedar}\td{before}\td{6.27}\td{5.78}\td{\strong{3.69} (3.59)}\td{26.9}\td{2254}\td{5.78 3.95 3.87 3.64 3.59 3.69}}
+\tr{\td{reference}\td{cedar}\td{after}\td{4.31}\td{4.15}\td{\strong{3.20} (3.14)}\td{23.4}\td{2458}\td{4.15 3.28 3.34 3.20 3.15 3.14}}
+\tr{\td{reference}\td{mathlib}\td{before}\td{(pass 1)}\td{68.34}\td{\strong{61.56} (61.56)}\td{466.3}\td{13246}\td{68.34 61.56}}
+\tr{\td{reference}\td{mathlib}\td{after}\td{(pass 1)}\td{60.85}\td{\strong{58.01} (58.01)}\td{438.6}\td{13272}\td{60.85 58.01}}
+}
+
+\table{
+\tr{\th{ratio after / before}\th{machine init}\th{machine std}\th{machine cedar}\th{machine mathlib}\th{reference init}\th{reference std}\th{reference cedar}\th{reference mathlib}}
+\tr{\td{cold wall (pass 1 on mathlib)}\td{0.59}\td{0.66}\td{0.60}\td{0.77}\td{0.69}\td{0.70}\td{0.69}\td{0.89}}
+\tr{\td{warm wall}\td{0.90}\td{0.89}\td{0.93}\td{0.95}\td{0.89}\td{0.93}\td{0.87}\td{0.94}}
+\tr{\td{peak RSS}\td{1.25}\td{0.93}\td{0.97}\td{0.73}\td{1.02}\td{1.02}\td{1.09}\td{1.00}}
+}
+
+\p{Reading. The cold wall clock is where the line shows: 0.59 to 0.66 times the old line's on Init, Std and cedar with the machine (0.69 to 0.70 with the reference engine), 0.77 on the first pass over mathlib: the eight compiler threads. With the machine the old line's pass 2 is still 1.6 to 2.8 times a warm pass and its pass 3 1.3 to 1.9 times; the new line's pass 3 is at 0.98 to 1.11 times its steady state. Warm, the new line is at 0.89 to 0.95 times the old line with the machine and 0.87 to 0.94 with the reference engine: J1 could claim no steady-state gain below mathlib (0.88 to 1.04) and 6 \% on mathlib from the huge pages; these rows are single windows, so read them as "not slower, a few per cent faster". Memory: the machine's 7 GB heap takes 2.4 GiB off the resident set on mathlib at the same wall clock; below mathlib the resident set is the touched part of the young generation and the store, as before.}
+
+\p{What each change is for (J1.md has the experiments; this table is the re-measurement of the whole line):}
+
+\table{
+\tr{\th{Change}\th{Why}\th{Evidence}}
+\tr{\td{\code{\verb~|CICompilerCount~} 2 -> 8}\td{with 2 a tiered VM has ONE C2 thread beside eight workers that still run interpreted and C1 code; it needs five or six passes to become steady. The threads are created on demand: 8 is a cap}\td{J1.md 3.2: Init cold 5.3 -> 2.9 s, cedar pass 1 7.4-8.9 -> 5.0 s, pass 3 steady; here: machine cold 4.82 / 6.15 / 7.36 -> 2.84 / 4.04 / 4.45 s (Init / Std / cedar), pass 3 0.69 / 1.20 / 1.66 s against 0.87 / 2.56 / 2.36 s; reference cold 3.37 / 5.26 / 6.27 -> 2.33 / 3.66 / 4.31 s}}
+\tr{\td{\code{\verb~|+UseTransparentHugePages~}}\td{the one flag with a consistent steady-state gain: TLB reach for a store of gigabytes}\td{J1.md 2.2: mathlib -6 \% warm wall and -9 \% first pass in an A B A B; reachability -2 to -4 \%; cedar 0 to -4 \%}}
+\tr{\td{\code{\verb~|-Xlog:disable -Xlog:all=warning:stderr~}}\td{the VM prints its own warnings on standard OUTPUT by default (huge pages unavailable, ...)}\td{J1.md 3.1}}
+\tr{\td{machine: \code{\verb~|-Xmx7g -Xmn1g~}, no \code{\verb~|-Xms~}}\td{the same warm wall clock as 13 GB with 2 GB less resident memory; 7 GB is the smallest cap at which the machine decides every unit it decides at 13 GB}\td{J1.md section 4: 23.9 / 24.1 / 24.2 / 24.0 s for 13 / 8 / 7 / 6 GB, RSS 8.0-8.7 -> 5.7-6.7 GB; here: mathlib, machine, old line with 13 GB against new line with 7 GB: warm pass 22.2 against 21.1 s, peak RSS 9052 against 6587 MiB}}
+\tr{\td{reference and every other engine: \code{\verb~|-Xms13g -Xmx13g -Xmn1g~} unchanged}\td{the reference engine's garbage on mathlib fills whatever heap it is given (13.4 GB resident, \code{\verb~|warm.md~}); the one alternative that showed something is another collector, not another size (section 0.4)}\td{-}}
+\tr{\td{sorted, explicit class path}\td{\code{\verb~|lib/*~} is expanded by the VM in directory order, which is not the same on every file system; with it the order of the \code{\verb~|ServiceLoader~} providers}\td{-}}
+\tr{\td{not added: AOT cache}\td{0.4-1.1 s off the cold wall, 5-9 \% ON every warm pass}\td{J1.md 3.3}}
+}
+}
+
+\subtree{
+\title{0.4 Collectors: Serial stays}
+
+\p{\src{docs/research/profiles/GC.md} measured every collector of GraalVM CE 25 in JVM mode on the real checker, both engines, 1 / 4 / 8 workers, Init, Std, the Cedar slice, reachability and mathlib:}
+
+\table{
+\tr{\th{ratio to Serial, CPU time (geometric mean of Init and Std)}\th{machine, 1 worker}\th{machine, 8 workers}\th{reference, 1 worker}\th{reference, 8 workers}}
+\tr{\td{Parallel}\td{0.99}\td{1.00}\td{1.01}\td{1.03}}
+\tr{\td{G1}\td{1.00}\td{1.00}\td{1.00}\td{1.01}}
+\tr{\td{ZGC (generational)}\td{1.04}\td{1.07}\td{1.06}\td{1.06}}
+\tr{\td{Shenandoah}\td{1.15}\td{1.17}\td{1.21}\td{1.19}}
+\tr{\td{Shenandoah, generational}\td{1.15}\td{1.16}\td{1.19}\td{1.26}}
+}
+
+\ul{
+\li{\strong{Wall clock with 8 workers: no collector improves it} (every ratio at or above 1 but G1's 0.99 on Std with the reference engine; ZGC and Shenandoah 1.2 to 1.3). The most a perfect collector could remove is Serial's pause total: 0.1 to 0.35 s on Init / Std, 1.2 s of 90 s (machine) and 7.3 s of 270 s (reference) on mathlib. In warm passes (\code{\verb~|warm.md~}): Parallel and G1 are inside the run-to-run spread of Serial on Init, Std and cedar (30 to 50 ms of pauses per warm pass).}
+\li{There is nothing to collect: with the machine no collector runs a single collection on Init, one on Std, nine on mathlib; Epsilon, which never collects, is not faster than Serial.}
+\li{The one cell where another collector has something: mathlib with the REFERENCE engine and 8 workers, G1 -3 to -6 \% CPU and a peak RSS of 7.1 GB against 12.4 GB (the 105 MB survivor spaces of \code{\verb~|-Xmn1g~} overflow at every young collection). Not adopted: one corpus, the engine that confirms rather than the one meant to ship, and G1 costs on the small corpora. If the reference engine stays the default engine for long, this is the first thing to measure again (with \code{\verb~|-XX:SurvivorRatio~} for Serial).}
+\li{The image has no choice: GraalVM CE's native image has the serial collector (and epsilon). Its own finding (P7-F4, 18:14Z) is open: \code{\verb~|-Xms6g~} for the image on mathlib with 8 workers pipelined took the collections from 359-379 to 26 and the wall clock from 34.1 to 32.5 s (-4.7 \%, two interleaved rounds) for 0.8 GB more resident memory; in a batch check phase it gains nothing. Not baked in (\code{\verb~|-R:MinHeapSize~}): it is a mathlib-only gain measured on an older driver, and the arena's small tests would each reserve what they do not use. To be re-measured on the current jars.}
+}
+}
+
+\subtree{
+\title{0.5 The default load mode}
+
+\p{\code{\verb~|rlvm-main~} (\code{\verb~|MainOptions.resolveLoadDefaults~}) now decides what the command line leaves open:}
+
+\table{
+\tr{\th{Setting}\th{Default}\th{Before}}
+\tr{\td{\code{\verb~|-X load~}}\td{\code{\verb~|pipelined~} when two or more workers run AND the input is a file of at least the driver's \code{\verb~|pipeline-min-mib~} (8 MiB) AND no \code{\verb~|stop-after~} phase is asked for; else \code{\verb~|batch~}. \code{\verb~|load=auto~} spells it out}\td{\code{\verb~|batch~}}}
+\tr{\td{\code{\verb~|-X scan-threads~}}\td{2 for inputs of 256 MiB and more (either load mode), else 0}\td{0}}
+\tr{\td{\code{\verb~|-X io~}}\td{\code{\verb~|auto~} (mapped if a regular file) when scanner threads run, else \code{\verb~|buffered~}}\td{\code{\verb~|buffered~}}}
+}
+
+\p{A setting that is given wins. \code{\verb~|--stats~} prints what was decided (\code{\verb~|load=pipelined(auto) scan-threads=2(auto) io=auto~}). Nothing changes for one worker, for a file below 8 MiB (every published arena test but the corpora, every mutant) or for a run that names its mode.}
+
+\p{Why it may be the default: the driver decides in pipelined mode what it decides in batch mode (kept environment pass + parking rule, rlvm-driver \code{\verb~|150aed4bf1bf~} / \code{\verb~|31fa08d9ce61~}: 0 pipelined-only declines over 16,928 mutants x 9 configurations with either engine), both modes build the same store (\code{\verb~|PipelinedLoadTest~}, record by record), and the scanner threads with packed runs build it word for word (LP2's differential digest: identical in 14 reader configurations including mathlib). Gates of THIS change: section 0.7.}
+
+\p{What it buys:}
+
+\table{
+\tr{\th{engine}\th{corpus}\th{old default (batch, plain reader): wall / CPU / RSS MiB}\th{new default (pipelined, 2 scanner threads): wall / CPU / RSS MiB}\th{new / old wall}}
+\tr{\td{reference}\td{init}\td{2.66 / 14.4 / 441}\td{2.29 / 14.7 / 523}\td{0.86}}
+\tr{\td{reference}\td{std}\td{4.58 / 24.4 / 626}\td{3.78 / 24.9 / 611}\td{0.83}}
+\tr{\td{reference}\td{cedar}\td{6.16 / 31.7 / 761}\td{4.91 / 32.5 / 837}\td{0.80}}
+\tr{\td{machine}\td{init}\td{1.30 / 5.2 / 319}\td{0.82 / 5.5 / 429}\td{0.63}}
+\tr{\td{machine}\td{std}\td{2.33 / 9.8 / 561}\td{1.59 / 10.3 / 719}\td{0.68}}
+\tr{\td{machine}\td{cedar}\td{3.27 / 13.5 / 658}\td{2.16 / 14.5 / 889}\td{0.66}}
+\tr{\td{machine}\td{mathlib}\td{35.67 / 185.8 / 3355}\td{27.59 / 196.0 / 4073}\td{0.77}}
+}
+
+\p{Reading. With the batch default the load is one thread and its wall clock is added to the check's; pipelined, the workers check while the file is read, and the two scanner threads take the tokenising and the packing of the proof records off the loader thread. New / old cold wall clock: reference Init 0.86, reference Std 0.83, reference cedar 0.80, machine Init 0.63, machine Std 0.68, machine cedar 0.66, machine mathlib 0.77. The gain is largest where loading was a large share of the run (the machine: loading was half of its cold wall clock on Init, Std and cedar) and smallest where checking dominates (the reference engine). Warm, on the JVM launcher, with 8 workers, the scanner threads by themselves move a pass by a few per cent at most (machine, 2 scanner threads against the plain reader: Init 0.64 against 0.70 s, Std 1.17 against 1.27, cedar 1.60 against 1.58; reference: 1.55 against 1.60, 2.64 against 2.74, 3.38 against 3.27 s): beside 8 workers on 8 cores a pass is bound by its total CPU time, as the load owner measured (the load alone: Std 0.92 -> 0.50 s, cedar 1.36 -> 0.73 s, mathlib 9.4 -> 6.0 s with two scanner threads; three are no better). They are the default because they are never worse and halve the load wherever cores are free (one worker, four workers, the first seconds of a run). What it costs: CPU time +2 to +7 \% and 0.1 to 0.7 GB of resident memory in the table above (the level snapshots of the publications, the packing on the scanner threads), and the arena's metric pays a little - instructions of the cold process in the arena container, image, 8 workers, old -> new default, one run each: machine Init 83.1 -> 84.7 G (+2.0 \%), cedar 209.5 -> 218.9 G (+4.5 \%); reference Init 245.7 -> 247.5 G (+0.7 \%), cedar 516.1 -> 525.5 G (+1.8 \%) (\code{\verb~|work/b2/instr-load.out~}, \code{\verb~|instr-load-old.out~}). \code{\verb~|-X load=batch -X scan-threads=0~} is the old default for whoever counts instructions.}
+}
+
+\subtree{
+\title{0.6 Workers: 7 against 8 on 8 cores}
+
+\p{\code{\verb~|--threads auto~} is decided in \code{\verb~|rlvm-main~} now (\code{\verb~|RlvmChecker.autoWorkers~}: one worker per CPU, at most 8) and passed to the driver like an explicit count; the driver's own automatic rule (CPUs - 2, at most 6: chosen by CPU time in wave 4) is no longer consulted, and its cap of one worker per 128 units still applies. The question was whether the eighth worker should be left to the loader, the scanner threads and the environment thread:}
+
+\table{
+\tr{\th{platform, engine}\th{corpus}\th{reader}\th{8 workers: warm (best) / pass 1 / CPU}\th{7 workers: warm (best) / pass 1 / CPU}\th{4 workers}}
+\tr{\td{jvm, machine}\td{init}\td{2 scanner threads}\td{0.64 (0.61) / 3.18 / 4.5}\td{0.64 (0.62) / 3.09 / 4.6}\td{-}}
+\tr{\td{jvm, machine}\td{init}\td{plain (scan-threads=0)}\td{0.70 (0.65) / 2.96 / 4.6}\td{0.71 (0.67) / 2.85 / 4.6}\td{-}}
+\tr{\td{jvm, machine}\td{std}\td{2 scanner threads}\td{1.17 (1.10) / 3.57 / 8.6}\td{1.16 (1.15) / 3.52 / 8.4}\td{-}}
+\tr{\td{jvm, machine}\td{std}\td{plain (scan-threads=0)}\td{1.27 (1.17) / 3.71 / 8.5}\td{1.17 (1.15) / 3.89 / 8.3}\td{-}}
+\tr{\td{jvm, machine}\td{cedar}\td{2 scanner threads}\td{1.60 (1.53) / 4.13 / 11.7}\td{1.75 (1.61) / 4.27 / 11.5}\td{-}}
+\tr{\td{jvm, machine}\td{cedar}\td{plain (scan-threads=0)}\td{1.58 (1.54) / 4.58 / 11.2}\td{1.56 (1.51) / 4.43 / 11.0}\td{-}}
+\tr{\td{jvm, machine}\td{mathlib}\td{2 scanner threads}\td{21.23 (21.23) / 24.31 / 161.4}\td{21.11 (21.11) / 24.34 / 151.7}\td{-}}
+\tr{\td{jvm, reference}\td{init}\td{2 scanner threads}\td{1.55 (1.51) / 2.37 / 11.1}\td{1.62 (1.57) / 2.31 / 10.9}\td{-}}
+\tr{\td{jvm, reference}\td{init}\td{plain (scan-threads=0)}\td{1.60 (1.54) / 2.19 / 11.8}\td{-}\td{-}}
+\tr{\td{jvm, reference}\td{std}\td{2 scanner threads}\td{2.64 (2.61) / 3.33 / 19.1}\td{2.73 (2.72) / 3.47 / 18.3}\td{-}}
+\tr{\td{jvm, reference}\td{std}\td{plain (scan-threads=0)}\td{2.74 (2.64) / 3.38 / 19.7}\td{-}\td{-}}
+\tr{\td{jvm, reference}\td{cedar}\td{2 scanner threads}\td{3.38 (3.26) / 4.19 / 24.7}\td{3.43 (3.36) / 4.26 / 23.8}\td{-}}
+\tr{\td{jvm, reference}\td{cedar}\td{plain (scan-threads=0)}\td{3.27 (3.10) / 4.08 / 24.0}\td{-}\td{-}}
+\tr{\td{native, reference}\td{init}\td{2 scanner threads}\td{2.25 (2.25) / 2.29 / 14.7}\td{2.42 (2.38) / 2.38 / 14.6}\td{3.70 (3.69) / 3.74 / 14.3}}
+\tr{\td{native, reference}\td{std}\td{2 scanner threads}\td{3.76 (3.75) / 3.82 / 24.9}\td{4.00 (4.00) / 4.10 / 24.9}\td{6.12 (6.11) / 6.15 / 24.3}}
+\tr{\td{native, reference}\td{cedar}\td{2 scanner threads}\td{4.88 (4.87) / 4.96 / 32.5}\td{5.18 (5.10) / 5.21 / 32.4}\td{7.93 (7.89) / 7.89 / 31.8}}
+\tr{\td{native, reference}\td{mathlib}\td{2 scanner threads}\td{91.76 (91.76) / 92.00 / 619.7}\td{-}\td{-}}
+\tr{\td{native, machine}\td{init}\td{2 scanner threads}\td{0.83 (0.81) / 0.79 / 5.4}\td{0.79 (0.79) / 0.78 / 5.4}\td{-}}
+\tr{\td{native, machine}\td{std}\td{2 scanner threads}\td{1.50 (1.50) / 1.52 / 10.4}\td{1.52 (1.50) / 1.54 / 10.2}\td{-}}
+\tr{\td{native, machine}\td{cedar}\td{2 scanner threads}\td{2.10 (2.09) / 2.12 / 14.6}\td{2.08 (2.07) / 2.08 / 14.4}\td{-}}
+\tr{\td{native, machine}\td{mathlib}\td{2 scanner threads}\td{28.18 (28.18) / 28.20 / 201.0}\td{29.13 (29.13) / 29.31 / 197.1}\td{-}}
+}
+
+\subtree{
+\title{cold (a fresh process, exec to exit), native image, the same window as the warm rows above}
+
+\table{
+\tr{\th{engine}\th{corpus}\th{8 workers: wall / CPU / RSS MiB}\th{7 workers}\th{4 workers}}
+\tr{\td{reference}\td{init}\td{2.30 / 14.7 / 532}\td{2.49 / 14.7 / 475}\td{3.67 / 14.4 / 452}}
+\tr{\td{reference}\td{std}\td{3.89 / 25.1 / 655}\td{4.06 / 24.8 / 615}\td{6.21 / 24.5 / 561}}
+\tr{\td{reference}\td{cedar}\td{5.00 / 32.9 / 805}\td{5.32 / 32.7 / 854}\td{7.86 / 31.8 / 713}}
+\tr{\td{machine}\td{init}\td{0.85 / 5.5 / 427}\td{0.83 / 5.5 / 416}\td{-}}
+\tr{\td{machine}\td{std}\td{1.57 / 10.4 / 747}\td{1.61 / 10.3 / 713}\td{-}}
+\tr{\td{machine}\td{cedar}\td{2.23 / 14.7 / 900}\td{2.18 / 14.5 / 843}\td{-}}
+}
+
+\p{Reading. \strong{Machine}: warm on the JVM launcher 8 against 7 workers 0.64 / 1.17 / 1.60 against 0.64 / 1.16 / 1.75 s on Init / Std / cedar, cold in the image 0.85 / 1.57 / 2.23 against 0.83 / 1.61 / 2.18 s: a tie inside the 5 \% between rows, as the first warm table found ("seven equal eight, six are slower"). On mathlib 8 against 7: 21.2 against 21.1 s warm on the JVM launcher, 28.2 against 29.1 s in the image. \strong{Reference engine} (the default engine): the eighth worker pays - cold in the image 1.04 to 1.08 times the 8-worker wall clock with 7 workers and 1.57 to 1.60 times with 4 (the arena run line until today), at the same CPU time; warm on the JVM launcher 7 workers are 1.01 to 1.05 times 8. The reference engine's passes are bound by the checking, which spreads over the workers: a warm Std pass on the JVM launcher keeps 7.2 of the 8 cores busy (19.1 s of CPU in 2.64 s), so a core that is left to the loader, its scanner threads and the environment thread is a core the checking misses. The load owner's windows agree (8 on 8 cores; 7 no better on Std and cedar, worse on mathlib and in the image; \src{rlvm-load/README.md}, "LP2: warm measurements"). So \code{\verb~|--threads auto~} is one worker per CPU up to 8 and the arena run line says 8. With the machine as the default engine the choice costs nothing; it should be measured again if the machine's passes get shorter than the load.}
+}
+}
+
+\subtree{
+\title{0.7 Gates of the changed defaults, and what was changed}
+
+\p{Everything is on \code{\verb~|work/b2/dist-c~} - the published \code{\verb~|rlvm-main~} \code{\verb~|21150203e39d~} and \code{\verb~|rlvm-cli~} \code{\verb~|cac1433b287a~} with the other jars as published at 22:32Z - unless a row names another distribution.}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{Module suites}\td{\code{\verb~|rlvm-cli~} 49 tests, \code{\verb~|rlvm-main~} 54 tests (3 opt-in skipped), 0 failures: in a frozen private copy of the tree with both modules together, and again in the tree at publication (the installed jars are byte-identical to the gated ones); \code{\verb~|bench/track/selftest.py --docker~} 89 checks; \code{\verb~|scripts/gate-hostile.py --selftest~}}}
+\tr{\td{\code{\verb~|scripts/gate.sh --dist work/b2/dist-c --defaults --corpus all~}: the distribution exactly as a user runs it - no \code{\verb~|-X~}, \code{\verb~|--threads auto~} - on the 230 published tests (JVM launcher, the new line), the four mutant corpora (\src{scripts/check-light.sh}; oracle: the stored official verdicts) and the differential self-test}\td{\strong{230 / 230} correct, 0 wrong, 0 declined; \strong{17,775 mutants: SOUNDNESS 0, COMPLETENESS 0}, agree 16,092, declined 1,683 (tutorial 11,847 / 413, bugs 2,627 / 65, prelude 839 / 8, mdata 779 / 1,197: the published record exactly), errors 0; self-test caught; PASS (22:39Z - 23:07Z; 1,554 s for the mutants at 4 lanes)}}
+\tr{\td{The same 230 tests with \code{\verb~|-X engine=machine~} under the launcher's 7 GB machine heap (\code{\verb~|dist-a~})}\td{230 / 230; peak RSS 3.3 GB (\code{\verb~|perf/gf3-matrix-product~})}}
+\tr{\td{\code{\verb~|rlvm-driver/bin/invariance.sh --no-compile -P 4 published~} - the driver's suite on the published jars: every published test with 1 / 2 / 4 / 8 workers, a session reset after every unit, and pipelined loading with a publication after every unit, every 7 and every 64 units}\td{231 files x 9 runs: 231 correct, 0 wrong, 0 declined, 0 schedule differences, \strong{0 pipelined declines}; PASS}}
+\tr{\td{The eight corpora in the default configuration (no option at all)}\td{native image: Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib accepted (verdict runs on the efficiency cores); mathlib accepted (\code{\verb~|dist-a~}, window \code{\verb~|t5~}: 92.0 s the first pass, 91.8 s the second, peak RSS 7.2 GiB; and by the arena's procedure on \code{\verb~|dist-c~}, next row); JVM launcher: Init, Std, cedar accepted (window \code{\verb~|b6~}), mathlib accepted with the reference engine (\code{\verb~|dist-a~}, window \code{\verb~|r1b~}: first pass 60.9 s, second 58.0 s, peak RSS 13.0 GiB)}}
+\tr{\td{The arena's complete test set by the arena's own procedure (one arena-shaped container, tests one after the other, the arena's time limits, \code{\verb~|perf stat~}; \code{\verb~|work/b2/arena-suite.sh~}, as AR1.md section 1), run line of \src{scripts/arena/rlvm.yaml} with \code{\verb~|--threads 8~}}\td{all tests but mathlib (269; 22:44Z - 22:54Z): good 147 / 147 accepted, bad 92 / 92 rejected, \code{\verb~|either~} 9 accepted / 19 rejected / 2 declined (\code{\verb~|corner-cases/eta-struct-major-no-whnf~}, \code{\verb~|-and-no-whnf~}: the official kernel does not terminate there): \strong{no wrong verdict}, no error, no timeout (closest to its limit: \code{\verb~|perf/app-lam~}, 11.3 s of 70 s); 8.72 T instructions, peak RSS 4.1 GiB; mathlib alone (announced; inside a quiet window, \code{\verb~|am~}, 23:38Z - 23:40Z): accepted in 92.0 s of a limit of 4,120 s, 618 s of CPU, 8,455 G instructions, peak RSS 7.5 GiB. \strong{270 of 270 without a wrong verdict; two \code{\verb~|either~} tests declined}}}
+\tr{\td{\code{\verb~|scripts/dev.sh arena-test --reuse --strict~} (a clean copy of the tree, \src{scripts/arena/build.sh} in the 8-CPU / 16 GB container, the run line on four tests)}\td{PASS (22:46Z): the 14 modules that ship compiled from source, \strong{22 jars} (no test kit), third-party jars match \code{\verb~|scripts/arena/deps.sha256~}, H10 lists generated in the container, image in 267 s; \code{\verb~|init-prelude~} and \code{\verb~|001_basicDef~} exit 0, \code{\verb~|002_badDef~} exit 1, \code{\verb~|perf/app-lam~} exit 0 (55.6 G instructions, 10.7 s, 4.0 GB)}}
+\tr{\td{A differential run (\code{\verb~|-X engine=diff~} with the test kit's provider) on Init under the default load}\td{accept, exit 0 (pipelined, 8 workers)}}
+\tr{\td{The hostile exports (\code{\verb~|scripts/gate.sh --defaults --hostile~}: the machine's suite, 421 rows, official verdicts, kind T rows may be accepted)}\td{default engine reference: agree 420, wrong 0, declined 1 (\code{\verb~|str-lit-missing-prerequisites-bad~}), PASS}}
+\tr{\td{Readiness for a machine-default tree: the same gate on a REHEARSAL distribution whose default engine is the machine (\code{\verb~|work/b2/dist-mdefault~}: the old machine jar \code{\verb~|78c74ca92785~} with priority 100, not for verdicts)}\td{the launcher reads \code{\verb~|default engine: machine~} and runs the 7 GB heap without an option; 230 / 230 with the machine checking by default; self-test caught; the hostile step FAILS that jar as it must: agree 395, kind T tolerated 6, \strong{wrong accepts 19} (the E1-F1 .. F7 rows that are not of kind T; fixed in the machine's later jars)}}
+\tr{\td{The shared distribution after the publication (\code{\verb~|work/dist~} -> \code{\verb~|dist.d/20261124T231129Z-9cdeba20778f-native~}: the published jars of 23:08Z, loader \code{\verb~|7e3f85cecdaa~}, store \code{\verb~|30979ee659b7~}, machine \code{\verb~|97d17e57e51b~})}\td{the 230 published tests through the arena run line (image, \code{\verb~|--threads 8~}): 230 / 230, 0 declined (\code{\verb~|work/status/slice-all.md~}); \code{\verb~|-X policy=strict~} declines a definition with a metadata node around its value on both launchers (\code{\verb~|policy=strict[metadata]~}), the default accepts it}}
+}
+
+\p{Not gated by me: the mutant corpora and the invariance suite were not repeated on the jars that other owners published after 22:32Z (their owners gate their own publications); the hostile exports of S3, S2 and C1 are not in the manifest yet; nothing ran on x86-64.}
+
+\p{\strong{Changed} (all in the steward's modules and scripts):}
+
+\ul{
+\li{\src{scripts/build.sh}: the JVM launcher template (decision 2: VM flags, heap by engine from \code{\verb~|-X engine=NAME~} / \code{\verb~|-Xengine=NAME~}, sorted explicit class path, VM messages on standard error); the test kit is never part of a distribution (a tree build - the arena build - used to put \code{\verb~|rlvm-testkit~} on the image class path: 23 jars against the 22 of every gated distribution); the CE image is built with the machine's H10 inline lists, generated from the machine jar of the build with the \code{\verb~|javap~} and \code{\verb~|jar~} of the build's own GraalVM (no \code{\verb~|unzip~}: the arena's shell has none), with a fallback to an image without them (\code{\verb~|--no-h10~}: never).}
+\li{\code{\verb~|rlvm-main~}: \code{\verb~|MainOptions~} (\code{\verb~|load~} / \code{\verb~|scan-threads~} / \code{\verb~|io~} defaults as in 0.5; \code{\verb~|load=auto~}, \code{\verb~|scan-threads=auto~}), \code{\verb~|RlvmChecker~} (\code{\verb~|--threads auto~} = \code{\verb~|autoWorkers~}; the statistics line names what was decided), tests \code{\verb~|LoadDefaultsTest~}. \strong{\code{\verb~|-X policy=practical|strict~}} (OWNER-NOTES 13; \code{\verb~|PolicyTest~}): strict = the reference engine, \code{\verb~|ref.exact=official~} for the reference kernel and \code{\verb~|LoadOptions.withStrictMetadata(true)~} for the loader where the jars have them. \code{\verb~|rlvm --version~} names the default engine; \code{\verb~|rlvm --help~} lists the checker's settings (\code{\verb~|rlvm-cli~}: \code{\verb~|Checker.usage()~}).}
+\li{\src{scripts/gate.sh}, \src{scripts/slice.sh}, \src{scripts/check-light.sh}: \code{\verb~|--engine default~} / \code{\verb~|--load default~} (no \code{\verb~|-X~} at all), \code{\verb~|gate.sh --defaults~} (the distribution exactly as a user runs it, so the same command gates a reference-default and a machine-default tree; every oracle is an official verdict), \code{\verb~|gate.sh --hostile~} (\src{scripts/gate-hostile.py}: the hostile exports judged by their official verdicts, a kind T row may be accepted), lanes clamped by the memory available at the start of a step.}
+\li{\src{scripts/arena/rlvm.yaml}: the state, the description, \code{\verb~|--threads 8~} / \code{\verb~|threads: 8~}.}
+\li{\code{\verb~|bench/track~} (rule on wall clock, pass lines, the generator of \src{docs/BENCHMARKS.md}), \src{bench/warm.py} (\code{\verb~|--load default~}, \code{\verb~|--cold-only~}, the distribution in every row).}
+}
+
+\p{\strong{Not changed}: which engine is the default (the reference engine; \code{\verb~|Engines.DEFAULT_ENGINE_MIN_PRIORITY~} = 100, the machine registers with 10); the image's collector, heap cap (13 GB) and optimisation level; the driver, the loader, the store, the engines.}
+
+\p{\strong{To repeat} (each line one quiet window of two to four minutes; \code{\verb~|work/b2/w/win.sh NAME...~}):}
+
+\pre{\verb~|
+bench/slot.sh -c ni -n 2 -- scripts/build.sh --published --dist work/b2/dist-a
+bench/quiet.py -- bash work/b2/w/m1a.sh     # launcher line, machine, Init / Std / cedar      (m1b: mathlib)
+bench/quiet.py -- bash work/b2/w/r1a.sh     # launcher line, reference                        (r1b, r1c: mathlib)
+bench/quiet.py -- bash work/b2/w/t1.sh      # 7 against 8 workers, JVM warm, machine          (t2: reference)
+bench/quiet.py -- bash work/b2/w/t3.sh      # 4 / 7 / 8 workers, native, cold + warm          (t4, t5: mathlib)
+bench/quiet.py -- bash work/b2/w/t6.sh      # batch against the default load, cold
+python3 -I work/b2/summ.py                  # the tables of this part
+~}
+}
+}
+
+\subtree{
+\title{Part I - the machine as engine (wave 7): cold processes, by CPU time}
+
+\p{\em{Superseded as the platform decision by Part 0 (owner note 12: warm wall clock decides). Kept as the record of what a fresh process per export costs on each launcher - the arena's situation - measured with the machine v0 on a batch load. "The launcher", "the flags" and "the worker count" in this part are the cold-process answers of 14:25Z; the current ones are in Part 0.}}
+
+\subtree{
+\title{I.0 The answer}
+
+\p{\strong{Read this first.} This gate was planned and measured under owner note 10 (CPU time of a run first, then wall clock): every run below is a FRESH process on a batch load, so the JVM's warm-up is part of every figure. While it was being written the owner changed the target (OWNER-NOTES item 12, read here at 14:37Z): \em{wall clock after warm-up, with pipelined loading, is the goal; warm-up cost is not charged; the platform question is decided by warm wall clock}. By that criterion the four points below are the answer for a COLD process - which is what an arena run is - and \strong{the platform question itself is open again}: section I.7 has the first indication (the machine's warm passes on HotSpot need less CPU time than the image, as the reference engine's long runs do) and what is needed to decide it.}
+
+\p{For a fresh process per export (the arena's run), by CPU time, then wall clock:}
+
+\ol{
+\li{\strong{The CE native image is the launcher of a cold run} (\code{\verb~|work/dist/bin/rlvm~}, GraalVM CE 25, \code{\verb~|-O3~}), and the arena definition stays on it. With the machine as engine it needs \strong{0.68 / 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers} (medians of 8 paired runs each on Init, Std, the Cedar slice and reachability; the image wins all 24 pairs, 0.24 to 0.88), 0.62 times its wall clock with four workers, and a third to a half of its memory. Init, four workers: 8.1 s CPU / 2.9 s wall / 330 MB against 18.4 s / 4.9 s / 770 MB. The JVM pays about 3.7 s of C2 compilation per run and runs every worker slowly until it is done; a run of the machine is too short to earn that back. The JVM launcher remains the cheaper platform for long runs of the \em{reference} engine (mathlib, eight workers: 500.5 s against 624.6 s CPU), which is the fallback engine and not what ships. \src{scripts/arena/rlvm.yaml} already names the image: nothing to switch.}
+\li{\strong{Flags: the image as it is built today} - \code{\verb~|-O3 --gc=serial -R:MaxHeapSize=13g -R:+ExitOnOutOfMemoryError~}, no nursery flag, no \code{\verb~|-march~}. \code{\verb~|-O3~} (10 to 18 \% less CPU time than \code{\verb~|-O2~} for the machine) was the arena build's level and is now also the default of \src{scripts/build.sh}. The serial collector is the only CE collector that collects; the heap limit is a limit, not a reservation (RSS 250 MB to 1.9 GB on the four corpora). The JVM launcher keeps its flags (\code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}); it is the launcher of the guards, not of the arena.}
+\li{\strong{Workers: \code{\verb~|--threads 4~} by CPU time, 8 by wall clock; the run line was left at 4.} With four workers the image's CPU time is that of one worker (1.02, 1.01 and 0.98 times on Init, Std and the Cedar slice) at 2.5 to 2.7 times the speed; eight workers cost 1.07 times the CPU time of one on all three for 18 \% less wall clock than four on Init and Std and nothing on the other two corpora. Under note 10 that reads "four"; under note 12 (wall clock is the goal, CPU time a diagnostic) it reads "eight, or six once it is measured" (section I.3). The run line was not changed: all 230 published tests under the arena's limits with another count could not be run in this session.}
+\li{\strong{What this rests on, and what it does not settle.} Two repeats of the matrix (48 runs, 13:33Z to 13:49Z, host load 26 to 95). The third repeat, the six-worker runs and the \code{\verb~|bench/track~} entries of 14:13Z to 14:21Z were taken while the host was thrashing (load 230 to 266, 40 GB of swap; orchestrator, \code{\verb~|work/status/requests.log~} 14:32Z) and are discarded; their repetition waited for the measurement lock behind eight other queues and was withdrawn at 14:34Z. Not settled: x86-64 (the runner's architecture; no such machine here); the machine on mathlib-sized input on either launcher (section I.4); the machine's staging switches and its compiled tier, which its own workflow is changing today (measured here: jar \code{\verb~|608b84b2b142~}, default switches).}
+}
+}
+
+\subtree{
+\title{I.1 What was measured, and how}
+
+\ul{
+\li{\p{\strong{Distribution} (frozen for the whole series): \code{\verb~|work/steward/w7/dist~}, built 13:30:43Z by}
+\pre{\verb~|
+scripts/build.sh --published --no-pgo --opt 3 --dist work/steward/w7/dist
+~}
+\p{from the jars published at that moment (\code{\verb~|BUILD-INFO.txt~} there): the pipeline jars of the end of wave 4 / 5 (driver \code{\verb~|eb0944caa630~}, store \code{\verb~|45df9b63e7af~}, ref \code{\verb~|035f31e854d9~}, admit \code{\verb~|a817cd0c9d35~}, load \code{\verb~|30617170f7a3~}, api \code{\verb~|46e5486d1a02~}) and the machine jar \strong{\code{\verb~|608b84b2b142~}} (the wave-4 integrator's final jar; the wave-6 machine workflow published newer ones from 13:39Z on, which are not in these numbers). \code{\verb~|bin/rlvm~} = CE native image, GraalVM CE 25.5.5.0.3, \code{\verb~|-O3 --gc=serial -R:MaxHeapSize=13g~}, 64.9 MB: exactly what \src{scripts/arena/build.sh} builds. \code{\verb~|bin/rlvm-jvm~} = the same jars on HotSpot with the launcher's flags (\code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}).}}
+\li{\strong{Engine}: \code{\verb~|-X engine=machine~} with the machine's default switches (v0: one session per declaration; the staging switches \code{\verb~|warm,gated,expect,probes~} of \code{\verb~|work/status/machine-integration.md~} are off). The reference engine re-checks what the machine declines; on the four corpora below it declines nothing (section I.6), so every figure is the machine's own.}
+\li{\p{\strong{One run} = the arena run line with the binary and the worker count replaced, in a fresh arena-shaped container (\code{\verb~|bench/arena-docker.sh --arena-limits --no-network~}: 8 performance cores, 16 GB), measured like the arena measures (\src{bench/measure.sh}: \code{\verb~|perf stat~} + GNU time around \code{\verb~|sh -c~}):}
+\pre{\verb~|
+RLVM_STATUS_BASE=10 DIST/bin/BINARY --threads N "$IN" -X engine=machine -X load=batch; case $? in ...
+~}
+\p{One-worker runs are in the same eight-core container (not the two-core container of Part II).}}
+\li{\strong{Matrix}: launcher \verb~|{~\code{\verb~|jvm~}, \code{\verb~|native~}\verb~|}~ x workers \verb~|{~1, 4, 8\verb~|}~ x corpus \verb~|{~Init 348 MB, Std 584 MB, the Cedar slice \code{\verb~|cedar-hot-ax~} 133 MB, reachability 19 MB\verb~|}~, the two launchers of a group back to back. \strong{Two repeats are valid} (48 runs, 13:33Z to 13:49Z). A third repeat and three runs with six workers for the image (36 runs, 14:13Z to 14:20Z) fell into the forty minutes in which the host was out of memory and thrashing; by the orchestrator's ruling they are discarded and kept apart (\code{\verb~|w7-machine-thrashing.jsonl~}), and section I.3 quotes them only to say what they cannot show. \src{scripts/platform-matrix.py} (\code{\verb~|work/steward/w7/queue.sh~} and \code{\verb~|queue2.sh~} have the exact calls); raw records with the host's load average before and after every run in \code{\verb~|work/steward/platform/results/w7-*.jsonl~}.}
+\li{\strong{Lock}: every run was made under the measurement lock \code{\verb~|work/perf-history/.ladder.lock~} (the first six groups with a lock per group, the rest in holds of 4 to 8 minutes). The lock was the bottleneck of the day: up to ten queues behind it, waits of 20 minutes, once held for more than ten minutes by a native-image build that had inherited it (my line of 14:02Z in \code{\verb~|work/status/requests.log~}).}
+\li{\strong{The host was not quiet.} The 1-minute load average of the host (20 CPUs) was 26 to 95 during the two valid repeats: thirty agents were testing, building and measuring. Other owners' processes are not confined to the cores outside the container, so CPU time is inflated by an amount that changes from minute to minute (Cedar slice, image, one worker: 3.60 and 3.64 s here against 3.17 s at load 7 to 10 two hours earlier, with the same 46.4 G instructions; Init 7.94 s against 7.77 s). The figure of a row is the \strong{minimum} over its repeats (median in parentheses); the \code{\verb~|Load~} column is the highest 1-minute load average at the end of a run of the row. Instruction counts do not depend on the load; compare launchers by the paired ratios.}
+}
+}
+
+\subtree{
+\title{I.2 Launcher x workers: Init, Std, Cedar slice, reachability}
+
+% <!-- BEGIN table:w7-machine:-:1,4,8 -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{init}\td{1}\td{\code{\verb~|jvm~}}\td{12.75 (12.75)}\td{8.18 (8.19)}\td{590 MB}\td{161.8 G}\td{0 / 0; 0 ms}\td{2}\td{75}}
+\tr{\td{init}\td{1}\td{\code{\verb~|native~}}\td{\strong{7.94 (7.97)}}\td{7.97 (7.99)}\td{252 MB}\td{136.6 G}\td{n.r.}\td{2}\td{74}}
+\tr{\td{init}\td{4}\td{\code{\verb~|jvm~}}\td{18.41 (20.01)}\td{4.90 (5.08)}\td{771 MB}\td{177.7 G}\td{0 / 0; 0 ms}\td{2}\td{74}}
+\tr{\td{init}\td{4}\td{\code{\verb~|native~}}\td{\strong{8.08 (8.11)}}\td{2.89 (2.95)}\td{334 MB}\td{137.1 G}\td{n.r.}\td{2}\td{75}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm~}}\td{24.30 (29.31)}\td{6.15 (6.17)}\td{1.18 GB}\td{198.4 G}\td{1 / 0; 105 ms}\td{2}\td{76}}
+\tr{\td{init}\td{8}\td{\code{\verb~|native~}}\td{\strong{8.32 (8.56)}}\td{2.36 (2.92)}\td{487 MB}\td{137.2 G}\td{n.r.}\td{2}\td{76}}
+\tr{\td{std}\td{1}\td{\code{\verb~|jvm~}}\td{17.35 (17.75)}\td{12.72 (12.77)}\td{1.16 GB}\td{227.0 G}\td{1 / 0; 95 ms}\td{2}\td{80}}
+\tr{\td{std}\td{1}\td{\code{\verb~|native~}}\td{\strong{13.20 (13.37)}}\td{13.23 (13.78)}\td{330 MB}\td{219.5 G}\td{n.r.}\td{2}\td{84}}
+\tr{\td{std}\td{4}\td{\code{\verb~|jvm~}}\td{22.90 (24.94)}\td{6.80 (7.90)}\td{1.23 GB}\td{253.6 G}\td{1 / 0; 98 ms}\td{2}\td{86}}
+\tr{\td{std}\td{4}\td{\code{\verb~|native~}}\td{\strong{13.21 (13.46)}}\td{4.43 (5.20)}\td{450 MB}\td{220.9 G}\td{n.r.}\td{2}\td{85}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm~}}\td{34.17 (35.56)}\td{6.32 (7.40)}\td{1.24 GB}\td{262.7 G}\td{1 / 0; 105 ms}\td{2}\td{85}}
+\tr{\td{std}\td{8}\td{\code{\verb~|native~}}\td{\strong{13.82 (14.24)}}\td{3.60 (4.35)}\td{567 MB}\td{221.0 G}\td{n.r.}\td{2}\td{86}}
+\tr{\td{cedar-hot-ax}\td{1}\td{\code{\verb~|jvm~}}\td{7.89 (8.11)}\td{4.13 (4.34)}\td{981 MB}\td{86.9 G}\td{1 / 0; 30 ms}\td{2}\td{94}}
+\tr{\td{cedar-hot-ax}\td{1}\td{\code{\verb~|native~}}\td{\strong{3.60 (3.62)}}\td{3.64 (3.66)}\td{190 MB}\td{46.4 G}\td{n.r.}\td{2}\td{95}}
+\tr{\td{cedar-hot-ax}\td{4}\td{\code{\verb~|jvm~}}\td{9.01 (9.96)}\td{2.73 (3.06)}\td{1.07 GB}\td{88.2 G}\td{1 / 0; 57 ms}\td{2}\td{95}}
+\tr{\td{cedar-hot-ax}\td{4}\td{\code{\verb~|native~}}\td{\strong{3.52 (3.54)}}\td{1.41 (1.48)}\td{319 MB}\td{46.4 G}\td{n.r.}\td{2}\td{95}}
+\tr{\td{cedar-hot-ax}\td{8}\td{\code{\verb~|jvm~}}\td{12.26 (12.44)}\td{3.04 (3.23)}\td{1.10 GB}\td{92.1 G}\td{1 / 0; 70 ms}\td{2}\td{94}}
+\tr{\td{cedar-hot-ax}\td{8}\td{\code{\verb~|native~}}\td{\strong{3.84 (3.86)}}\td{1.41 (1.43)}\td{404 MB}\td{46.5 G}\td{n.r.}\td{2}\td{94}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|jvm~}}\td{9.51 (9.59)}\td{7.20 (7.38)}\td{2.03 GB}\td{75.1 G}\td{5 / 0; 338 ms}\td{2}\td{91}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|native~}}\td{\strong{8.12 (8.23)}}\td{8.21 (8.34)}\td{1.32 GB}\td{58.5 G}\td{n.r.}\td{2}\td{88}}
+\tr{\td{reachability}\td{4}\td{\code{\verb~|jvm~}}\td{11.29 (11.69)}\td{5.31 (5.51)}\td{2.91 GB}\td{79.6 G}\td{5 / 0; 541 ms}\td{2}\td{85}}
+\tr{\td{reachability}\td{4}\td{\code{\verb~|native~}}\td{\strong{8.58 (8.73)}}\td{5.44 (7.10)}\td{1.74 GB}\td{58.5 G}\td{n.r.}\td{2}\td{86}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm~}}\td{11.51 (12.00)}\td{7.15 (7.31)}\td{1.73 GB}\td{86.1 G}\td{5 / 0; 232 ms}\td{2}\td{85}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|native~}}\td{\strong{8.38 (8.47)}}\td{6.18 (7.31)}\td{1.89 GB}\td{58.5 G}\td{n.r.}\td{2}\td{87}}
+}
+% <!-- END table:w7-machine:-:1,4,8 -->
+
+\p{Paired ratios, CE native image against the JVM launcher (the two runs of a group are seconds apart), all worker counts, then per worker count:}
+
+% <!-- BEGIN ratio:w7-machine:jvm -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{0.473 (0.243 - 0.878)}\td{0.735}\td{0.42}\td{0.752}\td{24}}
+}
+% <!-- END ratio:w7-machine:jvm -->
+
+\p{One worker:}
+
+% <!-- BEGIN ratio:w7-machine:jvm:-:1 -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{0.677 (0.437 - 0.878)}\td{1.006}\td{0.35}\td{0.823}\td{8}}
+}
+% <!-- END ratio:w7-machine:jvm:-:1 -->
+
+\p{Four workers:}
+
+% <!-- BEGIN ratio:w7-machine:jvm:-:4 -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{0.464 (0.323 - 0.760)}\td{0.621}\td{0.39}\td{0.759}\td{8}}
+}
+% <!-- END ratio:w7-machine:jvm:-:4 -->
+
+\p{Eight workers:}
+
+% <!-- BEGIN ratio:w7-machine:jvm:-:8 -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{0.368 (0.243 - 0.744)}\td{0.567}\td{0.42}\td{0.681}\td{8}}
+}
+% <!-- END ratio:w7-machine:jvm:-:8 -->
+
+\p{Reading:}
+
+\ul{
+\li{\strong{The CE native image needs less CPU time than the JVM launcher in every group} - every corpus, every worker count, both repeats (24 pairs). Median of the paired ratios: 0.68 with one worker, 0.46 with four, 0.37 with eight; the best case for the JVM is reachability with one worker (0.85 and 0.88), the worst Init with eight workers (0.24 and 0.34).}
+\li{\strong{The JVM's price is its JIT, and it is paid per worker.} A run of the machine on Init is 8 s of CPU in the image. On HotSpot the same run is 12.8 s with one worker, 18.4 to 21.6 s with four and 24 to 34 s with eight: C2 needs about 3.7 s to compile the machine's 800 methods (\code{\verb~|work/status/machine-integration.md~}), and until it is done every worker runs interpreted and C1 code. The image's CPU time hardly moves with the workers (7.9 / 8.1 / 8.3 s).}
+\li{\strong{Wall clock}: equal with one worker (median ratio 1.01: the JVM's compiler and collector threads run beside its one worker), 0.62 times with four workers and 0.57 with eight. Init with four workers: 2.9 s against 4.9 s; Std: 4.4 s against 6.8 s.}
+\li{\strong{Peak RSS}: 0.35 to 0.42 times the JVM's (medians; Init, four workers: 330 MB against 770 MB; Std: 450 MB against 1.26 GB). \strong{Instructions}: 0.68 to 0.82 times.}
+\li{\strong{This is the opposite of Part II's result for mathlib with the reference engine}, where HotSpot's code is better than the CE compiler's by 11 to 26 \% in CPU time and a run lasts ten minutes, so the warm-up is amortised. With the machine the runs are an order of magnitude shorter and its hot code is a few flat loops over \code{\verb~|int~} arrays, which the ahead-of-time compiler handles as well as C2: reachability, whose two heavy declarations run for seconds each (the closest thing to a long, hot run among the four), is still 0.73 to 0.88 times in the image's favour. Whether the JVM catches up on a mathlib-sized run of the machine is in section I.4.}
+}
+}
+
+\subtree{
+\title{I.3 Worker count}
+
+\p{CPU time and wall clock by worker count (minimum over the two valid repeats), and what more workers cost and buy against one worker \strong{of the same repeat} (median of the repeats, range in parentheses; the runs of a repeat are minutes apart): \code{\verb~|CPU N w / 1 w~} above 1.00 is the price in the primary metric, \code{\verb~|Wall 1 w / N w~} the speed-up. The repeats were taken at host loads of 26 to 95 (first) and 74 to 87 (second).}
+
+% <!-- BEGIN scaling:w7-machine:-:1:1,4,8 -->
+\table{
+\tr{\th{Corpus}\th{Configuration}\th{CPU s, 1 w}\th{CPU s, 4 w}\th{CPU s, 8 w}\th{Wall s, 1 w}\th{Wall s, 4 w}\th{Wall s, 8 w}\th{CPU 4 w / 1 w (median; range)}\th{CPU 8 w / 1 w (median; range)}\th{Wall 1 w / 4 w}\th{Wall 1 w / 8 w}\th{Peak RSS, 8 w}\th{Runs}}
+\tr{\td{init}\td{\code{\verb~|jvm~}}\td{12.75}\td{18.41}\td{24.30}\td{8.18}\td{4.90}\td{6.15}\td{1.57 (1.44 - 1.70)}\td{2.30 (1.91 - 2.69)}\td{1.61}\td{1.33}\td{1.18 GB}\td{2/2/2}}
+\tr{\td{init}\td{\code{\verb~|native~}}\td{7.94}\td{8.08}\td{8.32}\td{7.97}\td{2.89}\td{2.36}\td{1.02 (1.01 - 1.02)}\td{1.07 (1.04 - 1.11)}\td{2.71}\td{2.84}\td{487 MB}\td{2/2/2}}
+\tr{\td{std}\td{\code{\verb~|jvm~}}\td{17.35}\td{22.90}\td{34.17}\td{12.72}\td{6.80}\td{6.32}\td{1.40 (1.32 - 1.49)}\td{2.00 (1.97 - 2.04)}\td{1.65}\td{1.76}\td{1.24 GB}\td{2/2/2}}
+\tr{\td{std}\td{\code{\verb~|native~}}\td{13.20}\td{13.21}\td{13.82}\td{13.23}\td{4.43}\td{3.60}\td{1.01 (1.00 - 1.01)}\td{1.07 (1.05 - 1.08)}\td{2.69}\td{3.24}\td{567 MB}\td{2/2/2}}
+\tr{\td{cedar-hot-ax}\td{\code{\verb~|jvm~}}\td{7.89}\td{9.01}\td{12.26}\td{4.13}\td{2.73}\td{3.04}\td{1.23 (1.14 - 1.31)}\td{1.54 (1.47 - 1.60)}\td{1.43}\td{1.34}\td{1.10 GB}\td{2/2/2}}
+\tr{\td{cedar-hot-ax}\td{\code{\verb~|native~}}\td{3.60}\td{3.52}\td{3.84}\td{3.64}\td{1.41}\td{1.41}\td{0.98 (0.97 - 0.98)}\td{1.07 (1.07 - 1.07)}\td{2.48}\td{2.56}\td{404 MB}\td{2/2/2}}
+\tr{\td{reachability}\td{\code{\verb~|jvm~}}\td{9.51}\td{11.29}\td{11.51}\td{7.20}\td{5.31}\td{7.15}\td{1.22 (1.17 - 1.27)}\td{1.25 (1.21 - 1.29)}\td{1.34}\td{1.01}\td{1.73 GB}\td{2/2/2}}
+\tr{\td{reachability}\td{\code{\verb~|native~}}\td{8.12}\td{8.58}\td{8.38}\td{8.21}\td{5.44}\td{6.18}\td{1.06 (1.06 - 1.06)}\td{1.03 (1.03 - 1.03)}\td{1.24}\td{1.17}\td{1.89 GB}\td{2/2/2}}
+}
+% <!-- END scaling:w7-machine:-:1:1,4,8 -->
+
+\p{Reading (the image; the JVM launcher pays 1.2 to 2.7 times its one-worker CPU time for eight workers and is not a candidate):}
+
+\ul{
+\li{\strong{More workers cost CPU time although they add no work.} The image executes the same instructions at every worker count (Init: 136.6 / 137.1 / 137.2 G with 1 / 4 / 8 workers). Four workers need +0 to +3 \% CPU time against one on Init, Std and the Cedar slice (Init +1.1 / +2.5 \%, Std +0.1 / +1.4 \%, slice -1.5 / -3.2 \% in the two repeats) and eight need +4 to +11 \% (Init +4.1 / +10.7 \%, Std +4.7 / +8.4 \%, slice +6.6 / +6.9 \%): the workers share the memory system, and the machine's time is hash-consing probes and array growth (the same effect as with the reference engine, \src{rlvm-driver/README.md}). \strong{The busier the host, the dearer a worker}: on Init and Std the repeat at the higher load (75 to 86 against 26 to 56) is the dearer one.}
+\li{\strong{What they buy.} Four workers: 2.5 to 2.7 times the speed of one on Init, Std and the slice (2.8 and 3.0 on Init and Std in the quieter repeat). Eight workers: 18 to 19 \% less wall clock than four on Init and Std at their best (2.36 against 2.89 s, 3.60 against 4.43 s), nothing on the Cedar slice (1.41 s both), and reachability does not scale beyond 1.5 times at any count (two heavy declarations decide its wall clock; the scheduler's claim cut, \code{\verb~|work/status/integration.md~} "What is open").}
+\li{\strong{The gate of \src{rlvm-driver/README.md}} ("the largest N <= 6 whose CPU time exceeds that of one worker by at most 5 \%"): four workers pass on Init, Std and the slice (1.02, 1.01, 0.98) and are just above it on reachability (1.06 in both repeats); eight fail on Init, Std and the slice (1.07 each) and pass on reachability (1.03).}
+\li{\strong{Six workers} (the driver's proposal for \code{\verb~|--threads auto~}) have no valid measurement. The three runs per corpus that this series made with six workers (14:18Z to 14:20Z) are among the discarded ones: the host was at load 240 to 266 and swapping, Init with eight workers took 6.2 s of wall clock there against 2.36 s an hour earlier. For the record only, CPU seconds of those runs (minimum of three) beside the discarded third repeat's 1 / 4 / 8 workers of the same minutes: Init 8.57 (8.23 / 8.67 / 9.01), Std 14.57 (13.46 / 14.57 / 16.42), Cedar slice 3.83 (3.32 / 4.00 / 4.45), reachability 8.35 (8.43 / 8.72 / 8.74) - six cost what four cost and less than eight, on a host where four already cost +5 to +21 \% against one. That neither speaks against six nor confirms it.}
+\li{\strong{Reading under the two criteria.} CPU time first (owner note 10, in force when this was measured): four is the largest measured count at which the image's CPU time is still that of one worker; eight buy 18 \% of wall clock on two of four corpora for 4 to 11 \% more CPU time on three of them - keep \code{\verb~|--threads 4~}. Wall clock first (owner note 12, since 14:37Z): the same numbers say eight - less wall clock on Init and Std, the same on the Cedar slice, no worse on reachability within its scatter, and CPU time is only a diagnostic. \strong{The run line was left at \code{\verb~|--threads 4~} (and \code{\verb~|threads: 4~}, the CPU slots the arena reserves)}: a change needs all 230 published tests under the arena's time and memory limits with the new count (the wave-5 check ran them with four), which did not fit into this session. Six is the candidate the driver's owner proposes (with the reference engine he measured 12 to 25 \% less wall clock than with four on Init, Std and cedar, \src{rlvm-driver/README.md}); it needs a quiet host and a mathlib run with the machine to be judged (his \code{\verb~|threads-gate.sh --native --engine machine~} on mathlib held the lock from 14:21Z on). Changing it later is two numbers in \src{scripts/arena/rlvm.yaml}.}
+}
+}
+
+\subtree{
+\title{I.4 mathlib (reference engine), one run per launcher}
+
+\p{The reference engine did not change between the wave-5 check and this series (the same pipeline jars; \code{\verb~|rlvm-main~} differs only by the run-defaults plumbing of section I.8, which no engine uses), so the mathlib runs of 12:56Z and 13:03Z are the runs of this gate: one per launcher, eight workers, the \code{\verb~|-O3~} image, the same container, through \src{bench/track/track.py} (\code{\verb~|work/perf-history/mathlib.jsonl~}, note \code{\verb~|wave5-check~}; distribution \code{\verb~|work/pipeline-check/dist~}), at a host load of 9 to 14 - quieter than anything this afternoon offered (load 26 to 266).}
+
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Launcher}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Load}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm~}}\td{\strong{500.5}}\td{97.4}\td{12.85 GiB}\td{5,971 G}\td{14}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|native~}}\td{624.6}\td{120.3}\td{7.15 GiB}\td{8,533 G}\td{9}}
+\tr{\td{mathlib, \code{\verb~|-X load=pipelined~}}\td{8}\td{\code{\verb~|jvm~}}\td{\strong{501.0}}\td{73.2}\td{12.90 GiB}\td{5,895 G}\td{13}}
+\tr{\td{mathlib, \code{\verb~|-X load=pipelined~}}\td{8}\td{\code{\verb~|native~}}\td{605.2}\td{90.9}\td{6.76 GiB}\td{8,479 G}\td{13}}
+}
+
+\ul{
+\li{\strong{For the reference engine on mathlib the JVM launcher still needs less CPU time}: 0.80 times the image's (0.83 pipelined), 0.81 times the wall clock, with 5.7 GiB more memory (its heap setting). The other large corpora of the same check: navier-stokes-euler 0.82 (175.3 against 214.6 s), cslib 0.93 (125.2 / 134.1 s), con-leche 1.01 (60.2 / 59.8 s). Part II measured 0.80 to 0.89 on mathlib with this morning's jars: the picture held while the engine became twice as fast.}
+\li{\strong{What that decides: nothing for the shipped binary.} The reference engine is the fallback and the re-check engine; with the machine as primary engine it checks the inductive blocks and what the machine declines, and on every corpus it was run on to the end here the machine declines nothing (section I.6). A mathlib run of the reference engine is not what the arena will see.}
+\li{\strong{A four-worker pair} (the run line's count) was queued (\code{\verb~|queue2.sh B~}) and never reached the measurement lock; Part II section 2.3 has the four-worker pair of this morning's jars (JVM 945.8 s, image 1,068.6 s: 0.89). \strong{No mathlib run of the machine was made in this series} (it was queued as \code{\verb~|queue2.sh D~} / \code{\verb~|F~}; the acceptance run of section I.6 is not a measurement).}
+}
+}
+
+\subtree{
+\title{I.5 Heap and collector flags}
+
+\p{\strong{The image} (what ships): \code{\verb~|-O3 --gc=serial --no-fallback -R:+ExitOnOutOfMemoryError -R:MaxHeapSize=13g~}, no \code{\verb~|-march~}, no nursery flag - what \src{scripts/build.sh} and \src{scripts/arena/build.sh} build today.}
+
+\ul{
+\li{\code{\verb~|-O3~}: measured by the machine's integrator in this container two hours earlier (\code{\verb~|-O2~} against \code{\verb~|-O3~}, one worker): Init 9.61 -> 7.84 s CPU, Std 15.70 -> 12.82, Cedar slice 3.77 -> 3.21, reachability 9.15 -> 7.75 (-15 to -18 \%; an earlier pair of his series, on a busier host: Init 10.11 -> 9.08, Std 16.18 -> 14.85, slice 3.84 -> 3.59, -7 to -10 \%); reference engine Init 15.41 -> 13.82. \code{\verb~|-march=native~}: no change. It was the arena build's level already; since this wave it is \code{\verb~|build.sh~}'s default too.}
+\li{Collector: CE offers the image \code{\verb~|serial~} and \code{\verb~|epsilon~}. How much there is to collect is visible on the JVM launcher, whose runs are logged (column "Collections" in I.2; 1 GB nursery): zero to one young collection per run on Init, Std and the Cedar slice, five on reachability, never a full one, 30 to 520 ms of pauses in runs of 8 to 37 CPU-seconds. The machine's working memory is \code{\verb~|int~} arrays that live as long as a session. The image's own collections were not recorded; \code{\verb~|epsilon~} (never collect) could save at most that order of magnitude and turns a mathlib-class input into an out-of-memory risk: not built, not measured.}
+\li{Heap limit: \code{\verb~|-R:MaxHeapSize=13g~} is a limit, not a reservation - the image's RSS is what it uses (Init 250 to 490 MB, Std 330 to 570 MB, reachability 1.3 to 1.9 GB above; mathlib with the reference engine 7.15 GiB). 13 GB leaves 3 GB of the runner's 16 GB and is above the memory account's 12 GiB decline, so an input that does not fit is declined, not killed.}
+\li{Nursery (\code{\verb~|-Xmn256m~}, \code{\verb~|1g~}, \code{\verb~|2g~} against the default): queued (\code{\verb~|queue2.sh D~}), not measured - it never reached the measurement lock.}
+}
+
+\p{\strong{The JVM launcher} (not shipped; the launcher of guards and of \code{\verb~|scripts/dev.sh dist~}): flags unchanged, \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}. Part II sections 3 to 5 measured the alternatives with the reference engine (Serial against Parallel and G1: no CPU difference, more memory; C2 against Graal: none; HotSpot's own compiler thread count: 0.92 times the CPU time with eight workers; a 10 GB heap: no CPU cost). None of them can bring the JVM launcher near the image for the machine (0.37 to 0.68 above), so they were the last use planned for the lock (\code{\verb~|queue2.sh E~}) and were not measured with the machine.}
+}
+
+\subtree{
+\title{I.6 What the machine accepted in these runs}
+
+\p{The verdicts and the machine's own counters, taken outside the timed runs (\code{\verb~|work/steward/w7/accept.sh~}: the image of the measured distribution, \code{\verb~|-X engine=machine -X stats-file=...~}, four workers, on the host's efficiency cores; \code{\verb~|work/steward/w7/stats/*.json~}): on the eight corpora that ran to the end the machine decided every unit it was given and the reference engine re-checked none, so the figures of this part contain no fallback work. The mathlib run was stopped after 23 minutes on the thrashing host without a result.}
+
+\table{
+\tr{\th{Corpus}\th{Verdict}\th{Units given to the machine}\th{Accepted}\th{Rejected}\th{Declined}\th{Reference re-checks}\th{Driver disagreements}}
+\tr{\td{Init}\td{accept}\td{57,938}\td{57,938}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{Std}\td{accept}\td{100,096}\td{100,096}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{Cedar slice (\code{\verb~|cedar-hot-ax~})}\td{accept}\td{8,064}\td{8,064}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{reachability}\td{accept}\td{4,224}\td{4,224}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{cedar}\td{accept}\td{144,098}\td{144,098}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{con-leche}\td{accept}\td{36,274}\td{36,274}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{navier-stokes-euler}\td{accept}\td{124,850}\td{124,850}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{cslib}\td{accept}\td{397,608}\td{397,608}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{mathlib}\td{not run to the end in this series}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}}
+}
+
+\p{The remaining units of a file (inductive blocks, quotient declarations) are checked by the environment pass with the reference kernel, as before. All 48 valid timed runs of the matrix (and the 36 discarded ones) ended with exit status 0 (accept).}
+}
+
+\subtree{
+\title{I.7 Owner note 12: warm wall clock - what this part does not answer, and a first indication}
+
+\p{Note 12 asks every benchmark for, in this order: warm wall clock with 8 workers (pipelined), warm wall clock with 1 worker, cold wall clock of a fresh process (for information), CPU time, peak RSS, instructions; "warm" = the same process checks the same export again after a first pass. Against that:}
+
+\ul{
+\li{\strong{Everything above is the third and fourth item of that list} (cold wall clock and CPU time of a fresh process, batch load). It stays true for what the arena does - one process per export - and it no longer decides which platform is the fast one.}
+\li{\strong{The launcher cannot make a warm pass}: \code{\verb~|rlvm~} checks one export and exits. A \code{\verb~|--passes N~} (same process, per-pass wall clock and CPU time in the statistics, the passes must agree) belongs in \code{\verb~|rlvm-cli~} / \code{\verb~|rlvm-main~}; it changes the launcher's fail-closed path and could not be guarded in what was left of this session, so it is not there.}
+\li{\p{\strong{A first indication, not a measurement of record} (\code{\verb~|work/steward/w7/warm/Warm.java~}: a harness that calls \code{\verb~|RlvmChecker.checkExport~} several times in one JVM; \code{\verb~|work/steward/w7/warm/init-1w.txt~}). Machine, Init, ONE worker, the two spare performance cores (CPUs 18, 19; not the container), 14:38Z to 14:42Z at a host load of 135 to 155 - the cores were shared, so the wall clock of these runs (17 to 62 s) says nothing and only the CPU time per pass is quoted:}
+\table{
+\tr{\th{Platform}\th{Pass}\th{CPU s}}
+\tr{\td{JVM launcher's flags (C2, Serial, 6 GB heap), one process}\td{1 (cold)}\td{15.62}}
+\tr{\td{}\td{2}\td{8.49}}
+\tr{\td{}\td{3}\td{8.23}}
+\tr{\td{}\td{4}\td{7.08}}
+\tr{\td{CE native image \code{\verb~|-O3~}, fresh process}\td{-}\td{9.81}}
+\tr{\td{CE native image \code{\verb~|-O3~}, fresh process}\td{-}\td{9.41}}
+}
+\p{\strong{Once warm, HotSpot needs 0.72 to 0.87 times the image's CPU time for the same check} (passes 3 and 4 against the image's two runs in the same minutes on the same cores), where its cold pass needs 1.6 times. That is the reference engine's picture on mathlib (0.80) repeated for the machine: the JIT's steady-state code is better than the CE ahead-of-time compiler's. One corpus, one worker, disturbed cores (the image's run costs 7.94 s in the container; here contention inflated everything by about a fifth), the image's two runs made right after the JVM's passes and not interleaved with them, process CPU time including the compiler and collector threads: an indication.}}
+\li{\strong{What decides it}: warm passes of the machine in the container, 8 workers and 1, pipelined load, on Init, Std, a Cedar-level corpus and mathlib, for the JVM launcher and the image (for the image "warm" removes only page faults and table growth). If the indication holds, the JVM launcher is the faster platform by the owner's criterion, at two to three times the memory - and the arena run, a cold process, still favours the image by the numbers of section I.2. Both cannot be had from one launcher today; the machine's compiled tier (rlvm-truffle) moves the same question into the image.}
+}
+}
+
+\subtree{
+\title{I.8 What was changed, what was not measured, how to repeat}
+
+\p{\strong{Changed in this wave} (all in the pipeline owner's modules):}
+
+\ul{
+\li{\src{scripts/build.sh}: \code{\verb~|--opt~} defaults to \strong{3} (it was 2), so \code{\verb~|scripts/dev.sh dist-native~} builds the image the arena build builds (request of the machine integrator; measured by him: -10 to -18 \% CPU for the machine, about -10 \% for the reference engine; the build takes 2.5 minutes and 900 CPU-seconds instead of 1 to 2 minutes and 500). \src{scripts/arena/build.sh} has used \code{\verb~|--opt 3~} since wave 4.}
+\li{\src{scripts/build.sh}: \strong{Oracle GraalVM is used only on request} (\code{\verb~|--pgo~}; OWNER-NOTES item 11). Until today a default build made the PGO image whenever \code{\verb~|.toolchain/oracle-graalvm-25~} existed. No script downloads it. New \code{\verb~|--train-arg ARG~} passes arguments to the PGO training runs (\code{\verb~|-X engine=machine~}).}
+\li{\src{scripts/build.sh}: the shared distribution \code{\verb~|work/dist~} is \strong{versioned}: each build is installed as \code{\verb~|work/dist.d/<UTC time>-<sha256 prefix of the RLVM jars>-<jvm|native>~} and \code{\verb~|work/dist~} is a symbolic link switched by one \code{\verb~|rename(2)~}. \src{scripts/gate.sh}, \src{scripts/slice.sh}, \src{bench/track/track.py}, \code{\verb~|ladder.py~} and \src{scripts/platform-matrix.py} resolve the link once at their start. Old versions are deleted when they are neither among the newest four nor younger than 90 minutes. \code{\verb~|scripts/dev.sh dist-versions~} lists them. (The shared \code{\verb~|work/dist~} itself is still the plain directory of 12:17Z, \code{\verb~|-O2~}: the build that would have converted it was mine, ran without a host slot when the orchestrator introduced them, and was stopped; the next shared build converts it. The scheme was exercised on a scratch distribution and on a clean copy of the tree.)}
+\li{\src{scripts/gate.sh}, \code{\verb~|scripts/dev.sh dist-native~} / \code{\verb~|dist-tree~}: they take the host-wide slot of \src{bench/slot.sh} themselves (\code{\verb~|heavy~}, respectively \code{\verb~|ni~}: at most two native-image builds on the host) unless the caller already holds one; \code{\verb~|gate.sh~} runs four files at a time by default (it was 8 and 10). The orchestrator's rule of 14:32Z, after the host had run out of memory.}
+\li{\src{scripts/platform-matrix.py} finds slices (\code{\verb~|cedar-hot-ax~}); \src{scripts/platform-report.py} has the worker-scaling table (\code{\verb~|scaling:TAG~}). \src{bench/track/benchmarks.py} writes one RLVM column per engine and, since owner note 12, the cold wall clock before CPU time.}
+\li{\code{\verb~|rlvm-api~} / \code{\verb~|rlvm-main~}: \code{\verb~|EngineProvider.runDefaults(Map)~} - the primary engine may prefer run settings (the machine's session cap, request of the machine integrator); applied under the command line. No provider declares one yet, so no run changed.}
+}
+
+\p{\strong{Not changed}: the default engine (reference; the machine registers with priority 10 and its workflow raises it), the parent pom's module list, the JVM launcher's flags, the image's collector and heap limit.}
+
+\p{\strong{Not measured, and why}}
+
+\ul{
+\li{\strong{Warm passes in the container} (owner note 12; section I.7), \strong{the machine on mathlib} (either launcher), \strong{the machine on the JVM launcher beyond Std size}, and \strong{x86-64} (no such machine here).}
+\li{\strong{Oracle GraalVM PGO with the machine}: it needs three more image builds under the build lock (\code{\verb~|work/build/.lock~}), for which six builds of other agents were waiting at 13:50Z and ten at 13:53Z. Part II has the PGO image for the reference engine (small corpora: 0.82 and 0.91 times the JVM launcher's CPU time with eight workers and with one, where the CE image needs 0.92 and 1.03; mathlib +2 \% against the JVM launcher, the CE image +12 \%). It is a measurement only in any case (owner's decision: nothing that ships uses Oracle GraalVM).}
+\li{\strong{The machine's staging switches} (\code{\verb~|warm,gated,expect~}, \code{\verb~|probes~}: -3 to -9 \% CPU in \code{\verb~|work/status/machine-integration.md~}): they are the machine workflow's to turn on; the soundness review found wrong accepts under \code{\verb~|probes~} and \code{\verb~|facts~} (13:48Z) and under \code{\verb~|warm~} (14:38Z; \code{\verb~|work/status/requests.log~}, findings S-F1, S-F2, S-F4), so v0 is the configuration that could ship today.}
+\li{\strong{A quiet host, and a third repeat.} The load average was 26 to 95 during the two valid repeats; the absolute CPU times are a few percent above the wave-4 integrator's (Init, one worker: 7.94 s here, 7.77 s at load 7 to 10), the ratios inside a group are what the decision rests on. The third repeat, six workers, the nursery sizes, the JVM flags, the machine on the large corpora and the four-worker mathlib pair were all queued; after 13:50Z the host was out of memory, and the repetition (\code{\verb~|work/steward/w7/queue3.sh R~}, inside a host-wide slot as the orchestrator now requires) waited behind eight other queues for the lock and was withdrawn at 14:34Z, when it could no longer finish in this session.}
+\li{\strong{\code{\verb~|scripts/dev.sh arena-test~}} (the arena definition built and run from a clean copy in the container) was not run after the changes to \src{scripts/build.sh}: it needs the same lock. Instead: a clean copy of the tree built by \code{\verb~|scripts/build.sh --jvm-only~} with the default (versioned) distribution, and the run line of \code{\verb~|rlvm.yaml~} with \code{\verb~|bin/rlvm-jvm~} substituted on three published tests through the \code{\verb~|work/dist~} link (accept / reject / accept as expected).}
+}
+
+\p{\strong{To repeat} (about 45 minutes of container time on a host that is not thrashing):}
+
+\pre{\verb~|
+bench/slot.sh -c ni -n 2 -- scripts/build.sh --published --no-pgo --opt 3 --dist work/steward/w7/dist   # frozen distribution
+bench/slot.sh -- work/steward/w7/queue2.sh A B C D E F G   # the holds of the measurement lock (see the script)
+work/steward/w7/assemble.py                    # this part: part1.md + scripts/platform-report.py --update
+work/steward/w7/benchmarks.sh                  # docs/BENCHMARKS.md
+~}
+}
+}
+
+\subtree{
+\title{Part II - the rehearsal with the reference engine (wave 4): cold processes, by CPU time}
+
+\p{\em{Superseded as a decision by Part 0; kept for its measurements of the host JIT, the collectors and the heap sizes on cold processes of the reference engine.}}
+
+\p{Steward, wave 4, 2026-11-24. Engine: the \strong{reference engine} (\code{\verb~|-X engine=reference -X load=batch~}), the only engine in the distribution at the time. This part was the rehearsal of the platform gate with the engine that existed; its scripts are the ones Part I ran again with the machine (section 7).}
+
+\subtree{
+\title{0. Summary}
+
+\ol{
+\li{\p{\strong{Launchers} (reference engine, jars of 07:54Z).}
+\ul{
+\li{\strong{mathlib: the JVM launcher needs the least CPU time.} Eight workers, the three launchers back to back: JVM 1,057 s, Oracle PGO image 1,082 s (+2 \%), CE native image 1,187 s (+12 \%); over the day the JVM took 926 to 1,057 s in six runs and the CE image 1,168 to 1,203 s in three (no overlap). Four workers: 946 s against 1,069 s (+13 \%). One worker: 886 s against 983 s (PGO, +11 \%) and 1,112 s (CE, +26 \%). Instructions: 6.3 to 6.5 T (JVM), 7.6 T (PGO), 9.0 T (CE).}
+\li{\strong{Init, Std, cedar, reachability (12 to 55 s of CPU): within a tenth to a fifth of each other}, and the order depends on the worker count. CE image against JVM: 0.92 times the CPU time with eight workers (16 pairs), 1.03 times with one (12 pairs). PGO image: 0.82 and 0.91 times.}
+\li{\strong{Memory}: the images need a third to a half of the JVM's RSS on the small corpora; on mathlib 8.7 GiB (CE) and 8.1 GiB (PGO) against 13.0 GiB with eight workers, 4.65 and 3.9 GiB against 11.8 GiB with one.}
+}}
+\li{\strong{JVM, host JIT}: C2 against Graal makes no difference worth a flag (0.97 and 1.01 times); C1 alone costs 22 \%. More compiler threads than the launcher's two look useful with eight workers (0.92 times the CPU time on the small corpora, eight pairs, range crossing 1.0): not changed, to be measured at the gate.}
+\li{\strong{JVM, collector}: Serial, Parallel and G1 are within the noise in CPU time on the small corpora (zero to four young collections per run); Parallel and G1 need 17 to 89 \% more memory there, and on mathlib Parallel doubles the pauses and G1 has the highest RSS. Serial stays.}
+\li{\strong{JVM, heap}: the process's RSS is its heap limit, not its need (the old generation fills with dead arrays before the first full collection; neither a growing heap nor a lower \code{\verb~|MinHeapFreeRatio~} changes that). With the jars of 07:54Z the live set on mathlib with eight workers is 5.5 to 9.1 GB: a 10 GB heap passed twice at no CPU cost (10.1 GiB RSS, six full collections of 0.1 to 0.3 s instead of three), a 9 GB heap ran out of memory - the native image's 8.7 GiB was out of reach. With the jars of 10:56Z (the store of 10:33Z) the live set is 3.1 to 4.5 GB: mathlib, con-leche, cslib, navier-stokes-euler and all 230 tests pass with \strong{8 GB} (mathlib: 7.9 GiB RSS, seven full collections), which is the native image's range.}
+\li{\strong{Decisions.} \strong{No launcher default was changed.} The arena definition stays on the CE native image (description rewritten: reference engine; machine in progress); the JVM launcher keeps \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}. Reasons and what to do at the platform gate: section 6.3.}
+\li{\strong{Caveat.} The host ran at three to nine times its capacity during the series (section 1.1), and during the wave the store's owner made the reference engine about 40 \% cheaper on mathlib (jar of 11:17Z, its owner's measurement), which is not in the measured distribution. Ratios between launchers were not re-measured with it.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\ul{
+\li{\p{\strong{Distribution.} A frozen copy with the three launchers built from the same jars, \code{\verb~|work/steward/platform/dist~} (\code{\verb~|BUILD-INFO.txt~} there lists every jar with its sha256 prefix):}
+\pre{\verb~|
+scripts/build.sh --published --pgo --opt 3 --dist work/steward/platform/dist
+~}
+\table{
+\tr{\th{Launcher}\th{Configuration name}\th{What it is}}
+\tr{\td{\code{\verb~|bin/rlvm-jvm~}}\td{\code{\verb~|jvm~}}\td{the jars on HotSpot of GraalVM CE 25.5.5.0.3 (JDK 25.0.5) with the launcher's default flags: \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError -Xms13g -Xmx13g -Xmn1g~}}}
+\tr{\td{\code{\verb~|bin/rlvm~}}\td{\code{\verb~|native~}}\td{native image, GraalVM CE 25.5.5.0.3, \code{\verb~|-O3 --gc=serial -R:MaxHeapSize=13g~}, 60 MB: what \src{scripts/arena/build.sh} builds}}
+\tr{\td{\code{\verb~|bin/rlvm-pgo~}}\td{\code{\verb~|pgo~}}\td{native image, \strong{Oracle GraalVM 25.0.4}, \code{\verb~|-O3 --gc=serial~} + profile-guided optimisation, trained on \code{\verb~|init-prelude~} and \code{\verb~|init.ndjson~} with one worker, 42 MB. \strong{A measurement only}: Oracle GraalVM is under the GFTC licence, and whether the project may build with it is an open question with the project owner}}
+}
+\p{Jars: the integrator's final state of 07:35Z (driver \code{\verb~|b966222a51a9~}, ref \code{\verb~|9089b0a558f3~}, store \code{\verb~|90b8cf9432cb~}, load \code{\verb~|43a3adf4faaf~}, admit \code{\verb~|d89a73d8a715~}, inductive \code{\verb~|db8ac9802b19~}, api \code{\verb~|a956fdf3f0f4~}) with rlvm-cli \code{\verb~|f2af2657a704~} and rlvm-main \code{\verb~|080e6bcb2d6a~} of 07:54Z (public \code{\verb~|UsageException~}; no difference on the measured path). Later publications of this wave are not in it.}}
+\li{\strong{Containers.} Eight workers: \code{\verb~|bench/arena-docker.sh --arena-limits --no-network~}, 8 performance cores (Cortex-X925, CPUs 5-9, 15-17 of this 20-core aarch64 host) and 16 GB, like the arena runner (x86-64, 8 vCPU, 16 GB). One worker: a container with the two remaining performance cores (CPUs 18, 19) and 16 GB - one worker thread, the loader before it and two JIT threads fit there, and these runs could then go on while other people measured in the eight. A one-worker row is therefore not "arena-shaped" in its core count; its CPU time is what it is about.}
+\li{\strong{Units.} Peak RSS is printed in units of 2^20 and 2^30 bytes ("MB", "GB" in the tables are MiB and GiB); G instructions are 10^9.}
+\li{\p{\strong{One run} = the arena run line of \src{scripts/arena/rlvm.yaml} with the binary replaced, under \src{bench/measure.sh} (\code{\verb~|perf stat~} + GNU time around \code{\verb~|sh -c~}, exactly the arena's measurement):}
+\pre{\verb~|
+RLVM_STATUS_BASE=10 [RLVM_JAVA_OPTS='...'] DIST/bin/BINARY --threads N "$IN" -X engine=reference -X load=batch; case $? in ...
+~}
+\p{A JVM configuration other than \code{\verb~|jvm~} replaces \strong{all} VM flags through \code{\verb~|RLVM_JAVA_OPTS~}; the flags of every configuration are listed where it is used (\code{\verb~|scripts/platform-matrix.py --list~} prints all). Every JVM run also writes \code{\verb~|-Xlog:gc~} to a file; collection counts and pause totals come from it.}}
+\li{\strong{Tools.} \code{\verb~|scripts/platform-matrix.py --configs A,B,.. --corpora .. --threads .. --repeat K --tag T~} runs a matrix and appends one JSON line per run (with the complete command) to \code{\verb~|work/steward/platform/results/T.jsonl~}; \code{\verb~|scripts/platform-all.sh STEP...~} is the series as run; \code{\verb~|scripts/platform-report.py --update docs/PLATFORM.md~} regenerates every table below from the result files. GC logs: \code{\verb~|work/steward/platform/gclogs/~}.}
+\li{\strong{Interleaving and the lock.} For each repeat, corpus and worker count, every configuration runs once, back to back, in one container (a \em{group}), while the measurement lock of \src{bench/track/ladder.py} (\code{\verb~|work/perf-history/.ladder.lock~}) is held.}
+}
+
+\subtree{
+\title{1.1 The host was not quiet - how to read the numbers}
+
+\p{Sixteen agents shared the host during the whole series (unit tests, guards, mutant campaigns, other measurements, other projects' jobs). The 1-minute load average is in the last column of every table: \strong{60 to 190 on 20 cores} for most runs (08:30Z to 11:00Z), 25 to 80 for the first mathlib run of the JVM launcher (08:01Z) and for the last groups (after 11:00Z). Other processes are not confined to the cores outside the containers, and other owners' measurement containers ran in the same eight cores without the lock during several groups (recorded per group in \code{\verb~|results/T.groups.jsonl~}: among them the back-to-back mathlib group, both heap groups and the four-worker mathlib group). Consequences:}
+
+\ul{
+\li{\strong{CPU time is inflated}, by an amount that changes from minute to minute (shared caches, memory bandwidth, clock frequency under an all-core load). The same binary on the same file: mathlib on the JVM launcher took 926 s of CPU at load 26 and 1,030 to 1,057 s at load 130 to 190 (+11 to +14 \%) with instruction counts 1.4 \% apart. The figure of a row is the \strong{minimum} over its runs, the median is in parentheses.}
+\li{\strong{Compare configurations by the paired ratios}: runs of one group are minutes apart at most and saw nearly the same load. The ratio tables give the median over all groups of (configuration / reference configuration) and the range.}
+\li{\strong{Wall clock} of eight-worker runs measures the host as much as the checker: it is listed, and it is not a basis for a decision here.}
+\li{\strong{Peak RSS, collection counts, exit status and instructions} do not depend on the load.}
+}
+
+\p{For scale, on a quieter host (integration log, 07:35Z, same jars, container): Init JVM 15.1 s CPU / 12.4 s wall with one worker, 20.6 s / 3.9 s with eight; mathlib JVM 841.8 s CPU / 139.2 s wall / 13.1 GB with eight workers.}
+}
+}
+
+\subtree{
+\title{2. The three launchers}
+
+\subtree{
+\title{2.1 Init, Std, cedar, reachability - eight workers}
+
+\p{Three repeats in the order JVM, CE image, PGO image, and a fourth in the opposite order (a configuration that always runs first in its container could be at a disadvantage):}
+
+% <!-- BEGIN table:platforms -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm~}}\td{23.77 (25.88)}\td{4.60 (6.51)}\td{1.44 GB}\td{221.7 G}\td{2 / 0; 160 ms}\td{4}\td{125}}
+\tr{\td{init}\td{8}\td{\code{\verb~|native~}}\td{18.48 (20.65)}\td{4.43 (5.33)}\td{581 MB}\td{250.7 G}\td{n.r.}\td{4}\td{123}}
+\tr{\td{init}\td{8}\td{\code{\verb~|pgo~}}\td{\strong{16.91 (17.35)}}\td{3.67 (4.56)}\td{545 MB}\td{211.2 G}\td{n.r.}\td{4}\td{122}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm~}}\td{40.03 (42.03)}\td{7.68 (11.56)}\td{1.62 GB}\td{348.1 G}\td{3 / 0; 222 ms}\td{4}\td{122}}
+\tr{\td{std}\td{8}\td{\code{\verb~|native~}}\td{33.56 (38.32)}\td{6.82 (12.35)}\td{791 MB}\td{422.5 G}\td{n.r.}\td{4}\td{121}}
+\tr{\td{std}\td{8}\td{\code{\verb~|pgo~}}\td{\strong{31.36 (34.58)}}\td{6.29 (9.98)}\td{820 MB}\td{355.4 G}\td{n.r.}\td{4}\td{120}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm~}}\td{52.94 (54.20)}\td{8.91 (14.56)}\td{1.90 GB}\td{426.5 G}\td{4 / 0; 285 ms}\td{4}\td{118}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|native~}}\td{47.19 (54.20)}\td{7.98 (16.11)}\td{832 MB}\td{532.1 G}\td{n.r.}\td{4}\td{124}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|pgo~}}\td{\strong{42.06 (47.65)}}\td{7.17 (13.57)}\td{908 MB}\td{447.8 G}\td{n.r.}\td{4}\td{126}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm~}}\td{14.74 (15.85)}\td{9.30 (10.82)}\td{2.79 GB}\td{102.4 G}\td{4 / 0; 596 ms}\td{4}\td{126}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|native~}}\td{13.58 (14.69)}\td{9.44 (13.86)}\td{1.68 GB}\td{112.5 G}\td{n.r.}\td{4}\td{128}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|pgo~}}\td{\strong{12.13 (13.28)}}\td{8.97 (9.72)}\td{1.55 GB}\td{95.8 G}\td{n.r.}\td{4}\td{127}}
+}
+% <!-- END table:platforms -->
+
+\p{Paired ratios against the JVM launcher:}
+
+% <!-- BEGIN ratio:platforms:jvm -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{0.917 (0.778 - 1.032)}\td{1.018}\td{0.43}\td{1.186}\td{16}}
+\tr{\td{\code{\verb~|pgo~}}\td{0.815 (0.657 - 0.919)}\td{0.886}\td{0.46}\td{0.999}\td{16}}
+}
+% <!-- END ratio:platforms:jvm -->
+}
+
+\subtree{
+\title{2.2 The same, one worker (two-core container), three repeats}
+
+% <!-- BEGIN table:platforms-1w -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{init}\td{1}\td{\code{\verb~|jvm~}}\td{23.23 (24.24)}\td{21.25 (22.81)}\td{1.08 GB}\td{207.8 G}\td{1 / 0; 58 ms}\td{3}\td{118}}
+\tr{\td{init}\td{1}\td{\code{\verb~|native~}}\td{23.34 (23.99)}\td{23.57 (24.18)}\td{312 MB}\td{250.0 G}\td{n.r.}\td{3}\td{120}}
+\tr{\td{init}\td{1}\td{\code{\verb~|pgo~}}\td{\strong{20.79 (20.92)}}\td{21.08 (21.44)}\td{325 MB}\td{210.6 G}\td{n.r.}\td{3}\td{118}}
+\tr{\td{std}\td{1}\td{\code{\verb~|jvm~}}\td{40.02 (40.75)}\td{38.56 (39.00)}\td{1.30 GB}\td{330.1 G}\td{2 / 0; 126 ms}\td{3}\td{124}}
+\tr{\td{std}\td{1}\td{\code{\verb~|native~}}\td{43.56 (43.83)}\td{44.29 (44.43)}\td{408 MB}\td{421.5 G}\td{n.r.}\td{3}\td{123}}
+\tr{\td{std}\td{1}\td{\code{\verb~|pgo~}}\td{\strong{38.43 (38.44)}}\td{38.84 (39.02)}\td{517 MB}\td{354.4 G}\td{n.r.}\td{3}\td{121}}
+\tr{\td{cedar}\td{1}\td{\code{\verb~|jvm~}}\td{50.11 (52.64)}\td{49.81 (51.63)}\td{1.43 GB}\td{417.9 G}\td{3 / 0; 158 ms}\td{3}\td{108}}
+\tr{\td{cedar}\td{1}\td{\code{\verb~|native~}}\td{53.92 (54.31)}\td{54.78 (54.79)}\td{552 MB}\td{531.2 G}\td{n.r.}\td{3}\td{117}}
+\tr{\td{cedar}\td{1}\td{\code{\verb~|pgo~}}\td{\strong{48.25 (48.60)}}\td{48.99 (49.03)}\td{575 MB}\td{446.9 G}\td{n.r.}\td{3}\td{135}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|jvm~}}\td{13.41 (13.50)}\td{12.61 (12.87)}\td{1.95 GB}\td{96.8 G}\td{3 / 0; 425 ms}\td{3}\td{136}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|native~}}\td{13.61 (13.91)}\td{13.84 (14.17)}\td{996 MB}\td{111.8 G}\td{n.r.}\td{3}\td{134}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|pgo~}}\td{\strong{11.94 (12.15)}}\td{12.12 (12.31)}\td{940 MB}\td{94.8 G}\td{n.r.}\td{3}\td{129}}
+}
+% <!-- END table:platforms-1w -->
+
+% <!-- BEGIN ratio:platforms-1w:jvm -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{1.027 (0.986 - 1.095)}\td{1.100}\td{0.34}\td{1.231}\td{12}}
+\tr{\td{\code{\verb~|pgo~}}\td{0.913 (0.863 - 0.988)}\td{0.971}\td{0.37}\td{1.036}\td{12}}
+}
+% <!-- END ratio:platforms-1w:jvm -->
+}
+
+\subtree{
+\title{2.3 mathlib}
+
+\p{Eight workers, one group (the three runs back to back, 09:09Z to 09:26Z; another owner's container was in the same cores when the group started):}
+
+% <!-- BEGIN table:mathlib-paired -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm~}}\td{\strong{1056.8}}\td{287.0}\td{13.03 GB}\td{6,470 G}\td{85 / 3; 4.6 s}\td{1}\td{184}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|native~}}\td{1187.3}\td{337.1}\td{8.68 GB}\td{9,025 G}\td{n.r.}\td{1}\td{188}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|pgo~}}\td{1082.3}\td{326.6}\td{8.06 GB}\td{7,626 G}\td{n.r.}\td{1}\td{125}}
+}
+% <!-- END table:mathlib-paired -->
+
+% <!-- BEGIN ratio:mathlib-paired:jvm -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{1.123 (1.123 - 1.123)}\td{1.174}\td{0.67}\td{1.395}\td{1}}
+\tr{\td{\code{\verb~|pgo~}}\td{1.024 (1.024 - 1.024)}\td{1.138}\td{0.62}\td{1.179}\td{1}}
+}
+% <!-- END ratio:mathlib-paired:jvm -->
+
+\p{Earlier single runs, \strong{not} comparable with each other (the JVM run at load 26, the two images an hour later at load 119 to 135); kept for the record and for the instruction counts:}
+
+% <!-- BEGIN table:platforms-mathlib:-:-:-:plain -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm~}}\td{925.9}\td{177.9}\td{12.97 GB}\td{6,382 G}\td{84 / 3; 4.5 s}\td{1}\td{26}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|native~}}\td{1202.8}\td{340.5}\td{9.03 GB}\td{9,025 G}\td{n.r.}\td{1}\td{135}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|pgo~}}\td{1109.0}\td{412.5}\td{8.05 GB}\td{7,627 G}\td{n.r.}\td{1}\td{119}}
+}
+% <!-- END table:platforms-mathlib:-:-:-:plain -->
+
+\p{Four workers (the worker count of the arena run line):}
+
+% <!-- BEGIN table:mathlib-t4 -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{mathlib}\td{4}\td{\code{\verb~|jvm~}}\td{\strong{945.8}}\td{265.7}\td{13.03 GB}\td{6,263 G}\td{79 / 1; 3.4 s}\td{1}\td{62}}
+\tr{\td{mathlib}\td{4}\td{\code{\verb~|native~}}\td{1068.6}\td{295.4}\td{7.48 GB}\td{8,897 G}\td{n.r.}\td{1}\td{37}}
+}
+% <!-- END table:mathlib-t4 -->
+
+\p{One worker (two-core container):}
+
+% <!-- BEGIN table:platforms-mathlib-1w -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{mathlib}\td{1}\td{\code{\verb~|jvm~}}\td{\strong{885.5}}\td{886.3}\td{11.81 GB}\td{6,111 G}\td{77 / 0; 2.7 s}\td{1}\td{160}}
+\tr{\td{mathlib}\td{1}\td{\code{\verb~|native~}}\td{1111.9}\td{1124.5}\td{4.65 GB}\td{8,889 G}\td{n.r.}\td{1}\td{169}}
+\tr{\td{mathlib}\td{1}\td{\code{\verb~|pgo~}}\td{982.6}\td{997.2}\td{3.88 GB}\td{7,499 G}\td{n.r.}\td{1}\td{142}}
+}
+% <!-- END table:platforms-mathlib-1w -->
+
+% <!-- BEGIN ratio:platforms-mathlib-1w:jvm -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm~} (median; range)}\th{Wall / \code{\verb~|jvm~}}\th{Peak RSS / \code{\verb~|jvm~}}\th{Instructions / \code{\verb~|jvm~}}\th{Pairs}}
+\tr{\td{\code{\verb~|native~}}\td{1.256 (1.256 - 1.256)}\td{1.269}\td{0.39}\td{1.455}\td{1}}
+\tr{\td{\code{\verb~|pgo~}}\td{1.110 (1.110 - 1.110)}\td{1.125}\td{0.33}\td{1.227}\td{1}}
+}
+% <!-- END ratio:platforms-mathlib-1w:jvm -->
+}
+}
+
+\subtree{
+\title{3. JVM: the host JIT}
+
+% <!-- BEGIN legend:jit+jit-1w -->
+\ul{
+\li{\code{\verb~|jvm-c2~}: C2 host JIT, 2 compiler threads (= launcher default, spelled out) - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-graal~}: Graal (libgraal) host JIT, 2 compiler threads - \code{\verb~|-XX:+UseSerialGC -XX:+UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-c2-auto~}: C2 host JIT, HotSpot's own compiler thread count - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-graal-auto~}: Graal host JIT, HotSpot's own compiler thread count - \code{\verb~|-XX:+UseSerialGC -XX:+UseJVMCICompiler -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-c1~}: C1 only (no optimising host JIT) - \code{\verb~|-XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xms13g -Xmx13g -Xmn1g~}}
+}
+% <!-- END legend:jit+jit-1w -->
+
+\p{Eight workers, two repeats:}
+
+% <!-- BEGIN table:jit -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-c2~}}\td{24.25 (25.80)}\td{4.93 (5.28)}\td{1.43 GB}\td{220.5 G}\td{1 / 0; 129 ms}\td{2}\td{84}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-graal~}}\td{23.64 (24.60)}\td{4.68 (5.46)}\td{1.44 GB}\td{241.6 G}\td{2 / 0; 184 ms}\td{2}\td{83}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-c2-auto~}}\td{\strong{22.45 (22.99)}}\td{4.26 (5.19)}\td{1.51 GB}\td{214.0 G}\td{2 / 0; 194 ms}\td{2}\td{82}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-graal-auto~}}\td{23.15 (24.07)}\td{4.38 (4.91)}\td{1.52 GB}\td{249.8 G}\td{2 / 0; 208 ms}\td{2}\td{80}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-c2~}}\td{40.20 (41.15)}\td{8.34 (9.02)}\td{1.70 GB}\td{345.8 G}\td{3 / 0; 241 ms}\td{2}\td{74}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-graal~}}\td{39.00 (39.10)}\td{7.81 (9.60)}\td{1.63 GB}\td{381.8 G}\td{3 / 0; 230 ms}\td{2}\td{73}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-c2-auto~}}\td{\strong{36.18 (37.79)}}\td{7.05 (7.93)}\td{1.66 GB}\td{341.6 G}\td{3 / 0; 242 ms}\td{2}\td{72}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-graal-auto~}}\td{38.16 (38.33)}\td{7.53 (7.96)}\td{1.65 GB}\td{379.9 G}\td{3 / 0; 216 ms}\td{2}\td{73}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-c2~}}\td{56.45 (57.43)}\td{12.24 (13.35)}\td{1.79 GB}\td{436.9 G}\td{4 / 0; 296 ms}\td{2}\td{86}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-graal~}}\td{53.72 (55.30)}\td{11.42 (12.19)}\td{1.87 GB}\td{486.0 G}\td{4 / 0; 306 ms}\td{2}\td{85}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-c2-auto~}}\td{\strong{50.39 (51.27)}}\td{10.94 (11.51)}\td{1.86 GB}\td{417.1 G}\td{4 / 0; 308 ms}\td{2}\td{85}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-graal-auto~}}\td{51.16 (52.29)}\td{12.85 (13.38)}\td{1.86 GB}\td{468.8 G}\td{4 / 0; 322 ms}\td{2}\td{86}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-c2~}}\td{15.26 (15.35)}\td{8.68 (8.69)}\td{2.86 GB}\td{100.0 G}\td{4 / 0; 634 ms}\td{2}\td{79}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-graal~}}\td{16.14 (16.22)}\td{8.60 (10.44)}\td{2.74 GB}\td{117.4 G}\td{3 / 0; 395 ms}\td{2}\td{76}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-c2-auto~}}\td{16.51 (16.57)}\td{9.43 (9.64)}\td{3.10 GB}\td{104.7 G}\td{4 / 0; 645 ms}\td{2}\td{75}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-graal-auto~}}\td{\strong{14.85 (15.04)}}\td{8.57 (8.73)}\td{2.80 GB}\td{113.9 G}\td{4 / 0; 592 ms}\td{2}\td{74}}
+}
+% <!-- END table:jit -->
+
+% <!-- BEGIN ratio:jit:jvm-c2 -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm-c2~} (median; range)}\th{Wall / \code{\verb~|jvm-c2~}}\th{Peak RSS / \code{\verb~|jvm-c2~}}\th{Instructions / \code{\verb~|jvm-c2~}}\th{Pairs}}
+\tr{\td{\code{\verb~|jvm-graal~}}\td{0.972 (0.931 - 1.068)}\td{0.971}\td{1.02}\td{1.114}\td{8}}
+\tr{\td{\code{\verb~|jvm-c2-auto~}}\td{0.918 (0.821 - 1.082)}\td{0.901}\td{1.05}\td{0.986}\td{8}}
+\tr{\td{\code{\verb~|jvm-graal-auto~}}\td{0.932 (0.846 - 1.031)}\td{0.965}\td{1.04}\td{1.100}\td{8}}
+}
+% <!-- END ratio:jit:jvm-c2 -->
+
+\p{One worker (two-core container), two repeats:}
+
+% <!-- BEGIN table:jit-1w -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{init}\td{1}\td{\code{\verb~|jvm-c2~}}\td{\strong{23.16 (23.45)}}\td{21.15 (21.47)}\td{1.08 GB}\td{206.1 G}\td{1 / 0; 59 ms}\td{2}\td{128}}
+\tr{\td{init}\td{1}\td{\code{\verb~|jvm-graal~}}\td{23.62 (24.03)}\td{19.87 (20.13)}\td{1.12 GB}\td{248.6 G}\td{1 / 0; 60 ms}\td{2}\td{126}}
+\tr{\td{init}\td{1}\td{\code{\verb~|jvm-c1~}}\td{28.27 (28.45)}\td{28.57 (28.75)}\td{1.07 GB}\td{288.0 G}\td{1 / 0; 55 ms}\td{2}\td{124}}
+\tr{\td{std}\td{1}\td{\code{\verb~|jvm-c2~}}\td{40.12 (40.77)}\td{37.83 (38.41)}\td{1.30 GB}\td{330.2 G}\td{2 / 0; 138 ms}\td{2}\td{127}}
+\tr{\td{std}\td{1}\td{\code{\verb~|jvm-graal~}}\td{\strong{39.95 (40.05)}}\td{35.32 (35.45)}\td{1.34 GB}\td{387.4 G}\td{2 / 0; 127 ms}\td{2}\td{130}}
+\tr{\td{std}\td{1}\td{\code{\verb~|jvm-c1~}}\td{48.99 (49.31)}\td{49.19 (49.53)}\td{1.29 GB}\td{482.7 G}\td{2 / 0; 114 ms}\td{2}\td{144}}
+\tr{\td{cedar}\td{1}\td{\code{\verb~|jvm-c2~}}\td{\strong{48.34 (48.52)}}\td{46.45 (46.61)}\td{1.43 GB}\td{407.5 G}\td{3 / 0; 193 ms}\td{2}\td{154}}
+\tr{\td{cedar}\td{1}\td{\code{\verb~|jvm-graal~}}\td{50.49 (50.68)}\td{43.97 (44.15)}\td{1.46 GB}\td{499.1 G}\td{3 / 0; 156 ms}\td{2}\td{153}}
+\tr{\td{cedar}\td{1}\td{\code{\verb~|jvm-c1~}}\td{61.59 (62.18)}\td{61.77 (62.39)}\td{1.41 GB}\td{609.5 G}\td{3 / 0; 145 ms}\td{2}\td{154}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|jvm-c2~}}\td{13.25 (13.40)}\td{12.65 (12.97)}\td{1.95 GB}\td{98.7 G}\td{3 / 0; 308 ms}\td{2}\td{150}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|jvm-graal~}}\td{\strong{13.12 (13.15)}}\td{11.76 (12.13)}\td{1.37 GB}\td{114.6 G}\td{2 / 0; 130 ms}\td{2}\td{148}}
+\tr{\td{reachability}\td{1}\td{\code{\verb~|jvm-c1~}}\td{16.09 (16.11)}\td{16.32 (16.33)}\td{1.94 GB}\td{126.8 G}\td{3 / 0; 325 ms}\td{2}\td{144}}
+}
+% <!-- END table:jit-1w -->
+
+% <!-- BEGIN ratio:jit-1w:jvm-c2 -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm-c2~} (median; range)}\th{Wall / \code{\verb~|jvm-c2~}}\th{Peak RSS / \code{\verb~|jvm-c2~}}\th{Instructions / \code{\verb~|jvm-c2~}}\th{Pairs}}
+\tr{\td{\code{\verb~|jvm-graal~}}\td{1.008 (0.969 - 1.052)}\td{0.937}\td{1.03}\td{1.182}\td{8}}
+\tr{\td{\code{\verb~|jvm-c1~}}\td{1.217 (1.183 - 1.289)}\td{1.323}\td{0.99}\td{1.425}\td{8}}
+}
+% <!-- END ratio:jit-1w:jvm-c2 -->
+
+\p{On mathlib the host JIT variants were not measured (the host had no room left for two more groups of mathlib runs); \code{\verb~|scripts/platform-all.sh jvm-mathlib~} and \code{\verb~|jit8-1w~} are the steps for it.}
+}
+
+\subtree{
+\title{4. JVM: the collector}
+
+% <!-- BEGIN legend:gc -->
+\ul{
+\li{\code{\verb~|jvm-c2~}: C2 host JIT, 2 compiler threads (= launcher default, spelled out) - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-parallel-2~}: Parallel GC capped at 2 collector threads - \code{\verb~|-XX:+UseParallelGC -XX:ParallelGCThreads=2 -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-g1-2~}: G1 capped at 2 parallel + 1 concurrent collector threads - \code{\verb~|-XX:+UseG1GC -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1 -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-parallel-auto~}: Parallel GC, HotSpot's own thread count (8 on 8 vCPUs) - \code{\verb~|-XX:+UseParallelGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-g1-auto~}: G1, HotSpot's own thread counts (8 + 2 on 8 vCPUs) - \code{\verb~|-XX:+UseG1GC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms13g -Xmx13g -Xmn1g~}}
+}
+% <!-- END legend:gc -->
+
+\p{Init, Std, cedar, reachability, eight workers, two repeats (the collectors are judged with parallel workers, OWNER-NOTES 2):}
+
+% <!-- BEGIN table:gc -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-c2~}}\td{27.24 (27.81)}\td{6.46 (7.15)}\td{1.49 GB}\td{226.6 G}\td{2 / 0; 156 ms}\td{2}\td{72}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-parallel-2~}}\td{25.60 (25.70)}\td{5.64 (6.04)}\td{1.63 GB}\td{219.8 G}\td{2 / 0; 179 ms}\td{2}\td{72}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-g1-2~}}\td{25.35 (25.82)}\td{5.47 (6.52)}\td{1.59 GB}\td{223.2 G}\td{0 / 0; 0 ms}\td{2}\td{71}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-parallel-auto~}}\td{\strong{24.09 (25.25)}}\td{5.94 (6.21)}\td{2.48 GB}\td{217.9 G}\td{2 / 0; 179 ms}\td{2}\td{71}}
+\tr{\td{init}\td{8}\td{\code{\verb~|jvm-g1-auto~}}\td{27.04 (27.57)}\td{6.30 (6.62)}\td{1.59 GB}\td{222.2 G}\td{0 / 0; 0 ms}\td{2}\td{73}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-c2~}}\td{45.15 (45.17)}\td{10.60 (11.49)}\td{1.63 GB}\td{365.1 G}\td{3 / 0; 244 ms}\td{2}\td{86}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-parallel-2~}}\td{40.05 (42.32)}\td{8.81 (9.73)}\td{1.91 GB}\td{347.4 G}\td{3 / 0; 176 ms}\td{2}\td{86}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-g1-2~}}\td{\strong{38.68 (39.11)}}\td{8.79 (8.90)}\td{2.08 GB}\td{336.5 G}\td{1 / 0; 22 ms}\td{2}\td{84}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-parallel-auto~}}\td{40.32 (40.70)}\td{9.59 (9.74)}\td{3.39 GB}\td{344.4 G}\td{3 / 0; 297 ms}\td{2}\td{81}}
+\tr{\td{std}\td{8}\td{\code{\verb~|jvm-g1-auto~}}\td{40.38 (40.55)}\td{8.40 (9.20)}\td{2.14 GB}\td{350.8 G}\td{1 / 0; 17 ms}\td{2}\td{81}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-c2~}}\td{52.82 (53.31)}\td{12.32 (12.34)}\td{1.84 GB}\td{429.1 G}\td{4 / 0; 269 ms}\td{2}\td{79}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-parallel-2~}}\td{\strong{50.75 (52.27)}}\td{11.75 (11.97)}\td{2.09 GB}\td{421.1 G}\td{4 / 0; 248 ms}\td{2}\td{77}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-g1-2~}}\td{56.69 (57.00)}\td{12.64 (13.30)}\td{2.17 GB}\td{432.1 G}\td{2 / 0; 32 ms}\td{2}\td{76}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-parallel-auto~}}\td{51.90 (56.34)}\td{10.11 (13.77)}\td{3.74 GB}\td{431.5 G}\td{4 / 0; 356 ms}\td{2}\td{75}}
+\tr{\td{cedar}\td{8}\td{\code{\verb~|jvm-g1-auto~}}\td{54.36 (58.92)}\td{10.48 (13.44)}\td{2.22 GB}\td{438.6 G}\td{2 / 0; 30 ms}\td{2}\td{76}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-c2~}}\td{\strong{14.13 (14.72)}}\td{12.22 (12.85)}\td{2.13 GB}\td{96.3 G}\td{3 / 0; 449 ms}\td{2}\td{69}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-parallel-2~}}\td{16.46 (16.87)}\td{8.42 (9.05)}\td{2.84 GB}\td{103.4 G}\td{3 / 0; 335 ms}\td{2}\td{69}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-g1-2~}}\td{15.57 (15.76)}\td{7.30 (8.26)}\td{3.23 GB}\td{97.8 G}\td{0 / 0; 0 ms}\td{2}\td{70}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-parallel-auto~}}\td{15.84 (15.98)}\td{8.68 (11.11)}\td{4.43 GB}\td{99.6 G}\td{3 / 0; 473 ms}\td{2}\td{70}}
+\tr{\td{reachability}\td{8}\td{\code{\verb~|jvm-g1-auto~}}\td{14.17 (14.59)}\td{8.10 (8.71)}\td{2.95 GB}\td{98.1 G}\td{0 / 0; 0 ms}\td{2}\td{72}}
+}
+% <!-- END table:gc -->
+
+% <!-- BEGIN ratio:gc:jvm-c2 -->
+\table{
+\tr{\th{Configuration}\th{CPU time / \code{\verb~|jvm-c2~} (median; range)}\th{Wall / \code{\verb~|jvm-c2~}}\th{Peak RSS / \code{\verb~|jvm-c2~}}\th{Instructions / \code{\verb~|jvm-c2~}}\th{Pairs}}
+\tr{\td{\code{\verb~|jvm-parallel-2~}}\td{0.965 (0.886 - 1.165)}\td{0.848}\td{1.17}\td{0.982}\td{8}}
+\tr{\td{\code{\verb~|jvm-g1-2~}}\td{0.991 (0.857 - 1.130)}\td{0.838}\td{1.24}\td{0.992}\td{8}}
+\tr{\td{\code{\verb~|jvm-parallel-auto~}}\td{0.957 (0.884 - 1.130)}\td{0.865}\td{1.89}\td{0.997}\td{8}}
+\tr{\td{\code{\verb~|jvm-g1-auto~}}\td{0.991 (0.893 - 1.180)}\td{0.867}\td{1.23}\td{0.988}\td{8}}
+}
+% <!-- END ratio:gc:jvm-c2 -->
+
+\p{On mathlib the collectors were measured with a growing heap; they are in the heap table below (\code{\verb~|jvm-parallel-2-max-13g~}, \code{\verb~|jvm-g1-2-max-13g~}).}
+}
+
+\subtree{
+\title{5. Heap}
+
+% <!-- BEGIN legend:heap+heap2 -->
+\ul{
+\li{\code{\verb~|jvm-heap-max-13g~}: Serial, heap grows up to 13 GB, 1 GB nursery - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|jvm-heap-fixed-10g~}: Serial, fixed 10 GB heap, 1 GB nursery - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms10g -Xmx10g -Xmn1g~}}
+\li{\code{\verb~|jvm-heap-fixed-9g~}: Serial, fixed 9 GB heap, 1 GB nursery - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms9g -Xmx9g -Xmn1g~}}
+\li{\code{\verb~|jvm-g1-2-max-13g~}: G1 (2 + 1 threads), heap grows up to 13 GB - \code{\verb~|-XX:+UseG1GC -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1 -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xmx13g~}}
+\li{\code{\verb~|jvm-parallel-2-max-13g~}: Parallel GC (2 threads), heap grows up to 13 GB - \code{\verb~|-XX:+UseParallelGC -XX:ParallelGCThreads=2 -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xmx13g -Xmn1g~}}
+\li{\code{\verb~|native-max-10g~}: native image CE, -Xmx10g - \code{\verb~|-Xmx10g~}}
+\li{\code{\verb~|jvm~}: JVM launcher, its default flags - the launcher's defaults (\code{\verb~|work/steward/platform/dist/BUILD-INFO.txt~}, line \code{\verb~|jvm flags~})}
+\li{\code{\verb~|jvm-heap-track-15~}: Serial, 8 GB initial heap growing to 13 GB, 15 \% kept free after a full collection - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms8g -Xmx13g -Xmn1g -XX:MinHeapFreeRatio=15 -XX:MaxHeapFreeRatio=30~}}
+\li{\code{\verb~|jvm-heap-track-25~}: Serial, 8 GB initial heap growing to 13 GB, 25 \% kept free after a full collection - \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -Xms8g -Xmx13g -Xmn1g -XX:MinHeapFreeRatio=25 -XX:MaxHeapFreeRatio=40~}}
+}
+% <!-- END legend:heap+heap2 -->
+
+\p{mathlib, eight workers, one run each:}
+
+% <!-- BEGIN table:heap+heap2:-:-:jvm,jvm-heap-max-13g,jvm-heap-track-25,jvm-heap-track-15,jvm-heap-fixed-10g,jvm-heap-fixed-9g,jvm-g1-2-max-13g,jvm-parallel-2-max-13g,native-max-10g:plain -->
+\table{
+\tr{\th{Corpus}\th{Workers}\th{Configuration}\th{CPU s}\th{Wall s}\th{Peak RSS}\th{Instructions}\th{Collections (young / full; pause)}\th{Runs}\th{Load}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm~}}\td{1035.4}\td{266.1}\td{13.13 GB}\td{6,412 G}\td{84 / 3; 5.3 s}\td{1}\td{131}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-heap-max-13g~}}\td{1041.7}\td{358.0}\td{12.99 GB}\td{6,336 G}\td{86 / 3; 5.5 s}\td{1}\td{169}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-heap-track-25~}}\td{931.6}\td{180.3}\td{12.72 GB}\td{6,270 G}\td{85 / 4; 5.2 s}\td{1}\td{142}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-heap-track-15~}}\td{974.1}\td{187.5}\td{13.01 GB}\td{6,403 G}\td{84 / 4; 5.2 s}\td{1}\td{139}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-heap-fixed-10g~}}\td{939.6 (966.0)}\td{200.3 (221.7)}\td{10.11 GB}\td{6,361 G}\td{85 / 6; 5.1 s}\td{2}\td{172}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-heap-fixed-9g~}}\td{FAILED (exit 3)}\td{337.7}\td{9.02 GB}\td{-}\td{-}\td{1}\td{172}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-g1-2-max-13g~}}\td{989.0}\td{214.4}\td{13.24 GB}\td{6,343 G}\td{37 / 0 (+26); 680 ms}\td{1}\td{166}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|jvm-parallel-2-max-13g~}}\td{1058.6}\td{320.8}\td{13.02 GB}\td{6,405 G}\td{155 / 4; 10.4 s}\td{1}\td{134}}
+\tr{\td{mathlib}\td{8}\td{\code{\verb~|native-max-10g~}}\td{1168.2}\td{291.1}\td{7.93 GB}\td{9,030 G}\td{n.r.}\td{1}\td{112}}
+}
+% <!-- END table:heap+heap2:-:-:jvm,jvm-heap-max-13g,jvm-heap-track-25,jvm-heap-track-15,jvm-heap-fixed-10g,jvm-heap-fixed-9g,jvm-g1-2-max-13g,jvm-parallel-2-max-13g,native-max-10g:plain -->
+
+\p{What the GC logs say (mathlib, eight workers, Serial collector):}
+
+\ul{
+\li{\strong{The live set.} After a full collection the heap holds 4.1 to 4.4 GB at the end of the load (the two 10 GB runs, whose first full collection falls there) and 5.5 to 9.1 GB while eight workers check (42 full collections in nine Serial runs; above 8 GB four times: 8.1, 8.1, 8.7 and 9.1 GB, in four different runs). With one worker the native image's whole RSS is 4.65 GiB, with eight 8.7 GiB: about half a gigabyte of reachable arrays per worker comes on top of the store. The driver's memory account of such a run reported 3.9 GB (integration log): the rest is array capacity that is allocated and not in use, and worker memory outside the account - a figure for the store's and the driver's owners (the driver's jar of 09:39Z counts allocated capacity and gives memory back; it is not in the measured distribution), not something a VM flag changes.}
+\li{\strong{RSS equals the heap limit.} The process touches the whole heap whatever the live set is: young collections promote dead arrays, and the Serial collector expands the old generation up to \code{\verb~|-Xmx~} before it runs its first full collection. So \code{\verb~|-Xms13g -Xmx13g~} (today), \code{\verb~|-Xmx13g~} alone (\code{\verb~|jvm-heap-max-13g~}) and a lower \code{\verb~|MinHeapFreeRatio~} (\code{\verb~|jvm-heap-track-15~}, \code{\verb~|-25~}: full collections at 87 s, 110 s, 131 s, each from 12.6 to 13.0 GB) all end at 13.0 to 13.1 GiB. With \strong{one} worker the JVM reaches 11.8 GiB without a single full collection, where the native image needs 4.65 GiB. The only setting that lowers the peak is the limit itself.}
+\li{\strong{10 GB was enough twice, 9 GB is not.} \code{\verb~|-Xms10g -Xmx10g~}: accepted in both runs, 10.1 GiB RSS, six full collections instead of three, 0.09 to 0.34 s each (1.3 s per run), CPU time inside the spread of the 13 GB runs (940 and 992 s against 926 to 1,057 s). \code{\verb~|-Xms9g -Xmx9g~}: \code{\verb~|OutOfMemoryError~} after 337 s (exit status 3; ten full collections, the last two left 7.7 GB of the 8 GB old generation in use and an array did not fit). The 9.1 GB live set of the \code{\verb~|jvm-heap-track-25~} run would not have fitted into the 9 GB old generation of a 10 GB heap either.}
+\li{\strong{A full collection is cheap here} (0.07 to 0.47 s for 4 to 9 GB of live primitive arrays: nothing to trace, little to move), which is why a smaller heap costs no measurable CPU time. Young collections: 81 to 86 per run, 3.8 to 4.8 s in total, whatever the heap size.}
+\li{\strong{Other collectors on mathlib.} Parallel (2 threads): 155 young and 4 full collections, 10.4 s of pauses, same RSS, CPU time at the upper end of the Serial runs. G1 (2 + 1 threads): 0.7 s of pauses, no full collection, wall clock among the best of the hour - and 13.2 GiB RSS, the highest of all: it lets the heap fill before it reclaims the dead humongous arrays. Neither lowers RSS or CPU time.}
+\li{\strong{The native image} needs 8.7 to 9.0 GiB with its default 13 GB limit and 7.9 GiB with \code{\verb~|-Xmx10g~} (same CPU time).}
+}
+
+\p{So, with the measured distribution (jars of 07:54Z): the smallest heap that did not cost CPU time on mathlib with eight workers is 10 GB (10.1 GiB RSS), and it has no margin: 9 GB fails, and the peaks of the live set move with the schedule (up to 9.1 GB seen, which a 10 GB heap cannot hold); a heap that is safe for every schedule seen needs 11 GB or more, and the native image's 8.7 to 9.4 GiB cannot be reached.}
+
+\subtree{
+\title{5.1 The same question with the jars of 10:56Z}
+
+\p{During the wave the store's owner published a store whose overlays give memory back (10:33Z) and the driver's owner a memory account of allocated capacity with give-back (09:39Z). The store's owner reported mathlib accepted with \code{\verb~|-Xms8g -Xmx8g -Xmn1g~} at 8.24 GB RSS (requests.log, 11:00Z). Checked here with the distribution frozen at 10:56Z (\code{\verb~|work/steward/platform/dist-1100~}: store \code{\verb~|720f505913d7~}, driver \code{\verb~|d8bebed464b5~}, ref \code{\verb~|85ed3ee7a85a~}, admit \code{\verb~|8d7092222f70~}, load \code{\verb~|30617170f7a3~}), JVM launcher, Serial, eight workers. These runs were made on the \strong{host} (efficiency cores and CPUs 18, 19, beside other people's jobs, because the container's cores were taken): they are pass / fail, RSS and GC-log results, \strong{not timings}.}
+
+\table{
+\tr{\th{Input}\th{Heap}\th{Result}\th{Peak RSS}\th{Collections (young / full)}\th{Live after a full collection}}
+\tr{\td{mathlib}\td{\code{\verb~|-Xms10g -Xmx10g -Xmn1g~}}\td{accept}\td{10.02 GiB}\td{132 / 4}\td{3.2 to 4.4 GB}}
+\tr{\td{mathlib}\td{\code{\verb~|-Xms8g -Xmx8g -Xmn1g~}}\td{accept}\td{7.86 GiB}\td{126 / 7 (0.04 to 0.38 s each, 1.2 s)}\td{3.1 to 4.5 GB}}
+\tr{\td{con-leche}\td{8 / 10 / 13 GB}\td{accept}\td{7.41 / 7.29 / 7.28 GiB}\td{-}\td{-}}
+\tr{\td{cslib}\td{8 / 10 / 13 GB}\td{accept}\td{3.73 / 3.40 / 3.48 GiB}\td{-}\td{-}}
+\tr{\td{navier-stokes-euler}\td{8 / 10 / 13 GB}\td{accept}\td{2.50 / 2.36 / 2.48 GiB}\td{-}\td{-}}
+\tr{\td{all 230 published tests (one worker)}\td{8 GB and 10 GB}\td{230 / 230 correct, 0 declined (verdict runs)}\td{-}\td{-}\td{-}}
+}
+
+\p{(\code{\verb~|work/logs/steward/heap-current-jars.log~}, \code{\verb~|heap-current-jars-mathlib.log~}, \code{\verb~|work/steward/slice-all-heap-8g.md~}, \code{\verb~|slice-all-heap-10g.md~}, GC logs \code{\verb~|work/steward/platform/gclogs/host-current-jars-*~}.) con-leche is the input with the largest need: 7.3 GiB whatever the limit (one declaration, unit 24018).}
+
+\p{\strong{Answer to the two questions of the task.} The smallest heap that costs no CPU time: 10 GB with the jars of this morning (no margin), 8 GB with the jars of 10:56Z (everything above passes; the extra full collections cost about a second on mathlib). The native image's RSS (8.7 to 9.4 GiB on mathlib): out of reach this morning, reached with \code{\verb~|-Xmx8g~} now (7.9 GiB). \strong{The default was not lowered}: the smallest safe heap moved by 2 GB within three hours as the store changed, it will move again when the machine is the engine, an \code{\verb~|OutOfMemoryError~} is a lost verdict while RSS is not ranked, and with 13 GB the process stays below 13.2 GiB on a 16 GB runner. The setting to take to the platform gate is \code{\verb~|-Xms10g -Xmx10g -Xmn1g~}, verified against the engine that is shipped then.}
+}
+}
+
+\subtree{
+\title{6. Reading and recommendation}
+
+\subtree{
+\title{6.1 Launchers}
+
+\ul{
+\li{\strong{mathlib decides for the JVM launcher on CPU time.} Eight workers, back to back: JVM 1,057 s, PGO image 1,082 s (+2 \%), CE image 1,187 s (+12 \%). Over the whole day the JVM launcher with a 13 GB Serial heap took 926 to 1,057 s in six eight-worker runs (940 and 992 s with a 10 GB heap) and the CE image 1,168 to 1,203 s in three: the two ranges do not overlap, at any load. One worker: 886 s against 983 s (PGO, +11 \%) and 1,112 s (CE, +26 \%). Instruction counts, which do not depend on the load: 6.3 to 6.5 T against 7.6 T and 9.0 T (CE: +41 \%). This is decision 12 of ARCHITECTURE.md ("the JIT produces better code than the CE AOT compiler") measured on the real pipeline: the advantage is 11 to 26 \% in CPU time for the reference engine, and it is larger with one worker than with eight, where the JVM's own threads (JIT, collector) and its warm-up are multiplied.}
+\li{\strong{On the small corpora the three are within a tenth to a fifth of each other}, and the order turns around with the worker count: the CE image needs 0.92 times the JVM's CPU time with eight workers (median of 16 pairs; the JVM warms up eight threads at once and compiles while they run) and 1.03 times with one. The PGO image needs 0.82 and 0.91 times. A run of 15 to 55 s is where warm-up and steady state balance for this engine. The order of the runs inside a group is not what makes the difference: with the JVM first the medians are 0.93 and 0.83 (12 pairs), with the JVM last 0.86 and 0.78 (4 pairs, at a lower host load).}
+\li{\strong{Four workers on mathlib} (the arena run line's count): JVM 946 s CPU / 266 s wall / 13.0 GiB, CE image 1,069 s (+13 \%) / 295 s / 7.5 GiB.}
+\li{\strong{Memory is the image's side}: a third to a half of the JVM's RSS on the small corpora; on mathlib 8.7 GiB (CE) and 8.1 GiB (PGO) against 13.0 GiB, and 4.65 and 3.9 GiB against 11.8 GiB with one worker. Section 5: with these jars the JVM cannot go below about 10 GiB on mathlib with eight workers; with the store of 10:33Z it can (7.9 GiB with an 8 GB heap).}
+\li{\strong{PGO} is the best of both where it was trained (Init) and close to the JVM on mathlib with eight workers, at the image's memory. It needs Oracle GraalVM (GFTC licence): not a candidate until the project owner has decided; the numbers are here so that the decision has them.}
+\li{The 230 small tests are not ranked and have no tight limits; the image answers them in milliseconds, the JVM launcher in 0.2 to 0.4 s each. \code{\verb~|perf/app-lam~}, the test closest to its limit, is the other way round: 9.3 s on the JVM launcher against 16 s for the image (integration log).}
+}
+}
+
+\subtree{
+\title{6.2 JVM flags}
+
+\ul{
+\li{\strong{Host JIT.} Graal (libgraal) instead of C2 as the JVM's own compiler changes little: 0.97 times C2's CPU time with eight workers (eight pairs, range 0.93 to 1.07) and 1.01 with one (eight pairs, 0.97 to 1.05), with 11 to 18 \% more instructions. C1 alone costs 22 \% more CPU time (one worker). \strong{C2 stays.} The number of compiler threads is the one flag that showed an effect: with HotSpot's own choice (four on eight CPUs) instead of the launcher's \code{\verb~|-XX:CICompilerCount=2~}, eight workers leave the interpreter and the C1 code earlier, and the run needs 0.92 times the CPU time and 0.90 times the wall clock (median of eight pairs; Init, Std and cedar 7 to 11 \% less in both repeats, reachability 8 \% more; range 0.82 to 1.08). The flag dates from the time when instructions were the target ("compiler threads are billed", \src{scripts/build.sh}); by CPU time with parallel workers it looks wrong for runs of this size. \strong{Not changed today}: eight pairs on a loaded host with a range that crosses 1.0 are not unambiguous, the one-worker case and mathlib were not measured, and the JVM launcher is not the shipped binary. It is the first thing to measure at the gate.}
+\li{\strong{Collector.} On Init, Std, cedar and reachability with eight workers a run sees zero to four young collections and no full one, whatever the collector (the nursery is 1 GB; G1 often collects nothing at all), so the collector has little to decide: Parallel with two threads needs 0.97 times Serial's CPU time (median of eight pairs, range 0.89 to 1.17), G1 with 2 + 1 threads 0.99 (0.86 to 1.13), the uncapped variants 0.96 and 0.99 - ranges that are the noise of this host. Every alternative needs more memory: +17 \% RSS (Parallel, two threads), +23 to +24 \% (G1), +89 \% (Parallel uncapped: eight collector threads' buffers and an adaptive nursery). On mathlib (section 5) Parallel doubles the collections and the pause time, and G1 has the highest RSS of all configurations. \strong{Serial stays.} (The wall-clock ratios of that table, 0.84 to 0.87 for all four alternatives alike, are not explained by the pause totals, which are a few hundred milliseconds either way; the Serial configuration ran first in every group. The launcher comparison, repeated in both orders, shows no advantage of a later position, so this stays unexplained and is not used.)}
+\li{\strong{Heap.} Section 5. \code{\verb~|-Xms13g -Xmx13g -Xmn1g~} stays for now: it is the limit under which no schedule of any jar set of today ran out of memory, and the process cannot grow beyond about 13.2 GiB with it. \code{\verb~|-Xms10g -Xmx10g -Xmn1g~} is the candidate for the gate (no CPU cost; 2 GB above what today's jars need), 8 GB the floor with today's jars.}
+}
+}
+
+\subtree{
+\title{6.3 Recommendation}
+
+\ol{
+\li{\strong{Do not switch the arena definition now; switch it at the platform gate if the picture holds.} The definition keeps the CE native image. For mathlib-class inputs the JVM launcher is the faster platform for the reference engine by a margin that the noise of this host does not explain away (non-overlapping ranges, 11 to 26 \%, instructions 29 \% lower), and by the project's order of criteria (CPU time, wall clock, memory) it would be the one to ship for mathlib. What speaks against switching today: (a) the binding gate is defined for the machine (RECONCILIATION section 3: "run when the machine first accepts Init"), whose balance of compiled code against substitution and interning is a different one - the reference engine is not what will be submitted; (b) every number here is aarch64 on a host at five to nine times its capacity; the runner is x86-64 and quiet; (c) the measured distribution is this morning's - the store published at 11:17Z makes the reference engine about 40 \% cheaper on mathlib (its owner's measurement), and nobody has measured how the launchers compare with it; (d) the JVM's 13 GiB on a 16 GB runner leaves less room than the image's 9 GiB (the one arena failure on record that was a kill by the VM, rpylean, exit 137, happened at 14.65 GB, docs/research/01), and the heap that brings the JVM to 8 to 10 GiB is safe only since this morning's store change (section 5.1); (e) \src{bench/rlvm/run.sh} (not the steward's) finds the binary in the run line by the text \code{\verb~|work/dist/bin/rlvm ~} and would need a change with it. The switch itself is one word in \src{scripts/arena/rlvm.yaml} (\code{\verb~|bin/rlvm~} to \code{\verb~|bin/rlvm-jvm~}; the build step already produces both).}
+\li{\strong{Re-run this series when the machine passes its gates}, with the machine as the engine (\code{\verb~|RLVM_PLATFORM_ENGINE=machine~}), on a quiet host, mathlib three times per launcher, and once on an x86-64 machine: \src{scripts/platform-all.sh} + \code{\verb~|scripts/platform-report.py --update docs/PLATFORM.md~} (section 7). Decide then by CPU time, wall clock, memory, in that order.}
+\li{\strong{Until then, measure and guard on the JVM launcher} (what \code{\verb~|scripts/dev.sh dist~} builds in four seconds; lowest CPU time on the large corpora) and keep the image for the arena definition and the small tests.}
+\li{\strong{Memory is the engine's problem before it is the platform's.} This morning: 4 GB of store plus half a gigabyte per worker of reachable arrays, of which the memory account saw 3.9 GB; no heap flag brought the JVM below 10 GiB. After the store's change of 10:33Z: 3.1 to 4.5 GB live, and 8 GB of heap are enough. The heap limit only decides how much dead memory the process keeps.}
+}
+}
+}
+
+\subtree{
+\title{7. What was changed, what was not, and how to repeat this}
+
+\p{\strong{Launcher defaults: none was changed.} Not the launcher of the arena definition (CE native image, \code{\verb~|--threads 4~}), not the JVM launcher's flags (\src{scripts/build.sh}: Serial, C2, two compiler threads, \code{\verb~|-Xms13g -Xmx13g -Xmn1g~}), not the image's (\code{\verb~|-O2~} for \code{\verb~|dev.sh dist-native~}, \code{\verb~|-O3~} for the arena build, \code{\verb~|--gc=serial~}, \code{\verb~|-R:MaxHeapSize=13g~}). The candidates for a change at the platform gate, in the order of the evidence for them: the JVM launcher for mathlib-class inputs (6.3), a 10 GB heap for it (5.1), HotSpot's own compiler thread count (6.2).}
+
+\p{Changed in the tools (all in \code{\verb~|scripts/~}, the steward's):}
+
+\ul{
+\li{\code{\verb~|scripts/build.sh --published --pgo~} works: the Oracle variant compiles \code{\verb~|rlvm-cli~} from the snapshot as well, so that its Truffle jars follow the Oracle GraalVM's version (it used to pick the CE Truffle jars through the published \code{\verb~|rlvm-cli~} pom, and \code{\verb~|native-image~} failed in \code{\verb~|TruffleBaseFeature~}). The verification of every launcher now also checks the usage status (64).}
+\li{New: \src{scripts/platform-matrix.py} (the matrix; \code{\verb~|--list~} for the configurations, \code{\verb~|--cpuset~} for the one-worker container, records the host load and other containers on its CPUs, stops its container when killed), \src{scripts/platform-all.sh} (the series), \src{scripts/platform-report.py} (the tables of this file; \code{\verb~|--update docs/PLATFORM.md~}). \code{\verb~|scripts/dev.sh platform ...~} and \code{\verb~|platform-report~}.}
+\li{\src{scripts/arena/rlvm.yaml}: description and state comment rewritten (reference engine; the machine is in progress and is not in the binary); the run line is unchanged. \src{scripts/arena/test-in-docker.sh} holds the measurement lock while it builds and runs. \code{\verb~|scripts/dev.sh arena-test --reuse --strict~} passes with the tree of 10:26Z (work/status/steward.log).}
+}
+
+\p{Not measured, and why:}
+
+\ul{
+\li{\strong{x86-64.} No such machine here. The baselines document (docs/research/12) has aarch64 / x86-64 ratios for other checkers, none for HotSpot against a native image.}
+\li{\strong{A quiet host.} See 1.1. The absolute CPU times are 10 to 25 \% above what the same binaries need on an idle host; the ratios between configurations of one group are the result.}
+\li{\strong{\code{\verb~|-march=native~}} for the image (ARCHITECTURE 7.5 calls it admissible), \strong{\code{\verb~|-O2~} against \code{\verb~|-O3~}} (the integration log's \code{\verb~|-O2~} image needed 10,207 G instructions on mathlib, the \code{\verb~|-O3~} image here 9,025 G: -12 \%; no CPU-time pair), \strong{the epsilon collector} and \strong{G1 for the image} (Oracle only): each needs another image build of 700 CPU-seconds, which this host could not give today.}
+\li{\strong{ZGC / Shenandoah} on the JVM: concurrent collectors could hold the heap near the live set at the price of collector threads; one mathlib run each would tell.}
+\li{\strong{Three repeats of mathlib per launcher} (ARCHITECTURE 7.1 asks for three at the gate): one back-to-back group plus the single runs listed; the heap and collector rows are single runs.}
+\li{\strong{Four workers} on the small corpora, and the default worker count itself: the driver's owner measures that (\src{rlvm-driver/bin/threads-gate.sh}).}
+}
+
+\p{To repeat everything (about three hours of an idle host):}
+
+\pre{\verb~|
+scripts/build.sh --published --pgo --opt 3 --dist work/steward/platform/dist              # frozen distribution
+scripts/platform-all.sh small8 mathlib8 heap heap2 jit8 jit8-1w gc8 mathlib4 jvm-mathlib  # arena-shaped container
+scripts/platform-all.sh small1 jit1 mathlib1                                              # one worker, CPUs 18,19
+scripts/platform-report.py --update docs/PLATFORM.md                                      # the tables
+~}
+
+\p{With the machine: \code{\verb~|RLVM_PLATFORM_ENGINE=machine scripts/platform-all.sh ...~} (the machine's jar must be in the distribution, i.e. the module in the parent pom; for the JVM launcher alone \code{\verb~|RLVM_EXTRA_CP~} is enough). On a host with other core numbers: \code{\verb~|RLVM_SPARE_CPUS=a,b~} for the one-worker container.}
+}
+}
