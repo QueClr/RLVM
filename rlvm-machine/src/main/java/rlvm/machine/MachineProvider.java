@@ -39,14 +39,18 @@ import rlvm.api.EngineProvider;
  * machine.memocheck.budget=N       tick budget of one re-computation (default 65536)
  * </pre>
  *
- * <p>{@link #priority()} is 10: the machine is NOT the default engine of a distribution that contains it; it is
- * selected with {@code -X engine=machine}, and the reference engine is the default and the re-check engine (every
- * rejection and every decline of the machine is decided by it). It was 100 =
- * {@code Engines.DEFAULT_ENGINE_MIN_PRIORITY} (the default engine) from the integration of wave 6 (2026-11-24 19:41Z;
- * gates in {@code rlvm-machine/SWITCHES.md} and {@code work/status/machine-integration.md}) until the orchestrator
- * took it back the same day at 20:28Z: the machine accepts exports the official checker rejects (findings E1-F1 ..
- * E1-F7 and S3-F1 .. S3-F6 of 2026-11-24; E1-F1 .. F6 are fixed, {@code NOTES-M5.md}; the open classes are listed in
- * {@code docs/design/review/official-divergence.md}). The priority goes back to 100 only as a publication of its own.
+ * <p>{@link #priority()} is 100 = {@code Engines.DEFAULT_ENGINE_MIN_PRIORITY}: THE MACHINE IS THE DEFAULT ENGINE of a
+ * distribution that contains it (since 2026-11-25, INT7; the contract of the default configuration is owner note 13,
+ * the "practical" policy: never a statement that is not derivable; the official verdict on every real input;
+ * everything the official checker accepts is accepted; kind T accepts are tolerated and documented,
+ * {@code docs/design/review/official-divergence.md}). The reference engine re-checks every rejection of the machine
+ * and decides every unit it declines; {@code -X engine=reference} or {@code -X policy=strict} runs the reference
+ * engine alone (the strict mode). History: 100 from the integration of wave 6 (2026-11-24 19:41Z) until the
+ * orchestrator took it back the same day at 20:28Z because the machine accepted exports the official checker
+ * rejects (findings E1-F1 .. E1-F7, S3-F1 .. S3-F6; E1-F1 .. F6 are fixed, {@code NOTES-M5.md}; the others are kind T);
+ * back to 100 after the adversarial pass of reviewer S3 on the default set with {@code eager} and the two shortcuts
+ * (no kind F; {@code docs/design/review/soundness-default-set.md} section 10), the hostile suite with kinds (1,196
+ * rows), and the gates of {@code rlvm-machine/SWITCHES.md}.
  */
 public final class MachineProvider implements EngineProvider {
 
@@ -85,12 +89,9 @@ public final class MachineProvider implements EngineProvider {
 
     @Override
     public int priority() {
-        // 10 = not the default engine. It was 100 (Engines.DEFAULT_ENGINE_MIN_PRIORITY, the default engine)
-        // from 2026-11-24T19:41Z to 20:35Z; set back by the orchestrator because of the wrong accepts
-        // E1-F1 .. E1-F4 (INFER types a bound variable by what its slot holds, not by the binder's
-        // declared type; work/status/requests.log 20:10Z, 20:19Z, 20:25Z). Back to 100 when they are
-        // closed and gated.
-        return 10;
+        // 100 = Engines.DEFAULT_ENGINE_MIN_PRIORITY: the default engine (the class comment has the history and the
+        // evidence; it was 10 from 2026-11-24T20:28Z to 2026-11-25).
+        return 100;
     }
 
     @Override

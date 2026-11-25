@@ -1,19 +1,18 @@
 # rlvm-machine - switches and the default configuration (the ONE list)
 
-> **STATE, 2026-11-24T21:00Z: THE MACHINE IS NOT THE DEFAULT ENGINE.** It was from 19:41Z to 20:35Z (the
-> integration described below) and was taken back by the orchestrator (`MachineProvider.priority()` = 10, jar
-> `15cb3777e598`): E1's hostile exports (`work/e1/exports/e1-*.ndjson`, 67 exports with official verdicts)
-> show a family of WRONG ACCEPTS against the official checker, **E1-F1 .. E1-F5**, three of them in the
-> generic tier v0: a bound variable is typed by what its environment slot holds (the let value, the argument of
-> a re-inferred beta redex, the other side's comparison variable) or an expected type is kept as the lambda's
-> own, and such a type is only CONVERTIBLE with the declared one - the official relation is not transitive
-> (`work/status/requests.log` 20:10Z - 20:36Z; E1's patch for F1: `work/e1/patches/let/`, design for F2 - F5:
-> `work/e1/patches/E1-F2-F5-design.md`). None of the gates below could see it: they compare the machine with the
-> reference engine on real corpora and mutants, where the two types are the same, and package S's 329 exports
-> have no row of this shape. Everything below is the state of the machine as an engine that runs with
-> `-X engine=machine`: its default SWITCH SET, cap and bounds stand, and so do the measurements. The machine
-> becomes the default engine again when E1-F1 .. F5 are fixed, E1's rows are strict rows of the hostile suite,
-> and the gates of this file have been run again.
+> **STATE, 2026-11-25: THE MACHINE IS THE DEFAULT ENGINE** (`MachineProvider.priority()` = 100) with the default
+> switch set of 2026-11-25 (the set of wave 6 + `eager,skipargs,congruence`), under the owner's "practical" policy
+> (`docs/design/OWNER-NOTES.md` note 13): never a statement that is not derivable; the official verdict on every
+> real input; everything the official checker accepts is accepted (the reference engine re-checks every rejection
+> and decides every decline); kind T accepts are tolerated and documented
+> (`docs/design/review/official-divergence.md`). A run that means the reference engine says `-X engine=reference` or
+> `-X policy=strict`. History: the machine was the default engine from 2026-11-24T19:41Z to 20:35Z (integration of
+> wave 6) and was taken back because of the wrong accepts E1-F1 .. E1-F5 against the official checker; E1-F1 .. F6
+> are fixed (`NOTES-M5.md`), the remaining classes are kind T. Evidence for the switch back: the adversarial pass of
+> reviewer S3 on exactly this set (no kind F; `docs/design/review/soundness-default-set.md` section 10), the hostile
+> suite with kinds (1,196 rows; `NOTES-S.md`), the gates of the section "The default set of 2026-11-25", and the
+> steward's gate on a machine-default distribution (`scripts/gate.sh --defaults --corpus all --hostile`: 230 / 230;
+> 17,775 mutants SOUNDNESS 0 / COMPLETENESS 0; hostile 1,196 rows: 0 wrong accept, 0 wrong reject).
 
 Every optimisation of the machine that changes what is computed sits behind a staging switch
 (`Op.SW_*`, `Machine.sw`, `m.on(Op.SW_X)`); a strict engine (`EngineConfig.strict`, the driver's re-check
@@ -52,7 +51,7 @@ README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.ma
 
 | What | Default | Decided by |
 |---|---|---|
-| engine | **the reference engine** (`MachineProvider.priority()` = 10 since 20:35Z; 100 = the default engine from 19:41Z to 20:35Z). `-X engine=machine` runs the machine as primary engine: the reference engine then re-checks every rejection and decides every unit the machine declines | NOT the machine while E1-F1 .. E1-F5 are open (the note at the top); the gates below and step 4 of the integration (eight corpora, DiffEngine) were green |
+| engine | **the machine** (`MachineProvider.priority()` = 100 since 2026-11-25; it was 10 from 2026-11-24T20:35Z, and 100 from 19:41Z to 20:35Z). The reference engine re-checks every rejection and decides every unit the machine declines; `-X engine=reference` / `-X policy=strict` run the reference engine alone | the gates of "The default set of 2026-11-25", S3's adversarial pass, the steward's gate on a machine-default distribution |
 | switch set `Op.SW_DEFAULT` | **`warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same`** (`Op.SW_WAVE6`, the set of 2026-11-24) **+ `eager,skipargs,congruence`** (2026-11-25; `skipargs` brings `facts`, `congruence` brings `probes`; with the probe budget `-X machine.eager-probe` = 2^22 and the cap `-X machine.cong-spend` = 2^18): section "The default set of 2026-11-25" | gates and measurements below, one line per switch in "Named switches" |
 | session cap `MachineEngine.DEFAULT_SESSION_CAP` | **1 MiB** (`-X machine.session-kib=1024`) | section "Sessions": 512 KiB and 1 MiB are equal within 2 % everywhere, 2 and 4 MiB cost 3-4 % CPU and wall clock on mathlib |
 | host depth bound `Op.HOST_DEPTH` | **128** | 512 and 2048 measured: no gain (section "Host depth bound") |

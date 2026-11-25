@@ -21,11 +21,12 @@ scripts/machine-sandbox.sh publish M3                      # your files into the
 
 ## Running the machine
 
-The machine is NOT the default engine (`MachineProvider.priority()` is 10; the launcher's default needs
-100 = `Engines.DEFAULT_ENGINE_MIN_PRIORITY`): name it. It was the default from 2026-11-24T19:41Z to 20:35Z
-(integration of wave 6) and was taken back because of the wrong accepts E1-F1 .. E1-F5 against the official
-checker (`SWITCHES.md`, the note at its top). With `-X engine=machine` it runs its default switch set of
-`SWITCHES.md` (since 2026-11-25: the set of wave 6 + `eager,skipargs,congruence`), the reference engine re-checks every rejection and decides what the machine declines;
+The machine IS the default engine since 2026-11-25 (`MachineProvider.priority()` is 100 =
+`Engines.DEFAULT_ENGINE_MIN_PRIORITY`; `SWITCHES.md`, the note at its top, has the contract and the evidence; it was
+the default from 2026-11-24T19:41Z to 20:35Z and was taken back until the wrong accepts E1-F1 .. E1-F6 were fixed).
+It runs its default switch set of `SWITCHES.md` (the set of wave 6 + `eager,skipargs,congruence`), the reference
+engine re-checks every rejection and decides what the machine declines; `-X engine=reference` or `-X policy=strict`
+runs the reference engine alone;
 `-X machine.switches=none` is the generic tier v0.
 
 ```

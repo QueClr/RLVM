@@ -50,7 +50,7 @@ class M6FacadeTest {
     void theProviderTakesItsSettingsFromTheCommandLine() {
         MachineProvider p = new MachineProvider();
         assertTrue(p.runDefaults(new java.util.HashMap<>()).isEmpty(), "the machine caps its sessions itself: no driver setting is needed");
-        assertEquals(10, p.priority(), "not the default engine while the wrong accepts E1-F1 .. E1-F4 are open (it was 100 = Engines.DEFAULT_ENGINE_MIN_PRIORITY from 19:41Z to 20:35Z on 2026-11-24)");
+        assertEquals(100, p.priority(), "the default engine since 2026-11-25 (100 = Engines.DEFAULT_ENGINE_MIN_PRIORITY; it was 10 from 2026-11-24T20:28Z while the wrong accepts E1-F1 .. E1-F6 were open)");
         assertTrue(p.optionKeys().contains("machine.debug") && p.optionKeys().contains("machine.switches"));
         assertEquals("switches " + Debug.switchNames(Op.SW_DEFAULT), p.defaultsNote(), "'rlvm --version' names the default switch set");
         assertEquals(Op.SW_DEFAULT, Debug.parseSwitches(p.defaultsNote().substring("switches ".length())));
