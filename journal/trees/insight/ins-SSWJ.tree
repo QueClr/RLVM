@@ -1,0 +1,20 @@
+\title{Huge pages for the executable's large arrays are worth 2 to 14 percent of a warm pass while the kernel has free 2 MiB blocks, and cost 10 to 50 percent when it has none}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{gc}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report on huge pages for the executable](rep-OPT-G), sections 2 to 8. Conditions: the GraalVM CE native image of the release's settings, a run without options, 8 workers, warm passes, the same executable with and without the advice, three interleaved rounds inside quiet-core windows on the aarch64 development host while its other cores were busy; Linux 7.0, 4 KiB pages, \code{enabled=madvise} and \code{defrag=madvise}, which are Ubuntu's defaults. Not measured: x86-64, a quiet host, a machine of 16 GB.}
+
+\ul{
+\li{\strong{The image can only be given huge pages mapping by mapping.} GraalVM CE 25 has no option for them, and its serial collector commits every aligned chunk (512 KiB, the most the compacting old generation allows) and every array of 128 KiB or more with an \code{mmap} of its own, so advice for the reserved range is gone at the first commit. A wrapper around the image's \code{mmap}, linked in with \code{\verb~|--wrap=mmap~}, advises each mapping of 2 MiB or more: two thirds of what a Mathlib pass commits, 60 to 65 \% of its resident set.}
+\li{\strong{With free 2 MiB blocks}: Mathlib -2.4 \%, cslib -4.4 \%, cedar -3.3 \%, Std -3.9 \%, con-leche -6.9 \%, reachability -14.1 \%; the loader thread needs 12 to 13 \% less CPU on Mathlib and cslib, the workers 2 to 4 \%; the arena's memory-heavy \code{perf} tests are 9 to 40 \% faster. Resident memory and the arena's instruction count do not change, and a run that never maps 2 MiB at once is not touched.}
+\li{\strong{Without them}: under \code{defrag=madvise} a first touch in an advised mapping waits for the kernel to compact memory instead of taking a small page. When the host's free memory held no block of 2 MiB, a cslib pass took 7.7 to 9.5 s instead of 5.7 to 6.5 s and a Mathlib pass up to 19.1 s instead of 14.4 to 16.8 s; during one cslib process the host counted 11,060 allocations entering compaction, 11,058 of them in vain, and gave out 3 huge pages. The state came and went within minutes on a host that six agents had loaded for hours.}
+\li{\strong{Consequence}: plain advice does not meet [the guard for a default](dec-YP0N) (navier-stokes-euler 15.7 \% and Init 8.0 \% slower than the base in the guard window). The JVM launcher's \code{\verb~|-XX:+UseTransparentHugePages~} has the same exposure: a timing taken in that state carries it, and \code{\verb~|compact_stall~} of \code{\verb~|/proc/vmstat~} before and after a run tells.}
+\li{\strong{What avoids the loss}, counted and not yet timed: advising only while \code{\verb~|/proc/buddyinfo~} shows free blocks of 2 MiB, and taking the advice back when they run out or \code{\verb~|/proc/vmstat~} shows allocations entering compaction. In that form the advice did nothing when the host had no free block and kept its effect when it had.}
+}

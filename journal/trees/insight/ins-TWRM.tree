@@ -1,0 +1,17 @@
+\title{Two native images built from the same jars are not the same code: compare a setting inside one executable where it can be switched}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{benchmark}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report on huge pages for the executable](rep-OPT-G), section 5.3. Conditions: GraalVM CE 25.5.5 native-image with the release's options on the aarch64 development host; warm passes, 8 workers, three interleaved rounds per corpus inside quiet-core windows, the other cores of the host busy.}
+
+\ul{
+\li{\strong{The builder is not deterministic here.} Two images built from the same 22 jars with the same options, one of them with a C object of 720 bytes of code linked in, have code sections that differ by 4,048 bytes in the other direction, and 59 of their 68 million bytes differ. Four images that four agents built from one jar set on the same afternoon have four different code sizes, up to 31 KiB apart.}
+\li{\strong{It shows in a warm pass.} The second image with its extra object idle against the first: Mathlib -2.6 \% (14.35 to 14.74 s in three rounds against 14.87 to 15.12 s), Std +1.6 \% (1.150 to 1.162 s against 1.134 to 1.145 s), the rounds of the two images not overlapping in either; cslib -1.3 \%, the other corpora within 1 \% but one that was disturbed. The geometric mean of the eight corpora is the same to 0.02 \%.}
+\li{\strong{Consequence}: a comparison of a candidate image against a base image resolves a single corpus to about 2 or 3 \%, not better, however many rounds are interleaved; the guard's limit of 3 \% for one corpus is at that level. Where a change can be switched at run time, compare inside one executable. One pair of builds was measured; how the difference is distributed over many builds was not.}
+}

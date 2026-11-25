@@ -1,0 +1,453 @@
+\title{OPT-G: transparent huge pages for the heap of the executable - 2 to 14 percent of a pass while the kernel has them, a loss of 10 to 50 percent when it has none; in the image, off by default}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{gc}
+\tag{performance}
+\tag{benchmark}
+\tag{arena}
+\import{base-macros}
+
+\p{Agent "OPT-G" of the second optimisation wave after the first release, 2026-11-25 (11:56 to 17:00 UTC). The lever was found an hour earlier by the agent of the loader's second pass: the JVM launcher runs with transparent huge pages and the native image, which is [the release](design-packaging), has none. This report is what was tried to give the one executable huge pages for its heap, the mechanism that works, what it is worth and what it can cost under [the guard for a change of the default configuration](dec-YP0N), and what it does to small inputs, to memory and under each system setting. Everything was done in private copies of the tracked sources of the main tree; nothing was published. The result is one patch (section 14) and a verdict against making the advice a default (section 0).}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{The mechanism that works is a wrapper around the image's \code{mmap}, linked into the executable.} GraalVM CE 25 has no option for transparent huge pages. Advice given once to the image's reserved address range is lost, because the serial collector commits every aligned chunk and every large array with an \code{mmap} of its own and each is a new mapping (measured: 0 MiB of huge pages in a Mathlib pass). The linker option \code{\verb~|--wrap=mmap~} with one C object lets the executable advise each mapping after it is made; it is still one file with the same shared-library dependencies (sections 3 and 4).}
+\li{\strong{Where huge pages can be had they are worth 2 to 14 \% of a warm pass.} The same executable with and without the advice, 8 workers, three interleaved rounds, the other cores of the host busy: Mathlib 14.58 to 14.23 s (-2.4 \%), cslib 5.42 to 5.18 s (-4.4 \%), cedar -3.3 \%, Std -3.9 \%, con-leche -6.9 \%, reachability 0.522 to 0.448 s (-14.1 \%); the loader thread needs 12 to 13 \% less CPU on Mathlib and cslib, the workers 2 to 4 \%. The arena's 18 memory-heavy \code{perf} tests are 9 to 40 \% faster, a cold Mathlib run in the arena-shaped container takes 14.7 instead of 16.2 s. 60 to 65 \% of the resident set is then in huge pages; the resident set, the container's memory account and the arena's instruction count do not change (sections 5, 8, 9, 11).}
+\li{\strong{Where the kernel has no huge page to give, the same advice costs 10 to 50 \%.} With the system settings of Ubuntu (\code{enabled=madvise}, \code{defrag=madvise}) a first touch in an advised mapping does not fall back to a small page: it waits for the kernel to compact memory. In five minutes of the guard window navier-stokes-euler was 11.6 \% and Init 8.8 \% slower with the advice than the same executable without; twenty minutes later, when the host's 23 GB of free memory held no block of 2 MiB, a cslib pass took 7.7 to 9.5 s instead of 5.7 to 6.5 s and a Mathlib pass 15.6 to 19.1 s instead of 14.4 to 16.8 s, while the host counted 11,060 allocations entering compaction during one cslib process (1,800 to 2,200 during a process without advice), 11,058 of them in vain (section 6). The JVM launcher's \code{\verb~|-XX:+UseTransparentHugePages~} has the same exposure.}
+\li{\strong{Verdict for the default configuration: NO-GO for advice by default.} The guard of [the rule for a default](dec-YP0N) is not met by the first candidate (plain advice, on by default): the geometric mean of the eight warm passes goes down by 2.1 \%, but navier-stokes-euler is 15.7 \% and Init 8.0 \% slower than the base, where 3 \% is the limit (section 5). Whether a machine has free 2 MiB blocks is not in the executable's hands, and the arena's machine, 16 GB with a 6.3 GB export in its page cache, is of the kind that may have few.}
+\li{\strong{What is delivered instead: the wrapper in the image, switched off, and watching when it is switched on} (section 7). A plain run gives no advice and makes the system calls of the base. With \code{\verb~|RLVM_HUGEPAGES=on~} the wrapper advises a mapping only if \code{\verb~|/proc/buddyinfo~} shows the kernel has that much and 256 MiB more free in blocks of 2 MiB, and it takes its advice back from everything when those blocks run out or \code{\verb~|/proc/vmstat~} shows allocations entering compaction. Its logic was tested with made-up kernel files, and on the host as it was it did what it is for, in counts: with free blocks it advised 57 to 63 mappings of a reachability run and the process spent 0.09 to 0.17 s in the kernel instead of 0.29 to 0.33 s; with none it advised nothing and the kernel time was that of the run without advice (12 and 16 pairs of runs). \code{\verb~|rlvm --version~} names the setting in its \code{\verb~|build:~} line. Making the watched advice the default is one word of the build script and a decision that needs its own guard, taken in both states of a machine's memory; this report does not have that guard (item 7).}
+\li{\strong{Safety.} No Java source, class file or jar changes; the jars of the final candidate are byte for byte the shared distribution's with the level-store repair of this afternoon. The gate of the default configuration through the final executable has the counts of the release (230 of 230 tests; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0, agree 15,741, declined 2,034, no error; 1,196 hostile rows with no wrong accept and no wrong reject), the eight corpora are accepted with 8 and 4 workers through both launchers, and every counter of the eight corpora is identical to the base's. A tutorial test is 21 MB and 0.01 to 0.02 s as before: nothing below 2 MiB is ever advised, and 241 of the arena's 262 small tests never make such a mapping (sections 9 and 12).}
+\li{\strong{Not measured}: a quiet host; x86-64; the system settings \code{never} and \code{always} (\code{never} approximated with a process for which huge pages are disabled: no effect, no error); a machine short of memory, such as the arena's; the watched advice under a stall in a timing window, and with it a guard for it as a default; the optional Oracle GraalVM build, which gets the same treatment and was not built (section 13).}
+}
+}
+
+\subtree{
+\title{1. The question}
+
+\p{The profile of the loader thread by the agent of the loader's second pass ("OPT-F", 2026-11-25) ended in a finding outside its modules: every memory-bound item of the loader thread stalls on one load with a walk of the page tables, 760,000 of the 867,000 page faults of a Mathlib pass are first touches of 4 KiB pages of the heap, and the JVM launcher has transparent huge pages (\code{\verb~|-XX:+UseTransparentHugePages~}, worth 6 \% of a warm Mathlib pass there, see [the JVM as the warm platform](rep-J1) and [the launcher line](dec-E3EX)) while the native image has none. Its experiment was a preloaded library of 30 lines on the unchanged executable that advises every anonymous writable mapping of 2 MiB or more: cslib 4,997 to 4,797 ms and Mathlib 14.28 to 13.76 s over two rounds on a host that was not quiet. A preloaded library is a second file, and [the release is one executable](design-packaging). The task of this report: give the executable itself huge pages for its heap, by whatever mechanism an experiment shows to work, and measure what that is worth under [the guard for a change of the default configuration](dec-YP0N).}
+
+\p{\strong{Host.} aarch64, 10 Cortex-X925 and 10 Cortex-A725, 121 GB, Linux 7.0, base page 4 KiB, huge page 2 MiB. \code{\verb~|/sys/kernel/mm/transparent_hugepage/enabled~} is \code{madvise} and \code{defrag} is \code{madvise}, which are Ubuntu's defaults; the smaller sizes of multi-size huge pages (16 KiB to 1 MiB) are all \code{never}; \code{khugepaged} scans 4,096 pages every 10 s. The settings are the host's and could not be changed (no privilege), also not for a container.}
+}
+
+\subtree{
+\title{2. How the image gets its memory}
+
+\p{The \code{mmap} calls of the unchanged executable were logged with an experiment library (the calls the C library makes for itself, thread stacks and \code{malloc}, are not among them).}
+
+\ul{
+\li{\strong{One reservation.} At start the image reserves 32 GiB + 512 KiB of address space with one \code{\verb~|mmap(PROT_NONE, MAP_NORESERVE)~} and maps its image heap, 26.7 MB, from the executable file into it. Everything the collector allocates later lies inside this range.}
+\li{\strong{Every commit is a mapping of its own.} The serial collector commits memory with \code{\verb~|mmap(addr, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED)~} over a part of the reservation: one call for each aligned heap chunk of 512 KiB (the default of GraalVM CE 25.5.5; small objects live in these) and one call for each array of 128 KiB or more, which is a chunk of its own (\code{\verb~|-H:LargeArrayThreshold=131072~}). It gives memory back with the same call and \code{\verb~|PROT_NONE~}. A large array is never copied by a collection; its chunk is unmapped when the array is garbage.}
+\li{\strong{A tutorial test} (\code{\verb~|tutorial/001_basicDef~}, 21 MB resident, 0.01 to 0.02 s): 18 calls; 16 commits of 6.2 MiB together, the largest 1 MiB + 4 KiB.}
+\li{\strong{One Mathlib pass} (8 workers): 5,162 commits of 5,721 MiB together and 1,602 uncommits. By size:}
+}
+
+\table{
+\tr{\th{Size of the mapping}\th{Mappings}\th{MiB}\th{Share of the committed bytes}}
+\tr{\td{128 KiB to below 512 KiB (arrays)}\td{3,212}\td{783}\td{13.7 \%}}
+\tr{\td{512 KiB exactly (aligned chunks)}\td{952}\td{476}\td{8.3 \%}}
+\tr{\td{above 512 KiB to below 1 MiB}\td{236}\td{138}\td{2.4 \%}}
+\tr{\td{1 MiB to below 2 MiB}\td{495}\td{520}\td{9.1 \%}}
+\tr{\td{\strong{below 2 MiB, together}}\td{\strong{4,896}}\td{\strong{1,917}}\td{\strong{33.5 \%}}}
+\tr{\td{2 MiB to below 4 MiB}\td{138}\td{313}\td{5.5 \%}}
+\tr{\td{4 MiB to below 16 MiB}\td{86}\td{510}\td{8.9 \%}}
+\tr{\td{16 MiB to below 128 MiB}\td{40}\td{1,205}\td{21.1 \%}}
+\tr{\td{432 MiB (one) and 1,343 MiB (one)}\td{2}\td{1,775}\td{31.0 \%}}
+\tr{\td{\strong{2 MiB or more, together}}\td{\strong{266}}\td{\strong{3,804}}\td{\strong{66.5 \%}}}
+}
+
+\p{So two thirds of what a Mathlib pass commits is in 266 mappings that are each large enough to hold huge pages, and a small input never makes such a mapping.}
+}
+
+\subtree{
+\title{3. Three mechanisms, by experiment}
+
+\subtree{
+\title{3.1 An option of the image: there is none}
+
+\p{\code{\verb~|native-image --expert-options-all~} of GraalVM CE 25.5.5.0.3 (2,359 lines) has no option that names huge pages, large pages or \code{madvise}, neither among the build options (\code{\verb~|-H:~}) nor among the run-time ones (\code{\verb~|-R:~}). What it has near the subject: \code{\verb~|-H:AlignedHeapChunkSize~} (524,288), \code{\verb~|-H:LargeArrayThreshold~} (131,072), \code{\verb~|-H:+AlwaysPreTouch~} (touches committed pages, does not change their size), \code{\verb~|-H:ReservedAddressSpaceSize~}, and \code{\verb~|-H:NativeLinkerOption~}, which passes a word to the linker of the image and is what section 3.3 uses.}
+}
+
+\subtree{
+\title{3.2 Advice for the reserved range at start-up: lost at the first commit}
+
+\p{The image commits inside one reservation, so one call at start-up that advises the whole range would be the smallest change. It does not work, because of how the commits are made:}
+
+\ul{
+\li{\strong{In a C program of 60 lines} that does what the image does: a reservation of 1 GiB advised with \code{\verb~|MADV_HUGEPAGE~} carries the flag (\code{hg} in \code{\verb~|/proc/self/smaps~}); a commit by \code{\verb~|mmap(MAP_FIXED)~} of 64 MiB inside it is a new mapping without the flag, and touching all of it gives 0 kB of \code{AnonHugePages}; the same commit advised after the \code{mmap} and before the first touch gives 65,536 kB; an uncommit and a second commit of the same range lose the flag again. (A commit by \code{mprotect} would keep the flag; the image does not commit that way.)}
+\li{\strong{On the executable}, with the experiment library advising the reservation and nothing else: one Mathlib pass, peak resident set 4,009 MiB, peak \code{AnonHugePages} 0 MiB, 1.46 million page faults, as without any advice (3,866 MiB, 0 MiB, 1.48 million). \code{\verb~|/proc/PID/smaps~} 40 s into such a pass: the 292 writable mappings inside the reservation (3,806 MiB, 3,026 MiB resident) carry no flag and have no huge page; the flag is left on the 28.7 GiB that were never committed, and the ranges that were committed and given back (189 mappings, 184 MiB) have lost it as well.}
+}
+
+\p{The advice has to be given to each mapping after it is made, so it has to sit where the mappings are made.}
+}
+
+\subtree{
+\title{3.3 A wrapper around the image's \code{mmap}, linked in: works}
+
+\p{The image calls the C library's \code{mmap} through an ordinary undefined symbol of its object file. The linker option \code{\verb~|--wrap=mmap~} (GNU ld, gold, lld and mold have it) resolves every such reference in the objects it links to \code{\verb~|__wrap_mmap~} and gives the wrapper the real function as \code{\verb~|__real_mmap~}. So one C object with a wrapper of that name, handed to the linker of the image through \code{\verb~|-H:NativeLinkerOption~}, sees every mapping the image's own code makes, and no mapping the C library makes for itself (thread stacks, \code{malloc}): those calls are inside the shared library and are not relinked. The executable stays one file with the same shared-library dependencies; its table of dynamic symbols is the base's, line for line (272 entries).}
+
+\p{The wrapper calls \code{mmap} and, when the new mapping is anonymous, private, writable and at least 2 MiB long, calls \code{\verb~|madvise(MADV_HUGEPAGE)~} on it. It touches no page. Measured first with the experiment library on the unchanged executable, one Mathlib pass each, not timings:}
+
+\table{
+\tr{\th{Advice}\th{Mappings advised}\th{MiB advised}\th{Peak resident set, MiB}\th{Peak \code{AnonHugePages}, MiB}\th{Page faults of the process}\th{Kernel time, s}}
+\tr{\td{none}\td{0}\td{0}\td{3,866}\td{0}\td{1,479,507}\td{3.2}}
+\tr{\td{the reservation only (section 3.2)}\td{1}\td{-}\td{4,009}\td{0}\td{1,461,289}\td{3.0}}
+\tr{\td{every writable mapping of 2 MiB or more}\td{257}\td{3,749}\td{3,957}\td{2,460}\td{663,874}\td{1.7}}
+\tr{\td{every writable mapping of 128 KiB or more}\td{4,924}\td{5,677}\td{3,775}\td{2,366}\td{672,036}\td{1.9}}
+}
+
+\ul{
+\li{With the advice 62 \% of the resident set at its peak is in huge pages and the process takes 0.66 instead of 1.48 million page faults. \code{\verb~|/proc/PID/smaps~} of the candidate executable of section 4, 40 s into a Mathlib pass: 81 writable mappings carry the flag (2,787 MiB, 2,361 MiB resident, 2,166 MiB of that in huge pages) and 399 do not (1,045 MiB, no huge page).}
+\li{\strong{Advising the smaller mappings as well gives nothing}: not one more huge page. A mapping below 2 MiB cannot hold a huge page by itself; neighbours that are advised do merge into one mapping, but the first chunk of a 2 MiB range is touched (its header is written) before its neighbours are committed, and a range that already has small pages gets a huge page only from \code{khugepaged}, which scans 16 MiB in 10 s here. So the threshold is one huge page, and the 1.9 GiB of a Mathlib pass that are committed in pieces below 2 MiB stay on small pages (section 8.2).}
+\li{A large array does not start on a 2 MiB boundary (the collector places it by first fit), so its first and last partial huge page stay small: an array of 8 MiB gets three huge pages, 6 MiB, measured in a test image.}
+}
+}
+
+\subtree{
+\title{3.4 Not built}
+
+\ul{
+\li{\strong{Replacing the image's memory provider} (a build-time feature that registers a subclass of Substrate VM's virtual-memory provider which advises after a commit). It needs no linker option, but it is written against internal classes of one GraalVM version, and the optional build uses another version.}
+\li{\strong{Collapsing ranges synchronously} (\code{\verb~|MADV_COLLAPSE~}, Linux 6.1) for the ranges that are committed in small pieces: it copies what is there and makes untouched pages resident.}
+\li{\strong{A preloaded library or a wrapper script}: a second file, excluded by the rule of one executable.}
+}
+}
+}
+
+\subtree{
+\title{4. The first candidate: plain advice}
+
+\ul{
+\li{\strong{One C source}, \src{rlvm-cli/src/main/native/hugepages.c}: \code{\verb~|__wrap_mmap~} as described in section 3.3. It is the only native source of the project. It lives in \code{rlvm-cli} because that module is the launcher and owns what the image is: the entry point, the image-wide \code{\verb~|native-image.properties~} and the \code{\verb~|build:~} line of \code{\verb~|rlvm --version~}. Maven does not see it; no jar changes.}
+\li{\strong{The build} (\src{scripts/build.sh}) compiles it with the C compiler native-image itself uses (\code{gcc}, else \code{cc}), links a program of five lines with it and \code{\verb~|-Wl,--wrap=mmap~} and runs that program: only if it reports the advice for its 4 MiB mapping and none for its 1 MiB mapping does the image get \code{\verb~|-H:NativeLinkerOption=<the object> -H:NativeLinkerOption=-Wl,--wrap=mmap~}. If the compiler or the linker cannot do it, the image is built without the wrapper and the log says so; \code{\verb~|--no-hugepages~} builds without it on purpose.}
+\li{\strong{The verification of the built image} has one more step: a run that fills a 128 MB heap with arrays of 8 MiB (\code{\verb~|--protocol-selftest oom-real~}) under \code{\verb~|RLVM_HUGEPAGES=trace~} must report advised mappings, 16 in the candidate. An image that was linked with the wrapper and does not go through it fails the build, so the text of \code{\verb~|--version~} cannot claim what the image does not do.}
+\li{\strong{A switch for a run}: the environment variable \code{\verb~|RLVM_HUGEPAGES~}, read once at the first mapping of 2 MiB or more. It is in the environment and not an \code{\verb~|-X~} setting because the heap is committed below the launcher, before and independently of its command line. With \code{off} the executable makes exactly the system calls of the base, which gives a comparison \em{inside one executable}; section 5.3 says why that matters.}
+\li{\strong{Where it does nothing by construction.} A mapping below 2 MiB, a mapping that is not anonymous, private and writable, a mapping with \code{\verb~|MAP_STACK~}; a base page other than 4 KiB (the huge page is then 32 MiB or 512 MiB, and what that does to the resident set was not measured). The wrapper keeps \code{errno}, ignores the result of \code{madvise}, uses no \code{stdio} and allocates nothing.}
+\li{\strong{Trees and distributions.} "Base": a copy of the tracked sources of the main tree of 2026-11-25 11:56 UTC, built by \src{scripts/build.sh} with \code{\verb~|--published --dev~}; its 22 jars have the sha256 of the jars of the shared distribution of 09:13 UTC (jar set \code{\verb~|30dadd7f6cc5~}). "Candidate": the same copy with the patch, built the same way; the same 22 jars, so the JVM launcher of the two distributions is the same program, and the executable has the same table of dynamic symbols as the base's. Both executables are 68,356,216 bytes. Sections 5 and 6 are about this candidate; the final one is section 7.}
+}
+}
+
+\subtree{
+\title{5. The guard of plain advice}
+
+\subtree{
+\title{5.1 How it was measured}
+
+\p{The rule is [the guard for a change of the default configuration](dec-YP0N): the geometric mean of the warm passes of the eight corpora must go down and no corpus may be more than 3 \% slower, over at least three interleaved rounds. Every row was taken inside a quiet-core window (\src{bench/quiet.py}: the eight measurement cores belong to the window, one process at a time), three variants interleaved round by round in the order A B C, C B A, A B C: the base executable, the candidate executable, and the candidate executable with \code{\verb~|RLVM_HUGEPAGES=off~}. A run is the executable without options but \code{\verb~|--threads 8 --stats -X passes=N~}; a cell is the mean over the rounds of the median later pass of one process (no corpus was below the 0.5 s under which the rule takes the mean instead: reachability is 0.52 s on this busy host), with the smallest and the largest round in brackets. The other twelve cores of the host were busy with other agents' jobs the whole time (10 to 12 cores busy on average, load average 30 to 95), so the level of every number is higher than on a quiet host (Mathlib 13.1 s there on the same day, [the integration](rep-INT8)); the comparison is inside one window. Three windows: cslib at 12:22 UTC, Mathlib at 13:13, the other six corpora between 15:28 and 15:39.}
+}
+
+\subtree{
+\title{5.2 The table}
+
+\table{
+\tr{\th{Corpus (rounds x passes)}\th{base, s}\th{candidate, s}\th{candidate without advice, s}\th{candidate against base}\th{candidate against itself without advice}}
+\tr{\td{Init (3 x 10)}\td{0.668 (0.654 to 0.685)}\td{0.722 (0.653 to 0.858)}\td{0.663 (0.653 to 0.682)}\td{+8.0 \%}\td{+8.8 \%}}
+\tr{\td{Std (3 x 10)}\td{1.138 (1.134 to 1.145)}\td{1.111 (1.110 to 1.112)}\td{1.156 (1.150 to 1.162)}\td{-2.4 \%}\td{-3.9 \%}}
+\tr{\td{cedar (3 x 8)}\td{1.573 (1.547 to 1.590)}\td{1.507 (1.497 to 1.517)}\td{1.558 (1.541 to 1.581)}\td{-4.2 \%}\td{-3.3 \%}}
+\tr{\td{reachability (3 x 15)}\td{0.519 (0.510 to 0.529)}\td{0.448 (0.437 to 0.458)}\td{0.522 (0.517 to 0.528)}\td{-13.6 \%}\td{-14.1 \%}}
+\tr{\td{con-leche (3 x 6)}\td{1.515 (1.486 to 1.533)}\td{1.410 (1.382 to 1.445)}\td{1.514 (1.492 to 1.526)}\td{-6.9 \%}\td{-6.9 \%}}
+\tr{\td{navier-stokes-euler (3 x 6)}\td{3.919 (3.850 to 3.963)}\td{4.534 (3.732 to 5.302)}\td{4.064 (3.966 to 4.125)}\td{+15.7 \%}\td{+11.6 \%}}
+\tr{\td{cslib (3 x 6)}\td{5.490 (5.458 to 5.537)}\td{5.181 (5.109 to 5.316)}\td{5.420 (5.365 to 5.468)}\td{-5.6 \%}\td{-4.4 \%}}
+\tr{\td{Mathlib (3 x 4)}\td{14.965 (14.870 to 15.116)}\td{14.229 (14.166 to 14.308)}\td{14.583 (14.345 to 14.740)}\td{-4.9 \%}\td{-2.4 \%}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.042}}\td{\strong{1.999}}\td{\strong{2.043}}\td{\strong{-2.1 \%}}\td{\strong{-2.1 \%}}}
+}
+
+\ul{
+\li{\strong{The geometric mean goes down by 2.1 \%, and two corpora are far outside the guard}: navier-stokes-euler 15.7 \% and Init 8.0 \% slower than the base, 11.6 \% and 8.8 \% slower than the same executable without the advice. The guard is not met.}
+\li{\strong{The other six corpora are 2.4 to 13.6 \% faster} than the base and 2.4 to 14.1 \% faster than the same executable without the advice: reachability 0.519 to 0.448 s, con-leche 1.515 to 1.410 s, cslib 5.490 to 5.181 s, cedar 1.573 to 1.507 s, Mathlib 14.97 to 14.23 s, Std 1.138 to 1.111 s.}
+\li{The two losses and the six gains are the same advice in two states of the host's memory. navier-stokes-euler and Init were measured in the first five minutes of the third window, and in those five minutes the kernel had no huge page to give: section 6.}
+}
+
+\p{The first pass of each process, which is what one invocation of the executable costs (the pass's own wall clock, the mean of the three rounds):}
+
+\table{
+\tr{\th{Corpus}\th{first pass of a process, s (mean of the rounds): base}\th{candidate}\th{candidate without advice}\th{candidate against base}\th{against itself without advice}}
+\tr{\td{Init}\td{0.722}\td{0.945}\td{0.685}\td{+30.8 \%}\td{+38.0 \%}}
+\tr{\td{Std}\td{1.159}\td{1.117}\td{1.151}\td{-3.6 \%}\td{-3.0 \%}}
+\tr{\td{cedar}\td{1.605}\td{1.532}\td{1.589}\td{-4.5 \%}\td{-3.5 \%}}
+\tr{\td{reachability}\td{0.584}\td{0.458}\td{0.552}\td{-21.6 \%}\td{-17.1 \%}}
+\tr{\td{con-leche}\td{1.577}\td{1.429}\td{1.549}\td{-9.4 \%}\td{-7.7 \%}}
+\tr{\td{navier-stokes-euler}\td{4.026}\td{4.827}\td{4.091}\td{+19.9 \%}\td{+18.0 \%}}
+\tr{\td{cslib}\td{5.496}\td{5.273}\td{5.548}\td{-4.1 \%}\td{-5.0 \%}}
+\tr{\td{Mathlib}\td{14.962}\td{14.519}\td{14.788}\td{-3.0 \%}\td{-1.8 \%}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.121}}\td{\strong{2.109}}\td{\strong{2.087}}\td{\strong{-0.6 \%}}\td{\strong{+1.1 \%}}}
+}
+
+\p{Resident memory. The peak of the first pass is what a single run needs; the largest peak over all passes of all rounds includes what a process that reloads the file several times holds between collections:}
+
+\table{
+\tr{\th{Corpus}\th{peak RSS of the first pass, MiB (mean of the rounds): base}\th{candidate}\th{without advice}\th{largest peak over all passes and rounds: base}\th{candidate}\th{without advice}}
+\tr{\td{Init}\td{360}\td{367}\td{361}\td{381}\td{382}\td{472}}
+\tr{\td{Std}\td{581}\td{587}\td{579}\td{612}\td{611}\td{618}}
+\tr{\td{cedar}\td{741}\td{772}\td{749}\td{770}\td{776}\td{777}}
+\tr{\td{reachability}\td{703}\td{695}\td{698}\td{737}\td{721}\td{736}}
+\tr{\td{con-leche}\td{1,156}\td{1,192}\td{1,207}\td{1,360}\td{1,367}\td{1,351}}
+\tr{\td{navier-stokes-euler}\td{1,309}\td{1,302}\td{1,248}\td{1,942}\td{1,478}\td{1,543}}
+\tr{\td{cslib}\td{1,766}\td{1,768}\td{1,788}\td{2,043}\td{2,767}\td{2,013}}
+\tr{\td{Mathlib}\td{3,798}\td{3,866}\td{3,653}\td{4,446}\td{4,457}\td{4,440}}
+}
+
+\ul{
+\li{No corpus needs more memory with the advice: the first-pass peaks differ by less than their spread between rounds (Mathlib 3,743 to 3,848 MiB for the base, 3,579 to 4,068 with the advice, 3,601 to 3,749 without).}
+\li{The one large number, 2,767 MiB for cslib with the advice, is the sixth pass of one process, and it is not the advice: the same executable in processes of eight passes outside a window peaked at 2,096, 2,031 and 2,056 MiB with the advice and at 2,730, 2,871 and 1,996 MiB without it. A process that reloads sometimes holds two generations of the store's arrays.}
+}
+}
+
+\subtree{
+\title{5.3 Two builds of the same jars are not the same code}
+
+\p{The column "candidate without advice" is the candidate executable giving no advice. It differs from the base executable by up to 3.7 \% (navier-stokes-euler, in the disturbed five minutes), -2.6 \% (Mathlib) and 1.6 \% (Std), although the two were built from the same 22 jars with the same options and the wrapper is idle. The image builder is not deterministic here: the code section of the candidate is 4,048 bytes \em{smaller} than the base's although it contains 720 bytes more, 59 of the 68 million bytes of the two files differ, and four builds that other agents made of one jar set this afternoon have four different code sizes, up to 31 KiB apart. A comparison of a new image against an old one carries that; a setting that can be switched inside one executable does not. This report therefore gives both columns and reads the effect of the advice from the last one.}
+}
+}
+
+\subtree{
+\title{6. The stall: what the advice costs when the kernel has no huge page to give}
+
+\subtree{
+\title{6.1 What was seen}
+
+\ul{
+\li{\strong{In the guard} (section 5): the two corpora measured between 15:28 and 15:33 UTC. With the advice the passes of navier-stokes-euler fall into two groups, 3.68 to 3.83 s (shorter than without) and 4.45 to 5.92 s; the kernel time of the loader thread is 0.84, 2.13 and 1.07 s per pass in the three rounds against 0.27 to 0.32 s without, that of the workers 0.76, 1.76 and 1.07 s against 0.29 to 0.40 s, although the process takes \em{fewer} page faults. Init: passes of 0.63 to 0.65 s and passes of 0.86 to 1.46 s. The six corpora measured from 15:33 on show nothing of it.}
+\li{\strong{Counted} a quarter of an hour later, in the same window, with \code{\verb~|perf stat~} on the whole process in the arena-shaped container and the host's \code{\verb~|/proc/vmstat~} read before and after each process (the counters are the host's, all processes):}
+}
+
+\table{
+\tr{\th{Process (UTC)}\th{passes, s}\th{user instructions, G}\th{kernel instructions, G}\th{data TLB walks, M}\th{page faults, M}\th{CPU, s}\th{host: \code{\verb~|compact_stall~}}\th{of them failed}\th{host: huge pages given at a fault}\th{refused}}
+\tr{\td{Mathlib without advice (15:49)}\td{14.64, 14.36}\td{2,923.6}\td{24.1}\td{350}\td{2.88}\td{223.9}\td{0}\td{0}\td{1,115}\td{0}}
+\tr{\td{Mathlib with advice (15:50)}\td{15.60, 16.49}\td{2,924.2}\td{67.7}\td{184}\td{1.88}\td{234.5}\td{4,975}\td{4,969}\td{2,615}\td{1,644}}
+\tr{\td{Mathlib with advice (15:51)}\td{19.13, 18.82}\td{2,924.8}\td{103.9}\td{215}\td{2.52}\td{246.9}\td{9,588}\td{9,580}\td{1,314}\td{3,185}}
+\tr{\td{Mathlib without advice (15:51)}\td{15.93, 16.76}\td{2,924.4}\td{24.8}\td{362}\td{2.92}\td{227.2}\td{3,541}\td{3,539}\td{600}\td{1,176}}
+\tr{\td{cslib without advice (15:51)}\td{5.78, 5.72, 5.76}\td{1,496.8}\td{16.3}\td{208}\td{1.92}\td{123.6}\td{1,773}\td{1,762}\td{485}\td{573}}
+\tr{\td{cslib with advice (15:52)}\td{9.45, 9.29, 8.57}\td{1,497.1}\td{75.6}\td{213}\td{1.88}\td{141.1}\td{11,060}\td{11,058}\td{3}\td{3,688}}
+\tr{\td{cslib with advice (15:52)}\td{9.05, 7.71, 8.31}\td{1,497.6}\td{68.6}\td{194}\td{1.85}\td{138.4}\td{9,319}\td{9,303}\td{164}\td{3,088}}
+\tr{\td{cslib without advice (15:53)}\td{6.02, 6.33, 6.51}\td{1,496.9}\td{16.5}\td{206}\td{1.93}\td{123.8}\td{2,184}\td{2,183}\td{80}\td{725}}
+}
+
+\ul{
+\li{With the advice a pass of cslib took 7.7 to 9.5 s where it takes 5.7 to 6.5 s without: \strong{50 \% longer}; Mathlib 10 to 30 \% longer. The user instructions are the same to 0.05 \%; the kernel executes four times as many, and they are compaction: the host counted 11,060 allocations entering compaction during one cslib process with the advice (1,773 and 2,184 during the processes without it, from other agents' jobs), 11,058 of them in vain, and gave out 3 huge pages in that time.}
+\li{\strong{The state of the host at that time}: \code{\verb~|/proc/buddyinfo~} had \em{no} free block of 2 MiB or more in the zone Normal (the columns of order 9 and above all 0) while 23 GB were free in smaller blocks, and \code{\verb~|compact_stall~} grew by 200 to 570 per second, also from other agents' JVM launchers: one of them saw 6,158 stalls and no huge page in one process at 15:54. Four hours earlier, at the start of this work, the host had 54 GB free; at 15:43, after the first stall and before the second, 3,400 to 4,900 such blocks were free (7 to 10 GB) and the counter stood still for 40 s.}
+\li{\strong{A process that gives no advice gets slower too} while others make the kernel compact (Mathlib without advice 14.4 to 14.6 s, then 15.9 to 16.8 s; cslib 5.7 to 5.8, then 6.0 to 6.5 s): compaction moves pages and interrupts every core.}
+}
+}
+
+\subtree{
+\title{6.2 Why}
+
+\p{With \code{enabled=madvise}, a huge page is only ever given to a mapping that asked for one, and what the kernel does when it has none free is the setting \code{defrag}. Its default, \code{madvise}, means: for a mapping that asked, reclaim and compact memory \em{at the fault}, in the faulting thread, and fall back to a small page only when that fails (\code{\verb~|Documentation/admin-guide/mm/transhuge.rst~}). The other values would not stall (\code{defer}: wake the background thread and take a small page; \code{never}), and under \code{enabled=always} with \code{defrag=madvise} a mapping that did \em{not} ask gets exactly "a huge page if one is free, else a small one". An application cannot choose that behaviour for itself: asking is what turns the waiting on. So under Ubuntu's defaults huge pages for the heap come with this exposure, for the executable and for the JVM launcher alike, and how often it bites is a property of the machine: how much of its free memory is still in blocks of 2 MiB. On the development host six agents had run JVMs with huge pages, builds and file-heavy gates for hours. On a machine of 16 GB with a 6.3 GB export in its page cache the free memory is small by design; it was not available to try.}
+}
+}
+
+\subtree{
+\title{7. The final candidate: in the image, switched off, and watching when it is on}
+
+\subtree{
+\title{7.1 What it is}
+
+\ul{
+\li{\strong{The advice is off by default.} The wrapper is linked in as before; a plain run gives no advice and makes exactly the system calls of the base (a tutorial test: one \code{madvise}, the runtime's own, in both). \code{\verb~|RLVM_HUGEPAGES=on~} in the environment of a run switches the advice on, \code{trace} also reports it on standard error, \code{off} names the default. The default is one word of \src{scripts/build.sh}, \code{\verb~|IMAGE_THP_DEFAULT~}, which becomes a constant of the C object and the text of the build line: \code{\verb~|build: GraalVM CE native image (GraalVM CE 25.5.5.0.3, -O3, serial collector, heap at most 13g, collection policy BySpaceAndTime, transparent huge pages on request (RLVM_HUGEPAGES=on))~}.}
+\li{\strong{When it is on, it asks only while the kernel has huge pages to give.} Before it advises a mapping the wrapper reads \code{\verb~|/proc/buddyinfo~} and advises only if the kernel has the size of the mapping and 256 MiB more free in blocks of 2 MiB or larger (the zone DMA not counted). A refusal costs nothing further: the next large mapping asks again.}
+\li{\strong{While something is advised, it watches.} At an \code{mmap} call of the image, and at most every 20 ms, it reads \code{\verb~|/proc/buddyinfo~} again and two counters of \code{\verb~|/proc/vmstat~}: \code{\verb~|compact_stall~} (an allocation entered compaction) and \code{\verb~|thp_fault_fallback~} (a huge page could not be had). If the free blocks are down to 128 MiB, or the counters grew by 4 or more since the last look, it takes the advice back from everything it advised, with one \code{\verb~|madvise(MADV_NOHUGEPAGE)~} over the address span of those mappings (huge pages that are there stay), and advises nothing for 2 s, twice as long after every further time, up to 64 s. The image maps something 350 times a second in a Mathlib pass, so the watch is never far away.}
+\li{\strong{The files are the system's.} When another process uses up the huge pages or makes the kernel compact, this one stays away too, which is right: its own faults would wait as well. Without the two files it never advises (a kernel or a sandbox that hides them).}
+\li{\strong{What it costs}: nothing for a mapping below 2 MiB while nothing is advised (one comparison); two small file reads per advised mapping (257 in a Mathlib pass) and per look. The wrapper is 350 lines with its comment, uses no \code{stdio}, allocates nothing and imports two more symbols of the C library than the base does, both of glibc 2.17; the executable needs the same glibc as before (2.34, from the build machine).}
+\li{\strong{The build} gives the trial program and the verification of the image made-up copies of the two files (two environment variables that exist for this), so that neither depends on the memory of the machine that builds: plenty of free blocks, one line of advice; none, no line.}
+}
+}
+
+\subtree{
+\title{7.2 What was seen of the watch}
+
+\ul{
+\li{\strong{With made-up files}, a C program linked with the wrapper as the image is, twelve steps, the flags read back from \code{\verb~|/proc/self/smaps~}: a mapping is advised when the blocks are there and refused when the reserve is not; a refusal starts no cool-down; counters that grow by 3 change nothing; free blocks falling to 126 MiB take the advice back from every advised mapping; nothing is advised during the cool-down of 2 s although blocks are free again; what the counters did during the cool-down does not count afterwards; counters that grow by 4 take the advice back again, for 4 s; without either file nothing is advised. The zone DMA's free blocks are not counted. (A first version summed the two counters wrongly, digit by digit into one number; this test found it.)}
+\li{\strong{On the host as it was}, outside a window and therefore in counts, not seconds: the final candidate on reachability (a run of about a second on eight efficiency cores; 700 MB, nearly all of it the workers' large tables), once with \code{\verb~|RLVM_HUGEPAGES=trace~} and once with \code{off}, 32 pairs over 16:31 to 16:46 UTC while the host's free 2 MiB blocks came and went:}
+\ul{
+\li{\strong{12 pairs with free blocks throughout} (453 to 3,038 blocks of 2 MiB free before the run): 57 to 63 mappings advised, the advice never taken back; the process spends 0.09 to 0.17 s in the kernel instead of 0.29 to 0.33 s and takes 63,028 to 111,820 page faults instead of 221,327 to 226,453.}
+\li{\strong{16 pairs with no free block} (0 before the run, other processes entering compaction 15 to 1,510 times during it): nothing advised, nothing taken back; 0.32 to 0.41 s in the kernel with the advice switched on and 0.29 to 0.37 s with it off (means 0.35 and 0.33 s of about 2.9 s of CPU: the wrapper reads the two files once per large mapping, 62 times, and finds no blocks), 225,060 to 227,037 page faults and 224,697 to 226,720. This is the state in which plain advice cost 10 to 50 \%, and the watched advice does nothing in it.}
+\li{\strong{4 pairs in between} (0 to 238 blocks before the run): 1 to 44 mappings advised, the advice taken back 0 to 1 times in a run when the blocks ran out; 0.24 to 0.36 s in the kernel instead of 0.30 to 0.39 s.}
+}
+\li{The same on Std (a run of 1.1 s, 600 MB), 4 pairs, all with no free block or nearly none: in 3 runs nothing was advised, in 1 one mapping of 4 MiB was advised and the advice taken back at the next look; 0.48 to 0.59 s in the kernel with the advice on, 0.50 to 0.58 s with it off.}
+\li{\strong{What this does not show}: a large corpus, and seconds. A window with the final candidate on the eight corpora had been queued for an hour behind the windows of five other agents when this report was written and had not come up (section 13).}
+}
+}
+
+\subtree{
+\title{7.3 The guard of the final candidate}
+
+\p{There is none in seconds. A plain run of the final candidate takes the path that the first candidate takes with \code{\verb~|RLVM_HUGEPAGES=off~} - one comparison per mapping and nothing else - and that path is the column "candidate without advice" of section 5.2: the geometric mean of the eight corpora is 2.043 s against 2.042 s for the base, single corpora between -2.6 \% (Mathlib) and +3.7 \% (navier-stokes-euler, in the disturbed five minutes), which is what two builds of the same jars differ by (section 5.3). The final candidate is a third build, on the repaired jar set; its window against its base, with and without the advice, had not come up when this report was written (section 13). Section 7.2 has what was counted.}
+}
+
+}
+
+\subtree{
+\title{8. Where the gain is, when there is one}
+
+\subtree{
+\title{8.1 By thread}
+
+\p{The same windows as section 5.2, the candidate executable without and with the advice; per pass, the mean over the later passes and the rounds. Init and navier-stokes-euler are the two corpora measured during the stall of section 6 and show its cost instead:}
+
+\table{
+\tr{\th{Corpus}\th{CPU of a pass, s: without advice}\th{with}\th{workers, CPU s: without}\th{with}\th{loader thread, CPU s: without}\th{with}\th{workers, page faults: without}\th{with}\th{loader thread, page faults: without}\th{with}\th{kernel time of workers and loader, s: without}\th{with}\th{collector pauses, ms: without}\th{with}}
+\tr{\td{Init}\td{4.72}\td{5.02}\td{3.78}\td{4.01}\td{0.53}\td{0.70}\td{53,754}\td{50,163}\td{36,651}\td{26,003}\td{0.10}\td{0.37}\td{5}\td{5}}
+\tr{\td{Std}\td{8.56}\td{8.37}\td{7.29}\td{7.15}\td{0.92}\td{0.86}\td{87,656}\td{61,998}\td{68,569}\td{25,574}\td{0.19}\td{0.13}\td{10}\td{9}}
+\tr{\td{cedar}\td{11.76}\td{11.45}\td{9.89}\td{9.68}\td{1.39}\td{1.26}\td{114,932}\td{70,452}\td{105,103}\td{35,849}\td{0.28}\td{0.17}\td{17}\td{13}}
+\tr{\td{reachability}\td{1.44}\td{1.25}\td{1.32}\td{1.13}\td{0.04}\td{0.03}\td{199,900}\td{54,947}\td{1,809}\td{1,306}\td{0.19}\td{0.05}\td{16}\td{6}}
+\tr{\td{con-leche}\td{9.97}\td{9.61}\td{8.78}\td{8.44}\td{0.90}\td{0.83}\td{312,704}\td{90,377}\td{75,291}\td{31,137}\td{0.38}\td{0.16}\td{19}\td{14}}
+\tr{\td{navier-stokes-euler}\td{29.82}\td{31.69}\td{25.45}\td{26.33}\td{2.17}\td{3.18}\td{235,613}\td{184,357}\td{176,464}\td{130,213}\td{0.64}\td{2.54}\td{53}\td{36}}
+\tr{\td{cslib}\td{40.93}\td{39.50}\td{35.69}\td{34.77}\td{4.49}\td{3.92}\td{292,816}\td{116,725}\td{307,626}\td{106,095}\td{0.79}\td{0.45}\td{46}\td{32}}
+\tr{\td{Mathlib}\td{112.27}\td{109.04}\td{99.75}\td{97.64}\td{10.63}\td{9.37}\td{530,641}\td{259,881}\td{848,337}\td{335,533}\td{1.79}\td{1.16}\td{141}\td{132}}
+}
+
+\ul{
+\li{\strong{The loader thread gains most, relative to itself}: 12 \% of its CPU on Mathlib (10.63 to 9.37 s) and 13 \% on cslib (4.49 to 3.92 s), 9 \% on cedar, 7 to 8 \% on Std and con-leche. Its page faults fall to 34 to 41 \% of what they were (Mathlib 848,000 to 336,000). This is the thread whose memory-bound items the loader's profile had found stalled on page-table walks: the location table, promotion, the name table, the children of shared nodes are large arrays of the store, each a mapping of its own.}
+\li{\strong{The workers gain 2 to 4 \% of their CPU on the corpora with a load}: Mathlib 99.75 to 97.64 s, cslib 35.69 to 34.77 s, con-leche 8.78 to 8.44 s; and 14 \% on reachability (1.32 to 1.13 s), which has no load to speak of and whose passes are the workers' own large tables: its page faults fall from 200,000 to 55,000 and the kernel time of its workers from 0.16 to 0.04 s per pass of 0.5 s.}
+\li{\strong{In absolute CPU the workers are three fifths of the saving}: per Mathlib pass the workers need 2.11 s less and the loader thread 1.26 s less; per cslib pass 0.92 s and 0.57 s. Spread over eight cores that is 0.42 s and 0.19 s; the passes got 0.36 s and 0.24 s shorter. A fifth to a quarter of the saving is kernel time (first touches), the rest is the checker's own code running with fewer walks.}
+\li{\strong{Whose mappings.} Counted on the base executable with the experiment library, one pass: of the 3,761 MiB that get the advice on Mathlib, 2,436 MiB are mapped by the loader and the environment thread (the store) and 1,325 MiB by the workers (their session tables); on cslib 911 and 809 MiB; on reachability 4 and 681 MiB. A timing with the advice restricted to one of the two groups was prepared and not taken: its window met the host without free huge pages.}
+\li{The collector's pauses get shorter where large arrays are copied or freed in them (cslib 46 to 32 ms per pass, reachability 16 to 6 ms).}
+}
+}
+
+\subtree{
+\title{8.2 What stays on small pages}
+
+\ul{
+\li{\strong{Everything committed in pieces below 2 MiB}: a third of what a Mathlib pass commits (section 2), and with it 35 to 40 \% of the resident set: the arrays of 128 KiB to 2 MiB, the aligned chunks with the small objects and the young generation, and the first and the last partial huge page of every large array. Advising these pieces gives no huge page (section 3.3).}
+\li{\strong{The aligned chunks cannot be made large enough in this configuration.} A chunk is 512 KiB, and the image builder refuses anything larger with the compacting old generation, which is its default: "\code{\verb~|-H:+CompactingOldGen requires -H:AlignedHeapChunkSize=<value below or equal to 524288>~}". A chunk of 2 MiB needs \code{\verb~|-H:-CompactingOldGen~} (the copying old generation; \code{\verb~|-H:LargeArrayThreshold~} must then be given too). Such an image was built: it advises every chunk, and a tutorial test then holds 23.7 MB instead of 21 MB, because each of its chunks becomes a huge page. Its timing against the candidate was prepared and not taken (the same window as above); the copying old generation had been measured before, with 4 MiB chunks and no huge pages, as 3 to 5 \% slower (the comment on the heap settings in \src{scripts/build.sh}), which is more than the young generation can be expected to return.}
+\li{The JVM launcher has huge pages for its whole heap, and its gain on Mathlib was 6 \% ([the JVM as the warm platform](rep-J1)); the executable's is 2.4 \% in the one window that has it.}
+}
+}
+
+\subtree{
+\title{8.3 The arena's metric does not move}
+
+\p{The arena ranks by user instructions. Counted with \src{bench/measure.sh} in a container on eight efficiency cores (a count: it does not need quiet cores), the arena's run line, one fresh process, the candidate executable without and with the advice, two runs each, while the host still had huge pages to give:}
+
+\table{
+\tr{\th{Corpus}\th{user instructions without, G}\th{with, G}\th{kernel instructions without, G}\th{with, G}\th{CPU without, s}\th{with, s}}
+\tr{\td{cslib}\td{499.15, 499.19}\td{498.91, 498.90}\td{5.45, 5.55}\td{3.46, 3.42}\td{92.2, 92.1}\td{88.5, 89.6}}
+\tr{\td{Mathlib}\td{1,463.79, 1,463.66}\td{1,463.15, 1,463.54}\td{12.92, 12.95}\td{8.57, 8.48}\td{259.2, 261.8}\td{250.8, 250.7}}
+}
+
+\p{User instructions: -0.05 \% and -0.03 \%. The kernel executes a third fewer, and the CPU time on those cores is 3 to 4 \% lower. So this lever is worth nothing in the arena's ranking either way; it is a lever of the wall clock only. (In the stall of section 6 the instructions in user space are again the same and the kernel's quadruple.)}
+}
+}
+
+\subtree{
+\title{9. Small inputs}
+
+\p{The arena runs 262 tests besides the eight corpora, and a tutorial test is 21 MB and 0.01 to 0.02 s today. What the advice does to them, measured with the first candidate (plain advice) in a quiet-core window at a time when the host had huge pages to give: every test with the arena's run line (\code{\verb~|--threads 8 FILE~}), the base, the candidate and the candidate without advice interleaved, three rounds, 2,358 runs.}
+
+\ul{
+\li{\strong{Exit statuses}: the same for the three variants in all 786 triples, and the expected ones: 140 accepted of 140 good tests, 92 rejected of 92 bad ones, and of the 30 tests whose outcome is open 11 accepted, 17 rejected and 2 declined, as in the release.}
+\li{\strong{241 tests never map 2 MiB at once} (counted with the experiment library) and are therefore not touched at all: the wrapper's whole work for them is one comparison per mapping, 16 mappings in a tutorial test. A tutorial test makes one \code{madvise} call with the wrapper and one without (the runtime's own). The 244 tests whose resident set stays below 64 MiB take 5.040 s together in the base, 5.048 s in the candidate and 5.036 s in the candidate without advice (sums of the medians of three); their largest resident set is 50.0, 50.5 and 50.0 MiB.}
+\li{\strong{The 18 tests above 64 MiB}, all of the arena's \code{perf} group: 15 are 9 to 40 \% faster with the advice than the base, 3 are 0.4 to 5 \% faster, none is slower. \code{\verb~|perf/gf3-matrix-product~} 1.489 to 0.895 s (702,000 page faults to 34,000, kernel time 0.67 to 0.10 s); the five tests of 5.5 to 5.9 s take 4.6 to 4.8 s; \code{\verb~|perf/magma-list-deep-n36~} 8.57 to 7.12 s. All 262 together: 57.3 s in the base, 47.9 s in the candidate, 57.1 s without advice.}
+\li{\strong{Resident memory of those 18}: never higher by more than 3 MiB, and lower in 8 of them by 98 to 566 MiB (\code{\verb~|perf/unfold-before-literal-bad~} 2,003 to 1,438 MiB, \code{\verb~|perf/gf3-matrix-product~} 2,368 to 2,055 MiB). The worst small test for memory stays the one it is without the advice.}
+\li{These tests run one worker over a few very large tables, which is the case huge pages serve best; it is also the case a stall would hit hardest. Two of them are the heavy mutants of section 12: one worker, 3.5 GB, where the first candidate needed 16.8 s of CPU instead of 24.0 s.}
+}
+}
+
+\subtree{
+\title{10. What the system setting makes of the advice}
+
+\p{The kernel decides; the executable only advises. \code{\verb~|/sys/kernel/mm/transparent_hugepage/enabled~} has three values, and the host's could not be changed, so one was measured, one was approximated and one is argued from the kernel's documentation (\code{\verb~|Documentation/admin-guide/mm/transhuge.rst~}, \code{\verb~|madvise(2)~}).}
+
+\table{
+\tr{\th{Setting}\th{What happens}\th{How it is known}}
+\tr{\td{\code{madvise} (this host; Ubuntu's default)}\td{An advised mapping gets a huge page at the first touch of each 2 MiB range that lies inside it, if the kernel has one; everything else stays on 4 KiB pages. With \code{defrag=madvise}, also the default, the fault waits for compaction when the kernel has none: sections 5 and 6.}\td{measured, on the host and in the arena-shaped container (which sees the host's setting)}}
+\tr{\td{\code{never}}\td{\code{madvise} sets a flag on the mapping and returns 0; the kernel never looks at the flag. The executable runs as the base does, plus one system call per advised mapping. On a kernel built without transparent huge pages the call fails with \code{EINVAL}, which the wrapper ignores. No message, no error.}\td{argued from the documentation; approximated by a process for which huge pages are switched off (\code{\verb~|prctl(PR_SET_THP_DISABLE)~}, inherited over \code{execve}): \code{madvise} returns 0 and the mapping shows the flag, a Mathlib pass with the first candidate is accepted with 0 MiB of \code{AnonHugePages}, 1.48 million page faults and the base's resident set (3,955 MiB on the host, 3,692 MiB in the container), cslib likewise (1,765 MiB)}}
+\tr{\td{\code{always}}\td{The kernel gives huge pages to every anonymous mapping that can hold one, advised or not, so the base gets them too and there is nothing to gain. The advice then changes one thing: with \code{defrag=madvise} an advised mapping waits for compaction where an unadvised one takes a small page at once, so there the advice can only cost.}\td{argued from the documentation; not tested}}
+}
+
+\ul{
+\li{\strong{\code{khugepaged}.} Advised mappings are also candidates for the kernel thread that collapses small pages into huge ones in the background. It scans 16 MiB in 10 s here, so in a pass of 14 s it does nothing that could be measured; in a run of minutes it may add up to 2 MiB per large array to the resident set by filling ranges that were only partly touched.}
+\li{\strong{Other page sizes.} On aarch64 kernels with 16 KiB or 64 KiB pages a huge page is 32 MiB or 512 MiB. The wrapper gives no advice there (it checks the base page size once).}
+\li{\strong{x86-64}, the architecture of the arena, has the same 4 KiB and 2 MiB pages and the same linker option; nothing was built or run there.}
+}
+}
+
+\subtree{
+\title{11. Memory, the container's account and the 16 GB of the arena}
+
+\ul{
+\li{\strong{Resident set}: not higher with the advice. The tables of section 5.2 for the eight corpora; section 9 for the small tests. A huge page makes 2 MiB resident at the first touch of any byte of it, so an array that is touched sparsely could grow; RLVM's large arrays are filled densely or from the front, and none of the 270 inputs shows it.}
+\li{\strong{In huge pages}: 60 to 65 \% of the resident set at its peak. Mathlib 2,460 of 3,957 MiB and 2,072 of 3,476 MiB in two single passes on the host, 2,328 of 3,860 and 2,554 of 4,094 MiB in the container; cslib 1,210 of 1,856 MiB, and 1,260 to 1,306 MiB over three processes of eight passes.}
+\li{\strong{The container's account.} One fresh arena-shaped container per run (\code{\verb~|bench/arena-docker.sh --arena-limits~}: the eight performance cores, 16 GB, no swap, no network), one Mathlib pass, first candidate, in a quiet-core window while the host had huge pages. The account is cgroup v2 \code{\verb~|memory.peak~}, which charges a huge page whole even when a part of it has been unmapped:}
+}
+
+\table{
+\tr{\th{Run}\th{\code{\verb~|memory.peak~}, MiB}\th{peak resident set, MiB}\th{peak \code{AnonHugePages}, MiB}\th{mappings at most}\th{page faults}\th{wall clock of the run, s}}
+\tr{\td{base}\td{3,620; 3,712}\td{3,616; 3,662}\td{0}\td{1,170; 1,130}\td{1,472,104; 1,485,429}\td{16.2; 16.2}}
+\tr{\td{candidate, advice}\td{3,863; 4,104}\td{3,860; 4,094}\td{2,328; 2,554}\td{1,180; 1,299}\td{673,771; 676,908}\td{14.8; 14.7}}
+\tr{\td{candidate, \code{\verb~|RLVM_HUGEPAGES=off~}}\td{4,005}\td{3,984}\td{0}\td{1,085}\td{1,472,057}\td{16.0}}
+\tr{\td{candidate, huge pages disabled for the process}\td{3,694}\td{3,692}\td{0}\td{1,195}\td{1,480,104}\td{16.2}}
+}
+
+\ul{
+\li{The account is the resident set to within 10 MiB in every row: no memory hides behind partly unmapped huge pages. All rows lie between 3.6 and 4.1 GB, a quarter of the limit, and their spread from run to run (base 3,620 to 3,712, without advice 4,005) is larger than any difference the advice makes. The wall clock of these single cold runs, sampled process included: 16.2 s against 14.7 to 14.8 s.}
+\li{\strong{The number of mappings}: 1,085 to 1,586 at most in any Mathlib run sampled, with or without the advice (the advice keeps a mapping from merging with a neighbour that has none, and removing it merges them again); the kernel's default limit is 65,530.}
+\li{\strong{The 16 GB.} Nothing in these numbers comes near the limit, and the heap limit of 13 GB and the driver's memory account of 12 GiB are untouched. What the arena's machine may add is not memory but the stall of section 6: with 16 GB, a 6.3 GB export in the page cache and whatever ran before, the kernel may have few free blocks of 2 MiB when Mathlib is checked. That machine was not available.}
+}
+}
+
+\subtree{
+\title{12. Gates}
+
+\p{The change is cost-only by construction: no Java source, no class file and no jar changes, and the wrapper adds system calls that move no data; switched off, it adds none. The gates were run all the same, through the launchers of the candidate distributions with no \code{\verb~|-X~} option. The first candidate was built on the jar set of the shared distribution of 09:13 UTC; during the afternoon a defect of the level store was found and repaired in the main tree (two modules), so the final candidate and a new base were built on the repaired jar set of the shared distribution of 15:57 UTC (\code{\verb~|5b983297e76e~}; the 22 jars of base and candidate have its sha256 each) and gated again.}
+
+\subtree{
+\title{12.1 The final candidate (advice off by default, repaired jar set)}
+
+\ul{
+\li{\strong{The gate of the default configuration through the executable} (\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~}, two lanes on the two spare performance cores): 230 of 230 published tests correct, none wrong, none declined; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034, no error and no timeout; the differential self-test caught its broken engine; 1,196 hostile rows: agree 1,124, tolerated accepts 68, wrong accept 0, wrong reject 0, declined 4, errors 0. These are the counts of the release.}
+\li{\strong{The eight corpora}: accepted with 8 and with 4 workers through the executable and through the JVM launcher of the candidate distribution, 32 runs of 32.}
+\li{\strong{Counters} (the gate of a cost-only change): one worker, batch load, the new base executable against the final candidate executable, every counter a run reports but times and memory sizes (177 to 182 per corpus): identical on all eight corpora (Mathlib 574,100,326 ticks, 288,313,296 records, 120 declined units, the numbers the first pair had before the repair as well).}
+\li{\strong{The suite of the module that got the file}: \code{rlvm-cli}, 49 tests, green (no Java source changed). The wrapper's own test is the one of section 7.2.}
+\li{\strong{The build's own verification}: the exit-status protocol, real heap exhaustion under a 128 MB cap, the Truffle probe, and the new step (16 advised mappings in the self-test under made-up kernel files).}
+\li{\strong{Through the jars}: not run. The jars are the shared distribution's, byte for byte, and are gated there.}
+}
+}
+
+\subtree{
+\title{12.2 The first candidate (plain advice on by default, jar set before the repair)}
+
+\ul{
+\li{\strong{The gate of the default configuration through the executable} (\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~}): 230 of 230 published tests correct, none wrong, none declined; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034, and two that ran into the gate's limit of 60 s; the differential self-test caught its broken engine; 1,196 hostile rows: agree 1,124, tolerated accepts 68, wrong accept 0, wrong reject 0, declined 4, errors 0.}
+\li{\strong{The two that hit the time limit} are the two mutants every gate of this day has met on a loaded host: \code{\verb~|bugs/proj-of-subst-prop~} and \code{\verb~|bugs/rec-of-subst-prop~} with a literal changed to 2^64 - 1 and 2^64: one worker, 3.5 GB resident, 17 to 30 s of CPU. The gate ran four lanes on the ten efficiency cores while the host's load average was 45 to 75, and a second time two lanes on the two spare performance cores, where a process got a quarter of a core: twice the same two, and nothing else. Alone, both executables reject both mutants (exit status 1); on one contended performance core the candidate needed 16.8 s of CPU for the first one and the base 24.0 s (kernel 0.27 against 3.20 s). With them counted as the rejections they are, the numbers are the release's: agree 15,741, declined 2,034.}
+\li{\strong{The eight corpora}: accepted with 8 and 4 workers through both launchers, 32 of 32. \strong{Counters}: identical to the base on all eight corpora (177 to 182 compared; Mathlib 574,100,326 ticks, 288,313,296 records, 120 declined units). \strong{The small tests of the arena}: section 9.}
+}
+}
+}
+
+\subtree{
+\title{13. What was not measured}
+
+\ul{
+\li{\strong{A quiet host.} Every window of this report was taken while the twelve cores outside the window were busy with other agents' jobs (load average 30 to 95). The eight measurement cores were the window's own; memory bandwidth, the last-level cache and, as section 6 shows, the kernel's free memory were shared. The executable's Mathlib pass was 13.1 s on a quiet host on the same day ([the integration](rep-INT8)) and 14.2 to 15.0 s here.}
+\li{\strong{The watched advice of the final candidate in a timing window}, and so a guard for it as a default. Its window (the base, the final candidate, the final candidate with \code{\verb~|RLVM_HUGEPAGES=on~}; eight corpora, three rounds, the host's free blocks and compaction counter logged around every corpus) had waited an hour in a queue of six agents when this report was written; it stays queued and its result is not in this report. What exists here is the test with made-up files and the counts of section 7.2 on two small corpora.}
+\li{\strong{A stall made on purpose.} The state without free huge pages came and went by itself. Making it (a helper that takes the host's free 2 MiB blocks) slows every process of a shared machine and was not done.}
+\li{\strong{x86-64}, the architecture of the arena: nothing was built or run there. The mechanism needs a linker with \code{\verb~|--wrap~} and a kernel with 4 KiB base pages; both are the normal case there. The optional native build of the CI workflow would be the first run.}
+\li{\strong{The system settings \code{never} and \code{always}}, and \code{defrag} other than \code{madvise}: the host's setting cannot be changed without privilege, also not for a container. \code{never} was approximated (section 10); \code{always} is argued only.}
+\li{\strong{A machine short of memory}, such as the arena's 16 GB with the export in the page cache. The container of section 11 limits what the process may use, not what the machine has.}
+\li{\strong{The optional Oracle GraalVM build}: not built (Oracle GraalVM is not used in this wave). It gets the same options from the same function of the build script; \code{\verb~|-H:NativeLinkerOption~} is an old option of Substrate VM and the commit path is the same serial collector, so it is expected to work, and \code{\verb~|--no-hugepages~} is the way out if it does not.}
+\li{\strong{Whose mappings carry the gain} (advice for the workers' mappings only, for the store's only) and \strong{2 MiB aligned chunks} with the copying old generation: both prepared, with their executables, and not timed (section 8).}
+\li{\strong{The reference engine alone} (\code{\verb~|-X policy=strict~}), one worker, and the JVM launcher, which is not touched: its jars are the base's.}
+\li{\strong{Huge pages for the export file.} The loader reads a mapped file; what its pages are is the page cache's matter and was not looked at.}
+}
+}
+
+\subtree{
+\title{14. The patch and what an integrator must know}
+
+\ul{
+\li{\strong{One patch}, four files: \src{scripts/build.sh} (the section "TRANSPARENT HUGE PAGES" with \code{\verb~|IMAGE_THP_DEFAULT=off~}, the functions \code{\verb~|hugepages_object~} and \code{\verb~|verify_hugepages~}, the option \code{\verb~|--no-hugepages~}, the text of the \code{\verb~|build:~} line, a line of \code{\verb~|BUILD-INFO.txt~}), the new \src{rlvm-cli/src/main/native/hugepages.c}, one paragraph in \src{rlvm-cli/README.md} and three lines in the root \src{README.md}. It applies without offset to the main tree as it is after the repair of the level store.}
+\li{\strong{Integrating it changes no plain run}: the advice is off. It is offered so that the lever stays in the image for whoever measures on a machine with free memory, and so that a later decision is one word. Not integrating it loses nothing that a default run has today.}
+\li{\strong{No jar changes}, so nothing is to be published to the shared Maven repository; a build of the shared distribution with the patched script is the whole integration. The new step needs a C compiler, which native-image needs anyway.}
+\li{\strong{The paths of the build script that were run}: with the wrapper (three images), \code{\verb~|--no-hugepages~} (one image: the old \code{\verb~|build:~} line, no wrapper), and the function that builds the wrapper with a compiler that fails, with a linker that ignores \code{\verb~|--wrap~}, with a wrapper that does not advise, and without the source file: each ends in a warning and an image without the wrapper. The wrapper was also compiled and linked in the arena-shaped container with gcc and GNU ld 2.42, clang, lld, mold and gold. Not run: \code{\verb~|--oracle-pgo~}; the arena's build line in the arena's own shell.}
+\li{\strong{Left to the integrator}: the changelog entry; the sample of the \code{\verb~|build:~} line and the row "Heap and collector" in [packaging](design-packaging); the comment on the heap settings in \src{scripts/arena/rlvm.yaml}; whether the launcher's help text should name \code{\verb~|RLVM_HUGEPAGES~} (that changes the launcher's jar; the two READMEs name it).}
+\li{\strong{For every timing of this wave that involves the JVM launcher}: it runs with \code{\verb~|-XX:+UseTransparentHugePages~}, so a row taken while the host had no free 2 MiB blocks carries the stall of section 6. \code{\verb~|compact_stall~} of \code{\verb~|/proc/vmstat~} before and after a run says whether it did.}
+\li{\strong{Two images of the same jars are not the same code} (section 5.3): a comparison of a new build against an old one carries a difference of up to a few percent that is not the change. This setting can be judged inside one executable.}
+}
+}
