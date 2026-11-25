@@ -13,9 +13,10 @@ from the journal's base-macros, sections as subtrees) with the journal's frontma
 file's name, allocated with `journal-new insight`. The Markdown output stays until docs/ has moved.
 
 Tables, in this order, one column per corpus and one row per checker and platform. THE FIRST ROWS
-ARE THE DEFAULT CONFIGURATION (the engine a run without -X engine checks with: --default-engine,
-today the reference engine; policy practical), on the JVM launcher and on the native image; then the
-other RLVM engine on both; then gruszka and nano-lean; then the ratios:
+ARE THE DEFAULT CONFIGURATION (the engine a run without -X engine checks with: --default-engine, the
+machine since 2026-11-25T03:05Z; policy practical): the executable (the release is one executable,
+the native image), the optional Oracle GraalVM build of it, the JVM launcher of a development
+distribution; then the other RLVM engine on the same; then gruszka and nano-lean; then the ratios:
 
     1. warm wall clock, 8 workers, load pipelined      median of the later passes (best later pass);
                                                        later = passes 4..N of 8 or more, else 2..N
@@ -120,8 +121,12 @@ def read_rows(paths: list[str]) -> list[dict]:
     return rows
 
 
-def select(rows: list[dict], labels: list[str], since: str | None, default_engine: str = "reference") -> dict:
-    """cells[(corpus, checker, launcher)] = {"warm8": row, "warm1": row, "cold8": row}: the latest eligible row each."""
+def select(rows: list[dict], labels: list[str], since: str | None, default_engine: str = "machine", default_since: str | None = None) -> dict:
+    """cells[(corpus, checker, launcher)] = {"warm8": row, "warm1": row, "cold8": row}: the latest eligible row each.
+    A row measured without -X engine (warm.py's "default") is a row of the default engine OF ITS TIME:
+    default_engine if it is not older than default_since (the time the default engine changed), the
+    other engine before that."""
+    previous = [e for e in ENGINES if e != default_engine][0]
     cells: dict = {}
     for row in sorted(rows, key=lambda r: r["utc"]):
         if row["quiet"] != "quiet" or (labels and row["label"] not in labels and not row["label"].startswith("oracle-pgo")) or (since and row["utc"] < since):
@@ -130,7 +135,8 @@ def select(rows: list[dict], labels: list[str], since: str | None, default_engin
             continue
         what = row["what"].split("+")[0]
         if what == "default":
-            what = default_engine   # measured without -X engine: the default configuration itself
+            # measured without -X engine: the default configuration itself, of the time of the row
+            what = default_engine if not default_since or row["utc"] >= default_since else previous
         # A row of the optional Oracle GraalVM build is a native-image row of another distribution: its
         # label starts with "oracle-pgo" (bench/warm.sh --launcher native --dist DIR --label oracle-pgo...).
         launcher = ORACLE if row["launcher"] == "native" and row["label"].startswith("oracle-pgo") else row["launcher"]
@@ -296,8 +302,12 @@ def main() -> int:
     parser.add_argument("--since", help="ignore rows and history entries older than this UTC time (2026-11-24T21:00:00Z)")
     parser.add_argument("--history", default=track.DEFAULT_HISTORY, help="the tracker's history, for the instruction counts")
     parser.add_argument("--instr-threads", type=int, default=8, help="worker count of the history entries used for table 6 (default 8)")
-    parser.add_argument("--default-engine", default="reference", choices=ENGINES,
-                        help="the engine a run without -X engine checks with (rlvm --version: 'default engine: NAME'); its rows come first (default reference)")
+    parser.add_argument("--default-engine", default="machine", choices=ENGINES,
+                        help="the engine a run without -X engine checks with (rlvm --version: 'default engine: NAME'); its rows come first "
+                             "(default machine: the default engine since 2026-11-25T03:05Z)")
+    parser.add_argument("--default-since", default="2026-11-25T03:05:00Z",
+                        help="the UTC time since which --default-engine is the default engine: a row measured WITHOUT -X engine before it "
+                             "is a row of the other engine (default 2026-11-25T03:05:00Z, the machine's publication as default; '' = no such time)")
     parser.add_argument("--notes", default=NOTES, help="markdown put in front of and behind the tables (default bench/track/benchmarks-notes.md)")
     parser.add_argument("--out", default=os.path.join(ROOT, "docs", "BENCHMARKS.md"))
     parser.add_argument("--stdout", action="store_true")
@@ -316,7 +326,7 @@ def main() -> int:
         parser.error("--tree needs --tree-author (the address of your identity tree in journal/trees/people/)")
     paths = args.tsv or [os.path.join(ROOT, "work", "perf-history", "warm.tsv")]
     labels = [x for x in args.labels.split(",") if x]
-    cells = select(read_rows(paths), labels, args.since, args.default_engine)
+    cells = select(read_rows(paths), labels, args.since, args.default_engine, args.default_since or None)
     CHECKERS = checkers(args.default_engine)
     corpora = [c for c in CORPORA if any(k[0] == c for k in cells)]
     corpora += sorted({k[0] for k in cells} - set(corpora))

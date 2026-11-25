@@ -81,8 +81,9 @@ CONFIGS: dict[str, dict] = {
             "what": "JVM launcher, its default flags"},
     "native": {"binary": "rlvm", "java_opts": None,
                "what": "native image, GraalVM CE, serial GC"},
-    "pgo": {"binary": "rlvm-pgo", "java_opts": None,
-            "what": "native image, Oracle GraalVM + PGO (measurement only: licence question open)"},
+    # The optional Oracle GraalVM build is the same single executable in a distribution of its own
+    # (scripts/build.sh --oracle-pgo -> work/dist-oracle-pgo/bin/rlvm): run the matrix with
+    # --dist work/dist-oracle-pgo --configs native to measure it. No build makes bin/rlvm-pgo any more.
     # --- host JIT ---------------------------------------------------------------------------------
     "jvm-c2": dict(jvm(SERIAL, C2, CI2, HEAP13), what="C2 host JIT, 2 compiler threads (= launcher default, spelled out)"),
     "jvm-c2-auto": dict(jvm(SERIAL, C2, HEAP13), what="C2 host JIT, HotSpot's own compiler thread count"),

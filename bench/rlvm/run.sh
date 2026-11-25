@@ -11,7 +11,10 @@
 #
 #   --native        work/dist/bin/rlvm       native image, GraalVM CE   (default; the arena's binary)
 #   --jvm           work/dist/bin/rlvm-jvm   the same jars on the JVM
-#   --pgo           work/dist/bin/rlvm-pgo   native image, Oracle GraalVM + PGO
+#   --pgo           work/dist-oracle-pgo/bin/rlvm   the OPTIONAL executable built with Oracle GraalVM and
+#                   the shipped profile (scripts/build.sh --oracle-pgo; GFTC licence, never a default
+#                   build): the same single executable in a distribution of its own. With --dist DIR:
+#                   bin/rlvm of that directory
 #   --threads N     replace the worker count of the run line (yaml default: see `run:`)
 #   --dist DIR      use another distribution directory (default: work/dist)
 #   --print         print the shell command instead of running it (used by suite.sh, measure.sh)
@@ -31,18 +34,19 @@ YAML="$ROOT/scripts/arena/rlvm.yaml"
 mode=native
 threads=""
 dist="work/dist"
+dist_given=0
 print_only=0
 selftest=0
 export_file=""
 extra=()
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --native|--jvm|--pgo) mode="${1#--}"; shift ;;
     --threads|-j) threads="${2:?$1 needs a number}"; shift 2 ;;
-    --dist) dist="${2:?--dist needs a directory}"; shift 2 ;;
+    --dist) dist="${2:?--dist needs a directory}"; dist_given=1; shift 2 ;;
     --print) print_only=1; shift ;;
     --selftest) selftest=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -58,7 +62,7 @@ case "$threads" in ''|*[!0-9]*) [ -z "$threads" ] || { echo "run.sh: --threads n
 case "$mode" in
   native) binary=rlvm ;;
   jvm) binary=rlvm-jvm ;;
-  pgo) binary=rlvm-pgo ;;
+  pgo) binary=rlvm; [ "$dist_given" = 1 ] || dist="work/dist-oracle-pgo" ;;   # no build makes bin/rlvm-pgo any more
 esac
 case "$dist" in /*) dist_abs="$dist" ;; *) dist_abs="$ROOT/$dist" ;; esac
 

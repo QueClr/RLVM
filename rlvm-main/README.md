@@ -28,7 +28,7 @@ scripts/dev.sh slice                                              # table for mo
 | Key | Meaning | Default |
 |---|---|---|
 | `policy=practical\|strict` | what the run promises (owner note 13; section "Policy" below). `strict` = the reference engine plus every exactness-only option the jars of the run have; `practical` = the default engine by priority and none of them | `practical` |
-| `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. An engine with a lower priority (the machine registers with 10 until it has passed its gates) is in the distribution as a candidate: it runs when named or compared, never by default |
+| `engine=NAME` | `reference`, `machine`, or any registered provider name | the non-reference engine with the highest priority **of at least 100** (`Engines.DEFAULT_ENGINE_MIN_PRIORITY`); the reference kernel if there is none. **Since 2026-11-25 that engine is the machine** (its provider's priority is 100; `rlvm --version` prints `default engine: machine` and its switch set); the reference engine re-checks every rejection and decides what the machine declines, and a run that means the reference engine says `-X engine=reference` or `-X policy=strict`. An engine with a lower priority is in the distribution as a candidate: it runs when named or compared, never by default |
 | `engine=diff` | differential run. With the test kit's provider `diff` on the class path (`scripts/dev.sh diff`): its `DiffEngine` is the primary engine (engine under test and oracle per unit; the driver's own differential mode stays off). Without it: the best non-reference engine is the primary engine and the driver runs the reference kernel beside it on every unit (`RunConfig.differential`); a usage error (64) if the reference kernel is the only engine | - |
 | `load=batch\|pipelined\|auto` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `auto` (since 2026-11-24, owner note 12): **`pipelined` when two or more workers run and the input is a file of at least `pipeline-min-mib`** and no `stop-after` phase is asked for, else `batch` (`MainOptions.resolveLoadDefaults`; section "Load defaults and the automatic worker count"). It was `batch` |
 | `order=file\|namespace` | order of ready units | the driver's (`file`) |
@@ -266,14 +266,16 @@ the reference engine; an explicit `-Xmx` / `-Xms` / `-Xmn` replaces the heap fla
 because a run-time `-Xmx` below 1g then stops the image at start-up with status 1. The test kit is
 never part of a distribution (22 jars in a tree build and in a `--published` build alike). Since 11:18Z a
 `--published` build also copies the published `rlvm-machine` jar into `lib/` (the machine workflow's
-integrator added the module to the parent pom and that block to `scripts/build.sh`); the machine
-registers with priority 10 and is therefore never the default engine (`Engines`).
+integrator added the module to the parent pom and that block to `scripts/build.sh`); the machine's
+provider has priority 100 since 2026-11-25, so it is the default engine of every such build (`Engines`).
 
 ## What runs today
 
 The whole pipeline: `rlvm FILE` loads the export (`rlvm-export` reader, `rlvm-load`, `rlvm-store`), runs
 the environment pass and admission (`rlvm-admit`, `rlvm-inductive`) and checks every unit with the
-reference engine (`rlvm-ref`) under `rlvm-driver`, with 1..N workers. Results of 2026-11-24 (tables with
+default engine under `rlvm-driver`, with 1..N workers: the machine (`rlvm-machine`) since 2026-11-25,
+with the reference engine (`rlvm-ref`) re-checking every rejection and deciding every decline. The table
+below is of 2026-11-24, when the reference engine checked by default (`-X engine=reference` today; tables with
 the exact jars: `work/status/slice.md`, `slice-all.md`; history in `work/status/steward.log`):
 
 | run (jars as published by 06:05Z) | correct | wrong | declined | CPU (sum over tests) | wall (8 at a time) |
@@ -350,26 +352,18 @@ With the jars published by 10:56Z (`work/dist/BUILD-INFO.txt`), reference engine
 Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, collectors, heap):
 `docs/PLATFORM.md`.
 
-## State of 2026-11-25 (packaging owner; supersedes what the sections below say about defaults)
+## Defaults of a run without options
 
-- The release is ONE executable (journal: `design-packaging`); `rlvm --version` ends with `default: ...`,
-  this checker's own statement of what a run without options does (`RlvmChecker.defaults()`).
-- One scanner thread instead of two for inputs of 256 MiB and more (`MainOptions.DEFAULT_SCAN_THREADS`;
-  journal: decision `dec-EGMG`); the worker rule (one per CPU, at most 8) and the load rule (pipelined
-  from 8 MiB) were measured again with the machine as engine and stay.
-
-## State of 2026-11-24, 23Z (steward B2; the scanner-thread count below is superseded by the section above)
-
-- Published: `rlvm-main` `21150203e39d` (54 tests: 51 run green, 3 opt-in), `rlvm-cli` `cac1433b287a` (49).
-- Defaults of a run without options: load `auto` (pipelined for two or more workers on a file of 8 MiB or
-  more; 2 scanner threads on mapped input from 256 MiB), `--threads auto` = one worker per CPU up to 8
-  (decided here, not by the driver), policy `practical`, the default engine by priority (the reference
-  engine today).
-- Gate of that publication (`scripts/gate.sh --dist work/b2/dist-c --defaults --corpus all`, the
-  distribution exactly as a user runs it): 230 / 230; 17,775 mutants SOUNDNESS 0 / COMPLETENESS 0 (agree
-  16,092, declined 1,683); self-test caught; the driver's invariance suite on the published tests PASS
-  with 0 pipelined declines; the arena's complete test set (270) with `--threads 8`: no wrong verdict;
-  the eight corpora accepted; `scripts/dev.sh arena-test` PASS. Measurements: `docs/PLATFORM.md` 0.5, 0.6.
+- Engine: the machine, with the switch set `rlvm --version` prints; policy `practical`. The reference
+  engine re-checks every rejection and decides every declaration the machine declines; `-X engine=reference`
+  or `-X policy=strict` checks with it alone.
+- Load `auto`: pipelined for two or more workers on a file of 8 MiB or more; one scanner thread on mapped
+  input from 256 MiB (`MainOptions.DEFAULT_SCAN_THREADS`). `--threads auto`: one worker per CPU, at most 8
+  (decided here, not by the driver). The measurements behind both: *agentic-note*: dec-EGMG.
+- `rlvm --version` ends with `default: ...`, this checker's own statement of the above
+  (`RlvmChecker.defaults()`); the release is one executable (*agentic-note*: design-packaging).
+- What gates a change of a default: `scripts/gate.sh --defaults --corpus all --hostile`, through the jars
+  and with `--native` through the executable (*agentic-note*: design-gate).
 
 ## Known gaps
 

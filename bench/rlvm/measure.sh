@@ -68,13 +68,13 @@ if [ "${#modes[@]}" -eq 0 ]; then modes=(native); fi
 if [ "${modes[0]}" = all ]; then
   modes=()
   [ ! -x "$ROOT/work/dist/bin/rlvm" ] || modes+=(native)
-  [ ! -x "$ROOT/work/dist/bin/rlvm-pgo" ] || modes+=(pgo)
+  [ ! -x "$ROOT/work/dist-oracle-pgo/bin/rlvm" ] || modes+=(pgo)   # the optional Oracle GraalVM executable
   [ ! -x "$ROOT/work/dist/bin/rlvm-jvm" ] || modes+=(jvm)
 fi
 [ "${#modes[@]}" -gt 0 ] || { echo "measure.sh: nothing built in work/dist; run scripts/build.sh" >&2; exit 70; }
 for m in "${modes[@]}"; do
-  case "$m" in native) b=rlvm ;; jvm) b=rlvm-jvm ;; pgo) b=rlvm-pgo ;; esac
-  [ -x "$ROOT/work/dist/bin/$b" ] || { echo "measure.sh: work/dist/bin/$b not found; build it with scripts/build.sh" >&2; exit 70; }
+  case "$m" in native) b=work/dist/bin/rlvm ;; jvm) b=work/dist/bin/rlvm-jvm ;; pgo) b=work/dist-oracle-pgo/bin/rlvm ;; esac
+  [ -x "$ROOT/$b" ] || { echo "measure.sh: $b not found; build it with scripts/build.sh (--dev for the JVM launcher, --oracle-pgo for the optional Oracle build)" >&2; exit 70; }
 done
 
 # ------------------------------------------------------------------------------------------------

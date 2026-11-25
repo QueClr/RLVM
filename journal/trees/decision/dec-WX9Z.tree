@@ -6,12 +6,13 @@
 \tag{platform}
 \tag{arena}
 \tag{performance}
-\meta{status}{accepted}
+\meta{status}{superseded}
 \meta{created}{2026-11-24}
+\meta{updated}{2026-11-24}
 \meta{origin}{docs/PLATFORM.md}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. Both launchers are in every distribution; the arena definition names the native image.}
+\p{\strong{Status:} superseded on 2026-11-24 by [the packaging of one executable](design-packaging) and [the settings of its plain run](dec-EGMG). The maintainer asked for a single entry executable with the fastest default: the release is the native image alone, and the JVM launcher is a tool of the repository that is built only into a development distribution. What stands of this decision: the measurements below; that the arena definition names the native image; and that warm measurements of the jars on a JIT are taken on the JVM launcher. What no longer holds: that both launchers are in every distribution and that a user chooses between them.}
 
 \p{\strong{Context.} The same jars run as a native image of GraalVM CE and on HotSpot, see [the launchers](design-launchers). The design planned one platform gate, decided by CPU time, for when the machine first accepted Init. That gate was measured on fresh processes with a batch load and the machine as engine: the native image needed 0.68 / 0.46 / 0.37 times the JVM launcher's CPU time with 1 / 4 / 8 workers (medians of 8 paired runs each on Init, Std, the Cedar slice and reachability; the image won all 24 pairs) and a third to a half of its memory. The JVM pays about 3.7 s of C2 compilation per run and runs every worker slowly until it is done. While the gate was being written up, [the metric changed](dec-7QMU): the goal is wall clock after warm-up, warm-up cost is not charged, and the platform question is decided by warm wall clock. The cold answer stays true for what an arena run is, one fresh process per export, and no longer decides which platform is the fast one.}
 

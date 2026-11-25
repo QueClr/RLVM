@@ -27,6 +27,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-65Z0}
 \transclude{log-T9JD}
 \transclude{log-SZTZ}
 \transclude{log-RGSR}
@@ -83,6 +84,8 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-RCAL}
+\transclude{log-Z220}
 \transclude{log-XXB9}
 \transclude{log-XQ08}
 \transclude{log-MCZW}

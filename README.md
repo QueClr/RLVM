@@ -16,9 +16,9 @@ Two engines are in the executable:
 - the **reference engine**, a port of the official kernel's algorithm to hash-consed terms; it confirms every
   rejection, decides every declaration the machine declines, and alone it is the strict mode.
 
-Which engine a plain run checks with is decided by the engines themselves and printed by `rlvm --version`.
-Today it is the reference engine: the machine runs with `-X engine=machine` until its integrator publishes it
-as the default engine (it needs a half to a fifth of the reference engine's wall clock on the library corpora).
+A plain run checks with the machine (`rlvm --version` prints the default engine and its switch set); the
+reference engine re-checks every rejection and decides what the machine declines. `-X engine=reference` or
+`-X policy=strict` checks with the reference engine alone.
 
 **Status: a research prototype.** It is developed and measured by coding agents under the direction of the
 maintainer; the design notes, decisions, measurements and the changelog are the journal
@@ -65,21 +65,20 @@ The policy of the default configuration is "practical" (the maintainer's standin
 on the official implementation's object identity (a metadata node around a term, for example) instead of
 accepting it.
 
-What stands behind this today (2026-11-25, reference engine as default; *agentic-note*: design-gate):
+What stands behind this today (2026-11-25, the machine as default engine; *agentic-note*: design-gate):
 
-- gated, through the executable and through the jars: the 230 published arena tests (230 correct, none
-  declined); 17,775 mutants of them against the stored verdicts of the official checker (no accepted bad mutant,
-  no rejected good one; 2,034 declined, most of them mutants with a metadata node, which a rejection re-checks
-  under the strict policy); 1,245 hostile exports with their official verdicts (no wrong accept, no wrong
-  reject; 6 accepts of kind (d)). Earlier builds: the arena's complete test set of 270 by the
-  arena's own procedure (no wrong verdict; two `either` tests on which the official kernel does not terminate
-  are declined); Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and mathlib accepted; the
-  verdict does not depend on the number of workers or on how loading and checking interleave;
-- not established: (a) is supported by tests and adversarial review, not by a proof; the machine has open review
-  findings and is not the default engine yet; on x86-64 (the arena's architecture) only the unit tests have run
-  (continuous integration): the executable, the corpora and the release workflow have never run there; no release
-  has been published; the checker definition for the arena (`scripts/arena/rlvm.yaml`) is a draft that
-  has not been submitted.
+- gated on the launcher without any option, through the jars and through the executable: the 230 published arena
+  tests (230 correct, none declined); 17,775 mutants of them against the stored verdicts of the official checker
+  (no accepted bad mutant, no rejected good one; agree 15,741, declined 2,034); 1,196 hostile exports with their
+  official verdicts (no wrong accept, no wrong reject; agree 1,124, 68 accepts of kind (d), 4 declined); Init,
+  Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and mathlib accepted; the verdict does not
+  depend on the number of workers or on how loading and checking interleave;
+- not established: (a) is supported by tests and adversarial review, not by a proof; the arena's complete test
+  set of 270 by the arena's own procedure was run on earlier builds only (no wrong verdict there; two `either`
+  tests on which the official kernel does not terminate are declined); on x86-64 (the arena's architecture) only
+  the unit tests have run (continuous integration): the executable, the corpora and the release workflow have
+  never run there; no release has been published; the checker definition for the arena
+  (`scripts/arena/rlvm.yaml`) is a draft that has not been submitted.
 
 ## Get it
 
@@ -112,21 +111,21 @@ lists the rest (development distributions that also run the jars on a JVM, the g
 <!-- table: bench/track/benchmarks.py --headline (the rows of bench/warm.sh; *agentic-note*: dec-EGMG) -->
 | One run, 8 cores: wall clock in s (warm pass) | init (348 MB) | std (584 MB) | cedar (905 MB) | reachability (19 MB) | con-leche (702 MB) | navier-stokes-euler (1.56 GB) | cslib (2.50 GB) | mathlib (6.33 GB) |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|
-| **`rlvm FILE`** (the executable, default configuration: reference engine) | 2.10 (1.98) | 3.56 (3.38) | 4.51 (4.41) | 5.10 (4.74) | - | - | - | 92.00 (91.76) |
-| `rlvm -X engine=machine FILE` | 0.78 | 1.38 | 1.91 | 0.67 | 1.89 | 4.53 | 6.15 | 16.87 |
+| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.78 | 1.38 | 1.91 | 0.67 | 1.89 | 4.53 | 6.15 | 16.87 |
+| `rlvm -X engine=reference FILE` | 2.10 (1.98) | 3.56 (3.38) | 4.51 (4.41) | 5.10 (4.74) | - | - | - | 92.00 (91.76) |
 | gruszka | 0.71 (0.71) | 1.40 (1.28) | 2.74 (1.73) | - | - | - | - | 13.28 (14.20) |
 | nano-lean | 1.05 (1.03) | 1.75 (1.74) | 2.65 (2.64) | - | - | - | - | 18.68 (18.66) |
-| *rlvm / gruszka* | 2.96x | 2.54x | 1.65x | - | - | - | - | 6.93x |
-| *rlvm / nano-lean* | 2.00x | 2.03x | 1.70x | - | - | - | - | 4.93x |
+| *rlvm / gruszka* | 1.10x | 0.99x | 0.70x | - | - | - | - | 1.27x |
+| *rlvm / nano-lean* | 0.74x | 0.79x | 0.72x | - | - | - | - | 0.90x |
 <!-- end table -->
 
 Conditions: one host (aarch64, Cortex-X925), 8 cores reserved for one measurement at a time while the other 12
 cores were busy, 2026-11-24 and 2026-11-25; each figure is one fresh process of the executable (8 workers, the
 file checked while it is read), in brackets the median later pass of one process that checks the export several
-times, where one was taken on the same build. The first row is a run without any option; the second is the
-machine with the switch set its integrator is about to publish as its default
-(`-X engine=machine -X machine.switches=default,eager,skipargs,congruence`), the median of three runs, con-leche
-and mathlib one run; "-" = not measured on this build. gruszka and nano-lean with their arena run lines and 8
+times, where one was taken on the same build. The first row is the default configuration, a run without any
+option (the machine with its default switch set; taken an hour before the last machine jar, with that switch set
+named on the command line: the median of three runs, con-leche and mathlib one run); the second row is the
+reference engine, as `-X engine=reference` gives it; "-" = not measured on this build. gruszka and nano-lean with their arena run lines and 8
 threads on the same cores, first (second) of two runs. Two identical rows differ by up to 5 %. Not the arena's metric (instructions) and not its
 architecture (x86-64). All tables, per metric and with the provenance of every cell: the journal (*agentic-note*: dec-EGMG, and
 `docs/BENCHMARKS.md` until it has moved there).

@@ -73,7 +73,7 @@ bench/arena-docker.sh --arena-limits --no-network bench/measure.sh --require-per
 ```
 
 - `RUN LINE` is the arena's own run line of RLVM (`scripts/arena/rlvm.yaml`, through
-  `bench/rlvm/run.sh --print`), with the launcher (`--launcher native|jvm|pgo`), the thread count
+  `bench/rlvm/run.sh --print`), with the launcher (`--launcher native|jvm|pgo`; `pgo` = `bin/rlvm` of the optional Oracle GraalVM distribution `work/dist-oracle-pgo`), the thread count
   (`--threads`), the engine (`--engine NAME` = `-X engine=NAME`), extra arguments (`--rlvm-arg`) and,
   for the JVM launcher, extra class path entries (`--extra-cp`, i.e. `RLVM_EXTRA_CP`) replaced on request.
 - A published bad test is a valid measurement only when it is rejected (exit status 1); every other

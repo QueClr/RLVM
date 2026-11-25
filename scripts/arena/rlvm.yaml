@@ -1,65 +1,43 @@
 # DRAFT arena checker definition for RLVM (lean-kernel-arena: checkers/rlvm.yaml). NOT SUBMITTED.
 #
-# `url` is the public repository (https://github.com/QueClr/RLVM; OWNER-NOTES item 14: the code is
-# dual-licensed Apache-2.0 OR MIT). `ref` and `rev` below are still PLACEHOLDERS, on purpose: nothing
-# had been pushed when this file was written. They are filled in AT SUBMISSION with the branch and the
-# full hash of a pushed commit that contains pom.xml, env.sh, scripts/ and every module of the parent
-# pom (the arena fetches exactly that commit with depth 1), and this file is re-read against the
-# binary once more then.
+# `url` is the public repository (the code is dual-licensed Apache-2.0 OR MIT). `ref` and `rev` below are
+# still PLACEHOLDERS, on purpose: they are filled in AT SUBMISSION with the branch and the full hash of
+# a pushed commit that contains pom.xml, env.sh, scripts/ and every module of the parent pom (the arena
+# fetches exactly that commit with depth 1), and this file is re-read against the binary once more then.
 #
-# WHAT IS SHIPPED NOW (2026-11-24, 23:00Z; docs/PLATFORM.md, docs/BENCHMARKS.md):
+# WHAT IS SHIPPED (2026-11-25; *agentic-note*: design-packaging, *agentic-note*: design-gate):
 #
-# - The complete pipeline, checking with the REFERENCE engine by default (rlvm-ref: the official
-#   kernel's algorithm on hash-consed terms). On the arena's complete test set (270 tests: 148 good incl.
-#   the eight corpora, 92 bad, 30 `either`) it gives NO WRONG VERDICT: 148 of 148 good tests accepted, 92
-#   of 92 bad tests rejected, and of the `either` tests 9 accepted, 19 rejected and TWO DECLINED
-#   (`corner-cases/eta-struct-major-no-whnf` and `eta-struct-major-and-no-whnf`: the official kernel does
-#   not terminate there, RLVM says so and exits with 2). Measured by the arena's own procedure (one
-#   arena-shaped container, tests one after the other, the arena's time limits, perf stat) with THIS run
-#   line, `--threads 8`, on the distribution of the jars published at 22:32Z (rlvm-main 21150203e39d;
-#   docs/PLATFORM.md section 0.7): no error, no timeout (closest to its limit: perf/app-lam, 11.3 s of 70 s);
-#   mathlib: accepted in 92 s of wall clock, 618 s of CPU time, 8,455 G instructions, 7.5 GiB peak RSS
-#   (aarch64). The same counts as docs/research/profiles/AR1.md, section 0.1, found with `--threads 4`
-#   on the jars of 18:28Z (mathlib then: 178 s wall, 8,427 G instructions, 5.5 GiB).
-# - The machine (rlvm-machine: the worklist machine, the engine the project is named after) is compiled
-#   into the binary and runs ONLY ON REQUEST (`-X engine=machine`; the reference engine then confirms
-#   every rejection and decides what the machine declines; `-X engine=diff` compares the two). It was the
-#   default engine for 54 minutes on 2026-11-24 and was taken back: hand-made exports show wrong ACCEPTs
-#   against the official checker (findings E1-F1 .. E1-F7, S3-F1 .. S3-F6 in work/status/requests.log; some
-#   fixed since, some open, and how exact the machine must be on exports that exploit the official
-#   implementation's cache order is a question that is with the owner). Its provider's priority is 10;
-#   rlvm.main.Engines.DEFAULT_ENGINE_MIN_PRIORITY is 100. With the machine as engine this run line needed
-#   about a third of the reference engine's CPU time on the library corpora.
-# - THE POLICY of the default configuration is "practical" (owner's decision, docs/design/OWNER-NOTES.md
-#   item 13): (a) never accept a statement that is not derivable in Lean's type theory; (b) the official
-#   verdict on every real input - what lean4export writes, the arena's good and bad tests, the mutant
-#   corpora; (c) everything the official checker accepts is accepted; (d) a derivable statement that the
-#   official checker rejects only through its own incompleteness, non-transitivity, cache order or object
-#   identity may be accepted (the known classes: docs/design/review/official-divergence.md; for the
-#   reference engine: a metadata node around a term, the non-dependence flag of a `let`, two export
-#   records for one subterm - findings S3-F2, R2-F1, R2-F2; none is on the arena's test set). The strict
-#   mode is one option, `-X policy=strict`: the reference engine, declining where it would need the
-#   official object identity. The run line below is the default policy.
-#
-# WHEN THE MACHINE BECOMES THE DEFAULT ENGINE (its integrator publishes MachineProvider.priority() = 100
-# after its gates; nothing in this file selects the engine, the binary follows the priority by itself):
-# replace the second paragraph of `description` by the text between the two marker lines, re-run
-# `scripts/dev.sh arena-test --reuse --strict` and the arena's procedure of AR1.md on the new binary, and
-# move the sentences of this comment that say "reference engine by default".
-#   --- description, second paragraph, machine by default ---
-#   This version checks every declaration with its *machine*: a worklist machine whose instructions
-#   are the judgments of the kernel algorithm (type inference, weak-head normalisation, definitional
-#   equality with lazy delta reduction, the Nat and String literal extensions), with the
-#   environment's constants elaborated into code for it, over hash-consed terms that are integer ids
-#   into flat primitive arrays, which the garbage collector does not trace. A second engine is in
-#   the same binary: the *reference engine*, a direct port of the official kernel's algorithm. It
-#   re-checks every rejection of the machine before it is reported and decides every declaration
-#   the machine declines, so a rejection is never the machine's word alone. Universe levels are
-#   compared as the official kernel compares them. The policy is *practical* (see below);
-#   `-X policy=strict` checks with the reference engine alone.
-#   --- end ---
-# - The Truffle tier (rlvm-truffle) is compiled into the binary and OFF (switch t2 of the machine): its
-#   owner's verdict is NO-GO as a default (rlvm-truffle/NOTES-T3.md, section 1).
+# - THE MACHINE IS THE DEFAULT ENGINE since 2026-11-25T03:05Z (rlvm-machine: the worklist machine, the
+#   engine the project is named after; its provider's priority is 100 and nothing in this file selects
+#   the engine, the binary follows the priority). A run without options checks with the machine and the
+#   switch set that `rlvm --version` prints (the set of wave 6 plus eager reduction and the two
+#   proof-comparison shortcuts, skipargs and congruence). The reference engine (rlvm-ref: the official
+#   kernel's algorithm on hash-consed terms) re-checks every rejection before it is reported and decides
+#   every declaration the machine declines; `-X engine=reference` or `-X policy=strict` checks with it
+#   alone.
+# - GATED on the machine-default launcher, no -X anywhere (scripts/gate.sh --defaults --corpus all
+#   --hostile; the oracle of every step is an official verdict): 230 of 230 published arena tests
+#   correct, none declined; 17,775 mutants of them: no accepted bad mutant, no rejected good one (agree
+#   15,741, declined 2,034); 1,196 hostile exports: no wrong accept, no wrong reject (agree 1,124, 68
+#   accepts of the tolerated kind, 4 declined); all eight corpora accepted.
+# - THE ARENA'S COMPLETE TEST SET (270 tests: 148 good incl. the eight corpora, 92 bad, 30 `either`) by
+#   the arena's own procedure was run on EARLIER builds: with the reference engine as the default (no
+#   wrong verdict: 148 of 148 good accepted, 92 of 92 bad rejected, of the `either` tests 9 accepted, 19
+#   rejected and TWO DECLINED - `corner-cases/eta-struct-major-no-whnf` and
+#   `eta-struct-major-and-no-whnf`: the official kernel does not terminate there, RLVM says so and exits
+#   with 2) and with the machine and this switch set named on the run line (the same status on every
+#   test). It has NOT been run again on the machine-default binary: to do before submission.
+# - THE POLICY of the default configuration is "practical" (the maintainer's decision; *agentic-note*:
+#   design-exactness-contract): (a) never accept a statement that is not derivable in Lean's type
+#   theory; (b) the official verdict on every real input - what lean4export writes, the arena's good and
+#   bad tests, the mutant corpora; (c) everything the official checker accepts is accepted; (d) a
+#   derivable statement that the official checker rejects only through its own incompleteness,
+#   non-transitivity, cache order or object identity may be accepted (the known classes: *agentic-note*:
+#   design-official-divergence; none is on the arena's test set). A rejection of a file in which the
+#   loader dropped a metadata node is checked again in the strict mode before it is reported. The strict
+#   mode is one option, `-X policy=strict`: the reference engine alone, declining where it would need
+#   the official object identity. The run line below is the default policy.
+# - The Truffle tier (rlvm-truffle) is compiled into the binary and OFF (switch t2 of the machine).
 #
 # ONE EXECUTABLE (owner note 16; *agentic-note*: design-packaging): the build makes exactly one file,
 # `work/dist/bin/rlvm`, a GraalVM CE native image (-O3, serial collector) that needs no JDK and no jars,
@@ -72,7 +50,7 @@
 # first run of Init, Std or cedar) is a development tool for the warm benchmarks and the gates; it is not
 # built by the arena's build line and not part of a release.
 # The build uses GraalVM CE only; Oracle GraalVM is never downloaded or used by a default build
-# (docs/design/OWNER-NOTES.md, items 11 and 16: a profile-guided build with Oracle GraalVM exists as an
+# (the maintainer's standing policies, *agentic-note*: standing-policies: a profile-guided build with Oracle GraalVM exists as an
 # explicit option of scripts/build.sh and is not what this definition builds).
 #
 # WHAT THE BUILD LINE BUILDS: scripts/arena/build.sh = scripts/build.sh from the tree, online Maven with
@@ -84,16 +62,15 @@
 # with the `javap` and `jar` of the GraalVM the build downloads - nothing the arena's shell must have -
 # and the build falls back to an image without them if that fails.
 #
-# WORKERS AND LOAD: `--threads 8`, one worker per CPU of the 8-vCPU runner (what `--threads auto` chooses
-# there), decided by WALL CLOCK (OWNER-NOTES item 12; it was 4, the count by CPU time). Cold, native
-# image, reference engine, 8 / 7 / 4 workers: Init 2.30 / 2.49 / 3.67 s, Std 3.89 / 4.06 / 6.21 s, cedar
-# 5.00 / 5.32 / 7.86 s at the same CPU time (Init 14.7 / 14.7 / 14.4 s); with the machine 7 and 8 are
-# equal (Init 0.83 / 0.85 s). Without any option a run with two or more workers on a file of 8 MiB or
-# more loads PIPELINED (the workers check while the file is read; two scanner threads from 256 MiB):
-# docs/PLATFORM.md sections 0.5 and 0.6. The arena's small tests are below 8 MiB and are loaded in one
-# piece as before; the driver gives a file one worker per 128 declarations, so most of them run on one.
-# To change the count, change BOTH numbers below (`--threads` in the run line and `threads:`, the CPU
-# slots the arena's parallel runner reserves).
+# WORKERS AND LOAD (*agentic-note*: dec-EGMG): `--threads 8`, one worker per CPU of the 8-vCPU runner
+# (what `--threads auto` chooses there), decided by wall clock: with the machine 7 workers are level
+# with 8 and 6 are 5 % slower. Without any option a run with two or more workers on a file of 8 MiB or
+# more loads PIPELINED (the workers check while the file is read; one scanner thread from 256 MiB); a
+# batch load is 21 % slower. The arena's small tests are below 8 MiB and are loaded in one piece; the
+# driver gives a file one worker per 128 declarations, so most of them run on one. The image runs with
+# a heap of at most 13 GB and the collection policy BySpaceAndTime of the serial collector (`rlvm
+# --version` prints the settings). To change the count, change BOTH numbers below (`--threads` in the
+# run line and `threads:`, the CPU slots the arena's parallel runner reserves).
 #
 # bench/rlvm/run.sh, suite.sh and measure.sh read the `run:` line of this file, so that local
 # measurements execute exactly the command the arena would. Keep it on one line.
@@ -101,16 +78,16 @@ description: |
   **RLVM** (Rabdos Lean VM) is a Lean 4 kernel written in Java and shipped as a GraalVM native
   image (no JVM start-up, no warm-up).
 
-  This version checks every declaration with its *reference engine*: a direct port of the official
-  kernel's algorithm (type inference, weak-head normalisation, definitional equality with lazy
-  delta reduction, the official caches, the Nat and String literal extensions) to hash-consed
-  terms that are integer ids into flat primitive arrays, which the garbage collector does not
-  trace. Universe levels are compared as the official kernel compares them. The engine the
-  project is named after - a worklist machine whose instructions are the judgments of the kernel
-  algorithm, with the environment's constants elaborated into code for it - is in this binary and
-  roughly two to three times faster on the library corpora, but it does not check by default
-  yet: it runs on request (`-X engine=machine`) until its review is complete, and the reference
-  engine will remain as the engine that confirms every rejection.
+  This version checks every declaration with its *machine*: a worklist machine whose instructions
+  are the judgments of the kernel algorithm (type inference, weak-head normalisation, definitional
+  equality with lazy delta reduction, the Nat and String literal extensions), with the
+  environment's constants elaborated into code for it, over hash-consed terms that are integer ids
+  into flat primitive arrays, which the garbage collector does not trace. A second engine is in
+  the same binary: the *reference engine*, a direct port of the official kernel's algorithm. It
+  re-checks every rejection of the machine before it is reported and decides every declaration
+  the machine declines, so a rejection is never the machine's word alone. Universe levels are
+  compared as the official kernel compares them. The policy is *practical* (see below);
+  `-X policy=strict` checks with the reference engine alone.
 
   Policy: *practical*. RLVM gives the official verdict on everything a Lean exporter writes and
   on the arena's tests, and never accepts a statement that is not derivable in Lean's type

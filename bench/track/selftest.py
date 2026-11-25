@@ -219,7 +219,8 @@ def test_benchmarks() -> None:
             # a row of the tool before the dist / build columns
             handle.write("\t".join(row(corpus="std", what="reference").split("\t")[:22]) + "\n")
         result = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
-                                 "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True)
+                                 "--history", "/nonexistent", "--notes", "/nonexistent", "--default-engine", "reference", "--default-since", ""],
+                                capture_output=True, text=True)
         text = result.stdout
         order = [text.find(h) for h in ("## 1. Warm wall clock, 8 workers", "## 2. Warm wall clock, 1 worker", "## 3. Cold wall clock",
                                         "## 4. CPU time", "## 5. Peak RSS", "## 6. Instructions", "## Provenance")]
@@ -244,7 +245,8 @@ def test_benchmarks() -> None:
             handle.write(row(utc="2026-11-24T23:00:00Z", what="default", median_later_s="1.11", best_later_s="1.01",
                              walls_s="3.00 1.21 1.01 1.11") + "\n")
         again = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
-                                "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout
+                                "--history", "/nonexistent", "--notes", "/nonexistent", "--default-engine", "reference", "--default-since", ""],
+                               capture_output=True, text=True).stdout
         check("a row measured without -X engine is a row of the default configuration",
               "| RLVM default configuration (reference engine) on the JVM launcher (development tool) | **1.11** (1.01) | **1.20** (1.10) |" in again.split("## 2.")[0],
               again.split("## 2.")[0][-700:])
@@ -253,9 +255,21 @@ def test_benchmarks() -> None:
         with open(tsv, "a") as handle:
             handle.write(long + "\n")
         again = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
-                                "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout
+                                "--history", "/nonexistent", "--notes", "/nonexistent", "--default-engine", "reference", "--default-since", ""],
+                               capture_output=True, text=True).stdout
         check("a process with 8 or more passes is judged by passes 4..N (the first later passes are warm-up)",
               "| RLVM `-X engine=machine`, JVM launcher (development tool) | **1.00** (0.90) |" in again.split("## 2.")[0], again.split("## 2.")[0][-600:])
+        # The default engine changed on 2026-11-25T03:05Z: a row measured without -X engine BEFORE that time is a
+        # row of the engine that was the default then (the reference engine), one measured after it a row of the
+        # machine. That is the tool's default (--default-engine machine --default-since 2026-11-25T03:05:00Z).
+        with open(tsv, "a") as handle:
+            handle.write(row(utc="2026-11-25T04:00:00Z", what="default", median_later_s="0.77", best_later_s="0.70",
+                             walls_s="2.00 0.80 0.70 0.77") + "\n")
+        timed = subprocess.run([sys.executable, os.path.join(HERE, "benchmarks.py"), "--tsv", tsv, "--labels", "bench", "--stdout",
+                                "--history", "/nonexistent", "--notes", "/nonexistent"], capture_output=True, text=True).stdout.split("## 2.")[0]
+        check("without options the machine is the default engine, and an option-less row belongs to the default engine of its time",
+              "| RLVM default configuration (machine engine) on the JVM launcher (development tool) | **0.77** (0.70) | - |" in timed
+              and "| RLVM `-X engine=reference`, JVM launcher (development tool) | **1.11** (1.01) | **1.20** (1.10) |" in timed, timed[-800:])
         prov = text.split("## Provenance")[1]
         check("the provenance names the row, its passes and its build", "2026-11-24T22:10:00Z" in prov
               and "3.00 1.10 0.90 1.00 / 2.90" in prov and "`work/x/dist`" in prov and "sha256 `abc`" in prov, prov[:600])

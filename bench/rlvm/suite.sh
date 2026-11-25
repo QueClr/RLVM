@@ -54,8 +54,9 @@ done
 run_args=("--$mode")
 [ -z "$threads" ] || run_args+=(--threads "$threads")
 cmd="$("$SELF_DIR/run.sh" "${run_args[@]}" --print)"
-case "$mode" in native) binary=rlvm ;; jvm) binary=rlvm-jvm ;; pgo) binary=rlvm-pgo ;; esac
-[ -x "$ROOT/work/dist/bin/$binary" ] || { echo "suite.sh: work/dist/bin/$binary not found; build it with scripts/build.sh" >&2; exit 70; }
+# --pgo = the executable of the optional Oracle GraalVM distribution (bench/rlvm/run.sh).
+case "$mode" in native) binary=work/dist/bin/rlvm ;; jvm) binary=work/dist/bin/rlvm-jvm ;; pgo) binary=work/dist-oracle-pgo/bin/rlvm ;; esac
+[ -x "$ROOT/$binary" ] || { echo "suite.sh: $binary not found; build it with scripts/build.sh (--dev for the JVM launcher, --oracle-pgo for the optional Oracle build)" >&2; exit 70; }
 
 t="$(printf '%s' "$cmd" | sed -n -E 's/.*--threads ([0-9]+).*/\1/p')"
 label="rlvm-$mode-t${t:-auto}-$where$tag"

@@ -95,7 +95,8 @@
 #   run [options] EXPORT      bench/rlvm/run.sh: one export, exactly as the arena runs it
 #   selftest [--native|--jvm|--pgo]
 #                             bench/rlvm/run.sh --selftest for one launcher, or for every launcher
-#                             present in work/dist: exit-status protocol and Truffle probe
+#                             that is built (work/dist; --pgo = the executable of the optional Oracle
+#                             build in work/dist-oracle-pgo): exit-status protocol and Truffle probe
 #   suite [options]           bench/rlvm/suite.sh: the 230 published arena tests, on the host
 #                             (verdicts, time) or with --docker (instruction counts)
 #   measure [options] EXPORT  bench/rlvm/measure.sh: instructions / CPU / wall / RSS in the
@@ -109,7 +110,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 die() { echo "dev.sh: $*" >&2; exit 2; }
-usage() { sed -n '2,107p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,108p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [ "$#" -gt 0 ] || { usage; exit 2; }
 cmd="$1"; shift
@@ -317,8 +318,9 @@ case "$cmd" in
     fi
     rc=0; any=0
     for m in native pgo jvm; do
-      case "$m" in native) b=rlvm ;; pgo) b=rlvm-pgo ;; jvm) b=rlvm-jvm ;; esac
-      [ -x "$ROOT/work/dist/bin/$b" ] || continue
+      # pgo = the executable of the optional Oracle GraalVM distribution (bench/rlvm/run.sh --pgo)
+      case "$m" in native) b=work/dist/bin/rlvm ;; pgo) b=work/dist-oracle-pgo/bin/rlvm ;; jvm) b=work/dist/bin/rlvm-jvm ;; esac
+      [ -x "$ROOT/$b" ] || continue
       any=1
       "$ROOT/bench/rlvm/run.sh" "--$m" --selftest || rc=1
     done

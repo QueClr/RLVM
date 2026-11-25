@@ -1,0 +1,21 @@
+\title{Defaults of the executable: one scanner thread, the collection policy BySpaceAndTime}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{gc}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{93f35b8}
+\import{base-macros}
+
+\p{Two defaults of a run without options changed, both [decided on cold single runs of the executable](dec-EGMG). The reader uses one scanner thread instead of two for a file of 256 MiB or more: beside eight workers on eight cores the second one took a core from the checking. The image is built with the collection policy \code{BySpaceAndTime} of the serial collector in place of its default, \code{Adaptive2}, which ran this workload with an eden of about 54 MB; the heap limit stays 13 GB. The worker rule and the pipelined load were measured again with the machine and stay.}
+
+\p{On the image of that day, the machine with the switch set that became its default, before against after, 8 workers on the aarch64 development host: Init 0.79 against 0.78 s, Std 1.40 against 1.38, cedar 2.08 against 1.91, navier-stokes-euler 5.28 against 4.53, cslib 6.52 against 6.15, reachability inside its scatter, and Mathlib not settled by the one pair taken. The price is resident memory, Mathlib 4.1 against 5.6 GB. \code{\verb~|-XX:InitialCollectionPolicy=Adaptive2~} and \code{\verb~|-X scan-threads=2~} on the command line are the settings of before. Oracle GraalVM 25.0.4 knows the policy only as an option of the image build, so the optional build sets it there.}
+
+\p{Published as \code{rlvm-main} after the gate of the default configuration through the executable, on the image with the new policy: 230 of 230 published tests, 17,775 mutants with no soundness and no completeness difference, 1,189 hostile exports with no wrong accept and no wrong reject.}
+
+\p{Detail: \src{scripts/build.sh}, \src{rlvm-main/README.md}. Commits \commit{cfc5921}, \commit{93f35b8}.}

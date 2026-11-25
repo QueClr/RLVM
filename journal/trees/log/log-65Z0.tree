@@ -1,0 +1,21 @@
+\title{The machine is the default engine}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{launcher-platform}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{0b9092b}
+\import{base-macros}
+
+\p{Since 2026-11-25 03:05 UTC the provider of the machine has priority 100, so a run without \code{\verb~|-X engine~} of anything built from the published jars checks with the machine; \code{\verb~|rlvm --version~} prints the engine and its switch set. The reference engine re-checks every rejection before it is reported and decides every declaration the machine declines. A run that means the reference engine now has to say \code{\verb~|-X engine=reference~} or \code{\verb~|-X policy=strict~}. This is the second time the machine is made the default; the first was withdrawn within the hour, and [the condition for making it again](dec-T79V) was the contract of the default configuration shown by the gates and an adversarial pass without a finding of an underivable accept.}
+
+\p{The default switch set, published just before (\commit{455395f}), is the set of the wave-6 integration plus eager reduction and the two proof-comparison shortcuts, \code{skipargs} and \code{congruence}; see [the switches](design-switches), [eager reduction](design-eager-reduction) and [the proof-comparison shortcuts](design-proof-comparison-shortcuts). It was chosen by the warm wall clock of a pipelined pass with 8 workers on the JVM launcher over the eight corpora, the sets interleaved round by round inside one quiet-core window per corpus, on the aarch64 development host: geometric mean 2.065 s for the set of wave 6, 1.980 s with eager reduction, 1.720 s with both shortcuts as well, Mathlib 20.49, 18.02 and 12.72 s. No corpus was more than 1.8 \% slower than with eager reduction alone. On the native image of the final jar the geometric means are 2.560, 2.413 and 2.090 s and Mathlib 24.53, 21.29 and 14.55 s.}
+
+\p{Evidence on the published jar, as its integrator reported it: the gate of the default configuration through a machine-default launcher with no option, 230 of 230 published tests correct and none declined, 17,775 mutants with no soundness and no completeness difference (15,741 agree, 2,034 declined), the differential self-test, 1,196 hostile exports with no wrong accept and no wrong reject (1,124 agree, 68 tolerated accepts, 4 declined); the differential engine through that launcher on the published tests, Init, Std, cedar, cslib and 16 Mathlib slices, 1,141,195 checks without a difference; all eight corpora accepted. The same gate was run again on the distribution the team shares, through the jars and through the executable, with the same counts; see [the gate](design-gate).}
+
+\p{Detail: \src{rlvm-machine/README.md}, \src{rlvm-main/README.md}. Commits \commit{455395f}, \commit{0b9092b}. Related: [the exactness contract](design-exactness-contract), [the executable's defaults](dec-EGMG).}

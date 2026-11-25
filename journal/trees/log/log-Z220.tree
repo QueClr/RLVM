@@ -1,0 +1,26 @@
+\title{The release is one executable; the JVM launcher is a development tool; an optional profile-guided build}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{platform}
+\tag{arena}
+\meta{release}{Unreleased}
+\meta{commit}{43954c3}
+\import{base-macros}
+
+\p{\src{scripts/build.sh} builds the release layout by default: the native image \code{\verb~|bin/rlvm~} and a build record, no jars and no second launcher. \code{\verb~|--dev~} adds the jars and the JVM launcher, which the warm measurements, the gates and the test kit use; \code{\verb~|--jvm-only~} is that distribution without the image. The distribution the team shares stays a development distribution. \code{\verb~|rlvm --version~} has two new lines: \code{\verb~|build:~}, a constant of the image that says which compiler built it and which heap settings are baked in, and \code{\verb~|default:~}, what a run without options does, made by the checker from the constants that decide it and by the default engine through \code{\verb~|EngineProvider.defaultsNote()~}. The design is [packaging](design-packaging); it supersedes [which launcher was for what](dec-WX9Z).}
+
+\ul{
+\li{\src{scripts/package.sh} makes \code{\verb~|rlvm-<version>-linux-<arch>.tar.gz~} with exactly the executable, the licence and the README, after running the executable from an empty directory with an empty environment. \src{.github/workflows/release.yml} builds the archives for x86-64 and aarch64 and attaches them to a draft release; it is started by hand and had not run when this was written.}
+\li{\code{\verb~|scripts/build.sh --oracle-pgo~} builds the same executable with Oracle GraalVM and profile-guided optimisation from profiles kept in the repository. It is an option and never a default, says the licence on its first line, has a distribution of its own, downloads Oracle GraalVM only with an explicit acceptance flag, and warns when the profiles are older than the jars. \code{\verb~|scripts/dev.sh profiles~} records the profiles: Init once, in the default configuration.}
+\li{\code{\verb~|scripts/gate.sh --native~} runs the published tests, the mutant corpora and the hostile exports through the executable. On the first distribution gated that way the whole gate took three minutes, the 17,775 mutants 64 s against 46 minutes through the jars on a JVM, with the same counts.}
+\li{The measurement scripts read \code{\verb~|--pgo~} as the executable of the optional build's distribution; no build makes a second binary any more.}
+}
+
+\p{Published with it: \code{rlvm-api} (the note of an engine's defaults), \code{rlvm-cli} (the two lines, a help text that names no second launcher) and \code{rlvm-main}, after the gate of the default configuration on exactly those jars: 230 of 230 published tests, 17,775 mutants with no soundness and no completeness difference, the differential self-test.}
+
+\p{Detail: \src{scripts/build.sh}, \src{scripts/dev.sh}, \src{rlvm-cli/README.md}. Commits \commit{43954c3}, \commit{7407e1b}.}

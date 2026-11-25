@@ -111,7 +111,11 @@ DEFAULT_HISTORY = os.path.join(ROOT, "work", "perf-history")
 THRESHOLD_PCT = 5.0
 PASS_LINE = re.compile(r"^rlvm: pass (\d+)/(\d+) (.*)$")
 PHASES = (("load", ["-X", "stop-after=load"]), ("env", ["-X", "stop-after=env"]))
-BINARIES = {"native": "rlvm", "jvm": "rlvm-jvm", "pgo": "rlvm-pgo"}
+# "pgo" = the executable of the OPTIONAL Oracle GraalVM distribution (scripts/build.sh --oracle-pgo): the
+# same single executable bin/rlvm, in work/dist-oracle-pgo unless --dist names another directory. No
+# build makes a second binary bin/rlvm-pgo any more.
+BINARIES = {"native": "rlvm", "jvm": "rlvm-jvm", "pgo": "rlvm"}
+ORACLE_DIST = "work/dist-oracle-pgo"
 
 
 def die(message: str, code: int = 64) -> "NoReturn":  # noqa: F821
@@ -721,6 +725,8 @@ def main() -> int:
         checker, command, config = args.checker, f'bench/baselines/{args.checker}.sh "$IN"', args.checker
         build = {}
     else:
+        if args.launcher == "pgo" and args.dist == "work/dist":
+            args.dist = ORACLE_DIST   # the optional Oracle build has a distribution of its own
         dist = args.dist if os.path.isabs(args.dist) else os.path.join(ROOT, args.dist)
         if os.path.islink(dist):
             # A versioned distribution (scripts/build.sh: work/dist -> work/dist.d/<version>): pin the
