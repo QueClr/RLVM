@@ -1,0 +1,438 @@
+\title{J1: the JVM as the warm platform (HotSpot of GraalVM CE 25, machine engine)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{machine}
+\tag{gc}
+\tag{performance}
+\meta{origin}{docs/research/profiles/J1.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Agent J1, 2026-11-24. Owner note 12 makes warm wall clock the metric: 8 parallel workers, steady state after JIT warm-up, loading pipelined with checking; warm-up is reported, not charged. The first warm table (\code{\verb~|work/status/warm.md~}) found the JVM launcher faster than the CE native image once warm and slower cold. This report asks four things of the JVM launcher with the machine engine: is its steady state as good as HotSpot can do (section 2), how fast does it get there and can it start warm (section 3), how much memory does it need (section 4), and what should the launcher ship (section 5). No module code was changed; findings for the machine's owners are in section 6.}
+
+\subtree{
+\title{Answers in short}
+
+\ol{
+\li{\strong{Steady state.} C2 compiles all of the machine: no method near the 8,000-bytecode limit (largest 1,476), no bail-out, nothing hot left in C1 or the interpreter, no deoptimisation storm. What it runs into is its inlining budget (18,000 nodes / 8,000 bytecodes per compile unit, both constants of a product VM; depth 15) in five to twelve of about 940 compile units - and neither lifting nor tightening the limits that ARE flags (\code{\verb~|MaxInlineLevel~}, \code{\verb~|MaxInlineSize~}, \code{\verb~|FreqInlineSize~}, \code{\verb~|InlineSmallCode~}, \code{\verb~|-ClipInlining~}) moves the warm pass, nor do Graal as the top tier, compact object headers, a code cache within branch range or lower tier thresholds. Two flags have a consistent sign: \code{\verb~|+UseTransparentHugePages~} (Mathlib -6 \% warm wall in an A B A B; reachability -2 to -4 \%; cedar 0 to -4 \%) and \code{\verb~|-TieredCompilation~} with one worker (0 to -7 \%; nothing with 8). The time is in memory (table probes), not in code shape.}
+\li{\strong{Warm-up.} Compiler threads: \code{\verb~|CICompilerCount=8~} instead of 2 halves the cold wall below Mathlib (Init 4.1-5.3 -> 2.8-3.6 s, Std 5.5 -> 3.1, cedar 9.9 -> 5.2, reachability 4.0 -> 2.5) and makes pass 3 steady instead of pass 5-6. JDK 25's AOT cache (JEP 483 / 514 / 515) works on GraalVM CE 25 \strong{only with \code{\verb~|-XX:-EnableJVMCI~}} (with JVMCI on it silently degrades to a class archive without profiles); it is 18.7 MB, takes one training run at build time, takes another 0.4-1.1 s off the cold wall - and \strong{makes every later pass 5-9 \% slower} (11 of 11 comparisons, the training corpus included). Classic CDS and the cache without its profiles gain nothing: class loading is 0.1-0.2 s of the start.}
+\li{\strong{Memory.} Mathlib with the machine needs the same warm wall clock from 13 GB down to 6 GB (23.9-24.2 s). Peak RSS: 8.0-8.7 GB at 13 GB, 5.7-6.7 GB at 7 GB, 5.8 GB at 6 GB; 5 GB thrashes or dies. Below 7 GB the machine's own heap rule (a young reserve of a third of the heap, where the launchers give 1 GB) refuses 2-6 session growths per pass for a few tens of MB.}
+\li{\strong{Recommendation} (section 5): \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow~} with \code{\verb~|-Xmx7g -Xmn1g~} for the machine (\code{\verb~|-Xmx6g -Xmn1g~} once finding J1-F1 is fixed) and today's \code{\verb~|-Xms13g -Xmx13g -Xmn1g~} for the reference engine; no AOT cache. Warm, with 8 workers, this line and today's are 0.68-0.88 times the native image's wall clock on Init, Std, cedar, reachability and Mathlib.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\ul{
+\li{\strong{Distribution.} \code{\verb~|work/j1/dist~} (JVM launcher) and \code{\verb~|work/j1/distn~} (the same jar bytes plus the CE native image, \code{\verb~|-O3 --gc=serial~}), built 2026-11-24T18:29Z / 18:40Z with \code{\verb~|scripts/build.sh --published~} from the published jars: rlvm-machine \code{\verb~|8a8ea5644b24~}, rlvm-driver \code{\verb~|31fa08d9ce61~}, rlvm-main \code{\verb~|2c4a55f5a8ae~}, rlvm-load \code{\verb~|26242def2701~}, rlvm-store \code{\verb~|f85c730603b8~}, rlvm-admit \code{\verb~|398a117d4ad8~}, rlvm-inductive \code{\verb~|c15b14fffdd3~}, rlvm-ref \code{\verb~|ca1f9bd918bb~}. Engine \code{\verb~|-X engine=machine~} with its default switches (\code{\verb~|warm,gated,expect~}), \code{\verb~|-X load=pipelined~}.}
+\li{\strong{JVM.} \code{\verb~|.toolchain/graalvm-ce-25~}: OpenJDK 25.0.5 (GraalVM CE 25.5.5.0.3, \code{\verb~|25.0.5.0.3+1-jvmci-25.5-b26~}), linux-aarch64. JVMCI is ON by default in this JDK (\code{\verb~|EnableJVMCI = true {jimage}~}), and so is Graal as the top tier (\code{\verb~|UseJVMCICompiler = true~}); the launcher switches the latter off (\code{\verb~|-XX:-UseJVMCICompiler~}: C2).}
+\li{\strong{Host.} aarch64, 10 Cortex-X925 + 10 Cortex-A725, 121 GB; 4 KiB pages, transparent huge pages in \code{\verb~|madvise~} mode (2 MiB). Measurement cores 5-9,15-17 (X925). The host was shared with about 8 other agents (load average 30-60) for the whole session.}
+\li{\strong{Timings.} Every timing was taken inside a \src{bench/quiet.py} window (one measurement at a time on the host, the rest of the session off the measurement cores). Window scripts: \code{\verb~|work/j1/w/w*.sh~}; raw output of every process: \code{\verb~|work/j1/logs/<label>.out~}; one line per process in \code{\verb~|work/j1/logs/runs.tsv~}; tables with \code{\verb~|work/j1/tools/summ.py~}. "base" = the flags of today's \code{\verb~|bin/rlvm-jvm~} with the 6 GB heap shape of the host's memory rule (\code{\verb~|-Xms6g -Xmx6g -Xmn1g~}) for everything below Mathlib.}
+\li{\strong{Passes.} \code{\verb~|-X passes=N~}, mode reload (every pass loads and checks; the owner's metric). "Warm" = median of the later passes; with 8 workers the first two or three passes are warm-up, so 10-pass rows use passes 4-10.}
+\li{\strong{Diagnostics} (no window needed, not timings): \code{\verb~|-XX:+LogCompilation~}, JFR, \code{\verb~|-XX:+PrintCompilation~}, \code{\verb~|-Xlog:gc*~}, \code{\verb~|-Xlog:aot~}, \code{\verb~|/proc/PID/status~}; files in \code{\verb~|work/j1/diag/~} and \code{\verb~|work/j1/aot/~}, tools in \code{\verb~|work/j1/tools/~} (\code{\verb~|logcomp.py~}, \code{\verb~|inltree.py~}, \code{\verb~|budget.py~}, \code{\verb~|jfrsamples.py~}, \code{\verb~|rss.sh~}, \code{\verb~|MethodSizes.java~}).}
+\li{\strong{Noise.} Two base rows of the same window differ by up to 5 \% with 8 workers (cedar: 2.10 and 1.99 s) and by 1-3 \% with one worker. Three early windows ran beside diagnostics of my own on the other cores (the memory bus is shared): window 1 beside five 8-worker Init runs, the last round of window 2 and all of window 3 beside a Mathlib run; their rows are marked (*) and every conclusion drawn from them was repeated in a clean window. From window 4 on nothing of mine ran beside a window. Differences below 5 \% are not findings unless they repeat.}
+}
+}
+
+\subtree{
+\title{2. Steady state: what C2 does with the machine}
+
+\subtree{
+\title{2.1 Diagnostics (cedar, 8 workers, 5 passes; \code{\verb~|-XX:+LogCompilation~}, JFR)}
+
+\p{Files: \code{\verb~|work/j1/diag/cedar-8w-comp.xml~} (51 MB), its summary \code{\verb~|cedar-8w-comp.summary.txt~}, \code{\verb~|cedar-8w.jfr~}.}
+
+\table{
+\tr{\th{question}\th{answer}\th{evidence}}
+\tr{\td{methods over the huge-method limit (8,000 bytecodes, never compiled)}\td{none}\td{largest method of \code{\verb~|rlvm-machine~}: \code{\verb~|Machine.reset~} 1,476 bytecodes; largest hot ones \code{\verb~|Reduce.resume~} 1,113, \code{\verb~|Eval.resume~} 880, \code{\verb~|Code.resumeOne~} 830, \code{\verb~|MachineSession.check~} 806 (\code{\verb~|work/j1/method-sizes-machine.tsv~}, 1,451 methods, 65 above 325). \code{\verb~|-XX:-DontCompileHugeMethods~} has nothing to act on}}
+\tr{\td{C2 bail-outs (\code{\verb~|COMPILE SKIPPED~}, node limit, "failed")}\td{none}\td{5,396 compile tasks (1,341 at tier 4); the only \code{\verb~|<failure>~} elements are 25 x "stale task" (queue hygiene). Largest C2 graph: 18,909 nodes against \code{\verb~|MaxNodeLimit~} 80,000: \code{\verb~|MaxNodeLimit~} / \code{\verb~|NodeLimitFudgeFactor~} have nothing to act on}}
+\tr{\td{hot code left in the interpreter or in C1}\td{none}\td{of 1,588 \code{\verb~|rlvm.*~} methods with compiled code 947 reach tier 4; the 641 that do not are small and cold (highest invocation count 149,938, \code{\verb~|Values.c~}, 11 bytecodes; they are inlined into their callers). 99.9 \% of the execution samples of the last two passes are in compiled frames}}
+\tr{\td{loops stuck in a lower tier (OSR)}\td{two shells, harmless}\td{\code{\verb~|ExportReader.sequential~} (the reader's block loop, about 20,000 iterations per pass) and \code{\verb~|Scanner.newline~} have only tier-3 OSR code; \code{\verb~|Worker.run~} reached tier 4 in pass 5. All three are loop shells whose bodies are C2 code}}
+\tr{\td{deoptimisation storms}\td{none}\td{312 uncommon traps in 99 s of process time, 11-76 per 10 s, 263 of them \code{\verb~|unstable_if~}; most at \code{\verb~|Conv.convLazy~} (40) and \code{\verb~|Conv.lazydOffset~} (33). They cost warm-up, not steady state: \code{\verb~|Conv.lazydLoop~} was compiled 9 times by C2, \code{\verb~|Infer.twalk~} 8, \code{\verb~|Eval.app~} and \code{\verb~|Eval.applyFrom~} 6, each compile 0.5-2 s on that (loaded) host}}
+\tr{\td{inlining failures on the hot paths}\td{yes: C2's budget, not the callee sizes}\td{below}}
+}
+
+\p{\strong{What C2 does hit is its inlining budget.} The entry steps call their sub-judgments directly, the continuation steps are small, and C2 inlines depth-first in bytecode order. In the big loops it expands the first hot chain until the compile unit is full: \code{\verb~|NodeCountInliningCutoff~} (18,000 nodes at parse time) and \code{\verb~|DesiredMethodLimit~} (8,000 inlined bytecodes) are \strong{develop flags, constants in a product VM}; \code{\verb~|MaxInlineLevel~} (15) is the third wall. After that, hot callees later in the same method are left as calls:}
+
+\table{
+\tr{\th{compile unit (root), last C2 compile}\th{inlined bytecodes}\th{code bytes}\th{depth}\th{hot call sites refused for the budget (profile count at the site)}}
+\tr{\td{\code{\verb~|Infer.piLoop~}}\td{10,611}\td{55,088}\td{17}\td{inlining too deep 524 M (292 M of them \code{\verb~|Terms.kind -> Terms.arr~}); size > DesiredMethodLimit 21 M; NodeCountInliningCutoff 3 M}}
+\tr{\td{\code{\verb~|Conv.bindLoop~}}\td{10,368}\td{49,408}\td{15}\td{NodeCountInliningCutoff 56 M (\code{\verb~|Eval.flat -> Terms.kind / regionOf / Node.wordOf~}, \code{\verb~|Eval.eval -> Eval.enter~})}}
+\tr{\td{\code{\verb~|MachineSession.run~}}\td{10,144}\td{37,904}\td{17}\td{inlining too deep 55 M (\code{\verb~|Terms.a -> Terms.arr~} 42 M)}}
+\tr{\td{\code{\verb~|Infer.twY~}}\td{8,852}\td{43,944}\td{17}\td{inlining too deep 23 M; size > DesiredMethodLimit 4 M (\code{\verb~|twY -> twE~})}}
+\tr{\td{\code{\verb~|Conv.convLoop~}}\td{10,649}\td{52,784}\td{15}\td{NodeCountInliningCutoff 5.9 M: the second \code{\verb~|convPass~} and \code{\verb~|convCore1~} (the core of conversion) stay calls because \code{\verb~|convBind -> cbind -> bindLoop -> bindDom -> Eval.dom ...~} was parsed first}}
+}
+
+\p{(\code{\verb~|work/j1/tools/budget.py~}; 944 C2 units of \code{\verb~|rlvm.*~}, 2.56 MB of code in total; these five are the ones still over the budget in their last compile; earlier compiles of \code{\verb~|Infer.twalk~}, \code{\verb~|Reduce.coreLoop~}, \code{\verb~|Eval.args~}, \code{\verb~|Eval.app~}, \code{\verb~|Cargs.cargsFrom~}, \code{\verb~|Conv.lazydLoop~}, \code{\verb~|Conv.lstepBoth~} reached 18,300-18,900 nodes too.)}
+
+\p{Three more patterns from the inlining log (all C2 compiles, counts are the profile counts C2 saw):}
+
+\ul{
+\li{\strong{"too big" at cold-looking arms of a shared dispatcher.} \code{\verb~|Eval.atom~} (312 bytecodes, a switch) is inlined into \code{\verb~|Eval.eval~}, but its arms \code{\verb~|Values.mkConst~} (71 b, 16 M of atom's 50 M calls at that site), \code{\verb~|Levels.lsubList~} (127 b), \code{\verb~|Eval.closedGet~} (120 b), \code{\verb~|Levels.lsub~}, \code{\verb~|Values.mkSort~} (39 b) are refused as "too big": a callee above \code{\verb~|MaxInlineSize~} (35) is only inlined when its site runs in at least 25 \% of the caller's invocations (\code{\verb~|InlineFrequencyRatio~}), and that frequency is scaled by the share of the caller's profile that belongs to the inlined copy. A dispatcher that is called from several places never has a "hot" arm.}
+\li{\strong{"already compiled into a big method"} (386 M): \code{\verb~|Values.closureAt~} (318 b), \code{\verb~|Eval.app~}, \code{\verb~|Infer.twArg~}, \code{\verb~|Conv.k_cbind5~}: C2 calls the existing nmethod (above \code{\verb~|InlineSmallCode~} = 2,500 bytes of code) instead of inlining. That is the mechanism working as intended.}
+\li{\strong{"recursive inlining is too deep"} (149 M): \code{\verb~|Infer.inferApp -> Infer.infer~}, \code{\verb~|-> Infer.twalk~}, \code{\verb~|Reduce.coreHead -> Reduce.core~}: the recursive entry steps; one level is inlined (\code{\verb~|MaxRecursiveInlineLevel~} 1).}
+}
+
+\p{The profile itself is flat (JFR, last two passes, 3,823 samples): the hottest self frames are table probes - \code{\verb~|Runs.sameKept~} 8.3 \%, \code{\verb~|Values.closureAt~} 6.3 \%, \code{\verb~|Values.neu~} 4.8 \%, \code{\verb~|Eval.atom~} 4.8 \%, \code{\verb~|Values.closureProbe~} 3.7 \%, \code{\verb~|Eval.app~} 3.7 \%, \code{\verb~|Eval.gate~} 3.6 \% - and no compiled method holds more than 8.2 \% (\code{\verb~|Values.closureOverNew~}, \code{\verb~|Eval.args~} 7.9 \%, \code{\verb~|Eval.applyFrom~} 7.4 \%). \code{\verb~|Machine.growVtab~} + \code{\verb~|growRtab~} are 2.6 \% of a warm reload pass (the sessions of a new pass grow their tables again).}
+}
+
+\subtree{
+\title{2.2 Flags that change it: measurements}
+
+\p{\strong{One worker, cedar (12.5 s per warm pass), side by side.} Windows 1, 2 and 5c ran three or four one-worker processes at a time, each on two of the eight measurement cores (\code{\verb~|work/j1/tools/par4.sh~}; slot A = cores 5,6, B = 7,8, C = 15,16, D = 9,17), 4 passes each, and compared a variant with a base run \strong{in the same slot} (the slots differ by up to 12 \%: base in A 12.95-13.69 s, B 12.71-13.49, C 12.33-12.40, D 14.32-14.72). Ratio = warm median (passes 2-4) of the variant over base in that slot; one number per repetition; (+) = window 1 (all of it beside Init runs of my own, the same for every slot), (*) = a round beside a Mathlib diagnostic of my own; the others, the Latin square of window 5c among them, are clean:}
+
+\table{
+\tr{\th{flag (added to today's flags)}\th{warm wall, ratio to base}\th{reading}}
+\tr{\td{\code{\verb~|-XX:MaxInlineLevel=9~} / \code{\verb~|=25~}}\td{0.97+ / 1.02+}\td{nothing: the 524 M "inlining too deep" sites cost nothing measurable}}
+\tr{\td{\code{\verb~|-XX:MaxInlineSize=100~}}\td{0.99+}\td{nothing: nor do the "too big" arms}}
+\tr{\td{\code{\verb~|-XX:FreqInlineSize=600~}}\td{0.93+, 1.03, 1.06*}\td{scatter}}
+\tr{\td{\code{\verb~|-XX:InlineSmallCode=6000~} / \code{\verb~|=1000~}}\td{0.93+, 1.08, 1.06 / 0.985}\td{scatter}}
+\tr{\td{\code{\verb~|-XX:-ClipInlining~} (lifts DesiredMethodLimit)}\td{0.88+, 0.98, 1.01, 1.05}\td{scatter (the 0.88 was in slot D)}}
+\tr{\td{\code{\verb~|-XX:-TieredCompilation~} (C2 only, interpreter profiles)}\td{0.93+, 0.96, 0.99*, then the Latin square 1.01, 0.99, 1.01}\td{0 to -7 \%; CPU of the warm pass -3 \% in the Latin square}}
+\tr{\td{\code{\verb~|-XX:ReservedCodeCacheSize=120m~} (aarch64: no far branches)}\td{1.03, 1.02, 1.02 (Latin square)}\td{nothing (if anything +2 \%): the smaller code cache is not what \code{\verb~|-TieredCompilation~} gains}}
+\tr{\td{\code{\verb~|-XX:+UseTransparentHugePages~}}\td{0.96; with the 120 MB code cache 1.00}\td{see below}}
+\tr{\td{Graal as top tier (\code{\verb~|+UseJVMCICompiler~})}\td{1.02+}\td{nothing}}
+\tr{\td{\code{\verb~|-XX:+UseCompactObjectHeaders~}}\td{1.05+}\td{nothing or slightly worse (the machine's data are \code{\verb~|int[]~}, there are few headers to shrink)}}
+}
+
+\p{The same flag scatters by up to +-8 \% between repetitions of this side-by-side set-up, so it resolves only effects above that; none appeared. The sequential rows below are the better evidence.}
+
+\p{\strong{8 workers and 1 worker, sequential, all eight cores (windows 4 and 5r, both clean).} Warm = median of passes 4-10 with 8 workers (10 passes) and of passes 2-6 with one worker (6 passes); best pass in brackets; CPU = process CPU of the median warm pass:}
+
+\table{
+\tr{\th{corpus, workers}\th{today's flags}\th{\code{\verb~|+UseTransparentHugePages~}}\th{\code{\verb~|-TieredCompilation~}}\th{both}\th{Graal top tier}\th{compact headers}}
+\tr{\td{cedar, 8: warm s}\td{2.10 (2.07) and 1.99 (1.91)}\td{2.00 (1.91) and 1.92 (1.91)}\td{2.01 (1.94)}\td{1.92 (1.87)}\td{1.98 (1.94)}\td{2.18 (2.13)}}
+\tr{\td{cedar, 8: CPU s}\td{15.6 and 14.3}\td{14.4 and 14.4}\td{14.4}\td{13.9}\td{14.5}\td{16.0}}
+\tr{\td{cedar, 8: pass 1 s}\td{8.89 and 7.35}\td{7.09 and 7.35}\td{4.44}\td{4.77}\td{5.06}\td{9.63}}
+\tr{\td{reachability, 8: warm s}\td{1.81 (1.74)}\td{1.77 (1.67)}\td{1.85 (1.77)}\td{1.76 (1.69)}\td{-}\td{-}}
+\tr{\td{reachability, 8: CPU s}\td{5.80}\td{5.40}\td{5.81}\td{5.44}\td{-}\td{-}}
+\tr{\td{reachability, 1: warm s}\td{5.39 (5.34)}\td{5.16 (4.99)}\td{5.12 (5.10)}\td{4.91 (4.76)}\td{-}\td{-}}
+\tr{\td{reachability, 1: pass 1 s}\td{6.62}\td{5.70}\td{6.97}\td{6.09}\td{-}\td{-}}
+}
+
+\ul{
+\li{With 8 workers nothing separates from the two base rows of cedar (5 \% apart). A warm 8-worker pass on cedar is bounded by the single loader thread (1.8-2.0 s of the 2.0 s, \code{\verb~|work/status/warm.md~} point 5), so the engine's code quality cannot show there; on reachability, which has no load, huge pages gain 2-3 \% of wall and 7 \% of CPU.}
+\li{With one worker on reachability huge pages give -4 \%, C2 without tiers -5 \%, both -9 \% (4.91 against 5.39 s): the two add up. On cedar the same two flags gave 0 to -7 \% (table above).}
+\li{\strong{Mathlib, huge pages, A B A B (window 9, clean; 8 workers, 2 passes, \code{\verb~|-Xmx7g -Xmn1g~}, 8 compiler threads):} with \code{\verb~|+UseTransparentHugePages~} pass 1 / pass 2 = 25.64 / 22.56 and 25.92 / 21.87 s (CPU of pass 2 171.4 and 167.4 s, collector 0.6-0.8 s per pass); without 28.72 / 24.01 and 27.84 / 23.10 s (CPU 180.4 and 176.1 s, collector 0.9-1.4 s). Both runs with huge pages are faster than both without: \strong{-6 \% warm wall, -5 \% CPU, -9 \% on the first pass}; the resident set is not systematically different (section 4.2). Mathlib is where the store is largest (2.7-3.7 GB live), and it is where the flag shows best.}
+\li{Graal as the top tier: 1.98 s against 1.99-2.10 on cedar with 8 workers, 1.02 times base with one worker; it needs 400 MB more resident memory (2,465 against 2,029-2,061 MiB) and is the only JIT that excludes the AOT cache (section 3.1). Same answer as the single rows of \code{\verb~|work/status/warm.md~}: no reason to switch.}
+\li{Lower tier-4 thresholds (\code{\verb~|Tier4InvocationThreshold=1000 Tier4MinInvocationThreshold=200 Tier4CompileThreshold=3000 Tier4BackEdgeThreshold=10000~}, a fifth of the defaults, on top of the proposed line; window B): Init, 8 workers, 0.78 (0.74) against 0.77 (0.75) s, pass 1 2.81 against 2.60 s; reachability, one worker, 4.59 (4.15) against 4.32 (4.10) s. Nothing, in either direction.}
+\li{\code{\verb~|-XX:-DontCompileHugeMethods~}, \code{\verb~|MaxNodeLimit~} / \code{\verb~|NodeLimitFudgeFactor~}, \code{\verb~|LoopUnrollLimit~} were not timed: the diagnostics show nothing for them to act on (no huge method, largest graph 18,909 of 80,000 nodes; the hot code is not in counted loops).}
+}
+
+\p{\strong{Answer to question 1.} HotSpot's steady state on the machine is not limited by anything a flag can lift: every hot method is compiled by C2, nothing bails out, and making C2 inline more, less or differently does not move the warm pass beyond the noise. Two flags have a consistent sign and are free: transparent huge pages (-2 to -4 \% on cedar and reachability, -6 \% on Mathlib: TLB reach for a store of gigabytes) and, with one worker, C2 without the C1 tiers (0 to -7 \%). That fits the profile: the hot frames are probes into large tables, i.e. memory, not instructions. The last check is the table of section 5.2, where the proposed line (huge pages, 8 compiler threads) meets today's on four corpora in two very quiet windows: warm wall, proposed over today's, with 8 workers 0.94 (Init) / 1.03 (Std) / 0.88 (cedar) / 1.00 (reachability), with one worker 0.97 / 1.03 / 1.00 / 0.92. Below Mathlib: not worse, and no more than that can be claimed for the steady state; on Mathlib the huge pages are worth 6 \%.}
+}
+}
+
+\subtree{
+\title{3. Warm-up, and starting warm}
+
+\subtree{
+\title{3.1 What GraalVM CE 25's JDK supports (verified, not assumed)}
+
+\p{\code{\verb~|java -XX:+UnlockDiagnosticVMOptions -XX:+PrintFlagsFinal -version | grep -i aot~}: \code{\verb~|AOTCache~}, \code{\verb~|AOTCacheOutput~}, \code{\verb~|AOTConfiguration~}, \code{\verb~|AOTMode~}, \code{\verb~|AOTClassLinking~} (product: JEP 483 and the one-command form of JEP 514), \code{\verb~|AOTRecordTraining~} / \code{\verb~|AOTReplayTraining~} (diagnostic, switched on by the VM when a cache is written / used: the method profiles of JEP 515). There is no AOT code in JDK 25 (the cache's code region is 0 bytes): the cache makes classes load linked and tells the JIT what to compile, it does not carry machine code.}
+
+\table{
+\tr{\th{test (\code{\verb~|work/j1/aot/*.log~})}\th{result}}
+\tr{\td{one-step training run, \code{\verb~|-XX:AOTCacheOutput=FILE~}, launcher flags as shipped (JVMCI on)}\td{the cache is written, but the assembly step logs \code{\verb~|Mismatched values for property jdk.module.addmods: jdk.internal.vm.ci specified during dump time but not during runtime~}, \code{\verb~|Full module graph = disabled~}, \code{\verb~|aot-linked = 0~}, \code{\verb~|MethodTrainingData = 0~}: a plain class-data archive (14.6 MB), no linking, \strong{no profiles}}}
+\tr{\td{the same with \code{\verb~|-XX:-EnableJVMCI~} in the training run}\td{\code{\verb~|aot-linked = 1469~} of 1,469 classes (248 of the application), \code{\verb~|MethodTrainingData = 2692~}, \code{\verb~|MethodCounters = 5910~}, \code{\verb~|KlassTrainingData = 486~}; 18.6 MB (trained on Std, 4 passes); 18.0 MB (init-prelude, 20 passes, 2,438 method records, 7 s including the assembly)}}
+\tr{\td{production run with \code{\verb~|-XX:-EnableJVMCI -XX:AOTCache=FILE~}}\td{\code{\verb~|Using AOT-linked classes: true~}; all classes come from the cache (class-load log: 1,338 from "shared objects file", 0 from jars; a plain run takes 989 from the JDK's default archive, 226 from the jars, 63 from the runtime image)}}
+\tr{\td{production run with JVMCI on}\td{the cache is refused (\code{\verb~|AOT cache has aot-linked classes. It cannot be used when archived full module graph is not used~}); the run goes on without it}}
+\tr{\td{other heap size (\code{\verb~|-Xmx13g~}, no \code{\verb~|-Xms~}), \code{\verb~|-XX:CICompilerCount~}, \code{\verb~|+UseTransparentHugePages~}, \code{\verb~|ReservedCodeCacheSize~}, \code{\verb~|-TieredCompilation~}, \code{\verb~|+UseParallelGC~} at run time}\td{accepted}}
+\tr{\td{\code{\verb~|+UseCompactObjectHeaders~} at run time, cache trained without}\td{refused (\code{\verb~|Unable to use AOT cache~})}}
+\tr{\td{distribution copied with \code{\verb~|cp -a~} to another directory}\td{accepted (the jar paths may differ)}}
+\tr{\td{distribution copied with \code{\verb~|cp -r~} (new modification times)}\td{refused: \code{\verb~|This file is not the one used while building the AOT cache: '.../lib/nativeimage-25.5.5.0.3.jar', timestamp has changed~}, \code{\verb~|shared class paths mismatch~}}}
+\tr{\td{cache file missing}\td{three \code{\verb~|[error][aot]~} lines, the run goes on}}
+\tr{\td{where those lines go}\td{to \strong{standard output} (unified logging's default); \code{\verb~|-Xlog:disable -Xlog:all=warning:stderr~} sends them to standard error}}
+\tr{\td{the training run's exit}\td{the cache is written at a normal VM exit: the launcher's default \code{\verb~|Runtime.halt~} skips it, the training run needs \code{\verb~|RLVM_EXIT=exit~}}}
+\tr{\td{classic CDS (\code{\verb~|-XX:ArchiveClassesAtExit~} / \code{\verb~|-XX:SharedArchiveFile~}) with the shipped flags}\td{works with JVMCI on (3.7 MB; 1,283 classes from the archive)}}
+}
+
+\p{So on this JDK the AOT cache and JVMCI exclude each other: with the cache the VM cannot run Graal as its JIT and the Truffle tier (\code{\verb~|rlvm-truffle~}, switch \code{\verb~|t2~}) has no compiler. For the machine's default switches (no Truffle tier; C2 as the JIT) nothing is lost.}
+
+\p{What the cache changes in the first second (\code{\verb~|-XX:+PrintCompilation~} on init-prelude, \code{\verb~|work/j1/diag/printcomp-*~}): without it the VM compiles at tier 3 first (full profiling, the slowest compiled code) and C2 follows when the profiles are ripe; with it the methods that the training run saw at tier 4 are compiled at tier 2 (no profiling) at once and queued for C2 with the training profile. The C2 compiles themselves still have to be done.}
+}
+
+\subtree{
+\title{3.2 Compiler threads, tiers, and the cache: measurements}
+
+\p{Each row is two processes: a plain cold run (fresh process, exec to exit) and a 6-pass run; 8 workers. Window 7 (clean) unless marked (*) = window 3, which ran beside a Mathlib diagnostic of my own on the other cores (its rows agree with window 7 where both exist).}
+
+\p{\strong{Init (348 MB).}}
+
+\table{
+\tr{\th{VM flags (changes against today's)}\th{cold wall s}\th{passes 1-6, s}}
+\tr{\td{today: tiered, \code{\verb~|CICompilerCount=2~} (1 C1 + 1 C2 thread)}\td{5.30 (4.74*)}\td{4.28 1.77 1.22 1.01 1.00 0.91}}
+\tr{\td{\code{\verb~|CICompilerCount=4~} (*)}\td{3.69}\td{3.30 1.44 0.95 0.86 0.85 0.87}}
+\tr{\td{\code{\verb~|CICompilerCount=8~}}\td{2.87 (2.83*)}\td{3.70 1.02 0.90 0.85 0.84 0.89 (2.59 1.01 0.91 0.89 0.84 0.92*)}}
+\tr{\td{\code{\verb~|-TieredCompilation~}, 2 threads (both C2)}\td{2.79}\td{2.31 1.01 0.87 1.05 0.82 0.84}}
+\tr{\td{\code{\verb~|-TieredCompilation~}, 8 threads}\td{2.86}\td{2.83 0.99 0.82 0.84 0.87 0.83}}
+\tr{\td{today's flags, 6 workers instead of 8 (*)}\td{3.45}\td{3.67 1.50 1.00 0.95 0.97 0.93}}
+\tr{\td{\code{\verb~|CICompilerCount=4~}, 6 workers (*)}\td{2.85}\td{2.82 1.08 1.07 0.91 0.92 0.90}}
+\tr{\td{JVMCI off, nothing else (*; the control of the cache rows)}\td{3.97}\td{4.06 2.08 1.38 1.01 0.99 0.92}}
+\tr{\td{classic CDS archive (*)}\td{4.69}\td{4.21 2.19 1.39 0.99 0.88 0.91}}
+\tr{\td{AOT cache (Std x 4), profile replay off (\code{\verb~|-AOTReplayTraining~}) (*)}\td{4.10}\td{3.18 1.04 0.96 1.09 0.98 0.87}}
+\tr{\td{AOT cache (Std x 4), 2 threads (*)}\td{2.90}\td{2.81 1.65 1.04 1.08 1.09 0.97}}
+\tr{\td{AOT cache (Std x 4), 4 threads (*)}\td{2.35}\td{2.28 1.45 1.04 1.06 0.99 1.02}}
+\tr{\td{AOT cache (Std x 4), 8 threads}\td{2.33 (2.44*)}\td{2.46 1.11 0.97 1.01 1.04 0.89}}
+\tr{\td{AOT cache (Std x 4), untiered, 8 threads}\td{2.22}\td{2.11 1.09 0.97 0.95 0.96 0.94}}
+\tr{\td{AOT cache (init-prelude x 20), 4 threads (*)}\td{3.41}\td{3.26 1.40 1.04 0.88 0.94 0.91}}
+\tr{\td{AOT cache (init-prelude x 40, trained untiered), untiered, 8 threads}\td{2.62}\td{2.50 1.00 0.94 0.89 0.90 0.95}}
+}
+
+\p{\strong{cedar (905 MB).} Today's flags, from the 10-pass rows of window 4: pass 1 8.89 and 7.35 s, then 3.46 2.38 2.19 and 2.50 2.21 2.09; \code{\verb~|-TieredCompilation~} with 2 threads: 4.44, then 2.16 2.08 2.01; Graal (4 threads): 5.06, then 2.57 2.23 2.20.}
+
+\table{
+\tr{\th{VM flags}\th{cold wall s}\th{passes 1-6, s}}
+\tr{\td{\code{\verb~|CICompilerCount=8~}}\td{5.75}\td{5.00 2.27 2.04 2.12 2.01 2.00}}
+\tr{\td{\code{\verb~|-TieredCompilation~}, 8 threads}\td{4.57}\td{4.24 2.25 1.98 1.99 2.02 1.96}}
+\tr{\td{AOT cache (Std x 4), 8 threads}\td{4.69}\td{4.52 2.59 2.23 2.18 2.11 2.19}}
+\tr{\td{AOT cache (Std x 4), untiered, 8 threads}\td{4.07}\td{4.04 2.25 2.28 2.05 2.08 2.03}}
+\tr{\td{AOT cache (init-prelude x 20), 8 threads}\td{5.78}\td{5.27 2.43 2.39 2.14 2.09 2.07}}
+}
+
+\p{Reading:}
+
+\ul{
+\li{\strong{Compiler threads are the lever.} With \code{\verb~|CICompilerCount=2~} a tiered VM has one C2 thread, and it shares eight cores with eight workers that are still running interpreted and C1 code: Init needs four passes (4.3, 1.8, 1.2, 1.0 s). With 8 compiler threads the cold wall falls from 5.3 to 2.9 s on Init and from about 8.5 to 5.8 s on cedar, pass 2 is within 20 \% of steady and pass 3 is steady. The steady state does not suffer (0.85 against 1.00 s on Init in the same window). A first pass with 6 workers instead of 8 does the same thing from the other side (3.45 against 4.74 s cold): the two free cores go to the compilers.}
+\li{\strong{Without the C1 tiers} both threads of \code{\verb~|CICompilerCount=2~} are C2 threads and the first pass is shorter still on a real corpus (Init 2.79 s cold, cedar pass 1 4.4 s) although everything starts in the interpreter. On a tiny input it is the other way round (section 3.3).}
+\li{\strong{Class loading is not the cost.} A classic CDS archive (4.69 s) and the AOT cache with its profiles switched off (4.10 s) are where JVMCI-off alone is (3.97 s): loading and linking 1,300 classes is 0.1-0.2 s of a 4 s start.}
+\li{\strong{The profiles of the cache do shorten the start}: with 2 compiler threads 2.90 s against 4.74 s (3.97 s for its control); with 8 threads the gain shrinks to 0.5 s on Init (2.33 against 2.87) and 1.1 s on cedar (4.69 against 5.75).}
+\li{\strong{... and they make the steady state worse.} In every pair the later passes of the run with the cache are slower: Init 1.01 against 0.85 s (8 threads), 0.95 against 0.84 (untiered); cedar 2.18 against 2.01 and 2.05 against 1.99. Confirmation with 10 passes in section 3.3.}
+\li{\strong{The cache trained on init-prelude} (3.8 MB, what a build always has) gives less than the one trained on Std: cold 5.78 s on cedar, i.e. nothing, and 3.41 s on Init with 4 threads against 2.35 s.}
+}
+}
+
+\subtree{
+\title{3.3 The cache against the steady state, and a tiny input (window 8, clean)}
+
+\p{Candidate flags of section 5 (huge pages, 8 compiler threads; tiered C2), with and without the AOT cache trained on Std (4 passes); warm = median of passes 4-10 (8 workers) or 2-6 (1 worker), best in brackets:}
+
+\table{
+\tr{\th{corpus, workers, passes}\th{without the cache: pass 1 / warm s / CPU s / peak RSS MiB}\th{with the cache: pass 1 / warm s / CPU s / peak RSS MiB}\th{warm, with / without}}
+\tr{\td{Init, 8, 10 passes (run 1)}\td{2.67 / 0.80 (0.78) / 5.83 / 1,087}\td{2.27 / 0.85 (0.84) / 6.20 / 1,386}\td{1.06}}
+\tr{\td{Init, 8, 10 passes (run 2)}\td{2.62 / 0.78 (0.76) / 5.53 / 1,057}\td{2.17 / 0.85 (0.83) / 6.05 / 1,361}\td{1.09}}
+\tr{\td{Std, 8, 10 passes (the training corpus itself)}\td{3.43 / 1.37 (1.34) / 10.16 / 1,887}\td{2.91 / 1.46 (1.44) / 10.79 / 1,878}\td{1.07}}
+\tr{\td{reachability, 1, 6 passes}\td{5.47 / 4.88 (4.71) / 5.12 / 2,393}\td{5.46 / 5.14 (4.91) / 5.36 / 2,399}\td{1.05}}
+}
+
+\p{The cache takes 0.4-0.5 s off the first pass and adds \strong{5-9 \% to every later pass}, on the corpus it was trained on as well as on others, with 8 workers and with one (and with it the section 3.2 pairs: 11 of 11 comparisons in the same direction). The VM compiles from the training run's profiles at once and has no reason to compile again: the code is correct, a little worse, and stays.}
+
+\p{Where the difference is (\code{\verb~|-XX:+LogCompilation~} on Init, 8 workers, 6 passes, with and without the cache; \code{\verb~|work/j1/diag/init-8w-comp-*.summary.txt~}; a diagnostic on the loaded host):}
+
+\table{
+\tr{\th{}\th{without the cache}\th{with the cache}}
+\tr{\td{compile tasks at tier 3 (C1, full profiling) / tier 2 (C1, no profiling)}\td{2,017 / 860}\td{184 / 1,945}}
+\tr{\td{C2 compile units of \code{\verb~|rlvm.*~} (last compile of each root)}\td{932}\td{1,012}}
+\tr{\td{... of them at the inlining budget (8,000 or more inlined bytecodes)}\td{12 (0.46 MB of code)}\td{25 (0.92 MB)}}
+\tr{\td{C2 code of \code{\verb~|rlvm.*~}}\td{2.65 MB}\td{3.43 MB}}
+\tr{\td{uncommon traps taken at run time}\td{246}\td{25}}
+}
+
+\p{The run's own profile is young when C2 first compiles a method: branches not seen yet are compiled as traps, a few hundred of them fire, and the recompiled code contains what this run needs. The trained profile has seen four passes of Std: nearly every branch has a count, C2 compiles all of them (25 traps in the whole run), the units are a third larger and twice as many of them run into the inlining budget of section 2.1. On this evidence (one diagnostic pair; a reading, not a proof) a mature profile is the worse one for this code.}
+
+\p{A tiny input (init-prelude, 3.8 MB, 1,840 units), cold wall of a fresh process, three runs each: today's flags 0.21 / 0.22 / 0.22 s; candidate flags 0.25 / 0.25 / 0.24; with the cache 0.22 / 0.23 / 0.25; untiered 0.33 / 0.40 / 0.37; native image 0.02 / 0.02 / 0.02. The JVM's floor is about 0.2 s whatever is done; \code{\verb~|-TieredCompilation~} costs 0.15 s there.}
+
+\p{\strong{Answer to question 2.} (a) The JVM reaches its steady state in two or three passes instead of four to six when it has compiler threads: \code{\verb~|-XX:CICompilerCount=8~} (cold wall 4.1-5.3 -> 2.8-3.6 s on Init, 8.5-9.9 -> 5.2-5.8 s on cedar, 5.5 -> 3.1 s on Std, 4.0 -> 2.5 s on reachability over windows 3, 7, A and B; nothing lost in steady state). \code{\verb~|-XX:-TieredCompilation~} gets the same first pass with two threads. Lower tier-4 thresholds do nothing for the first pass (2.81 against 2.60 s on Init, section 2.2): the queue of the one C2 thread, not the thresholds, is what holds it back. (b) It can start warmER, not warm: JDK 25's AOT cache works on GraalVM CE 25 only with JVMCI off, takes another 0.4-1.1 s off the cold wall (Init 2.2-2.3 s against the image's 1.1-1.2 s), costs 18.7 MB and one training run at build time, and \strong{costs 5-9 \% of the warm wall clock}, which is the metric. It does not belong in the default launcher line; it is an option for a launcher that is known to run once.}
+}
+
+\subtree{
+\title{3.4 What it would take to ship the cache (if it is wanted for cold runs)}
+
+\p{Prototype: \code{\verb~|work/j1/tools/mkproto.sh~} builds a distribution with the proposed launcher (\code{\verb~|work/j1/proto-src/rlvm-jvm.in~}) and writes \code{\verb~|lib/rlvm.aot~} with one training run through that launcher; \code{\verb~|work/j1/proto-aot~} is the result (cache trained on Std, 4 passes).}
+
+\ol{
+\li{\strong{Build step} (in \src{scripts/build.sh}, after the jars and the launcher are in the staged distribution, before it is installed): one run of the staged launcher on a training export with \code{\verb~|RLVM_EXIT=exit~} and the VM flags \code{\verb~|-XX:-EnableJVMCI -XX:AOTCacheOutput=<stage>/lib/rlvm.aot~}, e.g. \code{\verb~|-X engine=machine -X load=pipelined -X passes=4 --threads 8 Std.ndjson~}. JEP 514's one-step form does the rest (the VM starts a child VM at exit that assembles the cache). Cost: the training run (Std x 4 passes: 52 and 95 s on this host under load, assembly included; the four passes are about 8 s on quiet cores) plus 2-3 s of assembly. Size: \strong{18-19 MB} next to 20 MB of jars. Nothing is downloaded; it is the build's own JDK.}
+\li{\strong{Training export.} init-prelude (always there) is not enough (section 3.2); Init or Std is. The arena build has \code{\verb~|init.ndjson~} only if the site generated it; the PGO path of \code{\verb~|build.sh~} already has a \code{\verb~|--train FILE~} option that could be shared.}
+\li{\strong{Launcher.} (a) add \code{\verb~|-XX:-EnableJVMCI -XX:AOTCache=$here/../lib/rlvm.aot~} when the file exists and nothing needs JVMCI (the Truffle tier \code{\verb~|t2~}, \code{\verb~|--truffle-probe~}, a user's \code{\verb~|-XX:+UseJVMCICompiler~}); (b) spell the class path out in sorted order instead of \code{\verb~|lib/*~}: the cache is accepted only for the class path it was trained with, and the VM expands the wildcard in directory order, which is not the same on every file system; (c) \code{\verb~|-Xlog:disable -Xlog:all=warning:stderr~}, because a refused cache prints three \code{\verb~|[error][aot]~} lines on standard output and the run goes on; (d) \code{\verb~|RLVM_EXTRA_CP~} entries are appended after the trained class path, which the cache allows.}
+\li{\strong{What invalidates it} (the run then goes on without it): any jar with another size or modification time (so the cache is written after the last jar is in place, and distributions are copied with \code{\verb~|cp -a~}, as \code{\verb~|cp -aL work/dist DIR~} already does; a \code{\verb~|cp -r~} copy was refused); another JDK build; \code{\verb~|UseCompactObjectHeaders~} different from the training run; JVMCI on. Heap size, collector (Serial and Parallel tried), compiler thread count, tiers on or off, huge pages and the code cache size may differ.}
+\li{\strong{What is lost.} Graal as the JIT and the Truffle tier's compiler in the same process (the launcher has to choose per run, as the prototype does).}
+}
+}
+}
+
+\subtree{
+\title{4. Memory: the heap the machine needs on Mathlib}
+
+\subtree{
+\title{4.1 What decides it}
+
+\ul{
+\li{The launcher's \code{\verb~|-Xms13g -Xmx13g -Xmn1g~} exists for the reference engine (13.4 GB resident on Mathlib, \code{\verb~|work/status/warm.md~}). With the machine the live data after a full collection are \strong{3.3-3.7 GB at the end of the load and 2.7 GB after it} (\code{\verb~|-Xlog:gc*~}, \code{\verb~|work/j1/diag/mathlib-*.gc.log~}); the resident set is anonymous memory only (\code{\verb~|/proc/PID/status~} once a second: RssFile 22 MB; the export does not stay mapped).}
+\li{HotSpot's serial collector collects the old generation only when it is full, so the resident set of a process with a large cap is whatever garbage the young generation promoted (the loader's publications, about 0.25 GB per young collection during the load) on top of the store. Nothing in the VM bounds it but \code{\verb~|-Xmx~}.}
+\li{\strong{The machine has a heap rule of its own}, \code{\verb~|Machine.heapAllows~} (rlvm-machine \code{\verb~|Machine.java~}): before a session array of 32 MB or more grows, the new array must fit into \code{\verb~|maxMemory - used~} together with 256 MB, a second copy of itself (multi-worker engines) and a "young reserve" of \strong{a third of the maximum heap} (\code{\verb~|YOUNG_RESERVE = Runtime.maxMemory() / 3~}: HotSpot's default \code{\verb~|NewRatio~}, although both launchers give \code{\verb~|-Xmn1g~}). If it does not fit, the machine calls \code{\verb~|System.gc()~} and looks again; if it still does not fit, the growth is refused, the unit is declined with \code{\verb~|E_MEM~} and the driver re-checks it on the cold path. These are the only full collections of a Mathlib run with the machine, and they are what a smaller cap changes.}
+}
+}
+
+\subtree{
+\title{4.2 Measurements}
+
+\p{Timed (window 6, clean; Mathlib, 8 workers, 2 reload passes, today's JIT flags):}
+
+\table{
+\tr{\th{heap flags}\th{pass 1 s}\th{pass 2 = warm s}\th{CPU of pass 2 s}\th{collector ms in pass 2}\th{collections in the two passes (of which full = \code{\verb~|System.gc()~} of the machine)}\th{peak RSS after pass 1 / after pass 2, MiB}\th{\code{\verb~|E_MEM~} declines}}
+\tr{\td{\code{\verb~|-Xms13g -Xmx13g -Xmn1g~} (today)}\td{29.98}\td{23.94}\td{180.4}\td{660}\td{55 (1: the one between the passes)}\td{7,924 / 8,729}\td{0}}
+\tr{\td{\code{\verb~|-Xmx8g -Xmn1g~}}\td{31.21}\td{24.07}\td{181.8}\td{878}\td{56 (5)}\td{6,355 / 6,657}\td{0}}
+\tr{\td{\code{\verb~|-Xmx7g -Xmn1g~}}\td{35.10}\td{24.21}\td{179.4}\td{964}\td{59 (6)}\td{5,717 / 6,663}\td{0}}
+}
+
+\p{Diagnostics on the loaded host (collections, declines and resident set are valid, the times are not; 2 passes):}
+
+\table{
+\tr{\th{heap flags}\th{full collections (\code{\verb~|System.gc()~} of the machine / allocation failure)}\th{\code{\verb~|E_MEM~} declines}\th{peak RSS MiB}}
+\tr{\td{\code{\verb~|-Xmx8g -Xmn1g~}}\td{5 / 0}\td{0}\td{6,252}}
+\tr{\td{\code{\verb~|-Xmx6g -Xmn1g~}}\td{20 / 0}\td{2}\td{5,589}}
+\tr{\td{\code{\verb~|-Xmx5g -Xmn512m~}}\td{83 / 12}\td{18}\td{5,125}}
+}
+
+\p{Timed, window 8 (clean; today's JIT flags, 2 passes):}
+
+\table{
+\tr{\th{heap flags}\th{pass 1 s}\th{pass 2 = warm s}\th{CPU of pass 2 s}\th{collector ms, pass 1 / 2}\th{full collections in the two passes}\th{peak RSS after pass 1 / pass 2, MiB}\th{\code{\verb~|E_MEM~} declines, pass 1 / 2}}
+\tr{\td{\code{\verb~|-Xmx6g -Xmn1g~}}\td{30.44}\td{23.99}\td{179.7}\td{1,773 / 1,121}\td{28 (all \code{\verb~|System.gc()~} of the machine)}\td{5,841 / 5,843}\td{2 / 6}}
+}
+
+\p{The declined units say why (\code{\verb~|work/j1/logs/w08-mathlib-base-x6g.declines.txt~}): \code{\verb~|a session array of 33554432 bytes does not fit (2375316784 bytes free of 6335102976, reserve 268435456)~}. Need = 2 x 32 MB + 256 MB + a third of 6,335 MB = 2,432 MB against 2,375 MB free: \strong{refused for 57 MB}, with a real young generation of 1 GB instead of the assumed 2.1 GB. The units (\code{\verb~|Scheme.exists_hom_hom_comp_eq_comp_of_isAffine_of_locallyOfFiniteType~}, \code{\verb~|Ideal.Quotient.stabilizerHomSurjectiveAuxFunctor._proof_1~} / \code{\verb~|_3~}) are then decided on the driver's cold path; the verdict is ACCEPT and the wall clock is that of the 13 GB run.}
+
+\p{Window 4 (clean) repeated the 13 GB row (30.99 / 23.92 s, 8,192 / 8,426 MiB, 0 \code{\verb~|E_MEM~}) and tried the next step down: \strong{\code{\verb~|-Xmx5g -Xmn1g~} ends after 19 s with \code{\verb~|java.lang.OutOfMemoryError: Java heap space~}, exit status 3} (\code{\verb~|ExitOnOutOfMemoryError~}; the last full collection left 3,405 MB live in an old generation of 4 GB; \code{\verb~|work/j1/logs/f-mathlib-base-x5g.{out,gc.log}~}). With a young generation of 512 MB the same cap survived in the diagnostic above; neither is a cap to ship.}
+
+\p{Window 9 (clean; \code{\verb~|-Xmx7g -Xmn1g~}, 8 compiler threads, with and without huge pages, two runs each) gave four more readings of the 7 GB cap: 0 \code{\verb~|E_MEM~} in all four, 9-12 \code{\verb~|System.gc()~} per run, and a peak RSS after pass 1 / pass 2 of 6,460 / 6,479 and 6,031 / 6,097 MiB (huge pages) and 5,712 / 6,487 and 6,658 / 6,682 MiB (without). \strong{The resident set under a 7 GB cap is 5.7-6.7 GB already in the first pass}: it depends on when a session array happens to grow (and so to collect), not on the flags.}
+}
+
+\subtree{
+\title{4.3 Answer to question 3}
+
+\ul{
+\li{\strong{Same warm wall clock from 13 GB down to 6 GB}: 23.94 / 24.07 / 24.21 / 23.99 s for 13 / 8 / 7 / 6 GB (CPU of the warm pass 179-182 s in all four).}
+\li{\strong{Peak RSS}: 8.4-8.7 GB (13 GB, two passes; \code{\verb~|warm.md~} saw 11.5 GB after three) / 6.7 GB (8 GB) / 5.7-6.7 GB after one pass and 6.1-6.8 GB after two (7 GB, seven runs) / \strong{5.8 GB in every pass (6 GB)}. With the serial collector the resident set is whatever the cap allows: the old generation is collected only when it is full or when the machine's heap rule asks, and in a later pass the pooled sessions no longer grow, so it does not ask.}
+\li{\strong{7 GB is the smallest cap at which the machine decides every unit it decides at 13 GB} (0 \code{\verb~|E_MEM~}); at 6 GB its own heap rule refuses 2-6 session growths per pass by a few tens of MB and calls \code{\verb~|System.gc()~} 28 times in two passes; at 5 GB the run thrashes (\code{\verb~|-Xmn512m~}: 18 refusals, 95 full collections) or dies (\code{\verb~|-Xmn1g~}: OutOfMemoryError).}
+\li{\strong{The 6 GB target is met only by the 6 GB cap} (5.84 GB in both passes, same wall clock), and at that cap the machine's own rule refuses 2-6 units per pass that it would otherwise decide.}
+\li{\strong{What the launcher should choose} (it sees \code{\verb~|-X engine=machine~} in its arguments): machine \code{\verb~|-Xmx7g -Xmn1g~} without \code{\verb~|-Xms~} today (every unit decided by the machine as at 13 GB; 5.7-6.7 GB resident on Mathlib instead of 8.0-8.7 GB), and \strong{\code{\verb~|-Xmx6g -Xmn1g~} as soon as the machine's reserve follows the real young generation} (finding J1-F1: 5.8 GB in every pass at the same wall clock, measured above with the 2-6 refusals that the fix should remove; the fix itself was not tested, no module was edited); every other engine today's \code{\verb~|-Xms13g -Xmx13g -Xmn1g~}. Below Mathlib the cap is never reached (Init 0.9-1.0 GB, Std 1.7, cedar 2.0, reachability 4.3 GB resident).}
+\li{Not measured: a smaller young generation (\code{\verb~|-Xmn512m~} would take another 0.5 GB off the resident set and double the 27 young collections of a pass), and the reference engine with any other heap.}
+}
+}
+}
+
+\subtree{
+\title{5. Recommendation}
+
+\subtree{
+\title{5.1 The launcher line}
+
+\pre{\verb~|
+-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow $heap
+~}
+
+\p{with \code{\verb~|$heap~} = \code{\verb~|-Xmx7g -Xmn1g~} when the arguments name \code{\verb~|-X engine=machine~}, and today's \code{\verb~|-Xms13g -Xmx13g -Xmn1g~} otherwise (a heap flag of the launcher's user replaces either, as today). Against today's line (\code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError ... -Xms13g -Xmx13g -Xmn1g~}):}
+
+\table{
+\tr{\th{change}\th{why}\th{evidence}}
+\tr{\td{\code{\verb~|CICompilerCount~} 2 -> 8}\td{the one C2 thread of today's line is what makes the JVM need four to six passes; nothing is lost once warm; the threads are created on demand (\code{\verb~|UseDynamicNumberOfCompilerThreads~}), so 8 is a cap}\td{section 3.2: Init cold 5.3 -> 2.9 s, cedar pass 1 7.4-8.9 -> 5.0 s, pass 3 steady; section 5.2: warm wall unchanged}}
+\tr{\td{\code{\verb~|+UseTransparentHugePages~}}\td{the only flag with a consistent steady-state gain; free where the host's setting is \code{\verb~|madvise~} (this host) or \code{\verb~|always~}; where it is \code{\verb~|never~} the VM should print one warning and run as today (not tested: the host's setting cannot be changed from here)}\td{section 2.2: Mathlib -6 \% warm wall and -9 \% first pass (A B A B); reachability -2 to -4 \% wall, -7 \% CPU; cedar 0 to -4 \%}}
+\tr{\td{\code{\verb~|-Xlog:disable -Xlog:all=warning:stderr~}}\td{the VM's own warnings (huge pages unavailable, a refused cache) go to standard output by default}\td{section 3.1}}
+\tr{\td{machine: \code{\verb~|-Xmx7g -Xmn1g~}, no \code{\verb~|-Xms~} (then \code{\verb~|-Xmx6g -Xmn1g~}, see section 4.3)}\td{same warm wall as 13 GB; 5.7-6.7 GB resident on Mathlib instead of 8.0-8.7 GB; 6 GB gives 5.8 GB once finding J1-F1 is fixed; below Mathlib the heap just stays small}\td{section 4}}
+\tr{\td{kept: SerialGC, C2 (\code{\verb~|-UseJVMCICompiler~}), tiers on}\td{\src{docs/research/profiles/GC.md}; Graal and untiered C2 are within the noise with 8 workers, untiered costs 0.15 s on a tiny input and gains nothing over 8 compiler threads on the first pass}\td{sections 2.2, 3.2, 3.3}}
+\tr{\td{not added: the AOT cache}\td{0.4-1.1 s off the cold wall, 5-9 \% ON the warm wall}\td{section 3.3}}
+}
+
+\p{The prototype of the launcher script (engine detection, heap rule, sorted class path, the cache when \code{\verb~|lib/rlvm.aot~} exists and nothing needs JVMCI) is \code{\verb~|work/j1/proto-src/rlvm-jvm.in~}; the table below was measured through it (\code{\verb~|work/j1/proto/bin/rlvm-jvm~}, no cache file), not through \code{\verb~|RLVM_JAVA_OPTS~}.}
+}
+
+\subtree{
+\title{5.2 The table behind it}
+
+\p{Three launchers on the same jars, one window per pair of corpora (window A: Init, cedar; window B: Std, reachability; window 4: Mathlib; the host's load average was 4-6 at the start of A and B). "today" = the flags of today's \code{\verb~|bin/rlvm-jvm~}; "proposed" = the prototype launcher \code{\verb~|work/j1/proto/bin/rlvm-jvm~} as measured, i.e. 8 compiler threads AND \code{\verb~|+UseTransparentHugePages~} (see the note on huge pages below); "native" = the CE native image \code{\verb~|work/j1/distn/bin/rlvm~}. Heap: \code{\verb~|-Xms6g -Xmx6g -Xmn1g~} (today), \code{\verb~|-Xmx6g -Xmn1g~} (proposed), \code{\verb~|-Xmx6g~} (native) below Mathlib, as the host's memory rule asks; on Mathlib each launcher's own default (13 GB; the proposed launcher's 7 GB for the machine; the image's 13 GB cap). JVM rows with 8 workers: 10 passes, warm = median of passes 4-10; native: 5 passes, passes 2-5; one worker: 3 or 4 passes (JVM), 2 (native), warm = the later ones. Cold = a separate plain run, exec to exit; on Mathlib pass 1 of the 2-pass process instead.}
+
+\table{
+\tr{\th{corpus}\th{launcher}\th{warm wall, 8 workers, s: median (best)}\th{warm wall, 1 worker, s: median (best)}\th{cold wall, fresh process, 8 workers, s}\th{CPU of the median warm pass, 8 workers, s}\th{peak RSS, 8 workers, MiB}\th{pass 1, 8 workers, s}\th{passes, 8 workers, s}}
+\tr{\td{init}\td{today's launcher flags}\td{\strong{0.86 (0.81)}}\td{\strong{5.18 (5.16)}}\td{4.14}\td{6.3}\td{895}\td{4.17}\td{4.17 1.61 1.41 0.99 0.91 0.86 0.87 0.82 0.83 0.81}}
+\tr{\td{init}\td{proposed launcher line}\td{\strong{0.81 (0.77)}}\td{\strong{5.05 (4.90)}}\td{3.57}\td{5.8}\td{1022}\td{2.25}\td{2.25 0.97 0.84 0.87 0.77 0.84 0.83 0.78 0.81 0.80}}
+\tr{\td{init}\td{native image (CE, -O3)}\td{\strong{1.02 (1.01)}}\td{\strong{6.12 (6.12)}}\td{1.18}\td{6.9}\td{446}\td{1.02}\td{1.02 1.01 1.01 1.02 1.06}}
+\tr{\td{std}\td{today's launcher flags}\td{\strong{1.33 (1.29)}}\td{\strong{8.72 (8.62)}}\td{5.45}\td{9.9}\td{1748}\td{4.89}\td{4.89 1.87 1.43 1.35 1.35 1.33 1.31 1.34 1.29 1.29}}
+\tr{\td{std}\td{proposed launcher line}\td{\strong{1.37 (1.33)}}\td{\strong{8.98 (8.92)}}\td{3.11}\td{10.2}\td{1649}\td{3.46}\td{3.46 1.54 1.41 1.39 1.42 1.43 1.37 1.35 1.33 1.35}}
+\tr{\td{std}\td{native image (CE, -O3)}\td{\strong{1.72 (1.68)}}\td{\strong{10.37 (10.37)}}\td{1.78}\td{11.9}\td{694}\td{1.71}\td{1.71 1.74 1.72 1.68 1.71}}
+\tr{\td{cedar}\td{today's launcher flags}\td{\strong{2.19 (2.11)}}\td{\strong{12.31 (12.25)}}\td{9.9}\td{15.5}\td{2028}\td{8.90}\td{8.90 5.33 2.95 2.42 2.27 2.19 2.16 2.21 2.13 2.11}}
+\tr{\td{cedar}\td{proposed launcher line}\td{\strong{1.92 (1.89)}}\td{\strong{12.28 (12.21)}}\td{5.15}\td{13.9}\td{1952}\td{4.57}\td{4.57 2.27 2.04 1.92 2.01 1.89 1.91 1.92 1.97 2.06}}
+\tr{\td{cedar}\td{native image (CE, -O3)}\td{\strong{2.54 (2.50)}}\td{\strong{15.18 (15.18)}}\td{2.5}\td{17.5}\td{897}\td{2.65}\td{2.65 2.74 2.50 2.53 2.54}}
+\tr{\td{reachability}\td{today's launcher flags}\td{\strong{1.65 (1.60)}}\td{\strong{4.70 (4.14)}}\td{3.95}\td{5.2}\td{4272}\td{3.57}\td{3.57 1.85 1.84 1.70 1.75 1.65 1.72 1.60 1.62 1.64}}
+\tr{\td{reachability}\td{proposed launcher line}\td{\strong{1.65 (1.57)}}\td{\strong{4.32 (3.92)}}\td{2.54}\td{5.0}\td{4308}\td{2.38}\td{2.38 1.79 1.70 1.67 1.71 1.65 1.65 1.57 1.60 1.67}}
+\tr{\td{reachability}\td{native image (CE, -O3)}\td{\strong{2.44 (2.43)}}\td{\strong{6.45 (6.45)}}\td{2.63}\td{7.2}\td{2672}\td{2.48}\td{2.48 2.55 2.43 2.44 2.45}}
+\tr{\td{mathlib}\td{today's launcher (13 GB heap)}\td{\strong{23.92} (pass 2 of 2)}\td{-}\td{30.99 (pass 1 of the same process)}\td{183.5}\td{8426}\td{30.99}\td{30.99 23.92}}
+\tr{\td{mathlib}\td{proposed launcher line (machine heap 7 GB)}\td{\strong{24.91} (pass 2 of 2)}\td{-}\td{27.16 (pass 1 of the same process)}\td{183.2}\td{6076}\td{27.16}\td{27.16 24.91}}
+\tr{\td{mathlib}\td{proposed line + AOT cache (Std)}\td{\strong{24.05} (pass 2 of 2)}\td{-}\td{26.53 (pass 1 of the same process)}\td{184.4}\td{6559}\td{26.53}\td{26.53 24.05}}
+\tr{\td{mathlib}\td{native image (CE, -O3, 13 GB cap)}\td{\strong{28.34} (pass 2 of 2)}\td{-}\td{29.10 (pass 1 of the same process)}\td{207.0}\td{4158}\td{29.10}\td{29.10 28.34}}
+}
+
+\table{
+\tr{\th{ratio}\th{Init}\th{Std}\th{cedar}\th{reachability}\th{Mathlib}}
+\tr{\td{warm wall, 8 workers: proposed / today}\td{0.94}\td{1.03}\td{0.88}\td{1.00}\td{1.04}}
+\tr{\td{warm wall, 1 worker: proposed / today}\td{0.97}\td{1.03}\td{1.00}\td{0.92}\td{-}}
+\tr{\td{cold wall: proposed / today}\td{0.86}\td{0.57}\td{0.52}\td{0.64}\td{0.88 (pass 1)}}
+\tr{\td{warm wall, 8 workers: proposed / native}\td{0.79}\td{0.80}\td{0.76}\td{0.68}\td{0.88}}
+\tr{\td{warm wall, 8 workers: today / native}\td{0.84}\td{0.77}\td{0.86}\td{0.68}\td{0.84}}
+\tr{\td{warm wall, 1 worker: proposed / native}\td{0.83}\td{0.87}\td{0.81}\td{0.67}\td{-}}
+\tr{\td{cold wall: proposed / native}\td{3.0}\td{1.75}\td{2.1}\td{0.97}\td{0.93 (pass 1)}}
+\tr{\td{cold wall: today / native}\td{3.5}\td{3.1}\td{4.0}\td{1.5}\td{1.06 (pass 1)}}
+\tr{\td{peak RSS, 8 workers: proposed / native}\td{2.3}\td{2.4}\td{2.2}\td{1.6}\td{1.46}}
+\tr{\td{peak RSS, 8 workers: today / native}\td{2.0}\td{2.5}\td{2.3}\td{1.6}\td{2.03}}
+}
+
+\ul{
+\li{\strong{Warm.} The proposed line is where today's line is (0.88-1.04 with 8 workers, 0.92-1.03 with one): no steady-state gain can be claimed, as section 2 predicts. It reaches that state two passes earlier: its pass 3 is steady on every corpus (Init 0.84, Std 1.41, cedar 2.04, reachability 1.70 s) where today's line needs five or six (Init 1.41, 0.99, 0.91, 0.86; cedar 2.95, 2.42, 2.27, 2.19).}
+\li{\strong{Cold.} 14-48 \% less than today below Mathlib (Init 4.14 -> 3.57 s in this window; 5.30 -> 2.87 and 4.74 -> 2.83 s in windows 7 and 3; Std 5.45 -> 3.11; cedar 9.9 -> 5.15; reachability 3.95 -> 2.54), 12 \% on the first pass of Mathlib (31.0 -> 27.2 s). The native image is still 1.75-3 times faster cold on Init, Std and cedar; on reachability and on Mathlib the proposed JVM line now starts as fast as the image (2.54 against 2.63 s; 27.2 against 29.1 s).}
+\li{\strong{JVM against native image, warm, same jars, same windows:} 0.68-0.88 times the image's wall clock with 8 workers on all five corpora, 0.67-0.87 with one worker. \code{\verb~|work/status/warm.md~} had 0.71-0.91: unchanged with today's jars (the image's Mathlib pass is 28.3 s here, 35.3 s there).}
+\li{\strong{Mathlib.} One pair here (24.91 against 23.92 s) reads as 4 \% against the proposed line; the same flags gave 22.56 and 21.87 s in window 9, today's line 23.94 s in window 6: the pass varies by +-6 \% between windows, and the A B A B of window 9 (section 2.2) is the comparison to trust: huge pages -6 \%, the cap nothing.}
+\li{\strong{Memory.} Below Mathlib the JVM needs 1.6-2.5 times the image's resident set with either line (its young generation of 1 GB is touched in full). On Mathlib the 7 GB cap brings it from 8.4 GB to 6.1 GB here (5.7-6.7 GB over all runs; image 4.2 GB).}
+}
+}
+}
+
+\subtree{
+\title{6. Findings for the machine's owners (no module was edited)}
+
+\p{\strong{J1-F1 (M6, \code{\verb~|Machine.heapAllows~} / \code{\verb~|YOUNG_RESERVE~}): the young reserve is a third of the heap whatever \code{\verb~|-Xmn~} says, and that is what sets the machine's memory floor.} \code{\verb~|YOUNG_RESERVE = Runtime.maxMemory() / 3~}; both launchers run with \code{\verb~|-Xmn1g~}. On Mathlib with \code{\verb~|-Xmx6g -Xmn1g~} the machine refuses 2 session growths in the first pass and 6 in the second: \code{\verb~|a session array of 33554432 bytes does not fit (2375316784 bytes free of 6335102976, reserve 268435456)~}, i.e. 2 x 32 MB + 256 MB + 2,112 MB = 2,432 MB wanted against 2,375 MB free, where the real young generation is 1,024 MB; before each refusal it calls \code{\verb~|System.gc()~} (28 full collections in two passes; with 13 GB: none). Reading the reserve from the VM (\code{\verb~|MemoryPoolMXBean~} of the young pools, or the \code{\verb~|NewSize~} / \code{\verb~|MaxNewSize~} flags through \code{\verb~|HotSpotDiagnosticMXBean~}) instead of assuming \code{\verb~|NewRatio~} would make 6 GB a clean cap: 5.8 GB resident in every pass at the wall clock of 13 GB (section 4). Evidence: \code{\verb~|work/j1/logs/w08-mathlib-base-x6g.{out,declines.txt,gc.log,stats.json}~}.}
+
+\p{\strong{J1-F2 (machine owners; the convention H10): C2 compiles all of it, and its inlining budget is the only thing it runs into; neither a flag nor a reshaping for the JIT is worth doing.} Evidence in section 2.1 (which methods, which messages). \code{\verb~|Infer.piLoop~}, \code{\verb~|Conv.bindLoop~}, \code{\verb~|Conv.convLoop~}, \code{\verb~|MachineSession.run~}, \code{\verb~|Infer.twY~} (cedar), \code{\verb~|Infer.twalk~}, \code{\verb~|Infer.k_ck1/4/5~}, \code{\verb~|Cargs.cargsFrom~} (Init) end at 8,900-11,200 inlined bytecodes and 18,000-18,900 nodes; C2 answers "NodeCountInliningCutoff", "size > DesiredMethodLimit", "inlining too deep" for call sites with 10^6-10^8 profile counts, among them \code{\verb~|Conv.convLoop -> convCore1~} and \code{\verb~|Terms.kind -> Terms.arr~} (292 M in \code{\verb~|Infer.piLoop~}). The flags that move those limits (\code{\verb~|MaxInlineLevel~} 9 / 25, \code{\verb~|MaxInlineSize=100~}, \code{\verb~|FreqInlineSize=600~}, \code{\verb~|InlineSmallCode~} 1,000 / 6,000, \code{\verb~|-ClipInlining~}) change the warm pass by nothing that repeats (section 2.2). So the source-level equivalents - folding the private three-way select \code{\verb~|Terms.arr~} into \code{\verb~|kind~} / \code{\verb~|a~} / \code{\verb~|b~} / \code{\verb~|fvMask~} / \code{\verb~|word~} (one inline level less at the hottest leaf), splitting the arms of \code{\verb~|Eval.atom~}, shielding entry steps with \code{\verb~|dontinline~} - should not be expected to pay either; \code{\verb~|h10/hotspot-inline.cmd~} measured nothing on C2 before (NOTES-M6 F23) and this agrees. What does show up in the profile is memory: the hottest frames are probes into session tables (\code{\verb~|Runs.sameKept~} 8.3 \%, \code{\verb~|Values.closureAt~} 6.3 \%, \code{\verb~|Values.neu~} 4.8 \%, \code{\verb~|Values.closureProbe~} 3.7 \%), and huge pages are the one flag with a consistent gain. A change that makes those probes fewer or denser will help more than any flag.}
+
+\p{\strong{J1-F3 (machine owners, M8): a mature profile gives C2 worse code for the machine than a young one.} With the AOT cache the VM compiles from the profile of four training passes: 25 uncommon traps in a whole Init run instead of 246, 3.43 MB of C2 code instead of 2.65 MB, 25 compile units at the inlining budget instead of 12, and every later pass 5-9 \% slower (section 3.3). The step methods have many rarely-taken arms (\code{\verb~|*Slow~}, \code{\verb~|sig*~}, \code{\verb~|spill*~}, \code{\verb~|fault~}, the cold switch arms); C2's own pruning of branches it has not seen is doing useful work, and whatever keeps rare arms out of the compile units (they are already out of line; the test in front of them is what the profile sees) keeps the units inside the budget.}
+
+\p{\strong{J1-F4 (rlvm-driver / rlvm-main, P7 and the integrator): the resident set of a machine run is decided by accident.} The only full collections of a machine run are the \code{\verb~|System.gc()~} calls of \code{\verb~|Machine.heapAllows~}, made when a pooled session array of 32 MB or more grows; between them the serial collector lets the old generation fill. So the same flags give 5.7-6.7 GB after the first pass of Mathlib under a 7 GB cap (seven runs), 8.0-8.7 GB under 13 GB (\code{\verb~|warm.md~}: 11.5 GB after three passes), and in a later pass, where the sessions no longer grow, the cap itself. If a bound on the resident set is wanted independently of \code{\verb~|-Xmx~}, the driver's \code{\verb~|gc-after-mib~} is the existing lever; it was not measured here.}
+
+\p{\strong{J1-F5 (rlvm-export, LP2; small): the reader's block loop stays in C1 code.} \code{\verb~|ExportReader.sequential~} runs once per load with about 20,000 iterations on cedar, so it never reaches the tier-4 back-edge threshold: after five passes it still runs as tier-3 OSR code (with full profiling). Its body is calls into C2 code, so the cost is small; \code{\verb~|Worker.run~} (the worker's unit loop, 1,092 bytecodes) reached tier 4 only in pass 5 for the same reason. Nothing to do unless a profile of the loader shows the shell.}
+}
+
+\subtree{
+\title{7. What was not established}
+
+\ul{
+\li{\strong{Effects below about 5 \%.} The host was shared for the whole session (load average 20-60); two base rows of one window differ by up to 5 \% with 8 workers. Every "nothing" above means "nothing above that".}
+\li{\strong{Why exactly the cached profile costs 5-9 \%}: the larger compile units are an observation on one diagnostic pair (Init), not a proof of cause.}
+\li{\strong{\code{\verb~|LoopUnrollLimit~}, \code{\verb~|MaxNodeLimit~}, \code{\verb~|-DontCompileHugeMethods~}} were not timed (nothing for them to act on, section 2.1); tier thresholds were tried once (a fifth of the tier-4 defaults: nothing, section 2.2), higher ones not.}
+\li{\strong{One worker on Mathlib} (about 190 s per pass) and \strong{Graal on Mathlib} were not run.}
+\li{\strong{The reference engine} was not measured with the proposed flags; its heap line is unchanged.}
+\li{\strong{Huge pages elsewhere}: this host has transparent huge pages in \code{\verb~|madvise~} mode, where the flag takes effect. With \code{\verb~|never~} the VM is expected to print one warning and run as today, with \code{\verb~|always~} the flag changes nothing; neither was tested (the setting is the host's, also for a container).}
+\li{\strong{x86}: every number here is aarch64 (Cortex-X925). The arena's runner is x86; the JVM launcher is not what the arena runs.}
+\li{\strong{A smaller young generation} on Mathlib (\code{\verb~|-Xmn512m~}) and the 6 GB cap after a fix of J1-F1.}
+\li{\strong{A cache trained on Init} (between init-prelude, which is not enough, and Std, which is).}
+}
+}
+
+\subtree{
+\title{8. Files}
+
+\table{
+\tr{\th{what}\th{where}}
+\tr{\td{living summary}\td{\code{\verb~|work/status/prof-J1.md~}}}
+\tr{\td{window scripts, in the order they ran}\td{\code{\verb~|work/j1/w/~}: \code{\verb~|w01~}, \code{\verb~|w02~}, \code{\verb~|w03~}, \code{\verb~|w04~}, \code{\verb~|w05r~}, \code{\verb~|w06~}, \code{\verb~|w05c~}, \code{\verb~|w07~}, \code{\verb~|w08~}, \code{\verb~|fa~}, \code{\verb~|fb~}, \code{\verb~|f4~}, \code{\verb~|w09~} (\code{\verb~|.sh~}); the windows are in \code{\verb~|work/perf-history/quiet.log~} (\code{\verb~|cmd=bash work/j1/w/...~})}}
+\tr{\td{raw output of every process, one line per process}\td{\code{\verb~|work/j1/logs/*.out~}, \code{\verb~|work/j1/logs/runs.tsv~}}}
+\tr{\td{tools}\td{\code{\verb~|work/j1/tools/~}: \code{\verb~|run.sh~}, \code{\verb~|seq.sh~}, \code{\verb~|par4.sh~}, \code{\verb~|coldwarm.sh~}, \code{\verb~|mathlib.sh~}, \code{\verb~|runproto.sh~}, \code{\verb~|runnative.sh~}, \code{\verb~|final.sh~}, \code{\verb~|variants.sh~} (every flag set by name), \code{\verb~|summ.py~}, \code{\verb~|finaltable.py~}, \code{\verb~|logcomp.py~}, \code{\verb~|inltree.py~}, \code{\verb~|budget.py~}, \code{\verb~|jfrsamples.py~}, \code{\verb~|rss.sh~}, \code{\verb~|memdiag.sh~}, \code{\verb~|train.sh~}, \code{\verb~|mkproto.sh~}, \code{\verb~|MethodSizes.java~}}}
+\tr{\td{JIT diagnostics}\td{\code{\verb~|work/j1/diag/cedar-8w-comp.xml~} + \code{\verb~|.summary.txt~}, \code{\verb~|cedar-8w.jfr~}, \code{\verb~|init-8w-comp-*.xml~} + \code{\verb~|.summary.txt~}, \code{\verb~|printcomp-prelude-*.txt~}}}
+\tr{\td{collector logs, resident-set samples, machine statistics of the Mathlib diagnostics}\td{\code{\verb~|work/j1/diag/mathlib-*.{gc.log,rss.tsv,stats.json}~}}}
+\tr{\td{AOT caches and their logs}\td{\code{\verb~|work/j1/aot/~} (\code{\verb~|std4.aot~}, \code{\verb~|prelude20.aot~}, \code{\verb~|prelude40nt.aot~}, \code{\verb~|cds-prelude.jsa~}, \code{\verb~|*.log~})}}
+\tr{\td{the proposed launcher and the prototype distributions}\td{\code{\verb~|work/j1/proto-src/rlvm-jvm.in~}, \code{\verb~|work/j1/proto/~} (no cache), \code{\verb~|work/j1/proto-aot/~} (cache trained on Std)}}
+\tr{\td{distributions measured}\td{\code{\verb~|work/j1/dist/~} (JVM launcher), \code{\verb~|work/j1/distn/~} (the same jars + native image)}}
+}
+}
