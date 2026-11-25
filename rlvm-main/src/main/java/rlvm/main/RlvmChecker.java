@@ -88,7 +88,7 @@ public final class RlvmChecker implements Checker {
                 "  load=auto|batch|pipelined how the file is loaded (default auto: pipelined with checking when two or",
                 "                            more workers run and the file has 8 MiB or more)",
                 "  scan-threads=K|auto, io=buffered|mapped|auto",
-                "                            the reader (default: 2 scanner threads on mapped input from 256 MiB)",
+                "                            the reader (default: 1 scanner thread on mapped input from 256 MiB)",
                 "  passes=N, passes-mode=reload|recheck",
                 "                            check the export N times in this process and report every pass",
                 "  stats-file=F, stop-after=load|env, session-mib=N, memory-mib=N, profile=4.36|4.37, no-recheck, ...",
@@ -99,21 +99,28 @@ public final class RlvmChecker implements Checker {
     /**
      * What a run without any option does, for {@code rlvm --version} ({@code rlvm.cli.Checker.defaults()};
      * without {@code @Override} for the same reason as {@link #usage()}): the engine by priority, the
-     * policy, the automatic worker count and the load rule, from the constants that decide them. The
+     * policy, the automatic worker count and the load rule, from the constants that decide them, and
+     * the default engine's own defaults as it states them ({@code EngineProvider.defaultsNote()}). The
      * release is one executable whose plain run is the fastest configuration (OWNER-NOTES 16); this is
      * the line that says which one that is.
      */
     public String defaults() {
         String engine;
         try {
-            engine = Engines.primary(null, Engines.providers()).name();
+            EngineProvider primary = Engines.primary(null, Engines.providers());
+            engine = primary.name();
+            // The engine's own defaults in its own words (the machine: its switch set), if it says any.
+            String note = primary.defaultsNote();
+            if (note != null && !note.isBlank()) {
+                engine += " (" + note.strip() + ")";
+            }
         } catch (RuntimeException | java.util.ServiceConfigurationError e) {
             engine = "unavailable";
         }
         long pipelineMib = new RunConfig().pipelineMinBytes >> 20;
         return "engine " + engine + ", policy practical; one worker per CPU, at most " + AUTO_MAX_WORKERS
                 + "; a file of " + pipelineMib + " MiB or more is checked while it is read (pipelined), with "
-                + MainOptions.DEFAULT_SCAN_THREADS + " scanner threads from "
+                + MainOptions.DEFAULT_SCAN_THREADS + (MainOptions.DEFAULT_SCAN_THREADS == 1 ? " scanner thread from " : " scanner threads from ")
                 + (MainOptions.SCAN_THREADS_MIN_BYTES >> 20) + " MiB";
     }
 

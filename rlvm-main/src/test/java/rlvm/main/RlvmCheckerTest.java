@@ -57,7 +57,7 @@ class RlvmCheckerTest {
     void defaultsLineSaysWhatARunWithoutOptionsDoes() throws Exception {
         String d = new RlvmChecker().defaults();
         assertEquals("engine reference, policy practical; one worker per CPU, at most 8; a file of 8 MiB or more is "
-                + "checked while it is read (pipelined), with 2 scanner threads from 256 MiB", d);
+                + "checked while it is read (pipelined), with 1 scanner thread from 256 MiB", d);
         boolean launcherPrintsDefaults;
         try {
             rlvm.cli.Checker.class.getMethod("defaults");
@@ -67,6 +67,9 @@ class RlvmCheckerTest {
         }
         LauncherAccess.Result r = LauncherAccess.run(new HashMap<>(), "--version");
         assertEquals(launcherPrintsDefaults, r.out.contains("\ndefault: " + d + "\n"), r.out);
+        // The reference kernel states no defaults of its own: no parenthesis behind its name. An engine
+        // that does (EngineProvider.defaultsNote(), e.g. the machine's switch set) is quoted there.
+        assertEquals("", rlvm.main.Engines.reference(rlvm.main.Engines.providers()).defaultsNote());
     }
 
     @Test

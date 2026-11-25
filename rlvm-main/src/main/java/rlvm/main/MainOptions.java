@@ -127,8 +127,16 @@ final class MainOptions {
      * and every mutant is far below, so nothing changes for them.
      */
     static final long SCAN_THREADS_MIN_BYTES = 256L << 20;
-    /** The default number of scanner threads for inputs of {@link #SCAN_THREADS_MIN_BYTES} and more. */
-    static final int DEFAULT_SCAN_THREADS = 2;
+    /**
+     * The default number of scanner threads for inputs of {@link #SCAN_THREADS_MIN_BYTES} and more.
+     * ONE since 2026-11-25 (it was 2, chosen with the reference engine and the machine's earlier switch
+     * set): with eight workers on eight cores a second scanner thread takes a core from the checking.
+     * Cold single runs of the native image, machine with the switch set default,eager,skipargs,congruence,
+     * one against two scanner threads (the journal: decision dec-EGMG): navier-stokes-euler 0.86, cedar
+     * 0.95, Std 0.98, Init and cslib 1.00, mathlib 0.92 to 0.97 times the wall clock; none at all is 3 %
+     * slower than one on Init and equal elsewhere; three are never better than two.
+     */
+    static final int DEFAULT_SCAN_THREADS = 1;
     String stopAfter;
     Path statsFile;
     boolean recheck = true;

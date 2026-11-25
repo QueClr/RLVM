@@ -21,11 +21,11 @@
 
 \pre{\verb~|
 rlvm 0.1.0-SNAPSHOT
-build: GraalVM CE native image (GraalVM CE 25.5.5.0.3, -O3, serial collector, heap at most 13g, ...)
+build: GraalVM CE native image (GraalVM CE 25.5.5.0.3, -O3, serial collector, heap at most 13g, collection policy BySpaceAndTime)
 runtime: native (Substrate VM, GraalVM CE 25.5.5.0.3+1.1, Java 25.0.5.0.3+1-jvmci-25.5-b26, aarch64)
 truffle: 25.5.5.0.3 (compiled against)
 checker: rlvm - RLVM kernel: ...; engines: machine, reference* (* = reference); default engine: ... (default)
-default: engine ..., policy practical; one worker per CPU, at most 8; a file of 8 MiB or more is checked while it is read (pipelined), with 2 scanner threads from 256 MiB
+default: engine ..., policy practical; one worker per CPU, at most 8; a file of 8 MiB or more is checked while it is read (pipelined), with 1 scanner thread from 256 MiB
 ~}
 
 \ul{
@@ -42,8 +42,8 @@ default: engine ..., policy practical; one worker per CPU, at most 8; a file of 
 \tr{\td{Switch set of the machine}\td{the machine's default set}\td{\code{rlvm-machine}}}
 \tr{\td{Policy}\td{practical; \code{\verb~|-X policy=strict~} is the reference engine alone}\td{\code{rlvm-main}}}
 \tr{\td{Workers}\td{one per CPU, at most 8}\td{\code{\verb~|RlvmChecker.autoWorkers~} in \code{rlvm-main}}}
-\tr{\td{Load}\td{pipelined with checking for two or more workers and a file of 8 MiB or more; 2 scanner threads on mapped input from 256 MiB}\td{\code{\verb~|MainOptions.resolveLoadDefaults~} in \code{rlvm-main}}}
-\tr{\td{Heap and collector}\td{run-time defaults baked into the image}\td{\code{\verb~|IMAGE_HEAP~} in \src{scripts/build.sh}}}
+\tr{\td{Load}\td{pipelined with checking for two or more workers and a file of 8 MiB or more; 1 scanner thread on mapped input from 256 MiB}\td{\code{\verb~|MainOptions.resolveLoadDefaults~} in \code{rlvm-main}}}
+\tr{\td{Heap and collector}\td{run-time defaults baked into the image: a heap of at most 13 GB, the collection policy \code{BySpaceAndTime}}\td{\code{\verb~|IMAGE_HEAP~} in \src{scripts/build.sh}}}
 }
 
 \p{The measured choice of these values for a single run of a fresh process is [a decision of its own](dec-EGMG).}
@@ -78,7 +78,9 @@ default: engine ..., policy practical; one worker per CPU, at most 8; a file of 
 \li{\code{\verb~|scripts/dev.sh profiles~} makes them anew: an instrumented image, a run of the Truffle probe so that the runtime compiler is profiled, then every training input once in the default configuration and once with the engine that the default configuration does not check with. Code that no training run executes is treated as cold by a profile-guided build, so a profile that saw one engine would slow the other down.}
 }
 
-\p{What the profile buys is being measured by the report PG1; its figures are added here when it is finished.}
+\p{\strong{What it buys.} Measured by the report \src{docs/research/profiles/PG1.md} with profiles of its own, on the aarch64 development host, cold processes of 8 workers in the arena-shaped container, the machine with the switch set \code{\verb~|default,eager,skipargs,congruence~}: a profile trained on Init takes 12 \% of the instructions on Mathlib (1,688 G for the CE image, 1,483 G) and 11 to 15 \% on the other seven corpora, with 7 to 16 \% of the cold wall clock; Oracle's compiler without a profile gains nothing; the image has no warm-up for a profile to remove, a second Mathlib pass in one process costs what the first did. Init alone is the best training input on all eight corpora, and the benchmark itself as training input is no better. A profile recorded with another switch set loses a third of the gain; a profile that is hours old against the sources keeps a half to three quarters and is never slower than the CE image. The 270 tests of the arena get the same status from the profiled images as from the CE image.}
+
+\p{The shipped profiles have the shape that report recommends against one-sided training: the Truffle probe, Init with the default configuration, and Init with the other engine. Against a profile of the machine alone that costs the machine 2.9 \% on Mathlib and gives the reference engine its full gain of 15 \%. Cold single runs of the executable built from the shipped profiles against the CE executable from the same jars, both with the collector's default policy, 8 workers, quiet-core windows, two runs each: with the machine and the candidate set 0.88 (Init), 0.82 (Std), 0.87 (cedar), 0.83 (reachability), 0.84 (navier-stokes-euler) and 0.89 (cslib) times the wall clock, 0.88 times the CPU time; with the reference engine 0.87 (Std) and 0.86 (cedar). The profiled executable is 47 MB, the CE executable 68 MB. The profiles must be made anew when the default engine or its switch set changes; \code{\verb~|profiles/PROFILE-INFO.txt~} says what they were made from.}
 }
 
 \subtree[design-packaging-archive]{

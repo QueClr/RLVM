@@ -33,7 +33,7 @@ scripts/dev.sh slice                                              # table for mo
 | `load=batch\|pipelined\|auto` | how units are published. `pipelined`: the store is built on the loader's `LevelChain`, the driver loads on the calling thread and checks what is published meanwhile; inputs below the driver's `pipeline-min-mib` (8 MiB) are loaded in one piece | `auto` (since 2026-11-24, owner note 12): **`pipelined` when two or more workers run and the input is a file of at least `pipeline-min-mib`** and no `stop-after` phase is asked for, else `batch` (`MainOptions.resolveLoadDefaults`; section "Load defaults and the automatic worker count"). It was `batch` |
 | `order=file\|namespace` | order of ready units | the driver's (`file`) |
 | `session-mib=N`, `memory-mib=N` | session reset threshold, memory account limit | the driver's, unless the primary engine prefers another (below) |
-| `scan-threads=K\|auto` | scanner threads of the reader: they tokenise and pack file ranges (rlvm-load "packed runs") and run only on mapped input | `auto`: **2 for inputs of 256 MiB and more**, none below (`MainOptions.SCAN_THREADS_MIN_BYTES`, `DEFAULT_SCAN_THREADS`). It was 0 |
+| `scan-threads=K\|auto` | scanner threads of the reader: they tokenise and pack file ranges (rlvm-load "packed runs") and run only on mapped input | `auto`: **1 for inputs of 256 MiB and more**, none below (`MainOptions.SCAN_THREADS_MIN_BYTES`, `DEFAULT_SCAN_THREADS`; 1 since 2026-11-25, it was 2: beside eight workers on eight cores one scanner thread is as fast or faster on every corpus with the machine, journal `dec-EGMG`) |
 | `io=buffered\|mapped\|auto` | how the reader brings the file into memory | `auto` (mapped if a regular file) when scanner threads run, whoever asked for them; `buffered` (plain `read`; ARCHITECTURE 1.4) otherwise. It was `buffered` |
 | `stop-after=load\|env` | stop after a phase | - |
 | `stats-file=F` | statistics as JSON | - |
@@ -174,7 +174,7 @@ driver's side was gated by its owner: 0 pipelined-only declines over 16,928 muta
 | Left open on the command line | Decided by `MainOptions.resolveLoadDefaults` / `RlvmChecker.autoWorkers` |
 |---|---|
 | `-X load` | `pipelined` if workers >= 2 and the input is a regular file of at least the driver's `pipelineMinBytes` (`-X pipeline-min-mib`, 8 MiB) and there is no `stop-after`; else `batch`. These are exactly the runs in which the driver really pipelines, so a batch run keeps the store it always had (no level chain) |
-| `-X scan-threads` | 2 if the input is at least 256 MiB, else 0 - in either load mode |
+| `-X scan-threads` | 1 if the input is at least 256 MiB (2 until 2026-11-25), else 0 - in either load mode |
 | `-X io` | `auto` if scanner threads run (given or defaulted), else `buffered` |
 | `--threads` | `min(CPUs, 8)`, at least 1 |
 
@@ -337,7 +337,15 @@ With the jars published by 10:56Z (`work/dist/BUILD-INFO.txt`), reference engine
 Platform comparison (JVM launcher, CE native image, Oracle PGO image; host JIT, collectors, heap):
 `docs/PLATFORM.md`.
 
-## State of 2026-11-24, 23Z (steward B2; supersedes what the sections below say about defaults)
+## State of 2026-11-25 (packaging owner; supersedes what the sections below say about defaults)
+
+- The release is ONE executable (journal: `design-packaging`); `rlvm --version` ends with `default: ...`,
+  this checker's own statement of what a run without options does (`RlvmChecker.defaults()`).
+- One scanner thread instead of two for inputs of 256 MiB and more (`MainOptions.DEFAULT_SCAN_THREADS`;
+  journal: decision `dec-EGMG`); the worker rule (one per CPU, at most 8) and the load rule (pipelined
+  from 8 MiB) were measured again with the machine as engine and stay.
+
+## State of 2026-11-24, 23Z (steward B2; the scanner-thread count below is superseded by the section above)
 
 - Published: `rlvm-main` `21150203e39d` (54 tests: 51 run green, 3 opt-in), `rlvm-cli` `cac1433b287a` (49).
 - Defaults of a run without options: load `auto` (pipelined for two or more workers on a file of 8 MiB or
