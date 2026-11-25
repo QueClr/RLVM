@@ -1,0 +1,568 @@
+\title{PG1 - Can the arena binary get its warm-up in advance? Profile-guided optimisation (Oracle GraalVM, measurement only), and the same question for the JVM}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{arena}
+\tag{performance}
+\tag{benchmark}
+\meta{origin}{docs/research/profiles/PG1.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Agent PG1, 2026-11-25, 00:00Z - 01:41Z. A measurement report. No module code was changed or published, no default was changed, \code{\verb~|scripts/~} was not touched, nothing was downloaded: the Oracle GraalVM 25.0.4 that was already unpacked under \code{\verb~|.toolchain/oracle-graalvm-25~} was used as it was. Everything of mine is under \code{\verb~|work/pg1/~} (builds, profiles, reports, logs, scripts); living summary \code{\verb~|work/status/prof-PG1.md~}. (Owner note 15 wants every note in the journal; this file is where its brief put it and moves with the others.)}
+
+\p{The owner's question:}
+
+\blockquote{
+\p{"is it possible to release with warm up config jsons so graal warmup on start up and we bench directly the hot path in arena?"}
+}
+
+\p{\strong{Every table of this report is headed "Oracle GraalVM - measurement only, not a default build".} Oracle GraalVM is licensed under the GraalVM Free Terms and Conditions (GFTC), not an open-source licence; the default build, the arena build and every default script use GraalVM Community Edition only (owner notes 11 and 16). Rows named "CE" or "JVM launcher" are the Community Edition and stand beside the Oracle rows for comparison. All numbers are aarch64 (Cortex-X925); the arena's runner is x86-64, where nothing of this was measured.}
+
+\subtree{
+\title{0. The answer}
+
+\ol{
+\li{\strong{Yes, and the mechanism is profile-guided optimisation (PGO).} A binary that is compiled ahead of time has no warm-up phase to move; what a training run can give it is what a JIT learns while warming up (which branches are taken, which calls are hot), as \code{\verb~|.iprof~} files (JSON) that \code{\verb~|native-image --pgo=...~} compiles with. Only Oracle GraalVM has it (GraalVM CE 25: "Unrecognized option '--pgo-instrument'"); owner note 16 makes such a build an option, never the default.}
+\li{\strong{The three numbers} - Mathlib, the machine with the candidate set \code{\verb~|default,eager,skipargs,congruence~}, 8 workers, one fresh process in the arena-shaped container; CE image as shipped -> Oracle GraalVM without a profile -> Oracle GraalVM with the Init profile (in brackets the two other training sets): \strong{instructions 1,687.6 G -> 1,705.6 G -> 1,483.2 G (1,528.2 G; 1,542.8 G), i.e. -12.1 \% (-9.4 \%; -8.6 \%)}; \strong{cold wall clock 17.82 s -> 16.73 s -> 15.57 s (15.81 s; 16.65 s)}; \strong{warm wall clock (passes 2-4 of one process) 17.11 s -> 17.49 s -> 15.18 s (16.20 s; 15.49 s)}.}
+\li{\strong{On Mathlib a profile is worth 9 to 12 \% of the instructions and about a tenth of the wall clock; Oracle's compiler without one is worth nothing in instructions} (+-1 \%; 0 to 6 \% less CPU time). Over all eight corpora: instructions -11 to -15 \% with the Init profile and -9 to -12 \% with Std + cedar; CPU time -8 to -15 \% and cold wall clock -7 to -16 \% with Std + cedar, timed on all eight. The same with the machine's plain default set (Mathlib 2,806.0 G -> 2,511.7 G, -10.5 \%) and with the reference engine (Mathlib 8,560.8 G -> 7,503.7 G, -12.3 \%; -12 to -14 \% on the other seven, from a profile that was recorded on the machine).}
+\li{\strong{"Bench directly the hot path": the image already does.} A cold Mathlib process takes 17.82 s, a later pass in the same process 17.11 s; in instructions the second pass of a two-pass process costs 1,697.9 G where a cold process costs 1,689.7 G. PGO makes the image's code better; it has no start-up phase to remove. The JVM is where the two differ: a warm Mathlib pass costs 1,180 to 1,240 G there, a cold process 1,369 to 1,425 G.}
+\li{\strong{The cheapest training set is the best}: Init alone (21 s of training; what nano-lean, gruszka and pestka train on in their arena builds) gives 1,483.2 G (-12.1 \%) on Mathlib, Std + cedar 1,542.8 G (-8.6 \%), two Mathlib slices + Std 1,528.2 G (-9.4 \%), Mathlib itself 1,506.7 G (-10.7 \%) (not an admissible entry, and not better), init-prelude alone 1,587.0 G (-6.0 \%). A profile is 15 to 27 MB of JSON, \strong{2.6 to 4.8 MB gzip-compressed}.}
+\li{\strong{Correctness}: on each of the arena's 270 tests the PGO image gives the status and the exit code of the CE image - with the shipped run line and with the candidate run line: 148 / 148 good accepted, 92 / 92 bad rejected, the two known \code{\verb~|either~} declines. Every image accepted all eight corpora in every configuration.}
+\li{\strong{A stale profile degrades gently and silently}: a profile recorded 4.3 hours earlier (7 of 14 jars republished since) keeps a half to three quarters of the gain (Mathlib -4.1 \% against the CE image instead of -8.0 \% for a fresh profile of the same kind), a 17-hour-old profile of the reference engine three fifths (Init -8.9 \% instead of -15.3 \%); no stale or foreign profile made any measured cell slower than the CE image. The build output does not tell a stale profile from a fresh one.}
+\li{\strong{The JVM cannot be handed its hot path with what JDK 25 has} (the AOT cache carries classes and method profiles, no compiled code; compiler-directive files and the Graal / Truffle options of the Community Edition steer compilation, they do not replace it: section 4). \strong{But "a JIT cannot win the arena's metric" is wrong at Mathlib size}: the JVM launcher as shipped (Community Edition, no profile, compiler threads counted) needs 1,368.7 G on eight quiet cores - less than the CE image and less than every PGO image, in the same wall clock (16.66 s) - and 1.5 to 3.8 times the image's instructions on everything short.}
+\li{\strong{Shipping it} (section 5) takes an Oracle GraalVM download in the build that asks for it (GFTC), the Init profile in the repository (2.6 MB) or three minutes of training at build time as the leading arena entries do, a refresh of the profile with every release, and it buys \strong{no place on the board}: pestka needs 1,339.6 G on this host, the PGO image 1,483 G, the JVM launcher 1,355 to 1,425 G. Neither image is reproducible bit for bit (two builds from identical inputs have the same size and 81 to 86 \% different bytes, the CE image as well as the PGO image; the two PGO builds agree to 0.4 \% in instructions).}
+\li{\strong{Not established}: anything on x86-64, the arena's architecture; whether a profile recorded on aarch64 serves an x86-64 build; timing differences below 5 \% (one run per cell). Section 6.}
+}
+}
+
+\subtree{
+\title{1. Tables}
+
+\subtree{
+\title{1.1 Mathlib}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Mathlib (6.33 GB export): one fresh process per row, the arena run line with \code{\verb~|--threads 8~}, in the arena-shaped container (8 performance cores, 16 GB). Instructions = user space, all threads. CPU s and cold wall from a \src{bench/quiet.py} window (one Mathlib process per window); warm = one process with \code{\verb~|-X passes=4~} in a window of its own, median of passes 2-4. "-" = not measured.}
+
+\table{
+\tr{\th{configuration}\th{image}\th{instructions}\th{vs CE}\th{CPU s}\th{vs CE}\th{cold wall s}\th{vs CE}\th{warm wall s}\th{vs CE}\th{passes 1-4 s}\th{peak RSS MiB}}
+\tr{\td{machine, candidate set}\td{CE image (as shipped)}\td{1,687.6 G}\td{}\td{127.5}\td{}\td{17.82}\td{}\td{17.11}\td{}\td{17.67 17.11 17.84 17.00}\td{4,087}}
+\tr{\td{machine, candidate set}\td{Oracle, no profile}\td{1,705.6 G}\td{+1.1 \%}\td{121.1}\td{-5.0 \%}\td{16.73}\td{-6.1 \%}\td{17.49}\td{+2.2 \%}\td{16.75 17.19 17.49 18.39}\td{4,373}}
+\tr{\td{machine, candidate set}\td{Oracle, no profile, ML inference off}\td{1,741.0 G}\td{+3.2 \%}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{4,261}}
+\tr{\td{machine, candidate set}\td{Oracle PGO A (Std + cedar)}\td{1,542.8 G}\td{-8.6 \%}\td{114.3}\td{-10.3 \%}\td{16.65}\td{-6.6 \%}\td{15.49}\td{-9.5 \%}\td{15.60 15.38 15.60 15.49}\td{4,355}}
+\tr{\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{1,483.2 G}\td{-12.1 \%}\td{111.4}\td{-12.6 \%}\td{15.57}\td{-12.7 \%}\td{15.18}\td{-11.3 \%}\td{15.59 15.04 15.18 15.67}\td{4,495}}
+\tr{\td{machine, candidate set}\td{Oracle PGO C (2 Mathlib slices + Std)}\td{1,528.2 G}\td{-9.4 \%}\td{113.2}\td{-11.2 \%}\td{15.81}\td{-11.3 \%}\td{16.20}\td{-5.3 \%}\td{16.33 16.20 16.85 15.64}\td{4,531}}
+\tr{\td{machine, candidate set}\td{Oracle PGO P (init-prelude)}\td{1,587.0 G}\td{-6.0 \%}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{4,180}}
+\tr{\td{machine, candidate set}\td{Oracle PGO M (Mathlib itself)}\td{1,506.7 G}\td{-10.7 \%}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{4,228}}
+\tr{\td{machine, plain default set}\td{CE image (as shipped)}\td{2,806.0 G}\td{}\td{203.5}\td{}\td{28.44}\td{}\td{-}\td{}\td{-}\td{4,165}}
+\tr{\td{machine, plain default set}\td{Oracle, no profile}\td{2,822.0 G}\td{+0.6 \%}\td{196.1}\td{-3.6 \%}\td{26.87}\td{-5.5 \%}\td{-}\td{-}\td{-}\td{4,668}}
+\tr{\td{machine, plain default set}\td{Oracle PGO A (Std + cedar)}\td{2,575.9 G}\td{-8.2 \%}\td{181.1}\td{-11.0 \%}\td{26.63}\td{-6.3 \%}\td{-}\td{-}\td{-}\td{4,793}}
+\tr{\td{machine, plain default set}\td{Oracle PGO B (Init)}\td{2,511.7 G}\td{-10.5 \%}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{4,109}}
+\tr{\td{machine, plain default set}\td{Oracle PGO C (2 Mathlib slices + Std)}\td{2,557.4 G}\td{-8.9 \%}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{4,252}}
+\tr{\td{reference engine}\td{CE image (as shipped)}\td{8,560.8 G}\td{}\td{618.4}\td{}\td{91.23}\td{}\td{-}\td{}\td{-}\td{7,715}}
+\tr{\td{reference engine}\td{Oracle, no profile}\td{8,274.2 G}\td{-3.3 \%}\td{612.4}\td{-1.0 \%}\td{92.90}\td{+1.8 \%}\td{-}\td{-}\td{-}\td{5,489}}
+\tr{\td{reference engine}\td{Oracle PGO A (Std + cedar)}\td{7,503.7 G}\td{-12.3 \%}\td{575.9}\td{-6.9 \%}\td{89.90}\td{-1.5 \%}\td{-}\td{-}\td{-}\td{6,562}}
+}
+
+\p{Reading. Instruction counts repeat to 0.3 \% for the machine and 1.2 \% for the reference engine between a run inside a window and a run of the same cell in a suite (section 2); CPU seconds and wall clock are single runs, and two identical 8-worker runs on this host differ by up to 5 \% (J1.md, section 1), so "-6 \%" against "-12 \%" of wall clock between two PGO images is not a finding - "PGO is faster than CE by about a tenth" is. Peak RSS is 7 to 11 \% higher with the Oracle images for the machine (4.3 to 4.4 GiB against 4.0) and lower for the reference engine (5.4 to 6.4 against 7.5 GiB). The Oracle image without a profile shows both, so it is not the profile; the two GraalVM versions differ (25.0.4 against 25.5.5.0.3).}
+}
+
+\subtree{
+\title{1.2 The other corpora}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Instructions of a cold process (user space, all threads), \code{\verb~|--threads 8~}, arena-shaped container. PGO B and PGO C with the plain default set and the reference engine: count runs outside a window (Mathlib only for the reference engine).}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{CE image (as shipped)}\th{Oracle, no profile}\th{Oracle PGO A (Std + cedar)}\th{Oracle PGO B (Init)}\th{Oracle PGO C (2 Mathlib slices + Std)}\th{Oracle PGO A (Std + cedar) / CE}\th{Oracle PGO B (Init) / CE}\th{Oracle, no profile / CE}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{1,687.6 G}\td{1,705.6 G}\td{1,542.8 G}\td{1,483.2 G}\td{1,528.2 G}\td{0.914}\td{0.879}\td{1.011}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{2,806.0 G}\td{2,822.0 G}\td{2,575.9 G}\td{2,511.7 G}\td{2,557.4 G}\td{0.918}\td{0.895}\td{1.006}}
+\tr{\td{mathlib}\td{reference engine}\td{8,560.8 G}\td{8,274.2 G}\td{7,503.7 G}\td{-}\td{-}\td{0.877}\td{-}\td{0.967}}
+\tr{\td{cedar}\td{machine, candidate set}\td{204.1 G}\td{204.9 G}\td{181.7 G}\td{174.7 G}\td{180.1 G}\td{0.890}\td{0.856}\td{1.004}}
+\tr{\td{cedar}\td{machine, plain default set}\td{219.3 G}\td{219.7 G}\td{195.3 G}\td{188.5 G}\td{193.9 G}\td{0.890}\td{0.859}\td{1.002}}
+\tr{\td{cedar}\td{reference engine}\td{533.2 G}\td{515.7 G}\td{466.1 G}\td{-}\td{-}\td{0.874}\td{-}\td{0.967}}
+\tr{\td{std}\td{machine, candidate set}\td{140.5 G}\td{141.8 G}\td{126.7 G}\td{121.9 G}\td{125.3 G}\td{0.902}\td{0.868}\td{1.009}}
+\tr{\td{std}\td{machine, plain default set}\td{152.7 G}\td{153.4 G}\td{137.4 G}\td{132.7 G}\td{136.2 G}\td{0.900}\td{0.869}\td{1.005}}
+\tr{\td{std}\td{reference engine}\td{415.8 G}\td{402.4 G}\td{362.8 G}\td{-}\td{-}\td{0.872}\td{-}\td{0.968}}
+\tr{\td{init}\td{machine, candidate set}\td{81.2 G}\td{82.0 G}\td{73.3 G}\td{70.3 G}\td{72.5 G}\td{0.903}\td{0.866}\td{1.010}}
+\tr{\td{init}\td{machine, plain default set}\td{85.0 G}\td{85.7 G}\td{76.6 G}\td{73.8 G}\td{76.0 G}\td{0.902}\td{0.868}\td{1.009}}
+\tr{\td{init}\td{reference engine}\td{251.8 G}\td{244.2 G}\td{219.5 G}\td{-}\td{-}\td{0.872}\td{-}\td{0.970}}
+\tr{\td{reachability}\td{machine, candidate set}\td{16.3 G}\td{16.2 G}\td{14.8 G}\td{14.5 G}\td{14.7 G}\td{0.906}\td{0.891}\td{0.991}}
+\tr{\td{reachability}\td{machine, plain default set}\td{16.4 G}\td{16.3 G}\td{14.8 G}\td{14.6 G}\td{14.8 G}\td{0.904}\td{0.892}\td{0.992}}
+\tr{\td{reachability}\td{reference engine}\td{116.2 G}\td{110.3 G}\td{100.4 G}\td{-}\td{-}\td{0.864}\td{-}\td{0.949}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{527.2 G}\td{520.3 G}\td{463.3 G}\td{450.7 G}\td{459.8 G}\td{0.879}\td{0.855}\td{0.987}}
+\tr{\td{navier-stokes-euler}\td{machine, plain default set}\td{1,023.1 G}\td{1,019.3 G}\td{924.1 G}\td{900.0 G}\td{924.3 G}\td{0.903}\td{0.880}\td{0.996}}
+\tr{\td{navier-stokes-euler}\td{reference engine}\td{3,191.9 G}\td{3,088.7 G}\td{2,791.7 G}\td{-}\td{-}\td{0.875}\td{-}\td{0.968}}
+\tr{\td{cslib}\td{machine, candidate set}\td{569.3 G}\td{575.5 G}\td{518.8 G}\td{499.7 G}\td{515.2 G}\td{0.911}\td{0.878}\td{1.011}}
+\tr{\td{cslib}\td{machine, plain default set}\td{768.3 G}\td{773.1 G}\td{701.6 G}\td{682.6 G}\td{695.7 G}\td{0.913}\td{0.888}\td{1.006}}
+\tr{\td{cslib}\td{reference engine}\td{2,211.6 G}\td{2,147.1 G}\td{1,943.2 G}\td{-}\td{-}\td{0.879}\td{-}\td{0.971}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{477.4 G}\td{474.0 G}\td{424.5 G}\td{416.0 G}\td{423.6 G}\td{0.889}\td{0.871}\td{0.993}}
+\tr{\td{con-leche}\td{machine, plain default set}\td{198.6 G}\td{195.5 G}\td{170.9 G}\td{164.9 G}\td{170.0 G}\td{0.861}\td{0.830}\td{0.984}}
+\tr{\td{con-leche}\td{reference engine}\td{848.9 G}\td{810.5 G}\td{725.8 G}\td{-}\td{-}\td{0.855}\td{-}\td{0.955}}
+}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} CPU seconds of a cold process (quiet windows only; "-" = no timed run).}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{CE image (as shipped)}\th{Oracle, no profile}\th{Oracle PGO A (Std + cedar)}\th{Oracle PGO B (Init)}\th{Oracle PGO C (2 Mathlib slices + Std)}\th{Oracle PGO A (Std + cedar) / CE}\th{Oracle PGO B (Init) / CE}\th{Oracle, no profile / CE}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{127.49}\td{121.13}\td{114.34}\td{111.44}\td{113.18}\td{0.897}\td{0.874}\td{0.950}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{203.45}\td{196.10}\td{181.13}\td{-}\td{-}\td{0.890}\td{-}\td{0.964}}
+\tr{\td{mathlib}\td{reference engine}\td{618.42}\td{612.37}\td{575.85}\td{-}\td{-}\td{0.931}\td{-}\td{0.990}}
+\tr{\td{cedar}\td{machine, candidate set}\td{13.85}\td{13.37}\td{12.15}\td{-}\td{-}\td{0.877}\td{-}\td{0.965}}
+\tr{\td{cedar}\td{machine, plain default set}\td{14.78}\td{14.21}\td{12.94}\td{-}\td{-}\td{0.876}\td{-}\td{0.962}}
+\tr{\td{cedar}\td{reference engine}\td{32.26}\td{31.43}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.974}}
+\tr{\td{std}\td{machine, candidate set}\td{9.86}\td{9.45}\td{8.55}\td{-}\td{-}\td{0.868}\td{-}\td{0.959}}
+\tr{\td{std}\td{machine, plain default set}\td{10.58}\td{10.09}\td{9.29}\td{-}\td{-}\td{0.878}\td{-}\td{0.954}}
+\tr{\td{std}\td{reference engine}\td{24.82}\td{24.13}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.972}}
+\tr{\td{init}\td{machine, candidate set}\td{5.41}\td{5.24}\td{4.73}\td{-}\td{-}\td{0.874}\td{-}\td{0.968}}
+\tr{\td{init}\td{machine, plain default set}\td{5.53}\td{5.30}\td{4.86}\td{-}\td{-}\td{0.878}\td{-}\td{0.958}}
+\tr{\td{init}\td{reference engine}\td{14.61}\td{14.20}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.972}}
+\tr{\td{reachability}\td{machine, candidate set}\td{1.57}\td{1.57}\td{1.38}\td{-}\td{-}\td{0.877}\td{-}\td{0.999}}
+\tr{\td{reachability}\td{machine, plain default set}\td{1.59}\td{1.52}\td{1.47}\td{-}\td{-}\td{0.924}\td{-}\td{0.958}}
+\tr{\td{reachability}\td{reference engine}\td{13.40}\td{13.16}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.982}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{35.01}\td{33.61}\td{29.92}\td{-}\td{-}\td{0.855}\td{-}\td{0.960}}
+\tr{\td{navier-stokes-euler}\td{machine, plain default set}\td{66.89}\td{63.62}\td{58.03}\td{-}\td{-}\td{0.867}\td{-}\td{0.951}}
+\tr{\td{navier-stokes-euler}\td{reference engine}\td{214.16}\td{212.22}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.991}}
+\tr{\td{cslib}\td{machine, candidate set}\td{45.20}\td{44.78}\td{39.80}\td{-}\td{-}\td{0.881}\td{-}\td{0.991}}
+\tr{\td{cslib}\td{machine, plain default set}\td{55.97}\td{54.57}\td{50.48}\td{-}\td{-}\td{0.902}\td{-}\td{0.975}}
+\tr{\td{cslib}\td{reference engine}\td{137.35}\td{134.23}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.977}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{51.78}\td{48.79}\td{47.71}\td{-}\td{-}\td{0.921}\td{-}\td{0.942}}
+\tr{\td{con-leche}\td{machine, plain default set}\td{12.10}\td{11.71}\td{10.57}\td{-}\td{-}\td{0.874}\td{-}\td{0.969}}
+\tr{\td{con-leche}\td{reference engine}\td{66.07}\td{66.40}\td{-}\td{-}\td{-}\td{-}\td{-}\td{1.005}}
+}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Cold wall clock in seconds, fresh process, 8 workers (quiet windows only).}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{CE image (as shipped)}\th{Oracle, no profile}\th{Oracle PGO A (Std + cedar)}\th{Oracle PGO B (Init)}\th{Oracle PGO C (2 Mathlib slices + Std)}\th{Oracle PGO A (Std + cedar) / CE}\th{Oracle PGO B (Init) / CE}\th{Oracle, no profile / CE}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{17.82}\td{16.73}\td{16.65}\td{15.57}\td{15.81}\td{0.934}\td{0.873}\td{0.939}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{28.44}\td{26.87}\td{26.63}\td{-}\td{-}\td{0.937}\td{-}\td{0.945}}
+\tr{\td{mathlib}\td{reference engine}\td{91.23}\td{92.90}\td{89.90}\td{-}\td{-}\td{0.985}\td{-}\td{1.018}}
+\tr{\td{cedar}\td{machine, candidate set}\td{2.09}\td{1.93}\td{1.75}\td{-}\td{-}\td{0.837}\td{-}\td{0.924}}
+\tr{\td{cedar}\td{machine, plain default set}\td{2.18}\td{2.12}\td{1.92}\td{-}\td{-}\td{0.878}\td{-}\td{0.969}}
+\tr{\td{cedar}\td{reference engine}\td{4.80}\td{4.61}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.960}}
+\tr{\td{std}\td{machine, candidate set}\td{1.49}\td{1.36}\td{1.24}\td{-}\td{-}\td{0.835}\td{-}\td{0.918}}
+\tr{\td{std}\td{machine, plain default set}\td{1.70}\td{1.52}\td{1.43}\td{-}\td{-}\td{0.847}\td{-}\td{0.898}}
+\tr{\td{std}\td{reference engine}\td{3.76}\td{3.61}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.962}}
+\tr{\td{init}\td{machine, candidate set}\td{0.79}\td{0.77}\td{0.72}\td{-}\td{-}\td{0.908}\td{-}\td{0.970}}
+\tr{\td{init}\td{machine, plain default set}\td{0.82}\td{0.81}\td{0.74}\td{-}\td{-}\td{0.896}\td{-}\td{0.987}}
+\tr{\td{init}\td{reference engine}\td{2.18}\td{2.09}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.958}}
+\tr{\td{reachability}\td{machine, candidate set}\td{0.64}\td{0.62}\td{0.54}\td{-}\td{-}\td{0.845}\td{-}\td{0.964}}
+\tr{\td{reachability}\td{machine, plain default set}\td{0.66}\td{0.67}\td{0.58}\td{-}\td{-}\td{0.884}\td{-}\td{1.012}}
+\tr{\td{reachability}\td{reference engine}\td{5.20}\td{4.99}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.959}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{5.12}\td{4.95}\td{4.32}\td{-}\td{-}\td{0.843}\td{-}\td{0.966}}
+\tr{\td{navier-stokes-euler}\td{machine, plain default set}\td{9.54}\td{8.70}\td{8.07}\td{-}\td{-}\td{0.846}\td{-}\td{0.912}}
+\tr{\td{navier-stokes-euler}\td{reference engine}\td{29.73}\td{33.19}\td{-}\td{-}\td{-}\td{-}\td{-}\td{1.117}}
+\tr{\td{cslib}\td{machine, candidate set}\td{6.44}\td{6.35}\td{5.54}\td{-}\td{-}\td{0.859}\td{-}\td{0.985}}
+\tr{\td{cslib}\td{machine, plain default set}\td{7.92}\td{7.58}\td{7.18}\td{-}\td{-}\td{0.906}\td{-}\td{0.956}}
+\tr{\td{cslib}\td{reference engine}\td{20.46}\td{20.41}\td{-}\td{-}\td{-}\td{-}\td{-}\td{0.998}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{41.31}\td{38.20}\td{38.46}\td{-}\td{-}\td{0.931}\td{-}\td{0.925}}
+\tr{\td{con-leche}\td{machine, plain default set}\td{2.93}\td{2.61}\td{2.22}\td{-}\td{-}\td{0.757}\td{-}\td{0.892}}
+\tr{\td{con-leche}\td{reference engine}\td{37.88}\td{39.00}\td{-}\td{-}\td{-}\td{-}\td{-}\td{1.030}}
+}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Peak RSS in MiB (cold process).}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{CE image (as shipped)}\th{Oracle, no profile}\th{Oracle PGO A (Std + cedar)}\th{Oracle PGO B (Init)}\th{Oracle PGO C (2 Mathlib slices + Std)}\th{Oracle PGO A (Std + cedar) / CE}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{4,087}\td{4,373}\td{4,355}\td{4,495}\td{4,531}\td{1.066}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{4,165}\td{4,668}\td{4,793}\td{4,109}\td{4,252}\td{1.151}}
+\tr{\td{mathlib}\td{reference engine}\td{7,715}\td{5,489}\td{6,562}\td{-}\td{-}\td{0.851}}
+\tr{\td{cedar}\td{machine, candidate set}\td{805}\td{836}\td{837}\td{817}\td{811}\td{1.040}}
+\tr{\td{cedar}\td{machine, plain default set}\td{899}\td{980}\td{921}\td{971}\td{1,039}\td{1.025}}
+\tr{\td{cedar}\td{reference engine}\td{824}\td{1,012}\td{871}\td{-}\td{-}\td{1.057}}
+\tr{\td{std}\td{machine, candidate set}\td{626}\td{581}\td{600}\td{622}\td{592}\td{0.958}}
+\tr{\td{std}\td{machine, plain default set}\td{774}\td{819}\td{761}\td{737}\td{786}\td{0.984}}
+\tr{\td{std}\td{reference engine}\td{653}\td{727}\td{633}\td{-}\td{-}\td{0.969}}
+\tr{\td{init}\td{machine, candidate set}\td{423}\td{454}\td{424}\td{412}\td{415}\td{1.003}}
+\tr{\td{init}\td{machine, plain default set}\td{449}\td{468}\td{472}\td{473}\td{461}\td{1.052}}
+\tr{\td{init}\td{reference engine}\td{473}\td{536}\td{459}\td{-}\td{-}\td{0.969}}
+\tr{\td{reachability}\td{machine, candidate set}\td{656}\td{495}\td{573}\td{631}\td{540}\td{0.874}}
+\tr{\td{reachability}\td{machine, plain default set}\td{554}\td{598}\td{516}\td{559}\td{535}\td{0.931}}
+\tr{\td{reachability}\td{reference engine}\td{2,498}\td{2,490}\td{2,169}\td{-}\td{-}\td{0.868}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{1,228}\td{1,333}\td{1,377}\td{1,378}\td{1,332}\td{1.121}}
+\tr{\td{navier-stokes-euler}\td{machine, plain default set}\td{1,493}\td{1,629}\td{1,707}\td{1,567}\td{1,480}\td{1.143}}
+\tr{\td{navier-stokes-euler}\td{reference engine}\td{1,284}\td{1,553}\td{1,311}\td{-}\td{-}\td{1.021}}
+\tr{\td{cslib}\td{machine, candidate set}\td{1,845}\td{1,842}\td{1,955}\td{1,928}\td{1,926}\td{1.060}}
+\tr{\td{cslib}\td{machine, plain default set}\td{1,738}\td{2,002}\td{1,975}\td{1,812}\td{1,787}\td{1.137}}
+\tr{\td{cslib}\td{reference engine}\td{2,181}\td{1,921}\td{1,911}\td{-}\td{-}\td{0.876}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{8,406}\td{6,517}\td{6,603}\td{7,179}\td{6,760}\td{0.785}}
+\tr{\td{con-leche}\td{machine, plain default set}\td{976}\td{1,046}\td{994}\td{965}\td{1,018}\td{1.019}}
+\tr{\td{con-leche}\td{reference engine}\td{4,640}\td{4,179}\td{4,143}\td{-}\td{-}\td{0.893}}
+}
+
+\p{con-leche with the candidate set is one unit that is evaluated until the machine's memory bound stops it, twice (finding INT7-F1 on the board: 38 to 41 s and 6.4 to 8.2 GiB where the plain default set needs 3 s and 1 GiB); the row is kept because the arena has the test, not because it says anything about PGO.}
+}
+
+\subtree{
+\title{1.3 Warm passes (the owner's metric)}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Warm passes: one process with \code{\verb~|-X passes=4~}, 8 workers, the load as the checker decides (pipelined), \src{bench/warm.sh} with the image as native launcher, each Mathlib process in a window of its own, the cedar rows in one window.}
+
+\table{
+\tr{\th{corpus}\th{image}\th{pass 1 s}\th{passes 2-4 s}\th{median of 2-4 s}\th{vs CE}\th{best of 2-4 s}\th{CPU of the median pass s}\th{peak RSS MiB}\th{verdict}}
+\tr{\td{mathlib}\td{CE image (as shipped)}\td{17.67}\td{17.11 17.84 17.00}\td{17.11}\td{}\td{17.00}\td{124.55}\td{4148}\td{ACCEPT}}
+\tr{\td{mathlib}\td{Oracle, no profile}\td{16.75}\td{17.19 17.49 18.39}\td{17.49}\td{+2.2 \%}\td{17.19}\td{125.85}\td{4369}\td{ACCEPT}}
+\tr{\td{mathlib}\td{Oracle PGO A (Std + cedar)}\td{15.60}\td{15.38 15.60 15.49}\td{15.49}\td{-9.5 \%}\td{15.38}\td{115.56}\td{4459}\td{ACCEPT}}
+\tr{\td{mathlib}\td{Oracle PGO B (Init)}\td{15.59}\td{15.04 15.18 15.67}\td{15.18}\td{-11.3 \%}\td{15.04}\td{112.48}\td{4933}\td{ACCEPT}}
+\tr{\td{mathlib}\td{Oracle PGO C (2 Mathlib slices + Std)}\td{16.33}\td{16.20 16.85 15.64}\td{16.20}\td{-5.3 \%}\td{15.64}\td{115.24}\td{4611}\td{ACCEPT}}
+\tr{\td{cedar}\td{CE image (as shipped)}\td{1.93}\td{1.96 1.98 1.95}\td{1.96}\td{}\td{1.95}\td{13.81}\td{846}\td{ACCEPT}}
+\tr{\td{cedar}\td{Oracle, no profile}\td{1.93}\td{1.85 1.90 1.88}\td{1.88}\td{-4.1 \%}\td{1.85}\td{13.38}\td{845}\td{ACCEPT}}
+\tr{\td{cedar}\td{Oracle PGO A (Std + cedar)}\td{1.72}\td{1.69 1.69 1.64}\td{1.69}\td{-13.8 \%}\td{1.64}\td{12.15}\td{879}\td{ACCEPT}}
+\tr{\td{cedar}\td{Oracle PGO B (Init)}\td{1.64}\td{1.67 1.65 1.69}\td{1.67}\td{-14.8 \%}\td{1.65}\td{11.96}\td{878}\td{ACCEPT}}
+\tr{\td{cedar}\td{Oracle PGO C (2 Mathlib slices + Std)}\td{1.71}\td{1.69 1.66 1.69}\td{1.69}\td{-13.8 \%}\td{1.66}\td{12.06}\td{864}\td{ACCEPT}}
+}
+}
+
+\subtree{
+\title{1.4 The hot path alone, in instructions}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} The hot path alone: instructions of ONE WARM PASS over Mathlib = (a process that checks the export twice, \code{\verb~|-X passes=2~}) minus (a process that checks it once); candidate set, 8 workers. The two processes of a row ran under the same conditions: both in a quiet window on eight cores, or both as count runs beside other containers (squeezed onto two cores for most of their time).}
+
+\table{
+\tr{\th{image / launcher}\th{conditions}\th{one pass (cold process)}\th{two passes}\th{the second, warm pass}\th{warm pass / cold process}\th{warm pass vs CE image}}
+\tr{\td{CE image (as shipped)}\td{count runs}\td{1,689.7 G}\td{3,387.6 G}\td{1,697.9 G}\td{1.005}\td{}}
+\tr{\td{JVM launcher (CE, HotSpot C2)}\td{quiet window}\td{1,368.7 G}\td{2,613.3 G}\td{1,244.6 G}\td{0.909}\td{-26.7 \%}}
+\tr{\td{JVM launcher (CE, HotSpot C2)}\td{count runs}\td{1,418.1 G}\td{2,594.7 G}\td{1,176.5 G}\td{0.830}\td{-30.7 \%}}
+}
+}
+
+\subtree{
+\title{1.5 Builds and profiles}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Builds (this host: aarch64, 12 CPUs visible to the builder, other builds and measurements running beside them; times are of a loaded host).}
+
+\table{
+\tr{\th{artefact}\th{GraalVM}\th{native-image flags beyond \code{\verb~|--gc=serial --no-fallback -R:+ExitOnOutOfMemoryError -R:MaxHeapSize=13g -H:+ReportExceptionStackTraces~}}\th{compiler line of the build output}\th{build wall s}\th{build CPU s}\th{builder peak RSS MB}\th{binary bytes}}
+\tr{\td{\code{\verb~|bin/rlvm~}: CE image (as shipped)}\td{CE 25.5.5.0.3}\td{\code{\verb~|-O3~} + the H10 inline lists}\td{optimization level: 3}\td{125}\td{989}\td{5627}\td{68,159,608}}
+\tr{\td{instrumented image (training only)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo-instrument~}}\td{optimization level: 2, PGO: instrument}\td{164}\td{862}\td{5827}\td{130,943,096}}
+\tr{\td{\code{\verb~|bin/rlvm-pgo~}: Oracle PGO A (Std + cedar)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<3 files>~}}\td{optimization level: 3, PGO: user-provided}\td{161}\td{613}\td{4067}\td{46,991,480}}
+\tr{\td{Oracle, no profile}\td{Oracle 25.0.4}\td{\code{\verb~|-O3~}}\td{optimization level: 3, PGO: ML-inferred}\td{295}\td{1124}\td{6163}\td{75,630,712}}
+\tr{\td{Oracle, no profile, ML inference off}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 -H:-MLProfileInference~}}\td{optimization level: 3, PGO: off}\td{243}\td{986}\td{4480}\td{69,470,328}}
+\tr{\td{Oracle PGO B (Init)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<2 files>~}}\td{optimization level: 3, PGO: user-provided}\td{113}\td{609}\td{4224}\td{46,663,800}}
+\tr{\td{Oracle PGO C (2 Mathlib slices + Std)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<4 files>~}}\td{optimization level: 3, PGO: user-provided}\td{146}\td{680}\td{4167}\td{47,122,552}}
+\tr{\td{Oracle PGO P (init-prelude)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<2 files>~}}\td{optimization level: 3, PGO: user-provided}\td{440}\td{690}\td{3608}\td{46,401,656}}
+\tr{\td{Oracle PGO B, from gzip-compressed profile files}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<2 .iprof.gz files>~}}\td{optimization level: 3, PGO: user-provided}\td{249}\td{732}\td{3807}\td{46,663,800}}
+\tr{\td{Oracle PGO BR (Init: the machine's run + a reference-engine run)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<3 files>~}}\td{optimization level: 3, PGO: user-provided}\td{191}\td{628}\td{4072}\td{46,991,480}}
+\tr{\td{Oracle PGO M (Mathlib itself)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<2 files>~}}\td{optimization level: 3, PGO: user-provided}\td{193}\td{751}\td{3953}\td{46,860,408}}
+\tr{\td{Oracle PGO Bd (Init, trained with the plain default set)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<2 files>~}}\td{optimization level: 3, PGO: user-provided; profile applicability 28.10 \%, relevance 99.02 \%}\td{216}\td{721}\td{3893}\td{46,729,336}}
+\tr{\td{Oracle PGO S2 (STALE: Init, profile of the jars of 19:41Z)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<2 files>~} (stale profile)}\td{optimization level: 3, PGO: user-provided; profile applicability 27.06 \%, relevance 98.72 \%}\td{170}\td{706}\td{3969}\td{46,532,728}}
+\tr{\td{Oracle PGO R (init-prelude + Init, trained with the reference engine)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<3 files>~}}\td{optimization level: 3, PGO: user-provided; profile applicability 25.55 \%, relevance 98.82 \%}\td{220}\td{712}\td{3897}\td{46,401,656}}
+\tr{\td{Oracle PGO S1 (STALE: the profile of 07:5xZ, reference engine)}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo=<3 files>~} (stale profile)}\td{optimization level: 3, PGO: user-provided; profile applicability 23.17 \%, relevance 97.95 \%}\td{487}\td{738}\td{3572}\td{46,008,440}}
+\tr{\td{instr-old}\td{Oracle 25.0.4}\td{\code{\verb~|-O3 --pgo-instrument~} (jars of 19:41Z)}\td{optimization level: 2, PGO: instrument}\td{285}\td{964}\td{5881}\td{130,549,880}}
+}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} The profiles (\code{\verb~|.iprof~}: JSON, one file per training process; \code{\verb~|native-image --pgo~} also reads them gzip-compressed).}
+
+\table{
+\tr{\th{profile}\th{training runs (instrumented image)}\th{training wall s}\th{files}\th{raw bytes}\th{gzip -9 bytes}}
+\tr{\td{P}\td{\code{\verb~|--truffle-probe~}; init-prelude - machine, candidate set}\td{6}\td{2}\td{14,440,954}\td{2,538,436}}
+\tr{\td{B}\td{\code{\verb~|--truffle-probe~}; Init - machine, candidate set, 8 workers}\td{21}\td{2}\td{14,781,540}\td{2,599,655}}
+\tr{\td{A}\td{\code{\verb~|--truffle-probe~}; Std; cedar - machine, candidate set, 8 workers (inside \code{\verb~|build.sh --pgo~}: 49.5 s)}\td{49.5}\td{3}\td{21,008,555}\td{3,754,719}}
+\tr{\td{C}\td{\code{\verb~|--truffle-probe~}; Mathlib.Analysis.Complex.CauchyIntegral cone; Mathlib.FieldTheory.Galois.Basic cone; Std - machine, candidate set}\td{38}\td{4}\td{26,884,718}\td{4,835,047}}
+\tr{\td{M}\td{\code{\verb~|--truffle-probe~}; Mathlib - machine, candidate set (instrumented: 116.6 s wall, 482 s CPU)}\td{119}\td{2}\td{14,902,646}\td{2,633,734}}
+\tr{\td{Bd}\td{\code{\verb~|--truffle-probe~}; Init - machine, plain default set}\td{6}\td{2}\td{14,753,842}\td{2,594,486}}
+\tr{\td{BR}\td{the two files of B + the Init run of R (no new training): the machine's run and a reference-engine run on Init}\td{-}\td{3}\td{20,440,612}\td{3,645,987}}
+\tr{\td{S2}\td{\code{\verb~|--truffle-probe~}; Init - machine of 19:15Z with its default set, instrumented image of the jars of 19:41Z}\td{5}\td{2}\td{14,568,258}\td{2,552,725}}
+\tr{\td{R}\td{\code{\verb~|--truffle-probe~}; init-prelude; Init - reference engine, 8 workers}\td{15}\td{3}\td{19,743,536}\td{3,526,524}}
+\tr{\td{S1}\td{\code{\verb~|--truffle-probe~}; init-prelude; Init - reference engine of 06:54Z, one worker, batch load (the build of 07:5xZ)}\td{-}\td{3}\td{18,979,143}\td{3,393,811}}
+}
+
+\p{The whole \code{\verb~|build.sh --pgo~} run of variant A (Maven, CE image, Oracle jars, instrumented image, training on Std + cedar, PGO image, verification of every launcher) took 517 s. Building the PGO image from profiles that already exist is no slower than building the CE image (113 to 193 s of wall clock for the first four, on a host that was loaded differently from build to build, and 610 to 750 CPU seconds, against 125 s and 990 CPU seconds): what costs is the instrumented image (164 s) and the training (21 s for Init, 119 s for Mathlib), and they are needed only when the profile is made. The PGO binary is 47 MB, the CE binary 68 MB, Oracle's without a profile 76 MB (69 MB without its branch-probability model).}
+}
+
+\subtree{
+\title{1.6 Correctness: the arena's 270 tests}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} The arena's complete test set (270 tests: 148 good incl. the eight corpora, 92 bad, 30 either) by the arena's procedure: one arena-shaped container per row, tests one after the other, the arena's time limit per test, \code{\verb~|perf stat~} around the run line.}
+
+\table{
+\tr{\th{image}\th{run line}\th{good: accepted / rejected / declined, error, timeout}\th{bad: rejected / accepted / other}\th{either: accepted / rejected / declined}\th{wrong verdicts}\th{instructions, all 270}\th{of them the 259 tests below 8 MiB}\th{status or exit code different from the CE image}}
+\tr{\td{CE image (as shipped)}\td{as shipped (reference engine)}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{9 / 19 / 2}\td{\strong{0}}\td{17,360.5 G}\td{1,288.59 G}\td{}}
+\tr{\td{Oracle PGO A (Std + cedar)}\td{as shipped (reference engine)}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{9 / 19 / 2}\td{\strong{0}}\td{15,271.8 G}\td{1,124.84 G}\td{none (270 of 270 equal)}}
+\tr{\td{CE image (as shipped)}\td{\code{\verb~|-X engine=machine -X machine.switches=default,eager,skipargs,congruence~}}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{\strong{0}}\td{4,355.6 G}\td{623.54 G}\td{}}
+\tr{\td{Oracle PGO A (Std + cedar)}\td{\code{\verb~|-X engine=machine -X machine.switches=default,eager,skipargs,congruence~}}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{\strong{0}}\td{3,923.9 G}\td{553.53 G}\td{none (270 of 270 equal)}}
+\tr{\td{Oracle PGO B (Init)}\td{\code{\verb~|-X engine=machine -X machine.switches=default,eager,skipargs,congruence~}}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{\strong{0}}\td{3,812.9 G}\td{554.69 G}\td{none (270 of 270 equal)}}
+\tr{\td{JVM launcher (CE, HotSpot C2)}\td{\code{\verb~|-X engine=machine -X machine.switches=default,eager,skipargs,congruence~}}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{\strong{0}}\td{5,019.9 G}\td{1,168.40 G}\td{none (270 of 270 equal)}}
+}
+
+\p{Every configuration of every image and launcher accepted the corpus it was given in every run of this report (201 measured runs of a corpus, none with a non-zero status). The two declined \code{\verb~|either~} tests are \code{\verb~|corner-cases/eta-struct-major-no-whnf~} and \code{\verb~|eta-struct-major-and-no-whnf~} (the official kernel does not terminate there; AR1.md 0.1). The \code{\verb~|either~} verdicts differ between the two run lines (9 / 19 against 11 / 17 accepted / rejected: the candidate set accepts two \code{\verb~|either~} tests that the reference engine rejects, the tolerated kind of owner note 13 (d)), not between the images. The suite containers ran beside quiet windows and were parked on two cores for most of their time: their instruction counts are valid, their times are not evidence. Even so no test used more than 22 \% of its arena time limit (\code{\verb~|perf/gf3-matrix-product~}, 15.3 s of 70 s, reference engine; with the candidate run line 7 \%; through the JVM launcher 17 \%: \code{\verb~|perf/ite-taken-branch-bad~}, 19.1 s of 110 s). "Below 8 MiB" are 259 of the 270 tests.}
+}
+}
+
+\subtree{
+\title{2. Method}
+
+\p{\strong{Jars.} The published jars as they were at 2026-11-25T00:02:50Z (\code{\verb~|work/pg1/logs/m2-jars-before-build.txt~}):}
+
+\pre{\verb~|
+rlvm-admit      398a117d4ad8   published 2026-11-24T18:01:13Z
+rlvm-api        6ff40825ca1d   13:34:23Z
+rlvm-cli        cac1433b287a   22:47:24Z   (Oracle variant: 10c4d6ccf815, compiled from the tree against Truffle 25.0.4;
+                                            class files identical, only rlvm/cli/build.properties differs)
+rlvm-driver     31fa08d9ce61   18:27:41Z
+rlvm-export     dc8c4f1ef79a   23:47:05Z
+rlvm-inductive  c15b14fffdd3   18:01:07Z
+rlvm-level      75bb0db242c5   04:53:25Z
+rlvm-load       b23a88e4c30b   23:47:10Z
+rlvm-machine    b3adf60ca905   23:45:51Z
+rlvm-main       21150203e39d   compiled from the tree by --published; byte-identical to the published jar
+rlvm-nat        b1dda7562adb   06:53:51Z
+rlvm-ref        a20c24a26b7c   22:58:43Z
+rlvm-store      30979ee659b7   22:55:50Z
+rlvm-truffle    ad3256d0751d   18:16:25Z
+collections, jniutils, nativeimage, polyglot, truffle-api, truffle-compiler, truffle-runtime, word:
+                25.5.5.0.3 (CE variant) / 25.0.4 (Oracle variant)
+~}
+
+\p{Default engine of the distribution: reference; the machine's provider priority is 10.}
+
+\p{\strong{Build.} \code{\verb~|work/pg1/build.sh~} is \src{scripts/build.sh} as it was at 00:00Z with two lines changed: its own location, and a private build directory (\code{\verb~|work/pg1/build~} instead of \code{\verb~|work/build~}), so that a 9-minute PGO build did not hold the team's build lock. (\src{scripts/build.sh} itself was rewritten by its owner while this report was measured: the option is now \code{\verb~|--oracle-pgo~} and builds the one executable from profiles in \code{\verb~|profiles/~}. The command lines below are those of the copy.)}
+
+\pre{\verb~|
+bench/slot.sh -c ni -n 2 -- work/pg1/build.sh --published --pgo --opt 3 --dist work/pg1/dist \
+    --train work/exports/std.ndjson --train work/exports/cedar.ndjson \
+    --train-arg --threads --train-arg 8 --train-arg -X --train-arg engine=machine \
+    --train-arg -X --train-arg machine.switches=default,eager,skipargs,congruence
+~}
+
+\p{It builds, from the same jars: \code{\verb~|bin/rlvm~} (CE 25.5.5.0.3, \code{\verb~|-O3 --gc=serial~}, the machine's H10 inline lists: the image as shipped), the instrumented image (Oracle 25.0.4, \code{\verb~|--pgo-instrument~}), the profile A and \code{\verb~|bin/rlvm-pgo~} (\code{\verb~|--pgo=~}). The other Oracle images were built by \code{\verb~|work/pg1/scripts/oracle-image.sh~} from the same Oracle-variant jars with exactly the arguments \code{\verb~|build.sh~} gives its Oracle images (\code{\verb~|-O3 --gc=serial --no-fallback -R:+ExitOnOutOfMemoryError -R:MaxHeapSize=13g -H:+ReportExceptionStackTraces~}) plus \code{\verb~|--pgo=<files>~}, or nothing (the control), or \code{\verb~|-H:-MLProfileInference~} (the second control: Oracle GraalVM infers branch probabilities with a built-in model when it has no profile, "PGO: ML-inferred" in its build output). \strong{The Oracle images have no H10 inline lists} (\code{\verb~|build.sh~} gives them to the CE image only); the control therefore differs from the CE image in the compiler, its version and the lists.}
+
+\p{\strong{Training} (\code{\verb~|build.sh~}, section "PGO", step c; \code{\verb~|work/pg1/scripts/train.sh~} for the further variants): the instrumented image runs \code{\verb~|--truffle-probe~} and then checks each training export with \code{\verb~|RLVM_EXIT=exit~}, \code{\verb~|--stats~}, \code{\verb~|--threads 8 -X engine=machine -X machine.switches=default,eager,skipargs,congruence~} (the load is pipelined by the checker's own rule); each process writes one \code{\verb~|.iprof~}. A = Std + cedar, B = Init, C = two Mathlib module cones (\code{\verb~|work/exports/slices/good/Mathlib.Analysis.Complex.CauchyIntegral.cone.ndjson~}, \code{\verb~|...FieldTheory.Galois.Basic.cone...~}) + Std, P = init-prelude, M = Mathlib itself. C contains declarations of the benchmark (their cones are part of Mathlib) and M is the benchmark: both are here to see what training data can do, not as candidates.}
+
+\p{\strong{Measurement.} One run = one fresh arena-shaped container (\code{\verb~|bench/arena-docker.sh --arena-limits --no-network~}: the 8 performance cores, 16 GB) and in it \src{bench/measure.sh} = the arena's \code{\verb~|perf stat -e instructions:u ... time ... sh -c RUN~} with \code{\verb~|$IN~}; RUN is the \code{\verb~|run:~} line of \src{scripts/arena/rlvm.yaml} as it was at 00:05Z (\code{\verb~|--threads 8~}, the status mapping), executed verbatim with a working directory whose \code{\verb~|work/dist/bin/rlvm~} is the image under test, with the engine options inserted after \code{\verb~|--threads 8~}:}
+
+\ul{
+\li{"candidate set": \code{\verb~|-X engine=machine -X machine.switches=default,eager,skipargs,congruence~}}
+\li{"plain default set": \code{\verb~|-X engine=machine~}}
+\li{"reference engine": \code{\verb~|-X engine=reference~} (in the suites: the line as shipped, which runs the reference engine)}
+}
+
+\p{Instruction counts need no quiet window; every CPU-seconds and wall-clock figure was taken inside a \src{bench/quiet.py} window (\code{\verb~|work/pg1/scripts/window.sh~}: one measurement at a time on the host, the rest of the session off the measurement cores; one Mathlib process per window, no window above five minutes): 27 windows between 00:11Z and 01:37Z, in turn with another agent's. Warm passes: \code{\verb~|bench/warm.sh --launcher native --passes 4 --load default~} in windows of their own (\code{\verb~|work/pg1/scripts/warm.sh~}; the process runs on the host, pinned to the same eight cores). Runs outside a window ("count runs", and the suites) give instructions and peak RSS only; they shared the eight cores with each other and were moved onto two spare cores during every window of anybody. The "JVM launcher" rows are \code{\verb~|bin/rlvm-jvm~} of the same distribution behind a two-line wrapper named \code{\verb~|rlvm~} (with \code{\verb~|-XX:-EnableJVMCI -XX:AOTCache=FILE~} for the AOT rows, \code{\verb~|-XX:-TieredCompilation~} for the untiered row), so that the same run line runs them. A cell that was measured more than once shows the count of the quiet run; the largest difference between two counts of one cell of a native image is 0.3 \% with the machine (17 cells with two or more runs) and 1.2 \% with the reference engine (9 cells), whose work depends more on how its workers interleave.}
+
+\p{\strong{Host.} aarch64, 10 Cortex-X925 + 10 Cortex-A725, 121 GB, shared with about ten other agents for the whole session (load average 25 to 60). The heap cap of every image is its built-in 13 GB (\code{\verb~|-R:MaxHeapSize=13g~}); no \code{\verb~|-Xmx~} was given, as in the arena.}
+}
+
+\subtree{
+\title{3. Training data, foreign profiles, stale profiles}
+
+\subtree{
+\title{3.1 The choice of training data}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} What the choice of training data does: instructions of a cold process with the candidate set. Every profile = \code{\verb~|--truffle-probe~} + the exports named, trained with the machine (candidate set, 8 workers) unless the row says otherwise.}
+
+\table{
+\tr{\th{image}\th{trained on}\th{profile files}\th{raw bytes}\th{gzip -9 bytes}\th{Mathlib}\th{vs CE}\th{cedar}\th{vs CE}\th{Init}\th{vs CE}\th{navier-stokes-euler}\th{vs CE}}
+\tr{\td{CE image (as shipped)}\td{-}\td{-}\td{-}\td{-}\td{1,687.6 G}\td{}\td{204.1 G}\td{}\td{81.2 G}\td{}\td{527.2 G}\td{}}
+\tr{\td{Oracle, no profile}\td{- (ML-inferred branch probabilities, Oracle's default)}\td{-}\td{-}\td{-}\td{1,705.6 G}\td{+1.1 \%}\td{204.9 G}\td{+0.4 \%}\td{82.0 G}\td{+1.0 \%}\td{520.3 G}\td{-1.3 \%}}
+\tr{\td{Oracle, no profile, ML inference off}\td{- (\code{\verb~|-H:-MLProfileInference~})}\td{-}\td{-}\td{-}\td{1,741.0 G}\td{+3.2 \%}\td{209.0 G}\td{+2.4 \%}\td{83.3 G}\td{+2.6 \%}\td{-}\td{}}
+\tr{\td{Oracle PGO P (init-prelude)}\td{init-prelude (3.8 MB)}\td{2}\td{14,440,954}\td{2,538,436}\td{1,587.0 G}\td{-6.0 \%}\td{192.3 G}\td{-5.8 \%}\td{75.6 G}\td{-6.9 \%}\td{518.5 G}\td{-1.7 \%}}
+\tr{\td{Oracle PGO B (Init)}\td{Init (348 MB)}\td{2}\td{14,781,540}\td{2,599,655}\td{1,483.2 G}\td{-12.1 \%}\td{174.7 G}\td{-14.4 \%}\td{70.3 G}\td{-13.4 \%}\td{450.7 G}\td{-14.5 \%}}
+\tr{\td{Oracle PGO A (Std + cedar)}\td{Std + cedar (584 + 905 MB)}\td{3}\td{21,008,555}\td{3,754,719}\td{1,542.8 G}\td{-8.6 \%}\td{181.7 G}\td{-11.0 \%}\td{73.3 G}\td{-9.7 \%}\td{463.3 G}\td{-12.1 \%}}
+\tr{\td{Oracle PGO A, second build}\td{the same profile files, built a second time}\td{3}\td{21,008,555}\td{3,754,719}\td{1,548.9 G}\td{-8.2 \%}\td{181.5 G}\td{-11.1 \%}\td{73.2 G}\td{-9.9 \%}\td{-}\td{}}
+\tr{\td{Oracle PGO C (2 Mathlib slices + Std)}\td{two Mathlib module cones (313 + 174 MB) + Std}\td{4}\td{26,884,718}\td{4,835,047}\td{1,528.2 G}\td{-9.4 \%}\td{180.1 G}\td{-11.7 \%}\td{72.5 G}\td{-10.7 \%}\td{459.8 G}\td{-12.8 \%}}
+\tr{\td{Oracle PGO M (Mathlib itself)}\td{Mathlib itself (the benchmark: not an admissible entry)}\td{2}\td{14,902,646}\td{2,633,734}\td{1,506.7 G}\td{-10.7 \%}\td{178.9 G}\td{-12.3 \%}\td{72.0 G}\td{-11.3 \%}\td{454.6 G}\td{-13.8 \%}}
+}
+
+\p{Reading.}
+
+\ul{
+\li{\strong{Any real export gives most of it, and the smallest was the best.} The three admissible sets end 8.6 to 12.1 \% below the CE image on Mathlib and 4 \% apart from each other (1,483 G with Init, 1,528 G and 1,543 G with the larger sets). That order is not build noise: a second image built from the same profile files as A differs from the first by 0.4 \% on Mathlib (1,548.9 against 1,542.8 G) and by 0.1 to 0.3 \% on cedar and Init. With Init the image is 11 to 15 \% below the CE image on all eight corpora, with Std + cedar 9 to 12 \% (table 1.2). Why Init does better than the larger sets was not investigated; it is an observation on five profiles, not a rule.}
+\li{\strong{Training on the benchmark itself is not better.} The profile recorded on Mathlib gives 1,506.7 G, -10.7 \% against the CE image on Mathlib: between the Init profile and the larger sets, and behind Init on cedar, Init and navier-stokes-euler as well. So the choice of training data has no ceiling above the Init profile to offer, and nothing is given away by not training on the ranking corpus.}
+\li{\strong{init-prelude alone} (1,840 declarations, 3.8 MB - a training input small enough to keep in the repository, one second of training): 1,587.0 G on Mathlib (-6.0 \%), 192.3 G on cedar (-5.8 \%), 75.6 G on Init (-6.9 \%).}
+\li{\strong{Without a profile, Oracle's compiler gives the machine nothing in instructions} (+-1 \% on the eight corpora with its built-in branch-probability model; +3.2 \% on Mathlib, +2.4 \% on cedar, +2.6 \% on Init with the model switched off) and 0 to 6 \% less CPU time; for the reference engine it is worth 3 to 5 \% of the instructions. The control is not a pure compiler comparison: the CE image has the machine's inline lists, the Oracle images do not (section 2).}
+}
+}
+
+\subtree{
+\title{3.2 A profile of another configuration or another engine, and a profile of older code}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} Foreign and stale profiles: instructions of a cold process. "vs fresh" compares with the image whose profile was trained on the same export with today's jars and the configuration of the row.}
+
+\table{
+\tr{\th{configuration}\th{image}\th{Mathlib}\th{vs CE}\th{vs fresh}\th{cedar}\th{vs CE}\th{vs fresh}\th{Init}\th{vs CE}\th{vs fresh}}
+\tr{\td{machine, candidate set}\td{CE image (as shipped)}\td{1,687.6 G}\td{}\td{}\td{204.1 G}\td{}\td{}\td{81.2 G}\td{}\td{}}
+\tr{\td{machine, candidate set}\td{Oracle, no profile}\td{1,705.6 G}\td{+1.1 \%}\td{}\td{204.9 G}\td{+0.4 \%}\td{}\td{82.0 G}\td{+1.0 \%}\td{}}
+\tr{\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{1,483.2 G}\td{-12.1 \%}\td{}\td{174.7 G}\td{-14.4 \%}\td{}\td{70.3 G}\td{-13.4 \%}\td{}}
+\tr{\td{machine, candidate set}\td{Oracle PGO BR (Init: the machine's run + a reference-engine run)}\td{1,526.0 G}\td{-9.6 \%}\td{+2.9 \%}\td{179.7 G}\td{-11.9 \%}\td{+2.9 \%}\td{72.2 G}\td{-11.0 \%}\td{+2.7 \%}}
+\tr{\td{machine, candidate set}\td{Oracle PGO Bd (Init, trained with the plain default set)}\td{1,552.1 G}\td{-8.0 \%}\td{+4.6 \%}\td{181.7 G}\td{-11.0 \%}\td{+4.0 \%}\td{73.0 G}\td{-10.1 \%}\td{+3.8 \%}}
+\tr{\td{machine, candidate set}\td{Oracle PGO S2 (STALE: Init, profile of the jars of 19:41Z)}\td{1,618.9 G}\td{-4.1 \%}\td{+9.1 \%}\td{195.4 G}\td{-4.3 \%}\td{+11.9 \%}\td{76.4 G}\td{-5.9 \%}\td{+8.6 \%}}
+\tr{\td{machine, plain default set}\td{CE image (as shipped)}\td{2,806.0 G}\td{}\td{}\td{219.3 G}\td{}\td{}\td{85.0 G}\td{}\td{}}
+\tr{\td{machine, plain default set}\td{Oracle, no profile}\td{2,822.0 G}\td{+0.6 \%}\td{}\td{219.7 G}\td{+0.2 \%}\td{}\td{85.7 G}\td{+0.9 \%}\td{}}
+\tr{\td{machine, plain default set}\td{Oracle PGO Bd (Init, trained with the plain default set)}\td{2,544.9 G}\td{-9.3 \%}\td{}\td{192.8 G}\td{-12.1 \%}\td{}\td{75.4 G}\td{-11.2 \%}\td{}}
+\tr{\td{machine, plain default set}\td{Oracle PGO B (Init)}\td{2,511.7 G}\td{-10.5 \%}\td{-1.3 \%}\td{188.5 G}\td{-14.1 \%}\td{-2.3 \%}\td{73.8 G}\td{-13.2 \%}\td{-2.2 \%}}
+\tr{\td{machine, plain default set}\td{Oracle PGO S2 (STALE: Init, profile of the jars of 19:41Z)}\td{2,618.0 G}\td{-6.7 \%}\td{+2.9 \%}\td{207.1 G}\td{-5.6 \%}\td{+7.4 \%}\td{78.9 G}\td{-7.2 \%}\td{+4.6 \%}}
+\tr{\td{reference engine}\td{CE image (as shipped)}\td{8,560.8 G}\td{}\td{}\td{533.2 G}\td{}\td{}\td{251.8 G}\td{}\td{}}
+\tr{\td{reference engine}\td{Oracle, no profile}\td{8,274.2 G}\td{-3.3 \%}\td{}\td{515.7 G}\td{-3.3 \%}\td{}\td{244.2 G}\td{-3.0 \%}\td{}}
+\tr{\td{reference engine}\td{Oracle PGO R (init-prelude + Init, trained with the reference engine)}\td{-}\td{}\td{}\td{448.5 G}\td{-15.9 \%}\td{}\td{213.2 G}\td{-15.3 \%}\td{}}
+\tr{\td{reference engine}\td{Oracle PGO BR (Init: the machine's run + a reference-engine run)}\td{-}\td{}\td{}\td{447.8 G}\td{-16.0 \%}\td{-0.2 \%}\td{212.7 G}\td{-15.5 \%}\td{-0.2 \%}}
+\tr{\td{reference engine}\td{Oracle PGO A (Std + cedar)}\td{7,503.7 G}\td{-12.3 \%}\td{}\td{466.1 G}\td{-12.6 \%}\td{+3.9 \%}\td{219.5 G}\td{-12.8 \%}\td{+2.9 \%}}
+\tr{\td{reference engine}\td{Oracle PGO S1 (STALE: the profile of 07:5xZ, reference engine)}\td{-}\td{}\td{}\td{487.8 G}\td{-8.5 \%}\td{+8.8 \%}\td{229.3 G}\td{-8.9 \%}\td{+7.5 \%}}
+}
+
+\p{Reading.}
+
+\ul{
+\li{\strong{Train with the configuration that ships; it covers the smaller one too.} The Init profile recorded with the machine's plain default set, used with the candidate set, gives -8.0 \% on Mathlib where the candidate set's own profile gives -12.1 \% (cedar -11.0 against -14.4 \%, Init -10.1 against -13.4 \%): a third of the gain is lost. The other way round nothing is: with the plain default set the candidate set's profile is 1 to 2 \% \em{better} than the default set's own (Mathlib -10.5 against -9.3 \%) - the candidate set runs the default set's code and more.}
+\li{\strong{A profile of the other engine still helps.} Profile A was recorded with the machine; with the reference engine its image needs 7,503.7 G on Mathlib where the CE image needs 8,560.8 G (-12.3 \%; -12 to -14 \% on the other seven corpora; a profile recorded with the reference engine itself on init-prelude + Init: -15 to -16 \% on Init, Std and cedar): the two engines share the loader, the store, the admission of inductive types and the arithmetic, and no engine got slower from a profile that was not its own. The mis-training hazard of \src{docs/research/10-graalvm-platform.md} 7.4 (an image slower than the untrained one on a path the training never took) did not show in any cell of this report.}
+\li{\strong{A profile with a run of each engine.} The two files of B plus the reference engine's run on Init (row BR; the shape of the profile that is in \code{\verb~|profiles/~} now): the reference engine gets all that its own profile gives (Init -15.5 \%, cedar -16.0 \%), and the machine gives up a fifth of its gain (Mathlib -9.6 \% against the CE image instead of -12.1 \%, cedar -11.9 \% instead of -14.4 \%, Init -11.0 \% instead of -13.4 \%). The machine's run alone still gives the reference engine 12 to 13 \%. So for a binary whose checking engine is the machine the machine's run alone is the better profile (by 2.9 \% of Mathlib's instructions); both runs are the better profile while the reference engine is the default engine.}
+\li{\strong{A stale profile: the machine.} The instrumented image was built from the jars of the distribution of 19:41Z (machine \code{\verb~|78c74ca92785~}; 7 of the 14 RLVM jars were republished before 00:02Z, the machine's at least six times), trained on Init with that machine and its default set, and the profile was given to today's jars. Against a fresh profile recorded the same way (Init, plain default set) it keeps a half to three quarters of the gain: with the plain default set Mathlib -6.7 \% against the CE image instead of -9.3 \%, cedar -5.6 \% instead of -12.1 \%, Init -7.2 \% instead of -11.2 \%; with the candidate set Mathlib -4.1 \% instead of -8.0 \%, cedar -4.3 \% instead of -11.0 \%, Init -5.9 \% instead of -10.1 \%. No cell became slower than the CE image.}
+\li{\strong{A stale profile: the reference engine.} The profile of the PGO build of 07:5xZ (\src{docs/PLATFORM.md}, Part II: init-prelude + Init with the reference engine of 06:54Z; since then the RLVM code in a profile grew from 1,468 to 3,329 methods) on today's jars, against a profile recorded today the same way: Init -8.9 \% against the CE image instead of -15.3 \%, Std -9.3 \% instead of -15.6 \%, cedar -8.5 \% instead of -15.9 \%. Seventeen hours and a doubled code base left three fifths of the gain.}
+\li{\strong{Nothing warns.} The build output of the stale profiles reads like that of a fresh one ("profile relevance" 98.7 \% and 97.9 \% against 99.0 \% and 98.8 \%; "applicability" 27.1 \% and 23.2 \% against 28.1 \% and 25.6 \%: table 1.5), and by method identity and bytecode index 87 \% of the branch contexts of a fresh profile are also in the profile that is 4.3 hours old (94 \% by executed count) and 71 \% in the one that is 17 hours old, while two fresh profiles of the same jars recorded with different switch sets share 95 \% (\code{\verb~|work/pg1/scripts/iprof-overlap.py~}). The counters of an edited method stay attached to its old bytecode indices; the compiler cannot know.}
+}
+}
+
+\subtree{
+\title{3.3 What a profile is tied to}
+
+\ul{
+\li{\strong{The compiler's profile format.} \code{\verb~|native-image~} has \code{\verb~|-H:±PGOIgnoreVersionCheck~} ("Prevent PGO run from failing if the profile version is not correct, and apply profiles on a best-effort basis"): so, by the option's own description, a profile whose format version (\code{\verb~|"version": "1.0.0"~} in the file) is not the compiler's fails the build by default. Not tested: the profiles here were written and read by the same Oracle GraalVM 25.0.4.}
+\li{\strong{The names and the bytecode of the code it describes.} A profile is a list of types and methods by name and signature and of counters keyed by a calling context: \code{\verb~|method:bytecode index < caller:bytecode index < ...~}. A method that was renamed or removed loses its entries (they are dropped: "relevance" in the build output of \code{\verb~|-H:+PGOPrintProfileQuality~}); a method whose body was edited keeps them, attached to whatever now sits at the old bytecode indices. So the build output of a stale profile looks like that of a fresh one (table 1.5: relevance 98.7 \% against 99.0 \%), and the only test is a measurement.}
+\li{\strong{The JDK and Truffle classes of the GraalVM version} (four in ten of a profile's branch contexts and more than nine in ten of the methods it names are not RLVM code).}
+\li{\strong{Not the architecture, by its format} (names and bytecode indices; nothing of the machine code). Whether an x86-64 build takes an aarch64 profile with the same effect could not be tested here.}
+\li{The instrumented image is compiled at \code{\verb~|-O2~} whatever level is asked for (its build output says so). Whether a profile depends on other flags of the final build (the inline lists, \code{\verb~|-march~}) was not tested.}
+}
+}
+}
+
+\subtree{
+\title{4. The same question for the JVM}
+
+\subtree{
+\title{4.1 What exists (verified on the JDK of \code{\verb~|.toolchain/graalvm-ce-25~}, 25.0.5; the wall-clock measurements are J1's)}
+
+\ul{
+\li{\strong{JDK 25's AOT cache} (JEP 483 / 514 / 515: \code{\verb~|-XX:AOTCacheOutput=FILE~} in a training run, \code{\verb~|-XX:AOTCache=FILE~} afterwards) is the JVM's "warm-up configuration": the classes of the training run, loaded and linked, and its method profiles, so that the JIT compiles from a ripe profile at once. \strong{It carries no compiled code} (J1.md 3.1: the cache's code region is 0 bytes; this JDK has only the diagnostic switches \code{\verb~|AOTAdapterCaching~} and \code{\verb~|AOTStubCaching~}, both off, for adapters and stubs). It works only with \code{\verb~|-XX:-EnableJVMCI~}, is tied to the JDK build and to the jars (size, modification time, class path order: J1.md 3.4) and is 20.4 MB here (Std x 4 passes: 106 s on the loaded host; Init x 4: 71 s). J1 measured it by wall clock: 0.4 to 1.1 s off the cold wall, every later pass 5 to 9 \% slower in 11 of 11 comparisons; by the owner's metric it does not belong in the launcher.}
+\li{\strong{Compiler-directive files} (\code{\verb~|-XX:CompilerDirectivesFile=FILE~}, JSON; a \em{diagnostic} option in this JDK, it needs \code{\verb~|-XX:+UnlockDiagnosticVMOptions~}) and \code{\verb~|-XX:CompileCommandFile~} give C1 and C2 instructions per method: exclude it, force or forbid an inlining, log, switch an intrinsic, compile in the foreground. They say how a method is compiled, not that it need not be: no profile and no code is in such a file, and the compiler threads do the same work. (J1.md 2.2: no inlining flag moves the warm pass of the machine either.)}
+\li{\strong{Graal as the JIT} (\code{\verb~|-XX:+UseJVMCICompiler~}, Community Edition): none of its 74 options (\code{\verb~|-XX:+JVMCIPrintProperties~}) saves or loads profiles or code. (The image builder's \code{\verb~|-H:SaveProfiles~} / \code{\verb~|-H:LoadProfiles~}, in CE as well, replay the profile of ONE compilation for debugging; that is not PGO.)}
+\li{\strong{Truffle's engine cache} (\code{\verb~|engine.CacheStore~} / \code{\verb~|engine.CacheLoad~}: a file with the engine's code, so that a later process starts with it): checked, not assumed. The shipped image refuses it ("Native image does not support auxilliary engine caching. Enable with -H:+AuxiliaryEngineCache at image build time"). \strong{GraalVM CE 25.5.5.0.3 has that build option}, and a CE image built with \code{\verb~|-H:+AuxiliaryEngineCache -H:ReservedAuxiliaryImageBytes=1073741824~} (both experimental) stored the engine of \code{\verb~|rlvm --truffle-probe~} (81 kB) and loaded it in a second process ("Loaded image ... Engine from image successfully patched with new options") - so it is not an Oracle-only feature in this version, as far as storing and loading go. Whether compiled code comes back was not shown: the probe builds its root node anew and compiled it again. It is moot for the release: the cache holds Truffle-compiled code, and the machine's Truffle tier (switch \code{\verb~|t2~}) is off because it does not pay in steady state (\src{rlvm-truffle/NOTES-T3.md}, section 1), not because of its warm-up.}
+}
+
+\p{So no: nothing in the Community Edition lets a JVM process start with its hot path compiled. The compilation happens in every process, and the arena counts the compiler threads' instructions.}
+}
+
+\subtree{
+\title{4.2 The number that was missing: a cold JVM process in the arena's metric}
+
+\p{Nobody had counted the instructions of the JVM launcher with the machine on Mathlib (PLATFORM.md, Part I, has the counts below Mathlib only). They are here, with the launcher as shipped, without its C1 tiers, and with an AOT cache trained with the candidate set (\code{\verb~|work/pg1/scripts/aot-train.sh~}):}
+
+\p{\strong{Oracle GraalVM - measurement only, not a default build.} The JVM launcher (GraalVM CE only: HotSpot C2, the launcher line as shipped, heap by engine) beside the images: instructions of a COLD process, JIT compiler and collector threads included, as the arena counts them. CPU s and wall from quiet windows where a row has them.}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{image / launcher}\th{instructions}\th{vs CE image}\th{CPU s}\th{cold wall s}\th{peak RSS MiB}\th{runs (quiet)}\th{every count of the cell, G}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{CE image (as shipped)}\td{1,687.6 G}\td{}\td{127.5}\td{17.82}\td{4,087}\td{2 (1)}\td{1687.6 / 1689.7}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{1,483.2 G}\td{-12.1 \%}\td{111.4}\td{15.57}\td{4,495}\td{2 (1)}\td{1483.2 / 1487.0}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{1,368.7 G}\td{-18.9 \%}\td{125.1}\td{16.66}\td{5,800}\td{3 (1)}\td{1368.7 / 1411.0 / 1425.2}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{JVM launcher, \code{\verb~|-XX:-TieredCompilation~}}\td{1,458.3 G}\td{-13.6 \%}\td{-}\td{-}\td{5,919}\td{1 (0)}\td{1458.3}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{JVM launcher + AOT cache (Std x 4)}\td{1,396.9 G}\td{-17.2 \%}\td{-}\td{-}\td{5,881}\td{1 (0)}\td{1396.9}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{JVM launcher + AOT cache (Init x 4)}\td{1,364.8 G}\td{-19.1 \%}\td{123.3}\td{16.35}\td{5,380}\td{2 (1)}\td{1364.8 / 1376.8}}
+\tr{\td{mathlib}\td{machine, candidate set}\td{JVM launcher + AOT cache (Init x 4), \code{\verb~|-XX:-TieredCompilation~}}\td{1,355.5 G}\td{-19.7 \%}\td{118.3}\td{21.16}\td{5,395}\td{2 (1)}\td{1355.5 / 1357.2}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{CE image (as shipped)}\td{2,806.0 G}\td{}\td{203.5}\td{28.44}\td{4,165}\td{1 (1)}\td{2806.0}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{Oracle PGO B (Init)}\td{2,511.7 G}\td{-10.5 \%}\td{-}\td{-}\td{4,109}\td{1 (0)}\td{2511.7}}
+\tr{\td{mathlib}\td{machine, plain default set}\td{JVM launcher (CE, HotSpot C2)}\td{2,197.3 G}\td{-21.7 \%}\td{-}\td{-}\td{6,033}\td{1 (0)}\td{2197.3}}
+\tr{\td{cslib}\td{machine, candidate set}\td{CE image (as shipped)}\td{569.3 G}\td{}\td{45.2}\td{6.44}\td{1,845}\td{2 (1)}\td{569.2 / 569.3}}
+\tr{\td{cslib}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{499.7 G}\td{-12.2 \%}\td{-}\td{-}\td{1,928}\td{1 (0)}\td{499.7}}
+\tr{\td{cslib}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{579.4 G}\td{+1.8 \%}\td{-}\td{-}\td{2,985}\td{2 (0)}\td{579.4 / 579.5}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{CE image (as shipped)}\td{527.2 G}\td{}\td{35.0}\td{5.12}\td{1,228}\td{2 (1)}\td{527.2 / 528.1}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{450.7 G}\td{-14.5 \%}\td{-}\td{-}\td{1,378}\td{1 (0)}\td{450.7}}
+\tr{\td{navier-stokes-euler}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{546.0 G}\td{+3.6 \%}\td{-}\td{-}\td{2,437}\td{2 (0)}\td{532.3 / 546.0}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{CE image (as shipped)}\td{477.4 G}\td{}\td{51.8}\td{41.31}\td{8,406}\td{2 (1)}\td{477.4 / 477.4}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{416.0 G}\td{-12.9 \%}\td{-}\td{-}\td{7,179}\td{1 (0)}\td{416.0}}
+\tr{\td{con-leche}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{380.6 G}\td{-20.3 \%}\td{-}\td{-}\td{4,674}\td{2 (0)}\td{380.6 / 408.3}}
+\tr{\td{cedar}\td{machine, candidate set}\td{CE image (as shipped)}\td{204.1 G}\td{}\td{13.9}\td{2.09}\td{805}\td{2 (1)}\td{204.1 / 204.1}}
+\tr{\td{cedar}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{174.7 G}\td{-14.4 \%}\td{-}\td{-}\td{817}\td{1 (0)}\td{174.7}}
+\tr{\td{cedar}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{340.0 G}\td{+66.6 \%}\td{-}\td{-}\td{1,551}\td{2 (0)}\td{306.6 / 340.0}}
+\tr{\td{cedar}\td{machine, candidate set}\td{JVM launcher + AOT cache (Std x 4)}\td{251.2 G}\td{+23.1 \%}\td{-}\td{-}\td{1,468}\td{1 (0)}\td{251.2}}
+\tr{\td{cedar}\td{machine, candidate set}\td{JVM launcher + AOT cache (Init x 4)}\td{243.9 G}\td{+19.5 \%}\td{-}\td{-}\td{1,454}\td{1 (0)}\td{243.9}}
+\tr{\td{std}\td{machine, candidate set}\td{CE image (as shipped)}\td{140.5 G}\td{}\td{9.9}\td{1.49}\td{626}\td{2 (1)}\td{140.2 / 140.5}}
+\tr{\td{std}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{121.9 G}\td{-13.2 \%}\td{-}\td{-}\td{622}\td{1 (0)}\td{121.9}}
+\tr{\td{std}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{236.2 G}\td{+68.1 \%}\td{-}\td{-}\td{1,286}\td{2 (0)}\td{236.2 / 250.1}}
+\tr{\td{init}\td{machine, candidate set}\td{CE image (as shipped)}\td{81.2 G}\td{}\td{5.4}\td{0.79}\td{423}\td{2 (1)}\td{81.2 / 81.2}}
+\tr{\td{init}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{70.3 G}\td{-13.4 \%}\td{-}\td{-}\td{412}\td{1 (0)}\td{70.3}}
+\tr{\td{init}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{196.8 G}\td{+142.4 \%}\td{-}\td{-}\td{782}\td{2 (0)}\td{185.0 / 196.8}}
+\tr{\td{init}\td{machine, candidate set}\td{JVM launcher + AOT cache (Std x 4)}\td{121.5 G}\td{+49.6 \%}\td{-}\td{-}\td{710}\td{1 (0)}\td{121.5}}
+\tr{\td{init}\td{machine, candidate set}\td{JVM launcher + AOT cache (Init x 4)}\td{118.3 G}\td{+45.7 \%}\td{-}\td{-}\td{717}\td{1 (0)}\td{118.3}}
+\tr{\td{init}\td{reference engine}\td{CE image (as shipped)}\td{251.8 G}\td{}\td{14.6}\td{2.18}\td{473}\td{2 (1)}\td{250.3 / 251.8}}
+\tr{\td{init}\td{reference engine}\td{JVM launcher (CE, HotSpot C2)}\td{207.1 G}\td{-17.8 \%}\td{-}\td{-}\td{1,353}\td{1 (0)}\td{207.1}}
+\tr{\td{reachability}\td{machine, candidate set}\td{CE image (as shipped)}\td{16.3 G}\td{}\td{1.6}\td{0.64}\td{656}\td{2 (1)}\td{16.3 / 16.3}}
+\tr{\td{reachability}\td{machine, candidate set}\td{Oracle PGO B (Init)}\td{14.5 G}\td{-10.9 \%}\td{-}\td{-}\td{631}\td{1 (0)}\td{14.5}}
+\tr{\td{reachability}\td{machine, candidate set}\td{JVM launcher (CE, HotSpot C2)}\td{59.2 G}\td{+263.0 \%}\td{-}\td{-}\td{1,371}\td{2 (0)}\td{59.2 / 62.4}}
+}
+
+\p{Reading.}
+
+\ul{
+\li{\strong{On everything short the JIT is the bill.} With the candidate set a cold JVM process needs 185 to 197 G on Init where the image needs 81 G, 307 to 340 G against 204 G on cedar, 59 to 62 G against 16 G on reachability; the two meet at the size of navier-stokes-euler and cslib (532 to 546 G against 527 G; 579 against 569 G).}
+\li{\strong{On Mathlib the bill is paid back inside the run.} 1,368.7 G on eight quiet cores, against 1,687.6 G for the CE image and 1,483.2 G for the best admissible PGO image - with the same CPU time (125.1 against 127.5 s) and a second less wall clock (16.66 against 17.82 s), and with the plain default set as well (2,197 against 2,806 G). C2 compiles the machine better than the ahead-of-time compiler does even when that has a profile: one warm Mathlib pass costs 1,180 to 1,240 G on the JVM and 1,698 G in the image (table 1.4). The price is in the last column: \strong{the JVM's count depends on how its compiler threads are scheduled} - 1,411 and 1,425 G in two runs that were squeezed onto two cores beside other containers, 4 \% above the quiet run, where an image repeats to 0.1 \%.}
+\li{\strong{The AOT cache halves the JVM's handicap on short runs and does nothing on Mathlib}: Init 196.8 -> 121.5 G, cedar 340.0 -> 251.2 G (it removes the phase in which C1 code collects the profile, not the C2 compilations); Mathlib 1,364.8 against 1,368.7 G in quiet windows, 1,377 and 1,397 against 1,411 and 1,425 G in count runs. Without the C1 tiers (\code{\verb~|-XX:-TieredCompilation~}: interpreter and C2 only) a cold Mathlib process needs 1,458.3 G (a count run); with the Init cache as well 1,355.5 G in a quiet window (1,357.2 G in a count run) - the lowest count of this report - at the price of the wall clock: 21.16 s.}
+\li{\strong{So "a JIT cannot win the arena's metric" is true of the short tests and false of the one that ranks} (and of con-leche: 381 to 408 G against 477 G). All 270 tests through the JVM launcher, under the arena's time limits: the same status and exit code as the CE image on every test, no timeout (the closest: 19 s of 110 s in a container squeezed onto two cores), 0.22 s per small test where the image needs 0.014 s, 1.87 times the image's instructions over the tests below 8 MiB (table 1.6).}
+\li{\strong{What it does not give}: a place (1,355 to 1,369 G is 1 to 2 \% above pestka's 1,339.6 G on this host: sixth, like the image), one executable (owner note 16: the JVM launcher is a script, 22 jars and the JDK the build downloads), a count that repeats, or the image's memory (5,400 to 5,800 MiB against 4,100). And it is no more "the hot path directly" than before: a cold JVM process still spends a tenth to a sixth of its instructions getting warm (table 1.4), and JDK 25 has nothing that hands a fresh process the compiled code.}
+}
+}
+}
+
+\subtree{
+\title{5. What shipping it would take (for the owner to decide)}
+
+\p{Owner note 16 (2026-11-24, recorded while this report was measured) already sets the frame: the Oracle GraalVM build with a shipped profile is an OPTION of the build, never its default, and the maintainer accepts the licence on the development machine for experiments. The list below is what the measurements add to that.}
+
+\ol{
+\li{\strong{What would be in the repository: a profile, about 2.6 MB.} For the Init profile (variant B) two files: \code{\verb~|probe.iprof~} (8.65 MB of JSON, 1.47 MB gzip-compressed: the profile of \code{\verb~|--truffle-probe~}, i.e. of the Truffle runtime compiler inside the image) and \code{\verb~|train-1.iprof~} (6.13 MB, 1.13 MB compressed: the checker on Init); together 14.8 MB raw, 2.60 MB compressed. \code{\verb~|native-image --pgo=~} reads gzip-compressed profiles (its help text says so, and an image built here from the two compressed files reports "PGO: user-provided" and has the size of the image built from the plain files, 46,663,800 bytes; it needs 70.4 G on Init and 174.6 G on cedar, the plain-file image 70.3 G and 174.7 G). Std + cedar: 3.75 MB compressed; three training exports: 4.84 MB. A profile is not a configuration a user can read or edit, and every refresh adds its 2.6 MB to the history of the repository.}
+\li{\strong{Which profile: Init, recorded with the configuration that ships.} It is the best of the admissible ones on Mathlib and on each of the other seven corpora in this measurement, its training takes 21 s, it does not contain the ranking corpus, and it is what the three arena entries that use PGO train on. A profile recorded with another switch set than the one that ships loses a third of the gain (section 3.2). (While this report was measured, the owner of the packaging added the optional build \code{\verb~|scripts/build.sh --oracle-pgo~} and a first \code{\verb~|profiles/~} directory, id \code{\verb~|88f067bfcb35~}: \code{\verb~|--truffle-probe~}, Init with the default configuration and Init with the candidate set, 3.6 MB compressed, with a provenance file. That build was not measured here; row BR of table 3.2 has the same shape of training.)}
+\li{\strong{A refresh with every release, and a guard.} A profile is tied to the bytecode of the jars and to the Oracle GraalVM version (section 3.3). Measured (section 3.2): a profile that was 4.3 hours old kept a half to three quarters of its gain, one that was 17 hours old three fifths, and neither made anything slower than the CE image - at this project's pace of change, which a released code base will not have. Nothing in the build output tells a fresh profile from a stale one, so the profile needs its own provenance file (the jar hashes it was recorded with, the GraalVM version, the training command) and the optional build should say when the jars it compiles are not the jars of the profile. Regenerating costs one instrumented image (164 s here) and the training (21 s).}
+\li{\strong{The Oracle GraalVM download, in the build that asks for it.} The archives are 380.5 MB (linux-x64) and 351.6 MB (linux-aarch64), downloadable without a login from version-pinned URLs with published checksums (\src{docs/research/10-graalvm-platform.md}, section 7.3; not fetched again for this report). The build also needs the Truffle jars of that GraalVM's version (25.0.4 instead of 25.5.5.0.3): eight more third-party jars to pin by checksum, and \code{\verb~|rlvm-cli~} compiled against them (its class files come out identical).}
+\li{\strong{The licence, in one sentence} (no legal advice): the GraalVM Free Terms and Conditions permit, free of charge, internal use of the unmodified program "for the purposes of developing, testing, prototyping and demonstrating your applications, and running the Program for Your own personal use or internal business operations" and its redistribution without a fee, and deem the parts of it that a Native Image output contains an unmodified program under the same terms - it is not an open-source licence. Text: \<html:a>[href]{\verb~|https://www.oracle.com/downloads/licenses/graal-free-license.html~}{https://www.oracle.com/downloads/licenses/graal-free-license.html} (the same text is \code{\verb~|LICENSE.txt~} in the archive). Owner note 16 accepts it on the development machine for experiments. \strong{In the arena the build would be run, and the licence accepted, by the arena's operators.} That is a question to put to them before a definition with such a build line is submitted; nothing in this repository can answer it.}
+\li{\strong{What the arena's rules say.} The arena's README (\code{\verb~|refs/lean-kernel-arena/README.md~}) has no rule about downloads in the build step or about prebuilt artefacts; it says "Checkers are not run in a sandbox. We assume good faith from all contributors", and the build time is not measured (\src{docs/research/01-arena-and-export-format.md}, "Build"). Precedent, from the definitions in \code{\verb~|refs/lean-kernel-arena/checkers/~}: \strong{the entries ranked 1, 2 and 5 are PGO builds that train at build time on Init} - nano-lean (\code{\verb~|scripts/pgo.sh~}: a sha256-pinned \code{\verb~|init.ndjson.gz~} from a release asset, \code{\verb~|-Cprofile-generate~}, one run over Init, \code{\verb~|-Cprofile-use~}), gruszka and pestka (a sha256-pinned \code{\verb~|init.susz~} from a dataset host, \code{\verb~|scripts/build-pgo.sh~}, \code{\verb~|-C target-cpu=native~}); kefir-wasm installs a toolchain with curl; RLVM's own definition downloads GraalVM CE and Maven. None of them ships a recorded profile, none ships a prebuilt binary, and all of their compilers are open source.}
+\li{\strong{So there are two ways to build it, and the arena's precedent is the other one.} (a) Owner note 16: the profile is in the repository, the optional build needs no training, costs no more time than the CE build (table 1.5) and can be stale. (b) As the leaders do: the build makes the instrumented image, trains on a pinned Init export that it downloads (348 MB; the repository has none) and builds again - about 3 minutes more on this host, never stale, nothing recorded in the repository but a checksum. The measurements of this report are the same for both.}
+\li{\strong{The image is not reproducible bit for bit.} Two builds from the same jars, the same profile files and the same command line have the same size and different bytes - the PGO image (46,991,480 bytes, 81 \% of them different) and the CE image (68,159,608 bytes, 86 \% different) alike, so it is the image builder, not the profile. The two PGO builds agree to 0.4 \% in instructions on Mathlib and 0.1 to 0.3 \% on cedar and Init. A release can publish the hash of the binary it built; nobody can confirm that hash by building again.}
+\li{\strong{What it buys on the arena's board: 12 \%, and no place.} In this host's counts the candidate set stands at 1,687.6 G with the CE image; the next entry ahead is pestka, which needs 1,339.6 G on this host (three runs, \code{\verb~|bench/baselines.json~}; 1,475.3 G published on x86-64), the next behind is kefir (2,577.3 G published). With the Init profile the image needs 1,483.2 G: 144 G (10 \%) short of pestka, the same sixth place by AR1's projection (AR1.md 0.3; fifth only at the favourable end of its conversion range). The JVM launcher stands at 1,355 to 1,369 G on eight quiet cores (as shipped; with an AOT cache; with the cache and without its C1 tiers): 1 to 2 \% short of pestka, with a count that moves by 4 \% with the scheduling - the same place.}
+\li{\strong{x86-64.} Every number here is aarch64. The arena's runner is x86-64: the size of the gain, the reproducibility and whether a profile recorded on aarch64 serves an x86-64 build have to be measured there before anything is promised (a profile is architecture-neutral by its format, section 3.3; that is not a test).}
+}
+}
+
+\subtree{
+\title{6. What could not be established}
+
+\ul{
+\li{\strong{x86-64}: nothing. No such machine here; the Oracle GraalVM under \code{\verb~|.toolchain/~} is the aarch64 build.}
+\li{\strong{A profile recorded on one architecture, used on the other}; \strong{a profile recorded with another Oracle GraalVM version} (the build has a version check and an option to ignore it; only 25.0.4 was at hand).}
+\li{\strong{Wall clock and CPU time below about 5 \%.} Every timed cell is ONE run in a quiet window on a host whose other twelve cores were busy (load average 25 to 85); J1 found up to 5 \% between two identical 8-worker runs. The instruction counts are exact to the spreads shown.}
+\li{\strong{How much of "Oracle without a profile against CE" is the H10 inline lists.} The CE image is built with the machine's lists, the Oracle images without (as \code{\verb~|build.sh~} builds them); an Oracle image with the lists was not built.}
+\li{\strong{Cells that have a count and no clock, or nothing}: the windows were shared with eight to twelve other measurements in the queue, so only the CE image, the Oracle image without a profile and PGO A were timed on all eight corpora (PGO A with the reference engine on Mathlib only); PGO B and PGO C were timed on Mathlib and cedar and counted elsewhere; PGO B and PGO C were not run with the reference engine at all; the reference engine's own fresh and stale profiles (R, S1) were counted on Init, Std and cedar, not on Mathlib.}
+\li{\strong{One worker}, and any worker count other than 8.}
+\li{\strong{A stale profile at the distance of a release.} Two distances were measured, both inside this project's first two days, in which the code more than doubled within a day: 4.3 hours and 17 hours. A profile exactly one publication old was not measured: no jar was published between 00:02Z and the end of the series.}
+\li{\strong{Whether the engine cache of Truffle returns compiled code in the Community Edition} (section 4): it stores and loads; the probe compiles its root node again after the load.}
+\li{\strong{\code{\verb~|--pgo-sampling~}} (profiles from \code{\verb~|perf~} samples instead of an instrumented image) and \strong{G1} (Oracle GraalVM only; \src{docs/research/10-graalvm-platform.md} 7.4 found no instruction gain from it) were not tried.}
+\li{\strong{The JVM launcher's instruction count on the arena's runner}: it depends on how the compiler threads are scheduled beside the workers (the counts of one cell differ by up to 10.9 \% here - on cedar; 4 \% on Mathlib - against 0.3 \% for an image with the machine), and on x86-64 it is unmeasured like everything else.}
+\li{\strong{Whether the arena's maintainers accept a build line that downloads Oracle GraalVM}: not a measurement.}
+}
+}
+
+\subtree{
+\title{7. Files and reproduction}
+
+\pre{\verb~|
+# images (5 + 9 minutes; one of the host's two native-image slots each)
+bench/slot.sh -c ni -n 2 -- work/pg1/build.sh --published --pgo --opt 3 --dist work/pg1/dist --train ... (section 2)
+work/pg1/scripts/oracle-image.sh ora                                  # Oracle, no profile (the control)
+work/pg1/scripts/train.sh B init                                      # a further profile: work/pg1/profiles/B
+work/pg1/scripts/oracle-image.sh pgoB --profiles work/pg1/profiles/B  # ... and its image: work/pg1/oimg/pgoB/rlvm
+work/pg1/scripts/mkimg.sh pgoB work/pg1/oimg/pgoB/rlvm                # a checkout directory for the run line
+# measurements
+work/pg1/scripts/window.sh TAG pgoB cand mathlib                      # one quiet window: instructions, CPU, wall, RSS
+work/pg1/scripts/warm.sh cand 4 mathlib pgoB                          # warm passes in a quiet window
+work/pg1/scripts/count.sh TAG pgoB mdef cedar pgoB mdef init          # instruction counts, no window
+work/pg1/scripts/suite.sh pgoA cand                                   # the 270 tests by the arena's procedure
+python3 -I work/pg1/scripts/cmp-suites.py work/pg1/reports/suite.ce.cand.json work/pg1/reports/suite.pgoA.cand.json
+python3 -I work/pg1/scripts/iprof-overlap.py work/pg1/profiles/Bd work/pg1/profiles/S2
+# the JVM's counterpart of a training run, and the launcher with the cache under the run line's name
+work/pg1/scripts/aot-train.sh init4 init 4 && work/pg1/scripts/window.sh TAG jvmaot-init4 cand mathlib
+# this document: the tables, the quoted numbers, the text
+python3 -I work/pg1/scripts/report.py                                 # every table
+python3 -I work/pg1/scripts/tokens.py                                 # the numbers the prose quotes
+python3 -I work/pg1/scripts/report.py --fill work/pg1/PG1.template.md docs/research/profiles/PG1.md
+~}
+
+\p{Files: \code{\verb~|work/pg1/reports/IMAGE.CONFIG.CORPUS.TAG.json~} (one measured run each: exit code, instructions, CPU, wall, RSS, whether it was inside a window, the run line), \code{\verb~|suite.IMAGE.CONFIG.json~} (270 tests each), \code{\verb~|work/pg1/warm.tsv~} and \code{\verb~|warm-logs/~}, \code{\verb~|work/pg1/profiles/*/~} (the \code{\verb~|.iprof~} files, the training logs, \code{\verb~|INFO.txt~}), \code{\verb~|work/pg1/oimg/*/~} (\code{\verb~|build.log~}, \code{\verb~|info.txt~}, the binaries), \code{\verb~|work/pg1/dist~} (the distribution of \code{\verb~|build.sh --pgo~}: CE image, PGO image A, JVM launcher, jars, \code{\verb~|BUILD-INFO.txt~}), \code{\verb~|work/pg1/logs/~} (window, chain and suite logs, \code{\verb~|repro-*.txt~}, \code{\verb~|m2-jars-before-build.txt~}), \code{\verb~|work/pg1/aot/~} (the JDK AOT caches and their training logs), \code{\verb~|work/pg1/stale-0756Z/~} (the profiles of the PGO build of 07:5xZ), \code{\verb~|work/pg1/scripts/~} (everything above), \code{\verb~|work/pg1/PG1.template.md~} and \code{\verb~|work/pg1/sec/~} (the text of this document).}
+}

@@ -1,0 +1,458 @@
+\title{Can the machine compare proofs cheaply and still give the official verdict? (agent C1)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\meta{origin}{docs/design/review/exact-proof-conversion.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{2026-11-24, 18:35Z - 21:50Z. Prototype work on a PRIVATE copy of \code{\verb~|rlvm-machine~} (taken under the sandbox lock at 18:37:51Z; \code{\verb~|work/c1/tree~}, base copy \code{\verb~|work/c1/base~}, the copy without my instrumentation \code{\verb~|work/c1/clean~}). No production file was changed and nothing was published. Everything of this report is under \code{\verb~|work/c1/~}; the living summary is \code{\verb~|work/status/prof-C1.md~}; the patch is \code{\verb~|work/c1/patches/0001-fused-two-sided-lazy-step.M4.patch~}.}
+
+\p{The question (profile P8, sections 0 and 4.1 / 4.2): 40 \% of the machine's instructions on Mathlib are spent comparing proofs the official way (types of proof arguments and proof fields, projection functions unfolded before their arguments are looked at). The two shortcuts that remove it (\code{\verb~|-Drlvm.machine.m4=congruence,skipargs~}) are sound in the theory but are not the official algorithm's verdict on hostile exports. \strong{How much of the 40 \% can be removed while every verdict stays exactly the official one?}}
+
+\subtree{
+\title{0. Answer}
+
+\p{\strong{None of it by a shortcut, and nothing measurable in time by doing the same steps with less bookkeeping.} The work the shortcuts remove is not redundant work of the official algorithm: on these comparisons the official verdict IS the result of the unfoldings, and every way of answering without them that I examined is either what the complete judgment already does, or is refuted by a hostile export, or needs a meta-theorem about the official algorithm (stability of \code{\verb~|is_def_eq~} under substitution) that nobody has and that I could not prove.}
+
+\p{Measured on one binary (native -O3 of the private tree, one worker, quiet cores; thread CPU of the checks; D = the default switch set of the published machine since 19:41Z; section 6):}
+
+\table{
+\tr{\th{}\th{Mathlib slice \code{\verb~|Scheme.cone~}}\th{Mathlib slice \code{\verb~|Galois.Basic.cone~}}\th{Cedar slice}}
+\tr{\td{the two NON-official options on top of D (what is to be recovered)}\td{\strong{-27.7 \%} CPU (-48.6 \% ticks)}\td{\strong{-31.7 \%} (-57.3 \%)}\td{-2.6 \% (-11.5 \%)}}
+\tr{\td{\code{\verb~|m4b~}, the official-exact step built here, on top of D}\td{no effect: -1.4 \% and, with the order of the pair reversed, +0.8 \% CPU (-3.3 \% ticks)}\td{+0.8 \% (-4.1 \%)}\td{-0.7 \% and +0.4 \% (-0.8 \%)}}
+\tr{\td{\code{\verb~|facts~} (B7, official-exact, exists) on top of D + \code{\verb~|m4b~}}\td{+1.2 \%}\td{+0.5 \%}\td{+2.1 \%}}
+\tr{\td{D itself against the step-1 set (official-exact, exists)}\td{-12.1 \%}\td{-8.5 \%}\td{-24.8 \%}}
+}
+
+\p{On all of Mathlib, eight workers, pipelined, warm passes (6.2): the default set 25.39 s, with the two options 19.15 s (\strong{-24.6 \%} of the wall clock, -25.5 \% of the process CPU time), with \code{\verb~|m4b~} 26.18 s (no gain).}
+
+\p{In the 1,690 units of \code{\verb~|Scheme.cone~} in which the shortcuts save half of the ticks or more (39 \% of the slice's checking time) the shortcuts remove 70 \% of the CPU time; the default set had removed 7.5 \% of it, and \code{\verb~|m4b~}'s 1.4 \% there is inside the order effect of that window. \strong{The share of the 40 \% that the official-exact route recovers is zero within the resolution of these measurements (1 \% of the checking time).}}
+
+\table{
+\tr{\th{\verb~|#~}\th{Idea}\th{Official-exact?}\th{Result}}
+\tr{\td{1}\td{memo / fusion of the unfold-to-structure steps}\td{yes where it only removes bookkeeping}\td{Built: switch \code{\verb~|m4b~}, the fused two-sided lazy step (\code{\verb~|Conv.convFuse~}, patch for M4). It makes the same records, unfoldings, comparisons and type inferences as the complete judgment (the counts are identical) and removes the judgments LAZYD / LSTEP around them: -3 to -4 \% of the ticks on Mathlib slices, no effect on the CPU time. The two larger parts of the idea were already in the machine: the CORE memo takes the restart of \code{\verb~|is_def_eq_core~} out of a repeated chain (3.1), and M2's \code{\verb~|bodies~} makes the unfolding of a projection function one MKPROJ}}
+\tr{\td{1'}\td{a derived rule per projection chain AND instance (the strong form of 1)}\td{would be exact under the four conditions of 3.4; NOT built}\td{bounded by the reduction share of the heavy units (61 \% of their ticks); my estimate is 5 to 10 \% of Mathlib's ticks and less in time. It is M3's K2 extended into lazy delta and keyed by instance arguments: a package of its own, and K2 itself is not reviewed yet}}
+\tr{\td{2}\td{lockstep walk of one proposition under two frames}\td{exact only where the official order compares arguments before it unfolds: rigid heads, the same REGULAR definition, binder domains, and there the complete judgment is that walk. Not exact for abbreviations (every projection function), recursors, projections, closures}\td{nothing: at most 12 \% of a heavy unit's ticks are in nodes of that kind, and what lies below them must be evaluated anyway. Not built}}
+\tr{\td{3}\td{caches the official kernel has and the machine uses worse}\td{there are none: the machine's pair table hits more often than the official caches would (canonical variables)}\td{8 of 2,227 comparisons of the traced unit repeat a pair of records; about 4 \% repeat a pair of EXPRESSIONS (an expression-keyed table would be exact; M4's measurements say the walks cost what they save). Not built}}
+}
+
+\p{Tests of the patch: M8's gate (step-1 set + \code{\verb~|m4b~}: PASS on tutorial, bugs, all 230 tests, Init, Std, reachability, the Cedar slice and ten Mathlib slices, SOUNDNESS 0 / COMPLETENESS 0, tier, convention and audit differences 0; with the default set: SOUNDNESS 0 / COMPLETENESS 0 everywhere, and convention differences in the complete gate that the default set shows WITHOUT the patch too: finding C1-F2, 7.1); every hostile export of package S and of reviewer S2 (1,235 exports) and 41 new ones give the official verdict under every switch set with \code{\verb~|m4b~}; the 15 exports that the two options accept against the official checker stay rejected.}
+}
+
+\subtree{
+\title{1. What the official algorithm does on these comparisons}
+
+\p{Unit traced: \code{\verb~|AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app~} (P8's unit), step-1 switches, JVM, one worker; private hooks (\code{\verb~|C1Trace~}, one tagged line per hook; \code{\verb~|work/c1/data/seq-base.txt~} is the sequential trace, 16,553 events; tools \code{\verb~|work/c1/spans.py~}, \code{\verb~|view.py~}).}
+
+\ul{
+\li{65,403 ticks: EVAL 7,858 + 6,896 memo hits, APPLY 8,519, CORE 6,850 + 3,352, DELTA 5,359 + 1,242, VTYPE 3,419, LSTEP 2,743, CONV 2,227 + 1,868 pair hits, PIRR 2,086, WHNF 1,614 + 272, DOM 1,519, LAZYD 1,384, INST 1,354, CARGS 1,011, CBIND 554, PROJD 359. 61 \% of the ticks are reduction and evaluation (EVAL, APPLY, CORE, DELTA, WHNF), 22 \% the comparison judgments themselves.}
+\li{\strong{Every comparison succeeds}: 2,212 of the 2,227 comparisons that are not answered inline end in T at their own level, none of the top-level ones fails. The work is not search; it is the confirmation of equations that the theory gives for free.}
+\li{59,736 of the 65,403 ticks are ONE comparison: \code{\verb~|RingHom A B iA iB =?= RingHom A' B' iA' iB'~}, where, as the terms print, \code{\verb~|A = CommRingCat.carrier (F.obj U)~} and \code{\verb~|A' = F'.obj U~}: one ring of sections written in two ways. The two instance arguments cost 27,263 and 27,373 ticks. Each is \code{\verb~|Semiring.toNonAssocSemiring A s =?= Semiring.toNonAssocSemiring A' s'~}: an abbreviation whose body is a constructor application (a parent that is not a sub-object is re-packed field by field), so both sides unfold and the constructors are compared field by field: \code{\verb~|Semiring.left_distrib ..~} (a proof: its type, 2,266 ticks), \code{\verb~|Semiring.zero_mul ..~} (3,374), \code{\verb~|Monoid.toOne ..~} (10,279, through a REGULAR definition whose last argument is the proof \code{\verb~|SubsemiringClass.toSemiring._proof_8~}: 6,251 ticks for its type), ...}
+\li{Inside a law, every operation is unfolded on both sides down to the concrete structure (here a subring of a product of localisations): \code{\verb~|HMul.hMul~} -> \code{\verb~|Mul.mul~} -> \code{\verb~|Subtype.mk (..) proof~} (166 ticks the first time the instance is normalised, 28 to 30 ticks for each later occurrence), then the product (a lambda, CBIND), then the localisation (\code{\verb~|LocalizedModule.mul~}, regular: its arguments are compared), and the proof inside the \code{\verb~|Subtype.mk~} is compared by ITS type (\code{\verb~|Membership.mem ..~} -> \code{\verb~|Set.Mem~} -> the predicate: three nested \code{\verb~|Exists~}). The depth of the tower times the number of operations in the laws is the cost.}
+\li{The leaders answer the top comparison by comparing the arguments of the projection functions first and never look at a proof (gruszka: 10 unfoldings in the whole unit, P8 4.1).}
+}
+
+\p{Which of this is the official algorithm's own choice (\code{\verb~|refs/lean4/src/kernel/type_checker.cpp~}, lines given):}
+
+\table{
+\tr{\th{Official rule}\th{Consequence here}}
+\tr{\td{\code{\verb~|is_def_eq_proof_irrel~} (895): the two inferred types are compared}\td{every proof field and proof argument costs the comparison of two instances of a law}}
+\tr{\td{\code{\verb~|lazy_delta_reduction_step~} (962): the arguments are compared before unfolding ONLY for the same definition with a REGULAR hint (995); for equal hints otherwise both sides unfold}\td{every structure projection function (\code{\verb~|HMul.hMul~}, \code{\verb~|Mul.mul~}, \code{\verb~|Semiring.toMonoid~}, \code{\verb~|Subtype.val~}: abbreviations) is unfolded on both sides, whatever its arguments are}}
+\tr{\td{\code{\verb~|whnf_core(.., cheap_proj = true)~} in the lazy step, then the second \code{\verb~|whnf_core~} and the restart of \code{\verb~|is_def_eq_core~} (1181)}\td{one operation = two or three passes of \code{\verb~|is_def_eq_core~}, each with its own proof-irrelevance test}}
+\tr{\td{\code{\verb~|is_def_eq_app~} (874) only for terms that nothing reduces}\td{congruence exists only at rigid heads (constructors, inductive types, variables, axioms, stuck eliminators)}}
+}
+}
+
+\subtree{
+\title{2. What "official-exact" permits}
+
+\p{Outside eager reduction (a declaration that enters it is declined by the machine, M6-F26) the official \code{\verb~|is_def_eq(t, s)~} is a function of the two expressions: its caches (\code{\verb~|m_success~}, \code{\verb~|m_failure~}, the \code{\verb~|infer~} and \code{\verb~|whnf~} caches) are memos of deterministic functions. An implementation is therefore official-exact iff it computes that function; the sequence of steps, the cache contents and the order of sub-comparisons are NOT observable in a verdict. Three things remain observable and bound every shortcut:}
+
+\ol{
+\li{\strong{Decision points.} A state of the official algorithm at which an answer can be given: the quick test (identical expressions, the success cache, two binders, two sorts, two literals), the \code{\verb~|Bool.true~} shortcut, proof irrelevance (definitive in BOTH directions), the Nat offset and Nat folding states of lazy delta, the argument comparison of the same regular definition, and the end of the lazy loop. A step that skips a state must show that no decision point of that state can fire, or that it fires with the answer the continuation gives.}
+\li{\strong{Cache transparency.} The quick test can answer T from the success cache in the middle of the lazy loop. A step that does not look there must be able to rely on "the continuation finds the same T". The machine already relies on it (NOTES-M4 D1, D26: \code{\verb~|lazyeval~}), and so does everything below. It holds because "is a proof" is invariant along an unfolding (the top-level \code{\verb~|is_def_eq_core~} of a cached pair tests proof irrelevance first, the loop that reaches the pair does not; \code{\verb~|is_prop~} normalises the level of the sort, lines 379-385, and a term and its reduct have convertible types).}
+\li{\strong{Errors.} An exception thrown by a sub-comparison is a verdict; an order that poses other sub-comparisons can meet other errors (NOTES-M4 D5). None of the mechanisms below reorders.}
+}
+
+\p{What is NOT available as an argument: congruence (\code{\verb~|a = b~} implies \code{\verb~|C[a] = C[b]~}), transitivity, and stability under substitution (\code{\verb~|t[x] = s[x]~} for a variable implies \code{\verb~|t[a] = s[a]~}). The official function has none of the three (review S-F1 / S-F2, NOTES-M4 W2); section 4 shows where each of them would be needed.}
+}
+
+\subtree{
+\title{3. Idea 1: the unfold-to-structure steps}
+
+\subtree{
+\title{3.1 What the complete judgment already does (found by tracing, not by me)}
+
+\ul{
+\li{\strong{The restart is already skipped on a repeated chain.} \code{\verb~|Reduce.core~} answers a CHEAP query from a memo that holds a FULL result ("a full result answers both modes", \code{\verb~|Reduce.java~} 564-568; ISA 4.3.3 COREFULL). The official \code{\verb~|whnf_core~} reads its cache only for the full mode. Effect: the first time \code{\verb~|(instHMul A m).1 x y~} is met the lazy loop ends with "unknown", the second \code{\verb~|whnf_core~} gives \code{\verb~|Mul.mul A m x y~} and \code{\verb~|is_def_eq_core~} restarts (quick test, \code{\verb~|Bool.true~}, proof irrelevance, a new LAZYD); every later application of the same projection is reduced to \code{\verb~|Mul.mul A m x' y'~} inside the lazy step, and the loop goes on with the next unfolding without a restart. In the trace of \code{\verb~|fuse-chain-nested-ok~} (two nested operations): the first operation costs PIRR, LSTEP, PIRR, LSTEP, PIRR, LSTEP; the second PIRR, LSTEP, LSTEP, LSTEP. This is the largest part of idea 1 and it is in the published machine. It is exact by point 2 of section 2 (the skipped proof-irrelevance test cannot fire); section 8 says what that rests on.}
+\li{\strong{The unfolding of a projection function is one step} with M2's \code{\verb~|bodies~} (\code{\verb~|m2a~}, \code{\verb~|Eval.betaProj~}: the body \code{\verb~|self.i~} of the closure is MKPROJ of the argument; no environment, no EVAL): slice records 14.37 M -> 11.56 M (-20 \%), ticks -0.9 \%.}
+\li{B7 (\code{\verb~|facts~}) answers "is it a proof" for a saturated constant application statically: PIRR 807 k -> 259 k, VTYPE 1.39 M -> 0.77 M, ticks -4.7 \%.}
+}
+}
+
+\subtree{
+\title{3.2 Built: the fused two-sided lazy step (\code{\verb~|m4b~}, owner M4, \code{\verb~|Conv.convFuse~})}
+
+\p{What is left of the bookkeeping is the pair of judgments LAZYD / LSTEP around every two-sided unfolding. The step runs those iterations inside CONV:}
+
+\ul{
+\li{\strong{Shape} (\code{\verb~|fuseShape(tn, sn)~}, tested at c5, after proof irrelevance answered "not proofs"): both sides are applications of a definition or theorem with the right number of levels (\code{\verb~|is_delta~}); neither head is one of the binary Nat functions; \code{\verb~|compare(hints) == 0~}; and it is not the same definition with a regular hint.}
+\li{\strong{Iteration}: \code{\verb~|tn' = CORE(unfoldLazy(tn), cheap)~}, \code{\verb~|sn' = CORE(unfoldLazy(sn), cheap)~} - the four calls of \code{\verb~|lstepBoth~} (k_lstep4 .. k_lstep7), in that order - then the quick test of \code{\verb~|lquick~}: T / F: the answer (recorded as CONV\verb~|[~7\verb~|]~ records the answer of LAZYD); two binders: CBIND, definitive; otherwise the next iteration if the new pair has the shape again, else the complete judgment LAZYD is called with the pair in hand (it is a function of the pair: the same loop).}
+\li{\strong{Not run}: the tick and event of LAZYD and LSTEP, and the states l0 (Nat offset) and l1 (Nat folding) of each iteration.}
+}
+
+\p{\strong{Why the outcome is the official one.} For a pair of the shape, the official \code{\verb~|lazy_delta_reduction~} iteration is: \code{\verb~|is_def_eq_offset~} needs a zero / successor form on both sides - a definition-headed application is neither, so "undef"; \code{\verb~|reduce_nat~} needs one of the Nat functions at the head - excluded; \code{\verb~|lazy_delta_reduction_step~}: both \code{\verb~|is_delta~}, \code{\verb~|compare(hints) == 0~}, not (same definition and regular): the branch that unfolds both sides (lines 1009-1010), then \code{\verb~|quick_is_def_eq~}. That is the iteration above, call for call. The step never compares arguments, never consults a type, never skips a quick test; the values it computes, the memo words it fills (UNF, CORE) and the pair entries it writes are those of the complete judgment, in the same order. Evidence that this is literally so: on the slice the runs with and without \code{\verb~|m4b~} make the same 14,374,194 records, 2,186,171 DELTA, 1,146,099 CONV, 807,213 PIRR and 1,388,832 VTYPE events; only LSTEP (1,437,395 -> 837,831) and LAZYD differ. Under host depth 0 every sub-judgment writes its frame (four new continuation states \code{\verb~|CONV2[9..12]~}).}
+
+\p{\strong{Size}: -2.9 \% of the ticks on the step-1 set, -3.3 \% on the default set and on the rich set (\code{\verb~|Scheme.cone~}), -3.8 \% / -4.1 \% on \code{\verb~|Galois.Basic.cone~}, -0.9 \% / -0.8 \% on the Cedar slice (section 6). The ticks it removes are the cheapest ones of the machine: in CPU time there is no effect (6.1).}
+}
+
+\subtree{
+\title{3.3 The first form of the step, withdrawn}
+
+\p{My first version went from the two unfoldings directly to c7 when both results were "inert" (a weak-head normal application, or a projection-headed application whose struct \code{\verb~|whnf_core(cheap)~} leaves alone), on the argument that the cheap \code{\verb~|whnf_core~} and the second iteration do nothing then. That argument describes the OFFICIAL algorithm correctly (the 36 exports that existed then: official verdict in every configuration), but not the machine: the cheap CORE of a repeated chain is NOT a no-op (3.1), so the first form restarted \code{\verb~|is_def_eq_core~} where the complete judgment continues the loop, and paid a proof-irrelevance test per level: PIRR 807 k -> 1,027 k, ticks only -1.0 \%. It is the more official of the two (it tests proof irrelevance where the official kernel does), and it is slower. I kept the form that is the complete judgment minus its bookkeeping.}
+}
+
+\subtree{
+\title{3.4 Not built: a derived rule per projection chain and instance (idea 1 in its strong form)}
+
+\p{What it would be: for a partial application \code{\verb~|P = HMul.hMul A A A (instHMul A m)~}, remember that \code{\verb~|P x y~} reaches \code{\verb~|g x y~} (the field of the weak-head normal form of \code{\verb~|m~}, here through the eta-expanded field \code{\verb~|fun a b => Mul.mul A m a b~} of \code{\verb~|instHMul~}), and build \code{\verb~|g x y~} directly: one APPLY instead of two DELTA, two CORE, two APPLY and four records per side.}
+
+\p{Conditions under which firing the rule on BOTH sides is the official outcome (worked out, not implemented):}
+
+\ol{
+\li{every head of the chain is an abbreviation or opaque (never regular: the argument comparison is a decision point) and none is a Nat function;}
+\li{both sides fire rules with the same sequence of heads, so that the official loop would have unfolded both sides at every step (\code{\verb~|compare(hints) == 0~} at every level); a chain that leaves the lockstep ends the rule;}
+\li{the intermediate values that the official algorithm passes at a restart (\code{\verb~|Mul.mul A m x y~}) are not proofs. This must be known WITHOUT building them: B7's static test on (constant, levels) gives it for a saturated application whose result sort is manifest and never zero; anything else ends the rule at that level;}
+\li{the intermediate quick tests can only answer T (the values are applications), and by cache transparency the continuation finds that T; identity of an intermediate pair implies identity of the final pair.}
+}
+
+\p{Size: bounded by the reduction share of the heavy units (61 \% of the traced unit's ticks are EVAL, APPLY, CORE, DELTA, WHNF). The two-level chains \code{\verb~|HMul.hMul -> Mul.mul~}, \code{\verb~|HAdd.hAdd -> Add.add~} are 1,920 of the unit's 5,359 unfoldings; halving their cost and that of the single levels is about a fifth of the unit's ticks. On Mathlib as a whole I would expect 5 to 10 \% of the ticks, less in CPU time. It is M3's K2 (session-local derived trees, today "no rule in lazy delta", NOTES-M3 D17) keyed additionally by the instance arguments and fired in lockstep; I did not build it because it is a package of its own (rule derivation with derivation variables, templates, budgets) and its prize is a tenth of what was asked for. The conditions above are what its exactness review would have to check.}
+}
+}
+
+\subtree{
+\title{4. Idea 2: the lockstep walk}
+
+\subtree{
+\title{4.1 Where the official order compares arguments before it unfolds}
+
+\table{
+\tr{\th{Place}\th{Official rule}\th{In the machine}}
+\tr{\td{applications that nothing reduces (rigid heads; stuck recursor, projection, variable heads), first to last}\td{\code{\verb~|is_def_eq_app~} after the second \code{\verb~|whnf_core~} changed nothing}\td{c8, CARGS policy APP}}
+\tr{\td{the SAME definition with a REGULAR hint, last to first, guarded by \code{\verb~|m_failure~} and the level lists}\td{\code{\verb~|lazy_delta_reduction_step~} 995-1007}\td{\code{\verb~|lstepBoth~}, CARGS policy SAMEDEF, FAILED}}
+\tr{\td{binder domains, then the bodies under one variable}\td{\code{\verb~|is_def_eq_binding~}}\td{CBIND}}
+\tr{\td{predecessors of two successor forms}\td{\code{\verb~|is_def_eq_offset~}}\td{OFFSET}}
+\tr{\td{the structs of two projections \code{\verb~|a.i~}, \code{\verb~|b.i~}: unfolded lazily in lockstep, then the fields of two constructors or the structs themselves}\td{\code{\verb~|lazy_delta_proj_reduction~}}\td{PROJD}}
+\tr{\td{proofs: never the arguments, always the two types}\td{\code{\verb~|is_def_eq_proof_irrel~}}\td{PIRR}}
+}
+
+\p{Everywhere else the official algorithm reduces first: abbreviations and opaque definitions (all structure projection functions and all theorems), recursor applications whose major premise can be normalised, projections of something that normalises to a constructor, beta and let.}
+}
+
+\subtree{
+\title{4.2 The walk that is exact by construction is the complete judgment}
+
+\p{A walk over the shared term of two closures can answer T without unfolding at a slot only if the official algorithm, on its way to that slot, passes only nodes of the first three rows: binders, sorts, applications of an inductive type (never a proof, so proof irrelevance says "not proofs"), and compares the two slot values themselves there. The complete judgment does this, node for node, and reads the pair table at the slots. A walk on the term would save the evaluation of the shell (INST, DOM, the CONV and CARGS of the rigid nodes): in the traced unit that shell is at most 554 CBIND + 503 CARGS-APP nodes with their CONV, PIRR, DOM and INST, about 8,000 of 65,403 ticks (12 \%) if every one of them cost nothing - and the first operation below the \code{\verb~|Eq~} is an abbreviation, where the walk must hand over. Not built: nothing to gain.}
+}
+
+\subtree{
+\title{4.3 Why the walk cannot be extended to projection functions}
+
+\p{The comparison that matters is \code{\verb~|P p s e =?= P p' s' e'~} for a projection function \code{\verb~|P~} (body \code{\verb~|self.i~}) with \code{\verb~|is_def_eq(s, s') = T~}, \code{\verb~|is_def_eq(e, e') = T~}. The official path: both unfold to \code{\verb~|s.i e~}, \code{\verb~|s'.i e'~}; if the projections are stuck for \code{\verb~|whnf_core(cheap)~}, "unknown"; then}
+
+\ul{
+\li{no further argument (\code{\verb~|Semiring.toMonoid A s~}): \code{\verb~|lazy_delta_proj_reduction(s, s')~}, which is the lazy loop of \code{\verb~|is_def_eq(s, s')~} itself. Here "the structs are convertible implies the projections are" does hold on every path I followed, and it gains nothing: the official path costs what \code{\verb~|is_def_eq(s, s')~} costs.}
+\li{with arguments (\code{\verb~|HMul.hMul A A A i x y~}): the second \code{\verb~|whnf_core~} normalises the instance. If it is stuck (an abstract instance), \code{\verb~|is_def_eq_app~} compares the heads (PROJD again, cached after the first time) and then exactly \code{\verb~|x =?= x'~}, \code{\verb~|y =?= y'~}: congruence holds and is what the complete judgment does - cheaply. If it is a constructor (a concrete instance: the heavy case), the comparison continues with \code{\verb~|f x y =?= f' x' y'~} for the two fields. What is known about them is \code{\verb~|f =?= f'~}, i.e. \code{\verb~|body[a, b] =?= body'[a, b]~} under two fresh variables. To conclude \code{\verb~|body[x, y] =?= body'[x', y']~} one needs stability of the official \code{\verb~|is_def_eq~} under substitution and congruence in the substituted positions. It has neither: \code{\verb~|body = fun a => R a~} with \code{\verb~|R a = And.rec f a~}, \code{\verb~|x = And.intro ..~}, \code{\verb~|x' = h~} (an axiom) is the review's \code{\verb~|probe-b12-closure-proof-slot-bad~}; with \code{\verb~|P~} an abbreviation it is \code{\verb~|probe-b1-abbrev-proof-arg~}, and my \code{\verb~|fuse-abbrev-samehead-proofarg-bad~} / \code{\verb~|fuse-opaque-samehead-proofarg-bad~} (official: reject; \code{\verb~|congruence~}: accept; every official-exact configuration: reject).}
+}
+
+\p{So the lemma "pair-table T at the slots, same term, implies T" is false for abbreviations as it stands, and the restricted lemma one would want - "... if the arguments are IDENTICAL or related without proof irrelevance and eta, and no reduction on the way inspects a proof" - needs (a) a way to know how a pair-table entry was derived, down to its sub-derivations, and (b) the meta-theorem that the official lazy strategy on two instances of one term under such frames stays in lockstep. M4 could not close (b) (NOTES-M4 D27: the types of the differing leaves are consulted by K, structure eta, unit-like and proof irrelevance of enclosing terms, and the types of two terms that are convertible by reduction alone can be convertible only through proof irrelevance). I could not either, and (a) fails on the hot comparisons anyway: the two instance structures of the traced unit ARE equal only up to proof irrelevance (their proof fields are different terms).}
+
+\p{Two more candidates that fail the same way: normalising the wrapper (\code{\verb~|carrier (of X)~} to \code{\verb~|X~}) when the value is built would make the two sides one record, but "replacing a subterm by its reduct does not change the official answer" is the same missing invariance (\code{\verb~|G I =?= G h~} for a regular \code{\verb~|G~} is T by the arguments and F after unfolding: \code{\verb~|fuse-regular-samehead-proofarg-ok~}). And skipping a proof position when the EARLIER positions are identical does not follow either: both proofs then have types convertible with one expected type, and the official relation is not transitive (\code{\verb~|nontransitive-*~} of package S).}
+}
+}
+
+\subtree{
+\title{5. Idea 3: caches}
+
+\ul{
+\li{Pair table against the official success cache: in the traced unit 8 of the 2,227 comparisons that miss the table pose a pair of records that was posed before (all eight are \code{\verb~|Sort (max 1 (u+1)) =?= Sort (u+1)~}, which is never recorded, NOTES-M4 D8); 179 of 2,743 lazy steps and 57 of 359 PROJD calls meet an in-hand pair again (the official kernel does not cache those either).}
+\li{Frame identity: frames are interned by content after pruning, so "equal but distinct frames" are frames whose slots are different records of one expression. M4's \code{\verb~|same~} (D28) answers those at c0; on this slice it is -5.3 \% of the ticks (NOTES-M4 W4) and is part of the rich set of section 6.}
+\li{The other direction: the machine's variables are \code{\verb~|FVAR(type, k)~}, the same record for the k-th variable of a type in every binder; the official kernel makes a fresh variable for every binder it opens. So two laws over the same carrier share their sub-comparisons in the machine (1,868 pair hits in the unit) and not in the official kernel. The machine's table hits MORE often than the official caches would.}
+\li{\p{Expression-level repeats: a comparison that misses the pair table although its two sides are, as EXPRESSIONS (\code{\verb~|Same.same~} on each side, 256 nodes), a pair that was already answered T in the same unit. Estimator \code{\verb~|C1Trace.structural~} (quadratic, traced units only, step-1 switches, \code{\verb~|-Dc1.struct=true~}):}
+\table{
+\tr{\th{unit}\th{comparisons not answered inline}\th{of them a repeat as expressions}\th{pair-table hits}}
+\tr{\td{\code{\verb~|AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app~}}\td{2,227}\td{100 (4.5 \%)}\td{1,868}}
+\tr{\td{\code{\verb~|AlgebraicGeometry.stalkMap_toStalk~}}\td{7,528}\td{349 (4.6 \%)}\td{6,469}}
+\tr{\td{\code{\verb~|AlgebraicGeometry.Spec.sheafedSpaceMap_id~}}\td{9,585}\td{331 (3.5 \%)}\td{8,041}}
+}
+\p{So a success cache keyed by expressions instead of records could answer about 4 \% more comparisons. It would be exact (the official answer is a function of the two expressions; the argument of D28), but it needs a structural hash of closures under frames for every probe, and M4 measured that walks which do not find identity cost what the others save (NOTES-M4 W4, W5). Not built; the ceiling is 4 \% of the comparisons, not of the time.}}
+}
+}
+
+\subtree{
+\title{6. Numbers}
+
+\p{Counters: JVM launcher, one worker, the private tree with the tap \code{\verb~|c1tap~} (P8's per-unit tap), statistics on, \code{\verb~|work/c1/run.sh TAG scheme SWITCHES~}; slice \code{\verb~|Mathlib.AlgebraicGeometry.Scheme.cone~} (21,155 engine checks; 21,099 accepted and 56 declined by the eager-reduction rule in EVERY row). \code{\verb~|rich~} = \code{\verb~|warm,gated,expect,probes,code,casetrees,lazyeval,k2,facts,same,m2a,m3a,m7a~}.}
+
+\table{
+\tr{\th{switches}\th{ticks}\th{vs step 1}\th{records}\th{DELTA}\th{CONV}\th{PIRR}\th{LSTEP}\th{VTYPE}\th{traced unit}}
+\tr{\td{\code{\verb~|warm,gated,expect~} (step 1)}\td{31,630,908}\td{}\td{14,374,194}\td{2,186,171}\td{1,146,099}\td{807,213}\td{1,437,395}\td{1,388,832}\td{65,403}}
+\tr{\td{+ \code{\verb~|m4b~}}\td{30,727,488}\td{-2.9 \%}\td{14,374,194}\td{2,186,171}\td{1,146,099}\td{807,213}\td{837,831}\td{1,388,832}\td{62,677}}
+\tr{\td{+ \code{\verb~|m2a~}}\td{31,351,447}\td{-0.9 \%}\td{11,560,882}\td{2,116,825}\td{1,121,896}\td{789,195}\td{1,390,046}\td{1,348,123}\td{65,920}}
+\tr{\td{+ \code{\verb~|facts~}}\td{30,152,550}\td{-4.7 \%}\td{14,200,568}\td{2,182,312}\td{1,144,335}\td{258,909}\td{1,434,568}\td{771,521}\td{62,128}}
+\tr{\td{+ \code{\verb~|facts,m4b~}}\td{29,250,967}\td{-7.5 \%}\td{14,200,568}\td{2,182,312}\td{1,144,335}\td{258,909}\td{836,309}\td{771,521}\td{59,402}}
+\tr{\td{D = the default set of the published machine since 19:41Z (\code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~})}\td{22,995,127}\td{-27.3 \%}\td{9,173,524}\td{1,650,613}\td{1,018,773}\td{696,424}\td{1,038,863}\td{1,196,592}\td{60,437}}
+\tr{\td{D + \code{\verb~|m4b~}}\td{22,235,653}\td{-29.7 \%}\td{9,173,524}\td{1,650,613}\td{1,018,773}\td{696,424}\td{529,156}\td{1,196,592}\td{57,549}}
+\tr{\td{D + \code{\verb~|facts,m4b~}}\td{20,959,610}\td{-33.7 \%}\td{9,037,160}\td{1,653,013}\td{1,020,540}\td{218,068}\td{530,072}\td{657,488}\td{54,114}}
+\tr{\td{rich}\td{23,479,898}\td{-25.8 \%}\td{9,303,450}\td{1,602,961}\td{1,064,195}\td{218,193}\td{1,082,110}\td{663,861}\td{57,971}}
+\tr{\td{rich + \code{\verb~|m4b~}}\td{22,695,373}\td{-28.2 \%}\td{9,308,505}\td{1,604,781}\td{1,062,148}\td{218,063}\td{551,133}\td{663,894}\td{54,673}}
+\tr{\td{step 1 + \code{\verb~|facts,probes~} + \code{\verb~|congruence,skipargs~} (NOT official)}\td{17,898,001}\td{-43.4 \%}\td{8,422,489}\td{926,239}\td{771,229}\td{44,386}\td{717,031}\td{307,439}\td{3,866}}
+\tr{\td{rich + \code{\verb~|congruence,skipargs~} (NOT official)}\td{13,624,753}\td{-56.9 \%}\td{5,434,986}\td{542,506}\td{703,781}\td{39,516}\td{336,508}\td{286,930}\td{3,052}}
+\tr{\td{D + \code{\verb~|facts,probes~} + \code{\verb~|congruence,skipargs~} (NOT official)}\td{11,809,466}\td{-62.7 \%}\td{5,035,473}\td{538,753}\td{693,452}\td{36,909}\td{334,775}\td{271,652}\td{2,916}}
+}
+
+\p{The same on a second Mathlib slice and on the Cedar slice (ticks; accepted and declined units equal in every row):}
+
+\table{
+\tr{\th{corpus}\th{step 1}\th{+ \code{\verb~|m4b~}}\th{D}\th{D + \code{\verb~|m4b~}}\th{D + \code{\verb~|facts,m4b~}}\th{step 1 + shortcuts (NOT official)}\th{D + shortcuts (NOT official)}}
+\tr{\td{\code{\verb~|Mathlib.FieldTheory.Galois.Basic.cone~} (26,596 checks)}\td{34.10 M}\td{32.81 M (-3.8 \%)}\td{26.82 M}\td{25.70 M (-4.1 \% of D)}\td{24.33 M}\td{15.62 M (-54.2 \%)}\td{11.46 M (-57.3 \% of D)}}
+\tr{\td{Cedar slice \code{\verb~|cedar-hot-ax~} (8,075 checks)}\td{16.55 M}\td{16.40 M (-0.9 \%)}\td{9.99 M}\td{9.91 M (-0.8 \% of D)}\td{9.59 M}\td{13.22 M (-20.1 \%)}\td{8.84 M (-11.5 \% of D)}}
+}
+
+\p{By how much the shortcuts save in a unit (ticks of the step-1 run divided by the ticks with the shortcuts):}
+
+\table{
+\tr{\th{ratio}\th{units}\th{step 1}\th{share}\th{with the shortcuts}\th{rich}\th{rich recovers}\th{\code{\verb~|facts~} recovers}}
+\tr{\td{below 1.25}\td{16,215}\td{12.02 M}\td{38.0 \%}\td{11.76 M}\td{8.50 M}\td{(more than the shortcuts)}\td{}}
+\tr{\td{1.25 .. 2}\td{3,222}\td{5.46 M}\td{17.3 \%}\td{3.56 M}\td{4.53 M}\td{49 \%}\td{17 \%}}
+\tr{\td{2 .. 4}\td{1,113}\td{4.22 M}\td{13.3 \%}\td{1.65 M}\td{3.29 M}\td{36 \%}\td{10 \%}}
+\tr{\td{4 .. 16}\td{464}\td{5.88 M}\td{18.6 \%}\td{0.80 M}\td{4.55 M}\td{26 \%}\td{7 \%}}
+\tr{\td{16 and more}\td{113}\td{4.04 M}\td{12.8 \%}\td{0.12 M}\td{2.60 M}\td{37 \%}\td{5 \%}}
+}
+
+\p{The units at 2 and more (1,690 units, 44.7 \% of the ticks): the shortcuts remove 11.58 M of 14.14 M ticks, the rich set 3.70 M (32 \%), \code{\verb~|facts~} 0.82 M (7 \%), \code{\verb~|m4b~} on top of the rich set about another 2 points.}
+
+\p{Where the shortcuts' 13.7 M ticks sit, by operation (step 1 -> with the shortcuts; M events and memo hits): EVAL 9.38 -> 6.42, CORE 4.13 -> 1.26, APPLY 3.65 -> 1.81, DELTA 2.92 -> 1.44, VTYPE 1.39 -> 0.31, PIRR 0.81 -> 0.04, LSTEP 1.44 -> 0.72, CONV 1.93 -> 1.56, LAZYD 0.60 -> 0.22. The rich set moves EVAL (5.73), APPLY (0.89, the code blocks run instead: 2.30 M ACT) and VTYPE / PIRR (0.66 / 0.22), and leaves CORE (3.41), DELTA (2.21) and CONV (2.03) where they are: the unfoldings and the comparisons are still made.}
+
+\subtree{
+\title{6.1 CPU time of the checks, one worker (bench/quiet.py)}
+
+\p{Native image -O3 of the CLEAN private tree (\code{\verb~|work/c1/dist-n~}, machine jar dde92f387280, the other jars as published at 18:46Z), engine \code{\verb~|c1tap~} (P8's tap: the thread CPU clock around every \code{\verb~|Session.check~}), statistics off, one worker, the eight measurement cores; the sets interleaved, two rounds (\code{\verb~|work/c1/quiet-cpu.sh~}; raw: \code{\verb~|work/c1/data/q/~}). A = \code{\verb~|warm,gated,expect~}; D = the default set of 19:41Z; N = A + \code{\verb~|facts,probes~} + the two NON-official options; DN = D + \code{\verb~|facts,probes~} + the two options.}
+
+\p{Thread CPU of the checks in seconds, round 1 / round 2 (ticks in M; 21,099 / 26,488 / 8,053 units accepted and 56 / 108 / 22 not accepted by the machine in every row):}
+
+\table{
+\tr{\th{set}\th{\code{\verb~|Scheme.cone~} ticks}\th{CPU s}\th{\code{\verb~|Galois.Basic.cone~} ticks}\th{CPU s}\th{Cedar slice ticks}\th{CPU s}}
+\tr{\td{A (step 1)}\td{31.63}\td{2.597 / 2.623}\td{34.10}\td{2.824 / 2.829}\td{16.55}\td{1.871 / 1.896}}
+\tr{\td{A + \code{\verb~|m4b~}}\td{30.73}\td{2.587 / 2.567}\td{32.81}\td{2.811 / 2.825}\td{16.40}\td{1.780 / 1.783}}
+\tr{\td{D (default set of 19:41Z)}\td{23.00}\td{2.311 / 2.275}\td{26.82}\td{2.586 / 2.586}\td{9.99}\td{1.436 / 1.397}}
+\tr{\td{D + \code{\verb~|m4b~}}\td{22.24}\td{2.235 / 2.286}\td{25.70}\td{2.619 / 2.593}\td{9.91}\td{1.405 / 1.408}}
+\tr{\td{D + \code{\verb~|facts,m4b~}}\td{20.96}\td{2.244 / 2.329}\td{24.33}\td{2.626 / 2.611}\td{9.59}\td{1.430 / 1.442}}
+\tr{\td{rich + \code{\verb~|m4b~}}\td{22.70}\td{2.301 / 2.312}\td{26.44}\td{2.874 / 2.739}\td{10.15}\td{1.462 / 1.475}}
+\tr{\td{N = A + \code{\verb~|facts,probes~} + shortcuts (NOT official)}\td{17.90}\td{1.898 / 1.898}\td{15.62}\td{1.876 / 1.870}\td{13.22}\td{1.649 / 1.661}}
+\tr{\td{DN = D + \code{\verb~|facts,probes~} + shortcuts (NOT official)}\td{11.81}\td{1.657 / 1.659}\td{11.46}\td{1.787 / 1.747}\td{8.84}\td{1.378 / 1.381}}
+}
+
+\p{Reading (means of the two rounds):}
+
+\ul{
+\li{\strong{The shortcuts}: on the step-1 set -27.3 \% (\code{\verb~|Scheme~}), -33.7 \% (\code{\verb~|Galois~}), -12.1 \% (Cedar slice); on top of the default set \strong{-27.7 \%, -31.7 \% and -2.6 \%}. The default set did not shrink what they are worth on Mathlib.}
+\li{\strong{The default set} against step 1: -12.1 \%, -8.5 \%, -24.8 \%.}
+\li{\strong{\code{\verb~|m4b~}}: on A -1.3 \% / -0.3 \% / -5.4 \%, on D -1.4 \% / +0.8 \% / -0.7 \% in this window, in which A and D always ran before their \code{\verb~|m4b~} twins; the reversed-order window below gives -0.1 \% to +0.8 \%. The ticks it removes (3 to 4 \% on the Mathlib slices) are bookkeeping that costs no measurable time.}
+\li{\code{\verb~|facts~} on top of D + \code{\verb~|m4b~}: +1.2 \% / +0.5 \% / +2.1 \%: the fact records cost more than B7 saves, as M4 measured (NOTES-M4 W6).}
+}
+
+\p{Reversed-order window (\code{\verb~|work/c1/quiet-ab.sh~}: the same binary, \code{\verb~|m4b~} FIRST in every pair, three rounds; thread CPU s of the checks):}
+
+\table{
+\tr{\th{corpus}\th{A}\th{A + \code{\verb~|m4b~}}\th{mean}\th{D}\th{D + \code{\verb~|m4b~}}\th{mean}}
+\tr{\td{Cedar slice}\td{1.868 / 1.855 / 1.863}\td{1.883 / 1.852 / 1.848}\td{-0.1 \%}\td{1.415 / 1.407 / 1.420}\td{1.427 / 1.423 / 1.411}\td{+0.4 \%}}
+\tr{\td{\code{\verb~|Scheme.cone~}}\td{2.599 / 2.578 / 2.584}\td{2.595 / 2.582 / 2.593}\td{+0.1 \%}\td{2.231 / 2.239 / 2.242}\td{2.280 / 2.246 / 2.237}\td{+0.8 \%}}
+}
+
+\p{So the differences of the first window were its order: \strong{\code{\verb~|m4b~} has no effect on the CPU time of the checks} (-0.1 \% to +0.8 \% over twelve pairs of runs).}
+
+\p{By class of unit, \code{\verb~|Scheme.cone~} (the classes of the table above; thread CPU ms, mean of the two rounds):}
+
+\table{
+\tr{\th{ticks step 1 / with the shortcuts}\th{units}\th{A}\th{A + \code{\verb~|m4b~}}\th{D}\th{D + \code{\verb~|m4b~}}\th{D + \code{\verb~|facts,m4b~}}\th{N}\th{DN}}
+\tr{\td{below 1.25}\td{16,215}\td{1,093}\td{1,079}\td{845}\td{834}\td{859}\td{1,160}\td{879}}
+\tr{\td{1.25 .. 2}\td{3,222}\td{490}\td{485}\td{498}\td{491}\td{492}\td{431}\td{441}}
+\tr{\td{2 .. 4}\td{1,113}\td{330}\td{326}\td{330}\td{326}\td{327}\td{199}\td{216}}
+\tr{\td{4 .. 16}\td{464}\td{427}\td{421}\td{410}\td{404}\td{401}\td{91}\td{101}}
+\tr{\td{16 and more}\td{113}\td{268}\td{264}\td{208}\td{204}\td{204}\td{14}\td{19}}
+\tr{\td{all}\td{21,155}\td{2,608}\td{2,575}\td{2,291}\td{2,258}\td{2,285}\td{1,896}\td{1,656}}
+}
+
+\p{\strong{The units at 2 and more} (1,690 units, 39 \% of the slice's checking time): A 1,025 ms, D 948 ms, D + \code{\verb~|m4b~} 934 ms, D + \code{\verb~|facts,m4b~} 933 ms, N 305 ms, DN 336 ms. The shortcuts remove 70 \% of the CPU time of these units; the default set removes 7.5 \% of it, \code{\verb~|facts~} nothing measurable, and the 1.4 \% of \code{\verb~|m4b~} is inside the order effect of this window (the reversed-order window above): \strong{the official-exact switches recover about a tenth of the CPU time that the shortcuts save in the units concerned, all of it by the default set's cheaper evaluation}. On top of the default set the shortcuts still remove 65 \% of the CPU time of these units (27.7 \% of the slice's): what the default set gained is evaluation (the units below 1.25: -23 \%), not the comparison of proofs.}
+}
+
+\subtree{
+\title{6.2 Wall clock, eight workers, pipelined load (owner note 12)}
+
+\p{Native -O3 (\code{\verb~|work/c1/dist-n~}), \code{\verb~|-j 8 -X load=pipelined -X engine=machine -X passes=4 -X passes-mode=reload~}, the eight measurement cores (\code{\verb~|work/c1/quiet-wall.sh~}); every pass loads and checks the file; milliseconds as the launcher reports them per pass; every pass ACCEPT.}
+
+\table{
+\tr{\th{\code{\verb~|Scheme.cone~} (22,055 units)}\th{wall ms, passes 1 .. 4}\th{median of passes 2 .. 4}\th{check ms (median)}\th{process CPU ms (median)}\th{load ms (median)}}
+\tr{\td{A (step 1)}\td{563 / 559 / 532 / 550}\td{550}\td{519}\td{3,200}\td{341}}
+\tr{\td{D}\td{457 / 462 / 476 / 447}\td{462}\td{429}\td{2,850}\td{333}}
+\tr{\td{D + \code{\verb~|m4b~}}\td{454 / 461 / 466 / 454}\td{461}\td{429}\td{2,810}\td{336}}
+\tr{\td{D + \code{\verb~|facts,m4b~}}\td{461 / 447 / 456 / 448}\td{448}\td{417}\td{2,870}\td{322}}
+\tr{\td{N (NOT official)}\td{422 / 415 / 451 / 439}\td{439}\td{408}\td{2,450}\td{313}}
+\tr{\td{DN (NOT official)}\td{384 / 388 / 371 / 388}\td{388}\td{356}\td{2,180}\td{310}}
+}
+
+\table{
+\tr{\th{Cedar slice \code{\verb~|cedar-hot-ax~} (8,418 units)}\th{wall ms, passes 1 .. 4}\th{median of passes 2 .. 4}\th{check ms (median)}\th{process CPU ms (median)}\th{load ms (median)}}
+\tr{\td{A (step 1)}\td{552 / 542 / 543 / 519}\td{542}\td{514}\td{2,930}\td{270}}
+\tr{\td{D}\td{478 / 442 / 447 / 443}\td{443}\td{413}\td{2,400}\td{257}}
+\tr{\td{D + \code{\verb~|m4b~}}\td{447 / 449 / 430 / 434}\td{434}\td{405}\td{2,360}\td{257}}
+\tr{\td{D + \code{\verb~|facts,m4b~}}\td{439 / 450 / 452 / 448}\td{450}\td{423}\td{2,380}\td{250}}
+\tr{\td{N (NOT official)}\td{486 / 515 / 492 / 482}\td{492}\td{464}\td{2,620}\td{263}}
+\tr{\td{DN (NOT official)}\td{429 / 454 / 465 / 426}\td{454}\td{426}\td{2,340}\td{258}}
+}
+
+\p{Reading: with eight workers a slice of this size is bounded by its pipelined load (310 to 340 ms of the 390 to 550 ms), so the wall clock moves less than the CPU time: the shortcuts on top of D -16 \% of the wall clock (462 -> 388 ms) and -24 \% of the process CPU time on the Mathlib slice, nothing on the Cedar slice (443 -> 454 ms: inside the spread of the passes); \code{\verb~|m4b~} on top of D 462 -> 461 ms and 443 -> 434 ms: inside the spread.}
+
+\p{\strong{All of Mathlib} (\code{\verb~|work/exports/mathlib.ndjson~}, 721,845 units, every pass ACCEPT; the same binary and options, three passes per process, one process at a time, one quiet window, announced on the board at 21:21Z; \code{\verb~|work/c1/quiet-mathlib.sh~}):}
+
+\table{
+\tr{\th{all of Mathlib, 8 workers, pipelined}\th{wall s, passes 1 / 2 / 3}\th{process CPU s, passes 1 / 2 / 3}\th{peak RSS GB}}
+\tr{\td{D (the default set of 19:41Z)}\td{25.42 / 25.45 / 25.33}\td{182.3 / 184.5 / 183.8}\td{4.4}}
+\tr{\td{DN = D + \code{\verb~|facts,probes~} + the two NON-official options}\td{19.25 / 18.98 / 19.32}\td{136.5 / 136.1 / 138.3}\td{4.3}}
+\tr{\td{D + \code{\verb~|m4b~} (the last process of the window)}\td{26.54 / 26.75 / 25.60}\td{191.5 / 192.3 / 185.6}\td{4.5}}
+}
+
+\p{\strong{On all of Mathlib the two options are worth 24.6 \% of the warm wall clock with eight workers on top of the default set (25.39 -> 19.15 s, passes 2 and 3) and 25.5 \% of the process CPU time (184.2 -> 137.2 s).} That is the size of the policy in the owner's metric today. \code{\verb~|m4b~} shows no gain there either: its first two passes are 4 to 5 \% above D and its third equals D (25.60 against 25.33 s); it was the last process of a five-minute window and I have one batch, so I read it as "no gain", not as a loss of that size (the one-worker windows of 6.1 put it at 0 +- 1 \%).}
+}
+}
+
+\subtree{
+\title{7. Tests}
+
+\subtree{
+\title{7.1 The differential gate (M8, \code{\verb~|report.sh gate~}) on the clean private tree}
+
+\p{\code{\verb~|work/c1/gates.sh~}, \code{\verb~|gates2.sh~}; reports under \code{\verb~|work/c1/clean/work/status/machine-gate-*.md~} (the script was run from the clean tree as its own report root; every report JVM held one of the host's slots). SOUNDNESS = the machine accepted a declaration the reference engine rejects; COMPLETENESS = it rejected one the reference engine accepts.}
+
+\table{
+\tr{\th{Gate}\th{Switch set}\th{Corpora}\th{Engine checks}\th{SOUNDNESS}\th{COMPLETENESS}\th{Tier / convention (D0, unbounded) / audit differences}\th{Pipeline verdicts}\th{Result}}
+\tr{\td{\code{\verb~|c1-a4~}}\td{\code{\verb~|warm,gated,expect,m4b~}}\td{tutorial (141 files), bugs (34), all 230 published tests, Init, Std, reachability, the Cedar slice}\td{15,845 + 57,938 + 100,096 + 4,224 + 8,064}\td{0}\td{0}\td{0 / 0 / 0}\td{230 of 230 tests and the four corpora right; MACHINE-INCOMPLETE 0, WARM-ANOMALY 0}\td{PASS WITH DECLINES}}
+\tr{\td{\code{\verb~|c1-a4-mathlib~}}\td{the same}\td{ten Mathlib slices (\code{\verb~|Scheme~}, \code{\verb~|Sylow~}, \code{\verb~|Order.Basic~}, \code{\verb~|Fintype.Basic~}, \code{\verb~|Topology.Basic~}, \code{\verb~|Group.Basic~}, \code{\verb~|Nat.Basic~}, \code{\verb~|List.Basic~}, \code{\verb~|Galois.Basic~}, \code{\verb~|Pow.Real~})}\td{108,256}\td{0}\td{0}\td{0 / 0 / 0}\td{10 of 10 right}\td{PASS WITH DECLINES}}
+\tr{\td{\code{\verb~|c1-d4~}}\td{D + \code{\verb~|m4b~} (D = the published default set of 19:41Z), session cap 1 MiB}\td{the seven corpora as above}\td{the same}\td{0}\td{0}\td{tier 0, audits 0; \strong{convention: Std 1,725 (D0) / 1,604 (unbounded), Cedar slice 12 / 12 declarations differ} - see below}\td{230 of 230 and the four corpora right; MACHINE-INCOMPLETE 0}\td{FAIL (convention part)}}
+\tr{\td{\code{\verb~|c1-d4-again~}}\td{the same, the complete gate a second time}\td{the seven corpora}\td{the same}\td{0}\td{0}\td{tier 0, audits 0; \strong{convention: Std 1,199 / 2,780, Cedar slice 0 / 15}}\td{right}\td{FAIL (convention part)}}
+\tr{\td{\code{\verb~|c1-d4-conv~}}\td{the same}\td{Std, reachability, the Cedar slice; convention part only}\td{112,384}\td{0}\td{0}\td{convention 0}\td{-}\td{PASS WITH DECLINES}}
+\tr{\td{\code{\verb~|report.sh conv~} on Std (D128, D64, D0, unbounded)}\td{D + \code{\verb~|m4b~}; D}\td{Std}\td{100,096 each}\td{-}\td{-}\td{EQUIVALENT, both}\td{-}\td{-}}
+\tr{\td{\code{\verb~|c1-d-control~}}\td{\strong{D WITHOUT \code{\verb~|m4b~}} (the published default set on the same copy)}\td{the seven corpora}\td{the same}\td{0}\td{0}\td{tier 0, audits 0; \strong{convention: Cedar slice 73 declarations differ (D0)}}\td{right}\td{FAIL (convention part)}}
+\tr{\td{\code{\verb~|c1-d4-mathlib~}}\td{D + \code{\verb~|m4b~}}\td{four Mathlib slices (\code{\verb~|Scheme~}, \code{\verb~|Sylow~}, \code{\verb~|Order.Basic~}, \code{\verb~|Galois.Basic~}); differential + audits}\td{68,969}\td{0}\td{0}\td{audits 0}\td{-}\td{PASS WITH DECLINES}}
+\tr{\td{\code{\verb~|c1-rich4~}}\td{rich + \code{\verb~|m4b~} (with \code{\verb~|k2~}, \code{\verb~|probes~}, \code{\verb~|facts~}), cap 4 MiB}\td{the seven corpora}\td{the same}\td{0}\td{0}\td{tier 0, audits 0; \strong{convention: Std 12,073 / 1,037, reachability 44, Cedar slice 43}}\td{right}\td{FAIL (convention part)}}
+\tr{\td{\code{\verb~|c1-rich-control~}}\td{rich WITHOUT \code{\verb~|m4b~}}\td{Std, reachability, the Cedar slice; convention part only}\td{112,384}\td{0}\td{0}\td{convention 0}\td{-}\td{PASS WITH DECLINES}}
+\tr{\td{\code{\verb~|c1-rich4-mathlib~}}\td{rich + \code{\verb~|m4b~}}\td{three Mathlib slices; differential + audits}\td{42,427}\td{0}\td{0}\td{audits 0}\td{-}\td{PASS WITH DECLINES}}
+\tr{\td{\code{\verb~|report.sh conv~} (D128, D64, D0, unbounded)}\td{20 switch sets: \code{\verb~|m4b~} with each switch of D alone, D + \code{\verb~|m4b~} complete, D + \code{\verb~|m4b~} minus one switch at a time}\td{the Cedar slice}\td{8,064 each}\td{-}\td{-}\td{EQUIVALENT in all 20 (\code{\verb~|work/c1/logs/bisect.done~})}\td{-}\td{-}}
+}
+
+\p{\strong{The convention differences of the complete gate are not reproducible outside it and exist without the patch} (finding C1-F2, for M8 / M7 / the integrator). (1) The complete gate of the published default set WITHOUT \code{\verb~|m4b~}, on the same copy and harness, shows them (\code{\verb~|c1-d-control~}: 73 declarations of the Cedar slice, "the same number of call events, distributed differently over the ops"). (2) With \code{\verb~|m4b~}, the convention part run alone on the three corpora is clean (\code{\verb~|c1-d4-conv~}), and so is the dedicated report \code{\verb~|report.sh conv~}: on Std with D + \code{\verb~|m4b~} and with D (100,096 declarations, four depth bounds, EQUIVALENT), on the Cedar slice with D + \code{\verb~|m4b~} and 19 subsets. (3) Which declarations differ changes from run to run (Cedar slice: 12 / 12, then 0 / 15 with the patch, 73 / 0 without), they lie late in the file, and in every run the outcomes, the tier comparison, the audits and the pipeline are clean. So something that the parts of one gate JVM share (the code and fact store, the \code{\verb~|pchk~} bits, or the heap: a growth that \code{\verb~|heapAllows~} refuses gives a lane a fresh session) moves ticks between lanes when all parts run at once; the integrator's own gate of the default set did not show it (requests.log 19:41Z). I did not find which one. What I cannot exclude: the differences on Std appeared in both complete runs with the patch (from unit 82,426 on) and not in the one complete run without it. For the patch this means: its convention equivalence is established where the comparison is reproducible (\code{\verb~|c1-a4~} with all parts, \code{\verb~|c1-a4-mathlib~}, \code{\verb~|c1-d4-conv~}, the 22 \code{\verb~|conv~} reports), and whether the complete gate of D + \code{\verb~|m4b~} is less stable than that of D is open.}
+
+\p{The declines are those of the base tree: the eager-reduction rule (M6-F26: 164 units of Init, 203 of Std, 8 of reachability, 11 of the Cedar slice, 28 of the \code{\verb~|Scheme~} slice, ...) and, in the step-1 set under the harness heap of 5 GiB, three \code{\verb~|perf~} tests by \code{\verb~|E_MEM~} (\code{\verb~|loop-unfolded-once~}, \code{\verb~|magma-list-deep-n36~}, \code{\verb~|magma-list-pair-n21~}; they are accepted with \code{\verb~|same~}).}
+}
+
+\subtree{
+\title{7.2 Hostile exports}
+
+\p{\code{\verb~|work/c1/judge.py~}: every export through the launcher classes of the clean private tree with \code{\verb~|-X engine=machine~}; official verdicts from the owners' records (package S's manifest, S2's judged tables) and, for the new exports, from leanchecker 4.36.0 run in the arena container (\code{\verb~|work/c1/official.sh~}). Switch sets: \code{\verb~|a4~} = \code{\verb~|warm,gated,expect,m4b~}; \code{\verb~|f4~} = \code{\verb~|a4~} + \code{\verb~|facts,probes~}; \code{\verb~|rich4~} = \code{\verb~|warm,gated,expect,facts,probes,tele,code,casetrees,lazyeval,same,m2a,m3a,m7a,k2,m4b~}; \code{\verb~|all4~} = \code{\verb~|all,lazyeval,same,match,joint,k2,m2a,m3a,m7a,m4b~} with \code{\verb~|elabAt=1~}; \code{\verb~|only4~} = \code{\verb~|m4b~} alone; \code{\verb~|cap4~} = session cap 1 KiB; \code{\verb~|d0~} = host depth 0.}
+
+\table{
+\tr{\th{Set}\th{Exports (official reject / accept)}\th{Switch sets}\th{WRONG verdicts}\th{Declined by the pipeline}}
+\tr{\td{package S, the rows of its manifest}\td{327 (282 / 45)}\td{\code{\verb~|a4~}, \code{\verb~|f4~}, \code{\verb~|rich4~}, \code{\verb~|all4~}}\td{0}\td{1 (\code{\verb~|str-lit-missing-prerequisites-bad~}, by design)}}
+\tr{\td{S2's table of known exports: all of package S (351) and the arena's \code{\verb~|bad~} tests (92)}\td{443 (396 / 47)}\td{\code{\verb~|dflt4~} (the published default set of 19:41Z + \code{\verb~|m4b~}), \code{\verb~|dflt4j4~} (the same with four workers)}\td{0}\td{1 (the same)}}
+\tr{\td{S2 hand-written attacks}\td{134 (96 / 38)}\td{\code{\verb~|a4~}, \code{\verb~|f4~}, \code{\verb~|rich4~}, \code{\verb~|dflt4~}}\td{0}\td{1 (\code{\verb~|prop-mdata-domain-bad~}, as in S2's runs)}}
+\tr{\td{S2 non-literal twins}\td{134 (96 / 38)}\td{\code{\verb~|a4~}, \code{\verb~|rich4~}}\td{0}\td{1 (the same)}}
+\tr{\td{S2 second batch (\code{\verb~|Acc.rec~}, \code{\verb~|Quot~}, unit-like)}\td{11 (8 / 3)}\td{\code{\verb~|a4~}, \code{\verb~|f4~}, \code{\verb~|rich4~}, \code{\verb~|all4~}, \code{\verb~|dflt4~}, \code{\verb~|dflt4j4~}}\td{0}\td{0}}
+\tr{\td{S2 certificates}\td{15 (0 / 15)}\td{\code{\verb~|a4~}, \code{\verb~|rich4~}}\td{0}\td{0}}
+\tr{\td{S2 random exports}\td{498 (362 / 136)}\td{\code{\verb~|a4~}, \code{\verb~|rich4~}}\td{0}\td{0}}
+\tr{\td{C1's new exports}\td{41 (15 / 26)}\td{\code{\verb~|v0~}, \code{\verb~|warm,gated,expect~}, \code{\verb~|a4~}, \code{\verb~|f4~}, \code{\verb~|only4~}, \code{\verb~|rich4~}, \code{\verb~|all4~}, \code{\verb~|cap4~}, \code{\verb~|d0~}, \code{\verb~|dflt4~}, \code{\verb~|dflt4j4~}}\td{0}\td{0}}
+}
+
+\p{\strong{The 15 exports that \code{\verb~|skipargs~} / \code{\verb~|congruence~} accept and the official checker rejects} (the 13 rows of S-F1 / S-F2, \code{\verb~|open-flag-closed-bad~}, \code{\verb~|acc-rec-intro-vs-axiom~}) are REJECTED under every switch set with \code{\verb~|m4b~} that they were run under (\code{\verb~|a4~}, \code{\verb~|f4~}, \code{\verb~|rich4~}, \code{\verb~|all4~}, \code{\verb~|dflt4~}, \code{\verb~|dflt4j4~}). The control: on the same binary \code{\verb~|-Drlvm.machine.m4=congruence,skipargs~} accepts two of my 41 exports that the official checker rejects (\code{\verb~|fuse-abbrev-samehead-proofarg-bad~}, \code{\verb~|fuse-opaque-samehead-proofarg-bad~}): the suite does see the class. Raw rows: \code{\verb~|work/c1/out/judge-*.tsv~}.}
+
+\p{Fast test group of the module with the patch applied (the clean tree, \code{\verb~|mvn test -Dgroups=fast~}): exit 0.}
+
+\p{The 41 new exports (\code{\verb~|work/c1/hostile/~}, generator \code{\verb~|work/c1/gen/hostile.py~}, manifest with the official verdicts \code{\verb~|work/c1/hostile/manifest.tsv~}; my prediction of the official verdict was right for all 41):}
+
+\table{
+\tr{\th{Group}\th{Exports}\th{What must hold}}
+\tr{\td{same REGULAR definition, arguments equal only by proof irrelevance (\code{\verb~|G I = G h~}, both orders)}\td{2 ok}\td{accepted: the arguments are compared first; a fused both-unfold would reject}}
+\tr{\td{same ABBREV / OPAQUE definition, the same arguments}\td{2 bad}\td{rejected: both unfold, \code{\verb~|And.rec f I~} is 5, \code{\verb~|And.rec f h~} is stuck (accepted by \code{\verb~|congruence~})}}
+\tr{\td{unequal hints (abbrev over regular, regular over abbrev, height 2 over height 1)}\td{3 ok}\td{accepted: one side unfolds first and meets the other; unfolding both would reject}}
+\tr{\td{two regular definitions of one height}\td{1 ok, 1 bad}\td{both unfold without an argument comparison}}
+\tr{\td{projection functions with hint abbrev / opaque / regular over two structure definitions; two projection functions; constructor struct; struct equal by structure eta on one side; two axioms; arguments by unfolding}\td{9 ok, 7 bad}\td{the chain unfold, stuck projection, second \code{\verb~|whnf_core~}, restart}}
+\tr{\td{a projection function of a PROOF field applied to an argument}\td{1 ok, 1 bad twin}\td{the application is a proof: by its type, never unfolded}}
+\tr{\td{a parameter that differs as a term and is dropped by the unfolding}\td{1 ok}\td{identical after the step: the quick test}}
+\tr{\td{the shape of \code{\verb~|HMul.hMul~} over \code{\verb~|instHMul~} over \code{\verb~|Mul.mul~}, also nested}\td{2 ok, 2 bad}\td{two fused levels, the CORE memo on the second occurrence}}
+\tr{\td{Nat functions, closed}\td{1 ok, 1 bad}\td{folded, not unfolded (the shape excludes them)}}
+\tr{\td{wrappers that unfold to recursor applications / to constructor applications (also differing in a proof field)}\td{3 ok, 1 bad}\td{a result that the next state can still change goes to the complete judgment}}
+\tr{\td{a projection chain at a type of sort \code{\verb~|Sort (imax 1 0)~} whose unfolding has a type of declared sort \code{\verb~|Prop~}, once / twice in two declarations / twice in one}\td{3 ok}\td{proof irrelevance before and after the unfolding (see 8)}}
+\tr{\td{\code{\verb~|a = b~} for two axioms of \code{\verb~|Q : Sort (imax 1 0)~} and of \code{\verb~|Q.{1} : Sort (imax u 0)~}}\td{2 ok}\td{probes of the base: the official \code{\verb~|is_prop~} normalises the level (accept), and so do both engines}}
+}
+}
+}
+
+\subtree{
+\title{8. Not established}
+
+\ul{
+\li{\strong{A mechanised argument for the CORE memo's answer to a cheap query (3.1).} It lets the lazy loop continue where the official algorithm restarts \code{\verb~|is_def_eq_core~}, so the proof-irrelevance test and the \code{\verb~|Bool.true~} test of the restarted pair are not made on a repeated chain. That is exact if "is a proof" cannot change along an unfolding. In the pinned kernel it cannot, by the standard meta-theory: \code{\verb~|is_prop~} is \code{\verb~|normalizes_to_zero~} of the sort of the type (\code{\verb~|type_checker.cpp~} 379-385, not a syntactic comparison with \code{\verb~|Prop~}), the types of a term and of its reduct are convertible (subject reduction), hence their sorts carry equivalent levels. I tried to separate the two paths with a type of sort \code{\verb~|Sort (imax 1 0)~} behind a definition of declared type \code{\verb~|Prop~} (three \code{\verb~|restart-proof-*~} exports, two \code{\verb~|isprop-imax-*~} probes): the official checker treats both as propositions and every configuration agrees with it. No counter-example, no mechanised proof. This concerns the published machine with every switch set, not \code{\verb~|m4b~} (which follows the complete judgment); owners: M3 (\code{\verb~|Reduce.core~}), M4, package S.}
+\li{\strong{A proof of the meta-theorem of 4.3.} I could not prove it and found no export that refutes its restricted form (identical arguments, data only); so "a lockstep walk that is exact for propositions without a proof-inspecting reduction" is neither established nor refuted. What I can say is that it would not apply to the hot comparisons (their leaves are equal only up to proof irrelevance).}
+\li{\strong{The size of 3.4} is an estimate from counters; nothing of it was built.}
+\li{\strong{A CPU effect of \code{\verb~|m4b~} below 1 \%}: the two windows resolve about 1 \% of the checking time; the step shows none.}
+\li{\strong{All of Mathlib}: counters and CPU time are from two slices (\code{\verb~|Scheme.cone~}, \code{\verb~|Galois.Basic.cone~}) and the Cedar slice; all of Mathlib was run once, for the wall clock with eight workers (6.2), not for counters or per-unit CPU time. The shares by class of unit are those of \code{\verb~|Scheme.cone~}.}
+\li{\strong{Parallel workers}: the counters and the CPU table are one worker; four workers were run on the hostile exports (\code{\verb~|dflt4j4~}) and in the pipeline part of the gates, eight in 6.2. No export targets a race in the step (it has no state of its own: nothing to race on).}
+\li{The official kernel's own cost on these units was not measured (P8: 30 times gruszka's instructions on Mathlib).}
+}
+}
+
+\subtree{
+\title{9. Deliverables and what each owner would do with them}
+
+\table{
+\tr{\th{What}\th{Where}\th{Owner}}
+\tr{\td{patch: switch \code{\verb~|m4b~}, the fused two-sided lazy step (\code{\verb~|Conv.java~} only: \code{\verb~|convFuse~}, \code{\verb~|fuseShape~}, \code{\verb~|fuseQuick~}, frames \code{\verb~|CONV2[9..12]~}; applies to the main tree of 21:48Z, whose \code{\verb~|Conv.java~} is that of the copy)}\td{\code{\verb~|work/c1/patches/0001-fused-two-sided-lazy-step.M4.patch~}}\td{M4}}
+\tr{\td{41 hostile exports with official verdicts (leanchecker 4.36.0, arena container) and their generator}\td{\code{\verb~|work/c1/hostile/~}, \code{\verb~|manifest.tsv~}; \code{\verb~|work/c1/gen/hostile.py~}}\td{candidates for package S}}
+\tr{\td{gate reports of the clean private tree}\td{\code{\verb~|work/c1/clean/work/status/machine-gate-c1-*.md~}, \code{\verb~|machine-conv-c1b*.txt~}}\td{M8 (finding C1-F2)}}
+\tr{\td{tools: per-unit tap and sequential trace (private hooks), counters, judge, timing}\td{\code{\verb~|work/c1/run.sh~}, \code{\verb~|spans.py~}, \code{\verb~|view.py~}, \code{\verb~|sum.py~}, \code{\verb~|judge.py~}, \code{\verb~|quiet-cpu.sh~}, \code{\verb~|quiet-wall.sh~}, \code{\verb~|qtable.py~}}\td{-}}
+}
+
+\ul{
+\li{\strong{M4}: the step is the two-sided case of \code{\verb~|lstepBoth~} inlined; with the switch off \code{\verb~|convLazy~} tests one bit. It counts a fused iteration as a probe event B1 / T: it wants a counter of its own. Its value is small (section 6): take it with the next gate of the default set, not for its own sake.}
+\li{\strong{M6}: \code{\verb~|m4b~} is M4's free experiment bit (the earlier \code{\verb~|m4b~} experiment was removed, NOTES-M4 W5); no change to \code{\verb~|Op~}, \code{\verb~|Debug~} or \code{\verb~|Machine~} is needed. A name is yours to give.}
+\li{\strong{M3 / M4 / package S}: the argument of 3.1 / section 8 for the CORE memo was not written down anywhere; five exports now sit next to it.}
+\li{\strong{M8 / M7 / the integrator}: finding C1-F2 (7.1).}
+\li{\strong{The owner}: the comparison of proofs the official way is a cost of the official algorithm, not of this implementation. The decision of P8's section 0, point 5, stands as it was: official verdicts at this price, or a named profile with the two theory-sound options. This report removes the third possibility.}
+}
+}
+
+\subtree{
+\title{10. Reproduction}
+
+\pre{\verb~|
+C=work/c1
+bench/slot.sh -- $C/build.sh                        # compile the private tree (with the trace hooks) and the tap
+C1_ONLY=AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app bench/slot.sh -- $C/run.sh base scheme warm,gated,expect
+awk '/^--- first/{f=1;next} f' $C/data/trace-base-scheme.txt > $C/data/seq-base.txt
+python3 -I $C/spans.py $C/data/seq-base.txt 9 1500 210      # nested spans with their ticks
+python3 -I $C/view.py $C/data/seq-base.txt 3421 3640        # one proof's type comparison, event by event
+bench/slot.sh -- $C/batch2.sh; python3 -I $C/sum.py scheme a a4 af af4 richx rich4 nx nx4 nxr   # the counter table
+bench/slot.sh -- $C/mkclean.sh                      # the tree without the hooks, the tap, the patch per owner
+python3 -I $C/gen/hostile.py; $C/official.sh        # the new hostile exports and their official verdicts (Docker)
+bench/slot.sh -- $C/hostile-all.sh                  # S, S2 and C1 exports under the m4b switch sets
+$C/gates.sh                                         # M8's gate on the clean tree (reports: $C/clean/work/status/)
+bench/slot.sh -c ni -n 2 -- $C/nbuild.sh            # native -O3 of the clean tree: $C/dist-n
+bench/quiet.py -- $C/quiet-cpu.sh scheme 2          # thread CPU of the checks, 1 worker
+bench/quiet.py -- $C/quiet-wall.sh scheme 4         # wall clock of every pass, 8 workers, pipelined
+~}
+}

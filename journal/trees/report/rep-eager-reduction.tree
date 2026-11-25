@@ -1,0 +1,237 @@
+\title{Eager reduction on the machine (package E1)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\meta{origin}{docs/design/review/eager-reduction.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{2026-11-24. Prototype and evidence: \code{\verb~|work/e1/~} (tree \code{\verb~|work/e1/tree/rlvm-machine~}, patches \code{\verb~|work/e1/patches/~}, hostile exports \code{\verb~|work/e1/exports/~} with official verdicts in \code{\verb~|work/e1/manifest.tsv~}, living summary \code{\verb~|work/status/prof-E1.md~}). The mechanism is behind the switch \code{\verb~|eager~} (\code{\verb~|Op.SW_EAGER~}, bit 26; off = the published rule M6-F26, a declaration that enters eager reduction is declined). \strong{Status 2026-11-24T21:58Z: PUBLISHED in the main tree, switch OFF by default (section 9); sections 1 - 8 describe the prototype as it was gated before the rebase.}}
+
+\p{Ground truth everywhere: the official checker (\code{\verb~|leanchecker --from-export~}, Lean v4.36.0, in the arena Docker image, \code{\verb~|work/e1/official.sh~}), and \code{\verb~|refs/lean4/src/kernel/type_checker.cpp~} for the reading of the procedure.}
+
+\subtree{
+\title{1. Result in one page}
+
+\ul{
+\li{\strong{It can be done, and the prototype does it.} With the switch \code{\verb~|eager~} the machine keeps every declaration of Init, Std, cedar, reachability and Mathlib that enters eager reduction: machine declines 164 / 203 / 423 / 8 / 6,711 units -> 0 on all five (launcher, 8 workers; section 7), at +2.5 \% to +4.4 \% of the machine's ticks. The differential gate against the reference engine per declaration is clean (SOUNDNESS 0, COMPLETENESS 0, 0 declines) on tutorial, bugs, the Cedar slice, reachability, Init, Std, the 16 Mathlib slices (436,408 units) and all 230 published tests.}
+\li{\strong{How} (section 4): the comparison of an \code{\verb~|eagerReduce _ _~} argument is DEFERRED to the end of the declaration, so that no plain judgment ever reads an answer derived under eager reduction; the plain phase records every point where the two modes would take different branches and at the end compares the two answers of each such point (a difference declines the declaration: these are exactly the hostile pairs of S-F4 / S-F5); an eager-only event inside the comparison of the K rule declines; a session is not shared across such a declaration when it could hold a mode-dependent answer.}
+\li{\strong{How exact} (sections 5, 6): the official verdict under the machine's standing assumption that the official procedure on terms and the machine's on values ask the same queries ("official up to evaluation"). 396 hostile exports (package S's 329 and 67 new ones with official verdicts from Docker) under 33 switch sets: no wrong verdict of the mechanism; 20 rows are declined by design. One gap is not closed and not demonstrated (section 6 item 1): a K reduction whose plain and eager computation the machine both skips by value identity.}
+\li{\strong{Found on the way, not about eager reduction, and worse} (section 6 item 6; \code{\verb~|work/e1/patches/let/~}, \code{\verb~|work/e1/patches/E1-F2-F5-design.md~}): five wrong ACCEPTs of the machine as published, in v0 and / or the default set: a convertible type is used in place of the official one (the type of a let variable, of a redex's bound variable, of a lambda's bound variable under comparison, B9's comparison variable and codomain memo), and the official relation is not transitive. A gated patch exists for the let rule (E1-F1) only.}
+\li{The eager patches are relative to the main tree of 20:19:58Z + the let patch (section 8).}
+}
+}
+
+\subtree{
+\title{2. What the official kernel does}
+
+\p{\code{\verb~|infer_app~} in check mode (\code{\verb~|type_checker.cpp:173-187~}): for an argument of the form \code{\verb~|eagerReduce _ _~} (\code{\verb~|is_eager_reduce~}, a constant named \code{\verb~|eagerReduce~} applied to two arguments) the comparison \code{\verb~|is_def_eq(a_type, d_type)~} runs with \code{\verb~|m_eager_reduce = true~} (\code{\verb~|flet~}, line 180). \code{\verb~|is_def_eq~} never calls check-mode inference (\code{\verb~|infer_type~} is infer-only), so the flag is true for exactly the dynamic extent of that one comparison and comparisons under it do not nest. The flag is read in two places:}
+
+\ul{
+\li{\strong{P1}, \code{\verb~|lazy_delta_reduction~} (line 1056): \code{\verb~|if ((!has_fvar(t_n) && !has_fvar(s_n)) || m_eager_reduce)~}: try \code{\verb~|reduce_nat(t_n)~}, then \code{\verb~|reduce_nat(s_n)~}; if one succeeds with \code{\verb~|v~}, the answer is \code{\verb~|is_def_eq_core(v, s_n)~} (or \code{\verb~|(t_n, v)~}). In plain mode a pair with a free variable skips this and goes on with \code{\verb~|lazy_delta_reduction_step~};}
+\li{\strong{P2}, \code{\verb~|is_def_eq_core~} (line 1138): \code{\verb~|if ((!has_fvar(t) || m_eager_reduce) && is_constant(s, Bool.true))~}: \code{\verb~|whnf(t)~} is \code{\verb~|Bool.true~}: true; else fall through to the common path.}
+}
+
+\p{Nothing else depends on the mode. \code{\verb~|whnf~}, \code{\verb~|whnf_core~} and infer-only \code{\verb~|infer_type~} depend on it only through the K rule (\code{\verb~|inductive_reduce_rec~}: \code{\verb~|to_cnstr_when_K~} calls \code{\verb~|is_def_eq(app_type, new_type)~}): the only place where the ANSWER of a comparison changes the RESULT of a reduction. Everywhere else an answer T is used positively (a conjunction goes on, or the comparison ends with T) and F means "try the next rule", so the procedure is monotone in the answers of its sub-comparisons except through K.}
+
+\p{The caches (\code{\verb~|m_infer_type[2]~}, \code{\verb~|m_whnf_core~}, \code{\verb~|m_whnf~}, \code{\verb~|m_success~}, \code{\verb~|m_failure~}, \code{\verb~|m_unfold~}) belong to one \code{\verb~|type_checker~}, i.e. one declaration, are keyed by terms whose free variables are unique per binder instance, and are read and written in BOTH modes: \code{\verb~|quick_is_def_eq~} answers T for a pair in \code{\verb~|m_success~} (written by every \code{\verb~|is_def_eq~} that returned true, line 1205) whatever the mode; \code{\verb~|whnf_core~} looks its cache up even in the cheap modes (line 487). So the official answer for a query is not a function of the query: it depends on the mode and on what the declaration computed before, in which mode, under which binder instance.}
+
+\p{Definitions used below. A \strong{query} is a comparison \code{\verb~|(t, s)~} or a reduction / inference of a term. Its \strong{plain value} and its \strong{eager value} are what the procedure computes for it with empty caches in plain mode / under the flag. A query is \strong{mode-dependent} if the two differ. Example (package S, S-F5): \code{\verb~|X := Nat.add (G (And.intro ..)) 0~}, \code{\verb~|Y p := Nat.add (G p) 0~}, \code{\verb~|G x := And.rec (fun _ _ => 0) x~}, \code{\verb~|p~} free: plain T (no fold, same head, arguments by proof irrelevance), eager F (\code{\verb~|X~} folds to \code{\verb~|0~}, \code{\verb~|0~} against \code{\verb~|Nat.add (G p) 0~} ends at a stuck recursor).}
+
+\p{If no query that a declaration asks in BOTH modes is mode-dependent, every cache entry holds what its reader would have computed, so every official answer is the cache-free value of the mode that asks, whatever was asked first. This is the property the mechanism establishes, or declines.}
+}
+
+\subtree{
+\title{3. Why the machine's tables could not reproduce it}
+
+\p{The machine computes on hash-consed values with canonical free variables (\code{\verb~|FVAR(type, k)~}), and its memos are keyed by values and live for a session:}
+
+\table{
+\tr{\th{Table}\th{What goes wrong across the mode switch}}
+\tr{\td{pair table, POS}\td{a T of plain mode for \code{\verb~|(X, Y p)~} is read under ER, where the official kernel computes F unless ITS success cache holds the pair: same binder instance yes, another binder (the same canonical variable) or another declaration (warm session) no: S-F5, S-F4}}
+\tr{\td{pair table, FAILED}\td{the same for a same-head argument comparison that failed in one mode}}
+\tr{\td{pair table, NEG}\td{machine-only memo of a complete F; never written or read under ER (ISA 5.4), but a later plain read does not see that the official success cache got the pair under ER in between}}
+\tr{\td{\code{\verb~|WHNF~} / \code{\verb~|CORE~} memo words, \code{\verb~|TYPE~}, \code{\verb~|PROOF~} / \code{\verb~|PROPT~} flags}\td{through the K rule: \code{\verb~|Eq.rec .. (e p)~} with indices \code{\verb~|X~}, \code{\verb~|Y p~} reduces in plain mode and is stuck under ER (\code{\verb~|krule-*~})}}
+\tr{\td{canonical variables of closed scopes}\td{make the entries of one binder instance answer for another one}}
+\tr{\td{warm sessions}\td{make the entries of one declaration answer in another one}}
+\tr{\td{shared facts (\code{\verb~|PCHK~}), code blocks}\td{not affected: PCHK is not set once a declaration entered eager reduction (M5), blocks contain no comparison}}
+}
+
+\p{Designs: \strong{(A) decline} (published, M6-F26): exact, costs the reference engine on these units (section 7). \strong{(B) stamps} on pairs and on every comparison-dependent memo word, flush at the mode switch: every memo word of every record kind and three flag pairs would need a stamp and every reader a test, and it still would not say whether the official cache holds a pair (same binder instance or not). \strong{(C) a scratch session} for the eager part: needs the two operands (values with closures, frames, variables in scope) copied into another session, and shares the open question of (B). What both miss is the criterion of section 2: the machine cannot know WHICH entries the official cache holds, but it can check that it does not matter. \strong{(D), built here}: order the work so that no table read crosses the modes in the harmful direction without that check.}
+}
+
+\subtree{
+\title{4. The mechanism (switch \code{\verb~|eager~})}
+
+\ol{
+\li{\strong{Deferral.} The comparison \code{\verb~|CONV(Tt, D)~} of an \code{\verb~|eagerReduce _ _~} argument with its domain (\code{\verb~|Infer.twD~}, \code{\verb~|Code.targConv~}; \code{\verb~|Tt != D~}) is not run where it stands: \code{\verb~|Machine.erSite~} records \code{\verb~|(Tt, D)~} and the open binders and the plain phase goes on as if the answer were T. When every plain judgment of the declaration has completed (\code{\verb~|Decl.accepted~}), \code{\verb~|Machine.erDischarge~} re-opens the binders of each recorded site (binders close in LIFO order per type, so \code{\verb~|Scope.open~} gives the same variables; checked) and runs the comparison under ER. F is \code{\verb~|E_APP_MISMATCH~}, the official error of \code{\verb~|infer_app~}. Consequence: \strong{no plain judgment ever reads an answer derived under ER}; the comparisons under ER read plain answers.}
+\li{\strong{Recorded points.} The plain phase of such a declaration runs \em{aware} (\code{\verb~|Machine.erAware~}): at P1 with a free variable present it runs the two \code{\verb~|reduce_nat~} attempts as a probe, at P2 it computes \code{\verb~|whnf(t)~}. If the lifted branch would have answered, the point is recorded (\code{\verb~|Machine.erNote~}: the pair in hand, the folded literal, which branch, the open binders; once per pair, pair status bit \code{\verb~|NOTED~}) and the plain branch goes on. A probe only writes memos that are true in every mode (\code{\verb~|WHNF~} of an argument). At the end, before the deferred comparisons: the plain value of every recorded pair (\code{\verb~|CONV~} in plain mode), then, under ER, the value of its lifted branch (\code{\verb~|CONV(v, sn)~} / \code{\verb~|CONV(tn, v)~} / T). \strong{A difference declines the declaration} (\code{\verb~|Machine.erSensitive~}, UNSUPPORTED_INPUT, statistic \code{\verb~|machine.eager.declined.plainFold / plainBoolTrue~}): the official answer for that pair under ER would depend on whether the official cache holds it. These are exactly the pairs of S-F4 / S-F5.}
+\li{\strong{K rule.} While the comparison of the K rule runs under ER, \code{\verb~|Machine.ER~} carries a nesting count (\code{\verb~|Op.ER_K~}, \code{\verb~|Reduce.k_iota3 / k_iota4~}; a cut or a failure restores the saved value as before). An eager-only event (P1 or P2 lifted for an operand with a free variable, the lifted branch answers) inside it declines the declaration (\code{\verb~|machine.eager.declined.kFold / kBoolTrue~}): the result of a REDUCTION would depend on the mode.}
+\li{\strong{Sessions.} The session flag \code{\verb~|Machine.erSens~} (cleared by \code{\verb~|reset~}) is set by a cheap, over-approximate test on the plain path of every declaration: P1 with a free variable and a side that \code{\verb~|reduce_nat~} could fold (a Nat operation or \code{\verb~|Nat.succ~} cell whose arguments are literals or not yet weak-head normal), P2 with a free variable. While it is false every answer the session holds is the same in both modes. A declaration that reaches its first \code{\verb~|eagerReduce~} argument with the flag set is run again by the facade in a fresh session, aware from the start (\code{\verb~|Machine.erRestart~}, statistic \code{\verb~|machine.eager.restarts~}); with the flag clear it becomes aware on the spot. After a declaration that recorded a point or saw an eager-only event the session is forgotten (\code{\verb~|machine.eager.forgets~}), so nothing derived under such an event is seen by a later declaration.}
+\li{Unchanged: strict mode and a bare machine (tests of the judgments) keep the old path; with the switch off the behaviour is the published one (\code{\verb~|Machine.erStop~} is what \code{\verb~|erSeen && erDeclines~} was).}
+}
+
+\p{Statistics (\code{\verb~|machine.eager.*~}): \code{\verb~|kept~} (units that entered eager reduction and were decided by the machine), \code{\verb~|restarts~}, \code{\verb~|forgets~}, \code{\verb~|sites~}, \code{\verb~|notes~}, \code{\verb~|events~}, \code{\verb~|declined.*~}; \code{\verb~|machine.eagerDeclines~} counts every decline for eager reduction as before.}
+}
+
+\subtree{
+\title{5. Why every table read is valid in the mode that reads it}
+
+\p{Assume a declaration that the machine keeps (no decline). Write PLAIN for the judgments before \code{\verb~|erDischarge~} (step 1 of it included) and EAGER for the comparisons under ER.}
+
+\ul{
+\li{\strong{PLAIN reads only plain-derived entries.} By deferral nothing was derived under ER when PLAIN runs. Entries of earlier declarations are in the session only if \code{\verb~|erSens~} was false at the first site (else the run was repeated in a fresh session): none of them passed a point where the modes differ, so they are plain values and eager values at once. The machine's plain procedure on plain-derived tables is the published v0 argument (the plain procedure is a function of the pair).}
+\li{\strong{EAGER reads plain-derived entries whose two values agree.} A plain-derived entry (POS, NEG is not read under ER, FAILED, a \code{\verb~|WHNF~} / \code{\verb~|CORE~} / \code{\verb~|TYPE~} word, a \code{\verb~|PROOF~} flag) belongs to a query whose plain computation either passed no point where the modes differ, then its eager computation is the same computation; or passed recorded points. Take the first one on its path: the plain computation and the eager computation of the enclosing query are identical up to it, and from it the eager one returns the value of the lifted branch while the plain one returns the plain value of the pair in hand (a restart of \code{\verb~|is_def_eq_core~} on the pair in hand does what the loop goes on to do: the pair is \code{\verb~|whnf_core~}-normal, proof irrelevance was already undecided). Step 2 checked that the two agree for every recorded pair. The check itself reads plain entries of other recorded pairs; by induction on the depth of the cache-free eager computation (finite, or the official kernel does not terminate either) all of them are right once all checks passed. A reduction that went through K did so through a comparison, which is a query like any other. So every plain-derived entry EAGER can read holds the eager value.}
+\li{\strong{EAGER reads eager-derived entries} of the same declaration: the eager procedure on eager-derived tables is a function of the pair (the same argument as for plain mode; canonical variables rename consistently).}
+\li{\strong{The official run} asks the plain queries in plain mode and the deferred comparisons under ER, interleaved, with caches that cross the modes. A plain query can meet an eager-derived entry only for a query that it also asks itself; if that query is mode-dependent it has a recorded point with two different values and the machine declined; otherwise the entry holds the plain value. An eager query that meets a plain-derived entry: the same with the roles exchanged. So the official answers are the cache-free values, which is what the machine computed, in another order. F of a deferred comparison rejects in both orders (the official kernel at the site, the machine at the end; a plain error in between rejects in both).}
+\li{\strong{After the declaration} the session is forgotten if anything eager-only happened; otherwise every entry it wrote is a plain value.}
+}
+
+\p{What this argument assumes is listed in section 6.}
+}
+
+\subtree{
+\title{6. Assumptions, and what is not covered}
+
+\ol{
+\li{\p{\strong{The evaluation abstraction} (inherited from v0): the official procedure on terms and the machine's on values ask the same queries up to instantiation, beta and zeta; two terms with one value are answered alike. In plain mode alone this is harmless where it is wrong in detail (the plain procedure does not look at its history). Across the modes it leaves one gap that the machine cannot close by itself: \strong{a computation the official kernel performs and the machine skips because the two operands are one value} (\code{\verb~|a == b~}, or \code{\verb~|Tt == D~} at a site). The official kernel compares two beta-variants by reducing both, and what it caches on the way (a \code{\verb~|whnf_core~} result that went through K, the pairs of the K comparison) is plain-derived or eager-derived knowledge the machine never sees.}
+\ul{
+\li{Witnessed half, covered: \code{\verb~|e1-skip-krule-plain-redex-then-eager-ok~} (the K reduction of \code{\verb~|R p~} happens in plain mode only inside the comparison of \code{\verb~|R p~} with \code{\verb~|(fun z => z) (R p)~}; then \code{\verb~|R p = 7~} is needed under ER; the official kernel reads 7 from its WHNF cache and ACCEPTS): the machine reaches the K comparison under ER, an eager-only event occurs inside it, rule 3 declines. Without rule 3 the machine would reject (K stuck). \code{\verb~|e1-skip-identity-both-bad~} (official REJECT: \code{\verb~|R p~} is 7 from the cache, the beta-variant \code{\verb~|R' p~} is computed under ER and stays stuck) is declined by the same rule; without it the machine would ACCEPT (both stuck, compared argument by argument). Rule 3 is therefore not optional.}
+\li{Not covered, not demonstrated: both the plain and the eager computation of such a recursor are skipped by value identity (the eager comparison is between two values that are one record although the official terms differ in a K recursor's index or major premise). I could not produce such an export (in \code{\verb~|e1-skip-identity-both-bad~} the two forms are different records because their arguments are different suspensions) and I cannot exclude one: identity depends on when a suspension was forced. Design (B) and the reviewer's "unique variables in a session of its own" have the same gap; only an engine on terms (the reference engine) is free of it.}
+}}
+\li{\strong{Fold and unfold agree} for the Nat operations of the prelude: used nowhere in the argument (a recorded point whose two values differ declines), but it is why real declarations are kept.}
+\li{\code{\verb~|facts~} (not in the default set): static PROOF reads manifest sorts only; not analysed further. The hostile matrix runs with \code{\verb~|facts~} and \code{\verb~|all~}. \code{\verb~|k2~} is not used under ER (\code{\verb~|Rules~}), as before.}
+\li{A declaration is declined although the official kernel decides it when (a) a recorded pair has two values but is never asked under ER (\code{\verb~|e1-bad-pair-plain-only-with-other-eager-ok~}), (b) rule 3 fires although the K comparison has one value (\code{\verb~|e1-krule-benign-eager-alone-ok~}), (c) more than 4096 points are recorded.}
+\li{Resource behaviour: a probe computes \code{\verb~|whnf~} of an argument that the official plain procedure does not compute at that point; a deferred comparison runs after plain work that the official kernel would not have reached had the comparison failed. Both can only turn into a decline (budget), never into a verdict.}
+\li{\strong{Findings E1-F1 .. E1-F5 (independent of this work, in the published default engine):} five wrong ACCEPTs, all of one pattern: a type that is CONVERTIBLE with the official one is used in its place, and the official relation is not transitive (package S's triple). F1: a \code{\verb~|let~} variable gets the type of its value (v0, default; gated patch \code{\verb~|work/e1/patches/let/~}). F2: the bound variable of a beta redex whose type is inferred again without checking gets the type of the argument (v0, default). F3: a lambda's bound variable gets the domain of the Pi it is compared with (v0; through the driver's strict re-check also the default pipeline). F4: under \code{\verb~|expect~} the body of a lambda is compared with the expected codomain under a variable of the lambda's own domain. F5: under \code{\verb~|expect~} the expected codomain is stored as the lambda's codomain. Reproducers with official verdicts: \code{\verb~|work/e1/exports/e1-app-type-*~}, \code{\verb~|e1-let-*~}, \code{\verb~|e1-lam-*~}, \code{\verb~|e1-redex-*~}, \code{\verb~|e1-expect-*~} (rows of the S manifest: the let rows strict, F2 .. F5 with the known-finding mark \code{\verb~|bind~}); board lines of 20:10Z - 20:35Z; what I think is needed: \code{\verb~|work/e1/patches/E1-F2-F5-design.md~}. For this document they mean: the machine's plain phase can ask queries the official kernel does not ask (and the reverse), so "official up to evaluation" holds for the eager mechanism only as far as it holds for the plain machine.}
+}
+}
+
+\subtree{
+\title{7. What was tested, and the numbers}
+
+\p{All runs on trees under \code{\verb~|work/e1/~} (never the main tree); JVM (C2), loaded host unless said otherwise. The gated tree is \code{\verb~|work/e1/frozen/f7~} = the main tree of 20:19:58Z + the let patch + the eager patches (\code{\verb~|work/e1/tree2~}).}
+
+\subtree{
+\title{7.1 Gates}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{fast test group of the module (\code{\verb~|work/e1/out/test-fast-f7.out~}; incl. \code{\verb~|SHostileEagerTest~}, 3 tests)}\td{415 tests, 0 failures, 3 skipped}}
+\tr{\td{differential, machine \code{\verb~|default,eager~} against the reference engine per declaration (M8's harness; reports \code{\verb~|work/e1/root~\verb~|/work/status/machine-diff-*-f7.txt~})}\td{tutorial 395 of 395, bugs 1,428 of 1,428 (was 1,427: \code{\verb~|rec-of-subst-prop~} unit 128 is REJECTED by the machine itself now), Cedar slice 8,418 of 8,418, reachability 4,413 of 4,413, Init 58,547 of 58,547, Std 101,146 of 101,146: \strong{DIFF-CLEAN, machine declined 0, SOUNDNESS 0, COMPLETENESS 0}; the 16 Mathlib slices \code{\verb~|work/exports/slices/good/Mathlib.*.ndjson~} 436,408 of 436,408 units, 16 files clean; all 230 published tests 17,493 of 17,493, 230 files clean (without the switch: 5 declines in 2 files)}}
+\tr{\td{the same with \code{\verb~|warm,gated,expect,eager~} (tree \code{\verb~|f5~}, before the let merge)}\td{tutorial, bugs, Cedar slice: DIFF-CLEAN, 0 declines}}
+\tr{\td{the same with the switch off (\code{\verb~|default~}, tree \code{\verb~|f5~}): the published rule}\td{declines 11 / 8 / 164 / 203 on Cedar slice / reachability / Init / Std, nothing else differs}}
+\tr{\td{hostile exports, in-process (\code{\verb~|E1Hostile~} = M8's \code{\verb~|Diff.compare~} per export: loader, reference engine, one machine lane), tree \code{\verb~|f7~}: package S's 329 rows + 67 rows \code{\verb~|e1-*~}, under every switch set of \code{\verb~|SHostileSlowTest~} with \code{\verb~|,eager~} and \code{\verb~|default,eager~} (33 sets; \code{\verb~|work/e1/out/hostile-f7.txt~})}\td{13,068 judgments. Flagged: 150, all on the eight rows of E1-F2 .. E1-F5 (mark \code{\verb~|bind~}; they are flagged without the switch too). No wrong verdict on a row that enters eager reduction. Machine declines: 21 per set (20 rows with the note \code{\verb~|eager-hard~}, 1 \code{\verb~|str-lit-missing-prerequisites-bad~})}}
+\tr{\td{the same on the tree before the let merge (\code{\verb~|f4~}), 372 rows: \code{\verb~|default,eager~}, \code{\verb~|eager~}, \code{\verb~|all,eager~}; with \code{\verb~|-Drlvm.machine.elabAt=1~} (blocks compiled at first use, \code{\verb~|Code.targConv~}): \code{\verb~|facts,tele,code,casetrees,eager~}, \code{\verb~|all,eager~}, \code{\verb~|default,eager~}, \code{\verb~|default,tele,eager~}; with host depth 0: \code{\verb~|eager~}, \code{\verb~|default,eager~}, \code{\verb~|all,eager~}}\td{in every lane: flagged only the two \code{\verb~|let~} rows (E1-F1, fixed since)}}
+\tr{\td{package S's five rows of S-F4 / S-F5 (\code{\verb~|warm-pos-across-declarations-eager-bad~}, \code{\verb~|krule-eager-alone-bad~}, \code{\verb~|krule-memo-across-declarations-eager-bad~}, \code{\verb~|canon-fvar-pos-across-binders-eager-bad~}, \code{\verb~|krule-memo-across-binders-eager-bad~})}\td{no wrong verdict under any set; all five are DECLINED by the new rules (a recorded point with two answers: their beta-redex form makes the machine ask \code{\verb~|X = Y p~} in plain mode; or the K rule), the reference engine gives the official REJECT}}
+}
+
+\p{Of the 67 new rows (official: 29 accept, 38 reject; every expectation of mine was confirmed by leanchecker): 32 do not enter eager reduction (the E1-F1 .. F5 family and twins); 35 do: 26 are DECIDED by the machine with the official verdict under \code{\verb~|default,eager~} (deferred comparisons in every order with plain ones, binder scopes: \code{\verb~|e1-scope-capture-bad~} would be accepted by a deferred comparison that ran with its binder closed; nested \code{\verb~|eagerReduce~}; a site in the type of an axiom; let variables; the Bool.true test; sessions across declarations; the K rule after a plain reduction), 9 are declined by design (5 a recorded point with two answers, 4 the K rule). The S manifest carries them with the notes \code{\verb~|eager-decline~} (enters eager reduction) and \code{\verb~|eager-hard~} (declined also with the switch).}
+}
+
+\subtree{
+\title{7.2 Declines before / after (launcher \code{\verb~|-X engine=machine~}, 8 workers, \code{\verb~|-Xmx6g~}; \code{\verb~|work/e1/out/counts.tsv~})}
+
+\p{Distribution \code{\verb~|work/e1/dist-b~} = INT6's \code{\verb~|work/int6/dist-b~} with the machine jar of the prototype (tree \code{\verb~|f4~}); one binary, switch off (\code{\verb~|default~}) and on (\code{\verb~|default,eager~}). "Declined" counts the driver's cold retry too (2 per unit).}
+
+\table{
+\tr{\th{Corpus}\th{declined, off}\th{units}\th{declined, on}\th{kept}\th{repeated runs}\th{sessions forgotten}\th{deferred comparisons}\th{recorded points}\th{eager-only events}\th{machine ticks off -> on}}
+\tr{\td{Init}\td{328}\td{164}\td{\strong{0}}\td{158}\td{132}\td{11}\td{729}\td{131}\td{6}\td{39.47 M -> 40.44 M (+2.5 \%)}}
+\tr{\td{Std}\td{406}\td{203}\td{\strong{0}}\td{200}\td{168}\td{32}\td{853}\td{347}\td{6}\td{64.77 M -> 67.24 M (+3.8 \%)}}
+\tr{\td{cedar (whole export)}\td{846}\td{423}\td{\strong{0}}\td{419}\td{275}\td{53}\td{3,706}\td{573}\td{20}\td{84.74 M -> 88.22 M (+4.1 \%)}}
+\tr{\td{reachability}\td{16}\td{8}\td{\strong{0}}\td{8}\td{5}\td{3}\td{37}\td{15}\td{0}\td{9.16 M -> 9.15 M}}
+\tr{\td{Mathlib}\td{13,422}\td{6,711}\td{\strong{0}}\td{6,629}\td{1,999}\td{162}\td{124,364}\td{1,383}\td{69}\td{1,249.2 M -> 1,303.8 M (+4.4 \%)}}
+}
+
+\p{Verdict ACCEPT, \code{\verb~|driver.declined~} 0, \code{\verb~|machineIncomplete~} 0, \code{\verb~|warmAnomalies~} 0 in all ten runs; \code{\verb~|machine.eager.declined.*~} (the new rules) 0 everywhere: on these corpora no recorded point has two answers and no eager-only event falls into a K comparison. "kept" is smaller than "units" where a warm session answers a closed sub-term that was checked, with its deferred comparison, by an earlier declaration of the session (6 units on Init).}
+}
+
+\subtree{
+\title{7.3 The formerly declined units: machine against reference engine}
+
+\p{In-process (M8's harness, one pass, thread CPU clock, loaded host: orientation, not a timing; \code{\verb~|work/e1/units.py~}, logs \code{\verb~|work/e1/out/units-*-{on,off}.tsv~}, \code{\verb~|ref-*-on.tsv~}; tree \code{\verb~|f5~}):}
+
+\table{
+\tr{\th{Corpus}\th{units}\th{machine ticks, on}\th{machine thread CPU, on}\th{reference thread CPU, same units}\th{machine CPU before its decline, off}}
+\tr{\td{Cedar slice}\td{11}\td{1.67 M}\td{0.42 s}\td{0.70 s}\td{0.08 s}}
+\tr{\td{reachability}\td{8}\td{26 k}\td{0.012 s}\td{0.015 s}\td{0.006 s}}
+\tr{\td{Init}\td{164}\td{0.86 M}\td{0.15 s}\td{0.13 s}\td{0.03 s}}
+\tr{\td{Std}\td{203}\td{3.08 M}\td{0.48 s}\td{1.62 s}\td{0.16 s}}
+}
+
+\p{Std unit 23249 (\code{\verb~|Std.Tactic.BVDecide.BVExpr.bitblast.goCache_Inv_of_Inv._mutual~}, the unit that bounds the 8-worker wall clock of Std): reference 1,100 ms, machine 154 ms (1.10 M ticks, both runs of the repeated check included); unit 22250: 202 ms -> 117 ms. Most of these units are checked twice (the run is repeated in a fresh session: 133 of 158 on Init, 167 of 199 on Std).}
+}
+
+\subtree{
+\title{7.4 Warm wall clock, 8 workers}
+
+\p{One \src{bench/quiet.py} window (2026-11-24T20:57Z - 21:00Z; \code{\verb~|work/e1/warm-batch.sh~}: \code{\verb~|bench/warm.sh --no-quiet~} inside the window, so the rows of \code{\verb~|work/e1/out/warm.tsv~}, label \code{\verb~|e1q ..~}, say "loaded" although they were taken on the quiet cores). JVM launcher, \code{\verb~|-X engine=machine~}, 8 workers, \code{\verb~|-Xmx6g~}, 10 check-only passes (\code{\verb~|recheck~}) per process, distribution \code{\verb~|work/e1/dist-d~} (INT6's \code{\verb~|dist-b~} with the machine jar of the gated tree \code{\verb~|f7~}), the switch off and on alternating, two rounds. Seconds; best and median of passes 2..10; CPU of the median pass:}
+
+\table{
+\tr{\th{Corpus}\th{Round}\th{\code{\verb~|default~} best / median / CPU}\th{\code{\verb~|default,eager~} best / median / CPU}\th{median, on against off}}
+\tr{\td{Std}\td{1}\td{0.89 / 0.93 / 6.80}\td{0.79 / 0.83 / 6.36}\td{-11 \%}}
+\tr{\td{Std}\td{2}\td{0.96 / 1.00 / 7.44}\td{0.75 / 0.78 / 6.03}\td{-22 \%}}
+\tr{\td{cedar}\td{1}\td{1.21 / 1.22 / 9.23}\td{1.09 / 1.13 / 8.72}\td{-7 \%}}
+\tr{\td{cedar}\td{2}\td{1.21 / 1.24 / 9.39}\td{1.10 / 1.12 / 8.90}\td{-10 \%}}
+}
+
+\p{All eight processes ACCEPT. Walls of every pass are in the TSV (Std, round 1, off: 4.28 1.28 1.04 0.97 0.94 0.93 0.91 0.90 0.89 0.89; on: 5.62 1.26 0.96 0.90 0.82 0.81 0.81 0.84 0.79 0.83). Two rounds only: the two Std rounds differ by 8 \% with the switch off, so the Std gain is between a tenth and a fifth; cedar's two rounds agree within 2 \%. Not measured: Mathlib, native image, 1 worker, reload mode with the switch on.}
+}
+
+\subtree{
+\title{7.5 Measured and rejected}
+
+\p{Running EVERY declaration aware from its start while the session is clean (\code{\verb~|-Drlvm.machine.eager.early=true~}, left in the patch as an experiment, off): repeated runs fall (Init 129 -> 25, Std 167 -> 28, cedar 280 -> 91) but the probes run in all declarations: machine ticks x 4.0 / x 4.6 / x 2.7 and 2 / 10 / 7 new declines (launcher, 8 workers, \code{\verb~|work/e1/out/early-run1.log~}). NO-GO; the cheap session flag with a repeated run stays.}
+}
+
+\subtree{
+\title{7.6 Not done}
+
+\ul{
+\li{Native image; instruction counts; mutant corpora with the switch; 4 workers through the launcher on the hostile exports; \code{\verb~|facts~} beyond the hostile matrix.}
+\li{No export forces a cut (budget exhaustion inside a TRY) while points are recorded.}
+\li{The gap of section 6 item 1 is argued, not demonstrated.}
+\li{Timing of Mathlib (one counts run per switch position only, cold JVM, loaded host: 90 s / 82 s process wall, not evidence) and of the native image.}
+}
+}
+}
+
+\subtree{
+\title{8. Patches}
+
+\p{\code{\verb~|work/e1/patches/~} (apply from the repository root with \code{\verb~|patch -p1~}):}
+
+\table{
+\tr{\th{File}\th{Owner}\th{What}}
+\tr{\td{\code{\verb~|let/LET-M1.patch~}, \code{\verb~|let/LET-M5.patch~}, \code{\verb~|let/LET-S.patch~}, \code{\verb~|let/S-resources/*.ndjson.gz~} (67), \code{\verb~|let/README.md~}}\td{M1, M5, S}\td{finding E1-F1 (the let variable carries its declared type); the 67 rows \code{\verb~|e1-*~} of the S manifest with the official verdicts, the generator \code{\verb~|gen/batchE.py~}, the known-finding mark \code{\verb~|bind~}. Base: the main tree as copied at 20:19:58Z. Gated separately (README)}}
+\tr{\td{\code{\verb~|eager/E1-M6.patch~}}\td{M6}\td{\code{\verb~|Op.SW_EAGER~} (bit 26, name \code{\verb~|eager~}), \code{\verb~|Op.ER_K~}, \code{\verb~|Layout.NOTED~}, \code{\verb~|Debug~} (switch name), \code{\verb~|Machine~} (the mechanism: \code{\verb~|erSite~}, \code{\verb~|erNote~}, \code{\verb~|erDischarge~}, \code{\verb~|erSensitive~}, state), \code{\verb~|MachineSession~} (repeated run, forgetting, statistics, the measurement aid \code{\verb~|-Drlvm.machine.eager.units~}), \code{\verb~|MachineEngine~} (statistics \code{\verb~|machine.eager.*~})}}
+\tr{\td{\code{\verb~|eager/E1-M4.patch~}}\td{M4}\td{\code{\verb~|Conv~}: the two points P1 / P2 (\code{\verb~|lazydFold~}, \code{\verb~|convBoolTrue~}): probe in an aware run, session flag otherwise; \code{\verb~|folded~}, \code{\verb~|boolTrue~}, \code{\verb~|modeEvent~}, \code{\verb~|foldCandidate~}}}
+\tr{\td{\code{\verb~|eager/E1-M5.patch~}}\td{M5}\td{\code{\verb~|Infer.twD~}: the site; \code{\verb~|Decl.accepted~}: \code{\verb~|erDischarge~}}}
+\tr{\td{\code{\verb~|eager/E1-M7.patch~}}\td{M7}\td{\code{\verb~|Code.targConv~}: the site}}
+\tr{\td{\code{\verb~|eager/E1-M3.patch~}}\td{M3}\td{\code{\verb~|Reduce.k_iota3 / k_iota4~}: the K nesting count in \code{\verb~|Machine.ER~} under ER}}
+\tr{\td{\code{\verb~|eager/E1-S.patch~}}\td{S}\td{\code{\verb~|SHostileEagerTest~} (fast group), six \code{\verb~|,eager~} sets in \code{\verb~|SHostileSlowTest~}, the note \code{\verb~|eager-hard~} on 20 manifest rows}}
+\tr{\td{\code{\verb~|E1-F2-F5-design.md~}}\td{-}\td{findings E1-F2 .. E1-F5: reproducers, cause, what I think is needed (no patch)}}
+}
+
+\p{The eager patches are relative to the main tree + the let patch (\code{\verb~|work/e1/let-tree~}); together with it they reproduce \code{\verb~|work/e1/tree2/rlvm-machine~}, except my harness change in \code{\verb~|M8Harness.java~} (the reference engine's per-unit CPU log) and my tool \code{\verb~|E1Hostile.java~}, which are not delivered. With the switch off nothing changes but the name of one condition (\code{\verb~|Machine.erStop~} is what \code{\verb~|erSeen && erDeclines~} was); the switch is not part of \code{\verb~|all~} or of the default set. To make it the default: \code{\verb~|Op.SW_DEFAULT |= SW_EAGER~} after the owners' gates (mutants, native image, timing).}
+}
+
+\subtree{
+\title{9. Publication in the main tree (2026-11-24T21:57:52Z, machine jar \code{\verb~|33914d3530cf~})}
+
+\p{The patches were rebased (three-way merge, one conflict in \code{\verb~|Reduce.k_iota3~}) on the main tree that has the fix of the wrong ACCEPTs E1-F1 .. E1-F6 (publication of 21:26:43Z, jar \code{\verb~|5945b6568177~}; \src{rlvm-machine/NOTES-M5.md}) and published as a publication of their own: \code{\verb~|Op~}, \code{\verb~|Debug~}, \code{\verb~|Layout~}, \code{\verb~|Machine~}, \code{\verb~|MachineSession~}, \code{\verb~|MachineEngine~}, \code{\verb~|Conv~}, \code{\verb~|Infer~} (\code{\verb~|twD~}), \code{\verb~|Code~} (\code{\verb~|targConv~}), \code{\verb~|Decl~}, \code{\verb~|Reduce~}, \code{\verb~|SWITCHES.md~}; tests \code{\verb~|SHostileEagerTest~} (new, fast group), \code{\verb~|SHostileSlowTest~} (six eager sets), \code{\verb~|M8Harness~}, the note \code{\verb~|eager-hard~} in \code{\verb~|s/manifest.tsv~}. The switch is OFF by default: with the default set the differential is what it was (Std 204, Cedar slice 11, Init 164 declines).}
+
+\p{Gate of the published sources (frozen copy \code{\verb~|work/e1/frozen/e10~}), switch set \code{\verb~|default,eager~}, per declaration against the reference engine: tutorial 395, bugs 1,428, Cedar slice 8,418, reachability 4,413, Init 58,547, all 230 tests 17,493: DIFF-CLEAN, 0 declines; Std 101,145 of 101,146 and the 16 Mathlib slices 436,404 of 436,408 (the five units are declined by the E1-F6 rule of the fix, not by eager reduction); SOUNDNESS 0, COMPLETENESS 0. Fast group 415 tests, 0 failures. Hostile matrix, 33 switch sets (each with \code{\verb~|eager~}) x 419 rows = 13,827 judgments: the only flagged rows are the three rows of the open finding E1-F7, which is not about eager reduction (below); 21 or 22 rows per set are declined by design.}
+
+\p{What the rebase changed: the two rows \code{\verb~|warm-eager-pair-alone-bad~} and \code{\verb~|warm-pos-across-declarations-eager-bad~} are no longer declined (\code{\verb~|eager-hard~} removed, 18 rows keep it). Their eager argument sits in a beta-redex; before the fix the machine typed the redex body under the ARGUMENT's type and so ran one comparison in the plain phase that the official kernel never runs - the recorded point with two answers. With the redex typed by its binder's declared domain (E1-F2) that comparison is gone and the deferred eager comparison fails as it does officially: the machine rejects.}
+
+\p{Open and NOT closed by this work (board 21:3xZ / 21:4xZ, \code{\verb~|NOTES-M5.md~} "E1-F7"): the machine still accepts three exports the official checker rejects (\code{\verb~|e1-sib-proj-applied-let-pi-bad~}, \code{\verb~|e1-sib-proj-redex-pi-bad~}, \code{\verb~|e1-sib-krule-major-redex-bad~}; rows of the S manifest with the mark \code{\verb~|bind~}). The official kernel infers the type of a term it has not reduced (the raw major premise of the K rule, the struct of a stuck projection) through the declared domain of an uncontracted redex or the declared type of a let variable; the machine's type of the VALUE is only convertible with it. This is independent of the switch \code{\verb~|eager~}, and it is the reason (with S3-F1 / S3-F3) why the machine's priority stays 10.}
+
+\p{Later the same day (22:25Z) the owner chose the "practical" policy (\src{docs/design/OWNER-NOTES.md} note 13): the three exports above are kind T (their statement is \code{\verb~|True~}) and tolerated; they are rows with the kind mark \code{\verb~|T~} in the S manifest and the class is recorded in \src{docs/design/review/official-divergence.md}.}
+
+\p{Numbers after the publication (jar \code{\verb~|33914d3530cf~}; 8 workers, check-only passes, \src{bench/quiet.py} windows 22:17 - 22:48Z, best / median of the later passes, \code{\verb~|default~} -> \code{\verb~|default,eager~}): native image Std 1.16 / 1.19 -> 1.02 / 1.03 s and 1.17 / 1.22 -> 1.03 / 1.04 s; cedar 1.56 / 1.59 -> 1.40 / 1.42 s and 1.56 / 1.58 -> 1.39 / 1.42 s; mathlib (one row, 3 passes) 23.92 -> 21.07 s; JVM Std 1.00 / 1.16 -> 0.82 / 0.94 s and 0.97 / 1.02 -> 0.89 / 0.99 s; cedar 1.33 / 1.65 -> 1.15 / 1.18 s and 1.25 / 1.28 -> 1.16 / 1.19 s; mathlib 20.07 -> 19.53 s. On the main tree: mutants 17,775 x (v0, default, \code{\verb~|default,eager~}): SOUNDNESS 0, COMPLETENESS 0, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0; M8's gate with \code{\verb~|default,eager~}: differential SOUNDNESS 0, COMPLETENESS 0; its tier part reported the 391 units that the switch decides and the generic tier declines as differences until the harness was taught to count them (publication of 22:41Z).}
+}
