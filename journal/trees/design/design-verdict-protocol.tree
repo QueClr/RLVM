@@ -7,7 +7,7 @@
 \tag{soundness}
 \meta{status}{implemented}
 \meta{created}{2026-11-23}
-\meta{updated}{2026-11-24}
+\meta{updated}{2026-11-25}
 \meta{origin}{docs/design/ARCHITECTURE.md}
 \import{base-macros}
 
@@ -45,7 +45,7 @@
 \subtree[design-verdict-protocol-recheck]{
 \title{The re-check protocol}
 
-\p{An accept of the primary engine is final and is never re-checked: it is the hot path, and its soundness is the engine's own obligation, shown by [the gate](design-gate) and attacked by [the adversarial reviews](design-adversarial-review). Everything else is checked again, at once, on the worker's own thread, in a freshly reset session with a cold budget.}
+\p{An accept of the primary engine is final and is never re-checked: it is the hot path, and its soundness is the engine's own obligation, shown by [the gate](design-gate) and attacked by [the adversarial reviews](design-adversarial-review). Since 2026-11-25 it has a second case, the accept of a repeat on the word of its original, see the next section. Everything else is checked again, at once, on the worker's own thread, in a freshly reset session with a cold budget.}
 
 \table{
 \tr{\th{Warm outcome}\th{Stage}\th{Final status}}
@@ -59,6 +59,16 @@
 }
 
 \p{Accepting on the reference engine's word after the primary engine rejected is sound: [the reference engine](design-reference-engine) is a complete checker in its own right. This step is the rule "shortcuts fail open into the complete official procedure" at the granularity of a declaration, and it is what gives item (c) of [the exactness contract](design-exactness-contract): everything the official checker accepts is accepted. When the reference engine is itself the primary engine, one fresh cold run decides. Structural rejections and rejections of the environment pass need no confirmation. A WARM-ANOMALY fails a test build. The gate of an engine under test runs with the fallback off, so that the engine must accept every unit by itself.}
+}
+
+\subtree[design-verdict-protocol-repeats]{
+\title{The accept of a repeat}
+
+\p{Since 2026-11-25 a definition, theorem or opaque that repeats an earlier unit word for word (the same kind, the same list of universe-parameter names, the same reducibility hint, and the \em{same type and value records} of the export) is reported accepted without a check when its original is ACCEPTED on the verdict board; its status is accepted, not the status of an unsafe or partial record that is left out. The unit still goes through admission: the environment frontier, its name, its universe parameters, its roots. How a worker proceeds is in [the driver](design-driver-repeats): when the original has no status yet, the repeat is checked like any unit; if that check does not accept, the worker waits for the original's status. The reference engine as primary engine never skips, so under \code{\verb~|-X policy=strict~} every declaration is checked, and \code{\verb~|-X repeats=check~} checks every unit in the default configuration too.}
+
+\p{\strong{Why the verdict of a file is unchanged.} The verdict is the status of the first unit in file order that is not accepted. A repeat is accepted on the word of its original only when the original \em{is} accepted, and a status is written once; if the original is rejected or declined, the verdict is decided at or before the original, and the repeat lies above the first failure. So the skip can change a verdict only where the check of the repeat would not have accepted although the check of the original did. No accept of an underivable statement can come of that: the value of the original has its type in the environment of the original, a later environment only adds constants, and the statement of the repeat is the statement of the original. That the second check accepts whenever the first did is a claim about the check. For these three kinds the official kernel reads the kind, the universe parameters, the type and the value, as terms and as objects, and the constants they mention; of the declaration's own name it asks only that it is not declared yet, which admission tests; and one export record is one object. The claim was tested with official verdicts: the official checker gives a repeat the verdict of its original on 1,193 of 1,193 files made from the hostile suite by repeating the last declaration of a row, and in a differential run the reference engine accepts every skipped unit of the eight corpora.}
+
+\p{\strong{The one hostile row.} For the machine the claim holds only up to its own tolerated shortcuts. The file \code{R-e1-sib-krule-major-redex-bad} is the row \code{e1-sib-krule-major-redex-bad} of the tolerated kind (finding E1-F7, the K rule on a major premise that is a beta-redex) with its theorem repeated. The official checker rejects it; the statement is derivable. The default configuration accepts the original, one of its tolerated accepts, and rejects the same two records when it checks them a second time, a rejection that the reference engine confirms as the re-check protocol asks. The machine's two answers differ because the two values live in different places: the proof of the original is a proof block decoded for that unit, the value of the repeat is the promoted copy of it, a shared term of an earlier unit, and the machine's tabling gate distinguishes the two. Without the skip the default configuration therefore rejected this file, at the repeat, which is the official verdict; with the skip it accepts it. That is a tolerated accept under the practical policy; under the strict policy the file is rejected, as officially. No underivable statement is accepted. It is the only verdict that differs between the skip and the check on the 1,648 hostile files made for the question, and it is the reason for the wait: without it the verdict of this file would depend on whether the original was decided before the repeat came up. See [the report](rep-OPT-I), sections 3.2 to 3.5, [the divergence classes](design-official-divergence), [the decision that took it](dec-RHRE) and [the changelog entry](log-YGJO).}
 }
 
 \subtree[design-verdict-protocol-resources]{

@@ -1,0 +1,388 @@
+\title{INT9: the second optimisation wave together - the merge, the gates and the guard of the published build, and where it stands against gruszka}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{benchmark}
+\tag{performance}
+\tag{soundness}
+\tag{arena}
+\tag{platform}
+\tag{machine}
+\tag{loader}
+\tag{driver}
+\import{base-macros}
+
+\p{Integration package "INT9", 2026-11-25 (19:13 to 21:55 UTC). The second optimisation wave after the first release had seven packages, each in a private copy of the tree with gates and a guard of its own: the session tables of the machine ([rep-OPT-D](rep-OPT-D)), RLVM against gruszka unit by unit ([rep-OPT-E](rep-OPT-E), research), the loader thread ([rep-OPT-F](rep-OPT-F)), huge pages ([rep-OPT-G](rep-OPT-G)), a table of comparison results that survives sessions ([rep-OPT-H](rep-OPT-H)), the probe budget and repeated declarations ([rep-OPT-I](rep-OPT-I)), the JVM launcher on a stock OpenJDK ([rep-OPT-J](rep-OPT-J)). None had been combined with another. This report is the record of the integration, in two phases: the changes that were to go in merged into one set against the main tree, gated before the publication (sections 1 to 5); and, after the orchestrator had published the set as \commit{34e8647}, the remaining gates, the guard of [the rule for the default configuration](dec-YP0N) with gruszka in the same windows, and the benchmark rows on the published build (sections 6 to 8). What is in the default build and what is not is [the decision](dec-RHRE). [The integration of the first wave](rep-INT8) is the model for the method, and its merged build, with the level fix of [rep-INV-1](rep-INV-1) on top, is the build before this wave.}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{The merged set} (sections 1 and 2): seven patches and one archive against the main tree, five changed jars. No hunk failed; two packages meet in one source file, the loader, where the repeat lookup stays in front of everything that moves the segment base and the stretches of the second pass give every record the ordinal it had. A digest of the new repeat column is the same in 28 of 28 reader configurations. The publication (\commit{34e8647}) produced exactly the jars that had been gated.}
+\li{\strong{The open point of the session tables is settled} (section 3): on Init the young and old tables are not slower than the larger table sizes alone, 591.5 ms each with a control at 591.3 ms, six interleaved rounds on a quiet host; reachability and con-leche need the tables (0.890 and 0.983 of the passes with the sizes alone). The tables went in.}
+\li{\strong{The gates pass, before the publication and on the published build} (sections 4 and 6), judged by official verdicts: the gate of the default configuration through the executable and through the jars - 230 of 230 published tests, 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 15,741, declined 2,034), the hostile suite of now 1,274 rows with no wrong accept and no wrong reject (agree 1,192, tolerated 78, declined 4); the reference engine by name and the strict policy; the driver's invariance suite; the machine's own gate with the table audit on; the differential engine on the eight corpora, in which the reference engine accepts each of 1,579,800 units, the 136,567 repeats that the driver did not check among them; the arena's own procedure on its 270 tests on the shared and on a release-layout executable; and the JVM launcher on a stock OpenJDK with the same status on all 270. No wrong accept and no wrong reject was seen anywhere.}
+\li{\strong{What is computed changed exactly as predicted} (section 5): with the probe budget and the repeat skip switched off, no counter of a one-worker run differs from the main tree on any corpus and launcher; the budget alone and the skip alone change what rep-OPT-I says, to the tick; together they add up (Mathlib 574,100,326 to 559,746,444 machine ticks).}
+\li{\strong{One verdict changes, on hostile input, and it is a tolerated one} (section 6): the file \code{\verb~|R-e1-sib-krule-major-redex-bad~}, a row of the tolerated kind with its theorem repeated, is accepted since the repeat skip and was rejected at the repeat before. On the 1,648 hostile files with repeats the invariance suite has the six known schedule differences of three rows under a one-byte session cap, with the skip and without it, and no other.}
+\li{\strong{The guard holds} (section 7). Warm pass, 8 workers, three interleaved rounds per corpus on a quiet host, against the build before the wave: the executable 6.8 \% faster in the geometric mean of the eight corpora (1.839 to 1.714 s), every corpus faster by 4.4 to 8.7 \%, Mathlib 13.14 to 12.29 s; the JVM launcher 7.7 \% faster (1.567 to 1.446 s), every corpus faster by 4.1 to 13.9 \%, Mathlib 11.11 to 10.35 s. Against the release before both waves the executable is 15 to 18 \% faster on the three largest corpora (Mathlib 14.52 to 12.29 s). No window saw a compaction stall. The level fix alone costs nothing a window resolves (Std 0.999, cslib 0.999, Mathlib 1.002).}
+\li{\strong{Against gruszka}, in the same windows: the published executable needs 1.05, 1.12, 0.99, 0.21, 1.19, 1.26, 1.06 and 1.14 times gruszka's wall clock on Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and Mathlib (12.29 against 10.77 s); the published JVM launcher 0.97, 0.96, 0.85, 0.15, 1.02, 1.13, 0.90 and 0.96 (10.35 s): ahead of gruszka on six corpora, behind on con-leche and navier-stokes-euler. By CPU both are still behind on seven corpora (Mathlib 1.49 and 1.25 times gruszka's).}
+\li{\strong{In the arena's metric} (section 6.1): Mathlib takes 1,432.5 to 1,433.2 G instructions, 2.0 \% fewer than after the first wave, and the seven large corpora 1.1 to 4.3 \% fewer. reachability takes 4.9 \% more and 17 of the 262 small tests 3.1 to 10.6 \% more, at 11 \% less CPU time in sum: the young and old tables execute more and wait less. One performance test is slower by both measures.}
+\li{\strong{The benchmark rows and the optional build} (section 8): the tables and the README carry the published build - Mathlib 12.77 s as a cold process and 12.32 s per warm pass for the executable, 10.32 s per warm pass on the JVM launcher, gruszka 10.82 and 10.74 s in the same windows. The profile of the optional Oracle GraalVM build was recorded again from the published jars; that executable needs 0.91 to 0.95 times the default executable's warm pass (Mathlib 11.60 s).}
+\li{\strong{Not done} (section 9): nothing on x86-64; the changes one by one on the published build; a profile of what is left of the distance to gruszka.}
+}
+}
+
+\subtree{
+\title{1. What was merged, and against what}
+
+\ul{
+\li{\strong{The main tree before the wave}: [the first wave](rep-INT8) and the fix of the level store's instantiation caches ([the stale level lists](rep-INV-1), \commit{55f2db3}; \code{rlvm-level} \code{35e453f8c770}, \code{rlvm-store} \code{5328df68c01b}). A private copy of its tracked sources with a pristine twin; the twin, built whole by \src{scripts/build.sh} with \code{\verb~|--dev~}, is "the build before the wave" of this report (jars sha256 \code{300e7397de62}; executable sha256 \code{5d96873ac96f}). Its jars are byte for byte the published ones wherever the embedded build file is the same (\code{rlvm-level}, \code{rlvm-store}, \code{rlvm-export}, \code{rlvm-load}, \code{rlvm-api}, \code{rlvm-ref}, \code{rlvm-main}, \code{rlvm-admit}, \code{rlvm-nat}, \code{rlvm-cli}), so a jar is reproducible from its sources; every counter of a one-worker run is the same for this build and for the shared distribution of that hour (0 of 177 to 182 counters differ on the eight corpora).}
+\li{\strong{What went in}, each as its owner's patches, none of which had been combined with another: the young and old session tables of the machine ([rep-OPT-D](rep-OPT-D); with them the entry \code{\verb~|Values.closureNew~} of the force-inline list in place of \code{\verb~|Values.closureOverNew~}); the loader thread's second pass, three patches ([rep-OPT-F](rep-OPT-F)); the default budget of an eager probe, 2^17 ticks, and the repeat skip, a declaration that repeats an accepted one word for word is admitted and not checked again, three patches ([rep-OPT-I](rep-OPT-I)); the 78 hostile exports of [rep-OPT-H](rep-OPT-H) as rows of the machine's hostile suite, without its switch, its test class and its switch sets; and the one flag that keeps the JVM launcher from starting on a stock OpenJDK ([rep-OPT-J](rep-OPT-J)), in the four files that carry it.}
+\li{\strong{What did not go in}: the closed-pair table of rep-OPT-H, the huge-page mechanism of [rep-OPT-G](rep-OPT-G), a change of the session cap and the smaller alternative of rep-OPT-D (the table sizes alone; section 3), the fast and slow splits of [rep-OPT-A](rep-OPT-A).}
+\li{\strong{The merged set} is seven patches, one per module in the order in which the modules are installed (\code{rlvm-export}, \code{rlvm-store}, \code{rlvm-load}, \code{rlvm-driver}, \code{rlvm-machine}, the hostile rows, the flag), and one archive with the 78 compressed exports. Applied to the main tree it gives the gated private tree file for file (2,315 files). Five jars change: \code{rlvm-export} \code{8fcc3cb37172}, \code{rlvm-store} \code{e2847c61a33c}, \code{rlvm-load} \code{6cc864470e08}, \code{rlvm-driver} \code{71da48c8c6ee}, \code{rlvm-machine} \code{1eaaf3e3655c}; of \code{rlvm-truffle} only the build file changes. The publication (\commit{34e8647}) installed the five modules from tested snapshots and got exactly these hashes.}
+\li{\strong{The merged private build}: the copy with the set applied, built the same way (jars \code{70e7d9767d42}; executable sha256 \code{a70fae57de84}; inline lists with 269 forced and 81 never-inlined methods, as before). Sections 3 to 5 ran on it and on the build before the wave; sections 6 to 8 ran on the published build.}
+\li{\strong{Host.} aarch64, 10 Cortex-X925 and 10 Cortex-A725, 121 GB. Every time in seconds is from a \src{bench/quiet.py} window on the 8 measurement cores, with the other cores idle unless a table says otherwise; gates and count runs are not timings and ran behind \src{bench/slot.sh}. No Oracle GraalVM was used except for the optional build of section 8.}
+}
+}
+
+\subtree{
+\title{2. The merge: what overlapped, and how it was resolved}
+
+\ul{
+\li{\strong{No hunk failed.} Every patch applied to the main tree singly, and they applied one after the other: the loader patch of the repeat skip on top of the loader patch of the second pass with offsets only (12 lines in \code{\verb~|Loader.java~}) and with two lines of fuzz in the module's README, where the two edit adjacent paragraphs. \code{\verb~|LoadTarget~} and \code{\verb~|StoreTarget~} are touched by the repeat skip only. In the whole set two packages meet in one source file, \code{\verb~|Loader.java~}, and in the READMEs of \code{rlvm-load} and \code{rlvm-store}.}
+\li{\strong{The one file, read.} The repeat lookup of rep-OPT-I stands in \code{\verb~|Loader.declare~} directly behind the reservation of the constant and in front of everything that writes the segment; it compares the two root ordinals with \code{segBase}, which only the end of a segment assigns. The stretch of rep-OPT-F (\code{\verb~|Loader.exprStretch~}) reads \code{segBase}, advances the record count and the segment length, and gives a record the ordinal that the record-by-record path gives it. So the key of the lookup - kind, list of universe-parameter names, hint, type ordinal, value ordinal - does not depend on whether the records came in a stretch, one by one or as tapes of the scanner threads, and metadata refuses the stretch in both versions.}
+\li{\strong{The one file, measured.} A digest of the new column, every pair of a unit and the unit it repeats, written for this purpose in the manner of the store digest: identical in 28 of 28 reader configurations (one, two and three scanner threads, chunks of 256 bytes to 4 MiB, both policies) on 17,158 small files, the 263 arena tests below 100 MB, 847 prelude mutants, the eight corpora and the Cedar slice; in every loaded file the column, the walk over it and the loader's own count agree. The repeats it finds are those of rep-OPT-I: Init 5,948, Std 8,661, cedar 15,429, reachability 220, con-leche 4,570, navier-stokes-euler 13,331, cslib 30,445, Mathlib 59,900. The loader's oracle of rep-OPT-I, which finds the repeats of every test file again from the reference records, runs in the merged suite of \code{rlvm-load} over the stretches of three kinds (85 tests).}
+\li{\strong{Modules of one package are their owner's candidate}: the merged \code{rlvm-export} is the gated candidate of rep-OPT-F file for file, \code{rlvm-driver} that of rep-OPT-I, the five changed sources of the machine those of rep-OPT-D and \code{\verb~|MachineEngine.java~} that of rep-OPT-I; the manifest of the hostile suite is that of rep-OPT-H (1,274 rows), and the archive holds its 78 exports byte for byte.}
+\li{\strong{The flag.} \code{\verb~|-XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler~} in place of \code{\verb~|-XX:-UseJVMCICompiler~}: on the GraalVM JDK of the build 531 VM flags are listed under both lines and one has another final value, a randomised address; the launcher of the build before the wave ends with status 1 on Eclipse Temurin 25.0.5.1+2 before the checker starts, the merged launcher accepts Init there and on the GraalVM JDK, and the Truffle probe of the build passes.}
+\li{\strong{One sentence corrected afterwards.} A comment of the driver's settings (\src{rlvm-driver/src/main/java/rlvm/driver/RunConfig.java}) said that the setting \code{repeats} cannot change a verdict. It can, on one hostile file of the tolerated kind (section 6 and [the decision](dec-RHRE)); the comment says so since this report. No code changed with it.}
+}
+}
+
+\subtree{
+\title{3. The young and old tables against the table sizes alone: Init}
+
+\p{rep-OPT-D had left one point open: in the one window that compared its candidate with the base at the candidate's table sizes, the passes of Init were 2 to 7 \% longer at the same CPU time, and a smaller alternative existed, the sizes alone. It was settled before the set was fixed, in one window of 507 s (19:22:24 to 19:30:51 UTC) on an otherwise idle host: the executable, 8 workers, six interleaved rounds with the order rotated, one process per variant and round, the first pass of a process left out. Variants: the build before the wave; the same executable with \code{\verb~|-Drlvm.machine.sizes=14,16,16,14,13,10~} (the sizes alone, as rep-OPT-D measured them); the build before the wave with the patch of rep-OPT-D; and the second variant once more, as a control of what the window resolves.}
+
+\table{
+\tr{\th{Corpus (rounds x later passes)}\th{main tree, ms}\th{sizes alone}\th{young and old tables}\th{sizes alone, control}\th{tables / sizes: passes (range of the six rounds)}\th{tables / sizes: CPU}\th{control / sizes: passes}}
+\tr{\td{Init (6 x 11)}\td{610.8}\td{591.5}\td{591.5}\td{591.3}\td{1.0000 (0.987 to 1.015)}\td{1.0008}\td{0.9997}}
+\tr{\td{reachability (6 x 9)}\td{452.2}\td{461.2}\td{410.5}\td{453.2}\td{0.890 (0.827 to 0.978)}\td{0.899}\td{0.982}}
+\tr{\td{con-leche (6 x 5)}\td{1382.3}\td{1379.2}\td{1356.2}\td{1381.8}\td{0.983 (0.953 to 1.016)}\td{0.981 (every round 0.974 to 0.988)}\td{1.002}}
+}
+
+\ul{
+\li{\strong{Init}: the tables and the sizes alone are the same, 591.5 ms each, with the control at 591.3; the CPU time of a pass is 4.267, 4.270 and 4.268 s. The 2 to 7 \% of rep-OPT-D are not there on a quiet host with six rounds.}
+\li{\strong{reachability and con-leche need the tables}: 11 \% and 1.7 \% shorter passes than with the sizes alone, 10 \% and 2 \% less CPU; the two copies of the sizes differ by 1.8 \% and 0.2 \% (reachability's passes scatter, its CPU ratios do not: 0.864 to 0.933 in the six rounds).}
+\li{Peak resident memory is the same in the three (Init 384, 384, 374 MiB; reachability 736, 736, 738; con-leche 1,359, 1,358, 1,350).}
+\li{\strong{So the tables went in}, as planned, and the alternative did not. The load average that the window's wrapper logged at its start, 8.59, was the tail of this work's own builds, which had ended 50 seconds earlier; no other process was running.}
+}
+}
+
+\subtree{
+\title{4. The gates of the merged private build, before the publication}
+
+\p{All on the merged private build of section 1, through its own launchers and with no \code{\verb~|-X~} option unless the row names one. Every oracle is an official verdict. No wrong accept and no wrong reject was seen, in the build before the wave or in the merged one.}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{The suites of the touched modules, in the private copy against its own repository}\td{\code{rlvm-level} 72 tests (1 skipped), \code{rlvm-export} 82 (1 skipped: the Mathlib differential, which has a switch of its own and was not run; the module is the candidate of rep-OPT-F, which ran it), \code{rlvm-store} 75 (1 skipped), \code{rlvm-load} 85, \code{rlvm-driver} 116 (3 skipped), \code{rlvm-machine}: the fast group 424 (3 skipped), everything not tagged slow 455 (4 skipped): 0 failures, 0 errors. The whole reactor compiles with its tests}}
+\tr{\td{\code{\verb~|SHostileSlowTest~}}\td{2 tests: 56 switch sets by 1,274 rows, 0 unexpected verdicts and 0 known findings open under every set; under \code{default} 76 tolerated accepts and 12 rejections repaired by the re-check, the counts of rep-OPT-H for its rows without its switch}}
+\tr{\td{Store equality: the differential digest of the loader's tests (the unchanged tool of [rep-OPT-B](rep-OPT-B) and rep-OPT-F), merged build against the build before the wave}\td{IDENTICAL in 28 of 28 configurations: the 25 of rep-OPT-F and the strict policy on the three lists of large files; each also equals the one-thread digest of its list and the digests that rep-OPT-F had taken of the main tree before the level fix. The digest reads the unit rows, the constants, the terms, the blocks, the names and the claims and never the new column of repeats, so the one intended difference of the store is invisible to it; section 2 has the digest of that column}}
+\tr{\td{The gate of the default configuration through the executable (\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~})}\td{PASS: 230 of 230 published tests; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034, no error, no run at the judge's limit; the differential self-test caught; hostile suite, 1,274 rows: agree 1,192, tolerated accepts of kind (d) 78, wrong accept 0, wrong reject 0, declined 4}}
+\tr{\td{The same through the jars}\td{PASS with the same counts; no hostile row has another verdict through the jars than through the executable. Of the 1,196 rows of the main tree: agree 1,124, tolerated 68, declined 4, the counts of the release; of the 78 new rows: agree 68, tolerated 10 (the eight rows of the box under its shapes and the two eager rows that rep-OPT-H lists for the default set without its table)}}
+\tr{\td{The eight corpora with 8 and with 4 workers, both launchers}\td{32 of 32 runs ACCEPT, exit status 0. Declines of the machine (attempts) 0, 2, 2, 0, 4, 32, 22 and 128, the units decided by the reference engine 0, 1, 1, 0, 2, 16, 11 and 64, no rejection of the machine; \code{\verb~|driver.repeatsAwaited~} 0 in every run; 97.3 to 99.5 \% of the repeats skipped on Init, Std, cedar, navier-stokes-euler, cslib and Mathlib, 94.1 to 97.3 \% of con-leche's and 86 to 91 \% of the 220 of reachability; the others came up while their original had no status and were checked}}
+\tr{\td{The strict policy (\code{\verb~|-X policy=strict~}), 8 workers, both launchers}\td{16 of 16 runs ACCEPT, every unit accepted, 0 declined, 0 repeats skipped (Mathlib: 721,845 of 721,845 units; the loader finds the 59,900 repeats, nobody reads them)}}
+\tr{\td{The table audit of rep-OPT-D (\code{\verb~|-Drlvm.machine.tableaudit=true~}: every reset audits the young and old tables of the session that ends), JVM launcher, 8 workers, default cap}\td{8 of 8 corpora accept, no audit failure (Mathlib: 17 s more CPU than a plain run)}}
+\tr{\td{Cost only, and exactly the predicted differences: every counter of a deterministic run}\td{section 5}}
+}
+
+\p{Peak resident set of one cold process, MiB, the executable with 8 workers / the JVM launcher with 8 workers: Init 358 / 692, Std 590 / 1,363, cedar 733 / 1,598, reachability 714 / 1,442, con-leche 845 / 1,450, navier-stokes-euler 1,224 / 2,142, cslib 1,545 / 2,330, Mathlib 3,585 / 4,738 (not timings: the runs shared the host with the count runs). Under the strict policy the executable peaks at 13.0 GiB on Mathlib and 5.2 GiB on con-leche, the JVM launcher at 13.3 and 7.8 GiB.}
+}
+
+\subtree{
+\title{5. The counters of a deterministic run: nothing but what the reports predict}
+
+\p{One worker makes a run deterministic (file order, batch load). Every count that a run reports - the machine's ticks, records, run words, pairs, calls and memo hits per judgment, resets and declines, the eager and code-block counters, the reference engine's units and steps, the driver's and the loader's counts; times, bytes and the allocator left out - and the unit trace, unit by unit, in five configurations per corpus and launcher: the build before the wave; the merged build with both changes of rep-OPT-I switched off (\code{\verb~|-X repeats=check -X machine.eager-probe=4194304~}); with the probe budget alone; with the repeat skip alone; and without any option. 88 runs with the control of section 1, the largest at 4.3 GiB resident. The executable and the JVM launcher report the same counts in all 40 pairs of runs, so one table:}
+
+\table{
+\tr{\th{Corpus}\th{counters compared}\th{differ with both changes of OPT-I switched off}\th{differ with the probe budget alone}\th{differ with the repeat skip alone}\th{differ in the merged build}\th{of them statistics that are new}\th{not attributed}}
+\tr{\td{Init}\td{177}\td{0}\td{1}\td{75}\td{78}\td{3}\td{0}}
+\tr{\td{Std}\td{180}\td{0}\td{1}\td{80}\td{83}\td{3}\td{0}}
+\tr{\td{cedar}\td{180}\td{0}\td{1}\td{82}\td{85}\td{3}\td{0}}
+\tr{\td{reachability}\td{177}\td{0}\td{1}\td{70}\td{73}\td{3}\td{0}}
+\tr{\td{con-leche}\td{182}\td{0}\td{19}\td{81}\td{84}\td{3}\td{0}}
+\tr{\td{navier-stokes-euler}\td{182}\td{0}\td{1}\td{82}\td{85}\td{3}\td{0}}
+\tr{\td{cslib}\td{182}\td{0}\td{76}\td{83}\td{98}\td{3}\td{0}}
+\tr{\td{Mathlib}\td{182}\td{0}\td{76}\td{84}\td{97}\td{3}\td{0}}
+}
+
+\ul{
+\li{\strong{The session tables and the loader's second pass compute what the main tree computes.} With both changes of rep-OPT-I switched off no counter differs on any corpus, and every unit has its ticks and its outcome; the merged build only reports three statistics more (\code{\verb~|load.repeatUnits~}, \code{\verb~|driver.repeatsSkipped~}, \code{\verb~|driver.repeatsAwaited~}).}
+\li{\strong{The probe budget alone} is rep-OPT-I, section 2.3, to the tick. On Init, Std, cedar, reachability and navier-stokes-euler the one counter that differs is the setting itself. con-leche: 19 counters, 4,063,232 ticks fewer, all in unit 13,027, which was cut and declined before and is cut earlier (4,196,461 to 133,229 ticks). cslib and Mathlib: 76 counters each, 7,850,591 and 7,850,590 ticks fewer, all in the four units of \code{\verb~|Batteries.Data.Char.Basic~} (units 96,222, 219,779, 219,799, 219,801 and 321,319, 362,538, 362,559, 362,561), which go from accepted by the machine to declined by it and decided by the reference engine in 15,760 steps; the machine's declines rise by 8 attempts, the reference engine's units by 4.}
+\li{\strong{The repeat skip alone} is rep-OPT-I, section 3.7, to the tick: the units not checked are the repeats the loader found, their ticks are gone, and the other units pay a little of it back, because a warm session no longer holds what the check of a repeat left in it. No unit has another outcome; 70 to 84 counters differ per corpus.}
+\li{\strong{Together they add up.} Every counter that differs between the main tree and the merged build differs under one of the two changes alone or is one of the three new statistics, and for every counter that is a sum the joint difference is the sum of the two single differences. One counter is not a sum: \code{\verb~|machine.eager.maxTicks~} on cslib, the largest eager run, is 3,218,191 in the main tree, 136,770 with the budget alone and 136,771 in the merged build, where the session of that unit is one tick different.}
+}
+
+\table{
+\tr{\th{Corpus}\th{machine ticks, main tree}\th{the probe budget alone}\th{the repeat skip alone}\th{units not checked}\th{their ticks in the main tree}\th{machine ticks, merged build}\th{difference, \%}\th{declines of the machine (attempts)}\th{units decided by the reference engine}}
+\tr{\td{Init}\td{34,490,709}\td{0}\td{-1,099,180}\td{5,948}\td{1,236,211}\td{33,391,529}\td{-3.19}\td{0 to 0}\td{0 to 0}}
+\tr{\td{Std}\td{56,957,035}\td{0}\td{-1,471,489}\td{8,661}\td{1,833,913}\td{55,485,546}\td{-2.58}\td{2 to 2}\td{1 to 1}}
+\tr{\td{cedar}\td{76,668,269}\td{0}\td{-2,305,010}\td{15,429}\td{2,827,396}\td{74,363,259}\td{-3.01}\td{2 to 2}\td{1 to 1}}
+\tr{\td{reachability}\td{9,014,777}\td{0}\td{-11,541}\td{220}\td{8,175}\td{9,003,236}\td{-0.13}\td{0 to 0}\td{0 to 0}}
+\tr{\td{con-leche}\td{70,755,128}\td{-4,063,232}\td{-1,664,205}\td{4,570}\td{2,021,517}\td{65,027,691}\td{-8.09}\td{4 to 4}\td{2 to 2}}
+\tr{\td{navier-stokes-euler}\td{144,220,381}\td{0}\td{-1,860,347}\td{13,331}\td{1,974,828}\td{142,360,034}\td{-1.29}\td{32 to 32}\td{16 to 16}}
+\tr{\td{cslib}\td{215,956,521}\td{-7,850,591}\td{-3,621,410}\td{30,445}\td{4,131,989}\td{204,484,520}\td{-5.31}\td{14 to 22}\td{7 to 11}}
+\tr{\td{Mathlib}\td{574,100,326}\td{-7,850,590}\td{-6,503,292}\td{59,900}\td{7,492,778}\td{559,746,444}\td{-2.50}\td{120 to 128}\td{60 to 64}}
+}
+}
+
+\subtree{
+\title{6. The published build: the remaining gates}
+
+\p{The set was published as \commit{34e8647}: the five modules installed from tested snapshots with the hashes of section 1, the shared distribution rebuilt at 20:00 UTC (jars sha256 \code{f5517aa135d2}; the executable sha256 \code{01737cb59df8}; the JVM launcher with the machine's heap line \code{\verb~|-Xmx7g -Xmn1g~}). At the publication the gate of the default configuration through the executable passed on it with the counts of section 4, and the arena definition built and ran end to end. The gates below ran on that distribution between 20:06 and 20:37 UTC, the runs of the corpora on a byte-identical copy; none had to be run twice. No wrong accept and no wrong reject.}
+
+\table{
+\tr{\th{Gate}\th{Launcher, configuration}\th{Result}}
+\tr{\td{Default configuration, the executable (\code{\verb~|gate.sh --defaults --corpus all --hostile --native~}; run at the publication)}\td{\code{rlvm}, no option}\td{PASS: 230 / 230; 17,775 mutants SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034, no error; hostile 1,274 rows: agree 1,192, tolerated 78, wrong accept 0, wrong reject 0, declined 4}}
+\tr{\td{Default configuration, the jars (\code{\verb~|gate.sh --defaults --corpus all --hostile~})}\td{\code{rlvm-jvm}, no option}\td{PASS: 230 / 230; 17,775 mutants SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034, no error and no run at the judge's limit; self-test of the differential path caught; hostile 1,274: agree 1,192, tolerated 78, wrong accept 0, wrong reject 0, declined 4}}
+\tr{\td{The reference engine by name (\code{\verb~|gate.sh --corpus all --hostile~})}\td{\code{rlvm-jvm}, \code{\verb~|-X engine=reference~}, batch load, one worker}\td{PASS: 230 / 230; 17,775 mutants SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034, no error; self-test caught; hostile 1,274: agree 1,260, tolerated 6, wrong accept 0, wrong reject 0, declined 8 (with the 1,196 rows of before: 1,182, 6 and 8: the reference engine gives the official verdict on each of the 78 new rows)}}
+\tr{\td{The strict policy (\code{\verb~|gate.sh --corpus bugs --hostile -X policy=strict~})}\td{\code{rlvm-jvm}, \code{\verb~|-X policy=strict~}, batch load, one worker}\td{PASS: 230 / 230; 2,692 mutants of the corpus \code{bugs} SOUNDNESS 0, COMPLETENESS 0, agree 2,579, declined 113, no error; hostile 1,274: agree 1,255, tolerated 0, wrong accept 0, wrong reject 0, declined 19 (before: 1,177, 0 and 19)}}
+\tr{\td{The driver's invariance suite, the machine as primary engine: every file under 9 schedules (batch with 1, 2, 4 and 8 workers; a session cap of one byte with 1 and 4 workers; pipelined with a publication every 1, 7 and 64 units and 1, 4, 8 workers)}\td{the published jars}\td{PASS: 15,183 files (the 231 published tests, 12,260 mutants of the tutorial tests, 2,692 of the corpus \code{bugs}): 0 wrong, 0 differences between schedules, 0 declines that only a pipelined run has; 478 mutants declined alike in every schedule (413 and 65), the counts of the release}}
+\tr{\td{The invariance suite on the 1,648 hostile files with repeats of rep-OPT-I (41 written for the repeat skip, 1,193 rows of the suite with their last declaration repeated, 414 with it repeated under another kind), with the skip and with \code{\verb~|repeats=check~}}\td{the published jars}\td{0 wrong, 0 declined, 6 schedule differences in each of the two runs, the same 6 and the ones rep-OPT-I has: the three rows of kind T that attack warm sessions (\code{\verb~|R-s3-wc-warm-pair-reused-bad~}, \code{\verb~|R-s3-wc-warm-term-reused-bad~}, \code{\verb~|R-s3-wc-warm-term-reused-reset-bad~}) are rejected at their original unit under the one-byte session cap, with 1 and with 4 workers, and accepted in the seven other schedules. No other file differs between its schedules. \code{\verb~|R-e1-sib-krule-major-redex-bad~} has one verdict in all 9: accept with the skip, reject at the repeat (unit 13) with \code{\verb~|repeats=check~}}}
+\tr{\td{The machine's M8 gate of the default set, all parts, the table audit of rep-OPT-D on in every lane (\code{\verb~|report.sh gate --switches default --session-mib 1 -Drlvm.machine.tableaudit=true~})}\td{the main tree of \code{rlvm-machine}, in process}\td{PASS WITH DECLINES, as before the wave. Differential against the reference engine per declaration: the 230 tests (15,845 engine checks), Init (57,938), Std (100,096), reachability (4,224), the Cedar slice (8,064): SOUNDNESS 0, COMPLETENESS 0, one unit of Std declined by the rule of finding E1-F6. Tier equivalence with the generic tier: 0 different outcomes. Convention equivalence (host depth 0 and unbounded against 128): 0 different declarations. The audit lanes \code{\verb~|poison,scopeaudit,maskaudit~} and \code{\verb~|memocheck,shortcheck~}: the same outcomes, no declaration ended by an audit. The pipeline: 230 of 230 verdicts right, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, no disagreement. No table audit failed in 729 s of the gate}}
+\tr{\td{The differential engine through the launcher (\code{\verb~|-X engine=diff~}: the reference engine beside the machine on every unit, the repeats that were not checked included; a difference declines the run), 8 workers, the eight corpora}\td{\code{rlvm} and \code{rlvm-jvm}}\td{16 of 16 runs ACCEPT. In each launcher the reference engine checked 1,579,800 units - every unit the workers were given: Init 57,938, Std 100,096, cedar 144,098, reachability 4,224, con-leche 36,274, navier-stokes-euler 124,850, cslib 397,608, Mathlib 714,712 - and accepted every one; disagreements 0, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0. Of them 136,567 (executable) and 136,502 (JVM launcher) were repeats that the driver had admitted without a check; the machine declined 0, 2, 2, 0, 4, 32, 22 and 128 attempts}}
+\tr{\td{The eight corpora with 2 and with 3 scanner threads (\code{\verb~|-X scan-threads=N~}: the reader's stretches arrive at the loader as tapes), 8 workers}\td{\code{rlvm}}\td{16 of 16 runs ACCEPT, the machine's declines as with one scanner thread (0, 2, 2, 0, 4, 32, 22, 128)}}
+\tr{\td{The arena's own procedure, 270 tests}\td{\code{rlvm}, the run line of the arena definition; the shared executable and a release-layout executable of the published jars}\td{no wrong accept, no wrong reject, no error, no timeout on both executables: good 148 / 148 accepted, bad 92 / 92 rejected, either 11 accepted / 17 rejected / 2 declined (the two on which the official kernel does not terminate); status and exit code of all 270 tests are the same for the two executables and the same as for the build of the first wave; Mathlib 1,432.5 to 1,433.2 G instructions (section 6.1)}}
+\tr{\td{The JVM launcher on a stock OpenJDK: Eclipse Temurin 25.0.5.1+2 through \code{\verb~|RLVM_JAVA~}, the launcher's flag line as shipped}\td{\code{rlvm-jvm}}\td{Init, Std and cslib ACCEPT with 8 workers. The arena's 270 tests with the arena's run line in an arena-sized container, once on the GraalVM JDK of the build and once on Temurin: good 148 of 148 accepted, bad 92 of 92 rejected, either 11 accepted, 17 rejected, 2 declined on both; 270 of 270 tests with the same status and the same exit code on the two JDKs, no error, no timeout (not timed: 5 performance cores each)}}
+}
+
+\ul{
+\li{\strong{The counts are those of the release wherever the wave did not mean to change them}: the published tests, the four mutant corpora, the invariance suite, the M8 gate. The hostile suite has 78 rows more, with 10 more tolerated accepts in the default configuration and none in the two configurations of the reference engine.}
+\li{\strong{The one verdict the wave changes} is outside the suite: the hostile file \code{\verb~|R-e1-sib-krule-major-redex-bad~} of rep-OPT-I, a row of the tolerated kind with its theorem repeated, is accepted by the default configuration since the repeat skip and was rejected at the repeat before, which is the official verdict. The statement of a repeat is the statement of its original, so nothing underivable is accepted; the strict policy rejects the file, and \code{\verb~|-X repeats=check~} gives the old verdict. [The decision](dec-RHRE) takes it under the practical policy.}
+\li{\strong{Which engine decides which unit} changed in two ways, and the differential engine is the gate for both: the units that the driver admits on the word of their original, 5 to 12 \% of a corpus, are each accepted by the reference engine when it is asked; and the four units of cslib and of Mathlib that the smaller probe budget hands to the reference engine are accepted by it, as the machine accepted them before.}
+}
+
+\subtree{
+\title{6.1 The arena's own procedure on the published build}
+
+\p{As in [rep-AR2](rep-AR2) and rep-INT8: the run line of the arena definition (\src{scripts/arena/rlvm.yaml}), verbatim and with no option, over the arena's complete test set (148 good tests with the eight corpora among them, 92 bad, 30 either) in one arena-shaped container (8 performance cores, 16 GB, no network), the tests one after the other with the arena's time limits, instructions counted around every run; each suite inside one quiet-core window (21:25:48 to 21:28:32 UTC; 80 s per suite). Twice: on the shared executable of the publication (development layout; sha256 \code{01737cb59df8}) and on a release-layout executable built for this purpose from the published jars by \code{\verb~|scripts/build.sh --published~}, with the third-party jars checked against \src{scripts/arena/deps.sha256} (one file of the same size, sha256 \code{332a43afd9e9}). Then Mathlib alone, twice per executable, each run in a fresh container.}
+
+\table{
+\tr{\th{Test}\th{instructions, G: the published executable}\th{the release-layout executable}\th{the build of the first wave ([rep-INT8](rep-INT8))}\th{published against the first wave}\th{CPU s (published)}\th{wall s}\th{peak RSS, MiB}}
+\tr{\td{Init}\td{68.3}\td{68.2}\td{70.4}\td{-3.1 \%}\td{4.1}\td{0.60}\td{367}}
+\tr{\td{Std}\td{118.2}\td{118.3}\td{121.5}\td{-2.7 \%}\td{7.5}\td{1.05}\td{533}}
+\tr{\td{cedar}\td{167.3}\td{167.0}\td{172.4}\td{-2.9 \%}\td{10.5}\td{1.48}\td{748}}
+\tr{\td{reachability}\td{15.8}\td{15.8}\td{15.1}\td{+4.9 \%}\td{1.1}\td{0.45}\td{729}}
+\tr{\td{con-leche}\td{148.6}\td{148.7}\td{155.3}\td{-4.3 \%}\td{8.4}\td{1.45}\td{812}}
+\tr{\td{navier-stokes-euler}\td{415.8}\td{415.9}\td{420.2}\td{-1.1 \%}\td{25.6}\td{3.47}\td{1,380}}
+\tr{\td{cslib}\td{479.9}\td{479.8}\td{499.2}\td{-3.9 \%}\td{33.7}\td{4.56}\td{1,549}}
+\tr{\td{Mathlib}\td{1,432.9}\td{1,433.2}\td{1,462.3}\td{-2.0 \%}\td{96.1}\td{12.77}\td{3,577}}
+\tr{\td{the 262 other tests together}\td{621.1}\td{621.8}\td{595.3}\td{+4.3 \%}\td{}\td{}\td{}}
+\tr{\td{\strong{all 270 tests}}\td{\strong{3,467.8}}\td{3,468.9}\td{3,511.7}\td{\strong{-1.2 \%}}\td{235}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{Verdicts}: the table of section 6; no test used a quarter of its time limit, none was above 4 GiB resident.}
+\li{\strong{Mathlib alone}, the arena's ranking input: 1,432.83 and 1,432.46 G instructions on the published executable (CPU 96.2 and 96.0 s, wall clock 12.76 and 12.71 s, 3.5 GiB resident) and 1,432.58 and 1,433.22 G on the release-layout executable (12.73 and 12.77 s, 3.6 and 3.7 GiB), where the build of the first wave had 1,462.3 G: 2.0 \% fewer.}
+\li{\strong{By instructions the wave is not a gain everywhere.} Seven corpora need 1.1 to 4.3 \% fewer instructions. reachability needs 4.9 \% more, and of the 262 other tests 17 need more than 2 \% more (3.1 to 10.6 \%; sixteen of them performance tests of one large unit) and none 2 \% fewer; the 239 tests below 0.5 G are unchanged in sum (3.06 G). On the same 17 tests the CPU time goes down, 45.4 to 40.4 s in sum, and reachability goes from 1.29 to 1.11 s: in a large session the young and old tables execute more instructions, a second probe for a key made of old things, and wait less for memory. One test is slower by both measures, \code{\verb~|perf/magma-list-deep-n36~}: 68.1 to 74.6 G instructions and 6.5 to 7.2 s of CPU. rep-OPT-D had not taken the instruction count; the maintainer's metric is the wall clock, the arena's is this one.}
+}
+}
+}
+
+\subtree{
+\title{7. The guard of the published build, and gruszka in the same windows}
+
+\p{The rule of [the decision on the default set](dec-YP0N): on the eight corpora the geometric mean of the warm passes goes down and no corpus is more than 3 \% slower, over at least three interleaved rounds, on the executable and on the JVM launcher. Measured between 20:37 and 21:16 UTC on a host on which nothing else ran: one quiet-core window per corpus on the 8 measurement cores; in every window the executable and the JVM launcher of the build before the wave (section 1: the first wave and the level fix) and of the published build, on the three largest corpora also the executable of the release before both waves; the variants interleaved round by round (in order, reversed, in order), three rounds, 8 workers, a run without options but the worker count and the passes; and gruszka with its arena run line and 8 workers in the arena container on the same cores, two runs before every round and two after the last. A cell is the mean over the rounds of the median later pass of one process (the first pass of a process is left out); for a pass shorter than 0.5 s, reachability, the mean of the later passes. CPU is the process CPU of a later pass; peak RSS the largest of the rounds. All 105 processes accepted in every pass.}
+
+\subtree{
+\title{7.1 The executable}
+
+\table{
+\tr{\th{corpus}\th{rounds x later passes}\th{the executable before the wave: warm pass, s}\th{the published executable: warm pass, s}\th{ratio}\th{CPU of a warm pass before, s}\th{after, s}\th{ratio}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{Init}\td{3 x 9}\td{0.609}\td{0.569}\td{0.934}\td{4.40}\td{4.14}\td{0.940}\td{384}\td{377}}
+\tr{\td{Std}\td{3 x 9}\td{1.051}\td{0.991}\td{0.943}\td{7.89}\td{7.42}\td{0.941}\td{609}\td{619}}
+\tr{\td{cedar}\td{3 x 7}\td{1.479}\td{1.387}\td{0.938}\td{11.14}\td{10.47}\td{0.939}\td{768}\td{765}}
+\tr{\td{reachability}\td{3 x 14}\td{0.458}\td{0.421}\td{0.918}\td{1.23}\td{1.11}\td{0.904}\td{725}\td{735}}
+\tr{\td{con-leche}\td{3 x 5}\td{1.390}\td{1.277}\td{0.919}\td{9.36}\td{8.30}\td{0.886}\td{1,347}\td{927}}
+\tr{\td{navier-stokes-euler}\td{3 x 5}\td{3.452}\td{3.301}\td{0.956}\td{26.57}\td{25.43}\td{0.957}\td{1,519}\td{1,515}}
+\tr{\td{cslib}\td{3 x 5}\td{4.784}\td{4.370}\td{0.913}\td{36.38}\td{33.55}\td{0.922}\td{2,003}\td{1,624}}
+\tr{\td{Mathlib}\td{3 x 3}\td{13.144}\td{12.292}\td{0.935}\td{101.15}\td{95.52}\td{0.944}\td{4,420}\td{4,062}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.932}}\td{}\td{}\td{\strong{0.929}}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The guard holds.} The geometric mean of the eight warm passes goes from 1.839 to 1.714 s, -6.8 \%, and every corpus is faster, by 4.4 \% (navier-stokes-euler) to 8.7 \% (cslib); Mathlib 13.14 to 12.29 s. The CPU of a pass goes down with it, 0.929 in the geometric mean.}
+\li{\strong{Memory.} The peak resident set falls where the smaller probe budget cuts a probe that had filled a session: con-leche 1,347 to 927 MiB, cslib 2,003 to 1,624, Mathlib 4,420 to 4,062. Elsewhere it is within 10 MiB.}
+}
+}
+
+\subtree{
+\title{7.2 The JVM launcher}
+
+\table{
+\tr{\th{corpus}\th{rounds x later passes}\th{the JVM launcher before the wave: warm pass, s}\th{the published JVM launcher: warm pass, s}\th{ratio}\th{CPU of a warm pass before, s}\th{after, s}\th{ratio}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{Init}\td{3 x 9}\td{0.547}\td{0.523}\td{0.957}\td{3.95}\td{3.86}\td{0.976}\td{811}\td{845}}
+\tr{\td{Std}\td{3 x 9}\td{0.911}\td{0.846}\td{0.929}\td{6.78}\td{6.35}\td{0.936}\td{1,463}\td{1,444}}
+\tr{\td{cedar}\td{3 x 7}\td{1.296}\td{1.180}\td{0.910}\td{9.62}\td{8.82}\td{0.917}\td{1,752}\td{1,779}}
+\tr{\td{reachability}\td{3 x 14}\td{0.343}\td{0.295}\td{0.861}\td{1.07}\td{0.96}\td{0.896}\td{1,574}\td{1,578}}
+\tr{\td{con-leche}\td{3 x 5}\td{1.183}\td{1.095}\td{0.926}\td{8.16}\td{7.24}\td{0.888}\td{1,787}\td{1,770}}
+\tr{\td{navier-stokes-euler}\td{3 x 5}\td{3.088}\td{2.961}\td{0.959}\td{23.14}\td{22.56}\td{0.975}\td{2,297}\td{2,287}}
+\tr{\td{cslib}\td{3 x 5}\td{4.038}\td{3.696}\td{0.915}\td{30.67}\td{28.31}\td{0.923}\td{2,818}\td{2,431}}
+\tr{\td{Mathlib}\td{3 x 3}\td{11.110}\td{10.348}\td{0.931}\td{85.35}\td{79.94}\td{0.937}\td{5,144}\td{4,901}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.923}}\td{}\td{}\td{\strong{0.930}}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The guard holds}: 1.567 to 1.446 s in the geometric mean, -7.7 \%, every corpus faster, by 4.1 \% (navier-stokes-euler) to 13.9 \% (reachability); Mathlib 11.11 to 10.35 s; CPU 0.930.}
+\li{\strong{Memory}: cslib 2,818 to 2,431 MiB, Mathlib 5,144 to 4,901; Init 811 to 845, the other five within 30 MiB.}
+\li{\strong{The sum is less than the product of the parts.} The four changes had given, each against a base of its own and most of them on a busy host, 0.957, 0.976, 0.986 and 0.986 of the base's geometric mean in the executable (the session tables, the loader's second pass, the probe budget, the repeat skip) and 0.912, 0.981, 1.000 and 0.993 on the JVM launcher: products of 0.908 and 0.888, against 0.932 and 0.923 measured together. One part of the difference is known: in the quiet window of section 3 the session tables alone gave 0.968, 0.907 and 0.981 on Init, reachability and con-leche, where their report had 0.963, 0.845 and 0.952 with the other cores busy. The rest was not separated.}
+}
+}
+
+\subtree{
+\title{7.3 Both waves: the executable of the release against the published one}
+
+\table{
+\tr{\th{corpus}\th{rounds x later passes}\th{the executable of the release, before both waves: warm pass, s}\th{the published executable: warm pass, s}\th{ratio}\th{CPU of a warm pass before, s}\th{after, s}\th{ratio}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{navier-stokes-euler}\td{3 x 5}\td{3.869}\td{3.301}\td{0.853}\td{29.09}\td{25.43}\td{0.874}\td{1,656}\td{1,515}}
+\tr{\td{cslib}\td{3 x 5}\td{5.308}\td{4.370}\td{0.823}\td{39.09}\td{33.55}\td{0.858}\td{2,436}\td{1,624}}
+\tr{\td{Mathlib}\td{3 x 3}\td{14.520}\td{12.292}\td{0.847}\td{109.60}\td{95.52}\td{0.872}\td{7,672}\td{4,062}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.841}}\td{}\td{}\td{\strong{0.868}}\td{}\td{}}
+}
+
+\p{On the three corpora where the release's executable ran in the same windows, the two waves together take 15 to 18 \% off a warm pass and 13 to 14 \% off its CPU: Mathlib 14.52 to 12.29 s with 4.0 GiB resident where it had 7.5 GiB.}
+}
+
+\subtree{
+\title{7.4 Against gruszka}
+
+\table{
+\tr{\th{corpus}\th{gruszka, arena run line, 8 workers: wall s, median of the runs (smallest to largest; runs)}\th{gruszka: CPU s / peak RSS MiB}\th{executable before the wave: wall s / CPU s}\th{published executable}\th{JVM launcher before}\th{published JVM launcher}\th{executable before / gruszka: wall, CPU}\th{\strong{published executable / gruszka}}\th{JVM launcher before / gruszka}\th{\strong{published JVM launcher / gruszka}}}
+\tr{\td{Init}\td{0.54 (0.53 to 0.56; 8)}\td{3.0 / 527}\td{0.61 / 4.4}\td{0.57 / 4.1}\td{0.55 / 4.0}\td{0.52 / 3.9}\td{1.13, 1.47}\td{\strong{1.05, 1.39}}\td{1.01, 1.32}\td{\strong{0.97, 1.29}}}
+\tr{\td{Std}\td{0.89 (0.88 to 0.93; 8)}\td{5.0 / 659}\td{1.05 / 7.9}\td{0.99 / 7.4}\td{0.91 / 6.8}\td{0.85 / 6.3}\td{1.19, 1.57}\td{\strong{1.12, 1.48}}\td{1.03, 1.35}\td{\strong{0.96, 1.27}}}
+\tr{\td{cedar}\td{1.40 (1.38 to 1.41; 8)}\td{7.8 / 798}\td{1.48 / 11.1}\td{1.39 / 10.5}\td{1.30 / 9.6}\td{1.18 / 8.8}\td{1.06, 1.42}\td{\strong{0.99, 1.33}}\td{0.93, 1.23}\td{\strong{0.85, 1.12}}}
+\tr{\td{reachability}\td{1.98 (1.84 to 2.05; 8)}\td{3.1 / 1,223}\td{0.46 / 1.2}\td{0.42 / 1.1}\td{0.34 / 1.1}\td{0.30 / 1.0}\td{0.23, 0.40}\td{\strong{0.21, 0.36}}\td{0.17, 0.35}\td{\strong{0.15, 0.31}}}
+\tr{\td{con-leche}\td{1.08 (1.06 to 1.11; 8)}\td{6.7 / 832}\td{1.39 / 9.4}\td{1.28 / 8.3}\td{1.18 / 8.2}\td{1.09 / 7.2}\td{1.29, 1.39}\td{\strong{1.19, 1.24}}\td{1.10, 1.22}\td{\strong{1.02, 1.08}}}
+\tr{\td{navier-stokes-euler}\td{2.62 (2.48 to 2.68; 8)}\td{15.6 / 956}\td{3.45 / 26.6}\td{3.30 / 25.4}\td{3.09 / 23.1}\td{2.96 / 22.6}\td{1.32, 1.70}\td{\strong{1.26, 1.63}}\td{1.18, 1.48}\td{\strong{1.13, 1.44}}}
+\tr{\td{cslib}\td{4.11 (4.08 to 4.14; 8)}\td{23.0 / 1,509}\td{4.78 / 36.4}\td{4.37 / 33.6}\td{4.04 / 30.7}\td{3.70 / 28.3}\td{1.17, 1.58}\td{\strong{1.06, 1.46}}\td{0.98, 1.33}\td{\strong{0.90, 1.23}}}
+\tr{\td{Mathlib}\td{10.77 (10.67 to 10.97; 8)}\td{64.0 / 2,840}\td{13.14 / 101.1}\td{12.29 / 95.5}\td{11.11 / 85.3}\td{10.35 / 79.9}\td{1.22, 1.58}\td{\strong{1.14, 1.49}}\td{1.03, 1.33}\td{\strong{0.96, 1.25}}}
+}
+
+\ul{
+\li{\strong{The published executable} is behind gruszka on six corpora by the wall clock of a warm pass: Init 1.05, Std 1.12, con-leche 1.19, navier-stokes-euler 1.26, cslib 1.06 and Mathlib 1.14 times gruszka's time (12.29 against 10.77 s). It is level on cedar (0.99) and far ahead on reachability (0.21). Before the wave it was, in the same order, at 1.13, 1.19, 1.29, 1.32, 1.17, 1.22, 1.06 and 0.23; the release, on navier-stokes-euler, cslib and Mathlib, at 1.48, 1.29 and 1.35.}
+\li{\strong{The published JVM launcher} is ahead of gruszka on six corpora: Init 0.97, Std 0.96, cedar 0.85, reachability 0.15, cslib 0.90 and Mathlib 0.96 (10.35 against 10.77 s). It is behind on con-leche (1.02) and on navier-stokes-euler (1.13). Before the wave it was ahead on cedar, reachability and cslib only.}
+\li{\strong{By CPU both are still behind} everywhere but on reachability: the executable needs 1.24 to 1.63 times gruszka's CPU for a pass (Mathlib 95.5 against 64.0 s: 1.49, where it was 1.58), the JVM launcher 1.08 to 1.44 times (Mathlib 79.9 s: 1.25, where it was 1.33). RLVM keeps the 8 cores busier - on Mathlib the executable's 95.5 s of CPU in 12.29 s are 7.8 cores, gruszka's 64.0 s in 10.77 s are 5.9 - so its distance by the wall clock is smaller than by the CPU, and its pass is still bound by the total CPU of the 8 cores. navier-stokes-euler is the largest distance on both launchers and by both measures; what the two checkers do differently there, unit by unit, is [rep-OPT-E](rep-OPT-E).}
+\li{\strong{Peak memory}: the executable holds less than gruszka on Init, Std, cedar and reachability (377, 619, 765 and 735 MiB against 527, 659, 798 and 1,223) and more on the four large corpora (con-leche 927 against 832 MiB, navier-stokes-euler 1,515 against 956, cslib 1,624 against 1,509, Mathlib 4,062 against 2,840); the JVM launcher holds more than gruszka on all eight (Mathlib 4,901 MiB).}
+}
+}
+
+\subtree{
+\title{7.5 The level fix alone}
+
+\p{The fix of the level store ([rep-INV-1](rep-INV-1), \commit{55f2db3}) was published between the two waves, so the build before this wave has it and the guard above is the wave alone. What the fix itself costs was measured in one more window (21:16:15 to 21:25:43 UTC, 568 s, three corpora one after the other, three interleaved rounds each, the executable with 8 workers): the shared executable of the first wave, which does not have the fix, against the private build of the main tree before the second wave, which has it.}
+
+\table{
+\tr{\th{corpus}\th{rounds x later passes}\th{the executable of the first wave without the level fix: warm pass, s}\th{the executable of the first wave with the level fix: warm pass, s}\th{ratio}\th{CPU of a warm pass before, s}\th{after, s}\th{ratio}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{Std}\td{3 x 9}\td{1.059}\td{1.058}\td{0.999}\td{7.94}\td{7.89}\td{0.994}\td{611}\td{601}}
+\tr{\td{cslib}\td{3 x 5}\td{4.811}\td{4.805}\td{0.999}\td{36.55}\td{36.44}\td{0.997}\td{1,995}\td{1,993}}
+\tr{\td{Mathlib}\td{3 x 3}\td{13.070}\td{13.102}\td{1.002}\td{101.26}\td{101.11}\td{0.998}\td{4,392}\td{4,397}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{1.000}}\td{}\td{}\td{\strong{0.996}}\td{}\td{}}
+}
+
+\p{Nothing a window resolves: Std and cslib 0.999, Mathlib 1.002 by the passes, 0.994 to 0.998 by the CPU, the same peak memory. The rule that an entry of the instantiation caches survives a reset only by content is paid at a reset, not in a probe. The two executables are two builds of an image; the window had no compaction stall (the counter did not move) and 8,700 to 8,780 free blocks of 2 MiB.}
+}
+
+\subtree{
+\title{7.6 The conditions of every window}
+
+\table{
+\tr{\th{Window}\th{UTC}\th{length, s}\th{processes x passes}\th{load average at the start (1 min)}\th{at the end}\th{CPUs busy outside the 8 measurement cores during the window}\th{gruszka in the window}\th{compaction stalls during the window}\th{huge-page faults that fell back}\th{free 2 MiB blocks before to after}}
+\tr{\td{Init}\td{21:05:21 to 21:06:57}\td{96}\td{12 x 10}\td{8.31}\td{9.73}\td{0.15}\td{4 calls of two runs}\td{0}\td{0}\td{8,735 to 8,840}}
+\tr{\td{Std}\td{21:07:04 to 21:09:29}\td{145}\td{12 x 10}\td{8.95}\td{9.50}\td{0.12}\td{4 calls of two runs}\td{0}\td{0}\td{8,840 to 8,826}}
+\tr{\td{cedar}\td{21:09:35 to 21:12:18}\td{163}\td{12 x 8}\td{8.04}\td{8.65}\td{0.12}\td{4 calls of two runs}\td{0}\td{0}\td{8,826 to 8,830}}
+\tr{\td{reachability}\td{21:12:24 to 21:14:01}\td{97}\td{12 x 15}\td{7.96}\td{3.78}\td{0.12}\td{4 calls of two runs}\td{0}\td{0}\td{8,830 to 8,698}}
+\tr{\td{con-leche}\td{21:14:08 to 21:16:08}\td{121}\td{12 x 6}\td{3.48}\td{8.84}\td{0.13}\td{4 calls of two runs}\td{0}\td{0}\td{8,698 to 8,700}}
+\tr{\td{navier-stokes-euler}\td{20:51:35 to 20:57:23}\td{347}\td{15 x 6}\td{7.56}\td{10.05}\td{0.09}\td{4 calls of two runs}\td{0}\td{0}\td{8,829 to 8,760}}
+\tr{\td{cslib}\td{20:57:29 to 21:05:15}\td{467}\td{15 x 6}\td{9.24}\td{9.03}\td{0.12}\td{4 calls of two runs}\td{0}\td{0}\td{8,760 to 8,721}}
+\tr{\td{Mathlib}\td{20:37:06 to 20:51:29}\td{864}\td{15 x 4}\td{11.18}\td{8.22}\td{0.15}\td{4 calls of two runs}\td{0}\td{0}\td{8,808 to 8,829}}
+}
+
+\p{The load average of the host carries the measurement itself; what the other cores did is the column after it. Huge pages: the JVM launcher asks for them (\code{\verb~|-XX:+UseTransparentHugePages~}), and [rep-OPT-G](rep-OPT-G) had found that such a request stalls in the kernel's compaction when no free block of 2 MiB is left. The kernel's counter of compaction stalls stood at 6,625,384 before the first window and after the last one, no huge-page fault fell back in any window, and the host had 8,700 to 8,840 free blocks of 2 MiB throughout (17 GiB): no window had to be repeated. The median later pass of every round, in ms (for reachability the mean of the later passes):}
+
+\table{
+\tr{\th{Corpus}\th{the executable before the wave: rounds, ms}\th{the published executable: rounds, ms}\th{the JVM launcher before the wave: rounds, ms}\th{the published JVM launcher: rounds, ms}\th{the executable of the release, before both waves: rounds, ms}}
+\tr{\td{Init}\td{606 606 614}\td{569 569 568}\td{536 561 543}\td{514 513 542}\td{-}}
+\tr{\td{Std}\td{1055 1048 1050}\td{990 992 992}\td{919 908 906}\td{855 841 843}\td{-}}
+\tr{\td{cedar}\td{1497 1470 1469}\td{1397 1377 1386}\td{1296 1302 1289}\td{1194 1177 1168}\td{-}}
+\tr{\td{reachability}\td{465.3 459.4 449.8}\td{433.1 415.1 413.7}\td{328.8 352.6 348.5}\td{287.3 293.3 305.9}\td{-}}
+\tr{\td{con-leche}\td{1390 1392 1389}\td{1258 1294 1280}\td{1198 1205 1145}\td{1127 1051 1107}\td{-}}
+\tr{\td{navier-stokes-euler}\td{3471 3434 3451}\td{3296 3308 3298}\td{3027 3141 3096}\td{3014 2885 2984}\td{3863 3896 3847}}
+\tr{\td{cslib}\td{4790 4794 4769}\td{4360 4381 4369}\td{4061 3999 4055}\td{3787 3669 3631}\td{5279 5326 5319}}
+\tr{\td{Mathlib}\td{13106 13064 13263}\td{12288 12311 12277}\td{11223 11041 11065}\td{10324 10346 10374}\td{14428 14600 14532}}
+}
+}
+}
+
+\subtree{
+\title{8. The benchmark rows of the published build, and the optional build}
+
+\p{The rows of [the benchmark tables](rep-benchmarks) were taken again for the published build, in ten quiet-core windows between 21:29 and 21:46 UTC with the other cores idle (0.10 to 0.14 CPUs of the host busy before every window; no compaction stall in any of them): the executable in its default configuration, the JVM launcher, the reference engine by name on the executable, the instruction counts of a cold process in the arena-shaped container for both engines, and the optional executable built with Oracle GraalVM. gruszka and nano-lean were measured again on all eight corpora with their arena run lines and 8 threads, in the same two windows as the executable's rows. The tree was regenerated by \src{bench/track/benchmarks.py} and has every row with its window; the table of the root README was regenerated from the same rows. The summary:}
+
+\table{
+\tr{\th{8 workers, wall clock in s}\th{Init}\th{Std}\th{cedar}\th{reachability}\th{con-leche}\th{navier-stokes-euler}\th{cslib}\th{Mathlib}}
+\tr{\td{\strong{the executable}, default configuration: cold process (warm pass)}\td{0.60 (0.58)}\td{1.10 (0.99)}\td{1.49 (1.38)}\td{0.46 (0.40)}\td{1.36 (1.33)}\td{3.55 (3.36)}\td{4.56 (4.37)}\td{12.77 (12.32)}}
+\tr{\td{the JVM launcher, default configuration: warm pass}\td{0.53}\td{0.87}\td{1.21}\td{0.27}\td{1.04}\td{2.92}\td{3.65}\td{10.32}}
+\tr{\td{the executable, \code{\verb~|-X engine=reference~}: cold process (warm pass)}\td{1.89 (1.73)}\td{3.05 (2.92)}\td{3.97 (3.77)}\td{4.07 (4.03)}\td{32.23}\td{24.66}\td{16.52}\td{75.01}}
+\tr{\td{the OPTIONAL executable, Oracle GraalVM with the new profile: cold process (warm pass)}\td{0.57 (0.53)}\td{0.98 (0.93)}\td{1.37 (1.27)}\td{0.49 (0.38)}\td{1.25 (1.26)}\td{3.30 (3.09)}\td{4.28 (4.07)}\td{12.03 (11.60)}}
+\tr{\td{gruszka, 8 threads: first run (second run)}\td{0.54 (0.56)}\td{0.90 (0.92)}\td{1.39 (1.40)}\td{1.88 (2.01)}\td{1.11 (1.07)}\td{2.63 (2.65)}\td{4.09 (4.06)}\td{10.82 (10.74)}}
+\tr{\td{nano-lean, 8 threads: first run (second run)}\td{0.93 (0.89)}\td{1.50 (1.50)}\td{2.33 (2.29)}\td{0.77 (0.66)}\td{1.91 (1.92)}\td{3.75 (3.77)}\td{6.15 (6.08)}\td{15.78 (15.93)}}
+\tr{\td{\em{the executable / gruszka}: cold against first run (warm against second run)}\td{1.11 (1.04)}\td{1.22 (1.08)}\td{1.07 (0.99)}\td{0.24 (0.20)}\td{1.23 (1.24)}\td{1.35 (1.27)}\td{1.11 (1.08)}\td{1.18 (1.15)}}
+\tr{\td{\em{the JVM launcher / gruszka}: warm against second run}\td{0.95}\td{0.95}\td{0.86}\td{0.13}\td{0.97}\td{1.10}\td{0.90}\td{0.96}}
+\tr{\td{\em{the executable / nano-lean}: cold (warm)}\td{0.65 (0.65)}\td{0.73 (0.66)}\td{0.64 (0.60)}\td{0.60 (0.61)}\td{0.71 (0.69)}\td{0.95 (0.89)}\td{0.74 (0.72)}\td{0.81 (0.77)}}
+\tr{\td{\em{optional Oracle build / the executable}: cold (warm)}\td{0.95 (0.91)}\td{0.89 (0.94)}\td{0.92 (0.92)}\td{1.07 (0.95)}\td{0.92 (0.95)}\td{0.93 (0.92)}\td{0.94 (0.93)}\td{0.94 (0.94)}}
+\tr{\td{\em{optional Oracle build / gruszka}: warm against second run}\td{0.95}\td{1.01}\td{0.91}\td{0.19}\td{1.18}\td{1.17}\td{1.00}\td{1.08}}
+\tr{\td{instructions of a cold process, default configuration}\td{68.2 G}\td{118.2 G}\td{167.1 G}\td{15.8 G}\td{148.7 G}\td{416.1 G}\td{479.9 G}\td{1,433.2 G}}
+\tr{\td{instructions of a cold process, \code{\verb~|-X engine=reference~}}\td{227.2 G}\td{375.3 G}\td{476.4 G}\td{104.9 G}\td{748.0 G}\td{2,883.6 G}\td{2,018.6 G}\td{7,808.6 G}}
+\tr{\td{peak RSS, MiB: the executable / the JVM launcher / gruszka}\td{375 / 816 / 524}\td{596 / 1,067 / 635}\td{761 / 1,779 / 769}\td{717 / 1,455 / 1,192}\td{893 / 1,797 / 848}\td{1,496 / 2,249 / 931}\td{1,623 / 2,437 / 1,493}\td{3,955 / 4,804 / 2,798}}
+}
+
+\ul{
+\li{\strong{The executable against gruszka in these windows}: 1.04, 1.08, 0.99, 0.20, 1.24, 1.27, 1.08 and 1.15 times gruszka's time for a warm pass (the tables after the first wave: 1.15, 1.21, 1.06, 0.24, 1.28, 1.31, 1.17, 1.23), and 1.07 to 1.35 times for one cold process on seven corpora. The guard windows of section 7, where gruszka ran eight times per corpus beside three rounds of the executable, give 1.05, 1.12, 0.99, 0.21, 1.19, 1.26, 1.06 and 1.14; a pass of about a second moves by up to 5 \% between windows, con-leche here.}
+\li{\strong{The JVM launcher} is at 0.95, 0.95, 0.86, 0.13, 0.97, 1.10, 0.90 and 0.96 of gruszka's second run (after the first wave: 1.04, 1.03, 0.89, 0.18, 1.06, 1.14, 0.98, 1.02): ahead on seven corpora in these windows, on six in the guard windows, behind on navier-stokes-euler in both.}
+\li{\strong{Against nano-lean} the executable needs 0.60 to 0.89 of the time of a warm pass and 0.60 to 0.95 of a cold process.}
+\li{\strong{A cold process against a warm pass}: 2 to 15 \% longer (Mathlib 12.77 against 12.32 s).}
+\li{\strong{The reference engine by name} is what it was: the wave changes its loader's inner loops and nothing of its engine. Cold processes within 2 \% of the rows after the first wave on seven corpora (Mathlib 75.01 s, there 75.98) and 5.5 \% longer on con-leche (32.23 against 30.54 s, one process each); instructions within 0.1 \% on all eight (Mathlib 7,808.6 G, there 7,804.6).}
+\li{\strong{Instructions of the default configuration}, one cold process each in the arena-shaped container: 68.2, 118.2, 167.1, 15.8, 148.7, 416.1, 479.9 and 1,433.2 G, the counts of the arena procedure of section 6.1. Against gruszka's counts with its arena run line, as recorded on this host: 3.0 to 3.5 times on seven corpora, 1.20 times on reachability (after the first wave 3.1 to 3.6 and 1.14).}
+}
+
+\subtree{
+\title{8.1 The optional build with Oracle GraalVM}
+
+\p{Oracle GraalVM is used by this explicitly optional build only; nothing was downloaded (the toolchain directory had it). The profile was recorded again with \code{\verb~|scripts/dev.sh profiles --published~} at 20:10 UTC: an instrumented image of the published jars (97 s), the Truffle probe, and Init once in the default configuration (1.9 s instrumented). The record of the profiles in the repository names the jars of the published build (\code{rlvm-export} \code{8fcc3cb37172}, \code{rlvm-store} \code{e2847c61a33c}, \code{rlvm-load} \code{6cc864470e08}, \code{rlvm-driver} \code{71da48c8c6ee}, \code{rlvm-machine} \code{1eaaf3e3655c}, \code{rlvm-level} \code{35e453f8c770}; profile id \code{169e607bc762}, 2.6 MB compressed). The optional executable was then built once from them (73 s; 46.4 MB, sha256 \code{591eb855f426}); its build record says "profile state: fresh". The whole command took 176 s. The same command without \code{\verb~|--published~} does not build: it compiles every module from the tree against the Truffle version of the Oracle GraalVM, and the sources of \code{rlvm-truffle} in the tree, which are newer than its published jar (5 classes differ, one is new), do not compile against that version. It failed in its Maven step and changed nothing.}
+
+\ul{
+\li{\strong{Its row} (the table above): Mathlib 12.03 s cold and 11.60 s for a warm pass, Init 0.57 and 0.53 s, cslib 4.28 and 4.07 s. Against gruszka's second run its warm pass is at 0.95, 1.01, 0.91, 0.19, 1.18, 1.17, 1.00 and 1.08.}
+\li{\strong{Its lead over the default executable is what it was after the first wave}: 0.91 to 0.95 times the default executable's warm pass on the eight corpora (there 0.92 to 0.98), and 0.89 to 0.95 times its cold wall clock on seven corpora with reachability at 1.07 (0.49 against 0.46 s, one process each of under half a second). The sentence of the root README was changed to these figures.}
+\li{\strong{Not gated.} The optional executable accepted the eight corpora in its 16 benchmark processes; no gate and no arena procedure was run on it.}
+}
+}
+}
+
+\subtree{
+\title{9. What was not measured}
+
+\ul{
+\li{\strong{x86-64.} Every figure is from the aarch64 development host. The arena's runner is x86-64 with 16 GB; nothing of this wave ran there.}
+\li{\strong{The changes one by one on the published build.} The guard of section 7 is the sum of the wave. What each change gives alone is in its own report, measured against a base of its own, most of them on a busy host and before the level fix; the counters of section 5 attribute what is computed, not the time.}
+\li{\strong{Two builds of an image are not the same code} ([the insight](ins-TWRM)). The executable before the wave and the published one are two builds, as they have to be; the window of section 3 compared a setting inside one executable where it could (the table sizes) and two private builds where it could not. No executable was built twice to see what a second build of the same jars moves.}
+\li{\strong{The optional executable} (Oracle GraalVM, profile-guided) was not gated and did not go through the arena's procedure: it accepted the eight corpora in the processes of its benchmark rows.}
+\li{\strong{The JVM launcher on a stock OpenJDK} was run for verdicts only in this report: Init, Std and cslib and the 270 arena tests. Its warm pass, its counters and its build on that JDK are in rep-OPT-J, measured with the refused flag left out; with the flag pair they were not measured again. One stock build, one patch level.}
+\li{\strong{The Mathlib differential test of the reader} has a switch of its own and was not run on the merged tree; the merged \code{rlvm-export} is file for file the candidate on which rep-OPT-F ran it.}
+\li{\strong{The mutant corpora under the invariance suite} other than the tutorial and bugs mutants (the metadata and prelude mutants) were not run; the gates of section 6 run all four corpora through the launchers.}
+\li{\strong{gruszka and nano-lean} are the builds of the baseline tables, not rebuilt; gruszka ran in every guard window, nano-lean only in the windows of the benchmark rows.}
+\li{\strong{The profile of the published build.} Where the remaining distance to gruszka goes after this wave was not profiled; [the profile of the release](rep-P11) and [the unit-by-unit comparison](rep-OPT-E) are of builds before it.}
+\li{\strong{Why the instruction count goes up on single large units} (section 6.1) was not profiled: that the young and old tables execute more and wait less is read from the counts and the CPU times of the arena procedure, not from a profile, and the one test that is slower by both measures was not looked at.}
+\li{\strong{The peak memory of the JVM launcher on Init} is 34 MiB higher after the wave in the guard window (811 to 845 MiB) and was not explained.}
+}
+}
+

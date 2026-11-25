@@ -1,0 +1,19 @@
+\title{A declaration that repeats an accepted one word for word is not checked again}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{driver}
+\tag{unreleased}
+\tag{loader}
+\tag{store}
+\tag{soundness}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{34e8647}
+\import{base-macros}
+
+\p{A definition, theorem or opaque that repeats an accepted earlier unit of the file word for word, with the same kind, the same list of universe-parameter names, the same reducibility hint and the \em{same type and value records} of the export, is admitted and not checked again. The loader finds repeats in a table of declarations by their record ids (\code{\verb~|rlvm.load.Repeats~}, \code{\verb~|LoadTarget.repeatOf~}); the store keeps the original of a unit in a column that it reads nowhere (\code{\verb~|DeclTable.repeatOf~}, \code{\verb~|StoreBuilder.repeatOf~}); the driver reads it (\code{\verb~|RunHost.unitRepeatOf~}, \code{\verb~|RunConfig.skipRepeats~}). The setting is \code{\verb~|-X repeats=skip~}, the default, or \code{\verb~|-X repeats=check~}; the statistics are \code{load.repeatUnits}, \code{driver.repeatsSkipped} and \code{driver.repeatsAwaited}. If the original has no status yet, the repeat is checked; if that check does not accept, the worker waits for the original's status, which happened on no corpus. The skip is never made when the primary engine is the reference engine, so never under \code{\verb~|-X policy=strict~}. Repeats: Init 5,948, Std 8,661, cedar 15,429, reachability 220, con-leche 4,570, navier-stokes-euler 13,331, cslib 30,445, Mathlib 59,900 of 721,845 units. \strong{One hostile file gets another verdict.} \code{R-e1-sib-krule-major-redex-bad} is the row \code{e1-sib-krule-major-redex-bad} of the tolerated kind (finding E1-F7, the K rule on a major premise that is a beta-redex) with its theorem repeated. The official checker rejects it; the statement is derivable. The default configuration accepts the original, one of its tolerated accepts, and without the skip it rejected the file at the repeat, which is the official verdict; with the skip the file is \strong{accepted}. That is a tolerated accept under the practical policy; under \code{\verb~|-X policy=strict~} the file is rejected as officially. No underivable statement is accepted.}
+
+\p{Detail: [the report](rep-OPT-I), section 3: the official checker gives a repeat the verdict of its original on 1,193 of 1,193 hostile files made for the question, the reference engine accepts every skipped unit of the eight corpora in a differential run, the row above is the only verdict that differs on 1,648 hostile files, and for the change alone on a calm host the geometric mean of the eight warm passes of the executable goes from 1.855 to 1.829 s with every corpus faster (8 workers). [The driver's side](design-driver-repeats), [the accept of a repeat in the verdict protocol](design-verdict-protocol-repeats), [the loader's table](design-export-loader-repeats), [the accepted risk](accepted-risks-divergence), [the finding in short](ins-FS8W). Taken into the default build, with that row, by [the decision](dec-RHRE); the gates and the guard of the merged build: [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{34e8647}.}

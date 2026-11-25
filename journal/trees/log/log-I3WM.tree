@@ -1,0 +1,16 @@
+\title{The default budget of an eager probe is 2^17 ticks}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{34e8647}
+\import{base-macros}
+
+\p{A probe of the plain phase of [eager reduction on the machine](design-eager-reduction) now has a default budget of 2^17 ticks (\code{\verb~|MachineEngine.DEFAULT_EAGER_PROBE~}, \code{\verb~|-X machine.eager-probe~}); it was [2^22](log-P6FV). The probe sizes of the eight corpora fall into three groups: below 1,600 ticks; 34,096 to 63,654; 458,881 and more. 2^17 lies in the upper gap, 2.06 times above the largest probe that completes and 3.5 times below the smallest it cuts. Exactly five units change. Four units of \code{Batteries.Data.Char.Basic} (\code{\verb~|Char.all._proof_1~}, \code{\verb~|Char.any._proof_1~}, \code{\verb~|Char.of_any_eq_false_aux._proof_1_15~} and \code{\verb~|_1_18~}), on cslib and on Mathlib, were accepted by the machine after 0.98 to 3.2 M ticks each and are now declines of the machine that the reference engine decides, the four in 15,760 steps; con-leche's unit \code{\verb~|ConLeche.lpOfData_pack~}, cut before, is cut earlier. With one worker the machine's declines go from 14 to 22 attempts on cslib and from 120 to 128 on Mathlib, the units decided by the reference engine from 7 to 11 and from 60 to 64, and the machine needs 7.85 M fewer ticks on cslib and on Mathlib and 4.06 M fewer on con-leche; every other unit of the eight corpora has the ticks and the outcome it had. No verdict changes: a cut probe can only turn a verdict of the machine into a decline. The statistics \code{machine.eager.probeBudget}, \code{probeCuts}, \code{probeMaxTicks} and \code{declined.probe} say after any run which units were cut.}
+
+\p{Detail: [the report](rep-OPT-I), section 2; for the change alone on a calm host the geometric mean of the eight warm passes of the executable goes from 1.855 to 1.830 s with no corpus slower, and the JVM launcher is flat (8 workers). [The three sizes of the probes](ins-N4ES), [staging switches](design-switches), [what is left of finding INT7-F1](prob-HC9J). In the default build with the other changes of the second wave, with its gates and its guard: [the decision](dec-RHRE), [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{34e8647}.}

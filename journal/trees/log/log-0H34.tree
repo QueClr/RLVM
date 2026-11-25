@@ -1,0 +1,18 @@
+\title{The loader thread, second pass: stretches of app, lam and forallE records, and a small table in front of the name index}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{loader-store}
+\tag{unreleased}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{34e8647}
+\import{base-macros}
+
+\p{The scanner of \code{rlvm-export} takes \code{app}, \code{lam} and \code{forallE} lines in one loop without a call, \code{\verb~|Scanner.exprStretch~}: the end of a line comes from loads at fixed places instead of from the line's numbers, a number has up to 8 digits there, and a line with a longer number goes to the loop of [the first pass](log-R7NE). A stretch is handed over as four ints per record through \code{\verb~|RecordOut.exprs~} and \code{\verb~|ExportSink.exprStretch~}, which \strong{replace} \code{\verb~|RecordOut.apps~} and \code{\verb~|ExportSink.exprApps~} of the first pass; both have a default that makes the single calls, so a sink that still implements \code{exprApps} gets the single calls again without a message. The loader of \code{rlvm-load} implements the stretch (\code{\verb~|Loader.exprStretch~}). The name table of \code{rlvm-store} keeps the names of the last thousand out of its large index, in a small table that is searched first: a name whose prefix is one of them cannot stand in the index. Both changes are cost only: no rule of the reader, the loader or the store changed, every name has the id it had, the digest of everything a load builds is identical in 25 reader configurations on the small files, the arena tests, the prelude mutants and the eight corpora under both policies, and one scanner thread stays the default.}
+
+\p{Detail: [the report](rep-OPT-F); for the change alone, on a busy host, a load of the executable takes 10 to 16 \% less time, the loader thread needs 9.78 s of CPU in a Mathlib pass where it needed 10.81 s, and the geometric mean of the eight warm passes goes down by 2.4 \% in the executable and by 1.9 \% on the JVM launcher (8 workers, three interleaved rounds). [What a miss costs and how to ask for it less often](ins-T58L), [stretches](design-export-loader-stretches), [the loader as the floor](prob-I7M9). In the default build with the other changes of the second wave, with its gates and its guard: [the decision](dec-RHRE), [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{34e8647}.}

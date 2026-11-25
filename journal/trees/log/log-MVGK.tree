@@ -1,0 +1,17 @@
+\title{A cached universe instantiation survives a level reset only by content}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{unreleased}
+\tag{levels}
+\tag{store}
+\meta{release}{Unreleased}
+\meta{commit}{55f2db3}
+\import{base-macros}
+
+\p{The two instantiation caches of the level store (\code{rlvm-level}, so under both engines) kept an entry across a reset of a worker's level overlay when the ids it rests on lay below the bounds of the frozen base. A base list \em{id} is not a list of base \em{levels}: level lists share one hash-consed store with the lists of parameter names, so a level list made of levels of the session can be \em{found} as a base list of the same ints. Such an entry survived, and a later session was handed a level list that meant other levels than the instantiation it had asked for, or an id that did not exist. An entry now survives only by content: every id it rests on is a base id and every level in its level lists is a base level (\code{\verb~|LevelStore.isBaseLevelList~}); and the term store of \code{rlvm-store} takes the level list of a constant into a shared term only if every level in it is shared (\code{\verb~|NodeCtx.listIsShared~}). The defect is older than [the shared level base](log-ZMAE) and of the family of [finding LV1-F1](log-XNVE), whose fix had left this rule. Counted without the fix, in a build that counts and has the same ids and answers (JVM launcher): 188 runs of a matrix on the eight corpora, both engines, all accept; 178 cache entries survived a reset in 72 runs, and 49 later hits fell in 8 runs, 33 of which handed the engine another level list than the instantiation and 16 an id that did not exist. \strong{No wrong verdict was observed, and none was excluded}: an export that turns the wrong level into a wrong accept was attempted and not built. Where no stale entry was hit nothing changes: the counters of a run with one worker are identical on Init, Std and cslib, and no verdict of the 230 arena tests and the 1,196 hostile rows of that day moves. Published as \code{rlvm-level} \code{35e453f8c770} and \code{rlvm-store} \code{5328df68c01b}.}
+
+\p{Detail: [the report](rep-INV-1), [the lesson](ins-DWCM), [what survives a reset](design-universe-levels-overlays). The structural repair that the report proposes, separate stores for level lists and name lists, is open: [what is left open](prob-HC9J). The suites and gates of the build that has the fix under the second optimisation wave: [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{55f2db3}.}

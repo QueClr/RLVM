@@ -1,0 +1,16 @@
+\title{The session tables of the machine are a young table of fixed size and an old one that grows}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{machine}
+\tag{unreleased}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{34e8647}
+\import{base-macros}
+
+\p{Each of the three tables in which a session of the machine finds something again, the intern table of the records, the table of the frame runs and the pair table, is now two: a young table of fixed size, where every probe starts and every new entry is written, and an old table that grows. A key that holds a record or a run made after the young table was last emptied can only name a young entry, so only a key made of old things is looked up in the old table. The young tables have 2^16 record slots, 2^14 frame slots and 2^13 pairs, where the one table per kind started at 2^15, 2^14 and 2^12: a session that ends at the cap of 1 MiB never moves an entry and never rehashes. Settings: \code{\verb~|-Drlvm.machine.sizes~} now gives the sizes of the young tables (default \code{\verb~|14,16,16,14,13,10~}), \code{\verb~|-Drlvm.machine.oldhint=off~} makes an old table start small, \code{\verb~|-Drlvm.machine.tableaudit=true~} audits the tables at every reset. Code that reads \code{\verb~|m.vtab~}, \code{\verb~|m.rtab~} or \code{\verb~|m.pair~} reads the young tables only. In the force-inline list of the image \code{\verb~|Values.closureOverNew~} became \code{\verb~|Values.closureNew~}; the build reports 269 forced and 81 never-inlined methods as before. What is computed does not change: hash functions, records, ids and the footprint are what they were, and every counter of the machine is identical on the eight corpora. \strong{The session cap stays at 1 MiB}: with the new tables a larger cap is slower at every size, in the geometric mean of the eight warm passes +1.5 \% at 2 MiB, +2.5 \% at 4 MiB, +5.8 \% at 8 MiB and +8.1 \% at 16 MiB (the executable, 8 workers, three interleaved rounds per corpus).}
+
+\p{Detail: [the report](rep-OPT-D); for the change alone, against the same tree without it on a busy host, the warm pass of the executable is 0.957 of the base's in the geometric mean of the eight corpora with every corpus faster, and 0.912 on the JVM launcher. [The rule of the young table](ins-ZKG1), [what a larger session costs](ins-58I0), [warm sessions and the session cap](design-warm-sessions), [the cost of one machine operation](prob-28KQ). In the default build with the other changes of the second wave, with its gates and its guard: [the decision](dec-RHRE), [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{34e8647}.}

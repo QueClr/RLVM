@@ -69,8 +69,8 @@ What stands behind this today (2026-11-25, the machine as default engine; *agent
 
 - gated on the launcher without any option, through the jars and through the executable: the 230 published arena
   tests (230 correct, none declined); 17,775 mutants of them against the stored verdicts of the official checker
-  (no accepted bad mutant, no rejected good one; agree 15,741, declined 2,034); 1,196 hostile exports with their
-  official verdicts (no wrong accept, no wrong reject; agree 1,124, 68 accepts of kind (d), 4 declined); Init,
+  (no accepted bad mutant, no rejected good one; agree 15,741, declined 2,034); 1,274 hostile exports with their
+  official verdicts (no wrong accept, no wrong reject; agree 1,192, 78 accepts of kind (d), 4 declined); Init,
   Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and mathlib accepted; the verdict does not
   depend on the number of workers or on how loading and checking interleave; the arena's complete test set of
   270 by the arena's own procedure, through the executable of this build: all 148 good tests accepted, all 92
@@ -99,8 +99,8 @@ first time.
 
 An optional build uses **Oracle GraalVM** and profile-guided optimisation from the profiles in `profiles/`
 (recorded as the last step of a release; `scripts/dev.sh profiles` records them): `scripts/build.sh --oracle-pgo`.
-Measured with the profiles of the repository, that executable needs 0.92 to 0.96 times the default executable's
-wall clock on the eight corpora (cold; 0.92 to 0.98 warm).
+Measured with the profiles of the repository, that executable needs 0.89 to 0.95 times the default executable's
+wall clock on seven corpora and 1.07 times on reachability (cold; 0.91 to 0.95 warm on all eight).
 Oracle GraalVM is not open source: it is licensed under the GraalVM Free Terms and Conditions, the option says
 so, and it downloads Oracle GraalVM only when `--accept-oracle-licence` is given too. The default build, the
 release workflow and CI use GraalVM Community Edition only.
@@ -113,12 +113,12 @@ lists the rest (development distributions that also run the jars on a JVM, the g
 <!-- table: bench/track/benchmarks.py --headline (the rows of bench/warm.sh; *agentic-note*: rep-benchmarks) -->
 | One run, 8 cores: wall clock in s (warm pass) | init (348 MB) | std (584 MB) | cedar (905 MB) | reachability (19 MB) | con-leche (702 MB) | navier-stokes-euler (1.56 GB) | cslib (2.50 GB) | mathlib (6.33 GB) |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|
-| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.66 (0.61) | 1.13 (1.05) | 1.56 (1.47) | 0.55 (0.45) | 1.57 (1.41) | 3.63 (3.45) | 4.99 (4.80) | 13.53 (13.15) |
-| `rlvm -X engine=reference FILE` | 1.88 (1.75) | 3.08 (2.97) | 4.00 (3.83) | 4.11 (3.88) | 30.54 | 24.54 | 16.70 | 75.98 |
-| gruszka | 0.56 (0.53) | 0.88 (0.87) | 1.39 (1.39) | 1.83 (1.86) | 1.09 (1.10) | 2.60 (2.64) | 4.10 (4.09) | 10.76 (10.68) |
-| nano-lean | 0.91 (0.89) | 1.50 (1.50) | 2.30 (2.31) | 0.76 (0.58) | 1.89 (1.88) | 3.76 (3.73) | 6.14 (6.10) | 15.87 (15.76) |
-| *rlvm / gruszka* | 1.18x | 1.28x | 1.12x | 0.30x | 1.44x | 1.40x | 1.22x | 1.26x |
-| *rlvm / nano-lean* | 0.73x | 0.75x | 0.68x | 0.72x | 0.83x | 0.97x | 0.81x | 0.85x |
+| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.60 (0.58) | 1.10 (0.99) | 1.49 (1.38) | 0.46 (0.40) | 1.36 (1.33) | 3.55 (3.36) | 4.56 (4.37) | 12.77 (12.32) |
+| `rlvm -X engine=reference FILE` | 1.89 (1.73) | 3.05 (2.92) | 3.97 (3.77) | 4.07 (4.03) | 32.23 | 24.66 | 16.52 | 75.01 |
+| gruszka | 0.54 (0.56) | 0.90 (0.92) | 1.39 (1.40) | 1.88 (2.01) | 1.11 (1.07) | 2.63 (2.65) | 4.09 (4.06) | 10.82 (10.74) |
+| nano-lean | 0.93 (0.89) | 1.50 (1.50) | 2.33 (2.29) | 0.77 (0.66) | 1.91 (1.92) | 3.75 (3.77) | 6.15 (6.08) | 15.78 (15.93) |
+| *rlvm / gruszka* | 1.11x | 1.22x | 1.07x | 0.24x | 1.23x | 1.35x | 1.11x | 1.18x |
+| *rlvm / nano-lean* | 0.65x | 0.73x | 0.64x | 0.60x | 0.71x | 0.95x | 0.74x | 0.81x |
 <!-- end table -->
 
 Conditions: one host (aarch64, Cortex-X925), 8 cores reserved for one measurement at a time while the other 12

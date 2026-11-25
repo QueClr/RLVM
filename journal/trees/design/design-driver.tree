@@ -21,7 +21,7 @@
 \ul{
 \li{\strong{The loader} is the thread that called the driver. In a pipelined run it publishes finished units while the others check; this moves the \em{loaded frontier}. See [the export loader](design-export-loader).}
 \li{\strong{The environment thread} runs the environment lane: it admits inductive blocks and the quotient records in file order with [the reference engine](design-reference-engine), and announces every unit below what it has admitted. This is the \em{environment frontier}: units below it may be handed out. See [admission](design-inductive-admission).}
-\li{\strong{W workers} claim announced units and check definitions, theorems, axioms and opaques with the primary engine in a warm session. A worker has three lanes: the warm lane, a strict lane and a reference lane for re-checks.}
+\li{\strong{W workers} claim announced units and check definitions, theorems, axioms and opaques with the primary engine in a warm session. A worker has three lanes: the warm lane, a strict lane and a reference lane for re-checks. Since 2026-11-25 a unit that repeats an accepted unit word for word is admitted and not checked, see [repeats](design-driver-repeats).}
 \li{\strong{The first-failure mark} is the smallest unit with a recorded rejection or decline. Units above it are no longer handed out, and running ones abandon at their next poll.}
 }
 
@@ -54,6 +54,22 @@
 \p{\strong{What a publication costs since 2026-11-25.} The workers read the frozen level store of a publication in place, see [frozen base and overlays](design-universe-levels-overlays): a lane that is handed a unit beyond its snapshot is reset as before, and the reset moves its level view to the newest snapshot with a few reference assignments. Nothing is allocated and nothing is copied; the loader still copies its open level store once per publication to go on in. The scaled interval was kept. Measured on the executable with the shared base, 8 workers, two interleaved rounds: Mathlib in 205 pieces 15.00 s and in 52 pieces 15.05 s, cslib 5.26 and 5.22 s, the same worker CPU and page faults, so small pieces no longer cost the workers anything; they are no gain either, because the workers are not waiting for the loader on these corpora and the loader pays for each piece with its own copy (1.43 s of kernel time instead of 1.10 s on Mathlib). See [the report](rep-OPT-C), section 5.3, and [the changelog entry](log-ZMAE).}
 }
 
+\subtree[design-driver-repeats]{
+\title{Repeats: a unit that repeats an accepted unit is admitted and not checked again}
+
+\p{Since 2026-11-25. The exporter writes many declarations more than once under different names: auxiliary proofs, equation lemmas, matchers. A unit is a \em{repeat} if it is a definition, a theorem or an opaque and an earlier unit of the file, its \em{original}, has the same kind, the same list of universe-parameter names, the same reducibility hint and the same two records of the export as type and as value. The loader finds repeats and writes the original into a column of the declaration table, see [the export loader](design-export-loader-repeats). 5.0 to 12.4 \% of the units of the eight corpora are repeats, 59,900 of Mathlib's 721,845, and in the build before the change they carried 1.3 to 3.7 \% of the machine's ticks.}
+
+\ul{
+\li{\strong{The skip.} A worker that comes to a repeat whose original is also earlier in admission order reads the original's status on the verdict board. If it is ACCEPTED, the unit goes through the lane's admission as any unit does (the environment frontier, a recorded outcome of the environment pass, the name, the universe parameters, the roots), with a session that answers accept where the engine would have been called. A status is written once, so an ACCEPTED that was read is final. A skipped unit counts as accepted and has zero steps in the unit trace.}
+\li{\strong{The original has no status yet}, because it is on another worker or in another worker's claim: the repeat is checked like any unit, and nobody waits.}
+\li{\strong{The wait.} If that check does not end in accept, the worker gives the rest of its claim back, resets its session and waits for the original's status. If it is ACCEPTED, the unit goes through the path of a repeat, as it would have a moment later; otherwise the first failure of the file lies at or before the original. The wait is for a smaller unit that another worker holds, so no cycle of waits exists; the worker holds no gate, and a cancelled run ends the wait. The rule exists so that no status depends on the schedule: on one kind of hostile input the machine accepts the original and rejects its copy, see [the accept of a repeat](design-verdict-protocol-repeats). The wait did not occur on any corpus (\code{driver.repeatsAwaited} is 0); a test of the driver forces it.}
+\li{\strong{Never with the reference engine as primary engine}: with \code{\verb~|-X engine=reference~}, and so under \code{\verb~|-X policy=strict~}, every declaration is checked, as the official checker checks it. In a differential run the reference engine still checks every unit, the skipped ones included.}
+\li{\strong{Setting and statistics.} \code{\verb~|-X repeats=skip~} is the default and \code{\verb~|-X repeats=check~} checks every unit; \code{load.repeatUnits}, \code{driver.repeatsSkipped} and \code{driver.repeatsAwaited} count the repeats of the file, the units not checked and the waits.}
+}
+
+\p{Measured for the skip alone, the build with it against the same tree without it, warm passes with 8 workers on a calm host: in the executable the geometric mean of the eight corpora goes from 1.855 to 1.829 s, -1.4 \%, with every corpus faster; on the JVM launcher -0.7 \%, the largest loss con-leche at +1.7 \%. The loader pays half a percent to 0.8 \% of a load for its table. See [the report](rep-OPT-I), section 3, [the changelog entry](log-YGJO) and [the decision of the second wave](dec-RHRE); the build that has the skip together with the other changes of that day is [the integration of the second wave](rep-INT9).}
+}
+
 \subtree[design-driver-memory]{
 \title{Sessions and memory}
 
@@ -65,7 +81,7 @@
 
 \ul{
 \li{Fail closed: the run's status is decline until the complete file was accepted.}
-\li{The verdict and the deciding unit do not depend on the worker count, the chunk and slice sizes, the session cap, the byte budgets or the load mode. No decision that affects a verdict is based on time.}
+\li{The verdict and the deciding unit do not depend on the worker count, the chunk and slice sizes, the session cap, the byte budgets or the load mode. No decision that affects a verdict is based on time. With the skip of repeats this holds through the wait: whether the original of a repeat was decided before the repeat came up changes no status.}
 \li{The invariance suite runs every file under 9 schedules: batch with 1, 2, 4 and 8 workers, a session cap of one byte, pipelined with a publication every 1, 7 and 64 units. On 16,928 mutants, with the reference engine and with the machine as primary engine: 0 wrong, 0 schedule differences, 1,675 declined alike in every schedule, 0 declines that only a pipelined run has.}
 }
 

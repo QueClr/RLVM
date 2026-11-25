@@ -1,0 +1,17 @@
+\title{78 hostile exports against a table of kept comparison results join the machine's hostile suite}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{bench-tooling}
+\tag{unreleased}
+\tag{machine}
+\tag{soundness}
+\meta{release}{Unreleased}
+\meta{commit}{34e8647}
+\import{base-macros}
+
+\p{The manifest of the machine's hostile suite, \src{rlvm-machine/src/test/resources/s/manifest.tsv}, has 1,274 rows where it had 1,196. The 78 new exports each carry the verdict of the official checker, 41 accepts and 37 rejects; 11 of them have the mark of the tolerated kind, each with a certificate that the official checker accepts. They were written against the switch \code{closedpairs}, a table of comparison results for closed values that survives the machine's sessions. \strong{That switch was not adopted and is not in the main tree}; the rows stay, because what they attack (a kept "true", a kept "false", universe levels, literals, eager reduction, the shapes of a key) is also what a warm session keeps. In the gate of the default configuration the 1,274 rows give 1,192 in agreement, 78 tolerated accepts (the 68 of before and 10 of the new rows), no wrong accept, no wrong reject and 4 declines; \code{SHostileSlowTest} runs 56 switch sets by 1,274 rows without an unexpected verdict.}
+
+\p{Detail: [the report](rep-OPT-H), section 5, for the families and the seeded faults, and sections 0 and 8 for why the switch stays out: no gain in time that the guard resolves on the large corpora, and no adversarial pass yet. [What such a table gives](ins-BFT4), [the gate](design-gate), [the divergence classes](design-official-divergence), [the tolerated rows](prob-HC9J). The decision that kept the switch out and the rows in: [the decision](dec-RHRE); the gates of the merged build: [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{34e8647}.}

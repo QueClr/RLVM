@@ -1,0 +1,16 @@
+\title{The JVM launcher starts on a stock OpenJDK 25}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{platform}
+\meta{release}{Unreleased}
+\meta{commit}{34e8647}
+\import{base-macros}
+
+\p{The flag line of the JVM launcher has \code{\verb~|-XX:+UnlockExperimentalVMOptions~} in front of \code{\verb~|-XX:-UseJVMCICompiler~}: in \code{JVM_FLAGS} of \src{scripts/build.sh}, in the test VM of \src{rlvm-truffle/pom.xml} and in the constants of \src{scripts/platform-matrix.py} and \src{bench/modules/rlvm-export/measure-all.sh}. A stock OpenJDK refuses the second flag alone, because it is an experimental flag there, and exits with status 1 before the checker starts; both VMs accept the pair, and on GraalVM CE it changes no other VM flag. A java named in \code{RLVM_JAVA} therefore no longer has to be a GraalVM. The JVM launcher does not need the GraalVM JDK: what GraalVM contributes to RLVM is the native image, which is the release, and the Truffle tier of the machine (the switch \code{t2}, off), which on a stock JDK has only its fallback runtime. The build of a distribution still runs on GraalVM CE, also one without the executable.}
+
+\p{Detail: [the report](rep-OPT-J): on Eclipse Temurin 25.0.5.1+2, with the refused flag left out of the line, the launcher gives the same status and exit code on the 270 tests of the arena, the same counters on the eight corpora with one worker and the same warm pass as on the GraalVM JDK (geometric mean 1.007, no corpus more than 1.9 \% slower; 8 workers, three interleaved rounds per corpus, aarch64 development host); one stock build and one patch level were measured. With the line as it ships since this change, the unlock in front of the flag, the published launcher gives the same status and exit code on 270 of 270 arena tests on the GraalVM JDK of the build and on Temurin, and accepts Init, Std and cslib on Temurin with 8 workers (section 6 of the report of the integration, linked below). [The launchers](design-launchers), [packaging](design-packaging). With the other changes of the second wave: [the decision](dec-RHRE), [the report of the integration](rep-INT9); [the session](ses-Q8QP). Commit \commit{34e8647}.}

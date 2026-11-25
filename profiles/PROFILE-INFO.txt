@@ -1,28 +1,28 @@
 RLVM profiles for 'scripts/build.sh --oracle-pgo' (profile-guided optimisation with Oracle GraalVM).
 Made by 'scripts/build.sh --oracle-pgo --train-profiles' (scripts/dev.sh profiles); do not edit.
 
-id:        d9e6c398f79e
-made:      2026-11-25T10:34:39Z on Linux aarch64
+id:        169e607bc762
+made:      2026-11-25T20:10:33Z on Linux aarch64
 compiler:  Oracle GraalVM 25.0.4 (25.0.4+7-LTS-jvmci-b01), native-image --pgo-instrument, -O3, serial collector
 settings:  the default configuration of the instrumented executable (default engine: machine)
 sources:   the RLVM jars of the build (compiled against Truffle 25.0.4, the version of this compiler), sha256 prefixes:
              rlvm-admit         398a117d4ad8
              rlvm-api           e2d2d31509fc
              rlvm-cli           ac9b19d560b2
-             rlvm-driver        31fa08d9ce61
-             rlvm-export        38c922c4fccd
+             rlvm-driver        71da48c8c6ee
+             rlvm-export        8fcc3cb37172
              rlvm-inductive     c15b14fffdd3
-             rlvm-level         4db74adbb68d
-             rlvm-load          a2a091b291fa
-             rlvm-machine       fa6d5d3bf377
+             rlvm-level         35e453f8c770
+             rlvm-load          6cc864470e08
+             rlvm-machine       1eaaf3e3655c
              rlvm-main          3729609561e3
              rlvm-nat           b1dda7562adb
              rlvm-ref           a20c24a26b7c
-             rlvm-store         a93a52584ee7
+             rlvm-store         e2847c61a33c
              rlvm-truffle       ad3256d0751d
 training:  one run of the instrumented executable each, RLVM_EXIT=exit:
              --truffle-probe -> probe.iprof.gz
-             init.ndjson (347772063 bytes, sha256 93b61a432ed4241b), arguments: none (the default configuration); exit 0, 1.5 s instrumented -> train-init.iprof.gz
+             init.ndjson (347772063 bytes, sha256 93b61a432ed4241b), arguments: none (the default configuration); exit 0, 1.9 s instrumented -> train-init.iprof.gz
 files:     sha256, bytes, name
-             19670f847011b20a   1466539 probe.iprof.gz
-             178eb5dc8c822312   1110695 train-init.iprof.gz
+             53fd484a952febd5   1459769 probe.iprof.gz
+             1d9a06ed85ae04c5   1110473 train-init.iprof.gz

@@ -366,8 +366,8 @@ public final class RunConfig {
      * repeats=skip|check  a unit that repeats an accepted unit word for word is not checked again
      *                     (skip, the default) or is (check)                            {@link #skipRepeats}
      * </pre>
-     * None of the numeric settings can change a verdict, nor can {@code repeats}; {@code no-fallback} and
-     * {@code shard} can only turn an ACCEPT into a DECLINE.
+     * None of the numeric settings can change a verdict. {@code repeats} can, on one kind of hostile input only: a file that
+     * only a shortcut of the primary engine accepts ({@link #skipRepeats}). {@code no-fallback} and {@code shard} can only turn an ACCEPT into a DECLINE.
      *
      * @throws IllegalArgumentException with a message for the user: unknown key, missing or malformed
      *     value, value out of range

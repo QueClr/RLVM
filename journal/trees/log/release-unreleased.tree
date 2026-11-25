@@ -28,6 +28,8 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-I3WM}
+\transclude{log-5HTT}
 \transclude{log-65Z0}
 \transclude{log-HS1E}
 \transclude{log-9636}
@@ -57,6 +59,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-0H34}
 \transclude{log-R7NE}
 \transclude{log-UB1N}
 \transclude{log-RN1B}
@@ -74,6 +77,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-YGJO}
 \transclude{log-QMC7}
 \transclude{log-QJD9}
 \transclude{log-Q48W}
@@ -89,6 +93,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-7WDX}
 \transclude{log-E7BA}
 \transclude{log-RCAL}
 \transclude{log-Z220}
@@ -106,6 +111,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-T6DI}
 \transclude{log-TLVM}
 \transclude{log-P2L8}
 \transclude{log-O30E}
@@ -134,6 +140,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-MVGK}
 \transclude{log-TRJ0}
 \transclude{log-6K9N}
 \transclude{log-XNVE}
