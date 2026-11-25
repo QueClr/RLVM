@@ -15,7 +15,7 @@ import sys
 journal = pathlib.Path(__file__).resolve().parent.parent
 
 ERRORS = [
-    (r"/home/|/Users/|/root/|/tmp/claude|/nix/store/", "absolute path of a machine"),
+    (r"/home/|/Users/|(?<![\w.-])/root/|/tmp/claude|/nix/store/", "absolute path of a machine"),
     (r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b", "e-mail address"),
     (r"ghp_[A-Za-z0-9]{20,}|github_pat_|sk-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY",
      "credential"),

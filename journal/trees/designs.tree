@@ -73,6 +73,8 @@
 \ul{
 \li{[The instruction set of the machine](design-isa-document), with its as-built notes.}
 \li{[The reconciliation of the design review](design-reconciliation-document), whose errata correct the instruction set.}
+\li{[The architecture document](design-architecture-document): the export reader, the stores, the reference engine, the driver and the build.}
+\li{[The value model, second version](design-values-v2-document): the full text of the design with its prototype; a draft.}
 \li{[The platform document](design-platform-document): JVM launcher against native image, collectors and heap settings, with the measurement tables.}
 }
 }

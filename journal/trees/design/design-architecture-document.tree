@@ -1,0 +1,1157 @@
+\title{RLVM architecture - everything around the machine}
+\taxon{Design}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{store}
+\tag{loader}
+\tag{reference-engine}
+\tag{driver}
+\tag{platform}
+\meta{status}{accepted}
+\meta{created}{2026-11-23}
+\meta{origin}{docs/design/ARCHITECTURE.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} accepted. This is the full text of the design document, as written on 2026-11-23, moved into the journal on 2026-11-24 with its wording and its section numbers unchanged. [The reconciliation of the design review](design-review-reconciliation) has authority over it. The short note on it is [the architecture](design-architecture), which also lists the defaults that moved after the design.}
+
+\p{Scope: the persistent store, the loader, declaration admission and its policies, the reference kernel, the scheduler, the runtime platform, the verdict protocol, testing, milestones and staffing. The machine itself (instruction set, values, code objects, memo semantics, tiers, Truffle mapping) is \code{\verb~|ISA.md~}; section 11 is the boundary between the two documents.}
+
+\p{References: \code{\verb~|R01~}..\code{\verb~|R11~} = \code{\verb~|docs/research/NN-*.md~} (R10 was not available when this was written; the platform numbers are taken from the raw files in \code{\verb~|spikes/platform/results/~}). \code{\verb~|[meas]~} = measured on this host (file named), \code{\verb~|[src]~} = read in a research document, \code{\verb~|[est]~} = estimate with the arithmetic shown. Skeleton code for every module defined here exists and compiles: \code{\verb~|rlvm-store~}, \code{\verb~|rlvm-api~}, \code{\verb~|rlvm-load~}, \code{\verb~|rlvm-ref~}, \code{\verb~|rlvm-inductive~}, \code{\verb~|rlvm-admit~}, \code{\verb~|rlvm-driver~}, \code{\verb~|rlvm-main~}, \code{\verb~|rlvm-testkit~}. Java signatures quoted below are the ones in those skeletons. The launcher, the exit-status protocol and the build and measurement scripts already exist (\src{rlvm-cli/README.md}, \code{\verb~|scripts/~}, \code{\verb~|bench/rlvm/~}); this document builds on them and says where they must change.}
+
+\p{Mathlib reference numbers used throughout (exact, \code{\verb~|work/exports/stats/mathlib.stats.json~}): 6,326,141,213 bytes; 112,081,718 lines; 107,037,712 expression records (app 91,561,354; lam 8,241,106; forallE 5,475,525; const 1,442,301; letE 255,403; proj 34,595; strVal 19,699; natVal 5,660; sort 1,709; bvar 360); 4,273,914 names; 48,246 levels; 721,845 declaration records = 739,167 constants (thm 524,582; def 187,271; opaque 2,855; axiom 4; quot 4; 7,129 inductive blocks with 7,162 types, 10,006 constructors, 7,283 recursors, 14 mutual blocks, 57 nested types). Longest line 2,713,224 bytes (a string literal); largest declaration 92,478 records; 1,820 Nat literals of 2^64 or more, the longest 1,085 digits.}
+
+\subtree{
+\title{0. Decisions in one page}
+
+\ol{
+\li{\strong{One shared store of flat \code{\verb~|int[]~} regions, frozen progressively.} A term is an \code{\verb~|int~}; a node is 8 ints (32 bytes) carrying everything consumers need (kind, three payload words, loose-variable range, 64-bit free-variable mask, \code{\verb~|depMax~}, \code{\verb~|lpSet~}). Flat arrays, not chunks (+25 \% per access, R11 B.3), not \code{\verb~|MemorySegment~} (1.9x).}
+\li{\strong{Two summaries per node make the per-declaration structural checks O(1)} and make cached facts order-independent: \code{\verb~|depMax~} (largest rank of a constant below the node) and \code{\verb~|lpSet~} (set of universe parameter names below it). "Every constant is declared earlier", "every universe parameter is declared" and "closed" are three integer tests at the declaration's roots.}
+\li{\strong{One pass over the file.} Expression records are buffered per declaration; at the declaration line they are split into shared terms and one packed proof block (theorem and opaque values). A block record that a later declaration references is promoted into the shared region on demand. No prescan, no whole-file column set, 4 bytes of transient state per record.}
+\li{\strong{Proof blocks stay packed} (about 5.5 bytes per record, LEB128) until a worker checks or unfolds the theorem; they are decoded into that worker's overlay in one forward pass.}
+\li{\strong{Loading, environment construction and checking overlap.} The loader publishes finished units; an environment thread admits inductive blocks and the quotient package ahead of the workers and publishes the derived facts; workers check everything else. Two publication frontiers and one failure mark, no locks on any hot path.}
+\li{\strong{Optimistic environment, pessimistic verdict.} A worker reads the statements of earlier declarations before they are checked; the file is accepted only if every unit is. Verdict: REJECT iff some rejection was confirmed by the reference kernel, else DECLINE iff anything was declined, else ACCEPT. The launcher's status starts as 3 (internal error) and receives a verdict in exactly one place.}
+\li{\strong{Nothing derived is read from the export.} Inductive facts and recursors are regenerated by \code{\verb~|rlvm-inductive~} and compared structurally with the exported records; only derived facts enter the declaration table's side tables. Where an exported term is identical to the derived one, the exported term id is used, so nothing has to be copied.}
+\li{\strong{The reference kernel is a complete engine}, not a helper: it runs the environment pass, re-checks every rejection, is the oracle of the differential tests, and can check a whole library alone. The pipeline is therefore complete and testable before the machine exists (milestones M1-M3).}
+\li{\strong{Engines sit behind one facade} (\code{\verb~|rlvm.api.Engine~} / \code{\verb~|Session~}): "check constant \code{\verb~|cid~}, return ACCEPT / REJECT / DECLINE", \code{\verb~|KernelOps~} for admission code, statistics dump. Engine modules register through \code{\verb~|ServiceLoader~} (\code{\verb~|rlvm.api.EngineProvider~}), as checkers do with the launcher.}
+\li{\strong{Sessions}: per worker; overlay terms plus engine arenas; reset at 32 MiB, on any non-ACCEPT outcome, when the next unit is not later than the last one, and when the level snapshot changes.}
+\li{\strong{Parallel by default}: 6 workers + loader + environment thread on the 8-vCPU runner; verdict independent of the worker count by construction (step budgets, cold re-check, no time-based decisions).}
+\li{\strong{Runtime}: one native-image binary with the Truffle runtime linked in, Serial GC, working set in primitive arrays; the same jars remain launchable on the JVM, and the shipped mode is decided by a measurement gate on mathlib (section 7.1) because the JIT produces better code than the CE AOT compiler.}
+\li{\strong{Policies}: accept every well-typed axiom; drop unsafe/partial records; shape guards on the prelude constants behind the literal extensions, declining only if an invalid one is actually used; malformed input is rejected exactly where the official reader rejects, declined where RLVM is merely narrower.}
+}
+
+\p{Where the owner's vision overrides the research documents, and what it costs:}
+
+\table{
+\tr{\th{Vision}\th{Research position}\th{Decision here}\th{Cost}}
+\tr{\td{parallelism and wall clock are first-class}\td{R11 C.9: one worker by default, every worker costs instructions}\td{6 workers by default, pipelined loader}\td{+0.8 \% (4 workers) to +1.6 \% (8) instructions in a design without collector work \verb~|[~src gruszka, R05 2.10\verb~|]~; gate: the default is the largest N <= 6 whose measured mathlib overhead against N = 1 is <= 2 \%}}
+\tr{\td{the machine carries essentially all checking work}\td{R03 decision 9: admission on a substitution reducer}\td{def/thm/axiom/opaque go to the machine; only inductive blocks and quot (1 \% of units) and re-checks use the reference kernel}\td{environment pass about 10 G instructions on mathlib \verb~|[~est, 4.6\verb~|]~, off the workers' path}}
+\tr{\td{base tier is plain Java compiled ahead of time (decision E)}\td{raw spike numbers: the HotSpot JIT needs 0.69x the instructions of the CE native image on the object NbE benchmark and 0.66x on the plain interpreter, after a warm-up that costs 9-90 G (7.1)}\td{native image first, platform gate at M5}\td{up to 1.4x on steady-state code if the gate is skipped; the gate costs one measurement campaign}}
+}
+}
+
+\subtree{
+\title{1. Module map}
+
+\subtree{
+\title{1.1 Dependency graph}
+
+\pre{\verb~|
+layer 0  (exist, no RLVM dependency)   rlvm-export    rlvm-level    rlvm-nat    rlvm-cli (launcher + Checker SPI)
+layer 1  rlvm-store      ->  JDK only
+layer 2  rlvm-api        ->  store                       (later: level, nat, for the bindings)
+         rlvm-load       ->  store                       (later: export, level, nat)
+layer 3  rlvm-ref        ->  store, api
+         rlvm-inductive  ->  store, api
+         rlvm-machine    ->  store, api                  (ISA.md; name reserved)
+         rlvm-truffle    ->  machine, Truffle artifacts  (ISA.md; name reserved)
+layer 4  rlvm-admit      ->  store, api, inductive
+layer 5  rlvm-driver     ->  store, api, load, admit
+layer 6  rlvm-main       ->  driver, load, admit, api, store   (later: cli, export, level, nat)
+         rlvm-testkit    ->  store, api, load, driver
+run time (ServiceLoader): rlvm-cli finds rlvm-main as a rlvm.cli.Checker;
+                          rlvm-main finds rlvm-ref and rlvm-machine as rlvm.api.EngineProvider
+~}
+
+\p{Rules: a module depends only on lower layers; there are no cycles; \code{\verb~|rlvm-driver~}, \code{\verb~|rlvm-admit~} and \code{\verb~|rlvm-main~} never see an engine class (engines arrive as \code{\verb~|EngineFactory~} from an \code{\verb~|EngineProvider~}); nothing depends on \code{\verb~|rlvm-main~} or \code{\verb~|rlvm-testkit~}; besides \code{\verb~|rlvm-cli~} (its Truffle probe) only \code{\verb~|rlvm-truffle~} depends on Truffle artifacts. The distribution puts every module jar on one class path (\src{scripts/build.sh}). Until the wave-2a modules are frozen, the new modules use adapter interfaces of their own (\code{\verb~|rlvm.api.LevelOps~}, \code{\verb~|rlvm.api.NatOps~}, \code{\verb~|rlvm.store.IntLists~}, \code{\verb~|rlvm.load.RecordSink~}, \code{\verb~|rlvm.load.LevelInterner~}, \code{\verb~|rlvm.load.NatDecoder~}); the bindings (about 300 lines) go into \code{\verb~|rlvm-api~} (\code{\verb~|rlvm.api.bind~}) and \code{\verb~|rlvm-load~} when those poms gain the dependencies.}
+}
+
+\subtree{
+\title{1.2 Modules}
+
+\table{
+\tr{\th{Module (package)}\th{Purpose}\th{Invariants the owner must keep}\th{Must never depend on}}
+\tr{\td{\code{\verb~|rlvm-export~} (\code{\verb~|rlvm.export~}), exists}\td{NDJSON bytes to record events (\code{\verb~|ExportSink~}), canonical fast path + JSON fallback, id translation, parallel scan}\td{rejects exactly what the official reader rejects, declines what it cannot represent; one sink thread}\td{any other RLVM module}}
+\tr{\td{\code{\verb~|rlvm-level~} (\code{\verb~|rlvm.level~}), exists}\td{hash-consed levels, official and complete comparison, lists}\td{frozen base + thread-confined overlays}\td{any other RLVM module}}
+\tr{\td{\code{\verb~|rlvm-nat~} (\code{\verb~|rlvm.nat~}), exists}\td{Nat/String literal values and the 15 kernel operations}\td{exact official limits}\td{any other RLVM module}}
+\tr{\td{\code{\verb~|rlvm-store~} (\code{\verb~|rlvm.store~})}\td{all persistent data: terms, names, literals, declaration table, proof blocks, specials, frontiers}\td{a published datum is immutable; one writer per structure; id 0 = none; node summaries never under-approximate}\td{every other RLVM module, Truffle}}
+\tr{\td{\code{\verb~|rlvm-api~} (\code{\verb~|rlvm.api~})}\td{contracts: \code{\verb~|Engine~}, \code{\verb~|Session~}, \code{\verb~|KernelOps~}, \code{\verb~|LevelOps~}, \code{\verb~|NatOps~}, \code{\verb~|Budget~}, \code{\verb~|Outcome~}, \code{\verb~|Reason~}, \code{\verb~|RunSignals~}, exceptions}\td{no implementation logic; an ACCEPT allocates nothing}\td{engines, driver, loader, Truffle}}
+\tr{\td{\code{\verb~|rlvm-load~} (\code{\verb~|rlvm.load~})}\td{record events to store: interning, segment ownership split, promotion, publication}\td{validates only what the official reader validates; never interprets terms}\td{engines, admission, driver}}
+\tr{\td{\code{\verb~|rlvm-ref~} (\code{\verb~|rlvm.ref~})}\td{reference kernel: official algorithm on term ids; \code{\verb~|RefKernel implements KernelOps~}, \code{\verb~|RefEngine implements Engine~}}\td{official control flow, no shortcut the official kernel lacks; caches per declaration; \code{\verb~|whnf~} output is the official term}\td{machine, Truffle, driver, loader}}
+\tr{\td{\code{\verb~|rlvm-inductive~} (\code{\verb~|rlvm.inductive~})}\td{\code{\verb~|add_inductive~}, recursor generation, record comparison, quot}\td{derives from inputs only; compares with \code{\verb~|==~}, never def-eq; engine-agnostic through \code{\verb~|KernelOps~}}\td{engine implementations, loader, driver}}
+\tr{\td{\code{\verb~|rlvm-admit~} (\code{\verb~|rlvm.admit~})}\td{structural checks, prelude guards, environment pass, per-unit admission flow, policies}\td{the only writer of derived facts; frontier stops at the first failed unit}\td{engine implementations, loader, driver}}
+\tr{\td{\code{\verb~|rlvm-machine~}, \code{\verb~|rlvm-truffle~} (reserved; \code{\verb~|ISA.md~})}\td{the machine and its Truffle tier, behind \code{\verb~|Engine~}}\td{section 11}\td{driver, loader, admission, reference kernel}}
+\tr{\td{\code{\verb~|rlvm-driver~} (\code{\verb~|rlvm.driver~})}\td{threads, scheduler, sessions' lifecycle, re-check protocol, verdict, statistics}\td{fail closed; verdict independent of worker count; never \code{\verb~|System.exit~}}\td{engine classes, Truffle}}
+\tr{\td{\code{\verb~|rlvm-cli~} (\code{\verb~|rlvm.cli~}), exists}\td{launcher: \code{\verb~|Main~}, options, the \code{\verb~|Checker~} SPI, the exit-status protocol (0/1/2/3/64), Truffle probe; with \code{\verb~|scripts/~} the packaging}\td{the only place that ends the process; status 0 only for a cleanly returned ACCEPT}\td{every other RLVM module}}
+\tr{\td{\code{\verb~|rlvm-main~} (\code{\verb~|rlvm.main~})}\td{the kernel as a \code{\verb~|rlvm.cli.Checker~} provider: options to \code{\verb~|RunConfig~}, engine lookup, reader + loader + driver}\td{no kernel logic; unknown \code{\verb~|-X~} keys are usage errors}\td{engine classes}}
+\tr{\td{\code{\verb~|rlvm-testkit~} (\code{\verb~|rlvm.testkit~})}\td{differential engine, official checker runner, export mutator}\td{not in the shipped image}\td{-}}
+}
+}
+
+\subtree{
+\title{1.3 Public API (the skeleton files are normative; this is the index)}
+
+\pre{\verb~|
+// rlvm-store ------------------------------------------------------------------------------------------
+final class Node        { WORDS = 8; W_HEADER, W_A, W_B, W_C, W_MASK_LO, W_MASK_HI, W_DEPMAX, W_LPSET;
+                          OVERLAY_BIT, GEN_BASE, INDEX_MASK, EXPORT_MAX; F_* flags; DEP_UNRESOLVED;
+                          static int kind(int header), flags(int header), looseRange(int header), wordOf(int id); }
+final class Kind        { BVAR, SORT, CONST, APP, LAM, PI, LET, PROJ, NATLIT, STRLIT, FVAR }
+final class TermStore   { int[] exportArray(); int[] generatedArray(); int exportEnd();
+                          int appendGenerated(Terms from, int overlayTerm); long bytes(); }
+final class Overlay     { int mkBVar(int), mkSort(int), mkConst(int cid, int levels), mkApp(int, int), mkLam(int, int),
+                          mkPi(int, int), mkLet(int, int, int), mkProj(int cid, int idx, int e), mkNatLit(long),
+                          mkNatLitBig(int), mkStrLit(int), mkFVar(int type); int blockRoot(int block);
+                          long mark(); void resetTo(long); void reset(); long usedBytes(); }
+final class Terms       { void refresh(); int kind(int), a(int), b(int), c(int), header(int), depMax(int), lpSet(int),
+                          looseRange(int); long fvMask(int); boolean isClosed(int); int spine(int, int[], int); }
+final class TermOps     { boolean eqv(int, int); int instantiate1(int, int), instantiateRev(int, int[], int, int),
+                          abstractFVars(int, int[], int, int), instantiateLevelParams(int, int, int),
+                          mkPiOver(int[], int, int, int), mkLambdaOver(...), consumeTypeAnnotations(int); }
+interface   IntLists    { int intern(int[], int, int), length(int), get(int, int), unionSorted(int, int);
+                          boolean subsetOf(int set, int list); }
+final class NameTable   { int internStr(int prefix, byte[], int, int), internNum(int prefix, long), internNumBig(...);
+                          int prefix(int); boolean lastComponentIs(int, String), hasNestedRoot(int);
+                          int compare(int, int); int constOf(int); boolean claim(int name, int value); }
+final class LitPool     { int addNat(long[], int, int), addString(byte[], int, int); int stringCodePointAt(int, int); }
+final class DeclTable   { kind(cid), flags, numLevelParams, unit, rank, name, type, value, hint, levelParams;
+                          inductNumParams/NumIndices/CtorCount/Ctors/All/Flags/NumNested; ctorInduct/Index/NumParams/NumFields;
+                          recNumParams/NumIndices/NumMotives/NumMinors/Flags/MajorIndex/MajorInduct/RuleCount/RuleCtor/
+                          RuleFields/RuleRhs/RuleFor; unitCount, unitFirstCid, unitSize, unitKind, status, casStatus;
+                          addConstant, beginUnit, endUnit, setInductive, setConstructor, setRecursor }
+final class ProofBlocks { int count(), nodeCount(int), firstRecord(int), blockOfRecord(int); interface Writer {...} }
+final class Specials    { NAT .. EAGER_REDUCE; int cid(int which), state(int which), which(int cid);
+                          int natLiteralRank(), stringLiteralRank(), quotRank(); }
+final class SharedFacts { boolean isChecked(int sharedTerm); void setChecked(int sharedTerm); }
+final class Store       { terms(), names(), lists(), lits(), decls(), blocks(), specials(), facts();
+                          int loadedUnits(); boolean loadComplete(); int envUnits(); StoreBuilder builder(); }
+// rlvm-api --------------------------------------------------------------------------------------------
+interface Engine  extends AutoCloseable { String name(); Session newSession(WorkerContext ctx);
+                          default void environmentAdvanced(int units); void dumpStats(StatsSink sink); void close(); }
+interface Session extends AutoCloseable { int check(int cid, Budget budget); Reason lastReason(); String lastMessage();
+                          KernelOps ops(); void reset(); long footprintBytes(); long steps(); void close(); }
+interface KernelOps     { void begin(int rank, int levelParams); void exposeUnitMembers(int kindMask);
+                          int infer(int term); int check(int term); int whnf(int term); int whnfCore(int term);
+                          boolean isDefEq(int a, int b); int ensureSort(int term); int ensurePi(int term);
+                          boolean isProp(int type); int mkLocal(int type); Terms terms(); TermOps termOps();
+                          LevelOps levels(); boolean whnfIsSyntactic(); long steps(); }
+final class Outcome     { ACCEPT = 0, REJECT = 1, DECLINE = 2; EXIT_ACCEPT, EXIT_REJECT, EXIT_DECLINE }
+enum Reason             { reject reasons (kernel errors) | decline reasons; boolean isReject(); int outcome(); }
+final class Budget      { long maxSteps, maxBytes; int maxDepth; static Budget warm(), cold(long maxBytes); }
+interface RunSignals    { int firstFailure(); boolean memoryExhausted(); }
+final class WorkerContext { workerId, store, terms, overlay, lists, lits, levels, nats, signals; void reset(); }
+interface EngineFactory { Engine create(Store store, EngineConfig config); }
+interface EngineProvider { String name(); int priority(); boolean isReference(); EngineFactory factory(); }
+// rlvm-load -------------------------------------------------------------------------------------------
+interface RecordSink    { mirror of rlvm.export.ExportSink (ids returned by the sink) }
+final class Loader implements RecordSink { Loader(Store, LoadOptions, LevelInterner, NatDecoder); void finish(); LoadReport report(); }
+// rlvm-ref, rlvm-inductive, rlvm-admit ------------------------------------------------------------------
+final class RefKernel implements KernelOps { void setBudget(Budget); void checkConstant(int cid); }
+final class RefEngine implements Engine    { static final EngineFactory FACTORY; }
+final class InductiveAdmission { void generate(BlockInput in, GeneratedBlock out); }
+final class RecordCompare      { long compare(BlockInput in, GeneratedBlock generated); }
+final class QuotAdmission      { void admit(int cid); int canonicalType(int quotKind); }
+final class StructuralChecks   { Reason checkConstant(int cid); Reason checkRoot(int term, int rank, int lparams, boolean ownUnit); }
+final class PreludeGuards      { int evaluate(int which, int cid); }
+final class EnvBuilder implements Runnable { int advanceTo(int unit); void cancel(); interface Listener {...} }
+final class Admission          { int admit(int unit, Session session, Budget budget); Reason lastReason(); }
+// rlvm-driver -------------------------------------------------------------------------------------------
+final class Run          { Run(RunConfig, EngineFactory primary, EngineFactory reference); int execute(); }
+final class Scheduler    { int claim(int[] out); void giveBack(int[], int, int); void defer(int unit); int claimHeavy(); }
+interface   OrderPolicy  { void arrange(int[] units, int from, int n); enum Kind { FILE, NAMESPACE_WINDOW } }
+final class VerdictBoard { accept(unit), reject(unit, reason, msg), decline(...), inputFailure(...), firstFailure(), exitCode() }
+// rlvm-main ---------------------------------------------------------------------------------------------
+final class RlvmChecker  { name() = "rlvm"; priority() = 100; int checkExport(Path, int threads, boolean stats, long stack,
+                           Map<String,String> extra); RunConfig configure(...); }     // becomes `implements rlvm.cli.Checker`
+final class Engines      { static EngineProvider primary(String name), reference(); }
+~}
+}
+
+\subtree{
+\title{1.4 What the wave-2a modules must provide}
+
+\table{
+\tr{\th{Module}\th{Requirement}\th{Why}}
+\tr{\td{\code{\verb~|rlvm-export~}}\td{\code{\verb~|ExportSink~} as it stands (sink returns ids; reader translates file ids; one sink thread also in parallel mode)}\td{the loader returns record ordinals, so canonical files need no translation table}}
+\tr{\td{\code{\verb~|rlvm-export~}}\td{current input byte offset and line number available to the sink}\td{publication every 32 MiB; diagnostics}}
+\tr{\td{\code{\verb~|rlvm-export~}}\td{plain \code{\verb~|read~} into reused buffers, no \code{\verb~|mmap~} of the input, lines of any length (2.7 MB occurs)}\td{mapped file pages count in RSS (R01 2.13); kernel copies are free (R11 0.10)}}
+\tr{\td{\code{\verb~|rlvm-level~}}\td{a way to make the levels and lists created so far readable by workers before the end of the file: \code{\verb~|snapshot()~} of an unfrozen store (O(size) copy; called at most once per publication) or an incremental \code{\verb~|freeze~}}\td{pipelined loading (3.5); without it the run falls back to batch mode}}
+\tr{\td{\code{\verb~|rlvm-level~}}\td{the run's single list store (\code{\verb~|IntListStore~}) with \code{\verb~|unionSorted~} / \code{\verb~|subsetOf~} on sorted name sets (or these are written in \code{\verb~|rlvm-load~} on top of \code{\verb~|intern~})}\td{\code{\verb~|lpSet~}}}
+\tr{\td{\code{\verb~|rlvm-level~}}\td{\code{\verb~|NameOracle~} is implemented by \code{\verb~|NameTable.compare~} (Lean's \code{\verb~|name::cmp~})}\td{official normal form}}
+\tr{\td{\code{\verb~|rlvm-nat~}}\td{decimal to limbs in sub-quadratic time for long numerals; operations take and return literals in caller-supplied pools; code-point index for strings}\td{1,085-digit literals in mathlib; megabyte numerals in hostile files; a 2.66 MB string literal in mathlib}}
+}
+}
+}
+
+\subtree{
+\title{2. Persistent store}
+
+\subtree{
+\title{2.1 Term node: 8 ints, 32 bytes}
+
+\pre{\verb!!|
+word 0  header   bits 0..3 kind | bits 4..15 flags | bits 16..31 looseRange (u16, saturating at 0xFFFF)
+word 1  a   \
+word 2  b    }   payload, by kind
+word 3  c   /
+word 4  fvMask low      bit i (i < 63): de Bruijn index i occurs free below this node
+word 5  fvMask high     bit 63: some index >= 63 occurs free
+word 6  depMax          largest rank of a constant in the sub-DAG; 0 = none; 0x7FFFFFFF = unresolved
+word 7  lpSet           list id of the sorted set of universe-parameter names in the sub-DAG; 0 = none
+
+kind        a                              b                      c
+1 BVAR      index
+2 SORT      level id
+3 CONST     cid, or ~nameId if unbound     level-list id          name id
+4 APP       function                       argument               head of the spine
+5 LAM       binder domain                  body                   (reserved for the elaborator)
+6 PI        binder domain                  body                   (reserved for the elaborator)
+7 LET       type                           value                  body
+8 PROJ      structure expression           field index            cid of the structure type, or ~nameId
+9 NATLIT    low 32 bits                    high 32 bits           -        (flag NAT_BIG: a = LitPool index)
+10 STRLIT   LitPool string index           number of code points
+11 FVAR     serial                         type term              (overlay only: reference kernel, admission)
+
+flags (header bits)  4 HAS_LPARAM   5 HAS_CONST   6 HAS_LIT   7 HAS_LET   8 HAS_PROJ   9 HAS_FVAR
+                     10 UNRESOLVED (an unbound CONST/PROJ, or a CONST with the wrong number of levels, below)
+                     11 LOOSE_SAT   12 NAT_BIG    13..15 reserved for the machine's elaborator
+!!}
+
+\p{Not stored: binder names, binder info, \code{\verb~|nondep~}, \code{\verb~|mdata~} (the loader returns the wrapped expression). R03 section 2: this differs from the official checker only on hand-written files, in the accepting direction, on semantically irrelevant data.}
+
+\p{Derivation, done once when the node is written (loader, block decoder, overlay constructors; identical code, \code{\verb~|TermStore.appendExport~}):}
+
+\pre{\verb~|
+looseRange: bvar i -> i+1 | app -> max(f, a) | lam, pi -> max(dom, body-1) | let -> max(ty, val, body-1)
+            | proj -> struct | else 0                                  (saturate; exact value by walking)
+fvMask:     bvar i -> 1 << min(i, 63) | app -> f | a | lam, pi -> dom | under(body)
+            | let -> ty | val | under(body) | proj -> struct | else 0
+            under(m, range) = (m >>> 1) | (range > 64 ? 1 << 63 : 0)                      (R09 1.2)
+depMax:     const -> rank(cid), or UNRESOLVED | proj -> max(struct, rank(structure cid))
+            | natlit -> specials.natLiteralRank() | strlit -> specials.stringLiteralRank()
+            | else max over children
+lpSet:      sort l -> params(l) | const -> union of params of its levels | else union over children
+            (union memoised on the id pair; 0 with 0, x with x and x with 0 are free)
+flags:      or of the children's flags, plus the node's own
+~}
+
+\p{A literal's \code{\verb~|depMax~} is the rank of its last prerequisite constant (\code{\verb~|Nat~}, \code{\verb~|Nat.zero~}, \code{\verb~|Nat.succ~}; for strings also \code{\verb~|String~}, \code{\verb~|String.ofList~}, \code{\verb~|Char~}, \code{\verb~|Char.ofNat~}, \code{\verb~|List.nil~}, \code{\verb~|List.cons~}), or UNRESOLVED when they are not all declared yet: a literal "mentions" them, which is what makes facts about literals monotone (4.1).}
+
+\p{Why AoS and 32 bytes: one cache-line touch per node for every consumer (the machine reads kind, children and mask together); R11 B.3 measured equal instructions for parallel columns and one interleaved \code{\verb~|int[]~} (29.2 against 30.5 per visit) and better CPU time for columns in a DFS that reads two fields. Work package WP-A1 repeats that measurement with the real access pattern (decode a block, walk it reading five fields) in the native image before the layout is frozen; the accessor API (\code{\verb~|Terms~}) hides the choice.}
+}
+
+\subtree{
+\title{2.2 Regions, ids, sizing}
+
+\pre{\verb~|
+term id (int)   bit 31 = 0 always: negative ints belong to the machine (value tags)
+  1 .. 0x0FFFFFFF               export region     shared; writer = loader thread
+  0x20000000 | i                generated region  shared; writer = environment thread; empty for canonical files
+  0x40000000 | i                overlay           one per worker
+word 0 of node id = (id & 0x0FFFFFFF) << 3 in its region's int[]
+~}
+
+\ul{
+\li{A region is one flat \code{\verb~|int[]~}; at most 2^28 - 1 nodes (array length 2^31 - 8). More shared nodes than that is \code{\verb~|UnsupportedExportException~} (decline).}
+\li{Export region capacity: \code{\verb~|inputBytes / 144~} nodes \verb~|[~est: mathlib has 56.35 bytes per expression record and 36 \% of the records end up shared (38 M of 105 M, R05 0.2), so 1 node per 156 input bytes; 144 is 8 \% above that\verb~|]~. Mathlib: 43.9 M nodes = 1.41 GB allocated, about 40 M used. If it fills, the writer allocates 1.25x, copies, and publishes the new array with the next frontier; readers call \code{\verb~|Terms.refresh()~} once per unit. Old arrays stay valid for everything published before.}
+\li{Overlay: one \code{\verb~|int[]~} per worker of \code{\verb~|sessionBytes / 4~} ints (32 MiB = 8,388,608 ints = 1,048,576 nodes); doubles by reallocation if one declaration needs more (the largest mathlib proof is 92,478 records = 3 MB) and returns to the base size at the next reset.}
+\li{Reading (\code{\verb~|Terms~}): \code{\verb~|id >= OVERLAY_BIT ? overlayArray : (id < GEN_BASE ? exportArray : generatedArray)~}, then one bounds-checked load; the arrays are fields of the worker's \code{\verb~|Terms~}.}
+}
+}
+
+\subtree{
+\title{2.3 Names}
+
+\pre{\verb~|
+per name id, 5 ints (20 bytes); id 0 = anonymous
+w0 prefix id | w1 bit 0 numeric, bit 1 root component is "_nested", bit 2 root is "_private", bits 8..31 byte length
+w2 string: offset into the UTF-8 pool; numeric: low 32 bits | w3 string: 32-bit hash; numeric: high 32 bits
+w4 constOf: cid declared under this name; 0 none; -1 dropped (unsafe/partial)
+intern index: open addressing int[] of name ids, 2^23 slots for mathlib (load 0.51), key (prefix id, component)
+~}
+
+\p{Names are interned structurally at load (a name id means a name, whatever ids the file used: R01 2.5), so "same name" is an integer comparison everywhere and the level store's requirement on parameter names holds. Cost: one probe per name record, about 120 instructions x 4.27 M = 0.5 G on mathlib \verb~|[~est, probe cost from R11 B.5\verb~|]~. Components above 2^64 are stored as digit strings with the numeric bit (\code{\verb~|internNumBig~}). \code{\verb~|constOf~} is the flat-namespace guard: \code{\verb~|NameTable.claim~} is a compare-and-set, so the second declaration of a name fails whichever thread makes it and whichever kind it has.}
+}
+
+\subtree{
+\title{2.4 Levels, lists, literals}
+
+\ul{
+\li{Levels are ids of \code{\verb~|rlvm-level~}'s store: shared base built by the loader with the plain constructors (export records are kept as written, because recursor types are compared syntactically), one overlay per worker. The store holds only level ids (\code{\verb~|SORT.a~}) and list ids (\code{\verb~|CONST.b~}, \code{\verb~|lparams~}).}
+\li{One list store for the run (\code{\verb~|rlvm.level.IntListStore~} behind \code{\verb~|rlvm.store.IntLists~}): level lists, parameter-name lists, constructor lists, recursor rule tables (triples), \code{\verb~|lpSet~} sets (sorted).}
+\li{\code{\verb~|LitPool~}: naturals of 2^64 and above as little-endian 64-bit limbs; strings as UTF-8 plus a lazily built code-point index (4 bytes per scalar, only for strings that are actually indexed). Smaller naturals live in the node. A worker has its own pool for computed numbers (negative indices).}
+}
+}
+
+\subtree{
+\title{2.5 Declaration table}
+
+\p{One row per constant (\code{\verb~|cid~}, dense from 1 in file order) and one row per unit (declaration record; an inductive block is one unit holding its types, constructors and recursors).}
+
+\pre{\verb~|
+constant row, 8 ints
+w0 bits 0..3 kind (AXIOM DEFN THM OPAQUE INDUCT CTOR REC QUOT_TYPE QUOT_MK QUOT_LIFT QUOT_IND)
+   bits 4..15 flags (UNFOLDS, BLOCK_VALUE, GENERATED, BLOCK_MEMBER) | bits 16..31 number of universe parameters
+w1 unit | w2 rank | w3 name id | w4 type (shared term)
+w5 value: DEFN shared term; THM/OPAQUE shared term or -(block+1); CTOR cid of its type; else 0
+w6 DEFN: reducibility hint 0 = opaque, 1+h = regular h, 0x7FFFFFFF = abbrev (larger unfolds first); THM 0;
+   INDUCT/CTOR/REC: row in the side table | w7 universe-parameter names (list id)
+unit row, 4 ints: first cid | number of constants | record kind | reserved      + status (atomic int column)
+inductive side row, 8 ints: numParams | numIndices | numCtors | ctors list | all list
+                            | flags REC, REFLEXIVE, STRUCT_LIKE, UNIT_LIKE, ONE_CTOR | numNested | cid of I.rec
+constructor side row, 4 ints: inductive cid | cidx | numParams | numFields
+recursor side row, 8 ints: numParams | numIndices | numMotives | numMinors | flags K | rules list
+                           | index of the major premise | cid of the major's inductive type
+rules list: (constructor cid, nfields, rhs term) triples
+unit status: LOADED -> ENV_READY -> RUNNING -> ACCEPTED | REJECTED | DECLINED ; SKIPPED for dropped records
+~}
+
+\p{Every fact the kernel reads is here and nowhere else: delta (\code{\verb~|UNFOLDS~}, value, hint, number of level parameters), iota (major index, K, rules by constructor cid, \code{\verb~|nfields~}), structure eta and unit-like (\code{\verb~|STRUCT_LIKE~}, \code{\verb~|UNIT_LIKE~}, constructor \code{\verb~|numParams~}/\code{\verb~|numFields~}), projection typing (\code{\verb~|ONE_CTOR~}, \code{\verb~|numParams~}, \code{\verb~|numIndices~}), K (\code{\verb~|K~}, major's inductive, its first constructor), quotients (kind), literal extensions (\code{\verb~|Specials~}). Side-table values are derived by admission (4.6); what the export claimed is held only in a per-block claims blob that is dropped after the comparison.}
+}
+
+\subtree{
+\title{2.6 Proof blocks}
+
+\p{A block holds the expression records of one declaration segment that the declaration's type does not reach: in practice the proof of a theorem or the value of an opaque (never unfolded, R03 4.2).}
+
+\pre{\verb~|
+storage   byte[][] of 1 MiB; per block 6 ints: chunk, offset, bytes, nodes, root (record index of the
+          owner's value, -1 if none), firstRecord (block records are numbered globally by prefix sum)
+record    tag:u8 (bits 0..3 kind, bits 4..7 small field), then LEB128 varints
+ref       r even -> record (k - r/2) of this block, r/2 >= 1          r odd -> shared term id r >>> 1
+APP ref ref | LAM, PI ref ref | LET ref ref ref | PROJ cid(zigzag) index ref | BVAR small or varint
+SORT level | CONST cid(zigzag) levelList name | NATLIT value or pool index | STRLIT pool index
+~}
+
+\p{Size \verb~|[~est\verb~|]~: an \code{\verb~|app~} record is 1 + 1..2 (local distance; 37 \% of references point to the previous record, R01 2.12) + 1..4 (a shared id is up to 4 bytes) = about 5.5 bytes; 67 M block records = 0.37 GB (the NDJSON for them is 3.8 GB). A per-block table of distinct shared ids ("frontier", as in Susz) would save about 1 byte per record and is left as an optimisation.}
+
+\p{Decoding (\code{\verb~|Overlay.blockRoot(block)~}): one forward loop appending 8 ints per record to the worker's overlay with the derivation of 2.1; no recursion, no hash-consing (block records are already distinct); budget 60 instructions per record = 4.0 G for all of mathlib. A block decoded for unfolding a theorem is kept until the session resets.}
+}
+
+\subtree{
+\title{2.7 Special constants and shared facts}
+
+\p{\code{\verb~|Specials~} binds the 34 names the kernel knows (\code{\verb~|Nat~} .. \code{\verb~|eagerReduce~}, section 4.8) to cids and records a guard state per name (ABSENT, VALID, INVALID); \code{\verb~|which(cid)~} is one array load. \code{\verb~|SharedFacts~} is one byte per export-region node written racily and idempotently: bit 0 = "this closed shared term passed check mode" (the machine's \code{\verb~|PCHK~}, ISA.md 1.5). No stamp is needed: by 2.1 the fact is usable for a unit of rank \code{\verb~|r~} with parameters \code{\verb~|L~} iff \code{\verb~|depMax(t) < r~} and \code{\verb~|lpSet(t)~} is a subset of \code{\verb~|L~}, and both hold for every term reachable from roots that passed the structural checks.}
+}
+
+\subtree{
+\title{2.8 Frozen base, overlays, who writes what}
+
+\table{
+\tr{\th{Structure}\th{Writer}\th{Readers}\th{Published by}}
+\tr{\td{export region, names, literals, lists, levels, proof blocks, constant and unit rows}\td{loader thread}\td{everyone}\td{\code{\verb~|Store.loadedUnits~} (volatile, monotone)}}
+\tr{\td{inductive / constructor / recursor side rows, \code{\verb~|Specials~}, generated region, generated constants}\td{environment thread}\td{everyone}\td{\code{\verb~|Store.envUnits~} (volatile, monotone, <= loadedUnits)}}
+\tr{\td{unit status, \code{\verb~|VerdictBoard~}}\td{any worker (CAS / atomic min)}\td{driver}\td{-}}
+\tr{\td{\code{\verb~|SharedFacts~}, the machine's per-constant static facts and code objects}\td{any worker (racy idempotent / publish-once, R11 C.3)}\td{workers}\td{-}}
+\tr{\td{overlay terms, worker lists, levels, literals, engine session}\td{owning worker}\td{owning worker}\td{-}}
+}
+
+\p{Contract: everything reachable from a unit below a frontier is immutable. A worker may check unit \code{\verb~|u~} only if \code{\verb~|u < envUnits~}; it then needs nothing above \code{\verb~|u~}. No structure is ever locked on a hot path.}
+}
+
+\subtree{
+\title{2.9 Memory budget for mathlib}
+
+\table{
+\tr{\th{Item}\th{Arithmetic}\th{GB}}
+\tr{\td{export region}\td{43.9 M nodes allocated x 32 B (40 M used)}\td{1.41}}
+\tr{\td{shared facts}\td{43.9 M x 1 B}\td{0.04}}
+\tr{\td{proof blocks}\td{67 M records x 5.5 B}\td{0.37}}
+\tr{\td{names}\td{4.27 M x 20 B + 32 MB strings (2.28 M components x 14 B) + 32 MB index}\td{0.15}}
+\tr{\td{declaration table}\td{739,167 x 32 B + 721,845 x 20 B + side tables (< 1 MB)}\td{0.04}}
+\tr{\td{levels, lists, literals}\td{48 k levels; lists of 1.44 M const records, mostly shared; 3.1 MB strings}\td{0.03}}
+\tr{\td{loader transient}\td{location table 107.04 M x 4 B; segment buffer <= 1.5 MB; 2 read buffers of 8 MiB}\td{0.45}}
+\tr{\td{6 workers}\td{6 x (32 MiB overlay + 96 MiB engine arenas \verb~|[~assumed, ISA\verb~|]~ + 3 MiB level overlay + 8 MiB stack touched)}\td{0.81}}
+\tr{\td{engine-wide code objects and static facts}\td{assumed \verb~|[~ISA to confirm\verb~|]~}\td{0.40}}
+\tr{\td{runtime}\td{image heap, Truffle compiler and code cache}\td{0.30}}
+\tr{\td{\strong{peak, while loading}}\td{}\td{\strong{4.00}}}
+\tr{\td{after loading}\td{minus the loader transient}\td{3.55}}
+}
+
+\p{Design ceiling 6 GB. The one event that approaches it is a growth copy of the export region (old 1.41 + new 1.76 GB alive together: 5.8 GB for a moment); the 8 \% head-room makes it unlikely on exporter output, and \code{\verb~|-X no-proof-blocks~} runs (all 107 M records shared, 3.4 GB) size the region from \code{\verb~|inputBytes / 56~}. The run declines by itself (\code{\verb~|memoryLimitBytes~}, default 12 GiB of accounted arrays) before the 16 GB VM would kill it.}
+}
+}
+
+\subtree{
+\title{3. Loader pipeline}
+
+\subtree{
+\title{3.1 Stages and threads}
+
+\pre{\verb~|
+$IN --read() into reused buffers--> rlvm-export reader --ExportSink events--> rlvm.load.Loader --> Store
+     (optional: K scan helper threads)        (one "loader thread" calls the sink, in file order)
+~}
+
+\p{The reader parses bytes into record events (canonical byte templates with SWAR integers, generic JSON for every line that does not match; R01 2.3, 2.13) and translates the file's ids into the ids the sink returned. The loader interns, buffers, splits, writes and publishes. Nothing in this pipeline recurses on expression depth: every per-node fact is derived from children that already exist (R01 2.13: \code{\verb~|perf/app-lam~} nests 19,999 deep).}
+
+\p{Ids the loader returns to the reader: store name ids (structurally interned), level ids, and for expressions the \strong{record ordinal} 1, 2, 3, ... in arrival order. Ordinals are consecutive, so the reader needs no translation table on a canonical file. Where a record finally lives is the loader's business:}
+
+\pre{\verb~|
+loc[ordinal]   > 0  shared term id        < 0  -(global block record + 1)        0  still in the segment buffer
+seg            the current segment: 4 ints per record (kind and small field, a, b, c; children as ordinals)
+promo          open-addressing int -> int: global block record -> shared id, for promoted records
+~}
+}
+
+\subtree{
+\title{3.2 What happens per record}
+
+\table{
+\tr{\th{Event}\th{Work}\th{Budget (instr)}}
+\tr{\td{\code{\verb~|nameStr~} / \code{\verb~|nameNum~}}\td{probe the name index, append 5 ints (+ bytes)}\td{150}}
+\tr{\td{\code{\verb~|level*~}}\td{\code{\verb~|LevelInterner~} (plain constructors)}\td{150}}
+\tr{\td{\code{\verb~|exprApp~} (85.5 \% of expression records)}\td{check the two child ordinals exist, append 4 ints to \code{\verb~|seg~}}\td{30}}
+\tr{\td{\code{\verb~|exprLam~}, \code{\verb~|exprForall~}, \code{\verb~|exprLet~}, \code{\verb~|exprProj~}, \code{\verb~|exprBVar~}, \code{\verb~|exprSort~}}\td{same}\td{30-40}}
+\tr{\td{\code{\verb~|exprConst~}}\td{intern the level list (most are 0-2 long and repeat), append}\td{120}}
+\tr{\td{\code{\verb~|exprNatLit~}}\td{up to 19 digits inline, else \code{\verb~|NatDecoder~} to limbs in the \code{\verb~|LitPool~}}\td{60 + digits}}
+\tr{\td{\code{\verb~|exprStrLit~}}\td{copy bytes to the \code{\verb~|LitPool~}, count scalars}\td{40 + bytes}}
+\tr{\td{\code{\verb~|exprMData~}}\td{return the wrapped ordinal}\td{5}}
+\tr{\td{declaration}\td{section 3.3}\td{70 per segment record + 400}}
+}
+}
+
+\subtree{
+\title{3.3 Ownership: one pass, per-declaration segments, promotion on demand}
+
+\p{About 80 \% of the expression records are reachable only from one theorem's proof (R01 2.12; mathlib: 67 M of 105 M, R05 0.2), but 5 \% of those are referenced again by later declarations, so ownership cannot be decided when a record arrives. Options:}
+
+\table{
+\tr{\th{Option}\th{Extra work}\th{Transient memory}\th{Checking can overlap loading}}
+\tr{\td{(a) prescan: a first pass counts references or last uses, a second pass loads (rpylean, R07 1.3)}\td{a second scan of 6.33 GB, at least 2.5 instr/byte = 16 G}\td{4 B per record = 0.43 GB}\td{no}}
+\tr{\td{(b) parse everything into columns, one backward ownership sweep, then pack (Susz, R05 1.3)}\td{a second and third sweep over 107 M cold records, about 3 G}\td{13 B per record = 1.39 GB (Susz: 1.6-1.8 GB peak)}\td{no}}
+\tr{\td{(c) \strong{chosen}: decide at each declaration line from that declaration's own roots; promote later references}\td{promotion: about 8 \% of block records \verb~|[~est\verb~|]~ x 120 instr = 0.65 G; the promoted records also stay in their block (30 MB)}\td{4 B per record = 0.43 GB (\code{\verb~|loc~})}\td{yes}}
+}
+
+\pre{\verb~|
+onDeclaration(kind, names, lparams, typeOrd, valueOrd, ...):            // exprs since the previous declaration = seg
+  claim the declared name(s)                                            // before the sweep: self-references bind
+  if kind in {THM, OPAQUE} and proofBlocks:
+      mark := records of seg reachable from typeOrd                     // explicit stack, stays inside seg
+      for r in seg, in order:
+          if mark[r]:  loc[r] := builder.<kind>(shared(children))       // shared node, facts derived (2.1)
+          else:        writer.<kind>(ref(children)); loc[r] := -(firstRecord + local + 1)
+      block := writer.finish(local index of valueOrd, or -1)
+      value := loc[valueOrd] > 0 ? loc[valueOrd] : -(block + 1)
+  else:                                                                 // def, axiom, quot, inductive
+      for r in seg: loc[r] := builder.<kind>(shared(children))
+  write the row(s); clear seg; publish if due (3.5)
+
+shared(c):   l := loc[c];  if l > 0 return l;  s := promote(-l - 1);  loc[c] := s;  return s
+ref(c):      c in seg and not marked -> local back distance;  else shared(c)
+promote(g):  if promo has g return it
+             over the prefix of g's block: mark backwards from g, then copy the marked records forwards
+             into the export region (marked child -> its new id, shared ref -> as is), promo.put(each)
+~}
+
+\p{Consequences:}
+
+\ul{
+\li{A theorem's type, every definition and every inductive record is shared at once; a theorem's or opaque's value is a block unless its root is reachable from the type or already existed.}
+\li{Records that no root of their segment reaches (lean4export writes the block of \code{\verb~|Nat~} in the middle of the first declaration that needs a Nat literal, R01 2.5) go to the block and are promoted when the later record references them. A hostile file can force many promotions, but each record is promoted at most once: the total stays linear.}
+\li{Promotion appends to the export region out of file order. That is harmless: nothing relies on shared ids being ordered, and children are always written before parents.}
+\li{\code{\verb~|CONST~} and \code{\verb~|PROJ~} are bound to constant ids when the node is written (after the unit's names were claimed), so the members of an inductive block see each other, and a theorem that mentions itself gets \code{\verb~|depMax = own rank~}, which the structural check turns into "unknown constant" (4.3).}
+}
+}
+
+\subtree{
+\title{3.4 Non-canonical and hostile input}
+
+\table{
+\tr{\th{Input property}\th{Handling}\th{Verdict if it matters}}
+\tr{\td{keys in another order, whitespace, \code{\verb~|\uXXXX~} escapes, CRLF, no final newline}\td{reader's generic JSON path for that line (271 lines of 8 hand-made tests, R01 2.10)}\td{none}}
+\tr{\td{sparse or out-of-order ids (\code{\verb~|other/sparse-name-index~}, \code{\verb~|level-index-out-of-order~})}\td{reader's \code{\verb~|IdSpace~} tables; the loader never sees file ids}\td{none}}
+\tr{\td{id used before definition, id bound twice, blank line, non-digit \code{\verb~|natVal~}, unknown record shape}\td{\code{\verb~|MalformedExportException~}}\td{reject (official: uncaught exception, exit 1)}}
+\tr{\td{declaration name declared twice, in any kinds, including the members of a block}\td{\code{\verb~|NameTable.claim~} fails}\td{reject (tutorial 132-139)}}
+\tr{\td{garbage or missing first line}\td{line 1 is never interpreted (official skips it unread); a missing meta line swallows the first record exactly as the official reader does}\td{as official}}
+\tr{\td{meta present with a format major version other than 3}\td{\code{\verb~|UnsupportedExportException~}}\td{decline}}
+\tr{\td{two name ids for one name, two expression ids for one term}\td{names: interned; terms: both kept (id equality is sufficient for equality, never necessary)}\td{none}}
+\tr{\td{ids or indices beyond 2^63, more than 2^28 - 1 shared nodes, de Bruijn index above 2^31, numeric hint above 2^32}\td{reader reduces / declines as documented in \code{\verb~|ExportSink~}; loader declines}\td{decline}}
+\tr{\td{lines of any length (2.7 MB in mathlib), numerals of any length, strings with every escape and U+0000}\td{growing carry buffer; sub-quadratic decimal conversion; code points, never chars (R01 2.5)}\td{none}}
+\tr{\td{loose bound variable, wrong universe arity, unknown or later constant in a root}\td{flagged in the node summaries, decided in 4.3}\td{reject or decline per 4.2}}
+\tr{\td{\code{\verb~|unsafe~} / \code{\verb~|partial~} records, \code{\verb~|isUnsafe~} inductive}\td{dropped, name remembered (4.5)}\td{users reject}}
+\tr{\td{\code{\verb~|mdata~}}\td{wrapped expression}\td{none}}
+\tr{\td{a segment or a store that exceeds the memory limit}\td{\code{\verb~|UnsupportedExportException~}}\td{decline}}
+}
+}
+
+\subtree{
+\title{3.5 Publication, pipelining, parallel scanning}
+
+\ul{
+\li{Batch mode (\code{\verb~|LoadOptions.batch~}): one publication at end of file; the level store is frozen once. The default until \code{\verb~|rlvm-level~} offers a snapshot (1.4), and the reference configuration for debugging.}
+\li{Pipelined mode (\code{\verb~|LoadOptions.pipelined~}, the arena default): after every 4,096 units or 32 MiB of input the loader calls \code{\verb~|LevelInterner.publish()~} and then \code{\verb~|Store.publishLoaded(n)~}: about 200 hand-offs on mathlib \verb~|[~6.33 GB / 32 MiB\verb~|]~. Workers and the environment thread park and are unparked at hand-offs; nobody polls (R11 0.10: parked time is kernel time, spinning is billed).}
+\li{A worker's level and list overlays are built on the snapshot that was current when its session started. A unit beyond that snapshot makes the worker reset its session and take the newest snapshot first (at most 200 forced resets per worker on mathlib; sessions reset far more often anyway, 6.4).}
+\li{Parallel scanning (\code{\verb~|rlvm.export.ParallelScan~}): K helper threads tokenise file ranges, the loader thread replays them in order. It buys wall clock only, at about +0.5 instr/byte for the hand-over \verb~|[~est\verb~|]~ (+3 G on mathlib). Default K = 0: with 6 workers the loader is not the bottleneck (load 50 G on one thread against 325 G on six, 3.6 and 6.8). \code{\verb~|-X scan-threads=K~} exists for the day that reverses.}
+\li{Wall-clock model for mathlib on 8 vCPUs at 3 G instr/s per core \verb~|[~nano-lean retires 3.25, R01 1.2\verb~|]~: batch = 17 s load + 18 s check = 35 s; pipelined = max(17, 18) + tail = about 20 s; \code{\verb~|-j 1~} pipelined = about 110 s. (nano-lean 36.8 s, gruszka 32.5 s with 4 threads.)}
+}
+}
+
+\subtree{
+\title{3.6 Instruction budget of loading}
+
+\p{Ceiling \strong{8 instructions per input byte} end to end (50.6 G on mathlib, 13 \% of the leader's total), target 6 (38 G). Reference points: Susz packs the same file at 5.4 instr/byte in Rust (R05 1.3); nano-lean spends 62 instr/byte on everything (R01 0.2).}
+
+\table{
+\tr{\th{Per \code{\verb~|app~} line (50-54 bytes with 9-digit ids)}\th{instr}}
+\tr{\td{reader: template match, three SWAR integers, id check}\td{180}}
+\tr{\td{sink call, child checks, segment append}\td{30}}
+\tr{\td{declaration sweep: classify, write 8 ints with derived facts or 2 varints, \code{\verb~|loc~} store}\td{70}}
+\tr{\td{total}\td{280 = 5.4 per byte}}
+}
+
+\p{\code{\verb~|lam~}/\code{\verb~|forallE~} lines (86-89 bytes) cost about 420 (4.8 per byte), name lines 300 (6 per byte), declaration lines go through generic JSON at about 40 per byte but are 1.3 \% of the bytes (+0.5 per byte overall). Decoding proof blocks later adds 60 x 67 M = 4.0 G, charged to checking. Acceptance for the loader work packages: <= 12 instr/byte at M3, <= 8 at M5, measured as \code{\verb~|rlvm -X stop-after=load~} minus process start.}
+}
+}
+
+\subtree{
+\title{4. Declaration admission}
+
+\subtree{
+\title{4.1 Order, visibility, and why any schedule is sound}
+
+\ul{
+\li{\strong{Unit} = one declaration record. \strong{Rank} = position in admission order; for every file whose constants are declared before use (all exporter output, R01 2.7) rank = unit index.}
+\li{\strong{Visibility} (official: a constant must be in the environment): while admitting a unit of rank \code{\verb~|r~}, a constant is visible iff its rank is \code{\verb~|< r~}; inside an inductive block the reference kernel additionally exposes the block's own types, then constructors, then recursors, as \code{\verb~|add_inductive~} does (\code{\verb~|KernelOps.exposeUnitMembers~}).}
+\li{\strong{I1} visibility is enforced once per root by \code{\verb~|depMax(root) < r~} (2.1) instead of at every lookup: a sub-term's \code{\verb~|depMax~} never exceeds its root's, and everything an engine builds while checking the unit mentions only constants of the roots and of bodies of visible constants.}
+\li{\strong{I2 optimistic environment}: units are admitted against the \em{statements} of earlier units (rows, and for inductive blocks the derived facts), not against their verdicts. Sound because the run is accepted only if every unit is: a wrong earlier unit can only make a later check fail, loop or crash, and it yields a non-ACCEPT outcome by itself.}
+\li{\strong{I3 kept facts are functions of ids.} A fact an engine keeps across units (session caches, \code{\verb~|SharedFacts~}, code objects) may depend only on term/value identity and on immutable published data. Then it is valid for every unit that can legally mention its subject. Not keepable: anything that depends on a constant being absent, anything computed while a budget was running out or a failure was propagating. The three environment-dependent kernel behaviours are made functions of ids: literal rules through the literal's \code{\verb~|depMax~} and the guard state of a cid, quotient reduction through the kind of the cid (\code{\verb~|QUOT_LIFT~}, \code{\verb~|QUOT_IND~}), unknown constants through I1.}
+\li{\strong{I4 totality}: engines must terminate with DECLINE on garbage (bounds-checked ids, step and memory budgets, every \code{\verb~|Throwable~} caught at the unit boundary), because under I2 they may be fed the body of an ill-typed earlier definition.}
+\li{\strong{I5 sessions move forward} (ISA.md I-SESSION): a session is reset when the next unit's rank is not larger than the last one's. With I1 and I3 this is defence in depth, not a necessity; relaxing it for the namespace order is an M5 experiment that needs the differential suite green.}
+\li{\strong{I6 worker-count independence}: budgets are steps and bytes, never time; a budget decline in a warm session is always retried cold with a fixed budget before it counts (6.5).}
+}
+}
+
+\subtree{
+\title{4.2 Names: flat namespace, unbound references, forward references}
+
+\ul{
+\li{One namespace for all kinds including generated names (\code{\verb~|I.rec~}, \code{\verb~|I.rec_N~}, the four \code{\verb~|Quot~} names): the \code{\verb~|constOf~} word of the name, claimed by compare-and-set (2.3). Exported recursor and constructor records claim their names at load; a later \code{\verb~|def~} with the same name is a duplicate (tutorial 135, 137, 138).}
+\li{A \code{\verb~|CONST~}/\code{\verb~|PROJ~} node whose name has no constant when the node is written stays unbound (\code{\verb!!|~nameId!!}, flag UNRESOLVED, \code{\verb~|depMax = UNRESOLVED~}); a \code{\verb~|CONST~} whose level list has the wrong length is flagged the same way. Only the slow path of 4.3 looks at such nodes.}
+\li{Slow path outcomes for a root with UNRESOLVED: name dropped as unsafe/partial -> UNKNOWN_CONSTANT (tutorial 140, 141); name never declared in the whole file (decided at end of file; the unit is parked) -> UNKNOWN_CONSTANT; wrong arity -> LEVEL_ARITY_MISMATCH (\code{\verb~|bugs/constlevels~}); name declared by a later unit -> FORWARD_REFERENCE.}
+\li{Forward references: the official replay is by dependency and accepts them when acyclic (R01 2.11); no arena test contains one. \code{\verb~|Policy.forwardRefs = DECLINE~} (v1) exits 2; \code{\verb~|REORDER~} (later) takes ranks from a topological sort with file order as tie-break and rejects a cycle. A reference to the unit itself is not a forward reference: names are claimed before the segment is swept, so it binds, gives \code{\verb~|depMax = own rank~}, and is rejected as UNKNOWN_CONSTANT (tutorial 014 \code{\verb~|selfProof~}).}
+\li{Generated constants that the export does not list (official: usable all the same, R01 2.11): the environment thread adds them (\code{\verb~|CF_GENERATED~}, terms in the generated region) and claims their names. If the name does not exist yet as a name id, loader and environment thread meet through a small concurrent table of late names, each publishing its own entry before looking for the other's, so that a later declaration of that name is always seen as a duplicate. v1 declines such files (\code{\verb~|UNSUPPORTED_INPUT~}); canonical files never need it.}
+}
+}
+
+\subtree{
+\title{4.3 Structural checks (\code{\verb~|StructuralChecks~}, O(1) per root)}
+
+\pre{\verb~|
+checkConstant(cid):                                     R03 checklist items 4-8, 11, 12
+  lparams distinct                       else DUPLICATE_LEVEL_PARAM        (tutorial 019, 048)
+  for root in {type, value if any}:
+     looseRange(root) == 0               else LOOSE_BVAR                   (bugs/loose-bvar-value)
+     subsetOf(lpSet(root), lparams)      else UNDECLARED_LEVEL_PARAM       (other/inductive-undeclared-universe)
+     header(root) has no UNRESOLVED and depMax(root) < rank
+                                         else slow path: exact walk -> UNKNOWN_CONSTANT | LEVEL_ARITY_MISMATCH
+                                              | FORWARD_REFERENCE | ok (late-bound names)
+~}
+
+\p{A block-valued theorem has no root node until the block is decoded; the decoder derives the root's summary in the worker's overlay and the same three tests run there before the engine starts. The name uniqueness test (items 2, 4) already happened at load. These tests are complete for the official rules because \code{\verb~|tc.check~} visits every sub-term (R03 4.1), so a property of the whole expression is a property of the root summary.}
+}
+
+\subtree{
+\title{4.4 Flow per declaration kind}
+
+\table{
+\tr{\th{Kind}\th{Structural (4.3)}\th{Decided by}\th{Engine work}\th{Thread}}
+\tr{\td{axiom}\td{lparams, type root}\td{primary engine (\code{\verb~|Session.check~})}\td{type is well typed, its type reduces to a sort}\td{worker}}
+\tr{\td{definition}\td{+ value root}\td{primary engine}\td{+ value checked, \code{\verb~|isDefEq(inferred, declared)~}}\td{worker}}
+\tr{\td{theorem}\td{+ value root (block)}\td{primary engine}\td{+ \code{\verb~|isProp(type)~} (throwing), value}\td{worker}}
+\tr{\td{opaque}\td{as definition}\td{primary engine}\td{as definition}\td{worker}}
+\tr{\td{quot (4 records)}\td{names are the four reserved ones}\td{\code{\verb~|QuotAdmission~}}\td{none (structural comparison)}\td{environment}}
+\tr{\td{inductive block}\td{item consistency, roots of types and constructor types (own unit allowed)}\td{\code{\verb~|InductiveAdmission~} + \code{\verb~|RecordCompare~} over \code{\verb~|KernelOps~} of the reference kernel}\td{section 4.6}\td{environment}}
+\tr{\td{unsafe / partial}\td{-}\td{dropped}\td{none}\td{loader}}
+}
+
+\p{The primary engine is the machine; before it exists, and under \code{\verb~|-X engine=reference~}, it is the reference kernel. \code{\verb~|Session.check(cid, budget)~} is specified in \code{\verb~|rlvm.api.Session~}; its preconditions are exactly the structural checks. After admission, definitions and theorems unfold (\code{\verb~|CF_UNFOLDS~}; a theorem's hint is opaque), everything else never does (R03 4.2). Hints are stored verbatim and steer only the lazy-delta order.}
+}
+
+\subtree{
+\title{4.5 Safety}
+
+\p{Records with \code{\verb~|safety~} in \verb~|{~unsafe, partial\verb~|}~ or \code{\verb~|isUnsafe = true~} are dropped at load: not stored, not checked, not comparable; only the name is marked (\code{\verb~|constOf = -1~}). An \code{\verb~|inductive~} item with an unsafe type record is dropped as a whole; an unsafe constructor or recursor record inside a safe block is ignored (the derived safe one exists). This is the official replay (R03 4.4): unsafe and partial constants are absent, and a safe declaration that mentions one fails with "unknown constant" (tutorial 140, 141 are rejected, not declined). \code{\verb~|mutualDefnDecl~} is never needed. The marker also keeps the diagnostic honest ("unknown constant 'unsafeLoop' (dropped: unsafe)").}
+}
+
+\subtree{
+\title{4.6 Inductive blocks: regenerate, compare, commit}
+
+\pre{\verb~|
+EnvBuilder, for an inductive unit u (after all earlier inductive and quot units):
+  in := BlockInput from the rows and the claims blob                    // checklist 25, 26: consistency, numParams fits
+  ops.begin(rank(u), in.levelParams)                                    // reference kernel, admission overlay
+  InductiveAdmission.generate(in, gen)                                  // checklist 27-48, R03 6.1-6.12
+  present := RecordCompare.compare(in, gen)                             // checklist 49-51: every exported safe ctor/rec record
+                                                                        //   has a derived twin and is identical to it
+  commit (checklist 52):
+     per type: setInductive(numParams, derived numIndices, ctors, all, derived flags, numNested, rec cid)
+     per ctor: setConstructor(induct, cidx, numParams, derived numFields)
+     per recursor j: if present(j): row keeps the exported type; rules list = exported rhs term ids
+                     else: copy derived type and rules into the generated region, add a GENERATED constant
+     bind specials and evaluate prelude guards for names of this block
+  publishEnv(u + 1); engine.environmentAdvanced(u + 1)
+~}
+
+\ul{
+\li{The only inputs are the universe parameters, \code{\verb~|numParams~}, and the (name, type) pairs of the types and of their constructors in the order of the \code{\verb~|ctors~} lists (R03 decision 1). Exported \code{\verb~|numIndices~}, \code{\verb~|isRec~}, \code{\verb~|isReflexive~}, \code{\verb~|numNested~} are neither used nor compared (official: ignored); the derived values are stored.}
+\li{Comparison is structural (\code{\verb~|TermOps.eqv~}: alpha-equivalence, binder info absent, levels by id), never definitional (\code{\verb~|bugs/rec-rule-proof-irrel*~}, \code{\verb~|rec-type-proof-irrel~}). Because an identical exported record is the same term as the derived one, committing "the generated constants, not the exported ones" needs no copy: the row points at the exported shared terms.}
+\li{Exactness traps T1-T8 of R03 6.13 are requirements on \code{\verb~|rlvm-inductive~}: annotations stripped from binder domains (\code{\verb~|TermOps.consumeTypeAnnotations~}), simplifying level instantiation for containers (\code{\verb~|LevelOps.mkMax/mkIMax~}), the syntactic output of \code{\verb~|whnf~} in three places (hence \code{\verb~|KernelOps.whnfIsSyntactic~}, which the reference kernel guarantees), universe name \code{\verb~|u~}, \code{\verb~|u_1~}, ..., recursors matched by name, auxiliary recursors named \code{\verb~|<first type>.rec_j~}.}
+\li{The optional "type-check then def-eq" fallback of nano-lean for non-identical records is not implemented: a mismatch is a rejection, as in the official checker.}
+\li{Failure of a unit in the environment pass (reject or decline) stops \code{\verb~|envUnits~} at that unit: later units are never checked, earlier ones still are (they decide the first failure in file order).}
+\li{Cost \verb~|[~est\verb~|]~: 7,129 blocks x about 1.5 M instructions (fresh caches, constructor types and recursor types checked by the substitution kernel) = 10.7 G on mathlib, 2.7 \% of the leader's total, on a thread of its own. Measured at M3 on Init (605 blocks). Two reductions are prepared and off by default: yes/no judgments through the machine's \code{\verb~|KernelOps~}, and \code{\verb~|Policy.trustMatchingRecursors~} (skip the defensive re-check of a derived recursor that equals the exported one).}
+}
+}
+
+\subtree{
+\title{4.7 Quot}
+
+\p{On the first \code{\verb~|quot~} record: \code{\verb~|Eq~} must be an admitted inductive type with one universe parameter, one constructor, type \code{\verb~|Pi(Sort u, Pi(#0, Pi(#1, Sort 0)))~} and constructor type \code{\verb~|Pi(Sort u, Pi(#0, Eq.{u} #1 #0 #0))~}; the four names must be claimed by quot records only. Every quot record must have kind, universe parameters (\code{\verb~|[u]~}; \code{\verb~|[u, v]~} for lift) and type identical to the canonical ones of R03 section 5, built in the overlay and compared with \code{\verb~|eqv~} (\code{\verb~|bugs/quot-bad-type~}). A quot record under any other name is rejected (stricter than official, harmless). Quotient reduction is a property of the kinds \code{\verb~|QUOT_LIFT~} and \code{\verb~|QUOT_IND~}, so it exists exactly for units after the quot unit.}
+}
+
+\subtree{
+\title{4.8 Literal prerequisites and prelude guards}
+
+\p{The official kernel validates nothing about \code{\verb~|Nat~}, \code{\verb~|String~} and the accelerated functions (R03 section 8); the arena promises official preludes (R01 4.3). RLVM implements level L1: shape guards, evaluated by the environment thread when a declaration with a special name is admitted (\code{\verb~|PreludeGuards~}):}
+
+\table{
+\tr{\th{Special}\th{Guard (structural, no reduction)}\th{Enables}}
+\tr{\td{\code{\verb~|Nat~}, \code{\verb~|Nat.zero~}, \code{\verb~|Nat.succ~}}\td{\code{\verb~|inductive Nat : Type~} with exactly these constructors, \code{\verb~|succ : Nat -> Nat~}}\td{Nat literal typing, literal/constructor views}}
+\tr{\td{\code{\verb~|Nat.add~} .. \code{\verb~|Nat.shiftRight~} (13 functions)}\td{safe definition, no universe parameters, type \code{\verb~|Nat -> Nat -> Nat~}}\td{binary acceleration of that function}}
+\tr{\td{\code{\verb~|Nat.beq~}, \code{\verb~|Nat.ble~}; \code{\verb~|Bool~}, \code{\verb~|Bool.false~}, \code{\verb~|Bool.true~}}\td{type \code{\verb~|Nat -> Nat -> Bool~}; \code{\verb~|inductive Bool : Type~} with these two constructors}\td{boolean acceleration}}
+\tr{\td{\code{\verb~|String~}, \code{\verb~|String.ofList~}, \code{\verb~|Char~}, \code{\verb~|Char.ofNat~}, \code{\verb~|List~}, \code{\verb~|List.nil~}, \code{\verb~|List.cons~}}\td{\code{\verb~|String.ofList : List Char -> String~}, \code{\verb~|Char.ofNat : Nat -> Char~}, standard \code{\verb~|List~} constructors}\td{string literal typing and expansion}}
+\tr{\td{\code{\verb~|eagerReduce~}, \code{\verb~|Eq~}, \code{\verb~|Eq.refl~}, \code{\verb~|Quot*~}}\td{bound; \code{\verb~|Eq~} checked in 4.7}\td{-}}
+}
+
+\p{A special is ABSENT (never declared: the extension does not fire, as in the official kernel), VALID, or INVALID. An engine that needs an extension whose special is INVALID raises \code{\verb~|ResourceException(UNSUPPORTED_PRELUDE)~}: the unit is declined, neither accepted nor rejected on the strength of a non-standard prelude. A file that declares an odd \code{\verb~|Nat.add~} and never computes with it gets its normal verdict. Bodies of the accelerated functions are not validated (official behaviour; level L2 of R03 is future work). For exports of older Lean versions the string hook \code{\verb~|String.mk~} is bound as a fallback when \code{\verb~|String.ofList~} is absent (R07 2.6; open point O4).}
+}
+
+\subtree{
+\title{4.9 Policies}
+
+\table{
+\tr{\th{Topic}\th{Policy}\th{Justification}}
+\tr{\td{axioms}\td{every well-typed axiom is admitted; no list}\td{official; \code{\verb~|cedar~} declares 9 \code{\verb~|native_decide~} axioms and \code{\verb~|sorryAx~} and must be accepted; only the con-leche family declines (R01 0.10, 4.3)}}
+\tr{\td{unsafe / partial}\td{dropped; users fail with unknown constant}\td{official replay; tutorial 140, 141 are reject tests and sokonanoda's decline costs it rank (R01 3.2)}}
+\tr{\td{\code{\verb~|Lean.reduceBool~}, \code{\verb~|reduceNat~}, \code{\verb~|ofReduceBool~}, \code{\verb~|trustCompiler~}}\td{ordinary constants, no evaluation}\td{absent from the 4.36 kernel and from Init/Std exports (R01 0.10)}}
+\tr{\td{malformed input}\td{reject where the official reader throws; decline where RLVM is narrower (3.4)}\td{official exit 1 on any reader error; a decline never counts as wrong (R01 1.3)}}
+\tr{\td{header}\td{never decides; decline only on another format major version}\td{official ignores line 1}}
+\tr{\td{Init.Prelude}\td{L1 guards, decline on use of an invalid special (4.8)}\td{R03 decision 12}}
+\tr{\td{kernel release}\td{\code{\verb~|KernelProfile.LEAN_4_36~} for all files, a build/CLI option, never taken from the file's header}\td{the arena's reference verdicts come from one official binary whatever the export's Lean version; the 4.37 rules (R02 section 12) are a profile switch}}
+\tr{\td{forward references}\td{decline (v1), reorder (later)}\td{4.2}}
+\tr{\td{"either" tests}\td{follow v4.36}\td{free (R01 1.3)}}
+\tr{\td{unconfirmed rejection}\td{decline (\code{\verb~|Policy.unconfirmedReject~})}\td{8.2}}
+}
+}
+
+\subtree{
+\title{4.10 The bad-test catalogue against these mechanisms}
+
+\table{
+\tr{\th{Group of reject tests (R01 3.2-3.4, R03 section 10)}\th{Caught by}}
+\tr{\td{forged constructor / recursor data: \code{\verb~|ctor-num-fields~}, \code{\verb~|rec-k-lie~}, \code{\verb~|nat-rec-k-lie~}, \code{\verb~|nat-rec-rules~}, \code{\verb~|unit-rec-rule~}, \code{\verb~|rec-rule-wrong-arg~}, \code{\verb~|nested-rec-rule-nfields~}, \code{\verb~|rec-rule-proof-irrel(-nested)~}, \code{\verb~|rec-type-proof-irrel~}, \code{\verb~|large-elim-*~}, \code{\verb~|rec-missing-ih~}, tutorial 073}\td{4.6: derived facts only; \code{\verb~|RecordCompare~} with \code{\verb~|eqv~}}}
+\tr{\td{records nobody derives: \code{\verb~|orphan-rec~}, \code{\verb~|other/extra-rec~}, \code{\verb~|other/orphan-ctor~}, tutorial 136}\td{4.6: checklist 51}}
+\tr{\td{\code{\verb~|nested-name-capture~}}\td{derived rule calls \code{\verb~|Shadow.rec_1~}; auxiliary names never enter the namespace}}
+\tr{\td{\code{\verb~|nested-unused-param~}}\td{mandatory check of nested applications in the final environment (R03 6.12)}}
+\tr{\td{\code{\verb~|quot-bad-type~}}\td{4.7}}
+\tr{\td{name clashes: tutorial 132-139}\td{\code{\verb~|NameTable.claim~}}}
+\tr{\td{\code{\verb~|loose-bvar-value~}, \code{\verb~|constlevels~}, \code{\verb~|inductive-undeclared-universe~}, tutorial 014, 019, 048, 140, 141}\td{4.3, 4.5}}
+\tr{\td{inductive well-formedness: tutorial 046-057, 061, 117, 118}\td{\code{\verb~|InductiveAdmission~} (reference kernel judgments)}}
+\tr{\td{typing, conversion, levels, projections, K, eta, literals: tutorial 002, 009-012, 087-116, 125; \code{\verb~|bugs/level-*~}, \code{\verb~|proj-*~}, \code{\verb~|k-rec-conv~}, \code{\verb~|closure-level-subst~}, \code{\verb~|pi-closure-context~}, \code{\verb~|open-term-cache-context~}, \code{\verb~|eta-ctor-alias~}, \code{\verb~|str-lit-utf8-bad~}, \code{\verb~|other/nat-lit-add-bad~}, \code{\verb~|other/proj-of-prop~}; \code{\verb~|perf/*-bad~}}\td{primary engine, confirmed by the reference kernel (8.2)}}
+}
+}
+}
+
+\subtree{
+\title{5. Reference kernel (\code{\verb~|rlvm-ref~})}
+
+\ul{
+\li{\strong{Scope}: the complete official type checker of v4.36.0 as specified in R02: \code{\verb~|infer~} in check and infer-only mode, \code{\verb~|whnf_core~} with the cheap flags, \code{\verb~|whnf~} with delta, the 15-function Nat extension, string literal expansion, quotients, iota with K and structure eta on majors, projections; \code{\verb~|is_def_eq~} with the exact step order of R02 8.1 (quick test, proof irrelevance, lazy delta with hints, congruence, eta, unit-like), level comparison through \code{\verb~|LevelOps~}. Locally nameless: binders are opened with \code{\verb~|FVAR~} overlay nodes; substitution is \code{\verb~|TermOps~}.}
+\li{\strong{Representation}: term ids; results built in the worker's overlay, hash-consed there. Equality fast path is id equality; \code{\verb~|eqv~} where the official code compares structurally.}
+\li{\strong{Caches}: the seven of R02 section 5 (infer x2, whnf_core, whnf, def-eq successes, same-head failures, unfold), as open-addressing \code{\verb~|int~} tables keyed by term ids, cleared per declaration (\code{\verb~|KernelOps.begin~}). Nothing survives a declaration, so its verdict is trivially deterministic. No union-find, no negative cache, no shortcut the official kernel lacks.}
+\li{\strong{API}: \code{\verb~|RefKernel implements KernelOps~} (+ \code{\verb~|setBudget~}, \code{\verb~|checkConstant(cid)~}); \code{\verb~|RefEngine implements Engine~} with \code{\verb~|RefSession~} (one \code{\verb~|RefKernel~}, \code{\verb~|check~} = structural preconditions assumed, then the official \code{\verb~|add_*~} body).}
+\li{\strong{Uses}: (1) all judgments of the environment pass; (2) confirmation of every rejection of the primary engine and fallback for its declines (8.2); (3) oracle of \code{\verb~|DiffEngine~} and of the \code{\verb~|KernelOps~}-level differential tests; (4) primary engine until the machine exists (M1-M3) and under \code{\verb~|-X engine=reference~}.}
+\li{\strong{Recursion}: recursive like the original. It runs only on threads with a 1 GiB stack (environment thread, heavy-lane threads), counts depth, and raises \code{\verb~|ResourceException(STACK_DEPTH)~} before the stack ends; \code{\verb~|StackOverflowError~} is caught as a backstop. Term traversals in \code{\verb~|TermOps~} are iterative.}
+\li{\strong{Cost off the hot path}: in an accepting run it executes only the environment pass (about 10 G on mathlib, own thread). Re-checks happen only for units the machine did not accept. In a differential run it doubles the work by design.}
+\li{\strong{Performance floor} (it is the fallback): a plain Java port with object terms and \code{\verb~|HashMap~} caches (tenet-jvm) checks Init in 37 virtual seconds and mathlib in 1,633 (R01 1.5); with ids and primitive tables the target is <= 300 G on Init at M3 and all 8 \code{\verb~|perf/*-bad~} tests within their arena timeouts (official needs 4.7-14.2 virtual seconds on them, timeouts are 110-130 s).}
+}
+}
+
+\subtree{
+\title{6. Scheduler and parallelism}
+
+\subtree{
+\title{6.1 Threads}
+
+\table{
+\tr{\th{Thread}\th{Count}\th{Stack}\th{Work}}
+\tr{\td{launcher main}\td{1}\td{default}\td{waits, owns the exit status (\code{\verb~|rlvm-cli~})}}
+\tr{\td{loader (\code{\verb~|rlvm-checker~}, created by the launcher)}\td{1}\td{512 MiB (launcher default)}\td{read, scan, sink; joins the others at end of file}}
+\tr{\td{scan helpers}\td{K = 0}\td{default}\td{tokenise file ranges (3.5)}}
+\tr{\td{environment}\td{1}\td{1 GiB}\td{inductive and quot units in admission order, reference kernel (4.6)}}
+\tr{\td{workers}\td{W = 6}\td{64 MiB}\td{check units with the primary engine; no host recursion in the machine (ISA.md 0.1)}}
+\tr{\td{heavy lane}\td{0-2, on first use}\td{1 GiB}\td{cold retries, reference-kernel re-checks and fallbacks (6.5, 8.2)}}
+\tr{\td{Truffle compiler}\td{1}\td{-}\td{background compilation of promoted code objects (ISA.md 0.14)}}
+\tr{\td{collector}\td{0}\td{-}\td{Serial GC runs on the allocating thread}}
+}
+
+\p{Stack sizes are reservations; pages are committed when touched. With \code{\verb~|-j 1~} the same code runs with one worker; the environment pass can then be driven lazily by that worker (\code{\verb~|EnvBuilder.advanceTo~}).}
+}
+
+\subtree{
+\title{6.2 Order of units}
+
+\p{Any order of units gives the same verdict (4.1: a unit sees exactly the constants of smaller rank, and kept facts are functions of ids). The order only decides cache warmth.}
+
+\ul{
+\li{\code{\verb~|FILE~} (default): the exporter's order is a dependency post-order from hash-ordered roots (R01 2.7): a declaration follows the dependencies it introduced, but consecutive roots are unrelated.}
+\li{\code{\verb~|NAMESPACE_WINDOW~}: inside a sliding window of 16,384 ready units, group by the first two name components (after stripping \code{\verb~|_private.<module>.0.~}), groups in order of first appearance, file order inside a group. Evidence for grouping: pestka -9 \% instructions on mathlib slices, gruszka -5 \% for contiguous slices against round robin (R05 0.6, 2.10); nano-lean reorders towards dependencies (R04 12.1). A window instead of the whole file keeps the pipeline (3.5); the cost is a session reset at each group boundary where the rank steps back (I5).}
+\li{Decision rule (M5, WP-P1): switch the default to \code{\verb~|NAMESPACE_WINDOW~} if mathlib instructions drop by 2 \% or more with the verdict-invariance suite green.}
+}
+}
+
+\subtree{
+\title{6.3 Work distribution}
+
+\pre{\verb~|
+ready     = units below min(envUnits, firstFailure + 1) not yet handed out, arranged window by window
+claim(w)  = the next n = min(chunkUnits = 32, max(1, backlog / (2 W))) units of that order; if none: park
+            (one short lock per claim; about 22,600 claims on mathlib; nothing else in the loop locks)
+worker    = for u in claim: Terms.refresh(); admit(u) with Budget.warm(); record; maybe reset (6.4)
+giveBack  = a unit took more than 20 ms: the unstarted rest of the claim goes to a shared stack
+            that claim() serves first
+skip      = inductive and quot units (decided by the environment thread), SKIPPED units
+~}
+
+\p{Workers therefore see increasing ranks inside a claim and mostly from claim to claim, and neighbouring declarations stay on one worker. Idle workers park and are unparked at publications; no thread spins.}
+}
+
+\subtree{
+\title{6.4 Sessions}
+
+\p{A session is the engine's \code{\verb~|Session~} plus the worker's \code{\verb~|WorkerContext~} (term overlay, list, level and literal overlays). It lives across units and is reset (\code{\verb~|Session.reset()~} + \code{\verb~|WorkerContext.reset()~}; cost proportional to what was used) when:}
+
+\ol{
+\li{its footprint exceeds \code{\verb~|sessionBytes~} = 32 MiB (overlay terms + engine arenas);}
+\li{a unit ended with anything but ACCEPT (nothing from a failed or abandoned unit is kept);}
+\li{the next unit's rank is not larger than the last one's (I5);}
+\li{the next unit lies beyond the worker's level snapshot (3.5);}
+\li{the worker moves to the heavy lane or to a re-check (always a fresh session).}
+}
+
+\p{32 MiB is the middle of the leaders' range (gruszka 8 MiB of table entries, sokonanoda 9 MiB, nano-lean 64 MiB arena; R04 12.3, R05 2.9, R06 0.5) and is swept over 8 / 16 / 32 / 64 at M5. Mathlib decodes 67 M x 32 B = 2.1 GB of block nodes in total, so with engine data a worker goes through a few hundred sessions per run \verb~|[~est\verb~|]~; a reset that costs a millisecond is irrelevant.}
+}
+
+\subtree{
+\title{6.5 Budgets, the heavy lane, determinism}
+
+\ul{
+\li{Warm attempt: \code{\verb~|Budget.warm()~} = 5 x 10^7 steps and 1 GiB. On exhaustion the session is reset and the unit is deferred (\code{\verb~|Scheduler.defer~}).}
+\li{Heavy lane: fresh session, deep-stack thread, \code{\verb~|Budget.cold(memory)~}: unlimited steps, memory up to the run's limit. A unit ends there with ACCEPT, REJECT (then 8.2), or DECLINE. If the primary engine declines, the reference kernel gets the unit with the same cold budget before the decline counts.}
+\li{No budget is expressed in time. A timeout would be scored exactly like the decline it tries to avoid (R01 1.3), and mathlib must never be cut short.}
+\li{Determinism: ACCEPT and REJECT are semantic facts and do not depend on cache warmth (I3). A budget DECLINE in a warm session is never final. The cold attempt is a function of the store, the unit and the budget constants. Remaining schedule dependence: a unit that fits the memory limit only with warm caches may be accepted in one schedule and declined in another; it can change a decline into an accept, never an accept into a reject.}
+\li{Cancellation: \code{\verb~|RunSignals.firstFailure()~} is polled by engines every few thousand steps (ISA.md 1.4: 4096 ticks); a unit above the first failure stops with a \code{\verb~|ResourceException~} and is not recorded.}
+}
+}
+
+\subtree{
+\title{6.6 Failure handling}
+
+\table{
+\tr{\th{Event}\th{Response}}
+\tr{\td{primary engine REJECT}\td{the worker resets its session and continues; the unit goes to the re-check protocol (8.2) on a heavy-lane thread}}
+\tr{\td{confirmed REJECT or final DECLINE of unit f}\td{\code{\verb~|firstFailure = min(firstFailure, f)~}; units above f are no longer handed out and running ones abandon; units below f run to completion, so the reported failure is the first in file order}}
+\tr{\td{environment pass fails at unit f}\td{same, and \code{\verb~|envUnits~} stays at f for good}}
+\tr{\td{\code{\verb~|MalformedExportException~}}\td{input failure: REJECT at once, everything is cancelled (official: the reader throws before any checking)}}
+\tr{\td{\code{\verb~|UnsupportedExportException~}}\td{loading stops; published units are still checked; verdict REJECT if one of them is rejected and confirmed, else DECLINE}}
+\tr{\td{\code{\verb~|RuntimeException~} out of an engine at a unit boundary}\td{session discarded; the unit is retried once by the reference kernel in the heavy lane; if that also throws: DECLINE(INTERNAL_ERROR)}}
+\tr{\td{\code{\verb~|Error~} on any thread (\code{\verb~|OutOfMemoryError~}, \code{\verb~|StackOverflowError~}, assertion)}\td{not handled: the launcher's uncaught-exception handler and \code{\verb~|ExitOnOutOfMemoryError~} end the process with status 3 (\code{\verb~|rlvm-cli~} contract: never catch \code{\verb~|Error~} to carry on). Depth counters and the memory account exist so that this does not happen}}
+}
+}
+
+\subtree{
+\title{6.7 Memory reclamation}
+
+\ul{
+\li{Loader transients (\code{\verb~|loc~}, promotion table, segment buffer, claims blobs, reader buffers) are dropped at end of file; they are plain arrays without references into them, so dropping is free.}
+\li{Session memory is reused, not freed: resets move pointers. An overlay or engine arena that one huge declaration made grow is replaced by a base-size array at the next reset.}
+\li{Shared terms and proof blocks live to the end (theorems can be unfolded, R03 4.2).}
+\li{Every large array is registered with the run's memory account (\code{\verb~|rlvm-driver~}); above \code{\verb~|memoryLimitBytes~} (12 GiB) \code{\verb~|RunSignals.memoryExhausted()~} turns true and units decline instead of letting the runner's OOM killer end the process (exit 137, also scored as a decline, but uncontrolled).}
+\li{At the end the launcher calls \code{\verb~|Runtime.halt~}: no teardown is paid for.}
+}
+}
+
+\subtree{
+\title{6.8 Default thread count on the 8-vCPU runner}
+
+\p{\code{\verb~|workers = max(1, min(processors, 8) - 2)~} = 6, leaving two CPUs for the loader, the environment thread and the compiler thread; the loader's CPU is free again after the first half of the run. Expected cost against one worker: +0.8 \% to +1.6 \% instructions \verb~|[~src gruszka, a design without collector work; R11 C.5 measures +7 \% to +10 \% when the working set is made of objects, which this design excludes\verb~|]~. Sources of the overhead here: facts found once per worker instead of once, and code objects elaborated concurrently by two workers. Gate before submission (WP-P1), on mathlib in the arena-shaped container:}
+
+\table{
+\tr{\th{\code{\verb~|-j~}}\th{instructions}\th{wall}\th{decision rule}}
+\tr{\td{1, 2, 4, 6, 8}\td{measure each 3 times}\td{measure}\td{default = the largest N <= 6 whose instructions exceed \code{\verb~|-j 1~} by <= 2 \%; the draft \code{\verb~|rlvm.yaml~} says \code{\verb~|--threads 4~} until then}}
+}
+}
+
+\subtree{
+\title{6.9 Measuring wall clock, CPU time and instructions}
+
+\ul{
+\li{Instructions: only from outside, exactly as the arena does: \code{\verb~|scripts/dev.sh measure EXPORT~} (\src{bench/rlvm/measure.sh}: \code{\verb~|perf stat -e instructions:u~} in the 8-CPU / 16 GB container, for 1, 4 and 8 threads). Phase attribution by differencing: \code{\verb~|-X stop-after=load~} and \code{\verb~|-X stop-after=env~} end the run after the phase with status 2.}
+\li{Wall clock and CPU: \code{\verb~|RunStats~} records \code{\verb~|System.nanoTime()~} at phase boundaries and per-thread CPU time at thread end (the launcher's \code{\verb~|ProcStats~}); \code{\verb~|--stats~} prints them; \code{\verb~|-X stats-file=F~} writes JSON with loader counters, steps per unit (top 50), units and resets per worker, peak accounted bytes, and the engines' heat tables (\code{\verb~|Engine.dumpStats~}).}
+\li{Steps (the engines' deterministic work unit) are the bridge between the two: instructions per step per phase is the number tracked from commit to commit.}
+\li{All of it is off by default and then costs one predictable branch per unit.}
+}
+}
+}
+
+\subtree{
+\title{7. Runtime platform}
+
+\subtree{
+\title{7.1 Native image or JVM: the measurements, the decision, the gate}
+
+\p{All numbers \verb~|[~meas\verb~|]~ in the arena-shaped container on this host (\code{\verb~|spikes/platform/results/~}), G instructions:}
+
+\table{
+\tr{\th{Runtime}\th{object-allocating NbE, x100 (\code{\verb~|nbe-instr.txt~})}\th{plain-Java interpreter, fib(32) x20 (\code{\verb~|truffle-instr.txt~})}\th{Truffle AST interpreter with runtime compilation, same program}\th{fixed cost}}
+\tr{\td{HotSpot, C2, SerialGC}\td{214.9}\td{-}\td{-}\td{warm-up of a large program (javac as proxy, \code{\verb~|javac-instr.txt~}; fixed part extrapolated from 20 and 60 repetitions): 9 G with C1 only, 65 G C2 only, 91 G tiered}}
+\tr{\td{HotSpot, Graal JIT, SerialGC}\td{232.0}\td{49.8}\td{14.0}\td{\code{\verb~|java~} start 0.47 G (\code{\verb~|startup-instr.txt~})}}
+\tr{\td{native image, CE}\td{309.3 (\code{\verb~|-O3~}: 302.2)}\td{76.0}\td{2.49}\td{about 0.001 G to start and exit}}
+\tr{\td{native image, Oracle GraalVM, PGO, \code{\verb~|-O3~}}\td{273.0}\td{n.m.}\td{n.m.}\td{same}}
+}
+
+\p{Also: the CE image's serial collector costs about twice HotSpot's on a collector-bound benchmark (112.0 against 57.8 G with a 4 GB nursery, \code{\verb~|gc-native-instr.txt~}, \code{\verb~|gc-matrix-instr.txt~}); Truffle compilation in the image must run in the background (synchronous compilation: 376.8 against 30.2 G) and on one compiler thread (26.7 against 30.2 G, \code{\verb~|truffle-many-instr.txt~}).}
+
+\p{Reading: ahead-of-time code needs 1.4-1.5x the instructions of JIT-compiled code in steady state, and the JIT charges tens of G before it gets there. For the 230 small tests nothing of this matters (no ranking, no tight timeouts). For mathlib \verb~|[~est, with 375 G measured on the CE image as the working assumption\verb~|]~: Oracle + PGO 0.88 x 375 = 330 G; HotSpot C2 0.70 x 375 + 20..60 G warm-up = 280..320 G. The three candidates are within 15 \% of each other and the order is not predictable from micro-benchmarks.}
+
+\p{Decision: build and ship the CE native image now (it is what \code{\verb~|scripts/arena/~} builds; deterministic to 0.1 \%, no warm-up, simplest to reason about, satisfies decision E), and hold a \strong{platform gate at M5}: measure mathlib three times each with (a) \code{\verb~|bin/rlvm~} CE \code{\verb~|-O3~}, (b) \code{\verb~|bin/rlvm-pgo~}, (c) \code{\verb~|bin/rlvm-jvm~} with C2 as host compiler; ship the one with the fewest instructions unless its wall clock is more than 1.5x the best. To keep the gate open, module code uses neither image-only APIs (\code{\verb~|org.graalvm.word~}, \code{\verb~|UnmanagedMemory~}) nor JVM-only ones (reflection without registration, dynamic class loading, agents); \src{scripts/build.sh} already produces all three launchers from the same jars.}
+}
+
+\subtree{
+\title{7.2 Collector configuration, and why the working set is invisible to it}
+
+\p{What is in the Java heap as objects: a few hundred long-lived singletons and array headers; the Truffle tier's node trees and compiled code for promoted code objects (thousands of objects, never collected); short-lived \code{\verb~|long[]~} temporaries of big-number arithmetic; diagnostics strings when enabled. Everything that scales with the input is a primitive array whose content no collector reads: term regions, proof blocks, names, tables, overlays, engine arenas, worklists. Cost model that this avoids (R11 0.3): about 10 instructions per surviving byte at promotion and 380 per object per full collection, i.e. 34 G to promote 105 M node objects once.}
+
+\p{Consequences: young collections are rare (only big-number garbage fills the nursery) and find almost nothing alive besides shallow thread stacks (the machine keeps no deep Java stack: 680 instructions per live frame per collection, R11 B.11); full collections do not occur because the old generation only grows by long-lived arrays and is sized above the memory account's limit; the collector choice then changes nothing measurable, and Serial is taken because it has no helper threads to bill (R11 0.5). The owner's observation that single-thread collector totals mislead (OWNER-NOTES 2) is answered by removing the collector from the workers' path rather than by tuning it: R11 C.5 measured +9.8 \% instructions and 2.4x process CPU for four allocating mutators under Serial with a 1 GB nursery (+7.2 \% with 4 GB).}
+
+\table{
+\tr{\th{Launcher}\th{Flags (changes to \src{scripts/build.sh} in bold)}}
+\tr{\td{native image}\td{\code{\verb~|--gc=serial -R:+ExitOnOutOfMemoryError~} \strong{\code{\verb~|-R:MaxHeapSize=13g -R:MaxNewSize=1g~}}}}
+\tr{\td{JVM}\td{\code{\verb~|-XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:-UseJVMCICompiler -XX:CICompilerCount=2~} \strong{\code{\verb~|-Xms13g -Xmx13g -Xmn1g~}} (was 8g / 8g / 3g, sized for an object working set); no \code{\verb~|AlwaysPreTouch~}, no \code{\verb~|System.gc()~}}}
+}
+
+\p{13 GB of heap on the 16 GB runner leaves 3 GB for stacks, code and the page cache's pressure; the memory account declines at 12 GiB, before the heap limit. Large arrays are allocated before anything else where possible so that they sit at the bottom of the old generation (R11 B.3).}
+}
+
+\subtree{
+\title{7.3 Thread stacks}
+
+\p{Worker 64 MiB (the machine is a worklist stepper; only the loader's reader and engine fast paths recurse, boundedly); environment and heavy-lane threads 1 GiB (the reference kernel recurses like the original; \code{\verb~|perf/app-lam~} is 19,999 binders deep); all created with \code{\verb~|new Thread(group, body, name, stackBytes)~}, which HotSpot and the image both honour. The reference kernel counts depth and declines before the stack ends.}
+}
+
+\subtree{
+\title{7.4 Launch}
+
+\pre{\verb~|
+arena run line (scripts/arena/rlvm.yaml; one line):
+  RLVM_STATUS_BASE=10 work/dist/bin/rlvm --threads N "$IN"; case $? in 10) exit 0;; 11) exit 1;; 12) exit 2;; *) exit 3;; esac
+launcher options (rlvm-cli): -j/--threads, --stats, --stack-size, --checker NAME, -X KEY[=VALUE], -q
+kernel options (-X, parsed by rlvm.main.RlvmChecker.configure): engine=machine|reference|diff, load=pipelined|batch,
+  order=file|namespace, session-mib=N, scan-threads=K, stop-after=load|env, stats-file=F, no-recheck, no-truffle,
+  profile=4.36|4.37, no-proof-blocks, engine.* (Truffle engine options, passed to rlvm-truffle)
+~}
+
+\p{\code{\verb~|RLVM_STATUS_BASE~} keeps a runtime that dies before \code{\verb~|main~} (it exits with 1) from reading as a rejection. Truffle engine defaults (single tier, one compiler thread, no splitting, background compilation, fixed thresholds) are set in code by \code{\verb~|rlvm-truffle~} (ISA.md section 8), not on the command line, so that every launcher gets them.}
+}
+
+\subtree{
+\title{7.5 Arena build and run commands}
+
+\p{They exist (\src{scripts/arena/rlvm.yaml}, \src{scripts/arena/build.sh}, \src{scripts/fetch-toolchain.sh}, \src{scripts/build.sh}):}
+
+\pre{\verb~|
+build: scripts/arena/build.sh
+   1. scripts/fetch-toolchain.sh : GraalVM CE 25.5.5.0.3 for uname -m from
+         github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.5.5.0.3/
+         graalvm-community-jdk-25i5-25.0.5.0.3_linux-{x64,aarch64}_bin.tar.gz
+         sha256 x64 c6438dee...de34ef, aarch64 41741c06...5cce66 (full values in the script);
+         Apache Maven 3.9.16, sha512-pinned
+   2. zlib 1.3.1 from pinned source if the C compiler cannot link -lz
+   3. scripts/build.sh --online --no-pgo --opt 3 --verify-deps scripts/arena/deps.sha256
+         Maven build of all modules; third-party jars (Truffle, polyglot, ...) checked against deps.sha256;
+         native-image -O3 --gc=serial --no-fallback -R:+ExitOnOutOfMemoryError ... -o work/dist/bin/rlvm rlvm.cli.Main
+   4. verification of the image: --version, exit-status self-test, --truffle-probe (fails the build if
+      Truffle fell back to the interpreter-only runtime)
+run:   the line of 7.4
+~}
+
+\p{To do in this area: the parent pom's module list (Appendix A); the heap flags of 7.2; \code{\verb~|-march~} (the image is built and run on the same runner, so \code{\verb~|RLVM_ARENA_MARCH=native~} is admissible; measure it); \code{\verb~|threads:~} and \code{\verb~|--threads~} from the gate of 6.8; a training corpus if the platform gate picks PGO.}
+}
+
+\subtree{
+\title{7.6 Profile-guided optimisation}
+
+\p{Available only with Oracle GraalVM (\code{\verb~|native-image --pgo-instrument~} / \code{\verb~|--pgo=~}); \code{\verb~|scripts/build.sh --pgo~} already builds \code{\verb~|bin/rlvm-pgo~}, training on init-prelude and Init with the launcher's own run line. Measured value on the NbE spike: 273.0 against 302.2 G (-10 \%) with \code{\verb~|-O3~}; the leaders report -11 \% to -15 \% for their PGO builds (R05 0.8). If the platform gate picks it, the arena build must fetch Oracle GraalVM (GFTC licence: free to use, not to redistribute; the build would download it from Oracle, checksum-pinned) and train on an Init export produced on the runner (\code{\verb~|leanexport~} of the pinned toolchain reproduces the arena's \code{\verb~|init~} byte for byte, R01 section 5) or downloaded with a pinned checksum, as nano-lean and gruszka do. Open question O2.}
+}
+}
+
+\subtree{
+\title{8. Verdict and error policy}
+
+\subtree{
+\title{8.1 Statuses and the fail-closed chain}
+
+\table{
+\tr{\th{Status}\th{Meaning}\th{Arena}}
+\tr{\td{0}\td{every unit ACCEPTED (or SKIPPED as unsafe/partial), end of file reached, counts consistent}\td{accepted}}
+\tr{\td{1}\td{malformed input, or a rejection confirmed by the reference kernel}\td{rejected}}
+\tr{\td{2}\td{no confirmed rejection, but something was declined}\td{declined}}
+\tr{\td{3}\td{internal error: an \code{\verb~|Error~}, a dead thread, a launcher failure (\code{\verb~|rlvm-cli~})}\td{error (scored like a decline)}}
+\tr{\td{64}\td{usage error}\td{error}}
+}
+
+\p{Three independent defaults must all be overturned for a 0: the launcher's status starts as 3 and takes a verdict only from a normally returned \code{\verb~|check~}; \code{\verb~|VerdictBoard.exitCode()~} is DECLINE until \code{\verb~|complete(units)~} was called by the loader at end of file; and \code{\verb~|complete~} yields ACCEPT only if \code{\verb~|accepted + skipped == units == declaration records counted by the reader~} and no unit has another status. Every unit status is written once, by compare-and-set from RUNNING.}
+
+\p{Scoring logic behind the choices (R01 1.3): the sort key is (bad accepted, good rejected, mathlib instructions, declined). A wrong answer in either direction outweighs any speed; a decline, a crash and a timeout all cost one unit of the last tie-breaker. Hence: never guess; when unsure decline; but do not decline lightly on mathlib, because a decline there removes the checker from the speed ranking.}
+}
+
+\subtree{
+\title{8.2 Re-check protocol}
+
+\pre{\verb~|
+primary engine says REJECT for unit u (in a warm session):
+  1. cold strict run of the primary engine (fresh session, EngineConfig.strict, Budget.cold)
+        ACCEPT  -> u accepted; logged as WARM-ANOMALY (a cache or shortcut produced a wrong rejection; test builds fail)
+        other   -> 2
+  2. reference kernel on u (fresh session, deep stack, Budget.cold)
+        REJECT  -> u REJECTED, confirmed; the reported reason is the reference kernel's
+        ACCEPT  -> u accepted; logged as MACHINE-INCOMPLETE (the machine failed to prove a true equation)
+        DECLINE -> Policy.unconfirmedReject: DECLINE(UNCONFIRMED_REJECT) (default) or REJECT
+primary engine says DECLINE in the heavy lane:  reference kernel as in 2; its ACCEPT or REJECT is final
+rejections that need no confirmation:  structural checks (4.3), the environment pass (already the reference
+  kernel), the loader (malformed input)
+~}
+
+\ul{
+\li{An ACCEPT of the primary engine is never re-checked: that is the hot path, and its soundness is the machine's own obligation (ISA.md; differential testing, 9.2).}
+\li{Accepting on the reference kernel's word after the machine rejected is sound: the reference kernel is a complete checker in its own right, and "shortcuts fail open into the complete official procedure" is exactly this step at the granularity of a declaration.}
+\li{\code{\verb~|unconfirmedReject = DECLINE~}: when the machine rejects twice and the reference kernel cannot finish, a decline costs one tie-breaker point, a wrong rejection of a good test costs the second sort key. The policy flips to REJECT only if the differential campaign of M4 shows no MACHINE-INCOMPLETE event and a \code{\verb~|perf/*-bad~} test needs it.}
+\li{Cost: nothing on accepting runs. On rejecting runs the reference kernel must finish within the test's timeout; that is an acceptance criterion of WP-R3 for the eight \code{\verb~|perf/*-bad~} tests.}
+}
+}
+
+\subtree{
+\title{8.3 Resource exhaustion and internal errors}
+
+\table{
+\tr{\th{Situation}\th{Outcome}\th{Why}}
+\tr{\td{step budget of the warm attempt}\td{retry cold (6.5)}\td{not a verdict}}
+\tr{\td{memory account over the limit}\td{units DECLINE(BUDGET_MEMORY); status 2}\td{a decline is controlled; exit 137 is not}}
+\tr{\td{depth limit of the reference kernel}\td{DECLINE(STACK_DEPTH) for that judgment's unit}\td{never a rejection (tenet-jvm and rpylean map it to "rejected"; R07)}}
+\tr{\td{INVALID prelude special used}\td{DECLINE(UNSUPPORTED_PRELUDE)}\td{4.8}}
+\tr{\td{engines disagree in differential mode}\td{DECLINE(ENGINE_DISAGREEMENT) and a test failure}\td{never ship a guess}}
+\tr{\td{exception inside an engine}\td{reference-kernel retry, else DECLINE(INTERNAL_ERROR)}\td{6.6}}
+\tr{\td{\code{\verb~|Error~}, dead thread}\td{status 3}\td{\code{\verb~|rlvm-cli~} contract}}
+\tr{\td{the arena's timeout}\td{(process killed)}\td{budgets are not time-based; the machine's speed is the remedy}}
+}
+}
+
+\subtree{
+\title{8.4 Diagnostics that cost nothing when off}
+
+\ul{
+\li{Default output: nothing on accept; on any other verdict one line on stderr (unit index, constant name, reason, the reference kernel's message). The arena keeps 100 lines / 8 KiB (R01 1.1).}
+\li{\code{\verb~|Session.lastMessage()~} and name rendering run only after a failure. No logging framework, no string formatting, no boxed values on any path that runs per node or per step.}
+\li{Tracing, memo checking and id poisoning are compiled in only in the debug distribution: they hang off \code{\verb~|static final boolean~} flags that are constants at image build time (system properties read in a class initialised at build time), so the release image contains no test for them.}
+\li{Statistics (\code{\verb~|--stats~}, \code{\verb~|-X stats-file~}) are collected per unit and per phase, never per step; the engines' heat counters follow the same rule (\code{\verb~|EngineConfig.stats~}).}
+}
+}
+}
+
+\subtree{
+\title{9. Testing and measurement}
+
+\subtree{
+\title{9.1 Unit tests (JUnit 5, \code{\verb~|scripts/dev.sh test MODULE~})}
+
+\table{
+\tr{\th{Module}\th{Core suites}}
+\tr{\td{\code{\verb~|rlvm-store~}}\td{node derivation against a naive recursive recomputation on random DAGs (looseRange, fvMask, depMax, lpSet); overlay hash-consing and reset; name interning with duplicates, \code{\verb~|compare~} against Lean's order; block encode/decode/promote round trips; concurrent reader during growth}}
+\tr{\td{\code{\verb~|rlvm-load~}}\td{every record shape; the 230 arena files load with the record counts of \src{bench/export-stats.py}; sparse / out-of-order / reformatted variants load to an isomorphic store; malformed and unsupported catalogue of 3.4; shared + block node counts add up; promotion paths}}
+\tr{\td{\code{\verb~|rlvm-ref~}}\td{\code{\verb~|TermOps~} laws (instantiate/abstract inverse, \code{\verb~|eqv~}); level and literal semantics through the bindings; each rule of R02 sections 6-8 with a minimal term; tutorial tests as fixtures}}
+\tr{\td{\code{\verb~|rlvm-inductive~}}\td{the reference outputs of R03 6.14 (\code{\verb~|Nat.rec~}, \code{\verb~|Eq.rec~}, \code{\verb~|Acc.rec~}, \code{\verb~|Tree~}, \code{\verb~|Rose~}, mutual Prop pair) compared with \code{\verb~|eqv~}; traps T1-T8; every bad inductive test with the expected reason}}
+\tr{\td{\code{\verb~|rlvm-admit~}}\td{structural checks on hand-built stores; guard matrix of 4.8; frontier behaviour on failure}}
+\tr{\td{\code{\verb~|rlvm-driver~}}\td{scheduler with a fake engine (scripted outcomes and delays): verdict and first failure for all interleavings of small cases; the status-chain of 8.1 over its whole input space; re-check protocol table}}
+}
+}
+
+\subtree{
+\title{9.2 Differential tests}
+
+\ul{
+\li{\strong{Engine against engine}: \code{\verb~|-X engine=diff~} (\code{\verb~|rlvm.testkit.DiffEngine~}) runs machine and reference kernel on every unit of the arena tests, Init, Std and mathlib slices (\code{\verb~|work/exports/slices/~}). Any ACCEPT/REJECT difference fails. Below that, a sampler compares \code{\verb~|KernelOps~} answers (\code{\verb~|whnf~} up to def-eq by the reference kernel, \code{\verb~|isDefEq~} exactly, \code{\verb~|infer~} up to def-eq) on sub-terms of real proofs.}
+\li{\strong{Against the official checker}: \code{\verb~|rlvm.testkit.Leanchecker~} wraps \code{\verb~|leanchecker --from-export~} of the pinned 4.36.0 toolchain; verdicts cached by file hash. Inputs: the 230 tests, and mutants from \code{\verb~|ExportMutator~} (forged counts, flags and rules, swapped children and levels must be judged like the official checker judges them; changed hints, renumbered ids and reformatted JSON must not change the verdict). A mutant on which RLVM accepts and the official checker rejects blocks everything.}
+\li{\strong{Invariance}: the verdict and the first failing unit must be identical under \code{\verb~|-j 1 / 2 / 6~}, batch / pipelined loading, file / namespace order, session cap 1 MiB / 32 MiB, proof blocks on / off, Truffle tier on / off. This is the test of I1-I6.}
+\li{\strong{Self-checking builds} (debug distribution): every memo hit recomputed cold (nano-lean's \code{\verb~|memocheck~}, R04 section 2); freed overlay ranges poisoned so that a stale id faults (gruszka); \code{\verb~|fvMask~} re-derived by naive traversal on use (ISA.md 2.4).}
+}
+}
+
+\subtree{
+\title{9.3 The arena suite}
+
+\p{\code{\verb~|scripts/dev.sh suite~} (\src{bench/rlvm/suite.sh} -> \src{bench/run-suite.py}, the arena's scoring): 138 accept, 92 reject. \code{\verb~|--docker~} adds instruction counts under the arena's limits and per-test timeouts. Required from M2 on: 0 wrong answers; declines listed by name and justified. \src{bench/compare-published.py} compares with the published leaders. The 30 "either" tests are run for information when their exports are built (\code{\verb~|work/exports/all/either/~}).}
+}
+
+\subtree{
+\title{9.4 Performance tracking}
+
+\ul{
+\li{Corpus ladder: init-prelude (3.8 MB), Init (348 MB), Std (584 MB), ten mathlib module cones (\code{\verb~|work/exports/slices/~}), cslib (2.5 GB), mathlib (6.3 GB). Per commit on the main line: init-prelude, Init and two slices; nightly: the rest.}
+\li{Recorded per run (\code{\verb~|scripts/dev.sh track~}, to be added; appends to \code{\verb~|work/perf-history/<corpus>.jsonl~}): commit, launcher, threads, instructions, kernel instructions, wall, CPU, RSS, steps, phase split. Instructions from \src{bench/measure.sh} only; never CPU time as a proxy (R11: the two disagree by up to 2x in both directions).}
+\li{Regression rule: +1 \% instructions on Init or a slice needs a justification in the commit. Native runs repeat to 0.1 \% single-threaded; multi-threaded and JVM runs are measured three times (the JVM varies by about 2 \%, \src{bench/README.md}).}
+\li{Targets are stated against leaders measured on this host with the same script (\code{\verb~|bench/baselines/~}), not against published x86 numbers (the official C++ kernel counts 5 \% fewer instructions here).}
+}
+}
+
+\subtree{
+\title{9.5 One developer entry point}
+
+\p{\src{scripts/dev.sh} exists: \code{\verb~|build~}, \code{\verb~|test~}, \code{\verb~|install~}, \code{\verb~|dist~}, \code{\verb~|dist-quick~}, \code{\verb~|run~}, \code{\verb~|selftest~}, \code{\verb~|suite~}, \code{\verb~|measure~}, \code{\verb~|arena-test~}. To add: \code{\verb~|diff EXPORT~} (engine=diff), \code{\verb~|oracle EXPORT~} (official verdict, cached), \code{\verb~|mutate EXPORT KIND N~}, \code{\verb~|track CORPUS~}, \code{\verb~|gate~} (what must be green before a merge: unit tests of the touched modules, suite on the host, \code{\verb~|diff~} on init-prelude, invariance on ten tests).}
+}
+}
+
+\subtree{
+\title{10. Milestones and staffing}
+
+\subtree{
+\title{10.1 Milestones}
+
+\table{
+\tr{\th{}\th{Goal}\th{Acceptance}}
+\tr{\td{M0}\td{skeleton builds}\td{the parent pom lists the nine new modules; \code{\verb~|scripts/dev.sh dist~} builds the image with \code{\verb~|rlvm-main~} as default checker (declining everything); bindings to \code{\verb~|rlvm-export~}, \code{\verb~|rlvm-level~}, \code{\verb~|rlvm-nat~} compile}}
+\tr{\td{M1}\td{tutorial tests}\td{141 / 141 with \code{\verb~|-X engine=reference -X load=batch -j 1~}; loader unit suite green on all 230 files}}
+\tr{\td{M2}\td{all 230 small tests}\td{0 wrong, at most 2 declines (named), every test within its arena timeout, with the reference engine; invariance suite green; mutant campaign of 9.2 without a soundness difference}}
+\tr{\td{M3}\td{Init and Std accepted}\td{reference engine: Init <= 300 G instructions, Std accepted; pipelined loading; loader <= 12 instr/byte; environment pass measured; machine engine joins as it becomes available and must be diff-clean on Init}}
+\tr{\td{M4}\td{mathlib accepted}\td{machine primary, reference fallback; no MACHINE-INCOMPLETE or WARM-ANOMALY event on Init, Std, cslib, mathlib; peak RSS <= 6 GB; cslib, cedar, con-leche, navier-stokes-euler, reachability accepted within their timeouts}}
+\tr{\td{M5}\td{performance}\td{mathlib below the best leader measured on this host (and < 394.9 G when counted on x86), wall clock below nano-lean's and gruszka's measured here with the same thread count; thread, order, session and platform gates decided with numbers; arena definition submitted}}
+}
+}
+
+\subtree{
+\title{10.2 Work packages for the next wave}
+
+\p{Every package can start today against the skeletons; "needs" lists what must have landed before its acceptance tests can run. \code{\verb~|R..~} = research documents to read first; \code{\verb~|A n~} = section n of this document.}
+
+\table{
+\tr{\th{WP}\th{Owns}\th{Needs}\th{Read}\th{Acceptance}}
+\tr{\td{A1 terms}\td{\code{\verb~|rlvm-store~}: \code{\verb~|Node~}, \code{\verb~|TermStore~}, \code{\verb~|Overlay~}, \code{\verb~|Terms~}, \code{\verb~|SharedFacts~}}\td{-}\td{A2.1-2.2, R09 1.2, R11 B.3}\td{derivation property tests; append <= 60 instr/node, overlay \code{\verb~|mk*~} <= 150 (one probe); AoS against columns measured in the image and reported}}
+\tr{\td{A2 tables}\td{\code{\verb~|rlvm-store~}: \code{\verb~|NameTable~}, \code{\verb~|LitPool~}, \code{\verb~|DeclTable~}, \code{\verb~|Specials~}, \code{\verb~|Store~}, \code{\verb~|StoreBuilder~}; \code{\verb~|rlvm-api~} bindings \code{\verb~|rlvm.api.bind~} over \code{\verb~|rlvm-level~} / \code{\verb~|rlvm-nat~}}\td{wave 2a}\td{A2.3-2.8, R01 2.5}\td{mathlib's 4.27 M names intern in <= 0.7 G instr; \code{\verb~|compare~} equals Lean's order on 10^5 random pairs; concurrent publication test}}
+\tr{\td{A3 blocks}\td{\code{\verb~|rlvm-store~}: \code{\verb~|ProofBlocks~} (writer, decoder, promotion)}\td{A1}\td{A2.6, R05 1.1-1.2}\td{round trip on every theorem of Init; <= 6 B/record, decode <= 60 instr/record}}
+\tr{\td{L1 loader}\td{\code{\verb~|rlvm-load~}: \code{\verb~|Loader~} (batch), reports, exceptions; \code{\verb~|Loader implements rlvm.export.ExportSink~}}\td{A1-A3, \code{\verb~|rlvm-export~}}\td{A3, R01 2-3}\td{230 files + Init + Std load with exact record counts; catalogue of A3.4; M1 loader criterion}}
+\tr{\td{L2 pipeline}\td{\code{\verb~|rlvm-load~}: pipelined publication, level snapshots, late names, forward-reference bookkeeping; loader performance}\td{L1, \code{\verb~|rlvm-level~} snapshot}\td{A3.5-3.6, A4.2, R11 C.6}\td{identical store in batch and pipelined mode; <= 8 instr/byte on mathlib; a reader thread never observes an unpublished datum (stress test)}}
+\tr{\td{R1 term algebra + infer}\td{\code{\verb~|rlvm-store~}: \code{\verb~|TermOps~}; \code{\verb~|rlvm-ref~}: \code{\verb~|RefKernel~} infer / check, \code{\verb~|begin~}, \code{\verb~|exposeUnitMembers~}, budgets}\td{A1, A2}\td{R02 2-6, A5}\td{infer-rule fixtures; projections table of R03 section 7; depth-safe on \code{\verb~|perf/app-lam~}}}
+\tr{\td{R2 reduction}\td{\code{\verb~|rlvm-ref~}: \code{\verb~|whnfCore~}, \code{\verb~|whnf~}, delta, iota, K, structure eta on majors, projections, quot, Nat and String extension}\td{R1}\td{R02 7}\td{reduction fixtures; \code{\verb~|other/nat-lit-*~}, \code{\verb~|bugs/nat-shift-huge~}, \code{\verb~|str-lit-utf8*~}}}
+\tr{\td{R3 conversion + engine}\td{\code{\verb~|rlvm-ref~}: \code{\verb~|isDefEq~} in the official order, \code{\verb~|checkConstant~}, \code{\verb~|RefEngine~}, \code{\verb~|RefSession~}, \code{\verb~|Provider~}}\td{R1, R2}\td{R02 8, 10, 11}\td{reference engine alone: M1, then M2 (with I1, I2, D1, D2); the eight \code{\verb~|perf/*-bad~} tests within timeouts}}
+\tr{\td{I1 inductive}\td{\code{\verb~|rlvm-inductive~}: \code{\verb~|InductiveAdmission~} for non-nested blocks, \code{\verb~|BlockInput~}, \code{\verb~|GeneratedBlock~}, \code{\verb~|RecordCompare~}}\td{R1 (through \code{\verb~|KernelOps~}; a fake for unit tests)}\td{R03 6.1-6.11, 6.13-6.14}\td{reference outputs of R03 6.14; all 605 blocks of Init regenerate identically; tutorial inductive tests}}
+\tr{\td{I2 nested + quot}\td{\code{\verb~|rlvm-inductive~}: nested elimination and restoration, \code{\verb~|QuotAdmission~}}\td{I1}\td{R03 5, 6.3, 6.12}\td{\code{\verb~|Tree~}, \code{\verb~|Rose~} fixtures; the 57 nested types of mathlib; \code{\verb~|bugs/nested-*~}, \code{\verb~|quot-bad-type~}}}
+\tr{\td{D1 admission}\td{\code{\verb~|rlvm-admit~}: all classes}\td{A2, I1}\td{A4, R03 4, 8, 9}\td{every reject test whose reason is structural is rejected without an engine; guard matrix; frontier semantics}}
+\tr{\td{D2 driver}\td{\code{\verb~|rlvm-driver~}: all classes; memory account}\td{D1, R3 (or a fake engine)}\td{A6, A8, R11 C}\td{scheduler suite of 9.1; invariance suite; status chain proof-by-enumeration}}
+\tr{\td{C1 wiring + packaging}\td{\code{\verb~|rlvm-main~} (\code{\verb~|RlvmChecker implements rlvm.cli.Checker~}, \code{\verb~|Engines~}, service files); parent pom; \code{\verb~|scripts/~} flags of A7}\td{D2}\td{A7, \src{rlvm-cli/README.md}}\td{M0; \code{\verb~|scripts/dev.sh arena-test~} green; \code{\verb~|rlvm --version~} lists the kernel and its engines}}
+\tr{\td{T1 testkit}\td{\code{\verb~|rlvm-testkit~}: \code{\verb~|DiffEngine~}, \code{\verb~|Leanchecker~}, \code{\verb~|ExportMutator~}; \code{\verb~|scripts/dev.sh diff / oracle / mutate / gate~}}\td{D2}\td{A9}\td{official verdict cache for the 230 tests; 10^4 mutants classified; diff run on Init wired into \code{\verb~|gate~}}}
+\tr{\td{T2 tracking}\td{\code{\verb~|bench/~}: \code{\verb~|track~}, phase differencing, history files, comparison with \code{\verb~|bench/baselines/~}}\td{C1}\td{A6.9, A9.4, \src{bench/README.md}}\td{one command per corpus; per-phase table for Init; regression rule automated}}
+\tr{\td{P1 gates}\td{measurement campaigns: threads, order, session cap, platform, \code{\verb~|-march~}; proposals for defaults}\td{M4}\td{A6.8, A7.1}\td{the four decision tables of this document filled with mathlib numbers}}
+\tr{\td{H1 hardening}\td{fuzzing of reader + loader (grammar-based and mutational), resource-exhaustion behaviour, determinism soak}\td{L1, D2}\td{A3.4, A8}\td{no status other than 1, 2 (or 3 for an injected \code{\verb~|Error~}) on 10^6 fuzzed inputs; never 0 on a mutant the official checker rejects}}
+}
+
+\p{The machine's own packages are in \code{\verb~|ISA.md~}; its integration point is one class (\code{\verb~|EngineProvider~} named "machine") and the differential harness of T1.}
+}
+}
+
+\subtree{
+\title{11. Boundary to ISA.md}
+
+\p{Provided to the machine:}
+
+\ul{
+\li{the store API of section 1.3 with the layouts of section 2 (normative: \code{\verb~|rlvm.store.Node~}), including per-node \code{\verb~|fvMask~} that never under-approximates, \code{\verb~|looseRange~}, \code{\verb~|HAS_LPARAM~}, \code{\verb~|depMax~}, \code{\verb~|lpSet~}, and three header bits plus the \code{\verb~|c~} word of LAM/PI nodes for the elaborator's own static facts;}
+\li{constant rows and derived inductive facts readable for every unit below \code{\verb~|envUnits~}; \code{\verb~|Specials~} with guard states (\code{\verb~|natOk~}, \code{\verb~|boolOk~}, \code{\verb~|stringOk~} of ISA.md 2.9 are \code{\verb~|state(NAT..)~}, \code{\verb~|state(BOOL..)~}, \code{\verb~|state(STRING..)~}); \code{\verb~|SharedFacts~} as the shared check-mode table (\code{\verb~|PCHK~});}
+\li{a \code{\verb~|WorkerContext~} per session: term overlay (decodes proof blocks, holds terms the machine builds), list / level / literal overlays, \code{\verb~|RunSignals~} (first failure, memory);}
+\li{lifecycle: sessions only move forward in rank; \code{\verb~|reset()~} is called by the driver on the conditions of 6.4 and always before a cold or strict run; \code{\verb~|Terms.refresh()~} at every unit start;}
+\li{preconditions of \code{\verb~|Session.check~} (4.3) and the guarantee that a REJECT is confirmed elsewhere.}
+}
+
+\p{Required from the machine:}
+
+\ul{
+\li{\code{\verb~|Engine~} / \code{\verb~|Session~} as specified in \code{\verb~|rlvm.api~}, registered as an \code{\verb~|EngineProvider~};}
+\li{outcomes that are functions of ids (I3), nothing kept from abandoned or failed work, DECLINE on every limit, termination on ill-typed input (I4);}
+\li{no writes to shared store data other than \code{\verb~|SharedFacts~} and its own engine-wide tables, which must be safe under concurrent sessions and must not make a verdict depend on which session filled them;}
+\li{\code{\verb~|EngineConfig.strict~} (no shortcut, no cache across units) for the re-check, \code{\verb~|footprintBytes()~} and \code{\verb~|steps()~} that are cheap and honest, \code{\verb~|dumpStats~} for heat;}
+\li{\code{\verb~|KernelOps~} from the machine is optional; admission uses the reference kernel in v1.}
+}
+}
+
+\subtree{
+\title{12. Risks and open questions}
+
+\p{Risks:}
+
+\ol{
+\li{\strong{AOT code quality} (7.1): if the gate is not run, up to 1.4x of the machine's instructions is left on the table; if it picks the JVM, start-up and warm-up variance (about 2 \%) enters every measurement.}
+\li{\strong{Exact syntactic regeneration of recursors} (R03 6.13) is the largest correctness item outside the machine; a mismatch rejects a good file. Mitigation: Init's 605 and mathlib's 7,129 blocks as regression corpus from M2 on.}
+\li{\strong{Reference kernel speed} decides whether rejections are confirmed within timeouts and whether the fallback rescues mathlib; its floor is set by acceptance criteria (R3), not by hope.}
+\li{\strong{Pipelined loading} depends on a level-store snapshot; without it the wall-clock model of 3.5 loses 15 s on mathlib (batch mode), nothing else.}
+\li{\strong{Shared-region estimate} (36 \% of records) comes from Susz's numbers for an earlier mathlib; a growth copy costs a transient 1.8 GB. Mitigation: measured ratio at M3, head-room adjusted.}
+\li{\strong{Optimistic environment} makes every engine face ill-typed bodies; a hang there is contained by budgets and cancellation only if polls are frequent (ISA.md 1.4).}
+\li{\strong{Parallel overhead} above 2 \% would cost rank; the gate then lowers the default, at the price of wall clock.}
+\li{\strong{\code{\verb~|Error~} handling}: a \code{\verb~|StackOverflowError~} in the reference kernel ends the run with status 3 under the launcher's contract; depth accounting must be conservative.}
+}
+
+\p{Open questions:}
+
+\ul{
+\li{O1. Does the level store get \code{\verb~|snapshot()~} (1.4)? Otherwise pipelining needs its own level table in \code{\verb~|rlvm-load~}.}
+\li{O2. May the arena build download Oracle GraalVM (GFTC) if PGO wins the platform gate?}
+\li{O3. AoS (this document) or columns (R11 B.3, ISA.md 1.1 wording) for term nodes: decided by WP-A1's measurement in the image; the accessor API is the same.}
+\li{O4. String-literal hook for exports of Lean < 4.36 (\code{\verb~|String.mk~} against \code{\verb~|String.ofList~}): do navier-stokes-euler and reachability (4.34.x) contain string literals that must expand? (R01 6.5)}
+\li{O5. Forward references and generated-but-unlisted constants: decline in v1; implement only if an arena test appears.}
+\li{O6. Session cap, order policy, worker count, scan helpers: defaults above are starting values; the gates of 6.2, 6.4, 6.8 decide.}
+\li{O7. Is the arena's instruction count user-only (R01 1.2)? If kernel instructions count, page faults of the 4 GB working set and \code{\verb~|read~} copies become costs; \code{\verb~|MAP_POPULATE~}-style pre-touching would then be wrong and array reuse more valuable.}
+}
+}
+
+\subtree{
+\title{Appendix A. Parent pom and build notes for the orchestrator}
+
+\p{Lines to add to \code{\verb~|<modules>~} of the parent \code{\verb~|pom.xml~} (Maven orders the reactor by dependencies, so the position among the existing entries does not matter):}
+
+\pre{\verb~|
+    <module>rlvm-store</module>
+    <module>rlvm-api</module>
+    <module>rlvm-load</module>
+    <module>rlvm-ref</module>
+    <module>rlvm-inductive</module>
+    <module>rlvm-admit</module>
+    <module>rlvm-driver</module>
+    <module>rlvm-main</module>
+    <module>rlvm-testkit</module>
+~}
+
+\ul{
+\li{The nine modules were compiled together through a temporary aggregator pom outside the tree (\code{\verb~|mvn -o -q -f <aggregator>/pom.xml compile~}: exit 0, 9 modules, 73 source files); \code{\verb~|rlvm-store~} also compiles alone with \code{\verb~|-f rlvm-store/pom.xml~}.}
+\li{Modules with RLVM dependencies cannot be built alone with \code{\verb~|-pl MODULE~} unless the upstream jars are in \code{\verb~|.toolchain/m2~} (\code{\verb~|scripts/dev.sh install MODULE~}) or \code{\verb~|-am~} is given.}
+\li{Dependencies to add when the wave-2a APIs are frozen: \code{\verb~|rlvm-api~} -> \code{\verb~|rlvm-level~}, \code{\verb~|rlvm-nat~} (bindings); \code{\verb~|rlvm-load~} -> \code{\verb~|rlvm-export~}, \code{\verb~|rlvm-level~}, \code{\verb~|rlvm-nat~}; \code{\verb~|rlvm-main~} -> \code{\verb~|rlvm-cli~}, \code{\verb~|rlvm-export~}, \code{\verb~|rlvm-level~}, \code{\verb~|rlvm-nat~}. \code{\verb~|rlvm-ref~} ships \code{\verb~|META-INF/services/rlvm.api.EngineProvider~}; \code{\verb~|rlvm-main~} will ship \code{\verb~|META-INF/services/rlvm.cli.Checker~}.}
+\li{Names reserved for the machine: modules \code{\verb~|rlvm-machine~} (\code{\verb~|rlvm.machine~}) and \code{\verb~|rlvm-truffle~} (\code{\verb~|rlvm.truffle~}).}
+}
+}
