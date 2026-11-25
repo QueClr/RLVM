@@ -1,0 +1,19 @@
+\title{A sample of the symbolised image can carry the name of an inlined method that did not run: three "image-only" lines of the profile were labels}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{platform}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of the optimisation of the image's worker code](rep-OPT-A), section 2.2, which reads the Mathlib samples of [the profile of the final default configuration](rep-P11) instruction by instruction (disassembly of the symbolised executable, the chain of inlined frames of every sampled address).}
+
+\ul{
+\li{\strong{The finding.} rep-P11 names four lines that exist almost only in the executable. Three of them are names, not costs. The samples called \code{\verb~|Machine.growRecords~} (0.66 \% of the workers) are the instructions of \code{\verb~|Values.Ext.mark~}, which writes the OPEN bit of a new record; those called \code{\verb~|Machine.growRuns~} (0.20 \%) are the two loops of \code{\verb~|Runs.pruneSlow~} that write a new frame; those called \code{\verb~|Machine.copyOrNull~} (0.20 \%) are the spine loop of \code{\verb~|Values.neuSlow~}. The growth of a slab itself is 0.014 \%. The samples called \code{\verb~|Machine.sigN~} are the compare after a call returns.}
+\li{\strong{Why.} When the compiler inlines a method and then moves or merges code, the debug information of the image keeps the range of the inlined frame, and code that follows the inlined call in the caller can fall into it. A classifier that takes the innermost inlined frame then counts the caller's work under the callee's name. The JVM's sampler names frames differently, so a comparison of the two platforms by method shows a line that one of them does not have.}
+\li{\strong{What was real.} Of the working-environment line only \code{\verb~|Runs.get~} was a call of its own (0.86 \%); the kernel line (page faults) is real and is not code.}
+}
+
+\p{What to take from it: before acting on a line of a native profile that is far out of proportion, read its hottest instructions in the disassembly; a line that is a growth path, a slow path or a helper of a few instructions and still has many samples is probably a label. Compare the two platforms by item sums, not by method. \strong{Not measured:} whether the debug information of another GraalVM version has the same ranges.}

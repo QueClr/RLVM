@@ -1,0 +1,21 @@
+\title{The executable's hot calls can be inlined by name: a hand-kept list is worth 4 to 6 percent of the CPU of a pass}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{platform}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of the optimisation of the image's worker code](rep-OPT-A), sections 2.3, 4 and 5. Conditions: GraalVM Community Edition native image with the flags of the release, the machine as default engine, warm passes with 8 workers and pipelined load on the aarch64 development host while its other cores were busy; base and candidate built from the same tree, three interleaved rounds per corpus.}
+
+\ul{
+\li{\strong{What the image lacks.} Without a profile the ahead-of-time inliner cannot tell a hot call from a cold one. In the released executable 8.3 \% of the workers' samples on Mathlib sit on the frame code of calls (stack check, frame, safepoint poll at the return), and the callees are one-line readers of the term store (\code{\verb~|Terms.a~}: 260 call sites, the most called function of the image), cache probes and steps with one or two callers. Larger inliner budgets do not help ([the flags that were tried](ins-TVGI)): they inline more of everything and stop first at the large hot roots.}
+\li{\strong{What gives it.} The build already forces the continuation steps inline from a generated list. A second, hand-kept list of 75 hot methods (\src{rlvm-machine/h10/force-inline.txt}) removes 9.6 \% of the instructions of an Init pass with one worker. It changes no class file, so nothing changes on the JVM.}
+\li{\strong{What it is worth.} CPU time of a warm pass 0.942 to 0.959 of the base's on the eight corpora, wall clock 0.953 to 0.979, geometric mean 0.966; Mathlib 14.50 to 13.87 s and 5.7 s less CPU. Every counter of the machine is unchanged on all eight corpora.}
+\li{\strong{Where it ends.} The list is at its plateau after about 60 entries. The executable then still executes 1.25 times the instructions of the JVM launcher (1.38 before): a bounds check per array element, three instructions per address, a safepoint poll per probe step. That is per access and not reachable from the source without another layout of the slabs.}
+\li{\strong{A split is not the same thing.} Moving the rare part of a method into a \code{\verb~|..Slow~} method helps the image as an entry does, but C2 does not inline such a method back ("too big", "callee is too large"): three splits that were worth 0.46 \% of the image's instructions made reachability 3.6 \% slower on the JVM launcher over nine rounds, because one of them, the miss of the level cache, is not rare. They were not adopted.}
+}
+
+\p{What to take from it: when a profile of the executable shows a small function with samples on its first six instructions, give it an entry in the list; never list a method that is recursive through other entries (the inliner unrolls the cycle five times); split a method only where the part that moves really never runs. \strong{Not measured:} x86-64; a quiet host; the optional Oracle GraalVM build with the list.}

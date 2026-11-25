@@ -1,0 +1,106 @@
+# rlvm-machine/h10/force-inline.txt - methods that the native image inlines at every call site.
+#
+# native-image-args.sh adds them to -H:PriorityForceInline, after the continuation steps k_* that it finds
+# itself. One "class.method" per line (every overload of the name); '#' starts a comment.
+#
+# Why a list: GraalVM Community Edition compiles ahead of time without a profile, so its inliner cannot
+# tell a hot call from a cold one; on the JVM C2 inlines all of these by call count. Each entry was a
+# call that showed in a profile of the executable (the cost of being called: frame, stack check,
+# safepoint poll, spilled registers around the call). What is listed and what it is worth:
+# *agentic-note*: rep-OPT-A.
+#
+# Rules for an entry:
+#   - a leaf reader or a cache probe of a few lines whose rare part is a ..Slow method of its own, or
+#   - a step that has one to three call sites in the hot path (inlining it adds no code), and
+#   - never a method that is recursive through other entries (the inliner unrolls the cycle five times:
+#     Infer.tmNode / Infer.tmApp grew from 1 kB to 41 kB each and bought nothing).
+# Prefer an entry to a split of the method: an entry costs the JVM launcher nothing (the jars do not
+# change), a part moved out of line is a call there, which C2 does not inline back.
+# An entry of rlvm.machine that names no method of the machine classes is reported by the script and
+# ignored; entries of other modules (rlvm.store) cannot be checked there: a renamed method silently
+# leaves the list. Tuning only: the list changes no result, and a build without it is correct.
+
+# --- readers of the term store (rlvm-store), called from every judgment
+rlvm.store.Terms.a
+rlvm.store.Terms.b
+rlvm.store.Terms.kind
+rlvm.store.Terms.fvMask
+rlvm.store.Terms.hasLevelParam
+rlvm.store.ProofBlocks.rd
+rlvm.store.ProofBlocks.localRef
+rlvm.store.DeclTable.ctorInduct
+
+# --- leaf accessors and cache probes of the machine
+rlvm.machine.Runs.get
+rlvm.machine.Values.openOf
+rlvm.machine.Values.peek
+rlvm.machine.Values.mkSort
+rlvm.machine.Values.mkConst
+rlvm.machine.Values.mkApp
+rlvm.machine.Values.closure
+rlvm.machine.Hash.ofRecord
+rlvm.machine.Pairs.status
+rlvm.machine.Pairs.undec
+rlvm.machine.Levels.lsubList
+rlvm.machine.Levels.importLevel
+rlvm.machine.Code.arityOf
+rlvm.machine.Code.raw
+rlvm.machine.CodeStore.blockOf
+rlvm.machine.FactStore.indexOf
+rlvm.machine.Facts.word
+rlvm.machine.Facts.facts
+rlvm.machine.Same.slot
+rlvm.machine.Same.levels
+rlvm.machine.Same.leaves
+rlvm.machine.Same.appNeu
+rlvm.machine.Infer.hit
+
+# --- EVAL and ARGV: the inline answers and the loop over the arguments
+rlvm.machine.Eval.atom
+rlvm.machine.Eval.argvFast
+rlvm.machine.Eval.argv
+rlvm.machine.Eval.inertHead
+rlvm.machine.Eval.closure
+rlvm.machine.Eval.closedGet
+rlvm.machine.Eval.gate
+rlvm.machine.Eval.flat
+rlvm.machine.Eval.table
+rlvm.machine.Eval.app
+rlvm.machine.Eval.appHead
+rlvm.machine.Eval.evalInAt
+rlvm.machine.Eval.evalBody
+rlvm.machine.Eval.done
+rlvm.machine.Eval.codeArity
+rlvm.machine.Values.frameProbe
+rlvm.machine.Values.closureOverNew
+
+# --- INFER: the walk over an application and the type patterns
+rlvm.machine.Infer.inferApp
+rlvm.machine.Infer.inferConst
+rlvm.machine.Infer.twEnter
+rlvm.machine.Infer.twArg
+rlvm.machine.Infer.twC
+rlvm.machine.Infer.twD
+rlvm.machine.Infer.twF
+rlvm.machine.Infer.twX
+rlvm.machine.Infer.twEval
+rlvm.machine.Infer.twEnv
+rlvm.machine.Infer.twVar
+rlvm.machine.Infer.twRaw
+rlvm.machine.Infer.twEnd
+rlvm.machine.Infer.twMatchDom
+rlvm.machine.Infer.tmatch
+rlvm.machine.Infer.tmVar
+rlvm.machine.Infer.tmConst
+rlvm.machine.Infer.isEagerReduce
+
+# --- CONV and the code blocks
+rlvm.machine.Conv.conv
+rlvm.machine.Conv.congruence
+rlvm.machine.Conv.pairHit
+rlvm.machine.Conv.sameShape
+rlvm.machine.Conv.sameClosure
+rlvm.machine.Conv.convStatic
+rlvm.machine.Conv.b1Budget
+rlvm.machine.Cargs.probePair
+rlvm.machine.Code.operands

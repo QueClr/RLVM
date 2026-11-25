@@ -1,0 +1,378 @@
+\title{OPT-A: the code the image runs in the workers - a hand-kept inline list for the hot calls, and three fast / slow splits that the JVM launcher refuses}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{platform}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Agent "OPT-A" of the optimisation wave after the first release, 2026-11-25 (05:20 to 08:20 UTC). The lever: lever 1 of [the profile of the final default configuration](rep-P11), [the image's code in the workers](ins-TVGI). The executable, a GraalVM Community Edition native image, needs 25 \% more CPU than the JVM launcher for the same work in the workers' own code, and no flag of the image build recovers any of it. The task: find out from a symbolised image why, make the source of \code{rlvm-machine} friendlier to the ahead-of-time compiler without changing what is computed, measure every step in the image, and say how far a hand gets and what limits the rest. Everything was done in private copies of the tracked sources; nothing was published. The result is one patch that is proposed, the list, and one that was measured and is not, the splits (section 9).}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{What the image lacks is inlining of hot calls, and it can be given by name.} Without a profile the Community Edition inliner cannot tell a hot call from a cold one: on Mathlib 8.3 \% of the workers' samples sit on the instructions of a call's frame alone (stack check, frame, safepoint poll at the return; 8.6 \% on navier-stokes-euler), and the callees are readers of one line (\code{\verb~|Terms.a~}, \code{\verb~|Terms.b~}, \code{\verb~|Runs.get~}) and steps with one or two call sites (\code{\verb~|Eval.argvFast~}, \code{\verb~|Eval.gate~}). A hand-kept list of 75 methods that the build passes to the inliner (\src{rlvm-machine/h10/force-inline.txt}, read by \src{rlvm-machine/h10/native-image-args.sh}) removes 9.6 \% of the instructions of a pass (Init, one worker) without changing one class file; three fast / slow splits in the source add 0.4 points and leave 3.2 \% of the samples on call frames (navier-stokes-euler).}
+\li{\strong{What the list is worth in the image} (the guard of [the rule for a default](dec-YP0N), 8 workers, warm passes, three interleaved rounds per corpus, base and candidate built from the same tree by \src{scripts/build.sh}): the geometric mean of the eight warm passes is 0.966, every corpus is faster (0.953 to 0.979), and the CPU time of a pass is 0.942 to 0.959 of the base's, the same in every round to within 0.6 points on six corpora. Mathlib 14.50 to 13.87 s (0.956; 110.1 to 104.4 s of CPU), navier-stokes-euler 3.86 to 3.68 s (0.954), cslib 5.29 to 5.18 s (0.978; its CPU 0.959). Peak resident memory is unchanged. With the splits on top, in a busier window, the geometric mean is 0.944 and the CPU 0.933 to 0.964 (section 5.2); the two builds differ by half a point of CPU, which is what 0.46 \% of the instructions should give.}
+\li{\strong{How far that is.} rep-P11 guessed that a hand recovers a third of the gap: 6 s of CPU and 0.8 s on Mathlib, 0.2 s on navier-stokes-euler, 0.3 s on cslib. Measured for the list: 5.7 s of CPU per Mathlib pass, which is 0.71 s on 8 cores, and the pass is 0.64 s shorter; 1.7 s of CPU on navier-stokes-euler (0.21 s on 8 cores; the pass 0.18 s); 1.6 s of CPU on cslib (0.20 s; the pass 0.12 s). So the guess is nearly met on navier-stokes-euler, four fifths of it on Mathlib, and on cslib two fifths by the wall clock and two thirds by the CPU: a third of the instruction surplus over the JVM launcher (Init, one worker: 7.6 of 22.0 G per pass) and three tenths of the CPU surplus of the workers (5.2 \% of a Mathlib pass's CPU, where rep-P11 found the workers' surplus to be 17.5 \% of it).}
+\li{\strong{Three of the four "image-only" lines of rep-P11 are labels, not costs} (section 2.2). "Slab growth" is the writing of new records and runs: the image's debug information gives the instructions of \code{\verb~|Values.Ext.mark~}, of the slot loop of \code{\verb~|Runs.pruneSlow~} and of the spine loop of \code{\verb~|Values.neuSlow~} the names \code{\verb~|Machine.growRecords~}, \code{\verb~|Machine.growRuns~} and \code{\verb~|Machine.copyOrNull~}; the growth itself is 0.014 \% of the samples. "The worklist's steps" are the compare after a call returns, labelled \code{\verb~|Machine.sigN~}. Of "the working environment" only \code{\verb~|Runs.get~} was a real call (0.86 \% of the samples, 87 instructions around 8 of work); \code{\verb~|Runs.push~} and \code{\verb~|Runs.enter~} are inlined in the image as on the JVM. There is no growth to move out of a loop.}
+\li{\strong{What limits the rest} (section 7). With the list the image still executes 1.25 times the instructions of the JVM launcher for an Init pass (1.38 before). What is left is not calls: it is the code of every array access (a bounds check per element, also where the index is \code{\verb~|hash & (length - 1)~}; three instructions to form an address; four to load an array field), a safepoint poll in every iteration of a probe loop, and register moves. No restructuring of the source removes these without changing how the slabs are laid out, which is lever 3. And the hottest instructions of the profile are first loads of table slots, which cost the same on both platforms.}
+\li{\strong{Verdict: GO for the list} (patch 1) as part of the default build. It changes no class file: the jars of the build are byte for byte the base's, so the JVM launcher and every gate through the jars are untouched; in the image every counter of the machine is identical to the base's on all eight corpora, the gate of the default configuration passes through the executable with the counts of the release (two heavy mutants ran into the gate's time limit on the loaded host in the first run and passed in a second one; section 6.1), and the guard holds (item 2).}
+\li{\strong{Verdict: NO-GO for the three splits} (patch 2), by the guard on the JVM launcher. They are correct (every counter of the machine identical on eight corpora on both launchers, all gates passed, section 6), and in the image they are worth 0.46 \% of the instructions, which no timing here resolves. But C2 does not inline the methods they move out of line (its own log: "too big", "callee is too large"), so the miss of \code{\verb~|Levels.lsubList~} becomes a call on the JVM: over nine interleaved rounds reachability is 3.6 \% slower (the limit is 3 \%) and cedar's CPU is at or above the base's in nine rounds of nine (1.3 \% in the mean), while the geometric mean of the eight corpora is 0.987 (section 5.3). A version without the split of \code{\verb~|Levels~} should not have this cost (the other two move code that a warm pass never runs); it was not built and gated.}
+}
+}
+
+\subtree{
+\title{1. What was built and how it was measured}
+
+\subtree{
+\title{1.1 Trees and distributions}
+
+\ul{
+\li{\strong{Base.} A copy of the tracked sources of the main tree of 2026-11-25 05:20 UTC, built whole by \src{scripts/build.sh} with \code{\verb~|--dev~} (the executable and the JVM launcher of the same jars). Its class files are those of the frozen jar set of the release for everything a default run uses: nine of the fourteen RLVM jars have the hashes of the shared distribution, four (driver, inductive, store and the machine, published as \code{\verb~|fa6d5d3bf377~}) differ from it only in the \code{\verb~|pom.xml~} they carry, and \code{rlvm-truffle} (the upper tier, off in the default configuration) has five class files that are newer in the tree than in its published jar. Executable: 68,225,144 bytes, the flags of the release (\code{\verb~|-O3 --gc=serial~}, heap at most 13g, collection policy \code{\verb~|BySpaceAndTime~}, the inline lists H10 of [the control convention](rep-stepper-convention): 194 forced, 81 never).}
+\li{\strong{The list} (patch 1). A copy of the base with patch 1, built the same way: the lists become 269 forced and 81 never, the executable 68,421,752 bytes (+197 KiB), and every jar is byte for byte the base's (the same hash over the RLVM jars, \code{\verb~|026a65358fe0~}).}
+\li{\strong{The list and the splits} (patches 1 and 2; "the candidate" of the tables). A copy with both patches: 269 forced and 87 never (six new \code{\verb~|..Slow~} methods), the executable 68,356,216 bytes (+131 KiB). Only the machine jar differs from the base's.}
+\li{\strong{Variants.} Ten more images of the base's or the candidate's jars, each the release flags with an edited list (section 4); symbolised twins (the same flags plus \code{\verb~|-g~}) of two for the profiles; one build with three list entries that match nothing, and one without compressed references (section 8).}
+\li{No Oracle GraalVM was used. Nothing was installed into the shared Maven repository and no file of the main tree was edited.}
+}
+}
+
+\subtree{
+\title{1.2 Instruments}
+
+\ul{
+\li{\strong{Instruction counts.} \code{\verb~|perf stat~} on the whole process in the arena container (user-space instructions and cycles of the performance cores' PMU): Init, one worker, two or three passes in one process. Three processes of the base executable executed 238,030,209,538, 238,030,208,577 and 238,030,201,111 instructions for three passes: the count repeats to eight digits, so a step of a tenth of a percent is resolved without a measurement window. Cycles of the same three processes: 53.3, 56.9 and 58.6 G outside a window. Cycles are therefore quoted only from interleaved rounds inside \src{bench/quiet.py} windows, and differences below 1.5 \% between two variants are not resolved.}
+\li{\strong{Profiles.} For the base: the samples of rep-P11 (its symbolised image of the frozen jars, Mathlib and navier-stokes-euler, \code{\verb~|cpu-clock~} 1 ms and instructions), read again at the level of single instructions: the disassembly of the image, the samples per address, and for every address its chain of inlined frames from the debug information. For two variants: the same recording on navier-stokes-euler (8 workers, \code{\verb~|perf record~} attached after the first pass, in the arena container).}
+\li{\strong{The cost of being called.} For every compiled function the samples on the instructions of its prologue (stack check, frame), its epilogue and the safepoint poll at the return. It is a lower bound of what a call costs (the arguments moved into place and the registers spilled around the call are not in it) and it contains some samples that skid from a load before the return.}
+\li{\strong{Timing.} Inside \src{bench/quiet.py} windows on the 8 measurement cores: per corpus three rounds; in each round one process of the base and one of the candidate, order rotated, \code{\verb~|rlvm[-jvm] --threads 8 --stats -X passes=N FILE~} and nothing else (the default configuration: machine engine, load pipelined with checking). Warm passes: for the executable passes 2 to N, for the JVM launcher the second half of the passes. Per process the median of its warm passes (their mean when the median is under 0.5 s), per corpus the mean over the rounds. The CPU time of a pass is the launcher's own figure for the process.}
+\li{\strong{Cost only.} Every corpus with one worker and \code{\verb~|-X stats-file~} through base and candidate: with one worker the machine's counters repeat exactly (two runs of the base on Init: 141 of 141 equal), with eight they depend on which worker gets which unit (ticks 34,641,852 and 34,659,141 in two runs).}
+}
+}
+
+\subtree{
+\title{1.3 The host was busy}
+
+\p{The windows of rep-P11 were taken on a quiet host. Most of these were not: two other agents of the wave and this report's own gates were computing on the other twelve cores (load average 40 to 48). A window keeps the 8 measurement cores for one process; memory bandwidth and the last-level cache are shared. In the windows of section 5.2 the base executable needs 16.6 s for a Mathlib pass where rep-P11 measured 14.46 s, 4.33 against 3.83 s on navier-stokes-euler, 6.39 against 5.22 s on cslib, and its passes drift by up to 15 \% inside a window (cslib, between two rounds). The last window (section 5.1) was quieter and gives rep-P11's times for the base. Every ratio in this report is between processes that ran next to each other, and the CPU ratio is given per round so that its spread can be seen.}
+}
+}
+
+\subtree{
+\title{2. Why the image is slow there}
+
+\subtree{
+\title{2.1 The gap is instructions}
+
+\p{Init, one worker, the same jars: the JVM launcher executes 57.3 G user-space instructions per later pass (the difference between a process of 8 and one of 4 passes, compiler threads included), the base executable 79.3 G: 1.38 times as many, at about the same number of instructions per cycle (4.3 and 4.5). The time ratio is smaller (3.7 against 4.6 s per pass, 1.25), because what the image adds is cheap: compares that never fail, moves, frame code. So the lever is the number of instructions, and an instruction count is the instrument for it. (The JVM's cycle counts were not taken in a window.)}
+}
+
+\subtree{
+\title{2.2 The "image-only" lines of rep-P11, instruction by instruction}
+
+\p{rep-P11, section 4.2, names four lines that exist almost only in the image, 4.2 s of worker CPU per Mathlib pass. Its classifier takes the innermost inlined frame that the debug information names for a sampled address. Read at the instructions (the Mathlib samples of rep-P11):}
+
+\table{
+\tr{\th{label (innermost frame)}\th{share of the workers' samples}\th{where the instructions are}\th{what they do}}
+\tr{\td{\code{\verb~|Machine.growRecords~}}\td{0.66 \%}\td{in \code{\verb~|Values.add~}, \code{\verb~|Values.closureProbe~}, \code{\verb~|Values.rec~}, \code{\verb~|Infer.openPush~}}\td{load \code{\verb~|x1.openBits~}, shift the record number by 5, compare with the length, or a two-bit field into the word, store \code{\verb~|openTop~}: this is \code{\verb~|Values.Ext.mark~}, the OPEN bit of a new record}}
+\tr{\td{\code{\verb~|Machine.growRuns~}}\td{0.20 \%}\td{all in \code{\verb~|Runs.pruneSlow~}}\td{the two loops that write HOLE and the kept slots of a new frame}}
+\tr{\td{\code{\verb~|Machine.copyOrNull~}}\td{0.20 \%}\td{0.18 \% in \code{\verb~|Values.neuSlow~}, 0.014 \% in the function \code{\verb~|copyOrNull~} itself}\td{the loop that writes the spine of a new neutral application; the 0.014 \% are the growth}}
+\tr{\td{\code{\verb~|Machine.sig1~} .. \code{\verb~|sig6~}}\td{0.27 \%}\td{in \code{\verb~|Infer.twC~}, \code{\verb~|Eval.evalInAt~}, \code{\verb~|Cargs.passB~} and others}\td{the compare of a result with SUSP after a sub-judgment returned, and the moves around it (\code{\verb~|sigN~} is on the never-inline list but is so small that the trivial inliner takes it anyway, as it should)}}
+\tr{\td{\code{\verb~|Runs.enter~}, \code{\verb~|Runs.push~}}\td{0.45 \%, 0.34 \%}\td{inlined, mostly in \code{\verb~|Infer.twEnv~}}\td{the copy of a frame's slots to the environment slab and the push of a binding: the work itself, inlined as on the JVM}}
+\tr{\td{\code{\verb~|Runs.get~}}\td{0.86 \%}\td{a function of its own, called from \code{\verb~|Eval.atom~}, \code{\verb~|Eval.argvFast~}, \code{\verb~|Infer.infer~}, \code{\verb~|Infer.inferLeaf~}}\td{87 instructions of which a read executes about 30: stack check and frame 6, two constants, the index tests, load and decode \code{\verb~|m.es~} 4, bounds check 3, address and load 3, the HOLE test, the debug flag, a store of the result to the stack and a load back, epilogue and poll 6. The read is 8 of them.}}
+}
+
+\ul{
+\li{\strong{There is no slab growth to repair.} The line "slab and stack growth" of rep-P11 (1.11 s per Mathlib pass in the image against 0.28 s on the JVM) is the miss path of hash consing under another name. The real growth, \code{\verb~|Arrays.copyOf~} in \code{\verb~|copyOrNull~} and the copy stubs, is 0.014 \% plus a part of the 0.2 \% of the copy stubs.}
+\li{\strong{The same holds for the worklist line}, and for the environment line except \code{\verb~|Runs.get~}.}
+\li{\strong{The kernel line is real} (page faults of fresh arrays, 1.8 \% of the workers on Mathlib) and is not code: three fifths are the copies of the level tables (rep-P11, section 4.4) and belong to another lever. It was not touched here.}
+\li{The lesson for a reader of a symbolised image is [an insight of its own](ins-RZKH).}
+}
+}
+
+\subtree{
+\title{2.3 The calls}
+
+\p{What the instruction-level view does show: 8.3 \% of the workers' samples on Mathlib (8.6 \% on navier-stokes-euler) sit on the frame instructions of the functions of RLVM, and the callees that pay most are small. The first sixteen on Mathlib (the base; "call sites" are the static ones in the whole image):}
+
+\table{
+\tr{\th{function}\th{samples on its frame code}\th{all its samples}\th{bytes}\th{call sites}}
+\tr{\td{\code{\verb~|Runs.get~}}\td{0.43 \%}\td{0.86 \%}\td{348}\td{4}}
+\tr{\td{\code{\verb~|rlvm.store.Terms.a~}}\td{0.35 \%}\td{1.06 \%}\td{160}\td{260}}
+\tr{\td{\code{\verb~|CodeStore.blockOf~}}\td{0.26 \%}\td{0.57 \%}\td{280}\td{6}}
+\tr{\td{\code{\verb~|Same.slot~}}\td{0.25 \%}\td{0.47 \%}\td{504}\td{4}}
+\tr{\td{\code{\verb~|Eval.gate~}}\td{0.24 \%}\td{2.25 \%}\td{696}\td{2}}
+\tr{\td{\code{\verb~|rlvm.store.Terms.b~}}\td{0.22 \%}\td{0.61 \%}\td{160}\td{209}}
+\tr{\td{\code{\verb~|Eval.argvFast~}}\td{0.21 \%}\td{3.16 \%}\td{1228}\td{5}}
+\tr{\td{\code{\verb~|Code.arityOf~}}\td{0.19 \%}\td{0.62 \%}\td{424}\td{6}}
+\tr{\td{\code{\verb~|Values.neu~}}\td{0.14 \%}\td{4.81 \%}\td{980}\td{13}}
+\tr{\td{\code{\verb~|rlvm.store.ProofBlocks.rd~}}\td{0.14 \%}\td{0.47 \%}\td{248}\td{24}}
+\tr{\td{\code{\verb~|Values.closureProbe~}}\td{0.14 \%}\td{4.23 \%}\td{2300}\td{29}}
+\tr{\td{\code{\verb~|Values.constSlow~}}\td{0.12 \%}\td{1.08 \%}\td{1404}\td{6}}
+\tr{\td{\code{\verb~|Eval.table~}}\td{0.12 \%}\td{1.95 \%}\td{1004}\td{2}}
+\tr{\td{\code{\verb~|Values.mkConst~}}\td{0.12 \%}\td{1.98 \%}\td{296}\td{9}}
+\tr{\td{\code{\verb~|Levels.lsubList~}}\td{0.11 \%}\td{1.41 \%}\td{544}\td{9}}
+\tr{\td{\code{\verb~|Eval.atom~}}\td{0.11 \%}\td{1.53 \%}\td{956}\td{4}}
+}
+
+\ul{
+\li{\strong{A reader of the term store is a call.} \code{\verb~|Terms.a~} is 40 instructions, 12 of them frame code and 14 the read; it has 260 call sites and is the most called function of the image. C2 inlines it everywhere.}
+\li{\strong{Steps with one or two callers are calls}: \code{\verb~|Eval.gate~}, \code{\verb~|Eval.table~}, \code{\verb~|Eval.inertHead~}, \code{\verb~|Infer.tmatch~}, \code{\verb~|Infer.twMatchDom~}. Inlining them adds no code.}
+\li{\strong{Why the budgets of rep-P11 did not help}: twice and four times the inliner's budgets inline more of everything, cold code included, and the large hot roots are where the inliner stops first. A list names the hot callees and nothing else.}
+\li{\strong{The miss paths are not rare.} \code{\verb~|Values.constSlow~}, \code{\verb~|Values.neuSlow~} and \code{\verb~|Runs.pruneSlow~} are on the never-inline list by their names and are called about as often as the probes that end in them (half a new record per tick). Taking them off the list bought nothing (section 4, variant e5): one call per new record is not what costs.}
+}
+}
+
+\subtree{
+\title{2.4 What the calls are not: the rest of the surplus}
+
+\p{The hottest single instructions of a profile are the ones behind a first load: the slot of the value table in \code{\verb~|Values.neu~} (2.8 \% of the workers' samples on one instruction, navier-stokes-euler) and in \code{\verb~|Values.closureProbe~} (2.4 \%), the cell of the constant cache in \code{\verb~|Values.mkConst~} (1.7 \%), the cell of \code{\verb~|Pairs.undec~} (1.5 \%), a term node in \code{\verb~|Terms.spineLength~} (1.4 \%) and in \code{\verb~|Eval.app~} (1.3 \%). 46 \% of the candidate's samples sit on the instruction after a load and 14 \% on a load. That part is memory, the same on both platforms (rep-P11: equal where memory binds), and no restructuring of code touches it. The rest of the surplus is in section 7.}
+}
+}
+
+\subtree{
+\title{3. The change}
+
+\subtree{
+\title{3.1 The list}
+
+\p{\src{rlvm-machine/h10/native-image-args.sh} already generates the two lists of H10 from the class files of the machine jar: every continuation step \code{\verb~|k_*~} is forced inline, every \code{\verb~|..Slow~} method and \code{\verb~|Machine.sigN~} / \code{\verb~|spillN~} never. It now also reads \src{rlvm-machine/h10/force-inline.txt}, a file kept by hand, and appends its 75 entries to the forced list:}
+
+\ul{
+\li{8 readers of \code{rlvm-store} that the machine calls everywhere: \code{\verb~|Terms.a~}, \code{\verb~|b~}, \code{\verb~|kind~}, \code{\verb~|fvMask~}, \code{\verb~|hasLevelParam~}, \code{\verb~|ProofBlocks.rd~}, \code{\verb~|localRef~}, \code{\verb~|DeclTable.ctorInduct~};}
+\li{23 leaf accessors and cache probes of the machine (\code{\verb~|Runs.get~}, \code{\verb~|Values.openOf~}, \code{\verb~|peek~}, \code{\verb~|mkSort~}, \code{\verb~|mkConst~}, \code{\verb~|mkApp~}, \code{\verb~|closure~}, \code{\verb~|Hash.ofRecord~}, \code{\verb~|Pairs.status~}, \code{\verb~|undec~}, \code{\verb~|Levels.lsubList~}, \code{\verb~|importLevel~}, \code{\verb~|Code.arityOf~}, \code{\verb~|raw~}, \code{\verb~|CodeStore.blockOf~}, \code{\verb~|FactStore.indexOf~}, \code{\verb~|Facts.word~}, \code{\verb~|facts~}, \code{\verb~|Same.slot~}, \code{\verb~|levels~}, \code{\verb~|leaves~}, \code{\verb~|appNeu~}, \code{\verb~|Infer.hit~});}
+\li{17 steps of EVAL and ARGV (the inline answers \code{\verb~|Eval.atom~} and \code{\verb~|argvFast~}, the tabling gate, the spine walk, the completion), 18 of INFER (the walk over an application and the type patterns), 9 of CONV and the code blocks.}
+}
+
+\p{The rules for an entry are in the file's header: a leaf reader or cache probe of a few lines whose rare part is a \code{\verb~|..Slow~} method of its own, or a step with one to three call sites in the hot path; never a method that is recursive through other entries. The last rule is measured: with \code{\verb~|Infer.tmNode~} and \code{\verb~|Infer.tmApp~} on the list the inliner unrolls their cycle five times, each grows from 1 kB to 41 kB, and the image executes 0.6 \% more instructions than without them. The script reports an entry of \code{rlvm.machine} that names no method of the classes it was given, or a \code{\verb~|..Slow~} method, on standard error and leaves it out; an entry of another module cannot be checked there, and \code{\verb~|native-image~} ignores a name that matches nothing (built and run with three such names). \src{scripts/build.sh} is unchanged: it calls the script as before.}
+
+\p{\strong{Why it is safe.} The list changes no class file: the jars of a build with it and without it are the same bytes (compared), so the JVM launcher runs the same code and every gate through the jars is the gate of the same bytes. In the image it changes which calls are calls. The stack frames of the merged functions grow by at most 160 bytes (\code{\verb~|Same.closures~} 64 to 224, \code{\verb~|Infer.twalk~} 80 to 192, \code{\verb~|Eval.args~} 128 to 176; read off the image with both patches), the largest frame of the machine stays under 500 bytes, and the calls that vanish take their frames with them. A build without the list is correct, as a build without the H10 lists is.}
+}
+
+\subtree{
+\title{3.2 Three fast / slow splits (measured, not proposed)}
+
+\ul{
+\li{\strong{\code{\verb~|Machine.ensureEnv~}, \code{\verb~|ensureScratch~}, \code{\verb~|ensureRegs~}}: the test \code{\verb~|top + n <= array.length~} stays, the growth moves to \code{\verb~|ensure..Slow~}. \code{\verb~|ensureScratch~} had 22 call sites and was a call of 1 kB for a compare that is true almost always (once per evaluated application).}
+\li{\strong{\code{\verb~|Runs.get~}}: the index test, the load and one compare stay; the three rare ends (index outside the environment, a HOLE slot, the scope audit of the debug mode) move to \code{\verb~|getSlow~}, in the order they had.}
+\li{\strong{\code{\verb~|Levels.lsub~}, \code{\verb~|lsubList~}}: the probe of the direct-mapped cache stays; the miss (the arity test, the level store's instantiation, the write of the cell) moves to \code{\verb~|lsubMissSlow~} and \code{\verb~|lsubListMissSlow~}. With it the machine reaches the level store's instantiation of a list from one site in the image instead of the 126 that the list alone gave it.}
+}
+
+\p{\strong{Why they are safe.} Each split moves statements into a private method of the same class without reordering them: the same tests in the same order, the same writes, the same results; the cache cell of \code{\verb~|lsub~} is written through the same \code{\verb~|final~} array. All six new methods end in \code{\verb~|Slow~}, so H10 keeps them out of line and \code{\verb~|StepSizeTest~} holds (limits of the control convention). The proof is section 6: every counter of the machine is identical on every corpus.}
+
+\p{\strong{Why they are not proposed.} What is good for the ahead-of-time compiler is not free on the JVM. C2 inlined the growth and the miss as parts of their methods; as methods of their own it refuses them. Its inlining log of a cedar run says "failed to inline: too big" or "callee is too large" for \code{\verb~|Levels.lsubListMissSlow~} at 39 call sites, for \code{\verb~|lsubMissSlow~} at 15, for \code{\verb~|Machine.ensureScratchSlow~} at 54. The growth paths never run in a warm pass, so that costs nothing; the miss of the level cache runs often (the level store's instantiation behind it is 2.6 \% of the workers' samples on navier-stokes-euler in the image) and is now a call. The guard on the JVM launcher sees it (section 5.3). In the image the three splits together are 0.46 \% of the instructions.}
+}
+
+\subtree{
+\title{3.3 What was looked at and left alone}
+
+\ul{
+\li{\strong{The probes of the value tables and the pair table}: not touched (another lever). Two findings for that lever are in section 7.}
+\li{\strong{\code{rlvm-level}, \code{rlvm-load}, \code{rlvm-store}, \code{rlvm-export}}: no source touched. The list names eight methods of \code{rlvm-store} by name; if one is renamed its entry silently stops matching.}
+\li{\strong{Growth outside the loop, locals instead of fields}: the hot methods already read their arrays into locals once and already keep growth in out-of-line methods; section 2.2 shows that what looked like growth in the loop is not growth.}
+}
+}
+}
+
+\subtree{
+\title{4. The steps, measured}
+
+\p{Init, one worker, two passes in one process, the whole process (loader included; about an eighth of its time). Instructions are exact; the cycle ratio is the geometric mean of interleaved rounds against the base inside a window (three or four rounds; two windows where two numbers are given; it is not resolved below 1.5 \%).}
+
+\table{
+\tr{\th{image}\th{forced list beyond H10}\th{instructions, G}\th{ratio}\th{cycles, ratio}\th{bytes}}
+\tr{\td{base}\td{none}\td{158.687}\td{1.000}\td{1.000}\td{68,225,144}}
+\tr{\td{e1a}\td{15 leaf accessors (5 store readers, \code{\verb~|Runs.get~}, ..)}\td{153.079}\td{0.965}\td{0.978}\td{68,225,144}}
+\tr{\td{e2}\td{+ 27 small methods and steps with one site}\td{148.155}\td{0.934}\td{0.983}\td{68,356,216}}
+\tr{\td{e3}\td{+ 14 larger steps with one to five sites (\code{\verb~|Eval.atom~}, \code{\verb~|argvFast~}, \code{\verb~|app~}, the chain of the application walk)}\td{145.167}\td{0.915}\td{0.960, 0.961}\td{68,618,360}}
+\tr{\td{e4}\td{+ 23 from a profile of e3}\td{144.298}\td{0.909}\td{0.951, 0.960}\td{68,683,896}}
+\tr{\td{e5}\td{e4, and \code{\verb~|constSlow~}, \code{\verb~|neuSlow~}, \code{\verb~|pruneSlow~} off the never-inline list}\td{144.932}\td{0.913}\td{0.961}\td{68,683,896}}
+\tr{\td{e6}\td{e4 without the eight steps of the application walk and the type patterns}\td{145.002}\td{0.914}\td{0.961}\td{68,356,216}}
+\tr{\td{e7}\td{e4 without \code{\verb~|Infer.tmApp~} and \code{\verb~|Infer.tmNode~}}\td{143.422}\td{0.904}\td{0.964}\td{68,421,752}}
+\tr{\td{s1}\td{e4, and the split of \code{\verb~|ensure..~}}\td{143.742}\td{0.906}\td{0.972}\td{68,618,360}}
+\tr{\td{s23}\td{e4 without two entries of the level store, and the three splits}\td{143.478}\td{0.904}\td{0.950}\td{68,618,360}}
+\tr{\td{\strong{the list}}\td{\strong{the 75 entries of patch 1 on the base's jars; built by \src{scripts/build.sh}}}\td{\strong{143.414}}\td{\strong{0.904}}\td{not in a window}\td{68,421,752}}
+\tr{\td{the list and the splits}\td{patches 1 and 2; built by \src{scripts/build.sh}}\td{142.756}\td{0.900}\td{0.956}\td{68,356,216}}
+}
+
+\ul{
+\li{\strong{The first fifteen accessors are a third of the gain} (3.5 of 9.6 points), the 41 methods of the next two steps another half, the second profile's 23 entries 0.6 points: the list is at its plateau. A profile of the image with both patches on navier-stokes-euler leaves 3.2 \% of the workers' samples on frame code (8.6 \% in the base), spread over large functions: \code{\verb~|Values.closureAt~} 0.16 \%, \code{\verb~|Values.closureProbe~} 0.14 \%, \code{\verb~|Values.neu~} 0.12 \%; the largest small ones left are \code{\verb~|Runs.push~} (0.07 \%) and \code{\verb~|Eval.closedPutUntabled~} (0.05 \%).}
+\li{\strong{Cycles follow instructions at about half the rate}: 8.5 to 10 \% fewer instructions, 4 to 5 \% fewer cycles with one worker. The removed instructions are frame code, which runs beside the loads that set the pace.}
+\li{\strong{The splits} are worth 0.4 points of instructions (\code{\verb~|ensure..~}) and less than 0.1 (\code{\verb~|Runs.get~}, \code{\verb~|Levels~}): 143.414 to 142.756 G in all. Their cycles are inside the noise of every window.}
+\li{\strong{With 8 workers} (4 rounds, navier-stokes-euler and cslib, variant e3 against the base): CPU of a pass 0.948 and 0.958, wall clock 0.956 and 0.973; the two builds of the patches are in section 5.}
+}
+}
+
+\subtree{
+\title{5. The guard}
+
+\p{The rule of [the decision on a default](dec-YP0N): the geometric mean of the eight warm passes goes down and no corpus is more than 3 \% slower, over at least three interleaved rounds. Base against candidate, \code{\verb~|rlvm[-jvm] --threads 8 --stats -X passes=N FILE~}, inside \src{bench/quiet.py} windows on a busy host (section 1.3). "Pass" is the median warm pass of a process (the mean where it is under 0.5 s), averaged over the rounds; "CPU" is the CPU time of the process during such a pass.}
+
+\subtree{
+\title{5.1 The list (patch 1) in the executable}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{base: pass s}\th{with the list: pass s}\th{ratio}\th{base: CPU s}\th{with the list: CPU s}\th{ratio}\th{CPU ratio of each round}\th{peak RSS MiB: base}\th{with the list}}
+\tr{\td{Init}\td{3 x 8}\td{0.682}\td{0.660}\td{0.969}\td{4.78}\td{4.53}\td{0.949}\td{0.946 0.952 0.950}\td{406}\td{401}}
+\tr{\td{Std}\td{3 x 6}\td{1.151}\td{1.116}\td{0.969}\td{8.51}\td{8.13}\td{0.956}\td{0.955 0.957 0.955}\td{662}\td{680}}
+\tr{\td{cedar}\td{3 x 6}\td{1.652}\td{1.618}\td{0.979}\td{12.04}\td{11.45}\td{0.951}\td{0.949 0.952 0.953}\td{863}\td{864}}
+\tr{\td{reachability}\td{3 x 8}\td{0.483}\td{0.467}\td{0.967}\td{1.31}\td{1.24}\td{0.950}\td{0.956 0.953 0.940}\td{739}\td{736}}
+\tr{\td{con-leche}\td{3 x 6}\td{1.535}\td{1.463}\td{0.953}\td{10.15}\td{9.57}\td{0.943}\td{0.942 0.942 0.945}\td{1377}\td{1379}}
+\tr{\td{navier-stokes-euler}\td{3 x 4}\td{3.863}\td{3.684}\td{0.954}\td{29.18}\td{27.48}\td{0.942}\td{0.938 0.958 0.930}\td{1633}\td{1643}}
+\tr{\td{cslib}\td{3 x 4}\td{5.294}\td{5.178}\td{0.978}\td{39.03}\td{37.42}\td{0.959}\td{0.960 0.959 0.958}\td{2490}\td{2470}}
+\tr{\td{Mathlib}\td{3 x 3}\td{14.501}\td{13.866}\td{0.956}\td{110.12}\td{104.40}\td{0.948}\td{0.949 0.947 0.949}\td{7602}\td{7625}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.966}}\td{}\td{}\td{\strong{0.950}}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The geometric mean is 0.966 and no corpus is slower}: 0.953 (con-leche) to 0.979 (cedar).}
+\li{\strong{The CPU time of a pass is 0.942 to 0.959 of the base's} (geometric mean 0.950), and the three rounds of a corpus agree to 0.6 points on six corpora (Mathlib 0.949, 0.947, 0.949), to 1.6 on reachability and to 2.8 on navier-stokes-euler. The wall clock gains less than the CPU: the pass is not bound by the workers alone (the loader thread, rep-P11 section 3).}
+\li{\strong{Peak resident memory}: within 3 \% on every corpus, both ways.}
+\li{The host was quieter in this window than in the one of section 5.2: the base's passes here (Mathlib 14.50 s, navier-stokes-euler 3.86 s, cslib 5.29 s) are close to those of rep-P11.}
+}
+}
+
+\subtree{
+\title{5.2 The list and the splits (patches 1 and 2) in the executable}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{base: pass s}\th{candidate: pass s}\th{ratio}\th{base: CPU s}\th{candidate: CPU s}\th{ratio}\th{CPU ratio of each round}\th{peak RSS MiB: base}\th{candidate}}
+\tr{\td{Init}\td{3 x 8}\td{0.733}\td{0.703}\td{0.960}\td{5.10}\td{4.82}\td{0.944}\td{0.943 0.945 0.943}\td{407}\td{406}}
+\tr{\td{Std}\td{3 x 6}\td{1.275}\td{1.209}\td{0.949}\td{9.27}\td{8.75}\td{0.943}\td{0.946 0.940 0.944}\td{657}\td{668}}
+\tr{\td{cedar}\td{3 x 6}\td{1.830}\td{1.763}\td{0.963}\td{13.05}\td{12.29}\td{0.942}\td{0.938 0.942 0.945}\td{871}\td{867}}
+\tr{\td{reachability}\td{3 x 8}\td{0.562}\td{0.523}\td{0.931}\td{1.48}\td{1.43}\td{0.964}\td{0.960 0.953 0.980}\td{736}\td{741}}
+\tr{\td{con-leche}\td{3 x 6}\td{1.701}\td{1.635}\td{0.961}\td{11.08}\td{10.41}\td{0.940}\td{0.948 0.940 0.932}\td{1374}\td{1363}}
+\tr{\td{navier-stokes-euler}\td{3 x 4}\td{4.334}\td{4.111}\td{0.948}\td{32.23}\td{30.05}\td{0.933}\td{0.933 0.928 0.937}\td{1628}\td{1633}}
+\tr{\td{cslib}\td{3 x 4}\td{6.386}\td{5.809}\td{0.910}\td{44.41}\td{41.89}\td{0.943}\td{0.948 0.928 0.954}\td{2519}\td{2506}}
+\tr{\td{Mathlib}\td{3 x 3}\td{16.622}\td{15.551}\td{0.936}\td{122.17}\td{115.51}\td{0.945}\td{0.961 0.942 0.934}\td{7773}\td{7557}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.944}}\td{}\td{}\td{\strong{0.944}}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The geometric mean is 0.944 and no corpus is slower}: the worst ratio is 0.963 (cedar).}
+\li{\strong{The CPU ratio is the robust number}: 0.933 to 0.964, and within a corpus the three rounds agree to 1.5 points (Init 0.943, 0.945, 0.943) except on reachability and Mathlib (2.7 points). The wall clock of cslib (0.910) contains a drift of the base inside its window; its CPU says 0.943.}
+\li{\strong{Peak resident memory}: within 3 \% on every corpus, both ways.}
+}
+}
+
+\subtree{
+\title{5.3 The JVM launcher: the splits}
+
+\p{The list does not exist on this platform and patch 1 leaves the jars as they are, so the JVM launcher's guard is about patch 2 alone. The same rounds through \code{\verb~|rlvm-jvm~} (heap of the machine \code{\verb~|-Xmx7g -Xmn1g~}); warm passes are the second half of a process's passes.}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{base: pass s}\th{candidate: pass s}\th{ratio}\th{base: CPU s}\th{candidate: CPU s}\th{ratio}\th{CPU ratio of each round}\th{peak RSS MiB: base}\th{candidate}}
+\tr{\td{Init}\td{3 x 10}\td{0.613}\td{0.603}\td{0.983}\td{4.36}\td{4.25}\td{0.976}\td{0.979 0.979 0.969}\td{831}\td{825}}
+\tr{\td{Std}\td{3 x 8}\td{1.111}\td{1.034}\td{0.931}\td{7.57}\td{7.41}\td{0.978}\td{0.985 0.992 0.958}\td{1560}\td{1587}}
+\tr{\td{cedar}\td{3 x 8}\td{1.456}\td{1.517}\td{1.042}\td{10.32}\td{10.49}\td{1.017}\td{1.015 1.026 1.008}\td{1727}\td{1722}}
+\tr{\td{reachability}\td{3 x 10}\td{0.379}\td{0.394}\td{1.039}\td{1.25}\td{1.28}\td{1.019}\td{0.978 1.083 0.997}\td{1545}\td{1563}}
+\tr{\td{con-leche}\td{3 x 8}\td{1.388}\td{1.330}\td{0.958}\td{8.81}\td{8.73}\td{0.991}\td{0.966 0.990 1.017}\td{2067}\td{1885}}
+\tr{\td{navier-stokes-euler}\td{3 x 6}\td{3.685}\td{3.601}\td{0.977}\td{26.34}\td{25.82}\td{0.980}\td{0.986 0.961 0.995}\td{2257}\td{2245}}
+\tr{\td{cslib}\td{3 x 6}\td{4.704}\td{4.677}\td{0.994}\td{34.21}\td{34.44}\td{1.007}\td{1.011 1.022 0.988}\td{2953}\td{3009}}
+\tr{\td{Mathlib}\td{3 x 4}\td{12.958}\td{12.622}\td{0.974}\td{95.86}\td{94.71}\td{0.988}\td{0.964 1.007 0.994}\td{6191}\td{7401}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.987}}\td{}\td{}\td{\strong{0.994}}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The geometric mean goes down} (0.987; CPU 0.994), but two corpora are over the limit in these three rounds: cedar 1.042 and reachability 1.039.}
+\li{\strong{Six more rounds of each} (cedar 8 passes, reachability 12 passes per process), nine rounds in all: cedar 1.465 to 1.479 s, ratio 1.010, and its CPU ratio is 1.013 with every one of the nine rounds at or above 1.000 (1.015, 1.026, 1.008, 1.007, 1.009, 1.008, 1.028, 1.000, 1.017); reachability 0.378 to 0.392 s, ratio 1.036 (per round 0.991, 1.077, 1.053, 1.058, 1.111, 1.026, 0.950, 1.025, 1.038), CPU 1.019. A pass of 0.38 s moves by 5 \% between processes, but nine rounds say the same: reachability is over 3 \%.}
+\li{\strong{A cause is visible}: C2's inlining log (section 3.2). The split methods are calls on the JVM; the miss of the level cache is the one that runs.}
+\li{\strong{So patch 2 fails the guard on the JVM launcher}, by one corpus, and the cost it shows on cedar is small and real. The other seven corpora (cedar with its nine rounds: 1.010) and the geometric mean are inside the rule.}
+\li{Peak resident memory of the JVM launcher varies by process under its heap limit of 7 GiB (Mathlib: 6,191 MiB for the base and 7,401 MiB for the candidate as the largest of three rounds; con-leche 2,067 and 1,885 MiB): no trend.}
+}
+}
+}
+
+\subtree{
+\title{6. The gates}
+
+\subtree{
+\title{6.1 The list (patch 1)}
+
+\ul{
+\li{\strong{Nothing changes in the jars.} The fourteen RLVM jars of the build with patch 1 are byte for byte the base's, so the suites of the modules, the gate through the jars, the machine's own gate and the JVM launcher's guard are those of the base.}
+\li{\strong{The gate of the default configuration through the executable} (\code{\verb~|scripts/gate.sh --dist .. --defaults --corpus all --hostile --native~}): 230 of 230 published tests correct, none declined; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 15,739, declined 2,034, two timeouts); the differential self-test caught; hostile exports 1,196 rows: agree 1,124, 68 tolerated accepts of kind (d), 0 wrong accept, 0 wrong reject, 4 declined. PASS.}
+\li{\strong{The two timeouts are the host's.} They are \code{\verb~|bugs/proj-of-subst-prop~} and \code{\verb~|bugs/rec-of-subst-prop~} with a changed literal, the two heaviest mutants: 18 to 30 s of CPU each. Run alone they are rejected by the base and by the executable with the list, as by the official checker (exit status 1 four times of four; 24 to 78 s of wall clock on the loaded host). Under the gate's 60 s limit on the efficiency cores they did not finish; the same one or two mutants timed out in every gate of the machine as default engine that ran on the host between 06:04 and 07:40 UTC (six runs, three of them of other distributions), and passed in 22 to 39 s in the release's gates. The step was run again for the corpus of the two when the host had calmed down (load average 9): 2,692 mutants, SOUNDNESS 0, COMPLETENESS 0, agree 2,590, declined 102, no timeout. With it the executable with the list has the release's counts: agree 15,741, declined 2,034.}
+\li{\strong{The eight corpora} are accepted through the executable with the list with 4 and with 8 workers (and through the JVM launcher of the same jars).}
+\li{\strong{Cost only.} Every corpus with one worker through the base's executable and the one with the list: all counters of the machine and the verdict counters of the driver and of the reference engine are identical on the eight corpora (141 to 146 keys per corpus; the figures are those of the table in section 6.2).}
+}
+}
+
+\subtree{
+\title{6.2 The list and the splits (patches 1 and 2)}
+
+\ul{
+\li{\strong{The machine's suites on the tree with both patches}: the fast group 420 tests, 0 failures, 0 errors, 3 skipped (with \code{\verb~|StepSizeTest~}); \code{\verb~|SHostileSlowTest~} 2 tests, 0 failures (the complete matrix of the hostile exports under every switch).}
+\li{\strong{The gate of the default configuration through the executable}: 230 of 230; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 15,740, declined 2,034, one timeout: the first of the two mutants of section 6.1); self-test caught; hostile 1,196 rows: agree 1,124, 68 tolerated, 0 wrong accept, 0 wrong reject, 4 declined. PASS.}
+\li{\strong{The same gate through the jars}: 230 of 230; mutants SOUNDNESS 0 and COMPLETENESS 0 (agree 15,740, declined 2,034, the same timeout); self-test caught; hostile agree 1,124, 68 tolerated, 0 wrong accept, 0 wrong reject, 4 declined. PASS.}
+\li{\strong{The eight corpora} are accepted with 4 and with 8 workers through both launchers.}
+\li{\strong{Cost only: the machine's counters.} Every corpus with one worker through base and candidate, executable and JVM launcher: all counters of the machine and the verdict counters of the driver and of the reference engine are identical (141 to 146 keys per corpus: ticks, records, run words, pairs, resets, call events and memo hits by judgment, probes, code blocks, declines by reason), and the executable's are the JVM launcher's.}
+}
+
+\table{
+\tr{\th{corpus (one worker)}\th{ticks}\th{records}\th{run words}\th{pairs}\th{units of the machine}\th{declined by the machine}\th{session resets}\th{counters compared / different}}
+\tr{\td{Init}\td{34,490,709}\td{15,271,167}\td{70,628,736}\td{1,856,757}\td{57,938}\td{0}\td{796}\td{141 / 0}}
+\tr{\td{Std}\td{56,957,035}\td{26,050,886}\td{128,075,185}\td{3,455,031}\td{100,097}\td{2}\td{1,350}\td{144 / 0}}
+\tr{\td{cedar}\td{76,668,269}\td{36,675,335}\td{218,602,630}\td{4,543,441}\td{144,099}\td{2}\td{1,903}\td{144 / 0}}
+\tr{\td{reachability}\td{9,014,777}\td{4,807,871}\td{24,366,666}\td{46,039}\td{4,224}\td{0}\td{34}\td{141 / 0}}
+\tr{\td{con-leche}\td{70,755,128}\td{30,386,037}\td{234,890,164}\td{3,407,468}\td{36,276}\td{4}\td{1,301}\td{146 / 0}}
+\tr{\td{navier-stokes-euler}\td{144,220,381}\td{69,470,249}\td{322,216,752}\td{11,346,649}\td{124,866}\td{32}\td{3,425}\td{146 / 0}}
+\tr{\td{cslib}\td{215,956,521}\td{112,841,885}\td{460,901,102}\td{11,694,439}\td{397,615}\td{14}\td{5,881}\td{146 / 0}}
+\tr{\td{Mathlib}\td{574,100,326}\td{288,313,296}\td{1,255,939,258}\td{32,500,348}\td{714,772}\td{120}\td{14,838}\td{146 / 0}}
+}
+
+\ul{
+\li{\strong{The machine's own gate} (the gate of [package M8](rep-machine-M8), default switch set, session cap 1 MiB) on the base tree and on the tree with both patches: both PASS WITH DECLINES, with the same cell in every column that is not a time, except one: 230 of 230 files clean, SOUNDNESS 0, COMPLETENESS 0, ticks 226,536,782 on the 230 tests, 35,050,261 on Init, 57,723,434 on Std, 9,027,354 on reachability, 10,291,231 on the Cedar slice; tier equivalence 0 different; convention equivalence 0 different; the audits clean; one decline on Std in both (the known unit of finding E1-F6). The exception: in the convention part one declaration of the performance tests was not compared in one lane of each run (the lane with host depth 0 for the patched tree, the unbounded lane for the base), in runs where files ran out of the gate's heap beside others on the loaded host and were repeated (3 files for the base, 6 for the patched tree). The convention part alone was run again on the patched tree with two passes at a time: 15,845 declarations compared under host depth 0 and unbounded, 0 different, 369,887,575 frames written, the base's figures.}
+}
+}
+}
+
+\subtree{
+\title{7. What limits the rest}
+
+\p{With the list the executable executes 71.7 G instructions for an Init pass with one worker (71.4 G with the splits as well) and the JVM launcher 57.3 G: 1.25 times, where it was 1.38. The 3 \% of samples that are still on frame code belong to calls of large functions, which are calls on the JVM too. What remains is how the Community Edition compiler translates the machine's one data structure, an \code{\verb~|int[]~} slab read through a field of the machine (the candidate's disassembly, aarch64):}
+
+\ul{
+\li{\strong{A bounds check per element.} A probe compares four words of a record, \code{\verb~|v[o + 1]~} to \code{\verb~|v[o + 3]~} and \code{\verb~|v[o]~}: four compares with the length and four branches. Writing a record is eight stores and eight checks (\code{\verb~|Machine.addRecordAt~} inlined in \code{\verb~|Values.add~}: about 70 instructions for the 8 stores). C2 merges the checks of constant offsets from one index into one or two; this compiler does not, and Java has no way to say it.}
+\li{\strong{The mask is not understood.} \code{\verb~|tab[hash & (tab.length - 1)]~} is checked against the length in every step of every probe loop (\code{\verb~|Values.neu~}, \code{\verb~|closureProbe~}, \code{\verb~|rec~}, \code{\verb~|Runs.pruneNear~}), although the source is written that way for the compiler's sake.}
+\li{\strong{Three instructions per address.} An element is loaded as: the constant 8 into a register, add the shifted index, load with two registers. Where C2 uses one add and a load with a displacement.}
+\li{\strong{Four instructions per array field.} \code{\verb~|m.vh~} is a 32-bit load, a test for null, a zero extension and an add of the heap base, again after every call that is not inlined.}
+\li{\strong{A safepoint poll per probe step.} The probe loops are not counted loops, so every iteration loads the thread's poll word and tests it: two of the 15 instructions of a step of \code{\verb~|Values.neu~}.}
+\li{\strong{Moves and spills}: 11 \% of the candidate's samples sit on register moves and constants and 7 \% on loads and stores of the stack frame (15 and 8 \% in the base, navier-stokes-euler); all registers are saved by the caller, and the merged functions are large.}
+}
+
+\p{None of these is a property of a method that a restructuring could repair; they are per access. A source can only have fewer accesses: two \code{\verb~|int~} words per \code{\verb~|long~} slot, a record's memo words next to its key, arguments of a neutral application inline. That is the layout of the session tables, which is lever 3 of rep-P11, and there it is not cost only. Two observations for that lever, measured here and not acted on: (1) writing the probe loops as counted loops would remove the poll from every step without changing the probe sequence; (2) the hottest instructions of the image are the first loads of a table slot, so the instruction count of a probe is not what a layout change should aim at.}
+
+\p{The other known way to the same instructions is a profile, which only Oracle GraalVM can use (rep-P11, section 4.3).}
+}
+
+\subtree{
+\title{8. What was not measured}
+
+\ul{
+\li{Anything on x86-64, the arena's architecture. The call overhead is the same kind of code there; the three-instruction address is specific to aarch64.}
+\li{The guard on a quiet host. Every time here was taken while the other twelve cores were busy; the ratios are from interleaved rounds, the absolute times are not those of the benchmark tables.}
+\li{The cycles of the executable with the list alone with one worker inside a window (its instruction count is exact; with the splits as well the cycles are 0.956 of the base's, three rounds).}
+\li{The instruction count of the JVM launcher on any corpus but Init, and its cycles inside a window.}
+\li{The loader thread and the environment thread separately: the list names eight readers of the term store that they call too; a pass's CPU contains them.}
+\li{Each list entry by itself. The list was built in four steps of 15, 27, 14 and 23 entries; two groups were taken out again by measurement (the recursive pair, the two entries of the level store).}
+\li{The splits without the one of \code{\verb~|Levels~}, and each split alone on the JVM launcher: the guard was run on the three together.}
+\li{The optional Oracle GraalVM build with the list (no Oracle GraalVM was used).}
+\li{\strong{An executable without compressed references} was built once (\code{\verb~|-H:-UseCompressedReferences~} on the image with both patches) because an array field then loads in one instruction less: 3.1 \% fewer instructions than with compressed references (138.370 against 142.756 G, Init, one worker), cycles 0.941 against 0.956 of the base in one window of three rounds (not resolved), 5.4 MB more image. It is a flag of the build, not of the machine; its memory with 8 workers and its guard were not measured.}
+\li{A clean run of the mutant step for the build with both patches: the heaviest mutant hit the gate's time limit on the loaded host in both of its gates (section 6.2); the step was repeated only for the build with the list.}
+}
+}
+
+\subtree{
+\title{9. The patches, and what an integrator must know}
+
+\ul{
+\li{\strong{Patch 1, the list (GO)}: a new file \src{rlvm-machine/h10/force-inline.txt} and 31 changed lines of \src{rlvm-machine/h10/native-image-args.sh}. No class file changes. \src{scripts/build.sh} needs no change; the line "inline lists" of a build's record then says 269 forced and 81 never. It applies to the main tree of 2026-11-25 without a failed hunk.}
+\li{\strong{Patch 2, the splits (NO-GO as it is)}: \code{\verb~|Machine.java~} (three methods become six), \code{\verb~|Runs.java~} (\code{\verb~|get~}, \code{\verb~|getSlow~}), \code{\verb~|Levels.java~} (\code{\verb~|lsub~}, \code{\verb~|lsubList~} and their two miss methods). Kept as the record of what was measured. It is independent of patch 1 and was not built alone. What would make it a candidate again: without the hunks of \code{\verb~|Levels.java~} (the other two splits move code that a warm pass never runs), built and gated anew; its gain in the image is under half a percent of the instructions.}
+\li{\strong{The list names methods of \code{rlvm-store}.} If the owners of the loader and the store rename \code{\verb~|Terms.a~}, \code{\verb~|b~}, \code{\verb~|kind~}, \code{\verb~|fvMask~}, \code{\verb~|hasLevelParam~}, \code{\verb~|ProofBlocks.rd~}, \code{\verb~|localRef~} or \code{\verb~|DeclTable.ctorInduct~}, the entry has to follow; the build does not notice. The other agents of the wave were told.}
+\li{\strong{A new hot helper needs an entry, not a split.} A profile of the executable shows it: a small function with samples on its first six instructions. A split helps the image and can cost the JVM launcher a call (section 5.3); the list cannot. The tools of this report (the cost of being called per function, the instruction-level view) are outside the repository; the method is section 1.2.}
+\li{The executable must be gated after the list changes; the jars need not be, they do not change.}
+\li{\strong{If the level store changes} (another lever of the wave works there): the list forces \code{\verb~|Levels.lsubList~} and with it the miss path into its nine callers; the level store's \code{\verb~|instantiateList~} then has more than a hundred call sites in the image (126 in variant e3). That is measured and harmless (it is the build of section 5.1), but a much larger \code{\verb~|instantiateList~} would be copied as often.}
+}
+}
