@@ -313,8 +313,9 @@ force(v): if Thunk: memo.whnf or (eval(term, env, ls) then store)            # m
 \li{\p{\code{\verb~|delta_step~}: neither unfolds -> stuck. Only one unfolds: if the \em{other} is a projection application that \code{\verb~|whnf_core~} reduces, do that instead; else unfold + cheap \code{\verb~|whnf_core~}. Both unfold: abbrev first, then the greater height, opaque (theorems) last. Equal hints and same constant:}
 \ul{
 \li{regular definition: unless this pair's arguments were already found different (\code{\verb~|EQ_ARGS_NO~} bit), levels equivalent and \code{\verb~|args_refuted~} false -> \code{\verb~|spines_defeq_skip(unfold = true)~} -> equal; else record the failure;}
-\li{non-regular (abbreviation/instance/projection function): \code{\verb~|probe_args~} under 1024 ticks, only when \code{\verb~|probe_worth~} (shape heuristics: projection functions and instances yes; eliminator-like bodies only when every differing pair is neutral/neutral or closure/closure); then unfold both, cheap \code{\verb~|whnf_core~}.}
-}}
+\li{non-regular (abbreviation/instance/projection function): \code{\verb~|probe_args~} under 1024 ticks, only when \code{\verb~|probe_worth~} (shape heuristics: projection functions and instances yes; eliminator-like bodies only when every differing pair is neutral/neutral or closure/closure);}
+}
+\p{then unfold both, cheap \code{\verb~|whnf_core~}.}}
 \li{\code{\verb~|quick~}, then \code{\verb~|quick_parts~}; loop.}
 }
 
