@@ -1,0 +1,19 @@
+\title{In the native image a hot loop pays for every call it contains, also for one it never makes, and for every branch on its data}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\tag{loader}
+\import{base-macros}
+
+\p{Source: [the report on the loader thread's CPU](rep-OPT-B), sections 2.3, 3 and 5. Conditions: the executable (GraalVM CE 25.5.5.0.3 native image, \code{\verb~|-O3~}, no profile) and a second image of the same code with debug information under \code{perf} in the arena container; the loader thread of a pass or of the load alone; aarch64 development host, not quiet. Instruction counts are exact; the times are from interleaved rounds.}
+
+\ul{
+\li{\strong{A method that is not inlined costs 14 instructions before it does anything}: a stack-overflow check, a frame, and a safepoint poll before the return. The reader's one-line 8-byte load was 22 instructions as a function and its number conversion 65; called six times per \code{app} line they were 23 \% of the instructions of the loader thread on Mathlib. Without a profile the compiler spends its budget on inlining the scan loop into its caller and has none left for what the loop calls; four times the budget (rep-P11) and a force-inline list of 25 methods (this work: -9 \% on the load of Init, -1 to -6 \% on Mathlib) do less than writing the load and the conversion where they are used.}
+\li{\strong{A call inside a loop, even on a path that is never taken, puts the loop's values into the stack frame}: the image's calling convention has no register that survives a call, and the allocator reloads in every iteration what it had to save for the call. A loop of the block writer with all its state in locals and two calls on rare paths ran 195 instructions per record. The cure is structural: the common case as an inner loop that contains no call and leaves through a \code{break} in front of anything else, the rare case handled outside it.}
+\li{\strong{A branch on the data is mispredicted, and a misprediction costs more than the work it selects}: 2.8 mispredicted branches per expression record in the base's load of cslib (116 million), 3.4 in an intermediate candidate that had fewer instructions and was slower, 1.7 in the candidate (69 million), for the number of digits of a number, the kind of a child and the number of bytes of a reference. As arithmetic (a shift count from the trailing zeros, a mask from the sign, a length from the leading zeros and one word store) they cost a few instructions more and nothing else.}
+}
+
+\p{What to take from it: the three hold for any hot loop compiled for the executable, the machine's included ([the image's distance to the JVM](ins-TVGI)): look at the loop's machine code, not at its source; count calls and stack loads per iteration; a rewrite that lowers the instruction count of the source can raise it in the image. The JVM's compiler hides the first two with its profile, but the loops written this way are not an image-only gain: the JVM launcher's load alone got 19 \% shorter on Init and 14 \% on cslib with the same patches, the executable's 18 \% and 13 \%. \strong{Not measured:} x86-64, where a call and a misprediction cost differently; Oracle GraalVM with a profile; the machine's loops; which of the three is how much of the JVM's gain.}

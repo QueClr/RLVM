@@ -1,0 +1,20 @@
+\title{After a first pass over its code the loader thread is memory and one chain of dependent loads; on the small corpora it is the pass}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report on the loader thread's CPU](rep-OPT-B), sections 2, 5 and 9. Conditions: the executable with the three patches of that report (not in the repository when this was written), a run without options, warm pass, 8 workers, load pipelined with checking, the 8 measurement cores of the aarch64 development host while the other cores were busy; shares from \code{perf} on a second image with debug information.}
+
+\ul{
+\li{\strong{What the candidate's loader thread is made of on Mathlib} (10.6 s of CPU per pass, 119.5 G instructions at 2.9 instructions per cycle, 31 \% of the cycles stalled on memory): the kernel 15 \% (0.85 million page faults per pass for 3 GB of fresh pages, unchanged), the scanner's loop for \code{app} lines 14 \%, shared nodes and their children 12 \%, promotion 10 \%, names 8 \%, the stretches of records between segment and block 10 \%, the locations of earlier records 5 \%.}
+\li{\strong{The scanner's loop is bound by latency, not by instructions}: 260 instructions and 64 cycles for a line, 4 instructions per cycle. The address of each of the three numbers of a line is known only when the length of the one before it is, so three loads wait for each other. Finding the delimiters of a whole line from loads at fixed offsets would break the chain; it was not built.}
+\li{\strong{The memory-bound items did not move and are two thirds of the thread's last-level misses and TLB walks}: the location table (428 MB, one random read per reference to an earlier record: 20 \% of the walks), promotion (19 \%), the name table (16 \%), the children of shared nodes (17 \%). They are properties of the design ([the loader](design-export-loader), [the store](design-term-store)), not of how its loops are written, and the image has no huge pages for them.}
+\li{\strong{Where the gain lands.} The pass of Init, Std, cedar and cslib is its load: the base's loader thread is busy for 89 to 95 \% of the pass. The candidate's is busy 10 to 18 \% less and the pass gets 4.5 to 7.1 \% shorter in the executable, not more, because then the pass waits for the workers: the candidate's loader thread is busy for 78 to 91 \% of its pass. On Mathlib the pass is bound by the CPU of all threads: 1.5 s less CPU in the loader thread are 0.37 s of a pass of 14.5 s, 2.6 \%. (Three interleaved rounds per corpus; the JVM launcher's passes get 2.8 to 6.2 \% shorter on the same corpora.)}
+}
+
+\p{What to take from it: the next step for this thread is not another pass over its code. It is fresh pages in the image (a platform question), the design of locations and promotion, or the scanner's chain; and whoever makes the workers faster moves Mathlib and cslib to where Init is now, where the loader's CPU is the pass. \strong{Not measured:} x86-64; a quiet host; the split of the kernel's time between page faults and the mapped file.}
