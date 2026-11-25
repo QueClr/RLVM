@@ -125,6 +125,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-XNVE}
 \transclude{log-SPW0}
 \transclude{log-RCQ7}
 \transclude{log-PPPC}

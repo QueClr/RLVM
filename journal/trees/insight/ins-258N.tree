@@ -1,0 +1,37 @@
+\title{Memoising universe instantiation per session does not pay: the cost is the first touch of cold level data}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{levels}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: the census and the prototype of 2026-11-24 on universe levels in the machine (report LV1). An early state of its note is \srcat{566f62f}{docs/research/profiles/LV1.md}; this tree carries the final numbers. The itemised profile of the warm Mathlib pass had put about 8 percent of the workers' time on universe levels and named it the main cache-miss item. The question was whether a memo in front of the level store removes it. All numbers are from the development host, aarch64.}
+
+\p{\strong{Census}: the whole of Mathlib, one worker, machine with the default switch set.}
+\ul{
+\li{Instantiating a level list (\code{\verb~|Levels.lsubList~}): 528.5 M calls, 739 per declaration. 42.4 percent are the identity substitution and return at once; 53.3 percent are answered by the machine's cache of 4,096 entries; 4.3 percent miss, and 18.3 M lists are computed. Of the computed results 86 percent are an existing base list, 5 percent an existing list of the session, 5 percent new and 4 percent unchanged. 55 percent of the lists have one element, 27 percent two, 11 percent three. The callers: evaluation of a constant 51 percent, the identity test 26 percent, inference of a constant 14 percent, the compiled constant instruction 10 percent.}
+\li{A larger memo buys almost nothing. The hit rate on the calls that are not the identity is 91.6 percent with 1,024 entries, 92.6 percent with 4,096 (today) and 93.1 percent with a memo that never evicts within a session. A memo keyed by content that never forgets reaches 99.2 percent and holds 2.3 M entries.}
+\li{Building a substitution: 51 M calls, of which 46 M intern a pair; 70.5 percent of those are found in the session, 17.5 percent coincide with a base list and 12 percent, 5.5 M, are new. The list store is asked to intern 66 M times and the store of level nodes 20.7 M times, 84 percent of the latter found in the base.}
+\li{A worker resets its level overlay 34,843 times in the pass. The intern table of the lists is 2 MiB and that of the level nodes 1 MiB, both copied per worker; a copy of an overlay is about 14 MiB.}
+}
+
+\p{\strong{Prototype.} A switch \code{levelmemo} that changes cost only: a line of recent results per substitution, a memo in front of the construction of substitutions, a memo in front of the intern table of level nodes, and two shortcuts in the slow path. Every id, step count and record is the same with it; the gate of the machine passes with it on the default set and on the candidate set, and the hostile suite shows nothing unexpected. Warm passes in quiet windows, 8 workers unless noted, best later pass, without the switch and with it:}
+\table{
+\tr{\th{Corpus, launcher, mode}\th{default set}\th{default set with eager reduction and both shortcuts}}
+\tr{\td{Mathlib, JVM, pipelined passes, one pair of runs}\td{21.41 s, 20.81 s}\td{not measured}}
+\tr{\td{Mathlib, JVM, checking only, one pair of runs}\td{18.80 s, 18.45 s}\td{11.05 s, 10.18 s}}
+\tr{\td{Mathlib, native image, pipelined, one pair of runs}\td{27.43 s, 27.41 s}\td{not measured}}
+\tr{\td{Std, JVM, checking only, 3 rounds}\td{0.87 s, 0.85 s}\td{0.75 s, 0.76 s}}
+\tr{\td{cedar, JVM, checking only, 3 rounds}\td{1.17 s, 1.17 s}\td{1.03 s, 1.04 s}}
+\tr{\td{a slice of Mathlib, JVM, 1 worker, 2 rounds}\td{1.79 s, 1.84 s}\td{1.27 s, 1.29 s}}
+}
+\p{In a profile of the Mathlib pass on the JVM the level item goes from 7.19 to 6.45 percent of the workers' CPU. The instantiation of lists falls from 1.53 to 0.15 percent, plus 0.74 for the probe of the new line; the interning of lists falls from 1.35 to 0.76. The construction of substitutions and the hashed caches stay where they were, and the slow path of list instantiation rises from 0.50 to 0.74.}
+
+\p{\strong{Verdict: not adopted.} The switch does not move the warm wall clock outside the noise on the default set, and it does nothing in the native image. The one larger figure, 7.9 percent on Mathlib with the candidate set, is a single pair of runs and was not repeated. A second experiment, the constant instruction without its inline cache, is not adopted either: that cache answers 70.7 percent of 186 M calls.}
+
+\p{\strong{Why, and what it points at.} The repeats that a session memo removes are the cheap part. The cost is the first touch, in each session, of level data that is cold: 18 M computed lists and 5.5 M new pairs per Mathlib pass, each reading several cache lines of large tables that every worker holds in its own copy. That points at the layout of the level stores and not at another memo: one shared base instead of a copy per worker, which would also remove [the copy at each publication](ins-E1DU), and records instead of parallel arrays. That layout was not prototyped.}
+
+\p{\strong{Not measured:} three clean rounds on the whole of Mathlib, since every Mathlib row above is one pair; one worker on the whole of Mathlib; anything on x86-64. An early figure of 44 percent less checking CPU on the slice was the warm-up of the JIT in a run of four passes and was withdrawn. The same work found and fixed [a stale cache entry across a session reset](log-XNVE).}

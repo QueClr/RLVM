@@ -1,0 +1,29 @@
+\title{A cached universe instantiation could survive a session reset}
+\taxon{Change}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{soundness}
+\tag{levels}
+\tag{unreleased}
+\meta{release}{Unreleased}
+\meta{commit}{43954c3}
+\import{base-macros}
+
+\p{Finding LV1-F1, in \code{rlvm-level} and therefore under both engines. The level store keeps the results of universe instantiation in a cache, and it marked an entry as valid for the whole run, across the resets of a worker's session, when the level or level list, the result and the id of the substitution were all below the bounds of the frozen base. A substitution is an interned pair of two list ids, the parameter names and the levels, in the same list store as the level lists and the name lists. A pair made in a session can therefore be found as a base list of two integers that already exists, while its list of levels belongs to the session. After a reset that list id is issued again, the same base id then names a different substitution, and the entry kept for the whole run answered for it with the level of the previous session.}
+
+\p{The entry is now kept across resets only if both components of the substitution are base lists as well (\code{\verb~|LevelStore.substIsBase~}). Within a session nothing changes: a run of the machine with counters is identical before and after. Two regression tests in \code{\verb~|OverlayTest~} fail on the old code. The other caches of the level store, the table of substitutions itself, the rebasing of an overlay and the level caches of the machine were checked for the same assumption and do not make it.}
+
+\p{\strong{Reach.} The defect was latent. The dangerous pair needs a base list that holds an integer at or above the number of base lists, which needs more level nodes than lists in the base. Mathlib has 70,610 base levels and 184,439 base lists. A counting build found no such pair on the whole of Mathlib with 8 workers (0 of 8,312,989 pairs that coincide with a base list), on cedar, on Init and on a slice of Mathlib. No export that triggers the defect was built, so there is no verdict of the official checker for it and no row in the hostile suite; the reproducer works on the store directly.}
+
+\p{\strong{Checks with the fixed module}, built from the tree:}
+\ul{
+\li{the suite of the module, 49 tests; the suite of the reference engine, 148; the fast group of the machine, 417;}
+\li{the gate on all corpora: 230 of 230 arena tests, and 17,775 mutants with no soundness and no completeness difference;}
+\li{the invariance suite: 231 files in 9 schedules each, no wrong verdict and no difference between schedules;}
+\li{the eight corpora through the native image with the reference engine: all accepted;}
+\li{in one quiet window, reference engine, 8 workers, Std and cedar take the same time with and without the fix.}
+}
+
+\p{Source: \src{rlvm-level/src/main/java/rlvm/level/LevelStore.java}, \src{rlvm-level/src/test/java/rlvm/level/OverlayTest.java}. Commit \commit{43954c3}. Related: [what universe-level instantiation costs the machine](ins-258N); [the level tables are copied per worker](ins-E1DU).}
