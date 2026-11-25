@@ -1,0 +1,365 @@
+\title{NOTES-M7 - K1 elaborator, code stepper, code store, MATCH, comparison plans (owner: M7)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{truffle}
+\meta{origin}{rlvm-machine/NOTES-M7.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Read section 8 first} (wave 6, 2026-11-24 afternoon): what code objects are for, measured on the native image; the tier hook; case trees that inline matchers; which switches are ready. Sections 1 to 7 are the state of wave 4 (the morning) and are kept as the description of the stepper, the blocks and the tests; where section 8 supersedes a statement it says so.}
+
+\p{Files: \code{\verb~|Elab~}, \code{\verb~|Code~}, \code{\verb~|CodeStore~}, \code{\verb~|Match~}, \code{\verb~|Cong~}, \code{\verb~|CodeShow~} (claimed: the listing printer), \code{\verb~|Tier~} (claimed: the hook of the compiled tier and the heat accounting); tests \code{\verb~|M7*.java~}. \strong{Nothing of this package runs in v0}: every entry point answers "walk the term" (0) while its staging switch is off (\code{\verb~|SW_FACTS~} for plans, \code{\verb~|SW_TELE~} for telescopes, \code{\verb~|SW_CODE~} for bodies / rules / closures, \code{\verb~|SW_CASETREES~} for RULES) and in strict mode (\code{\verb~|M7ElabTest.nothingRunsInV0~}); the callers in \code{\verb~|Eval~}, \code{\verb~|Reduce~}, \code{\verb~|Rules~} and \code{\verb~|Infer~} test the same switches before they call (section 4).}
+
+\subtree{
+\title{1. The stepper under convention H7, and the other deviations from ISA.md}
+
+\p{ISA 8.2 shows the stepper as a family loop over an \code{\verb~|ACT~} frame in \code{\verb~|W~} (candidate (i)). Under the decided convention (stepper-convention.md H7) it is written as follows.}
+
+\table{
+\tr{\th{\verb~|#~}\th{ISA}\th{As built}\th{Reason}}
+\tr{\td{D1}\td{registers are words of the \code{\verb~|ACT~} frame; arguments are addressed in \code{\verb~|argRun~} "without copying" (1.3, 2.4, 3.3)}\td{an activation is a window of the register stack \code{\verb~|m.RS~}: \code{\verb~|RS[rb-3] = capRun~}, \code{\verb~|RS[rb-2] = ls~}, \code{\verb~|RS[rb-1] = xp~} at entry, then the arguments, then the registers. The arguments are \strong{copied} into the window at entry (\code{\verb~|Code.enter~}); operand modes A and R both index the window, mode C a slot of \code{\verb~|capRun~}. \code{\verb~|argRun~} of the frame is always 0}\td{a frame has no address until it is written (H7); the callers hold arguments in three places (a spine run for DELTA, scratch for APPLY and IOTA, nothing yet for TELE, whose \code{\verb~|g_i~} are produced one by one). One copy of \code{\verb~|arity~} words buys one addressing mode and makes the block independent of the caller's scratch, so the caller may suspend freely}}
+\tr{\td{D2}\td{chunk directories installed by compare-and-set (3.3)}\td{readers are lock-free (acquire loads, one release store per block id and per row slot); writers serialise on the store's monitor}\td{a publication is a copy of a few dozen words; the monitor gives the same reader-side guarantees and makes "one block per role" (\code{\verb~|publish~} is first-wins) and "one sub-block per binder" (\code{\verb~|addSub~} checks the node hint under the lock) true by construction, which is what makes two workers build word-identical blocks}}
+\tr{\td{D3}\td{\code{\verb~|Code.run(m, blk, pc, rbase, d)~} is entry and continuation step}\td{kept. The dispatch loop is \code{\verb~|Code.resumeAt~} (a \code{\verb~|resume*~} name: a family's dense switch is exempt from the 325-bytecode step limit, H10 rule 2); every instruction body is a small method. The entry step (H4: tick, call event, window, depth test) is \code{\verb~|begin~} + \code{\verb~|go~}; a spilled entry is the frame \code{\verb~|ACT[.., dst = DST_ENTRY, ..]~} and is ticked again when the driver resumes it}\td{H4}}
+\tr{\td{D4}\td{\code{\verb~|TARG i, flags, dom~} is one instruction with several sub-judgments}\td{phases of opcode \code{\verb~|TARG~} in the \code{\verb~|x~} byte, each calling at most one judgment: \code{\verb~|TARG.INFER i, Lbind, Lnext~} (Tt = INFER(t_i); ONLY mode: bind and skip); the domain code, preceded by \code{\verb~|MATCH Tt, T(dom), i, Lbind~} when the domain is an open constant application; \code{\verb~|TARG.CONV i, D~} (CONV with the ER rule of \code{\verb~|eagerReduce~}, else \code{\verb~|fail(E_APP_MISMATCH)~}); \code{\verb~|TARG.BIND i~} (g_i = read later ? ARGV(t_i) : HOLE). \code{\verb~|TARG.EXPECT T(result), n~} is the result-pattern shortcut of TRET (B5). The site (argument terms in X, env, ls, mode, expected) lives in 8 site registers after the arguments}\td{under H the state of an activation is its pc. The frozen opcode set is unchanged}}
+\tr{\td{D5}\td{\code{\verb~|CONG~} is elaborated rent-to-own (3.1)}\td{a plan is built at the first \code{\verb~|Cong.planOf~} once the fact record exists (the caller triggers \code{\verb~|Facts.sigd~})}\td{a few dozen instructions per position, no source term to walk}}
+\tr{\td{D6}\td{leaves of a case tree are \code{\verb~|p ȳ~} (3.6)}\td{any term is a leaf, compiled in tail position}\td{the soundness argument of 3.6 does not depend on the leaf's form; \code{\verb~|casesOn~}-style heads are recognised by analysing the head definition (\code{\verb~|Elab.casesOnInfo~}), so matchers over any non-K, non-structure inductive type are trees}}
+\tr{\td{D7}\td{\code{\verb~|RULE(r, j)~}: one block per rule}\td{one block per recursor with one entry per rule (entry word 0 = that rule is walked); arity = the largest rule arity}\td{one publication per recursor; the block is a function of the store}}
+\tr{\td{D8}\td{sub-block "entry per number of applied lambdas" (3.4)}\td{entry j - 1 = "j binders applied"; j below the number of leading lambdas returns the closure of the rest, which is walked. Chains longer than 16 keep the first 16 in the block. The Pi that remains after a partial application of a TELE gets no sub-block. A body of more than 64 nodes gets none (3.4)}\td{bounds the code per binder; a block per telescope suffix tripled the code of Init.Prelude's telescopes (12,884 blocks against 7,698)}}
+\tr{\td{D9}\td{a block's level pool (3.3)}\td{absent: every level and level list is an operand L / LL holding the id found in the term's own node, a base id; \code{\verb~|pubcheck~} verifies it against \code{\verb~|LevelStore.baseSize / baseListCount~}}\td{the elaborator consults no fact and derives no level}}
+\tr{\td{D10}\td{\code{\verb~|KVAL d, k~} with a pool index}\td{the operand is the closed term (mode K); \code{\verb~|x~} bit 0 = the node stood in an argument position: the value is then \code{\verb~|ARGV~} of it (a suspension for an active term), as the generic walk builds it; \code{\verb~|x~} bit 1 = the term mentions a level parameter (the inline-cache key is then \code{\verb~|ls~}, else 0)}\td{decision 6}}
+\tr{\td{D11}\td{LEAF blocks run "without a frame" (B11)}\td{LEAF is a header flag; under H no activation writes a frame unless a sub-judgment is suspended}\td{H1}}
+\tr{\td{D12}\td{operand reads}\td{\code{\verb~|Code.val~} reads as the generic walk reads a variable, \code{\verb~|PEEK(GET)~} (\code{\verb~|Eval.atom~}), and faults \code{\verb~|E_HOLE~} on an argument or captured slot that holds HOLE; a capture list copies the binding raw (\code{\verb~|Code.raw~}), as \code{\verb~|PRUNE~} does. A register may hold HOLE (\code{\verb~|BUNREAD~}) and pass it to an APPLY}\td{the frames and values of both tiers are then the same records (verified, section 5)}}
+\tr{\td{D13}\td{TAILAPPLY / TAILCALL overwrite the own frame}\td{TAILAPPLY is a call followed by the pop of the window (continuation \code{\verb~|DST_RET~})}\td{its arguments are scratch of the activation (H3: a tail return may own no scratch)}}
+\tr{\td{D14}\td{\code{\verb~|BUNREAD f, i, d, L~}}\td{\code{\verb~|BUNREAD d, f, i, n, L~}: n = the number of arguments the following APPLY passes}\td{APPLY binds \code{\verb~|j = min(leading lambdas, n)~} binders and tests the body after j of them (4.3.1); the same test needs n}}
+\tr{\td{D15}\td{\code{\verb~|SWITCH s, L0..Lk-1, Lx~}}\td{\code{\verb~|SWITCH s, I, L0.., Lx~}: the inductive type is an operand; a value that is not a constructor of I applied to exactly its parameters and fields goes to Lx (also a big-number or string literal, and a numeral when the Nat guards are not VALID)}\td{an ill-typed or stuck major must take the DELTA path}}
+\tr{\td{D17}\td{\code{\verb~|let -> MKSUSP(value, LET) always (2.8)~} (3.4)}\td{a let value is compiled in position ARG (an atom, an inert application built at once, a plain suspension of an active term); \code{\verb~|MKSUSP~} keeps its LET bit but the elaborator does not emit it}\td{M2 changed the generic EVAL of a let to exactly that on 2026-11-24T10:26Z (NOTES-M2 D9: the LET suspension is INFER's; flagging the lets of an evaluated term made values OPEN and switched off Nat folding in lazy delta where the official kernel folds). The tier test showed it at once: 23 of 24,861 cases differed (a LET suspension against the closure in a captured slot) until the elaborator followed}}
+\tr{\td{D16}\td{probe \code{\verb~|ELAB_AT~} is \code{\verb~|Op.ELAB_AT~}}\td{\code{\verb~|CodeStore.elabAt~} (reduction roles, default 1 since wave 6) and \code{\verb~|CodeStore.teleAt~} (TELE, default 10); system property \code{\verb~|rlvm.machine.elabAt~} (1..15) sets both}\td{the sweep of ISA 3.1; section 8.4}}
+\tr{\td{D18}\td{\code{\verb~|tree ::= I.casesOn .. | I.rec ..~}, leaves \code{\verb~|p ȳ~} (3.6)}\td{a tree node may also be \code{\verb~|D args~} for a definition \code{\verb~|D~} that has a case tree of its own: \code{\verb~|D~}'s tree is compiled in place with its parameters bound to the argument terms (\code{\verb~|Elab.inline~}, section 8.3); an eta-reduced minor is a leaf}\td{the hot shape of every definition by pattern matching; the same composition of official steps}}
+\tr{\td{D19}\td{RULES is used by WHNF only (3.6)}\td{also by the unfolding step of lazy delta for shape CASESON (\code{\verb~|Code.rulesCasesOn~}, switch \code{\verb~|m7a~}): \code{\verb~|I.casesOn~} itself, where no state of the official loop lies between the DELTA and the iota of one step}\td{section 8.5}}
+}
+
+\p{Frames of this family: \code{\verb~|ACT [blk, pc, dst, 0, capRun, ls, rbase]~} (\code{\verb~|Op.ACT_*~}; \code{\verb~|dst~} < 256: the window index that receives the awaited result; otherwise \code{\verb~|DST_RET~}, \code{\verb~|DST_ENTRY~}, \code{\verb~|DST_NONE~}, \code{\verb~|DST_REQ_APP~}) and five continuations of judgments whose K1 half lives here: \code{\verb~|ACT[1](v, k)~}, \code{\verb~|ACT[2](xb)~} (RULES), \code{\verb~|ACT[3](v, ar)~}, \code{\verb~|ACT[4](v, xb)~} (DELTA through BODY), \code{\verb~|ACT[5](xb, n, total)~} (IOTA through RULE).}
+}
+
+\subtree{
+\title{2. Blocks and instructions as built}
+
+\pre{\verb~|
+block   hdr0 = len:20 | nreg:8 | role:4     hdr1 = owner row (0 for a sub-block)
+        hdr2 = arity:12 | flags:12 | nentry:8          flags: LEAF 1, SUB 4, shape << 4 (PICK, PROJARG, CTORBODY, CASESON, MATCHER)
+        hdr3 = 0 (sub-block: its binder term; CONG: the facts index)
+        entry table: BODY 1 entry; RULE one per rule; RULES 1; TELE arity + 1 (0 = first TARG, k = "return the
+        remaining Pi after k arguments", arity = the result code); sub-block one per number of binders applied
+instr   op:8 | d:8 | n:8 | x:8, then n operands mode:4 | payload:28 (Op.MODE_*)
+        MKAPP d, h, a..        KCONST d, D, LL       KSORT d, L        KLIT d, T        KVAL d, K
+        MKLAM / MKPI d, T, B, c0..ck      MKSUSP d, T, c0..ck (x: LET)      MKPROJ d, D, I, s
+        MOV, PEEK, NSUCC d, s      FIELDS d0, s (x = n)      JMP L      BEQ / BNE a, b, L      BKIND s, I(set), L
+        BUNREAD d, f, I(i), I(n), L      SWITCH s, D(I), L0.., Lx      MATCH s, T, I(n), L      RET s
+        APPLY d, f, a..      TAILAPPLY f, a..      WHNF / FORCE d, s      TARG (four phases)      TRET s
+CONG    hdr2 = npos | PROP_STATIC; word 4 = lamArity; per position: class | UNREAD | rank, dep low, dep high
+~}
+
+\p{The elaboration scheme is the comment of \code{\verb~|Elab~}: three positions (TAIL, EVAL, ARG) that mirror EVAL and ARGV of ISA 4.2 as M2 implements them, so that both tiers build the same records.}
+}
+
+\subtree{
+\title{3. Listings of ISA 3.7 as reproduced (\code{\verb~|M7ListingTest~}, from \code{\verb~|init-prelude.ndjson~})}
+
+\p{Differences from the text of 3.7:}
+
+\ul{
+\li{capture lists show every slot up to the highest bit of the node's mask: \code{\verb~|[A0, _, _, A3]~} for the minor premise of \code{\verb~|Nat.casesOn~} where the ISA printed \code{\verb~|[A3]~} (the lambda's second domain reads the motive);}
+\li{every entry of a sub-block is printed (\code{\verb~|B1 (1 applied)~}, \code{\verb~|B1 (2 applied)~});}
+\li{\code{\verb~|BODY(Nat.casesOn)~} is LEAF by the rule of 3.4 (four class-p instructions); the ISA omitted the flag;}
+\li{\code{\verb~|RULES(Nat.casesOn)~} is the ISA's line with the inductive type as an operand of \code{\verb~|SWITCH~}; \code{\verb~|RULES(Nat.add.match_1)~} is the one-level tree of 3.6 (\code{\verb~|TAILAPPLY A3, A1~} / \code{\verb~|FIELDS; TAILAPPLY A4, A1, r1~});}
+\li{\code{\verb~|RULE(Nat.rec, succ)~} is the ISA's line with the two registers numbered in emission order;}
+\li{\code{\verb~|TELE(congrArg)~}: \code{\verb~|TARG~} is the group of D4; the active arguments \code{\verb~|f a₁~}, \code{\verb~|f a₂~} of the result are \code{\verb~|BKIND g4, neutral / MKSUSP / MKAPP~} groups, the K0-equivalent form (decision 8), where the ISA printed \code{\verb~|APPLY~} (the strict form of open question 1; \code{\verb~|Elab.State.strictArgs~} emits it; off, it changes value ids);}
+\li{\code{\verb~|CONG(congrArg)~}: positions 2-4 are \code{\verb~|PROOFL~} (their sorts \code{\verb~|u~}, \code{\verb~|u~}, \code{\verb~|imax u v~} are manifest and can be zero: \code{\verb~|congrArg.{0,0}~} compares proofs there), which is what 6.1 and 3.5 specify; the listing printed \code{\verb~|SAME~}. \code{\verb~|CONG(HAdd.hAdd)~} is the listing's. Probe ranks follow the rule of 6.1 (for \code{\verb~|HAdd.hAdd~} position 5 is probed before 3; the remark under the listing says 3). Both plans are reproduced twice: from a hand-made record of the layout of 3.5 and from the record M5's \code{\verb~|SIGD~} derives;}
+\li{class TYPE: "the domain is a sort or a Pi telescope that ends in one" (6.1), \strong{or} its sort is manifest and of the form \code{\verb~|l + 2~} (the domain lives two universes up: \code{\verb~|outParam (Type w)~} in \code{\verb~|HAdd.hAdd~}, which the listing classifies TYPE). Both are compare classes; only the probe order differs;}
+\li{the \code{\verb~|slvl~} / \code{\verb~|rlvl~} part of the TELE header is M5's fact record and is not printed.}
+}
+}
+
+\subtree{
+\title{4. How the other packages call K1 (all in the main tree since 2026-11-24T10:41Z)}
+
+\table{
+\tr{\th{Caller (owner)}\th{Call}\th{Switch}}
+\tr{\td{\code{\verb~|Reduce.delta~} (M3): BODY on the spine, then APPLY of the arguments beyond the arity; \code{\verb~|Reduce.iotaRule~}: RULE on the rule's arguments}\td{\code{\verb~|Code.blockFor(row, ROLE_BODY / ROLE_RULE)~}, \code{\verb~|Code.arityOf~}, \code{\verb~|Code.hasEntry~}, \code{\verb~|Code.callRun~}, \code{\verb~|Code.callRule~}}\td{\code{\verb~|SW_CODE~}}}
+\tr{\td{\code{\verb~|Rules.rules~} / \code{\verb~|Rules.unfold~} (M3)}\td{\code{\verb~|Code.rules(m, v, d)~}: the complete RULES judgment}\td{\code{\verb~|SW_CASETREES~}}}
+\tr{\td{\code{\verb~|Eval.applyFrom~}, \code{\verb~|Eval.instBody~} (M2)}\td{\code{\verb~|Code.closureBlock~} (kept in the CODE memo), \code{\verb~|Code.arityOf~}, \code{\verb~|Code.hasEntry~}, \code{\verb~|Code.callClosure~}}\td{\code{\verb~|SW_CODE~}}}
+\tr{\td{\code{\verb~|Infer.inferApp~} (\code{\verb~|teleApp~}), \code{\verb~|Infer.vtypeNode~} (\code{\verb~|teleNeu~}) (M5)}\td{\code{\verb~|Code.blockFor(row, ROLE_TELE)~}, \code{\verb~|Code.tele~}, \code{\verb~|Code.teleValues~}, \code{\verb~|Code.arityOf~}; the arguments beyond the block's arity continue in the generic TWALK / NEU loop}\td{\code{\verb~|SW_TELE~}}}
+\tr{\td{\code{\verb~|Cargs~} (M4)}\td{\code{\verb~|Facts.sigd~} (derive), then \code{\verb~|Cong.planOf~} + \code{\verb~|Cong.words / base / positions / lamArity / classWord / dep / propStatic~}}\td{\code{\verb~|SW_FACTS~}; \strong{not wired, and not to be wired as specified} (section 8.6: skipped positions are not the official verdict)}}
+\tr{\td{\code{\verb~|Eval.codeArity~} (M2, since 14:54Z)}\td{\code{\verb~|Code.entryFor(m, blk, n)~}: the entry of a closure's block for n arguments}\td{\code{\verb~|SW_CODE~}}}
+\tr{\td{\code{\verb~|Conv.unfoldT / unfoldS~} -> \code{\verb~|Rules.unfoldLazy~} (M4, M3, since 15:05Z / 15:3xZ)}\td{\code{\verb~|Code.rulesCasesOn(m, v, d)~}: the CASESON tree as the unfolding step of lazy delta}\td{\code{\verb~|SW_CASETREES~} + \code{\verb~|m7a~}}}
+\tr{\td{a compiled tier (\code{\verb~|rlvm-truffle~}, T2)}\td{class \code{\verb~|Tier~} (section 8.2)}\td{\code{\verb~|t2~}}}
+}
+
+\p{So \code{\verb~|-Drlvm.machine.switches=code,tele,casetrees~} runs K1 in the main tree. One rule for every caller of a block, learnt the hard way while the TELE hook was being re-anchored on M5's new TWALK: \strong{capture \code{\verb~|m.ep~} (and any other stack mark) before the call}. A block that is suspended leaves the environments of its sub-judgments on \code{\verb~|es~} (H7), so a continuation frame written with the \code{\verb~|m.ep~} read after the call restores a wrong mark; the declaration then ends with a machine that is not idle and is declined (\code{\verb~|E_INTERNAL~}, 9 units of Init, all on terms deeper than the host bound; never a wrong verdict). M5's published hook does it right; \code{\verb~|M7BenchTest.init~} asserts that every configuration accepts the same units.}
+}
+
+\subtree{
+\title{5. Tests and what they showed}
+
+\table{
+\tr{\th{Test}\th{Group}\th{Content}\th{Result}}
+\tr{\td{\code{\verb~|M7CodeStoreTest~}}\td{fast}\td{directory, row slots, first-wins publication, chunk boundaries, oversized blocks, the rent-to-own counter (fires once, at the 10th request; saturates at 15), 8 threads publishing 2,000 roles with readers checking completeness}\td{green}}
+\tr{\td{\code{\verb~|M7ElabTest~}}\td{fast}\td{bodies, rules, telescopes of the hand-built prelude; determinism (two elaborations word-identical); \code{\verb~|pubcheck~} accepts every block and finds each of 13 planted violations at its word; overlay / proof-block / generated sources refused; nothing runs with the switches off; rent-to-own through \code{\verb~|Code.blockFor~}; hint validation}\td{green}}
+\tr{\td{\code{\verb~|M7MatchTest~}}\td{fast}\td{MATCH rows per form; "MATCH = build + CONV" on all pairs of 12 patterns and their values; the 64-node budget}\td{green}}
+\tr{\td{\code{\verb~|M7TierTest.handBuiltPrelude~}}\td{fast}\td{K0 = K1 value ids, D = 64 and D = 0}\td{425 cases identical}}
+\tr{\td{\code{\verb~|M7ListingTest~}}\td{default}\td{the listings of ISA 3.7 (section 3)}\td{green}}
+\tr{\td{\code{\verb~|M7CorpusTest~}}\td{default / slow}\td{every role of every constant of init-prelude, Init, Std elaborated; \code{\verb~|pubcheck~} on every block; proof-block and opaque values never elaborated; two workers build word-identical blocks and publish one block per role}\td{green; sizes in section 6}}
+\tr{\td{\code{\verb~|M7TierTest.initPrelude~}}\td{default}\td{K0 = K1 value ids on init-prelude: 1,441 bodies x level variants x over-application, every recursor rule, every sub-block applied to 1..k arguments, 687 case-tree cases, about 15,000 TELE cases (ONLY / CHECKED / VALUES, partial applications)}\td{24,862 cases: 24,655 identical ids, 0 different, 0 failures of one tier (207 ill-typed over-applications fail in both), D = 64 and D = 0; MATCH answers T on 2,432 of 2,440 own domain values}}
+\tr{\td{\code{\verb~|M7HookedTest~}}\td{default (init-prelude) / slow (tutorial, bugs, D = 0, all 230, Init)}\td{the machine with \code{\verb~|code,tele,casetrees~} against the reference engine through M8's \code{\verb~|Diff~}, ELAB_AT 1 and 10, and against the K0 run file by file}\td{section 6}}
+\tr{\td{\code{\verb~|M7ProfTest~}}\td{slow (a tool)}\td{JFR execution samples of the checking thread for a switch set on an export}\td{section 6}}
+\tr{\td{\code{\verb~|M7BenchTest~}}\td{default (init-prelude) / slow (Init, cedar-hot-ax, reachability)}\td{thread CPU time of one machine session over a whole export under switch sets; every set must accept the same units}\td{section 6}}
+}
+}
+
+\subtree{
+\title{6. Measurements (host JVM, C2/Graal as configured by the build; not the arena container)}
+
+\p{Elaboration of everything (\code{\verb~|M7CorpusTest~}; rent-to-own would elaborate about 15\% of it):}
+
+\table{
+\tr{\th{corpus}\th{constants}\th{blocks (incl. sub-blocks)}\th{code}\th{TELE}\th{BODY}\th{RULE}\th{RULES}}
+\tr{\td{init-prelude}\td{2,121}\td{7,698}\td{1.3 MiB}\td{1,975}\td{1,441}\td{125}\td{104}}
+\tr{\td{Init}\td{59,979}\td{124,411}\td{41.8 MiB}\td{56,154 (8.56 M words, 152 words each)}\td{17,284 (56 words each)}\td{603}\td{1,400}}
+\tr{\td{Std}\td{103,885}\td{215,164}\td{88.1 MiB}\td{97,062}\td{30,068}\td{1,046}\td{2,209}}
+}
+
+\p{Elaboration time was not measured in a way that supports a number: \code{\verb~|M7CorpusTest~} reports wall clock per constant tried, and three runs of the same code on this host gave 1.6, 5.3 and 12.9 us per TELE on Init (0.6 to 1.3 us per BODY); Std, which runs first in the JVM and pays the JIT warm-up, 14.7 to 41.8 us. The ISA's spike measured 3.0 us per telescope; these runs neither confirm nor contradict it.}
+
+\p{CPU time of the machine on Init with and without K1 (\code{\verb~|M7BenchTest.init~}: one session, one thread, 58,547 units, the CPU time of that thread from the JVM, a fresh engine per pass so elaboration is inside the time, v0 sessions (reset per declaration), warm-up pass discarded; host JVM, load average 70 to 160 while measuring, so a difference below about 10\% is not resolved; every configuration accepted all 58,547 units). The generic tier changed twice while K1 was being measured, and the answer changed with it:}
+
+\table{
+\tr{\th{generic tier of}\th{switches}\th{ELAB_AT}\th{CPU}\th{ratio}\th{blocks}\th{activations}\th{ticks}}
+\tr{\td{09:55Z (PI record + ENPI + DOM + INST per argument)}\td{none (v0)}\td{-}\td{11.9 s}\td{1.00}\td{0}\td{0}\td{93.6 M}}
+\tr{\td{}\td{\code{\verb~|tele~}}\td{10}\td{10.8 s}\td{0.91}\td{11,721}\td{5.0 M}\td{79.4 M}}
+\tr{\td{}\td{\code{\verb~|code,casetrees~}}\td{10}\td{10.0 s}\td{0.84}\td{6,425}\td{10.5 M}\td{82.3 M}}
+\tr{\td{}\td{\code{\verb~|code,tele,casetrees~}}\td{10}\td{8.3 s}\td{0.69}\td{17,997}\td{15.9 M}\td{68.3 M}}
+\tr{\td{}\td{\code{\verb~|code,tele,casetrees~}}\td{1}\td{8.3 s}\td{0.69}\td{79,733}\td{16.2 M}\td{67.2 M}}
+\tr{\td{10:55Z (M5's telescope-mode TWALK and grouped VTYPE, M2's let fix), best of 5}\td{none (v0)}\td{-}\td{8.35 s}\td{1.00}\td{0}\td{0}\td{77.8 M}}
+\tr{\td{}\td{\code{\verb~|tele~}}\td{10}\td{9.18 s}\td{1.10}\td{11,652}\td{5.0 M}\td{78.0 M}}
+\tr{\td{}\td{\code{\verb~|code,casetrees~}}\td{10}\td{8.39 s}\td{1.01}\td{6,425}\td{10.4 M}\td{66.5 M}}
+\tr{\td{}\td{\code{\verb~|code,tele,casetrees~}}\td{10}\td{7.98 s}\td{0.96}\td{17,930}\td{15.7 M}\td{67.0 M}}
+\tr{\td{}\td{\code{\verb~|code,tele,casetrees~}}\td{1}\td{7.56 s}\td{0.91}\td{79,765}\td{16.1 M}\td{66.6 M}}
+}
+
+\p{Reading. Against the generic tier of the morning K1 saved a third of the CPU time on Init. M5 then gave the generic TWALK what the TELE role is made of (it walks the syntactic telescope, no PI record, no ENPI / INST per argument), which took the generic tier from 11.9 s to 8.35 s; against that tier the K1 roles together measured 4 to 9\% less CPU on Init and the body / rule / case-tree roles alone no difference (1.01x, ticks -14\%). \code{\verb~|tele~} alone measured 1.10x in that run, which is at the edge of what this host resolves and was not reproduced elsewhere (1.00x on the Cedar slice below, 0.92x to 0.99x on init-prelude, ticks equal): what can be said is that \strong{TELE shows no CPU gain over M5's telescope-mode TWALK}, not that it costs 10\%. Why it does not gain is not established. One conjecture, not tested: the generic walk's tabled EVAL of a domain answers from its memo where the block builds the domain again. The profile below rules out the stepper's own overhead as the main term. This is not what the ISA's telescope spike predicted (-7\% to -28\% of an instantiation pass). Init is the regression corpus, not the yardstick (owner note 9). The Cedar slice (\code{\verb~|cedar-hot-ax.ndjson~}, 8,418 units, the same harness, best of 2, generic tier of 10:55Z; every configuration accepted all units):}
+
+\table{
+\tr{\th{switches}\th{ELAB_AT}\th{CPU}\th{ratio}\th{session memory made}\th{blocks}\th{activations}}
+\tr{\td{none (v0)}\td{-}\td{3.02 s}\td{1.00}\td{817 MiB (1.00)}\td{0}\td{0}}
+\tr{\td{\code{\verb~|tele~}}\td{10}\td{3.03 s}\td{1.00}\td{0.97}\td{5,148}\td{1.33 M}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{10}\td{2.99 s}\td{0.99}\td{0.92}\td{5,091}\td{1.15 M}}
+\tr{\td{\code{\verb~|code,tele,casetrees~}}\td{10}\td{2.93 s}\td{0.97}\td{0.88}\td{10,183}\td{2.65 M}}
+\tr{\td{\code{\verb~|code,tele,casetrees~}}\td{1}\td{2.90 s}\td{0.96}\td{0.87}\td{27,367}\td{2.81 M}}
+}
+
+\p{K1 makes 12 to 13\% less session memory (records, runs; a count, not disturbed by the load). The CPU differences of 1 to 4\% are inside this host's noise: no CPU gain is established on the Cedar slice. On init-prelude a TELE's MATCH answers T 2,371 times and "unknown" 239 times; the argument's type is the built domain itself 22,318 times and CONV is called 3,328 times (\code{\verb~|Code.Ext.matchT / matchF / targSame / targConv~}).}
+
+\p{Closed evaluation is where K1 pays: \code{\verb~|reachability.ndjson~} (4,413 units, the same harness, one measured pass after the warm-up, generic tier of 11:10Z; every configuration accepted all units):}
+
+\table{
+\tr{\th{switches}\th{CPU}\th{ratio}\th{session memory made}\th{ticks}\th{blocks}\th{activations}}
+\tr{\td{none (v0)}\td{6.68 s}\td{1.00}\td{1,369 MiB (1.00)}\td{34.6 M}\td{0}\td{0}}
+\tr{\td{\code{\verb~|code~}}\td{3.65 s}\td{0.55}\td{0.60}\td{29.1 M}\td{1,721}\td{7.97 M}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{2.26 s}\td{\strong{0.34}}\td{0.38}\td{16.5 M}\td{1,770}\td{4.43 M}}
+\tr{\td{\code{\verb~|code,tele,casetrees~}}\td{2.25 s}\td{0.34}\td{0.37}\td{16.5 M}\td{3,290}\td{4.63 M}}
+}
+
+\p{Bodies and rules as blocks halve the CPU time, the case trees (B8: the motive, the unchosen alternatives and the \code{\verb~|casesOn~} / \code{\verb~|rec~} applications of a matcher are never built) take it to a third. This is the ISA's prediction (0.1 "(b) the reduction roles carry the tail", "(c) derived rules matter on closed evaluation only"; nano-lean's rules were worth 1.9x there).}
+
+\p{Where the time goes with \code{\verb~|tele~} on Init (\code{\verb~|M7ProfTest~}: JFR samples of the checking thread, 2,056 samples; \code{\verb~|work/status/machine-M7-prof-init-tele.txt~}): self time \code{\verb~|Runs.pruneNear~} 18\%, \code{\verb~|Values.closure~} 17\%, \code{\verb~|Values.neu~} 13\%, \code{\verb~|Pairs.status~} 6\%, \code{\verb~|Machine.reset~} 5\%; \code{\verb~|Code.resumeAt~} 1.2\%, all of \code{\verb~|Code~} and \code{\verb~|Match~} together about 2\%. So about half of the samples are in interning, and the stepper's own code is a small share. \code{\verb~|Eval.table~} (the tabling probe of the generic EVAL) is 21.5\% inclusive. The callers of \code{\verb~|pruneNear~} / \code{\verb~|closure~} / \code{\verb~|neu~} were not broken down, so how much of the interning belongs to the tabling of proof terms (which no code role of a constant touches) and how much to values the blocks themselves build is an inference, not a measurement.}
+
+\p{Not measured: the arena container, Std, warm sessions (step 1), gated tabling (which removes most of that tabling and will change these ratios again).}
+
+\p{Verdicts with K1 (\code{\verb~|code,tele,casetrees~}, ELAB_AT 1 and 10, M8's differential runner): tutorial 141 files and bugs 34 files / 1,147 checks DIFF-CLEAN, also under D = 0 (\code{\verb~|M7HookedTest~}); all 230 published tests on the main tree of 11:10Z (\code{\verb~|report.sh -Dm8.switches=tele,code,casetrees -Drlvm.machine.elabAt=1 all~}, \code{\verb~|work/status/machine-diff-all-M7k1.txt~}): no wrong verdict, 229 files clean, 1 declined (\code{\verb~|good/perf/loop-unfolded-once~}, E_MEM: 2^28 run words; v0's report of 10:47Z declines the same file the same way), 17,492 of 17,493 units agree, the machine rejects 41 declarations and the reference rejects the same ones; Init, the Cedar slice and reachability: every unit accepted by every configuration of the tables above; M8's convention report with K1 on tutorial: EQUIVALENT across D = 64 / 0 / unbounded; M8's tiers report on tutorial: EQUIVALENT (175 constants, 700 results).}
+}
+
+\subtree{
+\title{7. Not done, shortcuts, open points}
+
+\p{(Wave 4 list; section 8.6 is the current one.)}
+
+\ul{
+\li{\code{\verb~|Cargs~} does not read comparison plans yet (M4): \code{\verb~|Cong~} is tested on fact records only.}
+\li{\code{\verb~|FIELDS(S)~} (ISA 3.2, for IPROJ) is not elaborated; IPROJ stays generic.}
+\li{\code{\verb~|B9~} inside TELE (CHECK of a lambda argument against the domain) is not implemented: TARG always infers and converts (the admissible fallback).}
+\li{\code{\verb~|TARG.EXPECT~} (the result-pattern shortcut) is emitted and implemented, but no caller passes an expected type yet (the hook passes NONE), so it has only been exercised as a no-op.}
+\li{Terms of the generated region cannot be operands (28-bit payload): a role that mentions one stays generic.}
+\li{Tier equivalence of value ids is "up to PEEK" in principle (the generic walk itself is path-dependent when a suspension's value becomes known between two reads); on the corpora above every compared id was identical. A static-beta binder aliases its argument's operand instead of copying the PEEKed value.}
+\li{TELE blocks are large (152 words on Init): the partial-application entries are a third of that.}
+\li{The IC table (\code{\verb~|m.ic~}) is used by KVAL and, since wave 6, by KCONST of a level-polymorphic constant; a site beyond pc 4095 bypasses it.}
+\li{Heat counters per block (ISA 8.3): since wave 6 \code{\verb~|Tier.heat(engine)~} (section 8.2); off unless asked for.}
+\li{\code{\verb~|dumpStats~} of the engine does not print the code store's numbers (M6's file).}
+}
+}
+
+\subtree{
+\title{8. Wave 6 (2026-11-24, 13:25Z - 16:55Z): what code objects are for}
+
+\p{Everything in this section was measured on the CE native image (\code{\verb~|-O3~}, built by \code{\verb~|work/m7/mkdist.sh~}: the pipeline jars of the integrator's \code{\verb~|work/machine-int/dist-g-native~}, the machine classes of the M7 sandbox) through the launcher, in the arena-shaped container (\code{\verb~|work/m7/m.py~}, a copy of the integrator's tool writing \code{\verb~|work/m7/measure.tsv~}; batches \code{\verb~|work/m7/batch{0,2,3}.sh~}, each under one hold of the measurement lock). The host ran 15 to 30 other agents' builds and runs the whole time (load average 150 to 230 from 14:00Z on), so CPU seconds are comparable inside one batch only; instructions per run (\code{\verb~|m.py --free~}: the same container without the lock and without the pinned cores) are the stable signal and are given beside them. One worker unless said otherwise.}
+
+\subtree{
+\title{8.1 Answer in one table}
+
+\p{Batch 3 (15:57Z-16:04Z, load average 69 to 93; \code{\verb~|work/m7/dist-f~} = the main tree of 15:11Z; CPU seconds of the two runs of each row, instructions per run in G; \code{\verb~|work/m7/table.py b3-~} prints it from \code{\verb~|work/m7/measure.tsv~}):}
+
+\table{
+\tr{\th{configuration}\th{workers}\th{reachability}\th{Cedar slice}\th{Init}\th{Std}}
+\tr{\td{v0 (no switch)}\td{1}\td{9.04, 8.53 (58.3 G)}\td{2.64, 2.61 (38.9 G)}\td{7.46, 7.49 (132.9 G)}\td{12.66, 12.30 (212.4 G)}}
+\tr{\td{\code{\verb~|code,casetrees~}, trees without inlining (\code{\verb~|-Drlvm.machine.m7.inline=off~})}\td{1}\td{3.08, 2.97 (27.6 G)}\td{2.46, 2.50 (38.1 G)}\td{6.55, 6.37 (111.0 G)}\td{10.89, 10.78 (181.7 G)}}
+\tr{\td{\strong{\code{\verb~|code,casetrees~}}}\td{1}\td{\strong{1.54, 1.58} (17.8 G)}\td{\strong{2.55, 2.46} (37.9 G)}\td{\strong{6.25, 6.27} (108.2 G)}\td{\strong{10.90, 10.65} (177.8 G)}}
+\tr{\td{\code{\verb~|code,casetrees,tele~}}\td{1}\td{1.69, 1.56 (17.8 G)}\td{2.53, 2.50 (38.2 G)}\td{6.53, 6.31 (106.8 G)}\td{11.07, 10.78 (176.2 G)}}
+\tr{\td{step 1: \code{\verb~|warm,gated,expect~}, 4 MiB}\td{1}\td{8.47, 8.14 (59.9 G)}\td{2.65, 2.68 (38.2 G)}\td{7.32, 7.21 (104.1 G)}\td{12.78, 12.20 (175.8 G)}}
+\tr{\td{step 1 + \code{\verb~|code,casetrees~}}\td{1}\td{1.51, 1.55 (17.3 G)}\td{2.54, 2.60 (37.1 G)}\td{6.21, 6.02 (87.3 G)}\td{11.27, 11.08 (150.3 G)}}
+\tr{\td{v0}\td{4}\td{8.29 CPU, 8.13 wall}\td{2.87, 1.13 wall}\td{7.48, 2.53 wall}\td{12.40, 4.19 wall}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{4}\td{1.62 CPU, \strong{1.52 wall}}\td{2.66, \strong{0.98 wall}}\td{6.31, \strong{2.28 wall}}\td{10.73, \strong{3.75 wall}}}
+\tr{\td{step 1 + \code{\verb~|code,casetrees~}}\td{4}\td{1.73 CPU, 1.70 wall}\td{2.71, 1.00 wall}\td{6.22, 2.22 wall}\td{11.19, 3.88 wall}}
+\tr{\td{for comparison (CPU s, one worker, the integrator's quiet batch G and the brief): reference engine / gruszka / nano-lean}\td{1}\td{12.19 / 3.97 / 2.08}\td{3.90 / 1.91 / 2.95}\td{13.82 / 2.63 / 4.46}\td{24.31 / 5.62 / 8.86}}
+}
+
+\p{Peak RSS with \code{\verb~|code,casetrees~} (one worker): reachability 311 MiB (v0: 1,151 to 1,348), Init 203 MiB, Std 348 MiB, Cedar slice 182 MiB. Every row: the machine accepted every unit it was given, 0 declined (4,224 / 8,064 / 57,938 / 100,096).}
+
+\p{Reading: the reduction roles (BODY, RULE, case trees, closure sub-blocks) are what code objects are for. With the trees of 8.3 the machine checks reachability in 1.54 to 1.58 s of CPU (gruszka on this host: 3.97 s, nano-lean 2.08 s; the reference engine 12.2 s) and saves 16 \% on Init and 14 \% on Std; on the Cedar slice, where 82 \% of the work is inference and conversion of open terms, they save 5 \%. TELE as built gains nothing (8.5). Nothing of it changes a verdict (8.7).}
+}
+
+\subtree{
+\title{8.2 The tier hook and heat (class \code{\verb~|Tier~}; ISA 8.3, 8.4)}
+
+\p{Published 13:39Z in the shape the Truffle agent asked for (requests.log 13:30Z):}
+
+\ul{
+\li{\code{\verb~|public abstract class Tier { public interface Factory { Tier create(Machine m); } public static Factory factory(); public abstract int run(Machine m, int blk, int pc, int rb, int d); }~}: one \code{\verb~|Tier~} per \code{\verb~|Machine~}, made by the factory found through \code{\verb~|ServiceLoader~} (\code{\verb~|META-INF/services/rlvm.machine.Tier$Factory~}), once, at the machine's first declaration, \strong{only if the machine runs with switch \code{\verb~|t2~}} and never in strict mode (\code{\verb~|Tier.beginDecl~}); \code{\verb~|Tier.set(m, tier)~} / \code{\verb~|Tier.of(m)~} for tests and wrappers.}
+\li{The stepper offers every activation to the tier: in \code{\verb~|Code.go~} after the depth test (an activation that is too deep becomes the frame \code{\verb~|ACT[.., DST_ENTRY, ..]~} first and is offered when it is resumed) and in \code{\verb~|Code.run~} (every resume: the awaited result is already in the window word the frame named, so the window is the whole state). \code{\verb~|run~} returns the result or the signal with the effects of \code{\verb~|Code.resumeAt~}, or \code{\verb~|Op.MISS~} before it changed anything.}
+\li{What a tier may call: \code{\verb~|Tier.interpret(m, code, blk, pc, rb, d)~} (the stepper; \code{\verb~|code~} = \code{\verb~|Tier.block(m, blk)~}, a copy of the block with base 0), \code{\verb~|Tier.step(..)~} (ONE instruction through the stepper's own body \code{\verb~|Code.resumeOne~}: the next pc, or \code{\verb~|Tier.DONE~} with \code{\verb~|Tier.result(m)~}), \code{\verb~|Tier.reg / setReg / operand / cap / ls / suspend / leave~}, \code{\verb~|Tier.blockCount / describe~}. For a bridge class in package \code{\verb~|rlvm.machine~} the helpers \code{\verb~|Code.val, raw, isNat, ctorIndex, icGet, susp~} are package-private and their signatures are frozen (a change is announced in requests.log first).}
+\li{Heat is independent of a tier: \code{\verb~|Tier.Heat h = Tier.heat(engine)~} switches the accounting on for the engine's sessions: entries per block and session (\code{\verb~|int[]~}, no shared word written), one entry in 64 timed with \code{\verb~|System.nanoTime~} (inclusive, and "self" = without the blocks entered inside), \code{\verb~|h.entries / nanos / selfNanos / timed / spentNanos / report(top)~}, \code{\verb~|h.listen((heat, m, blk) -> .., 4096)~} on the worker thread (ISA 8.3).}
+\li{Cost when nobody asked: one field load and test per activation (\code{\verb~|m.x7.hooked~}). Batch 2: Init, code,casetrees: 7.12 s on the integrator's image, 7.21 / 7.13 s with the hook; Std 12.38 against 12.25 / 12.47; no difference.}
+\li{Tests: \code{\verb~|M7TierHookTest~} (fast): a tier that steps every activation with \code{\verb~|Tier.step~}, one that takes every second activation and answers MISS on the others, and one that calls \code{\verb~|Tier.interpret~}, give the K0 value ids of \code{\verb~|M7Tier~} under D = 128 and D = 0; every activation is counted once; without \code{\verb~|t2~} and without \code{\verb~|Tier.heat~} a session is not hooked.}
+\li{\code{\verb~|M7HeatTest~} (a tool, slow group): the heat report of an export (\code{\verb~|work/status/machine-M7-heat-<export>-<switches>.txt~}). Init, code,casetrees, threshold 10 (before 8.3): 6,425 blocks / 869 KiB; \strong{293 blocks (34 KiB) take 92.8 \% of the 10.4 M entries}, 885 blocks 98.3 \%; 3,795 of the blocks are closure sub-blocks (440 KiB), 822 of them never entered. Reachability: 1,770 blocks / 213 KiB; 43 blocks take 95.9 \% of 4.43 M entries. The hot set is what R13 says: a few hundred blocks of the core library (\code{\verb~|List.rec~}, \code{\verb~|List.casesOn~}, \code{\verb~|*.match_1~}, the \code{\verb~|._f~} functionals, \code{\verb~|Int.add~}, \code{\verb~|Decidable.casesOn~}).}
+}
+}
+
+\subtree{
+\title{8.3 Case trees that inline the matchers they call (kept; part of \code{\verb~|casetrees~})}
+
+\p{The heat report showed the pattern behind most activations: a definition by pattern matching is \code{\verb~|f := fun .. => f.match_1 motive x (fun fields => rhs1) (fun fields => rhs2) ..~} (also the \code{\verb~|._f~} functionals of structural recursion, which are over-applied: \code{\verb~|.. f~}). K1 as delivered ran three activations per unfolding (\code{\verb~|BODY(f)~}, \code{\verb~|RULES(f.match_1)~}, the alternative's sub-block) and built the motive closure, every alternative's closure and the matcher application to throw all but one away.}
+
+\p{\code{\verb~|Elab.inline~} (with \code{\verb~|leaf~}, \code{\verb~|leafApply~}, \code{\verb~|betaLeaf~}, \code{\verb~|resolve~}): a tree node \code{\verb~|D a_1 .. a_n~} whose head is a definition with a case tree of its own (\code{\verb~|fun p_1 .. p_q => tree~}, \code{\verb~|n >= q~}) is compiled in place. \code{\verb~|D~}'s parameters are bound to the argument TERMS (\code{\verb~|DEFER~} environment entries: term + the environment region it is a term of + its owner), which are compiled only where the tree uses them: a major premise that is a parameter is \code{\verb~|ARGV~} of its argument (compiled once at the node, where it dominates every arm); a leaf \code{\verb~|p ȳ~} whose \code{\verb~|p~} is bound to a lambda of the caller is a static beta (ISA 3.4 "app, lambda head"): the right-hand side is compiled in tail position, in a copy of the caller's environment, with its binders bound to the FIELDS registers (HOLE for unread ones, B6), as a nested tree if it is one; arguments beyond \code{\verb~|q~} are applied to the leaves. An eta-reduced minor (\code{\verb~|Nat.casesOn x a b~}) is a leaf \code{\verb~|b fields~}. From \code{\verb~|D~}'s own value only tree nodes and leaves \code{\verb~|p ȳ~} (ȳ: fields, parameters, constants without level parameters) are compiled, never a term that depends on \code{\verb~|D~}'s level parameters: the block runs under the substitution of the role. A definition that is not of that form is not inlined and the caller's application is compiled as before (a failed attempt leaves nothing: \code{\verb~|inline~} resets \code{\verb~|bad~}, the caller restores the emission state).}
+
+\p{Soundness: ISA 3.6 unchanged - the result is the composition of DELTA(f), DELTA(D), the recursor rules and beta on the same arguments; K-like and structure-like recursors are excluded as before; a stuck major leaves the block with NONE and the caller takes the DELTA path. It is used where RULES is used: by WHNF (\code{\verb~|Rules.unfold~}), not by the two-sided lazy-delta step.}
+
+\table{
+\tr{\th{code,casetrees, one worker}\th{ticks}\th{records made}\th{run words}\th{activations}\th{APPLY}\th{RULES blocks}}
+\tr{\td{reachability, trees of ISA 3.6}\td{16.48 M}\td{9.08 M}\td{50.2 M}\td{4.43 M}\td{2.36 M}\td{71}}
+\tr{\td{reachability, with inlining}\td{10.14 M}\td{5.59 M}\td{27.3 M}\td{2.28 M}\td{0.71 M}\td{112}}
+\tr{\td{Init, trees of ISA 3.6}\td{66.5 M}\td{36.1 M}\td{159.1 M}\td{10.4 M}\td{4.63 M}\td{148}}
+\tr{\td{Init, with inlining}\td{63.9 M}\td{35.3 M}\td{153.7 M}\td{9.5 M}\td{4.01 M}\td{231}}
+\tr{\td{Cedar slice, trees of ISA 3.6}\td{17.53 M}\td{9.30 M}\td{-}\td{1.15 M}\td{-}\td{84}}
+\tr{\td{Cedar slice, with inlining}\td{17.35 M}\td{9.23 M}\td{96.2 M}\td{1.10 M}\td{1.65 M}\td{115}}
+}
+
+\p{CPU and instructions: 8.1 (rows "without inlining" use \code{\verb~|-Drlvm.machine.m7.inline=off~}, the A/B toggle of \code{\verb~|CodeStore.inlineTrees~}; it also switches the eta-reduced minors off).}
+
+\p{Tier equivalence (\code{\verb~|M7TierTest~}, default group): the case-tree test now runs every tree on every combination of constructors (and a stuck variable) for up to four major premises that are parameters, 120 combinations at most per constant: init-prelude 10,324 RULES cases (722 before), 966 trees fired, \strong{10,090 identical value ids, 0 different, 0 equal only up to PEEK}, 234 ill-typed applications failing in both tiers, D = 128 and D = 0. (The tree now runs before the K0 normalisation of the same case: the K0 WHNF of \code{\verb~|Nat.succ (suspension)~} forces the suspension to look for a literal, and a tree that ran after it was handed the value by MKSUSP where K0 itself had built the suspension - two cases "equal up to PEEK" that were an artefact of the order, ISA 2.1.)}
+}
+
+\subtree{
+\title{8.4 Other changes to the stepper and the store (kept)}
+
+\table{
+\tr{\th{Change}\th{Evidence}}
+\tr{\td{\code{\verb~|Code.addressOf~}: block id -> address kept per session (one plain load instead of two acquire loads per lookup; \code{\verb~|hasEntry~} did four)}\td{Init code,casetrees 118.8 -> 118.5 G instructions; batch 2 CPU flat (7.21 / 7.13 -> 7.10 / 7.19 s)}}
+\tr{\td{operands of MKAPP / APPLY / TAILAPPLY read in the loop (registers and arguments without a call per operand); KCONST of a level-polymorphic constant answered by the site's inline cache (the IC table of KVAL) instead of the LSUB cache + the CHEAD cache; \code{\verb~|Code.entryFor(m, blk, n)~} for closures (M2 adopted it 14:54Z: no walk of the lambda chain per APPLY through a block)}\td{together, against the image of one pull earlier (M6's pooling is in the difference): Init 118.5 -> 117.3 G, reachability 29.2 -> 28.5 G, Cedar slice 46.2 -> 45.9 G; tier test identical}}
+\tr{\td{rent-to-own thresholds per role: reduction roles at the FIRST request (\code{\verb~|CodeStore.REDUCE_AT = 1~}), TELE at the tenth; \code{\verb~|-Drlvm.machine.elabAt=N~} sets both}\td{instructions per run at threshold 10 / 1 (image of 15:11Z): reachability 17.8 / 17.8 G, Cedar slice 37.9 / 37.8, Init 108.2 / 108.1, Std 177.8 / 177.7; CPU s in batch 3: reachability 1.54, 1.58 / 1.68, 1.57; Cedar slice 2.55, 2.46 / 2.43, 2.48; Init 6.25, 6.27 / 6.25, 6.47; Std 10.90, 10.65 / 10.72, 10.60 (inside the noise of that host; section 8.8); code on Init 0.92 -> 2.2 MiB; M3: perf/unfold-before-literal 7.9 -> 4.1 s; gate at threshold 1 clean (8.7)}}
+\tr{\td{\code{\verb~|Code.rules~} / \code{\verb~|rulesCasesOn~}: a head with the wrong number of levels answers NONE (DELTA says "does not unfold") instead of running a block under ls = -1}\td{fail-open; no input reaches it after INFER}}
+\tr{\td{\code{\verb~|Code.targConv~}: \code{\verb~|m.enterER()~} (M6-F26)}\td{request of M6, 14:46Z}}
+}
+}
+
+\subtree{
+\title{8.5 Experiments}
+
+\table{
+\tr{\th{Experiment}\th{Result}\th{Verdict}}
+\tr{\td{\code{\verb~|tele~} on the native image (batch 0, quiet host, single runs; batch 2 and 3, two runs)}\td{on top of \code{\verb~|code,casetrees~}, CPU s without -> with: batch 0: reachability 2.64 -> 2.91, Cedar slice 2.96 -> 3.13, Init 6.69 -> 6.72, Std 11.26 -> 11.27 (on top of step 1 + probes + code,casetrees: 2.52 -> 2.70, 2.68 -> 2.82, 6.36 -> 6.22, 10.76 -> 10.34); batch 2: 3.05, 3.02 -> 3.03, 3.06; 3.28, 3.28 -> 3.27, 3.43; 7.10, 7.19 -> 7.00, 7.18; 12.41, 12.41 -> 12.47, 12.64; batch 3 (with 8.3): 1.54, 1.58 -> 1.69, 1.56; 2.55, 2.46 -> 2.53, 2.50; 6.25, 6.27 -> 6.53, 6.31; 10.90, 10.65 -> 11.07, 10.78}\td{rejected as a default: no corpus gains, the Cedar slice loses. With TELE the machine makes 10 \% fewer records on Init (36.1 -> 32.5 M; EVAL calls 4.7 -> 2.4 M) but enters 5.4 M more activations, each a window + 4 to 6 dispatched instructions per argument where M5's telescope-mode TWALK is straight Java; in v0 sessions its KVAL inline caches are cold in every declaration (400 k misses on Init). The role stays behind \code{\verb~|tele~}, elaborated at the tenth request. Not tried: TELE for VTYPE only (\code{\verb~|teleValues~}, no INFER / CONV per argument)}}
+\tr{\td{\code{\verb~|m7a~}: the CASESON tree as the unfolding step of lazy delta (\code{\verb~|Code.rulesCasesOn~}; state-exact: for \code{\verb~|I.casesOn~} itself no state of the official loop lies between the DELTA and the iota of one \code{\verb~|lazy_delta_reduction_step~})}\td{with fakes of \code{\verb~|Rules.unfoldLazy~} / \code{\verb~|Conv.unfoldT,S~} (batch 2): Init 7.10, 7.19 -> 6.77, 6.88 s (-4.5 \%; 118.5 -> 115.4 G), Std 12.41, 12.41 -> 12.20, 12.29 (-1.3 \%; 194.3 -> 190.6 G), Cedar slice 3.28, 3.28 -> 3.24, 3.29, reachability 3.05, 3.02 -> 3.02, 3.06; gate clean on tutorial + bugs + four corpora}\td{kept; behind \code{\verb~|casetrees,m7a~}; active since M3's \code{\verb~|Rules.unfoldLazy~} (15:05Z) and M4's \code{\verb~|Conv.unfoldT / unfoldS~} (15:24Z). On the main tree of 15:39Z (real call sites), instructions per run \code{\verb~|code,casetrees~} -> \code{\verb~|+m7a~}: Init 109.8 -> 107.1 G, Std 187.3 -> 184.0 G, Cedar slice 40.0 -> 39.8 G, reachability 17.9 -> 17.8 G; ticks on Init 63.5 M -> 59.7 M; gate 8.7}}
+\tr{\td{elaboration threshold 1 / 3 / 10 for the reduction roles}\td{instructions equal on Init, the Cedar slice and reachability (118.4 / 118.4 / 118.5 G; 46.2; 29.2); code on Init 2.2 / - / 0.9 MiB; M3: perf/unfold-before-literal 7.9 -> 4.1 s at 1}\td{1 (8.4)}}
+\tr{\td{negative cache / marker for roles that stay generic; a denser opcode numbering; an operand mode "register known not to be a suspension"}\td{not built: each is below 0.5 \% of Init by the profile (\code{\verb~|CodeStore.blockOf~} 0.9 \%, \code{\verb~|Code.resumeAt~} 1.0 \%, \code{\verb~|Code.val~} 1.7 \% of all cycles before 8.4)}\td{-}}
+}
+
+\p{Profile of the stepper before 8.3 / 8.4 (perf, Init, code,casetrees, \code{\verb~|work/m7/perf/init-k*.txt~}): class \code{\verb~|Code~} 10.9 \% of all cycles (\code{\verb~|kConst~} 1.8 \%, \code{\verb~|val~} 1.7 \%, \code{\verb~|resumeAt~} 1.0 \%, \code{\verb~|mkClosure~} 1.0 \%, \code{\verb~|arityOf~} 0.9 \%), \code{\verb~|Eval~} 15.1 \%, \code{\verb~|Values~} 14.2 \%, \code{\verb~|Runs~} 12.4 \%, \code{\verb~|Infer~} 11.5 \%; reachability: \code{\verb~|Values~} 32.9 \% (\code{\verb~|neu~} 17.4 \%), \code{\verb~|Runs~} 16.6 \%, kernel 11.7 \%, \code{\verb~|Code~} 11.5 \%.}
+}
+
+\subtree{
+\title{8.6 What was not done, and why}
+
+\ul{
+\li{\strong{CONG plans read by CARGS}: not wired, and it should not be as specified: the soundness review (S-F2, 13:48Z) showed that skipping a proof or unread position (classes PROOF / UNREAD) accepts pairs the official kernel rejects, and M4 took B3 / B4 out of every switch set (14:33Z). What remains of a plan is the probe order, and the probes that would use it are order-only now. \code{\verb~|Cong~} stays tested on fact records and unused.}
+\li{\strong{FIELDS(S)} (IPROJ): not elaborated. It is an inference role, not a reduction role; IPROJ is not in the profile of any of the four corpora above 0.5 \%.}
+\li{\strong{B9 inside TELE, TARG.EXPECT with a caller}: not done; TELE is off (8.5).}
+\li{\strong{Sub-block rent-to-own}: sub-blocks are still made with their parent (440 KiB of 869 KiB on Init at threshold 10, a fifth never entered). With the reduction roles at threshold 1 the whole code of Init is 2.2 MiB per engine; no need was measured.}
+\li{\strong{K2 (derived rules for structural recursion)}: M3 has it (\code{\verb~|k2~}). What 8.3 leaves on reachability is exactly that: \code{\verb~|RULE(List.rec)~} and the minor premise of \code{\verb~|List.brecOn.go~} (0.47 M entries each).}
+\li{\code{\verb~|M7HookedTest.all230~} (slow group): the integrator saw the K1 lane end \code{\verb~|perf/loop-unfolded-once~} as CRASH where K0 declines it. Not reproduced: alone, in-process, with \code{\verb~|tele,code,casetrees~} at threshold 1 the machine declines it cleanly (\code{\verb~|M7LoopProbeTest~}: BUDGET_MEMORY, E_MEM, 34.5 M records); the crash needs the other 229 files' garbage in the 6 GB test JVM.}
+}
+}
+
+\subtree{
+\title{8.7 Gates on the published state}
+
+\p{All through the launcher (\code{\verb~|work/m7/gate.sh~}: \code{\verb~|testkit diff --engine machine~} against the reference engine, 4 lanes; reports \code{\verb~|work/m7/gate-*.txt~}), plus the module's tests:}
+
+\table{
+\tr{\th{State}\th{Switches}\th{tutorial + bugs}\th{all 230}\th{Cedar slice}\th{reachability}\th{Init}\th{Std}}
+\tr{\td{main jar 608b84b2b142 (before this wave)}\td{\code{\verb~|code,casetrees~}}\td{1,342 / 1,342}\td{15,844 / 15,845, 1 decline (loop-unfolded-once, E_MEM as v0)}\td{8,064}\td{4,224}\td{57,938}\td{100,096}}
+\tr{\td{the same}\td{\code{\verb~|warm,gated,expect,probes,code,casetrees~}, 4 MiB}\td{1,342}\td{-}\td{8,064}\td{4,224}\td{57,938}\td{100,096}}
+\tr{\td{\strong{published 15:10:57Z} (inlined trees; \code{\verb~|work/m7/dist-f~})}\td{\code{\verb~|code,casetrees~}}\td{1,342 / 1,342}\td{\strong{15,844 / 15,845}, 1 decline (the same)}\td{8,064}\td{4,224}\td{57,938}\td{100,096}}
+\tr{\td{the same}\td{\code{\verb~|code,casetrees~} at threshold 1}\td{1,342}\td{-}\td{8,064}\td{4,224}\td{57,938}\td{100,096}}
+\tr{\td{sandbox of 14:50Z (inlined trees, \code{\verb~|dist-e~})}\td{\code{\verb~|warm,gated,expect,code,casetrees~}, 4 MiB}\td{-}\td{-}\td{8,064}\td{4,224}\td{57,938}\td{100,096}}
+\tr{\td{\strong{main tree of 15:39Z} (thresholds 1 / 10; M4's \code{\verb~|Conv~} calls \code{\verb~|Rules.unfoldLazy~}; M6's rule "a declaration that enters eager reduction is declined" is armed; \code{\verb~|work/m7/dist-g~})}\td{\code{\verb~|code,casetrees,m7a~}}\td{1,341 of 1,342}\td{15,839 of 15,845}\td{8,053 of 8,064}\td{4,216 of 4,224}\td{57,774 of 57,938}\td{99,893 of 100,096}}
+\tr{\td{the same}\td{\code{\verb~|warm,gated,expect,code,casetrees,m7a~}, 4 MiB}\td{-}\td{-}\td{8,053}\td{4,216}\td{57,774}\td{99,893}}
+}
+
+\p{Every cell: \strong{0 differences (SOUNDNESS 0, COMPLETENESS 0)} on the units compared. The units not compared in the last two rows are declines of the machine with \code{\verb~|UNSUPPORTED_INPUT ... eager reduction~} (M6's rule of 15:07Z, not this package: 1 / 5 / 11 / 8 / 164 / 203 units), which the driver hands to the reference engine, and loop-unfolded-once. "all 230" = 226 files with \code{\verb~|-Xmx4g~} and the four memory-hungry perf files (app-lam, gf3-matrix-product, magma-list-deep-n36, magma-list-pair-n21) with the launcher's heap, one at a time.}
+
+\p{Module tests on the published state: fast group green at every publication (the publish script); default group \code{\verb~|M7*Test~} green (\code{\verb~|M7TierTest.initPrelude~}: 25,824 cases, 25,590 identical ids, 0 different, 0 up to PEEK, 234 ill-typed applications failing in both tiers, D = 128 and D = 0; \code{\verb~|M7ListingTest~}: the listings of ISA 3.7 unchanged; \code{\verb~|M7CorpusTest~}: pubcheck on every block, two workers word-identical); slow \code{\verb~|M7CorpusTest~} on Init (126,664 blocks when every role is elaborated, RULES 1,400 -> 2,564) and Std (218,654; RULES 2,209 -> 4,019).}
+
+\p{Switches I consider ready to be on by default, with the evidence above: \strong{\code{\verb~|code~}, \code{\verb~|casetrees~}} (together; with the reduction threshold 1 and tree inlining, which are not switches) and \strong{\code{\verb~|m7a~}} on top of them (M6 may give it its final name; it is meaningless without \code{\verb~|casetrees~}). Not ready: \code{\verb~|tele~} (no gain; the Cedar slice loses), \code{\verb~|t2~} (the tier is another module). M4's \code{\verb~|lazyeval~} sends the one-sided lazy-delta steps through WHNF and so through the trees of 8.3; it is M4's switch and M4's measurement.}
+}
+
+\subtree{
+\title{8.8 Late rows: the main tree of 15:39Z (\code{\verb~|work/m7/dist-g~})}
+
+\p{Batch 4 (16:29Z-16:37Z, load average 42 to 70; CPU s of two runs, one worker; the reduction threshold is 1 here, \code{\verb~|Conv~} calls \code{\verb~|Rules.unfoldLazy~}, and M6's rule is armed: the machine declines the 8 / 11 / 164 / 203 declarations of reachability / the Cedar slice / Init / Std that enter eager reduction, and the reference engine checks them inside the same process, so the rows are not comparable with batch 3):}
+
+\table{
+\tr{\th{configuration}\th{workers}\th{reachability}\th{Cedar slice}\th{Init}\th{Std}}
+\tr{\td{v0}\td{1}\td{7.99, 8.24 (57.1 G)}\td{2.72, 2.80 (40.9 G)}\td{7.42, 7.36 (132.7 G)}\td{13.03, 12.86 (219.2 G)}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{1}\td{1.53, 1.50 (17.9 G)}\td{2.62, 2.59 (40.0 G)}\td{6.29, 6.36 (109.8 G)}\td{11.40, 11.42 (187.3 G)}}
+\tr{\td{\code{\verb~|code,casetrees,m7a~}}\td{1}\td{1.58, 1.51 (17.8 G)}\td{2.72, 2.53 (39.8 G)}\td{6.32, 6.12 (107.1 G)}\td{11.30, 11.28 (184.0 G)}}
+\tr{\td{step 1 (\code{\verb~|warm,gated,expect~}, 4 MiB)}\td{1}\td{7.63, 7.57 (58.1 G)}\td{2.80, 2.71 (40.0 G)}\td{7.32, 7.03 (103.9 G)}\td{12.79, 12.55 (181.5 G)}}
+\tr{\td{step 1 + \code{\verb~|code,casetrees,m7a~}}\td{1}\td{1.53, 1.55 (17.3 G)}\td{2.67, 2.64 (39.0 G)}\td{6.24, 5.93 (87.1 G)}\td{11.39, 11.35 (156.3 G)}}
+\tr{\td{v0}\td{4}\td{8.41 CPU, 7.93 wall}\td{2.93, 1.02 wall}\td{7.82, 4.38 wall}\td{14.65, 13.32 wall}}
+\tr{\td{\code{\verb~|code,casetrees,m7a~}}\td{4}\td{1.60 CPU, 1.12 wall}\td{2.82, 1.00 wall}\td{6.37, 2.89 wall}\td{12.49, 9.79 wall}}
+}
+
+\ul{
+\li{\code{\verb~|m7a~} with the real call sites: Init 6.33 -> 6.22 s (-1.7 \%), Std 11.41 -> 11.29 (-1.1 \%), Cedar slice 2.61 -> 2.63, reachability 1.52 -> 1.55 (both inside the noise; instructions lower on all four: -2.5 \%, -1.8 \%, -0.5 \%, -0.6 \%). Smaller than in batch 2 (-4.5 \% on Init) because the inlined trees of 8.3 took part of it.}
+\li{Not this package, but visible here and reported to M6: with four workers the eager-reduction declines cost wall clock (Std: 13.32 s for v0 and 9.79 s with the reduction roles, against 4.19 s and 3.75 s on the tree of 15:11Z; Init 4.38 / 2.89 s against 2.53 / 2.28 s) - the declined declarations are re-checked by the reference engine.}
+\li{The soundness review's hostile exports (351 files of \code{\verb~|work/soundness/exports~}, \code{\verb~|judge.py --dist work/m7/dist-g --sets "code,casetrees,m7a;code,casetrees,m7a!d0"~}, \code{\verb~|work/m7/judge-g.out~}): no WRONG-ACCEPT, no WRONG-REJECT, no M-INCOMPLETE; the 13 flagged machine declines are the eager-reduction exports (M6's rule).}
+\li{Batch 5 (16:49Z-16:52Z, load average 41 to 65; \code{\verb~|code,casetrees~}, three runs each): reduction threshold 1 (the default) against 10 (\code{\verb~|-Drlvm.machine.elabAt=10~}): reachability 1.51, 1.54, 1.63 / 1.59, 1.56, 1.55 s; Cedar slice 2.62, 2.67, 2.68 / 2.63, 2.69, 2.67; Init 6.39, 6.39, 6.40 / 6.36, 6.37, 6.38; Std 11.64, 11.70, 11.62 / 11.63, 11.59, 11.76: no difference on the four corpora (means within 0.4 \%); the gain of threshold 1 is on evaluation tests whose hot closures sit in bodies that are unfolded a few times (M3: perf/unfold-before-literal 7.9 -> 4.1 s).}
+}
+}
+}
+
+\subtree{
+\title{S3-F7: a capture list with an immediate operand (INT7, 2026-11-25)}
+
+\p{\code{\verb~|Code.raw~} (the operand of a capture list, called from \code{\verb~|Code.mkClosure~}) had no case for \code{\verb~|Op.MODE_I~}. \code{\verb~|Elab.atom~} emits an immediate operand for a numeral below 2^28, and \code{\verb~|Elab.let~} / an inlined beta step bind a variable to the ARGV of its value, so a closure in a compiled body that captures a variable bound to a small numeral (\code{\verb~|let x := 5; m _ n (fun _ => x) ..~}) reached the default branch: \code{\verb~|E_INTERNAL~}, the unit was declined and the reference engine decided it (finding S3-F7 of reviewer S3; no wrong verdict). The case now returns the immediate value \code{\verb~|n | Layout.IMM~} - what \code{\verb~|Code.val~} returns for the operand and what the generic walk pushes for the binding (\code{\verb~|Eval.letFrom~} -> \code{\verb~|argvFast~} -> \code{\verb~|Lits.klit~}), so the frame is the run \code{\verb~|PRUNE~} builds (decision 6). Regression test \code{\verb~|M7CaptureLiteralTest~} (S3's eight minimal rows and the four random programs that found it, under \code{\verb~|code~}, \code{\verb~|code,casetrees~}, \code{\verb~|default~}, \code{\verb~|default,eager~}: no decline).}
+}

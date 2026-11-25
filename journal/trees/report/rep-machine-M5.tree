@@ -1,0 +1,356 @@
+\title{NOTES-M5 - inference, checking, the DECL driver, facts (owner: M5)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{soundness}
+\meta{origin}{rlvm-machine/NOTES-M5.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Deviations from \src{docs/design/ISA.md} (revision 2) and things a caller should know, each with its reason.}
+
+\subtree{
+\title{Inference and checking (v0)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Where}\th{Deviation / decision}\th{Reason}}
+\tr{\td{I1}\td{\code{\verb~|Infer~} layout}\td{INFER is one judgment (one tick, one call event \code{\verb~|Op.INFER~}); the node kinds run as internal chains with frames of their own ops: app = \code{\verb~|TWALK[1..7]~}, pi = \code{\verb~|INFER2[1..5]~}, lam (CHECKED) = \code{\verb~|INFER2[6..9]~}, let = \code{\verb~|INFER2[10..15]~}, proj = \code{\verb~|IPROJ[1..14]~}; \code{\verb~|INFER[1](s, t, mode)~} lies below the chain's frames and stores TYPE / TSTAMP when the chain returns. TWALK and IPROJ charge no tick and raise no event of their own}\td{ISA 1.3 lists \code{\verb~|INFER [t, env, ls, mode, x1, x2]~} with at most 16 states; the telescopes and the projection chain need about 40 resume points. One judgment may own several frames under convention H (frames are private to their judgment, NOTES-M6 S11)}}
+\tr{\td{I2}\td{IPROJ registers}\td{the projection chain keeps its ten registers (type, structure row, index, struct value, struct term, env, ls, is-prop, nparams) in scratch \code{\verb~|X[xb ..]~}; its frames carry \code{\verb~|xb~} and at most two more words}\td{H7 allows scratch owned by a judgment with its base in the payload; the alternative is 12-word frames in every one of 12 states}}
+\tr{\td{I3}\td{IPROJ, generic tier}\td{no \code{\verb~|FIELDS(S)~} block (step 3): the constructor's type is walked as a value, as the official \code{\verb~|infer_proj~}: \code{\verb~|VTYPE(CONST ctor at the levels of the type)~}, INST with the parameters, then per field. "Field j is read later" is the node mask of the Pi's body (superset); \strong{where a set bit can reject} (the type is a proposition) it is first confirmed by \code{\verb~|TermOps.hasLooseBVar(body, 0)~} (ISA 4.5.5 last comment). Where it cannot reject, a spuriously set bit only instantiates with \code{\verb~|MKPROJ~} a variable nothing reads}\td{exactness where it matters, no walk elsewhere}}
+\tr{\td{I4}\td{index beyond \code{\verb~|nfields~}}\td{no explicit test: after \code{\verb~|nfields~} fields the rest of the constructor type is the inductive type, not a Pi, which is \code{\verb~|fail(E_PROJ)~} in the official order (R02 6.8). The error order of the official kernel is kept (\code{\verb~|is_prop(type)~} may fail first with E_TYPE_EXPECTED; both are REJECT)}\td{RECONCILIATION "Projections": \code{\verb~|i >= nfields~} fails with E_PROJ - it does}}
+\tr{\td{I5}\td{lam, ONLY mode}\td{answered inline before the tabling probe: \code{\verb~|PII(t, PRUNE(env, mask t), ls')~}, no SUSP record, no tick}\td{the PII is a function of the same key; a SUSP record would only repeat it}}
+\tr{\td{I6}\td{lam, CHECKED}\td{the PII is made before the telescope is checked and returned after it}\td{saves two payload words (frame, ls') in four frames; a record made early is just a value}}
+\tr{\td{I7}\td{\code{\verb~|VTYPE(SORT l)~}}\td{memoised in word m2 of the SORT record (ISA 2.6 gives SORT no memo word)}\td{m2 is unused on SORT; saves two probes per query}}
+\tr{\td{I8}\td{\code{\verb~|VTYPE(SUSP)~} without a stored TYPE}\td{\code{\verb~|VTYPE(FORCE(v))~}, tail call; nothing is written into the tabling record}\td{the value-route type and the term-route type are convertible but need not be the same record; only INFER writes TYPE}}
+\tr{\td{I9}\td{let-bound variable}\td{\code{\verb~|INFER(variable)~} = \code{\verb~|VTYPE(LET suspension)~} = the infer-only type of the value (the LET suspension is another record than the tabling record, NOTES-M1), not the declared type of the official let-fvar}\td{ISA 4.5.1 "variable i: VTYPE(GET(env, i))"; in CHECKED mode the two were compared with CONV when the let was checked}}
+\tr{\td{I10}\td{literals}\td{a Nat / String literal whose type constant is not declared or not visible is \code{\verb~|fail(E_UNKNOWN_CONST)~}; guard not VALID: \code{\verb~|fault(E_PRELUDE)~}. The numeral bound of a pooled literal is asked of \code{\verb~|ctx.nats.checkLiteralSize~} (a \code{\verb~|KernelException~} on that error path becomes \code{\verb~|fail(E_NATSIZE)~})}\td{the reference engine does the same (\code{\verb~|inferNatLit~}); the official kernel builds \code{\verb~|Const Nat []~} unchecked. The structural checks make the first case unreachable}}
+\tr{\td{I11}\td{unbound nodes}\td{CONST with \code{\verb~|a <= 0~}, PROJ with \code{\verb~|c <= 0~}: \code{\verb~|fault(E_INTERNAL)~} (DECLINE), never a REJECT}\td{ISA 4.2 KCONST, section 9}}
+\tr{\td{I12}\td{loose bound variables}\td{not tested per node: \code{\verb~|Decl.check~} rejects a root that is not closed with \code{\verb~|E_LOOSE_BVAR~} (O(1) from the header); a direct judgment on an open term faults in \code{\verb~|GET~} (E_INTERNAL)}\td{ISA 1.4: the machine relies on the structural checks}}
+\tr{\td{I13}\td{ER}\td{TWALK sets \code{\verb~|m.ER = 1~} for the comparison of an \code{\verb~|eagerReduce _ _~} argument and keeps the old value in its own frame \code{\verb~|TWALK[5]~}; no separate \code{\verb~|ERF~} frame}\td{under convention H the frame of the caller already exists whenever the comparison is suspended}}
+\tr{\td{I14}\td{ENPI / ENSORT / ISPROP on a SUSP}\td{no FORCE of their own: a SUSP is not a SORT / PI, so the WHNF they call forces it; ISPROP sets PROPT on the record it was given}\td{types may be suspensions (\code{\verb~|EVAL~} of a variable bound to a delayed argument)}}
+\tr{\td{I16}\td{COD of a PII}\td{when a \strong{single} lambda was checked and the type of its body under the canonical variable is a closed value (flag OPEN clear, not a SUSP), INFER writes that type into \code{\verb~|M_COD~} of the lambda's PII: the codomain at every argument. M2's \code{\verb~|INST~} returns it inline}\td{RECONCILIATION 3 "the body type of a closed lambda-type closure is memoised" (gruszka \code{\verb~|lam_dm~}). It is the official \code{\verb~|instantiate(binding_body(f_type), arg)~} for a body type that does not mention the bound variable, and it keeps \code{\verb~|(fun x => b) a~} ladders linear (\code{\verb~|perf/beta-ladder~}: E_MEM after 367 k ticks before, 18 k ticks after). \code{\verb~|M_COD~} is M2's memo word: its \code{\verb~|memocheck~} audit (\code{\verb~|Eval.checkCod~}) must not recompute such an entry with HOLE (requested). Telescopes of two or more lambdas are not covered (the inner PII of an application has another frame)}}
+\tr{\td{I15}\td{TWALK, telescope mode}\td{ISA 4.5.4 "while the codomain is a syntactic Pi keep (body, PUSH(frame, g_i)) instead of a PI record" is implemented as a mode of TWALK: when the prefix's type is a PI record whose binder is read and whose codomain is again a syntactic Pi, the following arguments instantiate Pi NODES; the telescope's environment \code{\verb~|ENTER(F0) ++ g[K0 .. i]~} is \strong{not kept on \code{\verb~|es~}}: the values \code{\verb~|g_j~} overwrite the argument-term slots in scratch, and the environment is built on top of \code{\verb~|es~} only for one EVAL (a domain in CHECKED mode, the codomain where the syntactic telescope ends) and cut back after it; closed terms are evaluated under the empty environment and a variable domain is read from its slot. A binder that is not read stays with \code{\verb~|INST~} (answered from the COD memo). TWALK's registers (n, site, mode, node, frame, ls, first index) are in scratch \code{\verb~|X[xb ..]~}, its frames carry \code{\verb~|xb~} and at most four words. \code{\verb~|VTYPE~} of a NEU does the same per group of syntactic Pis (\code{\verb~|neuGroup~}: one environment, one EVAL)}\td{keeping the telescope's environment on \code{\verb~|es~} would bury the environment of the argument terms, and every binder opened while an argument is inferred would copy it (the quadratic trap of ISA 2.4). Measured on Init (in-process, one thread): ticks 93.6 M -> 78.2 M, call events 79.2 M -> 63.8 M, INST 13.5 M -> 5.1 M, DOM 6.9 M -> 2.9 M; thread CPU of the check phase: 13.3 - 17.0 s before; 15.1 - 15.3 s after in the first run (host load 160-180, inside the noise) and 10.95 - 11.91 s in a later run of the same code with VTYPE grouping (load 125-140). One run each: the tick and call counts are exact, the CPU gain is roughly a fifth and not better established than that. Results are the same values: the gates and the convention-equivalence report were re-run}}
+\tr{\td{I17}\td{binder domains are forced}\td{\code{\verb~|Infer.evalDom~}: the domain term of a Pi / lambda binder is evaluated and, if the value is still a suspension, forced before \code{\verb~|OPEN~} (pi and lambda telescopes, B9, SIGD); frame \code{\verb~|VTYPE2[7]()~} if the EVAL is suspended}\td{advice of M2: \code{\verb~|EVAL~} may return a delayed argument, while \code{\verb~|DOM~} (CBIND, ETA) is forced; without the FORCE the same binder type gives two different variables and the identity and PAIR hits between INFER and CONV are lost (never a wrong answer). ISA 4.5.1 writes \code{\verb~|x = OPEN(call EVAL(A, env))~}}}
+\tr{\td{I18}\td{TELE hooks}\td{\code{\verb~|inferApp~} and VTYPE of a NEU call M7's \code{\verb~|Code.blockFor(row, ROLE_TELE)~} / \code{\verb~|Code.tele~} / \code{\verb~|Code.teleValues~} behind \code{\verb~|SW_TELE~} (off), then continue the generic walk in value mode for the arguments beyond the block's arity}\td{staging step 3; the call sites are in M5's file, the blocks and their stepper are M7's (tier equivalence is M7's / M8's test)}}
+\tr{\td{I19}\td{memocheck hooks}\td{tabled INFER hit: TYPE and TSTAMP are zeroed, INFER is re-run under \code{\verb~|Debug.memoEnter~} / \code{\verb~|memoExit~}, the entry is put back; VTYPE: \code{\verb~|Debug.memoCheck(Op.VTYPE)~} for M_TYPE of CONST / NEU / PROJ / LAM, the generic form for M_SLVL; ISPROP: \code{\verb~|Debug.memoCheck(Op.ISPROP_F)~}. \code{\verb~|M_COD~} of I16 is not written while \code{\verb~|memocheck~} is on (temporary, until \code{\verb~|Eval.checkCod~} re-computes at the caller's argument instead of HOLE)}\td{ISA 5.5; request of M6}}
+}
+}
+
+\subtree{
+\title{B9, expected-type checking (staging step 1, switch \code{\verb~|expect~}; off by default)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{E1}\td{\code{\verb~|CHECK~} of a lam node (frames \code{\verb~|CHECK2[1..8]~}): tabling probe (a stored checked type answers by \code{\verb~|CONV(TYPE(s), V)~}), \code{\verb~|W = WHNF(V)~}; not a PI / PII: the generic rule; else \code{\verb~|ENSORT(INFER(A, CHECKED))~}, \code{\verb~|D = EVAL(A)~}, \code{\verb~|CONV(D, DOM(W))~} or \code{\verb~|fail(E_TYPE_MISMATCH)~}, \code{\verb~|x = OPEN(D)~}, \code{\verb~|CHECK(body, env + x, INST(W, x))~}, CLOSE; then \code{\verb~|TYPE(s) = PII(t, frame of s, ls')~} with the check stamp. One lambda per CHECK (the recursion on the body takes the next)}\td{ISA 4.5.2 as written}}
+\tr{\td{E2}\td{\code{\verb~|CHECK~} of a let node: the bindings as INFER.let in CHECKED mode (the same frames \code{\verb~|INFER2[10..14]~}, whose mode word carries the expected type), then \code{\verb~|CHECK(body, env', V)~}; nothing is stored for the let node}\td{ISA 4.5.2 "let"; the type of the body is not computed}}
+\tr{\td{E3}\td{TWALK: a lambda argument is checked against the binder's domain (\code{\verb~|TWALK[8..9]~}); a mismatch there is \code{\verb~|E_TYPE_MISMATCH~}, where the generic rule raises \code{\verb~|E_APP_MISMATCH~} (both REJECT)}\td{ISA 4.5.4 "t_i is a lam node: call CHECK(t_i, env, D)"}}
+\tr{\td{E4}\td{A closed expected body type becomes \code{\verb~|M_COD~} of the lambda's PII, as I16}\td{the lambda has the type \code{\verb~|(x : D) -> B~} with B closed}}
+\tr{\td{E5}\td{Not done: \code{\verb~|app with constant head: CALL TELE(c) on the site with expected = V~}}\td{step 3 (M7's TELE blocks)}}
+\tr{\td{E6}\td{Measured (\code{\verb~|M5Bench~}: in-process, one thread, thread CPU of the check phase, second of two rounds, ONE run per configuration, host load average 125-180; differences below about 10\% are not established)}\td{Init: v0 10.95 s, \code{\verb~|gated~} 9.58 s, \code{\verb~|gated,expect~} 8.39 s (CBIND 0.78 M -> 0.48 M, CONV 2.49 M -> 2.19 M). cedar-hot-ax (8,064 engine checks): v0 4.98 s, \code{\verb~|expect~} 3.90 s, \code{\verb~|gated~} 3.28 s, \code{\verb~|gated,expect~} 3.17 s; \code{\verb~|expect~} cuts CBIND 970 k -> 697 k, CONV 1.38 M -> 1.11 M, INST 1.98 M -> 1.55 M, DOM 2.57 M -> 1.99 M in both regimes. So the call counts fall by 20-28\%; the CPU gain is clear without gated tabling and NOT established on top of it on the Cedar slice (3\%, inside the noise). Frames written rise (cedar 3,848 -> 60,839: one CHECK level per lambda instead of one loop per telescope). Every configuration accepts all units, 0 declined}}
+}
+}
+
+\subtree{
+\title{Tabling and check stamps (ISA 5.1, 5.3)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{T1}\td{The regime of 5.3 is decided \strong{per declaration by \code{\verb~|Decl.check~} itself}: \code{\verb~|trusted~} iff both roots pass \code{\verb~|depMax < rank~}, no \code{\verb~|F_UNRESOLVED~}, \code{\verb~|lpSet~} within the declared parameters (O(1) per root). Trusted: CHKCONST / CHKLVL are no-ops. Otherwise (direct judgment tests, \code{\verb~|MachineOps~}, a root that only the exact walk of admission could clear) they run per node}\td{fail closed without relying on the caller; the test costs two header reads per declaration}}
+\tr{\td{T2}\td{Stamp of a CHECKED result: PERM iff the term is closed and has no level parameter, else \code{\verb~|gen~} - \strong{also in the trusted regime}. \code{\verb~|gen~} stays while consecutive declarations are trusted (ISA: "gen never advances") or while the level parameters of the new declaration contain those of the previous one; otherwise \code{\verb~|gen++~}}\td{one rule for both regimes; a session that mixes them stays sound (a PERM stamp never depends on trust)}}
+\tr{\td{T3}\td{An ONLY completion never overwrites a stored TYPE}\td{it could only replace a check stamp by 0}}
+\tr{\td{T4}\td{\code{\verb~|tabled(t)~} under \code{\verb~|SW_GATED_TABLING~}: sharing flags of the node, or an export id below \code{\verb~|DeclTable.unitFirstTerm(unit)~}, or a generated id. v0: every non-leaf node on which INFER is called. Spine prefixes are not tabled separately (the official check-mode cache has an entry per prefix); a shared prefix is re-walked, its arguments are tabled}\td{the judgment is INFER of the spine; correct, and at most quadratic on prefix chains}}
+\tr{\td{T5}\td{CHECK (v0) has no table of its own: it is the CHECKED INFER (tabled) followed by CONV; the expected type is never stored}\td{ISA 4.5.2 "generic"; B9 is step 1}}
+}
+}
+
+\subtree{
+\title{DECL (ISA 4.5.6)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{D1}\td{theorem: "the type is a proposition" is \code{\verb~|isAlwaysZero~} of the level phase 1 returned (\code{\verb~|ENSORT(INFER(type, CHECKED))~}), tested before the value is looked at; no \code{\verb~|ISPROP(V)~}}\td{the official \code{\verb~|is_prop(type)~} re-infers the same sort in infer-only mode; same level, one inference less. Order as \code{\verb~|add_theorem~}}}
+\tr{\td{D2}\td{\code{\verb~|Decl.check~} returns \code{\verb~|E_INTERNAL~} (DECLINE) instead of ACCEPT if a phase completed but left a machine stack non-empty (\code{\verb~|!m.idle()~})}\td{I-STACKS / I-SCOPE are assumptions of every later judgment; an accept on a machine in an unknown state is not fail-closed}}
+\tr{\td{D3}\td{a row without a value where one is needed, or without a type: \code{\verb~|E_INTERNAL~}}\td{the loader never writes such a row}}
+}
+}
+
+\subtree{
+\title{Facts (staging step 2, switch \code{\verb~|facts~}; off by default)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{F1}\td{\code{\verb~|Facts.facts(m, row)~} is the pure query (published index or 0); the record is made by the \strong{judgment} \code{\verb~|Facts.sigd(m, row, d)~} (frames \code{\verb~|SIGD[1..4]~} and one TRY of \code{\verb~|Op.B_SIGD~} ticks)}\td{ISA 13.4 "facts .. triggers SIGD through Frames": under convention H a derivation is a judgment call with its own signal test; an accessor cannot start one}}
+\tr{\td{F2}\td{Every level ref of a record is \code{\verb~|POOL + offset~} (a structural encoding by \code{\verb~|Levels.encodeLevel~}); \code{\verb~|BASE + id~} is never written}\td{the record is then word-for-word the same whichever worker derives it and whatever the level snapshot of that worker is (pipelined loading); a session pays one decode per (record, slot) through \code{\verb~|LIMP~}. The test "six sessions = one session, word for word" relies on it}}
+\tr{\td{F3}\td{The store keeps the record length in the word before \code{\verb~|f0~} (\code{\verb~|FactStore.lengthOf~})}\td{the layout of ISA 3.5 has no length; the tests and \code{\verb~|pubcheck~} need it}}
+\tr{\td{F4}\td{\code{\verb~|FactStore~} publishes with ONE \code{\verb~|compareAndSet~} of the row's slot in an \code{\verb~|AtomicIntegerArray~} chunk; data chunks and slot chunks hang off \code{\verb~|AtomicReferenceArray~} directories and are installed by compare-and-set; a publication that finds a record returns the winner (\code{\verb~|lostRaces~}), and counts \code{\verb~|lostDifferent~} if both derivations were complete and the words differ (must be 0)}\td{ISA 3.3 "one release store"; ISA 12 R6. \code{\verb~|java.util.concurrent.atomic~} is the only non-array machinery; cap 1,024 data chunks (256 MiB)}}
+\tr{\td{F5}\td{The syntactic part (arity, \code{\verb~|reads~}, \code{\verb~|dep[i]~}, lamArity, \code{\verb~|unread~}, shape) is computed without the machine, before the TRY; the TRY segment only infers the sorts. Positions >= 64: binders are opened, sorts are not inferred}\td{a derivation that ends in U still knows the counts; they are published with F_NONE and not used}}
+\tr{\td{F6}\td{Value part only for a value that is an export term (\code{\verb~|DeclTable.value > 0~}); a value kept as a proof block has \code{\verb~|lamArity = 0~}}\td{ISA 3.3: nothing of an overlay is published; and a theorem is opaque to lazy delta}}
+\tr{\td{F7}\td{Shapes: only \code{\verb~|SHAPE_PICK~} (operand = parameter index) is recognised. PROJARG, CTORBODY, CASESON, MATCHER stay \code{\verb~|SHAPE_NONE~}}\td{step 4 (their operand encoding is M7's / M3's to agree on)}}
+\tr{\td{F8}\td{\code{\verb~|staticProof~}: TRI_NO for SORT, PI, PII and literals; for a constant applied to exactly \code{\verb~|arity~} arguments TRI_YES / TRI_NO from \code{\verb~|rlvl[ls]~} (\code{\verb~|isAlwaysZero~} / \code{\verb~|isNeverZero~}); everything else TRI_UNKNOWN. All three answers are TRI_UNKNOWN / 0 while the switch is off or the session is strict}\td{ISA 3.5 table, 14.2}}
+\tr{\td{F9}\td{\code{\verb~|Decl~} derives the record of a declaration it accepted (\code{\verb~|Facts.onAccept~}); a signal out of that derivation is dropped (the stacks are restored) and the declaration stays accepted}\td{ISA 4.5.6: "an optimisation only"}}
+\tr{\td{F10}\td{Manifest mutation tests (\code{\verb~|M5ManifestTest~}): the three exports, each rebuilt (a) with the family \code{\verb~|Owner~} as axioms in place of the inductive type with the stuck sort, (b) with the sort's definition replaced by an axiom, (c) variant (a) without the last steps of the exploit; verdicts compared with \code{\verb~|leanchecker --from-export~} with the switch on and off}\td{ISA 3.5 says "rebuilt with an axiom family in place of the stuck sort" without fixing the construction; (a) makes the machine itself check the family and derive its facts, (b) makes the sort stuck everywhere, (c) gives one mutant the official checker ACCEPTS (\code{\verb~|proj-of-subst-prop~}). As long as no consumer reads the prop mask or the static PROOF (M4's step 2), the verdict rows cannot fail because of a fact; the record rows (\code{\verb~|rlvl~} of the constructor is UNKNOWN) test the rule itself}}
+}
+}
+
+\subtree{
+\title{Wave 6 (2026-11-24): where inference spends, and four shortcuts}
+
+\p{Tools of this section: \code{\verb~|work/m5/~} (\code{\verb~|bench.sh~} = \code{\verb~|M5Bench~} in-process on the sandbox classes with counters; \code{\verb~|attr.sh~} = the same on an INSTRUMENTED COPY, \code{\verb~|work/m5/attr~}, that attributes records and run words to the call sites of \code{\verb~|Infer~} - never published; \code{\verb~|prof.sh~} + \code{\verb~|tools/jfrsite.py~} = JFR samples by the nearest enclosing judgment; \code{\verb~|nbuild.sh~} = a CE native image \code{\verb~|-O3~} with the sandbox's machine jar and the integrator's pipeline jars; \code{\verb~|m.py~} + \code{\verb~|batch*.sh~} = measured rows in the arena-shaped container under the measurement lock, \code{\verb~|work/m5/measure.tsv~}). Counts are exact (in-process, one thread); CPU times are from the container.}
+
+\subtree{
+\title{What the measurements say first (Init, \code{\verb~|warm,gated,expect~}, 4 MiB sessions)}
+
+\table{
+\tr{\th{Question}\th{Answer}}
+\tr{\td{Who makes the records? (443 per unit)}\td{59\% are made inside \code{\verb~|CONV~} calls started by argument checks (\code{\verb~|TWALK~}'s \code{\verb~|CONV(Tt, D)~}: 246 per unit; \code{\verb~|CHECK~}'s 14). 78.8\% of those conversions make no record; 5.4\% of them (83,000 calls: \code{\verb~|decide~}, \code{\verb~|omega~} reflection, \code{\verb~|Nat.le~} unfolding - kernel work no inference rule can avoid) make 90\% of it and half of all ticks of the run. Inference proper makes about 180 per unit: tabling records of INFER 47, telescope results (codomain EVAL / INST) 41, telescope domains 17, argument values 16, \code{\verb~|CHECK~} lambda \code{\verb~|INST~} 11, PII / PI closures 8, CONST 6, FVAR 4}}
+\tr{\td{Where is the CPU? (JFR on the JVM, nearest enclosing judgment)}\td{IN 42\% of the samples, RD 36\%, CV 11\%, loader etc. 11\%. Inside IN: EVAL of telescope domains and results (\code{\verb~|twEval~}) 11.9\%, ARGV of arguments 6.0\%, the tabling probe of INFER (PRUNE 3.4\% + SUSP record 3.0\%), spine copy 2.7\%, \code{\verb~|CHECK~} lambda \code{\verb~|INST~} 1.7\%, \code{\verb~|inferConst~} 1.5\%}}
+\tr{\td{How often is \code{\verb~|Tt == D~}?}\td{11.24 M argument checks: 88.6\% identical records. 2.79 M of the domains are open non-leaf terms that needed an environment and an EVAL; a structural MATCH against \code{\verb~|Tt~} answers 2.13 M of them (97\% of the identical ones)}}
+\tr{\td{Does the tabling probe pay?}\td{Yes: 6.24 M probes on APP nodes in CHECKED mode, 4.11 M hits (66\%); but each hit costs a PRUNE and a record probe}}
+\tr{\td{What can a shared check fact save?}\td{CHECKED inference of closed, level-parameter-free terms of EARLIER units: 97,088 outermost calls, 1.13 M ticks (2.0\% of the run), 0.59 M records}}
+\tr{\td{What does a lazy ARGV save?}\td{Little: of 6.16 M argument values, 3.10 M are atoms; of the 3.06 M others only 0.71 M are read by later domains alone (the result reads the rest)}}
+}
+
+\p{So the target "records per declaration down by a third" cannot come from inference rules: inference proper owns 41\% of the records and the rest is conversion work started by the official comparison of an argument's type with its domain.}
+}
+
+\subtree{
+\title{M: MATCH instead of building a telescope domain (switch \code{\verb~|m5a~}; ISA 4.4.4, 4.5.4, B5 of 6.3; R07 1.8 \code{\verb~|inst_eq~})}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{M1}\td{In TWALK's telescope mode (I15), CHECKED: before the domain of binder i is built, \code{\verb~|tmatch(dom_i, g, Tt)~} decides "\code{\verb~|EVAL(dom_i, ENTER(F0) ++ g[K0 .. i), PLS)~} is convertible with \code{\verb~|Tt~}" over the registers of the running TWALK; the environment is never built. T: the argument is accepted for this binder. Unknown (never a refutation): the domain is built and compared as before (\code{\verb~|Tt == D~}, else \code{\verb~|CONV~}), so \code{\verb~|E_APP_MISMATCH~} is raised exactly where it was}\td{the complete procedure stays the fall-through (6.3 rule 3); the match is M7's \code{\verb~|Match~} generalised to an environment that has a frame part (\code{\verb~|F0~}) and to suspensions}}
+\tr{\td{M2}\td{Rules of \code{\verb~|tmatch~} (pattern node against value, the value seen through PEEK): variable: the binding (through PEEK) is the same record; sort: equivalent levels after LSUB; constant: same row, equivalent level lists; small literal: the immediate; application: a NEU with as many arguments whose head matches (a constant by row and levels, a variable by identity with the NEU's head) and whose arguments match pairwise; lam / pi node: the closure of that very node, ls' and a near frame that agrees with the environment on the node's mask; an unevaluated suspension: the suspension of that very term under an agreeing frame. At most 64 pattern nodes, nesting 16; HOLE bindings, far frames, NSUC, a NEU that EVAL would extend: unknown}\td{T by congruence (R02 8.6) or by I-ID (the record EVAL would return). No judgment is called, no record is made, only levels are instantiated}}
+\tr{\td{M3}\td{Only non-leaf domain terms (app, pi, lam) are offered; a variable domain is read from its slot and a constant is one probe, as before. Value mode keeps \code{\verb~|DOM(P)~} (a memo word)}\td{measured: 3.19 M domains offered on Init, 2.20 M answered}}
+\tr{\td{M4}\td{\code{\verb~|shortcheck~} (ISA 5.5): a T is audited by building the domain and \code{\verb~|Debug.shortCheck(Tt, D, T)~} (the complete CONV with the switches off)}\td{a failed audit is \code{\verb~|E_AUDIT~}}}
+\tr{\td{M5}\td{Not done: the expected-type return for an application (ISA 4.5.4 "untabled t: MATCH(res, g, V) succeeds: ret V without building R"). Built and removed: it never fires. \code{\verb~|CHECK~} is only called on declaration roots and on bodies of binders, and the gate (T4) tables every BODY node, so no \code{\verb~|CHECK~} of an untabled application exists (0 of 1.09 M \code{\verb~|CHECK~} calls on Init). The form that would fire is pattern against pattern for an untabled application ARGUMENT (rpylean's \code{\verb~|inst_eq_inst~}): a probe on Init finds 383,000 result builds it would save (29\% of the application results built at telescope ends, 4\% of all EVAL calls). Not built}\td{recorded as the next step; the gain is bounded by those numbers}}
+}
+}
+
+\subtree{
+\title{P: shared check facts (switch \code{\verb~|pchk~}; ISA 5.1 last-but-one row, 5.3; the store's \code{\verb~|SharedFacts.CHECKED~} bit)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{P1}\td{Set: when a CHECKED INFER of a term completes (\code{\verb~|INFER[1]~}, which a signal never reaches) and its stamp is PERM (closed, no level parameter) and the term is in the export region (\code{\verb~|0 < t < GEN_BASE~}), the bit of \code{\verb~|t~} is set. Overlay terms (decoded proof blocks) and generated terms have no bit. The byte is read before it is written (a set bit dirties no shared cache line)}\td{ISA 5.1 "closed shared term passed check mode"; the publication rule (only export ids)}}
+\tr{\td{P2}\td{Use: a CHECKED INFER of such a term whose bit is set, in a declaration whose roots passed the summaries (\code{\verb~|Ext.trusted~}), runs the node's chain in ONLY mode (same value: both modes return the same record) and stores the type with stamp PERM. A lambda returns its PII at once. \code{\verb~|CHECK~} of a lam / let node whose bit is set takes the generic rule (INFER + CONV) instead of B9}\td{the conditions check mode adds are declaration-relative (5.3): level parameters (none here) and visibility, which the root summary of the using declaration discharges (\code{\verb~|depMax~} of a sub-term never exceeds its root's; a literal's \code{\verb~|depMax~} covers its prerequisite names, RECONCILIATION section 2)}}
+\tr{\td{P3}\td{Never read in strict mode (no switch) or in an untrusted declaration; \code{\verb~|shortcheck~} runs the CHECKED chain after all and turns a kernel error in it into \code{\verb~|E_AUDIT~}}\td{fail closed}}
+\tr{\td{P4}\td{Measured potential and effect on Init: 60,390 bits set, 117,875 CHECKED inferences answered in ONLY mode; ticks 56.03 M -> 54.87 M (-2.1\%), records 442.8 -> 433.8 per unit. The bit only helps terms of the export region: theorem values are proof blocks decoded into the worker's overlay and have no shared id}\td{the upper bound was 1.13 M ticks}}
+}
+}
+
+\subtree{
+\title{J: the joint telescope check of DECL (switch \code{\verb~|m5b~}; ISA 4.5.2 last comment, R07 1.8)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{J1}\td{\code{\verb~|Decl.joint~}: while the declared type is a Pi node, the value a lam node and both have the SAME domain term (node id): \code{\verb~|u_i = ENSORT(INFER(A_i, CHECKED))~}, \code{\verb~|x_i = OPEN(EVAL(A_i))~}, once for both telescopes. Then \code{\verb~|u = ENSORT(INFER(rest of the type, CHECKED))~}, the sort of the type is \code{\verb~|mkImax(u_1, .. mkImax(u_k, u))~}, a theorem's must be always zero (before the value is looked at, as \code{\verb~|add_theorem~}), then \code{\verb~|CHECK(rest of the value, env, EVAL(rest of the type, env))~}, CLOSE all. The telescope state is in the driver's locals (H6)}\td{the type part is INFER.pi verbatim; the value part is B9's lam rule with \code{\verb~|D == DOM(W)~} by construction and \code{\verb~|INST(W, x)~} = EVAL of the rest of the Pi under \code{\verb~|env + x~} (mask contract). Officially Pi against Pi is decided binder by binder (R02 8.1), so with identical domains the comparison is \code{\verb~|typeof(v)~} against \code{\verb~|T~} under the same variables. With no joint binder the calls are those of \code{\verb~|phases~}}}
+\tr{\td{J2}\td{Only identical node ids count as "the same domain" (the loader shares equal terms; hand-built fixtures do not, so \code{\verb~|M5Step1Test.initPrelude~} tests it on a real export)}\td{no comparison is made; anything else is left to \code{\verb~|CHECK~}}}
+\tr{\td{J3}\td{Measured on Init: 220,353 joint binders (3.8 per declaration with a value); ticks 56.03 M -> 55.12 M (-1.6\%), records 442.8 -> 430.1 per unit (-2.9\%), CHECK 1.09 M -> 0.87 M, INST 1.19 M -> 0.97 M, DOM 1.48 M -> 1.29 M}\td{each joint binder saves a tabling probe of the lambda and of its domain, \code{\verb~|WHNF(V)~}, \code{\verb~|DOM(W)~}, the PI closure of the rest of the telescope and its frame}}
+}
+}
+
+\subtree{
+\title{C: INFER's front cache (no switch yet: system property \code{\verb~|rlvm.machine.m5ic=true~}; ISA 12 open question 6)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{C1}\td{A direct-mapped, lossy table (2^10 cells of 8 words; \code{\verb~|rlvm.machine.m5ic.log2~} for sweeps) in front of INFER's tabling probe. A cell holds (term, session epoch, frame, ls', TYPE, TSTAMP) of a tabling record whose TYPE is stored; its index is a hash of the term and of the binding of the innermost variable the term reads. A query whose term, ls' and epoch match and whose environment agrees with the cell's frame on every index of the term's mask (popcount comparisons, no hash) is answered under the validity rule of 5.3; anything else takes PRUNE and the record probe as before. Cells are written when INFER stores a type and when the probe hits}\td{a memo hit cost a PRUNE (hash of the whole frame, probe, comparison) and a record probe (ISA "a memo hit costs almost what it saves"). The cache is exact: the frame comparison does not depend on how the environment was built. Far masks are not cached. Off in strict mode and in every debug mode (the audits see the canonical path)}}
+\tr{\td{C2}\td{It changes no result and no record. Inside one session it changes no tick either (\code{\verb~|M5Step1Test.frontCacheChangesNothing~}); in warm sessions its bytes count in the footprint (32 KiB), so resets move slightly}\td{honest footprint}}
+\tr{\td{C3}\td{Measured on Init (2^12 cells): 4.13 M of the 4.14 M tabling hits are answered by the cache}\td{the hit rate is not the limit; whether it pays is a CPU measurement (below)}}
+}
+}
+
+\subtree{
+\title{F: facts are visible (ISA 3.5; \code{\verb~|facts~})}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{F11}\td{Cost: \code{\verb~|Infer.Ext.sigdTicks~} = ticks between the start of a SIGD derivation and its publication (the stamp travels in the record buffer, two words), lazy derivations and those of DECL alike; \code{\verb~|Machine.factsDerived~} / \code{\verb~|factsNone~} are now written (they were never incremented, so the statistics always showed 0)}\td{"make their derivation cost visible"}}
+\tr{\td{F12}\td{Use: \code{\verb~|Ext.factUse[Facts.USE_*]~}, counted while \code{\verb~|m.stats~}: prop-mask queries / with a bit, unread-mask queries on a derived record / with a bit, static-PROOF queries on a constant head / answered YES / answered NO}\td{"their use measurable"; requested of M6 for \code{\verb~|dumpStats~}}}
+\tr{\td{F13}\td{Measured on Init (\code{\verb~|warm,gated,expect,facts~}): 58,576 records derived in 121,541 ticks = \strong{0.23\% of all ticks} (the bound is 2\%), 0 F_NONE; static PROOF 1.08 M queries: 3,678 yes, 947,262 no (87.6\% definite); prop mask 945,213 queries, 26,405 with a bit; unread mask 314,944 queries, 6,507 with a bit. Effect of the consumers (M4): PIRR 1.15 M -> 0.17 M, VTYPE 1.65 M -> 0.62 M, ISPROP 83 k -> 33 k, ticks 56.03 M -> 53.35 M (-4.8\%), records 442.8 -> 437.6 per unit}\td{the derivation is cheap because the type telescope was just checked in the same session (every INFER is a memo hit)}}
+}
+}
+
+\subtree{
+\title{Eager reduction (M6-F26, S-F4 / S-F5; 2026-11-24)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Decision}\th{Reason}}
+\tr{\td{I20}\td{\code{\verb~|Infer.twD~} sets the mode with \code{\verb~|m.enterER()~} (M6's request of 14:46Z), never by assigning \code{\verb~|m.ER~}}\td{the facade must learn that the declaration compared under eager reduction. M6's rule since 15:07Z (F26, after S-F5): such a declaration is DECLINED by the machine (\code{\verb~|E_LIMIT~}, UNSUPPORTED_INPUT; \code{\verb~|machine.eagerDeclines~}) and checked by the reference engine. On Init 155 declarations enter the mode (718 comparisons, 1.1\% of the machine's ticks before the rule); none of their \code{\verb~|eagerReduce _ _~} arguments has a type identical to its domain. In-process tools that stop at the first decline (\code{\verb~|Fixture.checkAll~}, so \code{\verb~|M5Bench~}) end at unit 2,718 of Init since then: the counters of this file were taken before, on one code state, and the measured rows go through the launcher}}
+\tr{\td{P5}\td{PCHK is not set once the declaration has entered eager reduction (\code{\verb~|m.erSeen~})}\td{the official answer of a comparison under \code{\verb~|eagerReduce~} depends on the declaration's history (its caches live for one declaration), so nothing derived after such a comparison is shared. A term whose bit is set was checked without any ER comparison, and it is closed, so its types are the same records in every declaration}}
+\tr{\td{M6}\td{MATCH is not restricted for \code{\verb~|eagerReduce _ _~} arguments}\td{a T of MATCH is identity of the two values up to PEEK and the official level equivalence: the case in which TWALK compares nothing (\code{\verb~|Tt == D~}) and never enters the mode. An argument whose type does not match goes through \code{\verb~|enterER~} + CONV as before}}
+}
+}
+
+\subtree{
+\title{Measurements of wave 6, batch 1: each switch on top of step 1}
+
+\p{Native image CE \code{\verb~|-O3~}, arena-shaped container, ONE worker, under the measurement lock, one batch (\code{\verb~|work/m5/batch1.sh~}, rows \code{\verb~|b1-*~} of \code{\verb~|work/m5/measure.tsv~}; image \code{\verb~|work/m5/dist-a2~} = this package's sandbox of 14:05Z with the integrator's pipeline jars; two interleaved rounds per configuration). \strong{The host was heavily loaded (load average 73-165 during the batch), so CPU and wall seconds scatter by about +-5\% and decide nothing below that; the instruction counts are exact (every repeat gave the same number) and are the signal here.} Base = \code{\verb~|warm,gated,expect~}, \code{\verb~|session-mib=4~}. Every row: all units accepted, 0 declined.}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{CPU s (two rounds)}\th{wall s}\th{RSS MiB}\th{instructions G}\th{against base}\th{ticks}}
+\tr{\td{Init}\td{v0 (no switch)}\td{8.29}\td{8.35}\td{252}\td{139.2}\td{}\td{77.83 M}}
+\tr{\td{Init}\td{base}\td{7.96 / 7.80}\td{7.96}\td{239}\td{109.9}\td{}\td{56.03 M}}
+\tr{\td{Init}\td{+ m5a}\td{8.25 / 7.80}\td{8.07}\td{239}\td{108.4}\td{-1.4\%}\td{53.93 M}}
+\tr{\td{Init}\td{+ pchk}\td{7.81 / 8.14}\td{8.09}\td{240}\td{107.9}\td{-1.8\%}\td{54.87 M}}
+\tr{\td{Init}\td{+ m5b}\td{8.11 / 7.67}\td{7.95}\td{237}\td{108.4}\td{-1.4\%}\td{55.12 M}}
+\tr{\td{Init}\td{+ m5a,pchk,m5b}\td{8.05 / 7.97}\td{8.05}\td{240}\td{105.7}\td{\strong{-3.8\%}}\td{52.36 M}}
+\tr{\td{Init}\td{base + probes}\td{8.14}\td{8.20}\td{225}\td{106.8}\td{}\td{52.97 M}}
+\tr{\td{Init}\td{base + probes + m5a,pchk,m5b}\td{7.92}\td{7.97}\td{228}\td{102.5}\td{-4.0\% (of probes)}\td{49.15 M}}
+\tr{\td{Std}\td{v0}\td{13.76}\td{13.87}\td{329}\td{223.6}\td{}\td{122.25 M}}
+\tr{\td{Std}\td{base}\td{13.89 / 14.58}\td{14.35}\td{307}\td{185.6}\td{}\td{94.06 M}}
+\tr{\td{Std}\td{+ m5a}\td{14.60 / 14.72}\td{14.76}\td{307}\td{182.5}\td{-1.7\%}\td{90.16 M}}
+\tr{\td{Std}\td{+ pchk}\td{14.50 / 13.43}\td{14.11}\td{310}\td{182.8}\td{-1.5\%}\td{92.37 M}}
+\tr{\td{Std}\td{+ m5b}\td{13.50 / 13.32}\td{13.51}\td{308}\td{182.4}\td{-1.7\%}\td{92.07 M}}
+\tr{\td{Std}\td{+ m5a,pchk,m5b}\td{13.10 / 13.07}\td{13.14}\td{312}\td{177.5}\td{\strong{-4.4\%}}\td{87.04 M}}
+\tr{\td{Std}\td{base + probes}\td{13.19}\td{13.27}\td{314}\td{178.3}\td{}\td{86.71 M}}
+\tr{\td{Std}\td{base + probes + m5a,pchk,m5b}\td{12.95}\td{13.01}\td{311}\td{169.8}\td{-4.8\% (of probes)}\td{79.51 M}}
+\tr{\td{Cedar slice}\td{v0}\td{3.40}\td{3.44}\td{190}\td{47.1}\td{}\td{18.10 M}}
+\tr{\td{Cedar slice}\td{base}\td{3.39 / 3.58}\td{3.54}\td{169}\td{46.0}\td{}\td{18.71 M}}
+\tr{\td{Cedar slice}\td{+ m5a}\td{3.59 / 3.63}\td{3.84}\td{169}\td{45.8}\td{-0.4\%}\td{18.39 M}}
+\tr{\td{Cedar slice}\td{+ pchk}\td{3.31 / 3.34}\td{3.36}\td{170}\td{45.6}\td{-0.9\%}\td{18.46 M}}
+\tr{\td{Cedar slice}\td{+ m5b}\td{3.34 / 3.35}\td{3.38}\td{169}\td{45.9}\td{-0.2\%}\td{18.65 M}}
+\tr{\td{Cedar slice}\td{+ m5a,pchk,m5b}\td{3.28 / 3.54}\td{3.45}\td{169}\td{45.3}\td{\strong{-1.5\%}}\td{18.09 M}}
+\tr{\td{Cedar slice}\td{base + probes}\td{3.00}\td{3.04}\td{171}\td{41.9}\td{}\td{15.67 M}}
+\tr{\td{Cedar slice}\td{base + probes + m5a,pchk,m5b}\td{3.17}\td{3.23}\td{172}\td{41.3}\td{-1.4\% (of probes)}\td{15.08 M}}
+\tr{\td{reachability}\td{base}\td{8.17 / 8.21}\td{8.32}\td{1341}\td{60.9}\td{}\td{35.44 M}}
+\tr{\td{reachability}\td{+ m5a}\td{8.54 / 8.74}\td{8.79}\td{1341}\td{60.8}\td{-0.2\%}\td{35.36 M}}
+\tr{\td{reachability}\td{+ pchk}\td{8.27 / 8.50}\td{8.57}\td{1341}\td{60.9}\td{0.0\%}\td{35.43 M}}
+\tr{\td{reachability}\td{+ m5b}\td{8.21 / 8.30}\td{8.38}\td{1341}\td{60.8}\td{-0.2\%}\td{35.39 M}}
+\tr{\td{reachability}\td{+ m5a,pchk,m5b}\td{8.15 / 8.19}\td{8.30}\td{1341}\td{60.8}\td{\strong{-0.2\%}}\td{35.31 M}}
+}
+
+\p{Reading. The three switches together take 3.8\% (Init), 4.4\% (Std), 1.5\% (Cedar slice), 0.2\% (reachability) of the instructions and are neutral on memory. Each alone is 1.4-1.8\% on the libraries and below 1\% on the Cedar slice. In CPU seconds the Std rows show the same direction (13.1 s against 13.9 - 14.6 s), the others are inside the scatter of a loaded host; the one row pair that looks worse, reachability + m5a (two runs 0.4 s above the base at the same instruction count and the same ticks), can only be the host: inference is 1\% of that corpus. The warm in-process A/B on the JVM (\code{\verb~|work/m5/ab.sh~}: \code{\verb~|M5Bench~} alternates the two configurations in ONE process, thread CPU of the check phase; Init, eight rounds, host load 140-170): base 8.99 / 9.11 / 7.83 / 9.09 s, with m5a,pchk,m5b 8.50 / 8.66 / 8.61 / 7.81 s: -4\% in the mean, also inside the scatter.}
+
+\p{Why so little, when MATCH answers 2.2 M of 3.2 M domains and EVAL call events fall by 18\%: the domains it answers were cheap (a flat application under the gate is one NEU probe, a tabled one is a memo hit), and the conversions that make 59\% of the records are untouched.}
+
+\p{The two numbers the brief asked for, on Init, in-process and exact (one code state: the sandbox of 14:30Z, before the eager-reduction rule):}
+
+\table{
+\tr{\th{}\th{v0}\th{\code{\verb~|warm,gated,expect~}}\th{+ m5a,pchk,m5b}\th{+ facts,m5a,pchk,m5b and the front cache}}
+\tr{\td{records per unit}\td{853.3}\td{442.8}\td{423.6}\td{417.6}}
+\tr{\td{run words per unit}\td{3,867.6}\td{2,290.4}\td{2,247.4}\td{2,218.3}}
+\tr{\td{INFER + VTYPE call events}\td{7.33 M}\td{5.07 M}\td{not taken}\td{3.91 M}}
+\tr{\td{EVAL call events}\td{13.62 M}\td{11.29 M}\td{not taken}\td{8.73 M}}
+\tr{\td{ticks}\td{77.83 M}\td{56.03 M}\td{52.36 M}\td{49.62 M}}
+}
+
+\p{"Records down by a third" and "INFER + VTYPE down by a third" hold against v0 (-51\% and -47\% with every step-1 switch, facts and this wave's switches) and do NOT hold against step 1 (-5.7\% and -23\%; without \code{\verb~|facts~} -4.3\% of the records): what inference itself can still remove is bounded by the 41\% of the records it makes, and the VTYPE calls that remain after \code{\verb~|facts~} are conversions asking for the type of a neutral term.}
+}
+
+\subtree{
+\title{Measurements of wave 6, batch 2: the front cache, facts, everything together}
+
+\p{Same method, one hold of the lock (15:18:05Z-15:26:33Z, load average 80-114), \code{\verb~|work/m5/batch2.sh~}, rows \code{\verb~|b2-*~}; image \code{\verb~|work/m5/dist-a3~} = the sandbox of 14:50Z, which has M1's cheaper PRUNE of 14:22Z (so its base is lower than batch 1's) and is from before the eager-reduction rule. "new" = \code{\verb~|m5a,pchk,m5b~}; "ic" = \code{\verb~|-Drlvm.machine.m5ic=true~}. Two rounds; instructions repeat exactly. Every row: all units accepted, 0 declined.}
+
+\table{
+\tr{\th{corpus}\th{configuration}\th{CPU s (two rounds)}\th{wall s}\th{RSS MiB}\th{instructions G}\th{against base}\th{ticks}}
+\tr{\td{Init}\td{v0}\td{7.58}\td{7.66}\td{244}\td{132.6}\td{}\td{77.83 M}}
+\tr{\td{Init}\td{base (\code{\verb~|warm,gated,expect~})}\td{7.47 / 7.48}\td{7.66 / 7.65}\td{225}\td{105.6}\td{}\td{56.03 M}}
+\tr{\td{Init}\td{+ ic}\td{7.25 / 7.74}\td{7.48 / 8.05}\td{224}\td{105.3}\td{-0.3\%}\td{56.09 M}}
+\tr{\td{Init}\td{+ new}\td{7.06 / 7.26}\td{7.10 / 7.48}\td{227}\td{101.7}\td{\strong{-3.7\%}}\td{52.36 M}}
+\tr{\td{Init}\td{+ new + ic}\td{7.10 / 7.53}\td{7.22 / 7.66}\td{227}\td{101.2}\td{-4.2\%}\td{52.30 M}}
+\tr{\td{Init}\td{+ facts}\td{7.54 / 7.65}\td{7.73 / 7.79}\td{233}\td{105.5}\td{-0.1\%}\td{53.91 M}}
+\tr{\td{Init}\td{+ facts + new + ic}\td{7.25 / 7.28}\td{7.29 / 7.41}\td{236}\td{101.0}\td{-4.4\%}\td{50.17 M}}
+\tr{\td{Std}\td{v0}\td{12.60}\td{12.88}\td{352}\td{212.0}\td{}\td{122.25 M}}
+\tr{\td{Std}\td{base}\td{12.94 / 13.01}\td{13.08 / 13.07}\td{325}\td{177.9}\td{}\td{94.06 M}}
+\tr{\td{Std}\td{+ ic}\td{12.86 / 12.90}\td{13.12 / 13.05}\td{328}\td{177.8}\td{-0.1\%}\td{94.28 M}}
+\tr{\td{Std}\td{+ new}\td{12.52 / 12.57}\td{13.21 / 12.68}\td{328}\td{170.2}\td{\strong{-4.3\%}}\td{87.04 M}}
+\tr{\td{Std}\td{+ new + ic}\td{13.12 / 13.40}\td{13.25 / 13.53}\td{329}\td{169.7}\td{-4.6\%}\td{87.00 M}}
+\tr{\td{Std}\td{+ facts}\td{13.06 / 13.11}\td{13.24 / 13.21}\td{344}\td{177.8}\td{-0.1\%}\td{90.15 M}}
+\tr{\td{Std}\td{+ facts + new + ic}\td{12.72 / 13.42}\td{12.88 / 13.54}\td{350}\td{169.4}\td{-4.8\%}\td{83.04 M}}
+\tr{\td{Cedar slice}\td{v0}\td{2.66}\td{2.90}\td{179}\td{39.0}\td{}\td{18.10 M}}
+\tr{\td{Cedar slice}\td{base}\td{2.75 / 2.94}\td{2.80 / 3.00}\td{173}\td{39.6}\td{}\td{18.71 M}}
+\tr{\td{Cedar slice}\td{+ ic}\td{2.73 / 2.75}\td{2.74 / 2.81}\td{173}\td{39.7}\td{+0.3\%}\td{18.72 M}}
+\tr{\td{Cedar slice}\td{+ new}\td{2.76 / 2.99}\td{2.79 / 3.02}\td{174}\td{39.0}\td{\strong{-1.5\%}}\td{18.09 M}}
+\tr{\td{Cedar slice}\td{+ new + ic}\td{2.80 / 2.72}\td{2.90 / 2.77}\td{174}\td{39.0}\td{-1.5\%}\td{18.08 M}}
+\tr{\td{Cedar slice}\td{+ facts}\td{2.97 / 2.78}\td{3.11 / 3.30}\td{190}\td{39.5}\td{-0.3\%}\td{18.21 M}}
+\tr{\td{Cedar slice}\td{+ facts + new + ic}\td{2.98 / 2.75}\td{3.08 / 2.78}\td{175}\td{38.9}\td{-1.8\%}\td{17.59 M}}
+\tr{\td{reachability}\td{v0}\td{8.41}\td{8.48}\td{1151}\td{57.4}\td{}\td{34.60 M}}
+\tr{\td{reachability}\td{base}\td{8.22 / 8.07}\td{8.33 / 8.17}\td{1144}\td{59.1}\td{}\td{35.44 M}}
+\tr{\td{reachability}\td{+ ic}\td{8.15 / 8.15}\td{8.22 / 8.25}\td{1144}\td{59.1}\td{0.0\%}\td{35.44 M}}
+\tr{\td{reachability}\td{+ new}\td{8.33 / 8.61}\td{8.44 / 9.08}\td{1144}\td{59.0}\td{\strong{-0.2\%}}\td{35.31 M}}
+\tr{\td{reachability}\td{+ new + ic}\td{8.09 / 8.24}\td{8.15 / 8.37}\td{1145}\td{59.0}\td{-0.2\%}\td{35.31 M}}
+\tr{\td{reachability}\td{+ facts + new + ic}\td{8.02 / 8.23}\td{8.19 / 8.42}\td{1145}\td{59.0}\td{-0.2\%}\td{35.27 M}}
+}
+
+\p{Reading.}
+
+\ul{
+\li{\strong{m5a,pchk,m5b: kept.} Instructions -3.7\% (Init), -4.3\% (Std), -1.5\% (Cedar slice), -0.2\% (reachability) on the newer base as on the older one; CPU -4.2\% on Init and -3.3\% on Std with both rounds below both base rounds (batch 1: Std -8\%, Init level); Cedar slice and reachability move by less than the scatter in either direction (the reachability rows of "+ new" are above the base in this batch and equal to it in batch 1, and "+ new + ic", the same work, is level here). Memory: +2 to +3 MiB. A confirmation on a quiet host is still owed for the two small corpora.}
+\li{\strong{The front cache: rejected (stays off, behind its property).} It answers nearly every tabling hit (4.13 M of 4.14 M on Init), but since M1's PRUNE hashes only the kept slots the probe it replaces is cheap: -0.3\% to -0.5\% of the instructions on the libraries, +0.3\% on the Cedar slice, and no CPU gain in any pair of rows (on Std "+ new + ic" is 0.6-0.8 s ABOVE "+ new" in both rounds). Not worth a table in every session.}
+\li{\strong{facts (after M4's fix of S-F1 / S-F2: static PROOF only): neutral.} -0.1\% of the instructions on Init and Std, -0.3\% on the Cedar slice, CPU inside the scatter; the derivation (0.23\% of the ticks) is paid for by the PIRR / VTYPE calls it removes and no more. The derivation cost stays far below the 2\% bound.}
+\li{Not this package's, but visible in both batches: on the Cedar slice and on reachability v0 needs FEWER instructions than \code{\verb~|warm,gated,expect~} since M1's PRUNE (39.0 against 39.6 G; 57.4 against 59.1 G).}
+\li{With the eager-reduction rule armed (after these batches) the machine declines the declarations that compare under \code{\verb~|eagerReduce~}: 155 on Init (1.1\% of its ticks) but 11 on the Cedar slice that were 18\% of the machine's ticks there (18.09 M -> 14.79 M in the final gate): what that costs through the reference engine is not in these tables.}
+}
+}
+
+\subtree{
+\title{Experiments of wave 6 that were not kept, or not built (with their numbers)}
+
+\table{
+\tr{\th{Experiment}\th{Result}}
+\tr{\td{Expected-type return for an untabled application under \code{\verb~|CHECK~} (ISA 4.5.4 last lines)}\td{built, removed: fires 0 times on Init (M5 above)}}
+\tr{\td{Pattern against pattern for an untabled application argument (R07 \code{\verb~|inst_eq_inst~})}\td{not built; probe on Init: 632,317 untabled APP arguments reach MATCH, 437,944 are answered, 382,705 of them right after their result type was built: that many of 1.32 M result builds (and as many MATCH walks) would go, about 4\% of the EVAL call events}}
+\tr{\td{Lazy ARGV (the value of an argument only when a domain or the result is built)}\td{not built; of 6.16 M argument values on Init 3.10 M are atoms and only 0.71 M of the others are read by domains alone}}
+\tr{\td{PCHK for closed terms WITH level parameters (allowed by \code{\verb~|SharedFacts~}: \code{\verb~|lpSet~} within the declaration's parameters)}\td{probe on Init: 89,448 bits instead of 60,390, 132,040 hits instead of 117,875 (+12\%); not adopted: about a quarter of a per cent of the ticks, and ISA 5.3 gives PERM only to terms without level parameter}}
+\tr{\td{Telescope domains and results evaluated without a tabling record (M2's rule for the body of INST under \code{\verb~|m2a~})}\td{KEPT, under M2's switch \code{\verb~|m2a~}: \code{\verb~|Infer.twEval~} calls \code{\verb~|Eval.evalBody~} (M2 published it at 15:36Z on this package's request; without \code{\verb~|m2a~} it is \code{\verb~|Eval.eval~}). Probe in a private copy, Init, on top of \code{\verb~|warm,gated,expect,m5a,m2a~}: records 358.8 -> 345.6 per unit (-3.7\%), run words 1,767.7 -> 1,709.3 (-3.3\%), ticks +0.4\% (the memo it gives up is a second application of the same head to the same arguments). Not measured in CPU}}
+\tr{\td{INFER's front cache (C1-C3)}\td{built, measured (batch 2), REJECTED: -0.3\% to -0.5\% instructions on the libraries, +0.3\% on the Cedar slice, no CPU gain. The code stays behind \code{\verb~|-Drlvm.machine.m5ic=true~} (off) for a re-measurement on a quiet host; if that shows nothing either, it should be deleted}}
+\tr{\td{A record-free INFER memo (the front cache alone, no SUSP record)}\td{not built: a lossy memo is not safe against a DAG that is walked as a tree (RECONCILIATION C3.10: CHECK is tabled)}}
+}
+}
+
+\subtree{
+\title{Statistics (M6's \code{\verb~|Machine.Counters~}, 15:18Z)}
+
+\p{\code{\verb~|Infer.Ext~} reports \code{\verb~|machine.match.tried~}, \code{\verb~|match.hit~}, \code{\verb~|pchk.set~}, \code{\verb~|pchk.hit~}, \code{\verb~|joint.binders~}, \code{\verb~|infer.icHits~}, \code{\verb~|facts.ticks~}, \code{\verb~|facts.use.propMask~}, \code{\verb~|.propMaskSet~}, \code{\verb~|.unread~}, \code{\verb~|.unreadSet~}, \code{\verb~|.proof~}, \code{\verb~|.proofYes~}, \code{\verb~|.proofNo~} (summed over the sessions; all but \code{\verb~|facts.ticks~} count only while statistics are on).}
+}
+
+\subtree{
+\title{Switches of this package (for \code{\verb~|SWITCHES.md~})}
+
+\table{
+\tr{\th{Switch}\th{Guards}\th{Gates passed}\th{Measured}}
+\tr{\td{\code{\verb~|expect~}}\td{B9: CHECK of lam / let nodes against the expected type (E1-E6)}\td{wave 4 / integrator}\td{E6, integrator}}
+\tr{\td{\code{\verb~|pchk~}}\td{P1-P5: shared check facts}\td{tutorial + bugs (alone, with step 1, with probes, with facts, audits), the four corpora, all 8,661 officially rejected tutorial mutants + 449 accepted ones through the launcher (together with \code{\verb~|m5a~}, \code{\verb~|m5b~}; one difference, caused by the official level relation against an older reference jar, present without any switch)}\td{batches 1 and 2: kept}}
+\tr{\td{\code{\verb~|m5a~}}\td{M1-M6: MATCH of a telescope domain against the argument's type}\td{the same}\td{batches 1 and 2: kept}}
+\tr{\td{\code{\verb~|m5b~}}\td{J1-J3: joint telescope check in DECL}\td{the same}\td{batches 1 and 2: kept}}
+\tr{\td{\code{\verb~|-Drlvm.machine.m5ic=true~}}\td{C1-C3: INFER's front cache (no switch; rejected by measurement, off)}\td{tutorial + bugs, the four corpora (with the three switches)}\td{batch 2: no gain}}
+\tr{\td{\code{\verb~|facts~}}\td{F1-F13: derivation and accessors (the consumers are M4's)}\td{M4's and S's gates}\td{F13}}
+}
+}
+}
+
+\subtree{
+\title{E1-F1 .. E1-F6: a bound variable is typed by its binder's DECLARED type (agent E1, 2026-11-24)}
+
+\p{Findings of package E1 (board 20:10Z - 20:35Z, \src{docs/design/review/eager-reduction.md} 6.6, \code{\verb~|work/e1/patches/E1-F2-F5-design.md~}): the machine accepted exports the official checker rejects because a type that is only CONVERTIBLE with the official one was used in its place (the official \code{\verb~|is_def_eq~} is not transitive: package S's triple \code{\verb~|d intro = d h~}, \code{\verb~|d intro = 5~} accepted, \code{\verb~|d h = 5~} rejected). 78 exports \code{\verb~|e1-*~} of the S manifest (official verdicts from Docker; generator \code{\verb~|src/test/resources/s/gen/batchE.py~}), all strict rows.}
+
+\table{
+\tr{\th{\verb~|#~}\th{Where}\th{Was}\th{Now}}
+\tr{\td{F1}\td{\code{\verb~|Infer.letBind~}, \code{\verb~|Values.mkLet~}}\td{the let variable (a LET suspension, never a variable) had the type of its VALUE}\td{the suspension carries \code{\verb~|EVAL(A)~}, the value of the DECLARED type, in \code{\verb~|M_TYPE~} (\code{\verb~|vtypeFast~} answers a SUSP from it); one record per declared type (\code{\verb~|aux = SUSP_LET + j~}); the declared type is evaluated in ONLY mode too (\code{\verb~|letOnly~}, frame INFER2\verb~|[~13\verb~|]~ with \code{\verb~|Tv = 0~}); INFER2\verb~|[~14\verb~|]~ carries \code{\verb~|EVAL(A)~}}}
+\tr{\td{F2, F3}\td{\code{\verb~|Eval.instBody~} (\code{\verb~|INST(PII, x)~}: the type of a lambda instantiated = its body typed again under \code{\verb~|x~})}\td{the lambda's variable had the type of whatever \code{\verb~|x~} is (the argument of a redex; the comparison variable of CBIND, typed by the other side's domain)}\td{if the body's type can depend on the type of its variable (\code{\verb~|Infer.typeReads~}, syntactic) and \code{\verb~|x~} does not have exactly \code{\verb~|DOM(PII)~} as its type (\code{\verb~|vtypeFast(x) == DOM~}), the variable is bound to a TYPED BINDING (\code{\verb~|Values.mkTyped~}: a plain SUSP, aux \code{\verb~|SUSP_TYPED~}, \code{\verb~|M_VAL = x~}, \code{\verb~|M_TYPE = DOM~}; EVAL peeks it to \code{\verb~|x~}, INFER reads the domain, frames keep it). \code{\verb~|DOM~} may need the judgment: frame INST\verb~|[~3\verb~|]~. \code{\verb~|Eval.force~} / \code{\verb~|forceFast~} return the value of a typed binding's value and do not memo-check it}}
+\tr{\td{F4}\td{\code{\verb~|Infer.k_ck5~} (B9, \code{\verb~|expect~})}\td{the body was checked against the expected codomain under a variable of the lambda's OWN domain whenever the two domains were convertible}\td{B9 applies only when the lambda's domain IS the expected domain (one value); otherwise the generic rule (INFER + CONV, where CBIND compares under the expected domain and the lambda's type is instantiated under a typed binding). The frames CHECK2\verb~|[~2..5\verb~|]~ carry \code{\verb~|V~} instead of the tabling record (found again in \code{\verb~|k_ck6~}, \code{\verb~|ckRecord~})}}
+\tr{\td{F5}\td{\code{\verb~|Infer.k_ck8~}}\td{the EXPECTED body type (when closed) was stored as the COD memo of the lambda's PII}\td{not stored (the memo written by the lam rule of INFER, the body's own closed type, stays)}}
+\tr{\td{F6}\td{\code{\verb~|Reduce.k_iota3~}, \code{\verb~|Eval.apply~} / \code{\verb~|k_evalHead~}, \code{\verb~|Infer.Ext.zetaInexact~}, \code{\verb~|Infer.LET_EXACT~}}\td{the K rule typed the major premise by its VALUE; under \code{\verb~|gated~} the value of \code{\verb~|f a~} with \code{\verb~|f~} a let variable has the variable reduced away, the official \code{\verb~|to_cnstr_when_K~} types the TERM through the variable's declared type}\td{a LET suspension whose declared type is the very type of its value is marked (\code{\verb~|M1 = LET_EXACT~}); applying any other let variable sets \code{\verb~|zetaInexact~} for the declaration, and a K comparison after that is a DECLINE (\code{\verb~|E_LIMIT~}, fatal). Cost: the declines of this rule on the corpora (the gate of the publication names them)}}
+}
+
+\subtree{
+\title{E1-F7 (kind T, tolerated by the practical policy; 2026-11-24 21:35Z): the type of a term the official kernel does NOT reduce}
+
+\p{Owner's note 13 (22:25Z): a kind T accept is tolerated in the default configuration, so this family is documented (\src{docs/design/review/official-divergence.md}) and not worked on further. Three rows of the S manifest carry the kind mark \code{\verb~|T~} (the machine accepts, the official checker rejects, the statement is \code{\verb~|True~}; official verdicts from Docker, the reference engine rejects): \code{\verb~|e1-sib-proj-applied-let-pi-bad~} and \code{\verb~|e1-sib-proj-redex-pi-bad~} (v0 and every set), \code{\verb~|e1-sib-krule-major-redex-bad~} (\code{\verb~|gated~} and the default set; v0 is right only because its tabling record of the argument holds the INFER type). Nine more rows \code{\verb~|e1-sib-*~} are strict.}
+
+\p{Root cause: the official kernel infers the type of a term it has not reduced in two places - the RAW major premise in \code{\verb~|to_cnstr_when_K~}, and the struct of a STUCK projection (\code{\verb~|reduce_proj~} fails, \code{\verb~|whnf_core~} returns the projection as it was; \code{\verb~|is_def_eq_proof_irrel~}, structure eta, the unit-like rule and eta expansion then call \code{\verb~|infer_type~} on it). That type goes through the DECLARED domain of an uncontracted beta-redex and the declared type of a let variable. The machine's \code{\verb~|VTYPE~} works on the VALUE, where the redex is contracted (\code{\verb~|Values.mkSuspAt~} also returns a known VAL in place of the suspension, and \code{\verb~|Eval.proj~} evaluates the struct), and gives the argument's own type, which is only convertible. The F6 rule above (decline of the K rule after the application of an inexact let variable) covers one shape only and is not robust in a warm session (a memoised evaluation does not pass \code{\verb~|Eval.apply~} again).}
+
+\p{What an exact fix needs (not built): (a) \code{\verb~|VTYPE~} of a plain suspension = \code{\verb~|INFER(term, frame, ONLY)~} (what v0's tabling stores), not \code{\verb~|VTYPE(FORCE)~}; (b) a suspension is never replaced by its known VAL where it stands for an argument (\code{\verb~|mkSuspAt~}, \code{\verb~|mkSusp~}, \code{\verb~|Eval.inertHead~}'s PEEK), so that a bound variable keeps the term it stands for; (c) \code{\verb~|Eval.proj~} keeps the suspension of an active struct term instead of its value; (d) the same in the compiled paths (\code{\verb~|Code~}, \code{\verb~|Rules~}, \code{\verb~|Ops~}: \code{\verb~|mkSusp~}, strict projections). Measured for a decline rule instead (Mathlib slices 425,620 / Std 100,096 engine checks): declarations that apply an inexact let variable and then type a projection or run the K rule: 322 / 12; declarations that bind an inexact let: 3,531 / 335; neither covers the let-free shapes. Cost of F2 / F3: \code{\verb~|INST(PII, x)~} builds one frame and one record more when the typed binding is needed; of F4: lambdas whose domain is not the expected domain's value take the generic rule.}
+}
+
+\subtree{
+\title{E1-F4 and the switch \code{\verb~|convexpect~} (2026-11-24 22:41Z)}
+
+\p{The fix of F4 (B9 only when the two domains are one value) is the whole tick cost of the fix: Cedar slice 2.40 \%, Std 0.30 \%, Init 0.32 \%, Mathlib slices 0.33 \%; the typed bindings of F2 / F3 cost nothing. In warm wall clock (8 workers, native) it does not show on Std and cedar, so it stays in the default. \code{\verb~|convexpect~} (\code{\verb~|Op.SW_CONV_EXPECT~}, off) gives the old B9 back; the three rows \code{\verb~|e1-lam-fvar-type-in-conv-*-bad~} are kind T rows and are accepted with it.}
+}
+}

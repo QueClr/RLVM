@@ -1,0 +1,53 @@
+\title{NOTES-S - the independent soundness review (package S)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\meta{origin}{rlvm-machine/NOTES-S.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{The review, its findings, the table of shortcuts and the verdict on the switch sets are in \src{docs/design/review/soundness-machine.md}. This file says what package S keeps in the module.}
+
+\table{
+\tr{\th{What}\th{Where}}
+\tr{\td{hostile exports, gzip (329; each attacks one shortcut or memo; plain files in \code{\verb~|work/soundness/exports/~})}\td{\code{\verb~|src/test/resources/s/*.ndjson.gz~}}}
+\tr{\td{manifest: name, verdict of the OFFICIAL checker (leanchecker 4.36.0), known findings, what the export attacks}\td{\code{\verb~|src/test/resources/s/manifest.tsv~}}}
+\tr{\td{generators (\code{\verb~|lk.py~}: export builder on \code{\verb~|init-prelude~} with a recursor generator; \code{\verb~|batch1..8.py~}), the judge (\code{\verb~|judge.py~}: official checker, reference engine and the machine through the launcher under any switch sets; \code{\verb~|check-machine.sh~} for \code{\verb~|testkit judge~}), the targeted mutator (\code{\verb~|mutate.py~})}\td{\code{\verb~|src/test/resources/s/gen/~} (working copies in \code{\verb~|work/soundness/~})}}
+\tr{\td{\code{\verb~|SHostile~}}\td{in-process judgment of one export by M8's \code{\verb~|Diff.compare~} under a switch set; the rule of a row}}
+\tr{\td{\code{\verb~|SHostileTest~} (group \code{\verb~|fast~})}\td{v0 and \code{\verb~|warm,gated,expect~} on every export; \code{\verb~|probes~}, \code{\verb~|facts~}, the K1 roles on the exports that attack them. 6 tests, about 5 s on a quiet host}}
+\tr{\td{\code{\verb~|SHostileSlowTest~} (group \code{\verb~|slow~})}\td{every export under 17 switch sets (about 4 minutes on a loaded host); \code{\verb~|noKnownFindingIsLeft~} (strict)}}
+}
+
+\p{Rules of the tests: a WRONG ACCEPT or WRONG REJECT against the official verdict fails, unless the manifest lists it as a KNOWN FINDING of a switch (\code{\verb~|warm~}; \code{\verb~|probes~} and \code{\verb~|facts~} had rows until M4's fix of 14:30Z) or of every configuration, v0 included (\code{\verb~|eager~} = S-F5, \code{\verb~|levels~} = S-F3): those are printed.}
+
+\p{State on 2026-11-24, 15:15Z (main tree): open is only \code{\verb~|levels~} (2 rows: S-F3, both engines). The 16 rows of S-F1 / S-F2 (fixed by M4 at 14:30Z), the 3 rows of S-F4 and the 2 rows of S-F5 (closed by M6's rule M6-F26, armed by M5 and M7 by 15:10Z: a declaration that enters eager reduction is DECLINED by the machine and checked by the reference engine) are strict and pass under every switch set. The 11 exports that enter eager reduction carry the note \code{\verb~|eager-decline~}: a decline of the machine on them is by design and is not printed.}
+
+\p{Adding an export: write it with \code{\verb~|gen/lk.py~} (see \code{\verb~|gen/batch2.py~} for a short example), judge it with \code{\verb~|gen/judge.py FILE~} (prints the official verdict and every switch set), gzip it into \code{\verb~|src/test/resources/s/~} and add its manifest row.}
+
+\p{Deviation: the exports are stored compressed (2.3 MB instead of 8.5 MB) and unpacked into a temporary directory by the tests.}
+
+\subtree{
+\title{The whole suite (INT7, 2026-11-25; OWNER-NOTES 13, the "practical" policy)}
+
+\p{\code{\verb~|manifest.tsv~} has 1,189 rows: package S's and E1's 421, reviewer S3's 423 (\code{\verb~|s3-*~}; \code{\verb~|work/s3/manifest.tsv~}, the six rows that caught seeded faults first), reviewer S2's 279 (\code{\verb~|s2-*~} = \code{\verb~|work/s2/attacks~} 134 + \code{\verb~|attacks2~} 11, \code{\verb~|s2d-*~} = \code{\verb~|attacks-dat~} 134), reviewer C1's 41 (\code{\verb~|c1-*~}; \code{\verb~|work/c1/hostile~}) and R2's 25 (\code{\verb~|r2-*~}; \code{\verb~|work/r2/exports/batch1..3.tsv~}). The official verdict of every new row was taken again from leanchecker 4.36.0 in Docker (\code{\verb~|work/int7/official.sh~}, \code{\verb~|work/int7/hostile/official.tsv~}: 325 accept, 443 reject; every reviewer's verdict confirmed, S2's \code{\verb~|attacks-dat~} had none of its own). Built by \code{\verb~|work/int7/hostile/collect.py~} + \code{\verb~|mkmanifest.py~} (+ \code{\verb~|marks.tsv~}).}
+
+\p{\strong{Every row = official verdict + kind.} The kind is the mark \code{\verb~|T~} (81 rows, all official REJECT): the official verdict OR an accept. Every other row is strict. A \code{\verb~|T~} is given only where a reviewer gave it; the text of the row says who:}
+
+\table{
+\tr{\th{Rows}\th{Kind T by}}
+\tr{\td{31 \code{\verb~|s3-*~}}\td{S3, \code{\verb~|soundness-default-set.md~} section 8 (derivable as written; certificates and twins in sections 3, 7, 10)}}
+\tr{\td{15: \code{\verb~|probe-b1-*~}, \code{\verb~|probe-b12-*~}, \code{\verb~|facts-*-noncongruent-*~}, \code{\verb~|open-flag-closed-bad~} (14) and \code{\verb~|s2-acc-rec-intro-vs-axiom~}}\td{S2, \code{\verb~|soundness-shortcuts.md~} section 4: 15 certificates accepted by the official checker}}
+\tr{\td{19 rows of the family \code{\verb~|X = Y p~} under eager reduction (\code{\verb~|*-eager-*~}, \code{\verb~|krule-*-eager-*~}, \code{\verb~|e1-site-*~}, ..)}\td{S3, section 10.1 (family argument)}}
+\tr{\td{7 \code{\verb~|e1-lam-fvar-type-in-conv-*~}, \code{\verb~|e1-sib-*~}}\td{E1 (\code{\verb~|official-divergence.md~} section 1, certificates \code{\verb~|e1-cert-*~}); the seventh, \code{\verb~|e1-sib-proj-let-pi-bad~}, by S3 10.1}}
+\tr{\td{5 \code{\verb~|r2-*~}}\td{R2 (findings R2-F1 nondep, R2-F2 object identity, R2-F3 admission cache)}}
+\tr{\td{\code{\verb~|c1-fuse-abbrev-samehead-proofarg-bad~}, \code{\verb~|c1-fuse-opaque-samehead-proofarg-bad~}}\td{INT7 by S2's certified family: the statement \code{\verb~|G I = G h~} of \code{\verb~|probe-b1-abbrev-proof-arg~} / \code{\verb~|probe-b1-theorem-head~}}}
+\tr{\td{\code{\verb~|r2-id-beta-control-bad~}, \code{\verb~|r2-id-literal-vs-offset-bad~}}\td{INT7 by S3's family S3-F1 (R2 lists them as controls of S3-F1): the statement of an officially accepted twin up to a beta step / \code{\verb~|Nat.succ 6 = 7~}}}
+}
+
+\p{Notes of single rows (the rule is in \code{\verb~|SHostile~}): \code{\verb~|recheck~} (11 official ACCEPT rows that the machine's primary lane may REJECT through its cache history - S3-F1, S3-F3, S3-F6 and R2's \code{\verb~|r2-id-binder-*~}, \code{\verb~|r2-ptr-*-ok~} - and the reference engine accepts: the pipeline's verdict is the official one; a rejection of the machine on an official ACCEPT without this note fails the suite); \code{\verb~|mdata~} (\code{\verb~|s3-mdata-eager-hidden-ok~}: official ACCEPT because an \code{\verb~|mdata~} node hides \code{\verb~|eagerReduce~}; with transparent \code{\verb~|mdata~} - the practical policy - \code{\verb~|default,eager~} and the reference engine REJECT it; with the two shortcuts the machine accepts it. It is the one known input on which the pipeline rejects what the official checker accepts; it belongs to the strict mode's suite); \code{\verb~|decline~} (\code{\verb~|s2-prop-mdata-domain-bad~}, \code{\verb~|s2d-~}: the reference engine declines).}
+
+\p{\code{\verb~|SHostileSlowTest~}: 1,189 rows under every switch set. \code{\verb~|SHostileTest~} (fast): v0 and \code{\verb~|warm,gated,expect~} on every row.}
+}

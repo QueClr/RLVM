@@ -1,0 +1,390 @@
+\title{NOTES-M8 - quote, tier and convention equivalence, differential tests (owner: M8)}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{benchmark}
+\tag{performance}
+\meta{origin}{rlvm-machine/NOTES-M8.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{What M8 delivers, where it deviates from \src{docs/design/ISA.md} / \code{\verb~|WORK-PACKAGES.md~} and why, what was measured, and what is not done. The tools are in the test tree (\code{\verb~|Quote~}, \code{\verb~|TierEq~}, \code{\verb~|Diff~}, \code{\verb~|M8*~}), the scripts in \code{\verb~|src/test/resources/m8/~}, the reports in \code{\verb~|work/status/~}.}
+
+\subtree{
+\title{1. Commands (one per report)}
+
+\p{\code{\verb~|rlvm-machine/src/test/resources/m8/report.sh --help~} lists them. Every command measures the \strong{main tree as published}: the script copies the module in a moment without a publication (checked against \code{\verb~|work/sandbox/.lock.holder~} and \code{\verb~|publish.log~} before and after the copy; it does not queue behind the publications), compiles the copy and runs \code{\verb~|rlvm.machine.M8Main~} in a JVM of its own (\code{\verb~|-Xss2m~}, 6g heap, \code{\verb~|-Xmn1g~}, inside one host-wide slot of \src{bench/slot.sh}, pinned to the CPUs outside the measurement container; wave 6, section 7). It never runs Maven on the main tree and never writes into it. \code{\verb~|--tree work/sandbox/Mk/rlvm-machine~} measures a sandbox instead (your files before you publish them).}
+
+\p{\strong{Wave 6 added the three commands everybody uses now (section 7): \code{\verb~|report.sh gate~}, \code{\verb~|report.sh mutants~}, \code{\verb~|ladder.py measure~}, and \code{\verb~|big.py~} for the large corpora.}}
+
+\table{
+\tr{\th{Command}\th{Report in \code{\verb~|work/status/~}}\th{What (ISA section 11; stepper-convention H12)}}
+\tr{\td{\code{\verb~|report.sh tutorial~} / \code{\verb~|bugs~} / \code{\verb~|all~} / \code{\verb~|init~} (\code{\verb~|gates~} = these four)}\td{\code{\verb~|machine-diff-NAME.txt~}}\td{machine against the reference engine, per declaration, in-process: the v0 gate. First lines: \code{\verb~|GATE NAME: DIFF-CLEAN / NOT CLEAN / WRONG VERDICTS~}, counts, what stopped the machine how often (stub, error code), then one line per file and the first difference of every file with its reproduction command. Exit 1 = a wrong verdict}}
+\tr{\td{\code{\verb~|report.sh std~} / \code{\verb~|cedar~} / \code{\verb~|reachability~}, \code{\verb~|report.sh diff NAME PATH..~}}\td{the same}\td{v1 gate, the Cedar-level slices, any corpus}}
+\tr{\td{\code{\verb~|report.sh launcher tutorial~} / \code{\verb~|bugs~} / \code{\verb~|all~}}\td{\code{\verb~|machine-launcher-NAME.txt~}}\td{the gate in its own form: every test through \code{\verb~|work/dist/bin/rlvm-jvm --threads 1 -X engine=machine~} with the published jar on \code{\verb~|RLVM_EXTRA_CP~}; the verdict against the arena's classification AND \code{\verb~|values.engine.primary.machine.declined == 0~}, \code{\verb~|units.declined == 0~} from the statistics (the exit status alone proves nothing)}}
+\tr{\td{\code{\verb~|report.sh conv NAME~}}\td{\code{\verb~|machine-conv-NAME.txt~}}\td{convention equivalence (H12 item 1): every declaration under host depth bounds \code{\verb~|Op.HOST_DEPTH~} (128), 64, 0 and unbounded: outcome, reason, ticks, call events by op, the frame trace; after an ACCEPT every record word (ids, flags, memo words), every run word, the pair entries}}
+\tr{\td{\code{\verb~|report.sh frames NAME~}}\td{\code{\verb~|machine-frames-NAME.txt~}, \code{\verb~|machine-calls-NAME.tsv~}}\td{call events and frames written per declaration under the bound in force; the bound of H12 item 2 (frames below 0.1\% of the calls, on Init); the per-declaration call table is compared with the previous one (+2\% alert of ISA section 11)}}
+\tr{\td{\code{\verb~|report.sh sample NAME~}}\td{\code{\verb~|machine-sample-NAME.txt~}}\td{judgment level: \code{\verb~|infer~}, \code{\verb~|whnf~}, \code{\verb~|whnfCore~}, \code{\verb~|isDefEq~}, \code{\verb~|isProp~}, \code{\verb~|ensurePi~} of the machine on sampled sub-terms (binders opened on the way), read back with \code{\verb~|Quote~} and judged by the reference kernel up to its \code{\verb~|isDefEq~}}}
+\tr{\td{\code{\verb~|report.sh tiers NAME~}}\td{\code{\verb~|machine-tiers-NAME.txt~}}\td{K0 against the tier \code{\verb~|-Dm8.k1=facts,tele,code,casetrees~}: DELTA, WHNF, VTYPE give the same value and CONV the same answer on generated applications of every constant}}
+\tr{\td{\code{\verb~|report.sh cost --stage LABEL [--runs N] [CORPUS..]~}}\td{\code{\verb~|machine-cost.md~}, \code{\verb~|machine-cost.tsv~}}\td{the per-stage table CPU / wall / RSS / instructions (in that order): machine and reference engine through the launcher in the arena-shaped container (\src{bench/measure.sh}), ratio to the reference and to gruszka. A machine row whose engine checks fell back to the reference kernel is marked FALLBACK}}
+\tr{\td{\code{\verb~|convcost.sh micro~}, \code{\verb~|convcost.sh corpus CORPUS..~}}\td{\code{\verb~|machine-convcost-micro.txt~}, rows \code{\verb~|convcost~} in \code{\verb~|machine-cost.md~}}\td{CPU cost of \code{\verb~|m.hostDepth~} as a field and of the masked TICK line (section 4)}}
+}
+
+\p{In a sandbox the same code runs as tests (\code{\verb~|scripts/machine-sandbox.sh test Mk ...~}):}
+
+\pre{\verb~|
+-Dgroups=slow -DexcludedGroups= -Dtest='M8DiffReportTest#tutorial'        (#bugs #all #init #std #cedar #custom)
+-Dgroups=slow -DexcludedGroups= -Dtest='M8SlowTest#convTutorial'          (#convBugs #framesInit #sampleInit #tiersValuesTutorial ..)
+-Dtest=M8DiffOneTest -Dm8.file=FILE [-Dm8.unit=N] [-Dm8.all=true] [-Dm8.trace=true]   one file in detail: both outcomes,
+                                                                          reasons, ticks, call events by op, frames, trace
+-Dtest='M8ConventionTest#oneFile' -Dm8.file=FILE                          convention equivalence of one file
+-Dtest='M8SamplerTest#oneFile' -Dm8.file=FILE [-Dm8.unit=U] [-Dm8.seed=S] one sampled difference again
+~}
+
+\p{Options everywhere (system properties): \code{\verb~|-Dm8.hostDepth=0~}, \code{\verb~|-Dm8.switches=warm,gated~}, \code{\verb~|-Dm8.debug=..~}, \code{\verb~|-Dm8.maxSteps=N~}, \code{\verb~|-Dm8.checkSeconds=N~}, \code{\verb~|-Dm8.fileSeconds=N~}, \code{\verb~|-Dm8.suffix=-d0~} (report name), \code{\verb~|-Dm8.seed=N~}, \code{\verb~|-Dm8.perConstant=N~}, \code{\verb~|-Dm8.every=N~}, \code{\verb~|-Dm8.k1=..~}.}
+
+\p{Guard of every publication (fast group): \code{\verb~|M8GateTest~} = no SOUNDNESS / COMPLETENESS difference on a fixed sample of tutorial and \code{\verb~|bugs/~} files (declines pass). It fails the publication of whoever introduces a wrong verdict and prints the reproduction command.}
+}
+
+\subtree{
+\title{2. What the pieces are}
+
+\ul{
+\li{\code{\verb~|M8Harness~}: one loaded export, the reference engine, and any number of machine configurations ("lanes": host depth, switches, debug modes) run over its units in lockstep. Every lane has its own worker context over the same store; an observing \code{\verb~|Session~} sits between admission and \code{\verb~|MachineSession.check~} and records outcome, ticks, call events by op, frames, the trace, and after an ACCEPT digests of records, runs and pairs; every check has a deadline that the machine sees through its 4096-tick poll.}
+\li{\code{\verb~|Diff~}: the corpus runner and the report.}
+\li{\code{\verb~|TierEq~}: \code{\verb~|conventionEquivalence(path)~}, \code{\verb~|compare(machineA, machineB)~} (word-for-word comparison of two machines, with the first difference printed), \code{\verb~|traceDifference~}, the reports \code{\verb~|conv~} and \code{\verb~|frames~}, \code{\verb~|tierEquivalence(path, seed)~} (declaration outcomes under two switch sets).}
+\li{\code{\verb~|Quote~}: readback of a value into the overlay. Closures and suspensions by substitution of the frame and of \code{\verb~|ls~} (no judgment runs); a PII through \code{\verb~|DOM~} / \code{\verb~|OPEN~} / \code{\verb~|INST~}; in-scope FVARs as the loose variables of their binders, or as a term given with \code{\verb~|Quote.of(m).local(fvar, term)~}; a HOLE slot that the term turns out to read is reported (mask contract, ISA 2.4).}
+\li{\code{\verb~|M8Sampler~}: glue between \code{\verb~|rlvm.testkit.KernelSampler~}, M6's \code{\verb~|MachineOps~} (with \code{\verb~|Quote::quote~} as its quoter) and a \code{\verb~|RefKernel~} on the same worker context.}
+\li{\code{\verb~|M8Tiers~}: tier equivalence on values, by a structural fingerprint that includes closure identity.}
+\li{\code{\verb~|M8ConvCost~}: the micro-benchmark of section 4.}
+}
+}
+
+\subtree{
+\title{3. Deviations}
+
+\table{
+\tr{\th{\verb~|#~}\th{Where}\th{Deviation}\th{Reason}}
+\tr{\td{D1}\td{\code{\verb~|Diff.run~}, the reports}\td{the corpus runs go through \code{\verb~|M8Harness~} (own loader wiring, one worker context per lane, an observing \code{\verb~|Session~}), not through \code{\verb~|Fixture.diffAgainstReference()~} as WORK-PACKAGES M8 says}\td{a report over hundreds of files needs per-declaration observation, a deadline per check, a hard limit per file and several machines over one store; the fixture is a frozen shared file. The counting rule is the fixture's (\code{\verb~|M8HarnessTest.theHarnessCountsAsTheFixtureDoes~}), except D8. \code{\verb~|Diff.file(path)~} still is the fixture's comparison}}
+\tr{\td{D2}\td{\code{\verb~|Diff.directory~}}\td{returns the rendered report; \code{\verb~|Diff.run~} / \code{\verb~|Diff.report~} return the structured one}\td{the stub's \code{\verb~|String~} signature is kept}}
+\tr{\td{D3}\td{convention equivalence}\td{after an outcome other than ACCEPT only outcome, reason, ticks, call events and the trace are compared, not records and memo words}\td{\code{\verb~|MachineSession.check~} resets the machine before it returns such an outcome (ISA 14.1); the comparison goes through the real facade on purpose}}
+\tr{\td{D4}\td{convention equivalence}\td{the pair table is compared as a set of \code{\verb~|(lo, hi, status)~}; another insertion order is counted as a note}\td{ISA 1.3 names "memo and pair-table contents", not the order of the insertion log}}
+\tr{\td{D5}\td{lane without a depth bound}\td{a \code{\verb~|StackOverflowError~} in the unbounded lane makes that declaration "not compared" (counted); under a bound it is not caught}\td{plain host recursion is a test configuration (H9); under a bound an overflow is a defect and must stay loud (ISA 12 R11)}}
+\tr{\td{D6}\td{the reports' JVM}\td{\code{\verb~|-Xss2m~} like surefire's; the conv run uses one 64 MiB thread for its three lanes}\td{the machine must not need a deep host stack (H9); only the unbounded lane does}}
+\tr{\td{D7}\td{deadlines}\td{a machine check that runs longer than \code{\verb~|m8.checkSeconds~} (default 120) is cancelled through \code{\verb~|RunSignals.firstFailure()~} at the next 4096-tick poll and counts as a decline (CANCELLED); a file beyond \code{\verb~|m8.fileSeconds~} (default 1800) is reported as TIMEOUT}\td{a report must survive a looping judgment. A loop that never ticks is only caught by the file limit (the line says so). On a loaded host a slow, correct check can be cancelled: read the reason column before reading a decline as a defect}}
+\tr{\td{D8}\td{a unit the reference engine DECLINES}\td{not SOUNDNESS / COMPLETENESS whatever the machine says; counted as "reference declined"; the run goes on behind it; the file is settled by the official verdict (the arena's good / bad classification, confirmed by the official checker for all 230 tests): \code{\verb~|CLEAN*~} if the machine's verdict of the file is the official one, \code{\verb~|WRONG~} if it is the opposite. The reference engine gets the driver's budget (min(6 GiB, 60\% of the heap))}\td{M5's request of 08:57Z: \code{\verb~|perf/app-lam~} and \code{\verb~|perf/magma-list-deep-n36~} exhaust a 4 GiB budget of the reference engine; without this the \code{\verb~|all~} gate could never be clean and a real soundness line would hide among such lines. The shared fixture follows since 09:31Z (\code{\verb~|DiffReport.referenceDeclined~}, M6); one difference remains: the fixture's \code{\verb~|clean()~} is false for a file with such a unit, the harness settles it by the official verdict}}
+\tr{\td{D9}\td{\code{\verb~|Quote~}}\td{closures and suspensions are read back by substitution (\code{\verb~|TermOps.instantiate~} of the frame's readbacks, then \code{\verb~|instantiateLevelParams~} by \code{\verb~|ls~}), not by evaluating the body under a fresh variable; the memo is keyed by (value, number of open binders) for OPEN values and dropped when the machine was reset, the overlay shrank, the open binders changed or a local changed}\td{the term is what the value \em{means} (ISA 2.2), independent of how well the machine evaluates: the right thing to hand to the reference kernel, and no judgment runs (a readback must not perturb what it observes more than necessary). Only a PII has no term of its own and is read back through \code{\verb~|INST~}}}
+\tr{\td{D10}\td{\code{\verb~|Quote~}}\td{a NatStore literal is read back as \code{\verb~|b.termOf(Nat.transfer(m.nats, handle, b.store()))~}}\td{M6's request of 08:48Z (the machine's number overlay)}}
+\tr{\td{D11}\td{sampler}\td{the comparison is \code{\verb~|rlvm.testkit.KernelSampler~} (not a second walker in this module); it needs \code{\verb~|MachineOps~} (M6). A judgment that ends in a stub is counted by stub, not as a difference; the report then says NO DATA, not AGREE. \code{\verb~|Tally.more~} (isProp / whnfCore / ensurePi) is read reflectively: the published test-kit jar is older than its source}\td{one sampler for the launcher campaign (\code{\verb~|testkit diff --sample~}) and for this module}}
+\tr{\td{D12}\td{tier equivalence}\td{"the same value id" across K0 and K1 is tested as "the same structural fingerprint" (kind, components, and for closures the term id, \code{\verb~|ls~} and the fingerprints of the frame slots incl. HOLE and the REST run) in two sessions of one machine; results equal up to PEEK are counted, not failed}\td{a memo written by one tier must not answer the other, so the tiers cannot share a session; with canonical ids a common fingerprint is a common id (I-ID). The up-to-PEEK relaxation follows M2's note of 08:56Z}}
+\tr{\td{D14}\td{report names}\td{the plain names (\code{\verb~|machine-diff-tutorial.txt~}, ..) are written only by runs on the main tree; a run on a sandbox (\code{\verb~|report.sh --tree ..~}, or a slow M8 test inside a sandbox) gets the suffix \code{\verb~|-Mk~} unless \code{\verb~|-Dm8.suffix~} is given and says "MEASURED: THE SANDBOX .., NOT THE MAIN TREE" in its header}\td{other packages ran the reports on their sandboxes (as intended) and overwrote the gate reports the orchestrator reads}}
+\tr{\td{D15}\td{convention lanes}\td{\code{\verb~|TierEq.BOUNDS~} = \code{\verb~|Op.HOST_DEPTH~} (128 since 10:29Z, M6's decision on the frame counts of section 5), 64, 0, unbounded; the first is the lane the others are compared with}\td{H12 item 1 and the acceptance of M8 name D = 64 and D = 0; the bound in force moved}}
+\tr{\td{D13}\td{\code{\verb~|M8GateTest~}}\td{a fast test of M8 asserts something about all packages together: no wrong verdict on 25 files}\td{WORK-PACKAGES section 6: soundness + completeness must be 0 at every commit. It never asserts that a stub throws}}
+}
+}
+
+\subtree{
+\title{4. Measured}
+
+\p{Host: aarch64, 20 cores, shared with the other 15 agents of the wave (load average 100-150 while these were taken); figures are minima over rounds where stated.}
+
+\p{\strong{Cost of the skeleton's two deviations from the measured convention} (NOTES-M6 S3, S4), requested by the skeleton. \code{\verb~|convcost.sh micro~} (\code{\verb~|work/status/machine-convcost-micro.txt~}): toy judgments that differ only in the depth test and the TICK line, CPU time per judgment, minimum of 25 interleaved rounds.}
+
+\table{
+\tr{\th{JIT}\th{workload}\th{CP: constant bound, \code{\verb~|--m.fuel < 0~} (the convention)}\th{FP: field bound}\th{CM: masked TICK}\th{FM: as built}\th{as built / convention}}
+\tr{\td{C2 (the launcher today)}\td{a judgment that only makes two sub-calls}\td{1.42 ns}\td{1.45 ns}\td{1.74 ns}\td{1.76 ns}\td{1.24}}
+\tr{\td{C2}\td{the same with one intern probe per judgment}\td{5.37 ns}\td{5.36 ns}\td{5.69 ns}\td{5.70 ns}\td{1.06}}
+\tr{\td{Graal JIT}\td{two sub-calls}\td{1.74 ns}\td{1.81 ns}\td{1.73 ns}\td{1.74 ns}\td{1.00}}
+\tr{\td{Graal JIT}\td{with one intern probe}\td{6.09 ns}\td{6.10 ns}\td{6.21 ns}\td{6.23 ns}\td{1.02}}
+}
+
+\p{Reading: \code{\verb~|m.hostDepth~} as a field is free (at most 0.03 ns, inside the noise). The masked TICK line costs about 0.3 ns per ticking judgment under C2 and about 0.1 ns under the Graal JIT: a quarter of a judgment that does nothing, 6\% of one that interns one record.}
+
+\p{\strong{The same on the real machine} (\code{\verb~|convcost.sh corpus --runs 6 init~}, rows \code{\verb~|convcost~} of \code{\verb~|work/status/machine-cost.md~}): three variant jars built by \code{\verb~|sed~} from the main tree of 10:04Z (35 depth tests, 41 TICK lines replaced), Init through the launcher (C2, one worker, arena-shaped container), minimum CPU time of six runs each; all four accept all 57,938 declarations:}
+
+\table{
+\tr{\th{variant}\th{CPU s (6 runs)}\th{CPU s (first series, 2 runs)}\th{instructions G}}
+\tr{\td{as built (field bound, masked TICK)}\td{15.01}\td{15.36}\td{151.1}}
+\tr{\td{constant bound}\td{15.51}\td{16.31}\td{157.3}}
+\tr{\td{plain TICK (\code{\verb~|--m.fuel < 0~}, no poll)}\td{15.19}\td{15.92}\td{154.8}}
+\tr{\td{constant bound and plain TICK (the convention)}\td{14.88}\td{14.63}\td{153.5}}
+}
+
+\p{No consistent order: the variant with only the constant bound is slower than the machine as built, the one with both changes is 0.9\% faster. The resolution of this host (load average 130-180 during the runs) is about 3\%, and the differences are inside it. The micro-benchmark bounds the effect from above: 0.33 ns x 94 M ticks = 31 ms of 15 s = 0.2\%. \strong{Conclusion: neither deviation has a measurable CPU cost on Init.} If it ever matters, the plain line can keep the poll: let \code{\verb~|fuel~} count down a chunk of at most 4096 ticks and let \code{\verb~|tickSlow()~} refill it from a reserve after polling (\code{\verb~|ticks() = tickBase - fuel - reserve~}); the TICK line is then the convention's \code{\verb~|--m.fuel < 0~}. Not requested: the measured cost does not justify touching every judgment.}
+}
+
+\subtree{
+\title{5. State of the gates on 2026-11-24 (regenerate with the commands of section 1)}
+
+\p{Last regeneration: main tree as published 10:46-10:55Z, \code{\verb~|Op.HOST_DEPTH = 128~} (every report names the publication it measured). Earlier states are in \code{\verb~|work/status/machine-M8.log~}.}
+
+\table{
+\tr{\th{Gate / acceptance item}\th{Result}\th{Report}}
+\tr{\td{tutorial (141 files), in-process}\td{\strong{DIFF-CLEAN}: 195 engine checks = 175 accepted + 20 rejected, 0 declined, 0 wrong}\td{\code{\verb~|machine-diff-tutorial.txt~}}}
+\tr{\td{tutorial, through the launcher (09:06Z)}\td{\strong{PASSED} 141 / 141: verdicts right, \code{\verb~|machine.declined == 0~}, \code{\verb~|units.declined == 0~}}\td{\code{\verb~|machine-launcher-tutorial.txt~}}}
+\tr{\td{\code{\verb~|bugs/~} (34 files), in-process / launcher (09:04Z)}\td{\strong{DIFF-CLEAN} (1136 accepted + 11 rejected) / \strong{PASSED} 34 / 34}\td{\code{\verb~|machine-diff-bugs.txt~}, \code{\verb~|machine-launcher-bugs.txt~}}}
+\tr{\td{all 230, in-process}\td{\strong{no wrong verdict; 229 files clean}, 1 with one decline: \code{\verb~|good/perf/loop-unfolded-once~} unit 1365 \code{\verb~|loop_unfolded_once~} (\code{\verb~|E_MEM~}: 2^28 run words per session; M2's diagnosis in requests.log 09:24Z). 15,803 accepted + 41 rejected + 1 declined}\td{\code{\verb~|machine-diff-all.txt~}}}
+\tr{\td{all 230, through the launcher}\td{\strong{229 / 230 clean, 0 wrong}; the same test falls back to the reference kernel}\td{\code{\verb~|machine-launcher-all.txt~}}}
+\tr{\td{Init, in-process / launcher (10:04Z)}\td{\strong{DIFF-CLEAN}: 58,547 units, 57,938 engine checks, all accepted / \strong{PASSED}}\td{\code{\verb~|machine-diff-init.txt~}, \code{\verb~|machine-launcher-init.txt~}}}
+\tr{\td{convention equivalence per declaration, lanes D = 128 (in force), 64, 0, unbounded (11:0xZ; before 10:29Z the same with 64 in force)}\td{\strong{EQUIVALENT} on tutorial (195 declarations, 175 accepted), \code{\verb~|bugs/~} (1147, 1136) and \strong{Init (57,938, all accepted; 77.8 M ticks, 63.5 M call events)}: outcome, reason, ticks, call events by op and their sequence, every record word incl. memo words, every run word, the pair entries; no pair-order note; the unbounded lane wrote no frame and never overflowed (64 MiB thread); frames on Init: D128 32,274, D64 180,960, D0 145.5 M}\td{\code{\verb~|machine-conv-{tutorial,bugs,init}.txt~}}}
+\tr{\td{frames written under the host depth bound on Init, bound 0.1\% of the calls}\td{D = 64 (the bound until 10:29Z): \strong{not met, 0.234\%} (185,128 frames for 79.2 M call events; 1992 spills; 603 declarations with a frame, one of them with 49\% of the frames). D = 128: 0.041\%, D = 256: 0.017\%; ticks and call events identical under all bounds. On this data M6 set \code{\verb~|Op.HOST_DEPTH = 128~}; \strong{with it the bound is met: 32,274 frames for 63.5 M call events = 0.051\%}}\td{\code{\verb~|machine-frames-init.txt~} (128), \code{\verb~|-init-d128.txt~}, \code{\verb~|-init-d256.txt~} (the D = 64 figures are in the log), \code{\verb~|machine-calls-init.tsv~}}}
+\tr{\td{readback of \code{\verb~|whnf~} and \code{\verb~|infer~} against the reference kernel on sampled sub-terms (10:02Z)}\td{\strong{AGREE} on Init: 1486 constants, 5944 sub-terms (1253 proofs): 5944 infer, 4691 whnf, 7240 isDefEq, 11,442 isProp / whnfCore / ensurePi answers, 0 differences, 0 undecided; tutorial (175 constants) and \code{\verb~|bugs/~} (1136 constants, 2 undecided) AGREE too}\td{\code{\verb~|machine-sample-{init,tutorial,bugs}.txt~}}}
+\tr{\td{K0 = K1 on values}\td{\strong{EQUIVALENT} on Init against \code{\verb~|facts,tele,code,casetrees~} as published: 1486 constants, 5944 results (DELTA, WHNF, VTYPE fingerprints incl. closure identity; CONV), none equal up to PEEK only, none skipped; tutorial (175 constants) likewise. (M7's own \code{\verb~|M7TierTest.initPrelude~} reported differences at 10:42Z after M2's \code{\verb~|let~} change; this test did not see one on its sample: it applies constants to variables and one-level constructors, M7's test drives block bodies directly)}\td{\code{\verb~|machine-tiers-{init,tutorial}.txt~}}}
+\tr{\td{Std (v1 gate corpus), in-process, first run (10:36Z)}\td{\strong{no wrong verdict, not clean}: 100,096 engine checks = 100,088 accepted + 8 declined, all \code{\verb~|E_MEM: run words: 2^28 per session~} after 50-54 M records each; they make the run slow (1.34 G ticks; 943 s in-process against 137 s for the reference engine on the loaded host)}\td{\code{\verb~|machine-diff-std.txt~}}}
+\tr{\td{Cedar slice \code{\verb~|cedar-hot-ax~}, \code{\verb~|reachability~}, in-process (10:37Z, 10:39Z)}\td{both \strong{DIFF-CLEAN}: 8064 and 4224 engine checks, all accepted}\td{\code{\verb~|machine-diff-cedar.txt~}, \code{\verb~|machine-diff-reachability.txt~}}}
+}
+
+\p{\strong{Cost, stage v0} (\code{\verb~|machine-cost.md~}: launcher \code{\verb~|rlvm-jvm --threads 1~} = HotSpot C2, machine jar on \code{\verb~|RLVM_EXTRA_CP~}, arena-shaped container; best CPU time over the runs of a row, 2-3 runs per measurement):}
+
+\table{
+\tr{\th{corpus}\th{machine CPU / wall / RSS / instructions}\th{reference engine}\th{machine / reference (CPU)}\th{machine / gruszka (CPU)}}
+\tr{\td{Init}\td{14.96 s / 10.9 s / 516 MiB / 155-160 G}\td{15.92 s / 13.8 s / 1253 MiB / 207.9 G}\td{0.94x}\td{5.3x (2.8 s; gate after step 1: 2.5x)}}
+\tr{\td{\code{\verb~|cedar-hot-ax~}}\td{8.62 s / 4.7 s / 689 MiB / 87.8 G}\td{6.38 s / 4.6 s / 1024 MiB / 71.0 G}\td{1.35x (slower)}\td{-}}
+\tr{\td{\code{\verb~|reachability~}}\td{9.41 s / 7.5 s / 2071 MiB / 76.7 G}\td{11.99 s / 11.3 s / 2669 MiB / 101.1 G}\td{0.78x}\td{-}}
+}
+
+\p{The host was shared with the other agents of the wave: CPU time moved by up to 50\% with their load (the reference engine on Init: 23.6 s at load average 150, 15.9 s at 70, the same instruction count). A first statement in the log ("0.63x the reference on Init") compared runs under different load and is withdrawn there. The table keeps every measurement and shows the best per row.}
+
+\p{Found by these tools so far: one bug, in M8's own \code{\verb~|Quote~} (D9: the level substitution reached into the bindings; ten "differences" of the sampler on \code{\verb~|bugs/~}, fixed 09:34Z). No difference in a judgment of the machine, no convention difference, no wrong verdict of the published main tree. (The three "WRONG" files in sandbox reports of 08:55-08:58Z were reference-engine declines counted as SOUNDNESS: D8.)}
+}
+
+\subtree{
+\title{6. Not done, not verified}
+
+\ul{
+\li{\strong{K0 = K1 against a real K1}: \code{\verb~|M8Tiers~} and \code{\verb~|TierEq.tierEquivalence~} run and are tested K0 against K0 and against whatever the switches \code{\verb~|facts,tele,code,casetrees~} do today; they were not validated against an elaborator bug planted on purpose. "Random argument values" are fresh variables and one-level constructor applications of index-free inductive types, not arbitrary closed terms.}
+\li{\strong{\code{\verb~|Quote~} of a PII} is tested through \code{\verb~|INFER~} of two lambdas only; a PII whose body type needs a failing judgment raises \code{\verb~|QuoteFailure~} (untested path beyond the cleanup of binders).}
+\li{\strong{Loops that never tick} inside a judgment are only caught by the per-file limit; the hung thread is abandoned (daemon) and dies with the JVM.}
+\li{\strong{Native image}: nothing of M8 was run on a native image; the micro-benchmark is JVM only (C2 and Graal JIT).}
+\li{The cost table measures the JVM launcher with the machine jar on \code{\verb~|RLVM_EXTRA_CP~}, one worker thread; the H10 inlining flags are not set (M6 has not wired them).}
+\li{\code{\verb~|report.sh frames~} keeps one previous call table (\code{\verb~|.prev~}), not a history.}
+}
+}
+
+\subtree{
+\title{7. Wave 6: the gate, the mutants, the scoreboard (2026-11-24, 13:25Z onwards)}
+
+\p{M8 is the gatekeeper and the scorekeeper of the wave. Everything below is test-tree code and scripts; no file of another package was touched. The numbers of a run are in section 8; this section is what exists and why it is built the way it is.}
+
+\subtree{
+\title{7.1 Commands}
+
+\table{
+\tr{\th{Command}\th{Report}\th{What}}
+\tr{\td{\code{\verb~|report.sh gate [--switches S] [--tree SANDBOX] [CORPUS..]~}}\td{\code{\verb~|work/status/machine-gate-NAME.md~} (one page) + \code{\verb~|.problems.txt~}}\td{THE GATE for one switch set (none = the generic tier): (1) every declaration against the reference engine on tutorial, bugs, all 230, Init, Std, reachability, the Cedar slice; (2) tier equivalence: the generic tier gives the same outcome for every declaration (another \em{reason} for the same outcome is a note), and for a set with K1 switches the values of \code{\verb~|M8Tiers~} on the tutorial tests and Init; (3) convention equivalence: host depth 0 and unbounded against \code{\verb~|Op.HOST_DEPTH~}: outcome, reason, ticks, call events by op, the frame trace, after an ACCEPT every record word, run word and pair; (4) the debug audits as two lanes, \code{\verb~|poison,scopeaudit,maskaudit~} and \code{\verb~|memocheck,shortcheck~}: the same outcomes and no \code{\verb~|E_AUDIT~}; (5) the real driver in the same JVM with \code{\verb~|-X engine=machine~} on the 230 tests (1 worker) and the corpora (4 workers): verdict, machine declines, MACHINE-INCOMPLETE, WARM-ANOMALY, disagreements. NAME = \code{\verb~|v0~} or the switches joined by \code{\verb~|+~}; a sandbox gets \code{\verb~|-Mk~}; fewer corpora or parts get \code{\verb~|-partial~} and the page says "A PARTIAL RUN, NOT THE GATE". Exit 1 = a wrong verdict, a difference, a crash or a timeout; declines alone are \code{\verb~|PASS WITH DECLINES~}}}
+\tr{\td{\code{\verb~|report.sh mutants --switches S1 --switches S2 .. [--corpus NAME] [--limit N] [--launcher-sample N]~}}\td{\code{\verb~|work/status/machine-mutants.md~}}\td{the four mutant corpora (17,775 exports classified by the official checker) per switch set: the final verdict of the real pipeline against the official checker (SOUNDNESS, COMPLETENESS), against the same pipeline with the reference engine, and the machine's own answers: from the driver's statistics (MACHINE-INCOMPLETE, WARM-ANOMALY, disagreements, declines) and, per declaration, in-process against the reference engine (the driver trusts an ACCEPT of the machine: only this sees a wrong one). \code{\verb~|--launcher-sample N~} runs every N-th mutant through the real launcher (a JVM per mutant, \src{scripts/check-light.sh}) and holds the in-process verdict against it}}
+\tr{\td{\code{\verb~|ladder.py measure [--sets 'v0;warm,gated,expect;..']~}, \code{\verb~|ladder.py render~}, \code{\verb~|ladder.py status~}}\td{\code{\verb~|work/status/machine-ladder.md~}, \code{\verb~|.tsv~}}\td{THE SCOREBOARD: the machine jar published now (named by the hash of its code, so that a test-only publication is the same jar), CE native image \code{\verb~|-O3~} of the published jars, arena-shaped container, ONE hold of the measurement lock per batch: reference engine, gruszka (its arena run line) and every switch set on Init, Std, the Cedar slice, reachability with 1 and 4 workers: CPU s / wall s / RSS MiB / instructions G, ratios to the reference and to gruszka of the same batch. Each batch is announced in \code{\verb~|work/status/machine-M8.log~}}}
+\tr{\td{\code{\verb~|big.py [--sets ..] [--corpora ..] [--with-reference]~}}\td{\code{\verb~|work/status/machine-big.md~}, \code{\verb~|.tsv~}}\td{the large corpora (con-leche, cedar, cslib, navier-stokes-euler, mathlib) through the native launcher with \code{\verb~|-X engine=machine~}, 4 workers: \code{\verb~|agree~} = machine accepted == engine checks, nothing rejected or declined, no MACHINE-INCOMPLETE; on a corpus every unit of which the reference engine accepts that is the per-declaration differential (the argument is in the header of the script and of the report)}}
+}
+
+\p{\code{\verb~|report.sh~} options since wave 6: \code{\verb~|--jobs N~} (passes / files / mutants at a time, default 4), \code{\verb~|--heap~} (default 6g), \code{\verb~|--levels official|complete~} (the level relation of the reference engine, default official: owner note 11), \code{\verb~|--no-pin~}, \code{\verb~|--no-slot~}. \code{\verb~|report.sh tutorial|bugs|all|conv ..~} run on the same parallel runner.}
+}
+
+\subtree{
+\title{7.2 How the gate stays inside the heap (the two slow tests that ran out of memory)}
+
+\p{\code{\verb~|M8SlowTest.convAll~} (four machine lanes and the reference kernel in lockstep, 6 GB) died with \code{\verb~|OutOfMemoryError~} on perf/app-lam, gf3-matrix-product, magma-list-deep-n36, magma-list-pair-n21; \code{\verb~|M7HookedTest.all230~} ended perf/loop-unfolded-once as CRASH in its K1 lane (\code{\verb~|OutOfMemoryError~} in \code{\verb~|Machine.growRecords~} under \code{\verb~|Diff.run~}). Causes: (a) lockstep keeps the reference kernel's overlay (1.2 GB used, up to three times that allocated, after app-lam) and every lane's machine alive at the same time; (b) the frame trace was kept as an \code{\verb~|int[]~} per lane and copied per declaration (4 bytes per call event: hundreds of MB for one perf declaration); (c) \code{\verb~|Machine.heapAllows~} counts the free bytes of the young generation, which a large array cannot use (SerialGC: a third of the heap by default), so a growth it allowed could still fail.}
+
+\p{What was built (\code{\verb~|M8Lanes~}, the pass runner; \code{\verb~|M8Harness~} keeps lockstep for the single-file tools):}
+
+\ul{
+\li{\strong{passes}: the reference engine runs over the whole file first and its session and context are emptied; then every lane runs alone over the same units and lets go of its machine, session and context when it ends; per unit only words are kept (outcome and reason of admission and engine, ticks, call events and a digest by op, the length and a digest of the trace, the sizes and digests of records, runs, pairs). The comparisons (lane against reference = \code{\verb~|Diff.FileResult~} with the fixture's counting rule; lane against lane = \code{\verb~|CONV~} everything observable, or \code{\verb~|OUTCOME~}) are made from those words. Peak memory is one engine on one declaration. A corpus that is one big file runs its lanes on one thread each (they share the frozen store and the finished environment pass; \code{\verb~|EnvBuilder.advanceTo~} returns at once for decided units).}
+\li{\strong{a check the Java heap ends is not a verdict}: \code{\verb~|OutOfMemoryError~} inside \code{\verb~|Session.check~} (and a growth that \code{\verb~|Machine.heapAllows~} refused) is a DECLINE flagged \code{\verb~|memory~}; the lane gets a new machine and context after the unit; the comparisons skip the unit; the file is flagged and \code{\verb~|M8Gate.runAll~} runs it again on its own after everything else. A file that still runs out of heap alone is reported as declined for memory, never as a difference. Tested with a seam (\code{\verb~|Config.simulateHeapExhaustionAtCheck~}).}
+\li{\strong{scheduling}: \code{\verb~|jobs~} passes at a time (a semaphore); big files (>= 16 MB) one per 5 GB of heap with their lanes in parallel; heavy files (\code{\verb~|work/m8/heavy.txt~} remembers every file whose lane or reference session held more than 256 MiB or that ran out of heap beside others; without that memory the perf tests) a few at a time, in a heap below 10 GB one at a time after everything else.}
+\li{\code{\verb~|report.sh~} runs the JVM with \code{\verb~|-Xmn1g~} so that \code{\verb~|heapAllows~} is right about large arrays.}
+\li{\strong{warm sessions} (\code{\verb~|Config.incrementalDigest~}): digesting a 4 MiB session after each of Init's 58,000 declarations would cost more than the checks, so after an ACCEPT only what the declaration added is digested, and the whole session once at every reset and at the end of the file.}
+\li{a check that its wall-clock deadline ended (\code{\verb~|Config.checkMillis~}, 300 s in the gate; the host is shared) is a decline and is not compared between lanes (it would be a difference made by the load).}
+}
+}
+
+\subtree{
+\title{7.3 Deviations (continuing the table of section 3)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Where}\th{Deviation}\th{Reason}}
+\tr{\td{D16}\td{the gate, the corpus reports}\td{lanes are compared from digests recorded per unit, not on live machines; the first difference is named by kind ("records made: 12 against 13"), the words themselves are shown by \code{\verb~|M8ConventionTest#oneFile~} (lockstep)}\td{memory (7.2)}}
+\tr{\td{D17}\td{tier equivalence at declaration level, audit lanes}\td{the same outcome for another reason (another error of a wrong declaration met first under \code{\verb~|expect~}) is counted as a note, not as a difference; under a host convention (CONV) the reason must be identical}\td{found on bad/bugs/rec-of-subst-prop unit 128: generic TYPE_EXPECTED, \code{\verb~|warm,gated,expect~} APP_TYPE_MISMATCH, the reference rejects too}}
+\tr{\td{D18}\td{the gate's part 5, the mutants}\td{the real pipeline is called in the report's JVM (\code{\verb~|rlvm.main.RlvmChecker.checkExport~} by reflection; \code{\verb~|report.sh~} puts the published rlvm-main and rlvm-cli jars behind the tree's classes), not started as a launcher process}\td{17,775 mutants x (sets + 1) runs: a JVM each is about 20 minutes per set, a call is milliseconds. Checked against the launcher by \code{\verb~|--launcher-sample~} and by the baseline table (the in-process reference pipeline must reproduce the published \code{\verb~|testkit judge~} counts)}}
+\tr{\td{D19}\td{every report}\td{the reference engine compares universe levels as the official kernel does (\code{\verb~|-Drlvm.levels=official~}; \code{\verb~|--levels complete~} for the old relation)}\td{owner note 11; the machine does since 14:22Z (M1), the published rlvm-ref jar still defaults to \code{\verb~|complete~}, and without this every level corner case would show as "the machine rejects, the reference accepts"}}
+\tr{\td{D20}\td{the scoreboard}\td{a machine jar is named by a hash of its classes (names and CRCs), not of the file}\td{a publication of tests only installs a jar with other time stamps and the same code}}
+\tr{\td{D21}\td{large corpora}\td{"differential" = the machine's own statistics on a corpus the reference engine accepts unit for unit, not both engines on every unit}\td{it is the same statement at a quarter of the CPU time on a host that was out of memory; \code{\verb~|testkit diff --engine machine~} stays the tool for a corpus with rejections}}
+\tr{\td{D22}\td{resources}\td{every report holds a host-wide slot, 4 passes, 6 GB, pinned outside the measurement cpuset}\td{the orchestrator's rule of 14:32Z after the host thrashed; my first full gate (12 passes, 24 GB) was one of the jobs that pushed it into the swap and was killed after 25 minutes without a result}}
+}
+}
+}
+
+\subtree{
+\title{8. Wave 6: what was run and what it showed}
+
+\p{Host during all of this: shared with up to thirty agents, load average 75 to 270, out of memory and swapping between 13:55Z and 14:35Z (the orchestrator stopped a wave of profilers and introduced the host-wide slots). All M8 jobs after 14:35Z ran inside a slot with 4 passes / mutants at a time and 6 GB. Wall-clock figures below say how long a tool takes under that load, nothing about the machine.}
+
+\subtree{
+\title{8.1 Mutants with the machine (priority 2)}
+
+\p{Campaign 1, main tree as copied at 14:42Z (after M1's official levels 14:22Z and M4's fix of the soundness findings S-F1 / S-F2 14:30Z), reference engine with \code{\verb~|levels=official~}, \code{\verb~|report.sh mutants --switches v0 --switches warm,gated,expect --switches warm,gated,expect,probes --launcher-sample 100~}; 1158 s wall (\code{\verb~|work/m8/machine-mutants-run1-1442Z.md~}):}
+
+\table{
+\tr{\th{switch set}\th{mutants}\th{SOUNDNESS}\th{COMPLETENESS}\th{agree}\th{declined}\th{final verdict not the reference pipeline's}\th{machine accepted / rejected / declined (engine checks)}\th{MACHINE-INCOMPLETE / WARM-ANOMALY / disagreements}\th{declarations compared in-process}\th{machine accepts, reference rejects}\th{machine rejects, reference accepts}\th{machine declines}\th{launcher sample differs / run}}
+\tr{\td{\code{\verb~|v0~}}\td{17,775}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,875 / 0}\td{0 / 0 / 0}\td{1,008,568}\td{0}\td{0}\td{0}\td{0 / 179}}
+\tr{\td{\code{\verb~|warm,gated,expect~} (4 MiB)}\td{17,775}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,875 / 0}\td{0 / 0 / 0}\td{1,008,568}\td{0}\td{0}\td{0}\td{0 / 179}}
+\tr{\td{\code{\verb~|warm,gated,expect,probes~} (4 MiB)}\td{17,775}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,875 / 0}\td{0 / 0 / 0}\td{1,008,568}\td{0}\td{0}\td{0}\td{0 / 179}}
+\tr{\td{baseline: the pipeline with \code{\verb~|-X engine=reference~}, in-process}\td{17,775}\td{0}\td{0}\td{16,092}\td{1,683}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}\td{-}}
+}
+
+\p{Per corpus (every set and the baseline alike): tutorial 12,260 = 11,847 agree + 413 declined; bugs 2,692 = 2,627 + 65; prelude 847 = 839 + 8; mdata 1,976 = 779 + 1,197: exactly the published \code{\verb~|testkit judge~} table of the reference engine through the launcher (\code{\verb~|work/status/mutants.md~}, 12:42Z), which is the check of the in-process method (D18). The declines are the loader's and admission's, not the machine's (the machine declined no engine check). \strong{No case in which the machine's own answer differs from the reference engine's}, per declaration or in the driver.}
+
+\p{Campaign 2, main tree as copied after M4's publication of 15:24:08Z (with M6's rule of 15:07Z that the machine declines a declaration that enters eager reduction), four sets, 859 s wall (\code{\verb~|work/status/machine-mutants-k1.md~}):}
+
+\table{
+\tr{\th{switch set}\th{SOUNDNESS}\th{COMPLETENESS}\th{agree}\th{declined}\th{final verdict not the reference pipeline's}\th{machine accepted / rejected / declined (engine checks)}\th{MACHINE-INCOMPLETE / WARM-ANOMALY / disagreements}\th{machine accepts, reference rejects}\th{machine rejects, reference accepts}\th{machine declines (declarations, in-process)}}
+\tr{\td{\code{\verb~|warm,gated,expect~}}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,846 / 58}\td{0 / 0 / 0}\td{0}\td{0}\td{29}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,846 / 58}\td{0 / 0 / 0}\td{0}\td{0}\td{29}}
+\tr{\td{\code{\verb~|warm,gated,expect,probes,code,casetrees~}}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,846 / 58}\td{0 / 0 / 0}\td{0}\td{0}\td{29}}
+\tr{\td{\code{\verb~|all~} (= gated,pchk,expect,warm,facts,tele,code,casetrees,probes,inert)}\td{0}\td{0}\td{16,092}\td{1,683}\td{0}\td{863,982 / 1,846 / 58}\td{0 / 0 / 0}\td{0}\td{0}\td{29}}
+}
+
+\p{The 29 declines (bugs corpus 24, mdata 5; the driver counts both attempts: 58) are the declarations that enter eager reduction; the reference kernel decides them and the final verdict is the reference pipeline's. Seven switch sets in two campaigns: no machine bug found by the mutants. Not covered: \code{\verb~|k2~}, \code{\verb~|m3a~}, \code{\verb~|m4a/b~}, \code{\verb~|m5a/b~}, \code{\verb~|m7a/b~}, \code{\verb~|lazyeval~}, \code{\verb~|t2~}, \code{\verb~|levels-complete~}.}
+}
+
+\subtree{
+\title{8.2 The large corpora (priority 4; coordinated with M6 in requests.log 15:06Z / 15:22Z)}
+
+\p{M6 has the 8-worker v0 rows (13:30Z: all five ACCEPT, machine declined 0). \code{\verb~|big.py~}, native image \code{\verb~|-O3~} of the jars published at 14:41Z (machine code \code{\verb~|767442aced60~}), 4 workers, one slot per run (\code{\verb~|work/status/machine-big-partial.md~}, \code{\verb~|machine-big-mathlib.md~}, rows in \code{\verb~|machine-big.tsv~}):}
+
+\table{
+\tr{\th{corpus}\th{units}\th{engine checks}\th{\code{\verb~|v0~}: accepted / rejected / declined}\th{\code{\verb~|warm,gated,expect~}: accepted / rejected / declined}\th{result}}
+\tr{\td{con-leche}\td{36,747}\td{36,274}\td{36,274 / 0 / 0}\td{36,274 / 0 / 0}\td{agree}}
+\tr{\td{cedar}\td{146,058}\td{144,098}\td{144,098 / 0 / 0}\td{144,098 / 0 / 0}\td{agree}}
+\tr{\td{cslib}\td{401,985}\td{397,608}\td{397,608 / 0 / 0}\td{397,608 / 0 / 0}\td{agree}}
+\tr{\td{navier-stokes-euler}\td{126,468}\td{124,850}\td{124,850 / 0 / 0}\td{124,850 / 0 / 0}\td{agree}}
+\tr{\td{mathlib}\td{721,845}\td{714,712}\td{714,712 / 0 / 0}\td{see the log}\td{agree (v0)}}
+}
+
+\p{MACHINE-INCOMPLETE, WARM-ANOMALY and disagreements are 0 in every run. "agree" is the per-declaration differential on these corpora because the reference engine accepts each of them unit for unit (D21). Orientation only (no lock, load average about 100): CPU s \code{\verb~|v0~} -> \code{\verb~|warm,gated,expect~}: con-leche 37 -> 29, cedar 41 -> 33, cslib 154 -> 108, navier-stokes-euler 207 -> 142; mathlib \code{\verb~|v0~} 368 s CPU, 2.7 GB RSS.}
+}
+
+\subtree{
+\title{8.3 The scoreboard (priority 3)}
+
+\p{\code{\verb~|work/status/machine-ladder.md~}. The queue for the measurement lock was longer than an hour during the wave (five packages' batches), so the first rows are a PROBE (\code{\verb~|ladder.py probe~}: no lock, CPUs 18 and 19, 1 worker): instruction counts are comparable, CPU time is not. Machine code \code{\verb~|767442aced60~} (jars of 14:41Z: M1's kept-slot PRUNE of 14:22Z, M4's official \code{\verb~|probes~}), instructions G (ratio to the reference engine):}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{Cedar slice}\th{reachability}}
+\tr{\td{reference engine}\td{246.8}\td{407.8}\td{54.8}\td{112.6}}
+\tr{\td{machine \code{\verb~|v0~}}\td{132.1 (0.54x)}\td{211.2 (0.52x)}\td{38.9 (0.71x)}\td{57.4 (0.51x)}}
+\tr{\td{machine \code{\verb~|warm,gated,expect~}}\td{105.2 (0.43x)}\td{177.2 (0.43x)}\td{39.5 (0.72x)}\td{59.1 (0.52x)}}
+\tr{\td{machine \code{\verb~|warm,gated,expect,probes~}}\td{106.7 (0.43x)}\td{179.6 (0.44x)}\td{39.7 (0.72x)}\td{59.1 (0.52x)}}
+\tr{\td{machine \code{\verb~|v0~} at the end of wave 5 (integrator, jar 608b84b2b142)}\td{139.0}\td{223.2}\td{47.0}\td{59.4}}
+}
+
+\p{So the first publications of wave 6 took 5\% of the instructions off Init and Std, 17\% off the Cedar slice and 3\% off reachability in \code{\verb~|v0~}. A locked batch (CPU s, 1 and 4 workers, gruszka in the same batch) was queued at 15:10Z; its rows, when it got the lock, are in \code{\verb~|machine-ladder.md~} and announced in \code{\verb~|work/status/machine-M8.log~}.}
+
+\p{\strong{The locked batch got the lock at 16:44Z} (batch \code{\verb~|2026-11-24T16:44Z~}, host load 39-47; machine code \code{\verb~|767442aced60~} = jars of 14:41Z; reference engine and gruszka in the same batch), CPU s with 1 worker (4 workers: CPU s / wall s):}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{Cedar slice}\th{reachability}}
+\tr{\td{reference engine}\td{14.39 (15.14 / 8.33)}\td{24.19 (24.96 / 13.75)}\td{4.10 (4.55 / 1.50)}\td{12.55 (12.49 / 8.32)}}
+\tr{\td{gruszka (arena run line, 4 threads)}\td{3.34}\td{5.54}\td{1.80}\td{4.01}}
+\tr{\td{machine \code{\verb~|v0~}}\td{7.41 (7.80 / 4.43)}\td{12.11 (12.58 / 5.43)}\td{2.58 (2.75 / 0.94)}\td{8.11 (8.17 / 5.89)}}
+\tr{\td{machine \code{\verb~|warm,gated,expect~} (4 MiB)}\td{7.33 (7.85 / 3.62)}\td{12.04 (13.22 / 7.79)}\td{2.67 (2.83 / 0.98)}\td{7.79 (7.70 / 5.56)}}
+\tr{\td{machine \code{\verb~|warm,gated,expect,probes~}}\td{7.16 (7.63 / 3.24)}\td{12.38 (13.14 / 7.02)}\td{2.72 (2.93 / 1.25)}\td{7.83 (7.78 / 7.61)}}
+\tr{\td{best machine / gruszka}\td{2.14x}\td{2.17x}\td{1.43x}\td{1.94x}}
+}
+
+\p{(Wall with 4 workers was taken on a loaded host: the reference engine's 8.33 s on Init was 4.38 s on the quiet host of wave 5.) Two readings for the owners: (a) against wave 5's final batch (\code{\verb~|v0~} 7.77 / 13.32 / 3.17 / 7.95 s) the first wave-6 publications are worth 5\% of the CPU time on Init, 9\% on Std, 19\% on the Cedar slice in \code{\verb~|v0~}; (b) \strong{\code{\verb~|warm,gated,expect~} takes 20\% of the instructions off Init and 16\% off Std and 1\% of the CPU time}: the process no longer runs at a constant number of instructions per second (v0 17.8 G/s, warm 14.4 G/s on Init), so on this machine jar the instruction count is NOT a proxy for CPU time across switch sets. The CPU differences between the three machine rows are 1-4\% in either direction on one run per row: inside the band in which the rule of the wave asks for three runs, so this batch neither shows a gain of the step-1 switches nor a loss (Cedar slice 2.58 -> 2.67 s, reachability 8.11 -> 7.79 s); \code{\verb~|ladder.py measure --runs 3 --sets 'none;warm,gated,expect'~} is the batch that would settle it.}
+
+\p{Probes of the newest jar at the end of the session (code \code{\verb~|22f54062df4d~}, jars of 16:53Z; instructions G, 1 worker, no lock):}
+
+\table{
+\tr{\th{}\th{Init}\th{Std}\th{Cedar slice}\th{reachability}\th{machine declined (engine checks)}}
+\tr{\td{reference engine}\td{246.8}\td{407.8}\td{54.7}\td{112.6}\td{-}}
+\tr{\td{machine \code{\verb~|none~} (the generic tier)}\td{132.0}\td{218.1}\td{39.9}\td{56.9}\td{328 / 406 / 22 / 16}}
+\tr{\td{machine default = \code{\verb~|warm,gated,expect~}}\td{116.4}\td{197.6}\td{39.4}\td{57.9}\td{328 / 406 / 22 / 16}}
+\tr{\td{machine \code{\verb~|warm,gated,expect,probes,code,casetrees~}}\td{96.5}\td{169.7}\td{38.5}\td{17.4}\td{328 / 406 / 22 / 16}}
+}
+
+\p{Every machine row of this jar is a FALLBACK row: the declarations that enter eager reduction are declined (M6's rule of 15:07Z) and checked by the reference kernel, whose instructions are in the totals. Reachability with \code{\verb~|code,casetrees~} on top: 17.4 G instructions, 1.48 s of (unlocked) CPU against gruszka's 4.0 s. NOTE the labels: since M6's publication of 16:24Z the engine's default set is \code{\verb~|warm,gated,expect~}; the generic tier is \code{\verb~|-X machine.switches=none~} (the tools say so explicitly since 17:18Z; four probe rows that were taken without the setting are labelled "default" in the TSV).}
+}
+
+\subtree{
+\title{8.4 The gate (priority 1)}
+
+\p{Full gate of the generic tier, main tree as copied after 16:09:23Z (\code{\verb~|work/m8/machine-gate-v0-1609Z.md~}; 4 passes, 6 GiB, 64 minutes wall beside a second gate at load 45-70): \strong{PASS WITH DECLINES}.}
+
+\table{
+\tr{\th{corpus}\th{engine checks}\th{accepted}\th{rejected}\th{declined}\th{SOUNDNESS}\th{COMPLETENESS}\th{convention differences (D0, unbounded)}\th{audit differences / E_AUDIT}\th{pipeline: verdict, MACHINE-INCOMPLETE, WARM-ANOMALY}}
+\tr{\td{tutorial (141 files)}\td{195}\td{175}\td{20}\td{0}\td{0}\td{0}\td{0}\td{0 / 0}\td{right, 0, 0}}
+\tr{\td{bugs (34)}\td{1,147}\td{1,136}\td{10}\td{1}\td{0}\td{0}\td{0}\td{0 / 0}\td{right, 0, 0}}
+\tr{\td{all 230}\td{15,845}\td{15,798}\td{40}\td{7}\td{0}\td{0}\td{0 (13 not compared: host stack overflow without a bound)}\td{0 / 0}\td{230 / 230 right, 0, 0}}
+\tr{\td{Init}\td{57,938}\td{57,774}\td{0}\td{164}\td{0}\td{0}\td{0}\td{0 / 0}\td{accept (4 workers), 0, 0}}
+\tr{\td{Std}\td{100,096}\td{99,893}\td{0}\td{203}\td{0}\td{0}\td{0}\td{0 / 0}\td{accept, 0, 0}}
+\tr{\td{reachability}\td{4,224}\td{4,216}\td{0}\td{8}\td{0}\td{0}\td{0}\td{0 / 0}\td{accept, 0, 0}}
+\tr{\td{Cedar slice}\td{8,064}\td{8,053}\td{0}\td{11}\td{0}\td{0}\td{0}\td{0 / 0}\td{accept, 0, 0}}
+}
+
+\p{The declines: 386 + 5 declarations that enter eager reduction (UNSUPPORTED_INPUT; Init 164, Std 203, reachability 8, Cedar slice 11, perf/grind-ring-5 4, bugs/rec-of-subst-prop 1), perf/loop-unfolded-once (E_MEM at 2^28 run words, as in wave 5) and perf/magma-list-deep-n36 \code{\verb~|countermodel~} (the report's 6 GiB heap: \code{\verb~|Machine.heapAllows~} refused a 1 GiB array; \code{\verb~|--heap 12g~} checks it). Frames written under D128: Init 0.051\%, Std 0.047\%, Cedar slice 0.026\%, reachability 1.14\%.}
+
+\p{Found by the gate on the way (quick form, tutorial + bugs + Cedar slice, \code{\verb~|warm,gated,expect~}, tree of 14:46Z): bad/bugs/rec-of-subst-prop unit 128 \code{\verb~|Issue.forallFalse~}: lane \code{\verb~|memocheck,shortcheck~} E_AUDIT ("CONV .. is memoised as HOLE/T but the re-computation gives NONE/F") and the generic tier rejecting for another reason than the warm tier: the warm-session / eager-reduction defect that M5 and M6 reported in the same quarter of an hour (F26); it led to the rule "a declaration that enters eager reduction is declined".}
+
+\p{Full gate of \code{\verb~|warm,gated,expect~} (4 MiB session cap), the same tree (\code{\verb~|work/m8/machine-gate-step1-1609Z.md~}; 65 minutes wall): \strong{PASS WITH DECLINES}, the declines being exactly those of the generic tier. Differential: SOUNDNESS 0, COMPLETENESS 0 on every corpus (all 230: 15,798 accepted, 40 rejected, 7 declined; Init 57,774 / 164 declined; Std 99,893 / 203; reachability 4,216 / 8; Cedar slice 8,053 / 11). Tier equivalence against the generic tier: 0 declarations with another outcome, 0 with another reason. Convention equivalence with warm sessions: 0 differences (12 perf declarations not compared with the unbounded lane); frames under D128: Init 0.072\%, Std 0.064\%, Cedar slice 0.41\%, reachability 1.15\%. Audits: 0 outcome differences, 0 \code{\verb~|E_AUDIT~}. Pipeline: 230 / 230 verdicts right, the four corpora accepted with 4 workers, MACHINE-INCOMPLETE 0, WARM-ANOMALY 0, disagreements 0.}
+
+\p{\strong{Finding M8-F1 (17:35Z-17:55Z, open; requests.log to M2 and M7).} The quick gate of \code{\verb~|warm,gated,expect,probes,code,casetrees~} on the tree of about 17:30Z FAILS on convention equivalence and on nothing else (differential 0 / 0, generic tier equal, tier test on values 175 constants / 700 results equal, audits clean, pipeline right): on the Cedar slice two of 8,064 declarations (unit 6225 \code{\verb~|Cedar.Thm.conversion_preserves_typedness._unary~}, unit 7434 \code{\verb~|Cedar.Thm.ofEnv_entities_valid_refs_for_wt_expr._unary~}) use one tick more under host depth 0 than under D128 (two with \code{\verb~|probes~}); the lane without a bound agrees with D128. Bisected with \code{\verb~|report.sh gate --switches S --parts conv cedar~}: clean for \code{\verb~|code~}, \code{\verb~|code,casetrees~}, \code{\verb~|expect,code,casetrees~}, \code{\verb~|warm,code,casetrees~}, \code{\verb~|warm,gated,expect~}, \code{\verb~|warm,gated,expect,probes~}; \strong{not clean for \code{\verb~|gated,code,casetrees~}}. A tick on a path that only runs when a judgment is suspended, in the interplay of gated tabling and the K1 blocks.}
+}
+
+\subtree{
+\title{8.5 Which switches the evidence supports (as of 17:55Z; M8's evidence only)}
+
+\table{
+\tr{\th{switch set}\th{mutants (17,775 x set)}\th{gate}\th{large corpora}\th{CPU (locked batch 16:44Z, jar 14:41Z)}\th{M8's reading}}
+\tr{\td{none (generic tier)}\td{S 0 / C 0, machine's own answers never differ}\td{full: PASS WITH DECLINES}\td{5 / 5 agree}\td{the baseline}\td{correct; 391 declarations declined for eager reduction since 15:07Z}}
+\tr{\td{\code{\verb~|warm,gated,expect~}}\td{S 0 / C 0 twice (trees 14:42Z, 15:24Z)}\td{full: PASS WITH DECLINES, same declines, tier / convention / audits clean}\td{5 / 5 agree}\td{within 1-4\% of the generic tier on all four corpora, one run each}\td{CORRECT by every gate M8 has; the CPU gain is NOT shown (needs \code{\verb~|--runs 3~}); it is the engine's default since M6's publication of 16:24Z}}
+\tr{\td{\code{\verb~|warm,gated,expect,probes~}}\td{S 0 / C 0 (tree 14:42Z, after M4's fix of S-F1)}\td{not run}\td{not run}\td{no gain over \code{\verb~|warm,gated,expect~}}\td{not ready: no gate, no gain}}
+\tr{\td{\code{\verb~|code,casetrees~}}\td{S 0 / C 0 (tree 15:24Z)}\td{not run}\td{not run}\td{not measured under the lock}\td{not ready: no gate}}
+\tr{\td{\code{\verb~|warm,gated,expect,probes,code,casetrees~}}\td{S 0 / C 0 (tree 15:24Z)}\td{quick form (tutorial, bugs, Cedar slice): \strong{FAIL, finding M8-F1} (convention equivalence: \code{\verb~|gated~} + \code{\verb~|code,casetrees~})}\td{not run}\td{probe: Init 96.5 G, reachability 17.4 G instructions}\td{the candidate with the largest effect; NOT ready: M8-F1, then the full gate and a locked batch}}
+\tr{\td{\code{\verb~|all~}}\td{S 0 / C 0 (tree 15:24Z)}\td{not run}\td{not run}\td{not measured}\td{bug-hunting set only}}
+}
+}
+
+\subtree{
+\title{8.6 Tool experiments, kept and rejected (wall time of the tools, not CPU time of the machine)}
+
+\table{
+\tr{\th{experiment}\th{result}\th{kept}}
+\tr{\td{pass runner (reference first, lanes one after the other, digests) instead of lockstep for corpus runs}\td{perf/app-lam, gf3-matrix-product, magma-list-pair-n21 with five or six lanes CLEAN in a 6 GiB JVM (lockstep: OutOfMemoryError with four lanes); peak = one engine}\td{kept}}
+\tr{\td{first full gate with 12 passes and a 24 GB heap (13:44Z)}\td{Init / Std / reachability / Cedar slice lanes done after 271 s, then the host went into the swap (my JVM at 23.5 GB RSS among others) and a full collection never ended; killed after 25 minutes, no result}\td{rejected: 6 GB, 4 passes, a slot}}
+\tr{\td{heavy files one at a time on one thread (no memory of earlier runs: all 43 perf tests)}\td{on the loaded host that thread got 15\% of a CPU: 48 minutes for the heavy phase without an end; killed}\td{rejected: \code{\verb~|work/m8/heavy.txt~} (measured peaks), light perf tests in the pool, heavy ones two at a time, only sessions above a sixth of the heap alone}}
+\tr{\td{the same gate with that scheduling (16:10Z)}\td{64 minutes wall for 234 files x 5 lanes + pipeline, of which 25 minutes for the four corpora and about 30 for 6 heavy perf files and 4 heap retries; two gates ran side by side}\td{kept; on a quiet host \code{\verb~|--heap 12g --jobs 8~}}}
+\tr{\td{mutants through the pipeline in one JVM instead of a JVM per mutant}\td{17,775 mutants x (3 sets + baseline) + per-declaration comparison in 19 minutes at 4 at a time; the launcher needs 13-27 minutes per set at 10-12 at a time; verdicts identical (baseline table, 537 launcher samples)}\td{kept}}
+\tr{\td{incremental digest for warm lanes}\td{Cedar slice, 6 lanes, warm: 8-20 s CPU per lane, convention equivalence still exact at resets}\td{kept}}
+\tr{\td{scoreboard: slot first, then the measurement lock}\td{held a host-wide slot idle for 25 minutes in the lock's queue}\td{rejected: lock first, then a slot within two minutes, else the lock goes back}}
+\tr{\td{scoreboard probe without the lock (CPUs 18, 19)}\td{instruction counts identical to the locked batch (132.1 / 105.2 / 106.7 G on Init)}\td{kept as a stop-gap; CPU time only from locked batches}}
+}
+}
+
+\subtree{
+\title{8.7 Incidents}
+
+\ul{
+\li{13:44Z-14:09Z: my first full gate (24 GB heap) was one of the processes on the host when it ran out of memory; I killed it by pid at 14:09Z. Since then every M8 job holds a slot and stays at 6 GB.}
+\li{15:55Z: a \code{\verb~|pgrep -f~} pattern of mine matched the shell that issued it; that command ended my own shell and the slow-test script (intended); the test JVM it had started was then stopped by pid. Nothing of another agent was touched.}
+\li{The two slow tests (\code{\verb~|M8SlowTest#convAll~}, \code{\verb~|M7HookedTest#all230~}) were started in the sandbox's surefire JVM at 15:45Z and stopped after 9 minutes to give the slot and 5 GB back when the host was at 16 GB available: \strong{they have not been run to completion under surefire since the change.} What stands in for them: the same code path (\code{\verb~|M8Lanes~} passes, heap failures as flagged declines) ran all 230 tests with five and six lanes in a 6 GiB JVM twice (the two gates above) without a crash, and the fast test \code{\verb~|aCheckThatTheJavaHeapEndsIsFlaggedAndTheLaneGoesOnWithANewMachine~}.}
+}
+}
+}
+
+\subtree{
+\title{9. Not done, not verified (wave 6)}
+
+\ul{
+\li{The full gate for any set with K1 switches (\code{\verb~|code~}, \code{\verb~|casetrees~}, \code{\verb~|tele~}, \code{\verb~|facts~}), \code{\verb~|probes~}, \code{\verb~|lazyeval~}, \code{\verb~|k2~}, the experiment switches; the tier test on values inside the gate (\code{\verb~|M8Gate.valueTiers~}) has run only in the quick form.}
+\li{\code{\verb~|M8SlowTest#convAll~} and \code{\verb~|M7HookedTest#all230~} to completion under surefire (8.7).}
+\li{A locked scoreboard batch for a jar newer than 14:41Z, and three runs per row for differences below 5\%.}
+\li{Large corpora with other sets than the generic tier and \code{\verb~|warm,gated,expect~}; \code{\verb~|--with-reference~} was not used (the premise "the reference engine accepts every unit" rests on the pipeline check of wave 5).}
+\li{The mutants with \code{\verb~|k2~}, \code{\verb~|m3a~}, \code{\verb~|m4a/b~}, \code{\verb~|m5a/b~}, \code{\verb~|m7a/b~}, \code{\verb~|lazyeval~}, \code{\verb~|t2~}, \code{\verb~|levels-complete~}.}
+\li{The gate at \code{\verb~|--heap 12g~}: in 6 GiB perf/magma-list-deep-n36 \code{\verb~|countermodel~} and (warm) perf/loop-unfolded-once are declined by the heap test of the report JVM, so those two declarations are not gated.}
+\li{The gate's pipeline part and the mutants run the driver in the report's JVM (D18); the launcher sample is 179 mutants per set, not all.}
+}
+}
