@@ -1,0 +1,781 @@
+\title{03 - Declaration admission in the official Lean 4 kernel (v4.36.0): implementation-grade specification}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{reference-engine}
+\tag{soundness}
+\meta{origin}{docs/research/03-kernel-declarations.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Scope: everything a checker must verify before a declaration enters the environment - \code{\verb~|environment::add~}, \code{\verb~|Quot~}, inductive types (headers, constructors, positivity, elimination universe, K, recursor types and rules, nested inductives), and how the constructor/recursor/quot records of a \code{\verb~|lean4export~} file must be treated. The type checker core (\code{\verb~|whnf~}, \code{\verb~|is_def_eq~}, levels, \code{\verb~|infer_proj~}) is specified in \src{docs/research/02-kernel-typechecker.md} and referenced as "02 §x". All paths are relative to \code{\verb~|refs/~}; line numbers refer to \code{\verb~|lean4~} at tag \code{\verb~|v4.36.0~} (commit \code{\verb~|611c117~}). "reject" = kernel exception = exit code 1. \code{\verb~|==~} is structural equality ignoring binder names and binder infos (02 §2.3); \code{\verb~|local(b)~} = fresh free variable for binder \code{\verb~|b~}, see 6.1.}
+
+\subtree{
+\title{0. Sources}
+
+\table{
+\tr{\th{Source}\th{Role}}
+\tr{\td{\code{\verb~|lean4/src/kernel/{environment,inductive,quot,declaration}.{h,cpp}~}}\td{the specification (\code{\verb~|inductive.cpp~} is 1405 lines, read completely)}}
+\tr{\td{\code{\verb~|lean4/src/LeanChecker.lean~}, \code{\verb~|lean4-leanexport/src/LeanExport/{Parse,Basic}.lean~}, \code{\verb~|lean4-replay/src/Lean/{Replay,Declaration,Expr}.lean~} (own sparse clone of v4.36.0)}\td{how the arena's \code{\verb~|official~} checker (\code{\verb~|leanchecker --from-export~}) drives the kernel; what the bundled exporter writes}}
+\tr{\td{\code{\verb~|lean4lean/Lean4Lean/{Environment,Primitive,Quot,Replay}.lean~}, \code{\verb~|Inductive/Add.lean~}, \code{\verb~|divergences.md~}}\td{Lean re-implementation; the only checker that validates prelude primitives}}
+\tr{\td{\code{\verb~|type_checking_in_lean4/src/declarations/*.md~}, \code{\verb~|lean-type-theory/axioms.tex~}}\td{background only; less precise than the code}}
+\tr{\td{\code{\verb~|lean-kernel-arena/tests/{bugs,other,corner-cases}/*~}, \code{\verb~|tutorial/Tutorial.lean~}, \code{\verb~|README.md~}}\td{every test that concerns declarations (section 10)}}
+}
+
+\p{Empirical cross-check: the generated records quoted in 6.13/6.14 were printed with the host toolchain (Lean 4.33.0, \code{\verb~|work/agent03-decl/Probe.lean~}, \code{\verb~|Probe2.lean~}, not committed). Nothing from the external repositories was built or run.}
+}
+
+\subtree{
+\title{1. Decision summary for RLVM (most decision-relevant first)}
+
+\ol{
+\li{\strong{Regenerate, never trust.} The only inputs of an inductive block are \code{\verb~|levelParams~}, \code{\verb~|numParams~}, and the (name, type) pairs of the types and of their constructors, in the order of the \code{\verb~|ctors~} lists. Every other field of the \code{\verb~|inductive~} JSON item is derived by the kernel. The official checker adds the regenerated constants and then requires every exported constructor and recursor record to be \em{identical} to the regenerated one (section 2). This one mechanism rejects 18 of the arena's bad tests (section 10).}
+\li{\strong{Compare structurally, never up to definitional equality.} Record equality uses \code{\verb~|==~} on expressions (alpha-equivalence, binder info ignored, universe levels compared syntactically). Comparing with \code{\verb~|is_def_eq~} is unsound through proof irrelevance (\code{\verb~|bugs/rec-rule-proof-irrel~}, \code{\verb~|rec-type-proof-irrel~}). Consequence: RLVM must reproduce the kernel's generated terms \em{syntactically}; the traps are in 6.13.}
+\li{\strong{An exported constructor/recursor with no regenerated counterpart is a rejection}, whatever its \code{\verb~|induct~} / \code{\verb~|all~} fields say (\code{\verb~|bugs/orphan-rec~}, \code{\verb~|other/extra-rec~}, \code{\verb~|other/orphan-ctor~}, tutorial \code{\verb~|misnamed_rec~}).}
+\li{\strong{Skip \code{\verb~|unsafe~} and \code{\verb~|partial~} records entirely} (not checked, not added). The official replay does this (\code{\verb~|Replay.lean:182~}) and the bundled exporter does emit \code{\verb~|partial~} definitions (\code{\verb~|LeanExport/Basic.lean:255~} filters only \code{\verb~|isUnsafe~}). These are the compiler's \code{\verb~|X._unsafe_rec~} copies: self-referential, so checking one as an ordinary definition would wrongly reject. Measured on the host (Lean 4.33, \code{\verb~|import Lean~}): 3001 partial constants, 0 references to them from safe constants. A safe declaration that mentions a skipped constant fails with "unknown constant" (tutorial \code{\verb~|falseFromUnsafe~}, \code{\verb~|falseFromPartial~}).}
+\li{\strong{\code{\verb~|Quot~} is synthesised, not read.} On a \code{\verb~|quot~} record: require \code{\verb~|Eq~} of the canonical shape, add the four canonical constants, and require exported records named \code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~} to equal them (\code{\verb~|bugs/quot-bad-type~}). Section 5 gives the four types in de Bruijn form.}
+\li{\strong{Theorems must have a type in \code{\verb~|Prop~}} (\code{\verb~|environment.cpp:200~}); axioms, definitions and opaques only need a type whose type is a sort. All five kinds share \code{\verb~|check_constant_val~} (section 4).}
+\li{\strong{One flat namespace.} A name may be declared once across all kinds, including generated names (\code{\verb~|I.rec~}, \code{\verb~|I.rec_N~}, the four \code{\verb~|Quot~} names). The tutorial's 8 name-collision tests check exactly this.}
+\li{\strong{The informational fields of an exported inductive type (\code{\verb~|numIndices~}, \code{\verb~|isRec~}, \code{\verb~|isReflexive~}, \code{\verb~|numNested~}) are ignored by the official checker and recomputed.} Recompute them exactly as the kernel does (\code{\verb~|isRec~} is syntactic and block-wide) because struct-eta reads them; do not reject on a mismatch.}
+\li{\strong{Admission is cold code.} Run it on plain de Bruijn terms with a substitution-based reducer; use the hot NbE engine only for yes/no judgements (\code{\verb~|is_def_eq~}, "is a sort"). The syntactic output of \code{\verb~|whnf~} matters in three places only (6.13 T4); there it is expected to be the identity on elaborator output (not verified on Mathlib, section 12).}
+\li{\strong{Intern expressions modulo binder names and binder info.} Then \code{\verb~|==~} is reference equality, record comparison is O(1) per expression, and every syntactic test in \code{\verb~|inductive.cpp~} (\code{\verb~|m_params[i] != args[i]~}, the nested-occurrence table lookup) is a pointer compare.}
+\li{\strong{Classify each constructor field once} (recursive or not, its telescope) and build both the minor premise and the rule from that single result, as lean4lean does. The C++ kernel recomputes it per pass and needed a cache redesign plus a defensive check to make the passes agree (\code{\verb~|bugs/rec-missing-ih~}).}
+\li{\strong{Prelude primitives are not validated by the official kernel} (section 8). Minimal sound policy: shape guards on \code{\verb~|Nat~}, \code{\verb~|Bool~} and the signatures of the accelerated functions, and \em{decline} (exit 2) rather than accept or reject when a guard fails.}
+\li{\strong{Order.} The official checker loads the whole file and replays by dependency; the exporter writes dependencies first. Process in file order, but park a declaration whose dependencies are missing instead of rejecting it immediately (section 9.4).}
+}
+}
+
+\subtree{
+\title{2. How the official checker consumes an export}
+
+\p{\code{\verb~|leanchecker --from-export FILE~} (\code{\verb~|lean4/src/LeanChecker.lean:60-90~}):}
+
+\ol{
+\li{\strong{Parse} the whole file into \code{\verb~|HashMap Name ConstantInfo~} (\code{\verb~|LeanExport/Parse.lean~}). Failures (all are uncaught exceptions, exit code 1): a declaration name seen twice ("Duplicate declaration", \code{\verb~|:100-102~}, across \em{all} record kinds, including the members of an \code{\verb~|inductive~} item); a name/level/expr index used before definition or defined twice (\code{\verb~|:56-97~}); unknown record shape. \code{\verb~|mdata~} payload is dropped (\code{\verb~|.mdata {} e~}, \code{\verb~|:254~}). The grouping into \code{\verb~|inductive~} items is forgotten: types, ctors and recs become independent map entries (\code{\verb~|:458-464~}).}
+\li{\p{\strong{Replay} (\code{\verb~|lean4-replay/src/Lean/Replay.lean:176-195~}): \code{\verb~|remaining~} = all constants that are neither \code{\verb~|isUnsafe~} nor \code{\verb~|isPartial~}. For each, depth-first over \code{\verb~|getUsedConstantsAsSet~} (constants of type and value; ctor names for an inductive; \code{\verb~|all~} for a recursor), then by kind (\code{\verb~|:74-136~}):}
+\ul{
+\li{\code{\verb~|defnInfo~}/\code{\verb~|thmInfo~}/\code{\verb~|axiomInfo~}/\code{\verb~|opaqueInfo~}: \code{\verb~|addDeclCore~} with the record as is (hints verbatim).}
+\li{\code{\verb~|inductInfo info~}: \code{\verb~|lparams := info.levelParams~}, \code{\verb~|nparams := info.numParams~}; types := the records named in \code{\verb~|info.all~}, each with the ctor records named in its \code{\verb~|ctors~} (name and type only); all of them are removed from \code{\verb~|remaining~}; ctor dependencies are replayed first; then \code{\verb~|addDecl (inductDecl lparams nparams types (isUnsafe := false))~}. Nothing else of the record is read.}
+\li{\code{\verb~|ctorInfo~}, \code{\verb~|recInfo~}: only remembered as \em{postponed}.}
+\li{\code{\verb~|quotInfo _~}: \code{\verb~|replayConstant Eq~}, then \code{\verb~|addDecl quotDecl~} (the record's content is not used).}
+}
+\p{A name that is not in \code{\verb~|remaining~} is silently skipped as a dependency, so a missing, unsafe or partial dependency surfaces as the kernel's "unknown constant".}}
+\li{\strong{Postponed check} (\code{\verb~|:148-164~}): for every postponed ctor/rec name, the kernel environment must contain a constant of the same kind with \code{\verb~|info == info'~}, else "No such constructor/recursor" or "Invalid constructor/recursor". The derived \code{\verb~|BEq~} compares every field (table in section 3); \code{\verb~|Expr~} fields with \code{\verb~|Expr.eqv~} = \code{\verb~|expr_eq_fn<false>~} (\code{\verb~|lean4/src/kernel/expr_eq_fn.cpp:23-125~}), names and level-parameter lists exactly.}
+\li{\strong{Quot post-check} (\code{\verb~|LeanChecker.lean:70-90~}): \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~} are removed from the map before replay; afterwards each of \code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~} that the export contains must be present in the kernel environment and equal (\code{\verb~|!=~} on \code{\verb~|ConstantInfo~}) to the exported record.}
+}
+
+\p{\code{\verb~|==~} for records (02 §2.3 for expressions): binder names and binder infos are ignored; everything else is syntactic: de Bruijn indices, literal values, constant names, universe levels \em{without normalisation}, projection (name, index), \code{\verb~|mdata~} nodes with payload, the \code{\verb~|nondep~} flag of \code{\verb~|let~}. The exporter strips \code{\verb~|mdata~} and writes \code{\verb~|nondep = false~} everywhere unless \code{\verb~|--export-mdata~} is given (\code{\verb~|LeanExport/Basic.lean:147-170~}; the arena does not pass it, \code{\verb~|lean-kernel-arena/lka.py:776~}), so an RLVM that drops \code{\verb~|mdata~} and ignores \code{\verb~|nondep~} at parse time differs from the official checker only on hand-written files, in the accepting direction, and only on semantically irrelevant data.}
+}
+
+\subtree{
+\title{3. Records: fields and where they come from}
+
+\p{\code{\verb~|lean4/src/kernel/declaration.h:56-394~} mirrors \code{\verb~|Lean/Declaration.lean~}. "in" = input of admission, "gen" = computed by the kernel, "cmp" = exported value must equal the generated one, "ign" = exported value ignored by the official checker.}
+
+\table{
+\tr{\th{Record}\th{Field}\th{Status}\th{Computed as}}
+\tr{\td{all}\td{\code{\verb~|name~}, \code{\verb~|levelParams~}, \code{\verb~|type~}}\td{in (checked)}\td{-}}
+\tr{\td{axiom}\td{\code{\verb~|isUnsafe~}}\td{in}\td{unsafe -> skipped}}
+\tr{\td{def}\td{\code{\verb~|value~}}\td{in (checked)}\td{-}}
+\tr{\td{def}\td{\code{\verb~|hints~}}\td{in, untrusted, never verified}\td{strategy only (02 §8.4)}}
+\tr{\td{def}\td{\code{\verb~|safety~}}\td{in}\td{\code{\verb~|unsafe~}/\code{\verb~|partial~} -> skipped}}
+\tr{\td{def/thm/opaque}\td{\code{\verb~|all~}}\td{ign}\td{-}}
+\tr{\td{inductive type}\td{\code{\verb~|numParams~}, \code{\verb~|all~}, \code{\verb~|ctors~}}\td{in}\td{-}}
+\tr{\td{inductive type}\td{\code{\verb~|numIndices~}}\td{ign / gen}\td{Pi binders of the type beyond \code{\verb~|numParams~}, with \code{\verb~|whnf~} between binders (6.4)}}
+\tr{\td{inductive type}\td{\code{\verb~|numNested~}}\td{ign / gen}\td{number of auxiliary types (6.3)}}
+\tr{\td{inductive type}\td{\code{\verb~|isRec~}, \code{\verb~|isReflexive~}}\td{ign / gen}\td{block-wide syntactic tests (6.5)}}
+\tr{\td{constructor}\td{\code{\verb~|type~}}\td{in}\td{(for nested blocks: restored type, equal to the input)}}
+\tr{\td{constructor}\td{\code{\verb~|induct~}, \code{\verb~|cidx~}, \code{\verb~|numParams~}, \code{\verb~|numFields~}, \code{\verb~|isUnsafe~}}\td{cmp}\td{owner type; position in its \code{\verb~|ctors~}; block \code{\verb~|numParams~}; syntactic Pi count minus \code{\verb~|numParams~}; false}}
+\tr{\td{recursor}\td{\code{\verb~|name~}}\td{cmp}\td{\code{\verb~|I.rec~}; auxiliary: \code{\verb~|<first type of block>.rec_<j>~}, j = 1..}}
+\tr{\td{recursor}\td{\code{\verb~|levelParams~}}\td{cmp}\td{\code{\verb~|[u*] ++ lparams~} or \code{\verb~|lparams~} (6.8)}}
+\tr{\td{recursor}\td{\code{\verb~|type~}, \code{\verb~|rules[i].rhs~}}\td{cmp with \code{\verb~|==~}}\td{6.11, 6.12}}
+\tr{\td{recursor}\td{\code{\verb~|all~}}\td{cmp}\td{the \em{user-declared} types of the block (never auxiliary names)}}
+\tr{\td{recursor}\td{\code{\verb~|numParams~}, \code{\verb~|numIndices~}}\td{cmp}\td{block \code{\verb~|numParams~}; indices of the type this recursor eliminates}}
+\tr{\td{recursor}\td{\code{\verb~|numMotives~}, \code{\verb~|numMinors~}}\td{cmp}\td{types incl. auxiliary ones; constructors of all of them}}
+\tr{\td{recursor}\td{\code{\verb~|rules[i].ctor~}, \code{\verb~|.nfields~}}\td{cmp}\td{constructors of the eliminated type in order (auxiliary: the container's ctor names); field count}}
+\tr{\td{recursor}\td{\code{\verb~|k~}, \code{\verb~|isUnsafe~}}\td{cmp}\td{6.9; false}}
+\tr{\td{quot}\td{\code{\verb~|kind~}, \code{\verb~|levelParams~}, \code{\verb~|type~}}\td{cmp for the four reserved names}\td{section 5}}
+}
+}
+
+\subtree{
+\title{4. \code{\verb~|environment::add~} and the simple kinds}
+
+\p{Dispatch: \code{\verb~|environment.cpp:270-281~}. Entry point \code{\verb~|lean_add_decl~} (\code{\verb~|:286-294~}) always checks.}
+
+\subtree{
+\title{4.1 Checks common to every declaration with a \code{\verb~|ConstantVal~} (\code{\verb~|check_constant_val~}, \code{\verb~|:126-132~})}
+
+\pre{\verb~|
+checkConstantVal(env, v, tc):
+  require !env.contains(v.name)                        # :101-104 already_declared
+  require v.levelParams has no duplicates              # :110-120
+  require !hasMVar(v.type) && !hasFVar(v.type)         # :86-99; unrepresentable in an export
+  s := tc.check(v.type, v.levelParams)                 # full type check with universe-parameter checking
+  tc.ensureSort(s)                                     # s, or whnf(s), must be a Sort (02 §6); else "type expected"
+~}
+
+\p{\code{\verb~|tc.check(e, lps)~} (\code{\verb~|type_checker.cpp:364-367~}, 02 §6) is where the remaining well-formedness rules live:}
+
+\ul{
+\li{loose bound variables anywhere in \code{\verb~|e~} -> reject (\code{\verb~|:326-327~}; \code{\verb~|bugs/loose-bvar-value~});}
+\li{\code{\verb~|Sort l~} / \code{\verb~|Const c ls~}: every \code{\verb~|Level.param~} must be in \code{\verb~|lps~} (\code{\verb~|:85-91~}, \code{\verb~|:118-120~}, \code{\verb~|:346~});}
+\li{\code{\verb~|Const c ls~}: \code{\verb~|c~} must be in the environment (\code{\verb~|env.get~} throws), \code{\verb~||ls| == |c.levelParams|~} (\code{\verb~|:105-108~}, \code{\verb~|bugs/constlevels~}), and the safety rule of 4.4;}
+\li{nat literals larger than 128 MB -> reject (\code{\verb~|:315-321~}).}
+}
+
+\p{The check visits every subterm, so "all universe parameters declared" and "all constants known" are properties of the whole expression. RLVM trick: cache per interned node the loose-bvar range and the set of universe-parameter names (small bitset or interned set id); both rules become O(1) tests at the root.}
+}
+
+\subtree{
+\title{4.2 Per kind}
+
+\pre{\verb~|
+addAxiom(v):        checkConstantVal(v, mode = v.isUnsafe ? unsafe : safe)                          # :151-157
+addDefinition(v):                                                                                   # :159-189
+  if v.safety == unsafe:  checkConstantVal(v, unsafe); env' := env + v;   # recursive: body sees itself
+                          check value in env' (mode unsafe); require isDefEq(T', v.type)
+  else (safe AND non-mutual partial):  mode := safe (the default of type_checker)
+       checkConstantVal(v); require closed(v.value)
+       T' := tc.check(v.value, v.levelParams); require tc.isDefEq(T', v.type)   # inferred type first
+       env + v                                                    # added only after the check: no recursion
+addTheorem(v):                                                                                      # :191-208
+  (value and type are hash-consed first: sharecommon_persistent_fn, :196-198)
+  checkConstantVal(v); require tc.isProp(v.type)                   # theorem_type_is_not_prop
+  require closed(v.value); T' := tc.check(v.value, v.levelParams); require tc.isDefEq(T', v.type)
+addOpaque(v):   exactly addDefinition's safe branch (mode safe even when v.isUnsafe)                # :210-222
+addMutual(vs):                                                                                      # :224-268
+  require vs nonempty; s := vs[0].safety; require s != safe
+  for v in vs: require v.safety == s, v.levelParams == vs[0].levelParams, name not repeated in the block
+               checkConstantVal(v, mode s)                 # headers against the OLD environment
+  env' := env + all vs; for v in vs: check value in env' (mode s); require isDefEq(T', v.type)
+~}
+
+\p{\code{\verb~|isProp(T)~} = \code{\verb~|normalizes_to_zero(level of ensureSort(infer(T)))~} (\code{\verb~|type_checker.cpp:379-385~}, 02 §6.10): it throws when the type's type does not reduce to a sort, and treats \code{\verb~|imax 1 0~} as zero. Argument order of the final test is \code{\verb~|isDefEq(inferredType, declaredType)~}.}
+
+\p{After admission: definitions \em{and theorems} unfold by delta (\code{\verb~|constant_info::has_value~}, \code{\verb~|declaration.h:447~}; a theorem's hints count as \code{\verb~|opaque~}, \code{\verb~|declaration.cpp:219-224~}); \code{\verb~|opaque~} constants, axioms, quot constants, inductive types, constructors and recursors never unfold. \code{\verb~|hints~} are taken from the export verbatim; the kernel never recomputes definitional height (\code{\verb~|environment.cpp:159-189~}).}
+}
+
+\subtree{
+\title{4.3 Tutorial tests on this section}
+
+\p{\code{\verb~|badDef~} (isDefEq fails), \code{\verb~|forallSortBad~} (binder domain is not a sort, inside \code{\verb~|tc.check~} of the value), \code{\verb~|nonTypeType~}, \code{\verb~|nonTypeAxiom~} (\code{\verb~|ensureSort~} of the type's type), \code{\verb~|nonPropThm~} (\code{\verb~|isProp~}), \code{\verb~|selfProof~} (a theorem is not in the environment while it is checked -> unknown constant), \code{\verb~|tut06_bad01~} (duplicate universe parameter), \code{\verb~|inductive-undeclared-universe~} (the same universe rule applied to an inductive header).}
+}
+
+\subtree{
+\title{4.4 Safety, and what unsafe/partial records mean for an external checker}
+
+\p{Kernel rule (\code{\verb~|type_checker.cpp:109-117~}), applied only in check mode: with checker mode M, a reference to a constant \code{\verb~|c~} is an error if \code{\verb~|c.isUnsafe && M != unsafe~}, or if \code{\verb~|c~} is a \code{\verb~|partial~} definition and \code{\verb~|M == safe~}. \code{\verb~|isUnsafe~} (\code{\verb~|declaration.cpp:226-238~}): axiom/opaque/inductive/ctor/rec flag, definition with \code{\verb~|safety == unsafe~}; theorems and quot constants never.}
+
+\p{For an export checker the rule degenerates, because the official replay never adds unsafe or partial constants (\code{\verb~|Replay.lean:179-183~}): they are absent, and a reference to one is "unknown constant". RLVM:}
+
+\ul{
+\li{drop every record with \code{\verb~|isUnsafe == true~} or \code{\verb~|safety in {unsafe, partial}~} at load time; remember the name only to give a precise error message;}
+\li{an \code{\verb~|inductive~} item whose type records are unsafe is dropped as a whole; an unsafe-flagged ctor/rec record inside a safe block is neither compared nor added (the generated, safe one is in the environment);}
+\li{\code{\verb~|mutualDefnDecl~} therefore never has to be implemented: it exists only for unsafe/partial blocks. Safe definitions with \code{\verb~|all.length > 1~} are independent, non-recursive kernel definitions.}
+}
+
+\p{The default \code{\verb~|lean4export~}/\code{\verb~|leanexport~} omits unsafe constants (\code{\verb~|LeanExport/Basic.lean:255~}); the tutorial tests are exported with \code{\verb~|--export-unsafe~} (\code{\verb~|tutorial/Tutorial/Export.lean~}), so unsafe and partial \code{\verb~|def~} records do occur in arena inputs and must be skipped, not rejected.}
+}
+}
+
+\subtree{
+\title{5. Quot}
+
+\p{\code{\verb~|environment::add_quot~} (\code{\verb~|quot.cpp:47-104~}); takes no data from the declaration.}
+
+\pre{\verb~|
+addQuot(env):
+  if env.quotInit: return env                              # idempotent, no checks at all the second time
+  checkEqType(env)                                         # quot.cpp:19-45
+  require Quot, Quot.mk, Quot.lift, Quot.ind are all absent from env     # :53-56
+  add the four constants below as QuotVal{kind}; env.quotInit := true
+checkEqType:
+  E := env["Eq"] (unknown constant -> reject); require E is an inductive type
+  require |E.levelParams| == 1 and |E.ctors| == 1
+  require E.type          == Pi(Sort u, Pi(#0, Pi(#1, Sort 0)))            # u = E.levelParams[0]
+  require env[E.ctors[0]].type == Pi(Sort u', Pi(#0, Eq.{u'} #1 #0 #0))    # u' = first level param of the ctor
+~}
+
+\p{Canonical constants (de Bruijn, binder names/infos irrelevant for \code{\verb~|==~}); \code{\verb~|A -> B~} is a Pi whose body does not use the bound variable (shift accordingly):}
+
+\table{
+\tr{\th{Name}\th{kind}\th{levelParams}\th{type}}
+\tr{\td{\code{\verb~|Quot~}}\td{\code{\verb~|type~}}\td{\code{\verb~|[u]~}}\td{\code{\verb~|Pi(Sort u, Pi(Pi(#0, Pi(#1, Sort 0)), Sort u))~}}}
+\tr{\td{\code{\verb~|Quot.mk~}}\td{\code{\verb~|ctor~}}\td{\code{\verb~|[u]~}}\td{\code{\verb~|Pi(Sort u, Pi(Pi(#0, Pi(#1, Sort 0)), Pi(#1, Quot.{u} #2 #1)))~}}}
+\tr{\td{\code{\verb~|Quot.lift~}}\td{\code{\verb~|lift~}}\td{\code{\verb~|[u, v]~}}\td{\code{\verb~|Pi(Sort u, Pi(Pi(#0, Pi(#1, Sort 0)), Pi(Sort v, Pi(Pi(#2, #1), Pi(S, Pi(Quot.{u} #4 #3, #3))))))~} with \code{\verb~|S = Pi(#3, Pi(#4, Pi(#4 #1 #0, Eq.{v} #4 (#3 #2) (#3 #1))))~}}}
+\tr{\td{\code{\verb~|Quot.ind~}}\td{\code{\verb~|ind~}}\td{\code{\verb~|[u]~}}\td{\code{\verb~|Pi(Sort u, Pi(Pi(#0, Pi(#1, Sort 0)), Pi(Pi(Quot.{u} #1 #0, Sort 0), Pi(Pi(#2, #1 (Quot.mk.{u} #3 #2 #0)), Pi(Quot.{u} #3 #2, #2 #0)))))~}}}
+}
+
+\p{Readable: \code{\verb~|Quot.{u} {α : Sort u} (r : α → α → Prop) : Sort u~}; \code{\verb~|Quot.mk.{u} {α} (r) (a : α) : Quot r~}; \code{\verb~|Quot.lift.{u,v} {α} {r} {β : Sort v} (f : α → β) : (∀ a b, r a b → f a = f b) → Quot r → β~}; \code{\verb~|Quot.ind.{u} {α} {r} {β : Quot r → Prop} : (∀ a, β (Quot.mk r a)) → ∀ q, β q~}. The universe parameter names are literally \code{\verb~|u~} and \code{\verb~|v~} and are compared.}
+
+\p{Facts: (a) \code{\verb~|Eq~} must exist \em{before} the quot declaration and have that exact type and constructor type; its \code{\verb~|numParams~} is not inspected. (b) Quot reduction (02 §7.5) is enabled only once \code{\verb~|quotInit~} is set and matches the three names; before that a user constant called \code{\verb~|Quot.lift~} is an ordinary constant, and afterwards the names are taken. (c) RLVM handling of a \code{\verb~|quot~} record: ensure \code{\verb~|Eq~} is admitted, run \code{\verb~|addQuot~} once, then require the record's name to be one of the four and (kind, levelParams, type) to equal the table (official: a quot record with another name is simply never added; rejecting it is stricter and harmless).}
+}
+
+\subtree{
+\title{6. Inductive types (\code{\verb~|kernel/inductive.cpp~})}
+
+\subtree{
+\title{6.1 Pipeline and conventions}
+
+\pre{\verb~|
+addInductive(env, d = {lparams, nparams, types[{name, type, ctors[{name, type}]}], isUnsafe}):     # :1223-1338
+  for T in d.types, and for every ctor c of T:                                                    # :1225-1235
+      require no mvar/fvar in the type; require noNestedPrefix(type)           # 6.2
+  checkUniformOccs(d)                                                          # 6.2
+  (aux, nestedAux, P) := elimNested(env, d)                                    # 6.3; aux.types = d.types ++ auxiliary
+  E := AddInductiveFn(env, aux, nnested = |nestedAux|).run()                   # 6.4 - 6.11
+  if nnested == 0: return E else return restoreNested(env, E, d, nestedAux, P) # 6.12
+AddInductiveFn.run():                                                          # :856-868
+  require lparams has no duplicates
+  checkInductiveTypes(); declareInductiveTypes(); checkConstructors(); declareConstructors()
+  initElimLevel(); initKTarget(); mkRecInfos(); declareRecursors(); checkRecursors()
+~}
+
+\ul{
+\li{\code{\verb~|nparams~} must fit a machine word (\code{\verb~|:123~}, \code{\verb~|:196~}); \code{\verb~|d.types~} must be nonempty (\code{\verb~|:1141~}).}
+\li{\code{\verb~|local(b)~}, for a Pi binder \code{\verb~|b~} (\code{\verb~|mk_local_decl_for~}, \code{\verb~|:213-216~}): a fresh fvar carrying the binder's name and info and the type \code{\verb~|consumeTypeAnnotations(b.domain)~} (6.13 T2). \code{\verb~|inst(body, x)~} is plain substitution. \code{\verb~|mkPi(xs, e)~} / \code{\verb~|mkLambda(xs, e)~} abstract the fvars back, using the stored (stripped) types.}
+\li{Every \code{\verb~|whnf~} / \code{\verb~|isDefEq~} / \code{\verb~|infer~} / \code{\verb~|check~} call in this class constructs a \em{new} \code{\verb~|type_checker~} (\code{\verb~|tc()~}, \code{\verb~|:202~}): no cache is shared between calls. The environment grows during \code{\verb~|run()~}: types are added before constructors are checked, constructors before recursors are built.}
+\li{Unsafe blocks skip only the positivity check (\code{\verb~|:474~}); RLVM never sees them (4.4).}
+}
+}
+
+\subtree{
+\title{6.2 Pre-checks on the declaration as written}
+
+\pre{\verb~|
+noNestedPrefix(e):                                                            # :1210-1221
+  no Const whose name has first component "_nested", and no Proj whose structure name has it
+checkUniformOccs(d):                                                          # :122-152
+  names := names of d.types; lvls := [Param p | p in lparams]
+  for every ctor type, traverse all subterms t pre-order with offset = number of binders entered
+  (Pi/lambda body and let body add 1; both children of an App are visited):
+     (fn, args) := spine(t)
+     if fn is not a Const named in names: continue into children
+     if |args| > nparams: continue into children          # the nparams-prefix is itself a visited subterm
+     require |args| == nparams && offset >= nparams && fn.levels == lvls (syntactic)
+             && for i < nparams: args[i] is BVar(offset - 1 - i)
+     do not descend
+~}
+
+\p{Meaning: every occurrence of a type of the block, anywhere in a constructor type (also inside the arguments of a nested container, inside index positions and inside beta-redexes), must be applied to the block's universe parameters and to the constructor's own parameter variables, in order. A bare or partially applied occurrence is rejected when \code{\verb~|nparams > 0~}. Tutorial \code{\verb~|inductWrongCtorParams~}, \code{\verb~|inductWrongCtorResParams~}, \code{\verb~|inductWrongCtorResLevel~} already fail here. Note that \code{\verb~|_nested~} is reserved only inside inductive declarations; a definition may be called \code{\verb~|_nested.X~} (\code{\verb~|bugs/nested-name-capture~}).}
+}
+
+\subtree{
+\title{6.3 Nested occurrences -> auxiliary mutual block (\code{\verb~|elim_nested_inductive_fn~}, \code{\verb~|:973-1168~})}
+
+\pre{\verb~|
+elimNested(env, d):
+  newTypes := copy of d.types; nestedAux := []          # ordered list of (I Ds over canonical params P, auxName)
+  P := for i < nparams: the type of d.types[0] must be a SYNTACTIC Pi; fresh fvar (name, raw domain, info)  # :1126-1134
+  q := 0; counter := 1
+  while q < |newTypes|:                                 # the queue grows while it is processed
+     for each ctor c of newTypes[q], in order:
+        (As, body) := peel nparams SYNTACTIC Pis of c.type into fresh fvars    # else "incorrect number of parameters"
+        body := replace(body, e -> replaceIfNested(As, e))   # pre-order; a replaced node is not descended into
+        c.type := mkPi(As, body)
+     q++
+  return ({lparams, nparams, newTypes, isUnsafe}, nestedAux, P)
+
+replaceIfNested(As, e):                                                       # :1011-1043, :1054-1119
+  (fn, args) := spine(e); if e is not an App, or fn is not a Const I with env[I] an admitted inductive type: none
+  np := env[I].numParams; if |args| < np: none
+  nested := some args[i], i < np, contains a Const named like a member of newTypes
+  if !nested: none
+  if some args[i], i < np, has loose bound variables: reject   # "parameters cannot contain local variables"
+  key := (fn args[0..np))[As := P]
+  if (key', aux) in nestedAux with key' == key: return Const(aux, lvls) As args[np..]
+  for J in env[I].all, in order:                        # the whole mutual block of the container is copied
+     auxJ := "_nested." ++ J ++ "_" ++ counter; counter++   (repeat while that name is in env)   # :989-995
+     ty := instLevelParams(env[J].type, env[J].levelParams, fn.levels)     # simplifying, 6.13 T3
+     ty := strip np SYNTACTIC Pis from ty and instantiate them with args[0..np)    # else "ill-formed"
+     nestedAux.push(((Const(J, fn.levels) args[0..np))[As := P], auxJ))
+     ctors := for each ctor Jc of J: (Jc.name with prefix J replaced by auxJ,
+                                      mkPi(As, same two steps applied to env[Jc].type))
+     newTypes.push({auxJ, mkPi(As, ty), ctors})
+  return Const(auxI, lvls) As args[np..]                # the entry created for J == I
+~}
+
+\ul{
+\li{Detection is purely syntactic. A container hidden behind a definition (\code{\verb~|abbrev L := List~}) or a partial application is not recognised and later fails positivity. Two occurrences that differ by a beta-redex are different keys and yield two auxiliary types (\code{\verb~|corner-cases/nested-redex-aux~}).}
+\li{Only the container's \em{parameter} arguments are searched for block types; indices \code{\verb~|args[np..]~} are kept.}
+\li{Auxiliary constructor types still mention the container (\code{\verb~|List (Tree α)~}); they are rewritten when the queue reaches the auxiliary type, which is how \code{\verb~|Array (T)~} discovers \code{\verb~|List (T)~}.}
+\li{Order of auxiliary types = order of discovery = (type index, ctor index, pre-order position; in an App the function part before the argument). It fixes \code{\verb~|motive_k~}, the minor-premise order and the \code{\verb~|rec_j~} numbering.}
+\li{The auxiliary names never reach the final environment; RLVM may use any private identity for them.}
+}
+}
+
+\subtree{
+\title{6.4 Type formers (\code{\verb~|check_inductive_types~}, \code{\verb~|:242-293~})}
+
+\pre{\verb~|
+levels := [Param p | p in lparams]
+for (k, T) in enumerate(types):
+  require T.name and T.name ++ "rec" are absent from env           # nothing of the block is added yet
+  tc.check(T.type, lparams)                                        # closed, constants known, universes declared
+  ty := whnf(T.type); i := 0; nidx := 0
+  while ty is Pi:
+     if i < nparams:
+        if k == 0: p := local(ty); params.push(p); ty := inst(ty.body, p)
+        else: require isDefEq(ty.domain, typeOf(params[i]))        # "parameters ... must match"
+              ty := inst(ty.body, params[i])
+        i++
+     else: ty := inst(ty.body, local(ty)); nidx++
+     ty := whnf(ty)
+  require i == nparams                                             # "number of parameters mismatch"
+  Sort l := ensureSort(ty)                                         # "type expected" (tutorial inductBadNonSort*)
+  if k == 0: resultLevel := l; isNotZero := is_not_zero(l)         # 02 §3.2
+  else: require is_equivalent(l, resultLevel)                      # "must live in the same universe"
+  nindices[k] := nidx; indConst[k] := Const(T.name, levels)
+~}
+
+\p{The parameter fvars (names, infos, annotation-stripped types) come from the \em{first} type only and are reused for every type, constructor, motive and recursor of the block.}
+}
+
+\subtree{
+\title{6.5 \code{\verb~|isRec~}, \code{\verb~|isReflexive~}, adding the types (\code{\verb~|:296-363~})}
+
+\pre{\verb~|
+isRec       := exists T, ctor c, a binder on the SYNTACTIC Pi spine of c.type (parameters included, no
+               instantiation, no whnf) whose domain contains a Const named like a type of the block
+isReflexive := exists T, ctor c, a binder (walking with local()) whose domain is syntactically a Pi and hasIndOcc
+for (k, T): require T.name absent; add InductiveVal{T.name, lparams, T.type, numParams = nparams,
+            numIndices = nindices[k], all = names of types, ctors = names, numNested = nnested,
+            isRec, isUnsafe, isReflexive}
+~}
+
+\p{Both flags are computed on the auxiliary block (after 6.3), are the same for all its types, and a nested block is therefore always \code{\verb~|isRec~} (verified: \code{\verb~|Tree~} with \code{\verb~|List (Tree α)~} has \code{\verb~|isRec = true, numNested = 1~}). \code{\verb~|isRec~} does not follow reduction (\code{\verb~|corner-cases/vanishing-occurrence~}: flag true, positivity sees nothing).}
+}
+
+\subtree{
+\title{6.6 Constructors (\code{\verb~|check_constructors~}, \code{\verb~|:444-485~}; positivity \code{\verb~|:369-440~})}
+
+\pre{\verb~|
+for (k, T): seen := {}
+  for c in T.ctors:
+     require c.name not in seen                                    # "duplicate constructor name"
+     require c.name absent from env; tc.check(c.type, lparams)     # env contains the block's TYPES, not its ctors
+     t := c.type; i := 0
+     while t is Pi:                                                # SYNTACTIC: the ctor type itself is never whnf'ed
+        if i < nparams: require isDefEq(t.domain, typeOf(params[i]))   # "does not match ... parameters"
+                        t := inst(t.body, params[i])
+        else: Sort lf := ensureSort(infer(t.domain))
+              require is_geq(resultLevel, lf) || normalizes_to_zero(resultLevel)     # "universe ... too big"
+              checkPositivity(t.domain)
+              t := inst(t.body, local(t))
+        i++
+     require isValidIndApp(t, k)                                   # "invalid return type"
+
+hasIndOcc(e)       := e contains a Const named like a type of the (auxiliary) block; levels are not looked at
+isValidIndApp(t,k) := (fn, args) := spine(t); fn == indConst[k]  (name AND levels == [Param lparams..])
+                      && |args| == nparams + nindices[k] && for i < nparams: args[i] == params[i]   (that fvar)
+                      && for i >= nparams: !hasIndOcc(args[i])     # lean4#2125
+isValidIndApp(t)   := the first k with isValidIndApp(t, k), else none
+checkPositivity(t):
+  t := whnf(t)                                                     # full whnf, delta included
+  if !hasIndOcc(t): ok                                             # non-recursive field
+  elif t is Pi: require !hasIndOcc(t.domain)                       # "non positive occurrence"
+                checkPositivity(inst(t.body, local(t)))
+  elif isValidIndApp(t) != none: ok                                # recursive field
+  else reject                                                      # "non valid occurrence"
+recArg(t): t := whnf(t); while t is Pi: t := whnf(inst(t.body, local(t))); return isValidIndApp(t)   # :414-421
+~}
+
+\p{Consequences worth a test each: the constructor type must be a manifest Pi telescope (tutorial \code{\verb~|reduceCtorType~}) but each field type is weak-head normalised (tutorial \code{\verb~|reduceCtorParam*~}, accept); the normalisation is only at the head, so an occurrence in the domain of an arrow inside a field is negative even if it would reduce away (tutorial \code{\verb~|indNegReducible~}; \code{\verb~|corner-cases/positivity-whnf~} is "either"); the result's parameters must be the parameter variables themselves, not something convertible (\code{\verb~|corner-cases/proof-param-swap~}, official rejects); Prop-valued blocks accept fields of any universe.}
+}
+
+\subtree{
+\title{6.7 Adding the constructors (\code{\verb~|:487-507~})}
+
+\p{\code{\verb~|arity~} = number of syntactic leading Pis of \code{\verb~|c.type~}; add \code{\verb~|ConstructorVal{c.name, lparams, c.type, induct = T.name, cidx = position in T.ctors, numParams = nparams, numFields = arity - nparams, isUnsafe}~} after requiring the name to be absent (this is the check that catches a name shared by two types' ctors or by a ctor and a type).}
+}
+
+\subtree{
+\title{6.8 Elimination universe (\code{\verb~|:510-580~})}
+
+\pre{\verb~|
+elimOnlyAtZero():
+  if isNotZero: return false                 # never a Prop: large elimination
+  if |types| > 1: return true                # mutual, and ALSO any nested block (auxiliary types count)
+  n := |types[0].ctors|
+  if n > 1: return true
+  if n == 0: return false                    # empty predicate: large elimination (False)
+  t := the single ctor type; i := 0; toCheck := []
+  while t is Pi:                             # syntactic
+     x := local(t)
+     if i >= nparams: Sort lf := ensureSort(infer(t.domain)); if !normalizes_to_zero(lf): toCheck.push(x)
+     t := inst(t.body, x); i++
+  return exists x in toCheck with x not in appArgs(t)      # == on fvars: the argument must BE the field
+elimLevel   := Zero if elimOnlyAtZero() else Param(u*), u* = first of "u", "u_1", "u_2", ... not in lparams
+recLParams  := [u*] ++ lparams   (just lparams when elimLevel is Zero);  recLevels likewise
+~}
+
+\p{The test is "could be a Prop" (\code{\verb~|!is_not_zero~}), not "is a Prop": \code{\verb~|inductive MyBool.{u} : Sort u | tt | ff~} eliminates into \code{\verb~|Prop~} only (\code{\verb~|bugs/large-elim-param~}). A non-Prop field is allowed only if it appears \em{verbatim} as an argument of the result type (tutorial \code{\verb~|sortElimPropRec~} large, \code{\verb~|sortElimProp2Rec~} with \code{\verb~|id b1~} small; \code{\verb~|Exists~} small; \code{\verb~|Eq~}, \code{\verb~|Acc~}, \code{\verb~|And~}, \code{\verb~|True~}, \code{\verb~|False~} large). Verified shapes: \code{\verb~|PUnit.rec~} has \code{\verb~|[u_1, u]~}, \code{\verb~|Eq.rec~} \code{\verb~|[u, u_1]~}, a nested Prop (\code{\verb~|N ∧ N → N~}) has no extra universe.}
+}
+
+\subtree{
+\title{6.9 K (\code{\verb~|init_K_target~}, \code{\verb~|:582-604~})}
+
+\p{\code{\verb~|k := |types| == 1 && normalizes_to_zero(resultLevel) && exactly one ctor && that ctor has exactly nparams syntactic Pis (no fields)~}. Here the test is "is definitely a Prop". All recursors of the block get the same flag (so only single-type blocks can have it). \code{\verb~|Eq.rec~}, \code{\verb~|True.rec~}: true; \code{\verb~|Acc.rec~}, \code{\verb~|And.rec~}, \code{\verb~|PUnit.rec~}, \code{\verb~|Nat.rec~}: false (\code{\verb~|bugs/nat-rec-k-lie~}, \code{\verb~|bugs/rec-k-lie~}, tutorial \code{\verb~|ruleKAcc~}).}
+}
+
+\subtree{
+\title{6.10 Motives and minor premises (\code{\verb~|mk_rec_infos~}, \code{\verb~|:620-705~})}
+
+\pre{\verb~|
+for (j, T):                                                 # types of the (auxiliary) block
+  idx_j := walk T.type exactly as in 6.4 (whnf between binders), instantiating params, local() per index
+  major_j := fresh fvar "t" : indConst[j] params idx_j
+  C_j := fresh fvar "motive" (or "motive_<j+1>" if |types| > 1) : mkPi(idx_j, mkPi(major_j, Sort elimLevel))
+for (j, T), for c in T.ctors (block order):
+  walk c.type syntactically: params instantiated; fields b := [local(binder) ...];
+                             u := [x in b | recArg(domain of x's binder) != none]
+  t := the result type; (r, ridx) := (its type index, its index arguments = args[nparams..])
+  for x in u:  ty := whnf(typeOf(x)); xs := []
+               while ty is Pi: y := local(ty); xs.push(y); ty := whnf(inst(ty.body, y))
+               (r', idx') := decompose ty as above
+               ih_x := fresh fvar (name(x) ++ "_ih") : mkPi(xs, C_{r'} idx' (x xs))
+  minor_c := fresh fvar : mkPi(b, mkPi(ihs, C_r ridx (Const(c.name, levels) params b)))
+~}
+
+\p{Layout of a minor premise: all fields first, then all induction hypotheses (one per recursive field, in field order). A recursive field keeps its declared (annotation-stripped) type; its hypothesis is built from the weak-head-normalised type.}
+}
+
+\subtree{
+\title{6.11 Recursors, rules and the defensive check (\code{\verb~|:736-854~})}
+
+\pre{\verb~|
+Cs := [C_0 .. C_{n-1}]; minors := all minor premises in block order; m := 0
+for (j, T):
+  type_j := mkPi(params, mkPi(Cs, mkPi(minors, mkPi(idx_j, mkPi(major_j, C_j idx_j major_j)))))
+            (then infer_implicit: changes binder infos only, irrelevant for ==)
+  rules_j := for c in T.ctors:
+     b, u as in 6.10
+     v := for x in u: xs, r', idx' as in 6.10;
+              mkLambda(xs, Const(types[r'].name ++ "rec", recLevels) params Cs minors idx' (x xs))
+     rhs := mkLambda(params, mkLambda(Cs, mkLambda(minors, mkLambda(b, minors[m] b v)))); m++
+     RecursorRule{ctor = c.name, nfields = |b|, rhs}
+  require T.name ++ "rec" absent
+  add RecursorVal{T.name ++ "rec", recLParams, type_j, all = names of types, numParams = nparams,
+                  numIndices = nindices[j], numMotives = |types|, numMinors = |minors|, rules_j, k, isUnsafe}
+checkRecursors():                                             # :817-854, defensive since lean4#14808
+  for (j, T): tc.check(type_j, recLParams)
+     for c in T.ctors: lhs := T.rec.{recLevels} params Cs minors ridx (c.{levels} params b)
+                       require isDefEq(infer(whnf(lhs)), infer(lhs))     # the rule preserves types
+~}
+
+\p{RLVM should build \code{\verb~|b~}, \code{\verb~|u~}, \code{\verb~|xs~}, \code{\verb~|idx'~} once per constructor and use them for both 6.10 and the rules (decision 11); \code{\verb~|checkRecursors~} is then redundant but cheap, keep it on.}
+}
+
+\subtree{
+\title{6.12 Restoring nested blocks (\code{\verb~|:875-964~}, \code{\verb~|:1179-1205~}, \code{\verb~|:1241-1337~})}
+
+\pre{\verb~|
+restoreNested(env0, E, d, nestedAux, P):
+  orig := names of d.types; auxNames := E[d.types[0].name].all[|d.types|..]       # creation order
+  rename: auxNames[j] ++ "rec"  ->  d.types[0].name ++ "rec_" ++ (j+1)
+  new := env0
+  for T in d.types:
+     add E[T.name] with all := orig                                   # name must be absent
+     for c in T.ctors: add E[c.name] with type := restore(type)       # == the input type
+     addRec(T.name ++ "rec")
+  for a in auxNames: addRec(a ++ "rec")
+  addRec(r): R := E[r]; n := renamed(r) or r; require n absent
+     add RecursorVal{n, R.lparams, restore(R.type), all := orig, R.numParams, R.numIndices, R.numMotives,
+                     R.numMinors, k = R.k, rules := for rule in R.rules:
+                       (ctor := if n != r then rule.ctor with prefix auxJ replaced by J else rule.ctor,
+                        rule.nfields, restore(rule.rhs))}
+  with tc over new and the fvars P: for (I Ds, _) in nestedAux: tc.check(I Ds, lparams)        # MANDATORY
+  with tc over new: check every restored ctor type, recursor type and rule rhs                 # defensive
+restore(e):
+  peel |P| leading binders of e (all Pi or all lambda) into fresh fvars As
+  rewrite pre-order, not descending into rewritten nodes:
+     Const r, r an auxiliary recursor name     ->  Const(renamed r, same levels)
+     t = Const(auxJ, _) a   (auxiliary type)   ->  (J.{ls} Ds)[P := As]  a[|P|..]
+     t = Const(auxJ.c, _) a (auxiliary ctor)   ->  Const(J.c, ls)  Ds[P := As]  a[|P|..]
+  rebind As with the original binder kind
+~}
+
+\p{The check of \code{\verb~|I Ds~} in the final environment is the fix for \code{\verb~|bugs/nested-unused-param~}: the container's parameter arguments are absent from the auxiliary block and would otherwise never be type-checked. A recursor of an auxiliary type keeps the block's \code{\verb~|numParams~}, while its rules name constructors of the container, whose own parameter count is different; iota therefore takes the fields as the \em{last} \code{\verb~|nfields~} arguments of the major premise (\code{\verb~|inductive.h:106-112~}). The major premise of \code{\verb~|T.rec_1~} has the container type (e.g. \code{\verb~|List (T α)~}), so struct-eta on that major is decided by the container's records (\code{\verb~|get_major_induct~}, \code{\verb~|declaration.cpp:117-126~}; e.g. a block nested through \code{\verb~|Prod~} eta-expands majors of \code{\verb~|rec_1~}). K is never set for a nested block (6.9).}
+}
+
+\subtree{
+\title{6.13 Exactness traps (what makes a regenerated record syntactically equal to the kernel's)}
+
+\ul{
+\li{\strong{T1 Binder names and binder infos do not matter}, including \code{\verb~|motive_k~}, \code{\verb~|x_ih~}, the minor-premise names and the implicit binders computed by \code{\verb~|infer_implicit~}.}
+\li{\strong{T2 \code{\verb~|consumeTypeAnnotations~}} (\code{\verb~|lean4-replay/src/Lean/Expr.lean:1738-1744~}): every binder domain the kernel turns into a local loses its \em{outermost} annotations, repeatedly: \code{\verb~|optParam A d -> A~}, \code{\verb~|autoParam A t -> A~} (head constant with exactly 2 arguments), \code{\verb~|outParam A -> A~}, \code{\verb~|semiOutParam A -> A~} (exactly 1 argument); matched by constant name only, not through \code{\verb~|mdata~}, not under binders. Affected: block parameters (from the first type header), indices, constructor fields, hypothesis telescopes. Constructor \em{types} keep the annotations. Verified: for \code{\verb~|class OP (α : outParam (Type u)) (γ : Type v)~} the recursor has \code{\verb~|{α : Type u}~}; for \code{\verb~|structure AP where x : Nat; h : x = x := by rfl~} the constructor has \code{\verb~|autoParam (x = x) _~} and the recursor's minor premise and rule have \code{\verb~|(h : x = x)~}. \code{\verb~|Init.Prelude~} already needs this (\code{\verb~|HAdd~}, \code{\verb~|Membership~}, \code{\verb~|Coe~}); Mathlib needs it thousands of times.}
+\li{\strong{T3 Universe instantiation simplifies} (02 §3.3): 6.3 instantiates the container's types with \code{\verb~|mk_max~}/\code{\verb~|mk_imax~}, and the result ends up in recursor types. Verified: container field \code{\verb~|PUnit.{succ (max a b)} → α~} instantiated at \code{\verb~|a = b = u~} appears in the recursor as \code{\verb~|PUnit.{succ u}~}.}
+\li{\strong{T4 Output of \code{\verb~|whnf~} is observable in three places}: the index binders of a type header (6.4/6.10), the telescope \code{\verb~|xs~} of a recursive field, and the index arguments \code{\verb~|idx'~} of its conclusion. On elaborator output \code{\verb~|whnf~} should be the identity there (a Pi, or an application of a constant without a value; not verified on Mathlib). It is not the identity on hand-written input (tutorial \code{\verb~|reduceCtorParamRefl2~}: field \code{\verb~|α → constType (T α) α~}, hypothesis \code{\verb~|∀ a, motive (x a)~}); those domains must then be the \em{unreduced, substituted} subterms the kernel's \code{\verb~|whnf~} exposes, which a normalise-and-quote implementation would not give.}
+\li{\strong{T5 Universe names}: \code{\verb~|u~}, else \code{\verb~|u_1~}, \code{\verb~|u_2~}, ... and it is the \em{first} parameter of the recursor.}
+\li{\strong{T6 Motive codomain} is \code{\verb~|Sort (Param u*)~} or \code{\verb~|Sort Zero~}; constructor constants carry \code{\verb~|[Param lparams..]~}, recursor constants \code{\verb~|recLevels~}; no simplification is applied to these.}
+\li{\strong{T7} Recursors of nested blocks: \code{\verb~|all~} lists only user types, \code{\verb~|numMotives~}/\code{\verb~|numMinors~} count auxiliary types/constructors, and rules of \code{\verb~|rec_j~} name the container's constructors.}
+\li{\strong{T8} The exported \code{\verb~|recs~} array is not ordered (\code{\verb~|bugs/nested-name-capture~} lists \code{\verb~|rec_1~} before \code{\verb~|rec~}); match by name.}
+}
+}
+
+\subtree{
+\title{6.14 Reference outputs (use as unit tests)}
+
+\pre{\verb~|
+Nat.rec.{u} : Pi(Pi(Nat, Sort u), Pi(#0 Nat.zero, Pi(Pi(Nat, Pi(#2 #0, #3 (Nat.succ #1))), Pi(Nat, #3 #0))))
+  numParams 0, numIndices 0, numMotives 1, numMinors 2, k false
+  rule Nat.zero, 0 fields:  λ motive zero succ. #1
+  rule Nat.succ, 1 field:   λ motive zero succ (n : Nat). #1 #0 (Nat.rec.{u} #3 #2 #1 #0)
+Eq.rec.{u, u_1}: {α : Sort u_1} {a : α} {motive : (b : α) → a = b → Sort u} (refl : motive a (Eq.refl a)) {b : α} (t : a = b) : motive b t
+  numParams 2, numIndices 1, k true;   rule Eq.refl, 0 fields: λ α a motive refl. refl
+Acc.rec.{u_1, u}: minor  (x : α) (h : ∀ y, r y x → Acc r y) (h_ih : ∀ y (a : r y x), motive y (h y a)) : motive x (Acc.intro x h)
+  rule Acc.intro, 2 fields: λ α r motive intro x h. intro x h (λ y a. Acc.rec.{u_1,u} α r motive intro y (h y a))
+Tree.{u} (α : Type u) | node : α → List (Tree α) → Tree α          (numNested 1, isRec true)
+  Tree.rec.{u_1,u}, Tree.rec_1.{u_1,u}: numParams 1, numMotives 2, numMinors 3, all [Tree]
+  binders: {α} {motive_1 : Tree α → Sort u_1} {motive_2 : List (Tree α) → Sort u_1} (node) (nil) (cons) ...
+  node : (a : α) (as : List (Tree α)) (as_ih : motive_2 as) : motive_1 (Tree.node a as)
+  Tree.rec   rule Tree.node, 2 fields: λ α m1 m2 node nil cons a as. node a as (Tree.rec_1 α m1 m2 node nil cons as)
+  Tree.rec_1 rules List.nil (0 fields), List.cons (2 fields):
+             λ ... head tail. cons head tail (Tree.rec ... head) (Tree.rec_1 ... tail)
+Rose α | node : α → Array (Rose α) → Rose α: numNested 2; motive_2 for Array (rec_1), motive_3 for List (rec_2)
+Mutual Prop pair EvenT/OddT: both recursors have levelParams [] (Prop only), numMotives 2, numMinors 3, k false
+~}
+}
+}
+
+\subtree{
+\title{7. Where the reducer and type checker read these records}
+
+\table{
+\tr{\th{Consumer}\th{Fields used}\th{Reference}}
+\tr{\td{iota (02 §7.4)}\td{rec: \code{\verb~|numParams+numMotives+numMinors+numIndices~} = major index, \code{\verb~|k~}, \code{\verb~|rules~} (lookup by head constant of the major, \code{\verb~|nfields~}), \code{\verb~|levelParams~}}\td{\code{\verb~|inductive.h:74-119~}}}
+\tr{\td{K}\td{\code{\verb~|k~}, \code{\verb~|numParams~}, inductive of the major (from the recursor type), first ctor of that inductive}\td{\code{\verb~|inductive.h:28-48~}, \code{\verb~|inductive.cpp:76-85~}}}
+\tr{\td{struct-eta of a major}\td{\code{\verb~|isNonRecStructure(I)~} := \code{\verb~||ctors| == 1 && numIndices == 0 && !isRec~}; ctor \code{\verb~|numParams~}, \code{\verb~|numFields~}; skipped if the major's type is a Prop}\td{\code{\verb~|inductive.cpp:28-33~}, \code{\verb~|:87-100~}, \code{\verb~|inductive.h:60-72~}}}
+\tr{\td{struct-eta in \code{\verb~|is_def_eq~}}\td{other side is a ctor application with exactly \code{\verb~|numParams + numFields~} arguments; \code{\verb~|isNonRecStructure(induct)~}}\td{\code{\verb~|type_checker.cpp:852-868~}}}
+\tr{\td{unit-like}\td{\code{\verb~|isNonRecStructure~}, ctor \code{\verb~|numFields == 0~}}\td{\code{\verb~|type_checker.cpp:1116-1126~}}}
+\tr{\td{\code{\verb~|Expr.proj~} typing}\td{see below}\td{\code{\verb~|type_checker.cpp:237-292~}}}
+\tr{\td{\code{\verb~|Expr.proj~} reduction}\td{head is a ctor with \code{\verb~|induct == structName~}; argument \code{\verb~|numParams + idx~}}\td{\code{\verb~|type_checker.cpp:416-437~}}}
+}
+
+\p{Validity of \code{\verb~|proj S i e~} (02 §6.8): \code{\verb~|i < 2^32~}; \code{\verb~|T := whnf(infer(e))~} has head \code{\verb~|Const S ls~} with \code{\verb~|S~} an inductive type with exactly one constructor and \code{\verb~||args(T)| == numParams + numIndices~} (indices and recursive types are allowed; only eta needs \code{\verb~|isNonRecStructure~}); walk the ctor type instantiated with \code{\verb~|ls~} and the parameter arguments; for each earlier field \code{\verb~|j < i~} whose binder is used by later binders: if \code{\verb~|T~} is a Prop the field's type must be a Prop, and the variable is replaced by \code{\verb~|proj S j e~}; the \code{\verb~|i~}-th binder must exist; if \code{\verb~|T~} is a Prop its type must be a Prop. \code{\verb~|isProp~} is the throwing, level-normalising test of 4.2. Tutorial \code{\verb~|projOutOfRange~}, \code{\verb~|projNotStruct~}, \code{\verb~|projProp2/4/5/6~}, \code{\verb~|projIndexData*~}; \code{\verb~|bugs/proj-non-structure~}, \code{\verb~|proj-of-imax-prop~}, \code{\verb~|proj-of-stuck-prop~}, \code{\verb~|proj-of-subst-prop~}. The structure-ness of \code{\verb~|S~} is therefore decided entirely by regenerated data (\code{\verb~|ctors~}, \code{\verb~|numParams~}, \code{\verb~|numIndices~}, \code{\verb~|isRec~}, ctor \code{\verb~|numFields~}); a lie in the export cannot reach it (\code{\verb~|bugs/ctor-num-fields~}).}
+}
+
+\subtree{
+\title{8. Literals, special constants and \code{\verb~|Init.Prelude~}}
+
+\p{Names hard-wired in the kernel (\code{\verb~|type_checker.cpp:1241-1266~}, \code{\verb~|inductive.cpp:1371-1390~}, \code{\verb~|quot.cpp:106-115~}): \code{\verb~|Nat~}, \code{\verb~|String~} (types of literals), \code{\verb~|Nat.zero~}, \code{\verb~|Nat.succ~}, \code{\verb~|Nat.add~}, \code{\verb~|Nat.sub~}, \code{\verb~|Nat.mul~}, \code{\verb~|Nat.pow~}, \code{\verb~|Nat.gcd~}, \code{\verb~|Nat.mod~}, \code{\verb~|Nat.div~}, \code{\verb~|Nat.beq~}, \code{\verb~|Nat.ble~}, \code{\verb~|Nat.land~}, \code{\verb~|Nat.lor~}, \code{\verb~|Nat.xor~}, \code{\verb~|Nat.shiftLeft~}, \code{\verb~|Nat.shiftRight~}, \code{\verb~|Bool.true~}, \code{\verb~|Bool.false~}, \code{\verb~|String.ofList~} (the string hook in v4.36, a \code{\verb~|def~}, not a constructor), \code{\verb~|Char~}, \code{\verb~|Char.ofNat~}, \code{\verb~|List.nil.{0}~}, \code{\verb~|List.cons.{0}~}, \code{\verb~|eagerReduce~}, \code{\verb~|Eq~}, \code{\verb~|Quot*~}.}
+
+\p{What the official kernel checks about them: \strong{nothing}, except \code{\verb~|Eq~} when \code{\verb~|Quot~} is declared. \code{\verb~|infer_lit~} returns \code{\verb~|Const Nat~} / \code{\verb~|Const String~} without looking them up; the Nat extension fires on the \em{names} of the functions; a string literal expands to \code{\verb~|String.ofList (List.cons.{0} Char (Char.ofNat c) ...)~} over Unicode scalar values. The arena promises (README "On \code{\verb~|Init.Prelude~}") that prelude declarations are either absent or taken from an official release, that checkers may check more, and that tests violating this would be labelled and declined by the official kernel.}
+
+\p{What is needed for soundness, by feature:}
+
+\ul{
+\li{\em{Literal typing and literal <-> constructor conversion}: only \code{\verb~|Nat.zero : Nat~}, \code{\verb~|Nat.succ : Nat → Nat~}, resp. the well-typedness of the expansion at type \code{\verb~|String~}. A literal is then an abbreviation.}
+\li{\em{Binary acceleration}: \code{\verb~|Nat~} must be the free inductive type on \code{\verb~|zero~}/\code{\verb~|succ~}, and each accelerated function must compute the standard function on numerals; \code{\verb~|Nat.beq~}/\code{\verb~|ble~} additionally need \code{\verb~|Bool~} with \code{\verb~|false~}, \code{\verb~|true~}. This is a semantic property of the definitions.}
+}
+
+\p{Stricter checkers: lean4lean (\code{\verb~|Lean4Lean/Primitive.lean~}, \code{\verb~|Environment/Basic.lean:34-63~}) reserves 24 names (\code{\verb~|Bool~}, \code{\verb~|Bool.false~}, \code{\verb~|Bool.true~}, \code{\verb~|Nat~}, \code{\verb~|Nat.zero~}, \code{\verb~|Nat.succ~}, the 14 functions above plus \code{\verb~|Nat.pred~} and \code{\verb~|Nat.bitwise~}, \code{\verb~|String.ofList~}, \code{\verb~|Char.ofNat~}); any declaration using one must pass a recogniser: \code{\verb~|Nat~}/\code{\verb~|Bool~} must be exactly \code{\verb~|inductive Nat : Type | zero | succ : Nat → Nat~} / \code{\verb~|Bool : Type | false | true~} (\code{\verb~|:588-604~}); each function must be a safe, universe-monomorphic definition of the expected type whose defining equations hold by \code{\verb~|is_def_eq~} on variables, e.g. \code{\verb~|add x 0 ≡ x~}, \code{\verb~|add x (succ y) ≡ succ (add x y)~}; \code{\verb~|mul x (succ y) ≡ add (mul x y) x~}; \code{\verb~|pow x (succ y) ≡ mul (pow x y) x~}; four cases for \code{\verb~|beq~}/\code{\verb~|ble~}; \code{\verb~|shiftLeft x (succ y) ≡ shiftLeft (mul 2 x) y~}; \code{\verb~|land~}/\code{\verb~|lor~}/\code{\verb~|xor~} must be \code{\verb~|Nat.bitwise f~} with the right truth table; \code{\verb~|mod~}/\code{\verb~|div~}/\code{\verb~|gcd~}/\code{\verb~|bitwise~} are recognised through their well-founded/fuel encodings, which is tied to one prelude version (\code{\verb~|:319-563~}). \code{\verb~|Char.ofNat : Nat → Char~} and \code{\verb~|String.ofList : List Char → String~} are checked for their types only (\code{\verb~|:481-499~}).}
+
+\p{Minimal sound policy for RLVM (three levels; implement L1 first):}
+
+\ul{
+\li{\strong{L0 = official}: no checks. Equal to the official verdict on every current test.}
+\li{\strong{L1 shape guards} (cheap, release-independent): (a) a block declaring \code{\verb~|Nat~} or \code{\verb~|Bool~} must have exactly the shape above, else the literal/Nat extension is unusable; (b) a declaration named like an accelerated function must be a safe definition without universe parameters whose type is \code{\verb~|Nat → Nat → Nat~} (\code{\verb~|Nat → Nat → Bool~} for \code{\verb~|beq~}/\code{\verb~|ble~}); (c) before the first string literal is typed: \code{\verb~|String.ofList : List Char → String~}, \code{\verb~|Char.ofNat : Nat → Char~}, \code{\verb~|List.nil.{0} Char : List Char~}, \code{\verb~|List.cons.{0} Char : Char → List Char → List Char~}; (d) a reserved name declared with another kind fails the guard. On a failed guard: \strong{exit 2 (decline)}, not 0 and not 1 - the test is then scored neither as wrongly accepted nor as wrongly rejected.}
+\li{\strong{L2 semantic recognisers} as in lean4lean, for the functions with simple recursion equations; needed only if the arena adds labelled forged-prelude tests. \code{\verb~|bugs/nat-rec-rules~} and \code{\verb~|bugs/nat-rec-k-lie~} (a wrong \code{\verb~|Nat.rec~}) are already caught by record comparison, not by this.}
+}
+}
+
+\subtree{
+\title{9. Policy for the records of an export (RLVM)}
+
+\subtree{
+\title{9.1 \code{\verb~|inductive~} item}
+
+\pre{\verb~|
+admitInductiveItem(item = {types, ctors, recs}):
+  if a type record is unsafe: drop the item (4.4)
+  require types nonempty; all type records agree on levelParams and numParams;
+          every T.all == [names of item.types in order]                      # stricter than official, see below
+  for T in types: Cs(T) := the ctor records named in T.ctors, in that order   # each must exist in item.ctors
+  G := addInductive(env, {lparams, nparams, [(T.name, T.type, [(c.name, c.type) | c in Cs(T)])], false})
+  for every safe ctor record c in item.ctors:  g := G.ctor[c.name] or reject "No such constructor"
+        require c.{levelParams, induct, cidx, numParams, numFields} == g's and c.type == g.type
+  for every safe rec record r in item.recs:    g := G.rec[r.name] or reject "No such recursor"
+        require r.{levelParams, all, numParams, numIndices, numMotives, numMinors, k} == g's,
+                r.type == g.type, |r.rules| == |g.rules| and pairwise (ctor, nfields, rhs ==)
+  commit G (all names were checked absent during generation)
+~}
+
+\ul{
+\li{The official checker keys everything by name in one flat map, so a constructor may sit in a different \code{\verb~|inductive~} item than its type; \code{\verb~|lean4export~} never does that. Requiring the item to be self-contained and the \code{\verb~|all~} lists to agree is stricter only on hand-made files.}
+\li{The official checker does not require a generated constructor/recursor to be \em{present} in the export; missing records are harmless because the generated ones are used.}
+\li{Exported \code{\verb~|numIndices~}, \code{\verb~|numNested~}, \code{\verb~|isRec~}, \code{\verb~|isReflexive~} are not compared (decision 8).}
+\li{Optional completeness fallback, off by default: if a \code{\verb~|==~} comparison fails, fully type-check the exported recursor type / rule and only then accept it if it is definitionally equal to the generated one \em{and} the two inferred types are definitionally equal. The arena descriptions of \code{\verb~|rec-rule-proof-irrel~} and \code{\verb~|rec-type-proof-irrel~} name "type check before comparing" as the sound alternative. It would mask an RLVM bug in 6.13, so log every use.}
+}
+}
+
+\subtree{
+\title{9.2 \code{\verb~|quot~} record: section 5(c).}
+
+
+}
+
+\subtree{
+\title{9.3 \code{\verb~|axiom~}, \code{\verb~|def~}, \code{\verb~|thm~}, \code{\verb~|opaque~}}
+
+\p{Section 4. Axioms are admitted unconditionally once their type checks; the official checker has no axiom whitelist (exit 0 even with \code{\verb~|sorryAx~} or \code{\verb~|Lean.trustCompiler~}; declining such inputs is allowed but costs a "declined").}
+}
+
+\subtree{
+\title{9.4 Order, duplicates, forward references}
+
+\ul{
+\li{Duplicate declaration name anywhere in the file -> reject (parse-time in the official checker).}
+\li{\code{\verb~|lean4export~} emits every dependency (of types, values, ctor types, recursor rules) before its user and the four quot records right after \code{\verb~|Eq~} (\code{\verb~|Basic.lean~}, \code{\verb~|dumpDeps~}), so file order is a valid admission order for generated files. The official checker accepts any order. Recommended: streaming admission with a "parked" set keyed by the first missing constant; at end of file a parked declaration is an unknown constant (reject). A declaration can never depend on itself (tutorial \code{\verb~|selfProof~}).}
+\li{Before a declaration's value is made available for unfolding by others, it must have passed the root-level closedness test (4.1): \code{\verb~|bugs/loose-bvar-value~} hangs checkers that unfold an unchecked value containing a loose bound variable. If bodies are checked concurrently, publish (header checked) -> check body later is sound for the final verdict only if the reducer is total on ill-typed closed terms.}
+}
+}
+}
+
+\subtree{
+\title{10. Bad tests about declarations -> the check that rejects them}
+
+\p{\code{\verb~|#n~} refers to the checklist in section 11. Tests of pure reduction/def-eq/level algebra are listed last.}
+
+\table{
+\tr{\th{Test}\th{Forgery / defect}\th{Rejected by}}
+\tr{\td{\code{\verb~|bugs/ctor-num-fields~}}\td{ctor record says \code{\verb~|numFields = 0~}}\td{\verb~|#~49 ctor record != generated}}
+\tr{\td{\code{\verb~|bugs/rec-k-lie~}, \code{\verb~|bugs/nat-rec-k-lie~}}\td{recursor record says \code{\verb~|k = true~}}\td{\verb~|#~50 (\code{\verb~|k~} from 6.9)}}
+\tr{\td{\code{\verb~|bugs/nat-rec-rules~}, \code{\verb~|unit-rec-rule~}, \code{\verb~|rec-rule-wrong-arg~}}\td{wrong rule right-hand side}\td{\verb~|#~50 rule \code{\verb~|rhs ==~}}}
+\tr{\td{\code{\verb~|bugs/nested-rec-rule-nfields~}}\td{rule \code{\verb~|nfields~} of a nested block}\td{\verb~|#~50 rule \code{\verb~|nfields~}}}
+\tr{\td{\code{\verb~|bugs/rec-rule-proof-irrel~}, \code{\verb~|rec-rule-proof-irrel-nested~}}\td{ill-typed rule equal only up to proof irrelevance}\td{\verb~|#~50, structural comparison, also for \code{\verb~|rec_N~}}}
+\tr{\td{\code{\verb~|bugs/rec-type-proof-irrel~}}\td{recursor type altered inside a proof argument}\td{\verb~|#~50 type \code{\verb~|==~}}}
+\tr{\td{\code{\verb~|bugs/large-elim-param~}, \code{\verb~|large-elim-prop-bool~}}\td{recursor with a motive universe it must not have}\td{\verb~|#~44 then \verb~|#~50 (\code{\verb~|levelParams~}, type)}}
+\tr{\td{\code{\verb~|bugs/orphan-rec~}, \code{\verb~|other/extra-rec~}, tutorial \code{\verb~|BogusRecursor~}}\td{recursor nobody generates / wrong type}\td{\verb~|#~51 / \verb~|#~50}}
+\tr{\td{\code{\verb~|other/orphan-ctor~}}\td{ctor of a non-existent type inside the item}\td{\verb~|#~51}}
+\tr{\td{\code{\verb~|bugs/nested-name-capture~}}\td{rule calls \code{\verb~|_nested.Cov_1.rec~}, defined later as a \code{\verb~|def~}}\td{\verb~|#~50 (generated rule calls \code{\verb~|Shadow.rec_1~}); aux names never enter the environment}}
+\tr{\td{\code{\verb~|bugs/nested-unused-param~}}\td{ill-typed container parameter that vanishes from the auxiliary block}\td{\verb~|#~48 check of \code{\verb~|I Ds~} in the final environment}}
+\tr{\td{\code{\verb~|bugs/rec-missing-ih~}}\td{exported recursor whose rule omits an induction hypothesis}\td{\verb~|#~41 (invalid occurrence) or \verb~|#~50; single classification (decision 11)}}
+\tr{\td{\code{\verb~|bugs/quot-bad-type~}}\td{\code{\verb~|Quot~} record with type \code{\verb~|False~}}\td{\verb~|#~24}}
+\tr{\td{\code{\verb~|bugs/loose-bvar-value~}}\td{definition value is a loose \code{\verb~|#0~}}\td{\verb~|#~11}}
+\tr{\td{\code{\verb~|bugs/constlevels~}}\td{constant applied to the wrong number of universe levels}\td{\verb~|#~8/\verb~|#~12 (and a guard in delta-unfolding)}}
+\tr{\td{\code{\verb~|other/inductive-undeclared-universe~}}\td{header uses \code{\verb~|Sort u~}, \code{\verb~|u~} undeclared}\td{\verb~|#~33}}
+\tr{\td{tutorial \code{\verb~|inductBadNonSort~}, \code{\verb~|inductBadNonSort2~}}\td{header does not end in a sort}\td{\verb~|#~35}}
+\tr{\td{tutorial \code{\verb~|inductLevelParam~}, \code{\verb~|tut06_bad01~}}\td{duplicate universe parameter}\td{\verb~|#~28, \verb~|#~5}}
+\tr{\td{tutorial \code{\verb~|inductTooFewParams~}}\td{\code{\verb~|numParams~} exceeds the Pi prefix}\td{\verb~|#~31/\verb~|#~34}}
+\tr{\td{tutorial \code{\verb~|inductWrongCtorParams~}, \code{\verb~|inductWrongCtorResParams~}, \code{\verb~|inductWrongCtorResLevel~}}\td{wrong parameter domain / swapped parameters / swapped levels}\td{\verb~|#~30 (also \verb~|#~39, \verb~|#~42)}}
+\tr{\td{tutorial \code{\verb~|inductInIndex~}}\td{block type inside an index of the result}\td{\verb~|#~42}}
+\tr{\td{tutorial \code{\verb~|indNeg~}, \code{\verb~|indNegReducible~}, \code{\verb~|reflOccLeft~}}\td{negative occurrence}\td{\verb~|#~41}}
+\tr{\td{tutorial \code{\verb~|reflOccInIndex~}}\td{occurrence in an index of a recursive field}\td{\verb~|#~41 (non valid occurrence)}}
+\tr{\td{tutorial \code{\verb~|reduceCtorType~}}\td{ctor type is not a manifest Pi telescope / application}\td{\verb~|#~42}}
+\tr{\td{tutorial \code{\verb~|typeWithTooHighTypeField~}}\td{field universe above the type's}\td{\verb~|#~40}}
+\tr{\td{tutorial \code{\verb~|dup_defs~}, \code{\verb~|dup_ind_def~}, \code{\verb~|dup_ctor_def~}, \code{\verb~|dup_rec_def~}, \code{\verb~|dup_rec_def2~}, \code{\verb~|dup_ctor_rec~}, \code{\verb~|DupConCon~}}\td{one name declared twice (def/type/ctor/rec in any combination)}\td{\verb~|#~2, \verb~|#~4, \verb~|#~32, \verb~|#~37, \verb~|#~43, \verb~|#~46}}
+\tr{\td{tutorial \code{\verb~|misnamed_rec~}}\td{recursor exported as \code{\verb~|I.not_rec~}}\td{\verb~|#~51 (and unknown constant in its user)}}
+\tr{\td{tutorial \code{\verb~|nonTypeType~}, \code{\verb~|nonTypeAxiom~}, \code{\verb~|nonPropThm~}, \code{\verb~|badDef~}, \code{\verb~|forallSortBad~}, \code{\verb~|selfProof~}}\td{section 4.3}\td{\verb~|#~10, \verb~|#~10, \verb~|#~16, \verb~|#~14, \verb~|#~13, \verb~|#~12}}
+\tr{\td{tutorial \code{\verb~|falseFromUnsafe~}, \code{\verb~|falseFromPartial~}}\td{theorem uses an unsafe / partial constant}\td{\verb~|#~3 then \verb~|#~12 (unknown constant)}}
+\tr{\td{tutorial \code{\verb~|projOutOfRange~}, \code{\verb~|projNotStruct~}, \code{\verb~|projProp2/4/5/6~}, \code{\verb~|projIndexData*~}; \code{\verb~|bugs/proj-non-structure~}, \code{\verb~|proj-of-imax-prop~}, \code{\verb~|other/proj-of-prop~}}\td{invalid projection}\td{\verb~|#~13 with the rules of section 7 on regenerated records}}
+\tr{\td{tutorial \code{\verb~|ruleKbad~}, \code{\verb~|ruleKAcc~}, \code{\verb~|accRecNoEta~}, \code{\verb~|indexedUnitEta~}, \code{\verb~|indexedStructEta~}; \code{\verb~|bugs/k-rec-conv~}}\td{def-eq must not use K / eta here}\td{\verb~|#~14 with regenerated \code{\verb~|k~}, \code{\verb~|numIndices~}, \code{\verb~|isRec~}}}
+\tr{\td{\code{\verb~|bugs/proj-of-stuck-prop~}, \code{\verb~|proj-of-subst-prop~}, \code{\verb~|rec-of-subst-prop~}}\td{a sort that is stuck after substitution}\td{\code{\verb~|isProp~} must throw (4.2), 02 §6.10}}
+\tr{\td{\code{\verb~|bugs/level-imax-leq~}, \code{\verb~|level-imax-normalization~}, \code{\verb~|closure-level-subst~}, \code{\verb~|pi-closure-context~}, \code{\verb~|open-term-cache-context~}, \code{\verb~|eta-ctor-alias~}, \code{\verb~|str-lit-utf8-bad~}, \code{\verb~|other/nat-lit-add-bad~}}\td{core type checker, not admission}\td{02}}
+}
+
+\p{"Either" tests touching admission and the official answer: \code{\verb~|corner-cases/large-elim-maybe-prop~} (official rejects: recursor differs), \code{\verb~|proof-param-swap~} (rejects, \verb~|#~30/\verb~|#~42), \code{\verb~|positivity-whnf~} (rejects, \verb~|#~41), \code{\verb~|vanishing-occurrence~} (accepts), \code{\verb~|nested-redex-aux~} (accepts, two auxiliary types), \code{\verb~|nested-nonuniform-param~} (rejects, \verb~|#~30), \code{\verb~|proj-maybe-prop*~} (accepts). \code{\verb~|corner-cases/proof-param-ok~} must be accepted.}
+}
+
+\subtree{
+\title{11. Admission checklist, in execution order}
+
+\p{Load time (per record):}
+
+\ol{
+\li{The line parses; every referenced name/level/expr index is already defined; no index is defined twice.}
+\li{The declaration name is not already used by any earlier record of any kind (flat namespace).}
+\li{Records flagged unsafe/partial are dropped (4.4); they are not admitted and not compared.}
+}
+
+\p{Every admitted constant (\code{\verb~|checkConstantVal~}):}
+
+\<html:ol>[start]{4}{
+\li{Name absent from the environment (this includes generated names such as \code{\verb~|I.rec~}, \code{\verb~|Quot.mk~}).}
+\li{\code{\verb~|levelParams~} has no duplicates.}
+\li{Type is closed (no loose bound variables; no fvar/mvar by construction).}
+\li{Every universe parameter occurring in the type is in \code{\verb~|levelParams~}.}
+\li{Every constant in the type is admitted and applied to as many levels as it has parameters.}
+\li{The type type-checks.}
+\li{The type of the type reduces to a sort.}
+}
+
+\p{Definition, theorem, opaque (after 4-10; axioms stop at 10):}
+
+\<html:ol>[start]{11}{
+\li{Value is closed.}
+\li{Universe parameters and constants of the value satisfy 7 and 8.}
+\li{Value type-checks, giving \code{\verb~|T'~}.}
+\li{\code{\verb~|isDefEq(T', declared type)~}.}
+\li{(definition) \code{\verb~|hints~} are stored verbatim and never trusted for correctness; \code{\verb~|all~} is ignored.}
+\li{(theorem, before 11) \code{\verb~|isProp(type)~}: the type's sort level normalises to zero; a stuck sort is an error.}
+\li{The constant becomes visible only after 4-16 (no self-reference).}
+}
+
+\p{Quot (first \code{\verb~|quot~} record):}
+
+\<html:ol>[start]{18}{
+\li{\code{\verb~|Eq~} is admitted and is an inductive type.}
+\li{\code{\verb~|Eq~} has exactly one universe parameter and exactly one constructor.}
+\li{\code{\verb~|Eq~}'s type is \code{\verb~|Pi(Sort u, Pi(#0, Pi(#1, Sort 0)))~}.}
+\li{Its constructor's type is \code{\verb~|Pi(Sort u, Pi(#0, Eq.{u} #1 #0 #0))~}.}
+\li{\code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~} are absent.}
+\li{Add the four canonical constants; set \code{\verb~|quotInit~} (enables quot reduction).}
+\li{Every exported quot record is one of the four names with identical kind, \code{\verb~|levelParams~} and type.}
+}
+
+\p{Inductive item:}
+
+\<html:ol>[start]{25}{
+\li{Item consistency: nonempty; type records agree on \code{\verb~|levelParams~}, \code{\verb~|numParams~}, \code{\verb~|all~}; each \code{\verb~|ctors~} entry resolves to a ctor record of the item.}
+\li{\code{\verb~|numParams~} fits a machine integer.}
+\li{No constant or projection structure name with first component \code{\verb~|_nested~} in any type or ctor type.}
+\li{\code{\verb~|levelParams~} has no duplicates.}
+\li{(types and ctor types have no mvar/fvar - vacuous for exports.)}
+\li{Uniform occurrences: every occurrence of a block type in a ctor type is applied to the block's levels and the ctor's parameter variables (6.2).}
+\li{Nested elimination: first type and every ctor have at least \code{\verb~|numParams~} \em{syntactic} Pis; parameters of a nested container contain no local variables; container types strip their own parameters syntactically.}
+\li{For each (auxiliary-block) type: \code{\verb~|I~} and \code{\verb~|I.rec~} absent.}
+\li{Each type header type-checks under \code{\verb~|levelParams~} (closed, constants known, universes declared).}
+\li{Header telescope: later types' parameter domains def-eq to the first type's; exactly \code{\verb~|numParams~} consumed.}
+\li{Header ends (after \code{\verb~|whnf~}) in a sort.}
+\li{All result sorts are \code{\verb~|is_equivalent~} to the first one.}
+\li{Type names pairwise distinct; per type, ctor names distinct; each ctor name absent from the environment.}
+\li{Each ctor type type-checks in the environment extended by the block's types.}
+\li{Ctor parameter binder domains def-eq to the block parameters.}
+\li{Each field's type is a type, and its universe is \code{\verb~|<=~} the result universe unless the result is a Prop.}
+\li{Each field is strictly positive (after head normalisation); a recursive field ends in a valid \code{\verb~|I params idx~}.}
+\li{Ctor result is syntactically \code{\verb~|I_k params idx~} with the block's levels, the parameter variables, the right arity and no block type inside the indices.}
+\li{Ctor names absent when added (catches clashes across types and with type names).}
+\li{Elimination universe (6.8).}
+\li{K flag (6.9).}
+\li{Recursor types and rules built; each recursor name absent when added (catches a ctor named \code{\verb~|rec~}).}
+\li{Defensive: generated recursor types type-check and each rule preserves types.}
+\li{Nested blocks: restore; every restored name absent; every nested application \code{\verb~|I Ds~} type-checks in the final environment (mandatory); restored ctor types, recursor types and rules type-check (defensive).}
+\li{Every exported safe ctor record equals the generated constant of that name (all fields, type by \code{\verb~|==~}).}
+\li{Every exported safe recursor record equals the generated constant of that name (all fields; type and rule right-hand sides by \code{\verb~|==~}; \code{\verb~|k~}; rule count and order).}
+\li{An exported ctor/recursor name without a generated constant of the same kind is rejected.}
+\li{Commit the generated constants (not the exported ones) to the environment.}
+}
+
+\p{End of file:}
+
+\<html:ol>[start]{53}{
+\li{No parked declaration remains (missing dependency = unknown constant).}
+\li{Exit 0 only if every record passed; exit 1 on any failure; exit 2 only by explicit policy (section 8).}
+}
+}
+
+\subtree{
+\title{12. Not verified / open points}
+
+\ul{
+\li{Not read: the Mathlib export itself. Whether it contains a non-identity \code{\verb~|whnf~} at the positions of T4, or containers whose instantiation exercises T3, is inferred from the exporter and kernel code, not observed. That exports contain \code{\verb~|partial~} definitions is inferred from the exporter's filter plus a count of partial constants in a live Lean 4.33 environment (\code{\verb~|work/agent03-decl/Probe3.lean~}).}
+\li{The level-simplification and annotation claims were observed on Lean 4.33.0 output, read in v4.36.0 code.}
+\li{"The official checker ignores \code{\verb~|numIndices~}/\code{\verb~|isRec~}/..." is from \code{\verb~|Replay.lean~}; the arena's pinned \code{\verb~|official~} checker is v4.35.0 (per 02 §0, same kernel); its \code{\verb~|Replay.lean~} was not diffed against v4.36.0.}
+\li{Exit codes of \code{\verb~|leanchecker~} on parse failures (uncaught \code{\verb~|IO~} exception) were not observed by running it.}
+\li{\code{\verb~|lean4-leanexport~} and \code{\verb~|lean4-replay~} are sparse clones of the same tag; \code{\verb~|Init/Prelude.lean~} was read only for the declarations named in section 8.}
+\li{PR numbers are quoted from source comments, test descriptions and \code{\verb~|lean4lean/divergences.md~}.}
+}
+}

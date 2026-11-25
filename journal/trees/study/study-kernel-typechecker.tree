@@ -1,0 +1,845 @@
+\title{02 - Official Lean 4 kernel type checker core (v4.36.0): implementation-grade specification}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{reference-engine}
+\tag{levels}
+\tag{nat}
+\meta{origin}{docs/research/02-kernel-typechecker.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Scope: everything in the official C++ kernel except declaration admission (inductive checking, recursor generation, replay order), which the declaration-admission document covers. All paths are relative to \code{\verb~|refs/~}. Line numbers refer to \code{\verb~|lean4~} at tag \code{\verb~|v4.36.0~} (commit \code{\verb~|611c117~}). "throw" always means a kernel exception, i.e. the whole declaration is rejected.}
+
+\p{Notation: \code{\verb~|==~} structural equality (binder names/infos ignored, see 2.3); \code{\verb~|=p~} pointer equality; \code{\verb~|whnf_core(e, cheap_proj)~} = \code{\verb~|whnf_core(e, cheap_rec=false, cheap_proj)~}.}
+
+\subtree{
+\title{0. Sources and version facts (read first)}
+
+\table{
+\tr{\th{Source}\th{What it is}}
+\tr{\td{\code{\verb~|lean4/src/kernel/{type_checker,level,expr,instantiate,abstract,replace_fn,expr_eq_fn,local_ctx,quot,declaration,environment}.{h,cpp}~}, \code{\verb~|inductive.h~}}\td{the specification}}
+\tr{\td{\code{\verb~|lean4/src/LeanChecker.lean~}, \code{\verb~|git show v4.36.0:src/Lean/{Replay,Declaration,Expr,Level}.lean~}}\td{how the arena's "official" checker drives the kernel (\code{\verb~|leanchecker --from-export~})}}
+\tr{\td{\code{\verb~|lean4lean/divergences.md~}, \code{\verb~|lean4lean/Lean4Lean/TypeChecker.lean~} (toolchain v4.36.0)}\td{independent Lean re-implementation, lists every deliberate difference}}
+\tr{\td{\code{\verb~|lean-kernel-arena/tests/{bugs,corner-cases,other,perf}/*.yaml~}, \code{\verb~|tutorial/Tutorial.lean~}}\td{the tests RLVM is ranked on}}
+}
+
+\p{Version facts, verified by diffing the tags \code{\verb~|v4.30.0~}, \code{\verb~|v4.33.0~}, \code{\verb~|v4.35.0~}, \code{\verb~|v4.36.0~} and master (\code{\verb~|7e19442~}, 2026-11-23):}
+
+\ul{
+\li{Arena tests are generated with toolchain v4.36.0 (\code{\verb~|lean-kernel-arena/tests/lean-toolchain~}); the arena's \code{\verb~|official~} checker is v4.35.0. \code{\verb~|git diff v4.35.0 v4.36.0 -- src/kernel~} is deletions of dead code only, so 4.35 and 4.36 behave identically.}
+\li{v4.30 -> v4.33: \code{\verb~|is_prop~} tests the level with \code{\verb~|normalizes_to_zero~} instead of \code{\verb~|== Prop~} (PR 14613); projection index bounded to 32 bits (\code{\verb~|to_proj_idx~}); \code{\verb~|reduce_proj_core~} and proj/proj comparison check the structure name (PR 14631/14632); local context extended only after the binder domain is checked.}
+\li{v4.33 -> v4.35: (a) \code{\verb~|Lean.reduceBool~}/\code{\verb~|Lean.reduceNat~} native reduction REMOVED from the kernel; (b) 128 MB bound on Nat numerals, \code{\verb~|Nat.pow~} now throws instead of staying stuck above 2^24 (PR 14849); (c) \code{\verb~|is_prop~} throws if the type's type does not reduce to a sort (PR 14807/14843); (d) the union-find \code{\verb~|equiv_manager~} was REPLACED by a plain set of successful pairs (PR 14806). Anything you read elsewhere about \code{\verb~|equiv_manager~}, \code{\verb~|reduce_native~} or \code{\verb~|ReducePowMaxExp~} is obsolete.}
+\li{master after v4.36 (section 12; the arena also lists an \code{\verb~|official-nightly~} checker, nightly-2026-11-14, which may already contain these, not verified): proof irrelevance moved before \code{\verb~|whnf_core~}; struct-eta on recursor majors decided by large elimination instead of \code{\verb~|is_prop~}; proof majors no longer whnf'ed; \code{\verb~|try_eta_struct~} eta-expands partially applied constructors.}
+}
+}
+
+\subtree{
+\title{1. Decision summary for RLVM}
+
+\ol{
+\li{\code{\verb~|is_def_eq~} is a sound, incomplete, order-sensitive semi-decision procedure. Mathlib is only known to check under the official step order (section 8) with the exported reducibility hints. Reproduce the order of \em{strategy} decisions (which side to unfold, when to compare arguments, when to fold Nat literals); being \em{more complete} (accepting more true equalities) is safe, being less complete rejects Mathlib.}
+\li{Soundness-critical restrictions that must be reproduced exactly: projection restrictions on Prop structures (6.8), \code{\verb~|is_prop~} hard failure (6.10), K-like reduction conditions (7.4), struct-eta conditions (7.4, 8.6), unit-like conditions (8.8), level arity checks, loose-bvar rejection, literal semantics.}
+\li{Reducibility hints come from the export and are used verbatim by the official checker; they only steer lazy delta. Do not recompute heights. All inductive-derived data (\code{\verb~|numFields~}, \code{\verb~|k~}, \code{\verb~|isRec~}, rules, ...) is recomputed by the official kernel and must not be trusted (section 9).}
+\li{Seven maps exist (section 5): infer x2 (check / infer-only), whnf_core, whnf, def-eq success pairs, same-head-args failure pairs, unfold (instantiated values). All are keyed by structural expression equality and live for one declaration. There is NO union-find and NO general failure cache in v4.36.}
+\li{Level equality is \code{\verb~|l1 == l2 || normalize(l1) == normalize(l2)~} with an imax normal form that is NOT canonical. A complete semantic comparison is sound and accepts a superset; use the official normal form as fast path only (section 3.6).}
+\li{Theorems are delta-unfoldable (hint "opaque" for ordering purposes only); \code{\verb~|opaque~} constants never unfold.}
+\li{The Nat GMP extension covers exactly 15 functions (7.6); in \code{\verb~|is_def_eq~} it only fires on fvar-free terms (or under \code{\verb~|eagerReduce~}), in \code{\verb~|whnf~} it fires always. Let-bound variables are fvars, which is why \code{\verb~|let~} bodies are not eagerly evaluated.}
+\li{A stuck projection/recursor keeps its \em{unreduced} form (\code{\verb~|whnf_core~} returns the original \code{\verb~|e~}), and def-eq first runs \code{\verb~|whnf_core~} with \code{\verb~|cheap_proj=true~}. Both are needed to keep folded heads for the argument-comparison shortcut (sections 7.2, 11).}
+}
+}
+
+\subtree{
+\title{2. Data model and invariants}
+
+\subtree{
+\title{2.1 Level (\code{\verb~|lean4/src/kernel/level.h:30~})}
+
+\p{\code{\verb~|Zero | Succ l | Max l l | IMax l l | Param name | MVar name~} (enum order matters, 3.5). Cached per node: 32-bit hash, \code{\verb~|depth~} (zero/param = 0, succ = d+1, max/imax = max(d1,d2)+1; panic if > 2^24-1, \code{\verb~|level.cpp:42-50~}), \code{\verb~|hasParam~}, \code{\verb~|hasMVar~}. \code{\verb~|l1 == l2~} is purely structural (\code{\verb~|level.cpp:118-143~}). MVar never occurs in checked declarations.}
+}
+
+\subtree{
+\title{2.2 Expr (\code{\verb~|lean4/src/kernel/expr.h:68-82~})}
+
+\p{\code{\verb~|BVar idx | FVar name | MVar name | Sort level | Const name levels | App f a | Lambda n bi dom body | Pi n bi dom body | Let n type value body nondep | Lit (Nat bignum | String) | MData kv e | Proj sname idx e~}.}
+
+\p{Cached 64-bit data word per node (\code{\verb~|expr.cpp:96-117~}, \code{\verb~|git show v4.36.0:src/Lean/Expr.lean~} l.119-127, 473-513): hash (32 bits), approxDepth (8 bits, saturating at 255), hasFVar, hasExprMVar, hasLevelMVar, hasLevelParam, looseBVarRange (20 bits; panic "too many bound variables" above 1048575).}
+
+\ul{
+\li{\code{\verb~|looseBVarRange~}: \code{\verb~|bvar i~} -> i+1; binders -> \code{\verb~|max(range(dom), range(body)-1)~}; let -> \code{\verb~|max(range(type), range(value), range(body)-1)~}; app -> max; const/sort/fvar/lit -> 0. \code{\verb~|has_loose_bvars(e)~} = range > 0 is O(1) and is used as a fast exit everywhere.}
+\li{\code{\verb~|hasFVar~} is true for let-bound fvars too.}
+\li{The hash ignores binder names, binder infos, the mdata payload and the let \code{\verb~|nondep~} flag.}
+}
+}
+
+\subtree{
+\title{2.3 Structural equality \code{\verb~|==~} (\code{\verb~|expr_eq_fn.cpp:44-113~}, \code{\verb~|expr_eq_fn<false>~})}
+
+\p{Pointer-equal -> true; hash differs -> false; kind differs -> false; then by kind. Binder names and binder infos are NOT compared; mdata payload and let \code{\verb~|nondep~} ARE compared; const compares name and levels with level \code{\verb~|==~}; Lit compares values. Shared sub-pairs (RC > 1) are memoised per call. Every \code{\verb~|expr_map~} cache and every \code{\verb~|t == s~} in the type checker uses this relation.}
+}
+
+\subtree{
+\title{2.4 Invariants the type checker enforces or assumes}
+
+\ul{
+\li{Every expression given to \code{\verb~|infer_type_core~} is closed w.r.t. bound variables: \code{\verb~|has_loose_bvars(e)~} -> throw "type checker does not support loose bound variables" (\code{\verb~|type_checker.cpp:326-327~}). Binders are opened with fresh fvars (locally nameless). Arena test \code{\verb~|bugs/loose-bvar-value~}.}
+\li{No metavariables (\code{\verb~|type_checker.cpp:342~}); declarations are pre-checked for mvars and fvars (\code{\verb~|environment.cpp:86-99~}).}
+\li{fvar names come from one counter per \code{\verb~|type_checker::state~} (\code{\verb~|_kernel_fresh.N~}), are never reused, and each has a fixed type (and optional value) in \code{\verb~|m_lctx~}. This is the soundness argument for keying all caches on open terms (comment at \code{\verb~|type_checker.h:33-39~}; arena \code{\verb~|bugs/open-term-cache-context~}).}
+\li{\code{\verb~|is_def_eq~}, \code{\verb~|whnf~}, and \code{\verb~|infer_type~} in infer-only mode assume well-typed inputs. Never run them on unchecked export data (arena \code{\verb~|bugs/rec-rule-proof-irrel~}: proof irrelevance on an unchecked term).}
+}
+}
+}
+
+\subtree{
+\title{3. Levels}
+
+\subtree{
+\title{3.1 Smart constructors (\code{\verb~|level.cpp:52-116~})}
+
+\pre{\verb~|
+is_explicit(l)   := l = succ^k zero
+to_offset(l)     := (base, k) with l = succ^k base and base not a succ
+is_not_zero(l)   := Zero,Param -> false | Succ -> true | Max a b -> nz(a) || nz(b) | IMax a b -> nz(b)
+normalizes_to_zero(l) := Zero -> true | Param,Succ -> false | Max a b -> ntz(a) && ntz(b) | IMax a b -> ntz(b)
+
+mk_max(a, b):
+  if explicit(a) && explicit(b): return depth(a) >= depth(b) ? a : b
+  if a == b: return a
+  if a is Zero: return b
+  if b is Zero: return a
+  if b = Max x y and (x == a or y == a): return b
+  if a = Max x y and (x == b or y == b): return a
+  (ba,ka) = to_offset(a); (bb,kb) = to_offset(b)
+  if ba == bb: return ka > kb ? a : b
+  return Max a b
+
+mk_imax(a, b):
+  if is_not_zero(b): return mk_max(a, b)
+  if b is Zero: return Zero
+  if a is Zero or a == succ Zero: return b
+  if a == b: return a
+  return IMax a b
+~}
+
+\p{\code{\verb~|mk_succ~} never simplifies. Levels arriving from the export are NOT run through these constructors; only levels built by the kernel are (\code{\verb~|infer_pi~}, \code{\verb~|instantiate~}, \code{\verb~|normalize~}).}
+}
+
+\subtree{
+\title{3.2 \code{\verb~|is_not_zero~} vs \code{\verb~|normalizes_to_zero~}}
+
+\p{\code{\verb~|is_not_zero(l)~}: l is nonzero under EVERY assignment (false for params). \code{\verb~|normalizes_to_zero(l)~}: l is zero under every assignment and syntactically so (false for params). A bare \code{\verb~|Param u~} satisfies neither. Arena \code{\verb~|bugs/large-elim-param~} breaks checkers where \code{\verb~|is_not_zero(Param) = true~}.}
+}
+
+\subtree{
+\title{3.3 Instantiating level parameters (\code{\verb~|level.cpp:277-300~}, \code{\verb~|261-275~})}
+
+\pre{\verb~|
+instantiate(l, ps, ls):                      # ps names, ls levels, same length
+  if !hasParam(l): return l
+  Param n      -> ls[i] if ps[i] == n for the first such i, else l   # unknown params stay
+  Succ a       -> a' =p a ? l : Succ a'
+  Max a b      -> (a' =p a && b' =p b) ? l : mk_max(a', b')          # SIMPLIFYING constructor
+  IMax a b     -> (a' =p a && b' =p b) ? l : mk_imax(a', b')
+~}
+
+\p{Consequence: instantiation is not plain substitution. \code{\verb~|imax u v [v := succ w]~} becomes \code{\verb~|max u' (succ w)~}, \code{\verb~|imax u v [v := 0]~} becomes \code{\verb~|0~}. Because 3.5 is not canonical, a checker that substitutes without these simplifications and then uses the official \code{\verb~|normalize~} can fail on pairs the official kernel accepts.}
+}
+
+\subtree{
+\title{3.4 Where levels are compared, and how}
+
+\table{
+\tr{\th{Site}\th{Relation}\th{Ref}}
+\tr{\td{\code{\verb~|Sort l1 =?= Sort l2~}}\td{\code{\verb~|is_equivalent~}}\td{\code{\verb~|type_checker.cpp:806-807~}}}
+\tr{\td{const/const level lists (same-head shortcut, bare constants)}\td{pairwise \code{\verb~|is_equivalent~}, equal length}\td{\code{\verb~|785-795~}, \code{\verb~|1001~}, \code{\verb~|1166-1167~}}}
+\tr{\td{\code{\verb~|t == s~}, all cache keys, \code{\verb~|f == Nat.add~} tests}\td{syntactic \code{\verb~|==~}}\td{2.3}}
+\tr{\td{"is this a Prop" (\code{\verb~|is_prop~}, K target, struct-eta guard)}\td{\code{\verb~|normalizes_to_zero~}}\td{\code{\verb~|379-385~}}}
+\tr{\td{number of levels of a constant vs its lparams}\td{exact length}\td{\code{\verb~|101-108~}, \code{\verb~|551-559~}, \code{\verb~|inductive.h:103~}}}
+\tr{\td{constructor-field universe <= result universe, elimination}\td{\code{\verb~|is_geq~}, \code{\verb~|is_not_zero~} (admission only)}\td{\code{\verb~|inductive.cpp:470,280~}}}
+}
+
+\p{There is no cumulativity: \code{\verb~|Sort u~} vs \code{\verb~|Sort v~} is always an equality test.}
+}
+
+\subtree{
+\title{3.5 \code{\verb~|normalize~}, \code{\verb~|is_equivalent~}, \code{\verb~|is_geq~} (\code{\verb~|level.cpp:355-504~})}
+
+\pre{\verb~|
+is_norm_lt(a, b):                       # total order used for sorting max-arguments
+  if a =p b: return false
+  (l1,k1) = to_offset(a); (l2,k2) = to_offset(b)
+  if l1 != l2:
+     if kind(l1) != kind(l2): return kind(l1) < kind(l2)   # Zero < Succ < Max < IMax < Param < MVar
+     Param/MVar: return name(l1) < name(l2)                # lexicographic name order
+     Max/IMax:   return lhs(l1) != lhs(l2) ? is_norm_lt(lhs(l1), lhs(l2)) : is_norm_lt(rhs(l1), rhs(l2))
+  else return k1 < k2
+
+normalize(l):
+  (r, k) = to_offset(l)
+  case r of
+   Zero, Param: return l
+   IMax a b:    return succ^k( mk_imax(normalize(a), normalize(b)) )      # offset stays OUTSIDE
+   Max _ _:
+     todo = flatten_max(r)                                  # all leaves of nested Max
+     args = concat [ flatten_max(normalize(x)) | x in todo ]
+     sort args by is_norm_lt                                # explicit levels first, same bases adjacent
+     i = 0
+     if explicit(args[0]):
+        while i+1 < n && explicit(args[i+1]): i++           # args[i] = largest explicit, offset K
+        if exists j > i with offset(args[j]) >= K: i++      # explicit subsumed by some succ^K'(x), K' >= K
+     out = [args[i]]; prev = to_offset(args[i]); i++
+     for ; i < n; i++:
+        cur = to_offset(args[i])
+        if cur.base == prev.base: (if prev.k < cur.k: replace last of out by args[i]; prev = cur)
+        else: out.push(args[i]); prev = cur
+     out = [ succ^k(x) | x in out ]                         # offset DISTRIBUTED over max
+     return mk_max(out[0], mk_max(out[1], ... mk_max(out[m-2], out[m-1])))   # right fold
+
+is_equivalent(a, b) := a == b || normalize(a) == normalize(b)
+
+is_geq(a, b) := is_geq_core(normalize(a), normalize(b))
+is_geq_core(l1, l2):                    # every recursive call below is is_geq (re-normalizes)
+  if l1 == l2 or l2 is Zero: return true
+  if l2 = Max x y:  return is_geq(l1, x) && is_geq(l1, y)
+  if l1 = Max x y and (is_geq(x, l2) or is_geq(y, l2)): return true
+  if l2 = IMax x y: return is_geq(l1, x) && is_geq(l1, y)
+  if l1 = IMax x y: return is_geq(y, l2)
+  (b1,k1) = to_offset(l1); (b2,k2) = to_offset(l2)
+  if b1 == b2 or b2 is Zero: return k1 >= k2
+  if k1 == k2 and k1 > 0:    return is_geq(b1, b2)
+  return false
+~}
+}
+
+\subtree{
+\title{3.6 Pitfalls (all verified by hand-evaluating the code above)}
+
+\ul{
+\li{\code{\verb~|bugs/level-imax-normalization~}: \code{\verb~|normalize(imax 0 v) = v~} but \code{\verb~|normalize(succ(imax 0 v)) = succ v~}. The successor offset is re-applied around whatever \code{\verb~|mk_imax~} returns; a normaliser that decomposes \code{\verb~|imax u (param v)~} and drops the pending offset equates them and proves False.}
+\li{\code{\verb~|bugs/level-imax-leq~}: \code{\verb~|is_geq(imax u v, succ(imax u v))~}: not equal, rhs not max/imax, lhs is imax -> \code{\verb~|is_geq(v, succ(imax u v))~} -> offsets (v,0) vs (imax u v,1), bases differ, k differ -> false. A leq that compares the imax arguments structurally while ignoring an accumulated offset returns true.}
+\li{The normal form is not canonical under imax. \code{\verb~|normalize(succ(imax u 1)) = succ(max u 1)~} (the max produced by \code{\verb~|mk_imax~} is neither sorted nor distributed) while \code{\verb~|normalize(succ(max u 1)) = max 2 (succ u)~}. So the official kernel REJECTS \code{\verb~|corner-cases/imax-right-successor~} and \code{\verb~|corner-cases/imax-nested-absorption~} (\code{\verb~|imax u v~} vs \code{\verb~|imax (imax u v) v~}); both tests have outcome "either".}
+\li{Recommendation: compare with the official algorithm first (cheap, interned), and on mismatch fall back to a complete procedure (case split each parameter occurring on an imax right-hand side into \code{\verb~|0~} and \code{\verb~|succ p~}, then compare max-plus normal forms). lean4lean does exactly this (\code{\verb~|lean4lean/divergences.md~}, "normalize'" entry) and therefore "accepts declarations the kernel rejects ..., never the other way".}
+\li{Good cases every checker must accept (\code{\verb~|tutorial/Tutorial.lean:90-186~}): \code{\verb~|Sort (imax 1 0) : Sort 1~}, \code{\verb~|imax 0 1~}, \code{\verb~|imax 2 1~}, \code{\verb~|imax u 0 = 0~}, \code{\verb~|imax u u = u~}, max commutativity, associativity, idempotence, absorption \code{\verb~|max u (max u v) = max u v~}.}
+}
+}
+}
+
+\subtree{
+\title{4. Expression helpers}
+
+\p{All traversals go through \code{\verb~|replace(e, f)~} (\code{\verb~|replace_fn.cpp:16-84~}): pre-order, \code{\verb~|f(node, binder_offset)~} may return a replacement; per-call memo keyed by (node pointer, offset) for nodes with RC != 1; unchanged children keep pointer identity (\code{\verb~|update_*~} in \code{\verb~|expr.cpp:263-317~}).}
+
+\table{
+\tr{\th{Function}\th{Exact semantics}\th{Ref}}
+\tr{\td{\code{\verb~|instantiate(e, s, n, subst)~}}\td{loose \code{\verb~|bvar (s+i)~} -> \code{\verb~|subst[i]~} for i < n (lifted by the local binder offset), loose bvars >= s+n lowered by n. Fast exit if \code{\verb~|s >= range(e)~} or n = 0.}\td{\code{\verb~|instantiate.cpp:15-37~}}}
+\tr{\td{\code{\verb~|instantiate(e, v)~}}\td{\code{\verb~|instantiate(e, 0, 1, [v])~}}\td{\code{\verb~|:41~}}}
+\tr{\td{\code{\verb~|instantiate_rev(e, n, subst)~}}\td{loose \code{\verb~|bvar i~} -> \code{\verb~|subst[n-1-i]~} (the last pushed fvar is bvar 0); bvars >= n lowered by n}\td{\code{\verb~|:98-117~}}}
+\tr{\td{\code{\verb~|abstract(e, n, fvars)~}}\td{fvar equal to \code{\verb~|fvars[i]~} (searched from the last) -> \code{\verb~|bvar (offset + n-1-i)~}. Fast exit if \code{\verb~|!hasFVar~}}\td{\code{\verb~|abstract.cpp:14-32~}}}
+\tr{\td{\code{\verb~|lift_loose_bvars(e, s, d)~} / \code{\verb~|lower_loose_bvars(e, s, d)~}}\td{loose bvars >= s get +d / -d (lower requires s >= d)}\td{\code{\verb~|expr.cpp:373-423~}}}
+\tr{\td{\code{\verb~|has_loose_bvar(e, i)~}}\td{pruned by the cached range}\td{\code{\verb~|expr.cpp:345-365~}}}
+\tr{\td{\code{\verb~|cheap_beta_reduce(e)~}}\td{if \code{\verb~|e = (fun x1..xk => b) a1..an~}: strip i = min(k,n) lambdas; if \code{\verb~|b~} has no loose bvars -> \code{\verb~|b a_{i+1}..a_n~}; if \code{\verb~|b~} is \code{\verb~|bvar j~} -> \code{\verb~|a_{i-j} a_{i+1}..a_n~}; otherwise return \code{\verb~|e~} unchanged}\td{\code{\verb~|instantiate.cpp:195-214~}}}
+\tr{\td{\code{\verb~|instantiate_lparams(e, ps, ls)~}}\td{on nodes with \code{\verb~|hasLevelParam~}: Const -> levels mapped with 3.3; Sort -> 3.3}\td{\code{\verb~|:216-230~}}}
+\tr{\td{\code{\verb~|instantiate_type_lparams(info, ls)~}}\td{panic if arity differs; returns the stored type unchanged if \code{\verb~|ls~} empty or type has no params; no cache of its own (the infer cache keyed on the \code{\verb~|Const~} node covers it)}\td{\code{\verb~|:232-238~}}}
+\tr{\td{\code{\verb~|instantiate_value_lparams(info, ls)~}}\td{same for the value; cached by \code{\verb~|m_unfold~} (5)}\td{\code{\verb~|:240-248~}}}
+\tr{\td{\code{\verb~|local_ctx::mk_pi(fvars, body, remove_dead_let)~}}\td{\code{\verb~|abstract~} all fvars at once, then wrap from the last: let-decl fvar -> \code{\verb~|Let~} binder (dropped via \code{\verb~|lower_loose_bvars~} if \code{\verb~|remove_dead_let~} and unused), else \code{\verb~|Pi~} with the decl's name/info and type abstracted over the earlier fvars}\td{\code{\verb~|local_ctx.cpp:66-98~}}}
+}
+
+\p{Head beta inside \code{\verb~|whnf_core~} (\code{\verb~|type_checker.cpp:507-520~}): with spine \code{\verb~|f a1..an~} and \code{\verb~|f~} reduced to a lambda, consume m = min(\verb~|#~leading syntactic lambdas, n) arguments with ONE \code{\verb~|instantiate(body, [a_m..a_1])~}, re-apply the rest, recurse. It does not look through \code{\verb~|Let~} or \code{\verb~|MData~} when counting lambdas.}
+}
+
+\subtree{
+\title{5. Type checker state and caches (\code{\verb~|type_checker.h:25-49~})}
+
+\p{One \code{\verb~|type_checker~} (and so one cache set) per declaration: \code{\verb~|environment.cpp:159-222~} builds a fresh checker for each definition/theorem/opaque/axiom; type and value share it. Theorem type and value are hash-consed first (\code{\verb~|sharecommon_persistent_fn~}, \code{\verb~|environment.cpp:196-198~}).}
+
+\table{
+\tr{\th{Cache}\th{Key -> value}\th{Written}\th{Read}\th{Soundness condition}}
+\tr{\td{\code{\verb~|m_infer_type[0]~} (check mode)}\td{expr -> type}\td{end of every \code{\verb~|infer_type_core(e, false)~}}\td{check mode only}\td{term was fully checked}}
+\tr{\td{\code{\verb~|m_infer_type[1]~} (infer-only)}\td{expr -> type}\td{end of every \code{\verb~|infer_type_core(e, true)~}}\td{infer-only only}\td{valid only for well-typed terms; never satisfies a check-mode request}}
+\tr{\td{\code{\verb~|m_whnf_core~}}\td{expr -> expr}\td{only when \code{\verb~|cheap_rec == cheap_proj == false~}, and not on the two early \code{\verb~|return~}s of the App case (iota result, stuck app)}\td{every non-trivial \code{\verb~|whnf_core~} call, cheap or not}\td{a full result is a legal answer to a cheap request}}
+\tr{\td{\code{\verb~|m_whnf~}}\td{expr -> expr}\td{every non-trivial \code{\verb~|whnf~}}\td{same}\td{fvar values fixed per fvar}}
+\tr{\td{\code{\verb~|m_success~}}\td{unordered pair (ordered by hash; both orders probed on a hash tie)}\td{\code{\verb~|is_def_eq~} (public wrapper) returning true}\td{\code{\verb~|quick_is_def_eq~}}\td{exact pair only, no transitive or congruence closure}}
+\tr{\td{\code{\verb~|m_failure~}}\td{unordered pair}\td{only the failed same-head argument comparison in \code{\verb~|lazy_delta_reduction_step~}}\td{only there}\td{skipping the shortcut is always safe}}
+\tr{\td{\code{\verb~|m_unfold~}}\td{\code{\verb~|Const c us~} expr (only if \code{\verb~|us~} non-empty) -> instantiated value}\td{\code{\verb~|unfold_definition_core~}}\td{same}\td{pure function of (c, us)}}
+}
+
+\p{Why not union-find: \code{\verb~|is_def_eq~} is not transitive (arena \code{\verb~|corner-cases/alg-conv-trans-*~}); the old \code{\verb~|equiv_manager~} closed successes transitively but consulted the closure only for hash-equal terms, so a comparison's outcome depended on hashes of surrounding terms, and recursor generation could be made to disagree with itself (\code{\verb~|bugs/rec-missing-ih~}, \code{\verb~|bugs/proj-of-stuck-prop~}). The local context \code{\verb~|m_lctx~} is saved and restored around binder traversals (\code{\verb~|flet~}), the caches are not.}
+}
+
+\subtree{
+\title{6. infer_type}
+
+\p{Entry points: \code{\verb~|infer(e)~} = \code{\verb~|infer_type_core(e, infer_only=true)~}; \code{\verb~|check(e, lparams)~} = \code{\verb~|infer_type_core(e, false)~} with \code{\verb~|m_lparams = lparams~} (\code{\verb~|type_checker.cpp:360-372~}).}
+
+\subtree{
+\title{6.1 Dispatcher (\code{\verb~|:325-358~})}
+
+\pre{\verb~|
+infer_type_core(e, infer_only):
+  if has_loose_bvars(e): throw
+  if cache[infer_only] has e: return it
+  r = case e of
+    Lit      -> infer_lit(e)                                  # 6.9
+    MData    -> infer_type_core(inner, infer_only)
+    Proj     -> infer_proj(e, infer_only)
+    FVar     -> type from m_lctx, else throw "unknown free variable"
+    MVar     -> throw
+    BVar     -> unreachable (caught by the loose bvar test)
+    Sort l   -> if !infer_only: check_level(l);  Sort (Succ l)            # Succ not simplified
+    Const    -> infer_constant ; Lambda -> infer_lambda ; Pi -> infer_pi ; App -> infer_app ; Let -> infer_let
+  cache[infer_only][e] = r; return r
+ensure_sort_core(t, _): if t is Sort return t; t' = whnf(t); if t' is Sort return t' else throw "type expected"
+ensure_pi_core(t, _):   same with Pi, throw "function expected"
+check_level(l): if m_lparams set and l mentions a Param not in it: throw       (:85-91)
+~}
+}
+
+\subtree{
+\title{6.2 Const (\code{\verb~|:101-123~})}
+
+\p{\code{\verb~|info = env.get(name)~} (throw if unknown). \code{\verb~|length(levels) != length(info.lparams)~} -> throw, in BOTH modes. Check mode only: throw if \code{\verb~|info~} is unsafe and the checker is not in unsafe mode; throw if \code{\verb~|info~} is a \code{\verb~|partial~} definition and the checker is in \code{\verb~|safe~} mode; \code{\verb~|check_level~} on every level. Result: \code{\verb~|instantiate_type_lparams(info, levels)~}.}
+}
+
+\subtree{
+\title{6.3 Lambda (\code{\verb~|:125-142~})}
+
+\pre{\verb~|
+fvars = []; e = lam
+while e is Lambda:
+   d = instantiate_rev(dom(e), fvars)
+   if !infer_only: ensure_sort_core(infer_type_core(d, false), d)
+   fvars.push(fresh fvar : d)            # context extended AFTER the domain is checked
+   e = body(e)
+r = infer_type_core(instantiate_rev(e, fvars), infer_only)
+r = cheap_beta_reduce(r)
+return m_lctx.mk_pi(fvars, r)            # lctx restored on exit
+~}
+
+\p{The whole lambda telescope is opened once (one \code{\verb~|instantiate_rev~} per domain and one for the body).}
+}
+
+\subtree{
+\title{6.4 Pi (\code{\verb~|:144-166~})}
+
+\p{Same telescope walk; for every domain \code{\verb~|us.push(sort_level(ensure_sort_core(infer_type_core(d, infer_only), d)))~} (computed in both modes); body sort level \code{\verb~|r~}; result \code{\verb~|Sort (mk_imax(us[0], mk_imax(us[1], ... mk_imax(us[n-1], r))))~} built from the inside out with the simplifying \code{\verb~|mk_imax~}.}
+}
+
+\subtree{
+\title{6.5 App (\code{\verb~|:173-206~})}
+
+\pre{\verb~|
+check mode (one App node at a time, so every spine prefix gets its own cache entry):
+   f_type = ensure_pi_core(infer_type_core(fn(e), false))
+   a_type = infer_type_core(arg(e), false)
+   d      = dom(f_type)
+   ok = is_def_eq(a_type, d)             # with m_eager_reduce = true for the duration of this one call
+                                         # iff arg(e) is `eagerReduce _ _` (Const eagerReduce applied to 2 args)
+   if !ok: throw app type mismatch
+   return instantiate(body(f_type), arg(e))
+infer-only mode (whole spine, no checks):
+   f_type = infer_type_core(head, true); j = 0
+   for i in 0..n-1:
+      if f_type is Pi: f_type = body(f_type)                         # syntactic, NOT instantiated yet
+      else: f_type = ensure_pi_core(instantiate_rev(f_type, args[j..i))); f_type = body(f_type); j = i
+   return instantiate_rev(f_type, args[j..n))
+~}
+}
+
+\subtree{
+\title{6.6 Let (\code{\verb~|:208-230~})}
+
+\pre{\verb~|
+while e is Let:
+   type = instantiate_rev(let_type(e), fvars); val = instantiate_rev(let_value(e), fvars)
+   if !infer_only:
+      ensure_sort_core(infer_type_core(type, false), type)
+      if !is_def_eq(infer_type_core(val, false), type): throw
+   fvars.push(fresh let-fvar : type := val); e = let_body(e)
+r = cheap_beta_reduce(infer_type_core(instantiate_rev(e, fvars), infer_only))
+return m_lctx.mk_pi(fvars, r, remove_dead_let = true)
+~}
+
+\p{The body is checked with the variable as an fvar that carries its value (zeta happens lazily in \code{\verb~|whnf_core~}, 7.1). The resulting type keeps a \code{\verb~|let~} binder for every let-variable the type mentions and drops the others. \code{\verb~|corner-cases/let-value-type-mismatch~} (outcome "either"): official rejects.}
+}
+
+\subtree{
+\title{6.7 MData}
+
+\p{Transparent in \code{\verb~|infer~}, \code{\verb~|whnf~}, \code{\verb~|whnf_core~}; \code{\verb~|quick_is_def_eq~} on two MData nodes compares the inner terms.}
+}
+
+\subtree{
+\title{6.8 Proj (\code{\verb~|:237-292~}) - soundness critical}
+
+\pre{\verb~|
+infer_proj(proj S idx c, infer_only):
+  type = whnf(infer_type_core(c, infer_only))        # in check mode the struct argument IS checked
+  if idx does not fit in unsigned 32 bit: throw
+  (I, args) = spine(type)
+  if I not Const, or name(I) != S, or I not an inductive type: throw
+  if #ctors(I) != 1 or len(args) != nparams(I) + nindices(I): throw
+  r = instantiate_type_lparams(ctor(I), levels(I))
+  for i < nparams:  r = whnf(r); if r not Pi: throw; r = instantiate(body(r), args[i])
+  is_prop_type = is_prop(type)                         # 6.10, may throw
+  for i < idx:
+     r = whnf(r); if r not Pi: throw
+     if has_loose_bvars(body(r)):                      # a later field type depends on field i
+        if is_prop_type && !is_prop(dom(r)): throw
+        r = instantiate(body(r), proj S i c)
+     else r = body(r)
+  r = whnf(r); if r not Pi: throw
+  r = dom(r)
+  if is_prop_type && !is_prop(r): throw
+  return r
+~}
+
+\p{Rules encoded: (1) \code{\verb~|S~} must be the head of the struct's whnf'd type; (2) exactly one constructor (indices and recursion are allowed); (3) out of a Prop-valued structure only proof fields may be projected, and no earlier field on which a later field depends may be data. Tutorial \code{\verb~|projProp1..6~}, arena \code{\verb~|bugs/proj-non-structure~}, \code{\verb~|other/proj-of-prop~}, \code{\verb~|bugs/proj-of-imax-prop~}, \code{\verb~|perf/prop-struct-projections~} (the dependency test is the O(1) cached range of the body after the parameters were instantiated). \code{\verb~|corner-cases/proj-maybe-prop~}: for \code{\verb~|S.{u} : Sort u~} official allows the projection (\code{\verb~|is_prop~} is false for a bare param); lean4lean uses "not never-zero" instead and rejects; outcome "either".}
+}
+
+\subtree{
+\title{6.9 Lit (\code{\verb~|:315-321~})}
+
+\p{Nat literal larger than the numeral bound (7.6) -> throw. Type is \code{\verb~|Const Nat []~} or \code{\verb~|Const String []~}; the kernel does not check that these constants exist or have the expected shape.}
+}
+
+\subtree{
+\title{6.10 \code{\verb~|is_prop(e)~} (\code{\verb~|:379-385~})}
+
+\p{\code{\verb~|s = ensure_sort_core(infer_type(e))~} (whnf; THROWS "type expected" if not a sort) then \code{\verb~|normalizes_to_zero(level(s))~}. Two separate fixes are encoded: zero up to normalization (\code{\verb~|Sort (imax 1 0)~} is Prop, \code{\verb~|bugs/proj-of-imax-prop~}) and hard failure on a stuck sort (\code{\verb~|bugs/proj-of-stuck-prop~}, \code{\verb~|bugs/proj-of-subst-prop~}, \code{\verb~|bugs/rec-of-subst-prop~}). Never answer "not a proposition" for a type whose sort does not reduce.}
+}
+}
+
+\subtree{
+\title{7. Reduction}
+
+\subtree{
+\title{7.1 \code{\verb~|whnf_core(e, cheap_rec, cheap_proj)~} (\code{\verb~|:464-547~}) - no delta, no Nat extension}
+
+\pre{\verb~|
+case e of
+  BVar, Sort, MVar, Pi, Const, Lambda, Lit -> return e
+  MData -> return whnf_core(inner)
+  FVar  -> if no value in m_lctx: return e            (else continue)
+if m_whnf_core has e: return it                       # consulted for cheap calls too
+case e of
+  FVar (let-bound) -> return whnf_core(value)                           # zeta, not cached
+  Proj  -> r = (m = reduce_proj(e)) ? whnf_core(m) : e                  # stuck: the ORIGINAL e, struct untouched
+  Let   -> r = whnf_core(instantiate(body, value))                      # zeta by substitution
+  App   -> f0 = head(e); f = whnf_core(f0)
+           if f is Lambda: multi-argument beta (section 4), r = whnf_core(result)
+           elif f == f0:   if (x = reduce_recursor(e)) return whnf_core(x) else return e      # not cached
+           else:           r = whnf_core(f applied to the same args)
+if !cheap_rec && !cheap_proj: m_whnf_core[e] = r
+return r
+~}
+}
+
+\subtree{
+\title{7.2 Projections (\code{\verb~|:416-450~})}
+
+\pre{\verb~|
+reduce_proj(proj S idx c): if idx not 32-bit: none
+   c' = cheap_proj ? whnf_core(c, cheap_rec, cheap_proj) : whnf(c)
+   return reduce_proj_core(c', S, idx)
+reduce_proj_core(c, S, idx):
+   if c is a String literal: c = whnf(string_lit_to_constructor(c))
+   (mk, args) = spine(c); if mk not a Const naming a constructor: none
+   if induct(mk) != S: none
+   return nparams(mk) + idx < len(args) ? args[nparams + idx] : none
+~}
+}
+
+\subtree{
+\title{7.3 Flags: where each mode is used}
+
+\table{
+\tr{\th{Call site}\th{cheap_rec}\th{cheap_proj}\th{Ref}}
+\tr{\td{\code{\verb~|whnf~} main loop}\td{false}\td{false}\td{\code{\verb~|:727~}}}
+\tr{\td{first normalisation of both sides in \code{\verb~|is_def_eq_core~}}\td{false}\td{true}\td{\code{\verb~|:1151-1152~}}}
+\tr{\td{after every delta step in lazy delta}\td{false}\td{true}\td{\code{\verb~|:979-1010~}}}
+\tr{\td{\code{\verb~|try_unfold_proj_app~}, second normalisation in \code{\verb~|is_def_eq_core~}}\td{false}\td{false}\td{\code{\verb~|:949~}, \code{\verb~|:1181-1182~}}}
+\tr{\td{\code{\verb~|whnf_core_cheap~} (true, true)}\td{-}\td{-}\td{declared \code{\verb~|type_checker.h:165~}, no caller in v4.36}}
+}
+
+\p{\code{\verb~|cheap_proj~} only changes how a projection's struct is normalised (no delta). With \code{\verb~|cheap_rec=false~} a recursor's major premise is always normalised with full \code{\verb~|whnf~}, and quotient reduction always uses full \code{\verb~|whnf~}.}
+}
+
+\subtree{
+\title{7.4 Recursor (iota) reduction (\code{\verb~|inductive.h:74-119~}, called from \code{\verb~|type_checker.cpp:389-403~})}
+
+\pre{\verb~|
+reduce_recursor(e): if quot initialised and (r = quot_reduce_rec(e)): return r     # 7.5, tried first
+inductive_reduce_rec(e):
+  rec = head Const naming a recursor, else none;  args = spine args
+  major_idx = nparams + nmotives + nminors + nindices;  if major_idx >= len(args): none
+  major = args[major_idx]
+  if rec.k: major = to_cnstr_when_K(major)                 # BEFORE any reduction of the major
+  major = whnf(major)
+  if major is Nat lit n:   major = (n == 0) ? Const Nat.zero : App (Const Nat.succ) (lit (n-1))
+  elif major is Str lit:   major = whnf(string_lit_to_constructor(major))
+  else:                    major = to_cnstr_when_structure(major_induct(rec), major)
+  rule = the rule of rec whose ctor name == head constant of major, else none
+  if rule.nfields > #args(major): none
+  if #levels(rec const) != #lparams(rec): none
+  rhs = instantiate_lparams(rule.rhs, rec.lparams, levels)
+  rhs = rhs  args[0 .. nparams+nmotives+nminors)           # params, motives, minors; indices are dropped
+  rhs = rhs  (the LAST rule.nfields arguments of major)    # ctor params may differ in number (nested inductives)
+  rhs = rhs  args[major_idx+1 ..]                          # extra arguments after the major
+  return rhs
+
+to_cnstr_when_K(e):                                         (inductive.h:28-48)
+  T = whnf(infer_type(e)); if head(T) is not Const major_induct: return e
+  c = (first ctor of the inductive){levels of head(T)} applied to the first nparams args of T
+  if !is_def_eq(T, infer_type(c)): return e                 # indices must match definitionally
+  return c
+
+to_cnstr_when_structure(I, e):                              (inductive.h:60-72)
+  if !is_non_rec_structure(I) or head(e) is ANY constructor constant: return e
+  T = whnf(infer_type(e)); if head(T) is not Const I: return e
+  if is_prop(T): return e                                   # no struct eta for proofs; is_prop may throw
+  return I.mk{levels of head(T)} (first nparams args of T) (proj I 0 e) .. (proj I (nfields-1) e)
+
+is_non_rec_structure(I) := I inductive && #ctors == 1 && nindices == 0 && !isRec     (inductive.cpp:28-33)
+major_induct(rec) := head constant of the major premise's binder type in rec's type    (declaration.cpp:117-126)
+~}
+
+\p{K flag (recomputed at admission, \code{\verb~|inductive.cpp:582-603~}): not mutual, result sort \code{\verb~|normalizes_to_zero~}, exactly one constructor, constructor has zero fields. Tutorial \code{\verb~|ruleK~} (accept), \code{\verb~|ruleKbad~}, \code{\verb~|ruleKAcc~} (reject); arena \code{\verb~|bugs/k-rec-conv~}, \code{\verb~|bugs/rec-k-lie~}, \code{\verb~|bugs/nat-rec-k-lie~}, tutorial \code{\verb~|accRecNoEta~}.}
+}
+
+\subtree{
+\title{7.5 Quotients (\code{\verb~|quot.h:39-70~})}
+
+\p{Only if the environment has Quot initialised. \code{\verb~|Quot.lift~}: major at arg 5, \code{\verb~|f~} at arg 3. \code{\verb~|Quot.ind~}: major at arg 4, \code{\verb~|f~} at arg 3. Needs more than \code{\verb~|mk_pos~} args. \code{\verb~|mk = whnf(args[mk_pos])~} must be \code{\verb~|Quot.mk~} applied to exactly 3 args. Result: \code{\verb~|f (last arg of mk)~} followed by the args after \code{\verb~|mk_pos~}.}
+}
+
+\subtree{
+\title{7.6 \code{\verb~|whnf~} and the Nat extension (\code{\verb~|:551-739~})}
+
+\pre{\verb~|
+whnf(e): trivial for BVar, Sort, MVar, Pi, Lit; MData -> inner; FVar without value -> e
+  if m_whnf has e: return it
+  t = e
+  loop: t1 = whnf_core(t)
+        if (v = reduce_nat(t1)):          m_whnf[e] = v;  return v        # BEFORE delta, regardless of fvars
+        elif (t2 = unfold_definition(t1)): t = t2
+        else:                              m_whnf[e] = t1; return t1
+is_delta(e): head is Const c, c in env, c is a definition or THEOREM (not opaque/axiom/ctor/rec/...),
+             and #levels == #lparams                                              (:551-559, declaration.h:447)
+unfold_definition(e): if is_delta: instantiate_value_lparams (via m_unfold) re-applied to the args; no beta here
+~}
+
+\p{\code{\verb~|reduce_nat(e)~} (\code{\verb~|:668-699~}). \code{\verb~|lit_ext(x)~} := x is a Nat literal or \code{\verb~|x == Const Nat.zero []~}. Function constants are matched as \code{\verb~|Const name []~} (no levels). Arguments are normalised with full \code{\verb~|whnf~} and must be \code{\verb~|lit_ext~}, otherwise the result is "none" and reduction continues with delta.}
+
+\table{
+\tr{\th{Shape}\th{Result}\th{Guards (throw = declaration rejected)}}
+\tr{\td{\code{\verb~|Nat.succ a~} (exactly 1 arg)}\td{\code{\verb~|lit (a+1)~}}\td{size check on result}}
+\tr{\td{\code{\verb~|Nat.add a b~}, \code{\verb~|Nat.sub a b~}, \code{\verb~|Nat.mul a b~}}\td{exact; sub truncates at 0}\td{size check on result}}
+\tr{\td{\code{\verb~|Nat.pow a b~}}\td{\code{\verb~|a^b~}}\td{throw if \code{\verb~|b > 2^32-1~} (even for a <= 1); throw if \code{\verb~|a > 1 && b != 0 && bytes(a) > MAX / b~} (integer division)}}
+\tr{\td{\code{\verb~|Nat.gcd a b~}}\td{gcd (gcd 0 b = b)}\td{none}}
+\tr{\td{\code{\verb~|Nat.mod a b~}}\td{\code{\verb~|a % b~}, \code{\verb~|a % 0 = a~}}\td{none}}
+\tr{\td{\code{\verb~|Nat.div a b~}}\td{floor, \code{\verb~|a / 0 = 0~}}\td{none}}
+\tr{\td{\code{\verb~|Nat.beq a b~}, \code{\verb~|Nat.ble a b~}}\td{\code{\verb~|Const Bool.true []~} / \code{\verb~|Const Bool.false []~}}\td{none}}
+\tr{\td{\code{\verb~|Nat.land~}, \code{\verb~|Nat.lor~}, \code{\verb~|Nat.xor~}}\td{bitwise}\td{none}}
+\tr{\td{\code{\verb~|Nat.shiftLeft a b~}}\td{\code{\verb~|a * 2^b~}; \code{\verb~|0 <<< b = 0~} for ANY b}\td{if a != 0: throw if \code{\verb~|b > 2^32-1~}; throw if \code{\verb~|bytes(a) + b/8 + 1 > MAX~}}}
+\tr{\td{\code{\verb~|Nat.shiftRight a b~}}\td{\code{\verb~|floor(a / 2^b)~}; 0 for any huge b}\td{none}}
+}
+
+\p{\code{\verb~|MAX~} = 128 MiB (134217728; env \code{\verb~|LEAN_NAT_MAX_SIZE~}), \code{\verb~|bytes(n)~} = 8 if n < 2^63, else 8 * ceil(bitlen/64) (\code{\verb~|:294-313~}, \code{\verb~|runtime/object.cpp:1671-1675~}). Consequence: with a word-sized base >= 2 the exponent limit is 2^24. Not accelerated: \code{\verb~|Nat.log2~}, \code{\verb~|Nat.blt~}, \code{\verb~|Nat.decEq~}, \code{\verb~|Nat.pred~}, anything on \code{\verb~|Int~}. Arena: \code{\verb~|other/nat-lit-{add,sub,ble}~}, \code{\verb~|other/nat-lit-add-bad~}, \code{\verb~|bugs/nat-shift-huge~} (shift counts >= 2^64 must not overflow or allocate), \code{\verb~|perf/gf3-matrix-product~} (600 kbit operands).}
+
+\p{Literal facts: \code{\verb~|Nat.zero~} and \code{\verb~|lit 0~} are both normal forms (\code{\verb~|whnf~} does not rewrite one into the other); \code{\verb~|whnf(Nat.succ (lit 4)) = lit 5~}; a literal is converted to constructor form one layer at a time and only as a recursor major (7.4) or in \code{\verb~|is_def_eq_offset~} (8.4). Literals are never expanded to unary.}
+
+\p{String literals: \code{\verb~|string_lit_to_constructor("...")~} = \code{\verb~|String.ofList (List.cons.{0} Char (Char.ofNat (lit c1)) (... (List.nil.{0} Char)))~} with one element per Unicode scalar value (UTF-8 decoded), \code{\verb~|inductive.cpp:1356-1368~}. The constant is \code{\verb~|String.ofList~} (already so at v4.30; the book \code{\verb~|type_checking_in_lean4/src/type_checking/definitional_equality.md:181-187~} still describes the older \code{\verb~|String.mk~}). Used in \code{\verb~|reduce_proj_core~}, recursor majors, and 8.7. Arena \code{\verb~|bugs/str-lit-utf8(-bad)~}.}
+
+\p{There is no other kernel extension in v4.36 (\code{\verb~|Lean.reduceBool~}/\code{\verb~|reduceNat~} are ordinary constants).}
+}
+}
+
+\subtree{
+\title{8. is_def_eq}
+
+\p{\code{\verb~|is_def_eq(t, s)~} (\code{\verb~|:1205-1210~}) = \code{\verb~|is_def_eq_core(t, s)~}, and on true \code{\verb~|m_success.insert({t, s})~}. Calls marked CORE below bypass the success insertion.}
+
+\subtree{
+\title{8.1 Exact step order of \code{\verb~|is_def_eq_core(t, s)~} (\code{\verb~|:1128-1203~})}
+
+\pre{\verb~|
+ 1. r = quick_is_def_eq(t, s);  if r != undef: return r
+ 2. if (!hasFVar(t) || m_eager_reduce) && s == Const Bool.true:          # only s on the RIGHT is tested
+        if whnf(t) is Const Bool.true: return true                       # otherwise fall through
+ 3. tn = whnf_core(t, cheap_proj=true); sn = whnf_core(s, cheap_proj=true)
+ 4. if tn !=p t || sn !=p s:  r = quick_is_def_eq(tn, sn); if r != undef: return r
+ 5. r = is_def_eq_proof_irrel(tn, sn); if r != undef: return r           # definitive true AND false
+ 6. r = lazy_delta_reduction(tn, sn);  if r != undef: return r           # updates tn, sn in place
+ 7. if tn, sn both Const, same name, levels pairwise is_equivalent: return true
+ 8. if tn, sn both FVar with the same name: return true
+ 9. if tn = proj S i a, sn = proj S i b (same S, same i):
+        if lazy_delta_proj_reduction(a, b, S, i): return true            # false -> continue below
+10. tnn = whnf_core(tn); snn = whnf_core(sn)                             # full: struct of a proj via whnf
+    if tnn !=p tn || snn !=p sn: return is_def_eq_core(tnn, snn)         # CORE, restart
+11. if is_def_eq_app(tn, sn): return true
+12. if try_eta_expansion(tn, sn): return true                            # both directions
+13. if try_eta_struct(tn, sn): return true                               # both directions
+14. r = try_string_lit_expansion(tn, sn); if r != undef: return r
+15. if is_def_eq_unit_like(tn, sn): return true
+16. return false
+~}
+}
+
+\subtree{
+\title{8.2 \code{\verb~|quick_is_def_eq(t, s)~} (\code{\verb~|:798-822~})}
+
+\p{\code{\verb~|t == s~} or \code{\verb~|{t,s} in m_success~} -> true. Otherwise if kinds are equal: Lambda/Pi -> \code{\verb~|is_def_eq_binding~} (definitive); Sort -> \code{\verb~|is_equivalent~} (definitive); MData -> \code{\verb~|is_def_eq(inner, inner)~} (definitive); Lit -> literal values equal (definitive, so two different literals are immediately unequal). Everything else -> undef.}
+
+\pre{\verb~|
+is_def_eq_binding(t, s):          # both Lambda or both Pi                    (:748-775)
+  subst = []
+  repeat:
+     ds = none
+     if dom(t) != dom(s):                                    # syntactic test on the UNinstantiated domains
+        ds = instantiate_rev(dom(s), subst)
+        if !is_def_eq(instantiate_rev(dom(t), subst), ds): return false
+     if has_loose_bvars(body(t)) || has_loose_bvars(body(s)):
+        subst.push(fresh fvar : (ds or instantiate_rev(dom(s), subst)))      # typed with s's domain
+     else subst.push(dummy constant)                         # no fvar allocated for non-dependent binders
+     t = body(t); s = body(s)
+  while t and s both still have the original kind
+  return is_def_eq(instantiate_rev(t, subst), instantiate_rev(s, subst))
+~}
+}
+
+\subtree{
+\title{8.3 Proof irrelevance (\code{\verb~|:895-902~})}
+
+\p{\code{\verb~|T = infer_type(tn)~}; if \code{\verb~|!is_prop(T)~} -> undef; else return \code{\verb~|is_def_eq(T, infer_type(sn))~} as the final answer. \code{\verb~|is_prop~} whnf's the sort (\code{\verb~|proofIrrelevanceWhnf~}: \code{\verb~|p : id Prop~}). A false answer here ends the comparison (\code{\verb~|perf/irrelevance-refutes~}). It runs after cheap \code{\verb~|whnf_core~} and before any delta.}
+}
+
+\subtree{
+\title{8.4 Lazy delta reduction (\code{\verb~|:962-1071~})}
+
+\pre{\verb~|
+lazy_delta_reduction(tn, sn): loop
+   r = is_def_eq_offset(tn, sn); if r != undef: return r
+   if (!hasFVar(tn) && !hasFVar(sn)) || m_eager_reduce:
+       if (v = reduce_nat(tn)): return is_def_eq_core(v, sn)            # CORE
+       elif (v = reduce_nat(sn)): return is_def_eq_core(tn, v)          # CORE
+   case lazy_delta_reduction_step(tn, sn) of Continue -> loop | Unknown -> return undef | Equal -> true | Diff -> false
+
+is_def_eq_offset(t, s):                                                 (:1021-1048)
+   zero(x) := x == Const Nat.zero || x is lit 0
+   pred(x) := lit n, n > 0 -> lit (n-1) | `Nat.succ a` (exactly 1 arg) -> a | else none
+   if zero(t) && zero(s): true
+   if pred(t) and pred(s) both exist: return is_def_eq_core(pred(t), pred(s))    # CORE, definitive
+   undef
+
+lazy_delta_reduction_step(tn, sn):
+   dt = is_delta(tn); ds = is_delta(sn);  unfold(x) := whnf_core(unfold_definition(x), cheap_proj=true)
+   neither:   return Unknown
+   only dt:   if head(sn) is a Proj and whnf_core(sn) != sn: sn = whnf_core(sn)       # full whnf_core
+              else tn = unfold(tn)
+   only ds:   symmetric
+   both:      c = compare(hints(dt), hints(ds))
+              c < 0: tn = unfold(tn);  c > 0: sn = unfold(sn)
+              c == 0:
+                 if tn, sn both App && dt, ds are the same constant && hints regular && {tn,sn} not in m_failure:
+                     if levels pairwise is_equivalent && is_def_eq_args(tn, sn): return Equal
+                     else m_failure.insert({tn, sn})
+                 tn = unfold(tn); sn = unfold(sn)
+   case quick_is_def_eq(tn, sn) of true -> Equal | false -> Diff | undef -> Continue
+
+compare(h1, h2):                                                        (declaration.cpp:19-44)
+   same kind:  regular: equal heights -> 0; h1 higher -> -1 (unfold t); else +1 (unfold s)
+               opaque/opaque or abbrev/abbrev -> 0 (unfold both)
+   different:  h1 opaque -> +1; h2 opaque -> -1; h1 abbrev -> -1; h2 abbrev -> +1
+hints(c) := the definition's hints; every non-definition (theorems!) counts as opaque  (declaration.cpp:219-224)
+
+is_def_eq_args(t, s): compare arguments from the LAST to the first with is_def_eq; arity must be equal  (:826-834)
+~}
+
+\p{So: the higher definition is unfolded first; abbrevs before regulars; a theorem (or a definition whose hint is \code{\verb~|opaque~}) is unfolded only when the other side is not delta or also counts as opaque; the argument shortcut applies only when both heads are the same \em{regular} definition and both sides are applications.}
+}
+
+\subtree{
+\title{8.5 Projections (\code{\verb~|:1080-1097~})}
+
+\pre{\verb~|
+lazy_delta_proj_reduction(a, b, S, i): loop
+   case lazy_delta_reduction_step(a, b) of
+     Continue -> loop;  Equal -> return true
+     Unknown, Diff:
+        if reduce_proj_core(a, S, i) = x and reduce_proj_core(b, S, i) = y: return is_def_eq_core(x, y)
+        return is_def_eq_core(a, b)
+~}
+
+\p{The structs are unfolded lazily and in lockstep; as soon as neither unfolds further (or they are known different) the fields are compared if both are constructor applications, else the structs themselves (\code{\verb~|perf/proj-lazy-struct~}, \code{\verb~|perf/proj-cheap-struct~}). Applied projections \code{\verb~|a.i x =?= b.i y~} do not take this path; they reach step 10 and are fully reduced (\code{\verb~|perf/proj-app-lazy-delta~}, leanprover/lean4\verb~|#~16613).}
+}
+
+\subtree{
+\title{8.6 Application congruence and eta (\code{\verb~|:837-891~})}
+
+\pre{\verb~|
+is_def_eq_app(t, s): both App; is_def_eq(head t, head s) && same arity && args pairwise is_def_eq, FIRST to last
+try_eta_expansion_core(t, s): t is Lambda, s is not:
+    T = whnf(infer_type(s)); must be Pi; return is_def_eq(t, Lambda (name,info,dom of T) (App s (bvar 0)))
+try_eta_struct_core(t, s):      # s must be a fully applied constructor
+    head(s) = Const ctor; #args(s) == nparams + nfields; is_non_rec_structure(induct(ctor))
+    is_def_eq(infer_type(t), infer_type(s))
+    for each field i: is_def_eq(proj I i t, args(s)[nparams + i])
+~}
+
+\p{Eta is only attempted when exactly one side is a lambda after normalisation; partially applied constructors and recursors are not eta-expanded (\code{\verb~|corner-cases/eta-ctor~}, \code{\verb~|eta-rule-k~}, \code{\verb~|eta-rec-struct~}: "either"; \code{\verb~|bugs/eta-ctor-alias~}: must reject).}
+}
+
+\subtree{
+\title{8.7 String literal expansion (\code{\verb~|:1100-1113~})}
+
+\p{If one side is a String literal and the other is \code{\verb~|App (Const String.ofList []) x~}: return \code{\verb~|is_def_eq_core(whnf(string_lit_to_constructor(lit)), other)~} as the final answer.}
+}
+
+\subtree{
+\title{8.8 Unit-like types (\code{\verb~|:1116-1126~})}
+
+\p{\code{\verb~|T = whnf(infer_type(tn))~}, head must be a \code{\verb~|is_non_rec_structure~} inductive whose single constructor has 0 fields; then return \code{\verb~|is_def_eq_core(T, infer_type(sn))~}. Indexed families and structures with fields are excluded (tutorial \code{\verb~|unitEta1-3~} accept, \code{\verb~|indexedUnitEta~} reject; \code{\verb~|corner-cases/eta-unit-like-*~} "either"; \code{\verb~|bugs/ctor-num-fields~}: \code{\verb~|numFields~} must not be trusted from the export).}
+}
+
+\subtree{
+\title{8.9 \code{\verb~|eagerReduce~}}
+
+\p{\code{\verb~|m_eager_reduce~} is true only while comparing the type of an argument of the form \code{\verb~|eagerReduce _ _~} with the expected domain (6.5). It lifts the \code{\verb~|hasFVar~} guards of step 2 and of the Nat folding in 8.4. It does not change \code{\verb~|whnf~}.}
+}
+
+\subtree{
+\title{8.10 Exceptions raised inside reduction and def-eq}
+
+\p{\code{\verb~|whnf~}, \code{\verb~|infer~} and \code{\verb~|is_def_eq~} can throw from deep inside a comparison, and nothing catches it: \code{\verb~|is_prop~} on a non-sort ("type expected"), \code{\verb~|infer_proj~} failures and "function expected" from infer-only inference (proof irrelevance, eta, unit-like and K all call \code{\verb~|infer~}), the Nat numeral bounds of 7.6, unknown constants or fvars, and stack exhaustion ("deep recursion was detected"; replay calls \code{\verb~|addDeclCore 0 0~}, i.e. no recursion-depth limit, so only the native stack bounds it). Each of them rejects the declaration; none may be turned into "not definitionally equal, try the next rule".}
+}
+}
+
+\subtree{
+\title{9. What may be trusted from the export}
+
+\p{\code{\verb~|leanchecker --from-export~} parses the export into \code{\verb~|ConstantInfo~}s and calls \code{\verb~|Kernel.Environment.replay~} (\code{\verb~|git show v4.36.0:src/Lean/Replay.lean~}): declarations are added in dependency order with \code{\verb~|addDeclCore 0 0~} (no heartbeat limit, no recursion-depth limit), unsafe and partial constants are skipped, constructors and recursors are not sent to the kernel but compared for equality afterwards with the ones the kernel generated, and the \code{\verb~|Quot~} constants are regenerated and compared (\code{\verb~|lean4/src/LeanChecker.lean:60-88~}).}
+
+\table{
+\tr{\th{Export field}\th{Official treatment}\th{RLVM}}
+\tr{\td{\code{\verb~|hints~} (opaque / abbrev / regular h) of a definition}\td{passed through unchanged, never recomputed (\code{\verb~|Replay.lean~} \code{\verb~|defnDecl info~}; \code{\verb~|environment.cpp:159-189~} has no height computation)}\td{use verbatim; affects strategy only (8.4). A wrong hint can cost time, not soundness}}
+\tr{\td{definition/theorem/opaque value and type, level params}\td{fully checked}\td{check}}
+\tr{\td{\code{\verb~|safety~}, \code{\verb~|all~} of definitions}\td{unsafe/partial skipped; \code{\verb~|all~} unused}\td{-}}
+\tr{\td{inductive \code{\verb~|numParams~}, types, ctor types}\td{input to admission}\td{check (admission document)}}
+\tr{\td{\code{\verb~|numIndices~}, \code{\verb~|isRec~}, \code{\verb~|isReflexive~}, \code{\verb~|numNested~}, ctor \code{\verb~|numParams/numFields/cidx/induct~}, recursor \code{\verb~|numParams/numIndices/numMotives/numMinors/k/rules/type~}}\td{recomputed; exported values must be identical}\td{recompute; the core reads these from the recomputed environment (7.2, 7.4, 8.6, 8.8)}}
+\tr{\td{\code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~}}\td{regenerated (\code{\verb~|quot.cpp:19-104~}), needs \code{\verb~|Eq~} of the expected shape}\td{regenerate and compare (\code{\verb~|bugs/quot-bad-type~})}}
+\tr{\td{primitives \code{\verb~|Nat~}, \code{\verb~|Nat.add~} ..., \code{\verb~|String.ofList~}, \code{\verb~|Char.ofNat~}, \code{\verb~|List.cons/nil~}, \code{\verb~|Bool.true/false~}, \code{\verb~|eagerReduce~}}\td{NOT validated (\code{\verb~|lean4lean/divergences.md~}, first entry: "required for soundness, but Lean ... ships its prelude")}\td{optional hardening as in \code{\verb~|lean4lean/Lean4Lean/Primitive.lean~}; see section 13}}
+}
+}
+
+\subtree{
+\title{10. Subtle points where independent implementations diverge}
+
+\p{Direction: A = accepts a wrong proof if violated, R = rejects valid terms if violated.}
+
+\table{
+\tr{\th{\verb~|#~}\th{Rule}\th{Source}\th{Arena / tutorial test}\th{Dir}}
+\tr{\td{1}\td{\code{\verb~|normalize(succ^k(imax a b)) = succ^k(mk_imax(..))~}; never drop the offset}\td{\code{\verb~|level.cpp:423-427~}}\td{\code{\verb~|bugs/level-imax-normalization~}}\td{A}}
+\tr{\td{2}\td{\code{\verb~|is_geq~} with imax: rhs imax needs both parts, lhs imax uses only its rhs, offsets compared last}\td{\code{\verb~|level.cpp:483-501~}}\td{\code{\verb~|bugs/level-imax-leq~}}\td{A}}
+\tr{\td{3}\td{\code{\verb~|is_not_zero(Param) = false~}}\td{\code{\verb~|level.cpp:149-161~}}\td{\code{\verb~|bugs/large-elim-param~}}\td{A}}
+\tr{\td{4}\td{Prop-ness is tested up to level normalisation (\code{\verb~|imax 1 0~})}\td{\code{\verb~|type_checker.cpp:379-385~}}\td{\code{\verb~|bugs/proj-of-imax-prop~}}\td{A}}
+\tr{\td{5}\td{\code{\verb~|is_prop~} throws when the sort is stuck; never "not Prop"}\td{\code{\verb~|:380~}}\td{\code{\verb~|bugs/proj-of-stuck-prop~}, \code{\verb~|proj-of-subst-prop~}, \code{\verb~|rec-of-subst-prop~}}\td{A}}
+\tr{\td{6}\td{Projection out of a Prop structure: target field and every depended-upon earlier field must be proofs}\td{\code{\verb~|:274-290~}}\td{tutorial \code{\verb~|projProp1-6~}}\td{A/R}}
+\tr{\td{7}\td{Projection requires exactly one constructor, name match, 32-bit index, full arity of the type}\td{\code{\verb~|:249-264~}}\td{\code{\verb~|bugs/proj-non-structure~}}\td{A}}
+\tr{\td{8}\td{In check mode the projected struct is checked, not inferred}\td{\code{\verb~|:248~}}\td{\code{\verb~|other/proj-of-prop~}}\td{A}}
+\tr{\td{9}\td{\code{\verb~|reduce_proj_core~} refuses a constructor of another inductive}\td{\code{\verb~|:427-431~}}\td{-}\td{A}}
+\tr{\td{10}\td{K: only with the recomputed \code{\verb~|k~} flag, and only if the major's type is defeq to the type of the nullary constructor application}\td{\code{\verb~|inductive.h:28-48~}}\td{\code{\verb~|ruleKbad~}, \code{\verb~|ruleKAcc~}, \code{\verb~|bugs/k-rec-conv~}, \code{\verb~|bugs/rec-k-lie~}}\td{A}}
+\tr{\td{11}\td{K never inspects or reduces the major itself}\td{\code{\verb~|inductive.h:88-91~}}\td{\code{\verb~|ruleK~}}\td{R}}
+\tr{\td{12}\td{Struct eta on a recursor major: non-recursive, no indices, not Prop-typed, not already any constructor app}\td{\code{\verb~|inductive.h:60-72~}}\td{\code{\verb~|accRecNoEta~}, \code{\verb~|corner-cases/eta-struct-major-and~}}\td{A/R}}
+\tr{\td{13}\td{Recursor fields are the last \code{\verb~|nfields~} args of the major; \code{\verb~|nfields~} comes from the recomputed rule}\td{\code{\verb~|inductive.h:102-112~}}\td{\code{\verb~|bugs/nested-rec-rule-nfields~}}\td{A}}
+\tr{\td{14}\td{Wrong number of universe levels: error in infer, "not delta" in unfold, "no reduction" in iota}\td{\code{\verb~|:105~}, \code{\verb~|:555~}, \code{\verb~|inductive.h:103~}}\td{\code{\verb~|bugs/constlevels~}}\td{A}}
+\tr{\td{15}\td{Loose bound variable anywhere in a checked term is an error}\td{\code{\verb~|:326~}}\td{\code{\verb~|bugs/loose-bvar-value~}}\td{A}}
+\tr{\td{16}\td{Level params must be declared (check mode only)}\td{\code{\verb~|:85-91~}, \code{\verb~|:118~}, \code{\verb~|:346~}}\td{\code{\verb~|other/inductive-undeclared-universe~}}\td{A}}
+\tr{\td{17}\td{Def-eq cache = exact pairs, no transitive closure}\td{\code{\verb~|type_checker.h:33-41~}}\td{\code{\verb~|bugs/rec-missing-ih~}}\td{A}}
+\tr{\td{18}\td{Any cache on open terms must distinguish binder types (official: globally unique fvars)}\td{\code{\verb~|type_checker.h:33-39~}}\td{\code{\verb~|bugs/open-term-cache-context~}}\td{A}}
+\tr{\td{19}\td{Closure-based checkers: closure identity must include the universe instantiation and the body's role (value vs type)}\td{n/a (official has no closures)}\td{\code{\verb~|bugs/closure-level-subst~}, \code{\verb~|bugs/pi-closure-context~}}\td{A}}
+\tr{\td{20}\td{String literal elements are Unicode scalar values, not bytes}\td{\code{\verb~|inductive.cpp:1356-1368~}}\td{\code{\verb~|bugs/str-lit-utf8(-bad)~}}\td{A/R}}
+\tr{\td{21}\td{Nat arithmetic exact; \code{\verb~|x/0 = 0~}, \code{\verb~|x%0 = x~}, truncated sub; huge shifts of 0 / to 0}\td{\code{\verb~|:610-699~}}\td{\code{\verb~|other/nat-lit-*~}, \code{\verb~|bugs/nat-shift-huge~}}\td{A/R}}
+\tr{\td{22}\td{Unit-like and struct eta use recomputed \code{\verb~|numFields~}, exclude indexed and recursive types}\td{\code{\verb~|:852-868~}, \code{\verb~|:1116-1126~}}\td{\code{\verb~|bugs/ctor-num-fields~}, \code{\verb~|indexedUnitEta~}, \code{\verb~|indexedStructEta~}}\td{A}}
+\tr{\td{23}\td{Function eta only against a lambda; type of the other side whnf'ed to a Pi}\td{\code{\verb~|:837-849~}}\td{\code{\verb~|funEta~}, \code{\verb~|funEtaDep~}, \code{\verb~|funEtaBad~}, \code{\verb~|bugs/eta-ctor-alias~}}\td{A/R}}
+\tr{\td{24}\td{Proof irrelevance needs \code{\verb~|is_prop(type)~} via whnf of the sort, and defeq of both types}\td{\code{\verb~|:895-902~}}\td{\code{\verb~|proofIrrelevance~}, \code{\verb~|proofIrrelevanceBad~}, \code{\verb~|proofIrrelevanceWhnf~}, \code{\verb~|proofIrrelevanceUnderBinder~}}\td{A/R}}
+\tr{\td{25}\td{Theorems unfold in \code{\verb~|whnf~} and lazy delta; \code{\verb~|opaque~} never}\td{\code{\verb~|declaration.h:447~}, \code{\verb~|:551-559~}}\td{(well-founded recursion, \code{\verb~|Acc.rec~} on theorem-headed proofs)}\td{R}}
+\tr{\td{26}\td{Let-bound fvars zeta-reduce in \code{\verb~|whnf_core~}; syntactic \code{\verb~|Let~} reduces by substitution}\td{\code{\verb~|:405-413~}, \code{\verb~|:538-540~}}\td{tutorial \code{\verb~|letRed~}, \code{\verb~|letTypeDep~}}\td{R}}
+\tr{\td{27}\td{Type of a \code{\verb~|let~} is a let-telescope over the body type with unused lets dropped}\td{\code{\verb~|:227-229~}}\td{\code{\verb~|letType~}}\td{R}}
+\tr{\td{28}\td{\code{\verb~|lit 0~} vs \code{\verb~|Nat.zero~}, \code{\verb~|lit (n+1)~} vs \code{\verb~|Nat.succ x~} via \code{\verb~|is_def_eq_offset~}}\td{\code{\verb~|:1021-1048~}}\td{tutorial \code{\verb~|natLitEq~}}\td{R}}
+\tr{\td{29}\td{Recursor on a literal major: one constructor layer (\code{\verb~|Nat.succ (lit (n-1))~})}\td{\code{\verb~|inductive.h:92-93~}}\td{\code{\verb~|nRecReduction~}, \code{\verb~|bugs/nat-rec-rules~}}\td{R}}
+\tr{\td{30}\td{\code{\verb~|Sort~} and constant levels compared with \code{\verb~|is_equivalent~}, not syntactically}\td{\code{\verb~|:806~}, \code{\verb~|:1166~}}\td{\code{\verb~|levelMaxComm~}, \code{\verb~|levelMaxAssoc~}, \code{\verb~|levelMaxIdem~}, \code{\verb~|levelMaxAbsorb~}}\td{R}}
+\tr{\td{31}\td{Binder names, binder infos irrelevant everywhere; mdata transparent}\td{\code{\verb~|expr_eq_fn.cpp:98-110~}, \code{\verb~|:474~}, \code{\verb~|:708~}}\td{-}\td{R}}
+\tr{\td{32}\td{\code{\verb~|infer_pi~} level = right-nested \code{\verb~|mk_imax~} of domain levels}\td{\code{\verb~|:158-165~}}\td{\code{\verb~|imax1~}, \code{\verb~|imax2~}}\td{A/R}}
+\tr{\td{33}\td{Binder domains / declaration types may need \code{\verb~|whnf~} to become a sort}\td{\code{\verb~|:62-71~}}\td{\code{\verb~|forallSortWhnf~}}\td{R}}
+\tr{\td{34}\td{Extra arguments after a recursor major / \code{\verb~|Quot.mk~} argument are re-applied}\td{\code{\verb~|inductive.h:113-117~}, \code{\verb~|quot.h:66-68~}}\td{\code{\verb~|quotLiftReduction~}}\td{R}}
+\tr{\td{35}\td{Level instantiation uses simplifying \code{\verb~|mk_max~}/\code{\verb~|mk_imax~}}\td{\code{\verb~|level.cpp:261-300~}}\td{(interacts with 30)}\td{R}}
+\tr{\td{36}\td{\code{\verb~|Bool.true~} shortcut and Nat folding only on fvar-free terms unless \code{\verb~|eagerReduce~}}\td{\code{\verb~|:1138~}, \code{\verb~|:1056~}}\td{\code{\verb~|perf/let-fold~}}\td{perf}}
+\tr{\td{37}\td{\code{\verb~|Nat.pow~} with exponent > 2^32-1, or result bound exceeded, is an error, not a stuck term}\td{\code{\verb~|:626-641~}}\td{-}\td{(mirror)}}
+\tr{\td{38}\td{Safe declarations may not mention unsafe or partial constants}\td{\code{\verb~|:109-117~}}\td{tutorial lines 1454-1486}\td{A}}
+\tr{\td{39}\td{Literal vs literal is decided immediately by value}\td{\code{\verb~|:817-818~}}\td{\code{\verb~|other/nat-lit-add-bad~}}\td{A/R}}
+\tr{\td{40}\td{Let value type must be defeq to the annotation (check mode)}\td{\code{\verb~|:217-220~}}\td{\code{\verb~|corner-cases/let-value-type-mismatch~} (either)}\td{-}}
+}
+}
+
+\subtree{
+\title{11. Performance-relevant behaviour (what Mathlib and the perf tests rely on)}
+
+\table{
+\tr{\th{Behaviour}\th{Where}\th{What goes wrong without it}\th{Arena perf test}}
+\tr{\td{Structural equality / success-pair test before any reduction}\td{\code{\verb~|quick_is_def_eq~}}\td{identical nested terms unfolded pairwise, exponential}\td{\code{\verb~|identical-nesting~}, \code{\verb~|repeated-subproblem~}}}
+\tr{\td{Same regular head: compare arguments (last to first) before unfolding; cache the failure}\td{8.4}\td{Theta(n^2) instead of Theta(n); without the failure cache the same failed argument comparison repeats at every level}\td{\code{\verb~|args-before-unfold~}, \code{\verb~|proj-stuck-struct~}}}
+\tr{\td{Unfold the definition with the greater height; abbrev before regular; never a theorem while a definition is available}\td{\code{\verb~|compare~}}\td{evaluating the cheap-to-match side to normal form}\td{\code{\verb~|unroll-versus-evaluate~}, \code{\verb~|loop-unfolded-once~}}}
+\tr{\td{Proof irrelevance before delta, with a definitive negative answer}\td{8.3}\td{evaluating proofs (e.g. well-founded recursion witnesses)}\td{\code{\verb~|irrelevance-refutes~}, \code{\verb~|irrelevance-before-evaluation~}}}
+\tr{\td{Cheap projection mode first; lazy lockstep unfolding under equal projections}\td{8.1 step 3, 8.5}\td{reducing a structure to a constructor when its arguments already agree}\td{\code{\verb~|proj-cheap-struct~}, \code{\verb~|proj-lazy-struct~}}}
+\tr{\td{Stuck projection keeps the folded struct term}\td{7.1}\td{the folded head is lost and recursion trees unroll, exponential}\td{\code{\verb~|proj-stuck-struct~}}}
+\tr{\td{When only one side is delta and the other is a stuck projection application, reduce the projection instead}\td{8.4 "only dt"}\td{lazily unfolding an expensive term against an instance projection}\td{(comment at \code{\verb~|type_checker.cpp:968-975~})}}
+\tr{\td{Nat folding in def-eq only on fvar-free sides; let variables are fvars}\td{8.4, 6.6}\td{evaluating a let-bound closed term that never needed evaluation}\td{\code{\verb~|let-fold~}}}
+\tr{\td{Infer cache on shared sub-DAGs, separate check/infer-only}\td{5}\td{2^n re-inference}\td{\code{\verb~|app-lam~}}}
+\tr{\td{Telescoped binder traversal (one instantiation per binder group), multi-argument beta, infer-only spine walk}\td{6.3-6.6, section 4}\td{Theta(n^2) substitution on ladders}\td{\code{\verb~|beta-ladder~}, \code{\verb~|let-ladder~}, \code{\verb~|shift-cascade~}, \code{\verb~|app-lam~}}}
+\tr{\td{O(1) loose-bvar range as dependency test in \code{\verb~|infer_proj~}}\td{6.8}\td{Theta(N^3) for wide Prop structures}\td{\code{\verb~|prop-struct-projections~}}}
+\tr{\td{GMP arithmetic on literals, binary literals never unary}\td{7.6}\td{infeasible}\td{\code{\verb~|gf3-matrix-product~}, \code{\verb~|other/nat-lit-*~}}}
+\tr{\td{\code{\verb~|m_unfold~}: instantiated bodies of universe-polymorphic constants reused}\td{5}\td{re-instantiating large bodies at every unfold}\td{-}}
+\tr{\td{Hash-consing of theorem type/value before checking}\td{\code{\verb~|environment.cpp:196-198~}}\td{pointer-keyed traversal memo and \code{\verb~|=p~} fast paths miss}\td{-}}
+}
+
+\p{Known weak spots of the official strategy (RLVM may do better without changing verdicts): arguments are compared before unfolding even if the head ignores them (\code{\verb~|discarded-argument~}, \code{\verb~|short-circuit-and~}: about 14 s); Nat folding is tried before unfolding on closed terms (\code{\verb~|unfold-before-literal~}: about 20 s); the higher side is unfolded even when one step on the lower side would finish (\code{\verb~|ite-taken-branch~}); applied projections are reduced eagerly (\code{\verb~|proj-applied-struct~}, \code{\verb~|proj-app-lazy-delta~}); whnf caches retain every big literal until the declaration ends (\code{\verb~|gf3-matrix-product~}: 3.5 GiB). The official kernel needs about 33.7 minutes of virtual time for Mathlib, so mirroring it literally (substitution-based, per-declaration caches) is not the performance target; mirroring its \em{decisions} is.}
+
+\p{Implications for an NbE/closure design (design guidance, not verified facts):}
+
+\ul{
+\li{Neutral values need the folded form (constant + argument thunks) next to the unfolded continuation, so that 8.4 can compare arguments and consult hints before forcing ("glued" evaluation).}
+\li{Proof irrelevance and unit eta need the type of an arbitrary value; either carry types on neutrals or quote and re-infer. They must be consulted before delta unfolding.}
+\li{The \code{\verb~|hasFVar~} guard needs a cheap "closed" bit on values/thunks; let-bound variables count as open.}
+\li{A cache on open values must include the environment (levels included) and the mode, see rows 18-19.}
+\li{The official recursion depth is bounded only by the native stack; Mathlib terms nest deeply, so the JVM checker threads need a large explicit stack size or an explicit work stack.}
+}
+}
+
+\subtree{
+\title{12. Changes on master after v4.36.0 (diff \code{\verb~|v4.36.0..7e19442~})}
+
+\ol{
+\li{\code{\verb~|is_def_eq_core~}: \code{\verb~|is_def_eq_proof_irrel(t, s)~} moved in front of the first \code{\verb~|whnf_core~}.}
+\li{\code{\verb~|inductive_reduce_rec~}: \code{\verb~|if (!is_prop(infer_type(major))) major = whnf(major)~}; proof majors are no longer normalised (related tests: \code{\verb~|corner-cases/eta-struct-major-no-whnf~}, \code{\verb~|-and-no-whnf~}).}
+\li{\code{\verb~|to_cnstr_when_structure~}: the Prop test is replaced by "recursor is not large-eliminating" (\code{\verb~|#lparams(rec) == #lparams(first inductive of the block)~} -> no eta), enabling eta for \code{\verb~|And~}-like majors.}
+\li{\code{\verb~|try_eta_struct_core~}: a partially applied constructor of a structure is eta-expanded with fresh fvars taken from the constructor application's own type (the variant that \code{\verb~|bugs/eta-ctor-alias~} demands).}
+\li{Projection indices are \code{\verb~|size_t~}; open-addressing pointer-pair sets replace \code{\verb~|std::unordered_set~} in \code{\verb~|expr_eq_fn~}/\code{\verb~|for_each_fn~}; \code{\verb~|replace_fn~} rewritten. No change to levels.}
+}
+
+\p{Changes 1, 3 and 4 let the kernel accept more (or answer earlier); the affected arena tests have outcome "either". Change 2 also makes it accept LESS (inference from the code, not run): a recursor of a non-structure Prop inductive, e.g. \code{\verb~|Acc.rec~}, no longer fires when its major is a proof that must be unfolded to become a constructor application (as in \code{\verb~|WellFounded.fix~} through \code{\verb~|WellFounded.apply~}). Keeping the v4.36 behaviour (whnf of every major) therefore accepts a superset of master here, at the price of non-termination on the two \code{\verb~|-no-whnf~} corner cases (60 s timeout, outcome "either").}
+}
+
+\subtree{
+\title{13. Not verified, and open questions}
+
+\ul{
+\li{Which hint kind the elaborator assigns to instances and structure projection functions (only the kernel side of hints was read).}
+\li{Whether the Mathlib v4.36.0 export contains \code{\verb~|mdata~} nodes, \code{\verb~|nondep~} lets or \code{\verb~|partial~} constants (export format is covered by another document).}
+\li{PR numbers are quoted from the arena test descriptions and \code{\verb~|lean4lean/divergences.md~}; only the resulting code at the four tags and master was inspected.}
+\li{Behaviour of the official checker on \code{\verb~|Nat.pow~}/\code{\verb~|Nat.shiftLeft~} guard violations beyond reading the code (no binary was run).}
+\li{Open: primitive validation. An export that declares \code{\verb~|Nat.add~} (or \code{\verb~|Nat~}, \code{\verb~|Bool.true~}, \code{\verb~|String.ofList~}) with a non-standard body makes the literal extension disagree with delta unfolding; by the code read here and by \code{\verb~|lean4lean/divergences.md~} the official checker accepts such a file (not run). Validating the definitional behaviour of the 15 Nat functions and of the literal constants (as lean4lean does) closes this, at the cost of rejecting exports the official checker accepts.}
+\li{Open: whether guard violations of 7.6 (\code{\verb~|Nat.pow~} exponent above 2^32-1, or above 2^24 for a word-sized base; numerals above 128 MiB) should be mirrored as "reject" or reported as "decline". None of the arena test descriptions read for this document exercises them.}
+\li{Open: caches that outlive one declaration are not what the official kernel does. For closed terms they are sound (the environment only grows and constants never change), but memory then has to be bounded explicitly; the official kernel frees everything after each declaration.}
+}
+}

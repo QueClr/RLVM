@@ -1,0 +1,724 @@
+\title{04 — Leader deep-dive: nano-lean v0.4.2 (arena \verb~|#~1 on mathlib)}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{performance}
+\meta{origin}{docs/research/04-leader-nano-lean.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Subject: https://github.com/sdiehl/nano-lean, arena pin \code{\verb~|v0.4.2~} = \code{\verb~|5cd4a25de7cdd8a5fadde3fec53e41a6a8693138~} (arena config: \code{\verb~|lean-kernel-arena/checkers/nano-lean.yaml~}; build \code{\verb~|scripts/pgo.sh~}; run \code{\verb~|target/release/nl-fast -q -j 4 "$IN"~}; \code{\verb~|threads: 4~}).}
+
+\p{Sources read (paths relative to \code{\verb~|refs/~}):}
+
+\ul{
+\li{\code{\verb~|nano-lean-v0.4.2/~} — plain \code{\verb~|git archive~} extract of the pinned revision. \strong{All \code{\verb~|file:line~} citations below refer to this tree.}}
+\li{\code{\verb~|nano-lean/~} — the git clone (154 commits, complete history), currently at \code{\verb~|v0.4.3~} (\code{\verb~|556670f~}), used only for history (\code{\verb~|git log~}, \code{\verb~|git show <tag>:README.md~}). v0.4.3 is NOT what the arena runs.}
+}
+
+\p{Citation convention: paths are relative to \code{\verb~|nano-lean-v0.4.2/src/~}. A bare file name out of \code{\verb~|mod.rs, value.rs, intern.rs, tables.rs, eval.rs, whnf.rs, derive.rs, conv.rs, infer.rs, decl.rs, session.rs~} means \code{\verb~|value_checker/<file>~}; \code{\verb~|fast.rs~}, \code{\verb~|reorder.rs~}, \code{\verb~|resource.rs~}, \code{\verb~|bin/nl-fast.rs~} are at \code{\verb~|src/~} level; everything else is written with its directory (\code{\verb~|term/…~}, \code{\verb~|import/…~}, \code{\verb~|checker/…~}, \code{\verb~|kernel/…~}).}
+
+\p{Nothing was built or executed. Statements marked \strong{\verb~|[~inference\verb~|]~} or \strong{\verb~|[~unverified\verb~|]~} are mine, not the source's. Arena figure used throughout: 65.8 s virtual time = 65.8 x 6e9 ≈ \strong{395 G user instructions} for all of mathlib, including NDJSON parsing, with 4 workers, peak 5.0 GB.}
+
+\subtree{
+\title{0. Executive summary}
+
+\ol{
+\li{\code{\verb~|nl-fast~} is \strong{not} the "hash-consing + de Bruijn substitution" checker its arena blurb describes. The default engine ("value core", \code{\verb~|src/value_checker/~}, ~5 kLoC) is a \strong{first-order-closure NbE} over the imported de Bruijn DAG: values are \code{\verb~|Sort | Pi(dom, clo) | Lam(lazyDom, clo) | Neu(head, spine) | Nat | Str~}; conversion and inference work directly on values; \strong{there is no quote/readback anywhere}. The older substitution engine ("term core", \code{\verb~|src/checker/~}) is only used for inductive blocks and quotient declarations.}
+\li{Its speed comes from \strong{making pointer identity mean semantic identity and then memoising everything on identity}: closures are trimmed to their free variables, environments, neutrals, lambdas and literals are hash-consed, and \code{\verb~|eval~}, \code{\verb~|infer~}, \code{\verb~|whnf~}, \code{\verb~|unfold~}, \code{\verb~|type_of~}, \code{\verb~|def_eq~}, Pi-instantiation all have caches keyed by pointers.}
+\li{Those caches \strong{survive across declarations} inside a per-worker "session" (dropped only when the session arena passes 64 MiB or a declaration fails), and declarations are \strong{re-ordered at load time so each one follows soon after its dependencies}, which keeps the caches warm. Closed sub-terms of the export are evaluated / type-checked once per session, not once per use.}
+\li{Delta is never performed by \code{\verb~|eval~}: constants stay folded as \code{\verb~|Neu(Const c us, args)~} and the unfolded/whnf form is memoised on the node (a lazily "glued" value). Lazy delta in \code{\verb~|def_eq~} uses \strong{budgeted same-head argument probes} (16384 / 1024 steps) with a failure cache instead of Lean's unbounded argument comparison.}
+\li{Hot definitions (unfolded >= 32 times) get a \strong{derived reduction rule}: a constructor decision tree with pre-reduced leaf templates, so \code{\verb~|f (C x̄)~} jumps over the matcher/casesOn/rec chain in one substitution.}
+\li{Import is a hand-written schema-specific scanner (SWAR digits, word compares, tight loop for \code{\verb~|app~} lines), with \strong{no hash-consing of expressions at import} (it trusts the exporter's sharing).}
+\li{Build: fat LTO, 1 codegen unit, \code{\verb~|panic=abort~}, \code{\verb~|target-cpu=native~}, 64-byte function alignment, mimalloc, and \strong{PGO trained on an Init export with the exact arena command line}.}
+\li{Inductive types are validated natively (positivity, universes, nested expansion); recursors are regenerated and compared structurally, falling back to a full type-check + def-eq when not identical. \code{\verb~|Nat~}/\code{\verb~|String~} primitive \em{bodies} are trusted (as in Lean's kernel); only their types are pattern-checked. No \code{\verb~|reduceBool~}/native evaluation exists.}
+\li{Parallelism costs instructions: the project's own (old, v0.1.0) table shows +5.4 \% instructions on mathlib going from 1 to 10 threads. Workers share only the immutable store; all caches are per worker.}
+}
+}
+
+\subtree{
+\title{1. Ranked tricks and their JVM/Truffle realisation}
+
+\p{Ranking is by my reading of the code plus the changelog ordering; the repo publishes almost no per-trick numbers (see §14 for every number that exists). "Evidence" cites what is actually written down.}
+
+\subtree{
+\title{T1. Session-persistent identity-keyed memo tables + dependency-ordered scheduling}
+
+\ul{
+\li{What: \code{\verb~|eval_closed[(expr, usub)]~}, \code{\verb~|infer_closed[(expr, usub)]~}, \code{\verb~|delta[(const, levels)]~}, \code{\verb~|const_ty~}, recursor-rule values, \code{\verb~|eq_cache~}, \code{\verb~|neq_cache~}, hash-cons tables and the per-value memo (whnf / whnf_core / unfold / type) all outlive a declaration (\code{\verb~|value_checker/tables.rs:141-187~}, \code{\verb~|session.rs:65-105~}). \code{\verb~|reorder.rs~} renumbers declarations so that neighbours share constants.}
+\li{Evidence: CHANGELOG 0.3.0 lists "Memoize evaluation", "Memoize whnf and types on values", "Keep bounded tables across declarations" under "Cut Mathlib checking cost substantially"; 0.3.3 "Check large exports near each declaration's dependencies, keeping tables warm" and "\code{\verb~|--session-mib~} to keep worker tables across more declarations". No isolated number.}
+\li{JVM: expression ids are dense ints, so the closed-term memos can be \strong{direct arrays indexed by expr id} (for the identity universe substitution) instead of hash tables: one bounds-checked load per probe. Use a generation stamp (\code{\verb~|int[] stamp~} parallel array, or stamp packed into the slot) for O(1) session reset. Non-identity universe substitutions go to a small open-addressing table keyed \code{\verb~|(exprId, subId)~}. Because the arena metric is instructions and not time, cache-missy but instruction-cheap big tables are nearly free for us — except that \strong{GC tracing of reference tables is charged}, and a memo table by nature points from long-lived storage to freshly allocated values. Two realistic options: (a) values as \code{\verb~|int~} handles into \code{\verb~|int[]~}/\code{\verb~|long[]~} slabs with bump allocation and bulk reset (a literal port of nano-lean's arena; the GC never traces values or tables), or (b) Java objects with a young generation big enough to hold a whole session, and the session reset placed so that almost nothing is live when a young collection runs. This is the single most important design decision nano-lean's architecture forces on RLVM; it should be decided by measurement. \strong{\verb~|[~inference\verb~|]~}}
+\li{Recommendation \strong{\verb~|[~inference\verb~|]~}: check on one thread unless the wall-clock timeout forces otherwise; all caches are then shared by every declaration and none of the duplicated work of §15 is paid.}
+}
+}
+
+\subtree{
+\title{T2. Canonical closures: free-variable trimming + hash-consed environments/values}
+
+\ul{
+\li{What: every \code{\verb~|Expr~} node carries \code{\verb~|sup~}, a 32-bit mask of the loose bvars < 32 it mentions (\code{\verb~|term/expr.rs:184-221~}), and \code{\verb~|nlb~} (max loose bvar + 1) in the pointer tag. Evaluating a \code{\verb~|Lam~}/\code{\verb~|Pi~} first \strong{trims} the environment to the slots the binder reads (\code{\verb~|eval.rs:457-523~}), producing an interned flat frame; unused slots hold one canonical dummy value, so de Bruijn indices in the body need no renumbering. \code{\verb~|push(env, v)~} is interned by \code{\verb~|(v ptr, env ptr)~}. Hence two closures over the same body whose environments agree on the used variables are \em{the same pointer}; \code{\verb~|def_eq~} on them is a pointer compare, and \code{\verb~|(expr, env)~} memo keys hit.}
+\li{Evidence: commit "exact support masks and thin env" (b542977); CHANGELOG 0.3.1 "Index environment frames directly from node runs", "Collapse deep environment runs into frames" (near-linear beta ladders); 0.3.2 "Keep long sparse environments untrimmed, so shift cascades check about 40\% cheaper".}
+\li{JVM: do the free-variable analysis once per binder node at load (store a 32/64-bit mask per node in the node table). A closure's captured environment is a small \code{\verb~|Object[]~} (or slab frame) of size \code{\verb~|maxUsed+1~}. Flat frames avoid pointer chasing; interning them needs a precomputed hash field on every value (never \code{\verb~|System.identityHashCode~}). Keep linked "push" nodes only for short runs (nano-lean collapses at 64).}
+}
+}
+
+\subtree{
+\title{T3. Folded neutrals with memoised whnf/unfold/type on the node ("lazy glued evaluation")}
+
+\ul{
+\li{What: \code{\verb~|eval~} never unfolds a constant; \code{\verb~|whnf_core~}, \code{\verb~|whnf~}, \code{\verb~|unfold~}, \code{\verb~|type_of~} results are cached in a \code{\verb~|Memo~} hanging off the value (\code{\verb~|value.rs:7-42~}, \code{\verb~|mod.rs:144-163~}). Comparison first tries the folded forms.}
+\li{Evidence: commit "memoize whnf and types on values" (724f2ea); README: "every value remembers its own normal form".}
+\li{JVM: plain fields on the \code{\verb~|Neutral~} object (\code{\verb~|whnfCore~}, \code{\verb~|whnf~}, \code{\verb~|unfolded~}, \code{\verb~|type~}), no separate memo object, no epoch needed if values die with the session. Cheapest trick in the list to port.}
+}
+}
+
+\subtree{
+\title{T4. Not computing things}
+
+\ul{
+\li{(a) Non-dependent codomain: argument is \strong{not evaluated} during inference; a dummy is pushed (\code{\verb~|infer.rs:295-300~}). (b) Lambda domains are lazy thunks (\code{\verb~|Lazy~}, \code{\verb~|eval.rs:212-227~}, \code{\verb~|321-339~}). (c) The type of a lambda is a Pi whose codomain is a \em{typed closure}: body type computed on demand by infer-only (\code{\verb~|infer.rs:70-73~}, \code{\verb~|429-448~}, \code{\verb~|eval.rs:563-571~}). (d) A lambda binder whose domain node is the same pointer as the declared type's Pi domain is not re-checked (\code{\verb~|decl.rs:94-128~}). (e) \code{\verb~|(fun x => b) a~} (a \code{\verb~|have~}) is typed by checking \code{\verb~|b~} once under a local and substituting into the \em{type} (\code{\verb~|infer.rs:156-185~}). (f) Infer-only mode for types of already-checked terms, in separate cache tables (\code{\verb~|tables.rs:60-84~}). (g) Proof-irrelevance test skipped when a term is syntactically not a proof (\code{\verb~|conv.rs:312-345~}). (h) Same-head argument comparison skips arguments the definition body does not use and arguments whose declared type is a \code{\verb~|Prop~} (\code{\verb~|conv.rs:389-431~}).}
+\li{JVM: all are algorithmic; (a)-(c) are natural Truffle node specialisations ("non-dependent Pi" vs "dependent Pi" node, decided once per node from the \code{\verb~|sup~} bit 0 of the codomain).}
+}
+}
+
+\subtree{
+\title{T5. Lazy delta with budgets and failure caches (§9)}
+
+\ul{
+\li{Evidence: CHANGELOG 0.3.2 "Give argument probes under cheap heads a smaller budget, so lazy projections check about 35\% cheaper"; 0.4.2 "Meet earlier unfoldings in lazy delta, fixing \code{\verb~|loop-unfolded-once~}"; roadmap items "Bound speculative congruence attempts and fall back after exhaustion", "Avoid repeated speculative comparisons under rigid heads".}
+\li{JVM: port as is. Budget accounting is one decrement per cache miss.}
+}
+}
+
+\subtree{
+\title{T6. Derived reduction rules for hot definitions (§8)}
+
+\ul{
+\li{Evidence: first item of the 0.3.0 "cut Mathlib checking cost substantially" list; CHANGELOG 0.3.2 "Intern Pi values built by rule substitution, so deep \code{\verb~|List~} indexing runs about 12x cheaper" (a micro case).}
+\li{JVM: this is where Truffle fits best: a per-constant call node with an inline cache on the scrutinee's constructor, leaf = pre-reduced template. The portable version (value-level symbolic execution + template substitution) is ~300 lines. Must keep a debug oracle (\code{\verb~|derivecheck~} feature asserts rule result ≡ plain unfolding).}
+}
+}
+
+\subtree{
+\title{T7. Universe substitution carried by closures (\code{\verb~|Sub{ks,vs}~}), never applied to terms}
+
+\ul{
+\li{What: closures and memo keys contain the pair (param list ptr, level-args ptr); levels are substituted only at \code{\verb~|Sort~}/\code{\verb~|Const~} leaves, with interning; the identity substitution has one normal form (\code{\verb~|value.rs:78-90~}, \code{\verb~|mod.rs:265-271~}, \code{\verb~|eval.rs:182-189~}).}
+\li{JVM: intern level-argument lists to small ints; \code{\verb~|subId~} is part of every eval/infer key. Mandatory for soundness to include it in closure identity (arena test \code{\verb~|bugs/closure-level-subst~} kills checkers that forget).}
+}
+}
+
+\subtree{
+\title{T8. Import (§5): schema-specific scanner, no expression interning, names carry their declaration index}
+
+\ul{
+\li{Evidence: commits "scan import lines in one pass", "inline the ndjson scanner hot path"; CHANGELOG 0.3.1 "Build runs of application lines straight into the import table".}
+\li{JVM: read the file into (or map as) byte storage, parse with 8-byte \code{\verb~|VarHandle~} loads; write nodes straight into primitive arrays indexed by the export's own ids. No per-node object, no hash table.}
+}
+}
+
+\subtree{
+\title{T9. Arena memory discipline (§12): bump allocation, bulk reset, bounded direct-mapped tables with O(1) clear}
+
+\ul{
+\li{JVM: see T1. Direct-mapped lossy caches (key arrays + epoch stamp) port 1:1 and are GC-cheap if small.}
+}
+}
+
+\subtree{
+\title{T10. Build-level (§13): PGO on the arena command line, LTO, abort-on-panic, alignment}
+
+\ul{
+\li{JVM analogue is JIT-budget control, not PGO. Out of scope here; see open questions.}
+}
+}
+
+\subtree{
+\title{T11. Micro-optimisations of the hot paths}
+
+\ul{
+\li{Cache probes are inlined "frameless" fast paths; the miss path is a separate non-inlined function (\code{\verb~|eval.rs:90-141~}, \code{\verb~|infer.rs:203-246~}, \code{\verb~|conv.rs:60-72~}). Hash of a key is computed once and reused for the insert after the miss. Step counter ticks only on misses. Application spines up to 16 args are built on the stack. JVM: same shape helps the JIT inline the hit path; keep miss paths in separate methods.}
+}
+}
+}
+
+\subtree{
+\title{2. Soundness-sensitive short-cuts (do not copy blindly)}
+
+\table{
+\tr{\th{\verb~|#~}\th{Short-cut}\th{Where}\th{Why it is fragile}}
+\tr{\td{S1}\td{\strong{Canonical locals}: the local standing for a binder is looked up by \code{\verb~|(binder depth, domain value ptr)~}; sibling scopes and later declarations reuse the same local}\td{\code{\verb~|conv.rs:182-205~}, used by \code{\verb~|infer.rs:141-154~}, \code{\verb~|decl.rs:65-78,99-119~}}\td{Sound only because a local's identity then determines its type and (transitively) the types it depends on, and because depth strictly increases with nesting. Any code path that opens a binder without bumping \code{\verb~|depth~} (or restores it early) aliases two live variables. All durable open-term caches depend on this.}}
+\tr{\td{S2}\td{\strong{Durable open-term caches} keyed by environment \em{pointer} (\code{\verb~|eval_memo~}, \code{\verb~|infer_open~}) or matched on the read slots only (\code{\verb~|eval_proj~}, \code{\verb~|infer_proj~}, \code{\verb~|agree~})}\td{\code{\verb~|eval.rs:103-176,272-280,703-738~}, \code{\verb~|infer.rs:372-376,525-550~}}\td{Arena test \code{\verb~|bugs/open-term-cache-context~} is exactly a type cache for open terms that ignores binder types. Here the key includes every value the term can read; correctness depends on \code{\verb~|sup~}/support being exact or over-approximate.}}
+\tr{\td{S3}\td{\strong{Dummy arguments}: when a closure body does not mention var 0, a constant placeholder is pushed instead of the argument/local}\td{\code{\verb~|conv.rs:232-236~}, \code{\verb~|infer.rs:124-131,295-299~}}\td{Relies on the \code{\verb~|sup~} mask (\code{\verb~|uses_arg~} may over-approximate, \code{\verb~|reads_arg~} is exact). A wrong mask substitutes garbage.}}
+\tr{\td{S4}\td{\strong{Typed closures} (\code{\verb~|Clo.typed~}): same body/env, but instantiation \em{infers} instead of \em{evaluates}}\td{\code{\verb~|value.rs:62-69~}, \code{\verb~|eval.rs:563-571~}}\td{The flag must be part of closure identity and of structural equality (it is: \code{\verb~|intern.rs:21-34~}, \code{\verb~|conv.rs:39-42~}). Arena test \code{\verb~|bugs/pi-closure-context~} (sokonanoda accepted \code{\verb~|False~}).}}
+\tr{\td{S5}\td{\strong{Persistent negative cache} \code{\verb~|neq_cache~}}\td{\code{\verb~|conv.rs:74-101~}}\td{Only definite inequalities may enter: probe budget exhaustion unwinds with \code{\verb~|Stop~} before the insert; not written while deriving rules; not written when either side is a lambda (reason not documented). A session is discarded on any failure and only moves to later declarations (\code{\verb~|session.rs:170-173~}).}}
+\tr{\td{S6}\td{\strong{Check/Only split and universe scoping of cached types}}\td{\code{\verb~|tables.rs:60-91~}, \code{\verb~|infer.rs:216-244,496-503,552-563~}, \code{\verb~|mod.rs:296-328~}}\td{A type inferred without checking must never answer a checking query; a checked result that relied on the declaration's universe parameters is tagged with them and only admitted when they are in scope.}}
+\tr{\td{S7}\td{Skipping the lambda-domain check when \code{\verb~|a == b~} by pointer}\td{\code{\verb~|decl.rs:110-115~}}\td{Fine only because the declared type was fully checked first.}}
+\tr{\td{S8}\td{\code{\verb~|relevant~} masks in same-head argument comparison (skip unused and Prop-typed args)}\td{\code{\verb~|conv.rs:389-470~}}\td{Skipping a Prop argument is proof irrelevance applied without comparing the proofs' types; it is justified only because both applications are well typed with the same head and earlier relevant arguments are compared.}}
+\tr{\td{S9}\td{Derived rules computed over locals with placeholder types}\td{\code{\verb~|derive.rs~}, \code{\verb~|whnf.rs:107,324,351~}}\td{Type-directed steps (K, structure eta on the major) are disabled on open values while deriving; anything new that consults a local's type during \code{\verb~|whnf~} must also be gated on \code{\verb~|deriving~}.}}
+\tr{\td{S10}\td{Recursor accepted without type-checking when structurally identical to the regenerated one}\td{\code{\verb~|decl.rs:176-203~}}\td{Requires the generator to be right. The non-identical path type-checks \strong{before} comparing (needed by arena tests \code{\verb~|bugs/rec-rule-proof-irrel~}, \code{\verb~|bugs/rec-type-proof-irrel~}).}}
+\tr{\td{S11}\td{Primitive bodies trusted}\td{\code{\verb~|import/primitives.rs:1-3~}, \code{\verb~|docs/TRUST.md~}}\td{A forged \code{\verb~|Nat.add~} body with the right type is accepted by default (\code{\verb~|tests/fixtures/forged-nat-add.verdict~}: all three cores "accepted"); \code{\verb~|--prelude~} closes it but the arena run does not pass it. TRUST.md states this is the official kernel's trust model too ("Like Lean's kernel … trusts their bodies"); not re-verified here.}}
+\tr{\td{S12}\td{Declaration re-ordering}\td{\code{\verb~|reorder.rs~}}\td{Verdict must not depend on it: it refuses to reorder if any recorded dependency points forward, and each check still only sees indices \code{\verb~|< idx~} (\code{\verb~|mod.rs:331-336~}). A dependency the recorder missed becomes a false "unknown constant" rejection, not an unsound accept.}}
+\tr{\td{S13}\td{Import does not hash-cons expressions}\td{\code{\verb~|import/importer.rs:409-412~}}\td{Pure performance assumption (exporter already shares). Structural comparisons that matter use \code{\verb~|ExprPtr::same~} (\code{\verb~|term/expr.rs:135-180~}), not pointer equality.}}
+}
+
+\p{Safety net they built (worth copying): a \code{\verb~|memocheck~} cargo feature recomputes \strong{every memo hit} with the cache bypassed and panics on disagreement (\code{\verb~|value_checker/memocheck.rs~}, \code{\verb~|checker/memocheck.rs~}); \code{\verb~|derivecheck~} asserts fired rules agree with unfolding (\code{\verb~|whnf.rs:205-212~}); \code{\verb~|nl-mutate~} mutates exports and diffs the three engines' verdicts; debug builds check every \code{\verb~|sup~} mask against a naive traversal (\code{\verb~|eval.rs:630-635~}).}
+}
+
+\subtree{
+\title{3. Architecture map and data flow}
+
+\p{Single crate \code{\verb~|nano-lean~}, four binaries (\code{\verb~|README.md~}):}
+
+\table{
+\tr{\th{Binary}\th{Role}}
+\tr{\td{\code{\verb~|nl-fast~} (\code{\verb~|src/bin/nl-fast.rs~})}\td{The arena binary. Imports an export (NDJSON, \code{\verb~|blean~} binary, or \code{\verb~|.olean~}), optionally reorders, checks in parallel with the value core. \code{\verb~|--term-core~} selects the substitution engine; \code{\verb~|--fallback~} re-checks a declaration through the reference-kernel bridge when its arena budget runs out (off by default: \code{\verb~|native_only = true~}, \code{\verb~|fast.rs:97~}).}}
+\tr{\td{\code{\verb~|nl-ref~}}\td{Reference kernel (\code{\verb~|src/kernel/~}, ~5.8 kLoC, built on the author's \code{\verb~|unbound~} binding library), also a parser/checker for a small core language (\code{\verb~|.ltc~}). Used as oracle and for a few bridged paths.}}
+\tr{\td{\code{\verb~|nl-mutate~}}\td{Mutation tester: edits an export, runs reference / term / value engines, reports disagreements.}}
+\tr{\td{\code{\verb~|nl-watch~}}\td{Lake project watcher with a content-addressed "accepted declarations" cache.}}
+}
+
+\p{Modules that matter for \code{\verb~|nl-fast~}:}
+
+\pre{\verb~|
+src/import/{mod,importer,scan,json,blean,primitives,prelude}.rs   export -> Store
+src/term/{expr,ptr,level,name,decl,intern,arena,ctx,ops}.rs       store data model, level algebra
+src/reorder.rs                                                    dependency-order renumbering
+src/fast.rs                                                       worker pool, sessions, exit code
+src/value_checker/{mod,value,intern,tables,eval,whnf,derive,conv,infer,decl,session}.rs   value core
+src/checker/{mod,whnf,defeq,contextual,inductive,native_inductive(+recursor),quot,nat,env}.rs  term core
+src/kernel/...                                                    reference kernel (bridge target)
+~}
+
+\p{Data flow of \code{\verb~|nl-fast -q -j 4 FILE.ndjson~} (\code{\verb~|bin/nl-fast.rs:200-335~}):}
+
+\ol{
+\li{\code{\verb~|Arena::new()~} (bumpalo). \code{\verb~|import::import_with~} → \code{\verb~|Store { dag, declars: Vec<Declar>, blocks, names, deps }~}.}
+\li{\code{\verb~|fast::release_import_memory(threads)~}: \code{\verb~|mi_collect(true)~}; purge delay disabled when threads <= 16.}
+\li{Optional \code{\verb~|--prelude~} / \code{\verb~|--axioms~} checks (not used by the arena).}
+\li{\code{\verb~|reorder::reorder(&mut store)~} (default on).}
+\li{\code{\verb~|Checks::run~}: spawn \code{\verb~|min(threads, n)~} scoped worker threads (256 MiB stacks). Each owns a \code{\verb~|Session~} (arena + durable tables) and claims contiguous index runs from an atomic counter. Per index: \code{\verb~|Session::check(idx)~}; \code{\verb~|Quot/Ind/Ctor/Rec~} go to the term core, \code{\verb~|Axiom/Def/Thm/Opaque~} to the value core.}
+\li{Exit code: 0 all accepted; 1 if any rejection; 2 otherwise (decline/internal) (\code{\verb~|fast.rs:379-383~}). Import errors: \code{\verb~|Invalid~} → 1, \code{\verb~|Unsupported~}/\code{\verb~|Internal~} → 2 (\code{\verb~|bin/nl-fast.rs:154-160~}). \code{\verb~|process::exit~} is called without dropping the store ("pure teardown cost", line 333).}
+}
+
+\p{Each declaration \code{\verb~|idx~} is checked against the immutable store with visibility limit \code{\verb~|idx~} (\code{\verb~|Decls::declar~}: \code{\verb~|decl_idx < limit~}), so declarations are independent and any order/parallelism gives the same verdicts.}
+}
+
+\subtree{
+\title{4. Data representation}
+
+\subtree{
+\title{4.1 Names, strings, levels (interned at import, global lifetime)}
+
+\ul{
+\li{\code{\verb~|NameNode { kind: Anon | Str(prefix, StringPtr, hash) | Num(prefix, u64, hash), decl: AtomicU32, nat: AtomicU8 }~} (\code{\verb~|term/name.rs:80-84~}). \strong{The name node stores its declaration index and a Nat-primitive tag}, so constant lookup is \code{\verb~|name.decl_idx()~} + bounds check against \code{\verb~|limit~} — "the checker never hashes a name".}
+\li{\code{\verb~|Level = Zero | Succ(l, h) | Max(a, b, h) | IMax(a, b, h) | Param(name, h)~} with stored hash, hash-consed. Smart constructors pre-simplify: \code{\verb~|max(l, l) = l~}, \code{\verb~|max(l, 0) = l~}, \code{\verb~|imax(l, 0) = 0~}, \code{\verb~|imax(l, succ r) = max(l, succ r)~}, \code{\verb~|imax(0, r) = r~}, \code{\verb~|imax(l, l) = l~} (\code{\verb~|term/ctx.rs~}, fns \code{\verb~|max~}/\code{\verb~|imax~}).}
+\li{Level lists are interned slices; \code{\verb~|LevelsPtr~} packs the length in the top 16 bits of the pointer.}
+\li{Level comparison (\code{\verb~|term/ops.rs:25-205~}): \code{\verb~|simplify~} (memoised per level) then \code{\verb~|leq_core(l, r, diff)~} with case split on \code{\verb~|imax(_, param)~} (substitute the param by \code{\verb~|0~} and by \code{\verb~|succ p~}), distribution of \code{\verb~|imax~} over \code{\verb~|max~}/\code{\verb~|imax~}; returns \code{\verb~|None~} ("reject") on a shape normalisation should have removed. \code{\verb~|level_eq = ptr-eq || (leq && geq)~}.}
+}
+}
+
+\subtree{
+\title{4.2 Expressions of the store (\code{\verb~|term/expr.rs:17-74~}, 32 bytes each, asserted at line 182)}
+
+\pre{\verb~|
+Var{idx:u16, hash} | Sort{level, hash} | Const{name, levels, hash}
+App{fun, arg, hash, sup:u32} | Lam{ty, body, hash, sup} | Pi{ty, body, hash, sup}
+Let{data:&LetData{ty,val,body,nondep}, hash, sup} | Proj{name, idx:u16, e, hash, sup}
+NatLit{n:&BigUint, hash} | StrLit{s, hash} | Local{id:u32, ty, hash}   // Local: term core only
+~}
+
+\ul{
+\li{Pure de Bruijn indices; binder names and binder info are dropped at import (validated, not stored); \code{\verb~|mdata~} nodes become aliases of their child (\code{\verb~|import/json.rs:135-137~}).}
+\li{\code{\verb~|ExprPtr~} = 64-bit tagged pointer: low 48 bits address, top 16 bits \code{\verb~|Meta~} = 15-bit \code{\verb~|nlb~} (number of loose bound variables, i.e. max index + 1) | 1 bit \code{\verb~|HAS_LOCAL~} (\code{\verb~|term/ptr.rs:55-107~}, \code{\verb~|term/expr.rs:223-235~}). So \code{\verb~|closed()~} is a test on the pointer, no memory access.}
+\li{\code{\verb~|sup~}: bitmask of loose bvars 0..31 occurring in the node; \code{\verb~|WIDE = u32::MAX~} means "unknown/more than 32". Computed bottom-up at node construction: \code{\verb~|app = sup(f)|sup(a)~}, binder = \code{\verb~|sup(ty) | sup(body)>>1~}. For \code{\verb~|WIDE~} nodes an exact sorted \code{\verb~|[u16]~} support is computed lazily and cached per node, capped at 256 slots (\code{\verb~|eval.rs:629-685~}).}
+\li{\code{\verb~|hash~} (64-bit, from child pointers) is only used by the term core's interner.}
+}
+}
+
+\subtree{
+\title{4.3 Values (\code{\verb~|value_checker/value.rs~})}
+
+\pre{\verb!!|
+Val   { k: K, open: bool, memo: Cell<Option<&Memo>> }      // ~64 B [my estimate, not asserted in source]
+K     = Sort(LevelPtr) | Pi(dom: V, Clo) | Lam(dom: &Lazy, Clo) | Neu(Head, &[V]) | Nat(&BigUint) | Str(&str)
+Head  = Local(id:u32, ty: V, letValue: Option<V>) | Const(NamePtr, LevelsPtr) | Proj(structName, idx:u16, V)
+Clo   { env: Env, sub: Sub, body: ExprPtr, typed: bool }
+Lazy  { env, sub, e: ExprPtr, val: Cell<Option<V>> }       // memoised thunk, used only for lambda domains
+Sub   { ks: LevelsPtr, vs: LevelsPtr }                     // delayed universe instantiation; id = (∅, ∅)
+Memo  { epoch:u32, whnf_core, whnf, unfold: Option<Option<V>>, ty }   // allocated on first use
+Env   = Option<&EnvObj>;  EnvObj (32 B, asserted) = Node{head: V, tail: Env, base: Env, depth:u32, open}
+                                                 | Frame{vals: &[V], open}
+!!}
+
+\ul{
+\li{\code{\verb~|open~} = "may mention a local" (over-approximated through closure environments). Closed values are substitution-invariant; many paths short-cut on \code{\verb~|!open~}.}
+\li{Environment = a run of at most \code{\verb~|RUN = 64~} linked \code{\verb~|Node~}s on top of a flat \code{\verb~|Frame~}. \code{\verb~|Node.base~}/\code{\verb~|depth~} let a lookup of index \code{\verb~|i >= depth~} jump straight into the frame; \code{\verb~|i < depth~} walks \code{\verb~|i~} links (unrolled by 2). A push onto a run of 64 collapses everything into a new frame (\code{\verb~|eval.rs:47-88~}).}
+\li{Locals are neutrals with a unique \code{\verb~|u32~} id carrying their type (and value for \code{\verb~|let~}-bound Nat locals). No de Bruijn levels; no quoting, so no fresh-level bookkeeping at all.}
+}
+}
+
+\subtree{
+\title{4.4 Hash-consing: tables, scopes, lifetimes}
+
+\table{
+\tr{\th{Scope}\th{Table}\th{Interned objects}\th{Lifetime}}
+\tr{\td{Store \code{\verb~|Dag~} (\code{\verb~|term/intern.rs:99-106~})}\td{hashbrown \code{\verb~|HashTable<&T>~}, hash stored in node}\td{names, strings, levels, level lists, big nats. \strong{Expressions are not interned at import.}}\td{process}}
+\tr{\td{Session \code{\verb~|Ctx.dag~} (\code{\verb~|term/ctx.rs:11-22~})}\td{same}\td{levels / level lists created while checking (looked up in the store first); term-core expressions}\td{session}}
+\tr{\td{Value core \code{\verb~|hc[closed|open]~} (\code{\verb~|intern.rs:90-151~})}\td{\code{\verb~|Set~} = table of \code{\verb~|(hash, &Val)~}, key recomputed from the value}\td{\code{\verb~|Sort~}, \code{\verb~|Lam~} (key: lazy-dom ptr, env ptr, sub, body, typed), nullary \code{\verb~|Const~}/\code{\verb~|Proj~} neutrals, \code{\verb~|Str~}; \code{\verb~|Pi~} only via \code{\verb~|mk_pi~} (substitution) — plain \code{\verb~|mk~} skips the probe for \code{\verb~|Pi~} ("rarely recur, probing only costs")}\td{session}}
+\tr{\td{\code{\verb~|neus~}}\td{\code{\verb~|(hash, &Val)~}; hash over head + arg pointers, stored so a rehash never walks a spine}\td{neutrals with a spine}\td{session}}
+\tr{\td{\code{\verb~|nats~}}\td{by value}\td{\code{\verb~|Nat~} literals}\td{session}}
+\tr{\td{\code{\verb~|envs[closed|open]~}}\td{direct-mapped, 2^16 slots, key \code{\verb~|(v ptr, env ptr)~}}\td{pushed env nodes (lossy: a miss just allocates a duplicate)}\td{session}}
+\tr{\td{\code{\verb~|frames[closed|open]~}}\td{hash map keyed by the pointer slice}\td{flat frames}\td{session}}
+\tr{\td{\code{\verb~|lazies[closed|open]~}}\td{key \code{\verb~|(env ptr, sub, ty expr)~}}\td{lambda-domain thunks}\td{declaration}}
+}
+
+\p{Hashing: Fx multiply-rotate over pointer words for value tables (\code{\verb~|tables.rs:287-328~}); a stronger multiply-xorshift mixer for store nodes because "FxHasher is linear and collides on large arenas" (\code{\verb~|term/mod.rs:16-72~}).}
+}
+}
+
+\subtree{
+\title{5. Export parsing}
+
+\p{Entry: \code{\verb~|import::import_with(arena, path, threads)~} (\code{\verb~|import/mod.rs:43-56~}).}
+
+\ul{
+\li{\code{\verb~|blean~} (binary, mmap'ed via \code{\verb~|memmap2~}) if the file sniffs as such; otherwise NDJSON (lean4export format version must be exactly \code{\verb~|"3.1.0"~}, \code{\verb~|export/mod.rs:20~}).}
+\li{NDJSON threading: \code{\verb~|threads = --import-threads~}, default \code{\verb~|2~} only if the file is > 16 GiB \strong{and} \code{\verb~|-j > 1~}, else \code{\verb~|1~} (\code{\verb~|bin/nl-fast.rs:13,228-236~}; comment: "Scanning helpers cost instructions, so only exports too big to read serially get them"). With \code{\verb~|1~}: files > 32 MiB are read by one extra I/O thread in 16 MiB blocks cut at the last newline, handed over a bounded channel (2 blocks ahead); the main thread parses (\code{\verb~|import/mod.rs:179-244~}). No mmap for NDJSON, no SIMD crate except \code{\verb~|memchr~} for newline search. With \code{\verb~|>= 2~}: helper threads \code{\verb~|pread~} 4 MiB chunks and pre-scan lines into \code{\verb~|Line~} records; the main thread builds in order (\code{\verb~|import/mod.rs:116-177~}).}
+\li{No lazy/deferred proof bodies for NDJSON: everything is materialised into the arena at import (lazy cone decoding exists only for the \code{\verb~|--olean~} path, \code{\verb~|import/mod.rs:287-304~}).}
+\li{No intermediate binary format is produced for NDJSON input.}
+}
+
+\p{Scanner (\code{\verb~|import/scan.rs~}), all specialised to lean4export's exact byte layout (sorted keys, no spaces); anything that does not match falls back to \code{\verb~|serde_json::from_slice~} + a generic handler (\code{\verb~|import/json.rs~}):}
+
+\ul{
+\li{\code{\verb~|fast(b)~}: if at least 128 bytes remain, dispatch on byte 2: \code{\verb~|'a'~} → \code{\verb~|app~}, \code{\verb~|'f'~} → \code{\verb~|forallE~}, \code{\verb~|'i'~} → \code{\verb~|lam~} (\code{\verb~|{"ie":N,"lam":…}~}), each matched with 8-byte word compares against constant tags (\code{\verb~|has~}, \code{\verb~|tag~}, \code{\verb~|ld~}, lines 503-530); otherwise \code{\verb~|other()~} handles \code{\verb~|thm~}, \code{\verb~|def~} (only when the mutual group is the declaration itself and \code{\verb~|safety~} is \code{\verb~|safe~}), \code{\verb~|app~}, \code{\verb~|bvar~}, \code{\verb~|const~}, \code{\verb~|forallE~}, \code{\verb~|lam~}, \code{\verb~|letE~}, \code{\verb~|sort~}, \code{\verb~|proj~}, name \code{\verb~|str~}/\code{\verb~|num~}, level \code{\verb~|succ~}/\code{\verb~|param~}/\code{\verb~|max~}/\code{\verb~|imax~}.}
+\li{Integers: SWAR. XOR the 8-byte word with \code{\verb~|0x30…~}, find the first non-digit lane, fold digit pairs with two multiplies (\code{\verb~|id~}, \code{\verb~|fold~}, \code{\verb~|above~}, lines 619-666). Canonical decimals only (no leading zeros).}
+\li{\code{\verb~|Importer::apps~} (\code{\verb~|import/importer.rs:276-310~}): a dedicated loop that consumes a \strong{run of consecutive \code{\verb~|app~} lines} as long as each new id equals \code{\verb~|dense.len()~} (ids arrive in order), with table and recorder moved into locals "to keep its constants in registers". Per line: 3 SWAR ints, 2 loads of child pointers, \code{\verb~|mk::app~} (hash, \code{\verb~|sup~}, \code{\verb~|nlb~}), one 32-byte bump allocation, one push, plus the dependency summary when recording.}
+\li{Id → node tables are dense \code{\verb~|Vec<Option<Ptr>>~} pre-sized from \code{\verb~|file_len / 56~} bytes per line (\code{\verb~|BYTES_PER_LINE~}), with a sparse hash-map escape for forged far ids (\code{\verb~|Table~}, lines 120-215).}
+\li{Expressions are \strong{only allocated, never looked up} (line 409: "Exported nodes are already shared and checking never looks them up"). Names, strings, levels, level lists and nat literals are interned.}
+\li{Nat literals: decimal string → \code{\verb~|BigUint~}, at most 65536 digits else "unsupported" (line 118).}
+\li{Validation at import: duplicate declaration names, unknown/forward ids, \code{\verb~|unsafe~}/\code{\verb~|partial~} rejected, quotient names reserved, group metadata (\code{\verb~|all~}) consistency, primitive \strong{types} pattern-matched (\code{\verb~|import/primitives.rs:77-135~}: \code{\verb~|Nat~}, \code{\verb~|Nat.zero/succ~}, \code{\verb~|Nat.log2~}, the 12 binary \code{\verb~|Nat → Nat → Nat~} operations, \code{\verb~|Nat.beq/ble~}, \code{\verb~|Bool~}, \code{\verb~|Bool.true/false~}, \code{\verb~|Char~}, \code{\verb~|Char.ofNat~}, \code{\verb~|String~}, \code{\verb~|String.ofList~}, \code{\verb~|List~}, \code{\verb~|List.nil/cons~}).}
+\li{Dependency recording (only for inputs >= 64 MiB, \code{\verb~|RECORD_BYTES~}): per expression id a 4-byte summary "no constant below / exactly declaration j / many (≙ the declaration during which this node was created)"; when a declaration's line references a node created before the declaration started, the summary yields a dependency edge in O(1) (\code{\verb~|Recorder~}, lines 36-111). Result: CSR lists \code{\verb~|Deps{ends, decls, names}~} for §12. The v0.4.3 commit message (5dabccf) says this recording "took about a fifth of the builder's time, most of it stalled on a summary table far larger than any cache".}
+}
+
+\p{Cost share: not published for NDJSON. The only data point is the README table (blean, M5, \code{\verb~|-j 1~}, v0.1.0-era): wall 57.4 s vs "kernel check" 53.5 s, i.e. ≈ 3.9 s (7 \%) outside checking. \strong{\verb~|[~unverified for NDJSON\verb~|]~}}
+}
+
+\subtree{
+\title{6. Evaluation (\code{\verb~|value_checker/eval.rs~})}
+
+\p{Strategy: \strong{strict (call-by-value) evaluation into closures and folded neutrals; no delta, no iota in \code{\verb~|eval~}.} \code{\verb~|eval~} performs only beta, zeta (\code{\verb~|let~}), and projection-of-constructor. Arguments are evaluated eagerly, but since constants never unfold this is cheap and every step is memoised. There are no general call-by-need thunks; the only thunk is the lambda domain.}
+
+\pre{\verb~|
+eval(env, sub, e):
+  if e is Var i: return env[i]                         // inlined, reject if out of range
+  closed = e.nlb == 0;  if closed: env = EMPTY
+  key = closed ? (e, sub) : (e, sub, envPtr)
+  hit eval_closed[key] (hash map)  /  eval_memo[key] (lossy 2^16)  -> return
+  -- miss --
+  guard stack; tick
+  if e is an open App with sup != 0:                   // "projected" hit
+      (env0, v) = eval_proj[(e, sub)];  if agree(env0, env, slots(e)): memo and return v
+  v = case e of
+    Sort l        -> intern Sort(subst(sub, l))
+    Const c ls    -> intern Neu(Const(c, subst(sub, ls)), [])
+    App           -> collect spine (<=16 args on stack, else SmallVec<32>)
+                     head = (f is Const && sub is id) ? Head::Const(c, ls)        // no value built for the head
+                                                      : eval(env, sub, f)
+                     args = map eval
+                     head is Head ? neu(head, [], args) : apply(headValue, args)
+    Lam ty body   -> env' = trim(env, e);  Lam(lazy(env', sub, ty), Clo{env', sub, body, typed:false})
+    Pi  ty body   -> env' = trim(env, e);  d = eval(env', sub, ty);  Pi(d, Clo{env', sub, body, false})
+    Let           -> v = eval(val);  eval(push(env, v), sub, body)
+    Proj S i s    -> proj(S, i, eval(s))               // picks the field if s is a constructor application
+    NatLit/StrLit -> interned literal value
+  insert into eval_closed / eval_memo (+ eval_proj for open apps)
+
+apply(f, args):                                        // eval.rs:585-626
+  loop over args:
+    f = Lam(_, c) untyped: env = push(c.env, arg); while body is syntactically `Lam` and args remain:
+                               env = push(env, nextArg); body = body.body      // multi-arg beta, no
+                           f = eval(env, c.sub, body)                           // intermediate closures
+    f = Lam(_, c) typed  : f = inst(c, arg)            // infer(push(env,arg), body, Only)
+    f = Neu(h, sp)       : return neu(h, sp, restOfArgs)                        // interned, spine copied
+    otherwise            : reject "expected a function"
+
+trim(env, e):                                          // eval.rs:457-523
+  slots = sup mask of e, or exact support list if WIDE (None if > 256 slots -> keep env)
+  if slots empty -> EMPTY
+  n = maxSlot + 1
+  if all of 0..n used && env.size == n && env.depth <= 8 -> keep env
+  if WIDE && n >= 128 && n > 4*|slots| -> keep env                 // sparse & long: frame would cost more
+  if mask: probe prunes[(envPtr, mask)]
+  buf = [dummy; n]; fill buf[j] = env[j] for j in slots (single walk)
+  frame_in(buf)                                                    // interned flat frame
+~}
+
+\ul{
+\li{\code{\verb~|proj(S, i, v)~} (\code{\verb~|eval.rs:544-552~}): if \code{\verb~|v~} is \code{\verb~|Neu(Const ctor, args)~} with \code{\verb~|ctor~} a constructor, return \code{\verb~|args[numParams + i]~}; else intern \code{\verb~|Neu(Proj(S, i, v), [])~}.}
+\li{\code{\verb~|inst(clo, x)~}: \code{\verb~|push~} then \code{\verb~|eval~} (or \code{\verb~|infer … Only~} for typed closures).}
+\li{\code{\verb~|zeta/subst~} (\code{\verb~|eval.rs:341-454~}): value-level substitution of local ids by values (used for Nat \code{\verb~|let~}s, \code{\verb~|infer_redex~}, and rule firing). Skips closed sub-values, memoises per call by value pointer, rebuilds neutrals/closures/envs through the interning constructors, re-applies when a substituted local was a head.}
+}
+}
+
+\subtree{
+\title{7. WHNF and reduction rules (\code{\verb~|value_checker/whnf.rs~})}
+
+\pre{\verb~|
+whnf_core(v):                                  // no delta
+  not Neu, or plain local -> v;  memo hit -> return
+  Const c ls, args  -> reduce_rec(c, ls, args) then recurse, else v
+  Proj _ i s, args  -> c = whnf(s) (string literal -> ctor form); if ctor app: apply(field, args), recurse
+  let-local x := d  -> apply(d, args), recurse
+  store memo.whnf_core
+
+whnf(v):
+  Sort/Pi/Lam/Nat/Str/plain local -> v;  memo hit -> return
+  loop: t1 = whnf_core(t)
+        if reduce_nat(t1) = n -> result n
+        match unfold(t1, rules = true): Some(u) -> t = u ; None -> result t1
+  store memo.whnf on every value visited on the path
+~}
+
+\ul{
+\li{\strong{Delta} (\code{\verb~|unfold_uncached~}, lines 157-216): head must be a \code{\verb~|Def~} or \code{\verb~|Thm~} (theorems unfold, with hint \code{\verb~|Opaque~}; \code{\verb~|Opaque~} declarations and axioms do not) and the level count must match. The body is evaluated \strong{once per \code{\verb~|(constant, level args)~}} into \code{\verb~|delta~} (a closure value) with a hit counter; unfolding is \code{\verb~|apply(bodyValue, args)~}. Result memoised on the neutral unless a derived rule fired.}
+\li{\strong{Iota} (\code{\verb~|reduce_ind_rec~}, 265-318): major = \code{\verb~|args[major_idx]~}; if the recursor is K-like, first try \code{\verb~|expose_ctor_when_k~} (type of major whnf'd to \code{\verb~|I params idx…~}; build \code{\verb~|C params~}; accept if its type is def-eq to the major's type); \code{\verb~|whnf(major)~}; Nat literal → \code{\verb~|Nat.zero~} / \code{\verb~|Nat.succ (n-1 literal)~}; string literal → \code{\verb~|String.ofList [Char.ofNat …]~}; otherwise structure-eta on the major (\code{\verb~|expose_ctor_when_structure~}: non-recursive single-constructor, zero-index type, not a Prop: rebuild \code{\verb~|C params (major.0) (major.1) …~}). Then find the rule by constructor name, evaluate the rule RHS once per \code{\verb~|(rec, rule index, levels)~} (\code{\verb~|rules~} table) and \code{\verb~|apply(rhs, params ++ motives ++ minors ++ ctorFields ++ extraArgs)~}.}
+\li{\strong{Quotient}: \code{\verb~|Quot.lift~} (major 5) / \code{\verb~|Quot.ind~} (major 4), only if the constants are declared as \code{\verb~|Quot~} declarations; major whnf must be \code{\verb~|Quot.mk~} with exactly 3 args; result \code{\verb~|f a~} applied to the rest (250-263).}
+\li{\strong{Nat literals} (\code{\verb~|reduce_nat~}, 431-473; arithmetic in \code{\verb~|checker/nat.rs~}): only for \strong{closed} values with 1 or 2 args whose head name carries a Nat tag: \code{\verb~|succ, log2~} unary; \code{\verb~|add, sub, mul, div, mod, gcd, beq, ble, land, lor, xor, shiftLeft, shiftRight, pow~} binary. Args are \code{\verb~|whnf~}'d and must be a literal or \code{\verb~|Nat.zero~}. \code{\verb~|pow~}/\code{\verb~|shiftLeft~} decline (fall back to unfolding) when exponent > 2^24 or result would exceed 2^26 bits. Big multiplication has a sparse-limb path; nat hashing has a wide 8-lane path (0.4.0/0.4.1 changelog).}
+\li{\strong{Nat \code{\verb~|let~}} (\code{\verb~|infer.rs:470-482~}): in checking mode, a \code{\verb~|let x : Nat := v~} binds \code{\verb~|x~} to a local that carries its value and unfolds only at the head, "so closed literal folding never forces the value" (mirrors Lean).}
+\li{\strong{Strings}: literal kept as \code{\verb~|Str~}; expanded to constructor form only when a recursor/projection/def-eq needs it.}
+\li{No special compiled forms for matchers / \code{\verb~|casesOn~} / \code{\verb~|brecOn~} / well-founded recursion — they are ordinary definitions that unfold — except through the generic derived rules of §8.}
+}
+}
+
+\subtree{
+\title{8. Derived rules for hot definitions (\code{\verb~|value_checker/derive.rs~})}
+
+\p{Trigger (\code{\verb~|whnf.rs:188-201~}): in \code{\verb~|whnf~} (not in lazy delta), when a constant's unfold counter reaches \code{\verb~|HOT = 32~}, it is not a Nat primitive or one of its auxiliaries, and fewer than 256 derivations were made by this checker instance.}
+
+\pre{\verb~|
+derive(f = body value, body expr):
+  arity = number of leading syntactic lambdas of the body; require 1..=16
+  budget = min(steps_left, 65536); deriving = true
+  slots = arity fresh locals typed with a placeholder
+  root = explore(depth 0);  on any failure/budget exhaustion -> Hot::Never (never retried)
+
+explore(depth):
+  r = whnf(apply(f, slots resolved to locals or constructor applications))
+  leaf = Leaf(r) if "open size" of r <= 256 nodes else Leaf(None)
+  if depth >= 3 -> leaf
+  blocker = follow r: while r is `rec … major …` (or a projection's struct), up to 8 hops:
+              m = whnf(major); if m is an unsplit slot local -> that slot; else continue into m
+  none, or the inductive has > 8 constructors -> leaf      (> 64 nodes in this rule: abort the derivation)
+  for each constructor C: bind slot := C fresh…(params+fields), node_C = explore(depth+1)
+  Split{slot, branches[(C, levels, nargs, firstLocalId, node_C)]}
+
+fire(rule, args):                    // args.len() >= arity
+  bind = [(localId_i, args[i])]
+  walk: Split -> v = whnf(bind[slot]); string -> ctor form; Nat literal matches zero / succ(pred literal);
+                 constructor must match by name, level-list pointer and arg count; push its args into bind
+        Leaf(t) -> result = subst(bind, t) applied to args[arity..]
+        Leaf(None) / no match -> fall back to ordinary unfolding
+~}
+
+\p{Soundness argument given in the file header: "Reduction commutes with substitution, so a leaf instantiated at matching arguments is a reduct of the call." While \code{\verb~|deriving~}: K and structure-eta are skipped for open majors, open Nat-primitive applications are left folded, \code{\verb~|neq_cache~} is not written. Lazy delta calls \code{\verb~|unfold(v, rules = false)~} "so it still sees the same-head states it compares by arguments".}
+}
+
+\subtree{
+\title{9. Definitional equality (\code{\verb~|value_checker/conv.rs~})}
+
+\pre{\verb~|
+def_eq(t, s):
+  ptr-eq or (t,s) in eq_cache -> true                                  // inlined fast path
+  tick; (min,max) in neq_cache -> false
+  same(t, s, fuel 512) -> true        // bounded structural compare of hash-consed values (closures: same
+                                      // body/sub/typed and structurally same env)
+  r = def_eq_core(t, s)
+  r ? eq_cache += (t,s),(s,t) : (if !deriving && neither is Lam) neq_cache += (min,max)
+
+def_eq_core(t, s):                                                      // exact order
+  1. quick: ptr/eq_cache; Lam-Lam or Pi-Pi -> binder loop; Sort-Sort -> level_eq; Nat-Nat; Str-Str
+  2. if s is the constant Bool.true and t is closed: whnf(t) is Bool.true -> true
+  3. same-head probe: both `Const c` applications, same arg count > 0, c unfoldable, same name, levels equal:
+        probe_args(t, s, budget = 16384 if hint Regular else 1024) -> true
+  4. unless statically_not_proof(t): proof irrelevance — type_of(t) is a Prop ? return def_eq(type_of t, type_of s)
+  5. tn = whnf_core(t), sn = whnf_core(s); if either changed: quick(tn, sn)
+  6. lazy_delta(tn, sn)  -> decided, or stuck pair (tn, sn)
+  7. Const-Const without args: name and levels;  Proj-Proj without args: same struct/index and def_eq structs
+  8. whnf_core again; if changed -> def_eq_core(restart)
+  9. def_eq_app: equal heads and arg counts; args pairwise (for Const heads through the `relevant` mask)
+ 10. eta(tn, sn), eta(sn, tn): one side Lam, other not: other's type whnf is Pi with def-eq domain;
+                               compare body with `other x` under a binder local
+ 11. eta_struct both ways: one side a fully applied constructor of a structure-like type: types def-eq and
+                           each field def-eq to the projection of the other side
+ 12. string_expand: Str vs `String.ofList …`
+ 13. unit_like: type whnf is a structure-like type with 0 fields -> compare the two types
+
+lazy_delta(t, s): loop
+  a. offset: both zero -> true; both successors (literal > 0 or `Nat.succ a`) -> def_eq(preds)
+  b. both closed: reduce_nat(t) or reduce_nat(s) -> def_eq_core with the folded literal
+  c. hints ht, hs = delta hints (None if not unfoldable)
+  d. if "past" non-empty and met_past(t, s) -> true
+  e. (None, None) -> stuck; one side only -> unfold it + whnf_core
+     both: compare hints (Abbrev unfolds before Regular before Opaque; larger Regular height first)
+        unequal -> remember the side's current form in `past` (max 4, Regular const applications), unfold it
+        equal   -> if Regular, same constant, levels equal: probe_args(t, s, 16384) -> true
+                   unfold both
+  f. quick(t, s) decides -> return
+~}
+
+\ul{
+\li{\code{\verb~|probe_args~} (356-387): if the pair is in \code{\verb~|fail_cache~} → false. Run \code{\verb~|args_eq~} under a temporarily reduced step budget; exhaustion or inequality records the pair in \code{\verb~|fail_cache~} (both orders) and returns false, i.e. "inconclusive, go unfold". Nested probes do not get their own budget. Probe steps are charged to the declaration.}
+\li{\code{\verb~|met_past~} (560-577): if the current form of one side has the same head constant as a form the \em{other} side had before it was unfolded, compare arguments with that earlier form (fix for arena test \code{\verb~|perf/loop-unfolded-once~}).}
+\li{\code{\verb~|relevant(c, n)~} (389-431), cached per \code{\verb~|(constant, n)~}: start all-true; strip up to \code{\verb~|n~} leading lambdas of the definition body, mark as irrelevant every parameter not in the body's support; then mark irrelevant every argument whose declared type (from the constant's Pi telescope) is syntactically a \code{\verb~|Prop~}-valued application (head constant or earlier parameter whose type ends in \code{\verb~|Sort 0~}).}
+\li{\code{\verb~|statically_not_proof~} (312-345): \code{\verb~|Sort~}, \code{\verb~|Pi~}, literals; a constant application whose result type (by syntactically stripping Pis of the constant's type) is a \code{\verb~|Sort~}, or is headed by a constant whose own result sort is syntactically positive (\code{\verb~|Succ~}, \code{\verb~|max~} with a positive side, \code{\verb~|imax _ positive~}); a bare local whose type is a \code{\verb~|Sort~} or such an application.}
+\li{Binder comparison (\code{\verb~|def_eq_binding_in~}, 211-241): iterative over nested binders; domains compared (lambda domains forced); identical closures (same body, sub, typed flag, env pointer) → true without instantiating; otherwise instantiate both with the canonical local for \code{\verb~|(depth, domain)~}, or with the dummy when neither body mentions the variable.}
+\li{No union-find. Equivalence classes are approximated by hash-consing + the symmetric pair set \code{\verb~|eq_cache~}.}
+}
+
+\p{Differences from the official kernel, checked against \code{\verb~|lean4/src/kernel/type_checker.cpp:1128-1203~} (\code{\verb~|is_def_eq_core~}) and \code{\verb~|:962-1010~} (\code{\verb~|lazy_delta_reduction_step~}) of the clone in \code{\verb~|refs/lean4~} (611c117, v4.36 branch). Official order: quick → \code{\verb~|Bool.true~} hack → \code{\verb~|whnf_core~} with cheap projections → quick → proof irrelevance → lazy delta → const / fvar / proj (\code{\verb~|lazy_delta_proj_reduction~}) → full \code{\verb~|whnf_core~} → restart → app → eta → eta-struct → string literal → unit-like. nano-lean deviates as follows:}
+
+\ol{
+\li{Same-head argument probe (step 3) runs \strong{before} any \code{\verb~|whnf_core~} and before proof irrelevance, for any unfoldable head (the official kernel only tries arguments inside lazy delta, when both sides are the same \code{\verb~|regular~} definition), and it is \strong{step-budgeted}; the official \code{\verb~|is_def_eq_args~} attempt is unbounded (it has the same kind of failure cache: \code{\verb~|failed_before~} / \code{\verb~|cache_failure~}).}
+\li{Proof irrelevance is tested on the un-reduced terms, before \code{\verb~|whnf_core~}, and skipped by a syntactic test.}
+\li{No "cheap projection" mode: \code{\verb~|whnf_core~} on a projection always fully \code{\verb~|whnf~}s the structure; consequently there is no \code{\verb~|try_unfold_proj_app~} and no \code{\verb~|lazy_delta_proj_reduction~} (stuck \code{\verb~|Proj~}-\code{\verb~|Proj~} just compares the structures with \code{\verb~|def_eq~}).}
+\li{"Past forms" in lazy delta; argument relevance masks; derived rules in \code{\verb~|whnf~} (not in lazy delta).}
+}
+}
+
+\subtree{
+\title{10. Type inference (\code{\verb~|value_checker/infer.rs~})}
+
+\p{Two modes (\code{\verb~|tables.rs:60-65~}): \code{\verb~|Check~} (full checking) and \code{\verb~|Only~} (compute the type of a term already known to be well typed; no argument/let/level checks). Results live in separate tables; a \code{\verb~|Check~} result may answer an \code{\verb~|Only~} query, never the reverse.}
+
+\pre{\verb~|
+infer(env, sub, e, mode):
+  Var i: v = env[i]; plain local -> its type; else type_of(v)            // types of values are memoised
+  closed e: infer_closed[Check][(e,sub)] hit if its recorded uparams are ∅ or == current uparams
+  open e  : infer_open[Check][(e,sub,envPtr)] likewise; in Only mode also infer_open[Only]
+  -- slow path --
+  closed: retry with `admit` (recorded uparams ⊆ current); Only: infer_closed[Only]
+  binders/let: env = trim(env, e) and re-probe with the trimmed env
+  open App: infer_proj[(e,sub)] whose environment agrees on the slots e reads
+  case e:
+    Sort l     : Check: every param of l must be declared; type Sort(succ(subst l))
+    Const c ls : declared below `limit`, level count matches, (Check) params declared; const_type(c, subst ls)
+    App        : spine; if head is a literal Lam and mode = Check -> infer_redex for the first argument
+                 ft = infer(head); for each arg: ft = whnf-to-Pi(ft)
+                     Check: def_eq(infer(arg, Check), domain) else "application type mismatch"
+                     x = codomain mentions var 0 ? eval(arg) : dummy
+                     ft = inst_pi(piValue, x)                 // memoised by (pi ptr, arg ptr), lossy 2^16
+    Lam ty b   : dom = eval(ty); Check: ty is a sort, infer(b) under the canonical local (result discarded)
+                 result Pi(dom, Clo{env, sub, b, typed: true})
+    Pi ty b    : imax(sort(ty), sort of b under the canonical local)
+    Let        : Check: type is a sort, value's type def-eq to it; then infer(body) in push(env, eval(val))
+                 (Nat-typed lets in Check mode: let-bound local + zeta of the resulting type)
+    Proj S i s : Check: infer(s); type_of(Neu(Proj(S, i, eval s)))
+    literals   : `Nat` / `String`, after checking that constant has type `Type`
+  record Scoped{type, uparams = (mode == Only || no level check happened) ? ∅ : current}
+~}
+
+\ul{
+\li{\code{\verb~|type_of(value)~} (46-95), memoised on the value: \code{\verb~|Sort l → Sort(succ l)~}; \code{\verb~|Pi → Sort(imax …)~}; \code{\verb~|Lam → Pi(forced domain, typed closure)~}; neutral: head type (local's type / \code{\verb~|const_type~} / \code{\verb~|proj_type~}) instantiated along the spine.}
+\li{\code{\verb~|proj_type~} (97-138): struct type whnf must be \code{\verb~|S params~} with exactly \code{\verb~|numParams~} args, \code{\verb~|S~} a single-constructor zero-index inductive; walk the constructor type; for each earlier field the later types depend on, substitute \code{\verb~|proj(S, j, s)~} (else the dummy); if the structure is a \code{\verb~|Prop~}, every field that is depended on, and the projected field itself, must be a \code{\verb~|Prop~} ("invalid projection").}
+\li{\code{\verb~|const_type(c, ls)~}: declared type evaluated once per \code{\verb~|(c, ls)~}.}
+\li{Caches, keys, scope: see §12 table. Eviction: none for hash maps within a session; lossy tables overwrite.}
+}
+
+\p{Declaration-level checks (\code{\verb~|value_checker/decl.rs:19-128~}):}
+
+\pre{\verb~|
+Axiom: type is a sort.
+Def/Opaque: check_telescope(type); check_value(value, type).
+Thm: additionally the type's sort must be level-equal to 0.
+check_telescope(ty): walk the Pi telescope under canonical locals (so the value check below finds the same
+    environments in the caches), infer each domain in Check mode, fold sorts with imax, record the result in
+    infer_closed.
+check_value(v, ty): peel `Lam a . body` against `Pi b . rest` simultaneously:
+    dom = eval(a); if a is not the same node as b: check a is a sort, remember (dom, env, b)
+    push canonical local. Then vt = infer(body, Check); verify remembered domains def-eq; def_eq(vt, eval(rest)).
+~}
+}
+
+\subtree{
+\title{11. Declaration admission}
+
+\ul{
+\li{Routing (\code{\verb~|session.rs:18-28,151-169~}): \code{\verb~|Quot~}, \code{\verb~|Ind~}, \code{\verb~|Ctor~}, \code{\verb~|Rec~} are "bridged" to the term core \code{\verb~|Tc~}; everything else goes to the value core.}
+\li{\strong{Inductive blocks} (\code{\verb~|checker/inductive.rs:61-88~}, \code{\verb~|checker/native_inductive.rs:400-428~}; bare line ranges in this bullet refer to the latter file): the whole block (types, constructors, recursors, as grouped in the export's \code{\verb~|inductive~} record) is validated when its first index is checked; the other members return OK immediately. Steps: distinct universe params; all types share params/universe/\code{\verb~|all~}; type telescopes checked, result sorts equal; constructors in Lean's order: metadata (\code{\verb~|induct~}, \code{\verb~|cidx~}, \code{\verb~|numParams~}, uparams), parameter domains def-eq to the type's, \strong{strict positivity} (\code{\verb~|positive~}, 359-380: no occurrence in a Pi domain; occurrences only as \code{\verb~|I params indices~} with indices free of the family), field universes \code{\verb~|<=~} the inductive's universe unless it is a \code{\verb~|Prop~}, return type is the owner applied to the block params; \code{\verb~|isRec~}/\code{\verb~|isReflexive~}/\code{\verb~|numNested~} flags recomputed and compared. \strong{Nested inductives} are expanded natively the way Lean's \code{\verb~|replace_all_nested~} does (auxiliary members are locals standing for \code{\verb~|J Ds~}; params of nested occurrences must be closed) (670-810). \code{\verb~|outParam~}, \code{\verb~|semiOutParam~}, \code{\verb~|optParam~}, \code{\verb~|autoParam~} gadgets are stripped from binder types to match Lean's generated recursors (209-237).}
+\li{Elimination level (\code{\verb~|checker/native_inductive/recursor.rs:12-56~}, \code{\verb~|kernel/inductive/elim.rs:14-40~}): let \code{\verb~|z~} = the result level with all universe params set to 0. If \code{\verb~|z~} is not zero (never a Prop): large elimination. Otherwise (may be a Prop): small if the expanded block has > 1 member or > 1 constructor; large if 0 constructors; with exactly one constructor, large iff every field is a Prop or occurs among the constructor's result indices. K-like iff the declared sort is \code{\verb~|Prop~}, one member, one constructor, zero fields. The recursor's universe params must be the type's (small) or one extra leading param not among them (large).}
+\li{\strong{Recursors are regenerated} (motives, minors with induction hypotheses for recursive fields, rule RHS) and compared with the exported ones (\code{\verb~|checker/native_inductive/recursor.rs:108-194~}, \code{\verb~|decl.rs:167-206~}): metadata must match exactly; type and each rule: if structurally identical (\code{\verb~|ExprPtr::same~}) accept; otherwise type-check the exported term, then require def-eq with the generated one. Names must be \code{\verb~|I.rec~} (and \code{\verb~|I0.rec_k~} for nested auxiliaries). The obligations are checked by a value-core instance shared across the block; a value core rejection is re-decided by the term core, and disagreement between the two is an \em{internal} error.}
+\li{If native checking of a \em{nested} block rejects, the block is re-decided by the reference kernel (\code{\verb~|check_existing~}, \code{\verb~|checker/inductive.rs:84-138~}).}
+\li{\strong{Quotient} (\code{\verb~|checker/quot.rs~}): \code{\verb~|Eq~} must be the expected inductive (one universe param, one constructor, exact type shapes); each of \code{\verb~|Quot~}, \code{\verb~|Quot.mk~}, \code{\verb~|Quot.lift~}, \code{\verb~|Quot.ind~} must have exactly the expected type (compared by def-eq with a hand-built term) and its prerequisites declared as quotient declarations.}
+\li{\strong{Literals}: types of the primitive constants are checked at import; literal typing additionally checks \code{\verb~|Nat : Type~} / \code{\verb~|String : Type~}. Bodies of \code{\verb~|Nat.add~} etc. are not compared with anything unless \code{\verb~|--prelude~}.}
+\li{\strong{Axioms}: any axiom is accepted (only its type is checked) unless \code{\verb~|--axioms~} restricts the list (not used by the arena).}
+\li{\strong{reduceBool / trustCompiler}: no support of any kind (\code{\verb~|grep -i reducebool src~} is empty); \code{\verb~|Lean.ofReduceBool~} would just be an axiom and \code{\verb~|Lean.reduceBool~} an opaque constant that never reduces.}
+\li{\code{\verb~|unsafe~} / \code{\verb~|partial~} declarations and unknown declaration kinds are rejected/declined at import.}
+}
+}
+
+\subtree{
+\title{12. Scheduling, sessions, parallelism, memory}
+
+\subtree{
+\title{12.1 Re-ordering (\code{\verb~|reorder.rs~})}
+
+\p{Units = inductive blocks or single declarations. Everything up to the last unit containing a builtin name stays in place ("pin"). For the rest: dependency edges from §5's recorder; if any edge points forward, or a name is unresolved, leave the store untouched. Otherwise a Kahn topological sort with a \strong{LIFO ready stack} (initially the zero-indegree units in ascending index order; when a unit is emitted, units it unblocks are pushed and therefore emitted next). Effect: a declaration is checked right after its last dependency. \code{\verb~|decl_idx~} in the name nodes and the block table are rewritten. Disabled by \code{\verb~|--no-reorder~} or \code{\verb~|--limit~}.}
+}
+
+\subtree{
+\title{12.2 Workers (\code{\verb~|fast.rs:163-384~})}
+
+\ul{
+\li{Unit of work: one declaration index. \code{\verb~|claim()~}: \code{\verb~|k = max(1, remaining / (4 * workers))~}, \code{\verb~|at = next.fetch_add(k)~} → the worker checks indices \code{\verb~|at..at+k~} in order. Runs shrink geometrically (with 4 workers each claim takes 1/16 of what is left), "neighbours share constants, so runs keep a session's tables warm".}
+\li{Shared between workers: only the immutable \code{\verb~|Store~} (plus atomics for counters / exit code). No shared cache, no locks on the hot path.}
+\li{Determinism: verdict per declaration is independent of scheduling. Resource declines could depend on session warmth, so a declaration that exhausts the arena budget in a warm session (session arena > 1/16 of the budget) is retried once in a fresh session (\code{\verb~|fast.rs:261-282~}).}
+\li{Per declaration budgets: 200 M steps (ticks on cache misses), 4096 MiB arena growth, stack floor guard (decline instead of overflow; \code{\verb~|resource.rs~}). Exhaustion = decline (exit 2).}
+}
+}
+
+\subtree{
+\title{12.3 Session lifecycle (\code{\verb~|value_checker/session.rs~}, \code{\verb~|tables.rs:140-270~})}
+
+\pre{\verb~|
+Session { arena: Box<Arena>, state: Option<State>, spare tables }
+check(idx):
+  state usable iff state.last < idx (and local ids < 2^31)
+  vc = Vc::new(...)            // takes emptied tables from a thread-local pool
+  resume: vc.tables = durable tables; vc.ctx (level interner etc.), next_local, memo epoch restored
+  result = vc.check(idx)
+  ok  -> state = suspend(vc)   // everything except fail_cache and lazies
+  err -> state dropped
+worker, after each declaration: if err or session arena allocated > 64 MiB (`--session-mib`): session.reset()
+  reset: tables emptied but their capacity kept (lossy tables: epoch bump, nothing written), arena reset
+         (bump chunk dropped if > 16 MiB, else reused), all BigUints freed.
+  a checker instance dropped after a failure returns its tables to a thread-local pool, shrunk to
+         8192 entries / 65536 lossy slots (`tables.rs:190-270`).
+~}
+}
+
+\subtree{
+\title{12.4 All value-core tables (\code{\verb~|tables.rs:102-138~})}
+
+\table{
+\tr{\th{Table}\th{Key → value}\th{Kind / bound}\th{Survives declaration}}
+\tr{\td{\code{\verb~|eval_closed~}}\td{(expr, sub) → value}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|eval_memo~}}\td{(expr, sub, env ptr) → value}\td{direct-mapped 2^16}\td{yes}}
+\tr{\td{\code{\verb~|eval_proj~}}\td{(open app expr, sub) → (env, value)}\td{direct-mapped 2^14}\td{yes}}
+\tr{\td{\code{\verb~|infer_closed[Check|Only]~}}\td{(expr, sub) → (type, uparams)}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|infer_open[Check|Only]~}}\td{(expr, sub, env ptr) → (type, uparams)}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|infer_proj~}}\td{(open app expr, sub) → (env, type, mode)}\td{direct-mapped 2^14}\td{yes}}
+\tr{\td{\code{\verb~|insts~}}\td{(Pi value ptr, arg ptr) → codomain}\td{direct-mapped 2^16}\td{yes}}
+\tr{\td{\code{\verb~|delta~}}\td{(const, levels) → (body value, hot counter / rule id)}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|derived~}}\td{rule trees}\td{vectors}\td{yes}}
+\tr{\td{\code{\verb~|const_ty~}}\td{(const, levels) → type value}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|rules~}}\td{(recursor, rule index, levels) → RHS value}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|support~} / \code{\verb~|arg_support~}}\td{expr → exact free-var list; (const, n) → relevance mask}\td{hash maps}\td{yes}}
+\tr{\td{\code{\verb~|conv_locals~}}\td{(depth, domain ptr) → local}\td{hash map}\td{yes}}
+\tr{\td{\code{\verb~|eq_cache~} / \code{\verb~|neq_cache~}}\td{value-pointer pairs}\td{hash sets}\td{yes}}
+\tr{\td{\code{\verb~|fail_cache~}}\td{value-pointer pairs (probe gave up or failed)}\td{hash set}\td{\strong{no}}}
+\tr{\td{\code{\verb~|hc~}, \code{\verb~|neus~}, \code{\verb~|nats~}, \code{\verb~|envs~}, \code{\verb~|frames~}, \code{\verb~|prunes~}}\td{interning (§4.4)}\td{—}\td{yes}}
+\tr{\td{\code{\verb~|lazies~}}\td{lambda-domain thunks}\td{hash set}\td{\strong{no} ("measured not to pay for retention")}}
+\tr{\td{\code{\verb~|Memo~} on each value}\td{whnf_core, whnf, unfold, type}\td{fields}\td{yes (epoch preserved)}}
+}
+
+\p{Two table gadgets worth copying: \code{\verb~|Lossy~} (direct-mapped, slots stamped with an epoch so clearing writes nothing; grows by doubling from 1024 until the cap) and \code{\verb~|Logged~} (hash map that logs its first 16 keys so a barely used table is emptied by 16 removals instead of clearing its capacity) (\code{\verb~|tables.rs:413-571~}).}
+}
+
+\subtree{
+\title{12.5 Memory}
+
+\ul{
+\li{Store: 32 B per expression node in one bump arena; no expression hash table; import-time id tables (8 B/id) and the dependency summary (4 B/id) are freed after import, then \code{\verb~|mi_collect(true)~}.}
+\li{Checking memory is transient: per worker ≈ session arena (<= 64 MiB between declarations; one declaration may grow it up to the 4096 MiB budget) + table capacity.}
+\li{With <= 16 threads mimalloc's purge is disabled after import: freed memory stays mapped, "which saves instructions" (\code{\verb~|fast.rs:112-125~}); above 16 threads it purges so each worker does not pin its peak.}
+\li{Why 5 GB at \code{\verb~|-j 4~} on mathlib: store nodes dominate; workers add little. \strong{\verb~|[~inference; the node count of the arena's mathlib export is not stated in the repo. README (blean, v0.1.0-era): 7.5 GB at \code{\verb~|-j 1~}.\verb~|]~}}
+}
+}
+}
+
+\subtree{
+\title{13. Build-level tricks}
+
+\ul{
+\li{\code{\verb~|Cargo.toml~} \code{\verb~|[profile.release]~}: \code{\verb~|opt-level = 3~}, \code{\verb~|lto = "fat"~}, \code{\verb~|codegen-units = 1~}, \code{\verb~|panic = "abort"~} (changelog: "Abort on panic, safe since nothing catches unwinding panics"; commit "saves unwind instrs"), \code{\verb~|overflow-checks = false~}.}
+\li{\code{\verb~|.cargo/config.toml~}: \code{\verb~|-C llvm-args=-align-all-functions=6~} — every function on a 64-byte boundary, because otherwise "the value checker's hot loops move whenever unrelated code ahead of them changes size, which alone swung Mathlib wall time by 2\%". \code{\verb~|CFLAGS=-DMI_NO_GETENV~} so mimalloc does not scan the environment at startup.}
+\li{Allocator: \code{\verb~|mimalloc~} as global allocator (\code{\verb~|bin/nl-fast.rs:15-16~}); bumpalo for arenas; hashbrown raw tables.}
+\li{\code{\verb~|scripts/pgo.sh~} (the arena build command): download \code{\verb~|init.ndjson.gz~} (a lean4export of \code{\verb~|Init~}, GitHub release asset \code{\verb~|pgo-data-1~}, sha256-pinned); build with \code{\verb~|-Cprofile-generate~}; run \strong{\code{\verb~|target/release/nl-fast -q -j 4 init.ndjson~}} once (same flags as the arena run); \code{\verb~|llvm-profdata merge~}; rebuild with \code{\verb~|-Cprofile-use~}. Both builds add \code{\verb~|-C target-cpu=native~} and the alignment flag. Training therefore covers import + reorder + 4-worker checking of a real library, but only \code{\verb~|Init~}.}
+\li{Rust toolchain pinned to 1.97.1 with \code{\verb~|llvm-tools~}.}
+\li{Recursion: 256 MiB worker stacks; an inline stack-pointer comparison against a precomputed floor replaces the \code{\verb~|stacker~} crate (\code{\verb~|resource.rs~}, commit 9a32004).}
+}
+}
+
+\subtree{
+\title{14. Optimisation history (every number the repository contains)}
+
+\p{Commit bodies are empty except the last two (post-pin); numbers come from \code{\verb~|CHANGELOG.md~} and old READMEs.}
+
+\table{
+\tr{\th{Version / commit}\th{Statement}}
+\tr{\td{README at v0.1.0 … v0.3.2 (table never updated afterwards; instruction rows deleted in v0.3.3)}\td{Mathlib from blean: M5 \code{\verb~|-j 1~} 57.4 s wall, 53.5 s kernel check, \strong{708.5 G instructions}, 247.7 G cycles, 7.5 GB. M5 \code{\verb~|-j 10~}: 16.7 s, \strong{746.5 G}, 9.2 GB. M4 Max \code{\verb~|-j 14~}: 11.85 s, 742.3 G, 10.7 GB.}}
+\tr{\td{same}\td{Navier–Stokes: \code{\verb~|-j 1~} 914.8 G → \code{\verb~|-j 10~} 971.5 G → \code{\verb~|-j 14~} 977.0 G → \code{\verb~|-j 28~} 984.8 G → \code{\verb~|-j 64~} 1011.8 G; memory 10.1 → 19.9 GB. CSLib: 258.0 G → 296.1 G (\code{\verb~|-j 10~}) → 309.2 G (\code{\verb~|-j 64~}). Quasi-Riemann: 227.4 G → 235.2 G (\code{\verb~|-j 10~}) → 242.6 G (\code{\verb~|-j 64~}).}}
+\tr{\td{0.3.0}\td{"Cut Mathlib checking cost substantially": derive reduction rules for hot definitions; memoize evaluation incl. wide applications; memoize whnf and types on values; keep bounded tables across declarations; scan import lines in a single pass. "Scale cleanly across threads by claiming declarations in contiguous runs."}}
+\tr{\td{0.3.1}\td{"Cut Mathlib checking cost by about a tenth": hash memo keys once + projected memo hits by lockstep environment walk; memoize Pi codomain instantiation across spines; index environment frames directly from node runs; applications of up to 16 args on the stack; runs of application lines built straight into the import table. Long beta ladders near linear by collapsing deep env runs into frames.}}
+\tr{\td{0.3.2}\td{Intern Pi values built by rule substitution: deep \code{\verb~|List~} indexing "about 12x cheaper". Long sparse environments untrimmed: shift cascades "about 40\% cheaper". Smaller probe budget under cheap heads: lazy projections "about 35\% cheaper". Inductive blocks "about a quarter cheaper". Native nested inductives; recursors matching the generated ones accepted. No mimalloc env scan.}}
+\tr{\td{0.3.3}\td{\code{\verb~|--session-mib~}; abort on panic; overlap export reads with parsing; dependency-near checking order.}}
+\tr{\td{0.4.0}\td{Each big Nat literal stored once, "halving memory"; one-pass big-Nat hashing; skip zero limbs; default arena budget 4096 MiB; retry in a fresh session only after a warm one.}}
+\tr{\td{0.4.1 / 0.4.2}\td{Faster big-Nat hash/multiply; parallel import for > 16 GiB; purge above 16 threads; past forms in lazy delta; PGO script.}}
+\tr{\td{\code{\verb~|.cargo/config.toml~}}\td{Function alignment: removes a 2 \% wall-time swing.}}
+\tr{\td{5dabccf (v0.4.3)}\td{Dependency recording ≈ 1/5 of import builder time.}}
+\tr{\td{70869ed (v0.4.3)}\td{Six lossy tables at 2^16 slots "do not fit in a core's share of the cache once every core runs a worker"; a smaller cap "recomputes more, which costs instructions, and waits on memory less". (Trade-off irrelevant under an instruction metric.)}}
+}
+
+\p{Net: 708.5 G (v0.1.0, blean, 1 thread, no PGO, import included) vs ≈ 395 G (arena, v0.4.2, NDJSON, 4 threads, PGO) — about 1.8x fewer instructions across 0.3.0–0.4.2, but on different hardware/ISA, input format and mathlib revision, so only indicative.}
+}
+
+\subtree{
+\title{15. Answers to the extra questions}
+
+\ul{
+\li{\strong{What is \code{\verb~|nl-fast~}?} §3. The parallel driver with the value core (NbE) as default engine, native inductive checking through the term core, no fallback by default.}
+\li{\strong{How does PGO train?} §13: one run of \code{\verb~|nl-fast -q -j 4~} on an \code{\verb~|Init~} export between an instrumented and an optimised build.}
+\li{\strong{How are the 4 threads used; overhead?} One importing thread (+ one I/O reader thread for files > 32 MiB; + scanner helpers only for > 16 GiB), then 4 checking workers with private sessions. The only measurements are the old README rows in §14: mathlib +5.4 \% instructions at 10 threads vs 1; other corpora +3 \% … +15 \% at 10 threads, up to +20 \% at 64. Causes visible in the code: per-worker caches recompute shared closed terms, and warmth is lost at run boundaries. Overhead at \code{\verb~|-j 4~} for v0.4.2 is \strong{\verb~|[~unverified\verb~|]~}.}
+\li{\strong{Why faster than sokonanoda / gruszka?} Not established by this study (their code was not analysed here). From the arena configs only: gruszka is also PGO-built and run with 4 workers (\code{\verb~|lean-kernel-arena/checkers/gruszka.yaml~}); sokonanoda is a plain \code{\verb~|cargo build --release~} with \code{\verb~|target-cpu=native~}, run with 4 threads on the NDJSON stream (\code{\verb~|checkers/sokonanoda.yaml~}). Features of nano-lean that are unusual and plausibly decisive \strong{\verb~|[~inference\verb~|]~}: cross-declaration caches with dependency ordering (T1), closure trimming + environment interning making memo keys hit (T2), derived rules (T6), not evaluating arguments of non-dependent applications during inference (T4a), the specialised importer without expression interning (T8).}
+\li{\strong{Which caches persist across declarations?} §12.4: all but \code{\verb~|fail_cache~} and \code{\verb~|lazies~}, per worker, until the session arena exceeds 64 MiB, a declaration fails, or the next index is not larger.}
+\li{\strong{How does it stay at 5 GB?} §12.5: 32-byte nodes without an intern table, import scaffolding freed and collected, 64 MiB session cap, bounded lossy tables, arenas reset in bulk.}
+}
+}
+
+\subtree{
+\title{16. nano-lean in HOAS / NbE terms}
+
+\ul{
+\li{It is evaluation-based conversion checking rather than textbook NbE: terms are evaluated into a semantic domain with \strong{defunctionalised closures} \code{\verb~|(env, usub, body, typed)~}, conversion is decided directly on that domain, and nothing is ever read back to syntax (no normal forms are produced). Fresh variables for going under binders are unique-id locals, not de Bruijn levels.}
+\li{It cannot be HOAS (host-language closures): every important trick needs to \em{look inside} a closure — hash it, compare it by \code{\verb~|(body ptr, env ptr)~}, trim its environment, substitute locals inside it (\code{\verb~|zeta_val~}), measure it (\code{\verb~|template_size~}). For RLVM this argues for first-order closure objects even on Truffle; Truffle call targets can still be attached \em{to the body node} (shared by all closures over that body).}
+\li{Constants are kept folded with memoised unfoldings, giving the effect of smalltt-style glued evaluation without ever building the unfolded side eagerly.}
+\li{Evaluation is strict; laziness is obtained structurally instead (constants do not unfold; lambda domains are thunks; codomain/body types are typed closures; arguments of non-dependent applications are skipped at inference).}
+\li{Sharing is maximal and explicit: the term DAG is shared by the exporter, values by hash-consing, work by memo tables; \code{\verb~|open~} bits and \code{\verb~|sup~} masks bound what must be re-done.}
+}
+}
+
+\subtree{
+\title{17. Unverified items and open questions}
+
+\ul{
+\li{Size of \code{\verb~|Val~} (estimated 64 B), node count and file size of the arena's mathlib export, and therefore the exact import/check split of the 395 G instructions: not in the repository.}
+\li{lean4export does deduplicate expressions (\code{\verb~|visitedExprs : HashMap Expr Nat~}, \code{\verb~|lean4export/Export.lean:38~}), which is what "no interning at import" relies on. Not checked: whether that map's equality ignores binder names/info; if it does not, nodes differing only there are distinct pointers in nano-lean and miss its memos.}
+\li{Why \code{\verb~|neq_cache~} excludes lambda pairs (no comment in the source).}
+\li{Number of session resets and derived rules on mathlib (counters exist behind the \code{\verb~|vstats~} feature; no recorded output).}
+\li{v0.4.3 (not pinned by the arena): \code{\verb~|--table-bits~}, import prefetching and off-thread dependency recording, export format 3.2.0 with per-inductive feature flags gating projections and eta.}
+}
+
+\p{Open questions for RLVM raised by this study:}
+
+\ul{
+\li{No per-trick ablation exists upstream. Which of T1/T2/T6 carries most of the gain on mathlib has to be measured on our own implementation (suggested order of implementation = order of §1).}
+\li{Values as slab handles or as Java objects (T1)? Decides GC cost, table design and how much of Truffle's object model is usable.}
+\li{How much instruction overhead \code{\verb~|-j 4~} costs nano-lean today, and whether RLVM should check on one thread.}
+\li{JIT budget: nano-lean pays zero run-time compilation; its PGO profile is collected offline. What is the instruction cost of Graal compilation for the hot set (parser loop, \code{\verb~|eval~}, \code{\verb~|infer~}, \code{\verb~|def_eq~}, table probes)?}
+\li{Is a dependency-order re-numbering worth its import cost for us (it was ~20 \% of nano-lean's import builder time before v0.4.3), or does a single thread with large tables make it unnecessary?}
+}
+}

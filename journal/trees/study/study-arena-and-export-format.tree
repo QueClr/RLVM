@@ -1,0 +1,810 @@
+\title{01 — Arena contract and the lean4export NDJSON format}
+\taxon{Study}
+\date{2026-11-23}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{arena}
+\tag{loader}
+\meta{origin}{docs/research/01-arena-and-export-format.md}
+\meta{moved}{2026-11-24}
+\import{base-macros}
+
+\p{Research snapshot: arena commit \code{\verb~|99195b6b~} (2026-11-23, the commit the live site was built from), \code{\verb~|results.json~} of the same commit (37 checkers, 270 tests, 9990 results, runs dated 2026-11-14 … 2026-11-23). Paths are relative to \code{\verb~|refs/~} unless absolute.}
+
+\p{Sources read (all read-only; nothing from the cloned repositories was built or executed — the only programs run were the host's official Lean 4.36.0 toolchain binaries \code{\verb~|leanexport~}, \code{\verb~|lean~}, \code{\verb~|leanchecker~}, and analysis scripts written for this report):}
+
+\ul{
+\li{\code{\verb~|lean-kernel-arena/~} (README.md, lka.py, set-timeouts.py, schemas/, checkers/*.yaml, tests/**, tutorial/**, .github/workflows/build-and-deploy.yml, flake.nix)}
+\li{\code{\verb~|lean-kernel-arena-history/~} — blob-less clone made for this report, only to read commit messages (7e43d5c, 8253be0)}
+\li{\code{\verb~|lean4export/~} — standalone exporter, HEAD df81913 (toolchain v4.36.0-rc1)}
+\li{\code{\verb~|lean4-leanexport/~} — sparse clone of leanprover/lean4 at tag v4.36.0 (611c117b…) made for this report: \code{\verb~|src/LeanExport/{Basic,Parse}.lean~}, \code{\verb~|src/Lean/Data/Json/*~}; other files read with \code{\verb~|git show HEAD:<path>~} (\code{\verb~|src/Lean/Replay.lean~}, \code{\verb~|src/Lean/Declaration.lean~}, \code{\verb~|src/Lean/Expr.lean~})}
+\li{\code{\verb~|lean4/~} (another agent's sparse clone, v4.36.0): \code{\verb~|src/LeanChecker.lean~}, \code{\verb~|src/kernel/type_checker.cpp~}, \code{\verb~|src/kernel/inductive.cpp~}}
+\li{Downloaded data in \code{\verb~|work/arena-site/~}: \code{\verb~|index.html~}, \code{\verb~|results.json~}, \code{\verb~|lean-arena-tests.tar.gz~}, extracted \code{\verb~|tests/{good,bad}/…~} (230 files, 52 MB)}
+\li{Generated locally with the host's official Lean 4.36.0 toolchain (\code{\verb!!|~/.elan/toolchains/leanprover--lean4---v4.36.0/bin/leanexport!!}): \code{\verb~|work/arena-site/generated/init.ndjson~} and \code{\verb~|std.ndjson~}. Both are \strong{byte-identical to the arena tests \code{\verb~|init~} and \code{\verb~|std~}} (sha256 equal to the values in results.json), see §5.}
+}
+
+\subtree{
+\title{0. Decision-relevant facts first}
+
+\ol{
+\li{\strong{Only instructions on \code{\verb~|mathlib~} rank speed.} Sort key = (bad tests accepted, good tests rejected, mathlib instructions \verb~|[~only if mathlib was \em{accepted}\verb~|]~, declined count) — \code{\verb~|lean-kernel-arena/lka.py:2728-2738~}. Declines, crashes and timeouts never count as a wrong answer, only in the last tie-breaker.}
+\li{\strong{mathlib export = 6,326,141,213 bytes, 112,081,718 lines}: 107,037,712 expression records, 4,273,914 name records, 48,246 level records, 721,845 declaration records (739,167 constants). Leader nano-lean spends 394.9 G instructions on it = \strong{62 instr/byte = 3.5 k instr/line}, parsing included. Every instruction per input byte costs 6.3 G.}
+\li{\strong{Exporter output is byte-canonical}: one compact JSON object per line, keys in ASCII-sorted order, no whitespace, \code{\verb~|\n~} line ends, dense ids in emission order, children before parents. Verified: 100 \% of the 17,106,803 lines of \code{\verb~|init~}+\code{\verb~|std~} and 99.97 \% of the lines of the 230 tarball files match fixed byte templates (§2.3). The 271 exceptions are all in 8 hand-crafted \em{bad} tests (other key order, spaces after \code{\verb~|:~}/\code{\verb~|,~}, \code{\verb~|\u03b1~} escapes) → \strong{template fast path + generic JSON fallback per line}.}
+\li{\strong{\code{\verb~|app~} records are ~80 \% of all lines} (init 80.5 \%, std 76.2 \%), 48 bytes each; \code{\verb~|lam~} 8–10 \%, \code{\verb~|forallE~} 5–6 \%, names 4.6–5.5 \%, everything else < 2.5 \%. Declaration lines are < 1 \% of lines.}
+\li{\strong{The expression table is already hash-consed} by the exporter modulo binder names/binder info (\code{\verb~|HashMap Expr Nat~} with \code{\verb~|BEq Expr = Expr.eqv~}): 0 structural duplicates among 16.07 M expr records of init+std and in every tarball file. No hash-consing is needed at load time for exporter output; id equality ⇒ structural equality (the converse must not be relied on for hand-crafted files).}
+\li{\strong{~80 \% of expression records are reachable only from theorem \em{values} (proofs)}; ~94 \% are never referenced after the declaration that introduced them; 83–84 \% have exactly one referrer (§2.12).}
+\li{\strong{Ids must not be assumed dense/ordered}: two \em{accept} tests use sparse and out-of-order ids (\code{\verb~|other/sparse-name-index~}, \code{\verb~|other/level-index-out-of-order~}). Ids are arbitrary naturals; "defined before use, bound once" is the only rule the official reader enforces.}
+\li{\strong{Nothing derived may be trusted}: constructor records, recursor records (type, rules, \code{\verb~|nfields~}, \code{\verb~|k~}, counts), \code{\verb~|numFields~}, \code{\verb~|isRec~}, quot types, level-param lists. 16 of the 32 \code{\verb~|bugs/~} rejects are forged derived data (§3.3).}
+\li{\strong{File order is dependency order} for exporter output (every constant declared before any record of another declaration uses it; verified on init, std, all good tests). The official checker itself replays by dependency, not file order, and accepts a file whose declaration lines are out of order (verified by experiment, §2.11).}
+\li{\strong{Axioms}: accept every well-typed axiom. \code{\verb~|cedar~} contains 9 \code{\verb~|…_native.native_decide.ax_N_M~} axioms plus \code{\verb~|sorryAx~}; all top checkers and the official one accept it; only the con-leche family declines. \code{\verb~|Lean.trustCompiler~}/\code{\verb~|Lean.ofReduceBool~}/\code{\verb~|Lean.reduceBool~}/\code{\verb~|Lean.reduceNat~} \strong{do not occur at all} in the 4.36.0 \code{\verb~|init~}/\code{\verb~|std~} exports and the 4.36.0 C++ kernel has no \code{\verb~|reduce_native~} any more (only \code{\verb~|reduce_nat~}).}
+\li{\strong{unsafe/partial}: never present in the real corpora; only \code{\verb~|tutorial/140~}, \code{\verb~|141~} (exported with \code{\verb~|--export-unsafe~}). Official behaviour: skip such constants, so anything using them fails with "unknown constant" → reject.}
+\li{\strong{Timeouts} are wall-clock per test (mathlib 4120 s, perf tests 40–360 s, small tests none); a timeout is scored like a decline. Runner: 8 vCPU / 16 GB x86-64, one checker per VM, tests run sequentially.}
+\li{\strong{JVM baseline measured in the arena} (tenet-jvm, plain \code{\verb~|java -XX:+UseParallelGC -XX:MaxRAMPercentage=75~}): 0.546 G instructions / 64 MB / 75 ms for a trivial test; mathlib 9798 G instructions, 11.8 GB RSS, 1060 s wall.}
+\li{Local ground truth exists: \code{\verb!!|~/.elan/toolchains/leanprover--lean4---v4.36.0/bin/leanchecker --from-export FILE!!} (exit 0/1) runs on this aarch64 host; its messages for all 92 bad tests are in §3.}
+}
+}
+
+\subtree{
+\title{1. The arena contract}
+
+\subtree{
+\title{1.1 Checker definition, build, run}
+
+\p{\code{\verb~|checkers/<name>.yaml~} (schema \code{\verb~|lean-kernel-arena/schemas/checker.json~}): \code{\verb~|language~} (enum incl. \code{\verb~|java~}), \code{\verb~|url~}+\code{\verb~|ref~}+\code{\verb~|rev~} (git, fetched with \code{\verb~|git fetch --depth 1 origin <rev>~}), \code{\verb~|build~} (shell, optional), \code{\verb~|run~} (shell, required), optional \code{\verb~|version~}, \code{\verb~|timeout~} (s, min with the test's), \code{\verb~|declines~} (test names recorded as declined without running), \code{\verb~|threads~} (declared worker count; \strong{not read by lka.py or the templates at this commit} — informational), \code{\verb~|disable~}.}
+
+\ul{
+\li{Build: \code{\verb~|build~} runs via shell in the repo checkout \code{\verb~|_build/checkers/<name>/src~} (\code{\verb~|lka.py:1612-1652~}). Build time is not measured. Precedents for heavy builds: nano-lean \code{\verb~|scripts/pgo.sh~}, gruszka/pestka PGO builds trained on a downloaded Init export with \code{\verb~|sha256sum -c~}, kefir-wasm installs a rustup toolchain with curl, tenet-jvm \code{\verb~|make~} with the flake's \code{\verb~|jdk~}.}
+\li{Tools on the runner come from \code{\verb~|lean-kernel-arena/flake.nix~} (nixpkgs \code{\verb~|nixos-26.05~}): python3, elan, rustc, cargo, llvm 21, perf, cmake, jq, just, pypy, nodejs, binaryen, ocaml, opam, gmp, zig, ghc, texlive, dotnet-sdk_10, \strong{\code{\verb~|jdk~}} (version = nixpkgs default; not verified). No GraalVM: RLVM's build step has to fetch a pinned GraalVM itself (or the flake must be extended in the PR).}
+\li{Run: \code{\verb~|sh -c "<run>"~} (not bash), cwd = \code{\verb~|_build/checkers/<name>/src~}, environment = runner environment + \code{\verb~|IN=<absolute path of the .ndjson>~} (\code{\verb~|lka.py:1750-1769~}). For cached tests \code{\verb~|$IN~} is a symlink into a cache volume (\code{\verb~|lka.py:1254-1257~}).}
+\li{stdout/stderr are piped and drained; only the first and last 100 lines / 8 KiB of each are kept (\code{\verb~|lka.py:284-285~}, \code{\verb~|BoundedOutput~}). Output never blocks, but printing costs instructions.}
+\li{\strong{Exit codes} (\code{\verb~|lka.py:1771-1781~}): 0 → \code{\verb~|accepted~}, 1 → \code{\verb~|rejected~}, 2 → \code{\verb~|declined~}, anything else (incl. signals, e.g. 137 = OOM kill) → \code{\verb~|error~}; killed by the arena on timeout → \code{\verb~|timeout~}.}
+\li{Correctness (\code{\verb~|lka.py:1784-1798~}): declined → \code{\verb~|declined~}; error/timeout → \code{\verb~|error~}; test outcome \code{\verb~|either~} → \code{\verb~|either~}; match → \code{\verb~|correct~}; else \code{\verb~|incorrect~}.}
+\li{Timeout handling: the whole wrapped command runs in a new session and the \strong{process group gets SIGKILL} when \code{\verb~|min(test.timeout, checker.timeout)~} wall seconds elapse (\code{\verb~|lka.py:365-441~}, \code{\verb~|1765-1766~}). No grace period, no partial credit.}
+}
+}
+
+\subtree{
+\title{1.2 Measurement}
+
+\p{Command actually executed (\code{\verb~|lka.py:496-514~}):}
+
+\pre{\verb~|
+perf stat -j -o <tmp.perf> -e duration_time -e task-clock -e instructions -- \
+  time -f "real_seconds=%e\nuser_seconds=%U\nsys_seconds=%S\nmax_rss_kb=%M" -o <tmp.time> -- \
+  sh -c "<run command>"
+~}
+
+\p{with \code{\verb~|LC_ALL=C~}.}
+
+\ul{
+\li{\code{\verb~|instructions~} → result field \code{\verb~|instructions~}; \code{\verb~|task-clock~} → \code{\verb~|cpu_time~}; \code{\verb~|duration_time~} → \code{\verb~|wall_time~}; GNU time \code{\verb~|%M~} × 1024 → \code{\verb~|max_rss~} (\code{\verb~|lka.py:532-593~}). \code{\verb~|user_seconds~}/\code{\verb~|sys_seconds~} are written by \code{\verb~|time~} but not stored.}
+\li{\code{\verb~|perf stat~} counts the command \strong{and everything it forks and all their threads} (default inherit; no \code{\verb~|--no-inherit~}). A wrapper script, a converter subprocess (gruszka/pestka run \code{\verb~|susz pack~} first), GC threads and JIT compiler threads are all inside the count.}
+\li{\strong{User vs kernel instructions.} Documented intent: user-space only. The parser strips the \code{\verb~|:u~} suffix that perf appends when \code{\verb~|perf_event_paranoid=2~} forces user-only counting (\code{\verb~|lka.py:541-543~}), the workflow comment says "user-space-only at paranoid=2" (\code{\verb~|.github/workflows/build-and-deploy.yml:84-85~}), and commit 7e43d5c states "per-process user-space counting works at the default paranoid = 2 with no sysctl needed". \strong{Not verified:} the same job first runs a probe step that executes \code{\verb~|sudo sysctl -w kernel.perf_event_paranoid=-1~} (\code{\verb~|build-and-deploy.yml:146~}, \code{\verb~|continue-on-error~}); if sudo is permitted on the Namespace runner, the later \code{\verb~|lka.py run~} step counts user+kernel. The CI logs are not publicly downloadable (HTTP 403). Treat kernel-mode work (page faults of a multi-GB heap, \code{\verb~|read~}, \code{\verb~|madvise~}) as possibly charged.}
+\li{\code{\verb~|max_rss~} is \code{\verb~|ru_maxrss~} of the child tree as reported by GNU time: the largest single process, not a sum (Linux \code{\verb~|getrusage~} semantics; not re-verified on the runner). Memory is displayed, not ranked. The hard limit is the 16 GB VM: rpylean was killed with exit 137 at 14.65 GB on \code{\verb~|perf/magma-string-pair-n9~} → \code{\verb~|error~}.}
+\li{\strong{Virtual time} = \code{\verb~|instructions / 6e9~} (\code{\verb~|lka.py:2339-2345~}, constant at \code{\verb~|2687~}). The leaderboard's ⏱️ column and the third sort key use the instruction count only. Cache misses, waiting and I/O time are free; instructions are everything (nano-lean retires 3.2 G instr per CPU-second on mathlib, tenet-jvm 8.6 G, official 5.4 G).}
+\li{Fallback if perf is missing: wall time only, \code{\verb~|instructions = 0~} (\code{\verb~|lka.py:599-613~}).}
+\li{Each (checker, test) pair is measured \strong{once}; results are reused across site builds while the source hashes of checker and test are unchanged (\code{\verb~|ci-select~}, \code{\verb~|lka.py:3086-3152~}). No averaging.}
+}
+}
+
+\subtree{
+\title{1.3 Scoring and ranking}
+
+\p{\code{\verb~|compute_checker_stats~} (\code{\verb~|lka.py:2038-2141~}) and \code{\verb~|sort_key~} (\code{\verb~|lka.py:2728-2738~}):}
+
+\pre{\verb~|
+for each test result of the checker:
+    if status in (declined, error, timeout): declined_count += 1; continue      # never counts as wrong
+    if outcome == either: continue                                              # never counts
+    if outcome == accept: accept_total += 1; accept_correct += (status == accepted)
+    if outcome == reject: reject_total += 1; reject_correct += (status == rejected)
+    if test == "mathlib" and status == accepted: mathlib_instructions = instructions
+key = (reject_total - reject_correct,          # bad proofs accepted
+       accept_total - accept_correct,          # good proofs rejected
+       mathlib_instructions or +inf,           # 0/missing sorts last
+       declined_count)
+~}
+
+\p{Consequences: (a) when unsure, exit 2 (or crash) rather than guess — a decline costs only the last tie-breaker; (b) rejecting mathlib, or timing out on it, removes the checker from the speed ranking; (c) \code{\verb~|either~} tests are free.}
+
+\p{Leaderboard at this snapshot (columns: wrongly accepted / wrongly rejected / declined(decl,err,timeout) / mathlib virtual s / G instr / wall s / cpu s / RSS GB; \code{\verb~|thr~} = declared threads):}
+
+\table{
+\tr{\th{\verb~|#~}\th{checker}\th{lang}\th{thr}\th{badAcc}\th{goodRej}\th{declined}\th{virt s}\th{G instr}\th{wall}\th{cpu}\th{RSS}}
+\tr{\td{1}\td{nano-lean}\td{rust}\td{4}\td{0}\td{0}\td{3 (3/0/0)}\td{65.8}\td{394.9}\td{36.8}\td{121.6}\td{5.00}}
+\tr{\td{2}\td{gruszka}\td{rust}\td{4}\td{0}\td{0}\td{0}\td{77.0}\td{462.0}\td{32.5}\td{109.7}\td{2.31}}
+\tr{\td{3}\td{sokonanoda}\td{rust}\td{(4 used)}\td{0}\td{0}\td{6 (2/2/2)}\td{87.9}\td{527.4}\td{46.3}\td{154.8}\td{4.95}}
+\tr{\td{4}\td{rpylean}\td{python (RPython)}\td{1}\td{0}\td{0}\td{4 (0/1/3)}\td{96.3}\td{578.1}\td{130.2}\td{127.3}\td{4.44}}
+\tr{\td{5}\td{pestka}\td{aver}\td{4}\td{0}\td{0}\td{0}\td{245.9}\td{1475.3}\td{100.6}\td{341.2}\td{3.50}}
+\tr{\td{6}\td{kefir}\td{rust}\td{1}\td{0}\td{0}\td{0}\td{429.5}\td{2577.3}\td{442.5}\td{442.4}\td{2.48}}
+\tr{\td{7}\td{palladium}\td{rust}\td{4}\td{0}\td{0}\td{6 (0/6/0)}\td{472.2}\td{2833.0}\td{148.0}\td{592.9}\td{3.82}}
+\tr{\td{8}\td{con-ron}\td{rust}\td{4}\td{0}\td{0}\td{10 (10/0/0)}\td{579.0}\td{3473.9}\td{149.8}\td{440.2}\td{4.41}}
+\tr{\td{9}\td{kefir-wasm}\td{rust/wasm}\td{1}\td{0}\td{0}\td{0}\td{582.7}\td{3496.0}\td{411.9}\td{412.7}\td{2.73}}
+\tr{\td{10}\td{con-agua}\td{x86}\td{4}\td{0}\td{0}\td{10 (10/0/0)}\td{654.3}\td{3925.9}\td{210.3}\td{675.0}\td{11.82}}
+\tr{\td{11}\td{nanobruijn}\td{rust}\td{(4 used)}\td{0}\td{0}\td{2 (0/0/2)}\td{784.1}\td{4704.7}\td{311.8}\td{973.2}\td{6.85}}
+\tr{\td{12}\td{nanoda}\td{rust}\td{(4 used)}\td{0}\td{0}\td{4 (2/0/2)}\td{962.2}\td{5773.3}\td{377.2}\td{1227.3}\td{5.94}}
+\tr{\td{15}\td{tenet-jvm}\td{java}\td{1}\td{0}\td{0}\td{3 (0/1/2)}\td{1633.1}\td{9798.4}\td{1060.0}\td{1143.9}\td{11.77}}
+\tr{\td{16}\td{official-nightly (2026-11-14)}\td{c++}\td{1}\td{0}\td{0}\td{0}\td{1635.9}\td{9815.1}\td{1891.7}\td{1891.4}\td{9.91}}
+\tr{\td{18}\td{official (v4.35.0)}\td{c++}\td{1}\td{0}\td{0}\td{2 (0/0/2)}\td{2015.9}\td{12095.3}\td{2234.4}\td{2233.9}\td{9.90}}
+\tr{\td{31}\td{nanoclo}\td{rust}\td{4}\td{2}\td{1}\td{0}\td{501.9}\td{3011.4}\td{200.0}\td{658.1}\td{7.40}}
+\tr{\td{37}\td{mathgraph}\td{rust}\td{2}\td{8}\td{1}\td{2}\td{152.0}\td{911.7}\td{104.5}\td{198.9}\td{6.16}}
+}
+
+\p{(13 con-leche 1022 s, 14 pestka-wasm 1169 s, 17 eink0rn 1769 s, 19 ind-models, 20 tenet 2842 s, 21 tenet-hs 3212 s; ranks 22–27 have no mathlib result; 28–37 have wrong answers.) To take first place RLVM needs \strong{< 394.9 G instructions on mathlib with zero wrong answers}; < 578 G is 4th.}
+}
+
+\subtree{
+\title{1.4 Timeouts (seconds, from tests/**/*.yaml)}
+
+\table{
+\tr{\th{test}\th{s}\th{test}\th{s}\th{test}\th{s}}
+\tr{\td{mathlib}\td{4120}\td{navier-stokes-euler}\td{1840}\td{cslib}\td{1600}}
+\tr{\td{con-leche}\td{920}\td{cedar}\td{640}\td{std}\td{600}}
+\tr{\td{init}\td{370}\td{reachability}\td{220}\td{init-prelude}\td{40}}
+\tr{\td{perf/magma-list-deep-n36}\td{360}\td{perf/unfold-before-literal-fallback}\td{270}\td{perf/unfold-before-literal}\td{240}}
+\tr{\td{perf/magma-list-pair-n21}\td{240}\td{perf/ite-taken-branch}\td{230}\td{perf/proj-applied-struct}\td{230}}
+\tr{\td{perf/short-circuit-and}\td{220}\td{perf/proj-applied-struct-bad}\td{130}\td{perf/unfold-before-literal-bad}\td{130}}
+\tr{\td{perf/loop-unfolded-once-bad, proj-applied-struct-arg-bad, short-circuit-and-bad, magma-string-pair-n9}\td{120}\td{perf/ite-taken-branch-bad}\td{110}\td{perf/app-lam, gf3-matrix-product, magma-list-deep-n21, magma-string-n4}\td{70}}
+\tr{\td{perf/magma-list-pair-n7, proj-app-lazy-delta}\td{60}\td{perf/grind-ring-5}\td{50}\td{all other perf/ (24 tests)}\td{40}}
+\tr{\td{corner-cases/eta-struct-major-no-whnf, -and-no-whnf}\td{60}\td{tutorial/*, bugs/*, other/*, other corner-cases}\td{none}\td{CI job limit}\td{360 min}}
+}
+
+\p{Derivation (\code{\verb~|set-timeouts.py~}): budget = 3 × Σ official wall time, distributed as \code{\verb~|c·w^0.6~} over \code{\verb~|compare-perf~} tests (\code{\verb~|w~} ≥ 1 s), rounded up to 10 s; ≈ 2× official for mathlib. They are re-derived from time to time; expect them to shrink when the official kernel gets faster.}
+}
+
+\subtree{
+\title{1.5 Real-world corpora (all \code{\verb~|outcome: accept~}, \code{\verb~|compare-perf~}, \code{\verb~|skip-on-ci~})}
+
+\p{Record counts are exact: they come from checker output in results.json (pestka: "constants, declarations, names, levels, expressions"; tenet-jvm: per-kind counts; lazylean; kefir) and satisfy \code{\verb~|lines = 1 + names + levels + exprs + decl records~} for every row.}
+
+\table{
+\tr{\th{test}\th{bytes}\th{lines}\th{name recs}\th{level recs}\th{expr recs}\th{decl recs}\th{constants}\th{axiom/def/thm/opaque/quot/ind-blocks}\th{Lean}\th{source}}
+\tr{\td{mathlib}\td{6,326,141,213}\td{112,081,718}\td{4,273,914}\td{48,246}\td{107,037,712}\td{721,845}\td{739,167}\td{4/187,271/524,582/2,855/4/7,129}\td{4.36.0}\td{mathlib4 \code{\verb~|v4.36.0~} fc4f59e5, module \code{\verb~|Mathlib~}}}
+\tr{\td{cslib}\td{2,500,956,112}\td{44,051,112}\td{2,349,377}\td{12,713}\td{41,287,036}\td{401,985}\td{413,186}\td{4/119,982/274,986/2,636/4/4,373}\td{4.36.0}\td{cslib e60b7760, module \code{\verb~|Cslib~}}}
+\tr{\td{navier-stokes-euler}\td{1,559,685,706}\td{28,569,038}\td{691,465}\td{3,907}\td{27,747,197}\td{126,468}\td{129,845}\td{3/24,370/100,424/53/4/1,614}\td{4.34.0-rc2}\td{4 named theorems + deps}}
+\tr{\td{cedar}\td{904,722,064}\td{15,913,292}\td{1,037,701}\td{1,029}\td{14,728,503}\td{146,058}\td{151,772}\td{13/60,089/82,625/1,371/4/1,956}\td{4.36.0}\td{module \code{\verb~|Cedar~}}}
+\tr{\td{con-leche}\td{701,947,717}\td{12,734,575}\td{476,319}\td{256}\td{12,221,252}\td{36,747}\td{38,246}\td{3/14,599/21,663/9/4/469}\td{4.36.0}\td{3 named theorems + deps}}
+\tr{\td{std}\td{584,315,500}\td{10,611,507}\td{580,893}\td{953}\td{9,928,514}\td{101,146}\td{103,885}\td{4/27,944/71,751/397/4/1,046}\td{4.36.0}\td{\code{\verb~|import Std~}}}
+\tr{\td{init}\td{347,772,063}\td{6,495,296}\td{299,085}\td{571}\td{6,137,092}\td{58,547}\td{59,979}\td{4/15,239/42,451/244/4/605}\td{4.36.0}\td{\code{\verb~|import Init~}}}
+\tr{\td{reachability}\td{19,031,110}\td{361,766}\td{30,662}\td{73}\td{326,617}\td{4,413}\td{4,846}\td{3/1,687/2,532/2/4/185}\td{4.34.1}\td{6 \code{\verb~|decide +kernel~} theorems + deps}}
+\tr{\td{init-prelude}\td{3,811,816}\td{65,406}\td{7,491}\td{113}\td{55,961}\td{1,840}\td{2,121}\td{3/1,536/161/10/4/126}\td{4.36.0}\td{\code{\verb~|prelude~} + \code{\verb~|import Init.Prelude~}}}
+}
+
+\p{Axioms declared: mathlib, cslib, std, init: \code{\verb~|propext~}, \code{\verb~|Quot.sound~}, \code{\verb~|Classical.choice~}, \code{\verb~|sorryAx~}; init-prelude: \code{\verb~|Quot.sound~}, \code{\verb~|Classical.choice~}, \code{\verb~|sorryAx~}; navier/con-leche/reachability: the three standard ones; cedar: the three standard ones, \code{\verb~|sorryAx~}, and 9 \code{\verb~|_private.Cedar.….<thm>._native.native_decide.ax_N_M~}. Average 53–57 bytes/line everywhere. Virtual seconds (instr/6e9) of leaders, same order as the table rows:}
+
+\table{
+\tr{\th{test}\th{nano-lean}\th{gruszka}\th{sokonanoda}\th{rpylean}\th{pestka}\th{kefir}\th{tenet-jvm}\th{official}}
+\tr{\td{mathlib}\td{65.8}\td{77.0}\td{87.9}\td{96.3}\td{245.9}\td{429.5}\td{1633.1}\td{2015.9}}
+\tr{\td{cslib}\td{23.6}\td{27.4}\td{32.0}\td{35.4}\td{79.0}\td{141.1}\td{396.6}\td{566.1}}
+\tr{\td{navier-stokes-euler}\td{17.2}\td{21.8}\td{40.3}\td{24.1}\td{57.4}\td{130.7}\td{493.2}\td{671.9}}
+\tr{\td{cedar}\td{10.5}\td{10.3}\td{12.0}\td{13.3}\td{26.1}\td{46.2}\td{79.2}\td{147.2}}
+\tr{\td{con-leche}\td{10.3}\td{9.2}\td{11.5}\td{11.9}\td{20.3}\td{47.2}\td{120.6}\td{216.2}}
+\tr{\td{std}\td{6.7}\td{6.7}\td{8.1}\td{9.2}\td{18.0}\td{32.4}\td{60.2}\td{110.9}}
+\tr{\td{init}\td{4.1}\td{4.1}\td{4.8}\td{5.4}\td{10.9}\td{18.2}\td{37.3}\td{66.9}}
+\tr{\td{reachability}\td{1.9}\td{2.4}\td{4.3}\td{4.3}\td{4.4}\td{3.4}\td{21.4}\td{23.5}}
+}
+
+\p{nano-lean is at 3.2–4.9 k instructions per export line on the seven large corpora (mathlib 3.5 k, cslib 3.2 k, init/std 3.8 k, con-leche 4.9 k). Other parse-time evidence: lazylean (C++) loads mathlib in 12.8 s wall; con-leche (Lean) "parse 19.8 s, check 153.0 s (4 workers)"; nanobruijn reports "107,037,712 parser entries → 97,515,217 DAG entries" after its own shift-normalising interning. Slowest single mathlib declaration for con-leche: \code{\verb~|_private.Mathlib.AlgebraicGeometry.EllipticCurve.Affine.AddSubMap.0.WeierstrassCurve.Affine.Point.sym2x_add_sub_eq_addSubMap_sym2x._proof_1_8~} (3.05 s); lean4lean needs 48.8 s for \code{\verb~|IntermediateField.algHomAdjoinIntegralEquiv_symm_apply_gen~}.}
+}
+}
+
+\subtree{
+\title{2. The export format (format version 3.1.0) as actually produced}
+
+\subtree{
+\title{2.1 Which exporter}
+
+\ul{
+\li{\code{\verb~|tests/lean-toolchain~} = \code{\verb~|leanprover/lean4:v4.36.0~}. Since Lean v4.35.0 the toolchain ships a \code{\verb~|leanexport~} binary and the arena uses it (\code{\verb~|lka.py:752-758~}, \code{\verb~|1390-1403~}); only older toolchains build \code{\verb~|leanprover/lean4export~} master.}
+\li{Bundled source: \code{\verb~|lean4-leanexport/src/LeanExport/Basic.lean~} (writer), \code{\verb~|…/Parse.lean~} (reader used by \code{\verb~|leanchecker --from-export~}), \code{\verb~|lean4/src/LeanExport.lean~} (main). It is the standalone \code{\verb~|lean4export/Export.lean~} with one semantic difference: standalone HEAD skips \code{\verb~|partial~} definitions unless \code{\verb~|--export-unsafe~} (\code{\verb~|lean4export/Export.lean:238~}), bundled 4.36.0 skips only \code{\verb~|isUnsafe~} ones (\code{\verb~|Basic.lean:255~}). No visible effect on the corpora (§2.7).}
+\li{Invocation: \code{\verb~|lake env leanexport <Module> [-- <decl>…] > out.ndjson~} (\code{\verb~|lka.py:776-781~}); no options, so \code{\verb~|Expr.mdata~} is stripped and unsafe constants are skipped. \code{\verb~|leanfile~} tests compile the file as module \code{\verb~|Test~} in a throw-away lake project and export \code{\verb~|Test~}. Tutorial tests use their own driver around the same writer with \code{\verb~|--export-unsafe~} and optional renaming (\code{\verb~|lean-kernel-arena/tutorial/Tutorial/Export.lean:127-176~}).}
+\li{Header metadata of every test: exporter \code{\verb~|lean4export~} 3.1.0 (2 files: \code{\verb~|handcrafted~} 0.1.0), format 3.1.0. Lean versions seen: 4.36.0 (most), 4.35.0, 4.34.1, 4.34.0-rc2, 4.29.1; githash is a real hash, forty zeros, or the string \code{\verb~|generated~}.}
+\li{The output is deterministic and platform independent: generated on this aarch64 host it is byte-identical to the arena's x86-64 exports (§5).}
+}
+}
+
+\subtree{
+\title{2.2 File structure}
+
+\pre{\verb~|
+line 1      {"meta":{"exporter":{"name":S,"version":S},"format":{"version":S},"lean":{"githash":S,"version":S}}}
+lines 2..n  one record per line: name | level | expr | declaration
+~}
+
+\ul{
+\li{Encoding UTF-8, every line ends with a single \code{\verb~|\n~} (no CRLF, no blank lines, final newline present) — verified on all files.}
+\li{Three independent id spaces: names (\code{\verb~|in~}), levels (\code{\verb~|il~}), expressions (\code{\verb~|ie~}). Implicit entries: \strong{name 0 = anonymous}, \strong{level 0 = zero}; neither is ever emitted. Expression ids start at 0.}
+\li{Written by \code{\verb~|IO.println (json.compress)~}; \code{\verb~|Json.mkObj~} builds a \code{\verb~|Std.TreeMap String Json~}, so \strong{keys of every object are emitted in ascending code-point order} (\code{\verb~|lean4-leanexport/src/Lean/Data/Json/Basic.lean:230-231~}, \code{\verb~|Printer.lean:167-232~}). That is why the id key is not in a fixed position: \code{\verb~|{"app":…,"ie":N}~} but \code{\verb~|{"ie":N,"lam":…}~}.}
+}
+}
+
+\subtree{
+\title{2.3 Canonical byte templates (the fast path)}
+
+\p{\code{\verb~|N~} = decimal natural without leading zeros; \code{\verb~|L~} = \code{\verb~|[]~} or \code{\verb~|[N,N,…]~}; \code{\verb~|S~} = JSON string as in §2.8; \code{\verb~|B~} = \code{\verb~|true|false~}. These regular shapes matched every line of init+std and of all exporter-generated test files.}
+
+\pre{\verb~|
+names   {"in":N,"num":{"i":N,"pre":N}}                                          Name.num pre i
+        {"in":N,"str":{"pre":N,"str":S}}                                        Name.str pre s
+levels  {"il":N,"imax":[N,N]}   {"il":N,"max":[N,N]}   {"il":N,"param":N}   {"il":N,"succ":N}
+                                                       (param → NAME id; others → LEVEL ids)
+exprs   {"app":{"arg":N,"fn":N},"ie":N}                                         note: arg before fn
+        {"bvar":N,"ie":N}                                                       de Bruijn index
+        {"const":{"name":N,"us":L},"ie":N}                                      name id, LEVEL ids
+        {"forallE":{"binderInfo":BI,"body":N,"name":N,"type":N},"ie":N}
+        {"ie":N,"lam":{"binderInfo":BI,"body":N,"name":N,"type":N}}
+        {"ie":N,"letE":{"body":N,"name":N,"nondep":B,"type":N,"value":N}}
+        {"ie":N,"natVal":"<decimal digits>"}                                    string, any length
+        {"ie":N,"proj":{"idx":N,"struct":N,"typeName":N}}                       field index, expr id, name id
+        {"ie":N,"sort":N}                                                       level id
+        {"ie":N,"strVal":S}
+        {"ie":N,"mdata":{"data":{…},"expr":N}}                                  only with --export-mdata (never in the arena)
+        BI = "default" | "implicit" | "strictImplicit" | "instImplicit"
+decls   {"axiom":{"isUnsafe":B,"levelParams":L,"name":N,"type":N}}
+        {"def":{"all":L,"hints":H,"levelParams":L,"name":N,"safety":"safe"|"unsafe"|"partial","type":N,"value":N}}
+              H = "abbrev" | "opaque" | {"regular":N}
+        {"opaque":{"all":L,"isUnsafe":B,"levelParams":L,"name":N,"type":N,"value":N}}
+        {"quot":{"kind":"type"|"ctor"|"lift"|"ind","levelParams":L,"name":N,"type":N}}
+        {"thm":{"all":L,"levelParams":L,"name":N,"type":N,"value":N}}
+        {"inductive":{"ctors":[C,…],"recs":[R,…],"types":[T,…]}}                 note: ctors, recs BEFORE types
+          C = {"cidx":N,"induct":N,"isUnsafe":B,"levelParams":L,"name":N,"numFields":N,"numParams":N,"type":N}
+          R = {"all":L,"isUnsafe":B,"k":B,"levelParams":L,"name":N,"numIndices":N,"numMinors":N,
+               "numMotives":N,"numParams":N,"rules":[{"ctor":N,"nfields":N,"rhs":N},…],"type":N}
+          T = {"all":L,"ctors":L,"isRec":B,"isReflexive":B,"isUnsafe":B,"levelParams":L,"name":N,
+               "numIndices":N,"numNested":N,"numParams":N,"type":N}
+~}
+
+\p{\code{\verb~|levelParams~}, \code{\verb~|all~}, \code{\verb~|ctors~} (inside T), \code{\verb~|induct~}, rule \code{\verb~|ctor~}, \code{\verb~|typeName~}, binder \code{\verb~|name~} are \strong{name ids}; \code{\verb~|us~}, \code{\verb~|sort~}, \code{\verb~|succ~}, \code{\verb~|max~}, \code{\verb~|imax~} operands are \strong{level ids}; \code{\verb~|type~}, \code{\verb~|value~}, \code{\verb~|body~}, \code{\verb~|fn~}, \code{\verb~|arg~}, \code{\verb~|struct~}, \code{\verb~|rhs~}, mdata \code{\verb~|expr~} are \strong{expression ids}.}
+
+\p{First-bytes dispatch (after \code{\verb~|{"~}): \code{\verb~|ap~}→app, \code{\verb~|ax~}→axiom, \code{\verb~|b~}→bvar, \code{\verb~|c~}→const, \code{\verb~|d~}→def, \code{\verb~|f~}→forallE, \code{\verb~|ie~}→ie-first expr (then the second key: \code{\verb~|lam~},\code{\verb~|letE~},\code{\verb~|natVal~},\code{\verb~|proj~},\code{\verb~|sort~},\code{\verb~|strVal~},\code{\verb~|mdata~}), \code{\verb~|il~}→level, \code{\verb~|in"~}→name, \code{\verb~|ind~}→inductive, \code{\verb~|m~}→meta, \code{\verb~|o~}→opaque, \code{\verb~|q~}→quot, \code{\verb~|t~}→thm.}
+}
+
+\subtree{
+\title{2.4 Id spaces: what holds and what may be assumed}
+
+\p{Writer logic (\code{\verb~|Basic.lean:100-110~}): look the object up in a \code{\verb~|HashMap~}; if absent, first emit its children (recursively), then assign \code{\verb~|idx := map.size~} and print. Hence for exporter output:}
+
+\table{
+\tr{\th{property}\th{exporter output}\th{hand-crafted tests}\th{official reader (\code{\verb~|Parse.lean~})}}
+\tr{\td{ids dense, starting at 1 (names, levels) / 0 (exprs), strictly +1 in file order}\td{yes (verified: init, std, 228 of 230 tarball files)}\td{\strong{no} — \code{\verb~|other/sparse-name-index~} (name id 2 without 1, expr id 4 without 0–3), \code{\verb~|other/level-index-out-of-order~} (level 2 defined before level 1); both are \em{accept} tests}\td{ids are keys of \code{\verb~|HashMap Nat _~}; any natural}}
+\tr{\td{every referenced id is defined on an earlier line}\td{yes, 0 forward references anywhere}\td{yes in all tests}\td{required: "Name/Level/Expr not found" otherwise}}
+\tr{\td{an id is bound once}\td{yes}\td{yes}\td{required: "index N bound twice" (\code{\verb~|Parse.lean:61-86~})}}
+\tr{\td{no two ids denote the same object}\td{names: unique by structure; levels: unique by syntax (\code{\verb~|max u v~} ≠ \code{\verb~|max v u~}); exprs: unique modulo binder names and binderInfo}\td{not guaranteed}\td{not required}}
+\tr{\td{largest ids}\td{mathlib: expr 107,037,711; name 4,273,914; level 48,246 → all fit in int32}\td{tiny}\td{unbounded \code{\verb~|Nat~}}}
+}
+
+\p{Recommended contract: fast path asserts \code{\verb~|id == next++~} per space; on the first violation switch that space to a sparse table (id → slot; grow an array while the id is small, else a hash map); a reference to an undefined id or a rebinding = malformed input (official: uncaught exception, exit 1 = \em{rejected}).}
+
+\p{Because expression lookup is by \code{\verb~|BEq Expr = Expr.eqv~} ("alpha equivalent, binder annotations ignored", \code{\verb~|Expr.lean:803-811~}), the record of a binder shows the binder name/info of its \em{first} occurrence only. \code{\verb~|letE.nondep~} is normalised to \code{\verb~|false~} before lookup (\code{\verb~|Basic.lean:158-164~}); all 5072+33,496 letE records seen have \code{\verb~|nondep:false~}. Binder names, binderInfo and \code{\verb~|nondep~} are irrelevant to checking and need not be stored.}
+}
+
+\subtree{
+\title{2.5 Names, levels, expressions}
+
+\ul{
+\li{\strong{Names} are hierarchical: \code{\verb~|str(pre, s)~} or \code{\verb~|num(pre, i)~}. A dot inside \code{\verb~|s~} is part of the component (\code{\verb~|str(0,"a.b")~} ≠ \code{\verb~|a~} then \code{\verb~|b~}); never identify names by a dotted rendering. \code{\verb~|i~} is a natural: observed up to 4,283,319,217 (> 2³¹; 9–10-digit values are common: 9687 ten-digit values in the tarball) → parse as \code{\verb~|long~}, with an overflow path. Longest component seen: 230 chars. In hand-crafted files two ids may denote the same name, so constants, level parameters and special names must be resolved by structural (interned) name, not by raw id.}
+\li{\strong{Levels}: \code{\verb~|succ~}, \code{\verb~|max~}, \code{\verb~|imax~}, \code{\verb~|param(name)~}; \code{\verb~|zero~} only as id 0; \code{\verb~|mvar~} never. Level ids are deduplicated syntactically only. \code{\verb~|const.us~} lists level ids, one per universe parameter (must equal the constant's arity — \code{\verb~|bugs/constlevels~}, \code{\verb~|large-elim-*~}).}
+\li{\strong{Expressions}: \code{\verb~|bvar~} (loose indices can legally appear in records, since subterms under binders are separate records; a declaration root must be closed — \code{\verb~|bugs/loose-bvar-value~}), \code{\verb~|sort~}, \code{\verb~|const~}, \code{\verb~|app~} (binary), \code{\verb~|lam~}, \code{\verb~|forallE~}, \code{\verb~|letE~}, \code{\verb~|proj(typeName, idx, struct)~}, \code{\verb~|natVal~}, \code{\verb~|strVal~}, \code{\verb~|mdata~} (never emitted without the flag; the official reader maps it to an empty-metadata \code{\verb~|mdata~} node). \code{\verb~|fvar~}/\code{\verb~|mvar~} cannot be exported (\code{\verb~|panic!~}).}
+\li{Before the first \code{\verb~|natVal~} the writer exports constant \code{\verb~|Nat~} (if not yet exported); before the first \code{\verb~|strVal~} it exports \code{\verb~|Char.ofNat~} and \code{\verb~|String.ofList~} (\code{\verb~|Basic.lean:234-244~}). So a declaration block can be emitted \em{in the middle of} the expression records of the declaration being written; "the records between two declaration lines belong to the second" is not exact.}
+\li{\strong{Nat literals}: decimal string, arbitrary length; the official reader uses \code{\verb~|String.toNat?~} (\code{\verb~|Parse.lean:237-241~}). Longest in the available files: 20 digits (2⁶⁴ in \code{\verb~|bugs/nat-shift-huge~}); mathlib not inspected (must go through a bignum path beyond 18 digits). The 4.36 kernel refuses numerals above 128 MB (\code{\verb~|LEAN_NAT_MAX_SIZE~}, \code{\verb~|lean4/src/kernel/type_checker.cpp:30-36~}, checked in \code{\verb~|infer_lit~} and after \code{\verb~|Nat.succ/add/sub/mul/pow/shiftLeft~}), and requires the second argument of \code{\verb~|Nat.pow~}/\code{\verb~|Nat.shiftLeft~} to fit in 32 bits unless the result is trivially 0 (\code{\verb~|type_checker.cpp:610-660~}).}
+\li{\strong{String literals} denote lists of Unicode scalar values: the kernel expands \code{\verb~|"…"~} to \code{\verb~|String.ofList (List.cons.{0} Char (Char.ofNat n₁) … (List.nil.{0} Char))~} with one \code{\verb~|Char.ofNat~} per \strong{code point} (\code{\verb~|lean4/src/kernel/inductive.cpp:1342-1390~}, \code{\verb~|type_checker.cpp:1100-1103~}). \code{\verb~|bugs/str-lit-utf8~} (accept) and \code{\verb~|bugs/str-lit-utf8-bad~} (reject) test 2-, 3- and 4-byte characters. In Java: iterate code points, never \code{\verb~|char~}s or bytes.}
+}
+}
+
+\subtree{
+\title{2.6 Declarations}
+
+\p{Field meaning = the fields of \code{\verb~|Lean.ConstantInfo~} (\code{\verb~|Declaration.lean~}); who must believe what is in §2.9.}
+
+\ul{
+\li{\code{\verb~|axiom~}: name, levelParams, type, isUnsafe.}
+\li{\code{\verb~|def~}: name, levelParams, type, value, \code{\verb~|hints~} (\code{\verb~|"opaque"~}, \code{\verb~|"abbrev"~}, \code{\verb~|{"regular":h}~} with \code{\verb~|h~} a UInt32 height; max seen 36), \code{\verb~|safety~}, \code{\verb~|all~} (names of the mutual block as elaborated; informational; length ≠ 1 for 4 defs in init, 6 in std).}
+\li{\code{\verb~|thm~}: name, levelParams, type, value, all.}
+\li{\code{\verb~|opaque~}: name, levelParams, type, value, isUnsafe, all (the official reader tolerates a missing \code{\verb~|isUnsafe~}, default false).}
+\li{\code{\verb~|quot~}: always the four records \code{\verb~|Quot~} (kind \code{\verb~|type~}), \code{\verb~|Quot.mk~} (\code{\verb~|ctor~}), \code{\verb~|Quot.lift~} (\code{\verb~|lift~}), \code{\verb~|Quot.ind~} (\code{\verb~|ind~}) in this order, preceded by the block of \code{\verb~|Eq~} (\code{\verb~|Basic.lean:308-322~}).}
+\li{\code{\verb~|inductive~}: one line per \em{mutual block}: all \code{\verb~|types~} in the order of \code{\verb~|all~}; all \code{\verb~|ctors~} grouped by type in that order, each type's constructors in \code{\verb~|cidx~} order; all recursors whose \code{\verb~|all~} contains the first type, \strong{in arbitrary order} (iteration of a \code{\verb~|NameSet~}: e.g. \code{\verb~|Lean.Syntax.rec_2, Lean.Syntax.rec, Lean.Syntax.rec_1~}; \code{\verb~|ImaxProp.rec~} before \code{\verb~|ImaxPropDummy.rec~}). Auxiliary recursors of nested inductives (\code{\verb~|X.rec_1~}, …) are in the block of \code{\verb~|X~}; their rules name constructors of other types (\code{\verb~|List.cons~}, \code{\verb~|Array.mk~}). Recursors have their own \code{\verb~|levelParams~} (motive universe first when large elimination is allowed). Match recursors and constructors by name, never by position.}
+}
+
+\p{Observed flag frequencies (init / std): k=true recursors 6 / 6; reflexive types 4 / 4; nested (\code{\verb~|numNested>0~}) 1 / 3; mutual blocks 0 / 0 (one in the tests: \code{\verb~|bugs/proj-of-imax-prop~}); \code{\verb~|isUnsafe~} always false; \code{\verb~|safety~} always \code{\verb~|safe~}; hints init: 7203 regular, 7884 abbrev, 152 opaque.}
+}
+
+\subtree{
+\title{2.7 Ordering guarantees}
+
+\p{\code{\verb~|dumpConstant~} (\code{\verb~|Basic.lean:252-429~}) marks the constant visited, exports every constant used by its type and value (recursively), then writes its own names/levels/expressions and finally its declaration line. For an inductive block the dependencies of all types, constructors, recursor types and rule right-hand sides are exported before any record of the block.}
+
+\ul{
+\li{Verified with a script on init, std and every \em{good} tarball file: each constant referenced by a declaration is declared on an earlier line, except references inside one \code{\verb~|inductive~} line to members of the same block (types ↔ constructors ↔ recursors ↔ rules).}
+\li{The only violations in the whole tarball are four \em{bad} tests: \code{\verb~|tutorial/014_selfProof~} (self reference), \code{\verb~|tutorial/140~}, \code{\verb~|141~} (unsafe/partial self-recursive definitions) and \code{\verb~|bugs/nested-name-capture~} (a recursor rule naming a constant that is declared later).}
+\li{Top-level iteration order is that of \code{\verb~|env.constants.toList~} filtered by \code{\verb~|!isInternal~} (\code{\verb~|Basic.lean:466~}) — a hash-map order, not source order, but dependency-closed. With \code{\verb~|-- decls~} only those and their dependency cone are exported.}
+\li{Partial definitions (\code{\verb~|safety: partial~}) would be exported by the bundled 4.36.0 writer if reachable, but they are only the \code{\verb~|_unsafe_rec~} auxiliaries (internal names, referenced only by each other). Evidence that the corpora contain none: 0 occurrences of \code{\verb~|"unsafe"~}/\code{\verb~|"partial"~}/\code{\verb~|_unsafe_rec~} in init and std; con-ron/con-agua/con-leche decline any such definition at once and accept all corpora but cedar; sokonanoda declines them and accepts cedar.}
+}
+
+\p{Checking strictly in file order with "unknown constant ⇒ reject" is therefore complete for all current accept tests; the official checker is more liberal (§2.11).}
+}
+
+\subtree{
+\title{2.8 Strings, escapes, numbers}
+
+\p{Writer (\code{\verb~|lean4-leanexport/src/Lean/Data/Json/Printer.lean:36-93~}):}
+
+\ul{
+\li{\code{\verb~|"~} → \code{\verb~|\"~}, \code{\verb~|\~} → \code{\verb~|\\~}, U+000A → \code{\verb~|\n~}, U+000D → \code{\verb~|\r~}; any other code point < U+0020 → \code{\verb~|\u00XX~} (four lowercase hex digits); \strong{everything ≥ U+0020 is written raw as UTF-8}, including U+007F and all non-ASCII. No \code{\verb~|\t~}, \code{\verb~|\b~}, \code{\verb~|\f~}, \code{\verb~|\/~}, no surrogate escapes.}
+\li{Observed in std (a superset of init): only \code{\verb~|\"~} (46), \code{\verb~|\\~} (45), \code{\verb~|\n~} (88), \code{\verb~|\r~} (42); raw non-ASCII on 1225 lines.}
+\li{Numbers are plain decimal naturals (no sign, fraction or exponent). Booleans are \code{\verb~|true~}/\code{\verb~|false~}. \code{\verb~|null~} never occurs.}
+}
+
+\p{Hand-crafted files use ordinary JSON: \code{\verb~|\u03b1~} occurs in \code{\verb~|bugs/nested-name-capture~} (name components \code{\verb~|α~}, \code{\verb~|β~} written by an ASCII-escaping JSON library). The fallback parser must implement all JSON escapes including surrogate pairs; a lone surrogate cannot be a Lean string (reject).}
+}
+
+\subtree{
+\title{2.9 What a checker must not trust}
+
+\table{
+\tr{\th{record / field}\th{status}\th{evidence}}
+\tr{\td{constructor records (\code{\verb~|type~}, \code{\verb~|induct~}, \code{\verb~|cidx~}, \code{\verb~|numParams~}, \code{\verb~|numFields~}, levelParams)}\td{re-derive from the types' \code{\verb~|ctors~} lists and compare; reject any constructor record of a block that is not derived, or whose \code{\verb~|induct~} is not in the block}\td{\code{\verb~|bugs/ctor-num-fields~}, \code{\verb~|other/orphan-ctor~}, tutorial 134, 138, 139}}
+\tr{\td{recursor records (name, levelParams, \code{\verb~|type~}, \code{\verb~|all~}, \code{\verb~|numParams/Indices/Motives/Minors~}, \code{\verb~|k~}, \code{\verb~|rules[].ctor/nfields/rhs~})}\td{re-derive completely; compare structurally (official: \code{\verb~|BEq~}, i.e. alpha-equivalence ignoring binder names/info), \strong{not} up to definitional equality; reject extra, misnamed or orphan recursors}\td{\code{\verb~|bugs/nat-rec-rules~}, \code{\verb~|unit-rec-rule~}, \code{\verb~|rec-rule-wrong-arg~}, \code{\verb~|rec-rule-proof-irrel~}, \code{\verb~|rec-rule-proof-irrel-nested~}, \code{\verb~|rec-type-proof-irrel~}, \code{\verb~|nested-rec-rule-nfields~}, \code{\verb~|rec-k-lie~}, \code{\verb~|nat-rec-k-lie~}, \code{\verb~|large-elim-param~}, \code{\verb~|large-elim-prop-bool~}, \code{\verb~|rec-missing-ih~}, \code{\verb~|orphan-rec~}, \code{\verb~|other/extra-rec~}, tutorial 073, 135–138}}
+\tr{\td{inductive \code{\verb~|numIndices~}, \code{\verb~|isRec~}, \code{\verb~|isReflexive~}, \code{\verb~|numNested~}, \code{\verb~|isUnsafe~}}\td{recompute; the official checker never reads them from the export (Replay builds an \code{\verb~|inductDecl~} from names, types, constructor names/types, \code{\verb~|levelParams~} and \code{\verb~|numParams~} of the first type only)}\td{\code{\verb~|Replay.lean~} (\code{\verb~|.inductInfo~} case); \code{\verb~|corner-cases/vanishing-occurrence~} notes exported \code{\verb~|isRec = true~} although the kernel finds no occurrence}}
+\tr{\td{inductive \code{\verb~|numParams~}, \code{\verb~|levelParams~}, \code{\verb~|all~}, \code{\verb~|ctors~}}\td{\em{inputs} of the declaration: validate (binder count ≥ numParams, no duplicate/undeclared universe names, constructors exist)}\td{tutorial 048–052, \code{\verb~|other/inductive-undeclared-universe~}}}
+\tr{\td{\code{\verb~|quot~} records}\td{check against the four canonical signatures, or generate them and compare; \code{\verb~|Eq~} must exist with the right shape}\td{\code{\verb~|bugs/quot-bad-type~}}}
+\tr{\td{\code{\verb~|levelParams~} of any declaration}\td{no duplicates; every \code{\verb~|param~} used in type/value must be listed}\td{tutorial 019, 048, \code{\verb~|other/inductive-undeclared-universe~}}}
+\tr{\td{\code{\verb~|hints~}}\td{untrusted performance hint; influences only the unfolding order (the official kernel takes it as given)}\td{—}}
+\tr{\td{\code{\verb~|all~} of def/thm/opaque, \code{\verb~|isUnsafe~}, binder names, binderInfo, \code{\verb~|nondep~}}\td{ignore}\td{—}}
+\tr{\td{\code{\verb~|safety~}}\td{\code{\verb~|unsafe~}/\code{\verb~|partial~} definitions must not be usable by safe declarations}\td{tutorial 140, 141}}
+\tr{\td{name uniqueness across all declared constants, including generated \code{\verb~|X.rec~}, constructors, and any internal auxiliary names the checker invents}\td{reject duplicates; never let a later declaration capture an auxiliary name}\td{tutorial 132–139, \code{\verb~|bugs/nested-name-capture~}}}
+\tr{\td{header \code{\verb~|meta~}}\td{the official reader discards line 1 unread (\code{\verb~|Parse.lean:511-512~}); use it only to decline unknown format versions}\td{—}}
+}
+}
+
+\subtree{
+\title{2.10 Deviations in hand-crafted test files (complete list for the tarball)}
+
+\table{
+\tr{\th{file}\th{deviation}}
+\tr{\td{bad/bugs/large-elim-param}\td{\code{\verb~|": "~} and \code{\verb~|", "~} separators on all 88 lines; id key first}}
+\tr{\td{bad/bugs/closure-level-subst, pi-closure-context (2 lines each), level-imax-leq (43), level-imax-normalization (44), nat-rec-rules (67), bad/other/inductive-undeclared-universe (23)}\td{keys not sorted (\code{\verb~|{"ie":3,"bvar":0}~}, \code{\verb~|{"ie":2,"const":{…}}~})}}
+\tr{\td{bad/bugs/nested-name-capture}\td{\code{\verb~|\u03b1~}, \code{\verb~|\u03b2~} escapes (the names α, β) in two name strings}}
+\tr{\td{good/other/sparse-name-index, good/other/level-index-out-of-order}\td{sparse / out-of-order ids; exporter name \code{\verb~|handcrafted~}}}
+}
+
+\p{All good tests except the last two are template-exact. The 30 \code{\verb~|either~} tests are not in the tarball; the four static ones in \code{\verb~|lean-kernel-arena/tests/corner-cases/*.ndjson~} are template-exact.}
+}
+
+\subtree{
+\title{2.11 The official reader and checker (\code{\verb~|leanchecker --from-export~})}
+
+\p{\code{\verb~|lean4/src/LeanChecker.lean~} (\code{\verb~|checkExport~}), \code{\verb~|Parse.lean~}, \code{\verb~|Replay.lean~} (v4.36.0):}
+
+\pre{\verb~|
+parse:   skip line 1 without parsing it;
+         for every further line: Json.parse (blank line = error); dispatch on the key set, any key order;
+         unknown key set / wrong field type / undefined or rebound id / natVal not a digit string → exception;
+         every constant (also each type, ctor, rec of a block) goes into constMap; a name seen twice →
+         "Duplicate declaration"                                   -- uncaught exception ⇒ exit code 1
+replay:  remaining := all constants that are neither unsafe nor partial; Quot.mk/lift/ind are removed
+         replayConstant(c): if c ∈ remaining: move to pending; first replayConstant every constant used
+                            by c's type/value (dependency order, NOT file order); then
+           def / thm / axiom / opaque → kernel addDecl
+           inductive → addDecl(inductDecl lparams nparams [{name,type,ctors:[{name,type}]} for all types in `all`])
+                       (lparams, nparams from the first type reached; the kernel generates ctors and recursors)
+           ctor, rec  → only remembered
+           quot       → replayConstant `Eq; addDecl quotDecl
+         at the end: every remembered ctor/rec must equal (BEq) the kernel-generated constant of that name,
+                     else "Invalid constructor/recursor" or "No such constructor/recursor"
+post:    Quot, Quot.mk, Quot.lift, Quot.ind, if present in the export, must equal the kernel's
+exit 0 "Lean default kernel accepts the solution"; exit 1 on any kernel error or exception
+~}
+
+\p{Notes: unsafe/partial constants are simply absent, so their users fail with "unknown constant". Forged recursors are often rejected at their first \em{use} (wrong universe arity or type), because the comparison runs last.}
+
+\p{Behaviour confirmed by experiment with the local 4.36.0 \code{\verb~|leanchecker~} on edited copies of tutorial tests (files in /tmp, not kept):}
+
+\table{
+\tr{\th{input change}\th{official result}}
+\tr{\td{a theorem's declaration line moved to the end of the file, after the theorem that uses it}\td{\strong{accepted} (dependency replay; file order of declarations is irrelevant as long as ids are defined before use)}}
+\tr{\td{\code{\verb~|"recs":[]~} in the block of \code{\verb~|Empty~} while a later definition uses \code{\verb~|Empty.rec~}}\td{\strong{accepted} (the kernel-generated recursor exists whether or not the export lists it)}}
+\tr{\td{garbage text as line 1}\td{accepted (line 1 is never parsed)}}
+\tr{\td{no meta line (line 1 is the first record)}\td{exit 1, "Name not found 1" (the first record is swallowed)}}
+\tr{\td{blank line in the middle}\td{exit 1, "Invalid JSON"}}
+\tr{\td{missing final newline; CRLF line ends}\td{accepted}}
+\tr{\td{the same name record twice (id rebound)}\td{exit 1, "Name index 1 bound twice"}}
+}
+
+\p{No arena test exercises the first two rows today (every good test is in dependency order and lists all recursors), but an exact emulation needs: (1) a constant table of the whole file before deciding "unknown constant" — on a reference to a constant declared later, check that one first (cycle ⇒ reject); a purely streaming checker should decline rather than reject in that situation; (2) generated constructors/recursors must be usable even when the export omits their records.}
+}
+
+\subtree{
+\title{2.12 Measured statistics}
+
+\p{Scripts were written for this report (JSON-parsing every line; kept outside the repository). "tarball" = all 230 files.}
+
+\table{
+\tr{\th{quantity}\th{init (347.8 MB)}\th{std (584.3 MB)}\th{tarball max / remark}}
+\tr{\td{lines}\td{6,495,296}\td{10,611,507}\td{1,034,955 total}}
+\tr{\td{\code{\verb~|app~}}\td{5,228,615 (80.50 \% of lines, 72.1 \% of bytes, 48.0 B avg, max 50 B)}\td{8,090,565 (76.24 \%, 66.5 \%)}\td{62.2 \% of lines}}
+\tr{\td{\code{\verb~|lam~}}\td{531,743 (8.19 \%, 13.1 \% of bytes, 85.8 B avg)}\td{1,062,503 (10.01 \%, 15.7 \%)}\td{11.9 \%}}
+\tr{\td{\code{\verb~|forallE~}}\td{302,481 (4.66 \%, 7.8 \%, 89.3 B)}\td{639,125 (6.02 \%, 9.9 \%)}\td{8.5 \%}}
+\tr{\td{\code{\verb~|const~}}\td{57,535 (0.89 \%)}\td{100,998 (0.95 \%)}\td{2.5 \%}}
+\tr{\td{\code{\verb~|letE~} / \code{\verb~|proj~} / \code{\verb~|strVal~} / \code{\verb~|natVal~} / \code{\verb~|sort~} / \code{\verb~|bvar~}}\td{11,380 / 2,948 / 1,837 / 285 / 121 / 147}\td{22,116 / 9,329 / 3,055 / 453 / 223 / 147}\td{bvar records = max index + 1}}
+\tr{\td{name.str / name.num}\td{174,019 / 125,066 (4.6 \% of lines, 4.1 \% of bytes)}\td{322,169 / 258,724 (5.5 \%)}\td{11.0 \%}}
+\tr{\td{levels (succ/max/imax/param)}\td{90 / 269 / 150 / 62}\td{146 / 493 / 181 / 133}\td{—}}
+\tr{\td{thm / def / inductive / opaque / axiom / quot lines}\td{42,451 / 15,239 / 605 / 244 / 4 / 4}\td{71,751 / 27,944 / 1,046 / 397 / 4 / 4}\td{declaration lines: 0.9 \% of lines, 1.7 \% of bytes}}
+\tr{\td{longest line}\td{3,272 B (an \code{\verb~|inductive~})}\td{10,847 B (an \code{\verb~|inductive~})}\td{2,372 B; longest non-inductive line in init/std: 262 B (a \code{\verb~|strVal~}); names ≤ 182 B}}
+\tr{\td{line length}\td{85.7 \% ≤ 55 B, 99.35 \% ≤ 95 B}\td{82.3 \% ≤ 55 B, 98.95 \% ≤ 95 B}\td{—}}
+\tr{\td{max DAG depth of an expression (children + 1)}\td{325}\td{325}\td{\strong{19,999} (\code{\verb~|perf/app-lam~}), 6,004 (\code{\verb~|beta-ladder~}, \code{\verb~|let-ladder~}), 1,325 (\code{\verb~|magma-list-deep-n36~}), 1,129 (\code{\verb~|grind-ring-5~})}}
+\tr{\td{max binder nesting / max app spine length}\td{147 / 99}\td{147 / 99}\td{max bvar index 3,999 (\code{\verb~|app-lam~})}}
+\tr{\td{app nodes by spine position 1/2/3/4/5/6/≥7}\td{11.8/22.2/21.8/15.5/11.8/11.4/5.6 \%}\td{11.8/21.3/20.8/15.3/11.9/11.0/8.0 \%}\td{—}}
+\tr{\td{app: \code{\verb~|fn~} is the previous record / \code{\verb~|arg~} is the previous record}\td{37.6 \% / 36.8 \%}\td{40.9 \% / 35.1 \%}\td{distance ≥ 9: 48.6 \% / 58.5 \%}}
+\tr{\td{expr in-degree 1 / 2 / 3 / 4 / ≥5}\td{83.2 / 8.8 / 3.2 / 1.7 / 3.1 \% (max 191,358)}\td{83.9 / 8.6 / 3.0 / 1.6 / 2.9 \% (max 322,960)}\td{references from records and declaration roots}}
+\tr{\td{expr records introduced by a theorem and reachable only from its \strong{value}}\td{82.6 \%}\td{78.6 \%}\td{"segment" = records since the previous declaration line}}
+\tr{\td{… by a theorem, reachable from its type}\td{7.5 \%}\td{10.3 \%}\td{}}
+\tr{\td{… by a definition: value-only / type}\td{7.2 \% / 2.0 \%}\td{8.0 \% / 2.2 \%}\td{}}
+\tr{\td{expr records referenced by any later declaration}\td{6.17 \%}\td{6.33 \%}\td{i.e. ~94 \% die with their declaration}}
+\tr{\td{proof-only records that a later declaration nevertheless references}\td{250,630 (4.9 \% of them)}\td{393,456 (5.0 \%)}\td{so proof subterms cannot be dropped blindly}}
+\tr{\td{new expr records per declaration: median / p90 / p99 / p99.9 / max}\td{27 / 211 / 1,241 / 5,451 / 26,418}\td{31 / 181 / 1,140 / 5,444 / 66,890}\td{—}}
+\tr{\td{duplicates modulo binder names (exprs) / levels / names}\td{0 / 0 / 0}\td{0 / 0 / 0}\td{0 in every file}}
+\tr{\td{\code{\verb~|us~} list length max; levelParams max; \code{\verb~|regular~} hint max}\td{7; 7; 31}\td{7; 7; 36}\td{—}}
+}
+
+\p{Not measured (file not available locally): the same breakdown for mathlib. Extrapolating the init/std shares to mathlib's exact totals gives roughly 82–86 M \code{\verb~|app~}, 9–11 M \code{\verb~|lam~}, 5–6.5 M \code{\verb~|forallE~} records; treat as an estimate.}
+}
+
+\subtree{
+\title{2.13 Byte-level parsing advice}
+
+\p{What a single-pass hand-written parser may assume \strong{on the fast path only} (and must verify byte-by-byte, falling back otherwise): fixed key order, no whitespace, \code{\verb~|\n~} terminators, decimal ids without leading zeros, \code{\verb~|id == next expected id~}, referenced ids \code{\verb~|< next~}. What it may never assume: density/order of ids, absence of escapes, key order, line length bounds (an \code{\verb~|inductive~} line grows with the block; allow arbitrarily long lines), 32-bit \code{\verb~|i~}/\code{\verb~|natVal~}/\code{\verb~|idx~}.}
+
+\pre{\verb~|
+buf: one reusable byte[] of a few MiB filled by read(); carry an incomplete tail line to the front.
+     (A mapped 6.3 GB file would count towards max RSS while resident, as Linux counts file-backed pages; plain reads do not.)
+per line, p at '{':
+  switch on buf[p+2], buf[p+3]:
+    "ap": match `{"app":{"arg":` A `,"fn":` F `},"ie":` N `}\n`      → 2 ints + check N == nextExpr
+    "ie": match `{"ie":` N `,"`; then
+            `lam":{"binderInfo":"` → skip to the closing quote; `,"body":` B `,"name":` (skip digits) `,"type":` T `}}\n`
+            `letE":{"body":` B `,"name":` skip `,"nondep":` skip `,"type":` T `,"value":` V `}}\n`
+            `proj":{"idx":` I `,"struct":` E `,"typeName":` P `}}\n`
+            `sort":` L `}\n`      `natVal":"` digits `"}\n`      `strVal":` string `}\n`
+    "fo": `{"forallE":{"binderInfo":"` skip `","body":` B `,"name":` skip `,"type":` T `},"ie":` N `}\n`
+    "co": `{"const":{"name":` P `,"us":[` ints `]},"ie":` N `}\n`
+    "bv": `{"bvar":` I `,"ie":` N `}\n`
+    "in" + '"': `{"in":` N `,"num":{"i":` I `,"pre":` P `}}\n`  |  `{"in":` N `,"str":{"pre":` P `,"str":"` … `"}}\n`
+    "il": the four level shapes
+    anything else (thm, def, inductive, opaque, axiom, quot, meta) or ANY mismatch above:
+          hand the whole line to a generic JSON object parser (any key order, whitespace, all escapes)
+          and build the same record from the parsed object. That path sees ≤ 1 % of the lines.
+~}
+
+\ul{
+\li{app + lam + forallE + names + const + letE + proj cover 99.1 \% of the lines of init and std.}
+\li{Strings on the fast path: scan to the closing \code{\verb~|"~}; if a \code{\verb~|\~} is met, either decode the four writer escapes or fall back. Keep name components and string literals as UTF-8 byte ranges in a side pool; a \code{\verb~|java.lang.String~} is needed only for diagnostics. Kernel-special names (\code{\verb~|Nat~}, \code{\verb~|Nat.add~}, …, \code{\verb~|String.ofList~}, \code{\verb~|Char.ofNat~}, \code{\verb~|Quot~}, \code{\verb~|Eq~}, \code{\verb~|eagerReduce~}, …) are found by comparing interned name structure once.}
+\li{Do not store binder names, binderInfo, \code{\verb~|nondep~}, or \code{\verb~|all~}/\code{\verb~|isUnsafe~} of non-inductive declarations.}
+\li{Integer parsing: ids have ≤ 9 digits on mathlib; nano-lean parses 8 digits per 64-bit word (SWAR) and matches literal key fragments by slice comparison, with a JSON fallback (\code{\verb~|nano-lean-v0.4.2/src/import/scan.rs:57-140~}, \code{\verb~|…/json.rs~}).}
+\li{Since ids are sequential, the id field of a record carries no information on the fast path; it only has to be compared with the counter.}
+\li{Budget: 6.33 GB at k instructions/byte = 6.3·k G instructions; at the leader's total of 62 instr/byte, parsing should stay near or below 10 instr/byte (≈ 500 instructions per \code{\verb~|app~} line).}
+\li{Storage options given §2.12: (a) keep all expression records in flat \code{\verb~|int~} arrays (app = 2 ints; roughly 1–1.5 GB for mathlib) and never free; (b) check each declaration when its line arrives and recycle the records introduced since the previous declaration — only sound with last-use information, because ~5 \% of proof-only records are referenced by later declarations (a pre-pass over the file doubles the scan). What the leaders say about themselves (checker descriptions in \code{\verb~|lean-kernel-arena/checkers/*.yaml~}; their code was not examined for this report): kefir "Declarations are checked as they stream in and their terms are freed once checked"; gruszka/pestka convert the export to the binary Susz form first (\code{\verb~|susz pack~}, inside the measured command) and read a theorem's proof block only when the theorem is checked; palladium "The export is parsed in parallel as it is read, in bounded pieces, so the file is never in memory as a whole".}
+\li{Expression depth: recursion over records must not use the Java stack naively (\code{\verb~|app-lam~} nests 19,999 deep; nanoda needed its thread stacks raised to 256 MiB for some tests; palladium fails six perf tests with "recursion depth exceeded", logos-kernel declines mathlib for the same reason).}
+}
+}
+}
+
+\subtree{
+\title{3. Test catalogue (270 tests)}
+
+\table{
+\tr{\th{group}\th{accept}\th{reject}\th{either}\th{in tarball}\th{what it is}}
+\tr{\td{top level}\td{9}\td{–}\td{–}\td{init-prelude only (others > 10 MB)}\td{real corpora, §1.5}}
+\tr{\td{tutorial/}\td{94}\td{47}\td{–}\td{all}\td{one feature per test, generated from \code{\verb~|tutorial/Tutorial.lean~}}}
+\tr{\td{bugs/}\td{2}\td{32}\td{–}\td{all}\td{soundness bugs/crashes actually found in some checker}}
+\tr{\td{other/}\td{5}\td{5}\td{–}\td{all}\td{synthetic single-check tests}}
+\tr{\td{corner-cases/}\td{1}\td{–}\td{30}\td{1 (either tests are excluded, \code{\verb~|lka.py:2287-2290~})}\td{debatable outcomes}}
+\tr{\td{perf/}\td{37}\td{8}\td{–}\td{43 (two string-magma tests are 17 MB)}\td{small inputs with algorithmic traps}}
+}
+
+\p{"Official 4.36.0" below = message of the local \code{\verb~|leanchecker --from-export~} run for this report (all 92 bad tests: exit 1).}
+
+\subtree{
+\title{3.1 tutorial/ — accept tests (94)}
+
+\p{001–008 definitions, arrows, Π, λ, β (also under binders), binder domain needing whnf to be a sort; 013 theorem using a theorem; 015–027 universe arithmetic: \code{\verb~|imax 1 0~}, \code{\verb~|imax 0 1~}, \code{\verb~|imax 2 1~}, level parameters, \code{\verb~|imax u 0~}, \code{\verb~|imax u u~}, typing of Π via imax, \code{\verb~|max~} commutative/associative/idempotent/absorbing; 028–029 local variables, defeq of λs; 030–032 Church/Peano arithmetic by conversion; 033–035 \code{\verb~|let~} typing (dependent) and ζ; 036–045 inductive types: \code{\verb~|Empty~}, \code{\verb~|Bool~}, structures, \code{\verb~|And~}, \code{\verb~|Prod~}, \code{\verb~|PProd~}, \code{\verb~|PUnit~}, \code{\verb~|Eq~}, \code{\verb~|N~}, indexed \code{\verb~|RBTree~}; 055 constructor field types are reduced (whnf) when checking; 058–060 universe of fields (Prop may hold anything; \code{\verb~|Type u~} field in \code{\verb~|Type (u+1)~}); 062–072, 074 recursor \em{types} (Empty, Bool, structure, And, Prod, PProd, PUnit, Eq, N, RBTree, 2-constructor Prop → Prop-only elimination, \code{\verb~|Exists~}); 075 recursor of a one-constructor field-less type reduces on a variable major (structure eta on the major); 076–077 subsingleton elimination when data fields occur in the result type syntactically (and not after reduction); 078–082 ι-reduction (Bool, Prod, N, List, RBTree); 083–086 projection functions (\code{\verb~|And~}, \code{\verb~|Prod~}, \code{\verb~|PProd~}, \code{\verb~|PSigma~}); 089, 091 projections of proof fields out of a \code{\verb~|Prop~} structure before any dependent data field; 095 recursor of an indexed \code{\verb~|Prop~} family eliminating into \code{\verb~|Sort~}; 098 projection reduction; 099 rule K for \code{\verb~|Eq~}; 102–103 Nat literal typing and \code{\verb~|3 ≡ succ (succ (succ zero))~}; 104, 106, 107 proof irrelevance (also when the type only reduces to \code{\verb~|Prop~}, and between applications); 108–110 unit eta; 112 structure eta; 114–115 function eta; 119–122 reflexive inductives (positivity after reduction, recursor type, ι); 123–124 \code{\verb~|Acc.rec~} type and ι; 126–131 \code{\verb~|Quot~} signatures and reductions.}
+
+\p{Three of them contain user axioms (034, 035, 107; and reject test 047): the con-leche family declines those.}
+}
+
+\subtree{
+\title{3.2 tutorial/ — reject tests (47)}
+
+\table{
+\tr{\th{test}\th{why it is invalid}\th{check that catches it (official 4.36.0 message)}}
+\tr{\td{002_badDef}\td{\code{\verb~|def badDef : Prop := Type~}}\td{value type vs declared type ("declaration type mismatch … has type Type 1 … expected Prop")}}
+\tr{\td{009_forallSortBad}\td{Π whose third binder domain is a proof variable}\td{domain's type must whnf to a sort ("type expected x")}}
+\tr{\td{010_nonTypeType}\td{definition whose "type" is the function \code{\verb~|constType~}}\td{declared type must be a type ("type expected constType")}}
+\tr{\td{011_nonTypeAxiom}\td{same for an axiom}\td{axioms need the same check}}
+\tr{\td{012_nonPropThm}\td{theorem whose statement \code{\verb~|Prop~} has sort \code{\verb~|Type~}}\td{theorem type must be a proposition ("type of theorem … is not a proposition")}}
+\tr{\td{014_selfProof}\td{theorem's value is the theorem itself}\td{constant not in the environment while being checked ("unknown constant")}}
+\tr{\td{019_tut06_bad01}\td{\code{\verb~|levelParams = [u, u]~}}\td{duplicate universe parameter}}
+\tr{\td{046_inductBadNonSort}\td{inductive whose type is a λ}\td{"type expected"}}
+\tr{\td{047_inductBadNonSort2}\td{inductive whose type is the axiom \code{\verb~|aType : Type~}}\td{type must end in a \code{\verb~|Sort~} ("type expected aType")}}
+\tr{\td{048_inductLevelParam}\td{inductive with \code{\verb~|[u, u]~}}\td{duplicate universe parameter}}
+\tr{\td{049_inductTooFewParams}\td{\code{\verb~|numParams = 2~}, type has one binder}\td{"incorrect number of parameters"}}
+\tr{\td{050_inductWrongCtorParams}\td{constructor parameter of type \code{\verb~|Type~} where the inductive's is \code{\verb~|Prop~}; result \code{\verb~|I aProp~}}\td{constructor telescope must start with the block's parameters and return \code{\verb~|I params…~} ("invalid occurrence of datatype … must be applied to the parameters and universe levels")}}
+\tr{\td{051_inductWrongCtorResParams}\td{result \code{\verb~|I y x~} (parameters swapped)}\td{same}}
+\tr{\td{052_inductWrongCtorResLevel}\td{result \code{\verb~|I.{u2,u1} x y~}}\td{same (universe arguments must be the declared ones in order)}}
+\tr{\td{053_inductInIndex}\td{result \code{\verb~|I (I aProp)~}: the type inside an index}\td{"invalid return type"}}
+\tr{\td{054_indNeg}\td{\code{\verb~|mk : (I → I) → I~}}\td{strict positivity ("non positive occurrence")}}
+\tr{\td{056_reduceCtorType.mk}\td{constructor type \code{\verb~|id Type I~} (not a manifest Π/application)}\td{constructor type as a whole is \em{not} reduced ("invalid return type")}}
+\tr{\td{057_indNegReducible}\td{field \code{\verb~|(constType aType I → I)~}; the occurrence would vanish by reducing inside the domain}\td{only whnf of the field type; inner occurrence is negative}}
+\tr{\td{061_typeWithTooHighTypeField.mk}\td{\code{\verb~|T : Type~} with a field \code{\verb~|Type~}}\td{field universe ≤ inductive universe ("universe level … is too big")}}
+\tr{\td{073_BogusRecursor}\td{recursor record claims type \code{\verb~|False~}, used to prove \code{\verb~|False~}}\td{regenerate recursors ("incorrect number of universe levels parameters for 'BogusRecursor.rec', \verb~|#~1 expected, \verb~|#~0 provided")}}
+\tr{\td{087_projOutOfRange}\td{\code{\verb~|z.3~} on \code{\verb~|And~}}\td{field index range ("invalid projection")}}
+\tr{\td{088_projNotStruct}\td{projection out of \code{\verb~|N~} (two constructors)}\td{structure-likeness ("invalid projection")}}
+\tr{\td{090, 092_projProp2/4}\td{data field out of a \code{\verb~|Prop~} structure}\td{projected field of a proposition must be a proof}}
+\tr{\td{093_projProp5}\td{proof field whose type depends on an earlier data field}\td{walking past a data field that later fields depend on is forbidden}}
+\tr{\td{094_projProp6}\td{proof field located after such a dependent data field}\td{same}}
+\tr{\td{096, 097_projIndexData(2)}\td{\code{\verb~|x.[PropStructure#i]~} where \code{\verb~|x : ProjDataIndex n~} (and the intended point: data stored in a \code{\verb~|Prop~} family)}\td{projection's type name must be the head of the struct's type; Prop rule ("invalid projection")}}
+\tr{\td{100_ruleKbad}\td{\code{\verb~|Eq.rec a (h : true = false) = a~} by \code{\verb~|rfl~}}\td{K only when the major's type matches the constructor's ("declaration type mismatch")}}
+\tr{\td{101_ruleKAcc}\td{\code{\verb~|Acc.rec … h = a~} by \code{\verb~|rfl~}}\td{\code{\verb~|Acc~} is not K-like (its constructor has fields)}}
+\tr{\td{105_proofIrrelevanceBad}\td{\code{\verb~|h1 = h2~} for \code{\verb~|h1 h2 : p~}, \code{\verb~|p : Type~}}\td{proof irrelevance only in \code{\verb~|Prop~}}}
+\tr{\td{111_indexedUnitEta}\td{\code{\verb~|x = y~} for \code{\verb~|x y : IndexedUnit true~}}\td{unit-like eta not for indexed families}}
+\tr{\td{113_indexedStructEta}\td{\code{\verb~|IndexedSingleton.mk True.intro = x~}}\td{structure eta not for indexed families}}
+\tr{\td{116_funEtaBad}\td{\code{\verb~|(fun x => f (g x)) = f~}}\td{eta must compare bodies}}
+\tr{\td{117_reflOccLeft}\td{field \code{\verb~|Nat → (I → Nat)~}}\td{positivity behind arrows}}
+\tr{\td{118_reflOccInIndex}\td{field \code{\verb~|Nat → I (I α)~}; as exported the constructor type is also ill-typed}\td{positivity / type check of the constructor ("application type mismatch")}}
+\tr{\td{125_accRecNoEta}\td{\code{\verb~|Acc.rec … (h : Acc r a) = p~} by \code{\verb~|rfl~}}\td{no structure eta for \code{\verb~|Acc~} majors}}
+\tr{\td{132_dup_defs}\td{two definitions named \code{\verb~|dup_defs~}}\td{duplicate constant name ("Duplicate declaration", raised by the reader)}}
+\tr{\td{133_dup_ind_def}\td{definition named like an inductive type}\td{same}}
+\tr{\td{134_dup_ctor_def}\td{definition named like a constructor}\td{same}}
+\tr{\td{135_dup_rec_def}\td{definition named like a recursor}\td{same}}
+\tr{\td{136_misnamed_rec_user}\td{recursor exported as \code{\verb~|misnamed_rec.not_rec~}, used by a definition}\td{recursors are generated, named \code{\verb~|<type>.rec~} ("unknown constant 'misnamed_rec.not_rec'")}}
+\tr{\td{137_dup_rec_def2}\td{misnamed recursor and a definition taking \code{\verb~|dup_rec_def2.rec~}}\td{generated name collides ("constant has already been declared")}}
+\tr{\td{138_dup_ctor_rec}\td{constructor named \code{\verb~|X.rec~}}\td{duplicate name}}
+\tr{\td{139_DupConCon}\td{two constructors with one name}\td{duplicate name}}
+\tr{\td{140_falseFromUnsafe}\td{theorem \code{\verb~|False := unsafeLoop~} (\code{\verb~|safety: unsafe~})}\td{unsafe constants are not visible to safe ones ("unknown constant 'unsafeLoop'")}}
+\tr{\td{141_falseFromPartial}\td{theorem \code{\verb~|False := partialLoop~} (\code{\verb~|safety: partial~})}\td{same for partial}}
+}
+
+\p{Top-checker policy on 140/141: nano-lean, gruszka, rpylean, pestka, kefir, palladium, nanoda, nanobruijn, tenet-jvm, official reject; sokonanoda and the con-leche family decline (allowed, but one more decline).}
+}
+
+\subtree{
+\title{3.3 bugs/ (2 accept, 32 reject)}
+
+\table{
+\tr{\th{test}\th{forged / exploited}\th{required check; where official 4.36.0 stops}\th{accepted this bug}}
+\tr{\td{closure-level-subst}\td{\code{\verb~|lower : Family.{0} := good~} with \code{\verb~|good : Family.{1}~}; two closures over the same body differing only in the universe substitution}\td{closure/cache keys must include universe instantiation ("declaration type mismatch 'lower'")}\td{sokonanoda, mathgraph}}
+\tr{\td{constlevels}\td{constant used with the wrong number of universe arguments}\td{arity check at every \code{\verb~|const~} ("let-declaration type mismatch")}\td{UB in official \code{\verb~|lazy_delta_reduction_step~} (lean4\verb~|#~10577)}}
+\tr{\td{ctor-num-fields}\td{constructor \code{\verb~|numFields = 0~} for a 1-field structure → fake unit-like eta}\td{recompute numFields}\td{nanoda family}}
+\tr{\td{eta-ctor-alias}\td{\code{\verb~|f = Box.mk~} for \code{\verb~|f : BoxFn~} (alias of \code{\verb~|Bool → Box~})}\td{if eta-expanding partially applied constructors, take arity from the constructor's type, not from the un-unfolded other side}\td{draft of lean4\verb~|#~15373}}
+\tr{\td{k-rec-conv}\td{\code{\verb~|fun x => x~} vs \code{\verb~|fun _ => y~} under K}\td{K-reduction must not make unrelated minors convertible}\td{sokonanoda}}
+\tr{\td{large-elim-param}\td{\code{\verb~|MyBool.{u} : Sort u~} with a large-eliminating recursor}\td{"level is never zero" must be false for a bare parameter; regenerate recursor ("incorrect number of universe levels parameters for 'MyBool.rec'")}\td{mini}}
+\tr{\td{large-elim-prop-bool}\td{two-constructor \code{\verb~|Prop~} with a \code{\verb~|Type~}-style recursor}\td{regenerate recursor}\td{kiota}}
+\tr{\td{level-imax-leq}\td{\code{\verb~|imax u v + 1 ≤ imax u v~}}\td{level \code{\verb~|≤~} must carry the successor offset through \code{\verb~|imax~}}\td{nanoda}}
+\tr{\td{level-imax-normalization}\td{\code{\verb~|imax 0 v~} vs \code{\verb~|succ (imax 0 v)~}}\td{normal form must keep the offset}\td{—}}
+\tr{\td{loose-bvar-value}\td{definition value \code{\verb~|#0~} (loose), reached through an inductive that is checked first}\td{declaration roots must be closed; reject before unfolding ("type checker does not support loose bound variables")}\td{pestka hung; sokonanoda errors (exit 3) today}}
+\tr{\td{nat-rec-k-lie}\td{\code{\verb~|Nat.rec~} marked \code{\verb~|k = true~}}\td{recompute \code{\verb~|k~}}\td{nanoda family (variant)}}
+\tr{\td{nat-rec-rules}\td{wrong \code{\verb~|Nat.rec~} succ rule}\td{compare rules with derived ones, not with themselves}\td{nanoda}}
+\tr{\td{\strong{nat-shift-huge (accept)}}\td{\code{\verb~|Nat.shiftRight 42 (2^64) = 0~}, \code{\verb~|Nat.shiftLeft 0 (2^64) = 0~}, closed and under \code{\verb~|Nat.rec~}}\td{shift counts ≥ 2⁶⁴ without overflow/OOM}\td{rpylean crashed; today: nano-lean declines (11 GB, budget), sokonanoda panics, tenet-jvm OOM after 366 s, 5 checkers reject}}
+\tr{\td{nested-name-capture}\td{rule of \code{\verb~|Shadow.rec~} calls \code{\verb~|_nested.Cov_1.rec~}; a later definition takes that name}\td{auxiliary names of nested-inductive elaboration must be uncapturable; rules compared with derived ones}\td{nanoda, nanoclo, nanobruijn, sokonanoda (earlier); mathgraph, metalean, nanoclo-fortran today}}
+\tr{\td{nested-rec-rule-nfields}\td{\code{\verb~|nfields = 1~} instead of 2 in a rule of a nested inductive's recursor}\td{recompute nfields, also for nested}\td{nanoda (earlier); 4 checkers today}}
+\tr{\td{nested-unused-param}\td{ill-typed argument \code{\verb~|b~} in a nested occurrence \code{\verb~|L (E w) b~} that disappears in the auxiliary type}\td{type-check nested applications' parameters ("invalid projection w.1")}\td{official (lean4\verb~|#~14576)}}
+\tr{\td{open-term-cache-context}\td{shared open subterm \code{\verb~|#1 #0~} under binders of different types}\td{infer-cache for open terms must depend on the binder types ("application type mismatch f y")}\td{ocaml4lean branch}}
+\tr{\td{orphan-rec}\td{extra recursor \code{\verb~|rogue : False~} with \code{\verb~|all = []~}}\td{reject every recursor not derived ("unknown constant 'rogue'")}\td{nanoda}}
+\tr{\td{pi-closure-context}\td{\code{\verb~|bad : TrueTy → FalseTy := fun _ => FalseTy~}}\td{do not confuse "closure that evaluates the body" with "closure that infers its type"}\td{sokonanoda, mathgraph}}
+\tr{\td{proj-non-structure}\td{projection out of a two-constructor type}\td{structure check}\td{nanoda family}}
+\tr{\td{proj-of-imax-prop}\td{data projection out of \code{\verb~|Sort (imax 1 0)~}}\td{Prop test after level normalisation ("invalid projection p.1")}\td{official (lean4\verb~|#~14613)}}
+\tr{\td{proj-of-stuck-prop}\td{family whose sort is \code{\verb~|Gate.rec … Prop h~}, Prop only via a hash-dependent defeq cache}\td{result sort must reduce to a sort ("type expected"); no order-dependent transitivity in caches}\td{official ≤ nightly-2026-08-01}}
+\tr{\td{proj-of-subst-prop}\td{same projection reached by substituting a proof of a defeq proposition}\td{\code{\verb~|is_prop~} must fail hard on a stuck sort (lean4\verb~|#~14807)}\td{official}}
+\tr{\td{quot-bad-type}\td{\code{\verb~|Quot~} record with type \code{\verb~|False~}}\td{validate/generate quot signatures}\td{rpylean; con-ron/con-agua decline}}
+\tr{\td{rec-k-lie}\td{two-constructor type with \code{\verb~|k = true~}}\td{recompute \code{\verb~|k~}}\td{nanoda family}}
+\tr{\td{rec-missing-ih}\td{recursor whose \code{\verb~|step~} rule drops the IH (hash-collision dependent)}\td{derive independently; positivity error on \code{\verb~|step~}}\td{official ≤ nightly-2026-08-01}}
+\tr{\td{rec-of-subst-prop}\td{\code{\verb~|Prop~} family with a \code{\verb~|Type~} field, eliminated by its own recursor}\td{reject the stuck result sort ("type expected Issue.resultSort Issue.gateWitness")}\td{official}}
+\tr{\td{rec-rule-proof-irrel}\td{rule rhs replaced by an ill-typed proof}\td{structural comparison of rules (not defeq)}\td{lazylean, mathgraph, nanoclo, nanoclo-fortran today}}
+\tr{\td{rec-rule-proof-irrel-nested}\td{same in an auxiliary recursor (\code{\verb~|N.rec_1~})}\td{same, also for auxiliary recursors}\td{\strong{7 checkers today — the most-failed test}}}
+\tr{\td{rec-rule-wrong-arg}\td{rule \code{\verb~|mk true~} instead of \code{\verb~|mk b~}}\td{derive rules}\td{—}}
+\tr{\td{rec-type-proof-irrel}\td{recursor \em{type} with an ill-typed proof inside}\td{structural comparison of recursor types}\td{lazylean today}}
+\tr{\td{\strong{str-lit-utf8 (accept)}}\td{\code{\verb~|"é€😀" = String.ofList [Char.ofNat 0xE9, 0x20AC, 0x1F600]~}}\td{code points, not bytes}\td{rpylean rejected; 3 checkers reject today}}
+\tr{\td{str-lit-utf8-bad}\td{\code{\verb~|"é" = String.ofList [0xC3, 0xA9]~}}\td{same}\td{rpylean}}
+\tr{\td{unit-rec-rule}\td{\code{\verb~|PUnit.rec~} rule returns \code{\verb~|PUnit.unit~} instead of the minor}\td{derive rules also for field-less constructors}\td{sokonanoda (earlier); mathgraph, nanoclo-fortran today}}
+}
+}
+
+\subtree{
+\title{3.4 other/ (5 accept, 5 reject)}
+
+\table{
+\tr{\th{test}\th{outcome}\th{content}}
+\tr{\td{sparse-name-index}\td{accept}\td{\code{\verb~|axiom foo : Prop~} with name id 2 and expr id 4 (nanoda and the con-leche family decline)}}
+\tr{\td{level-index-out-of-order}\td{accept}\td{\code{\verb~|axiom foo : Sort 2~} with level 2 defined before level 1}}
+\tr{\td{nat-lit-add / -sub / -ble}\td{accept}\td{\code{\verb~|Nat.add 123456789 987654321 = 1111111110~}, \code{\verb~|Nat.sub 1000000 1000001 = 0~}, \code{\verb~|Nat.ble 1000000 1000001 = true~} by \code{\verb~|rfl~}: literal arithmetic is mandatory (applications of \code{\verb~|Nat.add~} to literals, not \code{\verb~|HAdd~})}}
+\tr{\td{nat-lit-add-bad}\td{reject}\td{\code{\verb~|… = 1111111111~} with proof \code{\verb~|Eq.refl~}}}
+\tr{\td{extra-rec}\td{reject}\td{block of \code{\verb~|False~} plus a second recursor \code{\verb~|rogue : False~}}}
+\tr{\td{orphan-ctor}\td{reject}\td{block of \code{\verb~|False~} plus a constructor \code{\verb~|rogue : False~} with \code{\verb~|induct = Orphan~} (undeclared)}}
+\tr{\td{inductive-undeclared-universe}\td{reject}\td{\code{\verb~|inductive U : Sort u~} with \code{\verb~|levelParams = []~} ("invalid reference to undefined universe level parameter 'u'"); accepted today by mathgraph, nanoclo-fortran, vow}}
+\tr{\td{proj-of-prop}\td{reject}\td{\code{\verb~|(Wrapper.mk True.intro).p : False~} — the structure argument of a projection must be type-\em{checked}, not just inferred}}
+}
+}
+
+\subtree{
+\title{3.5 corner-cases/ (1 accept, 30 either)}
+
+\p{\code{\verb~|proof-param-ok~} (accept): inductive with two proof parameters used in declared order. Answers: O35 = official v4.35.0 (the ranked "official"), ON = official-nightly 2026-11-14; then nano-lean, gruszka, sokonanoda, rpylean, pestka, kefir; last column = accepted/rejected among all 37. A accept, R reject, T timeout, D decline.}
+
+\table{
+\tr{\th{test}\th{O35}\th{ON}\th{nl}\th{gr}\th{so}\th{rp}\th{pe}\th{ke}\th{A/R}\th{what decides}}
+\tr{\td{alg-conv-trans-acc}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{0/35}\td{needs inventing a proof of \code{\verb~|Acc~} (conversion not transitive)}}
+\tr{\td{alg-conv-trans-acc-left / -right}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{32/3, 34/1}\td{each half is checkable}}
+\tr{\td{alg-conv-trans-quot}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{0/37}\td{same for \code{\verb~|Quot~} of propositions}}
+\tr{\td{alg-conv-trans-quot-left}\td{R}\td{R}\td{R}\td{R}\td{A}\td{R}\td{R}\td{R}\td{5/32}\td{whnf first reduces one side; comparing arguments first would accept}}
+\tr{\td{alg-conv-trans-quot-left-def / -right}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{33/4, 37/0}\td{—}}
+\tr{\td{eta-ctor}\td{R}\td{A}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{7/29}\td{η for partially applied constructors (lean4\verb~|#~15373)}}
+\tr{\td{eta-rec-struct, eta-rule-k}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{2/35}\td{η for recursors missing the major (lean4\verb~|#~15374)}}
+\tr{\td{eta-struct-major-and}\td{R}\td{A}\td{R}\td{A}\td{A}\td{A}\td{A}\td{A}\td{19/18}\td{structure eta on a \code{\verb~|Prop~} major (\code{\verb~|And~})}}
+\tr{\td{eta-struct-major-no-whnf, -and-no-whnf (60 s)}\td{T}\td{A}\td{D}\td{A}\td{T}\td{T}\td{A}\td{A}\td{14/4, 19 other}\td{eta-expand the major \em{before} reducing it; otherwise non-termination}}
+\tr{\td{eta-unit-like-nested, -pi, -proof-field, -struct}\td{R}\td{A}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{5/31–32}\td{wider unit-like eta (lean4\verb~|#~15372)}}
+\tr{\td{imax-nested-absorption}\td{R}\td{R}\td{A}\td{R}\td{A}\td{A}\td{R}\td{R}\td{21/16}\td{complete level equality vs official normalisation}}
+\tr{\td{imax-right-successor}\td{R}\td{R}\td{A}\td{R}\td{A}\td{A}\td{A}\td{R}\td{24/13}\td{\code{\verb~|imax u (v+1) = max u (v+1)~}}}
+\tr{\td{large-elim-maybe-prop}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{3/33}\td{large elimination for \code{\verb~|Sort u~} box (official: recursor arity mismatch)}}
+\tr{\td{let-value-type-mismatch}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{1/36}\td{check the \code{\verb~|let~} annotation ("let-declaration type mismatch")}}
+\tr{\td{nested-nonuniform-param}\td{R}\td{R}\td{A}\td{A}\td{R}\td{R}\td{R}\td{R}\td{18/17}\td{parameter of a nested occurrence must be the block's parameter}}
+\tr{\td{nested-redex-aux}\td{A}\td{A}\td{A}\td{A}\td{R}\td{A}\td{A}\td{A}\td{32/2}\td{nested occurrences are collected syntactically (two auxiliaries)}}
+\tr{\td{positivity-whnf}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{1/35}\td{occurrence hidden in an unused argument inside an arrow domain}}
+\tr{\td{proj-maybe-prop, -past}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{26/10}\td{projection out of \code{\verb~|MaybeProp.{u} : Sort u~}}}
+\tr{\td{proof-param-swap}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{0/36}\td{swapped proof parameters in a constructor result}}
+\tr{\td{subject-reduction-redex}\td{A}\td{R}\td{A}\td{A}\td{A}\td{R}\td{A}\td{A}\td{25/10}\td{annotation supplies the middle term}}
+\tr{\td{subject-reduction-reduct}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{R}\td{0/35}\td{—}}
+\tr{\td{vanishing-occurrence}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{A}\td{R}\td{31/5}\td{occurrence removed by whnf of the field type}}
+}
+
+\p{The nightly already accepts the eta family (\code{\verb~|eta-ctor~}, \code{\verb~|eta-struct-major-*~}, \code{\verb~|eta-unit-like-*~}) and rejects \code{\verb~|subject-reduction-redex~}; these tests may become \code{\verb~|accept~} when the arena's official checker and toolchain move on. Imitating O35 is safe today; the algorithm should leave room for the nightly's eta rules, in particular "eta-expand a structure major before whnf", which is the only way not to loop on the two \code{\verb~|no-whnf~} tests.}
+}
+
+\subtree{
+\title{3.6 perf/ (37 accept, 8 reject)}
+
+\p{Virtual seconds (instr/6e9); E = error, T = timeout. tenet-jvm's floor is ≈ 0.11 (JVM start-up).}
+
+\table{
+\tr{\th{test}\th{to}\th{official}\th{nano-lean}\th{gruszka}\th{tenet-jvm}\th{the algorithmic question}}
+\tr{\td{app-lam}\td{70}\td{4.87}\td{0.01}\td{0.08}\td{11.70}\td{n levels of \code{\verb~|c (λ…) (λ…)~} with shared arguments, depth 19,999: infer cache on shared subterms (else 2ⁿ) and no O(n) substitution per binder (else n²)}}
+\tr{\td{args-before-unfold}\td{40}\td{0.04}\td{0.00}\td{0.00}\td{0.26}\td{\code{\verb~|count #n~} vs \code{\verb~|count (N.add #(n-1) #1)~}: compare arguments of an equal head before unfolding (Θ(n) vs Θ(n²))}}
+\tr{\td{beta-ladder}\td{40}\td{1.67}\td{0.00}\td{0.04}\td{2.23}\td{2000 nested β-redexes over one body: environment machine Θ(n) vs substitution Θ(n²)}}
+\tr{\td{church-numerals}\td{40}\td{0.05}\td{0.00}\td{0.01}\td{0.33}\td{\code{\verb~|cmul (cnum n) (cnum (n+1))~} both ways, 14,520 β steps under binders}}
+\tr{\td{discarded-argument}\td{40}\td{0.17}\td{0.00}\td{0.00}\td{0.46}\td{\code{\verb~|dropArg (count #n)~} vs \code{\verb~|dropArg (count #(n+1))~}: unfold a head that ignores its argument before comparing arguments}}
+\tr{\td{discarded-argument-match}\td{40}\td{0.15}\td{0.00}\td{0.00}\td{0.75}\td{same through \code{\verb~|brecOn~}/\code{\verb~|below~} tables that are built and never read}}
+\tr{\td{folded-constant-first / -last}\td{40}\td{0.05 / 0.04}\td{0.00}\td{0.00}\td{0.28}\td{\code{\verb~|tagged (count #n)~} vs a pair: a constant unfolded for one component should not have to be re-evaluated for the other}}
+\tr{\td{fueled-chain}\td{40}\td{0.13}\td{0.02}\td{0.01}\td{0.77}\td{monadic programs differing in the instance; proof irrelevance on \code{\verb~|Subtype~} proofs doubles the work per guard unless equal terms are recognised early (nanobruijn: 256 s at N = 12)}}
+\tr{\td{gf3-matrix-product}\td{70}\td{1.82}\td{0.83}\td{2.44}\td{9.94}\td{781×781 GF(3) matrices as 609,961-bit \code{\verb~|Nat~} literals: bignum shift/and/mul/xor speed; caches must not retain every intermediate (official 3.5 GiB); hash of big literals}}
+\tr{\td{grind-ring-5}\td{50}\td{2.18}\td{0.22}\td{0.25}\td{4.13}\td{one large \code{\verb~|grind~} proof term (203 k lines)}}
+\tr{\td{identical-nesting}\td{40}\td{0.03}\td{0.00}\td{0.00}\td{0.11}\td{identical terms \code{\verb~|f4 (f4 (…))~}: test syntactic/pointer equality before unfolding (else exponential)}}
+\tr{\td{irrelevance-before-evaluation}\td{40}\td{0.03}\td{0.00}\td{0.00}\td{0.12}\td{\code{\verb~|slowTriv (count #n) = True.intro~}: proof irrelevance before reducing proofs}}
+\tr{\td{irrelevance-refutes}\td{40}\td{0.03}\td{0.00}\td{0.00}\td{0.12}\td{proofs of non-defeq propositions are not defeq: take irrelevance's negative answer too instead of unfolding \code{\verb~|Nat.rec~} proofs}}
+\tr{\td{ite-taken-branch}\td{230}\td{19.41}\td{0.04}\td{0.05}\td{17.88}\td{\code{\verb~|(if true = true then piA else tA)~} vs \code{\verb~|piA~}: unfold the cheap \code{\verb~|ite~}/\code{\verb~|Decidable~} side although the other constant is "higher"}}
+\tr{\td{ite-taken-branch-bad (reject)}\td{110}\td{6.77}\td{0.27}\td{0.62}\td{7.86}\td{\code{\verb~|if false = true …~}: must decide the condition; refuting may evaluate \code{\verb~|piA~} (rpylean 27.6)}}
+\tr{\td{let-fold}\td{40}\td{0.06}\td{0.00}\td{0.01}\td{2.25}\td{\code{\verb~|let d := bits #16 0; d + 0 = Nat.add d 0~}: do not substitute the let value and then fold closed Nat arithmetic (2ⁿ)}}
+\tr{\td{let-ladder}\td{40}\td{1.01}\td{0.00}\td{0.00}\td{1.36}\td{2000 \code{\verb~|let~}s separated by additions: O(1) per binding}}
+\tr{\td{loop-unfolded-once}\td{40}\td{0.52}\td{0.04}\td{0.04}\td{1.92}\td{\code{\verb~|allInK 0 N p~} vs its one-step unfolding, N = 10⁶: unfold once, do not run the loop}}
+\tr{\td{loop-unfolded-once-bad (reject)}\td{120}\td{14.24}\td{0.04}\td{0.05}\td{2.79}\td{bodies differ under a binder; official refutes in ~N³}}
+\tr{\td{magma-list-deep-n21 / n36}\td{70 / 360}\td{2.70 / 35.45}\td{0.05 / 0.42}\td{0.28 / 9.43}\td{4.99 / 57.76}\td{\code{\verb~|decide~} over finite magmas with \code{\verb~|List~} tables: raw evaluation throughput on deep closed computations (rpylean 0.05 / 0.20)}}
+\tr{\td{magma-list-pair-n21 / n7}\td{240 / 60}\td{18.55 / 1.71}\td{2.23 / 0.20}\td{3.12 / 0.25}\td{19.07 / 2.58}\td{21⁴ ≈ 195 k tuples, list lookups (rpylean best: 1.11)}}
+\tr{\td{magma-string-n4 / pair-n9}\td{70 / 120}\td{3.58 / 8.21}\td{0.23 / 0.49}\td{0.26 / 0.72}\td{4.89 / 14.64}\td{table stored in a \code{\verb~|String~}: literal decoding on every lookup (rpylean OOM at 14.65 GB on n9)}}
+\tr{\td{proj-app-lazy-delta}\td{60}\td{2.08}\td{0.00}\td{0.00}\td{3.04}\td{\code{\verb~|small.1 a~} vs \code{\verb~|(big N).1 a~}: lazy δ on \em{applied} projections (lean4\verb~|#~16613)}}
+\tr{\td{proj-applied-struct}\td{230}\td{14.03}\td{0.00}\td{0.00}\td{14.82}\td{\code{\verb~|(gC slowA c).fn x~} vs \code{\verb~|(gC' slowA c).fn x~}: unfold \code{\verb~|gC'~} instead of reducing the structure (2¹⁹ steps); palladium E}}
+\tr{\td{proj-applied-struct-bad / -arg-bad (reject)}\td{130 / 120}\td{4.88 / 4.69}\td{0.88 / 2.65}\td{1.06}\td{12.93 / 5.34}\td{equal heads with different arguments / propositional-only equality must be refuted}}
+\tr{\td{proj-cheap-struct}\td{40}\td{0.04}\td{0.00}\td{0.00}\td{0.22}\td{\code{\verb~|(S u).re~} vs \code{\verb~|(S ()).re~}: compare stuck projections by their structures' arguments; do not evaluate \code{\verb~|S~} (2¹⁷)}}
+\tr{\td{proj-lazy-struct}\td{40}\td{0.04}\td{0.00}\td{0.00}\td{0.17}\td{\code{\verb~|(P a).1~} vs \code{\verb~|(Q b).1~}: project as soon as both are constructors; do not compare whole structures}}
+\tr{\td{proj-stuck-struct}\td{40}\td{0.04}\td{0.00}\td{0.00}\td{0.17}\td{keep the unreduced structure argument of a stuck projection (else exponential unrolling)}}
+\tr{\td{prop-struct-projections}\td{40}\td{0.10}\td{0.01}\td{0.01}\td{0.63}\td{200-field \code{\verb~|Prop~} structure: "is field j used later" must be O(1) per field (N² not N³)}}
+\tr{\td{refute-cheap-first / -last (reject)}\td{40}\td{0.04 / 0.18}\td{0.00}\td{0.00}\td{0.13 / 0.63}\td{\code{\verb~|(false, count #n) = (true, count #(n+1))~} and swapped: order of comparing constructor arguments}}
+\tr{\td{repeated-subproblem}\td{40}\td{0.03}\td{0.00}\td{0.00}\td{0.12}\td{perfect trees: memoise proved-equal pairs (n vs 2ⁿ)}}
+\tr{\td{shared-subterm}\td{40}\td{0.06}\td{0.00}\td{0.01}\td{0.37}\td{consume a shared tree through its DAG, never expand 2ⁿ nodes}}
+\tr{\td{shift-cascade}\td{40}\td{0.05}\td{0.00}\td{0.00}\td{0.28}\td{1000 nested \code{\verb~|let~}s capturing a λ parameter: no accumulation of deferred shifts}}
+\tr{\td{short-circuit-and}\td{220}\td{17.50}\td{0.04}\td{0.04}\td{16.71}\td{\code{\verb~|false && A~} vs \code{\verb~|false && B~} with open, unequal A, B: unfold \code{\verb~|&&~} before comparing arguments (pestka 3.06)}}
+\tr{\td{short-circuit-and-bad (reject)}\td{120}\td{6.18}\td{0.18}\td{0.65}\td{6.69}\td{\code{\verb~|true && …~}: must compare the arguments}}
+\tr{\td{unfold-before-literal}\td{240}\td{14.47}\td{2.65}\td{0.01}\td{22.49}\td{\code{\verb~|[slowA, 1].sum~} vs \code{\verb~|slowA + (1 + 0)~}: δ-unfold before Nat-literal folding forces \code{\verb~|slowA~} (2¹⁹)}}
+\tr{\td{unfold-before-literal-bad (reject)}\td{130}\td{4.87}\td{0.88}\td{1.06}\td{12.91}\td{\code{\verb~|… = slowA + (2 + 0)~}: failure of the shortcut must not be a "no" by itself, nor a "yes"}}
+\tr{\td{unfold-before-literal-fallback}\td{270}\td{14.52}\td{2.65}\td{3.60}\td{22.31}\td{\code{\verb~|[slowA + 1, 1].sum = slowA + (2 + 0)~}: after the argument comparison fails, continue and accept (rpylean T, kefir 0.00)}}
+\tr{\td{unroll-versus-evaluate}\td{40}\td{0.04}\td{0.00}\td{0.00}\td{0.16}\td{\code{\verb~|count #(n+1)~} vs \code{\verb~|N.add (count #n) #1~}: unfold the right one of two different heads}}
+}
+
+\p{Sources named in the descriptions: Courant & Leroy (POPL 2026) §2/§10, smalltt's \code{\verb~|conv_eval~}, AxiomMath/CFSG certificates, con-leche's own proofs, the SAIR equational-theories certificates.}
+}
+}
+
+\subtree{
+\title{4. results.json: failures, traps, policies}
+
+\subtree{
+\title{4.1 Everything the top 12 do not get right}
+
+\table{
+\tr{\th{checker}\th{test}\th{expected}\th{status}\th{reason (from stderr/stdout)}}
+\tr{\td{nano-lean}\td{bugs/nat-shift-huge}\td{accept}\td{declined}\td{"declaration stack/arena budget exhausted" on 3 theorems; 11.0 GB, 72.9 G instr}}
+\tr{\td{nano-lean}\td{corner-cases/eta-struct-major-no-whnf, -and-no-whnf}\td{either}\td{declined}\td{"declaration work budget exhausted" after 21 G instr}}
+\tr{\td{gruszka, pestka, kefir, kefir-wasm}\td{—}\td{}\td{}\td{no failure, no decline}}
+\tr{\td{sokonanoda}\td{bugs/loose-bvar-value}\td{reject}\td{error (3)}\td{panic "eval: loose bvar"}}
+\tr{\td{sokonanoda}\td{bugs/nat-shift-huge}\td{accept}\td{error (3)}\td{panic "Nat.shiftLeft: shift does not fit in a machine word"}}
+\tr{\td{sokonanoda}\td{the two no-whnf corner cases}\td{either}\td{timeout 60 s}\td{reduces the major first}}
+\tr{\td{sokonanoda}\td{tutorial/140, 141}\td{reject}\td{declined}\td{"unsafe and partial definitions are not supported"}}
+\tr{\td{rpylean}\td{the two no-whnf corner cases}\td{either}\td{timeout}\td{—}}
+\tr{\td{rpylean}\td{perf/magma-string-pair-n9}\td{accept}\td{error (137)}\td{killed at 14.65 GB after 722 G instr}}
+\tr{\td{rpylean}\td{perf/unfold-before-literal-fallback}\td{accept}\td{timeout 270 s}\td{—}}
+\tr{\td{palladium}\td{perf/proj-applied-struct, -bad, -arg-bad, unfold-before-literal, -bad, -fallback}\td{3 accept, 3 reject}\td{error (3)}\td{"fault: … recursion depth exceeded"}}
+\tr{\td{con-ron, con-agua}\td{bugs/quot-bad-type}\td{reject}\td{declined}\td{"quotient declaration mismatch" (verified mode declines instead of rejecting)}}
+\tr{\td{con-ron, con-agua}\td{cedar; other/sparse-name-index, level-index-out-of-order; tutorial/034, 035, 107 (accept), 047 (reject)}\td{}\td{declined}\td{"non-standard axiom (…)" — any axiom outside its pinned set}}
+\tr{\td{con-ron, con-agua}\td{tutorial/140, 141}\td{reject}\td{declined}\td{"definition with safety unsafe/partial"}}
+\tr{\td{nanobruijn}\td{the two no-whnf corner cases}\td{either}\td{timeout}\td{—}}
+\tr{\td{nanoda}\td{the two no-whnf corner cases}\td{either}\td{timeout}\td{—}}
+\tr{\td{nanoda}\td{other/sparse-name-index, level-index-out-of-order}\td{accept}\td{declined}\td{"back-reference mismatch … Back-refs must be continuous"}}
+}
+
+\p{For reference — tenet-jvm: \code{\verb~|bugs/nat-shift-huge~} → \code{\verb~|java.lang.OutOfMemoryError: GC overhead limit exceeded~} after 366 s and 10,892 G instructions (error); the two no-whnf tests time out. official v4.35.0: only the two no-whnf timeouts. lean4lean (rank 28) wrongly rejects 7 accept tests with "deterministic timeout", "deep recursion detected", "unknown constant 'Bool.Reflects'".}
+}
+
+\subtree{
+\title{4.2 Tests most often answered wrongly (all 37 checkers)}
+
+\table{
+\tr{\th{wrong}\th{test}\th{expected}\th{who}}
+\tr{\td{7}\td{bugs/rec-rule-proof-irrel-nested}\td{reject}\td{lazylean, mathgraph, metalean-fast, metalean-slow, nanoclo, nanoclo-fortran, vow}}
+\tr{\td{5}\td{bugs/nat-shift-huge}\td{accept}\td{canonical-min, lazylean, lean4cobol, mathgraph, nanoclo (+ 11 declines/errors/timeouts: the most-missed test overall)}}
+\tr{\td{4}\td{bugs/rec-rule-proof-irrel}\td{reject}\td{lazylean, mathgraph, nanoclo, nanoclo-fortran}}
+\tr{\td{4}\td{bugs/nested-name-capture}\td{reject}\td{mathgraph, metalean-fast, metalean-slow, nanoclo-fortran}}
+\tr{\td{4}\td{bugs/nested-rec-rule-nfields}\td{reject}\td{same four}}
+\tr{\td{3}\td{bugs/str-lit-utf8}\td{accept}\td{canonical-min, lean4cobol, vow}}
+\tr{\td{3}\td{perf/ite-taken-branch}\td{accept}\td{canonical-min, lean4cobol, lean4lean}}
+\tr{\td{3}\td{other/inductive-undeclared-universe}\td{reject}\td{mathgraph, nanoclo-fortran, vow}}
+\tr{\td{2}\td{bugs/unit-rec-rule}\td{reject}\td{mathgraph, nanoclo-fortran}}
+\tr{\td{1 each}\td{bugs/rec-type-proof-irrel (lazylean), closure-level-subst, pi-closure-context (mathgraph), nested-unused-param (metalean-fast)}\td{reject}\td{}}
+}
+
+\p{Common theme: recursors (especially auxiliary recursors of nested inductives) compared up to defeq or not at all. Most declined/errored/timed-out non-either tests: \code{\verb~|bugs/nat-shift-huge~} (11), \code{\verb~|mathlib~} (11), \code{\verb~|perf/proj-applied-struct-bad~} (10), \code{\verb~|cedar~} (10), \code{\verb~|perf/unfold-before-literal-fallback~} (10), \code{\verb~|perf/proj-applied-struct-arg-bad~}, \code{\verb~|unfold-before-literal-bad~}, \code{\verb~|tutorial/140~}, \code{\verb~|141~} (9 each), \code{\verb~|perf/magma-string-pair-n9~}, \code{\verb~|proj-app-lazy-delta~}, \code{\verb~|proj-applied-struct~}, \code{\verb~|gf3-matrix-product~}, \code{\verb~|unfold-before-literal~}, \code{\verb~|con-leche~} (8 each).}
+}
+
+\subtree{
+\title{4.3 Policies of the leaders}
+
+\ul{
+\li{\strong{Axioms.} nano-lean, gruszka, pestka, rpylean, palladium, official: no axiom filter in the run command, cedar accepted. sokonanoda \code{\verb~|--axiom-allow-all~}; kefir \code{\verb~|--axiom-policy=allow-all-declared-axioms~} (prints the assumed axioms; mathlib: propext, Quot.sound, Classical.choice, sorryAx); nanoda/nanobruijn/nanoclo/mathgraph config \code{\verb~|"unsafe_permit_all_axioms": true~}. Only con-leche/con-ron/con-agua decline unknown axioms. \code{\verb~|sorryAx~} is an ordinary axiom in init, std, cslib, mathlib, cedar.}
+\li{\strong{native_decide / reduceBool.} At Lean 4.36 \code{\verb~|native_decide~} leaves a plain axiom per use (cedar). The strings \code{\verb~|trustCompiler~}, \code{\verb~|ofReduceBool~}, \code{\verb~|reduceBool~}, \code{\verb~|reduceNat~} have 0 occurrences in init.ndjson and std.ndjson, and \code{\verb~|lean4/src/kernel/~} contains only \code{\verb~|reduce_nat~} (literal arithmetic). tenet-jvm states it does not evaluate \code{\verb~|Lean.reduceBool~}/\code{\verb~|reduceNat~} and rejects proofs needing them; tenet (.NET) declines "a file that asks it to trust compiled code". For exports of older Lean versions these names may exist as ordinary constants/axioms; treating them as opaque is sound. Not verified: whether any current arena test contains them (the three tests exported with 4.34.x declare only the three standard axioms).}
+\li{\strong{Nat literal extension.} Mandatory (\code{\verb~|other/nat-lit-*~}, gf3, magma, reachability). 4.36 kernel list (\code{\verb~|type_checker.cpp:668-700~}): \code{\verb~|Nat.succ~}, \code{\verb~|add~}, \code{\verb~|sub~}, \code{\verb~|mul~}, \code{\verb~|pow~}, \code{\verb~|gcd~}, \code{\verb~|mod~}, \code{\verb~|div~}, \code{\verb~|beq~}, \code{\verb~|ble~}, \code{\verb~|land~}, \code{\verb~|lor~}, \code{\verb~|xor~}, \code{\verb~|shiftLeft~}, \code{\verb~|shiftRight~}; arguments are whnf'd and must both be literals (or \code{\verb~|Nat.zero~}). nanoda-family checkers enable it by flag (\code{\verb~|nat_extension~}, \code{\verb~|string_extension~}).}
+\li{\strong{Malformed input.} official: any reader error is an uncaught exception → exit 1 (rejected). gruszka/pestka wrapper: converter says invalid → reject; cannot convert (limit, unknown record or key) → decline; anything else incl. signals → decline (\code{\verb~|gruszka/scripts/arena-run~}). nano-lean: rejected → 1, budget exhaustion/unsupported/internal → 2 (\code{\verb~|nano-lean-v0.4.2/src/term/outcome.rs:55-60~}); an unsafe/partial definition is "not permitted in a safe proof export" → reject at import (\code{\verb~|src/import/json.rs:270-279~}). palladium: unsupported format → decline, internal fault → 3, I/O → 4. tenet-jvm: verdict starts as error; exit 3 for internal error/unreadable input; never declines. nanoda's arena wrapper maps every failure except 2 to 1. No arena test contains syntactically invalid JSON.}
+\li{\strong{Init.Prelude.} README: declarations of \code{\verb~|Init.Prelude~} in a test are either absent or those of an official release; checkers may check more but are not expected to handle foreign preludes; the Lean version in the header may be used. Leaders: gruszka "treats the whole file, including the prelude, as untrusted … builds the quotient package and every recursor itself"; con-ron/con-agua embed con-leche's prelude pins and \code{\verb~|natOpPinSets~}; nano-lean has a check of the primitives it reduces by name (\code{\verb~|nano-lean-v0.4.2/src/import/primitives.rs~}, only skimmed) and can compare the prelude with a trusted export (\code{\verb~|--prelude~} option, \code{\verb~|src/import/prelude.rs~}; not used in the arena command). Tests that redefine prelude names with forged data exist (\code{\verb~|bugs/nat-rec-rules~}, \code{\verb~|nat-rec-k-lie~}, \code{\verb~|unit-rec-rule~}, \code{\verb~|quot-bad-type~}) and are all caught by re-deriving recursors/quot.}
+\li{\strong{Resource exhaustion} is reported as decline or error by every leader, never as reject (a reject on a good test costs rank).}
+}
+}
+}
+
+\subtree{
+\title{5. Local reproduction and ground truth}
+
+\ul{
+\li{Arena data: \code{\verb~|work/arena-site/{index.html,results.json,lean-arena-tests.tar.gz}~}; tests extracted to \code{\verb~|work/arena-site/tests/{good,bad}/<group>/<name>.ndjson~} (138 good, 92 bad). Links on the site: \code{\verb~|https://arena.lean-lang.org/lean-arena-tests.tar.gz~}, \code{\verb~|https://arena.lean-lang.org/results.json~}.}
+\li{\p{Real corpora reproduced locally (Lean 4.36.0 toolchain already installed under \code{\verb!!|~/.elan!!}):}
+\pre{\verb~|
+TC=$HOME/.elan/toolchains/leanprover--lean4---v4.36.0
+LEAN_SYSROOT=$TC PATH=$TC/bin:$PATH $TC/bin/leanexport Init > init.ndjson         # 12 s, sha256 93b61a43…30ba = arena `init`
+# std: needs a non-`module` file that imports Std, exactly like the arena's leanfile flow
+printf -- '-- Import Std module to make all its declarations available for export\nimport Std\n' > Test.lean
+LEAN_SYSROOT=$TC PATH=$TC/bin:$PATH $TC/bin/lean -o Test.olean Test.lean
+LEAN_SYSROOT=$TC PATH=$TC/bin:$PATH LEAN_PATH=$PWD $TC/bin/leanexport Test > std.ndjson   # 17 s, sha256 15b659c1…2f7d = arena `std`
+~}
+\p{Results are in \code{\verb~|work/arena-site/generated/{init,std}.ndjson~}. \code{\verb~|leanexport Std~} directly gives a different, smaller file (557,816,663 bytes); without \code{\verb~|LEAN_SYSROOT~} the binary picks up the default toolchain and fails with "incompatible header".}}
+\li{Official verdicts: \code{\verb~|$TC/bin/leanchecker --from-export FILE~} → exit 0 "Lean default kernel accepts the solution" / exit 1 "… rejects the solution: while replaying declaration 'X': (kernel) …". Run for this report on all 92 bad tests (all exit 1) and 5 static corner cases. The arena's ranked "official" is v4.35.0; the tests are exported by v4.36.0.}
+\li{mathlib, cslib, cedar, con-leche, navier-stokes-euler, reachability are not downloadable; they need the respective repositories at the pinned revisions plus \code{\verb~|lake exe cache get~} (YAMLs in \code{\verb~|lean-kernel-arena/tests/~}).}
+}
+}
+
+\subtree{
+\title{6. Not verified / open}
+
+\ol{
+\li{Whether the arena's instruction count is user-only or user+kernel (§1.2).}
+\li{Version of \code{\verb~|jdk~} in nixpkgs \code{\verb~|nixos-26.05~}; whether a downloaded GraalVM (or a native image built at build time) is acceptable to the arena maintainers — nothing in the README forbids it; other checkers download toolchains and data in \code{\verb~|build~}.}
+\li{Record-kind distribution, longest line, longest \code{\verb~|natVal~}, deepest expression of the \strong{mathlib} export (only totals are known); the estimates in §2.12 are extrapolated from init/std.}
+\li{Absence of \code{\verb~|unsafe~}/\code{\verb~|partial~} definitions and of \code{\verb~|mdata~} in the six corpora that could not be inspected rests on indirect evidence (§2.7) and on the writer's code.}
+\li{\code{\verb~|String.ofList~}/\code{\verb~|Char.ofNat~} as the literal-expansion constants was read from the 4.36.0 kernel. All 12 tarball files that contain a \code{\verb~|strVal~} are 4.36.0 exports, so the hand-crafted 4.29.1-labelled tests do not depend on it; whether the two corpora exported with Lean 4.34.x (navier-stokes-euler, reachability) contain string literals, and under which constant name their Lean version expands them, was not checked (all leaders accept both).}
+\li{\code{\verb~|max_rss~} semantics on the runner (largest process vs. sum) follow from GNU time/Linux documentation, not from an experiment.}
+\li{The exact kernel code path behind each official error message in §3 was not traced; the messages are quoted as printed.}
+\li{How noisy instruction counts are between runs of a JIT-compiled checker is unknown; the arena measures once per (checker, test) source-hash pair.}
+}
+}
