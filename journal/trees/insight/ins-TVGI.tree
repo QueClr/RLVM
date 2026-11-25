@@ -1,0 +1,20 @@
+\title{The executable's distance to the JVM launcher is code quality now, and no flag of the image build recovers it}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{platform}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the profile of the final default configuration](rep-P11), sections 4 and 6.1. Conditions: the released executable (GraalVM CE native image) and the JVM launcher on the same frozen jars, a run without options, warm pass, 8 workers, load pipelined with checking, the 8 measurement cores of the aarch64 development host with the other cores idle.}
+
+\ul{
+\li{\strong{Size.} The executable needs 14.46 s for a Mathlib pass and the JVM launcher 11.32 s; 3.83 against 3.01 s on navier-stokes-euler, 5.22 against 4.18 s on cslib. Of the 3.14 s on Mathlib, 2.40 s are the workers' own code outside the kernel (94.7 against 75.6 s of CPU: the image needs 25 \% more for the same work), 0.36 s the loader thread, 0.20 s page faults in the workers; the pauses of the collections are equal (0.27 and 0.28 s). The same shares on the two smaller corpora. In the profile of the afternoon half of the distance was memory management.}
+\li{\strong{Which code.} The ratio of image to JVM is the same on the three corpora: evaluation proper 1.35 to 1.54, structural sameness 1.8, the pair table 1.4 to 1.6, the probes of closures 1.4 to 1.5, hash consing as a whole 1.16 to 1.24; equal where memory binds (proof-block decoding, the fallback, universe levels within 17 \%). Four lines exist almost only in the image, 4.2 s of worker CPU on Mathlib: the working environment, slab growth, the worklist's own steps and the kernel.}
+\li{\strong{What does not recover it.} Four more images of the same jars, each the shipped flags plus one change, interleaved with the shipped executable: the inliner's budgets doubled, the budgets times four, and \code{\verb~|-march=native~} are all within 2 \% of the shipped executable in wall clock and in worker CPU on Mathlib, navier-stokes-euler and cslib.}
+\li{\strong{What is known to.} A profile, which only Oracle GraalVM can use (the optional build: 0.84 times the Mathlib pass in the benchmark tables), and C2 (the JVM launcher: 0.78 times). By hand, in the machine's source, the reachable part is not measured; a third of the gap would be 0.8 s on Mathlib.}
+}
+
+\p{What to take from it: a change that is meant for the executable has to be measured in the image. The collector and the build flags are settled; what is left on this side is the machine's hot loops as the ahead-of-time compiler sees them, or a decision about what the executable is. \strong{Not measured:} x86-64; anything with Oracle GraalVM in this work; a source change.}

@@ -1,0 +1,20 @@
+\title{The loader thread alone is longer than gruszka's whole run on Mathlib and cslib: it is the floor of the executable's pass}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{loader}
+\tag{driver}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the profile of the final default configuration](rep-P11), sections 3 and 6.2. Conditions: the released executable, a run without options (one scanner step on the loader thread), warm pass, 8 workers, the 8 measurement cores of the aarch64 development host with the other cores idle; gruszka with its arena run line and 8 workers in the same windows.}
+
+\ul{
+\li{\strong{Today the pass is bound by its CPU, not by the loader.} Workers, loader thread and environment thread need 13.67 s of 8 cores on Mathlib and the pass takes 14.46 s. The workers are parked for the loader for 0.8 to 3.5 \% of their time on Mathlib, navier-stokes-euler and cslib. So a CPU second saved in the loader is worth an eighth of a second, like one saved in a worker: the thread is 11.46 s of the 109.4 s of a Mathlib pass, 4.57 of 38.9 s on cslib, 2.47 of 28.7 s on navier-stokes-euler.}
+\li{\strong{But it is right behind.} With the file loaded first and checked afterwards, the load alone takes 11.13 s on Mathlib, 4.28 s on cslib and 2.24 s on navier-stokes-euler: 77, 82 and 58 \% of the pipelined pass. The workers stop being the bound when their CPU falls by 21 \% on Mathlib and by 14 \% on cslib. gruszka's whole run is 10.80 s and 4.04 s: on these two corpora no engine takes the executable to gruszka's wall clock while the load is one thread of this cost. On the JVM launcher the thread needs 8.60 s on Mathlib; of the image's 2.9 s more, 0.85 s are page faults.}
+\li{\strong{Splitting it is not a gain yet.} Two scanner threads take the loader thread from 11.46 to 6.8 s of CPU on Mathlib and cost 2.7 s more CPU in all: the pass is 14.70 s instead of 14.46 s, 4.40 instead of 3.83 to 3.95 s on navier-stokes-euler, even on cslib. That confirms [the settings of a plain run](dec-EGMG) for today and says when they change: as soon as the workers leave a core free.}
+\li{\strong{On navier-stokes-euler the serial chain is the environment thread}, which admits 1,618 inductive blocks with the reference engine behind the loader: 1.74 s of CPU, and the frontier is complete 0.8 s after the load has ended.}
+}
+
+\p{What to take from it: every gain in the workers beyond a fifth needs the loader to move with it, and the rule for scanner threads has to be measured again after such a gain. \strong{Not measured:} a loader that sizes the store's arrays once; x86-64; the other five corpora.}

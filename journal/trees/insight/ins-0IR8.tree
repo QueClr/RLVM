@@ -1,0 +1,26 @@
+\title{A tick of the machine gets dearer with the size of its session: longer sessions save up to a fifth of the ticks and no time}
+\taxon{Insight}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{store}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the profile of the final default configuration](rep-P11), sections 5.3, 5.5 and 6.3. Conditions: the released executable, the machine with its default switch set, warm pass, 8 workers, the aarch64 development host with the other cores idle; session caps set with \code{\verb~|-X machine.session-kib~} and \code{\verb~|-X session-mib~}, one process per cap.}
+
+\table{
+\tr{\th{Session cap}\th{navier-stokes-euler: ticks}\th{ns per tick}\th{pass, s}\th{cslib: ticks}\th{ns per tick}\th{pass, s}\th{Mathlib: ticks}\th{ns per tick}\th{pass, s}}
+\tr{\td{1 MiB, the default}\td{145.2 M}\td{173}\td{3.87 to 3.93}\td{216.7 M}\td{157}\td{5.35}\td{575.6 M}\td{169}\td{14.5}}
+\tr{\td{4 MiB}\td{126.0 M}\td{202}\td{3.89 to 3.92}\td{208.2 M}\td{177}\td{5.58 to 5.69}\td{550.8 M}\td{192}\td{15.4}}
+\tr{\td{16 MiB}\td{115.9 M}\td{231}\td{4.18 to 4.28}\td{203.7 M}\td{188}\td{5.86 to 5.89}\td{539.6 M}\td{208}\td{16.6}}
+}
+
+\ul{
+\li{\strong{The ticks are there to be saved, the time is not.} On navier-stokes-euler a session of 16 MiB needs a fifth fewer ticks than the default, fewer than gruszka needs for the corpus (134.5 M), and the pass is 8 \% longer. On cslib and Mathlib a longer memory saves 4 to 6 \% of the ticks and costs 5 to 15 \% of the pass. A smaller cap is no general gain either: 256 KiB is 1 to 3 \% faster on cslib and 5 \% slower on navier-stokes-euler. The cap of 1 MiB of [the earlier finding](ins-FJ5R) still stands on the final switch set.}
+\li{\strong{Where the dearer tick is.} At 4 MiB on navier-stokes-euler, per tick of the workers: hash consing 42 to 60 ns (the probes of closures and of neutral applications, growth and rehash of the value table), the pair table 6.1 to 9.6 ns, everything else together 120 to 134 ns. The tables that find a value again leave the cache; the rest of the machine does not care.}
+\li{\strong{A large unit is a large session whatever the cap says.} The two largest proofs of navier-stokes-euler (440,000 and 650,000 nodes, 2.1 and 3.4 M ticks), profiled alone: hash consing is 41 \% of the time on the JVM launcher and 35 \% in the image against 27 and 25 \% over the corpus, the pair table 8.4 and 7.2 \% against 3.3 and 3.6 \%, and in the image the kernel is 10.4 \% against 1.4 \%: every doubling of a slab is fresh pages there. gruszka's tick gets cheaper as the unit grows (112 ns below 100 nodes, 71 ns in the four largest proofs, one worker); the machine's gets dearer (151 to 208 ns in the image). Units of 1,000 nodes and more are half of the executable's time inside units on that corpus.}
+}
+
+\p{What to take from it: the lever is not the cap but what a tick costs when the tables are large. A machine whose tick cost at 16 MiB what it costs at 1 MiB would save 0.64 s of the 3.9 s pass on navier-stokes-euler, 0.26 s on cslib and 0.76 s on Mathlib; that is the ceiling. \strong{Not measured:} any change of layout; Mathlib at 256 KiB and at 64 MiB; x86-64.}

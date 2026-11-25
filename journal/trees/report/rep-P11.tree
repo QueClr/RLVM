@@ -1,0 +1,837 @@
+\title{P11: where a warm pass of the final default configuration goes, and the three levers left for the executable}
+\taxon{Report}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\tag{platform}
+\import{base-macros}
+
+\p{Profiler "P11", 2026-11-24 (the windows: 04:24 to 05:11 UTC of 2026-11-25). The question: where does the time of the warm pass go now, in the final default configuration of the release (the machine as default engine with the switch set of wave 6 plus \code{\verb~|eager~}, \code{\verb~|skipargs~} and \code{\verb~|congruence~}; the executable a GraalVM Community Edition native image with the collection policy \code{\verb~|BySpaceAndTime~} and one scanner thread; the jar set frozen), and what are the three largest levers left for the single executable? This report repeats the itemisation of [rep-P10](rep-P10) on that configuration, on Mathlib, navier-stokes-euler and cslib, for the JVM launcher and for the executable, adds the wall-clock structure of the pass, the unit level against gruszka, and seven small experiments that change no code (batch load, two scanner threads, one worker, four image builds with other flags, three hand-off intervals of the pipelined load, five session caps, the largest units alone). Nothing in the repository was changed; no Oracle GraalVM was used.}
+
+\subtree{
+\title{0. Answer}
+
+\p{Warm pass, 8 workers, load pipelined with checking, the 8 measurement cores of the aarch64 development host with the other cores idle (section 1.2: that is not the condition of the benchmark tables), a run without options:}
+
+\table{
+\tr{\th{}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{the executable: pass s / CPU s}\td{14.46 / 109.4}\td{3.83 / 28.7}\td{5.22 / 38.9}}
+\tr{\td{the JVM launcher: pass s / CPU s}\td{11.32 / 85.9}\td{3.01 / 22.7}\td{4.18 / 30.6}}
+\tr{\td{gruszka, its arena run line with 8 workers, same windows: s / CPU s}\td{10.80 / 63.7}\td{2.65 / 15.6}\td{4.04 / 22.9}}
+\tr{\td{the executable: workers / loader thread / environment thread, CPU s}\td{96.3 / 11.5 / 1.6}\td{24.5 / 2.5 / 1.7}\td{33.8 / 4.6 / 0.5}}
+\tr{\td{the executable: the load alone on a core, s (the serial floor)}\td{11.13}\td{2.24}\td{4.28}}
+\tr{\td{the executable / the JVM launcher}\td{1.28}\td{1.27}\td{1.25}}
+\tr{\td{the executable / gruszka}\td{1.34}\td{1.45}\td{1.29}}
+}
+
+\ol{
+\li{\strong{Where the time goes now.} The pass is bound by its total CPU on 8 cores: (workers + loader + environment thread) / 8 is 13.67 s of the 14.46 s on Mathlib in the image; the rest is 0.27 s of pauses and idle cores at both ends. Inside the workers the mixture is the one of rep-P10 without the fallback and without the proof comparison, at half the size: hash consing 25 \% (24.2 s of the image's 96.3 s on Mathlib, 3.0 s of wall clock), inference with universe levels 26 \% (levels alone 8.6 s), evaluation and reduction 19 \%, memo lookups 10 \%, conversion 8 \%, the term store 7 \%, around the machine 5 \% (of it the kernel 1.8 \%, the reference engine's fallback 0.7 \%), numeric computation 0.2 \%. The three corpora have the same shares to within 2 points, except more conversion and fewer levels on navier-stokes-euler (sections 2.1, 2.2).}
+\li{\strong{The structure.} The loader is not the bottleneck today: the workers are parked for it for 0.8 to 3.5 \% of their time. But they are right behind it (the backlog is 1 to 2 \% of the file for the first two thirds of a Mathlib pass), and the loader thread alone needs 11.13 s on Mathlib and 4.28 s on cslib, 77 and 82 \% of the pass. Collections are 2 \% of the pass on both platforms. The reference engine decides 60, 16 and 7 units, one kind of decline, 1 \% or less of the time. Eight busy cores cost the same checking 1 to 6 \% more CPU than one worker alone (sections 3.1 to 3.5).}
+\li{\strong{The image against the JVM.} The 3.1 s on Mathlib are code quality now: 2.4 s are the workers' user code (the image needs 25 \% more CPU for the same work, on all three corpora), 0.36 s the loader thread, 0.2 s page faults in the workers; the pauses are equal. The image is worst in the machine's own loops (evaluation proper 1.35 to 1.54 times, structural sameness 1.8, the pair table 1.4 to 1.6, the probes of closures 1.4 to 1.5) and equal where memory binds. No flag of the image build recovers any of it: twice and four times the inliner's budgets and \code{\verb~|-march=native~} are within 2 \% on the three corpora (sections 4.1 to 4.4).}
+\li{\strong{Against gruszka.} RLVM does the reductions gruszka does (unfoldings within 3 to 9 \%) in 8 to 22 \% more ticks, and on the JVM its workers pay gruszka's price per tick on Mathlib and cslib (1.03 to 1.06 times; 1.24 on navier-stokes-euler). gruszka's lead over the executable is, in this order: the price of a tick in the image (1.33 to 1.57 times gruszka's), the load (5.4 s of CPU on 8 threads against 11.5 s on one, on Mathlib), and on navier-stokes-euler the large proof terms, where a tick of the machine gets dearer with the size of the session and gruszka's gets cheaper. The time is flat over the units: the 20 heaviest are 3 to 9 \% (sections 5.1 to 5.5).}
+\li{\strong{The three levers} (section 6), by the size of what they attack in the executable: \strong{the code the image runs in the workers} (19.2 s of CPU, 2.4 s of 14.5 s on Mathlib; 16 to 17 \% of every pass; only a profile or C2 are known to recover it, and by hand perhaps a third: 0.8 s); \strong{the loader thread} (11.5 s of CPU, 1.4 s; directly 0.25 to 0.4 s, and it is the floor that lever 1 would hit on cslib after 14 \% and on Mathlib after 21 \%); \strong{the price of a tick in a large session} (ceiling 0.64 s of 3.9 s on navier-stokes-euler, 0.26 s on cslib, 0.76 s on Mathlib; expected half). Next in size, measured: the level stores (0.4 s per Mathlib pass for the copies at each publication alone). Together an eighth to a seventh of the pass, if all of it came true.}
+\li{\strong{Not supported by the data} (section 7): tuning the collector, build flags, more scanner threads today, a faster hash table, a memo for universe instantiation, huge pages against TLB misses, the fallback, numeric computation, larger warm sessions, a list of slow units, and the reading that gruszka wins by skipping work.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\subtree{
+\title{1.1 Binaries and configuration}
+
+\ul{
+\li{\strong{Distribution.} The shared distribution of the release, built on 2026-11-24 (03:18 UTC of 2026-11-25) by \src{scripts/build.sh} from the frozen jar set (jars sha256 \code{\verb~|162de4229b52~}): the executable \code{\verb~|rlvm~} (GraalVM CE 25.5.5.0.3 native image, \code{\verb~|-O3 --gc=serial~}, \code{\verb~|-R:MaxHeapSize=13g~}, \code{\verb~|-R:InitialCollectionPolicy=BySpaceAndTime~}, the inline lists H10 of the machine jar) and the development launcher \code{\verb~|rlvm-jvm~} on the same jars (HotSpot of GraalVM CE 25 with C2: \code{\verb~|-XX:+UseSerialGC -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages~}, heap of the machine \code{\verb~|-Xmx7g -Xmn1g~}). Jars (sha256 prefix): rlvm-machine \code{\verb~|fa6d5d3bf377~}, rlvm-driver \code{\verb~|31fa08d9ce61~}, rlvm-load \code{\verb~|58b0056c0417~}, rlvm-store \code{\verb~|30979ee659b7~}, rlvm-export \code{\verb~|dc8c4f1ef79a~}, rlvm-level \code{\verb~|c57947b218af~}, rlvm-ref \code{\verb~|a20c24a26b7c~}, rlvm-admit \code{\verb~|398a117d4ad8~}, rlvm-inductive \code{\verb~|c15b14fffdd3~}, rlvm-nat \code{\verb~|b1dda7562adb~}, rlvm-api \code{\verb~|9abf2ef6620a~}, rlvm-cli \code{\verb~|cd4cbbee7ad1~}, rlvm-main \code{\verb~|3729609561e3~}, rlvm-truffle \code{\verb~|ad3256d0751d~}. No Oracle GraalVM was used for anything in this report.}
+\li{\strong{Symbolised image.} A second CE image of exactly these jars with the flags that the build record of the distribution lists, plus \code{\verb~|-g~} (DWARF with inlined frames): the image the \code{\verb~|perf~} samples are taken from. In the arena container it makes the Mathlib pass in 14.44 to 14.79 s, the shipped image on the host in 14.44 to 14.46 s. No time in this report is from it unless said.}
+\li{\strong{Engine.} A run without \code{\verb~|-X engine~}, which is the machine with its default switch set (\code{\verb~|rlvm --version~}: \code{\verb~|gated,pchk,expect,warm,facts,code,casetrees,probes,bodies,directrules,same,match,joint,lazycases,lazyeval,eager,skipargs,congruence~}), policy practical. Where the reference engine is meant it is named.}
+\li{\strong{Run line.} \code{\verb~|rlvm[-jvm] --threads 8 --stats -X passes=N FILE~} and nothing else: every pass is a complete run (mode reload), the load is pipelined with the checking, one scanner step on the loader thread (\code{\verb~|scan-threads=1(auto)~}: with one scanner thread the scanning runs on the loader thread itself, so a pass has ten threads: eight workers, the loader thread, the environment thread). The JVM launcher got \code{\verb~|-XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints -XX:FlightRecorderOptions:stackdepth=1024~} and its collection log in the profiled process, the image \code{\verb~|-XX:+PrintGC~}.}
+\li{\strong{Corpora.} Mathlib (6.33 GB, 721,845 units), navier-stokes-euler (1.56 GB, 126,468 units), cslib (2.50 GB, 401,985 units), the exports of the benchmark tables.}
+\li{\strong{gruszka.} The arena checker as built for the baseline tables (version \code{\verb~|ebc80dc~}; nothing was rebuilt), run in the arena container on the same 8 cores under \src{bench/measure.sh}: its arena run line with 8 workers (\code{\verb~|scripts/arena-run FILE 8~}), and the two steps of that line separately (\code{\verb~|susz pack --no-index~}, then \code{\verb~|gruszka FILE.susz 8~}); for the unit level its own switch \code{\verb~|SK_DECL_INSTR=1~}, which prints one line per declaration (index, name, nanoseconds, ticks, unfoldings).}
+\li{\strong{Host.} aarch64, 10 Cortex-X925 and 10 Cortex-A725, 121 GB. Every number in seconds was taken inside a \src{bench/quiet.py} window on the 8 measurement cores (X925), one process per window at a time, heavy jobs behind \src{bench/slot.sh}.}
+}
+}
+
+\subtree{
+\title{1.2 The host was quiet, and that changes the comparison with gruszka}
+
+\p{The windows of this report were taken between 04:24 and 05:11 UTC of 2026-11-25 (the night of 2026-11-24 local time), when hardly anything else was computing on the host: the load average was 0.2 when the first window started, and the only other load seen was this report's own image builds (the runs that overlapped with them were repeated). The benchmark tables of [rep-benchmarks](rep-benchmarks) were taken while the other 12 cores were busy; they share the memory bandwidth and the last-level cache with the measurement cores. The same binaries on the same cores, benchmark table against this report:}
+
+\table{
+\tr{\th{Mathlib, 8 workers, wall clock in s}\th{benchmark tables (other cores busy)}\th{this report (other cores idle)}}
+\tr{\td{the executable, warm pass}\td{15.46}\td{14.46}}
+\tr{\td{JVM launcher, warm pass}\td{12.44}\td{11.32 (passes 11.70, 11.32, 11.87)}}
+\tr{\td{gruszka, its arena run line with 8 workers}\td{13.28 (second run 14.20)}\td{10.80}}
+}
+
+\p{So gruszka gains 19 \% from a quiet host and RLVM 6 to 9 \%: on a quiet host the executable is at 1.34 times gruszka on Mathlib, not at 1.09 to 1.23, and the JVM launcher at 1.05, not at 0.88. Everything below is from this report's windows, the three checkers in the same conditions. How much of the difference between the two nights is the other cores and how much is anything else that differed was not separated; what speaks for the cores is that gruszka's check needs 14 to 15 \% more CPU with eight workers than with one and RLVM's 1 to 6 \% (sections 3.4 and 5.3), and that a one-worker pass of the executable got 7 \% slower while image builds ran on the other cores. Which of the two conditions is the one that counts is not for this report to say; the arena's runner has 8 cores and nothing else running.}
+}
+
+\subtree{
+\title{1.3 Method}
+
+\p{The method, the classifiers and the item map are those of [rep-P10](rep-P10), sections 1.2 to 1.5, on the new binaries:}
+
+\ul{
+\li{\strong{Seconds} are from unprofiled passes: wall clock from the pass line, CPU seconds per thread from the kernel's per-thread counters (on-CPU and run-queue nanoseconds, kernel time, page faults), polled every 100 ms (50 ms on the two smaller corpora) from a core outside the window's eight; collections from the collectors' logs. The timed pass is the fastest unprofiled later pass of the process (JVM: passes 2 to 4 on Mathlib, 4 to 6 on the smaller corpora; image: passes 2 to 4 or 2 to 5).}
+\li{\strong{Shares} are from later passes of the same process on the JVM (\code{\verb~|jdk.CPUTimeSample~}, 2 ms of CPU per sample, attached with \code{\verb~|jcmd~} after the last unprofiled pass: passes 5 and 6 on Mathlib, 7 to 10 on the smaller corpora), and from a process of the symbolised image in the arena container (\code{\verb~|perf record~} with the fixed periods of rep-P10, attached after pass 2: \code{\verb~|cpu-clock~} 1 ms, cycles, instructions, cache refills of three levels, branch mispredictions, TLB walks, cycles stalled on memory).}
+\li{An item's CPU seconds = its share of the worker samples x the workers' CPU seconds of the timed pass; its wall-clock seconds = CPU seconds / 8.}
+\li{\strong{One item per method}: the item map of rep-P10 (591 rules, first match wins, innermost named frame; the reference-engine fallback and the decoding of a proof block are contexts that win over the innermost frame on the JVM). It already covered the methods of the switches \code{\verb~|eager~}, \code{\verb~|facts~}, \code{\verb~|probes~}, \code{\verb~|skipargs~} and \code{\verb~|congruence~}: no method of the final jars is without a rule (JVM: 0 of 80,089 Mathlib worker samples unassigned; image: 261 of 194,996, all of them JDK or runtime frames; the same on the two smaller corpora).}
+\li{\strong{The wall-clock structure} is from the driver's own time account (\code{\verb~|-X stats-file~}, which also gives the series of loaded, announced and accepted units about every 100 ms) and from runs with \code{\verb~|-X load=batch~} (the file is loaded first and checked afterwards, so the load and the check each have the 8 cores).}
+\li{\strong{The unit level} is the driver's unit trace (\code{\verb~|-X unit-trace~}: unit, worker, start, nanoseconds, ticks, outcome, size in nodes) of the same statistics runs, joined with the declaration names of the export and with gruszka's per-declaration lines. A unit's time is wall clock inside the unit, so it includes the run-queue waits and the pauses that fall into it: between two passes of one process about 13 \% of the time sits on different units. Per unit the smallest time over the traced passes is used (JVM: 2 passes on Mathlib, 4 on the smaller corpora; image: 3 and 4).}
+}
+}
+
+\subtree{
+\title{1.4 Error bars}
+
+\ul{
+\li{\strong{Wall clock.} Later passes of one image process differ by 0.1 to 0.2 s on Mathlib (14.44 to 14.46 s in one process, 14.39 to 14.71 s over five processes) and by up to 0.12 s on the smaller corpora; JVM passes by up to 0.55 s on Mathlib (11.32 to 11.87 s; a second process 11.72 and 11.96 s). Worker CPU of later passes: within 1 \% in the image, within 2.5 \% on the JVM.}
+\li{\strong{Sampling.} Worker samples: 80,089 (JVM) and 194,996 (image) on Mathlib, 39,577 and 100,616 on navier-stokes-euler, 55,703 and 137,335 on cslib: a 10 \% line has a standard error of 0.1 to 0.15 point. 68 CPU-time samples were lost on Mathlib (0.08 \%). 3.8 \% of the JVM samples are taken at the next safepoint instead of the interrupted pc.}
+\li{\strong{The profiled pass is slower}: JFR +5.9 \% worker CPU and +8.4 \% wall on Mathlib (12.27 against 11.32 s), perf +0.5 to +1.2 \% and +1 to +1.7 \% (14.61 and 14.71 against 14.46 s).}
+\li{\strong{Inlined frames.} As in rep-P10: the image's debug information attributes the one-line readers of the term store to their callers, so three lines trade places between the platforms (term store, conversion, inference); they are compared as a sum. A native sample has no caller: the store's share of the fallback and of proof-block decoding is split with the ratio measured on the JVM.}
+\li{\strong{One host, one night, one architecture.} Nothing was measured on x86-64. A row is one process unless it says otherwise.}
+}
+}
+}
+
+\subtree{
+\title{2. The itemised tables}
+
+\subtree{
+\title{2.1 Level 1: where the 8 cores are}
+
+\p{The timed pass of each process (section 1.3). "JVM" is the launcher \code{\verb~|rlvm-jvm~}, "image" the executable \code{\verb~|rlvm~}; both without any option but \code{\verb~|--threads 8~}.}
+
+\table{
+\tr{\th{line}\th{Mathlib: JVM}\th{image}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{\strong{wall clock of the pass, s}}\td{\strong{11.32}}\td{\strong{14.46}}\td{\strong{3.01}}\td{\strong{3.83}}\td{\strong{4.18}}\td{\strong{5.22}}}
+\tr{\td{\strong{CPU of the process in the pass, s}}\td{\strong{85.9}}\td{\strong{109.4}}\td{\strong{22.7}}\td{\strong{28.7}}\td{\strong{30.6}}\td{\strong{38.9}}}
+\tr{\td{\strong{workers (8 threads), CPU s}}\td{\strong{75.57}}\td{\strong{96.31}}\td{\strong{19.30}}\td{\strong{24.45}}\td{\strong{26.29}}\td{\strong{33.84}}}
+\tr{\td{loader thread (scanning, linking, loading, store building), CPU s}\td{8.60}\td{11.46}\td{1.91}\td{2.47}\td{3.76}\td{4.57}}
+\tr{\td{environment thread (admission of inductive blocks), CPU s}\td{1.33}\td{1.59}\td{1.33}\td{1.74}\td{0.38}\td{0.48}}
+\tr{\td{JIT compiler threads, CPU s}\td{0.15}\td{-}\td{0.13}\td{-}\td{0.06}\td{-}}
+\tr{\td{collector thread (JVM; the image collects on the allocating thread), CPU s}\td{0.29}\td{-}\td{0.06}\td{-}\td{0.09}\td{-}}
+\tr{\td{(workers + loader + environment thread) / 8, s}\td{10.69}\td{13.67}\td{2.82}\td{3.58}\td{3.80}\td{4.86}}
+\tr{\td{collections in the pass}\td{11}\td{34}\td{2}\td{8}\td{4}\td{12}}
+\tr{\td{pauses of the collections, s (all threads stopped)}\td{0.28}\td{0.27}\td{0.05}\td{0.05}\td{0.09}\td{0.10}}
+\tr{\td{workers: runnable without a CPU, s}\td{10.30}\td{12.83}\td{3.27}\td{3.99}\td{4.04}\td{4.69}}
+\tr{\td{workers: on a CPU, share of their life in the pass}\td{85.1 \%}\td{84.8 \%}\td{81.8 \%}\td{81.5 \%}\td{82.2 \%}\td{83.8 \%}}
+\tr{\td{kernel time of the workers, s}\td{0.00}\td{1.58}\td{0.00}\td{0.26}\td{0.00}\td{0.58}}
+\tr{\td{kernel time of the loader thread, s}\td{0.30}\td{1.15}\td{0.06}\td{0.27}\td{0.13}\td{0.47}}
+\tr{\td{minor page faults of the workers}\td{361}\td{1511793}\td{314}\td{264984}\td{261}\td{499728}}
+\tr{\td{minor page faults of the loader thread}\td{95334}\td{857312}\td{23398}\td{189536}\td{37927}\td{317903}}
+}
+
+\ul{
+\li{\strong{The pass is bound by its total CPU time on 8 cores.} Workers, loader thread and environment thread together need 13.67 s of 8 cores on Mathlib in the image and the pass takes 14.46 s; 10.69 against 11.32 s on the JVM; 3.58 against 3.83 s and 4.86 against 5.22 s in the image on the two smaller corpora. The remaining 5 to 9 \% are the pauses of the collections (0.27 s on Mathlib, all threads stopped) and cores that are idle at the start and at the end of the pass.}
+\li{\strong{The workers are on a CPU for 82 to 85 \% of their life and runnable without one for 11 to 14 \%}: ten runnable threads on eight cores for as long as the file loads. They are parked for 0.8 to 4.2 \% in all (section 3.2).}
+\li{\strong{The loader thread is a tenth of the CPU}: 11.46 s of 109.4 s on Mathlib in the image (10.5 \%), 2.47 of 28.7 s (8.6 \%) on navier-stokes-euler, 4.57 of 38.9 s (11.8 \%) on cslib; on the JVM 8.60, 1.91 and 3.76 s. It is one thread, so it is also the serial part of the pass (section 3.1).}
+\li{\strong{Collections are 2 \% or less of every pass on both platforms}: 34 collections with 0.27 s of pauses per Mathlib pass in the image (rep-P10 on the image of that day: 121 collections, 2.18 s), 11 with 0.28 s on the JVM. The image still pays for memory in the kernel: 2.5 million page faults and 2.8 s of kernel time per Mathlib pass over all threads, against 96,000 and 0.3 s on the JVM (section 4.4).}
+}
+}
+
+\subtree{
+\title{2.2 Level 2: inside the workers' CPU}
+
+\p{CPU seconds of the 8 workers by item; a group line also has its share of the workers' CPU. Wall-clock seconds are an eighth of the CPU seconds. Three lines trade places between the platforms (the readers of the term store are attributed to their callers in the image, section 1.4): the term store, conversion and inference are to be compared as a sum, which is 34.5 s on the JVM and 39.2 s in the image on Mathlib.}
+
+\table{
+\tr{\th{item (CPU seconds of the 8 workers; for a group also its share)}\th{Mathlib: JVM}\th{image}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{\strong{workers, CPU s}}\td{\strong{75.57}}\td{\strong{96.31}}\td{\strong{19.30}}\td{\strong{24.45}}\td{\strong{26.29}}\td{\strong{33.84}}}
+\tr{\td{\strong{1 Hash consing / interning of values and runs}}\td{\strong{19.59} (25.9 \%)}\td{\strong{24.21} (25.1 \%)}\td{\strong{5.27} (27.3 \%)}\td{\strong{6.12} (25.0 \%)}\td{\strong{7.14} (27.1 \%)}\td{\strong{8.87} (26.2 \%)}}
+\tr{\td{- hashing (\code{\verb~|Hash~}, argument / slot hashes)}\td{0.89}\td{0.33}\td{0.24}\td{0.07}\td{0.27}\td{0.12}}
+\tr{\td{- probes: closures, suspensions = tabling records (\code{\verb~|closureProbe~}, \code{\verb~|closureAt~}, \code{\verb~|suspRecord~} ..)}\td{5.15}\td{7.26}\td{1.40}\td{2.05}\td{1.65}\td{2.54}}
+\tr{\td{- probes: frames and spines (\code{\verb~|Runs.prune*~}, \code{\verb~|internRun~}, \code{\verb~|frameProbe~}, key comparison)}\td{3.55}\td{3.66}\td{1.11}\td{0.83}\td{1.55}\td{1.30}}
+\tr{\td{- probes: neutral applications (\code{\verb~|neu~}, \code{\verb~|mkApp~}, \code{\verb~|sameArgs~})}\td{3.84}\td{5.23}\td{0.96}\td{1.27}\td{1.40}\td{1.89}}
+\tr{\td{- probes: constants, sorts, projections, free variables; OPEN bits}\td{2.73}\td{3.37}\td{0.69}\td{0.90}\td{0.97}\td{1.29}}
+\tr{\td{- writing new records / runs (the miss path: \code{\verb~|add~}, \code{\verb~|addRecordAt~}, \code{\verb~|addRun~}, \code{\verb~|pruneSlow~}, \code{\verb~|neuSlow~})}\td{2.34}\td{2.87}\td{0.61}\td{0.63}\td{0.88}\td{1.14}}
+\tr{\td{- table growth and rehash (\code{\verb~|growVtab~}, \code{\verb~|growRtab~})}\td{1.09}\td{1.50}\td{0.26}\td{0.36}\td{0.41}\td{0.59}}
+\tr{\td{\strong{2 Memo lookups that are not interning}}\td{\strong{7.16} (9.5 \%)}\td{\strong{9.51} (9.9 \%)}\td{\strong{1.99} (10.3 \%)}\td{\strong{2.52} (10.3 \%)}\td{\strong{2.48} (9.4 \%)}\td{\strong{3.32} (9.8 \%)}}
+\tr{\td{- EVAL: tabling gate, closed-term memo, VAL words}\td{2.05}\td{2.54}\td{0.54}\td{0.62}\td{0.62}\td{0.80}}
+\tr{\td{- INFER / CHECK: front cache, TYPE / TSTAMP words, PCHK bits}\td{0.55}\td{0.70}\td{0.15}\td{0.19}\td{0.21}\td{0.26}}
+\tr{\td{- WHNF / CORE / DELTA memo words}\td{0.05}\td{0.09}\td{0.02}\td{0.02}\td{0.02}\td{0.03}}
+\tr{\td{- the pair table (comparisons already made) and its log}\td{1.46}\td{2.35}\td{0.63}\td{0.88}\td{0.48}\td{0.77}}
+\tr{\td{- code blocks: inline caches, block lookup}\td{3.05}\td{3.83}\td{0.65}\td{0.81}\td{1.14}\td{1.45}}
+\tr{\td{\strong{3 Term store}}\td{\strong{12.05} (16.0 \%)}\td{\strong{6.60} (6.9 \%)}\td{\strong{3.06} (15.9 \%)}\td{\strong{1.90} (7.8 \%)}\td{\strong{4.39} (16.7 \%)}\td{\strong{2.40} (7.1 \%)}}
+\tr{\td{- reading export nodes (\code{\verb~|Terms~}: kind, spine, masks)}\td{7.87}\td{3.42}\td{2.11}\td{1.17}\td{2.70}\td{1.15}}
+\tr{\td{- declaration table, names}\td{1.00}\td{0.35}\td{0.18}\td{0.06}\td{0.41}\td{0.17}}
+\tr{\td{- proof-block decoding (and the overlay nodes it writes)}\td{3.16}\td{2.80}\td{0.77}\td{0.66}\td{1.26}\td{1.07}}
+\tr{\td{- term-level substitution / overlay terms (\code{\verb~|TermOps~}, \code{\verb~|Overlay~}) outside the fallback}\td{0.03}\td{-}\td{0.01}\td{-}\td{0.01}\td{0.01}}
+\tr{\td{\strong{4 Evaluation, code blocks, reduction}}\td{\strong{12.88} (17.0 \%)}\td{\strong{18.19} (18.9 \%)}\td{\strong{2.77} (14.3 \%)}\td{\strong{4.36} (17.8 \%)}\td{\strong{4.35} (16.6 \%)}\td{\strong{6.24} (18.4 \%)}}
+\tr{\td{- evaluation proper (\code{\verb~|Eval~} minus its probes and memos)}\td{9.17}\td{12.35}\td{2.02}\td{3.12}\td{2.93}\td{4.06}}
+\tr{\td{- working environment (\code{\verb~|Runs.push~}, \code{\verb~|enter~})}\td{0.34}\td{1.59}\td{0.08}\td{0.37}\td{0.11}\td{0.53}}
+\tr{\td{- code-block stepper (\code{\verb~|Code~}, case trees)}\td{2.22}\td{2.76}\td{0.41}\td{0.55}\td{0.83}\td{1.06}}
+\tr{\td{- elaboration of terms into code blocks (\code{\verb~|Elab~})}\td{0.12}\td{0.22}\td{0.03}\td{0.05}\td{0.06}\td{0.10}}
+\tr{\td{- WHNF / CORE loops}\td{0.45}\td{0.64}\td{0.11}\td{0.15}\td{0.20}\td{0.23}}
+\tr{\td{- delta (unfolding)}\td{0.41}\td{0.29}\td{0.09}\td{0.07}\td{0.15}\td{0.11}}
+\tr{\td{- iota (recursor rules), quot}\td{0.09}\td{0.17}\td{-}\td{0.01}\td{0.04}\td{0.09}}
+\tr{\td{- projections}\td{0.09}\td{0.15}\td{0.03}\td{0.04}\td{0.03}\td{0.05}}
+\tr{\td{\strong{5 Numeric and literal computation}}\td{\strong{0.11} (0.1 \%)}\td{\strong{0.22} (0.2 \%)}\td{\strong{0.03} (0.1 \%)}\td{\strong{0.06} (0.2 \%)}\td{\strong{0.04} (0.2 \%)}\td{\strong{0.08} (0.2 \%)}}
+\tr{\td{- \code{\verb~|NatRed~}, \code{\verb~|StrRed~}, \code{\verb~|Lits~}, \code{\verb~|rlvm.nat~}, literal records, literal <-> constructor views}\td{0.11}\td{0.22}\td{0.03}\td{0.06}\td{0.04}\td{0.08}}
+\tr{\td{\strong{6 Conversion}}\td{\strong{5.31} (7.0 \%)}\td{\strong{7.31} (7.6 \%)}\td{\strong{1.95} (10.1 \%)}\td{\strong{2.74} (11.2 \%)}\td{\strong{1.55} (5.9 \%)}\td{\strong{2.24} (6.6 \%)}}
+\tr{\td{- the comparison loop: quick tests, steps, constants}\td{1.15}\td{1.14}\td{0.36}\td{0.37}\td{0.26}\td{0.38}}
+\tr{\td{- lazy delta reduction}\td{0.52}\td{0.50}\td{0.16}\td{0.17}\td{0.16}\td{0.16}}
+\tr{\td{- arguments of applications (\code{\verb~|Cargs~}, \code{\verb~|Cong~})}\td{0.88}\td{1.22}\td{0.37}\td{0.47}\td{0.30}\td{0.37}}
+\tr{\td{- structural sameness (\code{\verb~|Same~})}\td{2.14}\td{3.84}\td{0.85}\td{1.52}\td{0.62}\td{1.14}}
+\tr{\td{- binders and closures}\td{0.48}\td{0.45}\td{0.18}\td{0.17}\td{0.16}\td{0.14}}
+\tr{\td{- proof irrelevance: the rule's own steps}\td{0.10}\td{0.12}\td{0.03}\td{0.03}\td{0.03}\td{0.04}}
+\tr{\td{- structure eta, unit-like types}\td{0.03}\td{0.04}\td{-}\td{-}\td{0.01}\td{0.01}}
+\tr{\td{\strong{7 Inference, checking, universe levels}}\td{\strong{17.18} (22.7 \%)}\td{\strong{25.30} (26.3 \%)}\td{\strong{3.97} (20.6 \%)}\td{\strong{5.72} (23.4 \%)}\td{\strong{5.91} (22.5 \%)}\td{\strong{9.02} (26.6 \%)}}
+\tr{\td{- applications (TWALK)}\td{3.37}\td{7.92}\td{1.01}\td{2.01}\td{1.30}\td{3.03}}
+\tr{\td{- binders, lets, leaves, constants}\td{1.21}\td{1.50}\td{0.29}\td{0.41}\td{0.46}\td{0.69}}
+\tr{\td{- CHECK against an expected type}\td{0.10}\td{0.12}\td{0.02}\td{0.03}\td{0.05}\td{0.05}}
+\tr{\td{- types of values (VTYPE), sort / Pi / Prop tests}\td{0.58}\td{0.88}\td{0.15}\td{0.23}\td{0.21}\td{0.36}}
+\tr{\td{- type patterns (\code{\verb~|Match~}, \code{\verb~|tm*~})}\td{2.64}\td{4.29}\td{0.86}\td{1.27}\td{0.73}\td{1.22}}
+\tr{\td{- projections}\td{0.01}\td{0.04}\td{-}\td{-}\td{0.01}\td{0.01}}
+\tr{\td{- binders opened as free variables (\code{\verb~|Scope~})}\td{0.32}\td{0.23}\td{0.08}\td{0.05}\td{0.15}\td{0.10}}
+\tr{\td{- the declaration's phases (\code{\verb~|Decl~})}\td{0.07}\td{0.13}\td{0.01}\td{0.02}\td{0.03}\td{0.06}}
+\tr{\td{- fact records (\code{\verb~|Facts~})}\td{1.43}\td{1.58}\td{0.34}\td{0.41}\td{0.51}\td{0.63}}
+\tr{\td{- universe levels (\code{\verb~|Levels~}, \code{\verb~|rlvm.level~})}\td{7.45}\td{8.60}\td{1.20}\td{1.29}\td{2.45}\td{2.87}}
+\tr{\td{\strong{8 Around the machine}}\td{\strong{1.29} (1.7 \%)}\td{\strong{4.89} (5.1 \%)}\td{\strong{0.26} (1.3 \%)}\td{\strong{1.02} (4.2 \%)}\td{\strong{0.44} (1.7 \%)}\td{\strong{1.63} (4.8 \%)}}
+\tr{\td{- reference-engine fallback (declined units: \code{\verb~|rlvm.ref~} and everything it calls)}\td{0.66}\td{0.69}\td{0.12}\td{0.12}\td{0.03}\td{0.04}}
+\tr{\td{- admission on the worker (\code{\verb~|rlvm.admit~}: structural checks, claims)}\td{0.05}\td{0.11}\td{0.01}\td{0.02}\td{0.01}\td{0.06}}
+\tr{\td{- driver (scheduler, lanes, verdict board, statistics)}\td{0.16}\td{0.16}\td{0.02}\td{0.03}\td{0.04}\td{0.07}}
+\tr{\td{- session resets, begin of a declaration, footprint}\td{0.06}\td{0.12}\td{0.02}\td{0.03}\td{0.03}\td{0.06}}
+\tr{\td{- slab / stack growth, pooled arrays}\td{0.28}\td{1.11}\td{0.08}\td{0.27}\td{0.12}\td{0.41}}
+\tr{\td{- the worklist itself (drive loop, frames, ticks, signals)}\td{0.07}\td{0.44}\td{0.02}\td{0.12}\td{0.20}\td{0.15}}
+\tr{\td{- collector code running on a worker thread (native image)}\td{-}\td{0.05}\td{-}\td{0.01}\td{-}\td{0.02}}
+\tr{\td{- array copy / fill / compare stubs sampled without a caller (native image: slab growth, rehash, run comparison)}\td{-}\td{0.31}\td{-}\td{0.07}\td{-}\td{0.11}}
+\tr{\td{- other runtime / JDK code without an rlvm frame}\td{-}\td{0.13}\td{-}\td{0.02}\td{-}\td{0.06}}
+\tr{\td{- kernel (page faults, madvise, memory clearing)}\td{-}\td{1.75}\td{-}\td{0.33}\td{-}\td{0.64}}
+}
+
+\p{What the table says, against the itemisation of [rep-P10](rep-P10) on the default set of the afternoon (Mathlib, JVM launcher: 148.3 s of worker CPU in a pass of 21.93 s):}
+
+\ul{
+\li{\strong{The workers need half the CPU}: 75.6 s instead of 148.3 s on the JVM, 96.3 s instead of 175.3 s in the image. What left is what the three switches were for: the fallback to the reference engine was 18.6 s and is 0.66 s; proof irrelevance and what it triggers was 40.8 s inclusive and is 1.2 s.}
+\li{\strong{The shares did not move}: hash consing 25.9 \% (was 27.6 \%), memo lookups 9.5 \% (11.4 \%), evaluation and reduction 17.0 \% (16.4 \%), conversion 7.0 \% (4.4 \%), inference and levels 22.7 \% (15.5 \%), the term store 16.0 \% (11.4 \%), the fallback 0.9 \% (12.5 \%). The removed work was made of the same operations as the rest, so what remains is the same mixture, without the fallback.}
+\li{\strong{Hash consing is still the largest item}: 19.6 s on the JVM and 24.2 s in the image on Mathlib, 2.4 and 3.0 s of wall clock. Nine tenths of it are probes and the writing of new records; table growth is 1.1 to 1.5 s.}
+\li{\strong{Universe levels are the largest single line that is not a probe}: 7.45 s on the JVM, 8.60 s in the image on Mathlib (9.9 and 8.9 \% of the workers), 2.45 and 2.87 s on cslib (9.3 and 8.5 \%), 1.20 and 1.29 s on navier-stokes-euler (6.2 and 5.3 \%).}
+\li{\strong{Reading the export's term nodes} is 7.87 s on the JVM on Mathlib (10.4 \%), where the readers' inlined frames are exact: \code{\verb~|Terms.arr~} 2.9 \%, \code{\verb~|Terms.spineLength~} 2.9 \%, \code{\verb~|Terms.kind~} 1.5 \% of the worker samples; a third of these reads are asked for by \code{\verb~|Infer.inferApp~}, an eighth by \code{\verb~|Same.terms~}.}
+\li{\strong{Numeric computation is 0.1 to 0.2 \%} on all three corpora and both platforms.}
+\li{\strong{The three corpora have the same profile.} navier-stokes-euler has more conversion (10.1 against 7.0 \% on the JVM) and fewer levels; cslib has Mathlib's shares to within 1.5 points on every group.}
+}
+}
+
+\subtree{
+\title{2.3 Judgments in progress (JVM, inclusive)}
+
+\p{The host stack of the JVM carries the judgments that are in progress (up to depth 128; 2 of 80,089 Mathlib stacks were cut at 1,024 frames). Samples with a judgment anywhere on the stack:}
+
+\table{
+\tr{\th{worker samples with .. (JVM host stacks; the lines overlap)}\th{Mathlib: share}\th{CPU s}\th{navier-stokes-euler: share}\th{CPU s}\th{cslib: share}\th{CPU s}}
+\tr{\td{the machine as a whole (a declaration being checked by the machine)}\td{94.4 \%}\td{71.32}\td{95.2 \%}\td{18.36}\td{94.6 \%}\td{24.88}}
+\tr{\td{INFER on the stack}\td{84.9 \%}\td{64.13}\td{90.3 \%}\td{17.43}\td{81.8 \%}\td{21.49}}
+\tr{\td{CHECK on the stack}\td{72.4 \%}\td{54.71}\td{83.5 \%}\td{16.11}\td{72.0 \%}\td{18.92}}
+\tr{\td{CONV on the stack (conversion and everything it triggers)}\td{39.4 \%}\td{29.78}\td{42.4 \%}\td{8.18}\td{37.0 \%}\td{9.73}}
+\tr{\td{comparison of application arguments (CARGS) on the stack}\td{33.3 \%}\td{25.17}\td{37.2 \%}\td{7.19}\td{31.0 \%}\td{8.15}}
+\tr{\td{lazy delta reduction on the stack}\td{17.2 \%}\td{12.98}\td{17.1 \%}\td{3.31}\td{16.8 \%}\td{4.42}}
+\tr{\td{WHNF on the stack}\td{14.7 \%}\td{11.14}\td{10.8 \%}\td{2.09}\td{16.3 \%}\td{4.28}}
+\tr{\td{delta (unfolding) on the stack}\td{13.9 \%}\td{10.51}\td{11.4 \%}\td{2.21}\td{14.7 \%}\td{3.86}}
+\tr{\td{a code block running on the stack}\td{12.2 \%}\td{9.18}\td{9.2 \%}\td{1.77}\td{13.8 \%}\td{3.63}}
+\tr{\td{iota on the stack}\td{2.9 \%}\td{2.17}\td{0.7 \%}\td{0.13}\td{3.8 \%}\td{1.01}}
+\tr{\td{VTYPE (type of a value) on the stack}\td{2.9 \%}\td{2.19}\td{1.8 \%}\td{0.35}\td{3.1 \%}\td{0.82}}
+\tr{\td{proof irrelevance on the stack: the rule and everything it triggers}\td{1.6 \%}\td{1.20}\td{0.8 \%}\td{0.15}\td{1.7 \%}\td{0.44}}
+\tr{\td{structure eta / unit-like types in conversion on the stack}\td{1.0 \%}\td{0.72}\td{0.4 \%}\td{0.07}\td{0.6 \%}\td{0.17}}
+\tr{\td{lambda eta on the stack}\td{0.9 \%}\td{0.66}\td{0.4 \%}\td{0.07}\td{0.6 \%}\td{0.16}}
+\tr{\td{Nat folding on the stack}\td{0.4 \%}\td{0.34}\td{0.1 \%}\td{0.03}\td{0.6 \%}\td{0.17}}
+\tr{\td{the K rule on the stack}\td{0.1 \%}\td{0.07}\td{0.0 \%}\td{0.00}\td{0.1 \%}\td{0.02}}
+\tr{\td{structure eta of a major premise on the stack}\td{0.1 \%}\td{0.06}\td{0.0 \%}\td{0.00}\td{0.1 \%}\td{0.03}}
+}
+
+\ul{
+\li{Conversion and everything it triggers is 37 to 42 \% of the workers' CPU, and five sixths of that is under the comparison of the arguments of two applications. Inside conversion the mixture is the general one (on Mathlib: hash consing 21 \%, conversion's own code 18 \%, memo lookups 17 \%, levels 11 \%, evaluation 9 \%, the term store 8 \%, code blocks 7 \%).}
+\li{Lazy delta reduction is on the stack of 17 \% of the samples on all three corpora; a running code block of 9 to 14 \%.}
+\li{Proof irrelevance, which was 27.5 \% of the workers' CPU in rep-P10, is 0.8 to 1.7 \%.}
+}
+}
+
+\subtree{
+\title{2.4 Hardware events of the image's workers}
+
+\p{Mathlib, the symbolised image in the arena container, the two profiled passes. Over all worker samples: 3.97 instructions per cycle at 3.87 GHz, 16.3 \% of the cycles stalled on memory, 0.21 last-level read misses and 0.10 data TLB walks per 1,000 instructions (navier-stokes-euler: 4.30 instructions per cycle, 13.1 \% stalled; cslib: 3.77, 17.4 \%). The workers execute about 1,500 G instructions per Mathlib pass.}
+
+\table{
+\tr{\th{item (image, Mathlib, worker samples)}\th{CPU time}\th{instructions}\th{LLC read misses}\th{data TLB walks}\th{cycles stalled on memory}\th{IPC}\th{L1D / L2 / LLC misses, branch misses per 1,000 instructions}\th{memory stall, \% of its cycles}}
+\tr{\td{\strong{1 Hash consing / interning of values and runs}}\td{25.1 \%}\td{26.5 \%}\td{20.4 \%}\td{17.6 \%}\td{19.8 \%}\td{4.24}\td{2.8 / 1.9 / 0.16, 2.4}\td{13}}
+\tr{\td{- probes: closures, suspensions = tabling records}\td{7.5 \%}\td{8.5 \%}\td{4.1 \%}\td{4.1 \%}\td{4.1 \%}\td{4.49}\td{2.1 / 1.2 / 0.10, 2.3}\td{9}}
+\tr{\td{- probes: neutral applications}\td{5.4 \%}\td{6.2 \%}\td{3.9 \%}\td{3.0 \%}\td{3.9 \%}\td{4.57}\td{2.3 / 1.2 / 0.13, 1.9}\td{12}}
+\tr{\td{- probes: constants, sorts, projections, free variables; OPEN bits}\td{3.5 \%}\td{3.3 \%}\td{3.3 \%}\td{3.3 \%}\td{4.0 \%}\td{3.85}\td{3.1 / 2.5 / 0.21, 2.4}\td{20}}
+\tr{\td{- writing new records / runs}\td{3.0 \%}\td{2.6 \%}\td{3.1 \%}\td{3.9 \%}\td{3.8 \%}\td{3.55}\td{3.2 / 2.9 / 0.25, 3.0}\td{21}}
+\tr{\td{- table growth and rehash}\td{1.6 \%}\td{1.1 \%}\td{3.7 \%}\td{1.3 \%}\td{2.1 \%}\td{2.94}\td{10.2 / 9.3 / 0.72, 5.6}\td{23}}
+\tr{\td{\strong{2 Memo lookups that are not interning}}\td{9.9 \%}\td{9.2 \%}\td{10.7 \%}\td{11.3 \%}\td{11.7 \%}\td{3.72}\td{3.1 / 2.3 / 0.24, 2.5}\td{20}}
+\tr{\td{- the pair table}\td{2.4 \%}\td{2.1 \%}\td{2.9 \%}\td{1.3 \%}\td{2.2 \%}\td{3.60}\td{4.1 / 2.2 / 0.28, 3.2}\td{16}}
+\tr{\td{- code blocks: inline caches, block lookup}\td{4.0 \%}\td{3.3 \%}\td{6.1 \%}\td{7.1 \%}\td{7.3 \%}\td{3.16}\td{3.7 / 3.3 / 0.39, 2.3}\td{29}}
+\tr{\td{\strong{3 Term store}}\td{6.9 \%}\td{7.3 \%}\td{6.8 \%}\td{7.0 \%}\td{7.7 \%}\td{4.12}\td{1.9 / 2.1 / 0.20, 2.5}\td{18}}
+\tr{\td{- reading export nodes}\td{3.6 \%}\td{4.6 \%}\td{1.8 \%}\td{1.5 \%}\td{2.1 \%}\td{4.98}\td{1.6 / 0.9 / 0.08, 1.8}\td{9}}
+\tr{\td{- proof-block decoding}\td{2.9 \%}\td{2.3 \%}\td{4.5 \%}\td{5.0 \%}\td{5.2 \%}\td{3.18}\td{2.2 / 4.3 / 0.40, 3.8}\td{29}}
+\tr{\td{\strong{4 Evaluation, code blocks, reduction}}\td{18.9 \%}\td{20.7 \%}\td{12.7 \%}\td{12.9 \%}\td{12.9 \%}\td{4.37}\td{2.4 / 1.5 / 0.13, 2.2}\td{11}}
+\tr{\td{- evaluation proper}\td{12.8 \%}\td{14.5 \%}\td{7.3 \%}\td{9.0 \%}\td{7.8 \%}\td{4.52}\td{2.2 / 1.3 / 0.11, 2.3}\td{10}}
+\tr{\td{- code-block stepper}\td{2.9 \%}\td{2.8 \%}\td{2.9 \%}\td{2.0 \%}\td{3.4 \%}\td{3.75}\td{3.3 / 2.1 / 0.22, 2.1}\td{19}}
+\tr{\td{\strong{5 Numeric and literal computation}}\td{0.2 \%}\td{0.2 \%}\td{0.3 \%}\td{0.1 \%}\td{0.2 \%}\td{3.35}\td{3.4 / 2.7 / 0.33, 3.0}\td{11}}
+\tr{\td{\strong{6 Conversion}}\td{7.6 \%}\td{9.3 \%}\td{3.4 \%}\td{3.0 \%}\td{3.7 \%}\td{4.82}\td{1.8 / 0.8 / 0.08, 2.0}\td{8}}
+\tr{\td{- arguments of applications}\td{1.3 \%}\td{1.1 \%}\td{1.1 \%}\td{0.7 \%}\td{1.0 \%}\td{3.37}\td{3.7 / 1.7 / 0.20, 3.3}\td{12}}
+\tr{\td{- structural sameness}\td{4.0 \%}\td{6.0 \%}\td{0.9 \%}\td{1.2 \%}\td{1.3 \%}\td{5.97}\td{1.0 / 0.4 / 0.03, 1.2}\td{5}}
+\tr{\td{\strong{7 Inference, checking, universe levels}}\td{26.3 \%}\td{23.4 \%}\td{29.9 \%}\td{39.7 \%}\td{36.6 \%}\td{3.50}\td{3.3 / 2.6 / 0.27, 2.3}\td{22}}
+\tr{\td{- applications}\td{8.2 \%}\td{8.4 \%}\td{5.5 \%}\td{9.0 \%}\td{8.1 \%}\td{4.02}\td{2.2 / 1.9 / 0.14, 2.0}\td{16}}
+\tr{\td{- type patterns}\td{4.5 \%}\td{5.7 \%}\td{2.2 \%}\td{3.3 \%}\td{2.8 \%}\td{5.10}\td{2.0 / 1.1 / 0.08, 1.3}\td{10}}
+\tr{\td{- fact records}\td{1.6 \%}\td{1.3 \%}\td{1.7 \%}\td{2.9 \%}\td{2.3 \%}\td{2.92}\td{5.0 / 2.6 / 0.28, 3.0}\td{22}}
+\tr{\td{- universe levels}\td{8.9 \%}\td{5.2 \%}\td{18.3 \%}\td{22.3 \%}\td{21.2 \%}\td{2.26}\td{6.5 / 5.5 / 0.74, 3.3}\td{38}}
+\tr{\td{\strong{8 Around the machine}}\td{5.1 \%}\td{3.4 \%}\td{15.6 \%}\td{8.2 \%}\td{7.3 \%}\td{2.64}\td{5.3 / 6.7 / 0.97, 2.4}\td{24}}
+\tr{\td{- reference-engine fallback}\td{0.7 \%}\td{0.6 \%}\td{1.2 \%}\td{1.4 \%}\td{1.2 \%}\td{3.10}\td{4.2 / 3.9 / 0.43, 3.2}\td{28}}
+\tr{\td{- kernel}\td{1.8 \%}\td{0.6 \%}\td{10.5 \%}\td{3.8 \%}\td{3.2 \%}\td{1.22}\td{9.0 / 23.8 / 3.95, 0.9}\td{29}}
+\tr{\td{\strong{not attributed (vdso)}}\td{0.1 \%}\td{0.1 \%}\td{0.1 \%}\td{0.1 \%}\td{0.2 \%}\td{2.35}\td{8.3 / 3.5 / 0.46, 3.0}\td{29}}
+\tr{\td{\strong{all worker samples}}\td{100.0 \%}\td{100.0 \%}\td{100.0 \%}\td{100.0 \%}\td{100.0 \%}\td{3.97}\td{2.8 / 2.1 / 0.21, 2.3}\td{16}}
+}
+
+\ul{
+\li{\strong{The probes are instruction-bound, as before}: closures, frames and neutral applications run at 4.5 to 4.7 instructions per cycle with 7 to 12 \% of their cycles stalled. A layout change cannot make them faster; only fewer probes can.}
+\li{\strong{The memory-bound items are the same as in rep-P10}: universe levels (2.26 instructions per cycle, 38 \% of their cycles stalled, 18 \% of all last-level misses and 22 \% of all TLB walks for 5 \% of the instructions), the inline caches and block lookup of code blocks (29 \% stalled), proof-block decoding (29 \%), table growth (23 \%), the kernel (29 \%).}
+\li{\strong{TLB walks are not an item}: 301 million per two passes; at 30 cycles each that is 1.2 \% of the workers' cycles.}
+}
+}
+
+\subtree{
+\title{2.5 The loader thread and the environment thread}
+
+\table{
+\tr{\th{CPU s of the timed pass}\th{Mathlib: JVM}\th{image}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{\strong{loader thread}}\td{\strong{8.60}}\td{\strong{11.46}}\td{\strong{1.91}}\td{\strong{2.47}}\td{\strong{3.76}}\td{\strong{4.57}}}
+\tr{\td{- scanning the file (tokens, records)}\td{2.38}\td{1.84}\td{0.56}\td{0.50}\td{0.96}\td{0.79}}
+\tr{\td{- the loader (records into the store)}\td{1.64}\td{1.92}\td{0.40}\td{0.44}\td{0.62}\td{0.76}}
+\tr{\td{- proof blocks (packing the proof-private records)}\td{1.45}\td{1.85}\td{0.39}\td{0.47}\td{0.83}\td{0.71}}
+\tr{\td{- linking}\td{1.01}\td{1.25}\td{0.22}\td{0.27}\td{0.40}\td{0.51}}
+\tr{\td{- term-level substitution}\td{0.67}\td{0.69}\td{0.13}\td{0.12}\td{0.26}\td{0.27}}
+\tr{\td{- declaration table, names}\td{0.64}\td{0.82}\td{0.11}\td{0.10}\td{0.37}\td{0.40}}
+\tr{\td{- reading term nodes}\td{0.52}\td{0.86}\td{0.08}\td{0.14}\td{0.24}\td{0.35}}
+\tr{\td{- universe levels}\td{0.25}\td{0.25}\td{0.01}\td{0.02}\td{0.08}\td{0.07}}
+\tr{\td{- kernel (page faults of the mapped file and of new store memory)}\td{(0.30 by the kernel's own count)}\td{1.59}\td{(0.06)}\td{0.33}\td{(0.13)}\td{0.55}}
+\tr{\td{- array copies sampled without a caller}\td{-}\td{0.32}\td{-}\td{0.08}\td{-}\td{0.13}}
+\tr{\td{\strong{environment thread}}\td{\strong{1.33}}\td{\strong{1.59}}\td{\strong{1.33}}\td{\strong{1.74}}\td{\strong{0.38}}\td{\strong{0.48}}}
+\tr{\td{- of it the reference engine (admission of inductive blocks) and the store work it asks for}\td{1.05}\td{1.00}\td{1.26}\td{1.34}\td{0.26}\td{0.29}}
+}
+
+\p{The JVM's samples have no kernel line (its 0.30 s of kernel time on Mathlib is inside the other lines). The environment thread decides 7,133 units on Mathlib, 1,618 on navier-stokes-euler and 4,377 on cslib, the inductive blocks and their kin, with the reference engine; navier-stokes-euler has as much of that work as Mathlib in a file a quarter of the size.}
+}
+}
+
+\subtree{
+\title{3. The wall-clock structure of the pass}
+
+\subtree{
+\title{3.1 Load alone, check alone, and the pass that does both}
+
+\p{With \code{\verb~|-X load=batch~} the file is loaded first and checked afterwards: the loader thread has a core to itself, and then the workers have all eight. Later passes of one process, wall clock in s; the pipelined pass is the default:}
+
+\table{
+\tr{\th{}\th{Mathlib: JVM}\th{image}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{the load alone (one thread; its CPU is the same number)}\td{8.49}\td{11.13}\td{1.77}\td{2.24}\td{3.41}\td{4.28}}
+\tr{\td{the check alone (8 workers on 8 cores)}\td{9.57}\td{12.05}\td{2.66}\td{3.32}\td{3.39}\td{4.25}}
+\tr{\td{workers' CPU in the check alone, s}\td{74.0}\td{93.5}\td{19.2}\td{24.1}\td{26.0}\td{33.0}}
+\tr{\td{batch pass = load + check}\td{18.08}\td{23.19}\td{4.45}\td{5.56}\td{6.81}\td{8.53}}
+\tr{\td{\strong{the pipelined pass (default)}}\td{\strong{11.32}}\td{\strong{14.46}}\td{\strong{3.01}}\td{\strong{3.83}}\td{\strong{4.18}}\td{\strong{5.22}}}
+\tr{\td{workers' CPU in the pipelined pass, s}\td{75.6}\td{96.3}\td{19.3}\td{24.5}\td{26.3}\td{33.8}}
+\tr{\td{(workers + loader + environment thread) / 8}\td{10.69}\td{13.67}\td{2.82}\td{3.58}\td{3.80}\td{4.86}}
+\tr{\td{the pipelined pass over the larger of load and check}\td{1.18}\td{1.20}\td{1.13}\td{1.15}\td{1.23}\td{1.22}}
+\tr{\td{the load alone as a share of the pipelined pass}\td{75 \%}\td{77 \%}\td{59 \%}\td{58 \%}\td{82 \%}\td{82 \%}}
+\tr{\td{the image with two scanner threads (the default before [log-RCAL](log-RCAL))}\td{-}\td{14.70}\td{-}\td{4.40}\td{-}\td{5.27}}
+}
+
+\ul{
+\li{\strong{Pipelining hides 8.7 s of a batch pass of 23.2 s on Mathlib in the image}, and the pass still takes 2.4 s longer than its check alone: the loader thread and the environment thread need 13 s of CPU from the same eight cores (1.6 s of wall clock), and the pass has 34 collections where the batch pass has 16.}
+\li{\strong{The workers need 2 to 3 \% more CPU beside the loader than alone} (96.3 against 93.5 s in the image on Mathlib, 75.6 against 74.0 s on the JVM): what the pipelined pass adds is competition for cores, hardly any slower code.}
+\li{\strong{A pass costs its CPU divided by 8, plus 6 to 10 \%}: 13.67 s of CPU per core on Mathlib in the image, 14.46 s of wall clock. Every CPU second saved anywhere, in a worker or in the loader, is worth an eighth of a second, and nothing else is worth anything while that holds.}
+\li{\strong{It holds until the loader thread is the longest chain.} The load alone takes 11.13 s on Mathlib in the image, 77 \% of the pass. With L the loader's CPU and E the environment thread's, the workers stop being the bound when their CPU falls below about 8 times the load alone minus L and E: 76 s in the image on Mathlib (they are at 96.3 s, so after a gain of 21 \%), 58 s on the JVM (they are at 75.6 s). On cslib the limit is closer (29 s against 33.8 s in the image, a gain of 14 \%; 23 s against 26.3 s on the JVM), on navier-stokes-euler farther (14 s against 24.5 s in the image, but there the environment thread is the longer chain, section 3.3).}
+\li{\strong{A second scanner thread does not pay today}, as [the decision on the settings of a plain run](dec-EGMG) found on cold runs: on Mathlib it takes the loader thread from 11.46 to 6.8 s of CPU and adds 7.3 s on the scanner threads, 2.7 s more in all, and the pass is 14.70 to 14.76 s instead of 14.46 s; on navier-stokes-euler 4.40 to 4.43 s instead of 3.83 to 3.95 s, with 22 collections instead of 8; on cslib it is even (5.27 to 5.32 s against 5.22 to 5.37 s). It would pay once the workers leave a core free, which is the same condition as above.}
+}
+}
+
+\subtree{
+\title{3.2 How long the loader is the bottleneck}
+
+\p{From the driver's time account of a statistics run (later pass, 8 workers; the run with statistics is 0.02 to 0.4 s slower than the timed one):}
+
+\table{
+\tr{\th{share of workers x wall clock of the check}\th{Mathlib: JVM}\th{image}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{on a CPU}\td{84.3 \%}\td{85.0 \%}\td{81.2 \%}\td{81.2 \%}\td{82.0 \%}\td{82.6 \%}}
+\tr{\td{runnable without a CPU}\td{11.9 \%}\td{11.5 \%}\td{13.8 \%}\td{13.3 \%}\td{14.5 \%}\td{11.3 \%}}
+\tr{\td{parked: nothing announced, the loader has not delivered}\td{1.5 \%}\td{0.8 \%}\td{3.5 \%}\td{3.2 \%}\td{1.2 \%}\td{2.6 \%}}
+\tr{\td{parked: nothing announced, the environment thread is behind}\td{0.1 \%}\td{0.0 \%}\td{0.6 \%}\td{0.3 \%}\td{0.6 \%}\td{0.6 \%}}
+\tr{\td{parked in the tail (only busy claims left)}\td{0.0 \%}\td{0.0 \%}\td{0.1 \%}\td{0.2 \%}\td{0.1 \%}\td{0.1 \%}}
+\tr{\td{blocked otherwise (collections, page faults)}\td{2.1 \%}\td{2.7 \%}\td{0.8 \%}\td{1.8 \%}\td{1.6 \%}\td{2.6 \%}}
+\tr{\td{the load ends at, s of the pass}\td{10.29 of 11.68}\td{13.32 of 14.50}\td{1.96 of 3.03}\td{2.51 of 3.94}\td{3.60 of 4.24}\td{4.91 of 5.28}}
+\tr{\td{the frontier is complete at, s}\td{10.29}\td{13.33}\td{2.32}\td{3.32}\td{3.60}\td{4.92}}
+\tr{\td{last unit of the file announced to last unit checked, s}\td{1.38}\td{1.17}\td{0.70}\td{0.62}\td{0.64}\td{0.36}}
+}
+
+\ul{
+\li{\strong{The workers wait for the loader for 0.8 to 3.5 \% of their time}, 0.11 to 0.17 s per worker and pass on Mathlib. The loader is not the bottleneck of today's pass on any of the three corpora.}
+\li{\strong{But the workers are right behind it.} On Mathlib in the image the units that are announced and not yet accepted are 0.1 to 2.1 \% of the file for the first 10 s of the pass (5,000 to 15,000 units; one publication is 16,384), 3.7 \% at 11 s, 9.8 \% at 13 s when the load is about to end, and the workers need 1.2 s more after the last unit is announced. The same on the JVM: 0.3 to 1.8 \% for 6 s, 12.6 \% at 10 s, 1.4 s of tail. On cslib in the image the backlog is 1.1 to 2.5 \% for 3 s and 7.2 \% at the end of the load, which is at 4.91 s of 5.28 s.}
+\li{So for two thirds of a Mathlib pass the checking keeps pace with the file as it arrives, and only the heavy last third of Mathlib builds a queue. A pass that is a tenth faster in the workers would end with the load.}
+}
+}
+
+\subtree{
+\title{3.3 The serial parts: what Amdahl leaves with 8 workers}
+
+\table{
+\tr{\th{serial part}\th{Mathlib: JVM}\th{image}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{loader thread, alone on a core, s}\td{8.49}\td{11.13}\td{1.77}\td{2.24}\td{3.41}\td{4.28}}
+\tr{\td{environment thread, CPU s (it follows the loader and gates the frontier)}\td{1.33}\td{1.59}\td{1.33}\td{1.74}\td{0.38}\td{0.48}}
+\tr{\td{pauses of the collections, s}\td{0.28}\td{0.27}\td{0.05}\td{0.05}\td{0.09}\td{0.10}}
+\tr{\td{the pass}\td{11.32}\td{14.46}\td{3.01}\td{3.83}\td{4.18}\td{5.22}}
+\tr{\td{gruszka's whole run with 8 workers, same windows (section 5.1)}\td{10.80}\td{10.80}\td{2.65}\td{2.65}\td{4.04}\td{4.04}}
+}
+
+\ul{
+\li{\strong{The loader thread is the one long serial chain}: three quarters of the pass on Mathlib, four fifths on cslib. In the image its time alone is longer than gruszka's whole run on Mathlib (11.13 against 10.80 s) and 4.28 against 4.04 s on cslib: no engine, however fast, takes the executable to gruszka's wall clock on these two corpora while the load is one thread of that cost.}
+\li{\strong{On navier-stokes-euler the chain is the environment thread.} It admits the inductive blocks with the reference engine, 1,618 units, 1.74 s of CPU in the image, in file order behind the loader; it is runnable without a core for 0.6 s of the pass, and the frontier is complete only at 3.32 s of 3.94 s (JVM: 2.32 of 3.03 s), 0.8 s after the load ended. The workers are parked for it for 0.3 to 0.6 \% of their time only; it would be the floor of a faster pass.}
+\li{\strong{Collections are 0.27 s of a Mathlib pass on both platforms}; the collector is no longer a serial part that matters.}
+\li{\strong{The tail is not idle time.} After the last unit is announced the eight workers are busy for 0.4 to 1.4 s; they are parked in the tail for 0.0 to 0.2 \% of their time.}
+}
+}
+
+\subtree{
+\title{3.4 One worker}
+
+\p{navier-stokes-euler and cslib with \code{\verb~|--threads 1~} (with one worker the driver loads and checks in turn, and the worker drives the environment pass itself, so the pass is the sum of its CPU):}
+
+\table{
+\tr{\th{}\th{navier-stokes-euler: JVM}\th{image}\th{cslib: JVM}\th{image}}
+\tr{\td{pass with one worker, s}\td{22.17}\td{27.07}\td{29.82}\td{37.68}}
+\tr{\td{CPU of the worker (checking and the environment pass), s}\td{20.2}\td{24.7 to 25.4}\td{26.3}\td{33.1}}
+\tr{\td{the same work with 8 workers: workers + environment thread, CPU s}\td{20.63}\td{26.19}\td{26.67}\td{34.32}}
+\tr{\td{8 workers against one, CPU}\td{1.02}\td{1.03 to 1.06}\td{1.01}\td{1.04}}
+\tr{\td{wall clock, one worker / 8 workers}\td{7.4}\td{7.1}\td{7.1}\td{7.2}}
+}
+
+\ul{
+\li{\strong{Eight busy cores cost the same checking 1 to 6 \% more CPU} than one worker alone on the host: memory bandwidth and the shared cache, as [ins-RPLD](ins-RPLD) found (5 to 7 \% then). Nothing that the workers share shows up as CPU.}
+\li{\strong{Eight workers are 7.1 to 7.4 times faster than one} in wall clock, pipelining included. The check phase alone scales by 7.4 to 7.8 (one worker's 24.7 s against 3.32 s of check alone on navier-stokes-euler in the image; 33.2 against 4.25 s on cslib).}
+\li{Mathlib was not run with one worker.}
+}
+}
+
+\subtree{
+\title{3.5 The reference engine's share}
+
+\p{A plain run re-checks every rejection with the reference engine (none on these corpora) and gives it the units the machine declines. With the final set the machine declines one kind of unit only, with \code{\verb~|E_LIMIT~}: "K rule after the application of a let variable whose declared type is not the type of its value (finding E1-F6)". Each such unit is tried twice by the machine (120 declines for 60 units on Mathlib) and then decided by the reference engine.}
+
+\table{
+\tr{\th{}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{units the machine checks}\td{714,712}\td{124,850}\td{397,608}}
+\tr{\td{of them declined and decided by the reference engine (\code{\verb~|-X engine=reference~} is not used: the fallback inside a plain run)}\td{60}\td{16}\td{7}}
+\tr{\td{their time inside units, JVM / image, s}\td{0.74 / 1.11}\td{0.15 / 0.20}\td{0.04 / 0.05}}
+\tr{\td{share of the time inside units, JVM / image}\td{0.99 / 1.22 \%}\td{0.83 / 0.85 \%}\td{0.15 / 0.16 \%}}
+\tr{\td{steps of the reference engine in the pass (the fallback and the environment thread's admission of inductive blocks)}\td{5.28 M}\td{8.27 M}\td{0.82 M}}
+\tr{\td{the fallback in the samples of the workers, JVM / image}\td{0.88 / 0.72 \%}\td{0.62 / 0.49 \%}\td{0.11 / 0.12 \%}}
+}
+
+\p{The units it spends it on, longest first (image, ms): on Mathlib \code{\verb~|AlgebraicGeometry.Scheme.isCoverDense_toOver_Spec~} 286, the private \code{\verb~|Tilde~} lemma of \code{\verb~|Mathlib.AlgebraicGeometry.Modules.Tilde~} 147, \code{\verb~|AlgebraicGeometry.Scheme.isOneHypercoverDense_toOver_Spec~} 129, \code{\verb~|groupHomology.H1CoresCoinfOfTrivial_exact~} 42, \code{\verb~|LinearMap.exists_basis_basis_of_span_eq_top_of_mem_algebraMap~} 28, \code{\verb~|LinearMap.transvection.det~} 24; on navier-stokes-euler \code{\verb~|EulerSmoothTensorLimit.exists_smooth_limit~} 50, \code{\verb~|NavierStokes.UniformAngularReset.uniform_reset_branch~} 22, \code{\verb~|FormalMultilinearSeries.comp_assoc~} 21; on cslib \code{\verb~|FormalMultilinearSeries.comp_assoc~} 21, \code{\verb~|Cslib.Automata.NA.Buchi.buchiFamily_saturation~} 12. gruszka needs 1.3 to 5.9 ms for the first three of Mathlib (its profile with 4 workers of the baseline study). The environment thread uses the reference engine too, for the inductive blocks (section 2.5); that is admission, not fallback. The fallback is 1 \% or less of every corpus: it is not a lever any more.}
+}
+}
+
+\subtree{
+\title{4. The image against the JVM launcher}
+
+\subtree{
+\title{4.1 Where the seconds go}
+
+\p{The same jars, the same pass, the timed passes of section 2.1: the executable needs 3.14 s more than the JVM launcher on Mathlib (14.46 against 11.32 s), 0.82 s more on navier-stokes-euler and 1.04 s more on cslib; 1.26 to 1.27 times the CPU on all three.}
+
+\table{
+\tr{\th{image - JVM}\th{Mathlib: CPU s}\th{wall s}\th{navier-stokes-euler: CPU s}\th{wall s}\th{cslib: CPU s}\th{wall s}}
+\tr{\td{workers, user code: the image's code needs 25 to 27 \% more CPU than C2's}\td{+19.16}\td{+2.40}\td{+4.89}\td{+0.61}\td{+6.97}\td{+0.87}}
+\tr{\td{workers, kernel: page faults (1.5 M against 361 per Mathlib pass)}\td{+1.58}\td{+0.20}\td{+0.26}\td{+0.03}\td{+0.58}\td{+0.07}}
+\tr{\td{loader thread (of it kernel +0.85, +0.21, +0.34 s)}\td{+2.86}\td{+0.36}\td{+0.56}\td{+0.07}\td{+0.81}\td{+0.10}}
+\tr{\td{environment thread}\td{+0.26}\td{+0.03}\td{+0.41}\td{+0.05}\td{+0.10}\td{+0.01}}
+\tr{\td{JIT compiler threads and collector thread (the JVM's own)}\td{-0.44}\td{-0.06}\td{-0.19}\td{-0.02}\td{-0.15}\td{-0.02}}
+\tr{\td{pauses of the collections (0.27 against 0.28 s on Mathlib)}\td{}\td{-0.01}\td{}\td{0.00}\td{}\td{+0.01}}
+\tr{\td{cores idle otherwise (start and end of the pass)}\td{}\td{+0.22}\td{}\td{+0.08}\td{}\td{0.00}}
+\tr{\td{\strong{sum}}\td{\strong{+23.42}}\td{\strong{+3.14}}\td{\strong{+5.93}}\td{\strong{+0.82}}\td{\strong{+8.31}}\td{\strong{+1.04}}}
+}
+
+\ul{
+\li{\strong{It is code quality now, on every corpus}: three quarters or more of the gap are the workers' user code, a tenth is the loader thread, and memory management, which was half of the gap in [rep-P10](rep-P10) (pauses 1.4 s and page faults 0.9 s of 4.55 s), is 0.3 s of 3.14 s: the pauses are equal on the two platforms since the collection policy changed, and what is left is page faults.}
+\li{\strong{The gap grew in relative terms as the work shrank}: C2's code needed 12 \% less CPU than the image's in rep-P10, and needs 20 \% less now (75.6 against 94.7 s of user code). The work that the three switches removed, the fallback's term substitution and the comparison of proofs, was the part where the two platforms were equal.}
+}
+}
+
+\subtree{
+\title{4.2 Item by item: which items the image compiles worse}
+
+\p{Ratio of the workers' CPU seconds, image / JVM, from the table of section 2.2:}
+
+\table{
+\tr{\th{item}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}\th{image - JVM on Mathlib, CPU s}}
+\tr{\td{all worker CPU}\td{1.27}\td{1.27}\td{1.29}\td{+20.7}}
+\tr{\td{1 hash consing}\td{1.24}\td{1.16}\td{1.24}\td{+4.6}}
+\tr{\td{- probes: closures and tabling records}\td{1.41}\td{1.46}\td{1.54}\td{+2.1}}
+\tr{\td{- probes: neutral applications}\td{1.36}\td{1.32}\td{1.35}\td{+1.4}}
+\tr{\td{- probes: frames and spines}\td{1.03}\td{0.75}\td{0.84}\td{+0.1}}
+\tr{\td{2 memo lookups}\td{1.33}\td{1.27}\td{1.34}\td{+2.4}}
+\tr{\td{- the pair table}\td{1.61}\td{1.40}\td{1.60}\td{+0.9}}
+\tr{\td{4 evaluation, code blocks, reduction}\td{1.41}\td{1.57}\td{1.43}\td{+5.3}}
+\tr{\td{- evaluation proper}\td{1.35}\td{1.54}\td{1.39}\td{+3.2}}
+\tr{\td{- working environment (\code{\verb~|Runs.push~}, \code{\verb~|enter~})}\td{4.7}\td{4.6}\td{4.8}\td{+1.25}}
+\tr{\td{3 + 6 + 7 term store, conversion, inference and levels (compared as a sum, section 1.4)}\td{1.13}\td{1.15}\td{1.15}\td{+4.7}}
+\tr{\td{- structural sameness (\code{\verb~|Same~})}\td{1.79}\td{1.79}\td{1.84}\td{+1.7}}
+\tr{\td{- universe levels}\td{1.15}\td{1.08}\td{1.17}\td{+1.15}}
+\tr{\td{- proof-block decoding}\td{0.89}\td{0.86}\td{0.85}\td{-0.4}}
+\tr{\td{8 around the machine}\td{3.8}\td{3.9}\td{3.7}\td{+3.6}}
+\tr{\td{- kernel}\td{image only}\td{}\td{}\td{+1.75}}
+\tr{\td{- slab and stack growth}\td{4.0}\td{3.4}\td{3.4}\td{+0.8}}
+\tr{\td{- the worklist itself}\td{6.3}\td{6.0}\td{0.8}\td{+0.4}}
+\tr{\td{- array copy stubs, collector code, other runtime code}\td{image only}\td{}\td{}\td{+0.5}}
+\tr{\td{- the reference-engine fallback}\td{1.05}\td{1.00}\td{1.3}\td{+0.0}}
+}
+
+\ul{
+\li{\strong{The three corpora give the same ratios}, to within 0.1 on every group: the gap is a property of the code, not of the corpus.}
+\li{\strong{The image is worst where the work is the machine's own loops and data flow} (evaluation proper 1.35 to 1.54, structural sameness 1.8, the pair table 1.4 to 1.6, the probes of closures 1.4 to 1.5) \strong{and equal where the work is bound by memory} (proof-block decoding, the fallback, universe levels within 8 to 17 \%, the probes of frames).}
+\li{\strong{Four lines exist almost only in the image}, 4.2 s of worker CPU on Mathlib together: the working environment (\code{\verb~|Runs.push~} and \code{\verb~|enter~} are separate code in the image and vanish into their callers under C2: 1.59 against 0.34 s), slab growth (1.11 against 0.28 s), the kernel (1.75 s) and the worklist's own steps (0.44 against 0.07 s). Three of the four are about fresh memory: a grown array in the image is new pages from the kernel, zeroed there and faulted in one by one; on the JVM it is a piece of a nursery that was touched long ago.}
+\li{\strong{By class of the executing method} (the innermost inlined frame of a sample; CPU seconds of the workers on Mathlib, JVM against image): \code{\verb~|Values~} 13.9 and 19.2 (+5.3), \code{\verb~|Eval~} 10.8 and 14.9 (+4.1), \code{\verb~|Infer~} together with the readers of \code{\verb~|store.Terms~}, which the image attributes to their callers, 15.9 and 18.8 (+2.9), \code{\verb~|Same~} 1.9 and 3.7 (+1.8), \code{\verb~|Code~} 4.5 and 5.7 (+1.2), \code{\verb~|Machine~} 2.3 and 3.4 (+1.1), \code{\verb~|Pairs~} 1.2 and 2.0 (+0.8), \code{\verb~|Cargs~} 0.4 and 1.2 (+0.8), \code{\verb~|CodeStore~} 0.3 and 0.8, \code{\verb~|FactStore~} 0.2 and 0.6, the level binding of \code{\verb~|rlvm-api~} 0.1 and 0.5; equal within 0.2 s: \code{\verb~|Runs~}, \code{\verb~|Levels~}, \code{\verb~|IntListStore~}, \code{\verb~|Reduce~}; \code{\verb~|Conv~} +0.4. This is the work list of a pass over the machine for the image's sake (section 6.1).}
+\li{\strong{By worker count} the two platforms scale alike on navier-stokes-euler: the checking and the environment pass need 24.7 to 25.4 s of CPU with one worker in the image and 26.2 s with eight, 20.2 and 20.6 s on the JVM (section 3.4).}
+}
+}
+
+\subtree{
+\title{4.3 What does not recover it: flags of the image build}
+
+\p{Four more images of the same jars, each the shipped flags plus one change, interleaved with the shipped executable inside one window per corpus (median later pass of a process of 3 or 4 passes; navier-stokes-euler two rounds; wall clock in s, in brackets the workers' CPU against the shipped executable):}
+
+\table{
+\tr{\th{image}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{the shipped executable}\td{14.54}\td{3.88}\td{5.28}}
+\tr{\td{the same flags built again}\td{not run}\td{3.89 (+0.2 \%)}\td{not run}}
+\tr{\td{inliner budgets doubled (\code{\verb~|-H:BaseTargetSpending=240 -H:InliningCoefficient=0.04~})}\td{14.59 (+0.3 \%)}\td{3.96 (-0.4 \%)}\td{5.32 (+0.4 \%)}}
+\tr{\td{inliner budgets times four, with \code{\verb~|-H:InlinedCompilerNodeLimit=40000 -H:CallGraphSizeLimit=2400~}}\td{14.48 (0.0 \%)}\td{3.92 (-1.6 \%)}\td{5.32 (+0.2 \%)}}
+\tr{\td{\code{\verb~|-march=native~}}\td{14.56 (+0.4 \%)}\td{3.92 (-0.8 \%)}\td{5.29 (+0.8 \%)}}
+}
+
+\p{No flag moves the pass or the workers' CPU by more than 2 \%, which is the spread between rows. The images with larger budgets are 0.5 and 0.9 MB larger, so the inliner did inline more; it bought nothing. What the image lacks is not inlining volume and not instruction-set extensions. Three things are known to be worth something: the inline lists of the machine that are already in the build (0.7 to 4.4 \% of the machine's CPU, [the switch reference](design-switches-document)); \code{\verb~|-O3~} over \code{\verb~|-O2~}, already in the build; and a profile, which only Oracle GraalVM can use: the optional profile-guided executable runs the Mathlib pass in 0.84 times the default executable's time in the benchmark tables ([rep-benchmarks](rep-benchmarks); not re-measured here, no Oracle GraalVM was used). The JVM launcher is at 0.78.}
+}
+
+\subtree{
+\title{4.4 Memory in the image: collections are small, fresh pages are not free}
+
+\table{
+\tr{\th{per Mathlib pass}\th{JVM launcher}\th{image}}
+\tr{\td{collections}\td{9 young + 2 complete}\td{34 young}}
+\tr{\td{pauses, s}\td{0.28}\td{0.27}}
+\tr{\td{memory freed by the collections, GB}\td{4.9}\td{2.3}}
+\tr{\td{minor page faults, all threads}\td{96,000}\td{2,490,000}}
+\tr{\td{kernel time, all threads, s}\td{0.32}\td{2.83}}
+\tr{\td{peak resident set of the process, MiB}\td{6,404}\td{7,548}}
+}
+
+\ul{
+\li{\strong{The collector is settled}: 0.27 s of pauses, 0.05 s of collector code on the workers. \code{\verb~|BySpaceAndTime~} did what [log-RCAL](log-RCAL) says.}
+\li{\strong{Fresh pages cost 2.8 s of CPU per pass}, 0.35 s of wall clock: 1.5 million faults in the workers (5.9 GB of new pages per pass), 0.86 million in the loader thread. The JVM allocates the same 5 GB per pass out of a nursery of 1 GB that it touched once, on huge pages.}
+\li{\strong{About three fifths of the workers' faults are the copies of the level tables.} Each publication of the pipelined load makes every worker copy the level tables at its next reset ([ins-E1DU](ins-E1DU)). The image with other hand-off intervals, later passes of one process each, Mathlib:}
+}
+
+\table{
+\tr{\th{publications per pass}\th{pass, s}\th{process CPU, s}\th{workers' CPU, s}\th{workers' kernel time, s}\th{workers' page faults}\th{collections}\th{pauses, s}}
+\tr{\td{205 (\code{\verb~|-X publish-scale=1~})}\td{15.04 to 15.17}\td{113.5}\td{99.3 to 99.9}\td{2.4}\td{2.5 M}\td{59}\td{0.54}}
+\tr{\td{52 (default)}\td{14.59 to 14.61}\td{110.5}\td{96.8 to 97.3}\td{1.5}\td{1.5 M}\td{34}\td{0.27}}
+\tr{\td{8 (\code{\verb~|-X publish-scale=1 -X publish-units=131072 -X publish-mib=1024~})}\td{15.27 to 15.28}\td{108.5}\td{95.0 to 95.9}\td{0.85}\td{0.75 M}\td{19}\td{0.14}}
+}
+
+\p{From 205 to 52 publications the workers save 2.8 s of CPU, 1.0 million faults and 0.27 s of pauses, and the pass 0.5 s; from 52 to 8 another 1.6 s, 0.77 million faults and 0.13 s of pauses, but the pass gets 0.7 s longer, because eight pieces feed the workers too coarsely. So at the default a publication costs the workers about 36 ms of CPU, 17,000 page faults (68 MiB of new pages) and 3 ms of pause, 52 times per pass: 1.9 s of worker CPU, 0.9 million faults and 0.15 s of pauses, about 0.4 s of the 14.5 s. A level store that the workers share instead of copying would give that back and would let the file be published in small pieces again.}
+
+\ul{
+\li{\strong{What was not separated:} who faults the other 0.6 million pages of the workers. A native sample has no caller, so a page fault cannot be attributed to an allocation site; the candidates are the slab growths of the sessions that outgrow the kept slabs (958 MB grown in 203 growths per pass, by the machine's own count) and the eden of the collector, which is fresh memory after every collection.}
+}
+}
+}
+
+\subtree{
+\title{5. Against gruszka}
+
+\subtree{
+\title{5.1 The same windows}
+
+\p{gruszka in the arena container on the same 8 cores, one run per cell (the check alone was run twice and repeats to 0.04 s), against RLVM's timed passes of section 2.1. How it works is in [the study of gruszka and pestka](study-gruszka-pestka): the export is first packed into a binary columnar file on all threads, the shared part of that file is loaded, and the proof-private records stay bytes until a worker checks their theorem.}
+
+\table{
+\tr{\th{8 workers, 8 cores}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{gruszka, its arena run line: wall s / CPU s}\td{10.80 / 63.7}\td{2.65 / 15.6}\td{4.04 / 22.9}}
+\tr{\td{- packing the export (\code{\verb~|susz pack --no-index~}): wall s / CPU s}\td{1.80 / 5.4}\td{0.36 / 1.2}\td{0.73 / 2.2}}
+\tr{\td{- the check of the packed file: wall s / CPU s}\td{8.80 / 58.4}\td{2.24 / 14.4}\td{3.27 / 20.9}}
+\tr{\td{- peak resident set of the check, MiB}\td{2,876}\td{967}\td{1,503}}
+\tr{\td{- user-space instructions of the run line}\td{421 G}\td{120 G}\td{151 G}}
+\tr{\td{the executable, warm pass: wall s / CPU s}\td{14.46 / 109.4}\td{3.83 / 28.7}\td{5.22 / 38.9}}
+\tr{\td{the JVM launcher, warm pass: wall s / CPU s}\td{11.32 / 85.9}\td{3.01 / 22.7}\td{4.18 / 30.6}}
+\tr{\td{the executable / gruszka: wall, CPU}\td{1.34, 1.72}\td{1.45, 1.84}\td{1.29, 1.70}}
+\tr{\td{the JVM launcher / gruszka: wall, CPU}\td{1.05, 1.35}\td{1.14, 1.46}\td{1.03, 1.34}}
+}
+
+\p{RLVM needs 1.7 to 1.8 times gruszka's CPU in the image and stays within 1.3 to 1.45 of its wall clock, because RLVM checks while it loads and gruszka packs and loads before it checks: its packing is 0.36 to 1.80 s of wall clock in which nothing is checked.}
+}
+
+\subtree{
+\title{5.2 The same work, at a higher price per step}
+
+\p{Both checkers count the iterations of their loops ("ticks"; the two counters are not the same instrument) and their unfoldings. Whole corpus, 8 workers:}
+
+\table{
+\tr{\th{}\th{Mathlib}\th{navier-stokes-euler}\th{cslib}}
+\tr{\td{ticks: RLVM's machine / gruszka}\td{575.8 M / 471.2 M = 1.22}\td{145.3 M / 134.5 M = 1.08}\td{216.7 M / 177.8 M = 1.22}}
+\tr{\td{unfoldings: RLVM (delta calls that are not memo hits) / gruszka}\td{17.9 M / 19.2 M}\td{3.8 M / 3.9 M}\td{7.3 M / 6.7 M}}
+\tr{\td{CPU per tick, gruszka (its check, load included), ns}\td{124}\td{107}\td{117}}
+\tr{\td{CPU per tick, RLVM's workers on the JVM, ns}\td{131 (1.06 x)}\td{133 (1.24 x)}\td{121 (1.03 x)}}
+\tr{\td{CPU per tick, RLVM's workers in the image, ns}\td{167 (1.35 x)}\td{168 (1.57 x)}\td{156 (1.33 x)}}
+\tr{\td{records made per tick by the machine}\td{0.50}\td{0.48}\td{0.52}}
+}
+
+\ul{
+\li{\strong{RLVM does the reductions gruszka does}: the unfoldings agree to 3 to 9 \%.}
+\li{\strong{On the JVM the workers pay gruszka's price per tick on Mathlib and cslib} (1.03 to 1.06 times) and 1.24 times on navier-stokes-euler; \strong{in the image 1.33 to 1.57 times.} For the executable the price per step is the image's code (section 4), not the design of the machine.}
+\li{\strong{RLVM takes 8 to 22 \% more ticks.} Unit by unit (below) the two counters agree to within a quarter on the units that hold half of the ticks; RLVM takes more than 1.25 times gruszka's ticks on a third of the units of Mathlib (239,000 units, +124 M ticks) and fewer than 0.8 times on 208,000 units (-20 M). The excess is not in one kind of declaration: ordinary theorems 1.22 times, auxiliary proofs 1.28, definitions 1.21, instances 1.21, equation lemmas 1.84 (9 M ticks of 575 M), matchers 1.02; and not in one size: 1.31 times below 100 nodes, 1.16 to 1.26 above.}
+\li{\strong{The rest of the CPU is the loader}: 11.46 s on Mathlib in the image against 5.4 s of packing plus gruszka's load of the packed file (inside its 58.4 s; its documents give 1.24 s of wall clock for Mathlib).}
+}
+}
+
+\subtree{
+\title{5.3 The unit level}
+
+\p{Time inside units, smallest time of each unit over the traced passes with 8 workers (section 1.3); gruszka per declaration from its own switch with one worker (with 8 workers the switch distorts the run: the checker writes every line to an unbuffered standard error under a lock, and the cslib check takes 10.1 s instead of 3.3 s), so gruszka's column is free of what eight busy cores cost and RLVM's is not. That is 14 to 15 \% for gruszka (its check needs 12.7 s of CPU with one worker and 14.4 s with eight on navier-stokes-euler, 18.1 and 20.8 s on cslib) and 1 to 6 \% for RLVM (section 3.4); at equal worker counts the ratios of this section are lower by that much.}
+
+\table{
+\tr{\th{corpus}\th{time inside units: JVM s}\th{image s}\th{gruszka, one worker, s}\th{image / gruszka}\th{JVM / gruszka}\th{the 20 heaviest units of the image}\th{the 1,000 heaviest}}
+\tr{\td{navier-stokes-euler}\td{17.95}\td{23.02}\td{12.14}\td{1.90}\td{1.48}\td{2.10 s, 9.1 \%}\td{6.29 s, 27.3 \%}}
+\tr{\td{cslib}\td{24.93}\td{31.45}\td{17.76}\td{1.77}\td{1.40}\td{1.65 s, 5.2 \%}\td{4.73 s, 15.0 \%}}
+\tr{\td{Mathlib (gruszka: the one-worker profile of the baseline study, 2026-11-23)}\td{74.93}\td{90.63}\td{61.54}\td{1.47}\td{1.22}\td{2.97 s, 3.3 \%}\td{10.42 s, 11.5 \%}}
+}
+
+\p{By the size of the unit (nodes of the unit's blocks and shared terms):}
+
+\table{
+\tr{\th{corpus}\th{size of the unit}\th{units}\th{RLVM ticks}\th{gruszka ticks}\th{JVM s}\th{image s}\th{gruszka s}\th{image / gruszka}\th{JVM / gruszka}\th{image, ns per tick}\th{gruszka, ns per tick}}
+\tr{\td{navier-stokes-euler}\td{below 100 nodes}\td{81,872}\td{14.4 M}\td{12.8 M}\td{1.71}\td{2.18}\td{1.44}\td{1.51}\td{1.19}\td{151}\td{112}}
+\tr{\td{}\td{100 to 1,000}\td{37,154}\td{57.2 M}\td{49.5 M}\td{7.22}\td{9.19}\td{5.08}\td{1.81}\td{1.42}\td{161}\td{103}}
+\tr{\td{}\td{1,000 to 10,000}\td{5,715}\td{51.6 M}\td{48.7 M}\td{6.99}\td{8.94}\td{4.51}\td{1.98}\td{1.55}\td{173}\td{93}}
+\tr{\td{}\td{10,000 to 100,000}\td{105}\td{5.7 M}\td{7.9 M}\td{0.79}\td{1.02}\td{0.54}\td{1.90}\td{1.47}\td{180}\td{67}}
+\tr{\td{}\td{100,000 and more}\td{4}\td{8.1 M}\td{8.1 M}\td{1.23}\td{1.69}\td{0.57}\td{2.96}\td{2.15}\td{208}\td{71}}
+\tr{\td{cslib}\td{below 100 nodes}\td{305,093}\td{51.2 M}\td{42.2 M}\td{6.43}\td{7.98}\td{4.65}\td{1.72}\td{1.38}\td{156}\td{110}}
+\tr{\td{}\td{100 to 1,000}\td{86,665}\td{109.5 M}\td{84.8 M}\td{12.57}\td{16.03}\td{8.75}\td{1.83}\td{1.44}\td{146}\td{103}}
+\tr{\td{}\td{1,000 to 10,000}\td{5,786}\td{47.7 M}\td{40.3 M}\td{5.47}\td{6.83}\td{4.01}\td{1.70}\td{1.36}\td{143}\td{100}}
+\tr{\td{}\td{10,000 to 100,000}\td{64}\td{4.5 M}\td{4.0 M}\td{0.47}\td{0.61}\td{0.35}\td{1.75}\td{1.35}\td{135}\td{87}}
+\tr{\td{Mathlib}\td{below 100 nodes}\td{508,222}\td{105.5 M}\td{79.1 M}\td{14.47}\td{17.55}\td{11.77}\td{1.49}\td{1.23}\td{166}\td{149}}
+\tr{\td{}\td{100 to 1,000}\td{186,824}\td{257.7 M}\td{202.2 M}\td{33.07}\td{40.03}\td{27.76}\td{1.44}\td{1.19}\td{155}\td{137}}
+\tr{\td{}\td{1,000 to 10,000}\td{19,333}\td{178.6 M}\td{152.2 M}\td{24.11}\td{28.99}\td{19.34}\td{1.50}\td{1.25}\td{162}\td{127}}
+\tr{\td{}\td{10,000 to 100,000}\td{333}\td{24.7 M}\td{20.9 M}\td{3.27}\td{4.07}\td{2.67}\td{1.53}\td{1.23}\td{165}\td{128}}
+}
+
+\p{\strong{navier-stokes-euler: the 20 units where the executable spends the most.} Ticks and nodes are RLVM's (nodes = the size of the unit: block nodes and shared terms); "kind of work" is read from the ticks per node of the unit and from gruszka's count of unfoldings.}
+
+\table{
+\tr{\th{\verb~|#~}\th{unit}\th{nodes}\th{ticks}\th{JVM ms}\th{image ms}\th{gruszka ms}\th{gruszka ticks}\th{image / gruszka}\th{kind of work}}
+\tr{\td{1}\td{\code{\verb~|NavierStokes.FiveProfileMoments.quadraticBilin._proof_6~}}\td{647,064}\td{3,360,874}\td{521.1}\td{744.1}\td{236.0}\td{3,068,095}\td{3.2}\td{inference and conversion, 5.2 ticks per node; gruszka unfolds 8,588 times}}
+\tr{\td{2}\td{\code{\verb~|NavierStokes.FiveProfileMoments.quadraticBilin._proof_9~}}\td{441,964}\td{2,072,443}\td{299.2}\td{382.5}\td{130.9}\td{2,059,328}\td{2.9}\td{inference and conversion, 4.7 ticks per node; gruszka unfolds 5,839 times}}
+\tr{\td{3}\td{\code{\verb~|NavierStokes.TerminalCompensation.quadraticBilin._proof_6~}}\td{398,013}\td{1,690,798}\td{264.7}\td{377.0}\td{135.7}\td{1,782,059}\td{2.8}\td{inference and conversion, 4.2 ticks per node; gruszka unfolds 1,196 times}}
+\tr{\td{4}\td{\code{\verb~|NavierStokes.TerminalCompensation.quadraticBilin._proof_9~}}\td{272,462}\td{1,003,458}\td{146.6}\td{188.3}\td{69.3}\td{1,193,069}\td{2.7}\td{inference of a large term, 3.7 ticks per node; gruszka unfolds 916 times}}
+\tr{\td{5}\td{\code{\verb~|EulerSmoothTensorLimit.exists_smooth_limit~}}\td{1,749}\td{8,898}\td{34.7}\td{50.0}\td{1.5}\td{14,495}\td{32.4}\td{declined by the machine (K rule after a let variable, E1-F6), decided by the reference engine}}
+\tr{\td{6}\td{\code{\verb~|NavierStokes.AngularMomentReset.quadraticBilin._proof_6~}}\td{90,446}\td{184,344}\td{27.4}\td{40.4}\td{18.5}\td{363,575}\td{2.2}\td{inference of a large term, 2.0 ticks per node; gruszka unfolds 778 times}}
+\tr{\td{7}\td{\code{\verb~|NavierStokes.UniformAngularReset.quadraticCoefficientsBilin._proof_7~}}\td{87,092}\td{180,358}\td{26.3}\td{34.6}\td{21.2}\td{362,848}\td{1.6}\td{inference of a large term, 2.1 ticks per node; gruszka unfolds 756 times}}
+\tr{\td{8}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.A0_ofReal~}}\td{34,862}\td{178,165}\td{21.7}\td{29.0}\td{13.9}\td{316,530}\td{2.1}\td{inference and conversion, 5.1 ticks per node; gruszka unfolds 5,739 times}}
+\tr{\td{9}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.coefficient0_parity~}}\td{49,849}\td{200,955}\td{22.1}\td{28.4}\td{21.7}\td{374,815}\td{1.3}\td{inference and conversion, 4.0 ticks per node; gruszka unfolds 8,967 times}}
+\tr{\td{10}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.matrixRHS_jet~}}\td{51,462}\td{182,154}\td{22.7}\td{26.9}\td{11.6}\td{172,670}\td{2.3}\td{inference of a large term, 3.5 ticks per node; gruszka unfolds 8,504 times}}
+\tr{\td{11}\td{\code{\verb~|NavierStokes.AngularMomentReset.quadraticBilin._proof_9~}}\td{61,700}\td{117,858}\td{17.8}\td{24.5}\td{11.3}\td{244,206}\td{2.2}\td{inference of a large term, 1.9 ticks per node; gruszka unfolds 596 times}}
+\tr{\td{12}\td{\code{\verb~|NavierStokes.UniformAngularReset.quadraticCoefficientsBilin._proof_10~}}\td{58,466}\td{123,302}\td{17.5}\td{23.6}\td{11.6}\td{244,099}\td{2.0}\td{inference of a large term, 2.1 ticks per node; gruszka unfolds 607 times}}
+\tr{\td{13}\td{\code{\verb~|NavierStokes.UniformAngularReset.uniform_reset_branch~}}\td{3,631}\td{15,440}\td{17.5}\td{21.8}\td{1.9}\td{18,284}\td{11.6}\td{declined by the machine (K rule after a let variable, E1-F6), decided by the reference engine}}
+\tr{\td{14}\td{\code{\verb~|FormalMultilinearSeries.comp_assoc~}}\td{7,040}\td{20,254}\td{15.1}\td{21.0}\td{2.2}\td{21,493}\td{9.5}\td{declined by the machine (K rule after a let variable, E1-F6), decided by the reference engine}}
+\tr{\td{15}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.coefficient1_parity~}}\td{33,852}\td{146,416}\td{15.5}\td{20.2}\td{11.9}\td{224,612}\td{1.7}\td{inference and conversion, 4.3 ticks per node; gruszka unfolds 6,636 times}}
+\tr{\td{16}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.A1_ofReal~}}\td{31,826}\td{144,286}\td{15.0}\td{19.4}\td{13.6}\td{272,938}\td{1.4}\td{inference and conversion, 4.5 ticks per node; gruszka unfolds 6,827 times}}
+\tr{\td{17}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.coefficient0_contDiffAt_of_pullback~}}\td{33,112}\td{129,359}\td{15.3}\td{19.4}\td{11.7}\td{261,516}\td{1.7}\td{inference of a large term, 3.9 ticks per node; gruszka unfolds 5,183 times}}
+\tr{\td{18}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.coefficient0_analyticAt~}}\td{33,000}\td{132,345}\td{14.5}\td{18.9}\td{11.7}\td{271,876}\td{1.6}\td{inference and conversion, 4.0 ticks per node; gruszka unfolds 5,439 times}}
+\tr{\td{19}\td{\code{\verb~|EulerCylinderDirichlet.Coefficients.coordinate_equation_ae~}}\td{21,516}\td{101,945}\td{13.4}\td{17.0}\td{10.9}\td{92,025}\td{1.6}\td{inference and conversion, 4.7 ticks per node; gruszka unfolds 2,445 times}}
+\tr{\td{20}\td{\code{\verb~|NavierStokes.PositiveAxisSystem.A1_shape~}}\td{34,466}\td{116,160}\td{12.8}\td{16.5}\td{9.3}\td{148,447}\td{1.8}\td{inference of a large term, 3.4 ticks per node; gruszka unfolds 3,211 times}}
+}
+
+\p{\strong{cslib: the 20 units where the executable spends the most.}}
+
+\table{
+\tr{\th{\verb~|#~}\th{unit}\th{nodes}\th{ticks}\th{JVM ms}\th{image ms}\th{gruszka ms}\th{gruszka ticks}\th{image / gruszka}\th{kind of work}}
+\tr{\td{1}\td{\code{\verb~|(private) Char.of_any_eq_false_aux._proof_1_15~}}\td{125}\td{3,212,954}\td{282.4}\td{531.5}\td{0.2}\td{1,532}\td{3405.6}\td{enters eager reduction: a closed computation that gruszka decides without running it}}
+\tr{\td{2}\td{\code{\verb~|(private) Char.of_any_eq_false_aux._proof_1_18~}}\td{630}\td{3,218,191}\td{248.7}\td{513.6}\td{0.2}\td{2,446}\td{2721.1}\td{enters eager reduction: a closed computation that gruszka decides without running it}}
+\tr{\td{3}\td{\code{\verb~|(private) Char.all._proof_1~}}\td{239}\td{980,217}\td{87.2}\td{150.5}\td{0.3}\td{2,671}\td{533.4}\td{enters eager reduction: a closed computation that gruszka decides without running it}}
+\tr{\td{4}\td{\code{\verb~|(private) Char.any._proof_1~}}\td{217}\td{982,264}\td{62.0}\td{131.0}\td{0.2}\td{1,600}\td{606.2}\td{enters eager reduction: a closed computation that gruszka decides without running it}}
+\tr{\td{5}\td{\code{\verb~|(private) String.fromUTF8Lossy_surrogate_append._proof_1_10~}}\td{62}\td{716,486}\td{33.8}\td{53.3}\td{57.9}\td{548,778}\td{0.9}\td{reduction, 11556 ticks per node; gruszka unfolds 97,026 times}}
+\tr{\td{6}\td{\code{\verb~|(private) String.Slice.Pattern.Model.ForwardSliceSearcher.Invariants.isVali...~}}\td{27,036}\td{229,898}\td{19.2}\td{28.6}\td{10.5}\td{105,657}\td{2.7}\td{inference and conversion, 8.5 ticks per node; gruszka unfolds 836 times}}
+\tr{\td{7}\td{\code{\verb~|(private) Cslib.Automata.NA.loop_fin_run_exists._proof_1_88~}}\td{52,794}\td{124,577}\td{17.8}\td{23.4}\td{12.1}\td{163,581}\td{1.9}\td{inference of a large term, 2.4 ticks per node; gruszka unfolds 3,409 times}}
+\tr{\td{8}\td{\code{\verb~|Std.IterM.stepAsHetT_filterMapWithPostcondition~}}\td{31,298}\td{139,377}\td{17.4}\td{22.2}\td{13.0}\td{109,393}\td{1.7}\td{inference and conversion, 4.5 ticks per node; gruszka unfolds 911 times}}
+\tr{\td{9}\td{\code{\verb~|(private) Vector.extract_append._proof_1~}}\td{24,510}\td{185,958}\td{15.6}\td{21.4}\td{7.0}\td{111,069}\td{3.1}\td{inference and conversion, 7.6 ticks per node; gruszka unfolds 5,134 times}}
+\tr{\td{10}\td{\code{\verb~|FormalMultilinearSeries.comp_assoc~}}\td{6,917}\td{20,098}\td{15.4}\td{21.1}\td{2.4}\td{21,642}\td{8.9}\td{declined by the machine (K rule after a let variable, E1-F6), decided by the reference engine}}
+\tr{\td{11}\td{\code{\verb~|(private) Array.extract_append._proof_1_1~}}\td{25,453}\td{179,217}\td{14.0}\td{19.7}\td{22.3}\td{186,854}\td{0.9}\td{inference and conversion, 7.0 ticks per node; gruszka unfolds 18,239 times}}
+\tr{\td{12}\td{\code{\verb~|Std.Iter.atIdxSlow?_intermediateZip~}}\td{23,448}\td{137,591}\td{13.8}\td{17.1}\td{9.4}\td{93,983}\td{1.8}\td{inference and conversion, 5.9 ticks per node; gruszka unfolds 4,586 times}}
+\tr{\td{13}\td{\code{\verb~|Algebra.TensorProduct.tensorTensorTensorComm._proof_2~}}\td{20,413}\td{79,643}\td{13.6}\td{16.9}\td{9.5}\td{59,481}\td{1.8}\td{inference of a large term, 3.9 ticks per node; gruszka unfolds 5,800 times}}
+\tr{\td{14}\td{\code{\verb~|(private) Vector.extract_extract._proof_1~}}\td{24,947}\td{152,288}\td{12.0}\td{16.2}\td{11.4}\td{145,030}\td{1.4}\td{inference and conversion, 6.1 ticks per node; gruszka unfolds 10,752 times}}
+\tr{\td{15}\td{\code{\verb~|Std.Iter.toList_intermediateZip_of_finite~}}\td{16,350}\td{112,833}\td{11.9}\td{14.9}\td{7.9}\td{68,020}\td{1.9}\td{inference and conversion, 6.9 ticks per node; gruszka unfolds 3,725 times}}
+\tr{\td{16}\td{\code{\verb~|(private) Array.extract_append_extract._proof_1_1~}}\td{23,718}\td{127,742}\td{10.4}\td{14.8}\td{11.3}\td{151,158}\td{1.3}\td{inference and conversion, 5.4 ticks per node; gruszka unfolds 13,564 times}}
+\tr{\td{17}\td{\code{\verb~|(private) Array.toList_reverse.go._unary~}}\td{11,135}\td{126,190}\td{10.5}\td{13.7}\td{3.9}\td{48,630}\td{3.5}\td{inference and conversion, 11.3 ticks per node; gruszka unfolds 1,614 times}}
+\tr{\td{18}\td{\code{\verb~|Std.DTreeMap.Internal.Impl.balance!_eq_balanceₘ~}}\td{28,965}\td{66,143}\td{10.2}\td{13.5}\td{7.9}\td{92,997}\td{1.7}\td{inference of a large term, 2.3 ticks per node; gruszka unfolds 1,591 times}}
+\tr{\td{19}\td{\code{\verb~|(private) Vector.extract_append_extract._proof_1~}}\td{22,252}\td{131,278}\td{10.2}\td{13.2}\td{7.2}\td{101,920}\td{1.8}\td{inference and conversion, 5.9 ticks per node; gruszka unfolds 5,075 times}}
+\tr{\td{20}\td{\code{\verb~|(private) Matrix.det_projVandermonde_of_field~}}\td{26,132}\td{87,410}\td{10.8}\td{13.0}\td{6.6}\td{78,240}\td{2.0}\td{inference of a large term, 3.3 ticks per node; gruszka unfolds 1,626 times}}
+}
+
+\p{What the unit level says:}
+
+\ul{
+\li{\strong{The time is flat.} The 20 heaviest units are 9.1 \% of the time inside units on navier-stokes-euler, 5.2 \% on cslib and 3.3 \% on Mathlib; the 1,000 heaviest 27 \%, 15 \% and 11.5 \%. There is no list of units whose repair moves a pass.}
+\li{\strong{navier-stokes-euler is large proof terms.} Four proofs of 270,000 to 650,000 nodes (\code{\verb~|quadraticBilin._proof_6~} and \code{\verb~|_proof_9~} of two modules) take 0.19 to 0.74 s each in the image, 1.7 s together (7.3 \%), at 4 to 5 ticks per node: plain inference of a very large term, almost no unfolding (gruszka: 1,200 to 8,600 unfoldings in 1.2 to 3.1 M ticks). The same number of ticks in both checkers. The four take the executable 1.69 s and gruszka 0.57 s with one worker: 3.0 times, where the units below 1,000 nodes are at 1.5 to 1.8 times. Two of them were profiled alone (the block of 1,024 consecutive units that holds them, \code{\verb~|-X shard=48/124~}, in which they are 90 \% of the time; two workers, JVM launcher under JFR and the symbolised image under \code{\verb~|perf~}): hash consing is 41 \% of the JVM's worker time there against 27 \% in the corpus (the probes of closures and tabling records 14.4 against 7.3 \%, of neutral applications 10.8 against 5.0 \%) and the pair table 8.4 against 3.3 \%; in the image hash consing is 35 against 25 \%, the pair table 7.2 against 3.6 \%, the kernel 10.4 against 1.4 \%, and 26 \% of the cycles are stalled on memory against 13 \%. A proof of 650,000 nodes is one session of 3.4 M ticks: its tables are far out of the cache, and in the image every doubling of a slab is fresh pages.}
+\li{\strong{cslib has four units of another kind}: the proofs \code{\verb~|Char.of_any_eq_false_aux._proof_*~}, \code{\verb~|Char.any._proof_1~} and \code{\verb~|Char.all._proof_1~} of \code{\verb~|Batteries.Data.Char.Basic~} (they are in Mathlib too). They enter eager reduction, the switch \code{\verb~|eager~} keeps them on the machine, and the machine takes 1.0 to 3.2 M ticks and 0.13 to 0.53 s for each in the image where gruszka takes 1,500 to 2,800 ticks and 0.2 to 0.4 ms. Together 1.3 s of the image's 31.5 s inside units on cslib (4.2 \%; JVM 0.68 s) and 1.3 s of 90.6 s on Mathlib. Which rule lets gruszka decide them without the computation was not determined; the machine follows the official strategy there ([eager reduction on the machine](design-eager-reduction)).}
+\li{\strong{The units the reference engine decides} are 8 to 165 times gruszka's time each and 0.2 to 1.2 \% of the time together (section 3.5).}
+}
+}
+
+\subtree{
+\title{5.4 Which of gruszka's mechanisms account for its lead}
+
+\p{From the study, checked against these numbers:}
+
+\ul{
+\li{\strong{Not "what not to compute".} The lists of skipped work are now nearly the same on the two sides: unfoldings within 3 to 9 \%, ticks within 8 to 22 \%. The two shortcuts for proof arguments and unread arguments, the direct case trees and the lazy evaluation of the default set are RLVM's versions of gruszka's list. What gruszka has and RLVM has in a narrower form is the reuse of checked facts across declarations: gruszka keeps, per shared term, that it passed check mode under a list of level parameters, and the lambda bodies and codomains of checked definitions; RLVM's \code{\verb~|pchk~} keeps it for closed terms without level parameters only. Whether that is where the 8 to 22 \% of ticks are could not be told from the unit level: the excess is spread over every kind and size of declaration.}
+\li{\strong{The price of a step, for the executable}: values, their memo words and their tables in flat arrays compiled by an optimising ahead-of-time compiler with a profile (gruszka's build is profile-guided, with link-time optimisation); RLVM's machine has the same shape of data, and C2 compiles its steps to gruszka's price on two of the three corpora. The image does not.}
+\li{\strong{The load.} gruszka packs on 8 threads (5.4 s of CPU, 1.8 s of wall clock on Mathlib) and materialises a third of the expressions; RLVM's loader thread also leaves the proof-private records packed, and still needs 11.5 s on one thread in the image. On cslib and Mathlib the executable's load alone is longer than gruszka's whole run (section 3.3).}
+\li{\strong{Large units.} On navier-stokes-euler gruszka's tick gets cheaper as the unit grows (112 ns below 100 nodes, 67 to 71 ns above 10,000 nodes, one worker) and RLVM's gets dearer (151 to 208 ns in the image; on \code{\verb~|quadraticBilin._proof_6~} 221 ns in the image and 155 ns on the JVM against 168 and 133 ns over the corpus). What makes RLVM dearer there is the size of the session, not the kind of work (sections 5.5 and 6.3).}
+}
+}
+
+\subtree{
+\title{5.5 Longer sessions: fewer ticks, no gain}
+
+\p{gruszka's warm sessions hold 8 MiB; the machine's cap is 1 MiB, set by the processor cache ([ins-FJ5R](ins-FJ5R)). If the extra ticks were work that a longer memory across declarations saves, larger sessions would show it. The image with other caps (\code{\verb~|-X machine.session-kib~}, with the driver's \code{\verb~|-X session-mib~} raised accordingly), later passes of one process:}
+
+\table{
+\tr{\th{corpus}\th{session cap}\th{later passes, s}\th{workers' CPU, s}\th{ticks}\th{worker CPU per tick, ns}\th{records}\th{session resets}\th{collections, pauses s}}
+\tr{\td{navier-stokes-euler (gruszka: 134.5 M ticks)}\td{256 KiB}\td{4.11 4.08}\td{26.0}\td{174.1 M}\td{149}\td{93.8 M}\td{13,664}\td{8, 0.05}}
+\tr{\td{}\td{1 MiB (default)}\td{3.93 3.87}\td{25.1}\td{145.2 M}\td{173}\td{70.2 M}\td{3,538}\td{8, 0.05}}
+\tr{\td{}\td{4 MiB}\td{3.92 3.89}\td{25.4}\td{126.0 M}\td{202}\td{56.2 M}\td{959}\td{8, 0.04}}
+\tr{\td{}\td{16 MiB}\td{4.28 4.18}\td{26.8}\td{115.9 M}\td{231}\td{49.7 M}\td{424}\td{17, 0.14}}
+\tr{\td{}\td{64 MiB}\td{4.36 4.31}\td{27.6}\td{113.5 M}\td{243}\td{48.3 M}\td{384}\td{20, 0.11}}
+\tr{\td{cslib (gruszka: 177.8 M ticks)}\td{256 KiB}\td{5.28 5.18}\td{32.7}\td{230.3 M}\td{142}\td{124.4 M}\td{20,548}\td{12, 0.09}}
+\tr{\td{}\td{1 MiB (default)}\td{5.35 5.36}\td{33.9}\td{216.7 M}\td{157}\td{113.5 M}\td{6,051}\td{13, 0.11}}
+\tr{\td{}\td{4 MiB}\td{5.58 5.69}\td{36.8}\td{208.2 M}\td{177}\td{105.7 M}\td{2,279}\td{12, 0.09}}
+\tr{\td{}\td{16 MiB}\td{5.86 5.89}\td{38.3}\td{203.7 M}\td{188}\td{101.8 M}\td{1,585}\td{15, 0.13}}
+\tr{\td{}\td{64 MiB}\td{5.82 5.87}\td{38.5}\td{203.6 M}\td{189}\td{101.6 M}\td{1,649}\td{14, 0.12}}
+\tr{\td{Mathlib (gruszka: 471.2 M ticks)}\td{1 MiB (default)}\td{14.48 14.52}\td{97.1}\td{575.6 M}\td{169}\td{289.5 M}\td{14,964}\td{34, 0.27}}
+\tr{\td{}\td{4 MiB}\td{15.46 15.40}\td{105.5}\td{550.8 M}\td{192}\td{267.5 M}\td{5,233}\td{30, 0.23}}
+\tr{\td{}\td{16 MiB}\td{16.58 16.66}\td{112.3}\td{539.6 M}\td{208}\td{257.1 M}\td{3,319}\td{50, 0.47}}
+}
+
+\ul{
+\li{\strong{On navier-stokes-euler a longer memory saves ticks}: 13 \% at 4 MiB, 20 \% at 16 MiB, 22 \% at 64 MiB, down to fewer ticks than gruszka takes. The extra ticks of the default configuration on this corpus are work that is done again after a reset. \strong{On cslib and Mathlib it saves 4 to 6 \%}, and at 16 MiB RLVM still takes 15 \% more ticks than gruszka: there the excess is not the length of the session.}
+\li{\strong{The pass gets shorter nowhere, because the tick gets dearer faster}: 173, 202 and 231 ns of worker CPU per tick at 1, 4 and 16 MiB on navier-stokes-euler, 157, 177 and 188 ns on cslib, 169, 192 and 208 ns on Mathlib, where a cap of 4 MiB costs 0.9 s of the pass and one of 16 MiB 2.1 s.}
+\li{\strong{Where the dearer tick is.} navier-stokes-euler at 4 MiB under \code{\verb~|perf~} against the default cap, CPU per tick of the workers: hash consing 42 to 60 ns (the probes of closures 14.1 to 20.1, of neutral applications 8.8 to 12.7, growth and rehash of the value table 2.5 to 6.9), the pair table 6.1 to 9.6 ns, everything else together 120 to 134 ns; 3.93 instructions per cycle instead of 4.30, and 19 \% of the cycles stalled on memory instead of 13 \%. It is the tables that find a value again, and nothing else.}
+\li{\strong{A smaller cap is not a general gain either}: 256 KiB is 1 to 3 \% faster than the default on cslib (142 ns per tick) and 5 \% slower on navier-stokes-euler.}
+\li{Mathlib was run at 1, 4 and 16 MiB only. Every row is one process.}
+}
+}
+}
+
+\subtree{
+\title{6. The three largest levers for the single executable}
+
+\p{The rule of section 3.1 prices every lever: while the pass is bound by its CPU, a CPU second saved in any thread is worth an eighth of a second, 6 to 10 \% of idle and pauses are on top, and the loader thread alone is the floor (11.1 s on Mathlib, 2.2 s on navier-stokes-euler, 4.3 s on cslib in the image). The levers are ordered by the measured size of the item they attack in the executable. None of them was implemented or prototyped here; each estimate says what it rests on. Each lever also has a short insight: [the image's code](ins-TVGI), [the loader thread](ins-DBTJ), [the tick in a large session](ins-0IR8).}
+
+\subtree{
+\title{6.1 Lever 1: the code the image runs in the workers}
+
+\ul{
+\li{\strong{What it is.} The same jars need 25 to 27 \% more user CPU in the workers when GraalVM CE compiles them ahead of time than when C2 compiles them with a profile: the probes of closures 1.4 to 1.5 times, evaluation proper 1.35 to 1.54, structural sameness 1.8, the pair table 1.4 to 1.6, and four lines that C2 all but removes (working environment, slab growth, the worklist's steps, the kernel).}
+\li{\strong{Measured size.} 19.2 s of worker CPU on Mathlib, 4.9 s on navier-stokes-euler, 7.0 s on cslib: 2.4, 0.61 and 0.87 s of the pass, 16 to 17 \% of it on every corpus, and three quarters of the executable's distance to the JVM launcher. The loader thread adds 2.9, 0.6 and 0.8 s of CPU of the same kind.}
+\li{\strong{Estimate, and what it rests on.} There are three known ways to better code and this report closes the cheapest. (a) Build flags: measured, nothing (section 4.3). (b) A profile: 0.84 times the pass on Mathlib in the benchmark tables, 2.3 s of 14.5 s, but only Oracle GraalVM has it, so by the standing policy it stays the optional build. (c) Changes in the machine's source that give the ahead-of-time compiler by hand what a profile gives C2. The four image-only lines are 4.2 s of worker CPU on Mathlib (0.5 s of wall clock) and have a visible cause each: \code{\verb~|Runs.push~} and \code{\verb~|enter~} kept as calls, growth paths that are reached often enough to show, fresh pages. If a pass over them and over the three loops with the worst ratio takes a third of the gap, that is 6 s of CPU and 0.8 s on Mathlib (5 \%), 0.2 s on navier-stokes-euler, 0.3 s on cslib. The third is a guess between two measurements: the inline lists already in the build were worth 0.7 to 4.4 \% of the machine's CPU, a full profile is worth 16 \%.}
+\li{\strong{What would have to change.} \code{\verb~|rlvm-machine~}: \code{\verb~|Eval~} (package M2), \code{\verb~|Values~} and \code{\verb~|Runs~} (M1), \code{\verb~|Machine~} and the slab growth (M6), \code{\verb~|Same~} and \code{\verb~|Pairs~} (M4), with the class list of section 4.2 as the order of work; and the inline lists of the build (\code{\verb~|rlvm-machine/h10~}, \src{scripts/build.sh}), which the owner of the facade generates. A different answer to the same item is a decision about packaging, not an engineering task: the JVM launcher is 3.1 s faster on Mathlib warm today and loses cold on small inputs (0.74 against 3.03 s on Init in the benchmark tables).}
+\li{\strong{Risk for the verdict.} Cost only, if the changes are restructurings: no rule changes. But they are in the hottest code of the machine, where a slip is a wrong value. The machine's gate that compares tick counts declaration by declaration is the right net: a restructuring must leave every count identical.}
+\li{\strong{Gate.} The fast group and the full gate of the machine with identical tick counts, the hostile matrix, the gates of the default configuration through the executable; then the guard of [the rule for a default](dec-YP0N), measured in the image on all eight corpora, because this lever exists only there and a gain on the JVM launcher would say nothing.}
+}
+}
+
+\subtree{
+\title{6.2 Lever 2: the loader thread}
+
+\ul{
+\li{\strong{What it is.} One thread scans the file, links, loads and builds the store. It is a tenth of the pass's CPU, and it is the longest serial chain of the pass.}
+\li{\strong{Measured size.} 11.46 s of CPU on Mathlib in the image (10.5 \% of the pass's CPU, 1.43 s of wall clock), 2.47 s on navier-stokes-euler (8.6 \%), 4.57 s on cslib (11.8 \%). Alone on a core it takes 11.13, 2.24 and 4.28 s: 77, 58 and 82 \% of today's pass. gruszka's whole run is 10.80 s on Mathlib and 4.04 s on cslib. In the image the thread needs 1.33 times the JVM's CPU on Mathlib (8.60 s); 1.59 s of the difference is kernel time for 0.86 million page faults, the rest is the same code compiled worse (section 2.5).}
+\li{\strong{Estimate.} Direct, at an eighth of a second per CPU second: the page faults and the array copies of the growing store are 1.9 s on Mathlib (store arrays sized once from the size of the file, instead of grown as it arrives, would take the copies and the faults of the abandoned arrays: perhaps half, 1 s); the scanner and the linker at gruszka's cost of reading (5.4 s of packing plus its load, against 9.3 s of scanning, linking, loading and packing here) another 1 to 2 s. Together 2 to 3 s of CPU: 0.25 to 0.4 s on Mathlib (2 to 3 \%), 0.1 s on cslib. Indirect, and larger: it is the floor. On cslib the workers are 14 \% above the point where the loader binds, on Mathlib 21 \%; lever 1 alone at full size would end at the loader or just behind it on both (a pass of about 4.5 s instead of 4.2 s on cslib). Splitting the thread is measured: two scanner threads take the loader thread from 11.46 to 6.8 s on Mathlib for 2.7 s more CPU in all, a loss today and the right setting once the workers are a fifth faster.}
+\li{\strong{What would have to change.} \code{\verb~|rlvm-export~} (scanner), \code{\verb~|rlvm-load~} (linker, loader, the rule for scanner threads in \code{\verb~|rlvm-main~}), \code{\verb~|rlvm-store~} (allocation of the store's arrays): the owner of the loader. The scanner-thread rule is a default of the executable and is decided by [the settings of a plain run](dec-EGMG); it would have to be measured again after any gain in the workers.}
+\li{\strong{Risk for the verdict.} The loader decides what both engines see. Its invariant is that the store is word for word the store of the record-by-record path; allocation and thread layout do not touch it, a change in how records are scanned or packed does. A load-level decline must stay per unit.}
+\li{\strong{Gate.} The loader's store-equality tests on every corpus, the gates of the default configuration (the mutant corpora and the hostile exports exercise the reader's failure paths), the invariance of the verdict under worker count and interleaving, and the guard on eight corpora in the image.}
+}
+}
+
+\subtree{
+\title{6.3 Lever 3: the price of a tick in a large session}
+
+\ul{
+\li{\strong{What it is.} A tick of the machine gets dearer as its session grows: the value table, the tabling records and the pair table leave the cache. The session cap of 1 MiB exists because of it ([ins-FJ5R](ins-FJ5R)), and a unit that is larger than the cap cannot be helped by the cap. The cap in turn throws away what a longer memory would save.}
+\li{\strong{Measured size.} On navier-stokes-euler in the image a tick costs 173 ns of worker CPU at the default cap, 202 ns at 4 MiB and 231 ns at 16 MiB, while the ticks fall from 145.2 M to 126.0 M and 115.9 M, below gruszka's 134.5 M (section 5.5): the pass gets no shorter (3.87 to 3.93 s, 3.89 to 3.92 s, 4.18 to 4.28 s). On cslib 157, 177 and 188 ns for 216.7, 208.2 and 203.7 M ticks. On Mathlib 169, 192 and 208 ns for 575.6, 550.8 and 539.6 M ticks, and the pass goes from 14.5 to 15.4 and 16.6 s. At 4 MiB on navier-stokes-euler the whole increase is in the tables that find a value again: hash consing goes from 42 to 60 ns per tick (probes of closures and neutral applications, growth and rehash of the value table), the pair table from 6.1 to 9.6 ns, everything else from 120 to 134 ns. In the two largest units of navier-stokes-euler, profiled alone (section 5.3), hash consing is 41 \% of the JVM's time and 35 \% of the image's against 27 and 25 \% in the corpus, the pair table 8.4 and 7.2 \% against 3.3 and 3.6 \%, the kernel 10.4 \% of the image's against 1.4 \%, and 26 \% of the image's cycles are stalled on memory against 13 \%. Units of 1,000 nodes and more are half of the executable's time inside units on that corpus (11.6 of 23.0 s) and are where its ratio to gruszka is worst (1.9 to 3.0 times against 1.5 to 1.8 below).}
+\li{\strong{Estimate.} The ceiling is a machine whose tick costs the same at 16 MiB as at 1 MiB: navier-stokes-euler would need 115.9 M ticks at 173 ns, 20.0 s of worker CPU instead of 25.1 s, 0.64 s of the 3.9 s pass (16 \%); cslib 31.8 instead of 33.9 s, 0.26 s (5 \%). Mathlib 539.6 M ticks at 169 ns, 91.0 instead of 97.1 s, 0.76 s (5 \%). Half of the ceiling is a fair expectation for a first design. At 4 MiB the increase is probes, rehashing and the pair table, which a layout can address (the record, its memo words and its table slot are three places; gruszka keeps a value and its memos in one record of 32 bytes); in the giant units the image adds fresh pages for every doubling of a slab (the kernel is 10 \% of their time), which pooled or pre-sized slabs address. Neither removes the miss itself. So 0.3 s on navier-stokes-euler (8 \%), 0.13 s on cslib (2 to 3 \%), 0.4 s on Mathlib (2 to 3 \%).}
+\li{\strong{What would have to change.} The session tables of \code{\verb~|rlvm-machine~}: \code{\verb~|Machine~} and \code{\verb~|Layout~} (M6), \code{\verb~|Values~} (M1), \code{\verb~|Pairs~} (M4). The designs exist and were not built: a young set in front of the tables for giant sessions, inline arguments of neutral applications, memo words in the record ([rep-machine-M1](rep-machine-M1), [the cost of one machine operation](prob-28KQ)); for the fresh pages, the pooled slabs of [rep-V1](rep-V1), which were measured on the JVM launcher only, where fresh pages cost nothing ([ins-JJ7I](ins-JJ7I): "not measured: the native image with the patch").}
+\li{\strong{Risk for the verdict.} The tables are where two values are found to be the same value, so a layout change there is not cost only by nature: a wrong probe is a wrong equality. A change of the cap alone is cost only, and it changes which memo entries exist, so tick counts change with it.}
+\li{\strong{Gate.} For a layout change: the full gate of the machine with identical tick counts and record counts, the debug modes that re-compute memo hits and poison dead sessions, the hostile matrix. For a change of cap or of what survives a reset: the gates of the default configuration and the invariance of the verdict under worker count. Then the guard on eight corpora, in the image.}
+}
+}
+
+\subtree{
+\title{6.4 Next in size: the level stores}
+
+\p{Not one of the three on these corpora, but measured and cheap to state. Universe levels are 8.6 s of worker CPU on Mathlib in the image (8.9 \%), 2.9 s on cslib, 1.3 s on navier-stokes-euler, at 2.26 instructions per cycle; and each publication of the pipelined load makes every worker copy the level tables, which costs 1.9 s of worker CPU, 0.9 million page faults and 0.15 s of pauses per Mathlib pass at the default interval (section 4.4): 0.4 s of the pass. One base store shared by the workers, as [ins-258N](ins-258N) proposed and nobody prototyped, would return the 0.4 s (measured, by varying the number of publications), let the file be published in small pieces again, and take a part of the stalled cycles: 38 \% of 8.6 s are stalled, and eight copies of the tables compete for one shared cache. Together 0.5 to 0.6 s on Mathlib (4 \%), 0.15 to 0.2 s on cslib, little on navier-stokes-euler. It touches what is checked only through the store's interface (ids and normal forms must not change); the new hazard is a base that is shared between threads and must be read-only after publication. Modules: \code{\verb~|rlvm-level~}, the level binding of \code{\verb~|rlvm-api~}, \code{\verb~|Levels~} in the machine; gate: the level store's tests, the machine's full gate with identical ticks, the invariance under worker count.}
+}
+
+\subtree{
+\title{6.5 What the three add up to}
+
+\p{On Mathlib in the image: lever 1 by hand 0.8 s, lever 2 directly 0.3 s, lever 3 0.4 s, the level stores 0.5 s: 2.0 s of 14.5 s if all of it came true, to about 12.5 s, with the JVM launcher at 11.3 s and gruszka at 10.8 s on the same quiet host. On navier-stokes-euler 0.2 + 0.05 + 0.3 = 0.55 s of 3.83 s, to about 3.3 s against gruszka's 2.65 s; on cslib 0.3 + 0.1 + 0.13 + 0.15 = 0.7 s of 5.22 s, to about 4.5 s against 4.04 s. The estimates are not additive to the percent, and two of them are guesses with a measured ceiling. What they say together is plain: inside the Community Edition image the levers that this profile can name are worth an eighth to a seventh of the pass, and the rest of the distance to the JVM launcher is the compiler's.}
+}
+}
+
+\subtree{
+\title{7. What the data does not support}
+
+\p{Ideas that come up, with the measurement that speaks against each, on the final default configuration:}
+
+\ul{
+\li{\strong{Tuning the collector of the image.} 34 collections and 0.27 s of pauses per Mathlib pass, 0.05 s of collector code on the workers, the same pauses as on the JVM: 2 \% of the pass. The collection policy that [log-RCAL](log-RCAL) set took what there was.}
+\li{\strong{Flags of the image build} (inliner budgets, \code{\verb~|-march=native~}): within 2 \% on three corpora, section 4.3.}
+\li{\strong{More scanner threads, or a parallel load, today}: two scanner threads cost 0.25 s on Mathlib and 0.5 s on navier-stokes-euler and are even on cslib (section 3.1). The pass is bound by its CPU, and splitting the load adds CPU. It becomes right when the workers get faster; it is not a gain by itself.}
+\li{\strong{A faster or better laid out hash table for the values.} The probes run at 4.5 to 4.7 instructions per cycle with 7 to 12 \% of their cycles stalled on memory at the default session cap. They are instruction-bound: 25 \% of the workers' CPU is probes because there are 0.5 new records and several probes per tick, not because a probe is slow.}
+\li{\strong{A memo in front of universe instantiation} ([ins-258N](ins-258N)): the level item is the first touch of cold data; this profile shows the same (2.26 instructions per cycle, 38 \% of the cycles stalled).}
+\li{\strong{Huge pages against TLB misses in the image}: TLB walks are about 1 \% of the workers' cycles. Huge pages would help the page faults, which is another item (section 4.4), and the image has no option for them.}
+\li{\strong{The reference engine's fallback}: 60, 16 and 7 units, 1 \% or less of the time inside units (section 3.5). It was 12.5 \% in rep-P10.}
+\li{\strong{Numeric computation}: 0.1 to 0.2 \% of the workers.}
+\li{\strong{Proof irrelevance}: 0.8 to 1.7 \% inclusive, where it was 27.5 \%.}
+\li{\strong{Idle workers, the scheduler, the tail}: parked for 0.8 to 4.2 \% in all, of which the tail is 0.0 to 0.2 \%; the driver's own code is 0.2 \% of the workers' samples.}
+\li{\strong{Larger warm sessions} as a way to save steps: they do save steps, 13 to 22 \% on navier-stokes-euler, and each step gets dearer by more (section 5.5). And smaller ones are not uniformly better either: 256 KiB wins 1 to 3 \% on cslib and loses 5 \% on navier-stokes-euler.}
+\li{\strong{"gruszka wins by not computing things"}: unfoldings within 3 to 9 \%, ticks within 8 to 22 \%, and the JVM launcher pays gruszka's price per tick on Mathlib and cslib (section 5.2). The exception is four eager-reduction proofs worth 1.3 s of CPU.}
+\li{\strong{A list of slow units to repair}: the 20 heaviest units are 3 to 9 \% of the time inside units; the 1,000 heaviest 11 to 27 \%.}
+\li{\strong{The benchmark tables' ratios to gruszka as the state of the gap}: they were taken with the other cores of the host busy, which costs gruszka 19 \% and RLVM 6 to 9 \% on Mathlib (section 1.2).}
+}
+}
+
+\subtree{
+\title{8. What was not measured}
+
+\ul{
+\li{Anything on x86-64, the arena's architecture; anything with Oracle GraalVM (the figure of the optional profile-guided build is quoted from the benchmark tables).}
+\li{Mathlib with one worker; the JVM launcher's hardware events; con-leche, cedar, Init, Std and reachability, which this report does not profile.}
+\li{Which allocation sites take the 0.6 million page faults of the workers that are not the level-table copies: a native sample has no caller.}
+\li{The recoverable part of the code-quality gap by source changes: the report measures its size per item and that build flags do not touch it.}
+\li{What the 8 to 22 \% of extra ticks against gruszka are on cslib and Mathlib, beyond the part that longer sessions give back on navier-stokes-euler: the two tick counters are different instruments, and the excess is spread over every kind and size of declaration.}
+\li{Which rule lets gruszka decide the four eager-reduction proofs of \code{\verb~|Batteries.Data.Char.Basic~} in 2,000 ticks.}
+\li{gruszka per declaration with 8 workers on cslib and Mathlib (its per-declaration switch distorts such a run); its Mathlib column at the unit level is the one-worker profile of the baseline study of 2026-11-23, taken in other conditions of the host.}
+\li{Interleaved rounds for the timings: a cell is one process of several passes unless it says otherwise. Differences below 2 \% are not resolved.}
+\li{The image was profiled through a second build with debug information, in the arena container; its passes are within 2 \% of the shipped executable's on the host.}
+}
+}
+
+\subtree{
+\title{9. Tools}
+
+\p{The window scripts, the poller, the two classifiers and the table generator are those of [rep-P10](rep-P10), section 7, copied and pointed at the release's distribution; the item map is unchanged. New for this report, all outside the repository: a table of unit numbers and declaration names read from an export (the unit number of the driver is the index of the declaration record in file order, which is also gruszka's index); the join of the driver's unit trace with it and with gruszka's per-declaration lines (smallest time per unit over several passes, totals by kind, size and ratio); the backlog series from the driver's statistics; the method-level comparison of the two platforms; the builds of the symbolised image and of the four variant images from the frozen jars. To re-make the tables after a change: run the windows (JVM launcher with JFR attached after the unprofiled passes; the image unprofiled on the host and under \code{\verb~|perf~} in the arena container; both with \code{\verb~|-X stats-file~} and \code{\verb~|-X unit-trace~}), classify with the item map, and add rules for methods the classifiers report as unassigned.}
+}
