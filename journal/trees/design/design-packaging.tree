@@ -8,7 +8,7 @@
 \tag{performance}
 \meta{status}{implemented}
 \meta{created}{2026-11-24}
-\meta{updated}{2026-11-24}
+\meta{updated}{2026-11-25}
 \import{base-macros}
 
 \p{\strong{Status:} implemented. \src{scripts/build.sh} builds the release layout by default, \src{scripts/package.sh} makes the archive, \src{.github/workflows/release.yml} is written and has never run on a hosted runner.}
@@ -18,7 +18,7 @@
 \subtree[design-packaging-executable]{
 \title{The executable}
 
-\p{\code{rlvm} is the native image that GraalVM Community Edition 25 builds from the jars of all modules at \code{\verb~|-O3~} with the serial collector, with Truffle runtime compilation linked in and the inline lists of the machine. It needs no JDK, no jar and no file of the repository; it links the C library and zlib of the system dynamically. \code{\verb~|rlvm FILE~} checks, \code{\verb~|rlvm --help~} lists the options, and \code{\verb~|rlvm --version~} says what the executable is and what a plain run does:}
+\p{\code{rlvm} is the native image that GraalVM Community Edition 25 builds from the jars of all modules at \code{\verb~|-O3~} with the serial collector, with Truffle runtime compilation linked in and the inline lists of the machine: the lists that the build generates from the machine jar and, since 2026-11-25, a hand-kept list of 75 hot methods, see [the launchers](design-launchers). It needs no JDK, no jar and no file of the repository; it links the C library and zlib of the system dynamically. \code{\verb~|rlvm FILE~} checks, \code{\verb~|rlvm --help~} lists the options, and \code{\verb~|rlvm --version~} says what the executable is and what a plain run does:}
 
 \pre{\verb~|
 rlvm 0.1.0-SNAPSHOT
@@ -60,7 +60,7 @@ default: engine ..., policy practical; one worker per CPU, at most 8; a file of 
 }
 
 \ul{
-\li{The JVM launcher stays a tool of the repository. Warm, HotSpot needs 0.6 to 0.85 times the image's wall clock on the eight corpora (see [the benchmark tables](rep-benchmarks)), and the warm benchmarks of [the metric](dec-7QMU) are taken on it; the gates run thousands of small files through the jars; the test kit's differential engine needs a class path. It carries the path of the build's JDK, is written only into a development distribution and is never packaged.}
+\li{The JVM launcher stays a tool of the repository. Warm, HotSpot needs 0.76 to 0.90 times the image's wall clock on the eight corpora (see [the benchmark tables](rep-benchmarks); 0.6 to 0.85 before the inline list of 2026-11-25), and the warm benchmarks of [the metric](dec-7QMU) are taken on it; the gates run thousands of small files through the jars; the test kit's differential engine needs a class path. It carries the path of the build's JDK, is written only into a development distribution and is never packaged.}
 \li{The distribution that the team shares between builds, gates and benchmarks stays a development distribution, so nothing changed for a gate or a benchmark that names it.}
 \li{\code{\verb~|scripts/gate.sh --native~} runs the 230 published tests, the mutant corpora and the hostile exports through the executable instead of the jars, so the binary that ships can be guarded as it is; it needs no jar. The differential self-test needs a class path and is skipped in a release layout.}
 }
@@ -85,6 +85,8 @@ default: engine ..., policy practical; one worker per CPU, at most 8; a file of 
 \p{Code that no training run executes is treated as cold by a profile-guided build, so the profile has to see the engine that checks by default. The rule is one training input, Init, in the default configuration and nothing else: once the machine is the default engine a plain run trains the machine and, through its declines and re-checks, the reference engine in their real proportion; a second run for the other engine costs the machine 2.9 \% on Mathlib. The profiles of the repository were recorded that way on the jar set of the release, after the machine had become the default engine: the Truffle probe and one run of Init, 2.5 MB compressed. A first, provisional set, recorded while the reference engine was still the default engine and therefore with a second run for the machine, was not committed; the figures of the next sentence are from it. Cold single runs of the executable built from the shipped profiles against the CE executable from the same jars, both with the collector's default policy, 8 workers, quiet-core windows, two runs each: with the machine and the candidate set 0.88 (Init), 0.82 (Std), 0.87 (cedar), 0.83 (reachability), 0.84 (navier-stokes-euler) and 0.89 (cslib) times the wall clock, 0.88 times the CPU time; with the reference engine 0.87 (Std) and 0.86 (cedar). The same comparison on the final settings of both builds, with those provisional profiles by then three jars out of date: 0.87 (Init), 0.87 (Std), 0.91 (cedar), 0.89 (reachability and navier-stokes-euler) and 0.95 (cslib), and Mathlib in 15.1 s cold and 14.0 s for a warm pass against 16.9 s cold for the CE executable. The profiled executable is 47 MB, the CE executable 68 MB.}
 
 \p{\strong{The release.} With the profiles of the repository, both executables built from the jar set of the release with the same baked settings, the default configuration, one fresh process and a warm process each, in [the benchmark tables](rep-benchmarks): the optional executable needs 0.85 to 0.89 times the cold wall clock of the CE executable on the eight corpora and 0.82 to 0.89 times its warm pass; Mathlib 14.4 against 16.3 s cold and 12.9 against 15.4 s warm. On the development host a build from existing profiles took three minutes, and recording the profiles and building from them four. The profiles must be made anew when the default engine or its switch set changes; \code{\verb~|profiles/PROFILE-INFO.txt~} says what they were made from.}
+
+\p{\strong{Since 2026-11-25.} After [the three changes of the optimisation wave](dec-JT59) the profiles were recorded again on the new jars, the Truffle probe and one run of Init in the default configuration as before, and the optional executable was built from them once; recording and building took 103 s. Both executables from the same published jars, the default configuration, one fresh process and a warm process each, 8 workers, quiet-core windows with the other cores of the host idle, see [the report of the integration](rep-INT8), section 4.1: the optional executable needs 0.92 to 0.96 times the cold wall clock of the CE executable on the eight corpora and 0.92 to 0.98 times its warm pass; Mathlib 12.93 against 13.53 s cold and 12.41 against 13.15 s warm. Its lead has halved because the CE image now inlines its hot calls by name, which is a part of what the profile tells the Oracle compiler; the profile-guided build takes no such list. The optional executable is 47 MB, the CE executable 68 MB.}
 }
 
 \subtree[design-packaging-archive]{

@@ -400,7 +400,9 @@ What the driver adds:
   16,384 units / 128 MiB (about 50 publications instead of 205) and everything below 2 GiB as before. A
   publication is not free for the workers: each worker context builds a new level overlay at its first reset
   after a new snapshot (the level and list tables are copied), about 110 MB of garbage and 45 ms of worker
-  CPU per publication on mathlib, and with 8 workers the collections that follow stop everybody. The workers
+  CPU per publication on mathlib, and with 8 workers the collections that follow stop everybody (that was
+  the layout until 2026-11-25: the workers now read the frozen level store in place and rebase their overlay
+  for the price of a reset, *agentic-note*: rep-OPT-C; the hand-off interval was left as it is). The workers
   are never short of units on a file of that size (the loader delivers 19 CPU-seconds of work per second),
   whereas on the mid-size corpora they do wait for the loader, which is why the interval stays small there.
   Numbers in "Measured", wave 8.

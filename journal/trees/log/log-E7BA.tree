@@ -1,0 +1,21 @@
+\title{The native image inlines 75 hot methods by name}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{launcher-platform}
+\tag{unreleased}
+\tag{platform}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{c2536e8}
+\import{base-macros}
+
+\p{The build of the executable has a second force-inline list, \src{rlvm-machine/h10/force-inline.txt}: 75 methods named by hand, which \src{rlvm-machine/h10/native-image-args.sh} adds to the continuation steps it finds itself, so the build record of a distribution now reads 269 forced and 81 never-inlined methods where it read 194 and 81. GraalVM Community Edition compiles ahead of time without a profile and cannot tell a hot call from a cold one: on Mathlib 8.3 \% of the workers' samples sat on the instructions of a call's frame alone, around readers of one line (\code{\verb~|Terms.a~}, \code{\verb~|Terms.b~}, \code{\verb~|Runs.get~}) and steps with one or two call sites. The list changes no class file: the jars of a build are byte for byte what they were, so the JVM launcher and every gate through the jars are untouched, and a build without the list is correct. See [the launchers](design-launchers).}
+
+\p{Measured for the list alone, the executable against the same tree without it, warm passes with 8 workers on the aarch64 development host, three interleaved rounds per corpus: the geometric mean of the eight warm passes is 0.966 of the base's and no corpus is slower (0.953 to 0.979); the CPU time of a pass is 0.942 to 0.959; Mathlib 14.50 to 13.87 s, navier-stokes-euler 3.86 to 3.68 s, cslib 5.29 to 5.18 s; an Init pass with one worker executes 9.6 \% fewer instructions. Peak resident memory is unchanged. Every counter of the machine is identical on the eight corpora, and the gate of the default configuration passed through the rebuilt shared executable: 230 of 230 published tests, 17,775 mutants with no soundness and no completeness difference, 1,196 hostile exports with no wrong accept and no wrong reject. Two heavy mutants of the corpus \code{bugs} ran into the judge's limit of 60 s on the loaded host in the first run of the candidate's gate and passed when the corpus was run again.}
+
+\p{Not adopted: three splits of a method into a fast and a slow part (\code{\verb~|Machine.ensure*~}, \code{\verb~|Runs.get~}, \code{\verb~|Levels.lsub*~}) by the same work. They are correct and gated, and worth 0.46 \% of the image's instructions; on the JVM launcher C2 does not inline the parts they move out of line, and reachability is 3.6 \% slower over nine rounds, beyond [the guard of 3 percent](dec-YP0N). An entry of the list costs the JVM launcher nothing; a new hot helper therefore gets an entry, not a split.}
+
+\p{Detail: [the report](rep-OPT-A), [what the list is worth](ins-CGPT), [what three lines of the profile really were](ins-RZKH). The list as part of the default build, with the two other changes of the night, and the gates and the guard of the build that has all three: [the decision](dec-JT59), [the report of the integration](rep-INT8). Commit \commit{c2536e8}. Lever 1 of [the profile of the release](rep-P11).}

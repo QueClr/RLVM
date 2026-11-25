@@ -1,0 +1,74 @@
+\title{The default build takes the inline list, the shared level base and the loader's loops; the fast/slow splits and the pooled session arrays stay out}
+\taxon{Decision}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{performance}
+\tag{benchmark}
+\tag{platform}
+\tag{levels}
+\tag{loader}
+\tag{machine}
+\meta{status}{implemented}
+\meta{created}{2026-11-25}
+\meta{completed}{2026-11-25}
+\import{base-macros}
+
+\p{\strong{Status:} accepted and implemented. The inline list is in the main tree since \commit{c2536e8}; the level base and the loader's loops are in the main tree and in the published jars since \commit{b8feca1}, 09:12 UTC on 2026-11-25 (04:12 local time). The shared executable built from them at that hour is the default build.}
+
+\p{\strong{Context.} After [the machine had become the default engine](log-65Z0) and the release had become [one executable](design-packaging), the maintainer decided not to submit to the arena yet and to go on optimising, see [standing policies](standing-policies). [The profile of the release](rep-P11) had said where a warm pass of the executable goes: it is bound by the total CPU of the 8 cores, the image needs a quarter more CPU than the JVM launcher in the workers' own code, the loader thread is right behind the workers, and every publication of a pipelined load made every worker copy the level tables. Three agents took one lever each in the night of 2026-11-24 to 2026-11-25, in private copies of the tree, under the rule of [the decision on the default set](dec-YP0N) for anything proposed on top of that set: on the eight corpora the geometric mean of the warm passes goes down and no corpus is more than 3 \% slower, over at least three interleaved rounds, on the executable and on the JVM launcher, with every gate of the default configuration passed. Each delivered patches and a verdict; nothing was published by its author.}
+
+\p{\strong{Decision.}}
+\ul{
+\li{\strong{In the default build:} [the hand-kept inline list of the image](log-E7BA), 75 hot methods that the build inlines by name ([rep-OPT-A](rep-OPT-A), patch 1); [the frozen level base that the workers share](log-ZMAE) instead of copying it at every publication ([rep-OPT-C](rep-OPT-C)); [the loops without a call for runs of app records and of proof-block records](log-R7NE) in the reader, the loader and the block writer ([rep-OPT-B](rep-OPT-B)).}
+\li{\strong{Not in the default build:} the three splits of a method into a fast and a slow part (\code{\verb~|Machine.ensure*~}, \code{\verb~|Runs.get~}, \code{\verb~|Levels.lsub*~}; rep-OPT-A, patch 2). They are correct and gated and worth 0.46 \% of the image's instructions, but on the JVM launcher reachability is 3.6 \% slower over nine interleaved rounds, beyond the guard, and cedar's CPU is at or above the base's in nine rounds of nine: C2 does not inline the parts that the splits move out of line.}
+\li{\strong{Still not in the default build:} the pooled session arrays with the young reserve of finding J1-F1, the patch of [the report on session memory](rep-V1). It had been measured on the default set at the release and [failed the same guard](ins-JJ7I), Mathlib 3.7 \% slower with more resident memory. Nothing of this wave changes the sessions of the machine, and the patch was not measured again.}
+}
+
+\p{\strong{Evidence: the guard of the build that has all three}, against the release build before the wave. Warm wall clock of a pass that reloads the file with pipelined loading, 8 workers, a run without options; the executable and the JVM launcher with the machine's heap line; aarch64 development host, the 8 measurement cores, one quiet-core window per corpus with the four variants interleaved round by round, three rounds; no other job ran on the host. A cell is the mean over the rounds of the median later pass of one process, for a pass under 0.5 s the mean of the later passes; peak RSS is the largest of the three rounds.}
+
+\table{
+\tr{\th{Corpus (rounds x passes)}\th{executable: before, s}\th{merged, s}\th{merged against before}\th{peak RSS before / merged, MiB}\th{JVM launcher: before, s}\th{merged, s}\th{merged against before}\th{peak RSS before / merged, MiB}}
+\tr{\td{Init (3 x 10)}\td{0.676}\td{0.612}\td{-9.4 \%}\td{409 / 386}\td{0.562}\td{0.543}\td{-3.4 \%}\td{827 / 816}}
+\tr{\td{Std (3 x 10)}\td{1.159}\td{1.057}\td{-8.8 \%}\td{676 / 607}\td{0.933}\td{0.909}\td{-2.6 \%}\td{1,570 / 1,475}}
+\tr{\td{cedar (3 x 8)}\td{1.658}\td{1.480}\td{-10.7 \%}\td{875 / 767}\td{1.344}\td{1.292}\td{-3.9 \%}\td{1,758 / 1,753}}
+\tr{\td{reachability (3 x 15, mean)}\td{0.480}\td{0.465}\td{-3.2 \%}\td{740 / 738}\td{0.332}\td{0.337}\td{+1.4 \%}\td{1,580 / 1,572}}
+\tr{\td{con-leche (3 x 6)}\td{1.549}\td{1.417}\td{-8.5 \%}\td{1,363 / 1,348}\td{1.220}\td{1.165}\td{-4.5 \%}\td{2,012 / 1,817}}
+\tr{\td{navier-stokes-euler (3 x 6)}\td{3.888}\td{3.492}\td{-10.2 \%}\td{1,656 / 1,481}\td{3.102}\td{3.059}\td{-1.4 \%}\td{2,325 / 2,297}}
+\tr{\td{cslib (3 x 6)}\td{5.275}\td{4.815}\td{-8.7 \%}\td{2,481 / 1,993}\td{4.217}\td{4.010}\td{-4.9 \%}\td{2,950 / 2,828}}
+\tr{\td{Mathlib (3 x 4)}\td{14.567}\td{13.114}\td{-10.0 \%}\td{7,585 / 4,425}\td{11.680}\td{11.000}\td{-5.8 \%}\td{6,344 / 5,065}}
+\tr{\td{\strong{sum}}\td{29.25}\td{26.45}\td{-9.6 \%}\td{}\td{23.39}\td{22.31}\td{-4.6 \%}\td{}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.030}}\td{\strong{1.853}}\td{\strong{-8.7 \%}}\td{}\td{\strong{1.603}}\td{\strong{1.553}}\td{\strong{-3.2 \%}}\td{}}
+}
+
+\ul{
+\li{\strong{Primary.} The geometric mean of the eight warm passes goes down on both launchers: in the executable from 2.030 to 1.853 s, -8.7 \%, on the JVM launcher from 1.603 to 1.553 s, -3.2 \%.}
+\li{\strong{Guard.} In the executable every corpus is faster, by 3.2 \% (reachability) to 10.7 \% (cedar). On the JVM launcher seven corpora are 1.4 to 5.8 \% faster and reachability is at +1.4 \%, by the mean statistic of the rule for a pass under 0.5 s; its medians are 0.3170 and 0.3172 s and the rounds of the two builds overlap. No corpus is more than 3 \% slower.}
+\li{\strong{Mathlib.} The executable 14.57 to 13.11 s with a peak resident set of 4.3 GiB where it was 7.4 GiB; the JVM launcher 11.68 to 11.00 s.}
+\li{\strong{The three gains add up in the executable.} One by one, each against its own base, they had given 0.966, 0.959 and 0.992 of the base's geometric mean, a product of 0.919; together 0.913. On the JVM launcher, which the list does not touch, the two others had given 0.962 and 0.981 with the other cores of the host busy; together, on a quiet host, 0.968.}
+\li{\strong{Against gruszka}, with its arena run line and 8 workers in the same windows, eight runs per corpus: the merged executable needs 1.22 times gruszka's wall clock on Mathlib (13.11 against 10.75 s), 1.32 times on navier-stokes-euler (3.49 against 2.64 s) and 1.18 times on cslib (4.82 against 4.08 s), where the release needed 1.35, 1.47 and 1.29 times. The JVM launcher is at 1.02, 1.16 and 0.98.}
+}
+
+\p{\strong{Gates of the merged build}, every oracle an official verdict: the gate of the default configuration through the executable and through the jars, 230 of 230 published tests, 17,775 mutants with no soundness and no completeness difference (agree 15,741, declined 2,034), 1,196 hostile exports with no wrong accept and no wrong reject (agree 1,124, 68 tolerated accepts, 4 declined); the gate of the reference engine by name and of the strict policy with the counts of the release; the eight corpora accepted with 8 and 4 workers on both launchers, and under the strict policy with no unit declined; every counter of a deterministic run identical to the release's on the eight corpora and both launchers, so the three changes together are cost only; the driver's invariance suite on 15,183 files with the machine, no wrong verdict and no difference between schedules; the machine's fast group and its slow hostile matrix of 56 switch sets. The arena's own procedure on its 270 tests, through the development executable and a release-layout executable: no wrong accept, no wrong reject, 2 declined, and 1,462.3 G instructions on Mathlib where the release needed 1,652.6 G. No count of [the gate](design-gate) moved. All of it, with the conditions: [the report](rep-INT8).}
+
+\p{\strong{Alternatives considered.}}
+\ul{
+\li{\em{Adopt each change on its own evidence, without measuring the three together.} Each had been measured against a base of its own, mostly while the other cores of the host were busy, and two of them act on the same pass from two sides: the loops make the loader thread faster, and where the loader thread was the pass the workers become the bound again. The sum had to be measured, and the gates had to be run on the build that ships.}
+\li{\em{The splits without the split of the level helper.} The other two splits move code that a warm pass never runs and should not cost the JVM launcher a call. It was not built and not gated; its gain in the image would be under half a percent of the instructions. Rejected as not worth a build of its own: a hot helper gets an entry of the list, which costs the JVM launcher nothing.}
+\li{\em{Publish a large file in small pieces again}, since a publication no longer costs the workers a copy. Measured by rep-OPT-C on the shared base: Mathlib in 205 pieces 15.00 s, in 52 pieces 15.05 s. No gain, and the loader pays for each piece with its own copy; the hand-off interval stays, see [the driver](design-driver).}
+\li{\em{Two scanner threads}, now that the loader thread is faster. Not measured in this wave; the rule of [the settings of a plain run](dec-EGMG) was measured on the release and stays until it is measured again.}
+}
+
+\p{\strong{Consequences.}}
+\ul{
+\li{The executable of the default build is the one a release would ship; the numbers of [the benchmark tables](rep-benchmarks) and of the README are those of this build since 2026-11-25.}
+\li{The profile of the optional build with Oracle GraalVM was recorded again on the new jars, as [packaging](design-packaging) requires after the last jar is in.}
+\li{The inline list names methods by name, eight of them in \code{rlvm-store}. Whoever renames or splits \code{\verb~|Terms.a~}, \code{\verb~|b~}, \code{\verb~|kind~}, \code{\verb~|fvMask~}, \code{\verb~|hasLevelParam~}, \code{\verb~|ProofBlocks.rd~}, \code{\verb~|localRef~} or \code{\verb~|DeclTable.ctorInduct~} moves the entry; the build does not notice a stale one. After a change of the list the executable is gated; the jars need not be.}
+\li{A worker's level view is a shared overlay. \code{\verb~|IntListStore.pool()~} is an error on it; code outside \code{rlvm-level} reads a list through \code{\verb~|poolOf~}. The loader's open store is a flat one and is not affected.}
+\li{The record-by-record paths of the reader, the loader and the block writer stay the definition of what a stretch does; a change of a rule is made there, and the loop falls back or follows.}
+\li{What the wave leaves, by its own reports: the price of a tick in a large session, lever 3 of rep-P11, which no agent took; the loader's own copy of the level store per publication and records instead of parallel arrays for the level nodes; in the loader thread the memory behind the location table, promotion and the name table; in the image the code of every array access, which no list reaches. See [what is left open](prob-HC9J) and [the loader as the floor](prob-I7M9).}
+}
+
+\p{\strong{Not measured.} x86-64, the architecture of the arena's runner. The wall clock of one worker. The guard of the JVM launcher's Mathlib, navier-stokes-euler and cslib with the other cores busy, the condition of the earlier benchmark tables. The three changes pairwise: the baseline and the build with all three are what was compared. The differential engine of the test kit was not run on the merged build: the changes are cost only, and the counters of a deterministic run are identical to the baseline's on all eight corpora and both launchers.}
+
+\p{Source: [the report of the integration](rep-INT8), with every table, the conditions of every window and the gates in full; the reports of the three changes; commits \commit{c2536e8}, \commit{b8feca1}.}

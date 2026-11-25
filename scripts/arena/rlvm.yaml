@@ -21,8 +21,9 @@
 #   15,741, declined 2,034); 1,196 hostile exports: no wrong accept, no wrong reject (agree 1,124, 68
 #   accepts of the tolerated kind, 4 declined); all eight corpora accepted.
 # - THE ARENA'S COMPLETE TEST SET (270 tests: 148 good incl. the eight corpora, 92 bad, 30 `either`) by
-#   the arena's own procedure, on the machine-default binary of the frozen jar set (2026-11-25, the
-#   development image and the release-layout image, same status on all 270; *agentic-note*: rep-AR2):
+#   the arena's own procedure, on the machine-default binary (2026-11-25, the development image and
+#   the release-layout image, same status on all 270; first on the release's jar set, *agentic-note*:
+#   rep-AR2, and again after the optimisation wave of that night, *agentic-note*: rep-INT8):
 #   no wrong verdict, no error, no timeout - 148 of 148 good accepted, 92 of 92 bad rejected, of the
 #   `either` tests 11 accepted, 17 rejected and TWO DECLINED - `corner-cases/eta-struct-major-no-whnf`
 #   and `eta-struct-major-and-no-whnf`: the official kernel does not terminate there, RLVM says so and

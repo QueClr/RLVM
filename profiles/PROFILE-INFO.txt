@@ -1,28 +1,28 @@
 RLVM profiles for 'scripts/build.sh --oracle-pgo' (profile-guided optimisation with Oracle GraalVM).
 Made by 'scripts/build.sh --oracle-pgo --train-profiles' (scripts/dev.sh profiles); do not edit.
 
-id:        69caa69a3fad
-made:      2026-11-25T03:36:17Z on Linux aarch64
+id:        d9e6c398f79e
+made:      2026-11-25T10:34:39Z on Linux aarch64
 compiler:  Oracle GraalVM 25.0.4 (25.0.4+7-LTS-jvmci-b01), native-image --pgo-instrument, -O3, serial collector
 settings:  the default configuration of the instrumented executable (default engine: machine)
 sources:   the RLVM jars of the build (compiled against Truffle 25.0.4, the version of this compiler), sha256 prefixes:
              rlvm-admit         398a117d4ad8
-             rlvm-api           9abf2ef6620a
+             rlvm-api           e2d2d31509fc
              rlvm-cli           ac9b19d560b2
              rlvm-driver        31fa08d9ce61
-             rlvm-export        dc8c4f1ef79a
+             rlvm-export        38c922c4fccd
              rlvm-inductive     c15b14fffdd3
-             rlvm-level         c57947b218af
-             rlvm-load          58b0056c0417
+             rlvm-level         4db74adbb68d
+             rlvm-load          a2a091b291fa
              rlvm-machine       fa6d5d3bf377
              rlvm-main          3729609561e3
              rlvm-nat           b1dda7562adb
              rlvm-ref           a20c24a26b7c
-             rlvm-store         30979ee659b7
+             rlvm-store         a93a52584ee7
              rlvm-truffle       ad3256d0751d
 training:  one run of the instrumented executable each, RLVM_EXIT=exit:
              --truffle-probe -> probe.iprof.gz
-             init.ndjson (347772063 bytes, sha256 93b61a432ed4241b), arguments: none (the default configuration); exit 0, 3.1 s instrumented -> train-init.iprof.gz
+             init.ndjson (347772063 bytes, sha256 93b61a432ed4241b), arguments: none (the default configuration); exit 0, 1.5 s instrumented -> train-init.iprof.gz
 files:     sha256, bytes, name
-             820149f746c33f2d   1455371 probe.iprof.gz
-             a47af1e117751ffb   1102447 train-init.iprof.gz
+             19670f847011b20a   1466539 probe.iprof.gz
+             178eb5dc8c822312   1110695 train-init.iprof.gz

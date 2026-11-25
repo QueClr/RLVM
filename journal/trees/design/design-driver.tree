@@ -7,6 +7,7 @@
 \tag{performance}
 \meta{status}{implemented}
 \meta{created}{2026-11-24}
+\meta{updated}{2026-11-25}
 \meta{origin}{rlvm-driver/README.md}
 \import{base-macros}
 
@@ -48,7 +49,9 @@
 \li{\strong{The parking rule.} While the file is loading, the environment frontier does not move past a unit that may depend on the rest of the file. The driver sees that from the store's summaries without decoding anything: a root whose \code{depMax} lies beyond the unit's own rank, or a proof block with an unresolved reference. Workers go on with everything below the parked unit. Output of the exporter never parks: 0 parked units on Init, Std, cedar and Mathlib.}
 }
 
-\p{A large file is published in larger pieces: the hand-off interval of 4,096 units and 32 MiB is multiplied by the input's size in GiB, at most by 4. Each publication makes every worker rebuild its level overlay, about 110 MB of garbage and 45 ms of worker CPU on Mathlib. With the scaled interval Mathlib is published 52 times instead of 205, and the pipelined run with 8 workers went from 34.25 and 35.00 s to 31.71 and 31.90 s, two interleaved rounds. Pipelined loading is the launcher's default since 2026-11-24 when two or more workers run on an input of at least 8 MiB.}
+\p{A large file is published in larger pieces: the hand-off interval of 4,096 units and 32 MiB is multiplied by the input's size in GiB, at most by 4. The reason was the price of a publication for the workers: until 2026-11-25 each publication made every worker rebuild its level overlay as a private copy of the level store, about 110 MB of garbage and 45 ms of worker CPU on Mathlib. With the scaled interval Mathlib is published 52 times instead of 205, and the pipelined run with 8 workers went from 34.25 and 35.00 s to 31.71 and 31.90 s, two interleaved rounds on the machine of that day. Pipelined loading is the launcher's default since 2026-11-24 when two or more workers run on an input of at least 8 MiB.}
+
+\p{\strong{What a publication costs since 2026-11-25.} The workers read the frozen level store of a publication in place, see [frozen base and overlays](design-universe-levels-overlays): a lane that is handed a unit beyond its snapshot is reset as before, and the reset moves its level view to the newest snapshot with a few reference assignments. Nothing is allocated and nothing is copied; the loader still copies its open level store once per publication to go on in. The scaled interval was kept. Measured on the executable with the shared base, 8 workers, two interleaved rounds: Mathlib in 205 pieces 15.00 s and in 52 pieces 15.05 s, cslib 5.26 and 5.22 s, the same worker CPU and page faults, so small pieces no longer cost the workers anything; they are no gain either, because the workers are not waiting for the loader on these corpora and the loader pays for each piece with its own copy (1.43 s of kernel time instead of 1.10 s on Mathlib). See [the report](rep-OPT-C), section 5.3, and [the changelog entry](log-ZMAE).}
 }
 
 \subtree[design-driver-memory]{

@@ -1,0 +1,21 @@
+\title{The workers share one frozen universe-level store instead of copying it at every publication}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{reference-engine}
+\tag{unreleased}
+\tag{levels}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{b8feca1}
+\import{base-macros}
+
+\p{A worker's universe-level overlay no longer starts as a private copy of the level store. \code{\verb~|LevelStore.newSharedOverlay()~} of \code{rlvm-level} makes an overlay that reads the node arrays, the list store, the memoised forms and the hash tables of the frozen store where the loader left them and keeps what its session creates in small arrays of its own; \code{\verb~|rebase~} moves it in place to a later snapshot of a pipelined load, for the price of a reset. The two classes of \code{rlvm-api} that make, reset and move a worker's level view (\code{\verb~|Bindings~}, \code{\verb~|LevelBinding.rebaseOnto~}) use them. Both engines and inductive admission run on these overlays. The snapshots that the loader freezes and publishes are unchanged, and so is the loader, which still copies its open store once per publication. See [frozen base and overlays](design-universe-levels-overlays) and [what a publication costs](design-driver).}
+
+\p{Why: with a pipelined load every publication made every worker copy the level tables at its next reset, see [the cost of a publication](ins-E1DU). On Mathlib that was 4.5 GB in 473 copies per pass. It is safe because a frozen store is immutable, is published by one volatile reference and is never written by a shared overlay, and because no id changes: every level operation of every worker was run on both layouts side by side over the eight corpora with both engines, 1, 4 and 8 workers and several publication settings, 2.85 billion results without a difference, and the counters of a deterministic run are identical on both launchers. The instantiation caches are emptied when an overlay is moved, as they were empty in a new copy, because [the ids that follow depend on what the cache holds](ins-6S1P).}
+
+\p{Measured for this change alone, the executable against the same tree without it, warm passes with 8 workers, three interleaved rounds per corpus, aarch64 development host: on a quiet host Mathlib 14.54 to 14.14 s and cslib 5.30 to 5.20 s, the geometric mean of the eight corpora -0.8 \%, the largest loss Init at +0.4 \%; with the other cores busy Mathlib 16.16 to 15.69 s, geometric mean -0.9 \%. On the JVM launcher the geometric mean goes down by 1.9 \% and Mathlib from 13.62 to 13.04 s. Per Mathlib pass the workers take 0.53 million page faults instead of 1.49 million and the collector runs 17 times instead of 33; the peak resident set of the executable is 4.3 GiB instead of 7.4 GiB. A level operation needs 6 to 27 \% more instructions on its slow paths. Published as \code{rlvm-level} \code{4db74adbb68d} and \code{rlvm-api} \code{e2d2d31509fc} from tested snapshots; the candidate had passed the gate of the default configuration through the executable and through the jars, the gate of the reference engine, the strict policy and the driver's invariance suite with the counts of the release.}
+
+\p{Detail: [the report](rep-OPT-C), [what sharing gives](ins-VLN9). In the default build with the two other changes of the night, with the gates and the guard of the build that has all three: [the decision](dec-JT59), [the report of the integration](rep-INT8). Commit \commit{b8feca1}; the benchmark of the level module got an option for the shared overlay in \commit{37b701c}. The fourth item of [the profile of the release](rep-P11), section 6.4.}

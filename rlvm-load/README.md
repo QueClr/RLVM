@@ -656,8 +656,9 @@ Reading:
    term overlay) per snapshot it has to cross: 8 followers that rebuild at every one of the 204
    snapshots add 1.5 s of CPU time in total (0.9 ms per view) and 0.7 GB of garbage. A real worker
    lags behind the loader and crosses many snapshots with one rebuild; a longer hand-off interval
-   (`withPublishEvery`) trades the same way. An in-place "rebase" of an empty worker overlay onto a
-   newer snapshot (copy only the new ids) would remove the copies; that is an `rlvm-level` feature.
+   (`withPublishEvery`) trades the same way. Since 2026-11-25 that copy is gone for the workers: they
+   read the frozen level store in place and rebase their overlay onto a newer snapshot for the price
+   of a reset (*agentic-note*: rep-OPT-C); the figures of this item are those of the copying layout.
 5. What pipelining buys is the load's share of the wall clock: with the reference engine on mathlib
    (139 s wall, of which the load is 12-14 s) about 10 %; with an engine near the leaders' 18 s it is
    the difference between "load, then check" (about 14 s + check) and max(load, check).

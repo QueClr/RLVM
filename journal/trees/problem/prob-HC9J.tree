@@ -9,6 +9,7 @@
 \tag{platform}
 \meta{status}{open}
 \meta{created}{2026-11-24}
+\meta{updated}{2026-11-25}
 \import{base-macros}
 
 \p{\strong{Status:} open.}
@@ -30,7 +31,7 @@
 
 \ul{
 \li{\strong{The pooled session arrays with the young reserve of finding J1-F1}: correct by its gates, and [3.7 percent slower on Mathlib with more resident memory](ins-JJ7I) on the default set. Not separated: which of the two parts costs. The reserve belongs to a decision about the heap line of the JVM launcher, where a heap of 6 GB for the machine waits for it.}
-\li{\strong{The layout of the level stores.} A memo in front of universe instantiation [does not pay](ins-258N): the cost is the first touch, in each session, of level data that every worker holds in its own copy. What the census points at is one shared base instead of a copy per worker, and records instead of parallel arrays. That layout was not prototyped.}
+\li{\strong{The layout of the level stores.} A memo in front of universe instantiation [does not pay](ins-258N): the cost is the first touch, in each session, of level data that every worker holds in its own copy. What the census points at is one shared base instead of a copy per worker, and records instead of parallel arrays. That layout was not prototyped at the release. \strong{Since 2026-11-25 the first half is in the default build:} [the workers share the frozen level base](log-ZMAE), which took 0.40 s off the executable's Mathlib pass and 3 GiB off its resident set, see [the report](rep-OPT-C). Still open: records instead of parallel arrays for the level nodes and the cache entries, and the loader's own copy of the level store per publication.}
 \li{The visit filter on the tabling keys of evaluation was measured again on the set of wave 6 and is a no-go there, see [the report](rep-O1); it is closed, not open, and is listed here because it had been in the same queue.}
 }
 }

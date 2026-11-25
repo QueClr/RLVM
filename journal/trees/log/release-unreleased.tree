@@ -8,6 +8,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-ZMAE}
 \transclude{log-PC32}
 \transclude{log-EKLD}
 \transclude{log-DBKF}
@@ -56,6 +57,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-R7NE}
 \transclude{log-UB1N}
 \transclude{log-RN1B}
 \transclude{log-PSOJ}
@@ -87,6 +89,7 @@
 
 \scope{
 \put\transclude/expanded{false}
+\transclude{log-E7BA}
 \transclude{log-RCAL}
 \transclude{log-Z220}
 \transclude{log-XXB9}

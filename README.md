@@ -72,12 +72,13 @@ What stands behind this today (2026-11-25, the machine as default engine; *agent
   (no accepted bad mutant, no rejected good one; agree 15,741, declined 2,034); 1,196 hostile exports with their
   official verdicts (no wrong accept, no wrong reject; agree 1,124, 68 accepts of kind (d), 4 declined); Init,
   Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and mathlib accepted; the verdict does not
-  depend on the number of workers or on how loading and checking interleave;
-- not established: (a) is supported by tests and adversarial review, not by a proof; the arena's complete test
-  set of 270 by the arena's own procedure was run on earlier builds only (no wrong verdict there; two `either`
-  tests on which the official kernel does not terminate are declined); on x86-64 (the arena's architecture) only
-  the unit tests have run (continuous integration): the executable, the corpora and the release workflow have
-  never run there; no release has been published; the checker definition for the arena
+  depend on the number of workers or on how loading and checking interleave; the arena's complete test set of
+  270 by the arena's own procedure, through the executable of this build: all 148 good tests accepted, all 92
+  bad tests rejected (of the 30 `either` tests, the two on which the official kernel does not terminate are
+  declined);
+- not established: (a) is supported by tests and adversarial review, not by a proof; on x86-64 (the arena's
+  architecture) only the unit tests have run (continuous integration): the executable, the corpora and the
+  release workflow have never run there; no release has been published; the checker definition for the arena
   (`scripts/arena/rlvm.yaml`) is a draft that has not been submitted.
 
 ## Get it
@@ -98,8 +99,8 @@ first time.
 
 An optional build uses **Oracle GraalVM** and profile-guided optimisation from the profiles in `profiles/`
 (recorded as the last step of a release; `scripts/dev.sh profiles` records them): `scripts/build.sh --oracle-pgo`.
-Measured with the profiles of the repository, that executable needs 0.85 to 0.89 times the default executable's
-wall clock on the eight corpora.
+Measured with the profiles of the repository, that executable needs 0.92 to 0.96 times the default executable's
+wall clock on the eight corpora (cold; 0.92 to 0.98 warm).
 Oracle GraalVM is not open source: it is licensed under the GraalVM Free Terms and Conditions, the option says
 so, and it downloads Oracle GraalVM only when `--accept-oracle-licence` is given too. The default build, the
 release workflow and CI use GraalVM Community Edition only.
@@ -112,16 +113,16 @@ lists the rest (development distributions that also run the jars on a JVM, the g
 <!-- table: bench/track/benchmarks.py --headline (the rows of bench/warm.sh; *agentic-note*: rep-benchmarks) -->
 | One run, 8 cores: wall clock in s (warm pass) | init (348 MB) | std (584 MB) | cedar (905 MB) | reachability (19 MB) | con-leche (702 MB) | navier-stokes-euler (1.56 GB) | cslib (2.50 GB) | mathlib (6.33 GB) |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|
-| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.74 (0.71) | 1.33 (1.21) | 1.86 (1.81) | 0.63 (0.56) | 1.78 (1.65) | 4.41 (4.26) | 6.09 (5.72) | 16.31 (15.46) |
-| `rlvm -X engine=reference FILE` | 2.07 (1.96) | 3.53 (3.44) | 4.60 (4.43) | 4.94 (4.63) | 39.15 | 27.71 | 18.93 | 85.76 |
-| gruszka | 0.71 (0.71) | 1.40 (1.28) | 2.74 (1.73) | 2.38 (2.42) | 1.36 (1.22) | 2.86 (3.11) | 4.77 (4.63) | 13.28 (14.20) |
-| nano-lean | 1.05 (1.03) | 1.75 (1.74) | 2.65 (2.64) | 0.90 (0.75) | 2.20 (2.16) | 4.13 (4.14) | 6.52 (6.48) | 18.68 (18.66) |
-| *rlvm / gruszka* | 1.04x | 0.95x | 0.68x | 0.26x | 1.31x | 1.54x | 1.28x | 1.23x |
-| *rlvm / nano-lean* | 0.70x | 0.76x | 0.70x | 0.70x | 0.81x | 1.07x | 0.93x | 0.87x |
+| **`rlvm FILE`** (the executable, default configuration: machine engine) | 0.66 (0.61) | 1.13 (1.05) | 1.56 (1.47) | 0.55 (0.45) | 1.57 (1.41) | 3.63 (3.45) | 4.99 (4.80) | 13.53 (13.15) |
+| `rlvm -X engine=reference FILE` | 1.88 (1.75) | 3.08 (2.97) | 4.00 (3.83) | 4.11 (3.88) | 30.54 | 24.54 | 16.70 | 75.98 |
+| gruszka | 0.56 (0.53) | 0.88 (0.87) | 1.39 (1.39) | 1.83 (1.86) | 1.09 (1.10) | 2.60 (2.64) | 4.10 (4.09) | 10.76 (10.68) |
+| nano-lean | 0.91 (0.89) | 1.50 (1.50) | 2.30 (2.31) | 0.76 (0.58) | 1.89 (1.88) | 3.76 (3.73) | 6.14 (6.10) | 15.87 (15.76) |
+| *rlvm / gruszka* | 1.18x | 1.28x | 1.12x | 0.30x | 1.44x | 1.40x | 1.22x | 1.26x |
+| *rlvm / nano-lean* | 0.73x | 0.75x | 0.68x | 0.72x | 0.83x | 0.97x | 0.81x | 0.85x |
 <!-- end table -->
 
 Conditions: one host (aarch64, Cortex-X925), 8 cores reserved for one measurement at a time while the other 12
-cores were busy, 2026-11-25 (four of the baseline columns 2026-11-24); each figure is one fresh process (8 workers, the file
+cores were idle, 2026-11-25; each figure is one fresh process (8 workers, the file
 checked while it is read), in brackets the median later pass of one process that checks the export several times.
 The first row is the executable without any option; the second is the reference engine alone; gruszka and
 nano-lean with their arena run lines and 8 threads on the same cores, first (second) of two runs; "-" = not

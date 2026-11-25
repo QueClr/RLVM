@@ -8,11 +8,11 @@
 \tag{performance}
 \meta{status}{implemented}
 \meta{created}{2026-11-23}
-\meta{updated}{2026-11-24}
+\meta{updated}{2026-11-25}
 \meta{origin}{rlvm-load/README.md}
 \import{base-macros}
 
-\p{\strong{Status:} implemented in \code{rlvm-export} and \code{rlvm-load}: batch and pipelined loading, and since 2026-11-24 the packing of proofs by scanner threads.}
+\p{\strong{Status:} implemented in \code{rlvm-export}, \code{rlvm-load} and \code{rlvm-store}: batch and pipelined loading, since 2026-11-24 the packing of proofs by scanner threads, and since 2026-11-25 loops without a call for runs of \code{app} records and of proof-block records.}
 
 \p{The loader turns the record stream of an export file, one JSON record per line, into [the term store](design-term-store). It holds no kernel logic and validates only what the official reader validates. One loader thread receives the records in file order; nothing in it recurses on term depth.}
 
@@ -45,13 +45,27 @@
 \subtree[design-export-loader-pipelined]{
 \title{Pipelined loading}
 
-\p{In batch mode the store is published once, at the end of the file. In pipelined mode the loader hands over after every 4,096 units or 32 MiB of input, 204 times on Mathlib: it first publishes a frozen snapshot of the level store, then the frontier of loaded units, then wakes the waiting threads. A thread that reads the frontier finds the level snapshot that covers it already published. Only complete units are published. The level ids of a pipelined load differ from those of a batch load, because every snapshot adds the official normal forms of its levels; every other word of the store is identical. Publication itself costs nothing measurable. Since 2026-11-24 a run is pipelined by default when it has two or more workers and the input is a regular file of at least 8 MiB.}
+\p{In batch mode the store is published once, at the end of the file. In pipelined mode the loader hands over after every 4,096 units or 32 MiB of input; [the driver](design-driver) multiplies that interval by the size of the input in GiB, at most by 4, so Mathlib is handed over 52 times and not 204 times. At a hand-over the loader first publishes a frozen snapshot of the level store, then the frontier of loaded units, then wakes the waiting threads. Since 2026-11-25 the workers read that snapshot in place and the loader goes on in a private copy of it, see [frozen base and overlays](design-universe-levels-overlays). A thread that reads the frontier finds the level snapshot that covers it already published. Only complete units are published. The level ids of a pipelined load differ from those of a batch load, because every snapshot adds the official normal forms of its levels; every other word of the store is identical. Publication itself costs nothing measurable. Since 2026-11-24 a run is pipelined by default when it has two or more workers and the input is a regular file of at least 8 MiB.}
 }
 
 \subtree[design-export-loader-scanners]{
 \title{Scanner threads}
 
 \p{The reader can tokenise 4 MiB chunks of the mapped file on helper threads while the loader thread replays them in file order with identical calls. Since 2026-11-24 the helpers also \em{pack}: on exporter output the records of a theorem's segment with an id above the type's are the proof, and a scanner thread prepares their bytes as they will stand in the proof block, leaving open only the references it cannot resolve. The loader thread links such a run instead of handling its records one by one. The invariant is that the store is word for word the store of the record-by-record path on every file, and a failing file fails with the same message and line. One scanner thread runs by default for inputs of 256 MiB and more; it was two until the evening of 2026-11-24, see [dec-EGMG](dec-EGMG). Numbers and the argument for the packing: [dec-OC1F](dec-OC1F). Leaving the proofs in the file for the workers to parse was studied and not adopted: [dec-RN77](dec-RN77).}
+}
+
+\subtree[design-export-loader-stretches]{
+\title{Stretches: the common records in loops without a call}
+
+\p{Since 2026-11-25 the three places through which most records pass handle a run of common records in one loop, where they made one or more calls per record. Six lines of seven of an export are \code{app} records, and four fifths of the expression records end in a proof block. The executable is compiled ahead of time and without a profile: a small method that its compiler does not inline costs a stack check, a frame and a safepoint poll, and a call anywhere inside a loop, also one that is never made, makes it keep the loop's values in the stack frame. In the executable a fifth of the loader thread's instructions were this and not work.}
+
+\ul{
+\li{\strong{The scanner} converts consecutive \code{app} lines that are exactly the template in a loop of its own, with the word loads and the conversion of the three numbers written in place: no call and no branch on the number of digits. The loop stops in front of the first line that is anything else, and that line goes through the code that was there before, the general path included.}
+\li{\strong{The reader and the loader.} The scanner hands the lines of such a run over together. The linker offers the longest prefix that its fast path would take, dense ids with both children earlier expressions, to the loader, which appends it to its segment in one loop and refuses whenever the record-by-record path has something else to do: metadata was seen, referrers are counted, the segment is at its limit, a child is not an earlier record. Nothing is counted before the whole stretch is taken.}
+\li{\strong{The sweep and the block writer.} A run of consecutive proof-private APP, LAM, PI and LET records of a segment has its children turned into block references in place and goes to the block writer in one call. The writer writes the common records, those whose references are earlier records of the block or shared terms of an earlier unit, without a call and stores a reference as one word; every other record gets the checks of the single calls.}
+}
+
+\p{Every stretch has the record-by-record path as its definition, an interface default that makes the single calls, and takes only the cases for which the two are the same by construction. No rule of the reader, the loader or the store changed, and the invariant of the scanner threads holds here too: the store is word for word the store of the single calls. That was tested with a digest of everything a load builds, identical in 25 reader configurations on 17,158 small files, 263 arena tests, 847 prelude mutants and the eight corpora under both policies; tick counts, record counts and declines of the eight corpora are identical with one worker. The full record is [the report](rep-OPT-B); the entry is [in the changelog](log-R7NE).}
 }
 
 \subtree[design-export-loader-cost]{
@@ -62,6 +76,7 @@
 \li{Wave 7, native image, one thread, load phase only: Mathlib 17.2 s to 12.4 s, Init 885 ms to 673 ms, at the same number of instructions. All of the gain is cache misses that no longer happen or that overlap: the promotion memo became a direct map, the locations of earlier records are read in one loop at the declaration line, and the block writer stopped loading the shared node it refers to.}
 \li{With packing, the load alone on the JVM, warm, on quiet cores: Std 0.92 s to about 0.5 s, cedar 1.36 s to 0.73 s, Mathlib 9.2 to 9.6 s down to 5.8 to 6.2 s.}
 \li{A warm pass with 8 workers on 8 cores is bound by its total CPU time, of which the whole load is about a tenth; there the packing changes nothing measurable.}
+\li{The stretches of 2026-11-25, in the executable: a load takes a fifth fewer instructions (Mathlib 136.0 to 109.1 G, Init 7.62 to 6.02 G) and 11 to 18 \% less time alone (Mathlib 11.08 to 9.81 s, cslib 4.48 to 3.92 s, Init 0.584 to 0.478 s); in a Mathlib pass with 8 workers the loader thread needs 10.62 s of CPU where it needed 12.12 s. On Init, Std, cedar and cslib the loader thread is busy for 89 to 95 \% of the executable's pass, so there the pass follows the loader: the warm pass of the eight corpora got 4.1 \% shorter in the geometric mean in the executable and 3.8 \% on the JVM launcher (8 workers, three interleaved rounds, the change alone against its base). What is left of the thread is memory: the location table, promotion, the name table and the children of shared nodes take two thirds of its TLB walks, and the kernel 12.9 \% of its time for 0.85 million page faults per Mathlib pass.}
 }
 }
 

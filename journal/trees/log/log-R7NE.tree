@@ -1,0 +1,22 @@
+\title{The reader, the loader and the block writer handle runs of common records in loops without a call}
+\taxon{Change}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{changelog}
+\tag{loader-store}
+\tag{unreleased}
+\tag{loader}
+\tag{store}
+\tag{performance}
+\meta{release}{Unreleased}
+\meta{commit}{b8feca1}
+\import{base-macros}
+
+\p{Three places through which most records of an export pass now take a run of common records in one loop. The scanner of \code{rlvm-export} converts consecutive \code{app} lines, six lines of seven, in a loop of its own with the word loads and the number conversion written in place, and hands such a run over together; the loader of \code{rlvm-load} appends a run to its segment in one loop, and its sweep hands the proof-private records of a segment to the block writer as a run; the block writer of \code{rlvm-store} writes the common records of a run without a call and stores a reference as one word. Each of these has the record-by-record path as its definition, an interface default that makes the single calls, and falls back to it for whatever is not the common case. No rule of the reader, the loader or the store changed. See [stretches](design-export-loader-stretches).}
+
+\p{Why: in the executable a fifth of the loader thread's instructions were not work but [the way an ahead-of-time compiler without a profile lays work out](ins-BGII): a call for one word load, four calls and about 410 instructions for a proof-private record on its way into its block. The loader thread is lever 2 of [the profile of the release](rep-P11).}
+
+\p{The store is the same store: a digest of everything a load builds is identical to the one before the change in 25 reader configurations on 17,158 small files, 263 arena tests, 847 prelude mutants and the eight corpora, under both policies, and tick counts, record counts and declines of every corpus are identical with one worker. Measured for this change alone, against the same tree without it, on the aarch64 development host: a load takes a fifth fewer instructions in the executable (Mathlib 136.0 to 109.1 G) and 11 to 18 \% less time alone; in a Mathlib pass with 8 workers the loader thread needs 10.62 s of CPU instead of 12.12 s. Warm passes with 8 workers, three interleaved rounds per corpus: in the executable the geometric mean of the eight corpora goes from 2.170 to 2.082 s, -4.1 \%, with Init -6.6 \%, cslib -7.1 \%, Mathlib 14.53 to 14.16 s and reachability, the one corpus that is not faster, at +0.1 \%; on the JVM launcher -3.8 \% and every corpus faster. Published as \code{rlvm-export} \code{38c922c4fccd}, \code{rlvm-store} \code{a93a52584ee7} and \code{rlvm-load} \code{a2a091b291fa} from tested snapshots; the candidate had passed the gate of the default configuration through the executable and through the jars and the driver's invariance suite.}
+
+\p{Detail: [the report](rep-OPT-B), [what is left of the loader thread](ins-2B4K), [the loader as the floor](prob-I7M9). In the default build with the two other changes of the night, with the gates and the guard of the build that has all three: [the decision](dec-JT59), [the report of the integration](rep-INT8). Commit \commit{b8feca1}.}

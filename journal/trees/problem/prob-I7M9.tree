@@ -8,6 +8,7 @@
 \tag{performance}
 \meta{status}{open}
 \meta{created}{2026-11-24}
+\meta{updated}{2026-11-25}
 \meta{origin}{docs/research/profiles/X5.md}
 \import{base-macros}
 
@@ -20,6 +21,7 @@
 \li{[Packing by the scanner threads](ins-3L35) made the load alone 1.6 to 1.8 times shorter, 5.8 to 6.2 s for Mathlib, and did not shorten an 8-worker pass: such a pass is at its CPU bound.}
 \li{What is left on the loading thread has to stay in file order because it numbers shared structures: names, promotion, shared nodes, the references of proofs that the scanner threads could not resolve, and the records that are not proof-private.}
 \li{By the arena rule the loader costs 133.2 G instructions on Mathlib, 21 per input byte, against 6 for the leaders; see [the arena dry run](ins-6OVD). A leader converts the export once to a binary columnar file; RLVM reads the text every time.}
+\li{On the release the loader thread of the executable needed 12.1 s of CPU in a Mathlib pass of 14.5 s, [right behind the workers](ins-DBTJ), and was busy for 89 to 95 \% of the pass on Init, Std, cedar and cslib, see [the report](rep-OPT-B). Since 2026-11-25 [the reader, the loader and the block writer take runs of common records in loops without a call](log-R7NE): a fifth fewer instructions per load, 10.6 s of CPU in the Mathlib pass, and the pass of those four corpora 4.5 to 7.1 \% shorter. [What is left of the thread](ins-2B4K) is memory and one chain of dependent loads.}
 }
 \p{\strong{What would close it.} The switch point is measurable with numbers the project already produces: the check phase with 8 workers against a run that stops after the load. When they cross on a corpus that counts, cost the variant of the lazy design in which the scanner threads pack the ranges, so that there is no text in the workers, no second read and no restart; source [rep-X5](rep-X5), section 7.5.}
 \p{See also: [the export loader](design-export-loader).}
