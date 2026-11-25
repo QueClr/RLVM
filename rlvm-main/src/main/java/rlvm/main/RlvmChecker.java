@@ -14,6 +14,8 @@ import rlvm.cli.UsageException;
 import rlvm.cli.Verdict;
 import rlvm.driver.Run;
 import rlvm.driver.RunConfig;
+import rlvm.driver.RunStats;
+import rlvm.load.LoadReport;
 
 /**
  * The RLVM kernel behind the launcher's {@link Checker} interface: launcher options to
@@ -31,6 +33,15 @@ import rlvm.driver.RunConfig;
  *
  * <p>{@code -X passes=N} (N &gt; 1) checks the export N times in this process and reports every pass
  * ({@link Passes}: warm wall clock); without it nothing of that class runs.
+ *
+ * <p><b>The safety net of the practical policy</b> ({@link #strictRecheck}; OWNER-NOTES 13 (c): the
+ * default never rejects what the official checker accepts). The practical loader drops metadata
+ * nodes, which the official kernel keeps as terms of their own, and some of its syntactic tests look
+ * at such a node, not through it (finding R2-F4: {@code cheap_beta_reduce} behind a node). So a
+ * REJECT of a practical run on a file in which the loader dropped a metadata node is not reported:
+ * the file is checked once more under {@code policy=strict}, where such a declaration is declined
+ * instead of normalised, and THAT verdict is the run's. An ACCEPT or a DECLINE of the practical run
+ * and every file without a metadata record are untouched.
  */
 public final class RlvmChecker implements Checker {
 
@@ -175,30 +186,201 @@ public final class RlvmChecker implements Checker {
         if (s == null) {
             return Outcome.DECLINE; // a part of the pipeline is not implemented; said on the diagnostics stream
         }
+        // The safety net exists for the practical policy only: a strict run is its own last word.
+        final boolean practical = !s.mo.strict;
         if (s.mo.passes > 1) {
             // -X passes=N: the same export N times in this process (warm passes). Never on a plain run.
-            return new Passes(this, export, threads, stats, stackBytes, extra, all, err, quiet).run(s);
+            Passes passes = new Passes(this, export, threads, stats, stackBytes, extra, all, err, quiet);
+            long t0 = System.nanoTime();
+            int outcome = passes.run(s);
+            s = null;
+            long dropped = passes.droppedMetadata();
+            passes = null;
+            if (practical && outcome == Outcome.REJECT && dropped != 0) {
+                return strictRecheck(export, threads, stats, stackBytes, extra, all, err, quiet, dropped,
+                        System.nanoTime() - t0, null);
+            }
+            return outcome;
         }
-        MainOptions mo = s.mo;
-        RunConfig config = s.config;
-        MainWiring wiring = new MainWiring(export, mo);
-        long t0 = System.nanoTime();
-        int outcome;
-        Run run;
+        // The driver prints its lines (anomaly events, the explanation of a failure) when the run ends.
+        // Those of a practical run are held until it is known whether the verdict they explain is the
+        // one this run reports; everything else goes straight to the diagnostics stream.
+        java.io.ByteArrayOutputStream held = practical && !quiet ? new java.io.ByteArrayOutputStream() : null;
+        PrintStream diagnostics = quiet ? null
+                : held == null ? err : new PrintStream(held, true, java.nio.charset.StandardCharsets.UTF_8);
+        Done d;
         try {
-            run = Pipeline.newRun(config, wiring, s.primaryFactory, s.referenceFactory, quiet ? null : err);
-            outcome = run.execute();
-        } catch (UnsupportedOperationException e) {
-            return declineNotImplemented(e, err, quiet);
+            d = once(s, export, diagnostics, err, quiet);
+        } catch (Throwable t) {
+            release(held, err); // an Error ends the process: what the driver said is not lost
+            throw t;
         }
-        if (outcome != Outcome.ACCEPT && !quiet && run.verdicts().explanation() == null) {
-            // The driver explains every failure it knows the cause of; never end silently otherwise.
-            err.println("rlvm: " + Outcome.name(outcome) + " (no explanation recorded)");
+        if (d.notImplemented) {
+            release(held, err);
+            return Outcome.DECLINE;
         }
+        int outcome = d.outcome;
+        long dropped = droppedMetadata(d.report);
+        if (practical && outcome == Outcome.REJECT && dropped != 0) {
+            long nanos = d.nanos;
+            d = null; // nothing of the practical run is referenced while the strict one runs
+            s = null;
+            String explanation = held == null ? null : held.toString(java.nio.charset.StandardCharsets.UTF_8);
+            return strictRecheck(export, threads, stats, stackBytes, extra, all, err, quiet, dropped, nanos, explanation);
+        }
+        release(held, err);
         if (stats) {
-            err.println(statsLine(s, outcome, run.workerCount(), System.nanoTime() - t0));
+            err.println(statsLine(s, outcome, d.run.workerCount(), d.nanos));
         }
         return outcome;
+    }
+
+    /** What {@link #once} leaves: the outcome, the run, the loader's counters, the wall clock. */
+    private static final class Done {
+        int outcome;
+        /** Null if a part of the pipeline was not implemented ({@link #notImplemented}). */
+        Run run;
+        boolean notImplemented;
+        /** The loader's report; null if the load never got as far as a loader. */
+        LoadReport report;
+        long nanos;
+    }
+
+    /**
+     * One complete run of a setup: store, load, environment pass, workers.
+     *
+     * @param diagnostics where the driver's lines go; null = nowhere ({@code --quiet})
+     */
+    private static Done once(Setup s, Path export, PrintStream diagnostics, PrintStream err, boolean quiet) {
+        Done d = new Done();
+        MainWiring wiring = new MainWiring(export, s.mo);
+        long t0 = System.nanoTime();
+        try {
+            d.run = Pipeline.newRun(s.config, wiring, s.primaryFactory, s.referenceFactory, diagnostics);
+            d.outcome = d.run.execute();
+        } catch (UnsupportedOperationException e) {
+            d.run = null;
+            d.notImplemented = true;
+            d.outcome = declineNotImplemented(e, err, quiet);
+            return d;
+        }
+        d.nanos = System.nanoTime() - t0;
+        d.report = wiring.loadReport();
+        if (d.outcome != Outcome.ACCEPT && diagnostics != null && d.run.verdicts().explanation() == null) {
+            // The driver explains every failure it knows the cause of; never end silently otherwise.
+            diagnostics.println("rlvm: " + Outcome.name(d.outcome) + " (no explanation recorded)");
+        }
+        return d;
+    }
+
+    /** Prints what was held back of a run whose verdict is reported after all. */
+    private static void release(java.io.ByteArrayOutputStream held, PrintStream err) {
+        if (held != null && held.size() > 0) {
+            err.print(held.toString(java.nio.charset.StandardCharsets.UTF_8));
+            err.flush();
+            held.reset();
+        }
+    }
+
+    /**
+     * The number of metadata records the loader read and dropped (the wrapped expression stands for
+     * such a record; {@code LoadReport.exprMData}), counted up to the record at which the load ended;
+     * -1 if there is no report, which the safety net takes for "some" (fail closed).
+     *
+     * <p>The count is of RECORDS READ, whatever became of them: a superset of "a declaration was
+     * loaded without its node". The surplus (a node in an inductive record, which both policies
+     * decline; a record that no declaration uses) costs a second run and no verdict: the strict load
+     * treats those records as the practical one does. A record that the load never reached - a
+     * pipelined run that ended at a rejection before it - cannot be part of the rejected declaration,
+     * whose records all precede its line.
+     */
+    static long droppedMetadata(LoadReport report) {
+        return report == null ? -1 : report.exprMData;
+    }
+
+    /** The settings of the command line that the second run of the safety net does not take over. */
+    private static final java.util.Set<String> NOT_IN_RECHECK = java.util.Set.of("policy", "engine", "passes", "passes-mode");
+
+    /**
+     * The settings of the safety net's second run: the command line's, with {@code policy=strict} and
+     * without what contradicts or weakens it - the engine (strict IS the reference engine), the
+     * passes (one plain run) and the exactness-only engine settings ({@link MainOptions#STRICT_ENGINE_SETTINGS}:
+     * a value given for the practical run must not switch the strict one's exactness off).
+     */
+    static Map<String, String> recheckSettings(Map<String, String> extra) {
+        Map<String, String> again = new java.util.LinkedHashMap<>();
+        if (extra != null) {
+            for (Map.Entry<String, String> e : extra.entrySet()) {
+                if (!NOT_IN_RECHECK.contains(e.getKey()) && !MainOptions.STRICT_ENGINE_SETTINGS.containsKey(e.getKey())) {
+                    again.put(e.getKey(), e.getValue());
+                }
+            }
+        }
+        again.put("policy", MainOptions.STRICT);
+        return again;
+    }
+
+    /**
+     * THE SAFETY NET (class comment). The practical run ended with REJECT and the loader had dropped
+     * metadata: the file is checked again, as a plain run with fresh stores, under the strict policy
+     * (the reference engine, its exactness-only checks, the loader's metadata decline), and the
+     * outcome of that run is returned - accept, reject or decline.
+     *
+     * <p>Why that closes the class: a wrong reject of this checker on such a file now needs a wrong
+     * reject of the strict mode, which never normalises a metadata node away. The price: a correct
+     * reject becomes a decline wherever the strict load declines a declaration with a node before
+     * the rejected one is reached. No accepted file and no file without a metadata record ever comes
+     * here.
+     *
+     * @param dropped metadata records the practical load dropped; -1 = unknown
+     * @param practicalNanos wall clock of the practical run
+     * @param explanation what the driver said about the practical run (held back), or null
+     */
+    private int strictRecheck(Path export, int threads, boolean stats, long stackBytes, Map<String, String> extra,
+            java.util.List<EngineProvider> all, PrintStream err, boolean quiet, long dropped, long practicalNanos,
+            String explanation) {
+        String count = dropped < 0 ? "an unknown number of metadata nodes" : dropped == 1 ? "1 metadata node"
+                : dropped + " metadata nodes";
+        if (!quiet) {
+            err.println("rlvm: the practical check ended with reject on a file in which the loader dropped " + count
+                    + " (the official checker keeps such a node as part of the term): that verdict is NOT REPORTED, "
+                    + "the file is checked again under -X policy=strict");
+            if (explanation != null) {
+                for (String line : explanation.split("\\R")) {
+                    if (!line.isBlank()) {
+                        err.println("rlvm:   practical, not reported: " + (line.startsWith("rlvm: ") ? line.substring(6) : line));
+                    }
+                }
+            }
+        }
+        // The practical run's stores are garbage now; collected here, not during the second run.
+        System.gc();
+        Setup s = setup(export, threads, stats, stackBytes, recheckSettings(extra), all, err, quiet);
+        if (s == null) {
+            return Outcome.DECLINE;
+        }
+        Done d = once(s, export, quiet ? null : err, err, quiet);
+        if (d.notImplemented) {
+            return Outcome.DECLINE;
+        }
+        String net = "strict-recheck(practical=reject,metadata=" + dropped + ",practical_wall_ms="
+                + practicalNanos / 1_000_000 + ")";
+        RunStats file = d.run.stats();
+        if (s.mo.statsFile != null && file != null && file.enabled()) {
+            // The statistics file is the second run's (the driver wrote it); it says that it is one.
+            file.put("net", net);
+            try {
+                file.writeJson(s.mo.statsFile);
+            } catch (java.io.IOException | RuntimeException e) {
+                if (!quiet) {
+                    err.println("rlvm: cannot write statistics to " + s.mo.statsFile + ": " + e);
+                }
+            }
+        }
+        if (stats) {
+            err.println(statsLine(s, d.outcome, d.run.workerCount(), d.nanos) + " net=" + net);
+        }
+        return d.outcome;
     }
 
     /** The {@code --stats} line of a run (without the part {@link Passes} appends). */

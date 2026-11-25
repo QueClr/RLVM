@@ -1,6 +1,6 @@
 # The caches of the reference engine against the official kernel's (R2)
 
-2026-11-24, 21:28Z - 2026-11-25, 01:25Z. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
+2026-11-24, 21:28Z - 2026-11-25, 02:5xZ. Owner of `rlvm-ref` after L. Reason for this audit: finding S3-F2 (reviewer S3,
 21:21Z), a wrong ACCEPT of the reference engine, the oracle of every gate. Official source read:
 `refs/lean4/src/kernel/` at v4.36.0 (`type_checker.cpp/.h`, `expr_eq_fn.cpp`, `expr_maps.h`, `replace_fn.cpp`,
 `instantiate.cpp`, `inductive.h/.cpp`, `environment.cpp`, `local_ctx.cpp`, `level.cpp`), the reader
@@ -15,7 +15,10 @@ the loader `patches/`, raw results `out/`, `data/corpora.tsv`, `logs/`).
 1. **S3-F2 is not a kernel cache.** `rlvm-load` drops `mdata` records (the wrapped expression stands for the
    record; the store has no such node), so `a = mdata b` reaches the kernel as the term `a = b`. Officially an
    `mdata` node is a term of its own for every cache and hides what is under it from the kernel's syntactic tests.
-   Same cause, other direction: `s3-mdata-eager-hidden-ok` (official accept) was a wrong REJECT.
+   Same cause, other direction: `s3-mdata-eager-hidden-ok` (official accept) was a wrong REJECT, and so were the
+   four exports of **R2-F4** (`r2-mdata-beta-*-ok`: `cheap_beta_reduce` behind a node; section 6.1). That direction
+   is closed for the whole class by the launcher's safety net (section 6.1): a practical REJECT on a file with a
+   dropped node is not reported, the strict verdict is.
 2. **R2-F1** (new, same class): the `nondep` flag of `letE` is part of the official term identity and the store
    does not keep it. `r2-id-let-nondep-bad`: official reject, reference accept.
 3. **R2-F2** (new): **the official verdict can depend on object identity** - on whether a subterm is one record of
@@ -217,7 +220,7 @@ of the same statement elsewhere:
 accept path of the kernel is a derivation; the caches hold facts, and an entry that is "there too early" or "one
 object too many" changes which true facts the incomplete procedure finds.
 
-### 6.1 Metadata in the practical mode: transparent, except around an application of `eagerReduce`
+### 6.1 Metadata in the practical mode: transparent; a rule around `eagerReduce`; a safety net behind every reject
 
 Under the practical policy a dropped `mdata` node may make RLVM accept more than the official checker (kind T,
 tolerated), but it must not make RLVM REJECT what the official checker accepts (OWNER-NOTES 13 (c)).
@@ -244,7 +247,7 @@ one compare per `const` record; files without metadata are loaded as before (sto
 | Official test | With the node | With the node dropped | Can an official ACCEPT become our REJECT? |
 |---|---|---|---|
 | `is_eager_reduce(app_arg(e))` (infer_app, check mode) | not eager | eager | **yes, directly** (Nat folding with free variables decides `false` early): closed by the rule above |
-| `cheap_beta_reduce(r)` on the inferred type of a lambda / let body (`is_app`, `get_app_fn`, `is_lambda`) | the type stays `(mdata (fun x => C)) a` or `mdata ((fun x => C) a)` | reduced to `C` | not by itself (the two types are convertible and every comparison strips the node first). **Through the caches, yes in principle**: officially this occurrence and an explicit occurrence of the same term are one key of `m_success`; here one is `C` and the other the redex, so a pair recorded for the first does not answer the second, which is then recomputed in a later cache state (S3's pair with a full `whnf_core` in between would fail). Not built, not closed: the rule would be "decline a declaration with a metadata node on the head path of a beta redex" |
+| `cheap_beta_reduce(r)` on the inferred type of a lambda / let body (`is_app`, `get_app_fn`, `is_lambda`, the loop over the lambdas, `is_bvar` of the body) | the type stays `(mdata (fun x => C)) a` or `mdata ((fun x => C) a)`; a node between two lambdas or around the bound-variable body stops the reduction too | reduced to `C` | not by itself (the two types are convertible and every comparison strips the node first). **Through the caches, yes: built, finding R2-F4 below.** Officially this occurrence and an explicit occurrence of the same term are one key of `m_success`; here one is `C` and the other the redex, so a pair recorded for the first does not answer the second, which is then recomputed in a later cache state |
 | `is_pi(f_type)` / `ensure_pi_core` (infer_app, both modes), `ensure_sort_core`, the binder loops of `infer_lambda` / `infer_pi` / `infer_let`, `get_app_args` of infer-only `infer_app` | `whnf` strips the node, or the telescope is split in two | the direct path | no: the same types and the same judgments; only the place of an instantiation and function-memo entries differ |
 | `quick_is_def_eq`: `t == s`, the success set, the kind switch (`MData` against `MData` compares the bodies; mixed kinds fall through to `whnf_core`, which strips) | another key | the key of the bare term | no: more hits, i.e. accepts more (S3-F2, kind T); the mixed-kind path reaches the same binder / sort / literal comparison one step later |
 | the `Bool.true` shortcut (`is_constant(s, Bool.true)`) | no shortcut for `mdata Bool.true`; lazy delta reaches the same constant | shortcut | no: accepts as much, earlier |
@@ -252,8 +255,84 @@ one compare per `const` record; files without metadata are loaded as before (sto
 | everything after a `whnf_core` / `whnf` (`is_delta`, `is_def_eq_offset`, `reduce_nat`, `is_def_eq_args` / `_app`, eta, structure eta, `infer_proj`, the recursor and quotient rules) | the head and the spine have been stripped: `whnf_core` rebuilds an application whose head changed | - | no difference |
 | `add_inductive` (the syntactic tests on inductive and constructor types) | - | - | metadata in an inductive or quot record is declined in both modes (LP2) |
 
-So one more official test (`cheap_beta_reduce`) could in principle turn an official accept into a reject, and only
-together with a cache-history construction; everything else can only make the practical mode accept more.
+So one more official test (`cheap_beta_reduce`) can turn an official accept into a reject, together with a
+cache-history construction; everything else can only make the practical mode accept more.
+
+**R2-F4: `cheap_beta_reduce` behind a node, built** (2026-11-25; generator `work/r2/gen/batch4.py`, rows
+`work/r2/exports/batch4.tsv`, in the hostile manifest `work/r2/exports/manifest.tsv` with the mark `mdata`). The
+world is S3's probe: `A1 = (F intro).1` (a full `whnf_core` gives `Nat`), `B1 = (F h).1` (stuck), and `A1 = B1`
+holds only while `m_whnf_core` has no entry for `A1`. `v : T1` with `T1 = (mdata (fun x => A1)) 0`. Officially
+`infer_lambda` leaves the type of the body of `fun y => v` alone (`get_app_fn` stops at the node), so its
+comparison with `True -> B1` records the pair `(T1, B1)` in `m_success`; after `A1` was cached by a full
+`whnf_core`, the explicit `T1` against `B1` is answered by that pair. With the node dropped the kernel reduces the
+body type to `A1`, records `(A1, B1)`, and later meets the redex `(fun x => A1) 0` against `B1` as a new comparison
+in a cache that answers `Nat` for `A1`: false.
+
+| Export | Where the node is | official | practical before | practical now | strict |
+|---|---|---|---|---|---|
+| `r2-mdata-beta-hidden-ok`, `-hidden-def-ok` | on the head path of a redex written in the export | accept | **REJECT** | decline | decline |
+| `r2-mdata-beta-arg-hidden-ok` | around a lambda in ARGUMENT position: `g : (m : Nat -> Type) -> m 0`, term `g (mdata (fun x => A1))`; the redex exists only after the kernel instantiated the codomain | accept | **REJECT** | decline | decline |
+| `r2-mdata-beta-bvar-hidden-ok` | around a BOUND VARIABLE in function position: `g : (m : Nat -> Type) -> (mdata m) 0`, term `g (fun x => A1)` | accept | **REJECT** | decline | decline |
+| `r2-mdata-beta-nofill-ok` | as the first, without the cache fill | accept | accept | accept | decline |
+| `r2-mdata-beta-plainform-bad`, `-arg-plainform-bad` | the twins without a node | reject | reject | reject | reject |
+
+("practical" = the default configuration with the reference engine as default engine; the machine c2e04f2294ef
+accepts the four `-ok` files as primary engine.)
+
+*Census.* No file of real code has a metadata record: 0 in the eight corpora, 0 in the 270 arena tests
+(`work/exports/all`), 0 in `work/arena-site/tests` (230). Whatever is done about metadata declines nothing real.
+
+*Why no position rule.* The rule that covers the mechanism is "a node around a term whose head is a lambda or a
+bound variable" (the loop of `cheap_beta_reduce` also stops at a node between two lambdas and at a node around
+the bound-variable body; instantiation moves a wrapped lambda, or a lambda under a wrapped variable, into function
+position). Read back exactly from the files (`work/r2/census/mdata_heads.py`; a loader that fails closed can only
+decline more) it would turn **234 of the 779 agreements** of the metadata mutant corpus into declines (123 of the
+421 accepted mutants, 111 of the 358 rejected ones). The narrow rule ("a node on the head path of a redex
+written in the export") costs 2 agreements and leaves the `-arg-` and `-bvar-` files rejected. And position and
+wrapped kind cannot tell those two files from agreeing mutants (`bugs/open-term-cache-context` `wrap_mdata.s1.0000`
+wraps a lambda argument, `.s1.0006` a bound variable in function position): what makes the files hostile is the
+cache history, which a loader does not see. No rule was published; the loader stays 58b0056c0417.
+
+**The safety net** (`rlvm-main` @@MAINJAR@@, `RlvmChecker.strictRecheck`; decision of the orchestrator, 01:38Z). In
+the practical mode a REJECT on a file in which the loader dropped at least one metadata node
+(`LoadReport.exprMData` > 0 when the run ends) is not reported: the file is checked once more as a plain run
+under `-X policy=strict` (fresh stores, the reference engine, `ref.exact=official`, the loader's metadata decline;
+the command line without `engine`, `passes` and the exactness-only settings), and that verdict is the run's. An
+ACCEPT or a DECLINE of the practical run and every file without a metadata record are untouched. A wrong reject
+on such a file now needs a wrong reject of the strict mode, which never normalises a node away. The diagnostics
+say `.. NOT REPORTED ..` and quote the practical explanation; the `--stats` line of the reported run ends with
+`net=strict-recheck(practical=reject,metadata=N,practical_wall_ms=T)`. `-X passes=N` has the net too (one strict
+run after the passes). The counter counts records READ: a node in an inductive record (declined by both
+policies) or in a record no declaration uses also triggers the second run, which then ends as the first did.
+
+The three counts (published jars, reference engine, one JVM per set: `work/r2/net/`, `lists.py`, `run.sh`,
+`tables.py`):
+
+- **(a) Practical REJECTs on files with a metadata record, and what strict says.** The 92 bad arena tests: none
+  has a metadata record (nor has any of the 270). The four mutant corpora (17,775 files, 2,802 with a metadata
+  record): 485 practical REJECTs on such files, every one a correct reject (official reject) - tutorial 71, bugs
+  56, mdata 358, prelude 0. Strict: **351 become declines** (tutorial 67, bugs 37, mdata 247), 134 stay rejects
+  (the rejected declaration stands before the first declaration with a node). The hostile exports (1,245): 4
+  practical REJECTs on files with a metadata record, the four `-ok` files above, all official ACCEPT: strict
+  declines the four. No accepted file changes: the 657 accepted files with a metadata record (655 mutants, 2 hostile exports) are
+  never run twice.
+- **(b) Caught by the net alone?** Yes, all of them: `r2-mdata-beta-hidden-ok`, `-hidden-def-ok`,
+  `-arg-hidden-ok`, `-bvar-hidden-ok` (practical reject, strict decline), and `s3-mdata-eager-hidden-ok` with the
+  loader before the rule of this section (b23a88e4c30b: practical reject, strict decline; `judge-cand3-*`).
+- **(c) Cost.** @@COST@@
+- **A wider trigger** (not implemented). The `nondep` flag of a let, the loader's only other practical-only
+  normalisation: 7 files of the sets above have such a let (2 tutorial mutants, 1 prelude mutant, 4 hostile
+  exports); the practical mode accepts all seven, so the wider trigger would change nothing there. "Every
+  practical REJECT is checked again under strict" (which would also cover the kernel's practical-only
+  behaviours): no further decline on these sets - strict rejects all 809 rejected hostile exports and all 482
+  rejected prelude mutants without a metadata record, its additional declines on the tutorial and bugs corpora
+  (260 + 48, section 8) are exactly the files with a node or such a let, and it declines none of the 230 tests -
+  at the price of a second check of every rejected file.
+
+*Judgement.* The net is worth having, and it is the closure of the class; the position rule for `eagerReduce`
+is now redundant for contract (c) and only turns one decline-after-two-runs into a decline at load. The net
+costs nothing on any accepted file or any real input, and its price - 351 correct rejects of metadata mutants
+reported as declines - is paid only on files that no exporter writes without `--export-mdata`.
 
 ## 7. What the strict mode costs on real input
 
@@ -385,8 +464,12 @@ The published jars: `rlvm-ref` a20c24a26b7c, `rlvm-load` b23a88e4c30b, `rlvm-exp
   that everything else in the kernel is the official procedure. The evidence for the first is section 3's table
   (each continuation reproduces the official verdict exactly where it is the truth); for the second, the gates.
   A hazard is decided by at most 63 checks of the declaration; more would be a decline (not seen).
-- **`cheap_beta_reduce` behind a dropped metadata node** (section 6.1): an official accept could in principle
-  become a reject of the practical mode through the caches; no export was built and no rule closes it.
+- **The safety net of section 6.1 covers metadata only.** A wrong reject of the practical mode on a file WITHOUT
+  a metadata record is outside it (none is known: the hostile exports have no "official accept, rejected" row);
+  the `nondep` flag does not trigger it (no reject on such a file exists in the sets). A correct reject of a file
+  with a node becomes a decline wherever the strict load declines a declaration before the rejected one (351 of
+  485 such mutants). The net's second run uses the heap of the first (the JVM launcher sizes it by the default
+  engine).
 - The rule of section 6.1 fails closed in a file that names `eagerReduce`: there a metadata node around ANY record
   of an earlier declaration (or of a packed run) declines the declaration, because the loader cannot read such a
   record back.

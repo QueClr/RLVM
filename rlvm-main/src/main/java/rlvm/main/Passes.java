@@ -77,7 +77,9 @@ import rlvm.store.Store;
  *
  * <p><b>Verdict.</b> The verdict of the run is the first pass's. A later pass with another verdict
  * is a determinism bug: a loud line is printed (also with {@code --quiet}) and the run DECLINES; in
- * reload mode the remaining passes are not made.
+ * reload mode the remaining passes are not made. If the passes of a practical run end with REJECT on
+ * a file in which the loader dropped a metadata node, {@code RlvmChecker}'s safety net checks the
+ * file once more under the strict policy, as a plain run after the passes, and that is the verdict.
  */
 final class Passes {
 
@@ -93,6 +95,11 @@ final class Passes {
 
     /** The statistics of the pass that ran last (small: no reference to the store or the run). */
     private RunStats lastStats;
+    /**
+     * Metadata records the loader dropped in a pass (the largest count of the passes; -1 if a pass
+     * left no load report): what {@code RlvmChecker}'s safety net asks when the passes end with REJECT.
+     */
+    private long droppedMetadata;
 
     Passes(RlvmChecker checker, Path export, int threads, boolean stats, long stackBytes, Map<String, String> extra,
             List<EngineProvider> providers, PrintStream err, boolean quiet) {
@@ -105,6 +112,11 @@ final class Passes {
         this.providers = providers;
         this.err = err;
         this.quiet = quiet;
+    }
+
+    /** {@code RlvmChecker.droppedMetadata} over the passes made: 0 = none, -1 = unknown. */
+    long droppedMetadata() {
+        return droppedMetadata;
     }
 
     /** One finished pass: the numbers of its line. */
@@ -364,6 +376,8 @@ final class Passes {
         }
         p.loadNanos = wiring.loadNanos();
         p.checkNanos = wiring.sinceFirstContext(meter.endNanos);
+        long dropped = RlvmChecker.droppedMetadata(wiring.loadReport());
+        droppedMetadata = dropped < 0 || droppedMetadata < 0 ? -1 : Math.max(droppedMetadata, dropped);
         Store store = wiring.store();
         if (store != null) {
             try {
