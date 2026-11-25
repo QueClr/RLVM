@@ -370,7 +370,8 @@ public final class Machine {
     static final int ER_WHY_K_FOLD = 3;
     static final int ER_WHY_K_BOOL = 4;
     static final int ER_WHY_LIMIT = 5;
-    static final int ER_WHY_COUNT = 6;
+    static final int ER_WHY_PROBE = 6;
+    static final int ER_WHY_COUNT = 7;
     static final String[] ER_WHY = {
         "",
         "eager reduction, and a comparison of the PLAIN phase is mode-dependent: with the Nat folding that eager reduction"
@@ -383,7 +384,54 @@ public final class Machine {
                 + " would depend on the mode; the reference engine checks this declaration",
         "eager reduction lifts a hasFVar guard (Bool.true) INSIDE the comparison of the K rule: the result of a reduction"
                 + " would depend on the mode; the reference engine checks this declaration",
-        "eager reduction: too many deferred comparisons or mode-dependent points; the reference engine checks this declaration"};
+        "eager reduction: too many deferred comparisons or mode-dependent points; the reference engine checks this declaration",
+        "eager reduction, and a probe of the PLAIN phase (the test 'X = Bool.true' or a Nat folding on an open term, which"
+                + " only eager reduction evaluates) was not decided within its budget (-X machine.eager-probe): the machine"
+                + " did not learn whether the two modes agree at that point; the reference engine checks this declaration"};
+    /**
+     * [eager] The tick budget of ONE probe of an aware run ({@code Conv.lazydProbe}, {@code Conv.convBoolProbe}),
+     * 0 = no budget ({@code MachineEngine.eagerProbe}, {@code -X machine.eager-probe}). In the plain phase of a
+     * declaration that may defer eager comparisons ({@link #erAware}), a Nat folding of an OPEN pair and the test
+     * {@code X =?= Bool.true} on an OPEN {@code X} - which the official kernel evaluates only under eager reduction
+     * (its hasFVar guards) - are run as probes, so that a point where the two modes differ is known
+     * ({@link #erNote}). The official plain procedure never starts that evaluation, and it can be a computation of
+     * any size: on con-leche's {@code ConLeche.lpOfData_pack} a fold probe evaluated the arguments of an open term
+     * for 28.6 M ticks into the hard limit of a session (2^28 run words, 3.3 GB), the unit was declined with E_MEM,
+     * repeated cold, and then decided by the reference engine in under a millisecond - 11 of the 14 seconds of
+     * that corpus's warm pass with the switch (finding INT7-F1, 2026-11-25; every probe that completes in the eight
+     * corpora needs a few hundred ticks, {@code machine.eager.probeMaxTicks}). A probe that is cut at its budget
+     * ({@link #erProbeCut}) leaves the point undecided: the plain procedure goes on as the official one does, the
+     * session counts as mode-sensitive ({@link #erSens}), no further probe is started in the declaration, and the
+     * declaration is DECLINED if it has entered or later enters eager reduction ({@link #ER_WHY_PROBE}). Ticks, not
+     * time: the same on every host.
+     */
+    long erProbeBudget;
+    /** [eager] A probe of this declaration was cut at its budget (see {@link #erProbeBudget}). */
+    boolean erCut;
+    /** [eager] Statistics: probes cut at the budget; the most ticks a probe that completed used (outermost probes only). */
+    long erProbeCuts;
+    long erProbeMax;
+    long erProbeT0;
+    int erProbeDepth;
+    /** [eager] The result of a fold probe's segment that completed ({@code Conv.k_lazyd6}), read at once by {@code Conv.k_lazyd7}. */
+    int erProbeV;
+
+    /**
+     * [eager] A probe of the plain phase was cut at its budget: 0 (the plain procedure goes on), or the signal of the
+     * decline if the declaration has entered eager reduction already.
+     */
+    int erProbeCut() {
+        erProbeCuts++;
+        erSens = true; // as on the unaware path: the session holds an answer that was not compared across the modes
+        if (erSeen) {
+            return erSensitive(ER_WHY_PROBE);
+        }
+        erCut = true;
+        return 0;
+    }
+
+    /** {@link #ticks()} at the start of the declaration ({@link #beginDecl}). */
+    long declTicks0;
     /**
      * [eager] Eager-only events of the declaration's deferred comparisons: ER lifted a hasFVar guard and the
      * lifted branch was taken. 0 (and no note) = eager reduction changed nothing, the session stays warm.
@@ -1321,6 +1369,10 @@ public final class Machine {
      *     fresh session: {@link #erRestart}; or a limit)
      */
     int erSite(int tt, int dom) {
+        if (erCut) {
+            erSeen = true;
+            return erSensitive(ER_WHY_PROBE); // a probe of the plain phase was cut: the mode-dependent points are not all known
+        }
         if (!erSeen) {
             erSeen = true;
             if (erSens && !erAware) {
@@ -2092,6 +2144,8 @@ public final class Machine {
         erStop = false;
         erRestart = false;
         erGaveUp = false;
+        erCut = false;
+        erProbeDepth = 0;
         erWhy = 0;
         erEoe = 0;
         erObN = 0;
@@ -2102,6 +2156,7 @@ public final class Machine {
         erAware = erAwareNext || (ER_EARLY && !erSens && erDefers());
         erAwareNext = false;
         long done = ticks();
+        declTicks0 = done;
         fuel = maxSteps > Op.FUEL_UNLIMITED || maxSteps < 0 ? Op.FUEL_UNLIMITED : maxSteps;
         tickBase = done + fuel;
         decl = rank;

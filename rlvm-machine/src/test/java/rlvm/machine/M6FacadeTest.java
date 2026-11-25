@@ -787,6 +787,90 @@ class M6FacadeTest {
     }
 
     /**
+     * [eager] The probes of the plain phase run under a budget ({@code -X machine.eager-probe},
+     * {@code Machine.erProbeBudget}; finding INT7-F1 of 2026-11-25: on con-leche's {@code ConLeche.lpOfData_pack} a
+     * fold probe - an evaluation that the official plain procedure never starts - ran for 28.6 M ticks into the hard
+     * limit of a session). A probe is a segment under that budget; cut at it ({@code Machine.erProbeCut}), the plain
+     * phase goes on, and the unit is DECLINED when it reaches an {@code eagerReduce _ _} argument: the reference
+     * engine decides it. The driver's cold retry gets the same answer at once. A unit that never enters eager
+     * reduction is not affected by a cut.
+     */
+    @Test
+    void aProbeThatIsCutDeclinesTheUnitIfItEntersEagerReduction() {
+        Fixture f = Fixture.prelude();
+        for (int i = 1; i <= 3; i++) {
+            f.def("pb" + i, "Type", "Prop", Fixture.regular(1));
+        }
+        f.seal();
+        java.util.Map<String, String> options = new java.util.HashMap<>();
+        options.put("machine.switches", "warm,eager");
+        options.put("machine.eager-probe", "5000");
+        MachineEngine e = (MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults());
+        assertEquals(5000, e.eagerProbe);
+        MachineSession s = (MachineSession) e.newSession(f.ctx);
+        assertEquals(5000, s.m.erProbeBudget);
+        int eager = f.cid("pb2");
+        int plain = f.cid("pb3");
+        int[] runs = new int[1];
+        long[] ticked = new long[1];
+        s.driver = (m, c) -> {
+            runs[0]++;
+            if (c != eager && c != plain) {
+                return MachineErrors.E_NONE;
+            }
+            // a probe of the plain phase whose evaluation never ends: a segment under the probe budget (Frames, H11)
+            int ssp = m.ssp;
+            int xp = m.xp;
+            int ep = m.ep;
+            int rp = m.rp;
+            int er = m.ER;
+            long budget = m.erProbeBudget;
+            long saved = m.tryEnter(budget);
+            int r;
+            for (;;) {
+                ticked[0]++;
+                if ((--m.fuel & Op.POLL_MASK) == Op.POLL_MASK && m.tickSlow()) {
+                    r = m.sig;
+                    break;
+                }
+            }
+            r = Frames.k_try(m, saved, budget, ssp, xp, ep, rp, er, r);
+            assertEquals(Layout.U, r, "the probe was cut at its budget, the declaration goes on");
+            assertEquals(0, m.erProbeCut(), "not in eager reduction yet: the plain procedure goes on");
+            assertTrue(m.erCut && m.erSens);
+            if (c == plain) {
+                return MachineErrors.E_NONE; // a declaration without an eagerReduce argument: the cut does not matter
+            }
+            int sgn = m.erSite(0, 0); // the first `eagerReduce _ _` argument
+            assertEquals(Op.FATAL, sgn);
+            return m.err;
+        };
+        assertEquals(Outcome.ACCEPT, s.check(f.cid("pb1"), Budget.warm()));
+        assertEquals(Outcome.DECLINE, s.check(eager, Budget.warm()));
+        assertEquals(5001, ticked[0], "cut at the budget of the probe, not at a bound of the unit");
+        assertEquals(MachineErrors.E_LIMIT, s.lastCode());
+        assertTrue(s.lastMessage().contains("-X machine.eager-probe"), s.lastMessage());
+        assertEquals(1, s.eagerWhy[Machine.ER_WHY_PROBE]);
+        assertEquals(1, s.m.erProbeCuts);
+        // the driver's cold retry: the same answer at once
+        runs[0] = 0;
+        assertEquals(Outcome.DECLINE, s.check(eager, Budget.cold(BIG)));
+        assertEquals(0, runs[0]);
+        // a unit that never enters eager reduction is decided although its probe was cut
+        ticked[0] = 0;
+        assertEquals(Outcome.ACCEPT, s.check(plain, Budget.warm()));
+        assertEquals(5001, ticked[0]);
+        assertEquals(1, s.eagerWhy[Machine.ER_WHY_PROBE]);
+        // the default: above every probe of the eight corpora that completes (the largest: 2,752,617 ticks, one unit of
+        // Mathlib; statistic machine.eager.probeMaxTicks), below the probe that never does (28.6 M ticks and E_MEM)
+        assertTrue(MachineEngine.DEFAULT_EAGER_PROBE >= 1L << 23 && MachineEngine.DEFAULT_EAGER_PROBE <= 1L << 24,
+                "the budget of a probe: " + MachineEngine.DEFAULT_EAGER_PROBE);
+        // no budget: 0
+        options.put("machine.eager-probe", "0");
+        assertEquals(0, ((MachineEngine) new MachineProvider().factory(options).create(f.store, EngineConfig.defaults())).eagerProbe);
+    }
+
+    /**
      * The machine's own tick bound per unit ({@code -X machine.unit-ticks}; NOTES-M6 F31): a warm unit has no
      * step limit of the driver's, so a declaration that never ends (the official checker does not terminate on
      * either/corner-cases/eta-struct-major-no-whnf) is declined at the bound (BUDGET_STEPS; the reference engine

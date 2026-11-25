@@ -42,7 +42,8 @@ brings `probes` - `default,skipargs,-facts` still runs `facts`. A strict engine 
 Related settings (not switches): `-X machine.session-kib=N` (the machine's own cap on a warm session,
 section "Sessions"), `-X machine.unit-ticks=N` (the machine's own tick bound per unit, default 2^27,
 NOTES-M6 F31), `-X machine.hostDepth=N` (host depth bound, default `Op.HOST_DEPTH` = 128),
-`-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine), `-X machine.debug=...` (audits,
+`-X machine.eager-probe=N` (with `eager`: the tick budget of one probe of the plain phase, default 2^23, 0 = none;
+finding INT7-F1 below the table of named switches), `-X machine.declines=FILE` (one line per non-ACCEPT outcome of the machine), `-X machine.debug=...` (audits,
 README), `-Drlvm.machine.sizes=...` (base table sizes, NOTES-INT I1), `-Drlvm.machine.keep=R,W,S` and
 `-Drlvm.machine.pool=off` (kept and pooled session arrays, NOTES-M6 F25).
 
@@ -145,6 +146,23 @@ distribution against the reference engine, gruszka, nano-lean and the official c
 | `convexpect` | 27 `SW_CONV_EXPECT` | E1 (M5) | B9 (`expect`) also when the lambda's domain is only convertible with the expected one, as before the fix of E1-F4 (off: only when they are one value); accepts the kind T rows `e1-lam-fvar-type-in-conv-*` (`docs/design/review/official-divergence.md`) | off | E1: ticks -2.4 % on the Cedar slice, -0.3 % on Std; no gain in warm wall clock on cedar / Std (native, 8 workers) |
 | `skipargs` | 28 `SW_SKIPARGS` | M4 (`Conv.skipArgs`, `Cargs.plan` / `skipMask`, `Conv.k_etas3`; masks in `Facts`) | CARGS and ETAS do not compare the positions the fact record of the head allows: proof positions under the agreement rule (B3), positions the definition does not read under SAMEDEF (B4), the Prop mask of structure eta. **Brings `facts`** (`Op.implied`: it reads the fact records). The answer is derivable but not always the official verdict: KIND T (finding S-F2; OWNER-NOTES 13). Never in `all`; off in strict mode like every switch. Until 2026-11-25 the option `-Drlvm.machine.m4=skipargs` (still read: the same shortcut without the implication) | off until the measurement of INT7 (section "The two shortcuts") | theory-sound as implemented (S2, `docs/design/review/soundness-shortcuts.md`; optional patch H1 taken: `Cargs.plan` tests the level lists of the two heads itself); no kind F in `default,eager` + both shortcuts on 987 hostile rows (S3, `soundness-default-set.md` section 10); with `congruence`: Mathlib -24.6 % native warm (25.4 -> 19.2 s), cslib -15 %, navier-stokes-euler about -50 % of the checks, con-leche +5.6 % CPU (P9) |
 | `congruence` | 29 `SW_CONGRUENCE` | M4 (`Conv.congruence`, `convB1`, `convB12`, `convCore1`; `Same`, `Cong`) | the same-head probe B1 (arguments of two applications of one head compared before either side is unfolded), closure congruence B12 (two closures of one term: slots by CONV) and proofs by type B2, as speculative segments under the probe budget and debt. **Brings `probes`** (`Op.implied`). KIND T (finding S-F1). Never in `all`; off in strict mode. Until 2026-11-25 the option `-Drlvm.machine.m4=congruence` | off until the measurement of INT7 | as `skipargs`; the same-head probe costs on con-leche's hot unit (P9, P8) |
+
+**`eager`: the probes of the plain phase run under a budget (finding INT7-F1, 2026-11-25).** A declaration that may
+defer eager comparisons checks, in its plain phase, the two points where the official kernel answers differently
+under eager reduction - a Nat folding of an open pair and the test `X = Bool.true` on an open `X` - by running the
+eager branch as a probe (`Conv.lazydProbe`, `Conv.convBoolProbe`). The official plain procedure never starts that
+evaluation, and it can be of any size: with `eager` as published on 2026-11-24 the machine evaluated one unit of
+con-leche (`ConLeche.lpOfData_pack`) for 28.6 M ticks into the hard limit of a session (`E_MEM`, 3.3 GB), twice
+(cold retry), before the reference engine decided it in under a millisecond: 14.0 s instead of about 3 s for the
+warm pass of that corpus (JVM, 8 workers), and 8.6 to 11 GB resident on the native image. A probe is now a
+speculative segment with a budget of 2^23 ticks (`-X machine.eager-probe`); cut at it, the plain procedure goes on as
+the official one does, no further probe is started in the declaration, and the declaration is DECLINED if it has
+entered or enters eager reduction (`machine.eager.declined.probe`; the reference engine decides it; the cold retry is
+answered at once). Probes that complete on the eight corpora (`machine.eager.probeMaxTicks`): 63,654 ticks on Init /
+Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler, 2,752,617 on cslib and
+mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^20 declines it and two more units). Regression tests:
+`M6FacadeTest.aProbeThatIsCutDeclinesTheUnitIfItEntersEagerReduction`,
+`SHostileEagerTest.aBudgetOfOneTickForTheProbesNeverChangesAVerdict`.
 
 The experiment bits that are still free or undecided: `m1a`, `m1b` (unused in published code), `m2b`
 (above), `m3b`, `m4b`, `m7b` (free). `Op.SW_EXPERIMENTS` names exactly these six; the six that entered the

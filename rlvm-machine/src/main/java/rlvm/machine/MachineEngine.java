@@ -94,6 +94,19 @@ public final class MachineEngine implements Engine {
      */
     static final long DEFAULT_UNIT_TICKS = 1L << 27;
 
+    /**
+     * [eager] The tick budget of one probe of the plain phase of a declaration that may defer eager comparisons
+     * ({@code Machine.erProbeBudget}; switch {@code eager}; {@code -X machine.eager-probe}, 0 = none). 2^23 ticks:
+     * measured on the eight corpora with {@code default,eager} and with the two shortcuts (INT7, 2026-11-25,
+     * statistic {@code machine.eager.probeMaxTicks}): the largest probe that completes needs 63,654 ticks on Init /
+     * Std / cedar, 193 on con-leche, 102 on reachability, about 400 on navier-stokes-euler and 2,752,617 on cslib
+     * and mathlib (one unit of Mathlib, 4.14 M ticks in all; a budget of 2^20 declines it and two more), so 2^23
+     * keeps every unit the machine decides with a factor of three to spare; the one probe it cuts
+     * ({@code ConLeche.lpOfData_pack}, finding INT7-F1) would otherwise run for 28.6 M ticks into the hard limit of
+     * a session and be declined anyway.
+     */
+    static final long DEFAULT_EAGER_PROBE = 1L << 23;
+
     /** The machine's own settings (system properties {@code rlvm.machine.*}, overridden by {@code -X machine.*}). */
     static final class Settings {
         int switches = Op.SW_DEFAULT;
@@ -103,6 +116,7 @@ public final class MachineEngine implements Engine {
         long memoBudget = Debug.MEMO_BUDGET;
         long sessionCapBytes = DEFAULT_SESSION_CAP;
         long unitTicks = DEFAULT_UNIT_TICKS;
+        long eagerProbe = DEFAULT_EAGER_PROBE;
         /** File that receives one line per non-ACCEPT outcome of the machine, or null. */
         String declines;
 
@@ -112,6 +126,7 @@ public final class MachineEngine implements Engine {
             s.switches = Debug.parseSwitches(System.getProperty("rlvm.machine.switches", "default"));
             s.sessionCapBytes = Math.max(0, Long.getLong("rlvm.machine.session-kib", DEFAULT_SESSION_CAP >> 10)) << 10;
             s.unitTicks = Math.max(0, Long.getLong("rlvm.machine.unit-ticks", DEFAULT_UNIT_TICKS));
+            s.eagerProbe = Math.max(0, Long.getLong("rlvm.machine.eager-probe", DEFAULT_EAGER_PROBE));
             String d = System.getProperty("rlvm.machine.declines", "");
             s.declines = d.isEmpty() ? null : d;
             s.debug = Debug.parseModes(System.getProperty("rlvm.machine.debug", ""));
@@ -128,6 +143,8 @@ public final class MachineEngine implements Engine {
     final long sessionCapBytes;
     /** The machine's own tick bound per unit (0 = none). */
     final long unitTicks;
+    /** [eager] The tick budget of one probe of an aware run ({@code -X machine.eager-probe}; 0 = none): {@code Machine.erProbeBudget}. */
+    final long eagerProbe;
     private long statUnitBoundDeclines;
     /** Path of the decline log ({@code -X machine.declines}), or null. */
     final String declinesPath;
@@ -136,6 +153,9 @@ public final class MachineEngine implements Engine {
     private long statCapResets;
     private long statEagerDeclines;
     private long statEagerKept;
+    private long statEagerMaxTicks;
+    private long statEagerProbeCuts;
+    private long statEagerProbeMax;
     private long statEagerRestarts;
     private long statEagerForgets;
     private long statEagerSites;
@@ -165,6 +185,7 @@ public final class MachineEngine implements Engine {
         this.memoBudget = settings.memoBudget;
         this.sessionCapBytes = settings.sessionCapBytes;
         this.unitTicks = settings.unitTicks;
+        this.eagerProbe = settings.eagerProbe;
         this.declinesPath = settings.declines;
     }
 
@@ -249,6 +270,14 @@ public final class MachineEngine implements Engine {
                 // session; sessions forgotten after an eager-only event; deferred comparisons; eager-only events;
                 // the declines by reason (part of machine.eagerDeclines; the driver's cold retry counts again)
                 sink.put("machine.eager.kept", statEagerKept);
+                // the most ticks one such unit used; the probes of the plain phase (Machine.erProbeBudget): the budget in
+                // force (machine.eager-probe; 0 = none), probes cut at it, the most ticks a probe that completed used,
+                // units declined because a probe was cut (part of machine.eagerDeclines)
+                sink.put("machine.eager.maxTicks", statEagerMaxTicks);
+                sink.put("machine.eager.probeBudget", eagerProbe);
+                sink.put("machine.eager.probeCuts", statEagerProbeCuts);
+                sink.put("machine.eager.probeMaxTicks", statEagerProbeMax);
+                sink.put("machine.eager.declined.probe", statEagerWhy[Machine.ER_WHY_PROBE]);
                 sink.put("machine.eager.restarts", statEagerRestarts);
                 sink.put("machine.eager.forgets", statEagerForgets);
                 sink.put("machine.eager.sites", statEagerSites);
@@ -388,6 +417,9 @@ public final class MachineEngine implements Engine {
         statUnitBoundDeclines += s.unitBoundDeclines;
         statEagerDeclines += s.eagerDeclines;
         statEagerKept += s.eagerKept;
+        statEagerMaxTicks = Math.max(statEagerMaxTicks, s.eagerMaxTicks);
+        statEagerProbeCuts += m.erProbeCuts;
+        statEagerProbeMax = Math.max(statEagerProbeMax, m.erProbeMax);
         statEagerRestarts += s.eagerRestarts;
         statEagerForgets += s.eagerForgets;
         statEagerSites += s.eagerSites;

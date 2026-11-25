@@ -71,6 +71,34 @@ class SHostileEagerTest {
         assertTrue(wrong.isEmpty(), "the machine does not decide rows it is built for: " + wrong);
     }
 
+    /**
+     * The probes of the plain phase run under a budget ({@code Machine.erProbeBudget}, {@code -X machine.eager-probe};
+     * finding INT7-F1: on con-leche a fold probe evaluated an open term for 28.6 M ticks into the hard limit of a
+     * session). A probe that is cut can only turn a verdict of the machine into a DECLINE: with a budget of ONE tick
+     * (every probe that evaluates anything is cut) no row gets a verdict it does not allow, and no unit differs from
+     * the reference engine. The cut itself is tested in {@code M6FacadeTest.aProbeThatIsCutDeclinesTheUnitIfItEntersEagerReduction}.
+     */
+    @Test
+    @Tag("fast")
+    void aBudgetOfOneTickForTheProbesNeverChangesAVerdict() {
+        String key = "rlvm.machine.eager-probe";
+        String old = System.getProperty(key);
+        System.setProperty(key, "1");
+        try {
+            for (String set : SETS) {
+                SHostile.Result r = SHostile.run(set, row -> row.marked("eager-decline"));
+                assertTrue(r.judged >= 40, "the rows that enter eager reduction were found: " + r.judged);
+                assertEquals(0, r.unexpected.size(), "a cut probe gave a verdict the row does not allow: " + r.report(set));
+            }
+        } finally {
+            if (old == null) {
+                System.clearProperty(key);
+            } else {
+                System.setProperty(key, old);
+            }
+        }
+    }
+
     /** The rows with the note {@code eager-hard} are still declined (if one is decided, the note is stale: remove it). */
     @Test
     @Tag("fast")

@@ -92,6 +92,8 @@ public final class MachineSession implements Session {
      * ({@code Machine.ER_WHY_*}; part of {@link #eagerDeclines}); deferred comparisons; eager-only events.
      */
     long eagerKept;
+    /** [eager] The most ticks a unit that entered eager reduction and was decided by the machine used. */
+    long eagerMaxTicks;
     long eagerRestarts;
     long eagerForgets;
     final long[] eagerWhy = new long[Machine.ER_WHY_COUNT];
@@ -123,6 +125,7 @@ public final class MachineSession implements Session {
         this.m = new Machine();
         m.attach(ctx, engine);
         m.sw = engine.switches;
+        m.erProbeBudget = engine.eagerProbe;
         m.debug = engine.debug;
         m.hostDepth = engine.hostDepth;
         m.stats = engine.config.stats;
@@ -284,6 +287,7 @@ public final class MachineSession implements Session {
                     } else if (code == MachineErrors.E_NONE || MachineErrors.outcome(code) == Outcome.REJECT) {
                         // [eager] the machine's own verdict; a session that saw an eager-only event is not kept
                         eagerKept++;
+                        eagerMaxTicks = Math.max(eagerMaxTicks, m.ticks() - m.declTicks0);
                         eagerDirty = m.erEoe != 0 || m.erSens;
                     }
                 }

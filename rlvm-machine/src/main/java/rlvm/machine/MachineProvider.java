@@ -21,6 +21,11 @@ import rlvm.api.EngineProvider;
  * machine.unit-ticks=N             the machine's own tick bound per unit (default MachineEngine.DEFAULT_UNIT_TICKS;
  *                                  0 = none): beyond it the unit is declined (BUDGET_STEPS) and the reference
  *                                  engine decides it
+ * machine.eager-probe=N            with the switch eager: the tick budget of one probe of the plain phase (the test
+ *                                  X = Bool.true on an open X, which only eager reduction evaluates; default
+ *                                  MachineEngine.DEFAULT_EAGER_PROBE; 0 = none): a probe cut at it leaves the point
+ *                                  undecided and the unit is declined if it enters eager reduction
+ *                                  (Machine.erProbeBudget)
  * machine.declines=FILE            append one line per non-ACCEPT outcome of the machine to FILE (outcome, error code,
  *                                  unit, rank, units accepted in the session before it, name, message)
  * levels=official|complete         (the launcher's key, shared with the reference engine) complete = switch
@@ -50,6 +55,7 @@ public final class MachineProvider implements EngineProvider {
     static final String K_SESSION_KIB = "machine.session-kib";
     static final String K_DECLINES = "machine.declines";
     static final String K_UNIT_TICKS = "machine.unit-ticks";
+    static final String K_EAGER_PROBE = "machine.eager-probe";
     /**
      * The launcher's {@code -X levels=official|complete}, shared with the reference engine's provider (the keys
      * of all providers are a union): {@code complete} turns {@code Op.SW_LEVELS_COMPLETE} on, {@code official}
@@ -58,7 +64,7 @@ public final class MachineProvider implements EngineProvider {
      */
     static final String K_LEVELS = "levels";
     private static final Set<String> KEYS = Set.of(K_SWITCHES, K_DEBUG, K_HOST_DEPTH, K_MEMO_EVERY, K_MEMO_BUDGET,
-            K_SESSION_KIB, K_DECLINES, K_LEVELS, K_UNIT_TICKS);
+            K_SESSION_KIB, K_DECLINES, K_LEVELS, K_UNIT_TICKS, K_EAGER_PROBE);
 
     public MachineProvider() {}
 
@@ -133,6 +139,10 @@ public final class MachineProvider implements EngineProvider {
         v = options.get(K_UNIT_TICKS);
         if (v != null) {
             s.unitTicks = number(K_UNIT_TICKS, v, 0, Long.MAX_VALUE);
+        }
+        v = options.get(K_EAGER_PROBE);
+        if (v != null) {
+            s.eagerProbe = number(K_EAGER_PROBE, v, 0, Long.MAX_VALUE);
         }
         v = options.get(K_DECLINES);
         if (v != null) {

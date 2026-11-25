@@ -178,6 +178,9 @@ final class Conv {
     static final int K_CONV2_7 = Op.K_CONV2 | 7;
     /** Step 2: the continuation of the SIGD call of c4 (B7). */
     static final int K_CONV2_8 = Op.K_CONV2 | 8;
+    /** [eager] The budgeted probe of an aware run ({@link #convBoolProbe}): inside the segment, and after it. */
+    static final int K_CONV2_9 = Op.K_CONV2 | 9;
+    static final int K_CONV2_10 = Op.K_CONV2 | 10;
     static final int K_CCLO_1 = Op.K_CCLO | 1;
 
     static final int K_CBIND_1 = Op.K_CBIND | 1;
@@ -192,6 +195,9 @@ final class Conv {
     static final int K_LAZYD_3 = Op.K_LAZYD | 3;
     static final int K_LAZYD_4 = Op.K_LAZYD | 4;
     static final int K_LAZYD_5 = Op.K_LAZYD | 5;
+    /** [eager] The budgeted fold probe of an aware run ({@link #lazydProbe}): inside the segment, and after it. */
+    static final int K_LAZYD_6 = Op.K_LAZYD | 6;
+    static final int K_LAZYD_7 = Op.K_LAZYD | 7;
 
     static final int K_LSTEP_1 = K_LSTEP | 1;
     static final int K_LSTEP_2 = K_LSTEP | 2;
@@ -651,12 +657,76 @@ final class Conv {
         if (Values.kind(m, b) == Layout.CONST && isBoolTrue(m, b)) {
             // [eager] erAware: a declaration that defers its eager comparisons runs the lifted branch as a probe
             // (k_conv3 declines if it would have answered); otherwise the point is only noted for the session
-            if ((Values.flags(m, a) & Layout.FL_OPEN) == 0 || m.ER != 0 || m.erAware) {
+            if ((Values.flags(m, a) & Layout.FL_OPEN) == 0 || m.ER != 0) {
                 int r = Reduce.whnf(m, a, d + 1);
                 return r >= SIG ? m.sig4(r, K_CONV_3, t0, s0, a, b) : k_conv3(m, t0, s0, a, b, r, d);
             }
+            if (m.erAware) {
+                return convBoolProbe(m, t0, s0, a, b, d);
+            }
             if ((m.sw & Op.SW_EAGER) != 0) {
                 m.erSens = true;
+            }
+        }
+        return convCore1(m, t0, s0, a, b, d);
+    }
+
+    /**
+     * [eager] The probe of an aware run in plain mode: {@code a} is OPEN and {@code b} is {@code Bool.true}. The
+     * official plain procedure does not evaluate {@code a} here (its hasFVar guard); eager reduction would. The
+     * machine evaluates it to learn whether the two modes agree ({@link #boolTrue}: a recorded point), under the
+     * budget {@code Machine.erProbeBudget}: {@code r = TRY(budget) call [WHNF(a) is b]}. T: as {@link #k_conv3}
+     * with {@code whnf(a) = b}. F: the plain procedure, in both modes. U (the probe was cut, finding INT7-F1):
+     * {@code Machine.erProbeCut} - the plain procedure goes on, the declaration is declined if it enters eager
+     * reduction. Without a budget (0): the unbounded evaluation, as before.
+     */
+    private static int convBoolProbe(Machine m, int t0, int s0, int a, int b, int d) {
+        long budget = m.erProbeBudget;
+        if (budget <= 0) {
+            int r = Reduce.whnf(m, a, d + 1);
+            return r >= SIG ? m.sig4(r, K_CONV_3, t0, s0, a, b) : k_conv3(m, t0, s0, a, b, r, d);
+        }
+        if (m.erCut) {
+            return convCore1(m, t0, s0, a, b, d); // a probe of this declaration was cut already
+        }
+        if (m.erProbeDepth++ == 0) {
+            m.erProbeT0 = m.ticks();
+        }
+        int ssp = m.ssp;
+        int xp = m.xp;
+        int ep = m.ep;
+        int rp = m.rp;
+        int er = m.ER;
+        long saved = m.tryEnter(budget);
+        int r = probeWhnf(m, a, b, d + 1);
+        r = r == Op.SUSP ? m.saveTry(saved, budget, ssp, xp, ep, rp, er)
+                : Frames.k_try(m, saved, budget, ssp, xp, ep, rp, er, r);
+        return r >= SIG ? m.sig4(r, K_CONV2_10, t0, s0, a, b) : k_conv2_10(m, t0, s0, a, b, r, d);
+    }
+
+    /** The segment of {@link #convBoolProbe}: T if {@code WHNF(a)} is {@code b}, else F. */
+    private static int probeWhnf(Machine m, int a, int b, int d) {
+        int r = Reduce.whnf(m, a, d + 1);
+        return r >= SIG ? m.sig1(r, K_CONV2_9, b) : k_conv2_9(m, b, r);
+    }
+
+    /** CONV2[9](b); r = WHNF(a), inside the segment of the probe. */
+    static int k_conv2_9(Machine m, int b, int r) {
+        return r == b ? T : F;
+    }
+
+    /** CONV2[10](t0, s0, a, b); r = the outcome of the probe segment (T, F or U). */
+    static int k_conv2_10(Machine m, int t0, int s0, int a, int b, int r, int d) {
+        if (m.erProbeDepth > 0 && --m.erProbeDepth == 0 && r != Layout.U) {
+            m.erProbeMax = Math.max(m.erProbeMax, m.ticks() - m.erProbeT0);
+        }
+        if (r == T) {
+            return k_conv3(m, t0, s0, a, b, b, d);
+        }
+        if (r == Layout.U) {
+            int ev = m.erProbeCut();
+            if (ev != 0) {
+                return ev;
             }
         }
         return convCore1(m, t0, s0, a, b, d);
@@ -1653,10 +1723,16 @@ final class Conv {
         // (k_lazyd2 / k_lazyd4 decline if a fold succeeds); otherwise the point is only noted for the session
         if (m.ER != 0 || !openPair(m, tn, sn) || m.erAware) {
             if ((lazyClass(m, tn) & 4) != 0) {
+                if (foldProbe(m, tn, sn)) {
+                    return lazydProbe(m, tn, sn, 1, d);
+                }
                 int v = foldCall(m, tn, d);
                 return v >= SIG ? m.sig2(v, K_LAZYD_2, tn, sn) : k_lazyd2(m, tn, sn, v, d);
             }
             if ((lazyClass(m, sn) & 4) != 0) {
+                if (foldProbe(m, tn, sn)) {
+                    return lazydProbe(m, tn, sn, 2, d);
+                }
                 int v = foldCall(m, sn, d);
                 return v >= SIG ? m.sig2(v, K_LAZYD_4, tn, sn) : k_lazyd4(m, tn, sn, v, d);
             }
@@ -1664,6 +1740,68 @@ final class Conv {
             m.erSens = true;
         }
         return lazydStep(m, tn, sn, d);
+    }
+
+    /**
+     * [eager] True if a {@code reduce_nat} of this pair is only the PROBE of an aware run in plain mode (the pair is
+     * open: the official plain procedure does not fold it, eager reduction would) and probes run under a budget
+     * ({@code Machine.erProbeBudget}; finding INT7-F1: the fold evaluates the arguments of an open term, a
+     * computation of any size that the official checker never starts in plain mode).
+     */
+    private static boolean foldProbe(Machine m, int tn, int sn) {
+        return m.ER == 0 && m.erProbeBudget > 0 && openPair(m, tn, sn);
+    }
+
+    /**
+     * [eager] The fold probe of side {@code which} (1 = tn, 2 = sn) under the budget:
+     * {@code r = TRY(budget) call [v = reduce_nat(x)]}. T: the result is in {@code Machine.erProbeV} and the step
+     * goes on as without a budget ({@link #k_lazyd2} / {@link #k_lazyd4}: a fold that succeeds is a recorded point).
+     * U (cut): {@code Machine.erProbeCut} - the plain step goes on; the declaration is declined if it enters eager
+     * reduction.
+     */
+    private static int lazydProbe(Machine m, int tn, int sn, int which, int d) {
+        if (m.erCut) {
+            return lazydStep(m, tn, sn, d); // a probe of this declaration was cut already: no further probe can change that
+        }
+        if (m.erProbeDepth++ == 0) {
+            m.erProbeT0 = m.ticks();
+        }
+        int ssp = m.ssp;
+        int xp = m.xp;
+        int ep = m.ep;
+        int rp = m.rp;
+        int er = m.ER;
+        long budget = m.erProbeBudget;
+        long saved = m.tryEnter(budget);
+        int r = probeFold(m, which == 1 ? tn : sn, d + 1);
+        r = r == Op.SUSP ? m.saveTry(saved, budget, ssp, xp, ep, rp, er)
+                : Frames.k_try(m, saved, budget, ssp, xp, ep, rp, er, r);
+        return r >= SIG ? m.sig3(r, K_LAZYD_7, tn, sn, which) : k_lazyd7(m, tn, sn, which, r, d);
+    }
+
+    /** The segment of {@link #lazydProbe}: T, with {@code reduce_nat(x)} (as {@link #foldCall} returns it) in {@code Machine.erProbeV}. */
+    private static int probeFold(Machine m, int x, int d) {
+        int v = foldCall(m, x, d);
+        return v >= SIG ? m.sig1(v, K_LAZYD_6, x) : k_lazyd6(m, x, v);
+    }
+
+    /** LAZYD[6](x); r = reduce_nat(x), inside the segment of the probe. */
+    static int k_lazyd6(Machine m, int x, int v) {
+        m.erProbeV = v;
+        return T;
+    }
+
+    /** LAZYD[7](tn, sn, which); r = the outcome of the probe segment (T or U). */
+    static int k_lazyd7(Machine m, int tn, int sn, int which, int r, int d) {
+        if (m.erProbeDepth > 0 && --m.erProbeDepth == 0 && r != Layout.U) {
+            m.erProbeMax = Math.max(m.erProbeMax, m.ticks() - m.erProbeT0);
+        }
+        if (r == Layout.U) {
+            int ev = m.erProbeCut();
+            return ev != 0 ? ev : lazydStep(m, tn, sn, d);
+        }
+        int v = m.erProbeV;
+        return which == 1 ? k_lazyd2(m, tn, sn, v, d) : k_lazyd4(m, tn, sn, v, d);
     }
 
     /**
@@ -1690,6 +1828,9 @@ final class Conv {
             return foldedT(m, tn, sn, v, d);
         }
         if ((lazyClass(m, sn) & 4) != 0) {
+            if (foldProbe(m, tn, sn)) {
+                return lazydProbe(m, tn, sn, 2, d);
+            }
             int u = foldCall(m, sn, d);
             return u >= SIG ? m.sig2(u, K_LAZYD_4, tn, sn) : k_lazyd4(m, tn, sn, u, d);
         }
@@ -2501,6 +2642,10 @@ final class Conv {
                 return convBack(m, w[p], w[p + 1], k_conv2_7(m, w[p], w[p + 1], w[p + 2], w[p + 3], r, 0));
             case K_CONV2_8:
                 return convBack(m, w[p], w[p + 1], k_conv2_8(m, w[p], w[p + 1], w[p + 2], w[p + 3], r, 0));
+            case K_CONV2_9:
+                return k_conv2_9(m, w[p], r);
+            case K_CONV2_10:
+                return convBack(m, w[p], w[p + 1], k_conv2_10(m, w[p], w[p + 1], w[p + 2], w[p + 3], r, 0));
             default:
                 return m.fault(MachineErrors.E_INTERNAL);
         }
@@ -2520,6 +2665,10 @@ final class Conv {
                 return lazydBack(m, k_lazyd4(m, w[p], w[p + 1], r, 0));
             case K_LAZYD_5:
                 return lazydBack(m, r);
+            case K_LAZYD_6:
+                return k_lazyd6(m, w[p], r);
+            case K_LAZYD_7:
+                return lazydBack(m, k_lazyd7(m, w[p], w[p + 1], w[p + 2], r, 0));
             case K_LSTEP:
                 return lstep(m, w[p], w[p + 1], 0);
             case K_LSTEP_1:
