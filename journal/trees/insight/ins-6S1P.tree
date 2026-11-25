@@ -1,0 +1,21 @@
+\title{Level ids depend on the state of the instantiation cache: a level store that is moved in place must forget what a new store would not know}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{levels}
+\tag{soundness}
+\tag{machine}
+\tag{reference-engine}
+\import{base-macros}
+
+\p{Source: [the report of the shared level base](rep-OPT-C), sections 2.3 and 3. The work replaced the private copy of the level base that a worker took at every publication by an overlay that reads the frozen base in place and is moved to the next snapshot without being made anew. Its gate was that no level id, list id or substitution id changes.}
+
+\ul{
+\li{\strong{The trap.} The level store caches the result of instantiating a level or a level list under a substitution, and an entry made of base ids only survives a reset of the overlay ([the rule of finding LV1-F1](log-XNVE) says what "base ids only" must include). Computing an instantiation creates levels on the way that the result need not contain: \code{\verb~|imax (succ (max u x)) v~} at \code{\verb~|u := w+2, v := 0~} is 0, and computing it builds \code{\verb~|max (w+2) x~} and its successor in the overlay. A hit of the cache skips them. So the ids an overlay hands out afterwards depend on whether the entry is there, and with the ids the slots of every direct-mapped cache that is keyed by them, in the level store and in the machine.}
+\li{\strong{What follows.} A change of how long such an entry lives is not a change of cost only: it changes ids. An overlay that used to be replaced by a new copy at a publication had empty caches afterwards; the overlay that is moved in place must have them too. In the prototype the stamp that marks a surviving entry is a number that changes at every move, and a unit test fails if an entry survives one.}
+\li{\strong{On real data the difference is latent.} A build that keeps the entries across a move, run side by side with the old layout (every result of every level operation of every worker compared), shows no differing id on Std, cedar and cslib: 14.8 M, 18.6 M and 96.1 M results, 121 to 304 moves per run, 8 workers, load pipelined with checking, JVM launcher. As with LV1-F1, the rule guards a case the corpora do not contain; a hostile export could.}
+\li{\strong{The method that gates such a change.} Unit tests of the store compare a script of random operations on both layouts. The stronger net is a twin in the pipeline: the level view of every worker also drives the level store of the unchanged sources, fed with a private copy of the same snapshot exactly as the old code made it, and the first differing result stops the process. Over the eight corpora, both engines, 1, 4 and 8 workers and five publication and session settings: 2.85 billion results in 44 runs, no difference.}
+}
+
+\p{\strong{Not measured:} whether entries kept across a move would save any time; [the census of instantiation](ins-258N) says that a longer memory of this cache buys almost nothing.}

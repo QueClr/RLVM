@@ -1,0 +1,23 @@
+\title{Workers that share the frozen level base instead of copying it give back what a publication cost: Mathlib 2.7 percent, 3 GiB of resident memory, every id the same}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{levels}
+\tag{driver}
+\tag{gc}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-C](rep-OPT-C). It follows up [the cost of a publication](ins-E1DU) and the proposal at the end of [the census of universe-level instantiation](ins-258N). Conditions of every time below: a run without options, machine engine with the default switch set, warm pass that reloads the file, 8 workers, load pipelined with checking; the 8 measurement cores of the aarch64 development host; base and candidate alternating inside one quiet-core window per corpus, three rounds; a cell is the mean over the rounds of the median later pass. The executable was measured twice, with the other cores of the host quiet and with them busy; the JVM launcher with them busy.}
+
+\ul{
+\li{\strong{What was copied.} At every publication each worker and the environment thread replaced their level overlay by a private copy of the newest snapshot: on Mathlib 473 copies and 4.5 GB per pass, 14.7 MB for one copy at the end of the file; on cslib 0.8 GB; on the other six corpora 2 to 210 MB.}
+\li{\strong{The layout.} The overlay of a worker now reads the frozen snapshot in place, the node arrays, the lists, the memoised forms and both hash tables, and keeps only what its session creates; a publication moves it to the next snapshot for the price of a reset. A snapshot is immutable from the return of its freeze on and is published by one volatile reference; the overlay reads the store's volatile flag before anything else of it. The loader and the snapshots are unchanged.}
+\li{\strong{What it gives in the executable.} On a quiet host Mathlib 14.54 to 14.14 s, -2.7 \% and cslib 5.30 to 5.20 s, -1.9 \%; with the other cores busy 16.16 to 15.69 s, -2.9 \% and 5.90 to 5.76 s, -2.4 \%. The other six corpora are within 0.9 \% either way in both conditions. Geometric mean of the eight: 2.041 to 2.024 s, -0.8 \% quiet, 2.252 to 2.232 s, -0.9 \% busy; largest loss Init, +0.4 \% and Std, +0.3 \%. Per Mathlib pass, in both conditions: page faults of the workers 1.5 M to 0.53 M, their kernel time 1.5 to 0.7 s, collections 33 to 17, pauses 0.27 to 0.14 s, peak resident set 7.4 to 4.3 GiB.}
+\li{\strong{On the JVM launcher}: Mathlib 13.62 to 13.04 s, -4.3 \%, cslib 4.80 to 4.68 s, -2.5 \%, geometric mean 1.820 to 1.786 s, -1.9 \%, largest loss con-leche, +0.5 \%; pauses per Mathlib pass 0.32 to 0.17 s, peak resident set 6.1 to 5.0 GiB.}
+\li{\strong{What it does not give.} The level operations themselves are no cheaper. A lookup that the base does not answer probes a second table and every array read tests a bound: 0 to 10 instructions more on the hits of the caches, 6 to 27 \% more on the slow paths, and nothing of it visible in time, because the level code is bound by memory. One base instead of eight copies in a shared cache did not shorten the level code either: its share of the samples is 9.0 \% before and 9.5 \% after on cslib (JVM launcher, one profile each). [The profile](rep-P11) had put 0.4 s of the Mathlib pass on the copies and hoped for 0.1 to 0.2 s more from the cache; the pass is 0.40 s shorter on a quiet host, and the level code's own CPU did not move.}
+\li{\strong{Cost only, by test.} The ids of every level, list and substitution are the same: both layouts side by side in the real pipeline over the eight corpora, 2.85 billion results, no difference; 177 to 182 counters of a deterministic run per corpus identical on both launchers; the machine's gate identical cell by cell. See also [what makes ids depend on the cache](ins-6S1P).}
+}
+
+\p{\strong{Not measured:} the JVM launcher on a quiet host; x86-64; the optional profile-guided build; one worker. \strong{Not done:} the loader's own copy per publication (50 copies and 0.44 GB per Mathlib pass); records instead of parallel arrays for the level nodes and the cache entries, which is what is left of the layout question.}

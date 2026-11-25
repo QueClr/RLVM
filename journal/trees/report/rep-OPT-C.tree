@@ -1,0 +1,421 @@
+\title{OPT-C: one frozen level base shared by the workers instead of a copy per worker at every publication}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{levels}
+\tag{driver}
+\tag{machine}
+\tag{reference-engine}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Optimisation package "OPT-C" of the wave after the first release, 2026-11-25 (the windows: 05:28 to 09:05 UTC). The lever is the fourth item of [the profile of the final default configuration](rep-P11), section 6.4: each publication of a pipelined load made every worker copy the tables of the universe-level store ([the insight](ins-E1DU)), and [the census of universe-level instantiation](ins-258N) had pointed at the layout of the level stores instead of another memo. This report is the design, the prototype and its verdict: a layout in which the frozen level store of a publication is read in place by every worker, a worker's overlay holds only what its session adds, and every level id, list id and substitution id stays what it was. The prototype is a set of patches against \code{rlvm-level} and the two classes of \code{rlvm-api} that make, reset and move a worker's level view; nothing was published. No Oracle GraalVM was used.}
+
+\subtree{
+\title{0. Answer}
+
+\ul{
+\li{\strong{Verdict: GO for the default configuration.} The guard of [the rule for a default](dec-YP0N) is met on the executable, with the other cores of the host busy and with them quiet, and on the JVM launcher: the geometric mean of the eight warm passes goes from 2.252 to 2.232 s, -0.9 \% (busy) and from 2.041 to 2.024 s, -0.8 \% (quiet) in the executable and from 1.820 to 1.786 s, -1.9 \% on the JVM launcher; the largest losses are Std, +0.3 \%, Init, +0.4 \% and con-leche, +0.5 \%; three interleaved rounds per corpus (section 5). Every gate of the default configuration, of the reference engine and of the strict policy passes with the counts of the release (section 4), and that the change is cost only was tested, not assumed (section 3).}
+\li{\strong{What changed.} A worker's level overlay no longer starts as a private copy of the base. \code{\verb~|LevelStore.newSharedOverlay()~} makes an overlay that reads the node arrays, the list store, the memoised forms and the two hash tables of the frozen store where the loader left them, and keeps what its session creates in small arrays of its own; \code{\verb~|rebase(snapshot)~} moves it to a later snapshot of a pipelined load in place, for the price of a reset. The snapshots themselves, which the loader freezes and publishes, are unchanged, and so is the loader.}
+\li{\strong{Why it is safe.} A frozen store is immutable from the return of \code{\verb~|freeze()~} on, it is published by one volatile reference, and a shared overlay never writes it (section 2.4). The layout changes no id: every operation of every worker was run on both layouts side by side over the eight corpora, with both engines, 1, 4 and 8 workers and several publication and session settings, 2.85 billion results, no difference (section 3.2).}
+\li{\strong{What it gives.} The executable's Mathlib pass goes from 14.54 to 14.14 s, -2.7 \% on a quiet host and from 16.16 to 15.69 s, -2.9 \% with the other cores busy, cslib from 5.30 to 5.20 s, -1.9 \% and from 5.90 to 5.76 s, -2.4 \%; the other six corpora are within 0.9 \% either way. Per Mathlib pass the workers take 0.53 M page faults instead of 1.49 M and spend 0.71 s in the kernel instead of 1.48 s, the collector runs 17 times instead of 33 and stops the workers for 0.14 s instead of 0.26 s, and the peak resident set of the process is 4.3 GiB instead of 7.4 GiB. On the JVM launcher Mathlib goes from 13.62 to 13.04 s, -4.3 \% and cslib from 4.80 to 4.68 s, -2.5 \%. rep-P11 had estimated 0.4 s of the Mathlib pass and 0.9 million page faults for the copies, and 0.5 to 0.6 s with a part of the cold-touch cost of the level code: the pass is 0.40 s shorter on a quiet host and 0.47 s with the other cores busy, and the faults are 0.96 to 0.99 million fewer.}
+\li{\strong{What it does not give.} The level operations themselves did not get cheaper: a lookup that the base does not answer probes a second table, and a level operation needs 6 to 27 \% more instructions on its slow paths (section 6). The part of the estimate of rep-P11 that rested on eight copies competing for one cache did not show.}
+}
+}
+
+\subtree{
+\title{1. What was copied}
+
+\p{A counting build of the pristine sources (the copy constructor of the level store counts its arrays; the intern paths count where a lookup ends). MB and GB in this section are powers of ten. One cold pass per corpus, JVM launcher, a run without options but \code{\verb~|--threads 8~}: machine engine with the default switch set, 8 workers, load pipelined with checking. "Loader" is the thread that reads the file: it goes on in a private copy of every snapshot it freezes. "Environment thread" and "workers" each took a private copy of the newest snapshot at their next reset.}
+
+\table{
+\tr{\th{Corpus}\th{base at the end: levels / lists}\th{one copy at the end, MB}\th{copies per pass: loader}\th{environment thread}\th{workers}\th{MB copied per pass: loader}\th{environment thread}\th{workers}}
+\tr{\td{Init}\td{763 / 3,437}\td{0.36}\td{14}\td{15}\td{59}\td{4.4}\td{4.8}\td{18.2}}
+\tr{\td{Std}\td{1,252 / 6,065}\td{0.47}\td{25}\td{26}\td{44}\td{9.8}\td{10.3}\td{17.4}}
+\tr{\td{cedar}\td{1,315 / 8,018}\td{0.51}\td{37}\td{35}\td{181}\td{15.5}\td{15.1}\td{74.6}}
+\tr{\td{reachability}\td{103 / 623}\td{0.24}\td{1}\td{2}\td{8}\td{0.2}\td{0.5}\td{1.9}}
+\tr{\td{con-leche}\td{335 / 2,048}\td{0.28}\td{21}\td{11}\td{100}\td{5.6}\td{2.9}\td{26.7}}
+\tr{\td{navier-stokes-euler}\td{4,557 / 27,253}\td{1.44}\td{47}\td{23}\td{168}\td{49.4}\td{23.8}\td{183.5}}
+\tr{\td{cslib}\td{15,514 / 74,341}\td{4.22}\td{49}\td{50}\td{278}\td{124.2}\td{128.5}\td{687.6}}
+\tr{\td{Mathlib}\td{70,610 / 184,439}\td{14.67}\td{50}\td{49}\td{424}\td{439.8}\td{452.3}\td{4,032.7}}
+}
+
+\ul{
+\li{\strong{On Mathlib the workers and the environment thread copy 4.5 GB per pass in 473 copies}: 9.1 copies and 86 MB, 21,000 pages of 4 KiB, per publication, 9.5 MB and 2,300 pages per worker and publication on average. That is the 68 MiB of new pages per publication that rep-P11 had measured from outside, by varying the number of publications. The loader's own 50 copies, 0.44 GB, are not part of this change.}
+\li{\strong{One copy at the end of Mathlib is 14.67 MB}: the eight parallel arrays of the level nodes 2.82 MB, their hash table 1.05 MB; the list store 7.30 MB (pool 3.36, the two index arrays 0.92 each, the hash table 2.10); the store of canonical forms 3.25 MB (pool 2.75); the representatives 0.11 MB; and the two direct-mapped instantiation caches, 0.13 MB, allocated new with every copy.}
+\li{\strong{Only two corpora carry a volume that can show}: Mathlib and cslib, and navier-stokes-euler a quarter of cslib's. On the other five the copies are 2 to 105 MB per pass.}
+\li{\strong{A level overlay lives much longer than a session of the machine.} On Mathlib the level overlays are reset 779 times per pass and replaced 473 times; a reset drops 1,800 levels and 3,700 lists on average, the largest overlay of the pass has 7,811 levels and 13,124 lists. (The earlier census of ins-258N had counted 34,843 resets per pass for one worker, on the machine of its day; on the release it is 779 for eight workers and the environment thread.) So the tables of an overlay stay small, a few thousand entries, and the reset stays what it was: time proportional to what the session added.}
+}
+
+\p{Where a lookup ends, same runs. "Base": the object exists in the frozen base; "session": the overlay made it earlier; "new": it is created now.}
+
+\table{
+\tr{\th{Lookup (Mathlib: count per pass)}\th{base}\th{session}\th{new}\th{range of the base share over the eight corpora}}
+\tr{\td{level node, 65.4 M}\td{93.0 \%}\td{3.4 \%}\td{3.7 \%}\td{89 to 96 \%}}
+\tr{\td{substitution pair, 31.7 M}\td{14.0 \%}\td{73.6 \%}\td{12.4 \%}\td{2 to 25 \%}}
+\tr{\td{level list computed by an instantiation, 13.1 M}\td{90.2 \%}\td{4.2 \%}\td{5.7 \%}\td{}}
+\tr{\td{any other list, 2.6 M}\td{88.0 \%}\td{4.8 \%}\td{7.2 \%}\td{89 to 93 \% for both kinds of lists together}}
+}
+
+\p{This decides the order of the two tables of the new layout (section 2.2): the base first for nodes and lists, the session first for substitution pairs.}
+}
+
+\subtree{
+\title{2. The layout}
+
+\subtree{
+\title{2.1 Two kinds of overlay, one code}
+
+\ul{
+\li{\strong{The private flat copy} (\code{\verb~|newOverlay()~}) stays: one array per field, the whole base copied. It is the only kind that can be frozen, so the snapshots of a pipelined load are still such copies, made by the loader once per publication, and the loader's code, which reads the list pool of its open store directly, is untouched.}
+\li{\strong{The shared overlay} (\code{\verb~|newSharedOverlay()~}) is what a worker gets. It holds references to the arrays of the frozen store: the node arrays (kind and flags, operands, offset base and offset, normal form, canonical form), the node hash table, the list store's pool, index, hashes and hash table, the same of the store of canonical forms, and the representatives. Its own arrays start at 1,024 entries, grow with the largest session and are kept across resets and across publications.}
+\li{\strong{One code for both.} A level id below the bound \code{split} is read from the base arrays, any other from the own arrays at index id minus \code{split}; a flat store is the case \code{split} = 0. Every array read of the level algebra goes through an accessor with this one test. The same holds for the list stores.}
+}
+}
+
+\subtree{
+\title{2.2 Lookups}
+
+\ul{
+\li{\strong{Level nodes: base table, then own table.} 93 \% of the lookups end in the base with the probe they had before; the other 7 \% probe the base to an empty slot, as before, and then the small own table.}
+\li{\strong{Lists: base first; substitution pairs: own first.} Three in four pairs are found in the session's table, which has a few thousand entries, where they used to probe the base's table of 2 MiB; the rest pay one more probe.}
+\li{\strong{The intern results are the same.} A base is hash-consed, so a structure has one id in it; "in the base, else in the session, else new" gives the same id in either order, and the id of a new object is the next free one, as before.}
+}
+}
+
+\subtree{
+\title{2.3 Ids, and a base that grows}
+
+\ul{
+\li{\strong{Base ids do not change.} The snapshots of a load are a chain: the loader freezes its open store, publishes it and goes on in a private copy, so every snapshot extends the one before with the same ids. An overlay's ids start at the bounds of the snapshot it sits on, as before.}
+\li{\strong{A worker on an older snapshot} reads that snapshot's arrays and nothing newer: the driver resets a lane before it hands it a unit beyond its snapshot, and the reset moves the level view to the newest snapshot. \code{\verb~|rebase~} empties the overlay first, then swaps the references and the bounds; ids above the old bound are reissued, exactly as they were when the overlay was replaced by a new copy. A snapshot stays alive for as long as an overlay sits on it.}
+\li{\strong{The cache stamps keep their meaning.} The level store caches instantiations; an entry made of base ids only survives a reset, and since [the repair of finding LV1-F1](log-XNVE) "base ids only" includes both lists of the substitution. That rule is unchanged. A cached entry also skips the levels its computation would have created, so whether an entry exists decides the ids that follow. A new copy had empty caches; the overlay that is moved in place must have them too. The "forever" stamp of an entry is therefore a number that changes at every \code{\verb~|rebase~}, not the constant 0. A test fails if an entry survives a rebase.}
+\li{\strong{Memos that the copy kept in its base part.} The private copy remembers, in its copy of the base's array, the normal form of a base level that \code{\verb~|freeze()~} did not compute (its closure is bounded; no real export comes near the bound). The shared overlay makes a private copy of that one array at the first such write and never writes the base. The memo of "this level's parameters are declared in that list" for base levels is a private array per overlay, the size of the base, filled lazily: 0.28 MB on Mathlib, allocated a few times per pass instead of once per publication.}
+}
+}
+
+\subtree{
+\title{2.4 Why sharing is safe}
+
+\p{The publication rule of the design, immutable once published and published by one reference, holds as follows.}
+
+\ol{
+\li{A store is built by one thread, the loader. \code{\verb~|freeze()~} does the last writes into its arrays, and its last action is the write of the volatile flag \code{frozen}.}
+\li{After that no method of the store writes an array or a field of it: every path that would create a node, a list, a memo or a cache entry tests the flag, or the read-only flag of the list stores, first. This was already the contract of a frozen store; the audit of this work went through every write in the two classes again.}
+\li{The loader publishes the snapshot through one volatile field of its level chain, after \code{\verb~|freeze()~}, and goes on in a copy that shares no array with the snapshot.}
+\li{\code{\verb~|newSharedOverlay()~} and \code{\verb~|rebase()~} read the volatile flag of the store before anything else of it. So every array element a worker reads was written before a volatile write that the worker has read: the reads are ordered after the writes whichever way the worker came by the reference.}
+\li{An overlay is confined to its thread. Its only writes "towards" the base are the copy-on-write memos of section 2.3, which go to a private copy.}
+}
+
+\p{Tests of exactly this: eight workers on shared overlays beside a publisher that makes 120 snapshots, every session also run on a private copy of the same snapshot with the same trace required, and a digest of every snapshot taken at its publication and again at the end; the invariance suite of the driver with 1, 2, 4 and 8 workers, a session cap of one byte and a publication after every unit, every 7 and every 64 units (section 4); and the shadow runs of section 3.2, which are real pipelined runs with 4 and 8 workers.}
+}
+
+\subtree{
+\title{2.5 What a publication costs now}
+
+\ul{
+\li{\strong{A worker:} a reset of its overlay, time proportional to what the session added, and a handful of reference assignments. Nothing is allocated and nothing of the base is touched.}
+\li{\strong{The loader:} what it cost before. It freezes the open store (normal and canonical forms of the levels added since the last snapshot) and copies it once to go on (\src{rlvm-load/src/main/java/rlvm/load/LevelChain.java}): 50 copies and 0.44 GB per Mathlib pass. Sharing that copy too needs a store that can be frozen in layers, and the loader's direct reads of the list pool would have to change; it was not attempted, the loader belongs to another package of this wave.}
+}
+}
+}
+
+\subtree{
+\title{3. The ids are the same}
+
+\p{The layout is meant to change cost only. Because both engines and every cache key use level ids, list ids and substitution ids, "cost only" was not assumed but tested at four levels.}
+
+\subtree{
+\title{3.1 The module's tests}
+
+\ul{
+\li{Every test of the overlay suite, the two regression tests of LV1-F1 among them, now runs twice: on the private copy and on the shared overlay (\code{\verb~|OverlayTest~}, 12 tests, and \code{\verb~|SharedOverlayTest~}, the same 12 and 7 of its own).}
+\li{\strong{Same trace.} A script of random operations over the whole public interface of the store (constructors, the official and the complete relations, lists, substitutions, instantiation, declared parameters, printing; 26 kinds of operation) is run on a private copy and on a shared overlay of the same base, and every returned value and the two id bounds are compared after every step: over resets (6 bases, 40 sessions each), along a chain of 60 snapshots with a rebase at two publications in three, on a base whose \code{\verb~|freeze()~} was cut by its bound, and for the eight workers beside a publisher. The bases contain the aliases of LV1-F1 (two-element lists whose integers are a name list and one of the first list ids an overlay hands out).}
+\li{\strong{Mutation check}, by hand: 15 single faults injected into the new code (a rebase that keeps the surviving cache entries, the forgotten memo of a base level, pairs not looked up in the base, table slots left at a reset, a rebase without the store of canonical forms, the LV1-F1 defect itself, stamps, a wrong pool for a list at the bound ..). 14 make the suite fail; one is equivalent short of a collision of the 32-bit list hash (a base list accepted on equal hash and length without comparing its content), as it would be in the old code.}
+\li{The other suites of the module (the 11,128 official answers, the 1,600 answers of the rebuild rule, the semantics, the port) pass unchanged: 68 tests, 1 skipped (the depth limit of 16.7 M nodes).}
+}
+}
+
+\subtree{
+\title{3.2 Shadow runs: both layouts side by side in the real pipeline}
+
+\p{A build for this test only: the level view of every worker also drives a twin, the level store of the pristine sources under another package name, fed with a private copy of the same snapshot exactly as the old code made it. Every call of the engines into the level view (constructors, relations, instantiation, substitution ids, list reads and interns, the union of name sets, declared parameters ..) is made on both, and the results and the two id bounds are compared after each; the first difference stops the process. JVM launcher; "compared" counts results.}
+
+\table{
+\tr{\th{Runs}\th{corpora}\th{results compared}\th{of them instantiations}\th{rebases}\th{resets}\th{differences}}
+\tr{\td{machine (a run without options), 8 workers}\td{all eight}\td{457.0 M}\td{55.1 M}\td{1,114}\td{2,783}\td{0}}
+\tr{\td{machine, 4 workers}\td{all eight}\td{457.3 M}\td{55.2 M}\td{703}\td{3,234}\td{0}}
+\tr{\td{machine, 1 worker, batch load}\td{Init, Std, cedar, reachability, con-leche}\td{47.0 M}\td{2.3 M}\td{0}\td{449}\td{0}}
+\tr{\td{machine, 1 worker, pipelined}\td{Init, Std, cedar}\td{39.2 M}\td{2.1 M}\td{84}\td{279}\td{0}}
+\tr{\td{machine, 8 workers, a publication per 4,096 units and 32 MiB whatever the size of the file}\td{Std, cedar, cslib, navier-stokes-euler}\td{180.4 M}\td{20.7 M}\td{711}\td{1,044}\td{0}}
+\tr{\td{machine, 8 workers, a publication every 64 units}\td{Init, Std, reachability}\td{21.9 M}\td{1.2 M}\td{1,391}\td{1,131}\td{0}}
+\tr{\td{machine, 8 workers, the driver's session cap at 1 MiB}\td{Init, Std, cedar, cslib}\td{138.5 M}\td{14.8 M}\td{938}\td{9,428}\td{0}}
+\tr{\td{reference engine by name, 8 workers}\td{Init, Std, cedar, reachability}\td{169.4 M}\td{27.2 M}\td{277}\td{714}\td{0}}
+\tr{\td{strict policy, 8 workers}\td{Init, Std}\td{90.8 M}\td{15.0 M}\td{138}\td{229}\td{0}}
+\tr{\td{reference engine by name, 4 workers}\td{cslib, navier-stokes-euler, con-leche}\td{1,249.5 M}\td{250.7 M}\td{160}\td{1,470}\td{0}}
+\tr{\td{\strong{all 44 runs}}\td{}\td{\strong{2,851.0 M}}\td{\strong{444.2 M}}\td{\strong{5,516}}\td{\strong{20,761}}\td{\strong{0}}}
+}
+
+\p{Every run accepted its corpus. The twin is the code the release runs; the base it reads is the snapshot the loader froze, so the comparison covers the lookups, the caches and their stamps, the memos and the reset and rebase of the new layout under the schedules of real runs. It does not cover the loader's own store, which did not change kind.}
+}
+
+\subtree{
+\title{3.3 Counters of a deterministic run}
+
+\p{One worker and a batch load make a run deterministic. Base and candidate, both launchers, \code{\verb~|-X stats-file~}: every counter the run reports that is not a time or a memory size, 177 to 182 per corpus (the machine's ticks, records, run words, pairs, calls and memo hits per judgment, resets, declines, the eager and code-block counters, the loader's and the driver's counts).}
+
+\table{
+\tr{\th{Corpus, launcher}\th{counters compared}\th{different}\th{ticks}\th{records}\th{run words}\th{pairs}\th{units of the machine}\th{declined by the machine}\th{resets of the machine}}
+\tr{\td{Init, JVM launcher}\td{177}\td{0}\td{34,490,709}\td{15,271,167}\td{70,628,736}\td{1,856,757}\td{57,938}\td{0}\td{796}}
+\tr{\td{Std, JVM launcher}\td{180}\td{0}\td{56,957,035}\td{26,050,886}\td{128,075,185}\td{3,455,031}\td{100,097}\td{2}\td{1,350}}
+\tr{\td{cedar, JVM launcher}\td{180}\td{0}\td{76,668,269}\td{36,675,335}\td{218,602,630}\td{4,543,441}\td{144,099}\td{2}\td{1,903}}
+\tr{\td{reachability, JVM launcher}\td{177}\td{0}\td{9,014,777}\td{4,807,871}\td{24,366,666}\td{46,039}\td{4,224}\td{0}\td{34}}
+\tr{\td{con-leche, JVM launcher}\td{182}\td{0}\td{70,755,128}\td{30,386,037}\td{234,890,164}\td{3,407,468}\td{36,276}\td{4}\td{1,301}}
+\tr{\td{navier-stokes-euler, JVM launcher}\td{182}\td{0}\td{144,220,381}\td{69,470,249}\td{322,216,752}\td{11,346,649}\td{124,866}\td{32}\td{3,425}}
+\tr{\td{cslib, JVM launcher}\td{182}\td{0}\td{215,956,521}\td{112,841,885}\td{460,901,102}\td{11,694,439}\td{397,615}\td{14}\td{5,881}}
+\tr{\td{Mathlib, JVM launcher}\td{182}\td{0}\td{574,100,326}\td{288,313,296}\td{1,255,939,258}\td{32,500,348}\td{714,772}\td{120}\td{14,838}}
+\tr{\td{Init, executable}\td{177}\td{0}\td{34,490,709}\td{15,271,167}\td{70,628,736}\td{1,856,757}\td{57,938}\td{0}\td{796}}
+\tr{\td{Std, executable}\td{180}\td{0}\td{56,957,035}\td{26,050,886}\td{128,075,185}\td{3,455,031}\td{100,097}\td{2}\td{1,350}}
+\tr{\td{cedar, executable}\td{180}\td{0}\td{76,668,269}\td{36,675,335}\td{218,602,630}\td{4,543,441}\td{144,099}\td{2}\td{1,903}}
+\tr{\td{reachability, executable}\td{177}\td{0}\td{9,014,777}\td{4,807,871}\td{24,366,666}\td{46,039}\td{4,224}\td{0}\td{34}}
+\tr{\td{con-leche, executable}\td{182}\td{0}\td{70,755,128}\td{30,386,037}\td{234,890,164}\td{3,407,468}\td{36,276}\td{4}\td{1,301}}
+\tr{\td{navier-stokes-euler, executable}\td{182}\td{0}\td{144,220,381}\td{69,470,249}\td{322,216,752}\td{11,346,649}\td{124,866}\td{32}\td{3,425}}
+\tr{\td{cslib, executable}\td{182}\td{0}\td{215,956,521}\td{112,841,885}\td{460,901,102}\td{11,694,439}\td{397,615}\td{14}\td{5,881}}
+\tr{\td{Mathlib, executable}\td{182}\td{0}\td{574,100,326}\td{288,313,296}\td{1,255,939,258}\td{32,500,348}\td{714,772}\td{120}\td{14,838}}
+}
+
+\p{16 runs of each distribution, no counter differs.}
+}
+
+\subtree{
+\title{3.4 The machine's gate}
+
+\p{The gate of package M8 (\code{\verb~|report.sh gate --switches default --session-mib 1~}), once from the pristine sources and once with the changed \code{rlvm-level} and \code{rlvm-api}: both PASS WITH DECLINES, the known decline of one unit of Std. Of the 505 cells of the two reports (differential against the reference engine per declaration, tier equivalence, convention equivalence with every record word compared, the debug audits, the real driver on the 230 tests and four corpora) 500 are identical, ticks and frames included; the five that differ are seconds.}
+}
+}
+
+\subtree{
+\title{4. Gates}
+
+\p{All on the private distribution of the candidate (everything compiled from a private copy of the tree; jars sha256 \code{6368fa1335cf}), through its own launchers.}
+
+\ul{
+\li{\strong{Unit suites}, every module against the changed \code{rlvm-level} and \code{rlvm-api}: \code{rlvm-level} 68 tests (1 skipped), \code{rlvm-api} 32, \code{rlvm-store} 71, \code{rlvm-load} 81, \code{rlvm-nat} 54, \code{rlvm-inductive} 91, \code{rlvm-admit} 89, \code{rlvm-ref} 148, \code{rlvm-driver} 107, \code{rlvm-main} 64, \code{rlvm-cli} 49, the fast group of \code{rlvm-machine} 420: no failure. \code{\verb~|SHostileSlowTest~}: 56 switch sets times 1,196 hostile exports, nothing unexpected under any set.}
+\li{\strong{The gate of the default configuration through the executable} (\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~}): 230 of 230 arena tests; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 15,739, declined 2,034, 2 timeouts, see below); the self-test of the differential path caught; 1,196 hostile exports: agree 1,124, 68 tolerated accepts, 0 wrong accept, 0 wrong reject, 4 declined. PASS.}
+\li{\strong{The same through the jars}: 230 of 230; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 15,739, declined 2,034, the same 2 timeouts); self-test caught; hostile: agree 1,124, 68 tolerated, 0 wrong accept, 0 wrong reject, 4 declined. PASS.}
+\li{\strong{The two timeouts} are the mutants of \code{bugs/proj-of-subst-prop} and \code{bugs/rec-of-subst-prop} that change a literal to 2^64 - 1 and 2^64: one rejected declaration each that keeps the machine busy for 20 s on a quiet core. The gates ran on the efficiency cores of a host with a load average of 30 to 45, where the limit of 60 s per mutant was passed by both distributions: taken alone at that time, the pristine executable needs 33 s and the candidate's 42 to 45 s (on quiet cores 20.5 and 21.5 s, section 7); through the jars the pristine distribution needs 59 to 105 s and the candidate 56 to 82 s. Both reject, which is the official verdict. A second run of the corpus \code{bugs} on both launchers, with the other gates of this package finished: agree 2,590, declined 102, no timeout, on the executable and through the jars. With it both gates have the counts of the release: agree 15,741, declined 2,034.}
+\li{\strong{The reference engine by name} (\code{\verb~|scripts/gate.sh --corpus all --hostile~}, which runs \code{\verb~|-X engine=reference~}, batch load, one worker, through the jars): 230 of 230; 17,775 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 15,741, declined 2,034, no timeout: the counts of the release); self-test caught; hostile: agree 1,182, 6 tolerated accepts, 0 wrong accept, 0 wrong reject, 8 declined. PASS.}
+\li{\strong{The strict policy} (the same with \code{\verb~|-X policy=strict~}, the mutants of the corpus \code{bugs}): 230 of 230; 2,692 mutants with SOUNDNESS 0 and COMPLETENESS 0 (agree 2,579, declined 113, no timeout); hostile: agree 1,177, no tolerated accept, 0 wrong accept, 0 wrong reject, 19 declined. PASS.}
+\li{\strong{The eight corpora} accepted with 8 and with 4 workers through the executable and through the JVM launcher: 32 of 32 runs.}
+\li{\strong{The invariance suite of the driver} (every file under 9 schedules: batch with 1, 2, 4 and 8 workers, a session cap of one byte, pipelined with a publication after every unit, every 7 and every 64 units, with 1, 4 and 8 workers). With the machine as primary engine: the 231 published tests, the four large exports (init-prelude, Init, Std, cedar), 12,260 mutants of the tutorial tests and 2,692 of the corpus \code{bugs}: 0 wrong, 0 differences between schedules, 0 declines that only a pipelined run has; 478 mutants declined alike in every schedule. With the reference engine: the 231 published tests and the 12,260 tutorial mutants: 0 wrong, 0 differences, 413 declined alike.}
+\li{\strong{The machine's gate} and the counters of section 3: identical.}
+}
+
+\p{The gated distribution was built before a last change of a comment; the byte code of every class of the two changed jars is the same as in a build of the final sources (the level store's class differs in its line number table only).}
+}
+
+\subtree{
+\title{5. The guard}
+
+\p{[The rule for a default](dec-YP0N): the geometric mean of the warm passes of the eight corpora goes down and no corpus is more than 3 \% slower, over at least three interleaved rounds. Warm pass that reloads the file, 8 workers, load pipelined with checking, a run without options but \code{\verb~|--threads 8 -X passes=N~}; the 8 measurement cores of the aarch64 development host; every corpus in one quiet-core window with base and candidate alternating round by round (A B, B A, A B). A cell is the mean over the rounds of the median later pass of one process, in brackets the smallest and the largest of the rounds; on a pass shorter than 0.5 s the mean of the later passes. Base and candidate are two distributions built the same way from two copies of the tree that differ by the patches only. \strong{The other cores of the host were busy during these windows} (load average 23 to 45: this package's own gates and the work of the other packages), which is the condition of the benchmark tables and not that of rep-P11: the absolute times are 10 to 13 \% above rep-P11's. Section 5.4 repeats the table of the executable with the other cores quiet.}
+
+\subtree{
+\title{5.1 The executable}
+
+\table{
+\tr{\th{Corpus (rounds x passes)}\th{before, s}\th{after, s}\th{after against before}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{Init (3 x 10)}\td{0.729 (0.725 to 0.735)}\td{0.725 (0.722 to 0.730)}\td{-0.5 \%}\td{413}\td{377}}
+\tr{\td{Std (3 x 10)}\td{1.258 (1.251 to 1.264)}\td{1.263 (1.254 to 1.280)}\td{+0.3 \%}\td{674}\td{601}}
+\tr{\td{cedar (3 x 8)}\td{1.845 (1.837 to 1.853)}\td{1.834 (1.816 to 1.862)}\td{-0.6 \%}\td{883}\td{760}}
+\tr{\td{reachability (3 x 15)}\td{0.570 (0.558 to 0.583)}\td{0.566 (0.561 to 0.574)}\td{-0.8 \%}\td{736}\td{737}}
+\tr{\td{con-leche (3 x 6)}\td{1.675 (1.659 to 1.692)}\td{1.676 (1.647 to 1.712)}\td{+0.1 \%}\td{1,357}\td{1,358}}
+\tr{\td{navier-stokes-euler (3 x 6)}\td{4.298 (4.172 to 4.361)}\td{4.285 (4.226 to 4.386)}\td{-0.3 \%}\td{1,666}\td{1,499}}
+\tr{\td{cslib (3 x 6)}\td{5.902 (5.879 to 5.940)}\td{5.762 (5.701 to 5.795)}\td{-2.4 \%}\td{2,473}\td{2,047}}
+\tr{\td{Mathlib (3 x 4)}\td{16.157 (16.075 to 16.262)}\td{15.691 (15.521 to 15.821)}\td{-2.9 \%}\td{7,549}\td{4,405}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.252}}\td{\strong{2.232}}\td{\strong{-0.9 \%}}\td{}\td{}}
+}
+
+\table{
+\tr{\th{Corpus}\th{workers: CPU s, before}\th{after}\th{workers: kernel s, before}\th{after}\th{workers: minor page faults, before}\th{after}\th{loader thread: CPU s, before}\th{after}\th{loader thread: page faults, before}\th{after}\th{pauses per pass, ms, before}\th{after}\th{collections per pass, before}\th{after}}
+\tr{\td{Init}\td{4.16}\td{4.13}\td{0.02}\td{0.02}\td{57,235}\td{55,680}\td{0.64}\td{0.64}\td{36,326}\td{36,448}\td{5}\td{5}\td{1.0}\td{1.0}}
+\tr{\td{Std}\td{7.81}\td{7.73}\td{0.08}\td{0.07}\td{86,524}\td{86,200}\td{1.12}\td{1.10}\td{69,349}\td{69,139}\td{13}\td{10}\td{2.8}\td{2.0}}
+\tr{\td{cedar}\td{11.01}\td{10.91}\td{0.11}\td{0.11}\td{118,214}\td{112,169}\td{1.69}\td{1.69}\td{105,549}\td{105,240}\td{21}\td{18}\td{4.0}\td{3.0}}
+\tr{\td{reachability}\td{1.43}\td{1.43}\td{0.16}\td{0.16}\td{200,181}\td{198,972}\td{0.05}\td{0.05}\td{1,912}\td{1,890}\td{17}\td{16}\td{2.6}\td{2.4}}
+\tr{\td{con-leche}\td{9.45}\td{9.42}\td{0.26}\td{0.26}\td{314,464}\td{312,105}\td{1.12}\td{1.12}\td{75,318}\td{74,899}\td{20}\td{19}\td{5.2}\td{5.0}}
+\tr{\td{navier-stokes-euler}\td{27.33}\td{27.30}\td{0.26}\td{0.24}\td{267,924}\td{229,527}\td{2.60}\td{2.61}\td{177,261}\td{176,097}\td{46}\td{38}\td{8.0}\td{7.0}}
+\tr{\td{cslib}\td{37.45}\td{36.88}\td{0.57}\td{0.34}\td{493,331}\td{293,734}\td{5.10}\td{5.05}\td{315,951}\td{308,627}\td{104}\td{46}\td{12.3}\td{8.0}}
+\tr{\td{Mathlib}\td{107.84}\td{105.45}\td{1.48}\td{0.71}\td{1,488,858}\td{531,869}\td{12.37}\td{12.20}\td{852,603}\td{847,894}\td{260}\td{142}\td{33.3}\td{16.9}}
+}
+
+\ul{
+\li{\strong{The guard is met}: the geometric mean goes from 2.252 to 2.232 s, -0.9 \%, and the largest loss is Std, +0.3 \%, inside the spread of its own rounds.}
+\li{\strong{The workers' page faults fall by 0.96 million per Mathlib pass}, from 1.49 M to 0.53 M, and by 0.20 M on cslib: the copies. rep-P11 had put 0.9 M of the workers' 1.5 M on them. Kernel time of the workers 1.48 to 0.71 s on Mathlib, 0.57 to 0.34 s on cslib. The loader thread is unchanged, 0.85 M faults and 12.3 s of CPU on Mathlib: it still copies once per publication.}
+\li{\strong{Half the collections}: 33 to 17 per Mathlib pass and 12 to 8 on cslib, pauses 0.26 to 0.14 s and 0.10 to 0.05 s. The copies were 4.5 GB of the garbage of a pass.}
+\li{\strong{Peak resident set}: 7.4 to 4.3 GiB on Mathlib (7,549 to 4,405 MiB), 2.4 to 2.0 GiB on cslib, 9 to 14 \% less on Init, Std, cedar and navier-stokes-euler, equal on reachability and con-leche.}
+\li{\strong{The workers' CPU outside the kernel} falls by 1.5 \% on Mathlib (106.4 to 104.7 s) and by 0.9 \% on cslib (36.9 to 36.5 s); on the other six by 0.0 to 0.9 \%. On Mathlib the workers need 2.4 s less CPU in all, which is 0.30 s of the pass by the rule of rep-P11 (a CPU second is an eighth of a second), and the pauses are 0.12 s shorter: 0.42 s of the measured 0.47 s.}
+\li{\strong{A first pair of Mathlib processes}, taken an hour earlier with less load on the other cores (one process each, later passes): 14.56 and 15.03 s before, 14.32 and 14.54 s after; workers' page faults 1.51 M and 0.54 M, kernel time 1.54 and 0.65 s, peak resident set 7,556 and 4,377 MiB.}
+}
+}
+
+\subtree{
+\title{5.2 The JVM launcher}
+
+\p{The same windows with the JVM launcher of the two distributions and the machine's heap line (\code{\verb~|-Xmx7g -Xmn1g~}).}
+
+\table{
+\tr{\th{Corpus (rounds x passes)}\th{before, s}\th{after, s}\th{after against before}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{Init (3 x 10)}\td{0.614 (0.594 to 0.634)}\td{0.608 (0.595 to 0.627)}\td{-0.9 \%}\td{840}\td{812}}
+\tr{\td{Std (3 x 10)}\td{1.043 (1.015 to 1.057)}\td{1.008 (0.995 to 1.029)}\td{-3.4 \%}\td{1,567}\td{1,438}}
+\tr{\td{cedar (3 x 8)}\td{1.497 (1.468 to 1.515)}\td{1.490 (1.481 to 1.503)}\td{-0.5 \%}\td{1,750}\td{1,762}}
+\tr{\td{reachability (3 x 15, mean)}\td{0.408 (0.392 to 0.417)}\td{0.400 (0.387 to 0.414)}\td{-1.9 \%}\td{1,575}\td{1,567}}
+\tr{\td{con-leche (3 x 6)}\td{1.307 (1.282 to 1.331)}\td{1.313 (1.273 to 1.344)}\td{+0.5 \%}\td{1,863}\td{1,886}}
+\tr{\td{navier-stokes-euler (3 x 6)}\td{3.608 (3.489 to 3.723)}\td{3.542 (3.482 to 3.588)}\td{-1.8 \%}\td{2,306}\td{2,260}}
+\tr{\td{cslib (3 x 6)}\td{4.798 (4.765 to 4.819)}\td{4.678 (4.611 to 4.719)}\td{-2.5 \%}\td{2,947}\td{2,823}}
+\tr{\td{Mathlib (3 x 4)}\td{13.618 (13.147 to 13.972)}\td{13.038 (12.682 to 13.419)}\td{-4.3 \%}\td{6,218}\td{5,147}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.820}}\td{\strong{1.786}}\td{\strong{-1.9 \%}}\td{}\td{}}
+}
+
+\table{
+\tr{\th{Corpus}\th{workers: CPU s, before}\th{after}\th{workers: kernel s, before}\th{after}\th{workers: minor page faults, before}\th{after}\th{loader thread: CPU s, before}\th{after}\th{loader thread: page faults, before}\th{after}\th{pauses per pass, ms, before}\th{after}\th{collections per pass, before}\th{after}}
+\tr{\td{Init}\td{3.31}\td{3.30}\td{0.00}\td{0.00}\td{296}\td{280}\td{0.51}\td{0.51}\td{5,237}\td{5,256}\td{0}\td{0}\td{0.0}\td{0.0}}
+\tr{\td{Std}\td{6.07}\td{5.98}\td{0.00}\td{0.00}\td{279}\td{294}\td{0.87}\td{0.86}\td{8,822}\td{8,826}\td{3}\td{0}\td{0.1}\td{0.0}}
+\tr{\td{cedar}\td{8.41}\td{8.35}\td{0.00}\td{0.00}\td{330}\td{324}\td{1.33}\td{1.30}\td{13,668}\td{13,641}\td{29}\td{32}\td{1.0}\td{1.0}}
+\tr{\td{reachability}\td{0.96}\td{0.94}\td{0.00}\td{0.00}\td{228}\td{228}\td{0.03}\td{0.03}\td{8}\td{8}\td{2}\td{2}\td{0.1}\td{0.2}}
+\tr{\td{con-leche}\td{7.19}\td{7.27}\td{0.00}\td{0.00}\td{327}\td{298}\td{0.87}\td{0.86}\td{10,562}\td{10,550}\td{31}\td{33}\td{1.2}\td{1.1}}
+\tr{\td{navier-stokes-euler}\td{22.00}\td{21.69}\td{0.00}\td{0.00}\td{292}\td{294}\td{2.02}\td{2.03}\td{23,346}\td{23,339}\td{57}\td{56}\td{2.0}\td{2.0}}
+\tr{\td{cslib}\td{29.89}\td{29.67}\td{0.00}\td{0.00}\td{311}\td{308}\td{3.73}\td{3.75}\td{37,907}\td{37,924}\td{107}\td{91}\td{4.0}\td{3.0}}
+\tr{\td{Mathlib}\td{88.69}\td{84.86}\td{0.00}\td{0.00}\td{347}\td{361}\td{9.46}\td{9.56}\td{95,452}\td{95,422}\td{324}\td{173}\td{10.0}\td{5.0}}
+}
+
+\ul{
+\li{\strong{The guard is met}: the geometric mean goes from 1.820 to 1.786 s, -1.9 \%; the largest loss is con-leche, +0.5 \%, with the three rounds of the base at 1.282, 1.307 and 1.331 s and those of the candidate at 1.321, 1.344 and 1.273 s.}
+\li{\strong{Mathlib} loses 0.58 s, more than in the executable, and with more spread: the rounds of the base are 13.15, 13.97 and 13.73 s, those of the candidate 13.01, 13.42 and 12.68 s. The JVM takes no page faults for the copies (its young generation is touched once); it saves the copying and half of the pauses, 0.32 to 0.17 s per pass. Workers' CPU 88.7 to 84.9 s, where the worker CPU of a JVM pass repeats within 2.5 \% (rep-P11). Peak resident set 6,218 to 5,147 MiB.}
+\li{\strong{Std}, -3.4 \%, is more than its copies can explain (28 MB per pass): the candidate has no collection in its nine later passes where the base has one or two of 20 ms, and the rest is the spread of a pass of one second (the medians of the rounds: 1.015, 1.057 and 1.057 s against 1.029, 0.995 and 0.999 s).}
+\li{The workers' CPU is equal or lower on every corpus but con-leche (7.19 to 7.27 s, inside the spread of the rounds: 7.04 to 7.36 s and 7.12 to 7.48 s).}
+}
+}
+
+\subtree{
+\title{5.3 Smaller pieces again? The hand-off interval on a shared base}
+
+\p{The driver publishes a large file in larger pieces, the hand-off interval times the size of the input in GiB and at most 4 times, because every publication cost every worker a copy ([the insight](ins-E1DU)): Mathlib in 52 pieces instead of 205. rep-P11 measured 15.04 to 15.17 s with 205 publications against 14.59 to 14.61 s with 52, and expected that a shared base would let the file be published in small pieces again. An experiment that changes no code: the executable with \code{\verb~|-X publish-scale=1~}, which takes the scaling away, candidate and base, against the candidate with the default interval. One window per corpus, the three variants alternating, two rounds; a cell is the mean of the two median later passes, in brackets the two.}
+
+\table{
+\tr{\th{Variant}\th{pass, s}\th{workers: CPU s}\th{workers: kernel s}\th{workers: page faults}\th{loader thread: CPU s}\th{loader thread: kernel s}\th{pauses per pass, ms}\th{peak RSS, MiB}}
+\tr{\td{Mathlib: candidate, the default interval}\td{15.05 (14.72, 15.37)}\td{100.9}\td{0.71}\td{550,141}\td{11.9}\td{1.10}\td{141}\td{4,491}}
+\tr{\td{Mathlib: candidate, \code{\verb~|-X publish-scale=1~}}\td{15.00 (14.54, 15.46)}\td{101.1}\td{0.68}\td{521,880}\td{12.3}\td{1.43}\td{200}\td{4,994}}
+\tr{\td{Mathlib: base, \code{\verb~|-X publish-scale=1~}}\td{15.99 (15.84, 16.15)}\td{104.3}\td{2.43}\td{2,515,484}\td{12.4}\td{1.46}\td{552}\td{11,500}}
+\tr{\td{cslib: candidate, the default interval}\td{5.22 (5.21, 5.22)}\td{33.7}\td{0.34}\td{291,999}\td{4.7}\td{0.44}\td{47}\td{1,991}}
+\tr{\td{cslib: candidate, \code{\verb~|-X publish-scale=1~}}\td{5.26 (5.19, 5.33)}\td{33.8}\td{0.34}\td{293,478}\td{4.8}\td{0.48}\td{59}\td{2,147}}
+\tr{\td{cslib: base, \code{\verb~|-X publish-scale=1~}}\td{5.38 (5.37, 5.38)}\td{34.1}\td{0.64}\td{567,057}\td{4.7}\td{0.47}\td{140}\td{2,637}}
+}
+
+\ul{
+\li{\strong{With the shared base the small pieces cost the workers nothing}: the candidate needs 15.00 s for Mathlib in 205 pieces and 15.05 s in 52, the same workers' CPU, page faults and kernel time; cslib 5.26 and 5.22 s. The base with 205 pieces needs 15.99 s and 11,500 MiB, with 2.5 million page faults in the workers: at that interval the shared base is worth 1.0 s of the Mathlib pass and 6.4 GiB.}
+\li{\strong{But they are no gain either.} The workers are not waiting for the loader on these corpora, so finer pieces feed them no better; and the loader, which still copies its store at every publication, pays for them: on Mathlib 1.43 s of kernel time instead of 1.10 s, pauses of 200 ms per pass instead of 141 ms, 4,994 MiB resident instead of 4,491.}
+\li{\strong{So the interval stays.} The reason it was scaled is gone, and nothing in these two windows asks for another value. Two rounds per variant; inside the Mathlib window the second round was 0.3 to 0.9 s faster than the first for every variant, the other cores had got quieter.}
+}
+}
+
+\subtree{
+\title{5.4 The executable again, with the other cores quiet}
+
+\p{After the gates of this package had ended the other cores of the host fell quiet (load average 5 to 15, of which 8 to 10 are the measurement itself), which is the condition of rep-P11 and of the arena's runner. The guard of the executable was taken again there, the same way: one window per corpus, base and candidate alternating, three rounds.}
+
+\table{
+\tr{\th{Corpus (rounds x passes)}\th{before, s}\th{after, s}\th{after against before}\th{peak RSS before, MiB}\th{after, MiB}}
+\tr{\td{Init (3 x 10)}\td{0.674 (0.672 to 0.676)}\td{0.677 (0.675 to 0.680)}\td{+0.4 \%}\td{415}\td{376}}
+\tr{\td{Std (3 x 10)}\td{1.164 (1.158 to 1.169)}\td{1.154 (1.146 to 1.161)}\td{-0.9 \%}\td{677}\td{600}}
+\tr{\td{cedar (3 x 8)}\td{1.654 (1.646 to 1.658)}\td{1.646 (1.638 to 1.652)}\td{-0.5 \%}\td{876}\td{755}}
+\tr{\td{reachability (3 x 15, mean)}\td{0.489 (0.478 to 0.496)}\td{0.487 (0.481 to 0.493)}\td{-0.3 \%}\td{739}\td{732}}
+\tr{\td{con-leche (3 x 6)}\td{1.550 (1.528 to 1.592)}\td{1.538 (1.528 to 1.544)}\td{-0.8 \%}\td{1,363}\td{1,348}}
+\tr{\td{navier-stokes-euler (3 x 6)}\td{3.974 (3.919 to 4.034)}\td{3.977 (3.873 to 4.035)}\td{+0.1 \%}\td{1,642}\td{1,924}}
+\tr{\td{cslib (3 x 6)}\td{5.305 (5.249 to 5.335)}\td{5.203 (5.195 to 5.213)}\td{-1.9 \%}\td{2,481}\td{2,046}}
+\tr{\td{Mathlib (3 x 4)}\td{14.541 (14.511 to 14.589)}\td{14.144 (14.110 to 14.190)}\td{-2.7 \%}\td{7,725}\td{4,463}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.041}}\td{\strong{2.024}}\td{\strong{-0.8 \%}}\td{}\td{}}
+}
+
+\table{
+\tr{\th{Corpus}\th{workers: CPU s, before}\th{after}\th{workers: kernel s, before}\th{after}\th{workers: minor page faults, before}\th{after}\th{loader thread: CPU s, before}\th{after}\th{loader thread: page faults, before}\th{after}\th{pauses per pass, ms, before}\th{after}\th{collections per pass, before}\th{after}}
+\tr{\td{Init}\td{3.68}\td{3.74}\td{0.01}\td{0.01}\td{49,773}\td{50,800}\td{0.60}\td{0.60}\td{36,551}\td{36,340}\td{4}\td{5}\td{1.0}\td{1.0}}
+\tr{\td{Std}\td{7.11}\td{7.09}\td{0.06}\td{0.06}\td{85,762}\td{85,362}\td{1.03}\td{1.03}\td{69,686}\td{69,623}\td{12}\td{9}\td{2.7}\td{2.0}}
+\tr{\td{cedar}\td{9.92}\td{10.03}\td{0.10}\td{0.10}\td{113,979}\td{113,207}\td{1.57}\td{1.57}\td{105,291}\td{105,677}\td{21}\td{17}\td{4.0}\td{3.0}}
+\tr{\td{reachability}\td{1.18}\td{1.19}\td{0.17}\td{0.16}\td{200,907}\td{201,235}\td{0.05}\td{0.05}\td{1,736}\td{1,729}\td{16}\td{15}\td{2.4}\td{2.4}}
+\tr{\td{con-leche}\td{8.82}\td{8.74}\td{0.26}\td{0.26}\td{313,069}\td{314,039}\td{1.06}\td{1.05}\td{74,616}\td{74,666}\td{21}\td{21}\td{5.1}\td{5.1}}
+\tr{\td{navier-stokes-euler}\td{25.24}\td{25.36}\td{0.27}\td{0.23}\td{266,444}\td{228,376}\td{2.48}\td{2.49}\td{180,817}\td{175,489}\td{50}\td{37}\td{8.0}\td{7.0}}
+\tr{\td{cslib}\td{33.77}\td{33.24}\td{0.54}\td{0.33}\td{491,908}\td{294,147}\td{4.63}\td{4.69}\td{312,526}\td{309,464}\td{107}\td{46}\td{12.5}\td{8.0}}
+\tr{\td{Mathlib}\td{96.97}\td{95.00}\td{1.52}\td{0.66}\td{1,520,747}\td{527,119}\td{11.45}\td{11.33}\td{852,334}\td{848,336}\td{273}\td{140}\td{33.9}\td{16.7}}
+}
+
+\ul{
+\li{\strong{The guard is met here too}: the geometric mean goes from 2.041 to 2.024 s, -0.8 \%; the largest loss is Init, +0.4 \%, 3 ms on a pass that is reported in steps of 10 ms (the medians of the rounds: 0.676, 0.672 and 0.674 s against 0.680, 0.676 and 0.675 s).}
+\li{\strong{Mathlib} 14.54 to 14.14 s, -2.7 \%: 0.40 s, the figure of rep-P11 for the copies. The rounds: 14.51, 14.52 and 14.59 s before, 14.19, 14.11 and 14.13 s after. A window of two rounds twenty minutes earlier, with the Mathlib windows of another package between its runs, had 14.97 and 14.59 s before and 14.62 and 14.64 s after (-1.0 \%); over the five quiet rounds the pass is 0.30 s shorter.}
+\li{\strong{cslib} 5.30 to 5.20 s, -1.9 \%; in a window of two rounds before it 5.30 to 5.21 s.}
+\li{\strong{The counts do not depend on the other cores}: page faults of the workers 1.52 M to 0.53 M per Mathlib pass, their kernel time 1.52 to 0.66 s, pauses 0.27 to 0.14 s, peak resident set 7,725 to 4,463 MiB. What depends on them is the price of the same copies: 0.47 s of the Mathlib pass with the other cores busy, 0.40 s with them quiet; 0.14 and 0.10 s on cslib.}
+\li{\strong{The six other corpora} are within 0.9 \% either way in both conditions; navier-stokes-euler, whose copies are a quarter of cslib's, shows nothing (+0.1 \% here, -0.3 \% busy). Its peak resident set of 1,924 MiB for the candidate is one round of three; the other two are 1,432 and 1,455 MiB.}
+}
+}
+}
+
+\subtree{
+\title{6. What a lookup costs on a shared base}
+
+\p{Instructions per operation, the module's benchmark (\src{bench/modules/rlvm-level/run_bench.py}, now with \code{\verb~|--overlay shared|flat~}): two JVM runs per scenario in the arena container, the difference divided by the difference of the iteration counts; GraalVM CE 25 JIT, synthetic small levels. "Flat" is the private copy with the new code, "shared" the overlay of a worker. Repeatability 0.1 to 1.5 instructions.}
+
+\table{
+\tr{\th{Operation}\th{flat}\th{shared}\th{difference}}
+\tr{\td{the loop alone}\td{15.1}\td{15.1}\td{0.0}}
+\tr{\td{\code{\verb~|isEquiv(l, l)~}, identical ids}\td{14.7}\td{14.9}\td{+0.2}}
+\tr{\td{\code{\verb~|isEquiv~}, canonical forms memoised}\td{31.5}\td{35.5}\td{+4.0}}
+\tr{\td{\code{\verb~|isEquivOfficial~}, normal forms memoised}\td{29.5}\td{36.1}\td{+6.5}}
+\tr{\td{\code{\verb~|normalize~} / \code{\verb~|canonId~}, memo hit}\td{21.0 / 20.9}\td{23.5 / 24.0}\td{+2.5 / +3.2}}
+\tr{\td{\code{\verb~|instantiate~}, identity / closed level}\td{15.0 / 21.5}\td{15.0 / 23.6}\td{0.0 / +2.1}}
+\tr{\td{\code{\verb~|instantiate~}, cache hit}\td{42.0}\td{51.9}\td{+10.0}}
+\tr{\td{\code{\verb~|instantiateList~}, cache hit}\td{36.5}\td{36.5}\td{0.0}}
+\tr{\td{\code{\verb~|undeclaredParam~}, memo hit}\td{28.6}\td{28.5}\td{-0.1}}
+\tr{\td{\code{\verb~|mkMax~} / \code{\verb~|mkIMax~}, result exists in the base}\td{121.6 / 126.4}\td{135.2 / 160.4}\td{+13.5 / +33.9}}
+\tr{\td{\code{\verb~|isGeq~} on two stored canonical forms}\td{439.3}\td{442.0}\td{+2.7}}
+\tr{\td{build a new small level (1 or 2 new nodes), reset every 16}\td{414.4}\td{451.1}\td{+36.6}}
+\tr{\td{intern a new list of 3 levels and a substitution, reset every 16}\td{428.7}\td{510.7}\td{+82.0}}
+\tr{\td{the same and two instantiations that miss the cache}\td{1,641.7}\td{2,023.9}\td{+382.2}}
+\tr{\td{build a new small level and \code{\verb~|normalize~} it}\td{1,236.1}\td{1,415.7}\td{+179.6}}
+\tr{\td{build a new small level and \code{\verb~|canonId~} of it}\td{2,315.4}\td{2,446.2}\td{+130.8}}
+}
+
+\ul{
+\li{\strong{Per array read about 4 instructions}: the test against \code{split} and the second array. The hits of the two caches, which are the common case behind the machine's own cache, cost 0 and 10 instructions more.}
+\li{\strong{The slow paths cost 6 to 27 \% more instructions}: the second table for what the base does not have, and the test on every operand.}
+\li{\strong{It does not show in time.} The level code is bound by memory, 2.26 instructions per cycle in rep-P11. In samples of the JVM launcher on cslib (8 workers, five passes, the efficiency cores of the host; one profile each) the frames of the level store, of its binding and of the machine's level cache are 9.0 \% of all samples before and 9.5 \% after. In the guard the workers' CPU outside the kernel falls by 1.5 \% on Mathlib and by 1.1 \% on cslib, which is the copies themselves; on the corpora with little to copy it is equal.}
+\li{\strong{And it is not a gain either}: one shared base instead of eight copies in one shared cache was expected to take a part of the stalled cycles of the level code. Nothing of that size is visible. What is left for the level code is the layout of the records: a level's fields in five parallel arrays, a cache entry in three. That was not prototyped.}
+}
+}
+
+\subtree{
+\title{7. What was not measured, and what was seen on the way}
+
+\ul{
+\li{\strong{The JVM launcher on a quiet host}: its guard was taken with the other cores busy only. The executable was measured in both conditions (sections 5.1 and 5.4).}
+\li{\strong{x86-64}, the architecture of the arena; \strong{the optional profile-guided build}; \strong{one worker}; the wall clock of the reference engine and of the strict policy, which were gated and not timed.}
+\li{\strong{The differential engine} of the test kit and the arena's own procedure were not run: the change computes nothing differently, and that claim rests on sections 3.1 to 3.4.}
+\li{\strong{The invariance suite} on the mutants of the corpora \code{mdata} and \code{prelude}; with the reference engine on the corpus \code{bugs} and on the four large exports.}
+\li{\strong{Level code under a profile of the executable.} The statement that the level code got no cheaper rests on one JVM profile per variant on cslib (efficiency cores, five passes each, 17,500 samples) and on the workers' CPU of the guard; no \code{perf} run of the image was made.}
+\li{\strong{Seen on the way: two executables can differ by 5 \% on a unit that does not run the changed code.} The mutant of \code{bugs/proj-of-subst-prop} that changes a literal to 2^64 - 1 is one rejected declaration that grows the machine's value table to 3.7 GiB; a JVM profile of it has no frame of the level store, and it interns 361 level nodes in all. One worker, batch load, two alternating rounds in one window: 20.75 and 20.27 s in the base executable, 21.62 and 21.44 s in the candidate's; on the JVM launcher 13.47 and 13.81 s against 13.38 and 13.10 s. The level code is not what this unit executes, so the difference is in how the image was compiled or laid out around it. None of the eight corpora shows it (navier-stokes-euler, the corpus with the largest units, is within 0.3 \% in both conditions). It was not investigated further; it is a reason to read a difference of a few percent between two images on a single unit with care.}
+\li{\strong{Seen on the way: the cache entries that survive a reset.} They must end at a rebase for the ids to be those of a new overlay (section 2.3). A build without that rule, run side by side with the old layout on Std, cedar and cslib, shows no differing id (14.8 M, 18.6 M and 96.1 M results): on these corpora the case does not occur, as the case of LV1-F1 does not.}
+\li{\strong{Not done:} the loader's own copy per publication; a record layout for the level nodes and the cache entries; any change of the hand-off interval (section 5.3 only measures it).}
+}
+}
+
+\subtree{
+\title{8. For the integrator}
+
+\ul{
+\li{\strong{Patches}, against the tree of 2026-11-25 05:28 UTC, each verified with a dry run on the main tree: the layout (\src{rlvm-level/src/main/java/rlvm/level/LevelStore.java}, \src{rlvm-level/src/main/java/rlvm/level/IntListStore.java}, \src{rlvm-api/src/main/java/rlvm/api/bind/LevelBinding.java}, \src{rlvm-api/src/main/java/rlvm/api/bind/Bindings.java}); the tests (\src{rlvm-level/src/test/java/rlvm/level/OverlayTest.java}, the new \code{\verb~|SharedOverlayTest~}, \src{rlvm-api/src/test/java/rlvm/api/bind/BindingsTest.java}); the README of the module and the benchmark's switch.}
+\li{\strong{Order of publication:} \code{rlvm-level} first, then \code{rlvm-api}. The old \code{rlvm-api} runs on the new \code{rlvm-level} unchanged (it then still copies); the new \code{rlvm-api} needs the new \code{rlvm-level}.}
+\li{\strong{Interface.} Added: \code{\verb~|LevelStore.newSharedOverlay()~}, \code{\verb~|rebase(LevelStore)~}, \code{\verb~|isSharedOverlay()~}; \code{\verb~|IntListStore.poolOf(int)~}; \code{\verb~|LevelBinding.rebaseOnto(LevelStore)~}. Unchanged in meaning: \code{\verb~|newOverlay()~}, \code{\verb~|freeze()~}, \code{\verb~|reset()~}, the ids, \code{\verb~|LevelBinding.rebase(LevelStore)~}. Narrowed: \code{\verb~|IntListStore.pool()~} is an error on a shared overlay, which has two arrays; its readers outside the module are the two set operations of the binding, which now use \code{\verb~|poolOf~}, and the loader's level chain, whose open store is a flat one and is not affected. A shared overlay cannot be frozen. The machine's two reads of the base bounds (the check of a code block) see the same values as before.}
+\li{\strong{The executable's profile} of the optional build was recorded with the old level code; it has to be recorded again with the release that takes this change.}
+\li{\strong{Trees to revise when it is adopted:} the section "Frozen base and overlays" of [the design of universe levels](design-universe-levels), the paragraph on the hand-off interval in [the driver](design-driver), and a changelog entry of the area \code{reference-engine}.}
+\li{\strong{Next in the same code}, not done here: the loader's one copy per publication; the hand-off interval, which was scaled up because of the workers' copies (section 5); records instead of parallel arrays for the level nodes and for the entries of the two instantiation caches.}
+}
+}
