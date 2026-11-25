@@ -1,0 +1,516 @@
+\title{OPT-I: the budget of the eager probes, and declarations that repeat an earlier one}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{driver}
+\tag{loader}
+\tag{performance}
+\tag{soundness}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Optimisation package "OPT-I" of the second wave after the first release, 2026-11-25 (12:11 to 19:05 UTC). It takes up two of the proposals of [the comparison of RLVM with gruszka unit by unit](rep-OPT-E), sections 5.1, 4.3 and 6: the tick budget of the probes of [eager reduction on the machine](design-eager-reduction), and the declarations of an export that repeat an earlier declaration word for word. Both were treated as separate changes with separate evidence: a private copy of the tracked sources per change, built with \src{scripts/build.sh} as a development distribution with the executable, against a pristine twin of the main tree of 12:11 UTC, which is the merged tree of [the integration of the first wave](rep-INT8). Nothing was published; the changes are patches. No Oracle GraalVM was used. The official checker (leanchecker of Lean v4.36.0) ran only inside the project's Docker image.}
+
+\subtree{
+\title{0. Answer}
+
+\ul{
+\li{\strong{Change 1, the default budget of an eager probe from 2^22 to 2^17 ticks: GO.} The sizes of all probes of the eight corpora fall into three groups (below 1,600 ticks; 34,096 to 63,654; 458,881 and more), the same with one worker, with 8 workers and with sessions of one declaration; 2^17 lies in the upper gap, 2.06 times above the largest probe that completes and 3.5 times below the smallest it cuts. It changes exactly five units: four of \code{Batteries.Data.Char.Basic} on cslib and on Mathlib go from accepted by the machine to declined by it and decided by the reference engine in 15,760 steps, and con-leche's one cut probe is cut earlier; -7.85 M ticks on cslib (3.64 \%) and Mathlib (1.37 \%), -4.06 M on con-leche (5.74 \%); every counter and every unit of the other five corpora, and every other unit of these three, is identical. Every gate passes with the counts of the base. The guard holds on the executable on a calm host: geometric mean of the eight warm passes 1.855 to 1.830 s, -1.4 \%, no corpus slower, cslib -3.8 \%, con-leche -3.2 \%, Mathlib -1.8 \%; on the JVM launcher it is flat (1.558 and 1.557 s, largest loss +1.1 \%). Peak memory falls by 360 to 520 MiB on the three corpora (sections 2.2 to 2.5).}
+\li{\strong{Change 2, a declaration that repeats an accepted one word for word is admitted and not checked again: GO, with one thing the maintainer has to accept.} 5.0 to 12.4 \% of the units of the eight corpora are such repeats (59,900 of Mathlib's 721,845) and carry 1.3 to 3.7 \% of the machine's ticks. The loader marks them by the identity of their type and value records, the driver skips the engine when the original is ACCEPTED, the admission of the repeat still runs, the reference engine as primary engine and so the strict policy never skip. The official checker gives a repeat the verdict of its original on 1,193 of 1,193 hostile files made for the question; the reference engine accepts every skipped unit of the eight corpora in a differential run; every gate passes with the counts of the base; with nothing kept between declarations the ticks of the skipped units disappear and nothing else changes. The guard holds on the executable on a calm host: geometric mean 1.855 to 1.829 s, -1.4 \%, every corpus faster (Mathlib 13.17 to 12.97 s); JVM launcher -0.7 \%, largest loss +1.7 \%; the arena's instruction count on Mathlib 1,462.1 to 1,449.6 G (sections 3.5 to 3.8).}
+\li{\strong{The one thing.} For the machine the second check does not always say what the first said: one hostile row of kind T is accepted by the default configuration through its tabling of shared terms, and the copy of the same two records, checked, is rejected. The base therefore rejects that row with a repeat appended, at the repeat, which is the official verdict; with the skip it is a tolerated accept. No underivable statement is accepted, on this file or by the skip in general: the statement of a repeat is the statement of its original. It is the only verdict that differs on 1,648 hostile files, and it made one rule necessary so that no status depends on the schedule (sections 3.4 and 3.5).}
+\li{\strong{The level fix.} All of this was built and gated before the repair of the level store's instantiation caches; the single-run gates and the counters were repeated through the jars of private builds that carry the repair, with the same results (section 1.1).}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{Builds.} Three development distributions from three private copies of the same sources: the base, the base with change 1, the base with change 2. Each is the executable (GraalVM Community Edition native image, \code{-O3}, serial collector, the inline lists of the machine) and the JVM launcher with the jars. The default configuration throughout: the machine as primary engine with its default switch set, policy practical, a run without any \code{-X} option unless a row names one.}
+\li{\strong{Counts} are from one worker in file order with batch loading (\code{\verb~|--threads 1 --stats -X stats-file=F -X unit-trace~}), where every counter of the machine is deterministic; the unit trace gives the ticks and the outcome of the warm attempt of every checked unit. "Sessions of one declaration" is \code{\verb~|-X machine.switches=default,-warm~}. Count runs were made off the measurement cores; they are not timings.}
+\li{\strong{Timings} are warm passes that reload the file with pipelined loading, 8 workers, \code{\verb~|--threads 8 --stats -X passes=N~} with N = 10 on Init and Std, 8 on cedar, 15 on reachability, 6 on con-leche, navier-stokes-euler and cslib, 4 on Mathlib. The three builds ran interleaved round by round inside \src{bench/quiet.py} windows on the 8 measurement cores of the aarch64 development host, one window per launcher and set of corpora; a cell is the mean over the rounds of the median later pass of a process, and for passes under 0.5 s the mean over the rounds of the mean later pass, as [the rule for a default](dec-YP0N) says. The JVM launcher ran with its heap line for the machine, \code{\verb~|-Xmx7g -Xmn1g~}. Until about 17:15 UTC four other packages built, tested and counted on the other twelve cores (load average 45 to 95), and the windows of that time do not resolve 3 \%; from 17:51 UTC the other cores were calm (load average 4 to 10 beside the window), and the guard is from those windows: 6 rounds on the five short corpora, 3 on the three large ones, 18 on reachability on the JVM launcher.}
+\li{\strong{Gates} ran through the launchers of the private distributions with \src{scripts/gate.sh}; the suites of the changed modules ran in the private copies.}
+}
+}
+
+\subtree{
+\title{1.1 The level fix}
+
+\p{While the package ran, a defect of the base was found and repaired: an instantiation cache of the level store could outlive a reset ([the report of that investigation](rep-INV-1)). It is older than both changes, and base and candidates of this report have the same level store, so every comparison here is between like and like. Everything in sections 2 and 3 was built and run \em{without} the fix. Then the three private copies were given the two patches of the fix as posted on 2026-11-25 15:36 UTC (the base so built has byte-identical jars to the build of the investigation, and the two patched source files are those of the main tree after the fix was published), built as jars with the JVM launcher, and the single-run gates and the counters were repeated on them:}
+
+\table{
+\tr{\th{On the builds with the level fix, through the jars}\th{Change 1}\th{Change 2}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile~}}\td{230 of 230; 17,775 mutants SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034, the same 2 at the limit; hostile 1,124 agree, 68 tolerated, 0 wrong accept, 0 wrong reject, 4 declined}\td{the same counts}}
+\tr{\td{the two mutants at the limit, alone}\td{rejected}\td{rejected}}
+\tr{\td{the 1,648 hostile files with repeats}\td{-}\td{1,570 agree, 73 tolerated, 0 wrong accept, 0 wrong reject, 5 declined; with \code{\verb~|repeats=check~} 1,571 and 72}}
+\tr{\td{the eight corpora with 8 and 4 workers, JVM launcher}\td{16 of 16 accept}\td{16 of 16 accept}}
+\tr{\td{one worker, every count and every unit against the base with the fix}\td{the differences of section 2.3 and no other: 1, 4 and 4 units on con-leche, cslib and Mathlib}\td{with \code{\verb~|repeats=check~} identical on all eight corpora; with the skip the ticks of section 3.7}}
+}
+
+\p{The base with the fix has the counters of the base without it on all eight corpora with one worker (ticks, records, declines, every unit), so the tables of sections 2.3 and 3.7 stand for both. \strong{Not repeated with the fix:} the executables (not rebuilt), the suites of the modules, the invariance suite, the differential runs, the arena's procedure, and the timings, which are comparisons between builds with the same level store.}
+}
+
+\subtree{
+\title{2. Change 1: the default budget of the eager probes, 2^22 to 2^17 ticks}
+
+\subtree{
+\title{2.1 What a probe is, and what the budget does}
+
+\p{With the switch \code{eager} the plain phase of a declaration that may defer eager comparisons runs, at the two points where the official kernel answers differently under eager reduction, what the eager branch would do, to learn whether the two modes agree there ([eager reduction on the machine](design-eager-reduction)). The official plain procedure never starts that evaluation, so the work of a probe is work the reference engine does not have. A probe is a speculative segment under a tick budget, \code{\verb~|-X machine.eager-probe=N~} ([the changelog entry](log-P6FV)): a probe that is cut leaves its point undecided, no further probe is started in the declaration, and the declaration is declined when it enters eager reduction, so that the reference engine decides it. The budget was 2^22 ticks, the largest probe that completes on the eight corpora with a factor of 1.5 to spare, "so that the machine declines nothing it decides". The comparison with gruszka showed what that costs: four proofs of \code{Batteries.Data.Char.Basic} spend 0.98 to 3.2 M ticks each in probes that complete, where the reference engine decides the four in 15,760 steps.}
+
+\p{The change is one constant, \code{MachineEngine.DEFAULT_EAGER_PROBE}, and the test that pins it. It is cost only in the verdict: a unit whose probe is cut takes the path the switch already has, and the engine that follows the official order decides it. It is not cost only in the counters: such a unit becomes a decline of the machine.}
+}
+
+\subtree{
+\title{2.2 The sizes of the probes}
+
+\p{A private build of the machine printed every probe of 64 ticks and more with its own ticks (the ticks its speculative segment used; the statistic \code{machine.eager.probeMaxTicks} sees only outermost probes that complete, and misses a probe inside a declaration that was restarted). One worker in file order, budget 2^22:}
+
+\table{
+\tr{\th{Corpus}\th{probes of 64 ticks and more}\th{of them below 4,096 ticks: largest}\th{34,096 to 63,654 ticks}\th{458,881 ticks and more}\th{cut at 2^22}}
+\tr{\td{Init}\td{79}\td{75: 248}\td{4}\td{0}\td{0}}
+\tr{\td{Std}\td{261}\td{257: 318}\td{4}\td{0}\td{0}}
+\tr{\td{cedar}\td{463}\td{459: 370}\td{4}\td{0}\td{0}}
+\tr{\td{reachability}\td{3}\td{3: 102}\td{0}\td{0}\td{0}}
+\tr{\td{con-leche}\td{54}\td{53: 193}\td{0}\td{0}\td{1}}
+\tr{\td{navier-stokes-euler}\td{72}\td{72: 396}\td{0}\td{0}\td{0}}
+\tr{\td{cslib}\td{951}\td{941: 812}\td{4}\td{6}\td{0}}
+\tr{\td{Mathlib}\td{2,039}\td{2,027: 1,593}\td{6}\td{6}\td{0}}
+}
+
+\ul{
+\li{\strong{Three groups, with two gaps.} Below 1,600 ticks: every probe but thirteen. Between 34,096 and 63,654 ticks: six probes in six units, four of \code{Init.Data.Char.Ordinal} (\code{\verb~|Char.ofOrdinal._proof_5~} 34,110, \code{\verb~|Char.ordinal_ofOrdinal._proof_1_1~} 34,120, \code{\verb~|Char.succ?_eq._proof_1_10~} 62,850, \code{\verb~|Char.succ?_eq._proof_1_9~} 63,654), which every corpus built on Init contains, and two of \code{Batteries.Data.Fin.Coding} on Mathlib (34,096 and 34,106). At 458,881 ticks and more: six probes in the four units of \code{Batteries.Data.Char.Basic} on cslib and Mathlib (\code{\verb~|Char.all._proof_1~} 974,109; \code{\verb~|Char.any._proof_1~} 974,142; \code{\verb~|Char.of_any_eq_false_aux._proof_1_15~} 2,752,577 and then 458,881; \code{\verb~|._proof_1_18~} 2,752,589 and then 458,891), and the probe of con-leche's \code{ConLeche.lpOfData_pack} that never completes (finding INT7-F1).}
+\li{\strong{The sizes do not depend on the schedule.} With 8 workers (Init, Std, cedar, reachability, con-leche, navier-stokes-euler) and with sessions of one declaration (the same and cslib) the six probes of the middle group have exactly the ticks above, and the large ones differ by at most 22 ticks. A probe evaluates in a segment of its own and takes next to nothing from the session.}
+\li{\strong{The choice: 2^17 = 131,072 ticks.} Every budget between 63,655 and 458,880 ticks cuts the same seven probes and completes the same others, in every schedule measured. The budget costs its own ticks once per unit that is cut, so the three candidates 2^16, 2^17 and 2^18 differ by 0.26 M and 0.52 M ticks on cslib and on Mathlib (0.13 and 0.25 \% of cslib's ticks) and by 0.07 and 0.13 M on con-leche, which no timing resolves (section 2.4). They differ in their margin: 2^16 = 65,536 is 3.0 \% above the largest probe that completes, so a change of the machine that moves a tick count by a thirtieth would send four units of Init, in every corpus, to the reference engine; 2^18 is 4.1 times above it and 1.75 times below the smallest probe it has to cut. \strong{2^17 is 2.06 times above the largest probe that is worth completing (63,654) and 3.5 times below the smallest that is not (458,881)}, close to the middle of the gap, which is at 170,900 ticks.}
+\li{The lower gap, between 1,600 and 34,096 ticks, was not examined: a budget there would also hand the six units of the middle group to the reference engine. The count of [the comparison with gruszka](rep-OPT-E) at 2^12 says -0.3 to -0.6 \% of the machine's ticks on Init, Std and cedar for 41,651 steps of the reference engine; whether that is a gain in time is not known.}
+}
+}
+
+\subtree{
+\title{2.3 The counters: the units that change, and that nothing else does}
+
+\p{One worker, file order, the default configuration (warm sessions), the base against the build with the budget of 2^17. Compared: every count of the statistics of the machine, the reference engine, the driver and the loader (184 to 189 keys per corpus; times, bytes and the allocator's counters left out), and the unit traces, unit by unit.}
+
+\table{
+\tr{\th{Corpus}\th{machine ticks, base}\th{2^17}\th{difference}\th{units whose ticks or outcome differ}\th{machine declines (attempts)}\th{units decided by the reference engine, its steps}}
+\tr{\td{Init}\td{34,490,709}\td{34,490,709}\td{none}\td{0}\td{0, the same}\td{0, 57,877 steps, the same}}
+\tr{\td{Std}\td{56,957,035}\td{56,957,035}\td{none}\td{0}\td{2, the same}\td{1, 114,510 steps, the same}}
+\tr{\td{cedar}\td{76,668,269}\td{76,668,269}\td{none}\td{0}\td{2, the same}\td{1, 264,552 steps, the same}}
+\tr{\td{reachability}\td{9,014,777}\td{9,014,777}\td{none}\td{0}\td{0, the same}\td{0, 15,355 steps, the same}}
+\tr{\td{con-leche}\td{70,755,128}\td{66,691,896}\td{-4,063,232 (-5.74 \%)}\td{1}\td{4, the same}\td{2, 296,893 steps, the same}}
+\tr{\td{navier-stokes-euler}\td{144,220,381}\td{144,220,381}\td{none}\td{0}\td{32, the same}\td{16, 8,265,551 steps, the same}}
+\tr{\td{cslib}\td{215,956,521}\td{208,105,930}\td{-7,850,591 (-3.64 \%)}\td{4}\td{14, 22}\td{7, 822,090 steps; 11, 837,850 steps}}
+\tr{\td{Mathlib}\td{574,100,326}\td{566,249,736}\td{-7,850,590 (-1.37 \%)}\td{4}\td{120, 128}\td{60, 5,277,996 steps; 64, 5,293,756 steps}}
+}
+
+\table{
+\tr{\th{Unit (cslib / Mathlib)}\th{ticks and outcome, base}\th{2^17}}
+\tr{\td{\code{\verb~|Batteries.Data.Char.Basic: Char.all._proof_1~} (96,222 / 321,319)}\td{980,211 / 980,179, accept}\td{136,766 / 136,734, decline}}
+\tr{\td{\code{\verb~|Char.any._proof_1~} (219,779 / 362,538)}\td{982,310 / 982,260, accept}\td{140,768 / 140,718, decline}}
+\tr{\td{\code{\verb~|Char.of_any_eq_false_aux._proof_1_15~} (219,799 / 362,559)}\td{3,212,971 / 3,212,970, accept}\td{131,472 / 131,472, decline}}
+\tr{\td{\code{\verb~|Char.of_any_eq_false_aux._proof_1_18~} (219,801 / 362,561)}\td{3,218,191 / 3,218,190, accept}\td{134,086 / 134,085, decline}}
+\tr{\td{con-leche: \code{ConLeche.lpOfData_pack} (13,027)}\td{4,196,461, decline}\td{133,229, decline}}
+}
+
+\ul{
+\li{\strong{Init, Std, cedar, reachability, navier-stokes-euler: nothing changes.} Every count is identical; the one key that differs is the setting itself, \code{machine.eager.probeBudget}; no unit differs in ticks or outcome.}
+\li{\strong{cslib and Mathlib: exactly the four units of the table.} They go from accepted by the machine to declined by it and decided by the reference engine: the machine's accepted units fall by 4, its declines rise by 8 (the warm attempt and the driver's cold retry, which is answered at once), \code{machine.eager.probeCuts} and \code{machine.eager.declined.probe} go from 0 to 4, \code{machine.eager.kept} falls by 4, the reference engine decides 4 more units in 15,760 more steps. The four units take 8.39 M ticks in the base and 0.54 M with the budget: -7.85 M ticks, 3.64 \% of cslib's and 1.37 \% of Mathlib's. The ticks and the outcome of each of the other 397,604 and 714,708 units of the trace are identical, although the sessions are warm: a session is forgotten after such a unit either way. The other counters that differ (calls, records, run words, memo hits, frames) are those of the work inside the four units.}
+\li{\strong{con-leche: one unit}, the one that was cut and declined before: its probe is cut at 2^17 instead of 2^22, -4,063,232 ticks (5.74 \% of the corpus's), the same declines, the same units for the reference engine.}
+}
+}
+
+\subtree{
+\title{2.4 Timing}
+
+\p{The windows measured the base and both changes together, three builds interleaved round by round; the columns of change 2 are read in section 3.8. Two sets of windows exist. The first (16:09 to 17:11 UTC, three rounds per corpus) ran while the other twelve cores were fully loaded, and it does not resolve the guard: cells of corpora on which change 1 executes the identical ticks differ from the base by -4.7 to +5.5 \%. Its tables are at the end of this section for the record. The second set (17:51 to 19:04 UTC) ran after the other packages had finished, with a load average of 6 to 10 beside the window; it is the guard. Every cell: the rule's statistic in seconds, the number of rounds with their range and median, the process CPU of the pass in seconds, the loader thread's time, the peak resident set.}
+
+\table{
+\tr{\th{The executable, calm host}\th{base}\th{change 1: budget 2^17}\th{change 2: repeats skipped}}
+\tr{\td{Init (median)}\td{0.609; 6 rounds 0.606 to 0.612, median 0.609; CPU 4.4; loader 0.50; 381 MiB}\td{0.609 (-0.1 \%); 6 rounds 0.603 to 0.615, median 0.609; CPU 4.4 (+0.0 \%); loader 0.50; 383 MiB}\td{0.601 (-1.3 \%); 6 rounds 0.597 to 0.607, median 0.600; CPU 4.3 (-2.3 \%); loader 0.51; 388 MiB}}
+\tr{\td{Std (median)}\td{1.089; 6 rounds 1.061 to 1.116, median 1.095; CPU 8.2; loader 0.92; 604 MiB}\td{1.076 (-1.2 \%); 6 rounds 1.054 to 1.101, median 1.075; CPU 8.0 (-1.3 \%); loader 0.91; 610 MiB}\td{1.070 (-1.8 \%); 6 rounds 1.033 to 1.104, median 1.073; CPU 8.0 (-2.2 \%); loader 0.94; 605 MiB}}
+\tr{\td{cedar (median)}\td{1.484; 6 rounds 1.465 to 1.515, median 1.480; CPU 11.2; loader 1.37; 788 MiB}\td{1.480 (-0.3 \%); 6 rounds 1.465 to 1.489, median 1.482; CPU 11.2 (+0.0 \%); loader 1.38; 776 MiB}\td{1.458 (-1.8 \%); 6 rounds 1.444 to 1.475, median 1.456; CPU 10.9 (-2.3 \%); loader 1.38; 776 MiB}}
+\tr{\td{reachability (mean)}\td{0.459; 6 rounds 0.444 to 0.485, median 0.456; CPU 1.2; loader 0.03; 739 MiB}\td{0.459 (-0.1 \%); 6 rounds 0.453 to 0.467, median 0.458; CPU 1.2 (+0.0 \%); loader 0.03; 737 MiB}\td{0.454 (-1.1 \%); 6 rounds 0.441 to 0.463, median 0.456; CPU 1.2 (-0.7 \%); loader 0.03; 737 MiB}}
+\tr{\td{con-leche (median)}\td{1.414; 6 rounds 1.382 to 1.455, median 1.406; CPU 9.4; loader 0.93; 1,358 MiB}\td{1.369 (-3.2 \%); 6 rounds 1.332 to 1.393, median 1.375; CPU 8.8 (-6.3 \%); loader 0.90; 927 MiB}\td{1.389 (-1.8 \%); 6 rounds 1.353 to 1.427, median 1.391; CPU 9.2 (-2.2 \%); loader 0.92; 1,366 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.490; 3 rounds 3.461 to 3.536, median 3.474; CPU 26.7; loader 2.29; 1,509 MiB}\td{3.484 (-0.2 \%); 3 rounds 3.461 to 3.507, median 3.483; CPU 26.7 (+0.0 \%); loader 2.48; 1,552 MiB}\td{3.454 (-1.0 \%); 3 rounds 3.432 to 3.475, median 3.456; CPU 26.4 (-1.1 \%); loader 2.28; 1,525 MiB}}
+\tr{\td{cslib (median)}\td{4.771; 3 rounds 4.758 to 4.785, median 4.771; CPU 36.3; loader 4.21; 2,127 MiB}\td{4.589 (-3.8 \%); 3 rounds 4.579 to 4.603, median 4.585; CPU 35.2 (-3.2 \%); loader 4.11; 1,610 MiB}\td{4.736 (-0.7 \%); 3 rounds 4.725 to 4.753, median 4.731; CPU 35.9 (-1.1 \%); loader 4.31; 2,069 MiB}}
+\tr{\td{Mathlib (median)}\td{13.172; 3 rounds 13.044 to 13.358, median 13.115; CPU 101.5; loader 11.31; 4,384 MiB}\td{12.937 (-1.8 \%); 3 rounds 12.845 to 13.054, median 12.911; CPU 100.4 (-1.2 \%); loader 11.12; 4,026 MiB}\td{12.967 (-1.6 \%); 3 rounds 12.895 to 13.012, median 12.993; CPU 100.3 (-1.2 \%); loader 11.20; 4,490 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.855 (8 corpora)}}\td{\strong{1.830 against 1.855 (-1.4 \%, 8 corpora); largest loss -0.1 \% (Init), largest gain -3.8 \% (cslib); CPU of a pass -1.5 \%}}\td{\strong{1.829 against 1.855 (-1.4 \%, 8 corpora); largest loss -0.7 \% (cslib), largest gain -1.8 \% (con-leche); CPU of a pass -1.6 \%}}}
+}
+
+\table{
+\tr{\th{The JVM launcher, calm host}\th{base}\th{change 1: budget 2^17}\th{change 2: repeats skipped}}
+\tr{\td{Init (median)}\td{0.551; 6 rounds 0.540 to 0.568, median 0.545; CPU 4.0; loader 0.44; 830 MiB}\td{0.543 (-1.4 \%); 6 rounds 0.533 to 0.555, median 0.542; CPU 4.0 (+0.3 \%); loader 0.44; 838 MiB}\td{0.533 (-3.2 \%); 6 rounds 0.522 to 0.549, median 0.531; CPU 3.9 (-2.8 \%); loader 0.44; 835 MiB}}
+\tr{\td{Std (median)}\td{0.903; 6 rounds 0.880 to 0.916, median 0.904; CPU 6.8; loader 0.76; 1,456 MiB}\td{0.905 (+0.2 \%); 6 rounds 0.878 to 0.921, median 0.909; CPU 6.8 (-0.2 \%); loader 0.77; 1,462 MiB}\td{0.898 (-0.6 \%); 6 rounds 0.875 to 0.916, median 0.899; CPU 6.7 (-1.5 \%); loader 0.78; 1,446 MiB}}
+\tr{\td{cedar (median)}\td{1.286; 6 rounds 1.266 to 1.316, median 1.282; CPU 9.5; loader 1.19; 1,753 MiB}\td{1.286 (+0.0 \%); 6 rounds 1.269 to 1.306, median 1.282; CPU 9.5 (-0.4 \%); loader 1.17; 1,758 MiB}\td{1.276 (-0.8 \%); 6 rounds 1.237 to 1.321, median 1.272; CPU 9.4 (-1.8 \%); loader 1.18; 1,761 MiB}}
+\tr{\td{reachability (mean)}\td{0.340; 18 rounds 0.321 to 0.352, median 0.343; CPU 1.1; loader 0.02; 1,603 MiB}\td{0.342 (+0.5 \%); 18 rounds 0.323 to 0.377, median 0.341; CPU 1.1 (-0.7 \%); loader 0.02; 1,581 MiB}\td{0.341 (+0.1 \%); 18 rounds 0.314 to 0.376, median 0.340; CPU 1.1 (-0.4 \%); loader 0.02; 1,595 MiB}}
+\tr{\td{con-leche (median)}\td{1.177; 6 rounds 1.153 to 1.204, median 1.177; CPU 8.0; loader 0.77; 1,892 MiB}\td{1.190 (+1.1 \%); 6 rounds 1.172 to 1.224, median 1.185; CPU 7.7 (-2.9 \%); loader 0.77; 1,814 MiB}\td{1.197 (+1.7 \%); 6 rounds 1.160 to 1.220, median 1.206; CPU 8.1 (+1.3 \%); loader 0.79; 1,901 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.069; 3 rounds 3.046 to 3.104, median 3.058; CPU 23.1; loader 1.99; 2,291 MiB}\td{3.076 (+0.2 \%); 3 rounds 3.041 to 3.108, median 3.080; CPU 23.4 (+1.3 \%); loader 1.95; 2,331 MiB}\td{3.049 (-0.7 \%); 3 rounds 3.006 to 3.084, median 3.056; CPU 23.2 (+0.1 \%); loader 2.18; 2,316 MiB}}
+\tr{\td{cslib (median)}\td{3.983; 3 rounds 3.969 to 4.000, median 3.981; CPU 30.1; loader 3.50; 2,847 MiB}\td{3.950 (-0.8 \%); 3 rounds 3.868 to 4.027, median 3.954; CPU 30.1 (-0.1 \%); loader 3.39; 2,444 MiB}\td{3.972 (-0.3 \%); 3 rounds 3.920 to 4.041, median 3.954; CPU 29.8 (-0.9 \%); loader 3.51; 2,830 MiB}}
+\tr{\td{Mathlib (median)}\td{11.065; 3 rounds 10.840 to 11.364, median 10.990; CPU 85.5; loader 9.32; 5,094 MiB}\td{11.066 (+0.0 \%); 3 rounds 10.797 to 11.468, median 10.933; CPU 85.6 (+0.1 \%); loader 9.15; 4,808 MiB}\td{10.911 (-1.4 \%); 3 rounds 10.879 to 10.928, median 10.927; CPU 83.5 (-2.4 \%); loader 9.53; 5,145 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.558 (8 corpora)}}\td{\strong{1.557 against 1.558 (-0.0 \%, 8 corpora); largest loss +1.1 \% (con-leche), largest gain -1.4 \% (Init); CPU of a pass -0.3 \%}}\td{\strong{1.547 against 1.558 (-0.7 \%, 8 corpora); largest loss +1.7 \% (con-leche), largest gain -3.2 \% (Init); CPU of a pass -1.1 \%}}}
+}
+
+\ul{
+\li{\strong{The executable: the guard holds.} The geometric mean of the eight warm passes goes from 1.855 to 1.830 s, -1.4 \%, and no corpus is slower. Where a probe is cut: cslib 4.771 to 4.589 s, -3.8 \%, every round below every round of the base; con-leche 1.414 to 1.369 s, -3.2 \%; Mathlib 13.172 to 12.937 s, -1.8 \%, in each round below the base's round. On the five corpora where the change executes the same ticks the cells are within -1.2 and -0.1 \% of the base, which is the scatter of these windows. The process CPU of a pass falls by 6.3 \% on con-leche, 3.2 \% on cslib and 1.2 \% on Mathlib and is within 1.3 \% of the base's on the others; over the eight corpora -1.5 \%.}
+\li{\strong{The JVM launcher: no regression, and no gain.} Geometric mean 1.558 and 1.557 s; the largest loss is con-leche, +1.1 \% (with 2.9 \% less CPU), the largest gain Init, -1.4 \%, a corpus on which nothing changes. cslib -0.8 \%, Mathlib 0.0 \%. On the JVM the four units cost about half of what they cost in the executable to begin with (0.68 against 1.33 s on cslib in the unit traces of [the profile](rep-P11)), and a JVM process differs from the next by more than that: two samples of the base on reachability, twelve rounds each in one window, differ by 1.1 \%.}
+\li{\strong{Memory.} The peak resident set falls where a probe is cut, because a probe of millions of ticks is one session of that size: in the executable con-leche 1,358 to 927 MiB, cslib 2,127 to 1,610 MiB, Mathlib 4,384 to 4,026 MiB; on the JVM launcher cslib 2,847 to 2,444 MiB and Mathlib 5,094 to 4,808 MiB.}
+\li{\strong{Instructions.} In the arena's count the change is -2.90 \% on con-leche, -1.63 \% on cslib and -0.55 \% on Mathlib (1,462.1 to 1,454.0 G), and within 0.1 \% on everything else (table below).}
+}
+
+\p{\strong{The three budgets against each other} were measured only in the first, loaded windows, on the two corpora where a probe is cut: the base executable with \code{\verb~|-X machine.eager-probe=65536~} and \code{262144}, and the build of change 1 (2^17).}
+
+\table{
+\tr{\th{The executable, loaded host, 3 rounds}\th{base (2^22)}\th{2^16}\th{2^17 (the build)}\th{2^18}}
+\tr{\td{con-leche (median)}\td{1.583; 3 rounds 1.501 to 1.736, median 1.512; CPU 10.1; loader 1.11; 1,349 MiB}\td{1.568 (-0.9 \%); 3 rounds 1.504 to 1.652, median 1.548; CPU 9.5 (-6.3 \%); loader 1.15; 941 MiB}\td{1.554 (-1.8 \%); 3 rounds 1.452 to 1.628, median 1.582; CPU 9.5 (-5.9 \%); loader 1.05; 909 MiB}\td{1.677 (+5.9 \%); 3 rounds 1.640 to 1.727, median 1.664; CPU 9.6 (-5.3 \%); loader 1.23; 934 MiB}}
+\tr{\td{cslib (median)}\td{6.595; 3 rounds 6.237 to 7.062, median 6.486; CPU 41.0; loader 6.17; 2,064 MiB}\td{5.926 (-10.1 \%); 3 rounds 5.176 to 7.227, median 5.374; CPU 39.4 (-4.0 \%); loader 5.43; 1,610 MiB}\td{6.418 (-2.7 \%); 3 rounds 5.950 to 7.309, median 5.996; CPU 39.1 (-4.7 \%); loader 6.08; 1,601 MiB}\td{6.346 (-3.8 \%); 3 rounds 5.978 to 7.053, median 6.006; CPU 39.7 (-3.4 \%); loader 6.07; 1,669 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{3.231 (2 corpora)}}\td{\strong{3.048 against 3.231 (-5.7 \%, 2 corpora); largest loss -0.9 \% (con-leche), largest gain -10.1 \% (cslib); CPU of a pass -5.2 \%}}\td{\strong{3.158 against 3.231 (-2.3 \%, 2 corpora); largest loss -1.8 \% (con-leche), largest gain -2.7 \% (cslib); CPU of a pass -5.3 \%}}\td{\strong{3.262 against 3.231 (+1.0 \%, 2 corpora); largest loss +5.9 \% (con-leche), largest gain -3.8 \% (cslib); CPU of a pass -4.3 \%}}}
+}
+
+\table{
+\tr{\th{The JVM launcher, loaded host, 3 rounds}\th{base (2^22)}\th{2^16}\th{2^17 (the build)}\th{2^18}}
+\tr{\td{con-leche (median)}\td{1.335; 3 rounds 1.291 to 1.376, median 1.337; CPU 8.8; loader 0.85; 2,122 MiB}\td{1.329 (-0.4 \%); 3 rounds 1.307 to 1.358, median 1.322; CPU 8.4 (-4.2 \%); loader 0.84; 1,819 MiB}\td{1.300 (-2.6 \%); 3 rounds 1.265 to 1.365, median 1.270; CPU 8.4 (-5.0 \%); loader 0.86; 1,763 MiB}\td{1.278 (-4.2 \%); 3 rounds 1.258 to 1.289, median 1.287; CPU 8.5 (-3.7 \%); loader 0.87; 2,050 MiB}}
+\tr{\td{cslib (median)}\td{4.376; 3 rounds 4.221 to 4.462, median 4.446; CPU 33.0; loader 3.70; 2,816 MiB}\td{4.425 (+1.1 \%); 3 rounds 4.296 to 4.652, median 4.328; CPU 32.9 (-0.4 \%); loader 3.85; 2,424 MiB}\td{4.417 (+0.9 \%); 3 rounds 4.169 to 4.704, median 4.379; CPU 32.9 (-0.2 \%); loader 3.86; 2,416 MiB}\td{4.341 (-0.8 \%); 3 rounds 4.157 to 4.601, median 4.264; CPU 32.2 (-2.4 \%); loader 3.74; 2,436 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.417 (2 corpora)}}\td{\strong{2.425 against 2.417 (+0.3 \%, 2 corpora); largest loss +1.1 \% (cslib), largest gain -0.4 \% (con-leche); CPU of a pass -2.3 \%}}\td{\strong{2.396 against 2.417 (-0.8 \%, 2 corpora); largest loss +0.9 \% (cslib), largest gain -2.6 \% (con-leche); CPU of a pass -2.6 \%}}\td{\strong{2.355 against 2.417 (-2.5 \%, 2 corpora); largest loss -0.8 \% (cslib), largest gain -4.2 \% (con-leche); CPU of a pass -3.0 \%}}}
+}
+
+\p{The process CPU of a pass is the same for the three budgets within its scatter (con-leche 9.5, 9.5 and 9.6 s in the executable against 10.1 s; cslib 39.4, 39.1 and 39.7 s against 41.0 s), and the wall clock of these windows cannot order them: the three differ by a quarter of a percent of the ticks. The choice of section 2.2 is by margin.}
+
+\p{\strong{The first windows, for the record} (the other cores loaded, load average 45 to 70):}
+
+\table{
+\tr{\th{The executable, loaded host}\th{base}\th{change 1}\th{change 2}}
+\tr{\td{Init (median)}\td{0.661; 3 rounds 0.656 to 0.667, median 0.660; CPU 4.7; loader 0.54; 381 MiB}\td{0.662 (+0.1 \%); 3 rounds 0.652 to 0.672, median 0.661; CPU 4.7 (+0.2 \%); loader 0.56; 384 MiB}\td{0.651 (-1.6 \%); 3 rounds 0.642 to 0.660, median 0.650; CPU 4.6 (-2.3 \%); loader 0.56; 381 MiB}}
+\tr{\td{Std (median)}\td{1.168; 3 rounds 1.150 to 1.199, median 1.155; CPU 8.6; loader 0.99; 605 MiB}\td{1.212 (+3.8 \%); 3 rounds 1.173 to 1.283, median 1.181; CPU 8.6 (+0.4 \%); loader 1.09; 603 MiB}\td{1.216 (+4.1 \%); 3 rounds 1.125 to 1.374, median 1.148; CPU 8.4 (-1.8 \%); loader 1.09; 604 MiB}}
+\tr{\td{cedar (median)}\td{1.763; 3 rounds 1.692 to 1.902, median 1.695; CPU 12.1; loader 1.67; 761 MiB}\td{1.860 (+5.5 \%); 3 rounds 1.778 to 1.988, median 1.814; CPU 12.3 (+1.5 \%); loader 1.81; 758 MiB}\td{1.687 (-4.3 \%); 3 rounds 1.631 to 1.797, median 1.632; CPU 11.8 (-2.4 \%); loader 1.59; 766 MiB}}
+\tr{\td{reachability (median)}\td{0.582; 3 rounds 0.544 to 0.647, median 0.554; CPU 1.5; loader 0.03; 738 MiB}\td{0.570 (-2.1 \%); 3 rounds 0.538 to 0.600, median 0.571; CPU 1.5 (-0.7 \%); loader 0.03; 738 MiB}\td{0.563 (-3.3 \%); 3 rounds 0.557 to 0.572, median 0.559; CPU 1.5 (-1.1 \%); loader 0.03; 737 MiB}}
+\tr{\td{con-leche (median)}\td{1.583; 3 rounds 1.501 to 1.736, median 1.512; CPU 10.1; loader 1.11; 1,349 MiB}\td{1.554 (-1.8 \%); 3 rounds 1.452 to 1.628, median 1.582; CPU 9.5 (-5.9 \%); loader 1.05; 909 MiB}\td{1.629 (+2.9 \%); 3 rounds 1.540 to 1.687, median 1.660; CPU 9.9 (-1.5 \%); loader 1.16; 1,351 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{4.333; 3 rounds 4.184 to 4.469, median 4.345; CPU 29.7; loader 3.11; 1,535 MiB}\td{4.367 (+0.8 \%); 3 rounds 4.175 to 4.588, median 4.339; CPU 29.7 (+0.1 \%); loader 3.19; 1,510 MiB}\td{4.340 (+0.2 \%); 3 rounds 4.168 to 4.497, median 4.355; CPU 29.5 (-0.7 \%); loader 3.29; 1,518 MiB}}
+\tr{\td{cslib (median)}\td{6.595; 3 rounds 6.237 to 7.062, median 6.486; CPU 41.0; loader 6.17; 2,064 MiB}\td{6.418 (-2.7 \%); 3 rounds 5.950 to 7.309, median 5.996; CPU 39.1 (-4.7 \%); loader 6.08; 1,601 MiB}\td{7.055 (+7.0 \%); 3 rounds 5.893 to 9.344, median 5.928; CPU 40.2 (-2.1 \%); loader 6.72; 2,023 MiB}}
+\tr{\td{Mathlib (median)}\td{15.278; 3 rounds 14.397 to 15.921, median 15.516; CPU 112.5; loader 13.57; 4,427 MiB}\td{14.696 (-3.8 \%); 3 rounds 14.360 to 15.208, median 14.519; CPU 110.8 (-1.5 \%); loader 12.86; 4,024 MiB}\td{15.515 (+1.6 \%); 3 rounds 14.678 to 16.539, median 15.329; CPU 111.9 (-0.5 \%); loader 14.00; 4,467 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{2.199 (8 corpora)}}\td{\strong{2.198 against 2.199 (-0.1 \%, 8 corpora); largest loss +5.5 \% (cedar), largest gain -3.8 \% (Mathlib); CPU of a pass -1.4 \%}}\td{\strong{2.216 against 2.199 (+0.7 \%, 8 corpora); largest loss +7.0 \% (cslib), largest gain -4.3 \% (cedar); CPU of a pass -1.5 \%}}}
+}
+
+\table{
+\tr{\th{The JVM launcher, loaded host}\th{base}\th{change 1}\th{change 2}}
+\tr{\td{Init (median)}\td{0.633; 3 rounds 0.624 to 0.640, median 0.635; CPU 4.5; loader 0.52; 968 MiB}\td{0.603 (-4.7 \%); 3 rounds 0.592 to 0.610, median 0.608; CPU 4.3 (-4.9 \%); loader 0.48; 831 MiB}\td{0.601 (-5.1 \%); 3 rounds 0.580 to 0.629, median 0.593; CPU 4.3 (-5.8 \%); loader 0.50; 830 MiB}}
+\tr{\td{Std (median)}\td{1.013; 3 rounds 0.961 to 1.084, median 0.995; CPU 7.4; loader 0.81; 1,450 MiB}\td{1.024 (+1.1 \%); 3 rounds 1.007 to 1.051, median 1.015; CPU 7.6 (+3.0 \%); loader 0.86; 1,445 MiB}\td{0.991 (-2.2 \%); 3 rounds 0.988 to 0.994, median 0.992; CPU 7.3 (-0.6 \%); loader 0.84; 1,453 MiB}}
+\tr{\td{cedar (median)}\td{1.468; 3 rounds 1.423 to 1.508, median 1.474; CPU 10.7; loader 1.32; 1,748 MiB}\td{1.476 (+0.5 \%); 3 rounds 1.422 to 1.532, median 1.475; CPU 10.5 (-1.1 \%); loader 1.36; 2,119 MiB}\td{1.469 (+0.1 \%); 3 rounds 1.463 to 1.477, median 1.468; CPU 10.4 (-2.1 \%); loader 1.37; 1,750 MiB}}
+\tr{\td{reachability (mean)}\td{0.418; 3 rounds 0.395 to 0.440, median 0.420; CPU 1.3; loader 0.03; 1,542 MiB}\td{0.439 (+4.9 \%); 3 rounds 0.419 to 0.465, median 0.434; CPU 1.3 (+3.9 \%); loader 0.02; 1,545 MiB}\td{0.421 (+0.5 \%); 3 rounds 0.401 to 0.441, median 0.420; CPU 1.3 (+0.9 \%); loader 0.03; 1,624 MiB}}
+\tr{\td{con-leche (median)}\td{1.335; 3 rounds 1.291 to 1.376, median 1.337; CPU 8.8; loader 0.85; 2,122 MiB}\td{1.300 (-2.6 \%); 3 rounds 1.265 to 1.365, median 1.270; CPU 8.4 (-5.0 \%); loader 0.86; 1,763 MiB}\td{1.290 (-3.3 \%); 3 rounds 1.244 to 1.345, median 1.281; CPU 8.7 (-1.2 \%); loader 0.83; 1,896 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.430; 3 rounds 3.394 to 3.483, median 3.413; CPU 25.5; loader 2.34; 2,272 MiB}\td{3.452 (+0.6 \%); 3 rounds 3.304 to 3.574, median 3.477; CPU 25.6 (+0.3 \%); loader 2.18; 2,316 MiB}\td{3.400 (-0.9 \%); 3 rounds 3.337 to 3.466, median 3.397; CPU 25.8 (+1.2 \%); loader 2.32; 2,293 MiB}}
+\tr{\td{cslib (median)}\td{4.376; 3 rounds 4.221 to 4.462, median 4.446; CPU 33.0; loader 3.70; 2,816 MiB}\td{4.417 (+0.9 \%); 3 rounds 4.169 to 4.704, median 4.379; CPU 32.9 (-0.2 \%); loader 3.86; 2,416 MiB}\td{4.439 (+1.4 \%); 3 rounds 4.347 to 4.495, median 4.475; CPU 33.3 (+0.8 \%); loader 3.94; 2,815 MiB}}
+\tr{\td{Mathlib (median)}\td{11.623; 3 rounds 11.481 to 11.699, median 11.690; CPU 89.7; loader 9.65; 5,112 MiB}\td{11.310 (-2.7 \%); 3 rounds 11.229 to 11.411, median 11.291; CPU 87.3 (-2.6 \%); loader 9.57; 4,771 MiB}\td{11.337 (-2.5 \%); 3 rounds 11.132 to 11.456, median 11.422; CPU 87.9 (-1.9 \%); loader 9.53; 5,237 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.759 (8 corpora)}}\td{\strong{1.754 against 1.759 (-0.3 \%, 8 corpora); largest loss +4.9 \% (reachability), largest gain -4.7 \% (Init); CPU of a pass -0.9 \%}}\td{\strong{1.733 against 1.759 (-1.5 \%, 8 corpora); largest loss +1.4 \% (cslib), largest gain -5.1 \% (Init); CPU of a pass -1.1 \%}}}
+}
+
+\p{\strong{The arena's count.} The arena's own procedure (its 270 tests, one arena-shaped container on the 8 measurement cores, one cold run per test with the run line of the checker definition) gives the instructions of a run:}
+
+\table{
+\tr{\th{Instructions of one run, G}\th{base}\th{change 1}\th{change 2}}
+\tr{\td{Init}\td{70.4}\td{70.3 (-0.07 \%)}\td{68.7 (-2.39 \%)}}
+\tr{\td{Std}\td{121.5}\td{121.4 (-0.09 \%)}\td{119.0 (-2.06 \%)}}
+\tr{\td{cedar}\td{172.2}\td{172.2 (-0.00 \%)}\td{168.1 (-2.40 \%)}}
+\tr{\td{reachability}\td{15.1}\td{15.1 (+0.00 \%)}\td{15.0 (-0.16 \%)}}
+\tr{\td{con-leche}\td{155.4}\td{150.9 (-2.90 \%)}\td{153.0 (-1.53 \%)}}
+\tr{\td{navier-stokes-euler}\td{420.3}\td{420.5 (+0.06 \%)}\td{417.8 (-0.58 \%)}}
+\tr{\td{cslib}\td{498.9}\td{490.8 (-1.63 \%)}\td{492.8 (-1.23 \%)}}
+\tr{\td{Mathlib}\td{1,462.1}\td{1,454.0 (-0.55 \%)}\td{1,449.6 (-0.86 \%)}}
+\tr{\td{the 262 other tests together}\td{594.8}\td{594.8 (+0.00 \%)}\td{595.2 (+0.07 \%)}}
+}
+}
+
+\subtree{
+\title{2.5 Gates}
+
+\p{All on the private distribution of the change, through its own launchers, without any option.}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{\code{rlvm-machine}: the fast group}\td{420 tests, 0 failures, 3 skipped}}
+\tr{\td{\code{rlvm-machine}: the default group (everything not tagged slow)}\td{451 tests, 0 failures, 4 skipped}}
+\tr{\td{\code{SHostileSlowTest}: the 1,196 hostile rows under every switch set}\td{2 tests, 0 failures}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~}, the executable}\td{230 of 230 published tests correct; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034, 2 at the judge's limit of 60 s; hostile 1,196 rows: agree 1,124, kind-T accepts tolerated 68, wrong accept 0, wrong reject 0, declined 4; the differential self-test catches its broken engine}}
+\tr{\td{the same through the jars}\td{the same counts, the same 2 mutants at the limit}}
+\tr{\td{the two mutants at the limit, alone and without a limit (the changed literal of \code{bugs/proj-of-subst-prop} and of \code{bugs/rec-of-subst-prop}; official verdict reject)}\td{rejected by the executable and through the jars, in 47 to 74 s on the busy cores, as by the base (54 to 154 s). With them the mutants agree 15,741 times, the count of the release}}
+\tr{\td{the eight corpora with 8 and with 4 workers through the executable and the JVM launcher}\td{32 of 32 runs accept; probes cut 4 on cslib and Mathlib, 1 on con-leche, 0 elsewhere, and the machine's declines 22, 128 and 4 as with one worker: in every schedule the same units}}
+\tr{\td{the arena's own procedure: its 270 tests through the executable in one arena-shaped container}\td{148 good tests accepted, 92 bad tests rejected, of the 30 "either" tests 11 accepted, 17 rejected, 2 declined (the two on which the official kernel does not terminate): no wrong accept, no wrong reject, and status and exit code of all 270 are those of the base, run the same way in the same hour}}
+}
+
+\p{The two mutants are those that every gate of this wave has seen at the limit on a loaded host: each needs 30 s of CPU with the changed literal, and the efficiency cores were oversubscribed five times over.}
+}
+
+\subtree{
+\title{2.6 What the switch reference and the notes on eager reduction must say}
+
+\p{This report does not edit them. With the change in the main tree:}
+
+\ul{
+\li{[The switch reference](design-switches-document): in the paragraph "Related settings", \code{\verb~|-X machine.eager-probe=N~} has the default 2^17, not 2^22; the row of the switch set \code{Op.SW_DEFAULT} says "with the probe budget \code{\verb~|-X machine.eager-probe~} = 2^17"; the paragraph on the probes under the table of named switches gets the three groups of probe sizes of section 2.2, the four units of cslib and Mathlib that the machine now declines, and the sentence that the budget lies in a gap of the sizes, 2.06 times above the largest probe that completes and 3.5 times below the smallest that is cut, where 2^22 had been 1.5 times above the largest probe of any size.}
+\li{[Eager reduction on the machine](design-eager-reduction): "a budget of 2^22 ticks" becomes 2^17, and "on cslib and Mathlib no probe is cut" becomes "four units of \code{Batteries.Data.Char.Basic} are cut, declined and decided by the reference engine in 15,760 steps".}
+\li{[The decision on the default set](dec-YP0N) names the budget of 2^22 in its decision paragraph; it is a decision and stays as written, with a link to the changelog entry of this change.}
+\li{The statistics \code{machine.eager.probeBudget}, \code{probeCuts}, \code{probeMaxTicks} and \code{declined.probe} say after any run which units were cut.}
+}
+}
+}
+
+\subtree{
+\title{3. Change 2: a declaration that repeats an accepted one is not checked again}
+
+\subtree{
+\title{3.1 What a repeat is, and how many there are}
+
+\p{The exporter writes many declarations more than once under different names: auxiliary proofs, equation lemmas, matchers and compiler auxiliaries that the elaborator emits again. Such a record names the \em{same expression records} as type and as value as an earlier record of the same kind with the same universe parameters. A unit is a \em{repeat} here if it is a definition, a theorem or an opaque, and an earlier unit of the file has the same kind, the same list of universe-parameter names, the same reducibility hint (definitions) and the same two record ordinals as type and as value; its \em{original} is the first such unit. Counted by the loader of the change, and the ticks of the repeats in the base (one worker, file order, warm sessions):}
+
+\table{
+\tr{\th{Corpus}\th{units}\th{repeats}\th{their ticks in the base}\th{largest repeat, ticks}}
+\tr{\td{Init}\td{58,547}\td{5,948 (10.2 \%)}\td{1,236,211 (3.58 \% of 34,490,709)}\td{16,120}}
+\tr{\td{Std}\td{101,146}\td{8,661 (8.6 \%)}\td{1,833,913 (3.22 \% of 56,957,035)}\td{22,653}}
+\tr{\td{cedar}\td{146,058}\td{15,429 (10.6 \%)}\td{2,827,396 (3.69 \% of 76,668,269)}\td{22,660}}
+\tr{\td{reachability}\td{4,413}\td{220 (5.0 \%)}\td{8,175 (0.09 \% of 9,014,777)}\td{528}}
+\tr{\td{con-leche}\td{36,747}\td{4,570 (12.4 \%)}\td{2,021,517 (2.86 \% of 70,755,128)}\td{31,374}}
+\tr{\td{navier-stokes-euler}\td{126,468}\td{13,331 (10.5 \%)}\td{1,974,828 (1.37 \% of 144,220,381)}\td{15,920}}
+\tr{\td{cslib}\td{401,985}\td{30,445 (7.6 \%)}\td{4,131,989 (1.91 \% of 215,956,521)}\td{22,653}}
+\tr{\td{Mathlib}\td{721,845}\td{59,900 (8.3 \%)}\td{7,492,778 (1.31 \% of 574,100,326)}\td{44,499}}
+}
+
+\p{The count of [the comparison with gruszka](rep-OPT-E) (59,923 on Mathlib, 13,336 on navier-stokes-euler, 30,466 on cslib) is this set but for 23, 5 and 21 units: the key here also has the reducibility hint of a definition. By that count three quarters of Mathlib's repeats are theorems, and a repeat is far from its original: the median distance is 233,976 units on Mathlib.}
+}
+
+\subtree{
+\title{3.2 The claim, and what the check of a declaration reads}
+
+\p{\strong{Claim.} Let unit r repeat unit o: both are definitions, or both theorems, or both opaques; they have the same list of universe-parameter names and, for definitions, the same reducibility hint; and the type and the value of r are the \em{same expression records} of the export as those of o. Let o come before r in the file and in admission order. If the check of o ends in ACCEPT and the admission of r passes, the check of r ends in ACCEPT, for the official checker and for both engines of RLVM.}
+
+\p{\strong{What the official check reads.} For a definition, theorem or opaque the official kernel does this, and nothing else: the name must not be declared yet; the universe parameters must be distinct; the type must have no free variable or metavariable; the type is inferred in check mode and must be a sort, for a theorem the sort of propositions; the value is inferred in check mode and its type compared with the declared type. Its seven caches live for one declaration, see [the caches of the reference engine against the official kernel's](design-reference-caches). So the verdict is a function of these inputs:}
+
+\table{
+\tr{\th{Input of the check}\th{For a repeat}\th{Where it is decided}}
+\tr{\td{the kind: definition, theorem or opaque (a theorem's type must be a proposition; an axiom has no value)}\td{the same, part of the key}\td{the loader's key}}
+\tr{\td{the universe-parameter names, as a list (distinctness; every parameter the terms mention must be declared)}\td{the same list, part of the key}\td{the loader's key}}
+\tr{\td{the type and the value, as terms and as objects: the official kernel tests object identity in two places, and one export record is one object}\td{the same records, so the same terms and the same objects}\td{the loader's key: record ordinals, not structural equality}}
+\tr{\td{the safety (a safe declaration may not use an unsafe or partial constant)}\td{always safe: unsafe and partial records are dropped by the loader and never checked}\td{the loader}}
+\tr{\td{the reducibility hint of a definition}\td{not read by the check of the definition itself, which cannot mention its own name; kept in the key all the same}\td{the loader's key}}
+\tr{\td{the declaration's own name: "already declared"}\td{differs, and is checked}\td{the loader rejects a second declaration of a name; admission checks it again in O(1)}}
+\tr{\td{the declaration's own name inside its type or value}\td{impossible for an accepted original: neither name is declared when the original is checked, so the original would have failed with an unknown constant}\td{-}}
+\tr{\td{the constants the terms mention, and through unfolding the constants those mention: their kinds, types, values, hints, recursor rules}\td{the same constants: a constant is never replaced, and what the original could see the repeat sees (the environment only grows)}\td{admission: every constant below a root has a smaller rank; the driver asks in addition that the original's rank is smaller than the repeat's}}
+\tr{\td{names the kernel makes up itself: \code{Nat}, \code{Nat.zero}, \code{Nat.succ} for a literal, the accelerated functions and \code{Bool.true}, \code{Bool.false} for their results, \code{String.ofList}, \code{List.cons}, \code{Char.ofNat} for a string literal, the quotient constants, \code{eagerReduce}}\td{a lookup of such a name that \em{fails} without an error is the one place where a larger environment could change a path. For an accepted original it does not occur: the type of a literal is the constant \code{Nat}, which some checked binder or constant type must then mention, so it is declared, with its constructors, in one unit; an accelerated function fires only where the term names it; RLVM declines a root with a literal whose prerequisite constants are not declared earlier, and declines when a guard of a special constant does not hold}\td{admission (structural checks, prelude guards)}}
+\tr{\td{the position in the file: declared before use}\td{the repeat is later}\td{as above}}
+\tr{\td{the "all" list of the record (the names of a mutual block)}\td{not read by the kernel for these kinds; the loader does not keep it}\td{-}}
+\tr{\td{resources of the official process: the depth of its stack when the declaration is reached in its replay}\td{not modelled by RLVM for any declaration}\td{-}}
+}
+
+\p{\strong{Kinds for which the list is not closed}, and which are not part of the skip: an axiom (no value; its admission depends on its name under the axiom policy; four per corpus); inductive blocks, constructors, recursors and the quotient records (the environment pass decides them, and their check is about their names). A unit that the environment pass admits itself in dependency order never reaches an engine, with or without the skip.}
+
+\p{\strong{RLVM's engines.} The machine reads the rank of the declaration it checks in four places, each of the form "the constant's rank is not below the rank of the declaration: not visible" (\code{Infer}, \code{Values}, \code{NatRed}); nothing else of the unit's position or name enters a judgment. A session may hold facts from earlier units, and the driver's invariant, tested by its invariance suite, is that no verdict depends on them. The reference engine's caches live for one declaration. So for both engines the outcome of r is the outcome of o. The default configuration may accept an original that the official checker rejects for a reason of its own (class (d) of [the exactness contract](design-exactness-contract)): its repeat is then accepted too, with or without the skip, as the same derivable statement with the same proof.}
+
+\p{\strong{Soundness does not rest on the claim.} If o was accepted, its value has its type in the environment of o, and every environment that extends it by further constants gives the same typing: the statement of r is the statement of o and is derivable. The claim is needed for the other direction, that the skip never accepts what a check would have rejected or declined for a reason of the official implementation; for that it was tested (section 3.5).}
+}
+
+\subtree{
+\title{3.3 The implementation}
+
+\ul{
+\li{\strong{The loader says which unit a unit repeats.} Only it can: the value of a theorem is a proof block in the original and the promoted copy of that block's root in the first repeat, and nothing in the store links the two. At the declaration line the loader looks the declaration up in a table of the definitions, theorems and opaques read so far (\code{rlvm.load.Repeats}: an exact key of kind, id of the interned list of universe-parameter names, hint, and the two record ordinals; six ints per declaration; a declaration with a root in its own segment cannot repeat anything and is added without a search). The result goes through one new call of the loader's target, \code{LoadTarget.repeatOf(firstUnit)}, into a column of the declaration table, \code{DeclTable.repeatOf(unit)}: one int per unit in chunks that exist only where a unit repeats another, written before the unit is published. The store reads it nowhere, and every other word the loader writes is what it was. A metadata record has no ordinal of its own (the wrapped record stands for it), so a declaration whose value is a metadata record around an earlier value repeats it; under the practical policy that is what the base checks too, and the strict policy never skips.}
+\li{\strong{The driver admits a repeat and does not check it.} A worker that comes to a unit with an original (\code{RunHost.unitRepeatOf}; the original must also be earlier in admission order) reads the original's status on the verdict board. If it is ACCEPTED, the unit goes through the lane's admission exactly as any unit does - the environment frontier, a recorded outcome of the environment pass, the name, the universe parameters, the roots - with a session that answers ACCEPT where the engine would have been called. Whatever the admission finds is reported through the unchanged protocol. Nothing in \code{rlvm-admit} changed.}
+\li{\strong{Setting.} \code{\verb~|-X repeats=skip~} (the default) or \code{\verb~|repeats=check~}; statistics \code{load.repeatUnits}, \code{driver.repeatsSkipped} and \code{driver.repeatsAwaited}.}
+}
+}
+
+\subtree{
+\title{3.4 The verdict rule, the original in flight, the engines, the strict policy}
+
+\ul{
+\li{\strong{The verdict.} The verdict of a file is the status of its first unit in file order that is not accepted ([the verdict protocol](design-verdict-protocol)). A repeat is reported ACCEPT without a check only when its original is ACCEPTED, and a status is written once, so an ACCEPTED read is final. If the original is rejected or declined, the verdict is decided at or before the original: the repeat lies above the first failure and is never accepted on anybody's word.}
+\li{\strong{The original in flight.} With several workers the original can be without a status when the repeat comes up: on another worker, or in another worker's claim. Then the repeat is checked as in the base, and nobody waits. That would be all if the check of a repeat always said what the check of its original says. It does not on one kind of input (section 3.5): the machine accepted the original through a shortcut that the official checker does not have, and rejects the copy. With "check if in flight" alone the status of such a repeat, and the verdict of the file, would depend on the schedule. So one rule was added: \strong{if the check of a repeat whose original had no status does not end in ACCEPT, the worker gives the rest of its claim back and waits for the original's status}; if it is ACCEPTED the unit goes through the path of a repeat, as it would have a moment later; otherwise the first failure lies at or before the original. The wait is for a smaller unit that another worker holds, so no cycle of waits exists; the worker holds no gate and its session is reset; a cancelled run ends it. It did not occur on any corpus (\code{driver.repeatsAwaited} = 0 in every run of this report); a test of the driver forces it. The status of every unit is then the same in every schedule, which the invariance suite confirms on files made for it (section 3.6).}
+\li{\strong{Which engine.} Only when the primary engine is not the reference engine. With \code{\verb~|-X engine=reference~} every unit is checked, so the gates of the reference engine and its row in the benchmark tables keep their meaning.}
+\li{\strong{The strict policy} is the reference engine alone and is not touched: every declaration is checked, as the official checker checks it, and the strict mode's reading of a file is unchanged. The loader fills the column under every policy; it is not read.}
+\li{\strong{Statistics and re-checks.} A skipped unit counts as accepted in the driver's counts and has zero steps in the unit trace; it is not among the units of the engine. The re-check protocol is unchanged for every unit that is checked. In a differential run (\code{\verb~|-X engine=diff~}) the reference engine still checks every unit, the skipped ones included, and a difference is a decline of the run: that is how the claim was tested on the corpora.}
+}
+}
+
+\subtree{
+\title{3.5 The claim, tested}
+
+\p{\strong{The official checker.} Every row of the machine's hostile suite (1,196 exports, each attacking one shortcut, memo or cache order, with the verdict of the official checker) was rewritten with its last definition, theorem or opaque appended once more at the end of the file under a new name: the same record, a word-for-word repeat (1,193 files; three rows have no such declaration or an unsafe one). leanchecker 4.36.0 judged all of them again in Docker:}
+
+\table{
+\tr{\th{Files}\th{Official verdict}\th{Against the claim}}
+\tr{\td{1,193: a row with its last declaration repeated word for word}\td{414 accept, 779 reject}\td{\strong{the verdict of the row, 1,193 of 1,193}}}
+\tr{\td{414: a row that the official checker accepts, with the type and value records of its last declaration under another kind (theorem to definition 396, definition or opaque to theorem 18)}\td{402 accept, 12 reject (a theorem whose type is no proposition)}\td{why the kind is part of the key}}
+\tr{\td{41 written for this change (below)}\td{13 accept, 28 reject}\td{as the author expected, 41 of 41}}
+}
+
+\p{So on the files that were built to make the official verdict depend on cache order, on the sharing of records and on object identity, the official check of a repeat gives the verdict of its original every time. The 41 files of the third row are the cases the key and the rule have to get right: a repeat of a rejected original (theorem, definition, opaque); the same records under another kind in both directions (a definition \code{\verb~|a : Nat := 2 + 3~} is fine, a theorem with the same two records is not); other universe-parameter names, none, a superset, a duplicate; the name of the original or of a prelude constant; a self reference; the same statement with another proof and the same proof under another statement; the same terms as fresh records; other reducibility hints; an unsafe original; a metadata record around the value; an original that uses a constant declared later (the official replay goes by dependency); 300 repeats directly behind a unit that takes a moment, accepted and rejected; and seven rows of the suite, five of kind T, with every theorem repeated twice.}
+
+\p{\strong{RLVM, the default configuration, on these 1,648 files} (\src{scripts/gate-hostile.py} with a manifest of the official verdicts; a row of kind T may be accepted):}
+
+\table{
+\tr{\th{Run}\th{agree}\th{kind-T accepts tolerated}\th{wrong accept}\th{wrong reject}\th{declined}}
+\tr{\td{the executable, a run without options (automatic workers)}\td{1,570}\td{73}\td{0}\td{0}\td{5}}
+\tr{\td{the executable, 8 workers}\td{1,570}\td{73}\td{0}\td{0}\td{5}}
+\tr{\td{the jars on the JVM, automatic workers}\td{1,570}\td{73}\td{0}\td{0}\td{5}}
+\tr{\td{the executable with \code{\verb~|-X repeats=check~}: every unit checked, the behaviour of the base}\td{1,571}\td{72}\td{0}\td{0}\td{5}}
+}
+
+\ul{
+\li{\strong{No wrong accept and no wrong reject} in any run. The five declines are files the base declines too (a string literal without its prerequisites, metadata around \code{eagerReduce}, metadata in a binder domain).}
+\li{\strong{One row gets another verdict with the skip than without it}: \code{R-e1-sib-krule-major-redex-bad}, the row \code{e1-sib-krule-major-redex-bad} of kind T with its theorem repeated. The official checker rejects the statement through the K rule on a major premise that is a beta-redex (finding E1-F7); the statement is derivable, and the default configuration accepts it - the row is one of the 68 tolerated accepts of the suite. Checked a second time, the same two records are \em{rejected} by the machine and then by the reference engine. The reason is where the terms live, not the session: the proof of the original is a proof block, decoded for that unit; the repeat's value is the promoted copy, a shared term of an earlier unit, which the machine's tabling gate treats as shared. With \code{\verb~|-X no-proof-blocks~} the base accepts both; without the switch \code{gated} it rejects the original. So the base rejects this file, at the repeat, and accepts the same file without the repeat; with the skip it is accepted. Both verdicts are what a row of kind T allows, and nothing underivable is accepted: the statement of a repeat is the statement of its original. But it is a verdict that changes, on a hostile input, from the official one to a tolerated one, and it is why the claim of section 3.2 holds for the machine only up to its own tolerated shortcuts.}
+\li{\strong{That row is also why a wait was added} (section 3.4). Without it the verdict of this file would have depended on whether the original was decided before the repeat came up. With it the invariance suite sees one verdict in every schedule (section 3.6).}
+\li{The 67 other rows of kind T with a repeat, and the five written for this change, are accepted with the skip and without it.}
+}
+
+\p{\strong{The reference engine on every skipped unit.} In a differential run (\code{\verb~|-X engine=diff~}: the machine as primary engine, the reference engine beside it on every unit, a difference declines the run) the reference engine checks each unit the driver admitted without a check. The executable of the change, 8 workers, the eight corpora:}
+
+\table{
+\tr{\th{Corpus}\th{verdict}\th{repeats}\th{of them skipped}\th{units the reference engine accepted, of those the workers were given}\th{disagreements}}
+\tr{\td{Init}\td{accept}\td{5,948}\td{5,824}\td{57,938 of 57,938}\td{0}}
+\tr{\td{Std}\td{accept}\td{8,661}\td{8,492}\td{100,096 of 100,096}\td{0}}
+\tr{\td{cedar}\td{accept}\td{15,429}\td{15,102}\td{144,098 of 144,098}\td{0}}
+\tr{\td{reachability}\td{accept}\td{220}\td{189}\td{4,224 of 4,224}\td{0}}
+\tr{\td{con-leche}\td{accept}\td{4,570}\td{4,287}\td{36,274 of 36,274}\td{0}}
+\tr{\td{navier-stokes-euler}\td{accept}\td{13,331}\td{13,038}\td{124,850 of 124,850}\td{0}}
+\tr{\td{cslib}\td{accept}\td{30,445}\td{30,196}\td{397,608 of 397,608}\td{0}}
+\tr{\td{Mathlib}\td{accept}\td{59,900}\td{59,453}\td{714,712 of 714,712}\td{0}}
+}
+}
+
+\subtree{
+\title{3.6 Gates}
+
+\p{All on the private distribution of the change (the final build, with the wait of section 3.4), through its own launchers, without any option unless the row names one.}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{the suites of the changed modules, in the private copy: \code{rlvm-store}, \code{rlvm-load}, \code{rlvm-driver}}\td{73 tests (1 skipped), 85 tests, 116 tests (3 skipped): 0 failures. The loader's oracle finds the repeats of every file it loads again from the reference records (the 230 published tests in two configurations, Init, Std, random exports, pipelined loads) and compares them with what the loader said}}
+\tr{\td{the suites of the modules that sit on them: \code{rlvm-admit}, \code{rlvm-main}, \code{rlvm-cli}}\td{89, 64 and 49 tests, 0 failures}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~}, the executable}\td{230 of 230 published tests correct; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034, 2 at the judge's limit of 60 s; the suite's 1,196 hostile rows: agree 1,124, kind-T accepts tolerated 68, wrong accept 0, wrong reject 0, declined 4: the counts of the base}}
+\tr{\td{the same through the jars}\td{the same counts, the same 2 mutants at the limit}}
+\tr{\td{the two mutants at the limit, alone (section 2.5)}\td{rejected by the executable and through the jars, in 46 to 54 s}}
+\tr{\td{the 1,648 hostile files with repeats, official verdicts (section 3.5)}\td{no wrong accept, no wrong reject, through the executable and the jars; one row of kind T is a tolerated accept with the skip and the official reject without it}}
+\tr{\td{the driver's invariance suite from the private copy, the machine as primary engine, every file under 9 schedules (batch with 1, 2, 4 and 8 workers; a session cap of one byte with 1 and 4 workers; pipelined with a publication every 1, 7 and 64 units with 1, 4 and 8 workers): the 1,648 hostile files with repeats}\td{0 wrong, 0 declined, 6 schedule differences - the same 6 with \code{\verb~|repeats=check~}: three rows of kind T that attack warm sessions (\code{\verb~|s3-wc-warm-pair-reused-bad~}, \code{\verb~|s3-wc-warm-term-reused-bad~}, \code{\verb~|s3-wc-warm-term-reused-reset-bad~}) are rejected at their original unit under the one-byte session cap and accepted otherwise. The three rows of the suite without a repeat show the same 6. The skip adds none; the row of section 3.5 has one verdict in all 9 schedules, accept with the skip and reject without}}
+\tr{\td{the invariance suite: the 231 published tests}\td{0 wrong, 0 declined, 0 schedule differences}}
+\tr{\td{the invariance suite: the mutants of the tutorial tests and of the bugs tests}\td{14,952 files: 0 wrong, 478 declined alike in every schedule, 0 schedule differences}}
+\tr{\td{the eight corpora in a differential run, 8 workers (section 3.5)}\td{8 of 8 accept, no disagreement: the reference engine accepts every unit that was not checked}}
+\tr{\td{the eight corpora with 8 and with 4 workers through the executable and the JVM launcher}\td{32 of 32 runs accept, with the machine's declines of the base (0, 2, 2, 0, 4, 32, 14 and 120 attempts)}}
+\tr{\td{the arena's own procedure: its 270 tests through the executable in one arena-shaped container}\td{148 good tests accepted, 92 bad tests rejected, of the 30 "either" tests 11 accepted, 17 rejected, 2 declined (the two on which the official kernel does not terminate): no wrong accept, no wrong reject, and status and exit code of all 270 are those of the base, run the same way in the same hour}}
+\tr{\td{the strict policy and \code{\verb~|-X engine=reference~}}\td{not touched by the change: on Init under the strict policy and with \code{\verb~|-X engine=reference~} no unit is skipped and the reference engine checks all 57,938; the row of section 3.5 is rejected under the strict policy, as officially. A test of the driver pins it}}
+}
+}
+
+\subtree{
+\title{3.7 The counters}
+
+\p{One worker, file order. First that the change does nothing when it is switched off: the build of the change with \code{\verb~|-X repeats=check~} against the base. Every count of the machine, the reference engine, the driver and the loader is identical on all eight corpora (187 to 192 keys; the three new statistics apart), and so are the ticks and the outcome of every unit. The loader's table changes nothing that an engine sees.}
+
+\p{Then the skip against the base. "Nothing kept between declarations" is the default switch set without what outlives a declaration: \code{\verb~|-X machine.switches=default,-warm,-pchk,-skipargs,-facts~} (no warm session, no check facts, no fact records, and \code{skipargs}, which needs them).}
+
+\table{
+\tr{\th{Corpus, sessions}\th{machine ticks, base}\th{with the skip}\th{difference}\th{units not checked}\th{their ticks in the base}\th{the other units}\th{units with another outcome}\th{machine declines (attempts)}\th{units decided by the reference engine}}
+\tr{\td{Init, default (warm sessions)}\td{34,490,709}\td{33,391,529}\td{-1,099,180 (-3.19 \%)}\td{5,948}\td{1,236,211 (3.58 \%)}\td{+137,031 in 15,752 units}\td{0}\td{0, 0}\td{0, 0}}
+\tr{\td{Std, default (warm sessions)}\td{56,957,035}\td{55,485,546}\td{-1,471,489 (-2.58 \%)}\td{8,661}\td{1,833,913 (3.22 \%)}\td{+362,424 in 25,810 units}\td{0}\td{2, 2}\td{1, 1}}
+\tr{\td{cedar, default (warm sessions)}\td{76,668,269}\td{74,363,259}\td{-2,305,010 (-3.01 \%)}\td{15,429}\td{2,827,396 (3.69 \%)}\td{+522,386 in 37,718 units}\td{0}\td{2, 2}\td{1, 1}}
+\tr{\td{reachability, default (warm sessions)}\td{9,014,777}\td{9,003,236}\td{-11,541 (-0.13 \%)}\td{220}\td{8,175 (0.09 \%)}\td{-3,366 in 564 units}\td{0}\td{0, 0}\td{0, 0}}
+\tr{\td{con-leche, default (warm sessions)}\td{70,755,128}\td{69,090,923}\td{-1,664,205 (-2.35 \%)}\td{4,570}\td{2,021,517 (2.86 \%)}\td{+357,312 in 8,995 units}\td{0}\td{4, 4}\td{2, 2}}
+\tr{\td{navier-stokes-euler, default (warm sessions)}\td{144,220,381}\td{142,360,034}\td{-1,860,347 (-1.29 \%)}\td{13,331}\td{1,974,828 (1.37 \%)}\td{+114,481 in 28,766 units}\td{0}\td{32, 32}\td{16, 16}}
+\tr{\td{cslib, default (warm sessions)}\td{215,956,521}\td{212,335,111}\td{-3,621,410 (-1.68 \%)}\td{30,445}\td{4,131,989 (1.91 \%)}\td{+510,579 in 95,356 units}\td{0}\td{14, 14}\td{7, 7}}
+\tr{\td{Mathlib, default (warm sessions)}\td{574,100,326}\td{567,597,034}\td{-6,503,292 (-1.13 \%)}\td{59,900}\td{7,492,778 (1.31 \%)}\td{+989,486 in 144,593 units}\td{0}\td{120, 120}\td{60, 60}}
+\tr{\td{Init, nothing kept between declarations}\td{49,801,972}\td{47,560,796}\td{-2,241,176 (-4.50 \%)}\td{5,948}\td{2,241,176 (4.50 \%)}\td{+0 in 0 units}\td{0}\td{0, 0}\td{0, 0}}
+\tr{\td{Std, nothing kept between declarations}\td{79,290,688}\td{75,942,991}\td{-3,347,697 (-4.22 \%)}\td{8,661}\td{3,347,697 (4.22 \%)}\td{+0 in 2 units}\td{0}\td{2, 2}\td{1, 1}}
+\tr{\td{cedar, nothing kept between declarations}\td{104,418,277}\td{99,077,823}\td{-5,340,454 (-5.11 \%)}\td{15,429}\td{5,340,454 (5.11 \%)}\td{+0 in 3 units}\td{0}\td{2, 2}\td{1, 1}}
+\tr{\td{reachability, nothing kept between declarations}\td{9,401,140}\td{9,375,053}\td{-26,087 (-0.28 \%)}\td{220}\td{26,087 (0.28 \%)}\td{+0 in 0 units}\td{0}\td{0, 0}\td{0, 0}}
+\tr{\td{con-leche, nothing kept between declarations}\td{95,980,031}\td{91,094,834}\td{-4,885,197 (-5.09 \%)}\td{4,570}\td{4,885,197 (5.09 \%)}\td{+0 in 0 units}\td{0}\td{10, 10}\td{5, 5}}
+}
+
+\ul{
+\li{\strong{With nothing kept between declarations the ticks of the skipped units disappear and nothing else changes}: on Init, reachability and con-leche every other unit has its ticks to the tick; on Std two units and on cedar three move by one to three ticks with the sum zero. The difference of the totals is exactly the ticks of the skipped units. (Not run on navier-stokes-euler, cslib and Mathlib.)}
+\li{\strong{In the default configuration the other units pay a little of it back}: a warm session no longer holds what the check of a repeat left in it, and the check facts and fact records that a repeat was the first to derive are derived by a later unit. The skipped units carried 1.3 to 3.7 \% of the ticks (0.09 \% on reachability); the totals fall by 1.1 to 3.2 \% (0.13 \% on reachability). The repeats weigh more on the small corpora than the 1.3 to 1.9 \% that had been counted on Mathlib, navier-stokes-euler and cslib.}
+\li{\strong{No outcome changes}: the machine's declines and rejections and the units the reference engine decides are the same on every corpus, and no unit of a trace has another outcome.}
+\li{\strong{With 8 and 4 workers} nearly every repeat is skipped: with 8 workers 97.4 to 99.3 \% of the repeats of Init, Std, cedar, navier-stokes-euler, cslib and Mathlib (59,425 and 59,470 of Mathlib's 59,900 in the executable and on the JVM launcher), 93 and 94 \% of con-leche's and 84 and 93 \% of the 220 of reachability; with 4 workers 98.3 to 99.4 \%, 96 to 97 \% and 90 to 91 \%. The rest came up while their original had no status and were checked; none of those checks failed (\code{driver.repeatsAwaited} = 0).}
+}
+}
+
+\subtree{
+\title{3.8 Timing: the guard}
+
+\p{The tables are those of section 2.4: the windows measured the base and both changes together. On the calm host:}
+
+\ul{
+\li{\strong{The executable: the guard holds.} The geometric mean of the eight warm passes goes from 1.855 to 1.829 s, -1.4 \%, and every corpus is faster: Init -1.3 \%, Std -1.8 \%, cedar -1.8 \%, reachability -1.1 \%, con-leche -1.8 \%, navier-stokes-euler -1.0 \%, cslib -0.7 \%, Mathlib -1.6 \% (13.172 to 12.967 s). On Init, cedar, cslib and Mathlib every round is below the base's round, on cslib and Mathlib below every round of the base. The process CPU of a pass falls on every corpus, by 0.7 to 2.3 \%, -1.6 \% over the eight.}
+\li{\strong{The JVM launcher: no regression.} Geometric mean 1.558 to 1.547 s, -0.7 \%; Init -3.2 \%, Mathlib -1.4 \% (11.065 to 10.911 s), cedar -0.8 \%, navier-stokes-euler -0.7 \%, Std -0.6 \%, cslib -0.3 \%, reachability +0.1 \% over 18 rounds, con-leche +1.7 \%, the largest loss. The first six rounds of reachability alone read +3.6 \%; twelve more rounds in a window with a second sample of the base read -1.6 \% for the change and -1.1 \% for the base against itself.}
+\li{\strong{Instructions.} In the arena's count every corpus needs fewer instructions: Init -2.39 \%, Std -2.06 \%, cedar -2.40 \%, con-leche -1.53 \%, cslib -1.23 \%, Mathlib -0.86 \% (1,462.1 to 1,449.6 G), navier-stokes-euler -0.58 \%, reachability -0.16 \%; the 262 small tests together +0.07 \% (table in section 2.4). The loader's table is in these counts.}
+\li{\strong{Memory.} The peak resident set of a pass is the base's within 3 \% on every corpus (Mathlib 4,384 and 4,490 MiB in the executable, 5,094 and 5,145 MiB on the JVM launcher).}
+}
+
+\p{\strong{The load alone} (\code{\verb~|-X stop-after=load~}: batch load on the loader thread, nothing checked), the base against the build of the change, interleaved in one window on the calm host, 4 rounds of 3 passes; the median over the rounds of the median later pass, with the rounds:}
+
+\table{
+\tr{\th{The executable, load alone, ms}\th{base}\th{with the table of declarations}\th{ratio}\th{peak RSS, MiB}}
+\tr{\td{Init}\td{468 (466, 465, 472, 469)}\td{470 (472, 468, 467, 475)}\td{1.005}\td{173, 176}}
+\tr{\td{Std}\td{822 (822, 818, 830, 820)}\td{825 (838, 823, 823, 827)}\td{1.005}\td{301, 303}}
+\tr{\td{cslib}\td{3,867 (3,867, 3,866, 3,936, 3,843)}\td{3,890 (3,876, 3,895, 3,886, 3,894)}\td{1.006}\td{1,163, 1,170}}
+\tr{\td{Mathlib}\td{9,543 (9,621, 9,607, 9,478, 9,462)}\td{9,623 (9,552, 9,694, 9,701, 9,540)}\td{1.008}\td{2,769, 2,876}}
+}
+
+\p{So the loader pays 2 to 80 ms per load for the table, half a percent to 0.8 \% of the load, with rounds that overlap on Mathlib; the six ints per declaration and the growth of the arrays show as 3 to 107 MiB of peak resident set in a load alone, and as nothing that the peak of a whole pass shows on any corpus but Mathlib (4,384 and 4,490 MiB in the executable). On the corpora whose pass follows the loader thread (Init, Std, cedar, cslib) that cost is on the critical path, and the pass still gets shorter: the workers' saving is larger than the loader's price there too.}
+}
+
+\subtree{
+\title{3.9 What the design notes must say}
+
+\ul{
+\li{[The driver](design-driver): a paragraph on repeats under "Threads and frontiers" or the scheduler: what a repeat is, that it is admitted and not checked when its original is ACCEPTED, the wait, the setting, that the reference engine as primary engine never skips. Its invariant "the verdict and the deciding unit do not depend on the worker count" holds with the skip, for the reason of section 3.4.}
+\li{[The verdict protocol](design-verdict-protocol), "The re-check protocol": "an accept of the primary engine is final" gets its second case, the accept of a repeat on the word of its original.}
+\li{[The export loader](design-export-loader): the table of declarations by record ids and the one call that reports a repeat; the store digest is unchanged apart from the new column.}
+\li{[The divergence classes](design-official-divergence): the file of section 3.5 is an example of class (d) that exists only with the skip.}
+}
+}
+}
+
+\subtree{
+\title{4. The patches, and what an integrator must know}
+
+\p{Four unified diffs against the main tree (paths from the repository root; each was applied to the main tree of this report's end in a dry run). They are kept with the package's working files and handed to the integrator; this report names what they touch.}
+
+\table{
+\tr{\th{Patch}\th{Files}\th{Change}}
+\tr{\td{1, change 1}\td{\src{rlvm-machine/src/main/java/rlvm/machine/MachineEngine.java}, \src{rlvm-machine/src/test/java/rlvm/machine/M6FacadeTest.java}}\td{\code{DEFAULT_EAGER_PROBE} = 2^17 with its comment; the test asserts the value and that it lies between 63,654 and 458,881}}
+\tr{\td{2, change 2, store}\td{\src{rlvm-store/src/main/java/rlvm/store/DeclTable.java}, \src{rlvm-store/src/main/java/rlvm/store/StoreBuilder.java}, \src{rlvm-store/src/test/java/rlvm/store/DeclStoreTest.java}, \src{rlvm-store/README.md}}\td{the column \code{DeclTable.repeatOf} and its writer \code{StoreBuilder.repeatOf}; one test; one README entry}}
+\tr{\td{3, change 2, loader}\td{\src{rlvm-load/src/main/java/rlvm/load/Loader.java} (the method \code{declare}, one field, one line of the report), \code{rlvm-load/src/main/java/rlvm/load/Repeats.java} (new), \src{rlvm-load/src/main/java/rlvm/load/LoadTarget.java}, \src{rlvm-load/src/main/java/rlvm/load/StoreTarget.java}, \src{rlvm-load/src/main/java/rlvm/load/LoadReport.java}, \src{rlvm-load/README.md}; tests: \code{RepeatsTest.java} (new), \code{StoreIntegrationTest.java}, \code{Oracle.java}, \code{StoreOracle.java}, \code{FakeTarget.java}, \code{RecordingTarget.java}}\td{the table of declarations by their record ids, the call \code{LoadTarget.repeatOf} (a default method that does nothing), the statistic; the loader's oracle now finds the repeats of every file it loads again from the reference records and compares}}
+\tr{\td{4, change 2, driver}\td{\src{rlvm-driver/src/main/java/rlvm/driver/Worker.java}, \src{rlvm-driver/src/main/java/rlvm/driver/RunHost.java}, \src{rlvm-driver/src/main/java/rlvm/driver/StoreHost.java}, \src{rlvm-driver/src/main/java/rlvm/driver/RunConfig.java}, \src{rlvm-driver/src/main/java/rlvm/driver/Run.java}, \src{rlvm-driver/README.md}; tests: \code{RepeatSkipTest.java} (new), \code{Fakes.java}}\td{the skip, the wait of section 3.4, \code{RunHost.unitRepeatOf} (a default method: no unit repeats another), the setting \code{repeats}, two statistics; nine tests}}
+}
+
+\ul{
+\li{Patch 1 stands alone. Patches 2, 3 and 4 belong together and are published in that order: store, loader, driver. Nothing of \code{rlvm-admit}, \code{rlvm-machine}, \code{rlvm-main} or a build script changes for change 2, and no method named by the machine's force-inline list is renamed, split or removed.}
+\li{Change 1 and the work of other packages on \code{rlvm-machine}: the patch touches one constant and one assertion. A change of the machine that moves the tick count of a probe moves nothing here as long as the largest probe that completes stays below 2^17 (it is at 63,654); the statistics of any run say so.}
+\li{Change 2 and the work of another package on the loader: in \code{Loader.java} the patch reads the result of \code{out.beginUnit}, adds one call before the segment is written and one after \code{out.complete}. The call must stay in front of everything that moves \code{segBase}, because it compares the two root ordinals with it.}
+\li{The code cites this report by its address (\code{RunConfig.skipRepeats}, \code{MachineEngine.DEFAULT_EAGER_PROBE} and the three READMEs), so the address is permanent.}
+\li{A changelog entry per change and the revision of the design notes named in sections 2.6 and 3.9 are the integrator's, with the commit.}
+}
+}
+
+\subtree{
+\title{5. What was not measured}
+
+\ul{
+\li{An idle host: the windows of the guard ran with a load average of 4 to 10 on the other twelve cores, the first windows with 45 to 95.}
+\li{The two changes together, in time, in the counters and in the gates: each was built, gated and timed alone against the base. Their effects are on different units (the five units of change 1 are not repeats), so the counters should add.}
+\li{The executables with the level fix: the builds that carry it are jars (section 1.1).}
+\li{One worker as a timing; x86-64, the architecture of the arena runner; the optional profile-guided build.}
+\li{The three budgets 2^16, 2^17 and 2^18 against each other on a calm host: they were timed only in the loaded windows, where they cannot be told apart.}
+\li{A budget in the lower gap of the probe sizes (between 1,600 and 34,096 ticks), which would also send six units to the reference engine.}
+\li{What the wait of section 3.4 costs when it occurs: it did not occur on any corpus.}
+\li{The loader's table on a file with more declarations than Mathlib's 722,000.}
+\li{Whether a key without the reducibility hint would find more than the 23, 5 and 21 units it separates on Mathlib, navier-stokes-euler and cslib, and a skip for axioms (four per corpus, a handful of ticks each).}
+\li{"Nothing kept between declarations" on navier-stokes-euler, cslib and Mathlib (section 3.7): the exact identity of the other units was shown on the five smaller corpora.}
+}
+}
+
+\subtree{
+\title{6. Tools}
+
+\p{All outside the repository. A private build of \code{rlvm-machine} that prints one line per probe with its own ticks (the ticks of the speculative segment, so nested probes are seen separately) and a summary by size; a runner of one-worker count passes with the statistics file and the unit trace, and a comparison of two such runs key by key and unit by unit; the guard runner (one window per launcher, the variants interleaved, a variant may carry settings of its own so that one executable is measured against itself) and its table; a generator of hostile exports on the prelude of the machine's suite (41 files) and a transformation that appends, to every row of that suite, its last declaration once more under a new name, as the same record and as a record of another kind; the official-verdict script (leanchecker in the arena image, no network) and the manifest that \src{scripts/gate-hostile.py} judges.}
+}
+
+\p{Findings: [the probes of eager reduction come in three sizes](ins-N4ES), [a declaration that repeats an accepted one needs no second check for the official checker, and the machine's answer for the copy can differ](ins-FS8W).}

@@ -1,0 +1,20 @@
+\title{The probes of eager reduction come in three sizes, and a budget of 2^17 ticks in the gap above the middle one hands four units of cslib and Mathlib to the reference engine}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-I](rep-OPT-I), section 2. It closes what [the insight on the four slow eager proofs](ins-URMW) left unmeasured. Conditions of the counts: the machine with its default switch set, one worker in file order, a private build that prints every probe with its own ticks, and the same with 8 workers and with sessions of one declaration; of the times: the executable and the JVM launcher of private builds, 8 workers, warm passes that reload the file, the builds interleaved in quiet-core windows on the aarch64 development host while the other cores were calm (load average 4 to 10), 6 rounds on the five short corpora and 3 on the three large ones, the mean over the rounds of the median later pass.}
+
+\ul{
+\li{\strong{Three groups.} Every probe of the eight corpora but thirteen needs fewer than 1,600 ticks. Six need 34,096 to 63,654 ticks: four units of \code{Init.Data.Char.Ordinal}, which every corpus built on Init contains, and two of \code{Batteries.Data.Fin.Coding} on Mathlib. Seven need 458,881 ticks and more: six in the four units of \code{Batteries.Data.Char.Basic} on cslib and Mathlib, and the probe of con-leche that never completes. The sizes are the same to within 22 ticks with one worker, with 8 workers and with sessions of one declaration: a probe takes next to nothing from the session.}
+\li{\strong{A budget is a choice of gap, not of size.} Every budget between 63,655 and 458,880 ticks cuts the same seven probes in every schedule. 2^17 is 2.06 times above the largest probe that completes and 3.5 times below the smallest that is cut; 2^16, which had been measured first, is 3 \% above the largest probe that completes.}
+\li{\strong{What it changes.} With 2^17 instead of 2^22 exactly four units of cslib and of Mathlib go from accepted by the machine to declined by it and decided by the reference engine in 15,760 steps, and con-leche's unit is cut at 2^17 instead of 2^22: 7.85 M ticks less on cslib (3.64 \%) and on Mathlib (1.37 \%), 4.06 M less on con-leche (5.74 \%); on Init, Std, cedar, reachability and navier-stokes-euler every counter and every unit is identical. The ticks and the outcome of every other unit of cslib and Mathlib are identical too, with warm sessions.}
+\li{\strong{In time.} On the executable the geometric mean of the eight warm passes goes from 1.855 to 1.830 s (-1.4 \%) and no corpus is slower: cslib 4.771 to 4.589 s, con-leche 1.414 to 1.369 s, Mathlib 13.172 to 12.937 s. On the JVM launcher it is flat (1.558 and 1.557 s, largest loss +1.1 \%). The peak resident set of the executable falls by 360 to 520 MiB on the three corpora, and the arena's instruction count of Mathlib from 1,462.1 to 1,454.0 G. In windows taken while the other cores were loaded the same builds could not be told apart: cells of corpora with identical work differed by up to 5.5 \%.}
+}
+
+\p{\strong{Not measured:} a quiet host; a budget in the lower gap, between 1,600 and 34,096 ticks, which would also send the six units of the middle group to the reference engine.}

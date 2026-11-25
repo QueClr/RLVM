@@ -1,0 +1,21 @@
+\title{A declaration that repeats an accepted one word for word needs no second check for the official checker; for the machine the answer for the copy can differ where it accepted the original through a tolerated shortcut}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{driver}
+\tag{loader}
+\tag{soundness}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-I](rep-OPT-I), section 3. Conditions: the default configuration (the machine as primary engine, policy practical) in a private build; counts with one worker in file order; official verdicts from leanchecker 4.36.0 in Docker; times as in the report, on a busy host.}
+
+\ul{
+\li{\strong{How many.} 5.0 to 12.4 \% of the units of the eight corpora are definitions, theorems or opaques whose record names the same type and value records as an earlier one of the same kind, universe parameters and hint: 59,900 of Mathlib's 721,845 units, 5,948 of Init's 58,547. They carry 1.3 to 3.7 \% of the machine's ticks (0.09 \% on reachability), more on the small corpora than on Mathlib.}
+\li{\strong{The official checker gives the repeat the verdict of the original}: on the 1,193 rows of the machine's hostile suite with their last declaration written once more under a new name, files built to make the official verdict depend on cache order and object identity, the verdict of the file is the verdict of the row every time. The check reads the kind, the universe parameters, the two records and the constants they mention; its caches live for one declaration.}
+\li{\strong{The machine does not always.} One row of kind T (\code{e1-sib-krule-major-redex-bad}) is accepted by the default configuration through its tabling of shared terms; its repeat, whose value is the promoted copy of the proof block and so a shared term of an earlier unit, is rejected by the machine and by the reference engine. A skip of repeats turns the base's reject of that file, at the repeat, into a tolerated accept. Nothing underivable is accepted, because the statement of a repeat is the statement of its original; but "the second check gives the verdict of the first" holds for the machine only up to its own tolerated shortcuts, and a skip that only checks when the original is in flight would make that verdict depend on the schedule. The driver therefore waits for the original when a checked repeat is not accepted.}
+\li{\strong{What the skip gives.} The ticks of the machine fall by 1.1 to 3.2 \% (one worker). On the executable, on a calm host, 8 workers, the geometric mean of the eight warm passes goes from 1.855 to 1.829 s (-1.4 \%) and every corpus is faster (Std and cedar -1.8 \%, Mathlib 13.172 to 12.967 s); on the JVM launcher -0.7 \% with a largest loss of +1.7 \%; the arena's instruction count falls on every corpus, by 2.4 \% on Init and cedar and from 1,462.1 to 1,449.6 G on Mathlib. The loader's table of declarations costs 0.5 to 0.8 \% of a load alone.}
+}
+
+\p{\strong{Not measured:} a quiet host; x86-64; what a key without the reducibility hint would add (23 units on Mathlib).}
