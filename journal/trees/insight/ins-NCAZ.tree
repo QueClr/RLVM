@@ -1,0 +1,20 @@
+\title{What a table of comparison results that outlives the session may hold: names without session ids, "true" answers only, and a clear mode flag}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-H](rep-OPT-H), sections 2, 4 and 5: the prototype of a per-worker table for pairs of closed values behind the switch \code{closedpairs} (off by default), 78 hostile exports with official verdicts, 16 seeded faults. No configuration accepted a statement that is not derivable. The lessons, for whoever builds a memo with a lifetime longer than [the session](design-warm-sessions):}
+
+\ul{
+\li{\strong{A name must not contain an id that a session issues.} Level ids, list ids, overlay term ids and the ids of stored big numbers are issued again by the next session for other things. The first number a session computes has the same store id in every session: with a seeded fault that names a stored number by its id, the export \code{oh-lit-computed-big-bad} makes the machine accept a false statement, while the rows with big literals written in the export do not catch the fault (their ids are the base store's). The prototype names by structure down to declaration rows, shared term ids, numbers by value and parameters by name, and gives no name to anything else: a miss, never a wrong answer.}
+\li{\strong{"False" answers are not worth keeping.} They are 0.7 to 3.3 \% of the answers and at most 0.17 points of the ticks, and a kept "false" is the one way such a table makes the machine reject a declaration that it accepted before (the driver's re-check repairs it, as a warm anomaly). A "true" is a fact about two closed terms; a "false" is the failure of one procedure in one cache state.}
+\li{\strong{An answer that is not computed leaves no memo.} The official kernel's answer for a later pair can depend on a reduction that an earlier comparison cached. A hit skips that reduction, so the machine can accept where the official kernel and the machine without the table reject: one new accept of the tolerated kind (\code{oh-kept-false-then-false-bad}, a derivable statement with its twin certificate). A warm session has the effect in the other direction, because it keeps the memo.}
+\li{\strong{Eager reduction.} An answer is kept only while the session's flag for possibly mode-dependent answers is clear, and never from a declaration that entered eager reduction. That holds back 10 to 59 \% of the candidate answers. Keeping them with a mark instead (the setting \code{sens:1}) gains ticks on Init and loses them on cslib and Mathlib, where the reading sessions run two to three times as many declarations again.}
+\li{\strong{Visibility.} An entry carries the rank of the declaration that wrote it and is read only by a declaration of higher rank; it is written only when the declaration is accepted. Per-worker tables need nothing else for invariance; a shared table could hold "true" answers only and would rest on the rank rule alone, which no gate exercises today.}
+}
+
+\p{\strong{Not established:} that the names are sound was attacked only by the author of the code; an adversarial pass by somebody else is required before the switch could enter a default set ([the rule for a default](dec-QN1O)).}

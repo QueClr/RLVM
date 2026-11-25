@@ -1,0 +1,22 @@
+\title{A closed-pair table that survives sessions removes 5 to 22 \% of the machine's ticks and almost none of its time on the large corpora: the comparisons it answers are short}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\tag{arena}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-H](rep-OPT-H), section 7. Conditions: a prototype behind the switch \code{closedpairs}, off by default and not merged into a default set; private builds of the main tree of 2026-11-25; the aarch64 development host; counts from one run each, times from one quiet window of three interleaved rounds with 8 workers while the other cores ran gates, instructions from \code{\verb~|perf stat -e instructions:u~} in the measurement container. It answers the question that [the insight on gruszka's table](ins-OMW4) left open.}
+
+\ul{
+\li{\strong{Counts.} One worker: 13 \% (Mathlib) to 41 \% (Init) fewer unfoldings and 5.4 to 21.6 \% fewer ticks on seven corpora, nothing on reachability. Eight workers, a table per worker: 4.5 \% (Mathlib), 5.8 \% (cslib), 9.8 \% (navier-stokes-euler) to 15.1 \% (Init) fewer ticks. The estimate "a third of the unfoldings" holds on four corpora and not on cslib (19 \%) and Mathlib (13 \%).}
+\li{\strong{Time.} The executable, warm passes: geometric mean 0.994 of the base, CPU 0.991, while a build that computes exactly what the base computes measured 1.001 and 0.999 in the same window with single corpora between 0.969 and 1.027. Resolved: 1.2 to 2.6 \% of the CPU on Init, Std, cedar and con-leche. Not resolved: any gain on navier-stokes-euler, cslib and Mathlib (CPU 0.996, 1.002, 0.993). The JVM launcher: pass 0.976, CPU 0.997. Peak resident size: 2 to 9 \% more in the executable. The estimate of 4 to 10 \% of the workers' CPU is not met.}
+\li{\strong{Instructions}, a whole run, user space: 1.3 \% fewer on Mathlib with 8 workers, 3.4 \% on navier-stokes-euler, 6.7 \% on Init; a third to a half of the reduction in ticks. The hooks alone cost 0.26 to 0.29 \%, writing the table 0.3 to 0.75 \% more.}
+\li{\strong{Why, as far as the counts say.} An answered comparison had cost 31 to 54 ticks: the table replaces many short comparisons, which ran on values the session had just touched, by two walks for names and probes of tables of its own. Ticks removed are not time removed when the removed work is cheap and the added work misses the caches. No profile was made; that is the first step for anybody who continues.}
+\li{\strong{Consequence.} For a memo that outlives the session, counts of unfoldings and ticks overstate the gain several times; decide such a lever by a guard window or at least by instructions. A table shared by the workers could add at most 1 to 6.5 points of ticks (the distance between one worker and eight private tables), by the same exchange rate little time.}
+}
+
+\p{\strong{Not measured:} x86-64 and the arena's own procedure; a profile of the lookups; the settings of the table in time; a shared table.}
