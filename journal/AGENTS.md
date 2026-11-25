@@ -65,6 +65,8 @@ minutes; later builds reuse the Nix store.
 | Motivation | `motivation` | `mot-XXXX` | `trees/motivation/` | `Motivation` |
 | Insight | `insight` | `ins-XXXX` | `trees/insight/` | `Insight` or `Hypothesis` |
 | Session | `session` | `ses-XXXX` | `trees/session/` | `Session` |
+| Study | (by hand) | `study-<slug>` | `trees/study/` | `Study` |
+| Report | (by hand) | `rep-<label>` | `trees/report/` | `Report` |
 | Identity | (by hand) | `claude-fable-5-2`, ... | `trees/people/` | `Person` |
 
 - Addresses are global and permanent. Directories are only for tidiness; they
@@ -73,6 +75,14 @@ minutes; later builds reuse the Nix store.
 - A design note may use a readable address (`design-<slug>`): create the file
   `trees/design/design-<slug>.tree` by hand. Everything else uses the random
   address `journal-new` allocates.
+- A `Study` is the reading of an outside source: the arena and its format,
+  the official kernel, another checker, a technique from the literature. A
+  `Report` is the full record of one piece of work: a measurement campaign, a
+  review, a spike, the working notes of a package - its method, its
+  conditions and every table. Both are long, both have a readable address
+  (`study-nano-lean`, `rep-P10`, `rep-soundness-default-set`), and both exist
+  so that insights, decisions and design notes can stay short and cite them.
+  See "Moving a document into the forest".
 - Keep a tree to one idea. Put an example, a motivating case or an unresolved
   question in its own tree and `\transclude` it from every note it belongs to,
   rather than growing one long document.
@@ -188,6 +198,36 @@ Record a lesson only if it would help a later session avoid the same dead end
 or reach the fix faster. Keep it to a few sentences and name its source (a
 document under `docs/`, a commit or a session tree). Use `\taxon{Hypothesis}`
 if it was not verified, and change it to `\taxon{Insight}` once it is.
+
+## Moving a document into the forest
+
+The documents written before the rule of 2026-11-24 are moved, not
+summarised: after the move the document is deleted, so the tree must carry
+everything in it.
+
+- One document becomes one tree: a design document a `Design` note
+  (`design-<slug>`), a research document a `Study`, a profile, review, spike
+  result or package note a `Report`. Convert it with
+  `python3 scripts/md2tree.py --plain-sections <file.md> <address>`: the
+  sections become subtrees without an address, so the document is one page.
+  (A subtree with an address gets a page of its own that carries the whole
+  document; give a section an address only when code cites it.)
+- Add the frontmatter: `\date` is the date of the work, `\meta{origin}{<path>}`
+  the path the document had, `\meta{moved}{YYYY-MM-DD}` the day it was moved,
+  and for a `Design` note the status. Keep the text as it was written: its
+  numbers, tables, times and the names of findings. Change only what the
+  writing rules require ("the user" becomes "the maintainer", no host paths)
+  and what the markup needs.
+- A reference inside the text to another moved document becomes a link to its
+  tree; a reference to a document not moved yet stays `\src{...}` until it is.
+- The trees that summarise the document (`\meta{origin}` with its path, or a
+  `\src{...}` link to it) link to the new tree instead. A link to a tree
+  carries that tree into the page of the linking tree, so link to it once per
+  tree, in the source line.
+- Add the tree to its hub: `studies` and `reports` list by taxon; a design
+  note is added to `trees/designs.tree` by hand.
+- `python3 scripts/check-public.py` does not print its notes (working files,
+  times of day) for `trees/study/` and `trees/report/`; its errors apply.
 
 ## Numbers
 

@@ -69,8 +69,9 @@ What stands behind this today (2026-11-25, reference engine as default; *agentic
 
 - gated, through the executable and through the jars: the 230 published arena tests (230 correct, none
   declined); 17,775 mutants of them against the stored verdicts of the official checker (no accepted bad mutant,
-  no rejected good one; 1,683 declined); 1,189 hostile exports with their official verdicts (no wrong accept, no
-  wrong reject; 6 accepts of kind (d), 4 declined). Earlier builds: the arena's complete test set of 270 by the
+  no rejected good one; 2,034 declined, most of them mutants with a metadata node, which a rejection re-checks
+  under the strict policy); 1,245 hostile exports with their official verdicts (no wrong accept, no wrong
+  reject; 6 accepts of kind (d)). Earlier builds: the arena's complete test set of 270 by the
   arena's own procedure (no wrong verdict; two `either` tests on which the official kernel does not terminate
   are declined); Init, Std, cedar, reachability, con-leche, navier-stokes-euler, cslib and mathlib accepted; the
   verdict does not depend on the number of workers or on how loading and checking interleave;

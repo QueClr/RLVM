@@ -1,0 +1,7 @@
+\title{Reports}
+
+\p{Full records of single pieces of work: measurement campaigns and profiles, reviews, spikes and the working notes of packages, each with its method, its conditions and every table. An insight states what a report found in a few sentences and links here for the detail.}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Report}}
+}

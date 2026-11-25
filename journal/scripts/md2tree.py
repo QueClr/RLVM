@@ -5,6 +5,9 @@ into a tree:
 
     python3 scripts/md2tree.py draft.md design-my-topic > trees/design/design-my-topic.tree
 
+With --plain-sections the sections are subtrees without an address (one page
+for the whole document); use it when a whole document is moved into the forest.
+
 The output is a starting point: add the frontmatter (\\taxon, \\date, \\author,
 ...) by hand as described in AGENTS.md, and cut the result down to one idea
 per tree. Needs the python package markdown-it-py, which the flake's
@@ -62,6 +65,10 @@ class Converter:
         self.link_map = link_map or (lambda href: None)
         self.used = set()
         self.sections = []  # (address, title) in document order
+        # False: sections are subtrees without an address. A subtree with an
+        # address gets a page of its own that carries the whole document, so
+        # a long document moved into the forest keeps its sections plain.
+        self.section_addresses = True
 
     # ---- inline -------------------------------------------------------
 
@@ -217,7 +224,8 @@ class Converter:
             addr = self._section_address(plain(head))
             self.sections.append((addr, plain(head)))
             body = self.sections_from(nodes[i + 1 : j], depth + 1)
-            out.append(f"\\subtree[{addr}]{{\n\\title{{{title}}}\n\n{body}\n}}")
+            opener = f"\\subtree[{addr}]" if self.section_addresses else "\\subtree"
+            out.append(f"{opener}{{\n\\title{{{title}}}\n\n{body}\n}}")
             i = j
         return "\n\n".join(o for o in out if o)
 
@@ -226,11 +234,12 @@ def parse(md: str) -> SyntaxTreeNode:
     return SyntaxTreeNode(MarkdownIt("commonmark").enable("table").parse(md))
 
 
-def convert_document(md: str, address: str, link_map=None):
+def convert_document(md: str, address: str, link_map=None, section_addresses=True):
     """Returns (title markup, plain title, body markup, converter)."""
     root = parse(md)
     nodes = list(root.children)
     conv = Converter(address, link_map)
+    conv.section_addresses = section_addresses
     title, title_plain = "", ""
     if nodes and nodes[0].type == "heading" and nodes[0].tag == "h1":
         title = conv.inline(nodes[0].children[0].children)
@@ -241,7 +250,10 @@ def convert_document(md: str, address: str, link_map=None):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        sys.exit("usage: md2tree.py <file.md> <tree-address>")
-    title, _, body, _ = convert_document(open(sys.argv[1]).read(), sys.argv[2])
+    args = [a for a in sys.argv[1:] if a != "--plain-sections"]
+    if len(args) != 2:
+        sys.exit("usage: md2tree.py [--plain-sections] <file.md> <tree-address>")
+    title, _, body, _ = convert_document(
+        open(args[0]).read(), args[1], section_addresses="--plain-sections" not in sys.argv
+    )
     print(f"\\title{{{title}}}\n\\import{{base-macros}}\n\n{body}")

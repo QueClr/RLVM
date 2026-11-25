@@ -1,0 +1,7 @@
+\title{Studies}
+
+\p{Readings of outside sources, moved here from the research documents of the repository: the Lean Kernel Arena and the export format, the official kernel, the checkers that lead the arena, techniques from the literature, the platform, and the baselines measured on the development host. Each is one long tree; design notes, decisions and insights cite them.}
+
+\query\datalog{
+ ?X -: {\rel/has-taxon ?X '{Study}}
+}
