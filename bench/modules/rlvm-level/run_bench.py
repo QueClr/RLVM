@@ -2,7 +2,7 @@
 """Instruction counts per level operation, measured in the arena container.
 
     . ./env.sh && $MVN -o -q -pl rlvm-level test-compile        # classes must exist
-    bench/modules/rlvm-level/run_bench.py [--only GLOB] [--json FILE]
+    bench/modules/rlvm-level/run_bench.py [--only GLOB] [--json FILE] [--overlay shared|flat]
 
 For every scenario of rlvm.level.LevelBench two JVM runs are measured with bench/measure.sh inside
 `bench/arena-docker.sh --arena-limits` (8 CPUs, 16 GB, default JVM flags), with N1 and N2 iterations:
@@ -60,9 +60,12 @@ SCENARIOS = [
 ]
 
 
+OVERLAY = "shared"
+
+
 def measure(scenario, n):
     cmd = [os.path.join(ROOT, "bench/arena-docker.sh"), "--arena-limits", "bench/measure.sh", "--",
-           "java", "-cp", CP, "rlvm.level.LevelBench", scenario, str(n)]
+           "java", "-Drlvm.level.overlay=" + OVERLAY, "-cp", CP, "rlvm.level.LevelBench", scenario, str(n)]
     p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     for line in p.stdout.splitlines():
         line = line.strip()
@@ -80,7 +83,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", default="*", help="glob over scenario names (baseline and references are added)")
     ap.add_argument("--json", help="write the raw measurements to this file")
+    ap.add_argument("--overlay", choices=("shared", "flat"), default="shared",
+                    help="the overlay the scenarios work on: shared (a worker's, the default) or flat (the private copy)")
     a = ap.parse_args()
+    global OVERLAY
+    OVERLAY = a.overlay
     if not os.path.isdir(os.path.join(ROOT, "rlvm-level/target/test-classes/rlvm/level")):
         sys.exit("build first:  . ./env.sh && $MVN -o -q -pl rlvm-level test-compile")
     wanted = set()
