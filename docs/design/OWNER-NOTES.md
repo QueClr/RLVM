@@ -139,3 +139,10 @@ owner's words.
     - Continuous integration may download and run GraalVM Community Edition (GPL v2 with the Classpath
       exception). Note 11, item 2 is unchanged: Oracle GraalVM (GFTC) is not downloaded or used by
       anything default.
+
+15. (2026-11-24) "after finalization, please move all notes to forester except readme: current the repo
+    contains too many notes scattered everywhere. updates AGENTS.md to record requirement."
+    Reading: every note of the project lives in the journal (`journal/`, the Forester forest); outside it
+    only README files remain (plus LICENSE and the agent-instruction files). Recorded in the root
+    `AGENTS.md`. The existing documents (`docs/`, the modules' NOTES files and the like) are moved into
+    the journal once the work in flight is finished; nothing new is added outside the journal meanwhile.

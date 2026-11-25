@@ -5,9 +5,12 @@ the Lean 4 kernel on GraalVM. It is a
 [Forester](https://www.forester-notes.org/) forest: many small notes ("trees")
 with permanent addresses that link to and include each other. Design notes,
 decisions, measured findings, open problems, examples and dated changelog
-entries for RLVM are written here. The long documents under `docs/` of the RLVM
-repository stay where they are; a tree states one point and links to the
-document that carries the detail.
+entries for RLVM are written here - and only here: by the maintainer's rule of
+2026-11-24 (the repository's root `AGENTS.md`) every note of the project lives
+in this forest, and outside it only `README.md` files remain. The long
+documents written before that rule (under `docs/` and next to the modules) are
+being moved in; until one has been moved, a tree states the point and links to
+the document that still carries the detail.
 
 The forest is self-contained: everything it needs is in this directory, so it
 can be moved into a repository of its own unchanged. All commands below are run
