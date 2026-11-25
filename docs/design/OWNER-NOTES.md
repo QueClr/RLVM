@@ -146,3 +146,16 @@ owner's words.
     only README files remain (plus LICENSE and the agent-instruction files). Recorded in the root
     `AGENTS.md`. The existing documents (`docs/`, the modules' NOTES files and the like) are moved into
     the journal once the work in flight is finished; nothing new is added outside the journal meanwhile.
+
+16. (2026-11-24) "the package also needs to improve: I expect a final single entry executable with fastest
+    default. Make GraalVM EE with preload profile optional. I accept the license locally for experiment
+    purpose. we have no commercial implication on the use of graal EE."
+    Reading:
+    - The release is ONE entry executable, `rlvm`, whose behaviour without any option is the fastest
+      configuration there is (engine, switch set, load mode, worker count, memory settings): a user does
+      not choose between launchers or switch sets.
+    - A build with Oracle GraalVM ("EE") and a shipped profile (profile-guided optimisation: the profile of
+      a training run is part of the repository, so that the build needs no training) is an OPTION of the
+      build, never its default. The maintainer accepts Oracle GraalVM's licence on the development machine
+      for experiments; the project has no commercial use of it. This relaxes note 11, item 2 to: nothing
+      DEFAULT downloads or uses Oracle GraalVM; an explicitly requested build may.
