@@ -1,0 +1,21 @@
+\title{A key that holds something young names something young: the session's tables as a young table of fixed size and an old one that grows}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-D](rep-OPT-D), sections 2 to 5. Conditions: the machine with its default switch set, 8 workers, warm passes that reload the file; counts from an instrumented JVM launcher, times from the executable (GraalVM CE native image) and the JVM launcher in interleaved rounds of quiet-core windows on the aarch64 development host, while other cores were busy.}
+
+\ul{
+\li{\strong{The rule.} Record and run ids are given in creation order and a key is made of ids that exist. So a key that holds a record or a run made after some moment can only name an entry made after it: a closure over a new frame, an application with a new argument, a pair with a new side. If a table is kept in two parts, what was entered since the young part was last emptied and everything before, a probe needs the old part only for a key made of old things. It is the "young set" proposed in [the working notes of the value records](rep-machine-M1), section 5.3, built for the three tables of a session: records, frames, pairs.}
+\li{\strong{What it answers.} On navier-stokes-euler with a young part of 16,384 records, 84 to 90 \% of the probes never leave it at the session cap of 1 MiB, and 60 to 70 \% at a cap of 16 MiB; the probes of an old table fall from 2.3 to 0.8 per tick there. What goes on to the old table is mostly a hit on an old entry, which is what a long session is kept for.}
+\li{\strong{The trap.} An application that extends another one, \code{\verb~|h a~} applied to \code{\verb~|b~}, has the key \code{\verb~|(h, a, b)~}: the value \code{\verb~|h a~} is not part of it, and the same application may have been made in one step before \code{\verb~|h a~} existed. A young \code{\verb~|h a~} proves nothing; the head and every argument have to be tested. A random test against a model catches the mistake only if it makes an application first and its prefix afterwards.}
+\li{\strong{What it is worth at the default cap, with young tables sized so that a session of 1 MiB never leaves them} (2^16 record slots, 2^13 pairs; before, nine sessions in ten rehashed their 16,384 records once): the geometric mean of the eight warm passes is 0.957 of the base's in the executable, every corpus faster (reachability 0.845, Mathlib 0.987), and 0.912 by the passes and 0.943 by the CPU on the JVM launcher, no corpus slower. Every counter of the machine is identical on the eight corpora on both launchers.}
+\li{\strong{Which part gives what.} The sizes alone, as a setting of the unchanged executable, are the whole gain on the corpora of small units (Std, navier-stokes-euler, cslib, Mathlib: within 1 \% of the candidate); the young and old tables are the gain where single units are large: reachability 16 \%, con-leche 3.6 \%, cedar 2.1 \%. On Init the one window that compared the two showed passes 2 to 7 \% longer with the tables at the same CPU, which other windows do not confirm; not settled.}
+\li{\strong{How it is kept honest.} A probe that skips the old table wrongly makes a second record for one value, which no verdict shows. An audit that maps every key of a session at its reset (\code{\verb~|-Drlvm.machine.tableaudit=true~}) fails on a build with a wrong boundary and passes on the eight corpora at caps of 1, 4 and 16 MiB.}
+}
+
+\p{\strong{Not measured:} x86-64; a quiet host; each part alone on every corpus. What the same tables do for larger session caps: [the cap of 1 MiB still stands](ins-58I0).}

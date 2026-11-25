@@ -1,0 +1,31 @@
+\title{What a larger session costs is reading old records, not finding them: with young and old tables the cap of 1 MiB still stands}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report of package OPT-D](rep-OPT-D), sections 2, 6 and 7; it tests the third lever of [the profile of the final default configuration](rep-P11) ("a machine whose tick costs at 16 MiB what it costs at 1 MiB", see [its insight](ins-0IR8)). Conditions: the executable (GraalVM CE native image) with the young and old session tables of [the other finding of that report](ins-ZKG1), the machine with its default switch set, 8 workers, warm passes that reload the file, session caps set with \code{\verb~|-X machine.session-kib~} and the driver's \code{\verb~|-X session-mib~} at four times it, three interleaved rounds per corpus in one quiet-core window of the aarch64 development host while other cores were busy; per-tick figures from \code{\verb~|perf~} on a symbolised image.}
+
+\table{
+\tr{\th{warm pass against the cap of 1 MiB}\th{2 MiB}\th{4 MiB}\th{8 MiB}\th{16 MiB}}
+\tr{\td{geometric mean of the eight corpora}\td{1.015}\td{1.025}\td{1.058}\td{1.081}}
+\tr{\td{navier-stokes-euler (ticks -7, -13, -18, -21 \%)}\td{0.988}\td{0.981}\td{0.994}\td{1.046}}
+\tr{\td{cslib (ticks -4 \% at 4 MiB, -5 \% at 16 MiB)}\td{1.024}\td{1.050}\td{1.074}\td{1.097}}
+\tr{\td{Mathlib (ticks -6 \% at 16 MiB)}\td{1.038}\td{1.040}\td{1.096}\td{1.148}}
+\tr{\td{largest ratio of a corpus}\td{1.050}\td{1.072}\td{1.110}\td{1.148}}
+}
+
+\ul{
+\li{\strong{The cap of 1 MiB minimises the warm pass, with the new tables as with the old ones.} Before the tables changed, 4 and 16 MiB cost cslib 5.3 and 9.7 \%, Mathlib 6.4 and 14.6 \% and navier-stokes-euler 0 and 8.5 \% (rep-P11); now 5.0 and 9.7 \%, 4.0 and 14.8 \%, -1.9 and +4.6 \%.}
+\li{\strong{The cap is the size of a core's second-level cache.} A session cut at 1 MiB is 1.4 MiB with its tables, and the cache is 2 MiB; at a cap of 2 MiB it is 2.6 MiB. In the unchanged executable a tick costs 163 ns at 1 MiB, 194 at 4 MiB and 229 at 16 MiB on navier-stokes-euler; a little more than half of the increase is the tables that find something again, two fifths is every other line that reads a record, a run or a term.}
+\li{\strong{Tables cannot take it back.} With a young table in front, the probes of a table outside the cache fall from 2.3 to 0.8 per tick at 16 MiB, and the tick is still 33 ns dearer at 4 MiB and 60 ns at 16 MiB than at 1 MiB (the old tables: 31 and 65). The cost moved: every record of a large session is entered a second time into a table outside the cache (10 ns per tick at 16 MiB; the rehash it replaces was 7.5), every probe that finds an old record still loads its slot and the record (14 ns), and the young records share the cache with everything the session reads elsewhere. A hit on an old record saves a tick of 160 ns and costs two to four loads from memory.}
+\li{\strong{Where a longer memory is not asked for, it only costs.} On cslib and Mathlib 8 to 9 \% of the closure probes find a record older than 16,384 records even at 16 MiB (30 \% on navier-stokes-euler), the ticks fall by 4 to 6 \%, and the sessions still grow to three times their size.}
+\li{\strong{It is the machine's session, not the driver's.} With the driver's cap left at 4 MiB and the machine's at 2 MiB, cslib is 3.8 \% slower and Mathlib needs 2.8 \% more CPU.}
+\li{\strong{Fresh pages are a part at the largest cap only}: with kept slab sizes that cover the sessions (\code{\verb~|-Drlvm.machine.keep=20,22,20~}), 16 MiB costs navier-stokes-euler 4 \% less CPU and 375 MiB less resident memory; at 1 and 4 MiB nothing.}
+}
+
+\p{What to take from it: the lever that is left for long sessions is not how a value is found but how many bytes a value is and where the old ones lie (the record layout, not the tables), and a cap larger than the cache needs a corpus that asks for its old values. \strong{Not measured:} x86-64, whose caches have other sizes; a quiet host; a cap between 1 and 2 MiB; huge pages for the executable's heap, which another package of the wave is building.}

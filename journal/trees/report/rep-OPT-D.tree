@@ -1,0 +1,529 @@
+\title{OPT-D: the price of a tick in a large session - a young and an old table for what a session finds again; the default cap gets 4 percent cheaper and stays where it is}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Optimisation package "OPT-D" of the wave after the first release, 2026-11-25 (the windows: 10:55 to 14:53 UTC). The lever is the third of [the profile of the final default configuration](rep-P11), section 6.3 and [its insight](ins-0IR8): a worker's session is reset at a cap of 1 MiB because a tick of the machine gets dearer as the session grows, and every reset throws away what a longer memory would save (a fifth of the ticks on navier-stokes-euler at 16 MiB). The task: find where the tick gets dearer, make a tick in a large session cost what it costs in a small one in the session tables of \code{rlvm-machine}, sweep the cap again and propose the cap that minimises the warm pass. This report is the measurement, the change, its gates and the sweep. The change is a patch against the main tree; nothing was published. No Oracle GraalVM was used.}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{Where the tick gets dearer} (section 2). In the executable on navier-stokes-euler a tick costs 163 ns of worker CPU at the default cap, 194 ns at 4 MiB and 229 ns at 16 MiB. A little more than half of the increase is in the three tables that find something again (17 of 31 ns, 37 of 65 ns): their probes are as short and their load as low as at the default cap (0.3 to 0.36; 0.4 to 0.6 further slots per probe), but a session of 1 MiB with its tables is 1.4 MiB and a core's second-level cache is 2 MiB, so from the second megabyte on every probe is a load from outside it. Rehashing is 2.4 ns of a tick at the default cap and 7.5 ns at 16 MiB (0.8 and 1.5 records rehashed per record made); a reset is O(used), 14 microseconds for 20,000 records, 0.2 \% of the workers' time at every cap; fresh pages are 6 ns at 16 MiB. The other two fifths are not in any table: every line that reads a record, a run or a term gets slower with the size of what the session holds.}
+\li{\strong{The change} (section 3): each of the three tables becomes a young table of fixed size, where every probe starts, and an old one that grows. A key that holds a record or a run made after the young table was last emptied can only name a young entry, so a probe goes on to the old table only for a key made of old things: with a young table of 16,384 records, 84 to 90 \% of the probes at the default cap and 60 to 70 \% at 16 MiB never leave it. The young tables are sized so that a session of 1 MiB never moves anything (2^16 record slots and 2^13 pairs instead of 2^15 and 2^12); a full young table is moved into the old one in batches whose loads overlap; an old table starts at the size the last session's ended with. Hash functions, records, ids and the footprint are what they were.}
+\li{\strong{It answers as it did} (section 4): every counter of the machine is identical to the base's on the eight corpora with one worker, through the executable and through the JVM launcher (ticks, records, run words, pairs, resets, declines; 16 comparisons, no difference); an audit of the tables at every reset, which fails on a build with a deliberately wrong boundary, passes on the eight corpora at caps of 1, 4 and 16 MiB; the gates of the default configuration pass through the executable and through the jars with the counts of the release, the machine's own gate with its debug modes passes at the default cap and at 2, 4 and 8 MiB (at 16 MiB \code{memocheck} declines one declaration of Init with an internal error of the level store, in the pristine base exactly as in the candidate).}
+\li{\strong{The guard at the present cap holds} (section 5). Executable: the geometric mean of the eight warm passes is 0.957 of the base's and every corpus is faster (Init 0.963, Std 0.968, cedar 0.988, reachability 0.845, con-leche 0.952, navier-stokes-euler 0.979, cslib 0.981, Mathlib 0.987, 14.81 to 14.62 s on a busy host; CPU ratios of all 24 rounds below 1). JVM launcher: 0.912 by the passes, 0.943 by the CPU, the largest ratio 0.999 (cslib). Peak resident memory is unchanged.}
+\li{\strong{A tick in a large session is still dearer, and the cap stays at 1 MiB} (section 6). With the new tables the eight warm passes are in the geometric mean 1.5 \% longer at 2 MiB, 2.5 \% at 4 MiB, 5.8 \% at 8 MiB and 8.1 \% at 16 MiB than at 1 MiB, and at 2 MiB two corpora lose more than 3 \% (con-leche 5.0, Mathlib 3.8). navier-stokes-euler, the corpus whose ticks a longer memory saves, is level from 1 to 8 MiB (it lost 8.5 \% at 16 MiB before and loses 4.6 \% now); on cslib and Mathlib a larger cap costs what it cost before the change. The reasons, each measured: what a longer session finds, it finds old, and an old record is two to four loads from memory whichever table points to it; every record of a large session still has to be entered once into a table outside the cache (10 ns of a tick at 16 MiB, where the rehash it replaces was 7.5); and cslib and Mathlib rarely ask for old entries (8 to 9 \% of their closure probes at 16 MiB, 30 \% on navier-stokes-euler) while their sessions grow all the same. Raising the machine's cap alone, with the driver's left at 4 MiB, gives the same loss.}
+\li{\strong{Verdict: GO for the tables} (one patch, \code{rlvm-machine} only), \strong{NO-GO for a change of the cap} (no second patch). The estimate of rep-P11 for this lever was a ceiling of 0.64 s on navier-stokes-euler, 0.26 s on cslib and 0.76 s on Mathlib if a tick at 16 MiB cost what it costs at 1 MiB, "expect half". What came of it is not that: the passes are 0.08, 0.10 and 0.19 s shorter in the guard window, all of it at the default cap and most of it from sessions that no longer rehash; the young and old tables are worth 16 \% on reachability, 3.6 \% on con-leche and 2.1 \% on cedar, where single units are large, and nothing on Std, navier-stokes-euler, cslib and Mathlib (section 5.3). The tick in a large session is still dearer. One thing is not settled: in the one window that compared the candidate with the base at the candidate's table sizes, Init's passes were 2 to 7 \% longer at the same CPU (three rounds), which the other windows and a look at its heaviest unit do not confirm. For an integrator who wants only what is certain on every corpus there is a smaller alternative, the table sizes alone (two lines; section 9).}
+}
+}
+
+\subtree{
+\title{1. What was built and how it was measured}
+
+\subtree{
+\title{1.1 Trees and distributions}
+
+\ul{
+\li{\strong{Base.} A copy of the tracked sources of the main tree of 2026-11-25 10:50 UTC (the merged tree of [the first wave](rep-INT8): the inline list, the shared level base, the loader's stretches), built whole by \src{scripts/build.sh} with \code{\verb~|--dev~}: the executable (GraalVM CE 25.5.5.0.3 native image, \code{\verb~|-O3 --gc=serial~}, heap at most 13g, collection policy \code{\verb~|BySpaceAndTime~}, 269 forced and 81 never-inlined methods) and the JVM launcher of the same jars (machine heap \code{\verb~|-Xmx7g -Xmn1g~}). The sources of \code{rlvm-machine} in it are those of the main tree, file for file.}
+\li{\strong{Candidate.} A second copy with the change of section 3, built the same way; only the machine jar differs from the base's. The inline lists have the same sizes (the one entry of the hand-kept list that named a method this change removes names its successor, section 9).}
+\li{\strong{Instrumented build.} A third copy of the base whose probes count: per class of probe the probes, the further slots, the tag matches that are another key, the size and the load of the table, the age of what a hit finds, the entries moved by every growth, what every reset clears and how long it takes, and what a young window of 512 to 65,536 records would have answered (section 2.3). JVM launcher only; its times are not used, except the durations of the growths and the resets, which are the instrumented machine's own clock readings.}
+\li{\strong{Symbolised images} of the base and of two stages of the candidate (the release flags plus \code{\verb~|-g~}), for the profiles.}
+\li{No Oracle GraalVM was used. Nothing was installed into the shared Maven repository, no file of the main tree was edited, and nothing was published.}
+}
+}
+
+\subtree{
+\title{1.2 Instruments}
+
+\ul{
+\li{\strong{Counters} of the instrumented build: one pass with 8 workers per session cap. A count does not depend on the load of the host.}
+\li{\strong{Profiles.} The method and the tools of [rep-P11](rep-P11), section 1.3: \code{\verb~|perf record~} in the arena container, attached after the first of three passes, 8 workers; \code{\verb~|cpu-clock~} 1 ms, cycles, instructions, cache refills of the three levels, TLB walks, cycles stalled on memory; every sampled address resolved to its innermost inlined frame. New here: every event is divided by the ticks of the profiled passes, so a line reads "nanoseconds, misses per tick". An instruction count per method is not used: in memory-bound code the sample of an instruction counter lands behind the load the core was waiting for, like a cycle sample.}
+\li{\strong{Timing.} Inside \src{bench/quiet.py} windows on the 8 measurement cores, as in [rep-OPT-A](rep-OPT-A): per corpus three interleaved rounds, in each round one process per variant, order rotated, \code{\verb~|rlvm[-jvm] --threads 8 --stats -X passes=N FILE~} and for a cap \code{\verb~|-X machine.session-kib=K -X session-mib=K/256~} (the driver's cap at four times the machine's, as rep-P11 ran it). Warm passes: passes 2 to N in the executable, the second half of the passes on the JVM launcher; per process the median of the warm passes (the mean under 0.5 s), per corpus the mean over the rounds.}
+\li{\strong{Cost only.} Every corpus with one worker and \code{\verb~|-X stats-file~} through base and candidate, on both launchers: with one worker the machine's counters repeat exactly.}
+\li{\strong{The table audit} (section 4.2), a check the change brings with it: with \code{\verb~|-Drlvm.machine.tableaudit=true~} every reset checks the tables of the session that ends without using their probes.}
+}
+}
+
+\subtree{
+\title{1.3 The host was busy}
+
+\p{Two to four other packages of the wave were computing during every window of this report, and this report's own gates ran on the efficiency cores; the load average was 12 to 60. A window keeps the 8 measurement cores for one process; the memory bandwidth and the two last-level caches of 8 MiB are shared with the other twelve cores. The base executable needs 14.8 s for a Mathlib pass in the guard window where [the integration of the first wave](rep-INT8) measured 13.11 s on a quiet host, and the same variant moves by up to 8 \% between two rounds of one window (section 6). Every ratio in this report is between processes that ran next to each other in one window; where a per-tick profile was taken in a disturbed window, the text says so. Nothing here is an absolute time for a table of benchmarks.}
+}
+}
+
+\subtree{
+\title{2. Where the tick gets dearer}
+
+\subtree{
+\title{2.1 A session is larger than the cache of its core, and the cap of 1 MiB sits at that edge}
+
+\p{The measurement cores are Cortex-X925 with a first-level data cache of 64 KiB and a second-level cache of 2 MiB each; there are two last-level caches of 8 MiB, each shared by ten cores, so a worker has one to three megabytes of it when the other cores are idle. A session that ends at the cap of 1 MiB holds 20,200 records (646 KiB), 93,500 run words (365 KiB), a record table of 2^16 slots after one doubling (256 KiB), a frame table of 64 KiB and a pair table of 128 KiB: 1.4 MiB that is read and written at random places. That fits the second-level cache, with nothing to spare. At a cap of 2 MiB the session with its tables is 2.6 MiB, at 4 MiB 4.8 MiB, at 16 MiB 10.5 MiB: from the second megabyte on a session does not fit, and what does not fit goes to a last-level cache that eight sessions share or to memory. The cap of [the earlier finding](ins-FJ5R) is the size of the second-level cache.}
+
+\p{The machine's cap counts bytes in use, not capacity (32 bytes per record, 4 per run word, 20 per pair, 4 per table slot in use). On navier-stokes-euler a session cut at 16 MiB holds 142,000 records on average, not 300,000: sessions also end at every unit that is not accepted, at every step back in file order and at the driver's cap. On cslib and Mathlib that is what bounds them: at a cap of 16 MiB their sessions hold 62,000 and 70,000 records on average (19,000 at 1 MiB).}
+}
+
+\subtree{
+\title{2.2 The base, tick by tick (the executable under perf)}
+
+\p{navier-stokes-euler, the symbolised image of the base, 8 workers, the workers' samples of two profiled passes divided by their ticks (145.0, 125.9 and 115.7 M per pass). The passes of the three processes took 3.54 to 3.57 s, 3.65 to 3.67 s and 4.02 to 4.06 s, the times of [rep-P11](rep-P11) within 4 \%.}
+
+\table{
+\tr{\th{per tick of the machine, workers}\th{1 MiB}\th{4 MiB}\th{16 MiB}}
+\tr{\td{\strong{CPU time, ns}}\td{\strong{163.3}}\td{\strong{194.2}}\td{\strong{228.7}}}
+\tr{\td{first-level refills}\td{8.32}\td{8.98}\td{9.57}}
+\tr{\td{second-level refills}\td{5.31}\td{6.88}\td{8.46}}
+\tr{\td{last-level read misses}\td{0.46}\td{0.84}\td{1.27}}
+\tr{\td{data TLB walks}\td{0.21}\td{0.30}\td{0.48}}
+\tr{\td{cycles stalled on memory}\td{90}\td{161}\td{251}}
+\tr{\td{ns: probes of closures and suspensions (tabling records)}\td{15.6}\td{21.5}\td{30.7}}
+\tr{\td{ns: probes of neutral applications}\td{9.4}\td{13.1}\td{19.9}}
+\tr{\td{ns: probes of frames}\td{6.3}\td{8.1}\td{9.5}}
+\tr{\td{ns: probes of the other records (constants, sorts, variables, projections)}\td{5.9}\td{6.9}\td{7.6}}
+\tr{\td{ns: growth and rehash of the two intern tables}\td{2.4}\td{6.2}\td{7.5}}
+\tr{\td{ns: the pair table's own methods and its growth (its inlined lookups are in the last line)}\td{1.2}\td{1.9}\td{2.5}}
+\tr{\td{\strong{ns: the tables that find something again, together}}\td{\strong{40.8}}\td{\strong{57.7}}\td{\strong{77.6}}}
+\tr{\td{ns: writing new records and runs}\td{5.1}\td{5.2}\td{5.2}}
+\tr{\td{ns: kernel (page faults, clearing of new pages)}\td{1.9}\td{2.6}\td{7.8}}
+\tr{\td{ns: everything else (evaluation, conversion with its inlined pair lookups, inference, levels, the term store ..)}\td{115.5}\td{128.7}\td{138.0}}
+}
+
+\p{The same samples per probe (the probes per tick are those of section 2.3):}
+
+\table{
+\tr{\th{per probe}\th{1 MiB}\th{4 MiB}\th{16 MiB}}
+\tr{\td{closures and suspensions: ns}\td{23.3}\td{29.5}\td{39.5}}
+\tr{\td{second-level refills}\td{0.55}\td{0.79}\td{1.13}}
+\tr{\td{last-level read misses}\td{0.04}\td{0.09}\td{0.16}}
+\tr{\td{data TLB walks}\td{0.025}\td{0.042}\td{0.093}}
+\tr{\td{neutral applications: ns}\td{19.8}\td{27.4}\td{41.4}}
+\tr{\td{second-level refills}\td{0.50}\td{0.76}\td{1.18}}
+\tr{\td{last-level read misses}\td{0.05}\td{0.10}\td{0.20}}
+\tr{\td{data TLB walks}\td{0.021}\td{0.038}\td{0.090}}
+\tr{\td{frames: ns}\td{11.5}\td{13.6}\td{15.1}}
+\tr{\td{second-level refills}\td{0.25}\td{0.33}\td{0.39}}
+\tr{\td{last-level read misses}\td{0.02}\td{0.04}\td{0.06}}
+\tr{\td{data TLB walks}\td{0.011}\td{0.017}\td{0.029}}
+}
+
+\ul{
+\li{\strong{A tick is 31 ns dearer at 4 MiB and 65 ns at 16 MiB} (rep-P11: 29 and 58 ns), and the pass that saves 13 and 20 \% of the ticks is 3 and 14 \% longer.}
+\li{\strong{The tables are a little more than half of the increase}: 17 of 31 ns and 37 of 65 ns. Their probes run at a mean load of 0.29 to 0.36 and look at 0.4 to 0.6 further slots (section 2.3): the probe sequences do not get longer, every load of them gets slower. A probe of a closure has 0.55 second-level refills at the default cap and 1.13 at 16 MiB, a probe of an application 0.50 and 1.18, with 0.16 and 0.20 last-level misses per probe where there were 0.04 and 0.05; a tick has 5.3 second-level refills at the default cap and 8.5 at 16 MiB.}
+\li{\strong{Growth and rehash are 2.4 ns of a tick at the default cap and 7.5 ns at 16 MiB}: 1.5 \% and 3.3 \% of the workers' time (section 2.3 has the counts).}
+\li{\strong{The kernel is 6 ns of the increase at 16 MiB}: slabs that outgrow the kept sizes (2^18 records, 2^20 run words) are new pages at every doubling.}
+\li{\strong{The other two fifths are not in any table}: every line of the machine that reads a record, a run or an overlay term gets 5 to 25 \% slower as the session's slabs leave the cache (evaluation 20.1 to 22.4 ns, applications in inference 9.4 to 11.5, the type patterns 8.1 to 10.4). A layout of the tables cannot reach these.}
+}
+}
+
+\subtree{
+\title{2.3 What the probes look like (counters of the instrumented base)}
+
+\table{
+\tr{\th{navier-stokes-euler, base, 8 workers, one pass}\th{1 MiB}\th{2 MiB}\th{4 MiB}\th{8 MiB}\th{16 MiB}}
+\tr{\td{ticks, M}\td{145.0}\td{134.2}\td{125.8}\td{119.5}\td{115.0}}
+\tr{\td{session resets}\td{3461}\td{1706}\td{887}\td{498}\td{338}}
+\tr{\td{records per session}\td{20206}\td{36280}\td{62818}\td{102980}\td{142172}}
+\tr{\td{run words per session}\td{93460}\td{175899}\td{316862}\td{534771}\td{755436}}
+\tr{\td{interned runs (frames) per session}\td{3431}\td{6561}\td{11958}\td{20335}\td{28798}}
+\tr{\td{pair entries per session}\td{3289}\td{6223}\td{11219}\td{18934}\td{26621}}
+\tr{\td{probes per tick: closures and suspensions}\td{0.672}\td{0.702}\td{0.730}\td{0.755}\td{0.778}}
+\tr{\td{probes per tick: neutral applications}\td{0.477}\td{0.478}\td{0.478}\td{0.478}\td{0.479}}
+\tr{\td{probes per tick: other records}\td{0.085}\td{0.075}\td{0.068}\td{0.063}\td{0.060}}
+\tr{\td{probes per tick: frames}\td{0.551}\td{0.576}\td{0.599}\td{0.616}\td{0.630}}
+\tr{\td{probes per tick: pair lookups}\td{0.251}\td{0.257}\td{0.261}\td{0.264}\td{0.266}}
+\tr{\td{probes per tick: pair insertions}\td{0.080}\td{0.080}\td{0.081}\td{0.081}\td{0.081}}
+\tr{\td{probes per tick: all}\td{2.12}\td{2.17}\td{2.22}\td{2.26}\td{2.29}}
+\tr{\td{probes that end in a new entry, \% of the closure probes}\td{31.0}\td{29.4}\td{28.1}\td{27.0}\td{26.1}}
+\tr{\td{the same, neutral applications}\td{42.7}\td{41.1}\td{39.8}\td{38.8}\td{38.1}}
+\tr{\td{the same, frames}\td{14.9}\td{14.5}\td{14.2}\td{13.9}\td{13.7}}
+\tr{\td{the same, pair lookups (absent)}\td{53.0}\td{51.7}\td{50.6}\td{49.8}\td{49.1}}
+\tr{\td{further slots looked at per probe, closures}\td{0.44}\td{0.53}\td{0.57}\td{0.59}\td{0.60}}
+\tr{\td{the same, frames}\td{0.14}\td{0.28}\td{0.42}\td{0.50}\td{0.52}}
+\tr{\td{tag matches that are another key, per closure probe}\td{0.025}\td{0.030}\td{0.033}\td{0.034}\td{0.034}}
+\tr{\td{load of the record table at a probe, mean}\td{0.29}\td{0.33}\td{0.35}\td{0.36}\td{0.36}}
+\tr{\td{slots of the record table at a probe, median / 90th percentile}\td{2^15 / 2^16}\td{2^16 / 2^17}\td{2^17 / 2^18}\td{2^18 / 2^19}\td{2^18 / 2^19}}
+\tr{\td{slots of the frame table at a probe, median / 90th percentile}\td{2^14 / 2^14}\td{2^14 / 2^14}\td{2^14 / 2^15}\td{2^15 / 2^16}\td{2^16 / 2^17}}
+\tr{\td{entries of the pair table at a lookup, median / 90th percentile}\td{2^12 / 2^14}\td{2^13 / 2^15}\td{2^14 / 2^16}\td{2^15 / 2^17}\td{2^16 / 2^17}}
+\tr{\td{closure hits on a record made within the last 4,096 records, \%}\td{72}\td{67}\td{63}\td{60}\td{57}}
+\tr{\td{within the last 16,384 records, \%}\td{91}\td{83}\td{75}\td{69}\td{65}}
+\tr{\td{within the last 65,536 records, \%}\td{95}\td{95}\td{94}\td{85}\td{77}}
+\tr{\td{application hits within the last 16,384 records, \%}\td{92}\td{79}\td{69}\td{61}\td{56}}
+\tr{\td{growths of the record table}\td{3307}\td{3083}\td{2197}\td{1436}\td{965}}
+\tr{\td{records rehashed per tick}\td{0.399}\td{0.577}\td{0.656}\td{0.664}\td{0.641}}
+\tr{\td{records rehashed per record made}\td{0.83}\td{1.25}\td{1.48}\td{1.55}\td{1.53}}
+\tr{\td{frames rehashed per tick}\td{0.006}\td{0.020}\td{0.065}\td{0.089}\td{0.098}}
+\tr{\td{pair entries rehashed per tick}\td{0.068}\td{0.093}\td{0.105}\td{0.111}\td{0.113}}
+\tr{\td{a reset, microseconds}\td{14}\td{23}\td{45}\td{87}\td{120}}
+\tr{\td{a reset, ns per record of the session}\td{0.69}\td{0.65}\td{0.72}\td{0.84}\td{0.84}}
+}
+
+\ul{
+\li{\strong{Two probes per tick, and a third to a half of them end in a new entry.} 2.1 to 2.3 probes per tick; 31 \% of the closure probes, 43 \% of the application probes and 53 \% of the pair lookups find nothing at the default cap. A probe that finds nothing has touched one cache line of the table and no record.}
+\li{\strong{The tables run half empty and the sequences are short}: mean load 0.29 at the default cap (a session of 20,000 records lives in a table of 2^15 slots until record 16,384 and in 2^16 slots after it) and 0.36 at 16 MiB; 0.44 to 0.60 further slots per probe; a tag of four bits sends one probe in thirty to forty to a record of another key. Nothing is wrong with the table as a hash table.}
+\li{\strong{Rehash storms at the default cap.} The record table starts at 2^15 slots and a session that reaches the cap holds 20,000 records: 3,238 of the 3,461 sessions double it exactly once, each rehashing 16,384 records; the pair table (2^12 entries, 3,300 pairs per session) is doubled 3,607 times. Per record made, 0.83 records are rehashed at the default cap and 1.5 at 4 MiB and more; in the instrumented JVM the rehash loops take 0.44 s of a pass at the default cap and 0.95 s at 16 MiB (6.5 to 9.7 ns per entry moved).}
+\li{\strong{A reset is O(used) and is not a cost}: 14 microseconds for a session of 20,000 records, 120 for one of 142,000; 0.65 to 0.84 ns per record at every cap; 0.04 to 0.05 s per pass over the eight workers, 0.2 \% of their time. The design holds: a grown table is zeroed whole (at most four slots per record), a table of base size by one fill or by one probe per record, the pair table through its log.}
+\li{\strong{What a longer session is for}: at the default cap 91 \% of the closures that are found were made within the last 16,384 records; at 16 MiB 65 \%, and 23 \% are older than 65,536 records. On navier-stokes-euler the old entries are asked for, which is why the ticks fall. On cslib and Mathlib they are not: 98 \% of the found closures are younger than 16,384 records at the default cap and 91 to 92 \% at 16 MiB.}
+}
+}
+
+\subtree{
+\title{2.4 What a young window would answer (the same counters)}
+
+\p{Ids are given in creation order, and a key is made of ids that exist. So a key that holds a record or a run made after some moment T can only name an entry made after T (section 3.1). The instrumented build keeps such moments (the last multiple of S records, for S from 512 to 65,536), and counts for every probe whether its key holds something younger and where the entry was found:}
+
+\table{
+\tr{\th{navier-stokes-euler, base, simulated young window}\th{1 MiB}\th{2 MiB}\th{4 MiB}\th{8 MiB}\th{16 MiB}}
+\tr{\td{young window of 4,096 records: probes that go on to the old table, \% of the closure probes}\td{33.6}\td{36.7}\td{39.1}\td{41.3}\td{43.1}}
+\tr{\td{the same, neutral applications}\td{32.0}\td{36.6}\td{40.0}\td{42.4}\td{44.1}}
+\tr{\td{the same, frames}\td{37.6}\td{42.4}\td{46.0}\td{49.1}\td{51.1}}
+\tr{\td{the same, pair lookups}\td{27.2}\td{30.8}\td{33.5}\td{35.5}\td{36.7}}
+\tr{\td{probes of an old table per tick, all classes}\td{0.72}\td{0.82}\td{0.89}\td{0.96}\td{1.02}}
+\tr{\td{young window of 16,384 records: closures, \%}\td{16.1}\td{23.3}\td{28.5}\td{32.4}\td{35.3}}
+\tr{\td{neutral applications, \%}\td{10.3}\td{20.2}\td{27.1}\td{31.7}\td{34.8}}
+\tr{\td{frames, \%}\td{13.2}\td{23.1}\td{30.5}\td{35.9}\td{39.5}}
+\tr{\td{pair lookups, \%}\td{9.9}\td{17.8}\td{23.4}\td{27.2}\td{29.5}}
+\tr{\td{probes of an old table per tick, all classes}\td{0.31}\td{0.49}\td{0.63}\td{0.74}\td{0.81}}
+\tr{\td{of the closure probes: an old key that is found in the old table, \%}\td{11.0}\td{18.0}\td{23.2}\td{27.0}\td{29.9}}
+\tr{\td{of the closure probes: an old key that is nowhere, \%}\td{5.1}\td{5.2}\td{5.3}\td{5.4}\td{5.4}}
+\tr{\td{young window of 65,536 records: closures, \%}\td{8.0}\td{7.5}\td{9.8}\td{19.4}\td{25.2}}
+\tr{\td{neutral applications, \%}\td{2.0}\td{2.3}\td{5.5}\td{16.5}\td{22.7}}
+\tr{\td{frames, \%}\td{3.0}\td{3.2}\td{7.0}\td{18.7}\td{25.6}}
+\tr{\td{pair lookups, \%}\td{2.3}\td{2.5}\td{5.3}\td{14.8}\td{20.2}}
+\tr{\td{probes of an old table per tick, all classes}\td{0.14}\td{0.13}\td{0.19}\td{0.42}\td{0.56}}
+\tr{\td{keys with a young component that were found among older entries (must be 0)}\td{0}\td{0}\td{0}\td{0}\td{0}}
+}
+
+\ul{
+\li{\strong{The new keys are young keys.} With a window of 16,384 records at a cap of 16 MiB, 65 \% of the closure probes, 65 \% of the application probes and 70 \% of the pair lookups are settled by what was entered since the window began: either the entry is there or the key proves that it is nowhere. The probes of a table older than the window fall from 2.29 to 0.81 per tick; at 4 MiB from 2.22 to 0.63.}
+\li{\strong{What is left for the old tables is what the session is kept for}: of the closure probes that go on, 30 points find an old record and 5 find nothing (16 MiB). A probe that finds an old record has to read that record, wherever a table keeps its slot.}
+\li{\strong{The rule held in every probe}: no key with a young component was found among older entries, in 260 to 310 million probes per cap (it cannot be otherwise; the count is the test of the instrument).}
+}
+}
+}
+
+\subtree{
+\title{3. The change}
+
+\subtree{
+\title{3.1 The rule: a key that holds something young names something young}
+
+\p{Record ids and run ids are given in creation order, and a key is made of ids that exist when it is looked up: a closure or suspension is \code{\verb~|(term, frame, level substitution)~} with the id of a frame run; a neutral application is its head and its arguments; a free variable, a projection and a successor hold one value; a frame or a REST chunk is its slots and the id of its REST run; a pair is two values. So if a key holds a record or a run that was made after some moment T, an entry with that key, if there is one, was entered after T. This is the "young set" that the owner of the value records proposed after the reachability profile ([rep-machine-M1](rep-machine-M1), section 5.3) and that stayed the first open item of the machine's tables ([the cost of one machine operation](prob-28KQ)): "a lookup whose key holds a record id at or above the mark needs the young table only: absence is proven without the big table".}
+
+\p{One step of it is not obvious and was a bug of the first draft, found by reading and then pinned by a test: an application that extends another one, \code{\verb~|mkApp~} of the value \code{\verb~|h a~} to \code{\verb~|b~}, has the key \code{\verb~|(h, a, b)~}. The value \code{\verb~|h a~} is not part of that key: the same application may have been made in one step before \code{\verb~|h a~} existed. So a young \code{\verb~|h a~} proves nothing; the head and every argument are tested (if \code{\verb~|h a~} is old, its head and its arguments are old, and only the new arguments need the test).}
+}
+
+\subtree{
+\title{3.2 Two tables for each of the three}
+
+\ul{
+\li{\strong{Young.} \code{\verb~|vtab~}, \code{\verb~|rtab~} and \code{\verb~|pair~} keep their names, their word format and their hash functions and become tables of fixed size, the base size of \code{\verb~|Machine.Sizes~}. A young table holds what was entered since it was last emptied; the young pair table has a log of its entries (as the pair table had), so that it is cleared and moved in O(used).}
+\li{\strong{Old.} \code{\verb~|vold~}, \code{\verb~|rold~}, \code{\verb~|pold~}: the tables that grow, in the same format. A session that never fills a young table has none: the field is then a shared one-word table that is never written, so a probe of "no old table" ends at its first load without a test.}
+\li{\strong{Boundaries.} Each young table has its own, set when it is emptied: \code{\verb~|vY~} and \code{\verb~|rYv~} for the records (the next record id and the next run word at that moment), \code{\verb~|rY~} and \code{\verb~|vYr~} for the runs, \code{\verb~|vYp~} for the pairs. Three pairs of boundaries instead of one, because the three tables fill at different rates (0.48 records, 0.08 frames and 0.08 pairs per tick) and each should be emptied only when it is full. The test "this ref is a record at or above the boundary" is one subtraction and one shift, \code{\verb~|((ref - vY) >>> 28) == 0~}: an older record gives a negative difference, an immediate (bit 31) and a signal (0x7FFFFFFC and above) a difference with a bit above 27, and a record index is below 2^28.}
+}
+}
+
+\subtree{
+\title{3.3 A probe}
+
+\p{Every probe starts in the young table and is, up to the empty slot, the loop it was. At the empty slot it continues in a method of its own (\code{\verb~|Machine.oldRecord~}, \code{\verb~|Values.neuOld~}, \code{\verb~|Runs.pruneOld~}, \code{\verb~|Runs.internRunOld~}; the pair probes switch tables inside their loop): if the key holds something at or above the boundary, the entry is new; else the old table is probed with the same comparison, and only if that ends at an empty slot too is the entry new. A new entry is always written into the young table, at the empty slot the first half found. The second halves are separate methods because the step methods of the control convention must stay below 325 bytecodes (\code{\verb~|StepSizeTest~}), and because they are the cold half on the default cap.}
+
+\p{\code{\verb~|Values.closureAt~} (a closure or suspension over the pruned working environment) loses its speculation. It used to load the slot that the record over a new frame would get before it probed the frame, so that two cache misses overlapped, and kept 256 recent frame hashes to predict when that pays ([rep-machine-M1](rep-machine-M1), D20). A new frame and the record over it now touch the young tables only, so the frame is probed first and, if it is new, the record is written at the first free slot of its sequence as before, without a comparison. The 256 hashes and the method \code{\verb~|closureOverNew~} are gone.}
+}
+
+\subtree{
+\title{3.4 Moving a young table into the old one}
+
+\ul{
+\li{\strong{When.} When a young table is half full (the load of the tables stays at most 0.5, as it was): its entries are entered into the old table and it starts empty; its boundaries become the current ends of the slabs. The old table is made, or doubled, first if the session's entries would fill more than half of it; then every entry it held is entered again, as in the growth it replaces.}
+\li{\strong{How.} In batches of 128 entries: a first loop computes the hashes and reads the slot each entry starts at, a second loop probes and writes. The loads of the first loop do not depend on each other, so the misses of a large table overlap; a loop that probes at once waits for a slot whenever the branch on its content was mispredicted. As lines of two profiles at a cap of 16 MiB: 6.9 ns per tick for the plain loop of a first build, 5.0 ns with the batches (two builds, the second in a disturbed window: an indication, not an A/B).}
+\li{\strong{How large.} At least the size of the young table, at least what the session needs, and at least the size the old table of the last session had when it ended (clamped to the 4 MiB that the table pool keeps): sessions that end at a cap need the same table again, and a table that starts at its final size is never rehashed. With a cap of 16 MiB on navier-stokes-euler the process CPU of a pass is 1.3 to 2.8 \% lower with this than without (three rounds, each of them); at 4 MiB the rounds disagree; at the default cap it does not matter, because only the sessions of the largest units have old tables.}
+\li{\strong{Refusals.} A growth that the heap refuses is what it was: \code{\verb~|E_MEM~} for the record table (and a \code{\verb~|HeapLimit~} if the young table would then pass three quarters, so that a probe always finds an empty slot), a \code{\verb~|HeapLimit~} for the other two; nothing is moved before the larger table exists.}
+}
+}
+
+\subtree{
+\title{3.5 Reset, footprint, debug modes}
+
+\ul{
+\li{\strong{Reset} stays O(used): a young table is cleared by one fill or, if it holds less than a 32nd of its slots, by one probe per entry (the rule the base tables had); an old table goes back to its pool, where it is zeroed (at most four slots per record; eight if the size came from a larger last session); the pair tables are cleared through their logs. The boundaries return to the bases of the next session, also under \code{poison}, which moves the bases.}
+\li{\strong{The footprint} is the same number: it counted the pair log's entries, which were the pairs; it now counts the pairs. So every reset happens where it happened.}
+\li{\strong{The debug modes} see no difference; \code{memocheck} and \code{shortcheck}, which mask the status of a pair while they re-derive it, find the pair's entry in either table.}
+\li{\strong{For tests and digests} the pairs of a session are enumerated in the order they were made, \code{\verb~|Machine.pairWord(i, word)~}: the old table's log, then the young one's. The digests of the M8 harness are the numbers they were.}
+}
+}
+
+\subtree{
+\title{3.6 Base sizes}
+
+\p{The young record table is 2^16 slots instead of 2^15 and the young pair table 2^13 entries instead of 2^12 (the frame table stays at 2^14 slots): 448 KiB for the three instead of 256 KiB. A session that ends at the cap of 1 MiB holds 20,200 records, 3,400 frames and 3,300 pairs, so with these sizes it never moves anything and never rehashes; the doubling at record 16,384 that nine sessions in ten paid (section 2.3) is gone. This alone, as a setting of the unchanged base (\code{\verb~|-Drlvm.machine.sizes=14,16,16,14,13,10~}), takes 1.0 to 3.7 \% of the process CPU of a pass on seven corpora (two interleaved rounds each: Init -3.6 \%, Std -3.7 \%, cedar -2.2 \%, reachability -2.2 \%, con-leche -2.2 \%, navier-stokes-euler -2.7 \%, cslib -1.0 \%; the two rounds of Mathlib disagree, -9.0 and +0.2 \%). The earlier measurement that set 2^15 ([session tables must start small](ins-8O66)) compared base sizes for sessions of one declaration; with warm sessions that run to the cap, the table a session ends with is the table it should start with.}
+}
+
+\subtree{
+\title{3.7 What did not change}
+
+\p{The hash functions, the table word (tag and index), the record and run layouts, the probe sequences inside a table, the order in which records, runs and pairs are made, and therefore every id: a record has the number it had. The slabs, their growth and their kept sizes. The session rules and both caps. No switch, no judgment.}
+}
+
+\subtree{
+\title{3.8 What was looked at and left alone}
+
+\ul{
+\li{\strong{A recency cache in front of the old tables} for the hits on old entries. The finding of rep-machine-M1 stands: what a small cache of recent hits can answer is a slot whose line is still in the hardware cache; it was not built.}
+\li{\strong{A denser old table} (a byte of tag per slot beside the slots, a load of 0.8): it would shorten the line a miss has to bring, not the miss, and a probe that finds its record reads the record anyway.}
+\li{\strong{Larger kept slabs} (\code{\verb~|-Drlvm.machine.keep=20,22,20~}): no difference at the default cap; 4 \% of the CPU at a cap of 16 MiB (section 6.3). Not part of the patch, because the cap does not change.}
+\li{\strong{Huge pages for the image's heap}: TLB walks are 0.2 per tick at the default cap and 0.5 at 16 MiB; another package of the wave works on them for the whole executable.}
+\li{\strong{Counted probe loops} (the observation of [rep-OPT-A](rep-OPT-A) that a safepoint poll sits in every probe step): not tried; the hot instructions of a probe are its loads.}
+}
+}
+}
+
+\subtree{
+\title{4. That a probe answers as it did}
+
+\p{A probe that skips the old table wrongly makes a second record, run or pair for a key that has one: two values that are the same value get two ids, and "equal ids" stops being "equal values". No timing shows that. Four nets, each able to catch it on its own:}
+
+\subtree{
+\title{4.1 Every counter identical, on eight corpora and both launchers}
+
+\p{One worker, \code{\verb~|-X stats-file~}, base against candidate at the default cap, through the executable and through the JVM launcher: all 137 to 142 values of the machine's statistics are equal on each of the eight corpora on each launcher (16 comparisons, 0 differences), with the two columns the comparison of [rep-OPT-A](rep-OPT-A) left out, the bytes of the sessions at their resets. Mathlib: 574,100,326 ticks, 288,313,296 records, 1,255,939,258 run words, 32,500,348 pairs, 14,838 resets, 714,652 units accepted by the machine and 120 declined, on both sides. Init 34,490,709 ticks and 15,271,167 records, Std 56,957,035 and 26,050,886, cedar 76,668,269 and 36,675,335, reachability 9,014,777 and 4,807,871, con-leche 70,755,128 and 30,386,037, navier-stokes-euler 144,220,381 and 69,470,249, cslib 215,956,521 and 112,841,885. A second record for one key would change the record count; a pair entry that is not found would change the hits of conversion and the ticks.}
+}
+
+\subtree{
+\title{4.2 The table audit}
+
+\p{\code{\verb~|Debug.tablesAudit~} checks the tables of a live session without their probes: it builds a map of every record key, every interned run and every pair of the session and fails on a second one; it looks every record, run and pair up in the table its id says and in the other one; it checks that nothing in an old table holds a record or a run from that table's boundary on (the rule of section 3.1 as a property of the data); and it compares the counters with the occupied slots. With \code{\verb~|-Drlvm.machine.tableaudit=true~} every reset runs it and a failure ends the run with an \code{\verb~|AssertionError~} (exit status 3).}
+
+\ul{
+\li{\strong{It fails when it should.} A build in which the closure probe tests the frame against the wrong boundary (one of four deliberate faults) accepts Init without the audit and ends with "records 16366 and 16386 have one key (kind 7): I-ID is broken" with it.}
+\li{\strong{It passes} on the eight corpora through the candidate's JVM launcher with 8 workers at the default cap, at 4 MiB and at 16 MiB (24 runs), and on navier-stokes-euler and cslib at 2 and 8 MiB: every session of every run audited at its reset, no failure, every verdict accept.}
+\li{The M8 gate of the candidate ran with the audit on at every cap (section 4.4).}
+}
+}
+
+\subtree{
+\title{4.3 The tests of the module}
+
+\ul{
+\li{\strong{The fast group}: 424 tests, 0 failures, 3 skipped (the base: 420, the same 3 skipped). Seven of them needed a change because they looked into the tables: the reference probes of the test tree (\code{\verb~|TestTables~}) now search both tables whatever the key holds, the pair digests of the M8 harness and of the tier comparison enumerate the pairs through \code{\verb~|Machine.pairWord~}, and two tests that handed the real pair probe invented record refs now make those records first: the probes are right only for keys made of records that exist, which is what the machine gives them.}
+\li{\strong{A new class, \code{\verb~|YoungOldTablesTest~}} (4 tests): random sorts, closures over frames of existing values, variables, applications in one step and by extension, projections, REST chains with far frames, and pairs, checked against a model that knows the id of every key, on machines whose young tables hold 8, 4 and 4 entries (and 1 each), with the audit every 41 to 53 steps and resets in between; the standard sizes with three sessions of 150,000 operations each, which move into old tables of the size the session before ended with. It was run against four deliberate faults (the extension rule of section 3.1, a pair boundary off by three, frames tested against the records' boundary, closures against the runs') and fails on each of them.}
+\li{\strong{\code{\verb~|SHostileSlowTest~}}: 2 tests, 0 failures (56 switch sets by 1,196 hostile exports).}
+\li{\strong{\code{\verb~|StepSizeTest~}}: every step method within the limits of the control convention (a first draft with the old-table loop inside the probes was over them in four methods).}
+}
+}
+
+\subtree{
+\title{4.4 The gates}
+
+\p{All on the candidate's private distribution (executable and jars of one build; the class files of the patch are byte for byte those of that build), every launcher without an option unless the row says so.}
+
+\table{
+\tr{\th{gate}\th{on what}\th{result}}
+\tr{\td{the machine's fast group}\td{the candidate tree}\td{424 tests, 0 failures, 3 skipped}}
+\tr{\td{\code{\verb~|SHostileSlowTest~}}\td{the candidate tree}\td{2 tests, 0 failures: 56 switch sets by 1,196 hostile exports}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~}}\td{the executable}\td{PASS. 230 of 230 tests correct, 0 declined; 17,775 mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,741, declined 2,034, 0 errors; the differential self-test caught its engine; hostile suite, 1,196 rows: agree 1,124, accepts of kind T tolerated 68, 0 wrong accept, 0 wrong reject, 4 declined}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile~}}\td{the jars on the JVM launcher}\td{230 of 230 correct, 0 declined; mutants: SOUNDNESS 0, COMPLETENESS 0, agree 15,739, declined 2,034 and 2 timeouts, the two mutants of \code{bugs} with a changed literal that need 18 to 30 s of CPU and ran past the judge's limit of 60 s on the efficiency cores at a load average of 60 (as in the gates of the first wave); \code{bugs} again on two performance cores: agree 2,590, declined 102, 0 errors, which makes the totals of the release (agree 15,741); self-test caught; hostile suite: agree 1,124, tolerated 68, 0 wrong accept, 0 wrong reject, 4 declined}}
+\tr{\td{every counter of the machine, one worker, base against candidate}\td{eight corpora, executable and JVM launcher}\td{16 comparisons of 137 to 142 values, 0 differences (section 4.1)}}
+\tr{\td{the table audit at every reset, 8 workers}\td{eight corpora at caps of 1, 4 and 16 MiB; navier-stokes-euler and cslib also at 2 and 8 MiB; JVM launcher}\td{28 runs, every one accepted, no audit failure}}
+\tr{\td{the M8 gate of the machine (\code{\verb~|report.sh gate --switches default --session-mib 1~}), the table audit on}\td{the candidate tree, 234 files}\td{PASS WITH DECLINES, the known decline of one unit of Std: differential against the reference engine 0 SOUNDNESS, 0 COMPLETENESS on the 230 tests, Init, Std, reachability and the Cedar slice; tier equivalence 0 different outcomes; convention equivalence (host depth 0 and unbounded against 128, every record word, run word and pair entry compared) 0 different; the debug audits (\code{\verb~|poison,scopeaudit,maskaudit~} and \code{\verb~|memocheck,shortcheck~}) 0 different outcomes, 0 declarations ended by an audit; the real driver: 230 of 230 verdicts right, the four corpora accepted}}
+\tr{\td{the same with the parts \code{\verb~|audits,pipeline~} at caps of 4, 16, 2 and 8 MiB (the harness's cap and the machine's own), the table audit on}\td{the candidate tree}\td{2, 4 and 8 MiB: PASS WITH DECLINES (the same unit of Std): under both audit lanes 0 different outcomes and 0 declarations ended by an audit on the 230 tests, Init, Std, reachability and the Cedar slice; the real driver 230 of 230 verdicts right, the four corpora accepted. 16 MiB: the same, except that the lane \code{\verb~|memocheck,shortcheck~} declines one declaration of Init with an internal error (unit 10107, \code{\verb~|Array.ofFn.go.eq_def~}: "not a level id: 852") that the plain lane and the lane \code{\verb~|poison,scopeaudit,maskaudit~} accept. \strong{The pristine base does the same} on the same declaration with the same message at that cap: a defect of the base's debug mode in sessions that live long, not of the tables; it was reported on the board and is not investigated here (the level store is outside this package)}}
+\tr{\td{the eight corpora with 8 and with 4 workers}\td{executable and JVM launcher}\td{4 workers: 16 runs, all accepted. 8 workers: the 48 processes of the two guard windows (3 to 10 passes each, section 5), all accepted}}
+\tr{\td{the eight corpora at caps of 2, 4, 8 and 16 MiB, 8 workers}\td{the executable}\td{96 processes of 3 to 6 passes, every pass accepted (section 6.1)}}
+}
+
+\p{Not run: the M8 gate of the pristine base next to the candidate's for a comparison cell by cell (the counters of section 4.1 are that comparison on the whole corpora); the driver's invariance suite (the driver is not touched, and a verdict that depended on the worker count would show in the rows above only by chance); the reference engine's own gate (not touched).}
+}
+}
+
+\subtree{
+\title{5. The guard at the present cap}
+
+\p{The rule of [the decision for a default](dec-YP0N): on the eight corpora the geometric mean of the warm passes goes down and no corpus is more than 3 \% slower, over at least three interleaved rounds, on the executable (the target) and on the JVM launcher (which must not regress). Base against candidate, both without any option, 8 workers, one window per launcher; the host was busy (section 1.3), so the CPU ratio of every round is given beside the ratio of the passes.}
+
+\subtree{
+\title{5.1 The executable}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{base: pass s}\th{candidate: pass s}\th{ratio}\th{base: CPU s}\th{candidate: CPU s}\th{ratio}\th{CPU ratio of each round}\th{peak RSS MiB: base}\th{candidate}}
+\tr{\td{init}\td{3 x 8}\td{0.669}\td{0.644}\td{0.963}\td{4.76}\td{4.61}\td{0.969}\td{0.971 0.971 0.966}\td{377}\td{370}}
+\tr{\td{std}\td{3 x 6}\td{1.147}\td{1.110}\td{0.968}\td{8.51}\td{8.24}\td{0.969}\td{0.973 0.965 0.970}\td{607}\td{603}}
+\tr{\td{cedar}\td{3 x 6}\td{1.614}\td{1.594}\td{0.988}\td{12.01}\td{11.75}\td{0.979}\td{0.992 0.966 0.978}\td{770}\td{751}}
+\tr{\td{reachability}\td{3 x 8}\td{0.537}\td{0.454}\td{0.845}\td{1.44}\td{1.20}\td{0.831}\td{0.825 0.829 0.839}\td{737}\td{731}}
+\tr{\td{con-leche}\td{3 x 6}\td{1.550}\td{1.475}\td{0.952}\td{10.04}\td{9.64}\td{0.960}\td{0.963 0.959 0.959}\td{1344}\td{1365}}
+\tr{\td{navier-stokes-euler}\td{3 x 4}\td{3.917}\td{3.834}\td{0.979}\td{29.57}\td{28.73}\td{0.972}\td{0.965 0.978 0.973}\td{1510}\td{1514}}
+\tr{\td{cslib}\td{3 x 4}\td{5.406}\td{5.302}\td{0.981}\td{41.05}\td{39.92}\td{0.972}\td{0.972 0.972 0.973}\td{2026}\td{1994}}
+\tr{\td{mathlib}\td{3 x 3}\td{14.811}\td{14.617}\td{0.987}\td{113.93}\td{112.26}\td{0.985}\td{0.985 0.990 0.980}\td{4385}\td{4372}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.957}}\td{}\td{}\td{\strong{0.953}}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The geometric mean of the eight warm passes is 0.957 of the base's, and every corpus is faster}: Init 3.7 \%, Std 3.2 \%, cedar 1.2 \%, reachability 15.5 \%, con-leche 4.8 \%, navier-stokes-euler 2.1 \%, cslib 1.9 \%, Mathlib 1.3 \% (14.81 to 14.62 s). The CPU ratios of the 24 rounds are all below 1, between 0.825 and 0.992, and those of one corpus lie within 1.5 points of each other except cedar's (0.966 to 0.992).}
+\li{\strong{reachability} is two units with sessions of hundreds of thousands of records: there the young tables answer most probes and the old ones are entered in batches (its tables were the case the young set was proposed for). Its pass is 0.54 s, so by the rule its figure is the mean of the warm passes.}
+\li{\strong{Peak resident memory} is within 2 \% on every corpus (Mathlib 4,385 and 4,372 MiB).}
+}
+}
+
+\subtree{
+\title{5.2 The JVM launcher}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{base: pass s}\th{candidate: pass s}\th{ratio}\th{base: CPU s}\th{candidate: CPU s}\th{ratio}\th{CPU ratio of each round}\th{peak RSS MiB: base}\th{candidate}}
+\tr{\td{init}\td{3 x 10}\td{0.591}\td{0.578}\td{0.977}\td{4.26}\td{4.13}\td{0.969}\td{0.938 0.998 0.974}\td{836}\td{816}}
+\tr{\td{std}\td{3 x 8}\td{1.040}\td{0.999}\td{0.960}\td{7.60}\td{7.24}\td{0.953}\td{0.986 0.940 0.933}\td{1475}\td{1461}}
+\tr{\td{cedar}\td{3 x 8}\td{1.387}\td{1.364}\td{0.983}\td{10.07}\td{9.86}\td{0.980}\td{0.934 1.043 0.965}\td{1785}\td{1774}}
+\tr{\td{reachability}\td{3 x 10}\td{0.487}\td{0.311}\td{0.638}\td{1.36}\td{1.10}\td{0.808}\td{0.855 0.784 0.785}\td{1579}\td{1570}}
+\tr{\td{con-leche}\td{3 x 8}\td{1.314}\td{1.240}\td{0.943}\td{8.65}\td{8.12}\td{0.939}\td{0.962 0.930 0.927}\td{1913}\td{1808}}
+\tr{\td{navier-stokes-euler}\td{3 x 6}\td{3.672}\td{3.299}\td{0.898}\td{25.99}\td{24.60}\td{0.946}\td{0.908 0.977 0.956}\td{2279}\td{2229}}
+\tr{\td{cslib}\td{3 x 6}\td{4.711}\td{4.706}\td{0.999}\td{33.81}\td{33.64}\td{0.995}\td{0.987 0.994 1.004}\td{2850}\td{2840}}
+\tr{\td{mathlib}\td{3 x 4}\td{12.563}\td{12.053}\td{0.959}\td{94.89}\td{91.60}\td{0.965}\td{0.969 0.945 0.983}\td{5116}\td{5119}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.912}}\td{}\td{}\td{\strong{0.943}}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The geometric mean is 0.912 by the passes and 0.943 by the process CPU; no corpus is slower}: the largest ratio is cslib's, 0.999 by the passes and 0.995 by the CPU (rounds 0.987, 0.994, 1.004). The window was the most disturbed of this report (single passes of the base of 5.3 s on navier-stokes-euler and 7.4 s on cslib among passes of 3.5 and 4.6 s), so the ratio of the passes overstates the gain on navier-stokes-euler and reachability; the CPU ratios are the steadier figure: Init 0.969, Std 0.953, cedar 0.980, reachability 0.808, con-leche 0.939, navier-stokes-euler 0.946, cslib 0.995, Mathlib 0.965 (94.9 to 91.6 s of CPU per pass, 12.56 to 12.05 s).}
+\li{\strong{Peak resident memory} is within 6 \% (con-leche 1,913 and 1,808 MiB; Mathlib 5,116 and 5,119 MiB).}
+}
+}
+
+\subtree{
+\title{5.3 The two parts apart: what the young and old tables add to the sizes alone}
+
+\p{The change has two parts. The sizes of the young tables are a setting of the unchanged base (\code{\verb~|-Drlvm.machine.sizes=14,16,16,14,13,10~}: its one table per kind then starts where a session of 1 MiB ends, and the counters are identical, checked on Init and navier-stokes-euler). The young and old tables are the rest. The base executable with that setting against the candidate, one window, three interleaved rounds:}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{base with the sizes: pass s}\th{candidate: pass s}\th{ratio}\th{base with the sizes: CPU s}\th{candidate: CPU s}\th{ratio}\th{CPU ratio of each round}\th{peak RSS MiB: base with the sizes}\th{candidate}}
+\tr{\td{init}\td{3 x 8}\td{0.634}\td{0.659}\td{1.039}\td{4.55}\td{4.56}\td{1.001}\td{1.002 1.004 0.998}\td{380}\td{374}}
+\tr{\td{std}\td{3 x 6}\td{1.136}\td{1.130}\td{0.995}\td{8.35}\td{8.29}\td{0.993}\td{0.995 0.992 0.993}\td{602}\td{595}}
+\tr{\td{cedar}\td{3 x 6}\td{1.593}\td{1.560}\td{0.979}\td{11.74}\td{11.65}\td{0.992}\td{0.997 0.983 0.997}\td{759}\td{752}}
+\tr{\td{reachability}\td{3 x 8}\td{0.538}\td{0.452}\td{0.840}\td{1.44}\td{1.22}\td{0.850}\td{0.847 0.850 0.853}\td{719}\td{734}}
+\tr{\td{con-leche}\td{3 x 6}\td{1.527}\td{1.473}\td{0.964}\td{9.81}\td{9.56}\td{0.975}\td{0.971 0.980 0.974}\td{1360}\td{1358}}
+\tr{\td{navier-stokes-euler}\td{3 x 4}\td{3.840}\td{3.876}\td{1.009}\td{28.58}\td{28.55}\td{0.999}\td{0.989 1.010 0.998}\td{1486}\td{1476}}
+\tr{\td{cslib}\td{3 x 4}\td{5.485}\td{5.443}\td{0.992}\td{39.77}\td{39.69}\td{0.998}\td{0.996 1.000 0.998}\td{1998}\td{2002}}
+\tr{\td{mathlib}\td{3 x 3}\td{14.175}\td{14.200}\td{1.002}\td{108.75}\td{108.84}\td{1.001}\td{1.001 1.001 1.001}\td{4410}\td{4409}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{\strong{0.976}}\td{}\td{}\td{\strong{0.975}}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{On the corpora of small units the sizes are the whole gain.} Std, navier-stokes-euler, cslib and Mathlib are within 1 \% of the base with the sizes by the passes and within 0.7 \% by the CPU (Mathlib 1.001 in each of three rounds); what section 5.1 shows for them (2 to 3 \%) is the rehash that no longer happens.}
+\li{\strong{The young and old tables are the gain where single units are large}: reachability 16 \% (CPU 15 \%, the three rounds within a point), con-leche 3.6 \% (CPU 2.5 \%), cedar 2.1 \% (CPU 0.8 \%). The geometric mean of the eight is 0.976 by the passes and 0.975 by the CPU.}
+\li{\strong{Init}: the same CPU (1.001; rounds 1.002, 1.004, 0.998) and passes that are 2.2 to 7.0 \% longer in the three rounds (0.634 against 0.659 s). The window does not say why. The heaviest unit of Init (716,000 ticks, by itself a session several times a young table) is not slower with the new tables but faster, 60 against 84 ms in a one-worker run of its block of 1,024 units (a diagnosis on two spare cores, not a window), and the other 1,022 units of the block take 0.97 of their time; and the two other windows chain to 0.999 (candidate against base 0.963 by the passes, section 5.1; sizes against base 0.964, section 3.6). A window of six rounds for Init alone was queued behind the windows of other packages for more than an hour and given up, so whether the passes of Init are longer with the new tables than with the sizes alone is not settled; against the base they are 3.7 \% shorter (section 5.1).}
+}
+}
+}
+
+\subtree{
+\title{6. Large sessions with the change: the sweep of the cap}
+
+\subtree{
+\title{6.1 The sweep}
+
+\p{The candidate's executable, 8 workers, the cap of the machine at 1 MiB (no option), 2, 4, 8 and 16 MiB with the driver's cap at four times it, three interleaved rounds per corpus in one window; ratios against the default cap. Every one of the 120 processes accepted.}
+
+\table{
+\tr{\th{corpus}\th{rounds x passes}\th{1 MiB: pass s}\th{2 MiB}\th{4 MiB}\th{8 MiB}\th{16 MiB}\th{ratio to 1 MiB: 2}\th{4}\th{8}\th{16}\th{CPU ratio: 2}\th{4}\th{8}\th{16}\th{peak RSS MiB at 1 / 4 / 16 MiB}}
+\tr{\td{init}\td{3 x 6}\td{0.651}\td{0.665}\td{0.665}\td{0.722}\td{0.709}\td{1.022}\td{1.022}\td{1.110}\td{1.090}\td{1.028}\td{1.048}\td{1.094}\td{1.100}\td{368 / 447 / 617}}
+\tr{\td{std}\td{3 x 5}\td{1.128}\td{1.162}\td{1.209}\td{1.227}\td{1.273}\td{1.030}\td{1.072}\td{1.088}\td{1.129}\td{1.033}\td{1.062}\td{1.095}\td{1.123}\td{591 / 644 / 886}}
+\tr{\td{cedar}\td{3 x 5}\td{1.606}\td{1.637}\td{1.687}\td{1.733}\td{1.780}\td{1.019}\td{1.051}\td{1.079}\td{1.109}\td{1.031}\td{1.058}\td{1.090}\td{1.113}\td{751 / 831 / 1050}}
+\tr{\td{reachability}\td{3 x 6}\td{0.489}\td{0.464}\td{0.466}\td{0.471}\td{0.457}\td{0.948}\td{0.954}\td{0.964}\td{0.934}\td{1.024}\td{1.020}\td{1.029}\td{1.022}\td{740 / 783 / 801}}
+\tr{\td{con-leche}\td{3 x 5}\td{1.492}\td{1.566}\td{1.548}\td{1.593}\td{1.652}\td{1.050}\td{1.038}\td{1.067}\td{1.107}\td{1.024}\td{1.043}\td{1.084}\td{1.127}\td{1336 / 1548 / 2094}}
+\tr{\td{navier-stokes-euler}\td{3 x 4}\td{4.142}\td{4.091}\td{4.062}\td{4.116}\td{4.333}\td{0.988}\td{0.981}\td{0.994}\td{1.046}\td{1.009}\td{1.014}\td{1.029}\td{1.060}\td{1487 / 1702 / 2681}}
+\tr{\td{cslib}\td{3 x 4}\td{5.406}\td{5.538}\td{5.676}\td{5.806}\td{5.930}\td{1.024}\td{1.050}\td{1.074}\td{1.097}\td{1.049}\td{1.078}\td{1.106}\td{1.131}\td{2031 / 2320 / 2803}}
+\tr{\td{mathlib}\td{3 x 3}\td{14.736}\td{15.295}\td{15.329}\td{16.149}\td{16.918}\td{1.038}\td{1.040}\td{1.096}\td{1.148}\td{1.040}\td{1.072}\td{1.111}\td{1.150}\td{4399 / 4622 / 6653}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{}\td{}\td{}\td{\strong{1.015}}\td{\strong{1.025}}\td{\strong{1.058}}\td{\strong{1.081}}\td{\strong{1.030}}\td{\strong{1.049}}\td{\strong{1.079}}\td{\strong{1.102}}\td{}}
+\tr{\td{largest ratio of a corpus}\td{}\td{}\td{}\td{}\td{}\td{}\td{1.050}\td{1.072}\td{1.110}\td{1.148}\td{}\td{}\td{}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{The cap of 1 MiB minimises the warm pass.} The geometric mean of the eight passes is 1.5 \% higher at 2 MiB, 2.5 \% at 4 MiB, 5.8 \% at 8 MiB and 8.1 \% at 16 MiB; at 2 MiB con-leche loses 5.0 \% and Mathlib 3.8 \%, so a cap of 2 MiB fails the guard on two corpora and gains on none by more than the noise. No change of the cap is proposed, and there is no second patch.}
+\li{\strong{navier-stokes-euler is level from 1 to 8 MiB}: the pass is 4.14, 4.09, 4.06 and 4.12 s, the process CPU 0.9, 1.4 and 2.9 \% above the default. This is the corpus where a longer memory saves the most (7, 13, 18 and 21 \% of the ticks, section 2.3), and with the new tables the saved ticks pay for the dearer ones, no more. reachability does not depend on the cap (its two units are sessions of their own; the CPU is within 3 \%, the passes of 0.46 to 0.49 s are within their noise).}
+\li{\strong{Everywhere else a larger cap costs what it cost before the change.} rep-P11 measured the base at 4 and 16 MiB: cslib +5.3 and +9.7 \%, Mathlib +6.4 and +14.6 \%, navier-stokes-euler 0 and +8.5 \%. The candidate: cslib +5.0 and +9.7 \%, Mathlib +4.0 and +14.8 \%, navier-stokes-euler -1.9 and +4.6 \%. The penalty of the largest cap is halved where the old entries are asked for, and it does not move on cslib and Mathlib.}
+\li{\strong{Peak resident memory} grows with the cap: Mathlib 4,399 MiB at a cap of 1 MiB, 4,622 at 4 MiB, 6,653 at 16 MiB; navier-stokes-euler 1,487, 1,702 and 2,681 MiB.}
+}
+}
+
+\subtree{
+\title{6.2 Why the tick stays dearer: what is found old has to be read where it lies}
+
+\p{navier-stokes-euler, the symbolised image of the candidate under perf at 1, 4 and 16 MiB, and of the base at 1 MiB, in one window; the window was busy (the base's tick is 180 ns in it and 163 ns in the window of section 2.2), so the columns compare with each other and not with that section.}
+
+\table{
+\tr{\th{per tick of the machine, workers}\th{base, 1 MiB}\th{candidate, 1 MiB}\th{candidate, 4 MiB}\th{candidate, 16 MiB}}
+\tr{\td{\strong{CPU time, ns}}\td{\strong{180.3}}\td{\strong{176.0}}\td{\strong{208.8}}\td{\strong{235.8}}}
+\tr{\td{second-level refills}\td{5.11}\td{4.81}\td{6.21}\td{7.83}}
+\tr{\td{last-level read misses}\td{0.73}\td{0.72}\td{1.04}\td{1.44}}
+\tr{\td{data TLB walks}\td{0.23}\td{0.23}\td{0.31}\td{0.46}}
+\tr{\td{ns: the probes up to the end of the young table (closures, applications, frames, other records)}\td{42.1}\td{40.8}\td{50.2}\td{53.9}}
+\tr{\td{ns: the probes' second halves in the old tables}\td{-}\td{1.6}\td{6.9}\td{13.8}}
+\tr{\td{ns: moving young tables into old ones}\td{-}\td{1.5}\td{6.8}\td{10.2}}
+\tr{\td{ns: growth and rehash}\td{3.3}\td{0.0}\td{0.1}\td{0.1}}
+\tr{\td{\strong{ns: the intern tables together}}\td{\strong{45.4}}\td{\strong{43.9}}\td{\strong{63.9}}\td{\strong{78.0}}}
+\tr{\td{ns: writing new records and runs}\td{5.5}\td{4.8}\td{5.2}\td{4.8}}
+\tr{\td{ns: kernel}\td{2.3}\td{2.2}\td{3.2}\td{8.9}}
+\tr{\td{ns: everything else}\td{127.2}\td{125.1}\td{136.5}\td{144.2}}
+}
+
+\ul{
+\li{\strong{The tick of the candidate is 33 ns dearer at 4 MiB and 60 ns at 16 MiB than at 1 MiB}: the base's increase (31 and 65 ns in its own window), give or take what two windows resolve. The tables are 20 and 34 ns of it, as they were 17 and 37.}
+\li{\strong{The cost moved, it did not go.} The probes of a table that is out of the cache went from 2.3 per tick to 0.8 (section 2.4). But each record of a large session is now entered twice, once into the young table and once, with a cache miss the first time could not have, into the old one: 10 ns per tick at 16 MiB, where the base's rehash was 7.5. Each probe that finds an old record pays for its slot and for the record as before: 14 ns per tick. And the first halves of the probes are 13 ns dearer although the young table is the same at every cap, because the young records and runs they compare against share the second-level cache with everything the session reads elsewhere: second-level refills go from 4.8 to 7.8 per tick.}
+\li{\strong{What is found old has to be read where it lies.} A session of 16 MiB is asked for old records 0.2 times per tick by closures alone (section 2.4). Such a hit is a slot of the old table, the record, for an application its spine, and then whatever the caller reads through the record: its value, the frame of that value. None of these is in the cache of a core whose session is five times the cache, and no table layout brings them there. The hit saves a tick that would have cost 160 ns and costs two to four loads from memory.}
+\li{\strong{On cslib and Mathlib there is little to find}: 8 to 9 \% of their closure probes find a record older than 16,384 records even at 16 MiB (30 \% on navier-stokes-euler; 4 to 5 \% and 11 \% at the default cap), their ticks fall by 4 to 6 \%, and the sessions get larger all the same (62,000 to 70,000 records at 16 MiB against 19,000). They pay for a large session and get nothing for it, whichever tables it has.}
+}
+}
+
+\subtree{
+\title{6.3 Two other suspects: the driver's cap, and the kept slabs}
+
+\ul{
+\li{\strong{The driver's cap is not what costs.} The sweep raised the driver's cap with the machine's (as rep-P11 did), so a worker's term and level overlays grew as well. The candidate with only the machine's cap raised, three interleaved rounds, ratios to the default: navier-stokes-euler 0.995 by the pass and 1.012 by the CPU at 2 MiB under the driver's 4 MiB (1.006 and 1.014 under 8 MiB) and 1.000 and 1.013 at 4 MiB under 4 MiB; cslib 1.038 and 1.039 (1.034 and 1.041), 1.051 and 1.061; Mathlib 1.027 and 1.028 (1.000 and 1.022), 1.013 and 1.037, the CPU above the default in every round. What a larger cap costs is in the machine's own session.}
+\li{\strong{Larger kept slabs help the largest cap only.} A session's record and run slabs keep their capacity across resets up to 2^18 records and 2^20 run words; a slab beyond that is allocated anew, and its pages are new pages. With \code{\verb~|-Drlvm.machine.keep=20,22,20~} at a cap of 16 MiB on navier-stokes-euler the process CPU of a pass is 4.0 \% lower (two rounds, 0.949 and 0.970) and the peak resident set is 2,057 instead of 2,432 MiB, because the outgrown slabs are no longer garbage: the kernel's 6 to 7 ns of a tick at that cap (sections 2.2 and 6.2) and the copies of the growing slabs are what it removes. At the default cap the setting changes nothing (1.001), and at 4 MiB, where few sessions outgrow the kept sizes, an earlier window showed none either. In that window the candidate at 16 MiB needs 8.5 \% more CPU than at 1 MiB without the setting and 4.1 \% with it (6.0 \% without it in the sweep); it does not move the verdict, which is decided at 2 and 4 MiB by cslib and Mathlib. A cap above 4 MiB, if one is ever wanted, should come with kept sizes that grow with it.}
+}
+}
+}
+
+\subtree{
+\title{7. The lever against its estimate, and what is left of it}
+
+\ul{
+\li{\strong{The estimate.} [rep-P11](rep-P11), section 6.3: a machine whose tick at 16 MiB costs what it costs at 1 MiB would save 0.64 s of the pass on navier-stokes-euler, 0.26 s on cslib and 0.76 s on Mathlib; half of that was expected of a first design, by a layout of the tables and by pooled slabs.}
+\li{\strong{What the tables gave.} Nothing of that kind: the tick of a large session is as dear as it was (section 6.2), and the best cap is the old one. What they gave is at the default cap and was not in the estimate: 4.3 \% of the geometric mean of the eight passes in the executable (0.08 s on navier-stokes-euler, 0.10 s on cslib, 0.19 s on Mathlib in the guard window). Taken apart (section 5.3), the sizes of the young tables, with which a session of 1 MiB no longer rehashes, are the gain on the corpora of small units, and the young and old tables are the gain where single units are large: reachability 16 \%, con-leche 3.6 \%, cedar 2.1 \%.}
+\li{\strong{Why the estimate was too high.} It took the whole increase of a tick for something a table layout addresses. Two fifths of the increase are not in the tables (section 2.2); of the tables' part, what a probe pays for an entry that is found old cannot be avoided by any table, and the rest - the probes that find nothing or something young - turned out to be replaceable only by other work of the same price, because a record of a large session must still be findable later and so must be written once to a place outside the cache. And on cslib and Mathlib a larger cap buys 4 to 6 \% of the ticks for sessions three times as large, whatever a tick costs.}
+\li{\strong{What would have to be true for a larger cap to pay.} Either the old part of a session is small enough to stay in the cache, which a cap is; or it is asked for rarely and in bulk; or what it holds is denser. The machine keeps a value in 32 bytes of record, 4 to 8 of table and its share of a run of 8 to 20 bytes, and reads its memo words through the record: a record of 32 bytes with its key and its memo words is one cache line at best and two at worst (an \code{\verb~|int[]~} is not aligned to cache lines; by the arithmetic of its header every second record straddles two lines in three placements of four, which was not measured). Smaller records, or old records moved next to each other by what finds them together, are a change of the value layout (\code{\verb~|Layout~}, the ISA), not of the tables, and were not tried.}
+\li{\strong{The bound is the machine's own session, not the worker's overlays.} The sweep raised the driver's cap with the machine's, so the term and level overlays of a worker grew too. With the driver's cap left at its 4 MiB and only the machine's raised to 2 MiB, cslib is 3.8 \% slower than at the default (3.4 \% with the driver's cap at 8 MiB) and Mathlib's process CPU is 2.8 \% higher (2.2 \%), in each of three rounds; with a machine cap of 4 MiB under the driver's 4 MiB, 5.1 \% and 3.7 \% (section 6.3).}
+}
+}
+
+\subtree{
+\title{8. What was not measured}
+
+\ul{
+\li{Anything on x86-64, the arena's architecture: its second-level cache and its last-level cache have other sizes, and the edge that the cap sits on (section 2.1) moves with them.}
+\li{A quiet host. Every window of this report was taken while other packages and this report's gates were computing on the other cores (section 1.3); the guard is three interleaved rounds per corpus and launcher and the CPU ratio of every round is given, but the absolute times are not those of the benchmark tables, and the JVM launcher's window was disturbed enough that its ratios of the passes are less certain than its CPU ratios.}
+\li{The young and old tables with each part taken out: the base sizes alone were measured on the unchanged base (section 3.6), the young and old tables with the former base sizes on navier-stokes-euler only (the process CPU of a pass 0.980 and 0.970 of the base's in two windows of two and three rounds), the batches of the moves only as lines of two profiles, the size hint of the old tables on navier-stokes-euler at two caps (section 3.4).}
+\li{Init with the young and old tables against Init with the sizes alone over more than three rounds (section 5.3): the one window that compared them shows longer passes at the same CPU, and a longer window was not obtained.}
+\li{Why the base's debug mode \code{memocheck} declines one declaration of Init when the session cap is 16 MiB (section 4.4).}
+\li{Other sizes of the young tables than 2^15 and 2^16 slots for the records with 2^12 and 2^13 pairs (2^17 slots with 2^14 pairs was measured on the base only: 1.7 \% of the CPU on navier-stokes-euler against 2.7 \% for the sizes chosen).}
+\li{The instruction count of the arena (its metric): not taken. The change removes rehash loops and adds a second probe for keys made of old things; the counters say how often (section 2.4), no count was run.}
+\li{The one-worker cost of a tick, and the unit level against gruszka: the largest proofs of navier-stokes-euler, where rep-P11 found the tick dearest, were not profiled alone with the change. reachability, whose two units are sessions of that kind, is the evidence here (15 \% of its pass).}
+\li{A cap between 1 and 2 MiB, and a cap below 1 MiB with the new tables (rep-P11 had 256 KiB 1 to 3 \% faster on cslib and 5 \% slower on navier-stokes-euler on the old ones).}
+\li{The optional Oracle GraalVM build (no Oracle GraalVM was used), and the Truffle tier.}
+}
+}
+
+\subtree{
+\title{9. The patch, and what an integrator must know}
+
+\ul{
+\li{\strong{One patch} for the tables, against the main tree of 2026-11-25 (it applies without a failed hunk): \code{\verb~|Machine.java~} (the tables, the moves, the reset, the base sizes), \code{\verb~|Values.java~}, \code{\verb~|Runs.java~}, \code{\verb~|Pairs.java~} (the probes), \code{\verb~|Debug.java~} (the pair entry of \code{memocheck} and \code{shortcheck}; the audit), one line of \src{rlvm-machine/h10/force-inline.txt}, two paragraphs of \src{rlvm-machine/README.md}, one line of \src{rlvm-machine/OWNERS.tsv}, and the tests (six changed classes, one new). No other module is touched: not \code{rlvm-level}, not the loader, not the driver, not the build. \strong{There is no second patch}: the cap does not change (section 6).}
+\li{\strong{A smaller alternative}, for an integrator who wants the gain of the small-unit corpora without the new tables: the base sizes alone, two changed lines of \code{\verb~|Machine.java~} (2^16 record slots and 2^13 pairs as the defaults of \code{\verb~|rlvm.machine.sizes~}). It was not built as an executable of its own: it is the base executable with that setting, whose counters are identical on Init and navier-stokes-euler and whose timings are sections 3.6 and 5.3. It gives the base's one table per kind a size that a session of 1 MiB does not outgrow, and does nothing for reachability, con-leche and cedar. The two patches change the same line; the main patch contains the alternative.}
+\li{\strong{The inline list.} The entry \code{\verb~|rlvm.machine.Values.closureOverNew~} names a method that no longer exists; the patch replaces it by \code{\verb~|rlvm.machine.Values.closureNew~}, the method that took its place (called from one site, as its predecessor was). Nothing else in the list changes; the build reports 269 forced and 81 never-inlined methods as before. None of the new methods is named \code{\verb~|..Slow~}, so none enters the never-inline list by its name.}
+\li{\strong{A new precondition of the probes}: a key is made of records and runs that exist in the session. The machine never gives a probe anything else; a test that calls \code{\verb~|Pairs~}, \code{\verb~|Values~} or \code{\verb~|Runs~} with invented record refs must make that many records first (two tests did, and were changed). The reference probes of the test tree search both tables and have no such precondition.}
+\li{\strong{Who reads the tables directly} must know there are two: \code{\verb~|m.vtab~}, \code{\verb~|m.rtab~} and \code{\verb~|m.pair~} are the young tables only, and \code{\verb~|m.plog~} is the log of the old pair table only. The pairs of a session in the order they were made are \code{\verb~|m.pairWord(i, word)~} for \code{\verb~|i~} below \code{\verb~|m.pairUsed~}.}
+\li{\strong{Settings.} \code{\verb~|-Drlvm.machine.sizes~} now gives the sizes of the young tables (default \code{\verb~|14,16,16,14,13,10~}); \code{\verb~|-Drlvm.machine.oldhint=off~} makes an old table start at the young table's size (the A/B of section 3.4); \code{\verb~|-Drlvm.machine.tableaudit=true~} runs the audit at every reset (for gates; a session of 20,000 records costs a map of that size).}
+\li{\strong{After applying}: the machine's fast group (424 tests), the gate of the default configuration through the executable and through the jars, and one audit run of a large corpus through the JVM launcher. The journal's design notes on the session tables ([warm sessions and the session cap](design-warm-sessions), [the cost of one machine operation](prob-28KQ)) describe one table per kind and base sizes of 2^15 and 2^12; they were not edited by this package.}
+\li{\strong{If another package of the wave gives the executable huge pages}: the old tables and the slabs of a large session are what they would help most; the sweep of section 6 is then worth repeating at 2 and 4 MiB on navier-stokes-euler, where the caps are already level.}
+}
+}
