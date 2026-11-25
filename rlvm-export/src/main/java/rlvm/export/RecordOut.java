@@ -11,6 +11,18 @@ package rlvm.export;
 interface RecordOut {
     void app(long id, long fn, long arg) throws ExportException;
 
+    /**
+     * {@code count} consecutive {@code app} lines, three ints each from {@code recs[0]} on: id, fn,
+     * arg, as {@link #app} gets them. Exactly the {@code count} calls of {@link #app} in this order,
+     * which is what the default makes; {@link Linker} takes the stretch in one loop. The array is
+     * scratch owned by the caller.
+     */
+    default void apps(int[] recs, int count) throws ExportException {
+        for (int i = 0, o = 0; i < count; i++, o += 3) {
+            app(recs[o], recs[o + 1], recs[o + 2]);
+        }
+    }
+
     void lam(long id, int binderInfo, long name, long type, long body) throws ExportException;
 
     void pi(long id, int binderInfo, long name, long type, long body) throws ExportException;

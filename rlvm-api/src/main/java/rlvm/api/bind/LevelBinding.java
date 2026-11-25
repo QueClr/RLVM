@@ -22,7 +22,8 @@ import rlvm.store.LevelInfo;
  *
  * <p>Thread confinement is the level store's: a base binding is used by the loader thread until
  * {@code freeze()}, afterwards only its read-only methods may be called (from any thread); an overlay
- * binding belongs to one worker.
+ * binding belongs to one worker. A worker's overlay is a shared overlay: it reads the frozen base (or
+ * the frozen snapshot of a pipelined load) in place and holds only what its session adds.
  *
  * <p>Errors: {@link #instantiate(int, int, int)} and {@link #instantiateList(int, int, int)} throw
  * {@link KernelException} ({@link Reason#LEVEL_ARITY_MISMATCH}) on lists of different length;
@@ -122,6 +123,31 @@ public final class LevelBinding implements LevelOps, IntLists, LevelInfo {
         }
         this.store = overlay;
         this.lists = overlay.lists();
+        if (++epoch == Integer.MAX_VALUE) {
+            java.util.Arrays.fill(unionStamp, 0);
+            epoch = 1;
+        }
+    }
+
+    /**
+     * Pipelined loading, the way a worker's binding moves: puts this binding on {@code snapshot}, a
+     * NEWER frozen snapshot of the same level chain, and forgets everything created through it, exactly
+     * as {@link #rebase rebase(snapshot.newSharedOverlay())} would. If this binding's store is a shared
+     * overlay ({@code LevelStore.newSharedOverlay()}) it stays the same object and is moved in place:
+     * nothing of the snapshot is copied, the worker reads it where the loader published it.
+     *
+     * @throws IllegalArgumentException if {@code snapshot} is not a frozen store, or is smaller than the
+     *     current base (a snapshot never shrinks)
+     */
+    public void rebaseOnto(LevelStore snapshot) {
+        if (snapshot == null || !snapshot.isFrozen()) {
+            throw new IllegalArgumentException("rebaseOnto needs a frozen snapshot");
+        }
+        if (!store.isSharedOverlay()) {
+            rebase(snapshot.newSharedOverlay());
+            return;
+        }
+        store.rebase(snapshot);
         if (++epoch == Integer.MAX_VALUE) {
             java.util.Arrays.fill(unionStamp, 0);
             epoch = 1;
@@ -378,15 +404,16 @@ public final class LevelBinding implements LevelOps, IntLists, LevelInfo {
             scratch = new int[Math.max(na + nb, scratch.length * 2)];
         }
         int[] out = scratch;
-        int[] pool = lists.pool();
+        int[] poolA = lists.poolOf(setA);
+        int[] poolB = lists.poolOf(setB);
         int i = lists.start(setA);
         int ia = i + na;
         int j = lists.start(setB);
         int jb = j + nb;
         int n = 0;
         while (i < ia && j < jb) {
-            int x = pool[i];
-            int y = pool[j];
+            int x = poolA[i];
+            int y = poolB[j];
             if (x == y) {
                 out[n++] = x;
                 i++;
@@ -400,10 +427,10 @@ public final class LevelBinding implements LevelOps, IntLists, LevelInfo {
             }
         }
         while (i < ia) {
-            out[n++] = pool[i++];
+            out[n++] = poolA[i++];
         }
         while (j < jb) {
-            out[n++] = pool[j++];
+            out[n++] = poolB[j++];
         }
         int result = n == na ? setA : n == nb ? setB : lists.intern(out, 0, n);
         unionKey[slot] = key;
@@ -423,14 +450,15 @@ public final class LevelBinding implements LevelOps, IntLists, LevelInfo {
         if (nl == 0) {
             return false;
         }
-        int[] pool = lists.pool();
+        int[] poolS = lists.poolOf(sub);
+        int[] poolL = lists.poolOf(list);
         int s = lists.start(sub);
         int l = lists.start(list);
         outer:
         for (int i = 0; i < ns; i++) {
-            int x = pool[s + i];
+            int x = poolS[s + i];
             for (int j = 0; j < nl; j++) {
-                if (pool[l + j] == x) {
+                if (poolL[l + j] == x) {
                     continue outer;
                 }
             }

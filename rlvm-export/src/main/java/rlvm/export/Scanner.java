@@ -1,5 +1,6 @@
 package rlvm.export;
 
+import java.lang.invoke.VarHandle;
 
 /**
  * The template fast path.
@@ -21,12 +22,26 @@ package rlvm.export;
  * <p>Memory discipline: a load never starts beyond the first byte that has not been verified to belong
  * to the current line, and lines end with {@code '\n'}; so no load starts at or after {@code end}.
  * The caller guarantees that the buffer extends {@link #PAD} bytes beyond {@code end}.
+ *
+ * <p>Word loads are written as {@code (long) LE64.get(s, q)} at their place, not as a call of
+ * {@link Mem#u64}: the access through the handle is expanded where it stands by every compiler,
+ * while the ahead-of-time compiler of the native image, which has no profile, left the call of the
+ * one-line method (and the calls of {@link #num}) in the scan loop: six calls for an {@code app}
+ * line, each with a stack check, a frame and a safepoint poll, about twenty instructions for one
+ * load (*agentic-note*: rep-OPT-B). For the same reason the {@code app} lines, six lines of seven,
+ * have a loop of their own ({@link #appStretch}) in which the three numbers are converted in place.
  */
 final class Scanner {
     private Scanner() {}
 
+    /** Unaligned little-endian 64-bit loads from the scan buffer: {@link Mem#LE64}. */
+    private static final VarHandle LE64 = Mem.LE64;
+
     /** Bytes that must be readable after the {@code end} passed to {@link #scan}. */
     static final int PAD = 16;
+
+    /** Number of {@code app} lines that {@link #scan} collects before it hands them over. */
+    private static final int APPS = 256;
 
     /** Lines longer than this are not supported (a line must fit one buffer). */
     static final int MAX_LINE = 1 << 30;
@@ -38,6 +53,8 @@ final class Scanner {
     private static final long QUOTES = 0x2222222222222222L;
     private static final long BACKSLASHES = 0x5C5C5C5C5C5C5C5CL;
     private static final long SPACES = 0x2020202020202020L;
+    /** Added to a word xored with {@link #ZEROS}: the high bit of every byte above 9 gets set. */
+    private static final long NOT_DIGIT = 0x7676767676767676L;
 
     private static final long M1 = 0xFFL;
     private static final long M2 = 0xFFFFL;
@@ -152,7 +169,7 @@ final class Scanner {
      * followed by a non-digit: {@code (value << 5) | digits}. Anything else: -1.
      */
     static long num(byte[] s, int q) {
-        long t = Mem.u64(s, q) ^ ZEROS;
+        long t = (long) LE64.get(s, q) ^ ZEROS;
         // high bit set in every byte that is not a digit (exact for the lowest such byte)
         long nd = ((t + 0x7676767676767676L) | t) & HIGH;
         if (nd != 0) {
@@ -179,7 +196,7 @@ final class Scanner {
 
     /** Like {@link #num} for 1 to 15 digits. */
     static long numWide(byte[] s, int q) {
-        long t = Mem.u64(s, q) ^ ZEROS;
+        long t = (long) LE64.get(s, q) ^ ZEROS;
         long nd = ((t + 0x7676767676767676L) | t) & HIGH;
         if (nd != 0) {
             int bits = Long.numberOfTrailingZeros(nd) - 7;
@@ -191,7 +208,7 @@ final class Scanner {
         if ((t & M1) == 0) {
             return -1;
         }
-        long t2 = Mem.u64(s, q + 8) ^ ZEROS;
+        long t2 = (long) LE64.get(s, q + 8) ^ ZEROS;
         long nd2 = ((t2 + 0x7676767676767676L) | t2) & HIGH;
         if (nd2 == 0) {
             return -1; // 16 digits or more
@@ -212,7 +229,7 @@ final class Scanner {
     static int plainString(byte[] s, int q) {
         int p = q;
         while (true) {
-            long w = Mem.u64(s, p);
+            long w = (long) LE64.get(s, p);
             long x = w ^ QUOTES;
             long y = w ^ BACKSLASHES;
             long m = (((x - ONES) & ~x) | ((y - ONES) & ~y) | ((w - SPACES) & ~w) | w) & HIGH;
@@ -230,7 +247,7 @@ final class Scanner {
     /** Index of the first {@code '\n'} at or after {@code p}, which must exist before {@code end}. */
     static int newline(byte[] s, int p, int end) {
         while (p < end) {
-            long x = Mem.u64(s, p) ^ NEWLINES;
+            long x = (long) LE64.get(s, p) ^ NEWLINES;
             long m = (x - ONES) & ~x & HIGH;
             if (m != 0) {
                 int r = p + (Long.numberOfTrailingZeros(m) >>> 3);
@@ -255,27 +272,42 @@ final class Scanner {
         // Measured and rejected: comparing the id of an app line with the text of the expected next id
         // instead of parsing it (the trick of the Susz packer). Under C2 it made the scan 16 % faster
         // in time but cost 12 % more instructions, and instructions are what the arena counts.
+        final int[] apps = new int[3 * APPS + 1];
         while (pos < end) {
-            long w = Mem.u64(s, pos);
+            // {"app":{"arg":A,"fn":F},"ie":N}\n - six lines of seven, in long stretches. A stretch is
+            // scanned by appStretch (no call in its loop) and handed over as a whole.
+            final int na = appStretch(s, pos, end, apps);
+            if (na != 0) {
+                pos = apps[3 * na];
+                out.apps(apps, na);
+                if (na == APPS) {
+                    continue;
+                }
+            }
+            if (pos >= end) {
+                break;
+            }
+            // one line of another kind, or an app line that is not the template
+            long w = (long) LE64.get(s, pos);
             if (w == APP_0) {
-                if (Mem.u64(s, pos + 6) == APP_6) {
+                if ((long) LE64.get(s, pos + 6) == APP_6) {
                     int q = pos + 14;
                     long r = num(s, q);
                     if (r >= 0) {
                         long arg = r >>> 5;
                         q += (int) r & 31;
-                        if ((Mem.u64(s, q) & M6) == FN6) {
+                        if (((long) LE64.get(s, q) & M6) == FN6) {
                             q += 6;
                             r = num(s, q);
                             if (r >= 0) {
                                 long fn = r >>> 5;
                                 q += (int) r & 31;
-                                if ((Mem.u64(s, q) & M7) == IE7) {
+                                if (((long) LE64.get(s, q) & M7) == IE7) {
                                     q += 7;
                                     r = num(s, q);
                                     if (r >= 0) {
                                         q += (int) r & 31;
-                                        if ((Mem.u64(s, q) & M2) == END2) {
+                                        if (((long) LE64.get(s, q) & M2) == END2) {
                                             out.app(r >>> 5, fn, arg);
                                             pos = q + 2;
                                             continue;
@@ -297,6 +329,85 @@ final class Scanner {
             out.slow(pos, nl + 1 - pos);
             pos = nl + 1;
         }
+    }
+
+    /**
+     * Scans the {@code app} lines from {@code pos} on, at most {@link #APPS} of them, up to the first
+     * line that is not the template (or to {@code end}): id, fn and arg of line {@code i} go to
+     * {@code apps[3 * i ..]}, the position behind the last line taken to {@code apps[3 * n]}. Returns
+     * the number {@code n} of lines taken. It takes a line only if {@link #scan}'s own test of the
+     * template, with {@link #num}, takes it, and reads the same numbers.
+     *
+     * <p>The loop is written for a compiler without a profile (the native image; see the class
+     * comment): it contains no call - a call inside a loop, even one that is never made, makes that
+     * compiler keep the loop's values in the stack frame - and no branch on the number of digits of
+     * a number, which cannot be predicted. {@code num} is written out: {@code bits} is 8 * (the
+     * digits among the eight bytes loaded), 64 for eight, when the shift is by 0; a ninth digit is
+     * added by arithmetic ({@code nine} is 1 if there is one); a tenth ends the stretch. The byte
+     * behind the eight is read whatever {@code bits} is: it lies within {@link #PAD} of the line.
+     */
+    private static int appStretch(byte[] s, int pos, int end, int[] apps) {
+        int n = 0;
+        while (n < APPS && pos < end) {
+            if ((long) LE64.get(s, pos) != APP_0 || (long) LE64.get(s, pos + 6) != APP_6) {
+                break;
+            }
+            int q = pos + 14;
+            long t = (long) LE64.get(s, q) ^ ZEROS;
+            int bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+            int c = s[q + 8] - '0';
+            int nine = (bits >>> 6) & ~((c | (9 - c)) >> 31);
+            if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                break;
+            }
+            long arg = conv8(t << (64 - bits));
+            arg += nine * (arg * 9 + c);
+            q += (bits >>> 3) + nine;
+            if ((nine != 0 && !notDigit(s[q])) || ((long) LE64.get(s, q) & M6) != FN6) {
+                break;
+            }
+            q += 6;
+            t = (long) LE64.get(s, q) ^ ZEROS;
+            bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+            c = s[q + 8] - '0';
+            nine = (bits >>> 6) & ~((c | (9 - c)) >> 31);
+            if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                break;
+            }
+            long fn = conv8(t << (64 - bits));
+            fn += nine * (fn * 9 + c);
+            q += (bits >>> 3) + nine;
+            if ((nine != 0 && !notDigit(s[q])) || ((long) LE64.get(s, q) & M7) != IE7) {
+                break;
+            }
+            q += 7;
+            t = (long) LE64.get(s, q) ^ ZEROS;
+            bits = Long.numberOfTrailingZeros((((t + NOT_DIGIT) | t) & HIGH) >>> 7);
+            c = s[q + 8] - '0';
+            nine = (bits >>> 6) & ~((c | (9 - c)) >> 31);
+            if (bits == 0 || ((t & M1) == 0 && bits != 8)) {
+                break;
+            }
+            long id = conv8(t << (64 - bits));
+            id += nine * (id * 9 + c);
+            q += (bits >>> 3) + nine;
+            if ((nine != 0 && !notDigit(s[q])) || ((long) LE64.get(s, q) & M2) != END2) {
+                break;
+            }
+            // the numbers have at most nine digits
+            apps[3 * n] = (int) id;
+            apps[3 * n + 1] = (int) fn;
+            apps[3 * n + 2] = (int) arg;
+            n++;
+            pos = q + 2;
+        }
+        apps[3 * n] = pos;
+        return n;
+    }
+
+    /** Whether {@code b} is not an ASCII digit. */
+    private static boolean notDigit(byte b) {
+        return b < '0' || b > '9';
     }
 
     /** Position after the line at {@code p} if it matched a template (and was emitted), else -1. */
@@ -351,7 +462,7 @@ final class Scanner {
     }
 
     private static int thm(byte[] s, int p, RecordOut out, int[] list) throws ExportException {
-        if ((Mem.u64(s, p + 8) & M7) != ALL7) {
+        if (((long) LE64.get(s, p + 8) & M7) != ALL7) {
             return -1;
         }
         long l = idList(s, p + 15, list, 0);
@@ -360,7 +471,7 @@ final class Scanner {
         }
         int numAll = (int) l;
         int q = (int) (l >>> 32);
-        if (Mem.u64(s, q) != LEVELPARAMS_0 || Mem.u64(s, q + 8) != LEVELPARAMS_8) {
+        if ((long) LE64.get(s, q) != LEVELPARAMS_0 || (long) LE64.get(s, q + 8) != LEVELPARAMS_8) {
             return -1;
         }
         l = idList(s, q + 16, list, numAll);
@@ -369,7 +480,7 @@ final class Scanner {
         }
         int numParams = (int) l - numAll;
         q = (int) (l >>> 32);
-        if (Mem.u64(s, q) != NAME8) {
+        if ((long) LE64.get(s, q) != NAME8) {
             return -1;
         }
         q += 8;
@@ -379,7 +490,7 @@ final class Scanner {
         }
         long name = r >>> 5;
         q += (int) r & 31;
-        if (Mem.u64(s, q) != TYPE8) {
+        if ((long) LE64.get(s, q) != TYPE8) {
             return -1;
         }
         q += 8;
@@ -389,7 +500,7 @@ final class Scanner {
         }
         long type = r >>> 5;
         q += (int) r & 31;
-        if (Mem.u64(s, q) != VALUE_0 || Mem.u64(s, q + 1) != VALUE_1) {
+        if ((long) LE64.get(s, q) != VALUE_0 || (long) LE64.get(s, q + 1) != VALUE_1) {
             return -1;
         }
         q += 9;
@@ -398,7 +509,7 @@ final class Scanner {
             return -1;
         }
         q += (int) r & 31;
-        if ((Mem.u64(s, q) & M3) != END3) {
+        if (((long) LE64.get(s, q) & M3) != END3) {
             return -1;
         }
         out.thm(name, type, r >>> 5, list, numAll, numParams);
@@ -406,7 +517,7 @@ final class Scanner {
     }
 
     private static int def(byte[] s, int p, RecordOut out, int[] list) throws ExportException {
-        if ((Mem.u64(s, p + 8) & M7) != ALL7) {
+        if (((long) LE64.get(s, p + 8) & M7) != ALL7) {
             return -1;
         }
         long l = idList(s, p + 15, list, 0);
@@ -415,18 +526,18 @@ final class Scanner {
         }
         int numAll = (int) l;
         int q = (int) (l >>> 32);
-        if (Mem.u64(s, q) != HINTS_0 || (Mem.u64(s, q + 8) & M1) != ':') {
+        if ((long) LE64.get(s, q) != HINTS_0 || ((long) LE64.get(s, q + 8) & M1) != ':') {
             return -1;
         }
         q += 9;
-        long h = Mem.u64(s, q);
+        long h = (long) LE64.get(s, q);
         int hintKind;
         long height = 0;
         if (h == HINT_ABBREV) {
             hintKind = ExportSink.HINT_ABBREV;
             q += 8;
         } else if (h == HINT_REGULAR_0) {
-            if ((Mem.u64(s, q + 8) & M3) != HINT_REGULAR_8) {
+            if (((long) LE64.get(s, q + 8) & M3) != HINT_REGULAR_8) {
                 return -1;
             }
             q += 11;
@@ -447,7 +558,7 @@ final class Scanner {
         } else {
             return -1;
         }
-        if (Mem.u64(s, q) != LEVELPARAMS_0 || Mem.u64(s, q + 8) != LEVELPARAMS_8) {
+        if ((long) LE64.get(s, q) != LEVELPARAMS_0 || (long) LE64.get(s, q + 8) != LEVELPARAMS_8) {
             return -1;
         }
         l = idList(s, q + 16, list, numAll);
@@ -456,7 +567,7 @@ final class Scanner {
         }
         int numParams = (int) l - numAll;
         q = (int) (l >>> 32);
-        if (Mem.u64(s, q) != NAME8) {
+        if ((long) LE64.get(s, q) != NAME8) {
             return -1;
         }
         q += 8;
@@ -466,7 +577,7 @@ final class Scanner {
         }
         long name = r >>> 5;
         q += (int) r & 31;
-        if (Mem.u64(s, q) != SAFETY_0 || Mem.u64(s, q + 8) != SAFETY_8 || Mem.u64(s, q + 16) != TYPE8) {
+        if ((long) LE64.get(s, q) != SAFETY_0 || (long) LE64.get(s, q + 8) != SAFETY_8 || (long) LE64.get(s, q + 16) != TYPE8) {
             return -1;
         }
         q += 24;
@@ -476,7 +587,7 @@ final class Scanner {
         }
         long type = r >>> 5;
         q += (int) r & 31;
-        if (Mem.u64(s, q) != VALUE_0 || Mem.u64(s, q + 1) != VALUE_1) {
+        if ((long) LE64.get(s, q) != VALUE_0 || (long) LE64.get(s, q + 1) != VALUE_1) {
             return -1;
         }
         q += 9;
@@ -485,7 +596,7 @@ final class Scanner {
             return -1;
         }
         q += (int) r & 31;
-        if ((Mem.u64(s, q) & M3) != END3) {
+        if (((long) LE64.get(s, q) & M3) != END3) {
             return -1;
         }
         out.def(name, type, r >>> 5, hintKind, height, list, numAll, numParams);
@@ -494,7 +605,7 @@ final class Scanner {
 
     /** At the value of {@code "binderInfo":"}: {@code (length up to the closing quote << 2) | info}, or -1. */
     private static int binderInfo(byte[] s, int q) {
-        long w = Mem.u64(s, q);
+        long w = (long) LE64.get(s, q);
         if (w == BI_DEFAULT) {
             return (7 << 2) | ExportSink.BINDER_DEFAULT;
         }
@@ -502,10 +613,10 @@ final class Scanner {
             return (8 << 2) | ExportSink.BINDER_IMPLICIT;
         }
         if (w == BI_INST_0) {
-            return (Mem.u64(s, q + 8) & M4) == BI_INST_8 ? (12 << 2) | ExportSink.BINDER_INST_IMPLICIT : -1;
+            return ((long) LE64.get(s, q + 8) & M4) == BI_INST_8 ? (12 << 2) | ExportSink.BINDER_INST_IMPLICIT : -1;
         }
         if (w == BI_STRICT_0) {
-            return (Mem.u64(s, q + 8) & M6) == BI_STRICT_8 ? (14 << 2) | ExportSink.BINDER_STRICT_IMPLICIT : -1;
+            return ((long) LE64.get(s, q + 8) & M6) == BI_STRICT_8 ? (14 << 2) | ExportSink.BINDER_STRICT_IMPLICIT : -1;
         }
         return -1;
     }
@@ -518,10 +629,10 @@ final class Scanner {
         }
         long id = r >>> 5;
         q += (int) r & 31;
-        long k = Mem.u64(s, q);
+        long k = (long) LE64.get(s, q);
         if (k == LAM8) {
             q += 8;
-            if (Mem.u64(s, q) != BI_0 || Mem.u64(s, q + 6) != BI_6) {
+            if ((long) LE64.get(s, q) != BI_0 || (long) LE64.get(s, q + 6) != BI_6) {
                 return -1;
             }
             q += 14;
@@ -530,7 +641,7 @@ final class Scanner {
                 return -1;
             }
             q += b >>> 2;
-            if (Mem.u64(s, q) != QBODY_0 || Mem.u64(s, q + 1) != QBODY_1) {
+            if ((long) LE64.get(s, q) != QBODY_0 || (long) LE64.get(s, q + 1) != QBODY_1) {
                 return -1;
             }
             q += 9;
@@ -540,7 +651,7 @@ final class Scanner {
             }
             long body = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != NAME8) {
+            if ((long) LE64.get(s, q) != NAME8) {
                 return -1;
             }
             q += 8;
@@ -550,7 +661,7 @@ final class Scanner {
             }
             long name = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != TYPE8) {
+            if ((long) LE64.get(s, q) != TYPE8) {
                 return -1;
             }
             q += 8;
@@ -559,7 +670,7 @@ final class Scanner {
                 return -1;
             }
             q += (int) r & 31;
-            if ((Mem.u64(s, q) & M3) != END3) {
+            if (((long) LE64.get(s, q) & M3) != END3) {
                 return -1;
             }
             out.lam(id, b & 3, name, r >>> 5, body);
@@ -567,7 +678,7 @@ final class Scanner {
         }
         if (k == LETE8) {
             q += 8;
-            if (Mem.u64(s, q) != LBODY8) {
+            if ((long) LE64.get(s, q) != LBODY8) {
                 return -1;
             }
             q += 8;
@@ -577,7 +688,7 @@ final class Scanner {
             }
             long body = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != NAME8) {
+            if ((long) LE64.get(s, q) != NAME8) {
                 return -1;
             }
             q += 8;
@@ -587,10 +698,10 @@ final class Scanner {
             }
             long name = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != NONDEP_0) {
+            if ((long) LE64.get(s, q) != NONDEP_0) {
                 return -1;
             }
-            long v = Mem.u64(s, q + 8);
+            long v = (long) LE64.get(s, q + 8);
             boolean nondep;
             if ((v & M7) == NONDEP_FALSE) {
                 nondep = false;
@@ -601,7 +712,7 @@ final class Scanner {
             } else {
                 return -1;
             }
-            if (Mem.u64(s, q) != TYPE8) {
+            if ((long) LE64.get(s, q) != TYPE8) {
                 return -1;
             }
             q += 8;
@@ -611,7 +722,7 @@ final class Scanner {
             }
             long type = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != VALUE_0 || Mem.u64(s, q + 1) != VALUE_1) {
+            if ((long) LE64.get(s, q) != VALUE_0 || (long) LE64.get(s, q + 1) != VALUE_1) {
                 return -1;
             }
             q += 9;
@@ -620,7 +731,7 @@ final class Scanner {
                 return -1;
             }
             q += (int) r & 31;
-            if ((Mem.u64(s, q) & M3) != END3) {
+            if (((long) LE64.get(s, q) & M3) != END3) {
                 return -1;
             }
             out.let(id, name, nondep, type, r >>> 5, body);
@@ -628,7 +739,7 @@ final class Scanner {
         }
         if (k == PROJ8) {
             q += 8;
-            if ((Mem.u64(s, q) & M7) != IDX7) {
+            if (((long) LE64.get(s, q) & M7) != IDX7) {
                 return -1;
             }
             q += 7;
@@ -638,7 +749,7 @@ final class Scanner {
             }
             long idx = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != STRUCT_0 || (Mem.u64(s, q + 8) & M2) != STRUCT_8) {
+            if ((long) LE64.get(s, q) != STRUCT_0 || ((long) LE64.get(s, q + 8) & M2) != STRUCT_8) {
                 return -1;
             }
             q += 10;
@@ -648,7 +759,7 @@ final class Scanner {
             }
             long struct = r >>> 5;
             q += (int) r & 31;
-            if (Mem.u64(s, q) != TYPENAME_0 || (Mem.u64(s, q + 8) & M4) != TYPENAME_8) {
+            if ((long) LE64.get(s, q) != TYPENAME_0 || ((long) LE64.get(s, q + 8) & M4) != TYPENAME_8) {
                 return -1;
             }
             q += 12;
@@ -657,7 +768,7 @@ final class Scanner {
                 return -1;
             }
             q += (int) r & 31;
-            if ((Mem.u64(s, q) & M3) != END3) {
+            if (((long) LE64.get(s, q) & M3) != END3) {
                 return -1;
             }
             out.proj(id, idx, struct, r >>> 5);
@@ -667,9 +778,9 @@ final class Scanner {
     }
 
     private static int forall(byte[] s, int p, RecordOut out) throws ExportException {
-        if (Mem.u64(s, p + 8) != FORALL_8
-                || Mem.u64(s, p + 16) != FORALL_16
-                || (Mem.u64(s, p + 24) & M2) != FORALL_24) {
+        if ((long) LE64.get(s, p + 8) != FORALL_8
+                || (long) LE64.get(s, p + 16) != FORALL_16
+                || ((long) LE64.get(s, p + 24) & M2) != FORALL_24) {
             return -1;
         }
         int q = p + 26;
@@ -678,7 +789,7 @@ final class Scanner {
             return -1;
         }
         q += b >>> 2;
-        if (Mem.u64(s, q) != QBODY_0 || Mem.u64(s, q + 1) != QBODY_1) {
+        if ((long) LE64.get(s, q) != QBODY_0 || (long) LE64.get(s, q + 1) != QBODY_1) {
             return -1;
         }
         q += 9;
@@ -688,7 +799,7 @@ final class Scanner {
         }
         long body = r >>> 5;
         q += (int) r & 31;
-        if (Mem.u64(s, q) != NAME8) {
+        if ((long) LE64.get(s, q) != NAME8) {
             return -1;
         }
         q += 8;
@@ -698,7 +809,7 @@ final class Scanner {
         }
         long name = r >>> 5;
         q += (int) r & 31;
-        if (Mem.u64(s, q) != TYPE8) {
+        if ((long) LE64.get(s, q) != TYPE8) {
             return -1;
         }
         q += 8;
@@ -708,7 +819,7 @@ final class Scanner {
         }
         long type = r >>> 5;
         q += (int) r & 31;
-        if ((Mem.u64(s, q) & M7) != IE7) {
+        if (((long) LE64.get(s, q) & M7) != IE7) {
             return -1;
         }
         q += 7;
@@ -717,7 +828,7 @@ final class Scanner {
             return -1;
         }
         q += (int) r & 31;
-        if ((Mem.u64(s, q) & M2) != END2) {
+        if (((long) LE64.get(s, q) & M2) != END2) {
             return -1;
         }
         out.pi(r >>> 5, b & 3, name, type, body);
@@ -732,10 +843,10 @@ final class Scanner {
         }
         long id = r >>> 5;
         q += (int) r & 31;
-        long k = Mem.u64(s, q);
+        long k = (long) LE64.get(s, q);
         if (k == STR8) {
             q += 8;
-            if ((Mem.u64(s, q) & M6) != PRE6) {
+            if (((long) LE64.get(s, q) & M6) != PRE6) {
                 return -1;
             }
             q += 6;
@@ -744,7 +855,7 @@ final class Scanner {
                 return -1;
             }
             q += (int) r & 31;
-            if (Mem.u64(s, q) != STRQ8) {
+            if ((long) LE64.get(s, q) != STRQ8) {
                 return -1;
             }
             q += 8;
@@ -754,7 +865,7 @@ final class Scanner {
             }
             int strOff = q;
             q += len;
-            if ((Mem.u64(s, q) & M4) != QEND4) {
+            if (((long) LE64.get(s, q) & M4) != QEND4) {
                 return -1;
             }
             out.nameStr(id, r >>> 5, strOff, len);
@@ -762,7 +873,7 @@ final class Scanner {
         }
         if (k == NUM8) {
             q += 8;
-            if ((Mem.u64(s, q) & M4) != I4) {
+            if (((long) LE64.get(s, q) & M4) != I4) {
                 return -1;
             }
             q += 4;
@@ -772,7 +883,7 @@ final class Scanner {
             }
             long i = r >>> 5;
             q += (int) r & 31;
-            if ((Mem.u64(s, q) & M7) != PRE7) {
+            if (((long) LE64.get(s, q) & M7) != PRE7) {
                 return -1;
             }
             q += 7;
@@ -781,7 +892,7 @@ final class Scanner {
                 return -1;
             }
             q += (int) r & 31;
-            if ((Mem.u64(s, q) & M3) != END3) {
+            if (((long) LE64.get(s, q) & M3) != END3) {
                 return -1;
             }
             out.nameNum(id, r >>> 5, i);
@@ -791,7 +902,7 @@ final class Scanner {
     }
 
     private static int constant(byte[] s, int p, RecordOut out, int[] list) throws ExportException {
-        if (Mem.u64(s, p + 8) != CONST_8 || (Mem.u64(s, p + 16) & M1) != ':') {
+        if ((long) LE64.get(s, p + 8) != CONST_8 || ((long) LE64.get(s, p + 16) & M1) != ':') {
             return -1;
         }
         int q = p + 17;
@@ -801,7 +912,7 @@ final class Scanner {
         }
         long name = r >>> 5;
         q += (int) r & 31;
-        if ((Mem.u64(s, q) & M7) != US7) {
+        if (((long) LE64.get(s, q) & M7) != US7) {
             return -1;
         }
         q += 7;
@@ -824,7 +935,7 @@ final class Scanner {
                 }
             }
         }
-        if (Mem.u64(s, q) != CONST_END8) {
+        if ((long) LE64.get(s, q) != CONST_END8) {
             return -1;
         }
         q += 8;
@@ -833,7 +944,7 @@ final class Scanner {
             return -1;
         }
         q += (int) r & 31;
-        if ((Mem.u64(s, q) & M2) != END2) {
+        if (((long) LE64.get(s, q) & M2) != END2) {
             return -1;
         }
         out.constant(r >>> 5, name, list, 0, n);

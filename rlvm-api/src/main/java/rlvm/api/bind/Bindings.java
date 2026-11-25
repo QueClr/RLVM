@@ -37,7 +37,8 @@ import rlvm.store.Terms;
  * in which every store extends its predecessor with the same ids ({@code rlvm.load.LevelChain}). The
  * run tells this factory where the newest snapshot is ({@link #bindLevelSnapshots}); {@link #freeze()}
  * is then never called. A worker context is built on the snapshot that is current when it is created
- * and moves to the newest one at every {@code WorkerContext.reset()}:
+ * and moves to the newest one at every {@code WorkerContext.reset()}. It shares the snapshot with every
+ * other worker (a snapshot is immutable from its publication on) and copies none of it:
  *
  * <pre>
  * Bindings b = new Bindings(expectedLevels);
@@ -179,17 +180,18 @@ public final class Bindings {
     }
 
     /**
-     * A new worker view of the levels: a private overlay of the frozen base (batch), or of the newest
-     * snapshot (pipelined). About 1 ms for mathlib.
+     * A new worker view of the levels: a shared overlay of the frozen base (batch), or of the newest
+     * snapshot (pipelined). Nothing of the base is copied: every worker reads the one frozen store and
+     * holds only what its session adds ({@code LevelStore.newSharedOverlay()}).
      */
     public LevelBinding newWorkerLevels() {
         if (snapshots != null) {
-            LevelBinding b = new LevelBinding(currentSnapshot().newOverlay());
+            LevelBinding b = new LevelBinding(currentSnapshot().newSharedOverlay());
             b.baseIsShared(false); // a snapshot is not the run's final base
             return b;
         }
         requireFrozen();
-        return new LevelBinding(levelBase.newOverlay());
+        return new LevelBinding(levelBase.newSharedOverlay());
     }
 
     /** A new worker number store (an overlay of the frozen, empty base). */
@@ -215,7 +217,7 @@ public final class Bindings {
         // (the loader publishes the snapshot before the store frontier that needs it).
         final int covered = source == null ? Integer.MAX_VALUE : store.loadedUnits();
         final LevelStore snapshot = source == null ? null : currentSnapshot();
-        final LevelBinding levels = new LevelBinding(source == null ? levelBase.newOverlay() : snapshot.newOverlay());
+        final LevelBinding levels = new LevelBinding(source == null ? levelBase.newSharedOverlay() : snapshot.newSharedOverlay());
         if (source != null) {
             levels.baseIsShared(false); // a snapshot is not the run's final base
         }
@@ -235,7 +237,7 @@ public final class Bindings {
                     int units = st.loadedUnits(); // before the snapshot, as above
                     LevelStore newest = currentSnapshot();
                     if (newest != on) {
-                        levels.rebase(newest.newOverlay());
+                        levels.rebaseOnto(newest); // in place: the worker reads the snapshot, it copies nothing
                         on = newest;
                     } else {
                         levels.reset();

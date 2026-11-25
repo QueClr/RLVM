@@ -248,6 +248,10 @@ final class T {
         same(what + ": buffer 64", f, smallBuffer(data, 64), true);
         same(what + ": buffer 257", f, smallBuffer(data, 257), true);
         same(what + ": channel", f, channel(data, 100, data.length), true);
+        // stretches of app records (ExportSink.exprApps): refused (the runs above), taken, taken at random
+        Run s0 = struct(data, options(1, 1 << 20, false), 0);
+        same(what + ": app stretches taken", s0, struct(data, options(1, 1 << 20, false), 1), true);
+        same(what + ": app stretches taken at random, buffer 257", s0, struct(data, options(1, 257, false), 2), true);
         if (data.length >= 2 * 256) {
             same(what + ": parallel 256", f, parallel(data, 3, 256), true);
             same(what + ": parallel 1000", f, parallel(data, 2, 1000), true);

@@ -28,6 +28,9 @@ class PackedRunTest {
     private static final int BY_RECORD = 0;
     private static final int DEFAULT_RUN = 1;
     private static final int WRITER_RUN = 2;
+    /** {@link ProofBlocks.Writer#records}: the interface default, and the writer's own loop. */
+    private static final int DEFAULT_RECORDS = 3;
+    private static final int WRITER_RECORDS = 4;
 
     /** A writer whose {@code run} is the interface default (record by record) over {@code w}. */
     private static ProofBlocks.Writer plain(ProofBlocks.Writer w) {
@@ -122,7 +125,7 @@ class PackedRunTest {
         int s5 = b.constant(fx.undeclaredName, 0); // unresolved: a reference to it marks the block
         assertEquals(sharedEnd(fx) - 1, s5);
         ProofBlocks.Writer w = b.blockWriter();
-        ProofBlocks.Writer out = mode == DEFAULT_RUN ? plain(w) : w;
+        ProofBlocks.Writer out = mode == DEFAULT_RUN || mode == DEFAULT_RECORDS ? plain(w) : w;
         Random rnd = new Random(seed * 31 + 7); // the same cuts and encodings for both run modes
         final int unitStart = s1; // shared terms from here on belong to the open unit
         byte[] packed = new byte[64];
@@ -160,6 +163,26 @@ class PackedRunTest {
             int end = i;
             while (end < script.length && structure(script[end].kind) != 0 && (end == i || rnd.nextInt(12) != 0)) {
                 end++;
+            }
+            if (mode == DEFAULT_RECORDS || mode == WRITER_RECORDS) {
+                // the stretch as four ints per record, at an offset, with bits above the kind that must be ignored
+                final int o0 = 1 + rnd.nextInt(5);
+                int[] recs = new int[o0 + 4 * (end - i) + rnd.nextInt(3)];
+                Arrays.fill(recs, 0x5A5A5A5A);
+                for (int j = i; j < end; j++) {
+                    Rec q = script[j];
+                    int kids = structure(q.kind);
+                    int o = o0 + 4 * (j - i);
+                    recs[o] = q.kind | (rnd.nextInt(1 << 20) << 4);
+                    for (int c = 0; c < kids; c++) {
+                        int v = q.child[c];
+                        recs[o + 1 + c] = v > 0 ? ProofBlocks.Writer.shared(v) : ProofBlocks.Writer.local(j - (-v - 1));
+                    }
+                }
+                out.records(recs, o0, end - i);
+                assertEquals(end, out.size());
+                i = end;
+                continue;
             }
             // which shared references are written into the bytes: none, those to earlier units (the
             // loader's case), or any (terms of the open unit too: the writer must still be exact)
@@ -291,14 +314,18 @@ class PackedRunTest {
             Model byWriter = write(script, seed, WRITER_RUN);
             assertSame(byRecord, byDefault, "seed " + seed + ", interface default");
             assertSame(byRecord, byWriter, "seed " + seed + ", writer");
+            Model recordsDefault = write(script, seed, DEFAULT_RECORDS);
+            Model recordsWriter = write(script, seed, WRITER_RECORDS);
+            assertSame(byRecord, recordsDefault, "seed " + seed + ", records, interface default");
+            assertSame(byRecord, recordsWriter, "seed " + seed + ", records, writer");
             records += n;
             if (byRecord.store.blocks().hasUnresolved(0)) {
                 unresolved++;
             }
             // the sparse record index: promote some records of the block in a later unit
-            int[] promoted = new int[3];
-            Model[] all = {byRecord, byDefault, byWriter};
-            for (int m = 0; m < 3; m++) {
+            int[] promoted = new int[5];
+            Model[] all = {byRecord, byDefault, byWriter, recordsDefault, recordsWriter};
+            for (int m = 0; m < 5; m++) {
                 Model fx = all[m];
                 Random pr = new Random(seed);
                 fx.builder.beginUnit(DeclKind.AXIOM);
@@ -316,6 +343,10 @@ class PackedRunTest {
             assertEquals(promoted[0], promoted[2]);
             assertSame(byRecord, byDefault, "seed " + seed + ", after promotion, interface default");
             assertSame(byRecord, byWriter, "seed " + seed + ", after promotion, writer");
+            assertEquals(promoted[0], promoted[3]);
+            assertEquals(promoted[0], promoted[4]);
+            assertSame(byRecord, recordsDefault, "seed " + seed + ", after promotion, records, interface default");
+            assertSame(byRecord, recordsWriter, "seed " + seed + ", after promotion, records, writer");
         }
         assertTrue(unresolved > 5 && unresolved < 290, "blocks with an unresolved reference: " + unresolved);
         assertTrue(records > 20_000, "records " + records);
@@ -357,5 +388,45 @@ class PackedRunTest {
         w.bvar(1);
         w.run(app, 0, 1, one, 0, 1, new int[] {1, -1, 1, s1}, 0, 2, 0);
         assertEquals(2, w.size());
+    }
+
+    @Test
+    void aCorruptStretchIsAnError() {
+        Model fx = new Model();
+        fx.builder.beginUnit(DeclKind.THM);
+        fx.builder.reserve(DeclKind.THM, fx.name("thm"), 0);
+        int s1 = fx.builder.bvar(0);
+        ProofBlocks.Writer w = fx.builder.blockWriter();
+        ProofBlocks.Writer d = plain(w);
+        int sh = ProofBlocks.Writer.shared(s1);
+        for (ProofBlocks.Writer x : new ProofBlocks.Writer[] {w, d}) {
+            x.bvar(1);
+            // a record of another kind
+            assertThrows(IllegalArgumentException.class, () -> x.records(new int[] {Kind.CONST, sh, sh, 0}, 0, 1));
+            x.abort();
+            x.bvar(1);
+            // a reference to a record of the block that does not exist yet (record 1 refers to itself)
+            assertThrows(IllegalArgumentException.class, () -> x.records(new int[] {Kind.APP, sh, ProofBlocks.Writer.local(2), 0}, 0, 1));
+            x.abort();
+            x.bvar(1);
+            // a local reference with distance 0
+            assertThrows(IllegalArgumentException.class, () -> x.records(new int[] {Kind.LAM, 0, sh, 0}, 0, 1));
+            x.abort();
+            x.bvar(1);
+            // a shared term that does not exist
+            assertThrows(IllegalArgumentException.class,
+                    () -> x.records(new int[] {Kind.LET, sh, ProofBlocks.Writer.shared(s1 + 100), sh}, 0, 1));
+            x.abort();
+            // nothing and a well-formed stretch: APP (record 0) s1; PI (record 1) (record 0)
+            x.bvar(1);
+            x.records(new int[] {Kind.APP, 9, 9, 9}, 0, 0);
+            assertEquals(1, x.size());
+            x.records(new int[] {7, Kind.APP, ProofBlocks.Writer.local(1), sh, 7, Kind.PI, ProofBlocks.Writer.local(1),
+                    ProofBlocks.Writer.local(2), 7}, 1, 2);
+            assertEquals(3, x.size());
+            x.abort();
+        }
+        // the writer's own check of the array bounds
+        assertThrows(IllegalArgumentException.class, () -> w.records(new int[] {Kind.APP, sh, sh}, 0, 1));
     }
 }

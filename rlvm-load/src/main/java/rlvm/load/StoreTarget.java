@@ -226,6 +226,11 @@ final class StoreTarget implements LoadTarget {
     }
 
     @Override
+    public void blockRecords(int[] recs, int off, int count) {
+        writer.records(recs, off, count);
+    }
+
+    @Override
     public void blockRun(int blockIndex, byte[] packed, int off, int len, byte[] lengths, int lengthsOff, int count,
             int[] open, int openOff, int openCount, int maxEarly) {
         if (writer.size() != blockIndex) {

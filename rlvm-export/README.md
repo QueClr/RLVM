@@ -46,6 +46,10 @@ JIT compiler itself. See "What limits us".
 - **Obligation of the sink:** reject a second declaration of a structurally equal constant name
   (`ExportException.malformed("Duplicate declaration: …")`). It is the one parse-level rejection of
   the official reader that needs name identity, which only the store has. `ColumnarStore` does it.
+- Optional, like `exprRun` (default: refuse): `exprApps` gets a stretch of consecutive `app` records in
+  one call in place of the `exprApp` calls; the reader offers one only while the expression ids are
+  dense with a known delta and both children of every record are earlier expressions, and a sink that
+  refuses gets the single calls (*agentic-note*: rep-OPT-B).
 - All callbacks come from the thread that called `read`, also in parallel mode.
 
 ### Id conventions of `ColumnarStore`
@@ -111,6 +115,10 @@ name `str` (plain ASCII) / `num`, `thm`, safe `def`: 99.93 % of the lines of ini
 mathlib. A line is taken by the fast path only if *every byte* including the final `\n` is the
 template's; otherwise it goes, untouched, to the general path. The fast path never rejects anything
 and never reads a load starting beyond the first unverified byte of the line.
+`app` lines, six lines of seven, have a loop of their own in the fast path (`Scanner.appStretch`: no
+call inside, no branch on the number of digits; word loads through the handle where they stand): the
+native image compiles that loop well without a profile, and the lines are handed over as a stretch
+(`RecordOut.apps`, `ExportSink.exprApps`; *agentic-note*: rep-OPT-B).
 `JsonLine` + `Linker` (general path): a strict, non-recursive JSON parser into flat arrays
 (reused, no allocation per line) that mirrors Lean's `Json.parse`, then the dispatch of the official
 `parseItem`. 4 × slower than the fast path (425 MB/s vs 1.8 GB/s), irrelevant at 0.1 % of the lines.

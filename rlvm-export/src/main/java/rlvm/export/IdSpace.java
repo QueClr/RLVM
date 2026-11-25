@@ -252,7 +252,19 @@ final class IdSpace {
         return dense && !deltaOpen && id == limit && n > 0 && id + n <= Integer.MAX_VALUE - 1024;
     }
 
-    /** Binds the next {@code n} ids to consecutive sink ids ({@code id + delta}); only after {@link #nextDense}. */
+    /**
+     * Whether the ids {@code 0 .. limit-1} are bound, in order, to {@code id + delta} and the next id
+     * bound that way keeps it so: the state in which {@link #ref}, {@link #fresh} and {@link #bind}
+     * take their first branch for the next id ({@code limit}) and for references below it.
+     */
+    boolean denseWithDelta() {
+        return dense && !deltaOpen;
+    }
+
+    /**
+     * Binds the next {@code n} ids to consecutive sink ids ({@code id + delta}); only after
+     * {@link #nextDense}, or in the state {@link #denseWithDelta} for ids below 2^31 - 1024.
+     */
     void bindRun(int n) {
         limit += n;
     }

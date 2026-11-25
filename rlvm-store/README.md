@@ -383,6 +383,13 @@ Nothing here changes a word of what a load builds (differential digest, `work/lp
    packing, with `seek` 1.8 %). The sparse index and the block rows are what they were. Cost: one
    byte per block record while loading (mathlib 78 MB).
 
+`ProofBlocks.Writer.records` (2026-11-25, *agentic-note*: rep-OPT-B) is the same contract for records
+that are not packed: a stretch of APP / LAM / PI / LET records as four ints each (kind, references),
+equal to the single calls `app` / `lam` / `pi` / `let` (the interface default makes them); the
+writer's own loop writes the common records without a call and without a data-dependent branch and
+every other record with the checks of the single calls. `PackedRunTest` compares both with the
+record-by-record writes.
+
 ### Exactness and allocation items taken on 2026-11-24 (LP2)
 
 - **`LitPool.addNat` / `addString` on a worker pool look in the worker's own table first** (R2): a

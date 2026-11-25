@@ -164,6 +164,14 @@ after it; the promotions are requested in the same order as before).
    no root reached, i.e. records of later declarations that the file wrote early;
 5. the rows are completed and the unit is closed.
 
+Two paths of the loader thread take records in stretches instead of one by one, with the store and
+every failure unchanged (*agentic-note*: rep-OPT-B): `Loader.exprApps` appends a stretch of `app`
+records to the segment in one loop (the reader's `ExportSink.exprApps`; refused whenever the
+record-by-record path has something else to do: metadata, referrer counting, the segment limit), and
+the sweep hands a stretch of consecutive proof-private APP / LAM / PI / LET records to the target in
+one call (`LoadTarget.blockRecords`, default: the single `block*` calls; `StoreTarget`:
+`ProofBlocks.Writer.records`).
+
 Consequences: references to the unit's own names bind (members of an inductive block see each other; a
 theorem that mentions itself gets `depMax = own rank`); a record is never written to the shared region
 before a declaration that reaches it exists, so a hand-written file that puts all its expression

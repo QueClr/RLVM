@@ -779,14 +779,32 @@ public final class Loader implements ExportSink, RecordSink {
     private void resolvePending() {
         final int[] s = seg;
         final int[] pd = pend;
-        for (int i = 0, n = pendCount; i < n; i++) {
-            int slot = pd[i];
+        final int[] lc = loc; // not replaced in here: promotion writes into it
+        final int n = pendCount;
+        int i = 0;
+        while (i < n) {
+            // the references to shared records, in a loop without a call (see ProofBlocks.Writer.records)
+            for (; i < n; i++) {
+                final int slot = pd[i];
+                if (slot < 0) {
+                    break;
+                }
+                final int l = lc[-s[slot] - PENDING];
+                if (l < 0) {
+                    break;
+                }
+                s[slot] = -l;
+            }
+            if (i >= n) {
+                break;
+            }
+            final int slot = pd[i++];
             if (slot < 0) {
                 resolveRun(-slot - 1); // a run stands here in the order of arrival
                 continue;
             }
-            int ordinal = -s[slot] - PENDING;
-            int l = loc[ordinal];
+            final int ordinal = -s[slot] - PENDING;
+            int l = lc[ordinal];
             if (l < 0) {
                 l = promote(ordinal, l);
             }
@@ -1108,6 +1126,70 @@ public final class Loader implements ExportSink, RecordSink {
             }
         }
         return id;
+    }
+
+    /**
+     * A stretch of {@code app} records ({@link ExportSink#exprApps}): what {@link #exprApp} does for
+     * each of them, in one loop. Taken unless something makes the record-by-record path necessary
+     * (metadata was seen, referrer counting, the segment limit, a child that is not an earlier
+     * record): then the reader delivers the records one by one, and what that path does (also where
+     * it fails) is by definition what this loader does. Nothing is changed before the stretch is
+     * known to be taken.
+     */
+    @Override
+    public int exprApps(int firstFileId, int count, int delta, int[] recs, int off) {
+        if (mdata != null || counting || count <= 0 || firstFileId + delta != exprCount + 1
+                || exprCount > MAX_EXPR_RECORDS - count) {
+            return ExportSink.RUN_REFUSED;
+        }
+        final long ints = ((long) segLen + count) << 2;
+        if (ints > maxSegmentInts) {
+            return ExportSink.RUN_REFUSED; // the record that exceeds the segment limit is found one by one
+        }
+        if (ints > seg.length) {
+            seg = Arrays.copyOf(seg, (int) Math.min(Math.max((long) seg.length * 2, ints), maxSegmentInts));
+        }
+        int np = pendCount;
+        if ((long) np + 2L * count + 2 > pend.length) {
+            long want = Math.max((long) pend.length * 2, (long) np + 2L * count + 2);
+            if (want > Integer.MAX_VALUE - 16) {
+                return ExportSink.RUN_REFUSED;
+            }
+            pend = Arrays.copyOf(pend, (int) want);
+        }
+        final int[] s = seg;
+        final int[] pd = pend;
+        final int base = segBase;
+        final int first = exprCount + 1;
+        int p = segLen << 2;
+        for (int i = 0, o = off + 1; i < count; i++, o += 3, p += 4) {
+            // the children as exprApp gets them; both must be earlier records (ordinals 1 .. first + i - 1)
+            final int f = recs[o] + delta;
+            final int a = recs[o + 1] + delta;
+            if (f <= 0 || a <= 0 || f >= first + i || a >= first + i) {
+                return ExportSink.RUN_REFUSED; // nothing was counted yet: the record is found one by one
+            }
+            // child(): a record of the segment is its index there; an earlier one is PENDING and its
+            // slot joins the list. Without a branch on which it is: the slot is written to the list
+            // in both cases and counted in the second.
+            final int lf = f - base;
+            final int la = a - base;
+            final int earlierF = (lf - 1) >> 31; // -1 if f is not in the segment
+            final int earlierA = (la - 1) >> 31;
+            pd[np] = p + 1;
+            np -= earlierF;
+            pd[np] = p + 2;
+            np -= earlierA;
+            s[p] = Kind.APP;
+            s[p + 1] = (lf & ~earlierF) | (-(PENDING + f) & earlierF);
+            s[p + 2] = (la & ~earlierA) | (-(PENDING + a) & earlierA);
+            s[p + 3] = 0;
+        }
+        pendCount = np;
+        segLen += count;
+        nApp += count;
+        exprCount += count;
+        return first;
     }
 
     @Override
@@ -1643,6 +1725,20 @@ public final class Loader implements ExportSink, RecordSink {
                         throw unsupportedDecl("more than 2^31 proof-block records");
                     }
                 }
+                if (kind == Kind.APP || kind == Kind.LAM || kind == Kind.PI || kind == Kind.LET) {
+                    // A stretch of consecutive proof-private APP / LAM / PI / LET records - nearly all
+                    // records of a proof: their children are turned into block references in place
+                    // (the segment is consumed by this pass), their locations are set, and the
+                    // target gets the stretch in one call. Between the first and the last of them
+                    // nothing is written to the shared region, so what the target does for the
+                    // stretch is what it did when it got the records one by one.
+                    final int c = blockStretch(s, lc, base, i, runAt > i && runAt < n ? runAt : n, k, firstRecord);
+                    o.blockRecords(s, p, c);
+                    k += c;
+                    i += c - 1;
+                    p += (c - 1) << 2;
+                    continue;
+                }
                 switch (kind) {
                     case Kind.APP -> o.blockApp(ref(s[p + 1], k, firstRecord), ref(s[p + 2], k, firstRecord));
                     case Kind.LAM -> o.blockLam(ref(s[p + 1], k, firstRecord), ref(s[p + 2], k, firstRecord));
@@ -1704,6 +1800,57 @@ public final class Loader implements ExportSink, RecordSink {
             r++;
         }
         return r;
+    }
+
+    /**
+     * The stretch of proof-private APP / LAM / PI / LET records that begins with segment record
+     * {@code i} (0-based; it is one) and ends in front of record {@code limit} at the latest: turns
+     * the children of each into block references ({@link #ref}) in place and sets its location; the
+     * records become the block records {@code k}, {@code k + 1}, ... Returns their number.
+     *
+     * <p>A loop without a call and, for the children, without a branch: which of the three kinds a
+     * child is cannot be predicted, and a wrong guess costs more than the whole computation. A child
+     * is an earlier shared term ({@code e < 0}: minus its id) or record {@code e} of the segment,
+     * whose location is a shared id ({@code l > 0}) or minus (the global number of a block record
+     * + 1). For {@code e < 0} the load is made at {@code lc[base]} and its result dropped.
+     */
+    private static int blockStretch(int[] s, int[] lc, int base, int i, int limit, int k, int firstRecord) {
+        final int rel = firstRecord + 1; // block index of a record = -location - rel
+        int c = 0;
+        for (int p = i << 2; i + c < limit; c++, p += 4) {
+            final int w = s[p];
+            final int kd = w & K_MASK;
+            if ((w & S_MARK) != 0 || Integer.compareUnsigned(kd - Kind.APP, 4) >= 0) {
+                break;
+            }
+            final int at = k + c + rel;
+            int e = s[p + 1];
+            int m = e >> 31;
+            int l = (-e & m) | (lc[base + (e & ~m)] & ~m);
+            m = (l - 1) >> 31;
+            s[p + 1] = (LoadTarget.blockShared(l) & ~m) | (LoadTarget.blockLocal(at + l) & m);
+            e = s[p + 2];
+            m = e >> 31;
+            l = (-e & m) | (lc[base + (e & ~m)] & ~m);
+            m = (l - 1) >> 31;
+            s[p + 2] = (LoadTarget.blockShared(l) & ~m) | (LoadTarget.blockLocal(at + l) & m);
+            if (kd == Kind.LET) {
+                e = s[p + 3];
+                m = e >> 31;
+                l = (-e & m) | (lc[base + (e & ~m)] & ~m);
+                m = (l - 1) >> 31;
+                s[p + 3] = (LoadTarget.blockShared(l) & ~m) | (LoadTarget.blockLocal(at + l) & m);
+            }
+            lc[base + 1 + i + c] = -(firstRecord + k + c + 1);
+        }
+        return c;
+    }
+
+    static {
+        // blockStretch tests "APP, LAM, PI or LET" as one range
+        if (Kind.LAM != Kind.APP + 1 || Kind.PI != Kind.APP + 2 || Kind.LET != Kind.APP + 3) {
+            throw new AssertionError("the kinds APP, LAM, PI, LET are not consecutive");
+        }
     }
 
     /** Block reference to a segment-encoded child, for the block record with index {@code k}. */

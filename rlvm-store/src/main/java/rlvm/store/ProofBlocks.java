@@ -1,5 +1,8 @@
 package rlvm.store;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 
 /**
@@ -44,6 +47,15 @@ public final class ProofBlocks {
     private static final int ROW = 8;
     /** One byte offset is kept for every {@code 1 << SPARSE_SHIFT} records of a block (promotion seeks). */
     private static final int SPARSE_SHIFT = 4;
+    /** Unaligned little-endian 64-bit stores into the block writer's buffer ({@code WriterImpl.records}). */
+    private static final VarHandle LE64 = MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
+    static {
+        // WriterImpl.records tests "APP, LAM or PI" as one range
+        if (Kind.LAM != Kind.APP + 1 || Kind.PI != Kind.APP + 2) {
+            throw new AssertionError("the kinds APP, LAM, PI are not consecutive");
+        }
+    }
+
     private static final int T_BIT0 = 0x10;
     private static final int T_BIT1 = 0x20;
 
@@ -844,6 +856,30 @@ public final class ProofBlocks {
             }
         }
 
+        /**
+         * Appends {@code count} APP / LAM / PI / LET records given as four ints each from
+         * {@code recs[off]} on: the kind in the low four bits of the first (its other bits are
+         * ignored), then the references of {@link #app}, {@link #lam}, {@link #pi} or {@link #let} in
+         * their order (the fourth int of a record with two references is ignored). The records
+         * written, and every other effect, are those of these {@code count} calls in this order;
+         * this default makes the calls. The loader hands over a stretch of consecutive proof-private
+         * records of its segment this way, so that the writer can take it in one loop.
+         *
+         * @throws IllegalArgumentException for a record of another kind, or a reference the single
+         *     calls refuse (the block under construction is then in an undefined state)
+         */
+        default void records(int[] recs, int off, int count) {
+            for (int i = 0, o = off; i < count; i++, o += 4) {
+                switch (recs[o] & 0xF) {
+                    case Kind.APP -> app(recs[o + 1], recs[o + 2]);
+                    case Kind.LAM -> lam(recs[o + 1], recs[o + 2]);
+                    case Kind.PI -> pi(recs[o + 1], recs[o + 2]);
+                    case Kind.LET -> let(recs[o + 1], recs[o + 2], recs[o + 3]);
+                    default -> throw new IllegalArgumentException("not an APP / LAM / PI / LET record: kind " + (recs[o] & 0xF));
+                }
+            }
+        }
+
         /** Number of children of a packed record of kind {@code kind} (APP, LAM, PI: 2; LET: 3). */
         static int runChildren(int kind) {
             if (kind == Kind.APP || kind == Kind.LAM || kind == Kind.PI) {
@@ -1062,6 +1098,142 @@ public final class ProofBlocks {
             System.arraycopy(packed, p, b, p + shift, end - p);
             pos = end + shift;
             n = k;
+        }
+
+        /**
+         * The stretch in one loop, with the writer's state in locals: per record the place in the
+         * sparse index, the kind byte and the references. Writes exactly what the record-by-record
+         * default writes, with the same effects on the shared region (the sharing flags of the open
+         * unit's nodes, {@link #unresolved}) in the same order.
+         *
+         * <p>The loop is written for a compiler without a profile (the native image). The COMMON
+         * records - APP, LAM and PI whose references are earlier records of the block or shared
+         * terms below {@code quiet}: terms of an earlier unit below the first unresolved node, for
+         * which {@link #sharedRef} has nothing to do - are written by an inner loop that contains no
+         * call and no branch that depends on the data (which reference is local, how many bytes it
+         * takes: the bytes of a reference are computed and stored as one word). A call inside the
+         * loop, even one that is never made, makes that compiler keep the loop's values in the stack
+         * frame; a branch that cannot be predicted costs more than the record. The inner loop stops
+         * in front of every other record (a LET, a reference to a node of the open unit or to an
+         * unresolved one, a reference that is wrong) and at the end of a chunk of the record index;
+         * that record is then written with every check, as the single calls write it.
+         */
+        @Override
+        public void records(int[] recs, int off, int count) {
+            if (count <= 0) {
+                return;
+            }
+            if (off < 0 || (long) off + 4L * count > recs.length) {
+                throw new IllegalArgumentException("records outside the array");
+            }
+            // room: a record is at most its kind byte and three references of five bytes; a
+            // reference is stored as a word of eight bytes, of which up to seven lie behind it
+            long room = (long) pos + 16L * count + 8;
+            if (room > Integer.MAX_VALUE - 15 || (long) records + n + count > Integer.MAX_VALUE) {
+                // near a limit of the representation: record by record, which finds the record that exceeds it
+                Writer.super.records(recs, off, count);
+                return;
+            }
+            if (room > buf.length) {
+                buf = Arrays.copyOf(buf, (int) Math.min(Math.max((long) buf.length * 2, room), Integer.MAX_VALUE - 15));
+            }
+            int lastMark = (n + count - 1) >>> SPARSE_SHIFT;
+            if (lastMark >= marks.length) {
+                marks = Arrays.copyOf(marks, Math.max(marks.length * 2, lastMark + 1));
+            }
+            final byte[] b = buf;
+            final int[] mk = marks;
+            final TermStore ts = terms;
+            // Nothing is appended to the shared region while the stretch is written, so the bound is fixed.
+            // A shared reference is common if 1 <= id < quiet, a local one if 1 <= distance <= k: both
+            // as ONE unsigned comparison of (reference >>> 1) - 1 with a bound chosen by the low bit.
+            final int quiet1 = (ts == null ? Integer.MAX_VALUE : Math.min(ts.firstUnresolved(), ts.segmentStart())) - 1;
+            final int end = off + (count << 2);
+            final int first = records; // global number of record k of this block: first + k
+            int p = pos;
+            int k = n;
+            int o = off;
+            // start of the group of 1 << SPARSE_SHIFT records that record k belongs to
+            int mark = (k & ((1 << SPARSE_SHIFT) - 1)) == 0 ? p : mk[k >>> SPARSE_SHIFT];
+            while (o < end) {
+                final byte[] wn = withinChunk(first + k);
+                int wi = (first + k) & WITHIN_MASK;
+                // the common records up to the end of this chunk of the record index: no call in here
+                final int stop = (int) Math.min(end, o + (((1L << WITHIN_SHIFT) - wi) << 2));
+                for (; o < stop; o += 4, k++, wi++) {
+                    final int kind = recs[o] & 0xF;
+                    final int r1 = recs[o + 1];
+                    final int r2 = recs[o + 2];
+                    if (Integer.compareUnsigned(kind - Kind.APP, 3) >= 0
+                            || Integer.compareUnsigned((r1 >>> 1) - 1, k + ((quiet1 - k) & -(r1 & 1))) >= 0
+                            || Integer.compareUnsigned((r2 >>> 1) - 1, k + ((quiet1 - k) & -(r2 & 1))) >= 0) {
+                        break;
+                    }
+                    if ((k & ((1 << SPARSE_SHIFT) - 1)) == 0) {
+                        mark = p;
+                        mk[k >>> SPARSE_SHIFT] = p;
+                    }
+                    wn[wi] = (byte) (p - mark);
+                    b[p] = (byte) kind;
+                    int len = (38 - Integer.numberOfLeadingZeros(r1 | 1)) / 7;
+                    LE64.set(b, p + 1, leb(r1) | (0x80808080L & ((1L << ((len - 1) << 3)) - 1)));
+                    p += 1 + len;
+                    len = (38 - Integer.numberOfLeadingZeros(r2 | 1)) / 7;
+                    LE64.set(b, p, leb(r2) | (0x80808080L & ((1L << ((len - 1) << 3)) - 1)));
+                    p += len;
+                }
+                if (o < stop) {
+                    // the record in front of which the loop stopped, as need() and app / lam / pi / let write it
+                    if ((k & ((1 << SPARSE_SHIFT) - 1)) == 0) {
+                        mark = p;
+                        mk[k >>> SPARSE_SHIFT] = p;
+                    }
+                    wn[wi] = (byte) (p - mark);
+                    final int kind = recs[o] & 0xF;
+                    if (kind != Kind.APP && kind != Kind.LAM && kind != Kind.PI && kind != Kind.LET) {
+                        throw new IllegalArgumentException("not an APP / LAM / PI / LET record: kind " + kind);
+                    }
+                    b[p++] = (byte) kind;
+                    final int last = kind == Kind.LET ? 3 : 2;
+                    for (int c = 1; c <= last; c++) {
+                        int r = recs[o + c];
+                        checkedRef(r, k, c == last && kind != Kind.APP);
+                        while ((r & ~0x7F) != 0) {
+                            b[p++] = (byte) (r | 0x80);
+                            r >>>= 7;
+                        }
+                        b[p++] = (byte) r;
+                    }
+                    o += 4;
+                    k++;
+                }
+            }
+            pos = p;
+            n = k;
+        }
+
+        /**
+         * The bytes of the unsigned LEB128 form of the 32-bit value {@code r}, the first in the low
+         * byte, without the continuation bits: its five groups of seven bits, one per byte.
+         */
+        private static long leb(int r) {
+            long v = r & 0xFFFFFFFFL;
+            return (v & 0x7F) | ((v & 0x3F80) << 1) | ((v & 0x1FC000) << 2) | ((v & 0xFE00000) << 3) | ((v & 0xF0000000L) << 4);
+        }
+
+        /**
+         * The checks and effects of {@link #ref} for reference {@code r} of record {@code k} of the
+         * block under construction, without writing it.
+         */
+        private void checkedRef(int r, int k, boolean bodyPosition) {
+            if ((r & 1) == 0) {
+                int d = r >>> 1;
+                if (d < 1 || d > k) {
+                    throw new IllegalArgumentException("local reference " + d + " back from record " + k);
+                }
+            } else {
+                sharedRef(r >>> 1, bodyPosition);
+            }
         }
 
         @Override

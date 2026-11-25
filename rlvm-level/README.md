@@ -6,8 +6,8 @@ complete (semantic) comparison on top. No dependencies.
 
 | class | role |
 |---|---|
-| `LevelStore` | everything: levels, lists, substitutions, official and complete operations, freeze / overlay |
-| `IntListStore` | interned `int` sequences (level lists, parameter name lists, substitutions) |
+| `LevelStore` | everything: levels, lists, substitutions, official and complete operations, freeze / overlays |
+| `IntListStore` | interned `int` sequences (level lists, parameter name lists, substitutions); `poolOf(id)` + `start(id)` for direct reads |
 | `NameOracle` | what the name store must provide: Lean's name order and printing |
 | `LevelLimitException` | depth above 2^24-1 (the official kernel panics there): reject the input |
 
@@ -33,7 +33,7 @@ complete (semantic) comparison on top. No dependencies.
 | instantiation | `mkSubst(paramNames, levels)` (-1 = wrong number of levels: reject), `substParams substLevels`, `instantiate(level, subst)`, `instantiate(level, paramNames, levels)`, `instantiateList(list, subst)` |
 | declared parameters | `undeclaredParam(level, paramNames)` (0 or the offending `param` level), `paramsDeclared`, `undeclaredParamInList` |
 | printing | `toString(level)`, `appendTo` (`max (u+1) v`, `imax u v`, `(max u v)+1`) |
-| freezing | `freeze isFrozen newOverlay reset isOverlay size baseSize listCount baseListCount` |
+| freezing | `freeze isFrozen newSharedOverlay newOverlay reset rebase isOverlay isSharedOverlay size baseSize listCount baseListCount` |
 
 Raw constructors validate their operands (`IllegalArgumentException`); accessors and comparisons do
 not (hot paths). Any `Throwable` from this module must be treated as "reject".
@@ -104,26 +104,35 @@ the golden set change (never unsoundly). `isEquiv`/`isGeq` do not depend on it.
 ```java
 LevelStore base = new LevelStore(nameOracle);   // loader thread: raw constructors, internList
 base.freeze();                                  // normal forms + canonical forms of every level
-LevelStore w = base.newOverlay();               // one per worker thread
+LevelStore w = base.newSharedOverlay();         // one per worker thread: copies nothing
 ... w.instantiate(...), w.isEquiv(...) ...
 w.reset();                                      // session boundary: forget everything w created
+w.rebase(laterSnapshot);                        // pipelined load: move to a larger frozen store, in place
 ```
 
 - Base ids keep their meaning in every overlay; new ids start at `baseSize()` / `baseListCount()`.
 - A frozen store is immutable: accessors, lookups of existing objects and memoised answers work from
-  any thread; anything that would create an object throws `IllegalStateException`.
+  any thread; anything that would create an object throws `IllegalStateException`. Nothing in it is
+  written after `freeze()` has returned, and the last thing `freeze()` does is a volatile write that
+  every overlay reads before it reads anything else of its base.
 - `reset()` costs time proportional to what the overlay created. Memo slots of reissued ids are
   fresh; cache entries that involve overlay ids die with an epoch counter; entries made only of base
-  ids survive.
-- **Deviation from the design frame, on purpose:** an overlay does not probe a shared base and then
-  its own table. It works on a private copy of the base arrays and hash table, made once in
-  `newOverlay()` (0.5-1.9 ms for mathlib). Hot paths then have one array and no "base or overlay?"
-  branch, and workers share no memory at all after creation. The cost is memory per worker
-  (estimated at a few MB for mathlib, not measured) and that overlays must be reused, not created
-  per declaration. If the architects want the shared-base variant, the public API does not change.
+  ids survive (LV1-F1: "base ids only" includes both lists of the substitution).
+- **Two kinds of overlay, the same ids and answers operation by operation** (`SharedOverlayTest`):
+  - `newSharedOverlay()`, the overlay of a worker. It reads the frozen base in place (node arrays,
+    lists, memoised forms, both hash tables) and holds only what its session adds; any number of
+    workers share one base. A lookup probes the base's table and, on a miss, a small table of its own
+    (substitution pairs the other way round: three in four are the session's). `rebase(snapshot)`
+    moves it to a later snapshot of a pipelined load for the price of a `reset()`; it then answers
+    exactly like a new overlay of that snapshot (the cache entries that survive a `reset()` end there).
+    It cannot be frozen, and it has two backing arrays for its lists: `lists().poolOf(id)`.
+  - `newOverlay()`, a private flat copy of the whole base (14 MB for mathlib): one array per field. It
+    is the only kind that can be frozen in turn, so the snapshots of a pipelined load are such copies,
+    made by the loader once per publication (`rlvm.load.LevelChain`).
 - `freeze()` adds the official normal forms to the store so that `normalize` of a base level is a
   memo hit in overlays: mathlib grows from 48,248 to 70,610 levels (37 ms).
-- Not supported: partial truncation (marks), a base that grows while workers run.
+- Not supported: partial truncation (marks); freezing a shared overlay.
+- Measurements and the reasons for the layout: *agentic-note*: rep-OPT-C.
 
 ## Limits
 
@@ -134,7 +143,7 @@ w.reset();                                      // session boundary: forget ever
 
 ## Tests
 
-`. ./env.sh && $MVN -o -q -pl rlvm-level test`: 47 tests in 8 classes, 0 failures, 1 skipped
+`. ./env.sh && $MVN -o -q -pl rlvm-level test`: 68 tests in 9 classes, 0 failures, 1 skipped
 (`BasicsTest.depthLimitOfTheOfficialKernel`, 16.7 M nodes; it passed when run once with
 `-Dtest=BasicsTest -Drlvm.level.heavy=true`).
 
@@ -145,7 +154,8 @@ w.reset();                                      // session boundary: forget ever
 | `OfficialGoldenTest` | answers of the real official kernel (below) |
 | `OfficialRebuildGoldenTest` | the official verdict on 1,600 inductive declarations whose levels `add_inductive` rebuilds (see "Pointer equality"): accepted iff `isEquivOfficial(L, rebuild(L))`, on `LevelStore` and on `RefLevel`; `instantiate` under the identity substitution keeps the declared spelling |
 | `CuratedCasesTest` | the cases of docs/research/02 section 3.6, `bugs/level-imax-leq`, `bugs/level-imax-normalization`, `bugs/large-elim-param`, `bugs/proj-of-imax-prop`, the two imax corner cases, tutorial 015-027 |
-| `OverlayTest` | freeze, overlay ids, reset, reissued ids, cache and memo validity across reset, growth, 8 concurrent workers plus 2 readers of the frozen base |
+| `OverlayTest` | freeze, overlay ids, reset, reissued ids, cache and memo validity across reset, growth, 8 concurrent workers plus 2 readers of the frozen base (on the private copy) |
+| `SharedOverlayTest` | all of `OverlayTest` on the shared overlay, and: the same trace of ids as the private copy for random scripts over the whole API, across resets, along a chain of 60 snapshots with `rebase`, where the closure of `freeze()` was cut, and for 8 workers beside a publisher (no snapshot changes after publication); what a shared overlay refuses; that it holds no copy of its base |
 | `RealExportTest` | level records of the 230 arena tests (1,554 records) and of init, std, cedar, cslib, mathlib |
 | `BasicsTest` | ids, hash-consing, lists, substitution ids, printing, the `CANON_UNKNOWN` fallback, depth limit |
 
@@ -193,7 +203,9 @@ numeric names.
 `bench/modules/rlvm-level/run_bench.py` (needs `$MVN -o -q -pl rlvm-level test-compile` first) runs
 `rlvm.level.LevelBench SCENARIO N` in `bench/arena-docker.sh --arena-limits bench/measure.sh` for two
 values of N and reports `(instr(N2) - instr(N1)) / (N2 - N1)`, all threads counted. aarch64, GraalVM
-CE 25 JIT, default flags, synthetic small levels, on an overlay. "over ref" is the difference to the
+CE 25 JIT, default flags, synthetic small levels, on an overlay (the table: the private copy, as measured
+before the shared overlay existed; `--overlay shared|flat` chooses, and on the shared overlay of a worker the
+fast paths cost 0 to 10 instructions more and the slow paths 6 to 27 %: *agentic-note*: rep-OPT-C). "over ref" is the difference to the
 `baseline` loop, whose body adds the two operand ids; so a value near 0 means "as cheap as that add
 (about 2 instructions)", not "free". Repeatability about +-0.1 (first group), +-0.3 (second),
 +-1.5 (cold). Raw data: `work/rlvm-level/bench.json`.
@@ -228,8 +240,9 @@ Wall / CPU time of the longer run of some scenarios (same container): `isEquiv` 
 1. The cold canonical form is the expensive path (about 1,900 instructions for a new small level,
    2.5 times the official `normalize`). There is no fast path for `imax`-free levels. How often a
    checker reaches it is unknown until a kernel exists.
-2. Overlay = private copy of the base (see above); per-worker memory not measured.
-3. No marks / partial truncation; no growing base.
+2. The loader still copies the whole store once per publication of a pipelined load (`newOverlay()`
+   in `rlvm.load.LevelChain`); the workers copy nothing.
+3. No marks / partial truncation.
 4. Deep-nesting behaviour (`StackOverflowError`) untested.
 5. `new LevelStore(names, expectedLevels)` sizes the list stores proportionally to
    `expectedLevels`; fine for real exports, wasteful for huge values.

@@ -148,6 +148,28 @@ public interface ExportSink {
     int RUN_REFUSED = Integer.MIN_VALUE;
 
     /**
+     * Optional fast path of the reader for a stretch of consecutive {@code app} records, in place of
+     * {@code count} calls of {@link #exprApp}: record {@code i} has the file id
+     * {@code firstFileId + i}, its function is the expression with file id {@code recs[off + 3 * i + 1]}
+     * and its argument the one with file id {@code recs[off + 3 * i + 2]} (the ints at
+     * {@code off + 3 * i} are the file ids of the records themselves).
+     *
+     * <p>As for {@link #exprRun}, the reader offers a stretch only while the expression ids of the
+     * file are dense, in order and numbered consecutively by the sink (sink id = file id +
+     * {@code delta} for every expression so far, so the sink ids of the children are the file ids
+     * plus {@code delta}), and only if both children of every record are earlier expressions. The
+     * sink either takes the stretch - then it must behave exactly as if it had received the
+     * {@code count} calls, and return the id of the first record, the others being the following
+     * ids - or returns {@link #RUN_REFUSED} without any other effect, and the reader makes the
+     * {@code count} calls. The array is the reader's scratch: valid during the call only.
+     *
+     * @return the sink id of the first record ({@code firstFileId + delta}), or {@link #RUN_REFUSED}
+     */
+    default int exprApps(int firstFileId, int count, int delta, int[] recs, int off) throws ExportException {
+        return RUN_REFUSED;
+    }
+
+    /**
      * Optional fast path of the parallel mode with {@link ExportReader.Options#runs}: {@code count}
      * consecutive {@code app} / {@code lam} / {@code forallE} / {@code letE} records that a scanner
      * thread has already put into the PACKED form of {@link ExportReader.RunFormat}, in place of the

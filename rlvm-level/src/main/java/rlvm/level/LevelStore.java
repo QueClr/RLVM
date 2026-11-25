@@ -30,11 +30,24 @@ import java.util.Arrays;
  * canonical form of every level and makes the store immutable; a frozen store may be read by any number of threads through the
  * accessors and the memoised fast paths ({@link #kind}, {@link #lhs}, lists, {@link #isEquiv} ...);
  * operations that would have to create something throw {@link IllegalStateException}.
- * {@link #newOverlay()} gives a worker its own store whose ids below {@link #baseSize()} are the base
- * ids and whose new ids start there; {@link #reset()} forgets everything a worker created, in time
- * proportional to what it created. An overlay is confined to one thread and never touches the base
- * after its creation (it works on a private copy of the base arrays, a few MB for Mathlib's 48 k
- * levels), so there are no locks and no shared writes.
+ * An overlay is a writable store on top of a frozen one whose ids below {@link #baseSize()} are the
+ * base ids and whose new ids start there; {@link #reset()} forgets everything it created, in time
+ * proportional to what it created. An overlay is confined to one thread. There are two kinds, with the
+ * same ids and the same answers operation by operation:
+ * <ul>
+ *   <li>{@link #newSharedOverlay()}, the overlay of a worker: it reads the frozen base in place - the
+ *       node arrays, the lists, the memoised forms and the two hash tables - and holds only what its
+ *       session adds, in arrays of its own. Nothing is copied when it is made, and {@link #rebase}
+ *       moves it to a later, larger snapshot for the price of a {@code reset()}. A lookup that the base
+ *       does not answer probes a second, small table. Any number of overlays share one base; none of
+ *       them writes it (the publication rule: a store is immutable once {@code freeze()} has returned,
+ *       and {@link #isFrozen()}, a volatile read, is the first thing an overlay asks of its base).
+ *   <li>{@link #newOverlay()}, a private flat copy of the whole base (a few MB for Mathlib): one array
+ *       per field and no base. It is the only kind that can be frozen in turn, so the snapshots of a
+ *       pipelined load are such copies, made by the loader, once per publication.
+ * </ul>
+ * A flat store is a shared overlay whose base is empty: the code is the same, the bound {@code split}
+ * below which an id is read from the base is 0.
  *
  * <p>Operations recurse on the {@code max}/{@code imax} nesting depth (never on {@code succ} chains).
  * A hostile input nested hundreds of thousands deep ends in a {@link StackOverflowError}: the
@@ -80,7 +93,7 @@ public final class LevelStore {
 
     private final NameOracle names;
 
-    // ---- level nodes (index = id) ----
+    // ---- level nodes: own arrays; level id l >= split has the own index l - split ----
     private int[] info;     // kind | flags | depth << 8
     private int[] a;        // succ: predecessor; max/imax: lhs; param: name id
     private int[] b;        // max/imax: rhs
@@ -90,20 +103,45 @@ public final class LevelStore {
     private int[] canon;    // canonical form id, 0 = not computed, -1 = unknown
     private int[] chk;      // last parameter list this level was checked against, -1 = none
     private int top;
-    private int[] table;
+    private int[] table;    // own ids only
+
+    // ---- the shared base of a shared overlay: level ids < split (null / 0 in a flat store) ----
+    // The arrays of the frozen store this overlay sits on. They are only read here, by any number of
+    // overlays at once; the three "own" flags say that an array was replaced by a private copy because
+    // this overlay had to write a memo into it (never on a store that freeze() completed).
+    private int[] bInfo;
+    private int[] bA;
+    private int[] bB;
+    private int[] bOffBase;
+    private int[] bOffK;
+    private int[] bNorm;
+    private int[] bCanon;
+    private int[] bCanonRep;
+    private int[] bTable;
+    private boolean bNormOwn;
+    private boolean bCanonOwn;
+    private boolean bCanonRepOwn;
+    /** Private to this overlay: base level -> 1 + the parameter list it was last checked against (0 = none). */
+    private int[] bChk = NO_INTS;
+    /** First own level id: 0 in a flat store (a root store or a private copy), {@link #baseTop} in a shared overlay. */
+    private int split;
+    /** First own canonical form id, as {@link #split}. */
+    private int canonSplit;
 
     // ---- lists ----
     private final IntListStore lists;
     private final IntListStore canons;
-    private int[] canonRep; // canonical form id -> a level with that form
+    private int[] canonRep; // canonical form id -> a level with that form (own index: id - canonSplit)
 
-    // ---- overlay bookkeeping ----
-    private final int baseTop;      // 0 for a root store
-    private final int baseListTop;
-    private final int baseCanonTop;
+    // ---- overlay bookkeeping (not final: a shared overlay moves to a larger base, see rebase) ----
+    private int baseTop;      // 0 for a root store
+    private int baseListTop;
+    private int baseCanonTop;
     private volatile boolean frozen;
 
-    // ---- instantiation caches (direct mapped; stamp 0 = entry made of base ids only, see substIsBase) ----
+    // ---- instantiation caches (direct mapped). An entry is valid if its stamp is the current epoch (it was
+    // made in this session) or the current "forever" stamp (it is made of base ids only, see substIsBase, and
+    // survives reset()). epoch is positive, forever negative, 0 marks an empty slot. ----
     private final long[] icKey = new long[1 << CACHE_BITS];
     private final int[] icVal = new int[1 << CACHE_BITS];
     private final int[] icStamp = new int[1 << CACHE_BITS];
@@ -111,6 +149,12 @@ public final class LevelStore {
     private final int[] lcVal = new int[1 << CACHE_BITS];
     private final int[] lcStamp = new int[1 << CACHE_BITS];
     private int epoch = 1;
+    private int forever = -1;
+
+    private static final int[] NO_INTS = new int[0];
+
+    /** Initial own capacity (levels) of a shared overlay; its arrays grow and are kept across resets. */
+    private static final int OVERLAY_LEVELS = 1024;
 
     // ---- scratch ----
     private int[] scr = new int[64];
@@ -175,6 +219,7 @@ public final class LevelStore {
         }
     }
 
+    /** The private flat copy of a frozen flat store ({@link #newOverlay()}). */
     private LevelStore(LevelStore base) {
         names = base.names;
         int n = base.top;
@@ -197,20 +242,69 @@ public final class LevelStore {
         baseCanonTop = canons.size();
     }
 
+    /** The shared overlay of a frozen flat store ({@link #newSharedOverlay()}): nothing of the base is copied. */
+    private LevelStore(LevelStore base, boolean shared) {
+        names = base.names;
+        int cap = OVERLAY_LEVELS;
+        info = new int[cap];
+        a = new int[cap];
+        b = new int[cap];
+        offBase = new int[cap];
+        offK = new int[cap];
+        norm = new int[cap];
+        canon = new int[cap];
+        chk = new int[cap];
+        table = new int[2 * cap];
+        lists = IntListStore.sharedOverlayOf(base.lists);
+        canons = IntListStore.sharedOverlayOf(base.canons);
+        canonRep = new int[64];
+        adopt(base);
+    }
+
+    /** Points the base part of this shared overlay (which holds nothing of its own) at the frozen flat store {@code base}. */
+    private void adopt(LevelStore base) {
+        bInfo = base.info;
+        bA = base.a;
+        bB = base.b;
+        bOffBase = base.offBase;
+        bOffK = base.offK;
+        bNorm = base.norm;
+        bCanon = base.canon;
+        bCanonRep = base.canonRep;
+        bTable = base.table;
+        bNormOwn = false;
+        bCanonOwn = false;
+        bCanonRepOwn = false;
+        int n = base.top;
+        split = n;
+        top = n;
+        baseTop = n;
+        baseListTop = lists.size();
+        baseCanonTop = canons.size();
+        canonSplit = baseCanonTop;
+    }
+
     /**
      * Computes the official normal form and the canonical form of every level and makes this store
      * immutable. Idempotent. After this call the store may be shared between threads (accessors and
-     * memoised answers only) and {@link #newOverlay()} may be called from any thread.
+     * memoised answers only) and {@link #newOverlay()} / {@link #newSharedOverlay()} may be called from
+     * any thread: nothing in the store is written after this method has returned, and its last action
+     * is the volatile write that every reader of the store sees first ({@link #isFrozen()}).
      *
      * <p>The normal forms are added to the store (and normalised in turn), so that in an overlay
      * {@link #normalize} of a base level is always a memo hit; {@link #size()} can therefore grow
      * here. The closure is bounded (four times the size plus 1024 levels): beyond that, which no
      * real export comes near, an overlay recomputes the normal form of the remaining base levels on
      * every call. Every level gets its canonical form in any case.
+     *
+     * @throws IllegalStateException on a shared overlay: only a flat store can become a base
      */
     public void freeze() {
         if (frozen) {
             return;
+        }
+        if (split != 0) {
+            throw new IllegalStateException("a shared overlay cannot be frozen: freeze a root store or a newOverlay() copy");
         }
         int cap = 4 * top + 1024;
         for (int l = 1; l < top && top <= cap; l++) {
@@ -233,8 +327,9 @@ public final class LevelStore {
     }
 
     /**
-     * A private, writable store on top of this frozen store. Costs one copy of the store (make one
-     * per worker thread and {@link #reset()} it between sessions; do not make one per declaration).
+     * A private, writable flat store on top of this frozen store: a copy of all of it, which can be
+     * frozen in turn (the snapshots of a pipelined load are such copies). For a worker's session use
+     * {@link #newSharedOverlay()}, which copies nothing.
      */
     public LevelStore newOverlay() {
         if (!frozen) {
@@ -243,9 +338,29 @@ public final class LevelStore {
         return new LevelStore(this);
     }
 
-    /** True for a store made by {@link #newOverlay()}. */
+    /**
+     * A private, writable store on top of this frozen store that <em>shares</em> it: the overlay reads
+     * the levels, lists, memoised forms and hash tables of this store in place and holds only what it
+     * creates itself. Same ids and same answers as {@link #newOverlay()}, operation by operation. Make
+     * one per worker thread, {@link #reset()} it between sessions and {@link #rebase} it when a larger
+     * snapshot is published. The overlay keeps this store's arrays alive while it sits on it; it never
+     * writes them. It cannot be frozen.
+     */
+    public LevelStore newSharedOverlay() {
+        if (!frozen) {
+            throw new IllegalStateException("freeze() the store before creating overlays");
+        }
+        return new LevelStore(this, true);
+    }
+
+    /** True for a store made by {@link #newOverlay()} or {@link #newSharedOverlay()}. */
     public boolean isOverlay() {
         return baseTop != 0;
+    }
+
+    /** True for a store made by {@link #newSharedOverlay()}. */
+    public boolean isSharedOverlay() {
+        return split != 0;
     }
 
     /**
@@ -262,8 +377,10 @@ public final class LevelStore {
         }
         int[] t = table;
         int mask = t.length - 1;
+        int sp0 = split;
         for (int id = top - 1; id >= baseTop; id--) {
-            int s = hashNode(info[id] & KIND_MASK, a[id], b[id]) & mask;
+            int j = id - sp0;
+            int s = hashNode(info[j] & KIND_MASK, a[j], b[j]) & mask;
             int guard = t.length;
             while (t[s] != id) {
                 s = (s + 1) & mask;
@@ -275,15 +392,56 @@ public final class LevelStore {
         }
         top = baseTop;
         lists.truncate(baseListTop);
-        Arrays.fill(canonRep, baseCanonTop, canons.size(), 0);
+        Arrays.fill(canonRep, baseCanonTop - canonSplit, canons.size() - canonSplit, 0);
         canons.truncate(baseCanonTop);
         sp = 0;
         if (++epoch == Integer.MAX_VALUE) {
-            Arrays.fill(icKey, 0L);
-            Arrays.fill(lcKey, 0L);
-            Arrays.fill(icStamp, 0);
-            Arrays.fill(lcStamp, 0);
-            epoch = 1;
+            clearCaches();
+        }
+    }
+
+    private void clearCaches() {
+        Arrays.fill(icKey, 0L);
+        Arrays.fill(lcKey, 0L);
+        Arrays.fill(icStamp, 0);
+        Arrays.fill(lcStamp, 0);
+        epoch = 1;
+        forever = -1;
+    }
+
+    /**
+     * Shared overlay only: {@link #reset()}, and then moves this overlay onto {@code newBase}, a frozen
+     * flat store that extends the current base with the same ids (a later snapshot of the same chain of
+     * {@link #newOverlay()} copies; the caller guarantees that). Afterwards this store answers exactly
+     * like {@code newBase.newSharedOverlay()}, id by id: no answer that was remembered on the old base
+     * is given again, not even the cache entries that survive a {@code reset()} (a cached instantiation
+     * skips the levels its computation would create, so keeping one would shift the ids that follow).
+     * Costs what {@code reset()} costs; nothing of the base is copied.
+     *
+     * @throws IllegalArgumentException if {@code newBase} is not a frozen flat store over the same names, or
+     *     is smaller than the current base (a snapshot never shrinks)
+     */
+    public void rebase(LevelStore newBase) {
+        if (split == 0) {
+            throw new IllegalStateException("rebase() is only available on shared overlays");
+        }
+        if (newBase == null || !newBase.frozen || newBase.split != 0) {
+            throw new IllegalArgumentException("rebase needs a frozen flat store");
+        }
+        if (newBase.names != names) {
+            throw new IllegalArgumentException("rebase onto a store with another name order");
+        }
+        if (newBase.top < baseTop || newBase.lists.size() < baseListTop || newBase.canons.size() < baseCanonTop) {
+            throw new IllegalArgumentException("rebase onto an older snapshot: base " + newBase.top + " levels / "
+                    + newBase.lists.size() + " lists, current " + baseTop + " / " + baseListTop);
+        }
+        reset();
+        lists.rebase(newBase.lists);
+        canons.rebase(newBase.canons);
+        adopt(newBase);
+        // A fresh overlay has empty caches: the entries that survive a reset end here.
+        if (--forever == Integer.MIN_VALUE) {
+            clearCaches();
         }
     }
 
@@ -315,6 +473,94 @@ public final class LevelStore {
     }
 
     // =====================================================================================
+    // The node arrays: a level below split is read from the shared base, any other from the own arrays
+    // =====================================================================================
+
+    private int info(int l) {
+        int j = l - split;
+        return j >= 0 ? info[j] : bInfo[l];
+    }
+
+    private int a(int l) {
+        int j = l - split;
+        return j >= 0 ? a[j] : bA[l];
+    }
+
+    private int b(int l) {
+        int j = l - split;
+        return j >= 0 ? b[j] : bB[l];
+    }
+
+    private int offBase(int l) {
+        int j = l - split;
+        return j >= 0 ? offBase[j] : bOffBase[l];
+    }
+
+    private int offK(int l) {
+        int j = l - split;
+        return j >= 0 ? offK[j] : bOffK[l];
+    }
+
+    private int norm(int l) {
+        int j = l - split;
+        return j >= 0 ? norm[j] : bNorm[l];
+    }
+
+    private int canon(int l) {
+        int j = l - split;
+        return j >= 0 ? canon[j] : bCanon[l];
+    }
+
+    private int repOf(int c) {
+        int j = c - canonSplit;
+        return j >= 0 ? canonRep[j] : bCanonRep[c];
+    }
+
+    // Memo writes. A write below split goes to a private copy of the base array, made at the first such
+    // write: the base itself is never written. (It does not happen on a store that freeze() completed,
+    // whose levels all have their forms; the copy keeps the answers exact where the closure of freeze()
+    // was cut.)
+
+    private void setNorm(int l, int r) {
+        int j = l - split;
+        if (j >= 0) {
+            norm[j] = r;
+        } else {
+            if (!bNormOwn) {
+                bNorm = bNorm.clone();
+                bNormOwn = true;
+            }
+            bNorm[l] = r;
+        }
+    }
+
+    private void setCanon(int l, int c) {
+        int j = l - split;
+        if (j >= 0) {
+            canon[j] = c;
+        } else {
+            if (!bCanonOwn) {
+                bCanon = bCanon.clone();
+                bCanonOwn = true;
+            }
+            bCanon[l] = c;
+        }
+    }
+
+    private void setCanonRep(int c, int l) {
+        int j = c - canonSplit;
+        if (j >= 0) {
+            canonRep[j] = l;
+        } else {
+            if (!bCanonRepOwn) {
+                bCanonRep = bCanonRep.clone();
+                bCanonRepOwn = true;
+            }
+            bCanonRep[c] = l;
+        }
+    }
+
+    // =====================================================================================
     // Hash-consing
     // =====================================================================================
 
@@ -326,16 +572,37 @@ public final class LevelStore {
         return h;
     }
 
+    /** The node (kind, x, y): the base's if it has one (nine in ten lookups of a worker end there), else this store's, else a new one. */
     private int intern(int kind, int x, int y) {
+        int h = hashNode(kind, x, y);
+        int sp0 = split;
+        if (sp0 != 0) {
+            int[] t = bTable;
+            int[] ba = bA;
+            int[] bb = bB;
+            int mask = t.length - 1;
+            int s = h & mask;
+            for (;;) {
+                int id = t[s];
+                if (id == 0) {
+                    break;
+                }
+                if (ba[id] == x && bb[id] == y && (bInfo[id] & KIND_MASK) == kind) {
+                    return id;
+                }
+                s = (s + 1) & mask;
+            }
+        }
         int[] t = table;
         int mask = t.length - 1;
-        int s = hashNode(kind, x, y) & mask;
+        int s = h & mask;
         for (;;) {
             int id = t[s];
             if (id == 0) {
                 break;
             }
-            if (a[id] == x && b[id] == y && (info[id] & KIND_MASK) == kind) {
+            int j = id - sp0;
+            if (a[j] == x && b[j] == y && (info[j] & KIND_MASK) == kind) {
                 return id;
             }
             s = (s + 1) & mask;
@@ -348,7 +615,8 @@ public final class LevelStore {
             throw frozenError();
         }
         int id = top;
-        if (id == info.length) {
+        int j = id - split;
+        if (j == info.length) {
             growNodes();
         }
         int inf;
@@ -359,19 +627,19 @@ public final class LevelStore {
                 inf = KIND_ZERO | F_ALWAYS_ZERO | F_EXPLICIT;
                 break;
             case KIND_SUCC: {
-                int ia = info[x];
+                int ia = info(x);
                 int d = (ia >>> DEPTH_SHIFT) + 1;
                 if (d > MAX_DEPTH) {
                     throw new LevelLimitException("universe level depth is too big");
                 }
                 inf = KIND_SUCC | (ia & (F_HAS_PARAM | F_EXPLICIT | F_HAS_IMAX)) | F_NEVER_ZERO | (d << DEPTH_SHIFT);
-                ob = offBase[x];
-                ok = offK[x] + 1;
+                ob = offBase(x);
+                ok = offK(x) + 1;
                 break;
             }
             case KIND_MAX: {
-                int ia = info[x];
-                int ib = info[y];
+                int ia = info(x);
+                int ib = info(y);
                 int d = Math.max(ia >>> DEPTH_SHIFT, ib >>> DEPTH_SHIFT) + 1;
                 if (d > MAX_DEPTH) {
                     throw new LevelLimitException("universe level depth is too big");
@@ -381,8 +649,8 @@ public final class LevelStore {
                 break;
             }
             case KIND_IMAX: {
-                int ia = info[x];
-                int ib = info[y];
+                int ia = info(x);
+                int ib = info(y);
                 int d = Math.max(ia >>> DEPTH_SHIFT, ib >>> DEPTH_SHIFT) + 1;
                 if (d > MAX_DEPTH) {
                     throw new LevelLimitException("universe level depth is too big");
@@ -395,17 +663,17 @@ public final class LevelStore {
                 inf = KIND_PARAM | F_HAS_PARAM;
                 break;
         }
-        info[id] = inf;
-        a[id] = x;
-        b[id] = y;
-        offBase[id] = ob;
-        offK[id] = ok;
-        norm[id] = 0;
-        canon[id] = 0;
-        chk[id] = -1;
+        info[j] = inf;
+        a[j] = x;
+        b[j] = y;
+        offBase[j] = ob;
+        offK[j] = ok;
+        norm[j] = 0;
+        canon[j] = 0;
+        chk[j] = -1;
         top = id + 1;
         table[slot] = id;
-        if (2 * top > table.length) {
+        if (2 * (j + 1) > table.length) {
             rehash(table.length << 1);
         }
         return id;
@@ -426,8 +694,10 @@ public final class LevelStore {
     private void rehash(int newSize) {
         int[] t = new int[newSize];
         int mask = newSize - 1;
-        for (int id = 1; id < top; id++) {
-            int s = hashNode(info[id] & KIND_MASK, a[id], b[id]) & mask;
+        int sp0 = split;
+        for (int id = Math.max(1, sp0); id < top; id++) {
+            int j = id - sp0;
+            int s = hashNode(info[j] & KIND_MASK, a[j], b[j]) & mask;
             while (t[s] != 0) {
                 s = (s + 1) & mask;
             }
@@ -491,55 +761,55 @@ public final class LevelStore {
     // =====================================================================================
 
     public int kind(int l) {
-        return info[l] & KIND_MASK;
+        return info(l) & KIND_MASK;
     }
 
     /** Left operand of a max/imax. */
     public int lhs(int l) {
-        return a[l];
+        return a(l);
     }
 
     /** Right operand of a max/imax. */
     public int rhs(int l) {
-        return b[l];
+        return b(l);
     }
 
     /** Predecessor of a succ. */
     public int succOf(int l) {
-        return a[l];
+        return a(l);
     }
 
     /** Name id of a param. */
     public int paramName(int l) {
-        return a[l];
+        return a(l);
     }
 
     public boolean hasParam(int l) {
-        return (info[l] & F_HAS_PARAM) != 0;
+        return (info(l) & F_HAS_PARAM) != 0;
     }
 
     public boolean hasIMax(int l) {
-        return (info[l] & F_HAS_IMAX) != 0;
+        return (info(l) & F_HAS_IMAX) != 0;
     }
 
     /** Official depth: zero/param 0, succ d+1, max/imax max(d1,d2)+1. */
     public int depth(int l) {
-        return info[l] >>> DEPTH_SHIFT;
+        return info(l) >>> DEPTH_SHIFT;
     }
 
     /** Official {@code is_explicit}: {@code l = succ^k zero}; then {@link #offset(int)} is its value. */
     public boolean isExplicit(int l) {
-        return (info[l] & F_EXPLICIT) != 0;
+        return (info(l) & F_EXPLICIT) != 0;
     }
 
     /** Official {@code to_offset(l).first}: {@code l} without its leading succs. */
     public int offsetBase(int l) {
-        return offBase[l];
+        return offBase(l);
     }
 
     /** Official {@code to_offset(l).second}: the number of leading succs. */
     public int offset(int l) {
-        return offK[l];
+        return offK(l);
     }
 
     /** Official {@code is_zero}: syntactically zero. */
@@ -553,7 +823,7 @@ public final class LevelStore {
      * False for a parameter.
      */
     public boolean isNeverZero(int l) {
-        return (info[l] & F_NEVER_ZERO) != 0;
+        return (info(l) & F_NEVER_ZERO) != 0;
     }
 
     /**
@@ -561,7 +831,7 @@ public final class LevelStore {
      * False for a parameter. This is the kernel's "is a Prop" test for {@code Sort l}.
      */
     public boolean isAlwaysZero(int l) {
-        return (info[l] & F_ALWAYS_ZERO) != 0;
+        return (info(l) & F_ALWAYS_ZERO) != 0;
     }
 
     // =====================================================================================
@@ -570,8 +840,8 @@ public final class LevelStore {
 
     /** Official {@code mk_max}. */
     public int mkMax(int l1, int l2) {
-        int i1 = info[l1];
-        int i2 = info[l2];
+        int i1 = info(l1);
+        int i2 = info(l2);
         if ((i1 & i2 & F_EXPLICIT) != 0) {
             return (i1 >>> DEPTH_SHIFT) >= (i2 >>> DEPTH_SHIFT) ? l1 : l2;
         }
@@ -584,21 +854,21 @@ public final class LevelStore {
         if (l2 == ZERO) {
             return l1;
         }
-        if ((i2 & KIND_MASK) == KIND_MAX && (a[l2] == l1 || b[l2] == l1)) {
+        if ((i2 & KIND_MASK) == KIND_MAX && (a(l2) == l1 || b(l2) == l1)) {
             return l2;
         }
-        if ((i1 & KIND_MASK) == KIND_MAX && (a[l1] == l2 || b[l1] == l2)) {
+        if ((i1 & KIND_MASK) == KIND_MAX && (a(l1) == l2 || b(l1) == l2)) {
             return l1;
         }
-        if (offBase[l1] == offBase[l2]) {
-            return offK[l1] > offK[l2] ? l1 : l2;
+        if (offBase(l1) == offBase(l2)) {
+            return offK(l1) > offK(l2) ? l1 : l2;
         }
         return intern(KIND_MAX, l1, l2);
     }
 
     /** Official {@code mk_imax}. */
     public int mkIMax(int l1, int l2) {
-        if ((info[l2] & F_NEVER_ZERO) != 0) {
+        if ((info(l2) & F_NEVER_ZERO) != 0) {
             return mkMax(l1, l2);
         }
         if (l2 == ZERO) {
@@ -619,7 +889,7 @@ public final class LevelStore {
 
     /** Official {@code normalize}; memoised per level. */
     public int normalize(int l) {
-        int r = norm[l];
+        int r = norm(l);
         return r != 0 ? r : normalizeSlow(l);
     }
 
@@ -627,22 +897,22 @@ public final class LevelStore {
         if (frozen) {
             throw frozenError();
         }
-        int base = offBase[l];
-        int k = offK[l];
-        int kind = info[base] & KIND_MASK;
+        int base = offBase(l);
+        int k = offK(l);
+        int kind = info(base) & KIND_MASK;
         int r;
         if (kind == KIND_ZERO || kind == KIND_PARAM) {
             r = l;
         } else if (kind == KIND_IMAX) {
-            int l1 = normalize(a[base]);
-            int l2 = normalize(b[base]);
+            int l1 = normalize(a(base));
+            int l2 = normalize(b(base));
             r = succN(mkIMax(l1, l2), k);
         } else {
             r = normalizeMax(base, k);
         }
         // A base level of an overlay may only remember results that survive reset().
         if (l >= baseTop || r < baseTop) {
-            norm[l] = r;
+            setNorm(l, r);
         }
         return r;
     }
@@ -656,9 +926,9 @@ public final class LevelStore {
 
     /** Official {@code push_max_args}: the leaves of nested max nodes, left to right. */
     private void pushMaxArgs(int l) {
-        while ((info[l] & KIND_MASK) == KIND_MAX) {
-            pushMaxArgs(a[l]);
-            l = b[l];
+        while ((info(l) & KIND_MASK) == KIND_MAX) {
+            pushMaxArgs(a(l));
+            l = b(l);
         }
         push(l);
     }
@@ -675,14 +945,14 @@ public final class LevelStore {
         sortNormLt(t1, n1);
         int[] s = scr;
         int i = t1;
-        if ((info[s[i]] & F_EXPLICIT) != 0) {
-            while (i + 1 < n1 && (info[s[i + 1]] & F_EXPLICIT) != 0) {
+        if ((info(s[i]) & F_EXPLICIT) != 0) {
+            while (i + 1 < n1 && (info(s[i + 1]) & F_EXPLICIT) != 0) {
                 i++;
             }
-            int kk = offK[s[i]];
+            int kk = offK(s[i]);
             int j = i + 1;
             for (; j < n1; j++) {
-                if (offK[s[j]] >= kk) {
+                if (offK(s[j]) >= kk) {
                     break;
                 }
             }
@@ -692,14 +962,14 @@ public final class LevelStore {
         }
         int w = t1;
         int first = s[i];
-        int prevBase = offBase[first];
-        int prevK = offK[first];
+        int prevBase = offBase(first);
+        int prevK = offK(first);
         s[w++] = first;
         i++;
         for (; i < n1; i++) {
             int cur = s[i];
-            int cb = offBase[cur];
-            int ck = offK[cur];
+            int cb = offBase(cur);
+            int ck = offK(cur);
             if (cb == prevBase) {
                 if (prevK < ck) {
                     prevK = ck;
@@ -757,26 +1027,26 @@ public final class LevelStore {
             if (x == y) {
                 return false;
             }
-            int l1 = offBase[x];
-            int l2 = offBase[y];
+            int l1 = offBase(x);
+            int l2 = offBase(y);
             if (l1 == l2) {
-                return offK[x] < offK[y];
+                return offK(x) < offK(y);
             }
-            int k1 = info[l1] & KIND_MASK;
-            int k2 = info[l2] & KIND_MASK;
+            int k1 = info(l1) & KIND_MASK;
+            int k2 = info(l2) & KIND_MASK;
             if (k1 != k2) {
                 return k1 < k2;
             }
             if (k1 == KIND_PARAM) {
-                return names.compareNames(a[l1], a[l2]) < 0;
+                return names.compareNames(a(l1), a(l2)) < 0;
             }
             // Both max or both imax (bases are never succ; two zeros are the same id).
-            if (a[l1] != a[l2]) {
-                x = a[l1];
-                y = a[l2];
+            if (a(l1) != a(l2)) {
+                x = a(l1);
+                y = a(l2);
             } else {
-                x = b[l1];
-                y = b[l2];
+                x = b(l1);
+                y = b(l2);
             }
         }
     }
@@ -795,24 +1065,24 @@ public final class LevelStore {
         if (l1 == l2 || l2 == ZERO) {
             return true;
         }
-        int k2 = info[l2] & KIND_MASK;
+        int k2 = info(l2) & KIND_MASK;
         if (k2 == KIND_MAX) {
-            return isGeqOfficial(l1, a[l2]) && isGeqOfficial(l1, b[l2]);
+            return isGeqOfficial(l1, a(l2)) && isGeqOfficial(l1, b(l2));
         }
-        int k1 = info[l1] & KIND_MASK;
-        if (k1 == KIND_MAX && (isGeqOfficial(a[l1], l2) || isGeqOfficial(b[l1], l2))) {
+        int k1 = info(l1) & KIND_MASK;
+        if (k1 == KIND_MAX && (isGeqOfficial(a(l1), l2) || isGeqOfficial(b(l1), l2))) {
             return true;
         }
         if (k2 == KIND_IMAX) {
-            return isGeqOfficial(l1, a[l2]) && isGeqOfficial(l1, b[l2]);
+            return isGeqOfficial(l1, a(l2)) && isGeqOfficial(l1, b(l2));
         }
         if (k1 == KIND_IMAX) {
-            return isGeqOfficial(b[l1], l2);
+            return isGeqOfficial(b(l1), l2);
         }
-        int b1 = offBase[l1];
-        int b2 = offBase[l2];
-        int o1 = offK[l1];
-        int o2 = offK[l2];
+        int b1 = offBase(l1);
+        int b2 = offBase(l2);
+        int o1 = offK(l1);
+        int o2 = offK(l2);
         if (b1 == b2 || b2 == ZERO) {
             return o1 >= o2;
         }
@@ -852,7 +1122,7 @@ public final class LevelStore {
      * Memoised per level. The id is only meaningful for comparison (and {@link #canonRep}).
      */
     public int canonId(int l) {
-        int c = canon[l];
+        int c = canon(l);
         return c != 0 ? c : canonSlow(l);
     }
 
@@ -865,7 +1135,7 @@ public final class LevelStore {
      */
     public int canonRep(int l) {
         int c = canonId(l);
-        return c > 0 ? canonRep[c] : l;
+        return c > 0 ? repOf(c) : l;
     }
 
     /**
@@ -877,8 +1147,8 @@ public final class LevelStore {
         if (l1 == l2) {
             return true;
         }
-        int c1 = canon[l1];
-        int c2 = canon[l2];
+        int c1 = canon(l1);
+        int c2 = canon(l2);
         if (c1 > 0 && c2 > 0) {
             return c1 == c2;
         }
@@ -927,8 +1197,7 @@ public final class LevelStore {
         int s1 = lists.start(list1);
         int s2 = lists.start(list2);
         for (int i = 0; i < n; i++) {
-            int[] p = lists.pool();
-            if (!isEquiv(p[s1 + i], p[s2 + i])) {
+            if (!isEquiv(lists.poolOf(list1)[s1 + i], lists.poolOf(list2)[s2 + i])) {
                 return false;
             }
         }
@@ -949,14 +1218,14 @@ public final class LevelStore {
             c = CANON_UNKNOWN;
         } else {
             c = canonIntern();
-            if (canonRep[c] == 0 && (c >= baseCanonTop || l < baseTop)) {
-                canonRep[c] = l;
+            if (repOf(c) == 0 && (c >= baseCanonTop || l < baseTop)) {
+                setCanonRep(c, l);
             }
         }
         // In an overlay every base level already has its form (freeze() computed it), so this stores
         // overlay results only; the guard keeps the memo valid across reset() in any case.
         if (l >= baseTop || (c > 0 && c < baseCanonTop)) {
-            canon[l] = c;
+            setCanon(l, c);
         }
         return c;
     }
@@ -999,20 +1268,20 @@ public final class LevelStore {
         if (cFail || ++cSteps > CANON_MAX_STEPS) {
             return false;
         }
-        int inf = info[l];
+        int inf = info(l);
         if ((inf & F_ALWAYS_ZERO) != 0) {
             return true;
         }
         int start = cSp;
         switch (inf & KIND_MASK) {
             case KIND_PARAM: {
-                int idx = localParam(a[l]);
+                int idx = localParam(a(l));
                 cPush(1L << idx, idx, 0);
                 return !cFail;
             }
             case KIND_SUCC: {
-                int k = offK[l];
-                if (!canonRec(offBase[l])) {
+                int k = offK(l);
+                if (!canonRec(offBase(l))) {
                     return false;
                 }
                 for (int i = start; i < cSp; i++) {
@@ -1022,19 +1291,19 @@ public final class LevelStore {
                 break;
             }
             case KIND_MAX: {
-                if (!canonRec(a[l]) || !canonRec(b[l])) {
+                if (!canonRec(a(l)) || !canonRec(b(l))) {
                     return false;
                 }
                 break;
             }
             default: {
-                int y = b[l];
+                int y = b(l);
                 if (!canonRec(y)) {
                     return false;
                 }
-                if ((info[y] & F_NEVER_ZERO) != 0) {
+                if ((info(y) & F_NEVER_ZERO) != 0) {
                     // imax a b = max a b
-                    if (!canonRec(a[l])) {
+                    if (!canonRec(a(l))) {
                         return false;
                     }
                     break;
@@ -1045,7 +1314,7 @@ public final class LevelStore {
                     addMinimalGuard(g0, cMask[i]);
                 }
                 int g1 = gSp;
-                if (!canonRec(a[l])) {
+                if (!canonRec(a(l))) {
                     return false;
                 }
                 int aEnd = cSp;
@@ -1217,8 +1486,9 @@ public final class LevelStore {
         }
         int id = canons.intern(scr, sp0, sp - sp0);
         sp = sp0;
-        if (id >= canonRep.length) {
-            canonRep = Arrays.copyOf(canonRep, id + (id >> 1) + 16);
+        int j = id - canonSplit;
+        if (j >= canonRep.length) {
+            canonRep = Arrays.copyOf(canonRep, j + (j >> 1) + 16);
         }
         return id;
     }
@@ -1236,11 +1506,12 @@ public final class LevelStore {
 
     /** Every sublevel of canonical form {@code cb} is dominated by a sublevel of {@code ca}. */
     private boolean canonGeq(int ca, int cb) {
-        int[] p = canons.pool();
+        int[] p = canons.poolOf(cb);
+        int[] q = canons.poolOf(ca);
         int pb = canons.start(cb);
         int nb = p[pb++];
         int a0 = canons.start(ca);
-        int na = p[a0++];
+        int na = q[a0++];
         for (int e = 0; e < nb; e++) {
             int hdr = p[pb];
             int ne = hdr >>> 1;
@@ -1252,18 +1523,18 @@ public final class LevelStore {
             boolean found = false;
             int pa = a0;
             for (int f = 0; f < na && !found; f++) {
-                int h2 = p[pa];
+                int h2 = q[pa];
                 int nf = h2 >>> 1;
                 boolean v2 = (h2 & 1) != 0;
                 int fNames = pa + 1;
-                int y = v2 ? p[fNames + nf] : 0;
-                int k2 = p[fNames + nf + (v2 ? 1 : 0)];
+                int y = v2 ? q[fNames + nf] : 0;
+                int k2 = q[fNames + nf + (v2 ? 1 : 0)];
                 pa = fNames + nf + (v2 ? 2 : 1);
                 if (nf > ne) {
                     continue;
                 }
                 boolean ok = isV ? (v2 && y == x && k <= k2) : (v2 ? k <= k2 + 1 : k <= k2);
-                if (ok && sortedSubset(p, fNames, nf, eNames, ne)) {
+                if (ok && sortedSubset(q, fNames, nf, p, eNames, ne)) {
                     found = true;
                 }
             }
@@ -1274,15 +1545,15 @@ public final class LevelStore {
         return true;
     }
 
-    /** {@code p[f .. f+nf)} is a subset of {@code p[e .. e+ne)}; both ascending. */
-    private static boolean sortedSubset(int[] p, int f, int nf, int e, int ne) {
+    /** {@code q[f .. f+nf)} is a subset of {@code p[e .. e+ne)}; both ascending. */
+    private static boolean sortedSubset(int[] q, int f, int nf, int[] p, int e, int ne) {
         int i = 0;
         int j = 0;
         while (i < nf) {
             if (j == ne) {
                 return false;
             }
-            int x = p[f + i];
+            int x = q[f + i];
             int y = p[e + j];
             if (x == y) {
                 i++;
@@ -1325,7 +1596,7 @@ public final class LevelStore {
     public boolean listHasDuplicates(int list) {
         int n = lists.length(list);
         int s = lists.start(list);
-        int[] p = lists.pool();
+        int[] p = lists.poolOf(list);
         for (int i = 1; i < n; i++) {
             int x = p[s + i];
             for (int j = 0; j < i; j++) {
@@ -1357,13 +1628,14 @@ public final class LevelStore {
         if (n == 0) {
             return 0;
         }
-        int[] p = lists.pool();
+        int[] pp = lists.poolOf(paramNames);
+        int[] lp = lists.poolOf(levels);
         int ps = lists.start(paramNames);
         int ls = lists.start(levels);
         boolean identity = true;
         for (int i = 0; i < n; i++) {
-            int l = p[ls + i];
-            if ((info[l] & KIND_MASK) != KIND_PARAM || a[l] != p[ps + i]) {
+            int l = lp[ls + i];
+            if ((info(l) & KIND_MASK) != KIND_PARAM || a(l) != pp[ps + i]) {
                 identity = false;
                 break;
             }
@@ -1376,7 +1648,8 @@ public final class LevelStore {
         }
         pair[0] = paramNames;
         pair[1] = levels;
-        return lists.intern(pair, 0, 2);
+        // Own lists first: three in four pairs of a worker are pairs its session already made.
+        return lists.internOwnFirst(pair, 0, 2);
     }
 
     /** The parameter name list of a substitution made by {@link #mkSubst} (not for 0). */
@@ -1397,14 +1670,14 @@ public final class LevelStore {
      * Cached per (level, substitution).
      */
     public int instantiate(int l, int subst) {
-        if (subst == 0 || (info[l] & F_HAS_PARAM) == 0) {
+        if (subst == 0 || (info(l) & F_HAS_PARAM) == 0) {
             return l;
         }
         long key = ((long) l << 32) | (subst & 0xFFFFFFFFL);
         int i = cacheSlot(key);
         if (icKey[i] == key) {
             int st = icStamp[i];
-            if (st == epoch || st == 0) {
+            if (st == epoch || st == forever) {
                 return icVal[i];
             }
         }
@@ -1421,11 +1694,12 @@ public final class LevelStore {
         int ps = lists.get(subst, 0);
         int ls = lists.get(subst, 1);
         int n = lists.length(ps);
-        int r = instRec(l, lists.start(ps), lists.start(ls), n);
+        // Building levels never interns a list, so the two arrays stay the ones of these lists.
+        int r = instRec(l, lists.poolOf(ps), lists.start(ps), lists.poolOf(ls), lists.start(ls), n);
         if (!frozen) {
             icKey[slot] = key;
             icVal[slot] = r;
-            icStamp[slot] = (l < baseTop && r < baseTop && substIsBase(subst)) || baseTop == 0 ? 0 : epoch;
+            icStamp[slot] = (l < baseTop && r < baseTop && substIsBase(subst)) || baseTop == 0 ? forever : epoch;
         }
         return r;
     }
@@ -1441,39 +1715,38 @@ public final class LevelStore {
         return subst < baseListTop && lists.get(subst, 0) < baseListTop && lists.get(subst, 1) < baseListTop;
     }
 
-    private int instRec(int l, int ps, int ls, int n) {
-        int inf = info[l];
+    private int instRec(int l, int[] pp, int ps, int[] lp, int ls, int n) {
+        int inf = info(l);
         if ((inf & F_HAS_PARAM) == 0) {
             return l;
         }
         switch (inf & KIND_MASK) {
             case KIND_PARAM: {
-                int nm = a[l];
-                int[] p = lists.pool();
+                int nm = a(l);
                 for (int i = 0; i < n; i++) {
-                    if (p[ps + i] == nm) {
-                        return p[ls + i];
+                    if (pp[ps + i] == nm) {
+                        return lp[ls + i];
                     }
                 }
                 return l;
             }
             case KIND_SUCC: {
-                int base = offBase[l];
-                int nb = instRec(base, ps, ls, n);
-                return nb == base ? l : succN(nb, offK[l]);
+                int base = offBase(l);
+                int nb = instRec(base, pp, ps, lp, ls, n);
+                return nb == base ? l : succN(nb, offK(l));
             }
             case KIND_MAX: {
-                int x = a[l];
-                int y = b[l];
-                int nx = instRec(x, ps, ls, n);
-                int ny = instRec(y, ps, ls, n);
+                int x = a(l);
+                int y = b(l);
+                int nx = instRec(x, pp, ps, lp, ls, n);
+                int ny = instRec(y, pp, ps, lp, ls, n);
                 return nx == x && ny == y ? l : mkMax(nx, ny);
             }
             default: {
-                int x = a[l];
-                int y = b[l];
-                int nx = instRec(x, ps, ls, n);
-                int ny = instRec(y, ps, ls, n);
+                int x = a(l);
+                int y = b(l);
+                int nx = instRec(x, pp, ps, lp, ls, n);
+                int ny = instRec(y, pp, ps, lp, ls, n);
                 return nx == x && ny == y ? l : mkIMax(nx, ny);
             }
         }
@@ -1497,7 +1770,7 @@ public final class LevelStore {
         int i = cacheSlot(key);
         if (lcKey[i] == key) {
             int st = lcStamp[i];
-            if (st == epoch || st == 0) {
+            if (st == epoch || st == forever) {
                 return lcVal[i];
             }
         }
@@ -1513,7 +1786,7 @@ public final class LevelStore {
         int sp0 = sp;
         boolean changed = false;
         for (int i = 0; i < n; i++) {
-            int e = lists.pool()[st + i];
+            int e = lists.poolOf(list)[st + i];
             int r = instantiate(e, subst);
             changed |= r != e;
             push(r);
@@ -1522,7 +1795,7 @@ public final class LevelStore {
         sp = sp0;
         lcKey[slot] = key;
         lcVal[slot] = res;
-        lcStamp[slot] = (list < baseListTop && res < baseListTop && substIsBase(subst)) || baseTop == 0 ? 0 : epoch;
+        lcStamp[slot] = (list < baseListTop && res < baseListTop && substIsBase(subst)) || baseTop == 0 ? forever : epoch;
         return res;
     }
 
@@ -1536,31 +1809,43 @@ public final class LevelStore {
      * all are declared.
      */
     public int undeclaredParam(int l, int paramNames) {
-        int inf = info[l];
+        int inf = info(l);
         if ((inf & F_HAS_PARAM) == 0) {
             return 0;
         }
-        if (chk[l] == paramNames) {
+        int j = l - split;
+        if (j >= 0) {
+            if (chk[j] == paramNames) {
+                return 0;
+            }
+        } else if (l < bChk.length && bChk[l] == paramNames + 1) {
             return 0;
         }
-        int r = undeclaredRec(l, lists.start(paramNames), lists.length(paramNames));
+        int r = undeclaredRec(l, lists.poolOf(paramNames), lists.start(paramNames), lists.length(paramNames));
         // Remember successes; an overlay's base levels may only remember base lists (reset()).
         if (r == 0 && !frozen && (l >= baseTop || paramNames < baseListTop)) {
-            chk[l] = paramNames;
+            if (j >= 0) {
+                chk[j] = paramNames;
+            } else {
+                if (l >= bChk.length) {
+                    // The memo of a shared overlay for the levels of its base: private, sized to the base.
+                    bChk = Arrays.copyOf(bChk, split + (split >> 3) + 16);
+                }
+                bChk[l] = paramNames + 1;
+            }
         }
         return r;
     }
 
-    private int undeclaredRec(int l, int ps, int n) {
+    private int undeclaredRec(int l, int[] p, int ps, int n) {
         for (;;) {
-            int inf = info[l];
+            int inf = info(l);
             if ((inf & F_HAS_PARAM) == 0) {
                 return 0;
             }
             switch (inf & KIND_MASK) {
                 case KIND_PARAM: {
-                    int nm = a[l];
-                    int[] p = lists.pool();
+                    int nm = a(l);
                     for (int i = 0; i < n; i++) {
                         if (p[ps + i] == nm) {
                             return 0;
@@ -1569,14 +1854,14 @@ public final class LevelStore {
                     return l;
                 }
                 case KIND_SUCC:
-                    l = offBase[l];
+                    l = offBase(l);
                     break;
                 default: {
-                    int r = undeclaredRec(a[l], ps, n);
+                    int r = undeclaredRec(a(l), p, ps, n);
                     if (r != 0) {
                         return r;
                     }
-                    l = b[l];
+                    l = b(l);
                     break;
                 }
             }
@@ -1595,7 +1880,7 @@ public final class LevelStore {
         int n = lists.length(levelList);
         int st = lists.start(levelList);
         for (int i = 0; i < n; i++) {
-            int r = undeclaredParam(lists.pool()[st + i], paramNames);
+            int r = undeclaredParam(lists.poolOf(levelList)[st + i], paramNames);
             if (r != 0) {
                 return r;
             }
@@ -1619,37 +1904,37 @@ public final class LevelStore {
             sb.append("<invalid level ").append(l).append('>');
             return;
         }
-        int inf = info[l];
+        int inf = info(l);
         if ((inf & F_EXPLICIT) != 0) {
-            sb.append(offK[l]);
+            sb.append(offK(l));
             return;
         }
-        int k = offK[l];
+        int k = offK(l);
         if (k > 0) {
-            appendChild(sb, offBase[l]);
+            appendChild(sb, offBase(l));
             sb.append('+').append(k);
             return;
         }
         int kind = inf & KIND_MASK;
         if (kind == KIND_PARAM) {
-            names.appendName(sb, a[l]);
+            names.appendName(sb, a(l));
             return;
         }
         sb.append(kind == KIND_MAX ? "max " : "imax ");
-        appendChild(sb, a[l]);
+        appendChild(sb, a(l));
         // max and imax are right associative
-        int r = b[l];
-        while ((info[r] & KIND_MASK) == kind) {
+        int r = b(l);
+        while ((info(r) & KIND_MASK) == kind) {
             sb.append(' ');
-            appendChild(sb, a[r]);
-            r = b[r];
+            appendChild(sb, a(r));
+            r = b(r);
         }
         sb.append(' ');
         appendChild(sb, r);
     }
 
     private void appendChild(StringBuilder sb, int l) {
-        int inf = info[l];
+        int inf = info(l);
         if ((inf & F_EXPLICIT) != 0 || (inf & KIND_MASK) == KIND_PARAM) {
             appendTo(sb, l);
         } else {

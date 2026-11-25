@@ -45,6 +45,33 @@ final class StructSink extends TraceSink {
         return ++exprs;
     }
 
+    /** Stretches of app records taken ({@link #exprApps}) and their records. */
+    int appStretches;
+    int appStretchRecords;
+
+    @Override
+    public int exprApps(int firstFileId, int count, int delta, int[] recs, int off) {
+        if (take == 0 || (take == 2 && rnd.nextBoolean())) {
+            return RUN_REFUSED;
+        }
+        if (firstFileId + delta != exprs + 1 || count < 1) {
+            throw new AssertionError("stretch of " + count + " app records from file id " + firstFileId + ", delta " + delta
+                    + ", after " + exprs + " expressions");
+        }
+        int first = exprs + 1;
+        for (int i = 0, o = off; i < count; i++, o += 3) {
+            if (recs[o] != firstFileId + i || recs[o + 1] < 0 || recs[o + 1] >= recs[o] || recs[o + 2] < 0
+                    || recs[o + 2] >= recs[o]) {
+                throw new AssertionError("app record " + recs[o] + " of a stretch: fn " + recs[o + 1] + ", arg " + recs[o + 2]);
+            }
+            ev("app", recs[o + 1] + delta, recs[o + 2] + delta, exprs + 1);
+            exprs++;
+        }
+        appStretches++;
+        appStretchRecords += count;
+        return first;
+    }
+
     @Override
     public int exprRun(int firstFileId, int count, int delta, int minLocal, byte[] packed, int off, int len, byte[] lengths,
             int lengthsOff, int[] open, int openOff, int openCount, int numLam, int numPi, int numLet, int numEarly,

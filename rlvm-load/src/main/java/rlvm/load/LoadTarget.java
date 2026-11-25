@@ -131,6 +131,26 @@ public interface LoadTarget {
     void blockStr(int litIndex);
 
     /**
+     * {@code count} APP / LAM / PI / LET records of the open block, four ints each from
+     * {@code recs[off]} on: the kind in the low four bits of the first (its other bits are ignored),
+     * then the references of {@link #blockApp}, {@link #blockLam}, {@link #blockPi} or
+     * {@link #blockLet} in their order (the fourth int of a record with two references is ignored).
+     * Equivalent to those {@code count} calls, which is what the default makes; a target may take the
+     * whole stretch in one loop ({@code rlvm.store.ProofBlocks.Writer.records}).
+     */
+    default void blockRecords(int[] recs, int off, int count) {
+        for (int i = 0, o = off; i < count; i++, o += 4) {
+            switch (recs[o] & 0xF) {
+                case rlvm.store.Kind.APP -> blockApp(recs[o + 1], recs[o + 2]);
+                case rlvm.store.Kind.LAM -> blockLam(recs[o + 1], recs[o + 2]);
+                case rlvm.store.Kind.PI -> blockPi(recs[o + 1], recs[o + 2]);
+                case rlvm.store.Kind.LET -> blockLet(recs[o + 1], recs[o + 2], recs[o + 3]);
+                default -> throw new IllegalArgumentException("not an APP / LAM / PI / LET record: kind " + (recs[o] & 0xF));
+            }
+        }
+    }
+
+    /**
      * {@code count} APP / LAM / PI / LET records of the open block in the packed form of
      * {@link Loader#RUN_FORMAT} (see {@code rlvm.store.ProofBlocks.Writer.run}): the record bytes
      * {@code packed[off .. off+len)} - a kind byte and the references that are already encoded

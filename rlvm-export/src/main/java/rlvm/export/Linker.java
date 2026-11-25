@@ -158,6 +158,55 @@ final class Linker implements RecordOut {
         e.bind(id, sink.exprApp(f, a));
     }
 
+    /**
+     * A stretch of {@code app} lines. While the expression ids are dense with a known delta, the
+     * longest prefix of records that the fast path of {@link #app} would take - the id is the next
+     * one, both children are earlier expressions - is offered to the sink as a whole
+     * ({@link ExportSink#exprApps}); a sink that refuses, and every record that is not of that kind
+     * (it may be an error, or leave the dense mode), go through {@link #app} one by one, so the
+     * calls, the error and its line are those of the single records.
+     */
+    @Override
+    public void apps(int[] recs, int count) throws ExportException {
+        final IdSpace e = exprs;
+        int i = 0;
+        while (i < count) {
+            int j = i;
+            if (e.denseWithDelta()) {
+                long next = e.limit;
+                for (int o = 3 * i; j < count; j++, o += 3, next++) {
+                    int id = recs[o];
+                    // ids of the fast path are decimal numbers below 10^9: never negative
+                    if (id != next || recs[o + 1] >= id || recs[o + 2] >= id || (recs[o + 1] | recs[o + 2]) < 0) {
+                        break;
+                    }
+                }
+            }
+            if (j > i) {
+                final int n = j - i;
+                final int firstId = recs[3 * i];
+                int first = sink.exprApps(firstId, n, e.delta, recs, 3 * i);
+                if (first != ExportSink.RUN_REFUSED) {
+                    if (first - firstId != e.delta) {
+                        throw new IllegalStateException("the sink numbered the app records it took from " + first
+                                + " instead of " + (firstId + e.delta));
+                    }
+                    e.bindRun(n);
+                    line += n;
+                    i = j;
+                    continue;
+                }
+                // refused: these records one by one
+                for (; i < j; i++) {
+                    app(recs[3 * i], recs[3 * i + 1], recs[3 * i + 2]);
+                }
+                continue;
+            }
+            app(recs[3 * i], recs[3 * i + 1], recs[3 * i + 2]);
+            i++;
+        }
+    }
+
     @Override
     public void lam(long id, int binderInfo, long name, long type, long body) throws ExportException {
         line++;

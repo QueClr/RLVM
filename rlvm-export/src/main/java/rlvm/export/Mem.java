@@ -14,7 +14,11 @@ import java.nio.ByteOrder;
 final class Mem {
     private Mem() {}
 
-    private static final VarHandle LE64 =
+    /**
+     * The handle of {@link #u64}. {@link Scanner} loads through it directly, so that the load stands in
+     * the scan loop whatever a compiler decides about inlining (see there).
+     */
+    static final VarHandle LE64 =
             MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
 
     static long u64(byte[] b, int i) {

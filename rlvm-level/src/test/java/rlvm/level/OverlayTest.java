@@ -12,15 +12,24 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import org.junit.jupiter.api.Test;
 
-/** Frozen base + per-worker overlays: id layout, reset, memo and cache validity, concurrency. */
+/**
+ * Frozen base + per-worker overlays: id layout, reset, memo and cache validity, concurrency. The tests run
+ * on the overlay that {@link #overlay} makes: here the private flat copy ({@code newOverlay()}), in
+ * {@link SharedOverlayTest} the shared overlay of a worker ({@code newSharedOverlay()}).
+ */
 class OverlayTest {
 
+    /** The kind of overlay under test. */
+    LevelStore overlay(LevelStore base) {
+        return base.newOverlay();
+    }
+
     /** All names are registered up front: worker threads only read the oracle. */
-    private static Lv.Names names() {
+    static Lv.Names names() {
         return new Lv.Names("x", "w", "v", "u");
     }
 
-    private static LevelStore randomBase(Lv.Names n, long seed, int count, List<RefLevel> out) {
+    static LevelStore randomBase(Lv.Names n, long seed, int count, List<RefLevel> out) {
         Random rnd = new Random(seed);
         LevelStore base = new LevelStore(n);
         for (int i = 0; i < count; i++) {
@@ -69,7 +78,7 @@ class OverlayTest {
         assertEquals(m, base.normalize(m));
         assertTrue(base.isEquivOfficial(m, m) && base.isGeqOfficial(m, u));
         int size = base.size();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         assertEquals(size, base.size());
         assertEquals(size, ov.size());
         assertThrows(IllegalStateException.class, base::reset);
@@ -84,7 +93,7 @@ class OverlayTest {
         base.freeze();
         int bs = base.size();
         int bl = base.listCount();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         assertEquals(bs, ov.baseSize());
         assertEquals(bl, ov.baseListCount());
         // every base level is the same level in the overlay, and re-interning finds the base id
@@ -134,8 +143,8 @@ class OverlayTest {
         Lv.Names n = names();
         LevelStore base = randomBase(n, 23, 300, null);
         base.freeze();
-        LevelStore o1 = base.newOverlay();
-        LevelStore o2 = base.newOverlay();
+        LevelStore o1 = overlay(base);
+        LevelStore o2 = overlay(base);
         Random rnd = new Random(24);
         for (int i = 0; i < 2000; i++) {
             RefLevel r = Lv.random(rnd, 1 + rnd.nextInt(6), 4);
@@ -159,7 +168,7 @@ class OverlayTest {
         int u = base.param(n.id("u"));
         int v = base.param(n.id("v"));
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         int first = ov.size();
         // first tenant of the id: succ (imax u 1)
         int a = ov.succ(ov.imax(u, LevelStore.ONE));
@@ -193,7 +202,7 @@ class OverlayTest {
         int[] buf = {n.id("u"), n.id("v")};
         int names2 = base.internList(buf, 0, 2);
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
 
         int sw = ov.succ(w);
         buf[0] = sw;
@@ -240,7 +249,7 @@ class OverlayTest {
         int subst = base.mkSubst(names1, args);
         assertTrue(subst > 0);
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         assertEquals(subst, ov.mkSubst(names1, args));
         for (int round = 0; round < 3; round++) {
             // imax u v [v := u+1] = mk_imax(u, u+1) = mk_max(u, u+1) = u+1 (same base, larger offset): a base level
@@ -257,7 +266,7 @@ class OverlayTest {
         int u = base.param(n.id("u"));
         int l = base.succ(base.max(u, u));
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         int listU = ov.internList(new int[] {n.id("u")}, 0, 1);
         assertTrue(ov.paramsDeclared(l, listU));
         assertTrue(ov.paramsDeclared(l, listU));
@@ -283,7 +292,7 @@ class OverlayTest {
         List<RefLevel> made = new ArrayList<>();
         LevelStore base = randomBase(n, 25, 200, made);
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         int bs = ov.size();
         int u = ov.param(n.id("u"));
         for (int round = 0; round < 4; round++) {
@@ -327,13 +336,13 @@ class OverlayTest {
         Lv.Names n = names();
         LevelStore base = randomBase(n, 26, 400, null);
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
         work(ov, n, 27, 6000);
         assertEquals(base.size(), ov.baseSize());
     }
 
     /** Random operations on an overlay, each checked against the reference; resets in between. */
-    private static void work(LevelStore ov, Lv.Names n, long seed, int ops) {
+    static void work(LevelStore ov, Lv.Names n, long seed, int ops) {
         Random rnd = new Random(seed);
         int[] buf = new int[3];
         int pl = 0;
@@ -391,7 +400,7 @@ class OverlayTest {
             int tid = t;
             threads[t] = new Thread(() -> {
                 try {
-                    LevelStore ov = base.newOverlay();
+                    LevelStore ov = overlay(base);
                     overlays[tid] = ov;
                     work(ov, n, 100 + tid, 2500);
                     // memoised answers about base levels, computed by this worker
@@ -491,7 +500,7 @@ class OverlayTest {
         int alias = base.internList(new int[] {namesU, first}, 0, 2);
         assertEquals(first, base.listCount());
         base.freeze();
-        LevelStore ov = base.newOverlay();
+        LevelStore ov = overlay(base);
 
         // session 1: u := 3, with [3] a list of the overlay
         int x1 = ov.internList(new int[] {three}, 0, 1);
@@ -563,10 +572,10 @@ class OverlayTest {
         }
         assertEquals(first, base.listCount(), "the aliases name the first overlay ids");
         base.freeze();
-        LevelStore used = base.newOverlay();
+        LevelStore used = overlay(base);
         int aliased = 0;
         for (int session = 0; session < 300; session++) {
-            LevelStore fresh = base.newOverlay();
+            LevelStore fresh = overlay(base);
             long seed = 1000 + session;
             Random a = new Random(seed);
             Random b = new Random(seed);
@@ -584,7 +593,7 @@ class OverlayTest {
     }
 
     /** One random step of a session: a new level list, a substitution over it or over a base list, instantiations. Returns the ids. */
-    private static int[] sessionStep(LevelStore s, Random rnd, Lv.Names n, String[] ps, int[] nameLists, int[] baseLists) {
+    static int[] sessionStep(LevelStore s, Random rnd, Lv.Names n, String[] ps, int[] nameLists, int[] baseLists) {
         int names = nameLists[rnd.nextInt(nameLists.length)];
         int k = s.listLength(names);
         int[] buf = new int[k];

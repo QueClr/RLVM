@@ -11,7 +11,8 @@ package rlvm.level;
  * {@code baseline} scenario (same loop and array loads, no operation): JVM start-up, set-up and JIT
  * compilation are the same in both runs and cancel.
  *
- * <p>Every scenario works on an overlay of a frozen base, as a checker worker would.
+ * <p>Every scenario works on an overlay of a frozen base, as a checker worker would: the shared overlay
+ * ({@code newSharedOverlay()}), or with {@code -Drlvm.level.overlay=flat} the private copy ({@code newOverlay()}).
  */
 public final class LevelBench {
     private static final int M = 1024;
@@ -50,7 +51,8 @@ public final class LevelBench {
         v = p[1];
         w = p[2];
         base.freeze();
-        ov = base.newOverlay();
+        // -Drlvm.level.overlay=flat: the private copy (newOverlay()); default: the shared overlay of a worker
+        ov = "flat".equals(System.getProperty("rlvm.level.overlay")) ? base.newOverlay() : base.newSharedOverlay();
     }
 
     public static void main(String[] args) {

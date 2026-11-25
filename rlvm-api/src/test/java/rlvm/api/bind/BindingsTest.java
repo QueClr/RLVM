@@ -169,4 +169,83 @@ class BindingsTest {
         assertThrows(IllegalArgumentException.class, () -> late.rebase(w1));
         assertThrows(IllegalArgumentException.class, () -> late.rebase(null));
     }
+
+    /**
+     * A worker's view shares the snapshot it sits on and moves to a newer one in place
+     * ({@code rebaseOnto}): the same store object, nothing of the snapshot copied, and the same ids as a
+     * view made anew on that snapshot.
+     */
+    @Test
+    void aWorkerViewMovesToANewerSnapshotInPlace() {
+        Bindings b = new Bindings(100);
+        b.bindNameOrder(NameOracle.BY_ID);
+        AtomicReference<rlvm.level.LevelStore> current = new AtomicReference<>();
+        b.bindLevelSnapshots(current::get);
+        rlvm.level.LevelStore open = b.levelBase();
+        int u = open.param(7);
+        int su = open.succ(u);
+        int names = open.internList(new int[] {7}, 0, 1);
+        int l1 = open.internList(new int[] {su}, 0, 1);
+        open.freeze();
+        current.set(open); // snapshot 1
+
+        LevelBinding worker = b.newWorkerLevels();
+        rlvm.level.LevelStore store = worker.store();
+        assertTrue(store.isSharedOverlay(), "a worker's level store shares its base");
+        int ownLevel = worker.succ(worker.succ(su));
+        int ownList = worker.intern(new int[] {ownLevel, u}, 0, 2);
+        int ownSet = worker.unionSorted(names, worker.intern(new int[] {9}, 0, 1));
+        int subst = worker.mkSubst(names, worker.intern(new int[] {ownLevel}, 0, 1));
+        assertEquals(worker.succ(ownLevel), worker.instantiate(su, subst));
+        assertTrue(ownLevel >= open.size() && ownList >= open.listCount() && ownSet >= open.listCount());
+        assertTrue(worker.footprintBytes() > 0);
+
+        // loader: the next piece, in a private copy of snapshot 1 (rlvm.load.LevelChain)
+        rlvm.level.LevelStore w1 = open.newOverlay();
+        int v = w1.param(3);
+        int mx = w1.max(su, v);
+        int l2 = w1.internList(new int[] {mx, v}, 0, 2);
+        w1.freeze();
+        current.set(w1); // snapshot 2
+
+        worker.rebaseOnto(w1);
+        assertSame(store, worker.store(), "moved in place");
+        assertEquals(0L, worker.footprintBytes(), "what the worker made is forgotten");
+        assertEquals(w1.size(), store.baseSize());
+        assertEquals(w1.listCount(), store.baseListCount());
+        LevelBinding fresh = b.newWorkerLevels();
+        for (LevelBinding w : new LevelBinding[] {worker, fresh}) {
+            assertEquals(u, w.param(7));
+            assertEquals(mx, w.max(su, v));
+            assertEquals(l1, w.intern(new int[] {su}, 0, 1));
+            assertEquals(l2, w.intern(new int[] {mx, v}, 0, 2));
+            assertEquals(2, w.length(l2));
+            assertEquals(v, w.get(l2, 1));
+            assertTrue(w.subsetOf(names, names) && w.isGeq(mx, su));
+        }
+        // the same operations give the same ids on the moved view and on a new one
+        int a1 = worker.succ(worker.succ(mx));
+        int a2 = fresh.succ(fresh.succ(mx));
+        assertEquals(a2, a1);
+        assertEquals(w1.size() + 1, a1, "ids are reissued above snapshot 2");
+        int s1 = worker.unionSorted(names, worker.intern(new int[] {9}, 0, 1));
+        int s2 = fresh.unionSorted(names, fresh.intern(new int[] {9}, 0, 1));
+        assertEquals(s2, s1);
+        assertEquals(2, worker.length(s1));
+        assertEquals(7, worker.get(s1, 0));
+        assertEquals(9, worker.get(s1, 1));
+        int p1 = worker.mkSubst(names, worker.intern(new int[] {a1}, 0, 1));
+        int p2 = fresh.mkSubst(names, fresh.intern(new int[] {a2}, 0, 1));
+        assertEquals(p2, p1);
+        assertEquals(fresh.instantiate(su, p2), worker.instantiate(su, p1));
+        assertEquals(fresh.instantiateList(l1, p2), worker.instantiateList(l1, p1));
+        // a view on a private copy (tools, tests) is replaced instead; an older snapshot and an open store are refused
+        LevelBinding flat = new LevelBinding(open.newOverlay());
+        flat.rebaseOnto(w1);
+        assertTrue(flat.store().isSharedOverlay());
+        assertEquals(mx, flat.max(su, v));
+        assertThrows(IllegalArgumentException.class, () -> worker.rebaseOnto(open));
+        assertThrows(IllegalArgumentException.class, () -> worker.rebaseOnto(open.newOverlay()));
+        assertThrows(IllegalArgumentException.class, () -> worker.rebaseOnto(null));
+    }
 }
