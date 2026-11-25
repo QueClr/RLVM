@@ -44,6 +44,6 @@
 
 \p{\strong{Limits.} The study measured fresh processes, CPU time first and wall clock second; it did not measure warm passes. The host was loaded throughout: 8-worker runs of Init and Std scatter by 10 to 40 \% between identical runs, and wall clock cannot rank collectors there. Most of the matrix was taken on eight efficiency cores; the headline cells were repeated on the arena CPU set and agree. Not measured: other heap and young-generation sizes, tuning flags of the collectors, x86-64.}
 
-\p{Documents: \src{docs/research/profiles/GC.md}, \src{docs/PLATFORM.md}, \src{docs/design/ARCHITECTURE.md}. Source: [the session of the profiles and prototypes](ses-JRSD).}
+\p{Documents: [rep-GC](rep-GC), [design-platform-document](design-platform-document), [design-architecture-document](design-architecture-document). Source: [the session of the profiles and prototypes](ses-JRSD).}
 
 \p{Findings, examples and open problems: [no collector beats Serial](ins-XYMS), [the collector in the native image](prob-BIN4).}

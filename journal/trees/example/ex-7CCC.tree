@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/review/reference-caches.md}
 \import{base-macros}
 
-\p{Two exports that contain the same terms and differ only in whether one subterm is written as one record or as two records with the same content. The official checker accepts one and rejects the other. Source: the audit of the reference engine caches, \src{docs/design/review/reference-caches.md}, section 3, finding R2-F2; [the exactness session](ses-874D).}
+\p{Two exports that contain the same terms and differ only in whether one subterm is written as one record or as two records with the same content. The official checker accepts one and rejects the other. Source: the audit of the reference engine caches, [rep-reference-caches](rep-reference-caches), section 3, finding R2-F2; [the exactness session](ses-874D).}
 \pre{\verb~|
 -- X  = S.q.1                a stuck projection
 -- X' = the same projection, written either as the SAME record or as a SECOND record

@@ -9,7 +9,7 @@
 \meta{origin}{rlvm-truffle/NOTES-T3.md}
 \import{base-macros}
 
-\p{Source: \src{rlvm-truffle/NOTES-T3.md}, section 6; [the profiling session](ses-JRSD). An experiment in the Truffle tier, rejected and kept in the tree switched off. Quiet windows, JVM and native image, one worker, promotion at 1,000 entries.}
+\p{Source: [rep-truffle-T3](rep-truffle-T3), section 6; [the profiling session](ses-JRSD). An experiment in the Truffle tier, rejected and kept in the tree switched off. Quiet windows, JVM and native image, one worker, promotion at 1,000 entries.}
 \p{The idea: 76 to 83 percent of the samples of a probe had been measured as one instruction, the load of the slot of a table of 64 to 256 MiB. A compiled block has its whole future in front of it as constants, so it could hash the keys of the values it is about to build, load the slots early, and let the cache misses overlap.}
 \ul{
 \li{The predictor is good: in its exact form it names the record that the operation then returns for 90.3 percent of 13.6 M records per run of reachability.}

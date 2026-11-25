@@ -44,6 +44,6 @@
 \li{Kept by-products: a tool that compares the structural digest of every constant of two loads of one file, and measured unit costs (13 ns per line for the line end and its class, 28 to 32 ns per record for template tokenising, 20 to 35 ns per node written, 28 to 34 ns per node decoded from a block).}
 }
 
-\p{Detail: \src{docs/research/profiles/X5.md}. Source: [the session of profiles and prototypes](ses-JRSD).}
+\p{Detail: [rep-X5](rep-X5). Source: [the session of profiles and prototypes](ses-JRSD).}
 
 \p{Findings, examples and open problems: [leaving proofs in the file moves their cost to the workers](ins-QOX4), [the loader as the floor once checking is faster](prob-I7M9).}

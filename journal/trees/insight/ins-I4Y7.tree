@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/13-workload-characterization.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/13-workload-characterization.md}, a dynamic characterisation made with the counters of nano-lean before the machine existed; [the research session](ses-XOS5). It answers the instruction of the maintainer to judge heat on Cedar-level workloads, see [standing policies](standing-policies).}
+\p{Source: [study-workload-characterization](study-workload-characterization), a dynamic characterisation made with the counters of nano-lean before the machine existed; [the research session](ses-XOS5). It answers the instruction of the maintainer to judge heat on Cedar-level workloads, see [standing policies](standing-policies).}
 \ul{
 \li{Share of the checking instructions of nano-lean spent under a reduction: Init 38 percent, the 22,454 declarations of Cedar itself 17 percent, those of navier-stokes-euler 17 percent, cslib 24 percent, con-leche 34 percent, reachability 99 percent.}
 \li{What distinguishes Cedar-level declarations is size and conversion: 1.02 M instructions per declaration against 0.38 M for Init, and 30 percent of their instructions under the comparison against 16 percent.}

@@ -15,4 +15,4 @@
 
 \p{Warm wall clock with 8 workers in the native image, check-only passes, best and median of the later passes: Std 1.16 and 1.19 s without the switch against 1.02 and 1.03 s with it, cedar 1.56 and 1.59 s against 1.40 and 1.42 s. The adversarial review of the default set, which ended the same evening, reports no false accept in the candidate with the switch either (\commit{b391d00}).}
 
-\p{Detail: \src{docs/design/review/eager-reduction.md}, \src{docs/design/review/soundness-default-set.md}. Commit \commit{9c7e11d}. Session: [profiles and prototypes](ses-JRSD). Related: [eager reduction](design-eager-reduction), [the open problem](prob-8MJ2).}
+\p{Detail: [rep-eager-reduction](rep-eager-reduction), [rep-soundness-default-set](rep-soundness-default-set). Commit \commit{9c7e11d}. Session: [profiles and prototypes](ses-JRSD). Related: [eager reduction](design-eager-reduction), [the open problem](prob-8MJ2).}

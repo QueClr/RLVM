@@ -11,7 +11,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{What M8 delivers, where it deviates from \src{docs/design/ISA.md} / \code{\verb~|WORK-PACKAGES.md~} and why, what was measured, and what is not done. The tools are in the test tree (\code{\verb~|Quote~}, \code{\verb~|TierEq~}, \code{\verb~|Diff~}, \code{\verb~|M8*~}), the scripts in \code{\verb~|src/test/resources/m8/~}, the reports in \code{\verb~|work/status/~}.}
+\p{What M8 delivers, where it deviates from [design-isa-document](design-isa-document) / \code{\verb~|WORK-PACKAGES.md~} and why, what was measured, and what is not done. The tools are in the test tree (\code{\verb~|Quote~}, \code{\verb~|TierEq~}, \code{\verb~|Diff~}, \code{\verb~|M8*~}), the scripts in \code{\verb~|src/test/resources/m8/~}, the reports in \code{\verb~|work/status/~}.}
 
 \subtree{
 \title{1. Commands (one per report)}

@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/P7.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P7.md}, sections 2 and 8; [the profiling session](ses-JRSD). Native image \code{\verb~|-O3~} with the serial collector, machine with \code{\verb~|warm,gated,expect~}, Mathlib, quiet cores.}
+\p{Source: [rep-P7](rep-P7), sections 2 and 8; [the profiling session](ses-JRSD). Native image \code{\verb~|-O3~} with the serial collector, machine with \code{\verb~|warm,gated,expect~}, Mathlib, quiet cores.}
 \ul{
 \li{Every pause of the single-threaded collector stops all 8 workers and the loader. The pause time per check pass is the same at every worker count, about 1 s, and 1.8 to 3.9 s with the garbage of the pipelined loader on top. Its share of the wall clock is therefore 0.5 percent with one worker and 3.5 percent in a batch run, 10.3 percent in a pipelined run, with 8.}
 \li{A check pass frees 14 GB whatever the worker count: 20 KB per unit and 1 MB per session reset. A pipelined run frees 35.6 GB.}

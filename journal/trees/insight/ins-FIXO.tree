@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/review/exact-proof-conversion.md}
 \import{base-macros}
 
-\p{Source: \src{docs/design/review/exact-proof-conversion.md}; [the profiling session](ses-JRSD). A prototype on a private copy of the machine; native image \code{\verb~|-O3~}, one worker, quiet cores, thread CPU of the checks, against the default switch set of 19:41Z on 2026-11-24.}
+\p{Source: [rep-exact-proof-conversion](rep-exact-proof-conversion); [the profiling session](ses-JRSD). A prototype on a private copy of the machine; native image \code{\verb~|-O3~}, one worker, quiet cores, thread CPU of the checks, against the default switch set of 19:41Z on 2026-11-24.}
 \p{The question was how much of [the 40 percent](ins-HPBW) can be removed while every verdict stays exactly the official one. The answer: none of it by a shortcut, and nothing measurable in time by doing the same steps with less bookkeeping. On these comparisons the official verdict is the result of the unfoldings.}
 \table{
 \tr{\th{}\th{Mathlib slice \code{\verb~|Scheme.cone~}}\th{Mathlib slice \code{\verb~|Galois.Basic.cone~}}\th{Cedar slice}}

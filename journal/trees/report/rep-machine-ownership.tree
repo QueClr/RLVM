@@ -52,7 +52,7 @@
 \tr{\td{\src{scripts/machine-sandbox.sh}, \src{scripts/machine-sandbox-selftest.sh}}\td{M6}}
 \tr{\td{\code{\verb~|work/sandbox/<WP>/~}}\td{the package \code{\verb~|<WP>~}; \code{\verb~|work/sandbox/.lock~}, \code{\verb~|.backup/~}, \code{\verb~|publish.log~} belong to the script}}
 \tr{\td{\code{\verb~|work/status/machine-<WP>.log~}}\td{the package \code{\verb~|<WP>~} (the publish command appends to it)}}
-\tr{\td{\src{docs/design/ISA.md} sections 1.3, 8.2, 13 and the change log of 15}\td{consistency edits by M6 only}}
+\tr{\td{[design-isa-document](design-isa-document) sections 1.3, 8.2, 13 and the change log of 15}\td{consistency edits by M6 only}}
 \tr{\td{parent \code{\verb~|pom.xml~}}\td{not ours: the line \code{\verb~|<module>rlvm-machine</module>~} is added by the orchestrator}}
 }
 }

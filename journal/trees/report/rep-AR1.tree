@@ -66,7 +66,7 @@
 \subtree{
 \title{0.3 Projected board position (published board of \code{\verb~|work/arena-site/results.json~}: 37 checkers, 21 of them with no wrong verdict and an accepted Mathlib run)}
 
-\p{A PROJECTION: RLVM has never been measured on x86-64. Its aarch64 count is divided by the ratio "count here / published count" of a leader measured in this session; the last two columns are the extremes that any baseline in the arena's configuration has shown on a big corpus (\src{docs/research/12-baselines.md} section 3).}
+\p{A PROJECTION: RLVM has never been measured on x86-64. Its aarch64 count is divided by the ratio "count here / published count" of a leader measured in this session; the last two columns are the extremes that any baseline in the arena's configuration has shown on a big corpus ([study-baselines](study-baselines) section 3).}
 
 \table{
 \tr{\th{configuration}\th{here}\th{via nano-lean (0.915)}\th{via gruszka (0.907)}\th{via sokonanoda (0.959)}\th{lowest ratio seen (0.90)}\th{highest ratio seen (1.05)}\th{\strong{place}}}

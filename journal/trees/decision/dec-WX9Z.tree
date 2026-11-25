@@ -45,6 +45,6 @@
 
 \p{\strong{Not measured.} x86-64: the arena runner is x86-64 and every number here is aarch64. One worker on Mathlib.}
 
-\p{Documents: \src{docs/PLATFORM.md}, \src{docs/BENCHMARKS.md}, \src{docs/research/profiles/J1.md}, \src{docs/research/profiles/AR1.md}, \src{scripts/arena/rlvm.yaml}. Source: the sessions of [the pipeline](ses-CVTE) and of [the profiles and prototypes](ses-JRSD).}
+\p{Documents: [design-platform-document](design-platform-document), [rep-benchmarks](rep-benchmarks), [rep-J1](rep-J1), [rep-AR1](rep-AR1), \src{scripts/arena/rlvm.yaml}. Source: the sessions of [the pipeline](ses-CVTE) and of [the profiles and prototypes](ses-JRSD).}
 
 \p{Findings, examples and open problems: [warm, the JVM launcher beats the native image, and it loses cold](ins-GJ75).}

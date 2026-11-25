@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/AR1.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/AR1.md}, sections 0.3 and 0.6, and \src{docs/research/12-baselines.md}, section 3; [the profiling session](ses-JRSD). Not verified: RLVM has never been measured on the x86-64 runner of the arena.}
+\p{Source: [rep-AR1](rep-AR1), sections 0.3 and 0.6, and [study-baselines](study-baselines), section 3; [the profiling session](ses-JRSD). Not verified: RLVM has never been measured on the x86-64 runner of the arena.}
 \ul{
 \li{The development host is aarch64. A leader measured there in the arena configuration needs 0.907 to 0.959 times its published x86-64 instruction count; over every baseline and big corpus the extremes seen are 0.90 and 1.05.}
 \li{The places of [the arena dry run](ins-6OVD) divide the count of RLVM on this host by such a ratio. They hold for every ratio in that range, with two exceptions at the edge of 1.05: the machine with \code{\verb~|warm,gated,expect~} would be 0.13 percent behind the checker in place 7, and the candidate set would be seventh instead of eighth.}

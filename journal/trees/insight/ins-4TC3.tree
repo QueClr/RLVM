@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/09-nbe-hoas-tricks.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/09-nbe-hoas-tricks.md}, with the leader studies \src{docs/research/04-leader-nano-lean.md}, \src{docs/research/05-leader-gruszka-pestka.md} and \src{docs/research/07-leader-rpylean-and-tenet-jvm.md}; [the research session](ses-XOS5). Read from the sources of the checkers; the JVM figures were measured on GraalVM CE 25 on the development host.}
+\p{Source: [study-nbe-hoas-tricks](study-nbe-hoas-tricks), with the leader studies [study-nano-lean](study-nano-lean), [study-gruszka-pestka](study-gruszka-pestka) and [study-rpylean-and-tenet-jvm](study-rpylean-and-tenet-jvm); [the research session](ses-XOS5). Read from the sources of the checkers; the JVM figures were measured on GraalVM CE 25 on the development host.}
 \ul{
 \li{nano-lean, gruszka and sokonanoda are all normalisation by evaluation over hash-consed values with memo slots per value. Pointer identity means semantic identity, and evaluation, inference, reduction, unfolding and comparison are memoised on identity.}
 \li{Compiling every lambda to a host closure buys a small constant on pure beta reduction and loses every caching lever. On the JVM, closures as Java lambdas need 0.66 to 0.87 times the CPU of a syntax interpreter in steady state, the same when cold, and are 1.0 to 1.6 times slower without a top-tier compiler. Host closures are opaque: no structural identity, no cache key, no pruning of the environment.}

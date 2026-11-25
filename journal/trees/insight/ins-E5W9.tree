@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/08-thc-truffle-tricks.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/08-thc-truffle-tricks.md} and \src{docs/research/07-leader-rpylean-and-tenet-jvm.md}; [the research session](ses-XOS5). Read from the repositories of two Truffle implementations of lazy functional languages and of rpylean; the numbers are theirs.}
+\p{Source: [study-thc-truffle-tricks](study-thc-truffle-tricks) and [study-rpylean-and-tenet-jvm](study-rpylean-and-tenet-jvm); [the research session](ses-XOS5). Read from the repositories of two Truffle implementations of lazy functional languages and of rpylean; the numbers are theirs.}
 \ul{
 \li{Neither Truffle project shows that Truffle pays for a proof checker; both show what it costs. In one, compiled guest code is about 64 times faster than the same tree in the Truffle interpreter; in the other, one top-tier compilation of a small root had a median of 532 ms of compiler time in archived logs taken with graph dumping on. A root must run for a large fraction of a second in the interpreter before compiling it is a net win.}
 \li{The Truffle interpreter is the wrong first tier: about 150 ns per guest call against about 2.4 ns compiled. Kernel checking is a workload where the amount of computation is small and the terms are large, so most code runs once.}

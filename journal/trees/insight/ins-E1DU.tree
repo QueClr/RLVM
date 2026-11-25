@@ -10,7 +10,7 @@
 \meta{origin}{docs/research/profiles/P7.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P7.md}, section 6 and finding P7-F5; [the profiling session](ses-JRSD). Native image, machine with \code{\verb~|warm,gated,expect~}, Mathlib, pipelined load, quiet cores, two interleaved rounds.}
+\p{Source: [rep-P7](rep-P7), section 6 and finding P7-F5; [the profiling session](ses-JRSD). Native image, machine with \code{\verb~|warm,gated,expect~}, Mathlib, pipelined load, quiet cores, two interleaved rounds.}
 \ul{
 \li{When the loader publishes a piece of the file, each worker context copies the level tables at its next reset: about 110 MB of garbage and 45 ms of worker CPU per publication on Mathlib, and the collections stop all 8 workers.}
 \li{Publishing the 6 GB file in 52 pieces instead of 205 takes Mathlib with 8 workers from 34.25 and 35.00 s to 31.71 and 31.90 s, -8 percent; with 4 workers from 55.71 to 53.80 s.}

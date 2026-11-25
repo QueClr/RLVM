@@ -210,7 +210,7 @@
 }
 
 \subtree{
-\title{5. The cache-history class: what an exact treatment would need (input for \src{docs/design/review/official-divergence.md})}
+\title{5. The cache-history class: what an exact treatment would need (input for \code{rep-official-divergence})}
 
 \p{The official verdict is a function of the pair AND of the set Q of terms whose full \code{\verb~|whnf_core~} ran in this declaration (it matters for projection terms whose structure is not a constructor application under cheap reduction), plus the frozen answers \code{\verb~|m_success~} / \code{\verb~|m_infer_type[0]~} for identical terms.}
 

@@ -9,7 +9,7 @@
 \meta{origin}{docs/BENCHMARKS.md}
 \import{base-macros}
 
-\p{Source: the analysis of the first warm table of 2026-11-24, whose headline rows are in \src{docs/BENCHMARKS.md}; the scout report \src{docs/research/profiles/X5.md} uses the same model; [the session on wave 6 and the pipeline](ses-CVTE). Machine with \code{\verb~|warm,gated,expect~}, JVM launcher, 8 workers on 8 quiet cores. W is the wall clock of a warm pass that loads and checks, L the time of its loader thread, C the wall clock of a check-only pass.}
+\p{Source: the analysis of the first warm table of 2026-11-24, whose headline rows are in [rep-benchmarks](rep-benchmarks); the scout report [rep-X5](rep-X5) uses the same model; [the session on wave 6 and the pipeline](ses-CVTE). Machine with \code{\verb~|warm,gated,expect~}, JVM launcher, 8 workers on 8 quiet cores. W is the wall clock of a warm pass that loads and checks, L the time of its loader thread, C the wall clock of a check-only pass.}
 \table{
 \tr{\th{}\th{Init}\th{Std}\th{cedar}\th{Mathlib}}
 \tr{\td{W, s}\td{0.96}\td{1.72}\td{2.21}\td{25.6}}

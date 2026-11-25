@@ -10,7 +10,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Continues \src{rlvm-truffle/NOTES-T2.md} (what the tier is, its deviations from ISA 8.4, its correctness record). This file: the measurements T2 could not take, what the tier costs and gains on each platform and why, what was changed, and the go / no-go. Scratch, scripts, logs and raw rows: \code{\verb~|work/t3/~} (\code{\verb~|warm.tsv~}, \code{\verb~|logs/~}). Section 10 is the second task of the same day: the prototype of U1, the CALL instruction (NO-GO).}
+\p{Continues [rep-truffle-T2](rep-truffle-T2) (what the tier is, its deviations from ISA 8.4, its correctness record). This file: the measurements T2 could not take, what the tier costs and gains on each platform and why, what was changed, and the go / no-go. Scratch, scripts, logs and raw rows: \code{\verb~|work/t3/~} (\code{\verb~|warm.tsv~}, \code{\verb~|logs/~}). Section 10 is the second task of the same day: the prototype of U1, the CALL instruction (NO-GO).}
 
 \subtree{
 \title{1. Verdict: NO-GO as a default; what the tier is worth, and under which policy}

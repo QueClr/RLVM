@@ -11,7 +11,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{What M1 delivers, the deviations from \src{docs/design/ISA.md} (revision 2) with their reasons, what callers have to know, and what is not done. Files: \code{\verb~|Values~}, \code{\verb~|Runs~}, \code{\verb~|Lits~}, \code{\verb~|Levels~}, \code{\verb~|Scope~} (main tree); \code{\verb~|M1ValuesTest~}, \code{\verb~|M1RunsTest~}, \code{\verb~|M1LitsTest~}, \code{\verb~|M1ScopeTest~}, \code{\verb~|M1ProbeBench~}, \code{\verb~|src/test/resources/m1/~} (tests).}
+\p{What M1 delivers, the deviations from [design-isa-document](design-isa-document) (revision 2) with their reasons, what callers have to know, and what is not done. Files: \code{\verb~|Values~}, \code{\verb~|Runs~}, \code{\verb~|Lits~}, \code{\verb~|Levels~}, \code{\verb~|Scope~} (main tree); \code{\verb~|M1ValuesTest~}, \code{\verb~|M1RunsTest~}, \code{\verb~|M1LitsTest~}, \code{\verb~|M1ScopeTest~}, \code{\verb~|M1ProbeBench~}, \code{\verb~|src/test/resources/m1/~} (tests).}
 
 \subtree{
 \title{1. Deviations}

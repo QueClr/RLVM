@@ -8,7 +8,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Written by the skeleton agent (workflow \code{\verb~|rlvm-wave4-machine~}, 2026-11-24). It adjusts ISA 13.6 to the host convention that was decided after ISA revision 2 (\src{docs/design/review/stepper-convention.md}, rules H1-H12) and to the sandbox workflow. Order of authority: \code{\verb~|OWNER-NOTES.md~} > \code{\verb~|RECONCILIATION.md~} > \code{\verb~|ISA.md~} / \code{\verb~|stepper-convention.md~} > this file. Deviations of the skeleton from the ISA are listed in \code{\verb~|NOTES-M6.md~}, section "Skeleton", and in the change log of ISA section 15.}
+\p{Written by the skeleton agent (workflow \code{\verb~|rlvm-wave4-machine~}, 2026-11-24). It adjusts ISA 13.6 to the host convention that was decided after ISA revision 2 ([rep-stepper-convention](rep-stepper-convention), rules H1-H12) and to the sandbox workflow. Order of authority: \code{\verb~|OWNER-NOTES.md~} > \code{\verb~|RECONCILIATION.md~} > \code{\verb~|ISA.md~} / \code{\verb~|stepper-convention.md~} > this file. Deviations of the skeleton from the ISA are listed in \code{\verb~|NOTES-M6.md~}, section "Skeleton", and in the change log of ISA section 15.}
 
 \p{Contents: 1 what exists - 2 the sandbox workflow - 3 how a judgment is written - 4 shared definitions - 5 the staging rule - 6 testing and the differential test - 7 the packages - 8 who calls whom.}
 
@@ -178,7 +178,7 @@ RLVM_EXTRA_CP=$JAR work/dist/bin/rlvm-jvm -X engine=machine -X stats-file=/tmp/s
 \subtree{
 \title{7. The packages}
 
-\p{Common to all: read ISA sections 0-2 and 13-14, the convention document, and the sections named below; \src{docs/research/02-kernel-typechecker.md} (R02) is the official rule for every judgment and \code{\verb~|rlvm-ref~} (\code{\verb~|RefKernel.java~}, README) is the same rule already implemented over terms - read it for exact behaviour.}
+\p{Common to all: read ISA sections 0-2 and 13-14, the convention document, and the sections named below; [study-kernel-typechecker](study-kernel-typechecker) (R02) is the official rule for every judgment and \code{\verb~|rlvm-ref~} (\code{\verb~|RefKernel.java~}, README) is the same rule already implemented over terms - read it for exact behaviour.}
 
 \subtree{
 \title{M1 - values and runs with interning; levels; literals; scope}

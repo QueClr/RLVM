@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/X5.md}
 \import{base-macros}
 
-\p{Source: the scout report \src{docs/research/profiles/X5.md}; [the profiling session](ses-JRSD). A prototype outside the published modules; JVM with C2 and the launcher flags, quiet cores, medians of warm passes, Mathlib one run. On exporter output the proof-only records of a theorem are an id range that is recognisable without parsing them; the question was whether the loader can leave those bytes in the file for the worker that checks the theorem.}
+\p{Source: the scout report [rep-X5](rep-X5); [the profiling session](ses-JRSD). A prototype outside the published modules; JVM with C2 and the launcher flags, quiet cores, medians of warm passes, Mathlib one run. On exporter output the proof-only records of a theorem are an id range that is recognisable without parsing them; the question was whether the loader can leave those bytes in the file for the worker that checks the theorem.}
 \table{
 \tr{\th{}\th{Init}\th{Std}\th{cedar}\th{Mathlib}}
 \tr{\td{expression records the loader still parses}\td{17.9 percent}\td{21.9 percent}\td{23.4 percent}\td{27.7 percent}}

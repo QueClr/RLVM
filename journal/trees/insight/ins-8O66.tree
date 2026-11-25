@@ -8,7 +8,7 @@
 \meta{origin}{rlvm-machine/NOTES-INT.md}
 \import{base-macros}
 
-\p{Source: deviation I1 of \src{rlvm-machine/NOTES-INT.md}, the notes of the integration of the machine; [the session on the machine](ses-Z72N). Native image in the arena container, one worker, the plain machine.}
+\p{Source: deviation I1 of [rep-machine-INT](rep-machine-INT), the notes of the integration of the machine; [the session on the machine](ses-Z72N). Native image in the arena container, one worker, the plain machine.}
 \table{
 \tr{\th{Base sizes of a session}\th{Init}\th{Cedar slice}\th{Std}}
 \tr{\td{as in the instruction-set document: 2^18 records, 2^19 table slots, 2^20 run words}\td{13.54 s}\td{3.98 s}\td{21.79 s}}

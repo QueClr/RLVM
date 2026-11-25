@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/P8.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P8.md}, section 4.6, and \src{docs/research/profiles/P9.md}, section 4.6; [the profiling session](ses-JRSD). Native image, one worker, counts inside the checks; steps of gruszka by its own counter.}
+\p{Source: [rep-P8](rep-P8), section 4.6, and [rep-P9](rep-P9), section 4.6; [the profiling session](ses-JRSD). Native image, one worker, counts inside the checks; steps of gruszka by its own counter.}
 \table{
 \tr{\th{With the two shortcuts}\th{Machine steps}\th{gruszka steps}\th{Ratio}\th{Instructions per step, machine / gruszka}}
 \tr{\td{Mathlib}\td{680.1 M}\td{454.4 M}\td{1.50}\td{2,133 / 823}}

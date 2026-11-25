@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/P8.md}
 \import{base-macros}
 
-\p{The traced unit of profile P8 that shows where the machine loses on Mathlib. Source: \src{docs/research/profiles/P8.md}, section 4.1; [the profiling session](ses-JRSD). Counts are steps of each checker on the unit \code{\verb~|AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app~}; machine with the switch set \code{\verb~|warm,gated,expect~}, traced on the JVM with one worker.}
+\p{The traced unit of profile P8 that shows where the machine loses on Mathlib. Source: [rep-P8](rep-P8), section 4.1; [the profiling session](ses-JRSD). Counts are steps of each checker on the unit \code{\verb~|AlgebraicGeometry.Spec.sheafedSpaceMap_hom_c_app~}; machine with the switch set \code{\verb~|warm,gated,expect~}, traced on the JVM with one worker.}
 \pre{\verb~|
 -- while the type of the theorem is inferred:
 Module R R inst ..   =?=   Module R R inst' ..

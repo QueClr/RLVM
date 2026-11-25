@@ -16,4 +16,4 @@
 
 \p{None of the gates could see the family: they compare the machine with the reference engine on corpora and mutants, where the two types coincide, and the hostile suite had no row of this shape. The lesson recorded with it: making an engine the default needs a review with new hostile exports first.}
 
-\p{Detail: \src{rlvm-machine/SWITCHES.md}, \src{docs/design/review/official-divergence.md}. Commit \commit{51270a6}. Session: [exactness](ses-874D). Related: [the decision and the condition for making it again](dec-T79V), [what a gate against our own reference engine cannot see](ins-SJW4), [the open problem](prob-W2FV).}
+\p{Detail: [design-switches-document](design-switches-document), [rep-official-divergence](rep-official-divergence). Commit \commit{51270a6}. Session: [exactness](ses-874D). Related: [the decision and the condition for making it again](dec-T79V), [what a gate against our own reference engine cannot see](ins-SJW4), [the open problem](prob-W2FV).}

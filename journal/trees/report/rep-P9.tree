@@ -11,7 +11,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Profiler P9, 2026-11-24 (21:08Z - 21:55Z). No production code was changed. Scratch, tools and raw data: \code{\verb~|work/prof/P9/~}. Living summary: \code{\verb~|work/status/prof-P9.md~}. Board lines: \code{\verb~|work/status/requests.log~} (21:16Z, 21:26Z, 21:47Z). Model and tools: profile P8 (\src{docs/research/profiles/P8.md}, \code{\verb~|work/prof/P8/w9/~}).}
+\p{Profiler P9, 2026-11-24 (21:08Z - 21:55Z). No production code was changed. Scratch, tools and raw data: \code{\verb~|work/prof/P9/~}. Living summary: \code{\verb~|work/status/prof-P9.md~}. Board lines: \code{\verb~|work/status/requests.log~} (21:16Z, 21:26Z, 21:47Z). Model and tools: profile P8 ([rep-P8](rep-P8), \code{\verb~|work/prof/P8/w9/~}).}
 
 \p{Question: the machine's CPU time against gruszka (integrator's table, fresh process) is 3.9 times on navier-stokes-euler, 1.8 times on cslib, 1.3 times on con-leche. P8 explained Mathlib's 3.0 times by the official way of comparing proofs (40 \% of the machine's work) and by the eager-reduction declines (10-12 \%). What is it on navier-stokes-euler: the same two mechanisms in another proportion, or something new? And does a class of declarations stick out on cslib and con-leche?}
 
@@ -262,7 +262,7 @@
 \subtree{
 \title{4.1 Proofs are compared by their types (the official rule); on navier-stokes-euler they are the proofs of analysis}
 
-\p{\strong{Size: the 53.4 \% + 5.7 \% rows above; \code{\verb~|skipargs~} alone removes 42.2 \% of the machine's navier-stokes-euler instructions (57.8 \% of its ticks), 17.7 \% on cslib, 1.8 \% on con-leche.} Owner of the place: M4 (\code{\verb~|Conv.java~}, \code{\verb~|Cargs.java~}), facts by M5 (\code{\verb~|Facts.java~}); the rule that keeps it off: NOTES-M4 D27, findings S-F1 / S-F2, owner note 11; reviewed as theory-sound and not official in \src{docs/design/review/soundness-shortcuts.md}; agent C1 found no official-exact route to it (\src{docs/design/review/exact-proof-conversion.md}).}
+\p{\strong{Size: the 53.4 \% + 5.7 \% rows above; \code{\verb~|skipargs~} alone removes 42.2 \% of the machine's navier-stokes-euler instructions (57.8 \% of its ticks), 17.7 \% on cslib, 1.8 \% on con-leche.} Owner of the place: M4 (\code{\verb~|Conv.java~}, \code{\verb~|Cargs.java~}), facts by M5 (\code{\verb~|Facts.java~}); the rule that keeps it off: NOTES-M4 D27, findings S-F1 / S-F2, owner note 11; reviewed as theory-sound and not official in [rep-soundness-shortcuts](rep-soundness-shortcuts); agent C1 found no official-exact route to it ([rep-exact-proof-conversion](rep-exact-proof-conversion)).}
 
 \p{Traced unit (\code{\verb~|out/trace-nse-def.txt~}): \code{\verb~|EulerBoundedFieldGramInverse.inversePath._proof_1~}, a project theorem at 161 times.}
 
@@ -332,7 +332,7 @@
 \tr{\td{con-leche}\td{88 (0.2 \%)}\td{83 \code{\verb~|_proof_N~}; 81 the project's, 7 Init}\td{0.07 s, 1.27 G}\td{0.25 s}\td{2.9 \%}\td{0.86 M}\td{451 M = 1.0 \%, 0.07 s}}
 }
 
-\p{Every declined unit is declined twice (warm attempt, cold retry; the second costs the machine nothing: 13 us between the two) and then decided by the reference engine: per unit a median of 1.5 ms on cslib (10 \% of them under 0.58 ms, 10 \% above 5.2 ms, the largest about 70 ms: \code{\verb~|..ContinuousLinearMap.norm_eq_iSup_rayleighQuotient._proof_1_5~} and \code{\verb~|..Cslib.Automata.NA.loop_fin_run_exists._proof_1_88~}). The cost is not proportional to the reference steps (7.5 k steps per unit on cslib, 41 k on navier-stokes-euler, 2.4 ms and 3.5 ms per unit). Owner: M6 (\code{\verb~|MachineSession~}, \code{\verb~|Machine.enterER~}); E1's prototype (\src{docs/design/review/eager-reduction.md}, switch \code{\verb~|eager~}) keeps these units on the machine and reports a third of the reference engine's time for them on Std; on cslib that would be about 4 s of 46.6 s. Official-exactness is the reason for the rule.}
+\p{Every declined unit is declined twice (warm attempt, cold retry; the second costs the machine nothing: 13 us between the two) and then decided by the reference engine: per unit a median of 1.5 ms on cslib (10 \% of them under 0.58 ms, 10 \% above 5.2 ms, the largest about 70 ms: \code{\verb~|..ContinuousLinearMap.norm_eq_iSup_rayleighQuotient._proof_1_5~} and \code{\verb~|..Cslib.Automata.NA.loop_fin_run_exists._proof_1_88~}). The cost is not proportional to the reference steps (7.5 k steps per unit on cslib, 41 k on navier-stokes-euler, 2.4 ms and 3.5 ms per unit). Owner: M6 (\code{\verb~|MachineSession~}, \code{\verb~|Machine.enterER~}); E1's prototype ([rep-eager-reduction](rep-eager-reduction), switch \code{\verb~|eager~}) keeps these units on the machine and reports a third of the reference engine's time for them on Std; on cslib that would be about 4 s of 46.6 s. Official-exactness is the reason for the rule.}
 }
 
 \subtree{

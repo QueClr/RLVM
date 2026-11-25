@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/GC.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/GC.md}; [the profiling session](ses-JRSD). Every collector of GraalVM CE 25, JDK 25.0.5, in JVM mode on the real checker: both engines, 1, 4 and 8 workers, Init, Std, the Cedar slice, reachability and Mathlib. The headline cells were taken on the arena cores under the measurement lock with 3 repetitions, 5 at 8 workers; the full matrix on eight efficiency cores without the lock, and the two sets agree. The host was loaded almost throughout: runs of Init and Std with 8 workers scatter by 10 to 40 percent between identical runs.}
+\p{Source: [rep-GC](rep-GC); [the profiling session](ses-JRSD). Every collector of GraalVM CE 25, JDK 25.0.5, in JVM mode on the real checker: both engines, 1, 4 and 8 workers, Init, Std, the Cedar slice, reachability and Mathlib. The headline cells were taken on the arena cores under the measurement lock with 3 repetitions, 5 at 8 workers; the full matrix on eight efficiency cores without the lock, and the two sets agree. The host was loaded almost throughout: runs of Init and Std with 8 workers scatter by 10 to 40 percent between identical runs.}
 \table{
 \tr{\th{CPU time, ratio to Serial; geometric mean of Init and Std}\th{machine, 1 worker}\th{machine, 8 workers}\th{reference, 1 worker}\th{reference, 8 workers}}
 \tr{\td{Parallel}\td{0.99}\td{1.00}\td{1.01}\td{1.03}}

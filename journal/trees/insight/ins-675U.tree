@@ -10,7 +10,7 @@
 \meta{updated}{2026-11-24}
 \import{base-macros}
 
-\p{Source: \src{docs/BENCHMARKS.md}, section "Warm wall clock"; [the session on wave 6 and the pipeline](ses-CVTE). One process checks the same export again, every pass loads pipelined with checking, 8 workers on the 8 quiet performance cores of the aarch64 development host; warm is the median of the later passes. The baselines ran their arena run line with 8 threads in the arena container on the same cores, second of two runs. This is not the arena configuration.}
+\p{Source: [rep-benchmarks](rep-benchmarks), section "Warm wall clock"; [the session on wave 6 and the pipeline](ses-CVTE). One process checks the same export again, every pass loads pipelined with checking, 8 workers on the 8 quiet performance cores of the aarch64 development host; warm is the median of the later passes. The baselines ran their arena run line with 8 threads in the arena container on the same cores, second of two runs. This is not the arena configuration.}
 \table{
 \tr{\th{Warm wall clock, s}\th{Init}\th{Std}\th{cedar}\th{reachability}\th{Mathlib}}
 \tr{\td{machine, \code{\verb~|warm,gated,expect~}, JVM launcher, first table}\td{0.96}\td{1.72}\td{2.21}\td{1.88}\td{25.6}}

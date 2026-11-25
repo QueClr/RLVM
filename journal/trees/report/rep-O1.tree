@@ -9,7 +9,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Experiment of 2026-11-24, 21:07Z - 23:27Z, agent O1. Scout X1 (\src{docs/research/profiles/X1.md}) built \code{\verb~|once~}: a tabling key of EVAL, \code{\verb~|(term, bindings under the node mask, ls')~}, gets a frame and a tabling record only from its SECOND evaluation in a session on (a one-bit visit filter outside the store). X1 measured it against the generic tier and against \code{\verb~|warm,gated,expect~}: reachability -27 \% / -29 \% warm check time (JVM, one worker). Since then the default set became \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}. The question here: what is left for \code{\verb~|once~} on top of THAT set. Working files: \code{\verb~|work/o1/~} (\code{\verb~|README.md~} there). Nothing was published; \code{\verb~|rlvm-machine/~} was not edited.}
+\p{Experiment of 2026-11-24, 21:07Z - 23:27Z, agent O1. Scout X1 ([rep-X1](rep-X1)) built \code{\verb~|once~}: a tabling key of EVAL, \code{\verb~|(term, bindings under the node mask, ls')~}, gets a frame and a tabling record only from its SECOND evaluation in a session on (a one-bit visit filter outside the store). X1 measured it against the generic tier and against \code{\verb~|warm,gated,expect~}: reachability -27 \% / -29 \% warm check time (JVM, one worker). Since then the default set became \code{\verb~|warm,gated,expect,bodies,pchk,match,joint,code,casetrees,lazycases,directrules,lazyeval,same~}. The question here: what is left for \code{\verb~|once~} on top of THAT set. Working files: \code{\verb~|work/o1/~} (\code{\verb~|README.md~} there). Nothing was published; \code{\verb~|rlvm-machine/~} was not edited.}
 
 \subtree{
 \title{0. Verdict: NO-GO}

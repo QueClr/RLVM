@@ -10,7 +10,7 @@
 \meta{origin}{docs/design/OWNER-NOTES.md}
 \import{base-macros}
 
-\p{\strong{Status:} accepted. It is owner note 12 of 2026-11-24 and section 0 of \src{docs/design/RECONCILIATION.md}; it replaces the earlier "CPU time first".}
+\p{\strong{Status:} accepted. It is owner note 12 of 2026-11-24 and section 0 of [design-reconciliation-document](design-reconciliation-document); it replaces the earlier "CPU time first".}
 
 \p{\strong{Context.} The Lean Kernel Arena ranks checkers by a virtual clock derived from user-space instruction counts on Mathlib. The first design drafts therefore argued from instruction counts. The maintainer corrected this in three steps. Note 1 (2026-11-23): the board's time is a virtual clock, and the leading position on it does not reflect wall clock. Note 10 (2026-11-23): "We don't want to beat instructions. care more about CPU time plz.", which made CPU time summed over all threads the primary metric. Note 12 (2026-11-24): "instruction cost is what arena chasing, not us. wall clock time after warmup/pipelined is our goal. we care about 'real checking performance'".}
 
@@ -19,10 +19,10 @@
 \p{\strong{Evidence.} The three metrics rank designs differently, and the project has measured each disagreement.}
 
 \ul{
-\li{Instructions against time, same code. The same hash-consing probe ran at 29 instructions per nanosecond on a cached table and at 3.5 per nanosecond in a pass over all of Init with a working set of 116 MB (spike on the CE native image, aarch64, one thread; \src{docs/design/ISA.md} section 0.3). Memory traffic, not instruction count, sets the time.}
+\li{Instructions against time, same code. The same hash-consing probe ran at 29 instructions per nanosecond on a cached table and at 3.5 per nanosecond in a pass over all of Init with a working set of 116 MB (spike on the CE native image, aarch64, one thread; [design-isa-document](design-isa-document) section 0.3). Memory traffic, not instruction count, sets the time.}
 \li{Instructions against time, a tuning knob. As the machine's session cap grows, the instruction count falls (more memo hits) while CPU time and wall clock rise (the tables leave the cache); see [dec-KXE1](dec-KXE1).}
 \li{Instructions against time, a compiler. On Mathlib the same JVM checker (tenet-jvm) with the Graal JIT instead of C2 needs 1.4 \% more CPU time and 28 \% more instructions (\src{bench/README.md}).}
-\li{Cold against warm. On Mathlib with 8 workers and pipelined loading, the machine with its default switch set of the wave-6 integration takes 27.43 s per warm pass on the CE native image and 21.23 s on the JVM launcher, whose first pass took 30.94 s (median of the later passes of one process, inside a quiet-core window, development host aarch64; \src{docs/BENCHMARKS.md}, "Warm wall clock"). Charged for warm-up, the JVM loses; in steady state it wins. See [dec-WX9Z](dec-WX9Z).}
+\li{Cold against warm. On Mathlib with 8 workers and pipelined loading, the machine with its default switch set of the wave-6 integration takes 27.43 s per warm pass on the CE native image and 21.23 s on the JVM launcher, whose first pass took 30.94 s (median of the later passes of one process, inside a quiet-core window, development host aarch64; [rep-benchmarks](rep-benchmarks), "Warm wall clock"). Charged for warm-up, the JVM loses; in steady state it wins. See [dec-WX9Z](dec-WX9Z).}
 }
 
 \p{\strong{Consequences.}}
@@ -36,6 +36,6 @@
 \li{The arena's own figure, instructions of a cold process on an x86-64 runner, is still recorded; it is not the optimisation target.}
 }
 
-\p{The standing form of this decision is in [standing policies](standing-policies-goal). Source: \src{docs/design/OWNER-NOTES.md} notes 1, 2, 10 and 12; [the session](ses-CVTE) in which note 12 arrived.}
+\p{The standing form of this decision is in [standing policies](standing-policies-goal). Source: [owner-notes](owner-notes) notes 1, 2, 10 and 12; [the session](ses-CVTE) in which note 12 arrived.}
 
 \p{Findings, examples and open problems: [the arena clock is an instruction count](ins-0Q3P), [step and instruction counts do not stand for CPU time](ins-KFM6).}

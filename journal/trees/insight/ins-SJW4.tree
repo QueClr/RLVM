@@ -10,7 +10,7 @@
 \meta{origin}{rlvm-machine/SWITCHES.md}
 \import{base-macros}
 
-\p{Sources: the note at the top of \src{rlvm-machine/SWITCHES.md}; \src{docs/design/review/reference-caches.md}; \src{rlvm-inductive/README.md}; [the exactness session](ses-874D). Three times on 2026-11-24 a clean differential gate said nothing about a divergence from the official checker.}
+\p{Sources: the note at the top of [design-switches-document](design-switches-document); [rep-reference-caches](rep-reference-caches); \src{rlvm-inductive/README.md}; [the exactness session](ses-874D). Three times on 2026-11-24 a clean differential gate said nothing about a divergence from the official checker.}
 \ul{
 \li{\strong{Same inputs.} The machine was made the default engine at 19:41Z on gates that were all green: no difference from the reference engine on the corpora, the mutants and 329 hostile exports. Within the hour new hostile exports showed five wrong accepts. The gates compare the two engines on real corpora and mutants, where a declared type and the type of the value coincide, and the hostile suite had no row of that shape. The count of agreeing units was true and said nothing about it.}
 \li{\strong{Same component.} Both engines share the loader and the admission of inductive types. A metadata node dropped by the loader made the reference engine, the oracle of every gate, accept an export the official checker rejects. An inductive type whose level the official kernel respells was accepted by both engines in 183 of 2,200 generated declarations.}

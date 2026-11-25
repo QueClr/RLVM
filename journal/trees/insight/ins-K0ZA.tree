@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/J1.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/J1.md}, section 3, and the first warm table summarised in \src{docs/BENCHMARKS.md}; [the profiling session](ses-JRSD). JVM launcher, machine engine, 8 workers on 8 quiet cores.}
+\p{Source: [rep-J1](rep-J1), section 3, and the first warm table summarised in [rep-benchmarks](rep-benchmarks); [the profiling session](ses-JRSD). JVM launcher, machine engine, 8 workers on 8 quiet cores.}
 \ul{
 \li{The launcher shipped with \code{\verb~|-XX:CICompilerCount=2~}. With eight workers on eight cores compilation shares the cores with interpreted checking: the first Init pass burns 35.6 s of CPU time for work that costs 6 to 8 s once compiled. With one worker the compiler has cores of its own and the first pass is already within 12 to 25 percent of steady.}
 \li{With \code{\verb~|CICompilerCount=8~} the cold wall clock below Mathlib halves: Init 4.1 to 5.3 s becomes 2.8 to 3.6 s, Std 5.5 becomes 3.1 s, cedar 9.9 becomes 5.2 s, reachability 4.0 becomes 2.5 s. Pass 3 is steady instead of pass 5 or 6.}

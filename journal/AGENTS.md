@@ -8,9 +8,10 @@ decisions, measured findings, open problems, examples and dated changelog
 entries for RLVM are written here - and only here: by the maintainer's rule of
 2026-11-24 (the repository's root `AGENTS.md`) every note of the project lives
 in this forest, and outside it only `README.md` files remain. The long
-documents written before that rule (under `docs/` and next to the modules) are
-being moved in; until one has been moved, a tree states the point and links to
-the document that still carries the detail.
+documents written before that rule (under `docs/` and next to the modules)
+were moved in on 2026-11-24, one tree per document, and deleted from the
+repository; `trees/moved-documents.tree` is the table from an old path or
+short name to its tree.
 
 The forest is self-contained: everything it needs is in this directory, so it
 can be moved into a repository of its own unchanged. All commands below are run
@@ -86,14 +87,13 @@ minutes; later builds reuse the Nix store.
 - Keep a tree to one idea. Put an example, a motivating case or an unresolved
   question in its own tree and `\transclude` it from every note it belongs to,
   rather than growing one long document.
-- Which kind for what. A design or a review document of `docs/design/` becomes
-  a `Design` note (one per subject, not one per document: a long document
-  yields several). A choice between alternatives is a `Decision`. A measured
-  finding (a profile, an experiment, a prototype's verdict) is an `Insight`
-  with its numbers and their conditions; a claim nobody measured is a
-  `Hypothesis`. A wrong verdict or a hostile input that shows a rule is an
-  `Example`. Something unsettled is a `Problem`. There is no separate kind for
-  profiles or reviews.
+- Which kind for what. How a part is meant to work and why is a `Design`
+  note (one per subject). A choice between alternatives is a `Decision`. A
+  measured finding (a profile, an experiment, a prototype's verdict) is an
+  `Insight` with its numbers and their conditions, a few sentences long, and
+  the full record behind it - method, conditions, every table - is a
+  `Report`; a claim nobody measured is a `Hypothesis`. A wrong verdict or a hostile input that shows a rule is an
+  `Example`. Something unsettled is a `Problem`.
 - The hub trees (`decisions`, `open-problems`, `examples`, `insights`,
   `sessions`) list trees by taxon with a query, so a new tree with the right
   `\taxon` shows up without further edits. Two hubs are maintained by hand:
@@ -135,7 +135,8 @@ Every tree starts with:
   the status as the first paragraph (`\p{\strong{Status:} open.}`) so that it
   is visible on the page. Statuses: `draft`, `accepted`, `implemented`,
   `superseded`, `open`, `closed`.
-- A tree that summarises a document names it: `\meta{origin}{docs/design/ISA.md}`.
+- A tree that summarises or carries a former document names the path it had:
+  `\meta{origin}{docs/design/ISA.md}` (the tree `moved-documents` has the table).
 - Changelog entries carry `\tag{changelog}`, one area tag (see "Changelog
   entries"), the release tag `unreleased`, `\meta{release}{Unreleased}` and
   `\meta{commit}{<short hash>}`, the commit on branch `dev` that recorded the
@@ -196,7 +197,7 @@ month tree and the release tree, so keep them newest first.
 
 Record a lesson only if it would help a later session avoid the same dead end
 or reach the fix faster. Keep it to a few sentences and name its source (a
-document under `docs/`, a commit or a session tree). Use `\taxon{Hypothesis}`
+report or study tree, a commit or a session tree). Use `\taxon{Hypothesis}`
 if it was not verified, and change it to `\taxon{Insight}` once it is.
 
 ## Moving a document into the forest
@@ -247,13 +248,12 @@ not usable.
 ## Writing rules
 
 - Write for a reader who has no access to any conversation. Trees may cite
-  commits (`\commit{abc1234}`), documents of the repository (`\src{docs/...}`)
-  and session trees. They must never refer to a chat, to "the user" or to an
+  commits (`\commit{abc1234}`), files of the repository (`\src{...}`), other
+  trees and session trees. They must never refer to a chat, to "the user" or to an
   agent's private scratch files.
 - The person who directs the work is "the maintainer". The documents of the
-  repository say "the owner"; "owner note 12" names note 12 of
-  `docs/design/OWNER-NOTES.md`, and "the owner of" a module is the agent
-  responsible for it.
+  repository say "the owner"; "owner note 12" names note 12 of the tree
+  `owner-notes`, and "the owner of" a module is the agent responsible for it.
 - Agents of the project are named by their role when it matters ("the
   integrator of the machine", "the adversarial reviewer"). The short labels
   that findings carry in the documents (`S3-F1`, `E1-F7`, `P8`) may be used as
@@ -273,8 +273,8 @@ The repository and the rendered site are public.
   machine. Paths are relative to the root of the RLVM repository.
 - No personal data beyond the identity trees in `trees/people/`.
 - Files under `work/` are not part of the repository. Do not link to them;
-  cite the document under `docs/` that reports the result, or state the
-  result in the tree.
+  cite the report tree that carries the result, or state the result in the
+  tree.
 - Source code of other projects is not copied here beyond a short quotation
   that a finding needs.
 
@@ -304,12 +304,12 @@ Forester markup looks like LaTeX with markdown links. The pitfalls:
 
 - Links: `[text](address)` for a tree. For a URL use
   `\<html:a>[href]{\verb~|https://example.org/x#y~}{text}`.
-- A document or source file of the RLVM repository: `\src{docs/design/ISA.md}`
+- A source file or README of the RLVM repository: `\src{scripts/build.sh}`
   (no verbatim span inside; the path is the argument). The link shows the file
-  on branch `dev` as it is today; for a document that is regenerated, such as
-  `docs/BENCHMARKS.md`, cite the state you quote:
-  `\srcat{0123abc}{docs/BENCHMARKS.md}`. A commit: `\commit{0123abc}`. All
-  three come from `base-macros`.
+  on branch `dev` as it is today; to cite a file as it was, a deleted one
+  included, give the commit: `\srcat{0123abc}{bench/README.md}`. A commit:
+  `\commit{0123abc}`. All three come from `base-macros`. A note is never
+  cited by a path: it is a tree, cite its address.
 - Lists: `\ul{\li{...}\li{...}}`, `\ol{...}`. Emphasis: `\em{}`, `\strong{}`.
 - Tables: `\table{\tr{\th{A}\th{B}}\tr{\td{1}\td{2}}}` (from `base-macros`).
 - Include another tree as a section: `\transclude{address}`. Declare a section
@@ -321,11 +321,12 @@ Forester markup looks like LaTeX with markdown links. The pitfalls:
 
 ## Addresses cited from outside
 
-RLVM source and the documents under `docs/` do not cite journal addresses yet.
-The direction today is from the journal to the repository: a tree links to the
-document that carries the detail by its path relative to the repository root.
+RLVM source, READMEs and scripts cite trees: since the move of 2026-11-24
+every citation of a former document by its path carries the marker and the
+address of its tree. A tree cites a source file or README by its path
+(`\src{...}`) and another note by its address.
 
-When code or a document does cite a tree, it writes the marker
+When code or a README cites a tree, it writes the marker
 `*agentic-note*: <address>`, and from then on that address is permanent: the
 tree may be revised or marked superseded, never renamed or deleted. To resolve
 a marker, search here: `rg -F '<address>' trees/`. A whole tree is the file of

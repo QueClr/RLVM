@@ -8,7 +8,7 @@
 \meta{origin}{bench/README.md}
 \import{base-macros}
 
-\p{Source: \src{bench/README.md}, section "Timing on a busy host"; the cases are from \src{docs/research/profiles/P7.md}, \src{docs/research/profiles/GC.md} and \src{rlvm-truffle/NOTES-T3.md}; [the profiling session](ses-JRSD). The development host has 20 cores and was oversubscribed several times by the builds and tests of the team, with load averages of 45 to 140 and up to 250.}
+\p{Source: \src{bench/README.md}, section "Timing on a busy host"; the cases are from [rep-P7](rep-P7), [rep-GC](rep-GC) and [rep-truffle-T3](rep-truffle-T3); [the profiling session](ses-JRSD). The development host has 20 cores and was oversubscribed several times by the builds and tests of the team, with load averages of 45 to 140 and up to 250.}
 \ul{
 \li{\strong{The method.} A wall-clock number is evidence only when it was taken through \code{\verb~|bench/quiet.py~}: one measurement at a time on the host, and while it runs every other process of the session and every other container is moved off the 8 measurement cores and put back afterwards. Nothing is paused. Every window is logged.}
 \li{\strong{What it does not remove.} Memory bandwidth and the shared cache are still shared with the other 12 cores, so compare runs taken in the same window. What leaks onto the measurement cores shows as run-queue time of about 5 percent in rows with 8 workers; the driver measures it.}

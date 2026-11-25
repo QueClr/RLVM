@@ -13,7 +13,7 @@
 
 \p{\strong{Status:} open.}
 \p{\strong{The question.} The strict policy promises the official verdict or none. The official verdict can depend on [which object a term is](ins-E3MS), on [metadata nodes and the nondep flag](ins-61D4), and on the lifetime of caches during admission. How much of that can the reference engine reproduce, and what does it decline?}
-\p{\strong{What exists.} Source: \src{docs/design/review/reference-caches.md}, sections 0 and 3, and \src{rlvm-main/README.md}; [the exactness session](ses-874D).}
+\p{\strong{What exists.} Source: [rep-reference-caches](rep-reference-caches), sections 0 and 3, and \src{rlvm-main/README.md}; [the exactness session](ses-874D).}
 \ul{
 \li{The reference engine has two modes. The default, used by the practical policy for re-checks and fallbacks, never declines for the sake of agreement on adversarial files. The exact mode, set by the strict policy, gives the official verdict or none.}
 \li{For object identity the exact mode first probes: the second pass of the official comparison is run with the caches frozen, and if it decides nothing new, both continuations are the same. Otherwise the declaration is checked again with the hazard decided each way, at most 63 checks; if all verdicts agree that is the official verdict, if they differ the declaration is declined.}

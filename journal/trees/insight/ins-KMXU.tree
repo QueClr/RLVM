@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/V1.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/V1.md}, section 6, "the region question"; [the profiles of that day](ses-JRSD). One worker, exact counters of the machine, switches \code{\verb~|gated,expect~} with and without \code{warm}.}
+\p{Source: [rep-V1](rep-V1), section 6, "the region question"; [the profiles of that day](ses-JRSD). One worker, exact counters of the machine, switches \code{\verb~|gated,expect~} with and without \code{warm}.}
 
 \table{
 \tr{\th{Session}\th{cedar: ticks}\th{cedar: records}\th{cedar: sessions}\th{Std: ticks}\th{Std: records}\th{Std: sessions}}
@@ -20,7 +20,7 @@
 
 \ul{
 \li{At the default cap a declaration finds 22 \% of the records it needs already made by an earlier declaration of its session, 133 of 613 per declaration on cedar, and saves 16 \% of its ticks.}
-\li{The survivors are not a small, known set. Found again across declarations are tabling records of inference, closures and application spines; they refer to each other by record id, so a survivor drags its children along, and the census of \src{docs/research/profiles/X1.md} found no cheap predictor at creation time. This is what prevents the rule that everything a declaration made dies with it.}
+\li{The survivors are not a small, known set. Found again across declarations are tabling records of inference, closures and application spines; they refer to each other by record id, so a survivor drags its children along, and the census of [rep-X1](rep-X1) found no cheap predictor at creation time. This is what prevents the rule that everything a declaration made dies with it.}
 \li{The session already is an arena: records and runs are filled by a bump pointer and a reset moves two pointers back and clears the tables in time proportional to their use. A reset costs 8 to 9 microseconds, 0.2 to 0.3 \% of the worker's CPU time. Table growth costs more: 4 to 6 \% of the worker's CPU time is inside growths, because at the 1 MiB cap nearly every session outgrows its first table once.}
 \li{What a design with a survivor region could save is therefore ticks, not memory: the reuse of a 4 MiB session at the table footprint of a 1 MiB one. The 4 MiB session itself is slower in CPU time although it needs fewer ticks, because its tables leave the cache; see [the session cap](ins-FJ5R). The upper bound of the gain is the 10 \% of ticks between the two rows, less the cost of evacuating the survivors at a reset. It was not prototyped.}
 }

@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/VALUES-V2.md}
 \import{base-macros}
 
-\p{Source: the design and prototype \src{docs/design/VALUES-V2.md}; [the profiling session](ses-JRSD). A prototype on a private copy of the machine; counts on the JVM launcher with one worker, timings in quiet windows with a measuring tool that keeps one engine, without loading.}
+\p{Source: the design and prototype [design-values-v2-document](design-values-v2-document); [the profiling session](ses-JRSD). A prototype on a private copy of the machine; counts on the JVM launcher with one worker, timings in quiet windows with a measuring tool that keeps one engine, without loading.}
 \ul{
 \li{No verdict needs canonical references. Sharing is needed in three places only: the subject of a memoised judgment, the components of a key, and the two sides of a comparison.}
 \li{Atoms, frames, closures, suspensions and tabling records keep their identity from birth: they are keys by purpose and most of their probes hit. Applications are the one class whose probes are mostly wasted: they are 24 to 59 percent of the records and are found again 3.5 to 21 percent of the time.}

@@ -14,4 +14,4 @@
 
 \p{The build script writes the JVM launcher with the line the platform study arrived at: 8 compiler threads, transparent huge pages and a heap chosen by the engine that will run, a fixed 13 GB for every engine but the machine and at most 7 GB for the machine. The native image is built with the inline lists that the machine ships, with a fallback when the build environment lacks the tools to derive them, and the test kit is no longer part of a distribution. The arena build test passes on the tree with the new script: a clean copy, the 14 modules that ship compiled from source in the 8-CPU, 16 GB container, and the run line of the definition with 8 threads.}
 
-\p{Detail: \src{docs/research/profiles/J1.md}, \src{docs/PLATFORM.md}. Commit \commit{ca8e886}. Session: [exactness](ses-874D). Related: [the decision on the JVM launcher line](dec-E3EX).}
+\p{Detail: [rep-J1](rep-J1), [design-platform-document](design-platform-document). Commit \commit{ca8e886}. Session: [exactness](ses-874D). Related: [the decision on the JVM launcher line](dec-E3EX).}

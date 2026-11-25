@@ -39,6 +39,6 @@
 \li{The later choice of practical exactness leaves this item as it is: [dec-TQSI](dec-TQSI).}
 }
 
-\p{Detail: note 11 of \src{docs/design/OWNER-NOTES.md}; the section "Universe levels: official by default" of \src{rlvm-ref/README.md} for the evidence; \src{rlvm-level/README.md}; \src{docs/design/review/soundness-machine.md} for finding S-F3. Recorded as a standing policy in [standing policies](standing-policies-exactness). Source: [the pipeline wave](ses-CVTE).}
+\p{Detail: note 11 of [owner-notes](owner-notes); the section "Universe levels: official by default" of \src{rlvm-ref/README.md} for the evidence; \src{rlvm-level/README.md}; [rep-soundness-machine](rep-soundness-machine) for finding S-F3. Recorded as a standing policy in [standing policies](standing-policies-exactness). Source: [the pipeline wave](ses-CVTE).}
 
 \p{Findings, examples and open problems: [an inductive type whose level the official kernel respells](ex-4MDP).}

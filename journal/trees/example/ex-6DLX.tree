@@ -8,7 +8,7 @@
 \meta{origin}{docs/design/review/soundness-shortcuts.md}
 \import{base-macros}
 
-\p{The first equation of [the triple](ex-OTWJ) is accepted officially only because its head is a definition with a regular hint. With the recursor itself at the head, with an abbreviation or with a theorem at the head, the official checker rejects the same true statement. Source: \src{docs/design/review/soundness-shortcuts.md}, section 4, and finding S-F1 of \src{docs/design/review/soundness-machine.md}; [the exactness session](ses-874D).}
+\p{The first equation of [the triple](ex-OTWJ) is accepted officially only because its head is a definition with a regular hint. With the recursor itself at the head, with an abbreviation or with a theorem at the head, the official checker rejects the same true statement. Source: [rep-soundness-shortcuts](rep-soundness-shortcuts), section 4, and finding S-F1 of [rep-soundness-machine](rep-soundness-machine); [the exactness session](ses-874D).}
 \pre{\verb~|
 -- I = And.intro True True True.intro True.intro,  h : And True True  an axiom
 -- R x = And.rec (motive := fun _ => Nat) (fun _ _ => 5) x

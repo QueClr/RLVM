@@ -9,7 +9,7 @@
 \meta{origin}{docs/BENCHMARKS.md}
 \import{base-macros}
 
-\p{Source: the first warm table of 2026-11-24, whose headline rows are in \src{docs/BENCHMARKS.md}, section "Warm wall clock"; confirmed by \src{docs/research/profiles/P7.md}, section 3, and \src{docs/research/profiles/J1.md}; [the session on wave 6 and the pipeline](ses-CVTE). Conditions: one process checks the same export several times, every pass loads pipelined with checking, 8 workers on the 8 quiet performance cores of the aarch64 development host; warm is the median of the later passes. JVM launcher: HotSpot of GraalVM CE 25 with C2 and the serial collector. Native image: CE, \code{\verb~|-O3~}, serial collector.}
+\p{Source: the first warm table of 2026-11-24, whose headline rows are in [rep-benchmarks](rep-benchmarks), section "Warm wall clock"; confirmed by [rep-P7](rep-P7), section 3, and [rep-J1](rep-J1); [the session on wave 6 and the pipeline](ses-CVTE). Conditions: one process checks the same export several times, every pass loads pipelined with checking, 8 workers on the 8 quiet performance cores of the aarch64 development host; warm is the median of the later passes. JVM launcher: HotSpot of GraalVM CE 25 with C2 and the serial collector. Native image: CE, \code{\verb~|-O3~}, serial collector.}
 \table{
 \tr{\th{Machine, \code{\verb~|warm,gated,expect~}, 8 workers}\th{Init}\th{Std}\th{cedar}\th{reachability}\th{Mathlib}}
 \tr{\td{warm wall, JVM / native, s}\td{0.96 / 1.07}\td{1.72 / 1.88}\td{2.21 / 2.62}\td{1.88 / 2.66}\td{25.6 / 35.3}}

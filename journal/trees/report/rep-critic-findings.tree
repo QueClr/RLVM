@@ -10,7 +10,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Three independent critics reviewed \code{\verb~|ISA.md~} and \code{\verb~|ARCHITECTURE.md~} (first complete drafts). Their findings are reproduced here unedited. The orchestrator's binding resolutions are in \src{docs/design/RECONCILIATION.md}.}
+\p{Three independent critics reviewed \code{\verb~|ISA.md~} and \code{\verb~|ARCHITECTURE.md~} (first complete drafts). Their findings are reproduced here unedited. The orchestrator's binding resolutions are in [design-reconciliation-document](design-reconciliation-document).}
 
 \subtree{
 \title{Critic 1: coherence and implementability}

@@ -9,7 +9,7 @@
 \meta{origin}{rlvm-machine/NOTES-M7.md}
 \import{base-macros}
 
-\p{Source: \src{rlvm-machine/NOTES-M7.md}, section 8; [the session on wave 6](ses-CVTE). CE native image \code{\verb~|-O3~} through the launcher in the arena-shaped container, one worker, two runs per row. The host was loaded, load average 69 to 93 during the batch, so CPU seconds are comparable inside the batch only; the instructions per run are the stable signal and are given beside them.}
+\p{Source: [rep-machine-M7](rep-machine-M7), section 8; [the session on wave 6](ses-CVTE). CE native image \code{\verb~|-O3~} through the launcher in the arena-shaped container, one worker, two runs per row. The host was loaded, load average 69 to 93 during the batch, so CPU seconds are comparable inside the batch only; the instructions per run are the stable signal and are given beside them.}
 \table{
 \tr{\th{Configuration}\th{reachability}\th{Cedar slice}\th{Init}\th{Std}}
 \tr{\td{plain machine}\td{9.04, 8.53 s; 58.3 G}\td{2.64, 2.61 s; 38.9 G}\td{7.46, 7.49 s; 132.9 G}\td{12.66, 12.30 s; 212.4 G}}

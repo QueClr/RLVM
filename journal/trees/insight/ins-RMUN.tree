@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/J1.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/J1.md}, section 2; [the profiling session](ses-JRSD). HotSpot of GraalVM CE 25, machine engine, cedar with 8 workers and 5 passes, compilation log and flight recorder.}
+\p{Source: [rep-J1](rep-J1), section 2; [the profiling session](ses-JRSD). HotSpot of GraalVM CE 25, machine engine, cedar with 8 workers and 5 passes, compilation log and flight recorder.}
 \ul{
 \li{No method is near the limit of 8,000 bytecodes, the largest has 1,476. There is no bail-out, nothing hot is left in C1 or in the interpreter, and there is no deoptimisation storm.}
 \li{What C2 runs into is its inlining budget, 18,000 nodes and 8,000 bytecodes per compile unit and depth 15, in five to twelve of about 940 compile units. The two size limits are constants of a product VM.}

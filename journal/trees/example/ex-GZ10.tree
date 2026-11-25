@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/RECONCILIATION.md}
 \import{base-macros}
 
-\p{Unit 7008 of the Cedar slice, \code{\verb~|BitVec.neg_toInt_eq_neg_64._proof_1_1~}, is a certificate of the \code{\verb~|omega~} tactic whose definitions bind \code{\verb~|let~}s. Under the rule of the instruction-set document it ran into the memory limit; under the corrected rule it takes 38 ms. Source: erratum E1 of \src{docs/design/RECONCILIATION.md}, section 5, and decision D9 of \src{rlvm-machine/NOTES-M2.md}; [the session on the machine](ses-Z72N). The code is a schematic of the shape, not the text of the unit.}
+\p{Unit 7008 of the Cedar slice, \code{\verb~|BitVec.neg_toInt_eq_neg_64._proof_1_1~}, is a certificate of the \code{\verb~|omega~} tactic whose definitions bind \code{\verb~|let~}s. Under the rule of the instruction-set document it ran into the memory limit; under the corrected rule it takes 38 ms. Source: erratum E1 of [design-reconciliation-document](design-reconciliation-document), section 5, and decision D9 of [rep-machine-M2](rep-machine-M2); [the session on the machine](ses-Z72N). The code is a schematic of the shape, not the text of the unit.}
 \pre{\verb~|
 -- body of a definition that the kernel unfolds while it evaluates
 def step (x y : Nat) : Nat :=

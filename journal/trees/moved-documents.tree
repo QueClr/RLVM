@@ -1,0 +1,102 @@
+\title{Where the documents went}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{journal}
+\import{base-macros}
+
+\p{Until 2026-11-24 the notes of the project were Markdown documents next to the code: under \code{\verb~|docs/~}, in the module directories and in \code{\verb~|bench/~} and \code{\verb~|spikes/~}. By the maintainer's rule of that day every note lives in this forest, and the documents were moved here as they were written, one tree per document, and then deleted from the repository. This tree is the table from the old path of a document to the address of its tree. The history of the repository keeps the documents themselves up to the commit that removed them.}
+
+\p{Source code and READMEs cite a tree with the marker \code{\verb~|*agentic-note*: <address>~}. Older comments name a document by a short name and a place in it, such as "ISA 2.3", "ARCHITECTURE 3.3", "NOTES-M3 D17", "RECONCILIATION section 2" or "owner note 12"; the second table says which tree a short name means. The section numbers and the labels of decisions and findings are unchanged in the trees.}
+
+\subtree{
+\title{By path}
+
+\table{
+\tr{\th{path the document had}\th{tree}}
+\tr{\td{\code{\verb~|bench/track/benchmarks-notes.md~}}\td{[rep-benchmarks-notes](rep-benchmarks-notes)}}
+\tr{\td{\code{\verb~|bench/track/warm-wall-clock.md~}}\td{[rep-warm-wall-clock](rep-warm-wall-clock)}}
+\tr{\td{\code{\verb~|docs/BENCHMARKS.md~}}\td{[rep-benchmarks](rep-benchmarks)}}
+\tr{\td{\code{\verb~|docs/PLATFORM.md~}}\td{[design-platform-document](design-platform-document)}}
+\tr{\td{\code{\verb~|docs/design/ARCHITECTURE.md~}}\td{[design-architecture-document](design-architecture-document)}}
+\tr{\td{\code{\verb~|docs/design/ISA.md~}}\td{[design-isa-document](design-isa-document)}}
+\tr{\td{\code{\verb~|docs/design/OWNER-NOTES.md~}}\td{[owner-notes](owner-notes)}}
+\tr{\td{\code{\verb~|docs/design/RECONCILIATION.md~}}\td{[design-reconciliation-document](design-reconciliation-document)}}
+\tr{\td{\code{\verb~|docs/design/VALUES-V2.md~}}\td{[design-values-v2-document](design-values-v2-document)}}
+\tr{\td{\code{\verb~|docs/design/review/critic-findings.md~}}\td{[rep-critic-findings](rep-critic-findings)}}
+\tr{\td{\code{\verb~|docs/design/review/eager-reduction.md~}}\td{[rep-eager-reduction](rep-eager-reduction)}}
+\tr{\td{\code{\verb~|docs/design/review/exact-proof-conversion.md~}}\td{[rep-exact-proof-conversion](rep-exact-proof-conversion)}}
+\tr{\td{\code{\verb~|docs/design/review/official-divergence.md~}}\td{[rep-official-divergence](rep-official-divergence)}}
+\tr{\td{\code{\verb~|docs/design/review/reference-caches.md~}}\td{[rep-reference-caches](rep-reference-caches)}}
+\tr{\td{\code{\verb~|docs/design/review/soundness-default-set.md~}}\td{[rep-soundness-default-set](rep-soundness-default-set)}}
+\tr{\td{\code{\verb~|docs/design/review/soundness-machine.md~}}\td{[rep-soundness-machine](rep-soundness-machine)}}
+\tr{\td{\code{\verb~|docs/design/review/soundness-shortcuts.md~}}\td{[rep-soundness-shortcuts](rep-soundness-shortcuts)}}
+\tr{\td{\code{\verb~|docs/design/review/stepper-convention.md~}}\td{[rep-stepper-convention](rep-stepper-convention)}}
+\tr{\td{\code{\verb~|docs/research/01-arena-and-export-format.md~}}\td{[study-arena-and-export-format](study-arena-and-export-format)}}
+\tr{\td{\code{\verb~|docs/research/02-kernel-typechecker.md~}}\td{[study-kernel-typechecker](study-kernel-typechecker)}}
+\tr{\td{\code{\verb~|docs/research/03-kernel-declarations.md~}}\td{[study-kernel-declarations](study-kernel-declarations)}}
+\tr{\td{\code{\verb~|docs/research/04-leader-nano-lean.md~}}\td{[study-nano-lean](study-nano-lean)}}
+\tr{\td{\code{\verb~|docs/research/05-leader-gruszka-pestka.md~}}\td{[study-gruszka-pestka](study-gruszka-pestka)}}
+\tr{\td{\code{\verb~|docs/research/06-leader-sokonanoda-family.md~}}\td{[study-sokonanoda-family](study-sokonanoda-family)}}
+\tr{\td{\code{\verb~|docs/research/07-leader-rpylean-and-tenet-jvm.md~}}\td{[study-rpylean-and-tenet-jvm](study-rpylean-and-tenet-jvm)}}
+\tr{\td{\code{\verb~|docs/research/08-thc-truffle-tricks.md~}}\td{[study-thc-truffle-tricks](study-thc-truffle-tricks)}}
+\tr{\td{\code{\verb~|docs/research/09-nbe-hoas-tricks.md~}}\td{[study-nbe-hoas-tricks](study-nbe-hoas-tricks)}}
+\tr{\td{\code{\verb~|docs/research/10-graalvm-platform.md~}}\td{[study-graalvm-platform](study-graalvm-platform)}}
+\tr{\td{\code{\verb~|docs/research/11-memory-reuse-parallelism.md~}}\td{[study-memory-reuse-parallelism](study-memory-reuse-parallelism)}}
+\tr{\td{\code{\verb~|docs/research/12-baselines.md~}}\td{[study-baselines](study-baselines)}}
+\tr{\td{\code{\verb~|docs/research/13-workload-characterization.md~}}\td{[study-workload-characterization](study-workload-characterization)}}
+\tr{\td{\code{\verb~|docs/research/profiles/AR1.md~}}\td{[rep-AR1](rep-AR1)}}
+\tr{\td{\code{\verb~|docs/research/profiles/GC.md~}}\td{[rep-GC](rep-GC)}}
+\tr{\td{\code{\verb~|docs/research/profiles/J1.md~}}\td{[rep-J1](rep-J1)}}
+\tr{\td{\code{\verb~|docs/research/profiles/O1.md~}}\td{[rep-O1](rep-O1)}}
+\tr{\td{\code{\verb~|docs/research/profiles/P10.md~}}\td{[rep-P10](rep-P10)}}
+\tr{\td{\code{\verb~|docs/research/profiles/P7.md~}}\td{[rep-P7](rep-P7)}}
+\tr{\td{\code{\verb~|docs/research/profiles/P8.md~}}\td{[rep-P8](rep-P8)}}
+\tr{\td{\code{\verb~|docs/research/profiles/P9.md~}}\td{[rep-P9](rep-P9)}}
+\tr{\td{\code{\verb~|docs/research/profiles/PG1.md~}}\td{[rep-PG1](rep-PG1)}}
+\tr{\td{\code{\verb~|docs/research/profiles/V1.md~}}\td{[rep-V1](rep-V1)}}
+\tr{\td{\code{\verb~|docs/research/profiles/X1.md~}}\td{[rep-X1](rep-X1)}}
+\tr{\td{\code{\verb~|docs/research/profiles/X5.md~}}\td{[rep-X5](rep-X5)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-INT.md~}}\td{[rep-machine-INT](rep-machine-INT)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M1.md~}}\td{[rep-machine-M1](rep-machine-M1)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M2.md~}}\td{[rep-machine-M2](rep-machine-M2)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M3.md~}}\td{[rep-machine-M3](rep-machine-M3)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M4.md~}}\td{[rep-machine-M4](rep-machine-M4)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M5.md~}}\td{[rep-machine-M5](rep-machine-M5)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M6.md~}}\td{[rep-machine-M6](rep-machine-M6)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M7.md~}}\td{[rep-machine-M7](rep-machine-M7)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-M8.md~}}\td{[rep-machine-M8](rep-machine-M8)}}
+\tr{\td{\code{\verb~|rlvm-machine/NOTES-S.md~}}\td{[rep-machine-S](rep-machine-S)}}
+\tr{\td{\code{\verb~|rlvm-machine/OWNERSHIP.md~}}\td{[rep-machine-ownership](rep-machine-ownership)}}
+\tr{\td{\code{\verb~|rlvm-machine/SWITCHES.md~}}\td{[design-switches-document](design-switches-document)}}
+\tr{\td{\code{\verb~|rlvm-machine/WORK-PACKAGES.md~}}\td{[rep-machine-work-packages](rep-machine-work-packages)}}
+\tr{\td{\code{\verb~|rlvm-truffle/NOTES-T2.md~}}\td{[rep-truffle-T2](rep-truffle-T2)}}
+\tr{\td{\code{\verb~|rlvm-truffle/NOTES-T3.md~}}\td{[rep-truffle-T3](rep-truffle-T3)}}
+\tr{\td{\code{\verb~|spikes/machine/results/tables.md~}}\td{[rep-spike-machine](rep-spike-machine)}}
+\tr{\td{\code{\verb~|spikes/stepper/results/tables.md~}}\td{[rep-spike-stepper](rep-spike-stepper)}}
+}
+}
+
+\subtree{
+\title{By short name}
+
+\table{
+\tr{\th{name in comments and older notes}\th{tree}}
+\tr{\td{ISA, ISA.md}\td{[design-isa-document](design-isa-document)}}
+\tr{\td{ARCHITECTURE}\td{[design-architecture-document](design-architecture-document)}}
+\tr{\td{RECONCILIATION}\td{[design-reconciliation-document](design-reconciliation-document)}}
+\tr{\td{VALUES-V2}\td{[design-values-v2-document](design-values-v2-document)}}
+\tr{\td{PLATFORM, PLATFORM.md}\td{[design-platform-document](design-platform-document)}}
+\tr{\td{SWITCHES, SWITCHES.md}\td{[design-switches-document](design-switches-document)}}
+\tr{\td{OWNER-NOTES, owner note N}\td{[owner-notes](owner-notes)}}
+\tr{\td{NOTES-INT}\td{[rep-machine-INT](rep-machine-INT)}}
+\tr{\td{NOTES-M1 .. NOTES-M8}\td{[rep-machine-M1](rep-machine-M1) and its siblings in the table above}}
+\tr{\td{NOTES-S}\td{[rep-machine-S](rep-machine-S)}}
+\tr{\td{NOTES-T2, NOTES-T3}\td{[rep-truffle-T2](rep-truffle-T2)}}
+\tr{\td{OWNERSHIP}\td{[rep-machine-ownership](rep-machine-ownership)}}
+\tr{\td{WORK-PACKAGES}\td{[rep-machine-work-packages](rep-machine-work-packages)}}
+\tr{\td{docs/research/01 .. 13, research NN, R01 .. R13}\td{[study-arena-and-export-format](study-arena-and-export-format) and its siblings in the table above}}
+\tr{\td{P7 .. P10, GC, J1, V1, X1, X5, O1, AR1, PG1 (profiles)}\td{[rep-P7](rep-P7) and its siblings in the table above}}
+\tr{\td{BENCHMARKS, BENCHMARKS.md}\td{[rep-benchmarks](rep-benchmarks)}}
+}
+}

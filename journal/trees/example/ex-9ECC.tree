@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/01-arena-and-export-format.md}
 \import{base-macros}
 
-\p{The arena tests \code{\verb~|corner-cases/eta-struct-major-no-whnf~} and \code{\verb~|corner-cases/eta-struct-major-and-no-whnf~} have the expected outcome "either" and a limit of 60 s. A checker that reduces the major premise of a recursor before it eta-expands it does not terminate on them. Source: \src{docs/research/01-arena-and-export-format.md}, \src{rlvm-ref/README.md} and the arena dry run \src{docs/research/profiles/AR1.md}; [the research session](ses-XOS5). The statements are those of the arena test file.}
+\p{The arena tests \code{\verb~|corner-cases/eta-struct-major-no-whnf~} and \code{\verb~|corner-cases/eta-struct-major-and-no-whnf~} have the expected outcome "either" and a limit of 60 s. A checker that reduces the major premise of a recursor before it eta-expands it does not terminate on them. Source: [study-arena-and-export-format](study-arena-and-export-format), \src{rlvm-ref/README.md} and the arena dry run [rep-AR1](rep-AR1); [the research session](ses-XOS5). The statements are those of the arena test file.}
 \pre{\verb~|
 -- Omega : a proof with no weak head normal form (Coquand's paradox through propext)
 -- loopPair : Nat x Nat := Acc.rec (fun _ _ _ => (0, 0)) loopAcc     loopAcc built from Omega

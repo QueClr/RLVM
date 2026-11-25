@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/J1.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/J1.md}, section 3; [the profiling session](ses-JRSD). JVM launcher of GraalVM CE 25, machine engine, 8 workers, quiet cores.}
+\p{Source: [rep-J1](rep-J1), section 3; [the profiling session](ses-JRSD). JVM launcher of GraalVM CE 25, machine engine, 8 workers, quiet cores.}
 \ul{
 \li{The ahead-of-time cache of JDK 25, JEP 483, 514 and 515, works on GraalVM CE 25 only with \code{\verb~|-XX:-EnableJVMCI~}. With JVMCI on it silently degrades to a class archive without profiles.}
 \li{It is 18.7 MB, takes one training run at build time and takes another 0.4 to 1.1 s off the cold wall clock.}

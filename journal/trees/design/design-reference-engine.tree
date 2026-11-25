@@ -69,6 +69,6 @@
 \p{Gates of the published engine: the 230 arena tests all correct with no decline; 17,775 mutants in four corpora with no soundness and no completeness difference from the official verdicts (16,092 agree, 1,683 declined). Known gaps: the rules of Lean 4.37 are not implemented; the peak resident set of one heavy declaration is 3 to 4 times the bytes in use.}
 }
 
-\p{Detail: \src{rlvm-ref/README.md}; the design is section 5 of [the architecture document](design-architecture-document); the numbers are from \src{docs/BENCHMARKS.md}. Source: [the session that built the pipeline](ses-BQZM) and [the exactness session](ses-874D).}
+\p{Detail: \src{rlvm-ref/README.md}; the design is section 5 of [the architecture document](design-architecture-document); the numbers are from [rep-benchmarks](rep-benchmarks). Source: [the session that built the pipeline](ses-BQZM) and [the exactness session](ses-874D).}
 
 \p{Findings, examples and open problems: [two arena tests on which the official checker does not terminate](ex-9ECC).}

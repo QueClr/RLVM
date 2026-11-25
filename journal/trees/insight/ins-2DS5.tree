@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/review/exact-proof-conversion.md}
 \import{base-macros}
 
-\p{Source: \src{docs/design/review/exact-proof-conversion.md}, section 3.4; [the profiling session](ses-JRSD). Not built and not measured: the figure is the estimate of the author of that report, and the conditions were worked out on paper.}
+\p{Source: [rep-exact-proof-conversion](rep-exact-proof-conversion), section 3.4; [the profiling session](ses-JRSD). Not built and not measured: the figure is the estimate of the author of that report, and the conditions were worked out on paper.}
 \ul{
 \li{The idea is the one official-exact route left open by [the search for a cheap exact proof comparison](ins-FIXO). For a partial application such as \code{\verb~|HMul.hMul A A A (instHMul A m)~}, remember that applied to two arguments it reaches the field of the weak-head normal form of \code{\verb~|m~}, and build that directly: one application instead of two unfoldings, two reductions, two applications and four records per side.}
 \li{Four conditions make firing the rule on both sides the official outcome: every head of the chain is an abbreviation or opaque, never regular, and none is a Nat function; both sides fire rules with the same sequence of heads; the intermediate values that the official algorithm passes are known not to be proofs without building them; the intermediate quick tests can only answer true.}

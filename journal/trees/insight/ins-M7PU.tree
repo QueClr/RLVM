@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/P7.md}
 \import{base-macros}
 
-\p{Source: the closing remark of \src{docs/research/profiles/P7.md}, section 8; [the profiling session](ses-JRSD). Not measured: the measurement cores of the development host are eight, and every 8-worker row has the loader and the environment thread on the same eight cores.}
+\p{Source: the closing remark of [rep-P7](rep-P7), section 8; [the profiling session](ses-JRSD). Not measured: the measurement cores of the development host are eight, and every 8-worker row has the loader and the environment thread on the same eight cores.}
 \ul{
 \li{The loader, 12 s, and the environment thread, 1.6 to 3 s, are 15 s of CPU on Mathlib and 1.9 s of wall clock on 8 cores. They are not serial work, simply work, and with 8 workers on 8 cores they are why a pipelined run has ten runnable threads for 20 s: 13.6 percent of the worker time is spent runnable without a core.}
 \li{The claim: on a machine with ten cores the pipelined run would take the time of the check-only pass, 28.7 s instead of 31.8 s in the native image on Mathlib.}

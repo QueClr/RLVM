@@ -48,6 +48,6 @@
 \li{The base sizes of the session tables were reduced on the same reasoning, see [warm sessions](design-warm-sessions).}
 }
 
-\p{Related: [staging switches](design-switches), [the default switch set](dec-LZFX), [the metric](dec-7QMU). Detail: \src{rlvm-machine/SWITCHES.md} section "Sessions", \src{rlvm-machine/NOTES-M6.md} (F24), \src{rlvm-machine/NOTES-INT.md}, \src{rlvm-driver/README.md} section "Session cap", \src{docs/research/profiles/P9.md} section 4.5. Source: [the speed wave](ses-CVTE).}
+\p{Related: [staging switches](design-switches), [the default switch set](dec-LZFX), [the metric](dec-7QMU). Detail: [design-switches-document](design-switches-document) section "Sessions", [rep-machine-M6](rep-machine-M6) (F24), [rep-machine-INT](rep-machine-INT), \src{rlvm-driver/README.md} section "Session cap", [rep-P9](rep-P9) section 4.5. Source: [the speed wave](ses-CVTE).}
 
 \p{Findings, examples and open problems: [the best cap is set by the processor cache](ins-FJ5R), [sibling proofs and what a longer session answers](ex-UT0I).}

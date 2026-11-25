@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/RECONCILIATION.md}
 \import{base-macros}
 
-\p{Source: erratum E1 of \src{docs/design/RECONCILIATION.md}, section 5, which corrects \src{docs/design/ISA.md}; decision D9 of \src{rlvm-machine/NOTES-M2.md}; [the session on the machine](ses-Z72N). Found by implementation on the Cedar slice.}
+\p{Source: erratum E1 of [design-reconciliation-document](design-reconciliation-document), section 5, which corrects [design-isa-document](design-isa-document); decision D9 of [rep-machine-M2](rep-machine-M2); [the session on the machine](ses-Z72N). Found by implementation on the Cedar slice.}
 \ul{
 \li{The instruction-set document made every \code{\verb~|let~} value a suspension with a flag, so that every value built from an evaluated \code{\verb~|let~} carried the mark "contains a free variable". That is the official behaviour only for the let variable of \code{\verb~|infer_let~}.}
 \li{For a \code{\verb~|let~} inside a term that is evaluated, the body of an unfolded definition or a forced argument, the official \code{\verb~|whnf_core~} instantiates the body with the value: there is no variable.}

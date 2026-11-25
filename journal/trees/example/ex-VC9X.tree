@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/P9.md}
 \import{base-macros}
 
-\p{The unit with the largest excess on navier-stokes-euler. It is not a proof-position case: only the congruence shortcut repairs it. Source: \src{docs/research/profiles/P9.md}, section 4.2; [the profiling session](ses-JRSD). Machine with its default switch set of 21:02Z on 2026-11-24, one worker; unit \code{\verb~|EulerSobolevBaseCommutator.baseCommutator_bound~}.}
+\p{The unit with the largest excess on navier-stokes-euler. It is not a proof-position case: only the congruence shortcut repairs it. Source: [rep-P9](rep-P9), section 4.2; [the profiling session](ses-JRSD). Machine with its default switch set of 21:02Z on 2026-11-24, one worker; unit \code{\verb~|EulerSobolevBaseCommutator.baseCommutator_bound~}.}
 \pre{\verb~|
 -- both sides of the comparison are
 List.foldr (fun a acc => a + acc) 0 l

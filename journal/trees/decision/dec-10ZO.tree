@@ -11,11 +11,11 @@
 \meta{origin}{docs/design/review/stepper-convention.md}
 \import{base-macros}
 
-\p{\strong{Status:} accepted and implemented. The requirement comes from the reconciliation of the design review; the outcome, convention H, was recorded in section 8.2 of \src{docs/design/ISA.md} on 2026-11-24, before the machine's judgments were written.}
+\p{\strong{Status:} accepted and implemented. The requirement comes from the reconciliation of the design review; the outcome, convention H, was recorded in section 8.2 of [design-isa-document](design-isa-document) on 2026-11-24, before the machine's judgments were written.}
 
 \p{\strong{Context.} [The machine](design-machine-worklist) is specified as a worklist transition system. The first draft of the instruction set budgeted the worklist at 25 instructions per frame, 8 to 10 \% of the leading checker's total. A critic of the design review raised a blocker (finding C2.1): the spike had measured +33 \% instructions for a worklist machine against host recursion on evaluation and readback of all declaration types of Init with hash-consing on, +30 \% on the JVM in steady state, and +53 \% with hash-consing off. That spike machine was the best case (one method, registers in locals, frames of two or three words), and the convention of the draft cost more per frame. About 25 state machines were going to be written against the convention, so changing it later would mean rewriting all of them.}
 
-\p{\strong{Decision.} The convention by which Java executes the transition system is fixed by measurement before any judgment is written (resolution B4 of \src{docs/design/RECONCILIATION.md}). Two candidates, both of which keep the transition system as the specification:}
+\p{\strong{Decision.} The convention by which Java executes the transition system is fixed by measurement before any judgment is written (resolution B4 of [design-reconciliation-document](design-reconciliation-document)). Two candidates, both of which keep the transition system as the specification:}
 
 \ul{
 \li{fused loops, one per hot judgment family, with the registers in Java locals and one dense dispatch on operation and state;}
@@ -46,4 +46,4 @@
 
 \p{\strong{Limits of the evidence.} Three small judgments without tabling stand for about 25; real judgments call across families far more often, which the spike understates to the disadvantage of the fused loops only. aarch64 only; the arena runner is x86-64. The host was shared. The second candidate exactly as written was not built.}
 
-\p{Related: [the design review and its reconciliation](design-review-reconciliation). Detail: \src{docs/design/review/stepper-convention.md}, \src{docs/design/review/critic-findings.md} (finding C2.1), \src{spikes/stepper/README.md}. Source: [the design session](ses-EMMW).}
+\p{Related: [the design review and its reconciliation](design-review-reconciliation). Detail: [rep-stepper-convention](rep-stepper-convention), [rep-critic-findings](rep-critic-findings) (finding C2.1), \src{spikes/stepper/README.md}. Source: [the design session](ses-EMMW).}

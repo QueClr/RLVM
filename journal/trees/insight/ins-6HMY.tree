@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/X1.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/X1.md}, verdict 1 and section 4; the earlier analysis is part A of \src{docs/research/11-memory-reuse-parallelism.md}; [the profiling session](ses-JRSD). The idea examined was the few-bit reference count of Reussir, in the limit one bit that says unique or shared, which licenses in-place reuse. The verdicts rest on a census of the machine on the JVM with one worker; none of the four schemes was built.}
+\p{Source: [rep-X1](rep-X1), verdict 1 and section 4; the earlier analysis is part A of [study-memory-reuse-parallelism](study-memory-reuse-parallelism); [the profiling session](ses-JRSD). The idea examined was the few-bit reference count of Reussir, in the limit one bit that says unique or shared, which licenses in-place reuse. The verdicts rest on a census of the machine on the JVM with one worker; none of the four schemes was built.}
 \ul{
 \li{The cases the bit specialises are rare: extending the spine just built, extending or pruning the frame just built, bumping a Nat offset cell are 1.9 to 7.2 percent of the records, 0.4 to 3.4 percent of the new frames and a few hundred cells per corpus.}
 \li{Working environments are already a stack-like slab: 1 copy in 162 M pushes over the nine census runs.}

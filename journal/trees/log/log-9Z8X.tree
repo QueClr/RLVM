@@ -14,4 +14,4 @@
 
 \p{Within the next hour the packages published every judgment family of the generic tier, the configuration later called v0: values, runs, literals and levels; evaluation; reduction with Nat and String; inference and the check of a declaration; conversion with its complete procedure, after which no stub was left on the path. Checked per declaration against the reference engine, Init was clean: 58,547 units compared, 57,938 engine checks accepted by the machine, none declined. Through the launcher the tutorial tests were clean: 141 verdicts right, 175 units accepted, 20 rejected and every rejection confirmed by the reference kernel.}
 
-\p{Detail: \src{rlvm-machine/README.md}, \src{docs/design/ISA.md}. Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N). Related: [the machine as a worklist](design-machine-worklist), [the control convention](design-control-convention-h).}
+\p{Detail: \src{rlvm-machine/README.md}, [design-isa-document](design-isa-document). Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N). Related: [the machine as a worklist](design-machine-worklist), [the control convention](design-control-convention-h).}

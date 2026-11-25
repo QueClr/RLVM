@@ -13,4 +13,4 @@
 
 \p{The repository starts with a build environment that depends on nothing installed on the host. \code{\verb~|env.sh~} pins GraalVM Community Edition 25 and Maven 3.9.16 under \code{\verb~|.toolchain/~} and gives Maven a repository of its own there, so that no build touches the system JDK or a personal Maven repository; \code{\verb~|scripts/fetch-toolchain.sh~} fetches the pinned files. The parent \code{\verb~|pom.xml~} lists the modules, and each module is installed into that private repository when its own tests pass, which is what the later entries call a publication.}
 
-\p{Detail: \src{env.sh}, \src{docs/PLATFORM.md}. Commit \commit{6fad0e1}. Session: [research, benchmark infrastructure and spikes](ses-XOS5).}
+\p{Detail: \src{env.sh}, [design-platform-document](design-platform-document). Commit \commit{6fad0e1}. Session: [research, benchmark infrastructure and spikes](ses-XOS5).}

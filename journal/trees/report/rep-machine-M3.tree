@@ -10,7 +10,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Files: \code{\verb~|Reduce~}, \code{\verb~|NatRed~}, \code{\verb~|StrRed~}, \code{\verb~|Rules~}; tests \code{\verb~|M3ReduceTest~}, \code{\verb~|M3NatStrTest~}, \code{\verb~|M3TierTest~}, \code{\verb~|M3NestTest~}, \code{\verb~|M3K2Test~} (fast), \code{\verb~|M3ArenaTest~} (slow); \code{\verb~|M3Prof~} (a main for profiling, not a test). Specification: ISA 4.3 (4.3.2 - 4.3.5), 2.9, 4.4 (\code{\verb~|OFFSET~}), 3.6 (case trees, step 4); official rules R02 section 7 and 8.4. This file lists every deviation from \src{docs/design/ISA.md} (revision 2) with its reason, then what is not done.}
+\p{Files: \code{\verb~|Reduce~}, \code{\verb~|NatRed~}, \code{\verb~|StrRed~}, \code{\verb~|Rules~}; tests \code{\verb~|M3ReduceTest~}, \code{\verb~|M3NatStrTest~}, \code{\verb~|M3TierTest~}, \code{\verb~|M3NestTest~}, \code{\verb~|M3K2Test~} (fast), \code{\verb~|M3ArenaTest~} (slow); \code{\verb~|M3Prof~} (a main for profiling, not a test). Specification: ISA 4.3 (4.3.2 - 4.3.5), 2.9, 4.4 (\code{\verb~|OFFSET~}), 3.6 (case trees, step 4); official rules R02 section 7 and 8.4. This file lists every deviation from [design-isa-document](design-isa-document) (revision 2) with its reason, then what is not done.}
 
 \subtree{
 \title{Deviations}

@@ -14,4 +14,4 @@
 
 \p{The gate found one convention difference, M8-F1: with \code{\verb~|gated~} and the code tier, two declarations of the Cedar slice took one tick more under host depth 0. A closed value that arrived through a frame did not fill the inline cache of its site, so the site evaluated the term again. The fix fills the cache at the resume, and the unit takes 53,059 ticks under both conventions (\commit{dcccdad}).}
 
-\p{Detail: \src{rlvm-machine/NOTES-M8.md}, \src{rlvm-machine/SWITCHES.md}. Commit \commit{e8b15c7}. Session: [machine speed and pipeline](ses-CVTE). Related: [the gate](design-gate).}
+\p{Detail: [rep-machine-M8](rep-machine-M8), [design-switches-document](design-switches-document). Commit \commit{e8b15c7}. Session: [machine speed and pipeline](ses-CVTE). Related: [the gate](design-gate).}

@@ -86,4 +86,4 @@
 }
 }
 
-\p{Detail: \src{docs/design/ARCHITECTURE.md} section 2 for the design, \src{rlvm-store/README.md} for the implementation, its invariants, measurements and tests. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}
+\p{Detail: [design-architecture-document](design-architecture-document) section 2 for the design, \src{rlvm-store/README.md} for the implementation, its invariants, measurements and tests. Source: [the design session](ses-EMMW), [the session that built the pipeline](ses-BQZM) and [the pipeline wave](ses-CVTE).}

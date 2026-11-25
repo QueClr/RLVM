@@ -8,7 +8,7 @@
 \meta{origin}{docs/research/profiles/P9.md}
 \import{base-macros}
 
-\p{Three consecutive proofs of con-leche with shared sub-terms. gruszka answers the later ones from what the first left in its session; the machine had reset its session at the cap of 1 MiB. Source: \src{docs/research/profiles/P9.md}, section 4.5; [the profiling session](ses-JRSD). Machine with its default switch set, native image, one worker, quiet cores.}
+\p{Three consecutive proofs of con-leche with shared sub-terms. gruszka answers the later ones from what the first left in its session; the machine had reset its session at the cap of 1 MiB. Source: [rep-P9](rep-P9), section 4.5; [the profiling session](ses-JRSD). Machine with its default switch set, native image, one worker, quiet cores.}
 \pre{\verb~|
 ConLeche.Model.ctorsLoopAt._proof_1_9
 ConLeche.Model.ctorsLoopAt._proof_1_10

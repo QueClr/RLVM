@@ -15,4 +15,4 @@
 
 \p{Final rows, native image at \code{\verb~|-O3~}, one worker, arena-shaped container, CPU seconds of the machine against the reference engine: Init 7.77 against 13.82, Std 13.32 against 24.31, Cedar slice 3.17 against 3.90, reachability 7.95 against 12.19. The first Mathlib run of the machine, 8 workers in the same kind of image, accepted all 714,712 engine checks with no decline in 205.98 s CPU and 42.31 s wall at 2,855 MiB, against 624.6 s and 120.3 s for the reference engine.}
 
-\p{Detail: \src{rlvm-machine/NOTES-INT.md}, \src{docs/BENCHMARKS.md}. Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N). Related: [the machine as a worklist](design-machine-worklist), [session tables must start small](ins-8O66).}
+\p{Detail: [rep-machine-INT](rep-machine-INT), [rep-benchmarks](rep-benchmarks). Commit \commit{afe1c5b}. Session: [the machine](ses-Z72N). Related: [the machine as a worklist](design-machine-worklist), [session tables must start small](ins-8O66).}

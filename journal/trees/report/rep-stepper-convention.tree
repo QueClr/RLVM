@@ -9,7 +9,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Decision record for RECONCILIATION B4 (critic finding C2.1), from the measurements of \code{\verb~|spikes/stepper~} (README and \src{spikes/stepper/results/tables.md} there). Sections 2 and 3 are written as rules for the implementers of \code{\verb~|rlvm-machine~}; they replace the "Decision" paragraph of ISA 8.2 and refine its candidate (ii).}
+\p{Decision record for RECONCILIATION B4 (critic finding C2.1), from the measurements of \code{\verb~|spikes/stepper~} (README and [rep-spike-stepper](rep-spike-stepper) there). Sections 2 and 3 are written as rules for the implementers of \code{\verb~|rlvm-machine~}; they replace the "Decision" paragraph of ISA 8.2 and refine its candidate (ii).}
 
 \subtree{
 \title{1. Decision}
@@ -28,7 +28,7 @@
 }
 
 \ul{
-\li{The target of RECONCILIATION B4 (at most +15\% CPU over plain recursion on the declaration types of Init and Cedar) is met by H on every runtime and both corpora: +0\% to +7\% over the 24 estimates (six runtime configurations, two corpora, two estimators; per-workload tables in \src{spikes/stepper/results/tables.md}, section 2). W0 misses it everywhere (+26\% to +51\%). W1 meets it on the Graal JIT (+1\% to +4\%), is at +10\% to +18\% on the native image and at +15\% to +18\% on C2.}
+\li{The target of RECONCILIATION B4 (at most +15\% CPU over plain recursion on the declaration types of Init and Cedar) is met by H on every runtime and both corpora: +0\% to +7\% over the 24 estimates (six runtime configurations, two corpora, two estimators; per-workload tables in [rep-spike-stepper](rep-spike-stepper), section 2). W0 misses it everywhere (+26\% to +51\%). W1 meets it on the Graal JIT (+1\% to +4\%), is at +10\% to +18\% on the native image and at +15\% to +18\% on C2.}
 \li{H is the only candidate whose cost does not depend on which compiler runs it, which matters because the platform gate (JVM with JIT against native image) is still open.}
 \li{Instruction counts overstate every candidate: W1 executes 20\% more instructions than R and H64 15\% more (6\% with the steps inlined) in the native image, for +10\% and +6\% CPU. The instructions a convention adds are cheap ones; what costs is the data-dependent dispatch of an explicit stack. Reading the Init types workload with \code{\verb~|perf stat~} (\code{\verb~|spikes/stepper/results/counters.txt~}, net of set-up): W1 takes 25\% more branch misses than R, W0 27\%, the inert-nest loop alone 14\%, H64 none.}
 \li{Frames written per judgment: W0 0.19, W1 0.064, H64 0.00011 (Init, types + values).}

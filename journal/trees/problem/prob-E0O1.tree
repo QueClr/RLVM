@@ -17,9 +17,9 @@
 \ul{
 \li{Of the two unlocks named by the owner of the tier, the call instruction [does not pay](ins-1SLM). What is left is records that are not interned until they have to be.}
 \li{[Identity on demand](ins-PMD4) shows that no verdict needs canonical references and that applications can be born private. In the stepper a private application is still written into the slab, which is an escape for a compiler too.}
-\li{The design for the tier is "reserve, do not write": the id of a private application is fixed by two additions, head and arguments stay in a virtual object, and the record is written only where the reference leaves the compilation unit. Because the id was reserved, both tiers give every record the same reference. With direct calls between compiled blocks the unit grows to caller and inlined callee. Source: \src{docs/design/VALUES-V2.md}, section 5. It is design only.}
+\li{The design for the tier is "reserve, do not write": the id of a private application is fixed by two additions, head and arguments stay in a virtual object, and the record is written only where the reference leaves the compilation unit. Because the id was reserved, both tiers give every record the same reference. With direct calls between compiled blocks the unit grows to caller and inlined callee. Source: [design-values-v2-document](design-values-v2-document), section 5. It is design only.}
 \li{The rule that the two tiers are equivalent has to change from "the same records in the same order" to "the same identified records with the same references".}
-\li{On Cedar-level work even this reaches at most the 14 percent of the records that blocks make, unless the generic judgments use it too. Source: \src{rlvm-truffle/NOTES-T3.md}, section 10.8.}
+\li{On Cedar-level work even this reaches at most the 14 percent of the records that blocks make, unless the generic judgments use it too. Source: [rep-truffle-T3](rep-truffle-T3), section 10.8.}
 }
 \p{\strong{What would close it.} The staging switch for identity on demand in the machine, then the tier taught the lazy site, then a measurement on closed evaluation with 8 workers on the platform that ships. A measured negative result would close it as well.}
 \p{See also: [the second value model](design-values-v2); [the Truffle tier](design-truffle-tier).}

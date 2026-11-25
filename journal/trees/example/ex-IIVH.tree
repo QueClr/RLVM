@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/AR1.md}
 \import{base-macros}
 
-\p{An arena performance test that the official kernel answers by structural identity of two instantiated terms, and on which a machine over values has two closures of different terms that are equal only after substitution. Source: the arena dry run \src{docs/research/profiles/AR1.md}, table 0.1, and \src{rlvm-machine/SWITCHES.md}; [the profiling session](ses-JRSD).}
+\p{An arena performance test that the official kernel answers by structural identity of two instantiated terms, and on which a machine over values has two closures of different terms that are equal only after substitution. Source: the arena dry run [rep-AR1](rep-AR1), table 0.1, and [design-switches-document](design-switches-document); [the profiling session](ses-JRSD).}
 \pre{\verb~|
 Nat.rec M Z S1 m  =?=  Nat.rec M Z S2 m
 -- S1 = fun k _ => p (lo + k)               under  lo := 0, p := a closure

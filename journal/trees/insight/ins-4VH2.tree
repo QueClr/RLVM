@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/review/soundness-machine.md}
 \import{base-macros}
 
-\p{Source: the independent soundness review of the machine, \src{docs/design/review/soundness-machine.md}, findings S-F1 and S-F2; [the session on the machine](ses-Z72N). Ground truth is the official checker of Lean v4.36.0, never the reference engine alone.}
+\p{Source: the independent soundness review of the machine, [rep-soundness-machine](rep-soundness-machine), findings S-F1 and S-F2; [the session on the machine](ses-Z72N). Ground truth is the official checker of Lean v4.36.0, never the reference engine alone.}
 \transclude{ex-OTWJ}
 \ul{
 \li{The official comparison reduces before it compares. It compares the arguments of two applications of one head first only for a definition with a regular hint. So "the arguments are pairwise convertible" does not imply that the applications are convertible for the official procedure, although it does in the theory.}

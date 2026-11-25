@@ -15,4 +15,4 @@
 
 \p{The first measurements were not usable. On a host where the CPU time of identical work moved by 1.5 to 2 times within twenty minutes, rows of sequential configurations cannot be compared; in the one run that isolated it, the promoting tier was 55 to 80 \% slower than the base tier in the native image, cause not established at that point.}
 
-\p{Detail: \src{rlvm-truffle/NOTES-T2.md}, \src{rlvm-truffle/README.md}. Commit \commit{695edc1}. Session: [profiles and prototypes](ses-JRSD). Related: [the Truffle tier](design-truffle-tier), [the cost of heat accounting](ins-6SIZ).}
+\p{Detail: [rep-truffle-T2](rep-truffle-T2), \src{rlvm-truffle/README.md}. Commit \commit{695edc1}. Session: [profiles and prototypes](ses-JRSD). Related: [the Truffle tier](design-truffle-tier), [the cost of heat accounting](ins-6SIZ).}

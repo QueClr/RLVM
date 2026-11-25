@@ -14,7 +14,7 @@
 
 \p{\strong{Status:} accepted and binding. The resolutions were applied in revision 2 of the instruction-set document and in the modules; one erratum found by implementation was added on 2026-11-24.}
 
-\p{Before any module of the machine was written, three independent critics reviewed the first complete drafts of \src{docs/design/ISA.md} and \src{docs/design/ARCHITECTURE.md}: one for coherence and implementability, one for performance and feasibility, one for soundness. Their findings are kept verbatim in \src{docs/design/review/critic-findings.md}: 41 findings, of which 6 blockers, 26 major and 9 minor. The orchestrator answered them in \src{docs/design/RECONCILIATION.md}. That document is binding, and the order of authority for a design question is: the maintainer's notes, then the reconciliation, then the two design documents, then the research documents. A module that follows the reconciliation against a design document says so in its README.}
+\p{Before any module of the machine was written, three independent critics reviewed the first complete drafts of [design-isa-document](design-isa-document) and [design-architecture-document](design-architecture-document): one for coherence and implementability, one for performance and feasibility, one for soundness. Their findings are kept verbatim in [rep-critic-findings](rep-critic-findings): 41 findings, of which 6 blockers, 26 major and 9 minor. The orchestrator answered them in [design-reconciliation-document](design-reconciliation-document). That document is binding, and the order of authority for a design question is: the maintainer's notes, then the reconciliation, then the two design documents, then the research documents. A module that follows the reconciliation against a design document says so in its README.}
 
 \subtree[design-review-reconciliation-verdicts]{
 \title{What the critics said}
@@ -77,6 +77,6 @@
 \p{The rule now: evaluation treats a \code{let} as zeta by sharing with a plain value, like a beta argument; only inference's let variable is a suspension. OPEN on a value means what the official test for a free variable means. The document's statement that over-approximating OPEN is harmless was wrong: it steers into non-termination. Regression: unit 7008 of the Cedar slice, 73.7 M steps and a memory decline before, 60,569 steps after. See [the value model](design-value-model).}
 }
 
-\p{Documents: \src{docs/design/RECONCILIATION.md}, \src{docs/design/review/critic-findings.md}, \src{docs/design/OWNER-NOTES.md}. Source: [the design session](ses-EMMW); the erratum comes from [the machine's session](ses-Z72N).}
+\p{Documents: [design-reconciliation-document](design-reconciliation-document), [rep-critic-findings](rep-critic-findings), [owner-notes](owner-notes). Source: [the design session](ses-EMMW); the erratum comes from [the machine's session](ses-Z72N).}
 
 \p{Findings, examples and open problems: [the Cedar unit that blew up under the wrong let rule](ex-GZ10), [a let inside an evaluated term must be zeta by sharing](ins-H55H).}

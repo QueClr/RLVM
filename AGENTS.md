@@ -22,16 +22,17 @@ module, change logs and the maintainer's standing policies.
   with `rg -F '<address>' journal/trees/`. An address that code cites is permanent.
 - Scratch belongs under `work/` (untracked) and is never cited from a tracked file.
 
-Transition: the documents written before this rule (`docs/`, `rlvm-machine/NOTES-*.md`,
-`rlvm-machine/SWITCHES.md`, `rlvm-machine/OWNERSHIP.md`, `rlvm-machine/WORK-PACKAGES.md`,
-`rlvm-truffle/NOTES-*.md`, `bench/track/*.md` other than its README, the result notes under `spikes/`)
-are being moved into the journal. Until a document has been moved it may be corrected in place; nothing
-new is added next to it.
+The documents written before this rule (the former `docs/` directory, the working notes next to the
+modules, the result notes under `bench/` and `spikes/`) were moved into the journal on 2026-11-24, one
+tree per document, and deleted here. The journal's tree `moved-documents` is the table from an old path
+or short name ("ISA 2.3", "NOTES-M3 D17", "owner note 12" in older comments) to the tree that carries
+the text now.
 
 ## Standing policies
 
-The maintainer's lasting instructions are the journal's `policy/standing-policies` tree (until the move:
-`docs/design/OWNER-NOTES.md`). They are the highest authority. In short:
+The maintainer's lasting instructions are the journal's `policy/standing-policies` tree; the notes as
+they were given, each with its reading, are the tree `owner-notes`. They are the highest authority. In
+short:
 
 - The metric is warm wall clock: 8 parallel workers, steady state, loading pipelined with checking.
 - The default configuration never accepts a statement that is not derivable, gives the official verdict

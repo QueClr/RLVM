@@ -11,7 +11,7 @@
 \meta{model-id}{claude-fable-5-2}
 \import{base-macros}
 
-\p{The third phase: a complete checker without the machine. One agent per module wrote the modules of \src{docs/design/ARCHITECTURE.md}, an integrator put them together, and a later check re-ran every guard after the module owners had kept working. The foundation modules were installed late on 2026-11-23; the pipeline, its integration and the later check are of 2026-11-24. Branch \code{dev}, commits \commit{164409d} (export reader, universe levels, literals) and \commit{45563d9} (store, loader, reference kernel, inductive admission, admission, driver, launcher, test kit).}
+\p{The third phase: a complete checker without the machine. One agent per module wrote the modules of [design-architecture-document](design-architecture-document), an integrator put them together, and a later check re-ran every guard after the module owners had kept working. The foundation modules were installed late on 2026-11-23; the pipeline, its integration and the later check are of 2026-11-24. Branch \code{dev}, commits \commit{164409d} (export reader, universe levels, literals) and \commit{45563d9} (store, loader, reference kernel, inductive admission, admission, driver, launcher, test kit).}
 
 \ul{
 \li{\strong{Foundation.} \code{rlvm-export} reads the export, \code{rlvm-level} holds universe levels, \code{rlvm-nat} holds Nat and String literals and their arithmetic.}

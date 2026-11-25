@@ -8,7 +8,7 @@
 \meta{origin}{docs/design/review/soundness-machine.md}
 \import{base-macros}
 
-\p{Source: finding S-F5 of \src{docs/design/review/soundness-machine.md} and the design of the switch \code{\verb~|eager~} in \src{docs/design/review/eager-reduction.md}; [the session on the machine](ses-Z72N).}
+\p{Source: finding S-F5 of [rep-soundness-machine](rep-soundness-machine) and the design of the switch \code{\verb~|eager~} in [rep-eager-reduction](rep-eager-reduction); [the session on the machine](ses-Z72N).}
 \ul{
 \li{The official comparison has one mode switch. While it compares the type of an argument of the form \code{\verb~|eagerReduce _ _~} with its domain, lazy delta folds Nat operations although a free variable is present.}
 \li{Its caches live for one declaration and are keyed by terms whose free variables are unique per binder instance. In the machine a free variable is canonical, a type and a depth, so a pair established in one scope answered in another scope and in the other mode: a wrong accept in the plain machine.}

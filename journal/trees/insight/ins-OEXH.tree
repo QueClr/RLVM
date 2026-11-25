@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/P7.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P7.md}, sections 4 and 6; the figures with the switch \code{\verb~|eager~} are from \src{docs/design/review/eager-reduction.md}, section 7.3; [the profiling session](ses-JRSD). Native image, machine with \code{\verb~|warm,gated,expect~}, quiet cores.}
+\p{Source: [rep-P7](rep-P7), sections 4 and 6; the figures with the switch \code{\verb~|eager~} are from [rep-eager-reduction](rep-eager-reduction), section 7.3; [the profiling session](ses-JRSD). Native image, machine with \code{\verb~|warm,gated,expect~}, quiet cores.}
 \ul{
 \li{Std with 8 workers is bounded by one unit. Unit 23249 is the largest proof of the file, 76,204 block nodes; the machine declines it and the reference kernel re-checks it: 0.7 s on a quiet core, 1.09 s when ten threads share eight cores. The 8 workers have 1.5 s of CPU each.}
 \li{The former scheduler cut a later pass into 8 contiguous eighths; the unit sat near the end of its eighth and started at 1.4 s of a run that could have ended at 1.5 s. With slices of 256 units that an idle worker takes for itself, check-only passes of Std with 8 workers go from 2.15 to 2.18 s to 1.67 s, median of 20. Mathlib and cedar do not change.}

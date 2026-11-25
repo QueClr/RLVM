@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/P7.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P7.md}; [the profiling session](ses-JRSD). Native image \code{\verb~|-O3~} with the serial collector, machine with \code{\verb~|warm,gated,expect~}, session cap 4 MiB, the 8 quiet performance cores of the aarch64 development host; single runs, differences below 3 percent are not results.}
+\p{Source: [rep-P7](rep-P7); [the profiling session](ses-JRSD). Native image \code{\verb~|-O3~} with the serial collector, machine with \code{\verb~|warm,gated,expect~}, session cap 4 MiB, the 8 quiet performance cores of the aarch64 development host; single runs, differences below 3 percent are not results.}
 \table{
 \tr{\th{Mathlib, 721,845 units}\th{1 worker}\th{2}\th{4}\th{8}}
 \tr{\td{check phase of a batch run, s}\td{212.21}\td{101.39}\td{52.66}\td{30.57}}

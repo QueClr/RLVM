@@ -9,7 +9,7 @@
 \meta{origin}{rlvm-truffle/NOTES-T3.md}
 \import{base-macros}
 
-\p{Source: \src{rlvm-truffle/NOTES-T3.md}, section 1; [the profiling session](ses-JRSD). Warm wall clock per pass, median of the later half of the warm passes, the stepper and the tier back to back in one quiet window. Most rows are a measuring tool that keeps one engine and has no loading; the launcher rows say so.}
+\p{Source: [rep-truffle-T3](rep-truffle-T3), section 1; [the profiling session](ses-JRSD). Warm wall clock per pass, median of the later half of the warm passes, the stepper and the tier back to back in one quiet window. Most rows are a measuring tool that keeps one engine and has no loading; the launcher rows say so.}
 \table{
 \tr{\th{Workload}\th{Platform}\th{Workers}\th{Stepper, ms}\th{With the tier, ms}\th{Blocks compiled}}
 \tr{\td{reachability}\td{JVM}\td{1}\td{1118}\td{1006, -10.0 percent}\td{12}}

@@ -9,7 +9,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{The review, its findings, the table of shortcuts and the verdict on the switch sets are in \src{docs/design/review/soundness-machine.md}. This file says what package S keeps in the module.}
+\p{The review, its findings, the table of shortcuts and the verdict on the switch sets are in [rep-soundness-machine](rep-soundness-machine). This file says what package S keeps in the module.}
 
 \table{
 \tr{\th{What}\th{Where}}

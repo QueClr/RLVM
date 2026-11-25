@@ -10,7 +10,7 @@
 \meta{moved}{2026-11-24}
 \import{base-macros}
 
-\p{Deviations from \src{docs/design/ISA.md} (revision 2) and things a caller should know, each with its reason.}
+\p{Deviations from [design-isa-document](design-isa-document) (revision 2) and things a caller should know, each with its reason.}
 
 \subtree{
 \title{Inference and checking (v0)}
@@ -327,7 +327,7 @@
 \subtree{
 \title{E1-F1 .. E1-F6: a bound variable is typed by its binder's DECLARED type (agent E1, 2026-11-24)}
 
-\p{Findings of package E1 (board 20:10Z - 20:35Z, \src{docs/design/review/eager-reduction.md} 6.6, \code{\verb~|work/e1/patches/E1-F2-F5-design.md~}): the machine accepted exports the official checker rejects because a type that is only CONVERTIBLE with the official one was used in its place (the official \code{\verb~|is_def_eq~} is not transitive: package S's triple \code{\verb~|d intro = d h~}, \code{\verb~|d intro = 5~} accepted, \code{\verb~|d h = 5~} rejected). 78 exports \code{\verb~|e1-*~} of the S manifest (official verdicts from Docker; generator \code{\verb~|src/test/resources/s/gen/batchE.py~}), all strict rows.}
+\p{Findings of package E1 (board 20:10Z - 20:35Z, [rep-eager-reduction](rep-eager-reduction) 6.6, \code{\verb~|work/e1/patches/E1-F2-F5-design.md~}): the machine accepted exports the official checker rejects because a type that is only CONVERTIBLE with the official one was used in its place (the official \code{\verb~|is_def_eq~} is not transitive: package S's triple \code{\verb~|d intro = d h~}, \code{\verb~|d intro = 5~} accepted, \code{\verb~|d h = 5~} rejected). 78 exports \code{\verb~|e1-*~} of the S manifest (official verdicts from Docker; generator \code{\verb~|src/test/resources/s/gen/batchE.py~}), all strict rows.}
 
 \table{
 \tr{\th{\verb~|#~}\th{Where}\th{Was}\th{Now}}
@@ -341,7 +341,7 @@
 \subtree{
 \title{E1-F7 (kind T, tolerated by the practical policy; 2026-11-24 21:35Z): the type of a term the official kernel does NOT reduce}
 
-\p{Owner's note 13 (22:25Z): a kind T accept is tolerated in the default configuration, so this family is documented (\src{docs/design/review/official-divergence.md}) and not worked on further. Three rows of the S manifest carry the kind mark \code{\verb~|T~} (the machine accepts, the official checker rejects, the statement is \code{\verb~|True~}; official verdicts from Docker, the reference engine rejects): \code{\verb~|e1-sib-proj-applied-let-pi-bad~} and \code{\verb~|e1-sib-proj-redex-pi-bad~} (v0 and every set), \code{\verb~|e1-sib-krule-major-redex-bad~} (\code{\verb~|gated~} and the default set; v0 is right only because its tabling record of the argument holds the INFER type). Nine more rows \code{\verb~|e1-sib-*~} are strict.}
+\p{Owner's note 13 (22:25Z): a kind T accept is tolerated in the default configuration, so this family is documented ([rep-official-divergence](rep-official-divergence)) and not worked on further. Three rows of the S manifest carry the kind mark \code{\verb~|T~} (the machine accepts, the official checker rejects, the statement is \code{\verb~|True~}; official verdicts from Docker, the reference engine rejects): \code{\verb~|e1-sib-proj-applied-let-pi-bad~} and \code{\verb~|e1-sib-proj-redex-pi-bad~} (v0 and every set), \code{\verb~|e1-sib-krule-major-redex-bad~} (\code{\verb~|gated~} and the default set; v0 is right only because its tabling record of the argument holds the INFER type). Nine more rows \code{\verb~|e1-sib-*~} are strict.}
 
 \p{Root cause: the official kernel infers the type of a term it has not reduced in two places - the RAW major premise in \code{\verb~|to_cnstr_when_K~}, and the struct of a STUCK projection (\code{\verb~|reduce_proj~} fails, \code{\verb~|whnf_core~} returns the projection as it was; \code{\verb~|is_def_eq_proof_irrel~}, structure eta, the unit-like rule and eta expansion then call \code{\verb~|infer_type~} on it). That type goes through the DECLARED domain of an uncontracted beta-redex and the declared type of a let variable. The machine's \code{\verb~|VTYPE~} works on the VALUE, where the redex is contracted (\code{\verb~|Values.mkSuspAt~} also returns a known VAL in place of the suspension, and \code{\verb~|Eval.proj~} evaluates the struct), and gives the argument's own type, which is only convertible. The F6 rule above (decline of the K rule after the application of an inexact let variable) covers one shape only and is not robust in a warm session (a memoised evaluation does not pass \code{\verb~|Eval.apply~} again).}
 

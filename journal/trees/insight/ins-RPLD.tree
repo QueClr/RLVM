@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/profiles/P7.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/profiles/P7.md}, section 5; [the profiling session](ses-JRSD). A measurement-only option makes a one-worker process check one of eight shards of the units. Eight such processes, each pinned to one of the eight measurement cores, against one process with eight workers; native image, machine with \code{\verb~|warm,gated,expect~}, check-only passes over Mathlib.}
+\p{Source: [rep-P7](rep-P7), section 5; [the profiling session](ses-JRSD). A measurement-only option makes a one-worker process check one of eight shards of the units. Eight such processes, each pinned to one of the eight measurement cores, against one process with eight workers; native image, machine with \code{\verb~|warm,gated,expect~}, check-only passes over Mathlib.}
 \table{
 \tr{\th{}\th{Wall clock of the pass}\th{CPU}}
 \tr{\td{8 one-worker processes at once, per shard}\td{23.7 to 31.2 s, mean 26.8 s}\td{sum 213.0 s}}

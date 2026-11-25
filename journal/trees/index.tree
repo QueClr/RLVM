@@ -37,6 +37,7 @@
 \li{[Insights](insights): measured findings, with their numbers and conditions, and hypotheses not yet measured.}
 \li{[Reports](reports): the full record of each measurement campaign, review and spike.}
 \li{[Studies](studies): readings of outside sources - the arena, the official kernel, other checkers, techniques.}
+\li{[Where the documents went](moved-documents): the table from the path of a former document to its tree.}
 \li{[Open problems](open-problems): what is not settled, what is known, and what would close it.}
 \li{[Examples](examples): inputs that show a rule of the kernel or a wrong verdict.}
 \li{[Changelog](changelog): dated entries, by month and [by area](release-unreleased).}

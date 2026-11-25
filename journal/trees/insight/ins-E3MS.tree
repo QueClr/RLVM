@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/review/reference-caches.md}
 \import{base-macros}
 
-\p{Source: the audit of the caches of the reference engine against the official kernel, \src{docs/design/review/reference-caches.md}, section 3, finding R2-F2; [the exactness session](ses-874D).}
+\p{Source: the audit of the caches of the reference engine against the official kernel, [rep-reference-caches](rep-reference-caches), section 3, finding R2-F2; [the exactness session](ses-874D).}
 \ul{
 \li{The official type checker uses pointer equality on terms in two places of \code{\verb~|is_def_eq_core~}. The first repeats a quick test on structurally the same terms and changes nothing. The second runs the whole comparison a second time when the second reduction returned another object, and that second pass writes cache entries that change later cheap calls.}
 \li{The reduction returns another object in exactly one situation: a stuck projection whose cache entry was written by a full reduction of another occurrence.}

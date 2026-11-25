@@ -35,6 +35,6 @@
 \li{The condition of the note remains: should the restriction be shown to cost warm wall clock, it belongs to the strict mode. The switch for that exists.}
 }
 
-\p{Related: [the exactness contract](design-exactness-contract), [staging switches](design-switches), [the machine as default engine](dec-T79V). Detail: \src{docs/design/review/official-divergence.md} section 1, \src{rlvm-machine/NOTES-M5.md} (sections on E1-F1 to E1-F7 and on \code{convexpect}), \src{docs/design/OWNER-NOTES.md} note 13. Source: [the exactness session](ses-874D).}
+\p{Related: [the exactness contract](design-exactness-contract), [staging switches](design-switches), [the machine as default engine](dec-T79V). Detail: [rep-official-divergence](rep-official-divergence) section 1, [rep-machine-M5](rep-machine-M5) (sections on E1-F1 to E1-F7 and on \code{convexpect}), [owner-notes](owner-notes) note 13. Source: [the exactness session](ses-874D).}
 
 \p{Findings, examples and open problems: [a let whose declared type differs from the type of its value](ex-GZ3D), [typing values against typing unreduced terms](ins-AAXM).}

@@ -9,7 +9,7 @@
 \meta{origin}{docs/research/04-leader-nano-lean.md}
 \import{base-macros}
 
-\p{Source: \src{docs/research/04-leader-nano-lean.md} and \src{docs/research/05-leader-gruszka-pestka.md}; [the research session](ses-XOS5). Read from the sources and the notes of the two projects; their figures are their own.}
+\p{Source: [study-nano-lean](study-nano-lean) and [study-gruszka-pestka](study-gruszka-pestka); [the research session](ses-XOS5). Read from the sources and the notes of the two projects; their figures are their own.}
 \ul{
 \li{nano-lean keeps its caches inside a session per worker, dropped only when the session arena passes 64 MiB or a declaration fails, and reorders declarations at load time so that each one follows soon after its dependencies. Closed sub-terms of the export are evaluated and checked once per session, not once per use.}
 \li{gruszka frees memory by truncating arrays at the end of a session of 8 MiB. Its sessions only move forward in file order, free variables are named by their type so that binders opened again hit the caches, and each worker takes a contiguous part of the file.}

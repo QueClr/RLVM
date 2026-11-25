@@ -73,6 +73,6 @@
 
 \p{\strong{Open.} A heavy unit that starts late is still the end of the run on mid-size corpora: on Std one unit takes 0.7 s of a 1.5 s run with 8 workers. Starting large units first needs a scheduler rule that keeps the progress property, that the lowest undecided unit is always reached; the expected gain is 2.0 to 1.7 s on Std and nothing on Mathlib.}
 
-\p{Documents: \src{rlvm-driver/README.md} (as built, deviations, every measurement), \src{docs/design/ARCHITECTURE.md} section 6 (the design), \src{docs/research/profiles/P7.md} (the parallel-scaling profile), \src{rlvm-main/README.md} (load defaults, worker count). Source: [the pipeline session](ses-CVTE) and [the profiles](ses-JRSD).}
+\p{Documents: \src{rlvm-driver/README.md} (as built, deviations, every measurement), [design-architecture-document](design-architecture-document) section 6 (the design), [rep-P7](rep-P7) (the parallel-scaling profile), \src{rlvm-main/README.md} (load defaults, worker count). Source: [the pipeline session](ses-CVTE) and [the profiles](ses-JRSD).}
 
 \p{Findings, examples and open problems: [the scaling of the check phase at 8 workers](ins-MQ13), [the cost of a publication](ins-E1DU), [one heavy unit decides the end of a mid-size run](ins-OEXH), [the hardware ceiling of the host](ins-RPLD).}

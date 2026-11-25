@@ -9,7 +9,7 @@
 \meta{origin}{docs/design/review/soundness-default-set.md}
 \import{base-macros}
 
-\p{One comparison whose official answer depends on what the kernel reduced earlier in the same declaration. Source: the adversarial review of the default switch set, \src{docs/design/review/soundness-default-set.md}, section 2; [the exactness session](ses-874D). Official verdicts from Lean v4.36.0.}
+\p{One comparison whose official answer depends on what the kernel reduced earlier in the same declaration. Source: the adversarial review of the default switch set, [rep-soundness-default-set](rep-soundness-default-set), section 2; [the exactness session](ses-874D). Official verdicts from Lean v4.36.0.}
 \pre{\verb~|
 -- A, intro, h as in the triple
 structure B where n : Nat

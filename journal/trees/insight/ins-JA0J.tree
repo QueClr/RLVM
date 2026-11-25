@@ -9,7 +9,7 @@
 \meta{origin}{rlvm-truffle/NOTES-T3.md}
 \import{base-macros}
 
-\p{Source: \src{rlvm-truffle/NOTES-T3.md}, sections 5 and 7; [the profiling session](ses-JRSD). Flight-recorder samples of warm passes on the JVM with one worker, on an open host, so shares only; the machine with compiled case trees and bodies as code blocks that a stepper runs.}
+\p{Source: [rep-truffle-T3](rep-truffle-T3), sections 5 and 7; [the profiling session](ses-JRSD). Flight-recorder samples of warm passes on the JVM with one worker, on an open host, so shares only; the machine with compiled case trees and bodies as code blocks that a stepper runs.}
 \table{
 \tr{\th{Share of a warm pass}\th{reachability}\th{Cedar slice}}
 \tr{\td{inside code blocks}\td{83 percent}\td{14 percent}}

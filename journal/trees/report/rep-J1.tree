@@ -334,7 +334,7 @@
 \tr{\td{\code{\verb~|+UseTransparentHugePages~}}\td{the only flag with a consistent steady-state gain; free where the host's setting is \code{\verb~|madvise~} (this host) or \code{\verb~|always~}; where it is \code{\verb~|never~} the VM should print one warning and run as today (not tested: the host's setting cannot be changed from here)}\td{section 2.2: Mathlib -6 \% warm wall and -9 \% first pass (A B A B); reachability -2 to -4 \% wall, -7 \% CPU; cedar 0 to -4 \%}}
 \tr{\td{\code{\verb~|-Xlog:disable -Xlog:all=warning:stderr~}}\td{the VM's own warnings (huge pages unavailable, a refused cache) go to standard output by default}\td{section 3.1}}
 \tr{\td{machine: \code{\verb~|-Xmx7g -Xmn1g~}, no \code{\verb~|-Xms~} (then \code{\verb~|-Xmx6g -Xmn1g~}, see section 4.3)}\td{same warm wall as 13 GB; 5.7-6.7 GB resident on Mathlib instead of 8.0-8.7 GB; 6 GB gives 5.8 GB once finding J1-F1 is fixed; below Mathlib the heap just stays small}\td{section 4}}
-\tr{\td{kept: SerialGC, C2 (\code{\verb~|-UseJVMCICompiler~}), tiers on}\td{\src{docs/research/profiles/GC.md}; Graal and untiered C2 are within the noise with 8 workers, untiered costs 0.15 s on a tiny input and gains nothing over 8 compiler threads on the first pass}\td{sections 2.2, 3.2, 3.3}}
+\tr{\td{kept: SerialGC, C2 (\code{\verb~|-UseJVMCICompiler~}), tiers on}\td{[rep-GC](rep-GC); Graal and untiered C2 are within the noise with 8 workers, untiered costs 0.15 s on a tiny input and gains nothing over 8 compiler threads on the first pass}\td{sections 2.2, 3.2, 3.3}}
 \tr{\td{not added: the AOT cache}\td{0.4-1.1 s off the cold wall, 5-9 \% ON the warm wall}\td{section 3.3}}
 }
 
