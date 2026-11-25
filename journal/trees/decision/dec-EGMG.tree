@@ -1,0 +1,16 @@
+\title{What a run of the executable does without options: the settings of a single cold run}
+\taxon{Decision}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\tag{gc}
+\tag{benchmark}
+\meta{status}{draft}
+\meta{created}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} draft. The measurements are being taken; the table and the choice follow.}
+
+\p{\strong{Context.} The release is [one executable](design-packaging) whose plain run must be the fastest configuration. What one invocation of an executable is, is a single run of a fresh process, with the load pipelined and the automatic worker count; the settings are therefore chosen on cold single runs of the native image over the eight corpora, inside quiet-core windows, and not on the warm passes of [the metric](dec-7QMU).}

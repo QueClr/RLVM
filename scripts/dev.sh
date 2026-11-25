@@ -47,10 +47,13 @@
 #                             (or --accept-oracle-licence to download the pinned one)
 #   profiles [--train FILE]... [options]
 #                             regenerate profiles/ for release-oracle: scripts/build.sh --oracle-pgo
-#                             --train-profiles (instrumented image, one training run per input in the
-#                             default configuration, profiles/*.iprof.gz + profiles/PROFILE-INFO.txt).
-#                             Default training inputs: work/exports/init.ndjson (see the journal,
-#                             design-packaging: what the measurements of the profile found best)
+#                             --train-profiles (instrumented image, training runs, profiles/*.iprof.gz
+#                             + profiles/PROFILE-INFO.txt). Each training input is checked once in the
+#                             default configuration and once with the settings of PROFILE_TRAIN_ALSO
+#                             (below: the engine that the default configuration does not check with),
+#                             so that the profile covers both engines. Default training input:
+#                             work/exports/init.ndjson (the journal, design-packaging: what the
+#                             measurements of the profile found best)
 #   info                      print work/dist/BUILD-INFO.txt and the toolchain versions
 #
 # Test kit (rlvm-testkit/bin/testkit; see rlvm-testkit/README.md):
@@ -106,7 +109,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 die() { echo "dev.sh: $*" >&2; exit 2; }
-usage() { sed -n '2,104p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,107p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [ "$#" -gt 0 ] || { usage; exit 2; }
 cmd="$1"; shift
@@ -143,6 +146,12 @@ ni_slot() {
 # The default training inputs of `profiles` (paths below the repository root; the exports are not part
 # of the repository: bench/README.md says how to fetch the arena's corpora).
 PROFILE_TRAINING="work/exports/init.ndjson"
+# The second training run of every input (scripts/build.sh --train-also): code that no training run
+# executes is treated as cold by a profile-guided build, so the profile must see BOTH engines.
+# While the reference engine is the default engine: the machine with the switch set its integrator is
+# about to publish as its default. ONCE THE MACHINE IS THE DEFAULT ENGINE, change this to
+# '-X engine=reference' (the default run then covers the machine with its published set).
+PROFILE_TRAIN_ALSO="-X engine=machine -X machine.switches=default,eager,skipargs,congruence"
 
 # run / suite / measure default to the native image; when the distribution has only the JVM
 # launcher (scripts/dev.sh dist) and the caller named no launcher, use that one.
@@ -192,10 +201,12 @@ case "$cmd" in
     exec "${slot[@]}" "$ROOT/scripts/package.sh" --out "$ROOT/work/release" --build "$@"
     ;;
   release-oracle)
+    echo "dev.sh: release-oracle: an OPTIONAL build with ORACLE GraalVM (GraalVM Free Terms and Conditions, GFTC) and the shipped profiles; the default build uses GraalVM Community Edition only." >&2
     ni_slot
     exec "${slot[@]}" "$ROOT/scripts/build.sh" --oracle-pgo --dist "$ROOT/work/dist-oracle-pgo" "$@"
     ;;
   profiles)
+    echo "dev.sh: profiles: regenerates profiles/ with ORACLE GraalVM (GraalVM Free Terms and Conditions, GFTC); the default build uses GraalVM Community Edition only." >&2
     # The training inputs: every --train FILE of the command line, else the default set.
     has_train=0
     for a in "$@"; do [ "$a" != --train ] || has_train=1; done
@@ -206,8 +217,12 @@ case "$cmd" in
         train+=(--train "$ROOT/$f")
       done
     fi
+    has_also=0
+    for a in "$@"; do [ "$a" != --train-also ] || has_also=1; done
+    also=()
+    [ "$has_also" = 1 ] || [ -z "$PROFILE_TRAIN_ALSO" ] || also=(--train-also "$PROFILE_TRAIN_ALSO")
     ni_slot
-    exec "${slot[@]}" "$ROOT/scripts/build.sh" --oracle-pgo --train-profiles --dist "$ROOT/work/dist-oracle-pgo" "${train[@]}" "$@"
+    exec "${slot[@]}" "$ROOT/scripts/build.sh" --oracle-pgo --train-profiles --dist "$ROOT/work/dist-oracle-pgo" "${train[@]}" "${also[@]}" "$@"
     ;;
   dist-versions)
     cur="$(readlink "$ROOT/work/dist" 2>/dev/null || true)"

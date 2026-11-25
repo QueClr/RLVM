@@ -68,7 +68,8 @@
 #   REGENERATING THE PROFILES (scripts/dev.sh profiles = scripts/build.sh --oracle-pgo --train-profiles
 #   --train FILE...): an instrumented image is built (native-image --pgo-instrument), it runs
 #   `--truffle-probe` (so that the runtime compiler itself is profiled) and then checks every training
-#   export in the DEFAULT configuration (plus --train-arg ARG...), with RLVM_EXIT=exit because the
+#   export in the DEFAULT configuration (plus --train-arg ARG...; with --train-also 'ARGS' a second time
+#   with those arguments, e.g. the engine that is not the default one), with RLVM_EXIT=exit because the
 #   profile is written by a shutdown hook that the launcher's default Runtime.halt would skip; the
 #   profiles are compressed into profiles/ with a new PROFILE-INFO.txt, and the executable is then
 #   built from them like any --oracle-pgo build. The profile is only as good as the training runs.
@@ -99,6 +100,9 @@ What to build (default: THE RELEASE, one executable bin/rlvm built with GraalVM 
   --train FILE          training export of --train-profiles (repeatable)
   --train-arg ARG       extra argument of every training run (repeatable; default: none, i.e. the
                         default configuration)
+  --train-also 'ARGS'   a SECOND training run of every export with these extra arguments (one string,
+                        split on blanks), e.g. --train-also '-X engine=reference', so that the profile
+                        also covers an engine or a setting that the default configuration does not run
   --modules A,B         build only these modules (and what they depend on); default: all modules
                         of the parent pom
   --published           compile only the --modules (default: rlvm-main) and take every other RLVM
@@ -153,6 +157,7 @@ opt=3
 march=""
 versioned=auto
 train_args=()
+train_also=""
 gc=serial
 ni_extra=()
 train=()
@@ -183,6 +188,7 @@ while [ "$#" -gt 0 ]; do
     --ni-arg) ni_extra+=("${2:?--ni-arg needs an argument}"); shift 2 ;;
     --train) train+=("$(realpath -e "${2:?--train needs a file}")"); shift 2 ;;
     --train-arg) train_args+=("${2:?--train-arg needs an argument}"); shift 2 ;;
+    --train-also) train_also="${2:?--train-also needs the arguments of the second run}"; shift 2 ;;
     --dist) dist_arg="${2:?--dist needs a directory}"; shift 2 ;;
     --versioned) versioned=1; shift ;;
     --in-place) versioned=0; shift ;;
@@ -570,6 +576,7 @@ else layout="release: one executable, bin/rlvm"; fi
   echo "graalvm:          $img_label $img_version ($(sed -n 's/^JAVA_RUNTIME_VERSION="\(.*\)"$/\1/p' "$img_home/release"))$([ "$flavor" = oracle-pgo ] && echo ' - GFTC licence; an explicitly requested build (--oracle-pgo), never the default')"
   echo "maven build:      ${maven_secs}s"
   echo "jars:             $jars_bytes bytes in $(ls "$LIB" | wc -l) files$([ "$dev" = 1 ] && echo ' (lib/)' || echo ' (compiled into the executable; not part of this layout)')"
+  echo "jars sha256:      $(cat "$LIB"/rlvm-*.jar | sha256sum | cut -c1-12) (over the RLVM jars in name order: the id of the build; bench/warm.py reads it)"
 } > "$INFO"
 record "jars" "maven package ($modules)" "$maven_secs" "" "" "$jars_bytes"
 
@@ -752,16 +759,25 @@ if [ "$flavor" = oracle-pgo ]; then
     training=("--truffle-probe -> probe.iprof.gz")
     RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/probe.iprof" --truffle-probe > "$prof/probe.log" 2>&1 \
       || { cat "$prof/probe.log" >&2; die "[oracle] training run --truffle-probe failed"; }
-    for f in "${train[@]}"; do
-      n="train-$(basename "$f" .ndjson | tr -c 'A-Za-z0-9._\n-' '_')"; rc=0
-      [ ! -e "$prof/$n.iprof" ] || die "[oracle] two training exports are called $(basename "$f")"
+    # train_one <export> <file name of the profile> <arguments...>
+    train_one() {
+      local f="$1" n="$2" rc=0 t1; shift 2
+      [ ! -e "$prof/$n.iprof" ] || die "[oracle] two training runs are called $n"
       t1="$(now)"
-      RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/$n.iprof" --stats "$f" "${train_args[@]}" > "$prof/$n.log" 2>&1 || rc=$?
+      RLVM_EXIT=exit "$BUILD/oracle/rlvm-instr" "-XX:ProfilesDumpFile=$prof/$n.iprof" --stats "$f" "$@" > "$prof/$n.log" 2>&1 || rc=$?
       # A training run may accept, reject or decline; anything else means the profile is not to be trusted.
-      case "$rc" in 0|1|2) ;; *) cat "$prof/$n.log" >&2; die "[oracle] training run on $f ended with status $rc" ;; esac
+      case "$rc" in 0|1|2) ;; *) cat "$prof/$n.log" >&2; die "[oracle] training run on $f ($*) ended with status $rc" ;; esac
       [ -s "$prof/$n.iprof" ] || die "[oracle] the training run on $f wrote no profile"
-      training+=("$(basename "$f") ($(stat -Lc %s "$f") bytes, sha256 $(sha256sum "$f" | cut -c1-16)), exit $rc, $(since "$t1") s instrumented -> $n.iprof.gz")
-      log "[oracle] trained on $f (exit $rc)"
+      training+=("$(basename "$f") ($(stat -Lc %s "$f") bytes, sha256 $(sha256sum "$f" | cut -c1-16)), arguments: ${*:-none (the default configuration)}; exit $rc, $(since "$t1") s instrumented -> $n.iprof.gz")
+      log "[oracle] trained on $f ${*:+with $* }(exit $rc)"
+    }
+    for f in "${train[@]}"; do
+      n="train-$(basename "$f" .ndjson | tr -c 'A-Za-z0-9._\n-' '_')"
+      train_one "$f" "$n" "${train_args[@]}"
+      if [ -n "$train_also" ]; then
+        # shellcheck disable=SC2086
+        train_one "$f" "$n-also" "${train_args[@]}" $train_also
+      fi
     done
     train_secs="$(since "$t0")"
     log "[oracle] training took ${train_secs}s: $(ls "$prof"/*.iprof | wc -l) profiles, $(du -cb "$prof"/*.iprof | tail -n 1 | cut -f1) bytes"
@@ -778,7 +794,7 @@ if [ "$flavor" = oracle-pgo ]; then
       echo "id:        $profile_id"
       echo "made:      $stamp on $(uname -sm)"
       echo "compiler:  Oracle GraalVM $img_version ($(sed -n 's/^JAVA_RUNTIME_VERSION="\(.*\)"$/\1/p' "$ORACLE_HOME_DIR/release")), native-image --pgo-instrument, -O$opt, $gc collector"
-      echo "settings:  the default configuration of the instrumented executable (default engine: ${default_engine:-unknown})${train_args[*]:+; training arguments: ${train_args[*]}}"
+      echo "settings:  the default configuration of the instrumented executable (default engine: ${default_engine:-unknown})${train_args[*]:+; training arguments of every run: ${train_args[*]}}${train_also:+; every export a second time with: $train_also}"
       echo "sources:   the RLVM jars of the build, sha256 prefixes:"
       ( cd "$LIB" && for j in rlvm-*.jar; do printf '             %-18s %s\n' "${j%-[0-9]*}" "$(sha256sum "$j" | cut -c1-12)"; done )
       echo "training:  one run of the instrumented executable each, RLVM_EXIT=exit:"

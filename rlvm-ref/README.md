@@ -95,9 +95,11 @@ Details and tables: `docs/design/review/reference-caches.md`, sections 7 and 8.
 - `scripts/gate.sh --corpus all`, practical (default): the 230 published tests 230 correct, 0 declined; mutants
   17,775: SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683 (the published record); self-test passed.
   With `-X policy=strict`: see the review document.
-- 1,239 review exports with official verdicts (R2, S3, E1, S2, the first review): practical: 7 opposite verdicts,
-  all documented (6 kind T accepts: nondep x2, object identity x2, admission, metadata; 1 reject of a file with
-  metadata around `eagerReduce`); strict: 0 opposite verdicts, 14 declines.
+- 1,239 review exports with official verdicts (R2, S3, E1, S2, the first review): practical: 6 opposite verdicts,
+  all kind T accepts (nondep x2, object identity x2, admission, metadata), and none of the kind "official
+  accept, RLVM reject": the one there was (`s3-mdata-eager-hidden-ok`, metadata around `eagerReduce`) is declined
+  by the loader since `rlvm-load` 58b0056c0417 (at kernel level, with this module's test loader, it is still
+  rejected: row `T-reject` of the golden manifest); strict: 0 opposite verdicts, 14 declines.
 - The corpora are accepted in both modes; in strict mode no declaration is declined (the identity hazards of
   Std and cslib are decided both ways).
 - CPU, one worker, quiet window, five alternating runs against the published jar ca1f9bd918bb: Init 14.37 ->

@@ -60,6 +60,7 @@
 \scope{
 \put\transclude/expanded{false}
 \transclude{design-launchers}
+\transclude{design-packaging}
 \transclude{design-measurement-method}
 }
 }

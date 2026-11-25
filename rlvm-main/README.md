@@ -123,7 +123,10 @@ own automatic rule (CPUs - 2, at most 6) is no longer consulted. The arena run l
 `--stats` prints one line (`outcome, engine, reference, policy, workers, load, scan-threads, io,
 [engine-defaults,] wall_ms`; `(auto)` behind a value = decided by the defaults, not given) on stderr.
 `rlvm --help` ends with this checker's settings (`RlvmChecker.usage()` through `rlvm.cli.Checker.usage()`),
-`rlvm --version` names the default engine.
+`rlvm --version` names the default engine and ends with `default: ...`, what a run without options
+does (`RlvmChecker.defaults()` through `rlvm.cli.Checker.defaults()`: the engine by priority, the
+policy, the automatic worker count and the load rule, from the constants that decide them; an engine
+adds its own defaults through `EngineProvider.defaultsNote()`).
 
 ## Policy (`-X policy=practical|strict`, owner note 13)
 
@@ -226,9 +229,10 @@ Measurements and gates: `docs/PLATFORM.md`, sections 0.5 to 0.7.
 | Command | What it does |
 |---|---|
 | `scripts/dev.sh dist` | `build.sh --published --jvm-only`: `rlvm-main` compiled from the tree, every other RLVM module as its owner last published it in `.toolchain/m2`; `work/dist/bin/rlvm-jvm`; a few seconds. Since wave 7 the shared `work/dist` is **versioned**: every build is installed as `work/dist.d/<UTC time>-<jars sha256 prefix>-<jvm\|native>` and `work/dist` is a symbolic link switched to it by one `rename(2)`; `gate.sh`, `slice.sh`, `bench/track` and the platform matrix resolve the link once at their start, so a rebuild can no longer change the build under a running guard. Old versions are deleted when they are neither among the newest 4 nor younger than 90 minutes (`RLVM_DIST_KEEP`, `RLVM_DIST_MIN_AGE_MIN`). Copy it with `cp -aL` |
-| `scripts/dev.sh dist-native` | the same plus the CE native image `work/dist/bin/rlvm` at **`-O3`** (wave 7: the default of `build.sh --opt`, the arena's flags; 2.5 min wall, about 900 s CPU on this host; `--opt 2` halves the build and costs 10-18 % CPU at run time, `work/status/machine-integration.md`) |
+| `scripts/dev.sh dist-native` | `build.sh --published --dev`: the same plus the executable, the CE native image `work/dist/bin/rlvm` at **`-O3`** (wave 7: the default of `build.sh --opt`, the arena's flags; 2.5 min wall, about 900 s CPU on this host; `--opt 2` halves the build and costs 10-18 % CPU at run time, `work/status/machine-integration.md`) |
 | `scripts/dev.sh dist-versions` | the versions in `work/dist.d/` and the one `work/dist` names |
-| `scripts/dev.sh dist-tree` | plain `build.sh`: everything from the working tree (what `scripts/arena/build.sh` does). GraalVM CE only: the Oracle GraalVM PGO image is built only with `--pgo`, for labelled measurements (OWNER-NOTES item 11); `--train-arg` passes arguments to its training runs |
+| `scripts/dev.sh dist-tree` | `build.sh --dev`: a development distribution with everything compiled from the working tree. Plain `scripts/build.sh` (what `scripts/arena/build.sh` runs) builds THE RELEASE layout instead: one executable `bin/rlvm`, no jars, no JVM launcher (journal: `design-packaging`) |
+| `scripts/dev.sh release`, `scripts/package.sh` | the release archive `rlvm-<version>-linux-<arch>.tar.gz` with exactly `rlvm`, `LICENSE`, `README.md`; `scripts/dev.sh release-oracle` / `profiles`: the OPTIONAL build with Oracle GraalVM (GFTC licence) and the profiles shipped in `profiles/`, and their regeneration. GraalVM CE is the only compiler of every default build |
 | `scripts/dev.sh suite [--jvm]` | `bench/rlvm/suite.sh`: `bench/run-suite.py` over the 230 published tests with the distribution (uses the JVM launcher automatically when no native image is built) |
 | `scripts/dev.sh slice [--all] [--native\|--jvm] [--probe]` | `scripts/slice.sh`: tutorial tests (or all 230), reference engine, one worker, batch load; writes `work/status/slice.md` / `slice-all.md` (summary, wrong verdicts, failures grouped by message with a guess at the owning module, every test); `--probe` runs the driverless probe instead (`slice-probe*.md`) |
 | `scripts/dev.sh diff ARGS`, `oracle`, `judge`, `mutate`, `corpus`, `track` | pass-throughs to `rlvm-testkit/bin/testkit` and `bench/track/track.py`; `diff` is the test kit's differential campaign; `diff-launcher EXPORT` runs the JVM launcher once with the test kit's `diff` engine provider on `RLVM_EXTRA_CP` |

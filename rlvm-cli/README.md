@@ -6,8 +6,10 @@ definition), `bench/rlvm/` (run / suite / measure). Each script documents itself
 with `--help`.
 
 ```
-scripts/dev.sh test rlvm-cli          # 46 unit tests, 8 s
-scripts/dev.sh dist                   # work/dist/: bin/rlvm (native), bin/rlvm-jvm, bin/rlvm-pgo
+scripts/dev.sh test rlvm-cli          # 49 unit tests, 8 s
+scripts/build.sh                      # THE RELEASE: one executable, work/dist/bin/rlvm (GraalVM CE native image)
+scripts/dev.sh dist-native            # a development distribution: bin/rlvm plus lib/*.jar and bin/rlvm-jvm
+scripts/package.sh                    # rlvm-<version>-linux-<arch>.tar.gz: rlvm, LICENSE, README.md
 scripts/dev.sh selftest               # exit-status protocol + Truffle probe of every built launcher
 scripts/dev.sh run work/arena-site/tests/good/init-prelude.ndjson
 scripts/dev.sh suite [--docker]       # the 230 published arena tests
@@ -77,6 +79,7 @@ public interface Checker {                       // rlvm.cli.Checker
     String name();                               // "--checker NAME", shown by --version
     default String description() { ... }
     default String usage() { return ""; }        // lines for --help: the checker's own -X settings
+    default String defaults() { return ""; }     // one line for --version: what a run without options does
     default int priority() { return 0; }         // highest wins; the placeholder is Integer.MIN_VALUE
     Verdict check(Path export, Options options) throws Exception;   // ACCEPT | REJECT | DECLINE
 }
@@ -126,23 +129,31 @@ build otherwise. Nothing of Truffle is touched on a normal run.
 
 The Truffle version must equal the `GRAALVM_VERSION` of the GraalVM that builds the image:
 25.5.5.0.3 for the CE toolchain (parent pom property `graalvm.version`), 25.0.4 for Oracle GraalVM;
-`scripts/build.sh` compiles the modules a second time with `-Dgraalvm.version=25.0.4` for the PGO
-variant.
+`scripts/build.sh --oracle-pgo` compiles the modules with `-Dgraalvm.version=25.0.4` for that
+optional build.
 
-## Distribution (`scripts/build.sh`)
+## The executable and the distributions (`scripts/build.sh`)
 
-`work/dist/bin/rlvm` (native, GraalVM CE), `bin/rlvm-jvm` (sh launcher over `lib/*.jar`),
-`bin/rlvm-pgo` (native, Oracle GraalVM + PGO, when `.toolchain/oracle-graalvm-25` exists),
-`BUILD-INFO.txt`. The script builds from a snapshot of the sources in `work/build/`, so it never
-writes into a module's `target/` and can run while others work; every artifact is verified
-(protocol self-test, real heap exhaustion under `-Xmx128m`, Truffle probe) before the distribution
-directory is replaced as a whole. Build times and sizes: `work/build/build-times.tsv`.
+The release is ONE executable (journal: `design-packaging`). `scripts/build.sh` builds it as
+`work/dist/bin/rlvm` (native image, GraalVM CE) with `BUILD-INFO.txt` beside it and nothing else;
+`--dev` adds `lib/*.jar` and `bin/rlvm-jvm` (a sh launcher that runs the jars on the build's JDK: a
+development tool for the warm benchmarks, the gates and the test kit, never packaged); `--jvm-only`
+is the development distribution without the executable. `--oracle-pgo` builds the same executable
+with Oracle GraalVM (GFTC licence) and the profiles shipped in `profiles/`: an option, never a
+default. The script builds from a snapshot of the sources in `work/build/`, so it never writes into
+a module's `target/` and can run while others work; every artifact is verified (protocol self-test,
+real heap exhaustion under `-Xmx128m`, Truffle probe) before the distribution directory is replaced
+as a whole. Build times and sizes: `work/build/build-times.tsv`.
 
-JVM launcher flags: `-XX:+UseSerialGC -Xms8g -Xmx8g -Xmn3g -XX:-UseJVMCICompiler
--XX:CICompilerCount=2 -XX:+ExitOnOutOfMemoryError` (sources: doc 11 proposal A, platform spike
-results; reasons in the comment above `JVM_FLAGS` in `scripts/build.sh`). `rlvm-jvm` accepts
-`-Xmx/-Xms/-Xmn/-Xss`, `-XX:...`, `-D...` and `-J<flag>` like the native image does;
-`RLVM_JAVA_OPTS` replaces the defaults.
+`rlvm --version` prints, after the version: `build:` - how the executable was built (compiler,
+optimisation level, collector, the heap settings baked in; the text is the system property
+`rlvm.build` of the image BUILD, kept as a constant by `BuildInfo`, which is initialised at image
+build time; on a JVM it says so) - then the runtime, the checkers and `default:` - what a run
+without options does, in the words of the checker that would run (`Checker.defaults()`).
+
+The JVM launcher's flags and their reasons are in the comment above `JVM_FLAGS` in
+`scripts/build.sh`. `rlvm-jvm` accepts `-Xmx/-Xms/-Xmn/-Xss`, `-XX:...`, `-D...` and `-J<flag>`
+like the native image does; `RLVM_JAVA_OPTS` replaces the defaults.
 
 PGO training is step c of the header of `scripts/build.sh`: the instrumented image runs
 `--truffle-probe` and every `--train FILE` export with `RLVM_EXIT=exit`; one `.iprof` per run.

@@ -1,0 +1,95 @@
+\title{Packaging: one executable, a development distribution, an optional profile-guided build}
+\taxon{Design}
+\date{2026-11-24}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{arena}
+\tag{performance}
+\meta{status}{implemented}
+\meta{created}{2026-11-24}
+\import{base-macros}
+
+\p{\strong{Status:} implemented. \src{scripts/build.sh} builds the release layout by default, \src{scripts/package.sh} makes the archive, \src{.github/workflows/release.yml} is written and has never run on a hosted runner.}
+
+\p{\strong{The rule.} The maintainer asked for a single entry executable with the fastest default, and for the build with Oracle GraalVM and a shipped profile to be optional; see [standing policies](standing-policies). Before that a distribution had two entry points, a native image and a shell launcher that runs the jars on a JVM, see [the launchers](design-launchers) and [which launcher was for what](dec-WX9Z), and a user had to choose a launcher and, for the fast engine, an option. Now the release is one file, \code{rlvm}; a run without options is the fastest configuration there is; and nothing in the README or the help text names a second launcher.}
+
+\subtree[design-packaging-executable]{
+\title{The executable}
+
+\p{\code{rlvm} is the native image that GraalVM Community Edition 25 builds from the jars of all modules at \code{\verb~|-O3~} with the serial collector, with Truffle runtime compilation linked in and the inline lists of the machine. It needs no JDK, no jar and no file of the repository; it links the C library and zlib of the system dynamically. \code{\verb~|rlvm FILE~} checks, \code{\verb~|rlvm --help~} lists the options, and \code{\verb~|rlvm --version~} says what the executable is and what a plain run does:}
+
+\pre{\verb~|
+rlvm 0.1.0-SNAPSHOT
+build: GraalVM CE native image (GraalVM CE 25.5.5.0.3, -O3, serial collector, heap at most 13g, ...)
+runtime: native (Substrate VM, GraalVM CE 25.5.5.0.3+1.1, Java 25.0.5.0.3+1-jvmci-25.5-b26, aarch64)
+truffle: 25.5.5.0.3 (compiled against)
+checker: rlvm - RLVM kernel: ...; engines: machine, reference* (* = reference); default engine: ... (default)
+default: engine ..., policy practical; one worker per CPU, at most 8; a file of 8 MiB or more is checked while it is read (pipelined), with 2 scanner threads from 256 MiB
+~}
+
+\ul{
+\li{\code{\verb~|build:~} is a constant of the image. The build passes the text as the system property \code{\verb~|rlvm.build~} of the image build, and the launcher's version class, which is initialised at image build time, keeps it. So the line cannot disagree with the flags the image was built with. On a JVM it reads "jars on a JVM (development launcher ...)".}
+\li{\code{\verb~|default:~} is made by the checker from the constants that decide the configuration, so it cannot go stale either: the engine is the one the engines' priorities select, the worker rule and the load rule are the wiring's. An engine can add what its own defaults are (its switch set) through \code{\verb~|EngineProvider.defaultsNote()~} of \code{rlvm-api}.}
+\li{The executable takes \code{\verb~|-Xmx~}, \code{\verb~|-Xms~}, \code{\verb~|-Xmn~} and \code{\verb~|-XX:~} options itself, before the launcher sees the command line; \code{\verb~|-X KEY=VALUE~} with a blank is a setting of the checker.}
+}
+
+\p{Where each part of the default configuration is decided, so that a run without options is the fastest one and one place changes it:}
+
+\table{
+\tr{\th{Part}\th{Decided by}\th{Changed in}}
+\tr{\td{Engine}\td{the engine provider with the highest priority of at least 100, else the reference engine}\td{the engine's own provider (the integrator of the machine publishes it)}}
+\tr{\td{Switch set of the machine}\td{the machine's default set}\td{\code{rlvm-machine}}}
+\tr{\td{Policy}\td{practical; \code{\verb~|-X policy=strict~} is the reference engine alone}\td{\code{rlvm-main}}}
+\tr{\td{Workers}\td{one per CPU, at most 8}\td{\code{\verb~|RlvmChecker.autoWorkers~} in \code{rlvm-main}}}
+\tr{\td{Load}\td{pipelined with checking for two or more workers and a file of 8 MiB or more; 2 scanner threads on mapped input from 256 MiB}\td{\code{\verb~|MainOptions.resolveLoadDefaults~} in \code{rlvm-main}}}
+\tr{\td{Heap and collector}\td{run-time defaults baked into the image}\td{\code{\verb~|IMAGE_HEAP~} in \src{scripts/build.sh}}}
+}
+
+\p{The measured choice of these values for a single run of a fresh process is [a decision of its own](dec-EGMG).}
+}
+
+\subtree[design-packaging-layouts]{
+\title{Two layouts of a build}
+
+\table{
+\tr{\th{Layout}\th{Command}\th{Contents}\th{For}}
+\tr{\td{Release}\td{\code{\verb~|scripts/build.sh~}, \code{\verb~|scripts/arena/build.sh~}}\td{\code{\verb~|bin/rlvm~} and \code{\verb~|BUILD-INFO.txt~}}\td{the archive, the arena definition}}
+\tr{\td{Development}\td{\code{\verb~|scripts/build.sh --dev~}; \code{\verb~|--jvm-only~} without the executable; \code{\verb~|scripts/dev.sh dist~}, \code{\verb~|dist-native~}}\td{the same plus \code{\verb~|lib/*.jar~} and \code{\verb~|bin/rlvm-jvm~}}\td{the warm benchmarks, the gates, the test kit}}
+}
+
+\ul{
+\li{The JVM launcher stays a tool of the repository. Warm, HotSpot needs 0.74 to 0.81 times the image's wall clock, and the warm benchmarks of [the metric](dec-7QMU) are taken on it; the gates run thousands of small files through the jars; the test kit's differential engine needs a class path. It carries the path of the build's JDK, is written only into a development distribution and is never packaged.}
+\li{The distribution that the team shares between builds, gates and benchmarks stays a development distribution, so nothing changed for a gate or a benchmark that names it.}
+\li{\code{\verb~|scripts/gate.sh --native~} runs the 230 published tests, the mutant corpora and the hostile exports through the executable instead of the jars, so the binary that ships can be guarded as it is; it needs no jar. The differential self-test needs a class path and is skipped in a release layout.}
+}
+}
+
+\subtree[design-packaging-oracle]{
+\title{The optional build with Oracle GraalVM and a shipped profile}
+
+\p{\code{\verb~|scripts/build.sh --oracle-pgo~} builds the same single executable with Oracle GraalVM and profile-guided optimisation. It is an option and never a default: [no Oracle GraalVM in anything default](dec-6E82) holds for the default build, the arena build, the release workflow and CI, and the maintainer's later note relaxed it only for a build that is asked for explicitly.}
+
+\ul{
+\li{The first line of output of the option says that it uses Oracle GraalVM under the GraalVM Free Terms and Conditions and that the default build does not. \code{\verb~|rlvm --version~} of such a binary starts its build line with "Oracle GraalVM, profile-guided", and \src{scripts/package.sh} names its archive \code{\verb~|...-oracle-pgo~}.}
+\li{It uses the Oracle GraalVM in the toolchain directory when one is there. It downloads the pinned Oracle GraalVM 25.0.4, checked against the sha256 that Oracle publishes, only when \code{\verb~|--accept-oracle-licence~} is given as well (\code{\verb~|scripts/fetch-toolchain.sh --oracle --accept-gftc~}). The download path was written and not run.}
+\li{Its distribution is a directory of its own and can never be the shared one.}
+\li{\strong{The profiles are part of the repository}: \code{\verb~|profiles/*.iprof.gz~}, with \code{\verb~|profiles/PROFILE-INFO.txt~} that names the compiler, the jars, the settings and every training run. The optional build therefore needs no training run. A profile is JSON of 6 to 9 MB and compresses to about a seventh.}
+\li{\code{\verb~|scripts/dev.sh profiles~} makes them anew: an instrumented image, a run of the Truffle probe so that the runtime compiler is profiled, then every training input once in the default configuration and once with the engine that the default configuration does not check with. Code that no training run executes is treated as cold by a profile-guided build, so a profile that saw one engine would slow the other down.}
+}
+
+\p{What the profile buys is being measured by the report PG1; its figures are added here when it is finished.}
+}
+
+\subtree[design-packaging-archive]{
+\title{The archive and the release workflow}
+
+\ul{
+\li{\src{scripts/package.sh} makes \code{\verb~|rlvm-<version>-linux-<arch>.tar.gz~} with one directory and exactly three files: \code{rlvm}, \code{LICENSE} and \code{\verb~|README.md~}. Before it packs, it runs the executable from an empty directory with an empty environment: the version, the help text, the exit-status protocol and, when the published tests are at hand, one accepted and one rejected test. The archive is reproducible for a given executable: sorted names, a fixed owner and the executable's modification time.}
+\li{\src{.github/workflows/release.yml} is started by hand. For linux x86-64 and, unless switched off, linux aarch64 it builds the executable with the arena definition's build line, packs it and attaches the archives and their checksum files to a draft release. It uses GraalVM Community Edition only. It was written from commands that were run on the aarch64 development host and has never run on a hosted runner.}
+}
+}
+
+\p{\strong{Not done.} The executable is linked dynamically against the C library and zlib of the build machine; a statically linked zlib or a mostly static image was not tried. Nothing was run on x86-64. The automatic worker count was measured on 8 cores only.}
+
+\p{Source: \src{scripts/build.sh}, \src{scripts/dev.sh}, \src{scripts/package.sh}, \src{scripts/fetch-toolchain.sh}, \src{scripts/gate.sh}, \src{rlvm-cli/README.md}, \src{rlvm-main/README.md}.}

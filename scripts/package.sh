@@ -73,7 +73,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/$name" "$work/run"
 cp "$exe" "$work/$name/rlvm"
 cp "$ROOT/LICENSE" "$ROOT/README.md" "$work/$name/"
-chmod 755 "$work/$name/rlvm"; chmod 644 "$work/$name/LICENSE" "$work/$name/README.md"
+chmod 755 "$work/$name" "$work/$name/rlvm"; chmod 644 "$work/$name/LICENSE" "$work/$name/README.md"
 check() { # expected status, arguments...
   local want="$1" got=0; shift
   ( cd "$work/run" && env -i "$work/$name/rlvm" "$@" > "$work/run/out.txt" 2>&1 ) || got=$?
