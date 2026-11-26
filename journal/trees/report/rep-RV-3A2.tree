@@ -1,0 +1,158 @@
+\title{RV-3A, second pass: adversarial review of the union rule (second candidate of package MO-3), from the source}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Second pass of the review "RV-3A" (04:40 to 05:20 UTC of the UTC day that followed 2026-11-25). [The first pass](rep-RV-3A) refused the first candidate of [package MO-3](rep-MO-3), the mode \code{local}. Its author answered with a second candidate, the union rule (section 14 of that report): the comparison of an \code{\verb~|eagerReduce _ _~} argument runs in place under the mode bit, and under the bit a pair is true if the eager procedure or the plain procedure shows it; setting \code{\verb~|-X machine.eager-mode=union|deferred~}, \code{union} proposed as the default. The task was the same as before: refute it from the source, prove every suspicion with an export and the official verdict (leanchecker of Lean 4.36.0, commit \code{611c117b}, \code{\verb~|--from-export~}, in the project's Docker image without network), and say for each finding whether the published build has it. The four exports that the author hands over as rejected by the candidate and by the published build alike are known and are not findings here. Nothing in this report is a timing.}
+
+\subtree{
+\title{0. Result in one page}
+
+\ul{
+\li{\strong{Verdict: NO-GO as built}, for one cause that a small change removes at a price, and two consequences of it and of the rule on false answers. The candidate \strong{rejects official accepts that the published build accepts}, with the arena's prelude and closed terms: two hand-made exports and 21 of 1,220 exports of a systematic family (finding G1). On an export of two such declarations with 400 small theorems between them \strong{its verdict depends on the schedule}: 13 accepts and 17 rejections in 30 runs with default options, where the published build accepts 30 times (finding G3). And it \strong{declines} an official accept that the published build and the first candidate accept at once: a failing comparison of depth 24 under the bit ends at the machine's tick bound, without any eager-only event (finding G2).}
+\li{\strong{Claim (a), no accept of a statement that is not derivable: not refuted.} The new parts were read line by line: the plain attempt, the attempt under the bit after an eager-only event, the comparison of two recursor applications as they stand, the failure cache. Each adds only answers that a sound procedure or congruence gives. On the 1,433 rows of the suite as the candidate's tree has it, run again here, no row without the kind T is accepted.}
+\li{\strong{Claim (b), no wrong rejection that the published build does not have: refuted} by G1. It holds on everything the author ran, which was run again here: the 58 rows of the first pass (49 official verdicts, 9 accepts of kind T rows, no wrong rejection; published 48, 9, 1), the 1,433 rows of the suite (official verdict 1,305, kind T accept 112, declined 4, the 12 known rows; published 1,301, 111, 4, 17), and it holds on a new family of 572 ordered programs with a Nat function that does not compute, where the candidate has no wrong rejection and the published build has 41.}
+\li{\strong{Claim (c), nothing declined and no dependence on the schedule: refuted} by G2 and G3, on hand-made input. On Init and con-leche the counters of the candidate show what the author reports for the eight corpora: no comparison under the flag is false, no eager-only event.}
+\li{\strong{Claim (d), the table of memos}: its row on the memo words of reductions is incomplete. It treats a reduct of plain mode that is read under the bit. It misses the other direction: "stuck", written under the bit by a comparison of the K rule that is false there and not marked, read in plain mode - in the same declaration and, because no eager-only event happened and the session is kept, by a later declaration of the same session. That is G1 and G3.}
+\li{\strong{The root is the one the author names in section 14.8}: the K rule of the machine's plain mode fires through a shortcut where the official one does not. The marks of rule 5 see where the \em{official} modes part (an open pair that a Nat folding may answer). The machine's own two modes part elsewhere as well: on a closed pair the plain mode answers by its same-head shortcut before the fold, and the bit, which runs without the shortcut, answers false. Nothing is marked there.}
+\li{\strong{Repair}: one line, tried in a review copy, removes the regression and the schedule dependence (a comparison of the K rule that is false under the bit leaves no memo word). It is a trade, not the repair of the root: on the family of 1,220 it gains 21 accepts and loses 22 that only the candidate had (section 5). G2 needs a memo of false answers under the bit.}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{The second candidate}: the gated build of the author's third private tree (jars \code{9730aa6e4e26}), the executable and the JVM launcher, default options unless a setting is named. \strong{The published build}: the shared distribution as it stood during the pass (jars \code{d867a0766427}). \strong{The first candidate}: the build of the first pass.}
+\li{\strong{Official verdicts} as in the first pass; the verdict files are handed over with the exports.}
+\li{\strong{Exports}: the suite's builder on the arena's prelude. The closed-term rows use the recursors of the first pass: \code{\verb~|X = Nat.add (G intro) 0~}, \code{\verb~|Y h = Nat.add (G h) 0~} with \code{h} an axiom, proofs \code{\verb~|e : X = Y h~} as axioms, \code{\verb~|R = Eq.rec 1500 e~}. Officially the K comparison \code{\verb~|X = Y h~} against \code{\verb~|X = X~} is false in both modes (a closed pair: the fold answers first), so every such recursor is stuck and two of them are compared argument by argument. The machine's plain mode answers that K comparison true by its same-head shortcut and reduces the recursor. A minor premise \code{\verb~|S.inner 1500~} (1,500 recursor steps to evaluate) keeps the same-head probe of two recursor applications from answering inside its budget of 1,024 ticks.}
+\li{\strong{An instrumented copy} of the candidate's tree (JVM launcher; a trace behind a system property, and the experiment of section 5 behind another) was used for causes and for the experiment, never for a reported verdict of the candidate.}
+\li{Counts of ticks and of comparisons are from one worker through the executable and are deterministic. Where a duration is mentioned it is an observation of one run, not a measurement under the project's rule.}
+}
+}
+
+\subtree{
+\title{2. Finding G1: "stuck" under the bit, read in plain mode}
+
+\p{\strong{The two rows.} \code{rv3a2-kshort-eager-then-plain-ok}: one theorem, first \code{\verb~|R = R3~} under \code{eagerReduce}, then \code{\verb~|R = R2s~} in plain mode (\code{R3} over \code{\verb~|e3 : X = Y h3~}, \code{R2s} over \code{\verb~|e2 : X = Y h~} with the slow minor premise). \code{rv3a2-kshort-eager-declaration-then-plain-ok}: the same as two declarations. These are the rows \code{\verb~|rv3a-kshort-*~} of the first pass in the other order.}
+
+\table{
+\tr{\th{Export}\th{Official}\th{Second candidate, default}\th{with \code{\verb~|-X fallback=none~}}\th{\code{deferred}}\th{reference engine}\th{Published}\th{First candidate}}
+\tr{\td{\code{rv3a2-kshort-eager-then-plain-ok}}\td{accept}\td{\strong{reject}}\td{reject}\td{accept}\td{accept}\td{accept}\td{reject}}
+\tr{\td{\code{rv3a2-kshort-eager-declaration-then-plain-ok}}\td{accept}\td{\strong{reject}}\td{reject}\td{accept}\td{accept}\td{accept}\td{reject}}
+\tr{\td{twin \code{rv3a2-kshort-eager-then-plain-reduct-bad} (the second step is \code{\verb~|R = 1500~})}\td{reject}\td{reject}\td{reject}\td{accept}\td{reject}\td{accept (kind T)}\td{reject}}
+}
+
+\p{Exit status 1 through the executable and the JVM launcher, with 1 and with 8 workers, with the host depth bound at 0, 1, 2, 3, 5 and 9, with a second pass, with pipelined loading. The differential engine reports the disagreement. With the session cap at 1 KiB the two-declaration row is accepted: the second declaration then starts in a fresh session.}
+
+\p{\strong{What the machine does} (trace of the instrumented copy). Under the bit the two recursors are compared in the official order: the K comparison of \code{R} runs without the same-head shortcut, is false, and is \em{not marked} - the pair is closed, no fold of an open term answered, no local entry was read. So rule 5 does not apply and the memo of the reduction is written: \code{R} is weak head normal. The pair is true argument by argument, as it officially is. In plain mode the same-head probe of \code{R} against \code{R2s} runs out of budget; the complete procedure reads \code{R} as stuck from the memo, reduces \code{R2s} through the shortcut, and compares a stuck recursor with \code{\verb~|S.inner 1500~}: false. The declaration has had no eager-only event, so the plain comparison is not asked under the bit and the two applications are not compared as they stand (steps 3 and 4 of the rule run only under the bit or after an event).}
+
+\p{\strong{The systematic family.} Five recursors of this kind - \code{R}, \code{R3}, \code{R5} with the minor premise 1500, \code{R2s}, \code{R4s} with the slow one, \code{R4s} and \code{R5} over a copy of \code{G} that no shortcut identifies with it - give ten pairs, each a true statement in both modes for the official kernel. A program is a sequence of one to three steps, a step being a pair in plain mode or under \code{eagerReduce}: all 20 programs of one step, all 400 of two steps as conjuncts of one theorem and again as two declarations, and 400 of the 8,000 of three steps drawn with a fixed seed: 1,220 exports. Every program is an official accept by construction; 76 of them, all regressions among them, were confirmed in Docker. One worker, executables:}
+
+\table{
+\tr{\th{}\th{Programs}\th{Accepted by both}\th{Rejected by the published build, accepted by the candidate}\th{\strong{Rejected by the candidate, accepted by the published build}}\th{Rejected by both}}
+\tr{\td{one step}\td{20}\td{14}\td{3}\td{0}\td{3}}
+\tr{\td{two steps, one theorem}\td{400}\td{226}\td{89}\td{\strong{6}}\td{79}}
+\tr{\td{two steps, two declarations}\td{400}\td{226}\td{89}\td{\strong{6}}\td{79}}
+\tr{\td{three steps, one theorem}\td{400}\td{206}\td{100}\td{\strong{9}}\td{85}}
+\tr{\td{all}\td{1,220}\td{672}\td{281}\td{\strong{21}}\td{246}}
+}
+
+\p{The candidate accepts 953 and the published build 693, so on this family the candidate is far better than what is published. The 246 that both reject are the defect of the plain mode that the author reports (a recursor that the plain mode reduced against one that nobody can reduce); they are not counted as findings. The 21 are: each begins with a step under \code{eagerReduce} on two recursors with cheap minor premises and later compares one of them in plain mode with a recursor whose minor premise is slow.}
+
+\p{\strong{Cause in the patch.} \code{\verb~|Reduce.k_iota4~}: \code{\verb~|m.kDep = (fl & 2) != 0 || m.erSens~}. The reductions in progress write no memo word only if the comparison of the K rule was marked. The mark is the one of the first candidate: an open pair that a Nat folding may answer, an open term against \code{\verb~|Bool.true~}, an eager-only event, a local entry read. It stands for "the official modes may part here". With the shortcuts of plain mode switched off under the bit (\code{\verb~|Conv.underFlag~}), the machine's two modes part at every pair that only a shortcut makes true, marked or not. Section 14.3 of the report of MO-3 names the case "a reduct of plain mode is read under the bit" and answers it with the plain attempt and the third step; the case "a stuck form of the bit is read in plain mode" has no answer, because in plain mode without an eager-only event no step of the union runs.}
+
+\p{\strong{Kind}: wrong rejection; not in the published build, whose deferred mechanism runs the plain comparison first and the comparison under the bit at the end with the shortcuts.}
+}
+
+\subtree{
+\title{3. Finding G3: the verdict depends on the schedule}
+
+\p{\code{rv3a2-kshort-sched-400-ok}: the two declarations of G1 with 400 small theorems between them (official accept). \code{rv3a2-kshort-sched-8x400-ok}: eight copies of each. The second declaration is rejected exactly when the session that checked the first one checks it: no eager-only event happened in the first, so rule 7 keeps the session, with \code{R} marked stuck in it.}
+
+\table{
+\tr{\th{Build, launcher, options}\th{\code{sched-400}: accept / reject}\th{\code{sched-8x400}: accept / reject}}
+\tr{\td{second candidate, executable, default}\td{13 / 17 of 30}\td{9 / 21 of 30}}
+\tr{\td{second candidate, executable, 1 worker}\td{0 / 10}\td{0 / 10}}
+\tr{\td{second candidate, executable, 2 workers}\td{8 / 12}\td{9 / 11}}
+\tr{\td{second candidate, executable, 8 workers}\td{6 / 24}\td{8 / 22}}
+\tr{\td{second candidate, JVM launcher, default}\td{8 / 2}\td{7 / 3}}
+\tr{\td{published, executable, default}\td{30 / 0}\td{30 / 0}}
+\tr{\td{published, executable, 1 worker}\td{5 / 0}\td{5 / 0}}
+}
+
+\p{The author's check of the schedule (48 exports of the second reviewer's family, 30 runs each) passes because under the union those pairs are shown by the plain procedure in whatever session asks. Here the state that travels is a memo of a reduction, which the union does not ask again. \strong{Kind}: dependence on the schedule with wrong rejections in most runs; the published build does not have it on these exports.}
+}
+
+\subtree{
+\title{4. Finding G2: a failing comparison under the bit is exponential, and ends as a decline}
+
+\p{\strong{The construction.} \code{\verb~|g x := Pa x~} with \code{Pa} an axiom, \code{\verb~|f x := 0~}, both regular definitions; \code{Q} and \code{\verb~|Q'~} are \code{n} applications of \code{g} to two different axioms of type \code{Nat}. The statement is \code{\verb~|f Q = f Q'~} under \code{eagerReduce}. The official kernel compares the arguments of \code{f} first: at every level the argument comparison of \code{g} fails, the failure is cached, both sides unfold to \code{\verb~|Pa Q~} and \code{\verb~|Pa Q'~}, whose arguments are compared again, now skipping the cached failure: about \code{\verb~|n^2~} steps. Then \code{f} unfolds to 0 on both sides: accept. No eager-only event happens anywhere.}
+
+\p{\strong{The candidate} reads and writes no false entry under the bit (rule 6: neither the memo of a false comparison nor the failure cache), and asks every false comparison again in plain mode. So the arguments of level \code{k} are compared twice at every level:}
+
+\table{
+\tr{\th{n}\th{Official}\th{Second candidate: ticks of the unit}\th{comparisons asked again in plain mode}\th{verdict, default}\th{verdict with \code{\verb~|-X fallback=none~}}\th{Published: ticks}\th{verdict}\th{First candidate}}
+\tr{\td{8}\td{accept}\td{4,834}\td{655}\td{accept}\td{accept}\td{466}\td{accept}\td{accept}}
+\tr{\td{16}\td{accept}\td{855,602}\td{131,481}\td{accept}\td{accept}\td{498}\td{accept}\td{accept}}
+\tr{\td{24}\td{accept}\td{the bound}\td{-}\td{accept, by the reference engine}\td{\strong{decline}}\td{-}\td{accept}\td{accept}}
+\tr{\td{32}\td{accept}\td{134,218,131 (the unit bound of 2^27)}\td{20,648,554}\td{accept, by the reference engine}\td{\strong{decline}}\td{-}\td{accept}\td{accept}}
+\tr{\td{48}\td{accept}\td{the bound}\td{-}\td{accept, by the reference engine}\td{\strong{decline}}\td{-}\td{accept}\td{accept}}
+}
+
+\p{From \code{n} = 24 on the unit ends at the machine's own tick bound (\code{\verb~|BUDGET_STEPS~}): the reference engine decides it in a default run, and with \code{\verb~|-X fallback=none~} the export is declined, exit status 2, through the executable (all three depths) and through the JVM launcher (depths 24 and 32). The column of the first candidate is with \code{\verb~|-X fallback=none~} as well. It does not hang and does not grow: the peak resident set stayed at 24 MiB; the bound was reached after some ten to forty seconds in the runs made. The published build answers through a shortcut under the bit, the first candidate through the failure cache, both at once.}
+
+\p{\strong{After an eager-only event the same happens in plain mode} (the case section 14.8, item 4, names and did not construct): \code{rv3a2-towerread-32-event-then-plain-ok}, a harmless eager-only event and then the tower in plain mode with \code{\verb~|f x := Nat.mul x 0~}, a function that reads its argument, is declined with \code{\verb~|-X fallback=none~} and accepted by the published build. With \code{\verb~|f x := 0~} the unread position is skipped in plain mode and nothing fails (\code{rv3a2-tower-32-event-then-plain-ok}: accept).}
+
+\p{\strong{Can a real input reach it?} The shape is ordinary: a comparison of two applications of one definition whose arguments differ, which the kernel answers by unfolding, nested 24 deep. What a real input lacks today is the first failure: on Init and con-leche, run here with 8 workers, the candidate counts no comparison that is false under the flag and no eager-only event (728 and 375 comparisons of an eager argument), which is what the author reports for all eight corpora; the proofs that real exports wrap in \code{eagerReduce} compare a computation with a literal. So no real input was found, and none is excluded by anything but that count.}
+
+\p{\strong{Kind}: a decline, and a cost without a bound below the tick limit, where the published build and the first candidate decide; not a wrong verdict. It contradicts "nothing is declined" for a production that is to run without the fallback. \strong{Cause}: \code{\verb~|Conv.rec~} and \code{\verb~|Conv.lstepBoth~} under \code{\verb~|Conv.underFlag~}, and \code{\verb~|Conv.convEnd~}. \strong{Repair}: local - a memo of the false answers of the bit that lives as long as its declaration and is read only under the bit (the official failure cache is shared by the modes; one keyed by the mode loses nothing that rule 6 wants).}
+}
+
+\subtree{
+\title{5. The repair that was tried for G1 and G3, and what it costs}
+
+\p{In the review copy, behind a system property: in \code{\verb~|Reduce.k_iota4~} a comparison of the K rule that is false under the bit sets \code{\verb~|Machine.kDep~} as a marked one does, so no reduction in progress writes "stuck". Through the JVM launcher:}
+
+\ul{
+\li{the two rows of G1: reject to accept; the twin with \code{\verb~|R = 1500~}: reject to accept, an accept of kind T as in the published build;}
+\li{the schedule row: 12 accepts of 12 with the default workers, 6 of 6 with one worker;}
+\li{177 rows (the 101 of the suite's eager family, the 58 of the first pass, 10 of this pass, the 8 finding exports of the author): no other verdict moves;}
+\li{the family of 1,220: all 21 regressions are accepted, and \strong{22 programs that the candidate accepts are rejected} - programs that the published build rejects as well. In them the "stuck" of the bit agreed with the official kernel against the shortcut of the plain mode, and kept a recursor from being reduced that had to stay stuck. Accepts: candidate 953, with the change 952, published 693; with the change no program is rejected that the published build accepts.}
+}
+
+\p{So the change makes the candidate no worse than the published build on everything that was run, and it shows what the finding is: the memo of the K rule carries one mode's answer into the other in both directions, and whichever way it is cut, the plain mode's own K rule decides the rest. The author's item (c) of section 14.8 - a K comparison that is the official one in both modes - is the repair of the root; a third step after every false plain comparison is the other. Neither was built here. The change was not gated: no module suite, no corpus, no mutants, no timing.}
+}
+
+\subtree{
+\title{6. Attacked without result}
+
+\ul{
+\li{\strong{Soundness of the third step} (\code{\verb~|Conv.unionArgs~}): it runs only for two values whose heads are one recursor constant with equivalent level lists and the same number of arguments (\code{\verb~|recApp~}, \code{\verb~|sameRec~}); it compares every argument, the major premises included, with the policy of an application, under which the only positions that can be skipped are proof positions of the agreement rule, in plain mode; "as they stand" is the pair the comparison was called with, a suspension by its value, never a reduct or a memo. That is congruence. A pair behind a definition is not seen: the author's known limit.}
+\li{\strong{Soundness of the fourth step} (a false plain comparison asked under the bit): the true answer is the eager procedure's; the entries it reads are successes, which are valid conversions in either mode. The bit is restored on every path (\code{\verb~|unionSlow~}, the frame \code{\verb~|CONV2[12]~}, the cut of a segment).}
+\li{\strong{The failure cache}: keyed by the pair of value records, written and read in plain mode only, local if its comparison was marked and then not read after an eager-only event. One written by an unmarked plain comparison answers in a later declaration and under another instance of a binder, as it does in the published build; nothing new was found there.}
+\li{\strong{Rule 5 with a Nat function that does not compute} (the class F3 of the first pass), in every order. A new family: four K recursors under one binder over two K pairs, with cheap and slow minor premises, and the literal they reduce to; 8 statements, 16 steps; all 16 programs of one step, all 256 of two, 300 of three: 572 exports, the official verdict taken for every one (409 accept, 163 reject - it depends on the order). \strong{The candidate: 509 official verdicts, 63 accepts of official rejections, no wrong rejection, nothing declined.} The published build: 531 official verdicts, \strong{41 wrong rejections}, no accept of an official rejection. The 63 are the agreement that the union gives up: a statement that is first shown under the flag, or two stuck recursors that are equal argument by argument where the official kernel has reduced one from its cache; each is derivable (the recursor pairs by congruence, the reductions with the acceleration as a rule, the reading of the first pass). Seven further hand-made orders, across declarations and across binders: six official accepts, all accepted, and one official rejection that the candidate accepts (two stuck recursors that are equal argument by argument, kind T; the published build rejects it). The cases I looked for and could not build: a reduction that depends on a marked K comparison and still writes a memo word - through a nested K comparison (the flag is restored by \code{\verb~|k_iota4~}), a cut (\code{\verb~|kSignal~}, \code{\verb~|cutMark~}), a local entry (reading one marks), a suspension (the frame carries both flags). The only comparison a reduction starts is the one of the K rule; that was checked by reading every caller of \code{\verb~|Conv.conv~}.}
+\li{\strong{The host depth bound, the session, the driver}: 169 rows (101, 58, 10) through the executable with the bound at 0, 1, 2, 3, 5 and 9, with 1 and 4 workers, pipelined loading with 8 and 2 workers, a second pass, \code{\verb~|-X fallback=none~}, \code{\verb~|-X repeats=check~}: no verdict differs from the default run. The session cap at 1 KiB changes one verdict, the two-declaration row of G1.}
+\li{\strong{The suite}: its 1,433 rows through both executables give the author's counts for the candidate and for the published build; no row without the kind T is accepted; the candidate rejects no official accept that the published build accepts.}
+\li{\strong{The 58 rows of the first pass}: the author's counts; the seven rows of F3 get the official verdict; the executable and the JVM launcher agree.}
+}
+}
+
+\subtree{
+\title{7. Rows, and what was not attacked}
+
+\p{\strong{Rows}: 43 exports with their official verdicts and a manifest fragment in the suite's format: the 22 hand-made rows of this pass (20 accept, 2 reject with the kind T) and the 21 programs of the family that the candidate rejects and the published build accepts. The generators of the two families are handed over; the families themselves (1,220 and 572 exports, the second with a verdict file per export) are kept beside them. Three kinds of row need care in a gate: the rows of G2 from depth 24 on cost the candidate its whole tick bound; the two schedule rows have no fixed verdict for the candidate; the rows of G1 fail for it.}
+
+\ul{
+\li{\strong{Not attacked}: the eight corpora beyond the counters of two of them; the mutants; the arena tests; x86-64; the guard and its one corpus over the limit on the JVM launcher (a measurement, not asked of a reviewer).}
+\li{\strong{Not attacked}: the candidate merged with the package on the K rule after a let application.}
+\li{\strong{Not attacked}: pair entries and memo words under several host depth bounds (the convention part of the machine's own gate compares them); here only verdicts.}
+\li{\strong{Not attacked}: a mixed derivation through the K rule inside one reduction (one recursor reduced by a true K comparison, another left stuck), which the author names as outside the argument.}
+\li{\strong{Not built}: an input from a real export that reaches G1, G2 or G3. G1 needs a K recursor that only a shortcut of plain mode reduces, compared under \code{eagerReduce} and then in plain mode against a recursor whose arguments are expensive to compare; none was looked for in the corpora.}
+\li{\strong{An error of my own}: a waiting loop of this pass was first written with a process search that matches the waiting shell; it was killed and replaced by a wait on a marker line. No result depends on it.}
+}
+}

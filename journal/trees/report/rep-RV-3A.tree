@@ -9,6 +9,8 @@
 
 \p{Review "RV-3A" of 2026-11-25 (02:03 to 02:55 UTC of the following UTC day). Its subject is the patch of [package MO-3](rep-MO-3): the comparison of an \code{\verb~|eagerReduce _ _~} argument runs in place under the mode bit, pair entries whose answer can depend on the mode are local to their declaration, setting \code{\verb~|-X machine.eager-mode=local|shared|deferred~} with \code{local} proposed as the default. The reviewer did not write the patch and was asked to refute it, working from the source: the patch read line by line against the official kernel (\code{\verb~|src/kernel/type_checker.cpp~} of Lean 4.36.0, commit \code{611c117b}), every suspicion turned into an export, and every export judged by the official checker (leanchecker 4.36.0, \code{\verb~|--from-export~}, in the project's Docker image without network). A second reviewer attacked the same build as a black box; this report does not cover that work. Nothing here is a timing.}
 
+\p{\strong{Second pass.} The author answered this review with a second candidate, the union rule; its review is [the second pass](rep-RV-3A2).}
+
 \subtree{
 \title{0. Result in one page}
 
