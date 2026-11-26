@@ -1,0 +1,326 @@
+\title{RV-2A: adversarial review of the exact-let mode (package MO-2), from the source}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Review "RV-2A" of 2026-11-25 (02:49 to 03:50 UTC of the following UTC day). Its subject is the patch of [package MO-2](rep-MO-2): a declaration whose first run reaches a K comparison that the machine cannot tell from the official one is checked a second time in an \em{exact-let mode} (a session of its own, no staging switch, the application of a let variable kept as a value, the K comparison made in every scope state, a scope stack, four places where the run ends without a verdict). The reviewer did not write the patch and was asked to refute it, working from the source: the patch read line by line against the official kernel (\code{\verb~|src/kernel/type_checker.cpp~}, \code{inductive.h}, \code{\verb~|local_ctx.cpp~} of Lean 4.36.0, commit \code{611c117b}), every suspicion turned into an export, and every export judged by the official checker. A second reviewer attacked the same build as a black box; this report does not cover that work. Nothing was repaired, and nothing of this review is in the main tree.}
+
+\subtree{
+\title{0. Result in one page}
+
+\ul{
+\li{\strong{Verdict: no-go for the patch entering the default configuration as built.} On hand-made exports the candidate rejects \strong{six} exports that the official checker accepts and that a plain run of the published build accepts (findings F3, F4, F7, F8 and two exports of F12). Two more wrong rejects of the mode lie in its own class and are shared with the published build (F1, and F10 inside the mode). Four shapes of the class never start the mode and are wrong rejects of the published build and of the candidate alike (F5, F9, F10, F11).}
+\li{\strong{No accept of a statement that is not derivable was found}, in the candidate or in the published build. Every accept against the official verdict in this review is of a derivable statement (9 rows; the reason is in the row's text). Section 8 says why the reading did not expect one either.}
+\li{\strong{56 exports}, every verdict from the official checker (leanchecker 4.36.0, commit \code{611c117b}, in the project's Docker image without network): 42 accept, 14 reject. The reference engine gives the official verdict on all 56. A plain run of the candidate: 17 rejections of official accepts and 8 accepts of official rejects. A plain run of the published build: 16 and 7. The candidate differs from the official verdict on 8 rows on which the published build does not (6 rejections, 2 accepts of derivable statements), and gives the official verdict on 6 rows on which the published build does not. The executable and the JVM launcher of the candidate agree on every row.}
+\li{\strong{The causes are of four kinds.} (1) The mode holds a \em{value} where it claims to hold the official term: the guard \code{plainRoot} reads the term, and a variable of that term can be bound to a closure (F4, F7); the head of a kept application is read as a value through a typed binding (F3); a delayed term whose value is a let variable is forced through the variable (F10). (2) The scope stack knows records, and two binders of the official term can be one record (F1). (3) The second run is the generic tier, which rejects inputs that the default switch set accepts, and a kept application changes what the other typing sites see (F8, F12). (4) The trigger of the first run is a list of shapes (F5, F9, F10, F11).}
+\li{\strong{Beside the patch}: two more shapes of the redex class of findings E1-F7 and MO2-F3 that the published default rejects against the official verdict, without any let: the K rule on the binder of a redex while the body is typed again under the argument (F2), and a projection of a constructor application as the major premise (F6).}
+\li{\strong{What held.} The author's own 7.3 caveat on a typed binding in the chain (two more exports, official verdict). The marks and the two scope declines, by reading. Proof irrelevance on a stuck projection in the first run (six exports). A reduction of the recursor found in a memo before the K comparison is made (three exports). Section 9.}
+\li{\strong{The second question} (section 11): a simpler rule for the typing half exists and is the official rule itself, "a delayed argument is typed as the term it is"; the generic tier already does it where INFER stored a type, and on these exports it gives the official verdict for F5, F6, F9 and F11. What it costs is not at the K comparison (46,376 computed K typings on Mathlib, 36 of them on a delayed redex, let term or projection) but in what a value may no longer forget. It does not cover the scope half and not F2.}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{Candidate}: the final build of package MO-2 (jars \code{0397eb07054a}, the jar of \code{rlvm-machine} \code{6db085f6b0a5}), the executable and the JVM launcher, no option. \strong{Base}: the private build of the unpatched tree of 2026-11-25 22:44 UTC that the report of MO-2 names (jars \code{3babbe8de8f3}; its machine jar is the published one of build \code{f88e4ef5e102}). \strong{Published build}: the shared distribution as it stood during the review (jars \code{d867a0766427}, built 2026-11-26 01:30 UTC). Base and published build agree on every row of this review, so "published" below stands for both.}
+\li{\strong{Plain run}: no option; a rejection of the machine is final, a decline goes to the reference engine. \strong{Machine alone}: \code{\verb~|-X no-fallback -X no-recheck~}. \strong{Every declaration in the mode}: \code{\verb~|-Drlvm.machine.letexact=always -X machine.switches=none~}, machine alone, the JVM launcher. Exit status 0 is accept, 1 reject, 2 decline.}
+\li{\strong{Official verdict}: \code{\verb~|leanchecker --from-export~} of Lean 4.36.0 (\code{\verb~|lean --version~} in the container: commit \code{611c117bfaf7}), in the project's Docker image, no network. The reference engine (\code{\verb~|-X engine=reference~}) was run on every export as a cross-check and agrees on all 56.}
+\li{\strong{The exports} are built with the generator of package S and the environment of the rows of MO-2: \code{\verb~|d (x : True /\ True) : Nat := And.rec (fun _ _ => 5) x~}, an axiom \code{h}, so that \code{\verb~|d intro~} is convertible with \code{5} and with \code{\verb~|d h~} and \code{\verb~|d h~} is not convertible with \code{5}; \code{\verb~|r0 : d intro = 5~}, \code{\verb~|ax : 5 = d h~}; \code{\verb~|needs7 R~} is \code{\verb~|(fun (_ : R = 7) => True.intro) (Eq.refl 7)~}. "K fires" for a type \code{\verb~|a = b~} of the major premise iff \code{b} is officially convertible with \code{a}: yes for \code{\verb~|d intro = d intro~} and \code{\verb~|d intro = 5~}, no for \code{\verb~|d h = 5~} and \code{\verb~|5 = d h~}. \code{TRIG} is a part of type \code{True} that starts the mode and is accepted under every reading: \code{\verb~|let f : Unit -> d intro = 5 := fun u => r0; needs7 (Eq.rec 7 (f Unit.unit))~} (the row \code{mo2-shape-unrelated-ok}).}
+\li{Host: the aarch64 development host. Nothing in this report is a timing. The exports, the official verdict files, the verdicts of every build and a manifest fragment are handed over with the review; they are not rows of the suite.}
+}
+}
+
+\subtree{
+\title{2. The official source, read again}
+
+\p{Section 2 of [the report of MO-2](rep-MO-2) was checked against the source. It holds, with four additions that the findings rest on.}
+
+\ul{
+\li{\strong{The K rule types the raw major premise in infer-only mode}: \code{\verb~|to_cnstr_when_K~} calls \code{\verb~|whnf(infer_type(e))~}, and \code{infer_type} is \code{\verb~|infer_type_core(e, true)~}. The cache \code{\verb~|m_infer_type[infer_only]~} is keyed by the term; a free variable is fresh per binder, so no entry is shared between the two sides of a scope.}
+\li{\strong{The type of a redex is the type of its body under the binder, instantiated}, not "the binder's domain": infer-only \code{infer_app} takes the type of the head, \code{infer_lambda} types the body under a free variable of the domain, and the argument is substituted into the result. The domain is the special case of a body that is the binder. For a body \code{\verb~|x~} that is a let variable in scope, it is the declared type of \code{x} (F5); for a body that applies its binder, the codomain of the domain (F2, F3).}
+\li{\strong{The type of a projection of a constructor application is read off the constructor's parameters}: \code{infer_proj} types the struct, and the infer-only type of \code{\verb~|And.intro A B a b~} is \code{\verb~|And A B~} whatever the type of \code{a} is (F6).}
+\li{\strong{A chain of lets is one call of \code{infer_let}}: all its variables enter and leave together. The states "the inner variable has left, the outer one is in scope" exist only for lets that are not consecutive.}
+\li{\strong{The positive cache of \code{\verb~|is_def_eq~} is a set of pairs} (\code{\verb~|m_success~}) in this version, not a union-find: an answer of the official comparison does not depend on what was compared before, apart from memoising. So a comparison that the mode makes in a state the kernel is not in adds nothing that the official kernel could later use.}
+\li{\strong{Proof irrelevance, structure eta and the unit-like rule type terms after \code{\verb~|whnf_core~}}: a redex or a let variable at the head is gone by then, but the struct of a stuck projection stays as written (\code{\verb~|whnf_core~} returns the projection it was given) and is typed raw (F8, F12).}
+}
+}
+
+\subtree{
+\title{3. Findings that are new with the patch}
+
+\p{On each export of this section the official checker accepts, a plain run of the published build accepts, and a plain run of the candidate rejects with exit status 1 through the executable and through the JVM launcher. Line numbers are those of the patched tree.}
+
+\subtree{
+\title{F3. A typed binding whose value is a let variable, as the head of a kept application}
+
+\p{\code{rv2a-typed-binding-head-let-ok}. With \code{\verb~|D = (d intro = d intro)~}, \code{\verb~|c : forall (q : D), Eq.rec (motive := fun _ _ => Prop) (forall q2 : D, Q q2) q~} and \code{\verb~|r2 : d h = 5~}: the theorem \code{\verb~|Q r2 := let f : Unit -> d h = 5 := fun u => r2; (fun (z : Unit -> D) => c (z Unit.unit) (z Unit.unit)) f~}. Official: the body of the redex is typed once, under \code{z} of the binder domain; \code{ensure_pi} reduces the recursor in the type of \code{\verb~|c (z Unit.unit)~} by the K rule on \code{\verb~|z Unit.unit~}, of type \code{D}: it fires. The machine types the body again under the argument (INST of the lambda's type). In the mode \code{z} is a typed binding whose value is the let variable \code{f}; \code{Eval.letHead} (line 1001) peeks the binding, finds a let variable and keeps \code{\verb~|z Unit.unit~} as an application of it; \code{Infer.letAppWalkSlow} (line 3120) evaluates the head and types the application through the \em{declared type of \code{f}}, \code{\verb~|d h = 5~}. The states of \code{f} agree (\code{let.kDual} 1, \code{kDisagree} 0): no K, \code{FUNCTION_EXPECTED}.}
+
+\p{The machine of the base declines this unit (the rule of 2026-11-24) and the reference engine accepts it. This is item 6 of section 11 of the report of MO-2, "the typed binding as the head of a kept application", which section 7.3 lists as not constructed. The control with \code{f} declared \code{\verb~|Unit -> D~} is accepted.}
+}
+
+\subtree{
+\title{F4. The struct of a delayed projection, reached through a variable bound to a closure}
+
+\p{\code{rv2a-proj-struct-closure-var-ok}. \code{\verb~|A1 = (d intro = d intro) /\ True~}, \code{\verb~|b2 : (5 = d h) /\ True~}, \code{\verb~|W : forall (y : A1), P ((fun (g : A1 -> A1) => Eq.rec 7 (g y).1) (fun (w : A1) => w))~}; the theorem \code{\verb~|True /\ P 7 := And.intro TRIG (let y : A1 := b2; W y)~}. Official: after the let the major premise is \code{\verb~|((fun (w : A1) => w) b2).1~}; the struct is a redex, typed through the binder domain \code{A1}: K fires. The mode: the major premise is the delayed projection \code{\verb~|(g y).1~}; \code{Infer.suspProjStruct} (line 3175) asks \code{plainRoot} whether the struct term has a redex on the way to its root, and the answer is no, because \code{g} is a \em{variable}; it is bound to a closure. The struct term is evaluated (line 3181), the beta step is performed, the type root is the let variable \code{y}, and the state "\code{y} has left" reads the type of \code{b2} (\code{let.kFlips} 2): \code{APP_TYPE_MISMATCH}.}
+
+\p{Without \code{TRIG} nothing starts the mode and the candidate accepts (\code{rv2a-proj-struct-closure-var-notrig-ok}): the first run reads the declared type of \code{y}, which is right here by chance. The mirror \code{rv2a-proj-struct-closure-var-bad} is an official reject that the candidate accepts and the published build rejects; the statement is derivable (apply \code{W} to a pair whose first component is \code{\verb~|Eq.refl (d intro)~}). It is finding MO2-F4 again: an evaluation inside the mode's own steps, behind a guard that tests the term and not what its variables are bound to.}
+}
+
+\subtree{
+\title{F7. The chain of let variables, followed through a variable bound to a closure}
+
+\p{\code{rv2a-chain-typed-binding-closure-ok}. \code{\verb~|A = (d intro = d intro)~}, \code{\verb~|W : forall (x : A), P (Eq.rec 7 x)~}; the theorem \code{\verb~|P 7 := let y : A := ax; (fun (g : A -> A) => let x : A := g y; W x) (fun (w : A) => w)~}. Official: after the redex and the let the major premise is \code{\verb~|(fun (w : A) => w) ax~}, of type \code{A}: K fires. The machine of the base reads the declared type of \code{x} and accepts \em{by itself}. The mode: \code{Infer.letChainNextSlow} looks for the successor of \code{x} in the type chain; \code{plainRoot} passes the value term \code{\verb~|g y~}, the term is evaluated (line 3384), \code{g} is the closure of the argument, the result is \code{y}, and the state in which both have left reads the type of \code{ax} (\code{let.kFlips} 2): \code{DECL_TYPE_MISMATCH}. The mirror \code{rv2a-chain-typed-binding-closure-bad}: official reject, candidate accept, published build reject; derivable (\code{\verb~|W (Eq.refl (d intro))~}).}
+}
+
+\subtree{
+\title{F8. Proof irrelevance on a stuck projection of a kept application}
+
+\p{\code{rv2a-pi-proj-kept-app-escaped-ok}. No K rule in the comparison that fails. \code{\verb~|bx : P (d intro) /\ True~}, \code{\verb~|s : P 5~}, \code{\verb~|Q : P (d intro) -> Prop~}, \code{\verb~|W : forall (f : Unit -> P (d h) /\ True), Q (f Unit.unit).1~}; the theorem \code{\verb~|True /\ Q s := And.intro TRIG (let f : Unit -> P (d h) /\ True := fun u => bx; W f)~}. Official: after the let \code{\verb~|((fun u => bx) Unit.unit).1~} is compared with \code{s} by proof irrelevance, \code{\verb~|P (d intro)~} against \code{\verb~|P 5~}: true. The machine of the base reduces the application and accepts by itself. In the mode the stuck projection has a kept application as its struct, and a kept application has one type, the one \code{Infer.letAppTypeSlow} stores (line 3147): through the declared type of \code{f}, \code{\verb~|P (d h)~} against \code{\verb~|P 5~}: false. The scope states are computed for the K rule only (\code{Infer.letKSlow}), as section 7.3 of the report of MO-2 says; what it does not say is that the kept application makes the other typing sites answer differently from the base \em{after} the scope, where the base's reading was the official one. Without \code{TRIG} the candidate accepts (\code{rv2a-pi-proj-kept-app-escaped-notrig-ok}).}
+}
+
+\subtree{
+\title{F12. The second run is the generic tier}
+
+\p{\code{rv2a-mode-generic-pi-proj-redex-ok}. \code{\verb~|True /\ True := And.intro TRIG ((fun (_ : G (P 5) s) => True.intro) (gp (P (d intro)) ((fun (z : P (d intro) /\ True) => z) bx).1))~} with \code{\verb~|bx : P (d h) /\ True~}. The second part has no let: it is proof irrelevance on a stuck projection of a beta-redex, and the official checker reads the binder domain. That part alone (\code{rv2a-pi-proj-redex-domain-ok}) is accepted by the default switch set of the base and of the candidate, and \strong{rejected by their generic tier} (\code{\verb~|-X machine.switches=none~}, exit status 1 on both). The mode runs the whole declaration in the generic tier (\code{\verb~|m.sw = 0~}, \code{MachineSession.check0}, line 330), so the candidate rejects the theorem. The same with a let variable in the second part: \code{rv2a-mode-generic-pi-proj-let-escaped-ok}.}
+
+\p{The report of MO-2 argues for a second run without switches by three reasons and checks it by running all 1,341 hostile rows in the mode: four rejections of official accepts, "all four on rows that are known wrong rejects of every switch set". That check sees rows; it cannot see a row that the suite does not have. The generic tier is not at least as aligned as the default set, so a declaration that starts the mode for one comparison is judged everywhere by a tier with its own wrong rejects.}
+}
+
+\subtree{
+\title{A decline that is new}
+
+\p{\code{rv2a-twin-let-inside-then-inner-twin-ok}: the machine of the base accepts, the machine of the candidate declines ("a let variable leaves its scope in the type of the let term after a K comparison inside the scope depended on the scope"); a plain run accepts through the reference engine. Two binders are one record (F1); the mark that a K comparison under the outer one set ends the scope of the inner one.}
+}
+}
+
+\subtree{
+\title{4. Wrong verdicts of the mode in its own class, shared with the published build}
+
+\subtree{
+\title{F1. Two binders, one record}
+
+\p{\code{rv2a-twin-let-escaped-inside-twin-ok}. \code{\verb~|W : forall (q : d h = 5), P (Eq.rec 7 q)~}, \code{\verb~|F : P 7 -> True~}; the theorem \code{\verb~|True := let q : d h = 5 := r0; F (let q2 : d h = 5 := r0; W q2)~}. Official: the argument of \code{F} has the type \code{\verb~|let q2 := r0; P (Eq.rec 7 q2)~}; against \code{\verb~|P 7~} the value is substituted, \code{r0} has the type \code{\verb~|d intro = 5~}, K fires: accept. The candidate starts the mode and rejects (\code{let.kDisagree} 2, \code{kFlips} 0). A let variable of the machine is a record whose identity is the value term, the frame, the level substitution and the declared type (\code{Values.mkLet}); the two binders are that one record. \code{Infer.Ext.letInScope} (line 248) asks whether \em{the record} is on the scope stack, the outer binder is, and the mode answers for "in scope" a comparison that the official kernel makes after the inner variable has left. Three controls: without the outer let the candidate accepts (\code{kFlips} 1); with an outer let whose value is another axiom of the same type, two records, it accepts; the mirror \code{rv2a-twin-let-escaped-inside-twin-bad} is an official reject that it accepts (statement \code{True}).}
+
+\p{The published build rejects the export too: it reads the declared type everywhere (finding MO2-F1). So this is not a regression; it is a shape of MO2-F1 that the mode decides with confidence and wrongly, and step 3 of the argument of section 7.2 ("the scope stack is the official local context") does not hold for it.}
+}
+
+\subtree{
+\title{F10 in the mode}
+
+\p{\code{rv2a-let-applied-through-delayed-var-mode-ok} is the export of F10 (section 5) behind \code{TRIG}: the mode runs, makes its K comparison on \code{TRIG}, and rejects the second part with confidence (\code{let.declines} 0). The application of the let variable is reduced away inside the mode and \code{letLost} is not set.}
+}
+}
+
+\subtree{
+\title{5. Shapes of the class that never start the mode}
+
+\p{On each export of this section the official checker accepts, and the published build and the candidate reject in a plain run; the \code{let.*} counters of the candidate are all 0. With every declaration forced into the mode the candidate gives the official verdict on F5, F9 and F11 and not on F10: the first three are holes of the trigger, the fourth is a hole of the mode as well.}
+
+\subtree{
+\title{F5. A delayed redex or let term whose body is the let variable}
+
+\p{\code{rv2a-inside-redex-body-var-ok}: \code{\verb~|let x : d intro = d intro := ax; needs7 (Eq.rec 7 ((fun (z : Unit) => x) Unit.unit))~}. Official: the major premise is the redex, its type is the type of the body \code{x} under \code{z}, the declared type: K fires. The machine: the major premise is a delayed term without a stored type; its type is the type of its forced value (\code{Infer.vtypeSusp}), and FORCE does not stop at a let variable (\code{Eval.k_force1}: a value is never a suspension), so the type is that of \code{ax}. No let variable is applied, so no flag is set; \code{Infer.letRootedSlow} follows a delayed term only through a head that is a variable, and answers by the stored type otherwise, which is absent (line 464). The same with a let term as the major premise, \code{rv2a-inside-let-term-body-var-ok} (\code{\verb~|Eq.rec 7 (let w : Unit := Unit.unit; x)~}), and through a bound variable, \code{rv2a-let-var-through-delayed-var-ok}. This is the candidate that item 2 of section 11 of the report of MO-2 names first.}
+}
+
+\subtree{
+\title{F9. A let variable with one type is applied, and its value is no lambda}
+
+\p{\code{rv2a-exact-let-applied-redex-value-ok}: \code{\verb~|A = Unit -> d intro = d intro~}, \code{\verb~|axf : Unit -> 5 = d h~}; \code{\verb~|let f : A := (fun (z : A) => z) axf; needs7 (Eq.rec 7 (f Unit.unit))~}. Official: the declared type of \code{f}: K fires. For the machine \code{f} has one type: the type INFER gives the redex is the binder domain \code{A}, the declared type itself (\code{LET_EXACT}). \code{Eval.letHeadSlow} therefore notes nothing unless the value is a lambda (line 773), and the value is the axiom \code{axf}; the application becomes \code{\verb~|axf Unit.unit~} and is typed by the type of \code{axf}. "One type" is a statement about the \em{term} the variable is bound to; the value that is applied is the reduct.}
+}
+
+\subtree{
+\title{F10. A let variable applied through a variable that is bound to a delayed term}
+
+\p{\code{rv2a-let-applied-through-delayed-var-ok}: \code{\verb~|D = (d intro = d intro)~}, \code{\verb~|W : forall (g : Unit -> D), P (Eq.rec 7 (g Unit.unit))~}; \code{\verb~|True := let f : Unit -> D := fun u => ax; (fun (_ : P 7) => True.intro) (W ((fun (z : Unit) => f) Unit.unit))~}. Official: the type of the argument is \code{\verb~|P (Eq.rec 7 (((fun z => f) Unit.unit) Unit.unit))~}; the major premise is an over-application, typed through the body of the lambda, the declared type of \code{f}: K fires. The machine binds \code{g} to the delayed redex. When \code{\verb~|g Unit.unit~} is evaluated, \code{Eval.k_evalHead} (line 728) tests whether the head value is a let variable \em{before} it forces it; it is a plain suspension; FORCE then runs through the let variable to its value, and the application of \code{f} is reduced away with neither \code{zetaInexact} (first run) nor \code{letLost} (mode). Finding MO2-F5 named a third place where a let variable is applied; this is a fourth, and it is not a place in \code{Eval} but a property of FORCE.}
+}
+
+\subtree{
+\title{F11. A frame beyond the near slots, in the trigger}
+
+\p{\code{rv2a-escape-proj-far-frame-ok}: \code{\verb~|W : forall (p : (d h = 5) /\ True), P ((fun (u1 .. u70 : Unit) => Eq.rec 7 p.1) Unit.unit .. Unit.unit)~}, \code{\verb~|b3 : (d intro = 5) /\ True~}; \code{\verb~|P 7 := let p : (d h = 5) /\ True := b3; W p~}. It is the family \code{mo2-escape-proj-*} under 70 binders. Official: after the let \code{\verb~|b3.1~} has the type \code{\verb~|d intro = 5~}: K fires. The major premise of the machine is the delayed projection \code{\verb~|p.1~} under a frame of more than 63 slots; \code{Infer.letRootedSlow} gives up on such a frame unless a type was stored (line 464), the first run answers by the declared type of \code{p}, and the mode is not started. The control with three binders, \code{rv2a-escape-proj-near-frame-ok}, starts the mode and is accepted by the candidate (the published build rejects it). The report of MO-2 names the size of a frame as a point of attack for the lambda-body rule; the limit that fails is in the trigger.}
+}
+}
+
+\subtree{
+\title{6. The published default, without any let}
+
+\ul{
+\li{\strong{F2. The K rule on the binder of a redex, while the body is typed again.} \code{rv2a-redex-body-krule-binder-ok}: \code{\verb~|Q ax := (fun (z : D) => c z z) ax~} with \code{D} and \code{c} as in F3. Official accept: the K rule on \code{z} runs once, while the body is typed under \code{z : D}. The published build and the candidate reject (\code{FUNCTION_EXPECTED}): the type of the application is INST of the lambda's type, which types the body again under a typed binding (\code{Values.mkTyped}); the binding answers INFER of the variable with the domain, but as an \em{argument} it is its value, and the K rule types \code{ax}. The same with a function, \code{rv2a-typed-binding-head-lam-ok}. The mirror with a domain under which K does not fire is rejected by everybody. This is not finding MO2-F3: the major premise is not a redex, it is the binder inside the body; and it is the base of F3.}
+\li{\strong{F6. A projection of a constructor application as the major premise.} \code{rv2a-krule-major-proj-ctor-ok}: \code{\verb~|needs7 (Eq.rec 7 (And.intro (d intro = d intro) True ax True.intro).1)~}. Official accept: the type of the raw major premise is the constructor's parameter. The published build and the candidate reject: the delayed projection is forced, the projection is reduced, and the field \code{ax} is typed. The mirror \code{rv2a-krule-major-proj-ctor-bad} is accepted against the official verdict (statement \code{True}). The cause is that of MO2-F3 and MO2-F6 (\code{Infer.vtypeSusp}); the shape is not among their exports.}
+}
+
+\p{With every declaration in the generic tier and the mode, F6 gets the official verdict and F2 does not.}
+}
+
+\subtree{
+\title{7. Every row}
+
+\p{A verdict that is not the official one is in bold. The executable and the JVM launcher of the candidate agree on every row, and so do the base and the published build; one column each. The last column is not a configuration anybody proposes; it shows what the mode does when it is reached.}
+
+\table{
+\tr{\th{Row}\th{Official}\th{Candidate, plain run}\th{Candidate, machine alone}\th{Published build, plain run}\th{Base, machine alone}\th{Candidate, every declaration in the mode}}
+\tr{\td{\code{rv2a-chain-17-lets-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}}
+\tr{\td{\code{rv2a-chain-typed-binding-closure-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}\td{\strong{accept}}}
+\tr{\td{\code{rv2a-chain-typed-binding-closure-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-chain-typed-binding-domain-ok}}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-chain-typed-binding-var-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{rv2a-chain-typed-binding-var-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-escape-proj-far-frame-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{reject}}
+\tr{\td{\code{rv2a-escape-proj-far-frame-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-escape-proj-near-frame-ok}}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-escape-redex-body-var-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{rv2a-escape-redex-body-var-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-exact-let-applied-control-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-exact-let-applied-proj-ctor-value-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-exact-let-applied-redex-value-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{reject}}
+\tr{\td{\code{rv2a-exact-let-applied-redex-value-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-inside-let-term-body-var-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-inside-proj-ctor-var-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-inside-redex-binder-var-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-inside-redex-body-var-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-krule-major-proj-ctor-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{reject}}
+\tr{\td{\code{rv2a-krule-major-proj-ctor-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-krule-major-proj-let-ctor-escape-ok}}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-krule-major-proj-let-ctor-inside-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-let-applied-through-delayed-var-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}}
+\tr{\td{\code{rv2a-let-applied-through-delayed-var-mode-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-let-applied-through-delayed-var-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-let-var-through-delayed-var-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-memo-fires-then-let-app-one-decl-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{\strong{decline}}\td{reject}}
+\tr{\td{\code{rv2a-memo-stuck-then-let-app-one-decl-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-memo-stuck-then-let-app-two-decls-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-mode-generic-pi-proj-let-escaped-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{\strong{decline}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-mode-generic-pi-proj-redex-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{\strong{decline}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-pi-proj-control-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{rv2a-pi-proj-control-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-pi-proj-kept-app-escaped-notrig-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-pi-proj-kept-app-escaped-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-pi-proj-kept-app-inside-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-pi-proj-let-escaped-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}}
+\tr{\td{\code{rv2a-pi-proj-let-escaped-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-pi-proj-let-inside-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-pi-proj-redex-domain-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-proj-struct-closure-var-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{\strong{decline}}\td{\strong{accept}}}
+\tr{\td{\code{rv2a-proj-struct-closure-var-notrig-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-proj-struct-closure-var-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{\strong{decline}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-redex-body-krule-binder-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{rv2a-redex-body-krule-binder-control-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{rv2a-redex-body-krule-binder-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-twin-let-control-other-record-ok}}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-twin-let-control-single-bad}}\td{reject}\td{reject}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}}
+\tr{\td{\code{rv2a-twin-let-control-single-ok}}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv2a-twin-let-escaped-inside-twin-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{accept}}}
+\tr{\td{\code{rv2a-twin-let-escaped-inside-twin-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-twin-let-inside-then-inner-twin-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{\strong{decline}}}
+\tr{\td{\code{rv2a-typed-binding-head-lam-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}}
+\tr{\td{\code{rv2a-typed-binding-head-let-control-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}}
+\tr{\td{\code{rv2a-typed-binding-head-let-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{\strong{decline}}\td{\strong{reject}}}
+}
+
+\p{Sums over the 56 rows (42 official accepts, 14 official rejects). Candidate, plain run: 17 rejections of official accepts, 8 accepts of official rejects. Published build, plain run: 16 and 7. Candidate, machine alone: 17 and 8, and 1 decline. Base, machine alone: 7 declines, each of them decided with the official verdict by the reference engine in a plain run. Candidate with every declaration in the mode: 15 rejections of official accepts, 5 accepts of official rejects, 2 declines. The 9 different rows that some build accepts against the official verdict all state a derivable proposition: five state \code{True}, and for \code{rv2a-pi-proj-let-escaped-bad}, \code{rv2a-proj-struct-closure-var-bad}, \code{rv2a-chain-typed-binding-closure-bad} and \code{rv2a-escape-proj-far-frame-bad} the hypothesis \code{W} applied to a constructor proves the statement.}
+}
+
+\subtree{
+\title{8. Why no accept of a statement that is not derivable was found}
+
+\p{Section 7.1 of the report of MO-2 says that firing the K rule under any valid type of the major premise is derivable. The review checked the other half: that every type the mode uses \em{is} a type of that major premise. \code{Infer.outType} computes each state type from the value in the major position by the machine's own VTYPE and INFER: the declared type of a let record, INFER of its value term in infer-only mode, the type of a kept application from the type of its head value, a projection through the type of its struct. None of these reads a type of another value: the memo words they use (\code{M_TYPE} of a kept application, of a let record, of a typed binding) are functions of the record's identity, and the state types beyond state 0 are not stored. The wrong verdicts of sections 3 to 5 are all of the same form: the mode picks, among the valid types of the major premise, one that the official kernel does not have at that moment. That changes whether the rule fires; it cannot make the replacement of a proof by a constructor underivable.}
+
+\p{Where a wrong reading could have gone further, it did not. Two binders that are one record (F1) have the same value term and the same declared type, so the confusion is between two valid types of one value. The marks overwrite memo word 1 of a let record only where it is not \code{LET_EXACT}. A let record bound in infer-only mode never gets \code{LET_EXACT} and counts as having two types, which adds states and can only add declines. This is an argument from reading about 1,600 lines once; no export was written that tries to break the typing judgments themselves, which the patch does not touch.}
+}
+
+\subtree{
+\title{9. Attacked without result}
+
+\ul{
+\li{\strong{A typed binding on the way of the chain, after the redex} (the second caveat of section 7.3 of the report of MO-2): \code{rv2a-chain-typed-binding-var-ok} and its mirror, in which the comparison runs after the redex and inside an outer let whose variable is the argument, with a binder domain that would give the other answer. Official verdict on both. The reviewer's prediction of a wrong reject was wrong. With the five exports of the author that makes seven; still not an argument. The typed binding fails where the comparison belongs to the typing of the body (F2, F3), not where it belongs to the type that results.}
+\li{\strong{The reduction of the recursor found in a memo, so that no K comparison is made}: an earlier declaration, or an earlier part of the same one, reduces \code{\verb~|Eq.rec 7 ax~}; then a let variable is applied and forced without the K rule; then \code{\verb~|Eq.rec 7 (f Unit.unit)~} is evaluated. Three exports (\code{rv2a-memo-*}), official verdict on all: the K comparison is made all the same and starts the mode (\code{let.restarts} 1).}
+\li{\strong{Proof irrelevance on a stuck projection in the first run}: of a let variable inside and after its scope, of a beta-redex (six exports \code{rv2a-pi-proj-*}). The default switch set gives the official verdict on five and accepts the sixth, a derivable statement. The generic tier does not (F12).}
+\li{\strong{A projection of a let variable whose value is a constructor application}, inside the scope and after it (\code{rv2a-krule-major-proj-let-ctor-*}): official verdict from the candidate; the published build rejects the second.}
+\li{\strong{The marks and the two scope declines} (item 5 of the author's list), by reading only: a value that holds a marked variable is reached through the frame of a closure or a delayed term, the type of a free variable, a spine or a struct, and \code{letMentions} visits all of them; a memo word of a record that does not hold the variable cannot hold a value that does, except the stored type of a tabling record, which is the type the let chain returns. No export breaks it. The one hole found is F1, which is about what "the variable" is.}
+\li{\strong{The lambda-body rule} (item 1), by reading: where \code{lamBodyRoot} cannot read the root it takes every variable of the frame, and a body rooted at its own binder is typed by the domain in every state. Not broken. What fails next to it is the answer the rule keeps: a delayed major premise without a stored type is typed by its forced value (F10).}
+\li{\strong{The stored type} (item 4): no stored type was found that is used past a let variable which the frame walk does not see.}
+\li{\strong{A let whose value is a recursor application, a let inside the value of a let}: read, not exported; the chain ends at such a value term and the state type is INFER of the term, which is the official reading.}
+}
+}
+
+\subtree{
+\title{10. Not attacked, and errors of the reviewer}
+
+\ul{
+\li{\strong{Budgets} (item 9). The one export written for the bound of 16 on the chain, \code{rv2a-chain-17-lets-ok}, is void for a plain run: its two declared types are one value for the machine, nothing starts the mode. Forced into the mode it is declined ("the type root of the major premise lies too deep"), which is the bound doing what it says. No real unit was looked for.}
+\li{\strong{Structure eta, the unit-like rule and eta expansion in the mode.} F8 and F12 show proof irrelevance; the other sites type the same structs and were not exported.}
+\li{\strong{Eager reduction inside the mode}, universe-polymorphic K types beyond the author's rows, the over-application rule on the six real units, the warm session path of section 7.3 for a later declaration that never binds the variable.}
+\li{\strong{The gates and the guard of the report of MO-2 were not repeated.} Three corpora were run once through an instrumented private copy of the candidate for the counts of section 11 (Std, cslib, Mathlib: accepted).}
+\li{\strong{The x86-64 architecture.}}
+\li{\strong{Predictions that were wrong}: the typed binding in the chain (section 9), the memo exports (section 9), and proof irrelevance on a stuck projection of a let variable in the first run, which the reviewer expected to be a wrong reject of the published default and which the default switch set accepts.}
+}
+}
+
+\subtree{
+\title{11. A second question: is there a simpler rule in the ordinary tier?}
+
+\p{\strong{This section is an opinion with reasons, not a finding. Nothing of it was built.} The question: could one rule in the machine's ordinary tier give the official answer for the whole class (let variable, let term, beta-redex, over-application, projection of a constructor as the major premise) instead of a second run, a scope stack and four declines?}
+
+\subtree{
+\title{11.1 One root, four places where it shows}
+
+\p{Every finding of the report of MO-2 and of this review, the scope half aside, is one fact: the official kernel types a \em{term} and the machine types a \em{value}, and the value has forgotten a step. It forgets in four places. (1) A delayed argument is replaced by its value once that is known (PEEK, \code{Values.mkSusp}), so a redex, a let term or a projection arrives as its reduct. (2) The type of a delayed term without a stored type is the type of its forced value (\code{Infer.vtypeSusp}), and FORCE runs through let variables. (3) A let variable is one record for every binder with the same value term, frame and declared type, on both sides of its scope. (4) The type of a lambda is "the type of the body under the argument", computed again per argument, so a comparison that the official kernel made once under the binder is made again under the value (F2, F3).}
+}
+
+\subtree{
+\title{11.2 The rule}
+
+\p{\strong{A delayed argument is typed as the term it is, and stays the term it is.} In two parts.}
+
+\ul{
+\li{\strong{Typing.} VTYPE of a delayed term is INFER of its term under its frame in infer-only mode, never VTYPE of FORCE, and the result is the stored type of the tabling record. That is the official \code{infer_type} on the official term: a redex through its body under a typed binding of the domain, a let term through its body under a let record of the declared type, a projection of a constructor through the parameters, an over-application through the body of the lambda, the application of a let variable through the declared type. The judgment exists; the generic tier uses it wherever INFER stored a type, and with every declaration in that tier the candidate gives the official verdict on F5, F6, F9 and F11 of this review. The author proposes the same step for MO2-F3 and MO2-F6.}
+\li{\strong{Keeping.} A delayed term whose type root is not inert is never replaced by its value in a spine or a frame: a redex, a let term, a projection, or an application whose head variable is bound to a closure, a let record or another such term. That is the class for which ARGV already makes a suspension instead of a neutral value (\code{inertHead}); the change is that the suspension is handed on instead of its value. Without this part the first part is exact only for a major premise that nobody forced before, and the answer depends on the order of evaluation.}
+}
+
+\p{With both parts the kept application, \code{plainRoot}, the lambda-body rule, \code{letLost} and the trigger's list of shapes are not needed: F4, F7 and F10 cannot arise, because nothing is evaluated to find a type root.}
+}
+
+\subtree{
+\title{11.3 What it costs}
+
+\p{\strong{Per K comparison: one infer-only inference of the major premise, memoised on its tabling record}, a walk over the spine with one INST per argument, the same order as VTYPE of the neutral value. And there are few of them. Counted with an instrumented private copy of the candidate (the JVM launcher, 8 workers, no option, one pass, the aarch64 host; a K typing is counted when the K rule computes the type of its major premise, not when the reduction is found in a memo; second runs in the mode included):}
+
+\table{
+\tr{\th{Corpus}\th{K typings computed}\th{Declarations with at least one}\th{Declarations the machine started}\th{Major premise a neutral application}\th{a free variable}\th{a projection value}\th{a let variable, two types / one type}\th{a kept application}\th{a delayed redex}\th{a delayed let term}\th{a delayed projection}\th{a delayed application of a variable}}
+\tr{\td{Std}\td{4,076}\td{889}\td{91,711}\td{3,321}\td{751}\td{0}\td{0 / 3}\td{0}\td{1}\td{0}\td{0}\td{0}}
+\tr{\td{cslib}\td{8,370}\td{2,963}\td{368,173}\td{8,289}\td{59}\td{11}\td{0 / 3}\td{3}\td{4}\td{1}\td{0}\td{0}}
+\tr{\td{Mathlib}\td{46,376}\td{8,247}\td{656,753}\td{44,442}\td{1,523}\td{326}\td{5 / 24}\td{8}\td{23}\td{12}\td{1}\td{3}}
+}
+
+\p{On Mathlib 9 more are constants. Of the 39 delayed major premises of Mathlib, 9 have a stored type, 23 are not yet forced and 7 are forced already (their value is known and their type is still asked through the suspension). So the K rule meets a delayed redex, let term or projection 36 times on Mathlib (39 with the delayed applications of a variable), 5 times on cslib and once on Std: these are real inputs of the shape of findings MO2-F3 and MO2-F6; those without a stored type are typed today by the type of the reduct, with no verdict known to depend on it. The typing part of the rule is free.}
+
+\p{\strong{The cost is in the keeping part, and it was not measured.} A value that holds a suspension where it held a value is another record: fewer identical records, fewer hits of the memo words and of the pair table, more work in the structural comparison, which must look through the suspension. How many of the neutral major premises above are reducts that a kept term would have replaced cannot be read off the value; that needs a count at ARGV. The mode's own counter gives one bound from below: 172,023 kept applications of let variables on the eight corpora when every declaration runs in the mode (the report of MO-2, section 8.4), and redexes are more frequent than applied let variables: every \code{have} of a real proof is one. The earlier experiment with let values that are never replaced (erratum E1 of the reconciliation, the notes of package M2) ended in non-termination; this rule is narrower (a kept term is still forced once and its value memoised, only its identity is kept), but that experiment is the reason to measure before believing.}
+}
+
+\subtree{
+\title{11.4 What it does not cover}
+
+\ul{
+\li{\strong{The scope half} (finding MO2-F1, and F1 of this review). It is not a typing rule: after \code{infer_let} the official variable does not exist. The official kernel abstracts the variable out of the returned type and substitutes the value term when the type is reduced. The machine can do the same and nothing less will be exact: a let record per \em{binding} (a serial number in its identity, so that two binders are two records), and at the end of the let chain, if the returned type holds the record, a rewrite of that type with the record replaced by the delayed value term, which the rule of 11.2 then types as a term. That removes the states, the marks and the scope stack. It costs a traversal of the returned type for each let whose type holds its variable, and it ends the sharing of let records between a lambda body and its later typings under an argument. Not measured. The alternative is the comparison in every state that the patch has, with a record per binding to repair F1.}
+\li{\strong{The typing of a lambda body again under the argument} (F2, F3). The official kernel computes the type of a lambda once, under the binder, and instantiates the result. A machine that computes it again per argument replays every reduction that the typing of the body needs, with the argument where the binder was. An argument that keeps the domain as its type when it is passed on, as the typed binding does for INFER of the variable only, would cover the K rule on the binder; it puts a record into values that is not the value. No simpler exact rule is seen here.}
+\li{\strong{The shortcuts of the default set} that build or compare values without the term (code blocks, the lazy evaluation of one side, the proof-comparison shortcuts): the rule changes the default tier, so each of them has to be shown to hand the kept term on. That is a change of every declaration's values, with all gates and an adversarial pass of its own.}
+}
+
+\p{\strong{In short.} The class has a simple exact rule for typing, and it is cheap where the K rule runs. What is not simple is what the machine gave up for speed: a value that is its own normal form, a let variable that is shared, a lambda type that is recomputed. A second run in a mode is a way to pay those prices only for the few declarations that need it, and that idea is sound; what failed in this build is that the mode still works on values (kept applications found by evaluation, guards on terms whose variables are bound to values) and that it is another tier than the one the declaration was trusted in. A mode built on the rule of 11.2 plus the substitution at scope exit, started by a flag that says "a non-inert delayed term was replaced by its value, or forced through a let variable, in this declaration" instead of by a list of shapes, would not need the chain, the states or the declines. How many declarations that flag would run twice is the number to measure first.}
+}
+}
+
+\subtree{
+\title{12. What would change the verdict, and rows for the suite}
+
+\ul{
+\li{\strong{The six wrong rejects of section 3 are rejections of the second run.} On the eight corpora every one of the 93 runs in the mode is an accept (the report of MO-2, section 8.4). A second run that may accept and may not reject, with a rejection in the mode treated as "no verdict" as the base treats the whole unit today, would keep the 80 real units and turn F3, F4, F7, F8, F12 and the mode's part of F1 and F10 from wrong rejects into declines. It would leave the two new accepts of derivable statements (the mirrors of F4 and F7) and the trigger holes of section 5, which the published build has too. This was not built and not tested; it is the smallest change the findings suggest, not a repair of the mode.}
+\li{\strong{55 rows are proposed for the hostile suite} (all exports of section 7 but the void one), with the official verdicts, in the format of the manifest: 9 with the kind T and the reason in the text; 16 official accepts that a plain run of the published build rejects, which the gate cannot take today because it lets the count of known wrong rejects go down only; 30 strict rows. Six of the strict rows are the wrong rejects of the candidate: with them in the suite the gate of the candidate fails, which is what a gate is for.}
+\li{\strong{For the argument of section 7.2 of the report of MO-2}: step 1 ("the value in the major position is the official term") fails for a delayed term typed by its forced value and for a struct or a value term whose variables are bound to closures; step 3 ("the scope stack is the official local context") fails for two binders that are one record; step 4 ("everything else is the generic tier") is true and is itself a source of wrong rejects; step 5 ("the mode is reached") fails for four shapes.}
+}
+}
