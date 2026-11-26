@@ -1,4 +1,4 @@
-\title{MO-3: eager reduction on the machine in place (a first candidate with local pair entries, refused by review; a second with the union rule)}
+\title{MO-3: eager reduction on the machine in place (three candidates: local pair entries; the union rule; the union rule with the K rule as one procedure)}
 \taxon{Report}
 \date{2026-11-25}
 \author{claude-fable-5-2}
@@ -6,10 +6,10 @@
 \tag{machine}
 \tag{soundness}
 \tag{performance}
-\meta{updated}{2026-11-25}
+\meta{updated}{2026-11-26}
 \import{base-macros}
 
-\p{Package "MO-3" of 2026-11-25 (21:30 UTC to the early hours of the next UTC day). The maintainer's instruction of that day: the re-check by the reference engine is turned off in the default configuration, the machine is to follow the official behaviour by itself, and the reference engine is a fallback for development that must not affect production. So the machine has to decide every declaration that it hands to the reference engine today. This package takes one class of them, \strong{the declines of eager reduction}: a declaration that the machine declines because it applies \code{eagerReduce}. Its question was why the machine's switch \code{eager} ([the design note](design-eager-reduction), [the report of the package that built it](rep-eager-reduction)) speculates on what eager reduction would do instead of doing what the official kernel does, and whether an exact mechanism without probes, without a second run and without declines exists. A first candidate that claimed to be that mechanism was built and gated (sections 3 to 13) and was refused by two adversarial reviews within an hour of its delivery: it rejected exports that the official checker accepts. The second candidate (section 14) keeps what stood - the comparison in place, no probe, no second run, no decline - and replaces the claim of exactness by a rule that cannot reject what either procedure shows. Both are patches for the module \code{rlvm-machine}, not applied and not published. The work was done in private copies of the tracked sources, the official verdicts are those of leanchecker 4.36.0 in Docker, and every timing was taken in windows of \src{bench/quiet.py}.}
+\p{Package "MO-3" of 2026-11-25 (21:30 UTC to the early hours of the next UTC day). The maintainer's instruction of that day: the re-check by the reference engine is turned off in the default configuration, the machine is to follow the official behaviour by itself, and the reference engine is a fallback for development that must not affect production. So the machine has to decide every declaration that it hands to the reference engine today. This package takes one class of them, \strong{the declines of eager reduction}: a declaration that the machine declines because it applies \code{eagerReduce}. Its question was why the machine's switch \code{eager} ([the design note](design-eager-reduction), [the report of the package that built it](rep-eager-reduction)) speculates on what eager reduction would do instead of doing what the official kernel does, and whether an exact mechanism without probes, without a second run and without declines exists. A first candidate that claimed to be that mechanism was built and gated (sections 3 to 13) and was refused by two adversarial reviews within an hour of its delivery: it rejected exports that the official checker accepts. The second candidate (section 14) keeps what stood - the comparison in place, no probe, no second run, no decline - and replaces the claim of exactness by a rule that cannot reject what either procedure shows; a second pass of the reviewers refused it too, and the third candidate (section 15) repairs what both passes traced to one root. All three are patches for the module \code{rlvm-machine}, not applied and not published. The work was done in private copies of the tracked sources, the official verdicts are those of leanchecker 4.36.0 in Docker, and every timing was taken in windows of \src{bench/quiet.py}.}
 
 \subtree{
 \title{0. Result in one page}
@@ -19,11 +19,13 @@
 \li{\strong{What has to be keyed.} Not the mode: the official caches are shared by the two modes, and a table partitioned by mode rejects what the official checker accepts (a pair compared in plain mode and then under the flag in one declaration is answered from the cache). What an entry needs is the \em{life} of an official cache entry, one declaration - and only if its answer can depend on the mode at all. An entry written by a comparison that passed no point where the modes may part is the same in both modes and stays what it was, an entry of the session.}
 \li{\strong{The first candidate} (section 3; mode \code{local}). The comparison runs where it stands, under the bit; a comparison that passes a point where the modes may part is marked, and what a marked comparison writes into the pair table is a \em{local} entry, valid in both modes in its own declaration only; under the bit the machine runs the official order without the shortcuts of plain mode. Three more rules were to keep the machine from rejecting what the official cache would have answered: a search of the pair table by expression, a plain comparison inside the K rule, and a second check of a declaration alone before a rejection. It passed every gate and the guard (sections 6 to 8) - and \strong{was refused}: [the review from the source](rep-RV-3A) and [the review from the outside](rep-RV-3B) found wrong rejections on hand-made and generated exports (10 of 58 and 199 of 3,681 as run here), a dependence of the verdict on the schedule, and no accept of a statement that is not derivable. The three rules guessed what the official cache holds; a machine whose plain mode takes shortcuts cannot know that (section 14.1).}
 \li{\strong{The second candidate: the union rule} (section 14.2). Under the bit a pair is true if the eager procedure \em{or} the plain procedure shows it: a comparison that ends false under the bit is asked again in plain mode at its own level, and two applications of one recursor that are false both ways are compared as they stand, argument by argument. Both procedures are sound, so the union accepts nothing that is not derivable; it rejects no pair that either can show; and it accepts a derivable statement that the official checker rejects only through the order of its cache, which the standing policies allow. The comparison of the K rule stays in its own mode, and a reduction that depends on a marked one is not remembered. The search, the plain comparison inside the K rule and the run alone are gone.}
-\li{\strong{Declines.} No declaration of the eight corpora is declined for eager reduction: con-leche 1 unit, cslib 4 and Mathlib 4 before, 0 after, for both candidates. The 230 published arena tests had none before and have none.}
-\li{\strong{Hostile exports, second candidate} (section 14.4). No wrong rejection and no accept of a statement that is not derivable on the 58 rows of the first review, the 42 rows and the 3,681 generated exports of the second, its 1,486 real mutants, and the suite (1,433 rows now, 56 switch sets). \strong{Not so on the author's own rows against the union}: of 17 exports the second candidate rejects four that the official checker accepts (three with the recursors of the K rule behind definitions, one in pure plain mode); the published build rejects the same four and four more (section 14.9). One verdict under every schedule on the exports that showed the dependence. On the 101 rows of the suite's eager family: 64 official verdicts and 37 accepts of kind T rows, where the first candidate had 93 and 8 and the published mechanism has 63, 37 and one decline. That is the price: the union gives up the official rejection of a pair that is first asked under the flag and is true in plain mode.}
-\li{\strong{Cost, second candidate.} No comparison under the flag is false on any of the eight corpora, so the plain procedure is never asked there; what the second candidate adds on real declarations is the memo words that a marked comparison of the K rule keeps from being written: the machine's ticks are -0.09 to -1.24 \% against the published build on seven corpora and +0.65 \% on navier-stokes-euler (section 14.5). The guard of [the rule for a default](dec-YP0N) passes on the executable (geometric mean 0.993, no corpus above 1.006). On the JVM launcher the geometric mean is 0.990 and one corpus, navier-stokes-euler, is at 1.031 in the first window of three rounds and at 1.012 in a repeat of six: not a clean pass (section 14.6). Peak resident set unchanged.}
-\li{\strong{Found on the way.} Eight wrong rejections of the \em{published} build on exports made against the union rule, one of them in pure plain mode (section 14.9); a wrong rejection of the first candidate found by its own row before any gate (section 5.3); and a merge of two packages by \code{patch} that compiles and gives wrong verdicts (section 12).}
-\li{\strong{Verdict.} \strong{The first candidate: NO-GO} (two reviews). \strong{The second candidate: GO to a second adversarial pass, NO-GO for a default before it}, and three things that the pass and the maintainer should know before they start. (1) On everything the two reviews built - 100 rows, 3,681 generated exports, 1,486 real mutants, the schedule family - it has no wrong rejection and no accept of a statement that is not derivable; nothing is declined, probed or run twice; its gates pass, the mutants with SOUNDNESS 0 among them. (2) It is not what the instruction asked for in full: it still rejects four hand-made official accepts, three of them under the flag, found by its author; the published build rejects the same four and four more, so nothing measured here is worse than what is published, but "the machine alone gives every official accept" is not reached, and section 14.8 says why it cannot be reached inside eager reduction: the machine's K rule fires in plain mode where the official one does not. (3) The guard on the JVM launcher is marginal on one corpus, with a known cause and a remedy that is not built. The price of the union itself is agreement on hostile rejections: 64 of 101 rows where the first candidate had 93. If the maintainer wants the official rejection on a pair that is first asked under the flag, no candidate of this package has it without wrong rejections of official accepts.}
+\li{\strong{The second candidate was refused as well}, in a second pass of both reviewers ([from the source](rep-RV-3A2); section 9 of [the other review](rep-RV-3B)). Its soundness held under a targeted attack and its counts were reproduced; but a "stuck" that the comparison of the K rule left under the bit was read in plain mode (wrong rejections and a dependence on the schedule that the published build does not have), a failing comparison was exponential in its depth and ended as a decline, and its author had found four more rejections of official accepts (sections 14.9 and 15.1). All of them have one root: the machine's K rule fired in plain mode through a shortcut where the official one stays stuck.}
+\li{\strong{The third candidate} (section 15.2) is the union rule with that root repaired. The comparison of the K rule is one procedure in both modes: no shortcut of plain mode inside it, and no success read in it that another kind of comparison wrote. A pair that is false both ways is remembered for its declaration. The memo words that a marked comparison of the K rule may not carry across the modes are written in plain mode and cleared when the declaration reaches an eager argument.}
+\li{\strong{Declines.} No declaration of the eight corpora is declined for eager reduction: con-leche 1 unit, cslib 4 and Mathlib 4 before, 0 after, for all three candidates. The 230 published arena tests had none before and have none.}
+\li{\strong{Hostile exports, third candidate} (section 15.3). The first reviewer's 1,220 programs over officially stuck recursors: all accepted (the published build 693, the second candidate 953). No wrong rejection, no accept of a false step and no decline of the machine alone on the 5,326 generated exports of the second reviewer; one verdict in every run of the schedule rows; the towers that cost the second candidate its tick bound are accepted by the machine alone in 603 to 1,848 ticks; the official verdict on the 2,338 real inputs on which the published build gives it; all eight exports on which the published build is wrong and all 17 of this package's own attack are accepted. On the 101 rows of the suite's eager family: 64 official verdicts and 37 accepts of kind T rows, as the second candidate - the price of the union is unchanged.}
+\li{\strong{Cost, third candidate.} The machine's ticks are at or below the published build's on every corpus (-0.02 to -1.25 \%); the root repair moves them by 0.01 \% at most, because only 0 to 1,413 plain comparisons of the K rule per corpus had used a shortcut (section 15.4). In wall clock the guard of [the rule for a default](dec-YP0N) passes on the executable (geometric mean 0.990, no corpus above 1.017) and \strong{does not pass on the JVM launcher}: no corpus is more than 2.1 \% slower, but the geometric mean is 1.003 where the rule asks that it go down - about one per cent more work per comparison than the second candidate, with a likely cause and a repair that is not built (section 15.5).}
+\li{\strong{Found on the way.} Eight wrong rejections of the \em{published} build on exports made against the union rule, one of them in pure plain mode (section 14.9; the third candidate accepts all eight); a wrong rejection of the first candidate found by its own row before any gate (section 5.3); and a merge of two packages by \code{patch} that compiles and gives wrong verdicts (section 12).}
+\li{\strong{Verdict.} \strong{First and second candidate: NO-GO} (the reviews). \strong{The third candidate: GO to a third adversarial pass; not yet a GO for a default, for one measured reason}: the guard does not pass on the JVM launcher (geometric mean 1.003, section 15.5). Everything else that was asked for it holds: the first reviewer's 1,220 K programs are all accepted and none is rejected that the published build accepts; no wrong rejection and no accept of a false step on any corpus of the two reviews, the machine alone declining nothing; one verdict under every schedule; the towers in linear ticks; the eight corpora, the arena tests and the mutants (SOUNDNESS 0, COMPLETENESS 0) unchanged; the differential engine without a disagreement; every wrong rejection of the published build that this night found on the K rule repaired in the default set. The coordinator's instruction for this candidate was to fall back to the reviewer's trade if the root repair failed the guard. I did not: the trade gives up 268 of the 1,220 programs and the eight exports of section 14.9 for a difference of 0.3 \% in a geometric mean, it would not remove the second mark, which is the larger part of what was added to a comparison, and the time for another full cycle of gates was not there; the decision is the maintainer's, and the numbers for it are in sections 15.3 to 15.5.}
 }
 }
 
@@ -482,7 +484,7 @@
 
 \p{\strong{The executable.}}
 \table{
-\tr{\th{Corpus}\th{Published, ms}\th{Second candidate, ms}\th{ratio}\th{CPU of a pass, published / candidate, ms}\th{Peak RSS, published / candidate, MiB}\th{Rounds: published; candidate}}
+\tr{\th{Corpus}\th{Published, ms}\th{Candidate, ms}\th{ratio}\th{CPU of a pass, published / candidate, ms}\th{Peak RSS, published / candidate, MiB}\th{Rounds: published; candidate}}
 \tr{\td{Init}\td{609.2}\td{603.2}\td{0.990}\td{4398 / 4374}\td{376 / 381}\td{608, 613, 610, 602, 613; 603, 603, 606, 604, 600}}
 \tr{\td{Std}\td{1056.6}\td{1051.2}\td{0.995}\td{7862 / 7868}\td{612 / 603}\td{1047, 1045, 1051, 1068, 1072; 1051, 1056, 1051, 1037, 1061}}
 \tr{\td{cedar}\td{1482.2}\td{1486.0}\td{1.003}\td{11096 / 11108}\td{769 / 766}\td{1477, 1462, 1475, 1491, 1506; 1474, 1501, 1477, 1497, 1481}}
@@ -496,7 +498,7 @@
 
 \p{\strong{The JVM launcher.}}
 \table{
-\tr{\th{Corpus}\th{Published, ms}\th{Second candidate, ms}\th{ratio}\th{CPU of a pass, published / candidate, ms}\th{Peak RSS, published / candidate, MiB}\th{Rounds: published; candidate}}
+\tr{\th{Corpus}\th{Published, ms}\th{Candidate, ms}\th{ratio}\th{CPU of a pass, published / candidate, ms}\th{Peak RSS, published / candidate, MiB}\th{Rounds: published; candidate}}
 \tr{\td{Init}\td{585.2}\td{557.4}\td{0.952}\td{4138 / 4058}\td{834 / 838}\td{574, 595, 601, 564, 592; 569, 567, 563, 556, 532}}
 \tr{\td{Std}\td{972.8}\td{969.0}\td{0.996}\td{7112 / 7048}\td{1499 / 1470}\td{1026, 927, 959, 971, 981; 978, 962, 932, 987, 986}}
 \tr{\td{cedar}\td{1359.4}\td{1313.6}\td{0.966}\td{9778 / 9584}\td{1756 / 1780}\td{1381, 1310, 1364, 1369, 1373; 1259, 1323, 1329, 1331, 1326}}
@@ -580,6 +582,169 @@
 \li{\strong{The mode \code{deferred}} keeps the wrong rejections of the published mechanism (six rows of the suite carry the note); nothing was done about them.}
 \li{\strong{The kind of the nine rows with a Nat function that does not compute}: the first review reads them as kind T and asks for the maintainer's confirmation; this package took the reviewer's marks as they are.}
 \li{\strong{The patch together with the package on the K rule after a let application}: the module's suites and the hostile step on a hand-merged copy only.}
+}
+}
+}
+
+\subtree{
+\title{15. The second review, and the third candidate: the K rule as one procedure}
+
+\p{The two reviewers attacked the second candidate again: [from the source](rep-RV-3A2) and from the outside (section 9 of [the other review](rep-RV-3B)). Soundness held under a targeted attack (524 generated exports with a false step aimed at the union, the congruence of two recursor applications and the comparison asked both ways: none accepted), the counts of section 14 were reproduced, and the candidate was refused again. This section says what fell, what the third candidate changes, and what was measured. The third candidate is again a private build of a private copy; nothing is applied or published.}
+
+\subtree{
+\title{15.1 What fell}
+
+\ul{
+\li{\strong{G1: "stuck" under the bit, read in plain mode} (wrong rejection, the arena's prelude, closed terms, not in the published build). Under the bit the comparison of the K rule ran without the same-head shortcut, was false and not marked, so "stuck" was remembered; plain mode read it, reduced a second recursor through its shortcut and compared stuck with reduct. 21 of the reviewer's 1,220 programs over five officially stuck recursors were rejected by the candidate and accepted by the published build. Section 14.3 had covered a reduct of plain mode read under the bit, not this direction.}
+\li{\strong{G3}: the same two declarations with 400 theorems between them: the verdict depended on which session checked the second one (13 accepts and 17 rejections in 30 runs).}
+\li{\strong{G2 and U1: a failing comparison was exponential.} Under the bit no false answer was remembered and every false comparison was asked again in plain mode, at every level; the same in plain mode after an eager-only event. From depth 24 a unit ended at the machine's tick bound and was declined, also when the failing comparison was a step of a comparison that succeeds. Section 14.8 had named the cost and not built it.}
+\li{\strong{And the four rejections that the author had found} (section 14.9). All of these, and the eight wrong rejections of the published build found on the way, come back to one root, which the coordinator of the team assigned to this package after the second review: the machine's comparison of the K rule in plain mode was answered through a shortcut where the official one is false.}
+}
+}
+
+\subtree{
+\title{15.2 The third candidate}
+
+\ol{
+\li{\strong{The comparison of the K rule is one procedure in both modes.} While it runs (\code{\verb~|Machine.kExact~}, set in \code{\verb~|Reduce.k_iota3~} and restored in \code{\verb~|k_iota4~}, by the frame when the comparison is suspended and by the cut of a segment), the two shortcuts of plain mode are off, as they already were under the bit (\code{\verb~|Conv.congruence~}, \code{\verb~|Conv.skipArgs~}), and the only success that is read from the pair table is one that was written inside such a comparison (a status bit of the entry, \code{\verb~|Layout.KX~}, set in \code{\verb~|Pairs.add~}, tested in \code{\verb~|Conv.pairHit~}): a success that a shortcut wrote elsewhere does not answer it. So the K rule fires in plain mode where the official one does, and for a comparison that is not marked "stuck" and "reduct" mean the same in both modes: G1 and G3 have no cause, and neither have the wrong rejections of the published build's plain mode on these exports. A comparison of the K rule that is marked still leaves no memo word across the modes (item 5 of section 14.2).}
+\li{\strong{A pair that is false both ways is remembered} (\code{\verb~|Layout.UF~}, written by \code{\verb~|Conv.unionFalse~}): when the eager procedure, the plain procedure and the comparison of two recursor applications as they stand have all answered false and no comparison of the K rule took part (a second mark of the comparison in progress, \code{\verb~|Machine.kUsed~}, kept as the first one is), the entry answers false in either mode for the rest of the declaration. \em{Why a false of one mode never answers the other}: the entry is not one mode's - it is written only after both procedures failed; the memo of a false plain comparison is still read in plain mode only, and under the bit there is no other false entry. \em{Why it cannot go stale}: without a comparison of the K rule the two procedures are functions of the two values and of the answers of their sub-pairs; a sub-pair that was false both ways is of the same kind, and a sub-pair that was true stays true, so nothing that enters the table later can change the answer. With a comparison of the K rule in the pair nothing is written, because a success that enters the table later can change what that comparison answers, and with it a reduction. The entry is local: it ends with its declaration.}
+\li{\strong{The memo words under a marked comparison of the K rule are written in plain mode after all, and logged} (\code{\verb~|Reduce.kDepSlow~}, \code{\verb~|Machine.kLog~}): the log is cleared - the words set back to "not known" - when the declaration reaches a comparison under the bit, comes back to the bit from a plain attempt, or ends. Under the bit such a word is still not written. No word of one mode is read in the other or in a later declaration, as before, and a declaration without an eager argument computes such a reduction once: the +0.65 \% of ticks of the second candidate on navier-stokes-euler are gone (section 15.4).}
+\li{\strong{The rest is the second candidate}: the comparison in place, the union at the level of every called pair, two recursor applications as they stand, the marks and local entries, no false entry of one mode under the bit.}
+}
+
+\p{\strong{What I took of the three items of the second review's assignment, with the numbers}: the root repair (item 1), because it costs nothing that can be counted - on the eight corpora 6 to 1,413 plain comparisons of the K rule per corpus had a shortcut inside (0.0 to 18.7 \% of them, section 15.4), and the machine's ticks move by 0.00 to 0.01 \% - and it passes every gate; the memo of false answers (item 2); not the reviewer's trade (a false K comparison under the bit leaves no memo word), which the root repair makes unnecessary.}
+}
+
+\subtree{
+\title{15.3 What the third candidate answers}
+
+\p{Executables, default options unless a setting is named; "alone" is \code{\verb~|-X fallback=none~}: the machine's verdict or a decline. Official verdicts are the reviewers' (leanchecker 4.36.0 in Docker).}
+
+\table{
+\tr{\th{Input}\th{Count}\th{Third candidate: official verdict / kind T accept / wrong reject / accept of a false step / declined}\th{Published build}\th{Second candidate}}
+\tr{\td{the family of K programs of the first reviewer (five officially stuck recursors, one to three steps; all official accepts)}\td{1,220}\td{\strong{1,220} / 0 / \strong{0} / - / 0}\td{693 / 0 / 527}\td{953 / 0 / 267}}
+\tr{\td{the family of ordered programs with a Nat function that does not compute (409 accepts, 163 rejections)}\td{572}\td{509 / 63 / \strong{0} / - / 0}\td{531 / 0 / 41}\td{509 / 63 / 0}}
+\tr{\td{the rows of the first reviewer's first pass}\td{58}\td{50 / 8 / \strong{0} / 0 / 0}\td{48 / 9 / 1}\td{49 / 9 / 0}}
+\tr{\td{the rows of the first reviewer's second pass (G1, G2, G3 and 21 of the K programs among them)}\td{43}\td{42 / 1 / \strong{0} / 0 / 0}\td{-}\td{-}}
+\tr{\td{the rows of the second reviewer}\td{42}\td{28 / 14 / \strong{0} / 0 / 0}\td{29 / 13 / 0}\td{28 / 14 / 0}}
+\tr{\td{the generated exports of the second reviewer with an official verdict, the cost family among them (1,930 accepts, 2,544 derivable rejections, 852 with a false step)}\td{5,326}\td{3,224 / 2,102 / \strong{0} / \strong{0} / 0; alone: the same, \strong{0 declined}}\td{3,332 / 1,994 / 0 / 0; alone: 2,973 / 1,984 / 0 / 0 and 369 declined}\td{3,224 / 2,102 / 0 / 0 (declines hidden by the fallback)}}
+\tr{\td{the real inputs of the second reviewer with an official verdict, without the heavy slice}\td{2,343}\td{2,338 / 5 / \strong{0} / 0}\td{2,338 / 5 / 0 (per the review)}\td{2,338 / 5 / 0 (per the review)}}
+\tr{\td{this package's exports against the union (section 14.9)}\td{17}\td{\strong{17} / 0 / \strong{0} / 0 / 0}\td{9 / 0 / 8}\td{13 / 0 / 4}}
+}
+
+\ul{
+\li{\strong{The family of 1,220 K programs}: no program is rejected that the published build accepts - none is rejected at all.}
+\li{\strong{Schedule}: the row of G3 gives one verdict, an accept, in 30 runs each with 1, 2 and 8 workers, and in 40 runs over 1, 2, 4 and 8 workers with batch and pipelined loading and the JVM launcher; so does the row of eight copies.}
+\li{\strong{The towers}, machine alone, ticks of the unit beside the published build's: depth 8: 603 (466), 16: 770 (498; the second candidate 855,602), 24: 968 (530), 32: 1,202 (562), 48: 1,848 (626); the tower in plain mode after an eager-only event, depth 32 with a function that reads its argument: 1,406 (1,172); the second reviewer's true statement at depth 16 and 24: 725 (512) and 805 (544), and its false chain at depth 24, rejected: 793 (696). Every one is the machine's own verdict with \code{\verb~|-X fallback=none~}, none is declined, and the growth is linear in the depth. The file of 40 theorems: 16,066 ticks and no decline (published 948).}
+\li{\strong{Real inputs}: the official verdict on 2,338 of the 2,343 that have one; the other five are the second reviewer's open mutants of a power of two, which the official checker rejects with "deep recursion" and which the published build and both candidates accept (the value is unchanged; the statement is derivable).}
+\li{\strong{The suite's eager family}, the 101 rows of section 5, machine alone in process: 64 official verdicts, 37 accepts of kind T rows, as the second candidate. All 260 rows of the family as it is now (the reviews' rows and this package's): 200 official verdicts, 60 kind T accepts, no wrong rejection, none declined.}
+\li{\strong{The eight exports of section 14.9} are all accepted, the plain-only one included.}
+}
+}
+
+\subtree{
+\title{15.4 The eight corpora}
+
+\p{One worker in file order through the JVM launcher; all eight accept. The two columns on the K rule are from a counting copy of the second candidate, whose plain mode is the published one there.}
+
+\table{
+\tr{\th{Corpus}\th{Declined for eager reduction, published}\th{third candidate}\th{Machine ticks, published}\th{third candidate}\th{change}\th{against the second candidate}\th{Plain comparisons of the K rule}\th{of them with a shortcut of plain mode inside}\th{Comparisons false under the flag}\th{Pairs remembered as false both ways}\th{Memo words written under a marked K comparison and logged}}
+\tr{\td{Init}\td{0}\td{0}\td{33.39 M}\td{33.02 M}\td{-1.13 \%}\td{-0.02 \%}\td{576}\td{6}\td{0}\td{0}\td{124}}
+\tr{\td{Std}\td{0}\td{0}\td{55.49 M}\td{54.84 M}\td{-1.15 \%}\td{-0.01 \%}\td{4,031}\td{64}\td{0}\td{0}\td{114}}
+\tr{\td{cedar}\td{0}\td{0}\td{74.36 M}\td{73.43 M}\td{-1.25 \%}\td{-0.01 \%}\td{3,010}\td{59}\td{0}\td{0}\td{114}}
+\tr{\td{reachability}\td{0}\td{0}\td{9.00 M}\td{8.99 M}\td{-0.09 \%}\td{+0.00 \%}\td{901}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{con-leche}\td{1 (counter 2)}\td{0}\td{65.03 M}\td{64.74 M}\td{-0.45 \%}\td{+0.00 \%}\td{2,534}\td{475}\td{0}\td{0}\td{365}}
+\tr{\td{navier-stokes-euler}\td{0}\td{0}\td{142.36 M}\td{142.33 M}\td{-0.02 \%}\td{-0.67 \%}\td{11,869}\td{53}\td{0}\td{0}\td{233}}
+\tr{\td{cslib}\td{4 (counter 8)}\td{0}\td{204.48 M}\td{202.58 M}\td{-0.93 \%}\td{-0.06 \%}\td{9,097}\td{119}\td{0}\td{0}\td{741}}
+\tr{\td{Mathlib}\td{4 (counter 8)}\td{0}\td{559.75 M}\td{556.66 M}\td{-0.55 \%}\td{-0.02 \%}\td{50,593}\td{1,413}\td{0}\td{0}\td{2,712}}
+}
+
+\p{\strong{The root repair costs nothing that the counters see.} Of the plain comparisons of the K rule on a corpus, 0 to 1,413 had a shortcut of plain mode inside (an answer of the same-head probe or of closure congruence, or a skipped position): 0.0 to 2.8 \% of them, 18.7 \% on con-leche. Without the shortcut and without the entries of other comparisons they cost so little more that the machine's ticks are the second candidate's to 0.01 \%, and with the logged memo words the second candidate's +0.65 \% on navier-stokes-euler are gone: \strong{every corpus is at or below the published build}, -0.02 to -1.25 \%, which are the first candidate's figures. All eight accept, with the same units accepted by the machine as before; no comparison under the flag is false, no pair is remembered as false both ways, no eager-only event happens, no declaration is run twice, nothing is declined for eager reduction; the units that the reference engine decides are those of the second candidate. With \code{\verb~|-X machine.eager-mode=deferred~} the candidate is the published build: 990 counters of the machine compared on the eight corpora, 988 identical; the count of frame words differs on con-leche (by 3) and navier-stokes-euler (by 6).}
+}
+
+\subtree{
+\title{15.5 The guard}
+
+\p{As sections 7 and 14.6, the pristine build against the third candidate; five rounds on the short corpora and, on the JVM launcher, on the large ones as well (three on the executable). The windows, in UTC on 2026-11-26: the executable 06:03 to 06:11 and 06:11 to 06:21, the JVM launcher 06:21 to 06:30 and 06:30 to 06:47. The cores outside the windows carried this package's own gates until 06:18 and the work of other packages (load average at the start of a corpus: 10 to 26 for the executable, 14 to 41 for the JVM launcher); the kernel's count of compaction stalls did not move between the starts of the corpora.}
+
+\p{\strong{The executable.}}
+\table{
+\tr{\th{Corpus}\th{Published, ms}\th{Candidate, ms}\th{ratio}\th{CPU of a pass, published / candidate, ms}\th{Peak RSS, published / candidate, MiB}\th{Rounds: published; candidate}}
+\tr{\td{Init}\td{645.8}\td{600.8}\td{0.930}\td{4362 / 4296}\td{473 / 376}\td{599, 663, 789, 581, 597; 600, 640, 595, 584, 585}}
+\tr{\td{Std}\td{1013.8}\td{1030.6}\td{1.017}\td{7622 / 7728}\td{607 / 605}\td{1018, 1012, 1024, 1002, 1013; 1026, 1023, 1011, 1014, 1079}}
+\tr{\td{cedar}\td{1442.0}\td{1435.2}\td{0.995}\td{10898 / 10862}\td{765 / 1057}\td{1481, 1454, 1447, 1420, 1408; 1459, 1443, 1437, 1422, 1415}}
+\tr{\td{reachability}\td{429.9}\td{422.2}\td{0.982}\td{1137 / 1128}\td{734 / 736}\td{423.9, 422.9, 438.1, 428.5, 436.1; 418.9, 413.2, 448.6, 399.6, 430.6}}
+\tr{\td{con-leche}\td{1322.8}\td{1303.0}\td{0.985}\td{8558 / 8554}\td{925 / 924}\td{1330, 1290, 1313, 1333, 1348; 1297, 1303, 1320, 1324, 1271}}
+\tr{\td{navier-stokes-euler}\td{3585.3}\td{3629.7}\td{1.012}\td{27330 / 27713}\td{1502 / 1556}\td{3495, 3642, 3619; 3607, 3612, 3670}}
+\tr{\td{cslib}\td{4718.3}\td{4649.0}\td{0.985}\td{36253 / 35630}\td{1625 / 1617}\td{4835, 4688, 4632; 4728, 4461, 4758}}
+\tr{\td{Mathlib}\td{12756.3}\td{12963.7}\td{1.016}\td{98943 / 100800}\td{4049 / 4004}\td{13528, 12349, 12392; 13385, 12413, 13093}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{\strong{0.990}}\td{}\td{}\td{8 corpora; largest ratio 1.017, smallest 0.930}}
+}
+
+\p{\strong{The JVM launcher.}}
+\table{
+\tr{\th{Corpus}\th{Published, ms}\th{Candidate, ms}\th{ratio}\th{CPU of a pass, published / candidate, ms}\th{Peak RSS, published / candidate, MiB}\th{Rounds: published; candidate}}
+\tr{\td{Init}\td{536.4}\td{539.6}\td{1.006}\td{3988 / 3920}\td{962 / 953}\td{537, 549, 541, 510, 545; 533, 531, 541, 547, 546}}
+\tr{\td{Std}\td{906.2}\td{920.0}\td{1.015}\td{6886 / 6994}\td{1463 / 1468}\td{888, 904, 898, 938, 903; 906, 910, 913, 917, 954}}
+\tr{\td{cedar}\td{1309.8}\td{1256.6}\td{0.959}\td{9620 / 9374}\td{1782 / 1765}\td{1313, 1278, 1374, 1268, 1316; 1273, 1253, 1243, 1263, 1251}}
+\tr{\td{reachability}\td{315.8}\td{312.3}\td{0.989}\td{988 / 987}\td{1540 / 1560}\td{307.7, 317.2, 308.1, 325.9, 320.3; 321.8, 321.6, 311.3, 305.8, 301.2}}
+\tr{\td{con-leche}\td{1173.4}\td{1185.2}\td{1.010}\td{7588 / 7616}\td{1783 / 1782}\td{1138, 1199, 1168, 1150, 1212; 1154, 1139, 1243, 1170, 1220}}
+\tr{\td{navier-stokes-euler}\td{3028.6}\td{3071.8}\td{1.014}\td{22898 / 23594}\td{2328 / 2320}\td{3190, 3179, 2919, 2963, 2892; 3196, 3132, 3024, 3038, 2969}}
+\tr{\td{cslib}\td{4126.8}\td{4160.8}\td{1.008}\td{30808 / 31148}\td{2431 / 2427}\td{4118, 4038, 4145, 4187, 4146; 4277, 4141, 4083, 4138, 4165}}
+\tr{\td{Mathlib}\td{11739.6}\td{11987.6}\td{1.021}\td{89224 / 91014}\td{4844 / 4810}\td{11647, 11811, 11702, 11677, 11861; 11649, 12215, 11733, 11785, 12556}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{\strong{1.003}}\td{}\td{}\td{8 corpora; largest ratio 1.021, smallest 0.959}}
+}
+
+\p{\strong{The executable passes the rule by its letter}: geometric mean 0.990, no corpus more than 1.7 \% slower (Std 1.017, Mathlib 1.016, navier-stokes-euler 1.012). The mean owes its distance from 1 to Init (0.930: two of the five rounds of the published build were disturbed); the CPU time of a pass has a geometric mean of 1.000, between -1.7 and +1.9 \%. \strong{The JVM launcher does not pass it}: no corpus is more than 3 \% slower (the largest ratio is 1.021, Mathlib), but the geometric mean is \strong{1.003}; the rule asks that it go down. Six corpora are 0.6 to 2.1 \% slower there and two are faster (cedar 0.959, reachability 0.989); the CPU time of a pass is 1.1 to 3.0 \% higher on Std, navier-stokes-euler, cslib and Mathlib. This is not the tick count, which is at or below the published build's on every corpus (section 15.4), and it is not what the second candidate showed (0.993 and 0.990 on the two launchers; a first candidate 0.996 and 0.993): the third candidate does about one per cent more work per comparison than the second. What it added to every comparison: a second mark that is saved, cleared and given back around it (\code{\verb~|Machine.kUsed~}), a test of \code{\verb~|Machine.kExact~} in the two shortcut predicates and on every success read from the pair table. That is the likely cause; it was not isolated by a measurement. A repair that was not built: keep the second mark as a counter of comparisons of the K rule that a comparison only reads when it starts (no store, nothing to give back), and fold the test of the shortcut predicates into one word. The windows were not repeated; with five rounds a difference of one per cent is at the edge of what they resolve, and the result is reported as it came. The peak resident set is unchanged (Mathlib 4,049 and 4,004 MiB on the executable, 4,844 and 4,810 on the JVM launcher).}
+}
+
+\subtree{
+\title{15.6 Gates of the third candidate}
+
+\table{
+\tr{\th{Gate}\th{Result}}
+\tr{\td{the suites of \code{rlvm-machine} in the private copy}\td{default group 461 tests, no failure (4 skipped, as before); \code{SHostileSlowTest}: 56 switch sets by 1,479 rows, nothing unexpected; \code{SHostileEagerTest} pins the verdict of each of the 260 rows of the family under the default set (also with the host depth bound at 0) and asserts under five switch sets: no decline, no rejection of an official accept, no accept of a row that is not of kind T}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile --native~} (the executable)}\td{PASS. 230 of 230 arena tests correct, none declined. 17,775 mutants: \strong{SOUNDNESS 0}, COMPLETENESS 0, agree 16,092, declined 1,683, no error or timeout. Hostile suite, 1,479 rows: official verdict 1,353, accept of a kind T row 110, wrong accept 0, wrong reject 0, declined 4, and the 12 rows that the tree marks as known wrong rejects}}
+\tr{\td{the same through the jars (JVM launcher)}\td{PASS, the same counts in every column}}
+\tr{\td{the hostile step alone on the pristine build, the same 1,479 rows}\td{official verdict 1,343, accept of a kind T row 112, wrong accept 0, \strong{wrong reject 8}, declined 4, the same 12 known rows: the published build fails the step on the new rows, as it must (through the executable; the jars the same)}}
+\tr{\td{the eight corpora with 8 and with 4 workers, executable and JVM launcher}\td{32 of 32 accept; Mathlib with 8 workers: 3.5 GiB resident in the executable, 4.6 GiB on the JVM launcher}}
+\tr{\td{the machine's gate (M8) of the default set, all parts, table audit on, session cap 1 MiB}\td{PASS WITH DECLINES. Differential per declaration against the reference engine: the 230 tests (17,493 units; the machine accepts 15,804, rejects 41, declines 0), Init (0 declined), Std (1 declined: the K rule after a let application), reachability, the Cedar slice: SOUNDNESS 0, COMPLETENESS 0. Tier equivalence: no different outcome. Convention equivalence (host depth bound 0 and no bound against 128: outcome, ticks, every record word with its memo words, the pair entries): no difference. Debug audits: no different outcome, none ended by an audit. Pipeline: 230 of 230 verdicts right, the corpora right}}
+\tr{\td{the differential engine (\code{\verb~|-X engine=diff~}) on the eight corpora, 8 workers, executable and JVM launcher}\td{16 of 16 runs accept; no unit on which the two engines differ (0 disagreements, 0 units that the machine rejects and the reference engine accepts, 0 anomalies of a warm session). Mathlib: the reference engine checks 714,712 units and accepts them all, the machine declines 120 of its 655,344, none of them for eager reduction; 12.6 GiB resident in the executable, 13.0 GiB on the JVM launcher}}
+\tr{\td{a fresh JVM build of the final private tree}\td{the same jars byte for byte as the gated build}}
+}
+
+\p{The suite has 1,479 rows: the 1,433 of section 14.7, the 43 rows of the second pass of [the review from the source](rep-RV-3A2) with its marks, and three more of this package's (the recursors behind definitions, section 14.9). The second reviewer proposed no new rows. The notes \code{eager-accept} and \code{deferred-reject} are now computed from the verdicts of the candidate's machine alone in its two modes (60 and 9 rows).}
+}
+
+\subtree{
+\title{15.7 What is left}
+
+\ol{
+\li{\strong{Agreement} is that of the union: 64 of 101 on the suite's family, 3,224 of 5,326 on the generated corpus (the published build 3,332): a derivable statement that is first asked under the flag and is true in plain mode is accepted.}
+\li{\strong{A comparison that fails with a comparison of the K rule inside it} is not remembered as false both ways; a tower of such comparisons is still computed twice at every level. No export was built; the result would be a decline at the tick bound, not a verdict.}
+\li{\strong{A mixed derivation through the K rule inside one reduction} (section 14.8) stays outside the argument; with the K rule exact in both modes the machine no longer reduces a recursor that the official kernel leaves stuck, which was the only way such a case had been reached.}
+\li{\strong{The plain mode changed}: inside a comparison of the K rule no shortcut answers. A declaration that needed the shortcut to fire the K rule would now be rejected or run longer. None exists in the eight corpora, the 230 arena tests, the 17,775 mutants, the 2,343 real inputs of the second review (section 15.6); the kind T accepts of the published plain mode that went through such a reduction are official rejections now (one row of the first review).}
+\li{\strong{Without the switch \code{eager}} (other switch sets, a strict engine) and in the mode \code{deferred} the K rule is the published one, with its wrong rejections; nine rows of the suite carry the note for the mode.}
+\li{\strong{The marks} remain a cheap over-approximation; they decide the life of entries and of memo words, not a verdict.}
+}
+}
+
+\subtree{
+\title{15.8 The patch of the third candidate, and the lines of the K rule}
+
+\p{One unified diff and one archive, not applied and not published; they replace the patch of section 14.10. The diff changes 19 text files of \code{rlvm-machine}, the same as before; the archive holds 205 gzipped exports (46, 13 and 3 of this package, 58 and 43 of the first reviewer, 42 of the second). Checked when it was made: it applies to the main tree of 06:48 UTC on 2026-11-26 with no fuzz allowed, and that tree with the diff and the archive is, file for file, the private tree that was gated; a fresh JVM build of that tree gives the gated jars byte for byte. \strong{The lines of the K rule}, for a merge by hand with the package on the K rule after a let application, which works in the same functions. In \code{Reduce.java}: in \code{\verb~|k_iota3~} one line is added before the call of the comparison (\code{\verb~|int fl = m.erLocal ? kEnter(m) : 0;~}) and the last line is changed (the frame \code{\verb~|IOTA[4]~} gets a fourth word, \code{fl}; a signal goes through \code{kSignal}); \code{\verb~|k_iota4~} gets the parameter \code{fl} and, after the line that takes the nesting unit off the bit, one block of seven lines under \code{\verb~|if (m.erLocal)~} (the mark, \code{kDep}, \code{kExact} back, \code{kUsed}); three private methods follow it (\code{kEnter}, \code{kSignal}, \code{kDepSlow}); the case of the frame in the resume switch passes four words; \code{whnfDone} and \code{coreDone} start with one test each. Nothing else of \code{Reduce.java} is touched, and \code{Infer.java} is not touched at all. In \code{Conv.java}: \code{\verb~|&& !m.kExact~} at the end of \code{congruence} and of \code{skipArgs}, three lines in \code{pairHit}; in \code{Pairs.java}: three lines at the top of \code{add}; in \code{Machine.java}: the fields \code{kExact}, \code{kUsed}, \code{kLog} with its two methods, the lines in \code{beginDecl}, \code{enterER}, \code{reset} and \code{cutMark}; in \code{Layout.java}: the bits \code{KX} and \code{UF}, the bit of a local entry one place up. Everything of the K rule is inactive unless the declaration runs in place (\code{\verb~|Machine.erLocal~}: the switch \code{eager} in the mode \code{union}), so the other package's exact-let run, which has no switch, does not meet it. The hunk of section 14.10 on the merge still holds: applied after the other package's diffs, the part of \code{\verb~|k_iota3~} and \code{\verb~|k_iota4~} is rejected by \code{patch}; the merged copy and the variant of section 14.10 were not made again for this candidate. The generators of the reviews are not in the patch; the journal notes named in section 12 need their revision when a candidate is applied.}
+}
+
+\subtree{
+\title{15.9 Not measured, not done (third candidate)}
+
+\ul{
+\li{\strong{x86-64}, the arena's metric and the arena's 270-test container procedure; \strong{the driver's invariance suite}: not run, as before (the schedule rows stand in for the second).}
+\li{\strong{A tower of failing comparisons with a comparison of the K rule inside} (section 15.7, item 2), and \strong{a mixed derivation through the K rule}: no export.}
+\li{\strong{The 46 mutants of the heavy slice}: left out.}
+\li{\strong{The K rule without the switch \code{eager}}: unchanged; making the comparison of the K rule exact in every switch set is a change of what "no switch" means and was not made.}
+\li{\strong{The patch together with the package on the K rule after a let application}: not merged here this time; the lines are named in section 15.8.}
+\li{\strong{A third adversarial pass.}}
 }
 }
 }
