@@ -5,9 +5,12 @@
 \contributor{queclr}
 \tag{machine}
 \tag{soundness}
+\meta{updated}{2026-11-26}
 \import{base-macros}
 
 \p{Package "MO-2", 2026-11-25 (21:17 UTC to the first hours of 2026-11-26 UTC). The maintainer's instruction of that day: the reference engine is a fallback for development and shall not decide anything in production, so the machine must decide by itself every declaration it hands to the reference engine today. This package owns the largest class of such declarations: the machine declined a unit that reached the K rule after it had reduced the application of a let variable away (finding E1-F6 of [the working notes of package M5](rep-machine-M5), closed on 2026-11-24 by declining instead of by deciding), and the reference engine decided it. This report says what the official kernel does at that point, why a machine on values could not follow, the change that makes it follow, the hostile exports that were written against the change before it was trusted, what "exactly as the official kernel" rests on and what it does not cover. The patch is not applied and not published.}
+
+\p{\strong{After the review} (2026-11-26): the candidate of sections 0 to 12, the exact-let mode, did not survive two adversarial reviews and is not applied. Section 13 says what fell, and reports a second candidate with a different goal, the K-union rule. The verdict of section 0.1 is superseded by section 13.}
 
 \subtree{
 \title{0. Answer}
@@ -526,5 +529,168 @@
 \li{\strong{Deciding the two rows of the lambda-body rule} instead of declining them: the state of a let variable behind a lambda body needs the body's value typed in that state, which the chain of 4.3 would do if it went through the beta step with the binder's domain in hand. Not built.}
 \li{\strong{Comparing the states in the first run}, without a second run, and repeating the unit only when they differ, would save the seven extra runs; it would run the mode's judgments under speculative segments, which this package avoided.}
 \li{\strong{An adversarial pass by another author.} Every hostile export of this package was written by the author of the change. They found two wrong verdicts of the change and three classes of wrong rejects of the published build in one evening, which says more about how many are left than about how many were found.}
+}
+}
+
+\subtree{
+\title{13. After the review: the exact-let mode fell, and the K-union rule (second candidate)}
+
+\p{Written in the night from 2026-11-25 to 2026-11-26 (03:35 to about 06:30 UTC of 2026-11-26). Sections 0 to 12 are kept as the record of the first candidate. Their verdict is superseded: two reviews of that candidate ended with no-go, and it is not applied.}
+
+\subtree{
+\title{13.1 What fell}
+
+\ul{
+\li{\strong{[The review from the source](rep-RV-2A)}: 56 exports with official verdicts. A plain run of the first candidate rejects 17 official accepts, six of them new with the patch: a typed binding whose value is a let variable as the head of a kept application; a struct and a value term whose head variable is bound to a closure (the guard of finding MO2-F4 tested the term, not what its variables are bound to); proof irrelevance on a stuck projection of a kept application (the scope states exist for the K rule only); and two exports that the second run rejects in a part with no let at all, because the second run is the generic tier and the generic tier has wrong rejects that the default set has not. Two binders that are one record defeat the scope stack. Four shapes of the class never start the mode.}
+\li{\strong{[The review from the outside](rep-RV-2B)}: 12,621 inputs (generated exports, the 75 real units of the class as small exports, 1,311 structural mutants and 654 hostile grafts of them). The first candidate: 558 wrong rejects of which 142 its own, 422 accepts of official rejects of which 103 its own.}
+\li{\strong{No accept of a statement that is not derivable} in either review, in any build.}
+}
+
+\p{Both reviews say what sections 6 and 7 had already recorded twice: finding out from a machine on values \em{which} state the official kernel is in (scope stack, marks, chains of let variables, guards on terms) keeps failing, and each failure is a confident wrong reject.}
+}
+
+\subtree{
+\title{13.2 The K-union rule}
+
+\p{The orchestrator changed the goal of the candidate from "the official verdict by reconstruction" to what the [standing policies](standing-policies) ask in this zone: never accept a statement that is not derivable; accept what the official checker accepts; a derivable statement that the official checker rejects only through its incompleteness may be accepted (kind T). Every accept of the machine is a derivation: firing the K rule under any valid type of the major premise is sound, and so is not firing (7.1). So the machine does not have to know the official state; it has to know when its \em{rejection} cannot be trusted.}
+
+\ul{
+\li{\strong{Variant A.} In the first run, at a K comparison of the class (the flag of finding E1-F6, or a major premise typed through a let variable with two types as far as that can be read without a judgment, 4.5), the run does not end. It goes on with the type the machine has and remembers that the unit is \em{unsure}. If the run accepts, the unit is accepted. If it rejects and the unit is not unsure, it is rejected as today. If it rejects and the unit is unsure, the machine has no verdict: a decline, never a rejection. Three source files: \code{Reduce} (the first lines of \code{\verb~|k_iota3~} and one slow method beside it), \code{Infer} (one flag, two counters, the reading of the major premise that section 4.5 describes, about 100 lines moved in from the first candidate), \code{MachineSession} (one block of nine lines after the run and before the handling of eager reduction). Nothing in \code{Eval} or \code{Values}; no second run; no mode.}
+\li{\strong{Variant B} = A, the flags that the first candidate sets in \code{Eval} (an over-application, a let variable with one type whose value is a lambda, the mark for a later declaration of the session), and the exact-let mode as an \em{accept-only second chance}: after the rejection of an unsure unit the unit runs again in the mode, where the K rule fires if it fires under \em{any} reading of the let variables that the type of the major premise goes through. An accept of that run is the unit's accept; a rejection, or any of the mode's own ends without a verdict, is a decline. The mode is never the source of a rejection, and the scope decides nothing: the scope stack, the marks, the two scope declines, the rule for an over-application and the collection of let variables behind a lambda body are no longer consulted. Their code is still in the patch of B, dead; it was left there so that the patch stays comparable with the reviewed one, and it has to go if B is taken.}
+\li{\strong{A middle variant} was measured because the numbers asked for it: B's build with the second run switched off (\code{\verb~|-Drlvm.machine.letsecond=off~}), that is A plus the flags of \code{Eval}.}
+}
+}
+
+\subtree{
+\title{13.3 Real input}
+
+\p{Private builds of the current main tree (published build \code{d867a0766427}; the machine's sources are those of 22:44 UTC): base = the unpatched tree (jars \code{f62c8667964a}, machine jar \code{1eaaf3e3655c}, the published one), A (jars \code{8f64ecda212f}), B (see 13.6). The executable unless said otherwise.}
+
+\ul{
+\li{\strong{The eight corpora, 8 workers, variant A}: every unit of the class is accepted \em{in the first run}. Unsure units: Std 1, cedar 1, con-leche 1, navier-stokes-euler 16, cslib 7, Mathlib 63; rejections of an unsure unit: 0. The machine's declines of this class: \strong{0}, the six over-application units of section 8.4 included. The declines that are left are eager reduction (decline events: con-leche 2, cslib 8, Mathlib 8).}
+\li{\strong{One worker, unit traces, against the base}: 86 units change their outcome, each from declined to accepted (Std 1, cedar 1, con-leche 1, navier-stokes-euler 16, cslib 7, Mathlib 60): all 86 of section 1. The units the reference engine decides go from 1, 1, 2, 16, 11, 64 to 0, 0, 1, 0, 4, 4. With \code{\verb~|-Drlvm.machine.kunion=off~} the build computes what the base computes on all eight corpora: every count key but the two new ones, every unit's steps and outcome.}
+\li{\strong{The real rows of the black-box review}: the 75 units as small exports: accepted by the machine alone, all 75 (the published machine alone: 2, and 73 declines). The 1,309 structural mutants that have an official verdict (1,184 accept, 125 reject): a plain run gives the official verdict on every one; no unsure accept of an official reject. The machine alone decides 1,285 of them and declines 24 (published: 265 and 1,044). The same for the middle variant and for B.}
+\li{\strong{The differential engine}, 8 workers, the eight corpora, variant A: 8 accepts, no declaration on which the machine and the reference engine differ. \strong{Accept runs}: 8 and 4 workers through both launchers, 32 runs, 32 accepts, no anomaly; the largest resident set 4,560 MiB.}
+\li{\strong{The number of workers}: the 1,519 generated files with several declarations in a plain run and under 1, 4 and 8 workers: one verdict per file, variant A.}
+}
+}
+
+\subtree{
+\title{13.4 The regression corpus of the black-box review}
+
+\p{12,619 inputs with an official verdict (two mutants have none). A cell: wrong rejects / accepts of official rejects in a plain run; then the declines of the machine alone (\code{\verb~|-X fallback=none~}). "Kind F" inputs are those that every build and mode must reject (statements that are not derivable): none is accepted by any variant. The split of the generated files into one and several declarations is by family here (the session and warm families), which moves two files against the reviewer's count.}
+
+\table{
+\tr{\th{Source}\th{Inputs}\th{Official accept / reject}\th{Kind F}\th{Published: wrong rejects / accepts of rejects}\th{declines alone}\th{A}\th{declines alone}\th{Middle (A and the flags of Eval)}\th{declines alone}\th{B}\th{declines alone}}
+\tr{\td{generator, one declaration}\td{9,062}\td{4,084 / 4,978}\td{1,064}\td{532 / 682}\td{2,540}\td{415 / 1,045}\td{1,975}\td{402 / 1,045}\td{2,160}\td{402 / 1,493}\td{1,341}}
+\tr{\td{generator, several declarations}\td{1,519}\td{667 / 852}\td{0}\td{133 / 255}\td{643}\td{28 / 394}\td{589}\td{8 / 364}\td{751}\td{8 / 715}\td{158}}
+\tr{\td{real units of the class, unchanged}\td{75}\td{75 / 0}\td{0}\td{0 / 0}\td{73}\td{0 / 0}\td{0}\td{0 / 0}\td{0}\td{0 / 0}\td{0}}
+\tr{\td{real units, structural mutants}\td{1,309}\td{1,184 / 125}\td{0}\td{0 / 0}\td{1,044}\td{0 / 0}\td{24}\td{0 / 0}\td{24}\td{0 / 0}\td{24}}
+\tr{\td{real units, hostile grafts}\td{654}\td{403 / 251}\td{0}\td{13 / 2}\td{611}\td{10 / 77}\td{271}\td{6 / 77}\td{286}\td{6 / 134}\td{160}}
+\tr{\td{all}\td{12,619}\td{6,413 / 6,206}\td{1,064}\td{678 / 939}\td{4,911}\td{453 / 1,516}\td{2,859}\td{416 / 1,486}\td{3,221}\td{416 / 2,342}\td{1,683}}
+}
+
+\ul{
+\li{\strong{No wrong reject that the published plain run does not have}, in any variant, on any input (0 of 12,619; also 0 on the 67 rows of section 5 and the 56 rows of the review from the source). No kind F input accepted.}
+\li{\strong{The price in agreement, variant A}: of the 6,206 official rejects a plain run accepts 1,516, where the published build accepts 939: \strong{577 more accepts of kind T}. Wrong rejects fall from 678 to 453. The machine alone still declines 2,859 inputs, where the published machine declines 4,911. A plain run gives the official verdict on 10,650 inputs (published 11,002): the union rule buys fewer wrong rejects and fewer declines with more accepts of statements that the official checker rejects.}
+\li{\strong{The middle variant} has fewer wrong rejects than A (416) \em{and} fewer accepts of official rejects (1,486), at the price of more declines of the machine alone (3,221): the flags of \code{Eval} make more rejections "no verdict", among them 37 wrong rejects of A.}
+\li{\strong{Variant B}: the same 416 wrong rejects as the middle variant; 2,342 accepts of official rejects (1,403 more than the published build); 1,683 declines of the machine alone. The second run converts 1,538 declines into verdicts of the machine, 682 of them official accepts and 856 accepts of official rejects.}
+\li{\strong{The rows of this report and of the review from the source}, plain run, official / accept of an official reject / wrong reject: the 67 rows of section 5: published 54 / 8 / 5, A 47 / 19 / 1, middle 48 / 19 / 0, B 40 / 27 / 0. The 56 rows of the review: published 33 / 7 / 16, A 40 / 7 / 9, middle 40 / 7 / 9, B 37 / 10 / 9. The one wrong reject of A on the 67 rows is \code{mo2-overapp-declared-fires-ok} (finding MO2-F5: its flag sits in \code{Eval}); the nine on the 56 rows are the trigger gaps that the review names and that are out of scope here.}
+\li{\strong{Where the published machine decided by itself and the candidate's machine declines}: variant A, 482 inputs of the three sets and the real grafts, \em{every one an official reject} that the published machine rejected: under the union rule the rejection of an unsure unit is never a verdict, so an official reject whose run made a K comparison of the class goes to the reference engine. No official accept is among them. (Another 230 are official accepts that the published machine rejected and A declines: wrong rejects turned into declines.) For the middle variant the same count is 704, and 15 generated files with several declarations that the published machine accepts by itself are declined: a later declaration is rejected in a session that the earlier, now accepted, unit did not end. For B: 337.}
+\li{\strong{Rows of the suite that change their kind.} Under A the two strict rows that record finding E1-F6, \code{e1-sys-let-krule-major-applied-bad} and \code{e1-sib-krule-major-proj-applied-let-bad} (official reject, statement \code{True}), are accepted by the machine: it fires K under the type of the value. They are marked kind T in the patch. That is the closing of finding E1-F6 turned round: on 2026-11-24 it was closed by declining because the accept was not the official verdict; the union rule accepts it because it is a derivation. Under B two more rows change in the same way (\code{e1-sys-let-krule-major-variable-bad}, \code{e1-sib-krule-major-proj-let-bad}).}
+\li{\strong{The order of declarations} that the black-box review found in the published build (the identity redex of finding MO2-F3 over a let variable: "inside, then after" accepted, "after, then inside" rejected, both official accepts) is the same under A and under B: it is a history of the first run in a class that is out of scope here.}
+\li{\strong{The path and the schedule.} Under A there is one run, so a unit cannot be answered by one path under one schedule and by another under another. Whether a unit becomes \em{unsure} can still depend on the history of the session (the application of a let variable found in a tabling record is not applied again, and A has no mark for it; B has). That matters only for a unit the first run rejects: it is then rejected in one history and declined in another, and in a plain run the decline is the reference engine's verdict. Under B an accept is an accept on either path (first run or second run), and a second run can only replace a decline by an accept.}
+}
+}
+
+\subtree{
+\title{13.5 Gates}
+
+\p{None of these runs is a timing; all behind \src{bench/slot.sh}, off the measurement cores. Variant A, the build of 13.3; variant B, a build of the same tree with B's patch (jars \code{12569828c138}).}
+
+\table{
+\tr{\th{Gate}\th{Variant A}\th{Variant B}}
+\tr{\td{The suites of \code{rlvm-machine} (default group; fast group)}\td{455 tests, 0 failures, 4 skipped; 424 tests, 0 failures, 3 skipped (with the two rows of 13.4 marked kind T; before that mark the fast hostile test failed on exactly those two rows)}\td{455 tests, 0 failures, 4 skipped; 424 tests, 0 failures, 3 skipped (with four rows marked kind T; a first build failed the size test of the stepper convention, one step had grown past its limit, and was rebuilt with the test moved into a slow method)}}
+\tr{\td{\code{SHostileSlowTest}, 56 switch sets by 1,274 rows}\td{no unexpected verdict}\td{no unexpected verdict (four rows marked kind T)}}
+\tr{\td{The machine's own gate, default set (package M8)}\td{PASS WITH DECLINES, the heading of the base. Differential: the 230 tests 15,804 accepted, 41 rejected, 0 declined, to the tick of the base; Init, reachability and the cedar slice to the tick; Std 100,096 accepted, 0 declined (base 100,095 and 1), 57,732,569 ticks (base 57,723,434). Tier, convention and audit lanes: 0 differences, no declaration ended by an audit. The pipeline: 230 of 230.}\td{the same numbers in every lane}}
+\tr{\td{\code{\verb~|scripts/gate.sh --defaults --corpus all --hostile~}, the executable}\td{PASS. 230 of 230 tests correct, none declined (the 92 bad tests are rejected). Mutants: 17,775, SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683, the base's counts. Hostile rows: agree 1,182, kind T accepts tolerated 76, known wrong rejects 12 (at most 12), wrong accept 0, wrong reject 0, declined 4.}\td{PASS. The same tests and mutants; hostile rows: agree 1,180, tolerated 78, known wrong rejects 12, wrong accept 0, wrong reject 0, declined 4.}}
+\tr{\td{The same through the jars}\td{PASS, with the same counts as through the executable}\td{PASS, with the same counts as through the executable}}
+\tr{\td{The eight corpora with 8 and 4 workers, both launchers}\td{32 runs, 32 accepts, no anomaly; decline events per run 0, 0, 0, 0, 2, 0, 8, 8 (eager reduction)}\td{the same}}
+\tr{\td{The differential engine, 8 workers, the eight corpora}\td{8 accepts, 0 disagreements}\td{8 accepts, 0 disagreements; the second run is never started (0 on every corpus)}}
+\tr{\td{One worker, unit traces against the base}\td{13.3; ticks of the machine: Init and reachability equal, Std +0.011 \%, cedar +0.005 \%, con-leche -0.010 \%, navier-stokes-euler -0.072 \%, cslib -0.017 \%, Mathlib -0.010 \% (the base's count has the first run and the cold retry of a declined unit, and not what the reference engine did). As in 8.5, units after the first unit of the class take other steps with the same outcome (Std 12, cedar 84, con-leche 1, navier-stokes-euler 6,328, cslib 3,486, Mathlib 19,401; none before it).}\td{not run}}
+}
+
+\p{The mutants are the answer to the question that could have decided against A: a mutant of a unit of the class that the official checker rejects and that an unsure run accepts. There is none among the 17,775 mutants of the gate and none among the 125 official rejects of the black-box review's structural mutants.}
+}
+
+\subtree{
+\title{13.6 The guard}
+
+\p{As in section 9: three interleaved rounds, one quiet-core window per launcher, base = the private build of the unpatched current tree. These two windows ran while this package's own gate runs were still going on outside the measurement cores, which the window of section 9 did not have; the cells are noisier.}
+
+\p{\strong{The executable} (base, A, B):}
+
+\table{
+\tr{\th{Corpus (statistic)}\th{Base}\th{Variant A}\th{Variant B}}
+\tr{\td{Init (median)}\td{1.005; rounds 1.715 / 0.643 / 0.656; CPU 4.7; loader 0.80; 482 MiB}\td{0.648 (-35.5 \%); rounds 0.609 / 0.685 / 0.650; CPU 4.4; loader 0.49; 381 MiB}\td{0.640 (-36.3 \%); rounds 0.614 / 0.655 / 0.651; CPU 4.4; loader 0.49; 376 MiB}}
+\tr{\td{Std (median)}\td{1.114; rounds 1.173 / 1.076 / 1.093; CPU 8.0; loader 0.91; 612 MiB}\td{1.123 (+0.8 \%); rounds 1.139 / 1.146 / 1.083; CPU 8.1; loader 0.90; 610 MiB}\td{1.134 (+1.8 \%); rounds 1.155 / 1.160 / 1.086; CPU 8.1; loader 0.89; 607 MiB}}
+\tr{\td{cedar (median)}\td{1.504; rounds 1.500 / 1.526 / 1.485; CPU 11.2; loader 1.34; 770 MiB}\td{1.495 (-0.6 \%); rounds 1.485 / 1.503 / 1.496; CPU 11.1; loader 1.35; 762 MiB}\td{1.507 (+0.2 \%); rounds 1.504 / 1.521 / 1.495; CPU 11.2; loader 1.34; 767 MiB}}
+\tr{\td{reachability (mean)}\td{0.449; rounds 0.447 / 0.452 / 0.448; CPU 1.2; loader 0.03; 735 MiB}\td{0.453 (+0.9 \%); rounds 0.455 / 0.457 / 0.445; CPU 1.2; loader 0.03; 735 MiB}\td{0.459 (+2.4 \%); rounds 0.453 / 0.463 / 0.462; CPU 1.2; loader 0.03; 739 MiB}}
+\tr{\td{con-leche (median)}\td{1.383; rounds 1.353 / 1.388 / 1.409; CPU 8.8; loader 0.86; 917 MiB}\td{1.421 (+2.7 \%); rounds 1.428 / 1.400 / 1.436; CPU 8.8; loader 0.86; 911 MiB}\td{1.408 (+1.8 \%); rounds 1.431 / 1.390 / 1.404; CPU 8.8; loader 0.84; 907 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.727; rounds 3.754 / 3.734 / 3.694; CPU 27.9; loader 2.35; 1,529 MiB}\td{3.629 (-2.6 \%); rounds 3.601 / 3.622 / 3.664; CPU 27.6; loader 2.22; 1,494 MiB}\td{3.628 (-2.7 \%); rounds 3.564 / 3.632 / 3.689; CPU 27.6; loader 2.36; 1,489 MiB}}
+\tr{\td{cslib (median)}\td{4.842; rounds 4.804 / 4.880 / 4.842; CPU 36.7; loader 4.18; 1,624 MiB}\td{4.787 (-1.1 \%); rounds 4.799 / 4.786 / 4.775; CPU 36.3; loader 4.12; 1,604 MiB}\td{4.823 (-0.4 \%); rounds 4.845 / 4.802 / 4.821; CPU 36.6; loader 4.25; 1,600 MiB}}
+\tr{\td{Mathlib (median)}\td{13.415; rounds 13.363 / 13.404 / 13.478; CPU 104.1; loader 11.19; 6,237 MiB}\td{13.404 (-0.1 \%); rounds 13.476 / 13.508 / 13.227; CPU 103.5; loader 11.17; 3,780 MiB}\td{13.442 (+0.2 \%); rounds 13.613 / 13.364 / 13.348; CPU 104.0; loader 11.35; 3,798 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.997 (8 corpora)}}\td{\strong{1.890 against 1.997 (-5.4 \%, 8 corpora); largest loss +2.7 \% (con-leche), largest gain -35.5 \% (Init)}}\td{\strong{1.895 against 1.997 (-5.1 \%, 8 corpora); largest loss +2.4 \% (reachability), largest gain -36.3 \% (Init)}}}
+}
+
+\p{The first process of this window, the base on Init, was disturbed (its round 1.715 s with a loader of 1.39 s; the other two rounds 0.643 and 0.656 s), so the base's Init cell and the geometric means of this table mean nothing; with the two undisturbed rounds the base's Init is 0.650 s and A is at -0.3 \%. Without Init the largest loss of A is +2.7 \% (con-leche) and of B +2.4 \% (reachability); no corpus is above the limit of 3 \%.}
+
+\p{\strong{The JVM launcher} (base, A, B):}
+
+\table{
+\tr{\th{Corpus (statistic)}\th{Base}\th{Variant A}\th{Variant B}}
+\tr{\td{Init (median)}\td{0.545; rounds 0.524 / 0.561 / 0.549; CPU 4.0; loader 0.43; 827 MiB}\td{0.528 (-3.0 \%); rounds 0.529 / 0.525 / 0.531; CPU 3.9; loader 0.44; 816 MiB}\td{0.536 (-1.6 \%); rounds 0.516 / 0.545 / 0.547; CPU 4.0; loader 0.42; 826 MiB}}
+\tr{\td{Std (median)}\td{0.883; rounds 0.891 / 0.875 / 0.884; CPU 6.7; loader 0.74; 1,454 MiB}\td{0.922 (+4.4 \%); rounds 0.931 / 0.936 / 0.900; CPU 6.9; loader 0.76; 1,472 MiB}\td{0.884 (+0.1 \%); rounds 0.915 / 0.851 / 0.886; CPU 6.7; loader 0.74; 1,424 MiB}}
+\tr{\td{cedar (median)}\td{1.268; rounds 1.254 / 1.253 / 1.297; CPU 9.5; loader 1.17; 1,783 MiB}\td{1.256 (-1.0 \%); rounds 1.276 / 1.265 / 1.226; CPU 9.4; loader 1.14; 1,778 MiB}\td{1.251 (-1.4 \%); rounds 1.263 / 1.232 / 1.257; CPU 9.3; loader 1.15; 1,753 MiB}}
+\tr{\td{reachability (mean)}\td{0.305; rounds 0.290 / 0.307 / 0.319; CPU 1.0; loader 0.02; 1,575 MiB}\td{0.303 (-0.8 \%); rounds 0.302 / 0.305 / 0.301; CPU 1.0; loader 0.02; 1,578 MiB}\td{0.313 (+2.4 \%); rounds 0.320 / 0.332 / 0.286; CPU 1.0; loader 0.02; 1,573 MiB}}
+\tr{\td{con-leche (median)}\td{1.138; rounds 1.156 / 1.149 / 1.109; CPU 7.4; loader 0.72; 1,803 MiB}\td{1.133 (-0.4 \%); rounds 1.124 / 1.163 / 1.112; CPU 7.4; loader 0.73; 1,810 MiB}\td{1.137 (-0.1 \%); rounds 1.146 / 1.157 / 1.108; CPU 7.4; loader 0.72; 1,801 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{2.998; rounds 3.052 / 3.087 / 2.855; CPU 22.8; loader 1.99; 2,325 MiB}\td{2.972 (-0.9 \%); rounds 2.958 / 3.018 / 2.940; CPU 22.8; loader 1.99; 2,246 MiB}\td{3.023 (+0.8 \%); rounds 2.921 / 3.074 / 3.075; CPU 22.9; loader 1.95; 2,288 MiB}}
+\tr{\td{cslib (median)}\td{3.888; rounds 3.688 / 4.230 / 3.747; CPU 29.7; loader 3.30; 3,364 MiB}\td{3.973 (+2.2 \%); rounds 3.871 / 4.205 / 3.842; CPU 30.3; loader 3.38; 2,425 MiB}\td{4.145 (+6.6 \%); rounds 4.029 / 4.143 / 4.262; CPU 31.6; loader 3.66; 2,464 MiB}}
+\tr{\td{Mathlib (median)}\td{11.103; rounds 10.546 / 11.304 / 11.458; CPU 86.4; loader 8.88; 4,803 MiB}\td{11.143 (+0.4 \%); rounds 10.383 / 11.647 / 11.400; CPU 86.8; loader 9.23; 4,782 MiB}\td{11.425 (+2.9 \%); rounds 11.873 / 11.293 / 11.108; CPU 89.0; loader 9.34; 4,756 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.513 (8 corpora)}}\td{\strong{1.514 against 1.513 (+0.1 \%, 8 corpora); largest loss +4.4 \% (Std), largest gain -3.0 \% (Init)}}\td{\strong{1.531 against 1.513 (+1.2 \%, 8 corpora); largest loss +6.6 \% (cslib), largest gain -1.6 \% (Init)}}}
+}
+
+\p{\strong{Std on the JVM launcher, measured again.} In the window above Std is +4.4 \% for variant A (three rounds 0.900 to 0.936 s against 0.875 to 0.891 s), above the limit of 3 \%, as it was for the first candidate in section 9.2. So that cell was measured again when nothing else of this package was running: one window, Std only, \strong{six} interleaved rounds of base, A and B.}
+
+\table{
+\tr{\th{Std, JVM launcher, six rounds}\th{Cell}\th{Rounds}\th{CPU of a pass}\th{Peak resident set}}
+\tr{\td{Base}\td{0.903}\td{0.903 / 0.904 / 0.920 / 0.853 / 0.907 / 0.933}\td{6.8}\td{1,462 MiB}}
+\tr{\td{Variant A}\td{0.903 (-0.0 \%)}\td{0.884 / 0.926 / 0.886 / 0.861 / 0.915 / 0.947}\td{6.8}\td{1,467 MiB}}
+\tr{\td{Variant B}\td{0.914 (+1.1 \%)}\td{0.896 / 0.896 / 0.928 / 0.883 / 0.946 / 0.932}\td{6.9}\td{1,472 MiB}}
+}
+
+\p{\strong{Reading.} With six rounds in an undisturbed window variant A is at the base on Std, and B at +1.1 \%. The +4.4 \% of the first window does not repeat; neither do the +3.5 \% and +3.3 \% of the first candidate say anything about A, which is another build. What A adds to a first run is one test and one call per K comparison (about 4,000 of them on Std), and its ticks on Std are +0.011 \%. \strong{Variant A passes the guard on both launchers as far as it was measured}: every cell of the executable within 3 \% (the base's disturbed Init round set aside), every cell of the JVM launcher within 3 \% but Std in the disturbed window, and Std at -0.0 \% when measured again. \strong{Not measured}: the whole table of both launchers in undisturbed windows; those windows were queued behind four others and withdrawn. For variant B the cells cslib +6.6 \% and Mathlib +2.9 \% of the disturbed JVM window (rounds of the base on cslib 3.688 to 4.230 s) were not measured again.}
+
+}
+
+\subtree{
+\title{13.7 For the integrator}
+
+\ul{
+\li{\strong{Variant A}: one patch, five files: \code{Infer}, \code{MachineSession}, \code{Reduce}, the module's README (one bullet), the manifest of the hostile suite (two rows become kind T). In \code{Reduce}: the comment and the slow method before \code{\verb~|k_iota3~} and its first lines (the old test of the flag); \code{\verb~|k_iota4~} is not touched. In \code{MachineSession.check0}: one block of nine lines between the eager restart and the test of the machine's own tick bound. Both are apart from what the union candidate for eager reduction changes, as far as its description goes. \code{\verb~|-Drlvm.machine.kunion=off~} gives the rule of 2026-11-24 back, \code{\verb~|-Drlvm.machine.letroot=off~} takes the wider reading of the major premise out. Statistics \code{machine.let.kUnsureUnits} and \code{machine.let.kUnsureRejects}.}
+\li{\strong{Variant B}: one patch, seven files (the five and \code{Eval}, \code{Values}); four rows become kind T. \code{\verb~|-Drlvm.machine.letsecond=off~} is the middle variant.}
+\li{\strong{The rows}: the 67 rows of section 5, the 55 that the review from the source proposes and the 163 of the black-box review are not in these patches. Under the union rule their marks differ per variant (which official rejects are accepted), and the verdict tables of every variant on every one of them are handed over with the patches instead.}
+}
+}
+
+\subtree{
+\title{13.8 What the union rule does not do, and a recommendation}
+
+\ul{
+\li{\strong{The trigger gaps that the published build has} stay: a redex, a let term or a projection of a constructor as the major premise, the binder of a redex, a let variable reached through a delayed term, a far frame (findings MO2-F3, MO2-F6 and the review's F2, F5, F6, F9, F10, F11). They are the 453 wrong rejects that A still has on the regression corpus, all of them the published build's own. They need the major premise typed as the term it is and are another package.}
+\li{\strong{An official reject of the class is never a verdict of the machine} under A (482 inputs of the regression sets): the reference engine rejects it. On real input that is a unit of the class in a file that does not check, which the corpora do not have.}
+\li{\strong{The count of kind T rises}: 577 inputs of the regression corpus, 11 rows of section 5, two rows of the suite. Each is an accept of a statement for which the machine has a derivation; that the statements of the generated inputs are derivable is the argument of 7.1, not something this package checked input by input, beyond the fact that no kind F input is accepted.}
+\li{\strong{Recommendation.} Variant A does what was asked: on real input every unit of the class is a verdict of the machine in the first run, with no second run, no mode and no new state in the values; it has no wrong reject that the published build does not have. If the 37 wrong rejects that only the flags of \code{Eval} turn into declines are wanted, the middle variant is A plus those flags; it costs more declines of the machine alone and, on 15 generated files, declines where the published machine accepted. Variant B buys 682 official accepts for the machine alone on hostile input with 856 more accepts of official rejects and about 1,400 lines of the first candidate, half of them dead; this package does not recommend it.}
+}
 }
 }
