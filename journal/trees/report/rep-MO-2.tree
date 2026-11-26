@@ -1,0 +1,530 @@
+\title{MO-2: the K rule on a major premise typed through a let variable, decided by the machine (finding E1-F6 without the reference engine)}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Package "MO-2", 2026-11-25 (21:17 UTC to the first hours of 2026-11-26 UTC). The maintainer's instruction of that day: the reference engine is a fallback for development and shall not decide anything in production, so the machine must decide by itself every declaration it hands to the reference engine today. This package owns the largest class of such declarations: the machine declined a unit that reached the K rule after it had reduced the application of a let variable away (finding E1-F6 of [the working notes of package M5](rep-machine-M5), closed on 2026-11-24 by declining instead of by deciding), and the reference engine decided it. This report says what the official kernel does at that point, why a machine on values could not follow, the change that makes it follow, the hostile exports that were written against the change before it was trusted, what "exactly as the official kernel" rests on and what it does not cover. The patch is not applied and not published.}
+
+\subtree{
+\title{0. Answer}
+
+\ul{
+\li{\strong{What changed.} A run that reaches a K comparison whose answer the machine cannot tell from the official one ends without a verdict as before, but the machine no longer declines the unit: its facade checks the unit again in a new \em{exact-let mode}, in a session of its own and without any staging switch. In that mode the application of a let variable is kept as a value of its own (as the official term keeps it) and typed through the type of the variable, and the K comparison is made in every scope state the official kernel can be in with respect to the let variables the type of the major premise goes through. Where all states agree, that is the official answer. Where they differ, the machine knows the state from a scope stack and takes its answer, and it ends the run without a verdict at the places where what it has would stop being the official term or the official state.}
+\li{\strong{What the official kernel does, in one sentence.} It types the raw major premise of the K rule; while it is inside \code{infer_let} a let variable is a free variable with its \em{declared} type, and once \code{infer_let} has returned the variable is gone, because the type of a let term is itself a let term and \code{whnf_core} substitutes the \em{value term}. The two types are convertible, the official comparison is not transitive, and a machine has one value for both states. The second half was not known in the project (finding MO2-F1, section 6).}
+\li{\strong{On the corpora.} The base declined 86 units for this rule on the eight corpora (Std 1, cedar 1, con-leche 1, navier-stokes-euler 16, cslib 7, Mathlib 60; each tried twice). The final build decides \strong{80} of them, all accepts, each equal to the reference engine's verdict. \strong{Six stay declines of the machine} (one of cslib, five of Mathlib): they apply a let variable by the over-application of a redex, where the mode has no term to keep and gives no verdict (finding MO2-F5). Seven more units run in the mode because the base decided them by a reading that is the official one only inside the scope; all seven are accepted. In 13 K comparisons of the mode the type of the major premise goes through a let variable with two types; the scope states agree in all 13.}
+\li{\strong{Hostile exports.} 67 hand-made exports, every verdict taken from the official checker (leanchecker 4.36.0 in Docker): 36 accept, 31 reject. A plain run of the published executable gives the official verdict on 54, accepts 8 that the official checker rejects (derivable statements) and \strong{rejects 5 that it accepts}; a rejection of the machine is final since 22:44 UTC ([the decision](dec-PUU0), [the report of package MO-1](rep-MO-1)). A plain run of the final build gives the official verdict on all 67; its machine alone gives it on 63 and declines 4 by design.}
+\li{\strong{"Exactly as the official kernel, on every input" is not reached, and this report does not claim it.} Three things stand against it. (1) The argument of section 7 was wrong twice while it was being built: the second and the third build of this package gave confident wrong verdicts where the base declined or was right (findings MO2-F2 and MO2-F4), each found by an export written for a step the argument did not have, each before anything was handed over. (2) Two classes next to this one are wrong rejects of the published default and of the final build alike, and are not repaired: a major premise that is a beta-redex (MO2-F3, three exports) and one that is a let term (MO2-F6, one export); the same repair would serve both and is described, not built. (3) The six real units above.}
+\li{\strong{No accept of a statement that is not derivable} was seen in the base or in any build of this package, on any row, corpus, mutant or test.}
+\li{\strong{Gates} (section 8): the suites of the module; the hostile suite under 56 switch sets with the 67 rows; the gate of the brief through the executable and the jars; the machine's own gate of the default set with no difference in any lane; the differential engine on the eight corpora with no disagreement, also with every declaration in the mode; every hostile row with every declaration in the mode. With the old rule switched back on the build computes what the base computes, to the step, on all eight corpora. \strong{Guard} (section 9): passed on the executable (geometric mean -0.1 \%, largest loss +0.6 \%); on the JVM launcher the geometric mean is lower too, but Std is +3.5 \% and +3.3 \% in two windows, above the limit of 3 \%.}
+}
+
+\subtree{
+\title{0.1 Verdict}
+
+\p{\strong{Go for an adversarial pass by someone who did not write it; no-go for publication before that pass.} For: against the published default the final build takes 80 of 86 units of the class away from the reference engine, repairs five wrong rejects of the default configuration on hostile exports, adds none that is known, passes every gate of section 8, and passes the guard on the executable (no corpus more than 0.6 \% slower; section 9). Against: on the JVM launcher one corpus, Std, is about 3.4 \% slower in two windows, where the guard allows 3 \%; the change is about 1,600 lines in the judgments of the machine that the K rule goes through; its own author found two wrong verdicts in it after its gates had passed, with exports written the same evening; the rule that repaired the last of them is conservative and costs six real units; and the standing policy asks for an adversarial pass judged by the official checker before anything enters the default. Section 11 says where to attack. If the maintainer's aim is that the reference engine decides nothing in production, this patch alone does not reach it: the six units and the units of eager reduction remain.}
+}
+}
+
+\subtree{
+\title{1. The class: what was declined, and where}
+
+\p{The published build of 2026-11-25 20:00 UTC (jars \code{f5517aa135d2}), the executable, 8 workers, each corpus once with the machine's decline log. The published build of 22:45 UTC (jars \code{f88e4ef5e102}, the base of everything from section 5 on) has the same machine jar, \code{1eaaf3e3655c}: only the driver and the wiring changed.}
+
+\table{
+\tr{\th{Corpus}\th{Decline lines}\th{of them this rule}\th{Units of this rule}\th{Other declines (eager reduction, another package)}}
+\tr{\td{Init}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{Std}\td{2}\td{2}\td{1}\td{0}}
+\tr{\td{cedar}\td{2}\td{2}\td{1}\td{0}}
+\tr{\td{reachability}\td{0}\td{0}\td{0}\td{0}}
+\tr{\td{con-leche}\td{4}\td{2}\td{1}\td{1 unit}}
+\tr{\td{navier-stokes-euler}\td{32}\td{32}\td{16}\td{0}}
+\tr{\td{cslib}\td{22}\td{14}\td{7}\td{4 units}}
+\tr{\td{Mathlib}\td{128}\td{120}\td{60}\td{4 units}}
+}
+
+\p{Every unit is tried twice (the driver's cold retry of a declined unit), which is why the lines are twice the units. The units: Std and cedar \code{Std.IterM.Equiv.lift_step_bind_congr}; con-leche \code{ConLeche.Model.harvestDefn}; navier-stokes-euler 16, among them \code{EulerSmoothTensorLimit.exists_smooth_limit}, \code{NavierStokes.UniformAngularReset.uniform_reset_branch}, \code{FormalMultilinearSeries.comp_assoc}, \code{Memℓp.add}; cslib 7, among them \code{Cslib.Automata.NA.Buchi.buchiFamily_saturation}, \code{Matrix.exists_rank_normal_form}; Mathlib 60, among them \code{AlgebraicGeometry.Scheme.isCoverDense_toOver_Spec}, \code{AlgebraicGeometry.Scheme.isOneHypercoverDense_toOver_Spec}, the private lemma \code{aux_basicOpen_of_aux_restrict} of \code{AlgebraicGeometry.QuasicoherentTilde}, \code{GromovHausdorff.instCompleteSpaceGHSpace}, seven private declarations and thirteen of \code{CategoryTheory}.}
+
+\p{\strong{One decline site.} All of them end in \code{\verb~|Reduce.k_iota3~}, the step of the K rule that compares the type of the major premise with the type of the constructor application, with the declaration-wide flag \code{zetaInexact} set. The flag is set in two places and nowhere else, the two places where a let variable of INFER is applied and reduced away: \code{\verb~|Eval.k_evalHead~} (EVAL of an application whose head evaluates to the variable) and \code{\verb~|Eval.apply~}. The rule of 2026-11-24 was: after such an application every K comparison of the declaration declines.}
+
+\p{\strong{Two shapes}, told apart by the counters of the candidate (section 7):}
+
+\ul{
+\li{\strong{The let variable and the K rule have nothing to do with each other} (80 of the 93 units that run in exact-let mode): a let variable is applied somewhere, and later a K comparison runs on a major premise whose type goes through no let variable with two types. The flag is declaration-wide, so the unit was declined. Minimal exports: \code{mo2-shape-unrelated-ok} and \code{mo2-shape-unrelated-bad}.}
+\li{\strong{The type of the major premise goes through a let variable with two types} (13 K comparisons in 4 units: \code{Cslib.Automata.NA.Buchi.buchiFamily_saturation}, \code{exists_seq_forall_proj_of_forall_finite}, \code{GromovHausdorff.instCompleteSpaceGHSpace} and one instance of \code{CategoryTheory.Pseudofunctor.CoGrothendieck}): the variable itself, an application of it, a projection. Minimal exports: \code{e1-sys-let-krule-major-applied-ok} of package E1 and the rows \code{mo2-app-*}, \code{mo2-proj-*}, \code{mo2-var-*} of section 5.}
+}
+}
+
+\subtree{
+\title{2. What the official kernel does}
+
+\p{The source read is the official kernel as checked out under \code{refs/} (commit \code{611c117bfaf7} of 2026-11-16), files \code{type_checker.cpp}, \code{inductive.h}, \code{local_ctx.cpp} and \code{instantiate.cpp}. The reference engine (\src{rlvm-ref/README.md}) is a port of the same algorithm and agrees with it on every export of section 5.}
+
+\ul{
+\li{\strong{The K rule types the raw major premise.} \code{\verb~|to_cnstr_when_K~} starts with \code{\verb~|expr app_type = whnf(infer_type(e));~}, where \code{e} is the major premise as it stands in the recursor application, before any reduction of it. If the head of that type is the major inductive, the constructor application is built from the parameters of the type, and the rule fires iff \code{\verb~|is_def_eq(app_type, new_type)~}. Only then is the major premise itself reduced.}
+\li{\strong{Substitution does not reduce.} \code{instantiate} replaces bound variables and nothing else. An argument \code{\verb~|x a~} stays \code{\verb~|x a~}; a lambda that lands in a head position inside an argument leaves a beta-redex.}
+\li{\strong{Inside \code{infer_let} a let variable is a free variable with a type and a value.} \code{\verb~|infer_let~} checks the type and the value of a binder, compares the type of the value with the declared type, and then extends the local context with \code{\verb~|mk_local_decl(.., type, val)~}. \code{\verb~|infer_fvar~} answers the \em{declared} type. \code{\verb~|whnf_core~} replaces such a variable by its value when it meets it in a head position (\code{\verb~|whnf_fvar~}). So for an argument \code{\verb~|x a~} the infer-only \code{\verb~|infer_app~} starts from the declared type of \code{x} and instantiates its codomain with \code{a}: the arguments are not typed.}
+\li{\strong{After \code{infer_let} the variable does not exist.} \code{\verb~|infer_let~} returns \code{\verb~|m_lctx.mk_pi(fvars, r, true)~}, and \code{\verb~|mk_binding~} turns a let variable that the body type \code{r} mentions into \code{\verb~|mk_let(name, type, value, r)~}: the type of a let term is the let term \code{\verb~|let x : A := v; R~}. When that type is compared or reduced, \code{\verb~|whnf_core~} takes its \code{Let} case: \code{\verb~|instantiate(let_body(e), let_value(e))~}. Every occurrence of the variable in \code{R} is now the \em{value term}: \code{\verb~|x a~} has become \code{\verb~|v a~}, a beta-redex if \code{v} is a lambda, and its type is inferred from \code{v}, not from \code{A}. The official message for \code{mo2-escape-var-bad} shows the type as the kernel has it: \code{\verb~|'S.bad' has type let x := S.ax; S.P (Eq.rec 7 x) but it is expected to have type S.P 7~}.}
+\li{\strong{The two types are only convertible.} \code{\verb~|infer_let~} demands \code{\verb~|is_def_eq(val_type, type)~}, and the official relation is not transitive (package S's triple: with \code{\verb~|d (x : True /\ True) : Nat := And.rec (fun _ _ => 5) x~} and an axiom \code{h}, \code{\verb~|d intro~} is convertible with \code{5} and with \code{\verb~|d h~}, and \code{\verb~|d h~} is not convertible with \code{5}). So a K comparison can fire under one of the two types and not under the other, in either direction.}
+}
+
+\p{For the K rule this gives a state per let variable: the kernel is either inside its scope or past it. Scopes nest, so for the let variables that the type of one major premise goes through, the possible states are a chain: all in scope; the innermost one left; the two innermost left; and so on.}
+}
+
+\subtree{
+\title{3. Why the machine could not follow: what its values lack}
+
+\ul{
+\li{\strong{The application.} The machine's value of \code{\verb~|x a~} had the variable reduced away. A let variable of INFER is a record of its own (a suspension with the flag LET that carries the declared type, the fix of finding E1-F1), but EVAL of an application forced its head and performed the beta step, and ARGV made an ordinary delayed term that is replaced by its value as soon as that is known. The type of what is left is the type of the reduct. That is the half of the problem that finding E1-F6 named, and the decline rule covered it by a declaration-wide flag.}
+\li{\strong{The scope.} The machine never leaves a let: the type that the let rule of INFER returns is the type of the body under the bound values, with the let variable still in it, and that variable keeps its declared type for ever. Inside the scope that is the official reading. After it, the official kernel reads the type of the value. Before the fix of E1-F1 the machine had it the other way round. Neither is right in both states, and the expected-type rule of the default set moves the comparison of a let body with its expected type from after the let to inside it. This half was not known: section 6.}
+\li{\strong{One memo for two states.} The machine's memo words and its pair table are keyed by values. A K comparison answered inside the scope is found again after the scope, where the official kernel computes on another term.}
+}
+
+\p{The order of weak head normalisation and the K rule is not the problem: the machine types the major premise before it reduces it, as the official kernel does (\code{\verb~|Reduce.iota~}).}
+}
+
+\subtree{
+\title{4. The design: the exact-let mode}
+
+\subtree{
+\title{4.1 A second run, not another kind of let}
+
+\p{The first run of a declaration is what it was, to the tick. It ends without a verdict, as it did, when it reaches a K comparison that needs the mode (4.5). The facade then resets the machine, runs the same unit again in exact-let mode, and forgets the session after it: nothing the mode builds is seen by another declaration, and nothing another declaration or the first run built is seen by the mode. So no \code{let} of any other declaration pays anything, which is what erratum E1 of [the reconciliation](design-reconciliation-document) asks for: making every let value a variable steered into non-termination, and what a let suspension costs is measured in the notes of package M2.}
+
+\p{The second run has \em{no staging switch}: it is the generic tier, which the gate of package M8 compares with every switch set declaration by declaration. Three reasons, each a part of the argument of section 7: without code blocks EVAL and ARGV are the only places that build the value of an application; without speculative segments no judgment is cut, so a scope stack is exact; and the generic tier has none of the proof-comparison shortcuts whose answers are of the tolerated kind.}
+
+\p{Alternatives that were weighed. \em{Keeping the application of a let variable in every declaration} would change values, memo hits and tick counts in every unit that applies a let variable, and it does not solve the scope half. \em{Typing by the value only} (the machine before 2026-11-24) is the official reading after the scope and wrong inside it. \em{Firing the K rule under any reading} is sound (section 7.1) and would need no second run for the units whose first reading fires, but it accepts what the official checker rejects: the task was the official verdict.}
+}
+
+\subtree{
+\title{4.2 The kept application}
+
+\p{In exact-let mode an application whose head evaluates to a let variable of INFER, or to another kept application, is a record of its own: a suspension with the flags LET and OPEN over the application node and the pruned frame (\code{\verb~|Values.mkLetApp~}; another record than the tabling record of the same node and frame). It behaves as a let variable does: it is never replaced by its value, weak head normalisation forces it (zeta and beta, the official \code{whnf_core}), it has a free variable in the official sense, and two of them are the same expression only if they are one record. It is made in the two places where the mode's EVAL meets such an application, \code{\verb~|Eval.k_evalHead~} and \code{\verb~|Eval.argvFast~}; forcing it evaluates the application with the record itself as the tabling record, which is how the step tells the forcing from another meeting.}
+
+\p{Its type is the type of its head \em{value}, instantiated argument by argument with the values ARGV gives the argument terms (\code{ENPI}, \code{INST}): the infer-only \code{infer_app}. For a let variable at the head that starts from the declared type. The head is read as a value, not as a term under the frame, because a frame slot can hold a typed binding (the fix of E1-F2), which answers INFER with a lambda's domain and stands for its value everywhere else.}
+}
+
+\subtree{
+\title{4.3 The K comparison in every state}
+
+\p{The \em{type chain} of a major premise: the let variable at its type root (the major premise is that variable, a kept application whose head is, a projection of one of them, an application of such a projection, a delayed projection term), then the let variable at the type root of that variable's value term, and so on. The root of a value term is read off the \em{term}: the walk over application heads and projection structs goes on only while it meets no redex and no let term, because the value of such a term has the beta or zeta step performed and the official term has not (finding MO2-F4, section 6). A value term that is a redex whose body is typed through its own binders ends the chain: its official type is the binder's domain in every state. Any other redex or let term ends the chain too, and the let variables with two types that it can read through its frame are treated as those behind a lambda body, below. State \code{i} of the chain: the first \code{i} variables have left their scope. The type of the major premise in state \code{i} is computed with those variables read as their value terms (INFER of the value term in infer-only mode, recursively), every other variable at its declared type, and nothing is stored (\code{\verb~|Infer.outType~}). A variable whose declared type \em{is} the type INFER gave its value (one record) adds no state of its own.}
+
+\p{\code{\verb~|Infer.letKSlow~} is called where the standard comparison has answered (state 0). It computes the answer of every further state: the weak head normal form of the type, the constructor application from its parameters, the comparison. Then:}
+
+\ul{
+\li{all answers agree: that is the official answer in whatever state the kernel is, and what gets memoised holds in every state;}
+\li{they differ: the official state is the number of chain variables that are not on the scope stack (4.4), and its answer is taken. Every variable whose leaving or entering the scope changes the answer is marked.}
+}
+
+\p{\strong{Through the body of a lambda.} If a chain variable is bound to a lambda, the type of its application goes on through the type of the lambda's body, and that can go through another let variable. The states above read that variable by its declared type. So the let variables with two types that the body's type can reach are collected (the frame variable at the type root of the body, read off the term; every variable of the frame if that cannot be read off), and the same is done for a major premise that is a delayed beta-redex. While such a variable is in scope the states above are right; it is marked like a variable whose state changes the answer; if it is outside its scope the run ends without a verdict. This rule exists because of finding MO2-F2 (section 6).}
+}
+
+\subtree{
+\title{4.4 The scope stack and the places where a run ends without a verdict}
+
+\p{The let rule of INFER pushes the variable when it binds it (after the type and the value were checked, as \code{infer_let} extends the local context) and the end of the let chain pops what the chain pushed (as \code{infer_let} restores the context when it returns). Without speculative segments nothing else can leave a let, so the stack is the official local context as far as let variables go.}
+
+\ul{
+\li{\strong{A marked variable leaves its scope} and the type the let chain returns can still hold it (a bounded search of the value; a value without the flag OPEN holds no variable): what was computed belongs to the state inside. No verdict. If the returned type does not hold the variable, nothing outside the scope can meet it again, and the run goes on.}
+\li{\strong{A variable marked outside its scope is bound again}: the same, the other way round.}
+\li{\strong{The run applied a let variable where no application term can be kept} (finding MO2-F5, section 6): a redex whose body returns the variable is over-applied, \code{\verb~|(fun z => x) a b~}, or the head of the application is a let term whose body returns it. The official term keeps the redex and types it through the body of the lambda, the declared type of the variable; the machine has reduced it away. From then on the next K comparison of the run gives no verdict (the rule of 2026-11-24, inside the mode and for this shape only). A major premise whose type INFER stored while it checked the term is answered before that, from the stored type.}
+}
+
+\p{All of them are declines of the machine, together with the lambda-body rule of 4.3. On the eight corpora the first two and the lambda-body rule never occur; the third ends \strong{six real units} (one of cslib, five of Mathlib; section 8), which therefore stay declines. Four hostile rows end in one of these places (section 5).}
+
+\p{The third rule is coarser than it has to be. Where the over-application is part of a weak head normalisation (a kept application is forced, or the redex is the body of a beta step) the official kernel performs the same steps and nothing is lost; the step that applies cannot tell, and a variant that told the forcing of a kept application apart decided none of the six units, so it was taken out again. The exact treatment is to keep that application too: the official term at that point is the application of the let variable to the remaining arguments, a term the machine does not have and would have to build. Not built (section 12).}
+}
+
+\subtree{
+\title{4.5 What starts the mode}
+
+\ul{
+\li{The flag of 2026-11-24: the run reduced the application of a let variable with two types away, and reaches a K comparison whose type has the major inductive at its head. (86 units on the corpora.)}
+\li{The same for a let variable with one type whose value is a lambda: it can stand for the lambda of another let variable, and the beta step loses the declared type all the same (row \code{mo2-app-alias-exact-bad}).}
+\li{The same where the variable is applied by the over-application of a redex whose body returned it (\code{\verb~|Eval.applyFrom~}): the flag of 2026-11-24 was not set there, and the published build answers such a unit by the type of the reduct (finding MO2-F5).}
+\li{A mark on the let variable: a later declaration of the session that binds the same variable (the same value term, frame and declared type) may find the value of the application in a tabling record and never apply the variable (row \code{mo2-warm-applied-then-krule-bad}).}
+\li{The major premise of the comparison is itself typed through a let variable with two types, as far as that can be read without a judgment (\code{\verb~|Infer.letRootedSlow~}): the variable, a projection, a delayed application or redex whose stored type may have been read through one. The base answered these by the declared type (finding MO2-F1).}
+}
+
+\p{The last four are wider than the rule of 2026-11-24. Together they add 7 units on the eight corpora (navier-stokes-euler 1, cslib 1, Mathlib 5), all accepted by both readings; the test in the loop of APPLY adds none of them (with the old rule switched back on, the final build declines exactly what the base declines, section 8.5).}
+}
+}
+
+\subtree{
+\title{5. Hostile exports, written before the change was trusted}
+
+\p{67 exports, generator \src{rlvm-machine/src/test/resources/s/gen/batchMO2.py} (package S's builder), rows \code{mo2-*} at the end of the manifest of the hostile suite. Every official verdict is from leanchecker 4.36.0 in the project's Docker image, taken exactly as the suite's other rows were: 36 accept, 31 reject; all 67 came out as predicted from section 2. Fifty-six were written before the first gate of the change; eleven were added late, against the third build, and found the findings MO2-F4 and MO2-F5 of section 6. Every export uses the triple of section 2. With \code{\verb~|R at idx major = @Eq.rec Nat at (fun b _ => Nat) 7 idx major~} the statement \code{\verb~|(fun (_ : R = 7) => True.intro) (Eq.refl 7) : True~} is well typed iff the recursor application reduces to 7: by the K rule, or because the major premise reduces to a constructor. For a rule that must fire to be official the roles are swapped (\code{*-declared-fires-ok}): a let variable declared at \code{\verb~|d intro = d intro~} whose value is an axiom of \code{\verb~|5 = d h~}.}
+
+\p{"Machine alone" is the executable with \code{\verb~|-X no-fallback -X no-recheck~}: the reference engine neither decides a decline nor re-checks a rejection. "Plain run" is the executable without any option, which since 22:44 UTC means: a rejection of the machine is final, a decline goes to the reference engine. Published build = jars \code{f88e4ef5e102}; candidate = the final build of this package, the main tree of 22:44 UTC with the patch (jars \code{afe3ed7fc83d}; section 8 says which jars differ from the published ones). A verdict that is not the official one is in bold.}
+
+\table{
+\tr{\th{Row}\th{Official}\th{Published build, machine alone}\th{Published build, plain run}\th{Candidate, machine alone}\th{Candidate, plain run}}
+\tr{\td{\strong{inside the scope: the application of a let variable}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-app-declared-fires-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-two-args-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-two-args-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-neutral-value-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-neutral-value-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-ctor-value-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-alias-partial-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-alias-exact-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-alias-exact-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-dep-let-type-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-dep-let-type-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-let-type-function-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-let-type-function-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-under-binder-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-under-binder-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-bound-argument-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-through-defn-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-through-defn-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-var-declared-fires-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-two-ksites-agree-then-differ-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\strong{projections}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-proj-nested-applied-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-proj-nested-applied-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-app-of-proj-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-app-of-proj-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\strong{other K types}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-userk-app-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-userk-app-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-userk-app-declared-fires-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-upoly-app-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-upoly-app-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-noindex-app-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\strong{after the let: the value term is substituted}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-escape-app-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-app-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-escape-var-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-var-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-escape-proj-applied-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-app-of-proj-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-app-of-proj-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-escape-two-lets-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-inner-only-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-escape-under-binder-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-var-alias-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-var-alias-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-inside-then-escape-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{decline}}\td{reject}}
+\tr{\td{\strong{through the body of a lambda}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-escape-lambda-body-let-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{accept}}
+\tr{\td{\code{mo2-escape-lambda-body-let-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{\strong{decline}}\td{reject}}
+\tr{\td{\code{mo2-lambda-body-let-inner-left-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-lambda-body-let-inside-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-redex-body-let-inside-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-escape-redex-body-let-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-escape-redex-body-let-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-redex-body-let-declared-fires-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\strong{sessions, the common real shape, certificates}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-warm-applied-then-krule-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-shape-unrelated-ok}}\td{accept}\td{\strong{decline}}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-shape-unrelated-bad}}\td{reject}\td{\strong{decline}}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-cert-escape-var-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-cert-escape-app-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\strong{a redex on the way to the type root (findings MO2-F4, MO2-F5)}}\td{}\td{}\td{}\td{}\td{}}
+\tr{\td{\code{mo2-chain-redex-inexact-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-chain-redex-fn-inexact-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-chain-redex-inexact-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-chain-redex-exact-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-chain-redex-exact-bad}}\td{reject}\td{reject}\td{reject}\td{reject}\td{reject}}
+\tr{\td{\code{mo2-chain-redex-inside-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-redex-value-escape-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-overapp-declared-fires-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-overapp-value-fires-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{\strong{decline}}\td{reject}}
+\tr{\td{\code{mo2-binder-left-let-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{accept}}
+\tr{\td{\code{mo2-binder-left-let-bad}}\td{reject}\td{\strong{accept}}\td{\strong{accept}}\td{reject}\td{reject}}
+}
+
+\p{What the table shows. \strong{The published build, machine alone}: 38 declines (the rule of 2026-11-24), 16 official verdicts, 8 accepts of statements the official checker rejects, all of them derivable (kind T; certificates \code{mo2-cert-escape-var-ok}, \code{mo2-cert-escape-app-ok}, and \code{True}), and \strong{5 rejections of exports the official checker accepts} (findings MO2-F1 and MO2-F5). \strong{The published build, plain run}: the reference engine decides the 38 declines, so 54 official verdicts; the 8 accepts and the 5 rejections stay, because nothing re-checks them. \strong{The candidate, machine alone}: 63 official verdicts and 4 declines, each of them one of the places of 4.4 or the rule of 4.3 for a lambda body; the four rows carry the note \code{let-scope} in the manifest. \strong{The candidate, plain run}: the official verdict on all 67.}
+
+\p{The dimensions the task named, and the rows: K types (\code{Eq}; a K type of the export itself with an index, \code{mo2-userk-*}; a universe-polymorphic one at level 2 on types, \code{mo2-upoly-*}; one without indices and with a parameter, \code{mo2-noindex-app-ok}); the major premise a let variable (\code{mo2-var-*}, \code{mo2-escape-var-*}), an application of one (\code{mo2-app-*}), a projection (\code{mo2-proj-*}, \code{mo2-app-of-proj-*}), under a binder (\code{mo2-app-under-binder-*}, \code{mo2-app-bound-argument-bad}, \code{mo2-escape-under-binder-ok}); values that are a lambda, an axiom, a constructor application (\code{mo2-app-neutral-value-*}, \code{mo2-app-ctor-value-ok}); the declared type depending on an earlier let, and being the application of one (\code{mo2-app-dep-let-type-*}, \code{mo2-let-type-function-*}); through a definition that applies its argument (\code{mo2-app-through-defn-*}); two declarations with one let (\code{mo2-warm-applied-then-krule-bad}); a redex between a let variable and its type root, as a value term, as the major premise and as the binder of the value (\code{mo2-chain-redex-*}, \code{mo2-redex-value-escape-ok}, \code{mo2-overapp-*}, \code{mo2-binder-left-let-*}).}
+
+\p{In the suite. \code{SHostileSlowTest} with the rows added, 56 switch sets by 1,341 rows: section 8. The new fast test \code{SHostileLetTest} demands the official verdict \em{of the machine itself} on the 63 rows and on the seven rows of package E1 on the same rule under the generic tier, step 1, the set of wave 6 and the default set, a decline on the four rows with the note, and a decline of the row of finding E1-F6 when the old rule is switched back on.}
+}
+
+\subtree{
+\title{6. Six findings}
+
+\subtree{
+\title{MO2-F1: after a let, the machine of the published build types by the declared type (a wrong reject of the machine alone)}
+
+\p{Reported on the board at 22:09 UTC, and again at 23:14 UTC when the published default had changed. Export \code{mo2-escape-var-ok}: with \code{\verb~|W : forall (q : d h = 5), P (Eq.rec 7 q)~} and \code{\verb~|r0 : d intro = 5~}, the theorem \code{\verb~|P 7 := let q : d h = 5 := r0; W q~}. The official checker accepts: the type of the value is \code{\verb~|let q := r0; P (Eq.rec 7 q)~}, against \code{\verb~|P 7~} the value term is substituted, the major premise is \code{r0} of type \code{\verb~|d intro = 5~}, and the K rule fires. The machine of the published build, alone, rejects (\code{DECL_TYPE_MISMATCH}): its let variable has the declared type \code{\verb~|d h = 5~} for ever, and the expected-type rule compares inside the scope. No application of a let variable is involved, so the rule of 2026-11-24 did not decline. A plain run of the build of 20:00 UTC accepted, because the reference engine re-checked every rejection. A plain run of the build of 22:45 UTC, in which a rejection of the machine is final, \strong{rejects}: exit status 1 on \code{mo2-escape-var-ok}, \code{mo2-escape-var-alias-ok} and \code{mo2-escape-app-of-proj-ok}, exit status 0 with \code{\verb~|-X verify=reference~}. A fourth export of the family was added late: \code{mo2-binder-left-let-ok}, a let variable whose value is the variable of a redex, with the K rule after the redex has been inferred (the argument is substituted for the binder); the published build rejects it as well. These four are not among the twelve known wrong rejects of [the report of package MO-1](rep-MO-1); no real corpus, published test or mutant is known to be affected (section 8: the candidate's verdicts on all of them are the published ones).}
+
+\p{The same family in the published build: the accepts of derivable statements \code{mo2-escape-var-bad}, \code{mo2-escape-var-alias-bad}, \code{mo2-escape-app-of-proj-bad}, \code{mo2-inside-then-escape-bad}, \code{mo2-escape-inner-only-bad}, \code{mo2-app-alias-exact-bad}, \code{mo2-binder-left-let-bad}. The candidate gives the official verdict on all of them but \code{mo2-inside-then-escape-bad}, which it declines. This is the reverse side of the fix of E1-F1: before it the let variable had the type of its value, which is the official reading after the scope and not inside.}
+}
+
+\subtree{
+\title{MO2-F2: a confident wrong verdict of this package's own second build, found by its own rows}
+
+\p{Reported on the board at 22:46 UTC, before any gate result of that build was used. With \code{\verb~|let g := fun u => r0; let f := fun u => g u~} (both declared \code{\verb~|Unit -> d h = 5~}) and the K rule on \code{\verb~|f Unit.unit~} after both lets, the type goes on through the body of the lambda that \code{f} is bound to, into \code{g}. The second build compared two states, both of which read \code{g} by its declared type, found them equal and answered: it rejected \code{mo2-escape-lambda-body-let-ok} (official accept) and accepted \code{mo2-escape-lambda-body-let-bad} (official reject, a derivable statement), where the base declines both. The rows were written because the argument for exactness had no line for a lambda body; the official verdicts confirmed the prediction. The final build has the rule of 4.3 for lambda bodies and declines both rows; the same rule covers a major premise that is a delayed beta-redex (\code{mo2-*-redex-body-*}: four rows, four official verdicts). Every gate of section 8 was run again on the final build.}
+}
+
+\subtree{
+\title{MO2-F3: the K rule on a major premise that is a beta-redex, the reject direction of finding E1-F7 (a wrong reject of the published default, not repaired by this package)}
+
+\p{Reported on the board at 23:56 UTC, as soon as the official verdicts were in. Three exports without any let, written late in the package to test the prediction of 7.3: the statement \code{\verb~|(fun (_ : Eq.rec 7 ((fun (z : d intro = d intro) => z) ax) = 7) => True.intro) (Eq.refl 7) : True~}, the recursor at \code{\verb~|d intro~} with index \code{\verb~|d intro~}, \code{\verb~|ax : 5 = d h~} an axiom; the same with a function (\code{\verb~|(fun (f : Unit -> d intro = d intro) => f Unit.unit) (fun u => ax)~}); the same under a binder. The official checker \strong{accepts} all three: \code{\verb~|to_cnstr_when_K~} types the raw major premise, the infer-only type of the redex is the binder's domain \code{\verb~|d intro = d intro~}, and the K rule fires. A plain run of the published executable (build \code{f88e4ef5e102}) \strong{rejects} all three with \code{APP_TYPE_MISMATCH}, and so does the candidate of this package; with \code{\verb~|-X verify=reference~} both accept. Two controls without the redex (an axiom of \code{\verb~|d intro = d intro~} as the major premise: accept; \code{ax} as the major premise: reject) get the official verdict everywhere.}
+
+\p{The cause is one line: the type of a delayed term without a stored type is the type of its value (\code{\verb~|Infer.vtypeSusp~}: VTYPE of FORCE), so the machine types the reduct \code{ax}, whose type \code{\verb~|5 = d h~} does not let the rule fire. It is finding E1-F7 of [the working notes of package M5](rep-machine-M5), whose accept direction (row \code{e1-sib-krule-major-redex-bad}, kind T) is an accepted risk; the reject direction was repaired by the re-check of a rejection until 22:44 UTC and is a wrong reject of the default configuration since. These three are not among the twelve known wrong rejects of [the report of package MO-1](rep-MO-1). No real corpus, published test or mutant is known to be affected.}
+
+\p{\strong{Not repaired here}, and why: the class has no let variable, so nothing of the exact-let mode sees it, and a repair has two parts that both reach into the default tier. (1) At the K rule, a delayed major premise whose type root is the binder of a redex of its own term (or of a let inside it) must be typed by INFER of the term under its frame in infer-only mode, which already gives the official reading (the rows \code{e1-app-type-is-domain-*} are strict rows and pass): a syntactic test and one judgment at a place that is memoised. (2) A delayed argument whose value is already known is replaced by that value when the application is built, so the major premise can arrive as the reduct, with nothing left to say that it was a redex; an exact rule has to keep such an argument as a record of its own, as 4.2 does for the application of a let variable, either in every declaration (new values in the default tier and in the code blocks) or behind a trigger and a second run (the trigger would be the beta step of a redex whose body is typed through its own binder, which is what every \code{\verb~|have h : T := p; h ..~} of a real export is: how many units that would run twice was not measured). The three exports, the two controls, their official verdicts and the generator are handed over with the patch as a package of their own; they are not rows of the suite, because the gate allows the count of known wrong rejects to go down only.}
+}
+
+\subtree{
+\title{MO2-F4: a wrong reject of this package's own third build, found by its own probes (the chain of let variables went through a beta step)}
+
+\p{Reported on the board at 00:08 UTC of 2026-11-26, and the build was withdrawn. With \code{\verb~|let y : d intro = 5 := r2~} (\code{\verb~|r2 : d h = 5~} an axiom) and \code{\verb~|let x : d intro = d intro := (fun (z : d intro = 5) => z) y~}, the K rule on \code{x} after both lets. Officially the major premise is the redex \code{\verb~|(fun z => z) r2~}, typed through the binder's domain: the rule fires, and the published build, which reads the declared type of \code{x}, accepts by luck. The third build of this package found the successor of \code{x} in the chain of 4.3 by \em{evaluating} the value term of \code{x}: the evaluation performs the beta step and arrives at \code{y}, so the state "both variables have left" read the type of \code{r2}, and the build \strong{rejected} an export that the official checker and the published build accept (rows \code{mo2-chain-redex-inexact-ok} and \code{mo2-chain-redex-fn-inexact-ok}). All gates of that build had passed: no real unit, published test, mutant or earlier row has this shape. The final build reads the root off the term (4.3); the two rows, their mirror and four rows with a let variable of one type are decided with the official verdict. The same evaluation was used for a delayed projection whose struct is a redex; it is guarded the same way.}
+}
+
+\subtree{
+\title{MO2-F5: the application of a let variable by an over-application was never flagged (a wrong reject of the published default in this package's own class)}
+
+\p{Reported on the board at 00:12 UTC of 2026-11-26. \code{\verb~|let f : Unit -> d intro = d intro := fun u => ax~} and the K rule on \code{\verb~|(fun (z : Unit) => f) Unit.unit Unit.unit~}. Officially the major premise is typed through the body of the lambda, the declared type of \code{f}, and the rule fires. In the machine the beta step returns the variable and the loop of APPLY goes on with it: the test of finding E1-F6 stands at the entry of APPLY and in EVAL of an application, not in the loop. So the published build does not decline: it types the reduct \code{ax} and \strong{rejects} (row \code{mo2-overapp-declared-fires-ok}; the mirror \code{mo2-overapp-value-fires-bad} is accepted, a derivable statement). The third build of this package did the same. The final build sets the flag in the loop, so the first run ends and the unit runs in exact-let mode; there the first row is decided with the official verdict (the type of the major premise that INFER stored is the official one) and the mirror is declined (4.4). The price is paid on real inputs: six units of the class do exactly this, and the mode gives no verdict on them (section 8). The third build accepted them, with the reference engine's agreement, by typing the reduct; that is the reading this finding shows to be wrong on a hostile input.}
+}
+
+\subtree{
+\title{MO2-F6: a let term as the major premise (a wrong reject of the published default, not repaired by this package)}
+
+\p{Reported on the board at 00:55 UTC of 2026-11-26. \code{\verb~|(fun (_ : Eq.rec 7 (let w : d intro = d intro := ax; w) = 7) => True.intro) (Eq.refl 7)~}: the official checker \strong{accepts} (\code{infer_let} types the body under \code{w} with its declared type, and the K rule fires), the published executable and the candidate \strong{reject}; the mirror with \code{\verb~|let w : d h = 5 := r0; w~} is rejected officially and accepted by both (a derivable statement). The cause is that of MO2-F3: the delayed let term has no stored type, so its type is the type of its value, and EVAL has performed the zeta step. The let variable is one of EVAL, not of INFER: no record carries its declared type when the K rule runs, so neither the flag of finding E1-F6 nor the exact-let mode sees it.}
+
+\p{\strong{One repair for MO2-F3 and MO2-F6}, proposed and not built: at the K rule, a major premise that is still a delayed term without a stored type, and whose term has a redex or a let term on the way to its type root, is typed by INFER of the term under its frame in infer-only mode instead of by its value. That is the official reading for all five exports of the two findings and for the over-application of MO2-F5 inside a scope. It changes the default tier, so it needs the gates of a switch and an adversarial pass of its own; and it does not cover a major premise that arrives as a value because the delayed term had been forced before (7.3).}
+}
+}
+
+\subtree{
+\title{7. Exactness: the argument, what it rests on, what it does not cover}
+
+\subtree{
+\title{7.1 Soundness does not depend on any of this}
+
+\p{The K rule replaces the major premise by a constructor application of a type that the machine's comparison found convertible with a type of the major premise. Both the declared type of a let variable and the type of its value are types of it (the let rule checked their conversion), the inductive is a proposition with one constructor without fields, so the replacement is definitional proof irrelevance. Firing under any of the readings is derivable; not firing is always derivable. A wrong reading can make the machine accept a derivable statement that the official checker rejects, or reject one it accepts. It cannot make it accept a statement that is not derivable.}
+}
+
+\subtree{
+\title{7.2 The claim}
+
+\p{For a declaration that the machine decides, and a K comparison on a major premise whose type chain (4.3) has length \code{k}: if \code{k = 0} the machine does what it did. Otherwise the answer the machine uses is the answer of the standard comparison in the state the official kernel is in, where the state is the number of chain variables whose \code{infer_let} has returned; and no answer computed in one state is used in another state in which it differs.}
+
+\p{It rests on:}
+
+\ol{
+\li{\strong{The value in the major position is the official term}, for these shapes, up to the machine's delayed substitution. A let variable is its record. A syntactic application of one is a kept record, because the mode has no code blocks and the two steps of 4.2 are the only places where its EVAL can meet one; an application that is not syntactic (the loop of APPLY goes on with a let variable that a body returned, or the head term is not a variable) is not kept, and the run gives no verdict at its next K comparison (4.4). Projections of both are projection records; a delayed projection term is typed through its struct if no redex and no let term lies on the way to the struct's root. Checked by the rows of section 5 and by the audits of the gate (memo re-computation with kept applications in the values).}
+\li{\strong{The type of a state is the official type of the term of that state.} State 0: the declared type of the root variable, instantiated; arguments are not typed. State \code{i}: the value term of a variable typed by INFER in infer-only mode, which is what \code{infer_type} does on that term. A lambda as a value: the type of the lambda instantiated, which infers the body under the argument with the typed-binding rule. The chain goes from a variable to the next one only through a value term whose root is reached without a redex or a let term, so no state reads a type through a beta or zeta step that the official term does not have (the error of finding MO2-F4).}
+\li{\strong{The scope stack is the official local context} for let variables: pushed after the checks of a binder, popped where the chain returns, no cut in between because the mode has no speculative segment; a failed judgment ends the declaration.}
+\li{\strong{Everything else is the generic tier}: weak head normal form, the constructor application, the comparison. Its agreement with the official kernel is what the project's gates measure; it is not proven.}
+\li{\strong{The mode is reached} whenever a comparison of this class is reached: 4.5.}
+}
+}
+
+\subtree{
+\title{7.3 What it does not cover}
+
+\ul{
+\li{\strong{The places where the mode declines} (4.3, 4.4): a hostile input can turn a verdict into a decline there. Never a verdict into another verdict, as far as the argument of 7.2 holds; it held for neither the second nor the third build of this package (findings MO2-F2 and MO2-F4), both times because a step of it had not been written down, and both times a hostile export written for that step found it. With the reference engine off a decline of one unit is a decline of the file.}
+\li{\strong{A typed binding on the way}: a let variable whose value is the variable of a redex that INFER is inside (\code{\verb~|(fun (z : D) => let x := z; ..) a~}). While the redex is being inferred the official type of \code{z} is \code{D}; after it, \code{a} has been substituted. The machine has one record for both, as it had for a let variable, and no scope stack for it: state 1 of the chain reads \code{D} (INFER on the term), the later states read the argument (the chain is followed through the value). The two rows \code{mo2-binder-left-let-*} get the official verdict, and so do three probes that are not rows, in which the comparison runs after the redex and inside an outer let variable that the argument is (the published build and the candidate alike). That is five exports, not an argument: the machine cannot tell the two states of a redex binder apart, and a shape in which they differ and the machine picks the wrong one was looked for only as far as these five.}
+\li{\strong{A major premise that is a beta-redex, or has one at its type root, when the redex has already been forced.} The machine then types the reduct, the official kernel the redex through its binder's domain. This is finding E1-F7 of [the working notes of package M5](rep-machine-M5), an accepted risk as far as accepts go ([accepted risks](accepted-risks)). It has a reject direction too, and that direction is \em{not} tolerated by the policy once the re-check is off: finding MO2-F3 of section 6, three exports that the official checker accepts and a plain run rejects, in the published build and in the candidate alike. Not this package's class (no let variable); nothing here changes it. A redex that is still delayed, with a stored type, is covered (4.3, 4.5).}
+\li{\strong{The other places where the official kernel types an unreduced term}: the struct of a stuck projection in proof irrelevance, structure eta, the unit-like rule, eta expansion. In the default set they see the reduct's type when the application of a let variable was reduced away, and nothing starts the mode for them. Rows of package E1 (\code{e1-sib-proj-*}) are kind T rows for this reason. Inside the mode a kept application gives them the declared type, which is the reading inside the scope; the scope states are compared for the K rule only.}
+\li{\strong{A type that an earlier declaration of the session left in a tabling record} and that holds a let variable, used by a later declaration that never binds the variable (an infer-only inference of a shared closed term that an earlier declaration checked). The later declaration is officially outside the scope; the machine types a memoised reduct by its value, which is the official reading there up to the redex class above. The mark of 4.5 covers the declaration that binds the variable again.}
+\li{\strong{A frame slot that is a typed binding whose value is a let variable}, as the head of a kept application inside a value term: the state type is computed by INFER, which answers the binding's domain. Not constructed as an export.}
+\li{\strong{Eager reduction.} A unit that enters eager reduction in the mode is declined (the generic tier has no \code{eager}). None on the eight corpora.}
+\li{\strong{Work, not verdicts.} A kept application has a free variable in the official sense, so in the mode Nat literal folding in lazy delta and the \code{Bool.true} test are skipped where the official kernel skips them; in the first run they are not. This follows erratum E1 and changes no answer.}
+}
+}
+}
+
+\subtree{
+\title{8. Gates}
+
+\p{Everything in this section was run on the final build: a private copy of the main tree of 2026-11-25 22:44 UTC with the patch of section 10, built with \src{scripts/build.sh} (jars \code{0397eb07054a}; the jar of \code{rlvm-machine} \code{6db085f6b0a5}; executable 68,487,288 bytes), GraalVM Community Edition, on the aarch64 development host. "Base" is the published build of 22:45 UTC (jars \code{f88e4ef5e102}). The jars of \code{rlvm-driver} and \code{rlvm-main} of the final build are byte for byte the published ones; besides the jar of the machine, those of \code{rlvm-truffle} and \code{rlvm-inductive} differ from the published ones in \em{any} build of that tree (five classes of the Truffle tier and one build file: the main tree is ahead of the published build there, and it is not this patch), which is why the guard of section 9 has a second base. None of the runs of this section is a timing; every one ran behind \src{bench/slot.sh}, off the measurement cores. The gates of the three earlier builds are void and are not reported, with one exception that is named.}
+
+\subtree{
+\title{8.1 The suites of the module and the hostile suite}
+
+\ul{
+\li{\code{rlvm-machine}, default group, corpora present: 458 tests, 0 failures, 0 errors, 4 skipped. Fast group: 427 tests, 0 failures, 0 errors, 3 skipped. Three tests are new (\code{SHostileLetTest}); the size test of the stepper convention passes.}
+\li{\code{SHostileSlowTest}: 56 switch sets by 1,341 rows (the 1,274 rows of the base and the 67 of section 5), no unexpected verdict. In the base the rows \code{e1-sys-let-krule-major-applied-bad} and \code{e1-sib-krule-major-proj-applied-let-bad} are declines in all 56 lanes and \code{e1-sys-let-krule-major-applied-ok} in 31; with the patch they are verdicts of the machine in every lane, the official ones.}
+\li{\strong{Every declaration in exact-let mode} (\code{\verb~|-Drlvm.machine.letexact=always -X machine.switches=none~}, the machine alone, the JVM launcher) on all 1,341 rows: 1,250 official verdicts; 16 accepts of official rejects, all on rows of kind T, none on a row of this package; 4 rejections of official accepts, all four on rows that are known wrong rejects of every switch set (three rows \code{r2-id-binder-*} and \code{s3-wc-canon-fvar-full-first-ok}); 71 declines: 63 for eager reduction, which the generic tier does not have, the 4 rows with the note \code{let-scope}, 3 rows that the pipeline declines by design and one metadata row. So no row on which the mode gives a verdict that is neither the official one nor a deviation the base has under every switch set.}
+}
+}
+
+\subtree{
+\title{8.2 The gate of the brief}
+
+\p{\code{\verb~|scripts/gate.sh --dist <the final build> --defaults --corpus all --hostile <the manifest with the 67 rows>~}, through the executable and through the jars.}
+
+\table{
+\tr{\th{Launcher}\th{Published tests}\th{Mutants (17,775)}\th{Hostile rows (1,341)}\th{Result}}
+\tr{\td{executable}\td{230 of 230 correct, none declined}\td{SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683}\td{agree 1,251, kind T accepts tolerated 74, known wrong rejects 12 (12 marked, at most 12), wrong accept 0, wrong reject 0, declined 4, errors 0}\td{PASS}}
+\tr{\td{JVM launcher (the jars)}\td{230 of 230 correct, none declined}\td{SOUNDNESS 0, COMPLETENESS 0, agree 16,092, declined 1,683}\td{agree 1,251, kind T accepts tolerated 74, known wrong rejects 12 (12 marked, at most 12), wrong accept 0, wrong reject 0, declined 4, errors 0}\td{PASS}}
+}
+
+\p{The differential self-test of the gate caught its planted difference in both runs. The base's own gate ([the report of package MO-1](rep-MO-1)): 230 of 230, the same mutant counts, and on its 1,274 rows agree 1,184, tolerated 74, known wrong rejects 12, declined 4. So all 67 new rows are in agreement in a plain run and nothing else moved; the four declined rows are the base's (none of this package's).}
+}
+
+\subtree{
+\title{8.3 The machine's own gate (package M8), default set}
+
+\p{\code{\verb~|rlvm-machine/src/test/resources/m8/report.sh gate --switches default --session-mib 1~} on the patched tree: 234 files, six lanes per file. Result: PASS WITH DECLINES, the heading the base has too (the lane of the generic tier declines the units of eager reduction).}
+
+\table{
+\tr{\th{Lane}\th{Final build}\th{Base (the gate of the integrator, same switch set)}}
+\tr{\td{Differential against the reference engine, 230 tests}\td{15,845 checks: 15,804 accepted, 41 rejected, 0 declined; SOUNDNESS 0, COMPLETENESS 0; 226,536,782 ticks}\td{the same, to the tick}}
+\tr{\td{Differential, Init}\td{57,938 accepted, 0 declined; 35,050,261 ticks}\td{the same, to the tick}}
+\tr{\td{Differential, Std}\td{\strong{100,096 accepted, 0 declined}; 57,745,360 ticks}\td{100,095 accepted, \strong{1 declined}; 57,723,434 ticks}}
+\tr{\td{Differential, reachability; the cedar slice}\td{4,224 and 8,064 accepted, 0 declined; 9,027,354 and 10,291,231 ticks}\td{the same, to the tick}}
+\tr{\td{Tier equivalence (the generic tier against the default set)}\td{0 different outcomes, 0 other reasons; the generic tier declines 8, 164, 203, 8, 11 (eager reduction)}\td{0 and 0; 8, 164, 204, 8, 11}}
+\tr{\td{Convention equivalence (host depth 0 and unbounded against 128)}\td{0 different in every lane; 9 declarations not compared (host stack without a bound), as in the base}\td{0 different}}
+\tr{\td{Debug audits (poison, scope, mask; memo and shortcut re-computation)}\td{0 different outcomes, 0 declarations ended by an audit}\td{0 and 0}}
+\tr{\td{The pipeline (the real driver)}\td{230 of 230 verdicts right; Init, Std, reachability and the cedar slice accepted; 0 disagreements}\td{the same}}
+}
+
+\p{The one unit of this class in these corpora, \code{Std.IterM.Equiv.lift_step_bind_congr}, is a verdict of the machine now, equal to the reference engine's, and the 21,926 ticks that Std gained are its second run. An earlier build failed the memo audit of this gate on the same unit (the trigger fired inside the audit's re-computation of a judgment that the run itself had answered by a shortcut); the trigger is skipped inside an audit since then.}
+}
+
+\subtree{
+\title{8.4 The eight corpora: declines before and after, and the differential engine}
+
+\p{The executable, 8 workers. "Declined" counts decline events of the machine: every declined unit is tried twice (the driver's cold retry). Before: the published build with the machine's decline log (section 1). After: the final build under the differential engine (\code{\verb~|-X engine=diff~}: the reference engine checks every unit beside the machine, and a unit on which the two differ is a disagreement).}
+
+\table{
+\tr{\th{Corpus}\th{Declined before}\th{of them this rule}\th{Declined after}\th{of them this rule}\th{Runs in exact-let mode}\th{K comparisons through a let variable with two types}\th{of them with different answers}\th{Reference engine: units, accepted}\th{Disagreements}}
+\tr{\td{Init}\td{0}\td{0}\td{0}\td{0}\td{0}\td{0}\td{0}\td{57,938; 57,938}\td{0}}
+\tr{\td{Std}\td{2}\td{2}\td{0}\td{0}\td{1}\td{0}\td{0}\td{100,096; 100,096}\td{0}}
+\tr{\td{cedar}\td{2}\td{2}\td{0}\td{0}\td{1}\td{0}\td{0}\td{144,098; 144,098}\td{0}}
+\tr{\td{reachability}\td{0}\td{0}\td{0}\td{0}\td{0}\td{0}\td{0}\td{4,224; 4,224}\td{0}}
+\tr{\td{con-leche}\td{4}\td{2}\td{2}\td{0}\td{1}\td{0}\td{0}\td{36,274; 36,274}\td{0}}
+\tr{\td{navier-stokes-euler}\td{32}\td{32}\td{0}\td{0}\td{17}\td{0}\td{0}\td{124,850; 124,850}\td{0}}
+\tr{\td{cslib}\td{22}\td{14}\td{10}\td{\strong{2}}\td{8}\td{3}\td{0}\td{397,608; 397,608}\td{0}}
+\tr{\td{Mathlib}\td{128}\td{120}\td{18}\td{\strong{10}}\td{65}\td{10}\td{0}\td{714,712; 714,712}\td{0}}
+}
+
+\p{\strong{80 of the 86 units of the class are verdicts of the machine}, all accepts, each equal to the reference engine's. \strong{Six stay declines}, all by the rule for an over-application (4.4): \code{Cslib.Query.IsSort.lowerBound_infinite} of cslib, and of Mathlib \code{AlgebraicGeometry.Scheme.isCoverDense_toOver_Spec}, \code{AlgebraicGeometry.Scheme.isOneHypercoverDense_toOver_Spec}, \code{MeasureTheory.integral_eq_of_hasDerivAt_off_countable_of_le}, \code{ModularGroup.tendsto_lcRow0} and \code{MvQPF.liftR_map_last}. The other declines after the patch are eager reduction (one unit of con-leche, four of cslib, four of Mathlib), another package's class. The mode ran 93 units: the 86 and 7 more that the wider triggers of 4.5 start (navier-stokes-euler 1, cslib 1, Mathlib 5), which the base decided by a reading that is the official one only inside the scope; all seven are accepted in the mode.}
+
+\p{\strong{Accept runs}: the eight corpora with 8 and with 4 workers through the executable and through the JVM launcher, no option: 32 runs, 32 accepts, no warm anomaly, no machine-incomplete unit, no disagreement; decline events per run 0, 0, 0, 0, 2, 0, 10, 18 in the order of the table, in every one of the four configurations; the largest resident set 4,539 MiB (Mathlib, JVM launcher, 8 workers).}
+
+\p{\strong{Every declaration in exact-let mode against the reference engine} (\code{\verb~|-Drlvm.machine.letexact=always -X machine.switches=none -X engine=diff~}, 8 workers, the executable): 8 runs, 8 accepts, no disagreement on any unit. The mode ran 1,443,334 times, kept 172,023 applications and made 79 K comparisons through a let variable with two types, none with different answers. It ended 14 times without a verdict (cslib 2, Mathlib 12; every unit is tried twice), each time by the rule for an over-application. The other 19,238 decline events of these runs are eager reduction.}
+}
+
+\subtree{
+\title{8.5 Counters: what changes and what does not}
+
+\p{One worker in file order, the executable, the statistics file and the unit trace (steps and outcome of every checked unit), the eight corpora, three lanes: the base; the final build; the final build with the rule of 2026-11-24 switched back on (\code{\verb~|-Drlvm.machine.letexact=off -Drlvm.machine.letwide=false -Drlvm.machine.letroot=off~}).}
+
+\ul{
+\li{\strong{With the old rule on, the final build computes what the base computes}: on each of the eight corpora every count key of the machine, the reference engine, the driver and the loader is equal (the nine new \code{let.*} keys aside), and every unit has the same steps and the same outcome. So the first run of a declaration is what it was, and the new test in the loop of APPLY flags nothing on these corpora that the old tests did not flag.}
+\li{\strong{With the new rule}, the outcome of a unit changes on 80 units, each from declined to accepted: Std 1, cedar 1, con-leche 1, navier-stokes-euler 16, cslib 6, Mathlib 55. The units the reference engine decides in such a run go from 1, 1, 2, 16, 11, 64 to 0, 0, 1, 0, 5, 9.}
+\li{\strong{Not identical otherwise}, and this is the one place where the gate "only the units that were declined may change" does not hold to the letter: units checked by the same worker \em{after} the first unit of the class take other steps, with the same outcome: Std 2, cedar 84, con-leche 1, navier-stokes-euler 5,924, cslib 3,325, Mathlib 16,060 (none before the first unit of the class; about half of them fewer steps, half more; net -2,571 to +688,010 steps per corpus; the units that run a second time without changing their outcome are among them: the seven extra runs in the mode and the six units that are declined after it). The base's driver discards the worker's context after a decline, the patched unit is accepted and the context stays; from there on the resets of the warm session at its size cap fall on other units (Mathlib: 11,919 resets in the base, 11,900 with the patch), and a unit that starts in a session with another history takes other steps. The mechanism was followed as far as the count of resets, not further.}
+\li{\strong{Ticks of the machine} (one worker): Init and reachability equal to the tick; Std +0.018 \%, cedar +0.010 \%, con-leche +0.062 \%, navier-stokes-euler +0.433 \%, cslib +0.030 \%, Mathlib +0.511 \% (559,746,444 to 562,608,349). The base's number leaves out what the reference engine did on the declined units.}
+}
+}
+}
+
+\subtree{
+\title{9. The guard}
+
+\p{The guard of [the decision on the default set](dec-YP0N): no corpus more than 3 \% slower than without the change, over at least three interleaved rounds. Warm wall clock of a pass that reloads the file with pipelined loading, 8 workers, the default configuration, the aarch64 development host. Every number was taken inside a quiet-core window (\src{bench/quiet.py}), all corpora of a launcher in one window, the variants interleaved round by round on each corpus. A cell is the mean over the three rounds of the median later pass of one process, in seconds; on reachability, whose pass is shorter than 0.5 s, the mean of the later passes. A process makes 15 passes on reachability, 10 on Init and Std, 8 on cedar, 6 on con-leche, cslib and navier-stokes-euler, 4 on Mathlib. After the cell: the three rounds, the CPU seconds of a pass, the loader's seconds, the peak resident set. \strong{Base}: a private build of the unpatched tree of 22:44 UTC, made with the same command as the candidate (jars \code{3babbe8de8f3}); its machine jar is byte for byte the published one, so on the launcher that runs the jars base and candidate differ in the jar of the machine and in nothing else. \strong{Candidate}: the final build. Every process accepted every unit.}
+
+\subtree{
+\title{9.1 The executable}
+
+\table{
+\tr{\th{Corpus (statistic)}\th{Base}\th{Candidate}}
+\tr{\td{Init (median)}\td{0.568; rounds 0.571 / 0.569 / 0.563; CPU 4.1; loader 0.44; 375 MiB}\td{0.571 (+0.6 \%); rounds 0.569 / 0.576 / 0.568; CPU 4.1; loader 0.44; 378 MiB}}
+\tr{\td{Std (median)}\td{0.995; rounds 0.993 / 0.994 / 0.998; CPU 7.4; loader 0.81; 609 MiB}\td{0.993 (-0.2 \%); rounds 0.993 / 0.992 / 0.995; CPU 7.4; loader 0.81; 600 MiB}}
+\tr{\td{cedar (median)}\td{1.380; rounds 1.376 / 1.377 / 1.388; CPU 10.5; loader 1.23; 759 MiB}\td{1.382 (+0.1 \%); rounds 1.384 / 1.377 / 1.384; CPU 10.4; loader 1.26; 766 MiB}}
+\tr{\td{reachability (mean)}\td{0.415; rounds 0.410 / 0.418 / 0.416; CPU 1.1; loader 0.02; 734 MiB}\td{0.416 (+0.3 \%); rounds 0.419 / 0.411 / 0.418; CPU 1.1; loader 0.03; 735 MiB}}
+\tr{\td{con-leche (median)}\td{1.281; rounds 1.298 / 1.273 / 1.272; CPU 8.3; loader 0.75; 911 MiB}\td{1.273 (-0.6 \%); rounds 1.234 / 1.322 / 1.262; CPU 8.3; loader 0.75; 921 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.318; rounds 3.307 / 3.310 / 3.337; CPU 25.5; loader 2.18; 1,511 MiB}\td{3.273 (-1.4 \%); rounds 3.302 / 3.244 / 3.272; CPU 25.2; loader 2.02; 1,483 MiB}}
+\tr{\td{cslib (median)}\td{4.356; rounds 4.366 / 4.361 / 4.340; CPU 33.5; loader 3.84; 1,631 MiB}\td{4.366 (+0.2 \%); rounds 4.345 / 4.375 / 4.379; CPU 33.5; loader 3.83; 1,604 MiB}}
+\tr{\td{Mathlib (median)}\td{12.977; rounds 12.416 / 13.514 / 13.002; CPU 100.5; loader 10.72; 4,048 MiB}\td{12.981 (+0.0 \%); rounds 13.039 / 12.999 / 12.905; CPU 100.9; loader 11.00; 3,906 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.723 (8 corpora)}}\td{\strong{1.721 against 1.723 (-0.1 \%, 8 corpora); largest loss +0.6 \% (Init), largest gain -1.4 \% (navier-stokes-euler)}}}
+}
+
+\p{No corpus is slower by more than 0.6 \%; the geometric mean is 0.1 \% lower. The executable passes the guard.}
+}
+
+\subtree{
+\title{9.2 The JVM launcher}
+
+\p{First window, base and candidate:}
+
+\table{
+\tr{\th{Corpus (statistic)}\th{Base}\th{Candidate}}
+\tr{\td{Init (median)}\td{0.525; rounds 0.540 / 0.528 / 0.507; CPU 3.9; loader 0.45; 816 MiB}\td{0.536 (+2.1 \%); rounds 0.535 / 0.561 / 0.512; CPU 4.0; loader 0.44; 855 MiB}}
+\tr{\td{Std (median)}\td{0.877; rounds 0.875 / 0.861 / 0.894; CPU 6.7; loader 0.74; 1,471 MiB}\td{0.907 (+3.5 \%); rounds 0.903 / 0.917 / 0.902; CPU 6.9; loader 0.77; 1,473 MiB}}
+\tr{\td{cedar (median)}\td{1.315; rounds 1.273 / 1.367 / 1.305; CPU 9.8; loader 1.19; 1,751 MiB}\td{1.271 (-3.3 \%); rounds 1.249 / 1.259 / 1.305; CPU 9.4; loader 1.14; 2,086 MiB}}
+\tr{\td{reachability (mean)}\td{0.311; rounds 0.302 / 0.321 / 0.309; CPU 1.0; loader 0.02; 1,549 MiB}\td{0.319 (+2.7 \%); rounds 0.310 / 0.318 / 0.330; CPU 1.0; loader 0.02; 1,581 MiB}}
+\tr{\td{con-leche (median)}\td{1.148; rounds 1.161 / 1.161 / 1.121; CPU 7.4; loader 0.75; 1,782 MiB}\td{1.134 (-1.2 \%); rounds 1.123 / 1.147 / 1.131; CPU 7.4; loader 0.70; 1,802 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.072; rounds 3.059 / 3.035 / 3.122; CPU 23.4; loader 2.01; 2,238 MiB}\td{3.200 (+4.2 \%); rounds 3.219 / 3.197 / 3.183; CPU 23.9; loader 2.09; 2,300 MiB}}
+\tr{\td{cslib (median)}\td{4.143; rounds 4.214 / 4.079 / 4.137; CPU 30.9; loader 3.59; 2,453 MiB}\td{4.110 (-0.8 \%); rounds 4.131 / 4.006 / 4.194; CPU 30.7; loader 3.38; 2,426 MiB}}
+\tr{\td{Mathlib (median)}\td{12.127; rounds 12.300 / 11.717 / 12.364; CPU 92.2; loader 9.75; 4,770 MiB}\td{11.222 (-7.5 \%); rounds 11.451 / 11.373 / 10.841; CPU 86.6; loader 9.20; 4,771 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.550 (8 corpora)}}\td{\strong{1.548 against 1.550 (-0.1 \%, 8 corpora); largest loss +4.2 \% (navier-stokes-euler), largest gain -7.5 \% (Mathlib)}}}
+}
+
+\p{Second window, with a control: the published build (jars \code{f88e4ef5e102}), whose machine jar is the base's, byte for byte, so that base and control run the same machine code. Percentages are against the base.}
+
+\table{
+\tr{\th{Corpus (statistic)}\th{Base}\th{Candidate}\th{Control (published build, the base's machine code)}}
+\tr{\td{Init (median)}\td{0.568; rounds 0.584 / 0.559 / 0.560; CPU 4.1; loader 0.44; 816 MiB}\td{0.561 (-1.2 \%); rounds 0.563 / 0.576 / 0.544; CPU 4.1; loader 0.44; 814 MiB}\td{0.564 (-0.7 \%); rounds 0.584 / 0.541 / 0.567; CPU 4.1; loader 0.43; 867 MiB}}
+\tr{\td{Std (median)}\td{0.903; rounds 0.911 / 0.895 / 0.902; CPU 6.8; loader 0.76; 1,454 MiB}\td{0.932 (+3.3 \%); rounds 0.956 / 0.902 / 0.939; CPU 7.0; loader 0.76; 1,461 MiB}\td{0.915 (+1.4 \%); rounds 0.942 / 0.889 / 0.914; CPU 6.9; loader 0.74; 1,465 MiB}}
+\tr{\td{cedar (median)}\td{1.273; rounds 1.352 / 1.231 / 1.237; CPU 9.3; loader 1.15; 1,797 MiB}\td{1.239 (-2.7 \%); rounds 1.312 / 1.199 / 1.206; CPU 9.0; loader 1.12; 1,793 MiB}\td{1.230 (-3.4 \%); rounds 1.296 / 1.199 / 1.194; CPU 9.2; loader 1.11; 1,776 MiB}}
+\tr{\td{reachability (mean)}\td{0.294; rounds 0.290 / 0.300 / 0.291; CPU 0.9; loader 0.02; 1,550 MiB}\td{0.290 (-1.1 \%); rounds 0.297 / 0.291 / 0.284; CPU 0.9; loader 0.02; 1,599 MiB}\td{0.286 (-2.7 \%); rounds 0.292 / 0.288 / 0.277; CPU 0.9; loader 0.02; 1,547 MiB}}
+\tr{\td{con-leche (median)}\td{1.179; rounds 1.131 / 1.167 / 1.238; CPU 7.7; loader 0.78; 2,022 MiB}\td{1.192 (+1.1 \%); rounds 1.236 / 1.166 / 1.174; CPU 7.6; loader 0.82; 2,017 MiB}\td{1.139 (-3.3 \%); rounds 1.074 / 1.154 / 1.190; CPU 7.4; loader 0.72; 1,781 MiB}}
+\tr{\td{navier-stokes-euler (median)}\td{3.161; rounds 3.200 / 3.104 / 3.180; CPU 24.1; loader 2.10; 2,324 MiB}\td{3.078 (-2.6 \%); rounds 3.024 / 3.071 / 3.138; CPU 23.4; loader 1.94; 2,341 MiB}\td{3.122 (-1.2 \%); rounds 3.123 / 3.146 / 3.098; CPU 23.8; loader 2.16; 2,332 MiB}}
+\tr{\td{cslib (median)}\td{4.416; rounds 4.764 / 4.460 / 4.025; CPU 31.1; loader 3.63; 2,455 MiB}\td{4.192 (-5.1 \%); rounds 4.546 / 4.109 / 3.920; CPU 31.1; loader 3.47; 2,442 MiB}\td{4.021 (-8.9 \%); rounds 4.261 / 3.886 / 3.917; CPU 30.4; loader 3.32; 2,450 MiB}}
+\tr{\td{Mathlib (median)}\td{11.317; rounds 11.280 / 11.190 / 11.481; CPU 87.8; loader 8.90; 4,802 MiB}\td{11.283 (-0.3 \%); rounds 11.528 / 11.035 / 11.285; CPU 87.6; loader 8.82; 4,792 MiB}\td{11.399 (+0.7 \%); rounds 11.513 / 11.429 / 11.256; CPU 87.8; loader 8.94; 4,846 MiB}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.563 (8 corpora)}}\td{\strong{1.546 against 1.563 (-1.1 \%, 8 corpora); largest loss +3.3 \% (Std), largest gain -5.1 \% (cslib)}}\td{\strong{1.527 against 1.563 (-2.3 \%, 8 corpora); largest loss +1.4 \% (Std), largest gain -8.9 \% (cslib)}}}
+}
+
+\p{\strong{Reading.} On this launcher three rounds do not resolve 3 \% on most corpora: the control, which runs the base's machine code, differs from the base by +1.4 \% to -8.9 \% in the same window, and the candidate's cell on navier-stokes-euler is +4.2 \% in the first window and -2.6 \% in the second, on Mathlib -7.5 \% and -0.3 \%. \strong{One cell is the same in both windows and above the limit: Std, +3.5 \% and +3.3 \%} (six rounds of the base 0.861 to 0.911 s, six of the candidate 0.902 to 0.956 s; the control is at +1.4 \%). The geometric mean of the candidate is 0.1 \% and 1.1 \% below the base. So, read strictly, the patch \strong{does not pass the guard on the JVM launcher}: one corpus is about 3.4 \% slower, where 3 \% is allowed. On the executable, where the inlining of the machine's steps is fixed by lists, the same corpus is 0.2 \% faster. The cause on the JVM launcher was not looked for; the first run of a declaration gained one test in ARGV, one in the loop of APPLY and a call in the K comparison, and the bytecode of several hot steps changed size.}
+}
+}
+
+\subtree{
+\title{10. The patch}
+
+\p{Three files, against the main tree of 2026-11-25 22:44 UTC (the tree with the change of package MO-1, published as build \code{f88e4ef5e102}), dry-run verified against it. This is the fourth build of the package; the second and the third were withdrawn after the findings MO2-F2 and MO2-F4.}
+
+\ul{
+\li{\strong{The mode} (\code{rlvm-machine} only, six files): \code{Values} (the kept application: \code{mkLetApp}, \code{isLetApp}, \code{isLetFlagged}); \code{Eval} (\code{k_evalHead} and \code{apply} call a slow path when the head is a let variable; the loop of \code{applyFrom} tests whether the value a body returned is one; \code{argvFast} keeps the application in the mode; \code{force} evaluates a kept application); \code{Infer} (the mode's state in \code{Infer.Ext}, the scope stack in the let rule, the type of a kept application, the K comparison in every state, the trigger); \code{Reduce} (the three steps of the K rule call the trigger and the comparison); \code{MachineSession} (the second run, the session around it, a measurement aid); one paragraph of \src{rlvm-machine/README.md}.}
+\li{\strong{The tests and the rows}: \code{SHostileLetTest} (three tests, fast group), 67 rows and one note in the manifest of the hostile suite, the generator.}
+\li{\strong{The 67 exports} (compressed, binary): a tar file with paths from the repository root.}
+}
+
+\p{\strong{Not touched}: the eager-reduction code (\code{Conv}, \code{Machine}), which another package works on. In \code{MachineSession.check0} the second run is a block of its own after the eager restart; a merge with a change of that method is mechanical. \strong{No new switch, no new frame, no change of \code{Layout} or \code{Op}}: the kept application is a new value of the field \code{aux} of a suspension, the marks use memo word 1 of a let record (unused but for the mark of 2026-11-24), and the mode's own judgments are run to completion with \code{Machine.drive}, as the audits do. Every new method off the hot path has a name ending in \code{Slow}, so the build's inline lists keep it out of line (94 entries in the never-inline list where the published build has 81, the force-inline list unchanged at 269) and the size test of the stepper convention passes.}
+
+\p{\strong{Beside the patch, not in it}: the five exports of finding MO2-F3 and the two of finding MO2-F6, with their official verdicts and their generator. They are not rows: the four official accepts among them, marked as known wrong rejects, would raise that count from 12 to 16, and the gate lets it go down only (\src{scripts/gate.sh}).}
+
+\p{\strong{Settings} (system properties, read when a session is made, so they work in the executable): \code{\verb~|-Drlvm.machine.letexact=off~} declines as before 2026-11-25, \code{=always} runs every declaration in the mode; \code{\verb~|-Drlvm.machine.letwide=false~} and \code{\verb~|-Drlvm.machine.letroot=off|count~} take the wider triggers of 4.5 out. With all three off the candidate declines what the rule of 2026-11-24 declined and, beyond it, a unit that applies a let variable by an over-application before a K comparison; on the eight corpora there is no such unit that the old rule did not decline already (section 8.5). \strong{Statistics}: \code{machine.let.restarts}, \code{units}, \code{apps}, \code{kDual}, \code{kDisagree}, \code{kFlips}, \code{declines}, \code{lamUnits}, \code{rootUnits}.}
+}
+
+\subtree{
+\title{11. What an adversarial reviewer who did not write this must still attack}
+
+\ol{
+\li{\strong{The lambda-body rule} (4.3): it was added after a finding, it is conservative by a syntactic reading of a term, and its two escape rows are declines. Attack the reading: a body whose type root is behind a redex or a let inside the body, a kept application with more or fewer arguments than the lambda has binders, a lambda reached through two closures, a frame beyond 63 slots.}
+\li{\strong{The trigger} (4.5): find a K comparison of this class that the first run answers without starting the mode. Candidates: a major premise that is a delayed term without a stored type whose forcing reduces no let application but whose reduct is typed through a let variable; a value built by a code block; the session path of 7.3. Finding MO2-F5 was of this kind: a third place where a let variable is applied. The places were found by reading \code{Eval}; \code{Code}, \code{Rules} and \code{Elab} were read only for their calls of APPLY.}
+\li{\strong{Every evaluation of a term inside the mode's own steps}: \code{letAppWalkSlow} and \code{letAppHead} evaluate the head term of a kept application (a variable by construction), \code{letValueType} and \code{letChainNextSlow} the value term of a chain variable (guarded since MO2-F4), \code{suspEval} the struct of a delayed projection (guarded). Attack the guard \code{plainRoot}: a head or a struct reached through a variable that is bound to a closure or to a delayed redex.}
+\li{\strong{The stored type}: a delayed major premise whose type INFER stored is answered from that type, which is the reading inside the scopes it was checked in. The lambda-body rule covers it when the term is not a projection; attack a stored type that is used after a let variable of its frame has left its scope without that rule seeing the variable.}
+\li{\strong{The marks and the two declines of 4.4}: a comparison whose answers differ, followed by a use of the memoised answer in the other state that passes neither the end of the let chain nor a new binding of the variable. The argument is that a value holding the variable can only be made from an environment that binds it or from the type the chain returns; attack the bounded search and the word "holds" (a value that reaches the variable only through a memo word).}
+\li{\strong{The typed binding as the head of a kept application} (7.3).}
+\li{\strong{The redex class} (7.3, findings E1-F7 and MO2-F3): the three exports of MO2-F3 are the simplest shape. Still to write: the redex forced before the K rule meets it (the argument arrives as the reduct), a redex inside a value term of a let variable of the chain of 4.3, a let term as the major premise, and the same shapes at the other typing sites.}
+\li{\strong{The other typing sites} (7.3): the same question as MO2-F1 for proof irrelevance on a stuck projection after a let.}
+\li{\strong{Budgets}: the mode's own judgments nest to 16 levels and the lambda-body search takes 256 steps; beyond that it declines. A real unit that needs more would decline.}
+}
+}
+
+\subtree{
+\title{12. Not measured, not done}
+
+\ul{
+\li{\strong{The x86-64 architecture of the arena}: nothing of this package ran there.}
+\li{\strong{The six real units} (4.4, 8.4). The exact treatment of an over-application is to keep it: the official term at that point is the application of the let variable to the arguments that are left, which the machine would have to build as a term of its own and keep as it keeps a syntactic application. Not built. A cheaper variant, telling the forcing of a kept application apart, was built, decided none of the six and was taken out.}
+\li{\strong{The repair of MO2-F3 and MO2-F6} (section 6): typing a delayed major premise as a term at the K rule. Not built; it changes the default tier. How many real units have such a major premise was not counted.}
+\li{\strong{Deciding the two rows of the lambda-body rule} instead of declining them: the state of a let variable behind a lambda body needs the body's value typed in that state, which the chain of 4.3 would do if it went through the beta step with the binder's domain in hand. Not built.}
+\li{\strong{Comparing the states in the first run}, without a second run, and repeating the unit only when they differ, would save the seven extra runs; it would run the mode's judgments under speculative segments, which this package avoided.}
+\li{\strong{An adversarial pass by another author.} Every hostile export of this package was written by the author of the change. They found two wrong verdicts of the change and three classes of wrong rejects of the published build in one evening, which says more about how many are left than about how many were found.}
+}
+}

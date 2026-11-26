@@ -1,0 +1,19 @@
+\title{After a let the official kernel types by the value term: a let variable has two types, one per side of its scope}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Source: [the report of package MO-2](rep-MO-2), sections 2, 3, 5 and 6 (finding MO2-F1). Conditions: the official verdicts are those of leanchecker 4.36.0 in Docker on 67 hand-made exports; the machine verdicts are those of the published build of 2026-11-25 22:45 UTC (jars \code{f88e4ef5e102}) and of a private build with the package's patch, the executable, default switch set.}
+
+\ul{
+\li{\strong{Inside \code{infer_let}} a let variable is a free variable with its \em{declared} type. \strong{After it} the variable does not exist: the type that \code{infer_let} returns is itself a let term, and \code{whnf_core} substitutes the \em{value term}, so whatever is typed afterwards is typed through the type of the value. The let rule only demands that the two types are convertible, and the official comparison is not transitive, so a rule that types an unreduced term (the K rule, above all) can answer differently on the two sides of the scope.}
+\li{\strong{A machine on values has one record for both sides.} Typing the variable by its value (the machine before 2026-11-24) is right after the scope and wrong inside; typing it by the declared type (the fix of finding E1-F1) is right inside and wrong after. The expected-type rule moves a comparison from after the let to inside it, which is how the second error shows: the machine alone rejected four exports that the official checker accepts and accepted seven that it rejects (derivable statements). In none of the eleven is a let variable with two types applied, so the decline rule of finding E1-F6 did not see them.}
+\li{\strong{It became a wrong reject of the default configuration when a rejection of the machine became final} ([the decision](dec-PUU0)): a plain run of the published executable of 22:45 UTC rejects the four exports. No real corpus, published test or mutant is known to be affected.}
+\li{\strong{What works}: do not give the let variable another representation for every declaration. Run the few declarations that reach such a comparison a second time in a mode that keeps the application of a let variable as a value, compute the comparison in every scope state the official kernel can be in, and track the scope with a stack; where the states agree (all 13 comparisons of this kind on the eight corpora) nothing more is needed, and where what was memoised would cross a change of state, decline.}
+\li{\strong{A value is a term with its beta and zeta steps performed.} Two more wrong verdicts came from that: a redex as the major premise is typed officially through its binder's domain and by the machine through its reduct (three official accepts that the published default rejects, no let involved, not repaired), and the package's own third build followed a let variable's value through a beta step into another let variable and rejected an export that the official checker and the published build accept. Wherever the mode needs the type root of a term it now reads the term.}
+\li{\strong{The lesson for any rule that reads a type}: ask which \em{term} the official kernel has at that moment, not only which value. The same question is open for the other places where the official kernel types an unreduced term (the struct of a stuck projection in proof irrelevance, structure eta, the unit-like rule).}
+}
