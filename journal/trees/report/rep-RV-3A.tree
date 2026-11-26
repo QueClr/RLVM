@@ -1,0 +1,227 @@
+\title{RV-3A: adversarial review of eager reduction in place (package MO-3), from the source}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Review "RV-3A" of 2026-11-25 (02:03 to 02:55 UTC of the following UTC day). Its subject is the patch of [package MO-3](rep-MO-3): the comparison of an \code{\verb~|eagerReduce _ _~} argument runs in place under the mode bit, pair entries whose answer can depend on the mode are local to their declaration, setting \code{\verb~|-X machine.eager-mode=local|shared|deferred~} with \code{local} proposed as the default. The reviewer did not write the patch and was asked to refute it, working from the source: the patch read line by line against the official kernel (\code{\verb~|src/kernel/type_checker.cpp~} of Lean 4.36.0, commit \code{611c117b}), every suspicion turned into an export, and every export judged by the official checker (leanchecker 4.36.0, \code{\verb~|--from-export~}, in the project's Docker image without network). A second reviewer attacked the same build as a black box; this report does not cover that work. Nothing here is a timing.}
+
+\subtree{
+\title{0. Result in one page}
+
+\ul{
+\li{\strong{Verdict: NO-GO for \code{local} as the default}, and \code{shared} is no fallback. The gated build of MO-3 rejects, with default options and through both launchers, \strong{ten exports that the official checker accepts} and that the published build accepts; seven of them use only the arena's prelude. With a rejection of the machine final, each of them is a wrong verdict of the product.}
+\li{\strong{No accept of a statement that is not derivable was found} (kind F), and the reading of the patch gives an argument why this change cannot produce one: every true answer it adds is a conversion that one of the two sound orders, an entry of the pair table for the same two expressions, or the plain comparison of the K rule licenses (section 5).}
+\li{\strong{Finding F1} (wrong reject, honest prelude, three exports): a comparison of plain mode that a shortcut answers does not make the sub-comparisons that the official kernel makes and caches; when such a sub-pair is asked under the bit in the same declaration, the official success cache answers and the machine computes in eager order. The run alone before a rejection (rule 7 of MO-3) repeats the same shortcut. Shown through a skipped proof position, a skipped unread position, and an argument comparison that is refuted before its last arguments are compared.}
+\li{\strong{Finding F2} (wrong reject, honest prelude, two exports): the search by expression (rule 5) is bounded by the structural walk it calls, 40 host frames and 256 nodes; a cached pair under other records beyond either bound is not found. This is the risk that the report of MO-3 lists as "not demonstrated".}
+\li{\strong{Finding F3} (a Nat function whose body does not compute; three wrong rejects in the default set, two more under another switch set, one accept of an official reject that is new with the patch, kind T): the memo of a K reduction is written in one mode and read in the other. Rule 6 of MO-3 makes a recursor reduce under the bit whenever it reduces in plain mode; it does not cover a K comparison that is true under the bit only, and the claim "no memo word needs a stamp" does not hold there.}
+\li{\strong{Finding F4} (wrong reject, honest prelude, closed terms, two exports): the plain mode reduces a K recursor through the same-head shortcut where the official kernel leaves it stuck in both modes; under the bit the machine runs without the shortcut, leaves a second recursor stuck without any eager-only event, so neither rule 6 nor rule 7 runs, and compares the reduct of the first with the stuck second.}
+\li{\strong{The published build}: one wrong reject of its deferred mechanism was found on the way (an export of the F3 family: the pair first under the bit, then in plain mode, in one binder), and five accepts of official rejects in plain mode that belong to the accepted risk of the switch \code{lazyeval}; all need a Nat function whose body does not compute (section 4).}
+\li{\strong{Attacked without result}: the places where the bit is set, saved and restored (two check sites, suspension, cut, the K rule), the stamp logic of local entries, the host depth bound (six bounds), the session cap, worker counts, pipelined loading, a second pass, a checked term reused by a later declaration, and a pair that is true under the bit only with honest definitions (the real \code{\verb~|Nat.gcd~}, \code{\verb~|Nat.land~}, \code{\verb~|Nat.xor~}, \code{\verb~|Nat.shiftRight~} of Init): section 6.}
+\li{\strong{Repairs}: two changes of two lines were tried in a review copy; they repair F1 and F4 on the rows of this review and move no other verdict of 159 rows. F2 needs a complete search or a decline; F3 touches the design, the memo of a reduction that depends on a comparison (section 7).}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{The candidate}: the gated build of MO-3, a development distribution of its patched private tree (jars \code{c5814eaec85b}): the executable, a GraalVM Community Edition native image, and the JVM launcher. \strong{The base}: the build of the pristine twin of that tree (jars \code{3babbe8de8f3}), which is the main tree of 22:46 UTC with the package on the re-check, so a rejection of the machine is final in both. Default options means no \code{-X} option; a setting is named where one was used.}
+\li{\strong{The official verdict} of every export named here: leanchecker of Lean 4.36.0 (commit \code{611c117bfaf7}, aarch64) with \code{\verb~|--from-export~} inside the project's arena image, without network; exit status 0 is accept, 1 is reject. The verdict files (hash of the export, verdict, full output) are handed over with the exports.}
+\li{\strong{The exports} are built with the hostile suite's builder (\src{rlvm-machine/src/test/resources/s/gen/lk.py}) on the arena's prelude, with the building blocks of the suite's eager family: \code{\verb~|X = Nat.add (G intro) 0~} and \code{\verb~|Y p = Nat.add (G p) 0~}, a pair that is true in plain mode (same head, the proofs by proof irrelevance) and false under the flag (the closed side folds first). Twelve exports are built on the real Init instead (the export of the Init corpus, read lazily), for the definitions the arena's prelude does not have.}
+\li{\strong{Verdicts of the machine} are exit statuses of the launchers: 0 accept, 1 reject, 2 decline. "Wave 6 with eager" is the default set without \code{skipargs} and \code{congruence}, given with \code{\verb~|-X machine.switches~}.}
+\li{\strong{An instrumented copy} of the patched tree (JVM launcher only; a trace of comparisons, pair writes and events behind a system property) was used to confirm causes. It was never used for a verdict that is reported.}
+}
+}
+
+\subtree{
+\title{2. The official source against section 1 of the report of MO-3}
+
+\p{Section 1 of [the report of MO-3](rep-MO-3) is right in what it says: the flag is set in \code{\verb~|infer_app~} in check mode around the one comparison, after the type of the argument was inferred; it is read in \code{\verb~|lazy_delta_reduction~} and in \code{\verb~|is_def_eq_core~}; the caches belong to one type checker and are shared by the modes. Read against the source, five facts are missing from it or are not followed by the patch. Each of them is the root of a finding below.}
+
+\ol{
+\li{\strong{Which comparisons enter the success cache.} Only the wrapper \code{\verb~|is_def_eq~} caches, and it is the wrapper that the argument loops call: \code{\verb~|is_def_eq_args~} and \code{\verb~|is_def_eq_app~} for every argument pair, \code{\verb~|is_def_eq_proof_irrel~} for the two TYPES of two proofs, \code{\verb~|try_eta_struct_core~}, \code{\verb~|is_def_eq_binding~}. So a plain comparison fills the cache with its sub-pairs, the pair of types of two proofs among them, and a later comparison under the flag is answered by any of them before anything is computed. A machine that answers the outer comparison by a shortcut has none of these entries (finding F1).}
+\li{\strong{\code{\verb~|is_def_eq_args~} compares the last arguments first} and stops at the first false pair; the pairs it compared before that one are cached although the argument comparison as a whole fails (finding F1, third export).}
+\li{\strong{The comparison of the K rule runs under the flag} when the reduction is asked from under the flag: the flag is a field, \code{\verb~|to_cnstr_when_K~} calls \code{\verb~|is_def_eq~}, and nothing clears it. The report says so. What it does not draw from it: the answer can be true under the flag and false in plain mode as well as the reverse, as soon as a Nat function folds to something its unfolding does not reach (finding F3).}
+\li{\strong{A recursor application is not in the cache of \code{\verb~|whnf_core~}.} Both ends of the recursor case return before the insertion, and the first \code{\verb~|whnf_core~} of \code{\verb~|is_def_eq_core~} runs with \code{\verb~|cheap_proj~} and caches nothing. So the official kernel decides the K rule again every time, from its success cache or by computing in the mode of the moment; "stuck" is never remembered, and a reduct only through \code{\verb~|whnf~}. The machine remembers both for the session (findings F3 and F4).}
+\li{\strong{\code{\verb~|whnf~} folds Nat functions without looking at free variables}; only the fold of \code{\verb~|lazy_delta_reduction~} is guarded. So the official plain loop, which unfolds one step at a time, does not fold an open application, while one reduction to weak head normal form does. With honest definitions the two agree; with a body that does not compute they do not (section 4, the note on the published build).}
+}
+}
+
+\subtree{
+\title{3. Findings: wrong rejects with the arena's prelude}
+
+\p{All exports of this section: official verdict \strong{accept}; candidate with default options \strong{reject}, exit status 1, through the executable and through the JVM launcher, with 1, 2, 4 and 8 workers; base build \strong{accept} through both launchers; \code{\verb~|-X engine=reference~} accepts; \code{\verb~|-X engine=diff~} reports the disagreement and declines.}
+
+\table{
+\tr{\th{Finding}\th{Export}\th{\code{local}}\th{\code{shared}}\th{\code{deferred}}\th{wave 6 with eager}}
+\tr{\td{F1}\td{\code{rv3a-hidden-proofpos-types-then-eager-ok}}\td{reject}\td{accept}\td{accept}\td{accept}}
+\tr{\td{F1}\td{\code{rv3a-hidden-unread-arg-then-eager-ok}}\td{reject}\td{reject}\td{accept}\td{accept}}
+\tr{\td{F1}\td{\code{rv3a-hidden-refuted-sibling-then-eager-ok}}\td{reject}\td{reject}\td{accept}\td{reject}}
+\tr{\td{F2}\td{\code{rv3a-other-records-deep-ok}}\td{reject}\td{reject}\td{accept}\td{reject}}
+\tr{\td{F2}\td{\code{rv3a-other-records-large-ok}}\td{reject}\td{reject}\td{accept}\td{reject}}
+\tr{\td{F4}\td{\code{rv3a-kshort-plain-then-eager-ok}}\td{reject}\td{reject}\td{accept}\td{accept}}
+\tr{\td{F4}\td{\code{rv3a-kshort-plain-declaration-then-eager-ok}}\td{reject}\td{reject}\td{accept}\td{accept}}
+}
+
+\subtree{
+\title{F1. A sub-pair that a shortcut of plain mode never compares}
+
+\p{\strong{Shape.} One theorem, one binder. First a comparison in plain mode whose official evaluation compares and caches the pair \code{\verb~|X~}, \code{\verb~|Y p~} (or the pair of types \code{\verb~|X = X~}, \code{\verb~|X = Y p~}) as a sub-pair; then that sub-pair itself as the stated and the expected type of an \code{\verb~|eagerReduce _ _~} argument. The official kernel answers the second from its success cache. The machine answered the first by a shortcut and has no entry; under the bit it computes in eager order, the closed side folds, the answer is false after an eager-only event; the search by expression finds nothing because nothing was entered; the run alone repeats the declaration with the same switches and rejects.}
+
+\ul{
+\li{\code{rv3a-hidden-proofpos-types-then-eager-ok}: plain \code{\verb~|S.L p = S.R p~}, two definitions whose bodies \code{\verb~|G5 (Y p) (Eq.refl X)~} and \code{\verb~|G5 (Y p) (e p)~} differ in a proof only. The official kernel compares the two proofs by their types; \code{skipargs} skips the proof position. Mode \code{shared} accepts only because the entry of the declaration that checked \code{\verb~|S.L~} is still there.}
+\li{\code{rv3a-hidden-unread-arg-then-eager-ok}: plain \code{\verb~|K X = K (Y p)~}, \code{\verb~|K~} a regular definition that ignores its argument. The official same-head comparison compares the arguments first; \code{skipargs} skips the unread position.}
+\li{\code{rv3a-hidden-refuted-sibling-then-eager-ok}: plain \code{\verb~|D 5 X = D 7 (Y p)~}, \code{\verb~|D a b~} a regular definition that reads \code{a} only. The official same-head comparison compares the last arguments first (true, cached), then 5 with 7 (false), then unfolds both sides to 0. The same-head probe of the machine ends false without having compared the last arguments. Rejected without the two shortcuts as well: the cause is the probe of the switch \code{probes}.}
+}
+
+\p{\strong{Certificates} (official accept, machine accept): the same construction where no shortcut hides the pair: \code{rv3a-hidden-samehead-args-then-eager-ok} (an axiom at the head), \code{rv3a-hidden-regular-def-args-then-eager-ok}, \code{rv3a-hidden-susp-args-then-eager-ok} (the two sides as beta redexes of one lambda: the suspensions were forced before the comparison, closure congruence did not run), \code{rv3a-hidden-proofpos-direct-then-eager-ok}; and the twin \code{rv3a-hidden-proofpos-types-eager-alone-bad} without the plain comparison (official reject, machine reject).}
+
+\p{\strong{Cause in the patch.} The run alone in \code{\verb~|MachineSession.check0~} takes only the switch \code{pchk} off; its comment says that then "every plain comparison of the declaration is made in it". That is true of the comparisons the machine skips because it knows a term as checked, and not of the ones its shortcuts skip. The patch disables the shortcuts under the bit (\code{\verb~|Conv.underFlag~}); it leaves them on in the plain comparisons whose entries the bit depends on. The report of MO-3 names the shortcuts only as a source of accepts (its section 10, item 3).}
+
+\p{\strong{Repair}: local. See section 7.}
+}
+
+\subtree{
+\title{F2. The search by expression gives up}
+
+\p{\strong{Shape.} The row \code{mo3-binder-inner-closed-between-other-records-ok} of MO-3 with a larger term: \code{\verb~|Yr p = Nat.add (G ((fun z => z) (I (I (.. p))))) 0~}, \code{\verb~|I~} an axiom on proofs, applied 3, 60 and 400 times. The pair \code{\verb~|X = Yr p~} is compared in plain mode inside an inner binder and then under the bit outside it. For the official kernel the two instantiated terms are one term. For the machine the suspended redex is another record outside the binder, and the entry is found only by the structural walk.}
+
+\ul{
+\li{\code{rv3a-other-records-small-ok} (3 applications): accept, as the row of MO-3.}
+\li{\code{rv3a-other-records-deep-ok} (60): reject. The walk stops at 40 host frames.}
+\li{\code{rv3a-other-records-large-ok} (400): reject. The walk stops at 256 nodes.}
+}
+
+\p{\strong{Cause in the patch.} \code{\verb~|Pairs.samePos~} calls \code{\verb~|Same.same~} with its default fuel; "not seen to be the same" is read as "no such entry", and the false answer of the eager order stands. The budget of 2^22 nodes per declaration of \code{\verb~|Machine.erSameLeft~} is never the limit here. The switch set does not matter.}
+
+\p{\strong{Repair}: local in code, but not by a larger number: either the walk of this path is complete (iterative, bounded only by the size of the two expressions), or a search that was cut ends the declaration as a decline and not as a rejection.}
+}
+
+\subtree{
+\title{F4. A recursor that the plain mode reduced through a shortcut}
+
+\p{\strong{Shape.} Closed terms, no binder. \code{\verb~|h~}, \code{\verb~|h3~} axioms of type \code{\verb~|And True True~}; \code{\verb~|e, e2 : X = Y h~} and \code{\verb~|e3 : X = Y h3~} axioms; \code{\verb~|R = Eq.rec 1500 e~}, \code{\verb~|R2s = Eq.rec (S.inner 1500) e2~}, \code{\verb~|R3 = Eq.rec 1500 e3~}. For the official kernel no K comparison succeeds in either mode: \code{\verb~|X = Y h~} against \code{\verb~|X = X~} is a closed pair, the fold answers first, and 0 against the stuck side is false (certificate \code{rv3a-kshort-reduct-plain-bad}: \code{\verb~|R = 1500~} in plain mode, official reject). So all three recursors are stuck and are compared argument by argument, which succeeds.}
+
+\ul{
+\li{\code{rv3a-kshort-plain-then-eager-ok}: one theorem, \code{\verb~|R = R2s~} in plain mode, then \code{\verb~|R = R3~} under the bit.}
+\li{\code{rv3a-kshort-plain-declaration-then-eager-ok}: the same in two declarations.}
+\li{Certificates, accepted by both: \code{rv3a-kshort-eager-alone-ok}, \code{rv3a-kshort-plain-alone-ok}.}
+}
+
+\p{\strong{What the machine does} (from the trace of the instrumented copy). In plain mode the same-head probe of \code{\verb~|R~} against \code{\verb~|R2s~} runs out of its budget of 1,024 ticks, because the two minor premises need about 1,500 recursor steps to be compared. The complete procedure then reduces \code{\verb~|R~}: its K comparison is answered true by the same-head probe of \code{\verb~|Nat.add~}, before any fold, and the reduct 1500 is remembered. Under the bit the machine reads that reduct, runs the K comparison of \code{\verb~|R3~} in the official order without the probe, gets false without an eager-only event (the pair is closed), leaves \code{\verb~|R3~} stuck, and compares 1500 with a stuck recursor. No eager-only event happened in the declaration, so the search by expression and the run alone do not run either.}
+
+\p{\strong{Cause in the patch.} \code{\verb~|Reduce.kLeaveSlow~} asks the plain comparison only \code{\verb~|if (event && r == Layout.F && m.erInPlace)~}. The sentence it implements, "a recursor reduces under the bit whenever it reduces in plain mode", needs the plain comparison after every false answer under the bit, because the plain comparison of the machine is more than the official one. Under the published mechanism the comparison under the bit used the same shortcuts as the plain one, so the two agreed.}
+
+\p{\strong{Repair}: local for these rows (section 7); the general question is the one of F3.}
+}
+}
+
+\subtree{
+\title{4. Finding F3: the memo of a K reduction, with a Nat function that does not compute}
+
+\p{\strong{The construction.} The official kernel accelerates thirteen Nat functions by name and never looks at their bodies; the prelude guards of RLVM check the type of such a constant and not its body, as the design says. The arena's prelude has no \code{\verb~|Nat.gcd~}. The exports of this section declare \code{\verb~|Nat.gcd a b := S.og a b~} with \code{\verb~|S.og~} an axiom, \code{\verb~|S.K4 p := 4~} and \code{\verb~|S.two := 2~}. Then \code{\verb~|Nat.gcd (S.K4 p) 6~} against \code{\verb~|S.two~} is \strong{true under the flag} (the open side folds to 2) and \strong{false in plain mode} (it unfolds to the stuck \code{\verb~|S.og (S.K4 p) 6~}), for the official kernel and for the machine. With \code{\verb~|e, e2 : forall p, S.two = Nat.gcd (S.K4 p) 6~} as axioms, \code{\verb~|R p = Eq.rec 7 (e p)~} reduces by the K rule under the flag and is stuck in plain mode. The variants \code{gcd3} give the second recursor a minor premise that costs 1,500 steps, so that the same-head probe cannot answer in its budget.}
+
+\p{\strong{No honest pair of this kind was found}, see section 6. So these exports are hand-made in the strict sense; they are in scope because the report of MO-3 names the case as not attacked, and because nothing in RLVM or in the official checker refuses them.}
+
+\table{
+\tr{\th{Export}\th{What}\th{Official}\th{Candidate, default}\th{\code{shared}}\th{\code{deferred}}\th{wave 6 with eager}\th{Base}}
+\tr{\td{\code{rv3a-gcd3-krule-plain-stuck-then-eager-same-binder-ok}}\td{one binder: \code{\verb~|R p = R2s p~} in plain mode (both stuck), then \code{\verb~|R p = 1500~} under the bit}\td{accept}\td{\strong{reject}}\td{reject}\td{accept}\td{reject}\td{accept}}
+\tr{\td{\code{rv3a-gcd3-krule-plain-stuck-declaration-then-eager-ok}}\td{the same in two declarations}\td{accept}\td{\strong{reject}}\td{reject}\td{accept}\td{reject}\td{accept}}
+\tr{\td{\code{rv3a-gcd3-krule-eager-declaration-then-plain-two-proofs-slow-ok}}\td{first declaration: \code{\verb~|R p = 1500~} under the bit; second: \code{\verb~|R p = R2s p~} in plain mode}\td{accept}\td{\strong{reject}}\td{accept}\td{accept}\td{reject}\td{accept}}
+\tr{\td{\code{rv3a-gcd2-krule-eager-declaration-then-plain-two-proofs-ok}}\td{as the row above without the slow minor premise}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv3a-gcd2-krule-plain-two-proofs-then-eager-same-binder-ok}}\td{as the first row without the slow minor premise}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{accept}}
+\tr{\td{\code{rv3a-gcd2-krule-eager-declaration-then-plain-bad}}\td{first declaration: \code{\verb~|R p = 7~} under the bit; second: \code{\verb~|R p = 7~} in plain mode}\td{reject}\td{\strong{accept}}\td{accept}\td{reject}\td{accept}\td{reject}}
+\tr{\td{\code{rv3a-gcd2-pair-eager-then-plain-same-binder-ok}}\td{one binder: the pair under the bit, then in plain mode}\td{accept}\td{accept}\td{accept}\td{\strong{reject}}\td{accept}\td{\strong{reject}}}
+}
+
+\p{\strong{What the machine does.} A K recursor has one memo of its reduction for the session: the reduct, or the mark that it is weak head normal. (a) Plain first: the K comparison is false in plain mode, the recursor is marked stuck; under the bit the mark is read and the comparison is never asked again, where the official kernel asks it under the flag and reduces. No eager-only event happens, so the rejection is final without a run alone. (b) Bit first, another declaration: the reduct is remembered; the second recursor is compared in plain mode, is stuck, and 7 against a stuck recursor is false, where the official kernel has two stuck recursors and compares their arguments. (c) The same history with the statement \code{\verb~|R p = 7~} in plain mode is accepted from the memo, where the official checker rejects.}
+
+\p{\strong{Kinds.} Rows 1 to 3: wrong rejects of the candidate in the default set, not in the base. Rows 4 and 5: wrong rejects under a switch set that a user can reach; in the default set the same-head probe answers before anything is reduced. Row 6: an accept of an official reject that is new with the patch (the base rejects). I read it as kind T, not kind F: the official checker accepts the same statement in the first declaration of the same file, and with the acceleration as a rule of the kernel the statement is derivable by congruence. With a body that contradicts the function outright the official checker itself proves anything, so no export of this family can show a kind F. Row 7 is a \strong{wrong reject of the published build}: its deferred mechanism runs the plain comparison before the comparison under the bit, which officially comes first and fills the cache; the candidate gets it right in its two in-place modes.}
+
+\p{\strong{Cause in the patch.} Rule 6 (\code{\verb~|Reduce.k_iota4~}, \code{\verb~|kLeaveSlow~}, \code{\verb~|k_iota14~}) and the design sentence it serves, in the comment block of \code{\verb~|Machine.java~} and in section 2 of the report of MO-3: "the memo words of reductions need no stamp if the one place where a comparison decides a reduction, the K rule, is made to answer the same in both modes". The rule makes the bit answer true where plain mode does; it cannot make plain mode answer true where only the bit does, and the published mechanism, which declined a declaration with an eager-only event inside the K rule and forgot the session after it, protected the memo that the patch now keeps.}
+
+\p{\strong{Repair}: touches the design. Either the memo of a reduction that passed a K comparison gets the life of a local entry (a stamp, which the patch avoided on purpose), or such a reduction is not remembered when its comparison was marked or ran under the bit. The second is contained in \code{\verb~|Reduce~}; neither was built or tried here.}
+
+\p{\strong{A note on the published build, not new with MO-3.} With the same non-computing \code{\verb~|Nat.gcd~} the base and the candidate accept in plain mode five exports that the official checker rejects, for example \code{rv3a-gcd-open-plain-bad}: \code{\verb~|2 = Nat.gcd (S.K4 p) 6~} by \code{\verb~|Eq.refl 2~}. The cause is the switch \code{lazyeval}: a one-sided unfolding against a weak head normal side is run as one reduction to weak head normal form, and that reduction folds the open application, which the official plain loop never does (fact 5 of section 2). The reference engine rejects them. They belong to a class that is [an accepted risk](accepted-risks) (finding S3-F4 of [the review of the default set](rep-soundness-default-set)); they are listed because here the class reaches a statement whose only justification is the acceleration. Kind T by the same reading as above.}
+}
+
+\subtree{
+\title{5. Why no kind F was found}
+
+\p{The lens of this review was the accept of a statement that is not derivable. The patch was read for every way a comparison can answer true that it adds or changes:}
+
+\ul{
+\li{\strong{The comparison of an eager argument is made.} The two sites that check an argument, \code{\verb~|Infer.twD~} and \code{\verb~|Code.targConv~}, are the only places that raise the mismatch of an application; with the mode in place \code{\verb~|Machine.erDefers~} is false in both, nothing is deferred, and no path leaves a comparison for a discharge that no longer happens. The expected-type rule for lambda and let arguments runs in plain mode, as the official kernel does for an argument that is not of the form.}
+\li{\strong{A true answer under the bit} is the answer of the eager order, of an entry with a success, of the search by expression (the same two expressions as an entry with a success; the walk is syntactic and asks no conversion), or, inside the K rule, of the plain comparison. Each is a valid conversion in the scope it is asked in, under the assumption on canonical variables that the machine makes everywhere.}
+\li{\strong{A false answer} never licenses anything: a failed comparison ends a declaration or leaves a recursor stuck.}
+\li{\strong{The stamp logic} (\code{\verb~|Pairs.status~}, \code{\verb~|localSlow~}, \code{\verb~|mergeSlow~}, \code{\verb~|samePos~}, the growth and the two tables) was read case by case: a local entry of an earlier declaration is never read as present by any reader of the table, a write onto it drops its bits first, and an entry only ever goes from session life to local life.}
+}
+
+\p{So what the mode handling can change is which derivable statements are accepted or rejected against the official checker. That is what the findings are: wrong rejects, and accepts of kind T.}
+}
+
+\subtree{
+\title{6. Attacked without result}
+
+\ul{
+\li{\strong{The bit across suspension and cut, and the mark of a comparison.} The 101 rows of the suite's eager family and the 58 rows of this review were run through the executable with the host depth bound at 0, 1, 2, 3, 5 and 9 (at 0 every comparison is suspended and every cut is the driver's): no verdict differs from the default bound. Among them are rows in which a speculative segment is cut by its budget with suspended comparisons inside, in a declaration with a mode-dependent pair (the rows \code{gcd3} and \code{kshort}; the trace shows the cut). This is a test of verdicts, not of pair entries; the entries under several bounds are what the convention part of the machine's own gate compares, and that was not repeated. The code of \code{\verb~|Conv.convScoped~}, of the frame of the mark and of the cut in \code{\verb~|Machine.drive~} was read for a path on which a mark is lost; none was found: a cut restores the mark of the outermost comparison inside the segment, which is the owner's mark at that point, and everything inherited before the cut only marks more.}
+\li{\strong{Session and schedule.} The same 159 rows with 1, 4 and 8 workers, with pipelined loading forced, with a second pass over the loaded store, with \code{\verb~|-X fallback=none~}: no verdict differs. With the session cap at 1 KiB (every declaration in a fresh session) six verdicts differ, each on a row whose point is a state that survives a declaration: three accepts of official rejects become rejects, and the three cross-declaration rows of F3 and F4 that the candidate rejects get the official accept. The JVM launcher and the executable agree on all 159 rows.}
+\li{\strong{Elaborated code.} \code{\verb~|Code.targConv~} was read: the frame that restores the bit after a suspension is there, and the site is the twin of \code{\verb~|Infer.twD~}. The 159 rows were run through the JVM launcher with the elaboration threshold at 1 and at 3 (system property \code{\verb~|rlvm.machine.elabAt~}; the default elaborates at the first reduction): no verdict differs. No row was built whose point is an application checked first by the generic rule and later by its block.}
+\li{\strong{The numbers of MO-3 for the family} are reproduced through both launchers: 93 official verdicts, 8 accepts of kind T rows, no decline, no wrong accept, no wrong reject on the 101 rows.}
+\li{\strong{A checked term that holds an eager argument, reused by a later declaration}: \code{rv3a-checked-eager-term-reused-bad} gets the official reject. A closed term cannot carry a mode-dependent pair across a declaration (a closed pair is folded in both modes), and an open one is checked again under its new binder.}
+\li{\strong{A pair that is true under the flag and false in plain mode with honest definitions.} Twelve exports on the real Init: \code{\verb~|S.r = f (Ka p) b~} for \code{\verb~|Nat.gcd~}, \code{\verb~|Nat.land~}, \code{\verb~|Nat.xor~} and \code{\verb~|Nat.shiftRight~}, defined in Init by well-founded recursion or through it, under the flag, in plain mode, and closed. The official checker accepts all twelve, and so does the machine: the unfolding reaches what the fold reaches, with small operands. With the structurally recursive functions of the arena's prelude the same holds by inspection. Large operands, where the plain order would run out of stack, were not tried.}
+\li{\strong{The proof-by-type shortcut B2} stays on under the bit (\code{\verb~|Conv.convCore1~} tests the switch, not \code{\verb~|Conv.underFlag~}), against rule 2 of the report. No input was found on which it differs from the official order: the proof flag it needs is written on a value only after that value was found core-normal.}
+\li{\strong{The kind T accepts of the published plain mode} met on the way (\code{rv3a-checked-eager-term-reused-closed-bad}, \code{rv3a-kshort-reduct-plain-bad}: a closed pair answered by the same-head probe before the fold) are in the base as well and belong to the known class of the switch \code{congruence}.}
+}
+}
+
+\subtree{
+\title{7. Repairs tried, and what they do not reach}
+
+\p{Two changes were tried in a review copy of the patched tree, each behind a system property, through the JVM launcher with default options, on the 101 rows of the family and the 58 rows of this review:}
+
+\table{
+\tr{\th{Change}\th{Verdicts that move}\th{Other verdicts that move}}
+\tr{\td{the run alone (rule 7) also without \code{skipargs}, \code{congruence} and \code{probes}}\td{the three exports of F1: reject to accept}\td{none of 156}}
+\tr{\td{the K rule asks the plain comparison after every false answer under the bit, not only after an eager-only event}\td{the two exports of F4: reject to accept}\td{none of 157}}
+}
+
+\p{They are handed over as a suggestion and are not gated: no module suite, no corpus, no mutants, no timing. The first costs nothing on the corpora if the count of MO-3 holds (no declaration was checked again alone). The second adds a comparison to every K comparison that fails under the bit; how many there are on the corpora was not counted.}
+
+\p{\strong{Not reached}: F2 (a complete search or a decline) and F3 (the memo of a reduction). And the two changes repair rows, not the property: the run alone would have to make exactly the plain comparisons the official kernel makes, which is the reference engine's behaviour and not that of a machine without three switches; rows that separate the two were not looked for.}
+
+\p{\strong{On a rule that takes the union of the two orders under the bit}, which was announced as the next candidate while this report was written: it would answer the rows of F1, F2 and F4 by the plain computation. It gives up the official reject of every row whose pair is first asked under the flag and is true in plain mode (the candidate gives 33 official rejects on the family; such a rule keeps only those that are false in plain mode as well), and it does not touch the memo of F3: a recursor marked stuck in plain mode is still not asked again under the bit, and a reduct made under the bit is still read by a later declaration. The seven rows of the table of section 4 are the ones to judge it on.}
+}
+
+\subtree{
+\title{8. Rows for the hostile suite}
+
+\p{58 exports with their official verdicts, 45 accept and 13 reject, and a manifest fragment in the format of \src{rlvm-machine/src/test/resources/s/manifest.tsv}; the generators are two files beside the suite's builder plus a reader that keeps the expressions of a large export on disk. Marks: the 13 rejected rows carry \code{T} (the planted statement is the suite's pair, or a K reduction licensed by it; for the nine rows with the non-computing \code{\verb~|Nat.gcd~} the kind is the reviewer's reading and needs the maintainer's confirmation); rows that enter eager reduction carry \code{eager-decline}; the fourteen rows of the findings name their finding. The rows of F1, F2, F3 and F4 are strict accept rows: the candidate fails them, the base passes all but \code{rv3a-gcd2-pair-eager-then-plain-same-binder-ok}.}
+
+\table{
+\tr{\th{Group}\th{Rows}\th{Official accept / reject}}
+\tr{\td{\code{rv3a-hidden-*}: a sub-pair behind a shortcut, and certificates}\td{8}\td{7 / 1}}
+\tr{\td{\code{rv3a-other-records-*}: the search by expression}\td{3}\td{3 / 0}}
+\tr{\td{\code{rv3a-checked-*}: a checked term reused}\td{2}\td{0 / 2}}
+\tr{\td{\code{rv3a-kshort-*}: the K rule through a shortcut, honest prelude}\td{5}\td{4 / 1}}
+\tr{\td{\code{rv3a-gcd-*}, \code{rv3a-gcd2-*}, \code{rv3a-gcd3-*}: a Nat function that does not compute}\td{28}\td{19 / 9}}
+\tr{\td{\code{rv3a-real*}: the real definitions of Init}\td{12}\td{12 / 0}}
+}
+}
+
+\subtree{
+\title{9. Not attacked, and an error of my own}
+
+\ul{
+\li{\strong{Pair entries under several host depth bounds}, the test that found the mark lost by a suspended comparison in a first version of MO-3: only verdicts were compared here.}
+\li{\strong{Structure eta, unit-like types, string literals and projections under the bit}: read, not attacked with rows. The Prop mask of structure eta is one more shortcut of the kind of F1.}
+\li{\strong{The eight corpora, the mutants, the arena tests}: not run. The review is of hand-made exports; nothing here says how often a real export meets a finding, and the count of MO-3, no eager-only event on the eight corpora, was not checked.}
+\li{\strong{Closure congruence as the shortcut that hides a pair}: the one row built for it did not reach the shortcut, because the suspensions had been forced.}
+\li{\strong{The modes \code{shared} and \code{deferred}} were run on the 159 rows only.}
+\li{\strong{An error}: one table of statuses per mode that I posted to the team's board for F1 and F2 was read from a shell line that printed the status of a command substitution instead of the launcher's; it showed "accept" for every mode. It was seen within minutes, the runs were repeated with a tool that stores the status first, and the board carries the correction. Every status in this report is from the repeated runs.}
+}
+}
