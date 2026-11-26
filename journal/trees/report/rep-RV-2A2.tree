@@ -1,0 +1,172 @@
+\title{RV-2A2: adversarial review of the K-union rule (package MO-2, second candidate, variant A), from the source}
+\taxon{Report}
+\date{2026-11-26}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Second pass of the review "RV-2A", in the night from 2026-11-25 to 2026-11-26 (about 03:45 to 06:50 UTC of 2026-11-26). [The first pass](rep-RV-2A) ended with no-go for the exact-let mode. Its subject here is the second candidate of [package MO-2](rep-MO-2), section 13, \strong{variant A only}: the "K-union" rule. At a K comparison of the class (the flag of finding E1-F6, or a major premise that \code{Infer.letRootedSlow} reads as typed through a let variable with two types) the run no longer ends without a verdict; it goes on with the type the machine has and the unit is \em{unsure}. An accept stands. A rejection of a unit that is not unsure stands. A rejection of an unsure unit is a decline. No second run, no mode, nothing in \code{Eval} or \code{Values}. The patch is five files and 266 lines; it was read line by line, and what runs after it was read in \code{Reduce} and \code{MachineSession}. Every verdict called official is from leanchecker 4.36.0 (commit \code{611c117b}) in the project's Docker image without network. Nothing was repaired; nothing of this review is in the main tree.}
+
+\subtree{
+\title{0. Result in one page}
+
+\ul{
+\li{\strong{Verdict: no-go as built, for one reason, with a one-line way out.} Claim (b) of the author, "no wrong reject that the published plain run does not have", is true for every unit taken with the session it starts in and \strong{false per input}: finding G1 is an export of three declarations that the official checker accepts, the published build accepts in a plain run and the candidate rejects, in 20 of 20 runs under 1, 4, 8 and the default number of workers. The cause is not in the K comparison. In the published build the machine's decline of a unit of the class ends the session; under K-union that unit is accepted and the session stays, and a warm-session wrong reject that the published build is known to have (finding S3-F3, one of the twelve marked rows) is no longer masked for the declarations behind it. If the session is ended after an accepted unit that the published machine would have declined, the per-input claim follows from the argument of section 2; that change was not built or tested here.}
+\li{\strong{Claim (a), no accept of a statement that is not derivable: not refuted, and the reading gives no place where it could fail that the published build does not have.} The patch adds no typing and no reduction. Up to the first K comparison of the class the candidate computes what the published build computes; after it, it computes what the published machine computed before 2026-11-24 for the same unit, by the ordinary steps. None of the 1,064 inputs of the black-box corpus that state something not derivable is accepted (the author's table, tabulated again here), and the 7 of this review's 14 official rejects that the candidate accepts are the 7 the published build accepts, all derivable.}
+\li{\strong{Claim (c), real input: confirmed as far as it was run.} The eight corpora through the candidate's executable: accepted; unsure units Std 1, cedar 1, con-leche 1, navier-stokes-euler 16, cslib 7, Mathlib 63; rejections of an unsure unit 0; the only declines of the machine are eager reduction. The mutants were not run again.}
+\li{\strong{Claim (d), \code{kunion=off} is the base: confirmed} by reading and on 80 exports (machine alone, equal exit status on every one).}
+\li{\strong{Claim (e), one verdict per file under 1, 4 and 8 workers: false, for the candidate and for the published build alike}, on G1 with padding: section 5.}
+\li{\strong{The mark} (rule 4): no path was found on which the published machine declines a unit and the candidate rejects it with confidence. The reason is a short argument, section 2, not a count.}
+\li{\strong{The two rows that become kind T} state \code{True}. \strong{The merge with the rewrite of the K comparison}: variant A relies on where its test stands, not on how the comparison is made; section 6.}
+\li{\strong{Two notes from the reading}, neither a wrong verdict: the scan of frames in \code{Infer.letRootedRunSlow} is bounded in depth and not in work and does not tick; and under the rule an official reject of the class is never a verdict of the machine, which the author says.}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{Candidate}: variant A, the build the author's gates ran on (jars \code{8f64ecda212f}, machine jar \code{67bf93b8eb1c}), the executable and the JVM launcher, no option. \strong{Base}: the author's build of the unpatched tree (jars \code{f62c8667964a}, machine jar \code{1eaaf3e3655c}, the published one). \strong{Published build}: the shared distribution (jars \code{d867a0766427}). Base and published build agree on every row below.}
+\li{\strong{Plain run}: no option. \strong{Machine alone}: \code{\verb~|-X fallback=none~}. Exit status 0 accept, 1 reject, 2 decline. The exports use the environment of the first pass (\code{\verb~|d intro~} convertible with \code{5} and with \code{\verb~|d h~}, \code{\verb~|d h~} not with \code{5}; \code{needs7}; "K fires" for \code{\verb~|d intro = d intro~} and \code{\verb~|d intro = 5~}, not for \code{\verb~|d h = 5~} and \code{\verb~|5 = d h~}).}
+\li{A private debug copy of the candidate's machine (one print at each K comparison: what the major premise is, whether a type is stored for it, whether its value is known, the two flags, whether the rule fires) was used to see what the probes of section 4 do. It is not a build anybody runs. The aarch64 development host; nothing here is a timing.}
+}
+}
+
+\subtree{
+\title{2. The patch, and the argument that carries claims (a) and (b) for one unit}
+
+\p{The whole change of behaviour is two places. In \code{\verb~|Reduce.k_iota3~}, before the comparison: where the published build ends the run if the flag \code{zetaInexact} is set, the candidate calls \code{kUnsureSlow}, which sets \code{Infer.Ext.kUnsure} if that flag is set or if \code{letRootedSlow} says so, and goes on. In \code{MachineSession.check0}, after the run and after the restart for eager reduction: a rejection of a unit with \code{kUnsure} becomes a decline. \code{kUnsure} is reset in \code{beginDecl} and nowhere else. \code{letRootedSlow} and \code{letRootedRunSlow} only read: no record, memo word, table or stack is written.}
+
+\p{\strong{The prefix argument.} Take one unit and one state of the session at its start. Until the first K comparison at which \code{zetaInexact} is set, the candidate executes exactly the steps of the published build: the only new code on the way is the read-only test, and setting \code{kUnsure} early (by the let-rooted reading) changes no step. At that comparison the published build ends the run with a decline. So:}
+
+\ul{
+\li{if the published machine does not decline the unit, the two runs are the same run, and the candidate's outcome is the published one, except that a rejection becomes a decline when the let-rooted reading marked the unit;}
+\li{if the published machine declines the unit at that comparison, the candidate is unsure from there to the end of the run, so its outcome is an accept, a decline, or a limit; never a rejection.}
+}
+
+\p{Three things could break "unsure to the end of the run". (1) The restart for eager reduction runs the unit again and \code{beginDecl} resets the mark: but the restart resets the machine first, so the second run meets the same comparison again, unless the mode-aware run ends earlier, with a decline or with a rejection that is no longer this class's. (2) A comparison of the class inside a speculative segment: the mark is a field of the session state, not something a cut restores. (3) A comparison answered from a memo, so that \code{\verb~|k_iota3~} is not reached: within the unit the memo was written by a comparison that set the mark; across units section 4. The driver's cold retry of a declined unit is a new run of the same unit and falls under the same argument.}
+
+\p{\strong{Claim (a)} for one unit follows the same way: an accept of the candidate is either the published accept, or the accept of a run that went past the old decline point by the ordinary steps of the machine: VTYPE of the major premise (the type of the forced value, or a type INFER stored for the delayed term), the weak head normal form, the constructor application, the comparison. That is what the published machine does at every K comparison that is not flagged, and what it did at the flagged ones until 2026-11-24. The decline rule of that day was added for agreement with the official verdict, not for soundness (the working notes of package M5, finding E1-F6). The coordinator's question was whether something after the comparison assumed that the run had stopped: nothing in \code{\verb~|k_iota3~}, \code{\verb~|k_iota4~} or \code{iotaMajor} reads the flag or the reason for it; the eager counter \code{ER_K} is raised and lowered as for any K comparison; \code{Decl.accepted} discharges the deferred eager comparisons at the end of the unit, and a failure there is a rejection of an unsure unit, a decline.}
+}
+
+\subtree{
+\title{3. Finding G1: a wrong reject that the published plain run does not have}
+
+\p{\code{rv2a2-kept-session-warm-memo-ok}, three declarations in this order:}
+
+\ul{
+\li{\code{\verb~|S.a : (f intro).1 = 5 := Eq.refl 5~}}
+\li{\code{\verb~|S.u : True := let g : Unit -> d intro = 5 := fun u => r0; needs7 (Eq.rec 7 (g Unit.unit))~}}
+\li{\code{\verb~|S.ok : (f intro).1 = (f h).1 := Eq.refl ((f intro).1)~}}
+}
+
+\p{with \code{\verb~|f x := S.B.mk (And.rec (fun _ _ => 5) x)~}, a regular definition into a structure with one field. \code{S.a} and \code{S.ok} are the row \code{s3-wc-proj-two-decls-ok} of the hostile suite, rebuilt: finding S3-F3, a warm session keeps the memo of \code{\verb~|(f intro).1~} from \code{S.a} and rejects \code{S.ok}; it is one of the twelve rows marked as known wrong rejects of the default configuration. \code{S.u} is the row \code{mo2-shape-unrelated-ok}: a let variable is applied, then a K comparison that fires under every reading.}
+
+\table{
+\tr{\th{Build}\th{Plain run}\th{Machine alone}}
+\tr{\td{official checker}\td{accept}\td{}}
+\tr{\td{published build, and the base}\td{accept (20 of 20 runs: 5 each under 1, 4, 8 and the default number of workers)}\td{decline (\code{S.u})}}
+\tr{\td{candidate, executable}\td{\strong{reject}, exit status 1 (20 of 20 runs, the same worker counts); \code{\verb~|REJECT E_TYPE_MISMATCH S.ok~}}\td{\strong{reject}; unsure units 1, rejections of unsure units 0}}
+\tr{\td{candidate, JVM launcher}\td{\strong{reject}}\td{}}
+\tr{\td{candidate with \code{\verb~|-Drlvm.machine.kunion=off~}}\td{accept}\td{}}
+}
+
+\p{\strong{Cause.} The published machine declines \code{S.u}; the driver discards the worker's context after a decline; \code{S.ok} is checked in a new session, without the memo of \code{S.a}, and accepted. Under K-union \code{S.u} is unsure and accepted, the session stays, and \code{S.ok} is rejected by the memo: a rejection of a unit that is not unsure, final. Controls, each with the official verdict accept: \code{S.a}, \code{S.ok} without \code{S.u}: every build rejects (the known row). \code{S.u}, \code{S.a}, \code{S.ok}: every build rejects. \code{S.ok} alone, and \code{S.u}, \code{S.ok}: every build accepts.}
+
+\p{\strong{What it is and what it is not.} It is not a new cause: the rejection is the published build's own warm-session defect. It is a new place where that defect decides a file: every decline that the rule turns into an accept removes a reset of the session, and each warm-session wrong reject of the published build (findings S3-F1, S3-F3, S3-F6; the rows with the note \code{recheck}) can then decide the declarations behind such a unit. The regression corpus of the black-box review has 1,519 files with several declarations and none of this kind, because none puts a warm-session wrong reject behind a unit of the class. On the eight corpora nothing of the kind is seen: 86 units change from declined to accepted, and every file is accepted (the author's differential runs; the runs of section 5 here).}
+
+\p{\strong{The way out, not built.} End the session after an accepted unit that reached a K comparison with the flag \code{zetaInexact} set, that is, exactly where the published machine would have declined (not for a unit that is unsure by the let-rooted reading only: the published build keeps its session after those). \code{check0} already forgets the session after an accept for eager reduction (\code{eagerDirty}). Then every later unit starts in the session state it has in the published build, and with the prefix argument a plain run of the candidate differs from a plain run of the published build only on the units of the class themselves. The cost is the 86 resets that the published build pays today.}
+}
+
+\subtree{
+\title{4. The session: what an unsure unit that is accepted leaves behind}
+
+\p{The coordinator's line of attack: a later declaration that is not unsure reads something an unsure unit wrote and is rejected with confidence, where in the published build both were declined and the reference engine accepted both. Nineteen exports were written for it, ten with two declarations that bind the same let and nine controls; none gives a wrong reject that the published build does not have. What the debug copy shows:}
+
+\ul{
+\li{\strong{A later declaration applies the let variable again.} In \code{rv2a2-session-mask-gone-ok} both declarations bind \code{\verb~|n : Unit -> Nat := fun u => 5~} and compare \code{\verb~|n Unit.unit~} with 5; the first is unsure and accepted, the second sets \code{zetaInexact} again by itself and is unsure too. The value of the application forced by the first declaration was not met by the second in any probe. The sentence of section 13.4 of the report of MO-2, "the application of a let variable found in a tabling record is not applied again", was not reproduced; if it holds under another switch set or another shape, that shape is the wrong reject this section looked for.}
+\li{\strong{Whether the K rule reads the stored type or the forced value depends on the file, not on the session.} A term that an earlier unit of the file already contains is tabled (\code{Infer.tabled}: a term below the first term of the unit being checked), so INFER stores its type and the K rule reads the declared type without forcing; a term that the unit is the first to contain is forced and typed by its value. \code{rv2a2-session-unsure-accept-leaves-value-ok} and its controls: the second declaration alone is rejected by its run (machine alone: a decline in both builds); behind a first declaration with the same application it is accepted by the machine, in the base as in the candidate; in the other order it is declined again. Both readings are flagged for an application of a let variable (forced: \code{zetaInexact}; stored: the let-rooted reading), so the unit is unsure either way.}
+\li{\strong{What stays in the session after the unit} are memos of closed values, computed by steps that do not depend on the mark: the same memos a unit that is not unsure writes. That is why the only effect found is that the session is \em{kept} (section 3).}
+}
+
+\p{The opposite effect is in the author's tables: 6 generated files with several declarations that the published machine rejects against the official accept, and 3 that it rejects in agreement with it, are accepted by the candidate's machine. They were not traced here; a unit that no longer ends the session is the one difference between the two runs that the argument of section 2 leaves.}
+}
+
+\subtree{
+\title{5. Claims (c), (d), (e)}
+
+\ul{
+\li{\strong{(c) Real units.} The candidate's executable on the eight corpora, 8 workers, with statistics. Machine alone: Init, Std, cedar, reachability and navier-stokes-euler end with exit status 0; con-leche, cslib and Mathlib with 2, at a unit of eager reduction. A plain run of those three: accepted. Unsure units: Init 0, Std 1, cedar 1, reachability 0, con-leche 1, navier-stokes-euler 16, cslib 7, Mathlib 63. Rejections of unsure units: 0 on every corpus. Decline lines of the machine in the plain runs: con-leche 2, cslib 8, Mathlib 8, all eager reduction. These are the author's numbers. The structural mutants and the 17,775 mutants of the gate were not run again; the author's tables for the black-box sets were tabulated again and agree with section 13.4 (no input with official accept on which the published plain run accepts and the candidate rejects, among 10,581 generated files and 2,038 real units, mutants and grafts).}
+\li{\strong{(d) The switch.} With \code{\verb~|-Drlvm.machine.kunion=off~} \code{\verb~|k_iota3~} is the published text and the block of \code{check0} cannot fire (the mark is never set). On the 80 exports of both passes that are not padded, machine alone: the same exit status as the base on every one.}
+\li{\strong{(e) The number of workers.} G1 with 300 and with 3,000 trivial theorems between its declarations (official accept for both files), 12 runs per cell: candidate, 1 worker: 12 rejects; 4 workers: 10 rejects and 2 accepts, on both files; 8 workers: 12 rejects and 11 rejects with 1 accept. Base, 1 worker: 12 accepts; 4 workers: 11 accepts and 1 reject, on both files; 8 workers: 11 accepts with 1 reject, and 12 accepts. So the verdict of a plain run on such a file depends on which worker checks which unit, in the candidate \em{and} in the published build: whether \code{S.a} and \code{S.ok} meet in one session. The report of package MO-1 records the same for the published build on the rows that rest on a memo of an earlier declaration. The author's check of claim (e) used 1,519 small files, which one worker's session holds whole.}
+}
+}
+
+\subtree{
+\title{6. The rows that change kind, and the merge}
+
+\ul{
+\li{\strong{The two rows.} \code{e1-sys-let-krule-major-applied-bad} and \code{e1-sib-krule-major-proj-applied-let-bad} were decoded: the one theorem of each is \code{\verb~|S.bad : True~}. The statement is derivable (\code{True.intro}); kind T is the right mark. The candidate's machine accepts both; the published machine declines both and a plain run rejects them through the reference engine.}
+\li{\strong{The merge with the rewrite of the K comparison} (the union candidate for eager reduction changes \code{\verb~|k_iota4~} and the comparison). Variant A does not rely on how the comparison is computed: its test runs before the comparison, reads the major premise as it stands in the recursor application and two flags, and changes no step. It relies on three things that a rewrite must keep: (1) every K comparison that is computed passes the head of \code{\verb~|k_iota3~}, or whatever the one procedure's entry becomes; a second path to the comparison (a retry, a comparison in the other mode) needs the same test. (2) The nine lines of \code{check0} stand after the last run of the unit, and every run of a unit starts with \code{beginDecl}. (3) A K reduction that is answered from a memo was written by a comparison of the same unit, or by a unit whose steps did not depend on the mark; if the rewrite makes pair entries or reduction memos local to a declaration or a mode, that only gets easier. The two patches touch adjacent lines of \code{\verb~|k_iota3~}; the hunks will not apply mechanically.}
+\li{\strong{An unsure unit that enters eager reduction} after its K comparison was not exercised by any export here: section 8.}
+}
+}
+
+\subtree{
+\title{7. Two notes from the reading}
+
+\ul{
+\li{\strong{The frame scan is bounded in depth, not in work.} \code{Infer.letRootedRunSlow} passes its fuel by value: the i-th closure or delayed term of a frame is scanned with i units less than the frame had, and scans its own frame the same way. A branch that runs out of fuel answers "true" and ends the scan; a nest that never runs out is scanned whole. With 32 units the largest such nest has 32 frames, the frame of level k holding closures over the frames of all levels below it (the highest first), and costs 2 to the power 31 calls; a few dozen terms describe it, because frames are shared and the scan does not remember what it has visited. The answer is then "false", so the unit is not unsure and the scan runs again at its next K comparison. The scan does not tick: neither the unit's step bound nor a cancellation stops it. It is reached only for a delayed major premise with a stored type (a term that INFER tabled under a frame of typed bindings whose values are closures); \strong{no export was built}, so this is a reading, not a finding. On the corpora the guard of the author's section 13.6 shows no cost. The published build has no such scan.}
+\li{\strong{An official reject of the class is no verdict of the machine.} Rule 4 turns the rejection of every unsure unit into a decline, also when the rejection is the official verdict. In a plain run the reference engine rejects. The author counts 482 such inputs in the regression sets (section 13.4) and says so; it matters on the day the reference engine is not there: such a file is then declined, where the published machine rejected it.}
+}
+}
+
+\subtree{
+\title{8. Every row of this pass, attacked without result, not attacked}
+
+\p{All 24 rows have the official verdict accept; a verdict that is not the official one is in bold. The executable and the JVM launcher of the candidate agree on every row, and so do the base and the published build. The last column counts the driver's cold retry of a declined unit, so a unit that is declined counts twice.}
+
+\table{
+\tr{\th{Row}\th{Official}\th{Variant A, plain run}\th{Variant A, machine alone}\th{Published build, plain run}\th{Base, machine alone}\th{Unsure units; rejections of unsure units (variant A, machine alone)}}
+\tr{\td{\code{rv2a2-kept-session-warm-memo-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{accept}\td{\strong{decline}}\td{1; 0}}
+\tr{\td{\code{rv2a2-kept-session-warm-memo-second-alone-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{0; 0}}
+\tr{\td{\code{rv2a2-kept-session-warm-memo-two-decls-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{0; 0}}
+\tr{\td{\code{rv2a2-kept-session-warm-memo-unit-first-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{decline}}\td{1; 0}}
+\tr{\td{\code{rv2a2-kept-session-warm-memo-unit-then-second-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-control-first-alone-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{0; 0}}
+\tr{\td{\code{rv2a2-session-control-second-alone-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-mask-f3-alone-ok}}\td{accept}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{\strong{reject}}\td{0; 0}}
+\tr{\td{\code{rv2a2-session-mask-first-alone-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-mask-gone-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{3; 2}}
+\tr{\td{\code{rv2a2-session-mask-second-alone-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-unsure-accept-leaves-value-first-alone-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{0; 0}}
+\tr{\td{\code{rv2a2-session-unsure-accept-leaves-value-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-unsure-accept-leaves-value-reversed-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-unsure-accept-leaves-value-second-alone-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-unsure-accept-then-other-let-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-unsure-accept-then-sure-reject-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{accept}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-unsure-accept-then-sure-reject-reversed-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-unsure-no-first-alone-beta-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-unsure-no-first-alone-sel-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{1; 0}}
+\tr{\td{\code{rv2a2-session-unsure-no-reversed-beta-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-unsure-no-reversed-sel-ok}}\td{accept}\td{accept}\td{\strong{decline}}\td{accept}\td{\strong{decline}}\td{2; 2}}
+\tr{\td{\code{rv2a2-session-unsure-no-then-sure-reject-beta-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{2; 0}}
+\tr{\td{\code{rv2a2-session-unsure-no-then-sure-reject-sel-ok}}\td{accept}\td{accept}\td{accept}\td{accept}\td{\strong{decline}}\td{2; 0}}
+}
+
+\p{The names of the rows of section 4 say what the reviewer expected ("then sure reject"); the table says what happened. The 56 rows of the first pass under the candidate, run again here and equal to the author's table on every row: 9 rejections of official accepts, all of them the trigger gaps of the first pass that the published build has too, and 7 accepts of official rejects, the published build's 7.}
+
+\ul{
+\li{\strong{Attacked without result.} A statement that is not derivable accepted through an unsure K reduction: none built, for the reason of section 2; the black-box corpus has 1,064 such inputs and none is accepted. The mark lost on a restart, in a speculative segment, through a memo inside the unit, on the cold retry: by reading, section 2. A later declaration rejected with confidence through what an unsure unit left: 19 exports, section 4. \code{kunion=off} against the base: 80 exports.}
+\li{\strong{Not attacked.} An unsure unit that enters eager reduction after its K comparison (the restart, the deferred comparisons at the end of the unit, a mode-aware second run that rejects before it reaches the comparison): read, no export. The frame scan of section 7: no export. Other switch sets than the default. Whether the value of an applied let variable can be met by a later declaration under any configuration (section 4). The x86-64 architecture. The gates and the guard of section 13 were not repeated beyond what section 5 says.}
+\li{\strong{An error of the reviewer.} The exports of this pass were first named with the prefix of the black-box review; they are \code{rv2a2-*} now, with the same content.}
+}
+}
+
+\subtree{
+\title{9. Verdict}
+
+\p{\strong{No-go for variant A as built; go with the session ended after an accepted unit that the published machine would have declined, once that change has passed G1, its four controls and the files with several declarations of the black-box corpus.} For the rule: it is small, it adds no judgment, its two claims per unit rest on an argument of ten lines and not on a reconstruction of the official state, every real unit of the class is a verdict of the machine in the first run, and no accept of a statement that is not derivable was found by either review of either candidate. Against it as built: one wrong reject that the published plain run does not have (G1), by a cause that is the published build's and that any change from decline to accept will uncover; the claim that carries the candidate after the first one fell on wrong rejects of its own should be true as stated before the candidate is applied, and one line makes it so. The rows: G1 and its two accepting controls are proposed as strict rows (3), the two rebuilt known rejections and the control of finding MO2-F3 as rows with the mark of a known wrong reject (3), the 18 session probes as strict rows.}
+}

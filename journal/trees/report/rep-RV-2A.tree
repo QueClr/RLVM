@@ -9,6 +9,8 @@
 
 \p{Review "RV-2A" of 2026-11-25 (02:49 to 03:50 UTC of the following UTC day). Its subject is the patch of [package MO-2](rep-MO-2): a declaration whose first run reaches a K comparison that the machine cannot tell from the official one is checked a second time in an \em{exact-let mode} (a session of its own, no staging switch, the application of a let variable kept as a value, the K comparison made in every scope state, a scope stack, four places where the run ends without a verdict). The reviewer did not write the patch and was asked to refute it, working from the source: the patch read line by line against the official kernel (\code{\verb~|src/kernel/type_checker.cpp~}, \code{inductive.h}, \code{\verb~|local_ctx.cpp~} of Lean 4.36.0, commit \code{611c117b}), every suspicion turned into an export, and every export judged by the official checker. A second reviewer attacked the same build as a black box; this report does not cover that work. Nothing was repaired, and nothing of this review is in the main tree.}
 
+\p{A second pass, on the second candidate of the package (the K-union rule), is [the report RV-2A2](rep-RV-2A2).}
+
 \subtree{
 \title{0. Result in one page}
 
