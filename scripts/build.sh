@@ -7,7 +7,11 @@
 #   bin/rlvm         the native image, built with GraalVM Community Edition: self-contained (no JDK,
 #                    no jars, no second launcher), with Truffle runtime compilation; `rlvm FILE` checks
 #                    with the fastest configuration and `rlvm --version` says what that is. It is what
-#                    scripts/package.sh puts into the release archive and what the arena definition runs
+#                    scripts/package.sh puts into the release archive and what the arena definition runs.
+#                    It is a HYBRID SINGLE ENTRY (*agentic-note*: rep-OPT-K): the RLVM jars it was built
+#                    from are inside it, and when a JDK 25 or newer is on the machine it can hand a run
+#                    over to a JVM on those jars when asked (`--platform jvm|auto`; "HAND-OVER" below).
+#                    Without the option, and without a JDK, it checks everything itself
 #   BUILD-INFO.txt   versions, flags, build times, sizes (not part of the release archive)
 # and nothing else. A DEVELOPMENT distribution (--dev, or --jvm-only without the executable) adds
 #   lib/*.jar        every module of the reactor plus its runtime dependencies (Truffle, polyglot)
@@ -460,6 +464,9 @@ native_build() {
   local variant="$1" ghome="$2" name="$3"; shift 3
   local dir="$BUILD/$variant" tmp cp_ line
   cp_="$(classpath_of "$dir/lib")"
+  # The jars of the hand-over and their index (handover_resources): read by rlvm.cli.Handover while the
+  # image is BUILT (the package is initialised at build time), so they become data of the executable.
+  [ ! -d "$dir/handover" ] || cp_="$cp_:$dir/handover"
   local args=("-O$opt" "--gc=$gc" --no-fallback
               # An out-of-memory error ends the process at once with status 3 (= internal error).
               -R:+ExitOnOutOfMemoryError
@@ -668,6 +675,108 @@ echo "default engine:   ${default_engine:-unknown} (a run without -X engine; -X 
 JVM_FLAGS="-XX:+UseSerialGC -XX:+UnlockExperimentalVMOptions -XX:-UseJVMCICompiler -XX:CICompilerCount=8 -XX:+UseTransparentHugePages -Xlog:disable -Xlog:all=warning:stderr -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
 JVM_HEAP_FLAGS="-Xms13g -Xmx13g -Xmn1g"
 JVM_HEAP_FLAGS_MACHINE="-Xmx7g -Xmn1g"
+
+# --- HAND-OVER: the jars inside the executable (*agentic-note*: rep-OPT-K) -------------------------
+# The executable can hand a run over to a JVM (rlvm.cli.Handover: `--platform`, RLVM_PLATFORM). What the
+# JVM runs must be what the image was built from, and the release is one file, so the RLVM jars of this
+# build go INTO the executable: handover_resources puts them, with an index, on the class path of the
+# image build, where rlvm.cli.Handover reads them at build time. At run time the executable unpacks
+# them into a per-user cache directory named after the build id and compares every file there with its
+# own copy on every start.
+#   WHICH JARS: the RLVM modules without rlvm-truffle, and no third-party jar. A default run loads no
+#   class of Truffle, polyglot or the SDK (*agentic-note*: rep-OPT-J, section 2: 244 classes, all RLVM's),
+#   and on a stock JDK the Truffle tier has only its fallback runtime; a run that names the tier stays in
+#   the executable. That is 1.1 MB instead of 20 MB.
+#   WHICH FLAGS: the JVM launcher's line (JVM_FLAGS above) and its heap by engine, with two differences.
+#   The two options that silence JDK warnings about Truffle are left out (nothing of Truffle is handed
+#   over, and a JDK after 25 may refuse them), and -XX:+IgnoreUnrecognizedVMOptions is put in front, so
+#   that a later JDK which has dropped one of the -XX flags still starts instead of exiting with 1.
+HANDOVER_FLAGS="-XX:+IgnoreUnrecognizedVMOptions $(echo " $JVM_FLAGS " | sed -e 's/ --enable-native-access=ALL-UNNAMED / /' -e 's/ --sun-misc-unsafe-memory-access=allow / /' -e 's/^ *//' -e 's/ *$//')"
+#   handover_resources <variant>  ->  $BUILD/<variant>/handover/rlvm/handover/{index.properties,jars/}
+handover_jars=0; handover_bytes=0
+handover_resources() {
+  local dir="$BUILD/$1" out j n
+  out="$dir/handover/rlvm/handover"
+  rm -rf "$dir/handover"
+  ls "$dir/lib"/rlvm-main-*.jar >/dev/null 2>&1 || { log "[handover] no rlvm-main in this build: the executable carries no jars and hands nothing over"; return 0; }
+  mkdir -p "$out/jars"
+  {
+    echo "# The jars inside the executable; written by scripts/build.sh, read by rlvm.cli.Handover."
+    echo "id=$(cat "$dir/lib"/rlvm-*.jar | sha256sum | cut -c1-12)"
+    echo "engine=${default_engine:-}"
+    echo "flags=$HANDOVER_FLAGS"
+    echo "heap.machine=$JVM_HEAP_FLAGS_MACHINE"
+    echo "heap.other=$JVM_HEAP_FLAGS"
+    printf 'jars='
+    for j in $(ls "$dir/lib"/rlvm-*.jar | LC_ALL=C sort); do
+      n="$(basename "$j")"
+      case "$n" in rlvm-truffle-*) continue ;; esac
+      printf '%s ' "$n"
+    done
+    echo
+    for j in $(ls "$dir/lib"/rlvm-*.jar | LC_ALL=C sort); do
+      n="$(basename "$j")"
+      case "$n" in rlvm-truffle-*) continue ;; esac
+      cp "$j" "$out/jars/$n"
+      echo "sha256.$n=$(sha256sum "$j" | cut -d' ' -f1)"
+    done
+  } > "$out/index.properties"
+  handover_jars="$(ls "$out/jars" | wc -l)"
+  handover_bytes="$(du -cb "$out/jars"/*.jar | tail -n 1 | cut -f1)"
+  log "[handover] $handover_jars jars, $handover_bytes bytes, go into the executable (build id $(sed -n 's/^id=//p' "$out/index.properties"))"
+}
+# verify_handover <executable> <label>: the hybrid entry of an executable that carries its jars. The
+# JDK of the build is a JDK 25, so the hand-over itself is exercised here: forced to the JVM, and under
+# auto with two passes, a tutorial test must be accepted BY A JVM, with the status base carried
+# through; under auto with one pass, without an option (the default is the executable, also with two
+# passes), with a java that does not exist and with a cache directory that cannot be made it must be
+# accepted by the executable itself. The cache of these runs is a directory
+# of its own under ${TMPDIR:-/tmp}; where that place is one the executable does not accept as a cache
+# (a directory above it that others can write and that is not sticky), the forced run falls back, and
+# the log says that the hand-over was not exercised.
+verify_handover() {
+  local bin="$1" label="$2" t="$ROOT/work/arena-site/tests/good/tutorial/001_basicDef.ndjson" cache line got
+  "$bin" --version > "$STAGE/verify.out" 2>&1 || die "verification failed: $label --version"
+  grep -q "^platform: .*jars: $handover_jars in the executable" "$STAGE/verify.out" \
+    || { cat "$STAGE/verify.out" >&2; die "verification failed: $label --version does not name its $handover_jars jars"; }
+  "$bin" --version 2>/dev/null | grep -q '^checker: rlvm ' || return 0
+  [ -f "$t" ] || { log "[verify] $label: no tutorial test at hand, the hand-over was not exercised"; return 0; }
+  cache="$(mktemp -d "${TMPDIR:-/tmp}/rlvm-verify.XXXXXX")"
+  hand_run() { # environment... -- arguments...   ->  $got, $line (the launcher's statistics line)
+    local envs=()
+    while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
+    got=0
+    env -u RLVM_JAVA_OPTS -u RLVM_PLATFORM -u JAVA_HOME -u RLVM_STATUS_BASE "RLVM_CACHE_DIR=$cache" "RLVM_JAVA=$CE_HOME/bin/java" "${envs[@]}" \
+      "$bin" --stats "$@" "$t" > "$STAGE/verify.out" 2>&1 || got=$?
+    line="$(grep '^rlvm: stats: result=' "$STAGE/verify.out" || true)"
+  }
+  hand() { # expected-status pattern-of-the-statistics-line environment... -- arguments...
+    local want="$1" word="$2"; shift 2
+    hand_run "$@"
+    if [ "$got" != "$want" ] || ! echo "$line" | grep -q -- "$word"; then
+      cat "$STAGE/verify.out" >&2
+      rm -rf "$cache"
+      die "verification failed: $label hand-over ($*): exit status $got, expected $want and '$word' in the statistics"
+    fi
+  }
+  hand_run -- --platform jvm
+  if [ "$got" = 0 ] && echo "$line" | grep -q 'why=fallback(forced):cache:directory-above-the-cache-is-not-safe'; then
+    rm -rf "$cache"
+    log "[verify] $label: ${TMPDIR:-/tmp} is not a place for a cache (a directory above it is open to others): the hand-over was NOT exercised"
+    return 0
+  fi
+  hand 0  ' mode=jvm .* platform=jvm why=handed-over(rule=forced'        -- --platform jvm
+  # (a machine with less memory than the JVM's heap keeps a run that auto would hand over: also right)
+  hand 0  ' mode=jvm .* platform=jvm why=handed-over(rule=auto:passes=2\| mode=native .* why=fallback(auto:passes=2):low-memory' -- --platform auto -X passes=2
+  hand 10 ' exit=0 .* mode=jvm .* platform=jvm'                          RLVM_STATUS_BASE=10 -- --platform jvm
+  hand 0  ' mode=native .* platform=image why=auto:single-pass'          -- --platform auto
+  hand 0  ' mode=native .* platform=image why=forced'                    -- -X passes=2
+  hand 0  ' mode=native .* platform=image why=fallback(forced):RLVM_JAVA:' "RLVM_JAVA=$cache/no-such-java" -- --platform jvm
+  : > "$cache/a-file"
+  hand 0  ' mode=native .* platform=image why=fallback(forced):cache:'   "RLVM_CACHE_DIR=$cache/a-file/below" -- --platform jvm
+  rm -rf "$cache"
+  log "[verify] $label hand-over ok: forced, auto by passes, the status base, a single pass stays, nothing said stays, no java, no cache"
+}
 if [ "$dev" = 1 ]; then
 mkdir -p "$STAGE/dist/lib"
 cp "$LIB"/*.jar "$STAGE/dist/lib/"
@@ -751,6 +860,7 @@ image_text() { # first words -> the text of "build:" in `rlvm --version`
 
 if [ "$want_native" = 1 ] && [ "$flavor" = ce ]; then
   build_text="$(image_text "GraalVM CE native image")"
+  handover_resources ce
   [ "$h10" = no ] || h10_lists "$LIB"
   if [ "${#ni_h10[@]}" -gt 0 ]; then
     ni_soft_fail=1
@@ -765,6 +875,7 @@ if [ "$want_native" = 1 ] && [ "$flavor" = ce ]; then
     native_build ce "$CE_HOME" rlvm
   fi
   verify "$BUILD/ce/rlvm" "rlvm (native, CE)"
+  [ "$handover_jars" = 0 ] || verify_handover "$BUILD/ce/rlvm" "rlvm (native, CE)"
   cp "$BUILD/ce/rlvm" "$STAGE/dist/bin/rlvm"
   {
     echo "executable:       bin/rlvm  $ni_size bytes; GraalVM CE native image; built in ${ni_wall}s wall, ${ni_cpu}s cpu, peak ${ni_rss_mb} MB"
@@ -773,6 +884,7 @@ if [ "$want_native" = 1 ] && [ "$flavor" = ce ]; then
     echo "  inline lists:   $([ "${#ni_h10[@]}" -gt 0 ] && echo "H10, generated from the machine jar of this build (rlvm-machine/h10/native-image-args.sh)" || echo "none")"
     echo "  builder:        $ni_summary"
     echo "  truffle probe:  $probe_line"
+    echo "  hand-over:      $([ "$handover_jars" = 0 ] && echo "none (no jars inside)" || echo "$handover_jars RLVM jars inside ($handover_bytes bytes; not rlvm-truffle, no third-party jar); JVM line: $HANDOVER_FLAGS + heap by engine: machine $JVM_HEAP_FLAGS_MACHINE; any other $JVM_HEAP_FLAGS")"
   } >> "$INFO"
   record "rlvm (native CE $ce_version)" "$ni_flags" "$ni_wall" "$ni_cpu" "$ni_rss_mb" "$ni_size"
 fi
@@ -870,8 +982,10 @@ if [ "$flavor" = oracle-pgo ]; then
   fi
   profiles="$(ls "$prof"/*.iprof | LC_ALL=C sort | paste -sd, -)"
   build_text="$(image_text "Oracle GraalVM, profile-guided native image") [profiles $profile_id${profile_stale:+; ${profile_stale%% (*}}]"
+  handover_resources oracle
   native_build oracle "$ORACLE_HOME_DIR" rlvm "--pgo=$profiles"
   verify "$BUILD/oracle/rlvm" "rlvm (native, Oracle GraalVM, profile-guided)"
+  [ "$handover_jars" = 0 ] || verify_handover "$BUILD/oracle/rlvm" "rlvm (native, Oracle GraalVM, profile-guided)"
   "$BUILD/oracle/rlvm" --version | grep -q '^build: Oracle GraalVM, profile-guided' \
     || log "[oracle] NOTE: 'rlvm --version' does not say 'Oracle GraalVM, profile-guided' (a launcher jar from before 2026-11-25 has no build line)"
   cp "$BUILD/oracle/rlvm" "$STAGE/dist/bin/rlvm"

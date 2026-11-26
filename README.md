@@ -50,10 +50,21 @@ CPU up to 8, the file checked while it is read, the heap settings baked in.
 | `-X fallback=none` | development: the machine alone; a declaration it declines is declined instead of going to the reference engine |
 | `-X passes=N` | check the export N times in one process and report every pass (warm wall clock) |
 | `--stats` | one statistics line on standard error |
+| `--platform image\|jvm\|auto` | who checks: the executable itself (`image`, the default), a JVM on the jars inside the executable (`jvm`), or the rule below (`auto`) |
 | `-Xmx8g` | the executable's own memory options, written without a blank: maximum heap (also `-Xms`, `-Xmn`) |
 
 `rlvm --help` lists all of them. The export can also be given in the environment variable `IN`, as the Lean
 Kernel Arena does.
+
+**With a JDK.** The executable carries the RLVM jars it was built from. When a JDK 25 or newer is on the machine
+(`RLVM_JAVA`, else `JAVA_HOME`, else `java` on `PATH`) it can hand a run over to a JVM: it unpacks the jars into
+a per-user cache directory (`$HOME/.cache/rlvm`), compares each with its own copy on every start, and replaces
+itself by `java` on them. A JVM is faster per pass once it is warm and slower for one run: 1.1 to 4.9 times on
+the eight corpora, 20 times on a tutorial test; it is ahead in a single run only where one declaration computes
+for seconds. So the hand-over is an option: `--platform auto` hands a run with `-X passes=N` (N above 1) over,
+`--platform jvm` every run, and without the option the executable checks everything itself, as it does without a
+usable JDK or when anything of this fails; `--stats` and `--version` say which side ran and why
+(*agentic-note*: rep-OPT-K).
 
 ## What the default configuration promises
 

@@ -121,6 +121,8 @@ public final class Main {
         String checkerName;
         String selfTestMode;
         Options options;
+        /** {@code --platform}, else {@code RLVM_PLATFORM}, else the default (image): who checks, this process or a JVM ({@link Handover}). */
+        Handover.Platform platform = Handover.Platform.DEFAULT;
     }
 
     /**
@@ -151,7 +153,7 @@ public final class Main {
                 out.print(checkerUsage(inv.checkerName, injected));
                 return 0;
             case VERSION:
-                return version(out, injected);
+                return version(out, injected, env);
             case TRUFFLE_PROBE:
                 // The only reference to Truffle in the launcher: nothing of it is touched on a normal run.
                 return rlvm.cli.probe.TruffleProbe.run(out, inv.options.extra()) ? 0 : ExitCode.INTERNAL_ERROR;
@@ -173,13 +175,21 @@ public final class Main {
             }
         }
 
+        // The hybrid single entry: the executable hands a run over to a JVM when its rule says so and a JDK
+        // is usable, by replacing this process; if it returns, the export is checked here (Handover: nothing
+        // of the hand-over can fail a check). Never for the self-test, nor for a checker given by a test.
+        Handover.Outcome how = null;
+        if (inv.selfTestMode == null && injected == null) {
+            how = Handover.run(args, env, inv.platform, inv.export, inv.options, inv.checkerName);
+        }
+
         long start = System.nanoTime();
         VerdictProtocol.Outcome outcome = VerdictProtocol.run(checker, inv.export, inv.options);
         long wallNanos = System.nanoTime() - start;
         VerdictProtocol.report(outcome, err);
         if (inv.options.stats()) {
             try {
-                printStats(err, checker, inv.options, outcome, wallNanos);
+                printStats(err, checker, inv.options, outcome, wallNanos, how);
             } catch (Throwable ignored) {
                 // Statistics are best effort; the status is already decided.
             }
@@ -205,11 +215,13 @@ public final class Main {
         }
     }
 
-    private static int version(PrintStream out, Checker injected) {
+    private static int version(PrintStream out, Checker injected, Map<String, String> env) {
         out.println("rlvm " + BuildInfo.VERSION);
         out.println("build: " + BuildInfo.build());
         out.println("runtime: " + BuildInfo.runtime());
         out.println("truffle: " + BuildInfo.TRUFFLE_VERSION + " (compiled against)");
+        // Who checks: this process, or a JVM it hands the run to; which JDK was found, or why none.
+        out.println("platform: " + Handover.describe(env));
         Checker dflt = injected;
         if (injected != null) {
             out.println("checker: " + injected.name() + " - " + injected.description());
@@ -235,7 +247,8 @@ public final class Main {
         return 0;
     }
 
-    private static void printStats(PrintStream err, Checker checker, Options options, VerdictProtocol.Outcome outcome, long wallNanos) {
+    private static void printStats(PrintStream err, Checker checker, Options options, VerdictProtocol.Outcome outcome, long wallNanos,
+                    Handover.Outcome how) {
         ProcStats p = ProcStats.read();
         Runtime rt = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder("rlvm: stats:");
@@ -253,6 +266,10 @@ public final class Main {
         sb.append(" heap_committed_kb=").append(rt.totalMemory() >> 10);
         sb.append(" heap_max_kb=").append(rt.maxMemory() >> 10);
         sb.append(" os_threads=").append(p.threads);
+        if (how != null) {
+            // platform=image|jvm and why: the rule's word, or the reason a hand-over did not happen.
+            sb.append(how.stats());
+        }
         err.println(sb);
     }
 
@@ -273,6 +290,12 @@ public final class Main {
                     "      --stack-size S    stack of the checker thread, e.g. 512m (default), 2g (environment:",
                     "                        RLVM_STACK_SIZE)",
                     "      --checker NAME    use this checker implementation instead of the default (see --version)",
+                    "      --platform P      who checks: image (default: this executable), jvm (a JDK " + Handover.MIN_JAVA + " or newer, found",
+                    "                        as RLVM_JAVA, JAVA_HOME or java on PATH, started on the jars inside this",
+                    "                        executable) or auto (the executable, and a JVM for",
+                    "                        " + Handover.ruleText() + ";",
+                    "                        environment: RLVM_PLATFORM). Without a usable JDK the executable checks",
+                    "                        everything itself; --stats and --version say which side ran and why",
                     "  -X KEY[=VALUE]        setting passed through to the checker implementation (the settings of",
                     "                        the checker that would run are listed at the end of this text)",
                     "  -q, --quiet           print errors only",
@@ -298,7 +321,10 @@ public final class Main {
                     "",
                     "Environment: IN, RLVM_THREADS, RLVM_STACK_SIZE as above; RLVM_STATUS_BASE=N adds N to every exit",
                     "status (the arena run line uses 10 and maps 10/11/12 back, so that a runtime that fails to",
-                    "start, which exits with 1, is not read as a rejection); RLVM_EXIT=exit runs shutdown hooks.",
+                    "start, which exits with 1, is not read as a rejection); RLVM_EXIT=exit runs shutdown hooks;",
+                    "RLVM_PLATFORM as above, RLVM_JAVA (the java binary to hand over to), RLVM_JAVA_OPTS (replaces the",
+                    "VM flags of a hand-over, the heap included), RLVM_CACHE_DIR (where the jars are unpacked; default",
+                    "$XDG_CACHE_HOME/rlvm, else $HOME/.cache/rlvm).",
                     "");
 
     static Invocation parse(String[] args, Map<String, String> env, PrintStream out, PrintStream err) throws UsageException {
@@ -310,6 +336,8 @@ public final class Main {
         String threadsSource = ENV_THREADS;
         String stack = env.get(ENV_STACK_SIZE);
         String stackSource = ENV_STACK_SIZE;
+        String platform = env.get(Handover.ENV_PLATFORM);
+        String platformSource = Handover.ENV_PLATFORM;
         boolean informational = false;
         boolean optionsEnded = false;
 
@@ -350,6 +378,10 @@ public final class Main {
                     break;
                 case "--checker":
                     inv.checkerName = value != null ? value : next(args, ++i, a);
+                    break;
+                case "--platform":
+                    platform = value != null ? value : next(args, ++i, a);
+                    platformSource = a;
                     break;
                 case "-X": {
                     String kv = value != null ? value : next(args, ++i, a);
@@ -411,6 +443,9 @@ public final class Main {
         }
         if (stack != null && !stack.isEmpty()) {
             options.stackBytes(parseSize(stack, stackSource));
+        }
+        if (platform != null && !platform.isEmpty()) {
+            inv.platform = Handover.Platform.parse(platform, platformSource);
         }
         for (Map.Entry<String, String> e : extra.entrySet()) {
             options.extra(e.getKey(), e.getValue());

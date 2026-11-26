@@ -760,6 +760,11 @@ def main() -> int:
             extra_cp = ":".join(os.path.abspath(p) for p in args.extra_cp.split(":") if p)
             inner = run_line
             run_line = lambda extra: "RLVM_EXTRA_CP=" + shlex.quote(extra_cp) + " " + inner(extra)  # noqa: E731
+        if args.launcher != "jvm" and args.passes > 1:
+            # The executable is a hybrid entry (*agentic-note*: rep-OPT-K): a run with several passes is
+            # handed over to a JVM when a JDK is found. An entry of the executable measures the executable.
+            inner_image = run_line
+            run_line = lambda extra: "RLVM_PLATFORM=image " + inner_image(extra)  # noqa: E731
         checker = "rlvm"
         command = run_line(args.rlvm_arg)
         cwd = ROOT

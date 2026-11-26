@@ -6,7 +6,7 @@ definition), `bench/rlvm/` (run / suite / measure). Each script documents itself
 with `--help`.
 
 ```
-scripts/dev.sh test rlvm-cli          # 49 unit tests, 8 s
+scripts/dev.sh test rlvm-cli          # 67 unit tests, 8 s
 scripts/build.sh                      # THE RELEASE: one executable, work/dist/bin/rlvm (GraalVM CE native image)
 scripts/dev.sh dist-native            # a development distribution: bin/rlvm plus lib/*.jar and bin/rlvm-jvm
 scripts/package.sh                    # rlvm-<version>-linux-<arch>.tar.gz: rlvm, LICENSE, README.md
@@ -24,6 +24,8 @@ rlvm [options] [EXPORT.ndjson]            export also via the environment variab
       --stats           statistics on stderr when done
       --stack-size S    stack of the checker thread, default 512m (RLVM_STACK_SIZE)
       --checker NAME    pick a Checker implementation (see --version)
+      --platform P      image | jvm | auto: who checks, the executable or a JVM it hands the run to
+                        (RLVM_PLATFORM; section "The hybrid entry")
   -X KEY[=VALUE]        passed through to the checker (Options.extra()); --help ends with the
                         settings of the checker that would run (Checker.usage()), for the RLVM
                         kernel e.g. -X policy=practical|strict, -X engine=NAME, -X load=...
@@ -71,6 +73,37 @@ How it is enforced (`VerdictProtocol`, `Main`):
   ```
   RLVM_STATUS_BASE=10 work/dist/bin/rlvm --threads 4 "$IN"; case $? in 10) exit 0;; 11) exit 1;; 12) exit 2;; *) exit 3;; esac
   ```
+
+## The hybrid entry (`--platform`, class `Handover`)
+
+The executable can hand a run over to a JVM (*agentic-note*: rep-OPT-K has the measurements, the design
+and its security argument). In short:
+
+- **The jars are inside the executable.** `scripts/build.sh` puts the RLVM jars of the build (not
+  `rlvm-truffle`, no third-party jar: 1.1 MB) with an index on the class path of the image build;
+  `Handover.Jars.EMBEDDED` reads them at image build time. On a JVM it is null.
+- **The rule** (`Handover.decide`): `--platform image` (the default, `Handover.Platform.DEFAULT`) never,
+  `--platform jvm` always, `auto` for `-X passes=N` with N above 1 on the default engine. A run that names
+  the Truffle tier, and under `auto` one with a named checker, another engine or a VM option of the
+  executable, stays.
+- **The JDK** (`Handover.findJdk`, `inspect`): `RLVM_JAVA`, else `JAVA_HOME`, else `java` on `PATH`; judged
+  by the `release` file beside it (`JAVA_VERSION` 25 or more, the modules `java.base` and
+  `java.management`, HotSpot's server VM), without starting it.
+- **The cache** (`Handover.secureDir`, `materialise`): `$RLVM_CACHE_DIR`, else `$XDG_CACHE_HOME/rlvm`, else
+  `$HOME/.cache/rlvm`, plus the build id; mode 0700; it and every directory above it must be closed to
+  other users' writes; every jar is compared with the executable's copy, byte for byte, on every start.
+- **The step** (`Handover.attempt`, `NativeExec`): one probe per JDK and flag line
+  (`java ... rlvm.cli.Main --version` as a child, remembered by a marker file), then `execv`. The JVM is
+  the same process, and the exit status, `RLVM_STATUS_BASE` included, is the JVM side's own.
+- **Nothing of this can fail a check**: whatever goes wrong before `execv` leaves the process as it was
+  and the export is checked in-process. `--stats` ends with `platform=image|jvm why=...`, and
+  `--version` has a line `platform:` with the JDK found, or the reason there is none.
+- The VM flags are `JVM_FLAGS` of `scripts/build.sh` without the two options that silence warnings about
+  Truffle and with `-XX:+IgnoreUnrecognizedVMOptions`; the heap is the JVM launcher's by engine;
+  `RLVM_JAVA_OPTS` replaces both.
+
+`scripts/build.sh` exercises the hand-over on every executable it builds (`verify_handover`), and
+`HandoverTest` covers the rule, the search, the cache and the command line on a JVM.
 
 ## Plugging in a checker
 

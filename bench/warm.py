@@ -308,6 +308,10 @@ def main():
     env = dict(os.environ)
     if args.java_opts:
         env["RLVM_JAVA_OPTS"] = args.java_opts
+    if args.launcher == "native":
+        # The executable is a hybrid entry (*agentic-note*: rep-OPT-K): a run with several passes is handed
+        # over to a JVM when a JDK is found. A row of the executable measures the executable.
+        env.setdefault("RLVM_PLATFORM", "image")
     rows = []
     for c in args.corpora:
         path, name = corpus_path(c)

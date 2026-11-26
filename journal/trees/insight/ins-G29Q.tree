@@ -1,0 +1,23 @@
+\title{One cold run: a JVM is three seconds behind the executable on every corpus up to cslib and 12 percent behind on Mathlib, and ahead only where one worker computes for seconds}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Source: [the report on the hybrid single entry](rep-OPT-K), sections 2.1 to 2.7. Conditions: the build published on 2026-11-25 at 20:00 UTC, default configuration (the machine, 8 workers, the file checked while it is read), the whole process timed from outside, from its start to its exit status, one cold process per cell, five interleaved rounds per corpus inside one quiet-core window; the JVM is the JVM launcher's line on Eclipse Temurin 25; aarch64 development host with the cores outside the window loaded by other work, so the absolute times are 4 to 14 \% above a quiet host's and the ratios are what holds.}
+
+\ul{
+\li{\strong{The executable wins the cold run of every corpus.} A JVM needs 4.9 times the executable's wall clock on Init (3.24 against 0.66 s), 2.9 to 3.6 times on Std, cedar and con-leche, 1.75 and 1.57 times on navier-stokes-euler and cslib, and 1.12 times on Mathlib (16.33 against 14.56 s).}
+\li{\strong{The warm-up is a constant, not a share.} The difference is +2.6 to +3.0 s on every corpus from Init to cslib and +1.8 s on Mathlib: about three seconds of compiling beside eight busy workers, earned back at 0.11 s per second of the executable's time. The line through the three largest corpora crosses at about 30 s of the executable's time, twice Mathlib; this is an extrapolation.}
+\li{\strong{What shortens it.} The AOT cache of JDK 25, recorded once per JDK on one pass of Init (8 s, 18.7 MB), halves the cold run on Init and comes within 2 \% on Mathlib (14.87 against 14.56 s). C1 alone is the fastest JVM on short files (1.25 to 1.56 times the executable) and the slowest on Mathlib. Lower compile thresholds, fewer compiler threads, class-data sharing of RLVM's classes and a pre-touched heap gain nothing or lose.}
+\li{\strong{Where one worker computes for seconds, the JVM wins the single run.} Twelve of the arena's 262 small tests take more than a second in the executable, and exactly those are faster on a JVM; five interleaved rounds on six tests: 0.65 to 0.81 times the executable's wall clock from 1.5 s of work on, 1.59 times at 0.8 s. Such an export has few declarations, the driver gives it one worker, and the compilers work on the seven idle cores; what is left is the lead of C2's code. Neither the size of the file (67 kB to 4.6 MB) nor its unit count says so before the check.}
+\li{\strong{Several passes do not change the size of the crossover, only who reaches it.} Three passes in one process are faster on a JVM on Mathlib alone (39.3 against 43.1 s) and 1.12 to 2.67 times slower on the other seven corpora; the two meet where the executable needs about 25 s for the process. A JVM's second pass is still warm-up: three passes are not its steady state.}
+}
+
+\p{\strong{What follows.} For one invocation the native image is the platform on every corpus up to Mathlib, as [the decision on the launchers](dec-WX9Z) had it; a hand-over to a JVM is worth its three seconds only for a process the executable would work on for half a minute, or for a check that leaves seven cores idle for more than a second. The warm-up of a JVM is a cost in cores, not in time: what it costs depends on whether the workers need them. A timing of "the JVM" needs to say which pass: the first is 1.1 to 5 times the executable's run, the third is 0.8 to 1.1 times its pass, the steady pass 0.84 to 0.87 on the large corpora ([the benchmark tables](rep-benchmarks)).}
+
+\p{\strong{Not measured:} x86-64; a quiet host; an export larger than Mathlib; a JDK other than Temurin 25.0.5.1+2.}

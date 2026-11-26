@@ -1,0 +1,731 @@
+\title{OPT-K: the hybrid single entry - one executable that can hand a run to a JVM; one cold run of a corpus gains nothing from it up to Mathlib, twelve heavy small tests do}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{platform}
+\tag{performance}
+\tag{benchmark}
+\import{base-macros}
+
+\p{Work "OPT-K" of 2026-11-25, for a decision of the maintainer of that day: RLVM is to be shipped as a hybrid single entry, one executable \code{rlvm} that checks small files itself and hands large files to a JVM when a JDK 25 is found. Today the release is one executable, a GraalVM Community Edition native image ([packaging](design-packaging), [the settings of a plain run](dec-EGMG)); the JVM launcher \code{rlvm-jvm} is a tool of the repository that starts the same jars on a JVM ([the launchers](design-launchers)), since that day on a stock OpenJDK 25 as well ([the stock-JDK report](rep-OPT-J)). In the warm metric, the later passes of one process, the JVM is about 16 \% faster than the executable ([the benchmark tables](rep-benchmarks)); a user's single run is a cold run, and for one cold run the executable was as fast or faster in every earlier table. This report measures first when handing over pays: the whole process as a user has it, from its start to its exit status, one cold run each. Then it designs the hybrid, builds a prototype in a private copy of the tree, runs the gates through it in each of its modes, and gives a verdict on making the automatic mode the default. No tracked file of the main tree was changed, nothing was installed into the shared repository of jars, nothing was published, and nothing of Oracle GraalVM was used.}
+
+\subtree{
+\title{0. Answer}
+
+\ol{
+\li{\strong{One cold run of a corpus gains nothing from the hand-over, up to Mathlib} (section 2). The whole process, start to exit status, 8 workers, five interleaved rounds per corpus on the published build: with the JVM launcher's flags on a stock OpenJDK 25 a JVM needs 2.4 times the executable's wall clock in the geometric mean of the eight corpora - 4.9 times on Init (3.24 against 0.66 s), 1.57 on cslib (8.05 against 5.13 s) and \strong{1.12 on Mathlib (16.33 against 14.56 s)}. A JVM pays about three seconds of warm-up on every file from Std to cslib and begins to earn them back only at Mathlib's size.}
+\li{\strong{The best that shortens the warm-up is the AOT cache of JDK 25, and it ends 2 \% behind on Mathlib} (section 2.3): recorded once per JDK on one pass of Init in 8 s, 18.7 MB, it brings a cold JVM to 1.72 times the executable in the geometric mean and to \strong{1.02 on Mathlib (14.87 against 14.56 s)}, 1.03 in a second window three hours later. C1 alone is the best on everything short (1.25 to 1.56 times) and the worst on Mathlib. More compilation, fewer compiler threads, class-data sharing of RLVM's classes, a pre-touched or pre-committed heap: no gain or a loss.}
+\li{\strong{For an export that keeps eight workers busy the crossover lies above Mathlib}, the largest export there is (6.33 GB). Extrapolated from the three largest corpora, a JVM with the launcher's flags would be level with the executable at about 30 s of the executable's time, twice Mathlib, an export of about 13 GB; with the AOT cache at about 18 s, 8 GB. This is a line through three points and not a measurement (section 2.4).}
+\li{\strong{What does gain in a single run is a check that is long and leaves cores idle} (section 2.7): twelve of the arena's 262 small tests, exports of 25 kB to 4.6 MB whose check takes 1.5 to 9 s on one worker, are 10 to 47 \% faster on a JVM, which compiles on the seven idle cores; every small test under a second is slower, 1.4 to 12 times. Five interleaved rounds on six of them: 0.65 to 0.81 times the executable's wall clock from 1.5 s of work on, 1.59 times at 0.8 s. Neither the size of a file nor its number of units tells the two kinds apart before the check.}
+\li{\strong{With several passes the JVM leads from the third pass on, and as a whole process only on Mathlib} (section 2.5): three passes in one process take 39.3 s on a JVM and 43.1 s in the executable on Mathlib (0.91), and 1.12 to 2.67 times the executable's wall clock on the other seven corpora. Three passes are not yet a JVM's steady state.}
+\li{\strong{The hand-over itself costs 3 ms} (section 2.6): 48 microseconds to find a JDK from its \code{release} file, 0.8 ms to compare the 13 jars of the cache with the executable's copy, one \code{execv}; the first hand-over of a build on a machine costs 57 ms more, for unpacking (1.6 ms) and one probe of the JDK (55 ms). A tutorial test takes 4.5 ms in the executable and 93 ms on a JVM.}
+\li{\strong{The design} (section 3): the 13 RLVM jars, 1.1 MB, are inside the executable; it unpacks them into a per-user cache directory, named after the build id, compares every jar with its own copy, byte for byte, on every start, and refuses a directory that anybody else could write or replace; it finds a JDK 25 or newer as \code{RLVM_JAVA}, \code{JAVA_HOME} or \code{java} on \code{PATH} and judges it by its \code{release} file, without starting it; it probes a JDK once, and then replaces itself by \code{java} with \code{execv}, so the exit status, with \code{RLVM_STATUS_BASE}, is the JVM side's own. Whatever fails before \code{execv} leaves the run to the executable. The option is \code{\verb~|--platform image|jvm|auto~} (\code{RLVM_PLATFORM}).}
+\li{\strong{The rule of \code{auto}}, as the measurement leaves it: a single pass is never handed over, whatever the size, and a run with \code{\verb~|-X passes=N~}, N above 1, is. There is no size threshold: no corpus gains at any size we can test, and the small tests that gain cannot be told by their size.}
+\li{\strong{The prototype works and the gates pass in every mode} (sections 4 and 5): five patches, one changed jar; the first four are the hybrid as measured, the fifth makes the hand-over an option. The gate of the default configuration through the hybrid executable under \code{image}, \code{auto} and \code{jvm} and through its jars: 230 of 230 published tests, 17,775 mutants and 1,274 hostile exports with no wrong accept and no wrong reject in each; forced to the JVM, all 19,279 files of the gate were checked by a JVM. The arena's 270 tests by the arena's own procedure, six times - the published executable, and the hybrid with nothing said, kept in the image and forced to the JVM, with a stock JDK 25 and with none: the same status, exit code and output on 270 of 270 every time. In the arena's metric a hand-over of everything lowers the Mathlib count by 6 \% (1,347 against 1,433 G instructions) and multiplies the count of the median small test by 184; under \code{auto} every count is the executable's. One-worker runs of the eight corpora through five launchers: 6,888 values compared, none different.}
+\li{\strong{The guard} (section 6): under \code{auto} no corpus is slower in a single cold run than the executable alone: the same instructions, and 0.999 times the wall clock in the geometric mean (0.970 to 1.023; eight rounds in random order, in which two builds of the same sources differ by 0.992 to 1.020); a tutorial test takes the same 4.5 ms and has 0.9 MiB more resident (22.0 against 21.1 MiB: the jars in the image heap); with three passes the hybrid is the JVM launcher (Mathlib 0.985 in six rounds).}
+\li{\strong{Verdict}: \strong{NO-GO for \code{auto} as the default, GO for the hybrid as an option.} The guard's second item holds for the time of a small input and not for its memory, by 0.9 MiB; and what \code{auto} would do as the default is to move runs of \code{\verb~|-X passes~} to a JVM, at the price that every tool which times the executable with several passes must then name the image. There is no threshold to give: no corpus gains at any size, and the small tests that gain cannot be told from their size. A fifth patch makes the executable the default and the hand-over an option (section 6.4).}
+\li{\strong{Measured on} the aarch64 development host while another wave of the team loaded the other cores, with Eclipse Temurin 25.0.5.1+2 as the JDK. Section 8 has what was not measured.}
+}
+}
+
+\subtree{
+\title{1. What was measured, and how}
+
+\ul{
+\li{\strong{The build}: the distribution published on 2026-11-25 at 20:00 UTC (jars sha256 \code{f5517aa135d2}, the executable 68,421,752 bytes), in a private copy whose 25 files have the sha256 of the shared one. Part 1 times this copy and nothing else: its executable \code{\verb~|bin/rlvm~} and its JVM launcher \code{\verb~|bin/rlvm-jvm~}.}
+\li{\strong{The JDK} of every JVM row: Eclipse Temurin 25.0.5.1+2 for linux-aarch64, the stock OpenJDK 25 of [the stock-JDK report](rep-OPT-J), given to the launcher as \code{RLVM_JAVA}. The launcher's own flag line starts on it since that day.}
+\li{\strong{A cell is ONE COLD PROCESS, timed from outside}: the monotonic clock of the parent from just before \code{fork} to the return of \code{wait4}, so the start of the runtime, the check and the exit are all in it; CPU time and peak resident set are the child's \code{rusage}. Every process is \code{\verb~|--threads 8 --stats FILE~} and nothing else: the default configuration, the machine with its default switch set, the file checked while it is read. The export is read once before the rounds of a corpus, so that every process finds it in the page cache: "cold" is the process, not the disk.}
+\li{\strong{Rounds}: at least five per corpus; in every round each variant runs one process, and the order rotates from round to round. Everything that is compared ran inside one \src{bench/quiet.py} window on the eight measurement cores, behind \src{bench/slot.sh}, one process at a time ([the measurement method](design-measurement-method), [interleaved rounds](ins-MBQS)).}
+\li{\strong{The kernel's state} is recorded for every process: the free blocks of 2 MiB and more before it, and the growth of \code{compact_stall}, \code{thp_fault_alloc} and \code{thp_fault_fallback} of \code{\verb~|/proc/vmstat~} while it ran (counters of the whole host). The JVM's line has \code{\verb~|-XX:+UseTransparentHugePages~}, which stalls when the host has no free huge pages ([the huge-page report](rep-OPT-G)). A round in which any process saw a compaction stall or a huge-page fallback is \strong{disturbed}: it is left out of the cells and one more round is run.}
+\li{\strong{A cell} is the mean over the rounds, in brackets the smallest and the largest round; a ratio is the ratio of two cells; "round by round" are the ratios of the two processes of each round.}
+}
+
+\subtree{
+\title{1.1 The windows, the host beside them and the kernel's state}
+
+\p{Every window of this report with the corpora it timed: the load average of the host as each process started (the measurement cores were the window's own; the load is that of the other twelve cores, where another wave of the team and this work's own gates ran), the free blocks of 2 MiB and more before a process, the huge-page faults served and fallen back and the compaction stalls on the whole host while the processes ran, and the rounds that were left out because one of their processes saw a stall or a fallback. Times are UTC; the windows after 00:00 UTC belong to the same evening, 2026-11-25, in the journal's time zone.}
+
+\table{
+\tr{\th{window}\th{corpus}\th{UTC}\th{processes}\th{load of the host: least - most}\th{free 2 MiB blocks before a process: fewest - most}\th{huge-page faults served / fallen back}\th{compaction stalls}\th{rounds left out (repeated)}}
+\tr{\td{screening 1}\td{init}\td{21:49 - 21:51}\td{42}\td{24 - 29}\td{8,543 - 8,790}\td{11,981 / 0}\td{0}\td{0}}
+\tr{\td{screening 1}\td{cedar}\td{21:51 - 21:54}\td{42}\td{28 - 37}\td{8,590 - 8,828}\td{27,566 / 0}\td{0}\td{0}}
+\tr{\td{screening 1}\td{cslib}\td{21:54 - 21:58}\td{33}\td{29 - 39}\td{7,832 - 8,832}\td{34,277 / 0}\td{0}\td{0}}
+\tr{\td{screening 1}\td{mathlib}\td{21:58 - 22:10}\td{44}\td{23 - 43}\td{2,364 - 8,793}\td{114,193 / 0}\td{47}\td{1}}
+\tr{\td{screening 2}\td{init}\td{22:13 - 22:14}\td{27}\td{17 - 29}\td{7,466 - 8,473}\td{10,412 / 0}\td{0}\td{0}}
+\tr{\td{screening 2}\td{cedar}\td{22:14 - 22:15}\td{27}\td{26 - 31}\td{6,318 - 8,523}\td{16,356 / 0}\td{0}\td{0}}
+\tr{\td{screening 2}\td{cslib}\td{22:15 - 22:18}\td{27}\td{22 - 26}\td{8,449 - 8,526}\td{26,793 / 0}\td{0}\td{0}}
+\tr{\td{screening 2}\td{mathlib}\td{22:18 - 22:25}\td{27}\td{24 - 47}\td{6,449 - 8,597}\td{64,213 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{reachability}\td{22:29 - 22:30}\td{35}\td{36 - 40}\td{2,740 - 3,057}\td{11,475 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{init}\td{22:25 - 22:26}\td{35}\td{33 - 35}\td{6,322 - 8,422}\td{10,820 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{std}\td{22:26 - 22:28}\td{35}\td{33 - 39}\td{6,078 - 6,973}\td{13,261 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{con-leche}\td{22:30 - 22:31}\td{35}\td{32 - 37}\td{2,402 - 2,590}\td{12,313 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{cedar}\td{22:28 - 22:29}\td{35}\td{38 - 41}\td{3,034 - 6,742}\td{18,548 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{navier-stokes-euler}\td{22:31 - 22:34}\td{35}\td{35 - 41}\td{2,505 - 8,556}\td{21,580 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{cslib}\td{22:34 - 22:38}\td{35}\td{35 - 45}\td{7,838 - 8,541}\td{23,829 / 0}\td{0}\td{0}}
+\tr{\td{cold runs}\td{mathlib}\td{22:38 - 22:47}\td{35}\td{30 - 48}\td{2,610 - 8,703}\td{77,106 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{reachability}\td{22:52 - 22:53}\td{20}\td{55 - 60}\td{8,410 - 8,631}\td{11,245 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{init}\td{22:47 - 22:48}\td{20}\td{29 - 43}\td{7,711 - 8,695}\td{7,715 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{std}\td{22:48 - 22:50}\td{20}\td{44 - 53}\td{5,417 - 8,651}\td{20,761 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{con-leche}\td{22:53 - 22:55}\td{20}\td{51 - 57}\td{5,784 - 8,611}\td{33,765 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{cedar}\td{22:50 - 22:52}\td{20}\td{52 - 60}\td{8,490 - 8,658}\td{19,618 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{navier-stokes-euler}\td{22:55 - 22:59}\td{20}\td{48 - 58}\td{5,690 - 8,587}\td{46,196 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{cslib}\td{22:59 - 23:04}\td{20}\td{41 - 48}\td{4,293 - 7,874}\td{66,628 / 0}\td{0}\td{0}}
+\tr{\td{three passes}\td{mathlib}\td{23:05 - 23:24}\td{28}\td{46 - 59}\td{1,360 - 7,326}\td{203,007 / 1,908}\td{6,365}\td{2}}
+\tr{\td{three passes again}\td{std}\td{00:31 - 00:33}\td{18}\td{24 - 29}\td{6,277 - 7,930}\td{10,830 / 0}\td{0}\td{0}}
+\tr{\td{three passes again}\td{mathlib}\td{00:34 - 00:48}\td{24}\td{12 - 32}\td{2,099 - 7,727}\td{101,621 / 2,385}\td{7,542}\td{2}}
+\tr{\td{heavy small tests}\td{gf3-matrix-product}\td{00:49 - 00:49}\td{25}\td{9 - 11}\td{7,491 - 7,685}\td{34,103 / 0}\td{0}\td{0}}
+\tr{\td{heavy small tests}\td{ite-taken-branch-bad}\td{00:51 - 00:53}\td{25}\td{11 - 19}\td{7,529 - 7,693}\td{21,499 / 0}\td{0}\td{0}}
+\tr{\td{heavy small tests}\td{magma-list-deep-n36}\td{00:53 - 00:56}\td{25}\td{12 - 20}\td{6,660 - 7,723}\td{33,921 / 0}\td{0}\td{0}}
+\tr{\td{heavy small tests}\td{magma-list-pair-n21}\td{00:50 - 00:51}\td{25}\td{11 - 15}\td{7,399 - 7,704}\td{18,422 / 0}\td{0}\td{0}}
+\tr{\td{heavy small tests}\td{magma-string-pair-n9}\td{00:48 - 00:49}\td{25}\td{10 - 11}\td{7,565 - 7,726}\td{7,251 / 0}\td{0}\td{0}}
+\tr{\td{heavy small tests}\td{unfold-before-literal}\td{00:49 - 00:50}\td{25}\td{12 - 15}\td{7,509 - 7,711}\td{13,096 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{reachability}\td{01:10 - 01:10}\td{24}\td{30 - 31}\td{7,573 - 7,573}\td{0 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{init}\td{01:09 - 01:09}\td{24}\td{30 - 32}\td{7,521 - 7,631}\td{1,724 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{std}\td{01:09 - 01:10}\td{24}\td{30 - 31}\td{7,573 - 7,573}\td{0 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{con-leche}\td{01:10 - 01:11}\td{24}\td{28 - 30}\td{7,415 - 7,573}\td{3,326 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{cedar}\td{01:10 - 01:10}\td{24}\td{29 - 31}\td{7,573 - 7,573}\td{0 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{navier-stokes-euler}\td{01:11 - 01:13}\td{24}\td{28 - 30}\td{7,383 - 7,559}\td{8,104 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{cslib}\td{01:13 - 01:15}\td{24}\td{29 - 33}\td{7,376 - 7,621}\td{9,930 / 0}\td{0}\td{0}}
+\tr{\td{control}\td{mathlib}\td{01:15 - 01:20}\td{24}\td{27 - 36}\td{7,505 - 7,631}\td{2,926 / 0}\td{0}\td{0}}
+\tr{\td{cold runs again}\td{cslib}\td{01:20 - 01:22}\td{15}\td{31 - 36}\td{7,557 - 7,584}\td{10,590 / 0}\td{0}\td{0}}
+\tr{\td{cold runs again}\td{mathlib}\td{01:22 - 01:26}\td{15}\td{26 - 31}\td{7,522 - 7,602}\td{22,820 / 0}\td{0}\td{0}}
+}
+
+\ul{
+\li{\strong{Compaction stalls occurred in three windows, always on Mathlib}, the corpus whose JVM runs touch 5 GB under the huge-page advice: when the free 2 MiB blocks of the host fell to between 1,400 and 3,300, a JVM process saw tens to thousands of stalls and up to 1,029 fallbacks. Every such round was left out of the cells and run again; the tables say how many rounds a cell has.}
+\li{The window of the small inputs (section 2.6) and the window of the heavy small tests (section 2.7) had no stall; the counters of the host did not move between their start and their end.}
+\li{\strong{The load beside the windows}: 30 to 48 while the cold-run table was taken, 29 to 60 during the three-pass window, 9 to 20 for the heavy small tests, 26 to 36 for the last two windows.}
+}
+}
+}
+
+\subtree{
+\title{2. Part 1: one cold run of the executable against one cold run of a JVM}
+
+\subtree{
+\title{2.1 The table: (a) the executable, (b) the JVM launcher, (c) the best that shortens the JVM's warm-up}
+
+\p{Wall clock of the whole process in seconds, 8 workers, five rounds per corpus, one window of 1,302 s on 2026-11-25 from 22:25 to 22:47 UTC, 280 processes, every one accepted with status 0, no compaction stall on the host and no huge-page fallback, so no round was left out. The corpora are in the order of the executable's time. (b) is \code{\verb~|bin/rlvm-jvm~} on Temurin 25 with the launcher's own flags and heap; the two columns (c) are the same launcher with one thing added: the JDK 25 AOT cache recorded on one pass of Init (section 2.3), and \code{\verb~|-XX:TieredStopAtLevel=1~}.}
+
+\table{
+\tr{\th{corpus}\th{export, MB}\th{units}\th{rounds}\th{(a) the executable, s}\th{(b) JVM launcher, s}\th{/ (a)}\th{round by round}\th{(c) with the AOT cache, s}\th{/ (a)}\th{round by round}\th{(c) C1 only, s}\th{/ (a)}\th{round by round}}
+\tr{\td{reachability}\td{19}\td{4,413}\td{5 of 5}\td{0.500 (0.460 - 0.538)}\td{1.31 (1.26 - 1.42)}\td{\strong{2.612}}\td{3.09 2.43 2.65 2.52 2.43}\td{0.928 (0.908 - 0.969)}\td{\strong{1.855}}\td{1.99 1.69 2.04 1.83 1.76}\td{0.662 (0.626 - 0.704)}\td{\strong{1.325}}\td{1.39 1.24 1.42 1.39 1.20}}
+\tr{\td{init}\td{348}\td{58,547}\td{5 of 5}\td{0.656 (0.640 - 0.662)}\td{3.24 (2.94 - 3.45)}\td{\strong{4.945}}\td{4.86 4.59 5.21 5.00 5.06}\td{1.66 (1.60 - 1.70)}\td{\strong{2.530}}\td{2.42 2.56 2.57 2.58 2.53}\td{1.02 (1.01 - 1.05)}\td{\strong{1.555}}\td{1.53 1.63 1.54 1.54 1.53}}
+\tr{\td{std}\td{584}\td{101,146}\td{5 of 5}\td{1.15 (1.13 - 1.19)}\td{4.11 (3.51 - 4.49)}\td{\strong{3.571}}\td{3.51 3.55 3.07 3.80 3.93}\td{2.64 (2.57 - 2.71)}\td{\strong{2.297}}\td{2.33 2.22 2.25 2.36 2.32}\td{1.64 (1.63 - 1.66)}\td{\strong{1.429}}\td{1.45 1.39 1.43 1.44 1.43}}
+\tr{\td{con-leche}\td{702}\td{36,747}\td{5 of 5}\td{1.42 (1.40 - 1.45)}\td{4.11 (3.97 - 4.44)}\td{\strong{2.889}}\td{2.91 3.15 2.88 2.73 2.78}\td{2.86 (2.78 - 2.94)}\td{\strong{2.010}}\td{2.00 2.09 2.06 1.98 1.93}\td{1.98 (1.86 - 2.13)}\td{\strong{1.392}}\td{1.32 1.41 1.42 1.34 1.47}}
+\tr{\td{cedar}\td{905}\td{146,058}\td{5 of 5}\td{1.60 (1.59 - 1.61)}\td{4.59 (4.10 - 4.89)}\td{\strong{2.874}}\td{3.05 2.58 3.04 3.04 2.66}\td{3.19 (3.12 - 3.23)}\td{\strong{1.995}}\td{2.01 1.97 1.98 2.01 2.00}\td{2.22 (2.19 - 2.26)}\td{\strong{1.390}}\td{1.40 1.38 1.37 1.41 1.38}}
+\tr{\td{navier-stokes-euler}\td{1,560}\td{126,468}\td{5 of 5}\td{3.91 (3.74 - 4.02)}\td{6.84 (6.33 - 7.14)}\td{\strong{1.749}}\td{1.75 1.71 1.69 1.86 1.73}\td{5.27 (5.12 - 5.41)}\td{\strong{1.347}}\td{1.34 1.35 1.41 1.34 1.31}\td{4.99 (4.84 - 5.14)}\td{\strong{1.277}}\td{1.30 1.26 1.30 1.28 1.25}}
+\tr{\td{cslib}\td{2,501}\td{401,985}\td{5 of 5}\td{5.13 (4.96 - 5.27)}\td{8.05 (7.49 - 8.45)}\td{\strong{1.567}}\td{1.65 1.59 1.55 1.47 1.57}\td{6.56 (6.44 - 6.74)}\td{\strong{1.277}}\td{1.31 1.25 1.30 1.27 1.25}\td{6.55 (6.43 - 6.62)}\td{\strong{1.275}}\td{1.28 1.24 1.30 1.30 1.26}}
+\tr{\td{mathlib}\td{6,326}\td{721,845}\td{5 of 5}\td{14.56 (14.28 - 15.35)}\td{16.33 (15.94 - 17.37)}\td{\strong{1.121}}\td{1.11 1.11 1.14 1.12 1.13}\td{14.87 (14.75 - 15.04)}\td{\strong{1.021}}\td{1.04 1.02 1.03 1.04 0.97}\td{18.15 (17.71 - 18.78)}\td{\strong{1.247}}\td{1.30 1.25 1.24 1.23 1.21}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{}\td{}\td{\strong{2.420}}\td{1.121 to 4.945}\td{}\td{\strong{1.718}}\td{1.021 to 2.530}\td{}\td{\strong{1.358}}\td{1.247 to 1.555}}
+}
+
+\ul{
+\li{\strong{No corpus gains from the hand-over in a single cold run.} With the launcher's flags a JVM needs 2.4 times the executable's wall clock in the geometric mean: 4.9 times on Init, 2.9 to 3.6 times on Std, cedar and con-leche, 2.6 times on reachability, 1.75 and 1.57 times on navier-stokes-euler and cslib, and 1.12 times on Mathlib (16.33 against 14.56 s). All 40 round ratios are above 1; the smallest is 1.11.}
+\li{\strong{The difference in seconds is nearly constant up to cslib and shrinks only at Mathlib}: +2.6 s (Init), +3.0 (Std), +2.7 (con-leche), +3.0 (cedar), +2.9 (navier-stokes-euler), +2.9 (cslib), +1.8 (Mathlib); reachability, a short file, +0.8. A JVM pays about three seconds of warm-up whatever the file, and earns them back at 0.11 s per second of the executable's time only once the file is large.}
+\li{\strong{The AOT cache is the best single thing for a large file and is still behind}: 1.72 times in the geometric mean, 2.5 times on Init, 1.28 on cslib, and \strong{1.02 on Mathlib}: 14.87 against 14.56 s, 0.31 s behind, with four of five rounds above 1 and one at 0.97. That is as close as any JVM configuration came to the executable on any corpus.}
+\li{\strong{C1 alone is the best for everything short and never catches up}: 1.25 to 1.56 times on every corpus (Init 1.02 against 0.66 s). Without C2 the JVM has almost no warm-up to pay, and its steady state is 1.23 times slower than the executable's, so the difference grows with the file: +0.4 s on Init, +3.6 s on Mathlib.}
+\li{\strong{The absolute times are those of a loaded host.} Another job of the team kept the twelve cores outside the window busy (a load of 30 to 48 throughout), and the executable's cold Mathlib run took 14.56 s where the benchmark row of the same build on a quiet host, taken the same evening, has 12.77 s; the JVM launcher's first pass there is 14.21 s. The ratio on the quiet host, 1.11, is the one measured here, 1.12.}
+}
+
+\p{\strong{The two largest corpora again}, three hours later, the same three processes, five rounds with the order drawn anew in every round (316 s, 01:20 to 01:26 UTC, the same evening; a load of 26 to 36 beside the window, no compaction stall):}
+
+\table{
+\tr{\th{corpus}\th{export, MB}\th{units}\th{rounds}\th{(a) the executable, s}\th{(b) JVM launcher, s}\th{/ (a)}\th{round by round}\th{(c) with the AOT cache, s}\th{/ (a)}\th{round by round}}
+\tr{\td{cslib}\td{2,501}\td{401,985}\td{5 of 5}\td{4.98 (4.94 - 5.01)}\td{7.72 (7.13 - 8.30)}\td{\strong{1.551}}\td{1.54 1.52 1.66 1.44 1.59}\td{6.39 (6.30 - 6.53)}\td{\strong{1.285}}\td{1.28 1.32 1.27 1.27 1.28}}
+\tr{\td{mathlib}\td{6,326}\td{721,845}\td{5 of 5}\td{13.99 (13.59 - 14.25)}\td{15.59 (15.07 - 15.96)}\td{\strong{1.115}}\td{1.12 1.12 1.11 1.14 1.09}\td{14.38 (14.10 - 14.62)}\td{\strong{1.028}}\td{1.03 1.02 1.03 1.04 1.02}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{}\td{}\td{}\td{\strong{1.315}}\td{1.115 to 1.551}\td{}\td{\strong{1.149}}\td{1.028 to 1.285}}
+}
+
+\ul{
+\li{\strong{The same ratios.} The JVM launcher needs 1.55 times the executable's wall clock on cslib and 1.115 times on Mathlib (15.59 against 13.99 s); with the AOT cache 1.285 and 1.028 times (14.38 against 13.99 s). Over the two windows all ten Mathlib rounds have the plain JVM behind, by 9 to 14 \%, and nine of ten have the JVM with the cache behind, by 2 to 4 \%.}
+}
+}
+
+\subtree{
+\title{2.2 CPU time, memory, and what a process spends outside the check}
+
+\p{Of the same processes: CPU time (user and system, all threads), the part of it that is system time, CPU time over wall clock, and the peak resident set (the largest of the five rounds).}
+
+\table{
+\tr{\th{corpus}\th{executable: CPU, s}\th{of it system}\th{CPU / wall}\th{peak RSS, MiB}\th{JVM launcher: CPU, s}\th{of it system}\th{CPU / wall}\th{peak RSS, MiB}\th{with the AOT cache: CPU, s}\th{of it system}\th{CPU / wall}\th{peak RSS, MiB}\th{C1 only: CPU, s}\th{of it system}\th{CPU / wall}\th{peak RSS, MiB}}
+\tr{\td{reachability}\td{1.3}\td{0.3}\td{2.6}\td{715}\td{8.9}\td{0.2}\td{6.8}\td{1,405}\td{6.5}\td{0.1}\td{7.0}\td{1,297}\td{1.9}\td{0.1}\td{2.9}\td{1,133}}
+\tr{\td{init}\td{4.5}\td{0.2}\td{6.9}\td{370}\td{24.7}\td{0.2}\td{7.6}\td{726}\td{12.5}\td{0.2}\td{7.6}\td{659}\td{6.6}\td{0.1}\td{6.5}\td{687}}
+\tr{\td{std}\td{8.2}\td{0.3}\td{7.2}\td{587}\td{30.9}\td{0.3}\td{7.5}\td{1,387}\td{20.1}\td{0.2}\td{7.6}\td{1,327}\td{11.5}\td{0.1}\td{7.0}\td{855}}
+\tr{\td{con-leche}\td{9.0}\td{0.4}\td{6.3}\td{879}\td{31.0}\td{0.3}\td{7.5}\td{1,437}\td{21.8}\td{0.2}\td{7.6}\td{1,526}\td{12.8}\td{0.1}\td{6.5}\td{1,191}}
+\tr{\td{cedar}\td{11.6}\td{0.4}\td{7.3}\td{752}\td{34.7}\td{0.3}\td{7.6}\td{1,603}\td{24.3}\td{0.3}\td{7.6}\td{1,506}\td{15.8}\td{0.1}\td{7.1}\td{1,101}}
+\tr{\td{navier-stokes-euler}\td{28.9}\td{0.7}\td{7.4}\td{1,314}\td{52.5}\td{0.4}\td{7.7}\td{2,183}\td{40.4}\td{0.3}\td{7.7}\td{2,284}\td{36.9}\td{0.2}\td{7.4}\td{2,031}}
+\tr{\td{cslib}\td{37.9}\td{0.8}\td{7.4}\td{1,567}\td{61.3}\td{0.5}\td{7.6}\td{2,355}\td{50.1}\td{0.4}\td{7.6}\td{2,309}\td{48.4}\td{0.3}\td{7.4}\td{2,382}}
+\tr{\td{mathlib}\td{109.2}\td{2.0}\td{7.5}\td{3,645}\td{124.5}\td{0.8}\td{7.6}\td{4,829}\td{114.3}\td{0.7}\td{7.7}\td{4,688}\td{137.6}\td{0.6}\td{7.6}\td{4,646}}
+}
+
+\ul{
+\li{Every configuration keeps the eight cores busy (CPU over wall clock 6.3 to 7.7, reachability less): the cold run is bound by CPU, as the warm pass is ([the profile of the default configuration](rep-P11)). A cold JVM spends its extra CPU compiling: 24.7 s against 4.5 s on Init, 124.5 against 109.2 s on Mathlib; with the AOT cache 12.5 and 114.3 s.}
+\li{\strong{Memory}: the executable holds less on every corpus: 370 against 726 MiB on Init, 3,645 against 4,829 MiB on Mathlib.}
+}
+
+\p{The wall clock of a process that is not the check: the process's wall clock minus what the checker itself reports with \code{\verb~|--stats~}, in milliseconds - the start of the runtime before \code{main} and the exit after the verdict.}
+
+\table{
+\tr{\th{corpus}\th{executable, ms}\th{JVM launcher, ms}\th{JVM launcher with the AOT cache, ms}\th{hybrid executable handed over, ms}}
+\tr{\td{reachability}\td{35 (14 - 59)}\td{90 (83 - 103)}\td{66 (59 - 81)}\td{91 (78 - 105)}}
+\tr{\td{init}\td{33 (32 - 34)}\td{95 (84 - 116)}\td{69 (61 - 83)}\td{91 (89 - 99)}}
+\tr{\td{std}\td{47 (44 - 52)}\td{86 (84 - 88)}\td{61 (59 - 63)}\td{85 (82 - 92)}}
+\tr{\td{con-leche}\td{40 (32 - 45)}\td{85 (83 - 87)}\td{65 (60 - 80)}\td{89 (84 - 101)}}
+\tr{\td{cedar}\td{60 (53 - 65)}\td{88 (82 - 92)}\td{63 (61 - 65)}\td{85 (83 - 87)}}
+\tr{\td{navier-stokes-euler}\td{101 (91 - 112)}\td{87 (85 - 91)}\td{63 (60 - 67)}\td{87 (83 - 94)}}
+\tr{\td{cslib}\td{147 (127 - 158)}\td{88 (85 - 91)}\td{64 (61 - 71)}\td{86 (83 - 89)}}
+\tr{\td{mathlib}\td{305 (243 - 355)}\td{91 (88 - 93)}\td{69 (65 - 72)}\td{94 (91 - 98)}}
+}
+
+\ul{
+\li{\strong{A JVM costs about 90 ms around the check, whatever the file}; with the AOT cache 65 ms. The hybrid executable that hands over costs the same 85 to 94 ms as the JVM launcher's shell script: the hand-over itself is not visible at this scale (section 2.6 has it in microseconds).}
+\li{\strong{The executable costs 33 ms on Init and 305 ms on Mathlib}: it grows with the memory the process gives back when it ends.}
+}
+}
+
+\subtree{
+\title{2.3 What can shorten the JVM's warm-up: two screening windows}
+
+\p{Before the table of 2.1, two windows of three rounds each on Init, cedar, cslib and Mathlib screened what does not change what is computed: 21:49 to 22:10 UTC (962 s, 161 processes) and 22:13 to 22:25 UTC (744 s, 108 processes). Seconds of the whole process, in brackets the ratio to the executable in the same rounds. In the first window one Mathlib process ran while the host compacted memory (47 stalls; the free 2 MiB blocks had fallen from 8,800 to 2,700): its round is left out and a fourth was run.}
+
+\table{
+\tr{\th{variant}\th{init, s (/ executable)}\th{cedar, s (/ executable)}\th{cslib, s (/ executable)}\th{mathlib, s (/ executable)}}
+\tr{\td{the executable}\td{0.64}\td{1.57}\td{4.96}\td{14.20}}
+\tr{\td{JVM launcher, its own line}\td{3.24 (5.03)}\td{4.56 (2.90)}\td{7.56 (1.52)}\td{15.45 (1.09)}}
+\tr{\td{AOT cache recorded on one pass of Init}\td{1.64 (2.55)}\td{3.20 (2.04)}\td{6.40 (1.29)}\td{14.19 (1.00)}}
+\tr{\td{AOT cache recorded on four passes of Init}\td{1.66 (2.58)}\td{3.27 (2.08)}\td{6.64 (1.34)}\td{15.27 (1.08)}}
+\tr{\td{class-data archive of RLVM's classes (\code{\verb~|-XX:SharedArchiveFile~})}\td{3.09 (4.80)}\td{4.78 (3.05)}\td{7.76 (1.56)}\td{15.59 (1.10)}}
+\tr{\td{no class-data sharing at all (\code{\verb~|-Xshare:off~})}\td{3.16 (4.92)}\td{4.37 (2.78)}\td{-}\td{-}}
+\tr{\td{C1 only (\code{\verb~|-XX:TieredStopAtLevel=1~})}\td{1.00 (1.56)}\td{2.13 (1.36)}\td{-}\td{-}}
+\tr{\td{compile thresholds halved (\code{\verb~|-XX:CompileThresholdScaling=0.5~})}\td{3.52 (5.47)}\td{6.01 (3.83)}\td{9.02 (1.82)}\td{17.36 (1.22)}}
+\tr{\td{compile thresholds quartered}\td{3.38 (5.25)}\td{5.86 (3.73)}\td{9.94 (2.00)}\td{17.77 (1.25)}}
+\tr{\td{4 compiler threads (\code{\verb~|-XX:CICompilerCount=4~})}\td{3.38 (5.25)}\td{5.48 (3.49)}\td{10.25 (2.06)}\td{16.54 (1.16)}}
+\tr{\td{12 compiler threads}\td{3.40 (5.28)}\td{4.16 (2.65)}\td{7.64 (1.54)}\td{15.35 (1.08)}}
+\tr{\td{no huge-page advice}\td{3.36 (5.22)}\td{4.92 (3.13)}\td{8.80 (1.77)}\td{17.26 (1.22)}}
+\tr{\td{heap committed at the start (\code{\verb~|-Xms7g~})}\td{3.44 (5.34)}\td{4.93 (3.14)}\td{7.90 (1.59)}\td{15.61 (1.10)}}
+\tr{\td{heap pre-touched (\code{\verb~|-XX:+AlwaysPreTouch~})}\td{3.48 (5.40)}\td{4.63 (2.95)}\td{-}\td{-}}
+}
+
+\table{
+\tr{\th{variant}\th{init, s (/ executable)}\th{cedar, s (/ executable)}\th{cslib, s (/ executable)}\th{mathlib, s (/ executable)}}
+\tr{\td{the executable}\td{0.65}\td{1.54}\td{4.99}\td{14.23}}
+\tr{\td{JVM launcher, its own line}\td{3.34 (5.15)}\td{4.83 (3.14)}\td{7.72 (1.55)}\td{15.84 (1.11)}}
+\tr{\td{AOT cache recorded on one pass of Init}\td{1.65 (2.54)}\td{3.06 (1.99)}\td{6.21 (1.24)}\td{14.58 (1.02)}}
+\tr{\td{C1 only (\code{\verb~|-XX:TieredStopAtLevel=1~})}\td{1.01 (1.57)}\td{2.12 (1.38)}\td{6.26 (1.25)}\td{17.75 (1.25)}}
+\tr{\td{C1 only, with the AOT cache}\td{0.93 (1.44)}\td{2.05 (1.33)}\td{6.17 (1.24)}\td{18.43 (1.30)}}
+\tr{\td{compile thresholds doubled}\td{2.98 (4.60)}\td{4.34 (2.82)}\td{7.42 (1.49)}\td{15.92 (1.12)}}
+\tr{\td{compile thresholds times 4}\td{2.65 (4.08)}\td{3.93 (2.55)}\td{7.19 (1.44)}\td{15.58 (1.10)}}
+\tr{\td{compile thresholds times 8}\td{2.74 (4.23)}\td{3.91 (2.54)}\td{7.04 (1.41)}\td{15.79 (1.11)}}
+\tr{\td{AOT cache, compile thresholds times 4}\td{1.50 (2.31)}\td{2.83 (1.83)}\td{6.08 (1.22)}\td{14.40 (1.01)}}
+}
+
+\ul{
+\li{\strong{The AOT cache of JDK 25} (\code{\verb~|-XX:AOTCacheOutput~} in a training run, \code{\verb~|-XX:AOTCache~} afterwards; JEP 483, 514, 515): recorded once per JDK with the launcher's own flags on one pass of Init, 8.2 s including the assembly by a child VM, \strong{18,677,760 bytes}; on four passes 19.3 s and 20,054,016 bytes. It holds 1,459 classes loaded and linked (259 of RLVM) and the profiles of 2,709 methods. It halves the cold run on Init (1.64 against 3.24 s) and takes 1.2 to 1.5 s off cslib and Mathlib. The cache of four passes is no better than the cache of one (Mathlib 15.27 against 14.19 s in the first window).}
+\li{\strong{Less compilation helps a short run, more compilation never}: C1 alone is the fastest JVM on Init and cedar and the slowest on Mathlib (17.75 s); compile thresholds times 4 or 8 take 0.6 to 0.9 s off Init and cedar and nothing off Mathlib; thresholds halved or quartered cost 0.1 to 2.4 s everywhere. With the AOT cache as well, thresholds times 4 are level with the cache alone on Mathlib (14.40 against 14.58 s).}
+\li{\strong{Compiler threads}: 4 instead of the launcher's 8 cost 0.1 to 2.7 s; 12 are level with 8.}
+\li{\strong{Class-data sharing}: a dynamic archive of RLVM's own classes (4,194,304 bytes) gains nothing (Init 3.09 against 3.24 s, Mathlib 15.59 against 15.45 s), and switching the JDK's default archive off costs nothing that three rounds resolve: class loading is not where a cold JVM spends its time. The launcher's flag \code{\verb~|--enable-native-access~} makes the VM log that it cannot use the archived module graph with such an archive.}
+\li{\strong{Heap}: pre-touch is off in the launcher's line and stays off (switched on: Init 3.48 against 3.24 s); a heap committed at the start gains nothing; without the huge-page advice the cold run is 0.1 to 1.8 s slower.}
+\li{\strong{Not tried}: switching bytecode verification off, compact object headers, another collector, a JDK newer than 25, and anything that needs code compiled ahead of time (JDK 25 has none in its cache).}
+}
+}
+
+\subtree{
+\title{2.4 The crossover for a corpus: above Mathlib, by extrapolation}
+
+\p{\strong{No corpus gains from the hand-over in a single cold run}, with the launcher's flags or with anything of section 2.3. For an export that keeps eight workers busy the crossover lies above Mathlib, the largest export there is (6.33 GB, 721,845 units); section 2.7 has the other kind of input. What follows is an extrapolation from how the difference moves with the size, not a measurement.}
+
+\ul{
+\li{\strong{The model}: a cold JVM run costs a warm-up and then a share of the executable's time, \code{\verb~|T_jvm = W + r * T_image~}. Over the three largest corpora (navier-stokes-euler, cslib, Mathlib) the least-squares line through the cells of 2.1 is \strong{W = 3.4 s, r = 0.886} for the launcher's flags, and W = 1.9 s, r = 0.894 with the AOT cache. The slope agrees with the steady passes of the two platforms on these three corpora, which stand at 0.84 to 0.87 in the benchmark rows of a quiet host ([the benchmark tables](rep-benchmarks)).}
+\li{\strong{Where the lines cross}: at 30 s of the executable's time with the launcher's flags, 2.1 times Mathlib, and at 18 s with the AOT cache, 1.2 times Mathlib. If time grows with the file as it does from cslib to Mathlib, that is an export of about 13 GB, and of about 8 GB with the cache.}
+\li{\strong{What the gain would be there.} Past the crossover a JVM gains 0.11 s per second of the executable's time: an export twice the crossover size would be checked about 6 \% sooner.}
+\li{\strong{Why the extrapolation is weak.} Three points; the warm-up itself grows with the file (the difference between a JVM's first and third pass is 2.6 s on Init and 4.0 s on Mathlib, section 2.5); and at twice Mathlib neither platform fits its present memory settings: the JVM's heap of 7 GB is the smallest at which the machine decides every unit of Mathlib ([the JVM line](rep-J1)), and the arena's runner has 16 GB.}
+}
+}
+
+\subtree{
+\title{2.5 Three passes in one process: where the JVM's lead begins}
+
+\p{The warm metric: one process \code{\verb~|--threads 8 --stats -X passes=3 FILE~}, every pass a complete run. Five rounds per corpus in one window of 2,196 s (22:47 to 23:24 UTC), the four variants interleaved: the published executable, the hybrid executable kept in the image (\code{\verb~|RLVM_PLATFORM=image~}), the JVM launcher on Temurin 25, and the hybrid executable under \code{auto}, which hands a run with several passes over. Seconds per pass as the checker reports them, and the wall clock of the whole process. On Mathlib two of seven rounds had a process that ran while the host compacted memory (765 to 3,454 stalls, up to 1,029 huge-page fallbacks); they are left out.}
+
+\table{
+\tr{\th{corpus}\th{rounds}\th{executable: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}\th{hybrid kept in the image: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}\th{JVM launcher: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}\th{hybrid, auto: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}}
+\tr{\td{reachability}\td{5 of 5}\td{0.482}\td{0.461}\td{0.460 (0.432 - 0.498)}\td{1.53}\td{0.495}\td{0.461}\td{0.443 (0.424 - 0.464)}\td{1.53}\td{1.161}\td{0.571}\td{0.372 (0.323 - 0.429)}\td{2.22}\td{1.198}\td{0.586}\td{0.377 (0.342 - 0.402)}\td{2.28}}
+\tr{\td{init}\td{5 of 5}\td{0.659}\td{0.652}\td{0.653 (0.629 - 0.691)}\td{2.05}\td{0.677}\td{0.636}\td{0.628 (0.624 - 0.634)}\td{2.02}\td{3.343}\td{1.252}\td{0.738 (0.613 - 1.012)}\td{5.47}\td{2.977}\td{0.874}\td{0.628 (0.601 - 0.669)}\td{4.61}}
+\tr{\td{std}\td{5 of 5}\td{1.112}\td{1.090}\td{1.086 (1.072 - 1.104)}\td{3.43}\td{1.120}\td{1.100}\td{1.100 (1.087 - 1.108)}\td{3.46}\td{3.999}\td{1.248}\td{1.017 (0.989 - 1.036)}\td{6.40}\td{4.134}\td{1.314}\td{1.067 (1.002 - 1.105)}\td{6.65}}
+\tr{\td{con-leche}\td{5 of 5}\td{1.435}\td{1.440}\td{1.417 (1.387 - 1.466)}\td{4.46}\td{1.429}\td{1.470}\td{1.431 (1.381 - 1.486)}\td{4.50}\td{4.225}\td{1.408}\td{1.245 (1.199 - 1.318)}\td{7.01}\td{4.036}\td{1.422}\td{1.211 (1.162 - 1.277)}\td{6.79}}
+\tr{\td{cedar}\td{5 of 5}\td{1.542}\td{1.541}\td{1.531 (1.514 - 1.545)}\td{4.80}\td{1.557}\td{1.530}\td{1.529 (1.512 - 1.544)}\td{4.80}\td{4.799}\td{1.711}\td{1.491 (1.445 - 1.589)}\td{8.13}\td{4.623}\td{1.696}\td{1.496 (1.459 - 1.547)}\td{7.95}}
+\tr{\td{navier-stokes-euler}\td{5 of 5}\td{3.910}\td{3.798}\td{3.813 (3.693 - 3.929)}\td{11.84}\td{3.920}\td{4.004}\td{3.888 (3.761 - 3.993)}\td{12.15}\td{6.567}\td{3.499}\td{3.308 (3.236 - 3.368)}\td{13.51}\td{6.506}\td{3.460}\td{3.343 (3.247 - 3.435)}\td{13.45}}
+\tr{\td{cslib}\td{5 of 5}\td{5.043}\td{5.001}\td{5.005 (4.920 - 5.094)}\td{15.46}\td{5.024}\td{5.052}\td{5.019 (4.915 - 5.094)}\td{15.51}\td{8.083}\td{4.807}\td{4.332 (4.131 - 4.529)}\td{17.37}\td{7.687}\td{4.571}\td{4.254 (4.102 - 4.391)}\td{16.65}}
+\tr{\td{mathlib}\td{5 of 7}\td{14.047}\td{14.014}\td{14.027 (13.976 - 14.080)}\td{43.11}\td{14.215}\td{14.023}\td{14.045 (13.855 - 14.267)}\td{43.35}\td{15.583}\td{12.011}\td{11.555 (11.463 - 11.811)}\td{39.30}\td{15.991}\td{12.228}\td{11.979 (11.621 - 12.469)}\td{40.35}}
+}
+
+\p{The ratios: passes 2 and 3 together (the mean of the two), pass 3 alone, and the whole process.}
+
+\table{
+\tr{\th{corpus}\th{JVM launcher / executable: passes 2 and 3}\th{round by round}\th{pass 3}\th{whole process}\th{hybrid, auto / JVM launcher: passes 2 and 3}\th{round by round}\th{pass 3}\th{whole process}\th{hybrid kept in the image / executable: passes 2 and 3}\th{round by round}\th{pass 3}\th{whole process}}
+\tr{\td{reachability}\td{\strong{1.023}}\td{1.02 1.04 1.11 0.95 1.01}\td{0.808}\td{1.449}\td{\strong{1.022}}\td{1.05 0.95 1.00 1.08 1.03}\td{1.015}\td{1.025}\td{\strong{0.981}}\td{1.01 0.93 1.04 0.94 1.01}\td{0.962}\td{1.000}}
+\tr{\td{init}\td{\strong{1.525}}\td{1.31 1.26 2.11 1.17 1.76}\td{1.130}\td{2.666}\td{\strong{0.754}}\td{0.93 0.86 0.57 0.98 0.63}\td{0.850}\td{0.843}\td{\strong{0.968}}\td{0.98 0.99 0.93 0.97 0.97}\td{0.961}\td{0.988}}
+\tr{\td{std}\td{\strong{1.041}}\td{1.08 1.05 1.03 1.02 1.03}\td{0.936}\td{1.864}\td{\strong{1.051}}\td{0.99 1.02 1.09 0.98 1.17}\td{1.049}\td{1.039}\td{\strong{1.011}}\td{1.00 1.02 1.01 1.01 1.01}\td{1.012}\td{1.008}}
+\tr{\td{con-leche}\td{\strong{0.929}}\td{0.93 0.92 1.00 0.92 0.87}\td{0.879}\td{1.571}\td{\strong{0.993}}\td{0.95 1.02 0.91 1.05 1.04}\td{0.973}\td{0.969}\td{\strong{1.015}}\td{1.01 1.03 1.07 1.01 0.96}\td{1.010}\td{1.008}}
+\tr{\td{cedar}\td{\strong{1.042}}\td{1.06 1.05 1.03 1.06 1.02}\td{0.974}\td{1.696}\td{\strong{0.997}}\td{0.99 1.02 0.99 0.97 1.02}\td{1.003}\td{0.977}\td{\strong{0.996}}\td{1.01 0.99 1.00 0.99 0.99}\td{0.999}\td{1.000}}
+\tr{\td{navier-stokes-euler}\td{\strong{0.894}}\td{0.88 0.91 0.87 0.89 0.92}\td{0.868}\td{1.141}\td{\strong{0.999}}\td{1.00 0.97 1.04 1.02 0.97}\td{1.010}\td{0.995}\td{\strong{1.037}}\td{1.12 1.00 1.04 1.00 1.03}\td{1.020}\td{1.026}}
+\tr{\td{cslib}\td{\strong{0.913}}\td{0.87 0.94 0.94 0.91 0.91}\td{0.865}\td{1.123}\td{\strong{0.966}}\td{0.98 0.96 0.95 0.96 0.97}\td{0.982}\td{0.959}\td{\strong{1.006}}\td{1.01 1.02 1.00 1.01 1.00}\td{1.003}\td{1.003}}
+\tr{\td{mathlib}\td{\strong{0.840}}\td{0.85 0.86 0.82 0.83 0.84}\td{0.824}\td{0.912}\td{\strong{1.027}}\td{1.05 1.02 1.01 1.00 1.06}\td{1.037}\td{1.027}\td{\strong{1.001}}\td{1.00 0.99 1.00 0.99 1.01}\td{1.001}\td{1.006}}
+\tr{\td{\strong{geometric mean}}\td{\strong{1.010} (0.840 to 1.525)}\td{}\td{0.906}\td{1.475}\td{\strong{0.972} (0.754 to 1.051)}\td{}\td{0.988}\td{0.977}\td{\strong{1.002} (0.968 to 1.037)}\td{}\td{0.996}\td{1.005}}
+}
+
+\ul{
+\li{\strong{Three passes are not the steady state of a JVM.} Its second pass is still warm-up: 1.25 s on Init, where its third is 0.74 s and every pass of the executable 0.65 s; on a quiet host the same build's steady pass is 0.53 s on the JVM and 0.58 s in the executable ([the benchmark tables](rep-benchmarks)). Taken together, passes 2 and 3 of a JVM are 1.01 times the executable's in the geometric mean: slower on reachability, Init, Std and cedar (1.02 to 1.53), faster on con-leche, navier-stokes-euler, cslib and Mathlib (0.93 to 0.84).}
+\li{\strong{By the third pass the JVM leads on seven corpora}: 0.81 to 0.97 times the executable's pass, 0.82 on Mathlib (11.56 against 14.03 s); on Init its third pass is still 1.13 times.}
+\li{\strong{As a whole process of three passes the JVM is ahead on Mathlib only}: 39.3 against 43.1 s, 0.91. It needs 1.12 times the executable's wall clock on cslib, 1.14 on navier-stokes-euler, 1.5 to 1.9 on the corpora of a second or two, and 2.67 on Init.}
+\li{\strong{The same crossover as for one run.} The line through cslib and Mathlib is \code{\verb~|T_jvm = 5.1 s + 0.79 * T_image~} for a process of three passes: the two meet where the executable needs about 25 s for the whole process, against about 30 s for a single run (section 2.4). What decides is the time the executable would need for the process, the passes times the file, and not the number of passes.}
+\li{\strong{The hybrid kept in the image is the executable}: 1.002 in the geometric mean of passes 2 and 3 (0.968 to 1.037), 1.005 for the whole process. \strong{The hybrid under auto is the JVM launcher}: 0.972 for passes 2 and 3 (0.754 to 1.051), 0.988 for pass 3, 0.977 for the whole process; section 6.3 has Std and Mathlib, the two furthest above 1, measured again.}
+}
+}
+
+\subtree{
+\title{2.6 Small inputs, and what the hand-over itself costs}
+
+\p{Whole processes again, one window of 77 s (23:42 to 23:43 UTC), the variants interleaved round by round: a tutorial test of 367 bytes, the prelude, and the largest of the arena's small tests. Mean wall clock in milliseconds with the smallest and the largest round, mean CPU time, and the largest peak resident set. The last row is the start of the executable alone.}
+
+\table{
+\tr{\th{process}\th{tutorial test, 367 bytes, 40 rounds: wall clock, ms}\th{CPU, ms}\th{peak RSS, MiB}\th{prelude, 3.8 MB, 15 rounds: wall clock, ms}\th{CPU, ms}\th{peak RSS, MiB}\th{\code{\verb~|perf/grind-ring-5~}, 10.4 MB, 10 rounds: wall clock, ms}\th{CPU, ms}\th{peak RSS, MiB}}
+\tr{\td{published executable}\td{4.52 (3.90 - 5.04)}\td{4.4}\td{21.1}\td{22.42 (20.41 - 24.82)}\td{45.7}\td{49.8}\td{165.57 (158.31 - 171.13)}\td{242.1}\td{149.2}}
+\tr{\td{pristine twin}\td{4.58 (4.06 - 5.06)}\td{4.4}\td{21.2}\td{23.07 (20.81 - 25.62)}\td{46.1}\td{48.4}\td{164.64 (158.37 - 169.44)}\td{241.7}\td{150.2}}
+\tr{\td{hybrid, auto}\td{4.57 (3.99 - 5.02)}\td{4.4}\td{22.0}\td{22.08 (20.97 - 24.38)}\td{45.3}\td{49.7}\td{165.73 (160.70 - 170.95)}\td{242.9}\td{149.9}}
+\tr{\td{hybrid, \code{\verb~|--platform image~}}\td{4.49 (3.92 - 4.99)}\td{4.3}\td{21.9}\td{22.99 (21.00 - 25.82)}\td{45.9}\td{50.2}\td{163.70 (153.62 - 175.45)}\td{240.6}\td{151.9}}
+\tr{\td{hybrid forced to the JVM, no JDK (falls back)}\td{4.89 (4.30 - 5.49)}\td{4.6}\td{22.2}\td{22.52 (21.27 - 25.01)}\td{45.6}\td{50.4}\td{166.22 (158.77 - 176.06)}\td{242.9}\td{151.0}}
+\tr{\td{hybrid forced to the JVM, cache there}\td{93.25 (86.31 - 103.69)}\td{154.0}\td{81.2}\td{242.85 (229.76 - 256.34)}\td{1103.1}\td{204.3}\td{620.49 (596.19 - 643.81)}\td{3660.7}\td{387.1}}
+\tr{\td{hybrid forced to the JVM, a new empty cache each time}\td{150.02 (144.12 - 157.51)}\td{251.9}\td{81.6}\td{294.99 (283.06 - 308.21)}\td{1182.9}\td{196.6}\td{681.41 (594.42 - 717.76)}\td{3776.7}\td{381.0}}
+\tr{\td{JVM launcher (shell script)}\td{96.19 (88.58 - 109.27)}\td{161.7}\td{81.6}\td{242.77 (232.45 - 256.74)}\td{1084.6}\td{202.3}\td{632.21 (565.27 - 709.43)}\td{3732.1}\td{402.0}}
+\tr{\td{\code{java} started directly with the hand-over's line}\td{90.07 (85.67 - 95.75)}\td{151.0}\td{81.3}\td{231.27 (214.70 - 257.83)}\td{1054.4}\td{197.4}\td{614.32 (578.81 - 644.20)}\td{3655.2}\td{385.7}}
+\tr{\td{\code{\verb~|rlvm --version~} of the hybrid}\td{3.64 (3.28 - 3.95)}\td{3.3}\td{18.4}\td{3.69 (3.54 - 4.03)}\td{3.4}\td{18.4}\td{3.54 (3.36 - 3.86)}\td{3.2}\td{18.4}}
+}
+
+\ul{
+\li{\strong{A small input is 20 to 4 times faster in the executable}: 4.5 against 93 ms on a tutorial test, 22 against 243 ms on the prelude, 166 against 620 ms on the 10 MB test, with a quarter to two fifths of the memory. The arena has 262 tests that are not corpora: 259 of them are below 8 MiB, and their median size is 6.5 kB.}
+\li{\strong{The hand-over costs 3 ms}: the hybrid forced to the JVM needs 93.25 ms where \code{java} started directly with the same line needs 90.07 ms. The JVM launcher's shell script costs 6 ms on top of the same \code{java}. The 3 ms are the start of the executable (3.6 ms for \code{\verb~|--version~}, printing included) and what follows.}
+\li{\strong{The steps inside the executable}, as the JVM side reports them with \code{\verb~|--stats~}, medians of 30 runs in the same window: \strong{finding the JDK 48 microseconds} (the environment, one \code{release} file, three \code{stat} calls); \strong{the cache 772 microseconds} when it is there (the directories above it checked, 13 jars read and compared, 1,108,101 bytes); \code{execv} is one system call.}
+\li{\strong{The first run of a build on a machine}: unpacking the 13 jars into a new directory and reading them back takes \strong{1.6 ms}; the probe, one start of a JVM for \code{\verb~|--version~}, \strong{55 ms}. Together the first hand-over costs 57 ms more than every later one (150 against 93 ms for the whole process). A private temporary directory per run would pay the 1.6 ms every time and could not keep the probe's result, so it would either pay the 55 ms every time or go without the probe.}
+\li{\strong{No JDK}: a forced hand-over that finds none costs 0.4 ms (4.89 against 4.52 ms) and then checks in-process.}
+}
+}
+
+\subtree{
+\title{2.7 The inputs that do gain: a long check on one worker}
+
+\p{The suites of section 5.3 run each of the arena's 270 tests once through the published executable and once through the hybrid forced to the JVM, in the arena-sized container. On 258 tests the JVM is slower. On twelve it is faster, and they are exactly the twelve small tests whose check takes more than a second in the executable: \code{\verb~|perf/magma-list-deep-n36~} 8.82 against 7.12 s, \code{\verb~|perf/ite-taken-branch-bad~} 5.36 against 4.22 s, \code{\verb~|perf/unfold-before-literal~} 2.13 against 1.54 s, the two tests that are declined after a long search 1.81 against 0.95 s; the next one down, \code{\verb~|perf/magma-string-pair-n9~} with 0.85 s, is 1.53 times slower on the JVM. Six of them were then timed like the corpora, the whole cold process, five interleaved rounds in one window, the arena's 8 threads named:}
+
+\table{
+\tr{\th{test}\th{export, kB}\th{exit status}\th{rounds}\th{the executable, s}\th{CPU / wall}\th{JVM launcher, s}\th{/ executable}\th{round by round}\th{hybrid forced to the JVM, s}\th{/ executable}\th{with the AOT cache, s}\th{/ executable}\th{C1 only, s}\th{/ executable}}
+\tr{\td{\code{\verb~|perf/magma-string-pair-n9~}}\td{17,463}\td{0}\td{5 of 5}\td{0.816 (0.810 - 0.825)}\td{1.20}\td{1.30 (1.25 - 1.34)}\td{\strong{1.589}}\td{1.54 1.64 1.61 1.61 1.55}\td{1.31 (1.27 - 1.37)}\td{\strong{1.609}}\td{0.973 (0.941 - 1.029)}\td{\strong{1.192}}\td{1.11 (1.09 - 1.15)}\td{\strong{1.363}}}
+\tr{\td{\code{\verb~|perf/gf3-matrix-product~}}\td{801}\td{0}\td{5 of 5}\td{1.54 (1.49 - 1.57)}\td{1.00}\td{0.998 (0.942 - 1.051)}\td{\strong{0.650}}\td{0.60 0.65 0.67 0.68 0.64}\td{0.989 (0.946 - 1.034)}\td{\strong{0.644}}\td{0.936 (0.910 - 0.974)}\td{\strong{0.610}}\td{1.82 (1.77 - 1.85)}\td{\strong{1.184}}}
+\tr{\td{\code{\verb~|perf/unfold-before-literal~}}\td{67}\td{0}\td{5 of 5}\td{2.04 (2.01 - 2.09)}\td{1.00}\td{1.58 (1.55 - 1.61)}\td{\strong{0.772}}\td{0.76 0.76 0.75 0.79 0.80}\td{1.55 (1.52 - 1.57)}\td{\strong{0.759}}\td{1.35 (1.33 - 1.37)}\td{\strong{0.660}}\td{2.48 (2.42 - 2.54)}\td{\strong{1.214}}}
+\tr{\td{\code{\verb~|perf/magma-list-pair-n21~}}\td{610}\td{0}\td{5 of 5}\td{2.80 (2.69 - 2.90)}\td{1.00}\td{2.03 (1.93 - 2.16)}\td{\strong{0.724}}\td{0.76 0.71 0.72 0.72 0.71}\td{2.04 (1.91 - 2.18)}\td{\strong{0.727}}\td{1.94 (1.83 - 2.10)}\td{\strong{0.692}}\td{3.21 (3.02 - 3.37)}\td{\strong{1.144}}}
+\tr{\td{\code{\verb~|perf/ite-taken-branch-bad~}}\td{4,552}\td{1}\td{5 of 5}\td{5.33 (5.12 - 5.48)}\td{1.01}\td{4.30 (4.00 - 4.52)}\td{\strong{0.806}}\td{0.83 0.73 0.83 0.84 0.81}\td{4.33 (4.13 - 4.50)}\td{\strong{0.813}}\td{4.22 (4.05 - 4.35)}\td{\strong{0.792}}\td{6.02 (5.86 - 6.12)}\td{\strong{1.129}}}
+\tr{\td{\code{\verb~|perf/magma-list-deep-n36~}}\td{1,279}\td{0}\td{5 of 5}\td{8.10 (7.81 - 8.35)}\td{1.00}\td{6.39 (6.23 - 6.62)}\td{\strong{0.789}}\td{0.79 0.79 0.80 0.81 0.76}\td{6.48 (6.19 - 7.08)}\td{\strong{0.800}}\td{6.68 (6.41 - 7.17)}\td{\strong{0.825}}\td{8.62 (8.12 - 9.35)}\td{\strong{1.064}}}
+}
+
+\ul{
+\li{\strong{From a second and a half of work on one worker the JVM wins the single run}: 0.65 to 0.81 times the executable's wall clock on the five tests of 1.5 to 8 s (all 25 round ratios between 0.60 and 0.84), and 1.59 times on the test of 0.8 s. The crossover lies between 0.8 and 1.5 s of the executable's time. The hybrid forced to the JVM is the JVM launcher (0.64 to 0.81, and 1.61). The window ran on a host that had become calm (466 s, 00:48 to 00:56 UTC, no compaction stall).}
+\li{\strong{Why here and not on the corpora.} These exports have few declarations and the driver gives them one worker, so the executable uses one core of eight (CPU over wall clock 1.0) and the JVM's compiler threads work on the other seven: the warm-up that costs a corpus three seconds beside eight busy workers costs little here. What is left is the code: HotSpot's C2 runs the machine and the reference engine faster than the image's compiler does, the same lead as in the warm pass. C1 alone is slower than the executable on all six (1.06 to 1.36 times), so the gain is C2's.}
+\li{\strong{The AOT cache adds little}: 0.61 to 0.83 times, ahead of the plain launcher on the four shorter tests and behind on the longest.}
+\li{\strong{Nothing the launcher can see tells these inputs apart.} The five that gain are files of 67 kB to 4.6 MB; the arena has small tests of 17 MB that take 0.1 s and of 4.3 MB that take 0.03 s. The time of the check is known when it is over. Starting in the executable and moving to a JVM after a second would repeat that second, and gain less than a tenth on the longest of these tests and nothing on the others; it was not built. Whoever knows that an export is of this kind can say \code{\verb~|--platform jvm~}.}
+\li{\strong{In the arena's metric these tests do not gain}: the JVM executes 1.03 to 2.5 times the instructions on ten of the twelve, because the compilers count, and fewer only on the two that are declined after a long search (0.45 times).}
+}
+}
+}
+
+\subtree{
+\title{3. The design of the hybrid entry}
+
+\p{One executable, \code{rlvm}, as today. It checks an export itself, or it replaces its own process by \code{java} on the jars it was built from. Nothing is downloaded, at build time or at run time, and without a JDK the executable is what it was.}
+
+\subtree{
+\title{3.1 One file: the jars are inside the executable}
+
+\ul{
+\li{\strong{Which jars.} The RLVM modules without \code{rlvm-truffle}, and no third-party jar: 13 files, 1,108,101 bytes. A default run loads no class of Truffle, polyglot or the SDK ([the stock-JDK report](rep-OPT-J), section 2: 244 classes, all RLVM's), and on a stock JDK the Truffle tier has only its fallback runtime; a run that names the tier (a setting \code{\verb~|engine.*~} or the machine's switch \code{t2}) stays in the executable, also when the JVM is forced. With the Truffle jars the executable would carry 20 MB instead of 1.1 MB.}
+\li{\strong{How they get in.} \code{\verb~|scripts/build.sh~} copies them, with an index (the build id, the default engine, the VM flags, the heap lines, the sha256 of every jar), into a directory that it puts on the class path of the image build. The class \code{\verb~|rlvm.cli.Handover~} is initialised at image build time like the rest of the launcher's package and reads them there, checking every jar against the sha256 of the index: the bytes and the digests become data of the image, with no resource configuration. On a JVM the index is not on the class path, so jars on a JVM hand nothing over, and the class that calls \code{execv} is never loaded there.}
+\li{\strong{One build id.} The JVM runs \code{\verb~|rlvm.cli.Main~} of exactly the jars the image was compiled from, with the arguments and the environment of the executable. The class path keeps the sorted order of the JVM launcher, and with it the order of the service providers.}
+}
+}
+
+\subtree{
+\title{3.2 Where the jars are unpacked: a per-user cache, never trusted}
+
+\p{The choice was between a cache directory per user, named after the build id, and a private temporary directory per run. \strong{The cache directory is the design}; a temporary directory per run was measured and not taken:}
+
+\ul{
+\li{\strong{\code{execv} leaves nobody behind to remove a temporary directory.} The process that unpacked is the JVM afterwards. A directory per run would stay until the JVM side removed it itself, which it cannot do when it is killed or runs out of memory.}
+\li{\strong{The check of the JDK needs a place to remember its result} (section 3.4), and so would any class-data archive of the JDK.}
+\li{\strong{The cost}: writing the 13 jars into a new directory and reading them back takes 1.6 ms, comparing the jars of a cache that is there 0.8 ms (section 2.6); so the cache saves less than a millisecond per run. What it saves is the probe: 55 ms that a directory per run would pay on every hand-over, or go without.}
+}
+
+\p{\strong{The directory} is \code{\verb~|$RLVM_CACHE_DIR/<build id>~}, else \code{\verb~|$XDG_CACHE_HOME/rlvm/<build id>~}, else \code{\verb~|$HOME/.cache/rlvm/<build id>~}. It is created with mode 0700.}
+
+\p{\strong{The security argument.} The JVM opens the jars by path after the executable has looked at them. Two things must hold: what the JVM reads is what the executable carries, and nobody else can change that between the look and the read.}
+
+\ol{
+\li{\strong{Nothing found in the directory is trusted.} On every start every jar is read and compared with the executable's own copy, byte for byte: that is the check against the embedded digest and more, since the executable has the whole content. A file that is missing, shorter, longer, different in one byte, a symbolic link to a file with the right content, or anything that is not a regular file is not used: the executable's bytes are written to a new file beside it and renamed over it, and the result is read back. Whoever wrote into the directory before - an older run, another process of the same user, an attacker who had access once - changes nothing in what is executed.}
+\li{\strong{Nobody else can change a path in between.} The directory must belong to the account that runs the process and must not be writable by its group or by others. Every directory above it, up to the root and with symbolic links resolved first, must belong to that account or to root and must not be writable by group or others, with two exceptions: a sticky directory (in \code{\verb~|/tmp~} nobody else can rename or replace an entry that belongs to this account), and a directory that nobody else can reach, because a directory further up belongs to that account or to root and is closed to group and others. If any of this fails, the run is not handed over.}
+\li{\strong{What remains} is a process of the same user, or root, that replaces a jar between the comparison and the JVM's read. Such a process can replace the executable itself, or set \code{RLVM_JAVA}; the cache gives it nothing it did not have. Access control lists are covered as far as mode bits show them: the group bits of a directory with a list are its mask.}
+\li{\strong{Atomic writes.} A jar appears under its name only by \code{rename}, complete. Two processes that start together on an empty cache each write their own temporary files and rename them; both leave the same bytes.}
+\li{\strong{When the directory cannot be used} - \code{HOME} not set, a read-only file system, a directory above it that others can write - the run is checked by the executable. A read-only cache whose jars are intact is used.}
+}
+}
+
+\subtree{
+\title{3.3 Finding a JDK without starting it}
+
+\ul{
+\li{\strong{Where}: \code{RLVM_JAVA}, a path to a java binary, and then nothing else: it is a choice made for RLVM. Otherwise \code{\verb~|$JAVA_HOME/bin/java~}, then the first \code{java} on \code{PATH}; the first usable of the two.}
+\li{\strong{Usable} is decided from files, with no VM start: the binary, with symbolic links resolved, is an executable regular file; the \code{release} file of its home has a \code{JAVA_VERSION} of 25 or more and names the modules \code{\verb~|java.base~} and \code{\verb~|java.management~}, the two the jars need; and the home has HotSpot's server VM (\code{\verb~|lib/server/libjvm.so~}), because the flag line is HotSpot's. A JDK without a \code{release} file is not used.}
+\li{\strong{Not found, or too old}: the executable checks, silently. \code{\verb~|rlvm --version~} has a line \code{platform:} that names the JDK it would use or the reason there is none, and \code{\verb~|--stats~} ends with \code{\verb~|platform=image|jvm~} and \code{\verb~|why=...~}.}
+}
+}
+
+\subtree{
+\title{3.4 The step: one probe per JDK, then \code{execv}}
+
+\p{The executable hands over by \code{execv}: the JVM is the same process, with the same process id, standard streams, working directory and environment. A time limit, a signal or a resource limit of the caller reaches the JVM as it reached the executable, there is no second process to wait for or to orphan, and the exit status is the JVM side's own: \code{\verb~|rlvm.cli.Main~} applies \code{RLVM_STATUS_BASE} there exactly as in the image.}
+
+\p{The price of \code{execv} is that nothing can fall back after it. A java that passes the file checks and then does not start - a damaged installation, a flag in \code{RLVM_JAVA_OPTS} that the VM refuses, a heap that cannot be reserved - would end the run with the VM's status 1, which reads as a rejection. So the first hand-over to a JDK is preceded by \strong{one probe}: the executable starts \code{\verb~|java FLAGS -cp JARS rlvm.cli.Main --version~} as a child and hands over only if it ends with status 0 and answers with the version line. The result is remembered as an empty marker file in the cache directory, named after the java binary and its VM library (path, size, modification time), the content of the \code{release} file and the complete list of VM options. A JDK updated in place, another heap or another flag gives another name and a new probe; a failed probe is not remembered, so a JDK that is repaired is used again.}
+
+\p{\strong{What this guarantees and what it does not.} Everything that fails before \code{execv} falls back to the executable's own engine: no JDK, an old JDK, an unusable cache, a failed probe, an \code{execv} that returns. After a successful probe, a JDK that breaks without changing the size or the time of its two files is started and fails: the status is then the VM's. The arena's run line maps that to an error, never to a rejection, as it does for an executable that cannot start.}
+}
+
+\subtree{
+\title{3.5 The rule and the option}
+
+\ul{
+\li{\strong{The option} is \code{\verb~|--platform image|jvm|auto~}, with the environment variable \code{RLVM_PLATFORM}. It is an option of the launcher and not a setting \code{\verb~|-X platform=~}: the \code{\verb~|-X~} settings belong to the checker, which refuses a key it does not know, and the hand-over is decided before a checker exists. One module changes, \code{rlvm-cli}; on a JVM the option is accepted and changes nothing. What a run does when nothing is said is one constant: \code{auto} in the prototype as it was measured and gated, the executable with the fifth patch (section 6.4).}
+\li{\strong{\code{image}}: never handed over. \strong{\code{jvm}}: always, when a JDK is usable, except for what the JVM side cannot compute alike (the Truffle tier). \strong{\code{auto}}: the default engine's plain runs only, and of those the runs with several passes, \code{\verb~|-X passes=N~} with N above 1. A single pass is never handed over, whatever the size of the export: section 2 found no corpus that gains at any size, the small tests that do gain cannot be told from the command line (section 2.7), and the code has the size threshold as one constant, set to "never". Said plainly: under \code{auto}, the only runs that leave the executable are runs of the option with which the warm metric is measured.}
+\li{\strong{What \code{auto} never hands over}: a run with a named checker, with the reference engine or the strict policy, or with a VM option addressed to the executable (\code{\verb~|-Xmx~}, \code{\verb~|-XX:~}, \code{\verb~|-D~}: the executable has consumed it before \code{main}, and \code{\verb~|/proc/self/cmdline~} shows it). A forced hand-over passes such options on to the JVM, and a heap option replaces the default heap, as the JVM launcher does.}
+\li{\strong{A run that is not handed over does nothing of this.} The rule reads the command line and the size of the export. The JDK is searched and the cache touched only after the rule has said "hand over".}
+}
+}
+
+\subtree{
+\title{3.6 The VM flags and the heap}
+
+\ul{
+\li{\strong{The flags} are the JVM launcher's line (\code{JVM_FLAGS} of \src{scripts/build.sh}) with two differences. The two options that silence JDK warnings about Truffle (\code{\verb~|--enable-native-access~}, \code{\verb~|--sun-misc-unsafe-memory-access~}) are left out: nothing of Truffle is handed over, and a JDK after 25 may refuse them. \code{\verb~|-XX:+IgnoreUnrecognizedVMOptions~} is put in front, so that a later JDK that has dropped one of the flags starts.}
+\li{\strong{The heap} is the JVM launcher's by engine: \code{\verb~|-Xmx7g -Xmn1g~} for the machine, \code{\verb~|-Xms13g -Xmx13g -Xmn1g~} for any other engine.}
+\li{\strong{A machine with less memory} than the heap and 1 GiB beside it (physical memory, or the limit of the control group if that is smaller): \code{auto} does not hand over, because the executable's heap grows as needed and the JVM's young generation is a gigabyte from the start; a forced hand-over gets three quarters of the memory as heap and at most a quarter of that as young generation.}
+\li{\strong{No AOT cache.} The cache of section 2.3 is the one thing that brings a cold JVM close to the executable, and the hybrid does not use one. It is tied to the JDK build and to the jars, so it would have to be recorded on the machine where it is used, by a training run of some export, into a file of 19 MB per JDK; the VM maps that file into itself, and nothing in the executable can say what it must contain, so the rule of section 3.2 - nothing found in the cache is trusted - cannot hold for it; it serves the first pass, and the runs that \code{auto} hands over are the ones with several passes, where [the JVM line](rep-J1) found every later pass 5 to 9 \% slower with it (on an earlier build; not measured again here); and with it no corpus gains in a single run either. \code{RLVM_JAVA_OPTS} can name one.}
+\li{\code{RLVM_JAVA_OPTS} replaces flags and heap, as it does for the JVM launcher.}
+}
+}
+}
+
+\subtree{
+\title{4. The prototype}
+
+\p{Built in a private copy of the tracked sources and delivered as five patches against the main tree; nothing was applied, installed or published. The patches name this report as their note. Patches 1 to 4 are the hybrid that was measured and gated, in which \code{auto} is what a run does when nothing is said; patch 5, on top, is the verdict of section 6: the executable is the default and the hand-over an option.}
+
+\table{
+\tr{\th{patch}\th{files}\th{what}}
+\tr{\td{1, \code{rlvm-cli}}\td{\code{\verb~|Handover.java~} (new), \code{\verb~|NativeExec.java~} (new), \code{\verb~|Main.java~}, \code{\verb~|HandoverTest.java~} (new, 18 tests), the module's README}\td{the rule, the search for a JDK, the cache, the probe, the command line of the JVM; \code{execv} through the C interface of the image; the option \code{\verb~|--platform~} and \code{RLVM_PLATFORM}, the hook in front of the check, \code{\verb~|platform=~} and \code{\verb~|why=~} at the end of the \code{\verb~|--stats~} line, the line \code{platform:} of \code{\verb~|--version~}, the help text}}
+\tr{\td{2, the build}\td{\src{scripts/build.sh}}\td{the jars and their index onto the class path of the image build; the flag line of the hand-over; a line in the build record; and a verification of every executable it builds: forced to the JVM and with two passes a tutorial test must be accepted by a JVM, with the status base carried through; without an option, with \code{\verb~|--platform image~}, with a java that does not exist and with a cache that cannot be made it must be accepted by the executable}}
+\tr{\td{3, the README}\td{\src{README.md}}\td{the option and a paragraph "With a JDK"}}
+\tr{\td{4, two tools}\td{\src{bench/warm.py}, \src{bench/track/track.py}}\td{they set \code{\verb~|RLVM_PLATFORM=image~} when they time the executable with several passes (section 7)}}
+\tr{\td{5, the hand-over as an option}\td{\code{\verb~|Handover.java~}, \code{\verb~|Main.java~}, \code{\verb~|HandoverTest.java~}, \src{scripts/build.sh}, the two READMEs}\td{the default becomes the executable (one constant, \code{\verb~|Handover.Platform.DEFAULT~}); the line of \code{\verb~|--version~} and the help text say so; the unit test and the build's verification expect it}}
+}
+
+\ul{
+\li{\strong{Only \code{rlvm-cli} changes among the jars}: the hybrid distribution was built from the published jars with \code{rlvm-cli} and \code{rlvm-main} compiled from the tree, and 13 of its 14 RLVM jars have the sha256 of the published build's; so has every jar of the pristine twin, which was built the same way from the unchanged sources as the control of this work (build id \code{f5517aa135d2}, the published one). The hybrid's build id is \code{f8d3bfd23fcc}.}
+\li{\strong{The executable} is 69,994,616 bytes against 68,421,752: 1,108,101 bytes of jars and 0.46 MB of code the launcher did not need before (starting a process, file attributes). Both images were built in 101 s side by side.}
+\li{\strong{\code{execv} in a native image}: one method annotated as a C function, in a class that nothing loads on a JVM. The image builder takes a C function without a context as one of the C library, with no header and no extra library; the executable still links only the C library and zlib. The argument vector is copied to memory outside the heap; if \code{execv} returns, the memory is freed and the check goes on in-process.}
+\li{\strong{What the JVM inherits}, compared on a live process with the JVM launcher's JVM: the same executable (\code{java}), the same signal state (nothing blocked, nothing ignored, the same handlers), the standard streams. \strong{One descriptor more}: the image runtime opens its own executable file without close-on-exec, and the JVM keeps that read-only descriptor to the end. It is harmless and it is not tidy; the remedy, \code{close_range} with \code{CLOSE_RANGE_CLOEXEC} before \code{execv}, was not put in, because the sources were frozen for the gates by then.}
+\li{\strong{\code{--version}} of the hybrid executable has one line more, here on a machine whose only java is a JDK 8 without a release file (the home directory shortened):}
+}
+
+\pre{\verb~|
+platform: auto - the executable checks; a JVM (JDK 25 or newer: RLVM_JAVA, JAVA_HOME, java on PATH) is handed -X passes=N with N above 1 (default engine, no VM option of the executable); --platform image|jvm|auto. JDK: none usable [PATH:no-release-file]: the executable checks everything itself; jars: 13 in the executable (1108101 bytes, build f8d3bfd23fcc), unpacked to $HOME/.cache/rlvm/f8d3bfd23fcc
+~}
+
+\p{and the end of a \code{\verb~|--stats~} line, of a run that stayed and of one that was handed over (JDK and cache paths shortened):}
+
+\pre{\verb~|
+... heap_max_kb=13631488 os_threads=3 platform=image why=auto:single-pass
+... heap_max_kb=7235200 os_threads=19 platform=jvm why=handed-over(rule=forced,java=JDK/bin/java,jdk=25.0.5.1,from=JAVA_HOME,jars=CACHE/f8d3bfd23fcc,find_us=86,cache_us=1181,probe_us=0)
+~}
+}
+
+\subtree{
+\title{5. Gates, all on the hybrid distribution}
+
+\subtree{
+\title{5.1 The suites and the gate of the default configuration in each mode}
+
+\ul{
+\li{\strong{The suite of \code{rlvm-cli}}, the one module that changed: 67 tests, 0 failures, 0 skipped (49 before; the 18 new ones are the rule, the search for a JDK with directories that look like JDKs of 8, 21, 25, 26 and 27, the cache with damaged, linked and foreign files and open directories above it, the heap rule and the command line).}
+\li{\strong{\code{scripts/gate.sh --defaults --corpus all --hostile --native}} through the hybrid executable, once per mode, the mode given as \code{RLVM_PLATFORM} in the gate's environment, and once through the jars. A JDK 25 was there in every mode, as \code{RLVM_JAVA}: a directory that looks like the Temurin JDK whose \code{java} appends a line to a file and then becomes Temurin's, so the JVM starts of a gate are counted. All on the efficiency cores beside the windows.}
+}
+
+\table{
+\tr{\th{gate}\th{230 published tests}\th{17,775 mutants: SOUNDNESS / COMPLETENESS, agree, declined, error}\th{hostile exports, 1,274 rows: agree, accepts of kind T, wrong accept / wrong reject, declined}\th{JVM starts}\th{result}}
+\tr{\td{executable, \code{image}}\td{230 correct, 0 declined}\td{0 / 0, 15,739, 2,034, 2}\td{1,192, 78, 0 / 0, 4}\td{1 (the differential self-test, which runs the JVM launcher); no jar unpacked}\td{PASS}}
+\tr{\td{executable, \code{auto}}\td{230 correct, 0 declined}\td{0 / 0, 15,739, 2,034, 2}\td{1,192, 78, 0 / 0, 4}\td{1 (the same); no jar unpacked}\td{PASS}}
+\tr{\td{executable, \code{jvm}}\td{230 correct, 0 declined}\td{0 / 0, 15,741, 2,034, 0}\td{1,192, 78, 0 / 0, 4}\td{\strong{19,288}: the 19,279 checked files, 8 probes, 1 run of the differential self-test}\td{PASS}}
+\tr{\td{the jars (JVM launcher)}\td{230 correct, 0 declined}\td{0 / 0, 15,741, 2,034, 0}\td{1,192, 78, 0 / 0, 4}\td{-}\td{PASS}}
+}
+
+\ul{
+\li{\strong{No wrong accept and no wrong reject in any mode.} The two mutant runs that end with an error are the two \code{CHANGE_LITERAL} mutants of the corpus \code{bugs} that reach the gate's limit of 60 s when the host is loaded; they are known from the gates of the published build under load. Each alone and without the limit, both are rejected, as the official checker rejects them, by the published executable and by the hybrid in each of its three modes: 14 to 18 s in the executable and 9 and 12 s on the JVM, on two cores.}
+\li{\strong{Under \code{auto} the gate is the image's gate}: a single pass is never handed over, so no JVM was started for a checked file and nothing was unpacked. That is the mode a user has without saying anything.}
+\li{\strong{Forced to the JVM, every one of the 19,279 files of the gate was checked by a JVM}, 51 minutes on the efficiency cores of a loaded host: the wrapper counted 19,288 starts, which are the 230 tests, the 17,775 mutants and the 1,274 hostile rows, one start of the JVM launcher by the differential self-test, and eight probes - the gate's four lanes started together on an empty cache, and each probed the JDK once for each of the gate's two command lines (the run line, and the mutants' line with its heap cap of 4 GB, which the hand-over passes on to the JVM). With a JVM under them the two heavy mutants stay inside their limit, so this gate has no error at all and the agreement count is the full 15,741.}
+}
+}
+
+\subtree{
+\title{5.2 The same computation on both sides: counters and corpora}
+
+\p{Every corpus with one worker, where the machine's counters do not depend on scheduling, \code{\verb~|--threads 1 --stats -X stats-file=F~}, through five launchers: the published executable, the hybrid executable with \code{\verb~|--platform image~}, without an option, with \code{\verb~|--platform jvm~} (handed over to Temurin 25), and the JVM launcher of the hybrid distribution. Compared, key by key, is every value of the statistics file that is not a time: the machine's counters (ticks, records, run words, pairs, calls and hits by kind, probes, declines, resets), the reference engine's, the driver's and the loader's.}
+
+\table{
+\tr{\th{corpus}\th{values compared (of the machine)}\th{different: hybrid image / published}\th{hybrid auto / hybrid image}\th{hybrid handed over / hybrid image}\th{JVM launcher / handed over}\th{ticks}\th{records}\th{run words}\th{pairs}\th{units of the machine: accepted / declined}}
+\tr{\td{reachability}\td{212 (133)}\td{0}\td{0}\td{0}\td{0}\td{9,003,236}\td{4,801,253}\td{24,331,852}\td{45,530}\td{4,004 / 0}}
+\tr{\td{init}\td{212 (133)}\td{0}\td{0}\td{0}\td{0}\td{33,391,529}\td{14,754,653}\td{68,592,545}\td{1,808,605}\td{51,990 / 0}}
+\tr{\td{std}\td{215 (136)}\td{0}\td{0}\td{0}\td{0}\td{55,485,546}\td{25,332,132}\td{125,313,434}\td{3,393,824}\td{91,434 / 2}}
+\tr{\td{con-leche}\td{217 (138)}\td{0}\td{0}\td{0}\td{0}\td{65,027,691}\td{27,377,285}\td{222,008,082}\td{3,309,649}\td{31,702 / 4}}
+\tr{\td{cedar}\td{215 (136)}\td{0}\td{0}\td{0}\td{0}\td{74,363,259}\td{35,403,781}\td{213,975,844}\td{4,410,538}\td{128,668 / 2}}
+\tr{\td{navier-stokes-euler}\td{217 (138)}\td{0}\td{0}\td{0}\td{0}\td{142,360,034}\td{68,496,966}\td{318,927,144}\td{11,252,442}\td{111,503 / 32}}
+\tr{\td{cslib}\td{217 (138)}\td{0}\td{0}\td{0}\td{0}\td{204,484,520}\td{106,289,981}\td{437,202,833}\td{11,515,085}\td{367,152 / 22}}
+\tr{\td{mathlib}\td{217 (138)}\td{0}\td{0}\td{0}\td{0}\td{559,746,444}\td{280,003,550}\td{1,226,412,701}\td{32,228,721}\td{654,748 / 128}}
+}
+
+\ul{
+\li{\strong{6,888 values in 32 comparisons, none different.} The hybrid executable computes what the published one does (the jars of the engines are the same files), under \code{auto} what it computes under \code{image}, and after a hand-over what it computes itself: 559,746,444 ticks of the machine on Mathlib through all five, the same records, run words, pairs, the same 128 units declined by the machine and decided by the reference engine. All 40 runs accept with status 0 and print no line that is not the checker's.}
+\li{\strong{The eight corpora with 8 and 4 workers}, a run without \code{\verb~|-X~}: through the hybrid executable with \code{\verb~|--platform image~}, without an option and with \code{\verb~|--platform jvm~}, and through the JVM launcher of the hybrid distribution: \strong{64 of 64 runs accept with status 0}; the statistics line says \code{\verb~|platform=image why=forced~}, \code{\verb~|why=auto:single-pass~}, \code{\verb~|platform=jvm why=handed-over(rule=forced,...)~} and \code{\verb~|why=started-on-a-jvm~} in the 16 runs of each.}
+}
+}
+
+\subtree{
+\title{5.3 The arena's own procedure, with a JDK and with none}
+
+\p{The procedure of [AR2](rep-AR2): the run line of \src{scripts/arena/rlvm.yaml}, verbatim, over the arena's complete test set (148 good with the eight corpora, 92 bad, 30 either) in one container of the arena's size (8 performance cores, 16 GB, no network), one test after the other under the arena's time limits, with the instruction counter around every run line, which counts the instructions that all processes of a test execute in user mode. Six suites, each in a quiet window of its own; what differs is the environment of the checker. "A JDK" is Temurin 25 in \code{JAVA_HOME} and first on \code{PATH}, as a stock JDK is in the arena's shell; "no JDK" is an empty \code{JAVA_HOME} and no java on \code{PATH}. The cache is a directory of the container's own \code{\verb~|/tmp~}, empty at the start of every suite.}
+
+\table{
+\tr{\th{suite}\th{JDK in the checker's environment}\th{good: accepted / rejected / declined}\th{bad: rejected / accepted / declined}\th{either: accepted / rejected / declined}\th{error, timeout}\th{wrong accepts / wrong rejects}\th{same status and exit code as the published executable}\th{peak RSS of the 262 small tests, MiB: smallest - median}\th{largest share of a time limit}\th{suite, s}}
+\tr{\td{the published executable}\td{as the shell of the container has it}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0 / 0}\td{270 of 270}\td{18.1 - 21.7}\td{5 \% (5.4 s of 110 s)}\td{88}}
+\tr{\td{hybrid, nothing said (auto)}\td{a JDK 25}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0 / 0}\td{270 of 270}\td{18.8 - 22.6}\td{5 \% (5.3 s of 110 s)}\td{88}}
+\tr{\td{hybrid, \code{\verb~|RLVM_PLATFORM=image~}}\td{a JDK 25}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0 / 0}\td{270 of 270}\td{19.0 - 22.6}\td{5 \% (5.5 s of 110 s)}\td{89}}
+\tr{\td{hybrid, \code{\verb~|RLVM_PLATFORM=jvm~}}\td{a JDK 25}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0 / 0}\td{270 of 270}\td{68.7 - 79.3}\td{4 \% (4.2 s of 110 s)}\td{127}}
+\tr{\td{hybrid, nothing said (auto)}\td{no JDK}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0 / 0}\td{270 of 270}\td{18.9 - 22.6}\td{5 \% (5.2 s of 110 s)}\td{86}}
+\tr{\td{hybrid, \code{\verb~|RLVM_PLATFORM=jvm~}}\td{no JDK}\td{148 / 0 / 0}\td{92 / 0 / 0}\td{11 / 17 / 2}\td{0}\td{0 / 0}\td{270 of 270}\td{19.0 - 22.7}\td{5 \% (5.4 s of 110 s)}\td{86}}
+}
+
+\ul{
+\li{\strong{The same status and the same exit code on 270 of 270 tests in all six suites}, and the same output: the text a test wrote to standard output and standard error, as the suite keeps it, is identical between the published executable and each of the five hybrid suites on all 270. The table is the one of [AR2](rep-AR2): 148 good accepted, 92 bad rejected, of the 30 either 11 accepted, 17 rejected and the two on which the official kernel does not terminate declined. No wrong accept, no wrong reject, no error, no timeout.}
+\li{\strong{With a JDK and nothing said, nothing is handed over}: the suite under \code{auto} is the image's suite, in verdicts, in instructions (next section) and in memory.}
+\li{\strong{Forced to the JVM with a JDK, every test ran on a JVM}: the smallest resident set of the 270 is 68.7 MiB and the fewest instructions 554 M, where the executable needs 18 to 22 MiB and 4 M for a small test. The suite takes 127 s instead of 88 s, and the declines stay declines: the two tests that are declined after 1.9 s of work are declined by the JVM too, with exit status 2 through the run line.}
+\li{\strong{Forced to the JVM without a JDK, every test falls back} and the suite is the image's again: 270 of 270 with the same status, exit code and output, the instructions within 0.2 \% of the published executable's on every corpus and 1.001 times on the sum of the small tests, a median resident set of 22.7 MiB for a small test. In the container the hybrid says \code{\verb~|JDK: none usable [no-jdk(RLVM_JAVA-unset,JAVA_HOME-unset,no-java-on-PATH)]~} with \code{\verb~|--version~} and \code{\verb~|why=fallback(forced):no-jdk(...)~} with \code{\verb~|--stats~}.}
+\li{\strong{The cache needed a place in the container}: its home directory lies inside the checkout, below directories that the group can write, and with the default place a forced run there says \code{\verb~|why=fallback(forced):cache:directory-above-the-cache-is-not-safe:...~} and is checked by the executable. The suites gave the cache a directory of the container's \code{\verb~|/tmp~}.}
+}
+}
+
+\subtree{
+\title{5.4 What the hand-over does to the arena's metric}
+
+\p{The arena ranks by the instructions of a Mathlib run and counts the instructions of every process of a test. From the same six suites: user-mode instructions, wall clock and peak resident set of the published executable and of the hybrid forced to the JVM, and the instructions of the hybrid under \code{auto} and \code{image} as a ratio to the published executable's.}
+
+\table{
+\tr{\th{test}\th{published executable: instructions, G}\th{wall, s}\th{hybrid, auto: instructions / published}\th{hybrid, image: instructions / published}\th{hybrid forced to the JVM: instructions, G}\th{/ published}\th{wall, s}\th{/ published}\th{peak RSS, MiB: published}\th{forced to the JVM}}
+\tr{\td{reachability}\td{15.8}\td{0.54}\td{0.999}\td{1.000}\td{62.1}\td{\strong{3.923}}\td{1.16}\td{2.155}\td{672}\td{1,381}}
+\tr{\td{init}\td{68.3}\td{0.65}\td{1.000}\td{1.000}\td{179.9}\td{\strong{2.635}}\td{3.09}\td{4.781}\td{365}\td{705}}
+\tr{\td{std}\td{118.4}\td{1.23}\td{0.998}\td{0.999}\td{243.5}\td{\strong{2.057}}\td{3.94}\td{3.208}\td{569}\td{1,352}}
+\tr{\td{con-leche}\td{148.9}\td{1.47}\td{1.000}\td{0.999}\td{283.9}\td{\strong{1.907}}\td{4.51}\td{3.071}\td{845}\td{1,440}}
+\tr{\td{cedar}\td{167.0}\td{1.60}\td{1.000}\td{1.000}\td{282.3}\td{\strong{1.690}}\td{4.30}\td{2.684}\td{737}\td{1,541}}
+\tr{\td{navier-stokes-euler}\td{415.8}\td{3.96}\td{1.000}\td{1.001}\td{491.2}\td{\strong{1.181}}\td{6.11}\td{1.544}\td{1,288}\td{2,271}}
+\tr{\td{cslib}\td{480.1}\td{5.00}\td{1.000}\td{1.000}\td{566.6}\td{\strong{1.180}}\td{7.76}\td{1.553}\td{1,552}\td{2,354}}
+\tr{\td{mathlib}\td{1,432.7}\td{14.10}\td{1.000}\td{1.000}\td{1,347.3}\td{\strong{0.940}}\td{15.69}\td{1.112}\td{3,565}\td{4,741}}
+\tr{\td{the 262 other tests, sum}\td{621.1}\td{51.81}\td{1.001}\td{1.001}\td{1,308.2}\td{\strong{2.106}}\td{68.95}\td{1.331}\td{2,369 (largest)}\td{3,397 (largest)}}
+\tr{\td{the median of the 262}\td{0.0042}\td{0.0056}\td{1.003}\td{1.004}\td{0.7769}\td{\strong{184}}\td{0.1030}\td{18.5}\td{21.7}\td{79.3}}
+\tr{\td{all 270 tests, sum}\td{3,468.1}\td{80.35}\td{1.000}\td{1.000}\td{4,765.0}\td{\strong{1.374}}\td{115.50}\td{1.438}\td{}\td{}}
+}
+
+\ul{
+\li{\strong{Under \code{auto} and \code{image} the instruction counts are the published executable's}: 0.998 to 1.001 on every corpus, 1,433.1 against 1,432.7 G on Mathlib, 1.001 on the sum of the 262 small tests. The median small test needs 4.24 M instructions against 4.23 M: about ten thousand instructions for the rule.}
+\li{\strong{The hand-over lowers the Mathlib count by 6 \%}: 1,347.3 against 1,432.7 G, at 1.11 times the wall clock (15.69 against 14.10 s) and 4,741 against 3,565 MiB. Mathlib and the two tests that are declined after a long search are the only three of the 270 on which a JVM executes fewer instructions; twelve tests, all heavy ones of a second or more, have a shorter wall clock.}
+\li{\strong{It multiplies the count of a small test by 184}: 777 M against 4.2 M instructions in the median, 103 against 5.6 ms, 79 against 22 MiB. Over the 262 small tests the sum doubles, from 621 to 1,308 G, and over all 270 tests it is 1.37 times the executable's: the 687 G that the small tests cost more are eight times the 85 G that Mathlib costs less.}
+\li{\strong{So for the arena}: a hand-over of every test would move the ranking number down by 6 \% and every other number up; a hand-over of Mathlib alone, by size, would keep the first and avoid the second, at 11 \% more wall clock for that test. Neither is what \code{auto} does: its rule follows the wall clock of one run, which is the maintainer's metric and which no test gains. The counts are those of this host; the arena's runner is x86-64.}
+}
+}
+
+\subtree{
+\title{5.5 Behaviour when the hand-over cannot happen}
+
+\p{A script of 69 cases and one stated limit, each a run of the hybrid executable on a tutorial test in an environment that contains only what the case names; expected are the exit status and the last words of the \code{\verb~|--stats~} line. All 69 pass.}
+
+\table{
+\tr{\th{case}\th{what happens}\th{\code{why=} of the statistics line}}
+\tr{\td{no JDK at all (nothing set, an empty \code{PATH}); forced, or auto with two passes}\td{checked by the executable, status 0 (1 for a bad test)}\td{\code{\verb~|fallback(forced):no-jdk(RLVM_JAVA-unset,JAVA_HOME-unset,no-java-on-PATH)~}}}
+\tr{\td{the host's own \code{java}: OpenJDK 8, which has no \code{release} file}\td{the same}\td{\code{\verb~|fallback(forced):PATH:no-release-file~}}}
+\tr{\td{a real JDK 21 (Temurin 21.0.13.1+2) as \code{RLVM_JAVA}, as \code{JAVA_HOME}, on \code{PATH}}\td{the same; no VM is started to find out}\td{\code{\verb~|fallback(forced):JAVA_HOME:java-21.0.13.1-is-older-than-25~}}}
+\tr{\td{\code{JAVA_HOME} is the JDK 21, \code{PATH} has a JDK 25}\td{handed over to the JDK 25}\td{\code{\verb~|handed-over(rule=forced,...,from=PATH,...)~}}}
+\tr{\td{\code{RLVM_JAVA} is the JDK 21, \code{PATH} has a JDK 25}\td{checked by the executable: \code{RLVM_JAVA} is the only candidate when it is set}\td{\code{\verb~|fallback(forced):RLVM_JAVA:java-21.0.13.1-is-older-than-25~}}}
+\tr{\td{Temurin 25 by each of the three ways; GraalVM CE 25 as \code{JAVA_HOME}}\td{handed over; status 0 and 1, and 10 and 11 with \code{\verb~|RLVM_STATUS_BASE=10~}; an unknown \code{\verb~|-X~} setting is 64 on the JVM side too}\td{\code{\verb~|handed-over(rule=forced,...)~}}}
+\tr{\td{a broken java beside a valid \code{release} file: a script that exits with 1, a binary cut off after 4 KiB, an empty file, a program that prints something else and exits with 0}\td{the probe fails, the executable checks, status 0}\td{\code{\verb~|fallback(forced):jdk-does-not-start(RLVM_JAVA)~}}}
+\tr{\td{a java that does not exist; a directory}\td{checked by the executable}\td{\code{\verb~|fallback(forced):RLVM_JAVA:NoSuchFileException~}, \code{\verb~|...:not-an-executable-file~}}}
+\tr{\td{a flag in \code{RLVM_JAVA_OPTS} that the VM refuses}\td{the probe fails, the executable checks}\td{\code{\verb~|fallback(forced):jdk-does-not-start(JAVA_HOME)~}}}
+\tr{\td{\strong{the limit}: a program that answers the probe like these jars and then exits with 1}\td{after \code{execv} the status is that program's: 1. Through the arena's run line it is 3, an error}\td{(no statistics: the process is no longer RLVM)}}
+\tr{\td{\code{HOME} not set and no \code{RLVM_CACHE_DIR}}\td{checked by the executable}\td{\code{\verb~|fallback(forced):no-cache-directory(HOME-unset)~}}}
+\tr{\td{the place for the cache is read-only; a file is where the directory should be}\td{checked by the executable}\td{\code{\verb~|fallback(forced):cache:AccessDeniedException~}, \code{\verb~|cache:FileSystemException~}}}
+\tr{\td{the cache is read-only and its jars are intact}\td{handed over}\td{}}
+\tr{\td{the cache is read-only and one jar has a byte appended}\td{checked by the executable; once it is writable again the jar is rewritten, byte for byte the distribution's}\td{\code{\verb~|fallback(forced):cache:AccessDeniedException~}}}
+\tr{\td{one byte of a jar flipped, same length; a jar replaced by a symbolic link to a file with the right bytes}\td{the jar is rewritten as a regular file, then handed over}\td{}}
+\tr{\td{a directory where a jar should be}\td{checked by the executable}\td{\code{\verb~|fallback(forced):cache:FileSystemException~}}}
+\tr{\td{the cache directory writable by its group}\td{checked by the executable}\td{\code{\verb~|fallback(forced):cache:cache-directory-not-private:...~}}}
+\tr{\td{a directory above the cache writable by everybody: below a directory closed to others / reachable by others / reachable and sticky}\td{handed over / checked by the executable / handed over}\td{\code{\verb~|fallback(forced):cache:directory-above-the-cache-is-not-safe:...~}}}
+\tr{\td{a cache inside the checkout of the development host, whose directories are group-writable}\td{checked by the executable}\td{the same}}
+\tr{\td{2, 8 and 16 processes started together on an empty cache, three times each, good and bad tests mixed}\td{every process handed over with the right status; 14 files in the cache afterwards (13 jars and the marker), no temporary file left}\td{}}
+\tr{\td{a container limited to 4 GB of memory (by hand, outside the script)}\td{forced: handed over with a heap of 3 GB (\code{\verb~|heap_max_kb=3067136~}); auto with two passes: checked by the executable}\td{\code{\verb~|fallback(auto:passes=2):low-memory~}}}
+\tr{\td{forced with \code{\verb~|-Xmx2g~}; with the reference engine or the strict policy}\td{handed over with a heap of 2 GB; of 13 GB}\td{}}
+\tr{\td{auto with two passes and \code{\verb~|-Xmx2g~}, the reference engine, or \code{\verb~|--checker rlvm~}; forced with the machine's switch \code{t2}}\td{checked by the executable}\td{\code{\verb~|auto:vm-options-of-the-executable~}, \code{\verb~|auto:engine-reference~}, \code{\verb~|auto:checker-named~}, \code{\verb~|truffle-tier-is-in-the-executable-only~}}}
+\tr{\td{\code{\verb~|--protocol-selftest~} with \code{\verb~|RLVM_PLATFORM=jvm~}; \code{\verb~|--platform hotspot~}}\td{never handed over; a usage error, 64}\td{}}
+}
+}
+}
+
+\subtree{
+\title{6. The guard for making \code{auto} the default, and the verdict}
+
+\p{The guard, as the maintainer set it: (1) no corpus slower in a single cold run than the executable alone by more than the window resolves; (2) small inputs untouched: a tutorial test stays at its 0.014 s and 20 MB; (3) the warm metric with \code{\verb~|-X passes=3~} no slower than the JVM launcher.}
+
+\subtree{
+\title{6.1 One cold run under auto against the executable alone}
+
+\p{Under \code{auto} a single pass is never handed over, so the hybrid executable does what the executable does; what could differ is the binary, which is 1.5 MB larger. Two windows. In the window of section 2.1 the published executable, the pristine twin (the same sources and jars as the published build, built again by this work beside the hybrid) and the hybrid under \code{auto} ran in every round, always in that order, five rounds:}
+
+\table{
+\tr{\th{corpus}\th{the twin rebuilt: base, s}\th{image, s}\th{base / image}\th{round by round}\th{hybrid, auto: hyb-auto, s}\th{image, s}\th{hyb-auto / image}\th{round by round}\th{hybrid, auto: hyb-auto, s}\th{base, s}\th{hyb-auto / base}\th{round by round}\th{hybrid, forced to the JVM: hyb-jvm, s}\th{jvm, s}\th{hyb-jvm / jvm}\th{round by round}}
+\tr{\td{reachability}\td{0.485 (0.439 - 0.547)}\td{0.500 (0.460 - 0.538)}\td{\strong{0.969}}\td{0.95 0.86 1.07 1.08 0.90}\td{0.513 (0.446 - 0.552)}\td{0.500 (0.460 - 0.538)}\td{\strong{1.025}}\td{0.97 0.98 1.16 1.08 0.94}\td{0.513 (0.446 - 0.552)}\td{0.485 (0.439 - 0.547)}\td{\strong{1.057}}\td{1.02 1.14 1.09 1.00 1.04}\td{1.28 (1.26 - 1.31)}\td{1.31 (1.26 - 1.42)}\td{\strong{0.981}}\td{0.92 1.00 1.01 1.00 0.99}}
+\tr{\td{init}\td{0.663 (0.650 - 0.672)}\td{0.656 (0.640 - 0.662)}\td{\strong{1.010}}\td{1.02 1.01 1.01 1.01 1.00}\td{0.668 (0.659 - 0.680)}\td{0.656 (0.640 - 0.662)}\td{\strong{1.019}}\td{1.03 1.03 1.00 1.03 1.00}\td{0.668 (0.659 - 0.680)}\td{0.663 (0.650 - 0.672)}\td{\strong{1.009}}\td{1.01 1.02 0.98 1.03 1.00}\td{3.24 (2.93 - 3.55)}\td{3.24 (2.94 - 3.45)}\td{\strong{0.998}}\td{0.95 1.00 1.03 0.97 1.05}}
+\tr{\td{std}\td{1.15 (1.14 - 1.18)}\td{1.15 (1.13 - 1.19)}\td{\strong{1.003}}\td{1.02 0.99 1.00 1.01 1.00}\td{1.15 (1.14 - 1.17)}\td{1.15 (1.13 - 1.19)}\td{\strong{1.003}}\td{1.01 0.97 1.02 1.01 1.01}\td{1.15 (1.14 - 1.17)}\td{1.15 (1.14 - 1.18)}\td{\strong{1.000}}\td{0.99 0.99 1.02 1.00 1.00}\td{4.27 (3.76 - 4.88)}\td{4.11 (3.51 - 4.49)}\td{\strong{1.040}}\td{1.23 0.98 1.07 1.02 0.92}}
+\tr{\td{con-leche}\td{1.46 (1.40 - 1.52)}\td{1.42 (1.40 - 1.45)}\td{\strong{1.024}}\td{0.99 1.08 1.07 0.98 1.00}\td{1.46 (1.43 - 1.49)}\td{1.42 (1.40 - 1.45)}\td{\strong{1.029}}\td{1.04 1.05 1.03 0.99 1.04}\td{1.46 (1.43 - 1.49)}\td{1.46 (1.40 - 1.52)}\td{\strong{1.005}}\td{1.05 0.97 0.96 1.01 1.03}\td{4.19 (3.98 - 4.34)}\td{4.11 (3.97 - 4.44)}\td{\strong{1.018}}\td{1.05 0.91 0.99 1.07 1.08}}
+\tr{\td{cedar}\td{1.60 (1.60 - 1.62)}\td{1.60 (1.59 - 1.61)}\td{\strong{1.005}}\td{1.00 1.00 1.01 0.99 1.01}\td{1.59 (1.55 - 1.62)}\td{1.60 (1.59 - 1.61)}\td{\strong{0.993}}\td{1.00 1.00 1.01 0.99 0.98}\td{1.59 (1.55 - 1.62)}\td{1.60 (1.60 - 1.62)}\td{\strong{0.989}}\td{1.00 0.99 1.00 1.00 0.96}\td{5.05 (4.60 - 6.01)}\td{4.59 (4.10 - 4.89)}\td{\strong{1.099}}\td{0.98 1.24 0.98 1.23 1.09}}
+\tr{\td{navier-stokes-euler}\td{3.93 (3.79 - 4.01)}\td{3.91 (3.74 - 4.02)}\td{\strong{1.006}}\td{1.01 0.98 1.01 1.03 1.00}\td{3.96 (3.83 - 4.11)}\td{3.91 (3.74 - 4.02)}\td{\strong{1.013}}\td{1.00 1.00 1.04 1.00 1.02}\td{3.96 (3.83 - 4.11)}\td{3.93 (3.79 - 4.01)}\td{\strong{1.007}}\td{0.99 1.03 1.03 0.96 1.02}\td{6.76 (6.26 - 7.08)}\td{6.84 (6.33 - 7.14)}\td{\strong{0.989}}\td{1.03 1.02 1.08 0.93 0.90}}
+\tr{\td{cslib}\td{5.17 (5.03 - 5.26)}\td{5.13 (4.96 - 5.27)}\td{\strong{1.007}}\td{1.01 1.00 1.01 1.01 1.00}\td{5.22 (5.12 - 5.33)}\td{5.13 (4.96 - 5.27)}\td{\strong{1.017}}\td{1.00 1.01 1.05 1.02 1.01}\td{5.22 (5.12 - 5.33)}\td{5.17 (5.03 - 5.26)}\td{\strong{1.010}}\td{0.99 1.01 1.04 1.01 1.01}\td{8.15 (7.67 - 9.74)}\td{8.05 (7.49 - 8.45)}\td{\strong{1.013}}\td{0.93 0.93 1.26 1.03 0.93}}
+\tr{\td{mathlib}\td{14.57 (14.42 - 15.04)}\td{14.56 (14.28 - 15.35)}\td{\strong{1.000}}\td{1.00 1.01 1.01 1.01 0.98}\td{14.61 (14.41 - 14.75)}\td{14.56 (14.28 - 15.35)}\td{\strong{1.003}}\td{1.01 1.02 1.02 1.00 0.96}\td{14.61 (14.41 - 14.75)}\td{14.57 (14.42 - 15.04)}\td{\strong{1.003}}\td{1.01 1.02 1.01 1.00 0.98}\td{16.13 (15.93 - 16.43)}\td{16.33 (15.94 - 17.37)}\td{\strong{0.988}}\td{1.00 1.00 1.00 1.03 0.92}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{\strong{1.003}}\td{0.969 to 1.024}\td{}\td{}\td{\strong{1.013}}\td{0.993 to 1.029}\td{}\td{}\td{\strong{1.010}}\td{0.989 to 1.057}\td{}\td{}\td{\strong{1.015}}\td{0.981 to 1.099}}
+}
+
+\ul{
+\li{\strong{The control pair shows what five rounds resolve}: the pristine twin against the published executable, two builds of the same sources, is 1.003 in the geometric mean, from 0.969 (reachability) to 1.024 (con-leche).}
+\li{\strong{The hybrid under \code{auto}} is 1.013 against the published executable (0.993 to 1.029) and 1.010 against the twin (0.989 to 1.057, the largest on reachability, a run of half a second): within 3 \% of the published executable on every corpus, as the control pair is, and above 1 on seven of eight.}
+}
+
+\p{Seven of eight above 1 could be the order: in that window the hybrid always ran third, after the two other executables. A second window settled it: the same three, eight rounds per corpus, the order drawn anew in every round (684 s, 01:09 to 01:20 UTC, the same evening; no compaction stall):}
+
+\table{
+\tr{\th{corpus}\th{the twin rebuilt: base, s}\th{image, s}\th{base / image}\th{round by round}\th{hybrid, auto: hyb-auto, s}\th{image, s}\th{hyb-auto / image}\th{round by round}\th{hybrid, auto: hyb-auto, s}\th{base, s}\th{hyb-auto / base}\th{round by round}}
+\tr{\td{reachability}\td{0.484 (0.443 - 0.532)}\td{0.488 (0.454 - 0.533)}\td{\strong{0.992}}\td{1.00 1.04 0.95 1.08 0.98 0.86 0.98 1.07}\td{0.474 (0.455 - 0.510)}\td{0.488 (0.454 - 0.533)}\td{\strong{0.970}}\td{0.86 0.97 1.01 1.00 1.06 0.89 1.06 0.96}\td{0.474 (0.455 - 0.510)}\td{0.484 (0.443 - 0.532)}\td{\strong{0.978}}\td{0.86 0.93 1.07 0.93 1.08 1.04 1.08 0.89}}
+\tr{\td{init}\td{0.649 (0.627 - 0.679)}\td{0.646 (0.631 - 0.661)}\td{\strong{1.005}}\td{1.05 0.99 0.99 0.98 0.97 1.04 0.99 1.01}\td{0.643 (0.624 - 0.656)}\td{0.646 (0.631 - 0.661)}\td{\strong{0.995}}\td{0.99 1.04 0.97 1.00 0.98 1.01 0.98 0.99}\td{0.643 (0.624 - 0.656)}\td{0.649 (0.627 - 0.679)}\td{\strong{0.990}}\td{0.94 1.04 0.99 1.02 1.01 0.97 0.99 0.97}}
+\tr{\td{std}\td{1.14 (1.13 - 1.18)}\td{1.13 (1.12 - 1.16)}\td{\strong{1.004}}\td{1.00 1.01 1.00 1.02 1.00 0.99 1.00 1.00}\td{1.13 (1.12 - 1.15)}\td{1.13 (1.12 - 1.16)}\td{\strong{1.001}}\td{1.00 1.00 0.99 0.97 1.02 1.01 1.01 1.00}\td{1.13 (1.12 - 1.15)}\td{1.14 (1.13 - 1.18)}\td{\strong{0.997}}\td{1.00 0.99 0.99 0.96 1.01 1.02 1.01 1.00}}
+\tr{\td{con-leche}\td{1.46 (1.42 - 1.50)}\td{1.43 (1.37 - 1.52)}\td{\strong{1.016}}\td{1.06 0.99 0.96 1.07 1.05 0.98 0.97 1.07}\td{1.47 (1.43 - 1.52)}\td{1.43 (1.37 - 1.52)}\td{\strong{1.023}}\td{1.12 1.00 0.97 1.05 1.04 1.00 0.96 1.06}\td{1.47 (1.43 - 1.52)}\td{1.46 (1.42 - 1.50)}\td{\strong{1.007}}\td{1.05 1.01 1.01 0.98 0.99 1.03 0.99 0.99}}
+\tr{\td{cedar}\td{1.56 (1.53 - 1.57)}\td{1.57 (1.55 - 1.61)}\td{\strong{0.992}}\td{1.01 1.01 0.99 0.99 0.99 0.98 0.97 1.00}\td{1.57 (1.55 - 1.60)}\td{1.57 (1.55 - 1.61)}\td{\strong{1.002}}\td{1.00 0.99 1.00 1.03 1.03 0.99 0.99 0.99}\td{1.57 (1.55 - 1.60)}\td{1.56 (1.53 - 1.57)}\td{\strong{1.010}}\td{0.99 0.99 1.01 1.04 1.04 1.01 1.01 0.99}}
+\tr{\td{navier-stokes-euler}\td{3.90 (3.81 - 3.99)}\td{3.82 (3.76 - 3.88)}\td{\strong{1.020}}\td{1.02 0.99 1.05 1.02 1.02 1.03 0.99 1.05}\td{3.83 (3.74 - 3.91)}\td{3.82 (3.76 - 3.88)}\td{\strong{1.002}}\td{1.00 0.97 0.99 1.00 1.01 1.02 1.00 1.01}\td{3.83 (3.74 - 3.91)}\td{3.90 (3.81 - 3.99)}\td{\strong{0.982}}\td{0.99 0.98 0.95 0.98 0.99 0.99 1.01 0.97}}
+\tr{\td{cslib}\td{5.17 (5.09 - 5.24)}\td{5.19 (5.12 - 5.23)}\td{\strong{0.995}}\td{1.00 0.99 0.99 1.01 1.00 1.00 0.99 0.99}\td{5.17 (5.08 - 5.24)}\td{5.19 (5.12 - 5.23)}\td{\strong{0.997}}\td{0.99 1.00 1.00 1.01 0.99 1.00 0.99 1.00}\td{5.17 (5.08 - 5.24)}\td{5.17 (5.09 - 5.24)}\td{\strong{1.001}}\td{0.99 1.01 1.01 1.00 1.00 1.00 1.00 1.01}}
+\tr{\td{mathlib}\td{14.08 (13.84 - 14.32)}\td{14.11 (13.83 - 14.31)}\td{\strong{0.998}}\td{1.00 1.01 0.98 0.99 1.00 0.99 1.00 1.00}\td{14.17 (13.92 - 14.40)}\td{14.11 (13.83 - 14.31)}\td{\strong{1.004}}\td{1.01 1.00 1.00 1.00 1.01 1.00 1.01 1.00}\td{14.17 (13.92 - 14.40)}\td{14.08 (13.84 - 14.32)}\td{\strong{1.006}}\td{1.01 1.00 1.02 1.01 1.00 1.01 1.00 1.00}}
+\tr{\td{\strong{geometric mean}}\td{}\td{}\td{\strong{1.003}}\td{0.992 to 1.020}\td{}\td{}\td{\strong{0.999}}\td{0.970 to 1.023}\td{}\td{}\td{\strong{0.996}}\td{0.978 to 1.010}}
+}
+
+\ul{
+\li{\strong{With the order drawn at random the hybrid under \code{auto} is the executable}: 0.999 in the geometric mean against the published executable (0.970 to 1.023) and 0.996 against the twin (0.978 to 1.010), where the control pair is 1.003 (0.992 to 1.020). Mathlib: 1.004 and 1.006. What the first window showed was its order.}
+}
+
+\ul{
+\li{\strong{The instruction counts settle what the wall clock cannot}: in the arena's procedure the hybrid under \code{auto} needs 0.998 to 1.001 times the published executable's instructions on the eight corpora (1,433.1 against 1,432.7 G on Mathlib) and 1.001 times on the sum of the 262 small tests: the same work (section 5.4).}
+\li{\strong{The hybrid forced to the JVM against the JVM launcher} (last columns of the first table): 1.015 in the geometric mean, 0.981 to 1.099, within what five cold JVM runs resolve; Mathlib 0.988.}
+}
+}
+
+\subtree{
+\title{6.2 Small inputs}
+
+\ul{
+\li{\strong{The time is untouched}: a tutorial test takes 4.57 ms through the hybrid under \code{auto} and 4.52 ms through the published executable (4.58 ms through the pristine twin; 40 interleaved rounds each, section 2.6); the prelude 22.1 against 22.4 ms; the 10 MB test 165.7 against 165.6 ms. The rule looks at the command line and makes one \code{stat} of the export.}
+\li{\strong{The resident set is 0.9 MiB larger}: 22.0 MiB against 21.1 MiB for the tutorial test (21.9 with \code{\verb~|--platform image~}, 21.2 for the twin). The jars are 1.1 MiB of the image heap (26.6 against 25.5 MiB in the file), and the resident set of a bare start grows by about as much: 17.9 against 16.5 MB for \code{\verb~|--version~}. On the prelude and on the 10 MB test the difference is inside the spread of the runs (49.7 against 49.8 MiB, 149.9 against 149.2 MiB). This is a cost of having the jars inside the executable, whatever the default is; keeping them outside the image heap, appended to the file and read only at a hand-over, would remove it and was not built.}
+\li{The brief names 0.014 s and 20 MB for a tutorial test. Measured here, on the cores of a quiet window, the published executable needs 4.5 ms and 21.1 MiB for it; in the arena-sized container (section 5.3) the median of the 262 small tests is 5.6 ms and 21.7 MiB through the published executable, and 5.8 ms, 22.6 MiB and 4.24 against 4.23 M instructions through the hybrid under \code{auto}.}
+}
+}
+
+\subtree{
+\title{6.3 Three passes under auto against the JVM launcher}
+
+\p{Under \code{auto} a run with several passes is handed over, so the question is whether the JVM the executable hands over to is as fast as the JVM the launcher starts. The two differ in two flags that are left out, one that is added and nine jars that are not on the class path (section 3.6). In the window of section 2.5, five rounds, the hybrid under \code{auto} needs 0.972 times the launcher's passes 2 and 3 in the geometric mean of the eight corpora, 0.988 for pass 3 and 0.977 for the whole process; four corpora are between 0.966 and 0.999, Init is at 0.754 (two rounds in which the launcher's second pass was long), and three are above 1: reachability 1.022, Mathlib 1.027 and Std 1.051. Std and Mathlib were measured again, six rounds, the order of the processes drawn anew in every round, with the JVM launcher of the hybrid distribution as a third process (00:31 to 00:48 UTC, still the evening of 2026-11-25 in the journal's time zone; 1,019 s; on Mathlib two of eight rounds had compaction stalls and are left out):}
+
+\table{
+\tr{\th{corpus}\th{rounds}\th{JVM launcher, published build: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}\th{JVM launcher, hybrid distribution: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}\th{hybrid, auto: pass 1, s}\th{pass 2}\th{pass 3}\th{whole process, s}}
+\tr{\td{std}\td{6 of 6}\td{3.803}\td{1.173}\td{0.966 (0.928 - 1.006)}\td{6.08}\td{4.185}\td{1.266}\td{0.977 (0.910 - 1.057)}\td{6.56}\td{4.010}\td{1.201}\td{0.964 (0.939 - 1.022)}\td{6.30}}
+\tr{\td{mathlib}\td{6 of 8}\td{14.879}\td{11.216}\td{10.990 (10.384 - 11.610)}\td{37.23}\td{15.052}\td{11.157}\td{11.038 (10.485 - 11.716)}\td{37.39}\td{14.821}\td{11.021}\td{10.850 (10.232 - 11.570)}\td{36.83}}
+}
+
+\table{
+\tr{\th{corpus}\th{hybrid, auto / JVM launcher of the published build: passes 2 and 3}\th{round by round}\th{pass 3}\th{whole process}\th{hybrid, auto / JVM launcher of the hybrid distribution: passes 2 and 3}\th{round by round}\th{pass 3}\th{whole process}\th{JVM launcher of the hybrid distribution / of the published build: passes 2 and 3}\th{round by round}\th{pass 3}\th{whole process}}
+\tr{\td{std}\td{\strong{1.012}}\td{0.96 1.01 0.98 0.96 1.15 1.01}\td{0.998}\td{1.038}\td{\strong{0.965}}\td{0.97 0.99 0.93 0.98 1.21 0.78}\td{0.987}\td{0.961}\td{\strong{1.048}}\td{1.00 1.01 1.06 0.98 0.95 1.30}\td{1.011}\td{1.080}}
+\tr{\td{mathlib}\td{\strong{0.985}}\td{1.00 1.03 1.00 0.89 1.00 0.99}\td{0.987}\td{0.989}\td{\strong{0.985}}\td{0.98 0.98 1.00 0.97 0.98 0.99}\td{0.983}\td{0.985}\td{\strong{1.000}}\td{1.02 1.05 1.00 0.92 1.02 1.00}\td{1.004}\td{1.004}}
+\tr{\td{\strong{geometric mean}}\td{\strong{0.998} (0.985 to 1.012)}\td{}\td{0.993}\td{1.013}\td{\strong{0.975} (0.965 to 0.985)}\td{}\td{0.985}\td{0.973}\td{\strong{1.024} (1.000 to 1.048)}\td{}\td{1.008}\td{1.041}}
+}
+
+\ul{
+\li{\strong{No difference that holds}: the hybrid under \code{auto} against the JVM launcher of the published build is 1.012 on Std and \strong{0.985 on Mathlib} for passes 2 and 3, and 0.998 and 0.987 for pass 3 alone; against the launcher of its own distribution 0.965 and 0.985. What the first window showed on these two corpora did not repeat, and on Mathlib it has the other sign.}
+\li{\strong{The warm pass is the JVM launcher's}: 10.4 to 11.6 s for the third pass of Mathlib on all three, where the executable needs 14.0 s in the same hour.}
+}
+}
+
+\subtree{
+\title{6.4 Verdict}
+
+\p{\strong{NO-GO for \code{auto} as the default. GO for the hybrid as an option}: \code{\verb~|--platform jvm|auto~} and \code{RLVM_PLATFORM}, with the executable as what a run does when nothing is said.}
+
+\ol{
+\li{\strong{Item 1 holds.} No corpus is slower under \code{auto} than the executable alone by more than the windows resolve (0.970 to 1.023 where the control pair is 0.992 to 1.020), and the instructions are the same.}
+\li{\strong{Item 2 holds for the time and not for the memory.} A tutorial test takes the same 4.5 ms. Its resident set is 22.0 MiB where it was 21.1 MiB, and the median small test of the arena has 22.6 MiB where it had 21.7: 0.9 MiB, the jars in the image heap, measured in every run. It is small. The guard says untouched, and this report does not bend it.}
+\li{\strong{Item 3 holds.} With three passes the hybrid under \code{auto} is the JVM launcher, within what the windows resolve, and on Mathlib its third pass is the launcher's 10.4 to 11.6 s.}
+\li{\strong{Beyond the guard: what \code{auto} would do as the default is little, and it has a price.} For a single run it changes nothing, by its own rule, because no corpus gains; the twelve small tests that would gain cannot be recognised before the check, so \code{auto} leaves them where they are. What it moves to a JVM is a run with \code{\verb~|-X passes=N~}, the option with which the warm metric is measured: there the third pass is faster on seven corpora, passes 2 and 3 together are not yet faster on the four smallest, and the process as a whole is faster on Mathlib alone (section 2.5). In exchange, every tool that times the executable with several passes would measure a JVM unless it says \code{\verb~|RLVM_PLATFORM=image~} (section 7).}
+\li{\strong{The threshold}: there is none to give. For an export that keeps eight workers busy the crossover lies at about twice Mathlib, by extrapolation; for a check on one worker it lies at 0.8 to 1.5 s of the check, which no property of the file predicts. The code keeps the size threshold as one constant, set to "never".}
+\li{\strong{What is delivered for this verdict}: patches 1 to 4 are the hybrid as it was built, measured and gated, with \code{auto} as the default of the code. \strong{Patch 5 makes it an option}: the default is the executable; it changes one constant of the launcher, the wording of \code{\verb~|--version~} and \code{\verb~|--help~}, the expectations of one unit test and of the build's verification, and the two READMEs. With patch 5: the suite of \code{rlvm-cli} 67 of 67; the build's verification passes; the behaviour script passes its 69 cases under \code{\verb~|RLVM_PLATFORM=auto~} and six more on the default (nothing said, one pass and two passes, with a JDK there: checked by the executable, \code{\verb~|why=forced~}); the gate of the default configuration through the executable with nothing said and a JDK there passes (230 of 230, 17,775 mutants 0 / 0 with 15,741 agreeing, 1,274 hostile rows 0 / 0) with no JVM started for a checked file; the gate through its jars passes too (230 of 230, 0 / 0 with 15,741 agreeing, 0 / 0). Its timing windows were not repeated: it differs from the measured executable by that constant.}
+\li{\strong{What would change the verdict}: the jars kept outside the image heap, which removes the 0.9 MiB; and a use for \code{auto} - an export of twice Mathlib's size, or a way to know a long single-worker check before it starts.}
+}
+}
+}
+
+\subtree{
+\title{7. What an integrator must know}
+
+\ol{
+\li{\strong{Five patches, in this order}: \code{rlvm-cli}, the build, the README, the two tools, and the fifth, which makes the hand-over an option. Patches 1 to 4 alone are the hybrid with \code{auto} as its default, as it was measured and gated; with patch 5 it is what section 6.4 recommends. Only \code{rlvm-cli} is a jar that changes; \code{rlvm-main} is untouched.}
+\li{\strong{The main tree moved while this work ran}: a change of the driver, of \code{rlvm-main} and of the gate scripts went in at 22:44 UTC with a new shared build. The hybrid was built, measured and gated on the build published at 20:00 UTC, which is the one the brief names: the published jars of that build plus this work's \code{rlvm-cli}. The gates ran with the main tree's gate scripts as they were when each gate started, all after that change: their hostile manifest has 1,274 rows and marks 12 of them as known wrong rejects of the newer build, of which the hybrid on the build of 20:00 has none. None of the files the patches touch changed in the main tree except \src{README.md}; the patches were made again against the main tree at the end of the work and checked by applying them, in order, to a copy of its tracked files: the files they touch come out as they were built and gated.}
+\li{\strong{\code{-X passes=N} on the executable is no longer a measurement of the executable} when a JDK is found and the default is \code{auto}. Everything that times the image with several passes must say so: \code{\verb~|RLVM_PLATFORM=image~} in its environment, which an executable from before this change ignores. Patch 4 does it for \src{bench/warm.py} and \src{bench/track/track.py}. The private scripts of the optimisation waves that run \code{\verb~|bin/rlvm -X passes=N~} are not in the repository and are not patched: with \code{JAVA_HOME} set by \src{env.sh} they would time a JVM and call it the image. The guard of [the default switch set](dec-YP0N) is measured that way.}
+\li{\strong{The default is one constant}: with patch 5 it is \code{\verb~|Handover.Platform.DEFAULT~}, set to \code{IMAGE}; set to \code{AUTO} it gives the behaviour of patches 1 to 4, and then the two expectations of the build's verification and of the unit test that patch 5 changed change back. With the executable as the default, the item before this one arises only for a tool that itself asks for \code{auto}. The rule's size threshold is the constant \code{\verb~|Handover.AUTO_MIN_BYTES~}, set to "never".}
+\li{\strong{\code{RLVM_JAVA} and \code{RLVM_JAVA_OPTS} mean for the executable what they mean for the JVM launcher}, and only when a run is handed over. A tool that exports them for the launcher and then runs the executable with \code{\verb~|--platform jvm~} gets them.}
+\li{\strong{The cache directory is refused where a directory above it is open to others}: a checkout whose directories are group-writable (the development host's umask) is not a place for \code{RLVM_CACHE_DIR}; \code{\verb~|/tmp~} is, being sticky, and so is the default place, as long as neither the home directory nor its \code{\verb~|.cache~} can be written by the group or by others. In the arena-sized container of \src{bench/arena-docker.sh} the home directory lies inside the checkout, so a hand-over there needs \code{RLVM_CACHE_DIR}; without it every forced run falls back and says why.}
+\li{\strong{The build's verification needs a place for a cache too}: it takes a new directory under \code{TMPDIR} or \code{\verb~|/tmp~}, and where that is not acceptable it logs that the hand-over was not exercised and goes on.}
+\li{\strong{The arena definition needs no change}: its run line names no platform, a single pass is never handed over under \code{auto}, and the build line builds the same single file. \src{scripts/package.sh} runs the executable with an empty environment and passes unchanged.}
+\li{\strong{One descriptor is inherited by the JVM} (section 4); \code{close_range} before \code{execv} would close it.}
+\li{\strong{A word of the statistics}: with patch 5 a plain run ends its \code{\verb~|--stats~} line with \code{\verb~|platform=image why=forced~}, the word the rule has for "the platform is the image", also when nobody forced anything. It was left so that patch 5 stays one constant; \code{default} would be the better word there.}
+}
+}
+
+\subtree{
+\title{8. What was not measured}
+
+\ul{
+\li{\strong{x86-64}, the arena's architecture: everything here is the aarch64 development host. The step itself (\code{execv} through the image's C interface, the file checks) has nothing of the architecture in it, but no x86-64 executable was built or run. The stock JDK of the arena's shell was not used either: the JDK of every row is Eclipse Temurin 25.0.5.1+2, and GraalVM CE 25 in three behaviour cases.}
+\li{\strong{A quiet host.} Another wave of the team started while the windows ran: the cores outside the measurement set were at a load of 17 to 60 until midnight UTC and of 9 to 36 after it. The absolute times are 4 to 14 \% above the benchmark rows of the same build on a quiet host; the ratios between interleaved rounds are what the report rests on, and the one ratio that could be compared with a quiet-host row (the JVM's first pass against the executable on Mathlib, 1.11 there and 1.12 here) agrees.}
+\li{\strong{An export larger than Mathlib}: there is none. The crossover of section 2.4 is an extrapolation.}
+\li{\strong{A machine with less memory than the JVM's heap}: only as a container with a limit of 4 GB and a tutorial test (section 5.5). No corpus was checked under such a limit, and no machine of that size was used.}
+\li{\strong{The reference engine and the strict policy on the handed-over JVM} as timings; they were run as behaviour cases on a tutorial test (the heap line of 13 GB is chosen).}
+\li{\strong{A JDK newer than 25}, a JDK without HotSpot (it is refused by the file check), a JDK on a file system where a script cannot be executed.}
+\li{\strong{What the AOT cache does to later passes} on this build: a window for it was queued and withdrawn when the queue of the host grew; the figure in section 3.6 is the earlier report's.}
+\li{\strong{The AOT cache inside the hybrid}: it was measured through the JVM launcher. The hybrid does not record or use one (section 3.6 says why); \code{RLVM_JAVA_OPTS} can name one.}
+\li{\strong{The Oracle GraalVM build} of the executable with the jars inside: the build script handles it the same way, by reading; it was not built.}
+\li{\strong{The release workflow and the arena's build line from a clean copy} with the patched build script; the build script was run in a private copy of the tree with the published jars, and \src{scripts/package.sh} on its executable.}
+\li{\strong{The probe's 30 s limit} (a java that hangs), and a hand-over when \code{\verb~|/proc~} is not mounted (the search for VM options and for the process's own user then fail, and the run stays in the executable; by reading).}
+}
+}
