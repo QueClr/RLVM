@@ -1,0 +1,203 @@
+\title{RV-2B: adversarial review of the exact-let mode (package MO-2), from the outside: mutants of the real units, generated exports, the schedule}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Review "RV-2B" of 2026-11-25 (02:49 to about 04:30 UTC of the following UTC day). Its subject is the build of [package MO-2](rep-MO-2): a declaration whose first run reaches a K comparison on a major premise that may be typed through a let variable is checked again in an \em{exact-let mode}, and the machine decides it instead of handing it to the reference engine. The reviewer did not write the change and was asked to find inputs on which it is wrong, as a black box: inputs first, verdicts compared, the official checker as the only judge. A second reviewer read the patch against the official source ([its report](rep-RV-2A)); the two reviews did not share inputs. Nothing was repaired, and nothing of this review is in the main tree.}
+
+\subtree{
+\title{0. Result in one page}
+
+\ul{
+\li{\strong{Verdict: no-go for the patch entering the default configuration as built.} On 12,621 inputs with an official verdict (12,619 of them; two real mutants ended at the memory limit of the official run) a plain run of the candidate gives another verdict than the official checker on 980, and \strong{245 of these are its own}: on them the published build gives the official verdict, because its machine declines and the reference engine decides. 142 of the 245 are \strong{rejections of exports that the official checker accepts}, 103 are accepts of official rejects. One cause covers all 245 (finding RV2B-F1): inside the mode, a major premise that is a reducible term around the application of a let variable is typed by its reduct.}
+\li{\strong{No accept of a statement that is not derivable}, by any build, engine or option, on any input. 1,064 inputs state something that is not derivable (the K type at an opaque index, with let variables of firing types around the one the major premise goes through); every one of them is rejected by the candidate, by its machine alone or after a decline, by the base and by the published build. Every accept against the official verdict in this review is of a derivable statement (the family argument of section 3).}
+\li{\strong{What the candidate does better than the published build}, on the same inputs: 11,639 official verdicts in a plain run against 11,002; 558 rejections of official accepts against 678; 422 accepts of official rejects against 939. Its machine alone declines 1,804 inputs where the base's machine declines 4,911. On the shapes the package names as its class (a let variable, its application, a projection of it as the major premise; chains of let variables; lambda bodies; the same comparison inside and after the let; several declarations with one let) a plain run of the candidate gives the official verdict on every input of this review but those of finding RV2B-F2 and one of RV2B-F5.}
+\li{\strong{Five more findings are wrong rejects of the published default and of the candidate alike}, none of them repaired or declined by the mode, which is not entered: a trigger gap in the package's own class when only one of the two types of the let variable has the K type at its head (RV2B-F2); the projection of a constructor application as the major premise (RV2B-F3); a redex or let term whose body is the let variable (RV2B-F4); more than 64 alias lets (RV2B-F5); structure eta in iota and the unit-like rule on a stuck projection after a let (RV2B-F6). Findings F3 and F4 were found independently by [the review from the source](rep-RV-2A) (its findings F6 and F5).}
+\li{\strong{The real units.} 75 distinct declarations make up the 86 units of the class. Each was cut into an export of its own. The candidate's machine decides 69 of them and declines the six that [the report of the package](rep-MO-2) names; a plain run accepts all 75. On 1,311 structural mutants of them (lets turned into redexes and back, lets inlined, declared types and values wrapped, the major premise of every K recursor wrapped or hidden behind an axiom) a plain run of the candidate gives the official verdict on all 1,309 that have one (1,184 accept, 125 reject), and no mutant turns a decided unit into a declined one. On 654 mutants with a hostile K site grafted into the real declaration it differs on 52, all with a reducible major premise: 46 of them its own (RV2B-F1 inside a real unit).}
+\li{\strong{The schedule.} 1,519 files with several declarations that share one let and 492 real mutants, each under 1, 4 and 8 workers on the executable and 1 and 8 on the JVM launcher: no verdict depends on the schedule. The executable and the JVM launcher agree on 3,039 single-declaration exports, in a plain run and for the machine alone. Whether a real unit is answered by the first run or by the mode does depend on the schedule (section 7); the verdict does not.}
+\li{\strong{The reference engine} gives the official verdict on all 12,619 inputs.}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{Candidate}: the final build of package MO-2 (jars \code{0397eb07054a}, the jar of \code{rlvm-machine} \code{6db085f6b0a5}), the executable; the JVM launcher where it is named. \strong{Base}: the private build of the unpatched tree of 2026-11-25 22:44 UTC that the report of the package names as its second base. \strong{Published build}: a private copy of the shared distribution taken at the start of the review (jars \code{d867a0766427}). Base and published build give the same verdict on every input of this review; "published" below stands for both.}
+\li{\strong{Plain run}: no option; a rejection of the machine is final, a decline goes to the reference engine. \strong{Machine alone}: \code{\verb~|-X fallback=none~}; a decline of the machine is exit status 2. \strong{Reference engine}: \code{\verb~|-X engine=reference~}. Every run of the executable in the harness had a heap of 3 GiB. Exit status 0 is accept, 1 reject, 2 decline. The reference engine ended with status 3 (out of memory under the 3 GiB of the harness) on the two real mutants that have no official verdict; no other run ended with another status.}
+\li{\strong{Official verdict}: \code{\verb~|leanchecker --from-export~} of Lean 4.36.0 (\code{\verb~|lean --version~} in the container: commit \code{611c117bfaf7}), in the project's Docker image without network, 6 GiB of address space and 120 s per export (600 s for the real mutants). Two real mutants (a let of one navier-stokes-euler unit turned into a beta-redex) have no official verdict: the official checker ran out of 6 GiB and, run again, out of 24 GiB of address space. The machine of every build rejects both at once (a let whose value no longer has the declared type); they are counted as inputs and in no other column.}
+\li{\strong{The harness} runs, per input: the candidate in a plain run with its statistics file (the counters \code{\verb~|machine.let.*~}), the candidate's machine alone, the candidate with the reference engine, the base in a plain run and its machine alone, the published build in a plain run; for files with several declarations also the candidate under \code{\verb~|--threads 1|4|8~} and the JVM launcher under 1 and 8 workers, and \code{\verb~|-X engine=diff~} on one family. \strong{It sees a fault}: on the seven exports of the two shapes that the package left unrepaired (findings MO2-F3 and MO2-F6) it reports four rejections of official accepts and one accept of an official reject in the candidate and in the published build, the engine disagreement under the differential engine, and agreement on the two controls, as the package's own tables say.}
+\li{Host: the aarch64 development host; every bulk run behind \src{bench/slot.sh}, off the measurement cores. Nothing in this report is a timing. Two runs were above 8 GB resident, announced on the board: the official checker on the two mutants just named. The slicer on the Mathlib export needed 3.8 GB.}
+}
+}
+
+\subtree{
+\title{2. The inputs}
+
+\table{
+\tr{\th{Source}\th{Inputs}\th{Official accept}\th{Official reject}\th{Candidate, plain run: official verdict}\th{rejections of official accepts (its own)}\th{accepts of official rejects (its own)}\th{Published build: rejections / accepts against the official verdict}\th{Reached the mode}\th{Machine alone declines: candidate (base)}}
+\tr{\td{generator, one declaration per file}\td{9,060}\td{4,082}\td{4,978}\td{8,199}\td{475 (74)}\td{386 (80)}\td{530 / 682}\td{4,052}\td{1,434 (2,540)}}
+\tr{\td{generator, several declarations with one let}\td{1,521}\td{669}\td{852}\td{1,454}\td{35 (26)}\td{32 (19)}\td{135 / 255}\td{1,463}\td{178 (643)}}
+\tr{\td{real units, unchanged, one per export}\td{75}\td{75}\td{0}\td{75}\td{0}\td{0}\td{0 / 0}\td{72}\td{6 (73)}}
+\tr{\td{real units, structural mutants}\td{1,311}\td{1,184}\td{125}\td{1,309}\td{0}\td{0}\td{0 / 0}\td{1,102}\td{95 (1,044)}}
+\tr{\td{real units, hostile grafts}\td{654}\td{403}\td{251}\td{602}\td{48 (42)}\td{4 (4)}\td{13 / 2}\td{636}\td{91 (611)}}
+\tr{\td{\strong{all}}\td{\strong{12,621}}\td{\strong{6,413}}\td{\strong{6,206}}\td{\strong{11,639}}\td{\strong{558 (142)}}\td{\strong{422 (103)}}\td{\strong{678 / 939}}\td{\strong{7,325}}\td{\strong{1,804 (4,911)}}}
+}
+
+\p{"Its own" counts the inputs on which the published build gives the official verdict. "Reached the mode": the counter \code{\verb~|machine.let.units~} of the plain run is above 0. A plain run of the candidate never declined and never ended with an error. The two probes of section 4 (RV2B-F5) are in the second row.}
+}
+
+\subtree{
+\title{3. The generator}
+
+\p{The environment of every generated export is the triple of package S that the rows of MO-2 use: \code{\verb~|d (x : True /\ True) : Nat := And.rec (fun _ _ => 5) x~}, an axiom \code{h}, so that \code{\verb~|d intro~} is officially convertible with \code{5} and with \code{\verb~|d h~}, and \code{\verb~|d h~} is not convertible with \code{5}; and an axiom \code{\verb~|c : Nat~}, convertible with nothing else. A \em{type code} is two of the atoms \code{i} (\code{\verb~|d intro~}), \code{h} (\code{\verb~|d h~}), \code{5}, \code{c}: \code{\verb~|T(ab)~} is the K type at \code{a} with index \code{b}. The K rule fires on a major premise of type \code{\verb~|T(ab)~} iff \code{a} and \code{b} are officially convertible: \code{\verb~|T(ii)~} and \code{\verb~|T(i5)~} fire, \code{\verb~|T(h5)~} and \code{\verb~|T(5h)~} do not, and all four are pairwise convertible where no position sets \code{h} against \code{5}. \code{\verb~|R M~} is the K recursor into \code{Nat} with minor premise 7 on the major premise \code{M}; \code{\verb~|needs7 R~} is \code{\verb~|(fun (_ : R = 7) => True.intro) (Eq.refl 7)~}; \code{\verb~|P : Nat -> Prop~} and \code{\verb~|W : forall x, P (R (M x))~} are axioms, \code{\verb~|pf7 t~} is \code{\verb~|(fun (_ : P 7) => True.intro) t~}.}
+
+\p{\strong{The model, and how far it held.} The generator predicts every verdict from one rule: inside \code{infer_let} a let variable has its declared type; after it the value term is substituted and typed in infer-only mode; a redex is typed through its binder, a let term through its let, a projection through its struct, a constant application through the constant's type. The prediction is a label only; the verdict that counts is the official one. The official checker agreed with the prediction on 10,545 of the 10,579 generated exports; the 34 others are a flaw of the model in one flavour (a stuck declared type in a checked position), not of the kernel's reading.}
+
+\p{\strong{Kinds.} Every statement of the generator but those at the opaque index is derivable in the theory whatever the official checker says: \code{\verb~|d h~} and \code{5} are convertible in the theory (proof irrelevance and transitivity), so the K rule under any reading is definitional proof irrelevance (the argument of section 7.1 of the report of the package). An accept of an official reject on such an input is of kind T. At the opaque index no reading fires and the statement is not derivable: an accept there would be of kind F. 1,064 inputs are of that kind; the official checker rejects each of them because the recursor application does not reduce, not for a type error elsewhere.}
+
+\table{
+\tr{\th{Family}\th{What varies}\th{Exports}\th{Official accept / reject}\th{Candidate: official verdict}\th{rejections of accepts: own / shared}\th{accepts of rejects: own / shared}\th{Machine alone declines: candidate (base)}}
+\tr{\td{g1, one let}\td{K type (\code{Eq}; a K type of the export with one index, with two indices, universe polymorphic); the binder (a proof, a function, a function with two arguments, an axiom as the value, a pair, a constructor pair, a function into a pair, a pair of a function); 20 shapes of the major premise; 8 flavours of the two types (declared fires only, value fires only, both, neither, a constructor as the value, the opaque index, a stuck type on either side); 11 positions of the comparison (inside, under a binder, in the type of a second let, through the type of \code{W}, after the let, as an argument, both states in one body, two lets with one binder)}\td{2,709}\td{1,354 / 1,355}\td{2,419}\td{12 / 180}\td{16 / 82}\td{546 (640)}}
+\tr{\td{g2, two lets}\td{13 chains (alias, alias of a function, lambda body, partial application, a redex and a let term as the value, a projection, three lets, a beta-redex binder in either place); the firing pattern of the three types; 7 positions with the inner let left and bound again}\td{896}\td{352 / 544}\td{896}\td{0 / 0}\td{0 / 0}\td{99 (180)}}
+\tr{\td{g3, other typing sites}\td{proof irrelevance, the unit-like rule and structure eta in iota on a stuck projection of a let variable and on the variable itself, inside and after the let}\td{120}\td{58 / 62}\td{80}\td{0 / 2}\td{0 / 38}\td{0 (0)}}
+\tr{\td{g4, sessions}\td{2, 3 and 24 declarations with one let in different scope states, all orders}\td{367}\td{91 / 276}\td{333}\td{10 / 8}\td{3 / 13}\td{65 (149)}}
+\tr{\td{g5, no let}\td{the shapes of g1 with a beta-redex instead of the let (a typed binding) and with no binder}\td{1,944}\td{1,032 / 912}\td{1,670}\td{0 / 154}\td{0 / 120}\td{0 (0)}}
+\tr{\td{g6, depth}\td{2 to 70 alias lets, 2 to 70 lambda-body lets, 70 dummy lets around one}\td{448}\td{196 / 252}\td{447}\td{0 / 1}\td{0 / 0}\td{136 (196)}}
+\tr{\td{g7, the rules of the mode}\td{9 lambda bodies (a redex, a let, a projection in the body, two closures, more and fewer arguments, a redex binder, 70 lets before); a marked variable under 1 to 4,000 applications or behind 1 to 1,000 conjuncts in the type the let returns; a let whose value is the K recursor application; two independent lets}\td{598}\td{279 / 319}\td{598}\td{0 / 0}\td{0 / 0}\td{218 (431)}}
+\tr{\td{g8, a reducible major premise around a let application}\td{12 shapes: a redex, a let term, a projection of a constructor application, a recursor redex, a constant application around \code{\verb~|f u~}}\td{672}\td{328 / 344}\td{496}\td{62 / 25}\td{64 / 25}\td{45 (433)}}
+\tr{\td{g9, warm sessions}\td{2, 3 and 16 declarations with one let: some evaluate the application without the need of the K rule (proof irrelevance, a comparison with both sides stuck, typing only), one needs it; all orders}\td{1,152}\td{576 / 576}\td{1,120}\td{16 / 0}\td{16 / 0}\td{112 (494)}}
+\tr{\td{g10, not derivable}\td{every major premise of g1 and g8 at the opaque index, with lets of firing types and of the value 5 before, after and between}\td{800}\td{0 / 800}\td{800}\td{0 / 0}\td{0 / 0}\td{80 (240)}}
+\tr{\td{g11, the stored type}\td{a recursor application that INFER checked inside the let leaves it in the type of the body: \code{\verb~|Eq.refl (R M) : 7 = 7~}}\td{873}\td{483 / 390}\td{793}\td{0 / 39}\td{0 / 41}\td{310 (420)}}
+}
+
+\p{Not generated: a K type in a mutual or nested block. Such a type is not a K target for the official kernel and eliminates into \code{Prop} only, so no comparison of a recursor application with a numeral can be stated; the admission of its recursor is another package's subject. A structure-like proposition with fields (\code{And}) is the environment of every export: \code{\verb~|d h~} is \code{And.rec} on an axiom, which must stay stuck, and does in every build.}
+}
+
+\subtree{
+\title{4. Findings}
+
+\p{Every export named below is one theorem over the triple (240 to 310 lines, most of them the cone of \code{Nat}, \code{And} and \code{Eq}); its official verdict file, the exit status of every build and launcher and the generator are handed over with the review. Kinds: a rejection of an official accept is a \em{wrong reject}; an accept of an official reject is of kind T here (the statement is derivable).}
+
+\subtree{
+\title{RV2B-F1: inside the mode, a reducible major premise around the application of a let variable is typed by its reduct (wrong rejects of the candidate only)}
+
+\p{Reported on the board at 03:07 UTC and, wider, at 03:23 UTC. Smallest export, \code{\verb~|rv2b-g1-eq-fn-eta-DF-inW~} (249 lines): \code{\verb~|W : forall (f : Unit -> d intro = d intro), P (Eq.rec 7 ((fun (u : Unit) => f u) Unit.unit))~}, \code{\verb~|ax : 5 = d h~}, and the theorem \code{\verb~|True := let f : Unit -> d intro = d intro := fun u => ax; (fun (_ : P 7) => True.intro) (W f)~}. Official: \strong{accept}; inside the let the major premise is a beta-redex whose body \code{\verb~|f u~} has the declared type of \code{f}, and the K rule fires. Candidate: \strong{reject}, exit status 1 on the executable and on the JVM launcher, \code{APP_TYPE_MISMATCH}, with \code{\verb~|let.units=1~} and \code{\verb~|let.kDual=0~}: a verdict of the mode, made without a comparison of the scope states. Base and published build: accept (their machine declines, the reference engine decides). The candidate with \code{\verb~|-Drlvm.machine.letexact=off~}: accept. Under the differential engine: an engine disagreement.}
+
+\p{\strong{The shapes.} With \code{f} a let variable that is a function and \code{T} a type written in the term: \code{\verb~|(fun (u : Unit) => f u) a~}; \code{\verb~|(fun (g : Unit -> T) => g a) f~}; \code{\verb~|(fun (z : T) => z) (f a)~}; \code{\verb~|(let w : T := f a; w)~}; \code{\verb~|(let w : Unit -> T := f; w a)~}; \code{\verb~|(let w : Unit := a; f w)~}; \code{\verb~|(And.intro T True (f a) True.intro).1~}; \code{\verb~|(fun (g : Unit -> T) (u : Unit) => g u) f a~}; the same with an axiom as the value of \code{f}. Officially the type of each is the binder's domain, the declared type of the inner let, the parameter of the constructor, or the declared type of \code{f} under the binder; the candidate answers by the type of the value of \code{f}. The base flags the application of \code{f}, declines the unit at the K comparison, and the reference engine gives the official verdict; the candidate runs the unit in the mode instead, and the mode types a major premise that has no stored type and is not itself a let variable, a kept application or a projection of one by forcing it. It is the defect of findings MO2-F3 and MO2-F6 (and of RV2B-F3), which the package handed over as unrepaired and outside the mode; this finding is that the mode \em{inherits} it and so turns a decline into a verdict. Where INFER checked the same term inside the let, the type it stored is used and the verdict is the official one: the wrong verdicts are in the positions where the term comes from the type of \code{W} by instantiation, inside the let and after it.}
+
+\p{\strong{The answer also crosses the scope states.} \code{\verb~|rv2b-g8-fn-letunitapp-VF-out.in~}: \code{\verb~|And.intro (let f : Unit -> d h = 5 := fun u => r; W f) (let f : Unit -> d h = 5 := fun u => r; needs7 (Eq.rec 7 (let w : Unit := Unit.unit; f w)))~} with \code{\verb~|r : d intro = 5~}. Official: reject (inside the second let the K rule does not fire). Candidate: \strong{accept}, with \code{\verb~|let.kDual=0~}: the answer made after the first let, by the type of the value, is used inside the second. The statement is derivable, so this is of kind T; it is the claim of section 7.2 of the report of the package that does not hold for these shapes.}
+
+\p{\strong{Counts.} In the family written for these shapes (672 exports): 62 wrong rejects and 64 accepts of official rejects that the published build does not have; its machine declines 433 of the 672, the candidate's 45. Over all sources: 142 wrong rejects and 103 accepts of official rejects of the candidate's own, every one with a reducible major premise around a let variable or its application (families g1, g4, g8, g9: 199; the grafts into real units of section 6: 46). In 12 of the 245 the term is the plain identity redex over the let variable itself (finding MO2-F3), which the published build rejects when it stands alone: there the published build gives the official verdict because the unit is declined for another let application of the same declaration (10, inside real units) or by the order of two declarations (2, section 7). The review from the source reports the second shape of the list as its finding F3 (a typed binding whose value is a let variable, as the head of a kept application).}
+}
+
+\subtree{
+\title{RV2B-F2: a trigger gap in the class itself: only one of the two types has the K type at its head (wrong rejects of the published default and of the candidate)}
+
+\p{Reported on the board at 03:08 UTC. With \code{\verb~|S.DP (x : True /\ True) : Prop := And.rec (fun _ _ => d intro = d intro) x~}, the type \code{\verb~|S.DP intro~} unfolds to \code{\verb~|d intro = d intro~}, \code{\verb~|S.DP h~} is stuck, and the two are convertible (the same head, a proof-irrelevant argument). Export \code{\verb~|rv2b-g1-eq-fn-app-SV-in~}: \code{\verb~|let f : Unit -> S.DP intro := fun u => axs; needs7 (Eq.rec 7 (f Unit.unit))~} with \code{\verb~|axs : S.DP h~}. Official: \strong{accept}: the declared type of \code{f} unfolds to an equation on which the K rule fires. Published build and candidate: \strong{reject}, exit status 1 on both launchers, exit 0 with \code{\verb~|-X verify=reference~}; the mode is not entered (\code{\verb~|let.units=0~}) and the machine does not decline. The machine reduces the application away, types the reduct, finds a type whose weak head normal form does not have \code{Eq} at its head, and so makes no K comparison at all: the trigger of 2026-11-24 and every trigger of the package wait for a K comparison "whose type has the major inductive at its head".}
+
+\p{The mirror after the let, \code{\verb~|rv2b-g1-eq-var-var-SD-out~}: \code{\verb~|P 7 := let x : S.DP h := axi; W x~} with \code{\verb~|axi : S.DP intro~} and \code{\verb~|W : forall (y : S.DP intro), P (Eq.rec 7 y)~}. Official: accept (after the let the major premise is \code{axi}). Both builds reject: the shape of finding MO2-F1, which the candidate repairs when the declared type is an equation and does not start for when it is stuck. In the first family, with a major premise that is not itself reducible: 24 wrong rejects inside the let (an application to one and to two arguments, an over-application, a projection of an application; a lambda and an axiom as the value) and 12 after it (the variable, a projection, an application of a projection), in both builds alike.}
+}
+
+\subtree{
+\title{RV2B-F3: the projection of a constructor application as the major premise (wrong rejects of the published default and of the candidate)}
+
+\p{Reported on the board at 03:08 UTC. \code{\verb~|rv2b-g5-none-var-projctor.ii-DF-in~}, without any let: \code{\verb~|needs7 (Eq.rec 7 (And.intro (d intro = d intro) True ax True.intro).1)~} with \code{\verb~|ax : 5 = d h~}. Official: \strong{accept}: \code{infer_proj} types the struct by the constructor's type, so the major premise has the type that is the first parameter, and the K rule fires. Both builds \strong{reject} (exit status 1, both launchers, exit 0 with the reference engine): the machine reduces the projection and types \code{ax}. A third reducible form of the major premise beside the beta-redex of MO2-F3 and the let term of MO2-F6, with the same root; 56 wrong rejects and 42 accepts of official rejects among the 308 exports of this shape in the families g1, g5 and g11, with a let variable, a redex binder or nothing around it. The review from the source has the same shape as its finding F6.}
+}
+
+\subtree{
+\title{RV2B-F4: findings MO2-F3 and MO2-F6 with the let variable as the body (wrong rejects of the published default and of the candidate)}
+
+\p{Reported on the board at 03:08 UTC. \code{\verb~|rv2b-g1-eq-var-constredex-DF-in~}: \code{\verb~|let x : d intro = d intro := ax; needs7 (Eq.rec 7 ((fun (z : Unit) => x) Unit.unit))~}, and \code{\verb~|rv2b-g1-eq-var-letbody-DF-in~} with \code{\verb~|(let w : Unit := Unit.unit; x)~} as the major premise. Official: \strong{accept} (the redex and the let term are typed through the body, the declared type of \code{x}). Both builds reject; the mode is not entered. The over-applied form \code{\verb~|(fun z => f) a b~} is finding MO2-F5, which the candidate repairs by a flag in the loop of APPLY; this form applies no let variable and sets no flag. 16 wrong rejects and 12 accepts of official rejects in the first family. The review from the source has it as its finding F5.}
+}
+
+\subtree{
+\title{RV2B-F5: beyond 64 alias lets the mode is not started (a wrong reject of the published default and of the candidate)}
+
+\p{Reported on the board at 03:23 UTC. \code{\verb~|let x0 : d h = 5 := ax; let x1 : d h = 5 := x0; ..; W x64 : P 7~} with \code{\verb~|ax : d intro = d intro~} and 65 lets (\code{\verb~|rv2b-p-aliaschain65-NF-out~}, 307 lines). Official: \strong{accept} (after the lets the major premise is \code{ax}). The published build rejects such a chain at any length (finding MO2-F1). The candidate: with 2, 5 and 15 lets its machine accepts; with 17 to 64 its machine declines (the mode's own judgments nest to 16 levels) and a plain run accepts through the reference engine; \strong{with 65 and more it rejects}, exit status 1 on both launchers, with \code{\verb~|let.units=0~}: the walk that looks for a let variable with two types behind the major premise stops, and the first run answers by the declared type. The twin with 64 lets is in the proposed rows. The review from the source reports another size limit of the same trigger (its finding F11, a frame beyond the near slots).}
+}
+
+\subtree{
+\title{RV2B-F6: finding MO2-F1 at two other typing sites (wrong rejects of the published default and of the candidate)}
+
+\p{Reported on the board at 03:23 UTC. The question that section 11 of the report of the package leaves open. A stuck projection keeps the let variable as its struct, and the official kernel types it through the declared type inside the let and through the value after it.}
+
+\ul{
+\li{\strong{Structure eta in iota.} \code{\verb~|S.D2 (x : True /\ True) : Type := And.rec (fun _ _ => Nat × Nat) x~}; \code{\verb~|rv2b-g3-seta-proj-h.i-out~}: \code{\verb~|P 7 := let p : S.D2 h × Unit := axv; W p~} with \code{\verb~|axv : S.D2 intro × Unit~} and \code{\verb~|W : forall (y : S.D2 intro × Unit), P (Prod.rec (fun a b => 7) y.1)~}. Official: \strong{accept}: after the let the major premise \code{\verb~|axv.1~} has a pair type, is eta-expanded, and the recursor reduces. Both builds \strong{reject}: the machine types \code{\verb~|p.1~} by the declared type of \code{p}, a stuck type, and does not expand. The mirror (\code{\verb~|i.h~}) is rejected officially and accepted by both builds.}
+\li{\strong{The unit-like rule.} \code{\verb~|S.U (n : Nat) : Type~} with one constructor without fields; \code{\verb~|rv2b-g3-unit-proj-h.i-out~}: \code{\verb~|let p : S.U (d h) × Unit := axu; W p~} with \code{\verb~|axu : S.U (d intro) × Unit~} against a goal that needs \code{\verb~|p.1~} convertible with an axiom of \code{\verb~|S.U 5~}. Official: accept after the let. Both builds reject; the mirror is accepted against the official verdict.}
+\li{\strong{Proof irrelevance} on a stuck projection, on the let variable and on its application: no wrong reject in 64 exports. The machine accepts 34 that the official checker rejects (it compares proofs of types that it finds convertible where the official comparison of the two types fails); derivable statements.}
+}
+
+\p{The mode compares the scope states for the K rule only, so nothing of the package sees these; exit status 1 on both launchers of both builds, exit 0 with \code{\verb~|-X verify=reference~}.}
+}
+}
+
+\subtree{
+\title{5. What held}
+
+\ul{
+\li{\strong{The class as the package states it.} With the major premise a let variable, its application to one or two arguments, an over-application, a projection, a projection of an application, an application of a projection, and an axiom as the value: 788 exports of the first family in the six flavours without a stuck type, all eleven positions, four K types. A plain run of the candidate gives the official verdict on every one (its machine alone declines 206); the published build differs on 117 of them (37 rejections of official accepts, 80 accepts of official rejects).}
+\li{\strong{Chains} (896 exports): an alias, a lambda body, a partial application, a redex or a let term as the value term (the shapes of findings MO2-F2 and MO2-F4), a projection, three lets, a beta-redex binder as the outer or the inner link, in every firing pattern of the three types and with the inner let left and bound again. No deviation. The typed binding of section 7.3 of the report of the package (a let variable whose value is the variable of a redex, and a redex binder whose argument is a let variable) gave the official verdict in 280 exports.}
+\li{\strong{The rules of the mode} (598 exports): nine lambda bodies, among them a redex, a let and a projection inside the body, two closures, a kept application with more and with fewer arguments than the lambda has binders, 70 lets before the pair; a marked variable that leaves the let under up to 4,000 applications of an axiom or as the last of up to 1,001 conjuncts whose others hold another let variable (the bounded search of section 4.4 of the report of the package); a let whose value is the K recursor application; two independent lets. No deviation; the machine alone declines 218.}
+\li{\strong{Depth}: 2 to 70 lambda-body lets and 70 dummy lets around one give the official verdict; beyond 16 nested lets the machine declines, as the package says. The one deviation is finding RV2B-F5.}
+\li{\strong{The stored type} (873 exports): a recursor application that INFER checked inside the let and that leaves it in the type of the body. No deviation of the candidate's own.}
+\li{\strong{Sessions} (1,519 files): no deviation but in the shapes of RV2B-F1, RV2B-F4 and finding MO2-F3.}
+\li{\strong{Not derivable} (1,064 inputs): rejected everywhere.}
+}
+}
+
+\subtree{
+\title{6. The real units}
+
+\p{\strong{The units.} The decline log of the published build names 86 units of the class on the eight corpora; they are 75 distinct declarations (Std 1, con-leche 1, navier-stokes-euler 16, cslib 5 more, Mathlib 52 more). Each was cut with \src{bench/workloads/slice-export.py} into a self-contained export: the declaration, the statements of the theorems it uses, the definitions with their values (0.4 to 26 MB, 389 MB together). The official checker accepts all 75.}
+
+\p{\strong{Unchanged.} A plain run of the candidate accepts all 75. Its machine alone decides 69 (66 of them in the mode, one with a K comparison through a let variable with two types) and declines 6: the six units that the report of the package names. The base's machine declines 73 and decides 2 by itself: alone in an export, without the session history of its corpus, these two units do not set the flag.}
+
+\p{\strong{Structural mutants} (1,311, written by a tool that re-encodes the slice): every let of the declaration turned into a beta-redex, and one let at a time (the official checker rejects 125 of these 221: the body needs the value of the variable); a beta-redex turned into a let; a let inlined; the declared type of a let wrapped in a let term; the value of a let turned into an identity redex over the declared type, and into a let term; the major premise of every application of \code{Eq.rec}, \code{Eq.ndrec}, \code{Eq.mpr}, \code{Eq.mp} and \code{cast} turned into an identity redex typed by the equation of the application, into a let term, and put under an axiom \code{\verb~|RV.hide : a = b -> a = b~}, so that the recursor reduces by the K rule or not at all. \strong{A plain run of the candidate gives the official verdict on all 1,309 that have one}, and so does the published build. The candidate's machine alone decides every mutant of the 69 units and declines every mutant of the six; no mutation moved a unit from one group to the other. The real K comparisons do not need the major premise to reduce: with every such major premise behind the axiom (69 of the 75 units have one), every mutant is still accepted, officially and by the candidate.}
+
+\p{\strong{Grafts} (654): a hostile K site of the first family (nine shapes of the major premise, four flavours, three positions) around the whole value, the body of a let or the value of a let of the real declaration, so that the hostile let is bound and left among the real ones. The official checker accepts 403 and rejects 251, each as the model predicts. With the major premise a let variable, an application, an over-application, a projection or an application with two arguments: the candidate gives the official verdict on every graft; its machine alone declines 91 of the 654 (the grafts into the six units, and those in which the readings differ and both states are met). With a reducible major premise: 48 wrong rejects and 4 accepts of official rejects, 46 of the 52 its own. Ten of the 46 have the plain identity redex of finding MO2-F3: alone in an export the published build rejects that shape too, but inside a real unit of the class its machine declines the unit for the unit's own let applications, and the reference engine gives the official verdict. \strong{So each of the units that the package moves from the reference engine to the machine is, from then on, open to the unrepaired redex class}, where it was not before.}
+}
+
+\subtree{
+\title{7. The schedule}
+
+\ul{
+\li{\strong{Files with several declarations}: the 367 files of the session family and the 1,152 of the warm family, each under \code{\verb~|--threads 1~}, \code{4} and \code{8} on the executable and under 1 and 8 workers on the JVM launcher, beside the plain run: one verdict per file in all six configurations, on all 1,519.}
+\li{\strong{The two launchers}: 3,039 single-declaration exports of the families g1, g2, g3, g7 and g8 through the JVM launcher, in a plain run and for the machine alone: the same exit status as the executable on every one.}
+\li{\strong{Real mutants}: a quarter of them (492, every fourth in name order: 331 structural mutants and 161 grafts; these exports have hundreds to thousands of declarations around the mutated one) under the same six configurations: one verdict per file on all 492.}
+\li{\strong{The order of the declarations} decides one verdict of the \em{published} build: with the identity redex of finding MO2-F3 over a let variable, two declarations "inside, then after" are accepted and "after, then inside" are rejected, where the official checker accepts both and each declaration alone is rejected. The candidate rejects both orders. This is the dependence on the history of a session that the project knows ([the insight](ins-RPOG)); it does not move with the number of workers: six runs of each of these files under 1, 4 and 8 workers of the published executable give one verdict per file.}
+\li{\strong{The path depends on the schedule, the verdict does not.} The real unit \code{FirstOrder.Language.DirectLimit.equiv_lift}, alone in its export, in six runs per configuration: with one worker the candidate's machine accepts it in the first run every time; with 4 and 8 workers it accepts it in the first run in some runs and in the mode in others (\code{\verb~|let.units~} 0 or 1), and the base's machine accepts or declines (exit status 0 or 2 with \code{\verb~|-X fallback=none~}). Whether the first run flags the application of a let variable depends on what the session has evaluated before. On this unit both paths accept. No generated file was found on which the two paths give different verdicts; the session and warm families were written for that and did not find one.}
+}
+
+}
+
+\subtree{
+\title{8. Declines of the machine alone}
+
+\p{The aim of the package is that the machine decides. On the inputs of this review the candidate's machine alone declines 1,804 (the base's 4,911). Where the two readings of the type agree, which is the case of every K comparison of the real corpora that the package counted, the candidate's machine declines: the six real units and all their structural mutants (101 inputs); a chain of 17 or more alias or lambda-body lets (98 generated inputs, in every flavour); the over-application of a redex that returns a let variable and a let term in the head position of an application, in every flavour (the rule of finding MO2-F5). Where the readings differ and both scope states are met in one declaration it declines by design: the rows carry the note \code{let-scope} in the proposed fragment.}
+}
+
+\subtree{
+\title{9. Proposed rows}
+
+\p{163 exports chosen for coverage, with their official verdict files and a manifest fragment in the format of the hostile suite, are handed over with the review; they are not rows of the suite. \strong{123 rows} (70 accept, 53 reject) on which a plain run of the candidate gives the official verdict, 29 of them with the note \code{let-scope} (its machine alone declines): positions and K types that the rows of the package do not have, the chains, the lambda bodies, the buried marked variable, the long chains, the sessions, the typed bindings, the other typing sites where the machine is right, and 12 rows that are not derivable (strict). \strong{40 rows} on which it does not: 29 official accepts that a plain run rejects (10 of them only the candidate: RV2B-F1; the others shared with the published build: RV2B-F2 to F6 and the two known shapes with a let variable) and 11 accepts of official rejects (derivable; 5 of them only the candidate). Under \src{scripts/gate-hostile.py} in the default configuration: the candidate agrees on all 123 and has 29 rejections under the mark and 11 tolerated accepts on the 40; the published build has 26 wrong rejects and 23 wrong accepts on the 123 (the rows are strict) and 19 rejections under the mark on the 40; with the reference engine both builds agree on all 163.}
+}
+
+\subtree{
+\title{10. What this review did not cover}
+
+\ul{
+\li{\strong{The x86-64 architecture}: everything ran on the aarch64 development host.}
+\li{\strong{Whole corpora}: no corpus was run; the real units were run alone in their exports, without the session history of their corpus. The report of the package has the corpus runs.}
+\li{\strong{Three quarters of the real mutants under the schedule} and on the JVM launcher (section 7 has one quarter).}
+\li{\strong{Mutants that change what a real K comparison decides.} No structural mutation of a real unit made a real K comparison answer differently under the two readings: the bad mutants among them are rejected for the missing value of a let variable, and the K-decisive bad inputs on real units are the grafts, whose K site is the generator's.}
+\li{\strong{K types in mutual and nested blocks, and other K types than equalities} with indices of other sorts than \code{Nat} (one universe-polymorphic K type on \code{Nat}; the type-level triple of the package's rows was not repeated).}
+\li{\strong{Eta expansion and structure eta in the comparison} (not in iota) as typing sites, and string and numeral literals as major premises.}
+\li{\strong{The options of the package} other than \code{\verb~|-Drlvm.machine.letexact=off~} on the finding exports; every declaration in the mode (\code{\verb~|letexact=always~}) was not run.}
+\li{\strong{Why}: this review names shapes and verdicts. The causes given in section 4 are read off the counters, the messages and the comparison of builds, not off the source.}
+}
+}
