@@ -9,7 +9,7 @@
 
 \p{Review "RV-3B" of 2026-11-25 (01:58 to 03:05 UTC of the following UTC day). Its subject is the build of [package MO-3](rep-MO-3): the comparison of an \code{\verb~|eagerReduce _ _~} argument runs in place under the mode bit, pair entries whose answer can depend on the mode are local to their declaration, setting \code{\verb~|-X machine.eager-mode=local|shared|deferred~} with \code{local} proposed as the default. The reviewer did not write the patch and was asked to find an input on which it is wrong. A second reviewer read the patch against the official source ([RV-3A](rep-RV-3A)); this review did not start from the code: it starts from inputs and compares verdicts. The only reading of sources was the official kernel's \code{\verb~|type_checker.cpp~} of Lean 4.36.0 (to know what the official caches hold), the width of one field and, for the seeded fault of section 6, one method of the patch. Everything the review produced besides this tree (the generator, the harness, the exports of the findings with the official checker's outputs, the proposed rows) lies in the reviewer's working directory outside the repository and was handed over with it.}
 
-\p{\strong{Two passes.} Sections 0 to 8 are the review of the package's first build (the mode \code{local}); section 9 is the second pass, on the build of the package's second mechanism (the mode \code{union}), with a verdict of its own.}
+\p{\strong{Two passes.} Sections 0 to 8 are the review of the package's first build (the mode \code{local}); section 9 is the second pass, on the build of the package's second mechanism (the mode \code{union}), with a verdict of its own; section 10 is the third pass, on the third build, the one proposed for the main tree.}
 
 \subtree{
 \title{0. Result in one page (the first build)}
@@ -365,6 +365,76 @@
 \li{\strong{The forgetting of a session} after a declaration with an eager-only event was looked at through the schedule only; no input shows what another worker's session holds.}
 \li{\strong{The bound of U1}: whether a cheaper failing comparison (below depth 16) can be repeated inside one declaration so often that an accepted real-looking unit reaches the tick bound was not tried; nor a failing comparison under binders.}
 \li{\strong{The differential engine in bulk}, the mutants of the heavy slice, a dishonest prelude other than the one Nat function of family G, the package's variant after the package on the K rule after a let application: as in section 8.}
+}
+}
+}
+
+\subtree{
+\title{10. Third pass: the third candidate (one K rule in both modes, a memo of pairs that are false both ways)}
+
+\p{2026-11-26 (06:52 to 07:05 UTC). The package's third build ([its report](rep-MO-3), section 15) changes three things against the second: inside a comparison of the K rule the shortcuts of plain mode are off and only successes written inside such a comparison are read from the pair table, in BOTH modes - the package's first change to plain mode, through which every real declaration runs; a memo, local to the declaration, of pairs that are false both ways; a log of memo words written under a marked K comparison. Same method and limits as before; three builds side by side on every input: the third candidate, the published build, the second candidate, each in a default run.}
+
+\subtree{
+\title{10.1 Verdict}
+
+\p{\strong{GO.} On every input of this pass the third candidate gives the published build's verdict or, on 108 exports, an accept of a derivable statement where the published build gives the official rejection (the same 108 as in section 9.3). No input was found that the official checker accepts, the published build accepts and the candidate rejects - with or without \code{eagerReduce}; no false step is accepted; no unit is declined by the machine that the published machine decides (it declines fewer); no verdict depends on the schedule; the cost finding U1 of section 9.4 and the other reviewer's findings of the second pass are gone. What this pass could not do is section 10.6.}
+}
+
+\subtree{
+\title{10.2 Plain mode, no \code{eagerReduce} anywhere}
+
+\table{
+\tr{\th{Set}\th{Inputs}\th{Official accept / reject}\th{Third candidate against the published build}}
+\tr{\td{the corpus of the review of the K rule after a let application ([its report](rep-RV-2B)): a let variable or a redex as major premise, no \code{eagerReduce}}\td{14,348 with an official verdict}\td{5,099 / 9,249}\td{\strong{the same verdict on every one}, and the second candidate's: 4,409 official accepts accepted, 8,469 official rejects rejected, 780 official rejects accepted by all three, 690 official accepts rejected by all three (the plain-mode class of the published build that the package on the let application treats)}}
+\tr{\td{a new family: the K rule on a major premise whose K comparison the official kernel answers true by its own means}\td{2,464}\td{2,464 / 0}\td{all accepted by the third candidate, the published build and the second candidate}}
+\tr{\td{whole real exports with structural mutations: reachability (4,004 units) and the arena's prelude; 40 single edits of the test kit's verdict-preserving kinds (a hint, the ids, the formatting, the order of declarations, binder annotations) and 14 files with the reducibility hint of EVERY definition changed (all abbreviations, all one height, all opaque, heights reversed, three random assignments)}\td{54}\td{54 / 0}\td{all accepted by all three}}
+}
+
+\p{\strong{The new family.} 16 forms of the index against the parameter: equal by proof irrelevance in an argument of a definition, of an axiom and of a two-argument definition (the official same-head step on definitions with proof arguments); by unfolding one side only, in either orientation and with an ignored proof argument; by a closed and an open Nat computation; by a beta redex, a let, a projection; the suite's pair in three orientations; eta of a function and eta of a pair (at \code{\verb~|Eq~} only). Three K types: \code{\verb~|Eq~}, an own family with one index, an own family with two indices of which the second is a successor. Three major premises: an axiom applied to the proof variable, a bound hypothesis, a theorem whose proof is the constructor. Five statements: the recursor against its minor premise; two recursors over two proofs; inside an axiom; inside \code{\verb~|Nat.add~}; as the major premise of \code{\verb~|Nat.rec~}. Four histories: alone, twice, the pair of index and parameter by \code{\verb~|Eq.refl~} first in the same binder, the same in an earlier declaration. The official checker accepts all 2,464, so every one is a K comparison that it proves by itself; a build that had reached one of them only through a shortcut would reject it now. None does.}
+
+\p{\strong{What could not be counted from outside}: how many K comparisons of a real corpus took a shortcut in the published build. The package's figures (6 to 1,413 per corpus) are from a counting copy; the distribution has no such counter. What the distribution shows on the eight corpora, one default run each of the candidate and of the published build: all accepted; the machine rejects no unit in either; it declines 0, 0, 2, 2, 2, 32, 14 and 120 units (reachability, Init, Std, cedar, con-leche, navier-stokes-euler, cslib, Mathlib) against 0, 0, 2, 2, 4, 32, 22 and 128 in the published build; the candidate has no eager-only event on any corpus; its log of memo words under a marked K comparison skipped 0 to 2,825 words per corpus. Largest resident set 3.8 GB (Mathlib).}
+}
+
+\subtree{
+\title{10.3 The earlier material, run again}
+
+\table{
+\tr{\th{Set}\th{Official accept / reject}\th{Third candidate: official / accept, derivable / wrong reject / false step accepted}\th{Published build}\th{Second candidate}}
+\tr{\td{5,342 generated exports of the first two passes (854 with a false step; the cost family included)}\td{1,942 / 3,400}\td{3,238 / 2,104 / 0 / 0}\td{3,346 / 1,996 / 0 / 0}\td{3,237 / 2,104 / 0 / 0, one at the time limit}}
+\tr{\td{the same with the machine alone (\code{\verb~|-X fallback=none~}): exports declined}\td{}\td{\strong{0}; every verdict as in the default run}\td{369}\td{21}}
+\tr{\td{the 42 proposed rows}\td{21 / 21}\td{28 / 14 / 0 / 0}\td{29 / 13 / 0 / 0}\td{28 / 14 / 0 / 0}}
+\tr{\td{2,343 real inputs with an official verdict (the slices and mutants of sections 4.2 and 9.6)}\td{1,292 / 1,051}\td{2,338 official, 5 accepts where the official kernel ends in deep recursion}\td{the same on every input}\td{the same on every input}}
+\tr{\td{the other reviewer's exports of the second pass: 2 official accepts and 21 of his systematic family that the second candidate rejects}\td{23 / 0}\td{23 accepted}\td{23 accepted}\td{23 rejected}}
+}
+
+\p{The author's figures on this material (5,326 exports: 3,224 / 2,102 / 0 / 0; published 3,332 / 1,994 / 0; no decline with the machine alone against 369; the rows 28 / 14 / 0) are these with 16 exports fewer. The candidate differs from the published build on 108 of the 5,342, the accepts of derivable statements of section 9.3 (34 an intermediate pair of lazy unfolding, 74 in the family with a \code{\verb~|Nat.gcd~} that does not compute); nothing else moved.}
+}
+
+\subtree{
+\title{10.4 The cost}
+
+\ul{
+\li{\strong{U1 is repaired.} The accepted form at depth 24 and 40: 805 and 1,014 ticks, accepted by the machine, also with \code{\verb~|-X fallback=none~}; the file of 40 such theorems: 16,066 ticks, 0.02 s, no decline (the second candidate: 188 s and 80 declines). The rejected forms at depth 24 and 80: 793 and 1,353 ticks.}
+\li{\strong{A failing tower with a K comparison inside}, which the package's report names as not memoised and not built, in three forms, each alone under the flag, in plain mode after a harmless eager-only event and in plain mode alone, as a rejected statement and inside a definition that ignores its argument (an official accept), depths 8 to 40, 91 exports: the same pair of recursors at every level (857 ticks at depth 24, 1,017 at 40); a different K comparison at every level, each recursor over axioms of its own, the failing argument first (2,260 and 3,396 ticks); the same with the pair of recursors before the failing argument (10,359 and 22,023 ticks: quadratic). No decline, 0.01 to 0.04 s, 24 MB, the official verdict on every one, the same with the machine alone. \strong{No exponential case was found}; that is three constructions, not a bound.}
+}
+}
+
+\subtree{
+\title{10.5 The schedule}
+
+\p{85 files: the 83 of section 9.5 (300 distinct theorems each, which mix plain K comparisons, eager arguments, eager-only events and terms used again) and the other reviewer's two schedule files (several hundred small theorems between the two declarations of his finding). Every combination of 1, 2, 4 and 8 workers with batch and pipelined loading three times on the executable and once each on the JVM launcher with 8 workers, 26 runs per file: \strong{one verdict in every run of every file}. The other reviewer's files, on which the second candidate gave both verdicts, are accepted in every run.}
+}
+
+\subtree{
+\title{10.6 Not covered in the third pass}
+
+\ul{
+\li{\strong{Real K comparisons with a shortcut, unit by unit}: no counter in the distribution names them, so "what happens to exactly those units" is answered only in sum (every corpus accepted, no unit rejected by the machine, fewer declined).}
+\li{\strong{Mutants of real units with a K recursor from the large corpora}: the structural mutants are of two whole small exports (reachability, the arena's prelude); the slices of the other corpora are the axiomatised ones of the earlier passes, whose proofs are not checked. A change of hints across Mathlib, cslib or con-leche was not made.}
+\li{\strong{K types}: \code{\verb~|Eq~} and two own families; not \code{\verb~|HEq~}, not a family with parameters of different types or universe parameters; eta only at \code{\verb~|Eq~}.}
+\li{\strong{Expensive minor premises} are in this pass only through the other reviewer's 23 exports, not in the generator.}
+\li{\strong{The cost}: three tower constructions; a comparison that is false both ways with a K comparison inside is not memoised by design, and a worse construction may exist.}
+\li{\strong{The differential engine in bulk}, the heavy slice, a dishonest prelude beyond the one Nat function: as before.}
 }
 }
 }
