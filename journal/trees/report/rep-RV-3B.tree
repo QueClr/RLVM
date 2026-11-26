@@ -9,8 +9,10 @@
 
 \p{Review "RV-3B" of 2026-11-25 (01:58 to 03:05 UTC of the following UTC day). Its subject is the build of [package MO-3](rep-MO-3): the comparison of an \code{\verb~|eagerReduce _ _~} argument runs in place under the mode bit, pair entries whose answer can depend on the mode are local to their declaration, setting \code{\verb~|-X machine.eager-mode=local|shared|deferred~} with \code{local} proposed as the default. The reviewer did not write the patch and was asked to find an input on which it is wrong. A second reviewer read the patch against the official source ([RV-3A](rep-RV-3A)); this review did not start from the code: it starts from inputs and compares verdicts. The only reading of sources was the official kernel's \code{\verb~|type_checker.cpp~} of Lean 4.36.0 (to know what the official caches hold), the width of one field and, for the seeded fault of section 6, one method of the patch. Everything the review produced besides this tree (the generator, the harness, the exports of the findings with the official checker's outputs, the proposed rows) lies in the reviewer's working directory outside the repository and was handed over with it.}
 
+\p{\strong{Two passes.} Sections 0 to 8 are the review of the package's first build (the mode \code{local}); section 9 is the second pass, on the build of the package's second mechanism (the mode \code{union}), with a verdict of its own.}
+
 \subtree{
-\title{0. Result in one page}
+\title{0. Result in one page (the first build)}
 
 \ul{
 \li{\strong{Verdict: NO-GO for the mode \code{local} as the default, as built.} The build rejects exports that the official checker accepts and that the published mechanism accepts: 200 of 3,683 generated exports, from five causes (section 3). With a rejection of the machine final in the default configuration ([the package on the re-check](rep-MO-1)) each of them is the product's verdict; with \code{\verb~|-X verify=reference~} every one is accepted.}
@@ -264,5 +266,105 @@
 \li{\strong{Mutants of real declarations}: none of Mathlib directly (five Mathlib units through the cslib slice) and none of cedar, navier-stokes-euler and reachability; no mutation makes a real eager comparison open, which is what would take a real declaration into the mechanism; the heavy slice of section 4.3 is incomplete.}
 \li{\strong{The differential engine in bulk}: \code{\verb~|-X engine=diff~} was used on the findings only.}
 \li{\strong{The package's variant that applies after the package on the K rule after a let application}, and the second candidate that the package is building after these findings: not looked at.}
+}
+}
+
+\subtree{
+\title{9. Second pass: the second candidate (the mode \code{union})}
+
+\p{2026-11-25 (04:41 to 05:15 UTC of the following UTC day). After the findings of the two reviewers the package built a second mechanism ([its report](rep-MO-3), section 14): the eager comparison runs in place under the bit; a comparison that is false under the bit is asked again in plain mode at its own level; two applications of one recursor that are false both ways are compared argument by argument as they stand; in a declaration that has had an eager-only event a false plain comparison is asked under the bit; no false entry crosses the modes; a session is forgotten after a declaration with an eager-only event. No search by expression, no run alone. Setting \code{\verb~|-X machine.eager-mode=union|deferred~}, default \code{union}. The same method as before (section 1), with the \strong{published build} (a copy of the shared distribution) in the place of the base build and the limits of section 1 on every run (3 GiB heap, 120 s; 6 GiB and 120 s for an official check).}
+
+\subtree{
+\title{9.1 Verdict}
+
+\ul{
+\li{\strong{Verdict: NO-GO as built - but not from this reviewer's own inputs.} The other reviewer's second pass ([RV-3A](rep-RV-3A)) found an official accept that the candidate rejects and the published build accepts (a recursor left stuck under the bit without an eager-only event, read as stuck in plain mode beside a recursor whose minor premise is expensive) and a file whose verdict depends on the schedule. Both were run through this review's harness and reproduce: official accept, candidate reject, published build, mode \code{deferred} and reference engine accept on the two exports of the first; ten default runs of the candidate on the 400-theorem file of the second give accept and reject (exit 0 0 1 1 0 0 1 0 1 0), five of the published build accept. The generator of this review has no atom for that class - every minor premise in it is a literal - and found none of it.}
+\li{\strong{This reviewer's own inputs found no wrong verdict}: no input on which the published build gives the official verdict and the candidate gives a wrong one. No wrong rejection on 5,216 generated exports (the first build: 255) and 2,343 real inputs; no accept of a false step (808 generated exports with one, and 46 more in the cost family: all rejected); one verdict under every schedule on 83 files of 300 theorems and on 3,683 exports under seven configurations. The author's counts on the reviewer's corpus are reproduced.}
+\li{\strong{One condition, finding U1}: the candidate is exponential in the depth of a failing comparison once the declaration has an eager-only event, also when the failing comparison is a step of a comparison that SUCCEEDS; from depth 24 the unit ends at the machine's tick bound and \strong{the machine declines it}. With the default fallback the reference engine then gives the official verdict, so the exit status is right; the cost is about 5 s per accepted unit and 20 s for a rejected one where the published build needs 0.01 s, and with \code{\verb~|-X fallback=none~} an official accept becomes a decline where the published build's machine accepts by itself. Hostile input only: no real input reaches it (no eager-only event in 2,347 real inputs). Whether that is acceptable for a default is the maintainer's decision; it must be decided before the fallback is taken away, and the package's sentence "no decline" does not hold for hostile input.}
+\li{\strong{The candidate accepts more derivable statements than the published build}: 108 exports that the published build rejects with the official checker (34 of the first corpus: an entry for an intermediate pair, section 3; 74 of the family with a Nat function that does not compute, which are derivable only under the kernel's Nat extension - section 9.3). None is an accept of a false step.}
+}
+}
+
+\subtree{
+\title{9.2 The author's claims on the reviewer's corpus, run again}
+
+\table{
+\tr{\th{Set}\th{Official accept / reject}\th{Second candidate: official verdict / accept, derivable / wrong reject / accept of a false step}\th{Published build}\th{First candidate}}
+\tr{\td{the 3,683 generated exports of the first pass}\td{1,577 / 2,106 (284 with a false step)}\td{2,264 / 1,419 / 0 / 0}\td{2,298 / 1,385 / 0 / 0}\td{2,925 / 558 / 200 / 0}}
+\tr{\td{the 42 proposed rows}\td{21 / 21}\td{28 / 14 / 0 / 0}\td{29 / 13 / 0 / 0}\td{26 / 5 / 11 / 0}}
+\tr{\td{the 1,490 real inputs of the first pass outside the heavy slice (1,486 with an official verdict)}\td{727 / 759}\td{1,486 / 0 / 0 / 0}\td{1,486 / 0 / 0 / 0}\td{1,486 / 0 / 0 / 0}}
+\tr{\td{the 48 exports of the schedule family, 34 runs each (1, 2, 4, 8 workers by batch and pipelined loading four times on the executable, twice on the JVM launcher)}\td{28 / 20}\td{one verdict in every run: accept (20 of them accepts of derivable statements)}\td{not run again}\td{4 schedule-dependent (F6)}}
+}
+
+\p{The author's figures (2,263 / 1,418 / 0 of 3,681; published 2,297 / 1,384 / 0) are these without the reviewer's two probe exports. The seven schedule configurations of section 1 on all 3,683 exports: no verdict differs from the default run's. The reference engine of the candidate gives the official verdict on every generated export; the mode \code{deferred} of the candidate gives the published build's verdict on every one.}
+}
+
+\subtree{
+\title{9.3 New families}
+
+\table{
+\tr{\th{Family}\th{Exports}\th{What it holds}\th{Official accept / reject}\th{with a false step}\th{Second candidate: official / accept, derivable / wrong reject / false step accepted}\th{Published build}\th{First candidate}}
+\tr{\td{U}\td{819}\td{21 pairs by 24 histories by two positions. False pairs that a congruence of two recursor applications, a union or a comparison asked both ways could let through: two applications of \code{\verb~|Eq.rec~} with different minor premises (7 and 8), over K-stuck and K-reducing majors; two over-applied ones (the motive gives \code{\verb~|Nat -> Nat~}) with different further arguments; a non-K recursor with majors of different values; a pair of applications with one false sub-pair beside one that is true in one mode only; different shapes. True twins: a differently written motive, different numbers of arguments, sub-pairs that are each true in one mode only. Histories: alone, after a harmless eager-only event in plain mode and under the flag, after a plain K reduction, after the pair of stuck recursors under the flag, after the suite's pair in both modes, across declarations and sibling binders}\td{121 / 698}\td{468}\td{628 / 191 / 0 / 0}\td{628 / 191 / 0 / 0}\td{678 / 86 / 55 / 0}}
+\tr{\td{N}\td{112}\td{failing comparisons nested under the flag: a chain of 1, 2, 5 and 12 applications of a two-argument axiom whose second arguments are the pair of stuck recursors (true under the flag only) and whose innermost pair is the suite's pair (true in plain mode only) or a false one; 14 histories}\td{0 / 112}\td{56}\td{56 / 56 / 0 / 0}\td{56 / 56 / 0 / 0}\td{100 / 12 / 0 / 0}}
+\tr{\td{G}\td{602}\td{\code{\verb~|Nat.gcd~} declared with a body that does not compute (the class of the other reviewer's finding): a pair that folds under the flag and does not unfold in plain mode, a K recursor whose K comparison is true under the flag only, alone and against a recursor whose K comparison is true in plain mode only; two steps over 7 pairs in four orders of the modes and three layouts}\td{215 / 387}\td{0 (see below)}\td{215 / 387 / 0 / -}\td{289 / 313 / 0 / -}\td{287 / 315 / 0 / -}}
+\tr{\td{\strong{U, N, G}}\td{\strong{1,533}}\td{}\td{336 / 1,197}\td{524}\td{899 / 634 / 0 / 0}\td{973 / 560 / 0 / 0}\td{1,065 / 413 / 55 / 0}}
+\tr{\td{\strong{with the first corpus}}\td{\strong{5,216}}\td{}\td{1,913 / 3,303}\td{808}\td{3,163 / 2,053 / 0 / 0}\td{3,271 / 1,945 / 0 / 0}\td{3,990 / 971 / 255 / 0}}
+}
+
+\p{Of the 5,216, 4,497 entered eager reduction in the candidate and 3,166 had an eager-only event. The machine declines no unit of them.}
+
+\p{\strong{Regressions against the published build} (the published build gives the official verdict, the candidate does not): 108, every one an accept of an official rejection, none a rejection of an official accept. 34 are exports of the first corpus: the pair behind two definitions, or behind an identity definition on one side, and then the bare pair under the flag (the class of section 3; the candidate, like the first build, has the plain answer for the intermediate pair, and the union reads it). They are derivable. 74 are exports of family G with the step \code{\verb~|RG p = R1 p~} under the flag, \code{RG} a recursor whose K comparison is true under the flag only (the fold of \code{\verb~|Nat.gcd~}), \code{R1} one whose K comparison is true in plain mode only: the official kernel reduces \code{RG} and leaves \code{R1} stuck; the union reduces both. The statement is derivable in the theory the official kernel implements (the Nat extension folds \code{\verb~|Nat.gcd (K4 p) 6~} to 2 whatever the declared body is, and then K applies to both); in the type theory without the extension it is not, because the declared body does not compute - but neither is \code{\verb~|Nat.gcd 4 6 = 2~} by \code{\verb~|Eq.refl~}, which the official checker accepts on the same export. So the truth label of family G is the value under the extension, and the family says nothing about a dishonest prelude beyond that: this is the place where "kind T" rests on a convention, and it is named here for the maintainer to judge.}
+
+\p{\strong{The four known official accepts} that the candidate and the published build both reject (the machine's K rule in plain mode) were not looked for again; no variant that the candidate rejects and the published build accepts appeared in any family.}
+}
+
+\subtree{
+\title{9.4 Finding U1: the cost, and declines of official accepts}
+
+\p{The package's report names a worst case that it did not build: after an eager-only event every false comparison is computed in both modes at every level, and no false answer is remembered. Built in three forms; \code{W} is an axiom, the failing pair stands under \code{d} applications of it. The times are single runs on a loaded host, not measurements in the project's sense: orders of magnitude.}
+
+\table{
+\tr{\th{Export}\th{Official}\th{Depth 16}\th{Depth 20}\th{Depth 24}\th{Depth 40, 80}\th{Published build, any depth}}
+\tr{\td{a false pair under the flag (\code{\verb~|W^d X = W^d (Z p)~}, 0 against 1)}\td{reject}\td{0.9 s, 4.3 M ticks}\td{9.2 s, 69 M ticks}\td{19 s: the tick bound (2^27) in the run and in the cold retry, the machine declines, the reference engine rejects}\td{the same, 22 s}\td{reject, 0.02 s}}
+\tr{\td{the same pair in PLAIN mode after a harmless eager-only event}\td{reject}\td{4.3 M ticks}\td{12.5 s}\td{17 s, declined, then rejected}\td{the same}\td{reject, 0.02 s}}
+\tr{\td{a TRUE statement: \code{\verb~|U (W^d X) = U (W^d (Z p))~} under the flag, \code{\verb~|U n := 5~} (the official same-head step compares the arguments, fails, unfolds: 5 = 5)}\td{\strong{accept}}\td{0.3 s}\td{1.3 s}\td{5.4 s: \strong{the machine declines} (two declines, \code{\verb~|BUDGET_STEPS~}), the reference engine accepts}\td{6.2 s, declined, then accepted}\td{accept by the machine, 0.01 s}}
+}
+
+\ul{
+\li{\strong{The growth is 2 per level}: 17 k, 271 k, 4.3 M and 69 M ticks at depths 8, 12, 16 and 20. Memory does not grow (24 MB).}
+\li{\strong{40 true theorems of the third form in one file} (each with a literal of its own; official: accept): the candidate needs 188 s of wall clock, the machine declines all 40 (80 declines counted with the cold retries) and the file is accepted through the reference engine only; the published build accepts in 0.00 s without a decline. With \code{\verb~|-X fallback=none~} the candidate \strong{declines} the one-theorem file (exit 2) and the published build accepts it (exit 0).}
+\li{\strong{40 false theorems of the first form}: the run ends at the first rejection, 15 s; the price of a rejected file is paid once.}
+\li{The other deep exports (a tree of applications, a chain with sub-pairs that are each true in one mode only) share their subterms and stay cheap: 77 exports of the first two forms and of these, 44 with a false step (all rejected), 16 with a decline of the machine.}
+\li{\strong{What it means.} No verdict is wrong. But on these inputs the verdict is the reference engine's, the machine's decline is hidden by the fallback, and the time is that of the tick bound - on accepted input once per such unit. The maintainer's instruction of this day is that the machine be the whole checker; the claim that this mechanism declines nothing holds for the corpora and not for this input.}
+}
+}
+
+\subtree{
+\title{9.5 The schedule}
+
+\p{83 files of 300 distinct theorems: the 48 of the first pass and 35 new ones in which every third theorem holds an eager-only event (five pairs by seven patterns: the event before, between and after the plain and the eager theorem, the event in the plain theorem itself). Every combination of 1, 2, 4 and 8 workers with batch and pipelined loading four times on the executable and once each on the JVM launcher with 8 workers, 34 runs per file: \strong{one verdict in every run of every file}, accept. 45 of the 83 are official rejections of derivable statements. The four files of F6 are among them and no longer depend on the schedule. As before, the driver gives a file of this size two workers at most, and nothing controls which unit goes to which session.}
+}
+
+\subtree{
+\title{9.6 Mutants of real declarations, second pass}
+
+\ul{
+\li{\strong{The corpora not reached before}: three units each of reachability, cedar and navier-stokes-euler as slices of their own and eight units of Mathlib as one slice of the Mathlib export (4.8 MB; the slicer needed 3.7 GB resident), with the mutations of section 2.2.}
+\li{\strong{A mutation that makes a real eager comparison open}: a Nat literal under a lambda binder of the target's value becomes a beta redex of a constant function applied to the bound variable (the same value, an open term). 244 such mutants, of targets of all corpora but the heavy slice.}
+\li{\strong{Result}: 857 new inputs (10 slices, 847 mutants), official 565 accept, 292 reject; the candidate and the published build give the same verdict on every one: the official verdict on 852, and an accept on 5 open mutants that the official checker rejects with "deep recursion detected" (the literal 2 of a power of two made open: the official kernel no longer folds and unfolds \code{\verb~|Nat.pow~}; the value is unchanged, the statement derivable; the reference engine ends at its heap limit on them). With the first pass: 2,347 real inputs, 2,343 with an official verdict, the candidate differs from it on those 5 only, as the published build does.}
+\li{\strong{No eager-only event in any of them}, the open mutants included: opening a literal of the certificate does not make the comparison under the flag fold anything that plain mode would not. So this source still does not reach the mechanism; the candidate and the published build differ on no real input. In 19 of the new inputs the machine declined a unit that the reference engine decided, in the candidate as in the first pass.}
+}
+}
+
+\subtree{
+\title{9.7 Not covered in the second pass}
+
+\ul{
+\li{\strong{Expensive minor premises}: every recursor of the generator has a literal as its minor premise, so no comparison of this corpus exhausts the budget of the machine's same-head probe; the other reviewer's wrong rejection of the candidate lives exactly there (section 9.1). A corpus that finds nothing in a class it does not contain proves nothing about it.}
+\li{\strong{Universe levels} in the congruence of two recursor applications: no false statement can be written with them (two applications that differ in a level have different types), so only minor premises, further arguments, majors and shapes were varied.}
+\li{\strong{The forgetting of a session} after a declaration with an eager-only event was looked at through the schedule only; no input shows what another worker's session holds.}
+\li{\strong{The bound of U1}: whether a cheaper failing comparison (below depth 16) can be repeated inside one declaration so often that an accepted real-looking unit reaches the tick bound was not tried; nor a failing comparison under binders.}
+\li{\strong{The differential engine in bulk}, the mutants of the heavy slice, a dishonest prelude other than the one Nat function of family G, the package's variant after the package on the K rule after a let application: as in section 8.}
+}
 }
 }
