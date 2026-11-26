@@ -116,9 +116,11 @@ description: |
   subterm written as two export records) may be accepted - what it states is derivable. With
   `-X policy=strict` RLVM declines such input instead of accepting it. In the other direction
   the machine is not aligned with the official checker on every hand-made export yet: twelve
-  known hostile exports that the official checker accepts are rejected, because the machine
-  keeps a result from an earlier declaration or keys its tables by values where the official
-  caches are keyed by terms and live for one declaration.
+  exports of the project's hostile suite that the official checker accepts are rejected, because
+  the machine keeps a result from an earlier declaration or keys its tables by values where the
+  official caches are keyed by terms and live for one declaration, and ten further hand-made
+  exports are known outside the suite (the K rule on a major premise that the machine types by
+  its value where the official kernel types the term; one order of eager reduction).
 
   Nothing derived in the export is trusted: recursors, constructor data and flags of inductive
   types are regenerated and compared with the exported records, the quotient declarations are
