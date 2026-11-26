@@ -1,0 +1,268 @@
+\title{RV-3B: adversarial review of eager reduction in place (package MO-3), from the outside: generated exports, mutants of real declarations, the schedule}
+\taxon{Report}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Review "RV-3B" of 2026-11-25 (01:58 to 03:05 UTC of the following UTC day). Its subject is the build of [package MO-3](rep-MO-3): the comparison of an \code{\verb~|eagerReduce _ _~} argument runs in place under the mode bit, pair entries whose answer can depend on the mode are local to their declaration, setting \code{\verb~|-X machine.eager-mode=local|shared|deferred~} with \code{local} proposed as the default. The reviewer did not write the patch and was asked to find an input on which it is wrong. A second reviewer read the patch against the official source ([RV-3A](rep-RV-3A)); this review did not start from the code: it starts from inputs and compares verdicts. The only reading of sources was the official kernel's \code{\verb~|type_checker.cpp~} of Lean 4.36.0 (to know what the official caches hold), the width of one field and, for the seeded fault of section 6, one method of the patch. Everything the review produced besides this tree (the generator, the harness, the exports of the findings with the official checker's outputs, the proposed rows) lies in the reviewer's working directory outside the repository and was handed over with it.}
+
+\subtree{
+\title{0. Result in one page}
+
+\ul{
+\li{\strong{Verdict: NO-GO for the mode \code{local} as the default, as built.} The build rejects exports that the official checker accepts and that the published mechanism accepts: 200 of 3,683 generated exports, from five causes (section 3). With a rejection of the machine final in the default configuration ([the package on the re-check](rep-MO-1)) each of them is the product's verdict; with \code{\verb~|-X verify=reference~} every one is accepted.}
+\li{\strong{No accept of a statement that is not derivable} was found: 284 generated exports carry a false step (a pair of terms with two different values), and the build rejects all of them in the modes \code{local}, \code{shared} and \code{deferred}, under seven schedule variants, as do the reference engine and the base build. No decline and no crash on any generated export or mutant; what ended at a limit is section 4.3.}
+\li{\strong{Five causes of a wrong rejection}, each shrunk to one theorem: F1 the K rule (the machine reduces a recursor that the official kernel leaves stuck under the flag, and a pair that is true only because both sides stay stuck becomes false: 146 exports); F2 an unread position, F3 a skipped proof position, F4 the same-head answer for two K recursors (a shortcut of plain mode skips a comparison that the official kernel makes and caches, and a later comparison under the flag that the official cache answers is computed and is false: 30, 10 and 1 exports); F5 the bound of the search by expression (the risk that the package's report calls not demonstrated: 13 exports; 32 nested beta redexes are enough).}
+\li{\strong{A schedule dependence that the base build does not have} (F6): on four exports of 300 distinct theorems the build accepts with one worker and rejects or accepts from run to run with two, four and eight workers. The official verdict of these files is a rejection; the statements are derivable.}
+\li{\strong{A class of accepts of derivable statements that the package's report does not name}: the machine writes a pair entry for an intermediate pair of lazy unfolding, which the official kernel does not cache (16 exports that the build accepts and the official checker and the base build reject). Allowed by the practical policy, but it is a fourth cause beside the three of the report's section 10.}
+\li{\strong{The mode \code{shared}} is not a fallback: it rejects 190 official accepts of the generated set (the same causes except F3) and accepts 291 official rejects on which \code{local} gives the official verdict. \strong{The mode \code{deferred}} of the build gave the base build's verdict on every one of the 3,683 exports: no wrong rejection, 1,385 accepts of derivable statements that the official checker rejects.}
+\li{\strong{Mutants of real declarations}: 37 slices around 56 real declarations that use eager reduction and 1,499 targeted mutants of 44 of them (official: 747 accept, 771 reject on the 1,518 inputs that it decided within the limits): the build gives the official verdict on every one that was decided on both sides. No eager-only event occurs in any of them: the comparisons of real declarations are closed, which is why the corpora do not see what the generated exports see.}
+\li{\strong{The harness sees a fault}: a review copy of the build in which the search by expression answers true accepts 89 of the false-step exports it was given, and the harness reports each (section 6).}
+}
+}
+
+\subtree{
+\title{1. Conditions}
+
+\ul{
+\li{\strong{Builds}: the candidate is the development distribution that the package gated (the executable, a GraalVM Community Edition native image, and the JVM launcher on the same jars); the base build is the package's pristine twin of the main tree of 22:46 UTC, the published mechanism with a rejection of the machine final. Both were used as they stand, read-only.}
+\li{\strong{The official verdict} of every input: \code{\verb~|leanchecker --from-export~} of Lean 4.36.0 (commit \code{611c117b}) in the project's arena image without network, the method of [the gate](design-gate) in a script of the reviewer's own, one container per batch. For the mutants of real declarations each check had 6 GiB of address space and 120 s; a check that ends at a limit has no official verdict and is counted as such. A rejection by the export reader is a rejection.}
+\li{\strong{The comparison}, per input: the official checker; the candidate without any option (the mode \code{local}); the candidate with \code{\verb~|-X machine.eager-mode=shared~} and with \code{deferred}; the candidate with \code{\verb~|-X engine=reference~}; the base build without any option. The counters \code{\verb~|machine.eager.*~} of the candidate's default run are read from its statistics file. Leads were followed with \code{\verb~|-X engine=diff~} and \code{\verb~|-X verify=reference~}. Every RLVM run of the mutants of real declarations had a 3 GiB heap and 120 s (40 s on the heavy slice of section 4.3).}
+\li{\strong{The schedule}: the candidate's default configuration again with \code{\verb~|--threads 1~}, \code{4}, \code{8}, with 4 workers and \code{\verb~|-X load=batch~} and \code{\verb~|-X load=pipelined~}, and through the JVM launcher with 1 and 8 workers: seven further runs per export, for 3,615 of the generated exports. For the files with many declarations (section 5) every combination of 1, 2, 4 and 8 workers with batch and pipelined loading five times on the executable and once each on the JVM launcher with 8 workers.}
+\li{\strong{Nothing here is a timing.} The bulk runs stood behind \src{bench/slot.sh} on the cores outside the measurement set.}
+}
+}
+
+\subtree{
+\title{2. The inputs}
+
+\subtree{
+\title{2.1 The generator}
+
+\p{Built on the hostile suite's builder (\src{rlvm-machine/src/test/resources/s/gen/lk.py}, the arena's prelude) and the blocks of the suite's eager family. An export is a list of declarations; a declaration is a list of groups, each one binder instance \code{\verb~|p : And True True~}, optionally with a let variable or with one or two variables of type Nat under it; a group is a list of steps. A step proves an equation \code{\verb~|L = R~} between two \em{atoms}, in plain mode (by \code{\verb~|Eq.refl L~}, directly, through a beta redex, through an identity definition, as a let value or inside one or three inner binders) or under eager reduction (the application \code{\verb~|eagerReduce (L = L) (Eq.refl L)~} in one of fourteen positions: the argument of an axiom, of a beta redex, of a constructor, the minor premise of a recursor, under a further binder, inside a let, nested twice in two forms, nested 150 and 400 times, as a let value and with a third argument - the two forms that are plain mode officially -, inside the TYPE of the theorem as the argument of a dependent axiom, with a plain proof inside, with a wrong universe).}
+
+\p{\strong{Truth.} Every atom has a value, what it evaluates to at \code{\verb~|And.intro~}. Because \code{p} is a proof, every open atom is convertible in Lean's type theory to its instance at \code{\verb~|And.intro~}; so an export all of whose steps join atoms of one value is derivable, and an export with a step that joins two values is not (0 against 1, a variable \code{n} against a variable \code{m}, a let variable against a lambda variable). The label is the generator's; the official verdict is never predicted, always taken from the official checker. An accept of an export with a false step would be a wrong accept of a statement that is not derivable, whatever the official checker says about its other steps; an accept of an export without one that the official checker rejects is an accept of a derivable statement (kind T).}
+
+\p{\strong{The atoms} (about 90): the suite's pair, \code{\verb~|X = Nat.add (G intro) 0~} and \code{\verb~|Y p = Nat.add (G p) 0~} (true in plain mode, false under the flag), its harmless sibling \code{\verb~|Nat.add 0 1~} against \code{\verb~|K1 p~}, a wrong sibling \code{\verb~|Z p = Nat.add (G p) 1~}; the pair behind \code{\verb~|Nat.succ~}, behind each of six Nat operations in either argument, behind an axiom, behind identity definitions of three reducibility hints, behind a projection of a pair, behind two closures of one lambda, behind a lambda, behind a let, behind 1 to 300 nested beta redexes, behind 3, 150 and 400 applications of an axiom, as two definitions that unfold to it; a definition that ignores its argument (with one and with two arguments, the pair in the first or in the last position, a failing argument beside it); a definition that reads its argument by a recursor; two applications that differ in a proof only, directly and as two definitions; K recursors \code{\verb~|Eq.rec 7 (e p)~} over axioms \code{e} of type \code{\verb~|X = Y p~} (two of them), \code{\verb~|X = Y2 p~} with \code{G2} a copy of \code{G} under another name, and \code{\verb~|X = X~}; four Bool terms for the \code{\verb~|Bool.true~} test; atoms with a let variable and with Nat variables.}
+
+\table{
+\tr{\th{Family}\th{Exports}\th{What varies}}
+\tr{\td{A}\td{1,008}\td{16 pairs by 13 histories of the two modes (eager alone; plain then eager and the reverse in one binder, in two declarations, in sibling binders; a harmless eager step first; three steps; a definition with the checked term and then a theorem; two eager steps) by 11 positions (all positions for three histories, three positions for the others)}}
+\tr{\td{B}\td{420}\td{21 larger pairs whose official plain comparison compares the pair \code{\verb~|X / Y p~} on its way, by the pair itself in either orientation, by 10 orders of the two (the larger pair plain and the pair eager in one binder, in two declarations, in sibling binders, and the reverse)}}
+\tr{\td{C}\td{729}\td{two steps over 9 pairs around the K rule, by three orders of the modes, by three layouts (one binder, two declarations, sibling binders)}}
+\tr{\td{D}\td{165}\td{the \code{\verb~|Bool.true~} test: 5 Bool terms, the term on the left and as the stated type, 11 histories, 3 positions}}
+\tr{\td{E}\td{120}\td{a let variable in the pair: 6 pairs, 10 histories with one let value and with two different ones, 2 positions}}
+\tr{\td{F}\td{46}\td{comparisons deeper than the host depth bound of 128 (the pair under 150 and 400 applications; an eager application nested 150 and 400 times), with a plain pair after a deep harmless eager step and the reverse}}
+\tr{\td{H}\td{367}\td{51 pairs over reducibility hints and Nat operations by 7 histories; ten exports with large literals (their stated literal was written wrong by the reviewer: they are false-step exports, all rejected; the intended true ones were not made)}}
+\tr{\td{I}\td{166}\td{the cached pair under other records: 1 to 300 nested redexes, a let, a definition, two closures; the plain step inside one or three inner binders, the eager one outside; two more positions}}
+\tr{\td{J}\td{52}\td{Nat variables: the pair cached for \code{n} and asked for \code{m}, with and without a redex; a let variable and a lambda variable at one depth}}
+\tr{\td{K}\td{240}\td{\code{eagerReduce} declared as an abbreviation, with another height, as an opaque constant and as an axiom (the official kernel knows it by its name only)}}
+\tr{\td{L}\td{320}\td{the SAME eager term in a later declaration: 8 pairs, 10 histories, 4 positions}}
+\tr{\td{M}\td{48}\td{300 theorems per file, each with a literal of its own so that no two are one unit: 6 pairs by 8 patterns (section 5)}}
+\tr{\td{probes}\td{2}\td{the first finding and its plain twin}}
+}
+}
+
+\subtree{
+\title{2.2 Mutants of real declarations}
+
+\p{The declarations of an export whose type or value holds an application \code{\verb~|eagerReduce _ _~} as an argument were listed by a scan: Init 164, Std 203, con-leche 88, cslib 2,406; in none of them does the application itself contain a bound variable (it is the closed \code{\verb~|eagerReduce (true = true) (Eq.refl true)~} of the arithmetic tactics; what is open is the expected type). 56 of them were cut out with \src{bench/workloads/slice-export.py} (the dependency cone, other theorems as axioms): 28 of Init (every sixth), 4 of Std, 4 of con-leche with \code{\verb~|ConLeche.lpOfData_pack~}, the unit that the published build declines, each as a slice of its own (0.3 to 11.9 MB), and one slice of cslib (5.1 MB) with 20 targets, among them 12 units of \code{\verb~|Batteries.Data.Char.Basic~}, 3 of cslib and 5 of Mathlib; 8 of its targets were mutated.}
+
+\p{The mutator is the reviewer's own and changes what the eager comparison decides and where it stands: \code{strip} (every \code{\verb~|eagerReduce T a~} below the target becomes \code{a}: the comparison is then a plain one); \code{add} (an argument \code{\verb~|Eq.refl A x~} of the target's value becomes \code{\verb~|eagerReduce (Eq A x x) (Eq.refl A x)~}: a comparison that was plain runs under the flag, one argument per mutant and all at once); a Nat literal below the target changed locally; a literal or a constant of a definition of the slice changed in place (what the comparison unfolds); a constant below the target swapped with a relative (\code{\verb~|Nat.add~} and \code{\verb~|Nat.mul~}, \code{\verb~|Nat.ble~} and \code{\verb~|Nat.beq~}, \code{\verb~|Bool.true~} and \code{\verb~|Bool.false~} and so on); \code{\verb~|Bool.true~} changed inside the type argument of \code{eagerReduce}; the target declared twice; a twin without \code{eagerReduce} declared before or after the target; a twin with every \code{\verb~|Eq.refl~} argument under \code{eagerReduce} before or after it; a copy, a plain twin and a copy after it. 1,499 mutants.}
+}
+}
+
+\subtree{
+\title{3. Findings}
+
+\p{Every finding is one theorem under one binder unless said otherwise; the official verdicts are leanchecker 4.36.0 in Docker; "the candidate" is the build under review in its default mode on the executable and on the JVM launcher, with 1, 4 and 8 workers; the base build is the published mechanism. Exit status 1 is a rejection.}
+
+\subtree{
+\title{F1. Wrong rejection: the K rule reduces a recursor that the official kernel leaves stuck}
+
+\p{\code{\verb~|R1 p = Eq.rec 7 (e p)~} with \code{\verb~|e p : X = Y p~}; \code{\verb~|R2 p = Eq.rec 7 (e2 p)~} with \code{\verb~|e2 p : X = Y2 p~}, \code{\verb~|Y2 p = Nat.add (G2 p) 0~}, \code{G2} a definition with the body of \code{G} under another name. The theorem is \code{\verb~|R1 p = R2 p~} proved by \code{\verb~|S.use _ (eagerReduce (R1 p = R1 p) (Eq.refl (R1 p)))~}.}
+
+\ul{
+\li{Official: \strong{accept}. Under the flag the K comparison of \code{R1} (\code{\verb~|X = Y p~} against \code{\verb~|X = X~}) is false, because the closed side folds first; that of \code{R2} is false in either mode, because \code{\verb~|G intro~} against \code{\verb~|G2 p~} unfolds to 0 against a stuck recursor. Both recursors stay stuck and are compared argument by argument: \code{\verb~|Y p~} against \code{\verb~|Y2 p~} is true (both \code{G} unfold to one term), the two proofs have convertible types.}
+\li{Candidate: \strong{reject} (exit 1, \code{\verb~|APP_TYPE_MISMATCH~}); also in the mode \code{shared}. \code{deferred}, the reference engine, \code{\verb~|-X verify=reference~} and the base build accept; \code{\verb~|-X engine=diff~} names the unit: primary engine reject, reference kernel accept. Counters: 6 K comparisons asked again in plain mode, 2 of them true, one run alone.}
+\li{Cause: rule 6 of the package (a K comparison that fails under the bit after an eager-only event is asked again in plain mode, and the recursor reduces if either answer is true). \code{R1 p} becomes 7, \code{R2 p} stays stuck, and 7 against a stuck recursor is false. The report says of this rule that "the reduction is valid either way; what the rule can add is the acceptance of a derivable statement". It can also take one away: a comparison that is true because both sides are stuck is lost when one side reduces.}
+\li{The pair is \strong{true under the flag and false in plain mode} with an honest prelude (in plain mode the official checker rejects the same statement: \code{R1 p} is 7). Section 5.1 of the package's report says no such pair was found; the K rule makes one.}
+\li{146 generated exports: every export in which the pair \code{\verb~|R1 p = R2 p~} (or its mirror) stands under the flag before a plain reduction of \code{R1 p} in the same binder, in every position of the application, and with \code{eagerReduce} declared in four other ways.}
+\li{The plain twin (the same statement by \code{\verb~|Eq.refl~}, no \code{eagerReduce}) is an official rejection that the candidate, the base build and the published build accept and the reference engine rejects: the statement is derivable (\code{\verb~|Y2 p~} is \code{X} by proof irrelevance, K applies to both), the machine answers two applications of one recursor argument by argument. Kind T, not new, not about eager reduction.}
+}
+}
+
+\subtree{
+\title{F2, F3, F4. Wrong rejections: a shortcut of plain mode skips a comparison that the official kernel makes and caches}
+
+\p{One root, different from F1. The official success cache holds every pair that a successful comparison compared on its way; a later comparison under the flag of such a sub-pair is answered from the cache. The machine, in plain mode, takes a shortcut that never looks at the sub-pair, so no entry exists; under the bit it computes the sub-pair with the eager order, which is false; the search by expression finds nothing, because nothing was written; and the run alone before the rejection (rule 7) repeats the same shortcut. In each case the first step is in plain mode and the second is \code{\verb~|X = Y p~} under \code{eagerReduce} in the same binder; official \strong{accept}, candidate \strong{reject}, base build, \code{deferred}, reference engine and \code{\verb~|-X verify=reference~} accept.}
+
+\table{
+\tr{\th{Finding}\th{The plain step}\th{What the official kernel compares and caches}\th{What the machine does}\th{Mode \code{shared}}\th{Exports}}
+\tr{\td{F2, an unread position}\td{\code{\verb~|U X = U (Y p)~} by \code{\verb~|Eq.refl~}, \code{\verb~|U n := 5~}; also \code{\verb~|U2 0 X = U2 1 (Y p)~} with \code{\verb~|U2 a b := 5~}, and \code{\verb~|U (W2 X 0) = U (W2 (Y p) 1)~} with \code{W2} an axiom}\td{the same-head step compares the arguments although the definition ignores them: \code{X} against \code{\verb~|Y p~}, true and cached. With two arguments the same-head step goes from the last argument to the first, the comparison of two applications of an axiom from the first to the last: the pair is cached when it is met before the failing argument, and the twins with the pair on the other side are official rejections}\td{skips the unread position}\td{rejects}\td{30}}
+\tr{\td{F3, a proof position}\td{\code{\verb~|S.L p = S.R p~} by \code{\verb~|Eq.refl~}; \code{\verb~|S.L p := G5 (Y p) (Eq.refl X)~} and \code{\verb~|S.R p := G5 (Y p) (e p)~} are two definitions}\td{unfolds both and compares the two proofs by their types, \code{\verb~|X = X~} against \code{\verb~|X = Y p~}, in plain mode: cached}\td{skips the proof position; the entry that the check of \code{S.L} wrote is local to that declaration}\td{accepts (the entry of the earlier declaration is read)}\td{10}}
+\tr{\td{F4, two K recursors}\td{\code{\verb~|Eq.rec 7 (e p) = Eq.rec 7 (eb p)~} by \code{\verb~|Eq.refl~}, two axioms of type \code{\verb~|X = Y p~}}\td{reduces both recursors first; the K comparison \code{\verb~|X = Y p~} against \code{\verb~|X = X~} is true in plain mode and cached}\td{answers the two applications argument by argument and never makes the K comparison}\td{rejects}\td{1}}
+}
+
+\p{The rows \code{\verb~|mo3-proofpos-*~} and \code{\verb~|mo3-susp-*~} of the package cover the other direction of this root (the shortcut hides the pair from the mark, an accept of a derivable statement in a later declaration). The direction found here is the one that matters with a final rejection: any plain shortcut that saves a comparison the official kernel makes is a missing cache entry under the flag. The three found are not a complete list; the generator has no atom for the other shortcuts of the default set.}
+}
+
+\subtree{
+\title{F5. Wrong rejection: the bound of the search by expression}
+
+\p{The package's row \code{\verb~|mo3-binder-inner-closed-between-other-records-ok~} with the argument of \code{G} behind 32 nested beta redexes instead of one: \code{\verb~|Yr p = Nat.add (G ((fun z => z) (... p))) 0~}; under \code{p} the pair \code{\verb~|X = Yr p~} in plain mode inside an inner binder, then under \code{eagerReduce} outside it. Official: \strong{accept} (the two instantiated terms are one term, the success cache answers). Candidate: \strong{reject}, also in the mode \code{shared}; \code{deferred}, the reference engine, \code{\verb~|-X verify=reference~} and the base build accept. With 24 redexes the candidate accepts, with 32, 40 and 300 it rejects: a redex is about eight nodes, the bound of the search is 256 nodes per side. This is item 5 of the report's section 10, "not demonstrated"; it needs no large term. 13 exports.}
+}
+
+\subtree{
+\title{F6. Schedule dependence, new with the package}
+
+\p{Four exports of 300 distinct theorems (each carries a step \code{\verb~|k = k~} with a literal of its own, so that the loader does not treat two of them as one unit): a theorem that proves \code{\verb~|S.L p = S.R p~} in plain mode (the pair behind a skipped proof position, the kind T class of the report's section 10, item 3) and theorems that need it under \code{eagerReduce}, alternating or one plain theorem before 300 eager ones, each also with the eager step in the plain theorem. The official verdict of each file is a rejection (the first eager-only theorem); the statements are derivable.}
+
+\table{
+\tr{\th{Export}\th{1 worker, batch and pipelined, 5 runs each}\th{2 workers}\th{4 workers}\th{8 workers}\th{JVM launcher, 8 workers}\th{Base build, 1, 2 and 8 workers, 6 runs each}}
+\tr{\td{plain and eager alternating}\td{accept 10 of 10}\td{reject 7, accept 3}\td{reject 6, accept 4}\td{reject 5, accept 5}\td{reject 2 of 2}\td{accept 18 of 18}}
+\tr{\td{plain with the eager step, and eager alone, alternating}\td{accept 10 of 10}\td{reject 7, accept 3}\td{reject 4, accept 6}\td{reject 8, accept 2}\td{reject 2 of 2}\td{accept 18 of 18}}
+\tr{\td{one plain theorem, then 300 eager ones}\td{accept 10 of 10}\td{reject 10 of 10}\td{reject 10 of 10}\td{reject 10 of 10}\td{reject 2 of 2}\td{accept 18 of 18}}
+\tr{\td{the same with the eager step in the first theorem}\td{accept 10 of 10}\td{reject 10 of 10}\td{reject 10 of 10}\td{reject 10 of 10}\td{reject 2 of 2}\td{accept 18 of 18}}
+}
+
+\p{The candidate's verdict is a function of which session checked the earlier declaration: the entry of the plain theorem is not local (the shortcut hid the pair from the mark), so it answers under the flag in the session that wrote it and nowhere else. The mode \code{shared} behaves the same (accept with one worker, rejections with eight). The base build accepts in every run, because its eager comparison takes the shortcut itself. That hostile exports can depend on the session is known for the published build ([the insight on sessions](ins-RPOG)); these four are exports on which the published build does not depend on it and the candidate does. All eight patterns of the family were run for six pairs; only this pair shows it, in four of its eight patterns.}
+}
+
+\subtree{
+\title{An accept of a derivable statement that the report does not name}
+
+\p{\code{\verb~|S.SAc = S.SA p~} by \code{\verb~|Eq.refl~}, where \code{\verb~|S.SAc := X~} and \code{\verb~|S.SA p := Y p~} are two definitions, then \code{\verb~|X = Y p~} under \code{eagerReduce} in the same binder. Official: reject. The official kernel unfolds both sides and continues with \code{X} against \code{\verb~|Y p~} inside its lazy unfolding loop, where a success is not cached: the cache holds the pair of applications and the argument pairs of \code{\verb~|Nat.add~}, not \code{X} against \code{\verb~|Y p~}. The candidate accepts in the modes \code{local} and \code{shared}: the machine writes an entry for the intermediate pair. The base build and the mode \code{deferred} reject. 16 exports (the pair behind two definitions, or behind an identity definition on one side, in the same binder and in a sibling binder). The same holds, in the candidate and in the base build alike, for a pair behind a projection and behind \code{\verb~|Nat.succ~} (the reducts are compared, only the outer pair is cached). All are derivable statements; the practical policy allows the accept. It is a fourth cause of such accepts beside the three of the report's section 10 (the K rule, binder instances, a pair that a shortcut hides).}
+}
+}
+
+\subtree{
+\title{4. Counts}
+
+\subtree{
+\title{4.1 Generated exports}
+
+\p{3,683 exports. Official: 1,577 accept, 2,106 reject. Of the rejections, 284 are exports with a false step and 1,822 are derivable statements that the official checker rejects through its eager order or the state of its caches - the set is not rejected for one trivial reason: about three quarters of the official rejections are an application type mismatch whose argument is the \code{eagerReduce} application, the others a mismatch at a plain step (another argument, the declared type against the value, a let value), every one in the theorem the generator aimed at. "Wrong reject" and "accept, derivable" are the candidate's default mode against the official verdict; the counters say how many exports reached the mechanism: at least one unit that entered eager reduction and was kept by the machine; an eager-only event; a local entry written; a local entry of another declaration read as absent; a K comparison asked again; a search by expression asked, and one that answered; a declaration checked again alone.}
+
+\table{
+\tr{\th{Family}\th{Exports}\th{Official accept}\th{Official reject}\th{of them with a false step}\th{Candidate gives the official verdict}\th{Wrong reject (base accepts)}\th{Accept, derivable (base accepts too)}\th{Accept, derivable (base rejects)}\th{Entered eager reduction}\th{Eager-only event}\th{Local entry written}\th{Dead local entry read}\th{K asked again}\th{Search asked}\th{Search answered}\th{Run alone}}
+\tr{\td{A}\td{1,008}\td{505}\td{503}\td{63}\td{872}\td{19}\td{117}\td{0}\td{848}\td{486}\td{799}\td{260}\td{53}\td{382}\td{0}\td{350}}
+\tr{\td{B}\td{420}\td{194}\td{226}\td{0}\td{308}\td{40}\td{60}\td{12}\td{420}\td{200}\td{302}\td{106}\td{4}\td{232}\td{0}\td{226}}
+\tr{\td{C}\td{729}\td{206}\td{523}\td{0}\td{390}\td{103}\td{236}\td{0}\td{702}\td{599}\td{648}\td{52}\td{519}\td{592}\td{0}\td{356}}
+\tr{\td{D}\td{165}\td{90}\td{75}\td{33}\td{156}\td{0}\td{9}\td{0}\td{111}\td{24}\td{120}\td{12}\td{6}\td{12}\td{0}\td{6}}
+\tr{\td{E}\td{120}\td{34}\td{86}\td{60}\td{118}\td{0}\td{2}\td{0}\td{108}\td{52}\td{76}\td{0}\td{0}\td{48}\td{0}\td{48}}
+\tr{\td{F}\td{46}\td{26}\td{20}\td{0}\td{44}\td{0}\td{2}\td{0}\td{46}\td{30}\td{38}\td{10}\td{0}\td{18}\td{0}\td{18}}
+\tr{\td{H}\td{367}\td{136}\td{231}\td{10}\td{348}\td{0}\td{15}\td{4}\td{262}\td{188}\td{267}\td{33}\td{0}\td{140}\td{0}\td{140}}
+\tr{\td{I}\td{166}\td{85}\td{81}\td{4}\td{147}\td{13}\td{6}\td{0}\td{134}\td{82}\td{129}\td{4}\td{0}\td{76}\td{16}\td{62}}
+\tr{\td{J}\td{52}\td{12}\td{40}\td{26}\td{46}\td{0}\td{6}\td{0}\td{50}\td{14}\td{42}\td{0}\td{0}\td{14}\td{0}\td{14}}
+\tr{\td{K}\td{240}\td{132}\td{108}\td{48}\td{204}\td{24}\td{12}\td{0}\td{216}\td{168}\td{192}\td{48}\td{36}\td{96}\td{0}\td{96}}
+\tr{\td{L}\td{320}\td{128}\td{192}\td{40}\td{253}\td{0}\td{67}\td{0}\td{284}\td{124}\td{272}\td{131}\td{31}\td{97}\td{0}\td{89}}
+\tr{\td{M}\td{48}\td{28}\td{20}\td{0}\td{39}\td{0}\td{9}\td{0}\td{42}\td{22}\td{42}\td{34}\td{2}\td{17}\td{0}\td{11}}
+\tr{\td{probes}\td{2}\td{1}\td{1}\td{0}\td{0}\td{1}\td{1}\td{0}\td{1}\td{1}\td{2}\td{0}\td{1}\td{1}\td{0}\td{1}}
+\tr{\td{\strong{all}}\td{\strong{3,683}}\td{1,577}\td{2,106}\td{284}\td{2,925}\td{\strong{200}}\td{542}\td{16}\td{3,224}\td{1,990}\td{2,929}\td{690}\td{652}\td{1,725}\td{16}\td{1,417}}
+}
+
+\p{The 200 wrong rejections by cause: F1 146, F2 30, F3 10, F4 1, F5 13. Every one is accepted by the base build, by the mode \code{deferred} and by the reference engine. No export is declined by the candidate or ends in an error; the machine declines no unit of any generated export.}
+
+\p{\strong{The other engines on the same 3,683 exports.} The reference engine of the candidate gives the official verdict on every one. The mode \code{deferred} gives the base build's verdict on every one: no rejection of an official accept, 1,385 accepts of official rejections, none of them of a false-step export. The mode \code{shared} differs from \code{local} on 301 exports: it rejects 190 official accepts (the 200 of \code{local} without the 10 of F3) and accepts 849 official rejections, 291 of them rejections that \code{local} gets right. All 284 false-step exports are rejected by every engine, every mode and every schedule variant.}
+}
+
+\subtree{
+\title{4.2 Mutants of real declarations}
+
+\p{37 slices and 1,499 mutants; the official checker decided 1,518 of the 1,536 inputs within its limits: 747 accept, 771 reject. Of the rejections of the 1,490 inputs outside the heavy slice, 141 are an application type mismatch whose argument is the \code{eagerReduce} application (the eager comparison decided), 514 a type mismatch at another application of the mutated term, 3 another kernel error, and 101 are rejections by the export reader that test nothing (a constant swapped in place for a name that the file declares later: an error of the reviewer's mutator, 101 of the 280 mutants of that kind).}
+
+\table{
+\tr{\th{Mutation}\th{Inputs}\th{Official accept}\th{Official reject}\th{No official verdict}\th{Candidate gives the official verdict}\th{Entered eager reduction}\th{Local entry written}\th{Dead local entry read}\th{The machine declined a unit}}
+\tr{\td{the slices as cut}\td{37}\td{37}\td{0}\td{0}\td{37}\td{37}\td{31}\td{1}\td{0}}
+\tr{\td{\code{strip}}\td{43}\td{43}\td{0}\td{0}\td{43}\td{8}\td{37}\td{6}\td{0}}
+\tr{\td{\code{add}, one argument}\td{97}\td{97}\td{0}\td{0}\td{97}\td{97}\td{97}\td{20}\td{0}}
+\tr{\td{\code{add}, all arguments}\td{18}\td{18}\td{0}\td{0}\td{18}\td{18}\td{18}\td{7}\td{0}}
+\tr{\td{literal below the target}\td{348}\td{7}\td{337}\td{4}\td{344}\td{164}\td{290}\td{23}\td{37}}
+\tr{\td{literal of a definition}\td{280}\td{256}\td{24}\td{0}\td{280}\td{262}\td{227}\td{0}\td{3}}
+\tr{\td{constant below the target}\td{120}\td{0}\td{120}\td{0}\td{120}\td{72}\td{99}\td{5}\td{10}}
+\tr{\td{constant of a definition}\td{280}\td{45}\td{235}\td{0}\td{280}\td{52}\td{58}\td{0}\td{0}}
+\tr{\td{the stated type}\td{43}\td{0}\td{43}\td{0}\td{43}\td{8}\td{32}\td{2}\td{4}}
+\tr{\td{declared twice}\td{43}\td{43}\td{0}\td{0}\td{43}\td{43}\td{37}\td{6}\td{0}}
+\tr{\td{plain twin first / last}\td{86}\td{86}\td{0}\td{0}\td{86}\td{86}\td{74}\td{64}\td{0}}
+\tr{\td{eager twin first / last}\td{52}\td{52}\td{0}\td{0}\td{52}\td{52}\td{52}\td{41}\td{0}}
+\tr{\td{copy, plain twin, copy}\td{43}\td{43}\td{0}\td{0}\td{43}\td{43}\td{37}\td{34}\td{0}}
+\tr{\td{\strong{all but the heavy slice}}\td{\strong{1,490}}\td{727}\td{759}\td{4}\td{\strong{1,486}}\td{942}\td{1,089}\td{209}\td{54}}
+}
+
+\p{On the 1,486 inputs with an official verdict the candidate gives it, and so do the modes \code{shared} and \code{deferred}, the reference engine and the base build; on the four without one (a literal changed below two units of \code{\verb~|Batteries.Data.Char.Basic~}; the official checker and the reference engine did not end in 120 s) the machine rejects in a few seconds in all three modes, as does the base build. \strong{No eager-only event occurs in any of the 1,490}: every comparison under the flag in a real declaration, and in every mutant the mutator can make of one, is a comparison that the flag does not change. That is the package's own observation on the corpora (0 events), and it is why this source finds nothing: the mechanism that fails in section 3 never runs. In 54 inputs the machine declined a unit that the reference engine then decided; the verdict of those inputs is not the machine's alone.}
+}
+
+\subtree{
+\title{4.3 The heavy slice, and an error of the reviewer's conduct}
+
+\p{The 46 mutants of the slice around \code{\verb~|ConLeche.lpOfData_pack~} are counted apart. A changed literal of that declaration makes both kernels compute for minutes and gigabytes. In the first bulk run, without limits, the official checker grew to 8 to 10.8 GB per process with five such processes at a time (about 45 GB for some six minutes, 02:26 to 02:32 UTC), and the candidate's executable to 7 to 11 GB per process on the same mutants (02:28 to 02:33 UTC), without the announcement that the team's rules ask for above 8 GB. Both were killed and the error was posted on the team's board; the run was repeated with the limits of section 1. Under them, of the 46: the official checker decided 32 (20 accept, 12 reject) and ended at its limit on 14. 31 of the 46 were run through the harness under the final limits (for this slice 40 s per RLVM run): on 22 the candidate gives the official verdict (16 accepts, 6 rejects), as do its other modes, the reference engine and the base build; on one official rejection every RLVM run ended at the time limit; on the 8 without an official verdict every RLVM run ended at its heap or its time limit as well - an error or a timeout, never a verdict. The other 15 were not run through the harness under the final limits.}
+}
+}
+
+\subtree{
+\title{5. The schedule}
+
+\ul{
+\li{\strong{Generated exports}: 3,615 exports under seven further configurations (section 1): no verdict differs from the default run's. These files are small (one to three theorems after a dozen definitions); the driver gives them one or two workers whatever \code{\verb~|--threads~} says, so this says little about sessions.}
+\li{\strong{Files with many declarations} (family M, 48 exports of 300 distinct theorems, 42 runs each): 44 show one verdict in every run (33 accept, 11 reject), 4 are schedule-dependent (F6). A first version of this family, with 300 identical theorems, showed nothing: the loader checks identical declarations as one unit (16 units for 300 theorems), which is correct and hides the schedule.}
+\li{\strong{Mutants of real declarations with a second or third declaration} (218 mutants: copies and twins; every combination of 1, 2, 4 and 8 workers with batch and pipelined loading twice on the executable, once each on the JVM launcher with 8 workers, 18 runs per mutant): one verdict in every run of every mutant, the official accept.}
+}
+
+\p{What the schedule runs did not do: no run on the corpora (the package ran them with 8 and 4 workers); no control of which unit goes to which worker - a dependence shows only when the driver happens to split the file.}
+}
+
+\subtree{
+\title{6. Does the harness see a fault?}
+
+\ul{
+\li{\strong{A seeded fault}: a review copy of the candidate's machine jar in which the search by expression (the method that rule 5 calls after a comparison under the bit ended false) answers true without looking; never in the patch, run through the JVM launcher. Given the 284 false-step exports and 371 others, the harness reports \strong{89 accepts of a statement that is not derivable} (every one a false step under the flag after an eager-only event, for example \code{\verb~|X = Z p~} alone under \code{eagerReduce}) and 23 accepts of derivable statements that the official checker and the base build reject. Without the fault the same harness reports none of the 89.}
+\li{\strong{A weakened setting}: the mode \code{shared}, the candidate without local entries. The harness reports the 291 exports on which it accepts an official rejection that \code{local} gets right.}
+\li{\strong{Real faults}: the five causes of section 3 were found by the harness, not by reading.}
+}
+}
+
+\subtree{
+\title{7. Rows proposed for the hostile suite}
+
+\p{42 exports with their official verdicts and a manifest fragment in the format of \src{rlvm-machine/src/test/resources/s/manifest.tsv}, handed over beside this report (names \code{\verb~|rv3b-*~}; 21 official accepts, 21 rejects; chosen for coverage, not for number). Not installed: the suite's manifest is edited by every package, and 11 of the accepts are rejected by the build under review.}
+
+\table{
+\tr{\th{Group}\th{Rows}\th{What they hold}}
+\tr{\td{F1}\td{7}\td{the pair of two stuck recursors under the flag alone, as a constructor argument, twice, in two declarations, before a plain reduction (accepts); its plain twin and the order "plain reduction first" (rejects, kind T)}}
+\tr{\td{F2}\td{3}\td{the unread position with one argument and with the pair in the last position (accepts); the pair in the first position (reject, kind T)}}
+\tr{\td{F3, F4}\td{3}\td{the proof position behind two definitions, alone and after a plain declaration; the two K recursors}}
+\tr{\td{F5}\td{3}\td{32 nested redexes (accept), 24 (accept), 32 under the flag alone (reject, kind T)}}
+\tr{\td{intermediate pairs}\td{2}\td{the pair behind two definitions and behind a projection, then under the flag (rejects, kind T)}}
+\tr{\td{positions}\td{5}\td{the minor premise of a recursor after a plain step (accept) and alone (reject); the application inside the type of the theorem (reject: the type is checked before the value); a plain proof inside the application (accept); a wrong universe (reject)}}
+\tr{\td{not derivable}\td{6}\td{the pair cached for \code{n} and asked for \code{m}, with and without a redex; a let variable and then a lambda variable at one depth; two lets with two values; a false \code{\verb~|Bool.true~} statement; a false pair under an \code{eagerReduce} that is an axiom}}
+\tr{\td{twins of those}\td{4}\td{the pair for one Nat variable; a let variable plain and then eager; the \code{\verb~|Bool.true~} test of an open stated type after a plain step; \code{eagerReduce} as an axiom}}
+\tr{\td{\code{eagerReduce} opaque}\td{1}\td{the pair alone (reject)}}
+\tr{\td{depth}\td{3}\td{the pair under 400 applications plain and then eager (accept); a deep harmless eager step and then the plain pair (accept: the flag is off again); the deep pair plain in one declaration and eager in the next (reject)}}
+\tr{\td{the same term later}\td{2}\td{the eager term accepted in one declaration and alone in the next, after a theorem and after a definition (rejects)}}
+\tr{\td{schedule}\td{3}\td{the two patterns of F6 (rejects, kind T) and the twin with both steps in every theorem (accept)}}
+}
+
+\p{A gate that takes the two schedule rows must run them with one worker and with eight, more than once; with the mark of a kind T row a single run cannot fail on them.}
+}
+
+\subtree{
+\title{8. What this review did not cover}
+
+\ul{
+\li{\strong{The cause list is not complete.} F2 to F4 are instances of one root; the generator has atoms for three shortcuts of plain mode (an unread position, a proof position, the same-head answer) and for closure congruence, which did not produce a rejection in the forms tried. Other switches of the default set that save a comparison were not attacked one by one.}
+\li{\strong{The order of argument comparisons} with a head that reads both arguments: the official same-head step compares from the last argument, the comparison of two applications of an axiom from the first; only heads that ignore an argument were generated.}
+\li{\strong{A cut speculative segment whose comparisons were suspended}, in a declaration with a mode-dependent pair (the package's own open item): no input was built for it. The deep rows suspend comparisons; none of them is known to be cut.}
+\li{\strong{Elaborated code} (the eager argument checked by the code of an elaborated body): every generated export ran with the default thresholds; nothing forced or varied the elaboration.}
+\li{\strong{The stamp of a local entry} (27 bits, the number of the declaration in the session): a session with more than 134 million declarations was not built.}
+\li{\strong{A dishonest prelude}: no Nat function with another body; \code{eagerReduce} itself only with its own type (as an abbreviation, opaque, an axiom, with another height). The other reviewer has findings with a Nat function that does not compute.}
+\li{\strong{String literals, structure eta}: no atom. Projections: one atom.}
+\li{\strong{Large literals}: the ten exports of family H that were meant to hold a true statement with a literal of ten digits hold a false one through an error of the generator's naming (all are rejected by every engine); the true ones were not made.}
+\li{\strong{Mutants of real declarations}: none of Mathlib directly (five Mathlib units through the cslib slice) and none of cedar, navier-stokes-euler and reachability; no mutation makes a real eager comparison open, which is what would take a real declaration into the mechanism; the heavy slice of section 4.3 is incomplete.}
+\li{\strong{The differential engine in bulk}: \code{\verb~|-X engine=diff~} was used on the findings only.}
+\li{\strong{The package's variant that applies after the package on the K rule after a let application}, and the second candidate that the package is building after these findings: not looked at.}
+}
+}
