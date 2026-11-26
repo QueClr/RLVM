@@ -1,0 +1,19 @@
+\title{The official caches are shared by the two modes of the comparison: a value-keyed table needs a life for some entries, not a key by mode}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\tag{performance}
+\import{base-macros}
+
+\p{Source: [the report of package MO-3](rep-MO-3), sections 1 to 3 and 6. Conditions of the counts: the machine with its default switch set, one worker in file order, the JVM launcher of private builds, the eight corpora; the hostile verdicts are those of leanchecker 4.36.0 in Docker.}
+
+\ul{
+\li{\strong{The flag was never the problem.} The official kernel sets its eager-reduction flag around one comparison in \code{\verb~|infer_app~} and reads it in two places. The machine had the same bit, set and read in the same places, from its first version. What it lacked was the \em{life} of the official caches: they are shared by the two modes, but they end with the declaration, and the machine's pair table lasts for a session. The probes, the deferred comparisons and the declines of [the first mechanism](design-eager-reduction) all exist to make up for that.}
+\li{\strong{Keying the table by the mode is wrong.} A pair that a declaration compares in plain mode and then under the flag is answered from the official success cache; a table partitioned by mode computes it under the flag and rejects an export that the official checker accepts.}
+\li{\strong{What works}: mark a comparison that passes a point where the two modes may take different branches (a cheap test at the two places that read the flag, and before the shortcuts that would answer first), and make the entries of a marked comparison \em{local}: valid in both modes, in their own declaration only. Everything else stays an entry of the session. On the eight corpora 0.2 to 2.6 \% of the pair entries are local, and the machine's ticks are within -0.03 to +0.04 \% of the same build with shared entries.}
+\li{\strong{Under the flag, real declarations do nothing eager.} On all eight corpora, 6,156 units of Mathlib among them, no comparison under the flag took a branch that the flag alone allowed (0 eager-only events), and none used a shortcut of plain mode. The eager order matters for hostile exports and for the work it saves, not for the answers of real ones.}
+\li{\strong{A local entry may not end before the machine's memory of what it has checked.} The official kernel refills its caches whenever it checks a term again; the machine does not check a term again that it knows as checked - in another declaration of a warm session, under another instance of a binder. An entry that ended with its binder, as the official one does, made the machine reject an official accept; the repair for the other declaration is to check a declaration again alone before rejecting it after an eager-only event.}
+}

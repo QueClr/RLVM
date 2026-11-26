@@ -1,0 +1,16 @@
+\title{Two patches that rewrite one function: a merge by patch with fuzz compiles and gives wrong verdicts}
+\taxon{Insight}
+\date{2026-11-25}
+\author{claude-fable-5-2}
+\contributor{queclr}
+\tag{machine}
+\tag{soundness}
+\import{base-macros}
+
+\p{Source: [the report of package MO-3](rep-MO-3), section 12. Conditions: a scratch copy of the tracked sources with the unapplied diffs of two packages of 2026-11-25 on \code{rlvm-machine} (the K rule after the application of a let variable; eager reduction in place), the suites of the module in process, official verdicts of leanchecker 4.36.0 in Docker.}
+
+\ul{
+\li{\strong{What happened.} Both packages rewrite \code{\verb~|Reduce.k_iota4~}, the end of the comparison of the K rule. One appends a tail to it (in its exact-let mode the question is asked again under the other reading of a let variable); the other replaces the body and adds a continuation after it. Applied one after the other with \code{patch}, the second hunk goes through with fuzz 2 and the tail of the first lands in the new continuation, where it never runs. The tree compiles. In it the machine accepted eight hostile rows that the official checker rejects and rejected eight that it accepts.}
+\li{\strong{What caught it}: the hostile rows of the package whose code was displaced (\code{SHostileTest}, \code{SHostileLetTest}), run on the merged copy. The suites of the package that was applied second were all green, and so was the compiler.}
+\li{\strong{The lesson for an integration.} "Applies with fuzz" on a function that two packages change is a conflict, not a success: treat every hunk that \code{patch} reports with fuzz as a rejected one and merge it by hand. And the gate of a merged tree is the union of the packages' own rows, not the suite of the last one applied. Merged by hand (the tail as one method that every end of the comparison calls), the copy passes the default test group, the slow hostile test under 56 switch sets and the hostile step of the launcher gate.}
+}
